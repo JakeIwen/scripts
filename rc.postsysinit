@@ -1,0 +1,6 @@
+#!/bin/sh
+mkdir /etc/crontabs
+echo "* * * * *     /etc/persistent/config/update_wifi.sh >> /etc/persistent/config/update_wifi.log" > /etc/crontabs/ubnt
+echo "0 * * * *     /etc/persistent/config/truncate_file.sh /etc/persistent/config/update_wifi.log 5000" >> /etc/crontabs/ubnt
+echo " " >> /etc/crontabs/ubnt
+crond
