@@ -9,7 +9,7 @@ ssid_list_path=/etc/persistent/config/ssids.sh
 append_networks ()
 {
   iwlist ath0 scan 2>/dev/null | awk -f /etc/persistent/config/parse-iwlist.awk >> $ssid_scan_path
-  sleep 20
+  sleep 3
 }
 
 sort_networks ()
@@ -28,7 +28,7 @@ set_ap ()
   sed -i "s/\.ssid=.*/\.ssid=$SSID/g" "$config_path" 
   sed -i "s/\.ap=.*/\.ap=/g" "$config_path" 
   sed -i "s/\.bssid=.*/\.bssid=/g" "$config_path" 
-  sed -i "s/\.security\.type=.*/\.security\.type=$SECTYPE/g" "$config_path" 
+  sed -i "s/\.security\.type=.*/\.security\.type=none/g" "$config_path" 
   sed -i "s/wpasupplicant.status=.*/wpasupplicant.status=$wpa_status/g" "$config_path" 
   sed -i "s/wpasupplicant.status=.*/wpasupplicant.status=$wpa_status/g" "$config_path" 
   sed -i "s/wpasupplicant.device.1.status=.*/wpasupplicant.device.1.status=$wpa_status/g" "$config_path" 
