@@ -16,13 +16,26 @@ config interface 'lan'
 	option netmask '255.255.255.0'
 	option ip6assign '60'
 
+config interface 'self'
+	option ifname 'lo'
+	option proto 'static'
+	option ipaddr '192.168.6.1'
+	option netmask '255.255.255.255'
+	option gateway '192.168.6.1'
+
 config interface 'wan'
 	option ifname 'eth1'
 	option proto 'dhcp'
+	option metric '10'
 
 config interface 'wan6'
 	option ifname 'eth1'
 	option proto 'dhcpv6'
+
+config interface 'uwan'
+	option ifname 'eth2'
+	option proto 'dhcp'
+	option metric '30'
 
 config switch
 	option name 'switch0'
@@ -49,4 +62,8 @@ config switch_port
 	option device 'switch0'
 	option port '5'
 	option led '2'
+
+config interface 'cwan'
+	option proto 'dhcp'
+	option metric '20'
 
