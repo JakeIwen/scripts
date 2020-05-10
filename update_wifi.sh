@@ -19,20 +19,7 @@ sort_networks ()
 
 set_ap ()
 {
-  config_path=/tmp/system.cfg
-  wpa_status='disabled'
-  if [[ "$SECTYPE" = "wpa" ]]; then 
-    wpa_status='enabled'
-  fi
-  sed -i "s/psk=.*/psk=$PSK/g" "$config_path"
-  sed -i "s/\.ssid=.*/\.ssid=$SSID/g" "$config_path" 
-  sed -i "s/\.ap=.*/\.ap=/g" "$config_path" 
-  sed -i "s/\.bssid=.*/\.bssid=/g" "$config_path" 
-  sed -i "s/\.security\.type=.*/\.security\.type=none/g" "$config_path" 
-  sed -i "s/wpasupplicant.status=.*/wpasupplicant.status=$wpa_status/g" "$config_path" 
-  sed -i "s/wpasupplicant.status=.*/wpasupplicant.status=$wpa_status/g" "$config_path" 
-  sed -i "s/wpasupplicant.device.1.status=.*/wpasupplicant.device.1.status=$wpa_status/g" "$config_path" 
-  
+  cp ~/config/profiles/"$SSID".cfg /tmp/system.cfg
   /usr/etc/rc.d/rc.softrestart save
 }
 
