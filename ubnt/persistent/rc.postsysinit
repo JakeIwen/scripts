@@ -1,0 +1,7 @@
+#!/bin/sh
+
+date > /etc/persistent/log
+mkdir -p /etc/crontabs
+cp /etc/persistent/config/cron /etc/crontabs/ubnt
+cp /etc/persistent/config/.profile /etc/persistent/.profile
+crond
