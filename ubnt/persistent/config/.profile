@@ -12,10 +12,11 @@ mkcdir ()
    mkdir -p -- "$1" &&
      cd -P -- "$1"
 }
-
+scp =r /etc/persistent/profiles
 save_profile ()
 {
  ssid=$(iwgetid -r)
  cp /tmp/system.cfg "/etc/persistent/profiles/$ssid"
+ chmod 755 "/etc/persistent/profiles/$ssid"
  cfgmtd -w -p /etc/
 }

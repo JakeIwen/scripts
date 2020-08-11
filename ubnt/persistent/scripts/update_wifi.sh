@@ -80,14 +80,15 @@ ensure_saved ()
   profile_is_saved=False
   for item in $list
   do
+    echo "cur: $cur; item: $item;"
     if [[ "$cur" = "$item" ]]; then
       profile_is_saved=True
     fi
   done
   
-  if [ ! $profile_is_saved ] ; then
+  if [[ $profile_is_saved = False ]] ; then
     echo "SAVEING NEW PROFILE: $cur"
-    source /etc/persistent/.profile
+    source /etc/persistent/config/.profile
     save_profile
   fi
 }
