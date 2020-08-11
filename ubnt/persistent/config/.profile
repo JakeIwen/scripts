@@ -12,7 +12,6 @@ mkcdir ()
    mkdir -p -- "$1" &&
      cd -P -- "$1"
 }
-scp =r /etc/persistent/profiles
 save_profile ()
 {
  ssid=$(iwgetid -r)
