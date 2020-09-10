@@ -3,7 +3,7 @@
 # scanres=$(echo iwlist ath0 scan)
 # iwlist ath0 scan | awk '/ESSID/{i++}i==2'\
 
-ssid_scan_path=/etc/persistent/scripts/essids.XXXXX
+ssid_scan_path="/etc/persistent/scripts/essids.XXXXX"
 
 append_networks ()
 {
@@ -31,13 +31,12 @@ mark_finish ()
 
 find_ap ()
 {
-  echo "begin"
   if [[ "$WAITING_NEW_AP" = "true" ]]; then
     echo "waiting on recently set AP"
     mark_finish
     return 0
   fi
-  > $ssid_scan_path
+  rm $ssid_scan_path && touch $ssid_scan_path
   append_networks
   append_networks
   append_networks
@@ -73,6 +72,14 @@ find_ap ()
   done
 }
 
+save_current_profile ()
+{
+  ssid=$(iwgetid -r)
+  cp /tmp/system.cfg "/etc/persistent/profiles/$ssid"
+  chmod 755 "/etc/persistent/profiles/$ssid"
+  cfgmtd -w -p /etc/
+}
+
 ensure_saved ()
 {
   cur=$(iwgetid -r)
@@ -80,16 +87,14 @@ ensure_saved ()
   profile_is_saved=False
   for item in $list
   do
-    echo "cur: $cur; item: $item;"
     if [[ "$cur" = "$item" ]]; then
       profile_is_saved=True
     fi
   done
   
-  if [[ $profile_is_saved = False ]] ; then
-    echo "SAVEING NEW PROFILE: $cur"
-    source /etc/persistent/config/.profile
-    save_profile
+  if [[ $profile_is_saved = False ]]; then
+    echo "SAVING NEW PROFILE: $cur"
+    save_current_profile
   fi
 }
 

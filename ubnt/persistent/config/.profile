@@ -19,3 +19,4 @@ save_profile ()
  chmod 755 "/etc/persistent/profiles/$ssid"
  cfgmtd -w -p /etc/
 }
+
