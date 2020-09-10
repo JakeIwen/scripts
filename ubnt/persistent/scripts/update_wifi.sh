@@ -22,18 +22,10 @@ set_ap ()
   /usr/etc/rc.d/rc.softrestart save
 }
 
-mark_finish ()
-{
-  echo $(date)
-  echo "end"
-  echo " "
-}
-
 find_ap ()
 {
   if [[ "$WAITING_NEW_AP" = "true" ]]; then
     echo "waiting on recently set AP"
-    mark_finish
     return 0
   fi
   rm $ssid_scan_path && touch $ssid_scan_path
@@ -61,11 +53,11 @@ find_ap ()
       if [[ "$saved_ssid" = "$scan_ssid" ]]; then
         echo "MATCH: $j - setting AP"
         set_ap $scan_ssid
-        WAITING_NEW_AP="true"
+        pkill -f crond
         sleep 120
-        WAITING_NEW_AP="false"
-        echo "AP set"
-        mark_finish
+        echo "AP set. Restarting cron at $(date)"
+        echo " "
+        crond
         return 0
       fi
     done
