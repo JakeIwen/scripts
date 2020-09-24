@@ -4,7 +4,7 @@
 # iwlist ath0 scan | awk '/ESSID/{i++}i==2'\
 
 ssid_scan_path="/etc/persistent/scripts/essids.XXXXX"
-
+cur_profile_path="/etc/persistent/tmp/cur_profile.cfg"
 append_networks ()
 {
   iwlist ath0 scan 2>/dev/null | awk -f /etc/persistent/scripts/parse-iwlist.awk >> $ssid_scan_path
@@ -24,8 +24,14 @@ set_ap ()
 
 find_ap ()
 {
-  if [[ "$WAITING_NEW_AP" = "true" ]]; then
-    echo "waiting on recently set AP"
+  if [ "$(cat $cur_profile_path)" = "$(cat /tmp/system.cfg)" ]; then
+    echo "profile unchanged, continuing"
+  else
+    echo "waiting on manually set AP. Killing cron for 140s"
+    pkill -f crond
+    sleep 140
+    crond
+    save_tmp_profile
     return 0
   fi
   rm $ssid_scan_path && touch $ssid_scan_path
@@ -67,34 +73,51 @@ find_ap ()
 save_current_profile ()
 {
   ssid=$(iwgetid -r)
-  cp /tmp/system.cfg "/etc/persistent/profiles/$ssid"
-  chmod 755 "/etc/persistent/profiles/$ssid"
-  cfgmtd -w -p /etc/
+  profile_path="/etc/persistent/profiles/$ssid"
+  if [ "$(cat $profile_path)" = "$(cat /tmp/system.cfg)" ]; then
+    echo "profile unchanged, done."
+  else
+    echo "saving/updating profile: $ssid"
+    cp /tmp/system.cfg "$profile_path"
+    chmod 755 "$profile_path"
+    cfgmtd -w -p /etc/
+  fi
 }
 
-ensure_saved ()
+save_tmp_profile ()
 {
-  cur=$(iwgetid -r)
-  list=$(ls /etc/persistent/profiles)
-  profile_is_saved=False
-  for item in $list
-  do
-    if [[ "$cur" = "$item" ]]; then
-      profile_is_saved=True
-    fi
-  done
-  
-  if [[ $profile_is_saved = False ]]; then
-    echo "SAVING NEW PROFILE: $cur"
-    save_current_profile
-  fi
+  cp /tmp/system.cfg "$cur_profile_path"
+  chmod 755 "$cur_profile_path"
 }
 
 # # run every minute
 
-if ping -q -c 1 -W 1 8.8.8.8 >/dev/null; then
+ccq=`mca-status | grep ccq | cut -d= -f2`
+if [[ $ccq -gt 300 ]]; then
   echo "Ipv4 is up"
-  ensure_saved
+  save_current_profile
 else
   find_ap
 fi
+
+
+
+
+
+# ensure_saved ()
+# {
+#   cur=$(iwgetid -r)
+#   list=$(ls /etc/persistent/profiles)
+#   profile_is_saved=False
+#   for item in $list
+#   do
+#     if [[ "$cur" = "$item" ]]; then
+#       profile_is_saved=True
+#     fi
+#   done
+# 
+#   if [[ $profile_is_saved = False ]]; then
+#     echo "SAVING NEW PROFILE: $cur"
+#     save_current_profile
+#   fi
+# }

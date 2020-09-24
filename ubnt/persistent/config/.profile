@@ -20,3 +20,12 @@ save_profile ()
  cfgmtd -w -p /etc/
 }
 
+set_ap ()
+{
+  cp "/etc/persistent/profiles/$1" /tmp/system.cfg
+  /usr/etc/rc.d/rc.softrestart save
+}
+
+reset () {
+  set_ap "reset"
+}

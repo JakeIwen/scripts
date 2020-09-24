@@ -1,0 +1,1540 @@
+<!DOCTYPE html>
+
+
+
+
+
+
+<!--[if IE 8]> <html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!-->
+<html class="no-js" lang="en">
+<!--<![endif]-->
+<head prefix="og: http://ogp.me/ns# fb: http://ogp.me/ns/fb# skilljar: http://ogp.me/ns/fb/skilljar#" >
+    <meta charset="utf-8"/><script type="text/javascript">(window.NREUM||(NREUM={})).loader_config={xpid:"UA8AWFFbGwEJUldSBgI="};window.NREUM||(NREUM={}),__nr_require=function(t,n,e){function r(e){if(!n[e]){var o=n[e]={exports:{}};t[e][0].call(o.exports,function(n){var o=t[e][1][n];return r(o||n)},o,o.exports)}return n[e].exports}if("function"==typeof __nr_require)return __nr_require;for(var o=0;o<e.length;o++)r(e[o]);return r}({1:[function(t,n,e){function r(t){try{s.console&&console.log(t)}catch(n){}}var o,i=t("ee"),a=t(15),s={};try{o=localStorage.getItem("__nr_flags").split(","),console&&"function"==typeof console.log&&(s.console=!0,o.indexOf("dev")!==-1&&(s.dev=!0),o.indexOf("nr_dev")!==-1&&(s.nrDev=!0))}catch(c){}s.nrDev&&i.on("internal-error",function(t){r(t.stack)}),s.dev&&i.on("fn-err",function(t,n,e){r(e.stack)}),s.dev&&(r("NR AGENT IN DEVELOPMENT MODE"),r("flags: "+a(s,function(t,n){return t}).join(", ")))},{}],2:[function(t,n,e){function r(t,n,e,r,s){try{p?p-=1:o(s||new UncaughtException(t,n,e),!0)}catch(f){try{i("ierr",[f,c.now(),!0])}catch(d){}}return"function"==typeof u&&u.apply(this,a(arguments))}function UncaughtException(t,n,e){this.message=t||"Uncaught error with no additional information",this.sourceURL=n,this.line=e}function o(t,n){var e=n?null:c.now();i("err",[t,e])}var i=t("handle"),a=t(16),s=t("ee"),c=t("loader"),f=t("gos"),u=window.onerror,d=!1,l="nr@seenError",p=0;c.features.err=!0,t(1),window.onerror=r;try{throw new Error}catch(h){"stack"in h&&(t(8),t(7),"addEventListener"in window&&t(5),c.xhrWrappable&&t(9),d=!0)}s.on("fn-start",function(t,n,e){d&&(p+=1)}),s.on("fn-err",function(t,n,e){d&&!e[l]&&(f(e,l,function(){return!0}),this.thrown=!0,o(e))}),s.on("fn-end",function(){d&&!this.thrown&&p>0&&(p-=1)}),s.on("internal-error",function(t){i("ierr",[t,c.now(),!0])})},{}],3:[function(t,n,e){t("loader").features.ins=!0},{}],4:[function(t,n,e){function r(t){}if(window.performance&&window.performance.timing&&window.performance.getEntriesByType){var o=t("ee"),i=t("handle"),a=t(8),s=t(7),c="learResourceTimings",f="addEventListener",u="resourcetimingbufferfull",d="bstResource",l="resource",p="-start",h="-end",m="fn"+p,w="fn"+h,v="bstTimer",y="pushState",g=t("loader");g.features.stn=!0,t(6);var b=NREUM.o.EV;o.on(m,function(t,n){var e=t[0];e instanceof b&&(this.bstStart=g.now())}),o.on(w,function(t,n){var e=t[0];e instanceof b&&i("bst",[e,n,this.bstStart,g.now()])}),a.on(m,function(t,n,e){this.bstStart=g.now(),this.bstType=e}),a.on(w,function(t,n){i(v,[n,this.bstStart,g.now(),this.bstType])}),s.on(m,function(){this.bstStart=g.now()}),s.on(w,function(t,n){i(v,[n,this.bstStart,g.now(),"requestAnimationFrame"])}),o.on(y+p,function(t){this.time=g.now(),this.startPath=location.pathname+location.hash}),o.on(y+h,function(t){i("bstHist",[location.pathname+location.hash,this.startPath,this.time])}),f in window.performance&&(window.performance["c"+c]?window.performance[f](u,function(t){i(d,[window.performance.getEntriesByType(l)]),window.performance["c"+c]()},!1):window.performance[f]("webkit"+u,function(t){i(d,[window.performance.getEntriesByType(l)]),window.performance["webkitC"+c]()},!1)),document[f]("scroll",r,{passive:!0}),document[f]("keypress",r,!1),document[f]("click",r,!1)}},{}],5:[function(t,n,e){function r(t){for(var n=t;n&&!n.hasOwnProperty(u);)n=Object.getPrototypeOf(n);n&&o(n)}function o(t){s.inPlace(t,[u,d],"-",i)}function i(t,n){return t[1]}var a=t("ee").get("events"),s=t(18)(a,!0),c=t("gos"),f=XMLHttpRequest,u="addEventListener",d="removeEventListener";n.exports=a,"getPrototypeOf"in Object?(r(document),r(window),r(f.prototype)):f.prototype.hasOwnProperty(u)&&(o(window),o(f.prototype)),a.on(u+"-start",function(t,n){var e=t[1],r=c(e,"nr@wrapped",function(){function t(){if("function"==typeof e.handleEvent)return e.handleEvent.apply(e,arguments)}var n={object:t,"function":e}[typeof e];return n?s(n,"fn-",null,n.name||"anonymous"):e});this.wrapped=t[1]=r}),a.on(d+"-start",function(t){t[1]=this.wrapped||t[1]})},{}],6:[function(t,n,e){var r=t("ee").get("history"),o=t(18)(r);n.exports=r,o.inPlace(window.history,["pushState","replaceState"],"-")},{}],7:[function(t,n,e){var r=t("ee").get("raf"),o=t(18)(r),i="equestAnimationFrame";n.exports=r,o.inPlace(window,["r"+i,"mozR"+i,"webkitR"+i,"msR"+i],"raf-"),r.on("raf-start",function(t){t[0]=o(t[0],"fn-")})},{}],8:[function(t,n,e){function r(t,n,e){t[0]=a(t[0],"fn-",null,e)}function o(t,n,e){this.method=e,this.timerDuration=isNaN(t[1])?0:+t[1],t[0]=a(t[0],"fn-",this,e)}var i=t("ee").get("timer"),a=t(18)(i),s="setTimeout",c="setInterval",f="clearTimeout",u="-start",d="-";n.exports=i,a.inPlace(window,[s,"setImmediate"],s+d),a.inPlace(window,[c],c+d),a.inPlace(window,[f,"clearImmediate"],f+d),i.on(c+u,r),i.on(s+u,o)},{}],9:[function(t,n,e){function r(t,n){d.inPlace(n,["onreadystatechange"],"fn-",s)}function o(){var t=this,n=u.context(t);t.readyState>3&&!n.resolved&&(n.resolved=!0,u.emit("xhr-resolved",[],t)),d.inPlace(t,y,"fn-",s)}function i(t){g.push(t),h&&(x?x.then(a):w?w(a):(E=-E,O.data=E))}function a(){for(var t=0;t<g.length;t++)r([],g[t]);g.length&&(g=[])}function s(t,n){return n}function c(t,n){for(var e in t)n[e]=t[e];return n}t(5);var f=t("ee"),u=f.get("xhr"),d=t(18)(u),l=NREUM.o,p=l.XHR,h=l.MO,m=l.PR,w=l.SI,v="readystatechange",y=["onload","onerror","onabort","onloadstart","onloadend","onprogress","ontimeout"],g=[];n.exports=u;var b=window.XMLHttpRequest=function(t){var n=new p(t);try{u.emit("new-xhr",[n],n),n.addEventListener(v,o,!1)}catch(e){try{u.emit("internal-error",[e])}catch(r){}}return n};if(c(p,b),b.prototype=p.prototype,d.inPlace(b.prototype,["open","send"],"-xhr-",s),u.on("send-xhr-start",function(t,n){r(t,n),i(n)}),u.on("open-xhr-start",r),h){var x=m&&m.resolve();if(!w&&!m){var E=1,O=document.createTextNode(E);new h(a).observe(O,{characterData:!0})}}else f.on("fn-end",function(t){t[0]&&t[0].type===v||a()})},{}],10:[function(t,n,e){function r(t){var n=this.params,e=this.metrics;if(!this.ended){this.ended=!0;for(var r=0;r<d;r++)t.removeEventListener(u[r],this.listener,!1);if(!n.aborted){if(e.duration=a.now()-this.startTime,4===t.readyState){n.status=t.status;var i=o(t,this.lastSize);if(i&&(e.rxSize=i),this.sameOrigin){var c=t.getResponseHeader("X-NewRelic-App-Data");c&&(n.cat=c.split(", ").pop())}}else n.status=0;e.cbTime=this.cbTime,f.emit("xhr-done",[t],t),s("xhr",[n,e,this.startTime])}}}function o(t,n){var e=t.responseType;if("json"===e&&null!==n)return n;var r="arraybuffer"===e||"blob"===e||"json"===e?t.response:t.responseText;return h(r)}function i(t,n){var e=c(n),r=t.params;r.host=e.hostname+":"+e.port,r.pathname=e.pathname,t.sameOrigin=e.sameOrigin}var a=t("loader");if(a.xhrWrappable){var s=t("handle"),c=t(11),f=t("ee"),u=["load","error","abort","timeout"],d=u.length,l=t("id"),p=t(14),h=t(13),m=window.XMLHttpRequest;a.features.xhr=!0,t(9),f.on("new-xhr",function(t){var n=this;n.totalCbs=0,n.called=0,n.cbTime=0,n.end=r,n.ended=!1,n.xhrGuids={},n.lastSize=null,p&&(p>34||p<10)||window.opera||t.addEventListener("progress",function(t){n.lastSize=t.loaded},!1)}),f.on("open-xhr-start",function(t){this.params={method:t[0]},i(this,t[1]),this.metrics={}}),f.on("open-xhr-end",function(t,n){"loader_config"in NREUM&&"xpid"in NREUM.loader_config&&this.sameOrigin&&n.setRequestHeader("X-NewRelic-ID",NREUM.loader_config.xpid)}),f.on("send-xhr-start",function(t,n){var e=this.metrics,r=t[0],o=this;if(e&&r){var i=h(r);i&&(e.txSize=i)}this.startTime=a.now(),this.listener=function(t){try{"abort"===t.type&&(o.params.aborted=!0),("load"!==t.type||o.called===o.totalCbs&&(o.onloadCalled||"function"!=typeof n.onload))&&o.end(n)}catch(e){try{f.emit("internal-error",[e])}catch(r){}}};for(var s=0;s<d;s++)n.addEventListener(u[s],this.listener,!1)}),f.on("xhr-cb-time",function(t,n,e){this.cbTime+=t,n?this.onloadCalled=!0:this.called+=1,this.called!==this.totalCbs||!this.onloadCalled&&"function"==typeof e.onload||this.end(e)}),f.on("xhr-load-added",function(t,n){var e=""+l(t)+!!n;this.xhrGuids&&!this.xhrGuids[e]&&(this.xhrGuids[e]=!0,this.totalCbs+=1)}),f.on("xhr-load-removed",function(t,n){var e=""+l(t)+!!n;this.xhrGuids&&this.xhrGuids[e]&&(delete this.xhrGuids[e],this.totalCbs-=1)}),f.on("addEventListener-end",function(t,n){n instanceof m&&"load"===t[0]&&f.emit("xhr-load-added",[t[1],t[2]],n)}),f.on("removeEventListener-end",function(t,n){n instanceof m&&"load"===t[0]&&f.emit("xhr-load-removed",[t[1],t[2]],n)}),f.on("fn-start",function(t,n,e){n instanceof m&&("onload"===e&&(this.onload=!0),("load"===(t[0]&&t[0].type)||this.onload)&&(this.xhrCbStart=a.now()))}),f.on("fn-end",function(t,n){this.xhrCbStart&&f.emit("xhr-cb-time",[a.now()-this.xhrCbStart,this.onload,n],n)})}},{}],11:[function(t,n,e){n.exports=function(t){var n=document.createElement("a"),e=window.location,r={};n.href=t,r.port=n.port;var o=n.href.split("://");!r.port&&o[1]&&(r.port=o[1].split("/")[0].split("@").pop().split(":")[1]),r.port&&"0"!==r.port||(r.port="https"===o[0]?"443":"80"),r.hostname=n.hostname||e.hostname,r.pathname=n.pathname,r.protocol=o[0],"/"!==r.pathname.charAt(0)&&(r.pathname="/"+r.pathname);var i=!n.protocol||":"===n.protocol||n.protocol===e.protocol,a=n.hostname===document.domain&&n.port===e.port;return r.sameOrigin=i&&(!n.hostname||a),r}},{}],12:[function(t,n,e){function r(){}function o(t,n,e){return function(){return i(t,[f.now()].concat(s(arguments)),n?null:this,e),n?void 0:this}}var i=t("handle"),a=t(15),s=t(16),c=t("ee").get("tracer"),f=t("loader"),u=NREUM;"undefined"==typeof window.newrelic&&(newrelic=u);var d=["setPageViewName","setCustomAttribute","setErrorHandler","finished","addToTrace","inlineHit","addRelease"],l="api-",p=l+"ixn-";a(d,function(t,n){u[n]=o(l+n,!0,"api")}),u.addPageAction=o(l+"addPageAction",!0),u.setCurrentRouteName=o(l+"routeName",!0),n.exports=newrelic,u.interaction=function(){return(new r).get()};var h=r.prototype={createTracer:function(t,n){var e={},r=this,o="function"==typeof n;return i(p+"tracer",[f.now(),t,e],r),function(){if(c.emit((o?"":"no-")+"fn-start",[f.now(),r,o],e),o)try{return n.apply(this,arguments)}catch(t){throw c.emit("fn-err",[arguments,this,t],e),t}finally{c.emit("fn-end",[f.now()],e)}}}};a("setName,setAttribute,save,ignore,onEnd,getContext,end,get".split(","),function(t,n){h[n]=o(p+n)}),newrelic.noticeError=function(t){"string"==typeof t&&(t=new Error(t)),i("err",[t,f.now()])}},{}],13:[function(t,n,e){n.exports=function(t){if("string"==typeof t&&t.length)return t.length;if("object"==typeof t){if("undefined"!=typeof ArrayBuffer&&t instanceof ArrayBuffer&&t.byteLength)return t.byteLength;if("undefined"!=typeof Blob&&t instanceof Blob&&t.size)return t.size;if(!("undefined"!=typeof FormData&&t instanceof FormData))try{return JSON.stringify(t).length}catch(n){return}}}},{}],14:[function(t,n,e){var r=0,o=navigator.userAgent.match(/Firefox[\/\s](\d+\.\d+)/);o&&(r=+o[1]),n.exports=r},{}],15:[function(t,n,e){function r(t,n){var e=[],r="",i=0;for(r in t)o.call(t,r)&&(e[i]=n(r,t[r]),i+=1);return e}var o=Object.prototype.hasOwnProperty;n.exports=r},{}],16:[function(t,n,e){function r(t,n,e){n||(n=0),"undefined"==typeof e&&(e=t?t.length:0);for(var r=-1,o=e-n||0,i=Array(o<0?0:o);++r<o;)i[r]=t[n+r];return i}n.exports=r},{}],17:[function(t,n,e){n.exports={exists:"undefined"!=typeof window.performance&&window.performance.timing&&"undefined"!=typeof window.performance.timing.navigationStart}},{}],18:[function(t,n,e){function r(t){return!(t&&t instanceof Function&&t.apply&&!t[a])}var o=t("ee"),i=t(16),a="nr@original",s=Object.prototype.hasOwnProperty,c=!1;n.exports=function(t,n){function e(t,n,e,o){function nrWrapper(){var r,a,s,c;try{a=this,r=i(arguments),s="function"==typeof e?e(r,a):e||{}}catch(f){l([f,"",[r,a,o],s])}u(n+"start",[r,a,o],s);try{return c=t.apply(a,r)}catch(d){throw u(n+"err",[r,a,d],s),d}finally{u(n+"end",[r,a,c],s)}}return r(t)?t:(n||(n=""),nrWrapper[a]=t,d(t,nrWrapper),nrWrapper)}function f(t,n,o,i){o||(o="");var a,s,c,f="-"===o.charAt(0);for(c=0;c<n.length;c++)s=n[c],a=t[s],r(a)||(t[s]=e(a,f?s+o:o,i,s))}function u(e,r,o){if(!c||n){var i=c;c=!0;try{t.emit(e,r,o,n)}catch(a){l([a,e,r,o])}c=i}}function d(t,n){if(Object.defineProperty&&Object.keys)try{var e=Object.keys(t);return e.forEach(function(e){Object.defineProperty(n,e,{get:function(){return t[e]},set:function(n){return t[e]=n,n}})}),n}catch(r){l([r])}for(var o in t)s.call(t,o)&&(n[o]=t[o]);return n}function l(n){try{t.emit("internal-error",n)}catch(e){}}return t||(t=o),e.inPlace=f,e.flag=a,e}},{}],ee:[function(t,n,e){function r(){}function o(t){function n(t){return t&&t instanceof r?t:t?c(t,s,i):i()}function e(e,r,o,i){if(!l.aborted||i){t&&t(e,r,o);for(var a=n(o),s=h(e),c=s.length,f=0;f<c;f++)s[f].apply(a,r);var d=u[y[e]];return d&&d.push([g,e,r,a]),a}}function p(t,n){v[t]=h(t).concat(n)}function h(t){return v[t]||[]}function m(t){return d[t]=d[t]||o(e)}function w(t,n){f(t,function(t,e){n=n||"feature",y[e]=n,n in u||(u[n]=[])})}var v={},y={},g={on:p,emit:e,get:m,listeners:h,context:n,buffer:w,abort:a,aborted:!1};return g}function i(){return new r}function a(){(u.api||u.feature)&&(l.aborted=!0,u=l.backlog={})}var s="nr@context",c=t("gos"),f=t(15),u={},d={},l=n.exports=o();l.backlog=u},{}],gos:[function(t,n,e){function r(t,n,e){if(o.call(t,n))return t[n];var r=e();if(Object.defineProperty&&Object.keys)try{return Object.defineProperty(t,n,{value:r,writable:!0,enumerable:!1}),r}catch(i){}return t[n]=r,r}var o=Object.prototype.hasOwnProperty;n.exports=r},{}],handle:[function(t,n,e){function r(t,n,e,r){o.buffer([t],r),o.emit(t,n,e)}var o=t("ee").get("handle");n.exports=r,r.ee=o},{}],id:[function(t,n,e){function r(t){var n=typeof t;return!t||"object"!==n&&"function"!==n?-1:t===window?0:a(t,i,function(){return o++})}var o=1,i="nr@id",a=t("gos");n.exports=r},{}],loader:[function(t,n,e){function r(){if(!x++){var t=b.info=NREUM.info,n=l.getElementsByTagName("script")[0];if(setTimeout(u.abort,3e4),!(t&&t.licenseKey&&t.applicationID&&n))return u.abort();f(y,function(n,e){t[n]||(t[n]=e)}),c("mark",["onload",a()+b.offset],null,"api");var e=l.createElement("script");e.src="https://"+t.agent,n.parentNode.insertBefore(e,n)}}function o(){"complete"===l.readyState&&i()}function i(){c("mark",["domContent",a()+b.offset],null,"api")}function a(){return E.exists&&performance.now?Math.round(performance.now()):(s=Math.max((new Date).getTime(),s))-b.offset}var s=(new Date).getTime(),c=t("handle"),f=t(15),u=t("ee"),d=window,l=d.document,p="addEventListener",h="attachEvent",m=d.XMLHttpRequest,w=m&&m.prototype;NREUM.o={ST:setTimeout,SI:d.setImmediate,CT:clearTimeout,XHR:m,REQ:d.Request,EV:d.Event,PR:d.Promise,MO:d.MutationObserver};var v=""+location,y={beacon:"bam.nr-data.net",errorBeacon:"bam.nr-data.net",agent:"js-agent.newrelic.com/nr-1071.min.js"},g=m&&w&&w[p]&&!/CriOS/.test(navigator.userAgent),b=n.exports={offset:s,now:a,origin:v,features:{},xhrWrappable:g};t(12),l[p]?(l[p]("DOMContentLoaded",i,!1),d[p]("load",r,!1)):(l[h]("onreadystatechange",o),d[h]("onload",r)),c("mark",["firstbyte",s],null,"api");var x=0,E=t(17)},{}]},{},["loader",2,10,4,3]);</script><script type="text/javascript">window.NREUM||(NREUM={});NREUM.info={"licenseKey":"37e8b91624","transactionName":"Nl0BZkNYVxFWABYLWQ8XJUdfWk0LWA1NAVkUShBXQhdPC1IUEVhACF0UbV1cShFYDQ==","errorBeacon":"bam.nr-data.net","applicationTime":828,"queueTime":2,"beacon":"bam.nr-data.net","agent":"","applicationID":"2966013"}</script>
+    
+        <link rel="shortcut icon" href="https://cc.sj-cdn.net/instructor/2r47q1ex7j0mg-quickbase-university/themes/theme-2r47q1ex7j0mg-quickbase/favicon.1495501196.ico"/>
+    
+    <link href='https://fonts.googleapis.com/css?family=Lato:300,400,700|Open+Sans' rel='stylesheet' type='text/css'>
+    <meta name="viewport" id="viewport" content="width=device-width, initial-scale=1.0"/>
+    
+    
+    <title>Assessment: API Boot Camp</title>
+
+    
+    
+        <link rel="stylesheet" href="https://university.quickbase.com/static/css/static-sheets.e0367d0c6f90.css"/>
+        <link rel="stylesheet" href="https://university.quickbase.com/static/css/sj_dashboard.b437d79f0f33.css"/>
+        <link rel="stylesheet" href="https://university.quickbase.com/static/css/skilljar.cbe9556aa97b.css"/>
+    
+
+    
+    
+        
+            <link rel="stylesheet" href="https://university.quickbase.com/theme/204qr6e1xf28w.css?v=4"/>
+        
+        
+    
+
+    
+    
+
+    
+    
+
+    
+    
+        <script src="https://university.quickbase.com/static/js/modernizr.min.d22de1f472d7.js"></script>
+    
+
+    
+    
+        <script src="https://university.quickbase.com/static/js/jquery.min.55ced129c632.js"></script>
+    
+
+    
+        
+    
+
+    
+        
+
+
+<script>
+(function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+(i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+})(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+
+    ga('create', {
+        trackingId: 'UA\u002D230037\u002D14',
+        cookieDomain: 'auto',
+        
+        userId: '2813klgdeeus7',
+        allowLinker: true
+    });
+
+    ga('create', {
+        trackingId: 'UA\u002D40340039\u002D1',
+        cookieDomain: 'auto',
+        name: 'skilljarTracker',
+        userId: '2813klgdeeus7',
+        allowLinker: true
+    });
+
+
+    
+    ga('send', 'pageview');
+
+    
+        ga('skilljarTracker.require', 'linker');
+        ga('skilljarTracker.set', 'dimension1', 'true');
+    
+    ga('skilljarTracker.send', 'pageview');
+
+</script>
+
+
+
+    
+
+    
+        
+
+
+
+<script>
+    var isSkilljarTestUser = false;
+    
+    var isSkilljarFirstPageviewSinceAuth = false;
+    
+    var isSkilljarFirstPageviewSinceNewDomainMembership = false;
+    
+        var skilljarUser = {
+            id: '2813klgdeeus7',
+            email: 'jiwen@advantagequickbase.com',
+            name: 'Jake Iwen',
+            firstName: 'Jake',
+            lastName: 'Iwen'
+            
+        };
+        
+        var skilljarUserSignupFields = {
+            
+                "Account Status": {
+                    type: "PICKLIST",
+                    id: "w81gna97k5cw",
+                    label: "Account Status",
+                    value: "Active",
+                    required: false,
+                    active: false
+                
+                },
+                
+            
+                "IsAdmin": {
+                    type: "CHECKBOX",
+                    id: "jacdclhknevs",
+                    label: "IsAdmin",
+                    value: "False",
+                    required: false,
+                    active: false
+                
+                },
+                
+            
+                "Realm ID": {
+                    type: "TEXT",
+                    id: "3r08xmyjvyckz",
+                    label: "Realm ID",
+                    value: "1351",
+                    required: false,
+                    active: false
+                
+                },
+                
+            
+                "Can create apps": {
+                    type: "CHECKBOX",
+                    id: "1vqirh5pf5mip",
+                    label: "Can create apps",
+                    value: "True",
+                    required: false,
+                    active: false
+                
+                },
+                
+            
+                "User ID": {
+                    type: "TEXT",
+                    id: "j5fiiknkxqn7",
+                    label: "User ID",
+                    value: "60351150",
+                    required: false,
+                    active: false
+                
+                },
+                
+            
+                "Account ID": {
+                    type: "TEXT",
+                    id: "g46glbybqck",
+                    label: "Account ID",
+                    value: "134991",
+                    required: false,
+                    active: false
+                
+                },
+                
+            
+                "User Status": {
+                    type: "CHECKBOX",
+                    id: "hrbsq6pliolr",
+                    label: "User Status",
+                    value: "verified",
+                    required: false,
+                    active: false
+                
+                }
+                
+            
+        };
+        
+    
+    
+        var skilljarCourse = {
+            id: '1w7z38pyagac3',
+            
+                publishedCourseId: 'tikvqaj8myl4',
+                tags: [],
+            
+            title: 'AA02: API Boot Camp (40min)',
+                lesson: {
+                    id: '7uakutsnhc11',
+                    title: 'Assessment: API Boot Camp'
+                }
+        };
+    
+    
+        var skilljarLessonProgress = {
+            customData: '',
+        };
+    
+    
+</script>
+
+    
+
+    
+    
+        <style>
+/* price listed on bottom of tile */
+.storefront-price {
+ display:none;
+}
+
+/* REMOVED: 23 April 17,   sign in link on course detail page 
+header .login-link {
+display: none;
+}
+*/
+
+/* REMOVED: 23 April 17,  sign in link on course detail page 
+p.signin {
+display: none;
+}  
+*/
+
+/* registration button */
+a.purchase-button span.purchase-button-text { display: none; }
+a.purchase-button span.purchase-button-price { display: none; }
+a.purchase-button:after { content: 'Begin'; }
+
+
+/* Lesson summary - details link button */
+.sj-page-lesson .details-pane-button {
+    width: 36px;
+} 
+.sj-page-lesson .details-pane-button-text {
+    font-size: 0 !important;
+}
+.sj-page-lesson .details-pane-button:after {
+    content: "Learn more";
+}
+
+/* change the course tile look and feel */
+.sj-page-catalog .coursebox-text {
+    font-size: 20px !important;
+    margin-bottom: 0px !important;
+}
+.sj-page-catalog .coursebox-image {
+    margin: 2px !important;
+}
+
+
+
+
+
+
+/* 3-24-17 - center tiles on catalog page */
+.sj-page-catalog #catalog-courses {
+    -webkit-box-pack:center;
+    -ms-flex-pack:center;
+    justify-content:center
+}
+
+/*  hide tags on Catalog/series page */
+.sj-page-catalog-root #catalog-filter-menu {
+    display: none;
+}
+
+/*6-2-17 - change register/completed ribbon text to white, Dean Spalding */
+a.coursebox-container .sj-course-ribbon-wrapper .sj-course-ribbon {
+color: white !important;
+}
+</style>
+
+<script>
+/*7-28-17 - remove browser window from footer mailto link*/
+  $(document).ready(function() {
+    $('#footer-left a').attr("target","");
+  });
+</script>
+
+
+
+/*  8-30-17 Move search on Catalog page */
+<style>
+  #skilljar-content #customSearch {
+    display: none;
+  }
+  #customSearch {
+    background: white;
+    border-color: white;
+    color: black;
+    flex: 0 1 auto;
+    margin: 0 10px 0 auto;
+    padding: 0 10px;
+    width: auto;
+    border-radius: 3px;
+  }
+  #customSearch::-webkit-input-placeholder {
+    color: grey;
+  }
+  #customSearch:-ms-input-placeholder {
+    color: grey;
+  }
+  #customSearch::-moz-placeholder {
+    color: grey;
+    opacity: 1;
+  }
+  #customSearch:-moz-placeholder {
+    color: grey;
+    opacity: 1;
+  }
+  .sj-page-catalog-root #catalog-filter-menu {
+      display: none;
+  }
+ .sj-page-catalog.sj-page-catalog-root #catalog-left-nav, .sj-page-catalog.sj-page-catalog-root #catalog-search-box, .sj-page-catalog.sj-page-catalog-root a#left-nav-button.burger.header-link {
+      display: none;
+   }
+</style>
+
+<script>
+  jQuery(document).ready(function($) {
+
+    $('.catalog-header #customSearch').detach().appendTo('#header-left');
+    $('#customSearch').on('change paste keyup', function() {
+      $('#catalog-search-box input').val($(this).val()).change();
+    });
+
+    if (window.location.href == "https://university.quickbase.com/") {
+        $('.catalog-filters').addClass('no-catalog-filters').removeClass('catalog-filters');
+    }
+
+    $('#show-all-courses').click(function() {
+      $('#customSearch').val('').blur();
+    });
+  });
+</script>
+
+<script>
+/* 10-23-17 - Change ribbon text for pass/fail courses */
+.sj-course-ribbon-wrapper .sj-course-ribbon-passed .sj-course-ribbon-text { 
+   display: none !important; 
+}
+.sj-course-ribbon-wrapper .sj-course-ribbon-passed:after { 
+    content: 'Passed' !important; 
+}
+.sj-course-ribbon-wrapper .sj-course-ribbon-failed .sj-course-ribbon-text { 
+   display: none !important; 
+}
+.sj-course-ribbon-wrapper .sj-course-ribbon-failed:after { 
+    content: 'Did not pass' !important; 
+}
+</script>
+    
+
+    
+    
+    
+
+    
+</head>
+<body  class="sj-page-lesson lp-color-scheme-light details-pane-right">
+<div id="main-container"  class="lesson-page"  data-course="api-bootcamp-4000">
+    
+        
+        
+    
+        
+
+
+
+
+
+
+
+
+
+
+
+<header id="header">
+    <div id="header-left" class="header-left">
+
+        
+
+            <a id="left-nav-button" class="burger header-link">
+                <i class="fa fa-bars" aria-hidden="true"></i>
+                <i class="fa fa-search" aria-hidden="true"></i>
+                <i class="fa fa-times" aria-hidden="true"></i>
+                
+                    <span class="burger-text">
+                        Lessons
+                    </span>
+                
+            </a>
+        
+
+        
+
+
+        
+            <a href="https://university.quickbase.com" class="header-logo-link">
+        
+
+        
+            <img class="header-center-img" src="https://cc.sj-cdn.net/instructor/2r47q1ex7j0mg-quickbase-university/themes/theme-2r47q1ex7j0mg-quickbase/header-logo.1495501153.png"
+                 alt="Quick Base University"/>
+        
+
+        
+            </a>
+        
+
+    </div>
+
+    <div id="header-right">
+
+        
+
+        
+
+        <div class="headerheight align-vertical">
+
+            
+                <!-- Start Profile / Sign In -->
+                
+                    <a href="2onj6gercq7bu#" data-dropdown="header-drop" class="header-dropdown-button">
+                        <img src="https://www.gravatar.com/avatar/e4d980ee71b9825eca7ff106b180dab8/?s=32&amp;d=mm" alt="jiwen_advantagequickbase_com_kq9jtb" width="32" height="32" />
+                    </a>
+                
+                <!-- End Profile / Sign In -->
+            
+
+        </div>
+
+        
+    </div>
+
+    <!-- Start Header Dropdowns -->
+    
+
+        <!-- Start Profile Dropdown -->
+        <ul id="header-drop" data-dropdown-content class="f-dropdown">
+            
+                <li>
+                    <a href="https://university.quickbase.com/accounts/profile/?next=/api-bootcamp-4000/114117/scorm/2onj6gercq7bu" class="sj-text-my-profile"><span>My Profile</span></a>
+                </li>
+
+                
+
+            
+
+            <li>
+                <a href="https://university.quickbase.com/auth/logout?next=https%3A%2F%2Funiversity.quickbase.com%2Fapi-bootcamp-4000" class="signout-link sj-text-sign-out"><span>Sign Out</span></a>
+            </li>
+        </ul>
+        <!-- End Profile Dropdown -->
+
+        
+
+    
+    <!-- End Header Dropdowns -->
+</header>
+
+    
+    <nav id="lp-left-nav" class="lp-left-nav cbp-spmenu cbp-spmenu-vertical cbp-spmenu-left">
+        
+
+    <h1 class="course-title break-word">AA02: API Boot Camp (40min)</h1>
+
+    <a id="returnToOverview" href="https://university.quickbase.com/api-bootcamp-4000" class="left-nav-return animated-button-pair"
+       data-track-click="Lesson,Left Nav,Return To Overview,0">
+        <i class="fa fa-arrow-left" aria-hidden="true"></i><span id="left-nav-return-text"
+                                                                 class="left-nav-return-text">Course Overview</span>
+    </a>
+
+    
+        <div id="cp-content-2" class="row">
+            
+            <div id="curriculum-list-2" class="lessons-wrapper">
+                
+                    
+                        <h3 class="section-title">Course Introduction </h3>
+                    
+                    
+                
+                    
+                        
+                            <a href="https://university.quickbase.com/api-bootcamp-4000/77060" class="lesson">
+                        
+                    <div class="lesson-row "
+                         title="Course Introduction (0:23)">
+                        
+                            
+                                <div class="bullet">
+                                    <i class="fa fa-check-circle" aria-hidden="true"></i>
+                                </div>
+                            
+                        
+                        <div class="type-icon">
+                            <i class="icon-video" aria-hidden="true"></i>
+                        </div>
+                        <div class="title">Course Introduction (0:23)</div>
+                    </div>
+                    </a>
+                    
+                    
+                
+                    
+                        <h3 class="section-title">Introduction to APIs </h3>
+                    
+                    
+                
+                    
+                        
+                            <a href="https://university.quickbase.com/api-bootcamp-4000/77063" class="lesson">
+                        
+                    <div class="lesson-row "
+                         title="API Overview (1:57)">
+                        
+                            
+                                <div class="bullet">
+                                    <i class="fa fa-check-circle" aria-hidden="true"></i>
+                                </div>
+                            
+                        
+                        <div class="type-icon">
+                            <i class="icon-video" aria-hidden="true"></i>
+                        </div>
+                        <div class="title">API Overview (1:57)</div>
+                    </div>
+                    </a>
+                    
+                    
+                
+                    
+                        
+                            <a href="https://university.quickbase.com/api-bootcamp-4000/77237" class="lesson">
+                        
+                    <div class="lesson-row "
+                         title="Resources and Development Tools (3:10)">
+                        
+                            
+                                <div class="bullet">
+                                    <i class="fa fa-check-circle" aria-hidden="true"></i>
+                                </div>
+                            
+                        
+                        <div class="type-icon">
+                            <i class="icon-video" aria-hidden="true"></i>
+                        </div>
+                        <div class="title">Resources and Development Tools (3:10)</div>
+                    </div>
+                    </a>
+                    
+                    
+                
+                    
+                        <h3 class="section-title">API Calls</h3>
+                    
+                    
+                
+                    
+                        
+                            <a href="https://university.quickbase.com/api-bootcamp-4000/77240" class="lesson">
+                        
+                    <div class="lesson-row "
+                         title="API Calls by Function - C.R.U.D. (3:40)">
+                        
+                            
+                                <div class="bullet">
+                                    <i class="fa fa-check-circle" aria-hidden="true"></i>
+                                </div>
+                            
+                        
+                        <div class="type-icon">
+                            <i class="icon-video" aria-hidden="true"></i>
+                        </div>
+                        <div class="title">API Calls by Function - C.R.U.D. (3:40)</div>
+                    </div>
+                    </a>
+                    
+                    
+                
+                    
+                        
+                            <a href="https://university.quickbase.com/api-bootcamp-4000/77241" class="lesson">
+                        
+                    <div class="lesson-row "
+                         title="3 &quot;Must Knows&quot; of API Calls (3:25)">
+                        
+                            
+                                <div class="bullet">
+                                    <i class="fa fa-check-circle" aria-hidden="true"></i>
+                                </div>
+                            
+                        
+                        <div class="type-icon">
+                            <i class="icon-video" aria-hidden="true"></i>
+                        </div>
+                        <div class="title">3 &quot;Must Knows&quot; of API Calls (3:25)</div>
+                    </div>
+                    </a>
+                    
+                    
+                
+                    
+                        
+                            <a href="https://university.quickbase.com/api-bootcamp-4000/77242" class="lesson">
+                        
+                    <div class="lesson-row "
+                         title="Anatomy of an API Call (3:51)">
+                        
+                            
+                                <div class="bullet">
+                                    <i class="fa fa-check-circle" aria-hidden="true"></i>
+                                </div>
+                            
+                        
+                        <div class="type-icon">
+                            <i class="icon-video" aria-hidden="true"></i>
+                        </div>
+                        <div class="title">Anatomy of an API Call (3:51)</div>
+                    </div>
+                    </a>
+                    
+                    
+                
+                    
+                        
+                            <a href="https://university.quickbase.com/api-bootcamp-4000/77243" class="lesson">
+                        
+                    <div class="lesson-row "
+                         title="Build URL-based API Calls (3:40)">
+                        
+                            
+                                <div class="bullet">
+                                    <i class="fa fa-check-circle" aria-hidden="true"></i>
+                                </div>
+                            
+                        
+                        <div class="type-icon">
+                            <i class="icon-video" aria-hidden="true"></i>
+                        </div>
+                        <div class="title">Build URL-based API Calls (3:40)</div>
+                    </div>
+                    </a>
+                    
+                    
+                
+                    
+                        <h3 class="section-title">API_DoQuery</h3>
+                    
+                    
+                
+                    
+                        
+                            <a href="https://university.quickbase.com/api-bootcamp-4000/77245" class="lesson">
+                        
+                    <div class="lesson-row "
+                         title="API_DoQuery Online Help (1:32)">
+                        
+                            
+                                <div class="bullet">
+                                    <i class="fa fa-check-circle" aria-hidden="true"></i>
+                                </div>
+                            
+                        
+                        <div class="type-icon">
+                            <i class="icon-video" aria-hidden="true"></i>
+                        </div>
+                        <div class="title">API_DoQuery Online Help (1:32)</div>
+                    </div>
+                    </a>
+                    
+                    
+                
+                    
+                        
+                            <a href="https://university.quickbase.com/api-bootcamp-4000/77246" class="lesson">
+                        
+                    <div class="lesson-row "
+                         title="API_DoQuery Structure (6:53)">
+                        
+                            
+                                <div class="bullet">
+                                    <i class="fa fa-check-circle" aria-hidden="true"></i>
+                                </div>
+                            
+                        
+                        <div class="type-icon">
+                            <i class="icon-video" aria-hidden="true"></i>
+                        </div>
+                        <div class="title">API_DoQuery Structure (6:53)</div>
+                    </div>
+                    </a>
+                    
+                    
+                
+                    
+                        <h3 class="section-title">Platform Extension</h3>
+                    
+                    
+                
+                    
+                        
+                            <a href="https://university.quickbase.com/api-bootcamp-4000/77250" class="lesson">
+                        
+                    <div class="lesson-row "
+                         title="Code Pages and Languages (1:37)">
+                        
+                            
+                                <div class="bullet">
+                                    <i class="fa fa-check-circle" aria-hidden="true"></i>
+                                </div>
+                            
+                        
+                        <div class="type-icon">
+                            <i class="icon-video" aria-hidden="true"></i>
+                        </div>
+                        <div class="title">Code Pages and Languages (1:37)</div>
+                    </div>
+                    </a>
+                    
+                    
+                
+                    
+                        
+                            <a href="https://university.quickbase.com/api-bootcamp-4000/77251" class="lesson">
+                        
+                    <div class="lesson-row "
+                         title="Sample Code Pages (2:20)">
+                        
+                            
+                                <div class="bullet">
+                                    <i class="fa fa-check-circle" aria-hidden="true"></i>
+                                </div>
+                            
+                        
+                        <div class="type-icon">
+                            <i class="icon-video" aria-hidden="true"></i>
+                        </div>
+                        <div class="title">Sample Code Pages (2:20)</div>
+                    </div>
+                    </a>
+                    
+                    
+                
+                    
+                        
+                            <a href="https://university.quickbase.com/api-bootcamp-4000/77252" class="lesson">
+                        
+                    <div class="lesson-row "
+                         title="Sections of a Code Page (5:07)">
+                        
+                            
+                                <div class="bullet">
+                                    <i class="fa fa-check-circle" aria-hidden="true"></i>
+                                </div>
+                            
+                        
+                        <div class="type-icon">
+                            <i class="icon-video" aria-hidden="true"></i>
+                        </div>
+                        <div class="title">Sections of a Code Page (5:07)</div>
+                    </div>
+                    </a>
+                    
+                    
+                
+                    
+                        
+                            <a href="https://university.quickbase.com/api-bootcamp-4000/77253" class="lesson">
+                        
+                    <div class="lesson-row "
+                         title="Launch a Code Page (2:07)">
+                        
+                            
+                                <div class="bullet">
+                                    <i class="fa fa-check-circle" aria-hidden="true"></i>
+                                </div>
+                            
+                        
+                        <div class="type-icon">
+                            <i class="icon-video" aria-hidden="true"></i>
+                        </div>
+                        <div class="title">Launch a Code Page (2:07)</div>
+                    </div>
+                    </a>
+                    
+                    
+                
+                    
+                        
+                            <a href="https://university.quickbase.com/api-bootcamp-4000/77254" class="lesson">
+                        
+                    <div class="lesson-row "
+                         title="Troubleshooting and Error Codes (1:04)">
+                        
+                            
+                                <div class="bullet">
+                                    <i class="fa fa-check-circle" aria-hidden="true"></i>
+                                </div>
+                            
+                        
+                        <div class="type-icon">
+                            <i class="icon-video" aria-hidden="true"></i>
+                        </div>
+                        <div class="title">Troubleshooting and Error Codes (1:04)</div>
+                    </div>
+                    </a>
+                    
+                    
+                
+                    
+                        <h3 class="section-title">Course Summary</h3>
+                    
+                    
+                
+                    
+                        
+                            <a href="https://university.quickbase.com/api-bootcamp-4000/77256" class="lesson">
+                        
+                    <div class="lesson-row "
+                         title="Course Summary (0:36)">
+                        
+                            
+                                <div class="bullet">
+                                    <i class="fa fa-check-circle" aria-hidden="true"></i>
+                                </div>
+                            
+                        
+                        <div class="type-icon">
+                            <i class="icon-video" aria-hidden="true"></i>
+                        </div>
+                        <div class="title">Course Summary (0:36)</div>
+                    </div>
+                    </a>
+                    
+                    
+                
+                    
+                        <h3 class="section-title">Assessment: API Boot Camp</h3>
+                    
+                    
+                
+                    
+                        
+                            <a href="https://university.quickbase.com/api-bootcamp-4000/114117" class="lesson">
+                        
+                    <div class="lesson-row lesson-active theme-color-bg"
+                         title="Assessment: API Boot Camp">
+                        
+                            
+                                
+                                    <div class="bullet current-lesson-icon">
+                                        <i class="fa fa-circle-o unviewed " aria-hidden="true"></i>
+                                    </div>
+                                    <div class="bullet current-lesson-completed-icon hide">
+                                        <i class="fa fa-check-circle " aria-hidden="true"></i>
+                                    </div>
+                                
+                            
+                        
+                        <div class="type-icon">
+                            <i class="icon-text" aria-hidden="true"></i>
+                        </div>
+                        <div class="title">Assessment: API Boot Camp</div>
+                    </div>
+                    </a>
+                    
+                    
+                
+                    
+                        <h3 class="section-title">What Do You Think?</h3>
+                    
+                    
+                
+                    
+                        
+                            <a href="https://university.quickbase.com/api-bootcamp-4000/148945" class="lesson">
+                        
+                    <div class="lesson-row "
+                         title="Please Rate This Course - AA02: API Boot Camp">
+                        
+                            
+                                <div class="bullet">
+                                    <i class="fa fa-check-circle" aria-hidden="true"></i>
+                                </div>
+                            
+                        
+                        <div class="type-icon">
+                            <i class="icon-text" aria-hidden="true"></i>
+                        </div>
+                        <div class="title">Please Rate This Course - AA02: API Boot Camp</div>
+                    </div>
+                    </a>
+                    
+                    
+                
+            </div>
+        </div>
+    
+
+    </nav>
+    <div id="lp-wrapper">
+        <div id="lp-content">
+            <div class="row">
+    <div id="messages" class="small-11 small-centered columns">
+        
+    </div>
+</div>
+
+            
+    <div id="lesson-body" class="row details-pane-right
+        
+            details-pane-closed
+        
+        ">
+        <div id="lesson-main" class="columns fullheight">
+            
+                <div id="open-details-pane-button">
+                    <div class="details-pane-button">
+                        <a href="2onj6gercq7bu#">
+                            <div class="details-pane-arrow-wrapper">
+                                <i class="details-pane-arrow" aria-hidden="true"></i>
+                            </div>
+
+                            <p class="details-pane-button-text sj-text-details"><span>details</span></p>
+                            
+                        </a>
+                    </div>
+                </div>
+            
+            <div id="lesson-main-inner"
+                    >
+                <div class="lesson-top">
+                    <h2>Assessment: API Boot Camp</h2>
+                </div>
+                <div id="lesson-main-content" >
+                    
+                        
+                            
+                                
+
+
+
+
+
+
+<div id="scaled_embedded_content" class="scorm-lesson-content scaled-embedded-content" style="">
+    <iframe
+        id='scorm_content_frame'
+        
+        style="margin:0;width:100%;height:100%;min-width:100%;min-height:100%;max-width:100%;max-height:100%;border:none;"
+        allowfullscreen="true">
+    </iframe>
+    
+        <iframe id="scorm_api_unloader"
+                style="border:none;background-color:transparent;width:0px;height:0px;position:absolute;top:0;left:0;z-index:-1;"></iframe>
+    
+
+</div>
+
+
+    <script>
+
+        $(document).ready(function() {
+            var lmsCache = new Object();
+            lmsCache['cmi.core._children'] = 'student_id,student_name,lesson_location,credit,lesson_status,entry,score,total_time,exit,session_time';
+            lmsCache['cmi.core.score._children'] = 'raw,min,max';
+            lmsCache['cmi.core.session_time'] = '';
+            lmsCache['cmi.core.exit'] = '';
+            lmsCache['cmi.launch_data'] = 'None';
+            
+            lmsCache['cmi.student_data._children'] = '';
+            lmsCache['cmi.student_data.mastery_score'] = '';
+            
+            lmsCache['cmi.interactions._children'] = 'id,objectives,time,type,correct_responses,weighting,student_response,result,latency';
+            lmsCache['cmi.interactions._count'] = '13';
+            
+            lmsCache['cmi.interactions.0.objectives._count'] = '1';
+            lmsCache['cmi.interactions.0.correct_responses._count'] = '1';
+            
+            lmsCache['cmi.interactions.1.objectives._count'] = '1';
+            lmsCache['cmi.interactions.1.correct_responses._count'] = '1';
+            
+            lmsCache['cmi.interactions.2.objectives._count'] = '1';
+            lmsCache['cmi.interactions.2.correct_responses._count'] = '1';
+            
+            lmsCache['cmi.interactions.3.objectives._count'] = '1';
+            lmsCache['cmi.interactions.3.correct_responses._count'] = '1';
+            
+            lmsCache['cmi.interactions.4.objectives._count'] = '1';
+            lmsCache['cmi.interactions.4.correct_responses._count'] = '1';
+            
+            lmsCache['cmi.interactions.5.objectives._count'] = '1';
+            lmsCache['cmi.interactions.5.correct_responses._count'] = '1';
+            
+            lmsCache['cmi.interactions.6.objectives._count'] = '1';
+            lmsCache['cmi.interactions.6.correct_responses._count'] = '1';
+            
+            lmsCache['cmi.interactions.7.objectives._count'] = '1';
+            lmsCache['cmi.interactions.7.correct_responses._count'] = '1';
+            
+            lmsCache['cmi.interactions.8.objectives._count'] = '1';
+            lmsCache['cmi.interactions.8.correct_responses._count'] = '1';
+            
+            lmsCache['cmi.interactions.9.objectives._count'] = '1';
+            lmsCache['cmi.interactions.9.correct_responses._count'] = '1';
+            
+            lmsCache['cmi.interactions.10.objectives._count'] = '1';
+            lmsCache['cmi.interactions.10.correct_responses._count'] = '1';
+            
+            lmsCache['cmi.interactions.11.objectives._count'] = '1';
+            lmsCache['cmi.interactions.11.correct_responses._count'] = '1';
+            
+            lmsCache['cmi.interactions.12.objectives._count'] = '1';
+            lmsCache['cmi.interactions.12.correct_responses._count'] = '1';
+            
+            
+            lmsCache['cmi.core.lesson_mode'] = 'normal';
+            lmsCache['cmi.core.credit'] = 'credit';
+            lmsCache['cmi.core.lesson_location'] = 'Result';
+            lmsCache['cmi.core.lesson_status'] = 'failed';
+            lmsCache['cmi.core.entry'] = '';
+            lmsCache['cmi.core.total_time'] = '0000:41:21';
+            lmsCache['cmi.suspend_data'] = '0';
+            lmsCache['cmi.core.score.raw'] = '40';
+            lmsCache['cmi.core.score.min'] = '0';
+            lmsCache['cmi.core.score.max'] = '100';
+            lmsCache['cmi.core.student_id'] = '2813klgdeeus7';
+            lmsCache['cmi.core.student_name'] = 'Jake Iwen';
+            lmsCache['obfuscated_progress_id'] = '2dzogp2bc2fck';
+            lmsCache['obfuscated_scormitem_id'] = '2onj6gercq7bu';
+            lmsCache['obfuscated_lesson_id'] = '7uakutsnhc11';
+            lmsCache['obfuscated_publishedcourse_id'] = 'tikvqaj8myl4';
+            
+
+            
+            lmsCache['one_from_complete'] = 'true';
+            
+            
+            lmsCache['one_from_success'] = 'true';
+            
+            
+
+            var commitUrl = "/scorm/ajax/commit_scorm_values";
+            var overviewUrl = '';
+
+            
+                
+                    overviewUrl = "/api-bootcamp-4000";
+                
+            
+
+            var previewMode = false;
+
+            var logInfoMsgs = false;
+            var sURLVariables = window.location.search.substring(1).split('&');
+            for (var i = 0; i < sURLVariables.length; i++) {
+                var sParameterName = sURLVariables[i].split('=');
+                if (sParameterName[0] == "loginfo") {
+                    if (sParameterName[1] == '1') {
+                        logInfoMsgs = true;
+                    } else {
+                        logInfoMsgs = false;
+                    }
+                    break;
+                }
+            }
+
+            $.getCachedScript("/static/js/scorm.min.1a2ee6c65cb7.js").done(function () {
+                
+                API.init(lmsCache, commitUrl, overviewUrl, courseCompletionCallback, unlockNextLesson, previewMode, logInfoMsgs);
+                
+                $('#scorm_content_frame').attr('src', "/tikvqaj8myl4/web_package/22cqoi24ugjq/index_scorm.html");
+                $('#scorm_api_unloader').attr('src', "/static/scorm/scorm_unloader.af2b1de08fb5.html");
+                
+                
+                
+            });
+        });
+
+    </script>
+
+
+                            
+                        
+                    
+                </div>
+            </div>
+        </div>
+        
+            
+
+
+
+
+<div id="details-pane" class="columns fullheight right-bar">
+    <div id="details-pane-inner">
+        <div id="details-pane-top">
+            <div id="close-details-pane-button">
+                <div class="details-pane-button">
+                    <a href="2onj6gercq7bu#">
+                        <div class="details-pane-arrow-wrapper">
+                            <i class="details-pane-arrow" aria-hidden="true"></i>
+                        </div>
+                    </a>
+                </div>
+            </div>
+            <div id="details-pane-tabs">
+                
+                    <div id="details-pane-summary-tab" class="tab first button-background-shade3 active sj-text-details-pane-summary"><span>Summary</span></div>
+                
+
+                
+
+
+            </div>
+        </div>
+
+        <div id="details-pane-content">
+            
+                <div id="details-pane-summary-content" class="content">
+                    
+                        <div>
+                            <h4 class="sj-text-details-pane-summary"><span>Summary</span></h4>
+
+                            <div class="lesson-description-content">
+                                <p style="font-family: Tahoma, Verdana, 'Helvetica Neue', Arial, sans-serif; font-size: 16px; padding-left: 30px;"><span style="font-size: 12pt; color: #74489d; font-family: arial, helvetica, sans-serif;"><strong>Assessment:&nbsp;API Boot Camp</strong></span></p>
+<p style="padding-left: 30px;"><span style="font-family: arial, helvetica, sans-serif; font-size: 12pt;">This&nbsp;assessment will help you determine your current understanding of the content presented in this course</span>.</p>
+<ul style="font-size: 16px; font-family: Tahoma, Verdana, 'Helvetica Neue', Arial, sans-serif;">
+<ul>
+<ul>
+<li>Complete the assessment in one session&nbsp;</li>
+<li>Review your score and responses at the end</li>
+<li>Revisit lessons as needed&nbsp;</li>
+<li>Retake the assessment as often as you wish</li>
+</ul>
+</ul>
+</ul>
+<p class="MsoNormal" style="padding-left: 30px;"><span style="font-family: arial, helvetica, sans-serif; font-size: 12pt;">To compare your answers to the correct answers, click Review Assessment.on the Results page at the end of the assessment</span>.</p>
+<p class="MsoNormal" style="padding-left: 30px;">To retake the assessment, you can refresh your browser window or return to the course overview and click the assessment link.</p>
+<p style="padding-left: 30px;"><span style="font-family: arial, helvetica, sans-serif; font-size: 12pt;"><strong>Good luck!</strong></span></p>
+                            </div>
+                        </div>
+                    
+
+                    
+                </div>
+            
+            
+        </div>
+    </div>
+</div>
+
+
+        
+
+    </div>
+
+        </div>
+    </div>
+    <footer id="lp-footer">
+        
+    
+        <div class="left">
+            <a href="https://university.quickbase.com/api-bootcamp-4000/77256" class="prev-lesson-button align-vertical"
+               data-track-click="Lesson,Prev,Course Summary (0:36),0" title="Course Summary (0:36)">
+                <div class="button-content">
+                    <i class="fa fa-angle-left" aria-hidden="true"></i><span class="button-prev-title"><span>Previous</span></span>
+                    <span class="lesson-title-label">- Course Summary (0:36)</span>
+                </div>
+            </a>
+        </div>
+    
+
+    <span class="lesson-title-footer">Assessment: API Boot Camp</span>
+
+    <div class="right">
+        <div class="full-footer-height-wrapper align-vertical">
+            
+                <div class="next-lesson-button">
+                    <span>
+                    
+                        <span class="lesson-title-label">Please Rate This Course - AA02: API Boot Camp</span>
+                        
+                            <a href="https://university.quickbase.com/api-bootcamp-4000/148945"
+                               class="small button next-lesson-link"
+                               data-track-click="Lesson,Next,Please Rate This Course - AA02: API Boot Camp,0"
+                               title="Please Rate This Course - AA02: API Boot Camp"><span>Next</span></a>
+                        
+                    
+                    </span>
+                </div>
+            
+
+            <div class="complete-lesson-button hide disabled">
+                <a href="2onj6gercq7bu#" class="small button complete-lesson-link sj-text-complete"><span>Complete</span></a>
+            </div>
+
+            <div class="toggle-fullscreen">
+                <i class="fa fa-arrows-alt" aria-hidden="true"></i>
+            </div>
+
+        </div>
+    </div>
+
+    </footer>
+    <div id="lpLeftNavBackground"></div>
+
+
+        
+        
+            <script src="https://university.quickbase.com/static/js/plugins.min.2b8f26ed67a6.js"></script>
+            <script src="https://university.quickbase.com/static/js/scripts.min.e048d70e156f.js"></script>
+        
+
+        
+        
+            
+            
+            
+            
+        
+
+        
+        
+            <!--[if IE 8]> <script src="/static/js/respond.min.fbbed3e83e8f.js"></script> <![endif]-->
+        
+
+        
+        
+    
+        <script>
+            $(document).ready(function () {
+                $("#left-nav-button").click(function () {
+                    $("body, .cbp-spmenu-left").toggleClass("cbp-spmenu-open");
+                });
+                $('#lpLeftNavBackground').click(function() {
+                    $("body, .cbp-spmenu-left").removeClass("cbp-spmenu-open");
+                });
+            });
+        </script>
+    
+
+        
+    
+    <script>
+        var detailsPaneShowing = false;
+        var lessonCompleted = false;
+
+        function hideDetailsPane() {
+            $("#lesson-body").removeClass("details-pane-open");
+            $("#lesson-body").addClass("details-pane-closed");
+            detailsPaneShowing = false;
+        }
+
+        function showDetailsPane() {
+            $("#lesson-body").removeClass("details-pane-closed");
+            $("#lesson-body").addClass("details-pane-open");
+            detailsPaneShowing = true;
+            
+        }
+
+        $(document).ready(function () {
+
+            $('.toggle-fullscreen').click(function () {
+                $('body').toggleClass('lesson-fullscreen');
+                $(window).resize();
+            });
+
+            $(".details-pane-button").click(function () {
+                if (detailsPaneShowing) {
+                    hideDetailsPane();
+                } else {
+                    showDetailsPane();
+                }
+            });
+
+            // this code dynamically sets the TOP for #lesson-main-content based
+            //   on the hight of the lesson title. this adds support for multiple
+            //   line lesson titles while still maintaining fixed height video content
+            $('#lesson-main-content').css('top', $('.lesson-top').outerHeight());
+            $(window).resize(_.throttle(function () {
+                $('#lesson-main-content').css('top', $('.lesson-top').outerHeight());
+            }, 250));
+
+            try {
+                // this code auto-scrolls the left nav to the current
+                //  lesson on page load. it will throw an error if anything
+                //  happens but will not prevent the page from loading
+                //  as it swallows the error.
+
+                var $target = $("#lp-left-nav");
+                var $elem = $(".lesson-active");
+                var newTop = $(".lesson-active").position().top;
+                newTop -= ($target.height() / 2);
+                newTop += ($elem.height() / 2);
+                if (isNaN(newTop)) {
+                    throw new Error('Object is not a Number');
+                }
+                $target.scrollTop(newTop);
+            }
+            catch (err) {
+            }
+
+            
+
+            $("#details-pane-summary-tab").click(function () {
+                $("#details-pane-comments-tab").removeClass("active");
+                $("#details-pane-summary-tab").addClass("active");
+                $("#details-pane-comments-content").addClass("show-for-small");
+                $("#details-pane-summary-content").removeClass("show-for-small");
+            });
+
+            $(".disabled").click(function (event) {
+                if ($(this).hasClass('disabled')) {
+                    
+                    event.preventDefault();
+                }
+            });
+
+            $('.complete-lesson-button').click(function () {
+                completeLesson();
+            });
+        });
+
+        
+
+        function lessonPlayerCompleteCallback() {
+            
+                
+                    if (lessonCompleted) {
+                        advanceLesson();
+                    } else {
+                        completeLesson();
+                    }
+                
+            
+        }
+
+        function completeLesson() {
+            
+            if ($('.next-lesson-button:visible').exists() || $('.complete-lesson-button:visible').exists()) {
+                $('.next-lesson-button').css('display', 'none');
+                $('.complete-lesson-link').html('<span class="sj-text-completing"><span>Completing...</span></span><i class="fa fa-spinner fa-spin" aria-hidden="true"></i>');
+                $('.complete-lesson-link').addClass('disabled');
+                $('.complete-lesson-button').css('display', 'inline-block');
+            }
+
+            $.ajax({
+                url: '/api-bootcamp-4000/7uakutsnhc11/ajax-complete',
+                type: 'POST',
+                dataType: 'json'
+            }).done(function (response_json) {
+                lessonCompleted = true;
+                $('.complete-lesson-button').css('display', 'none');
+                $('.next-lesson-button').css('display', 'inline-block');
+                $('.next-lesson-button .fa-lock').hide();
+                courseCompletionCallback(response_json);
+                advanceLesson();
+            }).fail(function () {
+                flashMessage('\u003Cdiv data\u002Dalert class\u003D\u0022alert\u002Dbox error radius\u0022\u003E\u000A    \u000A        There was a problem completing your lesson. Please click the \u0026#39\u003BComplete\u0026#39\u003B button before leaving this page.\u000A    \u000A    \u003Ca href\u003D\u0022#\u0022 class\u003D\u0022close\u0022\u003E\u0026times\u003B\u003C/a\u003E\u000A\u003C/div\u003E');
+                $('.next-lesson-button').css('display', 'none');
+                $('.complete-lesson-link').html('<span class="sj-text-complete"><span>Complete</span></span><i class="fa fa-refresh" aria-hidden="true"></i>');
+                $('.complete-lesson-link').removeClass('disabled');
+                $('.complete-lesson-button').css('display', 'inline-block');
+            });
+        }
+
+        function courseCompletionCallback(json) {
+            
+            if (json !== undefined && json.hasOwnProperty('include_course_completion_code_snippet') && json['include_course_completion_code_snippet']) {
+                $('#course_completion_code').html(json['course_completion_code_snippet']);
+            }
+        }
+
+        function advanceLesson() {
+            
+            
+                unlockNextLesson();
+            
+        }
+
+        function unlockNextLesson() {
+            
+            
+            $('.next-lesson-link.button span').text('Next');
+            $('.next-lesson-link.button .fa-lock').hide();
+            $('.next-lesson-link').removeClass('disabled');
+            $('.next-lesson-locked-icon').addClass('hide');
+            $('.next-lesson-unlocked-icon').removeClass('hide');
+            $('.current-lesson-icon').addClass('hide');
+            $('.current-lesson-completed-icon').removeClass('hide');
+        }
+
+        
+
+        function resizeScaledEmbeddedContent() {
+            $(".scaled-embedded-content").removeAttr('style');
+            if ($(window).width() < 768) {
+                if ($('body').hasClass('lesson-fullscreen')) {
+                    $(".scaled-embedded-content").css("height", $(window).height() - 90);
+                }
+                else {
+                    
+                        $(".scaled-embedded-content").css("height", $(window).height() - 172);
+                    
+                    
+                }
+            } else {
+                if ($('body').hasClass('lesson-fullscreen')) {
+                    $(".scaled-embedded-content").css("height", $(window).height() - 110);
+                }
+                else {
+                    
+                    
+                        $(".details-pane-left .scaled-embedded-content, .details-pane-right .scaled-embedded-content").css("height", "100%");
+                        $(".details-pane-bottom .scaled-embedded-content").css("height", $(window).height() - 196);
+                    
+                    
+                }
+            }
+        }
+
+        
+        $(document).ready(function () {
+            var iOS = /(iPad|iPhone|iPod)/g.test(navigator.userAgent);
+            if (iOS) {
+                $("iframe").parent().addClass('iOS-scroll');
+            }
+            resizeScaledEmbeddedContent();
+            $(window).resize(_.throttle(resizeScaledEmbeddedContent, 100));
+        });
+    </script>
+
+
+        
+        
+            <script>
+                $(document).foundation(function () {
+                    // Activates the modified custom selects on forms
+                    // Just need to add the class awesome to the form to make it work
+                    wrapSelects = function () {
+                        $('form.awesome select:not(.is-wrapped)')
+                                .addClass('is-wrapped')
+                                .wrap('<div class="custom dropdown select" />')
+                                .after('<span class="selector"></span>');
+                    };
+
+                    wrapSelects();
+                });
+            </script>
+        
+
+        
+            
+                <script>
+                    $(document).ready(function () {
+                        $('a.login-link').click(function (event) {
+                            ga('skilljarTracker.linker:decorate', event.target);
+                        });
+                        $("[data-track-click]").click(function (event) {
+                            var ga_event_data = $(event.currentTarget).attr('data-track-click').split(',');
+                            ga('skilljarTracker.send', 'event', ga_event_data[0], ga_event_data[1], ga_event_data[2], ga_event_data[3]);
+                        });
+                    });
+                </script>
+            
+        
+
+    
+
+    
+    
+
+    
+
+    
+    
+    
+        <!--  9-25-2017 - update Copyright text -->
+<style>
+  footer #footer-left ul li:nth-child(1)::after {
+    content: ' Quick Base, Inc.';
+  }
+</style>
+
+<!-- 11-10-17 Remove inserted score from live view copy at bottom of certification viewed on social media (linkedin) -->
+<script> $(document).ready(function(){ $('.certificate-wording p .org-name')[0].nextSibling.data = ''; }); 
+</script>
+
+<!--  1-5-2018 - Adjusts padding of the course tile, but not on list-view -->
+<script>
+		if ($('.top-row').hasClass('list-view')) {
+			$('.sj-page-catalog a.coursebox-container').css('padding-bottom','10px');
+		} else {
+			$('.sj-page-catalog a.coursebox-container').css('padding-bottom','45px');
+		};
+</script>
+        
+    
+
+    
+        <div id="course_completion_code">
+            
+        </div>
+    
+</div>
+
+<!--[if lt IE 10]>
+<script src="/static/js/polyfills.min.dbc33d6e0b89.js"></script>
+<![endif]-->
+
+
+</body>
+</html>

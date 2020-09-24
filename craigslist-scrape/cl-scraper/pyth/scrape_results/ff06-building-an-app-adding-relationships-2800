@@ -1,0 +1,39 @@
+FF06 BUILDING AN APP ADDING RELATIONSHIPS 2800
+Which field is the unique identifier for each record and defaults to the Record ID#?
+     [   ] Summary Field 
+     [   ] Reference Field 
+     [   ] Lookup Field 
+     [ C ] Key Field 
+
+How would you diagram the relationship between the tables in an app that tracks employees and the departments where they work?
+     [ C ] [Departments] 	 		[Employees] 
+     [   ] [Employees] 	 			[Departments] 
+     [   ] [Departments] 	 		[Employees] 
+     [   ] [Departments] 			[Employees] 
+
+Which field is created on the master table and displays data from the details table?
+     [ C ] Summary Field 
+     [   ]  Key Field 
+     [   ] Reference Field 
+     [   ] Lookup Field 
+
+How do you start creating a relationship?
+     [   ] You must start the process from the relationships page 
+     [ C ] You can start the process from either the master table or the details table 
+     [   ] You must start the process from the details table 
+     [   ] You must start the process from the master table 
+
+What do summary fields do?
+     [   ] Summarize the number of parent records related to a child 
+     [   ] Use only numeric and date values when setting the matching criteria for the field 
+     [ C ] Summarize the number of child records related to a parent 
+     [ C ] Summarize numeric or date values from child records to display the value on the parent record 
+
+What links a field in the details table with a specific field in the master table?
+     [   ] Summary Field 
+     [   ]  Key Field 
+     [   ] Lookup Field 
+     [ C ] Reference Field  
+
+
+

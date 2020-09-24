@@ -1,0 +1,33 @@
+II17 WORKING WITH AUTOMATIONS
+What permission level do you need to create an automation?
+     [   ] Any 
+     [ C ] Admin 
+     [   ] Viewer 
+     [   ] Participant 
+
+Which of the following are features of an automation? (Choose 3)
+     [ C ] They reduce repetitive steps 
+     [ C ] They automate manual processes 
+     [ C ] They perform actions automatically 
+     [   ] They empower all users to create efficient processes 
+
+Where do you go in your app to create automations?
+     [   ] The App Settings page> User Interface> Automations 
+     [ C ] The App Settings page > Advanced Features>Automations 
+     [   ] The App Homepage 
+     [   ] The App Settings page > Advanced Features> App Management > Automations  
+
+Which of the following are examples of actions you can add to a trigger? (Choose 3)
+     [   ] Export a record 
+     [ C ] Run table import 
+     [ C ] Modify a record 
+     [ C ] Add a record 
+
+Which is a true statement when you disable an app?
+     [   ] You cannot disable an app once it is active 
+     [   ] They can be disabled but you need to reset the triggers when you turn them back on 
+     [ C ] They can be disabled but you can turn it back on if needed 
+     [   ] They can be disabled but cannot be turned back on 
+
+
+

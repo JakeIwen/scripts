@@ -5,7 +5,7 @@ logfile="/etc/persistent/scripts/update_wifi.log"
 tail -5000 $logfile > "$logfile.tmp"
 mv "$logfile.tmp" $logfile
 chmod 777 $logfile
-"" >> $logfile
+echo "" >> $logfile
 date >> $logfile
 
 mkdir -p /etc/crontabs
