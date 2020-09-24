@@ -13,7 +13,7 @@
     "body-parser": "^1.15.1",
     "express": "^4.13.4",
     "fs-extra": "^6.0.1",
-    "http-proxy": "^1.17.0",
+    "http-proxy": "^1.18.1",
     "mkdirp": "^0.5.1",
     "nightmare": "^3.0.1",
     "pg": "^6.1.0",
