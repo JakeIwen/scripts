@@ -174,3 +174,25 @@ sortBy('distance')
 
 
 regions.forEach(r => !cors.includes(r) && foundRegions.push(r));
+
+
+function makeLinks() {
+  var body = DocumentApp.getActiveDocument().getBody();
+  var bookmarks = doc.getBookmarks().reverse();
+  var paragraphs = body.getParagraphs();
+  
+  for (i = 0; i < bookmarks.length; i++) {
+    var url = '#bookmark=' + bookmarks[i].getId();
+    var titleLine = bookmarks[i].getPosition().getElement().getText().split(" - ")
+      .map(t => t.replace('\r', '').trim());
+    console.log(titleLine);
+    var titleRange = titleLine[0] && body.findText(titleLine[titleLine.length-1]);
+    
+    if (titleRange) {
+      var start = titleRange.getStartOffset();
+      var finish = titleRange.getEndOffsetInclusive();
+      titleRange.getElement().asText().editAsText().setLinkUrl(start, finish, url);
+    }
+    
+  }
+}
