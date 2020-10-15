@@ -5,7 +5,7 @@ exec bash
 sudo systemctl enable ssh
 sudo systemctl start ssh
 
-from macbook: 
+# from macbook: 
 ssh-copy-id -i ~/.ssh/id_rsa.pub 192.168.6.103
 
 sudo apt update
@@ -21,6 +21,7 @@ mv /usr/local/bin/rmate /usr/local/bin/ratom
 
 
 apt install qbittorrent
+apt install qbittorrent-nox
 
 
 ratom /etc/rc.local
@@ -34,7 +35,7 @@ cd AdGuardHome
 sudo ./AdGuardHome -s install
 
 
-mount a disk drive:
+# mount a disk drive:
 sudo blkid
 
 sudo mkdir /mnt/movingparts
@@ -49,8 +50,13 @@ sudo reboot
 
 sudo crontab -e
 
+
+# backup sd card 
 rsync -aHv --delete --exclude-from=~/rsync-exclude.txt / /mnt/movingparts/pi_backup/ 2>&1
 
+# Widevine - Chromium "Media" Launcher. (Netflix etc)
+curl -fsSL https://pi.vpetkov.net -o ventz-media-pi
+sh ventz-media-pi
 
 # startup programs
 
