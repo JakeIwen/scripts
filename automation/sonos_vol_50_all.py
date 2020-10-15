@@ -1,11 +1,9 @@
 import soco
 from soco.discovery import by_name
 
-# soco.discovery.any_soco().partymode()
-
-by_name("vanFront").partymode()
-by_name("vanFront").mute = False
-by_name("vanFront").volume = 50 
+by_name("vonFront").partymode()
+by_name("vonFront").mute = False
+by_name("vonFront").volume = 50 
 by_name("vonMid").mute = False
 by_name("vonMid").volume = 50
 by_name("vonRear").mute = False

@@ -1,6 +1,4 @@
 import soco
-from soco.discovery import by_name
+from soco.discovery import any_soco
 
-any_device = by_name("vanFront") or by_name("vonRear") or by_name("vonMid")
-
-any_device.partymode()
+any_soco().partymode()

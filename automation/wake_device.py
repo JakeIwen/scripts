@@ -6,4 +6,4 @@ print s.sendto('\xff'*6+'\xb8\xe8\x56\x0c\x81\xf2'*16, ('192.168.6.255', 80))
 # "b8:e8:56:0c:81:f2" device mac
 
 
-# vlc && osascript /Users/jacobr/dev/scripts/audioVanFront.scpt && python sonos_rear_movie.py
+# vlc && osascript /Users/jacobr/dev/scripts/audiovonFront.scpt && python sonos_rear_movie.py
