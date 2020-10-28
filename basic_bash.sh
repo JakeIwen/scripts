@@ -71,7 +71,7 @@ rec_files() {  # rec_files *.sh
 file_lines() { # file_lines 'truncate_file.sh' echo  
   fpath=$1
   command=$2
-  while read f  
+  while read f
   do 
     $command $f
   done < $fpath

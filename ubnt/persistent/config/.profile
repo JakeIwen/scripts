@@ -9,8 +9,8 @@ alias pgrep="ps lT | grep"
 
 mkcdir ()
 {
-   mkdir -p -- "$1" &&
-     cd -P -- "$1"
+  mkdir -p -- "$1" &&
+  cd -P -- "$1"
 }
 save_profile ()
 {

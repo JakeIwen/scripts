@@ -2,7 +2,7 @@ import sys
 import soco
 from soco.discovery import by_name
 # import pdb; pdb.set_trace()
-
+# docs: https://readthedocs.org/projects/soco/downloads/pdf/stable/
 device_name =  sys.argv[1]
 audio_source = sys.argv[2]
 
