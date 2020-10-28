@@ -44,7 +44,7 @@ sudo mount /dev/sda2 /mnt/movingparts
 
 sudo cp /etc/fstab /etc/fstab.backup
 sudo nano /etc/fstab
-add this text: /dev/sda2 /mnt/movingparts ext4 defaults,nofail,x-systemd.device-timeout=1 0 0
+add this text: /dev/sda1 /mnt/seegayte ext4 defaults,nofail,x-systemd.device-timeout=1 0 0
 
 sudo reboot
 
