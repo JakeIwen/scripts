@@ -6,7 +6,8 @@ from soco.discovery import by_name
 device_name =  sys.argv[1]
 audio_source = sys.argv[2]
 
-device = by_name(device_name)
+device = by_name(device_name) or by_name(device_name + "2")
+print(device)
 
 if audio_source == "optical":
     mid = by_name("vonMid")

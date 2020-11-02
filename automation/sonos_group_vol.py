@@ -2,7 +2,7 @@ import sys
 import soco
 from soco.discovery import by_name, any_soco
 
-speaker = sys.argv[1]
+device_name = sys.argv[1]
 direction = sys.argv[2]
 inc = int(sys.argv[3])
 
@@ -19,12 +19,12 @@ def adjust_volume(target):
     
 # import pdb; pdb.set_trace()
 
-if speaker == 'all': 
+if device_name == 'all': 
     for group in any_soco().all_groups:
         adjust_volume(group)
     print(group.volume)
 else:
-    device = by_name(speaker)
+    device = by_name(device_name) or by_name(device_name + "2")
     adjust_volume(device)
     print(device.volume)
     

@@ -58,6 +58,13 @@ rsync -aHv --delete --exclude-from=~/rsync-exclude.txt / /mnt/movingparts/pi_bac
 curl -fsSL https://pi.vpetkov.net -o ventz-media-pi
 sh ventz-media-pi
 
+# disable automount for dives
+# /home/pi/.config/pcmanfm/LXDE-pi/pcmanfm.conf
+# should contain: 
+# [volume]
+# mount_on_startup=0
+# mount_removable=0
+
 # startup programs
 
 sudo vi /etc/rc.local
