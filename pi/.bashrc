@@ -151,12 +151,25 @@ if ! shopt -oq posix; then
     . /etc/bash_completion
   fi
 fi
+
+alias movies='cd /mnt/movingparts/torrent/Movies; ls -lh;'
+alias tv='cd /mnt/movingparts/torrent/TV; ls -lh;'
+alias docu='cd /mnt/movingparts/torrent/Documentaries; ls -lh;'
+alias torrent='cd /mnt/movingparts/torrent; ls -lh;'
+
 alias synclog='cat /var/log/cron/rsync.log'
-alias omx='--timeout 60 udp://192.168.6.231:1234'
 alias omx='omxplayer --timeout 60 udp://192.168.6.231:1234'
 alias rpiplay='~/RPiPlay/build/rpiplay'
-alias pd='/sbin/shutdown -r now'
-alias pd='sudo /sbin/shutdown -r now'
-alias pd='/sbin/shutdown -r now'
 alias pd='sudo /sbin/shutdown -r now'
 alias rb='sudo reboot'
+
+play() {
+  filename=`ls | grep $1`
+  echo "Opening: $filename"
+  python3 ~/sonos/sonos_audio_source.py vonRear line
+  xset s reset # wake display
+  nohup vlc -f $filename &
+}  
+
+
+export DISPLAY=:0
