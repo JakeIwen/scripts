@@ -14,14 +14,13 @@ if audio_source == "optical":
     mid.switch_to_tv()
     if device_name == "vonMid":
         exit()
-    
     mid.partymode()
     mid.group.mute = True
-    device.mute = False
-    device.volume = 90
     
 elif audio_source == "line":
     device.switch_to_line_in(by_name("vonFront"))
-    device.mute = False
-    device.volume = 80 
+    
+device.mute = False
+device.volume = 90
+device.play()
 
