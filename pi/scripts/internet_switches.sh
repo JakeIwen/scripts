@@ -7,7 +7,12 @@ ubnt_internet_ops() {
 mobile_internet_ops() {
   if cat /home/pi/mtorrent &> /dev/null 
   then ubnt_internet_ops
-  else kill_torrent_client && unmount_drives
+  else 
+    kill_torrent_client
+    if cat /home/pi/mdisk &> /dev/null 
+    then mount_drives
+    else unmount_drives
+    fi
   fi
 }
 

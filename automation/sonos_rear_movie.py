@@ -9,3 +9,6 @@ front.partymode()
 front.mute = True
 mid.mute = True
 rear.volume = 90
+
+
+python3 -c 'from "/Users/jacobr/dev/scripts/pi/sonos/sonos_tasks" import start_noise; start_noise()'
