@@ -47,9 +47,7 @@ sudo nano /etc/fstab
 add this text: /dev/sda1 /mnt/seegayte ext4 defaults,nofail,x-systemd.device-timeout=1 0 0
 
 sudo reboot
-
 sudo crontab -e
-
 
 # backup sd card 
 rsync -aHv --delete --exclude-from=~/rsync-exclude.txt / /mnt/movingparts/pi_backup/ 2>&1
