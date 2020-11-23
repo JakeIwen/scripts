@@ -39,9 +39,14 @@ unmount_drives() {
   done
 }
 
+kill_all() {
+  kill_torrent_client
+  unmount_drives
+}
 if date | grep '00:0'; then date; fi
 
-if   ping -c 1 172.20.10.3 &> /dev/null; then mobile_internet_ops
+if cat /home/pi/umdisk &> /dev/null; then kill_all
+elif ping -c 1 172.20.10.3 &> /dev/null; then mobile_internet_ops
 elif ping -c 1 8.8.8.8 &> /dev/null;     then ubnt_internet_ops
 else no_internet_ops
 fi

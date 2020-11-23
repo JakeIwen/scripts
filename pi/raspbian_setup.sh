@@ -65,4 +65,7 @@ sh ventz-media-pi
 
 # startup programs
 
+sharing a network disk drive with osx netatalk
+https://www.instructables.com/How-to-share-files-between-Mac-OSX-and-Raspberry-P/
+
 sudo vi /etc/rc.local
