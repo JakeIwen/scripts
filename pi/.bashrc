@@ -160,16 +160,28 @@ alias torrent='cd /mnt/movingparts/torrent; ls -lh;'
 alias synclog='cat /var/log/cron/rsync.log'
 alias omx='omxplayer --timeout 60 udp://192.168.6.231:1234'
 alias rpiplay='~/RPiPlay/build/rpiplay'
-alias pd='sudo /sbin/shutdown -r now'
+alias pd='sudo /sbin  /shutdown -r now'
 alias rb='sudo reboot'
 
 play() {
   filename=`ls | grep $1`
   echo "Opening: $filename"
-  python3 ~/sonos/sonos_audio_source.py vonRear line
+  python3 ~/scripts/python/sonos_audio_source.py vonRear line
   xset s reset # wake display
   nohup vlc -f $filename &
 }  
 
+alias py="python3"
+alias pip3="python3 -m pip"
+  
+add_python3_path() {
+  name=$1
+  pypath=$2
+  SITEDIR=$(python3 -m site --user-site)
+  mkdir -p "$SITEDIR" # create if it doesn't exist
+  echo "$pypath" > "$SITEDIR/$name.pth"
+  echo "added $name containing $pypath to $SITEDIR"
+  l $SITEDIR
+}
 
 export DISPLAY=:0
