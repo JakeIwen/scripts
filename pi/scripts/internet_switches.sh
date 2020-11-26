@@ -9,7 +9,7 @@ mobile_internet_ops() {
   then ubnt_internet_ops
   else 
     kill_torrent_client
-    if cat /home/pi/mdisk &> /dev/null 
+    if cat /home  /pi/mdisk &> /dev/null 
     then mount_drives
     else unmount_drives
     fi
@@ -45,7 +45,7 @@ kill_all() {
 }
 if date | grep '00:0'; then date; fi
 
-if cat /home/pi/umdisk &> /dev/null; then kill_all
+if cat /home/pi/nodisk &> /dev/null; then kill_all
 elif ping -c 1 172.20.10.3 &> /dev/null; then mobile_internet_ops
 elif ping -c 1 8.8.8.8 &> /dev/null;     then ubnt_internet_ops
 else no_internet_ops

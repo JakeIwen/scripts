@@ -27,7 +27,7 @@ def start_noise(keyterm):
     play_item(cooridnator, item, 'REPEAT_ONE')
     return cooridnator
 
-def play_from_faves(keyterm, group_all=True):
+def play_from_faves(keyterm, group_all=True, group_vol=None):
     device = partymode() if group_all else get_preferred_device()
     matches = get_matching_faves(keyterm, device)
     matches = [x for x in matches if 'Noise' not in x.title]
@@ -170,6 +170,9 @@ def brown_noise():
     start_noise('Brown Noise')
 def pink_noise():
     start_noise('Pink Noise')
+    
+def discover_weekly():
+    play_from_faves('Discover Weekly', True, 42)
 def random_album():
     play_from_faves(" - ")
 def random_radio():
