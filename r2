@@ -11,7 +11,6 @@ debug1: identity file /Users/jacobr/.ssh/id_dsa-cert type -1
 debug1: identity file /Users/jacobr/.ssh/id_ecdsa type -1
 debug1: identity file /Users/jacobr/.ssh/id_ecdsa-cert type -1
 debug1: identity file /Users/jacobr/.ssh/id_ed25519 type -1
-
 debug1: identity file /Users/jacobr/.ssh/id_ed25519-cert type -1
 debug1: identity file /Users/jacobr/.ssh/id_xmss type -1
 debug1: identity file /Users/jacobr/.ssh/id_xmss-cert type -1
@@ -57,3 +56,4 @@ debug1: Sending environment.
 debug1: Sending env LC_TERMINAL_VERSION = 3.3.7
 debug1: Sending env LANG = en_US.UTF-8
 debug1: Sending env LC_TERMINAL = iTerm2
+Last login: Thu Nov 26 15:47:26 2020 from c-73-153-213-45.hsd1.co.comcast.net
