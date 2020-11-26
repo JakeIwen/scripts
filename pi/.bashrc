@@ -4,43 +4,95 @@ alias ...="cd ../.."
 alias ....="cd ../../.."
 alias .....="cd ../../../.."
 
-alias crlog="cd /var/log/cron"
-
-alias vi=/usr/bin/vim.tiny
+alias vi='/usr/bin/vim.tiny'
 alias rscr="sudo systemctl restart cron.service"
 alias ct="sudo crontab -e"
-
-alias egrep='egrep --color=auto'
-alias fgrep='fgrep --color=auto'
-alias grep='grep --color=auto'
-alias pgrep='ps ax | grep'
-
-alias mdisk='touch ~/mdisk'
-alias mdiskx='rm ~/mdisk'
-alias mtor='touch ~/mtorrent'
-alias mtorx='rm ~/mtorrent'
-
-# add new alias
-nalias()
-{
-  echo "alias $1='$2'" >> ~/.bashrc
-}
+alias cronlog="cd /var/log/cron"
+alias rsynclog='cat /var/log/cron/rsync.log'
+alias killcron="sudo pkill -f cron"
 
 alias bashp='vi ~/.bashrc'
 alias rbash='source ~/.bashrc'
 
 alias dirsize='du -hsc *'
-
 alias disku='df -u'
 
-rgrep()
-{
-  grep -rni "$1" . # recursively search cwd
+alias mdisk='touch ~/mdisk'
+alias mdiskx='rm ~/mdisk'
+alias mtor='touch ~/mtorrent'
+alias mtorx='rm ~/mtorrent'
+alias nodisk='touch ~/nodisk'
+alias nodiskx='rm ~/nodisk'
+
+# MEDIA
+alias movies='cd /mnt/movingparts/torrent/Movies; ls -lh;'
+alias tv='cd /mnt/movingparts/torrent/TV; ls -lh;'
+alias docu='cd /mnt/movingparts/torrent/Documentaries; ls -lh;'
+alias torrent='cd /mnt/movingparts/torrent; ls -lh;'
+
+alias omx='omxplayer --timeout 60 udp://192.168.6.231:1234'
+alias rpiplay='~/RPiPlay/build/rpiplay'
+alias pd='sudo /sbin/shutdown -r now'
+alias rb='sudo reboot'
+
+alias py="python3"
+alias pip3="python3 -m pip"
+
+alias egrep='egrep --color=auto'
+alias fgrep='fgrep --color=auto'
+alias grep='grep --color=auto'
+alias hist="history | sed 's/^ [[:digit:]]* //g'"
+alias hgrep="hist | grep" # search shell history
+alias pgrep="ps ax | grep" # search processes
+rgrep() {
+  grep -rni "$1" . # recursively search pwd
 }
 
-alias hgrep='history | grep'
-export HISTSIZE=8000
-export HISTFILESIZE=80000
+hcp() {
+  val=$(hist | grep $1 | tail -1)
+  echo $val | pbcopy
+  echo "copied: $val"
+}
+
+play() {
+  filename=`ls | grep $1`
+  echo "Opening: $filename"
+  sh ~/sns.sh rear_movie
+  xset s reset # wake display
+  nohup vlc -f $filename &
+}  
+  
+add_python3_path() {
+  name=$1
+  pypath=$2
+  SITEDIR=$(python3 -m site --user-site)
+  mkdir -p "$SITEDIR" # create if it doesn't exist
+  echo "$pypath" > "$SITEDIR/$name.pth"
+  echo "added $name containing $pypath to $SITEDIR"
+  l $SITEDIR
+}
+
+# add or update alias
+nalias() {
+  new_line="alias $1='$2'"
+  file=$(cat ~/.bashrc)
+  if [[ $file =~ $1\=.* ]]; then
+    old_line=$(grep -i "^alias $1=" ~/.bashrc)
+    old_line=$(echo "${old_line}" | sed -e 's/[]$.*[\^]/\\&/g' )
+    sed -i -e "s|^alias $1\=.*|${new_line}|g"  ~/.bashrc
+    echo "found alias, replaced: /^alias $1=.*/" 
+    echo "with: $(grep -i "^alias $1=" ~/.bashrc)"
+  else
+    echo "appending to rc: $new_line" 
+    echo "$new_line" >> ~/.bashrc
+  fi
+  echo 'reloading shell'
+  exec bash
+}
+
+export DISPLAY=:0
+export HISTSIZE=10000
+export HISTFILESIZE=100000
 
 # ~/.bashrc: executed by bash(1) for non-login shells.
 # see /usr/share/doc/bash/examples/startup-files (in the package bash-doc)
@@ -113,16 +165,16 @@ xterm*|rxvt*)
 esac
 
 # enable color support of ls and also add handy aliases
-if [ -x /usr/bin/dircolors ]; then
-    test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"
-    alias ls='ls --color=auto'
-    #alias dir='dir --color=auto'
-    #alias vdir='vdir --color=auto'
-
-    alias grep='grep --color=auto'
-    alias fgrep='fgrep --color=auto'
-    alias egrep='egrep --color=auto'
-fi
+# if [ -x /usr/bin/dircolors ]; then
+#     test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"
+#     alias ls='ls --color=auto'
+#     #alias dir='dir --color=auto'
+#     #alias vdir='vdir --color=auto'
+# 
+#     alias grep='grep --color=auto'
+#     alias fgrep='fgrep --color=auto'
+#     alias egrep='egrep --color=auto'
+# fi
 
 # colored GCC warnings and errors
 #export GCC_COLORS='error=01;31:warning=01;35:note=01;36:caret=01;32:locus=01:quote=01'
@@ -151,37 +203,3 @@ if ! shopt -oq posix; then
     . /etc/bash_completion
   fi
 fi
-
-alias movies='cd /mnt/movingparts/torrent/Movies; ls -lh;'
-alias tv='cd /mnt/movingparts/torrent/TV; ls -lh;'
-alias docu='cd /mnt/movingparts/torrent/Documentaries; ls -lh;'
-alias torrent='cd /mnt/movingparts/torrent; ls -lh;'
-
-alias synclog='cat /var/log/cron/rsync.log'
-alias omx='omxplayer --timeout 60 udp://192.168.6.231:1234'
-alias rpiplay='~/RPiPlay/build/rpiplay'
-alias pd='sudo /sbin  /shutdown -r now'
-alias rb='sudo reboot'
-
-play() {
-  filename=`ls | grep $1`
-  echo "Opening: $filename"
-  python3 ~/scripts/python/sonos_audio_source.py vonRear line
-  xset s reset # wake display
-  nohup vlc -f $filename &
-}  
-
-alias py="python3"
-alias pip3="python3 -m pip"
-  
-add_python3_path() {
-  name=$1
-  pypath=$2
-  SITEDIR=$(python3 -m site --user-site)
-  mkdir -p "$SITEDIR" # create if it doesn't exist
-  echo "$pypath" > "$SITEDIR/$name.pth"
-  echo "added $name containing $pypath to $SITEDIR"
-  l $SITEDIR
-}
-
-export DISPLAY=:0
