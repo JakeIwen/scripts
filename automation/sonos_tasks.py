@@ -15,8 +15,8 @@ def play(name=None):
     device.play()
     return device
 
-def pause():
-    [device.pause() for device in discover()]
+def pause(devices = discover()):
+    [device.pause() for device in devices]
     
 def stop():
     [device.stop() for device in discover()]
@@ -27,26 +27,29 @@ def start_noise(keyterm):
     play_item(cooridnator, item, 'REPEAT_ONE')
     return cooridnator
 
-def play_from_faves(keyterm, group_all=True):
+def play_from_faves(keyterm, group_all=True, group_vol=None):
     device = partymode() if group_all else get_preferred_device()
     matches = get_matching_faves(keyterm, device)
     matches = [x for x in matches if 'Noise' not in x.title]
     item = choice(matches) # choose random if multiple matches
     play_item(device, item.reference, 'NORMAL')
     return device
+    
+def source_optical(device):
+    if device.player_name == "vonMid":
+        device.switch_to_tv()
+    else
+        mid = get_spkr("vonMid")
+        mid.switch_to_tv()
+        mid.partymode()
+        mid.group.mute = True    
 
 def audio_source(name, source):
     unjoin_all()
     device = get_spkr(name)
     
     if source == "optical":
-        if name == "vonMid":
-            device.switch_to_tv()
-            return device
-        mid = get_spkr("vonMid")
-        mid.switch_to_tv()
-        mid.partymode()
-        mid.group.mute = True
+        source_optical
     elif source == "line":
         device.switch_to_line_in(get_spkr("vonFront"))
         
@@ -78,18 +81,15 @@ def partymode(vol=None):
 def unjoin_all():
     for device in discover():
         if len(device.group.members) > 1:
-            try:
-                member.unjoin()
-            except:
-                continue
+            with suppress(Exception): member.unjoin()
 
-def make_stereo_pair(master_name, slave_name):
-    slave = by_name(slave_name)
+def make_stereo_pair(left_master_name, right_name):
+    slave = by_name(right_name)
     with suppress(Exception): slave.separate_stereo_pair()
-    master = by_name(master_name)
+    master = by_name(left_master_name)
     while not master:
         sleep(1)
-        master = by_name(master_name)
+        master = by_name(left_master_name)
     with suppress(Exception): master.create_stereo_pair(slave)
     return master
     
@@ -170,6 +170,9 @@ def brown_noise():
     start_noise('Brown Noise')
 def pink_noise():
     start_noise('Pink Noise')
+    
+def discover_weekly():
+    play_from_faves('Discover Weekly', True, 42)
 def random_album():
     play_from_faves(" - ")
 def random_radio():
