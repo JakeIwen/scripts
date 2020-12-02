@@ -1,3 +1,4 @@
+#! /bin/bash
 alias l='ls -lah'  ##custom list directory
 alias ..="cd .."
 alias ...="cd ../.."
@@ -17,21 +18,29 @@ alias rbash='source ~/.bashrc'
 alias dirsize='du -hsc *'
 alias disku='df -u'
 
-alias mdisk='touch ~/mdisk'
-alias mdiskx='rm ~/mdisk'
-alias mtor='touch ~/mtorrent'
-alias mtorx='rm ~/mtorrent'
-alias nodisk='touch ~/nodisk'
-alias nodiskx='rm ~/nodisk'
+alias mdisk='touch ~/mdisk; bash ~/scripts/internet_switches.sh'
+alias mdiskx='rm ~/mdisk; bash ~/scripts/internet_switches.sh'
+alias mtor='touch ~/mtorrent; bash ~/scripts/internet_switches.sh'
+alias mtorx='rm ~/mtorrent; bash ~/scripts/internet_switches.sh'
+alias nodisk='touch ~/nodisk; bash ~/scripts/internet_switches.sh'
+alias nodiskx='rm ~/nodisk; bash ~/scripts/internet_switches.sh'
+
+alias sns='bash ~/sns.sh'
 
 # MEDIA
 alias movies='cd /mnt/movingparts/torrent/Movies; ls -lh;'
 alias tv='cd /mnt/movingparts/torrent/TV; ls -lh;'
 alias docu='cd /mnt/movingparts/torrent/Documentaries; ls -lh;'
 alias torrent='cd /mnt/movingparts/torrent; ls -lh;'
+alias mp='cd /mnt/movingparts/'
+alias sg='cd /mnt/seegayte/'
 
-alias omx='omxplayer --timeout 60 udp://192.168.6.231:1234'
-alias rpiplay='~/RPiPlay/build/rpiplay'
+alias cast="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; nohup python3 server.py &"
+
+alias rpiplay="/home/pi/RPiPlay/build/rpiplay"
+alias rhp='nohup /home/pi/RPiPlay/build/rpiplay -r 180 &'
+
+
 alias pd='sudo /sbin/shutdown -r now'
 alias rb='sudo reboot'
 
@@ -54,13 +63,34 @@ hcp() {
   echo "copied: $val"
 }
 
+killport() {
+  lsof -ti:"$1" | xargs kill
+}
+
+file_lines() { # file_lines './filename.txt' echo   
+  fpath=$1
+  command=$2
+  while read f  
+  do $command $f
+  done < $fpath
+}
+
+sns_list() {
+  fpath="$HOME/scripts/python/sonos_tasks.py"
+  while read f; do
+    helpers=`echo $f | grep '# helpers'`
+    if [[ $helpers ]]; then break; fi
+    echo $f | grep '^def' | sed "s|^def\s||g"
+  done < $fpath
+}
+
 play() {
   filename=`ls | grep $1`
   echo "Opening: $filename"
   sh ~/sns.sh rear_movie
   xset s reset # wake display
   nohup vlc -f $filename &
-}  
+}
   
 add_python3_path() {
   name=$1
@@ -93,6 +123,7 @@ nalias() {
 export DISPLAY=:0
 export HISTSIZE=10000
 export HISTFILESIZE=100000
+export PATH="$PATH:/home/pi/.local/bin"
 
 # ~/.bashrc: executed by bash(1) for non-login shells.
 # see /usr/share/doc/bash/examples/startup-files (in the package bash-doc)
@@ -103,6 +134,8 @@ case $- in
     *i*) ;;
       *) return;;
 esac
+
+
 
 # don't put duplicate lines or lines starting with space in the history.
 # See bash(1) for more options

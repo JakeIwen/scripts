@@ -4,6 +4,39 @@ from soco.music_library import MusicLibrary
 from contextlib import suppress
 from time import sleep
 
+#  abstractions
+
+def group_vol_up(inc=1):
+    adjust_volume('all', 'up', inc)
+def group_vol_down(inc=8):
+    adjust_volume('all', 'down', inc)
+
+def brown_noise():
+    start_noise('Brown Noise')
+def pink_noise():
+    start_noise('Pink Noise')
+    
+def discover_weekly():
+    play_from_faves('Discover Weekly', True, 42)
+def random_album():
+    play_from_faves(" - ")
+def random_radio():
+    play_from_faves(" Radio")
+
+def rear_movie():
+    audio_source('vonRear', 'optical')
+
+def rear_normal():
+    make_stereo_pair("vonRear", "vonRear2")
+def rear_inverted():
+    make_stereo_pair("vonRear2", "vonRear")
+    
+def back_15():
+    scrub(-15)
+def back_30():
+    scrub(-30)
+
+# utilities
 def adjust_volume(speaker, direction, inc=8):
     if speaker == 'all': 
         [adjust(group, direction, inc) for group in any_soco().all_groups]
@@ -34,28 +67,19 @@ def play_from_faves(keyterm, group_all=True, group_vol=None):
     item = choice(matches) # choose random if multiple matches
     play_item(device, item.reference, 'NORMAL')
     return device
-    
-def source_optical(device):
-    if device.player_name == "vonMid":
-        device.switch_to_tv()
-    else
-        mid = get_spkr("vonMid")
-        mid.switch_to_tv()
-        mid.partymode()
-        mid.group.mute = True    
 
 def audio_source(name, source):
     unjoin_all()
     device = get_spkr(name)
-    
+
     if source == "optical":
-        source_optical
+        source_optical(device)
     elif source == "line":
         device.switch_to_line_in(get_spkr("vonFront"))
-        
+        device.play()
+    
     device.mute = False
     device.volume = 90
-    device.play()
     return device
 
 def scrub(seconds=-15):
@@ -78,28 +102,19 @@ def partymode(vol=None):
         [set_vol(member, vol) for member in device.group]
     return device 
     
-def unjoin_all():
-    for device in discover():
+def unjoin_all(devices=discover()):
+    for device in devices:
         if len(device.group.members) > 1:
             with suppress(Exception): member.unjoin()
+    return devices
 
-def make_stereo_pair(left_master_name, right_name):
-    slave = by_name(right_name)
-    with suppress(Exception): slave.separate_stereo_pair()
-    master = by_name(left_master_name)
-    while not master:
-        sleep(1)
-        master = by_name(left_master_name)
-    with suppress(Exception): master.create_stereo_pair(slave)
-    return master
-    
 def test():
     cooridnator = partymode(9)
     ml = MusicLibrary(cooridnator)
     faves = ml.get_sonos_favorites()
     import pdb; pdb.set_trace()
 
-# helpers
+#  helpers
 def play_item(device, item, play_mode='NORMAL'):
     device.clear_queue()
     device.add_to_queue(item)
@@ -131,6 +146,26 @@ def adjust(target, direction, inc):
 def set_vol(target, vol):
     target.mute = False
     target.volume = int(vol)
+    
+def source_optical(device):
+    if device.player_name == "vonMid":
+        device.switch_to_tv()
+    else:
+        mid = get_spkr("vonMid")
+        mid.switch_to_tv()
+        mid.partymode()
+        mid.play()
+        mid.group.mute = True
+        
+def make_stereo_pair(left_master_name, right_name):
+    slave = by_name(right_name)
+    with suppress(Exception): slave.separate_stereo_pair()
+    master = by_name(left_master_name)
+    while not master:
+        sleep(1)
+        master = by_name(left_master_name)
+    with suppress(Exception): master.create_stereo_pair(slave)
+    return master
 
 def get_matching_faves(keyterm, device=None):
     if device == None:
@@ -159,37 +194,5 @@ def get_playing_device(default_to_any=False):
         
 def get_preferred_device():
     return get_playing_device(True)
-
-# abstractions
-def group_vol_up(inc=8):
-    adjust_volume('all', 'up', inc)
-def group_vol_down(inc=8):
-    adjust_volume('all', 'down', inc)
-
-def brown_noise():
-    start_noise('Brown Noise')
-def pink_noise():
-    start_noise('Pink Noise')
-    
-def discover_weekly():
-    play_from_faves('Discover Weekly', True, 42)
-def random_album():
-    play_from_faves(" - ")
-def random_radio():
-    play_from_faves(" Radio")
-
-def rear_movie():
-    audio_source('vonRear', 'line')
-
-def rear_normal():
-    make_stereo_pair("vonRear", "vonRear2")
-def rear_inverted():
-    make_stereo_pair("vonRear2", "vonRear")
-    
-def back_15():
-    scrub(-15)
-def back_30():
-    scrub(-30)
-
 
 # import pdb; pdb.set_trace()
