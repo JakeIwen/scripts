@@ -1,4 +1,6 @@
 #! /bin/bash
+shopt -s expand_aliases
+
 alias l='ls -lah'  ##custom list directory
 alias ..="cd .."
 alias ...="cd ../.."
@@ -16,7 +18,7 @@ alias fgrep='fgrep --color=auto'
 alias grep='grep --color=auto'
 alias hgrep='history | grep'
 
-alias alias="alias; cat ~/.bashrc | grep -E '^[[:space:]]*([[:alnum:]_]+[[:space:]]*\(\)|function[[:space:]]+[[:alnum:]_]+)'"
+# alias alias="alias; cat ~/.bashrc | grep -E '^[[:space:]]*([[:alnum:]_]+[[:space:]]*\(\)|function[[:space:]]+[[:alnum:]_]+)'"
 
 rgrep() {
   grep -rni "$1" . # recursively search cwd
