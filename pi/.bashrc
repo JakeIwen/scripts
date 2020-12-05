@@ -1,4 +1,6 @@
 #! /bin/bash
+shopt -s expand_aliases
+
 alias l='ls -lah'  ##custom list directory
 alias ..="cd .."
 alias ...="cd ../.."
@@ -18,12 +20,12 @@ alias rbash='source ~/.bashrc'
 alias dirsize='du -hsc *'
 alias disku='df -u'
 
-alias mdisk='touch ~/mdisk; bash ~/scripts/internet_switches.sh'
-alias mdiskx='rm ~/mdisk; bash ~/scripts/internet_switches.sh'
-alias mtor='touch ~/mtorrent; bash ~/scripts/internet_switches.sh'
-alias mtorx='rm ~/mtorrent; bash ~/scripts/internet_switches.sh'
-alias nodisk='touch ~/nodisk; bash ~/scripts/internet_switches.sh'
-alias nodiskx='rm ~/nodisk; bash ~/scripts/internet_switches.sh'
+alias mdisk="touch $HOME/mconf/mdisk; bash $HOME/scripts/internet_switches.sh"
+alias mdiskx="rm $HOME/mconf/mdisk; bash $HOME/scripts/internet_switches.sh"
+alias mtor="touch $HOME/mconf/mtorrent; bash $HOME/scripts/internet_switches.sh"
+alias mtorx="rm $HOME/mconf/mtorrent; bash $HOME/scripts/internet_switches.sh"
+alias nodisk="touch $HOME/mconf/nodisk; bash $HOME/scripts/internet_switches.sh"
+alias nodiskx="rm $HOME/mconf/nodisk; bash $HOME/scripts/internet_switches.sh"
 
 alias sns='bash ~/sns.sh'
 
@@ -53,6 +55,7 @@ alias grep='grep --color=auto'
 alias hist="history | sed 's/^ [[:digit:]]* //g'"
 alias hgrep="hist | grep" # search shell history
 alias pgrep="ps ax | grep" # search processes
+alias agrep="alias | grep" # search aliases
 rgrep() {
   grep -rni "$1" . # recursively search pwd
 }
