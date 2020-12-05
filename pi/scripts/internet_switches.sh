@@ -5,11 +5,11 @@ ubnt_internet_ops() {
 }
 
 mobile_internet_ops() {
-  if cat /home/pi/mtorrent &> /dev/null 
+  if cat /home/pi/mconf/mtorrent &> /dev/null 
   then ubnt_internet_ops
   else 
     kill_torrent_client
-    if cat /home  /pi/mdisk &> /dev/null 
+    if cat /home/pi/mconf/mdisk &> /dev/null 
     then mount_drives
     else unmount_drives
     fi
@@ -31,11 +31,26 @@ start_torrent_client() {
 
 mount_drives() {
   sudo mount -a --options-source-force; echo "drives mounted"
+  sudo /etc/init.d/smbd start
 }
 
 unmount_drives() {
-  for name in `cat /proc/self/mounts | grep -o '/dev/sd[^ ]*'`
-  do echo "unmounting $name"; sudo umount $name
+  sudo /etc/init.d/smbd stop
+  locations=`cat /proc/self/mounts | grep -o '/dev/sd[^ ]*'`
+  for loc in $locations; do
+    echo "unmounting $loc"
+    sudo umount $loc
+  done
+  sleep 5
+  spindown_drives
+}
+
+spindown_drives() {
+  all_names=`sudo fdisk -l | grep -o "/dev/sd[a-z][1-3]"`
+  for loc in $all_names; do
+    name="${loc/\/dev\//}"
+    echo "spinning down $name"
+    sudo hd-idle -t "$name" # spin-down drive
   done
 }
 
@@ -45,7 +60,7 @@ kill_all() {
 }
 if date | grep '00:0'; then date; fi
 
-if cat /home/pi/nodisk &> /dev/null; then kill_all
+if cat /home/pi/mconf/nodisk &> /dev/null; then kill_all
 elif ping -c 1 172.20.10.3 &> /dev/null; then mobile_internet_ops
 elif ping -c 1 8.8.8.8 &> /dev/null;     then ubnt_internet_ops
 else no_internet_ops
