@@ -7,15 +7,17 @@ ubnt_internet_ops() {
 mobile_internet_ops() {
   if cat /home/pi/mconf/mtorrent &> /dev/null 
   then ubnt_internet_ops
-  else 
-    kill_torrent_client
-    if cat /home/pi/mconf/mdisk &> /dev/null 
-    then mount_drives
-    else unmount_drives
-    fi
+  else no_internet_ops
   fi
 }
 
+no_internet_ops() {
+  kill_torrent_client
+  if cat /home/pi/mconf/mdisk &> /dev/null 
+  then mount_drives
+  else unmount_drives
+  fi
+}
 
 kill_torrent_client() {
   if [[ "$(ps ax)" == *"qbittorrent"* ]] 
@@ -25,17 +27,17 @@ kill_torrent_client() {
 
 start_torrent_client() {
   if [[ "$(ps ax)" != *"qbittorrent"* ]] 
-  then nohup qbittorrent-nox; echo 'started qbittorrent';
+  then echo 'started qbittorrent'; nohup qbittorrent-nox &
   fi
 }
 
 mount_drives() {
   sudo mount -a --options-source-force; echo "drives mounted"
-  sudo /etc/init.d/smbd start
+  start_service smbd 
 }
 
 unmount_drives() {
-  sudo /etc/init.d/smbd stop
+  stop_service smbd 
   locations=`cat /proc/self/mounts | grep -o '/dev/sd[^ ]*'`
   for loc in $locations; do
     echo "unmounting $loc"
@@ -46,7 +48,7 @@ unmount_drives() {
 }
 
 spindown_drives() {
-  all_names=`sudo fdisk -l | grep -o "/dev/sd[a-z][1-3]"`
+  all_names=`sudo fdisk -l | grep -o '/dev/sd[^ ]*'`
   for loc in $all_names; do
     name="${loc/\/dev\//}"
     echo "spinning down $name"
@@ -54,10 +56,20 @@ spindown_drives() {
   done
 }
 
+stop_service() {
+  /usr/sbin/service $1 stop
+}
+
+start_service() {
+  /usr/sbin/service $1 status > /dev/null || /usr/sbin/service $1 start
+}
+
 kill_all() {
   kill_torrent_client
   unmount_drives
 }
+
+
 if date | grep '00:0'; then date; fi
 
 if cat /home/pi/mconf/nodisk &> /dev/null; then kill_all
