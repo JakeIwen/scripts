@@ -6,10 +6,14 @@ from time import sleep
 
 #  abstractions
 
-def group_vol_up(inc=1):
+def group_vol_up(inc=8):
     adjust_volume('all', 'up', inc)
 def group_vol_down(inc=8):
     adjust_volume('all', 'down', inc)
+def vol_up(inc=8):
+    adjust_volume('playing', 'up', inc)
+def vol_down(inc=8):
+    adjust_volume('playing', 'down', inc)
 
 def brown_noise():
     start_noise('Brown Noise')
@@ -23,9 +27,9 @@ def random_album():
 def random_radio():
     play_from_faves(" Radio")
 
-def rear_movie():
-    audio_source('vonRear', 'optical')
-
+def rear_movie(vol=80):
+    audio_source('vonRear', 'optical', vol)
+    
 def rear_normal():
     make_stereo_pair("vonRear", "vonRear2")
 def rear_inverted():
@@ -40,6 +44,8 @@ def back_30():
 def adjust_volume(speaker, direction, inc=8):
     if speaker == 'all': 
         [adjust(group, direction, inc) for group in any_soco().all_groups]
+    elif speaker == 'preferred':
+        adjust(get_playing_device(), direction, inc)
     else:
         adjust(get_spkr(speaker), direction, inc)
 
@@ -68,7 +74,7 @@ def play_from_faves(keyterm, group_all=True, group_vol=None):
     play_item(device, item.reference, 'NORMAL')
     return device
 
-def audio_source(name, source):
+def audio_source(name, source, vol):
     unjoin_all()
     device = get_spkr(name)
 
@@ -79,7 +85,7 @@ def audio_source(name, source):
         device.play()
     
     device.mute = False
-    device.volume = 90
+    device.volume = 80
     return device
 
 def scrub(seconds=-15):
@@ -104,8 +110,9 @@ def partymode(vol=None):
     
 def unjoin_all(devices=discover()):
     for device in devices:
-        if len(device.group.members) > 1:
-            with suppress(Exception): member.unjoin()
+        if is_group_member(device):
+            print(device.player_name, "unjoining")
+            device.unjoin()
     return devices
 
 def test():
@@ -180,19 +187,27 @@ def get_spkr(name):
 def get_playing_device(default_to_any=False):
     devices = discover()
     for device in devices:
-        if len(device.group.members) > 1:
+        if is_group_member(device):
+            print("returning coord", device.group.coordinator.player_name)
             return device.group.coordinator 
     for device in devices:
         device.t_state = device.get_current_transport_info()['current_transport_state']
         if device.t_state == 'PLAYING':
+            print("is playing", device.group.coordinator.player_name)
             return device.group.coordinator
     for device in devices:
         if device.t_state == 'PAUSED_PLAYBACK':
+            print("is paused", device.group.coordinator.player_name)
             return device.group.coordinator
     if default_to_any:
+        print("random preferred", device.group.coordinator.player_name)
         return devices.pop()
-        
+
 def get_preferred_device():
     return get_playing_device(True)
+
+def is_group_member(device):
+    base_num = 2 if "vonRear" in device.player_name else 1
+    return len(device.group.members) > base_num
 
 # import pdb; pdb.set_trace()
