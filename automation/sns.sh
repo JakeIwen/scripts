@@ -11,4 +11,4 @@ fi
 
 py_cmd="from sonos_tasks import $task; $task($args)"
 echo  "running python3: $py_cmd"
-python3 -c "$py_cmd"
+echo `python3 -c "$py_cmd"`
