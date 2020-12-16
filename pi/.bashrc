@@ -20,6 +20,11 @@ alias rbash='source ~/.bashrc'
 alias dirsize='du -hsc *'
 alias disku='df -u'
 
+snh() {
+  nohup bash $1 &
+  tail -f ./nohup.out
+}
+
 alias mdisk="touch $HOME/mconf/mdisk; nohup $HOME/scripts/internet_switches.sh &"
 alias mdiskx="rm $HOME/mconf/mdisk; nohup $HOME/scripts/internet_switches.sh &"
 alias mtor="touch $HOME/mconf/mtorrent; nohup $HOME/scripts/internet_switches.sh &"
