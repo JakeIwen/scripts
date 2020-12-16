@@ -4,8 +4,12 @@ ubnt_internet_ops() {
   start_torrent_client
 }
 
+conf() {
+  cat /home/pi/mconf/$1 &> /dev/null 
+}
+
 mobile_internet_ops() {
-  if cat /home/pi/mconf/mtorrent &> /dev/null 
+  if conf mtorrent
   then ubnt_internet_ops
   else no_internet_ops
   fi
@@ -13,7 +17,7 @@ mobile_internet_ops() {
 
 no_internet_ops() {
   kill_torrent_client
-  if cat /home/pi/mconf/mdisk &> /dev/null 
+  if conf mdisk
   then mount_drives
   else unmount_drives
   fi

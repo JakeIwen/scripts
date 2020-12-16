@@ -20,12 +20,12 @@ alias rbash='source ~/.bashrc'
 alias dirsize='du -hsc *'
 alias disku='df -u'
 
-alias mdisk="touch $HOME/mconf/mdisk; bash $HOME/scripts/internet_switches.sh"
-alias mdiskx="rm $HOME/mconf/mdisk; bash $HOME/scripts/internet_switches.sh"
-alias mtor="touch $HOME/mconf/mtorrent; bash $HOME/scripts/internet_switches.sh"
-alias mtorx="rm $HOME/mconf/mtorrent; bash $HOME/scripts/internet_switches.sh"
-alias nodisk="touch $HOME/mconf/nodisk; bash $HOME/scripts/internet_switches.sh"
-alias nodiskx="rm $HOME/mconf/nodisk; bash $HOME/scripts/internet_switches.sh"
+alias mdisk="touch $HOME/mconf/mdisk; nohup $HOME/scripts/internet_switches.sh &"
+alias mdiskx="rm $HOME/mconf/mdisk; nohup $HOME/scripts/internet_switches.sh &"
+alias mtor="touch $HOME/mconf/mtorrent; nohup $HOME/scripts/internet_switches.sh &"
+alias mtorx="rm $HOME/mconf/mtorrent; nohup $HOME/scripts/internet_switches.sh &"
+alias nodisk="touch $HOME/mconf/nodisk; nohup $HOME/scripts/internet_switches.sh &"
+alias nodiskx="rm $HOME/mconf/nodisk; nohup $HOME/scripts/internet_switches.sh &"
 
 alias sns='bash ~/sns.sh'
 
@@ -36,6 +36,8 @@ alias docu='cd /mnt/movingparts/torrent/Documentaries; ls -lh;'
 alias torrent='cd /mnt/movingparts/torrent; ls -lh;'
 alias mp='cd /mnt/movingparts/'
 alias sg='cd /mnt/seegayte/'
+
+alias alias_media='bash $HOME/scripts/alias_media.sh'
 
 alias cast="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; nohup python3 server.py &"
 
@@ -48,6 +50,19 @@ alias rb='sudo reboot'
 
 alias py="python3"
 alias pip3="python3 -m pip"
+
+### GIT ###
+alias gpo="git push origin"
+alias gckm="git checkout master"
+alias gac="git add .; git commit -m"
+alias gp="git pull"
+alias grao="git remote add origin"
+alias gc='git clone'
+alias gck='git checkout'
+gacp() { 
+  git add .; git commit -m "$1"; git push 
+}
+
 
 alias egrep='egrep --color=auto'
 alias fgrep='fgrep --color=auto'
