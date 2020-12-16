@@ -1,11 +1,9 @@
 #! /bin/bash
 
-tasks=`ps ax`
-
-bash /home/pi/scripts/internet_switches.sh
-
-if [[ "$(ps ax)" != *'python3 server.py'* ]]  &> /dev/null 
-then nohup python3 /home/pi/NativCast/server.py &
+if [[ `ps ax` != *'NativCast/server.py'* ]] &> /dev/null 
+then 
+  python3 /home/pi/NativCast/server.py
+  python3 -c "from sonos_tasks import rear_movie; rear_movie(70)"
 fi
 
 
