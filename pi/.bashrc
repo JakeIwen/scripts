@@ -21,7 +21,7 @@ alias dirsize='du -hsc *'
 alias disku='df -u'
 
 snh() {
-  nohup bash $1 &
+  nohup bash -c $1 &
   tail -f ./nohup.out
 }
 
