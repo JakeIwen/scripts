@@ -18,6 +18,19 @@ alias fgrep='fgrep --color=auto'
 alias grep='grep --color=auto'
 alias hgrep='history | grep'
 
+### GIT ###
+alias gpo="git push origin"
+alias gckm="git checkout master"
+alias gac="git add .; git commit -m"
+alias gp="git pull"
+alias grao="git remote add origin"
+alias gc='git clone'
+alias gck='git checkout'
+gacp() {
+  git add .; git commit -m "$1"; git push
+}
+
+
 # alias alias="alias; cat ~/.bashrc | grep -E '^[[:space:]]*([[:alnum:]_]+[[:space:]]*\(\)|function[[:space:]]+[[:alnum:]_]+)'"
 
 rgrep() {
