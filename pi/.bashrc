@@ -33,6 +33,7 @@ alias nodisk="touch $HOME/mconf/nodisk; nohup $HOME/scripts/internet_switches.sh
 alias nodiskx="rm $HOME/mconf/nodisk; nohup $HOME/scripts/internet_switches.sh &"
 
 alias sns='bash ~/sns.sh'
+alias gpu_mem='vcgencmd get_mem gpu'
 
 # MEDIA
 alias movies='cd /mnt/movingparts/torrent/Movies; ls -lh;'
@@ -74,7 +75,7 @@ alias fgrep='fgrep --color=auto'
 alias grep='grep --color=auto'
 alias hist="history | sed 's/^ [[:digit:]]* //g'"
 alias hgrep="hist | grep" # search shell history
-alias pgrep="ps ax | grep" # search processes
+# alias pgrep="ps ax | grep" # search processes
 alias agrep="alias | grep" # search aliases
 rgrep() {
   grep -rni "$1" . # recursively search pwd
