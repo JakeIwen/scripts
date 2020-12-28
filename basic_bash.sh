@@ -27,7 +27,7 @@ alias grao="git remote add origin"
 alias gc='git clone'
 alias gck='git checkout'
 gacp() {
-  git add .; git commit -m "$1"; git push
+  git add . && git commit -m "$1" && git push
 }
 
 

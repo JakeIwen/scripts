@@ -6,15 +6,6 @@ from time import sleep
 
 #  abstractions
 
-def group_vol_up(inc=8):
-    adjust_volume('all', 'up', inc)
-def group_vol_down(inc=8):
-    adjust_volume('all', 'down', inc)
-def vol_up(inc=8):
-    adjust_volume('playing', 'up', inc)
-def vol_down(inc=8):
-    adjust_volume('playing', 'down', inc)
-
 def brown_noise():
     start_noise('Brown Noise')
 def pink_noise():
@@ -27,18 +18,30 @@ def random_album():
 def random_radio():
     play_from_faves(" Radio")
 
-def rear_movie(vol=80):
+def rear_movie(vol=55):
     audio_source('vonRear', 'optical', vol)
-    
 def rear_normal():
     make_stereo_pair("vonRear", "vonRear2")
 def rear_inverted():
     make_stereo_pair("vonRear2", "vonRear")
-    
+
+def group_vol_up(inc=8):
+    adjust_volume('all', 'up', inc)
+def group_vol_down(inc=8):
+    adjust_volume('all', 'down', inc)
+def vol_up(inc=8):
+    adjust_volume('preferred', 'up', inc)
+def vol_down(inc=8):
+    adjust_volume('preferred', 'down', inc)
+
 def back_15():
     scrub(-15)
 def back_30():
     scrub(-30)
+def fwd_15():
+    scrub(15)
+def fwd_30():
+    scrub(30)
 
 # utilities
 def adjust_volume(speaker, direction, inc=8):
@@ -74,7 +77,7 @@ def play_from_faves(keyterm, group_all=True, group_vol=None):
     play_item(device, item.reference, 'NORMAL')
     return device
 
-def audio_source(name, source, vol):
+def audio_source(name, source, vol=50):
     unjoin_all()
     device = get_spkr(name)
 
@@ -85,7 +88,7 @@ def audio_source(name, source, vol):
         device.play()
     
     device.mute = False
-    device.volume = 80
+    device.volume = vol
     return device
 
 def scrub(seconds=-15):
@@ -200,7 +203,7 @@ def get_playing_device(default_to_any=False):
             print("is paused", device.group.coordinator.player_name)
             return device.group.coordinator
     if default_to_any:
-        print("random preferred", device.group.coordinator.player_name)
+        print("random preferred")
         return devices.pop()
 
 def get_preferred_device():
