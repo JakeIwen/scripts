@@ -25,12 +25,15 @@ snh() {
   tail -f ./nohup.out
 }
 
-alias mdisk="touch $HOME/mconf/mdisk; nohup $HOME/scripts/internet_switches.sh &"
-alias mdiskx="rm $HOME/mconf/mdisk; nohup $HOME/scripts/internet_switches.sh &"
-alias mtor="touch $HOME/mconf/mtorrent; nohup $HOME/scripts/internet_switches.sh &"
-alias mtorx="rm $HOME/mconf/mtorrent; nohup $HOME/scripts/internet_switches.sh &"
-alias nodisk="touch $HOME/mconf/nodisk; nohup $HOME/scripts/internet_switches.sh &"
-alias nodiskx="rm $HOME/mconf/nodisk; nohup $HOME/scripts/internet_switches.sh &"
+isw="$HOME/scripts/internet_switches.sh"
+mconf="$HOME/mconf"
+
+alias mdisk="rm $mconf/nodisk; touch $mconf/mdisk; nohup $isw &"
+alias mdiskx="rm $mconf/mdisk; nohup $isw &"
+alias mtor="touch $mconf/mtorrent; nohup $isw &"
+alias mtorx="rm $mconf/mtorrent; nohup $isw &"
+alias nodisk="rm $mconf/mdisk; touch $mconf/nodisk; nohup $isw &"
+alias nodiskx="rm $mconf/nodisk; nohup $isw &"
 
 alias sns='bash ~/sns.sh'
 alias gpu_mem='vcgencmd get_mem gpu'

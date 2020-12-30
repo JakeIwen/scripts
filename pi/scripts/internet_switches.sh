@@ -48,16 +48,14 @@ unmount_drives() {
     sudo umount $loc
   done
   sleep 5
-  spindown_drives
+  for loc in $locations; do spindown_drive $loc; done
 }
 
-spindown_drives() {
-  all_names=`sudo fdisk -l | grep -o '/dev/sd[^ ]*'`
-  for loc in $all_names; do
-    name="${loc/\/dev\//}"
-    echo "spinning down $name"
-    sudo hd-idle -t "$name" # spin-down drive
-  done
+spindown_drive() {
+  loc=$1
+  name="${loc/\/dev\//}"
+  echo "spinning down $name"
+  sudo hd-idle -t "$name" # spin-down drive
 }
 
 stop_service() {
