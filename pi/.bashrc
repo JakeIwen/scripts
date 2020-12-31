@@ -50,9 +50,8 @@ alias alias_media='bash $HOME/scripts/alias_media.sh'
 
 alias cast="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; nohup python3 server.py &"
 
-alias rpiplay="/home/pi/RPiPlay/build/rpiplay"
-alias rhp='nohup /home/pi/RPiPlay/build/rpiplay -r 180 &'
 
+alias rpiplay='nohup /home/pi/RPiPlay/build/rpiplay -r 180 &'
 
 alias pd='sudo /sbin/shutdown -r now'
 alias rb='sudo reboot'
@@ -60,6 +59,12 @@ alias rb='sudo reboot'
 alias py="python3"
 alias pip3="python3 -m pip"
 
+rhp() {
+  if [[ `ps ax` == *"rpiplay"* ]]
+  then sudo pkill -f rpiplay
+  else rpiplay
+  fi
+}
 ### GIT ###
 alias gpo="git push origin"
 alias gckm="git checkout master"
@@ -186,7 +191,7 @@ shopt -s checkwinsize
 if [ -z "${debian_chroot:-}" ] && [ -r /etc/debian_chroot ]; then
     debian_chroot=$(cat /etc/debian_chroot)
 fi
-
+ 
 # set a fancy prompt (non-color, unless we know we "want" color)
 case "$TERM" in
     xterm-color|*-256color) color_prompt=yes;;
