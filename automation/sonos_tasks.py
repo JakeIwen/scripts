@@ -132,12 +132,11 @@ def play_item(device, item, play_mode='NORMAL'):
     device.play_mode = play_mode
 
 def add_time(position, diff_secs):
-    timeList = [ '0:00:00', '0:00:15', '9:30:56' ]
     totalSecs = diff_secs
     timeParts = [int(s) for s in position.split(':')]
     totalSecs += (timeParts[0] * 60 + timeParts[1]) * 60 + timeParts[2]
-    totalSecs, sec = divmod(totalSecs, 60)
-    hr, min = divmod(totalSecs, 60)
+    totalMin, sec = divmod(totalSecs, 60)
+    hr, min = divmod(totalMin, 60)
     new_timestamp = "%d:%02d:%02d" % (hr, min, sec)
     return "0:00:00" if new_timestamp.startswith("-") else new_timestamp
 
