@@ -36,6 +36,9 @@ sudo ./AdGuardHome -s install
 
 
 # mount a disk drive:
+# prevent udisks2 automount
+systemctl mask udisks2
+
 sudo blkid
 
 sudo mkdir /mnt/movingparts

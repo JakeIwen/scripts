@@ -36,7 +36,8 @@ start_torrent_client() {
 }
 
 mount_drives() {
-  sudo mount -a --options-source-force; echo "drives mounted"
+  /home/pi/scripts/mount_all.sh
+  echo "drives mounted"
   start_service smbd 
 }
 
