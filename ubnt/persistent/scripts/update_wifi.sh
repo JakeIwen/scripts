@@ -20,6 +20,10 @@ set_ap ()
 {
   cp "/etc/persistent/profiles/$1" /tmp/system.cfg
   /usr/etc/rc.d/rc.softrestart save
+  pkill -f crond
+  sleep 120
+  echo "AP set. Restarting cron at $(date)"
+  crond
 }
 
 find_ap ()
@@ -59,11 +63,7 @@ find_ap ()
       if [[ "$saved_ssid" = "$scan_ssid" ]]; then
         echo "MATCH: $j - setting AP"
         set_ap $scan_ssid
-        pkill -f crond
-        sleep 120
-        echo "AP set. Restarting cron at $(date)"
         echo " "
-        crond
         return 0
       fi
     done

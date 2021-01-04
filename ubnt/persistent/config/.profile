@@ -22,8 +22,21 @@ save_profile ()
 
 set_ap ()
 {
-  cp "/etc/persistent/profiles/$1" /tmp/system.cfg
+  cp "/etc/persistent/profiles/safehouse" /tmp/system.cfg
   /usr/etc/rc.d/rc.softrestart save
+  pkill -f crond
+  sleep 120
+  echo "AP set. Restarting cron at $(date)"
+}
+
+nh_set_ap() {
+  set_ap "$1" &> RESULT.txt
+}
+
+delete_ap ()
+{
+  rm "/etc/persistent/profiles/$1"
+  cfgmtd -w -p /etc/
 }
 
 reset () {
