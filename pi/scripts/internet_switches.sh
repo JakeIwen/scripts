@@ -76,7 +76,7 @@ kill_all() {
 if date | grep '00:0'; then date; fi
 
 if cat /home/pi/mconf/nodisk &> /dev/null; then kill_all
-elif ping -c 1 172.20.10.3 &> /dev/null; then mobile_internet_ops
+elif ping -c 1 172.20.10.1 &> /dev/null; then mobile_internet_ops
 elif ping -c 1 8.8.8.8 &> /dev/null;     then ubnt_internet_ops
 else no_internet_ops
 fi
