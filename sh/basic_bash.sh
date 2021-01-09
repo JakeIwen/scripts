@@ -63,7 +63,7 @@ mkcdir ()
 }
 
 rec_find_rpl_in_files() {
-  find . -type f | xargs sed -i '' "s/$1/$2/g"
+  find . -type f | xargs sed -i "s|$1|$2|g"
 }
 
 rec_rename() {
