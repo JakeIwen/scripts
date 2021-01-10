@@ -106,9 +106,10 @@ def remove_from_group(name):
 def partymode(vol=None):
     device = get_preferred_device()
     if len(device.group.members) < 4:
-        device.partymode()
-    if vol:
-        [set_vol(member, vol) for member in device.group]
+        device.partymode() 
+    vol = vol or device.volume
+    print(vol)
+    [set_vol(member, vol) for member in device.group]
     return device 
     
 def unjoin_all(devices=discover()):
