@@ -6,4 +6,3 @@ alias mount_usb='sudo mount -U "eea5b6a8-94a3-3fb8-99d8-3015bbafe289" -t hfsplus
 
 alias mount_all='mnt_hfs; mnt_sg; mnt_mp; mnt_usb'
 
--o force,rw

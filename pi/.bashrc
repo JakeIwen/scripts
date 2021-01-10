@@ -19,14 +19,16 @@ alias rbash='exec bash'
 
 alias dirsize='du -hsc *'
 alias disku='df -u'
+alias pkill='sudo pkill -f'
 
 snh() {
   nohup bash -c $1 &
   tail -f ./nohup.out
 }
 
-isw="$HOME/scripts/internet_switches.sh"
-mconf="$HOME/mconf"
+alias isw="$HOME/scripts/internet_switches.sh"
+alias iswl="tail -50 /var/log/cron/internet_switches.log; tail -f /var/log/cron/internet_switches.log"
+alias mconf="ls $HOME/mconf"
 
 alias mdisk="rm $mconf/nodisk; touch $mconf/mdisk; nohup $isw &"
 alias mdiskx="rm $mconf/mdisk; nohup $isw &"
@@ -35,6 +37,8 @@ alias mtorx="rm $mconf/mtorrent; nohup $isw &"
 alias nodisk="rm $mconf/mdisk; touch $mconf/nodisk; nohup $isw &"
 alias nodiskx="rm $mconf/nodisk; nohup $isw &"
 
+
+alias dsks='grep sd /proc/mounts'
 alias sns='bash ~/sns.sh'
 alias gpu_mem='vcgencmd get_mem gpu'
 
