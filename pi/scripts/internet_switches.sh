@@ -1,5 +1,6 @@
 #! /bin/bash
 ubnt_internet_ops() {
+  echo 'ubnt_internet_ops'
   mount_drives
   start_torrent_client
 }
@@ -9,6 +10,7 @@ conf() {
 }
 
 mobile_internet_ops() {
+  echo 'mobile_internet_ops'
   if conf mtorrent
   then ubnt_internet_ops
   else no_internet_ops
@@ -16,6 +18,7 @@ mobile_internet_ops() {
 }
 
 no_internet_ops() {
+  echo 'no_internet_ops'
   kill_torrent_client
   if conf mdisk
   then mount_drives
@@ -36,7 +39,6 @@ start_torrent_client() {
 }
 
 mount_drives() {
-  exit 0;
   /home/pi/scripts/mount_all.sh
   echo "drives mounted. sharting smb share."
   start_service smbd 
@@ -69,12 +71,13 @@ start_service() {
 }
 
 kill_all() {
+  echo 'killing all'
   kill_torrent_client
   unmount_drives
 }
 
 
-if date | grep '00:0'; then date; fi
+if date | grep '0:0'; then date; fi
 
 if conf nodisk &> /dev/null; then kill_all
 elif ping -c 1 172.20.10.1 &> /dev/null; then mobile_internet_ops
