@@ -3,7 +3,7 @@ dsc="/Users/jacobr/dev/scripts"
 scripts="$dsc/pi/scripts"
 vanrouter="$dsc/vanrouter"
 configs="$dsc/pi/configs"
-pi_ip='pi@192.168.6.103'
+pi_ip='pi@raspberrypi.local'
 vr_ip='root@192.168.6.1'
 # 
 mkdir "$scripts/python/" 

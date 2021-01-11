@@ -104,6 +104,10 @@ killport() {
   lsof -ti:"$1" | xargs kill
 }
 
+rec_find_rpl_in_files() { # rec_find_rpl_in_files find_pattern repl_pattern
+  find . -type f | xargs sed -i "s|$1|$2|g"
+}
+
 file_lines() { # file_lines './filename.txt' echo   
   fpath=$1
   command=$2
