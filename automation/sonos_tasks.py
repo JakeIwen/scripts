@@ -114,6 +114,8 @@ def partymode(vol=None):
     
 def unjoin_all(devices=discover()):
     for device in devices:
+        if device.group.coordinator.player_name == device.player_name:
+            device.stop()
         if is_group_member(device):
             print(device.player_name, "unjoining")
             device.unjoin()
@@ -187,8 +189,7 @@ def get_matching_faves(keyterm, device=None):
 def get_spkr(name):
     return by_name(name) or by_name(name + '2') 
 
-def get_playing_device(default_to_any=False):
-    devices = discover()
+def get_playing_device(default_to_front=False, devices=discover()):
     for device in devices:
         if is_group_member(device):
             print("returning coord", device.group.coordinator.player_name)
@@ -202,15 +203,29 @@ def get_playing_device(default_to_any=False):
         if device.t_state == 'PAUSED_PLAYBACK':
             print("is paused", device.group.coordinator.player_name)
             return device.group.coordinator
-    if default_to_any:
-        print("random preferred")
-        return devices.pop()
+    if default_to_front:
+        print("defaultin to vonFront")
+        return next((x for x in devices if x.player_name == 'vonFront'), None)
+    else:
+        return None
 
-def get_preferred_device():
-    return get_playing_device(True)
+def get_preferred_device(devices=discover()):
+    return get_playing_device(True, devices)
+    
+def all_devices():
+    return discover(5, True)
+    
+def num_devices():
+    return len(all_devices())
 
 def is_group_member(device):
     base_num = 2 if "vonRear" in device.player_name else 1
     return len(device.group.members) > base_num
 
 # import pdb; pdb.set_trace()
+
+# partymode()
+# print(get_spkr('vonRear').get_current_transport_info()['current_transport_state'])
+# print(get_spkr('vonMid').get_current_transport_info()['current_transport_state'])
+# print(get_spkr('vonFront').get_current_transport_info()['current_transport_state'])
+
