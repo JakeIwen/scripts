@@ -12,13 +12,13 @@ def pink_noise():
     start_noise('Pink Noise')
     
 def discover_weekly():
-    play_from_faves('Discover Weekly', True, 42)
+    play_from_faves('Discover Weekly')
 def random_album():
     play_from_faves(" - ")
 def random_radio():
     play_from_faves(" Radio")
 
-def rear_movie(vol=55):
+def rear_movie(vol=70):
     audio_source('vonRear', 'optical', vol)
 def rear_normal():
     make_stereo_pair("vonRear", "vonRear2")
@@ -69,7 +69,7 @@ def start_noise(keyterm):
     play_item(cooridnator, item, 'REPEAT_ONE')
     return cooridnator
 
-def play_from_faves(keyterm, group_all=True, group_vol=None):
+def play_from_faves(keyterm, group_all=True):
     device = partymode() if group_all else get_preferred_device()
     matches = get_matching_faves(keyterm, device)
     matches = [x for x in matches if 'Noise' not in x.title]
@@ -103,8 +103,7 @@ def add_to_group(name):
 def remove_from_group(name):
     get_spkr(name).unjoin()
 
-def partymode(vol=None):
-    device = get_preferred_device()
+def partymode(vol=None, device=get_preferred_device()):
     if len(device.group.members) < 4:
         device.partymode() 
     vol = vol or device.volume
@@ -120,6 +119,21 @@ def unjoin_all(devices=discover()):
             print(device.player_name, "unjoining")
             device.unjoin()
     return devices
+    
+def standby_grouped(devices=all_devices(), coord_name='vonFront'):
+    for device in devices:
+        if not device.is_visible:
+            continue
+        t_state = device.get_current_transport_info()['current_transport_state']
+        if t_state not in ['PAUSED_PLAYBACK', 'STOPPED']:
+            return print("in use, no action taken")
+
+    device = next((x for x in devices if x.player_name == coord_name), None)
+    if len(device.group.members) == len(devices):
+        return print("already grouped")
+
+    print("not in use, grouping")
+    return partymode(None, device)
 
 def test():
     cooridnator = partymode(9)
@@ -223,9 +237,4 @@ def is_group_member(device):
     return len(device.group.members) > base_num
 
 # import pdb; pdb.set_trace()
-
-# partymode()
-# print(get_spkr('vonRear').get_current_transport_info()['current_transport_state'])
-# print(get_spkr('vonMid').get_current_transport_info()['current_transport_state'])
-# print(get_spkr('vonFront').get_current_transport_info()['current_transport_state'])
 
