@@ -28,15 +28,14 @@ snh() {
 
 alias isw="$HOME/scripts/internet_switches.sh"
 alias iswl="tail -50 /var/log/cron/internet_switches.log; tail -f /var/log/cron/internet_switches.log"
-alias mconf="ls $HOME/mconf"
-
+mconf="$HOME/mconf"
+alias mconf="ls $mconf"
 alias mdisk="rm $mconf/nodisk; touch $mconf/mdisk; nohup $isw &"
 alias mdiskx="rm $mconf/mdisk; nohup $isw &"
 alias mtor="touch $mconf/mtorrent; nohup $isw &"
 alias mtorx="rm $mconf/mtorrent; nohup $isw &"
 alias nodisk="rm $mconf/mdisk; touch $mconf/nodisk; nohup $isw &"
 alias nodiskx="rm $mconf/nodisk; nohup $isw &"
-
 
 alias dsks='grep sd /proc/mounts'
 alias sns='bash ~/sns.sh'
@@ -83,7 +82,7 @@ gacp() {
 
 alias grep='grep --color=auto'
 alias egrep='egrep --color=auto'
-alias fgrep='fgrep --color=auto'
+alias fgrep="find . -name"
 alias psgrep='ps -aef | grep'
 alias agrep="alias | grep" # search aliases
 alias hist="history | sed 's/ [0-9]*  //g'"
