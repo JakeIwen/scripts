@@ -4,6 +4,14 @@ from soco.music_library import MusicLibrary
 from contextlib import suppress
 from time import sleep
 
+
+
+def filter_vis_devices():
+    return [x for x in all_devices if x.is_visible] 
+
+all_devices = discover(5, True)
+vis_devices = filter_vis_devices();
+
 #  abstractions
 
 def brown_noise():
@@ -57,11 +65,11 @@ def play(name=None):
     device.play()
     return device
 
-def pause(devices = discover()):
+def pause(devices=vis_devices):
     [device.pause() for device in devices]
     
 def stop():
-    [device.stop() for device in discover()]
+    [device.stop() for device in vis_devices]
 
 def start_noise(keyterm):
     cooridnator = partymode(9)
@@ -75,6 +83,8 @@ def play_from_faves(keyterm, group_all=True):
     matches = [x for x in matches if 'Noise' not in x.title]
     item = choice(matches) # choose random if multiple matches
     play_item(device, item.reference, 'NORMAL')
+    # import pdb; pdb.set_trace()
+    
     return device
 
 def audio_source(name, source, vol=50):
@@ -103,7 +113,8 @@ def add_to_group(name):
 def remove_from_group(name):
     get_spkr(name).unjoin()
 
-def partymode(vol=None, device=get_preferred_device()):
+def partymode(vol=None, device=None):
+    device = device or get_preferred_device()
     if len(device.group.members) < 4:
         device.partymode() 
     vol = vol or device.volume
@@ -111,7 +122,7 @@ def partymode(vol=None, device=get_preferred_device()):
     [set_vol(member, vol) for member in device.group]
     return device 
     
-def unjoin_all(devices=discover()):
+def unjoin_all(devices=vis_devices):
     for device in devices:
         if device.group.coordinator.player_name == device.player_name:
             device.stop()
@@ -120,7 +131,7 @@ def unjoin_all(devices=discover()):
             device.unjoin()
     return devices
     
-def standby_grouped(devices=all_devices(), coord_name='vonFront'):
+def standby_grouped(devices=all_devices, coord_name='vonFront'):
     for device in devices:
         if not device.is_visible:
             continue
@@ -166,7 +177,6 @@ def adjust(target, direction, inc):
         target.volume = orig + diff + 2
     elif direction == "down":
         target.volume = orig - diff - 2
-    
     target.mute = (direction == "mute")
 
 def set_vol(target, vol):
@@ -191,11 +201,11 @@ def make_stereo_pair(left_master_name, right_name):
         sleep(1)
         master = by_name(left_master_name)
     with suppress(Exception): master.create_stereo_pair(slave)
+    vis_devices = filter_vis_devices();
     return master
 
 def get_matching_faves(keyterm, device=None):
-    if device == None:
-        device = get_preferred_device()
+    device = device or get_preferred_device()
     ml = MusicLibrary(device)
     faves = ml.get_sonos_favorites()
     return [x for x in faves if keyterm in x.title]
@@ -203,7 +213,7 @@ def get_matching_faves(keyterm, device=None):
 def get_spkr(name):
     return by_name(name) or by_name(name + '2') 
 
-def get_playing_device(default_to_front=False, devices=discover()):
+def get_playing_device(default_to_front=False, devices=vis_devices):
     for device in devices:
         if is_group_member(device):
             print("returning coord", device.group.coordinator.player_name)
@@ -223,18 +233,16 @@ def get_playing_device(default_to_front=False, devices=discover()):
     else:
         return None
 
-def get_preferred_device(devices=discover()):
+def get_preferred_device(devices=vis_devices):
     return get_playing_device(True, devices)
     
-def all_devices():
-    return discover(5, True)
-    
 def num_devices():
-    return len(all_devices())
+    return len(all_devices)
 
 def is_group_member(device):
     base_num = 2 if "vonRear" in device.player_name else 1
     return len(device.group.members) > base_num
 
 # import pdb; pdb.set_trace()
-
+# random_album()
+# discover_weekly()
