@@ -37,7 +37,8 @@ alias mtorx="rm $mconf/mtorrent; nohup $isw &"
 alias nodisk="rm $mconf/mdisk; touch $mconf/nodisk; nohup $isw &"
 alias nodiskx="rm $mconf/nodisk; nohup $isw &"
 
-alias dsks='grep sd /proc/mounts'
+alias disks='grep sd /proc/mounts'
+alias mounts='grep sd /proc/mounts'
 alias sns='bash ~/sns.sh'
 alias gpu_mem='vcgencmd get_mem gpu'
 

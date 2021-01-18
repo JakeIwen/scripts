@@ -1,6 +1,7 @@
 #! /bin/bash
-sudo mount -U "a5204e11-ade6-3f5b-ac60-316848b2e72b" -t hfsplus -o force,rw /mnt/applehfs && echo "mounted hfs"
+sudo mount -U "fa2ffba1-8123-32ae-ac24-f5086119fbdd" -t hfsplus -o force,rw /mnt/mbbackup && echo "mounted hfsbackup"
 sudo mount -U "b3f3432a-57a0-4fb7-bb54-db528d15bca7" -t ext4 /mnt/seegayte && echo "mounted sg"
+sudo mount -U "313cb347-2278-42d0-8a2c-f1dde1e82725" -t ext4 /mnt/bigboi && echo "mounted bb"
 sudo mount -U "40c2277a-91f3-440f-a9cb-8417e9d64e03" -t ext4 /mnt/movingparts && echo "mounted mp"
 sudo mount -U "eea5b6a8-94a3-3fb8-99d8-3015bbafe289" -t hfsplus -o force,rw /mnt/usbhfs && echo "mounted usb"
 

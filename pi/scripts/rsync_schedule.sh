@@ -9,3 +9,4 @@ sudo rsync -avH --delete-during --delete-excluded --exclude-from=/rsync-exclude.
 
 [ ! $MP_MOUNTED ] && echo "MP not available/writable" && exit 0
 sudo rsync -avH --delete-during --delete-excluded /mnt/movingparts /mnt/seegayte/mp_backup/;
+sudo rsync -avH --delete-during --delete-excluded /mnt/movingparts /mnt/seegayte/mp_backup/;
