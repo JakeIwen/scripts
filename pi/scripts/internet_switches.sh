@@ -11,31 +11,21 @@ conf() {
 
 mobile_internet_ops() {
   echo 'mobile_internet_ops'
-  if conf mtorrent
-  then ubnt_internet_ops
-  else no_internet_ops
-  fi
+  if conf mtorrent; then ubnt_internet_ops; else no_internet_ops; fi
 }
 
 no_internet_ops() {
   echo 'no_internet_ops'
   kill_torrent_client
-  if conf mdisk
-  then mount_drives
-  else unmount_drives
-  fi
+  if conf mdisk; then mount_drives; else unmount_drives; fi
 }
 
 kill_torrent_client() {
-  if [[ "$(ps ax)" == *"qbittorrent"* ]] 
-  then echo 'killing torrent client'; pkill -TERM qbittorrent;
-  fi
+  if [[ "$(ps ax)" == *"qbittorrent"* ]]; then echo 'killtorrent' && pkill -TERM qbittorrent; fi
 }
 
 start_torrent_client() {
-  if [[ "$(ps ax)" != *"qbittorrent"* ]] 
-  then echo 'started qbittorrent'; nohup qbittorrent-nox &
-  fi
+  if [[ "$(ps ax)" != *"qbittorrent"* ]]; then nohup qbittorrent-nox; fi
 }
 
 mount_drives() {
