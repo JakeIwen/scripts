@@ -15,7 +15,7 @@ alias dirsize='du -hsc *'
 alias disku='df -u'
 
 alias egrep='egrep --color=auto'
-alias fgrep='fgrep --color=auto'
+alias fgrep="find . \( -type d -o -type f \) -iname"
 alias grep='grep --color=auto'
 alias hgrep='history | grep'
 
@@ -38,6 +38,9 @@ rgrep() {
   grep -rni "$1" . # recursively search cwd
 }
 
+piface() {
+  ping -I "$1" 8.8.8.8
+}
 
 mkcdir ()
 {

@@ -125,26 +125,30 @@ def partymode(vol=None, device=None):
 def unjoin_all(devices=vis_devices):
     for device in devices:
         if device.group.coordinator.player_name == device.player_name:
-            device.stop()
+            with suppress(Exception): device.stop()
         if is_group_member(device):
             print(device.player_name, "unjoining")
             device.unjoin()
     return devices
     
 def standby_grouped(devices=all_devices, coord_name='vonFront'):
-    for device in devices:
-        if not device.is_visible:
-            continue
-        t_state = device.get_current_transport_info()['current_transport_state']
-        if t_state not in ['PAUSED_PLAYBACK', 'STOPPED']:
-            return print("in use, no action taken")
-
-    device = next((x for x in devices if x.player_name == coord_name), None)
-    if len(device.group.members) == len(devices):
-        return print("already grouped")
-
-    print("not in use, grouping")
-    return partymode(None, device)
+    # broken, kills vlc Rear_movie audio
+    return True
+    # for device in devices:
+    #     if not device.is_visible:
+    #         continue
+    #     t_state = device.get_current_transport_info()['current_transport_state']
+    #     print("tstate:")
+    #     print(t_state)
+    #     if t_state not in ['PAUSED_PLAYBACK', 'STOPPED']:
+    #         return print("in use, no action taken")
+    # 
+    # device = next((x for x in devices if x.player_name == coord_name), None)
+    # if len(device.group.members) == len(devices):
+    #     return print("already grouped")
+    # 
+    # print("not in use, grouping")
+    # return partymode(None, device)
 
 def test():
     cooridnator = partymode(9)
@@ -242,7 +246,7 @@ def num_devices():
 def is_group_member(device):
     base_num = 2 if "vonRear" in device.player_name else 1
     return len(device.group.members) > base_num
-
+unjoin_all()
 # import pdb; pdb.set_trace()
 # random_album()
 # discover_weekly()

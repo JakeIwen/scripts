@@ -2,6 +2,7 @@
 shopt -s expand_aliases
 alias nhlog='tail -f nohup.out'
 alias l='ls -lah'  ##custom list directory
+alias lla='ls -ltu'
 alias ..="cd .."
 alias ...="cd ../.."
 alias ....="cd ../../.."
@@ -20,6 +21,9 @@ alias rbash='exec bash'
 alias dirsize='du -hsc *'
 alias disku='df -u'
 alias pkill='sudo pkill -f'
+s() {
+  . $HOME/scripts/$1.sh
+}
 
 snh() {
   nohup bash -c $1 &
@@ -29,6 +33,7 @@ snh() {
 alias isw="$HOME/scripts/internet_switches.sh"
 alias iswl="tail -50 /var/log/cron/internet_switches.log; tail -f /var/log/cron/internet_switches.log"
 mconf="$HOME/mconf"
+
 alias mconf="ls $mconf"
 alias mdisk="rm $mconf/nodisk; touch $mconf/mdisk; nohup $isw &"
 alias mdiskx="rm $mconf/mdisk; nohup $isw &"
@@ -37,8 +42,14 @@ alias mtorx="rm $mconf/mtorrent; nohup $isw &"
 alias nodisk="rm $mconf/mdisk; touch $mconf/nodisk; nohup $isw &"
 alias nodiskx="rm $mconf/nodisk; nohup $isw &"
 
-alias disks='grep sd /proc/mounts'
-alias mounts='grep sd /proc/mounts'
+# lsof | grep /mnt/mbbackup
+# fuser -mv /mnt/mbbackup
+
+alias disks='grep "dev/sd" /proc/mounts'
+alias mounts='grep "dev/sd" /proc/mounts'
+alias blk="sudo blkid | grep 'dev/sd'"
+alias remount="s umount_all; s mount_all; mounts"
+
 alias sns='bash ~/sns.sh'
 alias gpu_mem='vcgencmd get_mem gpu'
 
@@ -69,6 +80,7 @@ rhp() {
   else rpiplay
   fi
 }
+
 ### GIT ###
 alias gpo="git push origin"
 alias gckm="git checkout master"
@@ -83,7 +95,7 @@ gacp() {
 
 alias grep='grep --color=auto'
 alias egrep='egrep --color=auto'
-alias fgrep="find . -name"
+alias fgrep="find . \( -type d -o -type f \) -iname"
 alias psgrep='ps -aef | grep'
 alias agrep="alias | grep" # search aliases
 alias hist="history | sed 's/ [0-9]*  //g'"

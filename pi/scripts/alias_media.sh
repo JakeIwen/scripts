@@ -11,7 +11,7 @@ media_group_links() {
     [ -e "$pth" ] || continue
     title=`basename "$pth" | perl -pe "s~$pattern~~g" | perl -pe "s/(-| |,)/./g" | perl -pe "s|\.+|.|g" | perl -pe "s/(.|-)$//g"`
     link_folder=`echo "$folder" | sed "s|\/torrent\/|\/links\/|g"`
-    link="$link_folder/$title"
+    link="$link_folder/$title.$ext"
 
     [ -d "$link_folder" ] || mkdir "$link_folder"
     ln -s "$pth" "$link"
@@ -27,8 +27,8 @@ alias_folder() {
 }
 
 prep_dir() {
-  links='/mnt/movingparts/links'
-  rm -rf "$links"
+  links='/mnt/bigboi/movingparts/links'
+  rm -rf "$links" || True
   mkdir "$links"
   mkdir "$links/TV"
   mkdir "$links/Documentaries"
@@ -37,10 +37,10 @@ prep_dir() {
 
 prep_dir
 
-find '/mnt/movingparts/torrent/TV' -maxdepth 1 -mindepth 1  -type d \
+find '/mnt/bigboi/movingparts/torrent/TV' -maxdepth 1 -mindepth 1  -type d \
   | while read pth; do alias_folder "$pth" '\d\d\d\d|'; done
-find '/mnt/movingparts/torrent/Documentaries' -maxdepth 1 -mindepth 1  -type d \
+find '/mnt/bigboi/movingparts/torrent/Documentaries' -maxdepth 1 -mindepth 1  -type d \
   | while read pth; do alias_folder "$pth"; done
-alias_folder '/mnt/movingparts/torrent/Movies'
+alias_folder '/mnt/bigboi/movingparts/torrent/Movies'
 # mnt/movingparts
 # find . -type l -exec cp --parents {} ../links \;
