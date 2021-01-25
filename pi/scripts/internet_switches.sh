@@ -30,6 +30,7 @@ start_torrent_client() {
 
 mount_drives() {
   /home/pi/scripts/mount_all.sh
+  /home/pi/scripts/fix_hfs_fs.sh
   echo "drives mounted. sharting smb share."
   start_service smbd 
 }

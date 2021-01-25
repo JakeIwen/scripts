@@ -1,10 +1,10 @@
 proc            /proc           proc    defaults          0       0
 /dev/mmcblk0p6  /boot           vfat    defaults          0       2
 /dev/mmcblk0p7  /               ext4    defaults,noatime  0       1
-UUID=b3f3432a-57a0-4fb7-bb54-db528d15bca7 /mnt/seegayte ext4 defaults,nofail,x-systemd.device-timeout=1 0 0
-UUID=40c2277a-91f3-440f-a9cb-8417e9d64e03 /mnt/movingparts ext4 defaults,nofail,x-systemd.device-timeout=1 0 0
-UUID=eea5b6a8-94a3-3fb8-99d8-3015bbafe289 /mnt/usbhfs hfsplus defaults,nofail,force,rw
-UUID=a5204e11-ade6-3f5b-ac60-316848b2e72b /mnt/applehfs hfsplus defaults,nofail,x-systemd.device-timeout=1 0 0
+# UUID=b3f3432a-57a0-4fb7-bb54-db528d15bca7 /mnt/seegayte ext4 defaults,nofail,x-systemd.device-timeout=1 0 0
+# UUID=40c2277a-91f3-440f-a9cb-8417e9d64e03 /mnt/movingparts ext4 defaults,nofail,x-systemd.device-timeout=1 0 0
+# UUID=eea5b6a8-94a3-3fb8-99d8-3015bbafe289 /mnt/usbhfs hfsplus defaults,nofail,force,rw
+# UUID=8790cc1e-e5ca-372e-b846-8cedd282e9bf /mnt/mbbackup hfsplus defaults,nofail,force,rw
 # /dev/sdc2 /mnt/movingparts ext4 defaults,nofail,x-systemd.device-timeout=1 0 0
 # /dev/sdb1 /mnt/seegayte ext4 defaults,nofail,x-systemd.device-timeout=1 0 0
 # a swapfile is not a swap partition, no line here
