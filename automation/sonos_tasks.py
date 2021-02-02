@@ -246,7 +246,7 @@ def num_devices():
 def is_group_member(device):
     base_num = 2 if "vonRear" in device.player_name else 1
     return len(device.group.members) > base_num
-unjoin_all()
+# unjoin_all()
 # import pdb; pdb.set_trace()
 # random_album()
 # discover_weekly()
