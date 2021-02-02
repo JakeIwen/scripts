@@ -2,7 +2,7 @@
 ubnt_internet_ops() {
   echo 'ubnt_internet_ops'
   mount_drives
-  start_torrent_client
+  if conf notorrent; then exit 0; else start_torrent_client; fi
 }
 
 conf() {

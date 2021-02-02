@@ -20,7 +20,7 @@ alias rbash='exec bash'
 
 alias dirsize='du -hsc *'
 alias disku='df -u'
-alias pkill='sudo pkill -f'
+alias pk='sudo pkill -f'
 s() {
   . $HOME/scripts/$1.sh
 }
@@ -37,6 +37,8 @@ mconf="$HOME/mconf"
 alias mconf="ls $mconf"
 alias mdisk="rm $mconf/nodisk; touch $mconf/mdisk; nohup $isw &"
 alias mdiskx="rm $mconf/mdisk; nohup $isw &"
+alias notor="rm $mconf/mtorrent; touch $mconf/notorrent; nohup $isw &"
+alias notorx="rm $mconf/notorrent; nohup $isw &"
 alias mtor="touch $mconf/mtorrent; nohup $isw &"
 alias mtorx="rm $mconf/mtorrent; nohup $isw &"
 alias nodisk="rm $mconf/mdisk; touch $mconf/nodisk; nohup $isw &"
@@ -48,18 +50,34 @@ alias nodiskx="rm $mconf/nodisk; nohup $isw &"
 alias disks='grep "dev/sd" /proc/mounts'
 alias mounts='grep "dev/sd" /proc/mounts'
 alias blk="sudo blkid | grep 'dev/sd'"
-alias remount="s umount_all; s mount_all; mounts"
+
+remount() {
+  pk qbit
+  /usr/sbin/service smbd stop
+  s umount_all
+  s mount_all
+  s fix_hfs_fs
+  /usr/sbin/service smbd start
+  
+  mounts
+}
 
 alias sns='bash ~/sns.sh'
 alias gpu_mem='vcgencmd get_mem gpu'
 
 # MEDIA
-alias movies='cd /mnt/movingparts/torrent/Movies; ls -lh;'
-alias tv='cd /mnt/movingparts/torrent/TV; ls -lh;'
-alias docu='cd /mnt/movingparts/torrent/Documentaries; ls -lh;'
+alias movies='cd /mnt/movingparts/links/Movies && ls | sed "s|\.| |g" | sed "s| ...$||g"'
+alias docu='cd /mnt/movingparts/links/Documentaries && ls | sed "s|\.| |g" | sed "s| ...$||g"'
+tv(){
+  [[ "$#" = "2" ]] && cd `find . -maxdepth 1 -name "'*$1*"`
+  ls | sed "s|\.| |g" | sed "s| ...$||g"
+  
+}
+
 alias torrent='cd /mnt/movingparts/torrent; ls -lh;'
+alias links='cd /mnt/movingparts/links; ls -lh;'
 alias mp='cd /mnt/movingparts/'
-alias sg='cd /mnt/seegayte/'
+alias sg=mp
 
 alias alias_media='bash $HOME/scripts/alias_media.sh'
 
@@ -106,11 +124,15 @@ rgrep() {
   grep -rni "$1" . # recursively search pwd
 }
 
+alias vrc="cat $HOME/vlc-recent.txt | grep -i"
+
 hcp() {
   val=$(hist | grep $1 | tail -1)
   echo $val | pbcopy
   echo "copied: $val"
 }
+
+
 
 killport() {
   lsof -ti:"$1" | xargs kill
@@ -138,11 +160,25 @@ sns_list() {
 }
 
 play() {
-  filename=`ls | grep $1`
-  echo "Opening: $filename"
-  sh ~/sns.sh rear_movie
+  filenames=`ls | awk "/$1/{y=1}y"`
+  echo "Opening: $filenames"
+  sudo pkill -f "vlc"
+  bash ~/sns.sh rear_movie
   xset s reset # wake display
-  nohup vlc -f $filename &
+  nohup vlc -f $filenames &
+}
+
+vlcmd() {
+  cmd=$1
+  param=$2
+  # xset s reset # wake display
+  dbus-send --type=method_call --dest=org.mpris.MediaPlayer2.vlc /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.$cmd $param
+}
+
+alias pp="vlcmd PlayPause"
+
+vlcr() {
+  grep -i "$1" "$HOME/vlc-recent.txt"
 }
   
 add_python3_path() {
@@ -177,5 +213,5 @@ export DISPLAY=:0
 export HISTSIZE=10000
 export HISTFILESIZE=100000
 export PATH="$PATH:/home/pi/.local/bin"
-if [ -f ~/.mount_aliases ]; then . ~/.mount_aliases; fi
+# if [ -f ~/.mount_aliases ]; then . ~/.mount_aliases; fi
 if [ -f ~/.bash_defaults ]; then . ~/.bash_defaults; fi
