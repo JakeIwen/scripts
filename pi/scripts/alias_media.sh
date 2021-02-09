@@ -28,7 +28,7 @@ alias_folder() {
 }
 
 prep_dir() {
-  links='/mnt/movingparts/links'
+  links='/mnt/bigboi/mp_backup/links'
   rm -rf "$links" || True
   mkdir "$links"
   mkdir "$links/TV"
@@ -38,10 +38,10 @@ prep_dir() {
 
 prep_dir
 
-find '/mnt/movingparts/torrent/TV' -maxdepth 1 -mindepth 1  -type d \
+find '/mnt/bigboi/mp_backup/torrent/TV' -maxdepth 1 -mindepth 1  -type d \
   | while read pth; do alias_folder "$pth" '\d\d\d\d|'; done
-find '/mnt/movingparts/torrent/Documentaries' -maxdepth 1 -mindepth 1  -type d \
+find '/mnt/bigboi/mp_backup/torrent/Documentaries' -maxdepth 1 -mindepth 1  -type d \
   | while read pth; do alias_folder "$pth"; done
-alias_folder '/mnt/movingparts/torrent/Movies'
+alias_folder '/mnt/bigboi/mp_backup/torrent/Movies'
 # mnt/movingparts
 # find . -type l -exec cp --parents {} ../links \;
