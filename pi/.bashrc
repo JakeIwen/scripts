@@ -14,6 +14,7 @@ alias ct="sudo crontab -e"
 alias cronlog="cd /var/log/cron"
 alias rsynclog='cat /var/log/cron/rsync.log'
 alias killcron="sudo pkill -f cron"
+alias tfn='tail -f nohup.out'
 
 alias bashp='vi ~/.bashrc'
 alias rbash='exec bash'
@@ -66,18 +67,18 @@ alias sns='bash ~/sns.sh'
 alias gpu_mem='vcgencmd get_mem gpu'
 
 # MEDIA
-alias movies='cd /mnt/movingparts/links/Movies && ls | sed "s|\.| |g" | sed "s| ...$||g"'
-alias docu='cd /mnt/movingparts/links/Documentaries && ls | sed "s|\.| |g" | sed "s| ...$||g"'
+alias movies='cd /mnt/bigboi/mp_backup/links/Movies && ls | sed "s|\.| |g" | sed "s| ...$||g"'
+alias docu='cd /mnt/bigboi/mp_backup/links/Documentaries && ls | sed "s|\.| |g" | sed "s| ...$||g"'
 tv(){
-  [[ "$#" = "2" ]] && cd `find . -maxdepth 1 -name "'*$1*"`
+  cd /mnt/bigboi/mp_backup/links/TV;
+  [[ "$#" = "1" ]] && cd "`find . -maxdepth 1 -name "*$1*"`"
   ls | sed "s|\.| |g" | sed "s| ...$||g"
   
 }
 
-alias torrent='cd /mnt/movingparts/torrent; ls -lh;'
-alias links='cd /mnt/movingparts/links; ls -lh;'
+alias torrent='cd /mnt/bigboi/mp_backup/torrent; ls -lh;'
+alias links='cd /mnt/bigboi/mp_backup/links; ls -lh;'
 alias mp='cd /mnt/movingparts/'
-alias sg=mp
 
 alias alias_media='bash $HOME/scripts/alias_media.sh'
 
@@ -118,7 +119,7 @@ alias psgrep='ps -aef | grep'
 alias agrep="alias | grep" # search aliases
 alias hist="history | sed 's/ [0-9]*  //g'"
 hgrep() {
-   hist | grep "$1" | grep -v 'hgrep' | uniq -u
+  hist | grep "$1" | grep -v 'hgrep' | uniq -u
 }
 rgrep() {
   grep -rni "$1" . # recursively search pwd
@@ -205,6 +206,9 @@ nalias() {
     echo "appending to rc: $new_line" 
     echo "$new_line" >> ~/.bashrc
   fi
+  # echo 'sending to MacBook'
+  # scp  "$dsc/pi/.bashrc" "$HOME/.bashrc"
+  
   echo 'reloading shell'
   exec bash
 }

@@ -31,7 +31,6 @@ gacp() {
   git add . && git commit -m "$1" && git push
 }
 
-
 # alias alias="alias; cat /root/.profile | grep -E '^[[:space:]]*([[:alnum:]_]+[[:space:]]*\(\)|function[[:space:]]+[[:alnum:]_]+)'"
 
 rgrep() {
@@ -42,10 +41,9 @@ piface() {
   ping -I "$1" 8.8.8.8
 }
 
-mkcdir ()
-{
-    mkdir -p -- "$1" &&
-      cd -P -- "$1"
+mkcdir() {
+  mkdir -p -- "$1" &&
+    cd -P -- "$1"
 }
 
 rec_find_rpl_in_files() {
