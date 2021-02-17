@@ -1,6 +1,5 @@
 #! /bin/bash
 shopt -s expand_aliases
-alias nhlog='tail -f nohup.out'
 alias l='ls -lah'  ##custom list directory
 alias lla='ls -ltu'
 alias ..="cd .."
@@ -9,19 +8,21 @@ alias ....="cd ../../.."
 alias .....="cd ../../../.."
 
 alias vi='/usr/bin/vim.tiny'
+alias rsynclog='cat /var/log/cron/rsync.log'
 alias rscr="sudo systemctl restart cron.service"
 alias ct="sudo crontab -e"
+
 alias cronlog="cd /var/log/cron"
-alias rsynclog='cat /var/log/cron/rsync.log'
 alias killcron="sudo pkill -f cron"
-alias tfn='tail -f nohup.out'
+alias tf='tail -f'
+alias dirsize='du -hsc *'
+alias disku='df -u'
+alias pk='sudo pkill -f'
 
 alias bashp='vi ~/.bashrc'
 alias rbash='exec bash'
 
-alias dirsize='du -hsc *'
-alias disku='df -u'
-alias pk='sudo pkill -f'
+
 s() {
   . $HOME/scripts/$1.sh
 }
@@ -48,6 +49,7 @@ alias nodiskx="rm $mconf/nodisk; nohup $isw &"
 # lsof | grep /mnt/mbbackup
 # fuser -mv /mnt/mbbackup
 
+alias inuse='sudo lsof | grep'
 alias disks='grep "dev/sd" /proc/mounts'
 alias mounts='grep "dev/sd" /proc/mounts'
 alias blk="sudo blkid | grep 'dev/sd'"
@@ -73,12 +75,13 @@ tv(){
   cd /mnt/bigboi/mp_backup/links/TV;
   [[ "$#" = "1" ]] && cd "`find . -maxdepth 1 -name "*$1*"`"
   ls | sed "s|\.| |g" | sed "s| ...$||g"
-  
 }
 
 alias torrent='cd /mnt/bigboi/mp_backup/torrent; ls -lh;'
 alias links='cd /mnt/bigboi/mp_backup/links; ls -lh;'
 alias mp='cd /mnt/movingparts/'
+alias bb='cd /mnt/bigboi/'
+alias mnt='cd /mnt'
 
 alias alias_media='bash $HOME/scripts/alias_media.sh'
 
