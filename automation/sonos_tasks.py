@@ -50,8 +50,12 @@ def fwd_15():
     scrub(15)
 def fwd_30():
     scrub(30)
+    
 
 # utilities
+def vol_50_all():
+    [equal_vol(member, 50, True) for member in get_preferred_device().group]
+    
 def adjust_volume(speaker, direction, inc=8):
     if speaker == 'all': 
         [adjust(group, direction, inc) for group in any_soco().all_groups]
@@ -119,7 +123,7 @@ def partymode(vol=None, device=None):
         device.partymode() 
     vol = vol or device.volume
     print(vol)
-    [set_vol(member, vol) for member in device.group]
+    [equal_vol(member, vol, False) for member in device.group]
     return device 
     
 def unjoin_all(devices=vis_devices):
@@ -175,16 +179,18 @@ def add_time(position, diff_secs):
 def adjust(target, direction, inc):
     orig = target.volume
     diff = int(inc)
+    if (direction == "mute"):
+        target.mute = not target.mute
     if orig < 15:
         diff = diff/2
     if direction == "up":
         target.volume = orig + diff + 2
     elif direction == "down":
         target.volume = orig - diff - 2
-    target.mute = (direction == "mute")
 
-def set_vol(target, vol):
-    target.mute = False
+def equal_vol(target, vol, preserve_mute):
+    if not preserve_mute:
+        target.mute = False
     target.volume = int(vol)
     
 def source_optical(device):
