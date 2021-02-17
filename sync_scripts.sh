@@ -17,6 +17,7 @@ scp  "$dsc/sh/sns.sh" "$pi_ip:/home/pi/sns.sh"
 scp  "$configs/smb.conf" "$pi_ip:/etc/samba/smb.conf"
 scp  "$configs/.bash_defaults" "$pi_ip:/home/pi/.bash_defaults"
 scp  "$configs/.mount_aliases" "$pi_ip:/home/pi/.mount_aliases"
+scp  "$configs/rsync-exclude.txt" "$pi_ip:/rsync-exclude.txt"
 # scp "$scripts/mount_all.sh" "$pi_ip:/home/pi/scripts/mount_all.sh"
 
 # scp "$dsc/pi/configs/pcmanfm.conf" "$pi_ip:/home/pi/.config/pcmanfm/LXDE/pcmanfm.conf"
