@@ -14,7 +14,7 @@ alias ct="sudo crontab -e"
 
 alias cronlog="cd /var/log/cron"
 alias killcron="sudo pkill -f cron"
-alias dirsize='du -hsc *'
+alias dirsize='sudo du -hsc *'
 alias disku='df -u'
 alias pk='sudo pkill -f'
 
@@ -22,8 +22,7 @@ alias bashp='vi ~/.bashrc'
 alias rbash='exec bash'
 
 tf() {
-  tail -50 $1
-  tail -f $1
+  tail -50 $1; tail -f $1
 }
 s() {
   . $HOME/scripts/$1.sh
