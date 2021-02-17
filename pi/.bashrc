@@ -14,7 +14,6 @@ alias ct="sudo crontab -e"
 
 alias cronlog="cd /var/log/cron"
 alias killcron="sudo pkill -f cron"
-alias tf='tail -f'
 alias dirsize='du -hsc *'
 alias disku='df -u'
 alias pk='sudo pkill -f'
@@ -22,7 +21,10 @@ alias pk='sudo pkill -f'
 alias bashp='vi ~/.bashrc'
 alias rbash='exec bash'
 
-
+tf() {
+  tail -50 $1
+  tail -f $1
+}
 s() {
   . $HOME/scripts/$1.sh
 }
@@ -33,7 +35,7 @@ snh() {
 }
 
 alias isw="$HOME/scripts/internet_switches.sh"
-alias iswl="tail -50 /var/log/cron/internet_switches.log; tail -f /var/log/cron/internet_switches.log"
+alias iswl="tf /var/log/cron/internet_switches.log"
 mconf="$HOME/mconf"
 
 alias mconf="ls $mconf"
