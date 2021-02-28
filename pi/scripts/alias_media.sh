@@ -4,7 +4,7 @@ media_group_links() {
   ext="$1"
   regex="$2"
   folder="$3"
-  keys="${regex}Will1869|10\.?Bit|DTS|DL|NTb|ION10|MeGusta|METCON|strife|SDC|hdtv|CiNEFiLE|PRoDJi|EVO|POIASD|WiKi|HMAX|IMAX|MA|VhsRip|x0r|iNTERNAL|True-HD|(1080|720)(p|i)|Xvi|HD|AC3|AAC|REPACK|REMUX|PRiCK|AVC|d3g|Atmos|EPSiLON|HC|AMZN|HEVC|Blu(R|r)ay|(BR|WEB|web)(Rip)?|NF|DDP?\+?|(x|X|H|h)\.?26[4-5]"
+  keys="${regex}'|Will1869|10\.?Bit|DTS|DL|NTb|ION10|MeGusta|METCON|strife|SDC|hdtv|CiNEFiLE|PRoDJi|EVO|POIASD|WiKi|HMAX|IMAX|MA|VhsRip|x0r|iNTERNAL|True-HD|(1080|720)(p|i)|Xvi|HD|AC3|AAC|REPACK|REMUX|PRiCK|AVC|d3g|Atmos|EPSiLON|HC|AMZN|HEVC|Blu(R|r)ay|(BR|WEB|web)(Rip)?|NF|DDP?\+?|(x|X|H|h)\.?26[4-5]"
   pattern="(\.|-)($keys)(.?(5.1)|(2.0))?-?\w*-?(?=(\.|-))|\[.*\]|$ext$"
   find "$folder" -not -path '*/\.*' -not -ipath '*sample*' -type f -iname "*.$ext" | while read pth
   do
@@ -12,9 +12,9 @@ media_group_links() {
     (( `stat -c%s "$pth"` > 70000000 )) || continue # size > 70MB
     
     title=`basename "$pth" | perl -pe "s/(-| |,)/./g" | perl -pe "s~$pattern~~g" | perl -pe "s|\.+|.|g" | perl -pe "s/(\.|-)$//g"`
-    link_folder=`echo "$folder" | sed "s|\/torrent\/|\/links\/|g"`
+    link_folder=`echo "$folder" | sed "s|\/torrent\/|\/links\/|g" | sed "s| |\.|g"`
     link="$link_folder/$title.$ext"
-
+    
     [ -d "$link_folder" ] || mkdir "$link_folder"
     ln -s "$pth" "$link"
   done
@@ -28,7 +28,7 @@ alias_folder() {
 }
 
 prep_dir() {
-  links='/mnt/bigboi/mp_backup/links'
+  links="$SRC/links"
   rm -rf "$links" || True
   mkdir "$links"
   mkdir "$links/TV"
@@ -36,12 +36,19 @@ prep_dir() {
   mkdir "$links/Movies"
 }
 
-prep_dir
+alias_folders() {
+  find "$SRC/torrent/TV" -maxdepth 1 -mindepth 1  -type d \
+    | while read pth; do alias_folder "$pth" '\d\d\d\d|'; done
+  find "$SRC/torrent/Documentaries" -maxdepth 1 -mindepth 1  -type d \
+    | while read pth; do alias_folder "$pth"; done
+  alias_folder "$SRC/torrent/Movies"
+}
 
-find '/mnt/bigboi/mp_backup/torrent/TV' -maxdepth 1 -mindepth 1  -type d \
-  | while read pth; do alias_folder "$pth" '\d\d\d\d|'; done
-find '/mnt/bigboi/mp_backup/torrent/Documentaries' -maxdepth 1 -mindepth 1  -type d \
-  | while read pth; do alias_folder "$pth"; done
-alias_folder '/mnt/bigboi/mp_backup/torrent/Movies'
+# SRC="/mnt/bigboi/mp_backup"
+# prep_dir && alias_folders
+SRC="/mnt/movingparts"
+prep_dir && alias_folders
+
+
 # mnt/movingparts
 # find . -type l -exec cp --parents {} ../links \;

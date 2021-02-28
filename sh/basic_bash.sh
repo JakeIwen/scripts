@@ -30,6 +30,17 @@ gacp() {
   git add . && git commit -m "$1" && git push
 }
 
+tf() {
+  tail -50 $1; tail -f $1
+}
+snh() {
+  nohup bash -c $1 &
+  tail -f ./nohup.out
+}
+alias functions="cat ~/.bashrc | grep -E '^[[:space:]]*([[:alnum:]_]+[[:space:]]*\(\)|function[[:space:]]+[[:alnum:]_]+)'"
+fndef() { # print function definition
+  sed -n -e "/$1()/,/}/ p" ~/.bashrc
+}
 
 # alias alias="alias; cat ~/.bashrc | grep -E '^[[:space:]]*([[:alnum:]_]+[[:space:]]*\(\)|function[[:space:]]+[[:alnum:]_]+)'"
 

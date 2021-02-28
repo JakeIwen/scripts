@@ -10,7 +10,7 @@ def filter_vis_devices():
     return [x for x in all_devices if x.is_visible] 
 
 all_devices = discover(5, True)
-vis_devices = filter_vis_devices();
+vis_devices = filter_vis_devices()
 
 #  abstractions
 
@@ -18,7 +18,7 @@ def brown_noise():
     start_noise('Brown Noise')
 def pink_noise():
     start_noise('Pink Noise')
-    
+
 def discover_weekly():
     play_from_faves('Discover Weekly')
 def random_album():
@@ -26,7 +26,7 @@ def random_album():
 def random_radio():
     play_from_faves(" Radio")
 
-def rear_movie(vol=70):
+def rear_movie(vol=40):
     audio_source('vonRear', 'optical', vol)
 def rear_normal():
     make_stereo_pair("vonRear", "vonRear2")
