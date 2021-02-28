@@ -83,13 +83,13 @@ alias gpu_mem='vcgencmd get_mem gpu'
 play() {
   dir=`dirname "$1"`
   filename=`basename "$1"`
-  echo "directory: $dir"
-  echo "file: $filename"
   cd "$dir"
   filenames=`ls | awk "/$filename/{y=1}y"` # everything after & including match
-  if [[ "$2" == "-r" ]]; then filenames=`ls | shuf`; fi
+  if [[ "$2" == "-r" ]]; then filenames=`ls -I 'nohup.out' | shuf`; fi
+  echo "filenames: $filenames"
+  
+  ! [ "$filenames" ] && echo "NO MATCH!" && return 0
   sudo pkill -f omxplayer
-  echo "Opening: $filenames"
   sudo pkill -f "vlc"
   bash ~/sns.sh rear_movie
   xset s reset # wake display
@@ -97,13 +97,23 @@ play() {
 }
 
 playf() {
-  name=$1
+  name=`echo $1 | perl -pe 's/( |_)/./g'`
   ep=$2 # episode number eg 304 (parsed from S03E04)
+  num_re='^[0-9]+$'
   readarray -d '' match_arr < <(find /mnt/movingparts/links -type l -iname "*$name*" -print0)
+  [[ ${#match_arr[@]} -eq 1 ]] && play "${match_arr[0]}" && return 0
+  if [[ ! "$2" && ${#match_arr[@]} -gt 1 ]]; then 
+    ls `dirname "${match_arr[0]}"`
+    echo "^^^ Available matches ^^^"
+    return 0;
+  fi
   if [[ "$2" == "-r" ]]; then play ${match_arr[0]} -r && return 0; fi
   for line in "${match_arr[@]}"; do 
-    num=`echo $line | sed -e 's|[^0-9]*||g'`
-    if [[ "$num" == *"$ep"* ]]; then
+    matcher=$line
+    if [[ $ep =~ $num_re ]] ; then
+      matcher=`echo $matcher | sed -e 's|[^0-9]*||g'` # parsed numbers
+    fi
+    if [[ "${matcher,,}" == *"${ep,,}"* ]]; then # lowercased 
       echo "playing $line"
       play "$line"
       return 0
@@ -124,26 +134,30 @@ vlcmd() {
 
 alias pp="vlcmd PlayPause"
 
-alias vrc="cat $HOME/vlc-recent.txt | grep -i"
 vlcr() {
   grep -i "$1" "$HOME/vlc-recent.txt"
 }
+
+playing() {
+  list=(`grep 'list=' $HOME/.config/vlc/vlc-qt-interface.conf`)
+  echo `basename "${list[0]}"`
+}
   
-alias movies='cd /mnt/bigboi/mp_backup/links/Movies && ls | sed "s|\.| |g" | sed "s| ...$||g"'
-alias docu='cd /mnt/bigboi/mp_backup/links/Documentaries && ls | sed "s|\.| |g" | sed "s| ...$||g"'
+alias movies='cd /mnt/movingparts/links/Movies && ls | sed "s|\.| |g" | sed "s| ...$||g"'
+alias docu='cd /mnt/movingparts/links/Documentaries && ls | sed "s|\.| |g" | sed "s| ...$||g"'
 tv(){
-  cd /mnt/bigboi/mp_backup/links/TV;
+  cd /mnt/movingparts/links/TV;
   [[ "$#" = "1" ]] && cd "`find . -maxdepth 1 -name "*$1*"`"
   ls | sed "s|\.| |g" | sed "s| ...$||g"
 }
 
-alias torrent='cd /mnt/bigboi/mp_backup/torrent; ls -lh;'
-alias links='cd /mnt/bigboi/mp_backup/links; ls -lh;'
+alias torrent='cd /mnt/movingparts/torrent; ls -lh;'
+alias links='cd /mnt/movingparts/links; ls -lh;'
 alias mp='cd /mnt/movingparts/'
 alias bb='cd /mnt/bigboi/'
 alias mnt='cd /mnt'
 
-alias alias_media='bash $HOME/scripts/alias_media.sh'
+alias am=". $HOME/scripts/alias_media.sh"
 
 alias cast="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; nohup python3 server.py &"
 
@@ -180,14 +194,15 @@ alias egrep='egrep --color=auto'
 alias fgrep="find . \( -type d -o -type f \) -iname"
 alias psgrep='ps -aef | grep'
 alias agrep="alias | grep" # search aliases
+
+rgrep() { # recursively search, fallback to pwd "."
+  grep -rni "$1" "${2:-.}" 
+}
+
 alias hist="history | sed 's/ [0-9]*  //g'"
 hgrep() {
   hist | grep "$1" | grep -v 'hgrep' | uniq -u
 }
-rgrep() {
-  grep -rni "$1" . # recursively search pwd
-}
-
 hcp() {
   val=$(hist | grep $1 | tail -1)
   echo $val | pbcopy
