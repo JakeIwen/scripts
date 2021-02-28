@@ -1,4 +1,4 @@
-x#! /bin/bash
+#! /bin/bash
 
 /usr/sbin/service smbd stop
 locations=`cat /proc/self/mounts | grep -o '/dev/sd[^ ]*'`

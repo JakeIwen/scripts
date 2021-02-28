@@ -1,30 +1,30 @@
 #! /bin/bash
 
+FILE_EXTENSIONS=(mkv avi mp4 r00)
+
 media_group_links() {
-  ext="$1"
   regex="$2"
-  folder="$3"
-  keys="${regex}'|Will1869|10\.?Bit|DTS|DL|NTb|ION10|MeGusta|METCON|strife|SDC|hdtv|CiNEFiLE|PRoDJi|EVO|POIASD|WiKi|HMAX|IMAX|MA|VhsRip|x0r|iNTERNAL|True-HD|(1080|720)(p|i)|Xvi|HD|AC3|AAC|REPACK|REMUX|PRiCK|AVC|d3g|Atmos|EPSiLON|HC|AMZN|HEVC|Blu(R|r)ay|(BR|WEB|web)(Rip)?|NF|DDP?\+?|(x|X|H|h)\.?26[4-5]"
-  pattern="(\.|-)($keys)(.?(5.1)|(2.0))?-?\w*-?(?=(\.|-))|\[.*\]|$ext$"
-  find "$folder" -not -path '*/\.*' -not -ipath '*sample*' -type f -iname "*.$ext" | while read pth
+  folder="$1"
+  keys="${regex}multi|REQ|ETRG|YTM\.AM|SKGTV|CtrlHD|Will1869|10\.?Bit|DTS|DL|SDC|hdtv|EVO|WiKi|HMAX|IMAX|MA|VhsRip|iNTERNAL|True\.HD|1080p|720p|XviD|HD|AC3|AAC|REPACK|5\.1|2\.0|REMUX|PRiCK|AVC|HC|AMZN|HEVC|Bluray|(BR|web)(Rip)?|NF|DDP?(5\.1|2\.0)?|(x|h)\.?26[4-5]"
+  groups="d3g|CiNEFiLE|PRoDJi|regret|POIASD|Cinefeel|NTG|NTb|monkee|YELLOWBiRD|Atmos|EPSiLON|cielos|ION10|MeGusta|METCON|x0r|xlf|S8RHiNO|NTG|btx|strife|DD"
+  delims="\.|\+|\-"
+  find "$folder" -not -path '*/\.*' -not -ipath '*sample*' -type f | while read pth
   do
     [ -e "$pth" ] || continue 
+    ext="${pth##*.}"
+    [[ "${FILE_EXTENSIONS[*]}" =~ $ext ]] || continue # wrong extension
     (( `stat -c%s "$pth"` > 70000000 )) || continue # size > 70MB
-    
-    title=`basename "$pth" | perl -pe "s/(-| |,)/./g" | perl -pe "s~$pattern~~g" | perl -pe "s|\.+|.|g" | perl -pe "s/(\.|-)$//g"`
+    pattern="($delims)(\[?($keys)\]?(?=\.)|(($groups)\.)?$ext$)|\'"
+    # echo $pattern
+    # echo "bname: `basename "$pth" | perl -pe "s/(-| |,)/./g"`"
+    title=`basename "$pth" | perl -pe "s/(-| |,)/./g" | perl -pe "s~$pattern~~ig"`
+    echo $title
     link_folder=`echo "$folder" | sed "s|\/torrent\/|\/links\/|g" | sed "s| |\.|g"`
-    link="$link_folder/$title.$ext"
+    link="$link_folder/$title"
     
     [ -d "$link_folder" ] || mkdir "$link_folder"
     ln -s "$pth" "$link"
   done
-}
-
-alias_folder() {
-  media_group_links 'mkv' "$2" "$1"
-  media_group_links 'avi' "$2" "$1"
-  media_group_links 'mp4' "$2" "$1"
-  media_group_links 'r00' "$2" "$1"
 }
 
 prep_dir() {
@@ -38,10 +38,10 @@ prep_dir() {
 
 alias_folders() {
   find "$SRC/torrent/TV" -maxdepth 1 -mindepth 1  -type d \
-    | while read pth; do alias_folder "$pth" '\d\d\d\d|'; done
+    | while read pth; do media_group_links "$pth"; done
   find "$SRC/torrent/Documentaries" -maxdepth 1 -mindepth 1  -type d \
-    | while read pth; do alias_folder "$pth"; done
-  alias_folder "$SRC/torrent/Movies"
+    | while read pth; do media_group_links "$pth"; done
+  media_group_links "$SRC/torrent/Movies"
 }
 
 # SRC="/mnt/bigboi/mp_backup"
