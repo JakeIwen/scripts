@@ -14,23 +14,26 @@ alias ct="sudo crontab -e"
 
 alias cronlog="cd /var/log/cron"
 alias killcron="sudo pkill -f cron"
-alias dirsize='sudo du -hsc *'
+alias dirsize='sudo du -hsc .[^.]* *'
 alias disku='df -u'
 alias pk='sudo pkill -f'
 
 alias bashp='vi ~/.bashrc'
 alias rbash='exec bash'
+alias functions="cat ~/.bashrc | grep -E '^[[:space:]]*([[:alnum:]_]+[[:space:]]*\(\)|function[[:space:]]+[[:alnum:]_]+)'"
+fndef() { # print function definition
+  sed -n -e "/$1()/,/}/ p" ~/.bashrc
+}
 
 tf() {
   tail -50 $1; tail -f $1
 }
-s() {
-  . $HOME/scripts/$1.sh
-}
-
 snh() {
   nohup bash -c $1 &
   tail -f ./nohup.out
+}
+s() {
+  . $HOME/scripts/$1.sh
 }
 
 alias isw="$HOME/scripts/internet_switches.sh"
@@ -46,6 +49,12 @@ alias mtor="touch $mconf/mtorrent; nohup $isw &"
 alias mtorx="rm $mconf/mtorrent; nohup $isw &"
 alias nodisk="rm $mconf/mdisk; touch $mconf/nodisk; nohup $isw &"
 alias nodiskx="rm $mconf/nodisk; nohup $isw &"
+
+rsmp() {
+  rm -rf /mnt/movingparts/links/
+  sudo rsync -avH --exclude-from=/rsync-exclude-media.txt /mnt/movingparts/ /mnt/bigboi/mp_backup
+  . /home/pi/scripts/alias_media.sh
+}
 
 # lsof | grep /mnt/mbbackup
 # fuser -mv /mnt/mbbackup
@@ -70,6 +79,56 @@ alias sns='bash ~/sns.sh'
 alias gpu_mem='vcgencmd get_mem gpu'
 
 # MEDIA
+
+play() {
+  dir=`dirname "$1"`
+  filename=`basename "$1"`
+  echo "directory: $dir"
+  echo "file: $filename"
+  cd "$dir"
+  filenames=`ls | awk "/$filename/{y=1}y"` # everything after & including match
+  if [[ "$2" == "-r" ]]; then filenames=`ls | shuf`; fi
+  sudo pkill -f omxplayer
+  echo "Opening: $filenames"
+  sudo pkill -f "vlc"
+  bash ~/sns.sh rear_movie
+  xset s reset # wake display
+  nohup vlc -f $filenames &
+}
+
+playf() {
+  name=$1
+  ep=$2 # episode number eg 304 (parsed from S03E04)
+  readarray -d '' match_arr < <(find /mnt/movingparts/links -type l -iname "*$name*" -print0)
+  if [[ "$2" == "-r" ]]; then play ${match_arr[0]} -r && return 0; fi
+  for line in "${match_arr[@]}"; do 
+    num=`echo $line | sed -e 's|[^0-9]*||g'`
+    if [[ "$num" == *"$ep"* ]]; then
+      echo "playing $line"
+      play "$line"
+      return 0
+    fi
+  done
+}
+
+fgp() {
+  find /mnt/movingparts/links \( -type l \) -iname "*$1*"
+}
+
+vlcmd() {
+  cmd=$1
+  param=$2
+  # xset s reset # wake display
+  dbus-send --type=method_call --dest=org.mpris.MediaPlayer2.vlc /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.$cmd $param
+}
+
+alias pp="vlcmd PlayPause"
+
+alias vrc="cat $HOME/vlc-recent.txt | grep -i"
+vlcr() {
+  grep -i "$1" "$HOME/vlc-recent.txt"
+}
+  
 alias movies='cd /mnt/bigboi/mp_backup/links/Movies && ls | sed "s|\.| |g" | sed "s| ...$||g"'
 alias docu='cd /mnt/bigboi/mp_backup/links/Documentaries && ls | sed "s|\.| |g" | sed "s| ...$||g"'
 tv(){
@@ -129,15 +188,11 @@ rgrep() {
   grep -rni "$1" . # recursively search pwd
 }
 
-alias vrc="cat $HOME/vlc-recent.txt | grep -i"
-
 hcp() {
   val=$(hist | grep $1 | tail -1)
   echo $val | pbcopy
   echo "copied: $val"
 }
-
-
 
 killport() {
   lsof -ti:"$1" | xargs kill
@@ -164,28 +219,6 @@ sns_list() {
   done < $fpath
 }
 
-play() {
-  filenames=`ls | awk "/$1/{y=1}y"`
-  echo "Opening: $filenames"
-  sudo pkill -f "vlc"
-  bash ~/sns.sh rear_movie
-  xset s reset # wake display
-  nohup vlc -f $filenames &
-}
-
-vlcmd() {
-  cmd=$1
-  param=$2
-  # xset s reset # wake display
-  dbus-send --type=method_call --dest=org.mpris.MediaPlayer2.vlc /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.$cmd $param
-}
-
-alias pp="vlcmd PlayPause"
-
-vlcr() {
-  grep -i "$1" "$HOME/vlc-recent.txt"
-}
-  
 add_python3_path() {
   name=$1
   pypath=$2

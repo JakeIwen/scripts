@@ -1,0 +1,14 @@
+links
+links/*
+.git
+.git/*
+
+.Trashes
+._.Trashes
+.fseventsd
+.Spotlight-V100
+.DS_Store
+.AppleDesktop
+.AppleDB
+Network Trash Folder
+Temporary Items

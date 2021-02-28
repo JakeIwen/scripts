@@ -18,6 +18,7 @@ scp  "$configs/smb.conf" "$pi_ip:/etc/samba/smb.conf"
 scp  "$configs/.bash_defaults" "$pi_ip:/home/pi/.bash_defaults"
 scp  "$configs/.mount_aliases" "$pi_ip:/home/pi/.mount_aliases"
 scp  "$configs/rsync-exclude.txt" "$pi_ip:/rsync-exclude.txt"
+scp  "$configs/rsync-exclude-media.txt" "$pi_ip:/rsync-exclude-media.txt"
 # scp "$scripts/mount_all.sh" "$pi_ip:/home/pi/scripts/mount_all.sh"
 
 # scp "$dsc/pi/configs/pcmanfm.conf" "$pi_ip:/home/pi/.config/pcmanfm/LXDE/pcmanfm.conf"
@@ -25,3 +26,4 @@ scp  "$configs/rsync-exclude.txt" "$pi_ip:/rsync-exclude.txt"
 rm -rf $scripts/python/
 
 # scp -r "$vr_ip:/etc/config" "$vanrouter/etc/"
+scp "$vanrouter/root/auto_dns.sh" "$vr_ip:/root/auto_dns.sh"
