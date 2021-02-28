@@ -5,9 +5,10 @@
 TARGET=192.168.6.4 # Pi-hole
 FALLBACK_A=1.1.1.1 # Cloudflare
 FALLBACK_B=1.0.0.1 # Cloudflare
+echo "$(date)"
 
-function set_fallback_dns() {
-    echo $(date)
+set_fallback_dns() {
+    # echo "$(date)"
     echo "Setting fallback DNS servers"
     echo $FALLBACK_A
     echo $FALLBACK_B
@@ -23,6 +24,7 @@ TARGET_PING_COUNT=$(ping -c 3 -w 3 $TARGET | grep seq | wc -l)
 # check if pi is down
 if [ $TARGET_PING_COUNT -eq 0 ]; then
     FALLBACK_DNS_COUNT=$(uci show dhcp.@dnsmasq[0].server | grep $FALLBACK_A | wc -l)
+    echo "fallback DNS ct $FALLBACK_DNS_COUNT"
     # check if fallback is not set as a DNS server
     if [ $FALLBACK_DNS_COUNT -eq 0 ]; then
         set_fallback_dns
@@ -33,7 +35,7 @@ else
     if [ $TARGET_DNS_COUNT -eq 0 ]; then
         # check if raspi is up
         if ping -c 1 '192.168.6.4'; then
-            echo $(date)
+            # echo "$(date)"
             echo "Setting target DNS server"
             echo $TARGET
             uci -q delete dhcp.@dnsmasq[0].server
