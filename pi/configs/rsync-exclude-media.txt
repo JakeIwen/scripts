@@ -4,7 +4,7 @@ links/*
 .git/*
 
 .Trashes
-._.Trashes
+._.*
 .fseventsd
 .Spotlight-V100
 .DS_Store
