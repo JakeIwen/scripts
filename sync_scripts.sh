@@ -11,7 +11,7 @@ find "$dsc/automation/" -type f -name "*.py" -exec cp {} "$scripts/python/" \;
 # 
 scp -r "$scripts" "$pi_ip:/home/pi/"
 scp  "$dsc/pi/.bashrc" "$pi_ip:/home/pi/.bashrc"
-scp  "$dsc/sh/sns.sh" "$pi_ip:/home/pi/sns.sh"
+scp  "$dsc/pi/sns.sh"  "$pi_ip:/home/pi/sns.sh"
 
 # configs
 scp  "$configs/smb.conf" "$pi_ip:/etc/samba/smb.conf"

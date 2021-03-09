@@ -106,3 +106,13 @@ file_lines() { # file_lines 'truncate_file.sh' echo
 
 export HISTSIZE=8000
 export HISTFILESIZE=80000
+
+# runonce
+# case-insinsitive completion
+
+# If ~/.inputrc doesn't exist yet: First include the original /etc/inputrc
+# so it won't get overriden
+if [ ! -a ~/.inputrc ]; then echo '$include /etc/inputrc' > ~/.inputrc; fi
+
+# Add shell-option to ~/.inputrc to enable case-insensitive tab completion
+echo 'set completion-ignore-case On' >> ~/.inputrc

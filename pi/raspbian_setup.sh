@@ -1,8 +1,6 @@
 vi ~/.bash # not sudo
 
 exec bash
-
-sudo systemctl enable ssh
 sudo systemctl start ssh
 
 # from macbook: 
@@ -77,3 +75,9 @@ sudo vi /etc/rc.local
 sudo vi /etc/xdg/lxsession/LXDE-pi/autostart
 # add
 @xrandr --output HDMI-1 --rotate inverted
+
+
+# case insensitive completion:
+echo 'set completion-ignore-case On' | sudo tee -a /etc/inputrc
+  
+  
