@@ -7,9 +7,8 @@ BIGBOI_MOUNTED=$(mount | awk '/bigboi/ {print $6}' | grep "rw")
 [ ! $BIGBOI_MOUNTED ] && echo "bigboi not available/writable" && exit 0
 
 if [ $MP_MOUNTED ]
-then 
-  rm -rf /mnt/movingparts/links/
-  sudo rsync -avH --exclude-from=/rsync-exclude-media.txt /mnt/movingparts/ /mnt/bigboi/mp_backup
+then
+  sudo rsync -avH --delete-during --delete-excluded --exclude-from=/rsync-exclude-media.txt /mnt/movingparts/ /mnt/bigboi/mp_backup
   . /home/pi/scripts/alias_media.sh
 else echo "MP 2TB not available/writable"
 fi
