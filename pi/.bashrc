@@ -38,6 +38,7 @@ s() {
 
 alias isw="$HOME/scripts/internet_switches.sh"
 alias iswl="tf /var/log/cron/internet_switches.log"
+isw="$HOME/scripts/internet_switches.sh"
 mconf="$HOME/mconf"
 
 alias mconf="ls $mconf"
@@ -59,7 +60,13 @@ rsmp() {
 # lsof | grep /mnt/mbbackup
 # fuser -mv /mnt/mbbackup
 
-alias inuse='sudo lsof | grep'
+inuse() {
+  port=`if [[ "$#" = "1" ]]; then echo "$1"; else echo '[0-9][0-9][0-9][0-9][0-9]? '; fi`
+  sudo lsof -P -n | grep -E ":$port"
+  echo "port $port"
+}
+
+
 alias disks='grep "dev/sd" /proc/mounts'
 alias mounts='grep "dev/sd" /proc/mounts'
 alias blk="sudo blkid | grep 'dev/sd'"
@@ -83,6 +90,7 @@ alias gpu_mem='vcgencmd get_mem gpu'
 play() {
   dir=`dirname "$1"`
   filename=`basename "$1"`
+  echo "play $1"
   cd "$dir"
   filenames=`ls | awk "/$filename/{y=1}y"` # everything after & including match
   if [[ "$2" == "-r" ]]; then filenames=`ls -I 'nohup.out' | shuf`; fi
@@ -94,13 +102,19 @@ play() {
   bash ~/sns.sh rear_movie
   xset s reset # wake display
   nohup vlc -f $filenames &
+  # vlc -f $filenames
+  sudo renice -12 -g  `pgrep vlc`
+  
+  # curl -s -o /dev/null -u :dogma  http://127.0.0.1:9090/requests/status.xml
+
 }
 
 playf() {
   name=`echo $1 | perl -pe 's/( |_)/./g'`
   ep=$2 # episode number eg 304 (parsed from S03E04)
   num_re='^[0-9]+$'
-  readarray -d '' match_arr < <(find /mnt/movingparts/links -type l -iname "*$name*" -print0)
+  # readarray -d '' match_arr < <(find /mnt/movingparts/links -type l -iname "*$name*" -print0)
+  readarray -d '' match_arr < <(find /mnt/bigboi/mp_backup/links -type l -iname "*$name*" -print0)
   [[ ${#match_arr[@]} -eq 1 ]] && play "${match_arr[0]}" && return 0
   if [[ ! "$2" && ${#match_arr[@]} -gt 1 ]]; then 
     ls `dirname "${match_arr[0]}"`
@@ -115,7 +129,7 @@ playf() {
     fi
     if [[ "${matcher,,}" == *"${ep,,}"* ]]; then # lowercased 
       echo "playing $line"
-      play "$line"
+      play "$line" "$2"
       return 0
     fi
   done
@@ -138,17 +152,19 @@ vlcr() {
   grep -i "$1" "$HOME/vlc-recent.txt"
 }
 
-playing() {
+play_status() {
   list=(`grep 'list=' $HOME/.config/vlc/vlc-qt-interface.conf`)
-  echo `basename "${list[0]}"`
+  name=`basename "${list[0]}"`
+  position=`py scripts/python/vlc_property.py Position`
+  printf "$name \n $position"
 }
   
 alias movies='cd /mnt/movingparts/links/Movies && ls | sed "s|\.| |g" | sed "s| ...$||g"'
 alias docu='cd /mnt/movingparts/links/Documentaries && ls | sed "s|\.| |g" | sed "s| ...$||g"'
 tv(){
-  cd /mnt/movingparts/links/TV;
+  cd /mnt/movingparts/links/TV || cd /mnt/bigboi/mp_backup/links/TV;
   [[ "$#" = "1" ]] && cd "`find . -maxdepth 1 -name "*$1*"`"
-  ls | sed "s|\.| |g" | sed "s| ...$||g"
+  ls
 }
 
 alias torrent='cd /mnt/movingparts/torrent; ls -lh;'
@@ -214,7 +230,7 @@ killport() {
 }
 
 rec_find_rpl_in_files() { # rec_find_rpl_in_files find_pattern repl_pattern
-  find . -type f | xargs sed -i "s|$1|$2|g"
+  find . -exec sed -i '' "s|$1|$2|g" {} \;
 }
 
 file_lines() { # file_lines './filename.txt' echo   
