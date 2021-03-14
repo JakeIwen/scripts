@@ -2,11 +2,51 @@ import dbus
 import sys
 import time
 import pprint
-prop = sys.argv[1]
-key = None if len(sys.argv) < 2 else sys.argv[2] 
-# prop = 'Position'
-if prop == 'Title':
+import re
+
+req = sys.argv[1]
+prop = req
+iface = "Player"
+format_time = False
+sub_pattern = None
+key = None
+
+if req == 'Title':
     prop = 'Metadata'
+    key = 'xesam:title'
+
+elif req == 'URL':
+    prop = 'Metadata'
+    key = 'xesam:url'
+    sub_pattern = "file:\/\/"
+    
+elif req == 'TotalTime':
+    prop = 'Metadata'
+    key = 'mpris:length'    
+    format_time = True
+    
+elif req == 'Position':
+    format_time = True
+
+# not working
+# elif req == 'TrackList':
+#     iface = "TrackList"
+#     prop = 'Tracks'
+    
+bus = dbus.SessionBus()
+vlc_media_player_obj = bus.get_object("org.mpris.MediaPlayer2.vlc", "/org/mpris/MediaPlayer2")
+props_iface = dbus.Interface(vlc_media_player_obj, 'org.freedesktop.DBus.Properties')
+result = props_iface.Get("org.mpris.MediaPlayer2.{}".format(iface), prop)
+
+if key:
+    result = result[key]
+if sub_pattern:
+    result = re.sub(sub_pattern, "", result)
+if format_time:
+    seconds = round(result/1000/1000)
+    result = time.strftime('%H:%M:%S', time.gmtime(seconds))
+    
+print(result)
 
     # 'mpris:length': dbus.Int64(1353696000, variant_level=1),
     # 'mpris:trackid': dbus.ObjectPath('/org/videolan/vlc/playlist/90', variant_level=1),
@@ -32,17 +72,3 @@ if prop == 'Title':
 # CanPause	b	Read only		
 # CanSeek	b	Read only		
 # CanControl	b	Read only	
-
-bus = dbus.SessionBus()
-vlc_media_player_obj = bus.get_object("org.mpris.MediaPlayer2.vlc", "/org/mpris/MediaPlayer2")
-props_iface = dbus.Interface(vlc_media_player_obj, 'org.freedesktop.DBus.Properties')
-result = props_iface.Get('org.mpris.MediaPlayer2.Player', prop)
-
-if sys.argv[1] == 'Title':
-    result = result['xesam:title']
-if key:
-    result = result[key]
-if (prop == 'Position'):
-    seconds = int(result/1000/1000)
-    result = time.strftime('%H:%M:%S', time.gmtime(seconds))
-print(result)
