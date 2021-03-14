@@ -98,10 +98,10 @@ play() {
   
   ! [ "$filenames" ] && echo "NO MATCH!" && return 0
   sudo pkill -f omxplayer
-  sudo pkill -f "vlc"
+  sudo pkill -f vlc
   bash ~/sns.sh rear_movie
   xset s reset # wake display
-  nohup vlc -f $filenames &
+  nohup vlc -f --sub-language=EN,US,en,us,any $filenames &
   # vlc -f $filenames
   sudo renice -12 -g  `pgrep vlc`
   
@@ -127,12 +127,21 @@ playf() {
     if [[ $ep =~ $num_re ]] ; then
       matcher=`echo $matcher | sed -e 's|[^0-9]*||g'` # parsed numbers
     fi
-    if [[ "${matcher,,}" == *"${ep,,}"* ]]; then # lowercased 
+    if [[ "${matcher,,}" == *"${ep,,}"* ]]; then # case-insensitive match
       echo "playing $line"
       play "$line" "$2"
       return 0
     fi
   done
+}
+
+cv() {
+  matches=`find . -maxdepth 1 -iname "*$1*"`
+  echo "Matches: $matches"
+  if [[ $matches ]]; then 
+    cd "$matches" || echo "multiple matches"
+  else echo "no match" 
+  fi
 }
 
 fgp() {
@@ -153,10 +162,15 @@ vlcr() {
 }
 
 play_status() {
-  list=(`grep 'list=' $HOME/.config/vlc/vlc-qt-interface.conf`)
-  name=`basename "${list[0]}"`
-  position=`py scripts/python/vlc_property.py Position`
-  printf "$name \n $position"
+  omx_pos=`curl "http://0.0.0.0:2020/position"`
+  if [[ $omx_pos ]]; then
+    printf "$omx_pos"
+  elif [[ `pgrep vlc` ]]; then
+    position=`py scripts/python/vlc_property.py Position`
+    total=`py scripts/python/vlc_property.py TotalTime`
+    title=`py scripts/python/vlc_property.py Title`
+    printf "$title \r$position / $total"
+  fi
 }
   
 alias movies='cd /mnt/movingparts/links/Movies && ls | sed "s|\.| |g" | sed "s| ...$||g"'
@@ -219,6 +233,7 @@ alias hist="history | sed 's/ [0-9]*  //g'"
 hgrep() {
   hist | grep "$1" | grep -v 'hgrep' | uniq -u
 }
+
 hcp() {
   val=$(hist | grep $1 | tail -1)
   echo $val | pbcopy
@@ -226,7 +241,17 @@ hcp() {
 }
 
 killport() {
-  lsof -ti:"$1" | xargs kill
+  ARGS=("$@")
+  detail_list=`lsof ${ARGS[@]/#/-i:}`
+  echo "killing processes:\n$detail_list"
+  [ "$detail_list" ] && lsof ${ARGS[@]/#/-ti:} | xargs kill
+}
+
+pkl() {
+  args=("$@")
+  pids=`pgrep -f "${args[@]}"`
+  echo "killing $pids"
+  sudo kill $pids
 }
 
 rec_find_rpl_in_files() { # rec_find_rpl_in_files find_pattern repl_pattern
