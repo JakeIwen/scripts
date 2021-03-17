@@ -17,6 +17,7 @@ alias killcron="sudo pkill -f cron"
 alias dirsize='sudo du -hsc .[^.]* *'
 alias disku='df -u'
 alias pk='sudo pkill -f'
+alias slp='xset s activate'
 
 alias bashp='vi ~/.bashrc'
 alias rbash='exec bash'
@@ -59,13 +60,6 @@ rsmp() {
 
 # lsof | grep /mnt/mbbackup
 # fuser -mv /mnt/mbbackup
-
-inuse() {
-  port=`if [[ "$#" = "1" ]]; then echo "$1"; else echo '[0-9][0-9][0-9][0-9][0-9]? '; fi`
-  sudo lsof -P -n | grep -E ":$port"
-  echo "port $port"
-}
-
 
 alias disks='grep "dev/sd" /proc/mounts'
 alias mounts='grep "dev/sd" /proc/mounts'
@@ -110,12 +104,13 @@ play() {
 }
 
 playf() {
-  name=`echo $1 | perl -pe 's/( |_)/./g'`
+  name=`echo $1 | perl -pe 's/ /_/g'`
+  echo "name $name"
   ep=$2 # episode number eg 304 (parsed from S03E04)
   num_re='^[0-9]+$'
   # readarray -d '' match_arr < <(find /mnt/movingparts/links -type l -iname "*$name*" -print0)
-  readarray -d '' match_arr < <(find /mnt/bigboi/mp_backup/links -type l -iname "*$name*" -print0)
-  [[ ${#match_arr[@]} -eq 1 ]] && play "${match_arr[0]}" && return 0
+  readarray -d '' match_arr < <(find /mnt/bigboi/mp_backup/links -type l -iname "*$name*" -print0 | find /mnt/movingparts/links -type l -iname "*$name*" -print0)
+  # [[ ${#match_arr[@]} -eq 1 ]] && play "${match_arr[0]}" && return 0
   if [[ ! "$2" && ${#match_arr[@]} -gt 1 ]]; then 
     ls `dirname "${match_arr[0]}"`
     echo "^^^ Available matches ^^^"
@@ -127,6 +122,7 @@ playf() {
     if [[ $ep =~ $num_re ]] ; then
       matcher=`echo $matcher | sed -e 's|[^0-9]*||g'` # parsed numbers
     fi
+    echo "matcher $matcher"
     if [[ "${matcher,,}" == *"${ep,,}"* ]]; then # case-insensitive match
       echo "playing $line"
       play "$line" "$2"
@@ -215,25 +211,25 @@ alias gp="git pull"
 alias grao="git remote add origin"
 alias gc='git clone'
 alias gck='git checkout'
-gacp() { 
-  git add .; git commit -m "$1"; git push 
-}
 
 alias grep='grep --color=auto'
+alias g='grep'
 alias egrep='egrep --color=auto'
 alias fgrep="find . \( -type d -o -type f \) -iname"
 alias psgrep='ps -aef | grep'
 alias agrep="alias | grep" # search aliases
+alias hist="history | sed 's/ [0-9]*  //g'"
+
+gacp() { 
+  git add .; git commit -m "$1"; git push 
+}
 
 rgrep() { # recursively search, fallback to pwd "."
   grep -rni "$1" "${2:-.}" 
 }
-
-alias hist="history | sed 's/ [0-9]*  //g'"
 hgrep() {
   hist | grep "$1" | grep -v 'hgrep' | uniq -u
 }
-
 hcp() {
   val=$(hist | grep $1 | tail -1)
   echo $val | pbcopy
@@ -246,12 +242,16 @@ killport() {
   echo "killing processes:\n$detail_list"
   [ "$detail_list" ] && lsof ${ARGS[@]/#/-ti:} | xargs kill
 }
-
 pkl() {
   args=("$@")
-  pids=`pgrep -f "${args[@]}"`
+  pids=`pgrep -f -i "${args[@]}"`
   echo "killing $pids"
   sudo kill $pids
+}
+inuse() {
+  port=`if [[ "$#" = "1" ]]; then echo "$1"; else echo '[0-9][0-9][0-9][0-9][0-9]? '; fi`
+  sudo lsof -P -n | grep -E ":$port"
+  echo "port $port"
 }
 
 rec_find_rpl_in_files() { # rec_find_rpl_in_files find_pattern repl_pattern

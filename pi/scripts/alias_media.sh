@@ -27,12 +27,17 @@ media_group_links() {
   done
 }
 
+cargs(){
+  ARGS=("$@")
+  echo "${ARGS[@]}"
+}
+
 alias_folders() {
   src=$1
   links="$src/links"
   rm -rf "$links" || True
   mkdir "$links" "$links/TV" "$links/Documentaries" "$links/Movies"
-  
+ 
   find "$src/torrent/TV" -maxdepth 1 -mindepth 1  -type d \
     | while read pth; do media_group_links "$pth"; done
   find "$src/torrent/Documentaries" -maxdepth 1 -mindepth 1  -type d \

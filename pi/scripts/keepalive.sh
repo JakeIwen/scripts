@@ -1,7 +1,18 @@
 #! /bin/bash
 
-if [[ `ps ax` != *'NativCast/server.py'* ]] &> /dev/null 
-then 
-  python3 /home/pi/NativCast/server.py
-  python3 -c "from sonos_tasks import rear_movie; rear_movie(70)"
-fi
+airsonos() {
+  if [[ `ps ax` != *'airupnp-arm'* ]] &> /dev/null 
+  then sudo service airupnp start
+  fi
+}
+
+nativcast() {
+  if [[ `ps ax` != *'NativCast/server.py'* ]] &> /dev/null 
+  then  python3 /home/pi/NativCast/server.py 
+  fi
+}
+
+airsonos
+# nativcast
+
+  
