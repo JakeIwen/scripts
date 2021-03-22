@@ -27,3 +27,4 @@ rm -rf $scripts/python/
 
 # scp -r "$vr_ip:/etc/config" "$vanrouter/etc/"
 scp "$vanrouter/root/auto_dns.sh" "$vr_ip:/root/auto_dns.sh"
+scp "$vanrouter/root/.profile" "$vr_ip:/root/.profile"

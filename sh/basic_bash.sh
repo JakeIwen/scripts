@@ -7,6 +7,8 @@ alias ...="cd ../.."
 alias ....="cd ../../.."
 alias .....="cd ../../../.."
 
+alias init_rsa="ssh-copy-id -i ~/.ssh/id_rsa.pub" # init_rsa user@device
+
 alias bashp='vi ~/.bashrc'
 alias rbash='exec bash'
 
@@ -42,15 +44,12 @@ fndef() { # print function definition
   sed -n -e "/$1()/,/}/ p" ~/.bashrc
 }
 
-# alias alias="alias; cat ~/.bashrc | grep -E '^[[:space:]]*([[:alnum:]_]+[[:space:]]*\(\)|function[[:space:]]+[[:alnum:]_]+)'"
-
 rgrep() {
   grep -rni "$1" . # recursively search cwd
 }
 
 # add new alias
-nalias()
-{
+nalias() {
   new_line="alias $1='$2'"
   file=$(cat ~/.bashrc)
   if [[ $file =~ $1\=.* ]]; then

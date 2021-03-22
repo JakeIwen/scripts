@@ -3,7 +3,7 @@ from soco.discovery import by_name, any_soco, discover
 from soco.music_library import MusicLibrary
 from contextlib import suppress
 from time import sleep
-
+import os
 
 
 def filter_vis_devices():
@@ -220,8 +220,12 @@ def get_matching_faves(keyterm, device=None):
     faves = ml.get_sonos_favorites()
     return [x for x in faves if keyterm in x.title]
 
+def direct(name): # only on macbook
+    cmd = "osascript /Users/jacobr/dev/scripts/automation/sonosAudio.scpt " + name
+    os.system(cmd)
+
 def get_spkr(name):
-    return by_name(name) or by_name(name + '2') 
+    return by_name(name) or by_name(name + '2')
 
 def get_playing_device(default_to_front=False, devices=vis_devices):
     for device in devices:
