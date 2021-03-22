@@ -5,13 +5,27 @@ ubnt_internet_ops() {
   if conf notorrent; then exit 0; else start_torrent_client; fi
 }
 
+if_online() {
+  [[ `ssh root@OpenWrt "cat /tmp/run/mwan3track/$1/ONLINE"` > 0 ]]
+}
+
 conf() {
-  cat /home/pi/mconf/$1 &> /dev/null 
+  cat /home/pi/mconf/$1* &> /dev/null 
 }
 
 mobile_internet_ops() {
   echo 'mobile_internet_ops'
   if conf mtorrent; then ubnt_internet_ops; else no_internet_ops; fi
+}
+
+lifi_internet_ops() {
+  echo 'lifi_internet_ops'
+  if [ -e /home/pi/mconf/mtorrent_lifi ]; then
+    echo "lifi-tor allowed"
+    ubnt_internet_ops
+  else
+    no_internet_ops
+  fi
 }
 
 no_internet_ops() {
@@ -67,11 +81,11 @@ kill_all() {
   unmount_drives
 }
 
-
 if date | grep '0:0'; then date; fi
 
 if conf nodisk &> /dev/null; then kill_all
-elif ping -c 1 172.20.10.1 &> /dev/null; then mobile_internet_ops
-elif ping -c 1 8.8.8.8 &> /dev/null;     then ubnt_internet_ops
+elif if_online clientwan; then mobile_internet_ops
+elif if_online lifiwan; then lifi_internet_ops
+elif ping -c 1 8.8.8.8 &> /dev/null; then ubnt_internet_ops
 else no_internet_ops
 fi

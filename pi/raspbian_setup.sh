@@ -4,7 +4,7 @@ exec bash
 sudo systemctl start ssh
 
 # from macbook: 
-ssh-copy-id -i ~/.ssh/id_rsa.pub 192.168.6.103
+ssh-copy-id -i ~/.ssh/id_rsa.pub jacobr@192.168.6.145
 
 sudo apt update
 sudo apt install realvnc-vnc-server realvnc-vnc-viewer
