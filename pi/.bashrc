@@ -16,11 +16,11 @@ alias cronlog="cd /var/log/cron"
 alias killcron="sudo pkill -f cron"
 alias dirsize='sudo du -hsc .[^.]* *'
 alias disku='df -u'
-alias pk='sudo pkill -f'
 alias slp='xset s activate'
 
 alias bashp='vi ~/.bashrc'
 alias rbash='exec bash'
+alias init_rsa="ssh-copy-id -i ~/.ssh/id_rsa.pub" # init_rsa user@device
 alias functions="cat ~/.bashrc | grep -E '^[[:space:]]*([[:alnum:]_]+[[:space:]]*\(\)|function[[:space:]]+[[:alnum:]_]+)'"
 fndef() { # print function definition
   sed -n -e "/$1()/,/}/ p" ~/.bashrc
@@ -43,14 +43,14 @@ isw="$HOME/scripts/internet_switches.sh"
 mconf="$HOME/mconf"
 
 alias mconf="ls $mconf"
-alias mdisk="rm $mconf/nodisk; touch $mconf/mdisk; nohup $isw &"
-alias mdiskx="rm $mconf/mdisk; nohup $isw &"
-alias notor="rm $mconf/mtorrent; touch $mconf/notorrent; nohup $isw &"
-alias notorx="rm $mconf/notorrent; nohup $isw &"
-alias mtor="touch $mconf/mtorrent; nohup $isw &"
-alias mtorx="rm $mconf/mtorrent; nohup $isw &"
-alias nodisk="rm $mconf/mdisk; touch $mconf/nodisk; nohup $isw &"
-alias nodiskx="rm $mconf/nodisk; nohup $isw &"
+alias mdisk="rm $mconf/nodisk*; touch $mconf/mdisk; nohup $isw &"
+alias mdiskx="rm $mconf/mdisk*; nohup $isw &"
+alias notor="rm $mconf/mtorrent*; touch $mconf/notorrent; nohup $isw &"
+alias notorx="rm $mconf/notorrent*; nohup $isw &"
+alias mtor="rm $mconf/notorrent*; touch $mconf/mtorrent; nohup $isw &"
+alias mtorx="rm $mconf/mtorrent*; nohup $isw &"
+alias nodisk="rm $mconf/mdisk*; touch $mconf/nodisk; nohup $isw &"
+alias nodiskx="rm $mconf/nodisk*; nohup $isw &"
 
 rsmp() {
   rm -rf /mnt/movingparts/links/
@@ -74,6 +74,18 @@ remount() {
   /usr/sbin/service smbd start
   
   mounts
+}
+
+airupnp() {
+  if [[ "$1" == "disable" ]]; then
+    sudo systemctl stop airupnp.service
+    # dont fuck with the service files
+    # sudo perl -i -pe 's|^|\# |g' /etc/systemd/system/airupnp.service
+  else 
+    sudo systemctl start airupnp.service
+    # dont fuck with the service files
+    # sudo perl -i -pe 's|^(\# )*||g' /etc/systemd/system/airupnp.service
+  fi
 }
 
 alias sns='bash ~/sns.sh'
@@ -185,7 +197,10 @@ alias mnt='cd /mnt'
 
 alias am=". $HOME/scripts/alias_media.sh"
 
+alias ifonline="ssh root@OpenWrt mwan3 interfaces | grep 'is online'"
+
 alias cast="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; nohup python3 server.py &"
+alias castnn="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; python3 server.py"
 
 
 alias rpiplay='nohup /home/pi/RPiPlay/build/rpiplay -r 180 &'
@@ -228,7 +243,8 @@ rgrep() { # recursively search, fallback to pwd "."
   grep -rni "$1" "${2:-.}" 
 }
 hgrep() {
-  hist | grep "$1" | grep -v 'hgrep' | uniq -u
+  # howto: pass all args to a subfunction
+  hist | grep "$@" | grep -v 'hgrep' | uniq -u
 }
 hcp() {
   val=$(hist | grep $1 | tail -1)
@@ -242,11 +258,29 @@ killport() {
   echo "killing processes:\n$detail_list"
   [ "$detail_list" ] && lsof ${ARGS[@]/#/-ti:} | xargs kill
 }
+
+
+
 pkl() {
-  args=("$@")
-  pids=`pgrep -f -i "${args[@]}"`
+  # last arg
+  last=${*: -1} 
+  # remove last arg
+  if [[ $last == '-9' ]]; then
+    search_terms=${*:1:$#-1}
+  else 
+    last=""
+    search_terms=$*
+  fi
+  echo $last
+  echo $search_terms
+  pids=`pgrep -f -i "$search_terms"`
   echo "killing $pids"
-  sudo kill $pids
+  sudo kill $last $pids
+  alive=`pgrep -f -i "$@"`
+  if [[ $alive ]]; then 
+    echo "still alive: $alive"
+    echo "re run with '-9' to SIGKILL"
+  fi
 }
 inuse() {
   port=`if [[ "$#" = "1" ]]; then echo "$1"; else echo '[0-9][0-9][0-9][0-9][0-9]? '; fi`
