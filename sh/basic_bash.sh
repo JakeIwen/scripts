@@ -1,6 +1,6 @@
 #! /bin/bash
 shopt -s expand_aliases
-
+alias sudo='sudo '
 alias l='ls -lah'  ##custom list directory
 alias ..="cd .."
 alias ...="cd ../.."

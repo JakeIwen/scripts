@@ -15,7 +15,7 @@ fi
 # cron-scheduled daily
 sudo rsync -avH --delete-during --delete-excluded --exclude-from=/rsync-exclude.txt / /mnt/bigboi/pi_backup_git/pi_backup
 
-cd /mnt/bigboi/pi_backup_git  || exit 
+cd /mnt/bigboi/pi_backup_git || exit 
 sudo git add .
 msg="Pi Backup - $(date)"
 sudo git commit -m "$msg"
