@@ -1,9 +1,9 @@
-BEGIN { OFS = "\t"; } # OFS is a field separator used for "print"
+BEGIN { OFS = "|"; } # OFS is a field separator used for "print"
 /\<Cell/ {
     # New cell description has started, so we need to print a previous one.
     # Detect security mode first.
     if (wpa) { security = "wpa" } else { if (wep) { security = "wep" } else { security = "none" }}
-    if (essid) print essid, security, quality;
+    if (essid) print quality, essid, security;
     # Reset security flags.
     wep = 0; wpa = 0;
 }
@@ -35,5 +35,5 @@ BEGIN { OFS = "\t"; } # OFS is a field separator used for "print"
 END {
     # handle last cell
     if (wpa) { security = "wpa" } else { if (wep) { security = "wep" } else { security = "none" }}
-    if (essid) print essid, security, quality;
+    if (essid) print quality, essid, security;
 }
