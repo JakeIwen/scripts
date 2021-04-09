@@ -176,9 +176,9 @@ def add_time(position, diff_secs):
     new_timestamp = "%d:%02d:%02d" % (hr, min, sec)
     return "0:00:00" if new_timestamp.startswith("-") else new_timestamp
 
-def adjust(target, direction, inc):
+def adjust(target, direction, amount):
     orig = target.volume
-    diff = int(inc)
+    diff = int(amount)
     if (direction == "mute"):
         target.mute = not target.mute
     if orig < 15:

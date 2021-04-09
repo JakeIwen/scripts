@@ -1,5 +1,9 @@
 #! /bin/bash
-shopt -s expand_aliases
+shopt -s expand_aliases # run aliased commands inline with ssh ...@.... 
+alias sudo='sudo '
+alias ch7="sudo chmod -R 777" # usage: $ ch7 .
+alias chme="sudo chown -R $(whoami)" # usage: $ chme .
+
 alias l='ls -lah'  ##custom list directory
 alias lla='ls -ltu'
 alias ..="cd .."
@@ -43,6 +47,7 @@ isw="$HOME/scripts/internet_switches.sh"
 mconf="$HOME/mconf"
 
 alias mconf="ls $mconf"
+alias mreset="rm $mconf/*"
 alias mdisk="rm $mconf/nodisk*; touch $mconf/mdisk; nohup $isw &"
 alias mdiskx="rm $mconf/mdisk*; nohup $isw &"
 alias notor="rm $mconf/mtorrent*; touch $mconf/notorrent; nohup $isw &"
@@ -64,7 +69,6 @@ rsmp() {
 alias disks='grep "dev/sd" /proc/mounts'
 alias mounts='grep "dev/sd" /proc/mounts'
 alias blk="sudo blkid | grep 'dev/sd'"
-
 remount() {
   pk qbit
   /usr/sbin/service smbd stop
@@ -110,8 +114,6 @@ play() {
   nohup vlc -f --sub-language=EN,US,en,us,any $filenames &
   # vlc -f $filenames
   sudo renice -12 -g  `pgrep vlc`
-  
-  # curl -s -o /dev/null -u :dogma  http://127.0.0.1:9090/requests/status.xml
 
 }
 
@@ -128,7 +130,7 @@ playf() {
     echo "^^^ Available matches ^^^"
     return 0;
   fi
-  if [[ "$2" == "-r" ]]; then play ${match_arr[0]} -r && return 0; fi
+  if [ -z "$2" ] || [[ "$2" == "-r" ]]; then play ${match_arr[0]} -r && return 0; fi
   for line in "${match_arr[@]}"; do 
     matcher=$line
     if [[ $ep =~ $num_re ]] ; then
@@ -202,7 +204,6 @@ alias ifonline="ssh root@OpenWrt mwan3 interfaces | grep 'is online'"
 alias cast="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; nohup python3 server.py &"
 alias castnn="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; python3 server.py"
 
-
 alias rpiplay='nohup /home/pi/RPiPlay/build/rpiplay -r 180 &'
 
 alias pd='sudo /sbin/shutdown -r now'
@@ -235,10 +236,7 @@ alias psgrep='ps -aef | grep'
 alias agrep="alias | grep" # search aliases
 alias hist="history | sed 's/ [0-9]*  //g'"
 
-gacp() { 
-  git add .; git commit -m "$1"; git push 
-}
-
+gacp() { git add .; git commit -m "$1"; git push; }
 rgrep() { # recursively search, fallback to pwd "."
   grep -rni "$1" "${2:-.}" 
 }
@@ -259,29 +257,6 @@ killport() {
   [ "$detail_list" ] && lsof ${ARGS[@]/#/-ti:} | xargs kill
 }
 
-
-
-pkl() {
-  # last arg
-  last=${*: -1} 
-  # remove last arg
-  if [[ $last == '-9' ]]; then
-    search_terms=${*:1:$#-1}
-  else 
-    last=""
-    search_terms=$*
-  fi
-  echo $last
-  echo $search_terms
-  pids=`pgrep -f -i "$search_terms"`
-  echo "killing $pids"
-  sudo kill $last $pids
-  alive=`pgrep -f -i "$@"`
-  if [[ $alive ]]; then 
-    echo "still alive: $alive"
-    echo "re run with '-9' to SIGKILL"
-  fi
-}
 inuse() {
   port=`if [[ "$#" = "1" ]]; then echo "$1"; else echo '[0-9][0-9][0-9][0-9][0-9]? '; fi`
   sudo lsof -P -n | grep -E ":$port"
@@ -340,9 +315,33 @@ nalias() {
   exec bash
 }
 
+
+pk() { # kill process by name match - append flag '-9' for SIGTERM
+  search_terms=$*
+  last="${@: -1}" # remove last arg
+  if [[ $last == '-9' ]]; then
+    search_terms=${@:1:-1}
+  else
+    last=""
+  fi
+  pids=`pgrep -f $(echo $search_terms)`
+  echo "found $pids"
+  if [[ ! $pids ]]; then echo "no match" && return 0; fi
+  sudo kill $last $(echo $pids)
+
+  alive=`pgrep -f $(echo $search_terms)`
+  if [[ $alive ]]; then 
+    echo "still alive: $alive"
+    echo "re run with '-9' to SIGKILL"
+  else
+    echo "all terminated"
+  fi
+}
+
+
 export DISPLAY=:0
-export HISTSIZE=10000
-export HISTFILESIZE=100000
+export HISTSIZE=100000
+export HISTFILESIZE=1000000
 export PATH="$PATH:/home/pi/.local/bin"
 # if [ -f ~/.mount_aliases ]; then . ~/.mount_aliases; fi
 if [ -f ~/.bash_defaults ]; then . ~/.bash_defaults; fi

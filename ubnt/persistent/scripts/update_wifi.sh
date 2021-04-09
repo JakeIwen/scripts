@@ -1,23 +1,20 @@
-
+#! /bin/ash
 # NETWORKS=$(ECHO iwlist $1 scan 2>/dev/null | awk -f /etc/persistent/config/parse-iwlist.awk | sort -t$'\t' -nrk3)
 # scanres=$(echo iwlist ath0 scan)
 # iwlist ath0 scan | awk '/ESSID/{i++}i==2'\
 
 ssid_scan_path="/etc/persistent/scripts/essids.XXXXX"
 cur_profile_path="/etc/persistent/tmp/cur_profile.cfg"
-append_networks ()
-{
+append_networks() {
   iwlist ath0 scan 2>/dev/null | awk -f /etc/persistent/scripts/parse-iwlist.awk >> $ssid_scan_path
   sleep 3
 }
 
-sort_networks ()
-{
-  cat $ssid_scan_path | awk '{print $NF,$0}' | sort -nr | cut -d ' ' -f 2 | uniq
+sort_networks() {
+  cat $ssid_scan_path | sort -nr | cut -d '|' -f 2 | awk '!seen[$0]++'
 }
 
-set_ap ()
-{
+set_ap() {
   cp "/etc/persistent/profiles/$1" /tmp/system.cfg
   /usr/etc/rc.d/rc.softrestart save
   pkill -f crond
@@ -26,8 +23,7 @@ set_ap ()
   crond
 }
 
-find_ap ()
-{
+find_ap() {
   if [ "$(cat $cur_profile_path)" = "$(cat /tmp/system.cfg)" ]; then
     echo "profile unchanged, continuing"
   else
@@ -38,7 +34,7 @@ find_ap ()
     save_tmp_profile
     return 0
   fi
-  rm $ssid_scan_path && touch $ssid_scan_path
+  true > $ssid_scan_path
   append_networks
   append_networks
   append_networks
@@ -48,17 +44,15 @@ find_ap ()
   saved_networks=$(ls /etc/persistent/profiles)
   echo "current_ssid: $current_ssid"
   IFS=$'\n'
-  for i in $saved_networks 
-  do 
+  for i in $saved_networks; do 
     saved_ssid=`echo "$i" | cut -d "," -f 1`
     echo "saved_ssid: $saved_ssid"
     if [[ "$saved_ssid" = "$current_ssid" ]]; then
       echo "skipping current SSID"
       continue
     fi
-    for j in $scan_results
-    do 
-      scan_ssid=`echo "$j" | cut -f 1`
+    for j in $scan_results; do 
+      scan_ssid=`echo "$j" | cut -d '|' -f 1`
       echo "scan_ssid: $scan_ssid"
       if [[ "$saved_ssid" = "$scan_ssid" ]]; then
         echo "MATCH: $j - setting AP"
@@ -70,8 +64,7 @@ find_ap ()
   done
 }
 
-save_current_profile ()
-{
+save_current_profile() {
   ssid=$(iwgetid -r)
   profile_path="/etc/persistent/profiles/$ssid"
   if [ "$(cat $profile_path)" = "$(cat /tmp/system.cfg)" ]; then
@@ -84,13 +77,10 @@ save_current_profile ()
   fi
 }
 
-save_tmp_profile ()
-{
+save_tmp_profile () {
   cp /tmp/system.cfg "$cur_profile_path"
   chmod 755 "$cur_profile_path"
 }
-
-# # run every minute
 
 ccq=`mca-status | grep ccq | cut -d= -f2`
 if [[ $ccq -gt 300 ]]; then

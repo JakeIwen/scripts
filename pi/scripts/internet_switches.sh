@@ -5,12 +5,23 @@ ubnt_internet_ops() {
   if conf notorrent; then exit 0; else start_torrent_client; fi
 }
 
-if_online() {
+is_online() {
   [[ `ssh root@OpenWrt "cat /tmp/run/mwan3track/$1/ONLINE"` > 0 ]]
 }
 
+update_iface_score() {
+  file=$1
+  iface_score=`cat $file`
+  if [ "$iface_score" -lt "$lowest_score" ]; then
+    echo "IS LES"
+    lowest_score=$iface_score
+    iface=`basename "$(dirname $file)"`
+    echo "set iface. l: $lowest_score, f: $file, iface: $iface"
+  fi
+}
+
 conf() {
-  cat /home/pi/mconf/$1* &> /dev/null 
+  cat /home/pi/mconf/$1* &> /dev/null
 }
 
 mobile_internet_ops() {
@@ -39,11 +50,16 @@ kill_torrent_client() {
 }
 
 start_torrent_client() {
-  if [[ "$(ps ax)" != *"qbittorrent"* ]]; then nohup qbittorrent-nox; fi
+  if [ -e /mnt/movingparts/ext/airupnp-arm ]; then 
+    [[ "$(ps ax)" != *"qbittorrent"* ]] && nohup qbittorrent-nox
+  else
+    echo "preventing torrent-without-mpdisk"
+    kill_torrent_client
+  fi
 }
 
 mount_drives() {
-  /home/pi/scripts/mount_all.sh
+  /home/pi/scripts/mount_all.sh &> /dev/null
   /home/pi/scripts/fix_hfs_fs.sh
   echo "drives mounted. sharting smb share."
   start_service smbd 
@@ -68,11 +84,11 @@ spindown_drive() {
 }
 
 stop_service() {
-  /usr/sbin/service $1 stop
+  sudo /usr/sbin/service $1 stop
 }
 
 start_service() {
-  /usr/sbin/service $1 status > /dev/null || /usr/sbin/service $1 start
+  /usr/sbin/service $1 status > /dev/null || sudo /usr/sbin/service $1 start
 }
 
 kill_all() {
@@ -84,8 +100,9 @@ kill_all() {
 if date | grep '0:0'; then date; fi
 
 if conf nodisk &> /dev/null; then kill_all
-elif if_online clientwan; then mobile_internet_ops
-elif if_online lifiwan; then lifi_internet_ops
+elif is_online clientwan &> /dev/null; then mobile_internet_ops
+elif is_online lifiwan &> /dev/null; then lifi_internet_ops
 elif ping -c 1 8.8.8.8 &> /dev/null; then ubnt_internet_ops
 else no_internet_ops
 fi
+
