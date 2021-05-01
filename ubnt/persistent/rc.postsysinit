@@ -1,6 +1,6 @@
 #!/bin/sh
 
-logfile="/etc/persistent/scripts/update_wifi.log"
+logfile="/etc/persistent/log/update_wifi.log"
 
 tail -5000 $logfile > "$logfile.tmp"
 mv "$logfile.tmp" $logfile
