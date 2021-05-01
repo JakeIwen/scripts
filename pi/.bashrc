@@ -21,27 +21,19 @@ alias killcron="sudo pkill -f cron"
 alias dirsize='sudo du -hsc .[^.]* *'
 alias disku='df -u'
 alias slp='xset s activate'
-
+alias gpu="sudo /opt/vc/bin/vcdbg reloc stats"
 alias bashp='vi ~/.bashrc'
 alias rbash='exec bash'
 alias init_rsa="ssh-copy-id -i ~/.ssh/id_rsa.pub" # init_rsa user@device
 alias functions="cat ~/.bashrc | grep -E '^[[:space:]]*([[:alnum:]_]+[[:space:]]*\(\)|function[[:space:]]+[[:alnum:]_]+)'"
+
 fndef() { # print function definition
   sed -n -e "/$1()/,/}/ p" ~/.bashrc
 }
+tf() { tail ${2:-'-50'} $1; tail -f $1; } # tail -f with more recent lines 
+snh() { nohup bash -c $1 & tail -f ./nohup.out; }
+s() { . $HOME/scripts/$1.sh; }
 
-tf() {
-  tail -50 $1; tail -f $1
-}
-snh() {
-  nohup bash -c $1 &
-  tail -f ./nohup.out
-}
-s() {
-  . $HOME/scripts/$1.sh
-}
-
-alias isw="$HOME/scripts/internet_switches.sh"
 alias iswl="tf /var/log/cron/internet_switches.log"
 isw="$HOME/scripts/internet_switches.sh"
 mconf="$HOME/mconf"
@@ -69,6 +61,10 @@ rsmp() {
 alias disks='grep "dev/sd" /proc/mounts'
 alias mounts='grep "dev/sd" /proc/mounts'
 alias blk="sudo blkid | grep 'dev/sd'"
+
+alias sns='bash ~/sns.sh'
+alias gpu_mem='vcgencmd get_mem gpu'
+
 remount() {
   pk qbit
   /usr/sbin/service smbd stop
@@ -76,7 +72,6 @@ remount() {
   s mount_all
   s fix_hfs_fs
   /usr/sbin/service smbd start
-  
   mounts
 }
 
@@ -92,49 +87,86 @@ airupnp() {
   fi
 }
 
-alias sns='bash ~/sns.sh'
-alias gpu_mem='vcgencmd get_mem gpu'
-
 # MEDIA
+POSPATH="$HOME/vlc-positions.txt"
+VLCQTPATH="$HOME/.config/vlc/vlc-qt-interface.conf"
+VLCRPATH="$HOME/vlc-recent.txt"
+
+alias vlcp="$POSPATH"
+
+kill_media() {
+  log_position
+  pk omxplayer
+  pk vlc
+}
+
+resume() {
+  path=`grep -Po  '(?<=list=file:\/\/).*?(?=, )' "$VLCQTPATH"`
+  echo "playing $path"
+  nohup vlc -f --sub-language=EN,US,en,us,any $path &
+}
+
+log_position() {
+  [[ -z "$(pgrep vlc)" ]] && return 0
+  file=`py ~/scripts/python/vlc_property.py URL`
+  nsecs=`py ~/scripts/python/vlc_property.py NS`
+  if [[ $file && $nsecs ]]; then 
+    sed -i "\|^$file|d" $POSPATH
+    echo "$file $nsecs" >> $POSPATH
+  else
+    echo "could not extract position on file: $file"
+  fi
+}
+
+get_last_position() {
+  file=`echo $1 | sed 's|\/|\\/|g'`
+  ns=`grep -Po "(?<=${file} ).*" "$POSPATH"`
+  echo "${ns:-0}"
+}
 
 play() {
   dir=`dirname "$1"`
   filename=`basename "$1"`
-  echo "play $1"
-  cd "$dir"
-  filenames=`ls | awk "/$filename/{y=1}y"` # everything after & including match
-  if [[ "$2" == "-r" ]]; then filenames=`ls -I 'nohup.out' | shuf`; fi
-  echo "filenames: $filenames"
+  all_media=`find "$dir" -not -iname nohup.out -print | sort -g`
+  
+  if [[ "$2" == "-r" ]]; then 
+    filenames=`echo "$all_media" | shuf`;
+  else 
+    filenames=`echo "$all_media" | awk "/$filename/{y=1}y"`; # everything after & including match
+  fi
+  
+  echo -ne "filenames: \n$filenames"
   
   ! [ "$filenames" ] && echo "NO MATCH!" && return 0
-  sudo pkill -f omxplayer
-  sudo pkill -f vlc
+  kill_media
   bash ~/sns.sh rear_movie
   xset s reset # wake display
   nohup vlc -f --sub-language=EN,US,en,us,any $filenames &
-  # vlc -f $filenames
   sudo renice -12 -g  `pgrep vlc`
-
+  last_position=$(get_last_position "$1")
+  echo "last_position: $last_position"
+  sleep 4
+  [[ -n $last_position ]] && vlcmd Seek int64:${last_position}
 }
 
 playf() {
   name=`echo $1 | perl -pe 's/ /_/g'`
-  echo "name $name"
-  ep=$2 # episode number eg 304 (parsed from S03E04)
+  ep=$2 # episode number eg 304 (parsed from S03E04) or flag -a, -r
   num_re='^[0-9]+$'
-  # readarray -d '' match_arr < <(find /mnt/movingparts/links -type l -iname "*$name*" -print0)
-  readarray -d '' match_arr < <(find /mnt/bigboi/mp_backup/links -type l -iname "*$name*" -print0 | find /mnt/movingparts/links -type l -iname "*$name*" -print0)
-  # [[ ${#match_arr[@]} -eq 1 ]] && play "${match_arr[0]}" && return 0
+  readarray -d '' match_arr < <( find /mnt/bigboi/mp_backup/links -type l -iname "*$name*" -print0 | find /mnt/movingparts/links -type l -iname "*$name*" -print0 | sort -g )
+  unset match_arr[-1] > /dev/null
   if [[ ! "$2" && ${#match_arr[@]} -gt 1 ]]; then 
-    ls `dirname "${match_arr[0]}"`
-    echo "^^^ Available matches ^^^"
-    return 0;
+    printf '%s\n' "${match_arr[@]/*\//}"
+    echo -ne "^^^ Available matches ^^^ \n use flag -a to play all"
+    return 0
   fi
+  if [[ "$2" == "-a" ]]; then play ${match_arr[0]} && return 0; fi
   if [ -z "$2" ] || [[ "$2" == "-r" ]]; then play ${match_arr[0]} -r && return 0; fi
   for line in "${match_arr[@]}"; do 
-    matcher=$line
     if [[ $ep =~ $num_re ]] ; then
-      matcher=`echo $matcher | sed -e 's|[^0-9]*||g'` # parsed numbers
+      matcher=`echo $line | sed -e 's|[^0-9]*||g;s|_\d{4}_||g'` # parsed numbers
+    else
+      matcher=$line
     fi
     echo "matcher $matcher"
     if [[ "${matcher,,}" == *"${ep,,}"* ]]; then # case-insensitive match
@@ -167,9 +199,7 @@ vlcmd() {
 
 alias pp="vlcmd PlayPause"
 
-vlcr() {
-  grep -i "$1" "$HOME/vlc-recent.txt"
-}
+vlcr() { grep -i "$1" "$VLCRPATH"; }
 
 play_status() {
   omx_pos=`curl "http://0.0.0.0:2020/position"`
@@ -179,14 +209,15 @@ play_status() {
     position=`py scripts/python/vlc_property.py Position`
     total=`py scripts/python/vlc_property.py TotalTime`
     title=`py scripts/python/vlc_property.py Title`
+    [[ -n "$title" ]] && log_position
     printf "$title \r$position / $total"
   fi
 }
-  
-alias movies='cd /mnt/movingparts/links/Movies && ls | sed "s|\.| |g" | sed "s| ...$||g"'
-alias docu='cd /mnt/movingparts/links/Documentaries && ls | sed "s|\.| |g" | sed "s| ...$||g"'
+
+alias movies='cd /mnt/bigboi/mp_backup/torrent/links/Movies && ls | sed "s|\.| |g" | sed "s| ...$||g"'
+alias docu='cd /mnt/bigboi/mp_backup/torrent/links/Documentaries && ls | sed "s|\.| |g" | sed "s| ...$||g"'
 tv(){
-  cd /mnt/movingparts/links/TV || cd /mnt/bigboi/mp_backup/links/TV;
+  cd /mnt/bigboi/links/TV || cd /mnt/bigboi/mp_backup/links/TV;
   [[ "$#" = "1" ]] && cd "`find . -maxdepth 1 -name "*$1*"`"
   ls
 }
@@ -196,6 +227,7 @@ alias links='cd /mnt/movingparts/links; ls -lh;'
 alias mp='cd /mnt/movingparts/'
 alias bb='cd /mnt/bigboi/'
 alias mnt='cd /mnt'
+alias tor='cd /mnt/movingparts/torrent/'
 
 alias am=". $HOME/scripts/alias_media.sh"
 
@@ -253,7 +285,7 @@ hcp() {
 killport() {
   ARGS=("$@")
   detail_list=`lsof ${ARGS[@]/#/-i:}`
-  echo "killing processes:\n$detail_list"
+  echo -ne "killing processes:\n$detail_list"
   [ "$detail_list" ] && lsof ${ARGS[@]/#/-ti:} | xargs kill
 }
 
@@ -315,6 +347,7 @@ nalias() {
   exec bash
 }
 
+join_by() { local IFS="$1"; shift; echo "$*"; }
 
 pk() { # kill process by name match - append flag '-9' for SIGTERM
   search_terms=$*
@@ -324,12 +357,13 @@ pk() { # kill process by name match - append flag '-9' for SIGTERM
   else
     last=""
   fi
-  pids=`pgrep -f $(echo $search_terms)`
+  joined_terms=`join_by '|' $(echo $search_terms)`
+  pids=`pgrep -f "$joined_terms"`
   echo "found $pids"
   if [[ ! $pids ]]; then echo "no match" && return 0; fi
   sudo kill $last $(echo $pids)
-
-  alive=`pgrep -f $(echo $search_terms)`
+  sleep 1
+  alive=`pgrep -f "$joined_terms"`
   if [[ $alive ]]; then 
     echo "still alive: $alive"
     echo "re run with '-9' to SIGKILL"

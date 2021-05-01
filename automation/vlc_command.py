@@ -5,7 +5,7 @@ from sonos_tasks import sonos_audio_source
 
 file = sys.argv[1]
 # std_ref = sys.stdout
-# sys.stdout = open('/dev/null', 'w') 
+# sys.stdout = open('/dev/null', 'w')
 # sys.stdout = std_ref
 
 def vplay(p):
@@ -14,7 +14,7 @@ def vplay(p):
     p.play()
     p.set_fullscreen(True)
     return True
-    
+
 def vpause(p):
     print('pausing')
     p.pause()
