@@ -27,7 +27,8 @@ elif req == 'TotalTime':
     
 elif req == 'Position':
     format_time = True
-
+elif req == 'NS':
+    prop = 'Position'
 # not working
 # elif req == 'TrackList':
 #     iface = "TrackList"
