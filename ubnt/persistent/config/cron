@@ -1,2 +1,2 @@
 * * * * *     /etc/persistent/scripts/update_wifi.sh >> /etc/persistent/log/update_wifi.log 2>&1
-# 0 * * * *   /etc/persistent/scripts/truncate_file.sh >> /etc/persistent/log/update_wifi.log 5000 2>&1
+0 * * * *   /etc/persistent/scripts/truncate_file.sh "/etc/persistent/log/update_wifi.log" 5000 2>&1/

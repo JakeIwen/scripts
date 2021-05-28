@@ -1,12 +1,9 @@
 import sys
 import vlc
 import getch
-from sonos_tasks import sonos_audio_source
+from sonos_tasks import sonos_audio_source 
 
 file = sys.argv[1]
-# std_ref = sys.stdout
-# sys.stdout = open('/dev/null', 'w')
-# sys.stdout = std_ref
 
 def vplay(p):
     sonos_audio_source('vonRear', 'line')
@@ -44,6 +41,8 @@ while True:
         playing = vpause(player) if playing else vplay(player)
   except Exception as e:
     print(e)
+    
+
 
 # Basic Commands associated with the class object
 # p.play()

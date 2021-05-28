@@ -22,15 +22,14 @@ alias dirsize='sudo du -hsc .[^.]* *'
 alias disku='df -u'
 alias slp='xset s activate'
 alias gpu="sudo /opt/vc/bin/vcdbg reloc stats"
+alias gpu=gtop
 alias bashp='vi ~/.bashrc'
 alias rbash='exec bash'
 alias init_rsa="ssh-copy-id -i ~/.ssh/id_rsa.pub" # init_rsa user@device
 alias functions="cat ~/.bashrc | grep -E '^[[:space:]]*([[:alnum:]_]+[[:space:]]*\(\)|function[[:space:]]+[[:alnum:]_]+)'"
 
-fndef() { # print function definition
-  sed -n -e "/$1()/,/}/ p" ~/.bashrc
-}
-tf() { tail ${2:-'-50'} $1; tail -f $1; } # tail -f with more recent lines 
+fndef() { sed -n -e "/$1()/,/}/ p" ~/.bashrc; } # print function definition
+tf() { tail ${2:-'-50'} $1; tail -f $1; }       # tail -f with more recent lines 
 snh() { nohup bash -c $1 & tail -f ./nohup.out; }
 s() { . $HOME/scripts/$1.sh; }
 
@@ -65,13 +64,15 @@ alias blk="sudo blkid | grep 'dev/sd'"
 alias sns='bash ~/sns.sh'
 alias gpu_mem='vcgencmd get_mem gpu'
 
+mountall() { s mount_all; }
+
 remount() {
   pk qbit
   /usr/sbin/service smbd stop
   s umount_all
   s mount_all
   s fix_hfs_fs
-  /usr/sbin/service smbd start
+  sudo /usr/sbin/service smbd start
   mounts
 }
 
@@ -92,18 +93,20 @@ POSPATH="$HOME/vlc-positions.txt"
 VLCQTPATH="$HOME/.config/vlc/vlc-qt-interface.conf"
 VLCRPATH="$HOME/vlc-recent.txt"
 
-alias vlcp="$POSPATH"
+escape_chars() { echo $1 | perl -ne 'chomp;print "\Q$_\E\n"'; }
 
 kill_media() {
   log_position
-  pk omxplayer
-  pk vlc
+  pk chrom omxplayer vlc
+  echo lp
 }
 
 resume() {
-  path=`grep -Po  '(?<=list=file:\/\/).*?(?=, )' "$VLCQTPATH"`
+  echo hewy3
+  echo "$POSPATH"
+  path=`tail -1 "$POSPATH" | cut -d' ' -f1`
   echo "playing $path"
-  nohup vlc -f --sub-language=EN,US,en,us,any $path &
+  play "$path" "$*"
 }
 
 log_position() {
@@ -111,6 +114,7 @@ log_position() {
   file=`py ~/scripts/python/vlc_property.py URL`
   nsecs=`py ~/scripts/python/vlc_property.py NS`
   if [[ $file && $nsecs ]]; then 
+    # sub_status=`tail -1 "$POSPATH" | cut -d' ' -f3`
     sed -i "\|^$file|d" $POSPATH
     echo "$file $nsecs" >> $POSPATH
   else
@@ -124,26 +128,39 @@ get_last_position() {
   echo "${ns:-0}"
 }
 
+playi() {
+  subs='--sub-language=EN,US,en,us,any'
+  nohup vlc -f "$subs" "$1" &
+}
+
 play() {
+  path=$1
   dir=`dirname "$1"`
   filename=`basename "$1"`
+  shift
+  filename="$(escape_chars "$filename")"
   all_media=`find "$dir" -not -iname nohup.out -print | sort -g`
   
-  if [[ "$2" == "-r" ]]; then 
+  if [[ "$1" == "-r" ]]; then 
     filenames=`echo "$all_media" | shuf`;
+    shift
   else 
+    [[ "$1" == "-a" ]] && shift
     filenames=`echo "$all_media" | awk "/$filename/{y=1}y"`; # everything after & including match
   fi
+  subs='--sub-language=EN,US,en,us,any'
+  [[ "$1" == "-ns" ]] && subs='--sub-track=20'
   
-  echo -ne "filenames: \n$filenames"
+  echo -ne "filenames: \n$filenames\n"
+  echo "subs: $subs"
   
   ! [ "$filenames" ] && echo "NO MATCH!" && return 0
   kill_media
   bash ~/sns.sh rear_movie
   xset s reset # wake display
-  nohup vlc -f --sub-language=EN,US,en,us,any $filenames &
+  nohup vlc -f $subs $filenames &
   sudo renice -12 -g  `pgrep vlc`
-  last_position=$(get_last_position "$1")
+  last_position=$(get_last_position "$path")
   echo "last_position: $last_position"
   sleep 4
   [[ -n $last_position ]] && vlcmd Seek int64:${last_position}
@@ -160,8 +177,8 @@ playf() {
     echo -ne "^^^ Available matches ^^^ \n use flag -a to play all"
     return 0
   fi
-  if [[ "$2" == "-a" ]]; then play ${match_arr[0]} && return 0; fi
-  if [ -z "$2" ] || [[ "$2" == "-r" ]]; then play ${match_arr[0]} -r && return 0; fi
+  if [[ "$2" == "-a" ]]; then play ${match_arr[0]} "$3" && return 0; fi
+  if [ -z "$2" ] || [[ "$2" == "-r" ]]; then play ${match_arr[0]} -r "$3" && return 0; fi
   for line in "${match_arr[@]}"; do 
     if [[ $ep =~ $num_re ]] ; then
       matcher=`echo $line | sed -e 's|[^0-9]*||g;s|_\d{4}_||g'` # parsed numbers
@@ -170,9 +187,8 @@ playf() {
     fi
     echo "matcher $matcher"
     if [[ "${matcher,,}" == *"${ep,,}"* ]]; then # case-insensitive match
-      echo "playing $line"
-      play "$line" "$2"
-      return 0
+      echo "playing $line $2 $3"
+      play "$line" "$2" "$3"
     fi
   done
 }
@@ -180,10 +196,7 @@ playf() {
 cv() {
   matches=`find . -maxdepth 1 -iname "*$1*"`
   echo "Matches: $matches"
-  if [[ $matches ]]; then 
-    cd "$matches" || echo "multiple matches"
-  else echo "no match" 
-  fi
+  if [[ $matches ]]; then cd "$matches" || echo "multiple matches"; fi
 }
 
 fgp() {
@@ -198,8 +211,8 @@ vlcmd() {
 }
 
 alias pp="vlcmd PlayPause"
-
 vlcr() { grep -i "$1" "$VLCRPATH"; }
+vlc_nosubs() { kill_media; resume -ns; }
 
 play_status() {
   omx_pos=`curl "http://0.0.0.0:2020/position"`
@@ -214,28 +227,27 @@ play_status() {
   fi
 }
 
-alias movies='cd /mnt/bigboi/mp_backup/torrent/links/Movies && ls | sed "s|\.| |g" | sed "s| ...$||g"'
-alias docu='cd /mnt/bigboi/mp_backup/torrent/links/Documentaries && ls | sed "s|\.| |g" | sed "s| ...$||g"'
-tv(){
+tv() {
   cd /mnt/bigboi/links/TV || cd /mnt/bigboi/mp_backup/links/TV;
   [[ "$#" = "1" ]] && cd "`find . -maxdepth 1 -name "*$1*"`"
   ls
 }
-
+alias movies='cd /mnt/bigboi/mp_backup/links/Movies && ls | sed "s|\.| |g" | sed "s| ...$||g"'
+alias docu='cd /mnt/bigboi/mp_backup/links/Documentaries && ls | sed "s|\.| |g" | sed "s| ...$||g"'
 alias torrent='cd /mnt/movingparts/torrent; ls -lh;'
+alias new='cd /mnt/movingparts/links/new; ls -lh;'
 alias links='cd /mnt/movingparts/links; ls -lh;'
+alias inc='cd /mnt/movingparts/torrent/incomplete/; ls -lh'
 alias mp='cd /mnt/movingparts/'
 alias bb='cd /mnt/bigboi/'
 alias mnt='cd /mnt'
 alias tor='cd /mnt/movingparts/torrent/'
+alias inc='cd /mnt/movingparts/torrent/incomplete; ls -lah'
 
-alias am=". $HOME/scripts/alias_media.sh"
-
+alias am=". ~/scripts/alias_media.sh"
 alias ifonline="ssh root@OpenWrt mwan3 interfaces | grep 'is online'"
-
 alias cast="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; nohup python3 server.py &"
 alias castnn="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; python3 server.py"
-
 alias rpiplay='nohup /home/pi/RPiPlay/build/rpiplay -r 180 &'
 
 alias pd='sudo /sbin/shutdown -r now'
@@ -351,27 +363,22 @@ join_by() { local IFS="$1"; shift; echo "$*"; }
 
 pk() { # kill process by name match - append flag '-9' for SIGTERM
   search_terms=$*
-  last="${@: -1}" # remove last arg
-  if [[ $last == '-9' ]]; then
-    search_terms=${@:1:-1}
-  else
-    last=""
-  fi
+  k9="${@: -1}" # remove k9 arg
+  if [[ $k9 == '-9' ]]; then search_terms=${@:1:-1}; else k9=""; fi
+  
   joined_terms=`join_by '|' $(echo $search_terms)`
-  pids=`pgrep -f "$joined_terms"`
-  echo "found $pids"
+  pids=`pgrep -fi "$joined_terms" | sed "s|$$||g"`
   if [[ ! $pids ]]; then echo "no match" && return 0; fi
-  sudo kill $last $(echo $pids)
+  echo $pids | while read -r pid; do sudo kill $k9 $pid; done
   sleep 1
-  alive=`pgrep -f "$joined_terms"`
+  alive=`pgrep -fi "$joined_terms"`
   if [[ $alive ]]; then 
     echo "still alive: $alive"
     echo "re run with '-9' to SIGKILL"
   else
-    echo "all terminated"
+    echo "terminated $pids"
   fi
 }
-
 
 export DISPLAY=:0
 export HISTSIZE=100000
