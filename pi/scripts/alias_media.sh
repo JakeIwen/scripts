@@ -37,17 +37,20 @@ alias_folders() {
  
   find "$src/torrent/TV" -maxdepth 1 -mindepth 1  -type d \
     | while read pth; do media_group_links "$pth"; done
+  echo TV
   find "$src/torrent/Documentaries" -maxdepth 1 -mindepth 1  -type d \
     | while read pth; do media_group_links "$pth"; done
-    find "$src/torrent/New" -maxdepth 1 -mindepth 1  -type d \
-      | while read pth; do media_group_links "$pth"; done
+  echo Docu
+  find "$src/torrent/New" -maxdepth 1 -mindepth 1  -type d \
+    | while read pth; do media_group_links "$pth"; done
+  echo New
   media_group_links "$src/torrent/Movies"
-  
+  echo Movies
   chmod -R 777 "$links"
 }
-
+echo "mp start"
 [ -e "/mnt/movingparts" ] && alias_folders "/mnt/movingparts"
-echo "mp done"
+echo "mp done; bb start"
 [ -e "/mnt/bigboi/mp_backup" ] && alias_folders "/mnt/bigboi/mp_backup"
 echo "bb done"
 
