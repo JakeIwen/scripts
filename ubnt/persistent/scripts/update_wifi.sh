@@ -47,14 +47,14 @@ find_ap() {
   for i in $saved_networks; do 
     saved_ssid=`echo "$i" | cut -d "," -f 1`
     echo "saved_ssid: $saved_ssid"
-    if [[ "$saved_ssid" = "$current_ssid" ]]; then
+    if [ "$saved_ssid" = "$current_ssid" ]; then
       echo "skipping current SSID"
       continue
     fi
     for j in $scan_results; do 
       scan_ssid=`echo "$j" | cut -d '|' -f 1`
       echo "scan_ssid: $scan_ssid"
-      if [[ "$saved_ssid" = "$scan_ssid" ]]; then
+      if [ "$saved_ssid" = "$scan_ssid" ]; then
         echo "MATCH: $j - setting AP"
         set_ap $scan_ssid
         echo " "
@@ -89,10 +89,6 @@ if [[ $ccq -gt 300 ]]; then
 else
   find_ap
 fi
-
-
-
-
 
 # ensure_saved ()
 # {
