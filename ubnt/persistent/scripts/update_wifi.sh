@@ -20,7 +20,7 @@ set_ap() {
   pkill -f crond
   sleep 120
   echo "AP set. Restarting cron at $(date)"
-  crond
+  . /var/etc/persistent/rc.postsysinit
 }
 
 find_ap() {
