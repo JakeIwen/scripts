@@ -68,7 +68,7 @@ mountall() { s mount_all; }
 
 remount() {
   pk qbit
-  /usr/sbin/service smbd stop
+  sudo /usr/sbin/service smbd stop
   s umount_all
   s mount_all
   s fix_hfs_fs
