@@ -66,15 +66,7 @@ alias gpu_mem='vcgencmd get_mem gpu'
 
 mountall() { s mount_all; }
 
-remount() {
-  pk qbit
-  sudo /usr/sbin/service smbd stop
-  s umount_all
-  s mount_all
-  s fix_hfs_fs
-  sudo /usr/sbin/service smbd start
-  mounts
-}
+alias remount='su -c "/home/pi/scripts/remount.sh"'
 
 airupnp() {
   if [[ "$1" == "disable" ]]; then
@@ -213,7 +205,6 @@ vlcmd() {
 alias pp="vlcmd PlayPause"
 vlcr() { grep -i "$1" "$VLCRPATH"; }
 vlc_nosubs() { kill_media; resume -ns; }
-
 play_status() {
   omx_pos=`curl "http://0.0.0.0:2020/position"`
   if [[ $omx_pos ]]; then
@@ -249,6 +240,8 @@ alias ifonline="ssh root@OpenWrt mwan3 interfaces | grep 'is online'"
 alias cast="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; nohup python3 server.py &"
 alias castnn="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; python3 server.py"
 alias rpiplay='nohup /home/pi/RPiPlay/build/rpiplay -r 180 &'
+# boost processess pushing netflix, may help with outher services
+alias rechrome="sudo renice -12  \`ps aux --sort=%cpu | tail -3 | awk '{print \$2}'\`"
 
 alias pd='sudo /sbin/shutdown -r now'
 alias rb='sudo reboot'

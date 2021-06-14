@@ -10,7 +10,7 @@
 build_ips() {
   for net in "$@"; do 
     ip="192.168.$net.20" 
-    echo $ip
+    # echo $ip
     if ping -c 1 $ip &> /dev/null; then echo "$ip" ; fi
   done 
 } 
@@ -46,5 +46,5 @@ exec_on() {
   # $5 && if ping -c 1 $ip4 &> /dev/null; then `$cmd` ; fi
 }
 
-exec_on 6 7 8 10
+exec_on 8
 
