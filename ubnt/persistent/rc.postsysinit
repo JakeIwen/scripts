@@ -8,7 +8,7 @@ chmod 777 $logfile
 echo "" >> $logfile
 date >> $logfile
 
-mkdir -p /etc/crontabs
+mkdir -p /etc/crontabs    
 cp /etc/persistent/config/cron /etc/crontabs/ubnt
 cp /etc/persistent/config/.profile /etc/persistent/.profile
 crond
