@@ -51,6 +51,10 @@ def fwd_15():
 def fwd_30():
     scrub(30)
     
+def next_track():
+    get_preferred_device().next()
+def prev_track():
+    get_preferred_device().previous()
 
 # utilities
 def vol_50_all():
