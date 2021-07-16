@@ -21,8 +21,7 @@ alias killcron="sudo pkill -f cron"
 alias dirsize='sudo du -hsc .[^.]* *'
 alias disku='df -u'
 alias slp='xset s activate'
-alias gpu="sudo /opt/vc/bin/vcdbg reloc stats"
-alias gpu=gtop
+alias gtop="sudo /opt/vc/bin/vcdbg reloc stats"
 alias bashp='vi ~/.bashrc'
 alias rbash='exec bash'
 alias init_rsa="ssh-copy-id -i ~/.ssh/id_rsa.pub" # init_rsa user@device
@@ -64,9 +63,7 @@ alias blk="sudo blkid | grep 'dev/sd'"
 alias sns='bash ~/sns.sh'
 alias gpu_mem='vcgencmd get_mem gpu'
 
-mountall() { s mount_all; }
-
-alias remount='su -c "/home/pi/scripts/remount.sh"'
+alias remount='sudo su -c "/home/pi/scripts/remount.sh"'
 
 airupnp() {
   if [[ "$1" == "disable" ]]; then
@@ -177,7 +174,6 @@ playf() {
     else
       matcher=$line
     fi
-    echo "matcher $matcher"
     if [[ "${matcher,,}" == *"${ep,,}"* ]]; then # case-insensitive match
       echo "playing $line $2 $3"
       play "$line" "$2" "$3"
