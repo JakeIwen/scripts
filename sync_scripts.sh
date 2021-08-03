@@ -28,6 +28,7 @@ scp  "$configs/rsync-exclude-media.txt" "$pi_ip:/rsync-exclude-media.txt"
 
 # ROUTER
 # scp -r "$vr_ip:/etc/config" "$vanrouter/etc/"
+scp "$vanrouter/etc/config/betterspeedtest.sh" "$vr_ip:/etc/config/betterspeedtest.sh"
 scp "$vanrouter/root/auto_dns.sh" "$vr_ip:/root/auto_dns.sh"
 scp "$vanrouter/root/.profile" "$vr_ip:/root/.profile"
 
