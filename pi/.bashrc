@@ -159,14 +159,21 @@ playf() {
   name=`echo $1 | perl -pe 's/ /_/g'`
   ep=$2 # episode number eg 304 (parsed from S03E04) or flag -a, -r
   num_re='^[0-9]+$'
-  readarray -d '' match_arr < <( find /mnt/bigboi/mp_backup/links -type l -iname "*$name*" -print0 | find /mnt/movingparts/links -type l -iname "*$name*" -print0 | sort -g )
+  bb_links='/mnt/bigboi/mp_backup/links'
+  mp_links='/mnt/movingparts/links'
+  readarray -d '' match_arr < <( find "$bb_links" -type l -ipath "*$name*" -print0 | find "$mp_links" -type l -ipath "*$name*" -print0 | sort -g )
+  if [ ${#match_arr[@]} -eq 0 ]; then echo "No matches found" && return 1; fi
   unset match_arr[-1] > /dev/null
-  if [[ ! "$2" && ${#match_arr[@]} -gt 1 ]]; then 
+  
+  if [ -z "$ep" ]; then echo "no ep supplied"; fi
+  
+  if [[ ! "$ep" && ${#match_arr[@]} -gt 1 ]]; then 
     printf '%s\n' "${match_arr[@]/*\//}"
     echo -ne "^^^ Available matches ^^^ \n use flag -a to play all"
     return 0
   fi
-  if [[ "$2" == "-a" ]]; then play ${match_arr[0]} "$3" && return 0; fi
+  
+  if [[ "$ep" == "-a" ]]; then play ${match_arr[0]} "$3" && return 0; fi
   if [ -z "$2" ] || [[ "$2" == "-r" ]]; then play ${match_arr[0]} -r "$3" && return 0; fi
   for line in "${match_arr[@]}"; do 
     if [[ $ep =~ $num_re ]] ; then
@@ -200,7 +207,7 @@ vlcmd() {
 
 alias pp="vlcmd PlayPause"
 vlcr() { grep -i "$1" "$VLCRPATH"; }
-vlc_nosubs() { kill_media; resume -ns; }
+vlc_nosubs() { kill_media; resume -ns; }  
 play_status() {
   omx_pos=`curl "http://0.0.0.0:2020/position"`
   if [[ $omx_pos ]]; then
@@ -215,7 +222,7 @@ play_status() {
 }
 
 tv() {
-  cd /mnt/bigboi/links/TV || cd /mnt/bigboi/mp_backup/links/TV;
+  cd /mnt/bigboi/links/TV || cd /mnt/movingparts/links/TV
   [[ "$#" = "1" ]] && cd "`find . -maxdepth 1 -name "*$1*"`"
   ls
 }
@@ -238,7 +245,7 @@ alias castnn="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; python3
 alias rpiplay='nohup /home/pi/RPiPlay/build/rpiplay -r 180 &'
 # boost processess pushing netflix, may help with outher services
 alias rechrome="sudo renice -12  \`ps aux --sort=%cpu | tail -3 | awk '{print \$2}'\`"
-
+alias ngear="ssh root@OpenWrt"
 alias pd='sudo /sbin/shutdown -r now'
 alias rb='sudo reboot'
 

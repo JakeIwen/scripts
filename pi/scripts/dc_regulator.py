@@ -4,21 +4,21 @@ import RPi.GPIO as GPIO
 import obd
 
 GPIO.setmode(GPIO.BCM)
-GPIO.setup(13, GPIO.OUT)
+GPIO.setup(12, GPIO.OUT)
 
 dc = 0 # duty cycle
 v_ecu = 0
 v_obd = 0
-v_min = 13.5
+v_min = 13.4
 v_max = 14
 rpm = 0
 rpm_increasing = True
 voltage_increasing = False
 MAX_FIELD = 100
-last_response_timestamp = None
+last_response_at = None
 
 obd_link = obd.Async()
-pwm = GPIO.PWM(13, 113)  # channel=13 frequency=113Hz
+pwm = GPIO.PWM(12, 113)  # channel=12 frequency=113Hz
 start_time = int(time.time())
 
 if len(sys.argv) == 2:
@@ -51,14 +51,25 @@ def kill_duty_cycle():
     global dc
     dc = 0
     pwm.ChangeDutyCycle(dc)
+    print("killed duty cycle")
     
 def voltage_in_range():
     if not v_ecu or v_ecu > 14.6 or v_ecu < 10:
         kill_duty_cycle()
-        print(f"Error v_ecu out of range v_ecu=={v_ecu}, v_obd=={v_obd}, killed duty cycle")
+        print(f"Error v_ecu out of range v_ecu=={v_ecu}, v_obd=={v_obd}")
         return False
     else:
         return True
+
+def comm_synced():
+    last_update = time.time() - last_response_at
+    if last_update > 0.4:
+        kill_duty_cycle()
+        print(f"no update for {last_update}s")
+
+def ensure_failsafes():
+    voltage_in_range()
+    comm_synced()
     
 def regulate_pwm_duty_cycle():
     if not voltage_in_range():
@@ -70,23 +81,11 @@ def regulate_pwm_duty_cycle():
     elif v_ecu < v_min:
         increase_duty_cycle()
 
-def ensure_failsafes():
-    voltage_in_range()
-    last_update = time.time() - last_response_timestamp
-    # print(f"last update: {last_update}")
-    if last_update > 0.4:
-        kill_duty_cycle()
-        print(f"no update for {last_update}s, killed duty cycle")
-
 def ecu_voltage_update(r):
-    global v_ecu
-    global last_response_timestamp
-    global voltage_increasing
-    new_voltage = r.value.magnitude
-    v_diff = new_voltage - v_ecu
-    voltage_increasing = v_diff > 0
-    v_ecu = new_voltage
-    last_response_timestamp = r.time
+    global v_ecu, last_response_at, voltage_increasing
+    v_now = r.value.magnitude
+    v_diff = v_now - v_ecu
+    v_ecu, last_response_at, voltage_increasing = v_now, r.time, v_diff > 0
     
     if v_diff > 0.3:
         return kill_duty_cycle()
@@ -117,6 +116,7 @@ def end_session():
     pwm.stop()
     obd_link.stop()
     GPIO.cleanup()
+    print("CLean session end.")
 
 def init():
     # import pdb; pdb.set_trace()
@@ -127,7 +127,7 @@ def init():
     
     obd_link.start()
     pwm.start(dc)
-    while not last_response_timestamp: # wait for initial reading
+    while not last_response_at: # wait for initial reading
         time.sleep(0.1)
     
     try:

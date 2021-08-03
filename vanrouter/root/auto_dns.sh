@@ -2,48 +2,38 @@
 
 # The script automatically switches the DNS servers between Pi-hole and Cloudflare based on Pi-hole DNS Server status.
 
-TARGET=192.168.6.4 # Pi-hole
+PIHOLE=192.168.6.103 # Pi-hole
 FALLBACK_A=1.1.1.1 # Cloudflare
 FALLBACK_B=1.0.0.1 # Cloudflare
-echo "$(date)"
 
-set_fallback_dns() {
-    # echo "$(date)"
-    echo "Setting fallback DNS servers"
-    echo $FALLBACK_A
-    echo $FALLBACK_B
+DNS_CFG=$(uci show dhcp.@dnsmasq[0].server)
+PIHOLE_PING_CT=$(ping -c 1 -w 1 $PIHOLE | grep seq | wc -l)
+PIHOLE_DNS_CT=$(echo $DNS_CFG | grep $PIHOLE | wc -l)
+FALLBACK_DNS_CT=$(echo $DNS_CFG | grep $FALLBACK_A | wc -l)
 
-    uci -q delete dhcp.@dnsmasq[0].server
-    uci add_list dhcp.@dnsmasq[0].server=$FALLBACK_A
-    uci add_list dhcp.@dnsmasq[0].server=$FALLBACK_B
-    uci commit dhcp
-    /etc/init.d/dnsmasq restart
+
+echo_dns_data() {
+  echo "$(date)"
+  echo "DNS_CFG $DNS_CFG"
+  echo "PIHOLE_PING_CT $PIHOLE_PING_CT"
+  echo "PIHOLE_DNS_CT $PIHOLE_DNS_CT"
+  echo "FALLBACK_DNS_CT $FALLBACK_DNS_CT"
 }
 
-TARGET_PING_COUNT=$(ping -c 3 -w 3 $TARGET | grep seq | wc -l)
-# check if pi is down
-if [ $TARGET_PING_COUNT -eq 0 ]; then
-    FALLBACK_DNS_COUNT=$(uci show dhcp.@dnsmasq[0].server | grep $FALLBACK_A | wc -l)
-    echo "fallback DNS ct $FALLBACK_DNS_COUNT"
-    # check if fallback is not set as a DNS server
-    if [ $FALLBACK_DNS_COUNT -eq 0 ]; then
-        set_fallback_dns
-    fi
-else
-    TARGET_DNS_COUNT=$(uci show dhcp.@dnsmasq[0].server | grep $TARGET | wc -l)
-    # check if target is not set as a DNS server
-    if [ $TARGET_DNS_COUNT -eq 0 ]; then
-        # check if raspi is up
-        if ping -c 1 '192.168.6.4'; then
-            # echo "$(date)"
-            echo "Setting target DNS server"
-            echo $TARGET
-            uci -q delete dhcp.@dnsmasq[0].server
-            uci add_list dhcp.@dnsmasq[0].server=$TARGET
-            uci commit dhcp
-            /etc/init.d/dnsmasq restart
-        else
-            set_fallback_dns
-        fi
-    fi
+set_dns() {
+  echo "setting new dns"
+  echo_dns_data
+  uci -q delete dhcp.@dnsmasq[0].server
+  uci add_list dhcp.@dnsmasq[0].server=$1
+  if [ "$#" -eq 2 ]; then uci add_list dhcp.@dnsmasq[0].server=$2; fi
+  uci commit dhcp
+  /etc/init.d/dnsmasq restart
+}
+
+if [ $PIHOLE_PING_CT -eq 1 ] && [ $PIHOLE_DNS_CT -eq 0 ]; then
+  echo "Setting target DNS server to pi: $PIHOLE"
+  set_dns $PIHOLE
+elif [ $PIHOLE_PING_CT -eq 0 ] && [ $FALLBACK_DNS_CT -eq 0 ]; then # && ping -c 1 $FALLBACK_A > /dev/null
+  echo "Setting fallback DNS servers $FALLBACK_A $FALLBACK_B"
+  set_dns $FALLBACK_A $FALLBACK_B
 fi
