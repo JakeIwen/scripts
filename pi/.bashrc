@@ -128,7 +128,7 @@ play() {
   filename=`basename "$1"`
   shift
   filename="$(escape_chars "$filename")"
-  all_media=`find "$dir" -not -iname nohup.out -print | sort -g`
+  all_media=`find "$dir" -type l -not -iname nohup.out -print | sort -g`
   
   if [[ "$1" == "-r" ]]; then 
     filenames=`echo "$all_media" | shuf`;
@@ -155,13 +155,27 @@ play() {
   [[ -n $last_position ]] && vlcmd Seek int64:${last_position}
 }
 
+parse_episode_num() {
+  path=$1
+  ep=$2
+  cleanln=`echo $path | perl -pe 's|\_?\d{4}\_?||g'`
+  season=`echo $cleanln | grep  -o 'S[[:digit:]][[:digit:]]' | tail -1` 
+  ep=`echo $cleanln | grep  -o 'E[[:digit:]][[:digit:]]' | tail -1` 
+  if [[ "$ep" && "$season" ]] ; then
+    parsed_ep_num=`echo "${season}${ep}" | perl -pe 's|\D||g' | perl -pe 's|^0||g'` # parsed numbers
+  else
+    parsed_ep_num=`echo $cleanln | perl -pe 's|\_?\d{4,}\_?||g' | grep '[[:digit:]][[:digit:]][[:digit:]]'`
+  fi
+  echo $parsed_ep_num
+}
+
 playf() {
   name=`echo $1 | perl -pe 's/ /_/g'`
   ep=$2 # episode number eg 304 (parsed from S03E04) or flag -a, -r
   num_re='^[0-9]+$'
   bb_links='/mnt/bigboi/mp_backup/links'
   mp_links='/mnt/movingparts/links'
-  readarray -d '' match_arr < <( find "$bb_links" -type l -ipath "*$name*" -print0 | find "$mp_links" -type l -ipath "*$name*" -print0 | sort -g )
+  readarray -d '' match_arr < <( find "$bb_links" -type l -ipath "*$name*" -print0 | find "$mp_links" -type l -ipath "*$name*" -print0 | sort -z )
   if [ ${#match_arr[@]} -eq 0 ]; then echo "No matches found" && return 1; fi
   unset match_arr[-1] > /dev/null
   
@@ -176,12 +190,9 @@ playf() {
   if [[ "$ep" == "-a" ]]; then play ${match_arr[0]} "$3" && return 0; fi
   if [ -z "$2" ] || [[ "$2" == "-r" ]]; then play ${match_arr[0]} -r "$3" && return 0; fi
   for line in "${match_arr[@]}"; do 
-    if [[ $ep =~ $num_re ]] ; then
-      matcher=`echo $line | sed -e 's|[^0-9]*||g;s|_\d{4}_||g'` # parsed numbers
-    else
-      matcher=$line
-    fi
-    if [[ "${matcher,,}" == *"${ep,,}"* ]]; then # case-insensitive match
+    ep_from_path=$(parse_episode_num $line $ep)
+    # echo "path: $line, ep_from_path: $ep_from_path"
+    if [[ "${ep_from_path,,}" == *"${ep,,}"* ]]; then # case-insensitive match
       echo "playing $line $2 $3"
       play "$line" "$2" "$3"
     fi
@@ -226,8 +237,8 @@ tv() {
   [[ "$#" = "1" ]] && cd "`find . -maxdepth 1 -name "*$1*"`"
   ls
 }
-alias movies='cd /mnt/bigboi/mp_backup/links/Movies && ls | sed "s|\.| |g" | sed "s| ...$||g"'
-alias docu='cd /mnt/bigboi/mp_backup/links/Documentaries && ls | sed "s|\.| |g" | sed "s| ...$||g"'
+alias movies='cd /mnt/movingparts/links/Movies && ls | sed "s|\.| |g" | sed "s| ...$||g"'
+alias docu='cd /mnt/movingparts/links/Documentaries && ls | sed "s|\.| |g" | sed "s| ...$||g"'
 alias torrent='cd /mnt/movingparts/torrent; ls;'
 alias new='cd /mnt/movingparts/links/New; ls;'
 alias links='cd /mnt/movingparts/links; ls;'
@@ -242,12 +253,12 @@ alias am=". ~/scripts/alias_media.sh"
 alias ifonline="ssh root@OpenWrt mwan3 interfaces | grep 'is online'"
 alias cast="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; nohup python3 server.py &"
 alias castnn="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; python3 server.py"
-alias rpiplay='nohup /home/pi/RPiPlay/build/rpiplay -r 180 &'
+alias rpiplay='xset s reset; nohup /home/pi/RPiPlay/build/rpiplay -r 180 &'
 # boost processess pushing netflix, may help with outher services
 alias rechrome="sudo renice -12  \`ps aux --sort=%cpu | tail -3 | awk '{print \$2}'\`"
 alias ngear="ssh root@OpenWrt"
 alias pd='sudo /sbin/shutdown -r now'
-alias rb='sudo reboot'
+alias rb='. ~/scripts/umount_all.sh; sudo reboot'
 
 alias py="python3"
 alias pip3="python3 -m pip"
@@ -360,12 +371,12 @@ join_by() { local IFS="$1"; shift; echo "$*"; }
 pk() { # kill process by name match - append flag '-9' for SIGTERM
   search_terms=$*
   k9="${@: -1}" # remove k9 arg
-  if [[ $k9 == '-9' ]]; then search_terms=${@:1:-1}; else k9=""; fi
+  # if [[ $k9 == '-9' ]]; then search_terms=${@:1:-1}; else k9=""; fi
   
   joined_terms=`join_by '|' $(echo $search_terms)`
   pids=`pgrep -fi "$joined_terms" | sed "s|$$||g"`
   if [[ ! $pids ]]; then echo "no match" && return 0; fi
-  echo $pids | while read -r pid; do sudo kill $k9 $pid; done
+  echo $pids | while read -r pid; do echo "`sudo kill $k9 $pid`"; done
   sleep 1
   alive=`pgrep -fi "$joined_terms"`
   if [[ $alive ]]; then 
