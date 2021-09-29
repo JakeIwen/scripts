@@ -9,13 +9,16 @@ alias rbash='exec ash'
 alias bashp='vi /root/.profile'
 alias dirsize='du -hsc *'
 alias disku='df -u'
-alias spd="/etc/config/betterspeedtest.sh -4 -t 10"
+alias spd="/etc/config/betterspeedtest.sh -4 -t 6"
+alias spdwan="spd -H netperf-west.bufferbloat.net"
+alias spdclient="spd -H netperf-east.bufferbloat.net"
 alias reload='/etc/init.d/network reload'
 alias rl='reload'
 alias functions="cat ~/.profile | grep -E '^[[:space:]]*([[:alnum:]_]+[[:space:]]*\(\)|function[[:space:]]+[[:alnum:]_]+)'"
-
+alias cronlog='cd /root/log'
+dnslog='/root/log/auto_dns.sh'
 alias cstat='l /tmp/run/mwan3track; cat /tmp/run/mwan3track/*/*'
-
+tf() { tail ${2:-'-50'} $1; tail -f $1; } # tail --follow with 50 or "$2" recent lines 
 fndef() { sed -n -e "/$1()/,/}/ p" ~/.profile; }
 rgrep() { grep -rni "$1" .; } # recursively search cwd 
 piface() { ping -I "$1" 8.8.8.8; } # wlan1=lion_fone, wlan1-1=lifi

@@ -1,1 +1,0 @@
-### Angular Starter Plunker - Typescript

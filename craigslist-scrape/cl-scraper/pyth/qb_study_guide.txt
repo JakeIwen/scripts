@@ -1,5 +1,0 @@
-We nee
-sudo rm -rf Cellar
-brew prune
-sudo rm -rf Library .git .gitignore bin/brew README.md share/man/man1/brew
-sudo rm -rf ~/Library/Caches/Homebrew

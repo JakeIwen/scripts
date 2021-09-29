@@ -6,6 +6,7 @@ alias .....="cd ../../../.."
 
 alias hgrep="history | grep"
 alias pgrep="ps lT | grep"
+alias sudo=''
 
 mkcdir ()
 {
