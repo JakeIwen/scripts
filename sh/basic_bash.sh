@@ -28,25 +28,14 @@ alias gp="git pull"
 alias grao="git remote add origin"
 alias gc='git clone'
 alias gck='git checkout'
-gacp() {
-  git add . && git commit -m "$1" && git push
-}
-
-tf() {
-  tail -50 $1; tail -f $1
-}
-snh() {
-  nohup bash -c $1 &
-  tail -f ./nohup.out
-}
 alias functions="cat ~/.bashrc | grep -E '^[[:space:]]*([[:alnum:]_]+[[:space:]]*\(\)|function[[:space:]]+[[:alnum:]_]+)'"
-fndef() { # print function definition
-  sed -n -e "/$1()/,/}/ p" ~/.bashrc
-}
 
-rgrep() {
-  grep -rni "$1" . # recursively search cwd
-}
+gacp() { git add . && git commit -m "$1" && git push; }
+tf() { tail -50 $1; tail -f $1; }
+snh() { nohup bash -c "$1" & tail -f ./nohup.out; }
+fndef() { sed -n -e "/$1()/,/}/ p" ~/.bashrc; }     # print function definition
+rgrep() { grep -rni "$1" .; }                       # recursively search cwd
+truncate() { printf "$(tail -$2 $1)" >! "$1"; }     # truncate file $1 to $2 lines 
 
 # add new alias
 nalias() {
@@ -66,19 +55,9 @@ nalias() {
   exec bash
 }
 
-mkcdir ()
-{
-    mkdir -p -- "$1" &&
-      cd -P -- "$1"
-}
-
-rec_find_rpl_in_files() {
-  find . -type f | xargs sed -i "s|$1|$2|g"
-}
-
-rec_rename() {
-  find . -exec rename "s/$1/$2/g" {} +
-}
+mkcdir(){ mkdir -p -- "$1" && cd -P -- "$1"; }
+rec_find_rpl_in_files() { find . -type f | xargs sed -i "s|$1|$2|g"; }
+rec_rename() { find . -exec rename "s/$1/$2/g" {} + ; }
 
 truncate_log(){
   filename=$1

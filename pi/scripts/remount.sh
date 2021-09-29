@@ -21,7 +21,6 @@ pk() { # kill process by name match - append flag '-9' for SIGTERM
 }
 
 pk qbit
-sudo service smbd stop
 . /home/pi/scripts/umount_all.sh 
 . /home/pi/scripts/mount_all.sh 
 . /home/pi/scripts/fix_hfs_fs.sh 

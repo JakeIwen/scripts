@@ -2,3 +2,4 @@ ubnt/persistent/profiles/*
 .DS_Store
 secrets/*
 **/log/
+craigslist-scrape/*

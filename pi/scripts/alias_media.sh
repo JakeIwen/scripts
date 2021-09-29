@@ -1,5 +1,7 @@
 #! /bin/bash
 
+echo  "$(date): running alias_media.sh $0" >> /home/pi/scripts/alias_media.log
+
 FILE_EXTENSIONS=(mkv avi mp4 r00)
 
 media_group_links() {

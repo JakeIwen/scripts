@@ -55,7 +55,7 @@ kill_torrent_client() {
 
 start_torrent_client() {
   if [[ "$(grep movingparts /proc/mounts)" ]]; then 
-    [[ "$(pgrep qbittor)" ]] || nohup qbittorrent-nox
+    [[ "$(pgrep qbittor)" ]] || nohup qbittorrent-nox &
   else
     echo "preventing torrent-without-mpdisk"
     kill_torrent_client
@@ -63,16 +63,17 @@ start_torrent_client() {
 }
 
 mount_drives() {
-  /home/pi/scripts/mount_all.sh &> /dev/null
-  /home/pi/scripts/fix_hfs_fs.sh
+  . /home/pi/scripts/mount_all.sh &> /dev/null
+  sleep 3
+  . /home/pi/scripts/fix_hfs_fs.sh
   echo "drives mounted. starting smb share."
   start_service smbd 
 }
 
+
 unmount_drives() {
-  stop_service smbd 
-  locations=`cat /proc/self/mounts | grep -o '/dev/sd[^ ]*'`
-  for loc in $locations; do echo "unmounting $loc" && sudo umount $loc; done
+  locations=`cat /proc/self/mounts | grep -o '/dev/sd[^ ]+'`
+  . /home/pi/scripts/umount_all.sh
   sleep 5
   for loc in $locations; do spindown_drive $loc; done
 }
@@ -95,6 +96,7 @@ start_service() {
 kill_all() {
   echo 'killing all'
   kill_torrent_client
+  sleep 4
   unmount_drives
 }
 
