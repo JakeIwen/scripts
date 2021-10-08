@@ -51,6 +51,7 @@ no_internet_ops() {
 
 kill_torrent_client() {
   if [[ "$(ps ax)" == *"qbittorrent"* ]]; then echo 'killtorrent' && pkill -TERM qbittorrent; fi
+  sleep 2
 }
 
 start_torrent_client() {
@@ -63,11 +64,25 @@ start_torrent_client() {
 }
 
 mount_drives() {
-  . /home/pi/scripts/mount_all.sh &> /dev/null
-  sleep 3
-  . /home/pi/scripts/fix_hfs_fs.sh
-  echo "drives mounted. starting smb share."
-  start_service smbd 
+  if [[ $(van_is_running) ]]; then
+    echo "MOUNT interrupt: van is running, unmounting drives"
+    echo "will not mount drives without idisk conf flag!"
+    kill_torrent_client
+    stop_service smbd 
+    unmount_drives
+  else
+    . /home/pi/scripts/mount_all.sh
+    sleep 3
+    . /home/pi/scripts/fix_hfs_fs.sh
+    echo "drives mounted. starting smb share."
+    start_service smbd 
+  fi
+}
+
+van_is_running() {
+  if test -f /home/pi/hooks/ignition_is_on; then
+    [ -z "$(conf idisk)" ] && echo "yes"
+  fi
 }
 
 
@@ -105,7 +120,7 @@ if date | grep '0:0'; then date; fi
 if conf nodisk &> /dev/null; then kill_all # drives disabled ~/mconf/nodisk
 elif is_online clientwan &> /dev/null; then mobile_internet_ops
 elif is_online lifiwan &> /dev/null; then lifi_internet_ops
-elif ping -c 1 8.8.8.8 &> /dev/null; then ubnt_internet_ops
+elif ping -c 1 192.168.8.20 &> /dev/null; then ubnt_internet_ops
 else no_internet_ops
 fi
 

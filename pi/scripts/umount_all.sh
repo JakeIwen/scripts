@@ -1,7 +1,7 @@
 #! /bin/bash
 
 sudo service smbd stop
-locations() { cat /proc/self/mounts | grep -o '/mnt/[^ ]+'; }
+locations() { cat /proc/self/mounts | grep -oP '/mnt/[^ ]+'; }
 
 locs=`locations`
 if [[ -n "$locs" ]]; then 
