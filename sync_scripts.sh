@@ -1,6 +1,7 @@
 #! /bin/bash
 dsc="/Users/jacobr/dev/scripts"
 scripts="$dsc/pi/scripts"
+hooks="$dsc/pi/hooks"
 vanrouter="$dsc/vanrouter"
 configs="$dsc/pi/configs"
 pi_ip='pi@raspberrypi.local'
@@ -12,6 +13,7 @@ find "$dsc/automation/" -type f -name "*.py" -exec cp {} "$scripts/python/" \;
 
 # RASPI
 scp -r "$scripts" "$pi_ip:/home/pi/"
+scp -r "$hooks" "$pi_ip:/home/pi/"
 
 scp  "$dsc/pi/.bashrc" "$pi_ip:/home/pi/.bashrc"
 scp  "$dsc/pi/sns.sh"  "$pi_ip:/home/pi/sns.sh"

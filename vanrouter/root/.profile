@@ -21,7 +21,7 @@ alias cstat='l /tmp/run/mwan3track; cat /tmp/run/mwan3track/*/*'
 tf() { tail ${2:-'-50'} $1; tail -f $1; } # tail --follow with 50 or "$2" recent lines 
 fndef() { sed -n -e "/$1()/,/}/ p" ~/.profile; }
 rgrep() { grep -rni "$1" .; } # recursively search cwd 
-piface() { ping -I "$1" 8.8.8.8; } # wlan1=lion_fone, wlan1-1=lifi
+piface() { ping -I "$1" 8.8.8.8; } # wlan1=lion_fone, wlan1-1=lifi eth0.2=wan
 mkcdir() { mkdir -p -- "$1" && cd -P -- "$1"; }
 rec_find_rpl_in_files() { find . -type f | xargs sed -i "s|$1|$2|g"; }
 rec_rename() { find . -exec rename "s/$1/$2/g" {} +; }

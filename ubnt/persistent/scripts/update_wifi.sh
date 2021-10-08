@@ -5,6 +5,8 @@
 
 ssid_scan_path="/etc/persistent/scripts/essids.XXXXX"
 cur_profile_path="/etc/persistent/tmp/cur_profile.cfg"
+sys_init_flag="/etc/persistent/tmp/sys_init_flag.txt"
+
 append_networks() {
   iwlist ath0 scan 2>/dev/null | awk -f /etc/persistent/scripts/parse-iwlist.awk >> $ssid_scan_path
   sleep 3
@@ -22,11 +24,11 @@ set_ap() {
   echo "AP set. Restarting cron at $(date)"
   . /var/etc/persistent/rc.postsysinit
 }
-
 find_ap() {
-  if [ "$(cat $cur_profile_path)" = "$(cat /tmp/system.cfg)" ]; then
-    echo "profile unchanged, continuing"
-  else
+  if [ -n "$sys_init_flag" ]; then
+    echo "rebot flag detected, continuing scan"
+    rm $sys_init_flag
+  elif [ "$(cat $cur_profile_path)" != "$(cat /tmp/system.cfg)" ]; then
     echo "waiting on manually set AP. Killing cron for 140s"
     pkill -f crond
     sleep 140
@@ -86,6 +88,7 @@ ccq=`mca-status | grep ccq | cut -d= -f2`
 if [[ $ccq -gt 300 ]]; then
   echo "Ipv4 is up"
   save_current_profile
+  rm $sys_init_flag 2> /dev/null
 else
   find_ap
 fi

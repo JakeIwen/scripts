@@ -5,6 +5,11 @@
 /tmp/*
 /run/*
 /mnt/*
+/home/pi/.cache/*
+/var/swap/*
+/var/cache/apt/archives/*
+/_backup_old
+/_backup_live
 .git
 .git/*
 

@@ -4,6 +4,11 @@ alias sudo='sudo '
 alias ch7="sudo chmod -R 777" # usage: $ ch7 .
 alias chme="sudo chown -R $(whoami)" # usage: $ chme .
 
+alias rb='. ~/scripts/umount_all.sh; sudo reboot'
+alias ubnt='ssh ubnt@192.168.8.20'
+alias ngear='ssh -R root@192.168.6.1'
+alias rball='ubnt reboot & ngear reboot & rb'
+
 alias l='ls -lah'  ##custom list directory
 alias lla='ls -ltu'
 alias ..="cd .."
@@ -22,6 +27,7 @@ alias dirsize='sudo du -hsc .[^.]* *'
 alias disku='df -u'
 alias slp='xset s activate'
 alias gtop="sudo /opt/vc/bin/vcdbg reloc stats"
+alias ipinfo="py /home/pi/scripts/python/ip_info.py"
 alias bashp='vi ~/.bashrc'
 alias rbash='exec bash'
 alias init_rsa="ssh-copy-id -i ~/.ssh/id_rsa.pub" # init_rsa user@device
@@ -36,10 +42,13 @@ alias iswl="tf /var/log/cron/internet_switches.log"
 isw="$HOME/scripts/internet_switches.sh"
 mconf="$HOME/mconf"
 
+
 alias mconf="ls $mconf"
 alias mreset="rm $mconf/*"
 alias mdisk="rm $mconf/nodisk*; touch $mconf/mdisk; nohup $isw &"
 alias mdiskx="rm $mconf/mdisk*; nohup $isw &"
+alias idisk="rm $mconf/nodisk*; touch $mconf/idisk; nohup $isw &"
+alias idiskx="rm $mconf/idisk*; nohup $isw &"
 alias notor="rm $mconf/mtorrent*; touch $mconf/notorrent; nohup $isw &"
 alias notorx="rm $mconf/notorrent*; nohup $isw &"
 alias mtor="rm $mconf/notorrent*; touch $mconf/mtorrent; nohup $isw &"
@@ -51,6 +60,14 @@ rsmp() {
   rm -rf /mnt/movingparts/links/
   sudo rsync -avH --exclude-from=/rsync-exclude-media.txt /mnt/movingparts/ /mnt/bigboi/mp_backup
   . /home/pi/scripts/alias_media.sh
+}
+
+ssh-copy-id-openwrt() {
+  if [ "$#" -ne 1 ]; then
+    echo "Example: ${0} root@192.168.1.1"
+    exit 1
+  fi
+  cat /home/pi/.ssh/id_rsa.pub | ssh ${1} "cat >> /etc/dropbear/authorized_keys && chmod 0600 /etc/dropbear/authorized_keys && chmod 0700 /etc/dropbear"
 }
 
 # lsof | grep /mnt/mbbackup
@@ -90,12 +107,14 @@ kill_media() {
   echo lp
 }
 
+uridecode() { : "${*//+/ }"; echo -e "${_//%/\\x}"; }
+
 resume() {
-  echo hewy3
   echo "$POSPATH"
   path=`tail -1 "$POSPATH" | cut -d' ' -f1`
-  echo "playing $path"
-  play "$path" "$*"
+  decoded=`uridecode "$path"`
+  echo "playing $decoded"
+  play "$decoded" "$*"
 }
 
 log_position() {
@@ -212,7 +231,7 @@ fgp() {
 vlcmd() {
   cmd=$1
   param=$2
-  # xset s reset # wake display
+  xset s reset # wake display
   dbus-send --type=method_call --dest=org.mpris.MediaPlayer2.vlc /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.$cmd $param
 }
 
@@ -258,7 +277,6 @@ alias rpiplay='xset s reset; nohup /home/pi/RPiPlay/build/rpiplay -r 180 &'
 alias rechrome="sudo renice -12  \`ps aux --sort=%cpu | tail -3 | awk '{print \$2}'\`"
 alias ngear="ssh root@OpenWrt"
 alias pd='sudo /sbin/shutdown -r now'
-alias rb='. ~/scripts/umount_all.sh; sudo reboot'
 
 alias py="python3"
 alias pip3="python3 -m pip"
@@ -268,6 +286,10 @@ rhp() {
   then sudo pkill -f rpiplay
   else rpiplay
   fi
+}
+
+van_is_running() {
+  if test -f /home/pi/hooks/ignition_is_on; then echo "yes"; else echo "no"; fi
 }
 
 ### GIT ###
