@@ -6,7 +6,8 @@ alias .....="cd ../../../.."
 
 alias hgrep="history | grep"
 alias pgrep="ps lT | grep"
-alias sudo=''
+alias ccq="mca-status | grep ccq | cut -d= -f2"
+alias is_connected="mca-status | grep ccq | cut -d= -f2 | grep -v 0"
 
 mkcdir ()
 {

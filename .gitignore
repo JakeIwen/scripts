@@ -3,3 +3,11 @@ ubnt/persistent/profiles/*
 secrets/*
 **/log/
 craigslist-scrape/*
+
+*id_rsa.pub
+id_rsa.pub
+id_rsa
+id_dsa.pub
+id_dsa
+*.pem
+*.key

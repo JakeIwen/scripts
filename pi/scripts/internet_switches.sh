@@ -1,4 +1,8 @@
 #! /bin/bash
+
+conf() { cat /home/pi/mconf/$1* &> /dev/null; }
+iface_online() { ssh root@OpenWrt mwan3 interfaces | grep "$1 is online"; }
+
 ubnt_internet_ops() {
   echo 'ubnt_internet_ops'
   mount_drives
@@ -7,14 +11,6 @@ ubnt_internet_ops() {
   else 
     start_torrent_client
   fi
-}
-
-is_online() {
-  [[ `ssh root@OpenWrt "cat /tmp/run/mwan3track/$1/ONLINE"` > 0 ]]
-}
-
-conf() {
-  cat /home/pi/mconf/$1* &> /dev/null
 }
 
 update_iface_score() {
@@ -52,6 +48,8 @@ no_internet_ops() {
 kill_torrent_client() {
   if [[ "$(ps ax)" == *"qbittorrent"* ]]; then echo 'killtorrent' && pkill -TERM qbittorrent; fi
   sleep 2
+  if [[ "$(ps ax)" == *"qbittorrent"* ]]; then echo 'SECOND ATTEMPT killtorrent' && pkill -f qbittorrent; fi
+  sleep 2
 }
 
 start_torrent_client() {
@@ -69,6 +67,7 @@ mount_drives() {
     echo "will not mount drives without idisk conf flag!"
     kill_torrent_client
     stop_service smbd 
+    sleep 1
     unmount_drives
   else
     . /home/pi/scripts/mount_all.sh
@@ -118,9 +117,9 @@ kill_all() {
 if date | grep '0:0'; then date; fi
 
 if conf nodisk &> /dev/null; then kill_all # drives disabled ~/mconf/nodisk
-elif is_online clientwan &> /dev/null; then mobile_internet_ops
-elif is_online lifiwan &> /dev/null; then lifi_internet_ops
-elif ping -c 1 192.168.8.20 &> /dev/null; then ubnt_internet_ops
+elif iface_online clientwan &> /dev/null; then mobile_internet_ops
+elif iface_online lifiwan &> /dev/null; then lifi_internet_ops
+elif iface_online wan &> /dev/null; then ubnt_internet_ops
 else no_internet_ops
 fi
 
