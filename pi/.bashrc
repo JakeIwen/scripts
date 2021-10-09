@@ -4,7 +4,7 @@ alias sudo='sudo '
 alias ch7="sudo chmod -R 777" # usage: $ ch7 .
 alias chme="sudo chown -R $(whoami)" # usage: $ chme .
 
-alias rb='. ~/scripts/umount_all.sh; sudo reboot'
+alias rb='. /home/pi/scripts/umount_all.sh; sudo reboot'
 alias ubnt='ssh ubnt@192.168.8.20'
 alias ngear='ssh -R root@192.168.6.1'
 alias rball='ubnt reboot & ngear reboot & rb'
@@ -62,7 +62,7 @@ rsmp() {
   . /home/pi/scripts/alias_media.sh
 }
 
-ssh-copy-id-openwrt() {
+ssh_copy_id_dropbear() {
   if [ "$#" -ne 1 ]; then
     echo "Example: ${0} root@192.168.1.1"
     exit 1
@@ -269,13 +269,14 @@ alias tor='cd /mnt/movingparts/torrent/'
 alias inc='cd /mnt/movingparts/torrent/incomplete; ls -lah'
 
 alias am=". ~/scripts/alias_media.sh"
-alias ifonline="ssh root@OpenWrt mwan3 interfaces | grep 'is online'"
+alias ifaces="ssh root@OpenWrt mwan3 interfaces | grep 'is online'"
 alias cast="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; nohup python3 server.py &"
 alias castnn="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; python3 server.py"
 alias rpiplay='xset s reset; nohup /home/pi/RPiPlay/build/rpiplay -r 180 &'
 # boost processess pushing netflix, may help with outher services
 alias rechrome="sudo renice -12  \`ps aux --sort=%cpu | tail -3 | awk '{print \$2}'\`"
 alias ngear="ssh root@OpenWrt"
+alias ubnt="ssh ubnt@192.168.8.20"
 alias pd='sudo /sbin/shutdown -r now'
 
 alias py="python3"
@@ -286,6 +287,10 @@ rhp() {
   then sudo pkill -f rpiplay
   else rpiplay
   fi
+}
+
+ifonline() { # wan, clientwan, lifiwan
+  ssh root@OpenWrt mwan3 interfaces | grep "$1 is online"
 }
 
 van_is_running() {

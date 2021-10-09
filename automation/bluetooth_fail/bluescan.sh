@@ -2,8 +2,8 @@
 
 # run as root
 bscan() {
-  pkill -f "hcitool lescan"
-  systemctl restart bluetooth
+  sudo pkill -f "hcitool lescan"
+  sudo systemctl restart bluetooth
   sleep 0.5
   stdbuf -oL hcitool lescan &
   PID=$!

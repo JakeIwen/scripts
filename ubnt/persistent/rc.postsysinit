@@ -2,7 +2,7 @@
 
 logfile="/etc/persistent/log/update_wifi.log"
 sys_init_flag="/etc/persistent/tmp/sys_init_flag.txt"
-
+pkill -f cron
 tail -5000 $logfile > "$logfile.tmp"
 mv "$logfile.tmp" $logfile
 chmod 777 $logfile
@@ -13,4 +13,6 @@ mkdir -p /etc/crontabs
 touch $sys_init_flag 
 cp /etc/persistent/config/cron /etc/crontabs/ubnt
 cp /etc/persistent/config/.profile /etc/persistent/.profile
+cat /etc/persistent/config/raspi_rsa_id.pub >> /etc/dropbear/authorized_keys 
+
 crond
