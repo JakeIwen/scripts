@@ -23,8 +23,8 @@ echo "airsonos check start"
 airsonos
 echo "nativcast check start"
 nativcast
-echo "van_ignition_monitor check start"
-van_ignition_monitor
+# echo "van_ignition_monitor check start"
+# van_ignition_monitor
 echo "finished: $(date)"
 echo ""
   

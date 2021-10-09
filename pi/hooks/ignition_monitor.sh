@@ -8,7 +8,7 @@ sleep 1
 
 while :
 do
-  sleep 1
+  sleep 2
   flag_file_present=$(test -f /home/pi/hooks/ignition_is_on && echo "yes")
   found_device=$(hcitool name $van_bt_mac)
   name=${found_device:-none}
@@ -31,6 +31,16 @@ do
   fi
   
 done
+
+scn() {
+  echo -e "scan on\n"
+  sleep 15
+  echo -e "scan off\n"
+}
+
+device_present() {
+  scn | cat | bluetoothctl | grep "$1"
+}
 
 # Tip: To automate bluetoothctl commands, use 
 # echo -e "command1\ncommand2\n" | bluetoothctl or bluetoothctl -- command.
