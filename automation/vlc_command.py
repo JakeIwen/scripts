@@ -13,7 +13,8 @@ def vplay(p):
     return True
 
 def vpause(p):
-    print('pausing')
+    print('pausing')'sonos_tasks.py'
+
     p.pause()
     return False
 
@@ -25,22 +26,7 @@ player.video_set_mouse_input(True)
 player.video_set_key_input(True)
 
 # try:
-#     player.video_set_track(1)
-# except Exception as e:
-#     print(e)
-
-playing = False
-
-# import pdb; pdb.set_trace()
-
-while True:
-  try:
-    print("Enter command: ")
-    char = getch.getche()
-    if char == ' ':
-        playing = vpause(player) if playing else vplay(player)
-  except Exception as e:
-    print(e)
+# xzxz1    print(e)
     
 
 

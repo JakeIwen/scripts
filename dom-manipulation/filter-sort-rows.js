@@ -18,7 +18,7 @@ function filterSortRows(params){
     
     if (sort) {
       var t2 = $(row2).find(textElementSelector).text();
-      var result = (t1 > t2) ? 1 : -1;
+      result = (t1 > t2) ? 1 : -1;
       if (!isAscending) result *= -1;
     }
     
@@ -41,8 +41,17 @@ function run(params) {
   jq.onload = () => filterSortRows(params)
 }
 
+// run({
+//   rowSelector: '#torrents tr',
+//   textElementSelector: '.t_ctime', // child of row
+//   bannedText: ['crime'], //hides rows with any these words
+//   reqText: [], //hides rows without all of these words
+//   sort: true, // sort rows by the text within
+//   isAscending: false, //sort diretion
+// }); 
+
 run({
-  rowSelector: '#torrents tr',
+  rowSelector: $(),
   textElementSelector: '.t_ctime', // child of row
   bannedText: ['crime'], //hides rows with any these words
   reqText: [], //hides rows without all of these words

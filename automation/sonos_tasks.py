@@ -76,13 +76,14 @@ def play(name=None):
 def pause(devices=vis_devices):
     [device.pause() for device in devices]
     
-def stop():
-    [device.stop() for device in vis_devices]
+def stop(devices=vis_devices):
+    [device.stop() for device in devices]
 
-def start_noise(keyterm):
-    cooridnator = partymode(9)
+def start_noise(keyterm, vol=3):
+    cooridnator = partymode(vol)
     item = get_matching_faves(keyterm, cooridnator)[0]
     play_item(cooridnator, item, 'REPEAT_ONE')
+    crossfade_on(cooridnator)
     return cooridnator
 
 def play_from_faves(keyterm, group_all=True):
@@ -252,15 +253,23 @@ def get_playing_device(default_to_front=False, devices=vis_devices):
         return None
 
 def get_preferred_device(devices=vis_devices):
-    return get_playing_device(True, devices)
-    
-def num_devices():
-    return len(all_devices)
+    device = get_playing_device(True, devices)
+    return device
 
 def is_group_member(device):
     base_num = 2 if "vonRear" in device.player_name else 1
     return len(device.group.members) > base_num
+
+def crossfade_on(device=None):
+    (device or get_preferred_device()).cross_fade = True
+def crossfade_off(device=None):
+    (device or get_preferred_device()).cross_fade = False    
+def num_devices():
+    return len(all_devices)
+
 # unjoin_all()
+# print("attempting crossfade", crossfade())
+
 # import pdb; pdb.set_trace()
 # random_album()
 # discover_weekly()

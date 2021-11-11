@@ -2,7 +2,7 @@
 
 echo  "$(date): running alias_media.sh $0" >> /home/pi/scripts/alias_media.log
 
-FILE_EXTENSIONS=(mkv avi mp4 r00)
+FILE_EXTENSIONS=(mkv avi mp4 rar)
 
 media_group_links() {
   regex="$2"
@@ -15,7 +15,7 @@ media_group_links() {
     [ -e "$pth" ] || continue 
     ext="${pth##*.}"
     [[ "${FILE_EXTENSIONS[*]}" =~ $ext ]] || continue # wrong extension
-    (( `stat -c%s "$pth"` > 70000000 )) || continue # size > 70MB
+    (( `stat -c%s "$pth"` > 70000000 )) || [[ $ext == 'r00' ]] || continue # size > 70MB
     pattern="($delims)(\[?($keys)\]?(?=\.)|(($groups)\.)?\.?$ext$)|\'"
     title=`basename "$pth" | perl -pe "s/(-| |,)/./g" | perl -pe "s~$pattern~~ig" | perl -pe "s~\.+~_~g" | perl -pe "s~\(~[~g" | perl -pe "s~\)~]~g"`
     link_folder=`echo "$folder" | sed "s|\/torrent\/|\/links\/|g" | perl -pe "s~( |\.)+~_~g"`
