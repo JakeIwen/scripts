@@ -4,9 +4,9 @@ alias sudo='sudo '
 alias ch7="sudo chmod -R 777" # usage: $ ch7 .
 alias chme="sudo chown -R $(whoami)" # usage: $ chme .
 
-alias rb='. /home/pi/scripts/umount_all.sh; sudo reboot'
 alias ubnt='ssh ubnt@192.168.8.20'
 alias ngear='ssh -R root@192.168.6.1'
+alias rb='. /home/pi/scripts/umount_all.sh; sudo reboot'
 alias rball='ubnt reboot & ngear reboot & rb'
 
 alias l='ls -lah'  ##custom list directory
@@ -36,7 +36,7 @@ alias functions="cat ~/.bashrc | grep -E '^[[:space:]]*([[:alnum:]_]+[[:space:]]
 fndef() { sed -n -e "/$1()/,/}/ p" ~/.bashrc; } # print function definition
 tf() { tail ${2:-'-50'} $1; tail -f $1; }       # tail -f with more recent lines 
 snh() { nohup bash -c $1 & tail -f ./nohup.out; }
-s() { . $HOME/scripts/$1.sh; }
+s() { $HOME/scripts/$1.sh; }
 
 alias iswl="tf /var/log/cron/internet_switches.log"
 isw="$HOME/scripts/internet_switches.sh"
@@ -95,27 +95,38 @@ airupnp() {
 }
 
 # MEDIA
-POSPATH="$HOME/vlc-positions.txt"
-VLCQTPATH="$HOME/.config/vlc/vlc-qt-interface.conf"
-VLCRPATH="$HOME/vlc-recent.txt"
+export POSPATH="$HOME/vlc-positions.txt"
+export VLCQTPATH="$HOME/.config/vlc/vlc-qt-interface.conf"
+export VLCRPATH="$HOME/vlc-recent.txt"
 
 escape_chars() { echo $1 | perl -ne 'chomp;print "\Q$_\E\n"'; }
 
 kill_media() {
   log_position
   pk chrom omxplayer vlc
-  echo lp
+  sleep 2
+  pk chrom omxplayer vlc -9
 }
 
 uridecode() { : "${*//+/ }"; echo -e "${_//%/\\x}"; }
 
 resume() {
-  echo "$POSPATH"
   path=`tail -1 "$POSPATH" | cut -d' ' -f1`
   decoded=`uridecode "$path"`
   echo "playing $decoded"
   play "$decoded" "$*"
 }
+
+res() {
+  posline=`grep -ai "$1" "$POSPATH" | tail -1`
+  path=`echo "$posline" | /cut -d' ' -f1`"
+  position=`echo "$posline" | /cut -d' ' -f2`"
+  decoded=`uridecode "$path"`
+  epnum=`parse_episode_num $decoded`
+  echo "playing $decoded $epnum"
+  playf "$1" "$epnum"
+}
+
 
 log_position() {
   [[ -z "$(pgrep vlc)" ]] && return 0
@@ -132,7 +143,7 @@ log_position() {
 
 get_last_position() {
   file=`echo $1 | sed 's|\/|\\/|g'`
-  ns=`grep -Po "(?<=${file} ).*" "$POSPATH"`
+  ns=`grep -Poa "(?<=${file} ).*" "$POSPATH"`
   echo "${ns:-0}"
 }
 
@@ -178,8 +189,8 @@ parse_episode_num() {
   path=$1
   ep=$2
   cleanln=`echo $path | perl -pe 's|\_?\d{4}\_?||g'`
-  season=`echo $cleanln | grep  -o 'S[[:digit:]][[:digit:]]' | tail -1` 
-  ep=`echo $cleanln | grep  -o 'E[[:digit:]][[:digit:]]' | tail -1` 
+  season=`echo $cleanln | grep  -oE '(S|s)[[:digit:]][[:digit:]]' | tail -1` 
+  ep=`echo $cleanln | grep  -oE '(E|e)[[:digit:]][[:digit:]]' | tail -1` 
   if [[ "$ep" && "$season" ]] ; then
     parsed_ep_num=`echo "${season}${ep}" | perl -pe 's|\D||g' | perl -pe 's|^0||g'` # parsed numbers
   else
@@ -398,7 +409,7 @@ join_by() { local IFS="$1"; shift; echo "$*"; }
 pk() { # kill process by name match - append flag '-9' for SIGTERM
   search_terms=$*
   k9="${@: -1}" # remove k9 arg
-  # if [[ $k9 == '-9' ]]; then search_terms=${@:1:-1}; else k9=""; fi
+  if [[ $k9 == '-9' ]]; then search_terms=${@:1:$#-1}; else k9=""; fi
   
   joined_terms=`join_by '|' $(echo $search_terms)`
   pids=`pgrep -fi "$joined_terms" | sed "s|$$||g"`

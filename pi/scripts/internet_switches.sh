@@ -6,10 +6,9 @@ iface_online() { ssh root@OpenWrt mwan3 interfaces | grep "$1 is online"; }
 ubnt_internet_ops() {
   echo 'ubnt_internet_ops'
   mount_drives
-  if conf notorrent; then 
-    kill_torrent_client 
-  else 
-    start_torrent_client
+  if conf notorrent
+  then kill_torrent_client 
+  else start_torrent_client
   fi
 }
 
@@ -84,19 +83,19 @@ van_is_running() {
   fi
 }
 
-
-unmount_drives() {
-  locations=`cat /proc/self/mounts | grep -o '/dev/sd[^ ]+'`
-  . /home/pi/scripts/umount_all.sh
-  sleep 5
-  for loc in $locations; do spindown_drive $loc; done
-}
-
 spindown_drive() {
   loc=$1
   name="${loc/\/dev\//}"
   echo "spinning down $name"
   sudo hd-idle -t "$name" # spin-down drive
+}
+
+locations() { cat /proc/self/mounts | grep -oP '/mnt/[^ ]+'; }
+
+unmount_drives() {
+  . /home/pi/scripts/umount_all.sh
+  sleep 5
+  for loc in `locations`; do spindown_drive $loc; done
 }
 
 stop_service() {
