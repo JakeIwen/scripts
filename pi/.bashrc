@@ -118,13 +118,14 @@ resume() {
 }
 
 res() {
-  posline=`grep -ai "$1" "$POSPATH" | tail -1`
-  path=`echo "$posline" | /cut -d' ' -f1`"
-  position=`echo "$posline" | /cut -d' ' -f2`"
+  name=$1
+  posline=`grep -ai "$name" "$POSPATH" | tail -1`
+  path=`echo "$posline" | cut -d' ' -f1`"
+  position=`echo "$posline" | cut -d' ' -f2`"
   decoded=`uridecode "$path"`
   epnum=`parse_episode_num $decoded`
   echo "playing $decoded $epnum"
-  playf "$1" "$epnum"
+  playf "$name" "$epnum"
 }
 
 
