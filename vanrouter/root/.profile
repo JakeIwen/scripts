@@ -9,7 +9,7 @@ alias rbash='exec ash'
 alias bashp='vi /root/.profile'
 alias dirsize='du -hsc *'
 alias disku='df -u'
-alias spd="/etc/config/betterspeedtest.sh -4 -t 6"
+alias spd='t=$(date +"%s"); wget http://speedtest.tele2.net/10MB.zip -O ->/dev/null ; echo -n "MBit/s: "; expr 8 \* 10 / $(($(date +"%s")-$t))'
 alias spdwan="spd -H netperf-west.bufferbloat.net"
 alias spdclient="spd -H netperf-east.bufferbloat.net"
 alias reload='/etc/init.d/network reload'
