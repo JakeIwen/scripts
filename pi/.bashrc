@@ -142,6 +142,33 @@ log_position() {
   fi
 }
 
+sync_dirpath() {
+  # syncpath=$1
+  syncpath='/Users/jacobr/Library/Application Support/BetterTouchTool/'
+  m1='jacobr@Jake-M113'
+  i9='jacobr@Jake-Machine'
+  locpath="/sync$syncpath"
+  mkdir -p "$locpath"
+  rsync -ur "$m1:'$syncpath'" "$locpath"
+  rsync -ur "$i9:'$syncpath'" "$locpath"
+  rsync -ur "$locpath" "$m1:'$syncpath'"
+  rsync -ur "$locpath" "$i9:'$syncpath'"
+}
+# 
+# sync_dirpath() {
+#   # syncpath=$1
+#   rempath='/Users/jacobr/Library/Application Support/BetterTouchTool'
+#   syncpath=`echo $rempath | sed 's| |___|g'`
+#   m1='jacobr@Jake-M113'
+#   i9='jacobr@Jake-Machine'
+#   locpath="/sync$syncpath"
+#   mkdir -p "$locpath"
+#   rsync -ur "$m1:$rempath" "$locpath"
+#   rsync -ur "$i9:$rempath" "$locpath"
+#   rsync -ur "$locpath" "$m1:$rempath"
+#   rsync -ur "$locpath" "$i9:$rempath"
+# }
+
 get_last_position() {
   file=`echo $1 | sed 's|\/|\\/|g'`
   ns=`grep -Poa "(?<=${file} ).*" "$POSPATH"`
@@ -308,6 +335,11 @@ ifonline() { # wan, clientwan, lifiwan
 van_is_running() {
   if test -f /home/pi/hooks/ignition_is_on; then echo "yes"; else echo "no"; fi
 }
+
+alias print_zrate="cat ~/log/zrate.txt"
+zrate_stat(){ grep -Po '\d+\.\d+' ~/log/zrate.txt | awk '{if(min==""){min=max=$1}; if($1>max) {max=$1}; if($1<min) {min=$1}; total+=$1; count+=1} END {print "avg " total/count," | max "max," | min " min}'; }
+alias last_zrate="tail -1 ~/log/zrate.txt"
+alias bisqactive="cat ~/log/zuseractive.txt | grep 'BISQ USER JHYY1 IS ACTIVE'"
 
 ### GIT ###
 alias gpo="git push origin"
