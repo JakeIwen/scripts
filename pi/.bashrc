@@ -332,12 +332,20 @@ ifonline() { # wan, clientwan, lifiwan
   ssh root@OpenWrt mwan3 interfaces | grep "$1 is online"
 }
 
+echo_if() { if [[ "$1" ]]; then echo $1; fi; }
+
 van_is_running() {
   if test -f /home/pi/hooks/ignition_is_on; then echo "yes"; else echo "no"; fi
 }
 
 alias print_zrate="cat ~/log/zrate.txt"
-zrate_stat(){ grep -Po '\d+\.\d+' ~/log/zrate.txt | awk '{if(min==""){min=max=$1}; if($1>max) {max=$1}; if($1<min) {min=$1}; total+=$1; count+=1} END {print "avg " total/count," | max "max," | min " min}'; }
+zrate_stat(){ grep -Po '\d?\d?\.\d+' ~/log/zrate.txt | awk '{if(min==""){min=max=$1}; if($1>max) {max=$1}; if($1<min) {min=$1}; total+=$1; count+=1} END {print "avg " total/count," | max "max," | min " min}'; }
+zrate_less_than() {
+  lzr=`tail -1 ~/log/zrate.txt | grep -Po '^\d?\d?\.\d+'`
+  if [[ "$lzr" ]] && (( $(echo "$lzr < $1" | bc -l) )); then 
+    echo "LOW ZRATE: $lzr"
+  fi
+}
 alias last_zrate="tail -1 ~/log/zrate.txt"
 alias bisqactive="cat ~/log/zuseractive.txt | grep 'BISQ USER JHYY1 IS ACTIVE'"
 
