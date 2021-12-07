@@ -37,7 +37,6 @@ fndef() { sed -n -e "/$1()/,/}/ p" ~/.bashrc; } # print function definition
 tf() { tail ${2:-'-50'} $1; tail -f $1; }       # tail -f with more recent lines 
 snh() { nohup bash -c $1 & tail -f ./nohup.out; }
 s() { $HOME/scripts/$1.sh; }
-
 alias iswl="tf /var/log/cron/internet_switches.log"
 isw="$HOME/scripts/internet_switches.sh"
 mconf="$HOME/mconf"
@@ -128,7 +127,6 @@ res() {
   playf "$name" "$epnum"
 }
 
-
 log_position() {
   [[ -z "$(pgrep vlc)" ]] && return 0
   file=`py ~/scripts/python/vlc_property.py URL`
@@ -185,7 +183,7 @@ play() {
   dir=`dirname "$1"`
   filename=`basename "$1"`
   shift
-  filename="$(escape_chars "$filename")"
+  filename="$(escape_chars "$filename")"x 
   all_media=`find "$dir" -type l -not -iname nohup.out -print | sort -g`
   
   if [[ "$1" == "-r" ]]; then 
@@ -230,7 +228,6 @@ parse_episode_num() {
 playf() {
   name=`echo $1 | perl -pe 's/ /_/g'`
   ep=$2 # episode number eg 304 (parsed from S03E04) or flag -a, -r
-  num_re='^[0-9]+$'
   bb_links='/mnt/bigboi/mp_backup/links'
   mp_links='/mnt/movingparts/links'
   readarray -d '' match_arr < <( find "$bb_links" -type l -ipath "*$name*" -print0 | find "$mp_links" -type l -ipath "*$name*" -print0 | sort -z )
@@ -257,7 +254,8 @@ playf() {
   done
 }
 
-cv() {
+cv() {\
+
   matches=`find . -maxdepth 1 -iname "*$1*"`
   echo "Matches: $matches"
   if [[ $matches ]]; then cd "$matches" || echo "multiple matches"; fi
@@ -317,7 +315,7 @@ alias rechrome="sudo renice -12  \`ps aux --sort=%cpu | tail -3 | awk '{print \$
 alias ngear="ssh root@OpenWrt"
 alias ubnt="ssh ubnt@192.168.8.20"
 alias pd='sudo /sbin/shutdown -r now'
-
+alias am=''
 alias py="python3"
 alias pip3="python3 -m pip"
 
@@ -359,6 +357,7 @@ alias gc='git clone'
 alias gck='git checkout'
 
 alias grep='grep --color=auto'
+alias grepi='grep -i --color=auto'
 alias g='grep'
 alias egrep='egrep --color=auto'
 alias fgrep="find . \( -type d -o -type f \) -iname"
