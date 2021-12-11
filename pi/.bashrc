@@ -337,15 +337,14 @@ van_is_running() {
 }
 
 alias print_zrate="cat ~/log/zrate.txt"
+alias zrate_hourly="awk 'NR % 60 == 0' ~/log/zrate.txt"
 zrate_stat(){ grep -Po '\d?\d?\.\d+' ~/log/zrate.txt | awk '{if(min==""){min=max=$1}; if($1>max) {max=$1}; if($1<min) {min=$1}; total+=$1; count+=1} END {print "avg " total/count," | max "max," | min " min}'; }
 zrate_less_than() {
   lzr=`tail -1 ~/log/zrate.txt | grep -Po '^\d?\d?\.\d+'`
-  if [[ "$lzr" ]] && (( $(echo "$lzr < $1" | bc -l) )); then 
-    echo "LOW ZRATE: $lzr"
-  fi
+  [[ "$lzr" ]] && (( $(echo "$lzr < $1" | bc -l) )) && echo "LOW ZRATE: $lzr"
 }
 alias last_zrate="tail -1 ~/log/zrate.txt"
-alias bisqactive="cat ~/log/zuseractive.txt | grep 'BISQ USER JHYY1 IS ACTIVE'"
+alias bisqactive="cat ~/log/zuseractive.txt | grep JHYY1"
 
 ### GIT ###
 alias gpo="git push origin"
@@ -366,13 +365,8 @@ alias agrep="alias | grep" # search aliases
 alias hist="history | sed 's/ [0-9]*  //g'"
 
 gacp() { git add .; git commit -m "$1"; git push; }
-rgrep() { # recursively search, fallback to pwd "."
-  grep -rni "$1" "${2:-.}" 
-}
-hgrep() {
-  # howto: pass all args to a subfunction
-  hist | grep "$@" | grep -v 'hgrep' | uniq -u
-}
+rgrep() { grep -rni "$1" "${2:-.}" ; }                    # recursively search, fallback to pwd "."
+hgrep() { hist | grep "$@" | grep -v 'hgrep' | uniq -u; } # howto: pass all args to a subfunction
 hcp() {
   val=$(hist | grep $1 | tail -1)
   echo $val | pbcopy
@@ -391,8 +385,8 @@ inuse() {
   sudo lsof -P -n | grep -E ":$port"
   echo "port $port"
 }
-
-rec_find_rpl_in_files() { # rec_find_rpl_in_files find_pattern repl_pattern
+# rec_find_rpl_in_files find_pattern repl_pattern
+rec_find_rpl_in_files() { 
   find . -exec sed -i '' "s|$1|$2|g" {} \;
 }
 
