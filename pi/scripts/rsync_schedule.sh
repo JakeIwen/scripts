@@ -20,7 +20,7 @@ sync_pi_backup() {
   hdd_backup=/mnt/bigboi/pi_backup_git/pi_backup
   sd_backup=/mnt/micro_sd/
   sd_live=/mnt/micro_sd/_backup_live
-  sd_old=/mnt/micro_sd/_backup_old
+  sd_old=/mnt/micro_sd/_backup_old     
   
   # store in git repo on HDD drive
   echo "beginning pibackup to hdd `date`"
