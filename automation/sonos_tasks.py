@@ -215,6 +215,7 @@ def make_stereo_pair(left_master_name, right_name):
     while not master:
         sleep(1)
         master = by_name(left_master_name)
+    
     with suppress(Exception): master.create_stereo_pair(slave)
     vis_devices = filter_vis_devices();
     return master

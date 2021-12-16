@@ -179,11 +179,11 @@ playi() {
 }
 
 play() {
-  path=$1
+  pth=$1
   dir=`dirname "$1"`
   filename=`basename "$1"`
   shift
-  filename="$(escape_chars "$filename")"x 
+  filename="$(escape_chars "$filename")"
   all_media=`find "$dir" -type l -not -iname nohup.out -print | sort -g`
   
   if [[ "$1" == "-r" ]]; then 
@@ -205,7 +205,7 @@ play() {
   xset s reset # wake display
   nohup vlc -f $subs $filenames &
   sudo renice -12 -g  `pgrep vlc`
-  last_position=$(get_last_position "$path")
+  last_position=$(get_last_position "$pth")
   echo "last_position: $last_position"
   sleep 4
   [[ -n $last_position ]] && vlcmd Seek int64:${last_position}
@@ -242,8 +242,8 @@ playf() {
     return 0
   fi
   
-  if [[ "$ep" == "-a" ]]; then play ${match_arr[0]} "$3" && return 0; fi
-  if [ -z "$2" ] || [[ "$2" == "-r" ]]; then play ${match_arr[0]} -r "$3" && return 0; fi
+  if [[ "$ep" == "-a" ]]; then play "${match_arr[0]}" -a "$3" && return 0; fi
+  if [ -z "$2" ] || [[ "$2" == "-r" ]]; then play "${match_arr[0]}" -r "$3" && return 0; fi
   for line in "${match_arr[@]}"; do 
     ep_from_path=$(parse_episode_num $line $ep)
     # echo "path: $line, ep_from_path: $ep_from_path"
