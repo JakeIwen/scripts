@@ -1,6 +1,9 @@
 #! /bin/bash
 
-echo  "$(date): running alias_media.sh $0" >> /home/pi/scripts/alias_media.log
+pkill -f alias_media
+if [[ "$(pgrep alias_media)" ]]; then exit 0; fi
+
+echo  "$(date): running alias_media.sh $0 $(whoami)" >> /home/pi/scripts/alias_media.log
 
 FILE_EXTENSIONS=(mkv avi mp4 rar)
 
@@ -43,18 +46,21 @@ alias_folders() {
   find "$src/torrent/Documentaries" -maxdepth 1 -mindepth 1  -type d \
     | while read pth; do media_group_links "$pth"; done
   echo Docu
-  find "$src/torrent/New" -maxdepth 1 -mindepth 1  -type d \
+  find "$src/torrent/New" -maxdepth 2 -mindepth 1  -type d \
     | while read pth; do media_group_links "$pth"; done
   echo New
   media_group_links "$src/torrent/Movies"
   echo Movies
   chmod -R 777 "$links"
 }
+touch /home/pi/log/alias_media.log
+echo "alias media begin $(date)" >> /home/pi/log/alias_media.log
 echo "mp start"
 [ -e "/mnt/movingparts" ] && alias_folders "/mnt/movingparts"
 echo "mp done; bb start"
 [ -e "/mnt/bigboi/mp_backup" ] && alias_folders "/mnt/bigboi/mp_backup"
 echo "bb done"
+echo "alias media end $(date)" >> /home/pi/log/alias_media.log
 
 # mnt/movingparts
 # find . -type l -exec cp --parents {} ../links \;
