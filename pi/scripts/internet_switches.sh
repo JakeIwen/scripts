@@ -3,9 +3,10 @@
 conf() { cat /home/pi/mconf/$1* &> /dev/null; }
 iface_online() { ssh root@OpenWrt mwan3 interfaces | grep "$1 is online"; }
 
-ubnt_internet_ops() {
+ubnt_internet_ops() { # nanostation connected; van is likely stationary/parked
   echo 'ubnt_internet_ops'
   mount_drives
+  sleep 1
   if conf notorrent
   then kill_torrent_client 
   else start_torrent_client
@@ -40,8 +41,15 @@ lifi_internet_ops() {
 
 no_internet_ops() {
   echo 'no_internet_ops'
-  kill_torrent_client
-  if conf mdisk; then mount_drives; else unmount_drives; fi
+  if conf mdisk; then 
+    mount_drives
+    kill_torrent_client
+  else 
+    unmount_drives
+    kill_torrent_client
+  fi 
+    
+  
 }
 
 kill_torrent_client() {
@@ -114,7 +122,7 @@ kill_all() {
 }
 
 if date | grep '0:0'; then date; fi
-
+# ubnt_internet_ops
 if conf nodisk &> /dev/null; then kill_all # drives disabled ~/mconf/nodisk
 elif iface_online clientwan &> /dev/null; then mobile_internet_ops
 elif iface_online lifiwan &> /dev/null; then lifi_internet_ops

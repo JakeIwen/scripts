@@ -7,7 +7,7 @@ BIGBOI_MOUNTED=$(mount | awk '/bigboi/ {print $6}' | grep "rw")
 MICROSD_MOUNTED=$(mount | awk '/micro_sd/ {print $6}' | grep "rw")
 
 [ ! $BIGBOI_MOUNTED ] && echo "bigboi not available/writable" && exit 0
-
+ 
 if [ $MP_MOUNTED ]; then
   sudo rsync $rsync_flags --exclude-from=/rsync-exclude-media.txt /mnt/movingparts/ /mnt/bigboi/mp_backup
   . /home/pi/scripts/alias_media.sh

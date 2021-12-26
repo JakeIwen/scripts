@@ -37,6 +37,8 @@ fndef() { sed -n -e "/$1()/,/}/ p" ~/.bashrc; } # print function definition
 tf() { tail ${2:-'-50'} $1; tail -f $1; }       # tail -f with more recent lines 
 snh() { nohup bash -c $1 & tail -f ./nohup.out; }
 s() { $HOME/scripts/$1.sh; }
+sx() { sudo "$(history | sed 's/ [0-9]*  //g' | tail -1)"; }
+
 alias iswl="tf /var/log/cron/internet_switches.log"
 isw="$HOME/scripts/internet_switches.sh"
 mconf="$HOME/mconf"
@@ -110,8 +112,8 @@ kill_media() {
 uridecode() { : "${*//+/ }"; echo -e "${_//%/\\x}"; }
 
 resume() {
-  path=`tail -1 "$POSPATH" | cut -d' ' -f1`
-  decoded=`uridecode "$path"`
+  pth=`tail -1 "$POSPATH" | cut -d' ' -f1`
+  decoded=`uridecode "$pth"`
   echo "playing $decoded"
   play "$decoded" "$*"
 }
@@ -119,9 +121,9 @@ resume() {
 res() {
   name=$1
   posline=`grep -ai "$name" "$POSPATH" | tail -1`
-  path=`echo "$posline" | cut -d' ' -f1`"
+  pth=`echo "$posline" | cut -d' ' -f1`"
   position=`echo "$posline" | cut -d' ' -f2`"
-  decoded=`uridecode "$path"`
+  decoded=`uridecode "$pth"`
   epnum=`parse_episode_num $decoded`
   echo "playing $decoded $epnum"
   playf "$name" "$epnum"
@@ -194,7 +196,7 @@ play() {
     filenames=`echo "$all_media" | awk "/$filename/{y=1}y"`; # everything after & including match
   fi
   subs='--sub-language=EN,US,en,us,any'
-  [[ "$1" == "-ns" ]] && subs='--sub-track=20'
+  [[ "$1" == "-ns" ]] && subs='--sub-track=20' || subs='--sub-track=2'
   
   echo -ne "filenames: \n$filenames\n"
   echo "subs: $subs"
@@ -207,14 +209,14 @@ play() {
   sudo renice -12 -g  `pgrep vlc`
   last_position=$(get_last_position "$pth")
   echo "last_position: $last_position"
-  sleep 4
-  [[ -n $last_position ]] && vlcmd Seek int64:${last_position}
+  sleep 7
+  vlcmd Seek int64:"$last_position"
 }
 
 parse_episode_num() {
-  path=$1
+  pth=$1
   ep=$2
-  cleanln=`echo $path | perl -pe 's|\_?\d{4}\_?||g'`
+  cleanln=`echo $pth | perl -pe 's|\_?\d{4}\_?||g'`
   season=`echo $cleanln | grep  -oE '(S|s)[[:digit:]][[:digit:]]' | tail -1` 
   ep=`echo $cleanln | grep  -oE '(E|e)[[:digit:]][[:digit:]]' | tail -1` 
   if [[ "$ep" && "$season" ]] ; then
