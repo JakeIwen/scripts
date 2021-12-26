@@ -1,4 +1,17 @@
 vi ~/.bash # not sudo
+shopt -s dotglob 
+
+sudo rpi-update
+sudo cp -r /media/pi/Five\ Tera/pi_backup_git/pi_backup/etc/ssh/* /etc/ssh/
+sudo cp -r /media/pi/Five\ Tera/pi_backup_git/pi_backup/home/pi/* /home/pi/
+sudo chown -R pi /home/pi /etc/ssh
+
+cd /mnt
+sudo mkdir movingparts bigboi usbhfs
+sudo chown -R pi .
+
+sudo touch /rsync-exclude-media.txt /rsync-exclude.txt
+sudo chmod 775 /rsync-exclude-media.txt /rsync-exclude.txt
 
 exec bash
 sudo systemctl start ssh
@@ -7,25 +20,21 @@ sudo systemctl start ssh
 ssh-copy-id -i ~/.ssh/id_rsa.pub jacobr@192.168.6.145
 
 sudo apt update
-sudo apt install realvnc-vnc-server realvnc-vnc-viewer
+sudo apt-get install -y libusb-dev libdbus-1-dev libglib2.0-dev libudev-dev libical-dev libreadline-dev samba samba-common-bin dnsmasq hostapd bridge-utils qbittorrent-nox hfsutils hfsprogs
 
 sudo raspi-config
- - interfacing options
+  - interfacing options
   - vnc > yes
   
-curl -o /usr/local/bin/rmate https://raw.githubusercontent.com/aurora/rmate/master/rmate
+sudo curl -o /usr/local/bin/rmate https://raw.githubusercontent.com/aurora/rmate/master/rmate
 sudo chmod +x /usr/local/bin/rmate
 mv /usr/local/bin/rmate /usr/local/bin/ratom
 
-
-apt install qbittorrent
-apt install qbittorrent-nox
 
 
 ratom /etc/rc.local
  - replace resolution
 
-cd $HOME
 wget https://static.adguard.com/adguardhome/release/AdGuardHome_linux_arm.tar.gz
 tar xvf AdGuardHome_linux_arm.tar.gz
 
