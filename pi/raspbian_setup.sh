@@ -20,7 +20,7 @@ sudo systemctl start ssh
 ssh-copy-id -i ~/.ssh/id_rsa.pub jacobr@192.168.6.145
 
 sudo apt update
-sudo apt-get install -y libusb-dev libdbus-1-dev libglib2.0-dev libudev-dev libical-dev libreadline-dev samba samba-common-bin dnsmasq hostapd bridge-utils qbittorrent-nox hfsutils hfsprogs
+sudo apt-get install -y bc gparted libusb-dev libdbus-1-dev libglib2.0-dev libudev-dev libical-dev libreadline-dev samba samba-common-bin dnsmasq hostapd bridge-utils qbittorrent-nox hfsutils hfsprogs
 
 sudo raspi-config
   - interfacing options
