@@ -95,6 +95,42 @@ airupnp() {
   fi
 }
 
+set_vfat_uuid() {
+  UUID=$1 # 1234-ABCF  hex only
+  BLKID=$2 # /dev/sdc1
+  valid=`echo "$UUID" | grep -P "^\d{4}\-[A-F]{4}$"`
+  vfat=`blkid $BLKID | grep 'TYPE="vfat"'`
+  
+  echo "Current UUID:"
+  sudo dd bs=1 skip=67 count=4 if=$BLKID 2>/dev/null \
+    | xxd -plain -u \
+    | sed -r 's/(..)(..)(..)(..)/\4\3-\2\1/' 
+    
+  if [ -n "$valid" ] && [ -n "$vfat" ]; then
+    printf "\x${UUID:7:2}\x${UUID:5:2}\x${UUID:2:2}\x${UUID:0:2}" \
+      | sudo dd bs=1 seek=67 count=4 conv=notrunc of=$BLKID
+    
+    echo "Updated UUID:"
+    sudo dd bs=1 skip=67 count=4 if=$BLKID 2>/dev/null \
+      | xxd -plain -u \
+      | sed -r 's/(..)(..)(..)(..)/\4\3-\2\1/' 
+      
+  else
+    echo "UUID does not match '1234-ABCD' form"
+    echo "or '`blkid $BLKID | grep -o 'TYPE="[^"]*"'`' is not a vfat partition"
+  fi
+}
+
+# mntdsk sd_card 0383-ABDF
+mntdsk() {
+  dirname=$1
+  uuid=$2
+  pth="/mnt/$dirname"
+  fstype=`blkid | grep $uuid | grep -Po '(?<=TYPE=")[^"]*'`
+  sudo mkdir -p $pth && sudo chown pi $pth  && sudo chmod 777 $pth 
+  sudo mount -U "$uuid" -t $fstype -o nofail $pth && echo "mounted $dirname at $pth"
+}
+
 # MEDIA
 export POSPATH="$HOME/vlc-positions.txt"
 export VLCQTPATH="$HOME/.config/vlc/vlc-qt-interface.conf"
@@ -187,6 +223,10 @@ play() {
   shift
   filename="$(escape_chars "$filename")"
   all_media=`find "$dir" -type l -not -iname nohup.out -print | sort -g`
+  if [[ "$1" == "-c" ]]; then 
+    res $filename
+    return 0
+  fi
   
   if [[ "$1" == "-r" ]]; then 
     filenames=`echo "$all_media" | shuf`;
@@ -245,6 +285,7 @@ playf() {
   fi
   
   if [[ "$ep" == "-a" ]]; then play "${match_arr[0]}" -a "$3" && return 0; fi
+  
   if [ -z "$2" ] || [[ "$2" == "-r" ]]; then play "${match_arr[0]}" -r "$3" && return 0; fi
   for line in "${match_arr[@]}"; do 
     ep_from_path=$(parse_episode_num $line $ep)
