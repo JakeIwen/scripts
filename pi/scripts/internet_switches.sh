@@ -122,11 +122,11 @@ kill_all() {
 }
 
 if date | grep '0:0'; then date; fi
-# ubnt_internet_ops
-if conf nodisk &> /dev/null; then kill_all # drives disabled ~/mconf/nodisk
-elif iface_online clientwan &> /dev/null; then mobile_internet_ops
-elif iface_online lifiwan &> /dev/null; then lifi_internet_ops
-elif iface_online wan &> /dev/null; then ubnt_internet_ops
-else no_internet_ops
-fi
+ubnt_internet_ops
+# if conf nodisk &> /dev/null; then kill_all # drives disabled ~/mconf/nodisk
+# elif iface_online clientwan &> /dev/null; then mobile_internet_ops
+# elif iface_online lifiwan &> /dev/null; then lifi_internet_ops
+# elif iface_online wan &> /dev/null; then ubnt_internet_ops
+# else no_internet_ops
+# fi
 

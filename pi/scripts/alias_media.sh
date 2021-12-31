@@ -1,7 +1,7 @@
 #! /bin/bash
 
-pkill -f alias_media
-if [[ "$(pgrep alias_media)" ]]; then exit 0; fi
+# pkill -f alias_media
+# if [[ "$(pgrep alias_media)" ]]; then exit 0; fi
 
 echo  "$(date): running alias_media.sh $0 $(whoami)" >> /home/pi/scripts/alias_media.log
 
