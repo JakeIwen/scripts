@@ -1,0 +1,15 @@
+checking/creating backup folders
+backing up to /Users/jacobr/backups/BetterTouchTool/btt3
+done. ls -lah of /Users/jacobr/backups/BetterTouchTool:
+total 0
+drwxr-xr-x  11 jacobr  staff   352B Jan 21 23:18 .
+drwxr-xr-x   3 jacobr  staff    96B Jan 21 23:18 ..
+drwxr-xr-x  64 jacobr  staff   2.0K Jan 21 23:22 btt1
+drwxr-xr-x  64 jacobr  staff   2.0K Jan 21 23:23 btt2
+drwxr-xr-x  64 jacobr  staff   2.0K Jan 21 23:23 btt3
+drwxr-xr-x   2 jacobr  staff    64B Jan 21 23:18 btt4
+drwxr-xr-x   2 jacobr  staff    64B Jan 21 23:18 btt5
+drwxr-xr-x   2 jacobr  staff    64B Jan 21 23:18 btt6
+drwxr-xr-x   2 jacobr  staff    64B Jan 21 23:18 btt7
+drwxr-xr-x   2 jacobr  staff    64B Jan 21 23:18 btt8
+drwxr-xr-x   2 jacobr  staff    64B Jan 21 23:18 btt9
