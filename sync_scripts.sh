@@ -14,6 +14,7 @@ find "$dsc/automation/" -type f -name "*.py" -exec cp {} "$scripts/python/" \;
 # RASPI
 scp  "$dsc/pi/.bashrc" "$pi_ip:/home/pi/.bashrc"
 scp  "$dsc/pi/sns.sh"  "$pi_ip:/home/pi/sns.sh"
+scp  "$dsc/pi/sns.sh"  "$pi_ip:/home/pi/sns.sh"
 
 scp -r "$scripts" "$pi_ip:/home/pi/"
 scp -r "$hooks" "$pi_ip:/home/pi/"
