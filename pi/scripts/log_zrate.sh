@@ -38,7 +38,7 @@ else
 fi
 
 cur_rate=`usd_btc_rate "$(btclow)"`
-if [[ ! $cur_rate ]] || [[ "$(echo $cur_rate | grep -P '^\d\d\d')" ]]; then # || [[ "$(echo $cur_rate | grep -P '^\-')" ]]
+if [[ ! "$cur_rate" ]] || [[ "$(echo $cur_rate | grep -P '^\d\d\d')" ]]; then # || [[ "$(echo $cur_rate | grep -P '^\-')" ]]
   echo "no offers found" 
 else
   touch $z_logpath
