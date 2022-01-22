@@ -77,6 +77,7 @@ ssh_copy_id_dropbear() {
 alias disks='grep "dev/sd" /proc/mounts'
 alias mounts='grep "dev/sd" /proc/mounts'
 alias blk="sudo blkid | grep 'dev/sd'"
+alias blkg="sudo blkid | grep -Pi"
 
 alias sns='bash ~/sns.sh'
 alias gpu_mem='vcgencmd get_mem gpu'
