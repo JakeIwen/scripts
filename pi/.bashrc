@@ -124,12 +124,13 @@ set_vfat_uuid() {
 
 # mntdsk sd_card 0383-ABDF
 mntdsk() {
-  dirname=$1
-  uuid=$2
-  pth="/mnt/$dirname"
+  fname=$1
+  pth="/mnt/$fname"
+  uuid=$($HOME/scripts/fetch_disk_uuid.sh $fname)
   fstype=`blkid | grep $uuid | grep -Po '(?<=TYPE=")[^"]*'`
+  if [[ "$fstype" == "hfsplus" ]]; then opts="-o force,rw"; else opts=""; fi
   sudo mkdir -p $pth && sudo chown pi $pth  && sudo chmod 777 $pth 
-  sudo mount -U "$uuid" -t $fstype -o nofail $pth && echo "mounted $dirname at $pth"
+  sudo mount -U $uuid -t $fstype $opts $pth && echo "mounted $fname at $pth"
 }
 
 # MEDIA

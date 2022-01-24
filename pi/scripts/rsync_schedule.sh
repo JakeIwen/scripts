@@ -28,63 +28,72 @@ set_vfat_uuid() {
   fi
 }
 
-# mntdsk vfat /mnt/sd_card 0383-ADFD
-mntdsk() {
-  fstype=$1
-  dirname=$2
-  uuid=$3
-  pth="/mnt/$dirname"
-  
-  sudo mkdir -p $pth && sudo chown pi $pth  && sudo chmod 777 $pth 
-  sudo mount -U "$uuid" -t $fstype -o nofail $pth && echo "mounted $dirname at $pth"
-}
+
+
+chosen_msd=/mnt/msd_nand1
+sd_boot=${chosen_msd}_boot
+sd_root=$chosen_msd
 
 echo "start `date`";
 rsync_flags="-avH --delete-during --delete-excluded"
 MP_MOUNTED=$(mount | awk '/movingparts/ {print $6}' | grep "rw")
 BIGBOI_MOUNTED=$(mount | awk '/bigboi/ {print $6}' | grep "rw")
-MICROSD_MOUNTED=$(mount | awk '/micro_sd/ {print $6}' | grep "rw")
+MSD1_MOUNTED=$(mount | awk '/msd_nand1/ {print $6}' | grep "rw")
+MSD2_MOUNTED=$(mount | awk '/msd_nand2/ {print $6}' | grep "rw")
+hdd_backup=/mnt/bigboi/pi_backup_git/pi_backup
+
 
 [ ! $BIGBOI_MOUNTED ] && echo "bigboi not available/writable" && exit 0
  
-if [ $MP_MOUNTED ]; then
-  sudo rsync $rsync_flags --exclude-from=/rsync-exclude-media.txt /mnt/movingparts/ /mnt/bigboi/mp_backup
-  . /home/pi/scripts/alias_media.sh
-else echo "MP 2TB not available/writable"
-fi
+# if [ $MP_MOUNTED ]; then
+#   sudo rsync $rsync_flags --exclude-from=/rsync-exclude-media.txt /mnt/movingparts/ /mnt/bigboi/mp_backup
+#   . /home/pi/scripts/alias_media.sh
+# else echo "MP 2TB not available/writable"
+# fi
 
 # pi backups
 sync_pi_backup() {
   rsync_flags="-avH --delete-during --delete-excluded"
-  hdd_backup=/mnt/bigboi/pi_backup_git/pi_backup
-  sd_backup=/mnt/micro_sd/
-  sd_live=/mnt/micro_sd/_backup_live
-  sd_old=/mnt/micro_sd/_backup_old     
-  
   # store in git repo on HDD drive
   echo "beginning pibackup to hdd `date`"
   sudo rsync $rsync_flags --exclude-from=/rsync-exclude.txt / $hdd_backup
-  
-  echo "beginning pibackup to microSD `date`"
-  sudo rsync $rsync_flags --exclude-from=/rsync-exclude.txt / $sd_live
-  
-  echo "done with microSD `date`"
-  
-  files=`sudo ls -d ${sd_backup}* | grep -v '_backup_' | xargs -I {} echo {}`
-  sudo mv $files $sd_old/
-  sudo mv $sd_live/* $sd_backup/
-  
+  echo "hdd complete`date`"
 }
 
-[ $MICROSD_MOUNTED ] && sync_pi_backup
+commit_last_backup() {
+  cd /mnt/bigboi/pi_backup_git || exit 
+  sudo git add .
+  msg=$(echo "pibackup $(date)" | sed 's| |_|g')
+  sudo git commit -m "$msg"
+  commit=`git rev-parse HEAD`
+  echo "sudo git checkout $commit" > "./$msg.sh"
+}
+
+retore_to_msd() {
+  echo "resetting git"
+  git reset
+  echo "beginning restore to microSD `date`"
+  sudo mkdir -p $sd_root/_backup
+  sudo mv $sd_root/* $sd_root/_backup 
+  echo "moved sd root"
+  sudo mkdir -p $sd_boot/_backup_boot/
+  echo "moved sd boot"
+  sudo cp -r --preserve $hdd_backup/boot/* $sd_root/_backup_boot/ 
+  sudo rm -rf $hdd_backup/boot
+  echo "boot copied, beginng root"
+  # sudo mv $hdd_backup/* $sd_root/*
+  sudo cp -r $hdd_backup/* $sd_root/  
+  echo "done with microSD `date`"
+  echo "resetting git `date`"
+  git reset
+  echo "git reset `date`"
+}
+# 
+# sync_pi_backup
+commit_last_backup
+[ $MSD1_MOUNTED ] && retore_to_msd
 
 # sudo rsync -avH -e 'ssh -i /home/pi/.ssh/id_rsa' --delete-during --delete-excluded --exclude-from=/rsync-exclude.txt / root@192.168.6.1:/mnt/sda1
 
-cd /mnt/bigboi/pi_backup_git || exit 
-sudo git add .
-msg="Pi Backup - $(date)"
-sudo git commit -m "$msg"
-commit=`git rev-parse HEAD`
-echo "sudo git checkout $commit" > "./$msg.sh"
 
 echo "done `date`";
