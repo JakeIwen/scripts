@@ -6,7 +6,7 @@ alias chme="sudo chown -R $(whoami)" # usage: $ chme .
 
 alias ubnt='ssh ubnt@192.168.8.20'
 alias ngear='ssh -R root@192.168.6.1'
-alias rb='. /home/pi/scripts/umount_all.sh; sudo reboot'
+alias rb='. /home/pi/scripts/umount_disks.sh; sudo reboot'
 alias rball='ubnt reboot & ngear reboot & rb'
 
 alias l='ls -lah'  ##custom list directory

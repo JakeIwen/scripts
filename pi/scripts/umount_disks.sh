@@ -1,5 +1,11 @@
 #! /bin/bash
 
+if [[ "$#" = "1" ]]
+  then disk_name=$1
+else
+  unset disk_name
+fi
+
 kill_torrent_client() {
   if [[ "$(ps ax)" == *"qbittorrent"* ]]; then echo 'killtorrent' && sudo pkill -TERM qbittorrent; fi
   sleep 4
@@ -9,9 +15,16 @@ kill_torrent_client() {
 
 kill_torrent_client
 
-locations() { cat /proc/self/mounts | grep -oP '/mnt/[^ ]+'; }
+locations() { 
+  if [ -z ${disk_name+x} ]; then
+    cat /proc/self/mounts | grep -Po "/mnt/[^ ]+"
+  else
+    cat /proc/self/mounts | grep -Po "/mnt/${disk_name}[^_]"
+  fi
+}
 
 locs=`locations`
+echo "$locs"
 if [[ -n "$locs" ]]; then 
   sudo service smbd stop
   echo "unmounting $locs"
