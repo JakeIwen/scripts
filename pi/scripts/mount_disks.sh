@@ -15,18 +15,23 @@ mntdsk() {
   sudo mount -U $uuid -t $fstype $opts $pth && echo "mounted $fname at $pth"
 }
 
-mntdsk mbbackup
-mntdsk movingparts
-mntdsk bigboi
-mntdsk seegayte
+if [[ "$#" = "1" ]]; then
+  mntdsk "$1"
+else 
+  mntdsk mbbackup
+  mntdsk movingparts
+  mntdsk bigboi
+  mntdsk seegayte
 
-mntdsk msd_nand2
-mntdsk msd_nand2_boot
-mntdsk msd_nand2_settings
+  mntdsk msd_nand2
+  mntdsk msd_nand2_boot
+  mntdsk msd_nand2_settings
 
-mntdsk msd_nand1
-mntdsk msd_nand1_boot
-mntdsk msd_nand1_settings
+  mntdsk msd_nand1
+  mntdsk msd_nand1_boot
+  mntdsk msd_nand1_settings
+fi
+
 # 
 # 
 # If the optional argument new-label is present, then e2label will set the filesystem label to be new-label. 
