@@ -77,7 +77,7 @@ mount_drives() {
     sleep 1
     unmount_drives
   else
-    . /home/pi/scripts/mount_all.sh
+    . /home/pi/scripts/mount_disks.sh
     sleep 3
     . /home/pi/scripts/fix_hfs_fs.sh
     echo "drives mounted. starting smb share."
@@ -101,7 +101,7 @@ spindown_drive() {
 locations() { cat /proc/self/mounts | grep -oP '/mnt/[^ ]+'; }
 
 unmount_drives() {
-  . /home/pi/scripts/umount_all.sh
+  . /home/pi/scripts/umount_disks.sh
   sleep 5
   for loc in `locations`; do spindown_drive $loc; done
 }
