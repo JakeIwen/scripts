@@ -238,7 +238,7 @@ play() {
     filenames=`echo "$all_media" | awk "/$filename/{y=1}y"`; # everything after & including match
   fi
   subs='--sub-language=EN,US,en,us,any'
-  [[ "$1" == "-ns" ]] && subs='--sub-track=20' || subs='--sub-track=2'
+  # [[ "$1" == "-ns" ]] && subs='--sub-track=20' || subs='--sub-track=2'
   
   echo -ne "filenames: \n$filenames\n"
   echo "subs: $subs"
