@@ -45,11 +45,11 @@ hdd_backup=/mnt/bigboi/pi_backup_git/pi_backup
 
 [ ! $BIGBOI_MOUNTED ] && echo "bigboi not available/writable" && exit 0
  
-# if [ $MP_MOUNTED ]; then
-#   sudo rsync $rsync_flags --exclude-from=/rsync-exclude-media.txt /mnt/movingparts/ /mnt/bigboi/mp_backup
-#   . /home/pi/scripts/alias_media.sh
-# else echo "MP 2TB not available/writable"
-# fi
+if [ $MP_MOUNTED ]; then
+  sudo rsync $rsync_flags --exclude-from=/rsync-exclude-media.txt /mnt/movingparts/ /mnt/bigboi/mp_backup
+  . /home/pi/scripts/alias_media.sh
+else echo "MP 2TB not available/writable"
+fi
 
 # pi backups
 sync_pi_backup() {
@@ -89,11 +89,12 @@ retore_to_msd() {
   echo "git reset `date`"
 }
 # 
-# sync_pi_backup
-commit_last_backup
-[ $MSD1_MOUNTED ] && retore_to_msd
 
-# sudo rsync -avH -e 'ssh -i /home/pi/.ssh/id_rsa' --delete-during --delete-excluded --exclude-from=/rsync-exclude.txt / root@192.168.6.1:/mnt/sda1
+sync_pi_backup
+commit_last_backup
+[[ $MSD1_MOUNTED ]] && retore_to_msd
+
+sudo rsync -avH -e 'ssh -i /home/pi/.ssh/id_rsa' --delete-during --delete-excluded --exclude-from=/rsync-exclude.txt / root@192.168.6.1:/mnt/sda1
 
 
 echo "done `date`";

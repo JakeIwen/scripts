@@ -3,12 +3,12 @@
 z_activpath=/home/pi/log/zuseractive.txt
 z_logpath=/home/pi/log/zrate.txt
 
-get_offers() {  curl -sSL "https://bisq.markets/api/offers?market=BTC_USD"; }
+get_offers() { curl -sSL "https://bisq.markets/api/offers?market=BTC_USD"; }
 pp_json() { echo "$1" | python -m json.tool; }
 btclow() { parse_prices | sort -rn | tail -n 1; }
 btcusd() { curl -sSL https://api.coinbase.com/v2/prices/spot\?currency\=USD | grep -Po '\d+\.\d+'; }
-usd_btc_rate() {  echo "$(bc <<< "scale=2; (100 * ($1 - `btcusd`) / `btcusd` - 0.35)")"; }
-parse_prices() { 
+usd_btc_rate() { echo "$(bc <<< "scale=2; (100 * ($1 - `btcusd`) / `btcusd` - 0.35)")"; }
+parse_prices() {
   pp_json "$offers" | 
   grep '"direction": "SELL"' -A 7 | 
   grep -P '"min_amount": "0\.0[0-3]\d*' -A 6 | # less than 1/25 BTC (~$2k) 
