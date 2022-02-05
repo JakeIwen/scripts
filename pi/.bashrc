@@ -36,7 +36,7 @@ alias functions="cat ~/.bashrc | grep -E '^[[:space:]]*([[:alnum:]_]+[[:space:]]
 fndef() { sed -n -e "/$1()/,/}/ p" ~/.bashrc; } # print function definition
 tf() { tail ${2:-'-50'} $1; tail -f $1; }       # tail -f with more recent lines 
 snh() { nohup bash -c $1 & tail -f ./nohup.out; }
-s() { $HOME/scripts/$1.sh; }
+s() { name=$1; shift; $HOME/scripts/$name.sh $*; }
 sx() { sudo "$(history | sed 's/ [0-9]*  //g' | tail -1)"; }
 
 alias iswl="tf /var/log/cron/internet_switches.log"
@@ -299,8 +299,7 @@ playf() {
   done
 }
 
-cv() {\
-
+cv() {
   matches=`find . -maxdepth 1 -iname "*$1*"`
   echo "Matches: $matches"
   if [[ $matches ]]; then cd "$matches" || echo "multiple matches"; fi
@@ -383,7 +382,10 @@ van_is_running() {
 
 alias print_zrate="cat ~/log/zrate.txt"
 alias zrate_hourly="awk 'NR % 60 == 0' ~/log/zrate.txt"
-zrate_stat(){ grep -Po '\d?\d?\.\d+' ~/log/zrate.txt | awk '{if(min==""){min=max=$1}; if($1>max) {max=$1}; if($1<min) {min=$1}; total+=$1; count+=1} END {print "avg " total/count," | max "max," | min " min}'; }
+zrate_by_hour() { # usage: zrate_by_hour Fri 09 AM
+  grep -Pa "$1.* $2:.*$3" ~/log/zrate.txt | grep -Poa '\-?\d?\d?\.\d+' | awk '{if(min==""){min=max=$1}; if($1>max) {max=$1}; if($1<min) {min=$1}; total+=$1; count+=1} END {print total/count," | max "max," | min " min}';
+}
+zrate_stat(){ grep -Poa '\-?\d?\d?\.\d+' ~/log/zrate.txt | awk '{if(min==""){min=max=$1}; if($1>max) {max=$1}; if($1<min) {min=$1}; total+=$1; count+=1} END {print "avg " total/count," | max "max," | min " min}'; }
 zrate_less_than() {
   lzr=`tail -1 ~/log/zrate.txt | grep -Po '^\d?\d?\.\d+'`
   [[ "$lzr" ]] && (( $(echo "$lzr < $1" | bc -l) )) && echo "LOW ZRATE: $lzr"
