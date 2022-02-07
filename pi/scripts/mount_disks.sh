@@ -1,12 +1,16 @@
 #! /bin/bash
+# mntdsk sd_card 0383-ABDF
+
+fsroot=$(df -h | grep /boot | perl -pe 's|\d.*||g')
 
 fetch_uuid() { /home/pi/scripts/fetch_disk_uuid.sh $1; }
 
-# mntdsk sd_card 0383-ABDF
 mntdsk() {
   fname=$1
   pth="/mnt/$fname"
   uuid=$(fetch_uuid $fname)
+  blkid | grep -P "$fsroot.*${uuid}" && echo "not mounting $fname because it is rootFS: $fsroot" && return 0
+  
   fstype=`blkid | grep $uuid | grep -Po '(?<=TYPE=")[^"]*'`
 
   if [[ "$fstype" == "hfsplus" ]]; then opts="-o force,rw"; else opts=""; fi
