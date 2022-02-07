@@ -37,7 +37,7 @@ fndef() { sed -n -e "/$1()/,/}/ p" ~/.bashrc; } # print function definition
 tf() { tail ${2:-'-50'} $1; tail -f $1; }       # tail -f with more recent lines 
 snh() { nohup bash -c $1 & tail -f ./nohup.out; }
 s() { name=$1; shift; $HOME/scripts/$name.sh $*; }
-sx() { sudo "$(history | sed 's/ [0-9]*  //g' | tail -1)"; }
+sx() { sudo "$(history | perl -pe 's/^\s+[0-9]+\**\s+//g' | tail -1)"; }
 
 alias iswl="tf /var/log/cron/internet_switches.log"
 isw="$HOME/scripts/internet_switches.sh"
@@ -219,22 +219,19 @@ playi() {
 }
 
 play() {
+  echo "playing $1 $2 $3"
   pth=$1
   dir=`dirname "$1"`
   filename=`basename "$1"`
   shift
   filename="$(escape_chars "$filename")"
   all_media=`find "$dir" -type l -not -iname nohup.out -print | sort -g`
-  if [[ "$1" == "-c" ]]; then 
-    res $filename
-    return 0
-  fi
+  [[ "$1" == "-c" ]] && res $filename && return 0
   
-  if [[ "$1" == "-r" ]]; then 
-    filenames=`echo "$all_media" | shuf`;
-    shift
+  if [[ "$1" == "-r" ]]; then # play random
+    filenames=`echo "$all_media" | shuf` && shift
   else 
-    [[ "$1" == "-a" ]] && shift
+    [[ "$1" == "-a" ]] && shift # play all
     filenames=`echo "$all_media" | awk "/$filename/{y=1}y"`; # everything after & including match
   fi
   subs='--sub-language=EN,US,en,us,any'
@@ -244,14 +241,14 @@ play() {
   echo "subs: $subs"
   
   ! [ "$filenames" ] && echo "NO MATCH!" && return 0
-  kill_media
+  kill_media > /dev/null
   bash ~/sns.sh rear_movie
-  xset s reset # wake display
+  xset dpms force on # wake display
   nohup vlc -f $subs $filenames &
   sudo renice -12 -g  `pgrep vlc`
   last_position=$(get_last_position "$pth")
   echo "last_position: $last_position"
-  sleep 7
+  sleep 7 # wait seconds before jumping to resume position
   vlcmd Seek int64:"$last_position"
 }
 
@@ -269,16 +266,19 @@ parse_episode_num() {
   echo $parsed_ep_num
 }
 
+media_by_name() {
+  bb_links='/mnt/bigboi/mp_backup/links'
+  mp_links='/mnt/movingparts/links'
+  find "$bb_links" -type l -ipath "*$1*" -print0 | find "$mp_links" -type l -ipath "*$1*" -print0 | sort -z
+}
+
 playf() {
   name=`echo $1 | perl -pe 's/ /_/g'`
   ep=$2 # episode number eg 304 (parsed from S03E04) or flag -a, -r
-  bb_links='/mnt/bigboi/mp_backup/links'
-  mp_links='/mnt/movingparts/links'
-  readarray -d '' match_arr < <( find "$bb_links" -type l -ipath "*$name*" -print0 | find "$mp_links" -type l -ipath "*$name*" -print0 | sort -z )
-  if [ ${#match_arr[@]} -eq 0 ]; then echo "No matches found" && return 1; fi
+
+  readarray -d '' match_arr < <( media_by_name "$name"  )
+  [ ${#match_arr[@]} -eq 0 ] && echo "No matches found" && return 1
   unset match_arr[-1] > /dev/null
-  
-  if [ -z "$ep" ]; then echo "no ep supplied"; fi
   
   if [[ ! "$ep" && ${#match_arr[@]} -gt 1 ]]; then 
     printf '%s\n' "${match_arr[@]/*\//}"
@@ -286,15 +286,13 @@ playf() {
     return 0
   fi
   
-  if [[ "$ep" == "-a" ]]; then play "${match_arr[0]}" -a "$3" && return 0; fi
+  [[ "$ep" == "-a" ]] && play "${match_arr[0]}" -a "$3" && return 0
+  [ -z "$ep" ] || [[ "$ep" == "-r" ]] && play "${match_arr[0]}" -r "$3" && return 0
   
-  if [ -z "$2" ] || [[ "$2" == "-r" ]]; then play "${match_arr[0]}" -r "$3" && return 0; fi
   for line in "${match_arr[@]}"; do 
     ep_from_path=$(parse_episode_num $line $ep)
-    # echo "path: $line, ep_from_path: $ep_from_path"
     if [[ "${ep_from_path,,}" == *"${ep,,}"* ]]; then # case-insensitive match
-      echo "playing $line $2 $3"
-      play "$line" "$2" "$3"
+      play "$line" "$ep" "$3" && return 0
     fi
   done
 }
@@ -312,12 +310,12 @@ fgp() {
 vlcmd() {
   cmd=$1
   param=$2
-  xset s reset # wake display
+  xset dpms force on # wake display
   dbus-send --type=method_call --dest=org.mpris.MediaPlayer2.vlc /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.$cmd $param
 }
 
 alias pp="vlcmd PlayPause"
-vlcr() { grep -i "$1" "$VLCRPATH"; }
+vlcr() { grep -i "$1" "$VLCRPATH" | head -10; }
 vlc_nosubs() { kill_media; resume -ns; }  
 play_status() {
   omx_pos=`curl "http://0.0.0.0:2020/position"`
@@ -353,7 +351,7 @@ alias am=". ~/scripts/alias_media.sh"
 alias ifaces="ssh root@OpenWrt mwan3 interfaces | grep 'is online'"
 alias cast="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; nohup python3 server.py &"
 alias castnn="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; python3 server.py"
-alias rpiplay='xset s reset; nohup /home/pi/RPiPlay/build/rpiplay -r 180 &'
+alias rpiplay='xset dpms force on; nohup /home/pi/RPiPlay/build/rpiplay -r 180 &'
 # boost processess pushing netflix, may help with outher services
 alias rechrome="sudo renice -12  \`ps aux --sort=%cpu | tail -3 | awk '{print \$2}'\`"
 alias ngear="ssh root@OpenWrt"
@@ -409,7 +407,7 @@ alias egrep='egrep --color=auto'
 alias fgrep="find . \( -type d -o -type f \) -iname"
 alias psgrep='ps -aef | grep'
 alias agrep="alias | grep" # search aliases
-alias hist="history | sed 's/ [0-9]*  //g'"
+alias hist="history | perl -pe 's/^\s+[0-9]+\**\s+//g'"
 
 gacp() { git add .; git commit -m "$1"; git push; }
 rgrep() { grep -rni "$1" "${2:-.}" ; }                    # recursively search, fallback to pwd "."
