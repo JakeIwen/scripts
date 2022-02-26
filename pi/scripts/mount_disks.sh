@@ -9,14 +9,17 @@ mntdsk() {
   fname=$1
   pth="/mnt/$fname"
   uuid=$(fetch_uuid $fname)
-  blkid | grep -P "$fsroot.*${uuid}" && echo "not mounting $fname because it is rootFS: $fsroot" && return 0
+  # /sbin/blkid | grep -P "$fsroot.*${uuid}" && echo "not mounting $fname because it is rootFS: $fsroot" && return 0
   
-  fstype=`blkid | grep $uuid | grep -Po '(?<=TYPE=")[^"]*'`
+  fstype=$(/sbin/blkid | grep $uuid | grep -Po '(?<=TYPE=")[^"]*' | tail -1)
 
   if [[ "$fstype" == "hfsplus" ]]; then opts="-o force,rw"; else opts=""; fi
     
-  sudo mkdir -p $pth && sudo chown pi $pth  && sudo chmod 777 $pth 
-  sudo mount -U $uuid -t $fstype $opts $pth && echo "mounted $fname at $pth"
+  sudo mkdir -p $pth
+  sudo chown pi $pth
+  sudo chmod 777 $pth 
+  sudo mount -U $uuid -t $fstype $opts $pth
+  echo "mounted $fname at $pth"
 }
 
 if [[ "$#" = "1" ]]; then
@@ -26,6 +29,7 @@ else
   mntdsk movingparts
   mntdsk bigboi
   mntdsk seegayte
+  mntdsk usbext
 
   mntdsk msd_nand2
   mntdsk msd_nand2_boot
