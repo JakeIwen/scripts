@@ -3,7 +3,7 @@
 UUID=$1 # 1234-ABCF  hex only
 BLKID=$2 # /dev/sdc1
 valid=`echo "$UUID" | grep -P "^\d{4}\-[A-F]{4}$"`
-vfat=`blkid $BLKID | grep 'TYPE="vfat"'`
+vfat=`/sbin/blkid $BLKID | grep 'TYPE="vfat"'`
 
 echo "Current UUID:"
 sudo dd bs=1 skip=67 count=4 if=$BLKID 2>/dev/null \
@@ -21,5 +21,5 @@ if [ -n "$valid" ] && [ -n "$vfat" ]; then
     
 else
   echo "UUID does not match '1234-ABCD' form"
-  echo "or '`blkid $BLKID | grep -o 'TYPE="[^\"]*"'`' is not a vfat partition"
+  echo "or '`/sbin/blkid $BLKID | grep -o 'TYPE="[^\"]*"'`' is not a vfat partition"
 fi

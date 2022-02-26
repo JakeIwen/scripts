@@ -2,8 +2,9 @@
 # cron-scheduled daily
 
 chosen_msd=/mnt/msd_nand2
-sd_boot=${chosen_msd}_boot
-sd_root=$chosen_msd
+sd_boot_path=${chosen_msd}_boot
+sd_root_path=$chosen_msd
+hdd_backup=/mnt/bigboi/pi_backup_git/pi_backup
 
 echo "start `date`, for $chosen_msd";
 rsync_flags="--delete-during --delete-excluded --exclude-from=/rsync-exclude-media.txt"
@@ -11,7 +12,6 @@ MP_MOUNTED=$(mount | awk '/movingparts/ {print $6}' | grep "rw")
 BIGBOI_MOUNTED=$(mount | awk '/bigboi/ {print $6}' | grep "rw")
 MSD1_MOUNTED=$(mount | awk '/msd_nand1/ {print $6}' | grep "rw")
 MSD2_MOUNTED=$(mount | awk '/msd_nand2/ {print $6}' | grep "rw")
-hdd_backup=/mnt/bigboi/pi_backup_git/pi_backup
 
 
 [ ! $BIGBOI_MOUNTED ] && echo "bigboi not available/writable" && exit 0
@@ -41,23 +41,22 @@ commit_last_backup() {
 }
 
 retore_to_msd() {
-  echo "resetting git"
-  git reset > /dev/null
+  chosen_msd=/mnt/msd_nand2
+  sd_boot_path=${chosen_msd}_boot
+  sd_root_path=$chosen_msd
+  hdd_backup=/mnt/bigboi/pi_backup_git/pi_backup
+  # echo "resetting git"
   echo "beginning restore to microSD `date`"
-  sudo mkdir -p $sd_root/_backup
-  sudo rm -rf $sd_root/_backup/*
-  sudo mv $sd_root/* $sd_root/_backup 
-  echo "moved sd root"
-  sudo mkdir -p $sd_boot/_backup_boot/
-  echo "moved sd boot"
-  sudo cp -r --preserve $hdd_backup/boot/* $sd_root/_backup_boot/ 
+  # git reset > /dev/null
+  sudo rm -rf $sd_boot_path/*
+  sudo rm -rf $sd_root_path/*
+  echo "sdcard prepped, starting boot copy"
+  sudo cp -a $hdd_backup/boot/* $sd_boot_path/
   sudo rm -rf $hdd_backup/boot
   echo "boot copied, beginng root"
-  # sudo mv $hdd_backup/* $sd_root/*
-  sudo cp -r $hdd_backup/* $sd_root/  
+  sudo cp -a $hdd_backup/* $sd_root_path/  
   echo "done with microSD `date`"
 }
-# 
 
 sync_pi_backup
 commit_last_backup      
