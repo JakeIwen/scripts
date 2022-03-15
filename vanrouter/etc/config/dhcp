@@ -10,10 +10,12 @@ config dnsmasq
 	option leasefile '/tmp/dhcp.leases'
 	option resolvfile '/tmp/resolv.conf.auto'
 	option localservice '1'
+	option authoritative '1'
+	list server '192.168.6.103'
 
 config dhcp 'lan'
 	option interface 'lan'
-	option limit '150'
+	option limit '100'
 	option dhcpv6 'server'
 	option ra 'server'
 	option start '1'
@@ -29,4 +31,11 @@ config odhcpd 'odhcpd'
 	option leasefile '/tmp/hosts/odhcpd'
 	option leasetrigger '/usr/sbin/odhcpd-update'
 	option loglevel '4'
+
+config host
+	option mac 'DC:A6:32:94:7D:06'
+	option leasetime '86400'
+	option dns '1'
+	option name 'raspberrypi'
+	option ip '192.168.6.103'
 
