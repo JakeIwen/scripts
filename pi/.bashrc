@@ -7,7 +7,7 @@ alias chme="sudo chown -R $(whoami)" # usage: $ chme .
 alias ubnt='ssh ubnt@192.168.8.20'
 alias ngear='ssh -R root@192.168.6.1'
 alias rb='. /home/pi/scripts/umount_disks.sh; sudo reboot'
-alias rball='ubnt reboot & ngear reboot & rb'
+alias rball='ubnt reboot; ngear reboot; rb'
 
 alias l='ls -lah'  ##custom list directory
 alias lla='ls -ltu'
@@ -216,7 +216,7 @@ get_last_position() {
 }
 
 playi() {
-  subs='--sub-language=EN,US,en,us,any'
+  subs='--sub-language=EN,US,en,us'
   nohup vlc -f "$subs" "$1" &
 }
 
@@ -224,7 +224,7 @@ play() {
   echo "playing $1 $2 $3"
   pth=$1
   dir=`dirname "$1"`
-  filename=`basename "$1"`
+  filename=`basename "$1"` # TODO if DIR do ELSE play mkv
   shift
   filename="$(escape_chars "$filename")"
   all_media=`find "$dir" -type l -not -iname nohup.out -print | sort -g`
@@ -236,7 +236,7 @@ play() {
     [[ "$1" == "-a" ]] && shift # play all
     filenames=`echo "$all_media" | awk "/$filename/{y=1}y"`; # everything after & including match
   fi
-  subs='--sub-language=EN,US,en,us,any'
+  subs='--sub-language=EN,US,en,us'
   # [[ "$1" == "-ns" ]] && subs='--sub-track=20' || subs='--sub-track=2'
   
   echo -ne "filenames: \n$filenames\n"
@@ -305,9 +305,6 @@ cv() {
   if [[ $matches ]]; then cd "$matches" || echo "multiple matches"; fi
 }
 
-fgp() {
-  find /mnt/movingparts/links \( -type l \) -iname "*$1*"
-}
 
 vlcmd() {
   cmd=$1
@@ -335,6 +332,7 @@ play_status() {
     printf "$title \r$position / $total"
   fi
 }
+fgp() { find /mnt/movingparts/links \( -type l \) -iname "*$1*"; }
 
 tv() {
   cd /mnt/bigboi/links/TV || cd /mnt/movingparts/links/TV
@@ -374,7 +372,7 @@ rhp() {
   fi
 }
 
-ifonline() { # wan, clientwan, lifiwan
+ifonline() { # wan, clientwan, lifiwan, (nothing)
   ssh root@OpenWrt mwan3 interfaces | grep "$1 is online"
 }
 
@@ -418,7 +416,7 @@ alias hist="history | perl -pe 's/^\s+[0-9]+\**\s+//g'"
 gacp() { git add .; git commit -m "$1"; git push; }
 rgrep() { grep -rni "$1" "${2:-.}" ; }                    # recursively search, fallback to pwd "."
 hgrep() { hist | grep "$@" | grep -v 'hgrep' | uniq -u; } # howto: pass all args to a subfunction
-hcp(){
+hcp() {
   val=$(hist | grep $1 | tail -1)
   echo $val | pbcopy
   echo "copied: $val"

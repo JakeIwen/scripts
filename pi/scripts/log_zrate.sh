@@ -42,7 +42,9 @@ if [[ ! "$cur_rate" ]] || [[ "$(echo $cur_rate | grep -P '^\d\d\d')" ]]; then # 
   echo "no offers found" 
 else
   touch $z_logpath
-  echo "$cur_rate,$(date +%s),$(date)" >> $z_logpath
+  if echo $cur_rate | grep -v '00\.35'; then
+    echo "$cur_rate,$(date +%s),$(date)" >> $z_logpath
+  fi
   echo "cur_rate: $cur_rate"
 fi
 

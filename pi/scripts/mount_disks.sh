@@ -1,7 +1,6 @@
 #! /bin/bash
 # mntdsk sd_card 0383-ABDF
 
-fsroot=$(df -h | grep /boot | perl -pe 's|\d.*||g')
 
 fetch_uuid() { /home/pi/scripts/fetch_disk_uuid.sh $1; }
 
@@ -9,7 +8,9 @@ mntdsk() {
   fname=$1
   pth="/mnt/$fname"
   uuid=$(fetch_uuid $fname)
-  # /sbin/blkid | grep -P "$fsroot.*${uuid}" && echo "not mounting $fname because it is rootFS: $fsroot" && return 0
+  fsroot=$(df -h | grep /boot | perl -pe 's|\d.*||g')
+  
+  /sbin/blkid | grep -P "$fsroot.*${uuid}" && echo "not mounting $fname because it is rootFS: $fsroot" && return 1
   
   fstype=$(/sbin/blkid | grep $uuid | grep -Po '(?<=TYPE=")[^"]*' | tail -1)
 
@@ -31,13 +32,8 @@ else
   mntdsk seegayte
   mntdsk usbext
 
-  mntdsk msd_nand2
-  mntdsk msd_nand2_boot
-  mntdsk msd_nand2_settings
-
-  mntdsk msd_nand1
-  mntdsk msd_nand1_boot
-  mntdsk msd_nand1_settings
+  mntdsk msd_nand2 && mntdsk msd_nand2_boot && mntdsk msd_nand2_settings
+  mntdsk msd_nand1 && mntdsk msd_nand1_boot && mntdsk msd_nand1_settings
 fi
 
 # 
