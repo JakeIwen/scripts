@@ -147,7 +147,7 @@ kill_media() {
   pk chrom omxplayer vlc -9
 }
 
-uridecode() { : "${*//+/ }"; echo -e "${_//%/\\x}"; }
+uridecode() { : "${*//+/ }"; echo -e "${_//%/\\x}"; } 
 
 resume() {
   pth=`tail -1 "$POSPATH" | cut -d' ' -f1`
@@ -503,6 +503,8 @@ pk() { # kill process by name match - append flag '-9' for SIGTERM
     echo "terminated $pids"
   fi
 }
+
+source ~/.twilio/twilio_creds.sh
 
 export DISPLAY=:0
 export HISTSIZE=100000
