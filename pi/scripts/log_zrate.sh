@@ -1,6 +1,5 @@
 #! /bin/bash
 
-z_activpath=/home/pi/log/zuseractive.txt
 z_logpath=/home/pi/log/zrate.txt
 
 get_offers() { curl -sSL "https://bisq.markets/api/offers?market=BTC_USD"; }
@@ -27,25 +26,23 @@ if [ "$(parse_prices | wc -l)" -lt 5 ]; then
 fi
 echo "$(parse_prices | wc -l) offers"
 
-active=$(echo "$offers" | grep JHYY1)
-touch $z_activpath
-if [ -n "$active" ]; then
-  echo "BISQ USER JHYY1 IS ACTIVE - $(date)"
-  echo "BISQ USER JHYY1 IS ACTIVE - $(date)" >> $z_activpath
-else
-  echo "inactive - $(date)"
-  echo "inactive - $(date)" >> $z_activpath
-fi
-
 cur_rate=`usd_btc_rate "$(btclow)"`
 if [[ ! "$cur_rate" ]] || [[ "$(echo $cur_rate | grep -P '^\d\d\d')" ]]; then # || [[ "$(echo $cur_rate | grep -P '^\-')" ]]
   echo "no offers found" 
-else
-  touch $z_logpath
-  echo "$cur_rate,$(date +%s),$(date)" >> $z_logpath
-  echo "cur_rate: $cur_rate"
+  return 0
+  echo "this code should not print"
 fi
+touch $z_logpath
+echo "$cur_rate,$(date +%s),$(date)" >> $z_logpath
+echo "cur_rate: $cur_rate"
 
+zrate_less_than() {
+  [[ "$cur_rate" ]] && (( $(echo "$cur_rate < $1" | bc -l) )) && echo "LOW ZRATE: $cur_rate"
+}
+
+if zrate_less_than 0; then
+  . /home/pi/scripts/sms_send.sh "low zrate: $cur_rate"
+fi
 
 # awk 'NR % 60 == 0'  $z_logpath
 # sed  -i '/^,.*/d' $z_logpath 

@@ -38,7 +38,8 @@ alias_folders() {
   src=$1
   links="$src/links"
   rm -rf "$links" || True
-  mkdir "$links" "$links/TV" "$links/Documentaries" "$links/Movies" "$links/New" "$links/incomplete"
+  mkdir "$links"
+  mkdir "$links/TV" "$links/Documentaries" "$links/Movies" "$links/New" "$links/incomplete"
   find "$src/torrent/incomplete" -maxdepth 2 -mindepth 1  -type d \
     | while read pth; do media_group_links "$pth"; done
   echo incomplete
