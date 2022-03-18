@@ -33,4 +33,4 @@ for day in "${days[@]}"; do
   done
 done
 
-echo -e "$data" | column -t | perl -pe 's|(\S)  |\1 |g'
+echo -e "$data" | column -t | perl -pe 's|(\S)  |\1 |g' | sort
