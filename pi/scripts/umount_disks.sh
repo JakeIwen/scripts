@@ -23,7 +23,7 @@ locations() {
   fi
 }
 
-locs=`locations`
+locs=`locations | grep -vP 'usb|msd'`
 echo "$locs"
 if [[ -n "$locs" ]]; then 
   sudo service smbd stop

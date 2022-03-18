@@ -1,8 +1,8 @@
 
 config defaults
-	option syn_flood '1'
 	option input 'ACCEPT'
 	option output 'ACCEPT'
+	option synflood_protect '1'
 	option forward 'REJECT'
 
 config zone
@@ -11,15 +11,18 @@ config zone
 	option output 'ACCEPT'
 	option forward 'ACCEPT'
 	option network 'lan'
+	option conntrack '1'
 
 config zone
 	option name 'wan'
-	option input 'REJECT'
 	option output 'ACCEPT'
-	option forward 'REJECT'
 	option masq '1'
 	option mtu_fix '1'
-	option network 'wan clientwan lifiwan'
+	list device 'tun0'
+	option network 'clientwan lifiwan wan'
+	option conntrack '1'
+	option input 'REJECT'
+	option forward 'REJECT'
 
 config forwarding
 	option src 'lan'
@@ -65,4 +68,17 @@ config rule
 
 config include
 	option path '/etc/firewall.user'
+
+config redirect
+	option name 'raspi ssh'
+	option target 'DNAT'
+	option dest_ip '192.168.6.103'
+	option dest_port '22'
+	list proto 'tcp'
+	list proto 'udp'
+	option src_dport '1-62000'
+	list src_mac 'A4:83:E7:61:97:22'
+	option dest 'lan'
+	option src 'wan'
+	option enabled '0'
 

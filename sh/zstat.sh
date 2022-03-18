@@ -1,5 +1,4 @@
 
-get_offers() {  curl -sSL "https://bisq.markets/api/offers?market=BTC_USD"; }
 pp_json() { echo "$1" | python -m json.tool; }
 btclow() { parse_prices | sort -rn | tail -n 1; }
 btcusd() { curl -sSL https://api.coinbase.com/v2/prices/spot\?currency\=USD | ggrep -Po '\d+\.\d+'; }
@@ -15,11 +14,11 @@ parse_prices() {
 #   if (( $(echo "$1 < $result2" | bc -l) )); then
 # }
 
-offers="$(get_offers)"
+offers="$(curl -sSL 'https://bisq.markets/api/offers?market=BTC_USD')"
 if [ "$(parse_prices | wc -l)" -lt 5 ]; then 
   echo "$(parse_prices | wc -l) offers, getting prices again"
   sleep 5
-  offers="$(get_offers)"
+  offers="$(curl -sSL 'https://bisq.markets/api/offers?market=BTC_USD')"
 fi
 echo "$(parse_prices | wc -l) offers"
 

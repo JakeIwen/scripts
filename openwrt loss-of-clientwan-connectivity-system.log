@@ -1,0 +1,199 @@
+Thu Feb 24 03:22:58 2022 authpriv.info dropbear[26400]: Child connection from 192.168.6.103:60812
+Thu Feb 24 03:22:58 2022 authpriv.notice dropbear[26400]: Pubkey auth succeeded for 'root' with key sha1!! 4f:dd:c0:88:77:09:d1:b1:a3:ab:47:3f:47:c9:17:d1:6e:24:53:72 from 192.168.6.103:60812
+Thu Feb 24 03:23:00 2022 authpriv.info dropbear[26400]: Exit (root): Disconnect received
+Thu Feb 24 03:23:00 2022 cron.info crond[1384]: USER root pid 26530 cmd /root/auto_dns.sh >> /root/log/auto_dns.log 2>&1
+Thu Feb 24 03:23:58 2022 authpriv.info dropbear[27271]: Child connection from 192.168.6.103:60834
+Thu Feb 24 03:23:59 2022 authpriv.notice dropbear[27271]: Pubkey auth succeeded for 'root' with key sha1!! 4f:dd:c0:88:77:09:d1:b1:a3:ab:47:3f:47:c9:17:d1:6e:24:53:72 from 192.168.6.103:60834
+Thu Feb 24 03:24:00 2022 cron.info crond[1384]: USER root pid 27359 cmd /root/auto_dns.sh >> /root/log/auto_dns.log 2>&1
+Thu Feb 24 03:24:01 2022 authpriv.info dropbear[27271]: Exit (root): Disconnect received
+Thu Feb 24 03:24:58 2022 authpriv.info dropbear[28186]: Child connection from 192.168.6.103:60856
+Thu Feb 24 03:24:59 2022 authpriv.notice dropbear[28186]: Pubkey auth succeeded for 'root' with key sha1!! 4f:dd:c0:88:77:09:d1:b1:a3:ab:47:3f:47:c9:17:d1:6e:24:53:72 from 192.168.6.103:60856
+Thu Feb 24 03:25:00 2022 cron.info crond[1384]: USER root pid 28298 cmd /root/auto_dns.sh >> /root/log/auto_dns.log 2>&1
+Thu Feb 24 03:25:00 2022 authpriv.info dropbear[28186]: Exit (root): Disconnect received
+Thu Feb 24 03:25:58 2022 authpriv.info dropbear[29060]: Child connection from 192.168.6.103:60876
+Thu Feb 24 03:25:59 2022 authpriv.notice dropbear[29060]: Pubkey auth succeeded for 'root' with key sha1!! 4f:dd:c0:88:77:09:d1:b1:a3:ab:47:3f:47:c9:17:d1:6e:24:53:72 from 192.168.6.103:60876
+Thu Feb 24 03:26:00 2022 cron.info crond[1384]: USER root pid 29136 cmd /root/auto_dns.sh >> /root/log/auto_dns.log 2>&1
+Thu Feb 24 03:26:01 2022 authpriv.info dropbear[29060]: Exit (root): Disconnect received
+Thu Feb 24 03:26:58 2022 authpriv.info dropbear[29968]: Child connection from 192.168.6.103:60898
+Thu Feb 24 03:26:59 2022 authpriv.notice dropbear[29968]: Pubkey auth succeeded for 'root' with key sha1!! 4f:dd:c0:88:77:09:d1:b1:a3:ab:47:3f:47:c9:17:d1:6e:24:53:72 from 192.168.6.103:60898
+Thu Feb 24 03:27:00 2022 cron.info crond[1384]: USER root pid 30029 cmd /root/auto_dns.sh >> /root/log/auto_dns.log 2>&1
+Thu Feb 24 03:27:01 2022 authpriv.info dropbear[29968]: Exit (root): Disconnect received
+Thu Feb 24 03:27:02 2022 user.info mwan3track[27386]: Check (ping) failed for target "8.8.4.4" on interface clientwan (wlan1)
+Thu Feb 24 03:27:58 2022 authpriv.info dropbear[30836]: Child connection from 192.168.6.103:60924
+Thu Feb 24 03:27:59 2022 authpriv.notice dropbear[30836]: Pubkey auth succeeded for 'root' with key sha1!! 4f:dd:c0:88:77:09:d1:b1:a3:ab:47:3f:47:c9:17:d1:6e:24:53:72 from 192.168.6.103:60924
+Thu Feb 24 03:28:00 2022 cron.info crond[1384]: USER root pid 30954 cmd /root/auto_dns.sh >> /root/log/auto_dns.log 2>&1
+Thu Feb 24 03:28:00 2022 authpriv.info dropbear[30836]: Exit (root): Disconnect received
+Thu Feb 24 03:28:58 2022 authpriv.info dropbear[31750]: Child connection from 192.168.6.103:60946
+Thu Feb 24 03:28:59 2022 authpriv.notice dropbear[31750]: Pubkey auth succeeded for 'root' with key sha1!! 4f:dd:c0:88:77:09:d1:b1:a3:ab:47:3f:47:c9:17:d1:6e:24:53:72 from 192.168.6.103:60946
+Thu Feb 24 03:29:00 2022 cron.info crond[1384]: USER root pid 31833 cmd /root/auto_dns.sh >> /root/log/auto_dns.log 2>&1
+Thu Feb 24 03:29:00 2022 authpriv.info dropbear[31750]: Exit (root): Disconnect received
+Thu Feb 24 03:29:30 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-BEACON-LOSS
+Thu Feb 24 03:29:37 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-BEACON-LOSS
+Thu Feb 24 03:29:58 2022 authpriv.info dropbear[32618]: Child connection from 192.168.6.103:60970
+Thu Feb 24 03:29:59 2022 authpriv.notice dropbear[32618]: Pubkey auth succeeded for 'root' with key sha1!! 4f:dd:c0:88:77:09:d1:b1:a3:ab:47:3f:47:c9:17:d1:6e:24:53:72 from 192.168.6.103:60970
+Thu Feb 24 03:30:00 2022 cron.info crond[1384]: USER root pid 32750 cmd /root/auto_dns.sh >> /root/log/auto_dns.log 2>&1
+Thu Feb 24 03:30:00 2022 authpriv.info dropbear[32618]: Exit (root): Disconnect received
+Thu Feb 24 03:30:21 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-BEACON-LOSS
+Thu Feb 24 03:30:58 2022 authpriv.info dropbear[1073]: Child connection from 192.168.6.103:60990
+Thu Feb 24 03:30:59 2022 authpriv.notice dropbear[1073]: Pubkey auth succeeded for 'root' with key sha1!! 4f:dd:c0:88:77:09:d1:b1:a3:ab:47:3f:47:c9:17:d1:6e:24:53:72 from 192.168.6.103:60990
+Thu Feb 24 03:31:00 2022 cron.info crond[1384]: USER root pid 1203 cmd /root/auto_dns.sh >> /root/log/auto_dns.log 2>&1
+Thu Feb 24 03:31:00 2022 authpriv.info dropbear[1073]: Exit (root): Disconnect received
+Thu Feb 24 03:31:31 2022 kern.err kernel: [59010.126441] ath: phy1: Unable to reset channel, reset status -5
+Thu Feb 24 03:31:56 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-BEACON-LOSS
+Thu Feb 24 03:31:59 2022 authpriv.info dropbear[1955]: Child connection from 192.168.6.103:32780
+Thu Feb 24 03:31:59 2022 authpriv.notice dropbear[1955]: Pubkey auth succeeded for 'root' with key sha1!! 4f:dd:c0:88:77:09:d1:b1:a3:ab:47:3f:47:c9:17:d1:6e:24:53:72 from 192.168.6.103:32780
+Thu Feb 24 03:32:00 2022 cron.info crond[1384]: USER root pid 1999 cmd /root/auto_dns.sh >> /root/log/auto_dns.log 2>&1
+Thu Feb 24 03:32:01 2022 authpriv.info dropbear[1955]: Exit (root): Disconnect received
+Thu Feb 24 03:32:21 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-BEACON-LOSS
+Thu Feb 24 03:32:58 2022 authpriv.info dropbear[2876]: Child connection from 192.168.6.103:32808
+Thu Feb 24 03:32:59 2022 authpriv.notice dropbear[2876]: Pubkey auth succeeded for 'root' with key sha1!! 4f:dd:c0:88:77:09:d1:b1:a3:ab:47:3f:47:c9:17:d1:6e:24:53:72 from 192.168.6.103:32808
+Thu Feb 24 03:33:00 2022 cron.info crond[1384]: USER root pid 2942 cmd /root/auto_dns.sh >> /root/log/auto_dns.log 2>&1
+Thu Feb 24 03:33:01 2022 authpriv.info dropbear[2876]: Exit (root): Disconnect received
+Thu Feb 24 03:33:36 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-BEACON-LOSS
+Thu Feb 24 03:33:45 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-BEACON-LOSS
+Thu Feb 24 03:33:59 2022 authpriv.info dropbear[3750]: Child connection from 192.168.6.103:32832
+Thu Feb 24 03:33:59 2022 authpriv.notice dropbear[3750]: Pubkey auth succeeded for 'root' with key sha1!! 4f:dd:c0:88:77:09:d1:b1:a3:ab:47:3f:47:c9:17:d1:6e:24:53:72 from 192.168.6.103:32832
+Thu Feb 24 03:34:00 2022 cron.info crond[1384]: USER root pid 3798 cmd /root/auto_dns.sh >> /root/log/auto_dns.log 2>&1
+Thu Feb 24 03:34:01 2022 authpriv.info dropbear[3750]: Exit (root): Disconnect received
+Thu Feb 24 03:34:07 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-BEACON-LOSS
+Thu Feb 24 03:34:14 2022 daemon.notice wpa_supplicant[1849]: wlan1: WPA: Group rekeying completed with 5e:be:0c:70:c4:88 [GTK=CCMP]
+Thu Feb 24 03:34:29 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-BEACON-LOSS
+Thu Feb 24 03:34:40 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-BEACON-LOSS
+Thu Feb 24 03:34:44 2022 daemon.notice netifd: Network device 'wlan1' link is down
+Thu Feb 24 03:34:44 2022 daemon.notice netifd: Interface 'clientwan' has link connectivity loss
+Thu Feb 24 03:34:44 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-DISCONNECTED bssid=5e:be:0c:70:c4:88 reason=4 locally_generated=1
+Thu Feb 24 03:34:45 2022 daemon.notice wpa_supplicant[1923]: wlan1-1: CTRL-EVENT-SCAN-FAILED ret=-16 retry=1
+Thu Feb 24 03:34:45 2022 daemon.notice wpa_supplicant[1849]: wlan1: SME: Trying to authenticate with 5e:be:0c:70:c4:88 (SSID='lion_fone' freq=2437 Mhz)
+Thu Feb 24 03:34:45 2022 kern.info kernel: [59204.531892] wlan1: authenticate with 5e:be:0c:70:c4:88
+Thu Feb 24 03:34:45 2022 kern.info kernel: [59204.562625] wlan1: send auth to 5e:be:0c:70:c4:88 (try 1/3)
+Thu Feb 24 03:34:45 2022 daemon.notice wpa_supplicant[1849]: wlan1: Trying to associate with 5e:be:0c:70:c4:88 (SSID='lion_fone' freq=2437 Mhz)
+Thu Feb 24 03:34:45 2022 kern.info kernel: [59204.573695] wlan1: authenticated
+Thu Feb 24 03:34:45 2022 kern.info kernel: [59204.578154] wlan1: associate with 5e:be:0c:70:c4:88 (try 1/3)
+Thu Feb 24 03:34:45 2022 daemon.notice wpa_supplicant[1849]: wlan1: Associated with 5e:be:0c:70:c4:88
+Thu Feb 24 03:34:45 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-SUBNET-STATUS-UPDATE status=0
+Thu Feb 24 03:34:45 2022 daemon.notice netifd: Network device 'wlan1' link is up
+Thu Feb 24 03:34:45 2022 daemon.notice netifd: Interface 'clientwan' has link connectivity
+Thu Feb 24 03:34:45 2022 kern.info kernel: [59204.620163] wlan1: RX AssocResp from 5e:be:0c:70:c4:88 (capab=0x431 status=0 aid=1)
+Thu Feb 24 03:34:45 2022 kern.info kernel: [59204.628213] wlan1: associated
+Thu Feb 24 03:34:50 2022 user.info mwan3track[27386]: Check (ping) failed for target "8.8.4.4" on interface clientwan (wlan1)
+Thu Feb 24 03:34:53 2022 user.info mwan3track[27386]: Check (ping) failed for target "8.8.8.8" on interface clientwan (wlan1)
+Thu Feb 24 03:34:55 2022 daemon.notice wpa_supplicant[1849]: wlan1: Authentication with 5e:be:0c:70:c4:88 timed out.
+Thu Feb 24 03:34:55 2022 kern.info kernel: [59214.634814] wlan1: deauthenticating from 5e:be:0c:70:c4:88 by local choice (Reason: 3=DEAUTH_LEAVING)
+Thu Feb 24 03:34:55 2022 daemon.notice netifd: Network device 'wlan1' link is down
+Thu Feb 24 03:34:55 2022 daemon.notice netifd: Interface 'clientwan' has link connectivity loss
+Thu Feb 24 03:34:55 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-DISCONNECTED bssid=5e:be:0c:70:c4:88 reason=3 locally_generated=1
+Thu Feb 24 03:34:55 2022 daemon.notice wpa_supplicant[1849]: wlan1: WPA: 4-Way Handshake failed - pre-shared key may be incorrect
+Thu Feb 24 03:34:55 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid="lion_fone" auth_failures=1 duration=10 reason=WRONG_KEY
+Thu Feb 24 03:34:56 2022 user.info mwan3track[27386]: Check (ping) failed for target "208.67.222.222" on interface clientwan (wlan1)
+Thu Feb 24 03:34:56 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-SCAN-FAILED ret=-16 retry=1
+Thu Feb 24 03:34:57 2022 daemon.notice wpa_supplicant[1923]: wlan1-1: CTRL-EVENT-SCAN-FAILED ret=-16 retry=1
+Thu Feb 24 03:34:59 2022 authpriv.info dropbear[4651]: Child connection from 192.168.6.103:32856
+Thu Feb 24 03:34:59 2022 user.info mwan3track[27386]: Check (ping) failed for target "208.67.220.220" on interface clientwan (wlan1)
+Thu Feb 24 03:34:59 2022 authpriv.notice dropbear[4651]: Pubkey auth succeeded for 'root' with key sha1!! 4f:dd:c0:88:77:09:d1:b1:a3:ab:47:3f:47:c9:17:d1:6e:24:53:72 from 192.168.6.103:32856
+Thu Feb 24 03:35:00 2022 cron.info crond[1384]: USER root pid 4706 cmd /root/auto_dns.sh >> /root/log/auto_dns.log 2>&1
+Thu Feb 24 03:35:01 2022 authpriv.info dropbear[4651]: Exit (root): Disconnect received
+Thu Feb 24 03:35:05 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-SCAN-FAILED ret=-16 retry=1
+Thu Feb 24 03:35:07 2022 user.info mwan3track[27386]: Check (ping) failed for target "8.8.4.4" on interface clientwan (wlan1)
+Thu Feb 24 03:35:07 2022 daemon.notice wpa_supplicant[1923]: wlan1-1: CTRL-EVENT-SCAN-FAILED ret=-16 retry=1
+Thu Feb 24 03:35:07 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-SSID-REENABLED id=0 ssid="lion_fone"
+Thu Feb 24 03:35:07 2022 daemon.notice wpa_supplicant[1849]: wlan1: SME: Trying to authenticate with 5e:be:0c:70:c4:88 (SSID='lion_fone' freq=2437 Mhz)
+Thu Feb 24 03:35:07 2022 kern.info kernel: [59226.581724] wlan1: authenticate with 5e:be:0c:70:c4:88
+Thu Feb 24 03:35:07 2022 kern.info kernel: [59226.612579] wlan1: send auth to 5e:be:0c:70:c4:88 (try 1/3)
+Thu Feb 24 03:35:07 2022 daemon.notice wpa_supplicant[1849]: wlan1: Trying to associate with 5e:be:0c:70:c4:88 (SSID='lion_fone' freq=2437 Mhz)
+Thu Feb 24 03:35:07 2022 kern.info kernel: [59226.621749] wlan1: authenticated
+Thu Feb 24 03:35:07 2022 kern.info kernel: [59226.627793] wlan1: associate with 5e:be:0c:70:c4:88 (try 1/3)
+Thu Feb 24 03:35:07 2022 daemon.notice wpa_supplicant[1849]: wlan1: Associated with 5e:be:0c:70:c4:88
+Thu Feb 24 03:35:07 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-SUBNET-STATUS-UPDATE status=0
+Thu Feb 24 03:35:07 2022 kern.info kernel: [59226.655662] wlan1: RX AssocResp from 5e:be:0c:70:c4:88 (capab=0x431 status=0 aid=1)
+Thu Feb 24 03:35:07 2022 kern.info kernel: [59226.663691] wlan1: associated
+Thu Feb 24 03:35:07 2022 daemon.notice netifd: Network device 'wlan1' link is up
+Thu Feb 24 03:35:07 2022 daemon.notice netifd: Interface 'clientwan' has link connectivity
+Thu Feb 24 03:35:10 2022 user.info mwan3track[27386]: Check (ping) failed for target "8.8.8.8" on interface clientwan (wlan1)
+Thu Feb 24 03:35:12 2022 kern.debug kernel: [59231.281956] wlan1: Limiting TX power to 30 (30 - 0) dBm as advertised by 5e:be:0c:70:c4:88
+Thu Feb 24 03:35:13 2022 user.info mwan3track[27386]: Check (ping) failed for target "208.67.222.222" on interface clientwan (wlan1)
+Thu Feb 24 03:35:16 2022 user.info mwan3track[27386]: Check (ping) failed for target "208.67.220.220" on interface clientwan (wlan1)
+Thu Feb 24 03:35:16 2022 user.notice mwan3[4976]: Execute ifdown event on interface clientwan (wlan1)
+Thu Feb 24 03:35:17 2022 daemon.notice wpa_supplicant[1849]: wlan1: Authentication with 5e:be:0c:70:c4:88 timed out.
+Thu Feb 24 03:35:18 2022 kern.info kernel: [59236.668459] wlan1: deauthenticating from 5e:be:0c:70:c4:88 by local choice (Reason: 3=DEAUTH_LEAVING)
+Thu Feb 24 03:35:18 2022 daemon.notice netifd: Network device 'wlan1' link is down
+Thu Feb 24 03:35:18 2022 daemon.notice netifd: Interface 'clientwan' has link connectivity loss
+Thu Feb 24 03:35:18 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-DISCONNECTED bssid=5e:be:0c:70:c4:88 reason=3 locally_generated=1
+Thu Feb 24 03:35:18 2022 daemon.notice wpa_supplicant[1849]: wlan1: WPA: 4-Way Handshake failed - pre-shared key may be incorrect
+Thu Feb 24 03:35:18 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid="lion_fone" auth_failures=2 duration=20 reason=WRONG_KEY
+Thu Feb 24 03:35:18 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid="lion_fone" auth_failures=3 duration=30 reason=CONN_FAILED
+Thu Feb 24 03:35:18 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-SCAN-FAILED ret=-16 retry=1
+Thu Feb 24 03:35:18 2022 user.info mwan3[4976]: Connection tracking flushed for interface 'clientwan' on action 'ifdown'
+Thu Feb 24 03:35:18 2022 user.info mwan3track[27386]: Detect ifdown event on interface clientwan (wlan1)
+Thu Feb 24 03:35:19 2022 daemon.notice wpa_supplicant[1923]: wlan1-1: CTRL-EVENT-SCAN-FAILED ret=-16 retry=1
+Thu Feb 24 03:35:23 2022 user.notice mwan3track[27386]: Interface clientwan (wlan1) is offline
+Thu Feb 24 03:35:48 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-SCAN-FAILED ret=-16 retry=1
+Thu Feb 24 03:35:49 2022 daemon.notice wpa_supplicant[1923]: wlan1-1: CTRL-EVENT-SCAN-FAILED ret=-16 retry=1
+Thu Feb 24 03:35:50 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-SSID-REENABLED id=0 ssid="lion_fone"
+Thu Feb 24 03:35:50 2022 daemon.notice wpa_supplicant[1849]: wlan1: SME: Trying to authenticate with 5e:be:0c:70:c4:88 (SSID='lion_fone' freq=2437 Mhz)
+Thu Feb 24 03:35:50 2022 kern.info kernel: [59268.661143] wlan1: authenticate with 5e:be:0c:70:c4:88
+Thu Feb 24 03:35:50 2022 kern.info kernel: [59268.692520] wlan1: send auth to 5e:be:0c:70:c4:88 (try 1/3)
+Thu Feb 24 03:35:50 2022 daemon.notice wpa_supplicant[1849]: wlan1: Trying to associate with 5e:be:0c:70:c4:88 (SSID='lion_fone' freq=2437 Mhz)
+Thu Feb 24 03:35:50 2022 kern.info kernel: [59268.711751] wlan1: authenticated
+Thu Feb 24 03:35:50 2022 kern.info kernel: [59268.717116] wlan1: associate with 5e:be:0c:70:c4:88 (try 1/3)
+Thu Feb 24 03:35:50 2022 daemon.notice wpa_supplicant[1849]: wlan1: Associated with 5e:be:0c:70:c4:88
+Thu Feb 24 03:35:50 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-SUBNET-STATUS-UPDATE status=0
+Thu Feb 24 03:35:50 2022 daemon.notice netifd: Network device 'wlan1' link is up
+Thu Feb 24 03:35:50 2022 daemon.notice netifd: Interface 'clientwan' has link connectivity
+Thu Feb 24 03:35:50 2022 kern.info kernel: [59268.729953] wlan1: RX AssocResp from 5e:be:0c:70:c4:88 (capab=0x431 status=0 aid=1)
+Thu Feb 24 03:35:50 2022 kern.info kernel: [59268.737918] wlan1: associated
+Thu Feb 24 03:35:50 2022 kern.debug kernel: [59268.847828] wlan1: Limiting TX power to 30 (30 - 0) dBm as advertised by 5e:be:0c:70:c4:88
+Thu Feb 24 03:35:58 2022 authpriv.info dropbear[5731]: Child connection from 192.168.6.103:32918
+Thu Feb 24 03:35:58 2022 authpriv.notice dropbear[5731]: Pubkey auth succeeded for 'root' with key sha1!! 4f:dd:c0:88:77:09:d1:b1:a3:ab:47:3f:47:c9:17:d1:6e:24:53:72 from 192.168.6.103:32918
+Thu Feb 24 03:36:00 2022 daemon.notice wpa_supplicant[1849]: wlan1: Authentication with 5e:be:0c:70:c4:88 timed out.
+Thu Feb 24 03:36:00 2022 kern.info kernel: [59278.743157] wlan1: deauthenticating from 5e:be:0c:70:c4:88 by local choice (Reason: 3=DEAUTH_LEAVING)
+Thu Feb 24 03:36:00 2022 daemon.notice netifd: Network device 'wlan1' link is down
+Thu Feb 24 03:36:00 2022 daemon.notice netifd: Interface 'clientwan' has link connectivity loss
+Thu Feb 24 03:36:00 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-DISCONNECTED bssid=5e:be:0c:70:c4:88 reason=3 locally_generated=1
+Thu Feb 24 03:36:00 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid="lion_fone" auth_failures=4 duration=60 reason=CONN_FAILED
+Thu Feb 24 03:36:00 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-SCAN-FAILED ret=-16 retry=1
+Thu Feb 24 03:36:00 2022 authpriv.info dropbear[5731]: Exit (root): Disconnect received
+Thu Feb 24 03:36:00 2022 authpriv.info dropbear[5855]: Child connection from 192.168.6.103:32934
+Thu Feb 24 03:36:00 2022 cron.info crond[1384]: USER root pid 5856 cmd /root/auto_dns.sh >> /root/log/auto_dns.log 2>&1
+Thu Feb 24 03:36:01 2022 authpriv.notice dropbear[5855]: Pubkey auth succeeded for 'root' with key sha1!! 4f:dd:c0:88:77:09:d1:b1:a3:ab:47:3f:47:c9:17:d1:6e:24:53:72 from 192.168.6.103:32934
+Thu Feb 24 03:36:01 2022 daemon.notice wpa_supplicant[1923]: wlan1-1: CTRL-EVENT-SCAN-FAILED ret=-16 retry=1
+Thu Feb 24 03:36:02 2022 authpriv.info dropbear[5855]: Exit (root): Disconnect received
+Thu Feb 24 03:36:02 2022 authpriv.info dropbear[6045]: Child connection from 192.168.6.103:32942
+Thu Feb 24 03:36:03 2022 authpriv.notice dropbear[6045]: Pubkey auth succeeded for 'root' with key sha1!! 4f:dd:c0:88:77:09:d1:b1:a3:ab:47:3f:47:c9:17:d1:6e:24:53:72 from 192.168.6.103:32942
+Thu Feb 24 03:36:04 2022 authpriv.info dropbear[6045]: Exit (root): Disconnect received
+Thu Feb 24 03:36:57 2022 daemon.err uhttpd[1417]: luci: accepted login on / for root from 192.168.6.45
+Thu Feb 24 03:36:58 2022 authpriv.info dropbear[6798]: Child connection from 192.168.6.103:32976
+Thu Feb 24 03:37:00 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-SCAN-FAILED ret=-16 retry=1
+Thu Feb 24 03:37:00 2022 cron.info crond[1384]: USER root pid 6878 cmd /root/auto_dns.sh >> /root/log/auto_dns.log 2>&1
+Thu Feb 24 03:37:01 2022 authpriv.notice dropbear[6798]: Pubkey auth succeeded for 'root' with key sha1!! 4f:dd:c0:88:77:09:d1:b1:a3:ab:47:3f:47:c9:17:d1:6e:24:53:72 from 192.168.6.103:32976
+Thu Feb 24 03:37:01 2022 daemon.notice wpa_supplicant[1923]: wlan1-1: CTRL-EVENT-SCAN-FAILED ret=-16 retry=1
+Thu Feb 24 03:37:02 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-SSID-REENABLED id=0 ssid="lion_fone"
+Thu Feb 24 03:37:02 2022 daemon.notice wpa_supplicant[1849]: wlan1: SME: Trying to authenticate with 5e:be:0c:70:c4:88 (SSID='lion_fone' freq=2437 Mhz)
+Thu Feb 24 03:37:02 2022 kern.info kernel: [59340.720607] wlan1: authenticate with 5e:be:0c:70:c4:88
+Thu Feb 24 03:37:02 2022 kern.info kernel: [59340.751746] wlan1: send auth to 5e:be:0c:70:c4:88 (try 1/3)
+Thu Feb 24 03:37:02 2022 kern.info kernel: [59340.795440] wlan1: authenticated
+Thu Feb 24 03:37:02 2022 daemon.notice wpa_supplicant[1849]: wlan1: Trying to associate with 5e:be:0c:70:c4:88 (SSID='lion_fone' freq=2437 Mhz)
+Thu Feb 24 03:37:02 2022 kern.info kernel: [59340.885820] wlan1: associate with 5e:be:0c:70:c4:88 (try 1/3)
+Thu Feb 24 03:37:02 2022 daemon.notice wpa_supplicant[1849]: wlan1: Associated with 5e:be:0c:70:c4:88
+Thu Feb 24 03:37:02 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-SUBNET-STATUS-UPDATE status=0
+Thu Feb 24 03:37:02 2022 daemon.notice netifd: Network device 'wlan1' link is up
+Thu Feb 24 03:37:02 2022 daemon.notice netifd: Interface 'clientwan' has link connectivity
+Thu Feb 24 03:37:02 2022 kern.info kernel: [59340.903340] wlan1: RX AssocResp from 5e:be:0c:70:c4:88 (capab=0x431 status=0 aid=1)
+Thu Feb 24 03:37:02 2022 kern.info kernel: [59340.911322] wlan1: associated
+Thu Feb 24 03:37:02 2022 daemon.notice wpa_supplicant[1849]: wlan1: WPA: Key negotiation completed with 5e:be:0c:70:c4:88 [PTK=CCMP GTK=CCMP]
+Thu Feb 24 03:37:02 2022 daemon.notice wpa_supplicant[1849]: wlan1: CTRL-EVENT-CONNECTED - Connection to 5e:be:0c:70:c4:88 completed [id=0 id_str=]
+Thu Feb 24 03:37:02 2022 kern.debug kernel: [59341.039526] wlan1: Limiting TX power to 30 (30 - 0) dBm as advertised by 5e:be:0c:70:c4:88
+Thu Feb 24 03:37:04 2022 authpriv.info dropbear[6798]: Exit (root): Disconnect received
+Thu Feb 24 03:37:04 2022 authpriv.info dropbear[7210]: Child connection from 192.168.6.103:32994
+Thu Feb 24 03:37:06 2022 authpriv.notice dropbear[7210]: Pubkey auth succeeded for 'root' with key sha1!! 4f:dd:c0:88:77:09:d1:b1:a3:ab:47:3f:47:c9:17:d1:6e:24:53:72 from 192.168.6.103:32994
+Thu Feb 24 03:37:06 2022 user.info mwan3track[27386]: Check (ping) success for target "8.8.4.4" on interface clientwan (wlan1)
+Thu Feb 24 03:37:06 2022 user.info mwan3track[27386]: Lost 32 ping(s) on interface clientwan (wlan1)
+Thu Feb 24 03:37:06 2022 user.notice mwan3track[27386]: Interface clientwan (wlan1) is online
+Thu Feb 24 03:37:08 2022 user.notice mwan3[7339]: Execute ifup event on interface clientwan (wlan1)
+Thu Feb 24 03:37:11 2022 user.notice mwan3[7339]: Starting tracker on interface clientwan (wlan1)
+Thu Feb 24 03:37:11 2022 authpriv.info dropbear[7210]: Exit (root): Disconnect received
+Thu Feb 24 03:37:11 2022 authpriv.info dropbear[7809]: Child connection from 192.168.6.103:33000
+Thu Feb 24 03:37:14 2022 authpriv.notice dropbear[7809]: Pubkey auth succeeded for 'root' with key sha1!! 4f:dd:c0:88:77:09:d1:b1:a3:ab:47:3f:47:c9:17:d1:6e:24:53:72 from 192.168.6.103:33000
+Thu Feb 24 03:37:18 2022 user.info mwan3[7339]: Connection tracking flushed for interface 'clientwan' on action 'ifup'
+Thu Feb 24 03:37:18 2022 user.info mwan3rtmon[1841]: Detect rtchange event.
+Thu Feb 24 03:37:20 2022 authpriv.info dropbear[7809]: Exit (root): Disconnect received
+Thu Feb 24 03:37:20 2022 user.notice firewall: Reloading firewall due to ifup of clientwan (wlan1)
