@@ -23,6 +23,10 @@ delete_last_line() {
   sed -i "${lines}d" "$1"
 }
 
+delete_first_line() {
+  sed -i '1d' "$1"
+}
+
 echo_dns_data() {
   echo "$(date)"
   echo "DNS_CFG $DNS_CFG"
@@ -49,6 +53,8 @@ elif [ $PIHOLE_PING_CT -eq 0 ] && [ $FALLBACK_DNS_CT -eq 0 ]; then # && ping -c 
   echo "Setting fallback DNS servers $FALLBACK_A $FALLBACK_B"
   set_dns $FALLBACK_A $FALLBACK_B
 else
-  if [ "$(cat $logfile | wc -l)" -gt 5 ]; then delete_last_line "$logfile"; fi
+  while [ "$(cat $logfile | wc -l)" -gt 50 ]; do
+    delete_first_line "$logfile"
+  done
   echo "$(date) unchanged"
 fi

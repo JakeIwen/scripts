@@ -7,7 +7,7 @@ alias chme="sudo chown -R $(whoami)" # usage: $ chme .
 alias ubnt='ssh ubnt@192.168.8.20'
 alias ngear='ssh -R root@192.168.6.1'
 alias rb='. /home/pi/scripts/umount_disks.sh; sudo reboot'
-alias rball='ubnt reboot & ngear reboot & rb'
+alias rball='ubnt reboot; ngear reboot; rb'
 
 alias l='ls -lah'  ##custom list directory
 alias lla='ls -ltu'
@@ -33,9 +33,11 @@ alias rbash='exec bash'
 alias init_rsa="ssh-copy-id -i ~/.ssh/id_rsa.pub" # init_rsa user@device
 alias functions="cat ~/.bashrc | grep -E '^[[:space:]]*([[:alnum:]_]+[[:space:]]*\(\)|function[[:space:]]+[[:alnum:]_]+)'"
 
-fndef() { sed -n -e "/$1()/,/}/ p" ~/.bashrc; } # print function definition
+fndef() { sed -n -e "/$1()/,/}$/ p" ~/.bashrc; } # print function definition
+als() { alias $1; fndef $1; }
 tf() { tail ${2:-'-50'} $1; tail -f $1; }       # tail -f with more recent lines 
 snh() { nohup bash -c $1 & tail -f ./nohup.out; }
+
 s() { name=$1; shift; $HOME/scripts/$name.sh $*; }
 sx() { sudo "$(history | perl -pe 's/^\s+[0-9]+\**\s+//g' | tail -1)"; }
 
@@ -103,7 +105,7 @@ set_vfat_uuid() {
   vfat=`blkid $BLKID | grep 'TYPE="vfat"'`
   
   echo "Current UUID:"
-  sudo dd bs=1 skip=67 count=4 if=$BLKID 2>/dev/null \
+  sudo dd bs=1 skip=67 count=4 if=$BLKID 2>/dev/❤️ \
     | xxd -plain -u \
     | sed -r 's/(..)(..)(..)(..)/\4\3-\2\1/' 
     
@@ -214,7 +216,7 @@ get_last_position() {
 }
 
 playi() {
-  subs='--sub-language=EN,US,en,us,any'
+  subs='--sub-language=EN,US,en,us'
   nohup vlc -f "$subs" "$1" &
 }
 
@@ -222,7 +224,7 @@ play() {
   echo "playing $1 $2 $3"
   pth=$1
   dir=`dirname "$1"`
-  filename=`basename "$1"`
+  filename=`basename "$1"` # TODO if DIR do ELSE play mkv
   shift
   filename="$(escape_chars "$filename")"
   all_media=`find "$dir" -type l -not -iname nohup.out -print | sort -g`
@@ -234,7 +236,7 @@ play() {
     [[ "$1" == "-a" ]] && shift # play all
     filenames=`echo "$all_media" | awk "/$filename/{y=1}y"`; # everything after & including match
   fi
-  subs='--sub-language=EN,US,en,us,any'
+  subs='--sub-language=EN,US,en,us'
   # [[ "$1" == "-ns" ]] && subs='--sub-track=20' || subs='--sub-track=2'
   
   echo -ne "filenames: \n$filenames\n"
@@ -303,9 +305,6 @@ cv() {
   if [[ $matches ]]; then cd "$matches" || echo "multiple matches"; fi
 }
 
-fgp() {
-  find /mnt/movingparts/links \( -type l \) -iname "*$1*"
-}
 
 vlcmd() {
   cmd=$1
@@ -322,13 +321,18 @@ play_status() {
   if [[ $omx_pos ]]; then
     printf "$omx_pos"
   elif [[ `pgrep vlc` ]]; then
+    keys="multi|REQ|Hi10p|ETRG|YTM\.AM|SKGTV|CaLLiOpeD|CtrlHD|Will1869|10\.?Bit|DTS|DL|SDC|Atmos|hdtv|EVO|WiKi|HMAX|IMAX|MA|VhsRip|HDRip|BDRip|iNTERNAL|True\.HD|1080p|1080i|720p|XviD|HD|AC3|AAC|REPACK|5\.1|2\.0|REMUX|PRiCK|AVC|HC|AMZN|HEVC|Blu(R|r)ay|(BR|web)(Rip)?|NF|DDP?(5\.1|2\.0)?|(x|h|X|H)\.?26[4-5]|\d+mb|\d+kbps"
+    groups="d3g|CiNEFiLE|CTR|PRoDJi|regret|deef|POIASD|Cinefeel|NTG|NTb|monkee|YELLOWBiRD|Atmos|EPSiLON|cielos|ION10|MeGusta|METCON|x0r|xlf|S8RHiNO|NTG|btx|strife|DD|DBS|TEPES|pawel2006"
+    delims="\.|\+|\-"
+    pattern="($delims)(\[?($keys)\]?(?=\.)|(($groups)\.)?\.?$)|\'"
     position=`py scripts/python/vlc_property.py Position`
     total=`py scripts/python/vlc_property.py TotalTime`
-    title=`py scripts/python/vlc_property.py Title`
+    title=`py scripts/python/vlc_property.py Title | perl -pe "s~$pattern|~~g"`
     [[ -n "$title" ]] && log_position
     printf "$title \r$position / $total"
   fi
 }
+fgp() { find /mnt/movingparts/links \( -type l \) -iname "*$1*"; }
 
 tv() {
   cd /mnt/bigboi/links/TV || cd /mnt/movingparts/links/TV
@@ -368,7 +372,7 @@ rhp() {
   fi
 }
 
-ifonline() { # wan, clientwan, lifiwan
+ifonline() { # wan, clientwan, lifiwan, (nothing)
   ssh root@OpenWrt mwan3 interfaces | grep "$1 is online"
 }
 
