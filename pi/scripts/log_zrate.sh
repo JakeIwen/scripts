@@ -49,7 +49,7 @@ zrate_less_than() {
   [[ "$cur_rate" ]] && (( $(echo "$cur_rate < $1" | bc -l) )) && echo "LOW ZRATE: $cur_rate"
 }
 
-if zrate_less_than 0; then
+if zrate_less_than 1.5; then
   . /home/pi/scripts/sms_send.sh "low zrate: $cur_rate"
 fi
 
