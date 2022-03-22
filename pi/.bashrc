@@ -59,6 +59,22 @@ alias mtorx="rm $mconf/mtorrent*; nohup $isw &"
 alias nodisk="rm $mconf/mdisk*; touch $mconf/nodisk; nohup $isw &"
 alias nodiskx="rm $mconf/nodisk*; nohup $isw &"
 
+alias canset="sudo ip link set can0 type can"
+alias canlo="sudo ip link set can0 type can listen-only on"
+alias canhelp="sudo ip link add can0 type can help"
+alias canup="sudo ip link set can0 up && ip -details link show can0"
+alias candown="sudo ip link set can0 down 2>/dev/null"
+alias canshow="ip -details link show can0"
+caninit() {
+  if [[ "$1" == "b" ]]; then br=50000; 
+  elif [[ "$1" == "c" ]]; then br=500000; 
+  else return 1; fi;
+  if [[ "$2" == "lo" ]]; then lo="listen-only on"; else lo=""; fi;
+  candown
+  sudo ip link set can0 type can bitrate $br restart-ms 100 $lo
+  canup
+  canshow
+}
 rsmp() {
   rm -rf /mnt/movingparts/links/
   sudo rsync -avH --exclude-from=/rsync-exclude-media.txt /mnt/movingparts/ /mnt/bigboi/mp_backup
@@ -298,7 +314,23 @@ playf() {
     fi
   done
 }
+# ct=0
+# for line in "$(history)"; do 
+#   echo "$line \n"
+#   echo "LOOP"
+#   # if [ "`echo "$line" | wc -c`" -gt 10 ]; then
+#   #   ct+=1
+#   # fi
+#   # ofst=`echo "$line \n" | cut -d' ' -f2`
+#   # hdel $ofst
+# done
 
+# echo $ct
+#   ep_from_path=$(parse_episode_num $line $ep)
+#   if [[ "${ep_from_path,,}" == *"${ep,,}"* ]]; then # case-insensitive match
+#     play "$line" "$ep" "$3" && return 0
+#   fi
+# done
 cv() {
   matches=`find . -maxdepth 1 -iname "*$1*"`
   echo "Matches: $matches"
@@ -416,11 +448,8 @@ alias hist="history | perl -pe 's/^\s+[0-9]+\**\s+//g'"
 gacp() { git add .; git commit -m "$1"; git push; }
 rgrep() { grep -rni "$1" "${2:-.}" ; }                    # recursively search, fallback to pwd "."
 hgrep() { hist | grep "$@" | grep -v 'hgrep' | uniq -u; } # howto: pass all args to a subfunction
-hcp() {
-  val=$(hist | grep $1 | tail -1)
-  echo $val | pbcopy
-  echo "copied: $val"
-}
+hgrepn() { history | grep "$@" | grep -v 'hgrep'; } # howto: pass all args to a subxnction
+hdel() { history -d $1 && history -w; }
 
 killport() {
   ARGS=("$@")
