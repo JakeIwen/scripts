@@ -26,20 +26,13 @@ if [ "$(parse_prices | wc -l)" -lt 5 ]; then
 fi
 echo "$(parse_prices | wc -l) offers"
 
+
 cur_rate=`usd_btc_rate "$(btclow)"`
-if [[ ! "$cur_rate" ]] || [[ "$(echo $cur_rate | grep -P '^\d\d\d')" ]]; then # || [[ "$(echo $cur_rate | grep -P '^\-')" ]]
-  echo "no offers found" 
-<<<<<<< HEAD
-  return 0
-  echo "this code should not print"
-=======
-else
-  touch $z_logpath
-  if echo $cur_rate | grep -v '00\.35'; then
-    echo "$cur_rate,$(date +%s),$(date)" >> $z_logpath
-  fi
-  echo "cur_rate: $cur_rate"
->>>>>>> 81e311d22574d3c286ecc8967feb371606a10674
+if [[ ! "$cur_rate" ]] || [[ "$(echo $cur_rate | grep -P '\d\d\d')" ]]; then # triple digit rate means bad API response
+  echo "no offers found (rate (mis)calculated at: $cur_rate)" 
+  return 0 2>/dev/null 
+  exit 0
+  echo "this code still should not print"
 fi
 touch $z_logpath
 echo "$cur_rate,$(date +%s),$(date)" >> $z_logpath
