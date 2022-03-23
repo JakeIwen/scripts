@@ -1,20 +1,23 @@
 #! /bin/bash
 
 airsonos() {
-  if [[ `ps ax` != *'airupnp-arm'* ]] &> /dev/null 
-  then echo "process down, starting airsonos" && sudo service airupnp start
+  if [[ `ps ax` != *'airupnp-arm'* ]] &> /dev/null; then 
+    echo "process down, starting airsonos" 
+    sudo service airupnp start
   fi
 }
 
 nativcast() {
-  if [[ `ps ax` != *'server.py'* ]] &> /dev/null 
-  then echo "process down, starting nativcast" &&  python3 /home/pi/NativCast/NativCast.sh
+  if [[ `ps ax` != *'server.py'* ]] &> /dev/null; then 
+    echo "process down, starting nativcast" 
+    python3 /home/pi/NativCast/NativCast.sh
   fi
 }
 
 van_ignition_monitor() {
-  if [[ `ps ax` != *'ignition_monitor'* ]] &> /dev/null 
-  then echo "process down, starting van_ignition_monitor" &&  /home/pi/hooks/ignition_monitor.sh & 
+  if [[ `ps ax` != *'ignition_monitor'* ]] &> /dev/null; then 
+    echo "process down, starting van_ignition_monitor" 
+    /home/pi/hooks/ignition_monitor.sh & 
   fi
 }
 

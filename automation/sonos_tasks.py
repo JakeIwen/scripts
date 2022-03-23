@@ -5,7 +5,6 @@ from contextlib import suppress
 from time import sleep
 import os
 
-
 def filter_vis_devices():
     return [x for x in all_devices if x.is_visible] 
 
