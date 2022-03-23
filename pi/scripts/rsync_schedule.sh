@@ -52,6 +52,7 @@ retore_to_msd() {
   sudo rm -rf $sd_root_path/*
   echo "sdcard prepped, starting boot copy"
   sudo cp -a $hdd_backup/boot/* $sd_boot_path/
+  sudo chmod --reference="$hdd_backup/boot" $sd_boot_path
   sudo rm -rf $hdd_backup/boot
   echo "boot copied, beginng root"
   sudo cp -a $hdd_backup/* $sd_root_path/  
