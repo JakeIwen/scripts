@@ -92,18 +92,17 @@ van_is_running() {
 }
 
 spindown_drive() {
-  loc=$1
-  name="${loc/\/dev\//}"
-  echo "spinning down $name"
-  sudo hd-idle -t "$name" # spin-down drive
+  uuid=$1
+  echo "spinning down $uuid"
+  sudo hd-idle -t "/dev/disk/by-uuid/$uuid" # spin-down drive
 }
 
-locations() { cat /proc/self/mounts | grep -oP '/mnt/[^ ]+'; }
 
 unmount_drives() {
   . /home/pi/scripts/umount_disks.sh
   sleep 5
-  for loc in `locations`; do spindown_drive $loc; done
+  hdd_uuids=$(cat /home/pi/.disk_uuids | grep -Ev 'msd|usb' | cut -d' ' -f2)
+  for loc in $hdd_uuids; do spindown_drive $loc; done
 }
 
 stop_service() {
