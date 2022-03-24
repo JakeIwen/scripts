@@ -42,23 +42,12 @@ prev_rate="$(cat $z_logpath | tail -1 | cut -f1 -d , )"
 echo "$cur_rate,$(date +%s),$(date)" >> $z_logpath
 echo "cur_rate: $cur_rate"
 
-zrate_less_than() {
-  [[ "$cur_rate" ]] && (( $(echo "$cur_rate < $1" | bc -l) )) && echo "LOW ZRATE: $cur_rate"
-}
-
-prev_zrate_greater_than() {
-  (( $(echo "$prev_rate > $1" | bc -l) )) && echo "LOW PREV RATE: $prev_rate"
-}
-
 compare() { (( $(echo "$1" | bc -l) )) && echo true; }
+
 if compare "$prev_rate >= $min_pct_fee"; then
   compare "$cur_rate < $min_pct_fee" && /home/pi/scripts/sms_send.sh "low zrate: $cur_rate"
 else
   compare "$cur_rate >= $min_pct_fee" && /home/pi/scripts/sms_send.sh "zrate returned above threshold: $cur_rate"
-fi
-  
-if zrate_less_than $min_pct_fee && prev_zrate_greater_than $min_pct_fee; then
-  . /home/pi/scripts/sms_send.sh "low zrate: $cur_rate"
 fi
 
 # awk 'NR % 60 == 0'  $z_logpath
