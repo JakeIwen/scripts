@@ -1,53 +1,80 @@
 #! /bin/bash
 
 z_logpath=/home/pi/log/zrate.txt
-min_pct_fee=1
+min_pct_fee=1.1
 
-
-last_zratee() { cat $z_logpath | tail -1 | cut -f1 -d , ; }
+compare() { (( $(echo "$1" | bc -l) )) && echo true; }
 get_offers() { curl -sSL "https://bisq.markets/api/offers?market=BTC_USD"; }
 pp_json() { echo "$1" | python -m json.tool; }
 btclow() { parse_prices | sort -rn | tail -n 1; }
 btcusd() { curl -sSL https://api.coinbase.com/v2/prices/spot\?currency\=USD | grep -Po '\d+\.\d+'; }
 usd_btc_rate() { echo "$(bc <<< "scale=2; (100 * ($1 - `btcusd`) / `btcusd` - 0.35)")"; }
+num_offers() { parse_prices | wc -l; }
+sms_send() { /home/pi/scripts/sms_send.sh "$1" >/dev/null; }
 parse_prices() {
   pp_json "$offers" | 
   grep '"direction": "SELL"' -A 7 | 
-  grep -P '"min_amount": "0\.0[0-3]\d*' -A 6 | # less than 1/25 BTC (~$2k) 
+  # grep -P '"min_amount": "0\.0[0-3]\d*' -A 6 | # less than 1/25 BTC (~$2k) 
   grep CLEAR_X_ -A 1 |  # zelle 
   grep -Po '\d+\.\d+'
 }
-# is_less_than_usd() {
-#   if (( $(echo "$1 < $result2" | bc -l) )); then
-# }
 
-offers="$(get_offers)"
-if [ "$(parse_prices | wc -l)" -lt 5 ]; then 
-  echo "$(parse_prices | wc -l) offers, getting prices again"
+get_offer_details() {
+  pp_json "$offers" | 
+  grep '"direction": "SELL"' -A 8  -B 2 | 
+  grep CLEAR_X_ -A 2 -B 6 |
+  grep "$(btclow)" -A 1 -B 7
+}
+
+get_filtered_offers() {
+  bad_entry="$(echo "$1" | grep -Pzo '(?s)\{"offer_id":"NfDEN7.*?\},')"
+  if [ -n "$bad_entry" ]; then 
+    echo "$1" | sed "s|$bad_entry||g"
+  else
+    echo "$1"
+  fi
+}
+
+raw_offers="$(get_offers)"
+offers="$(get_filtered_offers $raw_offers)"
+
+if [ "$(num_offers)" -lt 5 ]; then 
+  echo "$(num_offers) offers, getting prices again"
   sleep 5
-  offers="$(get_offers)"
+  raw_offers="$(get_offers)"
+  offers="$(get_filtered_offers $raw_offers)"
 fi
-echo "$(parse_prices | wc -l) offers"
 
+echo "raw wc: $(pp_json $raw_offers | wc -l)"
+echo "filtered wc: $(pp_json $offers | wc -l)"
 
 cur_rate=`usd_btc_rate "$(btclow)"`
 if [[ ! "$cur_rate" ]] || [[ "$(echo $cur_rate | grep -P '\d\d\d')" ]]; then # triple digit rate means bad API response
   echo "no offers found (rate (mis)calculated at: $cur_rate)" 
   return 0 2>/dev/null 
   exit 0
-  echo "this code still should not print"
 fi
+
 touch $z_logpath
 prev_rate="$(cat $z_logpath | tail -1 | cut -f1 -d , )"
 echo "$cur_rate,$(date +%s),$(date)" >> $z_logpath
 echo "cur_rate: $cur_rate"
-
-compare() { (( $(echo "$1" | bc -l) )) && echo true; }
+echo "prev_rate: $prev_rate"
 
 if compare "$prev_rate >= $min_pct_fee"; then
-  compare "$cur_rate < $min_pct_fee" && /home/pi/scripts/sms_send.sh "low zrate: $cur_rate"
+  details="$(get_offer_details)"
+  then_ms=$(echo $details | grep -Po '\d{13}')
+  now_ms=$(date +%s%N | cut -b1-13)
+  minutes_age=$(echo "scale=2;($now_ms-$then_ms)/1000/60" | bc)
+  msg="low zrate: $(btclow) (${cur_rate}%)\n"
+  msg+="age: $minutes_age minutes \n"
+  msg+="$(num_offers) offers \n\n"
+  msg+="$details"
+  echo "HEREEEEEE msg "
+  
+  compare "$cur_rate < $min_pct_fee" && echo "Sending SMS: $msg" && sms_send "$msg"
 else
-  compare "$cur_rate >= $min_pct_fee" && /home/pi/scripts/sms_send.sh "zrate returned above threshold: $cur_rate"
+  compare "$cur_rate >= $min_pct_fee" && sms_send "zrate returned above threshold: $cur_rate"
 fi
 
 # awk 'NR % 60 == 0'  $z_logpath
