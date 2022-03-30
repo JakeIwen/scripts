@@ -1,5 +1,5 @@
 
-pp_json() { echo "$1" | python -m json.tool; }
+pp_json() { echo "$1" | python3 -m json.tool; }
 btclow() { parse_prices | sort -rn | tail -n 1; }
 btcusd() { curl -sSL https://api.coinbase.com/v2/prices/spot\?currency\=USD | ggrep -Po '\d+\.\d+'; }
 usd_btc_rate() {  echo "$(bc <<< "scale=2; (100 * ($1 - `btcusd`) / `btcusd` - 0.35)")"; }
