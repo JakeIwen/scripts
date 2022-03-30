@@ -11,9 +11,7 @@ id_dsa.pub
 id_dsa
 *.pem
 *.key
-<<<<<<< HEAD
 .twilio/
-=======
 **/wireless
 vanrouter/etc
->>>>>>> 81e311d22574d3c286ecc8967feb371606a10674
+*__pycache__*

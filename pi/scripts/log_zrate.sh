@@ -1,7 +1,9 @@
 #! /bin/bash
 
 z_logpath=/home/pi/log/zrate.txt
-min_pct_fee=1.1
+min_pct_fee=0.2
+
+if [ -z "`which grep`" ]; then grep() { grep $*; }; fi
 
 compare() { (( $(echo "$1" | bc -l) )) && echo true; }
 get_offers() { curl -sSL "https://bisq.markets/api/offers?market=BTC_USD"; }
@@ -56,25 +58,32 @@ if [[ ! "$cur_rate" ]] || [[ "$(echo $cur_rate | grep -P '\d\d\d')" ]]; then # t
 fi
 
 touch $z_logpath
-prev_rate="$(cat $z_logpath | tail -1 | cut -f1 -d , )"
+last_rate="$(cat $z_logpath | tail -1 | cut -f1 -d , )"
 echo "$cur_rate,$(date +%s),$(date)" >> $z_logpath
 echo "cur_rate: $cur_rate"
-echo "prev_rate: $prev_rate"
+echo "last_rate: $last_rate"
 
-if compare "$prev_rate >= $min_pct_fee"; then
+newly_lz_msg() {
   details="$(get_offer_details)"
   then_ms=$(echo $details | grep -Po '\d{13}')
-  now_ms=$(date +%s%N | cut -b1-13)
+  now_ms=$(date +%s%N | cut -b1-13) 
   minutes_age=$(echo "scale=2;($now_ms-$then_ms)/1000/60" | bc)
-  msg="low zrate: $(btclow) (${cur_rate}%)\n"
+  
+  msg="sustained low zrate: $(btclow) (${cur_rate}%)\n"
   msg+="age: $minutes_age minutes \n"
   msg+="$(num_offers) offers \n\n"
-  msg+="$details"
-  echo "HEREEEEEE msg "
-  
-  compare "$cur_rate < $min_pct_fee" && echo "Sending SMS: $msg" && sms_send "$msg"
-else
-  compare "$cur_rate >= $min_pct_fee" && sms_send "zrate returned above threshold: $cur_rate"
+  # echo "$msg$details"
+}
+if compare "$last_rate > $min_pct_fee"; then 
+  echo "rate above threshold" 
+  return 0 2>/dev/null || exit 0
+fi
+
+if compare "$cur_rate < $min_pct_fee"; then
+  msg=`newly_lz_msg`
+  compare "$last_rate < $min_pct_fee" && echo "Sending SMS: $msg" && sms_send "$msg"
+elif compare "$cur_rate >= $min_pct_fee"; then
+   sms_send "zrate returned above threshold: $cur_rate"
 fi
 
 # awk 'NR % 60 == 0'  $z_logpath
