@@ -36,6 +36,7 @@ cargs(){
 
 alias_folders() {
   src=$1
+  echo "start $src"
   links="$src/links"
   rm -rf "$links" || True
   mkdir "$links"
@@ -55,14 +56,12 @@ alias_folders() {
   media_group_links "$src/torrent/Movies"
   echo Movies
   chmod -R 777 "$links"
+  echo "done $src"
 }
 touch /home/pi/log/alias_media.log
 echo "alias media begin $(date)" >> /home/pi/log/alias_media.log
-echo "mp start"
-[ -e "/mnt/movingparts" ] && alias_folders "/mnt/movingparts"
-echo "mp done; bb start"
+[ -e "/mnt/movingparts" ] && alias_folders "/mnt/movingparts" &
 [ -e "/mnt/bigboi/mp_backup" ] && alias_folders "/mnt/bigboi/mp_backup"
-echo "bb done"
 echo "alias media end $(date)" >> /home/pi/log/alias_media.log
 
 # mnt/movingparts

@@ -45,9 +45,8 @@ alias iswl="tf /var/log/cron/internet_switches.log"
 isw="$HOME/scripts/internet_switches.sh"
 mconf="$HOME/mconf"
 
-
 alias mconf="ls $mconf"
-alias mreset="rm $mconf/*"
+alias mreset="rm $mconf/*; nohup $isw &"
 alias mdisk="rm $mconf/nodisk*; touch $mconf/mdisk; nohup $isw &"
 alias mdiskx="rm $mconf/mdisk*; nohup $isw &"
 alias idisk="rm $mconf/nodisk*; touch $mconf/idisk; nohup $isw &"
@@ -59,22 +58,62 @@ alias mtorx="rm $mconf/mtorrent*; nohup $isw &"
 alias nodisk="rm $mconf/mdisk*; touch $mconf/nodisk; nohup $isw &"
 alias nodiskx="rm $mconf/nodisk*; nohup $isw &"
 
-alias canset="sudo ip link set can0 type can"
-alias canlo="sudo ip link set can0 type can listen-only on"
 alias canhelp="sudo ip link add can0 type can help"
 alias canup="sudo ip link set can0 up && ip -details link show can0"
 alias candown="sudo ip link set can0 down 2>/dev/null"
 alias canshow="ip -details link show can0"
+alias cand="candump -c -axde can0"
+alias canlog="cd $HOME/log/can; ls -lah"
+
+alias canif="ifconfig can0"
+alias mxmon="cand | grep -Pv '  02 7E 00|  02 3E 00 00 00 00 00 00' | grep 18DA"
+
+canmxid=18DAF140
+mxgrep() { cat "$1" | grep $canmxid ; }
+cans() {
+  if [ -n "$2" ]; then
+    canid=$1
+    data=$(echo $2 | sed 's| ||g')
+  else
+    hex="[\d(A-F)]"
+    canid=$(echo "$1" | grep -Po "  $hex{8}  " | sed 's| ||g')
+    data="$(echo "$1" | grep -Po " ($hex$hex )+ " | sed 's| ||g')"
+  fi
+  echo "sending ${canid}#${data}"
+  cansend can0 "${canid}#${data}"
+}
+canuids() {
+  file="$1"
+  hex="[\d(A-F)]"
+  cat "$file" | grep -Po "\s$hex{8}" | sed 's| ||g' | sort -u
+}
+cansr() {
+  hex="[\d(A-F)]"
+  echo "$1" | while read line; do
+    canid=$(echo "$line" | grep -Po "  $hex{8}  " | sed 's| ||g')
+    data="$(echo "$line" | grep -Po " ($hex$hex )+ " | sed 's| ||g')"
+    echo "sending ${canid}#${data}"
+    cansend can0 "${canid}#${data}"
+  done
+}
 caninit() {
   if [[ "$1" == "b" ]]; then br=50000; 
   elif [[ "$1" == "c" ]]; then br=500000; 
   else return 1; fi;
-  if [[ "$2" == "lo" ]]; then lo="listen-only on"; else lo=""; fi;
+  shift 
+  if incl "lo" $@; then lo="listen-only on"; else lo="listen-only off"; fi;
+  if incl "lb" $@; then lb="loopback on"; else lb=""; fi;
+  if incl "fd" $@; then fd="fd on"; else fd=""; fi;
+  echo "options $lo $lb $fd"
   candown
-  sudo ip link set can0 type can bitrate $br restart-ms 100 $lo
+  sudo ip link set can0 type can bitrate $br restart-ms 100 $lo $lb $fd
   canup
   canshow
 }
+uniqtofile() { # find entries in file $2 not in file $1
+  awk 'FNR==NR {a[$0]++; next} !($0 in a)' "$1" "$2"
+}
+
 rsmp() {
   rm -rf /mnt/movingparts/links/
   sudo rsync -avH --exclude-from=/rsync-exclude-media.txt /mnt/movingparts/ /mnt/bigboi/mp_backup
@@ -156,7 +195,22 @@ export POSPATH="$HOME/vlc-positions.txt"
 export VLCQTPATH="$HOME/.config/vlc/vlc-qt-interface.conf"
 export VLCRPATH="$HOME/vlc-recent.txt"
 
+incl() { val="$1"; shift; printf '%s\0' "${@}" | grep -F -x -z "$val"; }
 escape_chars() { echo $1 | perl -ne 'chomp;print "\Q$_\E\n"'; }
+uridecode() { : "${*//+/ }"; echo -e "${_//%/\\x}"; } 
+
+uniqct() { 
+  file="$1"
+  if [ "$2" = '-f' ]; then
+    ext="${file##*.}"
+    uniqfile="$(echo "$file" | sed "s|$ext$|uniq\.$ext|g" )"
+    uniqctfile="$(echo "$file" | sed "s|$ext$|uniqct\.$ext|g" )"
+    cat "$file" | sort -u > "$uniqfile"; 
+    cat "$file" | sort | uniq -c | sort -nr > "$uniqctfile"; 
+  else
+    cat "$file" | sort | uniq -c | sort -nr;
+  fi
+}
 
 kill_media() {
   log_position
@@ -164,8 +218,6 @@ kill_media() {
   sleep 2
   pk chrom omxplayer vlc -9
 }
-
-uridecode() { : "${*//+/ }"; echo -e "${_//%/\\x}"; } 
 
 resume() {
   pth=`tail -1 "$POSPATH" | cut -d' ' -f1`
@@ -210,20 +262,6 @@ sync_dirpath() {
   rsync -ur "$locpath" "$m1:'$syncpath'"
   rsync -ur "$locpath" "$i9:'$syncpath'"
 }
-# 
-# sync_dirpath() {
-#   # syncpath=$1
-#   rempath='/Users/jacobr/Library/Application Support/BetterTouchTool'
-#   syncpath=`echo $rempath | sed 's| |___|g'`
-#   m1='jacobr@Jake-M113'
-#   i9='jacobr@Jake-Machine'
-#   locpath="/sync$syncpath"
-#   mkdir -p "$locpath"
-#   rsync -ur "$m1:$rempath" "$locpath"
-#   rsync -ur "$i9:$rempath" "$locpath"
-#   rsync -ur "$locpath" "$m1:$rempath"
-#   rsync -ur "$locpath" "$i9:$rempath"
-# }
 
 get_last_position() {
   file=`echo $1 | sed 's|\/|\\/|g'`
