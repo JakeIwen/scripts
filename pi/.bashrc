@@ -53,7 +53,7 @@ alias idisk="rm $mconf/nodisk*; touch $mconf/idisk; nohup $isw &"
 alias idiskx="rm $mconf/idisk*; nohup $isw &"
 alias notor="rm $mconf/mtorrent*; touch $mconf/notorrent; nohup $isw &"
 alias notorx="rm $mconf/notorrent*; nohup $isw &"
-alias mtor="rm $mconf/notorrent*; touch $mconf/mtorrent; nohup $isw &"
+alias mtor="rm $mconf/notorrent* $mconf/nodisk*; touch $mconf/mtorrent; nohup $isw &"
 alias mtorx="rm $mconf/mtorrent*; nohup $isw &"
 alias nodisk="rm $mconf/mdisk*; touch $mconf/nodisk; nohup $isw &"
 alias nodiskx="rm $mconf/nodisk*; nohup $isw &"
@@ -110,9 +110,7 @@ caninit() {
   canup
   canshow
 }
-uniqtofile() { # find entries in file $2 not in file $1
-  awk 'FNR==NR {a[$0]++; next} !($0 in a)' "$1" "$2"
-}
+                                                                                             
 
 rsmp() {
   rm -rf /mnt/movingparts/links/
