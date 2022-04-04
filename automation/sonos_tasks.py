@@ -25,13 +25,6 @@ def random_album():
 def random_radio():
     play_from_faves(" Radio")
 
-def rear_movie(vol=40):
-    audio_source('vonRear', 'optical', vol)
-def rear_normal():
-    make_stereo_pair("vonRear", "vonRear2")
-def rear_inverted():
-    make_stereo_pair("vonRear2", "vonRear")
-
 def group_vol_up(inc=8):
     adjust_volume('all', 'up', inc)
 def group_vol_down(inc=8):
@@ -54,8 +47,31 @@ def next_track():
     get_preferred_device().next()
 def prev_track():
     get_preferred_device().previous()
+    
+def rear_movie(vol=40):
+    audio_source('vonRear', 'optical', vol)
+def rear_normal():
+    make_stereo_pair("vonRear", "vonRear2")
+def rear_inverted():
+    make_stereo_pair("vonRear2", "vonRear")
+
 
 # utilities
+
+def make_stereo_pair(left_master_name, right_name):
+    # import pdb; pdb.set_trace()
+    
+    slave = by_name(right_name)
+    with suppress(Exception): slave.separate_stereo_pair()
+    master = by_name(left_master_name)
+    while not master:
+        sleep(1)
+        master = by_name(left_master_name)
+    
+    with suppress(Exception): master.create_stereo_pair(slave)
+    vis_devices = filter_vis_devices();
+    return master
+
 def vol_50_all():
     [equal_vol(member, 50, True) for member in get_preferred_device().group]
     
@@ -123,6 +139,8 @@ def remove_from_group(name):
 
 def partymode(vol=None, device=None):
     device = device or get_preferred_device()
+    import pdb; pdb.set_trace()
+    
     if len(device.group.members) < 4:
         device.partymode() 
     vol = vol or device.volume
@@ -206,18 +224,6 @@ def source_optical(device):
         mid.partymode()
         mid.play()
         mid.group.mute = True
-        
-def make_stereo_pair(left_master_name, right_name):
-    slave = by_name(right_name)
-    with suppress(Exception): slave.separate_stereo_pair()
-    master = by_name(left_master_name)
-    while not master:
-        sleep(1)
-        master = by_name(left_master_name)
-    
-    with suppress(Exception): master.create_stereo_pair(slave)
-    vis_devices = filter_vis_devices();
-    return master
 
 def get_matching_faves(keyterm, device=None):
     device = device or get_preferred_device()
@@ -253,8 +259,7 @@ def get_playing_device(default_to_front=False, devices=vis_devices):
         return None
 
 def get_preferred_device(devices=vis_devices):
-    device = get_playing_device(True, devices)
-    return device
+    return get_playing_device(True, devices)
 
 def is_group_member(device):
     base_num = 2 if "vonRear" in device.player_name else 1
@@ -267,6 +272,9 @@ def crossfade_off(device=None):
 def num_devices():
     return len(all_devices)
 
+partymode()
+# rear_normal()
+# partymode()
 # unjoin_all()
 # print("attempting crossfade", crossfade())
 
