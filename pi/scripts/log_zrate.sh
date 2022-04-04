@@ -5,7 +5,7 @@ min_pct_fee=0.2
 
 if [ -z "`which grep`" ]; then grep() { grep $*; }; fi
 
-compare() { (( $(echo "$1" | bc -l) )) && echo true; }
+compare_expr() { (( $(echo "$1" | bc -l) )) && echo true; }
 get_offers() { curl -sSL "https://bisq.markets/api/offers?market=BTC_USD"; }
 pp_json() { echo "$1" | python -m json.tool; }
 btclow() { parse_prices | sort -rn | tail -n 1; }
@@ -74,15 +74,15 @@ newly_lz_msg() {
   msg+="$(num_offers) offers \n\n"
   # echo "$msg$details"
 }
-if compare "$last_rate > $min_pct_fee"; then 
+if compare_expr "$last_rate > $min_pct_fee"; then 
   echo "rate above threshold" 
   return 0 2>/dev/null || exit 0
 fi
 
-if compare "$cur_rate < $min_pct_fee"; then
+if compare_expr "$cur_rate < $min_pct_fee"; then
   msg=`newly_lz_msg`
-  compare "$last_rate < $min_pct_fee" && echo "Sending SMS: $msg" && sms_send "$msg"
-elif compare "$cur_rate >= $min_pct_fee"; then
+  compare_expr "$last_rate < $min_pct_fee" && echo "Sending SMS: $msg" && sms_send "$msg"
+elif compare_expr "$cur_rate >= $min_pct_fee"; then
    sms_send "zrate returned above threshold: $cur_rate"
 fi
 
