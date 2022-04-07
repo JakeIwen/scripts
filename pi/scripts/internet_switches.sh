@@ -44,6 +44,9 @@ no_internet_ops() {
   if conf mdisk; then 
     mount_drives
     kill_torrent_client
+  elif conf mtorrent; then 
+    mount_drives
+    kill_torrent_client
   else 
     unmount_drives
     kill_torrent_client
