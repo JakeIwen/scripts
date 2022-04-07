@@ -272,7 +272,7 @@ def crossfade_off(device=None):
 def num_devices():
     return len(all_devices)
 
-partymode()
+# partymode()
 # rear_normal()
 # partymode()
 # unjoin_all()
