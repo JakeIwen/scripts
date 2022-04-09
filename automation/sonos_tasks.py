@@ -139,9 +139,8 @@ def remove_from_group(name):
 
 def partymode(vol=None, device=None):
     device = device or get_preferred_device()
-    import pdb; pdb.set_trace()
     
-    if len(device.group.members) < 4:
+    if len(device.group.members) < len(all_devices):
         device.partymode() 
     vol = vol or device.volume
     print(vol)

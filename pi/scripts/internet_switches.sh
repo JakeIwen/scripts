@@ -48,7 +48,7 @@ no_internet_ops() {
     mount_drives
     kill_torrent_client
   else 
-    unmount_drives
+    unmount_drives˜˜
     kill_torrent_client
   fi 
     
