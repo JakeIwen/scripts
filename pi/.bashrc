@@ -1,6 +1,15 @@
 #! /bin/bash
 shopt -s expand_aliases # run aliased commands inline with ssh ...@.... 
 alias sudo='sudo '
+alias vi='/usr/bin/vim.tiny'
+
+alias l='ls -lah'
+alias lla='ls -ltu'
+alias ..="cd .."
+alias ...="cd ../.."
+alias ....="cd ../../.."
+alias .....="cd ../../../.."
+
 alias ch7="sudo chmod -R 777" # usage: $ ch7 .
 alias chme="sudo chown -R $(whoami)" # usage: $ chme .
 
@@ -9,27 +18,24 @@ alias ngear='ssh -R root@192.168.6.1'
 alias rb='. /home/pi/scripts/umount_disks.sh; sudo reboot'
 alias rball='ubnt reboot; ngear reboot; rb'
 
-alias l='ls -lah'  ##custom list directory
-alias lla='ls -ltu'
-alias ..="cd .."
-alias ...="cd ../.."
-alias ....="cd ../../.."
-alias .....="cd ../../../.."
+alias ipinfo="py /home/pi/scripts/python/ip_info.py"
+alias active_ssh_sessions="sudo netstat -tnpa | grep 'ESTABLISHED.*sshd'"
+alias num_ssh="active_ssh_sessions | wc -l"
 
-alias vi='/usr/bin/vim.tiny'
-alias rsynclog='cat /var/log/cron/rsync.log'
 alias rscr="sudo systemctl restart cron.service"
 alias ct="sudo crontab -e"
+alias killcron="sudo pkill -f cron"
 
 alias cronlog="cd /var/log/cron"
-alias killcron="sudo pkill -f cron"
+alias rsynclog='cat /var/log/cron/rsync.log'
+
 alias dirsize='sudo du -hsc .[^.]* *'
 alias disku='df -u'
 alias slp='xset s activate'
 alias gtop="sudo /opt/vc/bin/vcdbg reloc stats"
-alias ipinfo="py /home/pi/scripts/python/ip_info.py"
 alias bashp='vi ~/.bashrc'
 alias rbash='exec bash'
+
 alias init_rsa="ssh-copy-id -i ~/.ssh/id_rsa.pub" # init_rsa user@device
 alias functions="cat ~/.bashrc | grep -E '^[[:space:]]*([[:alnum:]_]+[[:space:]]*\(\)|function[[:space:]]+[[:alnum:]_]+)'"
 
