@@ -338,7 +338,7 @@ playf() {
 
   readarray -d '' match_arr < <( media_by_name "$name"  )
   [ ${#match_arr[@]} -eq 0 ] && echo "No matches found" && return 1
-  unset match_arr[-1] > /dev/null
+  # unset match_arr[-1] > /dev/null
   
   if [[ ! "$ep" && ${#match_arr[@]} -gt 1 ]]; then 
     printf '%s\n' "${match_arr[@]/*\//}"
@@ -350,12 +350,14 @@ playf() {
   [ -z "$ep" ] || [[ "$ep" == "-r" ]] && play "${match_arr[0]}" -r "$3" && return 0
   
   for line in "${match_arr[@]}"; do 
+    echo "line: $line"
     ep_from_path=$(parse_episode_num $line $ep)
     if [[ "${ep_from_path,,}" == *"${ep,,}"* ]]; then # case-insensitive match
       play "$line" "$ep" "$3" && return 0
     fi
   done
 }
+
 # ct=0
 # for line in "$(history)"; do 
 #   echo "$line \n"

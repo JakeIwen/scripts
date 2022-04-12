@@ -41,14 +41,14 @@ lifi_internet_ops() {
 
 no_internet_ops() {
   echo 'no_internet_ops'
-  if conf mdisk; then 
+  if conf mtorrent; then 
     mount_drives
-    kill_torrent_client
-  elif conf mtorrent; then 
+    start_torrent_client
+  elif conf mdisk; then 
     mount_drives
     kill_torrent_client
   else 
-    unmount_drives˜˜
+    unmount_drives
     kill_torrent_client
   fi 
     
