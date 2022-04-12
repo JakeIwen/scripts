@@ -11,7 +11,7 @@ vr_ip='root@192.168.6.1'
 # PREP PYTHONS
 mkdir "$scripts/python/" 
 find "$dsc/automation/" -type f -name "*.py" -exec cp {} "$scripts/python/" \;
-
+# scp $rem_addr/Users/jacobr/Downloads
 # RASPI
 scp  "$dsc/pi/.bashrc" "$pi_ip:/home/pi/.bashrc"
 scp  "$dsc/pi/sns.sh"  "$pi_ip:/home/pi/sns.sh"

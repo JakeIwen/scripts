@@ -72,6 +72,7 @@ newly_lz_msg() {
   msg="sustained low zrate: $(btclow) (${cur_rate}%)\n"
   msg+="age: $minutes_age minutes \n"
   msg+="$(num_offers) offers \n\n"
+<<<<<<< Updated upstream
   # echo "$msg$details"
 }
 if compare_expr "$last_rate > $min_pct_fee"; then 
@@ -84,6 +85,14 @@ if compare_expr "$cur_rate < $min_pct_fee"; then
   compare_expr "$last_rate < $min_pct_fee" && echo "Sending SMS: $msg" && sms_send "$msg"
 elif compare_expr "$cur_rate >= $min_pct_fee"; then
    sms_send "zrate returned above threshold: $cur_rate"
+=======
+  msg+="$details"
+
+  
+  compare "$cur_rate < $min_pct_fee" && echo "Sending SMS: $msg" && sms_send "$msg"
+else
+  compare "$cur_rate >= $min_pct_fee" && sms_send "zrate returned above threshold: $cur_rate"
+>>>>>>> Stashed changes
 fi
 
 # awk 'NR % 60 == 0'  $z_logpath
