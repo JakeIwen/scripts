@@ -11,7 +11,7 @@ mntdsk() {
   fsroot=$(df -h | grep /boot | perl -pe 's|\d.*||g')
   
   /sbin/blkid | grep -P "$fsroot.*${uuid}" && echo "not mounting $fname because it is rootFS: $fsroot" && return 1
-  
+  # /sbin/blkid | grep mmcblk0p | grep $uuid && echo "not mounting $fname because it is mmcfs" && return 1
   fstype=$(/sbin/blkid | grep $uuid | grep -Po '(?<=TYPE=")[^"]*' | tail -1)
 
   if [[ "$fstype" == "hfsplus" ]]; then opts="-o force,rw"; else opts=""; fi
@@ -32,8 +32,8 @@ else
   mntdsk seegayte
   mntdsk usbext
 
-  mntdsk msd_nand2 && mntdsk msd_nand2_boot && mntdsk msd_nand2_settings
-  mntdsk msd_nand1 && mntdsk msd_nand1_boot && mntdsk msd_nand1_settings
+  mntdsk msd_nand2_boot && mntdsk msd_nand2 && mntdsk msd_nand2_settings
+  mntdsk msd_nand1_boot && mntdsk msd_nand1 && mntdsk msd_nand1_settings
 fi
 
 # 

@@ -230,17 +230,6 @@ resume() {
   play "$decoded" "$*"
 }
 
-res() {
-  name=$1
-  posline=`grep -ai "$name" "$POSPATH" | tail -1`
-  pth=`echo "$posline" | cut -d' ' -f1`"
-  position=`echo "$posline" | cut -d' ' -f2`"
-  decoded=`uridecode "$pth"`
-  epnum=`parse_episode_num $decoded`
-  echo "playing $decoded $epnum"
-  playf "$name" "$epnum"
-}
-
 log_position() {
   [[ -z "$(pgrep vlc)" ]] && return 0
   file=`py ~/scripts/python/vlc_property.py URL`
@@ -281,35 +270,43 @@ playi() {
 play() {
   echo "playing $1 $2 $3"
   pth=$1
-  dir=`dirname "$1"`
-  filename=`basename "$1"` # TODO if DIR do ELSE play mkv
+  dir=`dirname "$pth"`
+  filename=`basename "$pth"` # TODO if DIR do ELSE play mkv
   shift
-  filename="$(escape_chars "$filename")"
+  name="$(escape_chars "$filename")"
   all_media=`find "$dir" -type l -not -iname nohup.out -print | sort -g`
-  [[ "$1" == "-c" ]] && res $filename && return 0
   
-  if [[ "$1" == "-r" ]]; then # play random
-    filenames=`echo "$all_media" | shuf` && shift
-  else 
-    [[ "$1" == "-a" ]] && shift # play all
-    filenames=`echo "$all_media" | awk "/$filename/{y=1}y"`; # everything after & including match
+  if [[ -z "$1" ]]; then
+    decoded=`uridecode "$pth"`
+    epnum=`parse_episode_num $decoded`
+    [ -n "$epnum" ] && playf "$name" "$epnum" && return 0
+    echo "couldnt parse ep num, playing single file"
+    filenames="$pth"
+  elif [[ "$1" == "-r" ]]; then # play random
+    shift
+    filenames=`echo "$all_media" | shuf`
+  elif [[ "$1" == "-a" ]]; then
+    shift
+    filenames=`echo "$all_media" | awk "/$name/{y=1}y"`; # everything after & including match
+  else
+    echo "NO MATCH!" && return 0
   fi
-  subs='--sub-language=EN,US,en,us'
-  # [[ "$1" == "-ns" ]] && subs='--sub-track=20' || subs='--sub-track=2'
+  
+  [[ "$1" == "-ns" ]] && subs='--sub-track=20' || subs='--sub-language=EN,US,en,us'
+  kill_media > /dev/null
+  xset dpms force on # wake display
   
   echo -ne "filenames: \n$filenames\n"
   echo "subs: $subs"
   
-  ! [ "$filenames" ] && echo "NO MATCH!" && return 0
-  kill_media > /dev/null
-  bash ~/sns.sh rear_movie
-  xset dpms force on # wake display
+  bash ~/sns.sh rear_movie &
+  
   nohup vlc -f $subs $filenames &
   sudo renice -12 -g  `pgrep vlc`
   last_position=$(get_last_position "$pth")
   echo "last_position: $last_position"
-  sleep 7 # wait seconds before jumping to resume position
-  vlcmd Seek int64:"$last_position"
+  sleep 6 # wait seconds before jumping to resume position
+  [ -n "$last_position" ] && [ "$last_position" -gt "0" ] && vlcmd Seek int64:"$last_position"
 }
 
 parse_episode_num() {
@@ -338,7 +335,6 @@ playf() {
 
   readarray -d '' match_arr < <( media_by_name "$name"  )
   [ ${#match_arr[@]} -eq 0 ] && echo "No matches found" && return 1
-  # unset match_arr[-1] > /dev/null
   
   if [[ ! "$ep" && ${#match_arr[@]} -gt 1 ]]; then 
     printf '%s\n' "${match_arr[@]/*\//}"
@@ -346,16 +342,17 @@ playf() {
     return 0
   fi
   
-  [[ "$ep" == "-a" ]] && play "${match_arr[0]}" -a "$3" && return 0
-  [ -z "$ep" ] || [[ "$ep" == "-r" ]] && play "${match_arr[0]}" -r "$3" && return 0
-  
-  for line in "${match_arr[@]}"; do 
-    echo "line: $line"
-    ep_from_path=$(parse_episode_num $line $ep)
-    if [[ "${ep_from_path,,}" == *"${ep,,}"* ]]; then # case-insensitive match
-      play "$line" "$ep" "$3" && return 0
-    fi
-  done
+  if [ -z "$ep" ] || [[ "$ep" == "-r" ]] || [[ "$ep" == "-a" ]]; then 
+    play "${match_arr[0]}" "$ep" "$3"
+  else
+    #match ep
+    for line in "${match_arr[@]}"; do 
+      ep_from_path=$(parse_episode_num $line $ep)
+      if [[ "${ep_from_path,,}" == *"${ep,,}"* ]]; then # case-insensitive match
+        play "$line" "$ep" "$3" && return 0
+      fi
+    done
+  fi
 }
 
 # ct=0
@@ -398,7 +395,7 @@ play_status() {
     printf "$omx_pos"
   elif [[ `pgrep vlc` ]]; then
     keys="multi|REQ|Hi10p|ETRG|YTM\.AM|SKGTV|CaLLiOpeD|CtrlHD|Will1869|10\.?Bit|DTS|DL|SDC|Atmos|hdtv|EVO|WiKi|HMAX|IMAX|MA|VhsRip|HDRip|BDRip|iNTERNAL|True\.HD|1080p|1080i|720p|XviD|HD|AC3|AAC|REPACK|5\.1|2\.0|REMUX|PRiCK|AVC|HC|AMZN|HEVC|Blu(R|r)ay|(BR|web)(Rip)?|NF|DDP?(5\.1|2\.0)?|(x|h|X|H)\.?26[4-5]|\d+mb|\d+kbps"
-    groups="d3g|CiNEFiLE|CTR|PRoDJi|regret|deef|POIASD|Cinefeel|NTG|NTb|monkee|YELLOWBiRD|Atmos|EPSiLON|cielos|ION10|MeGusta|METCON|x0r|xlf|S8RHiNO|NTG|btx|strife|DD|DBS|TEPES|pawel2006"
+    groups="d3g|CiNEFiLE|CTR|PRoDJi|regret|deef|POIASD|Cinefeel|NTG|NTb|monkee|YELLOWBiRD|Atmos|EPSiLON|cielos|ION10|MeGusta|METCON|x0r|xlf|S8RHiNO|NTG|btx|strife|DD|DBS|TEPES|pawe|ggezl2006"
     delims="\.|\+|\-"
     pattern="($delims)(\[?($keys)\]?(?=\.)|(($groups)\.)?\.?$)|\'"
     position=`py scripts/python/vlc_property.py Position`
