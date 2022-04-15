@@ -1,17 +1,6 @@
 #! /bin/bash
 
-# pkill -f alias_media
-# if [[ "$(pgrep alias_media)" ]]; then exit 0; fi
-
-touch /home/pi/log/alias_media.log
-echo  "$(date): running alias_media.sh $0 $(whoami)" >> /home/pi/scripts/alias_media.log
-
-mount | grep bigboi && alias_folders "/mnt/bigboi/mp_backup" &
-mount | grep movingparts && alias_folders "/mnt/movingparts"
-echo "alias media end $(date)" >> /home/pi/log/alias_media.log
-
 FILE_EXTENSIONS=(mkv avi mp4 rar)
-
 media_group_links() {
   folder="$1"
   regex="$2"
@@ -84,4 +73,15 @@ alias_folders() {
   chmod -R 777 "$links"
   echo "done $src"
 }
+
+# pkill -f alias_media
+# if [[ "$(pgrep alias_media)" ]]; then exit 0; fi
+
+touch /home/pi/log/alias_media.log
+echo  "$(date): running alias_media.sh $0 $(whoami)" >> /home/pi/scripts/alias_media.log
+
+mount | grep bigboi && alias_folders "/mnt/bigboi/mp_backup" &
+mount | grep movingparts && alias_folders "/mnt/movingparts"
+echo "alias media end $(date)" >> /home/pi/log/alias_media.log
+
 
