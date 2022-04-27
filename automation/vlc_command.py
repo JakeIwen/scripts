@@ -13,8 +13,7 @@ def vplay(p):
     return True
 
 def vpause(p):
-    print('pausing')'sonos_tasks.py'
-
+    print('pausing')
     p.pause()
     return False
 
