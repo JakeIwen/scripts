@@ -16,7 +16,8 @@ MSD2_MOUNTED=$(mount | grep -P '^/dev/sd' | awk '/msd_nand2/ {print $6}' | grep 
 if [ $MP_MOUNTED ]; then
   sudo rsync -aH $rsync_media_flags /mnt/movingparts/ /mnt/bigboi/mp_backup
   . /home/pi/scripts/alias_media.sh
-else echo "MP 2TB not available/writable"
+else 
+  echo "MP 2TB not available/writable"
 fi
 
 # pi backups
@@ -59,11 +60,16 @@ retore_to_msd() {
   echo "done with microSD `date`"
 }
 
+pctfull=$(df -h | grep /dev/root | grep -Po '\d+%' | grep -Po '\d+')
+if [ "$pctfull" -gt 50 ]; then
+  echo "main SD card unusually full ($pctfull)%, aborting"
+  exit || return 
+fi
+  
 sync_pi_backup
 commit_last_backup      
 [[ $MSD1_MOUNTED ]] || [[ $MSD2_MOUNTED ]] && retore_to_msd
 
 # sudo rsync -avH -e 'ssh -i /home/pi/.ssh/id_rsa' $rsync_flags / root@192.168.6.1:/mnt/sda1
-
 
 echo "done `date`";
