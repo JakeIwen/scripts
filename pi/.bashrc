@@ -435,7 +435,6 @@ alias rechrome="sudo renice -12  \`ps aux --sort=%cpu | tail -3 | awk '{print \$
 alias ngear="ssh root@OpenWrt"
 alias ubnt="ssh ubnt@192.168.8.20"
 alias pd='sudo /sbin/shutdown -r now'
-alias am=''
 alias py="python3"
 alias pip3="python3 -m pip"
 

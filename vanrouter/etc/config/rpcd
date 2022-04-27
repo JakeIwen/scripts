@@ -1,6 +1,7 @@
+
 config rpcd
-	option socket /var/run/ubus.sock
-	option timeout 30
+	option timeout '30'
+	option socket '/var/run/ubus/ubus.sock'
 
 config login
 	option username 'root'

@@ -1,21 +1,19 @@
 
 config interface 'loopback'
-	option ifname 'lo'
 	option proto 'static'
 	option ipaddr '127.0.0.1'
 	option netmask '255.0.0.0'
+	option device 'lo'
 
 config globals 'globals'
 	option ula_prefix 'fd27:70fa:5c1d::/48'
 
 config interface 'lan'
-	option type 'bridge'
-	option ifname 'eth1.1'
 	option proto 'static'
 	option netmask '255.255.255.0'
 	option ipaddr '192.168.6.1'
 	option delegate '0'
-	list dns '192.168.6.4'
+	option device 'br-lan'
 
 config interface 'wan'
 	option delegate '0'
@@ -24,8 +22,8 @@ config interface 'wan'
 	option ipaddr '192.168.8.22'
 	option gateway '192.168.8.20'
 	option metric '2'
-	option ifname 'eth0.2'
 	option force_link '0'
+	option device 'eth0.2'
 
 config switch
 	option name 'switch0'
@@ -59,4 +57,9 @@ config interface 'lifiwan'
 config route
 	option target '23.226.232.80'
 	option interface 'wan'
+
+config device
+	option name 'br-lan'
+	option type 'bridge'
+	list ports 'eth1.1'
 
