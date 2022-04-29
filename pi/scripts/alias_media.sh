@@ -53,12 +53,12 @@ alias_folders() {
   links="$src/links"
   rm -rf "$links"
   mkdir "$links"
-  mkdir "$links/TV" "$links/Documentaries" "$links/Movies" "$links/New" "$links/incomplete"
   unset handlerars
   find "$src/torrent/incomplete" -maxdepth 2 -mindepth 1 -type d \
     | while read pth; do media_group_links "$pth"; done
   echo incomplete
   handlerars=true
+  mkdir "$links/TV" "$links/Documentaries" "$links/Movies" "$links/New" "$links/incomplete"
   find "$src/torrent/New" -maxdepth 2 -mindepth 1  -type d \
     | while read pth; do media_group_links "$pth"; done
   echo New
