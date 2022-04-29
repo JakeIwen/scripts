@@ -73,6 +73,11 @@ alias canlog="cd $HOME/log/can; ls -lah"
 
 alias canif="ifconfig can0"
 alias mxmon="cand | grep -Pv '  02 7E 00|  02 3E 00 00 00 00 00 00' | grep 18DA"
+excl_to_file() {
+  orig=$1
+  file2=$2
+  grep -v -f "$orig" "$file2"
+}
 
 canmxid=18DAF140
 mxgrep() { cat "$1" | grep $canmxid ; }
@@ -100,6 +105,7 @@ cansr() {
     data="$(echo "$line" | grep -Po " ($hex$hex )+ " | sed 's| ||g')"
     echo "sending ${canid}#${data}"
     cansend can0 "${canid}#${data}"
+    sleep 1
   done
 }
 caninit() {
@@ -110,13 +116,13 @@ caninit() {
   if incl "lo" $@; then lo="listen-only on"; else lo="listen-only off"; fi;
   if incl "lb" $@; then lb="loopback on"; else lb=""; fi;
   if incl "fd" $@; then fd="fd on"; else fd=""; fi;
-  echo "options $lo $lb $fd"
+  if incl "os" $@; then os="one-shot on"; else os=""; fi;
+  echo "options $lo $lb $fd $os"
   candown
   sudo ip link set can0 type can bitrate $br restart-ms 100 $lo $lb $fd
   canup
   canshow
 }
-                                                                                             
 
 rsmp() {
   rm -rf /mnt/movingparts/links/
@@ -268,20 +274,20 @@ playi() {
 }
 
 play() {
-  echo "playing $1 $2 $3"
+  echo "play $*"
   pth=$1
   dir=`dirname "$pth"`
   filename=`basename "$pth"` # TODO if DIR do ELSE play mkv
   shift
   name="$(escape_chars "$filename")"
   all_media=`find "$dir" -type l -not -iname nohup.out -print | sort -g`
+  filenames="$pth"
   
   if [[ -z "$1" ]]; then
     decoded=`uridecode "$pth"`
     epnum=`parse_episode_num $decoded`
     [ -n "$epnum" ] && playf "$name" "$epnum" && return 0
     echo "couldnt parse ep num, playing single file"
-    filenames="$pth"
   elif [[ "$1" == "-r" ]]; then # play random
     shift
     filenames=`echo "$all_media" | shuf`
@@ -289,7 +295,7 @@ play() {
     shift
     filenames=`echo "$all_media" | awk "/$name/{y=1}y"`; # everything after & including match
   else
-    echo "NO MATCH!" && return 0
+    echo "NO MATCH!?"
   fi
   
   [[ "$1" == "-ns" ]] && subs='--sub-track=20' || subs='--sub-language=EN,US,en,us'
@@ -305,7 +311,7 @@ play() {
   sudo renice -12 -g  `pgrep vlc`
   last_position=$(get_last_position "$pth")
   echo "last_position: $last_position"
-  sleep 6 # wait seconds before jumping to resume position
+  sleep 4 # wait seconds before jumping to resume position
   [ -n "$last_position" ] && [ "$last_position" -gt "0" ] && vlcmd Seek int64:"$last_position"
 }
 
