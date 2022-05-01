@@ -281,13 +281,12 @@ play() {
   dir=`dirname "$pth"`
   filename=`basename "$pth"` # TODO if DIR do ELSE play mkv
   shift
-  name="$(escape_chars "$filename")"
+  decoded=`uridecode "$pth"`
+  epnum=`parse_episode_num $decoded`
+  name="$(escape_chars "$filename" | grep -Po ".*(?=_S\d\dE\d\d.*$)")"
   all_media=`find "$dir" -type l -not -iname nohup.out -print | sort -g`
   filenames="$pth"
-  
   if [[ -z "$1" ]]; then
-    decoded=`uridecode "$pth"`
-    epnum=`parse_episode_num $decoded`
     [ -n "$epnum" ] && playf "$name" "$epnum" && return 0
     echo "couldnt parse ep num, playing single file"
   elif [[ "$1" == "-r" ]]; then # play random
@@ -309,7 +308,7 @@ run_vlc_on_filenames_subs() {
   kill_media > /dev/null
   xset dpms force on # wake display
   
-  echo -ne "filenames: \n$filenames\n"
+  echo -ne "filenames: \n$filenames\n" | grep -Po '(?<=\/)[^\/]* '
   echo "subs: $subs"
   
   bash ~/sns.sh rear_movie &
