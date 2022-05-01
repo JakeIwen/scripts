@@ -13,7 +13,6 @@ config dnsmasq
 	option noresolv '1'
 	option strictorder '1'
 	option logdhcp '0'
-	option logqueries '1'
 	option logfacility '/tmp/dnsmasq.log'
 	list server '192.168.6.103'
 

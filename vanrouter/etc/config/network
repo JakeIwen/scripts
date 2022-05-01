@@ -63,3 +63,38 @@ config device
 	option type 'bridge'
 	list ports 'eth1.1'
 
+config device
+	option name 'eth0'
+	option ipv6 '0'
+
+config device
+	option name 'eth0.2'
+	option type '8021q'
+	option ifname 'eth0'
+	option vid '2'
+	option ipv6 '0'
+
+config device
+	option name 'eth1'
+	option ipv6 '0'
+
+config device
+	option name 'eth1.1'
+	option type '8021q'
+	option ifname 'eth1'
+	option vid '1'
+	option ipv6 '0'
+
+config device
+	option name 'wlan0'
+	option ipv6 '0'
+
+config device
+	option name 'wlan1'
+	option ipv6 '0'
+
+config device
+	option name 'wlan1-1'
+	option ipv6 '0'
+	option sendredirects '0'
+

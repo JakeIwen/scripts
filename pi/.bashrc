@@ -263,9 +263,11 @@ sync_dirpath() {
 }
 
 get_last_position() {
-  file=`echo $1 | sed 's|\/|\\/|g'`
-  ns=`grep -Poa "(?<=${file} ).*" "$POSPATH"`
-  echo "${ns:-0}"
+  filename=$1
+  if [ -n "$filename" ]; then
+    ns=`grep -Poa "(?<=${filename} ).*" "$POSPATH"`
+    echo "${ns:-0}"
+  fi
 }
 
 playi() {
@@ -298,7 +300,12 @@ play() {
     echo "NO MATCH!?"
   fi
   
-  [[ "$1" == "-ns" ]] && subs='--sub-track=20' || subs='--sub-language=EN,US,en,us'
+  [[ "$1" == "-ns" ]] || subs='--sub-language=EN,US,en,us'
+  
+  run_vlc_on_filenames_subs
+}
+
+run_vlc_on_filenames_subs() {
   kill_media > /dev/null
   xset dpms force on # wake display
   
@@ -308,17 +315,20 @@ play() {
   bash ~/sns.sh rear_movie &
   
   nohup vlc -f $subs $filenames &
-  sudo renice -12 -g  `pgrep vlc`
-  last_position=$(get_last_position "$pth")
+  filename=`basename "$(echo $filenames | grep -Po '^\S+')"`
+  echo "basename: $filename"
+  last_position=$(get_last_position "$filename")
   echo "last_position: $last_position"
   sleep 4 # wait seconds before jumping to resume position
   [ -n "$last_position" ] && [ "$last_position" -gt "0" ] && vlcmd Seek int64:"$last_position"
+  
+  sudo renice -12 -g  `pgrep vlc`
 }
 
 parse_episode_num() {
   pth=$1
   ep=$2
-  cleanln=`echo $pth | perl -pe 's|\_?\d{4}\_?||g'`
+  cleanln=`basename $pth | perl -pe 's|\_?\d{4}\_?||g'`
   season=`echo $cleanln | grep  -oE '(S|s)[[:digit:]][[:digit:]]' | tail -1` 
   ep=`echo $cleanln | grep  -oE '(E|e)[[:digit:]][[:digit:]]' | tail -1` 
   if [[ "$ep" && "$season" ]] ; then
@@ -336,29 +346,36 @@ media_by_name() {
 }
 
 playf() {
-  name=`echo $1 | perl -pe 's/ /_/g'`
+  name=`basename $1 | perl -pe 's/ /_/g' | perl -pe 's/\..*$//g'`
   ep=$2 # episode number eg 304 (parsed from S03E04) or flag -a, -r
-
+  echo "name: $name"
   readarray -d '' match_arr < <( media_by_name "$name"  )
-  [ ${#match_arr[@]} -eq 0 ] && echo "No matches found" && return 1
   
-  if [[ ! "$ep" && ${#match_arr[@]} -gt 1 ]]; then 
-    printf '%s\n' "${match_arr[@]/*\//}"
-    echo -ne "^^^ Available matches ^^^ \n use flag -a to play all"
-    return 0
+  if [ ${#match_arr[@]} -eq 0 ]; then 
+    echo "No matches found"
+    return 1
   fi
   
-  if [ -z "$ep" ] || [[ "$ep" == "-r" ]] || [[ "$ep" == "-a" ]]; then 
-    play "${match_arr[0]}" "$ep" "$3"
-  else
-    #match ep
-    for line in "${match_arr[@]}"; do 
-      ep_from_path=$(parse_episode_num $line $ep)
-      if [[ "${ep_from_path,,}" == *"${ep,,}"* ]]; then # case-insensitive match
-        play "$line" "$ep" "$3" && return 0
-      fi
-    done
-  fi
+  echo "match_arr:"
+  #match ep
+  idx=0
+  for line in "${match_arr[@]}"; do 
+    dirplusname="$(echo $line | grep -Po '[^\/]+\/[^\/]+$')"
+    ep_from_path=$(parse_episode_num $dirplusname $ep)
+    echo "parsed ep $ep_from_path from 'line ep' $dirplusname $ep"
+    if [[ "${ep_from_path,,}" == *"${ep,,}"* ]]; then # case-insensitive match
+      echo "ep was included in ep_from path"
+      filenames="${match_arr[*]:$idx}"    # slice to the end of the array
+      [[ "$1" == "-ns" ]] || subs='--sub-language=EN,US,en,us'
+      run_vlc_on_filenames_subs
+      return 0
+      # play "$line" "$ep" "$3" && return 0
+    fi
+    idx+=1
+  done
+  # printf '%s\n' "${match_arr[@]/*\//}"
+  # echo -ne "^^^ Available matches ^^^ \n use flag -a to play all"
+  # return 0
 }
 
 # ct=0
