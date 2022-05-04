@@ -19,7 +19,7 @@ zrate_by_hour() { # usage: zrate_by_hour Fri 09 AM
 }
 
 convert_24_hour() {
-  cat $1 | perl -pe 's{\b(\d{1,2})(:\d\d:\d\d) ([AP])M\b}{  
+  cat $1 | perl -pe 's{\b(\d{1,2})(:\d\d:\d\d) ([AP])M\b}{ 
   $1 + 12 * (($3 eq "P") - ($1 == 12)) . $2}ge' | perl -pe 's| (\d:\d\d:\d\d)| 0\1|g'
 }
 
@@ -34,3 +34,16 @@ for day in "${days[@]}"; do
 done
 
 echo -e "$data" | column -t | perl -pe 's|(\S)  |\1 |g' | sort
+
+alias print_zrate="cat ~/log/zrate.txt"
+alias zrate_hourly="awk 'NR % 60 == 0' ~/log/zrate.txt"
+zrate_by_hour() { # usage: zrate_by_hour Fri 09 AM
+  grep -Pa "$1.* $2:.*$3" ~/log/zrate.txt | grep -Poa '\-?\d?\d?\.\d+' | awk '{if(min==""){min=max=$1}; if($1>max) {max=$1}; if($1<min) {min=$1}; total+=$1; count+=1} END {print total/count," | max "max," | min " min}';
+}
+zrate_stat(){ grep -Poa '\-?\d?\d?\.\d+' ~/log/zrate.txt | awk '{if(min==""){min=max=$1}; if($1>max) {max=$1}; if($1<min) {min=$1}; total+=$1; count+=1} END {print "avg " total/count," | max "max," | min " min}'; }
+zrate_less_than() {
+  lzr=`tail -1 ~/log/zrate.txt | grep -Po '^\d?\d?\.\d+'`
+  [[ "$lzr" ]] && (( $(echo "$lzr < $1" | bc -l) )) && echo "LOW ZRATE: $lzr"
+}
+alias last_zrate="tail -1 ~/log/zrate.txt"
+alias bisqactive="cat ~/log/zuseractive.txt | grep JHYY1"

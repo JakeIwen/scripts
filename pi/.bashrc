@@ -37,8 +37,12 @@ alias bashp='vi ~/.bashrc'
 alias rbash='exec bash'
 
 alias init_rsa="ssh-copy-id -i ~/.ssh/id_rsa.pub" # init_rsa user@device
-alias functions="cat ~/.bashrc | grep -E '^[[:space:]]*([[:alnum:]_]+[[:space:]]*\(\)|function[[:space:]]+[[:alnum:]_]+)'"
+ssh_copy_id_dropbear() {
+  if [ "$#" -ne 1 ]; then echo "Example: ${0} root@192.168.1.1" && exit 1; fi
+  cat /home/pi/.ssh/id_rsa.pub | ssh ${1} "cat >> /etc/dropbear/authorized_keys && chmod 0600 /etc/dropbear/authorized_keys && chmod 0700 /etc/dropbear"
+}
 
+alias functions="cat ~/.bashrc | grep -E '^[[:space:]]*([[:alnum:]_]+[[:space:]]*\(\)|function[[:space:]]+[[:alnum:]_]+)'"
 fndef() { sed -n -e "/$1()/,/}$/ p" ~/.bashrc; } # print function definition
 als() { alias $1; fndef $1; }
 tf() { tail ${2:-'-50'} $1; tail -f $1; }       # tail -f with more recent lines 
@@ -130,17 +134,6 @@ rsmp() {
   . /home/pi/scripts/alias_media.sh
 }
 
-ssh_copy_id_dropbear() {
-  if [ "$#" -ne 1 ]; then
-    echo "Example: ${0} root@192.168.1.1"
-    exit 1
-  fi
-  cat /home/pi/.ssh/id_rsa.pub | ssh ${1} "cat >> /etc/dropbear/authorized_keys && chmod 0600 /etc/dropbear/authorized_keys && chmod 0700 /etc/dropbear"
-}
-
-# lsof | grep /mnt/mbbackup
-# fuser -mv /mnt/mbbackup
-
 alias disks='grep "dev/sd" /proc/mounts'
 alias mounts='grep "dev/sd" /proc/mounts'
 alias blk="sudo blkid | grep 'dev/sd'"
@@ -208,8 +201,9 @@ export VLCRPATH="$HOME/vlc-recent.txt"
 incl() { val="$1"; shift; printf '%s\0' "${@}" | grep -F -x -z "$val"; }
 escape_chars() { echo $1 | perl -ne 'chomp;print "\Q$_\E\n"'; }
 uridecode() { : "${*//+/ }"; echo -e "${_//%/\\x}"; } 
+trim_last_line() { sed -i '$ d' $1; } # filepath
 
-uniqct() { 
+j() {
   file="$1"
   if [ "$2" = '-f' ]; then
     ext="${file##*.}"
@@ -230,7 +224,13 @@ kill_media() {
 }
 
 resume() {
-  pth=`tail -1 "$POSPATH" | cut -d' ' -f1`
+  if [ $# -gt 0 ] && [ -z "$( echo "$1" | grep -Po '^-')" ]; then
+    # if first arg is not a switch ie starts with '-'
+    pth=`grep -ia "$1" $POSPATH | tail -1 | cut -d' ' -f1`
+    shift
+  else
+    pth=`tail -1 "$POSPATH" | cut -d' ' -f1` 
+  fi
   decoded=`uridecode "$pth"`
   echo "playing $decoded"
   play "$decoded" "$*"
@@ -249,9 +249,13 @@ log_position() {
   fi
 }
 
+sync_comps() {
+  sync_dirpath '/Users/jacobr/Library/Application Support/BetterTouchTool/'
+  sync_dirpath '/Users/jacobr/router configs'
+}
+
 sync_dirpath() {
-  # syncpath=$1
-  syncpath='/Users/jacobr/Library/Application Support/BetterTouchTool/'
+  syncpath=$1
   m1='jacobr@Jake-M113'
   i9='jacobr@Jake-Machine'
   locpath="/sync$syncpath"
@@ -263,16 +267,10 @@ sync_dirpath() {
 }
 
 get_last_position() {
-  filename=$1
-  if [ -n "$filename" ]; then
+  if [ -n "$1" ]; then
     ns=`grep -Poa "(?<=${filename} ).*" "$POSPATH"`
     echo "${ns:-0}"
   fi
-}
-
-playi() {
-  subs='--sub-language=EN,US,en,us'
-  nohup vlc -f "$subs" "$1" &
 }
 
 play() {
@@ -280,12 +278,12 @@ play() {
   pth=$1
   dir=`dirname "$pth"`
   filename=`basename "$pth"` # TODO if DIR do ELSE play mkv
-  shift
   decoded=`uridecode "$pth"`
   epnum=`parse_episode_num $decoded`
-  name="$(escape_chars "$filename" | grep -Po ".*(?=_S\d\dE\d\d.*$)")"
+  name="$(escape_chars "$filename" | grep -Poi ".*(?=_S\d\dE\d\d.*$)")"
   all_media=`find "$dir" -type l -not -iname nohup.out -print | sort -g`
   filenames="$pth"
+  shift
   if [[ -z "$1" ]]; then
     [ -n "$epnum" ] && playf "$name" "$epnum" && return 0
     echo "couldnt parse ep num, playing single file"
@@ -304,9 +302,11 @@ play() {
   run_vlc_on_filenames_subs
 }
 
+wake_display() { xset dpms force on; }
+
 run_vlc_on_filenames_subs() {
   kill_media > /dev/null
-  xset dpms force on # wake display
+  wake_display
   
   echo -ne "filenames: \n$filenames\n" | grep -Po '(?<=\/)[^\/]* '
   echo "subs: $subs"
@@ -331,86 +331,59 @@ parse_episode_num() {
   season=`echo $cleanln | grep  -oE '(S|s)[[:digit:]][[:digit:]]' | tail -1` 
   ep=`echo $cleanln | grep  -oE '(E|e)[[:digit:]][[:digit:]]' | tail -1` 
   if [[ "$ep" && "$season" ]] ; then
-    parsed_ep_num=`echo "${season}${ep}" | perl -pe 's|\D||g' | perl -pe 's|^0||g'` # parsed numbers
+    echo "${season}${ep}" | perl -pe 's|\D||g' | perl -pe 's|^0||g' # parsed numbers
   else
-    parsed_ep_num=`echo $cleanln | perl -pe 's|\_?\d{4,}\_?||g' | grep '[[:digit:]][[:digit:]][[:digit:]]'`
+    echo $cleanln | perl -pe 's|\_?\d{4,}\_?||g' | grep '[[:digit:]][[:digit:]][[:digit:]]'
   fi
-  echo $parsed_ep_num
 }
 
-media_by_name() {
+media_by_name() { find "$(avail_links_path)" -type l -ipath "*$1*" -print0 | sort -z; }
+avail_links_path() {
   bb_links='/mnt/bigboi/mp_backup/links'
   mp_links='/mnt/movingparts/links'
-  find "$bb_links" -type l -ipath "*$1*" -print0 | find "$mp_links" -type l -ipath "*$1*" -print0 | sort -z
+  if [ -e "$bb_links" ]; then echo $bb_links; else echo $mp_links; fi
 }
 
 playf() {
   name=`basename $1 | perl -pe 's/ /_/g' | perl -pe 's/\..*$//g'`
   ep=$2 # episode number eg 304 (parsed from S03E04) or flag -a, -r
-  echo "name: $name"
+
+  echo "name: $name, ep: $ep"
   readarray -d '' match_arr < <( media_by_name "$name"  )
   
-  if [ ${#match_arr[@]} -eq 0 ]; then 
-    echo "No matches found"
-    return 1
+  if [ ${#match_arr[@]} -eq 0 ]; then echo "No matches found" && return 1; fi
+  
+  if [ -z "$ep" ]; then
+    echo "available files:"
+    echo -ne "filenames: \n${match_arr[*]}\n" | grep -Po '(?<=\/)[^\/]* '
+    echo "resume or provide ep# to watch"
+    return 0
   fi
   
-  echo "match_arr:"
-  #match ep
-  idx=0
-  for line in "${match_arr[@]}"; do 
-    dirplusname="$(echo $line | grep -Po '[^\/]+\/[^\/]+$')"
+  # match ep
+  for idx in "${!match_arr[@]}"; do
+    dirplusname="$(echo ${match_arr[$idx]} | grep -Po '[^\/]+\/[^\/]+$')"
     ep_from_path=$(parse_episode_num $dirplusname $ep)
-    echo "parsed ep $ep_from_path from 'line ep' $dirplusname $ep"
     if [[ "${ep_from_path,,}" == *"${ep,,}"* ]]; then # case-insensitive match
       echo "ep was included in ep_from path"
-      filenames="${match_arr[*]:$idx}"    # slice to the end of the array
+      filenames="${match_arr[*]:$idx}" # slice to the end of the array
       [[ "$1" == "-ns" ]] || subs='--sub-language=EN,US,en,us'
       run_vlc_on_filenames_subs
       return 0
-      # play "$line" "$ep" "$3" && return 0
     fi
-    idx+=1
   done
-  # printf '%s\n' "${match_arr[@]/*\//}"
-  # echo -ne "^^^ Available matches ^^^ \n use flag -a to play all"
-  # return 0
 }
-
-# ct=0
-# for line in "$(history)"; do 
-#   echo "$line \n"
-#   echo "LOOP"
-#   # if [ "`echo "$line" | wc -c`" -gt 10 ]; then
-#   #   ct+=1
-#   # fi
-#   # ofst=`echo "$line \n" | cut -d' ' -f2`
-#   # hdel $ofst
-# done
-
-# echo $ct
-#   ep_from_path=$(parse_episode_num $line $ep)
-#   if [[ "${ep_from_path,,}" == *"${ep,,}"* ]]; then # case-insensitive match
-#     play "$line" "$ep" "$3" && return 0
-#   fi
-# done
-cv() {
-  matches=`find . -maxdepth 1 -iname "*$1*"`
-  echo "Matches: $matches"
-  if [[ $matches ]]; then cd "$matches" || echo "multiple matches"; fi
-}
-
 
 vlcmd() {
   cmd=$1
   param=$2
-  xset dpms force on # wake display
+  wake_display
   dbus-send --type=method_call --dest=org.mpris.MediaPlayer2.vlc /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.$cmd $param
 }
 
 alias pp="vlcmd PlayPause"
 vlcr() { grep -i "$1" "$VLCRPATH" | head -10; }
-vlc_nosubs() { kill_media; resume -ns; }  
+vlc_nosubs() { resume -ns; }
 play_status() {
   omx_pos=`curl "http://0.0.0.0:2020/position"`
   if [[ $omx_pos ]]; then
@@ -427,8 +400,8 @@ play_status() {
     printf "$title \r$position / $total"
   fi
 }
-fgp() { find /mnt/movingparts/links \( -type l \) -iname "*$1*"; }
 
+fgp() { find /mnt/movingparts/links \( -type l \) -iname "*$1*"; }
 tv() {
   cd /mnt/bigboi/links/TV || cd /mnt/movingparts/links/TV
   [[ "$#" = "1" ]] && cd "`find . -maxdepth 1 -name "*$1*"`"
@@ -450,7 +423,7 @@ alias am=". ~/scripts/alias_media.sh"
 alias ifaces="ssh root@OpenWrt mwan3 interfaces | grep 'is online'"
 alias cast="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; nohup python3 server.py &"
 alias castnn="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; python3 server.py"
-alias rpiplay='xset dpms force on; nohup /home/pi/RPiPlay/build/rpiplay -r 180 &'
+alias rpiplay='wake_display; nohup /home/pi/RPiPlay/build/rpiplay -r 180 &'
 # boost processess pushing netflix, may help with outher services
 alias rechrome="sudo renice -12  \`ps aux --sort=%cpu | tail -3 | awk '{print \$2}'\`"
 alias ngear="ssh root@OpenWrt"
@@ -466,28 +439,11 @@ rhp() {
   fi
 }
 
-ifonline() { # wan, clientwan, lifiwan, (nothing)
-  ssh root@OpenWrt mwan3 interfaces | grep "$1 is online"
-}
-
-echo_if() { if [[ "$1" ]]; then echo $1; fi; }
+ifonline() { ssh root@OpenWrt mwan3 interfaces | grep "$1 is online"; }
 
 van_is_running() {
   if test -f /home/pi/hooks/ignition_is_on; then echo "yes"; else echo "no"; fi
 }
-
-alias print_zrate="cat ~/log/zrate.txt"
-alias zrate_hourly="awk 'NR % 60 == 0' ~/log/zrate.txt"
-zrate_by_hour() { # usage: zrate_by_hour Fri 09 AM
-  grep -Pa "$1.* $2:.*$3" ~/log/zrate.txt | grep -Poa '\-?\d?\d?\.\d+' | awk '{if(min==""){min=max=$1}; if($1>max) {max=$1}; if($1<min) {min=$1}; total+=$1; count+=1} END {print total/count," | max "max," | min " min}';
-}
-zrate_stat(){ grep -Poa '\-?\d?\d?\.\d+' ~/log/zrate.txt | awk '{if(min==""){min=max=$1}; if($1>max) {max=$1}; if($1<min) {min=$1}; total+=$1; count+=1} END {print "avg " total/count," | max "max," | min " min}'; }
-zrate_less_than() {
-  lzr=`tail -1 ~/log/zrate.txt | grep -Po '^\d?\d?\.\d+'`
-  [[ "$lzr" ]] && (( $(echo "$lzr < $1" | bc -l) )) && echo "LOW ZRATE: $lzr"
-}
-alias last_zrate="tail -1 ~/log/zrate.txt"
-alias bisqactive="cat ~/log/zuseractive.txt | grep JHYY1"
 
 ### GIT ###
 alias gpo="git push origin"
@@ -498,6 +454,7 @@ alias grao="git remote add origin"
 alias gc='git clone'
 alias gck='git checkout'
 
+### GREP ###
 alias grep='grep --color=auto'
 alias grepi='grep -i --color=auto'
 alias g='grep'
@@ -526,14 +483,12 @@ inuse() {
   echo "port $port"
 }
 # rec_find_rpl_in_files find_pattern repl_pattern
-rec_find_rpl_in_files() { 
-  find . -exec sed -i '' "s|$1|$2|g" {} \;
-}
+rec_find_rpl_in_files() { find . -exec sed -i '' "s|$1|$2|g" {} \;; }
 
 file_lines() { # file_lines './filename.txt' echo   
   fpath=$1
   command=$2
-  while read f  
+  while read f
   do $command $f
   done < $fpath
 }
@@ -545,16 +500,6 @@ sns_list() {
     if [[ $helpers ]]; then break; fi
     echo $f | grep '^def' | sed "s|^def\s||g"
   done < $fpath
-}
-
-add_python3_path() {
-  name=$1
-  pypath=$2
-  SITEDIR=$(python3 -m site --user-site)
-  mkdir -p "$SITEDIR" # create if it doesn't exist
-  echo "$pypath" > "$SITEDIR/$name.pth"
-  echo "added $name containing $pypath to $SITEDIR"
-  l $SITEDIR
 }
 
 # add or update alias
