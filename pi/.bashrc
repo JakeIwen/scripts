@@ -16,8 +16,10 @@ alias chme="sudo chown -R $(whoami)" # usage: $ chme .
 alias ubnt='ssh ubnt@192.168.8.20'
 alias ngear='ssh -R root@192.168.6.1'
 alias rb='. /home/pi/scripts/umount_disks.sh; sudo reboot'
-alias rball='ubnt reboot; ngear reboot; rb'
+alias rball='ubnt reboot & ngear reboot; rb'
 
+alias dirsize='sudo du -hsc .[^.]* *'
+alias disku='df -u'
 alias ipinfo="py /home/pi/scripts/python/ip_info.py"
 alias active_ssh_sessions="sudo netstat -tnpa | grep 'ESTABLISHED.*sshd'"
 alias num_ssh="active_ssh_sessions | wc -l"
@@ -25,16 +27,15 @@ alias num_ssh="active_ssh_sessions | wc -l"
 alias rscr="sudo systemctl restart cron.service"
 alias ct="sudo crontab -e"
 alias killcron="sudo pkill -f cron"
-
 alias cronlog="cd /var/log/cron"
 alias rsynclog='cat /var/log/cron/rsync.log'
 
-alias dirsize='sudo du -hsc .[^.]* *'
-alias disku='df -u'
-alias slp='xset s activate'
 alias gtop="sudo /opt/vc/bin/vcdbg reloc stats"
 alias bashp='vi ~/.bashrc'
 alias rbash='exec bash'
+
+alias wake_display='xset dpms force on'
+alias slp='xset s activate'
 
 alias init_rsa="ssh-copy-id -i ~/.ssh/id_rsa.pub" # init_rsa user@device
 ssh_copy_id_dropbear() {
@@ -55,6 +56,23 @@ alias iswl="tf /var/log/cron/internet_switches.log"
 isw="$HOME/scripts/internet_switches.sh"
 mconf="$HOME/mconf"
 
+sync_comps() {
+  sync_dirpath '/Users/jacobr/Library/Application Support/BetterTouchTool/'
+  sync_dirpath '/Users/jacobr/router configs'
+}
+
+sync_dirpath() {
+  syncpath=$1
+  m1='jacobr@Jake-M113'
+  i9='jacobr@Jake-Machine'
+  locpath="/sync$syncpath"
+  mkdir -p "$locpath"
+  rsync -ur "$m1:'$syncpath'" "$locpath"
+  rsync -ur "$i9:'$syncpath'" "$locpath"
+  rsync -ur "$locpath" "$m1:'$syncpath'"
+  rsync -ur "$locpath" "$i9:'$syncpath'"
+}
+
 alias mconf="ls $mconf"
 alias mreset="rm $mconf/*; nohup $isw &"
 alias mdisk="rm $mconf/nodisk*; touch $mconf/mdisk; nohup $isw &"
@@ -67,7 +85,7 @@ alias mtor="rm $mconf/notorrent* $mconf/nodisk*; touch $mconf/mtorrent; nohup $i
 alias mtorx="rm $mconf/mtorrent*; nohup $isw &"
 alias nodisk="rm $mconf/mdisk*; touch $mconf/nodisk; nohup $isw &"
 alias nodiskx="rm $mconf/nodisk*; nohup $isw &"
-
+### CANBUS ###
 alias canhelp="sudo ip link add can0 type can help"
 alias canup="sudo ip link set can0 up && ip -details link show can0"
 alias candown="sudo ip link set can0 down 2>/dev/null"
@@ -128,81 +146,6 @@ caninit() {
   canshow
 }
 
-rsmp() {
-  rm -rf /mnt/movingparts/links/
-  sudo rsync -avH --exclude-from=/rsync-exclude-media.txt /mnt/movingparts/ /mnt/bigboi/mp_backup
-  . /home/pi/scripts/alias_media.sh
-}
-
-alias disks='grep "dev/sd" /proc/mounts'
-alias mounts='grep "dev/sd" /proc/mounts'
-alias blk="sudo blkid | grep 'dev/sd'"
-alias blkg="sudo blkid | grep -Pi"
-
-alias sns='bash ~/sns.sh'
-alias gpu_mem='vcgencmd get_mem gpu'
-
-alias remount='sudo su -c "/home/pi/scripts/remount.sh"'
-
-airupnp() {
-  if [[ "$1" == "disable" ]]; then
-    sudo systemctl stop airupnp.service
-    # dont fuck with the service files
-    # sudo perl -i -pe 's|^|\# |g' /etc/systemd/system/airupnp.service
-  else 
-    sudo systemctl start airupnp.service
-    # dont fuck with the service files
-    # sudo perl -i -pe 's|^(\# )*||g' /etc/systemd/system/airupnp.service
-  fi
-}
-
-set_vfat_uuid() {
-  UUID=$1 # 1234-ABCF  hex only
-  BLKID=$2 # /dev/sdc1
-  valid=`echo "$UUID" | grep -P "^\d{4}\-[A-F]{4}$"`
-  vfat=`blkid $BLKID | grep 'TYPE="vfat"'`
-  
-  echo "Current UUID:"
-  sudo dd bs=1 skip=67 count=4 if=$BLKID 2>/dev/❤️ \
-    | xxd -plain -u \
-    | sed -r 's/(..)(..)(..)(..)/\4\3-\2\1/' 
-    
-  if [ -n "$valid" ] && [ -n "$vfat" ]; then
-    printf "\x${UUID:7:2}\x${UUID:5:2}\x${UUID:2:2}\x${UUID:0:2}" \
-      | sudo dd bs=1 seek=67 count=4 conv=notrunc of=$BLKID
-    
-    echo "Updated UUID:"
-    sudo dd bs=1 skip=67 count=4 if=$BLKID 2>/dev/null \
-      | xxd -plain -u \
-      | sed -r 's/(..)(..)(..)(..)/\4\3-\2\1/' 
-      
-  else
-    echo "UUID does not match '1234-ABCD' form"
-    echo "or '`blkid $BLKID | grep -o 'TYPE="[^"]*"'`' is not a vfat partition"
-  fi
-}
-
-# mntdsk sd_card 0383-ABDF
-mntdsk() {
-  fname=$1
-  pth="/mnt/$fname"
-  uuid=$($HOME/scripts/fetch_disk_uuid.sh $fname)
-  fstype=`blkid | grep $uuid | grep -Po '(?<=TYPE=")[^"]*'`
-  if [[ "$fstype" == "hfsplus" ]]; then opts="-o force,rw"; else opts=""; fi
-  sudo mkdir -p $pth && sudo chown pi $pth  && sudo chmod 777 $pth 
-  sudo mount -U $uuid -t $fstype $opts $pth && echo "mounted $fname at $pth"
-}
-
-# MEDIA
-export POSPATH="$HOME/vlc-positions.txt"
-export VLCQTPATH="$HOME/.config/vlc/vlc-qt-interface.conf"
-export VLCRPATH="$HOME/vlc-recent.txt"
-
-incl() { val="$1"; shift; printf '%s\0' "${@}" | grep -F -x -z "$val"; }
-escape_chars() { echo $1 | perl -ne 'chomp;print "\Q$_\E\n"'; }
-uridecode() { : "${*//+/ }"; echo -e "${_//%/\\x}"; } 
-trim_last_line() { sed -i '$ d' $1; } # filepath
-
 j() {
   file="$1"
   if [ "$2" = '-f' ]; then
@@ -216,11 +159,68 @@ j() {
   fi
 }
 
+alias disks='grep "dev/sd" /proc/mounts'
+alias mounts='grep "dev/sd" /proc/mounts'
+alias blk="sudo blkid | grep 'dev/sd'"
+alias blkg="sudo blkid | grep -Pi"
+
+alias sns='bash ~/sns.sh'
+alias gpu_mem='vcgencmd get_mem gpu'
+
+alias remount='sudo su -c "/home/pi/scripts/remount.sh"'
+
+incl() { val="$1"; shift; printf '%s\0' "${@}" | grep -F -x -z "$val"; }
+escape_chars() { echo $1 | perl -ne 'chomp;print "\Q$_\E\n"'; }
+uridecode() { : "${*//+/ }"; echo -e "${_//%/\\x}"; } 
+trim_last_line() { sed -i '$ d' $1; } # filepath
+join_by() { local IFS="$1"; shift; echo "$*"; }
+### MEDIA/DISK ###
+
 kill_media() {
   log_position
   pk chrom omxplayer vlc
   sleep 2
   pk chrom omxplayer vlc -9
+}
+
+
+print_vfat_uuid() {
+  BLKID=$1 # /dev/sdc1
+  sudo dd bs=1 skip=67 count=4 if=$BLKID 2>/dev/null \
+    | xxd -plain -u \
+    | sed -r 's/(..)(..)(..)(..)/\4\3-\2\1/' 
+}
+set_vfat_uuid() {
+  UUID=$1 # 1234-ABCF  hex only
+  BLKID=$2 # /dev/sdc1
+  valid=`echo "$UUID" | grep -P "^\d{4}\-[A-F]{4}$"`
+  vfat=`blkid $BLKID | grep 'TYPE="vfat"'`
+  
+  echo "Current UUID: $(print_vfat_uuid $BLKID)"
+    
+  if [ -n "$valid" ] && [ -n "$vfat" ]; then
+    printf "\x${UUID:7:2}\x${UUID:5:2}\x${UUID:2:2}\x${UUID:0:2}" \
+      | sudo dd bs=1 seek=67 count=4 conv=notrunc of=$BLKID
+    
+    echo "Updated UUID: $(print_vfat_uuid $BLKID)"
+  else
+    [ -z "$valid" ] && echo "New UUID '$UUID' does not match '1234-ABCD' form"
+    [ -z "$vfat" ] && echo "'`blkid $BLKID | grep -o 'TYPE="[^"]*"'`' is not a vfat partition"
+  fi
+}
+
+export POSPATH="$HOME/vlc-positions.txt"
+export VLCQTPATH="$HOME/.config/vlc/vlc-qt-interface.conf"
+export VLCRPATH="$HOME/vlc-recent.txt"
+
+mntdsk() { # mntdsk sd_card 0383-ABDF
+  fname=$1
+  pth="/mnt/$fname"
+  uuid=$($HOME/scripts/fetch_disk_uuid.sh $fname)
+  fstype=`blkid | grep $uuid | grep -Po '(?<=TYPE=")[^"]*'`
+  if [[ "$fstype" == "hfsplus" ]]; then opts="-o force,rw"; else opts=""; fi
+  sudo mkdir -p $pth && sudo chown pi $pth  && sudo chmod 777 $pth 
+  sudo mount -U $uuid -t $fstype $opts $pth && echo "mounted $fname at $pth"
 }
 
 resume() {
@@ -247,23 +247,6 @@ log_position() {
   else
     echo "could not extract position on file: $file"
   fi
-}
-
-sync_comps() {
-  sync_dirpath '/Users/jacobr/Library/Application Support/BetterTouchTool/'
-  sync_dirpath '/Users/jacobr/router configs'
-}
-
-sync_dirpath() {
-  syncpath=$1
-  m1='jacobr@Jake-M113'
-  i9='jacobr@Jake-Machine'
-  locpath="/sync$syncpath"
-  mkdir -p "$locpath"
-  rsync -ur "$m1:'$syncpath'" "$locpath"
-  rsync -ur "$i9:'$syncpath'" "$locpath"
-  rsync -ur "$locpath" "$m1:'$syncpath'"
-  rsync -ur "$locpath" "$i9:'$syncpath'"
 }
 
 get_last_position() {
@@ -302,8 +285,6 @@ play() {
   run_vlc_on_filenames_subs
 }
 
-wake_display() { xset dpms force on; }
-
 run_vlc_on_filenames_subs() {
   kill_media > /dev/null
   wake_display
@@ -341,7 +322,7 @@ media_by_name() { find "$(avail_links_path)" -type l -ipath "*$1*" -print0 | sor
 avail_links_path() {
   bb_links='/mnt/bigboi/mp_backup/links'
   mp_links='/mnt/movingparts/links'
-  if [ -e "$bb_links" ]; then echo $bb_links; else echo $mp_links; fi
+  if [ -e "$mp_links" ]; then echo $mp_links; else echo $bb_links; fi
 }
 
 playf() {
@@ -432,15 +413,6 @@ alias pd='sudo /sbin/shutdown -r now'
 alias py="python3"
 alias pip3="python3 -m pip"
 
-rhp() {
-  if [[ `ps ax` == *"rpiplay"* ]]
-  then sudo pkill -f rpiplay
-  else rpiplay
-  fi
-}
-
-ifonline() { ssh root@OpenWrt mwan3 interfaces | grep "$1 is online"; }
-
 van_is_running() {
   if test -f /home/pi/hooks/ignition_is_on; then echo "yes"; else echo "no"; fi
 }
@@ -469,21 +441,10 @@ rgrep() { grep -rni "$1" "${2:-.}" ; }                    # recursively search, 
 hgrep() { hist | grep "$@" | grep -v 'hgrep' | uniq -u; } # howto: pass all args to a subfunction
 hgrepn() { history | grep "$@" | grep -v 'hgrep'; } # howto: pass all args to a subxnction
 hdel() { history -d $1 && history -w; }
-
-killport() {
-  ARGS=("$@")
-  detail_list=`lsof ${ARGS[@]/#/-i:}`
-  echo -ne "killing processes:\n$detail_list"
-  [ "$detail_list" ] && lsof ${ARGS[@]/#/-ti:} | xargs kill
-}
-
-inuse() {
-  port=`if [[ "$#" = "1" ]]; then echo "$1"; else echo '[0-9][0-9][0-9][0-9][0-9]? '; fi`
-  sudo lsof -P -n | grep -E ":$port"
-  echo "port $port"
-}
 # rec_find_rpl_in_files find_pattern repl_pattern
 rec_find_rpl_in_files() { find . -exec sed -i '' "s|$1|$2|g" {} \;; }
+
+keepon() { while psgrep vlc && sleep 300; do xset dpms force on; done; }
 
 file_lines() { # file_lines './filename.txt' echo   
   fpath=$1
@@ -493,6 +454,57 @@ file_lines() { # file_lines './filename.txt' echo
   done < $fpath
 }
 
+### NETWORK/PROCESS ###
+
+ifonline() { ssh root@OpenWrt mwan3 interfaces | grep "$1 is online"; }
+killport() {
+  ARGS=("$@")
+  detail_list=`lsof ${ARGS[@]/#/-i:}`
+  echo -ne "killing processes:\n$detail_list"
+  [ "$detail_list" ] && lsof ${ARGS[@]/#/-ti:} | xargs kill
+}
+inuse() {
+  port=`if [[ "$#" = "1" ]]; then echo "$1"; else echo '[0-9][0-9][0-9][0-9][0-9]? '; fi`
+  sudo lsof -P -n | grep -E ":$port"
+  echo "port $port"
+}
+pk() { # kill process by name match - append flag '-9' for SIGTERM
+  search_terms=$*
+  k9="${@: -1}" # remove k9 arg
+  if [[ $k9 == '-9' ]]; then search_terms=${@:1:$#-1}; else k9=""; fi
+  
+  joined_terms=`join_by '|' $(echo $search_terms)`
+  pids=`pgrep -fi "$joined_terms" | sed "s|$$||g"`
+  if [[ ! $pids ]]; then echo "no match" && return 0; fi
+  echo $pids | while read -r pid; do echo "`sudo kill $k9 $pid`"; done
+  sleep 1
+  alive=`pgrep -fi "$joined_terms"`
+  if [[ $alive ]]; then 
+    echo "still alive: $alive"
+    echo "re run with '-9' to SIGKILL"
+  else
+    echo "terminated $pids"
+  fi
+}
+
+rhp() {
+  if [[ `ps ax` == *"rpiplay"* ]]
+  then sudo pkill -f rpiplay
+  else rpiplay
+  fi
+}
+
+airupnp() {
+  if [[ "$1" == "disable" ]]; then
+    sudo systemctl stop airupnp.service
+    # dont fuck with the service files
+    # sudo perl -i -pe 's|^|\# |g' /etc/systemd/system/airupnp.service
+  else 
+    sudo systemctl start airupnp.service
+    # dont fuck with the service files
+    # sudo perl -i -pe 's|^(\# )*||g' /etc/systemd/system/airupnp.service
+  fi
+}
 sns_list() {
   fpath="$HOME/scripts/python/sonos_tasks.py"
   while read f; do
@@ -521,27 +533,6 @@ nalias() {
   
   echo 'reloading shell'
   exec bash
-}
-
-join_by() { local IFS="$1"; shift; echo "$*"; }
-
-pk() { # kill process by name match - append flag '-9' for SIGTERM
-  search_terms=$*
-  k9="${@: -1}" # remove k9 arg
-  if [[ $k9 == '-9' ]]; then search_terms=${@:1:$#-1}; else k9=""; fi
-  
-  joined_terms=`join_by '|' $(echo $search_terms)`
-  pids=`pgrep -fi "$joined_terms" | sed "s|$$||g"`
-  if [[ ! $pids ]]; then echo "no match" && return 0; fi
-  echo $pids | while read -r pid; do echo "`sudo kill $k9 $pid`"; done
-  sleep 1
-  alive=`pgrep -fi "$joined_terms"`
-  if [[ $alive ]]; then 
-    echo "still alive: $alive"
-    echo "re run with '-9' to SIGKILL"
-  else
-    echo "terminated $pids"
-  fi
 }
 
 source ~/.twilio/twilio_creds.sh
