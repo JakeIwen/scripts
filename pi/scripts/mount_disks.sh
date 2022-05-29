@@ -28,6 +28,7 @@ if [[ "$#" = "1" ]]; then
 else 
   mntdsk mbbackup
   mntdsk movingparts
+  mntdsk moremovingparts
   mntdsk bigboi
   mntdsk seegayte
   mntdsk usbext

@@ -5,7 +5,7 @@ media_group_links() {
   folder="$1"
   regex="$2"
   keys="${regex}multi|REQ|Hi10p|ETRG|YTM\.AM|SKGTV|CaLLiOpeD|CtrlHD|Will1869|10\.?Bit|DTS|DL|SDC|Atmos|hdtv|EVO|WiKi|HMAX|IMAX|MA|VhsRip|HDRip|BDRip|iNTERNAL|True\.HD|1080p|1080i|720p|XviD|HD|AC3|AAC|REPACK|5\.1|2\.0|REMUX|PRiCK|AVC|HC|AMZN|HEVC|Blu(R|r)ay|(BR|web)(Rip)?|NF|DDP?(5\.1|2\.0)?|(x|h|X|H)\.?26[4-5]|\d+mb|\d+kbps"
-  groups="d3g|CiNEFiLE|CTR|PRoDJi|regret|deef|POIASD|Cinefeel|NTG|NTb|monkee|YELLOWBiRD|Atmos|EPSiLON|cielos|ION10|MeGusta|METCON|x0r|xlf|S8RHiNO|NTG|btx|strife|DD|DBS|TEPES|pawe|ggezl2006"
+  groups="d3g|CiNEFiLE|CTR|PRoDJi|regret|deef|POIASD|Cinefeel|NTG|NTb|monkee|YELLOWBiRD|Atmos|EPSiLON|cielos|ION10|MeGusta|METCON|x0r|xlf|S8RHiNO|GOSSIP|NTG|btx|strife|DD|DBS|TEPES|pawe|ggezl2006"
   delims="\.|\+|\-"
   find "$folder" -not -path '*/\.*' -not -ipath '*sample*' -type f | while read pth
   do
@@ -21,7 +21,7 @@ media_group_links() {
     link="$link_folder/$title"
     
     [ -d "$link_folder" ] || mkdir "$link_folder"
-    ln -s "$pth" "$link"
+    ln -sf "$pth" "$link"
   done
 }
 
