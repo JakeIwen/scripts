@@ -20,8 +20,8 @@ scp -r "$scripts" "$pi_ip:/home/pi/" &
 scp -r "$hooks" "$pi_ip:/home/pi/" &
 scp -r "$twilio" "$pi_ip:/home/pi/" &
   
-scp  "$dsc/pi/NativCast/process.py"  "$pi_ip:/home/pi/NativCast/process.py" &
-scp  "$dsc/pi/NativCast/server.py"  "$pi_ip:/home/pi/NativCast/server.py" &
+scp  "$dsc/NativCast/process.py"  "$pi_ip:/home/pi/NativCast/process.py" &
+scp  "$dsc/NativCast/server.py"  "$pi_ip:/home/pi/NativCast/server.py" &
 
 # configs
 scp  "$configs/smb.conf" "$pi_ip:/etc/samba/smb.conf" &
