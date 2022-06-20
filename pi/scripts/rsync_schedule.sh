@@ -30,7 +30,7 @@ sync_mp_bb() {
     sudo rsync -aH $rsync_media_flags /mnt/movingparts/ /mnt/bigboi/mp_backup
     s alias_media
   else 
-    echo "MP 2TB not available/writable"
+    s sms_send "MP 2TB not available/writable"
   fi
 }
 
@@ -52,7 +52,15 @@ commit_last_backup() {
 }
 
 retore_to_msd() {
-  [[ ! $backup_msd ]] && exit || return
+  if [[ ! $backup_msd ]]; then
+    s sms_send "no backup_msd specified"
+    exit || return
+  fi
+  if [[ ! $BACKUP_MSD_MOUNTED ]]; then
+    s sms_send "no BACKUP_MSD_MOUNTED"
+    exit || return
+  fi
+  
   sd_boot_path=${backup_msd}_boot
   # sd_settings_path=${backup_msd}_settings
   sd_root_path=$backup_msd
@@ -90,8 +98,8 @@ sync_mp_bb
 chk_free_sd_space
 live_pi_backup
 commit_last_backup      
-[[ $BACKUP_MSD_MOUNTED ]] && retore_to_msd
+retore_to_msd
 unmount_bb
-# sudo rsync -avH -e 'ssh -i /home/pi/.ssh/id_rsa' $rsync_flags / root@192.168.6.1:/mnt/sda1
-
 echo "scheduled_rsync end: `date`";
+
+# sudo rsync -avH -e 'ssh -i /home/pi/.ssh/id_rsa' $rsync_flags / root@192.168.6.1:/mnt/sda1
