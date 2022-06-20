@@ -2,26 +2,35 @@
 # cron-scheduled daily
 
 hdd_backup=/mnt/bigboi/pi_backup_git/pi_backup
+backup_msd=/mnt/msd_nand2
 
 rsync_media_flags="--delete-during --delete-excluded --exclude-from=/rsync-exclude-media.txt"
 rsync_flags="--delete-during --delete-excluded --exclude-from=/rsync-exclude.txt"
 MP_MOUNTED=$(mount | awk '/movingparts/ {print $6}' | grep "rw")
-BIGBOI_MOUNTED=$(mount | awk '/bigboi/ {print $6}' | grep "rw")
-MSD1_MOUNTED=$(mount | grep -P '^/dev/sd' | awk '/msd_nand1/ {print $6}' | grep "rw")
-MSD2_MOUNTED=$(mount | grep -P '^/dev/sd' | awk '/msd_nand2/ {print $6}' | grep "rw")
+# MSD1_MOUNTED=$(mount | grep -P '^/dev/sd' | awk '/msd_nand1/ {print $6}' | grep "rw")
+# MSD2_MOUNTED=$(mount | grep -P '^/dev/sd' | awk '/msd_nand2/ {print $6}' | grep "rw")
+BACKUP_MSD_MOUNTED=$(mount | grep -P '^/dev/sd' | grep "$backup_msd " | grep "rw")
 
+mount_bb() {
+  . /home/pi/scripts/mount_disks.sh bigboi
+  sleep 2
+  BIGBOI_MOUNTED=$(mount | awk '/bigboi/ {print $6}' | grep "rw")
+  [ ! $BIGBOI_MOUNTED ] && echo "bigboi not available/writable. EXITING" && exit 0
+}
 
-[ ! $BIGBOI_MOUNTED ] && echo "bigboi not available/writable" && exit 0
- 
-if [ $MP_MOUNTED ]; then
-  sudo rsync -aH $rsync_media_flags /mnt/movingparts/ /mnt/bigboi/mp_backup
-  . /home/pi/scripts/alias_media.sh
-else 
-  echo "MP 2TB not available/writable"
-fi
+unmount_bb() { . /home/pi/scripts/umount_disks.sh bigboi; }
+
+sync_mp_bb() {
+  if [ $MP_MOUNTED ]; then
+    sudo rsync -aH $rsync_media_flags /mnt/movingparts/ /mnt/bigboi/mp_backup
+    . /home/pi/scripts/alias_media.sh
+  else 
+    echo "MP 2TB not available/writable"
+  fi
+}
 
 # pi backups
-sync_pi_backup() {
+live_pi_backup() {
   # store in git repo on HDD drive
   echo "beginning pibackup to hdd `date`"
   sudo rsync -avH $rsync_flags / $hdd_backup
@@ -38,19 +47,21 @@ commit_last_backup() {
 }
 
 retore_to_msd() {
+  [[ ! $backup_msd ]] && exit || return
+  sd_boot_path=${backup_msd}_boot
+  # sd_settings_path=${backup_msd}_settings
+  sd_root_path=$backup_msd
   
-  chosen_msd=/mnt/msd_nand2
-  sd_boot_path=${chosen_msd}_boot
-  sd_settings_path=${chosen_msd}_settings
-  sd_root_path=$chosen_msd
-  hdd_backup=/mnt/bigboi/pi_backup_git/pi_backup
+  echo "beginning restore to microSD $backup_msd - `date`"
+  if [[ ! -e "$backup_msd/boot" ]]; then
+    echo "$backup_msd/boot not found for copying - resetting git"
+    sudo git reset --quiet > /dev/null
+    echo "git reset complete"
+  fi
   
-  echo "start `date`, for $chosen_msd";
-  # echo "resetting git"
-  echo "beginning restore to microSD `date`"
-  # git reset > /dev/null
-  sudo rm -rf $sd_boot_path/*
-  sudo rm -rf $sd_root_path/*
+  sudo rm -rf $sd_boot_path/* # lets make sure these variables are defined lol
+  sudo rm -rf $sd_root_path/* 
+  
   echo "sdcard prepped, starting boot copy"
   sudo cp -a $hdd_backup/boot/* $sd_boot_path/
   sudo chmod --reference="$hdd_backup/boot" $sd_boot_path
@@ -60,16 +71,22 @@ retore_to_msd() {
   echo "done with microSD `date`"
 }
 
-pctfull=$(df -h | grep /dev/root | grep -Po '\d+%' | grep -Po '\d+')
-if [ "$pctfull" -gt 50 ]; then
-  echo "main SD card unusually full ($pctfull)%, aborting"
-  exit || return 
-fi
-  
-sync_pi_backup
-commit_last_backup      
-[[ $MSD1_MOUNTED ]] || [[ $MSD2_MOUNTED ]] && retore_to_msd
+chk_free_sd_space() {
+  pctfull=$(df -h | grep /dev/root | grep -Po '\d+%' | grep -Po '\d+')
+  if [ "$pctfull" -gt 55 ]; then
+    echo "main SD card unusually full ($pctfull)%, aborting"
+    exit || return 
+  fi
+}
 
+echo -e "\nscheduled_rsync begin: `date`"
+mount_bb
+sync_mp_bb
+chk_free_sd_space
+live_pi_backup
+commit_last_backup      
+[[ $BACKUP_MSD_MOUNTED ]] && retore_to_msd
+unmount_bb
 # sudo rsync -avH -e 'ssh -i /home/pi/.ssh/id_rsa' $rsync_flags / root@192.168.6.1:/mnt/sda1
 
-echo "done `date`";
+echo "scheduled_rsync end: `date`";

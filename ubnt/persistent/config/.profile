@@ -17,7 +17,7 @@ mkcdir () {
 save_current() {
  ssid=$(iwgetid -r || iwgetid ath0 -r)
  cp /tmp/system.cfg "/etc/persistent/profiles/$ssid"
- chmod 755 "/etc/persistent/profiles/$ssid"
+ chmod 750 "/etc/persistent/profiles/$ssid"
  cfgmtd -w -p /etc/
 }
 

@@ -4,6 +4,7 @@ alias sudo='sudo '
 alias vi='/usr/bin/vim.tiny'
 
 alias l='ls -lah'
+
 alias lla='ls -ltu'
 alias ..="cd .."
 alias ...="cd ../.."
@@ -85,6 +86,7 @@ alias mtor="rm $mconf/notorrent* $mconf/nodisk*; touch $mconf/mtorrent; nohup $i
 alias mtorx="rm $mconf/mtorrent*; nohup $isw &"
 alias nodisk="rm $mconf/mdisk*; touch $mconf/nodisk; nohup $isw &"
 alias nodiskx="rm $mconf/nodisk*; nohup $isw &"
+
 ### CANBUS ###
 alias canhelp="sudo ip link add can0 type can help"
 alias canup="sudo ip link set can0 up && ip -details link show can0"
@@ -95,11 +97,7 @@ alias canlog="cd $HOME/log/can; ls -lah"
 
 alias canif="ifconfig can0"
 alias mxmon="cand | grep -Pv '  02 7E 00|  02 3E 00 00 00 00 00 00' | grep 18DA"
-excl_to_file() {
-  orig=$1
-  file2=$2
-  grep -v -f "$orig" "$file2"
-}
+uniq_to_file() { orig=$1; file2=$2; grep -v -f "$orig" "$file2"; }
 
 canmxid=18DAF140
 mxgrep() { cat "$1" | grep $canmxid ; }
@@ -121,12 +119,8 @@ canuids() {
   cat "$file" | grep -Po "\s$hex{8}" | sed 's| ||g' | sort -u
 }
 cansr() {
-  hex="[\d(A-F)]"
   echo "$1" | while read line; do
-    canid=$(echo "$line" | grep -Po "  $hex{8}  " | sed 's| ||g')
-    data="$(echo "$line" | grep -Po " ($hex$hex )+ " | sed 's| ||g')"
-    echo "sending ${canid}#${data}"
-    cansend can0 "${canid}#${data}"
+    cans "$line"
     sleep 1
   done
 }
@@ -159,22 +153,22 @@ j() {
   fi
 }
 
-alias disks='grep "dev/sd" /proc/mounts'
-alias mounts='grep "dev/sd" /proc/mounts'
-alias blk="sudo blkid | grep 'dev/sd'"
-alias blkg="sudo blkid | grep -Pi"
-
 alias sns='bash ~/sns.sh'
 alias gpu_mem='vcgencmd get_mem gpu'
-
-alias remount='sudo su -c "/home/pi/scripts/remount.sh"'
+alias gpu_mem_fix="vcgencmd cache_flush && sudo vcdbg reloc"
+alias gpu_stat="sudo vcdbg reloc"
 
 incl() { val="$1"; shift; printf '%s\0' "${@}" | grep -F -x -z "$val"; }
 escape_chars() { echo $1 | perl -ne 'chomp;print "\Q$_\E\n"'; }
 uridecode() { : "${*//+/ }"; echo -e "${_//%/\\x}"; } 
 trim_last_line() { sed -i '$ d' $1; } # filepath
 join_by() { local IFS="$1"; shift; echo "$*"; }
+
 ### MEDIA/DISK ###
+alias mounts='grep "dev/sd" /proc/mounts'
+alias blk="sudo blkid | grep 'dev/sd'"
+alias blkg="sudo blkid | grep -Pi"
+alias remount='sudo su -c "/home/pi/scripts/remount.sh"'
 
 kill_media() {
   log_position
@@ -182,7 +176,6 @@ kill_media() {
   sleep 2
   pk chrom omxplayer vlc -9
 }
-
 
 print_vfat_uuid() {
   BLKID=$1 # /dev/sdc1
@@ -249,9 +242,11 @@ log_position() {
   fi
 }
 
+lastpos() { grep -Pai "$1" "$POSPATH"; }
+
 get_last_position() {
   if [ -n "$1" ]; then
-    ns=`grep -Poa "(?<=${filename} ).*" "$POSPATH"`
+    ns=`grep -Poai "(?<=$1 ).*" "$POSPATH"`
     echo "${ns:-0}"
   fi
 }
@@ -284,6 +279,8 @@ play() {
   
   run_vlc_on_filenames_subs
 }
+vlcnice() { sudo renice ${1:-"12"} `pgrep vlc`; }
+vlcnice2() { parent=`pgrep -p vlc`; ncn=${1:-"12"}; sudo renice $ncn ${parent##*( )}; }
 
 run_vlc_on_filenames_subs() {
   kill_media > /dev/null
@@ -302,7 +299,7 @@ run_vlc_on_filenames_subs() {
   sleep 4 # wait seconds before jumping to resume position
   [ -n "$last_position" ] && [ "$last_position" -gt "0" ] && vlcmd Seek int64:"$last_position"
   
-  sudo renice -12 -g  `pgrep vlc`
+  vlcnice -12
 }
 
 parse_episode_num() {
@@ -443,7 +440,11 @@ hgrepn() { history | grep "$@" | grep -v 'hgrep'; } # howto: pass all args to a 
 hdel() { history -d $1 && history -w; }
 # rec_find_rpl_in_files find_pattern repl_pattern
 rec_find_rpl_in_files() { find . -exec sed -i '' "s|$1|$2|g" {} \;; }
-
+rm_lines() {
+  pattern="$1"
+  file="$2"
+  grep -Pav "$pattern" "$2" > tmpfile && mv tmpfile "$2" && rm tmpfile
+}
 keepon() { while psgrep vlc && sleep 300; do xset dpms force on; done; }
 
 file_lines() { # file_lines './filename.txt' echo   

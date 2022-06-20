@@ -15,7 +15,7 @@ kill_torrent_client
 
 locations() { 
   if [ -z ${disk_name+x} ]; then
-    cat /proc/self/mounts | grep -Po "/mnt/[^ ]+" | grep -vP 'usb|msd'
+    cat /proc/self/mounts | grep -Po "/mnt/[^ ]+" | grep -vP 'usb|msd|bigboi'
   else
     cat /proc/self/mounts | grep -Po "/mnt/${disk_name}[^_]"
   fi

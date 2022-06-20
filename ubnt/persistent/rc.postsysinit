@@ -3,9 +3,9 @@
 logfile="/etc/persistent/log/update_wifi.log"
 sys_init_flag="/etc/persistent/tmp/sys_init_flag.txt"
 pkill -f cron
-tail -5000 $logfile > "$logfile.tmp"
+tail -50000 $logfile > "$logfile.tmp"
 mv "$logfile.tmp" $logfile
-chmod 777 $logfile
+chmod 770 $logfile
 echo "" >> $logfile
 date >> $logfile
 
