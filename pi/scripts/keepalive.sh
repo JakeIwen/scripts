@@ -23,13 +23,10 @@ van_ignition_monitor() {
   fi
 }
 
-is_active() {
-  grep -P "^$1" /home/pi/keepalive.txt
-}
+is_active() { grep -P "^$1" /home/pi/keepalive.txt; }
 
 echo "start: $(date)"
 is_active airsonos && airsonos
 is_active nativcast && nativcast
 is_active van_ignition_monitor && van_ignition_monitor
-echo ""
-  
+echo -e "done\n"

@@ -11,19 +11,24 @@ MP_MOUNTED=$(mount | awk '/movingparts/ {print $6}' | grep "rw")
 # MSD2_MOUNTED=$(mount | grep -P '^/dev/sd' | awk '/msd_nand2/ {print $6}' | grep "rw")
 BACKUP_MSD_MOUNTED=$(mount | grep -P '^/dev/sd' | grep "$backup_msd " | grep "rw")
 
+s() { name=$1; shift; /home/pi/scripts/$name.sh "$@"; }
+
 mount_bb() {
-  . /home/pi/scripts/mount_disks.sh bigboi
+  s mount_disks bigboi
   sleep 2
   BIGBOI_MOUNTED=$(mount | awk '/bigboi/ {print $6}' | grep "rw")
-  [ ! $BIGBOI_MOUNTED ] && echo "bigboi not available/writable. EXITING" && exit 0
+  if [ ! $BIGBOI_MOUNTED ]; then
+    s sms_send "bigboi not available/writable. EXITING"
+    exit || return
+  fi
 }
 
-unmount_bb() { . /home/pi/scripts/umount_disks.sh bigboi; }
+unmount_bb() { s umount_disks bigboi; }
 
 sync_mp_bb() {
   if [ $MP_MOUNTED ]; then
     sudo rsync -aH $rsync_media_flags /mnt/movingparts/ /mnt/bigboi/mp_backup
-    . /home/pi/scripts/alias_media.sh
+    s alias_media
   else 
     echo "MP 2TB not available/writable"
   fi
@@ -33,7 +38,7 @@ sync_mp_bb() {
 live_pi_backup() {
   # store in git repo on HDD drive
   echo "beginning pibackup to hdd `date`"
-  sudo rsync -avH $rsync_flags / $hdd_backup
+  sudo rsync -aH $rsync_flags / $hdd_backup
   echo "hdd complete `date`"
 }
 
@@ -74,7 +79,7 @@ retore_to_msd() {
 chk_free_sd_space() {
   pctfull=$(df -h | grep /dev/root | grep -Po '\d+%' | grep -Po '\d+')
   if [ "$pctfull" -gt 55 ]; then
-    echo "main SD card unusually full ($pctfull)%, aborting"
+    s sms_send "main SD card unusually full ($pctfull)%, aborting"
     exit || return 
   fi
 }
