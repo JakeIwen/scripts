@@ -1,21 +1,19 @@
 
 config interface 'loopback'
-	option ifname 'lo'
 	option proto 'static'
 	option ipaddr '127.0.0.1'
 	option netmask '255.0.0.0'
+	option device 'lo'
 
 config globals 'globals'
 	option ula_prefix 'fd27:70fa:5c1d::/48'
 
 config interface 'lan'
-	option type 'bridge'
-	option ifname 'eth1.1'
 	option proto 'static'
 	option netmask '255.255.255.0'
 	option ipaddr '192.168.6.1'
 	option delegate '0'
-	list dns '192.168.6.4'
+	option device 'br-lan'
 
 config interface 'wan'
 	option delegate '0'
@@ -24,8 +22,8 @@ config interface 'wan'
 	option ipaddr '192.168.8.22'
 	option gateway '192.168.8.20'
 	option metric '2'
-	option ifname 'eth0.2'
 	option force_link '0'
+	option device 'eth0.2'
 
 config switch
 	option name 'switch0'
@@ -48,15 +46,55 @@ config interface 'clientwan'
 	option proto 'dhcp'
 	option metric '1'
 	option peerdns '0'
-	option force_link '1'
 
 config interface 'lifiwan'
 	option proto 'dhcp'
 	option metric '10'
 	option peerdns '0'
 	option delegate '0'
+	option force_link '1'
 
 config route
 	option target '23.226.232.80'
 	option interface 'wan'
+
+config device
+	option name 'br-lan'
+	option type 'bridge'
+	list ports 'eth1.1'
+
+config device
+	option name 'eth0'
+	option ipv6 '0'
+
+config device
+	option name 'eth0.2'
+	option type '8021q'
+	option ifname 'eth0'
+	option vid '2'
+	option ipv6 '0'
+
+config device
+	option name 'eth1'
+	option ipv6 '0'
+
+config device
+	option name 'eth1.1'
+	option type '8021q'
+	option ifname 'eth1'
+	option vid '1'
+	option ipv6 '0'
+
+config device
+	option name 'wlan0'
+	option ipv6 '0'
+
+config device
+	option name 'wlan1'
+	option ipv6 '0'
+
+config device
+	option name 'wlan1-1'
+	option ipv6 '0'
+	option sendredirects '0'
 

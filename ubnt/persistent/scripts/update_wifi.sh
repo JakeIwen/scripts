@@ -74,14 +74,14 @@ save_current_profile() {
   else
     echo "saving/updating profile: $ssid"
     cp /tmp/system.cfg "$profile_path"
-    chmod 755 "$profile_path"
+    chmod 750 "$profile_path"
     cfgmtd -w -p /etc/
   fi
 }
 
 save_tmp_profile () {
   cp /tmp/system.cfg "$cur_profile_path"
-  chmod 755 "$cur_profile_path"
+  chmod 750 "$cur_profile_path"
 }
 
 ccq=`mca-status | grep ccq | cut -d= -f2`

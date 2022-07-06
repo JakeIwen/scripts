@@ -20,7 +20,7 @@ mntdsk() {
   sudo chown pi $pth
   sudo chmod 777 $pth 
   sudo mount -U $uuid -t $fstype $opts $pth
-  echo "mounted $fname at $pth"
+  # echo "mounted $fname at $pth"
 }
 
 if [[ "$#" = "1" ]]; then
@@ -28,13 +28,17 @@ if [[ "$#" = "1" ]]; then
 else 
   mntdsk mbbackup
   mntdsk movingparts
-  mntdsk bigboi
+  mntdsk disk2tb
+  # mntdsk bigboi
   mntdsk seegayte
   mntdsk usbext
 
   mntdsk msd_nand2_boot && mntdsk msd_nand2 && mntdsk msd_nand2_settings
   mntdsk msd_nand1_boot && mntdsk msd_nand1 && mntdsk msd_nand1_settings
 fi
+
+echo "mounted disks:"
+grep "dev/sd" /proc/mounts
 
 # 
 # 
@@ -45,3 +49,4 @@ fi
 # 
 # It is also possible to set the filesystem label using the -L option of tune2fs, enter:
 # # tune2fs -L usbstroage /dev/sdb2
+

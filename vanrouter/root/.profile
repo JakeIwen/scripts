@@ -16,7 +16,8 @@ alias reload='/etc/init.d/network reload'
 alias rl='reload'
 alias functions="cat ~/.profile | grep -E '^[[:space:]]*([[:alnum:]_]+[[:space:]]*\(\)|function[[:space:]]+[[:alnum:]_]+)'"
 alias cronlog='cd /root/log'
-alias dnslog='/root/log/auto_dns.sh'
+# alias dnslog='/tmp/dnsmasq.log'
+alias dnslog='tail -f /tmp/dnsmasq.log | /root/dnsmasq.awk'
 alias cstat='l /tmp/run/mwan3track; cat /tmp/run/mwan3track/*/*'
 tf() { tail ${2:-'-50'} $1; tail -f $1; } # tail --follow with 50 or "$2" recent lines 
 fndef() { sed -n -e "/$1()/,/}/ p" ~/.profile; }
