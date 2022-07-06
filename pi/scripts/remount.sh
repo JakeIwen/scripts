@@ -5,7 +5,6 @@ pk() { # kill process by name match - append flag '-9' for SIGTERM
   search_terms=$*
   k9="${@: -1}" # remove k9 arg
   if [[ $k9 == '-9' ]]; then search_terms=${@:1:-1}; else k9=""; fi
-  
   joined_terms=`join_by '|' $(echo $search_terms)`
   pids=`pgrep -fi "$joined_terms" | sed "s|$$||g"`
   if [[ ! $pids ]]; then echo "no match" && return 0; fi
@@ -25,4 +24,3 @@ pk qbit
 . /home/pi/scripts/mount_disks.sh 
 . /home/pi/scripts/fix_hfs_fs.sh 
 sudo service smbd start
-grep "dev/sd" /proc/mounts

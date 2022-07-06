@@ -3,14 +3,16 @@
 airsonos() {
   if [[ `ps ax` != *'airupnp-arm'* ]] &> /dev/null; then 
     echo "process down, starting airsonos" 
-    sudo service airupnp start
+    /home/pi/airupnp-arm -z
   fi
 }
 
 nativcast() {
   if [[ `ps ax` != *'server.py'* ]] &> /dev/null; then 
     echo "process down, starting nativcast" 
-    python3 /home/pi/NativCast/NativCast.sh
+    cd /home/pi/NativCast/ || exit
+    sudo ./NativCast.sh stop
+    ./NativCast.sh start & 
   fi
 }
 
@@ -21,13 +23,10 @@ van_ignition_monitor() {
   fi
 }
 
+is_active() { grep -P "^$1" /home/pi/keepalive.txt; }
+
 echo "start: $(date)"
-echo "airsonos check start"
-airsonos
-echo "nativcast check start"
-nativcast
-# echo "van_ignition_monitor check start"
-# van_ignition_monitor
-echo "finished: $(date)"
-echo ""
-  
+is_active airsonos && airsonos
+is_active nativcast && nativcast
+is_active van_ignition_monitor && van_ignition_monitor
+echo -e "done\n"
