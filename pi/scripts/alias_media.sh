@@ -5,7 +5,7 @@ media_group_links() {
   folder="$1"
   regex="$2"
   keys="${regex}multi|REQ|Hi10p|ETRG|YTM\.AM|SKGTV|CaLLiOpeD|CtrlHD|Will1869|10\.?Bit|DTS|DL|SDC|Atmos|hdtv|EVO|WiKi|HMAX|IMAX|MA|VhsRip|HDRip|BDRip|iNTERNAL|True\.HD|1080p|1080i|720p|XviD|HD|AC3|AAC|REPACK|5\.1|2\.0|REMUX|PRiCK|AVC|HC|AMZN|HEVC|Blu(R|r)ay|(BR|web)(Rip)?|NF|DDP?(5\.1|2\.0)?|(x|h|X|H)\.?26[4-5]|\d+mb|\d+kbps"
-  groups="d3g|CiNEFiLE|CTR|PRoDJi|regret|deef|POIASD|Cinefeel|NTG|NTb|monkee|YELLOWBiRD|Atmos|EPSiLON|cielos|ION10|MeGusta|METCON|x0r|xlf|S8RHiNO|NTG|btx|strife|DD|DBS|TEPES|pawe|ggezl2006"
+  groups="d3g|CiNEFiLE|CTR|PRoDJi|regret|deef|POIASD|Cinefeel|NTG|NTb|monkee|YELLOWBiRD|Atmos|EPSiLON|cielos|ION10|MeGusta|METCON|x0r|xlf|S8RHiNO|GOSSIP|NTG|btx|strife|DD|DBS|TEPES|pawe|ggezl2006"
   delims="\.|\+|\-"
   find "$folder" -not -path '*/\.*' -not -ipath '*sample*' -type f | while read pth
   do
@@ -21,7 +21,7 @@ media_group_links() {
     link="$link_folder/$title"
     
     [ -d "$link_folder" ] || mkdir "$link_folder"
-    ln -s "$pth" "$link"
+    ln -sf "$pth" "$link"
   done
 }
 
@@ -53,19 +53,19 @@ alias_folders() {
   links="$src/links"
   rm -rf "$links"
   mkdir "$links"
-  mkdir "$links/TV" "$links/Documentaries" "$links/Movies" "$links/New" "$links/incomplete"
   unset handlerars
   find "$src/torrent/incomplete" -maxdepth 2 -mindepth 1 -type d \
     | while read pth; do media_group_links "$pth"; done
   echo incomplete
   handlerars=true
+  mkdir "$links/TV" "$links/Documentaries" "$links/Movies" "$links/New" "$links/incomplete"
   find "$src/torrent/New" -maxdepth 2 -mindepth 1  -type d \
     | while read pth; do media_group_links "$pth"; done
   echo New
   find "$src/torrent/TV" -maxdepth 1 -mindepth 1  -type d \
     | while read pth; do media_group_links "$pth"; done
   echo TV
-  find "$src/torrent/Documentaries" -maxdepth 1 -mindepth 1  -type d \
+  find "$src/torrent/Documentaries" -maxdepth 2 -mindepth 1  -type d \
     | while read pth; do media_group_links "$pth"; done
   echo Docu
   media_group_links "$src/torrent/Movies"
