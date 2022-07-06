@@ -376,19 +376,20 @@ vlc_nosubs() { inc_global vlc_sub_track -1 2; resume ; }
 vlc_subs_off() { echo '-1' > /home/pi/.vlc_sub_track; resume; }
 
 play_status() {
-  omx_pos=`curl "http://0.0.0.0:2020/position"`
-  if [[ $omx_pos ]]; then
-    printf "$omx_pos"
-  elif [[ `pgrep vlc` ]]; then
+  if [[ `pgrep vlc` ]]; then
     keys="multi|REQ|Hi10p|ETRG|YTM\.AM|SKGTV|CaLLiOpeD|CtrlHD|Will1869|10\.?Bit|DTS|DL|SDC|Atmos|hdtv|EVO|WiKi|HMAX|IMAX|MA|VhsRip|HDRip|BDRip|iNTERNAL|True\.HD|1080p|1080i|720p|XviD|HD|AC3|AAC|REPACK|5\.1|2\.0|REMUX|PRiCK|AVC|HC|AMZN|HEVC|Blu(R|r)ay|(BR|web)(Rip)?|NF|DDP?(5\.1|2\.0)?|(x|h|X|H)\.?26[4-5]|\d+mb|\d+kbps"
     groups="d3g|CiNEFiLE|CTR|PRoDJi|regret|deef|POIASD|Cinefeel|NTG|NTb|monkee|YELLOWBiRD|Atmos|EPSiLON|cielos|ION10|MeGusta|METCON|x0r|xlf|S8RHiNO|NTG|btx|strife|DD|DBS|TEPES|pawel2006"
     delims="\.|\+|\-"
     pattern="($delims)(\[?($keys)\]?(?=\.)|(($groups)\.)?\.?$)|\'"
-    position=`py scripts/python/vlc_property.py Position`
-    total=`py scripts/python/vlc_property.py TotalTime`
-    title=`py scripts/python/vlc_property.py Title | perl -pe "s~$pattern|~~g"`
+    py_vlc_path='/home/pi/scripts/python/vlc_property.py'
+    position=`py $py_vlc_path Position`
+    total=`py $py_vlc_path TotalTime`
+    title=`py $py_vlc_path Title | perl -pe "s~$pattern|~~g"`
     [[ -n "$title" ]] && log_position
     printf "$title \r$position / $total"
+  else
+    omx_pos=`curl "http://0.0.0.0:2020/position"`
+    if [[ $omx_pos ]]; then printf "$omx_pos" fi
   fi
 }
 
