@@ -156,7 +156,7 @@ j() {
 alias sns='bash ~/sns.sh'
 alias gpu_mem='vcgencmd get_mem gpu'
 alias gpu_mem_fix="vcgencmd cache_flush && sudo vcdbg reloc"
-alias gpu_stat="sudo vcdbg reloc"
+alias gpu_stat="sudo vcdbg reloc"   
 
 incl() { val="$1"; shift; printf '%s\0' "${@}" | grep -F -x -z "$val"; }
 escape_chars() { echo $1 | perl -ne 'chomp;print "\Q$_\E\n"'; }
@@ -170,6 +170,8 @@ alias blk="sudo blkid | grep 'dev/sd'"
 alias blkg="sudo blkid | grep -Pi"
 alias remount='sudo su -c "/home/pi/scripts/remount.sh"'
 
+sysvol() { sudo amixer cset numid=1 ${1:-"90"}%; }
+
 kill_media() {
   log_position
   pk chrom omxplayer vlc
@@ -181,7 +183,7 @@ print_vfat_uuid() {
   BLKID=$1 # /dev/sdc1
   sudo dd bs=1 skip=67 count=4 if=$BLKID 2>/dev/null \
     | xxd -plain -u \
-    | sed -r 's/(..)(..)(..)(..)/\4\3-\2\1/' 
+    | sed -r 's/(..)(..)(..)(..)/\4\3-\2\1/'
 }
 set_vfat_uuid() {
   UUID=$1 # 1234-ABCF  hex only
@@ -217,16 +219,15 @@ mntdsk() { # mntdsk sd_card 0383-ABDF
 }
 
 resume() {
-  if [ $# -gt 0 ] && [ -z "$( echo "$1" | grep -Po '^-')" ]; then
+  if [ $# -eq 1 ] && [ -z "$( echo "$1" | grep -Po '^-')" ]; then
     # if first arg is not a switch ie starts with '-'
     pth=`grep -ia "$1" $POSPATH | tail -1 | cut -d' ' -f1`
     shift
   else
     pth=`tail -1 "$POSPATH" | cut -d' ' -f1` 
   fi
-  decoded=`uridecode "$pth"`
-  echo "playing $decoded"
-  play "$decoded" "$*"
+  echo "playing $pth"
+  play "$pth" "$*"
 }
 
 log_position() {
@@ -253,18 +254,20 @@ get_last_position() {
 
 play() {
   echo "play $*"
+  sleep 1
   pth=$1
-  dir=`dirname "$pth"`
-  filename=`basename "$pth"` # TODO if DIR do ELSE play mkv
+  gpu_mem_fix > /dev/null
   decoded=`uridecode "$pth"`
+  dir=`echo "$decoded" | grep -Po '.*(New|TV|Movies|Documentaries)'`
+  filename=`basename "$decoded"` # TODO if DIR do ELSE play mkv
   epnum=`parse_episode_num $decoded`
-  name="$(escape_chars "$filename" | grep -Poi ".*(?=_S\d\dE\d\d.*$)")"
+  name="$(echo "$filename" | grep -Poi ".*(?=[_\.]S\d\d.*$)" | sed -E 's|[\\\.]|_|g' )"
   all_media=`find "$dir" -type l -not -iname nohup.out -print | sort -g`
-  filenames="$pth"
+  filenames="$decoded"
   shift
   if [[ -z "$1" ]]; then
-    [ -n "$epnum" ] && playf "$name" "$epnum" && return 0
-    echo "couldnt parse ep num, playing single file"
+    [ -n "$epnum" ] && [ -n "$name" ] && playf "$name" "$epnum" && return 0
+    echo "couldnt parse ep num or name , playing single file"
   elif [[ "$1" == "-r" ]]; then # play random
     shift
     filenames=`echo "$all_media" | shuf`
@@ -275,20 +278,29 @@ play() {
     echo "NO MATCH!?"
   fi
   
-  [[ "$1" == "-ns" ]] || subs='--sub-language=EN,US,en,us'
-  
-  run_vlc_on_filenames_subs
+  run_vlc_on_filenames
 }
 vlcnice() { sudo renice ${1:-"12"} `pgrep vlc`; }
 vlcnice2() { parent=`pgrep -p vlc`; ncn=${1:-"12"}; sudo renice $ncn ${parent##*( )}; }
+get_global() { cat /home/pi/.$1; }
 
-run_vlc_on_filenames_subs() {
+inc_global() {
+  name=$1
+  min=$2
+  max=$3
+  val=`cat /home/pi/.$name`
+  val=$(( $val + 1 ))
+  if [ -z $val ] || [ $val -gt $max ]; then val=$min; fi;
+  echo $val > /home/pi/.$name
+  echo $val
+}
+
+run_vlc_on_filenames() {
   kill_media > /dev/null
   wake_display
-  
   echo -ne "filenames: \n$filenames\n" | grep -Po '(?<=\/)[^\/]* '
+  subs="--sub-language=eng --sub-track=$(get_global vlc_sub_track)"
   echo "subs: $subs"
-  
   bash ~/sns.sh rear_movie &
   
   nohup vlc -f $subs $filenames &
@@ -345,8 +357,7 @@ playf() {
     if [[ "${ep_from_path,,}" == *"${ep,,}"* ]]; then # case-insensitive match
       echo "ep was included in ep_from path"
       filenames="${match_arr[*]:$idx}" # slice to the end of the array
-      [[ "$1" == "-ns" ]] || subs='--sub-language=EN,US,en,us'
-      run_vlc_on_filenames_subs
+      run_vlc_on_filenames
       return 0
     fi
   done
@@ -361,14 +372,16 @@ vlcmd() {
 
 alias pp="vlcmd PlayPause"
 vlcr() { grep -i "$1" "$VLCRPATH" | head -10; }
-vlc_nosubs() { resume -ns; }
+vlc_nosubs() { inc_global vlc_sub_track -1 2; resume ; }
+vlc_subs_off() { echo '-1' > /home/pi/.vlc_sub_track; resume; }
+
 play_status() {
   omx_pos=`curl "http://0.0.0.0:2020/position"`
   if [[ $omx_pos ]]; then
     printf "$omx_pos"
   elif [[ `pgrep vlc` ]]; then
     keys="multi|REQ|Hi10p|ETRG|YTM\.AM|SKGTV|CaLLiOpeD|CtrlHD|Will1869|10\.?Bit|DTS|DL|SDC|Atmos|hdtv|EVO|WiKi|HMAX|IMAX|MA|VhsRip|HDRip|BDRip|iNTERNAL|True\.HD|1080p|1080i|720p|XviD|HD|AC3|AAC|REPACK|5\.1|2\.0|REMUX|PRiCK|AVC|HC|AMZN|HEVC|Blu(R|r)ay|(BR|web)(Rip)?|NF|DDP?(5\.1|2\.0)?|(x|h|X|H)\.?26[4-5]|\d+mb|\d+kbps"
-    groups="d3g|CiNEFiLE|CTR|PRoDJi|regret|deef|POIASD|Cinefeel|NTG|NTb|monkee|YELLOWBiRD|Atmos|EPSiLON|cielos|ION10|MeGusta|METCON|x0r|xlf|S8RHiNO|NTG|btx|strife|DD|DBS|TEPES|pawe|ggezl2006"
+    groups="d3g|CiNEFiLE|CTR|PRoDJi|regret|deef|POIASD|Cinefeel|NTG|NTb|monkee|YELLOWBiRD|Atmos|EPSiLON|cielos|ION10|MeGusta|METCON|x0r|xlf|S8RHiNO|NTG|btx|strife|DD|DBS|TEPES|pawel2006"
     delims="\.|\+|\-"
     pattern="($delims)(\[?($keys)\]?(?=\.)|(($groups)\.)?\.?$)|\'"
     position=`py scripts/python/vlc_property.py Position`

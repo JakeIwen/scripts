@@ -7,7 +7,7 @@ alias .....="cd ../../../.."
 alias hgrep="history | grep"
 alias pgrep="ps lT | grep"
 alias ccq="mca-status | grep ccq | cut -d= -f2"
-alias is_connected="mca-status | grep ccq | cut -d= -f2 | grep -v 0"
+alias ,="mca-status | grep ccq | cut -d= -f2 | grep -v 0"
 
 mkcdir () {
   mkdir -p -- "$1" &&
@@ -15,10 +15,10 @@ mkcdir () {
 }
 
 save_current() {
- ssid=$(iwgetid -r || iwgetid ath0 -r)
- cp /tmp/system.cfg "/etc/persistent/profiles/$ssid"
- chmod 750 "/etc/persistent/profiles/$ssid"
- cfgmtd -w -p /etc/
+  ssid=$(iwgetid -r || iwgetid ath0 -r)
+  cp /tmp/system.cfg "/etc/persistent/profiles/$ssid"
+  chmod 750 "/etc/persistent/profiles/$ssid"
+  cfgmtd -w -p /etc/
 }
 
 set_ap() {
