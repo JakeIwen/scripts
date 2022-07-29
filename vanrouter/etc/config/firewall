@@ -10,24 +10,24 @@ config zone
 	option input 'ACCEPT'
 	option output 'ACCEPT'
 	option forward 'ACCEPT'
+	option network 'lan'
 	option conntrack '1'
-	option log '1'
-	list network 'lan'
-	option family 'ipv4'
 
 config zone
 	option name 'wan'
 	option output 'ACCEPT'
+	option masq '1'
 	option mtu_fix '1'
+	option network 'clientwan lifiwan wan'
 	option conntrack '1'
 	option input 'DROP'
 	option forward 'ACCEPT'
+	option log '1'
 	list device 'br-lan'
-	option masq '1'
-	list network 'clientwan'
-	list network 'lifiwan'
-	list network 'wan'
-	option family 'ipv4'
+
+config forwarding
+	option src 'lan'
+	option dest 'wan'
 
 config rule
 	option name 'Allow-DHCP-Renew'
@@ -79,14 +79,11 @@ config redirect
 	option dest_port '22'
 	list proto 'tcp'
 	list proto 'udp'
-	option src 'wan'
 	option dest 'lan'
-	option reflection_src 'external'
-	option src_dport '61000'
-
-config forwarding
-	option src 'lan'
-	option dest 'wan'
+	option src 'wan'
+	option src_dport '22'
+	option enabled '0'
+	option reflection '0'
 
 config forwarding
 	option src 'wan'
