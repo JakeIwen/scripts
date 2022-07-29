@@ -2,7 +2,7 @@
 
 # The script automatically switches the DNS servers between Pi-hole and Cloudflare based on Pi-hole DNS Server status.
 
-# logfile="/root/log/auto_dns.log"
+logfile="/root/log/auto_dns.log"
 PIHOLE=192.168.6.103 # Pi-hole
 FALLBACK_A=1.1.1.1 # Cloudflare
 FALLBACK_B=1.0.0.1 # Cloudflare
@@ -13,14 +13,14 @@ FALLBACK_B=1.0.0.1 # Cloudflare
 #   sed -i "${target}d" "$1"
 # }
 
-# delete_last_line() {
-#   lines=$(cat "$1" | wc -l)
-#   sed -i "${lines}d" "$1"
-# }
-# 
-# delete_first_line() {
-#   sed -i '1d' "$1"
-# }
+delete_last_line() {
+  lines=$(cat "$1" | wc -l)
+  sed -i "${lines}d" "$1"
+}
+
+delete_first_line() {
+  sed -i '1d' "$1"
+}
 
 echo_dns_data() {
   echo "$(date)"
@@ -53,11 +53,11 @@ run_auto() {
   elif [ $PIHOLE_PING_CT -eq 0 ] && [ $FALLBACK_DNS_CT -eq 0 ]; then # && ping -c 1 $FALLBACK_A > /dev/null
     echo "Setting fallback DNS servers $FALLBACK_A $FALLBACK_B"
     set_dns $FALLBACK_A $FALLBACK_B
-  # else
-  #   while [ "$(cat $logfile | wc -l)" -gt 50 ]; do
-  #     delete_first_line "$logfile"
-  #   done
-  #   echo "$(date) unchanged"
+  else
+    while [ "$(cat $logfile | wc -l)" -gt 50 ]; do
+      delete_first_line "$logfile"
+    done
+    echo "$(date) unchanged"
   fi
 }
 

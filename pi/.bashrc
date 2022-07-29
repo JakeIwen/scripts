@@ -327,12 +327,13 @@ parse_episode_num() {
   fi
 }
 
-media_by_name() { find "$(avail_links_path)" -type l -ipath "*$1*" -print0 | sort -z; }
-avail_links_path() {
-  bb_links='/mnt/bigboi/mp_backup/links'
-  mp_links='/mnt/movingparts/links'
+media_by_name() { find "$(avail_drive_path)/links" -type l -ipath "*$1*" -print0 | sort -z; }
+avail_drive_path() {
+  bb_links='/mnt/bigboi/mp_backup'
+  mp_links='/mnt/movingparts'
   if [ -e "$mp_links" ]; then echo $mp_links; else echo $bb_links; fi
 }
+
 
 playf() {
   name=`basename $1 | perl -pe 's/ /_/g' | perl -pe 's/\..*$//g'`
@@ -342,12 +343,16 @@ playf() {
   readarray -d '' match_arr < <( media_by_name "$name"  )
   
   if [ ${#match_arr[@]} -eq 0 ]; then echo "No matches found" && return 1; fi
+
+  echo "available files:"
+  echo -ne "filenames: \n${match_arr[*]}\n" | grep -Po '(?<=\/)[^\/]* '
   
   if [ -z "$ep" ]; then
-    echo "available files:"
-    echo -ne "filenames: \n${match_arr[*]}\n" | grep -Po '(?<=\/)[^\/]* '
     echo "resume or provide ep# to watch"
     return 0
+  elif [ "$ep" = "-l" ]; then
+    file="`ls -t "$(avail_drive_path)/torrent/New" | head -n1`"
+    run_vlc_on_file "$file"
   fi
   
   # match ep
@@ -361,6 +366,25 @@ playf() {
       return 0
     fi
   done
+}
+
+run_vlc_on_file() {
+  kill_media > /dev/null
+  wake_display
+  subs="--sub-language=eng --sub-track=$(get_global vlc_sub_track)"
+  echo "subs: $subs"
+  echo "f: $1"
+  bash ~/sns.sh rear_movie &
+  filename=`basename "$(echo $1 | grep -Po '^\S+')"`
+  echo "filename $filename"
+  nohup vlc -f $subs "$(avail_drive_path)/torrent/New/$1" &
+  echo "basename: $filename"
+  last_position=$(get_last_position "$filename")
+  echo "last_position: $last_position"
+  sleep 4 # wait seconds before jumping to resume position
+  [ -n "$last_position" ] && [ "$last_position" -gt "0" ] && vlcmd Seek int64:"$last_position"
+  
+  vlcnice -12
 }
 
 vlcmd() {
@@ -389,7 +413,7 @@ play_status() {
     printf "$title \r$position / $total"
   else
     omx_pos=`curl "http://0.0.0.0:2020/position"`
-    if [[ $omx_pos ]]; then printf "$omx_pos" fi
+    if [[ $omx_pos ]]; then printf "$omx_pos"; fi
   fi
 }
 
