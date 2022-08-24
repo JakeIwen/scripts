@@ -20,7 +20,7 @@ alias rb='. /home/pi/scripts/umount_disks.sh; sudo reboot'
 alias rball='ubnt reboot & ngear reboot; rb'
 
 alias dirsize='sudo du -hsc .[^.]* *'
-alias disku='df -u'
+alias disku='df -h'
 alias ipinfo="py /home/pi/scripts/python/ip_info.py"
 alias active_ssh_sessions="sudo netstat -tnpa | grep 'ESTABLISHED.*sshd'"
 alias num_ssh="active_ssh_sessions | wc -l"
@@ -318,8 +318,11 @@ parse_episode_num() {
   pth=$1
   ep=$2
   cleanln=`basename $pth | perl -pe 's|\_?\d{4}\_?||g'`
+  echo "cleanln $cleanln"
   season=`echo $cleanln | grep  -oE '(S|s)[[:digit:]][[:digit:]]' | tail -1` 
+  echo "season $season"
   ep=`echo $cleanln | grep  -oE '(E|e)[[:digit:]][[:digit:]]' | tail -1` 
+  echo "ep $ep"
   if [[ "$ep" && "$season" ]] ; then
     echo "${season}${ep}" | perl -pe 's|\D||g' | perl -pe 's|^0||g' # parsed numbers
   else
@@ -327,10 +330,13 @@ parse_episode_num() {
   fi
 }
 
+
 media_by_name() { find "$(avail_drive_path)/links" -type l -ipath "*$1*" -print0 | sort -z; }
+
 avail_drive_path() {
   bb_links='/mnt/bigboi/mp_backup'
   mp_links='/mnt/movingparts'
+  if [ -n "$drivepath" ] && [ "$drivepath" = "bb" ]; then echo $bb_links; fi
   if [ -e "$mp_links" ]; then echo $mp_links; else echo $bb_links; fi
 }
 
@@ -352,12 +358,13 @@ playf() {
     return 0
   elif [ "$ep" = "-l" ]; then
     file="`ls -t "$(avail_drive_path)/torrent/New" | head -n1`"
-    run_vlc_on_file "$file"
   fi
   
   # match ep
   for idx in "${!match_arr[@]}"; do
     dirplusname="$(echo ${match_arr[$idx]} | grep -Po '[^\/]+\/[^\/]+$')"
+    echo "dirplusname $dirplusname"
+    parse_episode_num $dirplusname $ep
     ep_from_path=$(parse_episode_num $dirplusname $ep)
     if [[ "${ep_from_path,,}" == *"${ep,,}"* ]]; then # case-insensitive match
       echo "ep was included in ep_from path"
@@ -373,7 +380,7 @@ run_vlc_on_file() {
   wake_display
   subs="--sub-language=eng --sub-track=$(get_global vlc_sub_track)"
   echo "subs: $subs"
-  echo "f: $1"
+  echo "file: $1"
   bash ~/sns.sh rear_movie &
   filename=`basename "$(echo $1 | grep -Po '^\S+')"`
   echo "filename $filename"
@@ -438,7 +445,7 @@ alias inc='cd /mnt/movingparts/torrent/incomplete; ls -lah'
 alias am=". ~/scripts/alias_media.sh"
 alias ifaces="ssh root@OpenWrt mwan3 interfaces | grep 'is online'"
 alias cast="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; nohup python3 server.py &"
-alias castnn="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; python3 server.py"
+alias castnn="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; py thon3 server.py"
 alias rpiplay='wake_display; nohup /home/pi/RPiPlay/build/rpiplay -r 180 &'
 # boost processess pushing netflix, may help with outher services
 alias rechrome="sudo renice -12  \`ps aux --sort=%cpu | tail -3 | awk '{print \$2}'\`"
