@@ -29,7 +29,7 @@ else
   mntdsk mbbackup
   mntdsk movingparts
   mntdsk disk2tb
-  # mntdsk bigboi
+  mntdsk bigboi
   mntdsk seegayte
   mntdsk usbext
 

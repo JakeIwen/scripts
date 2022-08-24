@@ -74,6 +74,24 @@ alias_folders() {
   echo "done $src"
 }
 
+alias_new() {
+  src=$1
+  echo "start $src"
+  links="$src/links/New"
+  rm -rf "$links"
+  mkdir "$links"
+  unset handlerars
+  find "$src/torrent/incomplete" -maxdepth 2 -mindepth 1 -type d \
+    | while read pth; do media_group_links "$pth"; done
+  echo incomplete
+  handlerars=true
+  find "$src/torrent/New" -maxdepth 2 -mindepth 1  -type d \
+    | while read pth; do media_group_links "$pth"; done
+  echo New
+  chmod -R 777 "$links"
+  echo "done $src"
+}
+
 # pkill -f alias_media
 # if [[ "$(pgrep alias_media)" ]]; then exit 0; fi
 
