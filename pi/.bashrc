@@ -316,17 +316,17 @@ run_vlc_on_filenames() {
 
 parse_episode_num() {
   pth=$1
-  ep=$2
-  cleanln=`basename $pth | perl -pe 's|\_?\d{4}\_?||g'`
-  echo "cleanln $cleanln"
-  season=`echo $cleanln | grep  -oE '(S|s)[[:digit:]][[:digit:]]' | tail -1` 
-  echo "season $season"
-  ep=`echo $cleanln | grep  -oE '(E|e)[[:digit:]][[:digit:]]' | tail -1` 
-  echo "ep $ep"
-  if [[ "$ep" && "$season" ]] ; then
-    echo "${season}${ep}" | perl -pe 's|\D||g' | perl -pe 's|^0||g' # parsed numbers
+  epp=$2
+  cleanln=`basename "$(echo $pth | tail -1)" | perl -pe 's|\_?\d{4}\_?||g'`
+  # echo "cleanln $cleanln"
+  season=`echo $cleanln | grep -Po '(?<=(S|s))\d\d' | head -1`
+  # echo "season $season"
+  epp=`echo $cleanln | grep -Po '(?<=(E|e))\d\d' | tail -1`
+  # echo "ep $epp"
+  if [[ "$epp" && "$season" ]] ; then
+    echo "${season}${epp}" | perl -pe 's|^0||g' # parsed numbers
   else
-    echo $cleanln | perl -pe 's|\_?\d{4,}\_?||g' | grep '[[:digit:]][[:digit:]][[:digit:]]'
+    echo $cleanln | perl -pe 's|\_?\d{4,}\_?||g' | grep '\d\d\d'
   fi
 }
 
