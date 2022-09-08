@@ -3,34 +3,49 @@
 
 
 fetch_uuid() { /home/pi/scripts/fetch_disk_uuid.sh $1; }
+fsprop() { 
+  prop=$1 #  LABEL UUID TYPE PARTUUID PARTLABEL
+  sterm=$2
+  match="$(/sbin/blkid | grep "$sterm" | grep -Po "(?<=$prop=\")[^\"]*")"
+  if [ -n "$sterm" ] && [ "$(echo "$match" | wc -l)" -gt 1 ]; then
+    echo "multiple matches tosearch"
+  fi
+  echo "$match"
+}
 
 mntdsk() {
-  fname=$1
-  pth="/mnt/$fname"
-  uuid=$(fetch_uuid $fname)
-  fsroot=$(df -h | grep /boot | perl -pe 's|\d.*||g')
+  label=$1
+  pth="/mnt/$label"
+  uuid=$(fetch_uuid $label)
   
-  /sbin/blkid | grep -P "$fsroot.*${uuid}" && echo "not mounting $fname because it is rootFS: $fsroot" && return 1
-  # /sbin/blkid | grep mmcblk0p | grep $uuid && echo "not mounting $fname because it is mmcfs" && return 1
-  fstype=$(/sbin/blkid | grep $uuid | grep -Po '(?<=TYPE=")[^"]*' | tail -1)
-
-  if [[ "$fstype" == "hfsplus" ]]; then opts="-o force,rw"; else opts=""; fi
-    
   sudo mkdir -p $pth
   sudo chown pi $pth
   sudo chmod 777 $pth 
-  sudo mount -U $uuid -t $fstype $opts $pth
-  # echo "mounted $fname at $pth"
+  # /sbin/blkid | grep mmcblk0p | grep $uuid && echo "not mounting $label because it is mmcfs" && return 1
+  if [ -n "$uuid" ]; then
+    fsroot=$(df -h | grep /boot | perl -pe 's|\d.*||g')
+    /sbin/blkid | grep -P "$fsroot.*${uuid}" && echo "not mounting $label because it is rootFS: $fsroot" && return 1
+    fstype=$(fsprop TYPE $uuid)
+    
+    sudo mount -U $uuid -t $fstype $opts $pth
+  else
+    fstype=$(fsprop TYPE $label)
+    if [[ "$fstype" == "hfsplus" ]]; then opts="-o force,rw"; else opts=""; fi
+    sudo mount PARTLABEL=$label -t $fstype $opts $pth
+  fi
+  
+
+  # echo "mounted $label at $pth"
 }
 
 if [[ "$#" = "1" ]]; then
   mntdsk "$1"
-else 
-  mntdsk mbbackup
+else 45h7
+  # mntdsk mbbackup
   mntdsk movingparts
-  mntdsk disk2tb
+  mntdsk hfs1tb
+  mntdsk hfs2tb
   mntdsk bigboi
-  mntdsk seegayte
   mntdsk usbext
 
   mntdsk msd_nand2_boot && mntdsk msd_nand2 && mntdsk msd_nand2_settings
