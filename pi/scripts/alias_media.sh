@@ -27,23 +27,17 @@ media_group_links() {
 
 handle_rars() {
   if [[ $ext == 'rar' ]]; then
-    unset outfile
+    unset vidfile
     dirn="$(dirname "$pth")"
-    outfile="$(unar "$pth" -o "$dirn" -t | grep -Po "\S+\.(mkv|avi|mp4)" | head -1)"
-    echo "outfile: $outfile"
-    if [ -n "$outfile" ]; then 
-      echo "removing:"
-      find "$dirn/" -type f -mtime +90 -not -name "*$outfile"
-      find "$dirn/" -type f -mtime +90 -not -name "*$outfile" -delete 
-      rm -rf "$dirn/Sample"
-      echo "remaining:"
-      ls -lah "$dirn"
-      ext="${outfile##*.}"
-      pth="$dirn/$outfile"
-    else
-      echo "NO out FAIL at: $dirn"
-      exit
+    vidfile="`basename "$(find "$dirn" -type f -size +300M)"`"
+    if [ -z "$vidfile" ]; then 
+      vidfile="$(unar "$pth" -o "$dirn" -t | grep -Po "\S+\.(mkv|avi|mp4)" | head -1)"
     fi
+    echo "vidfile: $vidfile"
+    find "$dirn/" -type f -mtime +90 -not -name "*$vidfile"
+    find "$dirn/" -type f -mtime +90 -not -name "*$vidfile" -delete 
+    ext="${vidfile##*.}"
+    pth="$dirn/$vidfile"
   fi
 }
 
