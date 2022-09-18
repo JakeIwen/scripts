@@ -46,4 +46,4 @@ active_iface() {
 cd /etc/config
 
 # find /tmp/run/mwan3track/*/ONLINE | xargs tail -n +1 | sed -e 's/==>/\n/g' -e 's/<==//g' -ern 's|(.*ONLINE \n)(\d+)|\2\1|g'
-
+  
