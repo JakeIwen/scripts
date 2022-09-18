@@ -6,9 +6,12 @@ fetch_uuid() { /home/pi/scripts/fetch_disk_uuid.sh $1; }
 fsprop() { 
   prop=$1 #  LABEL UUID TYPE PARTUUID PARTLABEL
   sterm=$2
-  match="$(/sbin/blkid | grep "$sterm" | grep -Po "(?<=$prop=\")[^\"]*")"
+  match="$(/sbin/blkid | grep "\"$sterm\"" | grep -Po "(?<=$prop=\")[^\"]*")"
   if [ -n "$sterm" ] && [ "$(echo "$match" | wc -l)" -gt 1 ]; then
     echo "multiple matches tosearch"
+    echo "prop $prop"
+    echo "sterm $sterm"
+    echo "match $match"
   fi
   echo "$match"
 }
@@ -27,10 +30,12 @@ mntdsk() {
     /sbin/blkid | grep -P "$fsroot.*${uuid}" && echo "not mounting $label because it is rootFS: $fsroot" && return 1
     fstype=$(fsprop TYPE $uuid)
     
+    echo "running sudo mount -U $uuid -t $fstype $opts $pth"
     sudo mount -U $uuid -t $fstype $opts $pth
   else
     fstype=$(fsprop TYPE $label)
     if [[ "$fstype" == "hfsplus" ]]; then opts="-o force,rw"; else opts=""; fi
+    echo "running sudo mount PARTLABEL=$label -t $fstype $opts $pth"
     sudo mount PARTLABEL=$label -t $fstype $opts $pth
   fi
   
@@ -40,7 +45,7 @@ mntdsk() {
 
 if [[ "$#" = "1" ]]; then
   mntdsk "$1"
-else 45h7
+else 
   # mntdsk mbbackup
   mntdsk movingparts
   mntdsk hfs1tb
