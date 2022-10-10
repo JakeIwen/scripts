@@ -13,15 +13,15 @@ kill_torrent_client() {
 
 kill_torrent_client
 
-locations() { 
+hdd_locations() { 
   if [ -z ${disk_name+x} ]; then
-    cat /proc/self/mounts | grep -Po "/mnt/[^ ]+" | grep -vP 'usb|msd|bigboi'
+    cat /proc/self/mounts | grep -Po "/mnt/[^ ]+" | grep -vP 'usb|msd'
   else
     cat /proc/self/mounts | grep -Po "/mnt/${disk_name}[^_]"
   fi
 }
 
-locs=`locations`
+locs=`hdd_locations`
 echo "$locs"
 if [[ -n "$locs" ]]; then 
   sudo service smbd stop
@@ -29,7 +29,7 @@ if [[ -n "$locs" ]]; then
   sudo umount $locs
 fi
 
-locs=`locations`
+locs=`hdd_locations`
 if [[ -n "$locs" ]]; then 
   echo "forcefully unmounting $locs"
   sudo umount $locs -fl
