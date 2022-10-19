@@ -5,7 +5,7 @@ hdd_backup=/mnt/bigboi/pi_backup_git/pi_backup
 backup_msd=/mnt/msd_nand2
 
 rsync_media_flags="--delete-during --delete-excluded --exclude-from=/rsync-exclude-media.txt"
-rsync_flags="--delete-during --delete-excluded --exclude-from=/rsync-exclude.txt"
+z_flags="--delete-during --delete-excluded --exclude-from=/rsync-exclude.txt"
 MP_MOUNTED=$(mount | awk '/movingparts/ {print $6}' | grep "rw")
 # MSD1_MOUNTED=$(mount | grep -P '^/dev/sd' | awk '/msd_nand1/ {print $6}' | grep "rw")
 # MSD2_MOUNTED=$(mount | grep -P '^/dev/sd' | awk '/msd_nand2/ {print $6}' | grep "rw")
