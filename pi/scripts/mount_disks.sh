@@ -53,8 +53,8 @@ else
   mntdsk bigboi
   mntdsk usbext
 
-  mntdsk msd_nand2_boot && mntdsk msd_nand2 && mntdsk msd_nand2_settings
-  mntdsk msd_nand1_boot && mntdsk msd_nand1 && mntdsk msd_nand1_settings
+  # mntdsk msd_nand2_boot && mntdsk msd_nand2 && mntdsk msd_nand2_settings
+  # mntdsk msd_nand1_boot && mntdsk msd_nand1 && mntdsk msd_nand1_settings
 fi
 
 echo "mounted disks:"

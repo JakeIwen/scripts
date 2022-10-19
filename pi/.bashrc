@@ -206,7 +206,6 @@ set_vfat_uuid() {
 
 export POSPATH="$HOME/vlc-positions.txt"
 export VLCQTPATH="$HOME/.config/vlc/vlc-qt-interface.conf"
-export VLCRPATH="$HOME/vlc-recent.txt"
 
 mntdsk() { # mntdsk sd_card 0383-ABDF
   fname=$1
@@ -402,7 +401,7 @@ vlcmd() {
 }
 
 alias pp="vlcmd PlayPause"
-vlcr() { grep -i "$1" "$VLCRPATH" | head -10; }
+vlcr() { grep -ia "$1" "$POSPATH" | head -10; }
 vlc_nosubs() { inc_global vlc_sub_track -1 2; resume ; }
 vlc_subs_off() { echo '-1' > /home/pi/.vlc_sub_track; resume; }
 
@@ -441,6 +440,7 @@ alias bb='cd /mnt/bigboi/'
 alias mnt='cd /mnt'
 alias tor='cd /mnt/movingparts/torrent/'
 alias inc='cd /mnt/movingparts/torrent/incomplete; ls -lah'
+alias backup_home='cd /mnt/bigboi/pi_backup_git/pi_backup/home/pi'
 
 alias am=". ~/scripts/alias_media.sh"
 alias ifaces="ssh root@OpenWrt mwan3 interfaces | grep 'is online'"
