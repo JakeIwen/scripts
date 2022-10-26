@@ -32,8 +32,8 @@ handle_rars() {
     vidfile="`basename "$(find "$dirn" -type f -size +300M)"`"
     if [ -z "$vidfile" ]; then 
       vidfile="$(unar "$pth" -o "$dirn" -t | grep -Po "\S+\.(mkv|avi|mp4)" | head -1)"
+      echo "new vidfile: $vidfile"
     fi
-    echo "vidfile: $vidfile"
     find "$dirn/" -type f -mtime +90 -not -name "*$vidfile"
     find "$dirn/" -type f -mtime +90 -not -name "*$vidfile" -delete 
     ext="${vidfile##*.}"

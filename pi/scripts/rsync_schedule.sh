@@ -98,7 +98,7 @@ sync_mp_bb
 chk_free_sd_space
 live_pi_backup
 commit_last_backup      
-retore_to_msd
+# retore_to_msd
 unmount_bb
 echo "scheduled_rsync end: `date`";
 

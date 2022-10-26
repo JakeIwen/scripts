@@ -87,6 +87,7 @@ alias mtorx="rm $mconf/mtorrent*; nohup $isw &"
 alias nodisk="rm $mconf/mdisk*; touch $mconf/nodisk; nohup $isw &"
 alias nodiskx="rm $mconf/nodisk*; nohup $isw &"
 
+umex() { . $HOME/scripts/umount_disks.sh EXFAT512; }
 ### CANBUS ###
 alias canhelp="sudo ip link add can0 type can help"
 alias canup="sudo ip link set can0 up && ip -details link show can0"
