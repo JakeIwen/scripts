@@ -11,7 +11,7 @@ kill_torrent_client() {
   if [[ "$(ps ax)" == *"qbittorrent"* ]]; then echo 'SECOND ATTEMPT killtorrent' && sudo pkill -f qbittorrent && sleep 3; fi
 }
 
-kill_torrent_client
+
 
 hdd_locations() { 
   if [ -z ${disk_name+x} ]; then
@@ -23,6 +23,10 @@ hdd_locations() {
 
 locs=`hdd_locations`
 echo "$locs"
+if [ -n "$(echo $locs | grep -Po movingparts)" ]; then
+  kill_torrent_client
+fi
+
 if [[ -n "$locs" ]]; then 
   sudo service smbd stop
   echo "unmounting $locs"
@@ -34,4 +38,7 @@ if [[ -n "$locs" ]]; then
   echo "forcefully unmounting $locs"
   sudo umount $locs -fl
 fi
+
+echo "mounted disks:"
+grep "dev/sd" /proc/mounts
 
