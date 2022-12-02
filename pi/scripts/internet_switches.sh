@@ -1,7 +1,6 @@
 #! /bin/bash
 
 conf() { cat /home/pi/mconf/$1* &> /dev/null; }
-iface_online() { ssh root@OpenWrt mwan3 interfaces | grep "$1 is online"; }
 
 ubnt_internet_ops() { # nanostation connected; van is likely stationary/parked
   echo 'ubnt_internet_ops'
@@ -48,8 +47,8 @@ no_internet_ops() {
     mount_drives
     kill_torrent_client
   else 
-    unmount_drives
     kill_torrent_client
+    unmount_drives
   fi 
     
   
@@ -82,7 +81,6 @@ mount_drives() {
   else
     . /home/pi/scripts/mount_disks.sh
     sleep 3
-    . /home/pi/scripts/fix_hfs_fs.sh
     echo "drives mounted. starting smb share."
     start_service smbd 
   fi
@@ -123,6 +121,8 @@ kill_all() {
   unmount_drives
 }
 
+ifaces="$(ssh root@OpenWrt 'mwan3 interfaces')"
+iface_online() { echo "$ifaces" | grep "$1 is online"; }
 if date | grep '0:0'; then date; fi
 # ubnt_internet_ops
 if conf nodisk &> /dev/null; then kill_all # drives disabled ~/mconf/nodisk

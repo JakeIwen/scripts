@@ -6,7 +6,7 @@ fetch_uuid() { /home/pi/scripts/fetch_disk_uuid.sh $1; }
 fsprop() { 
   prop=$1 #  LABEL UUID TYPE PARTUUID PARTLABEL
   sterm=$2
-  match="$(/sbin/blkid | grep "\"$sterm\"" | grep -Po "(?<= $prop=\")[^\"]*")"
+  match="$(blkln "$sterm" | grep -Po "(?<= $prop=\")[^\"]*")"
   if [ -n "$sterm" ] && [ "$(echo "$match" | wc -l)" -gt 1 ]; then
     echo "multiple matches tosearch"
     echo "prop $prop"
@@ -16,10 +16,30 @@ fsprop() {
   echo "$match"
 }
 
+blkln() { 
+  sterm=$1
+  match="$(/sbin/blkid | grep "\"$sterm\"")"
+  echo "$match"
+}
+
 mntdsk() {
   label=$1
   pth="/mnt/$label"
+  match=$(blkln $label)
+  unset msg
+  if [ -z "$match" ]; then
+    msg="no blkid match for: $label"
+  elif [[ "$match" == *"ro,"* ]]; then
+    msg="read-only match for: $label"
+  elif [[ "$(grep "dev/sd" /proc/mounts)" == *"/mnt/$label"* ]]; then
+    msg="already mounted for: $label"
+  fi
+  echo "$msg"
+  if [ -n "$msg" ]; then return 0; fi
+  
+  
   uuid=$(fetch_uuid $label)
+  fstype=$(fsprop TYPE $label)
   
   sudo mkdir -p $pth
   sudo chown pi $pth
@@ -32,8 +52,7 @@ mntdsk() {
     
     echo "running sudo mount -U $uuid -t $fstype $opts $pth"
     sudo mount -U $uuid -t $fstype $opts $pth
-  else
-    fstype=$(fsprop TYPE $label)
+  elif [ -n "$fstype" ]; then
     if [[ "$fstype" == "hfsplus" ]]; then opts="-o force,rw"; else opts=""; fi
     if [[ "$fstype" == "exfat" ]]; then sudo modprobe fuse; fi
     mountkey=PARTLABEL
@@ -46,7 +65,7 @@ mntdsk() {
 
 if [[ "$#" = "1" ]]; then
   mntdsk "$1"
-else 
+elif [[ "$#" = "0" ]]; then
   # mntdsk mbbackup
   mntdsk movingparts
   mntdsk hfs1tb

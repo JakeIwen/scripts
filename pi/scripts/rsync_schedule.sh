@@ -35,11 +35,21 @@ sync_mp_bb() {
 }
 
 # pi backups
+# live_pi_backup() {
+#   # store in git repo on HDD drive
+#   echo "beginning pibackup to hdd `date`"
+#   sudo rsync -aH $rsync_flags / $hdd_backup
+#   echo "hdd complete `date`"
+# }
+
 live_pi_backup() {
-  # store in git repo on HDD drive
-  echo "beginning pibackup to hdd `date`"
-  sudo rsync -aH $rsync_flags / $hdd_backup
-  echo "hdd complete `date`"
+    echo "beginning pibackup to hdd `date`"
+  outfile="/mnt/bigboi/pi_backup_git/dd_mmcblk0"
+  # Create trigger to force file system consistency check if image is restored
+  touch /boot/forcefsck
+  dd if=/dev/mmcblk0 of="$outfile" bs=1M
+  # Remove fsck trigger
+  rm /boot/forcefsck
 }
 
 commit_last_backup() {
@@ -86,7 +96,7 @@ retore_to_msd() {
 
 chk_free_sd_space() {
   pctfull=$(df -h | grep /dev/root | grep -Po '\d+%' | grep -Po '\d+')
-  if [ "$pctfull" -gt 55 ]; then
+  if [ "$pctfull" -gt 70 ]; then
     s sms_send "main SD card unusually full ($pctfull)%, aborting"
     exit || return 
   fi

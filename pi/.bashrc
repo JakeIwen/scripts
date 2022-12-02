@@ -323,6 +323,7 @@ parse_episode_num() {
   # echo "season $season"
   epp=`echo $cleanln | grep -Po '(?<=(E|e))\d\d' | tail -1`
   # echo "ep $epp"
+  echo "epp: $epp, season: $season"
   if [[ "$epp" && "$season" ]] ; then
     echo "${season}${epp}" | perl -pe 's|^0||g' # parsed numbers
   else
@@ -367,7 +368,7 @@ playf() {
     parse_episode_num $dirplusname $ep
     ep_from_path=$(parse_episode_num $dirplusname $ep)
     if [[ "${ep_from_path,,}" == *"${ep,,}"* ]]; then # case-insensitive match
-      echo "ep was included in ep_from path"
+      echo "ep was included in ep_from path" 
       filenames="${match_arr[*]:$idx}" # slice to the end of the array
       run_vlc_on_filenames
       return 0
@@ -427,7 +428,6 @@ play_status() {
 fgp() { find /mnt/movingparts/links \( -type l \) -iname "*$1*"; }
 tv() {
   cd /mnt/bigboi/links/TV || cd /mnt/movingparts/links/TV
-  [[ "$#" = "1" ]] && cd "`find . -maxdepth 1 -name "*$1*"`"
   ls
 }
 alias movies='cd /mnt/movingparts/links/Movies && ls | sed "s|\.| |g" | sed "s| ...$||g"'
