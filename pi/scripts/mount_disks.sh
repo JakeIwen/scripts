@@ -78,6 +78,8 @@ elif [[ "$#" = "0" ]]; then
   # mntdsk msd_nand1_boot && mntdsk msd_nand1 && mntdsk msd_nand1_settings
 fi
 
+. /home/pi/scripts/fix_hfs_fs.sh 
+
 echo "mounted disks:"
 grep "dev/sd" /proc/mounts
 
