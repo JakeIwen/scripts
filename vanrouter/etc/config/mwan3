@@ -1,19 +1,4 @@
 
-config rule 'bb_west_wan'
-	option dest_ip '23.239.20.41'
-	option proto 'all'
-	option sticky '0'
-	option logging '1'
-	option use_policy 'wann'
-	option family 'ipv4'
-
-config rule 'bb_east_client'
-	option dest_ip '23.226.232.80'
-	option proto 'all'
-	option sticky '0'
-	option use_policy 'client'
-	option family 'ipv4'
-
 config rule 'https'
 	option sticky '1'
 	option dest_port '443'
