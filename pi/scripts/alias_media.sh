@@ -34,7 +34,7 @@ handle_rars() {
       vidfile="$(unar "$pth" -o "$dirn" -t | grep -Po "\S+\.(mkv|avi|mp4)" | head -1)"
       echo "new vidfile: $vidfile"
     fi
-    find "$dirn/" -type f -mtime +90 -not -name "*$vidfile"
+    # delete rars files older than 90 days
     find "$dirn/" -type f -mtime +90 -not -name "*$vidfile" -delete 
     ext="${vidfile##*.}"
     pth="$dirn/$vidfile"
