@@ -39,6 +39,8 @@ alias wake_display='xset dpms force on'
 alias slp='xset s activate'
 
 alias init_rsa="ssh-copy-id -i ~/.ssh/id_rsa.pub" # init_rsa user@device
+
+alias corefreq='cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq; vcgencmd measure_volts'
 ssh_copy_id_dropbear() {
   if [ "$#" -ne 1 ]; then echo "Example: ${0} root@192.168.1.1" && exit 1; fi
   cat /home/pi/.ssh/id_rsa.pub | ssh ${1} "cat >> /etc/dropbear/authorized_keys && chmod 0600 /etc/dropbear/authorized_keys && chmod 0700 /etc/dropbear"
@@ -285,9 +287,7 @@ vlcnice2() { parent=`pgrep -p vlc`; ncn=${1:-"12"}; sudo renice $ncn ${parent##*
 get_global() { cat /home/pi/.$1; }
 
 inc_global() {
-  name=$1
-  min=$2
-  max=$3
+  name=$1; min=$2; max=$3;
   val=`cat /home/pi/.$name`
   val=$(( $val + 1 ))
   if [ -z $val ] || [ $val -gt $max ]; then val=$min; fi;
@@ -352,7 +352,7 @@ playf() {
   if [ ${#match_arr[@]} -eq 0 ]; then echo "No matches found" && return 1; fi
 
   echo "available files:"
-  echo -ne "filenames: \n${match_arr[*]}\n" | grep -Po '(?<=\/)[^\/]* '
+  echo -ne "filenames: \n${match_arr[*]}\n" | grep -Po '(?<=\/)[^\/]*( |$)'
   
   if [ -z "$ep" ]; then
     echo "resume or provide ep# to watch"
@@ -444,6 +444,7 @@ alias inc='cd /mnt/movingparts/torrent/incomplete; ls -lah'
 alias backup_home='cd /mnt/bigboi/pi_backup_git/pi_backup/home/pi'
 
 alias am=". ~/scripts/alias_media.sh"
+alias an=". ~/scripts/alias_media.sh new"
 alias ifaces="ssh root@OpenWrt mwan3 interfaces | grep 'is online'"
 alias cast="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; nohup python3 server.py &"
 alias castnn="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; py thon3 server.py"

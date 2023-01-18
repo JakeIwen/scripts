@@ -19,7 +19,9 @@ media_group_links() {
     title=`basename "$pth" | perl -pe "s/(-| |,)/./g" | perl -pe "s~$pattern~~ig" | perl -pe "s~\.+~_~g" | perl -pe "s~\(~[~g" | perl -pe "s~\)~]~g"`
     link_folder=`echo "$folder" | sed "s|\/torrent\/|\/links\/|g" | perl -pe "s~( |\.)+~_~g"`
     link="$link_folder/$title"
-    
+    dir_link_folder="$(basename $link_folder)"
+    echo "dir_link_folder: $dir_link_folder"
+    [ -d "$dir_link_folder" ] || mkdir "$dir_link_folder"
     [ -d "$link_folder" ] || mkdir "$link_folder"
     ln -sf "$pth" "$link"
   done
@@ -91,9 +93,12 @@ alias_new() {
 
 touch /home/pi/log/alias_media.log
 echo  "$(date): running alias_media.sh $0 $(whoami)" >> /home/pi/scripts/alias_media.log
-
-mount | grep bigboi && alias_folders "/mnt/bigboi/mp_backup" &
-mount | grep movingparts && alias_folders "/mnt/movingparts"
+if [[ "$#" = "1" ]]; then
+  mount | grep movingparts && alias_new "/mnt/movingparts" &
+else
+  mount | grep bigboi && alias_folders "/mnt/bigboi/mp_backup" &
+  mount | grep movingparts && alias_folders "/mnt/movingparts" &
+fi
 echo "alias media end $(date)" >> /home/pi/log/alias_media.log
 
 
