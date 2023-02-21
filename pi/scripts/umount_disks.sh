@@ -11,8 +11,6 @@ kill_torrent_client() {
   if [[ "$(ps ax)" == *"qbittorrent"* ]]; then echo 'SECOND ATTEMPT killtorrent' && sudo pkill -f qbittorrent && sleep 3; fi
 }
 
-
-
 hdd_locations() { 
   if [ -z ${disk_name+x} ]; then
     cat /proc/self/mounts | grep -Po "/mnt/[^ ]+" | grep -vP 'usb|msd'

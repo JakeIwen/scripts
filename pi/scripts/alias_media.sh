@@ -2,45 +2,53 @@
 
 FILE_EXTENSIONS=(mkv avi mp4 rar)
 media_group_links() {
-  folder="$1"
-  regex="$2"
-  keys="${regex}multi|REQ|Hi10p|ETRG|YTM\.AM|SKGTV|CaLLiOpeD|CtrlHD|Will1869|10\.?Bit|DTS|DL|SDC|Atmos|hdtv|EVO|WiKi|HMAX|IMAX|MA|VhsRip|HDRip|BDRip|iNTERNAL|True\.HD|1080p|1080i|720p|XviD|HD|AC3|AAC|REPACK|5\.1|2\.0|REMUX|PRiCK|AVC|HC|AMZN|HEVC|Blu(R|r)ay|(BR|web)(Rip)?|NF|DDP?(5\.1|2\.0)?|(x|h|X|H)\.?26[4-5]|\d+mb|\d+kbps"
-  groups="d3g|CiNEFiLE|CTR|PRoDJi|regret|deef|POIASD|Cinefeel|NTG|NTb|monkee|YELLOWBiRD|Atmos|EPSiLON|cielos|ION10|MeGusta|METCON|x0r|xlf|S8RHiNO|GOSSIP|NTG|btx|strife|DD|DBS|TEPES|pawe|ggezl2006"
-  delims="\.|\+|\-"
-  find "$folder" -not -path '*/\.*' -not -ipath '*sample*' -type f | while read pth
+  loc="$1"
+  folder="$2"
+  subfolder="$3"
+  
+  echo "mgr $folder"
+  ls $folder
+  keys="multi|REQ|Hi10p|ETRG|YTM_AM|SKGTV|UNCENSORED|HDR|CaLLiOpeD|ddpatmos|CtrlHD|Will1869|10_?Bit|DTS|DL|SDC|Atmos|hdtv|EVO|WiKi|HMAX|IMAX|MA|VhsRip|HDRip|BDRip|iNTERNAL|True_HD|1080p|1080i|720p|XviD|HD|AC3|AAC|REPACK|AAC?5_1|AAC?2_0|REMUX|PRiCK|AVC|HC|AMZN|HEVC|Blu(R|r)ay|(BR|web)(Rip)?|NF|DDP?(5_1|2_0)?|(x|h|X|H)_?26[4-5]|\d+mb|\d+kbps"
+  groups="d3g|CiNEFiLE|CTR|PRoDJi|regret|deef|POIASD|Cinefeel|NTG|NTb|monkee|YELLOWBiRD|Atmos|EPSiLON|cielos|ION10|MeGusta|METCON|x0r|xlf|S8RHiNO|GOSSIP|NTG|btx|strife|DD|DBS|TEPES|pawe|ggezl2006|CAKES|HiggsBoson|Coo7"
+  delims=" |\.|\+|\-|\,"
+  find "$folder" -not -path '*/\.*' -not -ipath '*sample*' -type f -a \( -name '*.mkv' -o -name '*.avi'  -o -name '*.mp4'  -o -name '*.rar' \) | while read pth
   do
-    [ -e "$pth" ] || continue 
     ext="${pth##*.}"
-    [[ "${FILE_EXTENSIONS[*]}" =~ $ext ]] || continue # wrong extension
-    # (( `stat -c%s "$pth"` > 70000000 )) || continue # size > 70MB
-    (( `stat -c%s "$pth"` > 10000000 )) || continue # size > 10MB
-    echo "$handlerars" > /dev/null && handle_rars
-    pattern="($delims)(\[?($keys)\]?(?=\.)|(($groups)\.)?\.?$ext$)|\'"
-    title=`basename "$pth" | perl -pe "s/(-| |,)/./g" | perl -pe "s~$pattern~~ig" | perl -pe "s~\.+~_~g" | perl -pe "s~\(~[~g" | perl -pe "s~\)~]~g"`
-    link_folder=`echo "$folder" | sed "s|\/torrent\/|\/links\/|g" | perl -pe "s~( |\.)+~_~g"`
-    link="$link_folder/$title"
-    dir_link_folder="$(basename $link_folder)"
-    echo "dir_link_folder: $dir_link_folder"
-    [ -d "$dir_link_folder" ] || mkdir "$dir_link_folder"
+    (( `stat -c%s "$pth"` > 70000000 )) || continue # size > 70MB
+    if [[ "$ext" == 'rar' ]] && echo "$handlerars" > /dev/null; then
+      handle_rars
+      ext="${pth##*.}"
+    fi
+    no_ext="$(echo "$pth" | perl -pe "s~\.${ext}~~g")"
+    no_grp="$(echo $no_ext | perl -pe "s~[\. ]([xh]\.?26[45]|hevc)-\w+(?=(\/|$))~~ig")"
+    fmt_pth=`echo $no_grp | perl -pe "s/(${delims})/./g" | perl -pe "s~\.+~_~g" | perl -pe "s~\(~[~g" | perl -pe "s~\)~]~g"`
+    cln_pth=`echo $fmt_pth | perl -pe "s~_(${keys})(?=(_|\/|$))~~ig"`
+    title=`basename "$cln_pth"`
+    link_folder=`echo "$loc" | sed "s|\/torrent\/|\/links\/|g"`
+    if [ -n "$subfolder" ]; then
+      fmt_sub=`echo "$subfolder" | perl -pe 's~ ~_~g'`
+      link_folder="$link_folder/$fmt_sub"
+    fi
+    # echo "title: $title"
     [ -d "$link_folder" ] || mkdir "$link_folder"
-    ln -sf "$pth" "$link"
+    ln -sf "$pth" "$link_folder/$title"
   done
 }
 
 handle_rars() {
-  if [[ $ext == 'rar' ]]; then
-    unset vidfile
-    dirn="$(dirname "$pth")"
-    vidfile="`basename "$(find "$dirn" -type f -size +300M)"`"
-    if [ -z "$vidfile" ]; then 
-      vidfile="$(unar "$pth" -o "$dirn" -t | grep -Po "\S+\.(mkv|avi|mp4)" | head -1)"
-      echo "new vidfile: $vidfile"
-    fi
-    # delete rars files older than 90 days
-    find "$dirn/" -type f -mtime +90 -not -name "*$vidfile" -delete 
-    ext="${vidfile##*.}"
-    pth="$dirn/$vidfile"
+  unset vidfile
+  dirn="$(dirname "$pth")"
+  found_extracted=`find "$dirn" -type f -size +300M -a \( -name '*.mkv' -o -name '*.avi'  -o -name '*.mp4' \)`
+  vidfile="`basename "$found_extracted"`"
+  if [ -z "$vidfile" ]; then 
+    vidfile="$(unar "$pth" -o "$dirn" -t | grep -Po "\S+\.(mkv|avi|mp4)" | head -1)"
+    echo "new vidfile: $vidfile"
+  else
+    echo "vidfile $vidfile"
   fi
+  # delete rars files older than 90 days
+  find "$dirn/" -type f -mtime +90 -not -name "*$vidfile" -delete 
+  pth="$dirn/$vidfile"
 }
 
 alias_folders() {
@@ -49,22 +57,20 @@ alias_folders() {
   links="$src/links"
   rm -rf "$links"
   mkdir "$links"
-  unset handlerars
-  find "$src/torrent/incomplete" -maxdepth 2 -mindepth 1 -type d \
-    | while read pth; do media_group_links "$pth"; done
-  echo incomplete
-  handlerars=true
   mkdir "$links/TV" "$links/Documentaries" "$links/Movies" "$links/New" "$links/incomplete"
-  find "$src/torrent/New" -maxdepth 2 -mindepth 1  -type d \
-    | while read pth; do media_group_links "$pth"; done
-  echo New
-  find "$src/torrent/TV" -maxdepth 1 -mindepth 1  -type d \
-    | while read pth; do media_group_links "$pth"; done
+  unset handlerars
+  alias_new "$src"
+  handlerars=true
+  loc="$src/torrent/TV"
+  find "$loc" -maxdepth 1 -mindepth 1  -type d \
+    | while read pth; do media_group_links "$loc" "$pth" "$(basename "$pth")"; done
   echo TV
-  find "$src/torrent/Documentaries" -maxdepth 2 -mindepth 1  -type d \
-    | while read pth; do media_group_links "$pth"; done
+  loc="$src/torrent/Documentaries"
+  find "$loc" -maxdepth 2 -mindepth 1  -type d \
+    | while read pth; do media_group_links "$loc" "$pth"; done
   echo Docu
-  media_group_links "$src/torrent/Movies"
+  loc="$src/torrent/Movies"
+  media_group_links "$loc" "$loc"
   echo Movies
   chmod -R 777 "$links"
   echo "done $src"
@@ -73,20 +79,22 @@ alias_folders() {
 alias_new() {
   src=$1
   echo "start $src"
-  links="$src/links/New"
-  rm -rf "$links"
-  mkdir "$links"
+  links_inc="$src/links/incomplete"
+  links_new="$src/links/New"
+  rm -rf "$links_new" "$links_inc"
+  mkdir "$links_new" "$links_inc"
   unset handlerars
-  find "$src/torrent/incomplete" -maxdepth 2 -mindepth 1 -type d \
-    | while read pth; do media_group_links "$pth"; done
-  echo incomplete
+  loc="$src/torrent/incomplete"
+  media_group_links "$loc" "$loc"
   handlerars=true
-  find "$src/torrent/New" -maxdepth 2 -mindepth 1  -type d \
-    | while read pth; do media_group_links "$pth"; done
-  echo New
-  chmod -R 777 "$links"
+  loc="$src/torrent/New"
+  media_group_links "$loc" "$loc"
+  
+  chmod -R 777 "$links_new" "$links_inc"
   echo "done $src"
 }
+
+
 
 # pkill -f alias_media
 # if [[ "$(pgrep alias_media)" ]]; then exit 0; fi
