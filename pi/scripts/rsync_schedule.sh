@@ -71,16 +71,16 @@ retore_to_msd() {
     exit || return
   fi
   
-  sd_boot_path=${backup_msd}_boot
-  # sd_settings_path=${backup_msd}_settings
-  sd_root_path=$backup_msd
-  
   echo "beginning restore to microSD $backup_msd - `date`"
   if [[ ! -e "$backup_msd/boot" ]]; then
     echo "$backup_msd/boot not found for copying - resetting git"
     sudo git reset --quiet > /dev/null
     echo "git reset complete"
   fi
+  
+  sd_boot_path=${backup_msd}_boot
+  # sd_settings_path=${backup_msd}_settings
+  sd_root_path=$backup_msd
   
   sudo rm -rf $sd_boot_path/* # lets make sure these variables are defined lol
   sudo rm -rf $sd_root_path/* 
