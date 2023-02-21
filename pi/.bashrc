@@ -10,7 +10,6 @@ alias ..="cd .."
 alias ...="cd ../.."
 alias ....="cd ../../.."
 alias .....="cd ../../../.."
-
 alias ch7="sudo chmod -R 777" # usage: $ ch7 .
 alias chme="sudo chown -R $(whoami)" # usage: $ chme .
 
@@ -171,7 +170,12 @@ join_by() { local IFS="$1"; shift; echo "$*"; }
 alias mounts='grep "dev/sd" /proc/mounts'
 alias blk="sudo blkid | grep 'dev/sd'"
 alias blkg="sudo blkid | grep -Pi"
-alias remount='sudo su -c "/home/pi/scripts/remount.sh"'
+md() { . /home/pi/scripts/mount_disks.sh "$@"; }
+remount() {
+  . /home/pi/scripts/umount_disks.sh "$@"
+  . /home/pi/scripts/mount_disks.sh "$@"
+  sudo service smbd start
+}
 
 sysvol() { sudo amixer cset numid=1 ${1:-"90"}%; }
 
@@ -303,7 +307,7 @@ run_vlc_on_filenames() {
   echo "subs: $subs"
   bash ~/sns.sh rear_movie &
   
-  nohup vlc -f $subs $filenames &
+  nohup vlc -f --mmal-display hdmi-2 $subs $filenames &
   filename=`basename "$(echo $filenames | grep -Po '^\S+')"`
   echo "basename: $filename"
   last_position=$(get_last_position "$filename")
@@ -447,7 +451,7 @@ alias am=". ~/scripts/alias_media.sh"
 alias an=". ~/scripts/alias_media.sh new"
 alias ifaces="ssh root@OpenWrt mwan3 interfaces | grep 'is online'"
 alias cast="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; nohup python3 server.py &"
-alias castnn="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; py thon3 server.py"
+alias castnn="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; python3 server.py"
 alias rpiplay='wake_display; nohup /home/pi/RPiPlay/build/rpiplay -r 180 &'
 # boost processess pushing netflix, may help with outher services
 alias rechrome="sudo renice -12  \`ps aux --sort=%cpu | tail -3 | awk '{print \$2}'\`"
@@ -543,19 +547,12 @@ rhp() {
 }
 
 airupnp() {
-  if [[ "$1" == "disable" ]]; then
-    sudo systemctl stop airupnp.service
-    # dont fuck with the service files
-    # sudo perl -i -pe 's|^|\# |g' /etc/systemd/system/airupnp.service
-  else 
-    sudo systemctl start airupnp.service
-    # dont fuck with the service files
-    # sudo perl -i -pe 's|^(\# )*||g' /etc/systemd/system/airupnp.service
-  fi
+  [[ "$1" == "disable" ]] && cmd=stop || cmd=start
+  sudo systemctl $cmd airupnp.service
 }
 sns_list() {
   fpath="$HOME/scripts/python/sonos_tasks.py"
-  while read f; do
+  while read f; do       
     helpers=`echo $f | grep '# helpers'`
     if [[ $helpers ]]; then break; fi
     echo $f | grep '^def' | sed "s|^def\s||g"
