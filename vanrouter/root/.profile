@@ -42,8 +42,10 @@ active_iface() {
   active_iface_scores | sort | tail -1 | cut -d ':' -f2-
 }
 
+denymac() {
+  sed -iE "s|list maclist .*|list maclist '$1'|" /etc/config/wireless
+}
 
 cd /etc/config
 
 # find /tmp/run/mwan3track/*/ONLINE | xargs tail -n +1 | sed -e 's/==>/\n/g' -e 's/<==//g' -ern 's|(.*ONLINE \n)(\d+)|\2\1|g'
-  

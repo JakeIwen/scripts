@@ -303,11 +303,11 @@ run_vlc_on_filenames() {
   kill_media > /dev/null
   wake_display
   echo -ne "filenames: \n$filenames\n" | grep -Po '(?<=\/)[^\/]* '
-  subs="--sub-language=eng --sub-track=$(get_global vlc_sub_track)"
+  subs="--sub-language=en"
   echo "subs: $subs"
   bash ~/sns.sh rear_movie &
   
-  nohup vlc -f --mmal-display hdmi-2 $subs $filenames &
+  nohup vlc -f $subs $filenames &
   filename=`basename "$(echo $filenames | grep -Po '^\S+')"`
   echo "basename: $filename"
   last_position=$(get_last_position "$filename")
@@ -327,7 +327,7 @@ parse_episode_num() {
   # echo "season $season"
   epp=`echo $cleanln | grep -Po '(?<=(E|e))\d\d' | tail -1`
   # echo "ep $epp"
-  echo "epp: $epp, season: $season"
+  # echo "epp: $epp, season: $season"
   if [[ "$epp" && "$season" ]] ; then
     echo "${season}${epp}" | perl -pe 's|^0||g' # parsed numbers
   else
@@ -368,7 +368,6 @@ playf() {
   # match ep
   for idx in "${!match_arr[@]}"; do
     dirplusname="$(echo ${match_arr[$idx]} | grep -Po '[^\/]+\/[^\/]+$')"
-    echo "dirplusname $dirplusname"
     parse_episode_num $dirplusname $ep
     ep_from_path=$(parse_episode_num $dirplusname $ep)
     if [[ "${ep_from_path,,}" == *"${ep,,}"* ]]; then # case-insensitive match
