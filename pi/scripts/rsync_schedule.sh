@@ -43,7 +43,7 @@ sync_mp_bb() {
 # }
 
 live_pi_backup() {
-    echo "beginning pibackup to hdd `date`"
+  echo "beginning pibackup to hdd `date`"
   outfile="/mnt/bigboi/pi_backup_git/dd_mmcblk0"
   # Create trigger to force file system consistency check if image is restored
   touch /boot/forcefsck
