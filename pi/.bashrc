@@ -167,17 +167,31 @@ trim_last_line() { sed -i '$ d' $1; } # filepath
 join_by() { local IFS="$1"; shift; echo "$*"; }
 
 ### MEDIA/DISK ###
+export POSPATH="$HOME/vlc-positions.txt"
+export VLCQTPATH="$HOME/.config/vlc/vlc-qt-interface.conf"
 alias mounts='grep "dev/sd" /proc/mounts'
 alias blk="sudo blkid | grep 'dev/sd'"
 alias blkg="sudo blkid | grep -Pi"
+alias pp="vlcmd PlayPause"
+vlcr() { grep -ia "$1" "$POSPATH" | head -10; }
+vlc_nosubs() { inc_global vlc_sub_track -1 2; resume ; }
+vlc_subs_off() { echo '-1' > /home/pi/.vlc_sub_track; resume; }
+vlcnice() { sudo renice ${1:-"12"} `pgrep vlc`; }
+vlcnice2() { parent=`pgrep -p vlc`; ncn=${1:-"12"}; sudo renice $ncn ${parent##*( )}; }
+get_global() { cat /home/pi/.$1; }
+media_by_name() { find "$(avail_drive_path)/links" -type l -ipath "*$1*" -print0 | sort -z; }
+fgp() { find /mnt/movingparts/links \( -type l \) -iname "*$1*"; }
+tv() { cd /mnt/bigboi/links/TV || cd /mnt/movingparts/links/TV; ls; }
+
+lastpos() { grep -Pai "$1" "$POSPATH"; }
+
 md() { . /home/pi/scripts/mount_disks.sh "$@"; }
+sysvol() { sudo amixer cset numid=1 ${1:-"90"}%; }
 remount() {
   . /home/pi/scripts/umount_disks.sh "$@"
   . /home/pi/scripts/mount_disks.sh "$@"
   sudo service smbd start
 }
-
-sysvol() { sudo amixer cset numid=1 ${1:-"90"}%; }
 
 kill_media() {
   log_position
@@ -210,9 +224,6 @@ set_vfat_uuid() {
     [ -z "$vfat" ] && echo "'`blkid $BLKID | grep -o 'TYPE="[^"]*"'`' is not a vfat partition"
   fi
 }
-
-export POSPATH="$HOME/vlc-positions.txt"
-export VLCQTPATH="$HOME/.config/vlc/vlc-qt-interface.conf"
 
 mntdsk() { # mntdsk sd_card 0383-ABDF
   fname=$1
@@ -249,8 +260,6 @@ log_position() {
   fi
 }
 
-lastpos() { grep -Pai "$1" "$POSPATH"; }
-
 get_last_position() {
   if [ -n "$1" ]; then
     ns=`grep -Poai "(?<=$1 ).*" "$POSPATH"`
@@ -286,9 +295,6 @@ play() {
   
   run_vlc_on_filenames
 }
-vlcnice() { sudo renice ${1:-"12"} `pgrep vlc`; }
-vlcnice2() { parent=`pgrep -p vlc`; ncn=${1:-"12"}; sudo renice $ncn ${parent##*( )}; }
-get_global() { cat /home/pi/.$1; }
 
 inc_global() {
   name=$1; min=$2; max=$3;
@@ -335,16 +341,12 @@ parse_episode_num() {
   fi
 }
 
-
-media_by_name() { find "$(avail_drive_path)/links" -type l -ipath "*$1*" -print0 | sort -z; }
-
 avail_drive_path() {
   bb_links='/mnt/bigboi/mp_backup'
   mp_links='/mnt/movingparts'
   if [ -n "$drivepath" ] && [ "$drivepath" = "bb" ]; then echo $bb_links; fi
   if [ -e "$mp_links" ]; then echo $mp_links; else echo $bb_links; fi
 }
-
 
 playf() {
   name=`basename $1 | perl -pe 's/ /_/g' | perl -pe 's/\..*$//g'`
@@ -405,11 +407,6 @@ vlcmd() {
   dbus-send --type=method_call --dest=org.mpris.MediaPlayer2.vlc /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.$cmd $param
 }
 
-alias pp="vlcmd PlayPause"
-vlcr() { grep -ia "$1" "$POSPATH" | head -10; }
-vlc_nosubs() { inc_global vlc_sub_track -1 2; resume ; }
-vlc_subs_off() { echo '-1' > /home/pi/.vlc_sub_track; resume; }
-
 play_status() {
   if [[ `pgrep vlc` ]]; then
     keys="multi|REQ|Hi10p|ETRG|YTM\.AM|SKGTV|CaLLiOpeD|CtrlHD|Will1869|10\.?Bit|DTS|DL|SDC|Atmos|hdtv|EVO|WiKi|HMAX|IMAX|MA|VhsRip|HDRip|BDRip|iNTERNAL|True\.HD|1080p|1080i|720p|XviD|HD|AC3|AAC|REPACK|5\.1|2\.0|REMUX|PRiCK|AVC|HC|AMZN|HEVC|Blu(R|r)ay|(BR|web)(Rip)?|NF|DDP?(5\.1|2\.0)?|(x|h|X|H)\.?26[4-5]|\d+mb|\d+kbps"
@@ -428,11 +425,6 @@ play_status() {
   fi
 }
 
-fgp() { find /mnt/movingparts/links \( -type l \) -iname "*$1*"; }
-tv() {
-  cd /mnt/bigboi/links/TV || cd /mnt/movingparts/links/TV
-  ls
-}
 alias movies='cd /mnt/movingparts/links/Movies && ls | sed "s|\.| |g" | sed "s| ...$||g"'
 alias docu='cd /mnt/movingparts/links/Documentaries && ls | sed "s|\.| |g" | sed "s| ...$||g"'
 alias torrent='cd /mnt/movingparts/torrent; ls;'
