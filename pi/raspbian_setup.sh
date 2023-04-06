@@ -20,7 +20,10 @@ sudo systemctl start ssh
 ssh-copy-id -i ~/.ssh/id_rsa.pub jacobr@192.168.6.145
 
 sudo apt update
-sudo apt-get install -y bc gparted libusb-dev libdbus-1-dev libglib2.0-dev libudev-dev libical-dev libreadline-dev samba samba-common-bin dnsmasq hostapd bridge-utils qbittorrent-nox hfsutils hfsprogs
+sudo apt-get install  bc gparted libusb-dev libdbus-1-dev libglib2.0-dev libudev-dev libical-dev libreadline-dev samba samba-common-bin dnsmasq hostapd bridge-utils qbittorrent-nox hfsutils hfsprogs
+
+# set samba password for user pi_backup
+sudo smbpasswd -a pi
 
 sudo raspi-config
   - interfacing options
@@ -88,5 +91,3 @@ sudo vi /etc/xdg/lxsession/LXDE-pi/autostart
 
 # case insensitive completion:
 echo 'set completion-ignore-case On' | sudo tee -a /etc/inputrc
-  
-  
