@@ -18,6 +18,9 @@ alias ngear='ssh -R root@192.168.6.1'
 alias rb='. /home/pi/scripts/umount_disks.sh; sudo reboot'
 alias rball='ubnt reboot & ngear reboot; rb'
 
+alias bootedit='sudo vi /boot/config.txt'
+alias bootconf='sudo cat /boot/config.txt'
+
 alias dirsize='sudo du -hsc .[^.]* *'
 alias disku='df -h'
 alias ipinfo="py /home/pi/scripts/python/ip_info.py"
@@ -87,19 +90,25 @@ alias mtor="rm $mconf/notorrent* $mconf/nodisk*; touch $mconf/mtorrent; nohup $i
 alias mtorx="rm $mconf/mtorrent*; nohup $isw &"
 alias nodisk="rm $mconf/mdisk*; touch $mconf/nodisk; nohup $isw &"
 alias nodiskx="rm $mconf/nodisk*; nohup $isw &"
-
 umex() { . $HOME/scripts/umount_disks.sh EXFAT512; }
+
 ### CANBUS ###
+alias pcanf='cd /home/pi/pcan; ls -lah;'
+
 alias canhelp="sudo ip link add can0 type can help"
 alias canup="sudo ip link set can0 up && ip -details link show can0"
 alias candown="sudo ip link set can0 down 2>/dev/null"
 alias canshow="ip -details link show can0"
-alias cand="candump -c -axde can0"
+alias cand="candump -ade can0"
+alias candd='candump -dL -t A can0'
 alias canlog="cd $HOME/log/can; ls -lah"
 
 alias canif="ifconfig can0"
 alias mxmon="cand | grep -Pv '  02 7E 00|  02 3E 00 00 00 00 00 00' | grep 18DA"
+fdiag() { echo "$1" | grep 18DA; }
+ffdiag() { grep 18DA "$1"; }
 uniq_to_file() { orig=$1; file2=$2; grep -v -f "$orig" "$file2"; }
+hex="[\d(A-F)]"
 
 canmxid=18DAF140
 mxgrep() { cat "$1" | grep $canmxid ; }
@@ -108,24 +117,36 @@ cans() {
     canid=$1
     data=$(echo $2 | sed 's| ||g')
   else
-    hex="[\d(A-F)]"
-    canid=$(echo "$1" | grep -Po "  $hex{8}  " | sed 's| ||g')
-    data="$(echo "$1" | grep -Po " ($hex$hex )+ " | sed 's| ||g')"
+    canid=$(echo "$1" | sed 's|#| |g' | grep -Po "$hex{8} " | sed 's| ||g')
+    data="$(echo "$1" | sed 's|#| |g' | grep -Po " ($hex$hex )+" | sed 's| ||g')"
   fi
   echo "sending ${canid}#${data}"
   cansend can0 "${canid}#${data}"
 }
-canuids() {
-  file="$1"
-  hex="[\d(A-F)]"
-  cat "$file" | grep -Po "\s$hex{8}" | sed 's| ||g' | sort -u
+
+play_alert() {
+  sns partymode
+  vlc /home/pi/soundbytes/emergency-alarm-with-reverb-29431.mp3 
 }
+
+
+canlive() { cand | grep -Poi "\s[\d(A-F)]{8}" | sed 's| ||g' | sort -u; }
+canuniq() { cat "$1" | sort -u; }
+canuids() { cat "$1" | grep -Poi "\s[\d(A-F)]{8}" | sed 's| ||g' | sort -u; }
+canuids_count_all() { canuids "$1" | while read uid; do echo -e "`grep -Po "$uid.*" $1` | `grep -c $uid $1`"; done; }
+canuids_count() { canuids_count_all "$1" | grep \|; }
 cansr() {
-  echo "$1" | while read line; do
+  while read line; do
+    echo "$line"
     cans "$line"
     sleep 1
-  done
+  done < "$1"
 }
+cansec() {
+  while true; do cansr /home/pi/pcan/every_second.txt; done
+}
+
+canspam() { echo "$1" | while read line; do cans "$line"; done; }
 caninit() {
   if [[ "$1" == "b" ]]; then br=50000; 
   elif [[ "$1" == "c" ]]; then br=500000; 
@@ -225,6 +246,19 @@ set_vfat_uuid() {
   fi
 }
 
+dd_from_bb() {
+  msd_blkid=$1 # /dev/sdi etc
+  infile="/mnt/bigboi/pi_backup_git/dd_mmcblk0"
+  if [ -e "$infile" ] && [ -e $msd_blkid ]; then
+    echo "beginning restore"
+    sudo dd if="$infile" of="$msd_blkid" bs=1M status=progress
+  else
+    echo "couldnt find both files"
+    echo "infile: $infile"
+    echo "msd_blkid: $msd_blkid"
+  fi
+}
+
 mntdsk() { # mntdsk sd_card 0383-ABDF
   fname=$1
   pth="/mnt/$fname"
@@ -310,10 +344,12 @@ run_vlc_on_filenames() {
   wake_display
   echo -ne "filenames: \n$filenames\n" | grep -Po '(?<=\/)[^\/]* '
   subs="--sub-language=en"
+  rot='--vout-filter=transform --transform-type=180 --video-filter "transform{true}" '
   echo "subs: $subs"
   bash ~/sns.sh rear_movie &
   
-  nohup vlc -f $subs $filenames &
+  nohup vlc -f $subs $filenames  &
+  # $rot 
   filename=`basename "$(echo $filenames | grep -Po '^\S+')"`
   echo "basename: $filename"
   last_position=$(get_last_position "$filename")
@@ -573,9 +609,12 @@ nalias() {
 
 source ~/.twilio/twilio_creds.sh
 
+shopt -s histappend                      # append to history, don't overwrite it
 export DISPLAY=:0
-export HISTSIZE=100000
-export HISTFILESIZE=1000000
+export HISTSIZE=1000000
+export HISTFILESIZE=10000000
 export PATH="$PATH:/home/pi/.local/bin"
+export PROMPT_COMMAND="history -a; history -c; history -r; $PROMPT_COMMAND"
+
 # if [ -f ~/.mount_aliases ]; then . ~/.mount_aliases; fi
 if [ -f ~/.bash_defaults ]; then . ~/.bash_defaults; fi

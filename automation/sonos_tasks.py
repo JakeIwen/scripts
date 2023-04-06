@@ -5,6 +5,15 @@ from contextlib import suppress
 from time import sleep
 import os
 
+# to make globally importable
+# run:
+# import site
+# site.getusersitepackages()
+# 
+# create file in site-packages cirectory usercustomize.py:
+# import sys
+# sys.path.extend(['/path/to/this/ditectory'])
+
 def filter_vis_devices():
     return [x for x in all_devices if x.is_visible] 
 
