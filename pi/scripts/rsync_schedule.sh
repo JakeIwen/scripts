@@ -10,8 +10,20 @@ MP_MOUNTED=$(mount | awk '/movingparts/ {print $6}' | grep "rw")
 # MSD1_MOUNTED=$(mount | grep -P '^/dev/sd' | awk '/msd_nand1/ {print $6}' | grep "rw")
 # MSD2_MOUNTED=$(mount | grep -P '^/dev/sd' | awk '/msd_nand2/ {print $6}' | grep "rw")
 BACKUP_MSD_MOUNTED=$(mount | grep -P '^/dev/sd' | grep "$backup_msd " | grep "rw")
-
 s() { name=$1; shift; /home/pi/scripts/$name.sh "$@"; }
+
+dd_from_bb() {
+  msd_blkid=$1 # /dev/sdi etc
+  infile="/mnt/bigboi/pi_backup_git/dd_mmcblk0"
+  if [ -e "$infile" ] && [ -e $msd_blkid ]; then
+    echo "beginning restore"
+    dd if="$infile" of="$msd_blkid" bs=1M
+  else
+    echo "couldnt find both files"
+    echo "infile: $infile"
+    echo "msd_blkid: $msd_blkid"
+  fi
+}
 
 mount_bb() {
   s mount_disks bigboi
@@ -26,7 +38,7 @@ mount_bb() {
 unmount_bb() { s umount_disks bigboi; }
 
 sync_mp_bb() {
-  if [ $MP_MOUNTED ]; then
+  if [ $MP_MOUNTED ] && [ $BIGBOI_MOUNTED ]; then
     sudo rsync -aH $rsync_media_flags /mnt/movingparts/ /mnt/bigboi/mp_backup
     s alias_media
   else 
@@ -45,11 +57,12 @@ sync_mp_bb() {
 live_pi_backup() {
   echo "beginning pibackup to hdd `date`"
   outfile="/mnt/bigboi/pi_backup_git/dd_mmcblk0"
+  rm $outfile
   # Create trigger to force file system consistency check if image is restored
-  touch /boot/forcefsck
-  dd if=/dev/mmcblk0 of="$outfile" bs=1M
+  sudo touch /boot/forcefsck
+  sudo dd if=/dev/mmcblk0 of="$outfile" bs=1M status=progress conv=fsync
   # Remove fsck trigger
-  rm /boot/forcefsck
+  sudo rm /boot/forcefsck
 }
 
 commit_last_backup() {
@@ -60,6 +73,8 @@ commit_last_backup() {
   commit=`git rev-parse HEAD`
   echo "sudo git checkout $commit" > "./$msg.sh"
 }
+
+# live_pi_backup && commit_last_backup
 
 retore_to_msd() {
   if [[ ! $backup_msd ]]; then
