@@ -81,8 +81,8 @@ def make_stereo_pair(left_master_name, right_name):
     vis_devices = filter_vis_devices();
     return master
 
-def vol_50_all():
-    [equal_vol(member, 50, True) for member in get_preferred_device().group]
+def vol_eql_all(vol=50):
+    [equal_vol(member, vol, True) for member in get_preferred_device().group]
     
 def adjust_volume(speaker, direction, inc=8):
     if speaker == 'all': 
@@ -145,7 +145,6 @@ def add_to_group(name):
 
 def remove_from_group(name):
     get_spkr(name).unjoin()
-
 def partymode(vol=None, device=None):
     device = device or get_preferred_device()
     
