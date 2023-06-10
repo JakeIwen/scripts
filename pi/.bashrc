@@ -124,11 +124,6 @@ cans() {
   cansend can0 "${canid}#${data}"
 }
 
-play_alert() {
-  sns partymode
-  vlc /home/pi/soundbytes/emergency-alarm-with-reverb-29431.mp3 
-}
-
 
 canlive() { cand | grep -Poi "\s[\d(A-F)]{8}" | sed 's| ||g' | sort -u; }
 canuniq() { cat "$1" | sort -u; }
@@ -142,6 +137,8 @@ cansr() {
     sleep 1
   done < "$1"
 }
+can_find() { candd | grep -Pq "$1"; }
+
 cansec() {
   while true; do cansr /home/pi/pcan/every_second.txt; done
 }
@@ -212,6 +209,20 @@ remount() {
   . /home/pi/scripts/umount_disks.sh "$@"
   . /home/pi/scripts/mount_disks.sh "$@"
   sudo service smbd start
+}
+
+rm_last_n_lines() {
+  file="$2"
+  awk -v n=$1 'NR==FNR{total=NR;next} FNR==total-n+1{exit} 1' "$file" "$file"
+  cat "$file"
+}
+
+rm_match_lines() {
+  term="$1"
+  file="$2"
+  cp "$file" "$file.bak"
+  cat "$file.bak" | grep -via "$term" > "$file"
+  cat "$file"
 }
 
 kill_media() {
@@ -306,25 +317,35 @@ play() {
   sleep 1
   pth=$1
   gpu_mem_fix > /dev/null
-  decoded=`uridecode "$pth"`
-  dir=`echo "$decoded" | grep -Po '.*(New|TV|Movies|Documentaries)'`
-  filename=`basename "$decoded"` # TODO if DIR do ELSE play mkv
-  epnum=`parse_episode_num $decoded`
-  name="$(echo "$filename" | grep -Poi ".*(?=[_\.]S\d\d.*$)" | sed -E 's|[\\\.]|_|g' )"
+  # decoded=`uridecode "$pth"`
+  dir=`echo "$pth" | grep -Po '.*(New|TV|Movies|Documentaries)'`
+  filename=`basename "$pth"` # TODO if DIR do ELSE play mkv
   all_media=`find "$dir" -type l -not -iname nohup.out -print | sort -g`
-  filenames="$decoded"
+  if [ -z $dir ]; then
+    unset epnum  
+    unset name  
+  else
+    epnum=`parse_episode_num $pth`
+    name="$(echo "$filename" | grep -Poi ".*(?=[_\.]S\d\d.*$)" | sed -E 's|[\\\.]|_|g' )"
+  fi
   shift
-  if [[ -z "$1" ]]; then
-    [ -n "$epnum" ] && [ -n "$name" ] && playf "$name" "$epnum" && return 0
-    echo "couldnt parse ep num or name , playing single file"
+  if [ -n "$epnum" ] && [ -n "$name" ] ; then
+    echo "parsed $name $epnum"
+    playf "$name" "$epnum" && return 0
   elif [[ "$1" == "-r" ]]; then # play random
     shift
     filenames=`echo "$all_media" | shuf`
   elif [[ "$1" == "-a" ]]; then
     shift
-    filenames=`echo "$all_media" | awk "/$name/{y=1}y"`; # everything after & including match
+    filenames=`echo "$all_media" | awk "/$name/{y=1}y"`; # everything a fter & including match
+  elif [ -n "$pth" ]; then
+    echo "couldnt parse ep num or name , playing single file: $pth"
+    filenames="$pth"
   else
+    unset filename 
+    unset filenames  
     echo "NO MATCH!?"
+    return 0
   fi
   
   run_vlc_on_filenames
@@ -347,8 +368,8 @@ run_vlc_on_filenames() {
   rot='--vout-filter=transform --transform-type=180 --video-filter "transform{true}" '
   echo "subs: $subs"
   bash ~/sns.sh rear_movie &
-  
-  nohup vlc -f $subs $filenames  &
+  decoded=`uridecode $filenames`
+  nohup vlc -f $subs $decoded --control dbus &
   # $rot 
   filename=`basename "$(echo $filenames | grep -Po '^\S+')"`
   echo "basename: $filename"
@@ -381,7 +402,7 @@ avail_drive_path() {
   bb_links='/mnt/bigboi/mp_backup'
   mp_links='/mnt/movingparts'
   if [ -n "$drivepath" ] && [ "$drivepath" = "bb" ]; then echo $bb_links; fi
-  if [ -e "$mp_links" ]; then echo $mp_links; else echo $bb_links; fi
+  if [ -e "$mp_links/torrent" ]; then echo $mp_links; else echo $bb_links; fi
 }
 
 playf() {
@@ -426,7 +447,7 @@ run_vlc_on_file() {
   bash ~/sns.sh rear_movie &
   filename=`basename "$(echo $1 | grep -Po '^\S+')"`
   echo "filename $filename"
-  nohup vlc -f $subs "$(avail_drive_path)/torrent/New/$1" &
+  nohup vlc -f $subs "$(avail_drive_path)/torrent/New/$1" --control dbus &
   echo "basename: $filename"
   last_position=$(get_last_position "$filename")
   echo "last_position: $last_position"
@@ -606,6 +627,33 @@ nalias() {
   echo 'reloading shell'
   exec bash
 }
+
+play_alert() {
+  sns rear_movie
+  sns vol_eql_all 50
+  vlc "/home/pi/soundbytes/$1" &
+  sleep 10
+  pk vlc
+}
+cwait() {
+  until can_find "2200[B-F]${hex}0000000${1}00"; do sleep 0.4 ; done
+  echo FOUND
+  candd > /home/pi/pcan/def_test_begin &
+  play_alert emergency-alarm-with-reverb-29431.mp3
+  sleep 6000
+  pk candump
+}
+canotif() {
+  sns rear_movie
+  while can_find "2200[B-F]${hex}0000000${1}00"; do 
+    echo FOUNDNOTIF
+    sns vol_eql_all 50
+    vlc "/home/pi/soundbytes/call-to-attention-123107.mp3" &
+    sleep 5
+    pk vlc
+  done
+}
+
 
 source ~/.twilio/twilio_creds.sh
 
