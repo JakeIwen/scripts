@@ -1,12 +1,12 @@
 import sys
 import vlc
 import getch
-from sonos_tasks import sonos_audio_source 
+from sonos_tasks import audio_source 
 
 file = sys.argv[1]
 
 def vplay(p):
-    sonos_audio_source('vonRear', 'line')
+    audio_source('vonRear', 'line')
     print('playing')
     p.play()
     p.set_fullscreen(True)

@@ -5,6 +5,7 @@ import pprint
 import re
 
 req = sys.argv[1]
+# req = "NS"
 prop = req
 iface = "Player"
 format_time = False
