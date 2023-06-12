@@ -211,6 +211,8 @@ remount() {
   sudo service smbd start
 }
 
+rm_last_line() { sed -i '$ d' "$1"; }
+
 rm_last_n_lines() {
   file="$2"
   awk -v n=$1 'NR==FNR{total=NR;next} FNR==total-n+1{exit} 1' "$file" "$file"
@@ -288,22 +290,12 @@ resume() {
   else
     pth=`tail -1 "$POSPATH" | cut -d' ' -f1` 
   fi
-  echo "playing $pth"
-  play "$pth" "$*"
+  full_pth="$(avail_drive_path)/links$pth"
+  echo "playing $full_pth"
+  play "$full_pth" "$*"
 }
 
-log_position() {
-  [[ -z "$(pgrep vlc)" ]] && return 0
-  file=`py ~/scripts/python/vlc_property.py URL`
-  nsecs=`py ~/scripts/python/vlc_property.py NS`
-  if [[ $file && $nsecs ]]; then 
-    # sub_status=`tail -1 "$POSPATH" | cut -d' ' -f3`
-    sed -i "\|^$file|d" $POSPATH
-    echo "$file $nsecs" >> $POSPATH
-  else
-    echo "could not extract position on file: $file"
-  fi
-}
+log_position() { /home/pi/scripts/log_position.sh; }
 
 get_last_position() {
   if [ -n "$1" ]; then
@@ -317,7 +309,7 @@ play() {
   sleep 1
   pth=$1
   gpu_mem_fix > /dev/null
-  # decoded=`uridecode "$pth"`
+  # decoded=`uridecode "$pth"`=[]
   dir=`echo "$pth" | grep -Po '.*(New|TV|Movies|Documentaries)'`
   filename=`basename "$pth"` # TODO if DIR do ELSE play mkv
   all_media=`find "$dir" -type l -not -iname nohup.out -print | sort -g`
@@ -365,11 +357,13 @@ run_vlc_on_filenames() {
   wake_display
   echo -ne "filenames: \n$filenames\n" | grep -Po '(?<=\/)[^\/]* '
   subs="--sub-language=en"
-  rot='--vout-filter=transform --transform-type=180 --video-filter "transform{true}" '
+  # rot='--vout-filter=transform --transform-type=180 --video-filter "transform{true}" '
   echo "subs: $subs"
   bash ~/sns.sh rear_movie &
   decoded=`uridecode $filenames`
-  nohup vlc -f $subs $decoded --control dbus &
+  echo "decoded:"
+  echo "$decoded"
+  nohup vlc -f --control=dbus $subs $decoded &
   # $rot 
   filename=`basename "$(echo $filenames | grep -Po '^\S+')"`
   echo "basename: $filename"
