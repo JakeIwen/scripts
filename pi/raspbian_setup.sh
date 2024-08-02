@@ -2,25 +2,35 @@ vi ~/.bash # not sudo
 shopt -s dotglob 
 
 sudo rpi-update
-sudo cp -r /media/pi/Five\ Tera/pi_backup_git/pi_backup/etc/ssh/* /etc/ssh/
-sudo cp -r /media/pi/Five\ Tera/pi_backup_git/pi_backup/home/pi/* /home/pi/
+sudo cp -r /media/pi/rootfs/etc/ssh/* /etc/ssh/
+sudo cp -r /media/pi/rootfs/home/pi/* /home/pi/
 sudo chown -R pi /home/pi /etc/ssh
 
 cd /mnt
 sudo mkdir movingparts bigboi usbhfs
 sudo chown -R pi .
 
-sudo touch /rsync-exclude-media.txt /rsync-exclude.txt
-sudo chmod 775 /rsync-exclude-media.txt /rsync-exclude.txt
+sudo touch /home/pi/rsync-exclude-media.txt /home/pi/rsync-exclude.txt
+sudo chmod 775 /home/pi/rsync-exclude-media.txt /home/pi/rsync-exclude.txt
 
 exec bash
 sudo systemctl start ssh
 
 # from macbook: 
-ssh-copy-id -i ~/.ssh/id_rsa.pub jacobr@192.168.6.145
+ssh-copy-id -i ~/.ssh/id_rsa.pub jacobr@mpro
 
 sudo apt update
-sudo apt-get install  bc gparted libusb-dev libdbus-1-dev libglib2.0-dev libudev-dev libical-dev libreadline-dev samba samba-common-bin dnsmasq hostapd bridge-utils qbittorrent-nox hfsutils hfsprogs
+sudo apt-get install  bc gparted libusb-dev libdbus-1-dev libglib2.0-dev libudev-dev libical-dev libreadline-dev samba samba-common-bin dnsmasq hostapd bridge-utils qbittorrent-nox hfsutils hfsprogs python3-full
+
+mkdir -p ~/scripts
+cd ~/scripts
+python -m venv python-automation
+cd python-automation
+pip3 install soco
+
+mkdir -p /var/log/cron
+sudo chmod 750 /var/log/cron
+# (paste crontab)
 
 # set samba password for user pi_backup
 sudo smbpasswd -a pi
@@ -63,7 +73,7 @@ sudo reboot
 sudo crontab -e
 
 # backup sd card 
-rsync -aHv --delete --exclude-from=~/rsync-exclude.txt / /mnt/movingparts/pi_backup/ 2>&1
+rsync -aHv --delete --exclude-from=/home/pi/rsync-exclude.txt / /mnt/movingparts/pi_backup/ 2>&1
 
 # Widevine - Chromium "Media" Launcher. (Netflix etc)
 curl -fsSL https://pi.vpetkov.net -o ventz-media-pi

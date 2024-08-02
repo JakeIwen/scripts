@@ -1,0 +1,18 @@
+# /var/spool/cron/crontabs/root
+
+scripts="/home/pi/scripts"
+log="/var/log/cron"
+tfiles_bkup="/mnt/movingparts/torrent/tfiles_bkup"
+PATH="/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:/root/bin"
+
+0 13 * *   *  "$scripts/rsync_schedule.sh"  >> "$log/rsync.log" 2>&1
+* * * * *     su pi -c "$scripts/internet_switches.sh"  >> "$log/internet_switches.log" 2>&1
+0 1 * * *      su pi -c "$scripts/prune_logs.sh '/var/log/cron/*.log' >> "$log/prune_logs.log" 2>&1
+0 0 * * *      rm -rf $tfiles_bkup/* && cp "/home/pi/tfiles" "$tfiles_bkup" >> "$log/copy_tfiles.log" 2>&1
+# * * * * *      su pi -c "$scripts/start_cast.sh"  >> "$log/cast.log" 2>&1
+* * * * *      su pi -c "$scripts/log_position.sh"  >> "$log/log_position.sh.log" 2>&1
+*/5 * * * *    su pi -c "$scripts/vlc_recent_files_update.sh"  >> "$log/vlc_recent_files_update.log" 2>&1
+*/5 * * * *    su pi -c "$scripts/keepalive.sh"  >> "$log/keepalive.log" 2>&1
+# 30 9 * * *   su pi -c "$scripts/reboot.sh" >> "$log/reboot.log" 2>&1
+# * * * * *    su pi -c "/home/pi/sns.sh standby_grouped" >> "$log/sonos_standby_grouped.log" 2>&1
+# * * * * *    su pi -c "$scripts/log_zrate.sh"  >> "$log/log_zrate.log" 2>&1
