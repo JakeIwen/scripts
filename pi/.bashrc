@@ -23,7 +23,7 @@ alias bootconf='sudo cat /boot/config.txt'
 
 alias dirsize='sudo du -hsc .[^.]* *'
 alias disku='df -h'
-alias ipinfo="py /home/pi/scripts/python/ip_info.py"
+alias ipinfo="py /home/pi/scripts/python-automation/ip_info.py"
 alias active_ssh_sessions="sudo netstat -tnpa | grep 'ESTABLISHED.*sshd'"
 alias num_ssh="active_ssh_sessions | wc -l"
 
@@ -43,6 +43,7 @@ alias slp='xset s activate'
 alias init_rsa="ssh-copy-id -i ~/.ssh/id_rsa.pub" # init_rsa user@device
 
 alias corefreq='cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq; vcgencmd measure_volts'
+set_date() { sudo date -s "$(wget -qSO- --max-redirect=0 google.com 2>&1 | grep Date: | cut -d' ' -f5-8)Z"; }
 ssh_copy_id_dropbear() {
   if [ "$#" -ne 1 ]; then echo "Example: ${0} root@192.168.1.1" && exit 1; fi
   cat /home/pi/.ssh/id_rsa.pub | ssh ${1} "cat >> /etc/dropbear/authorized_keys && chmod 0600 /etc/dropbear/authorized_keys && chmod 0700 /etc/dropbear"
@@ -64,6 +65,13 @@ mconf="$HOME/mconf"
 sync_comps() {
   sync_dirpath '/Users/jacobr/Library/Application Support/BetterTouchTool/'
   sync_dirpath '/Users/jacobr/router configs'
+}
+
+sync_new_torrents(){
+  locpath=/Users/jacobr/Desktop/vidtmp
+  pi_user='pi@vanpi.local'
+  rempath="$pi_user:/mnt/movingparts/torrent/New"
+  rsync -ur "$rempath/**/*.mkv" "$locpath"
 }
 
 sync_dirpath() {
@@ -464,7 +472,7 @@ play_status() {
     groups="d3g|CiNEFiLE|CTR|PRoDJi|regret|deef|POIASD|Cinefeel|NTG|NTb|monkee|YELLOWBiRD|Atmos|EPSiLON|cielos|ION10|MeGusta|METCON|x0r|xlf|S8RHiNO|NTG|btx|strife|DD|DBS|TEPES|pawel2006"
     delims="\.|\+|\-"
     pattern="($delims)(\[?($keys)\]?(?=\.)|(($groups)\.)?\.?$)|\'"
-    py_vlc_path='/home/pi/scripts/python/vlc_property.py'
+    py_vlc_path='/home/pi/scripts/python-automation/vlc_property.py'
     position=`py $py_vlc_path Position`
     total=`py $py_vlc_path TotalTime`
     title=`py $py_vlc_path Title | perl -pe "s~$pattern|~~g"`
@@ -593,7 +601,7 @@ airupnp() {
   sudo systemctl $cmd airupnp.service
 }
 sns_list() {
-  fpath="$HOME/scripts/python/sonos_tasks.py"
+  fpath="$HOME/scripts/python-automation/sonos_tasks.py"
   while read f; do       
     helpers=`echo $f | grep '# helpers'`
     if [[ $helpers ]]; then break; fi
@@ -656,6 +664,7 @@ export DISPLAY=:0
 export HISTSIZE=1000000
 export HISTFILESIZE=10000000
 export PATH="$PATH:/home/pi/.local/bin"
+export PYTHONPATH="/home/pi/scripts/python"
 export PROMPT_COMMAND="history -a; history -c; history -r; $PROMPT_COMMAND"
 
 # if [ -f ~/.mount_aliases ]; then . ~/.mount_aliases; fi
