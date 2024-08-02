@@ -16,14 +16,14 @@ config zone
 config zone
 	option name 'wan'
 	option output 'ACCEPT'
-	option masq '1'
 	option mtu_fix '1'
 	option network 'clientwan lifiwan wan'
 	option conntrack '1'
-	option input 'DROP'
 	option forward 'ACCEPT'
 	option log '1'
 	list device 'br-lan'
+	option input 'ACCEPT'
+	option masq '1'
 
 config forwarding
 	option src 'lan'
@@ -81,9 +81,8 @@ config redirect
 	list proto 'udp'
 	option dest 'lan'
 	option src 'wan'
-	option src_dport '22'
-	option enabled '0'
 	option reflection '0'
+	option src_dport '25555'
 
 config forwarding
 	option src 'wan'

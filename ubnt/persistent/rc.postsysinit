@@ -1,18 +1,27 @@
 #!/bin/sh
+home="/etc/persistent/"
+tmp="$home/tmp/"
+scripts="$home/scripts/"
+sys_init_flag="$tmp/sys_init_flag.txt"
+setup_log() {
+  logfile="$home/log/update_wifi.log"
+  tail -50000 $logfile > "$logfile.tmp"
+  mv "$logfile.tmp" $logfile
+  chmod 770 $logfile
+  echo "" >> $logfile
+  date >> $logfile
+}
 
-logfile="/etc/persistent/log/update_wifi.log"
-sys_init_flag="/etc/persistent/tmp/sys_init_flag.txt"
-pkill -f cron
-tail -50000 $logfile > "$logfile.tmp"
-mv "$logfile.tmp" $logfile
-chmod 770 $logfile
-echo "" >> $logfile
-date >> $logfile
-
+mkdir -p $tmp
 mkdir -p /etc/crontabs   
-touch $sys_init_flag 
+chmod -R 770 $scripts $tmp
+touch $sys_init_flag
+
+pkill -f cron
+setup_log
+
+echo "nanoM2" > /proc/sys/kernel/hostname
 cp /etc/persistent/config/cron /etc/crontabs/ubnt
 cp /etc/persistent/config/.profile /etc/persistent/.profile
 cat /etc/persistent/config/raspi_rsa_id.pub >> /etc/dropbear/authorized_keys 
-
 crond

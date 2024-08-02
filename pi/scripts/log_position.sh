@@ -5,8 +5,8 @@ POSPATH="/home/pi/vlc-positions.txt"
 uridecode() { : "${*//+/ }"; echo -e "${_//%/\\x}"; } 
 
 [[ -z "$(pgrep vlc)" ]] && exit 0
-file=`python /home/pi/scripts/python/vlc_property.py URL`
-nsecs=`python /home/pi/scripts/python/vlc_property.py NS`
+file=`python /home/pi/scripts/python-automation/vlc_property.py URL`
+nsecs=`python /home/pi/scripts/python-automation/vlc_property.py NS`
 if [[ $file && $nsecs ]]; then
   decoded="`uridecode $file`"
   trimmed="`echo $decoded | sed -E 's|.*\/links||g'`"
