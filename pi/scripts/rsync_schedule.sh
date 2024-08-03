@@ -62,6 +62,7 @@ live_pi_backup() {
   sudo touch /boot/forcefsck
   sudo dd if=/dev/mmcblk0 of="$outfile" bs=1M status=progress conv=fsync
   # Remove fsck trigger
+  sudo chown pi $outfile
   sudo rm /boot/forcefsck
 }
 
@@ -110,7 +111,7 @@ retore_to_msd() {
 }
 
 chk_free_sd_space() {
-  pctfull=$(df -h | grep /dev/root | grep -Po '\d+%' | grep -Po '\d+')
+  pctfull=$(df -h | grep /dev/mmcblk0p2 | grep -Po '\d+%' | grep -Po '\d+')
   if [ "$pctfull" -gt 70 ]; then
     s sms_send "main SD card unusually full ($pctfull)%, aborting"
     exit || return 
@@ -118,8 +119,8 @@ chk_free_sd_space() {
 }
 
 echo -e "\nscheduled_rsync begin: `date`"
-mount_bb
-sync_mp_bb
+# mount_bb
+# sync_mp_bb
 chk_free_sd_space
 live_pi_backup
 commit_last_backup      
