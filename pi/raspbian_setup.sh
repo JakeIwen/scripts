@@ -22,6 +22,7 @@ ssh-copy-id -i ~/.ssh/id_rsa.pub jacobr@mpro
 sudo apt update
 sudo apt-get install  bc gparted libusb-dev libdbus-1-dev libglib2.0-dev libudev-dev libical-dev libreadline-dev samba samba-common-bin dnsmasq hostapd bridge-utils qbittorrent-nox hfsutils hfsprogs python3-full
 
+# manage python virtual env
 mkdir -p ~/scripts
 cd ~/scripts
 python -m venv python-automation

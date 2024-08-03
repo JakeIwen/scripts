@@ -31,6 +31,8 @@ scp  "$configs/.disk_uuids" "$pi_ip:/home/pi/.disk_uuids" &
 scp  "$configs/rsync-exclude.txt" "$pi_ip:/home/pi/rsync-exclude.txt" &
 scp  "$configs/rsync-exclude-media.txt" "$pi_ip:/home/pi/rsync-exclude-media.txt" &
 
+ssh $pi_ip 'sudo chmod 775 /home/pi/rsync-exclude-media.txt /home/pi/rsync-exclude.txt'
+
 # ROUTER
 # scp -r "$vr_ip:/etc/config" "$vanrouter/etc/" &
 # scp -r "$vanrouter/etc/config" "$vr_ip:/etc/" &
