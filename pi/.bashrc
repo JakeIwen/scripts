@@ -1,5 +1,7 @@
 #! /bin/bash
 shopt -s expand_aliases # run aliased commands inline with ssh ...@.... 
+shopt -s dotglob # match all items in directory except . and ..
+
 alias sudo='sudo '
 alias vi='/usr/bin/vim.tiny'
 
@@ -371,7 +373,7 @@ run_vlc_on_filenames() {
   decoded=`uridecode $filenames`
   echo "decoded:"
   echo "$decoded"
-  nohup vlc -f --control=dbus $subs $decoded &
+  nohup vlc --qt-minimal-view --control=dbus $subs $decoded &
   # $rot 
   filename=`basename "$(echo $filenames | grep -Po '^\S+')"`
   echo "basename: $filename"
@@ -449,7 +451,7 @@ run_vlc_on_file() {
   bash ~/sns.sh rear_movie &
   filename=`basename "$(echo $1 | grep -Po '^\S+')"`
   echo "filename $filename"
-  nohup vlc -f $subs "$(avail_drive_path)/torrent/New/$1" --control dbus &
+  nohup vlc --qt-minimal-view $subs "$(avail_drive_path)/torrent/New/$1" --control dbus &
   echo "basename: $filename"
   last_position=$(get_last_position "$filename")
   echo "last_position: $last_position"
@@ -664,7 +666,7 @@ export DISPLAY=:0
 export HISTSIZE=1000000
 export HISTFILESIZE=10000000
 export PATH="$PATH:/home/pi/.local/bin"
-export PYTHONPATH="/home/pi/scripts/python"
+export PYTHONPATH="/home/pi/scripts/python-automation"
 export PROMPT_COMMAND="history -a; history -c; history -r; $PROMPT_COMMAND"
 
 # if [ -f ~/.mount_aliases ]; then . ~/.mount_aliases; fi
