@@ -57,7 +57,7 @@ def next_track():
 def prev_track():
     get_preferred_device().previous()
     
-def rear_movie(vol=40):
+def rear_movie(vol=75):
     audio_source('vonRear', 'optical', vol)
 def rear_normal():
     make_stereo_pair("vonRear", "vonRear2")
@@ -103,6 +103,10 @@ def pause(devices=vis_devices):
 def stop(devices=vis_devices):
     [device.stop() for device in devices]
 
+def mute(devices=vis_devices):
+    for device in devices:
+        device.mute = True
+    
 def start_noise(keyterm, vol=3):
     cooridnator = partymode(vol)
     item = get_matching_faves(keyterm, cooridnator)[0]
@@ -120,7 +124,7 @@ def play_from_faves(keyterm, group_all=True):
     
     return device
 
-def audio_source(name, source, vol=50):
+def audio_source(name, source, vol=75):
     unjoin_all()
     device = get_spkr(name)
 
@@ -130,6 +134,7 @@ def audio_source(name, source, vol=50):
         device.switch_to_line_in(get_spkr("vonFront"))
         device.play()
     
+    mute()
     device.mute = False
     device.volume = vol
     return device

@@ -5,25 +5,12 @@ hdd_backup=/mnt/bigboi/pi_backup_git/pi_backup
 backup_msd=/mnt/msd_nand2
 
 rsync_media_flags="--delete-during --delete-excluded --exclude-from=/home/pi/rsync-exclude-media.txt"
-z_flags="--delete-during --delete-excluded --exclude-from=/home/pi/rsync-exclude.txt"
+rsync_flags="--delete-during --delete-excluded --exclude-from=/home/pi/rsync-exclude.txt"
 MP_MOUNTED=$(mount | awk '/movingparts/ {print $6}' | grep "rw")
 # MSD1_MOUNTED=$(mount | grep -P '^/dev/sd' | awk '/msd_nand1/ {print $6}' | grep "rw")
 # MSD2_MOUNTED=$(mount | grep -P '^/dev/sd' | awk '/msd_nand2/ {print $6}' | grep "rw")
 BACKUP_MSD_MOUNTED=$(mount | grep -P '^/dev/sd' | grep "$backup_msd " | grep "rw")
 s() { name=$1; shift; /home/pi/scripts/$name.sh "$@"; }
-
-dd_from_bb() {
-  msd_blkid=$1 # /dev/sdi etc
-  infile="/mnt/bigboi/pi_backup_git/dd_mmcblk0"
-  if [ -e "$infile" ] && [ -e $msd_blkid ]; then
-    echo "beginning restore"
-    dd if="$infile" of="$msd_blkid" bs=1M
-  else
-    echo "couldnt find both files"
-    echo "infile: $infile"
-    echo "msd_blkid: $msd_blkid"
-  fi
-}
 
 mount_bb() {
   s mount_disks bigboi
@@ -40,7 +27,7 @@ unmount_bb() { s umount_disks bigboi; }
 sync_mp_bb() {
   if [ $MP_MOUNTED ] && [ $BIGBOI_MOUNTED ]; then
     sudo rsync -aH $rsync_media_flags /mnt/movingparts/ /mnt/bigboi/mp_backup
-    s alias_media
+    # s alias_media
   else 
     s sms_send "MP 2TB not available/writable"
   fi
@@ -54,23 +41,39 @@ sync_mp_bb() {
 #   echo "hdd complete `date`"
 # }
 
+live_pi_backup_split() {
+  echo "beginning pibackup to hdd `date`"
+  outfile1="/mnt/bigboi/pi_backup_git/dd_mmcblk0p1"
+  outfile2="/mnt/bigboi/pi_backup_git/dd_mmcblk0p2"
+  rm $outfile1 $outfile2
+  # Create trigger to force file system consistency check if image is restored
+  sudo touch /boot/forcefsck
+  sudo dd if=/dev/mmcblk0p1 of="$outfile1" bs=4M status=progress conv=fsync
+  sudo dd if=/dev/mmcblk0p2 of="$outfile2" bs=4M status=progress conv=fsync
+  # Remove fsck trigger
+  sudo chown pi $outfile1 $outfile2
+  sudo rm /boot/forcefsck
+}
+
 live_pi_backup() {
   echo "beginning pibackup to hdd `date`"
   outfile="/mnt/bigboi/pi_backup_git/dd_mmcblk0"
-  rm $outfile
+  sudo rm $outfile
   # Create trigger to force file system consistency check if image is restored
   sudo touch /boot/forcefsck
   sudo dd if=/dev/mmcblk0 of="$outfile" bs=1M status=progress conv=fsync
-  # Remove fsck trigger
   sudo chown pi $outfile
+  # Remove fsck trigger
   sudo rm /boot/forcefsck
 }
 
 commit_last_backup() {
   cd /mnt/bigboi/pi_backup_git || exit 
-  sudo git add .
+  git add .
   msg=$(echo "pibackup $(date)" | sed 's| |_|g')
-  sudo git commit -m "$msg"
+  echo "making commit: $msg"
+  git commit -m "$msg"
+  echo "commit made"
   commit=`git rev-parse HEAD`
   echo "sudo git checkout $commit" > "./$msg.sh"
 }
@@ -119,8 +122,15 @@ chk_free_sd_space() {
 }
 
 echo -e "\nscheduled_rsync begin: `date`"
-# mount_bb
-# sync_mp_bb
+
+if [ "$(ps aux | grep rsync_schedule | wc -l)" -gt 4 ]; then 
+  echo "rsync_schedule process already running"
+  echo "$(ps aux | grep rsync_schedule)"
+  exit || return
+fi
+
+mount_bb
+sync_mp_bb
 chk_free_sd_space
 live_pi_backup
 commit_last_backup      
