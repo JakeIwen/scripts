@@ -6,7 +6,7 @@ media_group_links() {
   folder="$2"
   subfolder="$3"
   
-  keys="multi|REQ|Hi10p|ETRG|YTM_AM|SKGTV|HDR10|UNCENSORED|HDR|CaLLiOpeD|ddpatmos|CtrlHD|Will1869|10_?Bit|DTS|DL|SDC|Atmos|hdtv|EVO|WiKi|HMAX|IMAX|MA|VhsRip|HDRip|BDRip|iNTERNAL|True_HD|1080p|1080i|720p|XviD|HD|AC3|AAC|REPACK|AAC?5_1|AAC?2_0|REMUX|PRiCK|AVC|HC|AMZN|HEVC|Blu(R|r)ay|(BR|web)(Rip)?|NF|DDP?(5_1|2_0)?|(x|h|X|H)_?26[4-5]|\d+mb|\d+kbps"
+  keys="multi|REQ|POOTLED|COLLECTiVE|TELESYNC|Hi10p|ETRG|YTM_AM|SKGTV|HDR10|UNCENSORED|HDR|CaLLiOpeD|ddpatmos|CtrlHD|Will1869|10_?Bit|DTS|DL|SDC|Atmos|hdtv|EVO|WiKi|HMAX|IMAX|MA|VhsRip|HDRip|BDRip|iNTERNAL|True_HD|1080p|1080i|720p|XviD|HD|AC3|AAC|REPACK|AAC?5_1|AAC?2_0|REMUX|PRiCK|AVC|HC|AMZN|HULU|HEVC|Blu(R|r)ay|(BR|web|WEB)(Rip)?|NF|DDP?(5_1|2_0)?|(x|h|X|H)_?26[4-5]|\d+mb|\d+kbps|5_1$"
   # groups="d3g|CiNEFiLE|CTR|PRoDJi|regret|deef|POIASD|Cinefeel|NTG|NTb|monkee|YELLOWBiRD|Atmos|EPSiLON|cielos|ION10|MeGusta|METCON|x0r|xlf|S8RHiNO|GOSSIP|NTG|btx|strife|DD|DBS|TEPES|pawe|ggezl2006|CAKES|HiggsBoson|Coo7"
   delims=" |\.|\+|\-|\,"
   find "$folder" -not -path '*/\.*' -not -ipath '*sample*' -type f -a \( -name '*.mkv' -o -name '*.avi'  -o -name '*.mp4'  -o -name '*.rar' \) | while read pth
@@ -35,19 +35,28 @@ media_group_links() {
 }
 
 handle_rars() {
-  unset vidfile
+  origdir="$(pwd)"
   dirn="$(dirname "$pth")"
   found_extracted=`find "$dirn" -type f -size +300M -a \( -name '*.mkv' -o -name '*.avi'  -o -name '*.mp4' \)`
-  vidfile="`basename "$found_extracted"`"
-  if [ -z "$vidfile" ]; then 
-    vidfile="$(unar "$pth" -o "$dirn" -t | grep -Po "\S+\.(mkv|avi|mp4)" | head -1)"
-    echo "new vidfile: $vidfile"
+  
+  if [ -z "$found_extracted" ]; then 
+    echo "extracting archive $pth"
+    cd "$dirn" || exit
+    unrar x -r -inul "$pth"
+    found_extracted=`find "$dirn" -type f -size +300M -a \( -name '*.mkv' -o -name '*.avi'  -o -name '*.mp4' \)`
+    if [ -z "$found_extracted" ]; then
+      echo "\nERROR: did not find vidfile (>300M, mkv/avi/mp4) after extracting archive\n"
+      return
+    fi
   else
-    echo "vidfile $vidfile"
+    echo "found existing extracted file!"
   fi
+  vidfile="`basename "$found_extracted"`"
+  echo "vidfile $vidfile"
   # delete rars files older than 90 days
   find "$dirn/" -type f -mtime +90 -not -name "*$vidfile" -delete 
   pth="$dirn/$vidfile"
+  cd "$origdir" || exit
 }
 
 alias_folders() {
@@ -100,6 +109,7 @@ alias_new() {
 
 touch /home/pi/log/alias_media.log
 echo  "$(date): running alias_media.sh $0 $(whoami)" >> /home/pi/scripts/alias_media.log
+echo  "$(date): running alias_media.sh $0 $(whoami)" 
 if [[ "$#" = "1" ]]; then
   mount | grep movingparts && alias_new "/mnt/movingparts" &
 else
@@ -107,5 +117,5 @@ else
   mount | grep movingparts && alias_folders "/mnt/movingparts" &
 fi
 echo "alias media end $(date)" >> /home/pi/log/alias_media.log
-
+echo "alias media end $(date)"
 

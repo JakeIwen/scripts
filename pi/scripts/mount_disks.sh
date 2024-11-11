@@ -18,7 +18,7 @@ fsprop() {
 
 blkln() { 
   sterm=$1
-  match="$(/sbin/blkid | grep "\"$sterm\"")"
+  match="$(sudo /sbin/blkid | grep "\"$sterm\"")"
   echo "$match"
 }
 
