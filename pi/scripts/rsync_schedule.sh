@@ -70,7 +70,7 @@ live_pi_backup() {
 commit_last_backup() {
   cd /mnt/bigboi/pi_backup_git || exit 
   git add .
-  msg=$(echo "pibackup $(date)" | sed 's| |_|g')
+  msg=$(echo "pibackup $(date +%Y.%m.%d)" | sed 's| |_|g')
   echo "making commit: $msg"
   git commit -m "$msg"
   echo "commit made"
