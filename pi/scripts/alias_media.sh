@@ -6,9 +6,9 @@ media_group_links() {
   folder="$2"
   subfolder="$3"
   
-  keys="multi|REQ|POOTLED|COLLECTiVE|TELESYNC|Hi10p|ETRG|YTM_AM|SKGTV|HDR10|UNCENSORED|HDR|CaLLiOpeD|ddpatmos|CtrlHD|Will1869|10_?Bit|DTS|DL|SDC|Atmos|hdtv|EVO|WiKi|HMAX|IMAX|MA|VhsRip|HDRip|BDRip|iNTERNAL|True_HD|1080p|1080i|720p|XviD|HD|AC3|AAC|REPACK|AAC?5_1|AAC?2_0|REMUX|PRiCK|AVC|HC|AMZN|HULU|HEVC|Blu(R|r)ay|(BR|web|WEB)(Rip)?|NF|DDP?(5_1|2_0)?|(x|h|X|H)_?26[4-5]|\d+mb|\d+kbps|5_1$"
-  # groups="d3g|CiNEFiLE|CTR|PRoDJi|regret|deef|POIASD|Cinefeel|NTG|NTb|monkee|YELLOWBiRD|Atmos|EPSiLON|cielos|ION10|MeGusta|METCON|x0r|xlf|S8RHiNO|GOSSIP|NTG|btx|strife|DD|DBS|TEPES|pawe|ggezl2006|CAKES|HiggsBoson|Coo7"
-  delims=" |\.|\+|\-|\,"
+  keys="multi|PROPER|REQ|FGT|EAC3|SANTi|MutzNutz|ViSiON|POOTLED|COLLECTiVE|TELESYNC|Hi10p|ETRG|YTM_AM|SKGTV|HDR10|UNCENSORED|HDR|CaLLiOpeD|ddpatmos|CtrlHD|Will1869|10_?Bit|DTS|DL|SDC|hdtv|EVO|WiKi|HMAX|IMAX|MA|VhsRip|HDRip|BDRip|iNTERNAL|True_HD|1080[pi](MAX)?|720p|XviD|HD|AC3|REPACK|REMUX|PRiCK|AVC|HC|AMZN|HULU|1080pWEBRip|Blu(R|r)ay|(BR|web|WEB)(Rip)?|NF|(AAC|DDP?)_?(5_1|2_0)?|\d+mb|\d+kbps|_$"
+  groups="d3g|CiNEFiLE|CTR|PRoDJi|regret|deef|POIASD|Cinefeel|NTG|NTb|monkee|YELLOWBiRD|Atmos|EPSiLON|cielos|ION10|MeGusta|METCON|x0r|xlf|S8RHiNO|GOSSIP|btx|strife|DBS|TEPES|pawe|ggezl2006|CAKES|HiggsBoson|Coo7"
+  delims=" |\.|\+|\-|\,| "
   find "$folder" -not -path '*/\.*' -not -ipath '*sample*' -type f -a \( -name '*.mkv' -o -name '*.avi'  -o -name '*.mp4'  -o -name '*.rar' \) | while read pth
   do
     ext="${pth##*.}"
@@ -17,11 +17,14 @@ media_group_links() {
       handle_rars
       ext="${pth##*.}"
     fi
-    no_ext="$(echo "$pth" | perl -pe "s~\.${ext}~~g")"
+    no_apos="$(echo "$pth" | perl -pe "s~'~~g")"
+    no_ext="$(echo "$no_apos" | perl -pe "s~\.${ext}~~g")"
     no_brk="$(echo "$no_ext" | perl -pe "s~\[|\]|\(|\)~~g")"
-    no_grp="$(echo $no_brk | perl -pe "s~[\. ]([xh]\.?26[45]|hevc)-\w+(?=(\/|$))~~ig")"
-    fmt_pth=`echo $no_grp | perl -pe "s/(${delims})/./g" | perl -pe "s~\.+~_~g"`
-    cln_pth=`echo $fmt_pth | perl -pe "s~_(${keys})(?=(_|\/|$))~~ig"`
+    fmt_pth=`echo $no_brk | perl -pe "s/(${delims})/./g" | perl -pe "s~\.+~_~g"`
+    no_grp="$(echo $fmt_pth | perl -pe "s~_([xh]_?26[45]|hevc)(_\w+)?(?=(\/|$))~~ig")"
+    cln_pth=`echo $no_grp | perl -pe "s~_(${keys})(?=(_|\/|$))~~ig"`
+    cln_pth=`echo $cln_pth | perl -pe "s~_(${groups})(?=(_|\/|$))~~ig"`
+    
     title=`basename "$cln_pth"`
     link_folder=`echo "$loc" | sed "s|\/torrent\/|\/links\/|g"`
     if [ -n "$subfolder" ]; then
