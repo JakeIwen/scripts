@@ -203,7 +203,7 @@ alias drives="sudo lsblk -o NAME,FSTYPE,SIZE,MOUNTPOINT,LABEL"
 alias pp="vlcmd PlayPause"
 rmlast() { tail -n 1 "$1" | wc -c | xargs -I {} truncate "$1" -s -{}; }
 vlcr() { grep -ia "$1" "$POSPATH" | tail -10; }
-vlc_nosubs() { inc_global vlc_sub_track -1 2; resume ; }
+vlc_nosubs() { increment_global vlc_sub_track -1 2; resume ; }
 vlc_subs_off() { echo '-1' > /home/pi/.vlc_sub_track; resume; }
 vlcnice() { sudo renice ${1:-"12"} `pgrep vlc`; }
 vlcnice2() { parent=`pgrep -p vlc`; ncn=${1:-"12"}; sudo renice $ncn ${parent##*( )}; }
@@ -314,9 +314,14 @@ resume() {
   else
     pth=`tail -1 "$POSPATH" | cut -d' ' -f1` 
   fi
-  full_pth="$(avail_drive_path)/links$pth"
-  echo "playing $full_pth"
-  play "$full_pth" "$*"
+  
+  if [ -z $pth ]; then
+    playf "$1" 101
+  else
+    full_pth="$(avail_drive_path)/links$pth"
+    echo "playing $full_pth"
+    play "$full_pth"
+  fi
 }
 
 log_position() { /home/pi/scripts/log_position.sh; }
@@ -329,8 +334,17 @@ get_last_position() {
 }
 
 playp() {
-  filenames="$(pwd)/$1"
-  run_vlc_on_filenames 
+  filepaths="$(pwd)/$1"
+  run_vlc_on_filepaths 
+}
+
+media_all() {
+  find "$(avail_drive_path)/links" -type l -not -iname nohup.out -print | sort -g
+}
+
+media_docs_movies() {
+  base="$(avail_drive_path)/links"
+  find "$base/Movies" "$base/Documentaries" | grep -Ev  '/Movies$|/Documentaries$'
 }
 
 play() {
@@ -341,7 +355,6 @@ play() {
   # decoded=`uridecode "$pth"`=[]
   dir=`echo "$pth" | grep -Po '.*(New|TV|Movies|Documentaries)'`
   filename=`basename "$pth"` # TODO if DIR do ELSE play mkv
-  all_media=`find "$dir" -type l -not -iname nohup.out -print | sort -g`
   if [ -z $dir ]; then
     unset epnum  
     unset name  
@@ -349,30 +362,32 @@ play() {
     epnum=`parse_episode_num $pth`
     name="$(echo "$filename" | grep -Poi ".*(?=[_\.]S\d\d.*$)" | sed -E 's|[\\\.]|_|g' )"
   fi
+  
   shift
   if [ -n "$epnum" ] && [ -n "$name" ] ; then
     echo "parsed $name $epnum"
-    playf "$name" "$epnum" && return 0
+    playf "$name" "$epnum"
+    return 0
   elif [[ "$1" == "-r" ]]; then # play random
     shift
-    filenames=`echo "$all_media" | shuf`
+    filepaths=`echo "$(media_all)" | shuf`
   elif [[ "$1" == "-a" ]]; then
     shift
-    filenames=`echo "$all_media" | awk "/$name/{y=1}y"`; # everything a fter & including match
+    filepaths=`echo "$(media_all)" | awk "/$name/{y=1}y"`; # everything a fter & including match
   elif [ -n "$pth" ]; then
     echo "couldnt parse ep num or name , playing single file: $pth"
-    filenames="$pth"
+    filepaths="$pth"
   else
     unset filename 
-    unset filenames  
+    unset filepaths  
     echo "NO MATCH!?"
     return 0
   fi
   
-  run_vlc_on_filenames
+  run_vlc_on_filepaths
 }
 
-inc_global() {
+increment_global() {
   name=$1; min=$2; max=$3;
   val=`cat /home/pi/.$name`
   val=$(( $val + 1 ))
@@ -381,21 +396,17 @@ inc_global() {
   echo $val
 }
 
-run_vlc_on_filenames() {
+run_vlc_on_filepaths() {
   kill_media > /dev/null
   wake_display
-  echo -ne "filenames: \n$filenames\n" | grep -Po '(?<=\/)[^\/]* '
+  echo -ne "filepaths: \n$filepaths\n" | grep -Po '(?<=\/)[^\/]* '
   subs="--sub-language=en"
   # rot='--vout-filter=transform --transform-type=180 --video-filter "transform{true}" '
   echo "subs: $subs"
   bash ~/sns.sh rear_movie &
-  decoded=`uridecode $filenames`
-  # decoded=`uridecode $filenames | sed 's| |\\ |g'`
-  echo "decoded2:"
-  echo "$decoded"
-  nohup vlc --qt-minimal-view --control=dbus $subs "$decoded" &
-  # $rot 
-  filename=`basename "$(echo $filenames | grep -Po '^\S+')"`
+  decoded=`uridecode $filepaths`
+  nohup vlc --qt-minimal-view --control=dbus $subs $decoded &
+  filename=`basename "$(echo $filepaths | grep -Po '^\S+')"`
   echo "basename: $filename"
   last_position=$(get_last_position "$filename")
   echo "last_position: $last_position"
@@ -409,12 +420,8 @@ parse_episode_num() {
   pth=$1
   epp=$2
   cleanln=`basename "$(echo $pth | tail -1)" | perl -pe 's|\_?\d{4}\_?||g'`
-  # echo "cleanln $cleanln"
   season=`echo $cleanln | grep -Po '(?<=(S|s))\d\d' | head -1`
-  # echo "season $season"
   epp=`echo $cleanln | grep -Po '(?<=(E|e))\d\d' | tail -1`
-  # echo "ep $epp"
-  # echo "epp: $epp, season: $season"
   if [[ "$epp" && "$season" ]] ; then
     echo "${season}${epp}" | perl -pe 's|^0||g' # parsed numbers
   else
@@ -434,29 +441,32 @@ playf() {
   ep=$2 # episode number eg 304 (parsed from S03E04) or flag -a, -r
 
   echo "name: $name, ep: $ep"
-  readarray -d '' match_arr < <( media_by_name "$name"  )
-  
-  if [ ${#match_arr[@]} -eq 0 ]; then echo "No matches found" && return 1; fi
 
-  echo "available files:"
-  echo -ne "filenames: \n${match_arr[*]}\n" | grep -Po '(?<=\/)[^\/]*( |$)'
-  
-  if [ -z "$ep" ]; then
-    echo "resume or provide ep# to watch"
+  if [ "$ep" = "-l" ]; then # list files
+    echo "available files"
+    media_all | grep -i $name
     return 0
-  elif [ "$ep" = "-l" ]; then
-    file="`ls -t "$(avail_drive_path)/torrent/New" | head -n1`"
+  elif [ "$ep" = "-s" ]; then # start
+    ep=101
+  elif [ "$ep" = "-r" ]; then
+    filepaths=`media_all | grep -i $name | shuf`
+    run_vlc_on_filepaths
+    return 0
+  elif [ -z "$ep" ]; then # movie
+    filepaths=`media_docs_movies | grep -i "$name" | sort`
+    run_vlc_on_filepaths
+    return 0
   fi
-  
+    readarray -d '' match_arr < <( media_by_name "$name"  )
+    
+  if [ ${#match_arr[@]} -eq 0 ]; then echo "No matches found" && return 1; fi
   # match ep
   for idx in "${!match_arr[@]}"; do
     dirplusname="$(echo ${match_arr[$idx]} | grep -Po '[^\/]+\/[^\/]+$')"
-    parse_episode_num $dirplusname $ep
     ep_from_path=$(parse_episode_num $dirplusname $ep)
     if [[ "${ep_from_path,,}" == *"${ep,,}"* ]]; then # case-insensitive match
-      echo "ep was included in ep_from path" 
-      filenames="${match_arr[*]:$idx}" # slice to the end of the array
-      run_vlc_on_filenames
+      filepaths="${match_arr[*]:$idx}" # slice to the end of the array
+      run_vlc_on_filepaths
       return 0
     fi
   done
@@ -516,7 +526,9 @@ alias inc='cd /mnt/movingparts/torrent/incomplete/; ls'
 alias mp='cd /mnt/movingparts/'
 alias bb='cd /mnt/bigboi/'
 mountbb() { s mount_disks bigboi; }
+mountmp() { s mount_disks movingparts; }
 umountbb() { s umount_disks bigboi; }
+umountmp() { s umount_disks movingparts; }
 alias mnt='cd /mnt'
 alias tor='cd /mnt/movingparts/torrent/'
 alias inc='cd /mnt/movingparts/torrent/incomplete; ls -lah'
