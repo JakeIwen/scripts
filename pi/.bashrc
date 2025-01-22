@@ -251,6 +251,7 @@ print_vfat_uuid() {
     | xxd -plain -u \
     | sed -r 's/(..)(..)(..)(..)/\4\3-\2\1/'
 }
+
 set_vfat_uuid() {
   UUID=$1 # 1234-ABCF  hex only
   BLKID=$2 # /dev/sdc1
@@ -328,14 +329,16 @@ log_position() { /home/pi/scripts/log_position.sh; }
 
 get_last_position() {
   if [ -n "$1" ]; then
-    ns=`grep -Poai "(?<=$1 ).*" "$POSPATH"`
-    echo "${ns:-0}"
+    # parse the big integer from the line after the filepath
+    grep -Poai "(?<=$1 )\d{4,}" "$POSPATH"
+  else
+    echo 0
   fi
 }
 
 playp() {
-  filepaths="$(pwd)/$1"
-  run_vlc_on_filepaths 
+  path="$(pwd)/$1"
+  run_vlc "$path" 
 }
 
 media_all() {
@@ -384,7 +387,7 @@ play() {
     return 0
   fi
   
-  run_vlc_on_filepaths
+  run_vlc
 }
 
 increment_global() {
@@ -396,24 +399,54 @@ increment_global() {
   echo $val
 }
 
-run_vlc_on_filepaths() {
+prep_for_media() {
   kill_media > /dev/null
   wake_display
-  echo -ne "filepaths: \n$filepaths\n" | grep -Po '(?<=\/)[^\/]* '
-  subs="--sub-language=en"
-  # rot='--vout-filter=transform --transform-type=180 --video-filter "transform{true}" '
-  echo "subs: $subs"
   bash ~/sns.sh rear_movie &
-  decoded=`uridecode $filepaths`
-  nohup vlc --qt-minimal-view --control=dbus $subs $decoded &
-  filename=`basename "$(echo $filepaths | grep -Po '^\S+')"`
-  echo "basename: $filename"
-  last_position=$(get_last_position "$filename")
-  echo "last_position: $last_position"
-  sleep 4 # wait seconds before jumping to resume position
-  [ -n "$last_position" ] && [ "$last_position" -gt "0" ] && vlcmd Seek int64:"$last_position"
+}
+
+run_vlc() {
+  pth="$1"
+  prep_for_media
+  # subs="--sub-language=en"
+
+  # subs="--sub-language=eng --sub-track=$(get_global vlc_sub_track)"
+
+  if [ -n "$pth" ]; then
+    decoded=`uridecode $pth`
+  elif [ -n "$filepaths" ]; then
+    decoded=`uridecode $filepaths`
+    pth="$(echo $filepaths | grep -Po '^\S+')"
+  else
+    echo "no path or filepaths provided"
+    return 0
+  fi
   
-  vlcnice -12
+  trupath="$(readlink "$pth")"
+  echo "TRU PATH $trupath"
+  json="$(mkvmerge -J "$trupath")"
+  subtrack=`node ~/scripts/parse_sub_track.js "$json"`
+  echo "playing subtrack $subtrack"
+  
+  subs="--sub-track=$subtrack"
+  audio="--audio-language=en"
+  ctrl="--control=dbus"
+  
+  nohup vlc --qt-minimal-view $ctrl $subs $audio $decoded &
+  
+  vlcnice -12 # give process priority to VLC
+  vlc_jump_to_position "$pth"
+}
+
+vlc_jump_to_position() {
+  path="$1"
+  filename=`basename "$path"`
+  last_position=$(get_last_position "$filename")
+  
+  echo "basename: $filename"
+  echo "last_position: $last_position"
+  sleep 4 # play for a few seconds before jumping to resume position
+  [ -n "$last_position" ] && [ "$last_position" -gt "0" ] && vlcmd Seek int64:"$last_position"
 }
 
 parse_episode_num() {
@@ -438,26 +471,27 @@ avail_drive_path() {
 
 playf() {
   name=`basename $1 | perl -pe 's/ /_/g' | perl -pe 's/\..*$//g'`
-  ep=$2 # episode number eg 304 (parsed from S03E04) or flag -a, -r
 
-  echo "name: $name, ep: $ep"
-
-  if [ "$ep" = "-l" ]; then # list files
+  if [ "$1" = "-l" ]; then # list files
     echo "available files"
-    media_all | grep -i $name
+    media_all | grep -i "$name"
     return 0
-  elif [ "$ep" = "-s" ]; then # start
+  elif [ "$1" = "-s" ]; then # start
     ep=101
-  elif [ "$ep" = "-r" ]; then
-    filepaths=`media_all | grep -i $name | shuf`
-    run_vlc_on_filepaths
+  elif [ "$1" = "-r" ]; then
+    filepaths=`media_all | grep -i "$name" | shuf`
+    run_vlc
     return 0
-  elif [ -z "$ep" ]; then # movie
+  elif [ -z "$1" ]; then # movie
     filepaths=`media_docs_movies | grep -i "$name" | sort`
-    run_vlc_on_filepaths
+    run_vlc
     return 0
   fi
-    readarray -d '' match_arr < <( media_by_name "$name"  )
+  
+  ep=$2 # episode number eg 304 (parsed from S03E04) or flag -a, -r
+  echo "name: $name, ep: $ep"
+  
+  readarray -d '' match_arr < <( media_by_name "$name"  )
     
   if [ ${#match_arr[@]} -eq 0 ]; then echo "No matches found" && return 1; fi
   # match ep
@@ -466,29 +500,10 @@ playf() {
     ep_from_path=$(parse_episode_num $dirplusname $ep)
     if [[ "${ep_from_path,,}" == *"${ep,,}"* ]]; then # case-insensitive match
       filepaths="${match_arr[*]:$idx}" # slice to the end of the array
-      run_vlc_on_filepaths
+      run_vlc
       return 0
     fi
   done
-}
-
-run_vlc_on_file() {
-  kill_media > /dev/null
-  wake_display
-  subs="--sub-language=eng --sub-track=$(get_global vlc_sub_track)"
-  echo "subs: $subs"
-  echo "file: $1"
-  bash ~/sns.sh rear_movie &
-  filename=`basename "$(echo $1 | grep -Po '^\S+')"`
-  echo "filename $filename"
-  nohup vlc --qt-minimal-view $subs "$(avail_drive_path)/torrent/New/$1" --control dbus &
-  echo "basename: $filename"
-  last_position=$(get_last_position "$filename")
-  echo "last_position: $last_position"
-  sleep 4 # wait seconds before jumping to resume position
-  [ -n "$last_position" ] && [ "$last_position" -gt "0" ] && vlcmd Seek int64:"$last_position"
-  
-  vlcnice -12
 }
 
 vlcmd() {
