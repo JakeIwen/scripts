@@ -6,7 +6,7 @@ media_group_links() {
   folder="$2"
   subfolder="$3"
   
-  keys="multi|PROPER|REQ|FGT|EAC3|SANTi|MutzNutz|ViSiON|POOTLED|COLLECTiVE|TELESYNC|Hi10p|ETRG|YTM_AM|SKGTV|HDR10|UNCENSORED|HDR|CaLLiOpeD|ddpatmos|CtrlHD|Will1869|10_?Bit|DTS|DL|SDC|hdtv|EVO|WiKi|HMAX|IMAX|MA|VhsRip|HDRip|BDRip|iNTERNAL|True_HD|1080[pi](MAX)?|720p|XviD|HD|AC3|REPACK|REMUX|PRiCK|AVC|HC|AMZN|HULU|1080pWEBRip|Blu(R|r)ay|(BR|web|WEB)(Rip)?|NF|(AAC|DDP?)_?(5_1|2_0)?|\d+mb|\d+kbps|_$"
+  keys="multi|PROPER|iP|REQ|FGT|EAC3|SANTi|MutzNutz|ViSiON|POOTLED|COLLECTiVE|TELESYNC|Hi10p|ETRG|YTM_AM|SKGTV|HDR10|UNCENSORED|HDR|CaLLiOpeD|ddpatmos|CtrlHD|Will1869|10_?Bit|DTS|DL|SDC|hdtv|EVO|WiKi|HMAX|IMAX|MA|VhsRip|HDRip|BDRip|iNTERNAL|True_HD|1080[pi](MAX)?|720p|XviD|HD|AC3|REPACK|REMUX|PRiCK|AVC|HC|AMZN|HULU|1080pWEBRip|Blu(R|r)ay|(BR|web|WEB)(Rip)?|NF|(AAC|DDP?)_?(5_1|2_0)?|\d+mb|\d+kbps|_$"
   groups="d3g|CiNEFiLE|CTR|PRoDJi|regret|deef|POIASD|Cinefeel|NTG|NTb|monkee|YELLOWBiRD|Atmos|EPSiLON|cielos|ION10|MeGusta|METCON|x0r|xlf|S8RHiNO|GOSSIP|btx|strife|DBS|TEPES|pawe|ggezl2006|CAKES|HiggsBoson|Coo7"
   delims=" |\.|\+|\-|\,| "
   find "$folder" -not -path '*/\.*' -not -ipath '*sample*' -type f -a \( -name '*.mkv' -o -name '*.avi'  -o -name '*.mp4'  -o -name '*.rar' \) | while read pth
@@ -19,7 +19,8 @@ media_group_links() {
     fi
     no_apos="$(echo "$pth" | perl -pe "s~'~~g")"
     no_ext="$(echo "$no_apos" | perl -pe "s~\.${ext}~~g")"
-    no_brk="$(echo "$no_ext" | perl -pe "s~\[|\]|\(|\)~~g")"
+    no_and="$(echo "$no_ext" | perl -pe "s~\&~and~g")"
+    no_brk="$(echo "$no_and" | perl -pe "s~\[|\]|\(|\)~~g")"
     fmt_pth=`echo $no_brk | perl -pe "s/(${delims})/./g" | perl -pe "s~\.+~_~g"`
     no_grp="$(echo $fmt_pth | perl -pe "s~_([xh]_?26[45]|hevc)(_\w+)?(?=(\/|$))~~ig")"
     cln_pth=`echo $no_grp | perl -pe "s~_(${keys})(?=(_|\/|$))~~ig"`
