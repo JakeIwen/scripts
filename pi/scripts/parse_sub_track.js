@@ -1,10 +1,10 @@
 
 var data = JSON.parse(process.argv[2])
-var tracks = data.tracks
+var tracks = data.tracks.filter(t => t.type === 'subtitles')
 
 // var num_media_tracks = tracks.filter(t => t.type !== 'subtitles').length
-var track = tracks.find(t => {
+var idx = tracks.findIndex(t => {
   var props = t.properties
-  return (t.type === 'subtitles' && props.forced_track === false && props.language === 'eng')
+  return (props.forced_track === false && props.language === 'eng')
 })
-console.log(track.id)
+console.log(idx)
