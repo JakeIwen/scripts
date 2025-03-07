@@ -1,13 +1,16 @@
 #! /bin/bash
 task=$1
 
-if [[ "$#" = "2" ]]
-then args="'$2'"
-elif [[ "$#" = "3" ]]
-then args="'$2', '$3'"
-elif [[ "$#" = "4" ]]
-then args="'$2', '$3', '$4'"
-fi
+case "$#" in
+  "1")
+    args="";;
+  "2")
+    args="'$2'";;
+  "3")
+    args="'$2', '$3'";;
+  "4")
+    args="'$2', '$3', '$4'";;
+esac
 
 py_cmd="from sonos_tasks import $task; $task($args)"
 echo  "running python3: $py_cmd"
