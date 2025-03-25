@@ -371,10 +371,10 @@ play() {
     echo "parsed $name $epnum"
     playf "$name" "$epnum"
     return 0
-  elif [[ "$1" == "-r" ]]; then # play random
+  elif [[ "$2" == "-r" ]]; then # play random
     shift
     filepaths=`echo "$(media_all)" | shuf`
-  elif [[ "$1" == "-a" ]]; then
+  elif [[ "$2" == "-a" ]]; then
     shift
     filepaths=`echo "$(media_all)" | awk "/$name/{y=1}y"`; # everything a fter & including match
   elif [ -n "$pth" ]; then
