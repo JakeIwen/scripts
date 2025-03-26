@@ -371,10 +371,10 @@ play() {
     echo "parsed $name $epnum"
     playf "$name" "$epnum"
     return 0
-  elif [[ "$2" == "-r" ]]; then # play random
+  elif [[ "$1" == "-r" ]]; then # play random
     shift
     filepaths=`echo "$(media_all)" | shuf`
-  elif [[ "$2" == "-a" ]]; then
+  elif [[ "$1" == "-a" ]]; then
     shift
     filepaths=`echo "$(media_all)" | awk "/$name/{y=1}y"`; # everything a fter & including match
   elif [ -n "$pth" ]; then
@@ -422,11 +422,7 @@ run_vlc() {
     return 0
   fi
   
-  if [[ -L "$pth" ]]; then
-    trupath="$(readlink "$pth")"
-  else
-    trupath="$pth"
-  fi
+  trupath="$(readlink "$pth")"
   echo "TRU PATH $trupath"
   json="$(mkvmerge -J "$trupath")"
   subtrack=`node ~/scripts/parse_sub_track.js "$json"`
@@ -436,7 +432,7 @@ run_vlc() {
   audio="--audio-language=en"
   ctrl="--control=dbus"
   
-  nohup vlc --qt-minimal-view $ctrl $subs $audio "$decoded" &
+  nohup vlc --qt-minimal-view $ctrl $subs $audio $decoded &
   
   vlcnice -12 # give process priority to VLC
   vlc_jump_to_position "$pth"
@@ -476,17 +472,17 @@ avail_drive_path() {
 playf() {
   name=`basename $1 | perl -pe 's/ /_/g' | perl -pe 's/\..*$//g'`
 
-  if [ "$1" = "-l" ]; then # list files
+  if [ "$2" = "-l" ]; then # list files
     echo "available files"
     media_all | grep -i "$name"
     return 0
-  elif [ "$1" = "-s" ]; then # start
+  elif [ "$2" = "-s" ]; then # start
     ep=101
-  elif [ "$1" = "-r" ]; then
+  elif [ "$2" = "-r" ]; then
     filepaths=`media_all | grep -i "$name" | shuf`
     run_vlc
     return 0
-  elif [ -z "$1" ]; then # movie
+  elif [ -z "$2" ]; then # movie
     filepaths=`media_docs_movies | grep -i "$name" | sort`
     run_vlc
     return 0
