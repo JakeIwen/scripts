@@ -1,12 +1,25 @@
 #! /bin/bash
 dsc="/Users/jacobr/dev/scripts"
 scripts="$dsc/pi/scripts"
+services="$dsc/pi/services"
 hooks="$dsc/pi/hooks"
 twilio="$dsc/pi/.twilio"
 vanrouter="$dsc/vanrouter"
 configs="$dsc/pi/configs"
 pi_ip='pi@vanpi.local'
 vr_ip='root@openwrt'
+
+cp_services() {
+  ssh $pi_ip "mkdir /tmp/systemd-tmp/"
+  scp -r "$services/" "$pi_ip:/tmp/systemd-tmp/"
+  ssh $pi_ip "sudo mv /tmp/systemd-tmp/services/* /etc/systemd/system/"
+  ssh $pi_ip "sudo systemctl daemon-reload"
+  # ssh $pi_ip "rm -rf /tmp/systemd-tmp/"
+  # sudo systemctl enable newjjob.service
+  # sudo systemctl start newjjob.service
+  # sudo systemctl status newjjob.service
+}
+cp_services &
 
 # PREP PYTHONS
 mkdir "$scripts/python-automation/" 
@@ -20,7 +33,6 @@ scp  "$dsc/pi/keepalive.txt"  "$pi_ip:/home/pi/keepalive.txt" &
 scp -r "$scripts" "$pi_ip:/home/pi/" &
 scp -r "$hooks" "$pi_ip:/home/pi/" &
 scp -r "$twilio" "$pi_ip:/home/pi/" &
-  
 scp  "$dsc/NativCast/process.py"  "$pi_ip:/home/pi/NativCast/process.py" &
 scp  "$dsc/NativCast/server.py"  "$pi_ip:/home/pi/NativCast/server.py" &
 

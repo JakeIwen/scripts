@@ -1,0 +1,13 @@
+[Unit]
+Description=Promaster Ignition Monitoring
+After=network.target
+
+[Service]
+ExecStart=/home/pi/scripts/ignition_monitor.sh
+Restart=always
+RestartSec=5
+User=pi
+Environment=PATH=/usr/bin:/usr/local/bin
+
+[Install]
+WantedBy=multi-user.target
