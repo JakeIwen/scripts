@@ -1,10 +1,10 @@
 #! /bin/bash
 
 name=$1 # aux, cab_wiz, ext_flood, solder_flood
-to_state=$2 # on, off, toggle?
+to_state=$2 # on, off, blank means toggle
 token=$(cat /home/pi/secrets/localtuya_token)
 
-if [[ "$to_state" == "toggle" ]]; then
+if [[ -z "$to_state" ]]; then
   state=$(/home/pi/scripts/tuya_status.sh $name)
   [[ "$state" == "on" ]] && to_state=off || to_state=on
 fi
