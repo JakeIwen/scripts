@@ -1,6 +1,7 @@
 ubnt/persistent/profiles/*
 .DS_Store
 secrets/*
+**/secrets/*
 **/log/
 craigslist-scrape/*
 

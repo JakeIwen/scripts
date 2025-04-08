@@ -1,7 +1,7 @@
 #! /bin/bash
 isw="$HOME/scripts/internet_switches.sh"
 mconf="$HOME/mconf"
-
+log="$HOME/log/ignition_monitor.log"
 echo "ignition OFF hook invoked"
 
 if [ -d "${mconf}_last" ]; then
@@ -12,5 +12,5 @@ if [ -d "${mconf}_last" ]; then
 else
   echo "no mconf_last dir"
 fi
-
+echo "Ignition OFF at $(date)" >> $log
 echo "VAN OFF DONE"
