@@ -6,6 +6,7 @@ hooks="$dsc/pi/hooks"
 twilio="$dsc/pi/.twilio"
 vanrouter="$dsc/vanrouter"
 configs="$dsc/pi/configs"
+secrets="$dsc/secrets"
 pi_ip='pi@vanpi.local'
 vr_ip='root@openwrt'
 
@@ -33,6 +34,7 @@ scp  "$dsc/pi/keepalive.txt"  "$pi_ip:/home/pi/keepalive.txt" &
 scp -r "$scripts" "$pi_ip:/home/pi/" &
 scp -r "$hooks" "$pi_ip:/home/pi/" &
 scp -r "$twilio" "$pi_ip:/home/pi/" &
+scp -r "$secrets" "$pi_ip:/home/pi/" &
 scp  "$dsc/NativCast/process.py"  "$pi_ip:/home/pi/NativCast/process.py" &
 scp  "$dsc/NativCast/server.py"  "$pi_ip:/home/pi/NativCast/server.py" &
 

@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@tuyapi/cli": "^1.18.3"
+  }
+}
