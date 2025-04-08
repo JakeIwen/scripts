@@ -15,4 +15,6 @@ id_dsa
 .twilio/
 **/wireless
 vanrouter/etc
-*__pycache__*node_modules/
+*__pycache__*
+node_modules/
+**/node_modules/
