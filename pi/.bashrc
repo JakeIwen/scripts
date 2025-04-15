@@ -59,7 +59,7 @@ snh() { nohup bash -c $1 & tail -f ./nohup.out; }
 
 s() { name=$1; shift; $HOME/scripts/$name.sh $*; }
 sx() { sudo "$(history | perl -pe 's/^\s+[0-9]+\**\s+//g' | tail -1)"; }
-
+svc() { sudo systemctl $2 $1.service; } # svc home-assistant start
 alias iswl="tf /var/log/cron/internet_switches.log"
 isw="$HOME/scripts/internet_switches.sh"
 mconf="$HOME/mconf"
