@@ -32,7 +32,9 @@ scp  "$dsc/pi/sns.sh"  "$pi_ip:/home/pi/sns.sh" &
 scp  "$dsc/pi/keepalive.txt"  "$pi_ip:/home/pi/keepalive.txt" &
 
 scp -r "$scripts" "$pi_ip:/home/pi/" &
+scripts_pid=$!
 scp -r "$hooks" "$pi_ip:/home/pi/" &
+hooks_pid=$!
 scp -r "$twilio" "$pi_ip:/home/pi/" &
 scp -r "$secrets" "$pi_ip:/home/pi/" &
 scp  "$dsc/NativCast/process.py"  "$pi_ip:/home/pi/NativCast/process.py" &
@@ -46,7 +48,11 @@ scp  "$configs/.disk_uuids" "$pi_ip:/home/pi/.disk_uuids" &
 scp  "$configs/rsync-exclude.txt" "$pi_ip:/home/pi/rsync-exclude.txt" &
 scp  "$configs/rsync-exclude-media.txt" "$pi_ip:/home/pi/rsync-exclude-media.txt" &
 
-ssh $pi_ip 'sudo chmod 775 /home/pi/rsync-exclude-media.txt /home/pi/rsync-exclude.txt'
+ssh $pi_ip 'sudo chmod 770 /home/pi/rsync-exclude-media.txt /home/pi/rsync-exclude.txt' &
+
+wait $scripts_pid
+wait $hooks_pid
+ssh $pi_ip 'sudo chmod 770 /home/pi/scripts/*' &
 
 # ROUTER
 # scp -r "$vr_ip:/etc/config" "$vanrouter/etc/" &
