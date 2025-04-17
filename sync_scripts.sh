@@ -13,14 +13,16 @@ vr_ip='root@openwrt'
 cp_services() {
   ssh $pi_ip "mkdir /tmp/systemd-tmp/"
   scp -r "$services/" "$pi_ip:/tmp/systemd-tmp/"
-  ssh $pi_ip "sudo mv /tmp/systemd-tmp/services/* /etc/systemd/system/"
-  ssh $pi_ip "sudo systemctl daemon-reload"
-  # ssh $pi_ip "rm -rf /tmp/systemd-tmp/"
-  # sudo systemctl enable newjjob.service
-  # sudo systemctl start newjjob.service
-  # sudo systemctl status newjjob.service
+  ssh $pi_ip "/home/pi/scripts/update_services.sh"
 }
+
+pull_crontab() {
+  ssh $pi_ip "sudo crontab -l > /tmp/crontab"
+  scp "$pi_ip:/tmp/crontab" "$dsc/pi/crontab"
+}
+
 cp_services &
+pull_crontab &
 
 # PREP PYTHONS
 mkdir "$scripts/python-automation/" 

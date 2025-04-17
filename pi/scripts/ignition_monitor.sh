@@ -1,5 +1,5 @@
 #! /bin/bash
-
+# this script is run continuously by ignitionmonitor.service
 num_confirmations_to_declare_off=3
 scripts=/home/pi/scripts
 hooks=/home/pi/hooks
