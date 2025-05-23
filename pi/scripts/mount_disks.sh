@@ -68,7 +68,7 @@ if [[ "$#" = "1" ]]; then
 elif [[ "$#" = "0" ]]; then
   # mntdsk mbbackup
   mntdsk movingparts
-  mntdsk hfs1tb
+  mntdsk mbp1tbkup
   mntdsk hfs2tb
   # mntdsk bigboi
   mntdsk usbext

@@ -6,11 +6,14 @@ ubnt_internet_ops() { # nanostation connected; van is likely stationary/parked
   echo 'ubnt_internet_ops'
   mount_drives
   sleep 1
-  if conf notorrent
+  if conf notorrent || has_io_error '/mnt/movingparts'
   then kill_torrent_client 
   else start_torrent_client
   fi
 }
+
+has_io_error() { ls -lah "$1" 2>&1 | grep -q 'Input/output error'; }
+# if has_io_error '/mnt/movingparts'; then echo 'i/o error'; fi
 
 update_iface_score() {
   file=$1
@@ -123,6 +126,7 @@ kill_all() {
 
 ifaces="$(ssh root@OpenWrt 'mwan3 interfaces')"
 iface_online() { echo "$ifaces" | grep "$1 is online"; }
+
 if date | grep '0:0'; then date; fi
 # ubnt_internet_ops
 if conf nodisk &> /dev/null; then kill_all # drives disabled ~/mconf/nodisk
