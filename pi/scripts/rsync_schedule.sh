@@ -121,21 +121,31 @@ chk_free_sd_space() {
   fi
 }
 
-echo -e "\nscheduled_rsync begin: `date`"
 
-if [ "$(ps aux | grep rsync_schedule | wc -l)" -gt 4 ]; then 
-  echo "rsync_schedule process already running"
-  echo "$(ps aux | grep rsync_schedule)"
-  exit || return
+
+sync() {
+  echo -e "\nscheduled_rsync begin: `date`"
+  if [ "$(ps aux | grep rsync_schedule | wc -l)" -gt 4 ]; then 
+    echo "rsync_schedule process already running"
+    echo "$(ps aux | grep rsync_schedule)"
+    return
+  fi
+  
+  mount_bb
+  sync_mp_bb
+  chk_free_sd_space
+  live_pi_backup
+  commit_last_backup      
+  # retore_to_msd
+  unmount_bb
+  echo "scheduled_rsync end: `date`";
+}
+
+if [ $# -eq 0 ]; then
+  sync
 fi
 
-mount_bb
-sync_mp_bb
-chk_free_sd_space
-live_pi_backup
-commit_last_backup      
-# retore_to_msd
-unmount_bb
-echo "scheduled_rsync end: `date`";
+
+
 
 # sudo rsync -avH -e 'ssh -i /home/pi/.ssh/id_rsa' $rsync_flags / root@192.168.6.1:/mnt/sda1
