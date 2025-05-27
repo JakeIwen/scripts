@@ -29,6 +29,9 @@ mntdsk() {
   unset msg
   if [ -z "$match" ]; then
     msg="no blkid match for: $label"
+    if [ "$(ls -lah $pth | wc -l)" -eq "3" ]; then # if empty folder
+      rm -rf "$pth"
+    fi
   elif [[ "$match" == *"ro,"* ]]; then
     msg="read-only match for: $label"
   elif [[ "$(grep "dev/sd" /proc/mounts)" == *"/mnt/$label"* ]]; then
@@ -37,7 +40,8 @@ mntdsk() {
   echo "$msg"
   if [ -n "$msg" ]; then return 0; fi
   
-  
+  mkdir "$pth"
+
   uuid=$(fetch_uuid $label)
   fstype=$(fsprop TYPE $label)
   
