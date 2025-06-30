@@ -66,6 +66,7 @@ handle_rars() {
 alias_folders() {
   src=$1
   echo "start $src"
+  mkdir "$src/links"
   links="$src/links"
   rm -rf "$links"
   mkdir "$links"
@@ -91,6 +92,7 @@ alias_folders() {
 alias_new() {
   src=$1
   echo "start $src"
+  mkdir "$src/links"
   links_inc="$src/links/incomplete"
   links_new="$src/links/New"
   rm -rf "$links_new" "$links_inc"
