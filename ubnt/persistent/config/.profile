@@ -33,11 +33,15 @@ save_current_apmode()
 
 set_ap() 
 {
-  profile_path="/etc/persistent/profiles/$1"
-  if test -f "$profile_path"; then
-    cp "$profile_path" /tmp/system.cfg
-    cronbreak &
-    /usr/etc/rc.d/rc.softrestart save
+  ssid="$1"
+  profile_path="/etc/persistent/profiles/$ssid"
+  scripts="/etc/persistent/scripts"
+  cur_ssid="$(cat /tmp/system.cfg | grep 'wireless.1.ssid' | cut -d= -f2)"
+  if [ "$cur_ssid" = "$ssid" ]; then
+    echo "already using ssid $ssid, make sure the profile is named correctly"
+  elif test -f "$profile_path"; then
+    echo "updating AP to $ssid"
+    $scripts/update_wifi.sh "$ssid" 
   else
     echo missing profile: "$profile_path"
   fi

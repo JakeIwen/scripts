@@ -16,7 +16,6 @@ mkdir -p $tmp
 mkdir -p /etc/crontabs   
 chmod -R 770 $scripts $tmp
 touch $sys_init_flag
-
 pkill -f cron
 setup_log
 
@@ -24,4 +23,11 @@ echo "nanoM2" > /proc/sys/kernel/hostname
 cp /etc/persistent/config/cron /etc/crontabs/ubnt
 cp /etc/persistent/config/.profile /etc/persistent/.profile
 cat /etc/persistent/config/raspi_rsa_id.pub >> /etc/dropbear/authorized_keys 
+
+update_pi_rsa() {
+  cat /etc/persistent/config/raspi_rsa_id.pub >> /etc/dropbear/authorized_keys
+  uniq_keys="$(sort -u /etc/dropbear/authorized_keys -o /etc/dropbear/authorized_keys)"
+  echo "$uniq_keys" > /etc/dropbear/authorized_keys 
+}
+
 crond
