@@ -16,7 +16,8 @@ sort_networks() {
   cat $ssid_scan_path | sort -nr | cut -d '|' -f 2 | awk '!seen[$0]++'
 }
 
-set_ap() {
+set_access_point() {
+  echo "setting AP to $1"
   cp "/etc/persistent/profiles/$1" /tmp/system.cfg
   /usr/etc/rc.d/rc.softrestart save
   pkill -f crond
@@ -26,7 +27,7 @@ set_ap() {
 }
 find_ap() {
   if [ -n "$sys_init_flag" ]; then
-    echo "rebot flag detected, continuing scan"
+    echo "reboot flag detected, continuing scan"
     rm $sys_init_flag
   elif [ "$(cat $cur_profile_path)" != "$(cat /tmp/system.cfg)" ]; then
     echo "waiting on manually set AP. Killing cron for 140s"
@@ -36,6 +37,7 @@ find_ap() {
     save_tmp_profile
     return 0
   fi
+  # cur_ssid="$(cat /tmp/system.cfg | grep 'wireless.1.ssid' | cut -d= -f2)"
   true > $ssid_scan_path
   append_networks
   append_networks
@@ -58,7 +60,7 @@ find_ap() {
       # echo "scan_ssid: $scan_ssid"
       if [ "$saved_ssid" = "$scan_ssid" ]; then
         echo "MATCH: $j - setting AP"
-        set_ap $scan_ssid
+        set_access_point $scan_ssid
         echo " "
         return 0
       fi
@@ -85,10 +87,13 @@ save_tmp_profile () {
 }
 
 ccq=`mca-status | grep ccq | cut -d= -f2`
-if [[ $ccq -gt 300 ]]; then
+
+if [ "$#" = "1" ]; then
+  set_access_point "$1"
+elif [ "$ccq" -gt 300 ]; then
   echo "Ipv4 is up"
   save_current_profile
-  rm $sys_init_flag 2> /dev/null
+  rm "$sys_init_flag" 2> /dev/null
 else
   find_ap
 fi
