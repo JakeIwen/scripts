@@ -1,7 +1,7 @@
 #! /bin/bash
 # tuya_toggle.sh aux on
 
-entity=$1 # aux, cab_wiz, ext_flood, solder_flood, light.dresser
+entity=$1 # aux, cab_wiz, ext_flood, solder_flood, light.dresser, starlink
 to_state=$2 # on, off, blank means toggle
 token=$(cat /home/pi/secrets/localtuya_token)
 
@@ -26,8 +26,10 @@ if [[ -z "$to_state" ]]; then
   [[ "$state" == "on" ]] && to_state=off || to_state=on
 fi
 
-curl -X POST \
+curl -s POST \
   -H "Authorization: Bearer $token" \
   -H "Content-Type: application/json" \
   -d "{\"entity_id\": \"$type_name\"}" \
-  http://vanpi.local:8123/api/services/$type/turn_$to_state
+  http://vanpi.local:8123/api/services/$type/turn_$to_state > /dev/null
+
+echo $to_state

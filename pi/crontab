@@ -3,6 +3,7 @@ log="/var/log/cron"
 tfiles_bkup="/mnt/movingparts/torrent/tfiles_bkup"
 PATH="/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:/root/bin"
 
+0 0 * * *      su pi -c "$scripts/prune_logs.sh $log 1000"  >> "$log/prune_logs.log" 2>&1
 0 13 * * *  "$scripts/rsync_schedule.sh"  >> "$log/rsync.log" 2>&1
 * * * * *     su pi -c "$scripts/internet_switches.sh"  >> "$log/internet_switches.log" 2>&1
 0 1 * * *      su pi -c "$scripts/prune_logs.sh '/var/log/cron/*.log' >> "$log/prune_logs.log" 2>&1

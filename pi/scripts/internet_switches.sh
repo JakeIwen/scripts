@@ -6,9 +6,16 @@ ubnt_internet_ops() { # nanostation connected; van is likely stationary/parked
   echo 'ubnt_internet_ops'
   mount_drives
   sleep 1
-  if conf notorrent || has_io_error '/mnt/movingparts'
+  if conf notorrent || has_io_error '/mnt/movingparts' || starlink_notor
   then kill_torrent_client 
   else start_torrent_client
+  fi
+}
+
+starlink_notor() {
+  local status=$(/home/pi/scripts/tuya_status.sh starlink)
+  if [ "$status" = "on" ]; then
+    ls /home/pi/starconf/notor &> /dev/null
   fi
 }
 
@@ -103,7 +110,7 @@ spindown_drive() {
 
 
 unmount_drives() {
-  . /home/pi/scripts/umount_disks.sh
+  /home/pi/scripts/umount_disks.sh
   sleep 5
   hdd_uuids=$(cat /home/pi/.disk_uuids | grep -Ev 'msd|usb' | cut -d' ' -f2)
   for loc in $hdd_uuids; do spindown_drive $loc; done

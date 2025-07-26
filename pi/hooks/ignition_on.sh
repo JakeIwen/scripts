@@ -15,11 +15,11 @@ stop_disks() {
 
 
 turn_lights_off() {
-  $tuya_toggle ext_flood off &
-  $tuya_toggle solder_flood off &
+  $tuya_toggle ext_flood off & # switches
+  $tuya_toggle solder_flood off & # switches
   # $tuya_toggle cab_wiz off &
   $tuya_device_ids | grep "^light." | while read -r line; do
-    $tuya_toggle $line off &
+    $tuya_toggle $line off & # wiz lights
   done
 }
 
