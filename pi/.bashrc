@@ -15,7 +15,6 @@ alias .....="cd ../../../.."
 alias ch7="sudo chmod -R 777" # usage: $ ch7 .
 alias chme="sudo chown -R $(whoami)" # usage: $ chme .
 
-alias ubnt='ssh ubnt@192.168.8.20'
 alias ngear='ssh -R root@192.168.6.1'
 alias rb='. /home/pi/scripts/umount_disks.sh; sudo reboot'
 alias rball='ubnt reboot & ngear reboot; rb'
@@ -43,6 +42,8 @@ alias wake_display='xset dpms force on'
 alias slp='xset s activate'
 
 alias init_rsa="ssh-copy-id -i ~/.ssh/id_rsa.pub" # init_rsa user@device
+alias logdir="cd /var/log/cron"
+alias speed="~/scripts/speedtest.sh"
 
 alias corefreq='cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq; vcgencmd measure_volts'
 set_date() { sudo date -s "$(wget -qSO- --max-redirect=0 google.com 2>&1 | grep Date: | cut -d' ' -f5-8)Z"; }
@@ -558,10 +559,22 @@ alias rpiplay='wake_display; nohup /home/pi/RPiPlay/build/rpiplay -r 180 &'
 # boost processess pushing netflix, may help with outher services
 alias rechrome="sudo renice -12  \`ps aux --sort=%cpu | tail -3 | awk '{print \$2}'\`"
 alias ngear="ssh root@OpenWrt"
-alias ubnt="ssh ubnt@192.168.8.20"
+alias ubnt="ssh -i ~/.ssh/id_rsa ubnt@192.168.8.20"
 alias pd='sudo /sbin/shutdown -r now'
-alias py="python3"
 alias pip3="python3 -m pip"
+alias py="python3"
+
+pipv() {
+  source /home/pi/pyvenv/bin/activate
+  pip "$@"
+  deactivate
+}
+
+pyv() {
+  source /home/pi/pyvenv/bin/activate
+  python "$@"
+  deactivate
+}
 
 van_is_running() {
   if test -f /home/pi/hooks/ignition_is_on; then echo "yes"; else echo "no"; fi

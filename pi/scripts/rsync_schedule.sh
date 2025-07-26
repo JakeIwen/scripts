@@ -51,7 +51,7 @@ live_pi_backup_split() {
   sudo dd if=/dev/mmcblk0p1 of="$outfile1" bs=4M status=progress conv=fsync
   sudo dd if=/dev/mmcblk0p2 of="$outfile2" bs=4M status=progress conv=fsync
   # Remove fsck trigger
-  sudo chown pi $outfile1 $outfile2
+  sudo chown pi:pi $outfile1 $outfile2
   sudo rm /boot/forcefsck
 }
 
@@ -62,7 +62,7 @@ live_pi_backup() {
   # Create trigger to force file system consistency check if image is restored
   sudo touch /boot/forcefsck
   sudo dd if=/dev/mmcblk0 of="$outfile" bs=1M status=progress conv=fsync
-  sudo chown pi $outfile
+  sudo chown pi:pi $outfile
   # Remove fsck trigger
   sudo rm /boot/forcefsck
 }
@@ -75,7 +75,7 @@ commit_last_backup() {
   git commit -m "$msg"
   echo "commit made"
   commit=`git rev-parse HEAD`
-  echo "sudo git checkout $commit" > "./$msg.sh"
+  echo "git checkout $commit" > "./$msg.sh"
 }
 
 # live_pi_backup && commit_last_backup

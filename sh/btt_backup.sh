@@ -1,8 +1,9 @@
-#! /bin/bash
+#! /bin/zsh
 
 set -eu # exit on error
+frequency="${1:=regular}"
 
-btt_bkdir="$HOME/backups/BetterTouchTool"
+btt_bkdir="$HOME/backups/BetterTouchTool/$frequency"
 btt_app_path="$HOME/Library/Application Support/BetterTouchTool"
 btt_emergency_path="$HOME/Library/Application Support/BetterTouchTool.bad"
 
