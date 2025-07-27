@@ -64,6 +64,19 @@ def rear_normal():
 def rear_inverted():
     make_stereo_pair("vonRear2", "vonRear")
 
+def play_soundbyte(filename, device_name='vonRear'):
+    device = get_spkr(device_name)
+    remove_from_group(device_name)
+    orig_vol = device.volume
+    device.volume = 80
+    chime_uri = "http://vanpi.local:8000/" + filename
+    device.play_uri(chime_uri)
+    sleep(5)
+    device.volume = orig_vol
+    add_to_group(device_name)
+
+    # need to sert up service to run python3 -m http.server 8000 from cd ~/soundbytes
+
 
 # utilities
 
