@@ -23,7 +23,7 @@ new_status="$($tuya_toggle starlink $1)" > /dev/null
 
 if [ "$new_status" = "on" ]; then 
   set_starlink_access_point & > /dev/null
-  play_sound success
+  play_sound poweron
 elif [ "$new_status" = "off" ]; then 
   play_sound deactivate
 fi
