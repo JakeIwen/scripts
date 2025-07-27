@@ -64,16 +64,18 @@ def rear_normal():
 def rear_inverted():
     make_stereo_pair("vonRear2", "vonRear")
 
-def play_soundbyte(filename, device_name='vonRear'):
+# chime warn success error deactivate
+def play_soundbyte(name, device_name='vonRear'):
     device = get_spkr(device_name)
     remove_from_group(device_name)
     orig_vol = device.volume
     device.volume = 80
-    chime_uri = "http://vanpi.local:8000/" + filename
+    chime_uri = "http://vanpi.local:8000/" + name + ".mp3"
     device.play_uri(chime_uri)
+
     sleep(5)
     device.volume = orig_vol
-    add_to_group(device_name)
+    add_to_main_group(device_name)
 
     # need to sert up service to run python3 -m http.server 8000 from cd ~/soundbytes
 
@@ -158,7 +160,7 @@ def scrub(seconds=-15):
     new_seektime = add_time(position, int(seconds))
     device.seek(new_seektime)
 
-def add_to_group(name):
+def add_to_main_group(name):
     get_spkr(name).join(get_preferred_device())
 
 def remove_from_group(name):
@@ -264,9 +266,11 @@ def get_spkr(name):
     return by_name(name) or by_name(name + '2')
 
 def get_playing_device(default_to_front=False, devices=vis_devices):
+    # if the device is in a group, then it is the ONLY group ( <4 stereo-pairs )
+    # otherwise return the active PLAYING or PAUSED device
     for device in devices:
         if is_group_member(device):
-            print("returning coord", device.group.coordinator.player_name)
+            print("returning group coord", device.group.coordinator.player_name)
             return device.group.coordinator 
     for device in devices:
         device.t_state = device.get_current_transport_info()['current_transport_state']
@@ -278,7 +282,7 @@ def get_playing_device(default_to_front=False, devices=vis_devices):
             print("is paused", device.group.coordinator.player_name)
             return device.group.coordinator
     if default_to_front:
-        print("defaultin to vonFront")
+        print("defaulting to vonFront")
         return next((x for x in devices if x.player_name == 'vonFront'), None)
     else:
         return None

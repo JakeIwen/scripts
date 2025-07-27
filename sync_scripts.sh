@@ -28,6 +28,7 @@ pull_crontab &
 mkdir "$scripts/python-automation/" 
 find "$dsc/automation/" -type f -name "*.py" -exec cp {} "$scripts/python-automation/" \;
 # scp $rem_addr/Users/jacobr/Downloads
+
 # RASPI
 scp  "$dsc/pi/.bashrc" "$pi_ip:/home/pi/.bashrc" &
 scp  "$dsc/pi/sns.sh"  "$pi_ip:/home/pi/sns.sh" &

@@ -1,0 +1,13 @@
+[Unit]
+Description=HTTP server for soundbyte files
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/pi/soundbytes
+ExecStart=/usr/bin/python3 -m http.server 8000
+Restart=on-failure
+User=pi
+
+[Install]
+WantedBy=multi-user.target
