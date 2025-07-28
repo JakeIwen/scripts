@@ -29,7 +29,7 @@ find_ap() {
   if [ -n "$sys_init_flag" ]; then
     echo "reboot flag detected, continuing scan"
     rm $sys_init_flag
-  elif [ "$(cat $cur_profile_path)" != "$(cat /tmp/system.cfg)" ]; then
+  elif [ "$(cat "$cur_profile_path")" != "$(cat /tmp/system.cfg)" ]; then
     echo "waiting on manually set AP. Killing cron for 140s"
     pkill -f crond
     sleep 140
@@ -71,7 +71,7 @@ find_ap() {
 save_current_profile() {
   ssid=$(iwgetid -r)
   profile_path="/etc/persistent/profiles/$ssid"
-  if [ "$(cat $profile_path)" = "$(cat /tmp/system.cfg)" ]; then
+  if [ "$(cat "$profile_path")" = "$(cat /tmp/system.cfg)" ]; then
     echo "profile unchanged, done."
   else
     echo "saving/updating profile: $ssid"
