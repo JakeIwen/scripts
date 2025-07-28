@@ -5,12 +5,12 @@ from contextlib import suppress
 from time import sleep
 import os
 
-# to make globally importable
+# to make sonos_tasks globally importable
 # run:
 # import site
 # site.getusersitepackages()
 # 
-# create file in site-packages cirectory usercustomize.py:
+# create file in site-packages directory usercustomize.py:
 # import sys
 # sys.path.extend(['/path/to/this/ditectory'])
 
@@ -64,10 +64,11 @@ def rear_normal():
 def rear_inverted():
     make_stereo_pair("vonRear2", "vonRear")
 
+# soundbyte options in ~/soundbytes
 # chime warn success error deactivate
 def play_soundbyte(name, device_name='vonRear'):
     device = get_spkr(device_name)
-    remove_from_group(device_name)
+    remove_from_group(device_name) # will be a problem if device.is_coordinator
     orig_vol = device.volume
     device.volume = 80
     chime_uri = "http://vanpi.local:8000/" + name + ".mp3"
@@ -76,9 +77,6 @@ def play_soundbyte(name, device_name='vonRear'):
     sleep(5)
     device.volume = orig_vol
     add_to_main_group(device_name)
-
-    # need to sert up service to run python3 -m http.server 8000 from cd ~/soundbytes
-
 
 # utilities
 
