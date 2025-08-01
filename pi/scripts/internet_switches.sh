@@ -16,6 +16,8 @@ starlink_notor() {
   local status=$(/home/pi/scripts/tuya_status.sh starlink)
   if [ "$status" = "on" ]; then
     ls /home/pi/starconf/notor &> /dev/null
+  else
+    ls /home/pi/starconf/idkhowtoreturnfalse &> /dev/null
   fi
 }
 
