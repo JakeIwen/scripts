@@ -34,6 +34,18 @@ alias killcron="sudo pkill -f cron"
 alias cronlog="cd /var/log/cron"
 alias rsynclog='cat /var/log/cron/rsync.log'
 
+stopcron() {
+  sudo systemctl stop cron
+  sudo systemctl disable cron
+  sudo systemctl mask cron
+}
+
+startcron() {
+  sudo systemctl unmask cron
+  sudo systemctl enable cron
+  sudo systemctl start cron
+}
+
 alias gtop="sudo /opt/vc/bin/vcdbg reloc stats"
 alias bashp='vi ~/.bashrc'
 alias rbash='exec bash'
