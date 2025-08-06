@@ -29,9 +29,6 @@ mntdsk() {
   unset msg
   if [ -z "$match" ]; then
     msg="no blkid match for: $label"
-    if [ "$(ls -lah $pth | wc -l)" -eq "3" ]; then # if empty folder
-      rm -rf "$pth"
-    fi
   elif [[ "$match" == *"ro,"* ]]; then
     msg="read-only match for: $label"
   elif [[ "$(grep "dev/sd" /proc/mounts)" == *"/mnt/$label"* ]]; then
@@ -40,12 +37,11 @@ mntdsk() {
   echo "$msg"
   if [ -n "$msg" ]; then return 0; fi
   
-  mkdir "$pth"
 
   uuid=$(fetch_uuid $label)
   fstype=$(fsprop TYPE $label)
   
-  sudo mkdir -p $pth
+  mkdir "$pth" 2>/dev/null
   sudo chown pi $pth
   sudo chmod 777 $pth 
   # /sbin/blkid | grep mmcblk0p | grep $uuid && echo "not mounting $label because it is mmcfs" && return 1
@@ -67,20 +63,43 @@ mntdsk() {
   # echo "mounted $label at $pth"
 }
 
+rm_mnt_dir() { # prevent Time Machine from backing up onto SD card etc 
+  diskdir="$1"
+
+  if blkid | grep "$diskdir"; then 
+    echo "NOT removing mount dir /mnt/$diskdir for attached disk"
+    return 0
+  fi
+  
+  if [ "$(ls -la "$diskdir" | wc -l)" -eq 3 ]; then
+    #  dir is empty
+    echo "removing empty mount dir: /mnt/$diskdir"
+    rm -rf "/mnt/$diskdir"
+  else
+    echo "ERROR: dir for unattached disk /mnt/$diskdir has folder contents"
+  fi
+}
+
 if [[ "$#" = "1" ]]; then
   mntdsk "$1"
-elif [[ "$#" = "0" ]]; then
+elif [[ "$#" = "0" ]]; then # used by minutely cron job
+  rm_dirs=(mbp1tbkup)
+  for dir in "${rm_dirs[@]}"; do
+    rm_mnt_dir "$dir"
+  done
+
+  disks=(movingparts mbp1tbkup hfs2tb usbext EXFAT512)
+
+  for disk in "${disks[@]}"; do
+    mntdsk "$disk"
+  done
   # mntdsk mbbackup
-  mntdsk movingparts
-  mntdsk mbp1tbkup
-  mntdsk hfs2tb
   # mntdsk bigboi
-  mntdsk usbext
-  mntdsk EXFAT512
 
   # mntdsk msd_nand2_boot && mntdsk msd_nand2 && mntdsk msd_nand2_settings
   # mntdsk msd_nand1_boot && mntdsk msd_nand1 && mntdsk msd_nand1_settings
 fi
+
 
 . /home/pi/scripts/fix_hfs_fs.sh 
 
