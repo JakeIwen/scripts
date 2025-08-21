@@ -5,7 +5,8 @@ sudo mv /tmp/systemd-tmp/services/* /etc/systemd/system/
 sudo systemctl daemon-reload
 
 for filename in $new_svcs; do
+  echo "NEW SERVICE: $filename"
   sudo systemctl enable $filename
   sudo systemctl start $filename
-  # sudo systemctl status $filename
+  sudo systemctl status $filename
 done

@@ -575,7 +575,7 @@ alias ubnt="ssh -i ~/.ssh/id_rsa ubnt@192.168.8.20"
 alias pd='sudo /sbin/shutdown -r now'
 alias pip3="python3 -m pip"
 alias py="python3"
-
+pipa() { source /home/pi/pyvenv/bin/activate; }
 pipv() {
   source /home/pi/pyvenv/bin/activate
   pip "$@"

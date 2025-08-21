@@ -1,0 +1,14 @@
+[Unit]
+Description=BME280 -> MQTT publisher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pi
+Environment="PATH=/home/pi/pyvenv/bin:/usr/bin"
+ExecStart=/home/pi/pyvenv/bin/python /home/pi/scripts/python-automation/bme280_mqtt.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
