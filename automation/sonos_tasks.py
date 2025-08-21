@@ -34,6 +34,8 @@ def random_album():
 def random_radio():
     play_from_faves(" Radio")
 
+def group_vol_set(val):
+    adjust_volume('all', 'set', val)
 def group_vol_up(inc=8):
     adjust_volume('all', 'up', inc)
 def group_vol_down(inc=8):
@@ -97,13 +99,13 @@ def make_stereo_pair(left_master_name, right_name):
 def vol_eql_all(vol=50):
     [equal_vol(member, vol, True) for member in get_preferred_device().group]
     
-def adjust_volume(speaker, direction, inc=8):
-    if speaker == 'all': 
-        [adjust(group, direction, inc) for group in any_soco().all_groups]
+def adjust_volume(speaker, direction, val=8):
+    if speaker == 'all':
+        [adjust(group, direction, val) for group in any_soco().all_groups]
     elif speaker == 'preferred':
-        adjust(get_playing_device(), direction, inc)
+        adjust(get_playing_device(), direction, val)
     else:
-        adjust(get_spkr(speaker), direction, inc)
+        adjust(get_spkr(speaker), direction, val)
 
 def play(name=None):
     device = get_spkr(name) if name else get_preferred_device()
@@ -120,9 +122,11 @@ def mute(devices=vis_devices):
     for device in devices:
         device.mute = True
     
-def start_noise(keyterm, vol=3):
+def start_noise(keyterm, vol=35):
     cooridnator = partymode(vol)
     item = get_matching_faves(keyterm, cooridnator)[0]
+    print("noise to play:")
+    print(item)
     play_item(cooridnator, item, 'REPEAT_ONE')
     crossfade_on(cooridnator)
     return cooridnator
@@ -137,7 +141,7 @@ def play_from_faves(keyterm, group_all=True):
     
     return device
 
-def audio_source(name, source, vol=75):
+def audio_source(name, source, vol=80):
     unjoin_all()
     device = get_spkr(name)
 
@@ -226,14 +230,17 @@ def add_time(position, diff_secs):
 def adjust(target, direction, amount):
     orig = target.volume
     diff = int(amount)
-    if (direction == "mute"):
-        target.mute = not target.mute
     if orig < 15:
         diff = diff/2
-    if direction == "up":
+    
+    if (direction == "mute"):
+        target.mute = not target.mute
+    elif direction == "up":
         target.volume = orig + diff + 2
     elif direction == "down":
         target.volume = orig - diff - 2
+    elif direction == "set":
+        target.volume = amount
 
 def equal_vol(target, vol, preserve_mute):
     if not preserve_mute:
