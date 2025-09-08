@@ -10,7 +10,7 @@ import os
 # import site
 # site.getusersitepackages()
 # 
-# create file in site-packages directory usercustomize.py:
+# create file in site-packages directory o-.py:
 # import sys
 # sys.path.extend(['/path/to/this/ditectory'])
 
@@ -59,7 +59,7 @@ def next_track():
 def prev_track():
     get_preferred_device().previous()
     
-def rear_movie(vol=75):
+def rear_movie(vol=60):
     audio_source('vonRear', 'optical', vol)
 def rear_normal():
     make_stereo_pair("vonRear", "vonRear2")

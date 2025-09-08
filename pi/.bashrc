@@ -435,7 +435,7 @@ run_vlc() {
     return 0
   fi
   
-  trupath="$(readlink "$pth")"
+  [[ -L "$pth" ]] && trupath="$(readlink "$pth")" || trupath="$decoded"
   echo "TRU PATH $trupath"
   json="$(mkvmerge -J "$trupath")"
   subtrack=`node ~/scripts/parse_sub_track.js "$json"`
@@ -445,7 +445,7 @@ run_vlc() {
   audio="--audio-language=en"
   ctrl="--control=dbus"
   
-  nohup vlc --qt-minimal-view $ctrl $subs $audio $decoded &
+  nohup vlc --qt-minimal-view $ctrl $subs $audio "$decoded" &
   
   vlcnice -12 # give process priority to VLC
   vlc_jump_to_position "$pth"
