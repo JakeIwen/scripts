@@ -435,7 +435,8 @@ run_vlc() {
     return 0
   fi
   
-  [[ -L "$pth" ]] && trupath="$(readlink "$pth")" || trupath="$decoded"
+  # [[ -L "$pth" ]] && trupath="$(readlink "$pth")" || trupath="$decoded"
+  trupath="$(readlink "$pth")"
   echo "TRU PATH $trupath"
   json="$(mkvmerge -J "$trupath")"
   subtrack=`node ~/scripts/parse_sub_track.js "$json"`
@@ -445,7 +446,15 @@ run_vlc() {
   audio="--audio-language=en"
   ctrl="--control=dbus"
   
-  nohup vlc --qt-minimal-view $ctrl $subs $audio "$decoded" &
+  # shitty workaround here
+  if [[ "$#" = "1" ]]; then
+    # handles spaces in filename ie /incomplete, playp()
+    nohup vlc --qt-minimal-view $ctrl $subs $audio "$decoded" &
+  else
+    # assuming multiple $filepaths are space-delimited (paths contain no individual spaces)
+    nohup vlc --qt-minimal-view $ctrl $subs $audio $decoded &
+  fi
+
   
   vlcnice -12 # give process priority to VLC
   vlc_jump_to_position "$pth"
