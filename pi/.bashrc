@@ -436,7 +436,8 @@ run_vlc() {
   fi
   
   # [[ -L "$pth" ]] && trupath="$(readlink "$pth")" || trupath="$decoded"
-  trupath="$(readlink "$pth")"
+  # trupath="$(readlink "$pth")"
+  trupath="$( [ -L "$pth" ] && readlink "$pth" || echo "$pth" )"
   echo "TRU PATH $trupath"
   json="$(mkvmerge -J "$trupath")"
   subtrack=`node ~/scripts/parse_sub_track.js "$json"`

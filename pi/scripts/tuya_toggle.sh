@@ -1,13 +1,13 @@
 #! /bin/bash
 # tuya_toggle.sh aux on
 
-entity=$1 # aux, cab_wiz, ext_flood, solder_flood, light.dresser, starlink
+entity=$1 # starlink, cab_wiz, ext_flood, solder_flood, light.dresser, starlink
 to_state=$2 # on, off, blank means toggle
 token=$(cat /home/pi/secrets/localtuya_token)
 
 if [[ -z "$entity" ]]; then
   echo 'enter a device entity/name'
-  echo 'entity=$1 # aux, cab_wiz, ext_flood, solder_flood, light.dresser'
+  echo 'entity=$1 # starlink, cab_wiz, ext_flood, solder_flood, light.dresser'
   echo 'to_state=$2 # on, off, blank means toggle'
   
   if return 2>/dev/null; then return 1; else exit 1; fi
