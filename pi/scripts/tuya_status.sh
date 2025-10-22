@@ -1,6 +1,6 @@
 #! /bin/bash
 
-name=$1 # aux, cab_wiz, ext_flood, solder_flood
+name=$1 # starlink, cab_wiz, ext_flood, solder_flood
 token=$(cat /home/pi/secrets/localtuya_token)
 
 # assumes no duplicate names, otherwise provide full device_type_name ie switch.cab_wiz
