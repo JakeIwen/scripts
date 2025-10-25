@@ -446,14 +446,19 @@ run_vlc() {
   subs="--sub-track=$subtrack"
   audio="--audio-language=en"
   ctrl="--control=dbus"
+  av="--avcodec-hw=v4l2-request"
   
   # shitty workaround here
   if [[ "$#" = "1" ]]; then
     # handles spaces in filename ie /incomplete, playp()
-    nohup vlc --qt-minimal-view $ctrl $subs $audio "$decoded" &
+    nohup vlc $ctrl $subs $audio $av "$decoded" &
+    # so --qt-minimal-view was a workaround to enforce the 180 rotation since the display
+    # preference was being unrespected by VLC. $av seems to remedy this
+    # nohup vlc --qt-minimal-view $ctrl $subs $audio $av "$decoded" &
   else
     # assuming multiple $filepaths are space-delimited (paths contain no individual spaces)
-    nohup vlc --qt-minimal-view $ctrl $subs $audio $decoded &
+    nohup vlc $ctrl $subs $audio $av $decoded &
+    # nohup vlc --qt-minimal-view $ctrl $subs $audio $av $decoded &
   fi
 
   
