@@ -134,7 +134,10 @@ sync() {
   fi
   
   mount_bb
-  sync_mp_bb
+  sync_mp_bb # will log/notify missing locations
+  cd /mnt/bigboi/pi_backup_git || { echo "bigboi unavailable"; exit; }
+  cd /mnt/movingparts/pi_backup_git || { echo "movingparts unavailable"; exit; }
+  
   chk_free_sd_space
   live_pi_backup
   commit_last_backup      
