@@ -113,7 +113,12 @@ alias mtor="rm $mconf/notorrent* $mconf/nodisk*; touch $mconf/mtorrent; nohup $i
 alias mtorx="rm $mconf/mtorrent*; nohup $isw &"
 alias nodisk="rm $mconf/mdisk*; touch $mconf/nodisk; nohup $isw &"
 alias nodiskx="rm $mconf/nodisk*; nohup $isw &"
-umex() { . $HOME/scripts/umount_disks.sh EXFAT512; }
+# starlink torrent
+alias startor="rm /home/pi/starconf/notor"
+alias nostartor="touch /home/pi/starconf/notor"
+
+# status hooks
+van_is_running() { if test -f /home/pi/hooks/ignition_is_on; then echo "yes"; else echo "no"; fi; }
 
 j() {
   file="$1"
@@ -151,7 +156,6 @@ vlcr() { grep -ia "$1" "$POSPATH" | tail -10; }
 vlc_nosubs() { increment_global vlc_sub_track -1 2; resume ; }
 vlc_subs_off() { echo '-1' > /home/pi/.vlc_sub_track; resume; }
 vlcnice() { sudo renice ${1:-"12"} `pgrep vlc`; }
-vlcnice2() { parent=`pgrep -p vlc`; ncn=${1:-"12"}; sudo renice $ncn ${parent##*( )}; }
 get_global() { cat /home/pi/.$1; }
 media_by_name() { find "$(avail_drive_path)/links" -type l -ipath "*$1*" -print0 | sort -z; }
 fgp() { find /mnt/movingparts/links \( -type l \) -iname "*$1*"; }
@@ -253,27 +257,27 @@ mntdsk() { # mntdsk sd_card 0383-ABDF
 }
 
 rm_sm_dirs() { # remove small dirs by size `rm_sm_dirs 1.1G .`
-    local threshold="$1"
-    local target_dir="${2:-.}"
+  local threshold="$1"
+  local target_dir="${2:-.}"
 
-    if [[ -z "$threshold" ]]; then
-      echo "Usage: remove_small_dirs <size> [directory]"
-      echo "Example: remove_small_dirs 10M /path/to/dir"
-      return 1
+  if [[ -z "$threshold" ]]; then
+    echo "Usage: remove_small_dirs <size> [directory]"
+    echo "Example: remove_small_dirs 10M /path/to/dir"
+    return 1
+  fi
+
+  for d in "$target_dir"/*/; do
+    # Skip if no directories exist
+    [[ -d "$d" ]] || continue
+
+    dir_size_bytes=$(du -sb "$d" | awk '{print $1}')
+    threshold_bytes=$(numfmt --from=iec "$threshold")
+
+    if (( dir_size_bytes < threshold_bytes )); then
+      echo "Removing: $d (size: $(numfmt --to=iec $dir_size_bytes))"
+      rm -rf "$d"
     fi
-
-    for d in "$target_dir"/*/; do
-      # Skip if no directories exist
-      [[ -d "$d" ]] || continue
-
-      dir_size_bytes=$(du -sb "$d" | awk '{print $1}')
-      threshold_bytes=$(numfmt --from=iec "$threshold")
-
-      if (( dir_size_bytes < threshold_bytes )); then
-        echo "Removing: $d (size: $(numfmt --to=iec $dir_size_bytes))"
-        rm -rf "$d"
-      fi
-    done
+  done
 }
 
 
@@ -523,42 +527,34 @@ alias mp='cd /mnt/movingparts/'
 alias bb='cd /mnt/bigboi/'
 mountbb() { s mount_disks bigboi; }
 mountmp() { s mount_disks movingparts; }
+mountex() { s mount_disks EXFAT512; }
 umountbb() { s umount_disks bigboi; }
 umountmp() { s umount_disks movingparts; }
+umountex() { s umount_disks EXFAT512; }
+
 alias mnt='cd /mnt'
 alias tor='cd /mnt/movingparts/torrent/'
 alias inc='cd /mnt/movingparts/torrent/incomplete; ls -lah'
 alias backup_home='cd /mnt/bigboi/pi_backup_git/pi_backup/home/pi'
 
-alias am=". ~/scripts/alias_media.sh"
-alias an=". ~/scripts/alias_media.sh new"
+alias am="~/scripts/alias_media.sh"
+alias an="~/scripts/alias_media.sh new"
 alias ifaces="ssh root@OpenWrt mwan3 interfaces | grep 'is online'"
 alias cast="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; nohup python3 server.py &"
 alias castnn="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; python3 server.py"
 alias rpiplay='wake_display; nohup /home/pi/RPiPlay/build/rpiplay -r 180 &'
-# boost processess pushing netflix, may help with outher services
-alias rechrome="sudo renice -12  \`ps aux --sort=%cpu | tail -3 | awk '{print \$2}'\`"
+
 alias ngear="ssh root@OpenWrt"
 alias ubnt="ssh -i ~/.ssh/id_rsa ubnt@192.168.8.20"
 alias pd='sudo /sbin/shutdown -r now'
+
+### PYTHON ###
+# use py venv to run basically anything
+pyv() { source /home/pi/pyvenv/bin/activate; python "$@"; deactivate; }
+pipv() { source /home/pi/pyvenv/bin/activate; pip "$@"; deactivate; }
+pipa() { source /home/pi/pyvenv/bin/activate; }
 alias pip3="python3 -m pip"
 alias py="python3"
-pipa() { source /home/pi/pyvenv/bin/activate; }
-pipv() {
-  source /home/pi/pyvenv/bin/activate
-  pip "$@"
-  deactivate
-}
-
-pyv() {
-  source /home/pi/pyvenv/bin/activate
-  python "$@"
-  deactivate
-}
-
-van_is_running() {
-  if test -f /home/pi/hooks/ignition_is_on; then echo "yes"; else echo "no"; fi
-}
 
 ### GIT ###
 alias gpo="git push origin"

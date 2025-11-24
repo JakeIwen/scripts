@@ -69,6 +69,7 @@ live_pi_backup() {
 
 commit_last_backup() {
   cd /mnt/bigboi/pi_backup_git || exit 
+  git config --global --add safe.directory /mnt/bigboi/pi_backup_git
   git add .
   msg=$(echo "pibackup $(date +%Y.%m.%d)" | sed 's| |_|g')
   echo "making commit: $msg"
@@ -76,6 +77,7 @@ commit_last_backup() {
   echo "commit made"
   commit=`git rev-parse HEAD`
   echo "git checkout $commit" > "./$msg.sh"
+  sudo chmod 775 "./$msg.sh"
 }
 
 # live_pi_backup && commit_last_backup
