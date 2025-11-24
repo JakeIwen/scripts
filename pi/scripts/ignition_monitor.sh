@@ -17,7 +17,7 @@ do
   ignition_is_on="$(tail -1 $histfile)"
 
   if $ignition_is_on && ! $ignition_was_on; then 
-    echo "van switched to ON"
+    echo "van ignition switched to ON"
     touch $hooks/ignition_is_on
     $hooks/ignition_on.sh # we rollin'
 
@@ -25,7 +25,7 @@ do
     # ensure scan didnt just miss 1 reading before declaring van parked
     $scripts/last_n_lines_same.sh $histfile $num_confirmations_to_declare_off || continue
 
-    echo "van switched to OFF"
+    echo "van ignition switched to OFF"
     rm $hooks/ignition_is_on
     $hooks/ignition_off.sh
   fi
