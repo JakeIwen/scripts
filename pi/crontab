@@ -15,4 +15,5 @@ PATH="/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:/root/bin"
 # 30 9 * * *   su pi -c "$scripts/reboot.sh" >> "$log/reboot.log" 2>&1
 # * * * * *    su pi -c "/home/pi/sns.sh standby_grouped" >> "$log/sonos_standby_grouped.log" 2>&1
 # * * * * *    su pi -c "$scripts/log_zrate.sh"  >> "$log/log_zrate.log" 2>&1
+0 * * * *     su pi -c "$scripts/streetlight.sh"  >> "$log/streetlight.log" 2>&1
 
