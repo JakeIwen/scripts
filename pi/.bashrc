@@ -113,9 +113,11 @@ alias mtor="rm $mconf/notorrent* $mconf/nodisk*; touch $mconf/mtorrent; nohup $i
 alias mtorx="rm $mconf/mtorrent*; nohup $isw &"
 alias nodisk="rm $mconf/mdisk*; touch $mconf/nodisk; nohup $isw &"
 alias nodiskx="rm $mconf/nodisk*; nohup $isw &"
+
 # starlink torrent
 alias startor="rm /home/pi/starconf/notor"
 alias nostartor="touch /home/pi/starconf/notor"
+alias starconf="ls -lah /home/pi/starconf"
 
 # status hooks
 van_is_running() { if test -f /home/pi/hooks/ignition_is_on; then echo "yes"; else echo "no"; fi; }

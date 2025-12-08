@@ -4,6 +4,8 @@ num_confirmations_to_declare_off=3
 scripts=/home/pi/scripts
 hooks=/home/pi/hooks
 histfile=/tmp/ignition_wifi_scan
+inactive="$HOME/scripts/inactive/ignition"
+
 > $histfile
 
 uconnect_wifi_available() { sudo iwlist wlan0 scan | grep running_van_no_internet; }
@@ -15,8 +17,9 @@ do
 
   ignition_was_on=$(test -f /home/pi/hooks/ignition_is_on && echo true || echo false)
   ignition_is_on="$(tail -1 $histfile)"
+  script_inactive=$(test -f $inactive && echo true || echo false)
 
-  if $ignition_is_on && ! $ignition_was_on; then 
+  if $ignition_is_on && ! $ignition_was_on && ! $script_inactive; then 
     echo "van ignition switched to ON"
     touch $hooks/ignition_is_on
     $hooks/ignition_on.sh # we rollin'
@@ -26,6 +29,12 @@ do
     $scripts/last_n_lines_same.sh $histfile $num_confirmations_to_declare_off || continue
 
     echo "van ignition switched to OFF"
+    rm $hooks/ignition_is_on
+    $hooks/ignition_off.sh
+
+  elif $ignition_is_on && $script_inactive; then
+    # this will repeatedly run
+    echo "van ignition monitor DEACTIVATED"
     rm $hooks/ignition_is_on
     $hooks/ignition_off.sh
   fi

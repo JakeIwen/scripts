@@ -76,8 +76,14 @@ commit_last_backup() {
   git commit -m "$msg"
   echo "commit made"
   commit=`git rev-parse HEAD`
-  echo "git checkout $commit" > "./$msg.sh"
-  sudo chmod 775 "./$msg.sh"
+  if [ -n "$commit" ]; then
+    echo "git checkout $commit" > "./$msg.sh"
+    sudo chmod 775 "./$msg.sh"
+    sudo chown pi:pi "./$msg.sh"
+  else 
+    echo "could NOT parse commit with"
+    echo "`git rev-parse HEAD` at $(pwd)"
+  fi
 }
 
 # live_pi_backup && commit_last_backup
@@ -125,30 +131,30 @@ chk_free_sd_space() {
 
 
 
-sync() {
-  echo -e "\nscheduled_rsync begin: `date`"
-  if [ "$(ps aux | grep rsync_schedule | wc -l)" -gt 4 ]; then 
-    echo "rsync_schedule process already running"
-    echo "$(ps aux | grep rsync_schedule)"
-    return
-  fi
-  
-  mount_bb
-  sync_mp_bb # will log/notify missing locations
-  cd /mnt/bigboi/pi_backup_git || { echo "bigboi unavailable"; exit; }
-  cd /mnt/movingparts/pi_backup_git || { echo "movingparts unavailable"; exit; }
-  
-  chk_free_sd_space
-  live_pi_backup
-  commit_last_backup      
-  # retore_to_msd
-  unmount_bb
-  echo "scheduled_rsync end: `date`";
-}
+  sync() {
+    echo -e "\nscheduled_rsync begin: `date`"
+    if [ "$(ps aux | grep rsync_schedule | wc -l)" -gt 4 ]; then 
+      echo "rsync_schedule process already running"
+      echo "$(ps aux | grep rsync_schedule)"
+      return
+    fi
+    
+    mount_bb
+    sync_mp_bb # will log/notify missing locations
+    
+    cd /mnt/bigboi/pi_backup_git || { echo "bigboi unavailable"; exit; }
+    # cd /mnt/movingparts/pi_backup_git || { echo "movingparts unavailable"; exit; }
+    chk_free_sd_space
+    live_pi_backup
+    commit_last_backup      
+    # retore_to_msd
+    unmount_bb
+    echo "scheduled_rsync end: `date`";
+  }
 
-if [ $# -eq 0 ]; then
-  sync
-fi
+  if [ $# -eq 0 ]; then
+    sync
+  fi
 
 
 

@@ -2,11 +2,11 @@
 isw="$HOME/scripts/internet_switches.sh"
 tuya_toggle="$HOME/scripts/tuya_toggle.sh"
 tuya_device_ids="$HOME/scripts/tuya_device_ids.sh"
+inactive="$HOME/hooks/inactive/ignition"
 mconf="$HOME/mconf"
 log="$HOME/log/ignition_monitor.log"
-nodisk() { rm $mconf/*; touch $mconf/nodisk; $isw; }
 
-echo "ignition ON hook invoked"
+nodisk() { rm $mconf/*; touch $mconf/nodisk; $isw; }
 
 stop_disks() {
   cp -R $mconf "${mconf}_last"
@@ -23,8 +23,15 @@ turn_lights_off() {
   done
 }
 
-turn_lights_off &
-stop_disks
+echo "" >> $log
+echo "$(date)" >> $log
+echo "Ignition ON script invoked" >> $log
 
-echo "Ignition ON at $(date)" >> $log
-echo "IGNITION ON DONE"
+if cat $inactive; then
+  echo "(ignition monitor INACTIVE)" >> $log
+else
+  echo "ignition monitor ACTIVE" >> $log
+  turn_lights_off &
+  stop_disks
+  echo "IGNITION ON DONE" >> $log
+fi
