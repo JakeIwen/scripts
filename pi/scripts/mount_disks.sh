@@ -70,25 +70,28 @@ rm_mnt_dir() { # prevent Time Machine from backing up onto SD card etc
     echo "NOT removing mount dir /mnt/$diskdir for attached disk"
     return 0
   fi
+
+  echo "removing mount dir because not in blkid: /mnt/$diskdir"
+  rm -rf "/mnt/$diskdir"
   
-  if [ "$(ls -la "$diskdir" | wc -l)" -eq 3 ]; then
-    #  dir is empty
-    echo "removing empty mount dir: /mnt/$diskdir"
-    rm -rf "/mnt/$diskdir"
-  else
-    echo "ERROR: dir for unattached disk /mnt/$diskdir has folder contents"
-  fi
+  # if [ "$(ls -la "$diskdir" | wc -l)" -eq 3 ]; then
+  #   #  dir is empty
+  #   echo "removing empty mount dir: /mnt/$diskdir"
+  #   rm -rf "/mnt/$diskdir"
+  # else
+  #   echo "ERROR: dir for unattached disk /mnt/$diskdir has folder contents"
+  # fi
 }
 
 if [[ "$#" = "1" ]]; then
   mntdsk "$1"
 elif [[ "$#" = "0" ]]; then # used by minutely cron job
-  rm_dirs=(mbp1tbkup)
+  rm_dirs=(mbp1tbkup mbp2tbkup)
   for dir in "${rm_dirs[@]}"; do
     rm_mnt_dir "$dir"
   done
 
-  disks=(movingparts mbp1tbkup hfs2tb usbext EXFAT512)
+  disks=(movingparts mbp1tbkup mbp2tbkup hfs2tb usbext EXFAT512)
 
   for disk in "${disks[@]}"; do
     mntdsk "$disk"

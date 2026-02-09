@@ -72,6 +72,7 @@ commit_last_backup() {
   git config --global --add safe.directory /mnt/bigboi/pi_backup_git
   git add .
   msg=$(echo "pibackup $(date +%Y.%m.%d)" | sed 's| |_|g')
+  rm '.git/index.lock'
   echo "making commit: $msg"
   git commit -m "$msg"
   echo "commit made"

@@ -11,15 +11,15 @@ set_starlink_access_point() {
   ssh -i ~/.ssh/id_rsa ubnt@192.168.8.20 '. ~/.profile && set_ap denlink' > /dev/null
 }
 
+new_status="$1"
 orig_status="$($tuya_status starlink)" > /dev/null
 
-# if no change in status
-if [ "$orig_status" = "$1" ]; then 
+if [ "$orig_status" = "$new_status" ]; then 
   play_sound warn
   exit 0
 fi
 
-new_status="$($tuya_toggle starlink $1)" > /dev/null
+$tuya_toggle starlink $new_status
 
 if [ "$new_status" = "on" ]; then 
   set_starlink_access_point & > /dev/null
@@ -28,4 +28,6 @@ elif [ "$new_status" = "off" ]; then
   play_sound deactivate
 fi
 
-echo "$new_status"
+echo "starlink set to $new_status"
+
+exit 0

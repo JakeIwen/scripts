@@ -18,10 +18,11 @@ function hhmmss {
 [[ -z "$(pgrep vlc)" ]] && exit 0
 file=`python /home/pi/scripts/python-automation/vlc_property.py URL`
 nsecs=`python /home/pi/scripts/python-automation/vlc_property.py NS`
+
 if [[ $file && $nsecs ]]; then
   decoded="`uridecode $file`"
   trimmed="`echo $decoded | sed -E 's|.*\/links||g'`"
-  sed -i "\|^$trimmed|d" $POSPATH
+  sed -i "\|^$trimmed|d" $POSPATH # rm existing ref to file 
   line="$trimmed $nsecs $(hhmmss $nsecs)"
   echo "$line" >> $POSPATH
   sed -i '/^[^\/]/ d' $POSPATH # rm any python errors sent to file

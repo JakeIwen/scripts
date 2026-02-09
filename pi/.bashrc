@@ -101,6 +101,7 @@ sync_dirpath() {
   rsync -ur "$locpath" "$i9:'$syncpath'"
 }
 
+# mconf - mobile disk and torrenting configuration
 alias mconf="ls $mconf"
 alias mreset="rm $mconf/*; nohup $isw &"
 alias mdisk="rm $mconf/nodisk*; rm $mconf/notorrent*; touch $mconf/mdisk; nohup $isw &"
@@ -120,7 +121,11 @@ alias nostartor="touch /home/pi/starconf/notor"
 alias starconf="ls -lah /home/pi/starconf"
 
 # status hooks
+alias ignitmonoff="touch $HOME/hooks/inactive/ignition"
+alias ignitmonon="rm $HOME/hooks/inactive/ignition"
+alias ignitmonconf="ls -lah $HOME/hooks/inactive/ignition"
 van_is_running() { if test -f /home/pi/hooks/ignition_is_on; then echo "yes"; else echo "no"; fi; }
+
 
 j() {
   file="$1"

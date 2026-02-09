@@ -1,9 +1,14 @@
 #! /bin/bash
 # tuya_toggle.sh aux on
-
+log="$HOME/log/tuya_toggle.log"
 entity=$1 # starlink, cab_wiz, ext_flood, solder_flood, light.dresser, starlink
 to_state=$2 # on, off, blank means toggle
 token=$(cat /home/pi/secrets/localtuya_token)
+
+write_log() {
+  echo "$1" >> $log
+  echo "$1"
+}
 
 if [[ -z "$entity" ]]; then
   echo 'enter a device entity/name'
@@ -25,6 +30,8 @@ if [[ -z "$to_state" ]]; then
   state=$(/home/pi/scripts/tuya_status.sh $name)
   [[ "$state" == "on" ]] && to_state=off || to_state=on
 fi
+
+write_log "turning type name: $type_name, type: $type, to_state: $to_state"
 
 curl -s POST \
   -H "Authorization: Bearer $token" \

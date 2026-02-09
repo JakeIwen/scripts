@@ -4,7 +4,7 @@ num_confirmations_to_declare_off=3
 scripts=/home/pi/scripts
 hooks=/home/pi/hooks
 histfile=/tmp/ignition_wifi_scan
-inactive="$HOME/scripts/inactive/ignition"
+inactive="$HOME/hooks/inactive/ignition"
 
 > $histfile
 
