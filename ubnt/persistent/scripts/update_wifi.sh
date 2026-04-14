@@ -18,13 +18,14 @@ sort_networks() {
 
 set_access_point() {
   echo "setting AP to $1"
+  pkill -f crond
   cp "/etc/persistent/profiles/$1" /tmp/system.cfg
   /usr/etc/rc.d/rc.softrestart save
-  pkill -f crond
   sleep 120
   echo "AP set. Restarting cron at $(date)"
   . /var/etc/persistent/rc.postsysinit
 }
+
 find_ap() {
   if [ -n "$sys_init_flag" ]; then
     echo "reboot flag detected, continuing scan"
@@ -45,7 +46,9 @@ find_ap() {
   
   current_ssid=$(iwgetid -r)
   scan_results=$(sort_networks)
-  saved_networks=$(ls /etc/persistent/profiles)
+  saved_networks=$( # prefer other networks over my starlink to save on data
+    { ls /etc/persistent/profiles | grep -v '^denlink$' | sort; ls /etc/persistent/profiles | grep '^denlink$'; }
+  )
   echo "current_ssid: $current_ssid"
   IFS=$'\n'
   for i in $saved_networks; do 
@@ -87,14 +90,18 @@ save_tmp_profile () {
 }
 
 ccq=`mca-status | grep ccq | cut -d= -f2`
+cur_profile="$(iwgetid -r)"
 
 if [ "$#" = "1" ]; then
-  set_access_point "$1"
-elif [ "$ccq" -gt 300 ]; then
-  echo "Ipv4 is up"
+  set_access_point "$1" &
+elif [ "$ccq" -gt 300 ] && [ "$cur_profile" != "denlink" ]; then
+  echo "Ipv4 is up for $cur_profile"
   save_current_profile
   rm "$sys_init_flag" 2> /dev/null
 else
+  if [ "$cur_profile" = "denlink" ]; then
+    echo "denlink is the current profile, scanning for other networks"
+  fi
   find_ap
 fi
 
