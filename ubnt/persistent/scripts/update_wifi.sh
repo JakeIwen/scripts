@@ -3,6 +3,10 @@
 # scanres=$(echo iwlist ath0 scan)
 # iwlist ath0 scan | awk '/ESSID/{i++}i==2'\
 
+# usage
+# ./update_wifi.sh [ssid]
+# cron also uses this to scan for & set networks
+
 ssid_scan_path="/etc/persistent/scripts/essids.XXXXX"
 cur_profile_path="/etc/persistent/tmp/cur_profile.cfg"
 sys_init_flag="/etc/persistent/tmp/sys_init_flag.txt"
