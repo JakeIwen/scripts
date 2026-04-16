@@ -10,6 +10,7 @@
 ssid_scan_path="/etc/persistent/scripts/essids.XXXXX"
 cur_profile_path="/etc/persistent/tmp/cur_profile.cfg"
 sys_init_flag="/etc/persistent/tmp/sys_init_flag.txt"
+no_internet_aps_folder="/var/etc/persistent/profiles_no_internet_tmp"
 
 append_networks() {
   iwlist ath0 scan 2>/dev/null | awk -f /etc/persistent/scripts/parse-iwlist.awk >> $ssid_scan_path
@@ -66,10 +67,17 @@ find_ap() {
       scan_ssid=`echo "$j" | cut -d '|' -f 1`
       # echo "scan_ssid: $scan_ssid"
       if [ "$saved_ssid" = "$scan_ssid" ]; then
-        echo "MATCH: $j - setting AP"
-        set_access_point $scan_ssid
-        echo " "
-        return 0
+        
+        echo "MATCH: $j"
+        if [ -e "$no_internet_aps_folder/$scan_ssid" ]; then
+          echo "blacklisted AP $scan_ssid, skipping"
+        else
+          echo "Setting AP"
+          set_access_point $scan_ssid
+          echo " "
+          return 0
+        fi
+
       fi
     done
   done
@@ -93,6 +101,17 @@ save_tmp_profile () {
   chmod 750 "$cur_profile_path"
 }
 
+check_ap_connectivity() {
+  if ping -c 1 -W 2 8.8.8.8 > /dev/null 2>&1; then
+    echo "AP is reachable"
+  else
+    echo "AP is unreachable, blacklisting '$cur_profile' for 1 hour"
+    mkdir $no_internet_aps_folder
+    touch "$no_internet_aps_folder/$cur_profile"
+    find_ap
+  fi
+}
+
 ccq=`mca-status | grep ccq | cut -d= -f2`
 cur_profile="$(iwgetid -r)"
 
@@ -102,6 +121,7 @@ elif [ "$ccq" -gt 300 ] && [ "$cur_profile" != "denlink" ]; then
   echo "Ipv4 is up for $cur_profile"
   save_current_profile
   rm "$sys_init_flag" 2> /dev/null
+  check_ap_connectivity
 else
   if [ "$cur_profile" = "denlink" ]; then
     echo "denlink is the current profile, scanning for other networks"
