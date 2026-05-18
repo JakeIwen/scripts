@@ -49,5 +49,6 @@ btt_init_backup_directories() {
 echo "checking/creating backup folders"
 btt_init_backup_directories
 btt_set_vars
+# btt_restore
 btt_backup
 

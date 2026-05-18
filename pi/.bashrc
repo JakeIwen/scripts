@@ -517,7 +517,7 @@ play_status() {
     total=`py $py_vlc_path TotalTime`
     title=`py $py_vlc_path Title | perl -pe "s~$pattern|~~g"`
     # [[ -n "$title" ]] && log_position > /dev/null
-    printf "$title \r$position / $total"
+    printf "$title \n$position / $total"
   else
     omx_pos=`curl "http://0.0.0.0:2020/position"`
     if [[ $omx_pos ]]; then printf "$omx_pos"; fi

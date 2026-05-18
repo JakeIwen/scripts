@@ -23,7 +23,29 @@ case "$MINUTES" in
         ;;
 esac
 
-# Delete files older than specified minutes
-find "$DIR" -type f -mmin +"$MINUTES" -exec rm -f {} \;
+# Delete files older than or equal to specified minutes.
+# BusyBox find on some systems does not support -mmin, so compute age manually.
+NOW="$(date +%s)"
+
+find "$DIR" -type f | while IFS= read -r FILE; do
+    # Prefer BusyBox-compatible date -r first.
+    MTIME="$(date -r "$FILE" +%s 2>/dev/null)"
+    if [ -z "$MTIME" ]; then
+        MTIME="$(stat -c %Y "$FILE" 2>/dev/null)"
+    fi
+    if [ -z "$MTIME" ]; then
+        MTIME="$(stat -f %m "$FILE" 2>/dev/null)"
+    fi
+
+    # Skip files we cannot read mtime for on this platform.
+    if [ -z "$MTIME" ]; then
+        continue
+    fi
+
+    AGE_MINUTES=$(( (NOW - MTIME) / 60 ))
+    if [ "$AGE_MINUTES" -ge "$MINUTES" ]; then
+        rm -f "$FILE"
+    fi
+done
 
 exit 0

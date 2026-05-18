@@ -11,6 +11,7 @@ ssid_scan_path="/etc/persistent/scripts/essids.XXXXX"
 cur_profile_path="/etc/persistent/tmp/cur_profile.cfg"
 sys_init_flag="/etc/persistent/tmp/sys_init_flag.txt"
 no_internet_aps_folder="/var/etc/persistent/profiles_no_internet_tmp"
+prefer_denlink_flag="/var/etc/persistent/config/prefer_denlink"
 
 append_networks() {
   iwlist ath0 scan 2>/dev/null | awk -f /etc/persistent/scripts/parse-iwlist.awk >> $ssid_scan_path
@@ -51,9 +52,13 @@ find_ap() {
   
   current_ssid=$(iwgetid -r)
   scan_results=$(sort_networks)
-  saved_networks=$( # prefer other networks over my starlink to save on data
-    { ls /etc/persistent/profiles | grep -v '^denlink$' | sort; ls /etc/persistent/profiles | grep '^denlink$'; }
-  )
+  if [ -f "$prefer_denlink_flag" ]; then
+    saved_networks=$(ls /etc/persistent/profiles | sort)
+  else # prefer other networks over denlink to save on data
+    saved_networks=$(
+      { ls /etc/persistent/profiles | grep -v '^denlink$' | sort; ls /etc/persistent/profiles | grep '^denlink$'; }
+    )
+  fi
   echo "current_ssid: $current_ssid"
   IFS=$'\n'
   for i in $saved_networks; do 
@@ -115,9 +120,12 @@ check_ap_connectivity() {
 ccq=`mca-status | grep ccq | cut -d= -f2`
 cur_profile="$(iwgetid -r)"
 
+echo "cur_profile: $cur_profile"
+echo "ccq: $ccq"
+
 if [ "$#" = "1" ]; then
   set_access_point "$1" &
-elif [ "$ccq" -gt 300 ] && [ "$cur_profile" != "denlink" ]; then
+elif [ "$ccq" -gt 300 ] && ( [ "$cur_profile" != "denlink" ] || [ -f "$prefer_denlink_flag" ] ); then
   echo "Ipv4 is up for $cur_profile"
   save_current_profile
   rm "$sys_init_flag" 2> /dev/null

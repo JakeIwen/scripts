@@ -3,6 +3,8 @@ import sys
 import time
 import pprint
 import re
+import os
+from urllib.parse import unquote, urlparse
 
 req = sys.argv[1]
 # req = "NS"
@@ -41,7 +43,19 @@ props_iface = dbus.Interface(vlc_media_player_obj, 'org.freedesktop.DBus.Propert
 result = props_iface.Get("org.mpris.MediaPlayer2.{}".format(iface), prop)
 
 if key:
-    result = result[key]
+    if key in result:
+        result = result[key]
+    elif req == 'Title':
+        # Some VLC streams/files do not expose xesam:title; derive it from URL.
+        fallback_url = result.get('xesam:url')
+        if fallback_url:
+            parsed = urlparse(str(fallback_url))
+            fallback_path = unquote(parsed.path) if parsed.path else str(fallback_url)
+            result = os.path.basename(fallback_path) or fallback_path
+        else:
+            result = ""
+    else:
+        result = ""
 if sub_pattern:
     result = re.sub(sub_pattern, "", result)
 if format_time:
