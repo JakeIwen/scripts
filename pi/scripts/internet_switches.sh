@@ -133,15 +133,22 @@ kill_all() {
   unmount_drives
 }
 
-ifaces="$(ssh root@OpenWrt 'mwan3 interfaces')"
-iface_online() { echo "$ifaces" | grep "$1 is online"; }
+iface_online() { 
+  ifaces="$(ssh root@OpenWrt 'mwan3 interfaces')"
+  echo "$ifaces" | grep "interface $1 is online"
+}
 
-if date | grep '0:0'; then date; fi
+# if date | grep '0:0'; then date; fi
 # ubnt_internet_ops
-if conf nodisk &> /dev/null; then kill_all # drives disabled ~/mconf/nodisk
-elif iface_online clientwan &> /dev/null; then mobile_internet_ops
-elif iface_online lifiwan &> /dev/null; then lifi_internet_ops
-elif iface_online wan &> /dev/null; then ubnt_internet_ops
-else no_internet_ops
-fi
-
+set_isw_options() {
+  echo ""
+  echo "$(date)"
+  if conf nodisk &> /dev/null; then kill_all # drives disabled ~/mconf/nodisk
+  elif iface_online clientwan &> /dev/null; then mobile_internet_ops
+  elif iface_online lifiwan &> /dev/null; then lifi_internet_ops
+  elif iface_online wan &> /dev/null; then ubnt_internet_ops
+  else no_internet_ops
+  fi
+}
+# 
+set_isw_options
