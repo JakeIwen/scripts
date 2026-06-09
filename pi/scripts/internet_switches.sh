@@ -67,10 +67,12 @@ no_internet_ops() {
 }
 
 kill_torrent_client() {
-  if [[ "$(ps ax)" == *"qbittorrent"* ]]; then echo 'killtorrent' && pkill -TERM qbittorrent; fi
-  sleep 2
-  if [[ "$(ps ax)" == *"qbittorrent"* ]]; then echo 'SECOND ATTEMPT killtorrent' && pkill -f qbittorrent; fi
-  sleep 2
+  if [[ "$(ps ax)" == *"qbittorrent"* ]]; then
+    echo 'killtorrent' && pkill -TERM qbittorrent
+    sleep 2
+    if [[ "$(ps ax)" == *"qbittorrent"* ]]; then echo 'SECOND ATTEMPT killtorrent' && pkill -f qbittorrent; fi
+    sleep 2
+  fi
 }
 
 start_torrent_client() {
