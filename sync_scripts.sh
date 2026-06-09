@@ -10,6 +10,8 @@ secrets="$dsc/secrets"
 pi_ip='pi@vanpi.local'
 vr_ip='root@openwrt'
 
+smb_changed=$(git -C "$dsc" diff HEAD -- "pi/configs/smb.conf" | grep -c '^[+-]' || true)
+
 cp_services() {
   ssh $pi_ip "mkdir /tmp/systemd-tmp/"
   scp -r "$services/" "$pi_ip:/tmp/systemd-tmp/"
@@ -45,17 +47,22 @@ scp  "$dsc/NativCast/server.py"  "$pi_ip:/home/pi/NativCast/server.py" &
 
 # configs
 scp  "$configs/smb.conf" "$pi_ip:/etc/samba/smb.conf" &
+smb_scp_pid=$!
 scp  "$configs/.bash_defaults" "$pi_ip:/home/pi/.bash_defaults" &
 scp  "$configs/.mount_aliases" "$pi_ip:/home/pi/.mount_aliases" &
 scp  "$configs/.disk_uuids" "$pi_ip:/home/pi/.disk_uuids" &
 scp  "$configs/rsync-exclude.txt" "$pi_ip:/home/pi/rsync-exclude.txt" &
 scp  "$configs/rsync-exclude-media.txt" "$pi_ip:/home/pi/rsync-exclude-media.txt" &
 
-ssh $pi_ip 'sudo chmod 770 /home/pi/rsync-exclude-media.txt /home/pi/rsync-exclude.txt' &
-
 wait $scripts_pid
 wait $hooks_pid
-ssh $pi_ip 'sudo chmod 770 /home/pi/scripts/*' &
+wait $smb_scp_pid
+
+if [[ "$smb_changed" -gt 0 ]]; then
+  echo "smb.conf changed — restarting smbd"
+  ssh $pi_ip 'sudo service smbd restart' &
+fi
+ssh $pi_ip 'sudo chmod 770 /home/pi/rsync-exclude-media.txt /home/pi/rsync-exclude.txt /home/pi/scripts/*' &
 
 # ROUTER
 # scp -r "$vr_ip:/etc/config" "$vanrouter/etc/" &
@@ -66,5 +73,5 @@ ssh $pi_ip 'sudo chmod 770 /home/pi/scripts/*' &
 # # scp "$vanrouter/root/dnsmasq.awk" "$vr_ip:/root/dnsmasq.awk" &
 
 # CLEANUP
-sleep 4
+sleep 2
 rm -rf $scripts/python-automation/

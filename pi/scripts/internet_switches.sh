@@ -84,19 +84,33 @@ start_torrent_client() {
   fi
 }
 
+clear_stale_tm_locks() {
+  # Remove stale sparsebundle lock state left by interrupted backups.
+  # 'lock' and 'token' cause "already in use"; stale 'mapped/' entries cause
+  # "crypto header" failure when hdiutil tries to resume a dead attachment.
+  for mount in /mnt/mbp1tbkup /mnt/mbp2tbkup; do
+    find "$mount" -maxdepth 1 -name "*.sparsebundle" -type d 2>/dev/null | while read -r sb; do
+      sudo rm -f "$sb/lock" "$sb/token"
+      sudo rm -f "$sb/mapped/"*
+      echo "cleared stale TM lock state: $sb"
+    done
+  done
+}
+
 mount_drives() {
   if [[ $(van_is_running) ]]; then
     echo "MOUNT interrupt: van is running, unmounting drives"
     echo "will not mount drives without idisk conf flag!"
     kill_torrent_client
-    stop_service smbd 
+    stop_service smbd
     sleep 1
     unmount_drives
   else
     . /home/pi/scripts/mount_disks.sh
     sleep 3
+    clear_stale_tm_locks
     echo "drives mounted. starting smb share."
-    start_service smbd 
+    start_service smbd
   fi
 }
 
