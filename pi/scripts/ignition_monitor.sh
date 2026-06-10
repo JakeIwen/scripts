@@ -1,6 +1,6 @@
 #! /bin/bash
 # this script is run continuously by ignitionmonitor.service
-num_confirmations_to_declare_off=3
+num_confirmations_to_declare_off=8
 scripts=/home/pi/scripts
 hooks=/home/pi/hooks
 histfile=/tmp/ignition_wifi_scan
@@ -8,12 +8,22 @@ inactive="$HOME/hooks/inactive/ignition"
 
 > $histfile
 
-uconnect_wifi_available() { sudo iwlist wlan0 scan | grep running_van_no_internet; }
-van_ignition_on(){ [ "$(uconnect_wifi_available)" ] && echo true || echo false; }
+# empty scan output means the scan itself failed (busy channel, driver hiccup);
+# treat that as "unknown" rather than "network absent" to avoid false OFF flapping
+van_ignition_on() {
+  local scan
+  scan=$(sudo iwlist wlan0 scan 2>/dev/null)
+  if [ -z "$scan" ]; then echo unknown
+  elif echo "$scan" | grep -q running_van_no_internet; then echo true
+  else echo false
+  fi
+}
 
 while :
 do
-  van_ignition_on >> $histfile
+  reading=$(van_ignition_on)
+  if [ "$reading" = "unknown" ]; then sleep 3; continue; fi
+  echo "$reading" >> $histfile
 
   ignition_was_on=$(test -f /home/pi/hooks/ignition_is_on && echo true || echo false)
   ignition_is_on="$(tail -1 $histfile)"

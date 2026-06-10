@@ -1,5 +1,11 @@
 #! /bin/bash
 
+# Serialize instances: a minutely-cron run mid-mount must not interleave with
+# an ignition-hook run trying to unmount (or vice versa). Lock is held for the
+# life of the process via fd 200.
+exec 200>/tmp/internet_switches.lock
+flock -w 90 200 || { echo "isw lock timeout; exiting"; exit 1; }
+
 conf() { cat /home/pi/mconf/$1* &> /dev/null; }
 
 ubnt_internet_ops() { # nanostation connected; van is likely stationary/parked
@@ -85,14 +91,19 @@ start_torrent_client() {
 }
 
 clear_stale_tm_locks() {
-  # Remove stale sparsebundle lock state left by interrupted backups.
-  # 'lock' and 'token' cause "already in use"; stale 'mapped/' entries cause
-  # "crypto header" failure when hdiutil tries to resume a dead attachment.
+  # Remove stale sparsebundle lock state ('lock'/'token' files) left by
+  # interrupted backups, which cause "backup already in use" on next attempt.
+  # NOT mapped/ — that is persistent band metadata, deleting it kills the bundle.
+  # Only safe while smbd is down: a live backup legitimately holds its lock.
+  if pgrep smbd > /dev/null; then return 0; fi
   for mount in /mnt/mbp1tbkup /mnt/mbp2tbkup; do
     find "$mount" -maxdepth 1 -name "*.sparsebundle" -type d 2>/dev/null | while read -r sb; do
-      sudo rm -f "$sb/lock" "$sb/token"
-      sudo rm -f "$sb/mapped/"*
-      echo "cleared stale TM lock state: $sb"
+      stale=$(ls "$sb/lock" "$sb/token" 2>/dev/null)
+      if [ -n "$stale" ]; then
+        echo "STALE TM lock state found (interrupted backup?):"
+        echo "$stale"
+        sudo rm -f "$sb/lock" "$sb/token"
+      fi
     done
   done
 }
@@ -108,6 +119,13 @@ mount_drives() {
   else
     . /home/pi/scripts/mount_disks.sh
     sleep 3
+    if [[ $(van_is_running) ]]; then
+      # ignition came on mid-mount; the hook's isw instance is queued on the
+      # lock behind us, but don't hand it a running smbd to tear down
+      echo "MOUNT abort: ignition came on mid-mount, unmounting"
+      unmount_drives
+      return 1
+    fi
     clear_stale_tm_locks
     echo "drives mounted. starting smb share."
     start_service smbd
