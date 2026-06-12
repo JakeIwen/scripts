@@ -679,6 +679,9 @@ nalias() {
 }
 
 source ~/.twilio/twilio_creds.sh
+source ~/claude/.claude-env
+
+alias claudep='claude --permission-mode bypassPermissions'
 
 shopt -s histappend                      # append to history, don't overwrite it
 export DISPLAY=:0

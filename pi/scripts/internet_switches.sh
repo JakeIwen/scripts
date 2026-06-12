@@ -90,23 +90,10 @@ start_torrent_client() {
   fi
 }
 
-clear_stale_tm_locks() {
-  # Remove stale sparsebundle lock state ('lock'/'token' files) left by
-  # interrupted backups, which cause "backup already in use" on next attempt.
-  # NOT mapped/ — that is persistent band metadata, deleting it kills the bundle.
-  # Only safe while smbd is down: a live backup legitimately holds its lock.
-  if pgrep smbd > /dev/null; then return 0; fi
-  for mount in /mnt/mbp1tbkup /mnt/mbp2tbkup; do
-    find "$mount" -maxdepth 1 -name "*.sparsebundle" -type d 2>/dev/null | while read -r sb; do
-      stale=$(ls "$sb/lock" "$sb/token" 2>/dev/null)
-      if [ -n "$stale" ]; then
-        echo "STALE TM lock state found (interrupted backup?):"
-        echo "$stale"
-        sudo rm -f "$sb/lock" "$sb/token"
-      fi
-    done
-  done
-}
+# NOTE: never delete 'lock', 'token', or 'mapped/' from a sparsebundle —
+# they are permanent parts of the bundle (token backs the crypto header;
+# an attach fails with ENOENT without it). "Already in use" errors are a
+# Mac-side condition (ghost volumes / stale attach), not Pi-side files.
 
 mount_drives() {
   if [[ $(van_is_running) ]]; then
@@ -126,7 +113,6 @@ mount_drives() {
       unmount_drives
       return 1
     fi
-    clear_stale_tm_locks
     echo "drives mounted. starting smb share."
     start_service smbd
   fi

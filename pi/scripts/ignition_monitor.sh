@@ -1,6 +1,6 @@
 #! /bin/bash
 # this script is run continuously by ignitionmonitor.service
-num_confirmations_to_declare_off=8
+num_confirmations_to_declare_off=5
 scripts=/home/pi/scripts
 hooks=/home/pi/hooks
 histfile=/tmp/ignition_wifi_scan
