@@ -58,6 +58,54 @@ alias logdir="cd /var/log/cron"
 alias speed="~/scripts/speedtest.sh"
 
 alias corefreq='cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq; vcgencmd measure_volts'
+### CLAUDE ###
+alias claudep='claude --permission-mode bypassPermissions'
+clauderm() {
+    if [ -z "$1" ] || [ -z "$2" ]; then
+        echo "usage: clauderm <project-folder> <conversation-id>" >&2
+        return 2
+    fi
+    rm -v "/home/pi/.claude/projects/$1/$2.jsonl"
+}
+# fzf-based Claude session picker with Ctrl-D to delete.
+# Deletion is handled AFTER fzf exits (via --expect) so the y/N prompt is
+# always visible — fzf's in-picker execute() doesn't render reliably over SSH.
+clauder() {
+    local out key result sid jsonl confirm
+    while true; do
+        out=$(python3 "$HOME/.claude/session-picker.py" | fzf \
+            --ansi \
+            --delimiter=$'\t' \
+            --with-nth=1 \
+            --border=rounded \
+            --prompt='Resume session › ' \
+            --header=$'Enter: resume  ·  Ctrl-D: delete  ·  Type to search  ·  Esc: cancel' \
+            --expect=ctrl-d)
+        # With --expect, line 1 is the key pressed (empty for Enter), line 2 the row.
+        key=$(sed -n 1p <<<"$out")
+        result=$(sed -n 2p <<<"$out")
+        [[ -z "$result" ]] && return 0          # Esc / no selection
+        if [[ "$key" == "ctrl-d" ]]; then
+            jsonl=$(cut -f3 <<<"$result")
+            printf 'Delete %s ? [y/N] ' "$jsonl"
+            read -r confirm < /dev/tty
+            if [[ "$confirm" == [yY] ]]; then
+                rm -f "$jsonl" && echo "Deleted."
+            else
+                echo "Cancelled."
+            fi
+            continue                            # reload the list
+        fi
+        sid=$(cut -f2 <<<"$result")
+        claude --resume "$sid" "$@"
+        return 0
+    done
+}
+claudepr() {
+    clauder --permission-mode bypassPermissions "$@"
+}
+### END CLAUDE ###
+
 set_date() { sudo date -s "$(wget -qSO- --max-redirect=0 google.com 2>&1 | grep Date: | cut -d' ' -f5-8)Z"; }
 ssh_copy_id_dropbear() {
   if [ "$#" -ne 1 ]; then echo "Example: ${0} root@192.168.1.1" && exit 1; fi
@@ -677,6 +725,62 @@ nalias() {
   echo 'reloading shell'
   exec bash
 }
+
+### CANBUS ###
+alias obd="cd ~/dev/obd-things; ls -lah"
+alias canhelp="sudo ip link add can0 type can help"
+alias canup="sudo ip link set can0 up && ip -details link show can0"
+alias candown="sudo ip link set can0 down 2>/dev/null"
+alias canshow="ip -details link show can0"
+alias cand="candump -c -axde can0"
+alias canlog="cd $HOME/log/can; ls -lah"
+
+alias canif="ifconfig can0"
+alias mxmon="cand | grep -Pv '  02 7E 00|  02 3E 00 00 00 00 00 00' | grep 18DA"
+uniq_to_file() { orig=$1; file2=$2; grep -v -f "$orig" "$file2"; }
+
+canmxid=18DAF140
+mxgrep() { cat "$1" | grep $canmxid ; }
+cans() {
+  if [ -n "$2" ]; then
+    canid=$1
+    data=$(echo $2 | sed 's| ||g')
+  else
+    hex="[\d(A-F)]"
+    canid=$(echo "$1" | grep -Po "  $hex{8}  " | sed 's| ||g')
+    data="$(echo "$1" | grep -Po " ($hex$hex )+ " | sed 's| ||g')"
+  fi
+  echo "sending ${canid}#${data}"
+  cansend can0 "${canid}#${data}"
+}
+canuids() {
+  file="$1"
+  hex="[\d(A-F)]"
+  cat "$file" | grep -Po "\s$hex{8}" | sed 's| ||g' | sort -u
+}
+cansr() {
+  echo "$1" | while read line; do
+    cans "$line"
+    sleep 1
+  done
+}
+caninit() {
+  if [[ "$1" == "b" ]]; then br=50000; 
+  elif [[ "$1" == "c" ]]; then br=500000; 
+  else return 1; fi;
+  shift 
+  if incl "lo" $@; then lo="listen-only on"; else lo="listen-only off"; fi;
+  if incl "lb" $@; then lb="loopback on"; else lb=""; fi;
+  if incl "fd" $@; then fd="fd on"; else fd=""; fi;
+  if incl "os" $@; then os="one-shot on"; else os=""; fi;
+  echo "options $lo $lb $fd $os"
+  candown
+  sudo ip link set can0 type can bitrate $br restart-ms 100 $lo $lb $fd
+  canup
+  canshow
+}
+
+#### END CANBUS
 
 source ~/.twilio/twilio_creds.sh
 
