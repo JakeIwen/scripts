@@ -1,0 +1,5 @@
+# restored 2026-07-08 by Claude after accidental `crontab -r` (content verified against session reads)
+# cron env: source secrets (NTFY_VOLTAGE_URL, OBD_VIN) via bash BASH_ENV — added 2026-07-09
+SHELL=/bin/bash
+BASH_ENV=/home/pi/secrets/.bash_variables
+#DISABLED 2026-07-07 (TPMS logger campaign: PCAN is on C-CAN tap + iface flips would blind tpms-logger; re-enable when PCAN returns to B-CAN) 0 10-22/2 * * * /home/pi/dev/obd-things/projects/battery/voltage_mon.sh

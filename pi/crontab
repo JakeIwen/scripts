@@ -21,3 +21,7 @@ PATH="/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:/root/bin"
 
 
 
+
+# crontab self-backup (added 2026-07-08): guarded so a wiped crontab can never truncate a good backup
+15 0 * * *     mkdir -p /home/pi/backups && su pi -c "crontab -l" > /home/pi/backups/crontab.pi.new 2>/dev/null && mv /home/pi/backups/crontab.pi.new /home/pi/backups/crontab.pi && chown pi:pi /home/pi/backups/crontab.pi
+20 0 * * *     mkdir -p /home/pi/backups && crontab -l > /home/pi/backups/crontab.root.new 2>/dev/null && mv /home/pi/backups/crontab.root.new /home/pi/backups/crontab.root

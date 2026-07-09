@@ -728,61 +728,12 @@ nalias() {
 
 ### CANBUS ###
 alias obd="cd ~/dev/obd-things; ls -lah"
-alias canhelp="sudo ip link add can0 type can help"
-alias canup="sudo ip link set can0 up && ip -details link show can0"
-alias candown="sudo ip link set can0 down 2>/dev/null"
-alias canshow="ip -details link show can0"
-alias cand="candump -c -axde can0"
-alias canlog="cd $HOME/log/can; ls -lah"
-
-alias canif="ifconfig can0"
-alias mxmon="cand | grep -Pv '  02 7E 00|  02 3E 00 00 00 00 00 00' | grep 18DA"
-uniq_to_file() { orig=$1; file2=$2; grep -v -f "$orig" "$file2"; }
-
-canmxid=18DAF140
-mxgrep() { cat "$1" | grep $canmxid ; }
-cans() {
-  if [ -n "$2" ]; then
-    canid=$1
-    data=$(echo $2 | sed 's| ||g')
-  else
-    hex="[\d(A-F)]"
-    canid=$(echo "$1" | grep -Po "  $hex{8}  " | sed 's| ||g')
-    data="$(echo "$1" | grep -Po " ($hex$hex )+ " | sed 's| ||g')"
-  fi
-  echo "sending ${canid}#${data}"
-  cansend can0 "${canid}#${data}"
-}
-canuids() {
-  file="$1"
-  hex="[\d(A-F)]"
-  cat "$file" | grep -Po "\s$hex{8}" | sed 's| ||g' | sort -u
-}
-cansr() {
-  echo "$1" | while read line; do
-    cans "$line"
-    sleep 1
-  done
-}
-caninit() {
-  if [[ "$1" == "b" ]]; then br=50000; 
-  elif [[ "$1" == "c" ]]; then br=500000; 
-  else return 1; fi;
-  shift 
-  if incl "lo" $@; then lo="listen-only on"; else lo="listen-only off"; fi;
-  if incl "lb" $@; then lb="loopback on"; else lb=""; fi;
-  if incl "fd" $@; then fd="fd on"; else fd=""; fi;
-  if incl "os" $@; then os="one-shot on"; else os=""; fi;
-  echo "options $lo $lb $fd $os"
-  candown
-  sudo ip link set can0 type can bitrate $br restart-ms 100 $lo $lb $fd
-  canup
-  canshow
-}
+if [ -f ~/canbus_funcs.sh ]; then . ~/canbus_funcs.sh; fi
 
 #### END CANBUS
 
 source ~/.twilio/twilio_creds.sh
+source ~/secrets/.bash_variables
 
 shopt -s histappend                      # append to history, don't overwrite it
 export DISPLAY=:0

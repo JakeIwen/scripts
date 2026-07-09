@@ -1,6 +1,7 @@
 ### CANBUS ###
 alias pcanf='cd /home/pi/pcan; ls -lah;'
-
+alias bringup="/home/pi/dev/obd-things/bringup.sh"
+alias obddump="/home/pi/dev/obd-things/tools/dump.sh"
 alias canhelp="sudo ip link add can0 type can help"
 alias canup="sudo ip link set can0 up && ip -details link show can0"
 alias candown="sudo ip link set can0 down 2>/dev/null"
@@ -68,7 +69,7 @@ caninit() {
 
 play_alert() {
   sns rear_movie
-  sns vol_eql_all 50
+  sns vol_eql_all 80
   vlc "/home/pi/soundbytes/$1" &
   sleep 10
   pk vlc
