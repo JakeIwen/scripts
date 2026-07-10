@@ -10,6 +10,7 @@ write_log() {
   echo "$1"
 }
 
+# todo get status first and invert -> revert
 cycle() {
   switch_name="$1"
   write_log "turning off $switch_name"
