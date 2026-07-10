@@ -1,6 +1,6 @@
 # vanpi recovery playbook
 
-Backups (see `scripts/backup_conf.sh`):
+Backups (see `scripts/backup/backup_conf.sh`):
 - **borg repo** `/mnt/bigboi/borg/vanpi` — nightly versioned snapshots of `/` + `/boot/firmware`
   (14 daily / 8 weekly / 12 monthly). HA's sqlite is snapshotted to
   `/home/pi/backups/snapshots/` before each run; the live DB is excluded.
@@ -42,6 +42,17 @@ archive, stop `home-assistant.service`, copy it over
    ```
    (Or run `restore_from_borg.sh` directly if any surviving system still has the scripts.)
 3. Swap the restored card into the SD slot and boot.
+
+## Van-ignition interplay
+
+Backups run hourly 03:00–08:00 (when the van is least likely to drive); the first
+success of the day wins. While the van runs
+(`~/hooks/ignition_is_on` exists) attempts defer, since drives are unmounted for
+vibration protection. Starting the van mid-backup is safe: `umount_disks.sh` calls
+`backup/abort_backup.sh`, which TERMs the running job and waits for it to stop before
+unmounting — borg simply rolls back to its last checkpoint and the next parked hour
+retries. A restore aborted this way leaves the target card INCOMPLETE (you'll get a
+loud ntfy) — just re-run it when parked.
 
 ## Watchdog
 

@@ -6,6 +6,9 @@ else
   unset disk_name
 fi
 
+# stop any running backup/restore gracefully before pulling mounts (no-op when idle)
+sudo /home/pi/scripts/backup/abort_backup.sh
+
 kill_torrent_client() {
   if [[ "$(ps ax)" == *"qbittorrent"* ]]; then echo 'killtorrent' && sudo pkill -TERM qbittorrent && sleep 4; fi
   if [[ "$(ps ax)" == *"qbittorrent"* ]]; then echo 'SECOND ATTEMPT killtorrent' && sudo pkill -f qbittorrent && sleep 3; fi

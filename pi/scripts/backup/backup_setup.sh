@@ -1,7 +1,7 @@
 #!/bin/bash
 # one-time (idempotent) setup for the new backup scheme — run as root on the Pi
 set -eu
-. /home/pi/scripts/backup_conf.sh
+. /home/pi/scripts/backup/backup_conf.sh
 
 apt-get install -y borgbackup sqlite3
 
@@ -22,7 +22,7 @@ if ! borg info >/dev/null 2>&1; then
 fi
 
 echo "setup complete. next steps:"
-echo "  1. run /home/pi/scripts/pi_backup.sh once manually and read the output"
+echo "  1. run /home/pi/scripts/backup/pi_backup.sh once manually and read the output"
 echo "  2. swap the crontab entries (rsync_schedule.sh -> pi_backup.sh + backup_watchdog.sh)"
 echo "  3. when a spare card is attached: clone_to_sd.sh --init hotspare-a sdX,"
 echo "     then add 'hotspare-a:7' to CLONE_TARGETS in backup_conf.sh"

@@ -4,7 +4,7 @@
 #   clone_to_sd.sh --init <label> <sdX>  first-time setup of a fresh card (DESTROYS its contents)
 # exit: 0 ok, 1 failed, 2 card not attached (quiet — watchdog handles staleness)
 set -u
-. /home/pi/scripts/backup_conf.sh
+. /home/pi/scripts/backup/backup_conf.sh
 notify() { /home/pi/scripts/ntfy_send.sh "$@"; }
 
 init=0
@@ -21,6 +21,7 @@ fi
 
 [ -b "/dev/$disk" ] || { echo "/dev/$disk is not a block device"; exit 1; }
 [[ "$disk" == mmcblk0* ]] && { echo "refusing to clone onto the live boot card"; exit 1; }
+lock_disk "$disk" || exit 1
 size_gb=$(( $(lsblk -bdno SIZE "/dev/$disk") / 1024**3 ))
 if [ "$size_gb" -gt "$CLONE_MAX_DISK_GB" ]; then
   notify "vanpi clone" "refusing /dev/$disk: ${size_gb}GB exceeds ${CLONE_MAX_DISK_GB}GB guard" high warning

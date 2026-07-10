@@ -3,16 +3,45 @@
 #   1. mount + verify bigboi          4. borg create/prune (versioned history)
 #   2. media mirror mp -> bigboi      5. bootable SD clones when due (CLONE_TARGETS)
 #   3. HA sqlite snapshot             6. stamp + ntfy
-# run as root from cron; all alerting via ntfy (see backup_conf.sh)
+# cron fires this hourly 03:00-08:00 (when the van is least likely to drive);
+# the first success of the day wins and later runs no-op. Defers while the van
+# runs (drives are unmounted for vibration protection); if the van starts
+# mid-run, umount_disks.sh -> abort_backup.sh TERMs us and we stop cleanly
+# before the force-unmount.
 set -u
-. /home/pi/scripts/backup_conf.sh
+. /home/pi/scripts/backup/backup_conf.sh
 
 notify() { /home/pi/scripts/ntfy_send.sh "$@"; }
 log() { echo "[$(date '+%F %T')] $*"; }
 fail() { log "FATAL: $1"; notify "vanpi backup FAILED" "$1" high rotating_light; exit 1; }
 
-exec 9>/run/pi_backup.lock
-flock -n 9 || { log "another pi_backup run is active, exiting"; exit 0; }
+if [ -f "$STAMP_DIR/borg_ok" ] && [ "$(date -r "$STAMP_DIR/borg_ok" +%F)" = "$(date +%F)" ]; then
+  log "already succeeded today, nothing to do"
+  exit 0
+fi
+if [ -f "$IGNITION_FLAG" ]; then
+  log "van is running, deferring (drives unmounted for vibration protection)"
+  exit 0
+fi
+acquire_job_lock || { log "another backup/restore is active, exiting"; exit 0; }
+
+# long steps go through run() so a TERM from abort_backup.sh stops them promptly
+# (bash delays traps until the foreground child exits; wait doesn't)
+child=
+run() { "$@" & child=$!; wait "$child"; local rc=$?; child=; return $rc; }
+aborted() {
+  [ -n "$child" ] && { kill -TERM "$child" 2>/dev/null; wait "$child" 2>/dev/null; }
+  log "aborted mid-run (van started?)"
+  notify "vanpi backup deferred" "aborted mid-run (likely ignition-on); retrying hourly until 08:00" default warning
+  exit 143
+}
+trap aborted TERM INT
+bail_if_driving() {
+  [ -f "$IGNITION_FLAG" ] || return 0
+  log "van started mid-run, stopping before the next phase"
+  notify "vanpi backup deferred" "van started mid-run; retrying hourly until 08:00" default warning
+  exit 143
+}
 
 mkdir -p "$STAMP_DIR" "$SNAP_DIR"
 
@@ -42,12 +71,14 @@ ensure_mounted "$BACKUP_DISK_LABEL" "$BACKUP_MNT" || fail "$BACKUP_DISK_LABEL no
 if ensure_mounted movingparts "$MEDIA_SRC"; then
   log "media mirror -> $MEDIA_DST"
   mkdir -p "$MEDIA_DST"
-  rsync -aH --delete-during --delete-excluded --exclude-from="$MEDIA_EXCLUDES" \
+  run rsync -aH --delete-during --delete-excluded --exclude-from="$MEDIA_EXCLUDES" \
     "$MEDIA_SRC/" "$MEDIA_DST" \
     || notify "vanpi backup" "media rsync exited $? (partial sync)" high warning
 else
   notify "vanpi backup" "movingparts not available, media mirror skipped" high warning
 fi
+
+bail_if_driving
 
 # --- 3. app-consistent snapshots (files rsync/borg could tear mid-write) ---
 if [ -f "$HA_DB" ]; then
@@ -60,7 +91,7 @@ dpkg --get-selections > "$SNAP_DIR/dpkg-selections.txt"
 # --- 4. versioned history ---
 archive="vanpi-$(date +%F_%H%M)"
 log "borg create ::$archive"
-borg create --stats --compression zstd --one-file-system \
+run borg create --stats --compression zstd --one-file-system \
   --exclude "$HA_DB" --exclude "$HA_DB-wal" --exclude "$HA_DB-shm" \
   --exclude /var/swap --exclude '/var/cache/apt/archives/*' \
   --exclude '/home/pi/.cache/*' --exclude '/root/.cache/*' \
@@ -68,12 +99,14 @@ borg create --stats --compression zstd --one-file-system \
 rc=$?
 [ $rc -le 1 ] || fail "borg create exited $rc"  # rc 1 = warnings (files changed during read), acceptable on a live system
 
-borg prune --keep-daily "$KEEP_DAILY" --keep-weekly "$KEEP_WEEKLY" --keep-monthly "$KEEP_MONTHLY"
-borg compact
+run borg prune --keep-daily "$KEEP_DAILY" --keep-weekly "$KEEP_WEEKLY" --keep-monthly "$KEEP_MONTHLY"
+run borg compact
 if [ "$(date +%-d)" = "$BORG_CHECK_DOM" ]; then
   log "monthly borg check"
-  borg check || fail "borg check found repository problems"
+  run borg check || fail "borg check found repository problems"
 fi
+
+bail_if_driving
 
 # --- 5. bootable clones when due ---
 clone_summary=""
@@ -85,7 +118,7 @@ for entry in "${CLONE_TARGETS[@]}"; do
   [ -f "$stamp" ] && age_days=$(( (now - $(stat -c %Y "$stamp")) / 86400 ))
   if [ "$age_days" -ge "$interval" ]; then
     log "clone to $label due (${age_days}d >= ${interval}d)"
-    /home/pi/scripts/clone_to_sd.sh "$label" && age_days=0
+    run /home/pi/scripts/clone_to_sd.sh "$label" && age_days=0
   fi
   clone_summary+="$label: ${age_days}d old. "
 done
