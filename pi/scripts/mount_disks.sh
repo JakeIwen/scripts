@@ -63,24 +63,30 @@ mntdsk() {
   # echo "mounted $label at $pth"
 }
 
-rm_mnt_dir() { # prevent Time Machine from backing up onto SD card etc 
+rm_mnt_dir() { # prevent Time Machine from backing up onto SD card etc
   diskdir="$1"
 
-  if blkid | grep "$diskdir"; then 
+  # fail closed: this deleted the mounted TM disk on 2026-07-14 when bare
+  # `blkid` wasn't in pi's SSH PATH → empty output looked like "disk absent"
+  if grep -q " /mnt/$diskdir " /proc/mounts; then
+    echo "NOT removing mount dir /mnt/$diskdir: currently mounted"
+    return 0
+  fi
+
+  attached="$(sudo /sbin/blkid)"
+  if [ -z "$attached" ]; then
+    echo "ERROR: blkid empty/failed, refusing to remove /mnt/$diskdir"
+    return 1
+  fi
+  if echo "$attached" | grep -q "$diskdir"; then
     echo "NOT removing mount dir /mnt/$diskdir for attached disk"
     return 0
   fi
 
+  [ -d "/mnt/$diskdir" ] || return 0
   echo "removing mount dir because not in blkid: /mnt/$diskdir"
-  rm -rf "/mnt/$diskdir"
-  
-  # if [ "$(ls -la "$diskdir" | wc -l)" -eq 3 ]; then
-  #   #  dir is empty
-  #   echo "removing empty mount dir: /mnt/$diskdir"
-  #   rm -rf "/mnt/$diskdir"
-  # else
-  #   echo "ERROR: dir for unattached disk /mnt/$diskdir has folder contents"
-  # fi
+  # rmdir only: a decoy dir is always empty; anything non-empty is real data
+  rmdir "/mnt/$diskdir" || echo "ERROR: /mnt/$diskdir has contents, refusing to delete"
 }
 
 if [[ "$#" = "1" ]]; then
