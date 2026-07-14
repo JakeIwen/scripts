@@ -33,12 +33,15 @@ if grep -q "^/dev/$disk" /proc/mounts; then
 fi
 
 start=$(date +%s)
+# background I/O priority: a slow or dying card must not starve the rest of the
+# system (2026-07-14: a failing card in D-state took down ssh for the whole pi)
+throttle="ionice -c2 -n7 nice -n10"
 if [ $init = 1 ]; then
   echo "initializing /dev/$disk as $label — full clone, erases the card"
-  rpi-clone "$disk" -f -U \
+  $throttle rpi-clone "$disk" -f -U \
     || { notify "vanpi clone" "initial clone to $label (/dev/$disk) failed" high rotating_light; exit 1; }
 else
-  rpi-clone "$disk" -U \
+  $throttle rpi-clone "$disk" -U \
     || { notify "vanpi clone" "clone to $label (/dev/$disk) failed" high rotating_light; exit 1; }
 fi
 # the label is how future runs find this card (device names re-enumerate constantly here)
