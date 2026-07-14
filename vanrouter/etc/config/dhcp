@@ -1,38 +1,29 @@
 
 config dnsmasq
+	option domainneeded '1'
 	option localise_queries '1'
 	option rebind_protection '1'
 	option rebind_localhost '1'
 	option local '/lan/'
 	option domain 'lan'
 	option expandhosts '1'
+	option authoritative '1'
 	option readethers '1'
 	option leasefile '/tmp/dhcp.leases'
-	option authoritative '1'
-	option localservice '0'
-	option noresolv '1'
-	option strictorder '1'
-	option logdhcp '0'
-	option logqueries '1'
-	option logfacility '/tmp/dnsmasq.log'
-	list server '1.1.1.1'
-	list server '1.0.0.1'
+	option resolvfile '/tmp/resolv.conf.d/resolv.conf.auto'
+	option localservice '1'
+	option ednspacket_max '1232'
 
 config dhcp 'lan'
 	option interface 'lan'
-	option limit '100'
-	option ra 'server'
-	option start '1'
-	option leasetime '72h'
-	option ra_management '1'
+	option start '100'
+	option limit '150'
+	option leasetime '12h'
+	option dhcpv4 'server'
 
 config dhcp 'wan'
 	option interface 'wan'
 	option ignore '1'
-	option start '100'
-	option limit '150'
-	option leasetime '12h'
-	list ra_flags 'none'
 
 config odhcpd 'odhcpd'
 	option maindhcp '0'
@@ -41,9 +32,40 @@ config odhcpd 'odhcpd'
 	option loglevel '4'
 
 config host
-	option mac 'DC:A6:32:94:7D:06'
-	option leasetime '86400'
-	option dns '1'
-	option name 'raspberrypi'
+	option name 'vanpi'
 	option ip '192.168.6.103'
+	option mac 'DC:A6:32:94:7D:06'
+
+config host
+	option name 'ESP_3CE979'
+	option ip '192.168.6.139'
+	option mac '24:A1:60:3C:E9:79'
+
+config host
+	option name 'ESP_DEB6C1'
+	option ip '192.168.6.137'
+	option mac '3C:61:05:DE:B6:C1'
+
+config host
+	option ip '192.168.6.150'
+	option mac '08:65:F0:E2:1C:D9'
+
+config host
+	option name 'wlan0'
+	option ip '192.168.6.129'
+	option mac '08:65:F0:E2:1C:2D'
+
+config host
+	option ip '192.168.6.171'
+	option mac '08:65:F0:9D:39:D4'
+
+config host
+	option ip '192.168.6.169'
+	option mac '08:65:F0:E2:1F:EF'
+
+config host
+	option ip '192.168.6.116'
+	option mac '5A:D2:10:CF:72:43'
+	option name 'm4mac'
+	option dns '1'
 

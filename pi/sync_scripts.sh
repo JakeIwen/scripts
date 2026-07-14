@@ -10,6 +10,8 @@ secrets="$dsc/pi/secrets"
 pi_ip='pi@vanpi.lan'
 # pi_ip='pi@100.82.91.76'
 vr_ip='root@openwrt'
+vanrouter="$dsc/vanrouter"
+scp -r "$vr_ip:/etc/config" "$vanrouter/etc/" 
 
 # one multiplexed connection shared by every ssh/scp below: parallel transfers
 # ride it as channels instead of separate connections, so sshd's MaxStartups
@@ -23,15 +25,9 @@ cp_services() {
   ssh $mux $pi_ip "/home/pi/scripts/update_services.sh"
 }
 
-pull_crontabs() {
-  ssh $mux $pi_ip "sudo crontab -l > /tmp/crontab"
-  scp $mux "$pi_ip:/tmp/crontab" "$dsc/pi/crontab"
-  ssh $mux $pi_ip "crontab -l > /tmp/crontab"
-  scp $mux "$pi_ip:/tmp/crontab" "$dsc/pi/crontab_pi"
-}
-
+# crontabs are no longer pulled here — repo is the source of truth now:
+# use pi/push_crontabs.sh to deploy, pi/pull_crontabs.sh to snapshot
 cp_services &
-pull_crontabs &
 
 # PREP PYTHONS
 mkdir "$scripts/python-automation/"
