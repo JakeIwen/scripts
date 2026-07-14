@@ -32,8 +32,8 @@ alias rscr="sudo systemctl restart cron.service"
 alias ct="sudo crontab -e"
 alias killcron="sudo pkill -f cron"
 alias cronlog="cd /var/log/cron"
-alias rsynclog='cat /var/log/cron/rsync.log'
-alias rsynclast="rsynclog | grep 'scheduled_rsync end'"
+alias bkuplog='cat /var/log/cron/pi_backup.log'
+alias bkuplast="bkuplog | grep 'backup complete'"
 
 stopcron() {
   sudo systemctl stop cron

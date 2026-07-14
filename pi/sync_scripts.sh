@@ -37,7 +37,7 @@ find "$dsc/automation/" -type f -name "*.py" -exec cp {} "$scripts/python-automa
 # RASPI — files grouped by destination, one scp per group
 scp $mux "$dsc/pi/.bashrc" "$dsc/pi/canbus_funcs.sh" "$dsc/pi/sns.sh" "$dsc/pi/keepalive.txt" \
   "$configs/.bash_defaults" "$configs/.disk_uuids" \
-  "$configs/rsync-exclude.txt" "$configs/rsync-exclude-media.txt" \
+  "$configs/rsync-exclude-media.txt" \
   "$pi_ip:/home/pi/" &
 home_pid=$!
 
@@ -48,7 +48,7 @@ scp $mux "$dsc/NativCast/process.py" "$dsc/NativCast/server.py" "$pi_ip:/home/pi
 scp $mux "$configs/smb.conf" "$pi_ip:/etc/samba/smb.conf" &
 
 wait $home_pid
-ssh $mux $pi_ip 'sudo chmod 770 /home/pi/rsync-exclude-media.txt /home/pi/rsync-exclude.txt' &
+ssh $mux $pi_ip 'sudo chmod 770 /home/pi/rsync-exclude-media.txt' &
 wait $dirs_pid
 ssh $mux $pi_ip 'sudo chmod 770 /home/pi/scripts/*' &
 
