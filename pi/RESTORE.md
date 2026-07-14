@@ -18,10 +18,13 @@ Backups (see `scripts/backup/backup_conf.sh`):
 ## Scenario 2 — restore individual files / roll back a mistake
 
 ```bash
-borg list                                  # see archives (BORG_REPO is exported via backup_conf.sh)
-borg mount ::vanpi-2026-07-01_1300 /mnt/tmp   # browse a snapshot read-only
-borg umount /mnt/tmp
-cd / && borg extract ::vanpi-2026-07-01_1300 home/pi/scripts/foo.sh   # restore in place
+# repo is root-owned 0700 (borg runs as root to read the whole fs) — use sudo + explicit path;
+# BORG_REPO from backup_conf.sh won't survive sudo's env reset
+repo=/mnt/bigboi/borg/vanpi
+sudo borg list $repo
+sudo borg mount $repo::vanpi-2026-07-01_1300 /mnt/tmp   # browse a snapshot read-only
+sudo borg umount /mnt/tmp
+cd / && sudo borg extract $repo::vanpi-2026-07-01_1300 home/pi/scripts/foo.sh   # restore in place
 ```
 
 Home Assistant DB: restore `home/pi/backups/snapshots/home-assistant_v2.db` from the

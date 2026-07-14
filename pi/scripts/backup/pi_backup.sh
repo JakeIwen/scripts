@@ -94,7 +94,9 @@ log "borg create ::$archive"
 run borg create --stats --compression zstd --one-file-system \
   --exclude "$HA_DB" --exclude "$HA_DB-wal" --exclude "$HA_DB-shm" \
   --exclude /var/swap --exclude '/var/cache/apt/archives/*' \
-  --exclude '/home/pi/.cache/*' --exclude '/root/.cache/*' \
+  --exclude '/tmp/*' --exclude '/var/lib/apt/lists/*' \
+  --exclude '/home/*/.cache/*' --exclude '/root/.cache/*' \
+  --exclude '/home/*/.local/share/Trash/*' \
   "::$archive" / /boot/firmware
 rc=$?
 [ $rc -le 1 ] || fail "borg create exited $rc"  # rc 1 = warnings (files changed during read), acceptable on a live system
@@ -125,8 +127,12 @@ done
 
 # --- 6. stamp + notify ---
 date '+%F %T' > "$STAMP_DIR/borg_ok"
+# check free space here, while bigboi is guaranteed mounted (watchdog can't when UNMOUNT_AFTER=1)
+free_gb=$(( $(df -k --output=avail "$BACKUP_MNT" | tail -1) / 1024 / 1024 ))
+[ "$free_gb" -ge "$MIN_FREE_GB" ] || notify "vanpi backup" \
+  "only ${free_gb}GB free on $BACKUP_MNT (limit ${MIN_FREE_GB}GB)" high warning
 [ "$UNMOUNT_AFTER" = 1 ] && umount "$BACKUP_MNT" 2>/dev/null
-log "backup complete"
+log "backup complete (${free_gb}GB free on $BACKUP_DISK_LABEL)"
 [ "$NTFY_ON_SUCCESS" = 1 ] && notify "vanpi backup OK" \
-  "borg $archive done. clones: ${clone_summary:-none configured}" min white_check_mark
+  "borg $archive done, ${free_gb}GB free. clones: ${clone_summary:-none configured}" min white_check_mark
 exit 0

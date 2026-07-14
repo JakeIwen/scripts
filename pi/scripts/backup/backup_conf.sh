@@ -16,10 +16,10 @@ KEEP_WEEKLY=8
 KEEP_MONTHLY=12
 BORG_CHECK_DOM=1  # day of month for the integrity check (borg check)
 
-# bootable clone targets: "<ext4-label>:<interval-days>", staggered by giving
-# each card a different interval, e.g. (hotspare-a:7 hotspare-b:14).
-# Empty until the first card is initialized with: clone_to_sd.sh --init hotspare-a sdX
-CLONE_TARGETS=()
+# bootable clone targets: "<ext4-label>:<interval-days>", staggered so hotspare-b
+# always holds an older known-good generation. Cards are found by ext4 label at
+# runtime; init new ones with: clone_to_sd.sh --init <label> sdX
+CLONE_TARGETS=(hotspare-a:7 hotspare-b:14)
 CLONE_MAX_DISK_GB=500  # refuse to clone onto anything bigger (TB-drive footgun guard)
 
 # media mirror (movingparts -> bigboi), carried over from rsync_schedule.sh
@@ -42,7 +42,8 @@ BORG_STALE_HOURS=48    # watchdog alerts past this
 CLONE_STALE_FACTOR=2   # watchdog alerts when clone age > factor * interval
 MIN_FREE_GB=100        # watchdog alerts when bigboi free space drops below this
 ROOT_USED_MAX_GB=26    # watchdog alerts before the system outgrows a 32GB clone card
-UNMOUNT_AFTER=0        # 1 = unmount bigboi when the backup finishes (old rsync_schedule behavior)
+UNMOUNT_AFTER=1        # unmount bigboi when the backup finishes (bigboi is not auto-mounted;
+                       # pi_backup mounts it by label at the start of each run)
 
 # present while the van runs (ignition_monitor.sh); drives are unmounted then
 IGNITION_FLAG=/home/pi/hooks/ignition_is_on
