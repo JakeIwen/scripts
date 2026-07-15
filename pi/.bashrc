@@ -119,10 +119,12 @@ als() { alias $1; fndef $1; }
 tf() { tail ${2:-'-50'} $1; tail -f $1; }       # tail -f with more recent lines 
 snh() { nohup bash -c $1 & tail -f ./nohup.out; }
 
-s() { # run ~/scripts/<name>.sh, drilling into subfolders if not at top level
+s() { # run ~/scripts/<name>.sh or .py, drilling into subfolders if not at top level
   name=$1; shift; f="$HOME/scripts/$name.sh"
-  [ -f "$f" ] || f=$(find "$HOME/scripts" -mindepth 2 -name "$name.sh" -type f | head -1)
-  [ -n "$f" ] && "$f" "$@" || { echo "s: $name.sh not found in ~/scripts"; return 1; }
+  [ -f "$f" ] || f="$HOME/scripts/$name.py"
+  [ -f "$f" ] || f=$(find "$HOME/scripts" -mindepth 2 \( -name "$name.sh" -o -name "$name.py" \) -type f | head -1)
+  [ -z "$f" ] && { echo "s: $name.sh/.py not found in ~/scripts"; return 1; }
+  case "$f" in *.py) python3 "$f" "$@";; *) "$f" "$@";; esac
 }
 sx() { sudo "$(history | perl -pe 's/^\s+[0-9]+\**\s+//g' | tail -1)"; }
 svc() { sudo systemctl $2 $1.service; } # svc home-assistant start

@@ -10,8 +10,6 @@ secrets="$dsc/pi/secrets"
 pi_ip='pi@vanpi.lan'
 # pi_ip='pi@100.82.91.76'
 vr_ip='root@openwrt'
-vanrouter="$dsc/vanrouter"
-scp -r "$vr_ip:/etc/config" "$vanrouter/etc/" 
 
 # one multiplexed connection shared by every ssh/scp below: parallel transfers
 # ride it as channels instead of separate connections, so sshd's MaxStartups

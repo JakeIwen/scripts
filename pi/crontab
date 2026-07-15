@@ -8,6 +8,7 @@ PATH="/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:/root/bin"
 0 0 * * *      su pi -c "$scripts/prune_logs.sh $log 1000" >> "$cronlog/prune_logs.log" 2>&1
 0 3-8 * * *  "$scripts/backup/pi_backup.sh"  >> "$cronlog/pi_backup.log" 2>&1
 0 10 * * *  "$scripts/backup/backup_watchdog.sh"  >> "$cronlog/backup_watchdog.log" 2>&1
+@reboot     sleep 90 && "$scripts/backup/backup_watchdog.sh"  >> "$cronlog/backup_watchdog.log" 2>&1
 * * * * *     su pi -c "$scripts/internet_switches.sh"  >> "$cronlog/internet_switches.log" 2>&1
 0 1 * * *      su pi -c "$scripts/prune_logs.sh '/var/log/cron/*.log' >> "$cronlog/prune_logs.log" 2>&1
 0 0 * * *      rm -rf $tfiles_bkup/* && cp "/home/pi/tfiles" "$tfiles_bkup" >> "$cronlog/copy_tfiles.log" 2>&1

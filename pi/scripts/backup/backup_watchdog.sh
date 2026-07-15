@@ -11,6 +11,16 @@ problems=()
 status=""
 now=$(date +%s)
 
+# detect running on a swapped-in hot spare (the ext4 label travels with the card,
+# so after a disaster swap the / partition still says hotspare-*). Nag until the
+# card is relabeled and a fresh spare is initialized — see RESTORE.md scenario 1.
+root_src=$(findmnt -no SOURCE /)
+root_label=$(blkid -o value -s LABEL "$root_src" 2>/dev/null)
+if [[ "$root_label" == hotspare-* ]]; then
+  clone_info=$(cat /boot/firmware/CLONE_INFO.txt 2>/dev/null || echo "clone date unknown")
+  problems+=("SYSTEM IS RUNNING ON SPARE '$root_label' ($clone_info) — check borg for newer files, then: sudo e2label $root_src rootfs, then init a fresh spare")
+fi
+
 # borg recency
 if [ -f "$STAMP_DIR/borg_ok" ]; then
   age_h=$(( (now - $(stat -c %Y "$STAMP_DIR/borg_ok")) / 3600 ))

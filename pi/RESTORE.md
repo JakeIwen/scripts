@@ -12,7 +12,10 @@ Backups (see `scripts/backup/backup_conf.sh`):
 1. Power off. Move the spare card from the USB reader into the SD slot. Power on.
 2. That's it — the clone carries its own PARTUUIDs in fstab/cmdline, so it just boots.
    You're now running at the state shown in its `CLONE_INFO.txt`.
-3. Pull anything newer from borg (scenario 2), then initialize a fresh spare:
+3. The watchdog notices the / partition is still labeled `hotspare-*` and nags via ntfy
+   (at boot and daily at 10:00) until you finish recovery:
+   pull anything newer from borg (scenario 2), relabel the now-live card
+   (`sudo e2label /dev/mmcblk0p2 rootfs`), then initialize a fresh spare:
    `sudo clone_to_sd.sh --init hotspare-a sdX`
 
 ## Scenario 2 — restore individual files / roll back a mistake
