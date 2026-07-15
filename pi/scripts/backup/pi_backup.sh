@@ -15,7 +15,10 @@ notify() { /home/pi/scripts/ntfy_send.sh "$@"; }
 log() { echo "[$(date '+%F %T')] $*"; }
 fail() { log "FATAL: $1"; notify "vanpi backup FAILED" "$1" high rotating_light; exit 1; }
 
-if [ -f "$STAMP_DIR/borg_ok" ] && [ "$(date -r "$STAMP_DIR/borg_ok" +%F)" = "$(date +%F)" ]; then
+force=0
+[ "${1:-}" = "--force" ] && force=1  # manual runs: skip the once-a-day short-circuit
+
+if [ $force = 0 ] && [ -f "$STAMP_DIR/borg_ok" ] && [ "$(date -r "$STAMP_DIR/borg_ok" +%F)" = "$(date +%F)" ]; then
   log "already succeeded today, nothing to do"
   exit 0
 fi
