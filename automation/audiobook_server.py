@@ -95,7 +95,6 @@ def scan_library():
         entries = sorted(os.listdir(LIBRARY), key=natural_key)
     except OSError as e:
         print(f"scan: library unavailable: {e}", flush=True)
-        last_scan = time.time()
         return
     for entry in entries:
         if entry.startswith("."):
@@ -161,7 +160,7 @@ def search_books(query, limit=8):
 
 # ------------------------------------------------------------------ state ---
 
-state_lock = threading.Lock()
+state_lock = threading.RLock()
 
 def load_state():
     try:
@@ -218,7 +217,9 @@ def get_device(name=None):
         zmap = get_zones(force=True)
         if not zmap:
             raise RuntimeError("no Sonos speakers found")
-    for candidate in (name, state.get("device")):
+    with state_lock:
+        remembered_device = state.get("device")
+    for candidate in (name, remembered_device):
         if candidate and candidate in zmap:
             return zmap[candidate].group.coordinator
     paused = None
@@ -291,7 +292,8 @@ def start_book(book, device, from_track, from_secs):
 # ------------------------------------------------------- progress tracker ---
 
 def poll_progress():
-    devname = state.get("device")
+    with state_lock:
+        devname = state.get("device")
     zmap = get_zones()
     if not devname or devname not in zmap:
         return
@@ -311,15 +313,16 @@ def poll_progress():
     dur = hms_to_secs(info.get("duration"))
     if pos is None:
         return
-    entry = state["books"].get(book.rel, {})
-    entry.update({
-        "id": bid, "track": idx, "pos": pos, "duration": dur or 0,
-        "tracks_total": len(book.tracks), "updated": int(time.time()),
-        "finished": bool(idx == len(book.tracks) - 1 and dur and pos >= dur - 20),
-    })
-    state["books"][book.rel] = entry
-    state["last_book"] = book.rel
-    save_state()
+    with state_lock:
+        entry = state["books"].get(book.rel, {})
+        entry.update({
+            "id": bid, "track": idx, "pos": pos, "duration": dur or 0,
+            "tracks_total": len(book.tracks), "updated": int(time.time()),
+            "finished": bool(idx == len(book.tracks) - 1 and dur and pos >= dur - 20),
+        })
+        state["books"][book.rel] = entry
+        state["last_book"] = book.rel
+        save_state()
 
 def poller_loop():
     while True:
@@ -339,13 +342,15 @@ def bookmark_now():
 # -------------------------------------------------------------------- api ---
 
 def book_progress(book):
-    entry = state["books"].get(book.rel)
-    if not entry:
-        return None
-    return {"track": entry["track"], "tracks_total": entry.get("tracks_total", len(book.tracks)),
-            "pos": entry["pos"], "pos_hms": secs_to_hms(entry["pos"]),
-            "duration": entry.get("duration", 0), "updated": entry.get("updated"),
-            "finished": entry.get("finished", False)}
+    with state_lock:
+        entry = state["books"].get(book.rel)
+        if not entry:
+            return None
+        return {"track": entry["track"],
+                "tracks_total": entry.get("tracks_total", len(book.tracks)),
+                "pos": entry["pos"], "pos_hms": secs_to_hms(entry["pos"]),
+                "duration": entry.get("duration", 0), "updated": entry.get("updated"),
+                "finished": entry.get("finished", False)}
 
 @app.route("/api/books")
 def api_books():
@@ -394,22 +399,24 @@ def api_play():
     except RuntimeError as e:
         return jsonify({"ok": False, "message": str(e)}), 503
 
-    entry = state["books"].get(book.rel)
+    with state_lock:
+        entry = state["books"].get(book.rel)
+        entry = entry.copy() if entry else None
+        if restart:
+            state["books"].pop(book.rel, None)
     from_track, from_secs = 0, 0
     if entry and not restart and not entry.get("finished"):
         from_track = min(entry.get("track", 0), len(book.tracks) - 1)
         from_secs = max(0, entry.get("pos", 0) - RESUME_REWIND)
-    if restart:
-        state["books"].pop(book.rel, None)
-
     try:
         start_book(book, device, from_track, from_secs)
     except Exception as e:
         return jsonify({"ok": False, "message": f"playback failed: {e}"}), 502
 
-    state["device"] = device.player_name
-    state["last_book"] = book.rel
-    save_state()
+    with state_lock:
+        state["device"] = device.player_name
+        state["last_book"] = book.rel
+        save_state()
     verb = "Resuming" if (from_track or from_secs) else "Playing"
     msg = (f"{verb} '{book.name}' ch {from_track + 1}/{len(book.tracks)}"
            f" at {secs_to_hms(from_secs)} on {device.player_name}")
@@ -418,7 +425,8 @@ def api_play():
                     "pos": from_secs, "device": device.player_name, "message": msg})
 
 def control_device():
-    devname = state.get("device")
+    with state_lock:
+        devname = state.get("device")
     zmap = get_zones()
     if devname and devname in zmap:
         return zmap[devname].group.coordinator
@@ -486,8 +494,9 @@ def api_volume():
 
 @app.route("/api/status")
 def api_status():
-    out = {"ok": True, "device": state.get("device"), "playing": None,
-           "last_book": state.get("last_book")}
+    with state_lock:
+        out = {"ok": True, "device": state.get("device"), "playing": None,
+               "last_book": state.get("last_book")}
     try:
         dev = control_device()
         t = dev.get_current_transport_info()["current_transport_state"]
