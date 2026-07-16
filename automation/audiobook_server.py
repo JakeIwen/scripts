@@ -95,7 +95,7 @@ def scan_library():
         entries = sorted(os.listdir(LIBRARY), key=natural_key)
     except OSError as e:
         print(f"scan: library unavailable: {e}", flush=True)
-        return
+        return False
     for entry in entries:
         if entry.startswith("."):
             continue
@@ -123,6 +123,7 @@ def scan_library():
         books = found
     last_scan = time.time()
     print(f"scan: {len(found)} playable titles", flush=True)
+    return True
 
 def maybe_rescan():
     if time.time() - last_scan > RESCAN_SECS:
@@ -369,6 +370,21 @@ def api_search():
     return jsonify({"q": q, "matches": [
         dict(b.as_dict(book_progress(b)), score=round(s, 3)) for s, b in matches]})
 
+@app.route("/api/progress/clear", methods=["POST"])
+def api_clear_progress():
+    bid = request.values.get("book", "").strip()
+    with books_lock:
+        book = books.get(bid)
+    if not book:
+        return jsonify({"ok": False, "message": "unknown book id"}), 404
+    with state_lock:
+        removed = state["books"].pop(book.rel, None)
+        if state.get("last_book") == book.rel:
+            state.pop("last_book", None)
+        save_state()
+    message = f"cleared progress for '{book.name}'" if removed else "progress already clear"
+    return jsonify({"ok": True, "book": bid, "message": message})
+
 @app.route("/api/play", methods=["GET", "POST"])
 def api_play():
     q = request.values.get("q", "").strip()
@@ -432,6 +448,97 @@ def control_device():
         return zmap[devname].group.coordinator
     return get_device()
 
+def speaker_snapshot(force=False):
+    zmap = get_zones(force=force)
+    if not zmap:
+        raise RuntimeError("no Sonos speakers found")
+    with state_lock:
+        devname = state.get("device")
+    if devname and devname in zmap:
+        coordinator = zmap[devname].group.coordinator
+    else:
+        coordinator = get_device()
+    coordinator_name = coordinator.player_name
+    member_names = {member.player_name for member in coordinator.group.members}
+    speakers = []
+    for name, zone in sorted(zmap.items()):
+        try:
+            volume = zone.volume
+        except Exception:
+            volume = None
+        speakers.append({
+            "name": name, "volume": volume, "grouped": name in member_names,
+            "coordinator": name == coordinator_name,
+            "group_coordinator": zone.group.coordinator.player_name,
+        })
+    return {"ok": True, "coordinator": coordinator_name, "speakers": speakers}
+
+@app.route("/api/device", methods=["GET", "POST"])
+def api_device():
+    name = request.values.get("name", "").strip()
+    if not name:
+        return jsonify({"ok": False, "message": "need name="}), 400
+    zmap = get_zones()
+    if name not in zmap:
+        return jsonify({"ok": False, "message": f"unknown device '{name}'"}), 404
+    coordinator = zmap[name].group.coordinator
+    with state_lock:
+        state["device"] = coordinator.player_name
+        save_state()
+    return jsonify({"ok": True, "device": coordinator.player_name,
+                    "message": f"using {coordinator.player_name}"})
+
+@app.route("/api/speakers")
+def api_speakers():
+    try:
+        return jsonify(speaker_snapshot())
+    except Exception as e:
+        return jsonify({"ok": False, "message": f"speaker discovery failed: {e}"}), 503
+
+@app.route("/api/speakers/group", methods=["POST"])
+def api_speaker_group():
+    name = request.values.get("name", "").strip()
+    grouped = request.values.get("grouped", "").lower() in ("1", "true", "yes")
+    zmap = get_zones()
+    if name not in zmap:
+        return jsonify({"ok": False, "message": f"unknown device '{name}'"}), 404
+    coordinator = control_device()
+    speaker = zmap[name]
+    if not grouped and speaker.player_name == coordinator.player_name:
+        return jsonify({"ok": False,
+                        "message": "select another group before removing its coordinator"}), 400
+    try:
+        active_members = {member.player_name for member in coordinator.group.members}
+        if grouped and name not in active_members:
+            speaker.join(coordinator)
+            message = f"added {name} to {coordinator.player_name}"
+        elif not grouped and name in active_members:
+            speaker.unjoin()
+            message = f"removed {name} from {coordinator.player_name}"
+        else:
+            message = f"{name} group is unchanged"
+        get_zones(force=True)
+    except Exception as e:
+        return jsonify({"ok": False, "message": f"could not update Sonos group: {e}"}), 502
+    return jsonify({"ok": True, "message": message})
+
+@app.route("/api/speakers/volume", methods=["POST"])
+def api_speaker_volume():
+    name = request.values.get("name", "").strip()
+    zmap = get_zones()
+    if name not in zmap:
+        return jsonify({"ok": False, "message": f"unknown device '{name}'"}), 404
+    try:
+        volume = max(0, min(100, int(request.values.get("volume", ""))))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "message": "volume must be from 0 to 100"}), 400
+    try:
+        zmap[name].volume = volume
+    except Exception as e:
+        return jsonify({"ok": False, "message": f"could not set {name} volume: {e}"}), 502
+    return jsonify({"ok": True, "device": name, "volume": volume,
+                    "message": f"{name} volume: {volume}"})
+
 @app.route("/api/toggle", methods=["GET", "POST"])
 def api_toggle():
     dev = control_device()
@@ -487,7 +594,7 @@ def api_volume():
     delta = int(request.values.get("d", "0"))
     for member in dev.group.members:
         if setval is not None:
-            member.volume = int(setval)
+            member.volume = max(0, min(100, int(setval)))
         elif delta:
             member.volume = max(0, min(100, member.volume + delta))
     return jsonify({"ok": True, "volume": dev.volume})
@@ -524,10 +631,14 @@ def api_status():
 
 @app.route("/api/rescan", methods=["GET", "POST"])
 def api_rescan():
-    scan_library()
+    available = scan_library()
     with books_lock:
         n = len(books)
-    return jsonify({"ok": True, "count": n})
+    if not available:
+        return jsonify({"ok": False, "count": n,
+                        "message": "audiobook drive is unavailable"}), 503
+    return jsonify({"ok": True, "count": n,
+                    "message": f"library refreshed: {n} titles"})
 
 # ------------------------------------------------------------ file server ---
 
@@ -549,116 +660,364 @@ def serve_audio(bid, fname):
 # --------------------------------------------------------------------- ui ---
 
 PAGE = """<!doctype html>
-<html><head>
+<html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#12100e">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📖</text></svg>">
+<meta name="apple-mobile-web-app-title" content="Audiobooks">
+<meta name="theme-color" content="#161310">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/app-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/app-icon.svg">
 <title>Audiobooks</title>
 <style>
-:root{--bg:#12100e;--card:#1e1b18;--ink:#e8e2d9;--dim:#9a9084;--accent:#e8a33d;--line:#2e2a25}
-*{box-sizing:border-box;margin:0}
-body{background:var(--bg);color:var(--ink);font:16px/1.45 -apple-system,system-ui,sans-serif;
-  padding:12px 12px calc(150px + env(safe-area-inset-bottom));max-width:640px;margin:0 auto}
-h1{font-size:20px;margin:6px 2px 12px;letter-spacing:.02em}
-#q{width:100%;padding:12px 14px;font-size:17px;border-radius:12px;border:1px solid var(--line);
-  background:var(--card);color:var(--ink);outline:none;margin-bottom:14px}
-h2{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.1em;margin:16px 2px 8px}
-.book{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:11px 13px;
-  margin-bottom:8px;display:flex;align-items:center;gap:10px;cursor:pointer}
-.book .t{flex:1;min-width:0}
-.book .n{font-size:15px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;
+:root{color-scheme:dark;--bg:#161310;--panel:#211d19;--raised:#2a2520;--ink:#f3ece2;
+  --dim:#a99d90;--accent:#eea94b;--accent2:#c9792d;--line:#39322b;--bad:#ef7b72;
+  --good:#72c69a;--shadow:0 14px 45px #09070566}
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:radial-gradient(circle at 85% -5%,#4a2d1744,transparent 34%),var(--bg);
+  color:var(--ink);font:16px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
+  min-height:100vh;padding:env(safe-area-inset-top) 14px calc(270px + env(safe-area-inset-bottom))}
+main,header{width:min(100%,680px);margin:auto}
+button,input,select{font:inherit}
+button,select{-webkit-tap-highlight-color:transparent}
+button{color:inherit}
+header{display:flex;align-items:center;justify-content:space-between;padding:22px 2px 15px}
+.eyebrow{color:var(--accent);font-size:11px;font-weight:750;letter-spacing:.16em;text-transform:uppercase}
+h1{font-size:28px;line-height:1.05;letter-spacing:-.025em;margin:3px 0 0}
+h2{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.12em;margin:22px 2px 9px}
+.icon-btn,.small-btn,.control,.vol-btn{border:1px solid var(--line);background:var(--panel);border-radius:13px;
+  min-width:46px;min-height:46px;cursor:pointer}
+.icon-btn{font-size:21px;display:grid;place-items:center;box-shadow:var(--shadow)}
+.icon-btn:active,.small-btn:active,.control:active,.vol-btn:active{background:var(--raised);transform:scale(.97)}
+button:disabled{opacity:.38;cursor:default;transform:none!important}
+.connection{display:flex;align-items:center;gap:7px;color:var(--dim);font-size:12px;margin:0 2px 12px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--bad);box-shadow:0 0 0 3px #ef7b7218}
+.dot.on{background:var(--good);box-shadow:0 0 0 3px #72c69a20}
+.setup{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:9px;margin-bottom:12px}
+.search-wrap{position:relative}
+#q{width:100%;height:49px;border-radius:14px;border:1px solid var(--line);background:var(--panel);
+  color:var(--ink);outline:none}
+#q{padding:0 42px 0 15px;font-size:17px}
+#q:focus,#speaker-button:focus{border-color:#a96b31;box-shadow:0 0 0 3px #eea94b18}
+#speaker-button{height:49px;border-radius:14px;border:1px solid var(--line);background:var(--panel);padding:0 11px;
+  display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:7px;text-align:left;cursor:pointer}
+#speaker-label{font-size:13px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#speaker-count{font-size:11px;color:var(--accent);font-variant-numeric:tabular-nums}
+#clear{position:absolute;right:5px;top:4px;width:41px;height:41px;border:0;background:transparent;
+  color:var(--dim);font-size:20px;display:none}
+.searching #clear{display:block}
+.book{display:flex;align-items:stretch;background:linear-gradient(145deg,var(--panel),#1d1a17);
+  border:1px solid var(--line);border-radius:16px;margin-bottom:9px;overflow:hidden;box-shadow:0 5px 18px #08060424}
+.book-main{border:0;background:transparent;text-align:left;color:inherit;padding:13px 14px;min-width:0;flex:1;cursor:pointer}
+.book-main:active{background:#ffffff08}
+.book-name{font-size:15px;font-weight:650;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;
   -webkit-line-clamp:2;-webkit-box-orient:vertical}
-.book .p{font-size:12px;color:var(--accent);margin-top:2px}
-.book .sub{color:var(--dim);font-size:12px}
-.restart{color:var(--dim);font-size:18px;padding:6px;background:none;border:none}
-#bar{position:fixed;left:0;right:0;bottom:0;background:#191612ee;backdrop-filter:blur(12px);
-  border-top:1px solid var(--line);padding:10px 14px calc(10px + env(safe-area-inset-bottom));
-  max-width:640px;margin:0 auto}
-#bar .n{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#bar .meta{font-size:12px;color:var(--dim);margin:2px 0 8px}
-#prog{height:3px;background:var(--line);border-radius:2px;margin-bottom:10px}
-#prog>div{height:100%;background:var(--accent);border-radius:2px;width:0}
-.row{display:flex;justify-content:space-between;align-items:center;gap:6px}
-.row button{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:10px;
-  font-size:15px;padding:10px 0;flex:1}
-.row button:active{background:var(--line)}
-#pp{font-size:20px;flex:1.3;color:var(--accent)}
-.hide{display:none}
+.book-meta{font-size:12px;color:var(--dim);margin-top:4px}
+.book-progress{color:var(--accent);margin-right:7px}
+.score{color:#c5b8aa}
+.restart,.clear-progress{width:52px;border:0;border-left:1px solid var(--line);background:transparent;color:var(--dim);
+  font-size:21px;cursor:pointer}
+.restart:active,.clear-progress:active{background:#ffffff08;color:var(--accent)}
+.empty{border:1px dashed var(--line);border-radius:16px;color:var(--dim);padding:28px 18px;text-align:center}
+.library-count{float:right;color:#746a60;font-weight:500;letter-spacing:0;text-transform:none}
+.speaker-backdrop{position:fixed;z-index:20;inset:0;background:#080604aa;display:flex;align-items:flex-end;
+  opacity:0;pointer-events:none;transition:opacity .2s}
+.speaker-backdrop.open{opacity:1;pointer-events:auto}
+.speaker-sheet{width:min(100%,680px);max-height:min(78vh,680px);overflow:auto;margin:0 auto;background:#1c1815;
+  border:1px solid #493d33;border-bottom:0;border-radius:22px 22px 0 0;padding:8px 14px calc(18px + env(safe-area-inset-bottom));
+  box-shadow:0 -18px 60px #000a;transform:translateY(24px);transition:transform .2s}
+.speaker-backdrop.open .speaker-sheet{transform:translateY(0)}
+.sheet-grabber{width:38px;height:4px;border-radius:3px;background:#5b5047;margin:2px auto 12px}
+.sheet-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.sheet-head h2{margin:0;color:var(--ink);font-size:18px;letter-spacing:-.01em;text-transform:none}
+.sheet-close{border:1px solid var(--line);background:var(--raised);border-radius:50%;width:38px;height:38px;font-size:20px}
+.sheet-help{color:var(--dim);font-size:12px;margin:3px 0 14px}
+.speaker-row{display:grid;grid-template-columns:30px minmax(0,1fr) 35px;align-items:center;column-gap:8px;
+  padding:11px 8px;border-top:1px solid var(--line)}
+.speaker-check{width:22px;height:22px;margin:0;accent-color:var(--accent)}
+.speaker-name{border:0;background:transparent;padding:2px 0;text-align:left;font-weight:700;min-width:0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+.speaker-name small{display:block;color:var(--dim);font-size:10px;font-weight:500;margin-top:1px}
+.speaker-level{font-size:11px;color:var(--dim);text-align:right;font-variant-numeric:tabular-nums}
+.speaker-volume{grid-column:2/4;width:100%;margin:8px 0 0;accent-color:var(--accent)}
+.speaker-loading{padding:28px;text-align:center;color:var(--dim)}
+body.sheet-open{overflow:hidden}
+#player{position:fixed;z-index:5;left:0;right:0;bottom:0;background:#191512f2;
+  border-top:1px solid #43382f;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  padding:12px 14px calc(11px + env(safe-area-inset-bottom));box-shadow:0 -15px 50px #09060488}
+.player-inner{width:min(100%,680px);margin:auto}
+.now{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px}
+#np-name{font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#np-meta{font-size:11px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+#transport{color:var(--accent);font-size:11px;font-weight:750;text-transform:uppercase;letter-spacing:.1em;padding-top:2px}
+#progress{height:4px;background:var(--line);border-radius:5px;overflow:hidden;margin:0 0 10px}
+#progress-fill{height:100%;width:0;background:linear-gradient(90deg,var(--accent2),var(--accent));transition:width .3s}
+.controls{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}
+.control{height:48px;min-width:0;font-size:14px;font-weight:650}
+.control.primary{font-size:21px;color:var(--accent);background:#30261d;border-color:#59422e}
+.subcontrols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-top:7px}
+.small-btn{min-height:35px;border-radius:10px;font-size:12px;color:var(--dim)}
+.volume{display:grid;grid-template-columns:38px minmax(0,1fr) 38px 30px;align-items:center;gap:7px;margin-top:8px}
+.vol-btn{min-width:38px;min-height:34px;border-radius:10px;font-size:16px}
+#volume{width:100%;accent-color:var(--accent)}
+#volume-value{font-size:11px;color:var(--dim);text-align:right;font-variant-numeric:tabular-nums}
+#toast{position:fixed;z-index:30;left:50%;top:calc(12px + env(safe-area-inset-top));transform:translate(-50%,-14px);
+  width:min(calc(100% - 28px),620px);background:#302820;color:var(--ink);border:1px solid #5a4939;
+  border-radius:13px;padding:11px 14px;box-shadow:var(--shadow);opacity:0;pointer-events:none;
+  transition:.2s ease;font-size:13px;text-align:center}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+#toast.bad{border-color:#874944;color:#ffd8d4}
+body.busy [data-action]{pointer-events:none;opacity:.5}
+@media(hover:hover){button:hover:not(:disabled){background-image:linear-gradient(#ffffff12,#ffffff12);filter:brightness(1.12)}}
+@media(max-width:420px){.setup{grid-template-columns:minmax(0,1fr) 125px}.control{font-size:13px}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
 </style></head><body>
-<h1>📖 Audiobooks</h1>
-<input id="q" placeholder="Search…" autocomplete="off">
-<div id="cont"></div>
-<div id="lib"></div>
-<div id="bar" class="hide">
-  <div class="n" id="np-name"></div>
-  <div class="meta" id="np-meta"></div>
-  <div id="prog"><div id="progfill"></div></div>
-  <div class="row">
-    <button onclick="api('chapter?d=-1')">⏮</button>
-    <button onclick="api('skip?s=-60')">-60</button>
-    <button id="pp" onclick="api('toggle')">⏯</button>
-    <button onclick="api('skip?s=60')">+60</button>
-    <button onclick="api('chapter?d=1')">⏭</button>
-    <button onclick="api('volume?d=-6')">🔉</button>
-    <button onclick="api('volume?d=6')">🔊</button>
+<header>
+  <div><div class="eyebrow">Van library</div><h1>Audiobooks</h1></div>
+  <button class="icon-btn" id="rescan" data-action aria-label="Rescan library" title="Rescan library">↻</button>
+</header>
+<main>
+  <div class="connection"><span class="dot" id="dot"></span><span id="connection">Connecting to vanpi…</span></div>
+  <div class="setup">
+    <div class="search-wrap" id="search-wrap">
+      <input id="q" type="search" placeholder="Search the library" autocomplete="off" autocapitalize="none">
+      <button id="clear" aria-label="Clear search">×</button>
+    </div>
+    <button id="speaker-button" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="speaker-panel">
+      <span aria-hidden="true">◉</span><span id="speaker-label">Finding Sonos…</span><span id="speaker-count">—</span>
+    </button>
   </div>
+  <div id="content"><div class="empty">Loading your library…</div></div>
+</main>
+<div class="speaker-backdrop" id="speaker-backdrop">
+  <section class="speaker-sheet" id="speaker-panel" role="dialog" aria-modal="true" aria-labelledby="speaker-title">
+    <div class="sheet-grabber"></div>
+    <div class="sheet-head"><h2 id="speaker-title">Sonos speakers</h2><button class="sheet-close" id="speaker-close" aria-label="Close speaker selector">×</button></div>
+    <p class="sheet-help">Tap a name to control its group. Check speakers to group them with the active player.</p>
+    <div id="speaker-list"><div class="speaker-loading">Finding speakers…</div></div>
+  </section>
 </div>
+<section id="player" aria-label="Playback controls">
+  <div class="player-inner">
+    <div class="now"><div style="min-width:0"><div id="np-name">Nothing playing</div><div id="np-meta">Choose an audiobook above</div></div><div id="transport">Idle</div></div>
+    <div id="progress"><div id="progress-fill"></div></div>
+    <div class="controls">
+      <button class="control" data-action data-control data-api="chapter" data-key="d" data-value="-1" aria-label="Previous chapter">◀Ⅰ</button>
+      <button class="control" data-action data-control data-api="skip" data-key="s" data-value="-30" aria-label="Back 30 seconds">−30</button>
+      <button class="control primary" id="toggle" data-action data-control data-api="toggle" aria-label="Play or pause">▶</button>
+      <button class="control" data-action data-control data-api="skip" data-key="s" data-value="30" aria-label="Forward 30 seconds">+30</button>
+      <button class="control" data-action data-control data-api="chapter" data-key="d" data-value="1" aria-label="Next chapter">Ⅰ▶</button>
+    </div>
+    <div class="subcontrols">
+      <button class="small-btn" data-action data-control data-api="skip" data-key="s" data-value="-60">−60 sec</button>
+      <button class="small-btn" data-action data-control data-api="pause">Pause</button>
+      <button class="small-btn" data-action data-control data-api="skip" data-key="s" data-value="60">+60 sec</button>
+    </div>
+    <div class="volume">
+      <button class="vol-btn" data-action data-control data-api="volume" data-key="d" data-value="-6" aria-label="Volume down">−</button>
+      <input id="volume" type="range" min="0" max="100" value="0" aria-label="Volume">
+      <button class="vol-btn" data-action data-control data-api="volume" data-key="d" data-value="6" aria-label="Volume up">+</button>
+      <span id="volume-value">—</span>
+    </div>
+  </div>
+</section>
+<div id="toast" role="status" aria-live="polite"></div>
 <script>
-let all=[];
 const $=id=>document.getElementById(id);
-async function j(u){const r=await fetch(u);return r.json()}
-async function api(ep){await j('/api/'+ep);setTimeout(refresh,600)}
-function fmt(b){
-  const pr=b.progress;
-  let sub=b.tracks+' chapters';
-  let p='';
-  if(pr&&!pr.finished)p='Ch '+(pr.track+1)+'/'+pr.tracks_total+' · '+pr.pos_hms;
-  if(pr&&pr.finished)p='✓ finished';
-  return `<div class="book" onclick="play('${b.id}')">
-    <div class="t"><div class="n">${esc(b.name)}</div>
-    ${p?`<div class="p">${p}</div>`:''}<div class="sub">${sub}</div></div>
-    ${pr?`<button class="restart" onclick="event.stopPropagation();restart('${b.id}')">↺</button>`:''}
-  </div>`}
-function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;')}
+let all=[],status={},speakers=null,searchResults=null,searchTimer=0,searchSerial=0,busy=false,toastTimer=0;
+
+function esc(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function seconds(value){return value?value.split(':').reduce((sum,part)=>sum*60+Number(part),0):0}
+function toast(message,bad=false){
+  clearTimeout(toastTimer);const el=$('toast');el.textContent=message;el.className=bad?'show bad':'show';
+  toastTimer=setTimeout(()=>el.className='',3200);
+}
+async function json(url,options){
+  const response=await fetch(url,options);let data;
+  try{data=await response.json()}catch(_){data={message:`Server returned ${response.status}`}}
+  if(!response.ok||data.ok===false)throw new Error(data.message||`Request failed (${response.status})`);
+  return data;
+}
+async function post(endpoint,params={}){
+  return json('/api/'+endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body:new URLSearchParams(params)});
+}
+async function action(work,{reload=false}={}){
+  if(busy)return;busy=true;document.body.classList.add('busy');
+  try{const result=await work();if(result?.message)toast(result.message);if(reload)await loadLibrary();await refresh(true)}
+  catch(error){toast(error.message,true)}finally{busy=false;document.body.classList.remove('busy')}
+}
+function bookMarkup(book,clearProgress=false){
+  const progress=book.progress;let progressText='';
+  if(progress?.finished)progressText='✓ Finished';
+  else if(progress)progressText=`Ch ${progress.track+1}/${progress.tracks_total} · ${progress.pos_hms}`;
+  const score=book.score?`<span class="score">${Math.round(book.score*100)}% match</span>`:'';
+  return `<article class="book"><button class="book-main" data-action data-play="${esc(book.id)}">
+    <div class="book-name">${esc(book.name)}</div><div class="book-meta">
+    ${progressText?`<span class="book-progress">${esc(progressText)}</span>`:''}${score||`${book.tracks} chapters`}</div></button>
+    ${clearProgress?`<button class="clear-progress" data-action data-clear="${esc(book.id)}" aria-label="Clear progress for ${esc(book.name)}">×</button>`:
+      progress?`<button class="restart" data-action data-restart="${esc(book.id)}" aria-label="Restart ${esc(book.name)}">↺</button>`:''}</article>`;
+}
+function section(title,books,count='',clearProgress=false){
+  if(!books.length)return '';
+  return `<h2>${esc(title)}${count?`<span class="library-count">${esc(count)}</span>`:''}</h2>${books.map(book=>bookMarkup(book,clearProgress)).join('')}`;
+}
 function render(){
-  const f=$('q').value.toLowerCase().split(/\\s+/).filter(Boolean);
-  const vis=all.filter(b=>f.every(t=>b.name.toLowerCase().includes(t)));
-  const cont=vis.filter(b=>b.progress&&!b.progress.finished&&b.progress.updated);
-  cont.sort((a,c)=>c.progress.updated-a.progress.updated);
-  $('cont').innerHTML=cont.length?'<h2>Continue</h2>'+cont.slice(0,5).map(fmt).join(''):'';
-  const ids=new Set(cont.slice(0,5).map(b=>b.id));
-  $('lib').innerHTML='<h2>Library</h2>'+vis.filter(b=>!ids.has(b.id)).map(fmt).join('');
+  const query=$('q').value.trim().toLowerCase();$('search-wrap').classList.toggle('searching',Boolean(query));
+  if(query){
+    const local=all.filter(book=>query.split(/\\s+/).every(token=>book.name.toLowerCase().includes(token)));
+    const shown=searchResults??local;
+    $('content').innerHTML=section('Search results',shown,`${shown.length} found`)||'<div class="empty">No matching audiobooks</div>';
+    return;
+  }
+  const continuing=all.filter(book=>book.progress&&!book.progress.finished&&book.progress.updated)
+    .sort((a,b)=>b.progress.updated-a.progress.updated).slice(0,5);
+  const ids=new Set(continuing.map(book=>book.id));
+  const library=all.filter(book=>!ids.has(book.id));
+  $('content').innerHTML=section('Continue',continuing,'',true)+section('Library',library,`${all.length} titles`)
+    ||'<div class="empty">The library is empty. Check the audiobook drive, then tap rescan.</div>';
 }
-async function play(id){await j('/api/play?book='+id);setTimeout(refresh,800)}
-async function restart(id){
-  if(confirm('Start over from the beginning?')){await j('/api/play?book='+id+'&restart=1');setTimeout(refresh,800)}}
-async function load(){all=(await j('/api/books')).books;render()}
-async function refresh(){
-  try{
-    const s=await j('/api/status');
-    if(s.playing){
-      $('bar').classList.remove('hide');
-      $('np-name').textContent=s.playing.name;
-      $('np-meta').textContent='Ch '+(s.playing.track+1)+'/'+s.playing.tracks_total
-        +' · '+s.playing.position+' / '+s.playing.duration
-        +(s.transport==='PLAYING'?'':' · paused')+' · '+s.device+' · vol '+s.volume;
-      $('pp').textContent=s.transport==='PLAYING'?'⏸':'▶';
-      const p=hms(s.playing.position),d=hms(s.playing.duration);
-      $('progfill').style.width=(d?100*p/d:0)+'%';
-    } else $('bar').classList.add('hide');
-  }catch(e){}
+async function loadLibrary(){
+  const data=await json('/api/books');all=data.books;render();
 }
-function hms(x){if(!x)return 0;return x.split(':').reduce((a,v)=>a*60+ +v,0)}
-$('q').addEventListener('input',render);
-load();refresh();
-setInterval(()=>{if(!document.hidden)refresh()},5000);
-setInterval(()=>{if(!document.hidden)load()},60000);
-document.addEventListener('visibilitychange',()=>{if(!document.hidden){load();refresh()}});
+async function fuzzySearch(){
+  const query=$('q').value.trim();const serial=++searchSerial;
+  if(!query){searchResults=null;render();return}
+  try{const data=await json('/api/search?q='+encodeURIComponent(query));if(serial===searchSerial){searchResults=data.matches;render()}}
+  catch(error){if(serial===searchSerial)toast(error.message,true)}
+}
+function renderSpeakers(next){
+  speakers=next;const grouped=next.speakers.filter(speaker=>speaker.grouped);
+  $('speaker-label').textContent=next.coordinator;$('speaker-count').textContent=`${grouped.length}/${next.speakers.length}`;
+  $('speaker-list').innerHTML=next.speakers.map(speaker=>{
+    const detail=speaker.coordinator?'Active coordinator':speaker.grouped?`Grouped with ${next.coordinator}`:`Group: ${speaker.group_coordinator}`;
+    const volume=Number.isFinite(speaker.volume)?speaker.volume:0;
+    return `<div class="speaker-row">
+      <input class="speaker-check" data-action data-group-speaker="${esc(speaker.name)}" type="checkbox"
+        ${speaker.grouped?'checked':''} ${speaker.coordinator?'disabled':''} aria-label="Group ${esc(speaker.name)}">
+      <button class="speaker-name" data-action data-select-speaker="${esc(speaker.name)}">${esc(speaker.name)}<small>${esc(detail)}</small></button>
+      <span class="speaker-level">${Number.isFinite(speaker.volume)?speaker.volume:'—'}</span>
+      <input class="speaker-volume" data-action data-speaker-volume="${esc(speaker.name)}" type="range" min="0" max="100"
+        value="${volume}" ${Number.isFinite(speaker.volume)?'':'disabled'} aria-label="${esc(speaker.name)} volume">
+    </div>`;
+  }).join('')||'<div class="speaker-loading">No Sonos speakers found</div>';
+}
+async function loadSpeakers(){
+  const next=await json('/api/speakers');renderSpeakers(next);return next;
+}
+async function openSpeakers(){
+  $('speaker-backdrop').classList.add('open');document.body.classList.add('sheet-open');
+  $('speaker-button').setAttribute('aria-expanded','true');
+  try{await loadSpeakers()}catch(error){$('speaker-list').innerHTML=`<div class="speaker-loading">${esc(error.message)}</div>`;toast(error.message,true)}
+}
+function closeSpeakers(){
+  $('speaker-backdrop').classList.remove('open');document.body.classList.remove('sheet-open');
+  $('speaker-button').setAttribute('aria-expanded','false');$('speaker-button').focus();
+}
+function updateStatus(next){
+  status=next;$('dot').classList.add('on');$('connection').textContent=`Connected · ${next.device||'Sonos ready'}`;
+  if(!speakers&&next.device)$('speaker-label').textContent=next.device;
+  document.querySelectorAll('[data-control]').forEach(button=>button.disabled=false);
+  const playing=next.playing;
+  if(playing){
+    $('np-name').textContent=playing.name;
+    $('np-meta').textContent=`Ch ${playing.track+1}/${playing.tracks_total} · ${playing.position||'0:00'} / ${playing.duration||'—'} · ${next.device}`;
+    $('transport').textContent=next.transport==='PLAYING'?'Playing':'Paused';
+    $('toggle').textContent=next.transport==='PLAYING'?'Ⅱ':'▶';
+    const position=seconds(playing.position),duration=seconds(playing.duration);
+    $('progress-fill').style.width=(duration?Math.min(100,100*position/duration):0)+'%';
+  }else{
+    $('np-name').textContent='Nothing from this library is playing';$('np-meta').textContent=next.device||'Choose a speaker';
+    $('transport').textContent=next.transport==='PLAYING'?'Other audio':'Idle';$('toggle').textContent='▶';$('progress-fill').style.width='0%';
+  }
+  if(document.activeElement!==$('volume')&&Number.isFinite(next.volume))$('volume').value=next.volume;
+  $('volume-value').textContent=Number.isFinite(next.volume)?next.volume:'—';
+}
+function offline(message){
+  $('dot').classList.remove('on');$('connection').textContent=message||'Server unavailable';
+  document.querySelectorAll('[data-control]').forEach(button=>button.disabled=true);
+}
+async function refresh(silent=false){
+  try{updateStatus(await json('/api/status'))}
+  catch(error){offline(error.message);if(!silent)toast(error.message,true)}
+}
+
+$('q').addEventListener('input',()=>{
+  searchResults=null;render();clearTimeout(searchTimer);searchTimer=setTimeout(fuzzySearch,220);
+});
+$('clear').addEventListener('click',()=>{$('q').value='';searchResults=null;++searchSerial;render();$('q').focus()});
+$('speaker-button').addEventListener('click',openSpeakers);
+$('speaker-close').addEventListener('click',closeSpeakers);
+$('speaker-backdrop').addEventListener('click',event=>{if(event.target===$('speaker-backdrop'))closeSpeakers()});
+$('rescan').addEventListener('click',()=>action(()=>post('rescan'),{reload:true}));
+$('volume').addEventListener('input',()=>{$('volume-value').textContent=$('volume').value});
+$('volume').addEventListener('change',()=>action(()=>post('volume',{set:$('volume').value})));
+document.addEventListener('input',event=>{
+  const slider=event.target.closest('[data-speaker-volume]');
+  if(slider)slider.closest('.speaker-row').querySelector('.speaker-level').textContent=slider.value;
+});
+document.addEventListener('change',event=>{
+  const checkbox=event.target.closest('[data-group-speaker]');
+  if(checkbox)action(async()=>{
+    try{return await post('speakers/group',{name:checkbox.dataset.groupSpeaker,grouped:checkbox.checked?'1':'0'})}
+    finally{await loadSpeakers()}
+  });
+  const slider=event.target.closest('[data-speaker-volume]');
+  if(slider)action(async()=>{
+    try{return await post('speakers/volume',{name:slider.dataset.speakerVolume,volume:slider.value})}
+    finally{await loadSpeakers()}
+  });
+});
+document.addEventListener('click',event=>{
+  const play=event.target.closest('[data-play]');
+  if(play){action(()=>post('play',{book:play.dataset.play}));return}
+  const restart=event.target.closest('[data-restart]');
+  if(restart&&confirm('Start this audiobook over from the beginning?')){
+    action(()=>post('play',{book:restart.dataset.restart,restart:'1'}));return}
+  const clear=event.target.closest('[data-clear]');
+  if(clear){action(()=>post('progress/clear',{book:clear.dataset.clear}),{reload:true});return}
+  const selected=event.target.closest('[data-select-speaker]');
+  if(selected){action(async()=>{const result=await post('device',{name:selected.dataset.selectSpeaker});await loadSpeakers();return result});return}
+  const control=event.target.closest('[data-api]');
+  if(control){const params={};if(control.dataset.key)params[control.dataset.key]=control.dataset.value;action(()=>post(control.dataset.api,params))}
+});
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&$('speaker-backdrop').classList.contains('open'))closeSpeakers()});
+Promise.allSettled([loadLibrary(),refresh(false),loadSpeakers()]).then(results=>{
+  for(const result of results)if(result.status==='rejected')toast(result.reason.message,true);
+});
+setInterval(()=>{if(!document.hidden)refresh(true)},5000);
+setInterval(()=>{if(!document.hidden)loadLibrary().catch(error=>offline(error.message))},60000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){loadLibrary().catch(()=>{});refresh(true)}});
 </script>
 </body></html>"""
+
+APP_ICON = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<rect width="512" height="512" rx="112" fill="#211d19"/>
+<path d="M103 136c54-16 105-5 153 31v244c-48-36-99-46-153-30V136Z" fill="#eea94b"/>
+<path d="M409 136c-54-16-105-5-153 31v244c48-36 99-46 153-30V136Z" fill="#c9792d"/>
+<path d="M256 167v244" stroke="#161310" stroke-width="18"/>
+<path d="M143 205c29-4 54 1 76 15M143 259c29-4 54 1 76 15M369 205c-29-4-54 1-76 15M369 259c-29-4-54 1-76 15" stroke="#211d19" stroke-width="14" stroke-linecap="round" opacity=".75"/>
+</svg>"""
+
+@app.route("/manifest.webmanifest")
+def manifest():
+    response = jsonify({
+        "name": "Van Audiobooks", "short_name": "Audiobooks", "id": "/",
+        "start_url": "/", "scope": "/", "display": "standalone",
+        "background_color": "#161310", "theme_color": "#161310",
+        "icons": [{"src": "/app-icon.svg", "sizes": "any", "type": "image/svg+xml"}],
+    })
+    response.mimetype = "application/manifest+json"
+    return response
+
+@app.route("/app-icon.svg")
+def app_icon():
+    response = app.response_class(APP_ICON, mimetype="image/svg+xml")
+    response.headers["Cache-Control"] = "public, max-age=86400"
+    return response
 
 @app.route("/")
 def index():
