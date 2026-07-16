@@ -566,6 +566,24 @@ vlcmd() {
   dbus-send --type=method_call --dest=org.mpris.MediaPlayer2.vlc /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.$cmd $param
 }
 
+### AUDIOBOOKS ### (audiobooks.service, port 8787 — web UI at http://vanpi.lan:8787)
+BOOKAPI="http://localhost:8787/api"
+book() { # book <fuzzy title> | book (status) | -p pause/play | -b/-f skip 60s | -l list | -B/-F chapter
+  case "${1:-}" in
+    "")   curl -s "$BOOKAPI/status" | python3 -m json.tool ;;
+    -p)   curl -s "$BOOKAPI/toggle" ;;
+    -b)   curl -s "$BOOKAPI/skip?s=-60" ;;
+    -f)   curl -s "$BOOKAPI/skip?s=60" ;;
+    -B)   curl -s "$BOOKAPI/chapter?d=-1" ;;
+    -F)   curl -s "$BOOKAPI/chapter?d=1" ;;
+    -l)   curl -s "$BOOKAPI/books" | python3 -c 'import json,sys
+for b in json.load(sys.stdin)["books"]: print(b["name"])' ;;
+    *)    curl -sG "$BOOKAPI/play" --data-urlencode "q=$*" | python3 -c 'import json,sys
+print(json.load(sys.stdin).get("message",""))' ;;
+  esac
+  echo
+}
+
 play_status() {
   if [[ `pgrep vlc` ]]; then
     keys="multi|REQ|WEBRip|Hi10p|ETRG|YTM\.AM|SKGTV|CaLLiOpeD|CtrlHD|Will1869|10\.?Bit|DTS|DL|SDC|Atmos|hdtv|EVO|WiKi|HMAX|IMAX|MA|VhsRip|HDRip|BDRip|iNTERNAL|True\.HD|1080p|1080i|720p|XviD|HDR10|HD|AC3|AAC|REPACK|5\.1|2\.0|REMUX|PRiCK|AVC|HC|AMZN|HEVC|Blu(R|r)ay|(BR|web)(Rip)?|NF|DDP?(5\.1|2\.0)?|(x|h|X|H)\.?26[4-5]|\d+mb|\d+kbps"

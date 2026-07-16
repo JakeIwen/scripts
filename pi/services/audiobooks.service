@@ -1,0 +1,15 @@
+[Unit]
+Description=Audiobook server (Sonos playback + resume + web UI on :8787)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 /home/pi/scripts/python-automation/audiobook_server.py
+WorkingDirectory=/home/pi
+Restart=always
+RestartSec=10
+User=pi
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
