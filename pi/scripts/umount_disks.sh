@@ -16,7 +16,7 @@ kill_torrent_client() {
 
 hdd_locations() { 
   if [ -z ${disk_name+x} ]; then
-    cat /proc/self/mounts | grep -Po "/mnt/[^ ]+" | grep -vP 'usb|msd'
+    cat /proc/self/mounts | grep -Po "/mnt/[^ ]+" | grep -vP 'usb|msd|EXFAT512'
   else
     cat /proc/self/mounts | grep -Po "/mnt/${disk_name}[^_]"
   fi

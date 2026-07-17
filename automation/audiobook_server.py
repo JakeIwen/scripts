@@ -696,7 +696,7 @@ button:disabled{opacity:.38;cursor:default;transform:none!important}
 .connection{display:flex;align-items:center;gap:7px;color:var(--dim);font-size:12px;margin:0 2px 12px}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--bad);box-shadow:0 0 0 3px #ef7b7218}
 .dot.on{background:var(--good);box-shadow:0 0 0 3px #72c69a20}
-.setup{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:9px;margin-bottom:12px}
+.setup{margin-bottom:12px}
 .search-wrap{position:relative}
 #q{width:100%;height:49px;border-radius:14px;border:1px solid var(--line);background:var(--panel);
   color:var(--ink);outline:none}
@@ -760,6 +760,8 @@ body.sheet-open{overflow:hidden}
 .control.primary{font-size:21px;color:var(--accent);background:#30261d;border-color:#59422e}
 .subcontrols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-top:7px}
 .small-btn{min-height:35px;border-radius:10px;font-size:12px;color:var(--dim)}
+.subcontrols #speaker-button{height:35px;border-radius:10px;padding:0 9px}
+.subcontrols #speaker-label{font-size:12px}
 .volume{display:grid;grid-template-columns:38px minmax(0,1fr) 38px 30px;align-items:center;gap:7px;margin-top:8px}
 .vol-btn{min-width:38px;min-height:34px;border-radius:10px;font-size:16px}
 #volume{width:100%;accent-color:var(--accent)}
@@ -772,7 +774,7 @@ body.sheet-open{overflow:hidden}
 #toast.bad{border-color:#874944;color:#ffd8d4}
 body.busy [data-action]{pointer-events:none;opacity:.5}
 @media(hover:hover){button:hover:not(:disabled){background-image:linear-gradient(#ffffff12,#ffffff12);filter:brightness(1.12)}}
-@media(max-width:420px){.setup{grid-template-columns:minmax(0,1fr) 125px}.control{font-size:13px}}
+@media(max-width:420px){.control{font-size:13px}.subcontrols #speaker-button>span:first-child{display:none}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
 </style></head><body>
 <header>
@@ -786,9 +788,6 @@ body.busy [data-action]{pointer-events:none;opacity:.5}
       <input id="q" type="search" placeholder="Search the library" autocomplete="off" autocapitalize="none">
       <button id="clear" aria-label="Clear search">×</button>
     </div>
-    <button id="speaker-button" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="speaker-panel">
-      <span aria-hidden="true">◉</span><span id="speaker-label">Finding Sonos…</span><span id="speaker-count">—</span>
-    </button>
   </div>
   <div id="content"><div class="empty">Loading your library…</div></div>
 </main>
@@ -812,9 +811,11 @@ body.busy [data-action]{pointer-events:none;opacity:.5}
       <button class="control" data-action data-control data-api="chapter" data-key="d" data-value="1" aria-label="Next chapter">Ⅰ▶</button>
     </div>
     <div class="subcontrols">
-      <button class="small-btn" data-action data-control data-api="skip" data-key="s" data-value="-60">−60 sec</button>
-      <button class="small-btn" data-action data-control data-api="pause">Pause</button>
-      <button class="small-btn" data-action data-control data-api="skip" data-key="s" data-value="60">+60 sec</button>
+      <button class="small-btn" data-action data-control data-api="skip" data-key="s" data-value="-300">−5 min</button>
+      <button id="speaker-button" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="speaker-panel">
+        <span aria-hidden="true">◉</span><span id="speaker-label">Speakers</span><span id="speaker-count">—</span>
+      </button>
+      <button class="small-btn" data-action data-control data-api="skip" data-key="s" data-value="300">+5 min</button>
     </div>
     <div class="volume">
       <button class="vol-btn" data-action data-control data-api="volume" data-key="d" data-value="-6" aria-label="Volume down">−</button>
