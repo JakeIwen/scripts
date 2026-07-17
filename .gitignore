@@ -18,3 +18,4 @@ vanrouter/etc
 *__pycache__*
 node_modules/
 **/node_modules/
+AGENTS.private.md
