@@ -39,7 +39,7 @@ services_pid=$!
 
 # RASPI — files grouped by destination, one scp per group
 scp $mux "$dsc/pi/.bashrc" "$dsc/pi/canbus_funcs.sh" "$dsc/pi/sns.sh" "$dsc/pi/keepalive.txt" \
-  "$configs/.bash_defaults" "$configs/.disk_uuids" \
+  "$configs/.bash_defaults" \
   "$configs/rsync-exclude-media.txt" \
   "$pi_ip:/home/pi/" &
 home_pid=$!
