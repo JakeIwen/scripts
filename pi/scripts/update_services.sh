@@ -26,7 +26,6 @@ fi
 
 declare -a new_services=()
 declare -a changed_services=()
-unit_files_changed=false
 
 for staged_unit in "$staged_services"/*.service; do
   unit="${staged_unit##*/}"
@@ -37,10 +36,8 @@ for staged_unit in "$staged_services"/*.service; do
   if [[ ! -e "$live_unit" ]]; then
     is_new=true
     new_services+=("$unit")
-    unit_files_changed=true
   elif ! cmp -s "$staged_unit" "$live_unit"; then
     changed=true
-    unit_files_changed=true
   fi
 
   # Restart a service when a repository-managed file named in ExecStart has
@@ -75,9 +72,9 @@ for staged_unit in "$staged_services"/*.service; do
   sudo install -m 0644 "$staged_unit" "$live_services/${staged_unit##*/}"
 done
 
-if [[ "$unit_files_changed" == true ]]; then
-  sudo systemctl daemon-reload
-fi
+# systemd may still have a stale cached unit even when the staged and on-disk
+# files match (for example, after an earlier copy that missed daemon-reload).
+sudo systemctl daemon-reload
 
 for unit in "${new_services[@]}"; do
   echo "NEW SERVICE: $unit (enabling and starting)"

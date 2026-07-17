@@ -266,6 +266,7 @@ def start_book(book, device, from_track, from_secs):
     gen = enqueue_gen
     host_ip = local_ip_for(device.ip_address)
     device.stop()
+    device.play_mode = "NORMAL"
     device.clear_queue()
     device.add_uri_to_queue(track_uri(host_ip, book, from_track))
     device.play_from_queue(0)
@@ -805,9 +806,9 @@ body.busy [data-action]{pointer-events:none;opacity:.5}
     <div id="progress"><div id="progress-fill"></div></div>
     <div class="controls">
       <button class="control" data-action data-control data-api="chapter" data-key="d" data-value="-1" aria-label="Previous chapter">◀Ⅰ</button>
-      <button class="control" data-action data-control data-api="skip" data-key="s" data-value="-30" aria-label="Back 30 seconds">−30</button>
+      <button class="control" data-action data-control data-api="skip" data-key="s" data-value="-30" aria-label="Back 30 seconds">−30s</button>
       <button class="control primary" id="toggle" data-action data-control data-api="toggle" aria-label="Play or pause">▶</button>
-      <button class="control" data-action data-control data-api="skip" data-key="s" data-value="30" aria-label="Forward 30 seconds">+30</button>
+      <button class="control" data-action data-control data-api="skip" data-key="s" data-value="30" aria-label="Forward 30 seconds">+30s</button>
       <button class="control" data-action data-control data-api="chapter" data-key="d" data-value="1" aria-label="Next chapter">Ⅰ▶</button>
     </div>
     <div class="subcontrols">
