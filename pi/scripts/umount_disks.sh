@@ -308,8 +308,13 @@ ud_notify_failures() {
   (( should_notify )) || return 0
   (( ${#UD_FAILURES[@]} )) || return 0
   summary=$(IFS='; '; echo "${UD_FAILURES[*]}")
-  /home/pi/scripts/ntfy_send.sh \
-    "vanpi HDD shutdown failed" "$summary" high warning || true
+  /home/pi/scripts/hdd_alert.sh failure "$summary" || true
+}
+
+ud_notify_recovery() {
+  local should_notify=$1
+  (( should_notify )) || return 0
+  /home/pi/scripts/hdd_alert.sh recovery || true
 }
 
 umount_disks_main() {
@@ -513,7 +518,11 @@ umount_disks_main() {
   echo "mounted USB/SCSI filesystems after disk operation:"
   /usr/bin/findmnt -rn -t ext4,exfat,hfsplus -o SOURCE,TARGET | /usr/bin/grep '^/dev/sd' || true
 
-  ud_notify_failures "$(( spindown && ! dry_run ))"
+  if (( had_runtime_failure )); then
+    ud_notify_failures "$(( spindown && ! dry_run ))"
+  else
+    ud_notify_recovery "$(( spindown && ! dry_run ))"
+  fi
   (( had_runtime_failure == 0 ))
 }
 
