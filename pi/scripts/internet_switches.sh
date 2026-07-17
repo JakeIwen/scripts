@@ -1,5 +1,13 @@
 #! /bin/bash
 
+# The ignition hook can invoke this at the same time as the minutely cron job.
+# Serialize the entire policy decision so mounting and unmounting cannot race.
+exec 9>/home/pi/.internet_switches.lock || exit 1
+if ! /usr/bin/flock -w 55 9; then
+  echo "another internet_switches.sh instance held the lock for 55 seconds"
+  exit 1
+fi
+
 conf() { cat /home/pi/mconf/$1* &> /dev/null; }
 
 ubnt_internet_ops() { # nanostation connected; van is likely stationary/parked
@@ -75,7 +83,11 @@ kill_torrent_client() {
 
 start_torrent_client() {
   if [[ "$(grep movingparts /proc/mounts)" ]]; then 
-    [[ "$(pgrep qbittor)" ]] || nohup qbittorrent-nox &
+    if ! pgrep qbittor >/dev/null; then
+      # Background only qbittorrent—not the surrounding conditional—and do
+      # not let the long-lived client inherit fd 9 and hold our flock.
+      nohup qbittorrent-nox 9>&- &
+    fi
   else
     echo "preventing torrent-without-mpdisk"
     kill_torrent_client
@@ -91,6 +103,7 @@ mount_drives() {
     sleep 1
     unmount_drives
   else
+    /home/pi/scripts/umount_disks.sh --clear-spindown-state || return 1
     . /home/pi/scripts/mount_disks.sh
     sleep 3
     echo "drives mounted. starting smb share."
@@ -104,18 +117,8 @@ van_is_running() {
   fi
 }
 
-spindown_drive() {
-  uuid=$1
-  echo "spinning down $uuid"
-  sudo hd-idle -t "/dev/disk/by-uuid/$uuid" # spin-down drive
-}
-
-
 unmount_drives() {
-  /home/pi/scripts/umount_disks.sh
-  sleep 5
-  hdd_uuids=$(cat /home/pi/.disk_uuids | grep -Ev 'msd|usb' | cut -d' ' -f2)
-  for loc in $hdd_uuids; do spindown_drive $loc; done
+  /home/pi/scripts/umount_disks.sh --spindown
 }
 
 stop_service() {
