@@ -13,5 +13,7 @@ tags=${4:-}
 args=(-H "Title: $title" -H "Priority: $prio")
 [ -n "$tags" ] && args+=(-H "Tags: $tags")
 
-curl -fsS -m 15 "${args[@]}" -d "$msg" "$url" >/dev/null \
-  || echo "ntfy_send failed ($url): $title — $msg"
+if ! /usr/bin/curl -fsS -m 15 "${args[@]}" -d "$msg" "$url" >/dev/null; then
+  echo "ntfy_send failed: $title" >&2
+  exit 1
+fi

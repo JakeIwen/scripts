@@ -1,92 +1,245 @@
 #! /bin/bash
-# mntdsk sd_card 0383-ABDF
 
+# Set by md_resolve_label on success.
+MD_DEVICE=""
+MD_LABEL_KEY=""
 
-fetch_uuid() { /home/pi/scripts/fetch_disk_uuid.sh $1; }
-fsprop() { 
-  prop=$1 #  LABEL UUID TYPE PARTUUID PARTLABEL
-  sterm=$2
-  match="$(blkln "$sterm" | grep -Po "(?<= $prop=\")[^\"]*")"
-  if [ -n "$sterm" ] && [ "$(echo "$match" | wc -l)" -gt 1 ]; then
-    echo "multiple matches tosearch"
-    echo "prop $prop"
-    echo "sterm $sterm"
-    echo "match $match"
+md_query_token() {
+  local token="$1"
+  local devices
+  local status
+
+  devices="$(/usr/bin/sudo /sbin/blkid -t "$token" -o device)"
+  status=$?
+  if (( status == 0 )); then
+    if [[ -z "$devices" ]]; then
+      echo "ERROR: blkid succeeded but returned no device for $token" >&2
+      return 2
+    fi
+    printf '%s\n' "$devices"
+    return 0
   fi
-  echo "$match"
+
+  # blkid returns 2 when no device matches a token.
+  if (( status == 2 )) && [[ -z "$devices" ]]; then
+    return 1
+  fi
+
+  echo "ERROR: blkid failed while resolving $token (status $status)" >&2
+  return 2
 }
 
-blkln() { 
-  sterm=$1
-  match="$(sudo /sbin/blkid | grep "\"$sterm\"")"
-  echo "$match"
+md_resolve_label() {
+  local label="$1"
+  local label_devices
+  local label_status
+  local partlabel_devices
+  local partlabel_status
+  local devices
+  local device
+  local count
+  local candidate
+  local actual_label
+
+  MD_DEVICE=""
+  MD_LABEL_KEY=""
+  if [[ -z "$label" ]]; then
+    echo "ERROR: refusing to resolve an empty disk label" >&2
+    return 2
+  fi
+
+  label_devices="$(md_query_token "LABEL=$label")"
+  label_status=$?
+  (( label_status == 2 )) && return 2
+
+  partlabel_devices="$(md_query_token "PARTLABEL=$label")"
+  partlabel_status=$?
+  (( partlabel_status == 2 )) && return 2
+
+  if (( label_status == 1 && partlabel_status == 1 )); then
+    return 1
+  fi
+
+  devices="$({ printf '%s\n' "$label_devices"; printf '%s\n' "$partlabel_devices"; } \
+    | /usr/bin/awk 'NF && !seen[$0]++')"
+  count="$(printf '%s\n' "$devices" | /usr/bin/awk 'NF { count++ } END { print count + 0 }')"
+  if (( count != 1 )); then
+    echo "ERROR: exact label '$label' resolves to $count devices; refusing" >&2
+    printf '%s\n' "$devices" >&2
+    return 2
+  fi
+
+  device="$(printf '%s\n' "$devices" | /usr/bin/awk 'NF { print; exit }')"
+  device="$(/usr/bin/readlink -f -- "$device")"
+  if [[ -z "$device" || ! -b "$device" ]]; then
+    echo "ERROR: resolved device for '$label' is not a block device" >&2
+    return 2
+  fi
+
+  MD_LABEL_KEY="PARTLABEL"
+  while IFS= read -r candidate; do
+    if [[ -n "$candidate" && "$(/usr/bin/readlink -f -- "$candidate")" == "$device" ]]; then
+      MD_LABEL_KEY="LABEL"
+      break
+    fi
+  done <<< "$label_devices"
+
+  actual_label="$(/usr/bin/sudo /sbin/blkid -s "$MD_LABEL_KEY" -o value -- "$device")"
+  if [[ $? -ne 0 || "$actual_label" != "$label" ]]; then
+    echo "ERROR: $device no longer has exact $MD_LABEL_KEY '$label'; refusing" >&2
+    return 2
+  fi
+
+  MD_DEVICE="$device"
+  return 0
+}
+
+md_parent_disk() {
+  local device="$1"
+  local ancestors
+  local status
+  local disks
+  local count
+
+  ancestors="$(/usr/bin/lsblk -s -nrpo NAME,TYPE -- "$device")"
+  status=$?
+  if (( status != 0 )) || [[ -z "$ancestors" ]]; then
+    echo "ERROR: cannot determine parent disk for $device" >&2
+    return 1
+  fi
+
+  disks="$(printf '%s\n' "$ancestors" \
+    | /usr/bin/awk '$2 == "disk" && !seen[$1]++ { print $1 }')"
+  count="$(printf '%s\n' "$disks" | /usr/bin/awk 'NF { count++ } END { print count + 0 }')"
+  if (( count != 1 )); then
+    echo "ERROR: expected one parent disk for $device, found $count" >&2
+    return 1
+  fi
+
+  printf '%s\n' "$disks"
 }
 
 mntdsk() {
-  label=$1
-  pth="/mnt/$label"
-  match=$(blkln $label)
-  unset msg
-  if [ -z "$match" ]; then
-    msg="no blkid match for: $label"
-  elif [[ "$match" == *"ro,"* ]]; then
-    msg="read-only match for: $label"
-  elif [[ "$(grep "dev/sd" /proc/mounts)" == *"/mnt/$label"* ]]; then
-    msg="already mounted for: $label"
-  fi
-  echo "$msg"
-  if [ -n "$msg" ]; then return 0; fi
-  
+  local label="$1"
+  local pth="/mnt/$label"
+  local resolve_status
+  local device
+  local label_key
+  local mount_targets
+  local read_only
+  local fstype
+  local root_source
+  local root_disk
+  local device_disk
+  local actual_label
+  local mounted_target
+  local -a mount_opts=()
 
-  uuid=$(fetch_uuid $label)
-  fstype=$(fsprop TYPE $label)
-  
-  mkdir "$pth" 2>/dev/null
-  sudo chown pi $pth
-  sudo chmod 777 $pth 
-  # /sbin/blkid | grep mmcblk0p | grep $uuid && echo "not mounting $label because it is mmcfs" && return 1
-  if [ -n "$uuid" ]; then
-    fsroot=$(df -h | grep /boot | perl -pe 's|\d.*||g')
-    /sbin/blkid | grep -P "$fsroot" && echo "not mounting $label because it is rootFS: $fsroot" && return 1
-    fstype=$(fsprop TYPE $uuid)
-    
-    echo "running sudo mount -U $uuid -t $fstype $opts $pth"
-    sudo mount -U $uuid -t $fstype $opts $pth
-  elif [ -n "$fstype" ]; then
-    if [[ "$fstype" == "hfsplus" ]]; then opts="-o force,rw"; else opts=""; fi
-    if [[ "$fstype" == "exfat" ]]; then sudo modprobe fuse; fi
-    mountkey=PARTLABEL
-    if [ -z "$(fsprop $mountkey $label)" ]; then mountkey=LABEL; fi
-    echo "running sudo mount $mountkey=$label -t $fstype $opts $pth"
-    sudo mount $mountkey=$label -t $fstype $opts $pth
+  md_resolve_label "$label"
+  resolve_status=$?
+  if (( resolve_status == 1 )); then
+    echo "no exact LABEL or PARTLABEL match for: $label"
+    return 0
+  elif (( resolve_status != 0 )); then
+    return 1
   fi
-  # echo "mounted $label at $pth"
+  device="$MD_DEVICE"
+  label_key="$MD_LABEL_KEY"
+
+  mount_targets="$(/usr/bin/findmnt -rn -S "$device" -o TARGET)"
+  if [[ -n "$mount_targets" ]]; then
+    if [[ "$mount_targets" == "$pth" ]]; then
+      echo "already mounted for: $label ($device)"
+      return 0
+    fi
+    echo "ERROR: $device is already mounted somewhere other than $pth: $mount_targets" >&2
+    return 1
+  fi
+
+  read_only="$(/usr/bin/lsblk -dnro RO -- "$device")"
+  if [[ $? -ne 0 || ! "$read_only" =~ ^[01]$ ]]; then
+    echo "ERROR: cannot determine read-only state for $device" >&2
+    return 1
+  elif [[ "$read_only" == "1" ]]; then
+    echo "ERROR: refusing to mount read-only device for: $label ($device)" >&2
+    return 1
+  fi
+
+  root_source="$(/usr/bin/findmnt -rn -T / -o SOURCE)"
+  if [[ $? -ne 0 || -z "$root_source" ]]; then
+    echo "ERROR: cannot determine root filesystem source; refusing to mount $label" >&2
+    return 1
+  fi
+  root_disk="$(md_parent_disk "$root_source")" || return 1
+  device_disk="$(md_parent_disk "$device")" || return 1
+  if [[ "$root_disk" == "$device_disk" ]]; then
+    echo "ERROR: refusing to mount $label from root disk $root_disk" >&2
+    return 1
+  fi
+
+  fstype="$(/usr/bin/sudo /sbin/blkid -s TYPE -o value -- "$device")"
+  if [[ $? -ne 0 || -z "$fstype" ]]; then
+    echo "ERROR: cannot determine filesystem type for $label ($device)" >&2
+    return 1
+  fi
+
+  if [[ "$fstype" == "hfsplus" ]]; then
+    mount_opts=(-o force,rw)
+  elif [[ "$fstype" == "exfat" ]]; then
+    /usr/bin/sudo /usr/sbin/modprobe fuse || return 1
+  fi
+
+  /usr/bin/sudo /usr/bin/install -d -m 0777 -o pi -g pi -- "$pth" || return 1
+  mounted_target="$(/usr/bin/findmnt -rn -T "$pth" -o TARGET 2>/dev/null)"
+  if [[ "$mounted_target" == "$pth" ]]; then
+    echo "ERROR: $pth became a mount point before mounting $device; refusing" >&2
+    return 1
+  fi
+
+  # Close the discovery-to-mount race by checking the selected exact label again.
+  actual_label="$(/usr/bin/sudo /sbin/blkid -s "$label_key" -o value -- "$device")"
+  if [[ $? -ne 0 || "$actual_label" != "$label" || ! -b "$device" ]]; then
+    echo "ERROR: $device no longer has exact $label_key '$label'; refusing" >&2
+    return 1
+  fi
+
+  echo "mounting exact $label_key '$label' from $device at $pth"
+  /usr/bin/sudo /usr/bin/mount -t "$fstype" "${mount_opts[@]}" -- "$device" "$pth" || return 1
+
+  mounted_target="$(/usr/bin/findmnt -rn -S "$device" -o TARGET)"
+  if [[ "$mounted_target" != "$pth" ]]; then
+    echo "ERROR: mount command succeeded but $device is not mounted at $pth" >&2
+    return 1
+  fi
+  echo "mounted $label at $pth"
 }
 
 rm_mnt_dir() { # prevent Time Machine from backing up onto SD card etc
-  diskdir="$1"
+  local diskdir="$1"
+  local resolve_status
 
   # fail closed: this deleted the mounted TM disk on 2026-07-14 when bare
   # `blkid` wasn't in pi's SSH PATH → empty output looked like "disk absent"
-  if grep -q " /mnt/$diskdir " /proc/mounts; then
+  if /usr/bin/grep -q " /mnt/$diskdir " /proc/mounts; then
     echo "NOT removing mount dir /mnt/$diskdir: currently mounted"
     return 0
   fi
 
-  attached="$(sudo /sbin/blkid)"
-  if [ -z "$attached" ]; then
-    echo "ERROR: blkid empty/failed, refusing to remove /mnt/$diskdir"
+  md_resolve_label "$diskdir"
+  resolve_status=$?
+  if (( resolve_status == 0 )); then
+    echo "NOT removing mount dir /mnt/$diskdir for attached disk $MD_DEVICE"
+    return 0
+  elif (( resolve_status != 1 )); then
+    echo "ERROR: disk discovery failed, refusing to remove /mnt/$diskdir"
     return 1
   fi
-  if echo "$attached" | grep -q "$diskdir"; then
-    echo "NOT removing mount dir /mnt/$diskdir for attached disk"
-    return 0
-  fi
 
-  [ -d "/mnt/$diskdir" ] || return 0
-  echo "removing mount dir because not in blkid: /mnt/$diskdir"
+  [[ -d "/mnt/$diskdir" ]] || return 0
+  echo "removing empty mount dir because no exact label is attached: /mnt/$diskdir"
   # rmdir only: a decoy dir is always empty; anything non-empty is real data
-  rmdir "/mnt/$diskdir" || echo "ERROR: /mnt/$diskdir has contents, refusing to delete"
+  /usr/bin/rmdir -- "/mnt/$diskdir" \
+    || echo "ERROR: /mnt/$diskdir has contents, refusing to delete"
 }
 
 if [[ "$#" = "1" ]]; then
@@ -105,15 +258,13 @@ elif [[ "$#" = "0" ]]; then # used by minutely cron job
   # mntdsk mbbackup
   # mntdsk bigboi
 
-  # mntdsk msd_nand2_boot && mntdsk msd_nand2 && mntdsk msd_nand2_settings
-  # mntdsk msd_nand1_boot && mntdsk msd_nand1 && mntdsk msd_nand1_settings
 fi
 
 
 . /home/pi/scripts/fix_hfs_fs.sh 
 
 echo "mounted disks:"
-grep "dev/sd" /proc/mounts
+/usr/bin/grep "dev/sd" /proc/mounts
 
 # 
 # 
@@ -124,4 +275,3 @@ grep "dev/sd" /proc/mounts
 # 
 # It is also possible to set the filesystem label using the -L option of tune2fs, enter:
 # # tune2fs -L usbstroage /dev/sdb2
-
