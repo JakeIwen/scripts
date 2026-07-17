@@ -314,16 +314,6 @@ print_vfat_uuid() {
     | sed -r 's/(..)(..)(..)(..)/\4\3-\2\1/'
 }
 
-mntdsk() { # mntdsk sd_card 0383-ABDF
-  fname=$1
-  pth="/mnt/$fname"
-  uuid=$($HOME/scripts/fetch_disk_uuid.sh $fname)
-  fstype=`blkid | grep $uuid | grep -Po '(?<=TYPE=")[^"]*'`
-  if [[ "$fstype" == "hfsplus" ]]; then opts="-o force,rw"; else opts=""; fi
-  sudo mkdir -p $pth && sudo chown pi $pth  && sudo chmod 777 $pth 
-  sudo mount -U $uuid -t $fstype $opts $pth && echo "mounted $fname at $pth"
-}
-
 rm_sm_dirs() { # remove small dirs by size `rm_sm_dirs 1.1G .`
   local threshold="$1"
   local target_dir="${2:-.}"
