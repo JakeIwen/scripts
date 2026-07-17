@@ -18,19 +18,24 @@ mux="-o ControlMaster=auto -o ControlPath=$HOME/.ssh/mux-%C -o ControlPersist=12
 ssh $mux $pi_ip true || { echo "can't reach $pi_ip"; exit 1; }
 
 cp_services() {
-  ssh $mux $pi_ip "mkdir -p /tmp/systemd-tmp/"
-  scp $mux -r "$services/" "$pi_ip:/tmp/systemd-tmp/"
-  ssh $mux $pi_ip "/home/pi/scripts/update_services.sh"
+  local remote_stage="/tmp/systemd-tmp.$$"
+  ssh $mux $pi_ip "mkdir -p '$remote_stage'" || return 1
+  scp $mux -r "$services" "$scripts" "$pi_ip:$remote_stage/" || return 1
+  ssh $mux $pi_ip "bash '$remote_stage/scripts/update_services.sh' '$remote_stage'"
 }
 
 # crontabs are no longer pulled here — repo is the source of truth now:
 # use pi/push_crontabs.sh to deploy, pi/pull_crontabs.sh to snapshot
-cp_services &
-
 # PREP PYTHONS
+rm -rf "$scripts/python-automation/"
 mkdir "$scripts/python-automation/"
 find "$dsc/automation/" -type f -name "*.py" -exec cp {} "$scripts/python-automation/" \;
 # scp $rem_addr/Users/jacobr/Downloads
+
+# Stage scripts and units together so services are restarted only after their
+# updated programs have been installed.
+cp_services &
+services_pid=$!
 
 # RASPI — files grouped by destination, one scp per group
 scp $mux "$dsc/pi/.bashrc" "$dsc/pi/canbus_funcs.sh" "$dsc/pi/sns.sh" "$dsc/pi/keepalive.txt" \
@@ -39,7 +44,7 @@ scp $mux "$dsc/pi/.bashrc" "$dsc/pi/canbus_funcs.sh" "$dsc/pi/sns.sh" "$dsc/pi/k
   "$pi_ip:/home/pi/" &
 home_pid=$!
 
-scp $mux -r "$scripts" "$hooks" "$secrets" "$twilio" "$pi_ip:/home/pi/" &
+scp $mux -r "$hooks" "$secrets" "$twilio" "$pi_ip:/home/pi/" &
 dirs_pid=$!
 
 scp $mux "$dsc/NativCast/process.py" "$dsc/NativCast/server.py" "$pi_ip:/home/pi/NativCast/" &
@@ -48,7 +53,7 @@ scp $mux "$configs/smb.conf" "$pi_ip:/etc/samba/smb.conf" &
 wait $home_pid
 ssh $mux $pi_ip 'sudo chmod 770 /home/pi/rsync-exclude-media.txt' &
 wait $dirs_pid
-ssh $mux $pi_ip 'sudo chmod 770 /home/pi/scripts/*' &
+wait $services_pid || { echo "script/service deployment failed" >&2; exit 1; }
 
 # ROUTER
 # scp -r "$vr_ip:/etc/config" "$vanrouter/etc/" &
