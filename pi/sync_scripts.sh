@@ -30,6 +30,8 @@ cp_services() {
 rm -rf "$scripts/python-automation/"
 mkdir "$scripts/python-automation/"
 find "$dsc/automation/" -type f -name "*.py" -exec cp {} "$scripts/python-automation/" \;
+cp -R "$dsc/automation/templates" "$scripts/python-automation/"
+cp -R "$dsc/automation/static" "$scripts/python-automation/"
 # scp $rem_addr/Users/jacobr/Downloads
 
 # Stage scripts and units together so services are restarted only after their

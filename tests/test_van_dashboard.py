@@ -609,7 +609,6 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'data-transport="play_pause"', page.data)
         self.assertIn(b"Group volume", page.data)
         self.assertIn(b"data-group-mute", page.data)
-        self.assertIn(b"data-speaker-mute", page.data)
         self.assertIn(b"Storage &amp; Torrents", page.data)
         self.assertIn(b'data-policy-field="disks_enabled"', page.data)
         self.assertIn(b'data-policy-field="torrents_enabled"', page.data)
@@ -619,10 +618,34 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(
             b"Starlink torrenting requires both Torrents enabled", page.data
         )
-        self.assertIn(b"bookUrl.port='8787'", page.data)
+        self.assertNotIn(b"<style>", page.data)
+        self.assertIn(b'href="/static/van_dashboard.css"', page.data)
+        self.assertIn(b'src="/static/van_dashboard.js"', page.data)
+        javascript = client.get("/static/van_dashboard.js")
+        stylesheet = client.get("/static/van_dashboard.css")
+        self.addCleanup(javascript.close)
+        self.addCleanup(stylesheet.close)
+        self.assertEqual(javascript.status_code, 200)
+        self.assertEqual(stylesheet.status_code, 200)
+        self.assertIn(b"data-speaker-mute", javascript.data)
+        self.assertIn(b"bookUrl.port='8787'", javascript.data)
+        self.assertIn(b".policy-toggle", stylesheet.data)
         manifest = client.get("/manifest.webmanifest")
         self.assertEqual(manifest.status_code, 200)
         self.assertEqual(manifest.json["name"], "Van Dashboard")
+
+    def test_sync_scripts_deploys_dashboard_assets(self):
+        repository = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(repository, "pi", "sync_scripts.sh"), encoding="utf-8") as handle:
+            sync_script = handle.read()
+        self.assertIn(
+            'cp -R "$dsc/automation/templates" "$scripts/python-automation/"',
+            sync_script,
+        )
+        self.assertIn(
+            'cp -R "$dsc/automation/static" "$scripts/python-automation/"',
+            sync_script,
+        )
 
     def test_connectivity_and_speedtest_status_routes(self):
         client = dashboard.app.test_client()

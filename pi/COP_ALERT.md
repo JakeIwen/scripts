@@ -7,6 +7,10 @@ so the same URL works through the LAN hostname or a Tailscale hostname/address:
 http://vanpi.lan:8788/
 ```
 
+The Flask backend is `automation/van_dashboard.py`; its page, stylesheet, and
+browser code live under `automation/templates/` and `automation/static/`.
+`pi/sync_scripts.sh` deploys those directories beside the Python entry point.
+
 The Audiobooks tile preserves the current host and changes only the port to
 `8787`, so it also works over Tailscale.
 

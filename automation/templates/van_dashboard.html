@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Van Dashboard">
+<meta name="theme-color" content="#111820">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/app-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/app-icon.svg">
+<title>Van Dashboard</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='van_dashboard.css') }}"></head><body>
+<header><div><div class="eyebrow">vanpi controls</div><h1>Van Dashboard</h1></div><div class="van-mark" aria-hidden="true">🚐</div></header>
+<main>
+  <div class="connection"><span class="dot" id="dot"></span><span id="connection">Connecting to vanpi…</span></div>
+  <div class="grid">
+    <button class="tile cop" id="cop" data-action aria-pressed="false">
+      <span class="pill" id="cop-pill">OFF</span><span class="tile-icon" aria-hidden="true">🚨</span>
+      <span class="tile-title">COP ALERT</span><span class="tile-detail" id="cop-detail">Tap to keep the dashcam awake</span>
+      <span class="status-lines">
+        <span class="status-line"><span>Engine</span><span id="engine">Checking C-CAN…</span></span>
+        <span class="status-line"><span>ext_flood</span><span id="flood">—</span></span>
+        <span class="status-line"><span>ext_led</span><span id="cop-led">—</span></span>
+        <span class="status-line"><span>CAN wake</span><span id="wake">—</span></span>
+      </span>
+    </button>
+    <button class="tile starlink unknown" id="starlink" data-action disabled aria-pressed="mixed">
+      <span class="switch-state"><span class="network-dot" id="starlink-dot"></span><span id="starlink-state">NO DATA</span></span>
+      <span class="tile-icon" aria-hidden="true">🛰️</span><span class="tile-title">Starlink</span>
+      <span class="tile-detail" id="starlink-detail">Checking Tuya status…</span>
+    </button>
+    <a class="tile" id="books" data-action href="#"><span class="tile-icon" aria-hidden="true">📖</span><span class="tile-title">Audiobooks</span><span class="tile-detail">Open the Sonos audiobook library</span></a>
+    <section class="tile sonos-tile" id="sonos-card" aria-labelledby="sonos-title">
+      <div class="sonos-head"><span class="tile-title" id="sonos-title">Sonos</span><button class="sonos-open" id="speakers" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="speaker-panel"><span aria-hidden="true">🔊</span><span id="speaker-summary">Finding…</span></button></div>
+      <div class="now-playing"><strong id="sonos-track">Finding Sonos…</strong><span id="sonos-artist">—</span></div>
+      <div class="transport" aria-label="Sonos playback controls">
+        <button class="transport-button" data-action data-transport="previous" aria-label="Previous track">|◀</button>
+        <button class="transport-button play" id="sonos-play" data-action data-transport="play_pause" aria-label="Play">▶</button>
+        <button class="transport-button" data-action data-transport="next" aria-label="Next track">▶|</button>
+      </div>
+      <div class="sonos-progress" id="sonos-progress" role="progressbar" aria-label="Track position" hidden><span class="sonos-progress-fill" id="sonos-progress-fill"></span></div>
+    </section>
+    <button class="tile storage-tile" id="storage" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="storage-panel">
+      <span class="tile-icon" aria-hidden="true">💾</span><span class="tile-title">Storage &amp; Torrents</span><span class="tile-detail" id="storage-summary">Checking requested policy…</span>
+    </button>
+  </div>
+  <section class="connectivity" aria-labelledby="connectivity-title">
+    <div class="connectivity-head"><h2 id="connectivity-title">Connectivity</h2><span class="connectivity-age" id="connectivity-age">Checking…</span></div>
+    <div class="network-grid">
+      <div class="network-stat"><span class="network-label"><span class="network-dot" id="internet-dot"></span>MWAN3</span><strong class="network-value" id="mwan-mode">Checking…</strong></div>
+      <div class="network-stat"><span class="network-label"><span class="network-dot" id="ubnt-dot"></span>UBNT Availability</span></div>
+      <div class="network-stat"><span class="network-label"><span class="network-dot" id="wireless-dot"></span>UBNT Wireless</span><strong class="network-value" id="wireless-status">Checking…</strong><span class="network-detail" id="wireless-detail">Association · —</span></div>
+    </div>
+    <div class="mwan-list" id="mwan-list" aria-label="mwan3 interfaces"></div>
+    <div class="speed-row">
+      <button class="speedtest-button" id="speedtest-button"><span class="speed-icon" aria-hidden="true">↕</span><span class="speed-spinner" aria-hidden="true"></span><span id="speedtest-label">Run speed test</span></button>
+      <div class="speed-results" id="speed-results" role="status" aria-live="polite"><strong>Not run yet</strong>Uses vanpi's current route</div>
+    </div>
+  </section>
+</main>
+<div class="speaker-backdrop" id="speaker-backdrop">
+  <section class="speaker-sheet" id="speaker-panel" role="dialog" aria-modal="true" aria-labelledby="speaker-title">
+    <div class="sheet-grabber"></div><div class="sheet-head"><h2 id="speaker-title">Sonos speakers</h2><button class="sheet-close" id="speaker-close" aria-label="Close speaker selector">×</button></div>
+    <p class="sheet-help">Tap a name to control its group. Check speakers to group them with the active player.</p>
+    <div class="group-audio">
+      <div class="group-audio-label">Group volume</div>
+      <button class="audio-mute" id="group-mute" data-action data-group-mute disabled aria-label="Mute group">🔊</button>
+      <input class="group-volume" id="group-volume" data-action data-group-volume type="range" min="0" max="100" value="0" disabled aria-label="Group volume">
+      <span class="group-level" id="group-level">—</span>
+    </div>
+    <div id="speaker-list"><div class="speaker-loading">Finding speakers…</div></div>
+  </section>
+</div>
+<div class="speaker-backdrop" id="storage-backdrop">
+  <section class="speaker-sheet policy-sheet" id="storage-panel" role="dialog" aria-modal="true" aria-labelledby="storage-title" aria-busy="true">
+    <div class="sheet-grabber"></div><div class="sheet-head"><h2 id="storage-title">Storage &amp; Torrents</h2><span class="policy-sheet-status" id="storage-status">Checking…</span><button class="sheet-close" id="storage-close" aria-label="Close storage policy">&times;</button></div>
+    <p class="sheet-help">Requested policy; the reconciler applies it to current van conditions.</p>
+    <div class="policy-controls">
+      <button class="policy-toggle" data-action data-policy-field="disks_enabled" disabled aria-pressed="mixed"><span><strong>Disks enabled</strong><small>Permit mounted storage while conditions allow</small></span><span class="policy-state">NO DATA</span></button>
+      <button class="policy-toggle" data-action data-policy-field="torrents_enabled" disabled aria-pressed="mixed"><span><strong>Torrents enabled</strong><small>Global torrent permission</small></span><span class="policy-state">NO DATA</span></button>
+      <button class="policy-toggle" data-action data-policy-field="allow_starlink_torrents" disabled aria-pressed="mixed"><span><strong>Allow torrents on Starlink</strong><small>Additional permission for Starlink traffic</small></span><span class="policy-state">NO DATA</span></button>
+    </div>
+    <ul class="policy-notes">
+      <li>Ignition always overrides disk permission.</li>
+      <li>Disabling disks also stops torrents.</li>
+      <li>Allow torrents on Starlink does not override the global torrents switch.</li>
+      <li>Starlink torrenting requires both Torrents enabled and Allow torrents on Starlink.</li>
+    </ul>
+  </section>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+<script src="{{ url_for('static', filename='van_dashboard.js') }}" defer></script></body></html>
