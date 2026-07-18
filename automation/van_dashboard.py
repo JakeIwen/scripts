@@ -48,6 +48,7 @@ SPEEDTEST = os.path.expanduser(
 )
 CONNECTIVITY_INTERVAL = float(os.environ.get("VAN_DASHBOARD_CONNECTIVITY_INTERVAL", "30"))
 SPEEDTEST_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_SPEEDTEST_TIMEOUT", "180"))
+TUYA_POLL_INTERVAL = float(os.environ.get("VAN_DASHBOARD_TUYA_POLL_INTERVAL", "15"))
 
 CAN_CHANNEL = os.environ.get("VAN_DASHBOARD_CAN_CHANNEL", "can0")
 CAN_BITRATE = 500000
@@ -507,6 +508,121 @@ class CopAlertManager:
             pass
 
 
+class TuyaSwitchManager:
+    """Cache and safely toggle one Home Assistant/Tuya switch."""
+
+    def __init__(
+        self,
+        entity,
+        command=run_command,
+        interval=TUYA_POLL_INTERVAL,
+        wall_clock=time.time,
+    ):
+        self.entity = entity
+        self.command = command
+        self.interval = interval
+        self.wall_clock = wall_clock
+        self.lock = threading.Lock()
+        self.operation_lock = threading.Lock()
+        self.stop_event = threading.Event()
+        self.thread = None
+        self.state = "unknown"
+        self.checked_at = None
+        self.last_error = None
+        self.refreshing = False
+        self.changing = False
+
+    def start(self):
+        if not self.thread:
+            self.thread = threading.Thread(
+                target=self._loop, name=f"tuya-{self.entity}", daemon=True
+            )
+            self.thread.start()
+
+    def stop(self):
+        self.stop_event.set()
+
+    def snapshot(self):
+        with self.lock:
+            return {
+                "entity": self.entity,
+                "state": self.state,
+                "available": self.state in ("on", "off"),
+                "checked_at": self.checked_at,
+                "last_error": self.last_error,
+                "refreshing": self.refreshing,
+                "changing": self.changing,
+            }
+
+    def refresh(self):
+        with self.operation_lock:
+            return self._refresh()
+
+    def toggle(self):
+        with self.operation_lock:
+            with self.lock:
+                current = self.state
+                if current not in ("on", "off"):
+                    raise ValueError(f"{self.entity} status is unavailable")
+                desired = "off" if current == "on" else "on"
+                self.state = "unknown"
+                self.changing = True
+                self.last_error = None
+            try:
+                result = self.command([TUYA_TOGGLE, self.entity, desired], timeout=20)
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                message = f"could not turn {self.entity} {desired}: {exc}"
+                self._mark_unknown(message, changing=False)
+                raise RuntimeError(message) from exc
+            if result.returncode:
+                detail = (result.stderr or result.stdout or "command failed").strip()
+                message = f"could not turn {self.entity} {desired}: {detail[-300:]}"
+                self._mark_unknown(message, changing=False)
+                raise RuntimeError(message)
+
+            # Read the authoritative Tuya/HA state after the service call. If
+            # that verification fails, the UI returns to neutral grey rather
+            # than presenting the requested state as confirmed.
+            status = self._refresh()
+            if not status["available"]:
+                raise RuntimeError(f"{self.entity} changed but status verification failed")
+            return status
+
+    def _refresh(self):
+        with self.lock:
+            self.refreshing = True
+        try:
+            result = self.command([TUYA_STATUS, self.entity], timeout=20)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            self._mark_unknown(f"could not read {self.entity}: {exc}", changing=False)
+        else:
+            state = result.stdout.strip().lower()
+            if result.returncode == 0 and state in ("on", "off"):
+                with self.lock:
+                    self.state = state
+                    self.checked_at = int(self.wall_clock())
+                    self.last_error = None
+                    self.refreshing = False
+                    self.changing = False
+            else:
+                detail = (result.stderr or result.stdout or "status unavailable").strip()
+                self._mark_unknown(f"could not read {self.entity}: {detail[-300:]}", changing=False)
+        return self.snapshot()
+
+    def _mark_unknown(self, message, changing):
+        with self.lock:
+            self.state = "unknown"
+            self.checked_at = int(self.wall_clock())
+            self.last_error = message
+            self.refreshing = False
+            self.changing = changing
+
+    def _loop(self):
+        while not self.stop_event.is_set():
+            self.refresh()
+            self.stop_event.wait(max(1.0, self.interval))
+
+
 class SonosController:
     """Small Sonos grouping/volume controller matching the audiobook page."""
 
@@ -807,6 +923,7 @@ cop_alert = CopAlertManager(state_store, engine_monitor)
 sonos = SonosController(state_store)
 connectivity = ConnectivityMonitor()
 speedtest = SpeedTestManager()
+starlink = TuyaSwitchManager("starlink")
 
 
 def api_error(message, status):
@@ -837,7 +954,26 @@ def reject_cross_origin_mutations():
 
 @app.route("/api/status")
 def api_status():
-    return jsonify({"ok": True, "cop_alert": cop_alert.snapshot()})
+    return jsonify(
+        {"ok": True, "cop_alert": cop_alert.snapshot(), "starlink": starlink.snapshot()}
+    )
+
+
+@app.route("/api/starlink", methods=["POST"])
+def api_starlink():
+    try:
+        status = starlink.toggle()
+    except ValueError as exc:
+        return api_error(exc, 503)
+    except RuntimeError as exc:
+        return api_error(exc, 502)
+    return jsonify(
+        {
+            "ok": True,
+            "message": f"Starlink power {status['state']}",
+            "starlink": status,
+        }
+    )
 
 
 @app.route("/api/connectivity")
@@ -943,27 +1079,30 @@ header{display:flex;align-items:center;justify-content:space-between;padding:24p
 .eyebrow{color:var(--accent);font-size:11px;font-weight:750;letter-spacing:.16em;text-transform:uppercase}
 h1{font-size:29px;line-height:1.05;letter-spacing:-.03em;margin:3px 0 0}.van-mark{font-size:28px;filter:grayscale(.2)}
 .connection{display:flex;align-items:center;gap:7px;color:var(--dim);font-size:12px;margin:0 2px 14px}
-.dot{width:8px;height:8px;border-radius:50%;background:var(--bad);box-shadow:0 0 0 3px #ef706718}
-.dot.on{background:var(--good);box-shadow:0 0 0 3px #62c89920}
+.dot{width:8px;height:8px;border-radius:50%;background:#71818a;box-shadow:0 0 0 3px #71818a18}
+.dot.on{background:var(--good);box-shadow:0 0 0 3px #62c89920}.dot.bad{background:var(--bad);box-shadow:0 0 0 3px #ef706718}
 .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
 .tile{min-height:150px;border:1px solid var(--line);border-radius:19px;background:linear-gradient(145deg,var(--panel),#151f28);
   padding:15px;text-decoration:none;color:inherit;box-shadow:0 8px 28px #050b102e;display:flex;flex-direction:column;
   align-items:flex-start;text-align:left;cursor:pointer;position:relative;overflow:hidden}
 .tile:active{background:var(--raised);transform:scale(.985)}.tile-icon{font-size:31px;line-height:1;margin-bottom:auto}
 .tile-title{font-size:17px;font-weight:760;letter-spacing:-.01em}.tile-detail{font-size:12px;color:var(--dim);margin-top:3px;min-height:34px}
-.cop{grid-column:1/-1;min-height:210px;border-color:#744238;background:radial-gradient(circle at 92% 5%,#ef503f33,transparent 35%),linear-gradient(145deg,#292124,#1c2026)}
+.cop{min-height:210px;border-color:#744238;background:radial-gradient(circle at 92% 5%,#ef503f33,transparent 35%),linear-gradient(145deg,#292124,#1c2026)}
 .cop .tile-icon{font-size:38px}.cop .tile-title{font-size:23px}.cop::after{content:"";position:absolute;inset:auto -25% -80% 25%;height:180px;
   background:var(--alert);filter:blur(60px);opacity:0;transition:opacity .25s}.cop.active{border-color:#ef675a;box-shadow:0 10px 40px #ef503f25}
 .cop.active::after{opacity:.35}.cop.active .tile-title{color:#ffd7d2}.pill{position:absolute;right:14px;top:14px;border:1px solid var(--line);
   border-radius:99px;padding:4px 8px;font-size:10px;font-weight:800;letter-spacing:.1em;color:var(--dim);background:#10171dcc}
 .cop.active .pill{color:#fff1ef;background:#8b2d27;border-color:#bf473d}.status-lines{display:grid;gap:4px;margin-top:12px;width:100%;font-size:11px;color:var(--dim)}
 .status-line{display:flex;justify-content:space-between;gap:10px}.status-line span:last-child{text-align:right;color:#c5d1d7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.starlink{min-height:210px;transition:border-color .2s,background .2s,opacity .2s}.starlink .tile-icon{font-size:38px}.starlink .tile-title{font-size:23px}.starlink.on{border-color:#438168;background:radial-gradient(circle at 88% 5%,#62c89928,transparent 38%),linear-gradient(145deg,#1d2b2b,#172225)}
+.starlink.off{border-color:#754743;background:radial-gradient(circle at 88% 5%,#ef70671c,transparent 38%),linear-gradient(145deg,#292124,#1b2025)}.starlink.unknown{border-color:#41505a;background:linear-gradient(145deg,#202a32,#182128)}.starlink:disabled{cursor:not-allowed;opacity:.72}
+.switch-state{position:absolute;right:14px;top:14px;display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:99px;padding:4px 8px;background:#10171dcc;color:var(--dim);font-size:10px;font-weight:800;letter-spacing:.08em}.starlink.on .switch-state{color:#bcebd5;border-color:#39725b}.starlink.off .switch-state{color:#f2b5b0;border-color:#754743}
 .connectivity{margin-top:11px;border:1px solid var(--line);border-radius:19px;background:linear-gradient(145deg,var(--panel),#151f28);padding:15px;box-shadow:0 8px 28px #050b102e}
 .connectivity-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:13px}.connectivity-head h2{font-size:17px;margin:0;letter-spacing:-.01em}
 .connectivity-age{color:var(--dim);font-size:10px;text-align:right}.network-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0}
 .network-stat{min-width:0;padding:1px 11px;border-left:1px solid var(--line)}.network-stat:first-child{border-left:0;padding-left:0}.network-stat:last-child{padding-right:0}
-.network-label{display:flex;align-items:center;gap:5px;color:var(--dim);font-size:10px;line-height:1.2;min-height:24px}.network-dot{width:7px;height:7px;flex:0 0 auto;border-radius:50%;background:#71818a}
-.network-dot.good{background:var(--good);box-shadow:0 0 0 3px #62c89918}.network-dot.bad{background:var(--bad);box-shadow:0 0 0 3px #ef706718}
+.network-label{display:flex;align-items:center;gap:7px;color:var(--dim);font-size:12px;line-height:1.2;min-height:24px}.network-dot{width:10px;height:10px;flex:0 0 auto;border-radius:50%;background:#71818a;box-shadow:0 0 0 4px #71818a18}
+.network-dot.good{background:var(--good);box-shadow:0 0 0 4px #62c89918}.network-dot.bad{background:var(--bad);box-shadow:0 0 0 4px #ef706718}
 .network-value{display:block;margin-top:4px;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.network-detail{display:block;margin-top:2px;color:var(--dim);font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mwan-list{display:flex;gap:5px;flex-wrap:wrap;margin-top:13px}.mwan-chip{border:1px solid #42545e;border-radius:99px;padding:3px 7px;color:var(--dim);font-size:9px}.mwan-chip.online{border-color:#39725b;color:#9cdec0;background:#1e3b31}.mwan-chip.offline{border-color:#6a4542;color:#e6aaa5;background:#392624}.mwan-chip.paused{opacity:.58}
 .speed-row{display:flex;align-items:center;gap:12px;margin-top:13px;padding-top:12px;border-top:1px solid var(--line)}.speedtest-button{display:flex;align-items:center;justify-content:center;gap:7px;flex:0 0 auto;border:1px solid #42606e;border-radius:11px;background:#263b47;color:var(--ink);padding:9px 11px;font-size:11px;font-weight:730;cursor:pointer}
@@ -997,6 +1136,11 @@ h1{font-size:29px;line-height:1.05;letter-spacing:-.03em;margin:3px 0 0}.van-mar
         <span class="status-line"><span>CAN wake</span><span id="wake">—</span></span>
       </span>
     </button>
+    <button class="tile starlink unknown" id="starlink" data-action disabled aria-pressed="mixed">
+      <span class="switch-state"><span class="network-dot" id="starlink-dot"></span><span id="starlink-state">NO DATA</span></span>
+      <span class="tile-icon" aria-hidden="true">🛰️</span><span class="tile-title">Starlink</span>
+      <span class="tile-detail" id="starlink-detail">Checking Tuya status…</span>
+    </button>
     <a class="tile" id="books" data-action href="#"><span class="tile-icon" aria-hidden="true">📖</span><span class="tile-title">Audiobooks</span><span class="tile-detail">Open the Sonos audiobook library</span></a>
     <button class="tile" id="speakers" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="speaker-panel">
       <span class="tile-icon" aria-hidden="true">🔊</span><span class="tile-title">Sonos</span><span class="tile-detail" id="speaker-summary">Finding speakers…</span>
@@ -1005,8 +1149,8 @@ h1{font-size:29px;line-height:1.05;letter-spacing:-.03em;margin:3px 0 0}.van-mar
   <section class="connectivity" aria-labelledby="connectivity-title">
     <div class="connectivity-head"><h2 id="connectivity-title">Connectivity</h2><span class="connectivity-age" id="connectivity-age">Checking…</span></div>
     <div class="network-grid">
-      <div class="network-stat"><span class="network-label"><span class="network-dot" id="internet-dot"></span>Internet Connectivity</span><strong class="network-value" id="internet-status">Checking…</strong><span class="network-detail" id="mwan-primary">mwan3 mode · —</span></div>
-      <div class="network-stat"><span class="network-label"><span class="network-dot" id="ubnt-dot"></span>UBNT Availability</span><strong class="network-value" id="ubnt-status">Checking…</strong><span class="network-detail" id="ubnt-detail">Ethernet · —</span></div>
+      <div class="network-stat"><span class="network-label"><span class="network-dot" id="internet-dot"></span>MWAN3</span><strong class="network-value" id="mwan-mode">Checking…</strong></div>
+      <div class="network-stat"><span class="network-label"><span class="network-dot" id="ubnt-dot"></span>UBNT Availability</span></div>
       <div class="network-stat"><span class="network-label"><span class="network-dot" id="wireless-dot"></span>UBNT Wireless</span><strong class="network-value" id="wireless-status">Checking…</strong><span class="network-detail" id="wireless-detail">Association · —</span></div>
     </div>
     <div class="mwan-list" id="mwan-list" aria-label="mwan3 interfaces"></div>
@@ -1036,10 +1180,8 @@ async function action(work){if(busy)return;busy=true;document.body.classList.add
 function age(ts){if(!ts)return 'never';const secs=Math.max(0,Date.now()/1000-ts);return secs<90?`${Math.round(secs)}s ago`:`${Math.round(secs/60)}m ago`}
 function networkState(id,value){const el=$(id);el.classList.remove('good','bad');if(value===true)el.classList.add('good');else if(value===false)el.classList.add('bad')}
 function renderConnectivity(response){const c=response.connectivity,r=c.router||{},u=c.ubnt||{},online=c.internet?.online;
-  networkState('internet-dot',online);$('internet-status').textContent=online===true?'Online':online===false?'Offline':'Unknown';
-  $('mwan-primary').textContent=r.reachable===false?'mwan3 · router unavailable':r.mode?`mwan3 mode · ${r.mode}`:r.reachable===true?'mwan3 · no active uplink':'mwan3 mode · —';
-  networkState('ubnt-dot',u.reachable);$('ubnt-status').textContent=u.reachable===true?'Reachable':u.reachable===false?'Unavailable':'Unknown';
-  $('ubnt-detail').textContent=u.reachable===false?'Ethernet cable or power':u.reachable===true?'Ethernet link responds':'Ethernet · —';
+  networkState('internet-dot',online===null&&r.reachable===false?false:online);$('mwan-mode').textContent=r.mode||((online===false||r.reachable===false)?'No active uplink':'Unknown');
+  networkState('ubnt-dot',u.reachable);$('ubnt-dot').closest('.network-stat').title=u.error||'';
   const radioKnown=u.reachable===true&&!u.error;networkState('wireless-dot',radioKnown?u.connected:u.reachable===false?false:null);
   if(u.reachable===false){$('wireless-status').textContent='Unavailable';$('wireless-detail').textContent='No UBNT Ethernet response'}
   else if(u.error){$('wireless-status').textContent='Status error';$('wireless-detail').textContent='Could not read radio'}
@@ -1056,13 +1198,14 @@ function renderSpeedtest(response){const s=response.speedtest,button=$('speedtes
   else $('speed-results').innerHTML="<strong>Not run yet</strong>Uses vanpi's current route"}
 async function refreshSpeedtest(){clearTimeout(speedPoll);try{const response=await json('/api/speedtest');renderSpeedtest(response);if(response.speedtest.status==='running')speedPoll=setTimeout(refreshSpeedtest,1000)}catch(error){$('speed-results').innerHTML=`<strong>Speed test unavailable</strong>${esc(error.message)}`}}
 async function startSpeedtest(){if($('speedtest-button').disabled)return;$('speedtest-button').disabled=true;try{const response=await post('speedtest');renderSpeedtest(response);if(response.speedtest.status==='running')speedPoll=setTimeout(refreshSpeedtest,1000)}catch(error){toast(error.message,true);$('speedtest-button').disabled=false}}
-function updateStatus(data){dashboard=data.cop_alert;const active=dashboard.active,engine=dashboard.engine;$('dot').classList.add('on');$('connection').textContent='Connected · vanpi dashboard';
+function renderStarlink(status){const state=status?.state||'unknown',known=state==='on'||state==='off',tile=$('starlink');tile.classList.remove('on','off','unknown');tile.classList.add(known?state:'unknown');networkState('starlink-dot',state==='on'?true:state==='off'?false:null);tile.disabled=!known||Boolean(status?.changing);tile.setAttribute('aria-pressed',known?String(state==='on'):'mixed');$('starlink-state').textContent=status?.changing?'WAIT':state==='on'?'ON':state==='off'?'OFF':'NO DATA';$('starlink-detail').textContent=status?.changing?'Changing power…':state==='on'?'Tuya switch is on':state==='off'?'Tuya switch is off':'Tuya status unavailable'}
+function updateStatus(data){dashboard=data.cop_alert;const active=dashboard.active,engine=dashboard.engine;$('dot').classList.remove('bad');$('dot').classList.add('on');$('connection').textContent='Connected · vanpi dashboard';renderStarlink(data.starlink);
   $('cop').classList.toggle('active',active);$('cop').setAttribute('aria-pressed',String(active));$('cop-pill').textContent=active?'ACTIVE':'OFF';
   $('cop-detail').textContent=active?'Dashcam wake and 5-minute bacon alerts are active':'Tap to keep the dashcam awake';
   $('engine').textContent=engine.running?`RUNNING · ${Math.round(engine.rpm)} RPM`:engine.rpm===null?'No fresh data':`Stopped · ${Math.round(engine.rpm)} RPM`;
   $('flood').textContent=dashboard.ext_flood;$('wake').textContent=dashboard.last_wake_ok===null?'Not attempted':dashboard.last_wake_ok?`OK · ${age(dashboard.last_wake)}`:'DEGRADED';
   if(active&&dashboard.last_error)$('connection').textContent=`Active with warning · ${dashboard.last_error}`}
-async function refresh(){try{updateStatus(await json('/api/status'))}catch(error){$('dot').classList.remove('on');$('connection').textContent=error.message}}
+async function refresh(){try{updateStatus(await json('/api/status'))}catch(error){$('dot').classList.remove('on');$('dot').classList.add('bad');$('connection').textContent=error.message}}
 function renderSpeakers(next){speakers=next;const grouped=next.speakers.filter(s=>s.grouped);$('speaker-summary').textContent=`${next.coordinator} · ${grouped.length}/${next.speakers.length} grouped`;
   $('speaker-list').innerHTML=next.speakers.map(s=>{const detail=s.coordinator?'Active coordinator':s.grouped?`Grouped with ${next.coordinator}`:`Group: ${s.group_coordinator}`;
     const volume=Number.isFinite(s.volume)?s.volume:0;return `<div class="speaker-row"><input class="speaker-check" data-action data-group-speaker="${esc(s.name)}" type="checkbox" ${s.grouped?'checked':''} ${s.coordinator?'disabled':''} aria-label="Group ${esc(s.name)}">
@@ -1073,7 +1216,7 @@ async function openSpeakers(){$('speaker-backdrop').classList.add('open');docume
   try{await loadSpeakers()}catch(error){$('speaker-list').innerHTML=`<div class="speaker-loading">${esc(error.message)}</div>`;toast(error.message,true)}}
 function closeSpeakers(){$('speaker-backdrop').classList.remove('open');document.body.classList.remove('sheet-open');$('speakers').setAttribute('aria-expanded','false');$('speakers').focus()}
 const bookUrl=new URL(window.location.href);bookUrl.port='8787';bookUrl.pathname='/';bookUrl.search='';bookUrl.hash='';$('books').href=bookUrl.toString();
-$('cop').addEventListener('click',()=>action(()=>post('cop-alert',{active:dashboard?.active?'false':'true'})));$('speakers').addEventListener('click',openSpeakers);$('speaker-close').addEventListener('click',closeSpeakers);
+$('cop').addEventListener('click',()=>action(()=>post('cop-alert',{active:dashboard?.active?'false':'true'})));$('starlink').addEventListener('click',()=>{renderStarlink({state:'unknown',changing:true});action(()=>post('starlink'))});$('speakers').addEventListener('click',openSpeakers);$('speaker-close').addEventListener('click',closeSpeakers);
 $('speedtest-button').addEventListener('click',startSpeedtest);
 $('speaker-backdrop').addEventListener('click',event=>{if(event.target===$('speaker-backdrop'))closeSpeakers()});document.addEventListener('keydown',event=>{if(event.key==='Escape')closeSpeakers()});
 document.addEventListener('input',event=>{const slider=event.target.closest('[data-speaker-volume]');if(slider)slider.closest('.speaker-row').querySelector('.speaker-level').textContent=slider.value});
@@ -1128,4 +1271,5 @@ def index():
 if __name__ == "__main__":
     cop_alert.start()
     connectivity.start()
+    starlink.start()
     app.run(host="0.0.0.0", port=PORT, threaded=True)

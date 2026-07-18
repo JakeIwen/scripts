@@ -192,6 +192,43 @@ class ConnectivityMonitorTests(unittest.TestCase):
         self.assertFalse(status["stale"])
 
 
+class TuyaSwitchManagerTests(unittest.TestCase):
+    def test_reads_and_toggles_confirmed_starlink_state(self):
+        state = "on"
+        calls = []
+
+        def command(args, timeout):
+            nonlocal state
+            calls.append(tuple(args))
+            if args[0] == dashboard.TUYA_STATUS:
+                return SimpleNamespace(returncode=0, stdout=state + "\n", stderr="")
+            if args[0] == dashboard.TUYA_TOGGLE:
+                state = args[2]
+                return SimpleNamespace(returncode=0, stdout=state + "\n", stderr="")
+            raise AssertionError(args)
+
+        switch = dashboard.TuyaSwitchManager(
+            "starlink", command=command, wall_clock=lambda: 1_700_000_000
+        )
+        self.assertEqual(switch.refresh()["state"], "on")
+        toggled = switch.toggle()
+        self.assertEqual(toggled["state"], "off")
+        self.assertTrue(toggled["available"])
+        self.assertEqual(calls[1], (dashboard.TUYA_TOGGLE, "starlink", "off"))
+        self.assertEqual(calls[2], (dashboard.TUYA_STATUS, "starlink"))
+
+    def test_failed_status_is_neutral_and_cannot_guess_toggle_direction(self):
+        def command(args, timeout):
+            return SimpleNamespace(returncode=1, stdout="unavailable\n", stderr="")
+
+        switch = dashboard.TuyaSwitchManager("starlink", command=command)
+        status = switch.refresh()
+        self.assertEqual(status["state"], "unknown")
+        self.assertFalse(status["available"])
+        with self.assertRaises(ValueError):
+            switch.toggle()
+
+
 class SpeedTestManagerTests(unittest.TestCase):
     def test_parser_accepts_existing_speedtest_script_output(self):
         output = "Download Speed: 42.75 Mbps\nUpload Speed:   8.5 Mbps\nLatency:        37.2 ms\n"
@@ -312,8 +349,10 @@ class DashboardRouteTests(unittest.TestCase):
         page = client.get("/")
         self.assertEqual(page.status_code, 200)
         self.assertIn(b"COP ALERT", page.data)
-        self.assertIn(b"Internet Connectivity", page.data)
-        self.assertIn(b"mwan3 mode", page.data)
+        self.assertIn(b"Starlink", page.data)
+        self.assertIn(b"MWAN3", page.data)
+        self.assertNotIn(b">Internet Connectivity<", page.data)
+        self.assertNotIn(b">Reachable<", page.data)
         self.assertIn(b"Run speed test", page.data)
         self.assertIn(b"bookUrl.port='8787'", page.data)
         manifest = client.get("/manifest.webmanifest")

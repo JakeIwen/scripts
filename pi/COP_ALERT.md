@@ -43,6 +43,19 @@ immediately, while `GET /api/speedtest` reports progress and the eventual
 download, upload, latency, and completion time. The browser renders completion
 as `@ HH:MM:SS` in its local time. The test is never run automatically.
 
+## Starlink power
+
+The Starlink tile reads `switch.starlink` through the existing Tuya/Home
+Assistant helpers every 15 seconds. Confirmed on is green, confirmed off is
+red, and unavailable/unread status is neutral grey. The tile is disabled while
+status is unknown so it never guesses a toggle direction. After a power change,
+the dashboard reads the authoritative switch state again; failed verification
+returns the tile to grey.
+
+The same neutral/failed/live color convention applies to dashboard status
+icons: grey means no data yet, red means confirmed down or failed, and green
+means confirmed active or reachable.
+
 ## COP ALERT behavior
 
 While active, the dashboard:
