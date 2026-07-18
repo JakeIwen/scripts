@@ -14,6 +14,35 @@ The service has no user-login layer; it is intended only for the trusted van
 LAN and Tailscale ACL. Do not forward port `8788` from a public interface. The
 server rejects cross-origin browser control requests to reduce CSRF risk.
 
+## Connectivity and speed tests
+
+The Connectivity card keeps three related states separate:
+
+- Internet Connectivity comes from mwan3's existing reachability tracking;
+- UBNT Availability is a single ping that detects lost Ethernet/power; and
+- UBNT Wireless requires a real access-point association. A configured SSID
+  is still shown when the radio says `Not-Associated`, but it is not reported
+  as connected. When associated, signal, link quality/CCQ, and bitrate are
+  available to the dashboard.
+
+The mwan3 mode lists every online uplink (for example `clientwan + wan`) so a
+balanced multi-uplink state is not mislabeled as a single primary route.
+
+`/home/pi/scripts/connectivity_status.py` is a reusable, standard-library JSON
+collector. It performs one read-only `mwan3 interfaces` SSH query per run, one
+UBNT ping, and (only when the UBNT responds) one read-only radio-status SSH
+query. It never scans for networks. The dashboard runs it in a background
+thread every 30 seconds and serves cached results through
+`GET /api/connectivity`, so browser polling adds no router load. Hosts, key
+path, and command paths can be overridden with the collector's
+`CONNECTIVITY_*` environment variables.
+
+The speed-test button starts `/home/pi/scripts/speedtest.sh` in a separate
+thread. Only one test can run at a time; `POST /api/speedtest` returns
+immediately, while `GET /api/speedtest` reports progress and the eventual
+download, upload, latency, and completion time. The browser renders completion
+as `@ HH:MM:SS` in its local time. The test is never run automatically.
+
 ## COP ALERT behavior
 
 While active, the dashboard:
@@ -78,6 +107,8 @@ Before supporting a PCAN moved to B-CAN:
 ## Dependencies
 
 The system Python used by the service needs `flask`, `soco`, and `can-isotp`.
+The existing speed-test script needs `speedtest-cli`; the connectivity
+collector adds no Python packages or router-side software.
 The existing `tuya_toggle.sh`, `tuya_status.sh`, and `ntfy_send.sh` scripts and
 their existing secret files remain the only Home Assistant/ntfy integrations;
 the dashboard contains no credentials.

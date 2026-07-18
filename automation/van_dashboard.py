@@ -15,6 +15,7 @@ bring can0 up/down or change its bitrate/listen-only state because the interface
 is shared with other vehicle tooling.
 """
 
+import copy
 import json
 import os
 import re
@@ -39,6 +40,14 @@ ENGINE_MARKER = os.path.join(RUNTIME_DIR, "engine-running")
 TUYA_TOGGLE = os.environ.get("VAN_DASHBOARD_TUYA_TOGGLE", "/home/pi/scripts/tuya_toggle.sh")
 TUYA_STATUS = os.environ.get("VAN_DASHBOARD_TUYA_STATUS", "/home/pi/scripts/tuya_status.sh")
 NTFY_SEND = os.environ.get("VAN_DASHBOARD_NTFY_SEND", "/home/pi/scripts/ntfy_send.sh")
+CONNECTIVITY_STATUS = os.environ.get(
+    "VAN_DASHBOARD_CONNECTIVITY_STATUS", "/home/pi/scripts/connectivity_status.py"
+)
+SPEEDTEST = os.path.expanduser(
+    os.environ.get("VAN_DASHBOARD_SPEEDTEST", "/home/pi/scripts/speedtest.sh")
+)
+CONNECTIVITY_INTERVAL = float(os.environ.get("VAN_DASHBOARD_CONNECTIVITY_INTERVAL", "30"))
+SPEEDTEST_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_SPEEDTEST_TIMEOUT", "180"))
 
 CAN_CHANNEL = os.environ.get("VAN_DASHBOARD_CAN_CHANNEL", "can0")
 CAN_BITRATE = 500000
@@ -608,11 +617,196 @@ class SonosController:
         return volume
 
 
+class ConnectivityMonitor:
+    """Cache the reusable connectivity collector away from HTTP request threads."""
+
+    def __init__(
+        self,
+        collector=CONNECTIVITY_STATUS,
+        interval=CONNECTIVITY_INTERVAL,
+        command=run_command,
+        clock=time.monotonic,
+        wall_clock=time.time,
+    ):
+        self.collector = collector
+        self.interval = interval
+        self.command = command
+        self.clock = clock
+        self.wall_clock = wall_clock
+        self.lock = threading.Lock()
+        self.stop_event = threading.Event()
+        self.thread = None
+        self.refreshing = False
+        self.last_error = None
+        self.data = {
+            "checked_at": None,
+            "internet": {"online": None, "source": "mwan3 reachability tracking"},
+            "router": {
+                "reachable": None,
+                "mode": None,
+                "online": [],
+                "interfaces": [],
+                "error": None,
+            },
+            "ubnt": {
+                "reachable": None,
+                "connected": None,
+                "ssid": None,
+                "signal_dbm": None,
+                "noise_dbm": None,
+                "quality_percent": None,
+                "ccq_percent": None,
+                "bitrate": None,
+                "error": None,
+            },
+        }
+
+    def start(self):
+        if not self.thread:
+            self.thread = threading.Thread(
+                target=self._loop, name="connectivity-monitor", daemon=True
+            )
+            self.thread.start()
+
+    def stop(self):
+        self.stop_event.set()
+
+    def refresh(self):
+        with self.lock:
+            self.refreshing = True
+        try:
+            result = self.command([self.collector], timeout=25)
+            if result.returncode:
+                detail = (result.stderr or result.stdout or "collector failed").strip()
+                raise RuntimeError(detail[-300:])
+            payload = json.loads(result.stdout)
+            if not isinstance(payload, dict) or not all(
+                key in payload for key in ("checked_at", "internet", "router", "ubnt")
+            ):
+                raise ValueError("collector returned an incomplete payload")
+        except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
+            with self.lock:
+                self.last_error = str(exc)
+        else:
+            with self.lock:
+                self.data = payload
+                self.last_error = None
+        finally:
+            with self.lock:
+                self.refreshing = False
+        return self.snapshot()
+
+    def snapshot(self):
+        with self.lock:
+            data = copy.deepcopy(self.data)
+            data["refreshing"] = self.refreshing
+            data["last_error"] = self.last_error
+        checked_at = data.get("checked_at")
+        data["stale"] = checked_at is None or (
+            self.wall_clock() - checked_at > max(60.0, self.interval * 2.5)
+        )
+        return data
+
+    def _loop(self):
+        while not self.stop_event.is_set():
+            started = self.clock()
+            self.refresh()
+            remaining = max(1.0, self.interval - (self.clock() - started))
+            self.stop_event.wait(remaining)
+
+
+def parse_speedtest_output(output):
+    values = {}
+    patterns = {
+        "download_mbps": r"^Download(?: Speed)?:\s*([0-9.]+)\s*(?:Mbit/s|Mbps)",
+        "upload_mbps": r"^Upload(?: Speed)?:\s*([0-9.]+)\s*(?:Mbit/s|Mbps)",
+        "latency_ms": r"^(?:Ping|Latency):\s*([0-9.]+)\s*ms",
+    }
+    for name, pattern in patterns.items():
+        match = re.search(pattern, output, re.IGNORECASE | re.MULTILINE)
+        if match:
+            values[name] = float(match.group(1))
+    return values
+
+
+class SpeedTestManager:
+    """Run the existing speedtest script once at a time, outside request threads."""
+
+    def __init__(
+        self,
+        script=SPEEDTEST,
+        command=run_command,
+        timeout=SPEEDTEST_TIMEOUT,
+        wall_clock=time.time,
+    ):
+        self.script = script
+        self.command = command
+        self.timeout = timeout
+        self.wall_clock = wall_clock
+        self.lock = threading.Lock()
+        self.thread = None
+        self.data = {
+            "status": "idle",
+            "started_at": None,
+            "completed_at": None,
+            "download_mbps": None,
+            "upload_mbps": None,
+            "latency_ms": None,
+            "error": None,
+        }
+
+    def start(self):
+        with self.lock:
+            if self.data["status"] == "running":
+                return False
+            self.data = {
+                "status": "running",
+                "started_at": int(self.wall_clock()),
+                "completed_at": None,
+                "download_mbps": None,
+                "upload_mbps": None,
+                "latency_ms": None,
+                "error": None,
+            }
+            self.thread = threading.Thread(target=self._run, name="speedtest", daemon=True)
+            self.thread.start()
+            return True
+
+    def snapshot(self):
+        with self.lock:
+            return dict(self.data)
+
+    def _run(self):
+        error = None
+        values = {}
+        try:
+            result = self.command([self.script], timeout=self.timeout)
+            if result.returncode:
+                detail = (result.stderr or result.stdout or "speed test failed").strip()
+                error = detail[-500:]
+            else:
+                values = parse_speedtest_output(result.stdout)
+                if len(values) != 3:
+                    error = "speed test returned incomplete results"
+        except subprocess.TimeoutExpired:
+            error = f"speed test timed out after {self.timeout:g} seconds"
+        except OSError as exc:
+            error = f"could not start speed test: {exc}"
+
+        with self.lock:
+            self.data.update(values)
+            self.data["status"] = "error" if error else "complete"
+            self.data["completed_at"] = int(self.wall_clock())
+            self.data["error"] = error
+
+
 app = Flask(__name__)
 state_store = StateStore()
 engine_monitor = EngineMonitor()
 cop_alert = CopAlertManager(state_store, engine_monitor)
 sonos = SonosController(state_store)
+connectivity = ConnectivityMonitor()
+speedtest = SpeedTestManager()
 
 
 def api_error(message, status):
@@ -644,6 +838,20 @@ def reject_cross_origin_mutations():
 @app.route("/api/status")
 def api_status():
     return jsonify({"ok": True, "cop_alert": cop_alert.snapshot()})
+
+
+@app.route("/api/connectivity")
+def api_connectivity():
+    return jsonify({"ok": True, "connectivity": connectivity.snapshot()})
+
+
+@app.route("/api/speedtest", methods=["GET", "POST"])
+def api_speedtest():
+    if request.method == "POST":
+        started = speedtest.start()
+        message = "Speed test started" if started else "Speed test is already running"
+        return jsonify({"ok": True, "message": message, "speedtest": speedtest.snapshot()})
+    return jsonify({"ok": True, "speedtest": speedtest.snapshot()})
 
 
 @app.route("/api/cop-alert", methods=["POST"])
@@ -750,6 +958,17 @@ h1{font-size:29px;line-height:1.05;letter-spacing:-.03em;margin:3px 0 0}.van-mar
   border-radius:99px;padding:4px 8px;font-size:10px;font-weight:800;letter-spacing:.1em;color:var(--dim);background:#10171dcc}
 .cop.active .pill{color:#fff1ef;background:#8b2d27;border-color:#bf473d}.status-lines{display:grid;gap:4px;margin-top:12px;width:100%;font-size:11px;color:var(--dim)}
 .status-line{display:flex;justify-content:space-between;gap:10px}.status-line span:last-child{text-align:right;color:#c5d1d7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.connectivity{margin-top:11px;border:1px solid var(--line);border-radius:19px;background:linear-gradient(145deg,var(--panel),#151f28);padding:15px;box-shadow:0 8px 28px #050b102e}
+.connectivity-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:13px}.connectivity-head h2{font-size:17px;margin:0;letter-spacing:-.01em}
+.connectivity-age{color:var(--dim);font-size:10px;text-align:right}.network-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0}
+.network-stat{min-width:0;padding:1px 11px;border-left:1px solid var(--line)}.network-stat:first-child{border-left:0;padding-left:0}.network-stat:last-child{padding-right:0}
+.network-label{display:flex;align-items:center;gap:5px;color:var(--dim);font-size:10px;line-height:1.2;min-height:24px}.network-dot{width:7px;height:7px;flex:0 0 auto;border-radius:50%;background:#71818a}
+.network-dot.good{background:var(--good);box-shadow:0 0 0 3px #62c89918}.network-dot.bad{background:var(--bad);box-shadow:0 0 0 3px #ef706718}
+.network-value{display:block;margin-top:4px;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.network-detail{display:block;margin-top:2px;color:var(--dim);font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mwan-list{display:flex;gap:5px;flex-wrap:wrap;margin-top:13px}.mwan-chip{border:1px solid #42545e;border-radius:99px;padding:3px 7px;color:var(--dim);font-size:9px}.mwan-chip.online{border-color:#39725b;color:#9cdec0;background:#1e3b31}.mwan-chip.offline{border-color:#6a4542;color:#e6aaa5;background:#392624}.mwan-chip.paused{opacity:.58}
+.speed-row{display:flex;align-items:center;gap:12px;margin-top:13px;padding-top:12px;border-top:1px solid var(--line)}.speedtest-button{display:flex;align-items:center;justify-content:center;gap:7px;flex:0 0 auto;border:1px solid #42606e;border-radius:11px;background:#263b47;color:var(--ink);padding:9px 11px;font-size:11px;font-weight:730;cursor:pointer}
+.speedtest-button:active{transform:scale(.98)}.speedtest-button:disabled{opacity:.7;cursor:default}.speed-spinner{display:none;width:13px;height:13px;border:2px solid #87a8b8;border-top-color:var(--ink);border-radius:50%;animation:spin .8s linear infinite}.speedtest-button.running .speed-spinner{display:inline-block}.speedtest-button.running .speed-icon{display:none}
+.speed-results{min-width:0;color:var(--dim);font-size:11px}.speed-results strong{display:block;color:#dce8ed;font-size:12px;font-variant-numeric:tabular-nums}.speed-results.bad strong{color:#ffc1bc}@keyframes spin{to{transform:rotate(360deg)}}
 .speaker-backdrop{position:fixed;z-index:20;inset:0;background:#05090daa;display:flex;align-items:flex-end;opacity:0;pointer-events:none;transition:opacity .2s}
 .speaker-backdrop.open{opacity:1;pointer-events:auto}.speaker-sheet{width:min(100%,680px);max-height:min(78vh,680px);overflow:auto;margin:0 auto;
   background:#141e26;border:1px solid #38505e;border-bottom:0;border-radius:22px 22px 0 0;padding:8px 14px calc(18px + env(safe-area-inset-bottom));
@@ -763,7 +982,7 @@ h1{font-size:29px;line-height:1.05;letter-spacing:-.03em;margin:3px 0 0}.van-mar
 #toast{position:fixed;z-index:30;left:50%;top:calc(12px + env(safe-area-inset-top));transform:translate(-50%,-14px);width:min(calc(100% - 28px),620px);
   background:#22313d;color:var(--ink);border:1px solid #405967;border-radius:13px;padding:11px 14px;box-shadow:var(--shadow);opacity:0;pointer-events:none;transition:.2s;font-size:13px;text-align:center}
 #toast.show{opacity:1;transform:translate(-50%,0)}#toast.bad{border-color:#874944;color:#ffd8d4}body.busy [data-action]{pointer-events:none;opacity:.55}
-@media(max-width:420px){.grid{gap:9px}.tile{min-height:140px}.cop{min-height:205px}}@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+@media(max-width:420px){.grid{gap:9px}.tile{min-height:140px}.cop{min-height:205px}.network-stat{padding-left:8px;padding-right:8px}.network-value{font-size:13px}.speed-row{gap:9px}}@media(prefers-reduced-motion:reduce){*{transition:none!important}.speed-spinner{animation:none}}
 </style></head><body>
 <header><div><div class="eyebrow">vanpi controls</div><h1>Van Dashboard</h1></div><div class="van-mark" aria-hidden="true">🚐</div></header>
 <main>
@@ -783,6 +1002,19 @@ h1{font-size:29px;line-height:1.05;letter-spacing:-.03em;margin:3px 0 0}.van-mar
       <span class="tile-icon" aria-hidden="true">🔊</span><span class="tile-title">Sonos</span><span class="tile-detail" id="speaker-summary">Finding speakers…</span>
     </button>
   </div>
+  <section class="connectivity" aria-labelledby="connectivity-title">
+    <div class="connectivity-head"><h2 id="connectivity-title">Connectivity</h2><span class="connectivity-age" id="connectivity-age">Checking…</span></div>
+    <div class="network-grid">
+      <div class="network-stat"><span class="network-label"><span class="network-dot" id="internet-dot"></span>Internet Connectivity</span><strong class="network-value" id="internet-status">Checking…</strong><span class="network-detail" id="mwan-primary">mwan3 mode · —</span></div>
+      <div class="network-stat"><span class="network-label"><span class="network-dot" id="ubnt-dot"></span>UBNT Availability</span><strong class="network-value" id="ubnt-status">Checking…</strong><span class="network-detail" id="ubnt-detail">Ethernet · —</span></div>
+      <div class="network-stat"><span class="network-label"><span class="network-dot" id="wireless-dot"></span>UBNT Wireless</span><strong class="network-value" id="wireless-status">Checking…</strong><span class="network-detail" id="wireless-detail">Association · —</span></div>
+    </div>
+    <div class="mwan-list" id="mwan-list" aria-label="mwan3 interfaces"></div>
+    <div class="speed-row">
+      <button class="speedtest-button" id="speedtest-button"><span class="speed-icon" aria-hidden="true">↕</span><span class="speed-spinner" aria-hidden="true"></span><span id="speedtest-label">Run speed test</span></button>
+      <div class="speed-results" id="speed-results" role="status" aria-live="polite"><strong>Not run yet</strong>Uses vanpi's current route</div>
+    </div>
+  </section>
 </main>
 <div class="speaker-backdrop" id="speaker-backdrop">
   <section class="speaker-sheet" id="speaker-panel" role="dialog" aria-modal="true" aria-labelledby="speaker-title">
@@ -793,7 +1025,7 @@ h1{font-size:29px;line-height:1.05;letter-spacing:-.03em;margin:3px 0 0}.van-mar
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
 <script>
-const $=id=>document.getElementById(id);let dashboard=null,speakers=null,busy=false,toastTimer=0;
+const $=id=>document.getElementById(id);let dashboard=null,speakers=null,busy=false,toastTimer=0,speedPoll=0;
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function toast(message,bad=false){clearTimeout(toastTimer);const el=$('toast');el.textContent=message;el.className=bad?'show bad':'show';toastTimer=setTimeout(()=>el.className='',3400)}
 async function json(url,options){const response=await fetch(url,options);let data;try{data=await response.json()}catch(_){data={message:`Server returned ${response.status}`}}
@@ -802,6 +1034,28 @@ async function post(endpoint,params={}){return json('/api/'+endpoint,{method:'PO
 async function action(work){if(busy)return;busy=true;document.body.classList.add('busy');try{const result=await work();if(result?.message)toast(result.message);await refresh()}
   catch(error){toast(error.message,true)}finally{busy=false;document.body.classList.remove('busy')}}
 function age(ts){if(!ts)return 'never';const secs=Math.max(0,Date.now()/1000-ts);return secs<90?`${Math.round(secs)}s ago`:`${Math.round(secs/60)}m ago`}
+function networkState(id,value){const el=$(id);el.classList.remove('good','bad');if(value===true)el.classList.add('good');else if(value===false)el.classList.add('bad')}
+function renderConnectivity(response){const c=response.connectivity,r=c.router||{},u=c.ubnt||{},online=c.internet?.online;
+  networkState('internet-dot',online);$('internet-status').textContent=online===true?'Online':online===false?'Offline':'Unknown';
+  $('mwan-primary').textContent=r.reachable===false?'mwan3 · router unavailable':r.mode?`mwan3 mode · ${r.mode}`:r.reachable===true?'mwan3 · no active uplink':'mwan3 mode · —';
+  networkState('ubnt-dot',u.reachable);$('ubnt-status').textContent=u.reachable===true?'Reachable':u.reachable===false?'Unavailable':'Unknown';
+  $('ubnt-detail').textContent=u.reachable===false?'Ethernet cable or power':u.reachable===true?'Ethernet link responds':'Ethernet · —';
+  const radioKnown=u.reachable===true&&!u.error;networkState('wireless-dot',radioKnown?u.connected:u.reachable===false?false:null);
+  if(u.reachable===false){$('wireless-status').textContent='Unavailable';$('wireless-detail').textContent='No UBNT Ethernet response'}
+  else if(u.error){$('wireless-status').textContent='Status error';$('wireless-detail').textContent='Could not read radio'}
+  else if(u.reachable===true){$('wireless-status').textContent=u.ssid||'Unknown SSID';const details=[u.connected?'Connected':'Not associated'];if(u.connected&&Number.isFinite(u.signal_dbm))details.push(`${u.signal_dbm} dBm`);if(u.connected&&Number.isFinite(u.ccq_percent))details.push(`${u.ccq_percent}% CCQ`);else if(u.connected&&Number.isFinite(u.quality_percent))details.push(`${u.quality_percent}% quality`);$('wireless-detail').textContent=details.join(' · ')}
+  else{$('wireless-status').textContent='Unknown';$('wireless-detail').textContent='Association · —'}
+  $('mwan-list').innerHTML=(r.interfaces||[]).map(i=>`<span class="mwan-chip ${esc(i.state)} ${i.tracking==='paused'?'paused':''}" title="${esc(i.detail||'')}">${esc(i.name)} · ${esc(i.state)}${i.tracking==='paused'?' · paused':''}</span>`).join('');
+  $('connectivity-age').textContent=c.last_error?`Collector error · ${c.last_error}`:c.checked_at?`${c.stale?'Stale':'Updated'} · ${age(c.checked_at)}`:c.refreshing?'Checking…':'Waiting for collector'}
+async function refreshConnectivity(){try{renderConnectivity(await json('/api/connectivity'))}catch(error){$('connectivity-age').textContent=error.message}}
+function atTime(ts){return ts?'@ '+new Date(ts*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}):''}
+function renderSpeedtest(response){const s=response.speedtest,button=$('speedtest-button'),running=s.status==='running';button.disabled=running;button.classList.toggle('running',running);button.setAttribute('aria-busy',String(running));$('speedtest-label').textContent=running?'Testing…':'Run speed test';$('speed-results').classList.toggle('bad',s.status==='error');
+  if(running)$('speed-results').innerHTML='<strong>Testing current route…</strong>This can take a minute';
+  else if(s.status==='complete')$('speed-results').innerHTML=`<strong>↓ ${Number(s.download_mbps).toFixed(1)} Mbps · ↑ ${Number(s.upload_mbps).toFixed(1)} Mbps</strong>Latency ${Number(s.latency_ms).toFixed(1)} ms ${atTime(s.completed_at)}`;
+  else if(s.status==='error')$('speed-results').innerHTML=`<strong>Speed test failed</strong>${esc(s.error||'Unknown error')} ${atTime(s.completed_at)}`;
+  else $('speed-results').innerHTML="<strong>Not run yet</strong>Uses vanpi's current route"}
+async function refreshSpeedtest(){clearTimeout(speedPoll);try{const response=await json('/api/speedtest');renderSpeedtest(response);if(response.speedtest.status==='running')speedPoll=setTimeout(refreshSpeedtest,1000)}catch(error){$('speed-results').innerHTML=`<strong>Speed test unavailable</strong>${esc(error.message)}`}}
+async function startSpeedtest(){if($('speedtest-button').disabled)return;$('speedtest-button').disabled=true;try{const response=await post('speedtest');renderSpeedtest(response);if(response.speedtest.status==='running')speedPoll=setTimeout(refreshSpeedtest,1000)}catch(error){toast(error.message,true);$('speedtest-button').disabled=false}}
 function updateStatus(data){dashboard=data.cop_alert;const active=dashboard.active,engine=dashboard.engine;$('dot').classList.add('on');$('connection').textContent='Connected · vanpi dashboard';
   $('cop').classList.toggle('active',active);$('cop').setAttribute('aria-pressed',String(active));$('cop-pill').textContent=active?'ACTIVE':'OFF';
   $('cop-detail').textContent=active?'Dashcam wake and 5-minute bacon alerts are active':'Tap to keep the dashcam awake';
@@ -820,12 +1074,13 @@ async function openSpeakers(){$('speaker-backdrop').classList.add('open');docume
 function closeSpeakers(){$('speaker-backdrop').classList.remove('open');document.body.classList.remove('sheet-open');$('speakers').setAttribute('aria-expanded','false');$('speakers').focus()}
 const bookUrl=new URL(window.location.href);bookUrl.port='8787';bookUrl.pathname='/';bookUrl.search='';bookUrl.hash='';$('books').href=bookUrl.toString();
 $('cop').addEventListener('click',()=>action(()=>post('cop-alert',{active:dashboard?.active?'false':'true'})));$('speakers').addEventListener('click',openSpeakers);$('speaker-close').addEventListener('click',closeSpeakers);
+$('speedtest-button').addEventListener('click',startSpeedtest);
 $('speaker-backdrop').addEventListener('click',event=>{if(event.target===$('speaker-backdrop'))closeSpeakers()});document.addEventListener('keydown',event=>{if(event.key==='Escape')closeSpeakers()});
 document.addEventListener('input',event=>{const slider=event.target.closest('[data-speaker-volume]');if(slider)slider.closest('.speaker-row').querySelector('.speaker-level').textContent=slider.value});
 document.addEventListener('change',event=>{const checkbox=event.target.closest('[data-group-speaker]');if(checkbox)action(async()=>{try{return await post('speakers/group',{name:checkbox.dataset.groupSpeaker,grouped:checkbox.checked?'1':'0'})}finally{await loadSpeakers()}});
   const slider=event.target.closest('[data-speaker-volume]');if(slider)action(async()=>{try{return await post('speakers/volume',{name:slider.dataset.speakerVolume,volume:slider.value})}finally{await loadSpeakers()}})});
 document.addEventListener('click',event=>{const selected=event.target.closest('[data-select-speaker]');if(selected)action(async()=>{const result=await post('speakers/select',{name:selected.dataset.selectSpeaker});await loadSpeakers();return result})});
-Promise.allSettled([refresh(),loadSpeakers()]).then(results=>{if(results[1].status==='rejected')$('speaker-summary').textContent='Sonos unavailable'});setInterval(()=>{if(!document.hidden)refresh()},5000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});
+Promise.allSettled([refresh(),loadSpeakers(),refreshConnectivity(),refreshSpeedtest()]).then(results=>{if(results[1].status==='rejected')$('speaker-summary').textContent='Sonos unavailable'});setInterval(()=>{if(!document.hidden)refresh()},5000);setInterval(()=>{if(!document.hidden)refreshConnectivity()},10000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){refresh();refreshConnectivity();refreshSpeedtest()}});
 </script></body></html>"""
 
 
@@ -872,4 +1127,5 @@ def index():
 
 if __name__ == "__main__":
     cop_alert.start()
+    connectivity.start()
     app.run(host="0.0.0.0", port=PORT, threaded=True)

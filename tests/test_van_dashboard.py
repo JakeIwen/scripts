@@ -1,5 +1,7 @@
+import json
 import os
 import tempfile
+import threading
 import unittest
 from types import SimpleNamespace
 
@@ -153,6 +155,81 @@ class SonosControllerTests(unittest.TestCase):
             self.assertEqual(store.get("sonos_device"), "Solo")
 
 
+class ConnectivityMonitorTests(unittest.TestCase):
+    def test_refreshes_reusable_collector_into_cache(self):
+        payload = {
+            "checked_at": 1_700_000_100,
+            "internet": {"online": True},
+            "router": {
+                "reachable": True,
+                "mode": "clientwan",
+                "online": ["clientwan"],
+                "interfaces": [],
+                "error": None,
+            },
+            "ubnt": {
+                "reachable": True,
+                "connected": False,
+                "ssid": "denlink",
+                "error": None,
+            },
+        }
+
+        def command(args, timeout):
+            self.assertEqual(args, ["/test/connectivity"])
+            self.assertEqual(timeout, 25)
+            return SimpleNamespace(returncode=0, stdout=json.dumps(payload), stderr="")
+
+        monitor = dashboard.ConnectivityMonitor(
+            collector="/test/connectivity",
+            command=command,
+            wall_clock=lambda: 1_700_000_110,
+        )
+        status = monitor.refresh()
+        self.assertTrue(status["internet"]["online"])
+        self.assertEqual(status["router"]["mode"], "clientwan")
+        self.assertEqual(status["ubnt"]["ssid"], "denlink")
+        self.assertFalse(status["stale"])
+
+
+class SpeedTestManagerTests(unittest.TestCase):
+    def test_parser_accepts_existing_speedtest_script_output(self):
+        output = "Download Speed: 42.75 Mbps\nUpload Speed:   8.5 Mbps\nLatency:        37.2 ms\n"
+        self.assertEqual(
+            dashboard.parse_speedtest_output(output),
+            {"download_mbps": 42.75, "upload_mbps": 8.5, "latency_ms": 37.2},
+        )
+
+    def test_speedtest_is_nonblocking_and_single_flight(self):
+        entered = threading.Event()
+        release = threading.Event()
+
+        def command(args, timeout):
+            self.assertEqual(args, ["/test/speedtest.sh"])
+            self.assertEqual(timeout, 180)
+            entered.set()
+            release.wait(2)
+            return SimpleNamespace(
+                returncode=0,
+                stdout="Download Speed: 50 Mbps\nUpload Speed: 10 Mbps\nLatency: 25 ms\n",
+                stderr="",
+            )
+
+        manager = dashboard.SpeedTestManager(
+            script="/test/speedtest.sh", command=command, timeout=180, wall_clock=lambda: 1234
+        )
+        self.assertTrue(manager.start())
+        self.assertTrue(entered.wait(1))
+        self.assertEqual(manager.snapshot()["status"], "running")
+        self.assertFalse(manager.start())
+        release.set()
+        manager.thread.join(2)
+        status = manager.snapshot()
+        self.assertEqual(status["status"], "complete")
+        self.assertEqual(status["download_mbps"], 50.0)
+        self.assertEqual(status["completed_at"], 1234)
+
+
 class CopAlertManagerTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
@@ -235,10 +312,22 @@ class DashboardRouteTests(unittest.TestCase):
         page = client.get("/")
         self.assertEqual(page.status_code, 200)
         self.assertIn(b"COP ALERT", page.data)
+        self.assertIn(b"Internet Connectivity", page.data)
+        self.assertIn(b"mwan3 mode", page.data)
+        self.assertIn(b"Run speed test", page.data)
         self.assertIn(b"bookUrl.port='8787'", page.data)
         manifest = client.get("/manifest.webmanifest")
         self.assertEqual(manifest.status_code, 200)
         self.assertEqual(manifest.json["name"], "Van Dashboard")
+
+    def test_connectivity_and_speedtest_status_routes(self):
+        client = dashboard.app.test_client()
+        connectivity = client.get("/api/connectivity")
+        self.assertEqual(connectivity.status_code, 200)
+        self.assertIn("router", connectivity.json["connectivity"])
+        speedtest = client.get("/api/speedtest")
+        self.assertEqual(speedtest.status_code, 200)
+        self.assertIn(speedtest.json["speedtest"]["status"], ("idle", "complete", "error"))
 
     def test_cop_alert_rejects_ambiguous_input_without_side_effects(self):
         client = dashboard.app.test_client()
