@@ -1,0 +1,14 @@
+#!/bin/sh
+#
+# Called by /etc/hotplug.d/iface/16-mwan3-user for enabled mwan3
+# interfaces. The detached helper sends only a bounded "reconcile now"
+# request; vanpi queries mwan3 itself for authoritative current state.
+
+case "${ACTION:-}" in
+  ifup | ifdown | connected | disconnected)
+    /usr/libexec/vanpi-policy-trigger \
+      "${ACTION:-unknown}" "${INTERFACE:-unknown}" || true
+    ;;
+esac
+
+exit 0

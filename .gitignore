@@ -15,6 +15,9 @@ id_dsa
 .twilio/
 **/wireless
 vanrouter/etc
+!vanrouter/etc/
+vanrouter/etc/*
+!vanrouter/etc/mwan3.user
 *__pycache__*
 node_modules/
 **/node_modules/
