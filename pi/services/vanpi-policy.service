@@ -1,0 +1,23 @@
+[Unit]
+Description=Reconcile vanpi network, disk, and torrent policy
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=pi
+WorkingDirectory=/home/pi
+Environment=HOME=/home/pi
+ExecStart=/home/pi/scripts/internet_switches.sh
+# internet_switches starts qBittorrent as a deliberately detached process.
+# Do not collect that process when this oneshot finishes.
+KillMode=process
+# Preserve the existing observe-only stall canary; do not terminate a disk
+# lifecycle operation at systemd's default service-start timeout.
+TimeoutStartSec=infinity
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vanpi-policy
+
+[Install]
+WantedBy=multi-user.target

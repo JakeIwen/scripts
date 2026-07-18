@@ -8,6 +8,9 @@ ISW_ALERT_FILE="$ISW_CANARY_DIR/alerted"
 ISW_ALERT_LOCK="$ISW_CANARY_DIR/alert.lock"
 ISW_LOG_FILE=${ISW_LOG_FILE:-/var/log/cron/internet_switches.log}
 ISW_NTFY_SEND=${ISW_NTFY_SEND:-/home/pi/scripts/ntfy_send.sh}
+ISW_MWAN_HOST=${ISW_MWAN_HOST:-root@OpenWrt}
+ISW_MWAN_TIMEOUT_SECONDS=${ISW_MWAN_TIMEOUT_SECONDS:-12}
+ISW_MWAN_STATE=""
 
 isw_prepare_canary_dir() {
   if [[ -L "$ISW_CANARY_DIR" || ( -e "$ISW_CANARY_DIR" && ! -d "$ISW_CANARY_DIR" ) ]]; then
@@ -283,9 +286,36 @@ kill_all() {
   unmount_drives
 }
 
-iface_online() { 
-  ifaces="$(ssh root@OpenWrt 'mwan3 interfaces')"
-  echo "$ifaces" | grep "interface $1 is online"
+refresh_mwan_state() {
+  local state
+  local status
+
+  state="$(/usr/bin/timeout --kill-after=2s "${ISW_MWAN_TIMEOUT_SECONDS}s" \
+    /usr/bin/ssh \
+      -n \
+      -o BatchMode=yes \
+      -o ConnectTimeout=5 \
+      -o ServerAliveInterval=3 \
+      -o ServerAliveCountMax=1 \
+      "$ISW_MWAN_HOST" \
+      '/usr/sbin/mwan3 interfaces' 2>&1)"
+  status=$?
+  if (( status != 0 )); then
+    echo "ERROR: unable to query mwan3 state from $ISW_MWAN_HOST (status $status)" >&2
+    printf '%s\n' "$state" >&2
+    return 1
+  fi
+  if [[ -z "$state" ]] || ! /usr/bin/grep -Fq 'Interface status:' <<< "$state"; then
+    echo "ERROR: mwan3 returned an empty or unrecognized interface report" >&2
+    return 1
+  fi
+
+  ISW_MWAN_STATE="$state"
+}
+
+iface_online() {
+  local interface="$1"
+  /usr/bin/grep -Fq " interface $interface is online" <<< "$ISW_MWAN_STATE"
 }
 
 # if date | grep '0:0'; then date; fi
@@ -294,10 +324,16 @@ set_isw_options() {
   echo ""
   echo "$(date)"
   if conf nodisk &> /dev/null; then kill_all # drives disabled ~/mconf/nodisk
-  elif iface_online clientwan &> /dev/null; then mobile_internet_ops
-  elif iface_online lifiwan &> /dev/null; then lifi_internet_ops
-  elif iface_online wan &> /dev/null; then ubnt_internet_ops
-  else no_internet_ops
+  else
+    # WAN transitions happen behind the Pi's stable LAN connection. OpenWrt
+    # pushes a reconciliation request, then the Pi verifies current mwan3
+    # state once here. A failed query is not evidence that every WAN is down.
+    refresh_mwan_state || return 1
+    if iface_online clientwan; then mobile_internet_ops
+    elif iface_online lifiwan; then lifi_internet_ops
+    elif iface_online wan; then ubnt_internet_ops
+    else no_internet_ops
+    fi
   fi
 }
 #
