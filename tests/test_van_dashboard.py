@@ -282,13 +282,6 @@ class CopLedManagerTests(unittest.TestCase):
 
         def command(args, timeout):
             self.calls.append(tuple(args))
-            if args[1:3] == ["status", "light.solder_led"]:
-                status = {
-                    "state": "on",
-                    "brightness": 170,
-                    "color_temp_kelvin": 2702,
-                }
-                return SimpleNamespace(returncode=0, stdout=json.dumps(status), stderr="")
             if args[1:3] == ["status", "light.ext_led"]:
                 return SimpleNamespace(returncode=0, stdout=json.dumps(self.target), stderr="")
             if args[1:3] == ["set", "light.ext_led"]:
@@ -313,7 +306,7 @@ class CopLedManagerTests(unittest.TestCase):
     def tearDown(self):
         self.tempdir.cleanup()
 
-    def test_waits_for_wifi_then_applies_and_confirms_reference_settings(self):
+    def test_waits_for_wifi_then_applies_and_confirms_fixed_settings(self):
         self.store.set("cop_alert", True)
         waiting = self.manager.tick()
         self.assertEqual(waiting["phase"], "waiting")
@@ -351,29 +344,6 @@ class CopLedManagerTests(unittest.TestCase):
         status = self.manager.tick()
         self.assertEqual(status["phase"], "inactive")
         self.assertEqual(self.calls, [])
-
-    def test_uses_captured_settings_when_reference_cannot_be_read(self):
-        def command(args, timeout):
-            if args[1:3] == ["status", "light.solder_led"]:
-                return SimpleNamespace(returncode=1, stdout="", stderr="reference offline")
-            status = {"state": "unavailable", "brightness": None, "color_temp_kelvin": None}
-            return SimpleNamespace(returncode=0, stdout=json.dumps(status), stderr="")
-
-        manager = dashboard.CopLedManager(
-            self.store,
-            self.engine,
-            command=command,
-            clock=self.clock,
-            fallback_brightness=170,
-            fallback_kelvin=2702,
-        )
-        self.store.set("cop_alert", True)
-        status = manager.tick()
-        self.assertEqual(
-            status["desired"], {"brightness": 170, "color_temp_kelvin": 2702}
-        )
-        self.assertEqual(status["reference"], "captured solder_led fallback")
-
 
 class CopAlertManagerTests(unittest.TestCase):
     def setUp(self):

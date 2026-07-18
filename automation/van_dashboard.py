@@ -50,14 +50,11 @@ SPEEDTEST = os.path.expanduser(
 CONNECTIVITY_INTERVAL = float(os.environ.get("VAN_DASHBOARD_CONNECTIVITY_INTERVAL", "30"))
 SPEEDTEST_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_SPEEDTEST_TIMEOUT", "180"))
 TUYA_POLL_INTERVAL = float(os.environ.get("VAN_DASHBOARD_TUYA_POLL_INTERVAL", "15"))
-COP_LED_SOURCE = os.environ.get("VAN_DASHBOARD_COP_LED_SOURCE", "light.solder_led")
 COP_LED_TARGET = os.environ.get("VAN_DASHBOARD_COP_LED_TARGET", "light.ext_led")
-COP_LED_FALLBACK_BRIGHTNESS = int(
-    os.environ.get("VAN_DASHBOARD_COP_LED_FALLBACK_BRIGHTNESS", "170")
-)
-COP_LED_FALLBACK_KELVIN = int(
-    os.environ.get("VAN_DASHBOARD_COP_LED_FALLBACK_KELVIN", "2702")
-)
+# Captured from solder_led on 2026-07-18. COP ALERT deliberately uses this
+# fixed look; it does not query or depend on solder_led at activation time.
+COP_LED_BRIGHTNESS = 170
+COP_LED_COLOR_TEMP_KELVIN = 2702
 COP_LED_RETRY_INTERVAL = float(os.environ.get("VAN_DASHBOARD_COP_LED_RETRY_INTERVAL", "5"))
 COP_LED_VERIFY_INTERVAL = float(
     os.environ.get("VAN_DASHBOARD_COP_LED_VERIFY_INTERVAL", "30")
@@ -529,7 +526,6 @@ class CopLedManager:
         self,
         store,
         engine_monitor=None,
-        source=COP_LED_SOURCE,
         target=COP_LED_TARGET,
         command=run_command,
         clock=time.monotonic,
@@ -537,12 +533,11 @@ class CopLedManager:
         retry_interval=COP_LED_RETRY_INTERVAL,
         verify_interval=COP_LED_VERIFY_INTERVAL,
         connect_grace=COP_LED_CONNECT_GRACE,
-        fallback_brightness=COP_LED_FALLBACK_BRIGHTNESS,
-        fallback_kelvin=COP_LED_FALLBACK_KELVIN,
+        brightness=COP_LED_BRIGHTNESS,
+        color_temp_kelvin=COP_LED_COLOR_TEMP_KELVIN,
     ):
         self.store = store
         self.engine_monitor = engine_monitor
-        self.source = source
         self.target = target
         self.command = command
         self.clock = clock
@@ -550,9 +545,9 @@ class CopLedManager:
         self.retry_interval = retry_interval
         self.verify_interval = verify_interval
         self.connect_grace = connect_grace
-        self.fallback = {
-            "brightness": fallback_brightness,
-            "color_temp_kelvin": fallback_kelvin,
+        self.desired = {
+            "brightness": brightness,
+            "color_temp_kelvin": color_temp_kelvin,
         }
         self.lock = threading.Lock()
         self.stop_event = threading.Event()
@@ -561,8 +556,6 @@ class CopLedManager:
         self.was_active = False
         self.connect_started_at = None
         self.next_attempt = 0.0
-        self.desired = None
-        self.reference = None
         self.phase = "inactive"
         self.message = "COP ALERT is off"
         self.last_error = None
@@ -594,8 +587,6 @@ class CopLedManager:
                 "last_attempt": self.last_attempt,
                 "confirmed_at": self.confirmed_at,
                 "desired": copy.deepcopy(self.desired),
-                "reference": self.reference,
-                "source": self.source,
                 "target": self.target,
             }
 
@@ -607,8 +598,6 @@ class CopLedManager:
                 self.was_active = False
                 self.connect_started_at = None
                 self.next_attempt = 0.0
-                self.desired = None
-                self.reference = None
                 self.phase = "inactive"
                 self.message = "COP ALERT is off"
                 self.last_error = None
@@ -618,8 +607,6 @@ class CopLedManager:
                 self.was_active = True
                 self.connect_started_at = now
                 self.next_attempt = 0.0
-                self.desired = None
-                self.reference = None
                 self.phase = "preparing"
                 self.message = "Preparing ext_led"
                 self.last_error = None
@@ -645,18 +632,6 @@ class CopLedManager:
 
         with self.lock:
             desired = copy.deepcopy(self.desired)
-        if desired is None:
-            source_status, source_error = self._read_light(self.source)
-            desired = self._settings_from_status(source_status)
-            reference = self.source
-            if desired is None:
-                desired = dict(self.fallback)
-                reference = "captured solder_led fallback"
-            with self.lock:
-                self.desired = desired
-                self.reference = reference
-                if source_error:
-                    self.message = "Reference unavailable; using captured settings"
 
         target_status, target_error = self._read_light(self.target)
         if target_error or not target_status or target_status.get("state") == "unavailable":
@@ -717,8 +692,6 @@ class CopLedManager:
             "last_attempt": self.last_attempt,
             "confirmed_at": self.confirmed_at,
             "desired": copy.deepcopy(self.desired),
-            "reference": self.reference,
-            "source": self.source,
             "target": self.target,
         }
 
@@ -735,19 +708,6 @@ class CopLedManager:
         except (TypeError, ValueError):
             return None, f"could not read {entity}: invalid status response"
         return status if isinstance(status, dict) else None, None
-
-    @staticmethod
-    def _settings_from_status(status):
-        if not status:
-            return None
-        try:
-            brightness = int(status["brightness"])
-            kelvin = int(status["color_temp_kelvin"])
-        except (KeyError, TypeError, ValueError):
-            return None
-        if not 1 <= brightness <= 255 or not 2000 <= kelvin <= 7000:
-            return None
-        return {"brightness": brightness, "color_temp_kelvin": kelvin}
 
     @staticmethod
     def _matches(status, desired):

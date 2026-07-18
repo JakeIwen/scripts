@@ -62,8 +62,8 @@ While active, the dashboard:
 
 - persists the active state in `/home/pi/.van_dashboard_state.json`;
 - keeps Home Assistant entity `switch.ext_flood` on while the engine is stopped;
-- asynchronously configures `light.ext_led` to match the current brightness and
-  color temperature of `light.solder_led`, then reads it back for confirmation;
+- asynchronously configures `light.ext_led` to fixed brightness `170/255` and
+  `2702 K`, then reads it back for confirmation;
 - sends an RF Hub `22 F190` identification read every 15 seconds on C-CAN. This
   is the already-verified parked C-CAN wake that powers the dash accessory rail;
 - sends `🥓 COP ALERT is active` through `ntfy_send.sh` immediately and every
@@ -91,14 +91,11 @@ during a 90-second connection grace period, then `ext_led unavailable · still
 retrying` if RF remains blocked. Neither state disables the alert, CAN wake,
 `ext_flood`, or ntfy behavior.
 
-At the start of each activation the worker reads `light.solder_led`, the light
-powered by `switch.solder_flood`. The settings captured on 2026-07-18 were
-brightness `170/255` (67%) and `2702 K` in color-temperature mode. Those values
-are the fallback if the reference light cannot be read, and can be overridden
-with `VAN_DASHBOARD_COP_LED_FALLBACK_BRIGHTNESS` and
-`VAN_DASHBOARD_COP_LED_FALLBACK_KELVIN`. The worker pauses while verified engine
-RPM causes COP ALERT to intentionally turn `ext_flood` off, then resumes when
-the engine stops.
+The fixed look—brightness `170/255` (67%) and `2702 K` in color-temperature
+mode—was captured from `light.solder_led` on 2026-07-18. The worker never reads
+or depends on `solder_led` during COP ALERT. It pauses while verified engine RPM
+causes COP ALERT to intentionally turn `ext_flood` off, then resumes when the
+engine stops.
 
 ## Engine-running gate
 
