@@ -1,5 +1,2 @@
-* * * * *   /etc/persistent/scripts/update_wifi.sh >> /etc/persistent/log/update_wifi.log 2>&1
-0,20,40 * * * *   /etc/persistent/scripts/revert_after_sleep.sh >> /etc/persistent/log/revert_after_sleep.log 2>&1
-0/5 * * * *   /etc/persistent/scripts/rm_old_files.sh /var/etc/persistent/profiles_no_internet_tmp 60 >> /etc/persistent/log/rm_old_files.sh.log 2>&1
-0 * * * *   /etc/persistent/scripts/truncate_file.sh "/etc/persistent/log/update_wifi.log" 5000 2>&1
-# 0 3,9,15,21 * * *   /etc/persistent/scripts/reboot.sh 2>&1/
+* * * * * /etc/persistent/scripts/wifi_manager.sh auto > /dev/null 2>> /var/log/ubnt-manager-cron-errors.log
+17 * * * * /etc/persistent/scripts/rotate_runtime_logs.sh > /dev/null 2>&1

@@ -1,50 +1,30 @@
-#! /bin/bash 
-# set up your ssh key first
+#!/bin/bash
+set -euo pipefail
 
+script_dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+mode=${1:---stage-only}
+shift || true
+subnets=("${@:-8}")
 
-# exec_on 'scp -r ubnt@192.168.8.20:/etc/persistent/profiles ~/dev/scripts/ubnt/persistent/' $subnets
+case $mode in
+    --stage-only|--install-paused|--activate) ;;
+    *)
+        echo "Usage: $0 --stage-only|--install-paused|--activate [subnet ...]" >&2
+        exit 1
+        ;;
+esac
 
-# exec_on 'scp -r ~/dev/scripts/ubnt/persistent/ ubnt@192.168.$cmd.20:/etc/' $subnets
-
-# exec_on ssh ubnt@192.168.8.20 'cfgmtd -w -p /etc/' $subnets
-build_ips() {
-  for net in "$@"; do 
-    ip="192.168.$net.20" 
-    # echo $ip
-    if ping -c 1 $ip &> /dev/null; then echo "$ip" ; fi
-  done 
-} 
-
-bd_cmd() {
-  ip=$1
-  idx=$2
-  declare -a cmds=(
-    "echo HEYYYY IP $ip"
-    "scp -r ubnt@$ip:/etc/persistent/profiles ~/dev/scripts/ubnt/persistent/"
-    "scp -r ~/dev/scripts/ubnt/persistent/ ubnt@$ip:/etc/"
-    "ssh ubnt@$ip 'cfgmtd -w -p /etc/'"
-  )
-  echo "${cmds[$idx]}"
-}
-
-exec_on() {
-  # args=`echo "$@" | cut -d ' ' --complement -f 1`
-  ips=`build_ips "$@"`
-  
-  for i in 0 1 2; do
-    for ip in $ips; do 
-      cmd=`bd_cmd $ip $i`
-      echo "$cmd"
-      $cmd
-    done 
-  done
-
-  
-  # $2 && if ping -c 1 $ip1 &> /dev/null; then `$cmd` ; fi
-  # $3 && if ping -c 1 $ip2 &> /dev/null; then `$cmd` ; fi
-  # $4 && if ping -c 1 $ip3 &> /dev/null; then `$cmd` ; fi
-  # $5 && if ping -c 1 $ip4 &> /dev/null; then `$cmd` ; fi
-}
-
-exec_on 8
-
+for subnet in "${subnets[@]}"; do
+    case $subnet in
+        ''|*[!0-9]*)
+            echo "Invalid subnet: $subnet" >&2
+            exit 1
+            ;;
+    esac
+    target="ubnt@192.168.$subnet.20"
+    if ping -c 1 -W 1000 "192.168.$subnet.20" >/dev/null 2>&1; then
+        "$script_dir/scp_to_device.sh" "$mode" "$target"
+    else
+        echo "Skipping unreachable $target" >&2
+    fi
+done

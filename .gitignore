@@ -1,4 +1,5 @@
 ubnt/persistent/profiles/*
+ubnt/private-backups/
 .DS_Store
 secrets/*
 **/secrets/*

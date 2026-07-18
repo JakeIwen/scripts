@@ -1,12 +1,11 @@
-#! /bin/ash
+#!/bin/sh
 
-ssid=$(iwgetid -r)
-profile_path="/etc/persistent/profiles/$ssid"
-if [ "$(cat "$profile_path")" = "$(cat /tmp/system.cfg)" ]; then
-  echo "profile unchanged, done."
-else
-  echo "saving/updating profile: $ssid"
-  cp /tmp/system.cfg "$profile_path"
-  chmod 750 "$profile_path"
-  cfgmtd -w -p /etc/
-fi
+manager=/etc/persistent/scripts/wifi_manager.sh
+profile_name=${1:-$(iwgetid ath0 -r 2>/dev/null || iwgetid -r 2>/dev/null)}
+
+[ -n "$profile_name" ] || {
+    echo 'No associated SSID; provide a profile name.' >&2
+    exit 1
+}
+
+exec "$manager" save-current "$profile_name"
