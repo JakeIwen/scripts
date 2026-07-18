@@ -1,0 +1,259 @@
+import os
+import tempfile
+import unittest
+from types import SimpleNamespace
+
+from automation import van_dashboard as dashboard
+
+
+class FakeClock:
+    def __init__(self, value=100.0):
+        self.value = value
+
+    def __call__(self):
+        return self.value
+
+    def advance(self, seconds):
+        self.value += seconds
+
+
+class FakeEngine:
+    def __init__(self, running=False, rpm=0.0):
+        self.running = running
+        self.rpm = rpm
+
+    def snapshot(self):
+        return {
+            "running": self.running,
+            "rpm": self.rpm,
+            "evidence_age_seconds": 0.0 if self.running else None,
+            "frame_age_seconds": 0.0,
+            "source": "test",
+            "error": None,
+        }
+
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+
+class EngineMonitorTests(unittest.TestCase):
+    @staticmethod
+    def observe_running_pair(monitor):
+        monitor.observe(0x0F4, bytes.fromhex("17 80"))
+        monitor.observe(0x0FC, bytes.fromhex("0b c0"))
+
+    def test_rpm_decoder_matches_verified_capture_samples(self):
+        self.assertEqual(dashboard.rpm_from_engine_frame(0x0F4, bytes.fromhex("17 80")), 752.0)
+        self.assertEqual(dashboard.rpm_from_engine_frame(0x0FC, bytes.fromhex("0b c0")), 752.0)
+        self.assertEqual(dashboard.rpm_from_engine_frame(0x0F4, bytes.fromhex("00 00")), 0.0)
+        self.assertIsNone(dashboard.rpm_from_engine_frame(0x101, bytes.fromhex("17 80")))
+        self.assertIsNone(dashboard.rpm_from_engine_frame(0x0F4, b"\x17"))
+
+    def test_requires_repeated_fresh_running_frames(self):
+        clock = FakeClock()
+        monitor = dashboard.EngineMonitor(clock=clock)
+        for _ in range(dashboard.ENGINE_CONFIRM_FRAMES - 1):
+            self.observe_running_pair(monitor)
+        self.assertFalse(monitor.snapshot()["running"])
+
+        self.observe_running_pair(monitor)
+        self.assertTrue(monitor.snapshot()["running"])
+        self.assertEqual(monitor.snapshot()["rpm"], 752.0)
+
+        clock.advance(dashboard.ENGINE_EVIDENCE_MAX_AGE + 0.1)
+        self.assertFalse(monitor.snapshot()["running"])
+
+    def test_zero_rpm_immediately_revokes_running_evidence(self):
+        clock = FakeClock()
+        monitor = dashboard.EngineMonitor(clock=clock)
+        for _ in range(dashboard.ENGINE_CONFIRM_FRAMES):
+            self.observe_running_pair(monitor)
+        self.assertTrue(monitor.snapshot()["running"])
+        monitor.observe(0x0F4, bytes.fromhex("00 00"))
+        self.assertFalse(monitor.snapshot()["running"])
+
+    def test_implausibly_high_value_does_not_count_as_running(self):
+        clock = FakeClock()
+        monitor = dashboard.EngineMonitor(clock=clock)
+        for _ in range(dashboard.ENGINE_CONFIRM_FRAMES):
+            monitor.observe(0x0F4, bytes.fromhex("ff ff"))
+            monitor.observe(0x0FC, bytes.fromhex("ff ff"))
+        self.assertFalse(monitor.snapshot()["running"])
+
+    def test_one_rpm_source_alone_is_not_running_evidence(self):
+        clock = FakeClock()
+        monitor = dashboard.EngineMonitor(clock=clock)
+        for _ in range(dashboard.ENGINE_CONFIRM_FRAMES):
+            monitor.observe(0x0FC, bytes.fromhex("0b c0"))
+        self.assertFalse(monitor.snapshot()["running"])
+
+
+class CanLinkSafetyTests(unittest.TestCase):
+    @staticmethod
+    def command_with(output, returncode=0):
+        def command(_args, timeout):
+            return SimpleNamespace(stdout=output, stderr="", returncode=returncode)
+
+        return command
+
+    def test_accepts_existing_armed_c_can_without_mutation(self):
+        output = "4: can0: <NOARP,UP,LOWER_UP> state UP\n    can state ERROR-ACTIVE bitrate 500000"
+        ok, _ = dashboard.c_can_link_status(self.command_with(output))
+        self.assertTrue(ok)
+
+    def test_rejects_b_can_speed_and_listen_only(self):
+        bcan = "4: can0: <UP,LOWER_UP> state UP\n    can state ERROR-ACTIVE bitrate 125000"
+        listen = "4: can0: <UP,LOWER_UP> state UP\n    can <LISTEN-ONLY> bitrate 500000"
+        self.assertFalse(dashboard.c_can_link_status(self.command_with(bcan))[0])
+        self.assertFalse(dashboard.c_can_link_status(self.command_with(listen))[0])
+
+
+class FakeGroup:
+    def __init__(self):
+        self.coordinator = None
+        self.members = []
+
+
+class FakeSpeaker:
+    def __init__(self, name, volume, transport="STOPPED"):
+        self.player_name = name
+        self.volume = volume
+        self.transport = transport
+        self.is_visible = True
+        self.group = FakeGroup()
+        self.group.coordinator = self
+        self.group.members = [self]
+
+    def get_current_transport_info(self):
+        return {"current_transport_state": self.transport}
+
+
+class SonosControllerTests(unittest.TestCase):
+    def test_snapshot_selection_and_volume_match_audiobook_controls(self):
+        front = FakeSpeaker("Front", 28, "PLAYING")
+        rear = FakeSpeaker("Rear", 34)
+        front.group.members = [front, rear]
+        rear.group = front.group
+        solo = FakeSpeaker("Solo", 19)
+        zones = {front, rear, solo}
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            store = dashboard.StateStore(os.path.join(tempdir, "state.json"))
+            controller = dashboard.SonosController(store, discover_func=lambda timeout: zones)
+            snapshot = controller.snapshot()
+            self.assertEqual(snapshot["coordinator"], "Front")
+            grouped = {item["name"] for item in snapshot["speakers"] if item["grouped"]}
+            self.assertEqual(grouped, {"Front", "Rear"})
+            self.assertEqual(controller.set_volume("Rear", 42), 42)
+            self.assertEqual(rear.volume, 42)
+            self.assertEqual(controller.select("Solo"), "Solo")
+            self.assertEqual(store.get("sonos_device"), "Solo")
+
+
+class CopAlertManagerTests(unittest.TestCase):
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.clock = FakeClock()
+        self.engine = FakeEngine()
+        self.entity_state = "off"
+        self.calls = []
+        self.wakes = []
+        self.store = dashboard.StateStore(os.path.join(self.tempdir.name, "state.json"))
+
+        def command(args, timeout):
+            self.calls.append(tuple(args))
+            if args[0] == dashboard.TUYA_STATUS:
+                return SimpleNamespace(stdout=self.entity_state + "\n", stderr="", returncode=0)
+            if args[0] == dashboard.TUYA_TOGGLE:
+                self.entity_state = args[2]
+                return SimpleNamespace(stdout=args[2] + "\n", stderr="", returncode=0)
+            if args[0] == dashboard.NTFY_SEND:
+                return SimpleNamespace(stdout="", stderr="", returncode=0)
+            raise AssertionError(args)
+
+        def wake():
+            self.wakes.append(self.clock())
+            return True, "wake ok"
+
+        self.manager = dashboard.CopAlertManager(
+            self.store,
+            self.engine,
+            command=command,
+            wake=wake,
+            runtime_dir=os.path.join(self.tempdir.name, "run"),
+            clock=self.clock,
+            wall_clock=lambda: 1_700_000_000 + self.clock(),
+        )
+
+    def tearDown(self):
+        self.tempdir.cleanup()
+
+    def test_parked_running_parked_transition(self):
+        status = self.manager.set_active(True)
+        self.assertTrue(status["active"])
+        self.assertEqual(self.entity_state, "on")
+        self.assertTrue(os.path.isfile(self.manager.active_marker))
+
+        self.manager.tick()
+        self.assertEqual(len(self.wakes), 1)
+        self.assertEqual(self.entity_state, "on")
+        self.assertTrue(any(call[0] == dashboard.NTFY_SEND for call in self.calls))
+        self.assertFalse(os.path.exists(self.manager.engine_marker))
+
+        self.engine.running = True
+        self.engine.rpm = 752.0
+        self.clock.advance(max(dashboard.FLOOD_CHECK_INTERVAL, dashboard.WAKE_INTERVAL) + 1)
+        self.manager.tick()
+        self.assertEqual(self.entity_state, "off")
+        self.assertEqual(len(self.wakes), 1, "running engine must suppress diagnostic wake")
+        self.assertTrue(os.path.isfile(self.manager.engine_marker))
+
+        self.engine.running = False
+        self.engine.rpm = 0.0
+        self.clock.advance(max(dashboard.FLOOD_CHECK_INTERVAL, dashboard.WAKE_INTERVAL) + 1)
+        self.manager.tick()
+        self.assertEqual(self.entity_state, "on")
+        self.assertEqual(len(self.wakes), 2)
+        self.assertFalse(os.path.exists(self.manager.engine_marker))
+
+        self.manager.set_active(False)
+        self.assertEqual(self.entity_state, "off")
+        self.assertFalse(os.path.exists(self.manager.active_marker))
+
+    def test_state_persists_across_manager_recreation(self):
+        self.manager.set_active(True)
+        reloaded = dashboard.StateStore(self.store.path)
+        self.assertTrue(reloaded.get("cop_alert"))
+
+
+class DashboardRouteTests(unittest.TestCase):
+    def test_index_and_manifest(self):
+        client = dashboard.app.test_client()
+        page = client.get("/")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"COP ALERT", page.data)
+        self.assertIn(b"bookUrl.port='8787'", page.data)
+        manifest = client.get("/manifest.webmanifest")
+        self.assertEqual(manifest.status_code, 200)
+        self.assertEqual(manifest.json["name"], "Van Dashboard")
+
+    def test_cop_alert_rejects_ambiguous_input_without_side_effects(self):
+        client = dashboard.app.test_client()
+        response = client.post("/api/cop-alert", data={"active": "maybe"})
+        self.assertEqual(response.status_code, 400)
+
+    def test_cross_origin_control_is_rejected(self):
+        client = dashboard.app.test_client()
+        response = client.post(
+            "/api/cop-alert",
+            data={"active": "true"},
+            headers={"Origin": "https://example.com", "X-Van-Dashboard": "1"},
+        )
+        self.assertEqual(response.status_code, 403)
+
+
+if __name__ == "__main__":
+    unittest.main()

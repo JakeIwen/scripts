@@ -1,0 +1,18 @@
+[Unit]
+Description=Van Dashboard web UI (COP ALERT + Sonos controls on :8788)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 /home/pi/scripts/python-automation/van_dashboard.py
+WorkingDirectory=/home/pi
+Restart=always
+RestartSec=5
+User=pi
+Environment=PYTHONUNBUFFERED=1
+RuntimeDirectory=van-dashboard
+RuntimeDirectoryMode=0750
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target
