@@ -8,9 +8,12 @@ ISW_ALERT_FILE="$ISW_CANARY_DIR/alerted"
 ISW_ALERT_LOCK="$ISW_CANARY_DIR/alert.lock"
 ISW_LOG_FILE=${ISW_LOG_FILE:-/var/log/cron/internet_switches.log}
 ISW_NTFY_SEND=${ISW_NTFY_SEND:-/home/pi/scripts/ntfy_send.sh}
-ISW_MWAN_HOST=${ISW_MWAN_HOST:-root@OpenWrt}
-ISW_MWAN_TIMEOUT_SECONDS=${ISW_MWAN_TIMEOUT_SECONDS:-12}
-ISW_MWAN_STATE=""
+ISW_POLICYCTL=${ISW_POLICYCTL:-/home/pi/scripts/policyctl}
+ISW_IGNITION_FLAG=${ISW_IGNITION_FLAG:-/home/pi/hooks/ignition_is_on}
+ISW_TUYA_STATUS=${ISW_TUYA_STATUS:-/home/pi/scripts/tuya_status.sh}
+POLICY_DISKS_ENABLED=""
+POLICY_TORRENTS_ENABLED=""
+POLICY_ALLOW_STARLINK_TORRENTS=""
 
 isw_prepare_canary_dir() {
   if [[ -L "$ISW_CANARY_DIR" || ( -e "$ISW_CANARY_DIR" && ! -d "$ISW_CANARY_DIR" ) ]]; then
@@ -158,71 +161,56 @@ isw_notify_recovery() {
   /usr/bin/rm -f -- "$ISW_ALERT_FILE"
 }
 
-conf() { cat /home/pi/mconf/$1* &> /dev/null; }
+ignition_is_on() {
+  test -f "$ISW_IGNITION_FLAG"
+}
 
-ubnt_internet_ops() { # nanostation connected; van is likely stationary/parked
-  echo 'ubnt_internet_ops'
-  mount_drives
-  sleep 1
-  if conf notorrent || has_io_error '/mnt/movingparts' || starlink_notor
-  then kill_torrent_client 
-  else start_torrent_client
+load_requested_policy() {
+  local output status
+  output=$("$ISW_POLICYCTL" read 2>&1)
+  status=$?
+  if (( status != 0 )); then
+    echo "ERROR: unable to read requested policy (status $status): $output" >&2
+    return 1
+  fi
+  read -r POLICY_DISKS_ENABLED POLICY_TORRENTS_ENABLED \
+    POLICY_ALLOW_STARLINK_TORRENTS <<< "$output"
+  if [[ ! "$POLICY_DISKS_ENABLED" =~ ^[01]$ ||
+        ! "$POLICY_TORRENTS_ENABLED" =~ ^[01]$ ||
+        ! "$POLICY_ALLOW_STARLINK_TORRENTS" =~ ^[01]$ ]]; then
+    echo "ERROR: policyctl returned an invalid compact policy: $output" >&2
+    return 1
   fi
 }
 
-starlink_notor() {
-  local status=$(/home/pi/scripts/tuya_status.sh starlink)
-  if [ "$status" = "on" ]; then
-    [ ! -e /home/pi/mconf/startor ]
-  else
-    return 1 # false
+starlink_blocks_torrents() {
+  local state status
+
+  # Explicit permission makes the Starlink state irrelevant. The global
+  # torrent switch is checked separately and still takes precedence.
+  [[ "$POLICY_ALLOW_STARLINK_TORRENTS" == 1 ]] && return 1
+
+  state=$("$ISW_TUYA_STATUS" starlink 2>&1)
+  status=$?
+  if (( status != 0 )); then
+    echo "WARNING: Starlink state is unavailable; blocking torrents: $state" >&2
+    return 0
   fi
+  case "$state" in
+    off) return 1 ;;
+    on)
+      echo "Starlink is on and Starlink torrents are not allowed"
+      return 0
+      ;;
+    *)
+      echo "WARNING: unrecognized Starlink state '$state'; blocking torrents" >&2
+      return 0
+      ;;
+  esac
 }
 
 has_io_error() { ls -lah "$1" 2>&1 | grep -q 'Input/output error'; }
 # if has_io_error '/mnt/movingparts'; then echo 'i/o error'; fi
-
-update_iface_score() {
-  file=$1
-  iface_score=`cat $file` 
-  if [ "$iface_score" -lt "$lowest_score" ]; then
-    echo "IS LES"
-    lowest_score=$iface_score
-    iface=`basename "$(dirname $file)"`
-    echo "set iface. l: $lowest_score, f: $file, iface: $iface"
-  fi
-}
-
-mobile_internet_ops() {
-  echo 'mobile_internet_ops'
-  if conf mtorrent; then ubnt_internet_ops; else no_internet_ops; fi
-}
-
-lifi_internet_ops() {
-  echo 'lifi_internet_ops'
-  if conf mtorrent_lifi; then
-    echo "lifi-tor allowed"
-    ubnt_internet_ops
-  else
-    no_internet_ops
-  fi
-}
-
-no_internet_ops() {
-  echo 'no_internet_ops'
-  if conf mtorrent; then 
-    mount_drives
-    start_torrent_client
-  elif conf mdisk; then 
-    mount_drives
-    kill_torrent_client
-  else 
-    kill_torrent_client
-    unmount_drives
-  fi 
-    
-  
-}
 
 kill_torrent_client() {
   if [[ "$(ps ax)" == *"qbittorrent"* ]]; then echo 'killtorrent' && pkill -TERM qbittorrent; fi
@@ -247,11 +235,12 @@ start_torrent_client() {
 mount_drives() {
   if [[ $(van_is_running) ]]; then
     echo "MOUNT interrupt: van is running, unmounting drives"
-    echo "will not mount drives without idisk conf flag!"
+    echo "will not mount drives while ignition is on"
     kill_torrent_client
     stop_service smbd 
     sleep 1
     unmount_drives
+    return 1
   else
     /home/pi/scripts/umount_disks.sh --clear-spindown-state || return 1
     . /home/pi/scripts/mount_disks.sh
@@ -262,9 +251,7 @@ mount_drives() {
 }
 
 van_is_running() {
-  if test -f /home/pi/hooks/ignition_is_on; then
-    [ -z "$(conf idisk)" ] && echo "yes"
-  fi
+  ignition_is_on && echo "yes"
 }
 
 unmount_drives() {
@@ -286,54 +273,38 @@ kill_all() {
   unmount_drives
 }
 
-refresh_mwan_state() {
-  local state
-  local status
-
-  state="$(/usr/bin/timeout --kill-after=2s "${ISW_MWAN_TIMEOUT_SECONDS}s" \
-    /usr/bin/ssh \
-      -n \
-      -o BatchMode=yes \
-      -o ConnectTimeout=5 \
-      -o ServerAliveInterval=3 \
-      -o ServerAliveCountMax=1 \
-      "$ISW_MWAN_HOST" \
-      '/usr/sbin/mwan3 interfaces' 2>&1)"
-  status=$?
-  if (( status != 0 )); then
-    echo "ERROR: unable to query mwan3 state from $ISW_MWAN_HOST (status $status)" >&2
-    printf '%s\n' "$state" >&2
-    return 1
-  fi
-  if [[ -z "$state" ]] || ! /usr/bin/grep -Fq 'Interface status:' <<< "$state"; then
-    echo "ERROR: mwan3 returned an empty or unrecognized interface report" >&2
-    return 1
-  fi
-
-  ISW_MWAN_STATE="$state"
-}
-
-iface_online() {
-  local interface="$1"
-  /usr/bin/grep -Fq " interface $interface is online" <<< "$ISW_MWAN_STATE"
-}
-
-# if date | grep '0:0'; then date; fi
-# ubnt_internet_ops
 set_isw_options() {
   echo ""
   echo "$(date)"
-  if conf nodisk &> /dev/null; then kill_all # drives disabled ~/mconf/nodisk
+  # Ignition is observed safety state and always wins, even if requested
+  # policy is missing or corrupt.
+  if ignition_is_on; then
+    echo "ignition is on; disabling and spinning down disks"
+    kill_all
+    return
+  fi
+
+  load_requested_policy || return 1
+  if [[ "$POLICY_DISKS_ENABLED" == 0 ]]; then
+    echo "requested policy disables disks"
+    kill_all
+    return
+  fi
+
+  # Parked storage is normally available. Uplink attachment no longer decides
+  # whether it is safe to spin disks; ignition_monitor owns that decision.
+  mount_drives || return 1
+
+  if [[ "$POLICY_TORRENTS_ENABLED" == 0 ]]; then
+    echo "requested policy disables torrents"
+    kill_torrent_client
+  elif has_io_error '/mnt/movingparts'; then
+    echo "movingparts has an I/O error; disabling torrents" >&2
+    kill_torrent_client
+  elif starlink_blocks_torrents; then
+    kill_torrent_client
   else
-    # WAN transitions happen behind the Pi's stable LAN connection. OpenWrt
-    # pushes a reconciliation request, then the Pi verifies current mwan3
-    # state once here. A failed query is not evidence that every WAN is down.
-    refresh_mwan_state || return 1
-    if iface_online clientwan; then mobile_internet_ops
-    elif iface_online lifiwan; then lifi_internet_ops
-    elif iface_online wan; then ubnt_internet_ops
-    else no_internet_ops
-    fi
+    start_torrent_client
   fi
 }
 #

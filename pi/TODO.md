@@ -19,22 +19,26 @@
 
 - [x] Trigger policy reconciliation from OpenWrt when mwan3 uplink state
   changes. Pi-side NetworkManager cannot observe those transitions because the
-  Pi-to-router LAN connection remains up. The router notification should mean
-  only "reconcile now"; the Pi should then query mwan3 once for authoritative
-  current state.
+  Pi-to-router LAN connection remains up. The router notification means only
+  "reconcile now."
   - Use a dedicated, forced-command credential that can only request the
     policy service; do not give the router general SSH access to the Pi or
     other devices.
   - Make the router hook non-blocking, bounded by a short timeout, and tolerant
     of duplicate events.
+  - Disk and torrent policy no longer varies by mwan3 state. Remove this
+    trigger after confirming it has no remaining policy consumer.
 
-- [ ] Trigger reconciliation when the requested configuration changes. Prefer
+- [x] Trigger reconciliation when the requested configuration changes. Prefer
   having the configuration-writing command request the service; use a
   systemd `.path` unit only as a fallback for changes made elsewhere.
+  - `policyctl` is the sole writer and requests `vanpi-policy.service` after an
+    atomic update.
 
-- [ ] Separate the user's requested configuration from the ignition override.
-  Derive effective policy from both inputs instead of replacing `mconf` with
-  `nodisk` and later restoring `mconf_last`.
+- [x] Separate the user's requested configuration from the ignition override.
+  Requested state lives in `~/.config/vanpi/policy.json`; ignition is an
+  unconditional observed-state override. The hooks never rewrite requested
+  state or create `mconf_last`.
 
 - [ ] Keep periodic reconciliation after event triggers are deployed. Replace
   the minutely cron invocation only after event coverage is verified, then use

@@ -144,8 +144,6 @@ s() { # run ~/scripts/<name>.sh or .py, drilling into subfolders if not at top l
 sx() { sudo "$(history | perl -pe 's/^\s+[0-9]+\**\s+//g' | tail -1)"; }
 svc() { sudo systemctl $2 $1.service; } # svc home-assistant start
 alias iswl="tf /var/log/cron/internet_switches.log"
-isw="$HOME/scripts/internet_switches.sh"
-mconf="$HOME/mconf"
 
 sync_comps() {
   sync_dirpath '/Users/jacobr/Library/Application Support/BetterTouchTool/'
@@ -171,21 +169,16 @@ sync_dirpath() {
   rsync -ur "$locpath" "$i9:'$syncpath'"
 }
 
-# mconf - mobile disk and torrenting configuration
-alias mconf="ls $mconf"
-alias mreset="rm $mconf/*; nohup $isw &"
-alias mdisk="rm $mconf/nodisk*; rm $mconf/notorrent*; touch $mconf/mdisk; nohup $isw &"
-alias mdiskx="rm $mconf/mdisk*; nohup $isw &"
-alias idisk="rm $mconf/nodisk*; touch $mconf/idisk; nohup $isw &"
-alias idiskx="rm $mconf/idisk*; nohup $isw &"
-alias notor="rm $mconf/mtorrent*; touch $mconf/notorrent; nohup $isw &"
-alias notorx="rm $mconf/notorrent*; nohup $isw &"
-alias mtor="rm $mconf/notorrent* $mconf/nodisk*; touch $mconf/mtorrent; nohup $isw &"
-alias mtorx="rm $mconf/mtorrent*; nohup $isw &"
-alias nodisk="rm $mconf/mdisk*; touch $mconf/nodisk; nohup $isw &"
-alias nodiskx="rm $mconf/nodisk*; nohup $isw &"
-alias startor="touch $mconf/startor; nohup $isw &" # starlink torrent
-alias startorx="rm $mconf/startor; nohup $isw &"
+# Requested storage/torrent policy. policyctl writes atomically and requests
+# reconciliation; the dashboard uses the same command.
+alias policyctl='$HOME/scripts/policyctl'
+alias mconf='$HOME/scripts/policyctl status'
+alias nodisk='$HOME/scripts/policyctl disks off'
+alias nodiskx='$HOME/scripts/policyctl disks on'
+alias notor='$HOME/scripts/policyctl torrents off'
+alias notorx='$HOME/scripts/policyctl torrents on'
+alias startor='$HOME/scripts/policyctl starlink-torrents on'
+alias startorx='$HOME/scripts/policyctl starlink-torrents off'
 
 # status hooks
 alias ignitmonoff="touch $HOME/hooks/inactive/ignition"

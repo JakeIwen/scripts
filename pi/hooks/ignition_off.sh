@@ -1,19 +1,16 @@
 #! /bin/bash
 isw="$HOME/scripts/internet_switches.sh"
-mconf="$HOME/mconf"
 log="$HOME/log/ignition_monitor.log"
 
-echo ""
-echo "$(date)"
-echo "ignition OFF hook invoked"
+echo "" >> "$log"
+echo "$(date)" >> "$log"
+echo "ignition OFF hook invoked" >> "$log"
 
-if [ -d "${mconf}_last" ]; then
-  echo "moving mconf_last dir to mconf, running ISW script" >> $log
-  rm -rf $mconf
-  mv "${mconf}_last" $mconf 
-  $isw
+if "$isw"; then
+  echo "Ignition OFF at $(date)" >> "$log"
+  echo "VAN OFF DONE"
 else
-  echo "no mconf_last dir, NO ACTION" >> $log
+  rc=$?
+  echo "Ignition OFF policy failed with status $rc" >> "$log"
+  exit "$rc"
 fi
-echo "Ignition OFF at $(date)" >> $log
-echo "VAN OFF DONE"
