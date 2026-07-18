@@ -184,11 +184,8 @@ alias mtor="rm $mconf/notorrent* $mconf/nodisk*; touch $mconf/mtorrent; nohup $i
 alias mtorx="rm $mconf/mtorrent*; nohup $isw &"
 alias nodisk="rm $mconf/mdisk*; touch $mconf/nodisk; nohup $isw &"
 alias nodiskx="rm $mconf/nodisk*; nohup $isw &"
-
-# starlink torrent
-alias startor="rm /home/pi/starconf/notor"
-alias startorx="touch /home/pi/starconf/notor"
-alias starconf="ls -lah /home/pi/starconf"
+alias startor="touch $mconf/startor; nohup $isw &" # starlink torrent
+alias startorx="rm $mconf/startor; nohup $isw &"
 
 # status hooks
 alias ignitmonoff="touch $HOME/hooks/inactive/ignition"

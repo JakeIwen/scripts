@@ -173,9 +173,9 @@ ubnt_internet_ops() { # nanostation connected; van is likely stationary/parked
 starlink_notor() {
   local status=$(/home/pi/scripts/tuya_status.sh starlink)
   if [ "$status" = "on" ]; then
-    ls /home/pi/starconf/notor &> /dev/null
+    [ ! -e /home/pi/mconf/startor ]
   else
-    ls /home/pi/starconf/idkhowtoreturnfalse &> /dev/null
+    return 1 # false
   fi
 }
 
