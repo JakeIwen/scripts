@@ -65,7 +65,16 @@ alias logdir="cd /var/log/cron"
 alias speed="~/scripts/speedtest.sh"
 
 alias corefreq='cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq; vcgencmd measure_volts'
-### CLAUDE ###
+### LLM UTILS ###
+codexp() {
+  command codex \
+    --strict-config \
+    --ask-for-approval never \
+    --config 'default_permissions="workspace-git-network"' \
+    --config 'permissions.workspace-git-network={extends=":workspace",filesystem={":workspace_roots"={".git"="write"},"~/.config/firebase"="write","~/.config/configstore"="write","~/.npm"="write","~/.config/gcloud"="write"},network={enabled=true}}' \
+    "$@"
+}
+alias codexpr='codexp resume'
 alias claudep='claude --permission-mode bypassPermissions'
 clauderm() {
     if [ -z "$1" ] || [ -z "$2" ]; then
