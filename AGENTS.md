@@ -34,6 +34,35 @@ Some ignored secret directories, wireless profiles, and device configurations
 may contain credentials or private network data. Never print or commit secrets,
 and preserve unrelated local or deployed changes.
 
+## Vanpi CAN/UDS workspace
+
+The primary CAN-bus research and diagnostic toolkit is a separate Git checkout
+on vanpi at `/home/pi/dev/obd-things/`; it is not mirrored by this repository.
+Before CAN/UDS work, inspect that live checkout and its Git status, then read its
+root `README.md`, `CLAUDE.md`, and `docs/bus-map.md`. It may contain active,
+uncommitted investigations, so preserve its changes independently from this
+repository.
+
+Its main contents are:
+
+- `bringup.sh`: PCAN/SocketCAN setup for C-CAN (500 kbit/s) and B-CAN
+  (125 kbit/s), passive/listen-only by default; transmit mode is explicit.
+- `lib/`: reusable CAN interface/bus detection and wake helpers, ISO-TP/UDS
+  request handling, and the ECU/module-address registry.
+- `tools/`: generic UDS requests and DID/routine discovery, CAN field finding,
+  signal correlation, decoding, and capture helpers.
+- `live_data/`: reusable terminal live-data viewer infrastructure.
+- `projects/`: battery-voltage, ECU-mapping, radar/ACC, and TPMS investigations,
+  with project-specific READMEs, scripts, findings, and some systemd units.
+- `tmp/`: ignored, transient captures, sweeps, logs, locks, and other runtime
+  output. Durable findings are deliberately promoted into the relevant
+  `projects/<name>/findings/` directory.
+
+Some helpers can reconfigure `can0`, wake a bus, issue diagnostic requests, or
+perform safety-critical radar actuation. Their presence is not authorization to
+run them: follow the live repo's guidance, coordinate with any service owning
+the interface, and retain the CAN-transmission safeguards below.
+
 ## Live infrastructure safety
 
 - Prefer read-only inspection before changing routing, wireless, firewall,
