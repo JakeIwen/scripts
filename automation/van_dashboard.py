@@ -40,6 +40,7 @@ ENGINE_MARKER = os.path.join(RUNTIME_DIR, "engine-running")
 TUYA_TOGGLE = os.environ.get("VAN_DASHBOARD_TUYA_TOGGLE", "/home/pi/scripts/tuya_toggle.sh")
 TUYA_STATUS = os.environ.get("VAN_DASHBOARD_TUYA_STATUS", "/home/pi/scripts/tuya_status.sh")
 NTFY_SEND = os.environ.get("VAN_DASHBOARD_NTFY_SEND", "/home/pi/scripts/ntfy_send.sh")
+TUYA_LIGHT = os.environ.get("VAN_DASHBOARD_TUYA_LIGHT", "/home/pi/scripts/tuya_light.sh")
 CONNECTIVITY_STATUS = os.environ.get(
     "VAN_DASHBOARD_CONNECTIVITY_STATUS", "/home/pi/scripts/connectivity_status.py"
 )
@@ -49,6 +50,19 @@ SPEEDTEST = os.path.expanduser(
 CONNECTIVITY_INTERVAL = float(os.environ.get("VAN_DASHBOARD_CONNECTIVITY_INTERVAL", "30"))
 SPEEDTEST_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_SPEEDTEST_TIMEOUT", "180"))
 TUYA_POLL_INTERVAL = float(os.environ.get("VAN_DASHBOARD_TUYA_POLL_INTERVAL", "15"))
+COP_LED_SOURCE = os.environ.get("VAN_DASHBOARD_COP_LED_SOURCE", "light.solder_led")
+COP_LED_TARGET = os.environ.get("VAN_DASHBOARD_COP_LED_TARGET", "light.ext_led")
+COP_LED_FALLBACK_BRIGHTNESS = int(
+    os.environ.get("VAN_DASHBOARD_COP_LED_FALLBACK_BRIGHTNESS", "170")
+)
+COP_LED_FALLBACK_KELVIN = int(
+    os.environ.get("VAN_DASHBOARD_COP_LED_FALLBACK_KELVIN", "2702")
+)
+COP_LED_RETRY_INTERVAL = float(os.environ.get("VAN_DASHBOARD_COP_LED_RETRY_INTERVAL", "5"))
+COP_LED_VERIFY_INTERVAL = float(
+    os.environ.get("VAN_DASHBOARD_COP_LED_VERIFY_INTERVAL", "30")
+)
+COP_LED_CONNECT_GRACE = float(os.environ.get("VAN_DASHBOARD_COP_LED_CONNECT_GRACE", "90"))
 
 CAN_CHANNEL = os.environ.get("VAN_DASHBOARD_CAN_CHANNEL", "can0")
 CAN_BITRATE = 500000
@@ -508,6 +522,295 @@ class CopAlertManager:
             pass
 
 
+class CopLedManager:
+    """Apply and verify the COP ALERT exterior LED look off-thread."""
+
+    def __init__(
+        self,
+        store,
+        engine_monitor=None,
+        source=COP_LED_SOURCE,
+        target=COP_LED_TARGET,
+        command=run_command,
+        clock=time.monotonic,
+        wall_clock=time.time,
+        retry_interval=COP_LED_RETRY_INTERVAL,
+        verify_interval=COP_LED_VERIFY_INTERVAL,
+        connect_grace=COP_LED_CONNECT_GRACE,
+        fallback_brightness=COP_LED_FALLBACK_BRIGHTNESS,
+        fallback_kelvin=COP_LED_FALLBACK_KELVIN,
+    ):
+        self.store = store
+        self.engine_monitor = engine_monitor
+        self.source = source
+        self.target = target
+        self.command = command
+        self.clock = clock
+        self.wall_clock = wall_clock
+        self.retry_interval = retry_interval
+        self.verify_interval = verify_interval
+        self.connect_grace = connect_grace
+        self.fallback = {
+            "brightness": fallback_brightness,
+            "color_temp_kelvin": fallback_kelvin,
+        }
+        self.lock = threading.Lock()
+        self.stop_event = threading.Event()
+        self.wake_event = threading.Event()
+        self.thread = None
+        self.was_active = False
+        self.connect_started_at = None
+        self.next_attempt = 0.0
+        self.desired = None
+        self.reference = None
+        self.phase = "inactive"
+        self.message = "COP ALERT is off"
+        self.last_error = None
+        self.last_attempt = None
+        self.confirmed_at = None
+
+    def start(self):
+        if not self.thread:
+            self.thread = threading.Thread(
+                target=self._loop, name="cop-alert-ext-led", daemon=True
+            )
+            self.thread.start()
+
+    def stop(self):
+        self.stop_event.set()
+        self.wake_event.set()
+
+    def notify(self):
+        with self.lock:
+            self.next_attempt = 0.0
+        self.wake_event.set()
+
+    def snapshot(self):
+        with self.lock:
+            return {
+                "phase": self.phase,
+                "message": self.message,
+                "last_error": self.last_error,
+                "last_attempt": self.last_attempt,
+                "confirmed_at": self.confirmed_at,
+                "desired": copy.deepcopy(self.desired),
+                "reference": self.reference,
+                "source": self.source,
+                "target": self.target,
+            }
+
+    def tick(self):
+        now = self.clock()
+        active = bool(self.store.get("cop_alert", False))
+        with self.lock:
+            if not active:
+                self.was_active = False
+                self.connect_started_at = None
+                self.next_attempt = 0.0
+                self.desired = None
+                self.reference = None
+                self.phase = "inactive"
+                self.message = "COP ALERT is off"
+                self.last_error = None
+                self.confirmed_at = None
+                return self.snapshot_unlocked()
+            if not self.was_active:
+                self.was_active = True
+                self.connect_started_at = now
+                self.next_attempt = 0.0
+                self.desired = None
+                self.reference = None
+                self.phase = "preparing"
+                self.message = "Preparing ext_led"
+                self.last_error = None
+                self.confirmed_at = None
+            if now < self.next_attempt:
+                return self.snapshot_unlocked()
+            self.last_attempt = int(self.wall_clock())
+
+        if self.engine_monitor is not None and self.engine_monitor.snapshot()["running"]:
+            with self.lock:
+                self.connect_started_at = None
+            self._schedule(
+                "paused",
+                "Engine running · ext_flood is intentionally off",
+                None,
+                now + self.retry_interval,
+            )
+            return self.snapshot()
+
+        with self.lock:
+            if self.connect_started_at is None:
+                self.connect_started_at = now
+
+        with self.lock:
+            desired = copy.deepcopy(self.desired)
+        if desired is None:
+            source_status, source_error = self._read_light(self.source)
+            desired = self._settings_from_status(source_status)
+            reference = self.source
+            if desired is None:
+                desired = dict(self.fallback)
+                reference = "captured solder_led fallback"
+            with self.lock:
+                self.desired = desired
+                self.reference = reference
+                if source_error:
+                    self.message = "Reference unavailable; using captured settings"
+
+        target_status, target_error = self._read_light(self.target)
+        if target_error or not target_status or target_status.get("state") == "unavailable":
+            with self.lock:
+                waiting_for = now - self.connect_started_at
+            if waiting_for >= self.connect_grace:
+                message = "ext_led unavailable · still retrying"
+                error = target_error or (
+                    f"{self.target} did not join Wi-Fi within {self.connect_grace:g} seconds"
+                )
+                phase = "unavailable"
+            else:
+                message = "Waiting for ext_led Wi-Fi"
+                error = target_error
+                phase = "waiting"
+            self._schedule(phase, message, error, now + self.retry_interval)
+            return self.snapshot()
+
+        if self._matches(target_status, desired):
+            self._confirmed(desired, now)
+            return self.snapshot()
+
+        with self.lock:
+            self.phase = "applying"
+            self.message = "Applying ext_led brightness and color"
+            self.last_error = None
+        set_error = self._set_light(self.target, desired)
+        if set_error:
+            self._schedule(
+                "error", "Could not configure ext_led; retrying", set_error, now + self.retry_interval
+            )
+            return self.snapshot()
+
+        confirmed, confirm_error = self._read_light(self.target)
+        if confirmed and self._matches(confirmed, desired):
+            self._confirmed(desired, now)
+        elif confirm_error or not confirmed or confirmed.get("state") == "unavailable":
+            self._schedule(
+                "waiting",
+                "ext_led accepted settings; waiting for Wi-Fi confirmation",
+                confirm_error,
+                now + self.retry_interval,
+            )
+        else:
+            self._schedule(
+                "verifying",
+                "ext_led settings not confirmed yet; retrying",
+                None,
+                now + self.retry_interval,
+            )
+        return self.snapshot()
+
+    def snapshot_unlocked(self):
+        return {
+            "phase": self.phase,
+            "message": self.message,
+            "last_error": self.last_error,
+            "last_attempt": self.last_attempt,
+            "confirmed_at": self.confirmed_at,
+            "desired": copy.deepcopy(self.desired),
+            "reference": self.reference,
+            "source": self.source,
+            "target": self.target,
+        }
+
+    def _read_light(self, entity):
+        try:
+            result = self.command([TUYA_LIGHT, "status", entity], timeout=20)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return None, f"could not read {entity}: {exc}"
+        if result.returncode:
+            detail = (result.stderr or result.stdout or "status failed").strip()
+            return None, f"could not read {entity}: {detail[-300:]}"
+        try:
+            status = json.loads(result.stdout)
+        except (TypeError, ValueError):
+            return None, f"could not read {entity}: invalid status response"
+        return status if isinstance(status, dict) else None, None
+
+    @staticmethod
+    def _settings_from_status(status):
+        if not status:
+            return None
+        try:
+            brightness = int(status["brightness"])
+            kelvin = int(status["color_temp_kelvin"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        if not 1 <= brightness <= 255 or not 2000 <= kelvin <= 7000:
+            return None
+        return {"brightness": brightness, "color_temp_kelvin": kelvin}
+
+    @staticmethod
+    def _matches(status, desired):
+        if not status or status.get("state") != "on":
+            return False
+        try:
+            brightness = int(status.get("brightness"))
+            kelvin = int(status.get("color_temp_kelvin"))
+        except (TypeError, ValueError):
+            return False
+        return brightness == desired["brightness"] and abs(
+            kelvin - desired["color_temp_kelvin"]
+        ) <= 10
+
+    def _set_light(self, entity, desired):
+        try:
+            result = self.command(
+                [
+                    TUYA_LIGHT,
+                    "set",
+                    entity,
+                    str(desired["brightness"]),
+                    str(desired["color_temp_kelvin"]),
+                ],
+                timeout=20,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return f"could not set {entity}: {exc}"
+        if result.returncode:
+            detail = (result.stderr or result.stdout or "set failed").strip()
+            return f"could not set {entity}: {detail[-300:]}"
+        return None
+
+    def _schedule(self, phase, message, error, next_attempt):
+        with self.lock:
+            self.phase = phase
+            self.message = message
+            self.last_error = error
+            self.next_attempt = next_attempt
+
+    def _confirmed(self, desired, now):
+        percent = round(desired["brightness"] * 100 / 255)
+        with self.lock:
+            self.phase = "confirmed"
+            self.message = f"Matched · {percent}% · {desired['color_temp_kelvin']} K"
+            self.last_error = None
+            self.confirmed_at = int(self.wall_clock())
+            self.next_attempt = now + self.verify_interval
+
+    def _loop(self):
+        while not self.stop_event.is_set():
+            try:
+                self.tick()
+            except Exception as exc:
+                with self.lock:
+                    self.phase = "error"
+                    self.message = "ext_led manager failed; retrying"
+                    self.last_error = str(exc)
+                    self.next_attempt = self.clock() + self.retry_interval
+            self.wake_event.wait(1.0)
+            self.wake_event.clear()
+
+
 class TuyaSwitchManager:
     """Cache and safely toggle one Home Assistant/Tuya switch."""
 
@@ -920,6 +1223,7 @@ app = Flask(__name__)
 state_store = StateStore()
 engine_monitor = EngineMonitor()
 cop_alert = CopAlertManager(state_store, engine_monitor)
+cop_led = CopLedManager(state_store, engine_monitor)
 sonos = SonosController(state_store)
 connectivity = ConnectivityMonitor()
 speedtest = SpeedTestManager()
@@ -955,7 +1259,12 @@ def reject_cross_origin_mutations():
 @app.route("/api/status")
 def api_status():
     return jsonify(
-        {"ok": True, "cop_alert": cop_alert.snapshot(), "starlink": starlink.snapshot()}
+        {
+            "ok": True,
+            "cop_alert": cop_alert.snapshot(),
+            "cop_led": cop_led.snapshot(),
+            "starlink": starlink.snapshot(),
+        }
     )
 
 
@@ -997,6 +1306,7 @@ def api_cop_alert():
         return api_error("active must be true or false", 400)
     active = raw in ("1", "true", "on")
     status = cop_alert.set_active(active)
+    cop_led.notify()
     verb = "armed" if active else "disarmed"
     return jsonify({"ok": True, "message": f"COP ALERT {verb}", "cop_alert": status})
 
@@ -1133,6 +1443,7 @@ h1{font-size:29px;line-height:1.05;letter-spacing:-.03em;margin:3px 0 0}.van-mar
       <span class="status-lines">
         <span class="status-line"><span>Engine</span><span id="engine">Checking C-CAN…</span></span>
         <span class="status-line"><span>ext_flood</span><span id="flood">—</span></span>
+        <span class="status-line"><span>ext_led</span><span id="cop-led">—</span></span>
         <span class="status-line"><span>CAN wake</span><span id="wake">—</span></span>
       </span>
     </button>
@@ -1199,11 +1510,11 @@ function renderSpeedtest(response){const s=response.speedtest,button=$('speedtes
 async function refreshSpeedtest(){clearTimeout(speedPoll);try{const response=await json('/api/speedtest');renderSpeedtest(response);if(response.speedtest.status==='running')speedPoll=setTimeout(refreshSpeedtest,1000)}catch(error){$('speed-results').innerHTML=`<strong>Speed test unavailable</strong>${esc(error.message)}`}}
 async function startSpeedtest(){if($('speedtest-button').disabled)return;$('speedtest-button').disabled=true;try{const response=await post('speedtest');renderSpeedtest(response);if(response.speedtest.status==='running')speedPoll=setTimeout(refreshSpeedtest,1000)}catch(error){toast(error.message,true);$('speedtest-button').disabled=false}}
 function renderStarlink(status){const state=status?.state||'unknown',known=state==='on'||state==='off',tile=$('starlink');tile.classList.remove('on','off','unknown');tile.classList.add(known?state:'unknown');networkState('starlink-dot',state==='on'?true:state==='off'?false:null);tile.disabled=!known||Boolean(status?.changing);tile.setAttribute('aria-pressed',known?String(state==='on'):'mixed');$('starlink-state').textContent=status?.changing?'WAIT':state==='on'?'ON':state==='off'?'OFF':'NO DATA';$('starlink-detail').textContent=status?.changing?'Changing power…':state==='on'?'Tuya switch is on':state==='off'?'Tuya switch is off':'Tuya status unavailable'}
-function updateStatus(data){dashboard=data.cop_alert;const active=dashboard.active,engine=dashboard.engine;$('dot').classList.remove('bad');$('dot').classList.add('on');$('connection').textContent='Connected · vanpi dashboard';renderStarlink(data.starlink);
+function updateStatus(data){dashboard=data.cop_alert;const active=dashboard.active,engine=dashboard.engine,led=data.cop_led||{};$('dot').classList.remove('bad');$('dot').classList.add('on');$('connection').textContent='Connected · vanpi dashboard';renderStarlink(data.starlink);
   $('cop').classList.toggle('active',active);$('cop').setAttribute('aria-pressed',String(active));$('cop-pill').textContent=active?'ACTIVE':'OFF';
   $('cop-detail').textContent=active?'Dashcam wake and 5-minute bacon alerts are active':'Tap to keep the dashcam awake';
   $('engine').textContent=engine.running?`RUNNING · ${Math.round(engine.rpm)} RPM`:engine.rpm===null?'No fresh data':`Stopped · ${Math.round(engine.rpm)} RPM`;
-  $('flood').textContent=dashboard.ext_flood;$('wake').textContent=dashboard.last_wake_ok===null?'Not attempted':dashboard.last_wake_ok?`OK · ${age(dashboard.last_wake)}`:'DEGRADED';
+  $('flood').textContent=dashboard.ext_flood;$('cop-led').textContent=led.message||'No data';$('cop-led').title=led.last_error||'';$('wake').textContent=dashboard.last_wake_ok===null?'Not attempted':dashboard.last_wake_ok?`OK · ${age(dashboard.last_wake)}`:'DEGRADED';
   if(active&&dashboard.last_error)$('connection').textContent=`Active with warning · ${dashboard.last_error}`}
 async function refresh(){try{updateStatus(await json('/api/status'))}catch(error){$('dot').classList.remove('on');$('dot').classList.add('bad');$('connection').textContent=error.message}}
 function renderSpeakers(next){speakers=next;const grouped=next.speakers.filter(s=>s.grouped);$('speaker-summary').textContent=`${next.coordinator} · ${grouped.length}/${next.speakers.length} grouped`;
@@ -1270,6 +1581,7 @@ def index():
 
 if __name__ == "__main__":
     cop_alert.start()
+    cop_led.start()
     connectivity.start()
     starlink.start()
     app.run(host="0.0.0.0", port=PORT, threaded=True)

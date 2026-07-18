@@ -18,7 +18,7 @@ server rejects cross-origin browser control requests to reduce CSRF risk.
 
 The Connectivity card keeps three related states separate:
 
-- Internet Connectivity comes from mwan3's existing reachability tracking;
+- MWAN3 comes from mwan3's existing reachability tracking;
 - UBNT Availability is a single ping that detects lost Ethernet/power; and
 - UBNT Wireless requires a real access-point association. A configured SSID
   is still shown when the radio says `Not-Associated`, but it is not reported
@@ -62,6 +62,8 @@ While active, the dashboard:
 
 - persists the active state in `/home/pi/.van_dashboard_state.json`;
 - keeps Home Assistant entity `switch.ext_flood` on while the engine is stopped;
+- asynchronously configures `light.ext_led` to match the current brightness and
+  color temperature of `light.solder_led`, then reads it back for confirmation;
 - sends an RF Hub `22 F190` identification read every 15 seconds on C-CAN. This
   is the already-verified parked C-CAN wake that powers the dash accessory rail;
 - sends `🥓 COP ALERT is active` through `ntfy_send.sh` immediately and every
@@ -77,6 +79,26 @@ The dashboard never changes `can0` bitrate, listen-only mode, or link state.
 The C-CAN wake therefore requires the shared interface to already be UP,
 armed, and at 500 kbit/s. A mismatch is shown as a degraded CAN wake rather
 than reconfiguring the interface out from under another CAN service.
+
+## Exterior LED matching
+
+The COP ALERT request is not blocked by the exterior light. A separate worker
+waits for `light.ext_led` to join Wi-Fi after `ext_flood` supplies power, then
+uses `tuya_light.sh` to apply and read back the desired light settings. It
+retries every five seconds while the target is unavailable and re-verifies a
+confirmed light every 30 seconds. The tile shows `Waiting for ext_led Wi-Fi`
+during a 90-second connection grace period, then `ext_led unavailable · still
+retrying` if RF remains blocked. Neither state disables the alert, CAN wake,
+`ext_flood`, or ntfy behavior.
+
+At the start of each activation the worker reads `light.solder_led`, the light
+powered by `switch.solder_flood`. The settings captured on 2026-07-18 were
+brightness `170/255` (67%) and `2702 K` in color-temperature mode. Those values
+are the fallback if the reference light cannot be read, and can be overridden
+with `VAN_DASHBOARD_COP_LED_FALLBACK_BRIGHTNESS` and
+`VAN_DASHBOARD_COP_LED_FALLBACK_KELVIN`. The worker pauses while verified engine
+RPM causes COP ALERT to intentionally turn `ext_flood` off, then resumes when
+the engine stops.
 
 ## Engine-running gate
 
@@ -122,6 +144,6 @@ Before supporting a PCAN moved to B-CAN:
 The system Python used by the service needs `flask`, `soco`, and `can-isotp`.
 The existing speed-test script needs `speedtest-cli`; the connectivity
 collector adds no Python packages or router-side software.
-The existing `tuya_toggle.sh`, `tuya_status.sh`, and `ntfy_send.sh` scripts and
-their existing secret files remain the only Home Assistant/ntfy integrations;
-the dashboard contains no credentials.
+The existing `tuya_toggle.sh`, `tuya_status.sh`, and `ntfy_send.sh` scripts plus
+the new `tuya_light.sh` helper use the existing secret files for Home
+Assistant/ntfy integrations; the dashboard contains no credentials.
