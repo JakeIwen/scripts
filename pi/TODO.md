@@ -32,9 +32,12 @@
   having the configuration-writing command request the service; use a
   systemd `.path` unit only as a fallback for changes made elsewhere.
 
-- [ ] Separate the user's requested configuration from the ignition override.
+- [x] Separate the user's requested configuration from the ignition override.
   Derive effective policy from both inputs instead of replacing `mconf` with
   `nodisk` and later restoring `mconf_last`.
+  - `mconf` remains the requested state. The observed `ignition_is_on` flag is
+    an unconditional disk-safety override, and both ignition transitions run
+    reconciliation without modifying the requested state.
 
 - [ ] Keep periodic reconciliation after event triggers are deployed. Replace
   the minutely cron invocation only after event coverage is verified, then use

@@ -4,15 +4,7 @@ tuya_toggle="$HOME/scripts/tuya_toggle.sh"
 tuya_device_ids="$HOME/scripts/tuya_device_ids.sh"
 cop_alert_ext_flood_guard="$HOME/scripts/cop_alert_ext_flood_guard.sh"
 inactive="$HOME/hooks/inactive/ignition"
-mconf="$HOME/mconf"
 log="$HOME/log/ignition_monitor.log"
-
-nodisk() { rm $mconf/*; touch $mconf/nodisk; $isw; }
-
-stop_disks() {
-  cp -R $mconf "${mconf}_last"
-  nodisk
-}
 
 
 turn_lights_off() {
@@ -28,15 +20,20 @@ turn_lights_off() {
   done
 }
 
-echo "" >> $log
-echo "$(date)" >> $log
-echo "Ignition ON script invoked" >> $log
+echo "" >> "$log"
+echo "$(date)" >> "$log"
+echo "Ignition ON script invoked" >> "$log"
 
-if cat $inactive; then
-  echo "(ignition monitor INACTIVE)" >> $log
+if [[ -f "$inactive" ]]; then
+  echo "(ignition monitor INACTIVE)" >> "$log"
 else
-  echo "ignition monitor ACTIVE" >> $log
+  echo "ignition monitor ACTIVE" >> "$log"
   turn_lights_off &
-  stop_disks
-  echo "IGNITION ON DONE" >> $log
+  if "$isw"; then
+    echo "IGNITION ON DONE" >> "$log"
+  else
+    rc=$?
+    echo "IGNITION ON policy failed with status $rc" >> "$log"
+    exit "$rc"
+  fi
 fi

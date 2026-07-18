@@ -10,6 +10,8 @@ ISW_LOG_FILE=${ISW_LOG_FILE:-/var/log/cron/internet_switches.log}
 ISW_NTFY_SEND=${ISW_NTFY_SEND:-/home/pi/scripts/ntfy_send.sh}
 ISW_MWAN_HOST=${ISW_MWAN_HOST:-root@OpenWrt}
 ISW_MWAN_TIMEOUT_SECONDS=${ISW_MWAN_TIMEOUT_SECONDS:-12}
+ISW_MCONF_DIR=${ISW_MCONF_DIR:-/home/pi/mconf}
+ISW_IGNITION_FLAG=${ISW_IGNITION_FLAG:-/home/pi/hooks/ignition_is_on}
 ISW_MWAN_STATE=""
 
 isw_prepare_canary_dir() {
@@ -158,7 +160,11 @@ isw_notify_recovery() {
   /usr/bin/rm -f -- "$ISW_ALERT_FILE"
 }
 
-conf() { cat /home/pi/mconf/$1* &> /dev/null; }
+conf() { cat "$ISW_MCONF_DIR"/"$1"* &> /dev/null; }
+
+ignition_is_on() {
+  test -f "$ISW_IGNITION_FLAG"
+}
 
 ubnt_internet_ops() { # nanostation connected; van is likely stationary/parked
   echo 'ubnt_internet_ops'
@@ -247,7 +253,7 @@ start_torrent_client() {
 mount_drives() {
   if [[ $(van_is_running) ]]; then
     echo "MOUNT interrupt: van is running, unmounting drives"
-    echo "will not mount drives without idisk conf flag!"
+    echo "will not mount drives while ignition is on"
     kill_torrent_client
     stop_service smbd 
     sleep 1
@@ -262,9 +268,7 @@ mount_drives() {
 }
 
 van_is_running() {
-  if test -f /home/pi/hooks/ignition_is_on; then
-    [ -z "$(conf idisk)" ] && echo "yes"
-  fi
+  ignition_is_on && echo "yes"
 }
 
 unmount_drives() {
@@ -323,7 +327,13 @@ iface_online() {
 set_isw_options() {
   echo ""
   echo "$(date)"
-  if conf nodisk &> /dev/null; then kill_all # drives disabled ~/mconf/nodisk
+  # mconf is requested state owned by the user/dashboard. Ignition is observed
+  # state and is an unconditional safety override; never rewrite mconf to
+  # represent it. When ignition turns off, the latest requested state applies.
+  if ignition_is_on; then
+    echo "ignition is on; overriding requested disk policy"
+    kill_all
+  elif conf nodisk &> /dev/null; then kill_all # drives disabled ~/mconf/nodisk
   else
     # WAN transitions happen behind the Pi's stable LAN connection. OpenWrt
     # pushes a reconciliation request, then the Pi verifies current mwan3
