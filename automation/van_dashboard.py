@@ -942,22 +942,59 @@ class SonosController:
         coordinator = self.coordinator()
         coordinator_name = coordinator.player_name
         members = {member.player_name for member in coordinator.group.members}
+        try:
+            group_volume = coordinator.group.volume
+        except Exception:
+            group_volume = None
+        try:
+            group_muted = coordinator.group.mute
+        except Exception:
+            group_muted = None
+        try:
+            transport_state = coordinator.get_current_transport_info()[
+                "current_transport_state"
+            ]
+        except Exception:
+            transport_state = "UNKNOWN"
+        try:
+            track = coordinator.get_current_track_info() or {}
+        except Exception:
+            track = {}
+        now_playing = {
+            "title": track.get("title") or track.get("radio_show") or "Nothing playing",
+            "artist": track.get("artist") or track.get("album") or "",
+            "album": track.get("album") or "",
+            "position": track.get("position") or "",
+            "duration": track.get("duration") or "",
+            "transport_state": transport_state,
+        }
         speakers = []
         for name, zone in sorted(zones.items()):
             try:
                 volume = zone.volume
             except Exception:
                 volume = None
+            try:
+                muted = zone.mute
+            except Exception:
+                muted = None
             speakers.append(
                 {
                     "name": name,
                     "volume": volume,
+                    "muted": muted,
                     "grouped": name in members,
                     "coordinator": name == coordinator_name,
                     "group_coordinator": zone.group.coordinator.player_name,
                 }
             )
-        return {"ok": True, "coordinator": coordinator_name, "speakers": speakers}
+        return {
+            "ok": True,
+            "coordinator": coordinator_name,
+            "group": {"volume": group_volume, "muted": group_muted},
+            "now_playing": now_playing,
+            "speakers": speakers,
+        }
 
     def select(self, name):
         zones = self.get_zones()
@@ -995,6 +1032,41 @@ class SonosController:
         zones[name].volume = volume
         return volume
 
+    def set_mute(self, name, muted):
+        zones = self.get_zones()
+        if name not in zones:
+            raise KeyError(f"unknown speaker '{name}'")
+        zones[name].mute = bool(muted)
+        return bool(muted)
+
+    def set_group_volume(self, volume):
+        volume = max(0, min(100, int(volume)))
+        self.coordinator().group.volume = volume
+        return volume
+
+    def set_group_mute(self, muted):
+        muted = bool(muted)
+        self.coordinator().group.mute = muted
+        return muted
+
+    def transport(self, action):
+        if action not in ("play_pause", "previous", "next"):
+            raise ValueError("unknown Sonos transport action")
+        coordinator = self.coordinator()
+        if action == "play_pause":
+            state = coordinator.get_current_transport_info()["current_transport_state"]
+            if state == "PLAYING":
+                coordinator.pause()
+                return "Sonos paused"
+            coordinator.play()
+            return "Sonos playing"
+        if action == "previous":
+            coordinator.previous()
+            return "Previous Sonos track"
+        if action == "next":
+            coordinator.next()
+            return "Next Sonos track"
+
 
 class ConnectivityMonitor:
     """Cache the reusable connectivity collector away from HTTP request threads."""
@@ -1014,6 +1086,7 @@ class ConnectivityMonitor:
         self.wall_clock = wall_clock
         self.lock = threading.Lock()
         self.stop_event = threading.Event()
+        self.refresh_event = threading.Event()
         self.thread = None
         self.refreshing = False
         self.last_error = None
@@ -1049,6 +1122,11 @@ class ConnectivityMonitor:
 
     def stop(self):
         self.stop_event.set()
+        self.refresh_event.set()
+
+    def request_refresh(self):
+        """Wake the collector without doing router I/O in the request thread."""
+        self.refresh_event.set()
 
     def refresh(self):
         with self.lock:
@@ -1091,7 +1169,8 @@ class ConnectivityMonitor:
             started = self.clock()
             self.refresh()
             remaining = max(1.0, self.interval - (self.clock() - started))
-            self.stop_event.wait(remaining)
+            self.refresh_event.wait(remaining)
+            self.refresh_event.clear()
 
 
 def parse_speedtest_output(output):
@@ -1194,6 +1273,13 @@ def api_error(message, status):
     return jsonify({"ok": False, "message": str(message)}), status
 
 
+def request_boolean(name):
+    raw = request.values.get(name, "").strip().lower()
+    if raw not in ("1", "0", "true", "false", "on", "off"):
+        raise ValueError(f"{name} must be true or false")
+    return raw in ("1", "true", "on")
+
+
 @app.before_request
 def reject_cross_origin_mutations():
     """Block browser CSRF against vehicle-control POST endpoints.
@@ -1236,6 +1322,7 @@ def api_starlink():
         return api_error(exc, 503)
     except RuntimeError as exc:
         return api_error(exc, 502)
+    connectivity.request_refresh()
     return jsonify(
         {
             "ok": True,
@@ -1247,7 +1334,9 @@ def api_starlink():
 
 @app.route("/api/connectivity")
 def api_connectivity():
-    return jsonify({"ok": True, "connectivity": connectivity.snapshot()})
+    response = jsonify({"ok": True, "connectivity": connectivity.snapshot()})
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.route("/api/speedtest", methods=["GET", "POST"])
@@ -1324,6 +1413,60 @@ def api_speaker_volume():
     return jsonify({"ok": True, "message": f"{name} volume: {volume}", "volume": volume})
 
 
+@app.route("/api/speakers/mute", methods=["POST"])
+def api_speaker_mute():
+    name = request.values.get("name", "").strip()
+    try:
+        muted = request_boolean("muted")
+        muted = sonos.set_mute(name, muted)
+    except ValueError as exc:
+        return api_error(exc, 400)
+    except KeyError as exc:
+        return api_error(exc.args[0], 404)
+    except Exception as exc:
+        return api_error(f"could not mute {name}: {exc}", 502)
+    verb = "muted" if muted else "unmuted"
+    return jsonify({"ok": True, "message": f"{name} {verb}", "muted": muted})
+
+
+@app.route("/api/speakers/group-volume", methods=["POST"])
+def api_speaker_group_volume():
+    try:
+        volume = int(request.values.get("volume", ""))
+    except (TypeError, ValueError):
+        return api_error("volume must be from 0 to 100", 400)
+    try:
+        volume = sonos.set_group_volume(volume)
+    except Exception as exc:
+        return api_error(f"could not set Sonos group volume: {exc}", 502)
+    return jsonify({"ok": True, "message": f"Group volume: {volume}", "volume": volume})
+
+
+@app.route("/api/speakers/group-mute", methods=["POST"])
+def api_speaker_group_mute():
+    try:
+        muted = request_boolean("muted")
+        muted = sonos.set_group_mute(muted)
+    except ValueError as exc:
+        return api_error(exc, 400)
+    except Exception as exc:
+        return api_error(f"could not mute Sonos group: {exc}", 502)
+    verb = "muted" if muted else "unmuted"
+    return jsonify({"ok": True, "message": f"Sonos group {verb}", "muted": muted})
+
+
+@app.route("/api/speakers/transport", methods=["POST"])
+def api_speaker_transport():
+    action = request.values.get("action", "").strip().lower()
+    try:
+        message = sonos.transport(action)
+    except ValueError as exc:
+        return api_error(exc, 400)
+    except Exception as exc:
+        return api_error(f"Sonos transport failed: {exc}", 502)
+    return jsonify({"ok": True, "message": message})
+
+
 PAGE = r"""<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -1367,6 +1510,8 @@ h1{font-size:29px;line-height:1.05;letter-spacing:-.03em;margin:3px 0 0}.van-mar
 .starlink{min-height:210px;transition:border-color .2s,background .2s,opacity .2s}.starlink .tile-icon{font-size:38px}.starlink .tile-title{font-size:23px}.starlink.on{border-color:#438168;background:radial-gradient(circle at 88% 5%,#62c89928,transparent 38%),linear-gradient(145deg,#1d2b2b,#172225)}
 .starlink.off{border-color:#754743;background:radial-gradient(circle at 88% 5%,#ef70671c,transparent 38%),linear-gradient(145deg,#292124,#1b2025)}.starlink.unknown{border-color:#41505a;background:linear-gradient(145deg,#202a32,#182128)}.starlink:disabled{cursor:not-allowed;opacity:.72}
 .switch-state{position:absolute;right:14px;top:14px;display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:99px;padding:4px 8px;background:#10171dcc;color:var(--dim);font-size:10px;font-weight:800;letter-spacing:.08em}.starlink.on .switch-state{color:#bcebd5;border-color:#39725b}.starlink.off .switch-state{color:#f2b5b0;border-color:#754743}
+.sonos-tile{cursor:default;min-height:174px}.sonos-tile:active{transform:none;background:linear-gradient(145deg,var(--panel),#151f28)}.sonos-head{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px}.sonos-open{min-width:0;max-width:68%;display:flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:9px;background:#1e2b34;color:var(--dim);padding:5px 8px;font-size:10px;cursor:pointer}.sonos-open span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.now-playing{width:100%;min-width:0;margin-top:13px}.now-playing strong,.now-playing span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.now-playing strong{font-size:15px;color:var(--ink)}.now-playing span{font-size:11px;color:var(--dim);margin-top:2px}.transport{display:flex;align-items:center;justify-content:space-between;width:100%;margin-top:auto;padding-top:12px}.transport-button{width:46px;height:36px;border:0;border-radius:10px;background:transparent;color:#dce8ed;font-size:22px;line-height:1;cursor:pointer}.transport-button:active{background:#ffffff12;transform:scale(.95)}.transport-button.play{font-size:28px}
 .connectivity{margin-top:11px;border:1px solid var(--line);border-radius:19px;background:linear-gradient(145deg,var(--panel),#151f28);padding:15px;box-shadow:0 8px 28px #050b102e}
 .connectivity-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:13px}.connectivity-head h2{font-size:17px;margin:0;letter-spacing:-.01em}
 .connectivity-age{color:var(--dim);font-size:10px;text-align:right}.network-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0}
@@ -1384,10 +1529,11 @@ h1{font-size:29px;line-height:1.05;letter-spacing:-.03em;margin:3px 0 0}.van-mar
   box-shadow:0 -18px 60px #000a;transform:translateY(24px);transition:transform .2s}.speaker-backdrop.open .speaker-sheet{transform:translateY(0)}
 .sheet-grabber{width:38px;height:4px;border-radius:3px;background:#4d626e;margin:2px auto 12px}.sheet-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .sheet-head h2{margin:0;font-size:18px;letter-spacing:-.01em}.sheet-close{border:1px solid var(--line);background:var(--raised);color:var(--ink);border-radius:50%;width:38px;height:38px;font-size:20px}
-.sheet-help{color:var(--dim);font-size:12px;margin:3px 0 14px}.speaker-row{display:grid;grid-template-columns:30px minmax(0,1fr) 35px;align-items:center;column-gap:8px;padding:11px 8px;border-top:1px solid var(--line)}
+.sheet-help{color:var(--dim);font-size:12px;margin:3px 0 14px}.group-audio{display:grid;grid-template-columns:42px minmax(0,1fr) 35px;align-items:center;column-gap:10px;padding:12px 8px 15px}.group-audio-label{grid-column:1/4;color:var(--ink);font-size:12px;font-weight:700;margin-bottom:6px}.audio-mute{width:38px;height:38px;border:0;border-radius:10px;background:transparent;color:var(--ink);font-size:22px;line-height:1;cursor:pointer}.audio-mute:active{background:#ffffff12}.audio-mute.muted{color:var(--bad)}.group-volume,.speaker-volume{width:100%;accent-color:var(--accent)}.group-level{font-size:11px;color:var(--dim);text-align:right;font-variant-numeric:tabular-nums}
+.speaker-row{display:grid;grid-template-columns:30px 42px minmax(0,1fr) 35px;align-items:center;column-gap:8px;padding:11px 8px;border-top:1px solid var(--line)}
 .speaker-check{width:22px;height:22px;margin:0;accent-color:var(--accent)}.speaker-name{border:0;background:transparent;color:var(--ink);padding:2px 0;text-align:left;font-weight:700;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .speaker-name small{display:block;color:var(--dim);font-size:10px;font-weight:500;margin-top:1px}.speaker-level{font-size:11px;color:var(--dim);text-align:right;font-variant-numeric:tabular-nums}
-.speaker-volume{grid-column:2/4;width:100%;margin:8px 0 0;accent-color:var(--accent)}.speaker-loading{padding:28px;text-align:center;color:var(--dim)}body.sheet-open{overflow:hidden}
+.speaker-volume{grid-column:3/5;margin:8px 0 0}.speaker-loading{padding:28px;text-align:center;color:var(--dim)}body.sheet-open{overflow:hidden}
 #toast{position:fixed;z-index:30;left:50%;top:calc(12px + env(safe-area-inset-top));transform:translate(-50%,-14px);width:min(calc(100% - 28px),620px);
   background:#22313d;color:var(--ink);border:1px solid #405967;border-radius:13px;padding:11px 14px;box-shadow:var(--shadow);opacity:0;pointer-events:none;transition:.2s;font-size:13px;text-align:center}
 #toast.show{opacity:1;transform:translate(-50%,0)}#toast.bad{border-color:#874944;color:#ffd8d4}body.busy [data-action]{pointer-events:none;opacity:.55}
@@ -1413,9 +1559,15 @@ h1{font-size:29px;line-height:1.05;letter-spacing:-.03em;margin:3px 0 0}.van-mar
       <span class="tile-detail" id="starlink-detail">Checking Tuya status…</span>
     </button>
     <a class="tile" id="books" data-action href="#"><span class="tile-icon" aria-hidden="true">📖</span><span class="tile-title">Audiobooks</span><span class="tile-detail">Open the Sonos audiobook library</span></a>
-    <button class="tile" id="speakers" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="speaker-panel">
-      <span class="tile-icon" aria-hidden="true">🔊</span><span class="tile-title">Sonos</span><span class="tile-detail" id="speaker-summary">Finding speakers…</span>
-    </button>
+    <section class="tile sonos-tile" aria-labelledby="sonos-title">
+      <div class="sonos-head"><span class="tile-title" id="sonos-title">Sonos</span><button class="sonos-open" id="speakers" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="speaker-panel"><span aria-hidden="true">🔊</span><span id="speaker-summary">Finding…</span></button></div>
+      <div class="now-playing"><strong id="sonos-track">Finding Sonos…</strong><span id="sonos-artist">—</span></div>
+      <div class="transport" aria-label="Sonos playback controls">
+        <button class="transport-button" data-action data-transport="previous" aria-label="Previous track">|◀</button>
+        <button class="transport-button play" id="sonos-play" data-action data-transport="play_pause" aria-label="Play">▶</button>
+        <button class="transport-button" data-action data-transport="next" aria-label="Next track">▶|</button>
+      </div>
+    </section>
   </div>
   <section class="connectivity" aria-labelledby="connectivity-title">
     <div class="connectivity-head"><h2 id="connectivity-title">Connectivity</h2><span class="connectivity-age" id="connectivity-age">Checking…</span></div>
@@ -1435,6 +1587,12 @@ h1{font-size:29px;line-height:1.05;letter-spacing:-.03em;margin:3px 0 0}.van-mar
   <section class="speaker-sheet" id="speaker-panel" role="dialog" aria-modal="true" aria-labelledby="speaker-title">
     <div class="sheet-grabber"></div><div class="sheet-head"><h2 id="speaker-title">Sonos speakers</h2><button class="sheet-close" id="speaker-close" aria-label="Close speaker selector">×</button></div>
     <p class="sheet-help">Tap a name to control its group. Check speakers to group them with the active player.</p>
+    <div class="group-audio">
+      <div class="group-audio-label">Group volume</div>
+      <button class="audio-mute" id="group-mute" data-action data-group-mute disabled aria-label="Mute group">🔊</button>
+      <input class="group-volume" id="group-volume" data-action data-group-volume type="range" min="0" max="100" value="0" disabled aria-label="Group volume">
+      <span class="group-level" id="group-level">—</span>
+    </div>
     <div id="speaker-list"><div class="speaker-loading">Finding speakers…</div></div>
   </section>
 </div>
@@ -1443,7 +1601,7 @@ h1{font-size:29px;line-height:1.05;letter-spacing:-.03em;margin:3px 0 0}.van-mar
 const $=id=>document.getElementById(id);let dashboard=null,speakers=null,busy=false,toastTimer=0,speedPoll=0;
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function toast(message,bad=false){clearTimeout(toastTimer);const el=$('toast');el.textContent=message;el.className=bad?'show bad':'show';toastTimer=setTimeout(()=>el.className='',3400)}
-async function json(url,options){const response=await fetch(url,options);let data;try{data=await response.json()}catch(_){data={message:`Server returned ${response.status}`}}
+async function json(url,options){const response=await fetch(url,{cache:'no-store',...(options||{})});let data;try{data=await response.json()}catch(_){data={message:`Server returned ${response.status}`}}
   if(!response.ok||data.ok===false)throw new Error(data.message||`Request failed (${response.status})`);return data}
 async function post(endpoint,params={}){return json('/api/'+endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','X-Van-Dashboard':'1'},body:new URLSearchParams(params)})}
 async function action(work){if(busy)return;busy=true;document.body.classList.add('busy');try{const result=await work();if(result?.message)toast(result.message);await refresh()}
@@ -1477,24 +1635,29 @@ function updateStatus(data){dashboard=data.cop_alert;const active=dashboard.acti
   $('flood').textContent=dashboard.ext_flood;$('cop-led').textContent=led.message||'No data';$('cop-led').title=led.last_error||'';$('wake').textContent=dashboard.last_wake_ok===null?'Not attempted':dashboard.last_wake_ok?`OK · ${age(dashboard.last_wake)}`:'DEGRADED';
   if(active&&dashboard.last_error)$('connection').textContent=`Active with warning · ${dashboard.last_error}`}
 async function refresh(){try{updateStatus(await json('/api/status'))}catch(error){$('dot').classList.remove('on');$('dot').classList.add('bad');$('connection').textContent=error.message}}
-function renderSpeakers(next){speakers=next;const grouped=next.speakers.filter(s=>s.grouped);$('speaker-summary').textContent=`${next.coordinator} · ${grouped.length}/${next.speakers.length} grouped`;
-  $('speaker-list').innerHTML=next.speakers.map(s=>{const detail=s.coordinator?'Active coordinator':s.grouped?`Grouped with ${next.coordinator}`:`Group: ${s.group_coordinator}`;
-    const volume=Number.isFinite(s.volume)?s.volume:0;return `<div class="speaker-row"><input class="speaker-check" data-action data-group-speaker="${esc(s.name)}" type="checkbox" ${s.grouped?'checked':''} ${s.coordinator?'disabled':''} aria-label="Group ${esc(s.name)}">
+function muteIcon(muted){return muted?'🔇':'🔊'}
+function renderSpeakers(next){speakers=next;const grouped=next.speakers.filter(s=>s.grouped),now=next.now_playing||{},group=next.group||{};$('speaker-summary').textContent=`${next.coordinator} · ${grouped.length}/${next.speakers.length}`;$('sonos-track').textContent=now.title||'Nothing playing';$('sonos-artist').textContent=now.artist||next.coordinator;
+  const playing=now.transport_state==='PLAYING';$('sonos-play').textContent=playing?'Ⅱ':'▶';$('sonos-play').setAttribute('aria-label',playing?'Pause':'Play');
+  const groupVolume=Number.isFinite(group.volume)?group.volume:0;$('group-volume').value=groupVolume;$('group-volume').disabled=!Number.isFinite(group.volume);$('group-level').textContent=Number.isFinite(group.volume)?group.volume:'—';const groupMuteKnown=typeof group.muted==='boolean';$('group-mute').disabled=!groupMuteKnown;$('group-mute').textContent=muteIcon(group.muted);$('group-mute').classList.toggle('muted',group.muted===true);$('group-mute').setAttribute('aria-pressed',String(group.muted===true));$('group-mute').setAttribute('aria-label',group.muted?'Unmute group':'Mute group');
+  $('speaker-list').innerHTML=next.speakers.map(s=>{const detail=s.coordinator?'Active coordinator':s.grouped?`Grouped with ${next.coordinator}`:`Group: ${s.group_coordinator}`,volume=Number.isFinite(s.volume)?s.volume:0,muteKnown=typeof s.muted==='boolean';return `<div class="speaker-row"><input class="speaker-check" data-action data-group-speaker="${esc(s.name)}" type="checkbox" ${s.grouped?'checked':''} ${s.coordinator?'disabled':''} aria-label="Group ${esc(s.name)}">
+      <button class="audio-mute ${s.muted?'muted':''}" data-action data-speaker-mute="${esc(s.name)}" ${muteKnown?'':'disabled'} aria-pressed="${String(s.muted===true)}" aria-label="${s.muted?'Unmute':'Mute'} ${esc(s.name)}">${muteIcon(s.muted)}</button>
       <button class="speaker-name" data-action data-select-speaker="${esc(s.name)}">${esc(s.name)}<small>${esc(detail)}</small></button><span class="speaker-level">${Number.isFinite(s.volume)?s.volume:'—'}</span>
       <input class="speaker-volume" data-action data-speaker-volume="${esc(s.name)}" type="range" min="0" max="100" value="${volume}" ${Number.isFinite(s.volume)?'':'disabled'} aria-label="${esc(s.name)} volume"></div>`}).join('')||'<div class="speaker-loading">No Sonos speakers found</div>'}
 async function loadSpeakers(){const next=await json('/api/speakers');renderSpeakers(next);return next}
+async function refreshSonos(){try{return await loadSpeakers()}catch(error){$('speaker-summary').textContent='Unavailable';$('sonos-track').textContent='Sonos unavailable';$('sonos-artist').textContent=error.message}}
 async function openSpeakers(){$('speaker-backdrop').classList.add('open');document.body.classList.add('sheet-open');$('speakers').setAttribute('aria-expanded','true');
   try{await loadSpeakers()}catch(error){$('speaker-list').innerHTML=`<div class="speaker-loading">${esc(error.message)}</div>`;toast(error.message,true)}}
 function closeSpeakers(){$('speaker-backdrop').classList.remove('open');document.body.classList.remove('sheet-open');$('speakers').setAttribute('aria-expanded','false');$('speakers').focus()}
 const bookUrl=new URL(window.location.href);bookUrl.port='8787';bookUrl.pathname='/';bookUrl.search='';bookUrl.hash='';$('books').href=bookUrl.toString();
-$('cop').addEventListener('click',()=>action(()=>post('cop-alert',{active:dashboard?.active?'false':'true'})));$('starlink').addEventListener('click',()=>{renderStarlink({state:'unknown',changing:true});action(()=>post('starlink'))});$('speakers').addEventListener('click',openSpeakers);$('speaker-close').addEventListener('click',closeSpeakers);
+$('cop').addEventListener('click',()=>action(()=>post('cop-alert',{active:dashboard?.active?'false':'true'})));$('starlink').addEventListener('click',()=>{renderStarlink({state:'unknown',changing:true});action(async()=>{const result=await post('starlink');await refreshConnectivity();return result})});$('speakers').addEventListener('click',openSpeakers);$('speaker-close').addEventListener('click',closeSpeakers);
 $('speedtest-button').addEventListener('click',startSpeedtest);
 $('speaker-backdrop').addEventListener('click',event=>{if(event.target===$('speaker-backdrop'))closeSpeakers()});document.addEventListener('keydown',event=>{if(event.key==='Escape')closeSpeakers()});
-document.addEventListener('input',event=>{const slider=event.target.closest('[data-speaker-volume]');if(slider)slider.closest('.speaker-row').querySelector('.speaker-level').textContent=slider.value});
+document.addEventListener('input',event=>{const slider=event.target.closest('[data-speaker-volume]');if(slider)slider.closest('.speaker-row').querySelector('.speaker-level').textContent=slider.value;const groupSlider=event.target.closest('[data-group-volume]');if(groupSlider)$('group-level').textContent=groupSlider.value});
 document.addEventListener('change',event=>{const checkbox=event.target.closest('[data-group-speaker]');if(checkbox)action(async()=>{try{return await post('speakers/group',{name:checkbox.dataset.groupSpeaker,grouped:checkbox.checked?'1':'0'})}finally{await loadSpeakers()}});
-  const slider=event.target.closest('[data-speaker-volume]');if(slider)action(async()=>{try{return await post('speakers/volume',{name:slider.dataset.speakerVolume,volume:slider.value})}finally{await loadSpeakers()}})});
-document.addEventListener('click',event=>{const selected=event.target.closest('[data-select-speaker]');if(selected)action(async()=>{const result=await post('speakers/select',{name:selected.dataset.selectSpeaker});await loadSpeakers();return result})});
-Promise.allSettled([refresh(),loadSpeakers(),refreshConnectivity(),refreshSpeedtest()]).then(results=>{if(results[1].status==='rejected')$('speaker-summary').textContent='Sonos unavailable'});setInterval(()=>{if(!document.hidden)refresh()},5000);setInterval(()=>{if(!document.hidden)refreshConnectivity()},10000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){refresh();refreshConnectivity();refreshSpeedtest()}});
+  const slider=event.target.closest('[data-speaker-volume]');if(slider)action(async()=>{try{return await post('speakers/volume',{name:slider.dataset.speakerVolume,volume:slider.value})}finally{await loadSpeakers()}});const groupSlider=event.target.closest('[data-group-volume]');if(groupSlider)action(async()=>{try{return await post('speakers/group-volume',{volume:groupSlider.value})}finally{await loadSpeakers()}})});
+document.addEventListener('click',event=>{const selected=event.target.closest('[data-select-speaker]');if(selected)action(async()=>{const result=await post('speakers/select',{name:selected.dataset.selectSpeaker});await loadSpeakers();return result});const transport=event.target.closest('[data-transport]');if(transport)action(async()=>{try{return await post('speakers/transport',{action:transport.dataset.transport})}finally{await loadSpeakers()}});const groupMute=event.target.closest('[data-group-mute]');if(groupMute)action(async()=>{try{return await post('speakers/group-mute',{muted:speakers?.group?.muted?'0':'1'})}finally{await loadSpeakers()}});const speakerMute=event.target.closest('[data-speaker-mute]');if(speakerMute)action(async()=>{const item=speakers?.speakers?.find(s=>s.name===speakerMute.dataset.speakerMute);try{return await post('speakers/mute',{name:speakerMute.dataset.speakerMute,muted:item?.muted?'0':'1'})}finally{await loadSpeakers()}})});
+function refreshVisibleDashboard(){if(document.hidden)return;refresh();refreshConnectivity();refreshSpeedtest();refreshSonos()}
+Promise.allSettled([refresh(),loadSpeakers(),refreshConnectivity(),refreshSpeedtest()]).then(results=>{if(results[1].status==='rejected')refreshSonos()});setInterval(()=>{if(!document.hidden)refresh()},5000);setInterval(()=>{if(!document.hidden)refreshConnectivity()},10000);setInterval(()=>{if(!document.hidden&&!busy)refreshSonos()},10000);document.addEventListener('visibilitychange',refreshVisibleDashboard);window.addEventListener('pageshow',refreshVisibleDashboard);window.addEventListener('focus',refreshVisibleDashboard);
 </script></body></html>"""
 
 

@@ -117,13 +117,24 @@ class FakeGroup:
     def __init__(self):
         self.coordinator = None
         self.members = []
+        self.volume = 61
+        self.mute = False
 
 
 class FakeSpeaker:
     def __init__(self, name, volume, transport="STOPPED"):
         self.player_name = name
         self.volume = volume
+        self.mute = False
         self.transport = transport
+        self.track_info = {
+            "title": "Orange Juice",
+            "artist": "Stanley Brinks and The Wave Pictures",
+            "album": "",
+            "position": "0:01:23",
+            "duration": "0:03:45",
+        }
+        self.transport_calls = []
         self.is_visible = True
         self.group = FakeGroup()
         self.group.coordinator = self
@@ -131,6 +142,23 @@ class FakeSpeaker:
 
     def get_current_transport_info(self):
         return {"current_transport_state": self.transport}
+
+    def get_current_track_info(self):
+        return self.track_info
+
+    def pause(self):
+        self.transport_calls.append("pause")
+        self.transport = "PAUSED_PLAYBACK"
+
+    def play(self):
+        self.transport_calls.append("play")
+        self.transport = "PLAYING"
+
+    def previous(self):
+        self.transport_calls.append("previous")
+
+    def next(self):
+        self.transport_calls.append("next")
 
 
 class SonosControllerTests(unittest.TestCase):
@@ -144,15 +172,41 @@ class SonosControllerTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tempdir:
             store = dashboard.StateStore(os.path.join(tempdir, "state.json"))
+            store.set("sonos_device", "Front")
             controller = dashboard.SonosController(store, discover_func=lambda timeout: zones)
             snapshot = controller.snapshot()
             self.assertEqual(snapshot["coordinator"], "Front")
+            self.assertEqual(snapshot["group"], {"volume": 61, "muted": False})
+            self.assertEqual(snapshot["now_playing"]["title"], "Orange Juice")
+            self.assertEqual(
+                snapshot["now_playing"]["artist"],
+                "Stanley Brinks and The Wave Pictures",
+            )
             grouped = {item["name"] for item in snapshot["speakers"] if item["grouped"]}
             self.assertEqual(grouped, {"Front", "Rear"})
             self.assertEqual(controller.set_volume("Rear", 42), 42)
             self.assertEqual(rear.volume, 42)
+            self.assertTrue(controller.set_mute("Rear", True))
+            self.assertTrue(rear.mute)
+            self.assertEqual(controller.set_group_volume(73), 73)
+            self.assertEqual(front.group.volume, 73)
+            self.assertTrue(controller.set_group_mute(True))
+            self.assertTrue(front.group.mute)
+            self.assertEqual(controller.transport("play_pause"), "Sonos paused")
+            self.assertEqual(controller.transport("play_pause"), "Sonos playing")
+            self.assertEqual(controller.transport("previous"), "Previous Sonos track")
+            self.assertEqual(controller.transport("next"), "Next Sonos track")
+            self.assertEqual(front.transport_calls, ["pause", "play", "previous", "next"])
             self.assertEqual(controller.select("Solo"), "Solo")
             self.assertEqual(store.get("sonos_device"), "Solo")
+
+    def test_invalid_transport_action_fails_before_discovery(self):
+        controller = dashboard.SonosController(
+            dashboard.StateStore("/dev/null"),
+            discover_func=lambda timeout: self.fail("discovery should not run"),
+        )
+        with self.assertRaisesRegex(ValueError, "unknown Sonos transport action"):
+            controller.transport("shuffle")
 
 
 class ConnectivityMonitorTests(unittest.TestCase):
@@ -190,6 +244,8 @@ class ConnectivityMonitorTests(unittest.TestCase):
         self.assertEqual(status["router"]["mode"], "clientwan")
         self.assertEqual(status["ubnt"]["ssid"], "denlink")
         self.assertFalse(status["stale"])
+        monitor.request_refresh()
+        self.assertTrue(monitor.refresh_event.is_set())
 
 
 class TuyaSwitchManagerTests(unittest.TestCase):
@@ -433,6 +489,11 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertNotIn(b">Internet Connectivity<", page.data)
         self.assertNotIn(b">Reachable<", page.data)
         self.assertIn(b"Run speed test", page.data)
+        self.assertIn(b'id="sonos-track"', page.data)
+        self.assertIn(b'data-transport="play_pause"', page.data)
+        self.assertIn(b"Group volume", page.data)
+        self.assertIn(b"data-group-mute", page.data)
+        self.assertIn(b"data-speaker-mute", page.data)
         self.assertIn(b"bookUrl.port='8787'", page.data)
         manifest = client.get("/manifest.webmanifest")
         self.assertEqual(manifest.status_code, 200)
@@ -442,10 +503,45 @@ class DashboardRouteTests(unittest.TestCase):
         client = dashboard.app.test_client()
         connectivity = client.get("/api/connectivity")
         self.assertEqual(connectivity.status_code, 200)
+        self.assertEqual(connectivity.headers["Cache-Control"], "no-store")
         self.assertIn("router", connectivity.json["connectivity"])
         speedtest = client.get("/api/speedtest")
         self.assertEqual(speedtest.status_code, 200)
         self.assertIn(speedtest.json["speedtest"]["status"], ("idle", "complete", "error"))
+
+    def test_sonos_transport_volume_and_mute_routes(self):
+        front = FakeSpeaker("Front", 28, "PLAYING")
+        with tempfile.TemporaryDirectory() as tempdir:
+            original = dashboard.sonos
+            dashboard.sonos = dashboard.SonosController(
+                dashboard.StateStore(os.path.join(tempdir, "state.json")),
+                discover_func=lambda timeout: {front},
+            )
+            try:
+                client = dashboard.app.test_client()
+                transport = client.post(
+                    "/api/speakers/transport", data={"action": "play_pause"}
+                )
+                group_volume = client.post(
+                    "/api/speakers/group-volume", data={"volume": "74"}
+                )
+                group_mute = client.post(
+                    "/api/speakers/group-mute", data={"muted": "true"}
+                )
+                speaker_mute = client.post(
+                    "/api/speakers/mute", data={"name": "Front", "muted": "true"}
+                )
+            finally:
+                dashboard.sonos = original
+
+        self.assertEqual(transport.status_code, 200)
+        self.assertEqual(front.transport_calls, ["pause"])
+        self.assertEqual(group_volume.json["volume"], 74)
+        self.assertEqual(front.group.volume, 74)
+        self.assertTrue(group_mute.json["muted"])
+        self.assertTrue(front.group.mute)
+        self.assertTrue(speaker_mute.json["muted"])
+        self.assertTrue(front.mute)
 
     def test_cop_alert_rejects_ambiguous_input_without_side_effects(self):
         client = dashboard.app.test_client()

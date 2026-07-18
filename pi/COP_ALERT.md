@@ -37,6 +37,11 @@ thread every 30 seconds and serves cached results through
 path, and command paths can be overridden with the collector's
 `CONNECTIVITY_*` environment variables.
 
+The page reads that cache every 10 seconds with browser caching disabled. It
+also reads immediately when a suspended tab becomes visible or focused, and a
+Starlink power change wakes the background collector without running router or
+UBNT commands in the HTTP request thread.
+
 The speed-test button starts `/home/pi/scripts/speedtest.sh` in a separate
 thread. Only one test can run at a time; `POST /api/speedtest` returns
 immediately, while `GET /api/speedtest` reports progress and the eventual
@@ -55,6 +60,13 @@ returns the tile to grey.
 The same neutral/failed/live color convention applies to dashboard status
 icons: grey means no data yet, red means confirmed down or failed, and green
 means confirmed active or reachable.
+
+## Sonos controls
+
+The Sonos tile follows the selected group's coordinator and shows the current
+track, artist, and play/pause/previous/next controls. Its speaker sheet keeps
+the existing group-selection checkboxes and adds native Sonos group volume,
+whole-group mute, individual volume, and individual mute controls.
 
 ## COP ALERT behavior
 
