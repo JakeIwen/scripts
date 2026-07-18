@@ -243,7 +243,7 @@ mount_drives() {
     return 1
   else
     /home/pi/scripts/umount_disks.sh --clear-spindown-state || return 1
-    . /home/pi/scripts/mount_disks.sh
+    /home/pi/scripts/mount_disks.sh || return 1
     sleep 3
     echo "drives mounted. starting smb share."
     start_service smbd 

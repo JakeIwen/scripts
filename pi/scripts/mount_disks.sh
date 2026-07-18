@@ -3,6 +3,7 @@
 # Set by md_resolve_label on success.
 MD_DEVICE=""
 MD_LABEL_KEY=""
+MD_MOUNT_SOURCE=""
 
 md_query_token() {
   local token="$1"
@@ -119,10 +120,109 @@ md_parent_disk() {
   printf '%s\n' "$disks"
 }
 
+md_canonical_path() {
+  /usr/bin/readlink -f -- "$1"
+}
+
+# Return the one source mounted at exactly this path.  Unlike findmnt -T, -M
+# does not mistake the root filesystem containing an unmounted directory for a
+# mount on that directory.  Returns 0 for one mount, 1 for no mount, and 2 when
+# the state cannot be determined safely.
+md_find_exact_mount_source() {
+  local pth="$1"
+  local output
+  local status
+  local count
+
+  MD_MOUNT_SOURCE=""
+  output="$(/usr/bin/findmnt -rn -M "$pth" -o SOURCE 2>&1)"
+  status=$?
+  if (( status == 1 )) && [[ -z "$output" ]]; then
+    return 1
+  elif (( status != 0 )); then
+    echo "ERROR: cannot determine whether $pth is a mount point (findmnt status $status)" >&2
+    return 2
+  fi
+
+  count="$(printf '%s\n' "$output" | /usr/bin/awk 'NF { count++ } END { print count + 0 }')"
+  if (( count != 1 )); then
+    echo "ERROR: expected one source mounted at $pth, found $count; refusing" >&2
+    return 2
+  fi
+
+  MD_MOUNT_SOURCE="$(printf '%s\n' "$output" | /usr/bin/awk 'NF { print; exit }')"
+  return 0
+}
+
+# Determine whether the exact target is free, already has the intended device,
+# or is occupied by something unsafe.  In particular, a /dev path which no
+# longer exists is a stale kernel mount, not evidence that the replacement
+# device is mounted correctly.
+#
+# Returns 0 when the intended device is already mounted, 1 when the target is
+# unmounted and available for further checks, and 2 on an unsafe/unknown state.
+md_check_existing_mount() {
+  local label="$1"
+  local pth="$2"
+  local device="$3"
+  local status
+  local source
+  local resolved_source
+
+  md_find_exact_mount_source "$pth"
+  status=$?
+  (( status == 1 )) && return 1
+  (( status == 0 )) || return 2
+
+  source="$MD_MOUNT_SOURCE"
+  resolved_source="$(md_canonical_path "$source" 2>/dev/null)"
+  if [[ -n "$resolved_source" && "$resolved_source" == "$device" ]]; then
+    echo "already mounted for: $label ($device)"
+    return 0
+  fi
+
+  if [[ "$source" == /dev/* && ( -z "$resolved_source" || ! -b "$resolved_source" ) ]]; then
+    echo "ERROR: stale mount at $pth still refers to vanished source $source; exact label '$label' now resolves to $device; refusing" >&2
+  else
+    echo "ERROR: $pth is mounted from unexpected source $source; exact label '$label' resolves to $device; refusing" >&2
+  fi
+  return 2
+}
+
+md_first_mount_dir_entry() {
+  /usr/bin/timeout 5 /usr/bin/find "$1" -mindepth 1 -maxdepth 1 -print -quit
+}
+
+md_require_empty_mount_dir() {
+  local pth="$1"
+  local first_entry
+  local status
+
+  if [[ ! -d "$pth" ]]; then
+    echo "ERROR: mount target is not a directory: $pth" >&2
+    return 1
+  fi
+
+  # A healthy local mount directory should answer immediately.  The timeout
+  # also fails closed if a broken mount appears during the validation race.
+  first_entry="$(md_first_mount_dir_entry "$pth" 2>/dev/null)"
+  status=$?
+  if (( status != 0 )); then
+    echo "ERROR: cannot verify that the underlying mount directory $pth is empty (status $status); refusing" >&2
+    return 1
+  fi
+  if [[ -n "$first_entry" ]]; then
+    echo "ERROR: underlying mount directory $pth is not empty; preserving its contents and refusing to mount over them" >&2
+    return 1
+  fi
+  return 0
+}
+
 mntdsk() {
   local label="$1"
   local pth="/mnt/$label"
   local resolve_status
+  local status
   local device
   local label_key
   local mount_targets
@@ -146,13 +246,18 @@ mntdsk() {
   device="$MD_DEVICE"
   label_key="$MD_LABEL_KEY"
 
-  mount_targets="$(/usr/bin/findmnt -rn -S "$device" -o TARGET)"
-  if [[ -n "$mount_targets" ]]; then
-    if [[ "$mount_targets" == "$pth" ]]; then
-      echo "already mounted for: $label ($device)"
-      return 0
-    fi
+  md_check_existing_mount "$label" "$pth" "$device"
+  status=$?
+  (( status == 0 )) && return 0
+  (( status == 1 )) || return 1
+
+  mount_targets="$(/usr/bin/findmnt -rn -S "$device" -o TARGET 2>&1)"
+  status=$?
+  if (( status == 0 )); then
     echo "ERROR: $device is already mounted somewhere other than $pth: $mount_targets" >&2
+    return 1
+  elif (( status != 1 )) || [[ -n "$mount_targets" ]]; then
+    echo "ERROR: cannot determine whether $device is already mounted (findmnt status $status)" >&2
     return 1
   fi
 
@@ -190,11 +295,12 @@ mntdsk() {
   fi
 
   /usr/bin/sudo /usr/bin/install -d -m 0777 -o pi -g pi -- "$pth" || return 1
-  mounted_target="$(/usr/bin/findmnt -rn -T "$pth" -o TARGET 2>/dev/null)"
-  if [[ "$mounted_target" == "$pth" ]]; then
-    echo "ERROR: $pth became a mount point before mounting $device; refusing" >&2
-    return 1
-  fi
+  md_check_existing_mount "$label" "$pth" "$device"
+  status=$?
+  (( status == 0 )) && return 0
+  (( status == 1 )) || return 1
+
+  md_require_empty_mount_dir "$pth" || return 1
 
   # Close the discovery-to-mount race by checking the selected exact label again.
   actual_label="$(/usr/bin/sudo /sbin/blkid -s "$label_key" -o value -- "$device")"
@@ -203,11 +309,19 @@ mntdsk() {
     return 1
   fi
 
+  # Recheck after examining the underlying directory so another mount cannot
+  # silently become an underlay between validation and the mount command.
+  md_check_existing_mount "$label" "$pth" "$device"
+  status=$?
+  (( status == 0 )) && return 0
+  (( status == 1 )) || return 1
+
   echo "mounting exact $label_key '$label' from $device at $pth"
   /usr/bin/sudo /usr/bin/mount -t "$fstype" "${mount_opts[@]}" -- "$device" "$pth" || return 1
 
-  mounted_target="$(/usr/bin/findmnt -rn -S "$device" -o TARGET)"
-  if [[ "$mounted_target" != "$pth" ]]; then
+  mounted_target="$(/usr/bin/findmnt -rn -S "$device" -o TARGET 2>&1)"
+  status=$?
+  if (( status != 0 )) || [[ "$mounted_target" != "$pth" ]]; then
     echo "ERROR: mount command succeeded but $device is not mounted at $pth" >&2
     return 1
   fi
@@ -238,33 +352,69 @@ rm_mnt_dir() { # prevent Time Machine from backing up onto SD card etc
   [[ -d "/mnt/$diskdir" ]] || return 0
   echo "removing empty mount dir because no exact label is attached: /mnt/$diskdir"
   # rmdir only: a decoy dir is always empty; anything non-empty is real data
-  /usr/bin/rmdir -- "/mnt/$diskdir" \
-    || echo "ERROR: /mnt/$diskdir has contents, refusing to delete"
+  if ! /usr/bin/rmdir -- "/mnt/$diskdir"; then
+    echo "ERROR: /mnt/$diskdir has contents, refusing to delete" >&2
+    return 1
+  fi
+  return 0
 }
 
-if [[ "$#" = "1" ]]; then
-  mntdsk "$1"
-elif [[ "$#" = "0" ]]; then # used by minutely cron job
-  rm_dirs=(mbp1tbkup mbp2tbkup)
-  for dir in "${rm_dirs[@]}"; do
-    rm_mnt_dir "$dir"
-  done
+md_fix_hfs_mounts() {
+  if [[ ! -r /home/pi/scripts/fix_hfs_fs.sh ]]; then
+    echo "ERROR: cannot read /home/pi/scripts/fix_hfs_fs.sh" >&2
+    return 1
+  fi
+  # shellcheck source=fix_hfs_fs.sh
+  . /home/pi/scripts/fix_hfs_fs.sh
+}
 
-  disks=(movingparts mbp1tbkup mbp2tbkup hfs2tb usbext EXFAT512)
+md_print_mounts() {
+  echo "mounted disks:"
+  /usr/bin/grep "dev/sd" /proc/mounts || true
+}
 
-  for disk in "${disks[@]}"; do
-    mntdsk "$disk"
-  done
-  # mntdsk mbbackup
-  # mntdsk bigboi
+mount_disks_main() {
+  local had_failure=0
+  local dir
+  local disk
+  local -a rm_dirs=(mbp1tbkup mbp2tbkup)
+  local -a disks=(movingparts mbp1tbkup mbp2tbkup hfs2tb usbext EXFAT512)
 
+  if (( $# == 1 )); then
+    mntdsk "$1" || had_failure=1
+  elif (( $# == 0 )); then # used by the minutely policy job
+    for dir in "${rm_dirs[@]}"; do
+      rm_mnt_dir "$dir" || had_failure=1
+    done
+
+    # Reconcile every label, but remember any unsafe result so a later missing
+    # optional disk cannot overwrite an earlier failure status.
+    for disk in "${disks[@]}"; do
+      mntdsk "$disk" || had_failure=1
+    done
+    # mntdsk mbbackup
+    # mntdsk bigboi
+  else
+    echo "usage: ${0##*/} [label]" >&2
+    return 2
+  fi
+
+  md_fix_hfs_mounts || had_failure=1
+  md_print_mounts
+  (( had_failure == 0 ))
+}
+
+# Source mode remains supported for existing interactive helpers.  Tests can
+# request definitions only without performing live disk operations.
+if [[ "${MOUNT_DISKS_LIBRARY_ONLY:-0}" != 1 ]]; then
+  mount_disks_main "$@"
+  mount_disks_rc=$?
+  if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    exit "$mount_disks_rc"
+  else
+    return "$mount_disks_rc"
+  fi
 fi
-
-
-. /home/pi/scripts/fix_hfs_fs.sh 
-
-echo "mounted disks:"
-/usr/bin/grep "dev/sd" /proc/mounts
 
 # 
 # 
