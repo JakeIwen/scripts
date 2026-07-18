@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import tempfile
 import threading
 import unittest
@@ -310,6 +311,93 @@ class TuyaSwitchManagerTests(unittest.TestCase):
             switch.toggle()
 
 
+class StoragePolicyManagerTests(unittest.TestCase):
+    POLICY = {
+        "version": 1,
+        "disks_enabled": True,
+        "torrents_enabled": True,
+        "allow_starlink_torrents": False,
+    }
+
+    def test_parses_only_the_exact_v1_boolean_schema(self):
+        self.assertEqual(
+            dashboard.StoragePolicyManager.parse_status(json.dumps(self.POLICY)),
+            self.POLICY,
+        )
+        invalid_values = (
+            "not-json",
+            json.dumps({**self.POLICY, "version": 2}),
+            json.dumps({**self.POLICY, "disks_enabled": 1}),
+            json.dumps({**self.POLICY, "unexpected": False}),
+        )
+        for value in invalid_values:
+            with self.subTest(value=value):
+                with self.assertRaises(dashboard.PolicyCommandError):
+                    dashboard.StoragePolicyManager.parse_status(value)
+
+    def test_each_update_uses_fixed_argv_and_refreshes_status(self):
+        cases = (
+            ("disks_enabled", "disks", False),
+            ("torrents_enabled", "torrents", False),
+            ("allow_starlink_torrents", "starlink-torrents", True),
+        )
+        for field, target, enabled in cases:
+            with self.subTest(field=field):
+                calls = []
+                policy = dict(self.POLICY)
+
+                def command(args, timeout):
+                    calls.append((list(args), timeout))
+                    if args[1:3] == ["--json", target]:
+                        policy[field] = args[3] == "on"
+                    return SimpleNamespace(
+                        returncode=0, stdout=json.dumps(policy), stderr=""
+                    )
+
+                manager = dashboard.StoragePolicyManager(command=command, timeout=7)
+                self.assertEqual(manager.update(field, enabled), policy)
+                self.assertEqual(
+                    calls,
+                    [
+                        (
+                            [
+                                dashboard.POLICYCTL,
+                                "--json",
+                                target,
+                                "on" if enabled else "off",
+                            ],
+                            7,
+                        ),
+                        ([dashboard.POLICYCTL, "--json", "status"], 7),
+                    ],
+                )
+
+    def test_rejects_unknown_fields_and_non_boolean_values(self):
+        manager = dashboard.StoragePolicyManager(
+            command=lambda args, timeout: self.fail("policyctl must not run")
+        )
+        with self.assertRaises(ValueError):
+            manager.update("shell_command", True)
+        with self.assertRaises(ValueError):
+            manager.update("disks_enabled", "true")
+
+    def test_subprocess_failure_and_timeout_are_bounded_errors(self):
+        failed = dashboard.StoragePolicyManager(
+            command=lambda args, timeout: SimpleNamespace(
+                returncode=1, stdout="", stderr="policy unavailable"
+            )
+        )
+        with self.assertRaisesRegex(dashboard.PolicyCommandError, "policy unavailable"):
+            failed.status()
+
+        def timeout(args, timeout):
+            raise subprocess.TimeoutExpired(args, timeout)
+
+        timed_out = dashboard.StoragePolicyManager(command=timeout, timeout=4)
+        with self.assertRaisesRegex(dashboard.PolicyCommandError, "timed out after 4"):
+            timed_out.status()
+
+
 class SpeedTestManagerTests(unittest.TestCase):
     def test_parser_accepts_existing_speedtest_script_output(self):
         output = "Download Speed: 42.75 Mbps\nUpload Speed:   8.5 Mbps\nLatency:        37.2 ms\n"
@@ -522,6 +610,15 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"Group volume", page.data)
         self.assertIn(b"data-group-mute", page.data)
         self.assertIn(b"data-speaker-mute", page.data)
+        self.assertIn(b"Storage &amp; Torrents", page.data)
+        self.assertIn(b'data-policy-field="disks_enabled"', page.data)
+        self.assertIn(b'data-policy-field="torrents_enabled"', page.data)
+        self.assertIn(b'data-policy-field="allow_starlink_torrents"', page.data)
+        self.assertIn(b"Ignition always overrides disk permission", page.data)
+        self.assertIn(b"Disabling disks also stops torrents", page.data)
+        self.assertIn(
+            b"Starlink torrenting requires both Torrents enabled", page.data
+        )
         self.assertIn(b"bookUrl.port='8787'", page.data)
         manifest = client.get("/manifest.webmanifest")
         self.assertEqual(manifest.status_code, 200)
@@ -536,6 +633,97 @@ class DashboardRouteTests(unittest.TestCase):
         speedtest = client.get("/api/speedtest")
         self.assertEqual(speedtest.status_code, 200)
         self.assertIn(speedtest.json["speedtest"]["status"], ("idle", "complete", "error"))
+
+    def test_storage_policy_get_update_and_input_rejection(self):
+        policy = {
+            "version": 1,
+            "disks_enabled": True,
+            "torrents_enabled": True,
+            "allow_starlink_torrents": False,
+        }
+        calls = []
+
+        def command(args, timeout):
+            calls.append(list(args))
+            if args == [dashboard.POLICYCTL, "--json", "torrents", "off"]:
+                policy["torrents_enabled"] = False
+            return SimpleNamespace(returncode=0, stdout=json.dumps(policy), stderr="")
+
+        original = dashboard.storage_policy
+        dashboard.storage_policy = dashboard.StoragePolicyManager(command=command)
+        try:
+            client = dashboard.app.test_client()
+            status = client.get("/api/storage-policy")
+            updated = client.post(
+                "/api/storage-policy",
+                data={"field": "torrents_enabled", "value": "false"},
+            )
+            unknown_field = client.post(
+                "/api/storage-policy",
+                data={"field": "command", "value": "true"},
+            )
+            unknown_value = client.post(
+                "/api/storage-policy",
+                data={"field": "disks_enabled", "value": "toggle"},
+            )
+            extra_input = client.post(
+                "/api/storage-policy",
+                data={"field": "disks_enabled", "value": "true", "extra": "x"},
+            )
+            duplicate_input = client.post(
+                "/api/storage-policy",
+                data={"field": ["disks_enabled", "torrents_enabled"], "value": "true"},
+            )
+        finally:
+            dashboard.storage_policy = original
+
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.json["policy"]["version"], 1)
+        self.assertEqual(updated.status_code, 200)
+        self.assertFalse(updated.json["policy"]["torrents_enabled"])
+        self.assertEqual(unknown_field.status_code, 400)
+        self.assertEqual(unknown_value.status_code, 400)
+        self.assertEqual(extra_input.status_code, 400)
+        self.assertEqual(duplicate_input.status_code, 400)
+        self.assertEqual(
+            calls,
+            [
+                [dashboard.POLICYCTL, "--json", "status"],
+                [dashboard.POLICYCTL, "--json", "torrents", "off"],
+                [dashboard.POLICYCTL, "--json", "status"],
+            ],
+        )
+
+    def test_starlink_power_change_requests_policy_reconciliation(self):
+        events = []
+
+        class FakeStarlink:
+            def toggle(self):
+                events.append("toggle")
+                return {"state": "on", "available": True}
+
+        class FakeConnectivity:
+            def request_refresh(self):
+                events.append("connectivity")
+
+        def command(args, timeout):
+            events.append(list(args))
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        originals = (dashboard.starlink, dashboard.connectivity, dashboard.storage_policy)
+        dashboard.starlink = FakeStarlink()
+        dashboard.connectivity = FakeConnectivity()
+        dashboard.storage_policy = dashboard.StoragePolicyManager(command=command)
+        try:
+            response = dashboard.app.test_client().post("/api/starlink")
+        finally:
+            dashboard.starlink, dashboard.connectivity, dashboard.storage_policy = originals
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            events,
+            ["toggle", "connectivity", [dashboard.POLICYCTL, "reconcile"]],
+        )
 
     def test_sonos_transport_volume_and_mute_routes(self):
         front = FakeSpeaker("Front", 28, "PLAYING")

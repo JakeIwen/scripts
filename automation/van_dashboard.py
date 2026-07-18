@@ -43,6 +43,7 @@ TUYA_TOGGLE = os.environ.get("VAN_DASHBOARD_TUYA_TOGGLE", "/home/pi/scripts/tuya
 TUYA_STATUS = os.environ.get("VAN_DASHBOARD_TUYA_STATUS", "/home/pi/scripts/tuya_status.sh")
 NTFY_SEND = os.environ.get("VAN_DASHBOARD_NTFY_SEND", "/home/pi/scripts/ntfy_send.sh")
 TUYA_LIGHT = os.environ.get("VAN_DASHBOARD_TUYA_LIGHT", "/home/pi/scripts/tuya_light.sh")
+POLICYCTL = "/home/pi/scripts/policyctl"
 CONNECTIVITY_STATUS = os.environ.get(
     "VAN_DASHBOARD_CONNECTIVITY_STATUS", "/home/pi/scripts/connectivity_status.py"
 )
@@ -52,6 +53,7 @@ SPEEDTEST = os.path.expanduser(
 CONNECTIVITY_INTERVAL = float(os.environ.get("VAN_DASHBOARD_CONNECTIVITY_INTERVAL", "30"))
 SPEEDTEST_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_SPEEDTEST_TIMEOUT", "180"))
 TUYA_POLL_INTERVAL = float(os.environ.get("VAN_DASHBOARD_TUYA_POLL_INTERVAL", "15"))
+POLICYCTL_TIMEOUT = 15
 COP_LED_TARGET = os.environ.get("VAN_DASHBOARD_COP_LED_TARGET", "light.ext_led")
 # Captured from solder_led on 2026-07-18. COP ALERT deliberately uses this
 # fixed look; it does not query or depend on solder_led at activation time.
@@ -890,6 +892,74 @@ class TuyaSwitchManager:
             self.stop_event.wait(max(1.0, self.interval))
 
 
+class PolicyCommandError(RuntimeError):
+    pass
+
+
+class StoragePolicyManager:
+    """Strict policyctl boundary for requested storage and torrent settings."""
+
+    TARGETS = {
+        "disks_enabled": "disks",
+        "torrents_enabled": "torrents",
+        "allow_starlink_torrents": "starlink-torrents",
+    }
+    STATUS_FIELDS = {"version", *TARGETS}
+
+    def __init__(self, command=run_command, timeout=POLICYCTL_TIMEOUT):
+        self.command = command
+        self.timeout = timeout
+
+    @classmethod
+    def parse_status(cls, output):
+        try:
+            status = json.loads(output)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise PolicyCommandError(f"policyctl returned invalid JSON: {exc}") from exc
+        if not isinstance(status, dict) or set(status) != cls.STATUS_FIELDS:
+            raise PolicyCommandError("policyctl returned an unexpected status schema")
+        if type(status["version"]) is not int or status["version"] != 1:
+            raise PolicyCommandError("policyctl returned an unsupported policy version")
+        for field in cls.TARGETS:
+            if type(status[field]) is not bool:
+                raise PolicyCommandError(f"policyctl field {field} was not boolean")
+        return status
+
+    def _run(self, args, expect_json):
+        try:
+            result = self.command(args, timeout=self.timeout)
+        except subprocess.TimeoutExpired as exc:
+            raise PolicyCommandError(
+                f"policyctl timed out after {self.timeout:g} seconds"
+            ) from exc
+        except OSError as exc:
+            raise PolicyCommandError(f"could not start policyctl: {exc}") from exc
+        if result.returncode:
+            detail = (result.stderr or result.stdout or "policyctl failed").strip()
+            raise PolicyCommandError(detail[-300:])
+        return self.parse_status(result.stdout) if expect_json else None
+
+    def status(self):
+        return self._run([POLICYCTL, "--json", "status"], expect_json=True)
+
+    def update(self, field, enabled):
+        target = self.TARGETS.get(field)
+        if target is None:
+            raise ValueError("unknown policy field")
+        if type(enabled) is not bool:
+            raise ValueError("policy value must be boolean")
+        requested = self._run(
+            [POLICYCTL, "--json", target, "on" if enabled else "off"],
+            expect_json=True,
+        )
+        if requested[field] is not enabled:
+            raise PolicyCommandError(f"policyctl did not confirm {field}")
+        return self.status()
+
+    def reconcile(self):
+        self._run([POLICYCTL, "reconcile"], expect_json=False)
+
+
 class SonosController:
     """Small Sonos grouping/volume controller matching the audiobook page."""
 
@@ -1314,6 +1384,7 @@ sonos = SonosController(state_store)
 connectivity = ConnectivityMonitor()
 speedtest = SpeedTestManager()
 starlink = TuyaSwitchManager("starlink")
+storage_policy = StoragePolicyManager()
 
 
 def api_error(message, status):
@@ -1370,6 +1441,13 @@ def api_starlink():
     except RuntimeError as exc:
         return api_error(exc, 502)
     connectivity.request_refresh()
+    try:
+        storage_policy.reconcile()
+    except PolicyCommandError as exc:
+        return api_error(
+            f"Starlink power changed, but torrent policy reconciliation failed: {exc}",
+            502,
+        )
     return jsonify(
         {
             "ok": True,
@@ -1377,6 +1455,44 @@ def api_starlink():
             "starlink": status,
         }
     )
+
+
+@app.route("/api/storage-policy", methods=["GET", "POST"])
+def api_storage_policy():
+    if request.method == "POST":
+        expected_form = {"field", "value"}
+        if set(request.form) != expected_form or any(
+            len(request.form.getlist(name)) != 1 for name in expected_form
+        ):
+            return api_error("storage policy requires field and boolean value", 400)
+        field = request.form.get("field", "")
+        raw_value = request.form.get("value", "").lower()
+        if field not in StoragePolicyManager.TARGETS:
+            return api_error("unknown storage policy field", 400)
+        if raw_value not in ("true", "false"):
+            return api_error("storage policy value must be true or false", 400)
+        try:
+            status = storage_policy.update(field, raw_value == "true")
+        except PolicyCommandError as exc:
+            return api_error(f"could not update storage policy: {exc}", 502)
+        label = {
+            "disks_enabled": "Disks",
+            "torrents_enabled": "Torrents",
+            "allow_starlink_torrents": "Starlink torrents",
+        }[field]
+        state = "enabled" if status[field] else "disabled"
+        return jsonify(
+            {
+                "ok": True,
+                "message": f"{label} {state}",
+                "policy": status,
+            }
+        )
+    try:
+        status = storage_policy.status()
+    except PolicyCommandError as exc:
+        return api_error(f"could not read storage policy: {exc}", 502)
+    return jsonify({"ok": True, "policy": status})
 
 
 @app.route("/api/connectivity")
@@ -1575,6 +1691,7 @@ h1{font-size:29px;line-height:1.05;letter-spacing:-.03em;margin:3px 0 0}.van-mar
 .sonos-tile{cursor:default;min-height:194px;overflow:hidden;background-position:center;background-size:cover}.sonos-tile:active{transform:none}.sonos-tile.has-art{box-shadow:inset 0 0 0 1px #ffffff0a,var(--shadow)}.sonos-tile.has-art .now-playing strong,.sonos-tile.has-art .now-playing span{text-shadow:0 1px 4px #000}.sonos-head{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px}.sonos-open{min-width:0;max-width:68%;display:flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:9px;background:#10171dcc;color:var(--dim);padding:5px 8px;font-size:10px;cursor:pointer}.sonos-open span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .now-playing{width:100%;min-width:0;margin-top:13px}.now-playing strong,.now-playing span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.now-playing strong{font-size:15px;color:var(--ink)}.now-playing span{font-size:11px;color:var(--dim);margin-top:2px}.transport{display:flex;align-items:center;justify-content:space-between;width:100%;margin-top:auto;padding-top:12px}.transport-button{width:46px;height:36px;border:0;border-radius:10px;background:transparent;color:#dce8ed;font-size:22px;line-height:1;cursor:pointer}.transport-button:active{background:#ffffff12;transform:scale(.95)}.transport-button.play{font-size:28px}
 .sonos-progress{width:100%;height:4px;margin-top:9px;border-radius:99px;background:#dce8ed42;overflow:hidden}.sonos-progress[hidden]{display:none}.sonos-progress-fill{display:block;width:0;height:100%;border-radius:inherit;background:#e6f0f3;transition:width .8s linear}
+.storage-tile .tile-icon{font-size:34px}.storage-tile .tile-detail{min-height:0}.policy-sheet{padding-bottom:calc(24px + env(safe-area-inset-bottom))}.policy-controls{display:grid;gap:9px;margin:14px 0}.policy-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;gap:14px;border:1px solid var(--line);border-radius:14px;background:#19252e;color:var(--ink);padding:13px;text-align:left;cursor:pointer}.policy-toggle strong{display:block;font-size:13px}.policy-toggle small{display:block;color:var(--dim);font-size:10px;margin-top:2px}.policy-toggle:disabled{cursor:default;opacity:.68}.policy-state{display:flex;align-items:center;gap:7px;flex:0 0 auto;border:1px solid #46545c;border-radius:99px;padding:5px 8px;color:var(--dim);font-size:9px;font-weight:800;letter-spacing:.08em}.policy-state::before{content:"";width:9px;height:9px;border-radius:50%;background:#71818a}.policy-toggle.on .policy-state{border-color:#39725b;color:#bcebd5}.policy-toggle.on .policy-state::before{background:var(--good)}.policy-toggle.off .policy-state{border-color:#754743;color:#f2b5b0}.policy-toggle.off .policy-state::before{background:var(--bad)}.policy-notes{margin:15px 4px 2px;padding-left:18px;color:var(--dim);font-size:11px}.policy-notes li+li{margin-top:6px}.policy-sheet-status{color:var(--dim);font-size:10px;margin-left:auto}
 .connectivity{margin-top:11px;border:1px solid var(--line);border-radius:19px;background:linear-gradient(145deg,var(--panel),#151f28);padding:15px;box-shadow:0 8px 28px #050b102e}
 .connectivity-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:13px}.connectivity-head h2{font-size:17px;margin:0;letter-spacing:-.01em}
 .connectivity-age{color:var(--dim);font-size:10px;text-align:right}.network-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0}
@@ -1632,6 +1749,9 @@ h1{font-size:29px;line-height:1.05;letter-spacing:-.03em;margin:3px 0 0}.van-mar
       </div>
       <div class="sonos-progress" id="sonos-progress" role="progressbar" aria-label="Track position" hidden><span class="sonos-progress-fill" id="sonos-progress-fill"></span></div>
     </section>
+    <button class="tile storage-tile" id="storage" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="storage-panel">
+      <span class="tile-icon" aria-hidden="true">💾</span><span class="tile-title">Storage &amp; Torrents</span><span class="tile-detail" id="storage-summary">Checking requested policy…</span>
+    </button>
   </div>
   <section class="connectivity" aria-labelledby="connectivity-title">
     <div class="connectivity-head"><h2 id="connectivity-title">Connectivity</h2><span class="connectivity-age" id="connectivity-age">Checking…</span></div>
@@ -1660,9 +1780,26 @@ h1{font-size:29px;line-height:1.05;letter-spacing:-.03em;margin:3px 0 0}.van-mar
     <div id="speaker-list"><div class="speaker-loading">Finding speakers…</div></div>
   </section>
 </div>
+<div class="speaker-backdrop" id="storage-backdrop">
+  <section class="speaker-sheet policy-sheet" id="storage-panel" role="dialog" aria-modal="true" aria-labelledby="storage-title" aria-busy="true">
+    <div class="sheet-grabber"></div><div class="sheet-head"><h2 id="storage-title">Storage &amp; Torrents</h2><span class="policy-sheet-status" id="storage-status">Checking…</span><button class="sheet-close" id="storage-close" aria-label="Close storage policy">&times;</button></div>
+    <p class="sheet-help">Requested policy; the reconciler applies it to current van conditions.</p>
+    <div class="policy-controls">
+      <button class="policy-toggle" data-action data-policy-field="disks_enabled" disabled aria-pressed="mixed"><span><strong>Disks enabled</strong><small>Permit mounted storage while conditions allow</small></span><span class="policy-state">NO DATA</span></button>
+      <button class="policy-toggle" data-action data-policy-field="torrents_enabled" disabled aria-pressed="mixed"><span><strong>Torrents enabled</strong><small>Global torrent permission</small></span><span class="policy-state">NO DATA</span></button>
+      <button class="policy-toggle" data-action data-policy-field="allow_starlink_torrents" disabled aria-pressed="mixed"><span><strong>Allow torrents on Starlink</strong><small>Additional permission for Starlink traffic</small></span><span class="policy-state">NO DATA</span></button>
+    </div>
+    <ul class="policy-notes">
+      <li>Ignition always overrides disk permission.</li>
+      <li>Disabling disks also stops torrents.</li>
+      <li>Allow torrents on Starlink does not override the global torrents switch.</li>
+      <li>Starlink torrenting requires both Torrents enabled and Allow torrents on Starlink.</li>
+    </ul>
+  </section>
+</div>
 <div id="toast" role="status" aria-live="polite"></div>
 <script>
-const $=id=>document.getElementById(id);let dashboard=null,speakers=null,busy=false,toastTimer=0,speedPoll=0,sonosTimeline={position:0,duration:0,playing:false,updatedAt:0};
+const $=id=>document.getElementById(id);let dashboard=null,speakers=null,storagePolicy=null,policyLoading=false,busy=false,toastTimer=0,speedPoll=0,sonosTimeline={position:0,duration:0,playing:false,updatedAt:0};
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function toast(message,bad=false){clearTimeout(toastTimer);const el=$('toast');el.textContent=message;el.className=bad?'show bad':'show';toastTimer=setTimeout(()=>el.className='',3400)}
 async function json(url,options){const response=await fetch(url,{cache:'no-store',...(options||{})});let data;try{data=await response.json()}catch(_){data={message:`Server returned ${response.status}`}}
@@ -1691,6 +1828,11 @@ function renderSpeedtest(response){const s=response.speedtest,button=$('speedtes
   else $('speed-results').innerHTML="<strong>Not run yet</strong>Uses vanpi's current route"}
 async function refreshSpeedtest(){clearTimeout(speedPoll);try{const response=await json('/api/speedtest');renderSpeedtest(response);if(response.speedtest.status==='running')speedPoll=setTimeout(refreshSpeedtest,1000)}catch(error){$('speed-results').innerHTML=`<strong>Speed test unavailable</strong>${esc(error.message)}`}}
 async function startSpeedtest(){if($('speedtest-button').disabled)return;$('speedtest-button').disabled=true;try{const response=await post('speedtest');renderSpeedtest(response);if(response.speedtest.status==='running')speedPoll=setTimeout(refreshSpeedtest,1000)}catch(error){toast(error.message,true);$('speedtest-button').disabled=false}}
+function setPolicyLoading(loading,label){policyLoading=loading;$('storage-panel').setAttribute('aria-busy',String(loading));$('storage-status').textContent=label||(loading?'Checking…':'Current request');document.querySelectorAll('[data-policy-field]').forEach(button=>button.disabled=loading||!storagePolicy);if(loading&&!storagePolicy)$('storage-summary').textContent=label||'Checking requested policy…'}
+function renderStoragePolicy(policy){storagePolicy=policy;const fields=[['disks_enabled','Disks'],['torrents_enabled','Torrents'],['allow_starlink_torrents','Starlink torrents']];for(const [field] of fields){const button=document.querySelector(`[data-policy-field="${field}"]`),enabled=policy[field]===true;button.classList.remove('on','off');button.classList.add(enabled?'on':'off');button.setAttribute('aria-pressed',String(enabled));button.querySelector('.policy-state').textContent=enabled?'ON':'OFF'}$('storage-summary').textContent=fields.map(([field,label])=>`${label} ${policy[field]?'on':'off'}`).join(' · ');setPolicyLoading(false,'Current request')}
+function renderStorageUnavailable(message){storagePolicy=null;$('storage-summary').textContent='Requested policy unavailable';$('storage-status').textContent=message||'Unavailable';$('storage-panel').setAttribute('aria-busy','false');document.querySelectorAll('[data-policy-field]').forEach(button=>{button.disabled=true;button.classList.remove('on','off');button.setAttribute('aria-pressed','mixed');button.querySelector('.policy-state').textContent='NO DATA'})}
+async function refreshStoragePolicy(){setPolicyLoading(true,'Checking…');try{const response=await json('/api/storage-policy');renderStoragePolicy(response.policy);return response}catch(error){renderStorageUnavailable(error.message);throw error}}
+async function changeStoragePolicy(field){if(policyLoading||!storagePolicy)return;const value=String(!storagePolicy[field]);let result,operationError;setPolicyLoading(true,'Applying…');try{result=await post('storage-policy',{field,value});renderStoragePolicy(result.policy)}catch(error){operationError=error}try{await refreshStoragePolicy()}catch(refreshError){if(!operationError)operationError=refreshError}if(operationError)throw operationError;return result}
 function renderStarlink(status){const state=status?.state||'unknown',known=state==='on'||state==='off',tile=$('starlink');tile.classList.remove('on','off','unknown');tile.classList.add(known?state:'unknown');networkState('starlink-dot',state==='on'?true:state==='off'?false:null);tile.disabled=!known||Boolean(status?.changing);tile.setAttribute('aria-pressed',known?String(state==='on'):'mixed');$('starlink-state').textContent=status?.changing?'WAIT':state==='on'?'ON':state==='off'?'OFF':'NO DATA';$('starlink-detail').textContent=status?.changing?'Changing power…':state==='on'?'Tuya switch is on':state==='off'?'Tuya switch is off':'Tuya status unavailable'}
 function updateStatus(data){dashboard=data.cop_alert;const active=dashboard.active,engine=dashboard.engine,led=data.cop_led||{};$('dot').classList.remove('bad');$('dot').classList.add('on');$('connection').textContent='Connected · vanpi dashboard';renderStarlink(data.starlink);
   $('cop').classList.toggle('active',active);$('cop').setAttribute('aria-pressed',String(active));$('cop-pill').textContent=active?'ACTIVE':'OFF';
@@ -1716,16 +1858,18 @@ async function refreshSonos(){try{return await loadSpeakers()}catch(error){$('sp
 async function openSpeakers(){$('speaker-backdrop').classList.add('open');document.body.classList.add('sheet-open');$('speakers').setAttribute('aria-expanded','true');
   try{await loadSpeakers()}catch(error){$('speaker-list').innerHTML=`<div class="speaker-loading">${esc(error.message)}</div>`;toast(error.message,true)}}
 function closeSpeakers(){$('speaker-backdrop').classList.remove('open');document.body.classList.remove('sheet-open');$('speakers').setAttribute('aria-expanded','false');$('speakers').focus()}
+async function openStorage(){$('storage-backdrop').classList.add('open');document.body.classList.add('sheet-open');$('storage').setAttribute('aria-expanded','true');try{await refreshStoragePolicy()}catch(error){toast(error.message,true)}}
+function closeStorage(){$('storage-backdrop').classList.remove('open');document.body.classList.remove('sheet-open');$('storage').setAttribute('aria-expanded','false');$('storage').focus()}
 const bookUrl=new URL(window.location.href);bookUrl.port='8787';bookUrl.pathname='/';bookUrl.search='';bookUrl.hash='';$('books').href=bookUrl.toString();
-$('cop').addEventListener('click',()=>action(()=>post('cop-alert',{active:dashboard?.active?'false':'true'})));$('starlink').addEventListener('click',()=>{renderStarlink({state:'unknown',changing:true});action(async()=>{const result=await post('starlink');await refreshConnectivity();return result})});$('speakers').addEventListener('click',openSpeakers);$('speaker-close').addEventListener('click',closeSpeakers);
+$('cop').addEventListener('click',()=>action(()=>post('cop-alert',{active:dashboard?.active?'false':'true'})));$('starlink').addEventListener('click',()=>{renderStarlink({state:'unknown',changing:true});action(async()=>{const result=await post('starlink');await refreshConnectivity();return result})});$('speakers').addEventListener('click',openSpeakers);$('speaker-close').addEventListener('click',closeSpeakers);$('storage').addEventListener('click',openStorage);$('storage-close').addEventListener('click',closeStorage);
 $('speedtest-button').addEventListener('click',startSpeedtest);
-$('speaker-backdrop').addEventListener('click',event=>{if(event.target===$('speaker-backdrop'))closeSpeakers()});document.addEventListener('keydown',event=>{if(event.key==='Escape')closeSpeakers()});
+$('speaker-backdrop').addEventListener('click',event=>{if(event.target===$('speaker-backdrop'))closeSpeakers()});$('storage-backdrop').addEventListener('click',event=>{if(event.target===$('storage-backdrop'))closeStorage()});document.addEventListener('keydown',event=>{if(event.key==='Escape'){if($('speaker-backdrop').classList.contains('open'))closeSpeakers();if($('storage-backdrop').classList.contains('open'))closeStorage()}});
 document.addEventListener('input',event=>{const slider=event.target.closest('[data-speaker-volume]');if(slider)slider.closest('.speaker-row').querySelector('.speaker-level').textContent=slider.value;const groupSlider=event.target.closest('[data-group-volume]');if(groupSlider)$('group-level').textContent=groupSlider.value});
 document.addEventListener('change',event=>{const checkbox=event.target.closest('[data-group-speaker]');if(checkbox)action(async()=>{try{return await post('speakers/group',{name:checkbox.dataset.groupSpeaker,grouped:checkbox.checked?'1':'0'})}finally{await loadSpeakers()}});
   const slider=event.target.closest('[data-speaker-volume]');if(slider)action(async()=>{try{return await post('speakers/volume',{name:slider.dataset.speakerVolume,volume:slider.value})}finally{await loadSpeakers()}});const groupSlider=event.target.closest('[data-group-volume]');if(groupSlider)action(async()=>{try{return await post('speakers/group-volume',{volume:groupSlider.value})}finally{await loadSpeakers()}})});
-document.addEventListener('click',event=>{const selected=event.target.closest('[data-select-speaker]');if(selected)action(async()=>{const result=await post('speakers/select',{name:selected.dataset.selectSpeaker});await loadSpeakers();return result});const transport=event.target.closest('[data-transport]');if(transport)action(async()=>{try{return await post('speakers/transport',{action:transport.dataset.transport})}finally{await loadSpeakers()}});const groupMute=event.target.closest('[data-group-mute]');if(groupMute)action(async()=>{try{return await post('speakers/group-mute',{muted:speakers?.group?.muted?'0':'1'})}finally{await loadSpeakers()}});const speakerMute=event.target.closest('[data-speaker-mute]');if(speakerMute)action(async()=>{const item=speakers?.speakers?.find(s=>s.name===speakerMute.dataset.speakerMute);try{return await post('speakers/mute',{name:speakerMute.dataset.speakerMute,muted:item?.muted?'0':'1'})}finally{await loadSpeakers()}})});
-function refreshVisibleDashboard(){if(document.hidden)return;refresh();refreshConnectivity();refreshSpeedtest();refreshSonos()}
-Promise.allSettled([refresh(),loadSpeakers(),refreshConnectivity(),refreshSpeedtest()]).then(results=>{if(results[1].status==='rejected')refreshSonos()});setInterval(()=>{if(!document.hidden)refresh()},5000);setInterval(()=>{if(!document.hidden)refreshConnectivity()},10000);setInterval(()=>{if(!document.hidden&&!busy)refreshSonos()},10000);setInterval(()=>{if(!document.hidden)updateSonosProgress()},1000);document.addEventListener('visibilitychange',refreshVisibleDashboard);window.addEventListener('pageshow',refreshVisibleDashboard);window.addEventListener('focus',refreshVisibleDashboard);
+document.addEventListener('click',event=>{const selected=event.target.closest('[data-select-speaker]');if(selected)action(async()=>{const result=await post('speakers/select',{name:selected.dataset.selectSpeaker});await loadSpeakers();return result});const transport=event.target.closest('[data-transport]');if(transport)action(async()=>{try{return await post('speakers/transport',{action:transport.dataset.transport})}finally{await loadSpeakers()}});const groupMute=event.target.closest('[data-group-mute]');if(groupMute)action(async()=>{try{return await post('speakers/group-mute',{muted:speakers?.group?.muted?'0':'1'})}finally{await loadSpeakers()}});const speakerMute=event.target.closest('[data-speaker-mute]');if(speakerMute)action(async()=>{const item=speakers?.speakers?.find(s=>s.name===speakerMute.dataset.speakerMute);try{return await post('speakers/mute',{name:speakerMute.dataset.speakerMute,muted:item?.muted?'0':'1'})}finally{await loadSpeakers()}});const policyButton=event.target.closest('[data-policy-field]');if(policyButton)action(()=>changeStoragePolicy(policyButton.dataset.policyField))});
+function refreshVisibleDashboard(){if(document.hidden)return;refresh();refreshConnectivity();refreshSpeedtest();refreshSonos();refreshStoragePolicy().catch(()=>{})}
+Promise.allSettled([refresh(),loadSpeakers(),refreshConnectivity(),refreshSpeedtest(),refreshStoragePolicy()]).then(results=>{if(results[1].status==='rejected')refreshSonos()});setInterval(()=>{if(!document.hidden)refresh()},5000);setInterval(()=>{if(!document.hidden)refreshConnectivity()},10000);setInterval(()=>{if(!document.hidden&&!busy)refreshSonos()},10000);setInterval(()=>{if(!document.hidden&&!busy)refreshStoragePolicy().catch(()=>{})},30000);setInterval(()=>{if(!document.hidden)updateSonosProgress()},1000);document.addEventListener('visibilitychange',refreshVisibleDashboard);window.addEventListener('pageshow',refreshVisibleDashboard);window.addEventListener('focus',refreshVisibleDashboard);
 </script></body></html>"""
 
 
