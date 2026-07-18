@@ -22,7 +22,7 @@ CONNECTED_UBNT = """ath0 IEEE 802.11ng ESSID:"profile-label"
  Mode:Managed Frequency:2.437 GHz Access Point: 00:11:22:33:44:55
  Bit Rate=65 Mb/s
  Link Quality=70/94 Signal level=-61 dBm Noise level=-96 dBm
-ccq=88
+ccq=881
 target_ssid=real-network
 """
 
@@ -47,7 +47,7 @@ class ConnectivityParserTests(unittest.TestCase):
         self.assertEqual(status["signal_dbm"], -61)
         self.assertEqual(status["noise_dbm"], -96)
         self.assertEqual(status["quality_percent"], 74)
-        self.assertEqual(status["ccq_percent"], 88)
+        self.assertEqual(status["ccq_percent"], 88.1)
         self.assertEqual(status["bitrate"], "65 Mb/s")
 
     def test_collector_reuses_mwan_state_and_passively_reads_ubnt(self):

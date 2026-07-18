@@ -107,6 +107,12 @@ def parse_ubnt_wireless(output):
     if bitrate_match:
         bitrate = f"{bitrate_match.group(1)} {bitrate_match.group(2)}"
 
+    # AirOS mca-status reports CCQ in tenths of a percent (991 means 99.1%).
+    ccq_raw = _number(r"^ccq=(-?\d+)", output)
+    ccq_percent = None
+    if ccq_raw is not None and 0 <= ccq_raw <= 1000:
+        ccq_percent = round(ccq_raw / 10, 1)
+
     return {
         "connected": connected,
         "ssid": ssid,
@@ -114,7 +120,7 @@ def parse_ubnt_wireless(output):
         "signal_dbm": _number(r"Signal level[=:]\s*(-?\d+)", output),
         "noise_dbm": _number(r"Noise level[=:]\s*(-?\d+)", output),
         "quality_percent": quality_percent,
-        "ccq_percent": _number(r"^ccq=(-?\d+)", output),
+        "ccq_percent": ccq_percent,
         "bitrate": bitrate,
         "frequency_ghz": _number(r"Frequency[=:]\s*([0-9.]+)\s*GHz", output, float),
     }
