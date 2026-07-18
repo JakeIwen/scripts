@@ -281,20 +281,20 @@ ud_parent_is_unmounted() {
 
 ud_kill_torrent_client() {
   local rc attempt
-  /usr/bin/pgrep -f '[q]bittorrent-nox' >/dev/null 2>&1
+  /usr/bin/pgrep -x qbittorrent-nox >/dev/null 2>&1
   rc=$?
   (( rc == 1 )) && return 0
   (( rc == 0 )) || return 1
 
   echo "asking qbittorrent-nox to stop"
-  /usr/bin/sudo /usr/bin/pkill -TERM -f '[q]bittorrent-nox'
+  /usr/bin/sudo /usr/bin/pkill -TERM -x qbittorrent-nox
   rc=$?
   (( rc <= 1 )) || return 1
 
   # This Pi's qBittorrent can need about 18 seconds to save state and exit.
   # Keep the stop graceful, but bound ignition shutdown at 30 seconds.
   for attempt in {1..30}; do
-    /usr/bin/pgrep -f '[q]bittorrent-nox' >/dev/null 2>&1
+    /usr/bin/pgrep -x qbittorrent-nox >/dev/null 2>&1
     rc=$?
     (( rc == 1 )) && return 0
     (( rc == 0 )) || return 1

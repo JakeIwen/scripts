@@ -11,6 +11,11 @@ ISW_NTFY_SEND=${ISW_NTFY_SEND:-/home/pi/scripts/ntfy_send.sh}
 ISW_POLICYCTL=${ISW_POLICYCTL:-/home/pi/scripts/policyctl}
 ISW_IGNITION_FLAG=${ISW_IGNITION_FLAG:-/home/pi/hooks/ignition_is_on}
 ISW_TUYA_STATUS=${ISW_TUYA_STATUS:-/home/pi/scripts/tuya_status.sh}
+ISW_PGREP=${ISW_PGREP:-/usr/bin/pgrep}
+ISW_PKILL=${ISW_PKILL:-/usr/bin/pkill}
+ISW_SLEEP=${ISW_SLEEP:-/usr/bin/sleep}
+ISW_QBIT_PROCESS=${ISW_QBIT_PROCESS:-qbittorrent-nox}
+ISW_QBIT_BINARY=${ISW_QBIT_BINARY:-/usr/bin/qbittorrent-nox}
 POLICY_DISKS_ENABLED=""
 POLICY_TORRENTS_ENABLED=""
 POLICY_ALLOW_STARLINK_TORRENTS=""
@@ -213,18 +218,52 @@ has_io_error() { ls -lah "$1" 2>&1 | grep -q 'Input/output error'; }
 # if has_io_error '/mnt/movingparts'; then echo 'i/o error'; fi
 
 kill_torrent_client() {
-  if [[ "$(ps ax)" == *"qbittorrent"* ]]; then echo 'killtorrent' && pkill -TERM qbittorrent; fi
-  sleep 2
-  if [[ "$(ps ax)" == *"qbittorrent"* ]]; then echo 'SECOND ATTEMPT killtorrent' && pkill -f qbittorrent; fi
-  sleep 2
+  local rc
+  local attempt
+
+  "$ISW_PGREP" -x "$ISW_QBIT_PROCESS" >/dev/null 2>&1
+  rc=$?
+  (( rc == 1 )) && return 0
+  if (( rc != 0 )); then
+    echo "ERROR: cannot inspect $ISW_QBIT_PROCESS processes (pgrep status $rc)" >&2
+    return 1
+  fi
+
+  echo "asking $ISW_QBIT_PROCESS to stop"
+  "$ISW_PKILL" -TERM -x "$ISW_QBIT_PROCESS"
+  rc=$?
+  (( rc <= 1 )) || return 1
+
+  # qBittorrent can need about 18 seconds to save state and exit. Keep the
+  # shutdown graceful, but do not let policy reconciliation wait forever.
+  for attempt in {1..30}; do
+    "$ISW_PGREP" -x "$ISW_QBIT_PROCESS" >/dev/null 2>&1
+    rc=$?
+    (( rc == 1 )) && return 0
+    if (( rc != 0 )); then
+      echo "ERROR: cannot verify $ISW_QBIT_PROCESS shutdown (pgrep status $rc)" >&2
+      return 1
+    fi
+    "$ISW_SLEEP" 1
+  done
+
+  echo "ERROR: $ISW_QBIT_PROCESS did not stop within 30 seconds" >&2
+  return 1
 }
 
 start_torrent_client() {
+  local rc
+
   if [[ "$(grep movingparts /proc/mounts)" ]]; then 
-    if ! pgrep qbittor >/dev/null; then
+    "$ISW_PGREP" -x "$ISW_QBIT_PROCESS" >/dev/null 2>&1
+    rc=$?
+    if (( rc == 1 )); then
       # Background only qbittorrent—not the surrounding conditional—and do
       # not let the long-lived client inherit fd 9 and hold our flock.
-      nohup qbittorrent-nox 9>&- &
+      /usr/bin/nohup "$ISW_QBIT_BINARY" 9>&- &
+    elif (( rc != 0 )); then
+      echo "ERROR: cannot inspect $ISW_QBIT_PROCESS processes (pgrep status $rc)" >&2
+      return 1
     fi
   else
     echo "preventing torrent-without-mpdisk"
@@ -268,7 +307,7 @@ start_service() {
 
 kill_all() {
   echo 'killing all'
-  kill_torrent_client
+  kill_torrent_client || return 1
   sleep 4
   unmount_drives
 }
