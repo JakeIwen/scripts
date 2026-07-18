@@ -53,7 +53,7 @@ TUYA_POLL_INTERVAL = float(os.environ.get("VAN_DASHBOARD_TUYA_POLL_INTERVAL", "1
 COP_LED_TARGET = os.environ.get("VAN_DASHBOARD_COP_LED_TARGET", "light.ext_led")
 # Captured from solder_led on 2026-07-18. COP ALERT deliberately uses this
 # fixed look; it does not query or depend on solder_led at activation time.
-COP_LED_BRIGHTNESS = 170
+COP_LED_BRIGHTNESS = 255
 COP_LED_COLOR_TEMP_KELVIN = 2702
 COP_LED_RETRY_INTERVAL = float(os.environ.get("VAN_DASHBOARD_COP_LED_RETRY_INTERVAL", "5"))
 COP_LED_VERIFY_INTERVAL = float(
