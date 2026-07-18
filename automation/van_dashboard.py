@@ -16,6 +16,7 @@ is shared with other vehicle tooling.
 """
 
 import copy
+import hashlib
 import json
 import os
 import re
@@ -25,6 +26,7 @@ import subprocess
 import threading
 import time
 from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
 
 from flask import Flask, jsonify, request
 
@@ -86,6 +88,8 @@ NTFY_INTERVAL = float(os.environ.get("VAN_DASHBOARD_NTFY_INTERVAL", "300"))
 FLOOD_CHECK_INTERVAL = float(os.environ.get("VAN_DASHBOARD_FLOOD_CHECK_INTERVAL", "15"))
 
 DEFAULT_SONOS_DEVICE = os.environ.get("VAN_DASHBOARD_SONOS_DEVICE", "vonFront")
+SONOS_ART_TIMEOUT = 5
+SONOS_ART_MAX_BYTES = 2 * 1024 * 1024
 
 
 def atomic_json_write(path, value):
@@ -889,10 +893,11 @@ class TuyaSwitchManager:
 class SonosController:
     """Small Sonos grouping/volume controller matching the audiobook page."""
 
-    def __init__(self, store, discover_func=None, clock=time.monotonic):
+    def __init__(self, store, discover_func=None, clock=time.monotonic, art_opener=None):
         self.store = store
         self.discover_func = discover_func
         self.clock = clock
+        self.art_opener = art_opener or urlopen
         self.lock = threading.Lock()
         self.zones = {}
         self.zones_at = 0.0
@@ -967,6 +972,7 @@ class SonosController:
             "position": track.get("position") or "",
             "duration": track.get("duration") or "",
             "transport_state": transport_state,
+            "album_art": self.album_art_path(track.get("album_art")),
         }
         speakers = []
         for name, zone in sorted(zones.items()):
@@ -995,6 +1001,47 @@ class SonosController:
             "now_playing": now_playing,
             "speakers": speakers,
         }
+
+    @staticmethod
+    def album_art_path(art_url):
+        if not isinstance(art_url, str) or not art_url:
+            return None
+        key = hashlib.sha256(art_url.encode("utf-8")).hexdigest()[:16]
+        return f"/api/speakers/art/{key}"
+
+    def album_art(self, key):
+        coordinator = self.coordinator()
+        track = coordinator.get_current_track_info() or {}
+        art_url = track.get("album_art")
+        if not art_url or self.album_art_path(art_url).rsplit("/", 1)[-1] != key:
+            raise KeyError("album art is no longer current")
+        parsed = urlsplit(art_url)
+        if (
+            parsed.scheme != "http"
+            or parsed.hostname != coordinator.ip_address
+            or parsed.port != 1400
+        ):
+            raise ValueError("Sonos returned an unexpected album-art URL")
+        request_object = Request(art_url, headers={"User-Agent": "van-dashboard/1"})
+        with self.art_opener(request_object, timeout=SONOS_ART_TIMEOUT) as response:
+            content = response.read(SONOS_ART_MAX_BYTES + 1)
+        if len(content) > SONOS_ART_MAX_BYTES:
+            raise ValueError("Sonos album art exceeded the size limit")
+        signatures = (
+            (b"\xff\xd8\xff", "image/jpeg"),
+            (b"\x89PNG\r\n\x1a\n", "image/png"),
+            (b"GIF87a", "image/gif"),
+            (b"GIF89a", "image/gif"),
+        )
+        content_type = next(
+            (mime for signature, mime in signatures if content.startswith(signature)),
+            None,
+        )
+        if content_type is None and content.startswith(b"RIFF") and content[8:12] == b"WEBP":
+            content_type = "image/webp"
+        if content_type is None:
+            raise ValueError("Sonos album art was not a supported image")
+        return content, content_type
 
     def select(self, name):
         zones = self.get_zones()
@@ -1467,6 +1514,21 @@ def api_speaker_transport():
     return jsonify({"ok": True, "message": message})
 
 
+@app.route("/api/speakers/art/<key>")
+def api_speaker_art(key):
+    if not re.fullmatch(r"[0-9a-f]{16}", key):
+        return api_error("invalid Sonos album-art key", 400)
+    try:
+        content, content_type = sonos.album_art(key)
+    except KeyError as exc:
+        return api_error(exc.args[0], 404)
+    except Exception as exc:
+        return api_error(f"Sonos album art unavailable: {exc}", 502)
+    response = app.response_class(content, mimetype=content_type)
+    response.headers["Cache-Control"] = "private, max-age=3600"
+    return response
+
+
 PAGE = r"""<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -1510,8 +1572,9 @@ h1{font-size:29px;line-height:1.05;letter-spacing:-.03em;margin:3px 0 0}.van-mar
 .starlink{min-height:210px;transition:border-color .2s,background .2s,opacity .2s}.starlink .tile-icon{font-size:38px}.starlink .tile-title{font-size:23px}.starlink.on{border-color:#438168;background:radial-gradient(circle at 88% 5%,#62c89928,transparent 38%),linear-gradient(145deg,#1d2b2b,#172225)}
 .starlink.off{border-color:#754743;background:radial-gradient(circle at 88% 5%,#ef70671c,transparent 38%),linear-gradient(145deg,#292124,#1b2025)}.starlink.unknown{border-color:#41505a;background:linear-gradient(145deg,#202a32,#182128)}.starlink:disabled{cursor:not-allowed;opacity:.72}
 .switch-state{position:absolute;right:14px;top:14px;display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:99px;padding:4px 8px;background:#10171dcc;color:var(--dim);font-size:10px;font-weight:800;letter-spacing:.08em}.starlink.on .switch-state{color:#bcebd5;border-color:#39725b}.starlink.off .switch-state{color:#f2b5b0;border-color:#754743}
-.sonos-tile{cursor:default;min-height:174px}.sonos-tile:active{transform:none;background:linear-gradient(145deg,var(--panel),#151f28)}.sonos-head{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px}.sonos-open{min-width:0;max-width:68%;display:flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:9px;background:#1e2b34;color:var(--dim);padding:5px 8px;font-size:10px;cursor:pointer}.sonos-open span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sonos-tile{cursor:default;min-height:194px;overflow:hidden;background-position:center;background-size:cover}.sonos-tile:active{transform:none}.sonos-tile.has-art{box-shadow:inset 0 0 0 1px #ffffff0a,var(--shadow)}.sonos-tile.has-art .now-playing strong,.sonos-tile.has-art .now-playing span{text-shadow:0 1px 4px #000}.sonos-head{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px}.sonos-open{min-width:0;max-width:68%;display:flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:9px;background:#10171dcc;color:var(--dim);padding:5px 8px;font-size:10px;cursor:pointer}.sonos-open span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .now-playing{width:100%;min-width:0;margin-top:13px}.now-playing strong,.now-playing span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.now-playing strong{font-size:15px;color:var(--ink)}.now-playing span{font-size:11px;color:var(--dim);margin-top:2px}.transport{display:flex;align-items:center;justify-content:space-between;width:100%;margin-top:auto;padding-top:12px}.transport-button{width:46px;height:36px;border:0;border-radius:10px;background:transparent;color:#dce8ed;font-size:22px;line-height:1;cursor:pointer}.transport-button:active{background:#ffffff12;transform:scale(.95)}.transport-button.play{font-size:28px}
+.sonos-progress{width:100%;height:4px;margin-top:9px;border-radius:99px;background:#dce8ed42;overflow:hidden}.sonos-progress[hidden]{display:none}.sonos-progress-fill{display:block;width:0;height:100%;border-radius:inherit;background:#e6f0f3;transition:width .8s linear}
 .connectivity{margin-top:11px;border:1px solid var(--line);border-radius:19px;background:linear-gradient(145deg,var(--panel),#151f28);padding:15px;box-shadow:0 8px 28px #050b102e}
 .connectivity-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:13px}.connectivity-head h2{font-size:17px;margin:0;letter-spacing:-.01em}
 .connectivity-age{color:var(--dim);font-size:10px;text-align:right}.network-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0}
@@ -1519,7 +1582,7 @@ h1{font-size:29px;line-height:1.05;letter-spacing:-.03em;margin:3px 0 0}.van-mar
 .network-label{display:flex;align-items:center;gap:7px;color:var(--dim);font-size:12px;line-height:1.2;min-height:24px}.network-dot{width:10px;height:10px;flex:0 0 auto;border-radius:50%;background:#71818a;box-shadow:0 0 0 4px #71818a18}
 .network-dot.good{background:var(--good);box-shadow:0 0 0 4px #62c89918}.network-dot.bad{background:var(--bad);box-shadow:0 0 0 4px #ef706718}
 .network-value{display:block;margin-top:4px;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.network-detail{display:block;margin-top:2px;color:var(--dim);font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.mwan-list{display:flex;gap:5px;flex-wrap:wrap;margin-top:13px}.mwan-chip{border:1px solid #42545e;border-radius:99px;padding:3px 7px;color:var(--dim);font-size:9px}.mwan-chip.online{border-color:#39725b;color:#9cdec0;background:#1e3b31}.mwan-chip.offline{border-color:#6a4542;color:#e6aaa5;background:#392624}.mwan-chip.paused{opacity:.58}
+.mwan-list{display:flex;gap:5px;flex-wrap:wrap;margin-top:13px}.mwan-chip{border:1px solid #42545e;border-radius:99px;padding:3px 7px;color:var(--dim);font-size:9px}.mwan-chip.online{border-color:#39725b;color:#9cdec0;background:#1e3b31}.mwan-chip.offline{border-color:#6a4542;color:#e6aaa5;background:#392624}
 .speed-row{display:flex;align-items:center;gap:12px;margin-top:13px;padding-top:12px;border-top:1px solid var(--line)}.speedtest-button{display:flex;align-items:center;justify-content:center;gap:7px;flex:0 0 auto;border:1px solid #42606e;border-radius:11px;background:#263b47;color:var(--ink);padding:9px 11px;font-size:11px;font-weight:730;cursor:pointer}
 .speedtest-button:active{transform:scale(.98)}.speedtest-button:disabled{opacity:.7;cursor:default}.speed-spinner{display:none;width:13px;height:13px;border:2px solid #87a8b8;border-top-color:var(--ink);border-radius:50%;animation:spin .8s linear infinite}.speedtest-button.running .speed-spinner{display:inline-block}.speedtest-button.running .speed-icon{display:none}
 .speed-results{min-width:0;color:var(--dim);font-size:11px}.speed-results strong{display:block;color:#dce8ed;font-size:12px;font-variant-numeric:tabular-nums}.speed-results.bad strong{color:#ffc1bc}@keyframes spin{to{transform:rotate(360deg)}}
@@ -1559,7 +1622,7 @@ h1{font-size:29px;line-height:1.05;letter-spacing:-.03em;margin:3px 0 0}.van-mar
       <span class="tile-detail" id="starlink-detail">Checking Tuya status…</span>
     </button>
     <a class="tile" id="books" data-action href="#"><span class="tile-icon" aria-hidden="true">📖</span><span class="tile-title">Audiobooks</span><span class="tile-detail">Open the Sonos audiobook library</span></a>
-    <section class="tile sonos-tile" aria-labelledby="sonos-title">
+    <section class="tile sonos-tile" id="sonos-card" aria-labelledby="sonos-title">
       <div class="sonos-head"><span class="tile-title" id="sonos-title">Sonos</span><button class="sonos-open" id="speakers" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="speaker-panel"><span aria-hidden="true">🔊</span><span id="speaker-summary">Finding…</span></button></div>
       <div class="now-playing"><strong id="sonos-track">Finding Sonos…</strong><span id="sonos-artist">—</span></div>
       <div class="transport" aria-label="Sonos playback controls">
@@ -1567,6 +1630,7 @@ h1{font-size:29px;line-height:1.05;letter-spacing:-.03em;margin:3px 0 0}.van-mar
         <button class="transport-button play" id="sonos-play" data-action data-transport="play_pause" aria-label="Play">▶</button>
         <button class="transport-button" data-action data-transport="next" aria-label="Next track">▶|</button>
       </div>
+      <div class="sonos-progress" id="sonos-progress" role="progressbar" aria-label="Track position" hidden><span class="sonos-progress-fill" id="sonos-progress-fill"></span></div>
     </section>
   </div>
   <section class="connectivity" aria-labelledby="connectivity-title">
@@ -1598,7 +1662,7 @@ h1{font-size:29px;line-height:1.05;letter-spacing:-.03em;margin:3px 0 0}.van-mar
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
 <script>
-const $=id=>document.getElementById(id);let dashboard=null,speakers=null,busy=false,toastTimer=0,speedPoll=0;
+const $=id=>document.getElementById(id);let dashboard=null,speakers=null,busy=false,toastTimer=0,speedPoll=0,sonosTimeline={position:0,duration:0,playing:false,updatedAt:0};
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function toast(message,bad=false){clearTimeout(toastTimer);const el=$('toast');el.textContent=message;el.className=bad?'show bad':'show';toastTimer=setTimeout(()=>el.className='',3400)}
 async function json(url,options){const response=await fetch(url,{cache:'no-store',...(options||{})});let data;try{data=await response.json()}catch(_){data={message:`Server returned ${response.status}`}}
@@ -1616,7 +1680,7 @@ function renderConnectivity(response){const c=response.connectivity,r=c.router||
   else if(u.error){$('wireless-status').textContent='Status error';$('wireless-detail').textContent='Could not read radio'}
   else if(u.reachable===true){$('wireless-status').textContent=u.ssid||'Unknown SSID';const details=[];if(!u.connected)details.push('Not associated');if(u.connected&&Number.isFinite(u.signal_dbm))details.push(`${u.signal_dbm} dBm`);if(u.connected&&Number.isFinite(u.ccq_percent))details.push(`${u.ccq_percent}% CCQ`);else if(u.connected&&Number.isFinite(u.quality_percent))details.push(`${u.quality_percent}% quality`);$('wireless-detail').textContent=details.join(' · ')}
   else{$('wireless-status').textContent='Unknown';$('wireless-detail').textContent='Association · —'}
-  $('mwan-list').innerHTML=(r.interfaces||[]).map(i=>`<span class="mwan-chip ${esc(i.state)} ${i.tracking==='paused'?'paused':''}" title="${esc(i.detail||'')}">${esc(i.name)} · ${esc(i.state)}${i.tracking==='paused'?' · paused':''}</span>`).join('');
+  $('mwan-list').innerHTML=(r.interfaces||[]).map(i=>`<span class="mwan-chip ${esc(i.state)}" title="${esc(i.detail||'')}">${esc(i.name)} · ${esc(i.state)}</span>`).join('');
   $('connectivity-age').textContent=c.last_error?`Collector error · ${c.last_error}`:c.checked_at?`${c.stale?'Stale':'Updated'} · ${age(c.checked_at)}`:c.refreshing?'Checking…':'Waiting for collector'}
 async function refreshConnectivity(){try{renderConnectivity(await json('/api/connectivity'))}catch(error){$('connectivity-age').textContent=error.message}}
 function atTime(ts){return ts?'@ '+new Date(ts*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}):''}
@@ -1636,15 +1700,19 @@ function updateStatus(data){dashboard=data.cop_alert;const active=dashboard.acti
   if(active&&dashboard.last_error)$('connection').textContent=`Active with warning · ${dashboard.last_error}`}
 async function refresh(){try{updateStatus(await json('/api/status'))}catch(error){$('dot').classList.remove('on');$('dot').classList.add('bad');$('connection').textContent=error.message}}
 function muteIcon(muted){return muted?'🔇':'🔊'}
+function clockSeconds(value){const parts=String(value||'').split(':').map(Number);return parts.length&&parts.every(Number.isFinite)?parts.reduce((total,part)=>total*60+part,0):0}
+function clockLabel(seconds){seconds=Math.max(0,Math.round(seconds));const minutes=Math.floor(seconds/60),secs=seconds%60;return `${minutes}:${String(secs).padStart(2,'0')}`}
+function updateSonosProgress(){const bar=$('sonos-progress'),duration=sonosTimeline.duration;if(!(duration>0)){bar.hidden=true;return}const elapsed=sonosTimeline.playing?(performance.now()-sonosTimeline.updatedAt)/1000:0,position=Math.min(duration,sonosTimeline.position+elapsed),percent=100*position/duration;bar.hidden=false;$('sonos-progress-fill').style.width=`${percent}%`;bar.setAttribute('aria-valuemin','0');bar.setAttribute('aria-valuemax',String(duration));bar.setAttribute('aria-valuenow',String(Math.round(position)));bar.setAttribute('aria-valuetext',`${clockLabel(position)} of ${clockLabel(duration)}`);bar.title=`${clockLabel(position)} / ${clockLabel(duration)}`}
 function renderSpeakers(next){speakers=next;const grouped=next.speakers.filter(s=>s.grouped),now=next.now_playing||{},group=next.group||{};$('speaker-summary').textContent=`${next.coordinator} · ${grouped.length}/${next.speakers.length}`;$('sonos-track').textContent=now.title||'Nothing playing';$('sonos-artist').textContent=now.artist||next.coordinator;
   const playing=now.transport_state==='PLAYING';$('sonos-play').textContent=playing?'Ⅱ':'▶';$('sonos-play').setAttribute('aria-label',playing?'Pause':'Play');
+  sonosTimeline={position:clockSeconds(now.position),duration:clockSeconds(now.duration),playing,updatedAt:performance.now()};updateSonosProgress();const card=$('sonos-card');let art=null;try{art=now.album_art?new URL(now.album_art,location.href):null}catch(_){art=null}if(art&&art.origin===location.origin){card.classList.add('has-art');card.style.backgroundImage=`linear-gradient(90deg,#111b22ed 0%,#111b22c7 58%,#111b226b 100%),url("${art.href}")`}else{card.classList.remove('has-art');card.style.backgroundImage=''}
   const groupVolume=Number.isFinite(group.volume)?group.volume:0;$('group-volume').value=groupVolume;$('group-volume').disabled=!Number.isFinite(group.volume);$('group-level').textContent=Number.isFinite(group.volume)?group.volume:'—';const groupMuteKnown=typeof group.muted==='boolean';$('group-mute').disabled=!groupMuteKnown;$('group-mute').textContent=muteIcon(group.muted);$('group-mute').classList.toggle('muted',group.muted===true);$('group-mute').setAttribute('aria-pressed',String(group.muted===true));$('group-mute').setAttribute('aria-label',group.muted?'Unmute group':'Mute group');
   $('speaker-list').innerHTML=next.speakers.map(s=>{const detail=s.coordinator?'Active coordinator':s.grouped?`Grouped with ${next.coordinator}`:`Group: ${s.group_coordinator}`,volume=Number.isFinite(s.volume)?s.volume:0,muteKnown=typeof s.muted==='boolean';return `<div class="speaker-row"><input class="speaker-check" data-action data-group-speaker="${esc(s.name)}" type="checkbox" ${s.grouped?'checked':''} ${s.coordinator?'disabled':''} aria-label="Group ${esc(s.name)}">
       <button class="audio-mute ${s.muted?'muted':''}" data-action data-speaker-mute="${esc(s.name)}" ${muteKnown?'':'disabled'} aria-pressed="${String(s.muted===true)}" aria-label="${s.muted?'Unmute':'Mute'} ${esc(s.name)}">${muteIcon(s.muted)}</button>
       <button class="speaker-name" data-action data-select-speaker="${esc(s.name)}">${esc(s.name)}<small>${esc(detail)}</small></button><span class="speaker-level">${Number.isFinite(s.volume)?s.volume:'—'}</span>
       <input class="speaker-volume" data-action data-speaker-volume="${esc(s.name)}" type="range" min="0" max="100" value="${volume}" ${Number.isFinite(s.volume)?'':'disabled'} aria-label="${esc(s.name)} volume"></div>`}).join('')||'<div class="speaker-loading">No Sonos speakers found</div>'}
 async function loadSpeakers(){const next=await json('/api/speakers');renderSpeakers(next);return next}
-async function refreshSonos(){try{return await loadSpeakers()}catch(error){$('speaker-summary').textContent='Unavailable';$('sonos-track').textContent='Sonos unavailable';$('sonos-artist').textContent=error.message}}
+async function refreshSonos(){try{return await loadSpeakers()}catch(error){$('speaker-summary').textContent='Unavailable';$('sonos-track').textContent='Sonos unavailable';$('sonos-artist').textContent=error.message;sonosTimeline={position:0,duration:0,playing:false,updatedAt:0};updateSonosProgress();$('sonos-card').classList.remove('has-art');$('sonos-card').style.backgroundImage=''}}
 async function openSpeakers(){$('speaker-backdrop').classList.add('open');document.body.classList.add('sheet-open');$('speakers').setAttribute('aria-expanded','true');
   try{await loadSpeakers()}catch(error){$('speaker-list').innerHTML=`<div class="speaker-loading">${esc(error.message)}</div>`;toast(error.message,true)}}
 function closeSpeakers(){$('speaker-backdrop').classList.remove('open');document.body.classList.remove('sheet-open');$('speakers').setAttribute('aria-expanded','false');$('speakers').focus()}
@@ -1657,7 +1725,7 @@ document.addEventListener('change',event=>{const checkbox=event.target.closest('
   const slider=event.target.closest('[data-speaker-volume]');if(slider)action(async()=>{try{return await post('speakers/volume',{name:slider.dataset.speakerVolume,volume:slider.value})}finally{await loadSpeakers()}});const groupSlider=event.target.closest('[data-group-volume]');if(groupSlider)action(async()=>{try{return await post('speakers/group-volume',{volume:groupSlider.value})}finally{await loadSpeakers()}})});
 document.addEventListener('click',event=>{const selected=event.target.closest('[data-select-speaker]');if(selected)action(async()=>{const result=await post('speakers/select',{name:selected.dataset.selectSpeaker});await loadSpeakers();return result});const transport=event.target.closest('[data-transport]');if(transport)action(async()=>{try{return await post('speakers/transport',{action:transport.dataset.transport})}finally{await loadSpeakers()}});const groupMute=event.target.closest('[data-group-mute]');if(groupMute)action(async()=>{try{return await post('speakers/group-mute',{muted:speakers?.group?.muted?'0':'1'})}finally{await loadSpeakers()}});const speakerMute=event.target.closest('[data-speaker-mute]');if(speakerMute)action(async()=>{const item=speakers?.speakers?.find(s=>s.name===speakerMute.dataset.speakerMute);try{return await post('speakers/mute',{name:speakerMute.dataset.speakerMute,muted:item?.muted?'0':'1'})}finally{await loadSpeakers()}})});
 function refreshVisibleDashboard(){if(document.hidden)return;refresh();refreshConnectivity();refreshSpeedtest();refreshSonos()}
-Promise.allSettled([refresh(),loadSpeakers(),refreshConnectivity(),refreshSpeedtest()]).then(results=>{if(results[1].status==='rejected')refreshSonos()});setInterval(()=>{if(!document.hidden)refresh()},5000);setInterval(()=>{if(!document.hidden)refreshConnectivity()},10000);setInterval(()=>{if(!document.hidden&&!busy)refreshSonos()},10000);document.addEventListener('visibilitychange',refreshVisibleDashboard);window.addEventListener('pageshow',refreshVisibleDashboard);window.addEventListener('focus',refreshVisibleDashboard);
+Promise.allSettled([refresh(),loadSpeakers(),refreshConnectivity(),refreshSpeedtest()]).then(results=>{if(results[1].status==='rejected')refreshSonos()});setInterval(()=>{if(!document.hidden)refresh()},5000);setInterval(()=>{if(!document.hidden)refreshConnectivity()},10000);setInterval(()=>{if(!document.hidden&&!busy)refreshSonos()},10000);setInterval(()=>{if(!document.hidden)updateSonosProgress()},1000);document.addEventListener('visibilitychange',refreshVisibleDashboard);window.addEventListener('pageshow',refreshVisibleDashboard);window.addEventListener('focus',refreshVisibleDashboard);
 </script></body></html>"""
 
 

@@ -64,9 +64,11 @@ means confirmed active or reachable.
 ## Sonos controls
 
 The Sonos tile follows the selected group's coordinator and shows the current
-track, artist, and play/pause/previous/next controls. Its speaker sheet keeps
-the existing group-selection checkboxes and adds native Sonos group volume,
-whole-group mute, individual volume, and individual mute controls.
+track, artist, live track-position bar, and play/pause/previous/next controls.
+When available, coordinator album art is fetched through a bounded same-origin
+vanpi proxy so it also works over Tailscale. Its speaker sheet keeps the existing
+group-selection checkboxes and adds native Sonos group volume, whole-group mute,
+individual volume, and individual mute controls.
 
 ## COP ALERT behavior
 
@@ -74,7 +76,7 @@ While active, the dashboard:
 
 - persists the active state in `/home/pi/.van_dashboard_state.json`;
 - keeps Home Assistant entity `switch.ext_flood` on while the engine is stopped;
-- asynchronously configures `light.ext_led` to fixed brightness `170/255` and
+- asynchronously configures `light.ext_led` to fixed brightness `255/255` and
   `2702 K`, then reads it back for confirmation;
 - sends an RF Hub `22 F190` identification read every 15 seconds on C-CAN. This
   is the already-verified parked C-CAN wake that powers the dash accessory rail;
@@ -103,7 +105,7 @@ during a 90-second connection grace period, then `ext_led unavailable · still
 retrying` if RF remains blocked. Neither state disables the alert, CAN wake,
 `ext_flood`, or ntfy behavior.
 
-The fixed look—brightness `170/255` (67%) and `2702 K` in color-temperature
+The fixed look—brightness `255/255` (100%) and `2702 K` in color-temperature
 mode—was captured from `light.solder_led` on 2026-07-18. The worker never reads
 or depends on `solder_led` during COP ALERT. It pauses while verified engine RPM
 causes COP ALERT to intentionally turn `ext_flood` off, then resumes when the

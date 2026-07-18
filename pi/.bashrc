@@ -187,7 +187,7 @@ alias nodiskx="rm $mconf/nodisk*; nohup $isw &"
 
 # starlink torrent
 alias startor="rm /home/pi/starconf/notor"
-alias nostartor="touch /home/pi/starconf/notor"
+alias startorx="touch /home/pi/starconf/notor"
 alias starconf="ls -lah /home/pi/starconf"
 
 # status hooks

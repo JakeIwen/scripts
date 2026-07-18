@@ -3,6 +3,7 @@ import os
 import tempfile
 import threading
 import unittest
+from email.message import Message
 from types import SimpleNamespace
 
 from automation import van_dashboard as dashboard
@@ -135,6 +136,10 @@ class FakeSpeaker:
             "duration": "0:03:45",
         }
         self.transport_calls = []
+        self.ip_address = "192.168.6.189"
+        self.track_info["album_art"] = (
+            "http://192.168.6.189:1400/getaa?s=1&u=test-track"
+        )
         self.is_visible = True
         self.group = FakeGroup()
         self.group.coordinator = self
@@ -161,6 +166,22 @@ class FakeSpeaker:
         self.transport_calls.append("next")
 
 
+class FakeArtResponse:
+    def __init__(self, content=b"\xff\xd8\xfffake-jpeg"):
+        self.content = content
+        self.headers = Message()
+        self.headers["Content-Type"] = "image/jpeg"
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return False
+
+    def read(self, size):
+        return self.content[:size]
+
+
 class SonosControllerTests(unittest.TestCase):
     def test_snapshot_selection_and_volume_match_audiobook_controls(self):
         front = FakeSpeaker("Front", 28, "PLAYING")
@@ -181,6 +202,10 @@ class SonosControllerTests(unittest.TestCase):
             self.assertEqual(
                 snapshot["now_playing"]["artist"],
                 "Stanley Brinks and The Wave Pictures",
+            )
+            self.assertRegex(
+                snapshot["now_playing"]["album_art"],
+                r"^/api/speakers/art/[0-9a-f]{16}$",
             )
             grouped = {item["name"] for item in snapshot["speakers"] if item["grouped"]}
             self.assertEqual(grouped, {"Front", "Rear"})
@@ -367,7 +392,7 @@ class CopLedManagerTests(unittest.TestCase):
         waiting = self.manager.tick()
         self.assertEqual(waiting["phase"], "waiting")
         self.assertEqual(
-            waiting["desired"], {"brightness": 170, "color_temp_kelvin": 2702}
+            waiting["desired"], {"brightness": 255, "color_temp_kelvin": 2702}
         )
         self.assertFalse(any(call[1] == "set" for call in self.calls))
 
@@ -375,8 +400,8 @@ class CopLedManagerTests(unittest.TestCase):
         self.clock.advance(5)
         confirmed = self.manager.tick()
         self.assertEqual(confirmed["phase"], "confirmed")
-        self.assertIn("67%", confirmed["message"])
-        self.assertEqual(self.target["brightness"], 170)
+        self.assertIn("100%", confirmed["message"])
+        self.assertEqual(self.target["brightness"], 255)
         self.assertEqual(self.target["color_temp_kelvin"], 2702)
         self.assertTrue(any(call[1] == "set" for call in self.calls))
 
@@ -488,8 +513,11 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"ext_led", page.data)
         self.assertNotIn(b">Internet Connectivity<", page.data)
         self.assertNotIn(b">Reachable<", page.data)
+        self.assertNotIn(b"mwan-chip paused", page.data)
+        self.assertNotIn(" · paused".encode(), page.data)
         self.assertIn(b"Run speed test", page.data)
         self.assertIn(b'id="sonos-track"', page.data)
+        self.assertIn(b'id="sonos-progress"', page.data)
         self.assertIn(b'data-transport="play_pause"', page.data)
         self.assertIn(b"Group volume", page.data)
         self.assertIn(b"data-group-mute", page.data)
@@ -511,14 +539,23 @@ class DashboardRouteTests(unittest.TestCase):
 
     def test_sonos_transport_volume_and_mute_routes(self):
         front = FakeSpeaker("Front", 28, "PLAYING")
+        art_requests = []
+
+        def art_opener(request, timeout):
+            art_requests.append((request.full_url, timeout))
+            return FakeArtResponse()
+
         with tempfile.TemporaryDirectory() as tempdir:
             original = dashboard.sonos
             dashboard.sonos = dashboard.SonosController(
                 dashboard.StateStore(os.path.join(tempdir, "state.json")),
                 discover_func=lambda timeout: {front},
+                art_opener=art_opener,
             )
             try:
                 client = dashboard.app.test_client()
+                speakers = client.get("/api/speakers")
+                album_art = client.get(speakers.json["now_playing"]["album_art"])
                 transport = client.post(
                     "/api/speakers/transport", data={"action": "play_pause"}
                 )
@@ -535,6 +572,13 @@ class DashboardRouteTests(unittest.TestCase):
                 dashboard.sonos = original
 
         self.assertEqual(transport.status_code, 200)
+        self.assertEqual(album_art.status_code, 200)
+        self.assertEqual(album_art.mimetype, "image/jpeg")
+        self.assertEqual(album_art.data, b"\xff\xd8\xfffake-jpeg")
+        self.assertEqual(
+            art_requests,
+            [(front.track_info["album_art"], dashboard.SONOS_ART_TIMEOUT)],
+        )
         self.assertEqual(front.transport_calls, ["pause"])
         self.assertEqual(group_volume.json["volume"], 74)
         self.assertEqual(front.group.volume, 74)
