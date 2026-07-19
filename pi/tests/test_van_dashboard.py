@@ -674,18 +674,27 @@ class CopAlertManagerTests(unittest.TestCase):
         )
 
     def tearDown(self):
+        self.wait_for_ntfy()
         self.tempdir.cleanup()
+
+    def wait_for_ntfy(self, manager=None):
+        manager = manager or self.manager
+        worker = manager.ntfy_thread
+        if worker:
+            worker.join(1)
+            self.assertFalse(worker.is_alive(), "ntfy test worker did not finish")
 
     def test_parked_running_parked_transition(self):
         status = self.manager.set_active(True)
         self.assertTrue(status["active"])
         self.assertEqual(self.entity_state, "on")
         self.assertTrue(os.path.isfile(self.manager.active_marker))
+        self.wait_for_ntfy()
+        self.assertTrue(any(call[0] == dashboard.NTFY_SEND for call in self.calls))
 
         self.manager.tick()
         self.assertEqual(len(self.wakes), 1)
         self.assertEqual(self.entity_state, "on")
-        self.assertTrue(any(call[0] == dashboard.NTFY_SEND for call in self.calls))
         self.assertFalse(os.path.exists(self.manager.engine_marker))
 
         self.engine.running = True
@@ -710,8 +719,77 @@ class CopAlertManagerTests(unittest.TestCase):
 
     def test_state_persists_across_manager_recreation(self):
         self.manager.set_active(True)
+        self.wait_for_ntfy()
         reloaded = dashboard.StateStore(self.store.path)
         self.assertTrue(reloaded.get("cop_alert"))
+
+    def test_activation_ntfy_is_immediate_nonblocking_and_single_flight(self):
+        started = threading.Event()
+        release = threading.Event()
+        ntfy_calls = []
+        ntfy_timeouts = []
+
+        def command(args, timeout):
+            if args[0] == dashboard.NTFY_SEND:
+                ntfy_calls.append(tuple(args))
+                ntfy_timeouts.append(timeout)
+                started.set()
+                release.wait(2)
+                return SimpleNamespace(stdout="", stderr="", returncode=0)
+            if args[0] == dashboard.TUYA_TOGGLE:
+                return SimpleNamespace(stdout=args[2] + "\n", stderr="", returncode=0)
+            if args[0] == dashboard.TUYA_STATUS:
+                return SimpleNamespace(stdout="on\n", stderr="", returncode=0)
+            raise AssertionError(args)
+
+        manager = dashboard.CopAlertManager(
+            self.store,
+            self.engine,
+            command=command,
+            wake=lambda: (True, "wake ok"),
+            runtime_dir=os.path.join(self.tempdir.name, "nonblocking-run"),
+            clock=self.clock,
+            wall_clock=lambda: 1_700_000_000 + self.clock(),
+        )
+        try:
+            status = manager.set_active(True)
+            self.assertTrue(status["active"])
+            self.assertTrue(started.wait(1), "activation did not start ntfy")
+            self.assertTrue(manager.ntfy_pending)
+            self.assertEqual(len(ntfy_calls), 1)
+            self.assertEqual(ntfy_timeouts, [dashboard.NTFY_TIMEOUT])
+
+            self.clock.advance(dashboard.NTFY_INTERVAL + 1)
+            manager.tick()
+            self.assertEqual(len(ntfy_calls), 1, "a blocked send must not accumulate workers")
+        finally:
+            release.set()
+            self.wait_for_ntfy(manager)
+
+    def test_ntfy_worker_failure_does_not_escape_or_stop_cop_alert(self):
+        def command(args, timeout):
+            if args[0] == dashboard.NTFY_SEND:
+                raise RuntimeError("network unavailable")
+            if args[0] == dashboard.TUYA_TOGGLE:
+                return SimpleNamespace(stdout=args[2] + "\n", stderr="", returncode=0)
+            if args[0] == dashboard.TUYA_STATUS:
+                return SimpleNamespace(stdout="on\n", stderr="", returncode=0)
+            raise AssertionError(args)
+
+        manager = dashboard.CopAlertManager(
+            self.store,
+            self.engine,
+            command=command,
+            wake=lambda: (True, "wake ok"),
+            runtime_dir=os.path.join(self.tempdir.name, "failure-run"),
+            clock=self.clock,
+            wall_clock=lambda: 1_700_000_000 + self.clock(),
+        )
+        manager.set_active(True)
+        self.wait_for_ntfy(manager)
+        self.assertTrue(manager.snapshot()["active"])
+        self.assertIn("network unavailable", manager.snapshot()["last_error"])
+        manager.tick()
 
 
 class DashboardRouteTests(unittest.TestCase):
@@ -721,8 +799,14 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertIn(b"COP ALERT", page.data)
         self.assertIn(b"Starlink", page.data)
+        self.assertIn(b'id="openwrt-title">OpenWrt', page.data)
         self.assertIn(b"MWAN3", page.data)
         self.assertIn(b"ext_led", page.data)
+        self.assertNotIn(b">Connectivity<", page.data)
+        self.assertNotIn(b"UBNT Availability", page.data)
+        self.assertNotIn(b"UBNT Wireless", page.data)
+        self.assertNotIn(b'id="ubnt-dot"', page.data)
+        self.assertNotIn(b'id="wireless-dot"', page.data)
         self.assertNotIn(b">Internet Connectivity<", page.data)
         self.assertNotIn(b">Reachable<", page.data)
         self.assertNotIn(b"mwan-chip paused", page.data)
@@ -734,6 +818,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"Group volume", page.data)
         self.assertIn(b"data-group-mute", page.data)
         self.assertIn(b"Disks &amp; Torrents", page.data)
+        self.assertIn(b"Managed disks", page.data)
         self.assertIn(b"UBNT Wi-Fi", page.data)
         self.assertIn(b'id="ubnt-network-list"', page.data)
         self.assertIn(b'id="ubnt-password-form"', page.data)
@@ -759,8 +844,14 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"data-speaker-mute", javascript.data)
         self.assertIn(b"data-ubnt-profile", javascript.data)
         self.assertIn(b"startUbntWifi('provision'", javascript.data)
+        self.assertIn(b"function renderUbntTile()", javascript.data)
+        self.assertNotIn(b"wireless-status", javascript.data)
+        self.assertNotIn(b"ubnt-dot", javascript.data)
+        self.assertIn(b"Stopped because disks are disabled", javascript.data)
         self.assertIn(b"bookUrl.port='8787'", javascript.data)
         self.assertIn(b".policy-toggle", stylesheet.data)
+        self.assertIn(b".policy-runtime-state::before", stylesheet.data)
+        self.assertIn(b".openwrt-grid", stylesheet.data)
         self.assertIn(b".ubnt-network-row", stylesheet.data)
         manifest = client.get("/manifest.webmanifest")
         self.assertEqual(manifest.status_code, 200)
@@ -778,6 +869,13 @@ class DashboardRouteTests(unittest.TestCase):
             'cp -R "$pi_apps/van_dashboard/static" "$python_stage/"',
             sync_script,
         )
+
+    def test_ntfy_helper_has_bounded_network_timeouts(self):
+        repository = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        with open(os.path.join(repository, "pi", "scripts", "ntfy_send.sh"), encoding="utf-8") as handle:
+            script = handle.read()
+        self.assertIn("--connect-timeout 5", script)
+        self.assertIn("--max-time 15", script)
 
     def test_connectivity_and_speedtest_status_routes(self):
         client = dashboard.app.test_client()

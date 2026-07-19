@@ -49,17 +49,18 @@
       <span class="tile-icon" aria-hidden="true">📡</span><span class="tile-title">UBNT Wi-Fi</span><span class="tile-detail" id="ubnt-wifi-summary">Scan and select upstream networks</span>
     </button>
   </div>
-  <section class="connectivity" aria-labelledby="connectivity-title">
-    <div class="connectivity-head"><h2 id="connectivity-title">Connectivity</h2><span class="connectivity-age" id="connectivity-age">Checking…</span></div>
-    <div class="network-grid">
-      <div class="network-stat"><span class="network-label"><span class="network-dot" id="internet-dot"></span>MWAN3</span><strong class="network-value" id="mwan-mode">Checking…</strong></div>
-      <div class="network-stat"><span class="network-label"><span class="network-dot" id="ubnt-dot"></span>UBNT Availability</span></div>
-      <div class="network-stat"><span class="network-label"><span class="network-dot" id="wireless-dot"></span>UBNT Wireless</span><strong class="network-value" id="wireless-status">Checking…</strong><span class="network-detail" id="wireless-detail">Association · —</span></div>
-    </div>
-    <div class="mwan-list" id="mwan-list" aria-label="mwan3 interfaces"></div>
-    <div class="speed-row">
-      <button class="speedtest-button" id="speedtest-button"><span class="speed-icon" aria-hidden="true">↕</span><span class="speed-spinner" aria-hidden="true"></span><span id="speedtest-label">Run speed test</span></button>
-      <div class="speed-results" id="speed-results" role="status" aria-live="polite"><strong>Not run yet</strong>Uses vanpi's current route</div>
+  <section class="connectivity" aria-labelledby="openwrt-title">
+    <div class="connectivity-head"><h2 id="openwrt-title">OpenWrt</h2><span class="connectivity-age" id="connectivity-age">Checking…</span></div>
+    <div class="openwrt-grid">
+      <div class="mwan-section">
+        <span class="network-label"><span class="network-dot" id="internet-dot"></span>MWAN3</span>
+        <strong class="network-value" id="mwan-mode">Checking…</strong>
+        <div class="mwan-list" id="mwan-list" aria-label="mwan3 interfaces"></div>
+      </div>
+      <div class="speed-row">
+        <button class="speedtest-button" id="speedtest-button"><span class="speed-icon" aria-hidden="true">↕</span><span class="speed-spinner" aria-hidden="true"></span><span id="speedtest-label">Run speed test</span></button>
+        <div class="speed-results" id="speed-results" role="status" aria-live="polite"><strong>Not run yet</strong>Uses vanpi's current route</div>
+      </div>
     </div>
   </section>
 </main>
@@ -81,7 +82,7 @@
     <div class="sheet-grabber"></div><div class="sheet-head"><h2 id="storage-title">Disks &amp; Torrents</h2><span class="policy-sheet-status" id="storage-status">Checking…</span><button class="sheet-close" id="storage-close" aria-label="Close disk and torrent policy">&times;</button></div>
     <p class="sheet-help">Requested switches and authoritative runtime state from policyctl.</p>
     <div class="policy-runtime">
-      <div class="policy-runtime-item" id="disk-runtime"><span><strong>Managed storage</strong><small id="disk-runtime-detail">Checking mounts…</small></span><span class="policy-runtime-state" id="disk-runtime-state">NO DATA</span></div>
+      <div class="policy-runtime-item" id="disk-runtime"><span><strong>Managed disks</strong><small id="disk-runtime-detail">Checking mounts…</small></span><span class="policy-runtime-state" id="disk-runtime-state">NO DATA</span></div>
       <div class="policy-runtime-item" id="torrent-runtime"><span><strong>qBittorrent</strong><small id="torrent-runtime-detail">Checking process…</small></span><span class="policy-runtime-state" id="torrent-runtime-state">NO DATA</span></div>
     </div>
     <p class="policy-request-label">Requested policy</p>

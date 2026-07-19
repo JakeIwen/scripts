@@ -6,7 +6,7 @@ The first dashboard feature is COP ALERT.  While active it:
 * keeps Home Assistant's ``switch.ext_flood`` on while the engine is stopped;
 * periodically wakes C-CAN with a benign RF Hub identification read so the
   dash accessory rail (and therefore the dashcam) stays awake;
-* emits a bacon ntfy notification every five minutes; and
+* emits a bacon ntfy notification immediately and every five minutes; and
 * publishes fresh, passive C-CAN engine-running evidence for ignition_on.sh.
 
 The CAN receive path is passive.  The only transmitted frame is the explicitly
@@ -90,6 +90,7 @@ RFH_RXID = 0x18DAF1C7
 RFH_WAKE_REQUEST = bytes((0x22, 0xF1, 0x90))
 WAKE_INTERVAL = float(os.environ.get("VAN_DASHBOARD_WAKE_INTERVAL", "15"))
 NTFY_INTERVAL = float(os.environ.get("VAN_DASHBOARD_NTFY_INTERVAL", "300"))
+NTFY_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_NTFY_TIMEOUT", "20"))
 FLOOD_CHECK_INTERVAL = float(os.environ.get("VAN_DASHBOARD_FLOOD_CHECK_INTERVAL", "15"))
 
 DEFAULT_SONOS_DEVICE = os.environ.get("VAN_DASHBOARD_SONOS_DEVICE", "vonFront")
@@ -353,6 +354,8 @@ class CopAlertManager:
         self.last_wake_ok = None
         self.last_wake_message = "not attempted"
         self.last_ntfy = None
+        self.ntfy_pending = False
+        self.ntfy_thread = None
         self.next_wake = 0.0
         self.next_flood_check = 0.0
         self.next_ntfy = 0.0
@@ -374,6 +377,7 @@ class CopAlertManager:
 
     def set_active(self, active):
         active = bool(active)
+        was_active = self.active
         self.store.set("cop_alert", active)
         with self.lock:
             self.errors.clear()
@@ -381,10 +385,17 @@ class CopAlertManager:
                 self._touch(self.active_marker)
                 self.next_wake = 0.0
                 self.next_flood_check = 0.0
-                self.next_ntfy = 0.0
+                if not was_active:
+                    self.next_ntfy = 0.0
             else:
                 self._remove(self.active_marker)
                 self._remove(self.engine_marker)
+
+        # Begin the activation notification before touching the Wi-Fi Tuya
+        # device. The single-flight worker keeps a slow or disconnected ntfy
+        # endpoint off both the request thread and the COP maintenance loop.
+        if active and not was_active:
+            self._queue_ntfy(self.clock())
 
         # Give the button immediate, deterministic switch behavior.  Background
         # retries and status reporting handle a temporarily unavailable HA API.
@@ -451,15 +462,7 @@ class CopAlertManager:
             self.next_wake = now + (WAKE_INTERVAL if ok else min(5.0, WAKE_INTERVAL))
 
         if now >= self.next_ntfy:
-            ok, message = self._send_ntfy()
-            if ok:
-                with self.lock:
-                    self.last_ntfy = int(self.wall_clock())
-                self._set_error("ntfy", None)
-                self.next_ntfy = now + NTFY_INTERVAL
-            else:
-                self._set_error("ntfy", message)
-                self.next_ntfy = now + min(30.0, NTFY_INTERVAL)
+            self._queue_ntfy(now)
 
         self._set_error("manager", None)
 
@@ -501,11 +504,49 @@ class CopAlertManager:
         self._set_error("ext_flood", "could not read ext_flood state")
         return "unknown"
 
+    def _queue_ntfy(self, now=None):
+        now = self.clock() if now is None else now
+        with self.lock:
+            if self.ntfy_pending:
+                return False
+            self.ntfy_pending = True
+            self.next_ntfy = now + NTFY_INTERVAL
+            worker = threading.Thread(
+                target=self._send_ntfy_worker,
+                name="cop-alert-ntfy",
+                daemon=True,
+            )
+            self.ntfy_thread = worker
+        try:
+            worker.start()
+        except Exception as exc:
+            with self.lock:
+                self.ntfy_pending = False
+                self.next_ntfy = now + min(30.0, NTFY_INTERVAL)
+            self._set_error("ntfy", f"could not start COP ALERT ntfy worker: {exc}")
+            return False
+        return True
+
+    def _send_ntfy_worker(self):
+        try:
+            ok, message = self._send_ntfy()
+        except Exception as exc:
+            ok, message = False, f"COP ALERT ntfy worker failed: {exc}"
+        with self.lock:
+            if ok:
+                self.last_ntfy = int(self.wall_clock())
+            elif self.active:
+                retry_at = self.clock() + min(30.0, NTFY_INTERVAL)
+                self.next_ntfy = min(self.next_ntfy, retry_at)
+            still_active = self.active
+            self.ntfy_pending = False
+        self._set_error("ntfy", None if ok or not still_active else message)
+
     def _send_ntfy(self):
         try:
             result = self.command(
                 [NTFY_SEND, "COP ALERT", "🥓 COP ALERT is active", "high", "bacon"],
-                timeout=20,
+                timeout=NTFY_TIMEOUT,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             return False, f"COP ALERT ntfy failed: {exc}"

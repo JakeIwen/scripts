@@ -18,16 +18,17 @@ The service has no user-login layer; it is intended only for the trusted van
 LAN and Tailscale ACL. Do not forward port `8788` from a public interface. The
 server rejects cross-origin browser control requests to reduce CSRF risk.
 
-## Connectivity and speed tests
+## OpenWrt and speed tests
 
-The Connectivity card keeps three related states separate:
+The OpenWrt card shows MWAN3 status and gives the speed test two thirds of the
+card width. The separate UBNT availability and wireless columns were removed;
+the UBNT Wi-Fi tile now uses the collector's real association status, signal,
+and CCQ/quality data directly. A configured SSID shown as `Not-Associated` is
+reported as disconnected rather than live.
 
-- MWAN3 comes from mwan3's existing reachability tracking;
-- UBNT Availability is a single ping that detects lost Ethernet/power; and
-- UBNT Wireless requires a real access-point association. A configured SSID
-  is still shown when the radio says `Not-Associated`, but it is not reported
-  as connected. When associated, signal, link quality/CCQ, and bitrate are
-  available to the dashboard.
+MWAN3 comes from mwan3's existing reachability tracking. The UBNT collector
+still performs its lightweight reachability and radio queries; consolidating
+their presentation does not remove either check.
 
 The mwan3 mode lists every online uplink (for example `clientwan + wan`) so a
 balanced multi-uplink state is not mislabeled as a single primary route.
@@ -97,9 +98,9 @@ vanpi proxy so it also works over Tailscale. Its speaker sheet keeps the existin
 group-selection checkboxes and adds native Sonos group volume, whole-group mute,
 individual volume, and individual mute controls.
 
-## Storage and torrent policy
+## Disk and torrent policy
 
-The Storage & Torrents tile reads and updates state exclusively through
+The Disks & Torrents tile reads and updates state exclusively through
 `/home/pi/scripts/policyctl`; the dashboard never reads the policy JSON, mount
 table, or process list directly. The sheet keeps requested disk, global torrent,
 and Starlink torrent permissions separate from policyctl's authoritative
@@ -123,8 +124,10 @@ While active, the dashboard:
   `2702 K`, then reads it back for confirmation;
 - sends an RF Hub `22 F190` identification read every 15 seconds on C-CAN. This
   is the already-verified parked C-CAN wake that powers the dash accessory rail;
-- sends `🥓 COP ALERT is active` through `ntfy_send.sh` immediately and every
-  five minutes, which resolves `NTFY_MESSAGE_URL` from the existing secrets;
+- starts a single-flight background send of `🥓 COP ALERT is active` through
+  `ntfy_send.sh` immediately on activation and every five minutes. A bounded
+  curl timeout, exception containment, and retry scheduling keep a disconnected
+  network from blocking the request or the COP-alert maintenance loop;
 - passively reads C-CAN engine speed and publishes short-lived marker files in
   `/run/van-dashboard` for the ignition hook.
 
