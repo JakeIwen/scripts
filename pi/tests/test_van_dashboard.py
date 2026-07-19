@@ -811,7 +811,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertNotIn(b">Reachable<", page.data)
         self.assertNotIn(b"mwan-chip paused", page.data)
         self.assertNotIn(" · paused".encode(), page.data)
-        self.assertIn(b"Run speed test", page.data)
+        self.assertIn(b"Speed Test", page.data)
         self.assertIn(b'id="sonos-track"', page.data)
         self.assertIn(b'id="sonos-progress"', page.data)
         self.assertIn(b'data-transport="play_pause"', page.data)
