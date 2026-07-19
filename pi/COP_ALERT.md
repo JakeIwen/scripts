@@ -99,12 +99,13 @@ individual volume, and individual mute controls.
 
 ## Storage and torrent policy
 
-The Storage & Torrents tile reads and updates requested policy exclusively
-through `/home/pi/scripts/policyctl`; the dashboard never reads the policy JSON
-file directly. The sheet exposes requested disk permission, the global torrent
-permission, and the additional Starlink torrent permission. Updates use fixed
-commands, wait for policyctl to reconcile, and then refresh authoritative status
-before the UI changes.
+The Storage & Torrents tile reads and updates state exclusively through
+`/home/pi/scripts/policyctl`; the dashboard never reads the policy JSON, mount
+table, or process list directly. The sheet keeps requested disk, global torrent,
+and Starlink torrent permissions separate from policyctl's authoritative
+runtime report of managed mounts and the exact `qbittorrent-nox` process.
+Updates use fixed commands, request reconciliation, and then refresh the same
+status contract.
 
 Ignition state always overrides requested disk permission, and disabling disks
 also stops torrents. Starlink torrenting requires both the global Torrents

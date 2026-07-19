@@ -42,7 +42,7 @@
       <div class="sonos-progress" id="sonos-progress" role="progressbar" aria-label="Track position" hidden><span class="sonos-progress-fill" id="sonos-progress-fill"></span></div>
     </section>
     <button class="tile storage-tile" id="storage" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="storage-panel">
-      <span class="tile-icon" aria-hidden="true">💾</span><span class="tile-title">Storage &amp; Torrents</span><span class="tile-detail" id="storage-summary">Checking requested policy…</span>
+      <span class="tile-icon" aria-hidden="true">💾</span><span class="tile-title">Disks &amp; Torrents</span><span class="tile-detail" id="storage-summary">Checking current state…</span>
     </button>
     <button class="tile ubnt-wifi-tile" id="ubnt-wifi" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="ubnt-wifi-panel">
       <span class="switch-state"><span class="network-dot" id="ubnt-wifi-dot"></span><span id="ubnt-wifi-state">NO DATA</span></span>
@@ -78,12 +78,17 @@
 </div>
 <div class="speaker-backdrop" id="storage-backdrop">
   <section class="speaker-sheet policy-sheet" id="storage-panel" role="dialog" aria-modal="true" aria-labelledby="storage-title" aria-busy="true">
-    <div class="sheet-grabber"></div><div class="sheet-head"><h2 id="storage-title">Storage &amp; Torrents</h2><span class="policy-sheet-status" id="storage-status">Checking…</span><button class="sheet-close" id="storage-close" aria-label="Close storage policy">&times;</button></div>
-    <p class="sheet-help">Requested policy; the reconciler applies it to current van conditions.</p>
+    <div class="sheet-grabber"></div><div class="sheet-head"><h2 id="storage-title">Disks &amp; Torrents</h2><span class="policy-sheet-status" id="storage-status">Checking…</span><button class="sheet-close" id="storage-close" aria-label="Close disk and torrent policy">&times;</button></div>
+    <p class="sheet-help">Requested switches and authoritative runtime state from policyctl.</p>
+    <div class="policy-runtime">
+      <div class="policy-runtime-item" id="disk-runtime"><span><strong>Managed storage</strong><small id="disk-runtime-detail">Checking mounts…</small></span><span class="policy-runtime-state" id="disk-runtime-state">NO DATA</span></div>
+      <div class="policy-runtime-item" id="torrent-runtime"><span><strong>qBittorrent</strong><small id="torrent-runtime-detail">Checking process…</small></span><span class="policy-runtime-state" id="torrent-runtime-state">NO DATA</span></div>
+    </div>
+    <p class="policy-request-label">Requested policy</p>
     <div class="policy-controls">
-      <button class="policy-toggle" data-action data-policy-field="disks_enabled" disabled aria-pressed="mixed"><span><strong>Disks enabled</strong><small>Permit mounted storage while conditions allow</small></span><span class="policy-state">NO DATA</span></button>
-      <button class="policy-toggle" data-action data-policy-field="torrents_enabled" disabled aria-pressed="mixed"><span><strong>Torrents enabled</strong><small>Global torrent permission</small></span><span class="policy-state">NO DATA</span></button>
-      <button class="policy-toggle" data-action data-policy-field="allow_starlink_torrents" disabled aria-pressed="mixed"><span><strong>Allow torrents on Starlink</strong><small>Additional permission for Starlink traffic</small></span><span class="policy-state">NO DATA</span></button>
+      <button class="policy-toggle" data-action data-policy-field="disks_enabled" disabled aria-pressed="mixed"><span><strong>Disks enabled</strong><small>Keep storage mounted while parked</small></span><span class="policy-state">NO DATA</span></button>
+      <button class="policy-toggle" data-action data-policy-field="torrents_enabled" disabled aria-pressed="mixed"><span><strong>Torrents enabled</strong><small>Global permission to run qBittorrent</small></span><span class="policy-state">NO DATA</span></button>
+      <button class="policy-toggle" data-action data-policy-field="allow_starlink_torrents" disabled aria-pressed="mixed"><span><strong>Allow torrents on Starlink</strong><small>Additional permission while Starlink is on</small></span><span class="policy-state">NO DATA</span></button>
     </div>
     <ul class="policy-notes">
       <li>Ignition always overrides disk permission.</li>

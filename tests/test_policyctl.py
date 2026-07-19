@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
 import tempfile
@@ -18,6 +19,19 @@ class PolicyctlTests(unittest.TestCase):
         self.mconf = self.root / "mconf"
         self.mconf_last = self.root / "mconf_last"
         self.starconf = self.root / "starconf"
+        self.mountinfo = self.root / "mountinfo"
+        self.mountinfo.write_text(
+            "24 1 179:2 / / rw,relatime - ext4 /dev/mmcblk0p2 rw\n",
+            encoding="utf-8",
+        )
+        self.pgrep = self.root / "pgrep"
+        self.pgrep.write_text(
+            "#!/bin/bash\n"
+            '[[ "$#" == 2 && "$1" == -x && "$2" == qbittorrent-nox ]] || exit 2\n'
+            'exit "${TEST_QBIT_EXIT:-1}"\n',
+            encoding="utf-8",
+        )
+        self.pgrep.chmod(0o700)
         self.environment = {
             **os.environ,
             "VANPI_POLICY_PATH": str(self.policy),
@@ -25,6 +39,8 @@ class PolicyctlTests(unittest.TestCase):
             "VANPI_POLICY_MCONF": str(self.mconf),
             "VANPI_POLICY_MCONF_LAST": str(self.mconf_last),
             "VANPI_POLICY_STARCONF": str(self.starconf),
+            "VANPI_POLICY_MOUNTINFO_PATH": str(self.mountinfo),
+            "VANPI_POLICY_PGREP": str(self.pgrep),
         }
 
     def tearDown(self):
@@ -45,6 +61,13 @@ class PolicyctlTests(unittest.TestCase):
     def read_policy(self):
         return json.loads(self.policy.read_text(encoding="utf-8"))
 
+    def expected_runtime(self, mounted=(), running=False):
+        return {
+            "disks_mounted": bool(mounted),
+            "mounted_disk_labels": list(mounted),
+            "qbittorrent_running": running,
+        }
+
     def test_migrate_uses_new_always_available_defaults(self):
         result = self.run_policyctl("--no-reconcile", "--json", "migrate")
         self.assertEqual(
@@ -54,12 +77,16 @@ class PolicyctlTests(unittest.TestCase):
                 "disks_enabled": True,
                 "torrents_enabled": True,
                 "allow_starlink_torrents": False,
+                "runtime": self.expected_runtime(),
             },
         )
         self.assertEqual(stat.S_IMODE(self.policy.stat().st_mode), 0o600)
         self.assertEqual(
             self.run_policyctl("read").stdout.strip(),
             "1 1 0",
+        )
+        self.assertNotIn(
+            "runtime", json.loads(self.run_policyctl("--json", "read").stdout)
         )
 
     def test_migrate_prefers_requested_state_saved_in_mconf_last(self):
@@ -121,10 +148,63 @@ class PolicyctlTests(unittest.TestCase):
         self.assertTrue(value["disks_enabled"])
         self.assertFalse(value["torrents_enabled"])
         self.assertFalse(value["allow_starlink_torrents"])
+        self.assertEqual(value["runtime"], self.expected_runtime())
 
         request_marker.unlink()
         self.run_policyctl("reconcile", environment=environment)
         self.assertTrue(request_marker.exists())
+
+    def test_status_separates_requested_permission_from_runtime(self):
+        self.run_policyctl("--no-reconcile", "migrate")
+        self.run_policyctl("--no-reconcile", "torrents", "on")
+        self.mountinfo.write_text(
+            "24 1 179:2 / / rw,relatime - ext4 /dev/mmcblk0p2 rw\n"
+            "30 24 8:1 / /mnt/EXFAT512 rw - exfat /dev/sda rw\n"
+            "31 24 8:97 / /mnt/movingparts rw - ext4 /dev/sdg1 rw\n"
+            "32 24 8:49 / /mnt/mbp2tbkup rw - ext4 /dev/sdd1 rw\n",
+            encoding="utf-8",
+        )
+        environment = {**self.environment, "TEST_QBIT_EXIT": "0"}
+
+        status = json.loads(
+            self.run_policyctl("--json", "status", environment=environment).stdout
+        )
+
+        self.assertTrue(status["torrents_enabled"])
+        self.assertEqual(
+            status["runtime"],
+            self.expected_runtime(("movingparts", "mbp2tbkup"), running=True),
+        )
+
+    def test_runtime_managed_labels_match_disk_lifecycle_policy(self):
+        disk_policy = (
+            POLICYCTL.parent / "disk_policy.sh"
+        ).read_text(encoding="utf-8")
+        match = re.search(r"HDD_LABELS=\(\s*(.*?)\s*\)", disk_policy, re.DOTALL)
+        self.assertIsNotNone(match)
+        labels = tuple(match.group(1).split())
+        mount_lines = [
+            "24 1 179:2 / / rw,relatime - ext4 /dev/mmcblk0p2 rw"
+        ]
+        mount_lines.extend(
+            f"{index} 24 8:{index} / /mnt/{label} rw - ext4 /dev/sd{index} rw"
+            for index, label in enumerate(labels, start=30)
+        )
+        self.mountinfo.write_text("\n".join(mount_lines) + "\n", encoding="utf-8")
+        self.run_policyctl("--no-reconcile", "migrate")
+
+        status = json.loads(self.run_policyctl("--json", "status").stdout)
+
+        self.assertEqual(status["runtime"]["mounted_disk_labels"], list(labels))
+
+    def test_runtime_probe_errors_fail_instead_of_reporting_false_state(self):
+        self.run_policyctl("--no-reconcile", "migrate")
+        environment = {**self.environment, "TEST_QBIT_EXIT": "2"}
+
+        result = self.run_policyctl("--json", "status", check=False, environment=environment)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cannot inspect qBittorrent runtime state", result.stderr)
 
     def test_invalid_policy_fails_without_guessing(self):
         self.policy.parent.mkdir(parents=True)
@@ -134,7 +214,9 @@ class PolicyctlTests(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("missing policy fields", result.stderr)
-        self.assertEqual(self.policy.read_text(encoding="utf-8"), '{"disks_enabled": true}\n')
+        self.assertEqual(
+            self.policy.read_text(encoding="utf-8"), '{"disks_enabled": true}\n'
+        )
 
 
 if __name__ == "__main__":
