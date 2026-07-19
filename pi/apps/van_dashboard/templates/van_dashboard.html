@@ -48,6 +48,11 @@
     <button class="tile storage-tile" id="storage" data-dashboard-tile data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="storage-panel">
       <span class="tile-icon" aria-hidden="true">💾</span><span class="tile-title">Disk &amp; Torrent</span><span class="tile-detail" id="storage-summary">Checking current state…</span>
     </button>
+    <button class="tile price-tile" id="price-checks" data-dashboard-tile data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="price-panel">
+      <span class="pill" id="price-pill">—</span><span class="tile-icon" aria-hidden="true">🏷️</span>
+      <span class="tile-title">Price Watch</span><span class="tile-detail" id="price-summary">Loading watched items…</span>
+      <span class="status-lines"><span class="status-line"><span>Last check</span><span id="price-last-check">never</span></span></span>
+    </button>
     <section class="tile lighting-tile" id="lighting-card" data-dashboard-tile aria-labelledby="lighting-title">
       <button class="lighting-open" id="lighting" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="lighting-panel">
         <span class="tile-icon" aria-hidden="true">💡</span>
@@ -118,6 +123,24 @@
     <div class="sheet-grabber"></div><div class="sheet-head"><h2 id="lighting-sheet-title">Lighting</h2><span class="policy-sheet-status" id="lighting-status">Checking…</span><button class="sheet-close" id="lighting-close" aria-label="Close lighting controls">&times;</button></div>
     <p class="sheet-help">Switch or dim individual lights, a room, or every available light.</p>
     <div class="lighting-groups" id="lighting-groups"><div class="speaker-loading">Loading lights…</div></div>
+  </section>
+</div>
+<div class="speaker-backdrop" id="price-backdrop">
+  <section class="speaker-sheet price-sheet" id="price-panel" role="dialog" aria-modal="true" aria-labelledby="price-sheet-title" aria-busy="true">
+    <div class="sheet-grabber"></div><div class="sheet-head"><h2 id="price-sheet-title">Price Watch</h2><span class="policy-sheet-status" id="price-operation">Loading…</span><button class="sheet-close" id="price-close" aria-label="Close price checks">&times;</button></div>
+    <p class="sheet-help">Private listings stored only on vanpi. Scheduled checks run at 10:00, 15:00, and 20:00.</p>
+    <div class="price-actions"><button class="speedtest-button" id="price-check-all" data-action><span class="speed-icon" aria-hidden="true">↻</span><span class="speed-spinner" aria-hidden="true"></span><span>Check all now</span></button></div>
+    <div class="price-list" id="price-list"><div class="speaker-loading">Loading price checks…</div></div>
+    <form class="price-form" id="price-add-form">
+      <h3 id="price-form-title">Add an item</h3>
+      <div class="price-form-grid">
+        <label><span>Parser</span><select id="price-parser" name="parser"><option value="amazon">Amazon</option></select></label>
+        <label><span>Alert below</span><input id="price-threshold" name="threshold" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="55.00" required></label>
+        <label class="price-form-wide"><span>Product URL</span><input id="price-url" name="url" type="url" inputmode="url" autocomplete="url" placeholder="https://…" required></label>
+        <label class="price-form-wide"><span>Title <small>optional</small></span><input id="price-title" name="title" type="text" maxlength="160" autocomplete="off" placeholder="Friendly item name"></label>
+      </div>
+      <div class="price-form-actions"><button class="price-edit-cancel" id="price-edit-cancel" type="button" hidden>Cancel</button><button class="price-add" id="price-submit" type="submit" data-action>Add price check</button></div>
+    </form>
   </section>
 </div>
 <div class="speaker-backdrop" id="ubnt-wifi-backdrop">

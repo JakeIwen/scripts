@@ -3,6 +3,9 @@ ubnt/private-backups/
 .DS_Store
 secrets/*
 **/secrets/*
+**/price_checks*.tsv
+**/price_checks.disabled
+**/price_check*.sqlite*
 **/log/
 craigslist-scrape/*
 tmp/*

@@ -1,131 +1,64 @@
 #!/usr/bin/python3
-"""Check configured product prices and send ntfy alerts below a threshold."""
+"""Manage private product listings and check their current prices."""
 
 from __future__ import annotations
 
 import argparse
 import csv
-import io
+import fcntl
 import json
 import os
 import subprocess
 import sys
-import tempfile
-from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from urllib.parse import urlparse, urlsplit, urlunsplit
+from urllib.parse import urlparse
 
 from amazon_parser import AmazonParseError, Product, parse as parse_amazon
+from store import PriceStore, StoreError, normalized_url
 
 
-DEFAULT_CONFIG = Path("/home/pi/configs/price_checks.tsv")
-DEFAULT_TITLE_CACHE = Path("/home/pi/.local/state/price_check/titles.json")
-CURL = "/usr/bin/curl"
+DEFAULT_DB = Path(
+    os.environ.get(
+        "PRICE_CHECK_DB", "/home/pi/.local/share/price_check/price_check.sqlite3"
+    )
+)
 DEFAULT_NTFY_SENDER = "/home/pi/scripts/ntfy_send.sh"
+CURL = "/usr/bin/curl"
 USER_AGENT = (
     "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 "
     "Chrome/126.0 Safari/537.36"
 )
+PARSERS = {"amazon": parse_amazon}
 
 
 class PriceCheckError(RuntimeError):
     pass
 
 
-@dataclass(frozen=True)
-class Listing:
-    parser: str
-    threshold: Decimal
-    url: str
-    title: str | None = None
-
-
-PARSERS = {"amazon": parse_amazon}
-
-
-def read_config(path: Path, *, allow_empty: bool = False) -> list[Listing]:
-    listings: list[Listing] = []
-    with path.open(encoding="utf-8", newline="") as config_file:
-        rows = csv.reader(config_file, delimiter="\t")
-        for line_number, row in enumerate(rows, 1):
-            if not row or row[0].lstrip().startswith("#"):
-                continue
-            if len(row) not in {3, 4}:
-                raise PriceCheckError(
-                    f"{path}:{line_number}: expected parser, threshold, URL, "
-                    "and optional title"
-                )
-            parser, threshold_text, url = (field.strip() for field in row[:3])
-            title = row[3].strip() if len(row) == 4 else ""
-            if parser not in PARSERS:
-                raise PriceCheckError(
-                    f"{path}:{line_number}: unknown parser {parser!r}"
-                )
-            try:
-                threshold = Decimal(threshold_text)
-            except InvalidOperation as error:
-                raise PriceCheckError(
-                    f"{path}:{line_number}: invalid threshold {threshold_text!r}"
-                ) from error
-            if threshold <= 0:
-                raise PriceCheckError(
-                    f"{path}:{line_number}: threshold must be greater than zero"
-                )
-            parsed_url = urlparse(url)
-            if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
-                raise PriceCheckError(f"{path}:{line_number}: invalid URL {url!r}")
-            listings.append(Listing(parser, threshold, url, title or None))
-    if not listings and not allow_empty:
-        raise PriceCheckError(f"{path}: no listings configured")
-    return listings
-
-
-def local_config_path(path: Path) -> Path:
-    return path.with_name(f"{path.stem}.local{path.suffix}")
-
-
-def disabled_config_path(path: Path) -> Path:
-    return path.with_name(f"{path.stem}.disabled")
-
-
-def normalized_url(url: str) -> str:
-    parts = urlsplit(url.strip())
-    return urlunsplit(
-        (parts.scheme.lower(), parts.netloc.lower(), parts.path, parts.query, "")
-    )
-
-
-def read_disabled_urls(path: Path) -> set[str]:
+def parse_money(text: str) -> Decimal:
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except FileNotFoundError:
-        return set()
-    except OSError as error:
-        raise PriceCheckError(f"could not read disabled listings {path}: {error}") from error
-    return {
-        normalized_url(line)
-        for line in lines
-        if line.strip() and not line.lstrip().startswith("#")
-    }
+        value = Decimal(text)
+    except InvalidOperation as error:
+        raise PriceCheckError(f"invalid dollar amount {text!r}") from error
+    if value <= 0 or value * 100 != (value * 100).to_integral_value():
+        raise PriceCheckError("dollar amount must be positive with at most two decimals")
+    return value
 
 
-def read_configs(path: Path) -> list[Listing]:
-    listings = read_config(path)
-    local_path = local_config_path(path)
-    if local_path.exists():
-        listings.extend(read_config(local_path, allow_empty=True))
-    seen_urls: set[str] = set()
-    for listing in listings:
-        if listing.url in seen_urls:
-            raise PriceCheckError(f"duplicate URL across price configs: {listing.url}")
-        seen_urls.add(listing.url)
-    disabled_urls = read_disabled_urls(disabled_config_path(path))
-    return [
-        listing
-        for listing in listings
-        if normalized_url(listing.url) not in disabled_urls
-    ]
+def validate_listing(parser: str, threshold: str, url: str, title: str = "") -> tuple:
+    if parser not in PARSERS:
+        raise PriceCheckError(f"unknown parser {parser!r}")
+    parsed_url = urlparse(url)
+    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+        raise PriceCheckError(f"invalid URL {url!r}")
+    if len(url) > 4096:
+        raise PriceCheckError("URL is too long")
+    if any(character in title for character in ("\t", "\r", "\n")):
+        raise PriceCheckError("title cannot contain tabs or newlines")
+    if len(title) > 160:
+        raise PriceCheckError("title must be 160 characters or fewer")
+    return parser, parse_money(threshold), url, title.strip() or None
 
 
 def fetch(url: str) -> str:
@@ -157,240 +90,233 @@ def fetch(url: str) -> str:
     return result.stdout
 
 
-def load_title_cache(path: Path) -> dict[str, str]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return {}
-    except (OSError, json.JSONDecodeError) as error:
-        raise PriceCheckError(f"could not read title cache {path}: {error}") from error
-    if not isinstance(data, dict) or not all(
-        isinstance(url, str) and isinstance(title, str)
-        for url, title in data.items()
-    ):
-        raise PriceCheckError(f"title cache {path} is not a string-to-string object")
-    return data
-
-
-def save_title_cache(path: Path, titles: dict[str, str]) -> None:
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{path.name}.", dir=path.parent, text=True
-    )
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as cache_file:
-            json.dump(titles, cache_file, indent=2, sort_keys=True)
-            cache_file.write("\n")
-            cache_file.flush()
-            os.fsync(cache_file.fileno())
-        os.chmod(temporary_name, 0o600)
-        os.replace(temporary_name, path)
-    except BaseException:
-        try:
-            os.unlink(temporary_name)
-        except FileNotFoundError:
-            pass
-        raise
-
-
-def write_text_atomic(path: Path, content: str) -> None:
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{path.name}.", dir=path.parent, text=True
-    )
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
-            output.write(content)
-            output.flush()
-            os.fsync(output.fileno())
-        os.chmod(temporary_name, 0o600)
-        os.replace(temporary_name, path)
-    except BaseException:
-        try:
-            os.unlink(temporary_name)
-        except FileNotFoundError:
-            pass
-        raise
-
-
-def serialize_listings(listings: list[Listing]) -> str:
-    output = io.StringIO()
-    output.write("# Local additions; parser<TAB>threshold<TAB>URL<TAB>title (optional)\n")
-    writer = csv.writer(output, delimiter="\t", lineterminator="\n")
-    for listing in listings:
-        row = [listing.parser, str(listing.threshold), listing.url]
-        if listing.title:
-            row.append(listing.title)
-        writer.writerow(row)
-    return output.getvalue()
-
-
-def remove_listing(config_path: Path, title_cache: dict[str, str], match: str) -> str:
-    base_listings = read_config(config_path)
-    local_path = local_config_path(config_path)
-    local_listings = (
-        read_config(local_path, allow_empty=True) if local_path.exists() else []
-    )
-    disabled_path = disabled_config_path(config_path)
-    disabled_urls = read_disabled_urls(disabled_path)
-    active = [
-        (source, listing)
-        for source, listings in (("base", base_listings), ("local", local_listings))
-        for listing in listings
-        if normalized_url(listing.url) not in disabled_urls
-    ]
-
-    if match.startswith(("http://", "https://")):
-        wanted_url = normalized_url(match)
-        matches = [item for item in active if normalized_url(item[1].url) == wanted_url]
-    else:
-        wanted_title = match.strip().casefold()
-        matches = [
-            item
-            for item in active
-            if (item[1].title or title_cache.get(item[1].url, "")).strip().casefold()
-            == wanted_title
-        ]
-    if not matches:
-        raise PriceCheckError(f"no active price check matches {match!r}")
-    if len(matches) > 1:
-        urls = ", ".join(listing.url for _, listing in matches)
-        raise PriceCheckError(f"multiple price checks match {match!r}: {urls}")
-
-    source, listing = matches[0]
-    if source == "local":
-        remaining = [item for item in local_listings if item.url != listing.url]
-        if remaining:
-            write_text_atomic(local_path, serialize_listings(remaining))
-        else:
-            local_path.unlink()
-    else:
-        disabled_urls.add(normalized_url(listing.url))
-        content = "# Base-config URLs disabled on this Pi\n" + "".join(
-            f"{url}\n" for url in sorted(disabled_urls)
-        )
-        write_text_atomic(disabled_path, content)
-    return listing.title or title_cache.get(listing.url) or listing.url
-
-
 def send_ntfy(title: str, message: str, priority: str, tags: str) -> None:
-    endpoint = os.environ.get("NTFY_PRICE_URL")
-    if not endpoint:
-        raise PriceCheckError("NTFY_PRICE_URL is not set")
     sender = os.environ.get("NTFY_SEND_BIN", DEFAULT_NTFY_SENDER)
     env = os.environ.copy()
-    env["NTFY_URL"] = endpoint
+    env["NTFY_TOPIC_VAR"] = "NTFY_PRICE_URL"
     try:
-        subprocess.run(
-            [sender, title, message, priority, tags],
-            check=True,
-            env=env,
-        )
+        subprocess.run([sender, title, message, priority, tags], check=True, env=env)
     except (OSError, subprocess.CalledProcessError) as error:
         raise PriceCheckError(f"notification failed: {error}") from error
 
 
-def send_alert(listing: Listing, product: Product, item_title: str) -> None:
-    title = f"{item_title}: ${product.price:.2f} < ${listing.threshold:.2f}"
-    message = listing.url
-    send_ntfy(title, message, "high", "moneybag")
+def send_price_alert(item: dict, product: Product) -> None:
+    title = f"{item['display_title']}: ${product.price:.2f} < ${item['threshold']}"
+    send_ntfy(title, item["url"], "high", "moneybag")
 
 
-def send_parser_error(
-    listing: Listing, error: AmazonParseError, item_title: str
-) -> None:
-    title = f"{item_title}: price parser needs update"
-    message = f"Could not parse the product page HTML.\n{error}\n{listing.url}"
+def send_parser_error(item: dict, error: AmazonParseError) -> None:
+    title = f"{item['display_title']}: price parser needs update"
+    message = f"Could not parse the product page HTML.\n{error}\n{item['url']}"
     send_ntfy(title, message, "high", "warning")
 
 
-def check_listing(
-    listing: Listing, title_cache: dict[str, str] | None = None, *, dry_run: bool = False
-) -> None:
-    if title_cache is None:
-        title_cache = {}
+def check_item(
+    store: PriceStore, item: dict, *, notify: bool = True, record: bool = True
+) -> dict:
     try:
-        product = PARSERS[listing.parser](fetch(listing.url))
+        product = PARSERS[item["parser"]](fetch(item["url"]))
     except AmazonParseError as error:
-        item_title = listing.title or title_cache.get(listing.url) or listing.url
-        if not dry_run:
+        if record:
+            store.record_error(item["id"], str(error))
+        if notify:
             try:
-                send_parser_error(listing, error, item_title)
+                send_parser_error(item, error)
             except PriceCheckError as notify_error:
                 raise PriceCheckError(
                     f"{error}; parser-error notification failed: {notify_error}"
                 ) from notify_error
         raise PriceCheckError(str(error)) from error
-    scraped_title = product.title if product.title != "Amazon product" else ""
-    item_title = listing.title or scraped_title or title_cache.get(listing.url) or listing.url
-    if not dry_run and not listing.title and scraped_title:
-        title_cache[listing.url] = scraped_title
-    relation = "below" if product.price < listing.threshold else "not below"
-    print(
-        f"{item_title}: ${product.price:.2f} is {relation} "
-        f"${listing.threshold:.2f}"
-    )
-    if product.price < listing.threshold and not dry_run:
-        send_alert(listing, product, item_title)
+    except PriceCheckError as error:
+        if record:
+            store.record_error(item["id"], str(error))
+        raise
+
+    if record:
+        updated = store.record_success(item["id"], product.title, product.price)
+    else:
+        updated = {
+            **item,
+            "last_price": f"{product.price:.2f}",
+            "last_price_cents": int(product.price * 100),
+            "last_title": product.title,
+            "display_title": item["title"] or product.title,
+            "below_threshold": product.price < Decimal(item["threshold"]),
+        }
+    if updated["below_threshold"] and notify:
+        send_price_alert(updated, product)
+    return updated
+
+
+def check_items(
+    store: PriceStore, items: list[dict], *, notify: bool = True, record: bool = True
+) -> tuple[list[dict], list[dict]]:
+    checked, errors = [], []
+    for item in items:
+        try:
+            updated = check_item(store, item, notify=notify, record=record)
+            checked.append(updated)
+            print(
+                f"{updated['display_title']}: ${updated['last_price']} is "
+                f"{'below' if updated['below_threshold'] else 'not below'} "
+                f"${updated['threshold']}",
+                file=sys.stderr,
+            )
+        except (PriceCheckError, StoreError) as error:
+            errors.append({"id": item["id"], "message": str(error)})
+            print(f"price-check: {item['url']}: {error}", file=sys.stderr)
+    return checked, errors
+
+
+def summary(items: list[dict]) -> dict:
+    return {
+        "count": len(items),
+        "checked": sum(item["last_checked_at"] is not None for item in items),
+        "below_threshold": sum(item["below_threshold"] is True for item in items),
+        "errors": sum(item["last_status"] == "error" for item in items),
+    }
+
+
+def response(store: PriceStore, **extra) -> dict:
+    items = store.list_items()
+    return {"ok": True, "items": items, "summary": summary(items), **extra}
+
+
+def migrate_tsv(store: PriceStore, path: Path) -> int:
+    paths = [path, path.with_name(f"{path.stem}.local{path.suffix}")]
+    disabled_path = path.with_name(f"{path.stem}.disabled")
+    disabled = set()
+    if disabled_path.exists():
+        disabled = {
+            normalized_url(line)
+            for line in disabled_path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+    added = 0
+    for candidate in paths:
+        if not candidate.exists():
+            continue
+        with candidate.open(encoding="utf-8", newline="") as source:
+            for line_number, row in enumerate(csv.reader(source, delimiter="\t"), 1):
+                if not row or row[0].lstrip().startswith("#"):
+                    continue
+                if len(row) not in {3, 4}:
+                    raise PriceCheckError(f"{candidate}:{line_number}: invalid TSV row")
+                parser, threshold, url = (value.strip() for value in row[:3])
+                title = row[3].strip() if len(row) == 4 else ""
+                if normalized_url(url) in disabled:
+                    continue
+                values = validate_listing(parser, threshold, url, title)
+                try:
+                    store.add_item(*values)
+                    added += 1
+                except StoreError as error:
+                    if "already configured" not in str(error):
+                        raise
+    return added
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--db", type=Path, default=DEFAULT_DB)
+    parser.add_argument("--json", action="store_true", help="emit JSON on stdout")
+    parser.add_argument("--dry-run", action="store_true", help="check without notifying")
+    commands = parser.add_subparsers(dest="command")
+    commands.add_parser("list", help="list configured products")
+    check = commands.add_parser("check", help="check one item ID or all items")
+    check.add_argument("target", nargs="?", default="all")
+    add = commands.add_parser("add", help="add a product")
+    add.add_argument("parser")
+    add.add_argument("threshold")
+    add.add_argument("url")
+    add.add_argument("title", nargs="?", default="")
+    edit = commands.add_parser("edit", help="edit an existing product")
+    edit.add_argument("id", type=int)
+    edit.add_argument("parser")
+    edit.add_argument("threshold")
+    edit.add_argument("url")
+    edit.add_argument("title", nargs="?", default="")
+    remove = commands.add_parser("remove", help="remove by ID, title, or URL")
+    remove.add_argument("match")
+    migrate = commands.add_parser("migrate-tsv", help="import the old private TSV")
+    migrate.add_argument("path", type=Path)
+    return parser
+
+
+def emit(args, payload: dict, message: str | None = None) -> None:
+    if args.json:
+        print(json.dumps(payload, separators=(",", ":")))
+    elif message:
+        print(message)
+    elif args.command == "list":
+        for item in payload["items"]:
+            price = f"${item['last_price']}" if item["last_price"] else "not checked"
+            print(f"{item['id']}\t{item['display_title']}\t{price}\t{item['url']}")
 
 
 def main() -> int:
-    argument_parser = argparse.ArgumentParser(description=__doc__)
-    argument_parser.add_argument(
-        "--config", type=Path, default=DEFAULT_CONFIG, help="tab-separated listings"
-    )
-    argument_parser.add_argument(
-        "--title-cache",
-        type=Path,
-        default=DEFAULT_TITLE_CACHE,
-        help="runtime cache for scraped titles",
-    )
-    argument_parser.add_argument(
-        "--dry-run", action="store_true", help="check prices without notifying"
-    )
-    argument_parser.add_argument(
-        "--remove", metavar="TITLE_OR_URL", help="remove one configured listing"
-    )
-    args = argument_parser.parse_args()
+    args = build_parser().parse_args()
+    command = args.command or "run"
+    try:
+        with PriceStore(args.db) as store:
+            if command == "list":
+                emit(args, response(store))
+                return 0
+            if command == "add":
+                values = validate_listing(args.parser, args.threshold, args.url, args.title)
+                item = store.add_item(*values)
+                emit(args, response(store, item=item), f"added price check: {item['display_title']}")
+                return 0
+            if command == "edit":
+                values = validate_listing(args.parser, args.threshold, args.url, args.title)
+                item = store.update_item(args.id, *values)
+                emit(
+                    args,
+                    response(store, item=item),
+                    f"updated price check: {item['display_title']}",
+                )
+                return 0
+            if command == "remove":
+                item = store.remove_item(args.match)
+                emit(args, response(store, removed=item), f"removed price check: {item['display_title']}")
+                return 0
+            if command == "migrate-tsv":
+                count = migrate_tsv(store, args.path)
+                emit(args, response(store, migrated=count), f"migrated {count} price checks")
+                return 0
 
-    failures = 0
-    if args.remove:
-        try:
-            title_cache = load_title_cache(args.title_cache)
-        except PriceCheckError as error:
-            print(f"price-check: warning: {error}", file=sys.stderr)
-            title_cache = {}
-        try:
-            removed_title = remove_listing(args.config, title_cache, args.remove)
-        except (OSError, PriceCheckError) as error:
+            lock_path = args.db.with_suffix(".check.lock")
+            lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            with lock_path.open("a", encoding="utf-8") as lock:
+                os.chmod(lock_path, 0o600)
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError as error:
+                    raise PriceCheckError("another price check is already running") from error
+                if command == "check" and args.target != "all":
+                    try:
+                        items = [store.get_item(int(args.target))]
+                    except ValueError as error:
+                        raise PriceCheckError("check target must be an item ID or 'all'") from error
+                else:
+                    items = store.list_items()
+                checked, errors = check_items(
+                    store,
+                    items,
+                    notify=not args.dry_run,
+                    record=not args.dry_run,
+                )
+                payload = response(store, checked=checked, check_errors=errors)
+                if errors:
+                    payload["message"] = "; ".join(error["message"] for error in errors)
+                emit(args, payload)
+                return 1 if errors else 0
+    except (OSError, PriceCheckError, StoreError) as error:
+        if args.json:
+            print(json.dumps({"ok": False, "message": str(error)}, separators=(",", ":")))
+        else:
             print(f"price-check: {error}", file=sys.stderr)
-            return 1
-        print(f"removed price check: {removed_title}")
-        return 0
-    try:
-        listings = read_configs(args.config)
-    except (OSError, PriceCheckError) as error:
-        print(f"price-check: {error}", file=sys.stderr)
         return 1
-    try:
-        title_cache = load_title_cache(args.title_cache)
-    except PriceCheckError as error:
-        print(f"price-check: warning: {error}", file=sys.stderr)
-        title_cache = {}
-    original_title_cache = title_cache.copy()
-    for listing in listings:
-        try:
-            check_listing(listing, title_cache, dry_run=args.dry_run)
-        except PriceCheckError as error:
-            failures += 1
-            print(f"price-check: {listing.url}: {error}", file=sys.stderr)
-    if not args.dry_run and title_cache != original_title_cache:
-        try:
-            save_title_cache(args.title_cache, title_cache)
-        except OSError as error:
-            failures += 1
-            print(f"price-check: could not save title cache: {error}", file=sys.stderr)
-    return 1 if failures else 0
 
 
 if __name__ == "__main__":

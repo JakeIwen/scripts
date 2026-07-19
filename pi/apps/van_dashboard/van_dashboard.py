@@ -23,6 +23,7 @@ import re
 import socket
 import struct
 import subprocess
+import sys
 import threading
 import time
 from urllib.parse import urlsplit
@@ -55,6 +56,16 @@ SPEEDTEST = os.path.expanduser(
 )
 CONNECTIVITY_INTERVAL = float(os.environ.get("VAN_DASHBOARD_CONNECTIVITY_INTERVAL", "30"))
 SPEEDTEST_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_SPEEDTEST_TIMEOUT", "180"))
+PRICE_CHECK_TOOL = os.environ.get(
+    "VAN_DASHBOARD_PRICE_CHECK_TOOL", "/home/pi/scripts/price_check/main.py"
+)
+PRICE_CHECK_DB = os.path.expanduser(
+    os.environ.get(
+        "VAN_DASHBOARD_PRICE_CHECK_DB",
+        "/home/pi/.local/share/price_check/price_check.sqlite3",
+    )
+)
+PRICE_CHECK_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_PRICE_CHECK_TIMEOUT", "180"))
 TUYA_POLL_INTERVAL = float(os.environ.get("VAN_DASHBOARD_TUYA_POLL_INTERVAL", "15"))
 POLICYCTL_TIMEOUT = 15
 COP_LED_TARGET = os.environ.get("VAN_DASHBOARD_COP_LED_TARGET", "light.ext_led")
@@ -1829,6 +1840,70 @@ class SpeedTestManager:
             self.data["error"] = error
 
 
+class PriceCheckCommandError(RuntimeError):
+    pass
+
+
+class PriceCheckController:
+    """Use the price-check CLI as the sole database and validation boundary."""
+
+    def __init__(
+        self,
+        tool=PRICE_CHECK_TOOL,
+        database=PRICE_CHECK_DB,
+        command=run_command,
+        timeout=PRICE_CHECK_TIMEOUT,
+    ):
+        self.tool = tool
+        self.database = database
+        self.command = command
+        self.timeout = timeout
+
+    def _run(self, *arguments, timeout=None):
+        argv = [
+            sys.executable,
+            self.tool,
+            "--db",
+            self.database,
+            "--json",
+            *[str(argument) for argument in arguments],
+        ]
+        try:
+            result = self.command(argv, timeout=timeout or self.timeout)
+        except subprocess.TimeoutExpired as error:
+            raise PriceCheckCommandError("price check timed out") from error
+        except OSError as error:
+            raise PriceCheckCommandError(f"could not start price checker: {error}") from error
+        try:
+            payload = json.loads(result.stdout)
+        except (TypeError, ValueError) as error:
+            detail = (result.stderr or result.stdout or "no output").strip()[-500:]
+            raise PriceCheckCommandError(
+                f"price checker returned invalid output: {detail}"
+            ) from error
+        if result.returncode or not isinstance(payload, dict) or payload.get("ok") is not True:
+            message = payload.get("message") if isinstance(payload, dict) else None
+            raise PriceCheckCommandError(message or "price checker failed")
+        return payload
+
+    def status(self):
+        return self._run("list", timeout=20)
+
+    def add(self, parser, threshold, url, title=""):
+        return self._run("add", parser, threshold, url, title, timeout=20)
+
+    def edit(self, item_id, parser, threshold, url, title=""):
+        return self._run(
+            "edit", item_id, parser, threshold, url, title, timeout=20
+        )
+
+    def remove(self, item_id):
+        return self._run("remove", item_id, timeout=20)
+
+    def check(self, target="all"):
+        return self._run("check", target)
+
+
 app = Flask(__name__)
 state_store = StateStore()
 engine_monitor = EngineMonitor()
@@ -1841,6 +1916,7 @@ speedtest = SpeedTestManager()
 starlink = TuyaSwitchManager("starlink")
 storage_policy = StoragePolicyManager()
 lighting = LightingController()
+price_checks = PriceCheckController()
 
 
 def api_error(message, status):
@@ -1856,13 +1932,13 @@ def request_boolean(name):
 
 @app.before_request
 def reject_cross_origin_mutations():
-    """Block browser CSRF against vehicle-control POST endpoints.
+    """Block browser CSRF against dashboard mutation endpoints.
 
     Command-line clients without browser Origin/Referer headers remain usable.
     The custom header also forces a cross-origin fetch to preflight, and this
     server intentionally grants no cross-origin access.
     """
-    if request.method != "POST":
+    if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
         return None
     origin = request.headers.get("Origin")
     referer = request.headers.get("Referer")
@@ -2121,6 +2197,84 @@ def api_speedtest():
         message = "Speed test started" if started else "Speed test is already running"
         return jsonify({"ok": True, "message": message, "speedtest": speedtest.snapshot()})
     return jsonify({"ok": True, "speedtest": speedtest.snapshot()})
+
+
+@app.route("/api/price-checks")
+def api_price_checks():
+    try:
+        payload = price_checks.status()
+    except PriceCheckCommandError as exc:
+        return api_error(f"could not read price checks: {exc}", 502)
+    response = jsonify(payload)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/api/price-checks/add", methods=["POST"])
+def api_price_checks_add():
+    if not _exact_form(("parser", "threshold", "url", "title")):
+        return api_error("price check requires parser, threshold, URL, and title", 400)
+    try:
+        payload = price_checks.add(
+            request.form["parser"],
+            request.form["threshold"],
+            request.form["url"],
+            request.form["title"],
+        )
+    except PriceCheckCommandError as exc:
+        return api_error(f"could not add price check: {exc}", 400)
+    payload["message"] = f"Watching {payload['item']['display_title']}"
+    return jsonify(payload)
+
+
+@app.route("/api/price-checks/remove", methods=["POST"])
+def api_price_checks_remove():
+    if not _exact_form(("id",)) or not request.form["id"].isdigit():
+        return api_error("price check removal requires an item ID", 400)
+    try:
+        payload = price_checks.remove(request.form["id"])
+    except PriceCheckCommandError as exc:
+        return api_error(f"could not remove price check: {exc}", 400)
+    payload["message"] = f"Removed {payload['removed']['display_title']}"
+    return jsonify(payload)
+
+
+@app.route("/api/price-checks/edit", methods=["POST"])
+def api_price_checks_edit():
+    fields = ("id", "parser", "threshold", "url", "title")
+    if not _exact_form(fields) or not request.form["id"].isdigit():
+        return api_error(
+            "price check edit requires ID, parser, threshold, URL, and title", 400
+        )
+    try:
+        payload = price_checks.edit(
+            request.form["id"],
+            request.form["parser"],
+            request.form["threshold"],
+            request.form["url"],
+            request.form["title"],
+        )
+    except PriceCheckCommandError as exc:
+        return api_error(f"could not edit price check: {exc}", 400)
+    payload["message"] = f"Updated {payload['item']['display_title']}"
+    return jsonify(payload)
+
+
+@app.route("/api/price-checks/check", methods=["POST"])
+def api_price_checks_check():
+    if not _exact_form(("target",)):
+        return api_error("price check requires one item ID or all", 400)
+    target = request.form["target"]
+    if target != "all" and not target.isdigit():
+        return api_error("price check target must be an item ID or all", 400)
+    try:
+        payload = price_checks.check(target)
+    except PriceCheckCommandError as exc:
+        status = 409 if "already running" in str(exc) else 502
+        return api_error(f"could not check price: {exc}", status)
+    count = len(payload.get("checked", ()))
+    payload["message"] = f"Checked {count} price {'item' if count == 1 else 'items'}"
+    return jsonify(payload)
 
 
 @app.route("/api/cop-alert", methods=["POST"])

@@ -1,5 +1,5 @@
 [Unit]
-Description=Van Dashboard web UI (COP ALERT, Tuya, Sonos, connectivity on :8788)
+Description=Van Dashboard web UI (vehicle, network, media, and price controls on :8788)
 After=network-online.target
 Wants=network-online.target
 

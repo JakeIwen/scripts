@@ -274,6 +274,185 @@ class ConnectivityMonitorTests(unittest.TestCase):
         self.assertTrue(monitor.refresh_event.is_set())
 
 
+class PriceCheckControllerTests(unittest.TestCase):
+    PAYLOAD = {
+        "ok": True,
+        "items": [
+            {
+                "id": 7,
+                "display_title": "Protein shakes",
+                "threshold": "55.00",
+                "last_price": "63.15",
+            }
+        ],
+        "summary": {"count": 1, "checked": 1, "below_threshold": 0, "errors": 0},
+    }
+
+    def test_uses_fixed_cli_and_parses_json(self):
+        calls = []
+
+        def command(args, timeout):
+            calls.append((list(args), timeout))
+            return SimpleNamespace(
+                returncode=0, stdout=json.dumps(self.PAYLOAD), stderr=""
+            )
+
+        controller = dashboard.PriceCheckController(
+            tool="/test/price/main.py",
+            database="/private/prices.sqlite3",
+            command=command,
+            timeout=91,
+        )
+        self.assertEqual(controller.status(), self.PAYLOAD)
+        controller.add("amazon", "55", "https://example.com/item", "Example")
+        controller.edit(7, "amazon", "45", "https://example.com/updated", "Updated")
+        controller.remove(7)
+        controller.check(7)
+        prefix = [
+            dashboard.sys.executable,
+            "/test/price/main.py",
+            "--db",
+            "/private/prices.sqlite3",
+            "--json",
+        ]
+        self.assertEqual(calls[0], (prefix + ["list"], 20))
+        self.assertEqual(
+            calls[1],
+            (prefix + ["add", "amazon", "55", "https://example.com/item", "Example"], 20),
+        )
+        self.assertEqual(
+            calls[2],
+            (
+                prefix
+                + [
+                    "edit",
+                    "7",
+                    "amazon",
+                    "45",
+                    "https://example.com/updated",
+                    "Updated",
+                ],
+                20,
+            ),
+        )
+        self.assertEqual(calls[3], (prefix + ["remove", "7"], 20))
+        self.assertEqual(calls[4], (prefix + ["check", "7"], 91))
+
+    def test_rejects_failed_or_non_json_cli_output(self):
+        def failed(_args, timeout):
+            return SimpleNamespace(
+                returncode=1,
+                stdout=json.dumps({"ok": False, "message": "duplicate URL"}),
+                stderr="",
+            )
+
+        with self.assertRaisesRegex(dashboard.PriceCheckCommandError, "duplicate URL"):
+            dashboard.PriceCheckController(command=failed).status()
+
+        def malformed(_args, timeout):
+            return SimpleNamespace(returncode=0, stdout="not-json", stderr="broken")
+
+        with self.assertRaisesRegex(dashboard.PriceCheckCommandError, "invalid output"):
+            dashboard.PriceCheckController(command=malformed).status()
+
+
+class PriceCheckApiTests(unittest.TestCase):
+    def setUp(self):
+        self.original = dashboard.price_checks
+        self.client = dashboard.app.test_client()
+
+    def tearDown(self):
+        dashboard.price_checks = self.original
+
+    def test_list_add_check_and_remove(self):
+        calls = []
+        payload = {
+            "ok": True,
+            "items": [],
+            "summary": {"count": 0, "checked": 0, "below_threshold": 0, "errors": 0},
+        }
+
+        class FakePriceChecks:
+            def status(self):
+                calls.append(("status",))
+                return dict(payload)
+
+            def add(self, *args):
+                calls.append(("add", *args))
+                return {**payload, "item": {"display_title": "Example"}}
+
+            def edit(self, *args):
+                calls.append(("edit", *args))
+                return {**payload, "item": {"display_title": "Updated"}}
+
+            def check(self, target):
+                calls.append(("check", target))
+                return {**payload, "checked": [{"id": 7}]}
+
+            def remove(self, item_id):
+                calls.append(("remove", item_id))
+                return {**payload, "removed": {"display_title": "Example"}}
+
+        dashboard.price_checks = FakePriceChecks()
+        self.assertEqual(self.client.get("/api/price-checks").status_code, 200)
+        add = self.client.post(
+            "/api/price-checks/add",
+            data={
+                "parser": "amazon",
+                "threshold": "55",
+                "url": "https://example.com/item",
+                "title": "Example",
+            },
+        )
+        self.assertEqual(add.status_code, 200)
+        self.assertEqual(add.get_json()["message"], "Watching Example")
+        edit = self.client.post(
+            "/api/price-checks/edit",
+            data={
+                "id": "7",
+                "parser": "amazon",
+                "threshold": "45",
+                "url": "https://example.com/updated",
+                "title": "Updated",
+            },
+        )
+        self.assertEqual(edit.status_code, 200)
+        self.assertEqual(edit.get_json()["message"], "Updated Updated")
+        self.assertEqual(
+            self.client.post("/api/price-checks/check", data={"target": "7"}).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.post("/api/price-checks/remove", data={"id": "7"}).status_code,
+            200,
+        )
+        self.assertEqual(
+            calls,
+            [
+                ("status",),
+                ("add", "amazon", "55", "https://example.com/item", "Example"),
+                (
+                    "edit",
+                    "7",
+                    "amazon",
+                    "45",
+                    "https://example.com/updated",
+                    "Updated",
+                ),
+                ("check", "7"),
+                ("remove", "7"),
+            ],
+        )
+
+    def test_rejects_bad_forms_before_running_cli(self):
+        class NeverCalled:
+            def __getattr__(self, _name):
+                self.fail("controller should not be called")
+
+        response = self.client.post("/api/price-checks/check", data={"target": "bad"})
+        self.assertEqual(response.status_code, 400)
+
+
 class UbntWifiControllerTests(unittest.TestCase):
     WIFI = {
         "version": 1,
@@ -964,6 +1143,11 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"Group volume", page.data)
         self.assertIn(b"data-group-mute", page.data)
         self.assertIn(b"Disks &amp; Torrents", page.data)
+        self.assertIn(b'id="price-checks"', page.data)
+        self.assertIn(b'id="price-panel"', page.data)
+        self.assertIn(b'id="price-add-form"', page.data)
+        self.assertIn(b'id="price-edit-cancel"', page.data)
+        self.assertIn(b"Check all now", page.data)
         self.assertIn(b"Managed disks", page.data)
         self.assertIn(b'id="lighting-title">Lighting', page.data)
         self.assertIn(b'id="lighting-master"', page.data)
@@ -978,7 +1162,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertNotIn(b'id="connectivity-age"', page.data)
         self.assertIn(b'id="openwrt-card" data-dashboard-tile', page.data)
         self.assertIn(b'id="speedtest-button" data-dashboard-tile', page.data)
-        self.assertEqual(page.data.count(b"data-dashboard-tile"), 9)
+        self.assertEqual(page.data.count(b"data-dashboard-tile"), 10)
         self.assertIn(b'class="network-card speedtest-card"', page.data)
         self.assertIn(b'id="ubnt-network-list"', page.data)
         self.assertIn(b'id="ubnt-password-form"', page.data)
@@ -1022,6 +1206,11 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"Stopped because disks are disabled", javascript.data)
         self.assertIn(b"function policyRequestBlocked", javascript.data)
         self.assertIn(b"function renderLighting(next)", javascript.data)
+        self.assertIn(b"function renderPriceChecks(response)", javascript.data)
+        self.assertIn(b"price-checks/check", javascript.data)
+        self.assertIn(b"price-checks/edit", javascript.data)
+        self.assertIn(b"data-price-edit", javascript.data)
+        self.assertIn(b"data-price-remove", javascript.data)
         self.assertIn(b"data-light-brightness", javascript.data)
         self.assertIn(b"TILE_ORDER_STORAGE_KEY", javascript.data)
         self.assertIn(b"localStorage.setItem", javascript.data)
@@ -1036,6 +1225,8 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b".policy-runtime-state::before", stylesheet.data)
         self.assertIn(b".lighting-master", stylesheet.data)
         self.assertIn(b".lighting-slider", stylesheet.data)
+        self.assertIn(b".price-row", stylesheet.data)
+        self.assertIn(b".price-form-grid", stylesheet.data)
         self.assertIn(b".tile-edit-button", stylesheet.data)
         self.assertIn(
             b"body.tiles-editing #tile-grid > [data-dashboard-tile]",

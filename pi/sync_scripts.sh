@@ -35,7 +35,6 @@ cp -R "$pi_apps/van_dashboard/static" "$python_stage/"
 # limit (~10 concurrent handshakes) can't randomly drop any of them
 mux="-o ControlMaster=auto -o ControlPath=$HOME/.ssh/mux-%C -o ControlPersist=120"
 ssh $mux $pi_ip true || { echo "can't reach $pi_ip"; exit 1; }
-ssh $mux $pi_ip 'mkdir -p /home/pi/configs'
 
 cp_services() {
   local remote_stage="/tmp/systemd-tmp.$$"
@@ -61,15 +60,11 @@ home_pid=$!
 scp $mux -r "$hooks" "$secrets" "$twilio" "$pi_ip:/home/pi/" &
 dirs_pid=$!
 
-scp $mux "$configs/price_checks.tsv" "$pi_ip:/home/pi/configs/" &
-price_config_pid=$!
-
 scp $mux "$configs/smb.conf" "$pi_ip:/etc/samba/smb.conf" &
 
 wait $home_pid
 ssh $mux $pi_ip 'sudo chmod 770 /home/pi/rsync-exclude-media.txt' &
 wait $dirs_pid
-wait $price_config_pid
 wait $services_pid || { echo "script/service deployment failed" >&2; exit 1; }
 
 # ROUTER

@@ -3,10 +3,13 @@ let dashboard = null,
   speakers = null,
   storagePolicy = null,
   lighting = null,
+  priceChecks = null,
   ubntWifi = null,
   ubntLink = null,
   ubntNewNetwork = null,
   policyLoading = false,
+  priceBusy = false,
+  priceEditingId = null,
   busy = false,
   tileEditing = false,
   tileDrag = null,
@@ -384,6 +387,118 @@ async function startSpeedtest() {
     toast(error.message, true);
     $('speedtest-button').disabled = false;
   }
+}
+function renderPriceChecks(response) {
+  priceChecks = response;
+  const items = response.items || [],
+    summary = response.summary || {},
+    tile = $('price-checks'),
+    latest = items.reduce(
+      (value, item) => Math.max(value, Number(item.last_checked_at) || 0),
+      0,
+    );
+  if (priceEditingId !== null && !items.some((item) => item.id === priceEditingId))
+    resetPriceForm();
+  tile.classList.toggle('has-deal', Number(summary.below_threshold) > 0);
+  tile.classList.toggle('has-error', Number(summary.errors) > 0);
+  $('price-pill').textContent = String(items.length);
+  $('price-summary').textContent = items.length
+    ? `${summary.below_threshold || 0} below target · ${summary.errors || 0} errors`
+    : 'No products watched';
+  $('price-last-check').textContent = latest ? age(latest) : 'never';
+  $('price-operation').textContent = priceBusy
+    ? 'Working…'
+    : items.length
+      ? `${items.length} watched`
+      : 'Empty';
+  $('price-list').innerHTML =
+    items
+      .map((item) => {
+        const stateClass = item.last_status === 'error' ? 'error' : item.below_threshold ? 'below' : '',
+          price = item.last_price ? `$${esc(item.last_price)}` : '—',
+          threshold = `$${esc(item.threshold)}`,
+          meta = item.last_status === 'error'
+            ? `Error ${age(item.last_checked_at)} · ${esc(item.last_error || 'Unknown error')}`
+            : item.last_checked_at
+              ? `Checked ${age(item.last_checked_at)}${item.below_threshold ? ' · below target' : ''}`
+              : 'Not checked yet';
+        return `<article class="price-row ${stateClass}">
+          <div class="price-row-title"><span>${esc(item.display_title)}</span><small>${esc(item.parser)} · ${esc(item.url)}</small></div>
+          <div class="price-value">${price}<small>alert below ${threshold}</small></div>
+          <div class="price-row-meta">${meta}</div>
+          <div class="price-row-controls"><button data-action data-price-check="${item.id}" ${priceBusy ? 'disabled' : ''}>Check</button><button data-action data-price-edit="${item.id}" ${priceBusy ? 'disabled' : ''}>Edit</button><button class="price-remove" data-action data-price-remove="${item.id}" data-price-title="${esc(item.display_title)}" ${priceBusy ? 'disabled' : ''}>Remove</button></div>
+        </article>`;
+      })
+      .join('') || '<div class="speaker-loading">No price checks yet</div>';
+  $('price-check-all').disabled = priceBusy || items.length === 0;
+  $('price-check-all').classList.toggle('running', priceBusy);
+  $('price-add-form').querySelectorAll('input, select, button').forEach((element) => {
+    element.disabled = priceBusy;
+  });
+}
+async function refreshPriceChecks() {
+  try {
+    const response = await json('/api/price-checks');
+    renderPriceChecks(response);
+    return response;
+  } catch (error) {
+    $('price-summary').textContent = 'Price data unavailable';
+    $('price-operation').textContent = 'Unavailable';
+    $('price-list').innerHTML = `<div class="speaker-loading">${esc(error.message)}</div>`;
+    throw error;
+  }
+}
+async function priceAction(work) {
+  if (priceBusy) return;
+  priceBusy = true;
+  if (priceChecks) renderPriceChecks(priceChecks);
+  try {
+    const result = await work();
+    if (result?.message) toast(result.message);
+    renderPriceChecks(result);
+    return result;
+  } catch (error) {
+    toast(error.message, true);
+    await refreshPriceChecks().catch(() => {});
+  } finally {
+    priceBusy = false;
+    if (priceChecks) renderPriceChecks(priceChecks);
+  }
+}
+async function checkPrices(target) {
+  return priceAction(() => post('price-checks/check', { target: String(target) }));
+}
+async function addPriceCheck() {
+  const fields = {
+    parser: $('price-parser').value,
+    threshold: $('price-threshold').value,
+    url: $('price-url').value.trim(),
+    title: $('price-title').value.trim(),
+  };
+  if (priceEditingId !== null) fields.id = String(priceEditingId);
+  const endpoint = priceEditingId === null ? 'price-checks/add' : 'price-checks/edit';
+  const result = await priceAction(() => post(endpoint, fields));
+  if (result) resetPriceForm();
+}
+function resetPriceForm() {
+  priceEditingId = null;
+  $('price-add-form').reset();
+  $('price-form-title').textContent = 'Add an item';
+  $('price-submit').textContent = 'Add price check';
+  $('price-edit-cancel').hidden = true;
+}
+function editPriceCheck(itemId) {
+  const item = priceChecks?.items?.find((candidate) => candidate.id === Number(itemId));
+  if (!item || priceBusy) return;
+  priceEditingId = item.id;
+  $('price-parser').value = item.parser;
+  $('price-threshold').value = item.threshold;
+  $('price-url').value = item.url;
+  $('price-title').value = item.title || '';
+  $('price-form-title').textContent = `Edit ${item.display_title}`;
+  $('price-submit').textContent = 'Save changes';
+  $('price-edit-cancel').hidden = false;
+  $('price-add-form').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 function setPolicyLoading(loading, label) {
   policyLoading = loading;
@@ -954,6 +1069,26 @@ function closeStorage() {
   $('storage').setAttribute('aria-expanded', 'false');
   $('storage').focus();
 }
+async function openPriceChecks() {
+  $('price-backdrop').classList.add('open');
+  document.body.classList.add('sheet-open');
+  $('price-checks').setAttribute('aria-expanded', 'true');
+  $('price-panel').setAttribute('aria-busy', 'true');
+  try {
+    await refreshPriceChecks();
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    $('price-panel').setAttribute('aria-busy', 'false');
+  }
+}
+function closePriceChecks() {
+  resetPriceForm();
+  $('price-backdrop').classList.remove('open');
+  document.body.classList.remove('sheet-open');
+  $('price-checks').setAttribute('aria-expanded', 'false');
+  $('price-checks').focus();
+}
 async function pollLighting() {
   clearTimeout(lightingPoll);
   if (!$('lighting-backdrop').classList.contains('open')) return;
@@ -1018,6 +1153,14 @@ $('speakers').addEventListener('click', openSpeakers);
 $('speaker-close').addEventListener('click', closeSpeakers);
 $('storage').addEventListener('click', openStorage);
 $('storage-close').addEventListener('click', closeStorage);
+$('price-checks').addEventListener('click', openPriceChecks);
+$('price-close').addEventListener('click', closePriceChecks);
+$('price-check-all').addEventListener('click', () => checkPrices('all'));
+$('price-edit-cancel').addEventListener('click', resetPriceForm);
+$('price-add-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  addPriceCheck();
+});
 $('lighting').addEventListener('click', openLighting);
 $('lighting-close').addEventListener('click', closeLighting);
 $('lighting-master').dataset.lightTarget = 'all';
@@ -1039,6 +1182,9 @@ $('speaker-backdrop').addEventListener('click', (event) => {
 $('storage-backdrop').addEventListener('click', (event) => {
   if (event.target === $('storage-backdrop')) closeStorage();
 });
+$('price-backdrop').addEventListener('click', (event) => {
+  if (event.target === $('price-backdrop')) closePriceChecks();
+});
 $('lighting-backdrop').addEventListener('click', (event) => {
   if (event.target === $('lighting-backdrop')) closeLighting();
 });
@@ -1049,6 +1195,7 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     if ($('speaker-backdrop').classList.contains('open')) closeSpeakers();
     if ($('storage-backdrop').classList.contains('open')) closeStorage();
+    if ($('price-backdrop').classList.contains('open')) closePriceChecks();
     if ($('lighting-backdrop').classList.contains('open')) closeLighting();
     if ($('ubnt-wifi-backdrop').classList.contains('open')) closeUbntWifi();
   }
@@ -1105,6 +1252,16 @@ document.addEventListener('change', (event) => {
     });
 });
 document.addEventListener('click', (event) => {
+  const priceCheck = event.target.closest('[data-price-check]');
+  if (priceCheck) checkPrices(priceCheck.dataset.priceCheck);
+  const priceEdit = event.target.closest('[data-price-edit]');
+  if (priceEdit) editPriceCheck(priceEdit.dataset.priceEdit);
+  const priceRemove = event.target.closest('[data-price-remove]');
+  if (
+    priceRemove &&
+    window.confirm(`Remove ${priceRemove.dataset.priceTitle || 'this price check'}?`)
+  )
+    priceAction(() => post('price-checks/remove', { id: priceRemove.dataset.priceRemove }));
   const lightPower = event.target.closest('[data-light-target]');
   if (lightPower)
     action(() =>
@@ -1170,6 +1327,7 @@ function refreshVisibleDashboard() {
   refreshSpeedtest();
   refreshSonos();
   refreshStoragePolicy().catch(() => {});
+  refreshPriceChecks().catch(() => {});
   refreshLighting(false).catch(() => {});
   refreshUbntWifi(false);
 }
@@ -1179,6 +1337,7 @@ Promise.allSettled([
   refreshConnectivity(),
   refreshSpeedtest(),
   refreshStoragePolicy(),
+  refreshPriceChecks(),
   refreshLighting(false),
   refreshUbntWifi(false),
 ]).then((results) => {
@@ -1195,6 +1354,9 @@ setInterval(() => {
 }, 10000);
 setInterval(() => {
   if (!document.hidden && !busy) refreshStoragePolicy().catch(() => {});
+}, 30000);
+setInterval(() => {
+  if (!document.hidden && !priceBusy) refreshPriceChecks().catch(() => {});
 }, 30000);
 setInterval(() => {
   if (!document.hidden && !busy) refreshLighting(false).catch(() => {});

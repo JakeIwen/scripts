@@ -457,6 +457,169 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
 .storage-tile .tile-detail {
   min-height: 0;
 }
+.price-tile .tile-icon {
+  font-size: 34px;
+}
+.price-tile .tile-detail {
+  min-height: 0;
+}
+.price-tile.has-deal {
+  border-color: #438168;
+  background:
+    radial-gradient(circle at 88% 5%, #62c89924, transparent 38%),
+    linear-gradient(145deg, #1d2b2b, #172225);
+}
+.price-tile.has-error {
+  border-color: #754743;
+}
+.price-sheet {
+  padding-bottom: calc(24px + env(safe-area-inset-bottom));
+}
+.price-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: 4px 0 12px;
+}
+.price-list {
+  display: grid;
+  gap: 8px;
+}
+.price-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #172129;
+  padding: 11px 12px;
+}
+.price-row.below {
+  border-color: #39725b;
+  background: #182a25;
+}
+.price-row.error {
+  border-color: #754743;
+  background: #2a2021;
+}
+.price-row-title,
+.price-row-title span,
+.price-row-title small {
+  display: block;
+  min-width: 0;
+}
+.price-row-title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 740;
+}
+.price-row-title small,
+.price-row-meta {
+  color: var(--dim);
+  font-size: 9px;
+}
+.price-row-title small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
+}
+.price-value {
+  text-align: right;
+  font-size: 14px;
+  font-weight: 760;
+  font-variant-numeric: tabular-nums;
+}
+.price-value small {
+  display: block;
+  color: var(--dim);
+  font-size: 9px;
+  font-weight: 500;
+}
+.price-row-meta {
+  align-self: center;
+  overflow-wrap: anywhere;
+}
+.price-row-controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.price-row-controls button,
+.price-add,
+.price-edit-cancel {
+  border: 1px solid #42606e;
+  border-radius: 9px;
+  background: #263b47;
+  color: var(--ink);
+  padding: 7px 10px;
+  font-size: 10px;
+  font-weight: 730;
+  cursor: pointer;
+}
+.price-row-controls .price-remove {
+  border-color: #754743;
+  background: #352526;
+  color: #f2b5b0;
+}
+.price-row-controls button:disabled,
+.price-add:disabled,
+.price-edit-cancel:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.price-form {
+  border-top: 1px solid var(--line);
+  margin-top: 15px;
+  padding-top: 14px;
+}
+.price-form h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+.price-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+}
+.price-form label,
+.price-form label > span {
+  display: block;
+}
+.price-form label > span {
+  color: var(--dim);
+  font-size: 10px;
+  margin: 0 0 4px 2px;
+}
+.price-form label small {
+  font-weight: 400;
+}
+.price-form input,
+.price-form select {
+  width: 100%;
+  border: 1px solid #46606e;
+  border-radius: 9px;
+  background: #0f171d;
+  color: var(--ink);
+  padding: 10px;
+}
+.price-form-wide {
+  grid-column: 1 / -1;
+}
+.price-form-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.price-add {
+  flex: 1;
+  padding: 10px;
+}
+.price-edit-cancel {
+  background: transparent;
+  padding: 10px 14px;
+}
 .lighting-tile {
   padding: 0;
   cursor: default;
