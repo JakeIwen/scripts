@@ -12,7 +12,6 @@ PATH="/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:/root/bin"
 * * * * *     su pi -c "$scripts/internet_switches.sh"  >> "$cronlog/internet_switches.log" 2>&1
 0 1 * * *      su pi -c "$scripts/prune_logs.sh '/var/log/cron/*.log' >> "$cronlog/prune_logs.log" 2>&1
 0 0 * * *      rm -rf $tfiles_bkup/* && cp "/home/pi/tfiles" "$tfiles_bkup" >> "$cronlog/copy_tfiles.log" 2>&1
-# * * * * *      su pi -c "$scripts/start_cast.sh"  >> "$cronlog/cast.log" 2>&1
 * * * * *      su pi -c "$scripts/log_position.sh"  >> "$cronlog/log_position.sh.log" 2>&1
 */5 * * * *    su pi -c "$scripts/vlc_recent_files_update.sh"  >> "$cronlog/vlc_recent_files_update.log" 2>&1
 */5 * * * *    su pi -c "$scripts/keepalive.sh"  >> "$cronlog/keepalive.log" 2>&1

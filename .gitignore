@@ -20,6 +20,7 @@ vanrouter/etc
 vanrouter/etc/*
 !vanrouter/etc/mwan3.user
 *__pycache__*
+*.pyc
 node_modules/
 **/node_modules/
 AGENTS.private.md

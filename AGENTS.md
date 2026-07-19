@@ -23,12 +23,12 @@ compare it with this checkout. Deployed files may differ from the repository.
 
 ## Repository map
 
-- `pi/`: Raspberry Pi backup, disk, service, and setup tooling.
+- `pi/`: Raspberry Pi apps, backup, disk, service, deployment, and setup tooling.
 - `vanrouter/`: OpenWrt configuration and scripts.
 - `ubnt/`: directional wireless-device profiles and uplink scripts.
-- `automation/`: home, media, and desktop automation.
-- `sh/`: macOS and general-purpose shell utilities.
-- `NativCast/`: Raspberry Pi casting server and browser extension.
+- `macbook/`: macOS shell utilities, AppleScripts, Automator workflows, and
+  BetterTouchTool helpers.
+- `shared/`: code imported or deployed on more than one host.
 
 Some ignored secret directories, wireless profiles, and device configurations
 may contain credentials or private network data. Never print or commit secrets,

@@ -264,7 +264,7 @@ def get_matching_faves(keyterm, device=None):
     return [x for x in faves if keyterm in x.title]
 
 def direct(name): # only on macbook
-    cmd = "osascript /Users/jacobr/dev/scripts/automation/sonosAudio.scpt " + name
+    cmd = "osascript /Users/jacobr/dev/scripts/macbook/applescript/sonosAudio.scpt " + name
     os.system(cmd)
 
 def get_spkr(name):
