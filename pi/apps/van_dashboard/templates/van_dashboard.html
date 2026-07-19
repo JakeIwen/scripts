@@ -46,12 +46,12 @@
     </button>
     <button class="tile ubnt-wifi-tile" id="ubnt-wifi" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="ubnt-wifi-panel">
       <span class="switch-state"><span class="network-dot" id="ubnt-wifi-dot"></span><span id="ubnt-wifi-state">NO DATA</span></span>
-      <span class="tile-icon" aria-hidden="true">📡 UBNT</span><span class="ubnt-title"><span class="network-dot" id="ubnt-radio-dot"></span><span class="tile-title">Wireless</span></span><span class="tile-detail" id="ubnt-wifi-summary">Scan and select upstream networks</span>
+      <span class="network-card-heading ubnt-card-heading"><span aria-hidden="true">📡</span><span>UBNT</span></span><span class="ubnt-title"><span class="network-dot" id="ubnt-radio-dot"></span><span class="tile-title">Wireless</span></span><span class="tile-detail" id="ubnt-wifi-summary">Scan and select upstream networks</span>
     </button>
   </div>
   <div class="network-cards">
     <section class="network-card openwrt-card" aria-labelledby="openwrt-title">
-      <div class="connectivity-head"><h2 id="openwrt-title">OpenWrt</h2><span class="connectivity-age" id="openwrt-age">Checking…</span></div>
+      <div class="connectivity-head"><h2 class="network-card-heading" id="openwrt-title">OpenWrt</h2><span class="connectivity-age" id="openwrt-age">Checking…</span></div>
       <div class="mwan-overview">
         <div class="mwan-primary">
           <span class="network-label"><span class="network-dot" id="internet-dot"></span>MWAN3</span>
@@ -61,7 +61,7 @@
       </div>
     </section>
     <button class="network-card speedtest-card" id="speedtest-button" data-action>
-      <span class="speedtest-card-head"><span class="speed-icon" aria-hidden="true">ᯓ➤</span><span class="speed-spinner" aria-hidden="true"></span><span id="speedtest-label">Speed Test</span></span>
+      <span class="network-card-heading speedtest-card-head"><span class="speed-icon" aria-hidden="true">ᯓ➤</span><span class="speed-spinner" aria-hidden="true"></span><span id="speedtest-label" data-running-label="Testing…">Speed Test</span></span>
       <span class="speed-results" id="speed-results" role="status" aria-live="polite"><strong>Not run yet</strong>Uses vanpi's current route</span>
     </button>
   </div>

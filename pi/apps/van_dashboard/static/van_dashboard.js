@@ -1,77 +1,861 @@
-const $=id=>document.getElementById(id);let dashboard=null,speakers=null,storagePolicy=null,ubntWifi=null,ubntLink=null,ubntNewNetwork=null,policyLoading=false,busy=false,toastTimer=0,speedPoll=0,storagePoll=0,ubntPoll=0,ubntLastCompletion='',sonosTimeline={position:0,duration:0,playing:false,updatedAt:0};
-function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-function toast(message,bad=false){clearTimeout(toastTimer);const el=$('toast');el.textContent=message;el.className=bad?'show bad':'show';toastTimer=setTimeout(()=>el.className='',3400)}
-async function json(url,options){const response=await fetch(url,{cache:'no-store',...(options||{})});let data;try{data=await response.json()}catch(_){data={message:`Server returned ${response.status}`}}
-  if(!response.ok||data.ok===false)throw new Error(data.message||`Request failed (${response.status})`);return data}
-async function post(endpoint,params={}){return json('/api/'+endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','X-Van-Dashboard':'1'},body:new URLSearchParams(params)})}
-async function action(work){if(busy)return;busy=true;document.body.classList.add('busy');try{const result=await work();if(result?.message)toast(result.message);await refresh()}
-  catch(error){toast(error.message,true)}finally{busy=false;document.body.classList.remove('busy')}}
-function age(ts){if(!ts)return 'never';const secs=Math.max(0,Date.now()/1000-ts);return secs<90?`${Math.round(secs)}s ago`:`${Math.round(secs/60)}m ago`}
-function networkState(id,value){const el=$(id);el.classList.remove('good','bad');if(value===true)el.classList.add('good');else if(value===false)el.classList.add('bad')}
-function renderUbntTile(){const tile=$('ubnt-wifi');tile.classList.remove('connected','unavailable');if(!ubntLink){networkState('ubnt-wifi-dot',null);networkState('ubnt-radio-dot',null);$('ubnt-wifi-state').textContent='NO DATA';$('ubnt-wifi-summary').textContent='Waiting for antenna status…';return}const u=ubntLink;if(u.reachable===false){tile.classList.add('unavailable');networkState('ubnt-wifi-dot',false);networkState('ubnt-radio-dot',null);$('ubnt-wifi-state').textContent='UNAVAILABLE';$('ubnt-wifi-summary').textContent='No UBNT Ethernet response';return}if(u.reachable!==true){networkState('ubnt-wifi-dot',null);networkState('ubnt-radio-dot',null);$('ubnt-wifi-state').textContent='NO DATA';$('ubnt-wifi-summary').textContent='Waiting for antenna status…';return}tile.classList.add('connected');networkState('ubnt-wifi-dot',true);$('ubnt-wifi-state').textContent='CONNECTED';const details=[u.ssid||'Unknown SSID'];if(u.error){networkState('ubnt-radio-dot',null);details.push('Wi-Fi status unavailable')}else{const connected=u.connected===true;networkState('ubnt-radio-dot',connected);if(!connected)details.push('Not associated');if(connected&&Number.isFinite(u.signal_dbm))details.push(`${u.signal_dbm} dBm`);if(connected&&Number.isFinite(u.ccq_percent))details.push(`${u.ccq_percent}% CCQ`);else if(connected&&Number.isFinite(u.quality_percent))details.push(`${u.quality_percent}% quality`)}$('ubnt-wifi-summary').textContent=details.join(' · ')}
-function renderConnectivity(response){const c=response.connectivity,r=c.router||{},u=c.ubnt||{},online=c.internet?.online;
-  networkState('internet-dot',online===null&&r.reachable===false?false:online);$('mwan-mode').textContent=r.mode||((online===false||r.reachable===false)?'No active uplink':'Unknown');
-  ubntLink=u;renderUbntTile();
-  $('mwan-list').innerHTML=(r.interfaces||[]).map(i=>`<span class="mwan-chip ${esc(i.state)}" title="${esc(i.detail||'')}">${esc(i.name)} · ${esc(i.state)}</span>`).join('');
-  $('openwrt-age').textContent=r.error?`MWAN3 error · ${r.error}`:c.last_error?`Collector error · ${c.last_error}`:c.checked_at?`${c.stale?'Stale':'Updated'} · ${age(c.checked_at)}`:c.refreshing?'Checking…':'Waiting for MWAN3'}
-async function refreshConnectivity(){try{renderConnectivity(await json('/api/connectivity'))}catch(error){$('openwrt-age').textContent=error.message;ubntLink=null;renderUbntTile()}}
-function atTime(ts){return ts?'@ '+new Date(ts*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}):''}
-function renderSpeedtest(response){const s=response.speedtest,button=$('speedtest-button'),running=s.status==='running';button.disabled=running;button.classList.toggle('running',running);button.setAttribute('aria-busy',String(running));$('speedtest-label').textContent=running?'Testing…':'Speed Test';$('speed-results').classList.toggle('bad',s.status==='error');
-  if(running)$('speed-results').innerHTML='<strong>Testing current route…</strong>This can take a minute';
-  else if(s.status==='complete')$('speed-results').innerHTML=`<strong>↓ ${Number(s.download_mbps).toFixed(1)} Mbps · ↑ ${Number(s.upload_mbps).toFixed(1)} Mbps</strong>Latency ${Number(s.latency_ms).toFixed(1)} ms ${atTime(s.completed_at)}`;
-  else if(s.status==='error')$('speed-results').innerHTML=`<strong>Speed test failed</strong>${esc(s.error||'Unknown error')} ${atTime(s.completed_at)}`;
-  else $('speed-results').innerHTML="<strong>Not run yet</strong>Uses vanpi's current route"}
-async function refreshSpeedtest(){clearTimeout(speedPoll);try{const response=await json('/api/speedtest');renderSpeedtest(response);if(response.speedtest.status==='running')speedPoll=setTimeout(refreshSpeedtest,1000)}catch(error){$('speed-results').innerHTML=`<strong>Speed test unavailable</strong>${esc(error.message)}`}}
-async function startSpeedtest(){if($('speedtest-button').disabled)return;$('speedtest-button').disabled=true;try{const response=await post('speedtest');renderSpeedtest(response);if(response.speedtest.status==='running')speedPoll=setTimeout(refreshSpeedtest,1000)}catch(error){toast(error.message,true);$('speedtest-button').disabled=false}}
-function setPolicyLoading(loading,label){policyLoading=loading;$('storage-panel').setAttribute('aria-busy',String(loading));$('storage-status').textContent=label||(loading?'Checking…':'Current state');document.querySelectorAll('[data-policy-field]').forEach(button=>button.disabled=loading||!storagePolicy);if(loading&&!storagePolicy)$('storage-summary').textContent=label||'Checking current state…'}
-function renderPolicyRuntime(id,active,onLabel,offLabel,detail){const item=$(id),state=$(`${id}-state`);item.classList.remove('on','off');item.classList.add(active?'on':'off');state.textContent=active?onLabel:offLabel;$(`${id}-detail`).textContent=detail}
-function renderStoragePolicy(policy){storagePolicy=policy;const fields=[['disks_enabled','Disks'],['torrents_enabled','Torrents'],['allow_starlink_torrents','Starlink torrents']],runtime=policy.runtime,mounted=runtime.disks_mounted===true,running=runtime.qbittorrent_running===true,labels=runtime.mounted_disk_labels,diskDetail=mounted?labels.join(', '):policy.disks_enabled?'No managed HDD mounts':'Disabled by requested policy',torrentDetail=running?'Exact process is active':!policy.disks_enabled?'Stopped because disks are disabled':!policy.torrents_enabled?'Disabled by requested policy':'Stopped by current conditions';for(const [field] of fields){const button=document.querySelector(`[data-policy-field="${field}"]`),enabled=policy[field]===true;button.classList.remove('on','off');button.classList.add(enabled?'on':'off');button.setAttribute('aria-pressed',String(enabled));button.querySelector('.policy-state').textContent=enabled?'ON':'OFF'}renderPolicyRuntime('disk-runtime',mounted,'MOUNTED','UNMOUNTED',diskDetail);renderPolicyRuntime('torrent-runtime',running,'RUNNING','STOPPED',torrentDetail);$('storage-summary').textContent=`Disks ${mounted?'mounted':'unmounted'} · qBittorrent ${running?'running':'stopped'}`;setPolicyLoading(false,'Current state')}
-function renderStorageUnavailable(message){storagePolicy=null;$('storage-summary').textContent='Runtime state unavailable';$('storage-status').textContent=message||'Unavailable';$('storage-panel').setAttribute('aria-busy','false');for(const id of ['disk-runtime','torrent-runtime']){const item=$(id);item.classList.remove('on','off');$(`${id}-state`).textContent='NO DATA';$(`${id}-detail`).textContent='Status unavailable'}document.querySelectorAll('[data-policy-field]').forEach(button=>{button.disabled=true;button.classList.remove('on','off');button.setAttribute('aria-pressed','mixed');button.querySelector('.policy-state').textContent='NO DATA'})}
-async function refreshStoragePolicy(silent=false){if(!silent)setPolicyLoading(true,'Checking…');try{const response=await json('/api/storage-policy');renderStoragePolicy(response.policy);return response}catch(error){renderStorageUnavailable(error.message);throw error}}
-async function changeStoragePolicy(field){if(policyLoading||!storagePolicy)return;const value=String(!storagePolicy[field]);let result,operationError;setPolicyLoading(true,'Applying…');try{result=await post('storage-policy',{field,value});renderStoragePolicy(result.policy)}catch(error){operationError=error}try{await refreshStoragePolicy()}catch(refreshError){if(!operationError)operationError=refreshError}if(operationError)throw operationError;return result}
-function ubntSecurity(value){return value==='wpa'?'WPA/WPA2':value==='none'?'Open':value==='enterprise'?'WPA Enterprise':String(value||'Unknown').toUpperCase()}
-function renderUbntWifi(response){ubntWifi=response;const wifi=response.wifi||{},state=wifi.state||{},operation=response.operation||{},running=operation.status==='running',error=operation.status==='error',associated=state.associated_ssid||'',reachable=wifi.reachable===true,unavailable=wifi.reachable===false||(error&&!reachable);$('ubnt-wifi-panel').setAttribute('aria-busy',String(running));$('ubnt-wifi-operation').textContent=running?`${operation.kind==='scan'?'Scanning':operation.kind==='connect'?'Connecting':operation.kind==='provision'?'Saving network':'Updating'}…`:error?'Failed':wifi.checked_at?`Updated ${age(wifi.checked_at)}`:'No data';networkState('ubnt-current-dot',reachable&&associated?true:unavailable||reachable?false:null);$('ubnt-current-ssid').textContent=associated||state.configured_ssid||'Not associated';$('ubnt-current-detail').textContent=error?(operation.error||'Status unavailable'):state.automatic_paused===true?'Automatic selection paused':state.automatic_paused===false?'Automatic selection active':'Waiting for antenna status…';$('ubnt-resume').hidden=state.automatic_paused!==true;$('ubnt-resume').disabled=running;const scan=$('ubnt-scan');scan.disabled=running;scan.classList.toggle('running',running&&operation.kind==='scan');$('ubnt-scan-label').textContent=running&&operation.kind==='scan'?'Scanning…':'Scan nearby Wi-Fi';const networks=wifi.networks||[];$('ubnt-network-list').innerHTML=networks.map(network=>{const known=network.known===true,connected=network.connected===true,supported=network.supported===true,meta=[Number.isFinite(network.signal_dbm)?`${network.signal_dbm} dBm`:null,Number.isFinite(network.quality_percent)?`${network.quality_percent}%`:null,ubntSecurity(network.security),known?'Known':null].filter(Boolean);let control;if(connected)control='<button class="ubnt-network-action" disabled>Connected</button>';else if(known)control=`<span class="ubnt-profile-actions">${network.profiles.map(profile=>`<button class="ubnt-network-action" data-action data-ubnt-profile="${esc(profile)}" ${running?'disabled':''}>${network.profiles.length>1?esc(profile):'Connect'}</button>`).join('')}</span>`;else if(!supported)control='<button class="ubnt-network-action" disabled>Unsupported</button>';else if(network.security==='none')control=`<button class="ubnt-network-action" data-action data-ubnt-open="1" data-ubnt-ssid="${esc(network.ssid)}" data-ubnt-security="none" data-ubnt-bssid="${esc(network.bssid)}" ${running?'disabled':''}>Add & connect</button>`;else control=`<button class="ubnt-network-action" data-action data-ubnt-new="1" data-ubnt-ssid="${esc(network.ssid)}" data-ubnt-security="wpa" data-ubnt-bssid="${esc(network.bssid)}" ${running?'disabled':''}>Add</button>`;return `<div class="ubnt-network-row ${known?'known':''} ${connected?'connected':''} ${supported?'':'unsupported'}"><span><strong class="ubnt-network-name">${esc(network.ssid)}</strong><span class="ubnt-network-meta">${meta.map(item=>`<span class="${known?'ubnt-known':''}">${esc(item)}</span>`).join('')}</span></span>${control}</div>`}).join('')||`<div class="ubnt-empty">${running&&operation.kind==='scan'?'Scanning nearby networks…':'No scan results yet. Tap Scan nearby Wi-Fi.'}</div>`;const completion=`${operation.status}:${operation.completed_at||''}`;if(operation.completed_at&&completion!==ubntLastCompletion){ubntLastCompletion=completion;if($('ubnt-wifi-backdrop').classList.contains('open'))toast(operation.error||operation.message||'UBNT Wi-Fi updated',Boolean(operation.error));if(operation.kind==='connect'||operation.kind==='provision'||operation.kind==='resume')refreshConnectivity()}clearTimeout(ubntPoll);if(running)ubntPoll=setTimeout(()=>refreshUbntWifi(true),1200);renderUbntTile()}
-async function refreshUbntWifi(showError=false){try{const response=await json('/api/ubnt-wifi');renderUbntWifi(response);return response}catch(error){if(showError)toast(error.message,true);renderUbntTile()}}
-async function startUbntWifi(endpoint,params={}){if(ubntWifi?.operation?.status==='running')return;clearUbntPassword();try{const response=await post(`ubnt-wifi/${endpoint}`,params);renderUbntWifi(response);ubntPoll=setTimeout(()=>refreshUbntWifi(true),500)}catch(error){toast(error.message,true);await refreshUbntWifi(false)}}
-function showUbntPassword(button){ubntNewNetwork={ssid:button.dataset.ubntSsid,security:button.dataset.ubntSecurity,bssid:button.dataset.ubntBssid};$('ubnt-password-title').textContent=`Join ${ubntNewNetwork.ssid}`;$('ubnt-password-detail').textContent=`${ubntSecurity(ubntNewNetwork.security)} · password is sent directly to the antenna and saved in its profile`;$('ubnt-password').value='';$('ubnt-password-form').hidden=false;$('ubnt-password').focus()}
-function clearUbntPassword(){ubntNewNetwork=null;$('ubnt-password').value='';$('ubnt-password-form').hidden=true}
-function renderStarlink(status){const state=status?.state||'unknown',known=state==='on'||state==='off',tile=$('starlink');tile.classList.remove('on','off','unknown');tile.classList.add(known?state:'unknown');networkState('starlink-dot',state==='on'?true:state==='off'?false:null);tile.disabled=!known||Boolean(status?.changing);tile.setAttribute('aria-pressed',known?String(state==='on'):'mixed');$('starlink-state').textContent=status?.changing?'WAIT':state==='on'?'ON':state==='off'?'OFF':'NO DATA';$('starlink-detail').textContent=status?.changing?'Changing power…':state==='on'?'Tuya switch is on':state==='off'?'Tuya switch is off':'Tuya status unavailable'}
-function updateStatus(data){dashboard=data.cop_alert;const active=dashboard.active,engine=dashboard.engine,led=data.cop_led||{};$('dot').classList.remove('bad');$('dot').classList.add('on');$('connection').textContent='Connected · vanpi dashboard';renderStarlink(data.starlink);
-  $('cop').classList.toggle('active',active);$('cop').setAttribute('aria-pressed',String(active));$('cop-pill').textContent=active?'ACTIVE':'OFF';
-  $('cop-detail').textContent=active?'Dashcam wake and 5-minute bacon alerts are active':'Tap to keep the dashcam awake';
-  $('engine').textContent=engine.running?`RUNNING · ${Math.round(engine.rpm)} RPM`:engine.rpm===null?'No fresh data':`Stopped · ${Math.round(engine.rpm)} RPM`;
-  $('flood').textContent=dashboard.ext_flood;$('cop-led').textContent=led.message||'No data';$('cop-led').title=led.last_error||'';$('wake').textContent=dashboard.last_wake_ok===null?'Not attempted':dashboard.last_wake_ok?`OK · ${age(dashboard.last_wake)}`:'DEGRADED';
-  if(active&&dashboard.last_error)$('connection').textContent=`Active with warning · ${dashboard.last_error}`}
-async function refresh(){try{updateStatus(await json('/api/status'))}catch(error){$('dot').classList.remove('on');$('dot').classList.add('bad');$('connection').textContent=error.message}}
-function muteIcon(muted){return muted?'🔇':'🔊'}
-function clockSeconds(value){const parts=String(value||'').split(':').map(Number);return parts.length&&parts.every(Number.isFinite)?parts.reduce((total,part)=>total*60+part,0):0}
-function clockLabel(seconds){seconds=Math.max(0,Math.round(seconds));const minutes=Math.floor(seconds/60),secs=seconds%60;return `${minutes}:${String(secs).padStart(2,'0')}`}
-function updateSonosProgress(){const bar=$('sonos-progress'),duration=sonosTimeline.duration;if(!(duration>0)){bar.hidden=true;return}const elapsed=sonosTimeline.playing?(performance.now()-sonosTimeline.updatedAt)/1000:0,position=Math.min(duration,sonosTimeline.position+elapsed),percent=100*position/duration;bar.hidden=false;$('sonos-progress-fill').style.width=`${percent}%`;bar.setAttribute('aria-valuemin','0');bar.setAttribute('aria-valuemax',String(duration));bar.setAttribute('aria-valuenow',String(Math.round(position)));bar.setAttribute('aria-valuetext',`${clockLabel(position)} of ${clockLabel(duration)}`);bar.title=`${clockLabel(position)} / ${clockLabel(duration)}`}
-function renderSpeakers(next){speakers=next;const grouped=next.speakers.filter(s=>s.grouped),now=next.now_playing||{},group=next.group||{};$('speaker-summary').textContent=`${next.coordinator} · ${grouped.length}/${next.speakers.length}`;$('sonos-track').textContent=now.title||'Nothing playing';$('sonos-artist').textContent=now.artist||next.coordinator;
-  const playing=now.transport_state==='PLAYING';$('sonos-play').textContent=playing?'Ⅱ':'▶';$('sonos-play').setAttribute('aria-label',playing?'Pause':'Play');
-  sonosTimeline={position:clockSeconds(now.position),duration:clockSeconds(now.duration),playing,updatedAt:performance.now()};updateSonosProgress();const card=$('sonos-card');let art=null;try{art=now.album_art?new URL(now.album_art,location.href):null}catch(_){art=null}if(art&&art.origin===location.origin){card.classList.add('has-art');card.style.backgroundImage=`linear-gradient(90deg,#111b22ed 0%,#111b22c7 58%,#111b226b 100%),url("${art.href}")`}else{card.classList.remove('has-art');card.style.backgroundImage=''}
-  const groupVolume=Number.isFinite(group.volume)?group.volume:0;$('group-volume').value=groupVolume;$('group-volume').disabled=!Number.isFinite(group.volume);$('group-level').textContent=Number.isFinite(group.volume)?group.volume:'—';const groupMuteKnown=typeof group.muted==='boolean';$('group-mute').disabled=!groupMuteKnown;$('group-mute').textContent=muteIcon(group.muted);$('group-mute').classList.toggle('muted',group.muted===true);$('group-mute').setAttribute('aria-pressed',String(group.muted===true));$('group-mute').setAttribute('aria-label',group.muted?'Unmute group':'Mute group');
-  $('speaker-list').innerHTML=next.speakers.map(s=>{const detail=s.coordinator?'Active coordinator':s.grouped?`Grouped with ${next.coordinator}`:`Group: ${s.group_coordinator}`,volume=Number.isFinite(s.volume)?s.volume:0,muteKnown=typeof s.muted==='boolean';return `<div class="speaker-row"><input class="speaker-check" data-action data-group-speaker="${esc(s.name)}" type="checkbox" ${s.grouped?'checked':''} ${s.coordinator?'disabled':''} aria-label="Group ${esc(s.name)}">
-      <button class="audio-mute ${s.muted?'muted':''}" data-action data-speaker-mute="${esc(s.name)}" ${muteKnown?'':'disabled'} aria-pressed="${String(s.muted===true)}" aria-label="${s.muted?'Unmute':'Mute'} ${esc(s.name)}">${muteIcon(s.muted)}</button>
-      <button class="speaker-name" data-action data-select-speaker="${esc(s.name)}">${esc(s.name)}<small>${esc(detail)}</small></button><span class="speaker-level">${Number.isFinite(s.volume)?s.volume:'—'}</span>
-      <input class="speaker-volume" data-action data-speaker-volume="${esc(s.name)}" type="range" min="0" max="100" value="${volume}" ${Number.isFinite(s.volume)?'':'disabled'} aria-label="${esc(s.name)} volume"></div>`}).join('')||'<div class="speaker-loading">No Sonos speakers found</div>'}
-async function loadSpeakers(){const next=await json('/api/speakers');renderSpeakers(next);return next}
-async function refreshSonos(){try{return await loadSpeakers()}catch(error){$('speaker-summary').textContent='Unavailable';$('sonos-track').textContent='Sonos unavailable';$('sonos-artist').textContent=error.message;sonosTimeline={position:0,duration:0,playing:false,updatedAt:0};updateSonosProgress();$('sonos-card').classList.remove('has-art');$('sonos-card').style.backgroundImage=''}}
-async function openSpeakers(){$('speaker-backdrop').classList.add('open');document.body.classList.add('sheet-open');$('speakers').setAttribute('aria-expanded','true');
-  try{await loadSpeakers()}catch(error){$('speaker-list').innerHTML=`<div class="speaker-loading">${esc(error.message)}</div>`;toast(error.message,true)}}
-function closeSpeakers(){$('speaker-backdrop').classList.remove('open');document.body.classList.remove('sheet-open');$('speakers').setAttribute('aria-expanded','false');$('speakers').focus()}
-async function pollStorage(){clearTimeout(storagePoll);if(!$('storage-backdrop').classList.contains('open'))return;try{if(!busy)await refreshStoragePolicy(true)}catch(_){/* rendered by refreshStoragePolicy */}finally{storagePoll=setTimeout(pollStorage,2500)}}
-async function openStorage(){$('storage-backdrop').classList.add('open');document.body.classList.add('sheet-open');$('storage').setAttribute('aria-expanded','true');try{await refreshStoragePolicy()}catch(error){toast(error.message,true)}finally{storagePoll=setTimeout(pollStorage,2500)}}
-function closeStorage(){clearTimeout(storagePoll);$('storage-backdrop').classList.remove('open');document.body.classList.remove('sheet-open');$('storage').setAttribute('aria-expanded','false');$('storage').focus()}
-async function openUbntWifi(){$('ubnt-wifi-backdrop').classList.add('open');document.body.classList.add('sheet-open');$('ubnt-wifi').setAttribute('aria-expanded','true');await refreshUbntWifi(true)}
-function closeUbntWifi(){$('ubnt-wifi-backdrop').classList.remove('open');document.body.classList.remove('sheet-open');$('ubnt-wifi').setAttribute('aria-expanded','false');clearUbntPassword();$('ubnt-wifi').focus()}
-const bookUrl=new URL(window.location.href);bookUrl.port='8787';bookUrl.pathname='/';bookUrl.search='';bookUrl.hash='';$('books').href=bookUrl.toString();
-$('cop').addEventListener('click',()=>action(()=>post('cop-alert',{active:dashboard?.active?'false':'true'})));$('starlink').addEventListener('click',()=>{renderStarlink({state:'unknown',changing:true});action(async()=>{const result=await post('starlink');await refreshConnectivity();return result})});$('speakers').addEventListener('click',openSpeakers);$('speaker-close').addEventListener('click',closeSpeakers);$('storage').addEventListener('click',openStorage);$('storage-close').addEventListener('click',closeStorage);$('ubnt-wifi').addEventListener('click',openUbntWifi);$('ubnt-wifi-close').addEventListener('click',closeUbntWifi);$('ubnt-scan').addEventListener('click',()=>startUbntWifi('scan'));$('ubnt-resume').addEventListener('click',()=>startUbntWifi('resume'));$('ubnt-password-cancel').addEventListener('click',clearUbntPassword);$('ubnt-password-form').addEventListener('submit',event=>{event.preventDefault();if(!ubntNewNetwork)return;const selected={...ubntNewNetwork,password:$('ubnt-password').value};startUbntWifi('provision',selected)});
-$('speedtest-button').addEventListener('click',startSpeedtest);
-$('speaker-backdrop').addEventListener('click',event=>{if(event.target===$('speaker-backdrop'))closeSpeakers()});$('storage-backdrop').addEventListener('click',event=>{if(event.target===$('storage-backdrop'))closeStorage()});$('ubnt-wifi-backdrop').addEventListener('click',event=>{if(event.target===$('ubnt-wifi-backdrop'))closeUbntWifi()});document.addEventListener('keydown',event=>{if(event.key==='Escape'){if($('speaker-backdrop').classList.contains('open'))closeSpeakers();if($('storage-backdrop').classList.contains('open'))closeStorage();if($('ubnt-wifi-backdrop').classList.contains('open'))closeUbntWifi()}});
-document.addEventListener('input',event=>{const slider=event.target.closest('[data-speaker-volume]');if(slider)slider.closest('.speaker-row').querySelector('.speaker-level').textContent=slider.value;const groupSlider=event.target.closest('[data-group-volume]');if(groupSlider)$('group-level').textContent=groupSlider.value});
-document.addEventListener('change',event=>{const checkbox=event.target.closest('[data-group-speaker]');if(checkbox)action(async()=>{try{return await post('speakers/group',{name:checkbox.dataset.groupSpeaker,grouped:checkbox.checked?'1':'0'})}finally{await loadSpeakers()}});
-  const slider=event.target.closest('[data-speaker-volume]');if(slider)action(async()=>{try{return await post('speakers/volume',{name:slider.dataset.speakerVolume,volume:slider.value})}finally{await loadSpeakers()}});const groupSlider=event.target.closest('[data-group-volume]');if(groupSlider)action(async()=>{try{return await post('speakers/group-volume',{volume:groupSlider.value})}finally{await loadSpeakers()}})});
-document.addEventListener('click',event=>{const selected=event.target.closest('[data-select-speaker]');if(selected)action(async()=>{const result=await post('speakers/select',{name:selected.dataset.selectSpeaker});await loadSpeakers();return result});const transport=event.target.closest('[data-transport]');if(transport)action(async()=>{try{return await post('speakers/transport',{action:transport.dataset.transport})}finally{await loadSpeakers()}});const groupMute=event.target.closest('[data-group-mute]');if(groupMute)action(async()=>{try{return await post('speakers/group-mute',{muted:speakers?.group?.muted?'0':'1'})}finally{await loadSpeakers()}});const speakerMute=event.target.closest('[data-speaker-mute]');if(speakerMute)action(async()=>{const item=speakers?.speakers?.find(s=>s.name===speakerMute.dataset.speakerMute);try{return await post('speakers/mute',{name:speakerMute.dataset.speakerMute,muted:item?.muted?'0':'1'})}finally{await loadSpeakers()}});const policyButton=event.target.closest('[data-policy-field]');if(policyButton)action(()=>changeStoragePolicy(policyButton.dataset.policyField));const profile=event.target.closest('[data-ubnt-profile]');if(profile)startUbntWifi('connect',{profile:profile.dataset.ubntProfile});const newNetwork=event.target.closest('[data-ubnt-new]');if(newNetwork)showUbntPassword(newNetwork);const openNetwork=event.target.closest('[data-ubnt-open]');if(openNetwork)startUbntWifi('provision',{ssid:openNetwork.dataset.ubntSsid,security:'none',bssid:openNetwork.dataset.ubntBssid,password:''})});
-function refreshVisibleDashboard(){if(document.hidden)return;refresh();refreshConnectivity();refreshSpeedtest();refreshSonos();refreshStoragePolicy().catch(()=>{});refreshUbntWifi(false)}
-Promise.allSettled([refresh(),loadSpeakers(),refreshConnectivity(),refreshSpeedtest(),refreshStoragePolicy(),refreshUbntWifi(false)]).then(results=>{if(results[1].status==='rejected')refreshSonos()});setInterval(()=>{if(!document.hidden)refresh()},5000);setInterval(()=>{if(!document.hidden)refreshConnectivity()},10000);setInterval(()=>{if(!document.hidden&&!busy)refreshSonos()},10000);setInterval(()=>{if(!document.hidden&&!busy)refreshStoragePolicy().catch(()=>{})},30000);setInterval(()=>{if(!document.hidden&&ubntWifi?.operation?.status!=='running')refreshUbntWifi(false)},30000);setInterval(()=>{if(!document.hidden)updateSonosProgress()},1000);document.addEventListener('visibilitychange',refreshVisibleDashboard);window.addEventListener('pageshow',refreshVisibleDashboard);window.addEventListener('focus',refreshVisibleDashboard);
+const $ = (id) => document.getElementById(id);
+let dashboard = null,
+  speakers = null,
+  storagePolicy = null,
+  ubntWifi = null,
+  ubntLink = null,
+  ubntNewNetwork = null,
+  policyLoading = false,
+  busy = false,
+  toastTimer = 0,
+  speedPoll = 0,
+  storagePoll = 0,
+  ubntPoll = 0,
+  ubntLastCompletion = '',
+  sonosTimeline = { position: 0, duration: 0, playing: false, updatedAt: 0 };
+function esc(v) {
+  return String(v ?? '').replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
+  );
+}
+function toast(message, bad = false) {
+  clearTimeout(toastTimer);
+  const el = $('toast');
+  el.textContent = message;
+  el.className = bad ? 'show bad' : 'show';
+  toastTimer = setTimeout(() => (el.className = ''), 3400);
+}
+async function json(url, options) {
+  const response = await fetch(url, { cache: 'no-store', ...(options || {}) });
+  let data;
+  try {
+    data = await response.json();
+  } catch (_) {
+    data = { message: `Server returned ${response.status}` };
+  }
+  if (!response.ok || data.ok === false)
+    throw new Error(data.message || `Request failed (${response.status})`);
+  return data;
+}
+async function post(endpoint, params = {}) {
+  return json('/api/' + endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Van-Dashboard': '1' },
+    body: new URLSearchParams(params),
+  });
+}
+async function action(work) {
+  if (busy) return;
+  busy = true;
+  document.body.classList.add('busy');
+  try {
+    const result = await work();
+    if (result?.message) toast(result.message);
+    await refresh();
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    busy = false;
+    document.body.classList.remove('busy');
+  }
+}
+function age(ts) {
+  if (!ts) return 'never';
+  const secs = Math.max(0, Date.now() / 1000 - ts);
+  return secs < 90 ? `${Math.round(secs)}s ago` : `${Math.round(secs / 60)}m ago`;
+}
+function networkState(id, value) {
+  const el = $(id);
+  el.classList.remove('good', 'bad');
+  if (value === true) el.classList.add('good');
+  else if (value === false) el.classList.add('bad');
+}
+function renderUbntTile() {
+  const tile = $('ubnt-wifi');
+  tile.classList.remove('connected', 'unavailable');
+  if (!ubntLink) {
+    networkState('ubnt-wifi-dot', null);
+    networkState('ubnt-radio-dot', null);
+    $('ubnt-wifi-state').textContent = 'NO DATA';
+    $('ubnt-wifi-summary').textContent = 'Waiting for antenna status…';
+    return;
+  }
+  const u = ubntLink;
+  if (u.reachable === false) {
+    tile.classList.add('unavailable');
+    networkState('ubnt-wifi-dot', false);
+    networkState('ubnt-radio-dot', null);
+    $('ubnt-wifi-state').textContent = 'UNAVAILABLE';
+    $('ubnt-wifi-summary').textContent = 'No UBNT Ethernet response';
+    return;
+  }
+  if (u.reachable !== true) {
+    networkState('ubnt-wifi-dot', null);
+    networkState('ubnt-radio-dot', null);
+    $('ubnt-wifi-state').textContent = 'NO DATA';
+    $('ubnt-wifi-summary').textContent = 'Waiting for antenna status…';
+    return;
+  }
+  tile.classList.add('connected');
+  networkState('ubnt-wifi-dot', true);
+  $('ubnt-wifi-state').textContent = 'CONNECTED';
+  const details = [u.ssid || 'Unknown SSID'];
+  if (u.error) {
+    networkState('ubnt-radio-dot', null);
+    details.push('Wi-Fi status unavailable');
+  } else {
+    const connected = u.connected === true;
+    networkState('ubnt-radio-dot', connected);
+    if (!connected) details.push('Not associated');
+    if (connected && Number.isFinite(u.signal_dbm)) details.push(`${u.signal_dbm} dBm`);
+    if (connected && Number.isFinite(u.ccq_percent)) details.push(`${u.ccq_percent}% CCQ`);
+    else if (connected && Number.isFinite(u.quality_percent))
+      details.push(`${u.quality_percent}% quality`);
+  }
+  $('ubnt-wifi-summary').textContent = details.join(' · ');
+}
+function renderConnectivity(response) {
+  const c = response.connectivity,
+    r = c.router || {},
+    u = c.ubnt || {},
+    online = c.internet?.online;
+  networkState('internet-dot', online === null && r.reachable === false ? false : online);
+  $('mwan-mode').textContent =
+    r.mode || (online === false || r.reachable === false ? 'No active uplink' : 'Unknown');
+  ubntLink = u;
+  renderUbntTile();
+  $('mwan-list').innerHTML = (r.interfaces || [])
+    .map(
+      (i) =>
+        `<span class="mwan-chip ${esc(i.state)}" title="${esc(i.detail || '')}">${esc(i.name)} · ${esc(i.state)}</span>`,
+    )
+    .join('');
+  $('openwrt-age').textContent = r.error
+    ? `MWAN3 error · ${r.error}`
+    : c.last_error
+      ? `Collector error · ${c.last_error}`
+      : c.checked_at
+        ? `${c.stale ? 'Stale' : 'Updated'} · ${age(c.checked_at)}`
+        : c.refreshing
+          ? 'Checking…'
+          : 'Waiting for MWAN3';
+}
+async function refreshConnectivity() {
+  try {
+    renderConnectivity(await json('/api/connectivity'));
+  } catch (error) {
+    $('openwrt-age').textContent = error.message;
+    ubntLink = null;
+    renderUbntTile();
+  }
+}
+function atTime(ts) {
+  return ts
+    ? '@ ' +
+        new Date(ts * 1000).toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false,
+        })
+    : '';
+}
+function renderSpeedtest(response) {
+  const s = response.speedtest,
+    button = $('speedtest-button'),
+    running = s.status === 'running',
+    label = $('speedtest-label');
+  if (!label.dataset.idleLabel) label.dataset.idleLabel = label.textContent;
+  button.disabled = running;
+  button.classList.toggle('running', running);
+  button.setAttribute('aria-busy', String(running));
+  label.textContent = running ? label.dataset.runningLabel : label.dataset.idleLabel;
+  $('speed-results').classList.toggle('bad', s.status === 'error');
+  if (running)
+    $('speed-results').innerHTML = '<strong>Testing current route…</strong>This can take a minute';
+  else if (s.status === 'complete')
+    $('speed-results').innerHTML =
+      `<strong>↓ ${Number(s.download_mbps).toFixed(1)} Mbps · ↑ ${Number(s.upload_mbps).toFixed(1)} Mbps</strong>Latency ${Number(s.latency_ms).toFixed(1)} ms ${atTime(s.completed_at)}`;
+  else if (s.status === 'error')
+    $('speed-results').innerHTML =
+      `<strong>Speed test failed</strong>${esc(s.error || 'Unknown error')} ${atTime(s.completed_at)}`;
+  else $('speed-results').innerHTML = "<strong>Not run yet</strong>Uses vanpi's current route";
+}
+async function refreshSpeedtest() {
+  clearTimeout(speedPoll);
+  try {
+    const response = await json('/api/speedtest');
+    renderSpeedtest(response);
+    if (response.speedtest.status === 'running') speedPoll = setTimeout(refreshSpeedtest, 1000);
+  } catch (error) {
+    $('speed-results').innerHTML = `<strong>Speed test unavailable</strong>${esc(error.message)}`;
+  }
+}
+async function startSpeedtest() {
+  if ($('speedtest-button').disabled) return;
+  $('speedtest-button').disabled = true;
+  try {
+    const response = await post('speedtest');
+    renderSpeedtest(response);
+    if (response.speedtest.status === 'running') speedPoll = setTimeout(refreshSpeedtest, 1000);
+  } catch (error) {
+    toast(error.message, true);
+    $('speedtest-button').disabled = false;
+  }
+}
+function setPolicyLoading(loading, label) {
+  policyLoading = loading;
+  $('storage-panel').setAttribute('aria-busy', String(loading));
+  $('storage-status').textContent = label || (loading ? 'Checking…' : 'Current state');
+  document
+    .querySelectorAll('[data-policy-field]')
+    .forEach((button) => (button.disabled = loading || !storagePolicy));
+  if (loading && !storagePolicy)
+    $('storage-summary').textContent = label || 'Checking current state…';
+}
+function renderPolicyRuntime(id, active, onLabel, offLabel, detail) {
+  const item = $(id),
+    state = $(`${id}-state`);
+  item.classList.remove('on', 'off');
+  item.classList.add(active ? 'on' : 'off');
+  state.textContent = active ? onLabel : offLabel;
+  $(`${id}-detail`).textContent = detail;
+}
+function renderStoragePolicy(policy) {
+  storagePolicy = policy;
+  const fields = [
+      ['disks_enabled', 'Disks'],
+      ['torrents_enabled', 'Torrents'],
+      ['allow_starlink_torrents', 'Starlink torrents'],
+    ],
+    runtime = policy.runtime,
+    mounted = runtime.disks_mounted === true,
+    running = runtime.qbittorrent_running === true,
+    labels = runtime.mounted_disk_labels,
+    diskDetail = mounted
+      ? labels.join(', ')
+      : policy.disks_enabled
+        ? 'No managed HDD mounts'
+        : 'Disabled by requested policy',
+    torrentDetail = running
+      ? 'Exact process is active'
+      : !policy.disks_enabled
+        ? 'Stopped because disks are disabled'
+        : !policy.torrents_enabled
+          ? 'Disabled by requested policy'
+          : 'Stopped by current conditions';
+  for (const [field] of fields) {
+    const button = document.querySelector(`[data-policy-field="${field}"]`),
+      enabled = policy[field] === true;
+    button.classList.remove('on', 'off');
+    button.classList.add(enabled ? 'on' : 'off');
+    button.setAttribute('aria-pressed', String(enabled));
+    button.querySelector('.policy-state').textContent = enabled ? 'ON' : 'OFF';
+  }
+  renderPolicyRuntime('disk-runtime', mounted, 'MOUNTED', 'UNMOUNTED', diskDetail);
+  renderPolicyRuntime('torrent-runtime', running, 'RUNNING', 'STOPPED', torrentDetail);
+  $('storage-summary').textContent =
+    `Disks ${mounted ? 'mounted' : 'unmounted'} · qBittorrent ${running ? 'running' : 'stopped'}`;
+  setPolicyLoading(false, 'Current state');
+}
+function renderStorageUnavailable(message) {
+  storagePolicy = null;
+  $('storage-summary').textContent = 'Runtime state unavailable';
+  $('storage-status').textContent = message || 'Unavailable';
+  $('storage-panel').setAttribute('aria-busy', 'false');
+  for (const id of ['disk-runtime', 'torrent-runtime']) {
+    const item = $(id);
+    item.classList.remove('on', 'off');
+    $(`${id}-state`).textContent = 'NO DATA';
+    $(`${id}-detail`).textContent = 'Status unavailable';
+  }
+  document.querySelectorAll('[data-policy-field]').forEach((button) => {
+    button.disabled = true;
+    button.classList.remove('on', 'off');
+    button.setAttribute('aria-pressed', 'mixed');
+    button.querySelector('.policy-state').textContent = 'NO DATA';
+  });
+}
+async function refreshStoragePolicy(silent = false) {
+  if (!silent) setPolicyLoading(true, 'Checking…');
+  try {
+    const response = await json('/api/storage-policy');
+    renderStoragePolicy(response.policy);
+    return response;
+  } catch (error) {
+    renderStorageUnavailable(error.message);
+    throw error;
+  }
+}
+async function changeStoragePolicy(field) {
+  if (policyLoading || !storagePolicy) return;
+  const value = String(!storagePolicy[field]);
+  let result, operationError;
+  setPolicyLoading(true, 'Applying…');
+  try {
+    result = await post('storage-policy', { field, value });
+    renderStoragePolicy(result.policy);
+  } catch (error) {
+    operationError = error;
+  }
+  try {
+    await refreshStoragePolicy();
+  } catch (refreshError) {
+    if (!operationError) operationError = refreshError;
+  }
+  if (operationError) throw operationError;
+  return result;
+}
+function ubntSecurity(value) {
+  return value === 'wpa'
+    ? 'WPA/WPA2'
+    : value === 'none'
+      ? 'Open'
+      : value === 'enterprise'
+        ? 'WPA Enterprise'
+        : String(value || 'Unknown').toUpperCase();
+}
+function renderUbntWifi(response) {
+  ubntWifi = response;
+  const wifi = response.wifi || {},
+    state = wifi.state || {},
+    operation = response.operation || {},
+    running = operation.status === 'running',
+    error = operation.status === 'error',
+    associated = state.associated_ssid || '',
+    reachable = wifi.reachable === true,
+    unavailable = wifi.reachable === false || (error && !reachable);
+  $('ubnt-wifi-panel').setAttribute('aria-busy', String(running));
+  $('ubnt-wifi-operation').textContent = running
+    ? `${operation.kind === 'scan' ? 'Scanning' : operation.kind === 'connect' ? 'Connecting' : operation.kind === 'provision' ? 'Saving network' : 'Updating'}…`
+    : error
+      ? 'Failed'
+      : wifi.checked_at
+        ? `Updated ${age(wifi.checked_at)}`
+        : 'No data';
+  networkState(
+    'ubnt-current-dot',
+    reachable && associated ? true : unavailable || reachable ? false : null,
+  );
+  $('ubnt-current-ssid').textContent = associated || state.configured_ssid || 'Not associated';
+  $('ubnt-current-detail').textContent = error
+    ? operation.error || 'Status unavailable'
+    : state.automatic_paused === true
+      ? 'Automatic selection paused'
+      : state.automatic_paused === false
+        ? 'Automatic selection active'
+        : 'Waiting for antenna status…';
+  $('ubnt-resume').hidden = state.automatic_paused !== true;
+  $('ubnt-resume').disabled = running;
+  const scan = $('ubnt-scan');
+  scan.disabled = running;
+  scan.classList.toggle('running', running && operation.kind === 'scan');
+  $('ubnt-scan-label').textContent =
+    running && operation.kind === 'scan' ? 'Scanning…' : 'Scan nearby Wi-Fi';
+  const networks = wifi.networks || [];
+  $('ubnt-network-list').innerHTML =
+    networks
+      .map((network) => {
+        const known = network.known === true,
+          connected = network.connected === true,
+          supported = network.supported === true,
+          meta = [
+            Number.isFinite(network.signal_dbm) ? `${network.signal_dbm} dBm` : null,
+            Number.isFinite(network.quality_percent) ? `${network.quality_percent}%` : null,
+            ubntSecurity(network.security),
+            known ? 'Known' : null,
+          ].filter(Boolean);
+        let control;
+        if (connected) control = '<button class="ubnt-network-action" disabled>Connected</button>';
+        else if (known)
+          control = `<span class="ubnt-profile-actions">${network.profiles.map((profile) => `<button class="ubnt-network-action" data-action data-ubnt-profile="${esc(profile)}" ${running ? 'disabled' : ''}>${network.profiles.length > 1 ? esc(profile) : 'Connect'}</button>`).join('')}</span>`;
+        else if (!supported)
+          control = '<button class="ubnt-network-action" disabled>Unsupported</button>';
+        else if (network.security === 'none')
+          control = `<button class="ubnt-network-action" data-action data-ubnt-open="1" data-ubnt-ssid="${esc(network.ssid)}" data-ubnt-security="none" data-ubnt-bssid="${esc(network.bssid)}" ${running ? 'disabled' : ''}>Add & connect</button>`;
+        else
+          control = `<button class="ubnt-network-action" data-action data-ubnt-new="1" data-ubnt-ssid="${esc(network.ssid)}" data-ubnt-security="wpa" data-ubnt-bssid="${esc(network.bssid)}" ${running ? 'disabled' : ''}>Add</button>`;
+        return `<div class="ubnt-network-row ${known ? 'known' : ''} ${connected ? 'connected' : ''} ${supported ? '' : 'unsupported'}"><span><strong class="ubnt-network-name">${esc(network.ssid)}</strong><span class="ubnt-network-meta">${meta.map((item) => `<span class="${known ? 'ubnt-known' : ''}">${esc(item)}</span>`).join('')}</span></span>${control}</div>`;
+      })
+      .join('') ||
+    `<div class="ubnt-empty">${running && operation.kind === 'scan' ? 'Scanning nearby networks…' : 'No scan results yet. Tap Scan nearby Wi-Fi.'}</div>`;
+  const completion = `${operation.status}:${operation.completed_at || ''}`;
+  if (operation.completed_at && completion !== ubntLastCompletion) {
+    ubntLastCompletion = completion;
+    if ($('ubnt-wifi-backdrop').classList.contains('open'))
+      toast(operation.error || operation.message || 'UBNT Wi-Fi updated', Boolean(operation.error));
+    if (
+      operation.kind === 'connect' ||
+      operation.kind === 'provision' ||
+      operation.kind === 'resume'
+    )
+      refreshConnectivity();
+  }
+  clearTimeout(ubntPoll);
+  if (running) ubntPoll = setTimeout(() => refreshUbntWifi(true), 1200);
+  renderUbntTile();
+}
+async function refreshUbntWifi(showError = false) {
+  try {
+    const response = await json('/api/ubnt-wifi');
+    renderUbntWifi(response);
+    return response;
+  } catch (error) {
+    if (showError) toast(error.message, true);
+    renderUbntTile();
+  }
+}
+async function startUbntWifi(endpoint, params = {}) {
+  if (ubntWifi?.operation?.status === 'running') return;
+  clearUbntPassword();
+  try {
+    const response = await post(`ubnt-wifi/${endpoint}`, params);
+    renderUbntWifi(response);
+    ubntPoll = setTimeout(() => refreshUbntWifi(true), 500);
+  } catch (error) {
+    toast(error.message, true);
+    await refreshUbntWifi(false);
+  }
+}
+function showUbntPassword(button) {
+  ubntNewNetwork = {
+    ssid: button.dataset.ubntSsid,
+    security: button.dataset.ubntSecurity,
+    bssid: button.dataset.ubntBssid,
+  };
+  $('ubnt-password-title').textContent = `Join ${ubntNewNetwork.ssid}`;
+  $('ubnt-password-detail').textContent =
+    `${ubntSecurity(ubntNewNetwork.security)} · password is sent directly to the antenna and saved in its profile`;
+  $('ubnt-password').value = '';
+  $('ubnt-password-form').hidden = false;
+  $('ubnt-password').focus();
+}
+function clearUbntPassword() {
+  ubntNewNetwork = null;
+  $('ubnt-password').value = '';
+  $('ubnt-password-form').hidden = true;
+}
+function renderStarlink(status) {
+  const state = status?.state || 'unknown',
+    known = state === 'on' || state === 'off',
+    tile = $('starlink');
+  tile.classList.remove('on', 'off', 'unknown');
+  tile.classList.add(known ? state : 'unknown');
+  networkState('starlink-dot', state === 'on' ? true : state === 'off' ? false : null);
+  tile.disabled = !known || Boolean(status?.changing);
+  tile.setAttribute('aria-pressed', known ? String(state === 'on') : 'mixed');
+  $('starlink-state').textContent = status?.changing
+    ? 'WAIT'
+    : state === 'on'
+      ? 'ON'
+      : state === 'off'
+        ? 'OFF'
+        : 'NO DATA';
+  $('starlink-detail').textContent = status?.changing
+    ? 'Changing power…'
+    : state === 'on'
+      ? 'Tuya switch is on'
+      : state === 'off'
+        ? 'Tuya switch is off'
+        : 'Tuya status unavailable';
+}
+function updateStatus(data) {
+  dashboard = data.cop_alert;
+  const active = dashboard.active,
+    engine = dashboard.engine,
+    led = data.cop_led || {};
+  $('dot').classList.remove('bad');
+  $('dot').classList.add('on');
+  $('connection').textContent = 'Connected · vanpi dashboard';
+  renderStarlink(data.starlink);
+  $('cop').classList.toggle('active', active);
+  $('cop').setAttribute('aria-pressed', String(active));
+  $('cop-pill').textContent = active ? 'ACTIVE' : 'OFF';
+  $('cop-detail').textContent = active
+    ? 'Dashcam wake and 5-minute bacon alerts are active'
+    : 'Tap to keep the dashcam awake';
+  $('engine').textContent = engine.running
+    ? `RUNNING · ${Math.round(engine.rpm)} RPM`
+    : engine.rpm === null
+      ? 'No fresh data'
+      : `Stopped · ${Math.round(engine.rpm)} RPM`;
+  $('flood').textContent = dashboard.ext_flood;
+  $('cop-led').textContent = led.message || 'No data';
+  $('cop-led').title = led.last_error || '';
+  $('wake').textContent =
+    dashboard.last_wake_ok === null
+      ? 'Not attempted'
+      : dashboard.last_wake_ok
+        ? `OK · ${age(dashboard.last_wake)}`
+        : 'DEGRADED';
+  if (active && dashboard.last_error)
+    $('connection').textContent = `Active with warning · ${dashboard.last_error}`;
+}
+async function refresh() {
+  try {
+    updateStatus(await json('/api/status'));
+  } catch (error) {
+    $('dot').classList.remove('on');
+    $('dot').classList.add('bad');
+    $('connection').textContent = error.message;
+  }
+}
+function muteIcon(muted) {
+  return muted ? '🔇' : '🔊';
+}
+function clockSeconds(value) {
+  const parts = String(value || '')
+    .split(':')
+    .map(Number);
+  return parts.length && parts.every(Number.isFinite)
+    ? parts.reduce((total, part) => total * 60 + part, 0)
+    : 0;
+}
+function clockLabel(seconds) {
+  seconds = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(seconds / 60),
+    secs = seconds % 60;
+  return `${minutes}:${String(secs).padStart(2, '0')}`;
+}
+function updateSonosProgress() {
+  const bar = $('sonos-progress'),
+    duration = sonosTimeline.duration;
+  if (!(duration > 0)) {
+    bar.hidden = true;
+    return;
+  }
+  const elapsed = sonosTimeline.playing ? (performance.now() - sonosTimeline.updatedAt) / 1000 : 0,
+    position = Math.min(duration, sonosTimeline.position + elapsed),
+    percent = (100 * position) / duration;
+  bar.hidden = false;
+  $('sonos-progress-fill').style.width = `${percent}%`;
+  bar.setAttribute('aria-valuemin', '0');
+  bar.setAttribute('aria-valuemax', String(duration));
+  bar.setAttribute('aria-valuenow', String(Math.round(position)));
+  bar.setAttribute('aria-valuetext', `${clockLabel(position)} of ${clockLabel(duration)}`);
+  bar.title = `${clockLabel(position)} / ${clockLabel(duration)}`;
+}
+function renderSpeakers(next) {
+  speakers = next;
+  const grouped = next.speakers.filter((s) => s.grouped),
+    now = next.now_playing || {},
+    group = next.group || {};
+  $('speaker-summary').textContent =
+    `${next.coordinator} · ${grouped.length}/${next.speakers.length}`;
+  $('sonos-track').textContent = now.title || 'Nothing playing';
+  $('sonos-artist').textContent = now.artist || next.coordinator;
+  const playing = now.transport_state === 'PLAYING';
+  $('sonos-play').textContent = playing ? 'Ⅱ' : '▶';
+  $('sonos-play').setAttribute('aria-label', playing ? 'Pause' : 'Play');
+  sonosTimeline = {
+    position: clockSeconds(now.position),
+    duration: clockSeconds(now.duration),
+    playing,
+    updatedAt: performance.now(),
+  };
+  updateSonosProgress();
+  const card = $('sonos-card');
+  let art = null;
+  try {
+    art = now.album_art ? new URL(now.album_art, location.href) : null;
+  } catch (_) {
+    art = null;
+  }
+  if (art && art.origin === location.origin) {
+    card.classList.add('has-art');
+    card.style.backgroundImage = `linear-gradient(90deg,#111b22ed 0%,#111b22c7 58%,#111b226b 100%),url("${art.href}")`;
+  } else {
+    card.classList.remove('has-art');
+    card.style.backgroundImage = '';
+  }
+  const groupVolume = Number.isFinite(group.volume) ? group.volume : 0;
+  $('group-volume').value = groupVolume;
+  $('group-volume').disabled = !Number.isFinite(group.volume);
+  $('group-level').textContent = Number.isFinite(group.volume) ? group.volume : '—';
+  const groupMuteKnown = typeof group.muted === 'boolean';
+  $('group-mute').disabled = !groupMuteKnown;
+  $('group-mute').textContent = muteIcon(group.muted);
+  $('group-mute').classList.toggle('muted', group.muted === true);
+  $('group-mute').setAttribute('aria-pressed', String(group.muted === true));
+  $('group-mute').setAttribute('aria-label', group.muted ? 'Unmute group' : 'Mute group');
+  $('speaker-list').innerHTML =
+    next.speakers
+      .map((s) => {
+        const detail = s.coordinator
+            ? 'Active coordinator'
+            : s.grouped
+              ? `Grouped with ${next.coordinator}`
+              : `Group: ${s.group_coordinator}`,
+          volume = Number.isFinite(s.volume) ? s.volume : 0,
+          muteKnown = typeof s.muted === 'boolean';
+        return `<div class="speaker-row"><input class="speaker-check" data-action data-group-speaker="${esc(s.name)}" type="checkbox" ${s.grouped ? 'checked' : ''} ${s.coordinator ? 'disabled' : ''} aria-label="Group ${esc(s.name)}">
+      <button class="audio-mute ${s.muted ? 'muted' : ''}" data-action data-speaker-mute="${esc(s.name)}" ${muteKnown ? '' : 'disabled'} aria-pressed="${String(s.muted === true)}" aria-label="${s.muted ? 'Unmute' : 'Mute'} ${esc(s.name)}">${muteIcon(s.muted)}</button>
+      <button class="speaker-name" data-action data-select-speaker="${esc(s.name)}">${esc(s.name)}<small>${esc(detail)}</small></button><span class="speaker-level">${Number.isFinite(s.volume) ? s.volume : '—'}</span>
+      <input class="speaker-volume" data-action data-speaker-volume="${esc(s.name)}" type="range" min="0" max="100" value="${volume}" ${Number.isFinite(s.volume) ? '' : 'disabled'} aria-label="${esc(s.name)} volume"></div>`;
+      })
+      .join('') || '<div class="speaker-loading">No Sonos speakers found</div>';
+}
+async function loadSpeakers() {
+  const next = await json('/api/speakers');
+  renderSpeakers(next);
+  return next;
+}
+async function refreshSonos() {
+  try {
+    return await loadSpeakers();
+  } catch (error) {
+    $('speaker-summary').textContent = 'Unavailable';
+    $('sonos-track').textContent = 'Sonos unavailable';
+    $('sonos-artist').textContent = error.message;
+    sonosTimeline = { position: 0, duration: 0, playing: false, updatedAt: 0 };
+    updateSonosProgress();
+    $('sonos-card').classList.remove('has-art');
+    $('sonos-card').style.backgroundImage = '';
+  }
+}
+async function openSpeakers() {
+  $('speaker-backdrop').classList.add('open');
+  document.body.classList.add('sheet-open');
+  $('speakers').setAttribute('aria-expanded', 'true');
+  try {
+    await loadSpeakers();
+  } catch (error) {
+    $('speaker-list').innerHTML = `<div class="speaker-loading">${esc(error.message)}</div>`;
+    toast(error.message, true);
+  }
+}
+function closeSpeakers() {
+  $('speaker-backdrop').classList.remove('open');
+  document.body.classList.remove('sheet-open');
+  $('speakers').setAttribute('aria-expanded', 'false');
+  $('speakers').focus();
+}
+async function pollStorage() {
+  clearTimeout(storagePoll);
+  if (!$('storage-backdrop').classList.contains('open')) return;
+  try {
+    if (!busy) await refreshStoragePolicy(true);
+  } catch (_) {
+    /* rendered by refreshStoragePolicy */
+  } finally {
+    storagePoll = setTimeout(pollStorage, 2500);
+  }
+}
+async function openStorage() {
+  $('storage-backdrop').classList.add('open');
+  document.body.classList.add('sheet-open');
+  $('storage').setAttribute('aria-expanded', 'true');
+  try {
+    await refreshStoragePolicy();
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    storagePoll = setTimeout(pollStorage, 2500);
+  }
+}
+function closeStorage() {
+  clearTimeout(storagePoll);
+  $('storage-backdrop').classList.remove('open');
+  document.body.classList.remove('sheet-open');
+  $('storage').setAttribute('aria-expanded', 'false');
+  $('storage').focus();
+}
+async function openUbntWifi() {
+  $('ubnt-wifi-backdrop').classList.add('open');
+  document.body.classList.add('sheet-open');
+  $('ubnt-wifi').setAttribute('aria-expanded', 'true');
+  await refreshUbntWifi(true);
+}
+function closeUbntWifi() {
+  $('ubnt-wifi-backdrop').classList.remove('open');
+  document.body.classList.remove('sheet-open');
+  $('ubnt-wifi').setAttribute('aria-expanded', 'false');
+  clearUbntPassword();
+  $('ubnt-wifi').focus();
+}
+const bookUrl = new URL(window.location.href);
+bookUrl.port = '8787';
+bookUrl.pathname = '/';
+bookUrl.search = '';
+bookUrl.hash = '';
+$('books').href = bookUrl.toString();
+$('cop').addEventListener('click', () =>
+  action(() => post('cop-alert', { active: dashboard?.active ? 'false' : 'true' })),
+);
+$('starlink').addEventListener('click', () => {
+  renderStarlink({ state: 'unknown', changing: true });
+  action(async () => {
+    const result = await post('starlink');
+    await refreshConnectivity();
+    return result;
+  });
+});
+$('speakers').addEventListener('click', openSpeakers);
+$('speaker-close').addEventListener('click', closeSpeakers);
+$('storage').addEventListener('click', openStorage);
+$('storage-close').addEventListener('click', closeStorage);
+$('ubnt-wifi').addEventListener('click', openUbntWifi);
+$('ubnt-wifi-close').addEventListener('click', closeUbntWifi);
+$('ubnt-scan').addEventListener('click', () => startUbntWifi('scan'));
+$('ubnt-resume').addEventListener('click', () => startUbntWifi('resume'));
+$('ubnt-password-cancel').addEventListener('click', clearUbntPassword);
+$('ubnt-password-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  if (!ubntNewNetwork) return;
+  const selected = { ...ubntNewNetwork, password: $('ubnt-password').value };
+  startUbntWifi('provision', selected);
+});
+$('speedtest-button').addEventListener('click', startSpeedtest);
+$('speaker-backdrop').addEventListener('click', (event) => {
+  if (event.target === $('speaker-backdrop')) closeSpeakers();
+});
+$('storage-backdrop').addEventListener('click', (event) => {
+  if (event.target === $('storage-backdrop')) closeStorage();
+});
+$('ubnt-wifi-backdrop').addEventListener('click', (event) => {
+  if (event.target === $('ubnt-wifi-backdrop')) closeUbntWifi();
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    if ($('speaker-backdrop').classList.contains('open')) closeSpeakers();
+    if ($('storage-backdrop').classList.contains('open')) closeStorage();
+    if ($('ubnt-wifi-backdrop').classList.contains('open')) closeUbntWifi();
+  }
+});
+document.addEventListener('input', (event) => {
+  const slider = event.target.closest('[data-speaker-volume]');
+  if (slider)
+    slider.closest('.speaker-row').querySelector('.speaker-level').textContent = slider.value;
+  const groupSlider = event.target.closest('[data-group-volume]');
+  if (groupSlider) $('group-level').textContent = groupSlider.value;
+});
+document.addEventListener('change', (event) => {
+  const checkbox = event.target.closest('[data-group-speaker]');
+  if (checkbox)
+    action(async () => {
+      try {
+        return await post('speakers/group', {
+          name: checkbox.dataset.groupSpeaker,
+          grouped: checkbox.checked ? '1' : '0',
+        });
+      } finally {
+        await loadSpeakers();
+      }
+    });
+  const slider = event.target.closest('[data-speaker-volume]');
+  if (slider)
+    action(async () => {
+      try {
+        return await post('speakers/volume', {
+          name: slider.dataset.speakerVolume,
+          volume: slider.value,
+        });
+      } finally {
+        await loadSpeakers();
+      }
+    });
+  const groupSlider = event.target.closest('[data-group-volume]');
+  if (groupSlider)
+    action(async () => {
+      try {
+        return await post('speakers/group-volume', { volume: groupSlider.value });
+      } finally {
+        await loadSpeakers();
+      }
+    });
+});
+document.addEventListener('click', (event) => {
+  const selected = event.target.closest('[data-select-speaker]');
+  if (selected)
+    action(async () => {
+      const result = await post('speakers/select', { name: selected.dataset.selectSpeaker });
+      await loadSpeakers();
+      return result;
+    });
+  const transport = event.target.closest('[data-transport]');
+  if (transport)
+    action(async () => {
+      try {
+        return await post('speakers/transport', { action: transport.dataset.transport });
+      } finally {
+        await loadSpeakers();
+      }
+    });
+  const groupMute = event.target.closest('[data-group-mute]');
+  if (groupMute)
+    action(async () => {
+      try {
+        return await post('speakers/group-mute', { muted: speakers?.group?.muted ? '0' : '1' });
+      } finally {
+        await loadSpeakers();
+      }
+    });
+  const speakerMute = event.target.closest('[data-speaker-mute]');
+  if (speakerMute)
+    action(async () => {
+      const item = speakers?.speakers?.find((s) => s.name === speakerMute.dataset.speakerMute);
+      try {
+        return await post('speakers/mute', {
+          name: speakerMute.dataset.speakerMute,
+          muted: item?.muted ? '0' : '1',
+        });
+      } finally {
+        await loadSpeakers();
+      }
+    });
+  const policyButton = event.target.closest('[data-policy-field]');
+  if (policyButton) action(() => changeStoragePolicy(policyButton.dataset.policyField));
+  const profile = event.target.closest('[data-ubnt-profile]');
+  if (profile) startUbntWifi('connect', { profile: profile.dataset.ubntProfile });
+  const newNetwork = event.target.closest('[data-ubnt-new]');
+  if (newNetwork) showUbntPassword(newNetwork);
+  const openNetwork = event.target.closest('[data-ubnt-open]');
+  if (openNetwork)
+    startUbntWifi('provision', {
+      ssid: openNetwork.dataset.ubntSsid,
+      security: 'none',
+      bssid: openNetwork.dataset.ubntBssid,
+      password: '',
+    });
+});
+function refreshVisibleDashboard() {
+  if (document.hidden) return;
+  refresh();
+  refreshConnectivity();
+  refreshSpeedtest();
+  refreshSonos();
+  refreshStoragePolicy().catch(() => {});
+  refreshUbntWifi(false);
+}
+Promise.allSettled([
+  refresh(),
+  loadSpeakers(),
+  refreshConnectivity(),
+  refreshSpeedtest(),
+  refreshStoragePolicy(),
+  refreshUbntWifi(false),
+]).then((results) => {
+  if (results[1].status === 'rejected') refreshSonos();
+});
+setInterval(() => {
+  if (!document.hidden) refresh();
+}, 5000);
+setInterval(() => {
+  if (!document.hidden) refreshConnectivity();
+}, 10000);
+setInterval(() => {
+  if (!document.hidden && !busy) refreshSonos();
+}, 10000);
+setInterval(() => {
+  if (!document.hidden && !busy) refreshStoragePolicy().catch(() => {});
+}, 30000);
+setInterval(() => {
+  if (!document.hidden && ubntWifi?.operation?.status !== 'running') refreshUbntWifi(false);
+}, 30000);
+setInterval(() => {
+  if (!document.hidden) updateSonosProgress();
+}, 1000);
+document.addEventListener('visibilitychange', refreshVisibleDashboard);
+window.addEventListener('pageshow', refreshVisibleDashboard);
+window.addEventListener('focus', refreshVisibleDashboard);
