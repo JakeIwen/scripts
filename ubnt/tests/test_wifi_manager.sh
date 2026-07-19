@@ -25,6 +25,17 @@ printf '%s\n' \
     'wireless.1.scan_list.channels=' \
     'wpasupplicant.status=disabled' \
     'wpasupplicant.device.1.status=disabled' > "$test_root/profiles/missing-target"
+printf '%s\n' \
+    'wireless.1.ssid=template-network' \
+    'wireless.1.ap=00:00:00:00:00:01' \
+    'wireless.1.security.type=none' \
+    'wireless.1.scan_list.status=disabled' \
+    'wireless.1.scan_list.channels=' \
+    'wpasupplicant.status=enabled' \
+    'wpasupplicant.device.1.status=enabled' \
+    'wpasupplicant.profile.1.network.1.ssid=template-network' \
+    'wpasupplicant.profile.1.network.1.bssid=00:00:00:00:00:01' \
+    'wpasupplicant.profile.1.network.1.psk=template-secret' > "$test_root/profiles/WPA Template"
 profile_hash_before=$(md5 -q "$profile" 2>/dev/null || md5sum "$profile" | awk '{print $1}')
 cp "$profile" "$test_root/system.cfg"
 printf 'old-network\n' > "$test_root/associated"
@@ -105,8 +116,34 @@ fi
 unset MOCK_FAIL_SSID UBNT_ASSOCIATE_FALLBACK_SECONDS UBNT_MANUAL_GRACE_SECONDS
 [ "$(sed -n '1p' "$test_root/associated")" = 'A Network With Spaces' ]
 grep -q 'manual switch protection expired; recovering best available saved network' "$test_root/wifi.log"
-grep -q 'requested switch failed profile=missing-target; automatic recovery in ' "$test_root/wifi.log"
 grep -q 'automatic recovery selected profile=A Network With Spaces' "$test_root/wifi.log"
 grep -q 'automatic recovery completed profile=A Network With Spaces' "$test_root/wifi.log"
+
+dashboard_output=$("$manager" dashboard-scan)
+printf '%s\n' "$dashboard_output" | grep -q '^state|'
+printf '%s\n' "$dashboard_output" | grep -q '^profile|'
+printf '%s\n' "$dashboard_output" | grep -q '^network|'
+! printf '%s\n' "$dashboard_output" | grep -q 'template-secret'
+
+rm -f "$test_root/state/paused"
+printf 'old-network\n' > "$test_root/associated"
+printf 'A Network With Spaces\n' | "$manager" manual-connect-stdin >/dev/null
+[ -f "$test_root/state/paused" ]
+[ "$(sed -n '1p' "$test_root/associated")" = 'A Network With Spaces' ]
+
+rm -f "$test_root/state/paused"
+printf '%s\n' \
+    'dendelion' \
+    'wpa' \
+    'D8:EC:5E:8D:6A:3A' \
+    'new-test-password' | "$manager" provision-stdin >/dev/null
+[ -f "$test_root/state/paused" ]
+[ -f "$test_root/profiles/dendelion" ]
+grep -q '^wpasupplicant.profile.1.network.1.ssid=dendelion$' "$test_root/profiles/dendelion"
+grep -q '^wpasupplicant.profile.1.network.1.bssid=D8:EC:5E:8D:6A:3A$' "$test_root/profiles/dendelion"
+grep -q '^wpasupplicant.profile.1.network.1.psk=new-test-password$' "$test_root/profiles/dendelion"
+grep -q '^wireless.1.scan_list.status=disabled$' "$test_root/profiles/dendelion"
+! grep -q 'new-test-password' "$test_root/wifi.log"
+! find "$test_root/profiles" -maxdepth 1 -name '.dashboard-new.*' | grep -q .
 
 printf 'wifi-manager: ok\n'

@@ -47,6 +47,9 @@ POLICYCTL = "/home/pi/scripts/policyctl"
 CONNECTIVITY_STATUS = os.environ.get(
     "VAN_DASHBOARD_CONNECTIVITY_STATUS", "/home/pi/scripts/connectivity_status.py"
 )
+UBNT_WIFI_TOOL = os.environ.get(
+    "VAN_DASHBOARD_UBNT_WIFI_TOOL", "/home/pi/scripts/ubnt_wifi.py"
+)
 SPEEDTEST = os.path.expanduser(
     os.environ.get("VAN_DASHBOARD_SPEEDTEST", "/home/pi/scripts/speedtest.sh")
 )
@@ -249,8 +252,15 @@ class EngineMonitor:
                     can_socket.close()
 
 
-def run_command(args, timeout=20):
-    return subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=False)
+def run_command(args, timeout=20, input_text=None):
+    return subprocess.run(
+        args,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+        input=input_text,
+    )
 
 
 def c_can_link_status(command=run_command):
@@ -1290,6 +1300,161 @@ class ConnectivityMonitor:
             self.refresh_event.clear()
 
 
+class UbntWifiController:
+    """Run scans and network changes off-thread through the reusable JSON tool."""
+
+    TIMEOUTS = {
+        "status": 20,
+        "scan": 45,
+        "connect": 260,
+        "provision": 260,
+        "resume": 20,
+    }
+
+    def __init__(
+        self,
+        tool=UBNT_WIFI_TOOL,
+        command=run_command,
+        wall_clock=time.time,
+        on_change=None,
+    ):
+        self.tool = tool
+        self.command = command
+        self.wall_clock = wall_clock
+        self.on_change = on_change
+        self.lock = threading.Lock()
+        self.thread = None
+        self.wifi = {
+            "version": 1,
+            "reachable": None,
+            "checked_at": None,
+            "state": {
+                "configured_ssid": None,
+                "associated_ssid": None,
+                "ccq_percent": None,
+                "automatic_paused": None,
+                "selector_running": None,
+            },
+            "profiles": [],
+            "networks": [],
+        }
+        self.operation = {
+            "status": "idle",
+            "kind": None,
+            "started_at": None,
+            "completed_at": None,
+            "message": None,
+            "error": None,
+        }
+
+    def snapshot(self):
+        with self.lock:
+            return {
+                "wifi": copy.deepcopy(self.wifi),
+                "operation": dict(self.operation),
+            }
+
+    def request_refresh(self, max_age=20):
+        with self.lock:
+            checked_at = self.wifi.get("checked_at")
+            running = self.operation["status"] == "running"
+            completed_at = self.operation.get("completed_at")
+        recent_attempt = completed_at is not None and (
+            self.wall_clock() - completed_at <= max_age
+        )
+        if not running and (
+            (checked_at is None and not recent_attempt)
+            or (checked_at is not None and self.wall_clock() - checked_at > max_age)
+        ):
+            self.start("status")
+
+    def start(self, kind, payload=None):
+        if kind not in self.TIMEOUTS:
+            raise ValueError("unknown UBNT Wi-Fi operation")
+        with self.lock:
+            if self.operation["status"] == "running":
+                return False
+            self.operation = {
+                "status": "running",
+                "kind": kind,
+                "started_at": int(self.wall_clock()),
+                "completed_at": None,
+                "message": None,
+                "error": None,
+            }
+            self.thread = threading.Thread(
+                target=self._run,
+                args=(kind, dict(payload or {})),
+                name=f"ubnt-wifi-{kind}",
+                daemon=True,
+            )
+            self.thread.start()
+            return True
+
+    def _tool_result(self, kind, payload=None):
+        input_text = json.dumps(payload, separators=(",", ":")) if payload else None
+        try:
+            result = self.command(
+                [self.tool, "--json", kind],
+                timeout=self.TIMEOUTS[kind],
+                input_text=input_text,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"UBNT {kind} timed out") from exc
+        except OSError as exc:
+            raise RuntimeError(f"could not start UBNT {kind}: {exc}") from exc
+        finally:
+            input_text = None
+            if payload and "password" in payload:
+                payload["password"] = ""
+        try:
+            parsed = json.loads(result.stdout)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("UBNT Wi-Fi tool returned invalid JSON") from exc
+        if not isinstance(parsed, dict):
+            raise RuntimeError("UBNT Wi-Fi tool returned invalid data")
+        if result.returncode or parsed.get("ok") is not True:
+            raise RuntimeError(str(parsed.get("message") or "UBNT Wi-Fi operation failed"))
+        wifi = parsed.get("wifi")
+        if not isinstance(wifi, dict) or wifi.get("version") != 1:
+            raise RuntimeError("UBNT Wi-Fi tool returned invalid status")
+        return parsed
+
+    def _refresh_after_failure(self):
+        try:
+            return self._tool_result("status").get("wifi")
+        except RuntimeError:
+            return None
+
+    def _run(self, kind, payload):
+        error = None
+        message = None
+        wifi = None
+        try:
+            result = self._tool_result(kind, payload)
+            wifi = result["wifi"]
+            message = result.get("message")
+            if kind in ("connect", "provision", "resume") and self.on_change:
+                self.on_change()
+        except RuntimeError as exc:
+            error = str(exc)
+            wifi = self._refresh_after_failure()
+        finally:
+            if "password" in payload:
+                payload["password"] = ""
+        with self.lock:
+            if wifi is not None:
+                self.wifi = wifi
+            self.operation = {
+                "status": "error" if error else "complete",
+                "kind": kind,
+                "started_at": self.operation["started_at"],
+                "completed_at": int(self.wall_clock()),
+                "message": message,
+                "error": error,
+            }
+
+
 def parse_speedtest_output(output):
     values = {}
     patterns = {
@@ -1382,6 +1547,7 @@ cop_alert = CopAlertManager(state_store, engine_monitor)
 cop_led = CopLedManager(state_store, engine_monitor)
 sonos = SonosController(state_store)
 connectivity = ConnectivityMonitor()
+ubnt_wifi = UbntWifiController(on_change=connectivity.request_refresh)
 speedtest = SpeedTestManager()
 starlink = TuyaSwitchManager("starlink")
 storage_policy = StoragePolicyManager()
@@ -1500,6 +1666,101 @@ def api_connectivity():
     response = jsonify({"ok": True, "connectivity": connectivity.snapshot()})
     response.headers["Cache-Control"] = "no-store"
     return response
+
+
+@app.route("/api/ubnt-wifi")
+def api_ubnt_wifi():
+    ubnt_wifi.request_refresh()
+    response = jsonify({"ok": True, **ubnt_wifi.snapshot()})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+def _exact_form(fields):
+    return set(request.form) == set(fields) and all(
+        len(request.form.getlist(name)) == 1 for name in fields
+    )
+
+
+def _start_ubnt_operation(kind, payload=None):
+    if not ubnt_wifi.start(kind, payload):
+        return api_error("another UBNT Wi-Fi operation is already running", 409)
+    return (
+        jsonify(
+            {
+                "ok": True,
+                "message": f"UBNT {kind} started",
+                **ubnt_wifi.snapshot(),
+            }
+        ),
+        202,
+    )
+
+
+@app.route("/api/ubnt-wifi/scan", methods=["POST"])
+def api_ubnt_wifi_scan():
+    if request.form:
+        return api_error("UBNT scan does not accept input", 400)
+    return _start_ubnt_operation("scan")
+
+
+@app.route("/api/ubnt-wifi/connect", methods=["POST"])
+def api_ubnt_wifi_connect():
+    if not _exact_form(("profile",)):
+        return api_error("UBNT connect requires one profile", 400)
+    profile = request.form["profile"]
+    if not profile or len(profile.encode("utf-8")) > 128 or any(
+        ord(character) < 32 or ord(character) == 127 for character in profile
+    ):
+        return api_error("invalid UBNT profile", 400)
+    return _start_ubnt_operation("connect", {"profile": profile})
+
+
+@app.route("/api/ubnt-wifi/provision", methods=["POST"])
+def api_ubnt_wifi_provision():
+    fields = ("ssid", "security", "bssid", "password")
+    if not _exact_form(fields):
+        return api_error("new UBNT network requires SSID, security, BSSID, and password", 400)
+    payload = {name: request.form[name] for name in fields}
+    ssid = payload["ssid"]
+    password = payload["password"]
+    if (
+        not ssid
+        or len(ssid.encode("utf-8")) > 32
+        or ssid.startswith(".")
+        or "/" in ssid
+        or any(ord(character) < 32 or ord(character) == 127 for character in ssid)
+    ):
+        payload["password"] = ""
+        return api_error("SSID cannot be safely stored as a UBNT profile", 400)
+    if payload["security"] not in ("wpa", "none"):
+        payload["password"] = ""
+        return api_error("only WPA/WPA2 Personal and open networks are supported", 400)
+    if not re.fullmatch(r"(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", payload["bssid"]):
+        payload["password"] = ""
+        return api_error("invalid UBNT access-point address", 400)
+    password_size = len(password.encode("utf-8"))
+    password_has_control = any(
+        ord(character) < 32 or ord(character) == 127 for character in password
+    )
+    if password_has_control or (
+        payload["security"] == "wpa" and not 8 <= password_size <= 63
+    ):
+        payload["password"] = ""
+        return api_error("WPA password must be 8 to 63 bytes without control characters", 400)
+    if payload["security"] == "none" and password:
+        payload["password"] = ""
+        return api_error("open networks do not use a password", 400)
+    response = _start_ubnt_operation("provision", payload)
+    payload["password"] = ""
+    return response
+
+
+@app.route("/api/ubnt-wifi/resume", methods=["POST"])
+def api_ubnt_wifi_resume():
+    if request.form:
+        return api_error("UBNT resume does not accept input", 400)
+    return _start_ubnt_operation("resume")
 
 
 @app.route("/api/speedtest", methods=["GET", "POST"])

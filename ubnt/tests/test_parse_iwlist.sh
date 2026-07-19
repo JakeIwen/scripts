@@ -12,7 +12,8 @@ awk -f "$parser" "$fixture" > "$actual"
 printf '%s\n' \
     '92|denlink|wpa|2462|11|4E:EA:85:26:34:F4|-13' \
     '21|dendelion|wpa|2412|1|D8:EC:5E:8D:6A:3A|-55' \
-    '60|A Network With Spaces|none|2437|6|00:11:22:33:44:55|-40' > "$expected"
+    '60|A Network With Spaces|none|2437|6|00:11:22:33:44:55|-40' \
+    '50|Enterprise Campus|enterprise|2422|3|00:11:22:33:44:77|-67' > "$expected"
 
 diff -u "$expected" "$actual"
 printf 'parse-iwlist: ok\n'

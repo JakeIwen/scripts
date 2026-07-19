@@ -16,6 +16,7 @@ MCA_STATUS=${UBNT_MCA_STATUS:-/usr/bin/mca-status}
 IP_CMD=${UBNT_IP_CMD:-/usr/bin/ip}
 PING=${UBNT_PING:-/bin/ping}
 CFGMTD=${UBNT_CFGMTD:-/sbin/cfgmtd}
+HEXDUMP=${UBNT_HEXDUMP:-/usr/bin/hexdump}
 
 LOCK_DIR="$STATE_DIR/lock"
 PAUSE_FILE="$STATE_DIR/paused"
@@ -25,6 +26,7 @@ SCAN_RAW="$STATE_DIR/scan.raw"
 APPLY_CFG="$STATE_DIR/apply.cfg"
 PRIORITY_FILE="$CONFIG_DIR/wifi-priority"
 PREFER_DENLINK_FLAG="$CONFIG_DIR/prefer_denlink"
+PENDING_PROFILE=
 
 MANUAL_GRACE_SECONDS=${UBNT_MANUAL_GRACE_SECONDS:-120}
 AUTO_SCAN_INTERVAL=${UBNT_AUTO_SCAN_INTERVAL:-120}
@@ -145,6 +147,9 @@ acquire_lock() {
 }
 
 release_lock() {
+    if [ -n "${PENDING_PROFILE:-}" ]; then
+        rm -f "$PENDING_PROFILE"
+    fi
     rm -f "$APPLY_CFG" "$STATE_DIR/softrestart.$$.log"
     rm -f "$LOCK_DIR/pid"
     rmdir "$LOCK_DIR" 2>/dev/null || true
@@ -228,6 +233,48 @@ scan_networks() {
         return 1
     fi
     return 0
+}
+
+hex_encode() {
+    printf '%s' "$1" | "$HEXDUMP" -v -e '1/1 "%02x"'
+}
+
+emit_dashboard_snapshot() {
+    dashboard_configured=$(effective_ssid "$SYSTEM_CFG")
+    dashboard_associated=$(associated_ssid)
+    dashboard_ccq=$(current_ccq)
+    [ -f "$PAUSE_FILE" ] && dashboard_paused=yes || dashboard_paused=no
+    [ -d "$LOCK_DIR" ] && dashboard_running=yes || dashboard_running=no
+    printf 'state|%s|%s|%s|%s|%s\n' \
+        "$(hex_encode "$dashboard_configured")" \
+        "$(hex_encode "$dashboard_associated")" \
+        "$dashboard_ccq" "$dashboard_paused" "$dashboard_running"
+
+    for dashboard_profile_path in "$PROFILE_DIR"/*; do
+        [ -f "$dashboard_profile_path" ] || continue
+        dashboard_profile=${dashboard_profile_path##*/}
+        case $dashboard_profile in
+            system.cfg|reset|*.backup.*) continue ;;
+        esac
+        dashboard_ssid=$(effective_ssid "$dashboard_profile_path")
+        [ -n "$dashboard_ssid" ] || continue
+        dashboard_security=$(profile_security "$dashboard_profile_path")
+        printf 'profile|%s|%s|%s\n' \
+            "$(hex_encode "$dashboard_profile")" \
+            "$(hex_encode "$dashboard_ssid")" \
+            "$dashboard_security"
+    done
+
+    if [ -s "$SCAN_FILE" ]; then
+        while IFS='|' read -r dashboard_quality dashboard_ssid dashboard_security \
+            dashboard_frequency dashboard_channel dashboard_bssid dashboard_signal; do
+            [ -n "$dashboard_ssid" ] || continue
+            printf 'network|%s|%s|%s|%s|%s|%s|%s\n' \
+                "$dashboard_quality" "$(hex_encode "$dashboard_ssid")" \
+                "$dashboard_security" "$dashboard_frequency" "$dashboard_channel" \
+                "$dashboard_bssid" "$dashboard_signal"
+        done < "$SCAN_FILE"
+    fi
 }
 
 profile_security() {
@@ -415,6 +462,212 @@ connect_profile() {
     clear_failures
     log_message "connection ready profile=$requested_profile ssid=$target_ssid"
     return 0
+}
+
+run_requested_connect() {
+    requested_name=$1
+    connect_profile "$requested_name"
+    requested_status=$?
+    if [ "$requested_status" -eq 1 ] && \
+        profile_name_is_valid "$requested_name" && [ -f "$PROFILE_DIR/$requested_name" ]; then
+        recover_after_failed_manual_switch "$requested_name" || true
+    fi
+    return "$requested_status"
+}
+
+profile_template_for_security() {
+    wanted_security=$1
+    for template_path in "$PROFILE_DIR"/*; do
+        [ -f "$template_path" ] || continue
+        template_name=${template_path##*/}
+        case $template_name in
+            system.cfg|reset|*.backup.*) continue ;;
+        esac
+        [ "$(profile_security "$template_path")" = "$wanted_security" ] || continue
+        printf '%s\n' "$template_path"
+        return 0
+    done
+    return 1
+}
+
+write_provision_config() {
+    provision_template=$1
+    provision_output=$2
+    provision_ssid=$3
+    provision_security=$4
+    provision_bssid=$5
+    provision_password=$6
+    saw_wireless_ssid=no
+    saw_wireless_ap=no
+    saw_wireless_security=no
+    saw_scan_status=no
+    saw_scan_channels=no
+    saw_wpa_status=no
+    saw_wpa_device_status=no
+    saw_wpa_ssid=no
+    saw_wpa_bssid=no
+    saw_wpa_psk=no
+
+    : > "$provision_output"
+    while IFS= read -r provision_line || [ -n "$provision_line" ]; do
+        provision_key=${provision_line%%=*}
+        case $provision_key in
+            wireless.1.ssid)
+                printf 'wireless.1.ssid=%s\n' "$provision_ssid"
+                saw_wireless_ssid=yes
+                ;;
+            wireless.1.ap)
+                printf 'wireless.1.ap=%s\n' "$provision_bssid"
+                saw_wireless_ap=yes
+                ;;
+            wireless.1.security.type)
+                printf 'wireless.1.security.type=none\n'
+                saw_wireless_security=yes
+                ;;
+            wireless.1.scan_list.status)
+                printf 'wireless.1.scan_list.status=disabled\n'
+                saw_scan_status=yes
+                ;;
+            wireless.1.scan_list.channels)
+                printf 'wireless.1.scan_list.channels=\n'
+                saw_scan_channels=yes
+                ;;
+            wpasupplicant.status)
+                if [ "$provision_security" = wpa ]; then
+                    printf 'wpasupplicant.status=enabled\n'
+                else
+                    printf 'wpasupplicant.status=disabled\n'
+                fi
+                saw_wpa_status=yes
+                ;;
+            wpasupplicant.device.1.status)
+                if [ "$provision_security" = wpa ]; then
+                    printf 'wpasupplicant.device.1.status=enabled\n'
+                else
+                    printf 'wpasupplicant.device.1.status=disabled\n'
+                fi
+                saw_wpa_device_status=yes
+                ;;
+            wpasupplicant.profile.1.network.1.ssid)
+                printf 'wpasupplicant.profile.1.network.1.ssid=%s\n' "$provision_ssid"
+                saw_wpa_ssid=yes
+                ;;
+            wpasupplicant.profile.1.network.1.bssid)
+                printf 'wpasupplicant.profile.1.network.1.bssid=%s\n' "$provision_bssid"
+                saw_wpa_bssid=yes
+                ;;
+            wpasupplicant.profile.1.network.1.psk)
+                if [ "$provision_security" = wpa ]; then
+                    printf 'wpasupplicant.profile.1.network.1.psk=%s\n' "$provision_password"
+                    saw_wpa_psk=yes
+                fi
+                ;;
+            *) printf '%s\n' "$provision_line" ;;
+        esac
+    done < "$provision_template" >> "$provision_output"
+
+    [ "$saw_wireless_ssid" = yes ] || printf 'wireless.1.ssid=%s\n' "$provision_ssid" >> "$provision_output"
+    [ "$saw_wireless_ap" = yes ] || printf 'wireless.1.ap=%s\n' "$provision_bssid" >> "$provision_output"
+    [ "$saw_wireless_security" = yes ] || printf 'wireless.1.security.type=none\n' >> "$provision_output"
+    [ "$saw_scan_status" = yes ] || printf 'wireless.1.scan_list.status=disabled\n' >> "$provision_output"
+    [ "$saw_scan_channels" = yes ] || printf 'wireless.1.scan_list.channels=\n' >> "$provision_output"
+    if [ "$provision_security" = wpa ]; then
+        [ "$saw_wpa_status" = yes ] || printf 'wpasupplicant.status=enabled\n' >> "$provision_output"
+        [ "$saw_wpa_device_status" = yes ] || printf 'wpasupplicant.device.1.status=enabled\n' >> "$provision_output"
+        [ "$saw_wpa_ssid" = yes ] || printf 'wpasupplicant.profile.1.network.1.ssid=%s\n' "$provision_ssid" >> "$provision_output"
+        [ "$saw_wpa_bssid" = yes ] || printf 'wpasupplicant.profile.1.network.1.bssid=%s\n' "$provision_bssid" >> "$provision_output"
+        [ "$saw_wpa_psk" = yes ] || printf 'wpasupplicant.profile.1.network.1.psk=%s\n' "$provision_password" >> "$provision_output"
+    else
+        [ "$saw_wpa_status" = yes ] || printf 'wpasupplicant.status=disabled\n' >> "$provision_output"
+        [ "$saw_wpa_device_status" = yes ] || printf 'wpasupplicant.device.1.status=disabled\n' >> "$provision_output"
+    fi
+}
+
+provision_profile() {
+    new_ssid=$1
+    new_security=$2
+    new_bssid=$3
+    new_password=$4
+
+    profile_name_is_valid "$new_ssid" || {
+        log_message "new SSID cannot be used as a profile filename"
+        return 1
+    }
+    case $new_ssid in
+        .*) log_message "new SSID cannot begin with a dot"; return 1 ;;
+    esac
+    ssid_length=$(printf '%s' "$new_ssid" | wc -c | tr -d '[:space:]')
+    case $ssid_length in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    [ "$ssid_length" -ge 1 ] && [ "$ssid_length" -le 32 ] || {
+        log_message "new SSID must be 1 to 32 bytes"
+        return 1
+    }
+    if printf '%s' "$new_ssid" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+        log_message "new SSID contains a control character"
+        return 1
+    fi
+    case $new_security in
+        wpa|none) ;;
+        *) log_message "unsupported new-network security=$new_security"; return 1 ;;
+    esac
+    if ! printf '%s\n' "$new_bssid" | grep -Eq '^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$'; then
+        log_message "invalid access-point address"
+        return 1
+    fi
+    if [ "$new_security" = wpa ]; then
+        password_length=$(printf '%s' "$new_password" | wc -c | tr -d '[:space:]')
+        case $password_length in
+            ''|*[!0-9]*) return 1 ;;
+        esac
+        [ "$password_length" -ge 8 ] && [ "$password_length" -le 63 ] || {
+            log_message "WPA password must be 8 to 63 bytes"
+            return 1
+        }
+        if printf '%s' "$new_password" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+            log_message "WPA password contains a control character"
+            return 1
+        fi
+    elif [ -n "$new_password" ]; then
+        log_message "open networks do not accept a password"
+        return 1
+    fi
+    [ ! -e "$PROFILE_DIR/$new_ssid" ] || {
+        log_message "profile already exists profile=$new_ssid"
+        return 1
+    }
+
+    provision_template=$(profile_template_for_security "$new_security") || {
+        log_message "no saved template for security=$new_security"
+        return 1
+    }
+    : > "$PAUSE_FILE"
+    log_message "automatic selection paused for new profile=$new_ssid"
+    pending_name=.dashboard-new.$$
+    PENDING_PROFILE="$PROFILE_DIR/$pending_name"
+    write_provision_config "$provision_template" "$PENDING_PROFILE" \
+        "$new_ssid" "$new_security" "$new_bssid" "$new_password" || return 1
+    chmod 750 "$PENDING_PROFILE"
+
+    connect_profile "$pending_name"
+    provision_status=$?
+    case $provision_status in
+        0|2)
+            set_scan_list "$SYSTEM_CFG" disabled "" || return 1
+            save_current_profile "$new_ssid" || return 1
+            rm -f "$PENDING_PROFILE"
+            PENDING_PROFILE=
+            log_message "provisioned profile=$new_ssid security=$new_security"
+            return "$provision_status"
+            ;;
+        *)
+            recover_after_failed_manual_switch "$pending_name" || true
+            rm -f "$PENDING_PROFILE"
+            PENDING_PROFILE=
+            return "$provision_status"
+            ;;
+    esac
 }
 
 manual_transition_active() {
@@ -671,7 +924,7 @@ show_status() {
 }
 
 usage() {
-    printf 'Usage: %s auto|connect PROFILE|status|pause|resume|save-current PROFILE|disable PROFILE\n' "$0" >&2
+    printf 'Usage: %s auto|connect PROFILE|status|pause|resume|save-current PROFILE|disable PROFILE|dashboard-status|dashboard-scan|manual-connect-stdin|provision-stdin\n' "$0" >&2
 }
 
 command_name=${1:-}
@@ -683,13 +936,8 @@ case $command_name in
     connect)
         [ "$#" -eq 2 ] || { usage; exit 1; }
         acquire_lock || exit 1
-        connect_profile "$2"
-        requested_status=$?
-        if [ "$requested_status" -eq 1 ] && \
-            profile_name_is_valid "$2" && [ -f "$PROFILE_DIR/$2" ]; then
-            recover_after_failed_manual_switch "$2" || true
-        fi
-        exit "$requested_status"
+        run_requested_connect "$2"
+        exit $?
         ;;
     status)
         show_status
@@ -711,6 +959,42 @@ case $command_name in
         [ "$#" -eq 2 ] || { usage; exit 1; }
         acquire_lock || exit 1
         disable_profile "$2"
+        ;;
+    dashboard-status)
+        [ "$#" -eq 1 ] || { usage; exit 1; }
+        emit_dashboard_snapshot
+        ;;
+    dashboard-scan)
+        [ "$#" -eq 1 ] || { usage; exit 1; }
+        acquire_lock || exit 1
+        scan_networks || true
+        emit_dashboard_snapshot
+        ;;
+    manual-connect-stdin)
+        [ "$#" -eq 1 ] || { usage; exit 1; }
+        IFS= read -r manual_profile || {
+            log_message "manual profile was not provided"
+            exit 1
+        }
+        profile_name_is_valid "$manual_profile" && [ -f "$PROFILE_DIR/$manual_profile" ] || {
+            log_message "unknown manual profile"
+            exit 1
+        }
+        : > "$PAUSE_FILE"
+        log_message "automatic selection paused for manual profile=$manual_profile"
+        acquire_lock || exit 1
+        run_requested_connect "$manual_profile"
+        exit $?
+        ;;
+    provision-stdin)
+        [ "$#" -eq 1 ] || { usage; exit 1; }
+        IFS= read -r input_ssid || exit 1
+        IFS= read -r input_security || exit 1
+        IFS= read -r input_bssid || exit 1
+        IFS= read -r input_password || exit 1
+        acquire_lock || exit 1
+        provision_profile "$input_ssid" "$input_security" "$input_bssid" "$input_password"
+        exit $?
         ;;
     *)
         usage

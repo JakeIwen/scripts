@@ -12,12 +12,14 @@ function reset_cell() {
     address = ""
     wep = 0
     wpa = 0
+    enterprise = 0
     have_cell = 0
 }
 
 function emit_cell(security) {
     if (!have_cell || essid == "") return
-    if (wpa) security = "wpa"
+    if (wpa && enterprise) security = "enterprise"
+    else if (wpa) security = "wpa"
     else if (wep) security = "wep"
     else security = "none"
     print quality, essid, security, frequency, channel, address, signal
@@ -78,5 +80,6 @@ function emit_cell(security) {
 
 /Encryption key:(o|O)n/ { wep = 1 }
 /IE:.*(WPA|WPA2|IEEE 802\.11i)/ { wpa = 1 }
+/Authentication Suites.*(802\.1[xX]|EAP)/ { enterprise = 1 }
 
 END { emit_cell() }

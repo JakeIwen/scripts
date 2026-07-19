@@ -44,6 +44,10 @@
     <button class="tile storage-tile" id="storage" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="storage-panel">
       <span class="tile-icon" aria-hidden="true">💾</span><span class="tile-title">Storage &amp; Torrents</span><span class="tile-detail" id="storage-summary">Checking requested policy…</span>
     </button>
+    <button class="tile ubnt-wifi-tile" id="ubnt-wifi" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="ubnt-wifi-panel">
+      <span class="switch-state"><span class="network-dot" id="ubnt-wifi-dot"></span><span id="ubnt-wifi-state">NO DATA</span></span>
+      <span class="tile-icon" aria-hidden="true">📡</span><span class="tile-title">UBNT Wi-Fi</span><span class="tile-detail" id="ubnt-wifi-summary">Scan and select upstream networks</span>
+    </button>
   </div>
   <section class="connectivity" aria-labelledby="connectivity-title">
     <div class="connectivity-head"><h2 id="connectivity-title">Connectivity</h2><span class="connectivity-age" id="connectivity-age">Checking…</span></div>
@@ -87,6 +91,23 @@
       <li>Allow torrents on Starlink does not override the global torrents switch.</li>
       <li>Starlink torrenting requires both Torrents enabled and Allow torrents on Starlink.</li>
     </ul>
+  </section>
+</div>
+<div class="speaker-backdrop" id="ubnt-wifi-backdrop">
+  <section class="speaker-sheet ubnt-wifi-sheet" id="ubnt-wifi-panel" role="dialog" aria-modal="true" aria-labelledby="ubnt-wifi-title" aria-busy="true">
+    <div class="sheet-grabber"></div><div class="sheet-head"><h2 id="ubnt-wifi-title">UBNT Wi-Fi</h2><span class="policy-sheet-status" id="ubnt-wifi-operation">Checking…</span><button class="sheet-close" id="ubnt-wifi-close" aria-label="Close UBNT Wi-Fi">&times;</button></div>
+    <p class="sheet-help">Known networks are green. Manual connections pause automatic selection until you resume it.</p>
+    <div class="ubnt-current"><span class="network-dot" id="ubnt-current-dot"></span><span><strong id="ubnt-current-ssid">No data</strong><small id="ubnt-current-detail">Waiting for antenna status…</small></span></div>
+    <div class="ubnt-actions">
+      <button class="speedtest-button" id="ubnt-scan" data-action><span class="speed-icon" aria-hidden="true">⌁</span><span class="speed-spinner" aria-hidden="true"></span><span id="ubnt-scan-label">Scan nearby Wi-Fi</span></button>
+      <button class="ubnt-resume" id="ubnt-resume" data-action hidden>Resume automatic selection</button>
+    </div>
+    <form class="ubnt-password-form" id="ubnt-password-form" hidden>
+      <strong id="ubnt-password-title">Join network</strong><span id="ubnt-password-detail"></span>
+      <label for="ubnt-password">Wi-Fi password</label><input id="ubnt-password" name="password" type="password" minlength="8" maxlength="63" autocomplete="current-password" required>
+      <div><button type="button" id="ubnt-password-cancel">Cancel</button><button type="submit" data-action>Save &amp; connect</button></div>
+    </form>
+    <div class="ubnt-network-list" id="ubnt-network-list"><div class="speaker-loading">Loading UBNT networks…</div></div>
   </section>
 </div>
 <div id="toast" role="status" aria-live="polite"></div>

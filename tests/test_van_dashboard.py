@@ -274,6 +274,107 @@ class ConnectivityMonitorTests(unittest.TestCase):
         self.assertTrue(monitor.refresh_event.is_set())
 
 
+class UbntWifiControllerTests(unittest.TestCase):
+    WIFI = {
+        "version": 1,
+        "reachable": True,
+        "checked_at": 123,
+        "state": {
+            "configured_ssid": "denlink",
+            "associated_ssid": "denlink",
+            "ccq_percent": 99.1,
+            "automatic_paused": False,
+            "selector_running": False,
+        },
+        "profiles": [{"name": "denlink", "ssid": "denlink", "security": "wpa"}],
+        "networks": [],
+    }
+
+    def test_provision_uses_fixed_tool_argv_and_does_not_retain_password(self):
+        calls = []
+        changes = []
+
+        def command(args, timeout, input_text=None):
+            calls.append((list(args), timeout, input_text))
+            return SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps(
+                    {"ok": True, "message": "saved", "wifi": self.WIFI}
+                ),
+                stderr="",
+            )
+
+        manager = dashboard.UbntWifiController(
+            tool="/test/ubnt_wifi.py",
+            command=command,
+            wall_clock=FakeClock(200),
+            on_change=lambda: changes.append("refresh"),
+        )
+        payload = {
+            "ssid": "Camp",
+            "security": "wpa",
+            "bssid": "00:11:22:33:44:55",
+            "password": "test-password",
+        }
+        manager._run("provision", payload)
+
+        self.assertEqual(calls[0][0], ["/test/ubnt_wifi.py", "--json", "provision"])
+        self.assertNotIn("test-password", " ".join(calls[0][0]))
+        self.assertIn('"password":"test-password"', calls[0][2])
+        self.assertEqual(payload["password"], "")
+        self.assertEqual(manager.snapshot()["operation"]["status"], "complete")
+        self.assertEqual(changes, ["refresh"])
+
+    def test_failure_refreshes_authoritative_status(self):
+        calls = []
+
+        def command(args, timeout, input_text=None):
+            calls.append(list(args))
+            if args[-1] == "connect":
+                return SimpleNamespace(
+                    returncode=1,
+                    stdout=json.dumps({"ok": False, "message": "switch failed"}),
+                    stderr="",
+                )
+            return SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps({"ok": True, "wifi": self.WIFI}),
+                stderr="",
+            )
+
+        manager = dashboard.UbntWifiController(
+            tool="/test/ubnt_wifi.py", command=command, wall_clock=FakeClock(200)
+        )
+        manager._run("connect", {"profile": "denlink"})
+        snapshot = manager.snapshot()
+
+        self.assertEqual(snapshot["operation"]["status"], "error")
+        self.assertEqual(snapshot["operation"]["error"], "switch failed")
+        self.assertTrue(snapshot["wifi"]["reachable"])
+        self.assertEqual(
+            calls,
+            [
+                ["/test/ubnt_wifi.py", "--json", "connect"],
+                ["/test/ubnt_wifi.py", "--json", "status"],
+            ],
+        )
+
+    def test_failed_status_refresh_is_not_retried_on_every_poll(self):
+        clock = FakeClock(200)
+        manager = dashboard.UbntWifiController(wall_clock=clock)
+        manager.operation.update(
+            {"status": "error", "kind": "status", "completed_at": 200}
+        )
+        starts = []
+        manager.start = lambda kind: starts.append(kind)
+
+        manager.request_refresh(max_age=20)
+        self.assertEqual(starts, [])
+        clock.advance(21)
+        manager.request_refresh(max_age=20)
+        self.assertEqual(starts, ["status"])
+
+
 class TuyaSwitchManagerTests(unittest.TestCase):
     def test_reads_and_toggles_confirmed_starlink_state(self):
         state = "on"
@@ -610,6 +711,9 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"Group volume", page.data)
         self.assertIn(b"data-group-mute", page.data)
         self.assertIn(b"Storage &amp; Torrents", page.data)
+        self.assertIn(b"UBNT Wi-Fi", page.data)
+        self.assertIn(b'id="ubnt-network-list"', page.data)
+        self.assertIn(b'id="ubnt-password-form"', page.data)
         self.assertIn(b'data-policy-field="disks_enabled"', page.data)
         self.assertIn(b'data-policy-field="torrents_enabled"', page.data)
         self.assertIn(b'data-policy-field="allow_starlink_torrents"', page.data)
@@ -628,8 +732,11 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(javascript.status_code, 200)
         self.assertEqual(stylesheet.status_code, 200)
         self.assertIn(b"data-speaker-mute", javascript.data)
+        self.assertIn(b"data-ubnt-profile", javascript.data)
+        self.assertIn(b"startUbntWifi('provision'", javascript.data)
         self.assertIn(b"bookUrl.port='8787'", javascript.data)
         self.assertIn(b".policy-toggle", stylesheet.data)
+        self.assertIn(b".ubnt-network-row", stylesheet.data)
         manifest = client.get("/manifest.webmanifest")
         self.assertEqual(manifest.status_code, 200)
         self.assertEqual(manifest.json["name"], "Van Dashboard")
@@ -656,6 +763,97 @@ class DashboardRouteTests(unittest.TestCase):
         speedtest = client.get("/api/speedtest")
         self.assertEqual(speedtest.status_code, 200)
         self.assertIn(speedtest.json["speedtest"]["status"], ("idle", "complete", "error"))
+
+    def test_ubnt_wifi_routes_are_narrow_and_nonblocking(self):
+        calls = []
+        wifi = {
+            "version": 1,
+            "reachable": True,
+            "checked_at": 123,
+            "state": {"associated_ssid": "denlink", "automatic_paused": False},
+            "profiles": [],
+            "networks": [],
+        }
+
+        class FakeUbntWifi:
+            def request_refresh(self):
+                calls.append(("refresh", None))
+
+            def start(self, kind, payload=None):
+                calls.append((kind, dict(payload or {})))
+                return True
+
+            def snapshot(self):
+                return {
+                    "wifi": wifi,
+                    "operation": {"status": "running", "kind": "test"},
+                }
+
+        original = dashboard.ubnt_wifi
+        dashboard.ubnt_wifi = FakeUbntWifi()
+        try:
+            client = dashboard.app.test_client()
+            status = client.get("/api/ubnt-wifi")
+            scan = client.post("/api/ubnt-wifi/scan")
+            connect = client.post(
+                "/api/ubnt-wifi/connect", data={"profile": "Known Camp"}
+            )
+            provision = client.post(
+                "/api/ubnt-wifi/provision",
+                data={
+                    "ssid": "New Camp",
+                    "security": "wpa",
+                    "bssid": "00:11:22:33:44:55",
+                    "password": "test-password",
+                },
+            )
+            resume = client.post("/api/ubnt-wifi/resume")
+            unknown_security = client.post(
+                "/api/ubnt-wifi/provision",
+                data={
+                    "ssid": "Old Camp",
+                    "security": "wep",
+                    "bssid": "00:11:22:33:44:55",
+                    "password": "test-password",
+                },
+            )
+            extra_scan_input = client.post(
+                "/api/ubnt-wifi/scan", data={"command": "anything"}
+            )
+            extra_connect_input = client.post(
+                "/api/ubnt-wifi/connect",
+                data={"profile": "Known Camp", "command": "anything"},
+            )
+        finally:
+            dashboard.ubnt_wifi = original
+
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.headers["Cache-Control"], "no-store")
+        self.assertEqual(scan.status_code, 202)
+        self.assertEqual(connect.status_code, 202)
+        self.assertEqual(provision.status_code, 202)
+        self.assertEqual(resume.status_code, 202)
+        self.assertEqual(unknown_security.status_code, 400)
+        self.assertEqual(extra_scan_input.status_code, 400)
+        self.assertEqual(extra_connect_input.status_code, 400)
+        self.assertEqual(
+            calls,
+            [
+                ("refresh", None),
+                ("scan", {}),
+                ("connect", {"profile": "Known Camp"}),
+                (
+                    "provision",
+                    {
+                        "ssid": "New Camp",
+                        "security": "wpa",
+                        "bssid": "00:11:22:33:44:55",
+                        "password": "test-password",
+                    },
+                ),
+                ("resume", {}),
+            ],
+        )
 
     def test_storage_policy_get_update_and_input_rejection(self):
         policy = {

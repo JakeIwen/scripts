@@ -19,7 +19,14 @@ ath0      Scan completed :
                     Signal level:-40 dBm
                     Encryption key:off
                     ESSID:"A Network With Spaces"
-          Cell 04 - Address: 00:11:22:33:44:66
+          Cell 04 - Address: 00:11:22:33:44:77
+                    Frequency:2.422 GHz (Channel 3)
+                    Quality=35/70  Signal level=-67 dBm
+                    Encryption key:on
+                    ESSID:"Enterprise Campus"
+                    IE: IEEE 802.11i/WPA2 Version 1
+                    Authentication Suites (1) : 802.1x
+          Cell 05 - Address: 00:11:22:33:44:66
                     Frequency:2.417 GHz (Channel 2)
                     Quality=1/70  Signal level=-90 dBm
                     Encryption key:off

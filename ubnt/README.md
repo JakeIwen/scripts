@@ -15,6 +15,27 @@ On the NanoStation:
 /etc/persistent/scripts/wifi_manager.sh resume
 ```
 
+The van dashboard uses four additional fixed manager entry points:
+
+```sh
+/etc/persistent/scripts/wifi_manager.sh dashboard-status
+/etc/persistent/scripts/wifi_manager.sh dashboard-scan
+/etc/persistent/scripts/wifi_manager.sh manual-connect-stdin
+/etc/persistent/scripts/wifi_manager.sh provision-stdin
+```
+
+The first two emit credential-free, hex-encoded records for
+`pi/scripts/ubnt_wifi.py`. The latter two read their selection or provisioning
+request from standard input so Wi-Fi passwords never appear in SSH arguments,
+process listings, command output, or manager logs. New profiles support
+WPA/WPA2 Personal and open networks; WEP is reported to the UI as unsupported.
+After association, provisioning deliberately runs the same `save-current` and
+`cfgmtd` persistence path as an explicit profile save.
+
+Manual dashboard connections pause automatic selection. The dashboard sheet
+shows this state and provides an explicit Resume automatic selection button,
+which keeps captive-portal onboarding from being abandoned before login.
+
 `connect` aggregates three site-scan passes because individual airOS scans can
 omit visible networks. It applies the strongest matching observation's
 frequency to a temporary profile copy, and falls back to an unrestricted scan

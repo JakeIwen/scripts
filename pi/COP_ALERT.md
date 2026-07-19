@@ -52,6 +52,29 @@ immediately, while `GET /api/speedtest` reports progress and the eventual
 download, upload, latency, and completion time. The browser renders completion
 as `@ HH:MM:SS` in its local time. The test is never run automatically.
 
+## UBNT Wi-Fi selection
+
+The UBNT Wi-Fi tile uses `/home/pi/scripts/ubnt_wifi.py`, a reusable
+standard-library JSON interface to the antenna's tracked `wifi_manager.sh`.
+Opening its sheet reads the current association and cached observations; Scan
+starts the antenna's existing locked, three-pass site scan in a background
+thread. Known visible profiles are green and can be selected directly.
+
+Unknown WPA/WPA2 Personal networks request a password; open networks require no
+password. WEP and enterprise networks are displayed but not configurable. New
+credentials are POSTed same-origin, supplied to the Pi tool over standard input,
+and then supplied to the antenna over SSH standard input. They are never placed
+in URLs, process arguments, output, or logs. Successful association explicitly
+runs the manager's `save-current`/`cfgmtd` path so the full airOS profile and its
+credential survive reboot.
+
+Manual selections pause the antenna's automatic selector until Resume automatic
+selection is pressed. This permits captive-portal login even though Internet
+reachability initially fails. Scans, switches, and provisioning are single-flight
+background operations; their POST endpoints return immediately and the sheet
+polls authoritative status rather than changing the selected network
+optimistically.
+
 ## Starlink power
 
 The Starlink tile reads `switch.starlink` through the existing Tuya/Home
