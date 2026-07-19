@@ -222,13 +222,17 @@ function renderPolicyRuntime(id, active, onLabel, offLabel, detail) {
   state.textContent = active ? onLabel : offLabel;
   $(`${id}-detail`).textContent = detail;
 }
+function policyRequestBlocked(policy, field) {
+  if (policy[field] !== true) return false;
+  if (field === 'torrents_enabled') return policy.disks_enabled !== true;
+  if (field === 'allow_starlink_torrents') {
+    return policy.disks_enabled !== true || policy.torrents_enabled !== true;
+  }
+  return false;
+}
 function renderStoragePolicy(policy) {
   storagePolicy = policy;
-  const fields = [
-      ['disks_enabled', 'Disks'],
-      ['torrents_enabled', 'Torrents'],
-      ['allow_starlink_torrents', 'Starlink torrents'],
-    ],
+  const fields = ['disks_enabled', 'torrents_enabled', 'allow_starlink_torrents'],
     runtime = policy.runtime,
     mounted = runtime.disks_mounted === true,
     running = runtime.qbittorrent_running === true,
@@ -245,13 +249,19 @@ function renderStoragePolicy(policy) {
         : !policy.torrents_enabled
           ? 'Disabled by requested policy'
           : 'Stopped by current conditions';
-  for (const [field] of fields) {
+  for (const field of fields) {
     const button = document.querySelector(`[data-policy-field="${field}"]`),
-      enabled = policy[field] === true;
-    button.classList.remove('on', 'off');
+      enabled = policy[field] === true,
+      blocked = policyRequestBlocked(policy, field);
+    button.classList.remove('on', 'off', 'blocked');
     button.classList.add(enabled ? 'on' : 'off');
+    button.classList.toggle('blocked', blocked);
     button.setAttribute('aria-pressed', String(enabled));
-    button.querySelector('.policy-state').textContent = enabled ? 'ON' : 'OFF';
+    button.querySelector('.policy-state').textContent = blocked
+      ? 'ON · BLOCKED'
+      : enabled
+        ? 'ON'
+        : 'OFF';
   }
   renderPolicyRuntime('disk-runtime', mounted, 'MOUNTED', 'UNMOUNTED', diskDetail);
   renderPolicyRuntime('torrent-runtime', running, 'RUNNING', 'STOPPED', torrentDetail);
@@ -272,7 +282,7 @@ function renderStorageUnavailable(message) {
   }
   document.querySelectorAll('[data-policy-field]').forEach((button) => {
     button.disabled = true;
-    button.classList.remove('on', 'off');
+    button.classList.remove('on', 'off', 'blocked');
     button.setAttribute('aria-pressed', 'mixed');
     button.querySelector('.policy-state').textContent = 'NO DATA';
   });

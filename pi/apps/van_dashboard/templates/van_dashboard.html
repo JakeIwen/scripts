@@ -89,14 +89,14 @@
     <p class="policy-request-label">Requested policy</p>
     <div class="policy-controls">
       <button class="policy-toggle" data-action data-policy-field="disks_enabled" disabled aria-pressed="mixed"><span><strong>Disks enabled</strong><small>Keep storage mounted while parked</small></span><span class="policy-state">NO DATA</span></button>
-      <button class="policy-toggle" data-action data-policy-field="torrents_enabled" disabled aria-pressed="mixed"><span><strong>Torrents enabled</strong><small>Global permission to run qBittorrent</small></span><span class="policy-state">NO DATA</span></button>
-      <button class="policy-toggle" data-action data-policy-field="allow_starlink_torrents" disabled aria-pressed="mixed"><span><strong>Allow torrents on Starlink</strong><small>Additional permission while Starlink is on</small></span><span class="policy-state">NO DATA</span></button>
+      <button class="policy-toggle" data-action data-policy-field="torrents_enabled" disabled aria-pressed="mixed"><span><strong>Torrents enabled</strong><small>Requires Disks enabled</small></span><span class="policy-state">NO DATA</span></button>
+      <button class="policy-toggle" data-action data-policy-field="allow_starlink_torrents" disabled aria-pressed="mixed"><span><strong>Allow torrents on Starlink</strong><small>Requires Disks enabled and Torrents enabled</small></span><span class="policy-state">NO DATA</span></button>
     </div>
     <ul class="policy-notes">
       <li>Ignition always overrides disk permission.</li>
-      <li>Disabling disks also stops torrents.</li>
-      <li>Allow torrents on Starlink does not override the global torrents switch.</li>
-      <li>Starlink torrenting requires both Torrents enabled and Allow torrents on Starlink.</li>
+      <li>Disabling disks stops torrents; a requested-on Torrents switch is shown as blocked.</li>
+      <li>Allow torrents on Starlink does not override disk or global torrent permission.</li>
+      <li>Starlink torrenting requires Disks enabled, Torrents enabled, and Allow torrents on Starlink.</li>
     </ul>
   </section>
 </div>

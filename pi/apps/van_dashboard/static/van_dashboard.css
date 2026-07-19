@@ -515,6 +515,16 @@ h1 {
 .policy-toggle.off .policy-state::before {
   background: var(--bad);
 }
+.policy-toggle.blocked {
+  border-color: #6a4542;
+}
+.policy-toggle.blocked .policy-state {
+  border-color: #754743;
+  color: #f2b5b0;
+}
+.policy-toggle.blocked .policy-state::before {
+  background: var(--bad);
+}
 .policy-notes {
   margin: 15px 4px 2px;
   padding-left: 18px;

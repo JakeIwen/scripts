@@ -840,9 +840,11 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="disk-runtime-state"', page.data)
         self.assertIn(b'id="torrent-runtime-state"', page.data)
         self.assertIn(b"Ignition always overrides disk permission", page.data)
-        self.assertIn(b"Disabling disks also stops torrents", page.data)
+        self.assertIn(b"requested-on Torrents switch is shown as blocked", page.data)
+        self.assertIn(b"Requires Disks enabled", page.data)
+        self.assertIn(b"does not override disk or global torrent permission", page.data)
         self.assertIn(
-            b"Starlink torrenting requires both Torrents enabled", page.data
+            b"Starlink torrenting requires Disks enabled, Torrents enabled", page.data
         )
         self.assertNotIn(b"<style>", page.data)
         self.assertIn(b'href="/static/van_dashboard.css"', page.data)
@@ -870,9 +872,12 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertNotIn(b"wireless-status", javascript.data)
         self.assertNotIn(b"ubnt-dot", javascript.data)
         self.assertIn(b"Stopped because disks are disabled", javascript.data)
+        self.assertIn(b"function policyRequestBlocked", javascript.data)
+        self.assertIn(b"ON \xc2\xb7 BLOCKED", javascript.data)
         self.assertIn(b"bookUrl.port", javascript.data)
         self.assertIn(b"'8787'", javascript.data)
         self.assertIn(b".policy-toggle", stylesheet.data)
+        self.assertIn(b".policy-toggle.blocked", stylesheet.data)
         self.assertIn(b".policy-runtime-state::before", stylesheet.data)
         self.assertIn(b".network-cards", stylesheet.data)
         self.assertIn(b".network-card-heading", stylesheet.data)

@@ -29,9 +29,10 @@ Ignition is observed safety state and always overrides requested state:
 | Starlink on, permission enabled, torrents enabled | mounted | running |
 | Starlink off, torrents enabled | mounted | running |
 
-In particular, Starlink torrenting requires both `torrents_enabled=true` and
-`allow_starlink_torrents=true`. An unavailable or unrecognized Starlink power
-state fails closed unless Starlink torrent permission was explicitly granted.
+In particular, Starlink torrenting requires `disks_enabled=true`,
+`torrents_enabled=true`, and `allow_starlink_torrents=true`. An unavailable or
+unrecognized Starlink power state fails closed unless Starlink torrent
+permission was explicitly granted.
 
 Disk availability no longer depends on mwan3 state, upstream Wi-Fi attachment,
 or internet availability. While parked, disks are mounted unless explicitly
