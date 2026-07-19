@@ -907,14 +907,19 @@ class PolicyCommandError(RuntimeError):
 
 
 class StoragePolicyManager:
-    """Strict policyctl boundary for requested storage and torrent settings."""
+    """Strict policyctl boundary for requested and observed storage state."""
 
     TARGETS = {
         "disks_enabled": "disks",
         "torrents_enabled": "torrents",
         "allow_starlink_torrents": "starlink-torrents",
     }
-    STATUS_FIELDS = {"version", *TARGETS}
+    STATUS_FIELDS = {"version", *TARGETS, "runtime"}
+    RUNTIME_FIELDS = {
+        "disks_mounted",
+        "mounted_disk_labels",
+        "qbittorrent_running",
+    }
 
     def __init__(self, command=run_command, timeout=POLICYCTL_TIMEOUT):
         self.command = command
@@ -933,6 +938,25 @@ class StoragePolicyManager:
         for field in cls.TARGETS:
             if type(status[field]) is not bool:
                 raise PolicyCommandError(f"policyctl field {field} was not boolean")
+        runtime = status["runtime"]
+        if not isinstance(runtime, dict) or set(runtime) != cls.RUNTIME_FIELDS:
+            raise PolicyCommandError("policyctl returned an unexpected runtime schema")
+        for field in ("disks_mounted", "qbittorrent_running"):
+            if type(runtime[field]) is not bool:
+                raise PolicyCommandError(
+                    f"policyctl runtime field {field} was not boolean"
+                )
+        labels = runtime["mounted_disk_labels"]
+        if (
+            not isinstance(labels, list)
+            or any(not isinstance(label, str) or not label for label in labels)
+            or len(labels) != len(set(labels))
+        ):
+            raise PolicyCommandError(
+                "policyctl runtime mounted_disk_labels was invalid"
+            )
+        if runtime["disks_mounted"] is not bool(labels):
+            raise PolicyCommandError("policyctl returned inconsistent disk runtime state")
         return status
 
     def _run(self, args, expect_json):

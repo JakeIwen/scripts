@@ -18,6 +18,13 @@ POLICY_PATH = Path(
 LOCK_PATH = Path(
     os.environ.get("VANPI_POLICY_LOCK_PATH", "/home/pi/.config/vanpi/policy.lock")
 )
+MOUNTINFO_PATH = Path(
+    os.environ.get("VANPI_POLICY_MOUNTINFO_PATH", "/proc/self/mountinfo")
+)
+PGREP_COMMAND = os.environ.get("VANPI_POLICY_PGREP", "/usr/bin/pgrep")
+QBITTORRENT_PROCESS = os.environ.get(
+    "VANPI_POLICY_QBITTORRENT_PROCESS", "qbittorrent-nox"
+)
 LEGACY_MCONF = Path(os.environ.get("VANPI_POLICY_MCONF", "/home/pi/mconf"))
 LEGACY_MCONF_LAST = Path(
     os.environ.get("VANPI_POLICY_MCONF_LAST", "/home/pi/mconf_last")
@@ -36,6 +43,14 @@ TARGET_FIELDS = {
     "torrents": "torrents_enabled",
     "starlink-torrents": "allow_starlink_torrents",
 }
+# Keep this list aligned with HDD_LABELS in disk_policy.sh. These are the
+# rotational disks controlled by the disks policy; unrelated flash media does
+# not make managed storage appear enabled.
+MANAGED_DISK_LABELS = (
+    "movingparts",
+    "bigboi",
+    "mbp2tbkup",
+)
 
 
 class PolicyError(RuntimeError):
@@ -203,6 +218,62 @@ def request_reconciliation():
         raise PolicyError(f"could not request policy reconciliation: {detail}")
 
 
+def mounted_disk_labels():
+    targets = {f"/mnt/{label}": label for label in MANAGED_DISK_LABELS}
+    mounted = set()
+    try:
+        with MOUNTINFO_PATH.open(encoding="utf-8") as handle:
+            for line_number, line in enumerate(handle, start=1):
+                fields = line.split()
+                if len(fields) < 7 or "-" not in fields:
+                    raise PolicyError(
+                        f"malformed mountinfo record at {MOUNTINFO_PATH}:{line_number}"
+                    )
+                label = targets.get(fields[4])
+                if label:
+                    mounted.add(label)
+    except PolicyError:
+        raise
+    except OSError as exc:
+        raise PolicyError(f"cannot read runtime mounts from {MOUNTINFO_PATH}: {exc}") from exc
+    return [label for label in MANAGED_DISK_LABELS if label in mounted]
+
+
+def qbittorrent_running(command=subprocess.run):
+    try:
+        result = command(
+            [PGREP_COMMAND, "-x", QBITTORRENT_PROCESS],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise PolicyError(f"cannot inspect qBittorrent runtime state: {exc}") from exc
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    detail = (result.stderr or result.stdout or "pgrep failed").strip()
+    raise PolicyError(
+        f"cannot inspect qBittorrent runtime state (status {result.returncode}): {detail}"
+    )
+
+
+def runtime_status(command=subprocess.run):
+    labels = mounted_disk_labels()
+    return {
+        "disks_mounted": bool(labels),
+        "mounted_disk_labels": labels,
+        "qbittorrent_running": qbittorrent_running(command=command),
+    }
+
+
+def status_report(value, runtime=None):
+    report = dict(value)
+    report["runtime"] = runtime_status() if runtime is None else runtime
+    return report
+
+
 def parse_on_off(value):
     if value == "on":
         return True
@@ -211,11 +282,13 @@ def parse_on_off(value):
     raise PolicyError("state must be 'on' or 'off'")
 
 
-def print_policy(value, as_json=False):
+def print_status(value, as_json=False):
+    report = status_report(value)
     if as_json:
-        json.dump(value, sys.stdout, sort_keys=True)
+        json.dump(report, sys.stdout, sort_keys=True)
         sys.stdout.write("\n")
         return
+    print("Requested policy:")
     rows = (
         ("Disks", "enabled" if value["disks_enabled"] else "disabled"),
         ("Torrents", "enabled" if value["torrents_enabled"] else "disabled"),
@@ -225,7 +298,16 @@ def print_policy(value, as_json=False):
         ),
     )
     for label, state in rows:
-        print(f"{label}: {state}")
+        print(f"  {label}: {state}")
+    runtime = report["runtime"]
+    mounted = runtime["mounted_disk_labels"]
+    disk_detail = f"mounted ({', '.join(mounted)})" if mounted else "unmounted"
+    print("Runtime:")
+    print(f"  Managed disks: {disk_detail}")
+    print(
+        "  qBittorrent: "
+        + ("running" if runtime["qbittorrent_running"] else "stopped")
+    )
 
 
 def build_parser():
@@ -239,7 +321,7 @@ def build_parser():
         help="update requested state without starting vanpi-policy.service",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("status", help="show requested policy")
+    subparsers.add_parser("status", help="show requested policy and runtime state")
     subparsers.add_parser("read", help="emit the compact policy used by the reconciler")
     subparsers.add_parser("migrate", help="initialize policy from legacy markers")
     subparsers.add_parser("reconcile", help="request policy reconciliation now")
@@ -257,7 +339,8 @@ def main(argv=None):
     elif args.command == "read":
         value = read_policy()
         if args.json:
-            print_policy(value, as_json=True)
+            json.dump(value, sys.stdout, sort_keys=True)
+            sys.stdout.write("\n")
         else:
             print(
                 int(value["disks_enabled"]),
@@ -273,7 +356,7 @@ def main(argv=None):
 
     if (changed or args.command == "reconcile") and not args.no_reconcile:
         request_reconciliation()
-    print_policy(value, as_json=args.json)
+    print_status(value, as_json=args.json)
     return 0
 
 

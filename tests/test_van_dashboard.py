@@ -418,6 +418,11 @@ class StoragePolicyManagerTests(unittest.TestCase):
         "disks_enabled": True,
         "torrents_enabled": True,
         "allow_starlink_torrents": False,
+        "runtime": {
+            "disks_mounted": True,
+            "mounted_disk_labels": ["movingparts", "mbp2tbkup"],
+            "qbittorrent_running": False,
+        },
     }
 
     def test_parses_only_the_exact_v1_boolean_schema(self):
@@ -430,6 +435,24 @@ class StoragePolicyManagerTests(unittest.TestCase):
             json.dumps({**self.POLICY, "version": 2}),
             json.dumps({**self.POLICY, "disks_enabled": 1}),
             json.dumps({**self.POLICY, "unexpected": False}),
+            json.dumps(
+                {
+                    **self.POLICY,
+                    "runtime": {
+                        **self.POLICY["runtime"],
+                        "qbittorrent_running": 0,
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    **self.POLICY,
+                    "runtime": {
+                        **self.POLICY["runtime"],
+                        "disks_mounted": False,
+                    },
+                }
+            ),
         )
         for value in invalid_values:
             with self.subTest(value=value):
@@ -712,12 +735,15 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"data-group-mute", page.data)
         self.assertIn(b"Disks &amp; Torrents", page.data)
         self.assertNotIn(b"Storage &amp; Torrents", page.data)
+        self.assertIn(b"Managed disks", page.data)
         self.assertIn(b"UBNT Wi-Fi", page.data)
         self.assertIn(b'id="ubnt-network-list"', page.data)
         self.assertIn(b'id="ubnt-password-form"', page.data)
         self.assertIn(b'data-policy-field="disks_enabled"', page.data)
         self.assertIn(b'data-policy-field="torrents_enabled"', page.data)
         self.assertIn(b'data-policy-field="allow_starlink_torrents"', page.data)
+        self.assertIn(b'id="disk-runtime-state"', page.data)
+        self.assertIn(b'id="torrent-runtime-state"', page.data)
         self.assertIn(b"Ignition always overrides disk permission", page.data)
         self.assertIn(b"Disabling disks also stops torrents", page.data)
         self.assertIn(
@@ -735,8 +761,11 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"data-speaker-mute", javascript.data)
         self.assertIn(b"data-ubnt-profile", javascript.data)
         self.assertIn(b"startUbntWifi('provision'", javascript.data)
+        self.assertIn(b"Disks ${mounted?", javascript.data)
+        self.assertIn(b"Stopped because disks are disabled", javascript.data)
         self.assertIn(b"bookUrl.port='8787'", javascript.data)
         self.assertIn(b".policy-toggle", stylesheet.data)
+        self.assertIn(b".policy-runtime-state::before", stylesheet.data)
         self.assertIn(b".ubnt-network-row", stylesheet.data)
         manifest = client.get("/manifest.webmanifest")
         self.assertEqual(manifest.status_code, 200)
@@ -862,6 +891,11 @@ class DashboardRouteTests(unittest.TestCase):
             "disks_enabled": True,
             "torrents_enabled": True,
             "allow_starlink_torrents": False,
+            "runtime": {
+                "disks_mounted": True,
+                "mounted_disk_labels": ["movingparts"],
+                "qbittorrent_running": True,
+            },
         }
         calls = []
 

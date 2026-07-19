@@ -27,15 +27,71 @@ printf 'called\n' >> "$TEST_STARLINK_CALLS"
 printf '%s\n' "$TEST_STARLINK_STATE"
 exit "$TEST_STARLINK_STATUS"
 HELPER
-chmod +x "$test_root/policyctl" "$test_root/tuya-status"
+cat > "$test_root/pgrep" <<'HELPER'
+#!/bin/bash
+[[ "$#" == 2 && "$1" == -x && "$2" == qbittorrent-nox ]] || exit 99
+printf '%s\n' "$*" >> "$TEST_PGREP_CALLS"
+count=0
+[[ ! -f "$TEST_PGREP_COUNT" ]] || read -r count < "$TEST_PGREP_COUNT"
+count=$((count + 1))
+printf '%s\n' "$count" > "$TEST_PGREP_COUNT"
+(( count <= TEST_PGREP_RUNNING_CALLS ))
+HELPER
+cat > "$test_root/pkill" <<'HELPER'
+#!/bin/bash
+[[ "$#" == 3 && "$1" == -TERM && "$2" == -x && "$3" == qbittorrent-nox ]] || exit 99
+printf '%s\n' "$*" >> "$TEST_PKILL_CALLS"
+exit "${TEST_PKILL_STATUS:-0}"
+HELPER
+cat > "$test_root/sleep" <<'HELPER'
+#!/bin/bash
+[[ "$#" == 1 && "$1" == 1 ]] || exit 99
+printf '%s\n' "$1" >> "$TEST_SLEEP_CALLS"
+HELPER
+chmod +x "$test_root/policyctl" "$test_root/tuya-status" \
+  "$test_root/pgrep" "$test_root/pkill" "$test_root/sleep"
 
 export ISW_POLICYCTL="$test_root/policyctl"
 export ISW_IGNITION_FLAG="$test_root/ignition_is_on"
 export ISW_TUYA_STATUS="$test_root/tuya-status"
+export ISW_PGREP="$test_root/pgrep"
+export ISW_PKILL="$test_root/pkill"
+export ISW_SLEEP="$test_root/sleep"
 export TEST_STARLINK_CALLS="$test_root/starlink-calls"
+export TEST_PGREP_CALLS="$test_root/pgrep-calls"
+export TEST_PGREP_COUNT="$test_root/pgrep-count"
+export TEST_PKILL_CALLS="$test_root/pkill-calls"
+export TEST_SLEEP_CALLS="$test_root/sleep-calls"
 
 # shellcheck source=../scripts/internet_switches.sh
 source "$repo_root/pi/scripts/internet_switches.sh"
+
+reset_process_test() {
+  export TEST_PGREP_RUNNING_CALLS=$1
+  export TEST_PKILL_STATUS=${2:-0}
+  rm -f "$TEST_PGREP_CALLS" "$TEST_PGREP_COUNT" \
+    "$TEST_PKILL_CALLS" "$TEST_SLEEP_CALLS"
+}
+
+reset_process_test 0
+kill_torrent_client >/dev/null 2>&1 || fail "absent torrent client was a stop failure"
+[[ ! -e "$TEST_PKILL_CALLS" ]] || fail "absent torrent client was signaled"
+assert_eq "-x qbittorrent-nox" "$(cat "$TEST_PGREP_CALLS")" \
+  "torrent discovery must use exact process identity"
+
+reset_process_test 1
+kill_torrent_client >/dev/null 2>&1 || fail "graceful torrent stop returned failure"
+assert_eq "-TERM -x qbittorrent-nox" "$(cat "$TEST_PKILL_CALLS")" \
+  "torrent stop must signal only the exact process identity"
+assert_eq 2 "$(cat "$TEST_PGREP_COUNT")" \
+  "graceful torrent stop must verify process exit"
+
+reset_process_test 31
+if kill_torrent_client >/dev/null 2>&1; then
+  fail "stuck torrent client was reported stopped"
+fi
+assert_eq 30 "$(wc -l < "$TEST_SLEEP_CALLS" | tr -d ' ')" \
+  "stuck torrent stop must be bounded at 30 seconds"
 
 ACTION=""
 IO_ERROR=1

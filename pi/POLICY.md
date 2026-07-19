@@ -49,12 +49,36 @@ policyctl starlink-torrents on|off
 policyctl reconcile
 ```
 
+`policyctl status` reports both requested policy and authoritative runtime
+observation. Its JSON form preserves the requested fields at the top level and
+adds a `runtime` object:
+
+```json
+{
+  "allow_starlink_torrents": false,
+  "disks_enabled": false,
+  "runtime": {
+    "disks_mounted": false,
+    "mounted_disk_labels": [],
+    "qbittorrent_running": false
+  },
+  "torrents_enabled": true,
+  "version": 1
+}
+```
+
+Managed disk state comes from exact `/mnt/<HDD_LABELS>` mount entries, and the
+process state uses the exact kernel process name `qbittorrent-nox`. A runtime
+discovery error makes `status` fail instead of reporting a false stopped or
+unmounted state. `policyctl read` remains requested-policy-only because it is
+the stable compact interface consumed by the reconciler.
+
 The Bash aliases retain the previous short names:
 
 - `nodisk` / `nodiskx`: disable / enable parked storage
 - `notor` / `notorx`: disable / enable all torrenting
 - `startor` / `startorx`: allow / block torrenting while Starlink is on
-- `mconf`: display the requested policy
+- `mconf`: display requested policy and authoritative runtime state
 
 `policyctl migrate` creates the policy from legacy `mconf`, `mconf_last`, and
 `starconf` markers without overwriting an existing policy. After migration and
