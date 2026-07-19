@@ -615,8 +615,6 @@ alias backup_home='cd /mnt/bigboi/pi_backup_git/pi_backup/home/pi'
 alias am="~/scripts/alias_media.sh"
 alias an="~/scripts/alias_media.sh new"
 alias ifaces="ssh root@OpenWrt mwan3 interfaces | grep 'is online'"
-alias cast="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; nohup python3 server.py &"
-alias castnn="sudo pkill -f 'python3 server.py'; cd /home/pi/NativCast/; python3 server.py"
 alias rpiplay='wake_display; nohup /home/pi/RPiPlay/build/rpiplay -r 180 &'
 
 alias ngear="ssh root@OpenWrt"

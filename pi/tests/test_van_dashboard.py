@@ -7,7 +7,7 @@ import unittest
 from email.message import Message
 from types import SimpleNamespace
 
-from automation import van_dashboard as dashboard
+from pi.apps.van_dashboard import van_dashboard as dashboard
 
 
 class FakeClock:
@@ -767,15 +767,15 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(manifest.json["name"], "Van Dashboard")
 
     def test_sync_scripts_deploys_dashboard_assets(self):
-        repository = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        repository = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         with open(os.path.join(repository, "pi", "sync_scripts.sh"), encoding="utf-8") as handle:
             sync_script = handle.read()
         self.assertIn(
-            'cp -R "$dsc/automation/templates" "$scripts/python-automation/"',
+            'cp -R "$pi_apps/van_dashboard/templates" "$python_stage/"',
             sync_script,
         )
         self.assertIn(
-            'cp -R "$dsc/automation/static" "$scripts/python-automation/"',
+            'cp -R "$pi_apps/van_dashboard/static" "$python_stage/"',
             sync_script,
         )
 

@@ -8,7 +8,7 @@ import tempfile
 import unittest
 
 
-POLICYCTL = Path(__file__).resolve().parents[1] / "pi" / "scripts" / "policyctl"
+POLICYCTL = Path(__file__).resolve().parents[1] / "scripts" / "policyctl"
 
 
 class PolicyctlTests(unittest.TestCase):

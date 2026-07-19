@@ -6,7 +6,6 @@ import unittest
 
 MODULE_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "pi",
     "scripts",
     "ubnt_wifi.py",
 )
