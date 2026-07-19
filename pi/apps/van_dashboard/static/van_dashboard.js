@@ -462,8 +462,9 @@ function renderStarlink(status) {
 }
 function updateStatus(data) {
   dashboard = data.cop_alert;
-  const active = dashboard.active,
-    engine = dashboard.engine;
+  const active = dashboard.active;
+  const engine = dashboard.engine;
+  const led = data.cop_led || {};
   $('dot').classList.remove('bad');
   $('dot').classList.add('on');
   $('connection').textContent = 'Connected · vanpi dashboard';
@@ -479,7 +480,8 @@ function updateStatus(data) {
     : engine.rpm === null
       ? 'No fresh data'
       : `Stopped · ${Math.round(engine.rpm)} RPM`;
-  $('flood').textContent = dashboard.ext_flood;
+  $('cop-led').textContent = led.message || 'No data';
+  $('cop-led').title = led.last_error || '';
   $('wake').textContent =
     dashboard.last_wake_ok === null
       ? 'Not attempted'
