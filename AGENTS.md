@@ -26,8 +26,7 @@ compare it with this checkout. Deployed files may differ from the repository.
 - `pi/`: Raspberry Pi apps, backup, disk, service, deployment, and setup tooling.
 - `vanrouter/`: OpenWrt configuration and scripts.
 - `ubnt/`: directional wireless-device profiles and uplink scripts.
-- `macbook/`: macOS shell utilities, AppleScripts, Automator workflows, and
-  BetterTouchTool helpers.
+- `macbook/`: macOS shell utilities, AppleScripts, and BetterTouchTool helpers.
 - `shared/`: code imported or deployed on more than one host.
 
 Some ignored secret directories, wireless profiles, and device configurations
@@ -111,9 +110,9 @@ capacity limits, labels, and deployed versions before changing clone behavior.
 
 On affected macOS versions, Finder may select frame zero for videos that fade in
 from black, producing black thumbnails even though the media and SMB share are
-healthy. `sh/stamp-video-thumbs.zsh` uses a `qlmanage` thumbnail as a Finder
-custom icon. It requires a GUI session and may write AppleDouble resource-fork
-files on SMB storage.
+healthy. `macbook/scripts/stamp-video-thumbs.zsh` uses a `qlmanage` thumbnail as
+a Finder custom icon. It requires a GUI session and may write AppleDouble
+resource-fork files on SMB storage.
 
 After macOS updates, test whether native frame selection is fixed before stamping
 more icons. Remove custom icons and clear the thumbnail cache deliberately if the

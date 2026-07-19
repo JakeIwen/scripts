@@ -1,6 +1,11 @@
-#!/usr/bin/env python 
-import socket 
-s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-print s.sendto('\xff'*6+'\xb8\xe8\x56\x0c\x81\xf2'*16, ('192.168.6.255', 80))
-# "b8:e8:56:0c:81:f2" device mac
+#!/usr/bin/env python3
+
+import socket
+
+
+target_mac = bytes.fromhex("b8e8560c81f2")
+magic_packet = b"\xff" * 6 + target_mac * 16
+
+with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as wake_socket:
+    wake_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    print(wake_socket.sendto(magic_packet, ("192.168.6.255", 80)))

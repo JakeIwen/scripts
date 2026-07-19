@@ -4,7 +4,6 @@ This directory contains code executed locally on Jacob's MacBook:
 
 - `scripts/`: shell and Python utilities.
 - `applescript/`: reusable compiled AppleScripts.
-- `automator/`: Automator workflows.
 - `bettertouchtool/`: BetterTouchTool helpers, backups, and configuration
   migration tools.
 

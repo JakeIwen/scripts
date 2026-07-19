@@ -21,8 +21,8 @@ const btt = Application("/Applications/BetterTouchTool.app");
 
 const repoRoot = "/Users/jacobr/dev/scripts";
 const replacements = [
+  ["/usr/local/opt/python@3.9/bin/python3", "/usr/bin/python3"],
   [`${repoRoot}/automation/display_settings.scpt`, `${repoRoot}/macbook/applescript/display_settings.scpt`],
-  [`${repoRoot}/automation/toggle_sidecar.scpt`, `${repoRoot}/macbook/applescript/toggle_sidecar.scpt`],
   [`${repoRoot}/automation/sonosAudio.scpt`, `${repoRoot}/macbook/applescript/sonosAudio.scpt`],
   [`${repoRoot}/automation/wake_device.py`, `${repoRoot}/macbook/scripts/wake_device.py`],
   [`${repoRoot}/sh/`, `${repoRoot}/macbook/scripts/`],

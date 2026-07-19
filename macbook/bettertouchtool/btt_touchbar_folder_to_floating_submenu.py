@@ -209,13 +209,18 @@ def convert_folder(folder, parent_uuid_override=None):
         "BTTTriggerClass": "BTTTriggerTypeFloatingMenu",
         "BTTUUID": submenu_uuid,
         "BTTEnabled": int(folder.get("BTTEnabled", 1)),
-        "BTTOrder": int(folder.get("BTTOrder", 0)),
         "BTTMenuItems": [],
         "BTTMenuConfig": base_menu_config(tb_name, label_text=tb_name),  # <-- RTF label here
         "BTTMenuAvailability": 0,
         "BTTMenuName": tb_name,
         "BTTGestureNotes": "Standard Item"
     }
+
+    # Let BTT append a pasted submenu to its destination menu. Explicit root
+    # orders can become stale between generation and paste, and BTT 6.011 can
+    # crash its editor instead of safely resolving that mismatch.
+    if parent_uuid_override is None and "BTTOrder" in folder:
+        submenu["BTTOrder"] = int(folder["BTTOrder"])
 
     # Back button
     submenu["BTTMenuItems"].append(back_button_item(submenu_uuid, order=0))
