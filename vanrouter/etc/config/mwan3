@@ -85,6 +85,11 @@ config member 'wan_m2_w3'
 	option metric '2'
 	option weight '3'
 
+config member 'wan_m3_w3'
+	option interface 'wan'
+	option metric '3'
+	option weight '3'
+
 config member 'clientwan_m1_w2'
 	option interface 'clientwan'
 	option metric '1'
@@ -124,9 +129,9 @@ config policy 'clientwan_only'
 	option last_resort 'unreachable'
 
 config policy 'balanced'
-	list use_member 'wan_m1_w3'
 	list use_member 'clientwan_m1_w3'
-	list use_member 'lifiwan_m1_w3'
+	list use_member 'lifiwan_m2_w2'
+	list use_member 'wan_m3_w3'
 	option last_resort 'unreachable'
 
 config rule 'https'
@@ -144,4 +149,3 @@ config rule 'default_rule_v4'
 config policy 'lifiwan_only'
 	option last_resort 'unreachable'
 	list use_member 'lifiwan_m1_w3'
-

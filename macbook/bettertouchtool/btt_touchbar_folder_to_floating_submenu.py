@@ -17,11 +17,27 @@ RTF_TEMPLATE = (
 )
 
 def rtf_escape(text: str) -> str:
-    # Escape backslashes and braces for RTF
-    text = text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
-    # Turn literal newlines into RTF hard line breaks used by your samples (backslash + newline)
-    text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\\\n")
-    return text
+    # RTF is not UTF-8. Encode non-ASCII text as signed UTF-16 code units so
+    # emoji do not turn into mojibake when BTT reads BTTMenuAttributedText.
+    escaped = []
+    for char in text.replace("\r\n", "\n").replace("\r", "\n"):
+        if char == "\\":
+            escaped.append("\\\\")
+        elif char == "{":
+            escaped.append("\\{")
+        elif char == "}":
+            escaped.append("\\}")
+        elif char == "\n":
+            escaped.append("\\\n")
+        elif ord(char) < 128:
+            escaped.append(char)
+        else:
+            utf16 = char.encode("utf-16-le")
+            for index in range(0, len(utf16), 2):
+                code_unit = int.from_bytes(utf16[index:index + 2], "little")
+                signed = code_unit if code_unit < 0x8000 else code_unit - 0x10000
+                escaped.append(f"\\u{signed}?")
+    return "".join(escaped)
 
 def rtf_label(text: str) -> str:
     return RTF_TEMPLATE % rtf_escape(text if text is not None else "")
@@ -101,10 +117,50 @@ def action_to_menuItemAction(src_action, parent_uuid):
         "BTTPredefinedActionType", "BTTPredefinedActionName",
         "BTTNamedTriggerToTrigger", "BTTTerminalCommand",
         "BTTShellTaskActionScript", "BTTShellTaskActionConfig",
-        "BTTAppleScriptString", "BTTAppleScriptRunInBackground"
+        # Preserve the common generic action payloads used by newer BTT
+        # actions. These are harmless when absent and make folder conversion
+        # work for more than the original shell/script-oriented buttons.
+        "BTTAdditionalActionData", "BTTGenericActionConfig",
+        "BTTGenericActionConfig2"
     ):
         if k in src_action:
             act[k] = src_action[k]
+
+    # BTT exports this field at the action's top level, but its JSON importer
+    # expects it inside BTTAdditionalActionData. Supplying it at the top level
+    # creates an action whose UI reads "Paste text: (null)".
+    if "BTTActionTextToPaste" in src_action:
+        additional_data = act.get("BTTAdditionalActionData", {})
+        if isinstance(additional_data, str):
+            try:
+                additional_data = json.loads(additional_data)
+            except json.JSONDecodeError:
+                additional_data = {}
+        else:
+            additional_data = dict(additional_data)
+        additional_data["BTTActionTextToPaste"] = src_action["BTTActionTextToPaste"]
+        act["BTTAdditionalActionData"] = additional_data
+
+    # Current BTT imports script-action settings from BTTAdditionalActionData,
+    # even though older trigger exports may put some of them at the top level.
+    script_keys = (
+        "BTTAppleScriptString", "BTTAppleScriptRunInBackground",
+        "BTTAppleScriptUsePath", "BTTAppleScriptFilePath",
+        "BTTScriptLocation", "BTTScriptType"
+    )
+    if any(key in src_action for key in script_keys):
+        additional_data = act.get("BTTAdditionalActionData", {})
+        if isinstance(additional_data, str):
+            try:
+                additional_data = json.loads(additional_data)
+            except json.JSONDecodeError:
+                additional_data = {}
+        else:
+            additional_data = dict(additional_data)
+        for key in script_keys:
+            if key in src_action:
+                additional_data[key] = src_action[key]
+        act["BTTAdditionalActionData"] = additional_data
     if "BTTNamedTriggerToTrigger" in src_action and "BTTPredefinedActionType" not in act:
         act["BTTPredefinedActionType"] = 248
         act["BTTPredefinedActionName"] = "Trigger Named Trigger (Configured in Other Tab)"
