@@ -412,6 +412,110 @@ class TuyaSwitchManagerTests(unittest.TestCase):
             switch.toggle()
 
 
+class LightingControllerTests(unittest.TestCase):
+    @staticmethod
+    def light_values(default_state="off"):
+        return [
+            {
+                "entity_id": entity,
+                "state": default_state,
+                "brightness": 128 if default_state == "on" else None,
+            }
+            for _group_id, _group_label, lights in dashboard.LIGHT_GROUPS
+            for entity, _label in lights
+        ]
+
+    def test_status_preserves_configured_groups_and_reports_percent(self):
+        values = self.light_values()
+        values[0].update(state="on", brightness=128)
+
+        def command(args, timeout):
+            self.assertEqual(args, [dashboard.TUYA_LIGHT, "list"])
+            return SimpleNamespace(returncode=0, stdout=json.dumps(values), stderr="")
+
+        status = dashboard.LightingController(command=command).status()
+        self.assertEqual([group["label"] for group in status["groups"]], [
+            "Cab", "Rear", "Kitchen", "Exterior", "Solder", "Extra"
+        ])
+        self.assertEqual(status["state"], "mixed")
+        self.assertEqual(status["on_count"], 1)
+        self.assertEqual(status["available_count"], 9)
+        self.assertEqual(status["groups"][0]["lights"][0]["brightness"], 50)
+
+    def test_power_and_brightness_use_only_fixed_commands_then_refresh(self):
+        values = self.light_values()
+        calls = []
+
+        def command(args, timeout):
+            calls.append(list(args))
+            if args[:2] == [dashboard.TUYA_TOGGLE, "light.wiz_kitchen"]:
+                values[4]["state"] = args[2]
+                values[4]["brightness"] = 255 if args[2] == "on" else None
+            elif args[:3] == [dashboard.TUYA_LIGHT, "set", "light.wiz_kitchen"]:
+                values[4]["state"] = "on"
+                values[4]["brightness"] = int(args[3])
+            return SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps(values) if args == [dashboard.TUYA_LIGHT, "list"] else "",
+                stderr="",
+            )
+
+        controller = dashboard.LightingController(command=command)
+        powered = controller.set_power("light.wiz_kitchen", True)
+        dimmed = controller.set_brightness("light.wiz_kitchen", 40)
+        self.assertEqual(powered["on_count"], 1)
+        self.assertEqual(dimmed["groups"][2]["lights"][0]["brightness"], 40)
+        self.assertEqual(calls[0], [dashboard.TUYA_TOGGLE, "light.wiz_kitchen", "on"])
+        self.assertEqual(calls[1], [dashboard.TUYA_LIGHT, "list"])
+        self.assertEqual(calls[2], [dashboard.TUYA_LIGHT, "set", "light.wiz_kitchen", "102"])
+        self.assertEqual(calls[3], [dashboard.TUYA_LIGHT, "list"])
+        with self.assertRaisesRegex(ValueError, "unknown lighting target"):
+            controller.set_power("switch.starlink", True)
+        with self.assertRaisesRegex(ValueError, "unknown light entity"):
+            controller.set_brightness("light.not_configured", 50)
+
+    def test_rejects_bad_schema_and_reports_timeout(self):
+        with self.assertRaises(dashboard.LightingCommandError):
+            dashboard.LightingController.parse_status('{"not":"a list"}')
+
+        def timeout(_args, timeout):
+            raise subprocess.TimeoutExpired("lights", timeout)
+
+        with self.assertRaisesRegex(dashboard.LightingCommandError, "timed out"):
+            dashboard.LightingController(command=timeout).status()
+
+    def test_room_and_all_targets_expand_only_to_configured_entities(self):
+        calls = []
+        values = self.light_values()
+
+        def command(args, timeout):
+            calls.append(list(args))
+            return SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps(values) if args == [dashboard.TUYA_LIGHT, "list"] else "",
+                stderr="",
+            )
+
+        controller = dashboard.LightingController(command=command)
+        controller.set_power("group:cab", False)
+        self.assertEqual(
+            calls,
+            [
+                [dashboard.TUYA_TOGGLE, "light.wiz_front_driver", "off"],
+                [dashboard.TUYA_TOGGLE, "light.wiz_front_passenger", "off"],
+                [dashboard.TUYA_LIGHT, "list"],
+            ],
+        )
+        calls.clear()
+        controller.set_power("all", True)
+        self.assertEqual(len(calls), 10)
+        self.assertEqual(calls[-1], [dashboard.TUYA_LIGHT, "list"])
+        self.assertEqual(
+            {call[1] for call in calls[:-1]},
+            controller.entities,
+        )
+
+
 class StoragePolicyManagerTests(unittest.TestCase):
     POLICY = {
         "version": 1,
@@ -826,6 +930,10 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"data-group-mute", page.data)
         self.assertIn(b"Disks &amp; Torrents", page.data)
         self.assertIn(b"Managed disks", page.data)
+        self.assertIn(b'id="lighting-title">Lighting', page.data)
+        self.assertIn(b'id="lighting-master"', page.data)
+        self.assertIn(b'id="lighting-panel"', page.data)
+        self.assertIn(b'id="lighting-groups"', page.data)
         self.assertIn(b"UBNT Wi-Fi", page.data)
         self.assertIn(b'id="ubnt-radio-dot"', page.data)
         self.assertIn(b'id="openwrt-age"', page.data)
@@ -873,12 +981,16 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertNotIn(b"ubnt-dot", javascript.data)
         self.assertIn(b"Stopped because disks are disabled", javascript.data)
         self.assertIn(b"function policyRequestBlocked", javascript.data)
+        self.assertIn(b"function renderLighting(next)", javascript.data)
+        self.assertIn(b"data-light-brightness", javascript.data)
         self.assertIn(b"ON \xc2\xb7 BLOCKED", javascript.data)
         self.assertIn(b"bookUrl.port", javascript.data)
         self.assertIn(b"'8787'", javascript.data)
         self.assertIn(b".policy-toggle", stylesheet.data)
         self.assertIn(b".policy-toggle.blocked", stylesheet.data)
         self.assertIn(b".policy-runtime-state::before", stylesheet.data)
+        self.assertIn(b".lighting-master", stylesheet.data)
+        self.assertIn(b".lighting-slider", stylesheet.data)
         self.assertIn(b".network-cards", stylesheet.data)
         self.assertIn(b".network-card-heading", stylesheet.data)
         self.assertIn(b".mwan-list", stylesheet.data)
@@ -919,6 +1031,79 @@ class DashboardRouteTests(unittest.TestCase):
         speedtest = client.get("/api/speedtest")
         self.assertEqual(speedtest.status_code, 200)
         self.assertIn(speedtest.json["speedtest"]["status"], ("idle", "complete", "error"))
+
+    def test_lighting_routes_are_authoritative_and_reject_unknown_inputs(self):
+        calls = []
+        status = {
+            "state": "off",
+            "on_count": 0,
+            "available_count": 1,
+            "total_count": 1,
+            "groups": [],
+        }
+
+        class FakeLighting:
+            entities = {"light.wiz_kitchen"}
+            targets = {"all": ("light.wiz_kitchen",), "light.wiz_kitchen": ("light.wiz_kitchen",)}
+
+            def status(self):
+                calls.append(("status",))
+                return status
+
+            def set_power(self, target, enabled):
+                calls.append(("power", target, enabled))
+                return {**status, "state": "on" if enabled else "off"}
+
+            def set_brightness(self, entity, brightness):
+                calls.append(("brightness", entity, brightness))
+                return {**status, "state": "on", "on_count": 1}
+
+        original = dashboard.lighting
+        dashboard.lighting = FakeLighting()
+        try:
+            client = dashboard.app.test_client()
+            read = client.get("/api/lights")
+            power = client.post(
+                "/api/lights/power", data={"target": "all", "value": "true"}
+            )
+            brightness = client.post(
+                "/api/lights/brightness",
+                data={"entity": "light.wiz_kitchen", "brightness": "42"},
+            )
+            unknown_target = client.post(
+                "/api/lights/power",
+                data={"target": "switch.starlink", "value": "true"},
+            )
+            unknown_entity = client.post(
+                "/api/lights/brightness",
+                data={"entity": "light.unknown", "brightness": "42"},
+            )
+            bad_value = client.post(
+                "/api/lights/power", data={"target": "all", "value": "toggle"}
+            )
+            extra = client.post(
+                "/api/lights/power",
+                data={"target": "all", "value": "true", "command": "anything"},
+            )
+        finally:
+            dashboard.lighting = original
+
+        self.assertEqual(read.status_code, 200)
+        self.assertEqual(read.headers["Cache-Control"], "no-store")
+        self.assertEqual(power.status_code, 200)
+        self.assertEqual(brightness.status_code, 200)
+        self.assertEqual(unknown_target.status_code, 400)
+        self.assertEqual(unknown_entity.status_code, 400)
+        self.assertEqual(bad_value.status_code, 400)
+        self.assertEqual(extra.status_code, 400)
+        self.assertEqual(
+            calls,
+            [
+                ("status",),
+                ("power", "all", True),
+                ("brightness", "light.wiz_kitchen", 42),
+            ],
+        )
 
     def test_ubnt_wifi_routes_are_narrow_and_nonblocking(self):
         calls = []

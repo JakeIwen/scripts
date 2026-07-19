@@ -2,6 +2,7 @@ const $ = (id) => document.getElementById(id);
 let dashboard = null,
   speakers = null,
   storagePolicy = null,
+  lighting = null,
   ubntWifi = null,
   ubntLink = null,
   ubntNewNetwork = null,
@@ -10,6 +11,7 @@ let dashboard = null,
   toastTimer = 0,
   speedPoll = 0,
   storagePoll = 0,
+  lightingPoll = 0,
   ubntPoll = 0,
   ubntLastCompletion = '',
   sonosTimeline = { position: 0, duration: 0, playing: false, updatedAt: 0 };
@@ -316,6 +318,107 @@ async function changeStoragePolicy(field) {
   }
   if (operationError) throw operationError;
   return result;
+}
+function lightingDotClass(state) {
+  return state === 'on' ? 'good' : state === 'off' ? 'bad' : '';
+}
+function renderLighting(next) {
+  lighting = next;
+  const master = $('lighting-master'),
+    known = next.available_count > 0,
+    unavailable = next.total_count - next.available_count;
+  networkState(
+    'lighting-master-dot',
+    next.state === 'on' ? true : next.state === 'off' ? false : null,
+  );
+  master.disabled = !known;
+  master.dataset.lightValue = String(next.state !== 'on');
+  master.setAttribute(
+    'aria-pressed',
+    next.state === 'on' ? 'true' : next.state === 'off' ? 'false' : 'mixed',
+  );
+  $('lighting-master-state').textContent =
+    next.state === 'on'
+      ? 'ALL ON'
+      : next.state === 'off'
+        ? 'ALL OFF'
+        : known
+          ? 'MIXED'
+          : 'NO DATA';
+  const summary = [`${next.on_count} on`];
+  if (unavailable) summary.push(`${unavailable} unavailable`);
+  $('lighting-summary').textContent = known ? summary.join(' · ') : 'Light status unavailable';
+  $('lighting-status').textContent = known ? 'Current state' : 'No available lights';
+  $('lighting-panel').setAttribute('aria-busy', 'false');
+  $('lighting-groups').innerHTML = next.groups
+    .map((group) => {
+      const groupKnown = group.lights.some((light) => light.available),
+        groupEnabled = group.state === 'on',
+        groupAction = groupEnabled ? 'Turn room off' : 'Turn room on';
+      const rows = group.lights
+        .map((light) => {
+          const enabled = light.state === 'on',
+            level = Number.isFinite(light.brightness) ? light.brightness : 100,
+            stateLabel = enabled ? 'ON' : light.state === 'off' ? 'OFF' : 'NO DATA';
+          return `<div class="lighting-row">
+            <span class="lighting-bulb ${enabled ? 'on' : ''}" aria-hidden="true">●</span>
+            <strong>${esc(light.label)}</strong>
+            <button class="lighting-power ${lightingDotClass(light.state)}" data-action data-light-target="${esc(light.entity_id)}" data-light-value="${String(!enabled)}" ${light.available ? '' : 'disabled'} aria-pressed="${light.available ? String(enabled) : 'mixed'}">${stateLabel}</button>
+            <input class="lighting-slider" data-action data-light-brightness="${esc(light.entity_id)}" type="range" min="1" max="100" value="${level}" ${light.available ? '' : 'disabled'} aria-label="${esc(light.label)} brightness">
+            <span class="lighting-level">${light.available ? `${level}%` : '—'}</span>
+          </div>`;
+        })
+        .join('');
+      return `<section class="lighting-group">
+        <div class="lighting-group-head"><h3><span class="network-dot ${lightingDotClass(group.state)}"></span>${esc(group.label)}</h3><button data-action data-light-target="group:${esc(group.id)}" data-light-value="${String(!groupEnabled)}" ${groupKnown ? '' : 'disabled'}>${groupAction}</button></div>
+        ${rows}
+      </section>`;
+    })
+    .join('');
+}
+function renderLightingUnavailable(message) {
+  lighting = null;
+  networkState('lighting-master-dot', null);
+  $('lighting-master').disabled = true;
+  $('lighting-master').setAttribute('aria-pressed', 'mixed');
+  $('lighting-master-state').textContent = 'NO DATA';
+  $('lighting-summary').textContent = 'Light status unavailable';
+  $('lighting-status').textContent = 'Unavailable';
+  $('lighting-panel').setAttribute('aria-busy', 'false');
+  $('lighting-groups').innerHTML = `<div class="speaker-loading">${esc(message)}</div>`;
+}
+async function refreshLighting(showError = false) {
+  try {
+    const response = await json('/api/lights');
+    renderLighting(response.lighting);
+    return response;
+  } catch (error) {
+    renderLightingUnavailable(error.message);
+    if (showError) toast(error.message, true);
+    throw error;
+  }
+}
+async function changeLightPower(target, value) {
+  let result;
+  try {
+    result = await post('lights/power', { target, value });
+    renderLighting(result.lighting);
+    return result;
+  } catch (error) {
+    await refreshLighting(false).catch(() => {});
+    throw error;
+  }
+}
+async function changeLightBrightness(entity, brightness) {
+  let result;
+  try {
+    result = await post('lights/brightness', { entity, brightness });
+    renderLighting(result.lighting);
+    return result;
+  } catch (error) {
+    await refreshLighting(false).catch(() => {});
+    throw error;
+  }
 }
 function ubntSecurity(value) {
   return value === 'wpa'
@@ -670,6 +773,35 @@ function closeStorage() {
   $('storage').setAttribute('aria-expanded', 'false');
   $('storage').focus();
 }
+async function pollLighting() {
+  clearTimeout(lightingPoll);
+  if (!$('lighting-backdrop').classList.contains('open')) return;
+  try {
+    if (!busy) await refreshLighting(false);
+  } catch (_) {
+    /* rendered by refreshLighting */
+  } finally {
+    lightingPoll = setTimeout(pollLighting, 10000);
+  }
+}
+async function openLighting() {
+  $('lighting-backdrop').classList.add('open');
+  document.body.classList.add('sheet-open');
+  $('lighting').setAttribute('aria-expanded', 'true');
+  $('lighting-panel').setAttribute('aria-busy', 'true');
+  try {
+    await refreshLighting(true);
+  } finally {
+    lightingPoll = setTimeout(pollLighting, 10000);
+  }
+}
+function closeLighting() {
+  clearTimeout(lightingPoll);
+  $('lighting-backdrop').classList.remove('open');
+  document.body.classList.remove('sheet-open');
+  $('lighting').setAttribute('aria-expanded', 'false');
+  $('lighting').focus();
+}
 async function openUbntWifi() {
   $('ubnt-wifi-backdrop').classList.add('open');
   document.body.classList.add('sheet-open');
@@ -704,6 +836,9 @@ $('speakers').addEventListener('click', openSpeakers);
 $('speaker-close').addEventListener('click', closeSpeakers);
 $('storage').addEventListener('click', openStorage);
 $('storage-close').addEventListener('click', closeStorage);
+$('lighting').addEventListener('click', openLighting);
+$('lighting-close').addEventListener('click', closeLighting);
+$('lighting-master').dataset.lightTarget = 'all';
 $('ubnt-wifi').addEventListener('click', openUbntWifi);
 $('ubnt-wifi-close').addEventListener('click', closeUbntWifi);
 $('ubnt-scan').addEventListener('click', () => startUbntWifi('scan'));
@@ -722,6 +857,9 @@ $('speaker-backdrop').addEventListener('click', (event) => {
 $('storage-backdrop').addEventListener('click', (event) => {
   if (event.target === $('storage-backdrop')) closeStorage();
 });
+$('lighting-backdrop').addEventListener('click', (event) => {
+  if (event.target === $('lighting-backdrop')) closeLighting();
+});
 $('ubnt-wifi-backdrop').addEventListener('click', (event) => {
   if (event.target === $('ubnt-wifi-backdrop')) closeUbntWifi();
 });
@@ -729,6 +867,7 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     if ($('speaker-backdrop').classList.contains('open')) closeSpeakers();
     if ($('storage-backdrop').classList.contains('open')) closeStorage();
+    if ($('lighting-backdrop').classList.contains('open')) closeLighting();
     if ($('ubnt-wifi-backdrop').classList.contains('open')) closeUbntWifi();
   }
 });
@@ -738,8 +877,17 @@ document.addEventListener('input', (event) => {
     slider.closest('.speaker-row').querySelector('.speaker-level').textContent = slider.value;
   const groupSlider = event.target.closest('[data-group-volume]');
   if (groupSlider) $('group-level').textContent = groupSlider.value;
+  const lightSlider = event.target.closest('[data-light-brightness]');
+  if (lightSlider)
+    lightSlider.closest('.lighting-row').querySelector('.lighting-level').textContent =
+      `${lightSlider.value}%`;
 });
 document.addEventListener('change', (event) => {
+  const lightSlider = event.target.closest('[data-light-brightness]');
+  if (lightSlider)
+    action(() =>
+      changeLightBrightness(lightSlider.dataset.lightBrightness, lightSlider.value),
+    );
   const checkbox = event.target.closest('[data-group-speaker]');
   if (checkbox)
     action(async () => {
@@ -775,6 +923,11 @@ document.addEventListener('change', (event) => {
     });
 });
 document.addEventListener('click', (event) => {
+  const lightPower = event.target.closest('[data-light-target]');
+  if (lightPower)
+    action(() =>
+      changeLightPower(lightPower.dataset.lightTarget, lightPower.dataset.lightValue),
+    );
   const selected = event.target.closest('[data-select-speaker]');
   if (selected)
     action(async () => {
@@ -835,6 +988,7 @@ function refreshVisibleDashboard() {
   refreshSpeedtest();
   refreshSonos();
   refreshStoragePolicy().catch(() => {});
+  refreshLighting(false).catch(() => {});
   refreshUbntWifi(false);
 }
 Promise.allSettled([
@@ -843,6 +997,7 @@ Promise.allSettled([
   refreshConnectivity(),
   refreshSpeedtest(),
   refreshStoragePolicy(),
+  refreshLighting(false),
   refreshUbntWifi(false),
 ]).then((results) => {
   if (results[1].status === 'rejected') refreshSonos();
@@ -858,6 +1013,9 @@ setInterval(() => {
 }, 10000);
 setInterval(() => {
   if (!document.hidden && !busy) refreshStoragePolicy().catch(() => {});
+}, 30000);
+setInterval(() => {
+  if (!document.hidden && !busy) refreshLighting(false).catch(() => {});
 }, 30000);
 setInterval(() => {
   if (!document.hidden && ubntWifi?.operation?.status !== 'running') refreshUbntWifi(false);

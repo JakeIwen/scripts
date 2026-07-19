@@ -43,6 +43,16 @@
     <button class="tile storage-tile" id="storage" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="storage-panel">
       <span class="tile-icon" aria-hidden="true">💾</span><span class="tile-title">Disk &amp; Torrent</span><span class="tile-detail" id="storage-summary">Checking current state…</span>
     </button>
+    <section class="tile lighting-tile" id="lighting-card" aria-labelledby="lighting-title">
+      <button class="lighting-open" id="lighting" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="lighting-panel">
+        <span class="tile-icon" aria-hidden="true">💡</span>
+        <span class="tile-title" id="lighting-title">Lighting</span>
+        <span class="tile-detail" id="lighting-summary">Checking Home Assistant…</span>
+      </button>
+      <button class="lighting-master" id="lighting-master" data-action disabled aria-pressed="mixed">
+        <span class="network-dot" id="lighting-master-dot"></span><span id="lighting-master-state">NO DATA</span>
+      </button>
+    </section>
     <button class="tile ubnt-wifi-tile" id="ubnt-wifi" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="ubnt-wifi-panel">
       <span class="switch-state"><span class="network-dot" id="ubnt-wifi-dot"></span><span id="ubnt-wifi-state">NO DATA</span></span>
       <span class="network-card-heading ubnt-card-heading"><span aria-hidden="true">📡</span><span>UBNT</span></span><span class="ubnt-title"><span class="network-dot" id="ubnt-radio-dot"></span><span class="tile-title">Wireless</span></span><span class="tile-detail" id="ubnt-wifi-summary">Scan and select upstream networks</span>
@@ -98,6 +108,13 @@
       <li>Allow torrents on Starlink does not override disk or global torrent permission.</li>
       <li>Starlink torrenting requires Disks enabled, Torrents enabled, and Allow torrents on Starlink.</li>
     </ul>
+  </section>
+</div>
+<div class="speaker-backdrop" id="lighting-backdrop">
+  <section class="speaker-sheet lighting-sheet" id="lighting-panel" role="dialog" aria-modal="true" aria-labelledby="lighting-sheet-title" aria-busy="true">
+    <div class="sheet-grabber"></div><div class="sheet-head"><h2 id="lighting-sheet-title">Lighting</h2><span class="policy-sheet-status" id="lighting-status">Checking…</span><button class="sheet-close" id="lighting-close" aria-label="Close lighting controls">&times;</button></div>
+    <p class="sheet-help">Switch or dim individual lights, a room, or every available light.</p>
+    <div class="lighting-groups" id="lighting-groups"><div class="speaker-loading">Loading lights…</div></div>
   </section>
 </div>
 <div class="speaker-backdrop" id="ubnt-wifi-backdrop">

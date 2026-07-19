@@ -97,6 +97,37 @@ DEFAULT_SONOS_DEVICE = os.environ.get("VAN_DASHBOARD_SONOS_DEVICE", "vonFront")
 SONOS_ART_TIMEOUT = 5
 SONOS_ART_MAX_BYTES = 2 * 1024 * 1024
 
+LIGHT_GROUPS = (
+    (
+        "cab",
+        "Cab",
+        (
+            ("light.wiz_front_driver", "Driver"),
+            ("light.wiz_front_passenger", "Passenger"),
+        ),
+    ),
+    (
+        "rear",
+        "Rear",
+        (
+            ("light.wiz_dresser", "Dresser"),
+            ("light.wiz_werkbench", "Workbench"),
+        ),
+    ),
+    ("kitchen", "Kitchen", (("light.wiz_kitchen", "Kitchen"),)),
+    ("exterior", "Exterior", (("light.ext_led", "Exterior LED"),)),
+    ("solder", "Solder", (("light.solder_led", "Solder LED"),)),
+    (
+        "extra",
+        "Extra",
+        (
+            ("light.extra_led_1", "LED 1"),
+            ("light.extra_led_2", "LED 2"),
+        ),
+    ),
+)
+LIGHT_COMMAND_TIMEOUT = 20
+
 
 def atomic_json_write(path, value):
     """Write JSON without leaving a partially-written state file."""
@@ -943,6 +974,157 @@ class TuyaSwitchManager:
             self.stop_event.wait(max(1.0, self.interval))
 
 
+class LightingCommandError(RuntimeError):
+    pass
+
+
+class LightingController:
+    """Strict Home Assistant boundary for the dashboard's configured lights."""
+
+    VALID_STATES = {"on", "off", "unavailable", "unknown"}
+
+    def __init__(self, command=run_command, timeout=LIGHT_COMMAND_TIMEOUT):
+        self.command = command
+        self.timeout = timeout
+        self.operation_lock = threading.Lock()
+        ordered_entities = tuple(
+            entity
+            for _group_id, _group_label, lights in LIGHT_GROUPS
+            for entity, _label in lights
+        )
+        self.entities = set(ordered_entities)
+        self.targets = {"all": ordered_entities}
+        self.targets.update(
+            {
+                f"group:{group_id}": tuple(entity for entity, _label in lights)
+                for group_id, _group_label, lights in LIGHT_GROUPS
+            }
+        )
+        self.targets.update({entity: (entity,) for entity in self.entities})
+
+    @classmethod
+    def parse_status(cls, output):
+        try:
+            values = json.loads(output)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise LightingCommandError(f"Home Assistant returned invalid JSON: {exc}") from exc
+        if not isinstance(values, list):
+            raise LightingCommandError("Home Assistant returned an unexpected light schema")
+        parsed = {}
+        for item in values:
+            if not isinstance(item, dict) or set(item) != {
+                "entity_id",
+                "state",
+                "brightness",
+            }:
+                raise LightingCommandError("Home Assistant returned an unexpected light schema")
+            entity = item["entity_id"]
+            state = item["state"]
+            brightness = item["brightness"]
+            if not isinstance(entity, str) or not re.fullmatch(r"light\.[a-z0-9_]+", entity):
+                raise LightingCommandError("Home Assistant returned an invalid light entity")
+            if state not in cls.VALID_STATES:
+                state = "unknown"
+            if brightness is not None and (
+                type(brightness) is not int or not 0 <= brightness <= 255
+            ):
+                raise LightingCommandError(
+                    f"Home Assistant returned invalid brightness for {entity}"
+                )
+            if entity in parsed:
+                raise LightingCommandError(f"Home Assistant returned duplicate {entity}")
+            parsed[entity] = {"state": state, "brightness": brightness}
+        return parsed
+
+    @staticmethod
+    def aggregate(lights):
+        states = [light["state"] for light in lights]
+        if states and all(state == "on" for state in states):
+            return "on"
+        if states and all(state == "off" for state in states):
+            return "off"
+        if any(state in ("on", "off") for state in states):
+            return "mixed"
+        return "unknown"
+
+    def _run(self, args, expect_status=False):
+        try:
+            result = self.command(args, timeout=self.timeout)
+        except subprocess.TimeoutExpired as exc:
+            raise LightingCommandError(
+                f"lighting command timed out after {self.timeout:g} seconds"
+            ) from exc
+        except OSError as exc:
+            raise LightingCommandError(f"could not start lighting command: {exc}") from exc
+        if result.returncode:
+            detail = (result.stderr or result.stdout or "lighting command failed").strip()
+            raise LightingCommandError(detail[-300:])
+        return self.parse_status(result.stdout) if expect_status else None
+
+    def status(self):
+        observed = self._run([TUYA_LIGHT, "list"], expect_status=True)
+        groups = []
+        all_lights = []
+        for group_id, group_label, configured in LIGHT_GROUPS:
+            lights = []
+            for entity, label in configured:
+                value = observed.get(entity, {"state": "unknown", "brightness": None})
+                brightness = value["brightness"]
+                light = {
+                    "entity_id": entity,
+                    "label": label,
+                    "state": value["state"],
+                    "available": value["state"] in ("on", "off"),
+                    "brightness": (
+                        round(brightness * 100 / 255) if brightness is not None else None
+                    ),
+                }
+                lights.append(light)
+                all_lights.append(light)
+            groups.append(
+                {
+                    "id": group_id,
+                    "label": group_label,
+                    "state": self.aggregate(lights),
+                    "lights": lights,
+                }
+            )
+        return {
+            "state": self.aggregate(all_lights),
+            "on_count": sum(light["state"] == "on" for light in all_lights),
+            "available_count": sum(light["available"] for light in all_lights),
+            "total_count": len(all_lights),
+            "groups": groups,
+        }
+
+    def set_power(self, target, enabled):
+        entities = self.targets.get(target)
+        if entities is None:
+            raise ValueError("unknown lighting target")
+        if type(enabled) is not bool:
+            raise ValueError("lighting power value must be boolean")
+        with self.operation_lock:
+            for entity in entities:
+                self._run(
+                    [TUYA_TOGGLE, entity, "on" if enabled else "off"],
+                    expect_status=False,
+                )
+            return self.status()
+
+    def set_brightness(self, entity, brightness):
+        if entity not in self.entities:
+            raise ValueError("unknown light entity")
+        if type(brightness) is not int or not 1 <= brightness <= 100:
+            raise ValueError("brightness must be from 1 to 100")
+        raw_brightness = max(1, round(brightness * 255 / 100))
+        with self.operation_lock:
+            self._run(
+                [TUYA_LIGHT, "set", entity, str(raw_brightness)],
+                expect_status=False,
+            )
+            return self.status()
+
+
 class PolicyCommandError(RuntimeError):
     pass
 
@@ -1616,6 +1798,7 @@ ubnt_wifi = UbntWifiController(on_change=connectivity.request_refresh)
 speedtest = SpeedTestManager()
 starlink = TuyaSwitchManager("starlink")
 storage_policy = StoragePolicyManager()
+lighting = LightingController()
 
 
 def api_error(message, status):
@@ -1724,6 +1907,67 @@ def api_storage_policy():
     except PolicyCommandError as exc:
         return api_error(f"could not read storage policy: {exc}", 502)
     return jsonify({"ok": True, "policy": status})
+
+
+@app.route("/api/lights")
+def api_lights():
+    try:
+        status = lighting.status()
+    except LightingCommandError as exc:
+        return api_error(f"could not read lights: {exc}", 502)
+    response = jsonify({"ok": True, "lighting": status})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/api/lights/power", methods=["POST"])
+def api_lights_power():
+    if not _exact_form(("target", "value")):
+        return api_error("lighting power requires target and boolean value", 400)
+    target = request.form["target"]
+    raw_value = request.form["value"].lower()
+    if target not in lighting.targets:
+        return api_error("unknown lighting target", 400)
+    if raw_value not in ("true", "false"):
+        return api_error("lighting power value must be true or false", 400)
+    enabled = raw_value == "true"
+    try:
+        status = lighting.set_power(target, enabled)
+    except LightingCommandError as exc:
+        return api_error(f"could not update lights: {exc}", 502)
+    return jsonify(
+        {
+            "ok": True,
+            "message": f"Lights turned {'on' if enabled else 'off'}",
+            "lighting": status,
+        }
+    )
+
+
+@app.route("/api/lights/brightness", methods=["POST"])
+def api_lights_brightness():
+    if not _exact_form(("entity", "brightness")):
+        return api_error("light brightness requires entity and brightness", 400)
+    entity = request.form["entity"]
+    if entity not in lighting.entities:
+        return api_error("unknown light entity", 400)
+    try:
+        brightness = int(request.form["brightness"])
+    except (TypeError, ValueError):
+        return api_error("brightness must be from 1 to 100", 400)
+    if not 1 <= brightness <= 100:
+        return api_error("brightness must be from 1 to 100", 400)
+    try:
+        status = lighting.set_brightness(entity, brightness)
+    except LightingCommandError as exc:
+        return api_error(f"could not set light brightness: {exc}", 502)
+    return jsonify(
+        {
+            "ok": True,
+            "message": f"Brightness set to {brightness}%",
+            "lighting": status,
+        }
+    )
 
 
 @app.route("/api/connectivity")
