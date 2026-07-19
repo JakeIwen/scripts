@@ -97,9 +97,9 @@ vanpi proxy so it also works over Tailscale. Its speaker sheet keeps the existin
 group-selection checkboxes and adds native Sonos group volume, whole-group mute,
 individual volume, and individual mute controls.
 
-## Storage and torrent policy
+## Disk and torrent policy
 
-The Storage & Torrents tile reads and updates requested policy exclusively
+The Disks & Torrents tile reads and updates requested policy exclusively
 through `/home/pi/scripts/policyctl`; the dashboard never reads the policy JSON
 file directly. The sheet exposes requested disk permission, the global torrent
 permission, and the additional Starlink torrent permission. Updates use fixed
