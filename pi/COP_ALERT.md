@@ -151,10 +151,10 @@ The COP ALERT request is not blocked by the exterior light. A separate worker
 waits for `light.ext_led` to join Wi-Fi after `ext_flood` supplies power, then
 uses `tuya_light.sh` to apply and read back the desired light settings. It
 retries every five seconds while the target is unavailable and re-verifies a
-confirmed light every 30 seconds. The tile shows `Waiting for ext_led Wi-Fi`
-during a 90-second connection grace period, then `ext_led unavailable · still
-retrying` if RF remains blocked. Neither state disables the alert, CAN wake,
-`ext_flood`, or ntfy behavior.
+confirmed light every 30 seconds. Its retry state remains available as
+`cop_led` in `GET /api/status`, but is omitted from the compact COP ALERT tile.
+An unavailable exterior light never disables the alert, CAN wake, `ext_flood`,
+or ntfy behavior.
 
 The fixed look—brightness `255/255` (100%) and `2702 K` in color-temperature
 mode—was captured from `light.solder_led` on 2026-07-18. The worker never reads

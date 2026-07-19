@@ -10,7 +10,6 @@
   --good: #62c899;
   --bad: #ef7067;
   --alert: #ef503f;
-  --alert2: #ff9b43;
   --shadow: 0 14px 45px #050a0e88;
 }
 * {
@@ -793,15 +792,6 @@ h1 {
   display: block;
   margin-top: 4px;
   font-size: 14px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.network-detail {
-  display: block;
-  margin-top: 2px;
-  color: var(--dim);
-  font-size: 9px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
