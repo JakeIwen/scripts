@@ -1,33 +1,28 @@
 #!/bin/sh
-home="/etc/persistent/"
-tmp="$home/tmp/"
-scripts="$home/scripts/"
-sys_init_flag="$tmp/sys_init_flag.txt"
-setup_log() {
-  logfile="$home/log/update_wifi.log"
-  tail -50000 $logfile > "$logfile.tmp"
-  mv "$logfile.tmp" $logfile
-  chmod 770 $logfile
-  echo "" >> $logfile
-  date >> $logfile
-}
+set -u
 
-mkdir -p $tmp
-mkdir -p /etc/crontabs   
-chmod -R 770 $scripts $tmp
-touch $sys_init_flag
-pkill -f cron
-setup_log
+persistent=/etc/persistent
+scripts="$persistent/scripts"
+key_source="$persistent/config/raspi_rsa_id.pub"
+authorized_keys=/etc/dropbear/authorized_keys
 
-echo "nanoM2" > /proc/sys/kernel/hostname
-cp /etc/persistent/config/cron /etc/crontabs/ubnt
-cp /etc/persistent/config/.profile /etc/persistent/.profile
-cat /etc/persistent/config/raspi_rsa_id.pub >> /etc/dropbear/authorized_keys 
+mkdir -p /etc/crontabs /tmp/ubnt-wifi /var/log
+chmod 700 /tmp/ubnt-wifi
+chmod 770 "$scripts"
+chmod 750 "$scripts"/* 2>/dev/null || true
 
-update_pi_rsa() {
-  cat /etc/persistent/config/raspi_rsa_id.pub >> /etc/dropbear/authorized_keys
-  uniq_keys="$(sort -u /etc/dropbear/authorized_keys -o /etc/dropbear/authorized_keys)"
-  echo "$uniq_keys" > /etc/dropbear/authorized_keys 
-}
+echo nanoM2 > /proc/sys/kernel/hostname
+cp "$persistent/config/cron" /etc/crontabs/ubnt
+cp "$persistent/config/.profile" "$persistent/.profile"
 
+if [ -s "$key_source" ]; then
+    touch "$authorized_keys"
+    if ! grep -Fqx -f "$key_source" "$authorized_keys" 2>/dev/null; then
+        cat "$key_source" >> "$authorized_keys"
+    fi
+    sort -u "$authorized_keys" > "$authorized_keys.new" && mv "$authorized_keys.new" "$authorized_keys"
+    chmod 600 "$authorized_keys"
+fi
+
+pkill crond 2>/dev/null || true
 crond

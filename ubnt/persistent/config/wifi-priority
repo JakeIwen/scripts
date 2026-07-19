@@ -1,0 +1,5 @@
+# Higher numbers win. Unlisted profiles default to 100.
+# denlink defaults to 10, or 1000 while config/prefer_denlink exists.
+#
+# Format:
+# priority|profile filename

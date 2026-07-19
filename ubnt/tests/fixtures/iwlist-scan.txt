@@ -1,0 +1,26 @@
+ath0      Scan completed :
+          Cell 01 - Address: 4E:EA:85:26:34:F4
+                    Channel:11
+                    Frequency:2.462 GHz (Channel 11)
+                    Quality=65/70  Signal level=-13 dBm  Noise level=-95 dBm
+                    Encryption key:on
+                    ESSID:"denlink"
+                    IE: IEEE 802.11i/WPA2 Version 1
+          Cell 02 - Address: D8:EC:5E:8D:6A:3A
+                    Channel:1
+                    Frequency:2.412 GHz (Channel 1)
+                    Quality=15/70  Signal level=-55 dBm  Noise level=-94 dBm
+                    Encryption key:on
+                    ESSID:"dendelion"
+                    IE: WPA Version 1
+          Cell 03 - Address: 00:11:22:33:44:55
+                    Frequency:2.437 GHz (Channel 6)
+                    Quality:60
+                    Signal level:-40 dBm
+                    Encryption key:off
+                    ESSID:"A Network With Spaces"
+          Cell 04 - Address: 00:11:22:33:44:66
+                    Frequency:2.417 GHz (Channel 2)
+                    Quality=1/70  Signal level=-90 dBm
+                    Encryption key:off
+                    ESSID:""
