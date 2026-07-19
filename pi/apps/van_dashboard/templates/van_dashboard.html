@@ -20,7 +20,7 @@
     <button class="tile-edit-button" id="tile-edit" type="button" aria-pressed="false" aria-describedby="tile-edit-help" aria-label="Edit tile positions" title="Edit tile positions"><span id="tile-edit-icon" aria-hidden="true">✎</span></button>
   </div>
   <div class="grid" id="tile-grid">
-    <button class="tile cop" id="cop" data-action aria-pressed="false">
+    <button class="tile cop" id="cop" data-dashboard-tile data-action aria-pressed="false">
       <span class="pill" id="cop-pill">OFF</span><span class="tile-icon" aria-hidden="true">🚨</span>
       <span class="tile-title">COP ALERT</span><span class="tile-detail" id="cop-detail">Tap to keep the dashcam awake</span>
       <span class="status-lines">
@@ -29,13 +29,13 @@
         <span class="status-line"><span>CAN wake</span><span id="wake">—</span></span>
       </span>
     </button>
-    <button class="tile starlink unknown" id="starlink" data-action disabled aria-pressed="mixed">
+    <button class="tile starlink unknown" id="starlink" data-dashboard-tile data-action disabled aria-pressed="mixed">
       <span class="switch-state"><span class="network-dot" id="starlink-dot"></span><span id="starlink-state">NO DATA</span></span>
       <span class="tile-icon" aria-hidden="true">🛰️</span><span class="tile-title">Starlink</span>
       <span class="tile-detail" id="starlink-detail">Checking Tuya status…</span>
     </button>
-    <a class="tile" id="books" data-action href="#"><span class="tile-icon" aria-hidden="true">📖</span><span class="tile-title">Audiobooks</span><span class="tile-detail">Open the Sonos audiobook library</span></a>
-    <section class="tile sonos-tile" id="sonos-card" aria-labelledby="sonos-title">
+    <a class="tile" id="books" data-dashboard-tile data-action href="#"><span class="tile-icon" aria-hidden="true">📖</span><span class="tile-title">Audiobooks</span><span class="tile-detail">Open the Sonos audiobook library</span></a>
+    <section class="tile sonos-tile" id="sonos-card" data-dashboard-tile aria-labelledby="sonos-title">
       <div class="sonos-head"><span class="tile-title" id="sonos-title">Sonos</span><button class="sonos-open" id="speakers" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="speaker-panel"><span aria-hidden="true">🔊</span><span id="speaker-summary">Finding…</span></button></div>
       <div class="now-playing"><strong id="sonos-track">Finding Sonos…</strong><span id="sonos-artist">—</span></div>
       <div class="transport" aria-label="Sonos playback controls">
@@ -45,10 +45,10 @@
       </div>
       <div class="sonos-progress" id="sonos-progress" role="progressbar" aria-label="Track position" hidden><span class="sonos-progress-fill" id="sonos-progress-fill"></span></div>
     </section>
-    <button class="tile storage-tile" id="storage" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="storage-panel">
+    <button class="tile storage-tile" id="storage" data-dashboard-tile data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="storage-panel">
       <span class="tile-icon" aria-hidden="true">💾</span><span class="tile-title">Disk &amp; Torrent</span><span class="tile-detail" id="storage-summary">Checking current state…</span>
     </button>
-    <section class="tile lighting-tile" id="lighting-card" aria-labelledby="lighting-title">
+    <section class="tile lighting-tile" id="lighting-card" data-dashboard-tile aria-labelledby="lighting-title">
       <button class="lighting-open" id="lighting" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="lighting-panel">
         <span class="tile-icon" aria-hidden="true">💡</span>
         <span class="tile-title" id="lighting-title">Lighting</span>
@@ -58,13 +58,11 @@
         <span class="network-dot" id="lighting-master-dot"></span><span id="lighting-master-state">NO DATA</span>
       </button>
     </section>
-    <button class="tile ubnt-wifi-tile" id="ubnt-wifi" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="ubnt-wifi-panel">
+    <button class="tile ubnt-wifi-tile" id="ubnt-wifi" data-dashboard-tile data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="ubnt-wifi-panel">
       <span class="switch-state"><span class="network-dot" id="ubnt-wifi-dot"></span><span id="ubnt-wifi-state">NO DATA</span></span>
       <span class="network-card-heading ubnt-card-heading"><span aria-hidden="true">📡</span><span>UBNT</span></span><span class="ubnt-title"><span class="network-dot" id="ubnt-radio-dot"></span><span class="tile-title">Wireless</span></span><span class="tile-detail" id="ubnt-wifi-summary">Scan and select upstream networks</span>
     </button>
-  </div>
-  <div class="network-cards">
-    <section class="network-card" aria-labelledby="openwrt-title">
+    <section class="network-card" id="openwrt-card" data-dashboard-tile data-tile-label="OpenWrt" aria-labelledby="openwrt-title">
       <div class="connectivity-head"><h2 class="network-card-heading" id="openwrt-title">OpenWrt</h2><span class="connectivity-age" id="openwrt-age">Checking…</span></div>
       <div class="mwan-overview">
         <div class="mwan-primary">
@@ -74,7 +72,7 @@
         <div class="mwan-list" id="mwan-list" aria-label="mwan3 interfaces"></div>
       </div>
     </section>
-    <button class="network-card speedtest-card" id="speedtest-button" data-action>
+    <button class="network-card speedtest-card" id="speedtest-button" data-dashboard-tile data-tile-label="Speed Test" data-action>
       <span class="network-card-heading speedtest-card-head"><span class="speed-icon" aria-hidden="true">ᯓ➤</span><span class="speed-spinner" aria-hidden="true"></span><span id="speedtest-label" data-running-label="Testing…">Speed Test</span></span>
       <span class="speed-results" id="speed-results" role="status" aria-live="polite"><strong>Not run yet</strong>Uses vanpi's current route</span>
     </button>

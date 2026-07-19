@@ -77,12 +77,12 @@ function networkState(id, value) {
   else if (value === false) el.classList.add('bad');
 }
 function dashboardTiles() {
-  return Array.from($('tile-grid').children).filter((element) =>
-    element.classList.contains('tile'),
-  );
+  return Array.from($('tile-grid').querySelectorAll(':scope > [data-dashboard-tile]'));
 }
 function tileName(tile) {
-  return tile.querySelector('.tile-title')?.textContent?.trim() || tile.id;
+  return (
+    tile.dataset.tileLabel || tile.querySelector('.tile-title')?.textContent?.trim() || tile.id
+  );
 }
 function restoreTileOrder() {
   let stored;
@@ -158,6 +158,7 @@ function setTileEditing(enabled) {
   if (!tileEditing) {
     saveTileOrder();
     refresh();
+    refreshSpeedtest();
   }
 }
 function reorderTileToIndex(tile, nextIndex) {
@@ -206,7 +207,7 @@ function setupTileEditing() {
   );
   grid.addEventListener('pointerdown', (event) => {
     if (!tileEditing || (event.pointerType === 'mouse' && event.button !== 0)) return;
-    const tile = event.target.closest('.tile');
+    const tile = event.target.closest('[data-dashboard-tile]');
     if (!tile || tile.parentElement !== grid) return;
     event.preventDefault();
     tileDrag = { tile, pointerId: event.pointerId };
@@ -220,7 +221,9 @@ function setupTileEditing() {
     const edge = 64;
     if (event.clientY < edge) window.scrollBy(0, -12);
     else if (event.clientY > window.innerHeight - edge) window.scrollBy(0, 12);
-    const target = document.elementFromPoint(event.clientX, event.clientY)?.closest('.tile');
+    const target = document
+      .elementFromPoint(event.clientX, event.clientY)
+      ?.closest('[data-dashboard-tile]');
     if (!target || target === tileDrag.tile || target.parentElement !== grid) return;
     const tiles = dashboardTiles(),
       currentIndex = tiles.indexOf(tileDrag.tile),
@@ -241,7 +244,7 @@ function setupTileEditing() {
     const offsets = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -2, ArrowDown: 2 },
       offset = offsets[event.key];
     if (!offset) return;
-    const tile = event.target.closest('.tile');
+    const tile = event.target.closest('[data-dashboard-tile]');
     if (!tile || tile.parentElement !== grid) return;
     event.preventDefault();
     reorderTileToIndex(tile, dashboardTiles().indexOf(tile) + offset);
@@ -345,7 +348,7 @@ function renderSpeedtest(response) {
     running = s.status === 'running',
     label = $('speedtest-label');
   if (!label.dataset.idleLabel) label.dataset.idleLabel = label.textContent;
-  button.disabled = running;
+  button.disabled = !tileEditing && running;
   button.classList.toggle('running', running);
   button.setAttribute('aria-busy', String(running));
   label.textContent = running ? label.dataset.runningLabel : label.dataset.idleLabel;

@@ -976,7 +976,9 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="ubnt-radio-dot"', page.data)
         self.assertIn(b'id="openwrt-age"', page.data)
         self.assertNotIn(b'id="connectivity-age"', page.data)
-        self.assertIn(b'class="network-cards"', page.data)
+        self.assertIn(b'id="openwrt-card" data-dashboard-tile', page.data)
+        self.assertIn(b'id="speedtest-button" data-dashboard-tile', page.data)
+        self.assertEqual(page.data.count(b"data-dashboard-tile"), 9)
         self.assertIn(b'class="network-card speedtest-card"', page.data)
         self.assertIn(b'id="ubnt-network-list"', page.data)
         self.assertIn(b'id="ubnt-password-form"', page.data)
@@ -1035,8 +1037,11 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b".lighting-master", stylesheet.data)
         self.assertIn(b".lighting-slider", stylesheet.data)
         self.assertIn(b".tile-edit-button", stylesheet.data)
-        self.assertIn(b"body.tiles-editing .grid > .tile", stylesheet.data)
-        self.assertIn(b".network-cards", stylesheet.data)
+        self.assertIn(
+            b"body.tiles-editing #tile-grid > [data-dashboard-tile]",
+            stylesheet.data,
+        )
+        self.assertNotIn(b".network-cards", stylesheet.data)
         self.assertIn(b".network-card-heading", stylesheet.data)
         self.assertIn(b".mwan-list", stylesheet.data)
         self.assertIn(b"flex-direction: column", stylesheet.data)
