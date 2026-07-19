@@ -134,12 +134,109 @@ als() { alias $1; fndef $1; }
 tf() { tail ${2:-'-50'} $1; tail -f $1; }       # tail -f with more recent lines 
 snh() { nohup bash -c $1 & tail -f ./nohup.out; }
 
-s() { # run ~/scripts/<name>.sh or .py, drilling into subfolders if not at top level
-  name=$1; shift; f="$HOME/scripts/$name.sh"
-  [ -f "$f" ] || f="$HOME/scripts/$name.py"
-  [ -f "$f" ] || f=$(find "$HOME/scripts" -mindepth 2 \( -name "$name.sh" -o -name "$name.py" \) -type f | head -1)
-  [ -z "$f" ] && { echo "s: $name.sh/.py not found in ~/scripts"; return 1; }
+s() { # run a named .sh/.py script or a named directory's main.sh/main.py
+  local name candidate f
+  if [ "$#" -lt 1 ]; then
+    echo "usage: s <script-name> [args...]" >&2
+    return 2
+  fi
+  name=$1
+  shift
+  for candidate in \
+    "$HOME/scripts/$name.sh" \
+    "$HOME/scripts/$name.py" \
+    "$HOME/scripts/$name/main.sh" \
+    "$HOME/scripts/$name/main.py"; do
+    if [ -f "$candidate" ]; then
+      f=$candidate
+      break
+    fi
+  done
+  [ -n "$f" ] || f=$(find "$HOME/scripts" -mindepth 2 -type f \
+    \( -name "$name.sh" -o -name "$name.py" \
+       -o -path "*/$name/main.sh" -o -path "*/$name/main.py" \) \
+    -print -quit)
+  [ -z "$f" ] && {
+    echo "s: no $name script found in ~/scripts" >&2
+    return 1
+  }
   case "$f" in *.py) python3 "$f" "$@";; *) "$f" "$@";; esac
+}
+add_pricecheck() { # add_pricecheck <parser> <threshold> <URL> [title]
+  local parser threshold url title base_config config new_config
+  if [ "$#" -lt 3 ] || [ "$#" -gt 4 ]; then
+    echo "usage: add_pricecheck <parser> <threshold> <URL> [title]" >&2
+    return 2
+  fi
+  parser=$1
+  threshold=$2
+  url=$3
+  title=${4:-}
+  base_config="$HOME/configs/price_checks.tsv"
+  config="$HOME/configs/price_checks.local.tsv"
+
+  case "$parser" in
+    *[!a-zA-Z0-9_-]*|'')
+      echo "add_pricecheck: invalid parser: $parser" >&2
+      return 2
+      ;;
+  esac
+  if [ ! -f "$HOME/scripts/price_check/${parser}_parser.py" ]; then
+    echo "add_pricecheck: unsupported parser: $parser" >&2
+    return 2
+  fi
+  if ! [[ "$threshold" =~ ^[0-9]+([.][0-9]{1,2})?$ ]] || \
+     ! awk -v value="$threshold" 'BEGIN { exit !(value > 0) }'; then
+    echo "add_pricecheck: threshold must be a positive dollar amount" >&2
+    return 2
+  fi
+  case "$url" in
+    http://*|https://*) ;;
+    *)
+      echo "add_pricecheck: URL must begin with http:// or https://" >&2
+      return 2
+      ;;
+  esac
+  if [[ "$parser$threshold$url$title" == *$'\t'* || \
+        "$parser$threshold$url$title" == *$'\n'* ]]; then
+    echo "add_pricecheck: fields cannot contain tabs or newlines" >&2
+    return 2
+  fi
+  if [ ! -f "$base_config" ]; then
+    echo "add_pricecheck: config not found: $base_config" >&2
+    return 1
+  fi
+  if awk -F '\t' -v url="$url" '$3 == url { found=1 } END { exit !found }' \
+       "$base_config" || \
+     { [ -f "$config" ] && \
+       awk -F '\t' -v url="$url" '$3 == url { found=1 } END { exit !found }' \
+         "$config"; }; then
+    echo "add_pricecheck: URL is already configured: $url" >&2
+    return 1
+  fi
+
+  new_config=false
+  [ -e "$config" ] || new_config=true
+  {
+    "$new_config" && printf '%s\n' \
+      '# Local additions; parser<TAB>threshold<TAB>URL<TAB>title (optional)'
+    if [ -n "$title" ]; then
+      printf '%s\t%s\t%s\t%s\n' "$parser" "$threshold" "$url" "$title"
+    else
+      printf '%s\t%s\t%s\n' "$parser" "$threshold" "$url"
+    fi
+  } >> "$config"
+  echo "added price check: ${title:-$url} ($parser, below \$$threshold)"
+}
+rm_pricecheck() { # rm_pricecheck <title-or-URL>
+  if [ "$#" -ne 1 ]; then
+    echo "usage: rm_pricecheck <title-or-URL>" >&2
+    return 2
+  fi
+  python3 "${PRICE_CHECK_SCRIPT:-$HOME/scripts/price_check/main.py}" \
+    --config "$HOME/configs/price_checks.tsv" \
+    --title-cache "$HOME/.local/state/price_check/titles.json" \
+    --remove "$1"
 }
 sx() { sudo "$(history | perl -pe 's/^\s+[0-9]+\**\s+//g' | tail -1)"; }
 svc() { sudo systemctl $2 $1.service; } # svc home-assistant start
