@@ -992,6 +992,7 @@ class LightingController:
             for _group_id, _group_label, lights in LIGHT_GROUPS
             for entity, _label in lights
         )
+        self.ordered_entities = ordered_entities
         self.entities = set(ordered_entities)
         self.targets = {"all": ordered_entities}
         self.targets.update(
@@ -1062,7 +1063,15 @@ class LightingController:
         return self.parse_status(result.stdout) if expect_status else None
 
     def status(self):
-        observed = self._run([TUYA_LIGHT, "list"], expect_status=True)
+        try:
+            observed = self._run([TUYA_LIGHT, "list"], expect_status=True)
+        except LightingCommandError as exc:
+            # A dashboard-only deployment used to omit tuya_light.sh. Keep
+            # status useful with that older helper, while the deployment tool
+            # now installs and health-checks both files as one unit.
+            if "usage: tuya_light.sh" not in str(exc):
+                raise
+            observed = self._legacy_status()
         groups = []
         all_lights = []
         for group_id, group_label, configured in LIGHT_GROUPS:
@@ -1096,6 +1105,39 @@ class LightingController:
             "total_count": len(all_lights),
             "groups": groups,
         }
+
+    def _legacy_status(self):
+        observed = {}
+        successful = 0
+        for entity in self.ordered_entities:
+            try:
+                result = self.command(
+                    [TUYA_LIGHT, "status", entity], timeout=self.timeout
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                result = None
+            if result is None or result.returncode:
+                observed[entity] = {"state": "unknown", "brightness": None}
+                continue
+            try:
+                item = json.loads(result.stdout)
+            except (TypeError, json.JSONDecodeError):
+                item = None
+            state = item.get("state") if isinstance(item, dict) else None
+            brightness = item.get("brightness") if isinstance(item, dict) else None
+            if state not in self.VALID_STATES or (
+                brightness is not None
+                and (type(brightness) is not int or not 0 <= brightness <= 255)
+            ):
+                observed[entity] = {"state": "unknown", "brightness": None}
+                continue
+            observed[entity] = {"state": state, "brightness": brightness}
+            successful += 1
+        if not successful:
+            raise LightingCommandError(
+                "lighting helper is outdated and individual status queries failed"
+            )
+        return observed
 
     def set_power(self, target, enabled):
         entities = self.targets.get(target)

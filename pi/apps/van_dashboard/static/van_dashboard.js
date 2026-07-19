@@ -8,6 +8,8 @@ let dashboard = null,
   ubntNewNetwork = null,
   policyLoading = false,
   busy = false,
+  tileEditing = false,
+  tileDrag = null,
   toastTimer = 0,
   speedPoll = 0,
   storagePoll = 0,
@@ -15,6 +17,7 @@ let dashboard = null,
   ubntPoll = 0,
   ubntLastCompletion = '',
   sonosTimeline = { position: 0, duration: 0, playing: false, updatedAt: 0 };
+const TILE_ORDER_STORAGE_KEY = 'van-dashboard.tile-order.v1';
 function esc(v) {
   return String(v ?? '').replace(
     /[&<>"']/g,
@@ -72,6 +75,179 @@ function networkState(id, value) {
   el.classList.remove('good', 'bad');
   if (value === true) el.classList.add('good');
   else if (value === false) el.classList.add('bad');
+}
+function dashboardTiles() {
+  return Array.from($('tile-grid').children).filter((element) =>
+    element.classList.contains('tile'),
+  );
+}
+function tileName(tile) {
+  return tile.querySelector('.tile-title')?.textContent?.trim() || tile.id;
+}
+function restoreTileOrder() {
+  let stored;
+  try {
+    stored = JSON.parse(localStorage.getItem(TILE_ORDER_STORAGE_KEY));
+  } catch (_) {
+    return;
+  }
+  if (!Array.isArray(stored)) return;
+  const grid = $('tile-grid'),
+    current = dashboardTiles(),
+    byId = new Map(current.map((tile) => [tile.id, tile])),
+    seen = new Set(),
+    ordered = [];
+  for (const id of stored) {
+    if (typeof id !== 'string' || seen.has(id) || !byId.has(id)) continue;
+    seen.add(id);
+    ordered.push(byId.get(id));
+  }
+  for (const tile of current) {
+    if (!seen.has(tile.id)) ordered.push(tile);
+  }
+  for (const tile of ordered) grid.append(tile);
+}
+function saveTileOrder() {
+  try {
+    localStorage.setItem(
+      TILE_ORDER_STORAGE_KEY,
+      JSON.stringify(dashboardTiles().map((tile) => tile.id)),
+    );
+  } catch (_) {
+    /* The layout still works for this page if browser storage is unavailable. */
+  }
+}
+function announceTilePosition(tile) {
+  const tiles = dashboardTiles(),
+    position = tiles.indexOf(tile) + 1;
+  $('tile-edit-status').textContent = `${tileName(tile)} moved to position ${position}`;
+}
+function setTileEditing(enabled) {
+  if (!enabled && tileDrag) finishTileDrag();
+  tileEditing = Boolean(enabled);
+  document.body.classList.toggle('tiles-editing', tileEditing);
+  const button = $('tile-edit'),
+    icon = $('tile-edit-icon');
+  button.setAttribute('aria-pressed', String(tileEditing));
+  button.setAttribute('aria-label', tileEditing ? 'Finish editing tile positions' : 'Edit tile positions');
+  button.title = tileEditing ? 'Done arranging tiles' : 'Edit tile positions';
+  icon.textContent = tileEditing ? '✓' : '✎';
+  for (const tile of dashboardTiles()) {
+    tile.setAttribute('aria-grabbed', 'false');
+    if (tileEditing) {
+      if (!tile.hasAttribute('tabindex') && !tile.matches('a, button')) {
+        tile.dataset.editTabAdded = '1';
+        tile.tabIndex = 0;
+      }
+      if (tile.matches('button:disabled')) {
+        tile.dataset.editWasDisabled = '1';
+        tile.disabled = false;
+      }
+    } else {
+      tile.removeAttribute('aria-grabbed');
+      if (tile.dataset.editTabAdded) {
+        tile.removeAttribute('tabindex');
+        delete tile.dataset.editTabAdded;
+      }
+      if (tile.dataset.editWasDisabled) {
+        tile.disabled = true;
+        delete tile.dataset.editWasDisabled;
+      }
+    }
+  }
+  if (!tileEditing) {
+    saveTileOrder();
+    refresh();
+  }
+}
+function reorderTileToIndex(tile, nextIndex) {
+  const tiles = dashboardTiles(),
+    currentIndex = tiles.indexOf(tile);
+  if (currentIndex < 0) return;
+  nextIndex = Math.max(0, Math.min(tiles.length - 1, nextIndex));
+  if (nextIndex === currentIndex) return;
+  tiles.splice(currentIndex, 1);
+  tiles.splice(nextIndex, 0, tile);
+  for (const item of tiles) $('tile-grid').append(item);
+  announceTilePosition(tile);
+}
+function finishTileDrag(event) {
+  if (!tileDrag || (event && event.pointerId !== tileDrag.pointerId)) return;
+  const tile = tileDrag.tile;
+  tile.classList.remove('tile-dragging');
+  tile.setAttribute('aria-grabbed', 'false');
+  try {
+    tile.releasePointerCapture(tileDrag.pointerId);
+  } catch (_) {
+    /* Pointer capture may already have ended. */
+  }
+  tileDrag = null;
+  saveTileOrder();
+  announceTilePosition(tile);
+}
+function setupTileEditing() {
+  const grid = $('tile-grid');
+  restoreTileOrder();
+  $('tile-edit').addEventListener('click', () => {
+    if (busy) {
+      toast('Wait for the current control action to finish');
+      return;
+    }
+    setTileEditing(!tileEditing);
+  });
+  grid.addEventListener(
+    'click',
+    (event) => {
+      if (!tileEditing) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    },
+    true,
+  );
+  grid.addEventListener('pointerdown', (event) => {
+    if (!tileEditing || (event.pointerType === 'mouse' && event.button !== 0)) return;
+    const tile = event.target.closest('.tile');
+    if (!tile || tile.parentElement !== grid) return;
+    event.preventDefault();
+    tileDrag = { tile, pointerId: event.pointerId };
+    tile.classList.add('tile-dragging');
+    tile.setAttribute('aria-grabbed', 'true');
+    tile.setPointerCapture(event.pointerId);
+  });
+  grid.addEventListener('pointermove', (event) => {
+    if (!tileDrag || event.pointerId !== tileDrag.pointerId) return;
+    event.preventDefault();
+    const edge = 64;
+    if (event.clientY < edge) window.scrollBy(0, -12);
+    else if (event.clientY > window.innerHeight - edge) window.scrollBy(0, 12);
+    const target = document.elementFromPoint(event.clientX, event.clientY)?.closest('.tile');
+    if (!target || target === tileDrag.tile || target.parentElement !== grid) return;
+    const tiles = dashboardTiles(),
+      currentIndex = tiles.indexOf(tileDrag.tile),
+      targetIndex = tiles.indexOf(target);
+    if (currentIndex < targetIndex) target.after(tileDrag.tile);
+    else target.before(tileDrag.tile);
+  });
+  grid.addEventListener('pointerup', finishTileDrag);
+  grid.addEventListener('pointercancel', finishTileDrag);
+  grid.addEventListener('keydown', (event) => {
+    if (!tileEditing) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setTileEditing(false);
+      $('tile-edit').focus();
+      return;
+    }
+    const offsets = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -2, ArrowDown: 2 },
+      offset = offsets[event.key];
+    if (!offset) return;
+    const tile = event.target.closest('.tile');
+    if (!tile || tile.parentElement !== grid) return;
+    event.preventDefault();
+    reorderTileToIndex(tile, dashboardTiles().indexOf(tile) + offset);
+    saveTileOrder();
+    tile.focus();
+  });
 }
 function renderUbntTile() {
   const tile = $('ubnt-wifi');
@@ -382,7 +558,9 @@ function renderLightingUnavailable(message) {
   $('lighting-master').disabled = true;
   $('lighting-master').setAttribute('aria-pressed', 'mixed');
   $('lighting-master-state').textContent = 'NO DATA';
-  $('lighting-summary').textContent = 'Light status unavailable';
+  $('lighting-summary').textContent = /usage: tuya_light\.sh/.test(message)
+    ? 'Lighting helper needs deployment'
+    : 'Home Assistant status unavailable';
   $('lighting-status').textContent = 'Unavailable';
   $('lighting-panel').setAttribute('aria-busy', 'false');
   $('lighting-groups').innerHTML = `<div class="speaker-loading">${esc(message)}</div>`;
@@ -556,7 +734,7 @@ function renderStarlink(status) {
   tile.classList.remove('on', 'off', 'unknown');
   tile.classList.add(known ? state : 'unknown');
   networkState('starlink-dot', state === 'on' ? true : state === 'off' ? false : null);
-  tile.disabled = !known || Boolean(status?.changing);
+  tile.disabled = !tileEditing && (!known || Boolean(status?.changing));
   tile.setAttribute('aria-pressed', known ? String(state === 'on') : 'mixed');
   $('starlink-state').textContent = status?.changing
     ? 'WAIT'
@@ -816,6 +994,7 @@ function closeUbntWifi() {
   $('ubnt-wifi').focus();
 }
 const bookUrl = new URL(window.location.href);
+setupTileEditing();
 bookUrl.port = '8787';
 bookUrl.pathname = '/';
 bookUrl.search = '';

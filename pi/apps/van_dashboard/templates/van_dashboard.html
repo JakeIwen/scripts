@@ -14,7 +14,12 @@
 <header><div><div class="eyebrow">vanpi controls</div><h1>Van Dashboard</h1></div><div class="van-mark" aria-hidden="true">🚐</div></header>
 <main>
   <div class="connection"><span class="dot" id="dot"></span><span id="connection">Connecting to vanpi…</span></div>
-  <div class="grid">
+  <div class="tile-edit-bar">
+    <span class="sr-only" id="tile-edit-help">In edit mode, drag tiles or use the arrow keys to rearrange them.</span>
+    <span class="sr-only" id="tile-edit-status" role="status" aria-live="polite"></span>
+    <button class="tile-edit-button" id="tile-edit" type="button" aria-pressed="false" aria-describedby="tile-edit-help" aria-label="Edit tile positions" title="Edit tile positions"><span id="tile-edit-icon" aria-hidden="true">✎</span></button>
+  </div>
+  <div class="grid" id="tile-grid">
     <button class="tile cop" id="cop" data-action aria-pressed="false">
       <span class="pill" id="cop-pill">OFF</span><span class="tile-icon" aria-hidden="true">🚨</span>
       <span class="tile-title">COP ALERT</span><span class="tile-detail" id="cop-detail">Tap to keep the dashcam awake</span>

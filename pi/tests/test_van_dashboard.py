@@ -515,6 +515,41 @@ class LightingControllerTests(unittest.TestCase):
             controller.entities,
         )
 
+    def test_old_helper_falls_back_to_fixed_individual_status_queries(self):
+        calls = []
+
+        def command(args, timeout):
+            calls.append(list(args))
+            if args == [dashboard.TUYA_LIGHT, "list"]:
+                return SimpleNamespace(
+                    returncode=2,
+                    stdout="",
+                    stderr="usage: tuya_light.sh <status|set> <light.entity>",
+                )
+            self.assertEqual(args[:2], [dashboard.TUYA_LIGHT, "status"])
+            return SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "state": "on" if args[2] == "light.wiz_dresser" else "off",
+                        "color_mode": None,
+                        "brightness": 128 if args[2] == "light.wiz_dresser" else None,
+                        "color_temp_kelvin": None,
+                    }
+                ),
+                stderr="",
+            )
+
+        controller = dashboard.LightingController(command=command)
+        status = controller.status()
+        self.assertEqual(status["on_count"], 1)
+        self.assertEqual(status["available_count"], 9)
+        self.assertEqual(len(calls), 10)
+        self.assertEqual(
+            [call[2] for call in calls[1:]],
+            list(controller.ordered_entities),
+        )
+
 
 class StoragePolicyManagerTests(unittest.TestCase):
     POLICY = {
@@ -934,6 +969,9 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="lighting-master"', page.data)
         self.assertIn(b'id="lighting-panel"', page.data)
         self.assertIn(b'id="lighting-groups"', page.data)
+        self.assertIn(b'id="tile-edit"', page.data)
+        self.assertIn(b'id="tile-grid"', page.data)
+        self.assertIn(b'aria-label="Edit tile positions"', page.data)
         self.assertIn(b"UBNT Wi-Fi", page.data)
         self.assertIn(b'id="ubnt-radio-dot"', page.data)
         self.assertIn(b'id="openwrt-age"', page.data)
@@ -983,6 +1021,11 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"function policyRequestBlocked", javascript.data)
         self.assertIn(b"function renderLighting(next)", javascript.data)
         self.assertIn(b"data-light-brightness", javascript.data)
+        self.assertIn(b"TILE_ORDER_STORAGE_KEY", javascript.data)
+        self.assertIn(b"localStorage.setItem", javascript.data)
+        self.assertIn(b"function setupTileEditing()", javascript.data)
+        self.assertIn(b"'pointerdown'", javascript.data)
+        self.assertIn(b"'pointermove'", javascript.data)
         self.assertIn(b"ON \xc2\xb7 BLOCKED", javascript.data)
         self.assertIn(b"bookUrl.port", javascript.data)
         self.assertIn(b"'8787'", javascript.data)
@@ -991,6 +1034,8 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b".policy-runtime-state::before", stylesheet.data)
         self.assertIn(b".lighting-master", stylesheet.data)
         self.assertIn(b".lighting-slider", stylesheet.data)
+        self.assertIn(b".tile-edit-button", stylesheet.data)
+        self.assertIn(b"body.tiles-editing .grid > .tile", stylesheet.data)
         self.assertIn(b".network-cards", stylesheet.data)
         self.assertIn(b".network-card-heading", stylesheet.data)
         self.assertIn(b".mwan-list", stylesheet.data)
