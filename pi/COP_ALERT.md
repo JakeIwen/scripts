@@ -20,11 +20,16 @@ server rejects cross-origin browser control requests to reduce CSRF risk.
 
 ## OpenWrt and speed tests
 
-The OpenWrt card shows MWAN3 status and gives the speed test two thirds of the
-card width. The separate UBNT availability and wireless columns were removed;
-the UBNT Wi-Fi tile now uses the collector's real association status, signal,
-and CCQ/quality data directly. A configured SSID shown as `Not-Associated` is
-reported as disconnected rather than live.
+OpenWrt/MWAN3 and the speed test use separate half-width cards. The three MWAN3
+interface states are stacked beside the active mode. The OpenWrt timestamp and
+error label describe the MWAN3 collector data still shown on that card.
+
+The separate UBNT availability and wireless columns were removed. The UBNT
+Wi-Fi tile's top badge and green tile state describe physical Ethernet
+reachability, while the dot beside `UBNT Wi-Fi` describes radio association.
+A reachable antenna configured for an absent SSID therefore shows `CONNECTED`
+with a red Wi-Fi dot and `Not associated` detail. Signal and CCQ/quality data
+appear when the radio is associated.
 
 MWAN3 comes from mwan3's existing reachability tracking. The UBNT collector
 still performs its lightweight reachability and radio queries; consolidating
