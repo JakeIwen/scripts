@@ -1838,6 +1838,94 @@ body.busy [data-action] {
   color: var(--dim);
   font-size: 10px;
 }
+.monitor-section-head p {
+  color: var(--dim);
+  font-size: 9px;
+  margin: 3px 0 0;
+}
+.monitor-throttling {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+.monitor-throttle-summary,
+.monitor-frequency-policies {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+.monitor-throttle-summary > div,
+.monitor-frequency-policies > div {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #151f27;
+  padding: 9px;
+}
+.monitor-throttle-summary span,
+.monitor-frequency-policies span,
+.monitor-frequency-policies small {
+  display: block;
+  color: var(--dim);
+  font-size: 8px;
+}
+.monitor-throttle-summary strong,
+.monitor-frequency-policies strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+.monitor-frequency-policies small {
+  margin-top: 2px;
+}
+.monitor-throttle-flags {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.monitor-throttle-flag {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid #39725b;
+  border-radius: 11px;
+  background: #182a25;
+  padding: 8px 9px;
+}
+.monitor-throttle-flag.occurred {
+  border-color: #7b633a;
+  background: #292319;
+}
+.monitor-throttle-flag.active {
+  border-color: #8c4943;
+  background: #382320;
+}
+.monitor-throttle-flag strong,
+.monitor-throttle-flag small {
+  display: block;
+}
+.monitor-throttle-flag strong {
+  font-size: 10px;
+}
+.monitor-throttle-flag small {
+  color: var(--dim);
+  font-size: 8px;
+  margin-top: 2px;
+}
+.monitor-throttle-flag b {
+  flex: 0 0 auto;
+  color: #9cdec0;
+  font-size: 8px;
+  letter-spacing: 0.05em;
+}
+.monitor-throttle-flag.occurred b {
+  color: #f2d59e;
+}
+.monitor-throttle-flag.active b {
+  color: #ffd2ce;
+}
 .monitor-peaks {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1857,6 +1945,88 @@ body.busy [data-action] {
   color: var(--dim);
   font-size: 9px;
   margin: 7px 2px 0;
+}
+.monitor-process-current {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.monitor-process-current > div {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #151f27;
+  padding: 9px;
+}
+.monitor-process-current h4,
+.monitor-subtitle {
+  color: var(--dim);
+  font-size: 10px;
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.monitor-process-current ol {
+  list-style: none;
+  margin: 5px 0 0;
+  padding: 0;
+}
+.monitor-process-current li {
+  display: flex;
+  justify-content: space-between;
+  gap: 7px;
+  border-top: 1px solid var(--line);
+  color: #cbd8de;
+  font-size: 9px;
+  padding: 6px 0;
+}
+.monitor-process-current li > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.monitor-process-current li small {
+  flex: 0 0 auto;
+  color: var(--dim);
+  font-size: 8px;
+}
+.monitor-subtitle {
+  margin: 12px 2px 6px;
+}
+.monitor-offenders {
+  display: grid;
+  gap: 6px;
+}
+.monitor-offenders article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #151f27;
+  padding: 8px 9px;
+}
+.monitor-offenders article strong,
+.monitor-offenders article small {
+  display: block;
+}
+.monitor-offenders article strong {
+  font-size: 11px;
+}
+.monitor-offenders article small {
+  color: var(--dim);
+  font-size: 8px;
+  margin-top: 2px;
+}
+.monitor-offenders article > span {
+  color: #cbd8de;
+  font-size: 9px;
+  text-align: right;
+}
+.monitor-offenders article > span b {
+  color: var(--ink);
+  font-size: 12px;
 }
 .monitor-next {
   border-left: 3px solid #7b633a;
@@ -2131,6 +2301,18 @@ body.busy [data-action] {
   }
   .monitor-io-details {
     grid-template-columns: 1fr;
+  }
+  .monitor-throttle-summary,
+  .monitor-frequency-policies,
+  .monitor-throttle-flags,
+  .monitor-process-current {
+    grid-template-columns: 1fr;
+  }
+  .monitor-offenders article {
+    grid-template-columns: 1fr;
+  }
+  .monitor-offenders article > span {
+    text-align: left;
   }
   .monitor-crashes .monitor-section-head {
     align-items: stretch;

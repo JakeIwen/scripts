@@ -5,7 +5,7 @@ let dashboard = null,
   lighting = null,
   priceChecks = null,
   systemMonitor = null,
-  systemMonitorHours = 24,
+  systemMonitorHours = 6,
   ubntWifi = null,
   ubntLink = null,
   ubntNewNetwork = null,
@@ -101,6 +101,24 @@ function eventTime(timestamp) {
     minute: '2-digit',
     second: '2-digit',
   });
+}
+function monitorRangeLabel(hours = systemMonitorHours) {
+  if (hours === 168) return '7 days';
+  if (hours === 720) return '30 days';
+  return `${hours} hour${hours === 1 ? '' : 's'}`;
+}
+function cpuListLabel(cpuIds) {
+  const ids = Array.isArray(cpuIds) ? cpuIds.map(Number).filter(Number.isInteger) : [];
+  if (!ids.length) return '';
+  const consecutive = ids.every((value, index) => index === 0 || value === ids[index - 1] + 1);
+  return consecutive && ids.length > 1 ? `${ids[0]}–${ids.at(-1)}` : ids.join(', ');
+}
+function thermalSensorLabel(sensor) {
+  const type = String(sensor?.type || sensor?.zone || 'Thermal sensor');
+  const base = type.toLowerCase() === 'cpu-thermal' ? 'CPU / SoC' : type;
+  const cpus = cpuListLabel(sensor?.cpu_ids);
+  if (!cpus) return base;
+  return `${base} · core${sensor.cpu_ids.length === 1 ? '' : 's'} ${cpus}${sensor.shared ? ' (shared sensor)' : ''}`;
 }
 function networkState(id, value) {
   const el = $(id);
@@ -620,6 +638,12 @@ function monitorProcess(process, cpu = false) {
       : '';
   return `${esc(process.name || process.command || `PID ${process.pid}`)}${usage}`;
 }
+function monitorProcessList(items, cpu = false) {
+  if (!items?.length) return '<div class="monitor-io-empty">No process samples yet</div>';
+  return `<ol>${items
+    .map((process) => `<li><span>${monitorProcess(process, cpu)}</span><small>PID ${esc(process.pid ?? '—')}</small></li>`)
+    .join('')}</ol>`;
+}
 function monitorEventState(event) {
   const state = event.state;
   if (!state) return '';
@@ -672,7 +696,11 @@ function renderSystemMonitor(response) {
     tile = $('system-monitor'),
     level = response.status?.stale ? 'unknown' : diagnosis.level || 'unknown',
     episodes = Number(evidence.undervoltage_episodes) || 0,
-    activeFirmware = current.throttle?.current?.length > 0;
+    activeFirmware = current.throttle?.current?.length > 0,
+    currentThermals = current.thermal_sensors || [],
+    primaryThermal = currentThermals.find((sensor) => String(sensor.type).toLowerCase().includes('cpu'))
+      || currentThermals[0],
+    throttling = response.throttling || {};
   tile.classList.remove('unknown', 'good', 'warning', 'critical');
   tile.classList.add(level);
   $('system-monitor-pill').textContent =
@@ -688,8 +716,18 @@ function renderSystemMonitor(response) {
     ? `${episodes} drop${episodes === 1 ? '' : 's'} · ${Number(evidence.undervoltage_seconds || 0).toFixed(1)}s`
     : current.throttle?.occurred?.includes('under_voltage')
       ? 'Sticky history set'
-      : 'No events in range';
+      : `No events in range (${monitorRangeLabel()})`;
   $('system-monitor-cpu').textContent = monitorMetric(peaks.cpu_percent, '%');
+  $('system-monitor-temperature').textContent = Number.isFinite(primaryThermal?.temperature_c)
+    ? `${Number(primaryThermal.temperature_c).toFixed(1)} °C`
+    : monitorMetric(peaks.temperature_c, ' °C');
+  $('system-monitor-throttle').textContent = throttling.active?.length
+    ? `ACTIVE · ${throttling.active.map((flag) => flag.replaceAll('_', ' ')).join(', ')}`
+    : throttling.occurred_since_boot?.length
+      ? 'Clear now · seen this boot'
+      : throttling.available
+        ? 'Clear'
+        : 'No data';
   $('system-monitor-memory').textContent = monitorMetric(peaks.memory_percent, '%');
   $('system-monitor-network').textContent =
     `↓ ${formatRate(current.network_io?.rx_bytes_per_second)} · ↑ ${formatRate(current.network_io?.tx_bytes_per_second)}`;
@@ -699,7 +737,7 @@ function renderSystemMonitor(response) {
   $('system-monitor-panel').setAttribute('aria-busy', 'false');
   $('system-monitor-status').textContent = response.status?.stale
     ? `Stale · ${age(current.timestamp)}`
-    : `${systemMonitorHours === 168 ? '7 days' : systemMonitorHours === 720 ? '30 days' : `${systemMonitorHours} hours`} · updated ${age(current.timestamp)}`;
+    : `${monitorRangeLabel()} · updated ${age(current.timestamp)}`;
   const badge = $('monitor-level');
   badge.className = `monitor-level ${level}`;
   badge.textContent = level.toUpperCase();
@@ -708,10 +746,18 @@ function renderSystemMonitor(response) {
     .map((finding) => `<li>${esc(finding)}</li>`)
     .join('');
 
+  const thermalFacts = currentThermals.length
+    ? currentThermals.map((sensor) => [
+        thermalSensorLabel(sensor),
+        Number.isFinite(sensor.temperature_c)
+          ? `${Number(sensor.temperature_c).toFixed(1)} °C`
+          : '—',
+      ])
+    : [['CPU / SoC temperature', Number.isFinite(current.temperature_c) ? `${Number(current.temperature_c).toFixed(1)} °C` : '—']];
   const currentFacts = [
     ['CPU now', Number.isFinite(current.cpu_percent) ? `${Number(current.cpu_percent).toFixed(1)}%` : '—'],
     ['Memory now', Number.isFinite(current.memory?.used_percent) ? `${Number(current.memory.used_percent).toFixed(1)}%` : '—'],
-    ['Temperature', Number.isFinite(current.temperature_c) ? `${Number(current.temperature_c).toFixed(1)} °C` : '—'],
+    ...thermalFacts,
     ['Arm clock', Number.isFinite(current.arm_mhz) ? `${Number(current.arm_mhz).toFixed(0)} MHz` : '—'],
     ['Firmware', current.throttle?.hex || '—'],
     ['Active flags', current.throttle?.current?.length ? current.throttle.current.join(', ') : 'none'],
@@ -725,6 +771,19 @@ function renderSystemMonitor(response) {
     .map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`)
     .join('');
 
+  const throttleFlags = throttling.flags || [],
+    frequencyPolicies = current.cpu_frequency_policies || [];
+  $('monitor-throttling').innerHTML = `<div class="monitor-throttle-summary">
+    <div><span>Firmware word</span><strong>${esc(throttling.hex || 'No data')}</strong></div>
+    <div><span>Active now</span><strong>${throttling.active?.length ? esc(throttling.active.map((flag) => flag.replaceAll('_', ' ')).join(', ')) : throttling.available ? 'None' : '—'}</strong></div>
+    <div><span>Seen since boot</span><strong>${throttling.occurred_since_boot?.length ? esc(throttling.occurred_since_boot.map((flag) => flag.replaceAll('_', ' ')).join(', ')) : throttling.available ? 'None' : '—'}</strong></div>
+  </div><div class="monitor-throttle-flags">
+    ${throttleFlags.map((flag) => {
+      const state = flag.active ? 'active' : flag.occurred_since_boot ? 'occurred' : 'clear';
+      return `<div class="monitor-throttle-flag ${state}"><span><strong>${esc(flag.label)}</strong><small>${flag.active_transitions} start${flag.active_transitions === 1 ? '' : 's'} · ${flag.cleared_transitions} clear${flag.cleared_transitions === 1 ? '' : 's'} in ${monitorRangeLabel()}</small></span><b>${flag.active ? 'ACTIVE' : flag.occurred_since_boot ? 'SEEN THIS BOOT' : 'CLEAR'}</b></div>`;
+    }).join('') || '<div class="monitor-io-empty">Firmware throttling data unavailable</div>'}
+  </div>${frequencyPolicies.length ? `<div class="monitor-frequency-policies">${frequencyPolicies.map((policy) => `<div><span>${esc(policy.policy)} · cores ${esc(cpuListLabel(policy.cpu_ids) || '—')}</span><strong>${Number.isFinite(policy.current_mhz) ? `${Number(policy.current_mhz).toFixed(0)} MHz` : '—'} / ${Number.isFinite(policy.maximum_mhz) ? `${Number(policy.maximum_mhz).toFixed(0)} MHz max` : 'max —'}</strong><small>${esc(policy.governor || 'governor unknown')}</small></div>`).join('')}</div>` : ''}`;
+
   const interfaces = current.network_io?.interfaces || [],
     devices = current.disk_io?.devices || [];
   $('monitor-io-details').innerHTML = `<div class="monitor-io-group"><h4>Network</h4>
@@ -733,6 +792,15 @@ function renderSystemMonitor(response) {
     ${devices.map((item) => `<div class="monitor-io-row"><span><strong>${esc(item.labels?.length ? item.labels.join(', ') : item.name)}</strong><small>${esc(item.name)} · ${Number.isFinite(item.busy_percent) ? `${Number(item.busy_percent).toFixed(1)}% busy` : 'busy —'}</small></span><span>R ${formatRate(item.read_bytes_per_second)}<br>W ${formatRate(item.write_bytes_per_second)}</span></div>`).join('') || '<div class="monitor-io-empty">No disks sampled</div>'}
   </div>`;
 
+  const thermalPeakDefinitions = (peaks.thermal_sensors || []).map((sensor) => [
+    thermalSensorLabel(sensor),
+    sensor,
+    'temperature',
+    false,
+  ]);
+  if (!thermalPeakDefinitions.length) {
+    thermalPeakDefinitions.push(['CPU / SoC temperature', peaks.temperature_c, 'temperature', false]);
+  }
   const peakDefinitions = [
     ['CPU', peaks.cpu_percent, 'percent', true],
     ['Memory', peaks.memory_percent, 'percent', false],
@@ -742,7 +810,7 @@ function renderSystemMonitor(response) {
     ['Disk write', peaks.disk_write_bytes_per_second, 'rate', false],
     ['Disk busy', peaks.disk_busy_percent, 'percent', false],
     ['Load · 1m', peaks.load1, 'number', false],
-    ['Temperature', peaks.temperature_c, 'temperature', false],
+    ...thermalPeakDefinitions,
     ['Swap', peaks.swap_percent, 'percent', false],
     ['Root used', peaks.root_used_percent, 'percent', false],
     ['Minimum Arm clock', peaks.minimum_arm_mhz, 'clock', false],
@@ -758,6 +826,14 @@ function renderSystemMonitor(response) {
     })
     .join('');
 
+  const processes = response.processes || {},
+    offenders = processes.repeat_offenders || [];
+  $('monitor-process-range').textContent = `${monitorRangeLabel()} · ${processes.rollup_count || 0} minute rollups`;
+  $('monitor-process-current').innerHTML = `<div><h4>CPU now</h4>${monitorProcessList(processes.current_cpu, true)}</div><div><h4>Memory now</h4>${monitorProcessList(processes.current_memory)}</div>`;
+  $('monitor-offenders').innerHTML = offenders
+    .map((process) => `<article><div><strong>${esc(process.name)}</strong><small>last peak ${esc(eventTime(process.last_seen_at))}${process.pid_count > 1 ? ` · ${process.pid_count} PIDs` : ''}</small></div><span><b>${process.peak_count}</b> peak lead${process.peak_count === 1 ? '' : 's'}<small>${process.cpu_peak_count} CPU · ${process.memory_peak_count} memory${Number.isFinite(process.max_cpu_percent) ? ` · ${Number(process.max_cpu_percent).toFixed(1)}% max` : ''}${Number.isFinite(process.max_rss_bytes) ? ` · ${formatBytes(process.max_rss_bytes)} RSS` : ''}</small></span></article>`)
+    .join('') || '<div class="speaker-loading">No retained process peaks in this range</div>';
+
   const nextSteps = diagnosis.next_steps || [];
   $('monitor-next').hidden = nextSteps.length === 0;
   $('monitor-next-steps').innerHTML = nextSteps.map((step) => `<li>${esc(step)}</li>`).join('');
@@ -771,7 +847,7 @@ function renderSystemMonitor(response) {
           <strong>${esc(event.summary)}</strong><p>${esc(event.message)}</p>${monitorEventState(event)}
         </article>`,
       )
-      .join('') || '<div class="speaker-loading">No events in this range</div>';
+      .join('') || `<div class="speaker-loading">No events in range (${monitorRangeLabel()})</div>`;
   document.querySelectorAll('[data-monitor-hours]').forEach((button) => {
     button.classList.toggle('active', Number(button.dataset.monitorHours) === systemMonitorHours);
     button.disabled = false;
@@ -785,6 +861,8 @@ function renderSystemMonitorUnavailable(message) {
   $('system-monitor-summary').textContent = 'System monitor unavailable';
   $('system-monitor-power').textContent = '—';
   $('system-monitor-cpu').textContent = '—';
+  $('system-monitor-temperature').textContent = '—';
+  $('system-monitor-throttle').textContent = '—';
   $('system-monitor-memory').textContent = '—';
   $('system-monitor-network').textContent = '—';
   $('system-monitor-disk').textContent = '—';
@@ -792,6 +870,9 @@ function renderSystemMonitorUnavailable(message) {
   $('system-monitor-panel').setAttribute('aria-busy', 'false');
   $('monitor-events').innerHTML = `<div class="speaker-loading">${esc(message)}</div>`;
   $('monitor-io-details').innerHTML = `<div class="speaker-loading">${esc(message)}</div>`;
+  $('monitor-throttling').innerHTML = `<div class="speaker-loading">${esc(message)}</div>`;
+  $('monitor-process-current').innerHTML = `<div class="speaker-loading">${esc(message)}</div>`;
+  $('monitor-offenders').innerHTML = `<div class="speaker-loading">${esc(message)}</div>`;
   document.querySelectorAll('[data-monitor-hours]').forEach((button) => {
     button.disabled = false;
   });

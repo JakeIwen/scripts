@@ -77,6 +77,104 @@ def read_number(path, divisor=1.0):
         return None
 
 
+def parse_cpu_list(value):
+    """Expand Linux CPU-list syntax such as ``0-3,6`` into integer IDs."""
+    cpus = []
+    for part in re.split(r"[\s,]+", str(value or "")):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            if "-" in part:
+                start, end = (int(item) for item in part.split("-", 1))
+                if end < start:
+                    continue
+                cpus.extend(range(start, end + 1))
+            else:
+                cpus.append(int(part))
+        except ValueError:
+            continue
+    return sorted(set(cpus))
+
+
+def collect_thermal_sensors(sys_root="/sys"):
+    """Return every readable Linux thermal zone without inventing per-core data."""
+    thermal_root = os.path.join(sys_root, "class", "thermal")
+    try:
+        zones = sorted(
+            (
+                name
+                for name in os.listdir(thermal_root)
+                if re.fullmatch(r"thermal_zone\d+", name)
+            ),
+            key=lambda name: int(name.removeprefix("thermal_zone")),
+        )
+    except OSError:
+        return []
+
+    online_cpus = parse_cpu_list(
+        read_text(os.path.join(sys_root, "devices", "system", "cpu", "online"), "")
+    )
+    sensors = []
+    for zone in zones:
+        zone_root = os.path.join(thermal_root, zone)
+        temperature = read_number(os.path.join(zone_root, "temp"), divisor=1000)
+        if temperature is None or not math.isfinite(temperature):
+            continue
+        sensor_type = read_text(os.path.join(zone_root, "type"), zone) or zone
+        sensor = {
+            "zone": zone,
+            "type": sensor_type,
+            "temperature_c": round(temperature, 2),
+        }
+        if "cpu" in sensor_type.lower() and online_cpus:
+            # Raspberry Pi exposes one cpu-thermal package/SoC sensor shared by
+            # all cores. Listing its scope is more accurate than duplicating the
+            # same reading and calling those values per-core temperatures.
+            sensor["cpu_ids"] = online_cpus
+            sensor["shared"] = len(online_cpus) > 1
+        sensors.append(sensor)
+    return sensors
+
+
+def collect_cpu_frequency_policies(sys_root="/sys"):
+    """Return live cpufreq policy state useful when interpreting throttling."""
+    cpu_root = os.path.join(sys_root, "devices", "system", "cpu", "cpufreq")
+    try:
+        policies = sorted(
+            (
+                name
+                for name in os.listdir(cpu_root)
+                if re.fullmatch(r"policy\d+", name)
+            ),
+            key=lambda name: int(name.removeprefix("policy")),
+        )
+    except OSError:
+        return []
+
+    result = []
+    for policy in policies:
+        policy_root = os.path.join(cpu_root, policy)
+
+        def mhz(filename):
+            value = read_number(os.path.join(policy_root, filename))
+            return round(value / 1000, 2) if value is not None else None
+
+        result.append(
+            {
+                "policy": policy,
+                "cpu_ids": parse_cpu_list(
+                    read_text(os.path.join(policy_root, "related_cpus"), "")
+                ),
+                "current_mhz": mhz("scaling_cur_freq"),
+                "minimum_mhz": mhz("cpuinfo_min_freq"),
+                "maximum_mhz": mhz("cpuinfo_max_freq"),
+                "governor": read_text(os.path.join(policy_root, "scaling_governor")),
+            }
+        )
+    return result
+
+
 def run_text(args, timeout=3):
     try:
         result = subprocess.run(
@@ -905,10 +1003,14 @@ class ResourceSampler:
             uptime = float(uptime_raw[0])
         except (IndexError, ValueError):
             uptime = None
-        temperature = read_number(
-            os.path.join(self.sys_root, "class", "thermal", "thermal_zone0", "temp"),
-            divisor=1000,
+        thermal_sensors = collect_thermal_sensors(self.sys_root)
+        cpu_sensors = [
+            sensor for sensor in thermal_sensors if "cpu" in sensor["type"].lower()
+        ]
+        primary_temperature = (cpu_sensors or thermal_sensors or [{}])[0].get(
+            "temperature_c"
         )
+        frequency_policies = collect_cpu_frequency_policies(self.sys_root)
         arm_khz = read_number(
             os.path.join(
                 self.sys_root,
@@ -939,8 +1041,12 @@ class ResourceSampler:
                 "used_bytes": memory["swap_used_bytes"],
                 "total_bytes": memory["swap_total_bytes"],
             },
-            "temperature_c": round(temperature, 2) if temperature is not None else None,
+            # Keep the legacy primary value for thresholds and old dashboard
+            # clients while also reporting every thermal zone with its scope.
+            "temperature_c": primary_temperature,
+            "thermal_sensors": thermal_sensors,
             "arm_mhz": round(arm_khz / 1000, 2) if arm_khz is not None else None,
+            "cpu_frequency_policies": frequency_policies,
             "throttle": throttle,
             "root_filesystem": self._root_usage(),
             "top_cpu": top_cpu,
@@ -1042,6 +1148,50 @@ class RollupAccumulator:
                     max(eligible, key=lambda item: item[device_key]) if eligible else None
                 )
             metrics[name] = entry
+        thermal_metrics = []
+        sensor_keys = sorted(
+            {
+                (sensor.get("zone"), sensor.get("type"))
+                for sample in self.samples
+                for sensor in sample.get("thermal_sensors", ())
+                if sensor.get("zone") and sensor.get("type")
+            }
+        )
+        for zone, sensor_type in sensor_keys:
+            candidates = []
+            cpu_ids = []
+            shared = False
+            for sample in self.samples:
+                sensor = next(
+                    (
+                        item
+                        for item in sample.get("thermal_sensors", ())
+                        if item.get("zone") == zone and item.get("type") == sensor_type
+                    ),
+                    None,
+                )
+                value = sensor.get("temperature_c") if sensor else None
+                if isinstance(value, (int, float)) and math.isfinite(value):
+                    candidates.append((value, sample["timestamp"]))
+                    cpu_ids = sensor.get("cpu_ids") or cpu_ids
+                    shared = bool(sensor.get("shared", shared))
+            if not candidates:
+                continue
+            peak, at = max(candidates, key=lambda pair: pair[0])
+            thermal_metrics.append(
+                {
+                    "zone": zone,
+                    "type": sensor_type,
+                    "cpu_ids": cpu_ids,
+                    "shared": shared,
+                    "peak": round(peak, 2),
+                    "average": round(
+                        statistics.fmean(value for value, _timestamp in candidates), 2
+                    ),
+                    "at": at,
+                }
+            )
+        metrics["thermal_sensors"] = thermal_metrics
         last = self.samples[-1]
         rollup = {
             "period_start": self.period_start,
@@ -1479,10 +1629,17 @@ def event_public(row, include_state=True):
     return event
 
 
+def rollup_row_and_metrics(item):
+    """Accept a DB row or a predecoded ``(row, metrics)`` report entry."""
+    if isinstance(item, tuple) and len(item) == 2 and isinstance(item[1], dict):
+        return item
+    return item, decode_row_json(item, "metrics_json") or {}
+
+
 def best_rollup_metric(rows, metric_name, prefer_min=False):
     candidates = []
-    for row in rows:
-        metrics = decode_row_json(row, "metrics_json") or {}
+    for item in rows:
+        _row, metrics = rollup_row_and_metrics(item)
         entry = metrics.get(metric_name) or {}
         value = entry.get("peak")
         if isinstance(value, (int, float)):
@@ -1495,6 +1652,150 @@ def best_rollup_metric(rows, metric_name, prefer_min=False):
         if extra in entry:
             result[extra] = entry.get(extra)
     return result
+
+
+def best_thermal_sensor_metrics(rows, current=None):
+    """Combine per-zone peaks stored in rollup JSON with the live sample."""
+    sensors = {}
+
+    def consider(sensor, value_key, timestamp_key):
+        value = sensor.get(value_key)
+        if not isinstance(value, (int, float)) or not math.isfinite(value):
+            return
+        key = (sensor.get("zone"), sensor.get("type"))
+        if not all(key):
+            return
+        candidate = {
+            "zone": key[0],
+            "type": key[1],
+            "cpu_ids": sensor.get("cpu_ids") or [],
+            "shared": bool(sensor.get("shared")),
+            "value": round(value, 2),
+            "at": sensor.get(timestamp_key),
+        }
+        if sensor.get("average") is not None:
+            candidate["average"] = sensor.get("average")
+        if key not in sensors or value > sensors[key]["value"]:
+            sensors[key] = candidate
+
+    for item in rows:
+        _row, metrics = rollup_row_and_metrics(item)
+        for sensor in metrics.get("thermal_sensors") or ():
+            if isinstance(sensor, dict):
+                consider(sensor, "peak", "at")
+    if isinstance(current, dict):
+        for sensor in current.get("thermal_sensors") or ():
+            if not isinstance(sensor, dict):
+                continue
+            live = dict(sensor)
+            live["at"] = current.get("timestamp")
+            consider(live, "temperature_c", "at")
+    return sorted(sensors.values(), key=lambda sensor: (sensor["type"], sensor["zone"]))
+
+
+def build_process_report(rows, current=None, limit=12):
+    """Aggregate one-minute CPU/memory peak leaders across process restarts."""
+    offenders = {}
+    for item in rows:
+        row, metrics = rollup_row_and_metrics(item)
+        for resource in ("cpu", "memory"):
+            metric = metrics.get(resource) or {}
+            process = metric.get("top_process")
+            if not isinstance(process, dict):
+                continue
+            name = str(process.get("name") or process.get("command") or "").strip()
+            if not name:
+                continue
+            entry = offenders.setdefault(
+                name,
+                {
+                    "name": name,
+                    "cpu_peak_count": 0,
+                    "memory_peak_count": 0,
+                    "max_cpu_percent": None,
+                    "max_rss_bytes": None,
+                    "last_seen_at": None,
+                    "pids": set(),
+                },
+            )
+            entry[f"{resource}_peak_count"] += 1
+            timestamp = metric.get("at") or row["period_end"]
+            if entry["last_seen_at"] is None or timestamp > entry["last_seen_at"]:
+                entry["last_seen_at"] = timestamp
+                entry["latest_pid"] = process.get("pid")
+            if isinstance(process.get("pid"), int):
+                entry["pids"].add(process["pid"])
+            cpu_percent = process.get("cpu_percent")
+            if isinstance(cpu_percent, (int, float)) and (
+                entry["max_cpu_percent"] is None
+                or cpu_percent > entry["max_cpu_percent"]
+            ):
+                entry["max_cpu_percent"] = cpu_percent
+            rss_bytes = process.get("rss_bytes")
+            if isinstance(rss_bytes, (int, float)) and (
+                entry["max_rss_bytes"] is None or rss_bytes > entry["max_rss_bytes"]
+            ):
+                entry["max_rss_bytes"] = rss_bytes
+
+    public = []
+    for entry in offenders.values():
+        item = {key: value for key, value in entry.items() if key != "pids"}
+        item["pid_count"] = len(entry["pids"])
+        item["peak_count"] = item["cpu_peak_count"] + item["memory_peak_count"]
+        public.append(item)
+    public.sort(
+        key=lambda item: (
+            -item["peak_count"],
+            -(item["max_cpu_percent"] or 0),
+            -(item["max_rss_bytes"] or 0),
+            item["name"].lower(),
+        )
+    )
+    current = current if isinstance(current, dict) else {}
+    return {
+        "rollup_count": len(rows),
+        "current_cpu": (current.get("top_cpu") or [])[:5],
+        "current_memory": (current.get("top_memory") or [])[:5],
+        "repeat_offenders": public[: max(1, min(int(limit), 50))],
+    }
+
+
+def build_throttling_report(current, counts, events):
+    throttle = current.get("throttle") if isinstance(current, dict) else None
+    throttle = throttle if isinstance(throttle, dict) else {}
+    active = set(throttle.get("current") or ())
+    occurred = set(throttle.get("occurred") or ())
+    last_by_kind = {}
+    for event in events:
+        kind = event.get("kind")
+        if kind and kind.startswith("firmware_"):
+            last_by_kind[kind] = event.get("timestamp")
+    flags = []
+    for _bit, key, label in THROTTLE_FLAGS:
+        active_kind = f"firmware_{key}_active"
+        cleared_kind = f"firmware_{key}_cleared"
+        occurred_kind = f"firmware_{key}_occurred"
+        flags.append(
+            {
+                "key": key,
+                "label": label,
+                "active": key in active,
+                "occurred_since_boot": key in occurred,
+                "active_transitions": counts.get(active_kind, 0),
+                "cleared_transitions": counts.get(cleared_kind, 0),
+                "sticky_observations": counts.get(occurred_kind, 0),
+                "last_active_at": last_by_kind.get(active_kind),
+                "last_cleared_at": last_by_kind.get(cleared_kind),
+            }
+        )
+    return {
+        "available": bool(throttle),
+        "raw": throttle.get("raw"),
+        "hex": throttle.get("hex"),
+        "active": sorted(active),
+        "occurred_since_boot": sorted(occurred),
+        "flags": flags,
+    }
 
 
 def power_episodes(events):
@@ -1911,6 +2212,18 @@ def build_diagnosis(events, current):
                 "Treat USB errors without undervoltage as data-path/device evidence; treat undervoltage without USB activity as Pi input-power-path evidence.",
             )
         )
+    elif current_flags:
+        level = (
+            "critical"
+            if current_flags.intersection(("under_voltage", "throttled"))
+            else "warning"
+        )
+        headline = "Firmware throttling or power limiting is active"
+        findings.append(
+            "The live firmware word reports active limiting: "
+            + ", ".join(sorted(current_flags))
+            + "."
+        )
     elif "under_voltage" in occurred_flags or "throttled" in occurred_flags:
         level = "warning"
         headline = "Firmware has sticky power/throttle history"
@@ -1976,7 +2289,11 @@ def build_report(store, hours=24, limit=100, now=None):
     ).fetchall()
     # Diagnosis and counts must use every event in range, independent of display limit.
     all_event_rows = store.connection.execute(
-        "SELECT * FROM events WHERE timestamp >= ? ORDER BY timestamp ASC", (since,)
+        """
+        SELECT id, timestamp, boot_id, category, kind, severity, source, summary, message
+        FROM events WHERE timestamp >= ? ORDER BY timestamp ASC
+        """,
+        (since,),
     ).fetchall()
     events = [event_public(row) for row in event_rows]
     all_events = [event_public(row, include_state=False) for row in all_event_rows]
@@ -1984,23 +2301,29 @@ def build_report(store, hours=24, limit=100, now=None):
         "SELECT * FROM resource_rollups WHERE period_end >= ? ORDER BY period_end ASC",
         (since,),
     ).fetchall()
+    # A rollup's JSON contains every metric. Decode it once rather than once per
+    # peak, thermal zone, and process aggregation; this matters on the Pi for
+    # 7- and 30-day reports.
+    decoded_rollups = [
+        (row, decode_row_json(row, "metrics_json") or {}) for row in rollup_rows
+    ]
     current = store.get_meta("current")
     counts = collections.Counter(event["kind"] for event in all_events)
     severity = collections.Counter(event["severity"] for event in all_events)
     category = collections.Counter(event["category"] for event in all_events)
     peaks = {
-        "cpu_percent": best_rollup_metric(rollup_rows, "cpu"),
-        "memory_percent": best_rollup_metric(rollup_rows, "memory"),
-        "swap_percent": best_rollup_metric(rollup_rows, "swap"),
-        "load1": best_rollup_metric(rollup_rows, "load1"),
-        "temperature_c": best_rollup_metric(rollup_rows, "temperature"),
-        "root_used_percent": best_rollup_metric(rollup_rows, "root_used"),
-        "minimum_arm_mhz": best_rollup_metric(rollup_rows, "arm_mhz", prefer_min=True),
-        "network_rx_bytes_per_second": best_rollup_metric(rollup_rows, "network_rx"),
-        "network_tx_bytes_per_second": best_rollup_metric(rollup_rows, "network_tx"),
-        "disk_read_bytes_per_second": best_rollup_metric(rollup_rows, "disk_read"),
-        "disk_write_bytes_per_second": best_rollup_metric(rollup_rows, "disk_write"),
-        "disk_busy_percent": best_rollup_metric(rollup_rows, "disk_busy"),
+        "cpu_percent": best_rollup_metric(decoded_rollups, "cpu"),
+        "memory_percent": best_rollup_metric(decoded_rollups, "memory"),
+        "swap_percent": best_rollup_metric(decoded_rollups, "swap"),
+        "load1": best_rollup_metric(decoded_rollups, "load1"),
+        "temperature_c": best_rollup_metric(decoded_rollups, "temperature"),
+        "root_used_percent": best_rollup_metric(decoded_rollups, "root_used"),
+        "minimum_arm_mhz": best_rollup_metric(decoded_rollups, "arm_mhz", prefer_min=True),
+        "network_rx_bytes_per_second": best_rollup_metric(decoded_rollups, "network_rx"),
+        "network_tx_bytes_per_second": best_rollup_metric(decoded_rollups, "network_tx"),
+        "disk_read_bytes_per_second": best_rollup_metric(decoded_rollups, "disk_read"),
+        "disk_write_bytes_per_second": best_rollup_metric(decoded_rollups, "disk_write"),
+        "disk_busy_percent": best_rollup_metric(decoded_rollups, "disk_busy"),
     }
     current_age = None
     if isinstance(current, dict) and isinstance(current.get("timestamp"), (int, float)):
@@ -2076,6 +2399,26 @@ def build_report(store, hours=24, limit=100, now=None):
                         max(devices, key=lambda item: item[device_key]) if devices else None
                     )
 
+    peaks["thermal_sensors"] = best_thermal_sensor_metrics(decoded_rollups, current)
+    legacy_temperature = peaks["temperature_c"]
+    if peaks["thermal_sensors"] and legacy_temperature.get("value") is not None:
+        primary_sensor = next(
+            (
+                sensor
+                for sensor in peaks["thermal_sensors"]
+                if "cpu" in sensor["type"].lower()
+            ),
+            peaks["thermal_sensors"][0],
+        )
+        if legacy_temperature["value"] > primary_sensor["value"]:
+            primary_sensor.update(
+                {
+                    "value": legacy_temperature["value"],
+                    "at": legacy_temperature.get("at"),
+                    "average": legacy_temperature.get("average"),
+                }
+            )
+
     diagnosis = build_diagnosis(all_events, current)
     return {
         "ok": True,
@@ -2096,6 +2439,8 @@ def build_report(store, hours=24, limit=100, now=None):
             "by_kind": dict(counts),
         },
         "peaks": peaks,
+        "throttling": build_throttling_report(current or {}, counts, all_events),
+        "processes": build_process_report(decoded_rollups, current),
         "diagnosis": diagnosis,
         "events": events,
     }

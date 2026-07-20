@@ -26,6 +26,58 @@ class ThrottleDecodeTests(unittest.TestCase):
         self.assertIsNone(monitor.parse_throttled("not available"))
 
 
+class ThermalDiscoveryTests(unittest.TestCase):
+    @staticmethod
+    def write(path, value):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(str(value))
+
+    def test_reports_shared_cpu_sensor_and_frequency_policy_without_fake_core_temps(self):
+        with tempfile.TemporaryDirectory() as sys_root:
+            self.write(
+                os.path.join(sys_root, "class", "thermal", "thermal_zone0", "type"),
+                "cpu-thermal\n",
+            )
+            self.write(
+                os.path.join(sys_root, "class", "thermal", "thermal_zone0", "temp"),
+                "97873\n",
+            )
+            self.write(
+                os.path.join(sys_root, "class", "thermal", "thermal_zone1", "type"),
+                "usb-controller\n",
+            )
+            self.write(
+                os.path.join(sys_root, "class", "thermal", "thermal_zone1", "temp"),
+                "51250\n",
+            )
+            self.write(
+                os.path.join(sys_root, "devices", "system", "cpu", "online"),
+                "0-3\n",
+            )
+            policy = os.path.join(
+                sys_root, "devices", "system", "cpu", "cpufreq", "policy0"
+            )
+            self.write(os.path.join(policy, "related_cpus"), "0 1 2 3\n")
+            self.write(os.path.join(policy, "scaling_cur_freq"), "600000\n")
+            self.write(os.path.join(policy, "cpuinfo_min_freq"), "600000\n")
+            self.write(os.path.join(policy, "cpuinfo_max_freq"), "1500000\n")
+            self.write(os.path.join(policy, "scaling_governor"), "ondemand\n")
+
+            sensors = monitor.collect_thermal_sensors(sys_root)
+            policies = monitor.collect_cpu_frequency_policies(sys_root)
+
+        self.assertEqual(len(sensors), 2)
+        self.assertEqual(sensors[0]["temperature_c"], 97.87)
+        self.assertEqual(sensors[0]["cpu_ids"], [0, 1, 2, 3])
+        self.assertTrue(sensors[0]["shared"])
+        self.assertNotIn("cpu_ids", sensors[1])
+        self.assertEqual(policies[0]["current_mhz"], 600)
+        self.assertEqual(policies[0]["maximum_mhz"], 1500)
+        self.assertEqual(policies[0]["cpu_ids"], [0, 1, 2, 3])
+        self.assertEqual(policies[0]["governor"], "ondemand")
+
+
 class KernelClassificationTests(unittest.TestCase):
     def test_classifies_power_usb_storage_and_kernel_faults(self):
         cases = {
@@ -309,6 +361,108 @@ class StoreAndDiagnosisTests(unittest.TestCase):
         self.assertTrue(report["ok"])
         self.assertTrue(report["status"]["available"])
 
+    def test_report_tracks_repeat_process_peak_leaders_and_throttle_transitions(self):
+        for index in range(3):
+            self.store.insert_rollup(
+                {
+                    "period_start": self.now - 180 + index * 60,
+                    "period_end": self.now - 121 + index * 60,
+                    "boot_id": "boot-one",
+                    "sample_count": 12,
+                    "cpu_peak": 70 + index,
+                    "memory_peak": 40,
+                    "swap_peak": 0,
+                    "load1_peak": 1,
+                    "temperature_peak": 80 + index,
+                    "root_used_peak": 50,
+                    "arm_mhz_min": 600,
+                    "metrics": {
+                        "cpu": {
+                            "peak": 70 + index,
+                            "at": self.now - 150 + index * 60,
+                            "top_process": {
+                                "name": "smbd",
+                                "pid": 100 + index,
+                                "cpu_percent": 50 + index,
+                                "rss_bytes": 20_000_000,
+                            },
+                        },
+                        "memory": {
+                            "peak": 40,
+                            "at": self.now - 145 + index * 60,
+                            "top_process": {
+                                "name": "hass",
+                                "pid": 200,
+                                "rss_bytes": 300_000_000 + index,
+                            },
+                        },
+                        "thermal_sensors": [
+                            {
+                                "zone": "thermal_zone0",
+                                "type": "cpu-thermal",
+                                "cpu_ids": [0, 1, 2, 3],
+                                "shared": True,
+                                "peak": 80 + index,
+                                "average": 78,
+                                "at": self.now - 140 + index * 60,
+                            }
+                        ],
+                    },
+                }
+            )
+        self.insert(
+            self.now - 100,
+            "firmware_throttled_active",
+            category="throttle",
+            severity="critical",
+        )
+        self.insert(
+            self.now - 50,
+            "firmware_throttled_cleared",
+            category="throttle",
+            severity="info",
+        )
+        self.store.set_meta(
+            "current",
+            {
+                "timestamp": self.now,
+                "top_cpu": [],
+                "top_memory": [],
+                "thermal_sensors": [
+                    {
+                        "zone": "thermal_zone0",
+                        "type": "cpu-thermal",
+                        "cpu_ids": [0, 1, 2, 3],
+                        "shared": True,
+                        "temperature_c": 79,
+                    }
+                ],
+                "throttle": {
+                    "raw": 0x40004,
+                    "hex": "0x40004",
+                    "current": ["throttled"],
+                    "occurred": ["throttled"],
+                },
+            },
+        )
+
+        report = monitor.build_report(self.store, hours=1, now=self.now)
+
+        self.assertEqual(report["processes"]["repeat_offenders"][0]["name"], "smbd")
+        offenders = {item["name"]: item for item in report["processes"]["repeat_offenders"]}
+        self.assertEqual(offenders["smbd"]["cpu_peak_count"], 3)
+        self.assertEqual(offenders["smbd"]["pid_count"], 3)
+        self.assertEqual(offenders["hass"]["memory_peak_count"], 3)
+        self.assertEqual(report["peaks"]["thermal_sensors"][0]["value"], 82)
+        throttled = next(
+            item for item in report["throttling"]["flags"] if item["key"] == "throttled"
+        )
+        self.assertEqual(report["diagnosis"]["level"], "critical")
+        self.assertIn("active", report["diagnosis"]["headline"].lower())
+        self.assertTrue(throttled["active"])
+        self.assertEqual(throttled["active_transitions"], 1)
+        self.assertEqual(throttled["cleared_transitions"], 1)
+
 
 class RollupTests(unittest.TestCase):
     @staticmethod
@@ -321,6 +475,15 @@ class RollupTests(unittest.TestCase):
             "swap": {"used_percent": 0},
             "load": {"1m": cpu / 25},
             "temperature_c": temperature,
+            "thermal_sensors": [
+                {
+                    "zone": "thermal_zone0",
+                    "type": "cpu-thermal",
+                    "cpu_ids": [0, 1, 2, 3],
+                    "shared": True,
+                    "temperature_c": temperature,
+                }
+            ],
             "root_filesystem": {"used_percent": 45},
             "arm_mhz": 1500 - cpu,
             "network_io": {
@@ -363,6 +526,8 @@ class RollupTests(unittest.TestCase):
         self.assertEqual(rollup["metrics"]["cpu"]["at"], 160)
         self.assertEqual(rollup["metrics"]["cpu"]["top_process"]["name"], "worker")
         self.assertEqual(rollup["temperature_peak"], 67)
+        self.assertEqual(rollup["metrics"]["thermal_sensors"][0]["peak"], 67)
+        self.assertTrue(rollup["metrics"]["thermal_sensors"][0]["shared"])
         self.assertEqual(rollup["arm_mhz_min"], 1408)
         self.assertEqual(rollup["metrics"]["network_rx"]["peak"], 9200)
         self.assertEqual(rollup["metrics"]["network_rx"]["top_interface"]["name"], "eth0")

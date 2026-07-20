@@ -55,6 +55,8 @@ scp -q pi/sync_scripts.sh \
   "pi@vanpi.lan:$dashboard_test_dir/pi/"
 scp -q pi/scripts/ntfy_send.sh \
   "pi@vanpi.lan:$dashboard_test_dir/pi/scripts/"
+scp -q pi/scripts/usb_watch.py \
+  "pi@vanpi.lan:$dashboard_test_dir/pi/scripts/"
 
 ssh -o BatchMode=yes pi@vanpi.lan \
   "cd '$dashboard_test_dir' && \

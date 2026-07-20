@@ -13,16 +13,32 @@ It does not reset USB devices or change power, clocks, services, or CAN state.
   disconnect, USB over-current, storage I/O, OOM, watchdog, hung-task, panic,
   and kernel-warning events.
 - Five-second resource observations summarized into one-minute peak rollups:
-  total CPU, memory, swap, load, SoC temperature, root usage, Arm clock,
+  total CPU, memory, swap, load, every readable Linux thermal zone, root usage, Arm clock,
   physical-interface network receive/transmit rates, whole-disk read/write
   rates, IOPS, and disk busy time. Rollups retain the top process, interface,
   or disk at each peak.
+- Live CPU-frequency policies (current/minimum/maximum clock, related cores,
+  and governor) are shown alongside the firmware throttle word. The dashboard
+  separates flags active now, sticky flags seen since boot, and start/clear
+  transitions in the selected time range.
 - A live state snapshot on new events: resource state, top processes, USB sysfs
   topology, mounted local filesystems, firmware flags, and failed systemd units.
 
 Process command-line arguments are deliberately not stored because they may
 contain credentials or private URLs; peak-process evidence contains only the
 kernel process name, PID, CPU percentage, and RSS.
+
+The dashboard groups the CPU and memory leader from every one-minute rollup by
+kernel process name. This makes repeat peak leaders visible across restarts
+without collecting command-line arguments. It also shows the five current CPU
+and memory leaders. A leader count means that the process was busiest at a
+sampled peak; it does not by itself prove that the process is faulty.
+
+On the current Raspberry Pi 4 kernel, `cpu-thermal` is one shared CPU/SoC sensor
+covering cores 0-3. Linux does not expose an independent temperature for each
+core, so the UI labels the sensor and its shared scope rather than duplicating
+one value four times. If additional thermal zones appear later, the collector
+and dashboard report each zone separately.
 
 At startup the daemon imports relevant messages from the current boot. Those
 older events are labeled as journal backfill because a full state snapshot was

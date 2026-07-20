@@ -54,6 +54,8 @@
       <span class="status-lines">
         <span class="status-line"><span>Power</span><span id="system-monitor-power">Checking…</span></span>
         <span class="status-line"><span>CPU peak</span><span id="system-monitor-cpu">—</span></span>
+        <span class="status-line"><span>CPU / SoC temp</span><span id="system-monitor-temperature">—</span></span>
+        <span class="status-line"><span>Throttling</span><span id="system-monitor-throttle">Checking…</span></span>
         <span class="status-line"><span>Memory peak</span><span id="system-monitor-memory">—</span></span>
         <span class="status-line"><span>Network</span><span id="system-monitor-network">—</span></span>
         <span class="status-line"><span>Disk I/O</span><span id="system-monitor-disk">—</span></span>
@@ -142,15 +144,17 @@
     <div class="sheet-grabber"></div><div class="sheet-head"><h2 id="system-monitor-title">System Health</h2><span class="policy-sheet-status" id="system-monitor-status">Loading…</span><button class="sheet-close" id="system-monitor-close" aria-label="Close system health">&times;</button></div>
     <p class="sheet-help">Passive Pi power, throttling, USB, storage, kernel, and resource evidence. Firmware history resets on reboot.</p>
     <div class="monitor-ranges" role="group" aria-label="System health time range">
-      <button data-monitor-hours="6" type="button">6 hours</button><button class="active" data-monitor-hours="24" type="button">24 hours</button><button data-monitor-hours="168" type="button">7 days</button><button data-monitor-hours="720" type="button">30 days</button>
+      <button class="active" data-monitor-hours="6" type="button">6 hours</button><button data-monitor-hours="24" type="button">24 hours</button><button data-monitor-hours="168" type="button">7 days</button><button data-monitor-hours="720" type="button">30 days</button>
     </div>
     <section class="monitor-diagnosis" id="monitor-diagnosis" aria-labelledby="monitor-diagnosis-title">
       <div><span class="monitor-level unknown" id="monitor-level">NO DATA</span><h3 id="monitor-diagnosis-title">Waiting for monitor data…</h3></div>
       <ul id="monitor-findings"></ul>
     </section>
     <div class="monitor-current" id="monitor-current" aria-label="Current system state"></div>
+    <section class="monitor-section" aria-labelledby="monitor-throttling-title"><h3 id="monitor-throttling-title">Thermal &amp; throttling</h3><div class="monitor-throttling" id="monitor-throttling"></div></section>
     <section class="monitor-section" aria-labelledby="monitor-io-title"><h3 id="monitor-io-title">Current network &amp; disk I/O</h3><div class="monitor-io-details" id="monitor-io-details"></div></section>
     <section class="monitor-section" aria-labelledby="monitor-peaks-title"><h3 id="monitor-peaks-title">Resource peaks</h3><div class="monitor-peaks" id="monitor-peaks"></div><p class="monitor-note">A low idle Arm clock can be normal governor scaling; firmware flags and timestamped events determine whether throttling occurred.</p></section>
+    <section class="monitor-section" aria-labelledby="monitor-processes-title"><div class="monitor-section-head"><div><h3 id="monitor-processes-title">Resource-hungry processes</h3><p>Current leaders and repeat one-minute peak leaders in the selected range.</p></div><span id="monitor-process-range">—</span></div><div class="monitor-process-current" id="monitor-process-current"></div><h4 class="monitor-subtitle">Repeat offenders</h4><div class="monitor-offenders" id="monitor-offenders"></div><p class="monitor-note">Process restarts are grouped by kernel process name. Command-line arguments are never retained.</p></section>
     <section class="monitor-section monitor-next" id="monitor-next" aria-labelledby="monitor-next-title" hidden><h3 id="monitor-next-title">Useful next tests</h3><ol id="monitor-next-steps"></ol></section>
     <section class="monitor-section monitor-crashes" aria-labelledby="monitor-crashes-title">
       <div class="monitor-section-head"><div><h3 id="monitor-crashes-title">Crash analysis</h3><p>Inspect the journal from the preceding boot, save the report, and compare it with earlier crashes.</p></div><button class="monitor-crash-button" id="monitor-crash-analyze" type="button">Analyze previous crash</button></div>

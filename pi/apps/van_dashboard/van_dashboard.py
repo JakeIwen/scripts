@@ -2147,7 +2147,7 @@ class SystemMonitorClient:
             raise SystemMonitorCommandError(message or detail or "system monitor command failed")
         return payload
 
-    def report(self, hours=24):
+    def report(self, hours=6):
         return self._run_json(
             [
                 "report",
@@ -2495,7 +2495,7 @@ def api_price_checks():
 def api_system_monitor():
     if set(request.args) - {"hours"} or len(request.args.getlist("hours")) > 1:
         return api_error("system monitor accepts only one hours value", 400)
-    raw_hours = request.args.get("hours", "24")
+    raw_hours = request.args.get("hours", "6")
     try:
         hours = int(raw_hours)
     except (TypeError, ValueError):

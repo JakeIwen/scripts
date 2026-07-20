@@ -1372,6 +1372,11 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="usb-panel"', page.data)
         self.assertIn(b'id="usb-device-list"', page.data)
         self.assertIn(b'id="monitor-io-details"', page.data)
+        self.assertIn(b'id="monitor-throttling"', page.data)
+        self.assertIn(b'id="monitor-process-current"', page.data)
+        self.assertIn(b'id="monitor-offenders"', page.data)
+        self.assertIn(b'id="system-monitor-temperature"', page.data)
+        self.assertIn(b'id="system-monitor-throttle"', page.data)
         self.assertIn(b'id="monitor-crash-analyze"', page.data)
         self.assertIn(b'id="monitor-crash-history"', page.data)
         self.assertIn(b'id="monitor-crash-timeline"', page.data)
@@ -1446,6 +1451,9 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"function renderCrashAnalysis(payload)", javascript.data)
         self.assertIn(b"function renderCrashHistory(payload)", javascript.data)
         self.assertIn(b"function monitorEventState(event)", javascript.data)
+        self.assertIn(b"function thermalSensorLabel(sensor)", javascript.data)
+        self.assertIn(b"function monitorProcessList(items", javascript.data)
+        self.assertIn(b"No events in range (${monitorRangeLabel()})", javascript.data)
         self.assertIn(b"function formatRate(value)", javascript.data)
         self.assertIn(b"network_rx_bytes_per_second", javascript.data)
         self.assertIn(b"disk_write_bytes_per_second", javascript.data)
@@ -1586,7 +1594,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(week.status_code, 200)
         self.assertEqual(invalid.status_code, 400)
         self.assertEqual(extra.status_code, 400)
-        self.assertEqual(calls, [24, 168])
+        self.assertEqual(calls, [6, 168])
 
     def test_crash_analysis_routes_save_and_return_full_history(self):
         calls = []
