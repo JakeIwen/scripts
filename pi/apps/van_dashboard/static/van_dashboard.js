@@ -4,12 +4,15 @@ let dashboard = null,
   storagePolicy = null,
   lighting = null,
   priceChecks = null,
+  systemMonitor = null,
+  systemMonitorHours = 24,
   ubntWifi = null,
   ubntLink = null,
   ubntNewNetwork = null,
   policyLoading = false,
   priceBusy = false,
   priceEditingId = null,
+  crashAnalysisBusy = false,
   busy = false,
   tileEditing = false,
   tileDrag = null,
@@ -17,6 +20,7 @@ let dashboard = null,
   speedPoll = 0,
   storagePoll = 0,
   lightingPoll = 0,
+  systemMonitorPoll = 0,
   ubntPoll = 0,
   ubntLastCompletion = '',
   sonosTimeline = { position: 0, duration: 0, playing: false, updatedAt: 0 };
@@ -72,6 +76,30 @@ function age(ts) {
   if (!ts) return 'never';
   const secs = Math.max(0, Date.now() / 1000 - ts);
   return secs < 90 ? `${Math.round(secs)}s ago` : `${Math.round(secs / 60)}m ago`;
+}
+function formatBytes(value) {
+  if (!Number.isFinite(value)) return '—';
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  let size = Math.max(0, value),
+    unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${size.toFixed(size >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+function formatRate(value) {
+  return Number.isFinite(value) ? `${formatBytes(value)}/s` : '—';
+}
+function eventTime(timestamp) {
+  if (!Number.isFinite(timestamp)) return 'unknown time';
+  return new Date(timestamp * 1000).toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+  });
 }
 function networkState(id, value) {
   const el = $(id);
@@ -499,6 +527,292 @@ function editPriceCheck(itemId) {
   $('price-submit').textContent = 'Save changes';
   $('price-edit-cancel').hidden = false;
   $('price-add-form').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+function monitorMetric(metric, suffix = '', digits = 1) {
+  if (metric?.value === null || metric?.value === undefined) return '—';
+  const value = Number(metric.value);
+  return Number.isFinite(value) ? `${value.toFixed(digits)}${suffix}` : '—';
+}
+function monitorProcess(process, cpu = false) {
+  if (!process) return '';
+  const usage = cpu && Number.isFinite(process.cpu_percent)
+    ? ` · ${Number(process.cpu_percent).toFixed(1)}% CPU`
+    : Number.isFinite(process.rss_bytes)
+      ? ` · ${formatBytes(process.rss_bytes)} RSS`
+      : '';
+  return `${esc(process.name || process.command || `PID ${process.pid}`)}${usage}`;
+}
+function monitorEventState(event) {
+  const state = event.state;
+  if (!state) return '';
+  if (state.state_available === false)
+    return '<div class="monitor-event-state unavailable">Historical journal import; live resource and USB state was not captured at this time.</div>';
+  const facts = [],
+    cpu = Number.isFinite(state.cpu_percent) ? Number(state.cpu_percent) : null,
+    memory = Number.isFinite(state.memory?.used_percent)
+      ? Number(state.memory.used_percent)
+      : null,
+    temperature = Number.isFinite(state.temperature_c) ? Number(state.temperature_c) : null,
+    topCpu = state.top_cpu?.[0],
+    topMemory = state.top_memory?.[0],
+    throttle = state.throttle || {},
+    networkIo = state.network_io || {},
+    diskIo = state.disk_io || {},
+    usb = state.usb_devices || [],
+    mounts = state.mounts || [];
+  if (Number.isFinite(cpu)) facts.push(`CPU ${cpu.toFixed(1)}%`);
+  if (Number.isFinite(memory)) facts.push(`memory ${memory.toFixed(1)}%`);
+  if (Number.isFinite(temperature)) facts.push(`${temperature.toFixed(1)} °C`);
+  if (Number.isFinite(state.load?.['1m'])) facts.push(`load ${Number(state.load['1m']).toFixed(2)}`);
+  if (Number.isFinite(networkIo.rx_bytes_per_second))
+    facts.push(`net ↓ ${formatRate(networkIo.rx_bytes_per_second)}`);
+  if (Number.isFinite(networkIo.tx_bytes_per_second))
+    facts.push(`net ↑ ${formatRate(networkIo.tx_bytes_per_second)}`);
+  if (Number.isFinite(diskIo.read_bytes_per_second))
+    facts.push(`disk read ${formatRate(diskIo.read_bytes_per_second)}`);
+  if (Number.isFinite(diskIo.write_bytes_per_second))
+    facts.push(`disk write ${formatRate(diskIo.write_bytes_per_second)}`);
+  if (throttle.hex) facts.push(`firmware ${esc(throttle.hex)}`);
+  const devices = usb
+    .map((device) => device.product || device.manufacturer || device.id)
+    .filter(Boolean)
+    .map(esc);
+  return `<details class="monitor-event-state"><summary>State at event</summary>
+    <div class="monitor-state-facts">${facts.map((fact) => `<span>${fact}</span>`).join('')}</div>
+    ${topCpu ? `<p><strong>Top CPU:</strong> ${monitorProcess(topCpu, true)}</p>` : ''}
+    ${topMemory ? `<p><strong>Top memory:</strong> ${monitorProcess(topMemory)}</p>` : ''}
+    <p><strong>USB:</strong> ${devices.length ? devices.join(', ') : 'no enumerated devices'} (${usb.length})</p>
+    <p><strong>Local mounts:</strong> ${mounts.length ? mounts.map((mount) => `${esc(mount.mountpoint)}${mount.read_only ? ' (read-only)' : ''}`).join(', ') : 'none captured'}</p>
+  </details>`;
+}
+function renderSystemMonitor(response) {
+  systemMonitor = response;
+  const diagnosis = response.diagnosis || {},
+    evidence = diagnosis.evidence || {},
+    peaks = response.peaks || {},
+    current = response.status?.current || {},
+    tile = $('system-monitor'),
+    level = response.status?.stale ? 'unknown' : diagnosis.level || 'unknown',
+    episodes = Number(evidence.undervoltage_episodes) || 0,
+    activeFirmware = current.throttle?.current?.length > 0;
+  tile.classList.remove('unknown', 'good', 'warning', 'critical');
+  tile.classList.add(level);
+  $('system-monitor-pill').textContent =
+    level === 'critical' && activeFirmware
+      ? 'ACTIVE'
+      : episodes
+        ? `${episodes} POWER`
+        : level.toUpperCase();
+  $('system-monitor-summary').textContent = response.status?.stale
+    ? 'Monitor data is stale'
+    : diagnosis.headline || 'No diagnosis available';
+  $('system-monitor-power').textContent = episodes
+    ? `${episodes} drop${episodes === 1 ? '' : 's'} · ${Number(evidence.undervoltage_seconds || 0).toFixed(1)}s`
+    : current.throttle?.occurred?.includes('under_voltage')
+      ? 'Sticky history set'
+      : 'No events in range';
+  $('system-monitor-cpu').textContent = monitorMetric(peaks.cpu_percent, '%');
+  $('system-monitor-memory').textContent = monitorMetric(peaks.memory_percent, '%');
+  $('system-monitor-network').textContent =
+    `↓ ${formatRate(current.network_io?.rx_bytes_per_second)} · ↑ ${formatRate(current.network_io?.tx_bytes_per_second)}`;
+  $('system-monitor-disk').textContent =
+    `R ${formatRate(current.disk_io?.read_bytes_per_second)} · W ${formatRate(current.disk_io?.write_bytes_per_second)}`;
+
+  $('system-monitor-panel').setAttribute('aria-busy', 'false');
+  $('system-monitor-status').textContent = response.status?.stale
+    ? `Stale · ${age(current.timestamp)}`
+    : `${systemMonitorHours === 168 ? '7 days' : systemMonitorHours === 720 ? '30 days' : `${systemMonitorHours} hours`} · updated ${age(current.timestamp)}`;
+  const badge = $('monitor-level');
+  badge.className = `monitor-level ${level}`;
+  badge.textContent = level.toUpperCase();
+  $('monitor-diagnosis-title').textContent = diagnosis.headline || 'No diagnosis available';
+  $('monitor-findings').innerHTML = (diagnosis.findings || [])
+    .map((finding) => `<li>${esc(finding)}</li>`)
+    .join('');
+
+  const currentFacts = [
+    ['CPU now', Number.isFinite(current.cpu_percent) ? `${Number(current.cpu_percent).toFixed(1)}%` : '—'],
+    ['Memory now', Number.isFinite(current.memory?.used_percent) ? `${Number(current.memory.used_percent).toFixed(1)}%` : '—'],
+    ['Temperature', Number.isFinite(current.temperature_c) ? `${Number(current.temperature_c).toFixed(1)} °C` : '—'],
+    ['Arm clock', Number.isFinite(current.arm_mhz) ? `${Number(current.arm_mhz).toFixed(0)} MHz` : '—'],
+    ['Firmware', current.throttle?.hex || '—'],
+    ['Active flags', current.throttle?.current?.length ? current.throttle.current.join(', ') : 'none'],
+    ['Network RX', formatRate(current.network_io?.rx_bytes_per_second)],
+    ['Network TX', formatRate(current.network_io?.tx_bytes_per_second)],
+    ['Disk read', formatRate(current.disk_io?.read_bytes_per_second)],
+    ['Disk write', formatRate(current.disk_io?.write_bytes_per_second)],
+    ['Busiest disk', Number.isFinite(current.disk_io?.busy_percent) ? `${Number(current.disk_io.busy_percent).toFixed(1)}%` : '—'],
+  ];
+  $('monitor-current').innerHTML = currentFacts
+    .map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`)
+    .join('');
+
+  const interfaces = current.network_io?.interfaces || [],
+    devices = current.disk_io?.devices || [];
+  $('monitor-io-details').innerHTML = `<div class="monitor-io-group"><h4>Network</h4>
+    ${interfaces.map((item) => `<div class="monitor-io-row"><span><strong>${esc(item.name)}</strong><small>${item.physical ? 'physical' : 'virtual'}</small></span><span>↓ ${formatRate(item.rx_bytes_per_second)}<br>↑ ${formatRate(item.tx_bytes_per_second)}</span></div>`).join('') || '<div class="monitor-io-empty">No interfaces sampled</div>'}
+  </div><div class="monitor-io-group"><h4>Disks</h4>
+    ${devices.map((item) => `<div class="monitor-io-row"><span><strong>${esc(item.labels?.length ? item.labels.join(', ') : item.name)}</strong><small>${esc(item.name)} · ${Number.isFinite(item.busy_percent) ? `${Number(item.busy_percent).toFixed(1)}% busy` : 'busy —'}</small></span><span>R ${formatRate(item.read_bytes_per_second)}<br>W ${formatRate(item.write_bytes_per_second)}</span></div>`).join('') || '<div class="monitor-io-empty">No disks sampled</div>'}
+  </div>`;
+
+  const peakDefinitions = [
+    ['CPU', peaks.cpu_percent, 'percent', true],
+    ['Memory', peaks.memory_percent, 'percent', false],
+    ['Network receive', peaks.network_rx_bytes_per_second, 'rate', false],
+    ['Network transmit', peaks.network_tx_bytes_per_second, 'rate', false],
+    ['Disk read', peaks.disk_read_bytes_per_second, 'rate', false],
+    ['Disk write', peaks.disk_write_bytes_per_second, 'rate', false],
+    ['Disk busy', peaks.disk_busy_percent, 'percent', false],
+    ['Load · 1m', peaks.load1, 'number', false],
+    ['Temperature', peaks.temperature_c, 'temperature', false],
+    ['Swap', peaks.swap_percent, 'percent', false],
+    ['Root used', peaks.root_used_percent, 'percent', false],
+    ['Minimum Arm clock', peaks.minimum_arm_mhz, 'clock', false],
+  ];
+  $('monitor-peaks').innerHTML = peakDefinitions
+    .map(([label, metric, format, cpu]) => {
+      const process = monitorProcess(metric?.top_process, cpu),
+        source = metric?.top_interface?.name || (metric?.top_device ? (metric.top_device.labels?.join(', ') || metric.top_device.name) : ''),
+        value = format === 'rate'
+          ? formatRate(metric?.value)
+          : monitorMetric(metric, format === 'temperature' ? ' °C' : format === 'clock' ? ' MHz' : format === 'percent' ? '%' : '');
+      return `<div class="monitor-peak"><span>${esc(label)}</span><strong>${value}</strong><small>${metric?.at ? eventTime(metric.at) : 'No samples'}${process ? `<br>${process}` : source ? `<br>${esc(source)}` : ''}</small></div>`;
+    })
+    .join('');
+
+  const nextSteps = diagnosis.next_steps || [];
+  $('monitor-next').hidden = nextSteps.length === 0;
+  $('monitor-next-steps').innerHTML = nextSteps.map((step) => `<li>${esc(step)}</li>`).join('');
+  const events = response.events || [];
+  $('monitor-event-count').textContent = `${response.summary?.events || 0} total`;
+  $('monitor-events').innerHTML =
+    events
+      .map(
+        (event) => `<article class="monitor-event ${esc(event.severity)}">
+          <div class="monitor-event-head"><span>${esc(event.category)}</span><time>${esc(eventTime(event.timestamp))}</time></div>
+          <strong>${esc(event.summary)}</strong><p>${esc(event.message)}</p>${monitorEventState(event)}
+        </article>`,
+      )
+      .join('') || '<div class="speaker-loading">No events in this range</div>';
+  document.querySelectorAll('[data-monitor-hours]').forEach((button) => {
+    button.classList.toggle('active', Number(button.dataset.monitorHours) === systemMonitorHours);
+    button.disabled = false;
+  });
+}
+function renderSystemMonitorUnavailable(message) {
+  const tile = $('system-monitor');
+  tile.classList.remove('good', 'warning', 'critical');
+  tile.classList.add('unknown');
+  $('system-monitor-pill').textContent = 'NO DATA';
+  $('system-monitor-summary').textContent = 'System monitor unavailable';
+  $('system-monitor-power').textContent = '—';
+  $('system-monitor-cpu').textContent = '—';
+  $('system-monitor-memory').textContent = '—';
+  $('system-monitor-network').textContent = '—';
+  $('system-monitor-disk').textContent = '—';
+  $('system-monitor-status').textContent = 'Unavailable';
+  $('system-monitor-panel').setAttribute('aria-busy', 'false');
+  $('monitor-events').innerHTML = `<div class="speaker-loading">${esc(message)}</div>`;
+  $('monitor-io-details').innerHTML = `<div class="speaker-loading">${esc(message)}</div>`;
+  document.querySelectorAll('[data-monitor-hours]').forEach((button) => {
+    button.disabled = false;
+  });
+}
+async function refreshSystemMonitor(showErrors = false) {
+  try {
+    const response = await json(`/api/system-monitor?hours=${systemMonitorHours}`);
+    renderSystemMonitor(response);
+    return response;
+  } catch (error) {
+    renderSystemMonitorUnavailable(error.message);
+    if (showErrors) toast(error.message, true);
+    throw error;
+  }
+}
+function crashCountLabel(kind) {
+  return String(kind || '')
+    .replaceAll('_', ' ')
+    .replace(/^./, (letter) => letter.toUpperCase());
+}
+function crashTimeline(items) {
+  return (items || [])
+    .map(
+      (item) => `<div class="monitor-crash-log ${esc(item.severity || 'info')}">
+        <time>${esc(eventTime(item.timestamp))}</time><strong>${esc(item.summary || item.source || 'Log')}</strong>
+        <p>${esc(item.message || '')}</p>
+      </div>`,
+    )
+    .join('') || '<div class="speaker-loading">No relevant retained log lines</div>';
+}
+function renderCrashHistory(payload) {
+  const history = payload?.history || [];
+  $('monitor-crash-history').innerHTML =
+    history
+      .map((item) => {
+        const analysis = item.report?.analysis || {},
+          previousBoot = item.previous_boot || analysis.previous_boot || {},
+          findings = item.findings || analysis.findings || [],
+          counts = item.counts || analysis.counts || {},
+          countEntries = Object.entries(counts).filter(([, value]) => Number(value) > 0),
+          timeline = analysis.timeline || [];
+        return `<details class="monitor-crash-history-item">
+          <summary><span class="monitor-level ${esc(item.level || 'unknown')}">${esc(String(item.level || 'unknown').toUpperCase())}</span><span><strong>${esc(item.headline || 'Saved crash analysis')}</strong><small>${esc(eventTime(previousBoot.ended_at || item.analyzed_at))} · analyzed ${esc(eventTime(item.analyzed_at))}</small></span></summary>
+          <ul>${findings.map((finding) => `<li>${esc(finding)}</li>`).join('')}</ul>
+          ${countEntries.length ? `<div class="monitor-crash-counts">${countEntries.map(([kind, value]) => `<span>${esc(crashCountLabel(kind))}: ${Number(value)}</span>`).join('')}</div>` : ''}
+          ${timeline.length ? `<div class="monitor-crash-saved-timeline">${crashTimeline(timeline)}</div>` : ''}
+        </details>`;
+      })
+      .join('') || '<div class="speaker-loading">No saved crash analyses yet</div>';
+}
+function renderCrashAnalysis(payload) {
+  const analysis = payload.analysis || {},
+    comparison = payload.comparison,
+    level = analysis.level || 'unknown',
+    result = $('monitor-crash-result');
+  result.hidden = false;
+  $('monitor-crash-level').className = `monitor-level ${level}`;
+  $('monitor-crash-level').textContent = level.toUpperCase();
+  $('monitor-crash-headline').textContent = analysis.headline || 'Crash analysis unavailable';
+  $('monitor-crash-findings').innerHTML = (analysis.findings || [])
+    .map((finding) => `<li>${esc(finding)}</li>`)
+    .join('');
+  if (comparison) {
+    const deltas = Object.entries(comparison.count_deltas || {});
+    $('monitor-crash-comparison').innerHTML = `<div class="monitor-crash-compare"><strong>Compared with previous saved crash</strong><p>${esc(comparison.previous_headline || 'Earlier analysis')} (${esc(comparison.previous_level || 'unknown')})</p>${deltas.length ? `<div class="monitor-crash-counts">${deltas.map(([kind, value]) => `<span>${esc(crashCountLabel(kind))}: ${Number(value) > 0 ? '+' : ''}${Number(value)}</span>`).join('')}</div>` : '<p>No tracked fault counts changed.</p>'}</div>`;
+  } else {
+    $('monitor-crash-comparison').innerHTML = '<p class="monitor-note">No earlier saved crash is available for comparison.</p>';
+  }
+  $('monitor-crash-timeline').innerHTML = crashTimeline(analysis.timeline);
+}
+async function refreshCrashHistory(showErrors = false) {
+  try {
+    const payload = await json('/api/system-monitor/crashes');
+    renderCrashHistory(payload);
+    return payload;
+  } catch (error) {
+    $('monitor-crash-history').innerHTML = `<div class="speaker-loading">${esc(error.message)}</div>`;
+    if (showErrors) toast(error.message, true);
+    throw error;
+  }
+}
+async function analyzePreviousCrash() {
+  if (crashAnalysisBusy) return;
+  crashAnalysisBusy = true;
+  const button = $('monitor-crash-analyze');
+  button.disabled = true;
+  button.textContent = 'Analyzing logs…';
+  try {
+    const payload = await post('system-monitor/crash-analysis');
+    renderCrashAnalysis(payload);
+    await refreshCrashHistory(false);
+    toast(payload.saved ? 'Crash analysis saved' : 'Crash analysis complete; no prior boot was available to save');
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    crashAnalysisBusy = false;
+    button.disabled = false;
+    button.textContent = 'Analyze previous crash';
+  }
 }
 function setPolicyLoading(loading, label) {
   policyLoading = loading;
@@ -1069,6 +1383,32 @@ function closeStorage() {
   $('storage').setAttribute('aria-expanded', 'false');
   $('storage').focus();
 }
+async function pollSystemMonitor() {
+  clearTimeout(systemMonitorPoll);
+  if (!$('system-monitor-backdrop').classList.contains('open')) return;
+  try {
+    await refreshSystemMonitor(false);
+  } catch (_) {
+    /* rendered by refreshSystemMonitor */
+  } finally {
+    systemMonitorPoll = setTimeout(pollSystemMonitor, 10000);
+  }
+}
+async function openSystemMonitor() {
+  $('system-monitor-backdrop').classList.add('open');
+  document.body.classList.add('sheet-open');
+  $('system-monitor').setAttribute('aria-expanded', 'true');
+  $('system-monitor-panel').setAttribute('aria-busy', 'true');
+  await Promise.allSettled([refreshSystemMonitor(true), refreshCrashHistory(false)]);
+  systemMonitorPoll = setTimeout(pollSystemMonitor, 10000);
+}
+function closeSystemMonitor() {
+  clearTimeout(systemMonitorPoll);
+  $('system-monitor-backdrop').classList.remove('open');
+  document.body.classList.remove('sheet-open');
+  $('system-monitor').setAttribute('aria-expanded', 'false');
+  $('system-monitor').focus();
+}
 async function openPriceChecks() {
   $('price-backdrop').classList.add('open');
   document.body.classList.add('sheet-open');
@@ -1153,6 +1493,9 @@ $('speakers').addEventListener('click', openSpeakers);
 $('speaker-close').addEventListener('click', closeSpeakers);
 $('storage').addEventListener('click', openStorage);
 $('storage-close').addEventListener('click', closeStorage);
+$('system-monitor').addEventListener('click', openSystemMonitor);
+$('system-monitor-close').addEventListener('click', closeSystemMonitor);
+$('monitor-crash-analyze').addEventListener('click', analyzePreviousCrash);
 $('price-checks').addEventListener('click', openPriceChecks);
 $('price-close').addEventListener('click', closePriceChecks);
 $('price-check-all').addEventListener('click', () => checkPrices('all'));
@@ -1182,6 +1525,9 @@ $('speaker-backdrop').addEventListener('click', (event) => {
 $('storage-backdrop').addEventListener('click', (event) => {
   if (event.target === $('storage-backdrop')) closeStorage();
 });
+$('system-monitor-backdrop').addEventListener('click', (event) => {
+  if (event.target === $('system-monitor-backdrop')) closeSystemMonitor();
+});
 $('price-backdrop').addEventListener('click', (event) => {
   if (event.target === $('price-backdrop')) closePriceChecks();
 });
@@ -1195,6 +1541,7 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     if ($('speaker-backdrop').classList.contains('open')) closeSpeakers();
     if ($('storage-backdrop').classList.contains('open')) closeStorage();
+    if ($('system-monitor-backdrop').classList.contains('open')) closeSystemMonitor();
     if ($('price-backdrop').classList.contains('open')) closePriceChecks();
     if ($('lighting-backdrop').classList.contains('open')) closeLighting();
     if ($('ubnt-wifi-backdrop').classList.contains('open')) closeUbntWifi();
@@ -1252,6 +1599,17 @@ document.addEventListener('change', (event) => {
     });
 });
 document.addEventListener('click', (event) => {
+  const monitorRange = event.target.closest('[data-monitor-hours]');
+  if (monitorRange) {
+    const hours = Number(monitorRange.dataset.monitorHours);
+    if (Number.isFinite(hours) && hours !== systemMonitorHours) {
+      systemMonitorHours = hours;
+      document.querySelectorAll('[data-monitor-hours]').forEach((button) => {
+        button.disabled = true;
+      });
+      refreshSystemMonitor(true).catch(() => {});
+    }
+  }
   const priceCheck = event.target.closest('[data-price-check]');
   if (priceCheck) checkPrices(priceCheck.dataset.priceCheck);
   const priceEdit = event.target.closest('[data-price-edit]');
@@ -1327,6 +1685,7 @@ function refreshVisibleDashboard() {
   refreshSpeedtest();
   refreshSonos();
   refreshStoragePolicy().catch(() => {});
+  refreshSystemMonitor(false).catch(() => {});
   refreshPriceChecks().catch(() => {});
   refreshLighting(false).catch(() => {});
   refreshUbntWifi(false);
@@ -1337,6 +1696,7 @@ Promise.allSettled([
   refreshConnectivity(),
   refreshSpeedtest(),
   refreshStoragePolicy(),
+  refreshSystemMonitor(false),
   refreshPriceChecks(),
   refreshLighting(false),
   refreshUbntWifi(false),
@@ -1354,6 +1714,9 @@ setInterval(() => {
 }, 10000);
 setInterval(() => {
   if (!document.hidden && !busy) refreshStoragePolicy().catch(() => {});
+}, 30000);
+setInterval(() => {
+  if (!document.hidden) refreshSystemMonitor(false).catch(() => {});
 }, 30000);
 setInterval(() => {
   if (!document.hidden && !priceBusy) refreshPriceChecks().catch(() => {});

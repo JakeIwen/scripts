@@ -66,6 +66,15 @@ PRICE_CHECK_DB = os.path.expanduser(
     )
 )
 PRICE_CHECK_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_PRICE_CHECK_TIMEOUT", "180"))
+SYSTEM_MONITOR_TOOL = os.environ.get(
+    "VAN_DASHBOARD_SYSTEM_MONITOR_TOOL", "/home/pi/scripts/system_event_monitor.py"
+)
+SYSTEM_MONITOR_DB = os.environ.get(
+    "VAN_DASHBOARD_SYSTEM_MONITOR_DB", "/var/lib/vanpi-monitor/events.sqlite3"
+)
+SYSTEM_MONITOR_TIMEOUT = float(
+    os.environ.get("VAN_DASHBOARD_SYSTEM_MONITOR_TIMEOUT", "15")
+)
 TUYA_POLL_INTERVAL = float(os.environ.get("VAN_DASHBOARD_TUYA_POLL_INTERVAL", "15"))
 POLICYCTL_TIMEOUT = 15
 COP_LED_TARGET = os.environ.get("VAN_DASHBOARD_COP_LED_TARGET", "light.ext_led")
@@ -1904,6 +1913,81 @@ class PriceCheckController:
         return self._run("check", target)
 
 
+class SystemMonitorCommandError(RuntimeError):
+    pass
+
+
+class SystemMonitorClient:
+    """Read the passive system monitor through bounded, fixed CLI commands."""
+
+    def __init__(
+        self,
+        tool=SYSTEM_MONITOR_TOOL,
+        database=SYSTEM_MONITOR_DB,
+        command=run_command,
+        timeout=SYSTEM_MONITOR_TIMEOUT,
+    ):
+        self.tool = tool
+        self.database = database
+        self.command = command
+        self.timeout = timeout
+
+    def _run_json(self, command_args):
+        args = [
+            sys.executable,
+            self.tool,
+            "--database",
+            self.database,
+            *command_args,
+        ]
+        try:
+            result = self.command(args, timeout=self.timeout)
+        except subprocess.TimeoutExpired as error:
+            raise SystemMonitorCommandError(
+                f"system monitor command timed out after {self.timeout:g} seconds"
+            ) from error
+        except OSError as error:
+            raise SystemMonitorCommandError(str(error)) from error
+        try:
+            payload = json.loads(result.stdout)
+        except (TypeError, ValueError) as error:
+            detail = (result.stderr or result.stdout or "no output").strip()[-500:]
+            raise SystemMonitorCommandError(
+                f"system monitor returned invalid output: {detail}"
+            ) from error
+        if result.returncode or not isinstance(payload, dict) or payload.get("ok") is not True:
+            message = payload.get("message") if isinstance(payload, dict) else None
+            detail = (result.stderr or "").strip()[-500:]
+            raise SystemMonitorCommandError(message or detail or "system monitor command failed")
+        return payload
+
+    def report(self, hours=24):
+        return self._run_json(
+            [
+                "report",
+                "--hours",
+                str(int(hours)),
+                "--limit",
+                "100",
+                "--json",
+            ]
+        )
+
+    def crash_analysis(self):
+        return self._run_json(["crash-report", "--save", "--json"])
+
+    def crash_history(self, limit=20):
+        return self._run_json(
+            [
+                "crash-history",
+                "--limit",
+                str(max(1, min(int(limit), 100))),
+                "--full",
+                "--json",
+            ]
+        )
+
+
 app = Flask(__name__)
 state_store = StateStore()
 engine_monitor = EngineMonitor()
@@ -1917,6 +2001,7 @@ starlink = TuyaSwitchManager("starlink")
 storage_policy = StoragePolicyManager()
 lighting = LightingController()
 price_checks = PriceCheckController()
+system_monitor = SystemMonitorClient()
 
 
 def api_error(message, status):
@@ -2205,6 +2290,52 @@ def api_price_checks():
         payload = price_checks.status()
     except PriceCheckCommandError as exc:
         return api_error(f"could not read price checks: {exc}", 502)
+    response = jsonify(payload)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/api/system-monitor")
+def api_system_monitor():
+    if set(request.args) - {"hours"} or len(request.args.getlist("hours")) > 1:
+        return api_error("system monitor accepts only one hours value", 400)
+    raw_hours = request.args.get("hours", "24")
+    try:
+        hours = int(raw_hours)
+    except (TypeError, ValueError):
+        return api_error("system monitor range must be 6, 24, 168, or 720 hours", 400)
+    if hours not in (6, 24, 168, 720):
+        return api_error("system monitor range must be 6, 24, 168, or 720 hours", 400)
+    try:
+        payload = system_monitor.report(hours)
+    except SystemMonitorCommandError as exc:
+        return api_error(f"system monitor unavailable: {exc}", 503)
+    response = jsonify(payload)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/api/system-monitor/crashes")
+def api_system_monitor_crashes():
+    if request.args:
+        return api_error("crash history does not accept query parameters", 400)
+    try:
+        payload = system_monitor.crash_history(20)
+    except SystemMonitorCommandError as exc:
+        return api_error(f"crash history unavailable: {exc}", 503)
+    response = jsonify(payload)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/api/system-monitor/crash-analysis", methods=["POST"])
+def api_system_monitor_crash_analysis():
+    if not _exact_form(()):
+        return api_error("crash analysis does not accept parameters", 400)
+    try:
+        payload = system_monitor.crash_analysis()
+    except SystemMonitorCommandError as exc:
+        return api_error(f"crash analysis unavailable: {exc}", 503)
     response = jsonify(payload)
     response.headers["Cache-Control"] = "no-store"
     return response

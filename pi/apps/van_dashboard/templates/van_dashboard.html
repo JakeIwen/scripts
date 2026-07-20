@@ -48,6 +48,17 @@
     <button class="tile storage-tile" id="storage" data-dashboard-tile data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="storage-panel">
       <span class="tile-icon" aria-hidden="true">💾</span><span class="tile-title">Disk &amp; Torrent</span><span class="tile-detail" id="storage-summary">Checking current state…</span>
     </button>
+    <button class="tile monitor-tile unknown" id="system-monitor" data-dashboard-tile data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="system-monitor-panel">
+      <span class="pill" id="system-monitor-pill">NO DATA</span><span class="tile-icon" aria-hidden="true">⚡</span>
+      <span class="tile-title">System Health</span><span class="tile-detail" id="system-monitor-summary">Loading power and resource history…</span>
+      <span class="status-lines">
+        <span class="status-line"><span>Power</span><span id="system-monitor-power">Checking…</span></span>
+        <span class="status-line"><span>CPU peak</span><span id="system-monitor-cpu">—</span></span>
+        <span class="status-line"><span>Memory peak</span><span id="system-monitor-memory">—</span></span>
+        <span class="status-line"><span>Network</span><span id="system-monitor-network">—</span></span>
+        <span class="status-line"><span>Disk I/O</span><span id="system-monitor-disk">—</span></span>
+      </span>
+    </button>
     <button class="tile price-tile" id="price-checks" data-dashboard-tile data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="price-panel">
       <span class="pill" id="price-pill">—</span><span class="tile-icon" aria-hidden="true">🏷️</span>
       <span class="tile-title">Price Watch</span><span class="tile-detail" id="price-summary">Loading watched items…</span>
@@ -116,6 +127,29 @@
       <li>Allow torrents on Starlink does not override disk or global torrent permission.</li>
       <li>Starlink torrenting requires Disks enabled, Torrents enabled, and Allow torrents on Starlink.</li>
     </ul>
+  </section>
+</div>
+<div class="speaker-backdrop" id="system-monitor-backdrop">
+  <section class="speaker-sheet monitor-sheet" id="system-monitor-panel" role="dialog" aria-modal="true" aria-labelledby="system-monitor-title" aria-busy="true">
+    <div class="sheet-grabber"></div><div class="sheet-head"><h2 id="system-monitor-title">System Health</h2><span class="policy-sheet-status" id="system-monitor-status">Loading…</span><button class="sheet-close" id="system-monitor-close" aria-label="Close system health">&times;</button></div>
+    <p class="sheet-help">Passive Pi power, throttling, USB, storage, kernel, and resource evidence. Firmware history resets on reboot.</p>
+    <div class="monitor-ranges" role="group" aria-label="System health time range">
+      <button data-monitor-hours="6" type="button">6 hours</button><button class="active" data-monitor-hours="24" type="button">24 hours</button><button data-monitor-hours="168" type="button">7 days</button><button data-monitor-hours="720" type="button">30 days</button>
+    </div>
+    <section class="monitor-diagnosis" id="monitor-diagnosis" aria-labelledby="monitor-diagnosis-title">
+      <div><span class="monitor-level unknown" id="monitor-level">NO DATA</span><h3 id="monitor-diagnosis-title">Waiting for monitor data…</h3></div>
+      <ul id="monitor-findings"></ul>
+    </section>
+    <div class="monitor-current" id="monitor-current" aria-label="Current system state"></div>
+    <section class="monitor-section" aria-labelledby="monitor-io-title"><h3 id="monitor-io-title">Current network &amp; disk I/O</h3><div class="monitor-io-details" id="monitor-io-details"></div></section>
+    <section class="monitor-section" aria-labelledby="monitor-peaks-title"><h3 id="monitor-peaks-title">Resource peaks</h3><div class="monitor-peaks" id="monitor-peaks"></div><p class="monitor-note">A low idle Arm clock can be normal governor scaling; firmware flags and timestamped events determine whether throttling occurred.</p></section>
+    <section class="monitor-section monitor-next" id="monitor-next" aria-labelledby="monitor-next-title" hidden><h3 id="monitor-next-title">Useful next tests</h3><ol id="monitor-next-steps"></ol></section>
+    <section class="monitor-section monitor-crashes" aria-labelledby="monitor-crashes-title">
+      <div class="monitor-section-head"><div><h3 id="monitor-crashes-title">Crash analysis</h3><p>Inspect the journal from the preceding boot, save the report, and compare it with earlier crashes.</p></div><button class="monitor-crash-button" id="monitor-crash-analyze" type="button">Analyze previous crash</button></div>
+      <div class="monitor-crash-result" id="monitor-crash-result" hidden><div><span class="monitor-level unknown" id="monitor-crash-level">NO DATA</span><h4 id="monitor-crash-headline">No analysis run</h4></div><ul id="monitor-crash-findings"></ul><div id="monitor-crash-comparison"></div><details><summary>Relevant log timeline</summary><div class="monitor-crash-timeline" id="monitor-crash-timeline"></div></details></div>
+      <div class="monitor-crash-history"><h4>Saved analyses</h4><div id="monitor-crash-history"><div class="speaker-loading">Loading saved analyses…</div></div></div>
+    </section>
+    <section class="monitor-section" aria-labelledby="monitor-events-title"><div class="monitor-section-head"><h3 id="monitor-events-title">Event timeline</h3><span id="monitor-event-count">—</span></div><div class="monitor-events" id="monitor-events"><div class="speaker-loading">Loading events…</div></div></section>
   </section>
 </div>
 <div class="speaker-backdrop" id="lighting-backdrop">

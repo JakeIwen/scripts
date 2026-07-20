@@ -356,6 +356,98 @@ class PriceCheckControllerTests(unittest.TestCase):
             dashboard.PriceCheckController(command=malformed).status()
 
 
+class SystemMonitorClientTests(unittest.TestCase):
+    PAYLOAD = {
+        "ok": True,
+        "status": {"available": True, "stale": False, "current": {}},
+        "diagnosis": {"level": "good", "headline": "No faults"},
+        "peaks": {},
+        "events": [],
+    }
+
+    def test_uses_fixed_report_command_and_parses_json(self):
+        calls = []
+
+        def command(args, timeout):
+            calls.append((list(args), timeout))
+            return SimpleNamespace(
+                returncode=0, stdout=json.dumps(self.PAYLOAD), stderr=""
+            )
+
+        client = dashboard.SystemMonitorClient(
+            tool="/test/system_event_monitor.py",
+            database="/test/events.sqlite3",
+            command=command,
+            timeout=12,
+        )
+        self.assertEqual(client.report(168), self.PAYLOAD)
+        self.assertEqual(
+            calls,
+            [
+                (
+                    [
+                        dashboard.sys.executable,
+                        "/test/system_event_monitor.py",
+                        "--database",
+                        "/test/events.sqlite3",
+                        "report",
+                        "--hours",
+                        "168",
+                        "--limit",
+                        "100",
+                        "--json",
+                    ],
+                    12,
+                )
+            ],
+        )
+
+    def test_rejects_failed_or_malformed_report(self):
+        failed = dashboard.SystemMonitorClient(
+            command=lambda args, timeout: SimpleNamespace(
+                returncode=1, stdout="", stderr="database unavailable"
+            )
+        )
+        with self.assertRaisesRegex(
+            dashboard.SystemMonitorCommandError, "database unavailable"
+        ):
+            failed.report()
+
+        malformed = dashboard.SystemMonitorClient(
+            command=lambda args, timeout: SimpleNamespace(
+                returncode=0, stdout="not-json", stderr="broken"
+            )
+        )
+        with self.assertRaisesRegex(dashboard.SystemMonitorCommandError, "invalid output"):
+            malformed.report()
+
+    def test_uses_fixed_crash_analysis_and_full_history_commands(self):
+        calls = []
+
+        def command(args, timeout):
+            calls.append(list(args))
+            return SimpleNamespace(returncode=0, stdout='{"ok": true}', stderr="")
+
+        client = dashboard.SystemMonitorClient(
+            tool="/test/monitor.py",
+            database="/test/events.sqlite3",
+            command=command,
+        )
+        client.crash_analysis()
+        client.crash_history(20)
+        prefix = [
+            dashboard.sys.executable,
+            "/test/monitor.py",
+            "--database",
+            "/test/events.sqlite3",
+        ]
+        self.assertEqual(calls[0], prefix + ["crash-report", "--save", "--json"])
+        self.assertEqual(
+            calls[1],
+            prefix + ["crash-history", "--limit", "20", "--full", "--json"],
+        )
+
+
 class PriceCheckApiTests(unittest.TestCase):
     def setUp(self):
         self.original = dashboard.price_checks
@@ -1143,6 +1235,17 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"Group volume", page.data)
         self.assertIn(b"data-group-mute", page.data)
         self.assertIn(b"Disks &amp; Torrents", page.data)
+        self.assertIn(b'id="system-monitor"', page.data)
+        self.assertIn(b'id="system-monitor-panel"', page.data)
+        self.assertIn(b'id="monitor-diagnosis"', page.data)
+        self.assertIn(b'id="monitor-events"', page.data)
+        self.assertIn(b'id="system-monitor-network"', page.data)
+        self.assertIn(b'id="system-monitor-disk"', page.data)
+        self.assertIn(b'id="monitor-io-details"', page.data)
+        self.assertIn(b'id="monitor-crash-analyze"', page.data)
+        self.assertIn(b'id="monitor-crash-history"', page.data)
+        self.assertIn(b'id="monitor-crash-timeline"', page.data)
+        self.assertIn(b'data-monitor-hours="168"', page.data)
         self.assertIn(b'id="price-checks"', page.data)
         self.assertIn(b'id="price-panel"', page.data)
         self.assertIn(b'id="price-add-form"', page.data)
@@ -1162,7 +1265,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertNotIn(b'id="connectivity-age"', page.data)
         self.assertIn(b'id="openwrt-card" data-dashboard-tile', page.data)
         self.assertIn(b'id="speedtest-button" data-dashboard-tile', page.data)
-        self.assertEqual(page.data.count(b"data-dashboard-tile"), 10)
+        self.assertEqual(page.data.count(b"data-dashboard-tile"), 11)
         self.assertIn(b'class="network-card speedtest-card"', page.data)
         self.assertIn(b'id="ubnt-network-list"', page.data)
         self.assertIn(b'id="ubnt-password-form"', page.data)
@@ -1207,6 +1310,15 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"function policyRequestBlocked", javascript.data)
         self.assertIn(b"function renderLighting(next)", javascript.data)
         self.assertIn(b"function renderPriceChecks(response)", javascript.data)
+        self.assertIn(b"function renderSystemMonitor(response)", javascript.data)
+        self.assertIn(b"function renderCrashAnalysis(payload)", javascript.data)
+        self.assertIn(b"function renderCrashHistory(payload)", javascript.data)
+        self.assertIn(b"function monitorEventState(event)", javascript.data)
+        self.assertIn(b"function formatRate(value)", javascript.data)
+        self.assertIn(b"network_rx_bytes_per_second", javascript.data)
+        self.assertIn(b"disk_write_bytes_per_second", javascript.data)
+        self.assertIn(b"/api/system-monitor?hours=", javascript.data)
+        self.assertIn(b"system-monitor/crash-analysis", javascript.data)
         self.assertIn(b"price-checks/check", javascript.data)
         self.assertIn(b"price-checks/edit", javascript.data)
         self.assertIn(b"data-price-edit", javascript.data)
@@ -1223,10 +1335,16 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b".policy-toggle", stylesheet.data)
         self.assertIn(b".policy-toggle.blocked", stylesheet.data)
         self.assertIn(b".policy-runtime-state::before", stylesheet.data)
+        self.assertIn(b".monitor-crash-button", stylesheet.data)
+        self.assertIn(b".monitor-crash-history-item", stylesheet.data)
         self.assertIn(b".lighting-master", stylesheet.data)
         self.assertIn(b".lighting-slider", stylesheet.data)
         self.assertIn(b".price-row", stylesheet.data)
         self.assertIn(b".price-form-grid", stylesheet.data)
+        self.assertIn(b".monitor-diagnosis", stylesheet.data)
+        self.assertIn(b".monitor-event-state", stylesheet.data)
+        self.assertIn(b".monitor-io-details", stylesheet.data)
+        self.assertIn(b".monitor-io-row", stylesheet.data)
         self.assertIn(b".tile-edit-button", stylesheet.data)
         self.assertIn(
             b"body.tiles-editing #tile-grid > [data-dashboard-tile]",
@@ -1272,6 +1390,72 @@ class DashboardRouteTests(unittest.TestCase):
         speedtest = client.get("/api/speedtest")
         self.assertEqual(speedtest.status_code, 200)
         self.assertIn(speedtest.json["speedtest"]["status"], ("idle", "complete", "error"))
+
+    def test_system_monitor_route_has_bounded_ranges(self):
+        calls = []
+
+        class FakeSystemMonitor:
+            def report(self, hours):
+                calls.append(hours)
+                return {
+                    "ok": True,
+                    "status": {"available": True, "stale": False, "current": {}},
+                    "diagnosis": {"level": "good", "headline": "No faults"},
+                    "peaks": {},
+                    "events": [],
+                }
+
+        original = dashboard.system_monitor
+        dashboard.system_monitor = FakeSystemMonitor()
+        try:
+            client = dashboard.app.test_client()
+            default = client.get("/api/system-monitor")
+            week = client.get("/api/system-monitor?hours=168")
+            invalid = client.get("/api/system-monitor?hours=25")
+            extra = client.get("/api/system-monitor?hours=24&command=anything")
+        finally:
+            dashboard.system_monitor = original
+
+        self.assertEqual(default.status_code, 200)
+        self.assertEqual(default.headers["Cache-Control"], "no-store")
+        self.assertEqual(week.status_code, 200)
+        self.assertEqual(invalid.status_code, 400)
+        self.assertEqual(extra.status_code, 400)
+        self.assertEqual(calls, [24, 168])
+
+    def test_crash_analysis_routes_save_and_return_full_history(self):
+        calls = []
+
+        class FakeSystemMonitor:
+            def crash_analysis(self):
+                calls.append(("analyze",))
+                return {"ok": True, "saved": True, "analysis": {"available": True}}
+
+            def crash_history(self, limit):
+                calls.append(("history", limit))
+                return {"ok": True, "history": []}
+
+        original = dashboard.system_monitor
+        dashboard.system_monitor = FakeSystemMonitor()
+        try:
+            client = dashboard.app.test_client()
+            analysis = client.post("/api/system-monitor/crash-analysis")
+            history = client.get("/api/system-monitor/crashes")
+            bad_analysis = client.post(
+                "/api/system-monitor/crash-analysis", data={"boot": "anything"}
+            )
+            bad_history = client.get("/api/system-monitor/crashes?limit=2")
+        finally:
+            dashboard.system_monitor = original
+
+        self.assertEqual(analysis.status_code, 200)
+        self.assertTrue(analysis.json["saved"])
+        self.assertEqual(analysis.headers["Cache-Control"], "no-store")
+        self.assertEqual(history.status_code, 200)
+        self.assertEqual(history.headers["Cache-Control"], "no-store")
+        self.assertEqual(bad_analysis.status_code, 400)
+        self.assertEqual(bad_history.status_code, 400)
+        self.assertEqual(calls, [("analyze",), ("history", 20)])
 
     def test_lighting_routes_are_authoritative_and_reject_unknown_inputs(self):
         calls = []
