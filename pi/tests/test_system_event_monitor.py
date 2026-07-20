@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from pi.scripts import system_event_monitor as monitor
 
@@ -158,6 +159,16 @@ class CrashAnalysisTests(unittest.TestCase):
         self.assertNotIn("do-not-store", redacted)
         self.assertNotIn("password:secret", redacted)
 
+    def test_uses_monotonic_journal_time_when_wall_clock_jumps(self):
+        records = [
+            self.record(500, "Linux version test", monotonic="1000000"),
+            self.record(100, "final kernel message", monotonic="11000000"),
+        ]
+        analysis = monitor.analyze_previous_boot(records)
+        self.assertEqual(analysis["previous_boot"]["duration_seconds"], 10)
+        self.assertEqual(analysis["previous_boot"]["started_at"], 500)
+        self.assertEqual(analysis["previous_boot"]["ended_at"], 100)
+
 
 class CrashHistoryStoreTests(unittest.TestCase):
     def setUp(self):
@@ -308,6 +319,135 @@ class StoreAndDiagnosisTests(unittest.TestCase):
             readonly.close()
         self.assertTrue(report["ok"])
         self.assertTrue(report["status"]["available"])
+
+    def test_flight_samples_are_durable_ordered_and_pruned_separately(self):
+        old = {
+            "timestamp": self.now - 72 * 3600,
+            "uptime_seconds": 10,
+            "boot_id": "01234567-89ab-cdef-0123-456789abcdef",
+            "cpu_percent": 1,
+        }
+        recent = {
+            "timestamp": self.now - 5,
+            "uptime_seconds": 20,
+            "boot_id": "0123456789abcdef0123456789abcdef",
+            "cpu_percent": 2,
+        }
+        self.store.record_sample(old)
+        self.store.record_sample(recent)
+        samples = self.store.flight_samples(recent["boot_id"])
+        self.assertEqual([item["cpu_percent"] for item in samples], [1, 2])
+        self.assertEqual(samples[-1]["boot_id"], recent["boot_id"])
+        self.assertEqual(self.store.connection.execute("PRAGMA synchronous").fetchone()[0], 2)
+        self.store.prune(sample_retention_hours=5 / 3600)
+        samples = self.store.flight_samples(recent["boot_id"])
+        self.assertEqual([item["cpu_percent"] for item in samples], [2])
+
+
+class FlightRecorderTests(unittest.TestCase):
+    def test_pressure_parser_and_resource_summary_keep_crash_precursors(self):
+        pressure = monitor.parse_pressure(
+            "some avg10=1.25 avg60=0.50 avg300=0.10 total=12345\n"
+            "full avg10=0.25 avg60=0.10 avg300=0.01 total=99"
+        )
+        self.assertEqual(pressure["some"]["avg10"], 1.25)
+        self.assertEqual(pressure["full"]["total"], 99)
+        samples = [
+            {
+                "timestamp": 100,
+                "uptime_seconds": 50,
+                "boot_id": "boot-one",
+                "cpu_percent": 10,
+                "memory": {"used_percent": 40},
+                "top_cpu": [{"name": "idle"}],
+                "top_memory": [{"name": "idle"}],
+                "disk_io": {"busy_percent": 2},
+                "network_io": {},
+                "load": {"1m": 1},
+                "swap": {"used_percent": 0},
+                "temperature_c": 50,
+                "arm_mhz": 1500,
+            },
+            {
+                "timestamp": 110,
+                "uptime_seconds": 60,
+                "boot_id": "boot-one",
+                "cpu_percent": 95,
+                "memory": {"used_percent": 94},
+                "top_cpu": [{"name": "worker"}],
+                "top_memory": [{"name": "worker"}],
+                "disk_io": {"busy_percent": 99},
+                "network_io": {},
+                "load": {"1m": 9},
+                "swap": {"used_percent": 20},
+                "temperature_c": 70,
+                "arm_mhz": 600,
+            },
+        ]
+        evidence = monitor.build_resource_evidence(samples)
+        self.assertEqual(evidence["span_seconds"], 10)
+        self.assertEqual(evidence["peaks"]["cpu_percent"]["value"], 95)
+        self.assertEqual(
+            evidence["peaks"]["cpu_percent"]["top_process"]["name"], "worker"
+        )
+        self.assertEqual(evidence["peaks"]["minimum_arm_mhz"]["value"], 600)
+
+    def test_boot_capture_saves_database_and_atomic_json_copy(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            store = monitor.EventStore(os.path.join(tempdir, "events.sqlite3"))
+            report = {
+                "ok": True,
+                "version": 1,
+                "generated_at": 200,
+                "current_boot_id": "boot-current",
+                "analysis": {
+                    "available": True,
+                    "level": "warning",
+                    "headline": "Abrupt restart",
+                    "findings": [],
+                    "previous_boot": {
+                        "boot_id": "boot-old",
+                        "started_at": 100,
+                        "ended_at": 190,
+                    },
+                    "timeline": [],
+                    "counts": {},
+                    "pstore": [],
+                    "resource_evidence": {
+                        "available": False,
+                        "sample_count": 0,
+                        "tail": [],
+                        "peaks": {},
+                    },
+                },
+            }
+            current_sample = {
+                "timestamp": 201,
+                "uptime_seconds": 5,
+                "boot_id": "boot-current",
+                "cpu_percent": None,
+            }
+            sampler = mock.Mock()
+            sampler.sample.return_value = current_sample
+            output = os.path.join(tempdir, "reports")
+            with mock.patch.object(monitor, "build_crash_report", return_value=report), mock.patch.object(
+                monitor, "ResourceSampler", return_value=sampler
+            ), mock.patch.object(monitor, "collect_usb_state", return_value=[]), mock.patch.object(
+                monitor, "collect_mount_state", return_value=[]
+            ):
+                captured = monitor.capture_previous_boot(store, output)
+            self.assertTrue(captured["saved"])
+            self.assertTrue(os.path.isfile(captured["report_path"]))
+            with open(captured["report_path"], encoding="utf-8") as handle:
+                on_disk = json.load(handle)
+            self.assertEqual(on_disk["analysis"]["previous_boot"]["boot_id"], "boot-old")
+            self.assertEqual(len(store.crash_history()), 1)
+            kinds = [
+                row[0]
+                for row in store.connection.execute("SELECT kind FROM events").fetchall()
+            ]
+            self.assertEqual(kinds, ["boot_crash_evidence_captured"])
+            store.close()
 
 
 class RollupTests(unittest.TestCase):

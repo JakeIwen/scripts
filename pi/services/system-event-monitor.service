@@ -1,6 +1,7 @@
 [Unit]
 Description=Vanpi power, USB, kernel event, and resource monitor
-After=systemd-journald.service
+Wants=vanpi-crash-capture.service
+After=systemd-journald.service vanpi-crash-capture.service
 
 [Service]
 Type=simple

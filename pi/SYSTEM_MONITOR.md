@@ -12,11 +12,13 @@ It does not reset USB devices or change power, clocks, services, or CAN state.
 - Timestamped kernel undervoltage/recovery, USB connection/error/reset/
   disconnect, USB over-current, storage I/O, OOM, watchdog, hung-task, panic,
   and kernel-warning events.
-- Five-second resource observations summarized into one-minute peak rollups:
+- Five-second resource observations durably retained as a 48-hour flight
+  recorder and summarized into one-minute peak rollups:
   total CPU, memory, swap, load, SoC temperature, root usage, Arm clock,
   physical-interface network receive/transmit rates, whole-disk read/write
-  rates, IOPS, and disk busy time. Rollups retain the top process, interface,
-  or disk at each peak.
+  rates, IOPS, disk busy time, Linux CPU/memory/I/O pressure, selected VM
+  counters, and passive DRM/framebuffer state. Samples and rollups retain the
+  top process, interface, or disk at each peak.
 - A live state snapshot on new events: resource state, top processes, USB sysfs
   topology, mounted local filesystems, firmware flags, and failed systemd units.
 
@@ -27,7 +29,11 @@ kernel process name, PID, CPU percentage, and RSS.
 At startup the daemon imports relevant messages from the current boot. Those
 older events are labeled as journal backfill because a full state snapshot was
 not available at their original event time. New events get live snapshots.
-Resource rollups are retained for 90 days; noteworthy events are retained.
+Resource rollups are retained for 90 days; noteworthy events are retained. The
+48-hour detailed sample ring is bounded by insertion order rather than wall
+clock, because boot-time NTP correction can move a Pi's clock. It is written
+with SQLite's FULL
+synchronous mode so a committed sample is recoverable after abrupt power loss.
 
 The database is `/var/lib/vanpi-monitor/events.sqlite3`. The dashboard accesses
 it through bounded monitor commands instead of opening the database itself.
@@ -61,7 +67,15 @@ Filter normalized events and optionally include the captured state:
 /home/pi/scripts/system_event_monitor.py events --hours 24 --severity critical --state --json
 ```
 
-Analyze the journal retained from the preceding boot and save the report:
+`vanpi-crash-capture.service` runs once on every boot, after persistent journal
+and pstore processing but before the continuous monitor. It automatically saves
+the preceding boot's redacted journal analysis, up to the final 30 minutes of
+detailed flight-recorder samples, and a current-boot hardware/state snapshot.
+An atomic JSON copy is also kept under
+`/var/lib/vanpi-monitor/crash-reports/`, keyed by boot ID.
+
+Analyze the journal retained from the preceding boot and save/update the report
+manually:
 
 ```bash
 /home/pi/scripts/system_event_monitor.py crash-report --save
@@ -83,6 +97,13 @@ Crash analysis is read-only with respect to the operating system: it reads the
 previous-boot journal and kernel pstore but does not reset devices, restart
 services, or alter power state. Log URLs and common token/password assignments
 are redacted before a report is returned or stored.
+
+The deployed journald drop-in makes storage explicitly persistent, syncs it at
+least every 15 seconds, and keeps up to 300 MiB while reserving 2 GiB of free
+root space. `/boot/firmware/config.txt` includes
+`vanpi-crash-evidence.txt`, which enables a 256 KiB `ramoops` region. After the
+next reboot, a kernel panic/oops or captured console tail can survive in pstore;
+`systemd-pstore` archives it under `/var/lib/systemd/pstore/` for the boot hook.
 
 Firmware history bits are sticky until reboot. For a controlled A/B power test,
 safely unmount affected storage before disconnecting anything, reboot to clear
