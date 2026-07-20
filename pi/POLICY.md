@@ -39,6 +39,18 @@ or internet availability. While parked, disks are mounted unless explicitly
 disabled. qBittorrent may remain running without an internet uplink and resume
 naturally when connectivity returns.
 
+`vanpi-storage.path` watches the udev-managed filesystem-label and
+partition-label directories and requests immediate policy reconciliation when
+their contents change. The periodic policy job remains a fallback for missed
+events and boot races.
+
+Before applying requested policy, reconciliation checks every `MOUNT_LABELS`
+target for a kernel mount whose `/dev` source vanished during a USB reset or
+disconnect. It stops backup, torrent, and SMB consumers, revalidates the exact
+stale source, and attempts a bounded normal unmount. It never force-unmounts or
+lazy-detaches a filesystem. After successful cleanup, the ordinary exact-label
+mount logic can attach a re-enumerated device at the same target.
+
 ## Commands and aliases
 
 ```bash

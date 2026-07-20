@@ -48,8 +48,28 @@ cat > "$test_root/sleep" <<'HELPER'
 [[ "$#" == 1 && "$1" == 1 ]] || exit 99
 printf '%s\n' "$1" >> "$TEST_SLEEP_CALLS"
 HELPER
+cat > "$test_root/mount-disks" <<'HELPER'
+#!/bin/bash
+printf 'mount:%s\n' "${1:-default}" >> "$TEST_STALE_RECOVERY_CALLS"
+case "${1:-}" in
+  --list-stale)
+    printf '%s' "${TEST_STALE_MOUNTS:-}"
+    exit "${TEST_STALE_SCAN_STATUS:-0}"
+    ;;
+  --recover-stale)
+    exit "${TEST_STALE_RECOVERY_STATUS:-0}"
+    ;;
+  *) exit 0 ;;
+esac
+HELPER
+cat > "$test_root/abort-backup" <<'HELPER'
+#!/bin/bash
+printf 'abort-backup\n' >> "$TEST_STALE_RECOVERY_CALLS"
+exit "${TEST_ABORT_BACKUP_STATUS:-0}"
+HELPER
 chmod +x "$test_root/policyctl" "$test_root/tuya-status" \
-  "$test_root/pgrep" "$test_root/pkill" "$test_root/sleep"
+  "$test_root/pgrep" "$test_root/pkill" "$test_root/sleep" \
+  "$test_root/mount-disks" "$test_root/abort-backup"
 
 export ISW_POLICYCTL="$test_root/policyctl"
 export ISW_IGNITION_FLAG="$test_root/ignition_is_on"
@@ -57,11 +77,14 @@ export ISW_TUYA_STATUS="$test_root/tuya-status"
 export ISW_PGREP="$test_root/pgrep"
 export ISW_PKILL="$test_root/pkill"
 export ISW_SLEEP="$test_root/sleep"
+export ISW_MOUNT_DISKS="$test_root/mount-disks"
+export ISW_ABORT_BACKUP="$test_root/abort-backup"
 export TEST_STARLINK_CALLS="$test_root/starlink-calls"
 export TEST_PGREP_CALLS="$test_root/pgrep-calls"
 export TEST_PGREP_COUNT="$test_root/pgrep-count"
 export TEST_PKILL_CALLS="$test_root/pkill-calls"
 export TEST_SLEEP_CALLS="$test_root/sleep-calls"
+export TEST_STALE_RECOVERY_CALLS="$test_root/stale-recovery-calls"
 
 # shellcheck source=../scripts/internet_switches.sh
 source "$repo_root/pi/scripts/internet_switches.sh"
@@ -93,8 +116,31 @@ fi
 assert_eq 30 "$(wc -l < "$TEST_SLEEP_CALLS" | tr -d ' ')" \
   "stuck torrent stop must be bounded at 30 seconds"
 
+kill_torrent_client() {
+  printf 'kill-torrent\n' >> "$TEST_STALE_RECOVERY_CALLS"
+}
+stop_service() {
+  printf 'stop:%s\n' "$1" >> "$TEST_STALE_RECOVERY_CALLS"
+}
+
+: > "$TEST_STALE_RECOVERY_CALLS"
+export TEST_STALE_MOUNTS=""
+recover_stale_mounts_if_needed >/dev/null 2>&1 ||
+  fail "empty stale-mount scan returned failure"
+assert_eq "mount:--list-stale" "$(cat "$TEST_STALE_RECOVERY_CALLS")" \
+  "empty stale scan must not stop consumers"
+
+: > "$TEST_STALE_RECOVERY_CALLS"
+export TEST_STALE_MOUNTS=$'EXFAT512\t/mnt/EXFAT512\t/dev/vanished'
+recover_stale_mounts_if_needed >/dev/null 2>&1 ||
+  fail "stale-mount recovery orchestration returned failure"
+expected_calls=$'mount:--list-stale\nabort-backup\nkill-torrent\nstop:smbd\nmount:--recover-stale'
+assert_eq "$expected_calls" "$(cat "$TEST_STALE_RECOVERY_CALLS")" \
+  "stale recovery must stop consumers before normal unmount"
+
 ACTION=""
 IO_ERROR=1
+recover_stale_mounts_if_needed() { return 0; }
 mount_drives() { ACTION="${ACTION:+$ACTION }mount"; }
 kill_torrent_client() { ACTION="${ACTION:+$ACTION }kill-torrent"; }
 start_torrent_client() { ACTION="${ACTION:+$ACTION }start-torrent"; }

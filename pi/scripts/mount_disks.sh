@@ -1,9 +1,18 @@
 #! /bin/bash
 
+md_script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=disk_policy.sh
+if ! . "$md_script_dir/disk_policy.sh"; then
+  echo "ERROR: cannot load $md_script_dir/disk_policy.sh" >&2
+  return 1 2>/dev/null || exit 1
+fi
+
 # Set by md_resolve_label on success.
 MD_DEVICE=""
 MD_LABEL_KEY=""
 MD_MOUNT_SOURCE=""
+MD_STALE_LABELS=()
+MD_STALE_SOURCES=()
 
 md_query_token() {
   local token="$1"
@@ -124,6 +133,14 @@ md_canonical_path() {
   /usr/bin/readlink -f -- "$1"
 }
 
+md_mount_source_is_live() {
+  local source="$1"
+  local resolved_source
+
+  resolved_source="$(md_canonical_path "$source" 2>/dev/null)"
+  [[ -n "$resolved_source" && -b "$resolved_source" ]]
+}
+
 # Return the one source mounted at exactly this path.  Unlike findmnt -T, -M
 # does not mistake the root filesystem containing an unmounted directory for a
 # mount on that directory.  Returns 0 for one mount, 1 for no mount, and 2 when
@@ -187,6 +204,120 @@ md_check_existing_mount() {
     echo "ERROR: $pth is mounted from unexpected source $source; exact label '$label' resolves to $device; refusing" >&2
   fi
   return 2
+}
+
+# Collect managed targets whose kernel mount still refers to a /dev node that
+# vanished. This is distinct from an unexpected-but-live source, which remains
+# a hard refusal and is never unmounted automatically.
+md_collect_stale_mounts() {
+  local label
+  local pth
+  local status
+  local source
+
+  MD_STALE_LABELS=()
+  MD_STALE_SOURCES=()
+  for label in "${MOUNT_LABELS[@]}"; do
+    pth="/mnt/$label"
+    md_find_exact_mount_source "$pth"
+    status=$?
+    if (( status == 1 )); then
+      continue
+    elif (( status != 0 )); then
+      return 1
+    fi
+
+    source="$MD_MOUNT_SOURCE"
+    if [[ "$source" == /dev/* ]] && ! md_mount_source_is_live "$source"; then
+      MD_STALE_LABELS+=("$label")
+      MD_STALE_SOURCES+=("$source")
+    fi
+  done
+}
+
+md_list_stale_mounts() {
+  local index
+
+  md_collect_stale_mounts || return 1
+  for index in "${!MD_STALE_LABELS[@]}"; do
+    printf '%s\t/mnt/%s\t%s\n' \
+      "${MD_STALE_LABELS[$index]}" \
+      "${MD_STALE_LABELS[$index]}" \
+      "${MD_STALE_SOURCES[$index]}"
+  done
+}
+
+md_normal_unmount_stale_target() {
+  /usr/bin/sudo /usr/bin/timeout --kill-after=5 15 \
+    /usr/bin/umount -- "$1"
+}
+
+md_recover_stale_mounts() {
+  local index
+  local label
+  local pth
+  local expected_source
+  local status
+  local output
+  local had_failure=0
+
+  # Finish discovery before changing any mount. A discovery error therefore
+  # prevents partial cleanup across the managed target set.
+  md_collect_stale_mounts || return 1
+  if (( ${#MD_STALE_LABELS[@]} == 0 )); then
+    echo "no stale managed mounts found"
+    return 0
+  fi
+
+  for index in "${!MD_STALE_LABELS[@]}"; do
+    label="${MD_STALE_LABELS[$index]}"
+    pth="/mnt/$label"
+    expected_source="${MD_STALE_SOURCES[$index]}"
+
+    # Revalidate immediately before unmounting. Never touch a target that was
+    # remounted or whose source became live after the initial scan.
+    md_find_exact_mount_source "$pth"
+    status=$?
+    if (( status == 1 )); then
+      echo "$label: stale mount disappeared before recovery"
+      continue
+    elif (( status != 0 )); then
+      had_failure=1
+      continue
+    fi
+    if [[ "$MD_MOUNT_SOURCE" != "$expected_source" ]]; then
+      echo "ERROR: $pth source changed from $expected_source to $MD_MOUNT_SOURCE; refusing recovery" >&2
+      had_failure=1
+      continue
+    fi
+    if md_mount_source_is_live "$MD_MOUNT_SOURCE"; then
+      echo "ERROR: $pth source $MD_MOUNT_SOURCE became live; refusing stale recovery" >&2
+      had_failure=1
+      continue
+    fi
+
+    echo "recovering stale mount for $label: $expected_source -> $pth"
+    output="$(md_normal_unmount_stale_target "$pth" 2>&1)"
+    status=$?
+    if (( status != 0 )); then
+      echo "ERROR: normal unmount failed for stale $label mount (status $status): ${output:-no diagnostic output}" >&2
+      had_failure=1
+      continue
+    fi
+
+    md_find_exact_mount_source "$pth"
+    status=$?
+    if (( status == 0 )); then
+      echo "ERROR: $pth remains mounted after stale recovery" >&2
+      had_failure=1
+    elif (( status != 1 )); then
+      had_failure=1
+    else
+      echo "recovered stale mount for $label"
+    fi
+  done
+
+  (( had_failure == 0 ))
 }
 
 md_first_mount_dir_entry() {
@@ -392,9 +523,18 @@ mount_disks_main() {
   local dir
   local disk
   local -a rm_dirs=(mbp1tbkup mbp2tbkup)
-  local -a disks=(movingparts mbp1tbkup mbp2tbkup hfs2tb usbext EXFAT512)
+  local -a disks=("${MOUNT_LABELS[@]}")
 
-  if (( $# == 1 )); then
+  if (( $# == 1 )) && [[ "$1" == --list-stale ]]; then
+    md_list_stale_mounts
+    return $?
+  elif (( $# == 1 )) && [[ "$1" == --recover-stale ]]; then
+    md_recover_stale_mounts
+    return $?
+  elif (( $# == 1 )) && [[ "$1" == --* ]]; then
+    echo "usage: ${0##*/} [label|--list-stale|--recover-stale]" >&2
+    return 2
+  elif (( $# == 1 )); then
     mntdsk "$1" || had_failure=1
   elif (( $# == 0 )); then # used by the minutely policy job
     for dir in "${rm_dirs[@]}"; do
@@ -409,7 +549,7 @@ mount_disks_main() {
     # mntdsk mbbackup
     # mntdsk bigboi
   else
-    echo "usage: ${0##*/} [label]" >&2
+    echo "usage: ${0##*/} [label|--list-stale|--recover-stale]" >&2
     return 2
   fi
 

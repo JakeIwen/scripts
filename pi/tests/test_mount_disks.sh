@@ -77,6 +77,56 @@ assert_eq 1 "$status" "directory probe failure must fail closed"
    "$output" == *"failed to restore inaccessible working directory"* ]] ||
   fail "directory probe stderr was not preserved: $output"
 
+# Only a vanished /dev source at an allowlisted target is stale. A live source
+# must never be selected for automatic recovery.
+MOUNT_LABELS=(movingparts EXFAT512)
+TEST_MOVING_SOURCE_FILE="$test_root/moving-source"
+TEST_EXFAT_SOURCE_FILE="$test_root/exfat-source"
+TEST_UNMOUNT_CALLS_FILE="$test_root/unmount-calls"
+printf '%s\n' /dev/vanished-test-device > "$TEST_MOVING_SOURCE_FILE"
+printf '%s\n' /dev/live-test-device > "$TEST_EXFAT_SOURCE_FILE"
+: > "$TEST_UNMOUNT_CALLS_FILE"
+md_find_exact_mount_source() {
+  case "$1" in
+    /mnt/movingparts) IFS= read -r MD_MOUNT_SOURCE < "$TEST_MOVING_SOURCE_FILE" ;;
+    /mnt/EXFAT512) IFS= read -r MD_MOUNT_SOURCE < "$TEST_EXFAT_SOURCE_FILE" ;;
+    *) MD_MOUNT_SOURCE=""; return 1 ;;
+  esac
+  [[ -n "$MD_MOUNT_SOURCE" ]] || return 1
+}
+md_mount_source_is_live() {
+  [[ "$1" == /dev/live-test-device ]]
+}
+md_normal_unmount_stale_target() {
+  printf '%s\n' "$1" >> "$TEST_UNMOUNT_CALLS_FILE"
+  case "$1" in
+    /mnt/movingparts) : > "$TEST_MOVING_SOURCE_FILE" ;;
+    /mnt/EXFAT512) : > "$TEST_EXFAT_SOURCE_FILE" ;;
+    *) return 1 ;;
+  esac
+}
+
+output=$(md_list_stale_mounts 2>&1) || fail "stale mount scan returned failure"
+[[ "$output" == $'movingparts\t/mnt/movingparts\t/dev/vanished-test-device' ]] ||
+  fail "stale scan did not isolate the vanished source: $output"
+
+md_recover_stale_mounts >/dev/null 2>&1 || fail "stale recovery returned failure"
+assert_eq "/mnt/movingparts" "$(cat "$TEST_UNMOUNT_CALLS_FILE")" \
+  "stale recovery must normally unmount only the vanished source"
+assert_eq "" "$(cat "$TEST_MOVING_SOURCE_FILE")" "stale recovery did not clear the stale target"
+assert_eq "/dev/live-test-device" "$(cat "$TEST_EXFAT_SOURCE_FILE")" \
+  "stale recovery modified a live mount"
+
+printf '%s\n' /dev/vanished-test-device > "$TEST_MOVING_SOURCE_FILE"
+md_normal_unmount_stale_target() { return 32; }
+if md_recover_stale_mounts >/dev/null 2>&1; then
+  fail "failed normal stale unmount was reported successful"
+fi
+assert_eq "/dev/vanished-test-device" "$(cat "$TEST_MOVING_SOURCE_FILE")" \
+  "failed normal stale unmount changed target state"
+
+MOUNT_LABELS=(movingparts mbp1tbkup mbp2tbkup hfs2tb usbext EXFAT512)
+
 # A failure for the first label must survive later successful/missing labels.
 calls=()
 rm_mnt_dir() { return 0; }
@@ -99,5 +149,7 @@ assert_eq 1 "${#calls[@]}" "single-label reconciliation call count"
 
 mount_disks_main one two >/dev/null 2>&1
 assert_eq 2 "$?" "invalid argument count must return usage failure"
+mount_disks_main --unknown-mode >/dev/null 2>&1
+assert_eq 2 "$?" "unknown maintenance mode must return usage failure"
 
-echo "PASS: mount disk stale-source, underlay, and status safeguards"
+echo "PASS: mount disk stale-source recovery, underlay, and status safeguards"

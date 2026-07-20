@@ -16,6 +16,8 @@ ISW_PKILL=${ISW_PKILL:-/usr/bin/pkill}
 ISW_SLEEP=${ISW_SLEEP:-/usr/bin/sleep}
 ISW_QBIT_PROCESS=${ISW_QBIT_PROCESS:-qbittorrent-nox}
 ISW_QBIT_BINARY=${ISW_QBIT_BINARY:-/usr/bin/qbittorrent-nox}
+ISW_MOUNT_DISKS=${ISW_MOUNT_DISKS:-/home/pi/scripts/mount_disks.sh}
+ISW_ABORT_BACKUP=${ISW_ABORT_BACKUP:-/home/pi/scripts/backup/abort_backup.sh}
 POLICY_DISKS_ENABLED=""
 POLICY_TORRENTS_ENABLED=""
 POLICY_ALLOW_STARLINK_TORRENTS=""
@@ -271,6 +273,40 @@ start_torrent_client() {
   fi
 }
 
+recover_stale_mounts_if_needed() {
+  local stale_mounts
+  local status
+
+  stale_mounts=$("$ISW_MOUNT_DISKS" --list-stale)
+  status=$?
+  if (( status != 0 )); then
+    echo "ERROR: cannot inspect managed targets for stale mounts (status $status)" >&2
+    return 1
+  fi
+  [[ -n "$stale_mounts" ]] || return 0
+
+  echo "stale managed mounts detected:"
+  printf '%s\n' "$stale_mounts"
+
+  # A disconnected filesystem may still be held by a backup, qBittorrent, or
+  # Samba. Stop each consumer before attempting only a normal unmount. The
+  # recovery helper never uses force or lazy detach and revalidates the source
+  # immediately before changing it.
+  "$ISW_ABORT_BACKUP" || {
+    echo "ERROR: backup/restore did not stop; refusing stale-mount recovery" >&2
+    return 1
+  }
+  kill_torrent_client || {
+    echo "ERROR: qBittorrent did not stop; refusing stale-mount recovery" >&2
+    return 1
+  }
+  stop_service smbd || {
+    echo "ERROR: smbd did not stop; refusing stale-mount recovery" >&2
+    return 1
+  }
+  "$ISW_MOUNT_DISKS" --recover-stale
+}
+
 mount_drives() {
   if [[ $(van_is_running) ]]; then
     echo "MOUNT interrupt: van is running, unmounting drives"
@@ -282,7 +318,7 @@ mount_drives() {
     return 1
   else
     /home/pi/scripts/umount_disks.sh --clear-spindown-state || return 1
-    /home/pi/scripts/mount_disks.sh || return 1
+    "$ISW_MOUNT_DISKS" || return 1
     sleep 3
     echo "drives mounted. starting smb share."
     start_service smbd 
@@ -315,6 +351,10 @@ kill_all() {
 set_isw_options() {
   echo ""
   echo "$(date)"
+  # Stale mounts are observed unsafe runtime state, not requested policy. Deal
+  # with them before any policy branch so a vanished device never remains
+  # exposed merely because ignition or the requested configuration changed.
+  recover_stale_mounts_if_needed || return 1
   # Ignition is observed safety state and always wins, even if requested
   # policy is missing or corrupt.
   if ignition_is_on; then

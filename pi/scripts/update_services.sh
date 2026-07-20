@@ -24,10 +24,17 @@ if [[ ! -d "$staged_services" || ! -d "$staged_scripts" ]]; then
   exit 1
 fi
 
-declare -a new_services=()
-declare -a changed_services=()
+shopt -s nullglob
+staged_units=("$staged_services"/*.service "$staged_services"/*.path)
+if (( ${#staged_units[@]} == 0 )); then
+  echo "service update staging contains no systemd units" >&2
+  exit 1
+fi
 
-for staged_unit in "$staged_services"/*.service; do
+declare -a new_units=()
+declare -a changed_units=()
+
+for staged_unit in "${staged_units[@]}"; do
   unit="${staged_unit##*/}"
   live_unit="$live_services/$unit"
   changed=false
@@ -35,7 +42,7 @@ for staged_unit in "$staged_services"/*.service; do
 
   if [[ ! -e "$live_unit" ]]; then
     is_new=true
-    new_services+=("$unit")
+    new_units+=("$unit")
   elif ! cmp -s "$staged_unit" "$live_unit"; then
     changed=true
   fi
@@ -58,7 +65,7 @@ for staged_unit in "$staged_services"/*.service; do
   )
 
   if [[ "$changed" == true && "$is_new" == false ]]; then
-    changed_services+=("$unit")
+    changed_units+=("$unit")
   fi
 done
 
@@ -68,7 +75,7 @@ cp -a "$staged_scripts/." "$live_scripts/"
 # service restart so directly executed shell scripts remain runnable.
 chmod 770 "$live_scripts"/*
 
-for staged_unit in "$staged_services"/*.service; do
+for staged_unit in "${staged_units[@]}"; do
   sudo install -m 0644 "$staged_unit" "$live_services/${staged_unit##*/}"
 done
 
@@ -76,16 +83,16 @@ done
 # files match (for example, after an earlier copy that missed daemon-reload).
 sudo systemctl daemon-reload
 
-for unit in "${new_services[@]}"; do
-  echo "NEW SERVICE: $unit (enabling and starting)"
+for unit in "${new_units[@]}"; do
+  echo "NEW UNIT: $unit (enabling and starting)"
   sudo systemctl enable --now "$unit"
 done
 
-for unit in "${changed_services[@]}"; do
-  echo "UPDATED SERVICE: $unit"
+for unit in "${changed_units[@]}"; do
+  echo "UPDATED UNIT: $unit"
   if sudo systemctl is-active --quiet "$unit"; then
     sudo systemctl restart "$unit"
-    echo "RESTARTED SERVICE: $unit"
+    echo "RESTARTED UNIT: $unit"
   else
     echo "NOT ACTIVE; NOT STARTED: $unit"
   fi

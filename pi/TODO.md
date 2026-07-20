@@ -13,9 +13,9 @@
   event-driven through `ignitionmon.service`; this change should prevent the
   monitor from blocking while disk and network actions complete.
 
-- [ ] Trigger policy reconciliation on disk attachment through udev and
-  systemd. Do not perform mounting, unmounting, or other long-running work in
-  the udev process itself.
+- [x] Trigger policy reconciliation when udev-managed disk-label links change.
+  `vanpi-storage.path` delegates all work to `vanpi-policy.service`; no mounting,
+  unmounting, or other long-running work occurs in the udev process itself.
 
 - [x] Trigger policy reconciliation from OpenWrt when mwan3 uplink state
   changes. Pi-side NetworkManager cannot observe those transitions because the

@@ -1,0 +1,10 @@
+[Unit]
+Description=Reconcile vanpi policy when labeled block devices change
+
+[Path]
+PathChanged=/dev/disk/by-label
+PathChanged=/dev/disk/by-partlabel
+Unit=vanpi-policy.service
+
+[Install]
+WantedBy=multi-user.target
