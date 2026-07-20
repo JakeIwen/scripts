@@ -14,7 +14,7 @@ pi_ip='pi@vanpi.lan'
 # pi_ip='pi@100.82.91.76'
 vr_ip='root@openwrt'
 
-local_stage="$(mktemp -d "${TMPDIR:-/tmp}/vanpi-sync.XXXXXX")" || exit 1
+local_stage="$(mktemp -d "/tmp/vanpi-sync.XXXXXX")" || exit 1
 staged_scripts="$local_stage/scripts"
 
 cleanup_local_stage() {
@@ -33,7 +33,7 @@ cp -R "$pi_apps/van_dashboard/static" "$python_stage/"
 # one multiplexed connection shared by every ssh/scp below: parallel transfers
 # ride it as channels instead of separate connections, so sshd's MaxStartups
 # limit (~10 concurrent handshakes) can't randomly drop any of them
-mux="-o ControlMaster=auto -o ControlPath=$HOME/.ssh/mux-%C -o ControlPersist=120"
+mux="-o ControlMaster=auto -o ControlPath=$local_stage/ssh-%C -o ControlPersist=120"
 ssh $mux $pi_ip true || { echo "can't reach $pi_ip"; exit 1; }
 
 cp_services() {
