@@ -7,6 +7,7 @@
 # Usage: usb_watch.py [interval_seconds]   (default 1)
 
 import glob
+import json
 import os
 import re
 import subprocess
@@ -38,7 +39,9 @@ def snapshot():
     Device numbers change on every replug so they're not part of the key,
     but they're kept as values for the sysfs filesystem-label lookup.
     """
-    out = subprocess.run(["lsusb"], capture_output=True, text=True, check=True).stdout
+    out = subprocess.run(
+        ["/usr/bin/lsusb"], capture_output=True, text=True, check=True
+    ).stdout
     devs = {}
     for line in out.splitlines():
         m = LINE_RE.match(line)
@@ -79,9 +82,40 @@ def usb_labels():
 
 
 def labels_for(key, devnums, labelmap):
+    return ", ".join(label_names_for(key, devnums, labelmap))
+
+
+def label_names_for(key, devnums, labelmap):
     bus = key[0]
     names = sorted({l for dn in devnums for l in labelmap.get((bus, dn), [])})
-    return ", ".join(names)
+    return names
+
+
+def json_snapshot(current=None, labelmap=None):
+    """Return one JSON-safe snapshot for reuse by non-terminal clients."""
+    current = snapshot() if current is None else current
+    labelmap = usb_labels() if labelmap is None else labelmap
+    devices = []
+
+    def sort_key(item):
+        (bus, identity), _devnums = item
+        return (bus, 0 if identity.endswith("root hub") else 1, identity.lower())
+
+    for (bus, identity), devnums in sorted(current.items(), key=sort_key):
+        parts = identity.split(None, 2)
+        device_id = parts[1] if len(parts) >= 2 and parts[0] == "ID" else "unknown"
+        description = parts[2] if len(parts) >= 3 else "Unknown USB device"
+        devices.append(
+            {
+                "bus": bus,
+                "device_id": device_id,
+                "description": description,
+                "present_count": len(devnums),
+                "labels": label_names_for((bus, identity), devnums, labelmap),
+                "root_hub": identity.endswith("root hub"),
+            }
+        )
+    return {"version": 1, "devices": devices}
 
 
 def now():
@@ -89,6 +123,12 @@ def now():
 
 
 def main():
+    if sys.argv[1:] == ["--json"]:
+        print(json.dumps(json_snapshot(), separators=(",", ":"), sort_keys=True))
+        return
+    if len(sys.argv) > 2 or (len(sys.argv) == 2 and sys.argv[1].startswith("-")):
+        print("usage: usb_watch.py [interval_seconds] | --json", file=sys.stderr)
+        raise SystemExit(2)
     interval = float(sys.argv[1]) if len(sys.argv) > 1 else 1.0
 
     # key -> state dict; display is sorted by bus with root hubs first

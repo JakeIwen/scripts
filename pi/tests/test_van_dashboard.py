@@ -8,6 +8,7 @@ from email.message import Message
 from types import SimpleNamespace
 
 from pi.apps.van_dashboard import van_dashboard as dashboard
+from pi.scripts import usb_watch
 
 
 class FakeClock:
@@ -932,6 +933,132 @@ class StoragePolicyManagerTests(unittest.TestCase):
             timed_out.status()
 
 
+class UsbWatchScriptTests(unittest.TestCase):
+    def test_json_snapshot_reuses_usb_and_filesystem_label_discovery(self):
+        current = {
+            ("001", "ID 1d6b:0002 Linux Foundation 2.0 root hub"): [1],
+            ("002", "ID abcd:1234 Example Storage Device"): [7],
+        }
+        labels = {("002", 7): ["movingparts"]}
+        payload = usb_watch.json_snapshot(current=current, labelmap=labels)
+        self.assertEqual(payload["version"], 1)
+        self.assertEqual(payload["devices"][0]["device_id"], "1d6b:0002")
+        self.assertTrue(payload["devices"][0]["root_hub"])
+        self.assertEqual(payload["devices"][1]["description"], "Example Storage Device")
+        self.assertEqual(payload["devices"][1]["labels"], ["movingparts"])
+
+
+class UsbDeviceMonitorTests(unittest.TestCase):
+    @staticmethod
+    def payload(*devices):
+        return json.dumps({"version": 1, "devices": list(devices)})
+
+    @staticmethod
+    def device(device_id, description, count=1, labels=None, bus="002", root=False):
+        return {
+            "bus": bus,
+            "device_id": device_id,
+            "description": description,
+            "present_count": count,
+            "labels": list(labels or []),
+            "root_hub": root,
+        }
+
+    def test_tracks_unplugged_replugged_and_new_devices_from_usb_watch(self):
+        clock = FakeClock(1_000)
+        samples = [
+            self.payload(
+                self.device("1d6b:0002", "Linux root hub", bus="001", root=True),
+                self.device(
+                    "abcd:1234", "Example Storage", count=2, labels=["movingparts"]
+                ),
+            ),
+            self.payload(
+                self.device("1d6b:0002", "Linux root hub", bus="001", root=True),
+                self.device("beef:0001", "New Keyboard"),
+            ),
+            self.payload(
+                self.device("1d6b:0002", "Linux root hub", bus="001", root=True),
+                self.device(
+                    "abcd:1234", "Example Storage", count=1, labels=["movingparts"]
+                ),
+                self.device("beef:0001", "New Keyboard"),
+            ),
+        ]
+        calls = []
+
+        def command(args, timeout):
+            calls.append((list(args), timeout))
+            return SimpleNamespace(returncode=0, stdout=samples.pop(0), stderr="")
+
+        monitor = dashboard.UsbDeviceMonitor(
+            tool="/test/usb_watch.py", command=command, timeout=4, wall_clock=clock
+        )
+        baseline = monitor.refresh()
+        self.assertEqual(baseline["present_device_count"], 2)
+        self.assertEqual(baseline["storage_labels"], ["movingparts"])
+        self.assertTrue(all(device["event"] is None for device in baseline["devices"]))
+
+        clock.advance(5)
+        changed = monitor.refresh()
+        storage = next(
+            device for device in changed["devices"] if device["device_id"] == "abcd:1234"
+        )
+        keyboard = next(
+            device for device in changed["devices"] if device["device_id"] == "beef:0001"
+        )
+        self.assertEqual(storage["status"], "unplugged")
+        self.assertEqual(storage["event"], {"kind": "unplugged", "at": 1005})
+        self.assertEqual(keyboard["event"], {"kind": "plugged", "at": 1005})
+        self.assertEqual(changed["unplugged_device_count"], 2)
+
+        clock.advance(5)
+        replugged = monitor.refresh()
+        storage = next(
+            device for device in replugged["devices"] if device["device_id"] == "abcd:1234"
+        )
+        self.assertEqual(storage["status"], "partial")
+        self.assertEqual(storage["event"], {"kind": "replugged", "at": 1010})
+        self.assertEqual(
+            calls[0],
+            ([dashboard.sys.executable, "/test/usb_watch.py", "--json"], 4),
+        )
+
+    def test_failure_is_bounded_and_keeps_last_good_snapshot(self):
+        responses = [
+            SimpleNamespace(
+                returncode=0,
+                stdout=self.payload(self.device("abcd:1234", "Example Device")),
+                stderr="",
+            ),
+            subprocess.TimeoutExpired("usb_watch", 3),
+        ]
+
+        def command(args, timeout):
+            response = responses.pop(0)
+            if isinstance(response, Exception):
+                raise response
+            return response
+
+        monitor = dashboard.UsbDeviceMonitor(command=command, timeout=3)
+        self.assertEqual(monitor.refresh()["present_device_count"], 1)
+        stale = monitor.refresh()
+        self.assertEqual(stale["present_device_count"], 1)
+        self.assertIn("timed out after 3", stale["last_error"])
+
+    def test_parser_rejects_unexpected_schema(self):
+        invalid = (
+            "not-json",
+            json.dumps({"version": 2, "devices": []}),
+            self.payload(self.device("not-an-id", "Bad device")),
+            self.payload({**self.device("abcd:1234", "Bad labels"), "labels": "disk"}),
+        )
+        for payload in invalid:
+            with self.subTest(payload=payload):
+                with self.assertRaises(ValueError):
+                    dashboard.UsbDeviceMonitor.parse_current(payload)
+
+
 class SpeedTestManagerTests(unittest.TestCase):
     def test_parser_accepts_existing_speedtest_script_output(self):
         output = "Download Speed: 42.75 Mbps\nUpload Speed:   8.5 Mbps\nLatency:        37.2 ms\n"
@@ -1241,6 +1368,9 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="monitor-events"', page.data)
         self.assertIn(b'id="system-monitor-network"', page.data)
         self.assertIn(b'id="system-monitor-disk"', page.data)
+        self.assertIn(b'id="usb-devices"', page.data)
+        self.assertIn(b'id="usb-panel"', page.data)
+        self.assertIn(b'id="usb-device-list"', page.data)
         self.assertIn(b'id="monitor-io-details"', page.data)
         self.assertIn(b'id="monitor-crash-analyze"', page.data)
         self.assertIn(b'id="monitor-crash-history"', page.data)
@@ -1265,7 +1395,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertNotIn(b'id="connectivity-age"', page.data)
         self.assertIn(b'id="openwrt-card" data-dashboard-tile', page.data)
         self.assertIn(b'id="speedtest-button" data-dashboard-tile', page.data)
-        self.assertEqual(page.data.count(b"data-dashboard-tile"), 11)
+        self.assertEqual(page.data.count(b"data-dashboard-tile"), 12)
         self.assertIn(b'class="network-card speedtest-card"', page.data)
         self.assertIn(b'id="ubnt-network-list"', page.data)
         self.assertIn(b'id="ubnt-password-form"', page.data)
@@ -1311,6 +1441,8 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"function renderLighting(next)", javascript.data)
         self.assertIn(b"function renderPriceChecks(response)", javascript.data)
         self.assertIn(b"function renderSystemMonitor(response)", javascript.data)
+        self.assertIn(b"function renderUsbDevices(response)", javascript.data)
+        self.assertIn(b"/api/usb-devices", javascript.data)
         self.assertIn(b"function renderCrashAnalysis(payload)", javascript.data)
         self.assertIn(b"function renderCrashHistory(payload)", javascript.data)
         self.assertIn(b"function monitorEventState(event)", javascript.data)
@@ -1345,6 +1477,8 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b".monitor-event-state", stylesheet.data)
         self.assertIn(b".monitor-io-details", stylesheet.data)
         self.assertIn(b".monitor-io-row", stylesheet.data)
+        self.assertIn(b".usb-device-row", stylesheet.data)
+        self.assertIn(b".usb-label", stylesheet.data)
         self.assertIn(b".tile-edit-button", stylesheet.data)
         self.assertIn(
             b"body.tiles-editing #tile-grid > [data-dashboard-tile]",
@@ -1390,6 +1524,37 @@ class DashboardRouteTests(unittest.TestCase):
         speedtest = client.get("/api/speedtest")
         self.assertEqual(speedtest.status_code, 200)
         self.assertIn(speedtest.json["speedtest"]["status"], ("idle", "complete", "error"))
+
+    def test_usb_status_route_is_read_only_and_uncached(self):
+        calls = []
+
+        class FakeUsbDevices:
+            def refresh(self):
+                calls.append("refresh")
+                return {
+                    "checked_at": 123,
+                    "last_success_at": 123,
+                    "last_error": None,
+                    "present_device_count": 2,
+                    "unplugged_device_count": 0,
+                    "storage_labels": ["movingparts"],
+                    "devices": [],
+                }
+
+        original = dashboard.usb_devices
+        dashboard.usb_devices = FakeUsbDevices()
+        try:
+            client = dashboard.app.test_client()
+            response = client.get("/api/usb-devices")
+            rejected = client.get("/api/usb-devices?command=anything")
+        finally:
+            dashboard.usb_devices = original
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(response.json["usb"]["present_device_count"], 2)
+        self.assertEqual(rejected.status_code, 400)
+        self.assertEqual(calls, ["refresh"])
 
     def test_system_monitor_route_has_bounded_ranges(self):
         calls = []

@@ -59,6 +59,14 @@
         <span class="status-line"><span>Disk I/O</span><span id="system-monitor-disk">—</span></span>
       </span>
     </button>
+    <button class="tile usb-tile unknown" id="usb-devices" data-dashboard-tile data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="usb-panel">
+      <span class="pill" id="usb-pill">NO DATA</span><span class="tile-icon" aria-hidden="true">🔌</span>
+      <span class="tile-title">USB Devices</span><span class="tile-detail" id="usb-summary">Reading live USB devices…</span>
+      <span class="status-lines">
+        <span class="status-line"><span>Connected</span><span id="usb-connected">Checking…</span></span>
+        <span class="status-line"><span>Storage</span><span id="usb-storage">—</span></span>
+      </span>
+    </button>
     <button class="tile price-tile" id="price-checks" data-dashboard-tile data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="price-panel">
       <span class="pill" id="price-pill">—</span><span class="tile-icon" aria-hidden="true">🏷️</span>
       <span class="tile-title">Price Watch</span><span class="tile-detail" id="price-summary">Loading watched items…</span>
@@ -150,6 +158,13 @@
       <div class="monitor-crash-history"><h4>Saved analyses</h4><div id="monitor-crash-history"><div class="speaker-loading">Loading saved analyses…</div></div></div>
     </section>
     <section class="monitor-section" aria-labelledby="monitor-events-title"><div class="monitor-section-head"><h3 id="monitor-events-title">Event timeline</h3><span id="monitor-event-count">—</span></div><div class="monitor-events" id="monitor-events"><div class="speaker-loading">Loading events…</div></div></section>
+  </section>
+</div>
+<div class="speaker-backdrop" id="usb-backdrop">
+  <section class="speaker-sheet usb-sheet" id="usb-panel" role="dialog" aria-modal="true" aria-labelledby="usb-title" aria-busy="true">
+    <div class="sheet-grabber"></div><div class="sheet-head"><h2 id="usb-title">USB Devices</h2><span class="policy-sheet-status" id="usb-status">Checking…</span><button class="sheet-close" id="usb-close" aria-label="Close USB devices">&times;</button></div>
+    <p class="sheet-help">Live output from usb_watch.py. Unplugged devices stay red until the dashboard service restarts, making intermittent disconnects visible.</p>
+    <div class="usb-device-list" id="usb-device-list"><div class="speaker-loading">Reading USB buses…</div></div>
   </section>
 </div>
 <div class="speaker-backdrop" id="lighting-backdrop">

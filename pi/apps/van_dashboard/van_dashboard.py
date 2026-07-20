@@ -54,8 +54,12 @@ UBNT_WIFI_TOOL = os.environ.get(
 SPEEDTEST = os.path.expanduser(
     os.environ.get("VAN_DASHBOARD_SPEEDTEST", "/home/pi/scripts/speedtest.sh")
 )
+USB_WATCH_TOOL = os.environ.get(
+    "VAN_DASHBOARD_USB_WATCH_TOOL", "/home/pi/scripts/usb_watch.py"
+)
 CONNECTIVITY_INTERVAL = float(os.environ.get("VAN_DASHBOARD_CONNECTIVITY_INTERVAL", "30"))
 SPEEDTEST_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_SPEEDTEST_TIMEOUT", "180"))
+USB_WATCH_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_USB_WATCH_TIMEOUT", "10"))
 PRICE_CHECK_TOOL = os.environ.get(
     "VAN_DASHBOARD_PRICE_CHECK_TOOL", "/home/pi/scripts/price_check/main.py"
 )
@@ -1778,6 +1782,188 @@ def parse_speedtest_output(output):
     return values
 
 
+class UsbDeviceMonitor:
+    """Track live USB devices using usb_watch.py's one-shot collector."""
+
+    DEVICE_FIELDS = {
+        "bus",
+        "device_id",
+        "description",
+        "present_count",
+        "labels",
+        "root_hub",
+    }
+
+    def __init__(
+        self,
+        tool=USB_WATCH_TOOL,
+        command=run_command,
+        timeout=USB_WATCH_TIMEOUT,
+        wall_clock=time.time,
+    ):
+        self.tool = tool
+        self.command = command
+        self.timeout = timeout
+        self.wall_clock = wall_clock
+        self.operation_lock = threading.Lock()
+        self.lock = threading.Lock()
+        self.seen = {}
+        self.baseline = True
+        self.checked_at = None
+        self.last_success_at = None
+        self.last_error = None
+
+    @classmethod
+    def parse_current(cls, output):
+        try:
+            payload = json.loads(output)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"usb_watch returned invalid JSON: {exc}") from exc
+        if not isinstance(payload, dict) or set(payload) != {"version", "devices"}:
+            raise ValueError("usb_watch returned an unexpected schema")
+        if payload["version"] != 1 or type(payload["version"]) is not int:
+            raise ValueError("usb_watch returned an unsupported version")
+        if not isinstance(payload["devices"], list):
+            raise ValueError("usb_watch devices were not a list")
+        parsed = {}
+        for device in payload["devices"]:
+            if not isinstance(device, dict) or set(device) != cls.DEVICE_FIELDS:
+                raise ValueError("usb_watch returned an invalid device")
+            bus = device["bus"]
+            device_id = device["device_id"]
+            description = device["description"]
+            count = device["present_count"]
+            labels = device["labels"]
+            root_hub = device["root_hub"]
+            if not isinstance(bus, str) or not re.fullmatch(r"\d{3}", bus):
+                raise ValueError("usb_watch returned an invalid bus")
+            if not isinstance(device_id, str) or not re.fullmatch(
+                r"(?:[0-9A-Fa-f]{4}:[0-9A-Fa-f]{4}|unknown)", device_id
+            ):
+                raise ValueError("usb_watch returned an invalid device ID")
+            if not isinstance(description, str) or not description or len(description) > 500:
+                raise ValueError("usb_watch returned an invalid description")
+            if type(count) is not int or count < 1:
+                raise ValueError("usb_watch returned an invalid device count")
+            if (
+                not isinstance(labels, list)
+                or any(not isinstance(label, str) or not label for label in labels)
+                or len(labels) != len(set(labels))
+            ):
+                raise ValueError("usb_watch returned invalid filesystem labels")
+            if type(root_hub) is not bool:
+                raise ValueError("usb_watch returned an invalid root-hub flag")
+            key = (bus, device_id, description)
+            if key in parsed:
+                raise ValueError("usb_watch returned a duplicate device")
+            parsed[key] = {
+                "bus": bus,
+                "device_id": device_id.lower(),
+                "description": description,
+                "present_count": count,
+                "labels": list(labels),
+                "root_hub": root_hub,
+            }
+        return parsed
+
+    def refresh(self):
+        with self.operation_lock:
+            now = int(self.wall_clock())
+            try:
+                result = self.command(
+                    [sys.executable, self.tool, "--json"], timeout=self.timeout
+                )
+                if result.returncode:
+                    detail = (result.stderr or result.stdout or "usb_watch failed").strip()
+                    raise RuntimeError(detail[-500:])
+                current = self.parse_current(result.stdout)
+            except subprocess.TimeoutExpired:
+                error = f"usb_watch timed out after {self.timeout:g} seconds"
+            except (OSError, RuntimeError, ValueError) as exc:
+                error = str(exc)
+            else:
+                error = None
+
+            with self.lock:
+                self.checked_at = now
+                if error:
+                    self.last_error = error
+                    return self._snapshot_unlocked()
+
+                for key, device in current.items():
+                    count = device["present_count"]
+                    if key not in self.seen:
+                        event = None if self.baseline else {"kind": "plugged", "at": now}
+                        self.seen[key] = {
+                            **device,
+                            "max_count": count,
+                            "event": event,
+                        }
+                        continue
+                    seen = self.seen[key]
+                    if seen["present_count"] == 0:
+                        seen["event"] = {"kind": "replugged", "at": now}
+                    seen["present_count"] = count
+                    seen["max_count"] = max(seen["max_count"], count)
+                    if device["labels"]:
+                        seen["labels"] = device["labels"]
+
+                for key, seen in self.seen.items():
+                    if key not in current and seen["present_count"] > 0:
+                        seen["present_count"] = 0
+                        seen["event"] = {"kind": "unplugged", "at": now}
+
+                self.baseline = False
+                self.last_success_at = now
+                self.last_error = None
+                return self._snapshot_unlocked()
+
+    def snapshot(self):
+        with self.lock:
+            return self._snapshot_unlocked()
+
+    def _snapshot_unlocked(self):
+        devices = []
+        for seen in sorted(
+            self.seen.values(),
+            key=lambda item: (
+                item["bus"],
+                0 if item["root_hub"] else 1,
+                item["description"].lower(),
+            ),
+        ):
+            if seen["present_count"] == 0:
+                status = "unplugged"
+            elif seen["present_count"] < seen["max_count"]:
+                status = "partial"
+            elif seen["root_hub"]:
+                status = "root"
+            else:
+                status = "present"
+            devices.append({**seen, "status": status})
+
+        physical = [device for device in devices if not device["root_hub"]]
+        present = [device for device in physical if device["present_count"] > 0]
+        labels = sorted(
+            {
+                label
+                for device in present
+                for label in device["labels"]
+            }
+        )
+        return {
+            "checked_at": self.checked_at,
+            "last_success_at": self.last_success_at,
+            "last_error": self.last_error,
+            "present_device_count": sum(device["present_count"] for device in present),
+            "unplugged_device_count": sum(
+                device["max_count"] for device in physical if device["present_count"] == 0
+            ),
+            "storage_labels": labels,
+            "devices": devices,
+        }
+
+
 class SpeedTestManager:
     """Run the existing speedtest script once at a time, outside request threads."""
 
@@ -2002,6 +2188,7 @@ storage_policy = StoragePolicyManager()
 lighting = LightingController()
 price_checks = PriceCheckController()
 system_monitor = SystemMonitorClient()
+usb_devices = UsbDeviceMonitor()
 
 
 def api_error(message, status):
@@ -2282,6 +2469,15 @@ def api_speedtest():
         message = "Speed test started" if started else "Speed test is already running"
         return jsonify({"ok": True, "message": message, "speedtest": speedtest.snapshot()})
     return jsonify({"ok": True, "speedtest": speedtest.snapshot()})
+
+
+@app.route("/api/usb-devices")
+def api_usb_devices():
+    if request.args:
+        return api_error("USB status does not accept input", 400)
+    response = jsonify({"ok": True, "usb": usb_devices.refresh()})
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.route("/api/price-checks")

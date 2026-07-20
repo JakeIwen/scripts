@@ -1508,6 +1508,125 @@ body.busy [data-action] {
   pointer-events: none;
   opacity: 0.55;
 }
+.usb-tile {
+  min-height: 190px;
+}
+.usb-tile .status-line {
+  gap: 7px;
+  font-size: 10px;
+}
+.usb-tile.good {
+  border-color: #356c58;
+  background: linear-gradient(145deg, #1d302a, #15231f);
+}
+.usb-tile.warning {
+  border-color: #7b633a;
+  background: linear-gradient(145deg, #30291d, #242017);
+}
+.usb-tile.unknown {
+  opacity: 0.82;
+}
+.usb-tile.good .pill {
+  background: #254b3d;
+  color: #bcebd5;
+}
+.usb-tile.warning .pill {
+  background: #584524;
+  color: #f2d59e;
+}
+.usb-sheet {
+  max-height: min(88vh, 820px);
+}
+.usb-device-list {
+  display: grid;
+  gap: 8px;
+}
+.usb-error {
+  border: 1px solid #754743;
+  border-radius: 11px;
+  background: #2a1d1d;
+  color: #f2b5b0;
+  padding: 9px 11px;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+.usb-device-row {
+  display: grid;
+  grid-template-columns: 13px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: #172129;
+  padding: 11px 12px;
+}
+.usb-device-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #d8e1e5;
+  box-shadow: 0 0 0 4px #d8e1e512;
+}
+.usb-device-row.present .usb-device-dot {
+  background: var(--good);
+  box-shadow: 0 0 0 4px #62c89918;
+}
+.usb-device-row.partial .usb-device-dot {
+  background: #e4b75c;
+  box-shadow: 0 0 0 4px #e4b75c18;
+}
+.usb-device-row.unplugged {
+  border-color: #65413f;
+  background: #291d1d;
+}
+.usb-device-row.unplugged .usb-device-dot {
+  background: var(--bad);
+  box-shadow: 0 0 0 4px #ef706718;
+}
+.usb-device-main {
+  min-width: 0;
+}
+.usb-device-main strong,
+.usb-device-main small,
+.usb-device-main time {
+  display: block;
+}
+.usb-device-main strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.usb-device-main small,
+.usb-device-main time {
+  color: var(--dim);
+  font-size: 9px;
+  margin-top: 2px;
+}
+.usb-device-row.unplugged .usb-device-main time {
+  color: #f2aaa5;
+}
+.usb-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+.usb-label {
+  border: 1px solid #356b76;
+  border-radius: 999px;
+  background: #183039;
+  color: #9cdeea;
+  padding: 2px 6px;
+  font-size: 9px;
+}
+.usb-device-count {
+  color: var(--dim);
+  font-size: 9px;
+  font-weight: 750;
+  white-space: nowrap;
+}
 .monitor-tile.good {
   border-color: #356c58;
   background: linear-gradient(145deg, #1d302a, #15231f);

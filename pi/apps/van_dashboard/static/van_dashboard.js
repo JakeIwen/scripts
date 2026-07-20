@@ -21,6 +21,7 @@ let dashboard = null,
   storagePoll = 0,
   lightingPoll = 0,
   systemMonitorPoll = 0,
+  usbPoll = 0,
   ubntPoll = 0,
   ubntLastCompletion = '',
   sonosTimeline = { position: 0, duration: 0, playing: false, updatedAt: 0 };
@@ -414,6 +415,83 @@ async function startSpeedtest() {
   } catch (error) {
     toast(error.message, true);
     $('speedtest-button').disabled = false;
+  }
+}
+function usbEventLabel(event) {
+  if (!event?.kind || !event?.at) return '';
+  const label =
+    event.kind === 'unplugged'
+      ? 'Unplugged'
+      : event.kind === 'replugged'
+        ? 'Replugged'
+        : 'Plugged';
+  return `${label} ${eventTime(event.at)}`;
+}
+function renderUsbDevices(response) {
+  const state = response.usb,
+    tile = $('usb-devices'),
+    present = Number(state.present_device_count) || 0,
+    unplugged = Number(state.unplugged_device_count) || 0,
+    labels = state.storage_labels || [],
+    hasData = Number.isFinite(state.last_success_at),
+    stale = Boolean(state.last_error);
+  tile.classList.remove('good', 'warning', 'unknown');
+  tile.classList.add(!hasData ? 'unknown' : stale || unplugged ? 'warning' : 'good');
+  $('usb-pill').textContent = !hasData ? 'NO DATA' : stale ? 'STALE' : unplugged ? 'CHANGE' : 'LIVE';
+  $('usb-summary').textContent = !hasData
+    ? 'USB status unavailable'
+    : unplugged
+      ? `${unplugged} unplugged since monitoring began`
+      : `${present} non-hub device${present === 1 ? '' : 's'} connected`;
+  $('usb-connected').textContent = hasData ? String(present) : '—';
+  $('usb-storage').textContent = labels.length ? labels.join(', ') : 'None detected';
+  $('usb-status').textContent = state.last_error
+    ? 'Stale · retrying'
+    : state.last_success_at
+      ? `Updated ${age(state.last_success_at)}`
+      : 'No data';
+  $('usb-panel').setAttribute('aria-busy', 'false');
+  const deviceRows = (state.devices || [])
+    .map((device) => {
+      const event = usbEventLabel(device.event),
+        count = device.max_count > 1
+          ? `${device.present_count}/${device.max_count}`
+          : device.present_count > 0
+            ? 'Connected'
+            : 'Missing',
+        labelsHtml = (device.labels || [])
+          .map((label) => `<span class="usb-label">${esc(label)}</span>`)
+          .join('');
+      return `<article class="usb-device-row ${esc(device.status)}">
+        <span class="usb-device-dot" aria-hidden="true"></span>
+        <div class="usb-device-main"><strong>${esc(device.description)}</strong><small>Bus ${esc(device.bus)} · ID ${esc(device.device_id)}</small>${labelsHtml ? `<div class="usb-labels">${labelsHtml}</div>` : ''}${event ? `<time>${esc(event)}</time>` : ''}</div>
+        <span class="usb-device-count">${esc(count)}</span>
+      </article>`;
+    })
+    .join('');
+  const errorRow = state.last_error
+    ? `<div class="usb-error">${esc(state.last_error)}</div>`
+    : '';
+  $('usb-device-list').innerHTML =
+    errorRow + (deviceRows || '<div class="speaker-loading">No USB devices reported</div>');
+}
+async function refreshUsbDevices(showErrors = false) {
+  try {
+    const response = await json('/api/usb-devices');
+    renderUsbDevices(response);
+    return response;
+  } catch (error) {
+    $('usb-devices').classList.remove('good', 'warning');
+    $('usb-devices').classList.add('unknown');
+    $('usb-pill').textContent = 'NO DATA';
+    $('usb-summary').textContent = 'USB status unavailable';
+    $('usb-connected').textContent = '—';
+    $('usb-storage').textContent = '—';
+    $('usb-status').textContent = 'Unavailable';
+    $('usb-panel').setAttribute('aria-busy', 'false');
+    $('usb-device-list').innerHTML = `<div class="speaker-loading">${esc(error.message)}</div>`;
+    if (showErrors) toast(error.message, true);
+    throw error;
   }
 }
 function renderPriceChecks(response) {
@@ -1409,6 +1487,35 @@ function closeSystemMonitor() {
   $('system-monitor').setAttribute('aria-expanded', 'false');
   $('system-monitor').focus();
 }
+async function pollUsbDevices() {
+  clearTimeout(usbPoll);
+  if (!$('usb-backdrop').classList.contains('open')) return;
+  try {
+    await refreshUsbDevices(false);
+  } catch (_) {
+    /* rendered by refreshUsbDevices */
+  } finally {
+    usbPoll = setTimeout(pollUsbDevices, 2000);
+  }
+}
+async function openUsbDevices() {
+  $('usb-backdrop').classList.add('open');
+  document.body.classList.add('sheet-open');
+  $('usb-devices').setAttribute('aria-expanded', 'true');
+  $('usb-panel').setAttribute('aria-busy', 'true');
+  try {
+    await refreshUsbDevices(true);
+  } finally {
+    usbPoll = setTimeout(pollUsbDevices, 2000);
+  }
+}
+function closeUsbDevices() {
+  clearTimeout(usbPoll);
+  $('usb-backdrop').classList.remove('open');
+  document.body.classList.remove('sheet-open');
+  $('usb-devices').setAttribute('aria-expanded', 'false');
+  $('usb-devices').focus();
+}
 async function openPriceChecks() {
   $('price-backdrop').classList.add('open');
   document.body.classList.add('sheet-open');
@@ -1496,6 +1603,8 @@ $('storage-close').addEventListener('click', closeStorage);
 $('system-monitor').addEventListener('click', openSystemMonitor);
 $('system-monitor-close').addEventListener('click', closeSystemMonitor);
 $('monitor-crash-analyze').addEventListener('click', analyzePreviousCrash);
+$('usb-devices').addEventListener('click', openUsbDevices);
+$('usb-close').addEventListener('click', closeUsbDevices);
 $('price-checks').addEventListener('click', openPriceChecks);
 $('price-close').addEventListener('click', closePriceChecks);
 $('price-check-all').addEventListener('click', () => checkPrices('all'));
@@ -1528,6 +1637,9 @@ $('storage-backdrop').addEventListener('click', (event) => {
 $('system-monitor-backdrop').addEventListener('click', (event) => {
   if (event.target === $('system-monitor-backdrop')) closeSystemMonitor();
 });
+$('usb-backdrop').addEventListener('click', (event) => {
+  if (event.target === $('usb-backdrop')) closeUsbDevices();
+});
 $('price-backdrop').addEventListener('click', (event) => {
   if (event.target === $('price-backdrop')) closePriceChecks();
 });
@@ -1542,6 +1654,7 @@ document.addEventListener('keydown', (event) => {
     if ($('speaker-backdrop').classList.contains('open')) closeSpeakers();
     if ($('storage-backdrop').classList.contains('open')) closeStorage();
     if ($('system-monitor-backdrop').classList.contains('open')) closeSystemMonitor();
+    if ($('usb-backdrop').classList.contains('open')) closeUsbDevices();
     if ($('price-backdrop').classList.contains('open')) closePriceChecks();
     if ($('lighting-backdrop').classList.contains('open')) closeLighting();
     if ($('ubnt-wifi-backdrop').classList.contains('open')) closeUbntWifi();
@@ -1686,6 +1799,7 @@ function refreshVisibleDashboard() {
   refreshSonos();
   refreshStoragePolicy().catch(() => {});
   refreshSystemMonitor(false).catch(() => {});
+  refreshUsbDevices(false).catch(() => {});
   refreshPriceChecks().catch(() => {});
   refreshLighting(false).catch(() => {});
   refreshUbntWifi(false);
@@ -1697,6 +1811,7 @@ Promise.allSettled([
   refreshSpeedtest(),
   refreshStoragePolicy(),
   refreshSystemMonitor(false),
+  refreshUsbDevices(false),
   refreshPriceChecks(),
   refreshLighting(false),
   refreshUbntWifi(false),
@@ -1717,6 +1832,10 @@ setInterval(() => {
 }, 30000);
 setInterval(() => {
   if (!document.hidden) refreshSystemMonitor(false).catch(() => {});
+}, 30000);
+setInterval(() => {
+  if (!document.hidden && !$('usb-backdrop').classList.contains('open'))
+    refreshUsbDevices(false).catch(() => {});
 }, 30000);
 setInterval(() => {
   if (!document.hidden && !priceBusy) refreshPriceChecks().catch(() => {});
