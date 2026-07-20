@@ -66,6 +66,17 @@ fi
 [[ -e "$test_root/mount-target/.hidden-underlay-data" ]] ||
   fail "underlying data was modified"
 
+md_first_mount_dir_entry() {
+  echo "find: failed to restore inaccessible working directory" >&2
+  return 1
+}
+output=$(md_require_empty_mount_dir "$test_root/mount-target" 2>&1)
+status=$?
+assert_eq 1 "$status" "directory probe failure must fail closed"
+[[ "$output" == *"directory probe diagnostic:"* &&
+   "$output" == *"failed to restore inaccessible working directory"* ]] ||
+  fail "directory probe stderr was not preserved: $output"
+
 # A failure for the first label must survive later successful/missing labels.
 calls=()
 rm_mnt_dir() { return 0; }

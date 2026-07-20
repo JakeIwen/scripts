@@ -190,7 +190,16 @@ md_check_existing_mount() {
 }
 
 md_first_mount_dir_entry() {
-  /usr/bin/timeout 5 /usr/bin/find "$1" -mindepth 1 -maxdepth 1 -print -quit
+  # Root's cron launches this script through `su pi -c` without changing out
+  # of /root.  GNU find otherwise inspects the absolute target successfully,
+  # then exits 1 because pi cannot restore that inaccessible starting cwd.
+  (
+    cd / || {
+      echo "ERROR: cannot enter a safe working directory for mount validation" >&2
+      return 1
+    }
+    /usr/bin/timeout 5 /usr/bin/find "$1" -mindepth 1 -maxdepth 1 -print -quit
+  )
 }
 
 md_require_empty_mount_dir() {
@@ -205,10 +214,15 @@ md_require_empty_mount_dir() {
 
   # A healthy local mount directory should answer immediately.  The timeout
   # also fails closed if a broken mount appears during the validation race.
-  first_entry="$(md_first_mount_dir_entry "$pth" 2>/dev/null)"
+  # Preserve stderr so a permission, I/O, or timeout failure is actionable in
+  # the policy log instead of being reduced to an unexplained status number.
+  first_entry="$(md_first_mount_dir_entry "$pth" 2>&1)"
   status=$?
   if (( status != 0 )); then
     echo "ERROR: cannot verify that the underlying mount directory $pth is empty (status $status); refusing" >&2
+    if [[ -n "$first_entry" ]]; then
+      printf 'directory probe diagnostic: %s\n' "$first_entry" >&2
+    fi
     return 1
   fi
   if [[ -n "$first_entry" ]]; then
