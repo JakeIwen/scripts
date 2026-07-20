@@ -35,6 +35,9 @@ DEFAULT_DATABASE = os.environ.get(
 DEFAULT_SAMPLE_INTERVAL = 5.0
 DEFAULT_ROLLUP_INTERVAL = 60.0
 DEFAULT_RETENTION_DAYS = 90
+DEFAULT_SAMPLE_RETENTION_HOURS = 48
+DEFAULT_CRASH_SAMPLE_LIMIT = 360
+DEFAULT_CRASH_REPORT_DIRECTORY = "/var/lib/vanpi-monitor/crash-reports"
 REPORT_VERSION = 1
 
 THROTTLE_FLAGS = (
@@ -59,6 +62,16 @@ def iso_time(timestamp):
 
 def json_dumps(value):
     return json.dumps(value, separators=(",", ":"), sort_keys=True)
+
+
+def normalize_boot_id(value):
+    """Normalize real systemd UUID boot IDs while preserving test/legacy labels."""
+    text = str(value or "").strip().lower()
+    if re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", text):
+        return text.replace("-", "")
+    if re.fullmatch(r"[0-9a-f]{32}", text):
+        return text
+    return text or None
 
 
 def read_text(path, default=None):
@@ -316,7 +329,11 @@ class EventStore:
         self.connection.execute("PRAGMA busy_timeout=5000")
         if not read_only:
             self.connection.execute("PRAGMA journal_mode=WAL")
-            self.connection.execute("PRAGMA synchronous=NORMAL")
+            # A flight-recorder sample that exists only in an unflushed page is
+            # little help after sudden power loss. FULL asks SQLite and the OS to
+            # flush every committed 5-second sample before reporting success.
+            self.connection.execute("PRAGMA synchronous=FULL")
+            self.connection.execute("PRAGMA wal_autocheckpoint=32")
             self._create_schema()
             try:
                 os.chmod(path, 0o640)
@@ -374,7 +391,29 @@ class EventStore:
             );
             CREATE INDEX IF NOT EXISTS crash_analyses_time_idx
                 ON crash_analyses(analyzed_at DESC);
-            PRAGMA user_version=2;
+            CREATE TABLE IF NOT EXISTS resource_samples (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp REAL NOT NULL,
+                monotonic_seconds REAL,
+                boot_id TEXT NOT NULL,
+                sample_json TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS samples_boot_monotonic_idx
+                ON resource_samples(boot_id, monotonic_seconds DESC);
+            CREATE INDEX IF NOT EXISTS samples_timestamp_idx
+                ON resource_samples(timestamp DESC);
+            CREATE TABLE IF NOT EXISTS pstore_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fingerprint TEXT NOT NULL UNIQUE,
+                previous_boot_id TEXT NOT NULL,
+                first_seen_at REAL NOT NULL,
+                name TEXT NOT NULL,
+                source TEXT NOT NULL,
+                content TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS pstore_boot_idx
+                ON pstore_records(previous_boot_id, id);
+            PRAGMA user_version=4;
             """
         )
         self.connection.commit()
@@ -399,6 +438,88 @@ class EventStore:
         )
         if commit:
             self.connection.commit()
+
+    def record_sample(self, sample):
+        """Atomically persist the dashboard state and detailed flight sample."""
+        boot_id = normalize_boot_id(sample.get("boot_id")) or "unknown"
+        durable_sample = dict(sample)
+        durable_sample["boot_id"] = boot_id
+        self.connection.execute(
+            """
+            INSERT INTO resource_samples(
+                timestamp, monotonic_seconds, boot_id, sample_json
+            ) VALUES (?, ?, ?, ?)
+            """,
+            (
+                float(sample["timestamp"]),
+                sample.get("uptime_seconds"),
+                boot_id,
+                json_dumps(durable_sample),
+            ),
+        )
+        self.set_meta("current", durable_sample, commit=False)
+        self.connection.commit()
+
+    def flight_samples(self, boot_id, limit=DEFAULT_CRASH_SAMPLE_LIMIT):
+        boot_id = normalize_boot_id(boot_id)
+        if not boot_id:
+            return []
+        rows = self.connection.execute(
+            """
+            SELECT sample_json FROM resource_samples
+            WHERE boot_id = ?
+            ORDER BY monotonic_seconds DESC, id DESC LIMIT ?
+            """,
+            (boot_id, max(1, min(int(limit), 5000))),
+        ).fetchall()
+        samples = []
+        for row in reversed(rows):
+            try:
+                samples.append(json.loads(row["sample_json"]))
+            except (TypeError, ValueError):
+                continue
+        return samples
+
+    def claim_pstore_records(self, boot_id, records):
+        boot_id = normalize_boot_id(boot_id)
+        if not boot_id or self.read_only:
+            return 0
+        inserted = 0
+        for record in records:
+            content = record.get("content") or ""
+            name = record.get("name") or "pstore"
+            source = record.get("source") or "pstore"
+            fingerprint = event_fingerprint("pstore", name, content)
+            cursor = self.connection.execute(
+                """
+                INSERT OR IGNORE INTO pstore_records(
+                    fingerprint, previous_boot_id, first_seen_at,
+                    name, source, content
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (fingerprint, boot_id, self.clock(), name, source, content),
+            )
+            inserted += int(cursor.rowcount == 1)
+        self.connection.commit()
+        return inserted
+
+    def pstore_for_boot(self, boot_id):
+        boot_id = normalize_boot_id(boot_id)
+        if not boot_id:
+            return []
+        try:
+            rows = self.connection.execute(
+                """
+                SELECT name, source, content FROM pstore_records
+                WHERE previous_boot_id = ? ORDER BY id
+                """,
+                (boot_id,),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            # Allows a read-only report during the brief upgrade window before
+            # the writer has migrated an older database.
+            return []
+        return [dict(row) for row in rows]
 
     def insert_event(
         self,
@@ -462,10 +583,30 @@ class EventStore:
         )
         self.connection.commit()
 
-    def prune(self, retention_days=DEFAULT_RETENTION_DAYS):
+    def prune(
+        self,
+        retention_days=DEFAULT_RETENTION_DAYS,
+        sample_retention_hours=DEFAULT_SAMPLE_RETENTION_HOURS,
+    ):
         cutoff = self.clock() - float(retention_days) * 86400
         deleted = self.connection.execute(
             "DELETE FROM resource_rollups WHERE period_end < ?", (cutoff,)
+        ).rowcount
+        # Use insertion order rather than wall time: a Pi without a battery RTC
+        # can jump its clock at NTP synchronization, including backwards.
+        max_samples = max(
+            1,
+            int(float(sample_retention_hours) * 3600 / DEFAULT_SAMPLE_INTERVAL),
+        )
+        deleted += self.connection.execute(
+            """
+            DELETE FROM resource_samples
+            WHERE id < COALESCE((
+                SELECT id FROM resource_samples
+                ORDER BY id DESC LIMIT 1 OFFSET ?
+            ), 0)
+            """,
+            (max_samples - 1,),
         ).rowcount
         self.connection.commit()
         return deleted
@@ -473,7 +614,7 @@ class EventStore:
     def save_crash_analysis(self, report):
         analysis = report.get("analysis") or {}
         previous_boot = analysis.get("previous_boot") or {}
-        boot_id = previous_boot.get("boot_id")
+        boot_id = normalize_boot_id(previous_boot.get("boot_id"))
         if not analysis.get("available") or not boot_id:
             return False
         self.connection.execute(
@@ -525,6 +666,9 @@ class EventStore:
                 "findings": analysis.get("findings", []),
                 "counts": analysis.get("counts", {}),
                 "pstore_records": len(analysis.get("pstore", [])),
+                "resource_peaks": (
+                    (analysis.get("resource_evidence") or {}).get("peaks") or {}
+                ),
             }
             if full:
                 item["report"] = report
@@ -551,6 +695,88 @@ def parse_meminfo(proc_root="/proc"):
         "swap_used_bytes": max(0, swap_total - swap_free),
         "swap_used_percent": (
             round((swap_total - swap_free) * 100 / swap_total, 2) if swap_total else 0.0
+        ),
+    }
+
+
+def parse_pressure(value):
+    """Parse one Linux PSI file without depending on a psutil version."""
+    result = {}
+    for line in str(value or "").splitlines():
+        fields = line.split()
+        if not fields:
+            continue
+        entry = {}
+        for field in fields[1:]:
+            if "=" not in field:
+                continue
+            key, raw = field.split("=", 1)
+            try:
+                entry[key] = int(raw) if key == "total" else float(raw)
+            except ValueError:
+                continue
+        result[fields[0]] = entry
+    return result
+
+
+def collect_pressure(proc_root="/proc"):
+    return {
+        name: parse_pressure(read_text(os.path.join(proc_root, "pressure", name), ""))
+        for name in ("cpu", "memory", "io")
+    }
+
+
+def collect_vm_counters(proc_root="/proc"):
+    wanted = {
+        "allocstall_dma",
+        "allocstall_dma32",
+        "allocstall_movable",
+        "allocstall_normal",
+        "oom_kill",
+        "pgmajfault",
+        "pswpin",
+        "pswpout",
+    }
+    counters = {}
+    for line in (read_text(os.path.join(proc_root, "vmstat"), "") or "").splitlines():
+        fields = line.split()
+        if len(fields) != 2 or fields[0] not in wanted:
+            continue
+        try:
+            counters[fields[0]] = int(fields[1])
+        except ValueError:
+            continue
+    return counters
+
+
+def collect_display_state(sys_root="/sys"):
+    """Capture passive DRM/console state to correlate recurring VC4 warnings."""
+    connectors = []
+    base = os.path.join(sys_root, "class", "drm")
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        names = []
+    for name in names:
+        path = os.path.join(base, name)
+        status = read_text(os.path.join(path, "status"))
+        if status is None:
+            continue
+        connectors.append(
+            {
+                "name": name,
+                "status": status,
+                "enabled": read_text(os.path.join(path, "enabled")),
+                "dpms": read_text(os.path.join(path, "dpms")),
+            }
+        )
+    return {
+        "connectors": connectors,
+        "framebuffer_blank": read_number(
+            os.path.join(sys_root, "class", "graphics", "fb0", "blank")
+        ),
+        "framebuffer_virtual_size": read_text(
+            os.path.join(sys_root, "class", "graphics", "fb0", "virtual_size")
         ),
     }
 
@@ -1025,7 +1251,9 @@ class ResourceSampler:
         return {
             "timestamp": now,
             "timestamp_iso": iso_time(now),
-            "boot_id": read_text(os.path.join(self.proc_root, "sys", "kernel", "random", "boot_id")),
+            "boot_id": normalize_boot_id(
+                read_text(os.path.join(self.proc_root, "sys", "kernel", "random", "boot_id"))
+            ),
             "uptime_seconds": uptime,
             "cpu_percent": cpu_percent,
             "cpu_count": self.cpu_count,
@@ -1053,6 +1281,9 @@ class ResourceSampler:
             "top_memory": top_memory,
             "network_io": network_io,
             "disk_io": disk_io,
+            "pressure": collect_pressure(self.proc_root),
+            "vm_counters": collect_vm_counters(self.proc_root),
+            "display": collect_display_state(self.sys_root),
         }
 
 
@@ -1453,7 +1684,9 @@ class SystemEventMonitor:
             return
         boot_id = sample.get("boot_id")
         previous = self.store.get_meta("last_throttle")
-        same_boot = isinstance(previous, dict) and previous.get("boot_id") == boot_id
+        same_boot = isinstance(previous, dict) and normalize_boot_id(
+            previous.get("boot_id")
+        ) == normalize_boot_id(boot_id)
         previous_current = set(previous.get("current", ())) if same_boot else set()
         previous_occurred = set(previous.get("occurred", ())) if same_boot else set()
         current = set(throttle["current"])
@@ -1550,7 +1783,7 @@ class SystemEventMonitor:
     def take_sample(self):
         sample = self.sampler.sample()
         self.current = sample
-        self.store.set_meta("current", sample)
+        self.store.record_sample(sample)
         self.reconcile_firmware(sample)
         self.evaluate_thresholds(sample)
         self.check_failed_units(sample)
@@ -1563,7 +1796,7 @@ class SystemEventMonitor:
         sample = self.take_sample()
         boot_id = sample.get("boot_id")
         last_boot = self.store.get_meta("last_boot_id")
-        if boot_id and boot_id != last_boot:
+        if boot_id and normalize_boot_id(boot_id) != normalize_boot_id(last_boot):
             now = sample["timestamp"]
             self.store.insert_event(
                 timestamp=now,
@@ -1899,8 +2132,7 @@ def read_journal_records(boot=-1, kernel=False, lines=600, timeout=20):
     return records
 
 
-def read_pstore(sys_root="/sys"):
-    base = os.path.join(sys_root, "fs", "pstore")
+def read_pstore_directory(base, source):
     records = []
     try:
         names = sorted(os.listdir(base))
@@ -1915,15 +2147,75 @@ def read_pstore(sys_root="/sys"):
                 content = handle.read(65536)
         except OSError:
             continue
-        records.append({"name": name, "content": redact_log_message(content)})
+        records.append(
+            {
+                "name": name,
+                "source": source,
+                "content": redact_log_message(content),
+            }
+        )
     return records
 
 
-def analyze_previous_boot(records, current_boot_started_at=None, pstore_records=None):
+def read_pstore(sys_root="/sys"):
+    return read_pstore_directory(os.path.join(sys_root, "fs", "pstore"), "pstore")
+
+
+def read_pstore_archive(path="/var/lib/systemd/pstore"):
+    return read_pstore_directory(path, "systemd-pstore archive")
+
+
+def journal_monotonic_seconds(record):
+    try:
+        return int(record.get("monotonic")) / 1_000_000
+    except (TypeError, ValueError):
+        return None
+
+
+def journal_order_key(record):
+    monotonic = journal_monotonic_seconds(record)
+    return (
+        0 if monotonic is not None else 1,
+        monotonic if monotonic is not None else record.get("timestamp", 0),
+    )
+
+
+def analyze_previous_boot(
+    records,
+    current_boot_started_at=None,
+    pstore_records=None,
+    previous_boot_id_hint=None,
+):
     """Analyze already-filtered previous-boot journal records."""
     pstore_records = list(pstore_records or ())
-    ordered = sorted(records, key=lambda item: item["timestamp"])
+    # Pi wall-clock timestamps can jump when NTP catches up after boot. The
+    # journal's per-boot monotonic timestamp is authoritative for sequencing.
+    ordered = sorted(records, key=journal_order_key)
     if not ordered:
+        if pstore_records:
+            return {
+                "available": True,
+                "level": "critical",
+                "headline": "Persistent kernel crash evidence is available",
+                "findings": [
+                    f"The journal has no readable preceding-boot records, but pstore retained {len(pstore_records)} kernel crash record(s)."
+                ],
+                "previous_boot": {
+                    "boot_id": normalize_boot_id(previous_boot_id_hint),
+                    "started_at": None,
+                    "ended_at": None,
+                    "started_monotonic_seconds": None,
+                    "ended_monotonic_seconds": None,
+                    "duration_seconds": None,
+                    "retained_log_started_at": None,
+                    "retained_log_span_seconds": None,
+                    "ended_cleanly": False,
+                    "gap_to_current_boot_seconds": None,
+                },
+                "pstore": pstore_records,
+                "timeline": [],
+                "counts": {"pstore": len(pstore_records)},
+            }
         return {
             "available": False,
             "level": "unknown",
@@ -1993,9 +2285,14 @@ def analyze_previous_boot(records, current_boot_started_at=None, pstore_records=
             )
             counts["fatal_log"] += 1
 
-    boot_id = next((item.get("boot_id") for item in ordered if item.get("boot_id")), None)
+    boot_id = normalize_boot_id(
+        next((item.get("boot_id") for item in ordered if item.get("boot_id")), None)
+        or previous_boot_id_hint
+    )
     started_at = ordered[0]["timestamp"]
     ended_at = ordered[-1]["timestamp"]
+    started_monotonic = journal_monotonic_seconds(ordered[0])
+    ended_monotonic = journal_monotonic_seconds(ordered[-1])
     gap = (
         max(0, current_boot_started_at - ended_at)
         if isinstance(current_boot_started_at, (int, float))
@@ -2073,7 +2370,11 @@ def analyze_previous_boot(records, current_boot_started_at=None, pstore_records=
             previous["severity"], 0
         ):
             unique[key] = item
-    timeline = sorted(unique.values(), key=lambda item: item["timestamp"], reverse=True)[:80]
+    timeline = sorted(unique.values(), key=journal_order_key, reverse=True)[:80]
+    if started_monotonic is not None and ended_monotonic is not None:
+        duration_seconds = max(0, ended_monotonic - started_monotonic)
+    else:
+        duration_seconds = max(0, ended_at - started_at)
     return {
         "available": True,
         "level": level,
@@ -2083,7 +2384,9 @@ def analyze_previous_boot(records, current_boot_started_at=None, pstore_records=
             "boot_id": boot_id,
             "started_at": started_at,
             "ended_at": ended_at,
-            "duration_seconds": round(max(0, ended_at - started_at), 2),
+            "started_monotonic_seconds": started_monotonic,
+            "ended_monotonic_seconds": ended_monotonic,
+            "duration_seconds": round(duration_seconds, 2),
             "retained_log_started_at": started_at,
             "retained_log_span_seconds": round(max(0, ended_at - started_at), 2),
             "ended_cleanly": ended_cleanly,
@@ -2095,9 +2398,74 @@ def analyze_previous_boot(records, current_boot_started_at=None, pstore_records=
     }
 
 
-def build_crash_report(clock=utc_timestamp):
-    general = read_journal_records(boot=-1, kernel=False, lines=800)
-    kernel = read_journal_records(boot=-1, kernel=True, lines=800)
+def build_resource_evidence(samples):
+    if not samples:
+        return {"available": False, "sample_count": 0, "tail": [], "peaks": {}}
+    metric_paths = {
+        "cpu_percent": (("cpu_percent",), False),
+        "memory_percent": (("memory", "used_percent"), False),
+        "swap_percent": (("swap", "used_percent"), False),
+        "load1": (("load", "1m"), False),
+        "temperature_c": (("temperature_c",), False),
+        "minimum_arm_mhz": (("arm_mhz",), True),
+        "disk_busy_percent": (("disk_io", "busy_percent"), False),
+        "network_rx_bytes_per_second": (("network_io", "rx_bytes_per_second"), False),
+        "network_tx_bytes_per_second": (("network_io", "tx_bytes_per_second"), False),
+        "disk_read_bytes_per_second": (("disk_io", "read_bytes_per_second"), False),
+        "disk_write_bytes_per_second": (("disk_io", "write_bytes_per_second"), False),
+    }
+    peaks = {}
+    for name, (path, prefer_min) in metric_paths.items():
+        candidates = [
+            (metric_value(sample, path), sample)
+            for sample in samples
+            if metric_value(sample, path) is not None
+        ]
+        if not candidates:
+            peaks[name] = {"value": None, "at": None, "uptime_seconds": None}
+            continue
+        value, sample = (min if prefer_min else max)(
+            candidates, key=lambda pair: pair[0]
+        )
+        peaks[name] = {
+            "value": value,
+            "at": sample.get("timestamp"),
+            "uptime_seconds": sample.get("uptime_seconds"),
+        }
+        if name == "cpu_percent":
+            peaks[name]["top_process"] = (sample.get("top_cpu") or [None])[0]
+        elif name == "memory_percent":
+            peaks[name]["top_process"] = (sample.get("top_memory") or [None])[0]
+    first_uptime = samples[0].get("uptime_seconds")
+    last_uptime = samples[-1].get("uptime_seconds")
+    span = (
+        max(0, last_uptime - first_uptime)
+        if isinstance(first_uptime, (int, float))
+        and isinstance(last_uptime, (int, float))
+        else None
+    )
+    return {
+        "available": True,
+        "sample_count": len(samples),
+        "boot_id": normalize_boot_id(samples[-1].get("boot_id")),
+        "first_uptime_seconds": first_uptime,
+        "last_uptime_seconds": last_uptime,
+        "span_seconds": round(span, 2) if span is not None else None,
+        "peaks": peaks,
+        "last_sample": samples[-1],
+        "tail": samples,
+    }
+
+
+def build_crash_report(
+    store=None,
+    clock=utc_timestamp,
+    general_lines=4000,
+    kernel_lines=2000,
+    claim_pstore=False,
+):
+    general = read_journal_records(boot=-1, kernel=False, lines=general_lines)
+    kernel = read_journal_records(boot=-1, kernel=True, lines=kernel_lines)
     unique = {}
     for item in general + kernel:
         key = (item.get("boot_id"), item.get("monotonic"), item["message"])
@@ -2107,9 +2475,35 @@ def build_crash_report(clock=utc_timestamp):
         current_boot_started_at = clock() - float(uptime_raw[0])
     except (IndexError, ValueError):
         current_boot_started_at = None
-    analysis = analyze_previous_boot(
-        list(unique.values()), current_boot_started_at, read_pstore()
-    )
+    journal_records = list(unique.values())
+    analysis = analyze_previous_boot(journal_records, current_boot_started_at, [])
+    previous_boot_id = (analysis.get("previous_boot") or {}).get("boot_id")
+    live_pstore = read_pstore() + read_pstore_archive()
+    if not previous_boot_id and store and live_pstore:
+        previous_boot_id = normalize_boot_id(store.get_meta("last_boot_id"))
+    if store and previous_boot_id and claim_pstore:
+        store.claim_pstore_records(previous_boot_id, live_pstore)
+    assigned_pstore = store.pstore_for_boot(previous_boot_id) if store else []
+    # With no store (library/diagnostic use), report the files directly. With a
+    # store, only attach records permanently claimed to this boot so an old
+    # ramoops archive is never misattributed to every later crash.
+    pstore_records = assigned_pstore if store else live_pstore
+    if pstore_records:
+        analysis = analyze_previous_boot(
+            journal_records,
+            current_boot_started_at,
+            pstore_records,
+            previous_boot_id_hint=previous_boot_id,
+        )
+    samples = store.flight_samples(previous_boot_id) if store and previous_boot_id else []
+    resource_evidence = build_resource_evidence(samples)
+    analysis["resource_evidence"] = resource_evidence
+    if resource_evidence["available"]:
+        span = resource_evidence.get("span_seconds")
+        span_text = f" spanning {span / 60:.1f} minutes" if span is not None else ""
+        analysis["findings"].append(
+            f"The durable flight recorder retained {len(samples)} detailed sample(s){span_text} from the end of that boot."
+        )
     return {
         "ok": True,
         "version": REPORT_VERSION,
@@ -2117,6 +2511,74 @@ def build_crash_report(clock=utc_timestamp):
         "current_boot_id": read_text("/proc/sys/kernel/random/boot_id"),
         "analysis": analysis,
     }
+
+
+def write_crash_report_file(report, output_directory=DEFAULT_CRASH_REPORT_DIRECTORY):
+    previous_boot_id = normalize_boot_id(
+        ((report.get("analysis") or {}).get("previous_boot") or {}).get("boot_id")
+    )
+    if not previous_boot_id:
+        return None
+    os.makedirs(output_directory, mode=0o750, exist_ok=True)
+    destination = os.path.join(output_directory, f"boot-{previous_boot_id}.json")
+    temporary = os.path.join(
+        output_directory, f".boot-{previous_boot_id}.{os.getpid()}.tmp"
+    )
+    try:
+        with open(temporary, "w", encoding="utf-8") as handle:
+            json.dump(report, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, 0o640)
+        os.replace(temporary, destination)
+        directory_fd = os.open(output_directory, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+    return destination
+
+
+def capture_previous_boot(store, output_directory=DEFAULT_CRASH_REPORT_DIRECTORY):
+    """Run once near startup and persist the preceding boot's evidence."""
+    report = build_crash_report(store=store, claim_pstore=True)
+    history = store.crash_history(limit=20)
+    report["comparison"] = compare_crash_history(report["analysis"], history)
+    report["saved"] = store.save_crash_analysis(report)
+    report["report_path"] = write_crash_report_file(report, output_directory)
+
+    current_sample = ResourceSampler().sample()
+    store.record_sample(current_sample)
+    boot_id = current_sample.get("boot_id")
+    previous_boot_id = (
+        (report.get("analysis") or {}).get("previous_boot") or {}
+    ).get("boot_id")
+    store.insert_event(
+        timestamp=current_sample["timestamp"],
+        boot_id=boot_id,
+        category="system",
+        kind="boot_crash_evidence_captured",
+        severity="info",
+        source="boot-hook",
+        summary="Previous-boot crash evidence captured",
+        message=f"previous_boot_id={previous_boot_id or 'unavailable'}",
+        fingerprint=event_fingerprint("boot-crash-capture", boot_id),
+        state={
+            **current_sample,
+            "capture": "boot_hook",
+            "usb_devices": collect_usb_state(),
+            "mounts": collect_mount_state(),
+            "previous_boot_id": previous_boot_id,
+            "previous_boot_level": (report.get("analysis") or {}).get("level"),
+        },
+    )
+    return report
 
 
 def compare_crash_history(analysis, history):
@@ -2142,6 +2604,16 @@ def compare_crash_history(analysis, history):
         "hung_task",
         "fatal_log",
     )
+    current_resource = (analysis.get("resource_evidence") or {}).get("peaks") or {}
+    previous_resource = previous.get("resource_peaks") or {}
+    resource_deltas = {}
+    for key in sorted(set(current_resource) | set(previous_resource)):
+        current_value = (current_resource.get(key) or {}).get("value")
+        previous_value = (previous_resource.get(key) or {}).get("value")
+        if isinstance(current_value, (int, float)) and isinstance(
+            previous_value, (int, float)
+        ):
+            resource_deltas[key] = round(current_value - previous_value, 2)
     return {
         "previous_boot_id": previous.get("previous_boot_id"),
         "previous_analyzed_at": previous.get("analyzed_at"),
@@ -2153,6 +2625,7 @@ def compare_crash_history(analysis, history):
             for key in keys
             if current_counts.get(key, 0) or previous_counts.get(key, 0)
         },
+        "resource_peak_deltas": resource_deltas,
     }
 
 
@@ -2573,6 +3046,15 @@ def build_parser():
     )
     crash_parser.add_argument("--json", action="store_true")
 
+    capture_parser = subparsers.add_parser(
+        "boot-capture",
+        help="persist previous-boot logs and final flight-recorder samples",
+    )
+    capture_parser.add_argument(
+        "--output-directory", default=DEFAULT_CRASH_REPORT_DIRECTORY
+    )
+    capture_parser.add_argument("--json", action="store_true")
+
     history_parser = subparsers.add_parser(
         "crash-history", help="list saved preceding-boot analyses"
     )
@@ -2584,7 +3066,7 @@ def build_parser():
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
-    writable = args.command_name == "run" or (
+    writable = args.command_name in ("run", "boot-capture") or (
         args.command_name == "crash-report" and args.save
     )
     try:
@@ -2615,12 +3097,28 @@ def main(argv=None):
             else:
                 print_report(report)
             return 0
+        if args.command_name == "boot-capture":
+            report = capture_previous_boot(store, args.output_directory)
+            if args.json:
+                print(json.dumps(report, indent=2, sort_keys=True))
+            else:
+                analysis = report["analysis"]
+                destination = report.get("report_path") or "no report file"
+                print(
+                    f"{analysis['headline']} [{analysis['level']}]; "
+                    f"saved={report.get('saved', False)}; {destination}"
+                )
+            return 0
         if args.command_name == "crash-report":
-            report = build_crash_report()
+            report = build_crash_report(
+                store=store, claim_pstore=bool(args.save and not store.read_only)
+            )
+            history_before = store.crash_history(limit=20)
+            report["comparison"] = compare_crash_history(
+                report["analysis"], history_before
+            )
             report["saved"] = store.save_crash_analysis(report) if args.save else False
-            history = store.crash_history(limit=20)
-            report["history"] = history
-            report["comparison"] = compare_crash_history(report["analysis"], history)
+            report["history"] = store.crash_history(limit=20)
             if args.json:
                 print(json.dumps(report, indent=2, sort_keys=True))
             else:
