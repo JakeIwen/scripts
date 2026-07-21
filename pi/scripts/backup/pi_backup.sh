@@ -2,7 +2,7 @@
 # daily backup orchestrator — replaces rsync_schedule.sh
 #   1. mount + verify bigboi          4. borg create/prune (versioned history)
 #   2. media mirror mp -> bigboi      5. bootable SD clones when due (CLONE_TARGETS)
-#   3. HA sqlite snapshot             6. stamp + ntfy
+#   3. HA + OpenWrt snapshots         6. stamp + ntfy
 # cron fires this hourly 03:00-08:00 (when the van is least likely to drive);
 # the first success of the day wins and later runs no-op. Defers while the van
 # runs (drives are unmounted for vibration protection); if the van starts
@@ -90,6 +90,16 @@ if [ -f "$HA_DB" ]; then
 fi
 dpkg --get-selections > "$SNAP_DIR/dpkg-selections.txt"
 /srv/homeassistant/bin/pip freeze > "$SNAP_DIR/ha-pip-freeze.txt" 2>/dev/null
+
+log "OpenWrt router snapshot"
+if run /home/pi/scripts/backup/openwrt_backup.sh; then
+  log "OpenWrt router snapshot verified"
+else
+  rc=$?
+  notify "vanpi backup" \
+    "OpenWrt snapshot failed (status $rc); Borg will retain the last valid router snapshot" \
+    high warning
+fi
 
 # --- 4. versioned history ---
 archive="vanpi-$(date +%F_%H%M)"

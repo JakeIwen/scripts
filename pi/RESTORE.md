@@ -3,7 +3,9 @@
 Backups (see `scripts/backup/backup_conf.sh`):
 - **borg repo** `/mnt/bigboi/borg/vanpi` — nightly versioned snapshots of `/` + `/boot/firmware`
   (14 daily / 8 weekly / 12 monthly). HA's sqlite is snapshotted to
-  `/home/pi/backups/snapshots/` before each run; the live DB is excluded.
+  `/home/pi/backups/snapshots/` before each run; the live DB is excluded. A
+  verified OpenWrt recovery bundle is pulled into the same snapshot tree before
+  Borg runs; see `scripts/backup/OPENWRT_BACKUP.md`.
 - **hot-spare SD card(s)** — bootable clones via rpi-clone, staggered intervals per
   `CLONE_TARGETS`. Each card's `/boot/firmware/CLONE_INFO.txt` says when it was cloned.
 
@@ -34,6 +36,11 @@ Home Assistant DB: restore `home/pi/backups/snapshots/home-assistant_v2.db` from
 archive, stop `home-assistant.service`, copy it over
 `/home/homeassistant/.homeassistant/home-assistant_v2.db` (remove `-wal`/`-shm`), start.
 
+OpenWrt router: restore
+`home/pi/backups/snapshots/openwrt/dendelion-latest.tar.gz` from a selected Borg
+archive, then follow `scripts/backup/OPENWRT_BACKUP.md`. The outer bundle is not
+a firmware image and must not be flashed.
+
 ## Scenario 3 — SD card AND spare both dead
 
 1. On the MacBook: flash **Raspberry Pi OS 64-bit** (any recent) to a card with rpi-imager.
@@ -62,7 +69,8 @@ loud ntfy) — just re-run it when parked.
 
 ## Watchdog
 
-`backup_watchdog.sh` (daily cron) sends ntfy alerts when: no successful borg backup in
-48h, a clone exceeds 2× its interval, a card was never cloned, bigboi is unmounted, or
-free space < 100GB. Silence = healthy, but the nightly "vanpi backup OK" ping (min
-priority) includes per-card clone age if you want positive confirmation.
+`backup_watchdog.sh` (daily cron) sends ntfy alerts when: no successful Borg backup in
+48h, no verified OpenWrt snapshot exists or it is stale, a clone exceeds 2× its
+interval, a card was never cloned, bigboi is unmounted, or free space < 100GB.
+Silence = healthy, but the nightly "vanpi backup OK" ping (min priority) includes
+per-card clone age if you want positive confirmation.

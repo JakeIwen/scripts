@@ -3,7 +3,7 @@
 set -eu
 . /home/pi/scripts/backup/backup_conf.sh
 
-apt-get install -y borgbackup sqlite3
+apt-get install -y borgbackup sqlite3 jq
 
 if ! command -v rpi-clone >/dev/null; then
   rm -rf /tmp/rpi-clone

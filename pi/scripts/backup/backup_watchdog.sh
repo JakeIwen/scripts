@@ -30,6 +30,17 @@ else
   problems+=("no successful borg backup recorded yet")
 fi
 
+# OpenWrt snapshot recency is independent of Borg recency. A router pull can
+# fail while the Pi backup correctly continues with the last valid snapshot.
+if [ -s "$OPENWRT_SNAPSHOT_FILE" ] && [ -f "$OPENWRT_BACKUP_STAMP" ]; then
+  age_h=$(( (now - $(stat -c %Y "$OPENWRT_BACKUP_STAMP")) / 3600 ))
+  status+="openwrt: ${age_h}h ago. "
+  [ "$age_h" -le "$OPENWRT_BACKUP_STALE_HOURS" ] \
+    || problems+=("last good OpenWrt snapshot was ${age_h}h ago (limit ${OPENWRT_BACKUP_STALE_HOURS}h)")
+else
+  problems+=("no verified OpenWrt snapshot recorded yet")
+fi
+
 # per-card clone recency
 for entry in "${CLONE_TARGETS[@]}"; do
   label=${entry%%:*}; interval=${entry##*:}

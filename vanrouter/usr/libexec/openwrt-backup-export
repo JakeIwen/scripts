@@ -1,0 +1,98 @@
+#!/bin/sh
+
+# Forced-command SSH endpoint used by vanpi to pull a verified OpenWrt backup.
+# Stdout must contain only the outer tar.gz stream.
+set -eu
+
+tag=openwrt-backup-export
+expected_source=192.168.6.103
+expected_command=openwrt-backup
+
+fail() {
+	/usr/bin/logger -p auth.err -t "$tag" "$1"
+	printf '%s\n' "$1" >&2
+	exit 1
+}
+
+set -- ${SSH_CONNECTION:-}
+[ "$#" -ge 1 ] && [ "$1" = "$expected_source" ] \
+	|| fail "refused backup request from an unexpected source"
+[ "${SSH_ORIGINAL_COMMAND:-}" = "$expected_command" ] \
+	|| fail "refused backup request with an unexpected command"
+
+umask 077
+work_dir=$(/bin/mktemp -d /tmp/openwrt-backup.XXXXXX) \
+	|| fail "could not create backup workspace"
+case "$work_dir" in
+	/tmp/openwrt-backup.*) ;;
+	*) fail "refusing unexpected backup workspace: $work_dir" ;;
+esac
+
+config_archive="$work_dir/dendelion-sysupgrade.tar.gz"
+board_file="$work_dir/system-board.json"
+package_file="$work_dir/apk-installed-manifest.txt"
+backup_list="$work_dir/sysupgrade-file-list.txt"
+created_file="$work_dir/created-at-utc.txt"
+checksum_file="$work_dir/SHA256SUMS"
+
+cleanup() {
+	/bin/rm -f "$config_archive" "$board_file" "$package_file" \
+		"$backup_list" "$created_file" "$checksum_file"
+	/bin/rmdir "$work_dir" 2>/dev/null || true
+}
+trap cleanup EXIT
+trap 'exit 143' HUP INT TERM
+
+/sbin/sysupgrade -l > "$backup_list"
+for required_path in \
+	/etc/config/dhcp \
+	/etc/config/dropbear \
+	/etc/config/firewall \
+	/etc/config/mwan3 \
+	/etc/config/network \
+	/etc/config/sqm \
+	/etc/config/system \
+	/etc/config/wireless \
+	/etc/dropbear/authorized_keys \
+	/etc/dropbear/vanpi-policy-trigger \
+	/etc/firewall.ttl-clientwan.nft \
+	/etc/mwan3.user \
+	/etc/sysupgrade.conf \
+	/root/.ssh/known_hosts \
+	/usr/libexec/openwrt-backup-export \
+	/usr/libexec/vanpi-policy-trigger; do
+	/bin/grep -Fx "$required_path" "$backup_list" >/dev/null \
+		|| fail "required path is absent from sysupgrade backup: $required_path"
+done
+/bin/grep -F \
+	'command="/usr/libexec/openwrt-backup-export",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty ssh-ed25519 ' \
+	/etc/dropbear/authorized_keys >/dev/null \
+	|| fail "restricted backup key is absent from authorized_keys"
+
+/sbin/sysupgrade -b "$config_archive" >/dev/null 2>&1 \
+	|| fail "sysupgrade backup creation failed"
+/bin/tar -tzf "$config_archive" >/dev/null \
+	|| fail "sysupgrade created an unreadable archive"
+/bin/ubus call system board > "$board_file"
+/usr/bin/apk list --installed --manifest > "$package_file"
+[ -s "$package_file" ] || fail "installed package manifest is empty"
+/bin/date -u '+%Y-%m-%dT%H:%M:%SZ' > "$created_file"
+
+(
+	cd "$work_dir"
+	/usr/bin/sha256sum \
+		dendelion-sysupgrade.tar.gz \
+		system-board.json \
+		apk-installed-manifest.txt \
+		sysupgrade-file-list.txt \
+		created-at-utc.txt > SHA256SUMS
+)
+
+/usr/bin/logger -p auth.notice -t "$tag" "exported verified configuration backup"
+/bin/tar -C "$work_dir" -czf - \
+	dendelion-sysupgrade.tar.gz \
+	system-board.json \
+	apk-installed-manifest.txt \
+	sysupgrade-file-list.txt \
+	created-at-utc.txt \
+	SHA256SUMS

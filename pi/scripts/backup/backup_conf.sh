@@ -33,6 +33,16 @@ HA_DB=/home/homeassistant/.homeassistant/home-assistant_v2.db
 # state + notifications
 STAMP_DIR=/home/pi/backups/stamps
 SNAP_DIR=/home/pi/backups/snapshots
+
+# OpenWrt snapshot pulled from dendelion before each Borg archive. The router
+# key is forced-command-only; the last valid local bundle is retained on error.
+OPENWRT_SNAPSHOT_DIR="$SNAP_DIR/openwrt"
+OPENWRT_SNAPSHOT_FILE="$OPENWRT_SNAPSHOT_DIR/dendelion-latest.tar.gz"
+OPENWRT_BACKUP_STAMP="$STAMP_DIR/openwrt_ok"
+OPENWRT_BACKUP_STALE_HOURS=72
+OPENWRT_BACKUP_HOST=root@192.168.6.1
+OPENWRT_BACKUP_KEY=/home/pi/.ssh/openwrt-backup
+OPENWRT_BACKUP_KNOWN_HOSTS=/home/pi/.ssh/known_hosts
 # backup alerts go to NTFY_BACKUP_URL (set in secrets, e.g. https://ntfy.sh/<topic>);
 # if unset, ntfy_send.sh's own fallbacks apply (NTFY_MESSAGE_URL, then local server).
 # exported because ntfy_send.sh runs as a child process, not sourced
