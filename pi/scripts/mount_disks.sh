@@ -320,22 +320,27 @@ md_recover_stale_mounts() {
   (( had_failure == 0 ))
 }
 
-md_first_mount_dir_entry() {
+md_first_blocking_mount_dir_entry() {
   # Root's cron launches this script through `su pi -c` without changing out
   # of /root.  GNU find otherwise inspects the absolute target successfully,
   # then exits 1 because pi cannot restore that inaccessible starting cwd.
+  # Finder's two standard metadata files are harmless underlay clutter. Only
+  # regular files with those exact names are allowed; a directory, symlink, or
+  # similarly named entry still blocks the mount.
   (
     cd / || {
       echo "ERROR: cannot enter a safe working directory for mount validation" >&2
       return 1
     }
-    /usr/bin/timeout 5 /usr/bin/find "$1" -mindepth 1 -maxdepth 1 -print -quit
+    /usr/bin/timeout 5 /usr/bin/find "$1" -mindepth 1 -maxdepth 1 \
+      ! \( -type f \( -name .DS_Store -o -name '._.DS_Store' \) \) \
+      -print -quit
   )
 }
 
 md_require_empty_mount_dir() {
   local pth="$1"
-  local first_entry
+  local blocking_entry
   local status
 
   if [[ ! -d "$pth" ]]; then
@@ -347,18 +352,22 @@ md_require_empty_mount_dir() {
   # also fails closed if a broken mount appears during the validation race.
   # Preserve stderr so a permission, I/O, or timeout failure is actionable in
   # the policy log instead of being reduced to an unexplained status number.
-  first_entry="$(md_first_mount_dir_entry "$pth" 2>&1)"
+  blocking_entry="$(md_first_blocking_mount_dir_entry "$pth" 2>&1)"
   status=$?
   if (( status != 0 )); then
     echo "ERROR: cannot verify that the underlying mount directory $pth is empty (status $status); refusing" >&2
-    if [[ -n "$first_entry" ]]; then
-      printf 'directory probe diagnostic: %s\n' "$first_entry" >&2
+    if [[ -n "$blocking_entry" ]]; then
+      printf 'directory probe diagnostic: %s\n' "$blocking_entry" >&2
     fi
     return 1
   fi
-  if [[ -n "$first_entry" ]]; then
+  if [[ -n "$blocking_entry" ]]; then
     echo "ERROR: underlying mount directory $pth is not empty; preserving its contents and refusing to mount over them" >&2
     return 1
+  fi
+  if [[ ( -f "$pth/.DS_Store" && ! -L "$pth/.DS_Store" ) ||
+        ( -f "$pth/._.DS_Store" && ! -L "$pth/._.DS_Store" ) ]]; then
+    echo "ignoring Finder metadata in underlying mount directory: $pth"
   fi
   return 0
 }

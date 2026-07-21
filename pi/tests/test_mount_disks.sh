@@ -25,8 +25,10 @@ source "$repo_root/pi/scripts/mount_disks.sh"
 md_canonical_path() {
   printf '%s\n' "$1"
 }
-md_first_mount_dir_entry() {
-  /usr/bin/find "$1" -mindepth 1 -maxdepth 1 -print -quit
+md_first_blocking_mount_dir_entry() {
+  /usr/bin/find "$1" -mindepth 1 -maxdepth 1 \
+    ! \( -type f \( -name .DS_Store -o -name '._.DS_Store' \) \) \
+    -print -quit
 }
 
 # Simulate a mountinfo entry for a vanished old enumeration.  The expected
@@ -59,6 +61,33 @@ assert_eq 1 "$?" "an unmounted target must continue to underlay validation"
 mkdir "$test_root/mount-target"
 md_require_empty_mount_dir "$test_root/mount-target" >/dev/null 2>&1 ||
   fail "empty underlying mount directory was rejected"
+
+mkdir "$test_root/finder-metadata-only"
+touch "$test_root/finder-metadata-only/.DS_Store" \
+  "$test_root/finder-metadata-only/._.DS_Store"
+md_require_empty_mount_dir "$test_root/finder-metadata-only" >/dev/null 2>&1 ||
+  fail "regular Finder metadata files blocked the mount target"
+[[ -f "$test_root/finder-metadata-only/.DS_Store" &&
+   -f "$test_root/finder-metadata-only/._.DS_Store" ]] ||
+  fail "Finder metadata files were modified"
+
+mkdir -p "$test_root/finder-metadata-directory/.DS_Store"
+if md_require_empty_mount_dir "$test_root/finder-metadata-directory" >/dev/null 2>&1; then
+  fail "a directory named .DS_Store was accepted as Finder metadata"
+fi
+
+mkdir "$test_root/finder-metadata-symlink"
+ln -s /dev/null "$test_root/finder-metadata-symlink/.DS_Store"
+if md_require_empty_mount_dir "$test_root/finder-metadata-symlink" >/dev/null 2>&1; then
+  fail "a symlink named .DS_Store was accepted as Finder metadata"
+fi
+
+mkdir "$test_root/similarly-named-metadata"
+touch "$test_root/similarly-named-metadata/not-really.DS_Store"
+if md_require_empty_mount_dir "$test_root/similarly-named-metadata" >/dev/null 2>&1; then
+  fail "a similarly named file was accepted as standard Finder metadata"
+fi
+
 touch "$test_root/mount-target/.hidden-underlay-data"
 if md_require_empty_mount_dir "$test_root/mount-target" >/dev/null 2>&1; then
   fail "nonempty underlying mount directory was accepted"
@@ -66,7 +95,7 @@ fi
 [[ -e "$test_root/mount-target/.hidden-underlay-data" ]] ||
   fail "underlying data was modified"
 
-md_first_mount_dir_entry() {
+md_first_blocking_mount_dir_entry() {
   echo "find: failed to restore inaccessible working directory" >&2
   return 1
 }
