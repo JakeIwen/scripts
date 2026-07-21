@@ -21,8 +21,8 @@
   </div>
   <div class="grid" id="tile-grid">
     <button class="tile cop" id="cop" data-dashboard-tile data-action aria-pressed="false">
-      <span class="pill" id="cop-pill">OFF</span><span class="tile-icon" aria-hidden="true">🚨</span>
-      <span class="tile-title">COP ALERT</span><span class="tile-detail" id="cop-detail">Tap to keep the dashcam awake</span>
+      <span class="pill" id="cop-pill">OFF</span><span class="tile-heading"><span class="tile-icon" aria-hidden="true">🚨</span><span class="tile-title">COP ALERT</span></span>
+      <span class="tile-detail" id="cop-detail">Tap to keep the dashcam awake</span>
       <span class="status-lines">
         <span class="status-line"><span>Engine</span><span id="engine">Checking C-CAN…</span></span>
         <span class="status-line"><span>ext_led</span><span id="cop-led">—</span></span>
@@ -31,12 +31,12 @@
     </button>
     <button class="tile starlink unknown" id="starlink" data-dashboard-tile data-action disabled aria-pressed="mixed">
       <span class="switch-state"><span class="network-dot" id="starlink-dot"></span><span id="starlink-state">NO DATA</span></span>
-      <span class="tile-icon" aria-hidden="true">🛰️</span><span class="tile-title">Starlink</span>
+      <span class="tile-heading"><span class="tile-icon" aria-hidden="true">🛰️</span><span class="tile-title">Starlink</span></span>
       <span class="tile-detail" id="starlink-detail">Checking Tuya status…</span>
     </button>
-    <a class="tile" id="books" data-dashboard-tile data-action href="#"><span class="tile-icon" aria-hidden="true">📖</span><span class="tile-title">Audiobooks</span><span class="tile-detail">Open the Sonos audiobook library</span></a>
+    <a class="tile" id="books" data-dashboard-tile data-action href="#"><span class="tile-heading"><span class="tile-icon" aria-hidden="true">📖</span><span class="tile-title">Audiobooks</span></span><span class="tile-detail">Open the Sonos audiobook library</span></a>
     <section class="tile sonos-tile" id="sonos-card" data-dashboard-tile aria-labelledby="sonos-title">
-      <div class="sonos-head"><span class="tile-title" id="sonos-title">Sonos</span><button class="sonos-open" id="speakers" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="speaker-panel"><span aria-hidden="true">🔊</span><span id="speaker-summary">Finding…</span></button></div>
+      <div class="sonos-head"><span class="tile-heading"><span class="tile-icon" aria-hidden="true">🔊</span><span class="tile-title" id="sonos-title">Sonos</span></span><button class="sonos-open" id="speakers" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="speaker-panel"><span id="speaker-summary">Finding…</span></button></div>
       <div class="now-playing"><strong id="sonos-track">Finding Sonos…</strong><span id="sonos-artist">—</span></div>
       <div class="transport" aria-label="Sonos playback controls">
         <button class="transport-button" data-action data-transport="previous" aria-label="Previous track">|◀</button>
@@ -46,11 +46,11 @@
       <div class="sonos-progress" id="sonos-progress" role="progressbar" aria-label="Track position" hidden><span class="sonos-progress-fill" id="sonos-progress-fill"></span></div>
     </section>
     <button class="tile storage-tile" id="storage" data-dashboard-tile data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="storage-panel">
-      <span class="tile-icon" aria-hidden="true">💾</span><span class="tile-title">Disk &amp; Torrent</span><span class="tile-detail" id="storage-summary">Checking current state…</span>
+      <span class="tile-heading"><span class="tile-icon" aria-hidden="true">💾</span><span class="tile-title">Disk &amp; Torrent</span></span><span class="tile-detail" id="storage-summary">Checking current state…</span>
     </button>
     <button class="tile monitor-tile unknown" id="system-monitor" data-dashboard-tile data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="system-monitor-panel">
-      <span class="pill" id="system-monitor-pill">NO DATA</span><span class="tile-icon" aria-hidden="true">⚡</span>
-      <span class="tile-title">System Health</span><span class="tile-detail" id="system-monitor-summary">Loading power and resource history…</span>
+      <span class="pill" id="system-monitor-pill">NO DATA</span><span class="tile-heading"><span class="tile-icon" aria-hidden="true">⚡</span><span class="tile-title">System Health</span></span>
+      <span class="tile-detail" id="system-monitor-summary">Loading power and resource history…</span>
       <span class="status-lines">
         <span class="status-line"><span>Power</span><span id="system-monitor-power">Checking…</span></span>
         <span class="status-line"><span>CPU peak</span><span id="system-monitor-cpu">—</span></span>
@@ -62,22 +62,21 @@
       </span>
     </button>
     <button class="tile usb-tile unknown" id="usb-devices" data-dashboard-tile data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="usb-panel">
-      <span class="pill" id="usb-pill">NO DATA</span><span class="tile-icon" aria-hidden="true">🔌</span>
-      <span class="tile-title">USB Devices</span><span class="tile-detail" id="usb-summary">Reading live USB devices…</span>
+      <span class="pill" id="usb-pill">NO DATA</span><span class="tile-heading"><span class="tile-icon" aria-hidden="true">🔌</span><span class="tile-title">USB Devices</span></span>
+      <span class="tile-detail" id="usb-summary">Reading live USB devices…</span>
       <span class="status-lines">
         <span class="status-line"><span>Connected</span><span id="usb-connected">Checking…</span></span>
         <span class="status-line"><span>Storage</span><span id="usb-storage">—</span></span>
       </span>
     </button>
     <button class="tile price-tile" id="price-checks" data-dashboard-tile data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="price-panel">
-      <span class="pill" id="price-pill">—</span><span class="tile-icon" aria-hidden="true">🏷️</span>
-      <span class="tile-title">Price Watch</span><span class="tile-detail" id="price-summary">Loading watched items…</span>
+      <span class="pill" id="price-pill">—</span><span class="tile-heading"><span class="tile-icon" aria-hidden="true">🏷️</span><span class="tile-title">Price Watch</span></span>
+      <span class="tile-detail" id="price-summary">Loading watched items…</span>
       <span class="status-lines"><span class="status-line"><span>Last check</span><span id="price-last-check">never</span></span></span>
     </button>
     <section class="tile lighting-tile" id="lighting-card" data-dashboard-tile aria-labelledby="lighting-title">
       <button class="lighting-open" id="lighting" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="lighting-panel">
-        <span class="tile-icon" aria-hidden="true">💡</span>
-        <span class="tile-title" id="lighting-title">Lighting</span>
+        <span class="tile-heading"><span class="tile-icon" aria-hidden="true">💡</span><span class="tile-title" id="lighting-title">Lighting</span></span>
         <span class="tile-detail" id="lighting-summary">Checking Home Assistant…</span>
       </button>
       <button class="lighting-master" id="lighting-master" data-action disabled aria-pressed="mixed">
@@ -86,10 +85,10 @@
     </section>
     <button class="tile ubnt-wifi-tile" id="ubnt-wifi" data-dashboard-tile data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="ubnt-wifi-panel">
       <span class="switch-state"><span class="network-dot" id="ubnt-wifi-dot"></span><span id="ubnt-wifi-state">NO DATA</span></span>
-      <span class="network-card-heading ubnt-card-heading"><span aria-hidden="true">📡</span><span>UBNT</span></span><span class="ubnt-title"><span class="network-dot" id="ubnt-radio-dot"></span><span class="tile-title">Wireless</span></span><span class="tile-detail" id="ubnt-wifi-summary">Scan and select upstream networks</span>
+      <span class="network-card-heading ubnt-card-heading tile-heading"><span class="tile-icon" aria-hidden="true">📡</span><span class="ubnt-title"><span class="network-dot" id="ubnt-radio-dot"></span><span class="tile-title">UBNT Wi-Fi</span></span></span><span class="tile-detail" id="ubnt-wifi-summary">Scan and select upstream networks</span>
     </button>
     <section class="network-card" id="openwrt-card" data-dashboard-tile data-tile-label="OpenWrt" aria-labelledby="openwrt-title">
-      <div class="connectivity-head"><h2 class="network-card-heading" id="openwrt-title">OpenWrt</h2><span class="connectivity-age" id="openwrt-age">Checking…</span></div>
+      <div class="connectivity-head"><h2 class="network-card-heading tile-heading" id="openwrt-title"><span class="tile-icon" aria-hidden="true">🌐</span><span>OpenWrt</span></h2><span class="connectivity-age" id="openwrt-age">Checking…</span></div>
       <div class="mwan-overview">
         <div class="mwan-primary">
           <span class="network-label"><span class="network-dot" id="internet-dot"></span>MWAN3</span>
