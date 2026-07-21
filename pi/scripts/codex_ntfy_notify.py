@@ -4,12 +4,34 @@
 import json
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 
 
 NTFY_SEND = "/home/pi/scripts/ntfy_send.sh"
+CODEX_STATE = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "state_5.sqlite"
 MAX_MESSAGE_CHARS = 3500
+
+
+def conversation_title(event: dict) -> str:
+    for key in ("conversation-title", "thread-title"):
+        title = event.get(key)
+        if isinstance(title, str) and title.strip():
+            return title.strip()
+
+    thread_id = event.get("thread-id")
+    if not thread_id or not CODEX_STATE.is_file():
+        return ""
+    try:
+        with sqlite3.connect(f"file:{CODEX_STATE}?mode=ro", uri=True, timeout=1) as connection:
+            row = connection.execute(
+                "SELECT title FROM threads WHERE id = ?",
+                (thread_id,),
+            ).fetchone()
+    except (OSError, sqlite3.Error):
+        return ""
+    return row[0].strip() if row and isinstance(row[0], str) else ""
 
 
 def main() -> int:
@@ -29,11 +51,14 @@ def main() -> int:
     cwd = event.get("cwd") or "unknown directory"
     project = Path(cwd).name or cwd
     assistant_message = (event.get("last-assistant-message") or "Turn complete").strip()
-    if len(assistant_message) > MAX_MESSAGE_CHARS:
-        assistant_message = assistant_message[: MAX_MESSAGE_CHARS - 1].rstrip() + "…"
 
     title = f"Codex ready — {project}"
     message = f"{cwd}\n\n{assistant_message}"
+    thread_title = conversation_title(event)
+    if thread_title:
+        message = f"{thread_title} - {message}"
+    if len(message) > MAX_MESSAGE_CHARS:
+        message = message[: MAX_MESSAGE_CHARS - 1].rstrip() + "…"
 
     env = os.environ.copy()
     env["NTFY_TOPIC_VAR"] = "NTFY_AGENT_URL"
