@@ -1423,6 +1423,16 @@ class UsbPortControllerTests(unittest.TestCase):
         tee_calls = [call for call in self.calls if dashboard.TEE in call[0]]
         self.assertEqual([call[2] for call in tee_calls], ["1\n", "0\n"])
 
+    def test_uses_fixed_usb2_recovery_tool_and_refreshes_topology(self):
+        self.controller._run_recovery(1000)
+
+        self.assertIn(
+            ([dashboard.USB2_RECOVERY_TOOL], dashboard.USB2_RECOVERY_TIMEOUT, None),
+            self.calls,
+        )
+        self.assertEqual(self.controller.snapshot()["operation"]["status"], "complete")
+        self.assertEqual(self.controller.snapshot()["operation"]["action"], "restore")
+
 
 class SpeedTestManagerTests(unittest.TestCase):
     def test_parser_accepts_existing_speedtest_script_output(self):
@@ -2202,6 +2212,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"function renderUsbDevices(response)", javascript.data)
         self.assertIn(b"function renderUsbPorts(state)", javascript.data)
         self.assertIn(b"function changeUsbPort(button)", javascript.data)
+        self.assertIn(b"function recoverUsb2()", javascript.data)
         self.assertIn(b"function renderBackups(response)", javascript.data)
         self.assertIn(b"function startBackupClone(button)", javascript.data)
         self.assertIn(b"/api/backups", javascript.data)
@@ -2212,6 +2223,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"ignition-monitor/enable", javascript.data)
         self.assertIn(b"/api/usb-devices", javascript.data)
         self.assertIn(b"usb-ports/action", javascript.data)
+        self.assertIn(b"usb-ports/recover", javascript.data)
         self.assertIn(b"function renderCrashAnalysis(payload)", javascript.data)
         self.assertIn(b"function renderCrashHistory(payload)", javascript.data)
         self.assertIn(b"function monitorEventState(event)", javascript.data)
@@ -2384,6 +2396,43 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(unknown_field.status_code, 400)
         self.assertEqual(cross_origin.status_code, 403)
         self.assertEqual(calls, [("2-2:3", "off")])
+
+    def test_usb2_recovery_route_accepts_no_input_and_is_csrf_protected(self):
+        calls = []
+
+        class FakeUsbPorts:
+            def start_recovery(self):
+                calls.append("recover")
+                return {"operation": {"status": "running", "action": "restore"}}
+
+        original = dashboard.usb_ports
+        dashboard.usb_ports = FakeUsbPorts()
+        try:
+            client = dashboard.app.test_client()
+            accepted = client.post(
+                "/api/usb-ports/recover",
+                headers={"X-Van-Dashboard": "1"},
+            )
+            supplied_input = client.post(
+                "/api/usb-ports/recover",
+                data={"location": "anything"},
+                headers={"X-Van-Dashboard": "1"},
+            )
+            cross_origin = client.post(
+                "/api/usb-ports/recover",
+                headers={
+                    "X-Van-Dashboard": "1",
+                    "Origin": "https://example.invalid",
+                },
+            )
+        finally:
+            dashboard.usb_ports = original
+
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(accepted.headers["Cache-Control"], "no-store")
+        self.assertEqual(supplied_input.status_code, 400)
+        self.assertEqual(cross_origin.status_code, 403)
+        self.assertEqual(calls, ["recover"])
 
     def test_backup_routes_are_narrow_nonblocking_and_uncached(self):
         calls = []

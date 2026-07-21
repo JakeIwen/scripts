@@ -61,6 +61,9 @@ SPEEDTEST = os.path.expanduser(
 USB_WATCH_TOOL = os.environ.get(
     "VAN_DASHBOARD_USB_WATCH_TOOL", "/home/pi/scripts/usb_watch.py"
 )
+USB2_RECOVERY_TOOL = os.environ.get(
+    "VAN_DASHBOARD_USB2_RECOVERY_TOOL", "/home/pi/scripts/recover_usb2.sh"
+)
 CONNECTIVITY_INTERVAL = float(os.environ.get("VAN_DASHBOARD_CONNECTIVITY_INTERVAL", "30"))
 SPEEDTEST_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_SPEEDTEST_TIMEOUT", "180"))
 USB_WATCH_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_USB_WATCH_TIMEOUT", "10"))
@@ -68,6 +71,9 @@ UHUBCTL = os.environ.get("VAN_DASHBOARD_UHUBCTL", "/usr/sbin/uhubctl")
 SUDO = os.environ.get("VAN_DASHBOARD_SUDO", "/usr/bin/sudo")
 TEE = os.environ.get("VAN_DASHBOARD_TEE", "/usr/bin/tee")
 USB_PORT_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_USB_PORT_TIMEOUT", "15"))
+USB2_RECOVERY_TIMEOUT = float(
+    os.environ.get("VAN_DASHBOARD_USB2_RECOVERY_TIMEOUT", "30")
+)
 PRICE_CHECK_TOOL = os.environ.get(
     "VAN_DASHBOARD_PRICE_CHECK_TOOL", "/home/pi/scripts/price_check/main.py"
 )
@@ -2088,19 +2094,23 @@ class UsbPortController:
         self,
         device_monitor,
         command=run_command,
+        recovery_tool=USB2_RECOVERY_TOOL,
         sys_root="/sys",
         dev_root="/dev",
         mounts_path="/proc/self/mounts",
         timeout=USB_PORT_TIMEOUT,
+        recovery_timeout=USB2_RECOVERY_TIMEOUT,
         wall_clock=time.time,
         sleeper=time.sleep,
     ):
         self.device_monitor = device_monitor
         self.command = command
+        self.recovery_tool = recovery_tool
         self.sys_root = sys_root
         self.dev_root = dev_root
         self.mounts_path = mounts_path
         self.timeout = timeout
+        self.recovery_timeout = recovery_timeout
         self.wall_clock = wall_clock
         self.sleeper = sleeper
         self.lock = threading.RLock()
@@ -2328,6 +2338,31 @@ class UsbPortController:
             thread.start()
             return copy.deepcopy(self.data)
 
+    def start_recovery(self):
+        """Start the fixed, guarded Raspberry Pi internal USB 2 hub recovery."""
+        self.refresh()
+        with self.lock:
+            if self.data["operation"].get("status") == "running":
+                raise RuntimeError("another USB port action is already running")
+            started_at = int(self.wall_clock())
+            self.data["operation"] = {
+                "status": "running",
+                "key": "Pi internal USB 2 hub",
+                "action": "restore",
+                "started_at": started_at,
+                "completed_at": None,
+                "message": None,
+                "error": None,
+            }
+            thread = threading.Thread(
+                target=self._run_recovery,
+                args=(started_at,),
+                name="usb2-recovery",
+                daemon=True,
+            )
+            thread.start()
+            return copy.deepcopy(self.data)
+
     def _command_ok(self, args, input_text=None):
         result = self.command(args, timeout=self.timeout, input_text=input_text)
         if result.returncode:
@@ -2378,6 +2413,35 @@ class UsbPortController:
                 "action": action,
                 "started_at": started_at,
                 "completed_at": int(self.wall_clock()),
+                "error": error,
+            }
+
+    def _run_recovery(self, started_at):
+        error = None
+        message = None
+        try:
+            result = self.command(
+                [self.recovery_tool], timeout=self.recovery_timeout
+            )
+            if result.returncode:
+                detail = (result.stderr or result.stdout or "USB 2 recovery failed").strip()
+                raise RuntimeError(detail[-500:])
+            lines = (result.stdout or "").strip().splitlines()
+            message = lines[-1][-500:] if lines else "USB 2 hub restored"
+            usb_state = self.device_monitor.refresh()
+            self.refresh(usb_state)
+        except subprocess.TimeoutExpired:
+            error = f"USB 2 recovery timed out after {self.recovery_timeout:g} seconds"
+        except (OSError, RuntimeError, ValueError) as exc:
+            error = str(exc)
+        with self.lock:
+            self.data["operation"] = {
+                "status": "error" if error else "complete",
+                "key": "Pi internal USB 2 hub",
+                "action": "restore",
+                "started_at": started_at,
+                "completed_at": int(self.wall_clock()),
+                "message": message,
                 "error": error,
             }
 
@@ -3684,6 +3748,25 @@ def api_usb_port_action():
         {
             "ok": True,
             "message": "USB port action started",
+            "usb_ports": state,
+        }
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/api/usb-ports/recover", methods=["POST"])
+def api_usb2_recovery():
+    if request.args or request.form:
+        return api_error("USB 2 recovery does not accept input", 400)
+    try:
+        state = usb_ports.start_recovery()
+    except RuntimeError as exc:
+        return api_error(str(exc), 409)
+    response = jsonify(
+        {
+            "ok": True,
+            "message": "USB 2 recovery started",
             "usb_ports": state,
         }
     )

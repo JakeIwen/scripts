@@ -24,6 +24,13 @@ uses request text as a path, location, port number, executable, or action.
 Actions run in a background thread so a slow re-enumeration does not block the
 dashboard request.
 
+**Restore USB 2** runs the fixed `recover_usb2.sh` helper in a background
+thread. The helper verifies the Raspberry Pi 4 internal VIA `2109:3431` hub at
+location `1-1`, refuses to continue if any block device below that hub is
+mounted, and power-cycles only root-hub location `1`, port `1`. This briefly
+disconnects every USB 2 socket while leaving the independent USB 3 bus online.
+It never removes or rescans the VL805 PCIe controller.
+
 Before Off or Cycle, the backend refreshes topology and rejects the action if a
 filesystem label anywhere downstream currently resolves to a mounted block
 device. Use the Disks & Torrents policy/lifecycle controls to unmount storage

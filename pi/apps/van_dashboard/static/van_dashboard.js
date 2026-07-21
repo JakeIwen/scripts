@@ -49,6 +49,68 @@ function esc(v) {
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
   );
 }
+const TRUNCATED_TEXT_SELECTOR = [
+  '.status-line span:last-child',
+  '.sonos-open span:last-child',
+  '.now-playing strong',
+  '.now-playing span',
+  '.price-row-title span',
+  '.price-row-title small',
+  '.lighting-row strong',
+  '.disk-device-name',
+  '.disk-device-detail',
+  '.ubnt-network-name',
+  '.network-value',
+  '.speaker-name',
+  '.usb-device-main strong',
+  '.monitor-current strong',
+  '.monitor-peak > strong',
+  '.monitor-io-row strong',
+  '.monitor-io-row small',
+].join(',');
+function setupTruncationTitles() {
+  let frame = 0;
+  const resizeObserver = window.ResizeObserver
+    ? new ResizeObserver(() => schedule())
+    : null;
+  function fullText(element) {
+    return element.innerText
+      .trim()
+      .replace(/\s*\n\s*/g, ' · ')
+      .replace(/[\t ]+/g, ' ');
+  }
+  function sync() {
+    frame = 0;
+    document.querySelectorAll(TRUNCATED_TEXT_SELECTOR).forEach((element) => {
+      const previous = element.dataset.truncationTitle || '';
+      const current = element.getAttribute('title') || '';
+      if (current && current !== previous) return;
+      const clipped =
+        element.scrollWidth > element.clientWidth + 1 ||
+        element.scrollHeight > element.clientHeight + 1;
+      const text = clipped ? fullText(element) : '';
+      if (text) {
+        element.title = text;
+        element.dataset.truncationTitle = text;
+      } else if (current === previous) {
+        element.removeAttribute('title');
+        delete element.dataset.truncationTitle;
+      }
+    });
+  }
+  function schedule() {
+    if (!frame) frame = requestAnimationFrame(sync);
+  }
+  new MutationObserver(schedule).observe(document.body, {
+    childList: true,
+    characterData: true,
+    subtree: true,
+  });
+  resizeObserver?.observe(document.body);
+  window.addEventListener('resize', schedule);
+  document.fonts?.ready.then(schedule);
+  schedule();
+}
 function toast(message, bad = false) {
   clearTimeout(toastTimer);
   const el = $('toast');
@@ -484,17 +546,19 @@ function usbEventLabel(event) {
 }
 function renderUsbPorts(state) {
   const operation = state?.operation || { status: 'idle' },
-    running = operation.status === 'running';
-  $('usb-operation').textContent = running
-    ? `${operation.action} · ${operation.key}`
-    : operation.status === 'error'
-      ? `Failed · ${operation.error || 'unknown error'}`
-      : state?.last_error
-        ? 'Port status incomplete'
-        : state?.checked_at
-          ? `Updated ${age(state.checked_at)}`
-          : 'No port data';
+    running = operation.status === 'running',
+    recovering = operation.action === 'restore';
+  let operationLabel = state?.checked_at ? `Updated ${age(state.checked_at)}` : 'No port data';
+  if (state?.last_error) operationLabel = 'Port status incomplete';
+  if (operation.status === 'error')
+    operationLabel = `Failed · ${operation.error || 'unknown error'}`;
+  if (operation.status === 'complete' && recovering)
+    operationLabel = operation.message || 'USB 2 restored';
+  if (running)
+    operationLabel = recovering ? 'Restoring USB 2…' : `${operation.action} · ${operation.key}`;
+  $('usb-operation').textContent = operationLabel;
   $('usb-panel').classList.toggle('usb-port-busy', running);
+  $('usb-recover').disabled = running || usbPortBusy;
   $('usb-hub-list').innerHTML = (state?.hubs || [])
     .map((hub) => {
       const power = hub.method === 'power';
@@ -611,6 +675,29 @@ async function changeUsbPort(button) {
     });
     renderUsbPorts(response.usb_ports);
     toast(response.message || 'USB port action started');
+  } catch (error) {
+    toast(error.message, true);
+    await refreshUsbDevices(false).catch(() => {});
+  } finally {
+    usbPortBusy = false;
+  }
+}
+async function recoverUsb2() {
+  const button = $('usb-recover');
+  if (usbPortBusy || button.disabled) return;
+  if (
+    !window.confirm(
+      'Restore the Pi USB 2 bus? Every USB 2 device will disconnect briefly. The recovery refuses to run if USB 2 storage is mounted.',
+    )
+  )
+    return;
+  usbPortBusy = true;
+  button.disabled = true;
+  $('usb-panel').classList.add('usb-port-busy');
+  try {
+    const response = await post('usb-ports/recover');
+    renderUsbPorts(response.usb_ports);
+    toast(response.message || 'USB 2 recovery started');
   } catch (error) {
     toast(error.message, true);
     await refreshUsbDevices(false).catch(() => {});
@@ -2305,6 +2392,7 @@ $('system-monitor-close').addEventListener('click', closeSystemMonitor);
 $('monitor-crash-analyze').addEventListener('click', analyzePreviousCrash);
 $('usb-devices').addEventListener('click', openUsbDevices);
 $('usb-close').addEventListener('click', closeUsbDevices);
+$('usb-recover').addEventListener('click', recoverUsb2);
 $('backups').addEventListener('click', openBackups);
 $('backup-close').addEventListener('click', closeBackups);
 $('ignition-monitor').addEventListener('click', openIgnitionMonitor);
@@ -2538,6 +2626,7 @@ function refreshVisibleDashboard() {
   refreshLighting(false).catch(() => {});
   refreshUbntWifi(false);
 }
+setupTruncationTitles();
 Promise.allSettled([
   refresh(),
   loadSpeakers(),

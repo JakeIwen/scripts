@@ -832,6 +832,27 @@ const $=id=>document.getElementById(id);
 let all=[],status={},speakers=null,searchResults=null,searchTimer=0,searchSerial=0,busy=false,toastTimer=0;
 
 function esc(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+const TRUNCATED_TEXT_SELECTOR=['#speaker-label','.book-name','.speaker-name','#np-name','#np-meta'].join(',');
+function setupTruncationTitles(){
+  let frame=0;
+  const resizeObserver=window.ResizeObserver?new ResizeObserver(()=>schedule()):null;
+  function fullText(element){return element.innerText.trim().replace(/\\s*\\n\\s*/g,' · ').replace(/[\\t ]+/g,' ')}
+  function sync(){
+    frame=0;
+    document.querySelectorAll(TRUNCATED_TEXT_SELECTOR).forEach(element=>{
+      const previous=element.dataset.truncationTitle||'',current=element.getAttribute('title')||'';
+      if(current&&current!==previous)return;
+      const clipped=element.scrollWidth>element.clientWidth+1||element.scrollHeight>element.clientHeight+1;
+      const text=clipped?fullText(element):'';
+      if(text){element.title=text;element.dataset.truncationTitle=text}
+      else if(current===previous){element.removeAttribute('title');delete element.dataset.truncationTitle}
+    });
+  }
+  function schedule(){if(!frame)frame=requestAnimationFrame(sync)}
+  new MutationObserver(schedule).observe(document.body,{childList:true,characterData:true,subtree:true});
+  resizeObserver?.observe(document.body);
+  window.addEventListener('resize',schedule);document.fonts?.ready.then(schedule);schedule();
+}
 function seconds(value){return value?value.split(':').reduce((sum,part)=>sum*60+Number(part),0):0}
 function toast(message,bad=false){
   clearTimeout(toastTimer);const el=$('toast');el.textContent=message;el.className=bad?'show bad':'show';
@@ -987,6 +1008,7 @@ document.addEventListener('click',event=>{
   if(control){const params={};if(control.dataset.key)params[control.dataset.key]=control.dataset.value;action(()=>post(control.dataset.api,params))}
 });
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&$('speaker-backdrop').classList.contains('open'))closeSpeakers()});
+setupTruncationTitles();
 Promise.allSettled([loadLibrary(),refresh(false),loadSpeakers()]).then(results=>{
   for(const result of results)if(result.status==='rejected')toast(result.reason.message,true);
 });
