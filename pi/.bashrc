@@ -220,9 +220,13 @@ alias startor='$HOME/scripts/policyctl starlink-torrents on'
 alias startorx='$HOME/scripts/policyctl starlink-torrents off'
 
 # status hooks
-alias ignitmonoff="touch $HOME/hooks/inactive/ignition"
-alias ignitmonon="rm $HOME/hooks/inactive/ignition"
-alias ignitmonconf="ls -lah $HOME/hooks/inactive/ignition"
+ignitmonoff() { "$HOME/scripts/ignitionmonctl" disable "$@"; }
+ignitmonon() { "$HOME/scripts/ignitionmonctl" enable "$@"; }
+ignitmonconf() { "$HOME/scripts/ignitionmonctl" status "$@"; }
+# Also accept the service's full spelling while preserving the old short names.
+ignitionmonoff() { ignitmonoff "$@"; }
+ignitionmonon() { ignitmonon "$@"; }
+ignitionmonconf() { ignitmonconf "$@"; }
 van_is_running() { if test -f /home/pi/hooks/ignition_is_on; then echo "yes"; else echo "no"; fi; }
 
 

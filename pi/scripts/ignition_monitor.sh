@@ -4,7 +4,8 @@ num_confirmations_to_declare_off=3
 scripts=/home/pi/scripts
 hooks=/home/pi/hooks
 histfile=/tmp/ignition_wifi_scan
-inactive="$HOME/hooks/inactive/ignition"
+log="$HOME/log/ignition_monitor.log"
+override_check_failed=false
 
 > $histfile
 
@@ -17,7 +18,21 @@ do
 
   ignition_was_on=$(test -f /home/pi/hooks/ignition_is_on && echo true || echo false)
   ignition_is_on="$(tail -1 $histfile)"
-  script_inactive=$(test -f $inactive && echo true || echo false)
+  if "$scripts/ignitionmonctl" check >> "$log" 2>&1; then
+    script_inactive=true
+    override_check_failed=false
+  else
+    inactive_status=$?
+    script_inactive=false
+    if ((inactive_status > 1)); then
+      if ! $override_check_failed; then
+        echo "$(date): cannot inspect ignition monitor override; failing active" >> "$log"
+      fi
+      override_check_failed=true
+    else
+      override_check_failed=false
+    fi
+  fi
 
   if $ignition_is_on && ! $ignition_was_on && ! $script_inactive; then 
     echo "van ignition switched to ON"
