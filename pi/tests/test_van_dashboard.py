@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import subprocess
@@ -940,12 +941,24 @@ class UsbWatchScriptTests(unittest.TestCase):
             ("002", "ID abcd:1234 Example Storage Device"): [7],
         }
         labels = {("002", 7): ["movingparts"]}
-        payload = usb_watch.json_snapshot(current=current, labelmap=labels)
-        self.assertEqual(payload["version"], 1)
+        instances = {
+            ("002", 7): {
+                "device_number": 7,
+                "location": "2-2.3",
+                "parent_location": "2-2",
+                "port": 3,
+            }
+        }
+        payload = usb_watch.json_snapshot(
+            current=current, labelmap=labels, instances=instances
+        )
+        self.assertEqual(payload["version"], 2)
         self.assertEqual(payload["devices"][0]["device_id"], "1d6b:0002")
         self.assertTrue(payload["devices"][0]["root_hub"])
         self.assertEqual(payload["devices"][1]["description"], "Example Storage Device")
         self.assertEqual(payload["devices"][1]["labels"], ["movingparts"])
+        self.assertEqual(payload["devices"][1]["instances"][0]["location"], "2-2.3")
+        self.assertEqual(payload["devices"][1]["instances"][0]["labels"], ["movingparts"])
 
 
 class UsbDeviceMonitorTests(unittest.TestCase):
@@ -1049,7 +1062,7 @@ class UsbDeviceMonitorTests(unittest.TestCase):
     def test_parser_rejects_unexpected_schema(self):
         invalid = (
             "not-json",
-            json.dumps({"version": 2, "devices": []}),
+            json.dumps({"version": 3, "devices": []}),
             self.payload(self.device("not-an-id", "Bad device")),
             self.payload({**self.device("abcd:1234", "Bad labels"), "labels": "disk"}),
         )
@@ -1057,6 +1070,184 @@ class UsbDeviceMonitorTests(unittest.TestCase):
             with self.subTest(payload=payload):
                 with self.assertRaises(ValueError):
                     dashboard.UsbDeviceMonitor.parse_current(payload)
+
+    def test_parser_accepts_version_two_topology_instances(self):
+        device = {
+            **self.device("abcd:1234", "Storage", labels=["movingparts"]),
+            "instances": [
+                {
+                    "device_number": 5,
+                    "location": "2-2.3",
+                    "parent_location": "2-2",
+                    "port": 3,
+                    "labels": ["movingparts"],
+                }
+            ],
+        }
+        parsed = dashboard.UsbDeviceMonitor.parse_current(
+            json.dumps({"version": 2, "devices": [device]})
+        )
+        self.assertEqual(next(iter(parsed.values()))["instances"][0]["port"], 3)
+
+
+class UsbPortControllerTests(unittest.TestCase):
+    UHUB_STATUS = """Current status for hub 2 [1d6b:0003 Linux xHCI Host Controller, USB 3.00, 2 ports, ppps]
+  Port 1: 0203 power 5gbps U0 enable connect [0781:5591 SanDisk Drive]
+  Port 2: 02a0 power 5gbps Rx.Detect
+"""
+
+    @staticmethod
+    def write(path, value):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(str(value))
+
+    @staticmethod
+    def usb_state():
+        return {
+            "devices": [
+                {
+                    "description": "GenesysLogic USB3.1 Hub",
+                    "device_id": "05e3:0626",
+                    "present_count": 1,
+                    "root_hub": False,
+                    "instances": [
+                        {
+                            "device_number": 3,
+                            "location": "2-2",
+                            "parent_location": "2",
+                            "port": 2,
+                            "labels": [],
+                        }
+                    ],
+                },
+                {
+                    "description": "Seagate Portable",
+                    "device_id": "0bc2:2344",
+                    "present_count": 1,
+                    "root_hub": False,
+                    "instances": [
+                        {
+                            "device_number": 5,
+                            "location": "2-2.3",
+                            "parent_location": "2-2",
+                            "port": 3,
+                            "labels": ["movingparts"],
+                        }
+                    ],
+                },
+            ]
+        }
+
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.sys_root = os.path.join(self.tempdir.name, "sys")
+        self.dev_root = os.path.join(self.tempdir.name, "dev")
+        self.mounts = os.path.join(self.tempdir.name, "mounts")
+        self.write(
+            os.path.join(
+                self.sys_root,
+                "bus",
+                "usb",
+                "devices",
+                "2-0:1.0",
+                "usb2-port1",
+                "disable",
+            ),
+            "0\n",
+        )
+        for port in (3, 4):
+            self.write(
+                os.path.join(
+                    self.sys_root,
+                    "bus",
+                    "usb",
+                    "devices",
+                    "2-2:1.0",
+                    f"2-2-port{port}",
+                    "disable",
+                ),
+                "0\n",
+            )
+        os.makedirs(os.path.join(self.dev_root, "disk", "by-label"), exist_ok=True)
+        disk = os.path.join(self.dev_root, "sda1")
+        self.write(disk, "")
+        os.symlink(disk, os.path.join(self.dev_root, "disk", "by-label", "movingparts"))
+        self.write(self.mounts, f"{disk} /mnt/movingparts ext4 rw 0 0\n")
+        self.calls = []
+
+        class Devices:
+            def refresh(inner_self):
+                return UsbPortControllerTests.usb_state()
+
+        def command(args, timeout, input_text=None):
+            self.calls.append((list(args), timeout, input_text))
+            if args == [dashboard.SUDO, "-n", dashboard.UHUBCTL]:
+                return SimpleNamespace(returncode=0, stdout=self.UHUB_STATUS, stderr="")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        self.controller = dashboard.UsbPortController(
+            Devices(),
+            command=command,
+            sys_root=self.sys_root,
+            dev_root=self.dev_root,
+            mounts_path=self.mounts,
+            timeout=4,
+            wall_clock=lambda: 1000,
+            sleeper=lambda _seconds: None,
+        )
+
+    def tearDown(self):
+        self.tempdir.cleanup()
+
+    def test_parses_power_hubs_and_maps_readable_devices_to_kernel_ports(self):
+        state = self.controller.refresh(self.usb_state())
+        ports = {
+            port["key"]: port
+            for hub in state["hubs"]
+            for port in hub["ports"]
+        }
+        self.assertEqual(ports["2:1"]["method"], "power")
+        self.assertEqual(ports["2-2:3"]["method"], "disable")
+        self.assertEqual(ports["2-2:3"]["device_descriptions"], ["Seagate Portable"])
+        self.assertEqual(ports["2-2:3"]["mounted_labels"], ["movingparts"])
+        self.assertEqual(ports["2-2:4"]["device_descriptions"], [])
+
+    def test_rejects_unknown_inputs_and_mounted_storage(self):
+        self.controller.refresh(self.usb_state())
+        with self.assertRaisesRegex(ValueError, "unknown USB port"):
+            self.controller.start_action("../../etc:1", "off")
+        with self.assertRaisesRegex(ValueError, "must be on, off, or cycle"):
+            self.controller.start_action("2:1", "toggle")
+        with self.assertRaisesRegex(RuntimeError, "refusing to disconnect mounted storage"):
+            self.controller.start_action("2-2:3", "off")
+
+    def test_uses_exact_uhubctl_and_kernel_tee_commands(self):
+        self.controller.refresh(self.usb_state())
+        power_target = copy.deepcopy(self.controller.targets["2:1"])
+        data_target = copy.deepcopy(self.controller.targets["2-2:4"])
+        self.controller._run_action(power_target, "off", 1000)
+        self.controller._run_action(data_target, "cycle", 1000)
+        self.assertIn(
+            (
+                [
+                    dashboard.SUDO,
+                    "-n",
+                    dashboard.UHUBCTL,
+                    "-l",
+                    "2",
+                    "-p",
+                    "1",
+                    "-a",
+                    "off",
+                ],
+                4,
+                None,
+            ),
+            self.calls,
+        )
+        tee_calls = [call for call in self.calls if dashboard.TEE in call[0]]
+        self.assertEqual([call[2] for call in tee_calls], ["1\n", "0\n"])
 
 
 class SpeedTestManagerTests(unittest.TestCase):
@@ -1373,6 +1564,9 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="usb-devices"', page.data)
         self.assertIn(b'id="usb-panel"', page.data)
         self.assertIn(b'id="usb-device-list"', page.data)
+        self.assertIn(b'id="usb-hub-list"', page.data)
+        self.assertIn(b'id="usb-operation"', page.data)
+        self.assertIn(b"Mounted storage is protected", page.data)
         self.assertIn(b'id="monitor-io-details"', page.data)
         self.assertIn(b'id="monitor-throttling"', page.data)
         self.assertIn(b'id="monitor-process-current"', page.data)
@@ -1449,7 +1643,10 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"function renderPriceChecks(response)", javascript.data)
         self.assertIn(b"function renderSystemMonitor(response)", javascript.data)
         self.assertIn(b"function renderUsbDevices(response)", javascript.data)
+        self.assertIn(b"function renderUsbPorts(state)", javascript.data)
+        self.assertIn(b"function changeUsbPort(button)", javascript.data)
         self.assertIn(b"/api/usb-devices", javascript.data)
+        self.assertIn(b"usb-ports/action", javascript.data)
         self.assertIn(b"function renderCrashAnalysis(payload)", javascript.data)
         self.assertIn(b"function renderCrashHistory(payload)", javascript.data)
         self.assertIn(b"function monitorEventState(event)", javascript.data)
@@ -1489,6 +1686,8 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b".monitor-io-row", stylesheet.data)
         self.assertIn(b".usb-device-row", stylesheet.data)
         self.assertIn(b".usb-label", stylesheet.data)
+        self.assertIn(b".usb-port-grid", stylesheet.data)
+        self.assertIn(b".usb-port-actions", stylesheet.data)
         self.assertIn(b".tile-edit-button", stylesheet.data)
         self.assertIn(
             b"body.tiles-editing #tile-grid > [data-dashboard-tile]",
@@ -1551,20 +1750,67 @@ class DashboardRouteTests(unittest.TestCase):
                     "devices": [],
                 }
 
+        class FakeUsbPorts:
+            def refresh(self, state):
+                calls.append(("ports", state["present_device_count"]))
+                return {"checked_at": 123, "hubs": [], "operation": {"status": "idle"}}
+
         original = dashboard.usb_devices
+        original_ports = dashboard.usb_ports
         dashboard.usb_devices = FakeUsbDevices()
+        dashboard.usb_ports = FakeUsbPorts()
         try:
             client = dashboard.app.test_client()
             response = client.get("/api/usb-devices")
             rejected = client.get("/api/usb-devices?command=anything")
         finally:
             dashboard.usb_devices = original
+            dashboard.usb_ports = original_ports
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["Cache-Control"], "no-store")
         self.assertEqual(response.json["usb"]["present_device_count"], 2)
         self.assertEqual(rejected.status_code, 400)
-        self.assertEqual(calls, ["refresh"])
+        self.assertEqual(calls, ["refresh", ("ports", 2)])
+
+    def test_usb_port_action_route_is_whitelisted_and_csrf_protected(self):
+        calls = []
+
+        class FakeUsbPorts:
+            def start_action(self, port, action):
+                calls.append((port, action))
+                return {"operation": {"status": "running", "key": port, "action": action}}
+
+        original = dashboard.usb_ports
+        dashboard.usb_ports = FakeUsbPorts()
+        try:
+            client = dashboard.app.test_client()
+            accepted = client.post(
+                "/api/usb-ports/action",
+                data={"port": "2-2:3", "action": "off"},
+                headers={"X-Van-Dashboard": "1"},
+            )
+            unknown_field = client.post(
+                "/api/usb-ports/action",
+                data={"port": "2-2:3", "action": "off", "command": "anything"},
+                headers={"X-Van-Dashboard": "1"},
+            )
+            cross_origin = client.post(
+                "/api/usb-ports/action",
+                data={"port": "2-2:3", "action": "off"},
+                headers={
+                    "X-Van-Dashboard": "1",
+                    "Origin": "https://example.invalid",
+                },
+            )
+        finally:
+            dashboard.usb_ports = original
+
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(accepted.headers["Cache-Control"], "no-store")
+        self.assertEqual(unknown_field.status_code, 400)
+        self.assertEqual(cross_origin.status_code, 403)
+        self.assertEqual(calls, [("2-2:3", "off")])
 
     def test_system_monitor_route_has_bounded_ranges(self):
         calls = []

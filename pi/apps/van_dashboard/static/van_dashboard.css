@@ -1572,11 +1572,142 @@ body.busy [data-action] {
 .usb-sheet {
   max-height: min(88vh, 820px);
 }
+.usb-port-section {
+  margin-top: 8px;
+}
+.usb-hub-list {
+  display: grid;
+  gap: 9px;
+  margin-top: 8px;
+}
+.usb-hub-card {
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: #121b22;
+  padding: 10px;
+}
+.usb-hub-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.usb-hub-head strong,
+.usb-hub-head small {
+  display: block;
+}
+.usb-hub-head strong {
+  font-size: 11px;
+}
+.usb-hub-head small {
+  color: var(--dim);
+  font-size: 8px;
+  margin-top: 2px;
+}
+.usb-method {
+  flex: 0 0 auto;
+  border: 1px solid #39725b;
+  border-radius: 999px;
+  background: #182a25;
+  color: #9cdec0;
+  padding: 3px 6px;
+  font-size: 7px;
+  letter-spacing: 0.06em;
+}
+.usb-method.data {
+  border-color: #6c5a36;
+  background: #292319;
+  color: #f0d49b;
+}
+.usb-port-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+.usb-port-card {
+  min-width: 0;
+  border: 1px solid #39725b;
+  border-radius: 11px;
+  background: #182a25;
+  padding: 8px;
+}
+.usb-port-card.disabled {
+  border-color: #65413f;
+  background: #291d1d;
+}
+.usb-port-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+}
+.usb-port-title strong {
+  font-size: 10px;
+}
+.usb-port-title span {
+  color: #9cdec0;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+.usb-port-card.disabled .usb-port-title span {
+  color: #f2aaa5;
+}
+.usb-port-card p,
+.usb-port-card > small {
+  display: block;
+  color: var(--dim);
+  font-size: 8px;
+  margin: 5px 0 0;
+  overflow-wrap: anywhere;
+}
+.usb-mounted {
+  border-radius: 7px;
+  background: #594022;
+  color: #f2d59e;
+  font-size: 8px;
+  margin-top: 6px;
+  padding: 4px 6px;
+  overflow-wrap: anywhere;
+}
+.usb-port-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  margin-top: 7px;
+}
+.usb-port-actions button {
+  min-width: 0;
+  border: 1px solid #42606e;
+  border-radius: 7px;
+  background: #263b47;
+  color: var(--ink);
+  padding: 5px 2px;
+  font-size: 8px;
+  font-weight: 740;
+  cursor: pointer;
+}
+.usb-port-actions button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+.usb-port-busy .usb-port-actions button {
+  pointer-events: none;
+}
+.usb-device-heading {
+  border-top: 1px solid var(--line);
+  margin-top: 16px;
+  padding-top: 13px;
+}
 .usb-device-list {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+  margin-top: 8px;
 }
 .usb-error {
+  grid-column: 1 / -1;
   border: 1px solid #754743;
   border-radius: 11px;
   background: #2a1d1d;
@@ -1661,6 +1792,12 @@ body.busy [data-action] {
   font-size: 9px;
   font-weight: 750;
   white-space: nowrap;
+}
+@media (max-width: 340px) {
+  .usb-device-list,
+  .usb-port-grid {
+    grid-template-columns: 1fr;
+  }
 }
 .monitor-tile.good {
   border-color: #356c58;

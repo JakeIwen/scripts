@@ -13,6 +13,7 @@ let dashboard = null,
   priceBusy = false,
   priceEditingId = null,
   crashAnalysisBusy = false,
+  usbPortBusy = false,
   busy = false,
   tileEditing = false,
   tileDrag = null,
@@ -445,6 +446,45 @@ function usbEventLabel(event) {
         : 'Plugged';
   return `${label} ${eventTime(event.at)}`;
 }
+function renderUsbPorts(state) {
+  const operation = state?.operation || { status: 'idle' },
+    running = operation.status === 'running';
+  $('usb-operation').textContent = running
+    ? `${operation.action} · ${operation.key}`
+    : operation.status === 'error'
+      ? `Failed · ${operation.error || 'unknown error'}`
+      : state?.last_error
+        ? 'Port status incomplete'
+        : state?.checked_at
+          ? `Updated ${age(state.checked_at)}`
+          : 'No port data';
+  $('usb-panel').classList.toggle('usb-port-busy', running);
+  $('usb-hub-list').innerHTML = (state?.hubs || [])
+    .map((hub) => {
+      const power = hub.method === 'power';
+      return `<article class="usb-hub-card"><div class="usb-hub-head"><span><strong>${esc(hub.description)}</strong><small>Location ${esc(hub.location)}</small></span><b class="usb-method ${power ? 'power' : 'data'}">${power ? 'POWER + DATA' : 'DATA ONLY'}</b></div><div class="usb-port-grid">${(hub.ports || [])
+        .map((port) => {
+          const enabled = port.enabled !== false,
+            mounted = port.mounted_labels || [],
+            descriptions = port.device_descriptions || [],
+            downstream = Number(port.downstream_device_count) || 0,
+            label = `${hub.description} port ${port.port}`,
+            detail = descriptions.length
+              ? descriptions.join(', ')
+              : downstream
+                ? `${downstream} downstream device${downstream === 1 ? '' : 's'}`
+                : 'Empty port',
+            storage = (port.storage_labels || [])
+              .map((item) => `<span class="usb-label">${esc(item)}</span>`)
+              .join(''),
+            blocked = mounted.length > 0,
+            controlsDisabled = running || usbPortBusy;
+          return `<section class="usb-port-card ${enabled ? 'enabled' : 'disabled'}"><div class="usb-port-title"><strong>Port ${port.port}</strong><span>${enabled ? 'ON' : 'OFF'}</span></div><p>${esc(detail)}</p>${downstream > descriptions.length ? `<small>${downstream} total downstream</small>` : ''}${storage ? `<div class="usb-labels">${storage}</div>` : ''}${blocked ? `<div class="usb-mounted">Mounted: ${esc(mounted.join(', '))}</div>` : ''}<div class="usb-port-actions"><button data-usb-port-action="on" data-usb-port-key="${esc(port.key)}" data-usb-port-label="${esc(label)}" ${controlsDisabled || enabled ? 'disabled' : ''}>On</button><button data-usb-port-action="off" data-usb-port-key="${esc(port.key)}" data-usb-port-label="${esc(label)}" ${controlsDisabled || !enabled || blocked ? 'disabled' : ''}>Off</button><button data-usb-port-action="cycle" data-usb-port-key="${esc(port.key)}" data-usb-port-label="${esc(label)}" ${controlsDisabled || !enabled || blocked ? 'disabled' : ''}>Cycle</button></div></section>`;
+        })
+        .join('')}</div></article>`;
+    })
+    .join('') || '<div class="speaker-loading">No USB port controls discovered</div>';
+}
 function renderUsbDevices(response) {
   const state = response.usb,
     tile = $('usb-devices'),
@@ -469,6 +509,7 @@ function renderUsbDevices(response) {
       ? `Updated ${age(state.last_success_at)}`
       : 'No data';
   $('usb-panel').setAttribute('aria-busy', 'false');
+  renderUsbPorts(response.usb_ports);
   const deviceRows = (state.devices || [])
     .map((device) => {
       const event = usbEventLabel(device.event),
@@ -508,8 +549,37 @@ async function refreshUsbDevices(showErrors = false) {
     $('usb-status').textContent = 'Unavailable';
     $('usb-panel').setAttribute('aria-busy', 'false');
     $('usb-device-list').innerHTML = `<div class="speaker-loading">${esc(error.message)}</div>`;
+    $('usb-hub-list').innerHTML = `<div class="speaker-loading">${esc(error.message)}</div>`;
+    $('usb-operation').textContent = 'Unavailable';
     if (showErrors) toast(error.message, true);
     throw error;
+  }
+}
+async function changeUsbPort(button) {
+  if (usbPortBusy || button.disabled) return;
+  const actionName = button.dataset.usbPortAction,
+    label = button.dataset.usbPortLabel || 'this USB port';
+  if (
+    actionName !== 'on' &&
+    !window.confirm(
+      `${actionName === 'cycle' ? 'Cycle' : 'Turn off'} ${label}? Connected devices will disconnect, and data-only controls may leave power present.`,
+    )
+  )
+    return;
+  usbPortBusy = true;
+  $('usb-panel').classList.add('usb-port-busy');
+  try {
+    const response = await post('usb-ports/action', {
+      port: button.dataset.usbPortKey,
+      action: actionName,
+    });
+    renderUsbPorts(response.usb_ports);
+    toast(response.message || 'USB port action started');
+  } catch (error) {
+    toast(error.message, true);
+    await refreshUsbDevices(false).catch(() => {});
+  } finally {
+    usbPortBusy = false;
   }
 }
 function renderPriceChecks(response) {
@@ -1793,6 +1863,8 @@ document.addEventListener('change', (event) => {
     });
 });
 document.addEventListener('click', (event) => {
+  const usbPortAction = event.target.closest('[data-usb-port-action]');
+  if (usbPortAction) changeUsbPort(usbPortAction);
   const monitorRange = event.target.closest('[data-monitor-hours]');
   if (monitorRange) {
     const hours = Number(monitorRange.dataset.monitorHours);

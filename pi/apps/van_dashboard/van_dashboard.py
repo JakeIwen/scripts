@@ -16,6 +16,7 @@ is shared with other vehicle tooling.
 """
 
 import copy
+import glob
 import hashlib
 import json
 import os
@@ -60,6 +61,10 @@ USB_WATCH_TOOL = os.environ.get(
 CONNECTIVITY_INTERVAL = float(os.environ.get("VAN_DASHBOARD_CONNECTIVITY_INTERVAL", "30"))
 SPEEDTEST_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_SPEEDTEST_TIMEOUT", "180"))
 USB_WATCH_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_USB_WATCH_TIMEOUT", "10"))
+UHUBCTL = os.environ.get("VAN_DASHBOARD_UHUBCTL", "/usr/sbin/uhubctl")
+SUDO = os.environ.get("VAN_DASHBOARD_SUDO", "/usr/bin/sudo")
+TEE = os.environ.get("VAN_DASHBOARD_TEE", "/usr/bin/tee")
+USB_PORT_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_USB_PORT_TIMEOUT", "15"))
 PRICE_CHECK_TOOL = os.environ.get(
     "VAN_DASHBOARD_PRICE_CHECK_TOOL", "/home/pi/scripts/price_check/main.py"
 )
@@ -317,6 +322,11 @@ def run_command(args, timeout=20, input_text=None):
         check=False,
         input=input_text,
     )
+
+
+def read_text_file(path):
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        return handle.read().strip()
 
 
 def c_can_link_status(command=run_command):
@@ -1793,6 +1803,13 @@ class UsbDeviceMonitor:
         "labels",
         "root_hub",
     }
+    INSTANCE_FIELDS = {
+        "device_number",
+        "location",
+        "parent_location",
+        "port",
+        "labels",
+    }
 
     def __init__(
         self,
@@ -1821,13 +1838,14 @@ class UsbDeviceMonitor:
             raise ValueError(f"usb_watch returned invalid JSON: {exc}") from exc
         if not isinstance(payload, dict) or set(payload) != {"version", "devices"}:
             raise ValueError("usb_watch returned an unexpected schema")
-        if payload["version"] != 1 or type(payload["version"]) is not int:
+        if payload["version"] not in (1, 2) or type(payload["version"]) is not int:
             raise ValueError("usb_watch returned an unsupported version")
         if not isinstance(payload["devices"], list):
             raise ValueError("usb_watch devices were not a list")
         parsed = {}
         for device in payload["devices"]:
-            if not isinstance(device, dict) or set(device) != cls.DEVICE_FIELDS:
+            expected_fields = cls.DEVICE_FIELDS | ({"instances"} if payload["version"] == 2 else set())
+            if not isinstance(device, dict) or set(device) != expected_fields:
                 raise ValueError("usb_watch returned an invalid device")
             bus = device["bus"]
             device_id = device["device_id"]
@@ -1835,6 +1853,7 @@ class UsbDeviceMonitor:
             count = device["present_count"]
             labels = device["labels"]
             root_hub = device["root_hub"]
+            instances = device.get("instances", [])
             if not isinstance(bus, str) or not re.fullmatch(r"\d{3}", bus):
                 raise ValueError("usb_watch returned an invalid bus")
             if not isinstance(device_id, str) or not re.fullmatch(
@@ -1853,6 +1872,26 @@ class UsbDeviceMonitor:
                 raise ValueError("usb_watch returned invalid filesystem labels")
             if type(root_hub) is not bool:
                 raise ValueError("usb_watch returned an invalid root-hub flag")
+            if not isinstance(instances, list):
+                raise ValueError("usb_watch returned invalid topology instances")
+            parsed_instances = []
+            for instance in instances:
+                if not isinstance(instance, dict) or set(instance) != cls.INSTANCE_FIELDS:
+                    raise ValueError("usb_watch returned an invalid topology instance")
+                if (
+                    type(instance["device_number"]) is not int
+                    or instance["device_number"] < 1
+                    or not isinstance(instance["location"], str)
+                    or not re.fullmatch(r"\d+-\d+(?:\.\d+)*", instance["location"])
+                    or not isinstance(instance["parent_location"], str)
+                    or not re.fullmatch(r"\d+(?:-\d+(?:\.\d+)*)?", instance["parent_location"])
+                    or type(instance["port"]) is not int
+                    or instance["port"] < 1
+                    or not isinstance(instance["labels"], list)
+                    or any(not isinstance(label, str) or not label for label in instance["labels"])
+                ):
+                    raise ValueError("usb_watch returned an invalid topology instance")
+                parsed_instances.append(copy.deepcopy(instance))
             key = (bus, device_id, description)
             if key in parsed:
                 raise ValueError("usb_watch returned a duplicate device")
@@ -1863,6 +1902,7 @@ class UsbDeviceMonitor:
                 "present_count": count,
                 "labels": list(labels),
                 "root_hub": root_hub,
+                "instances": parsed_instances,
             }
         return parsed
 
@@ -1907,6 +1947,7 @@ class UsbDeviceMonitor:
                     seen["max_count"] = max(seen["max_count"], count)
                     if device["labels"]:
                         seen["labels"] = device["labels"]
+                    seen["instances"] = device["instances"]
 
                 for key, seen in self.seen.items():
                     if key not in current and seen["present_count"] > 0:
@@ -1962,6 +2003,348 @@ class UsbDeviceMonitor:
             "storage_labels": labels,
             "devices": devices,
         }
+
+
+UHUB_HUB_RE = re.compile(r"^Current status for hub (\S+) \[(.+)\]$")
+UHUB_PORT_RE = re.compile(r"^\s+Port (\d+):\s+(.+?)(?:\s+\[([0-9A-Fa-f]{4}:[0-9A-Fa-f]{4})\s+(.+)\])?$")
+USB_PORT_KEY_RE = re.compile(r"^(\d+(?:-\d+(?:\.\d+)*)?):([1-9]\d*)$")
+
+
+def parse_uhubctl_status(output):
+    """Parse the stable human-readable status emitted by uhubctl 2.x."""
+    hubs = {}
+    current = None
+    for raw_line in str(output or "").splitlines():
+        hub_match = UHUB_HUB_RE.match(raw_line.strip())
+        if hub_match:
+            location, details = hub_match.groups()
+            port_match = re.search(r",\s*(\d+) ports?,\s*([^,\]]+)\s*$", details)
+            identity = details.split(", USB ", 1)[0]
+            parts = identity.split(None, 1)
+            current = {
+                "location": location,
+                "device_id": parts[0].lower() if parts else "unknown",
+                "description": parts[1] if len(parts) > 1 else "USB hub",
+                "port_count": int(port_match.group(1)) if port_match else 0,
+                "switching": port_match.group(2).strip() if port_match else "unknown",
+                "ports": {},
+            }
+            hubs[location] = current
+            continue
+        port_match = UHUB_PORT_RE.match(raw_line)
+        if current is None or not port_match:
+            continue
+        port, status, device_id, description = port_match.groups()
+        current["ports"][int(port)] = {
+            "powered": "power" in status.split(),
+            "status": status,
+            "device_id": device_id.lower() if device_id else None,
+            "description": description if description else None,
+        }
+    return hubs
+
+
+class UsbPortController:
+    """Discover USB hub ports and run only previously discovered fixed actions."""
+
+    ACTIONS = {"off", "on", "cycle"}
+
+    def __init__(
+        self,
+        device_monitor,
+        command=run_command,
+        sys_root="/sys",
+        dev_root="/dev",
+        mounts_path="/proc/self/mounts",
+        timeout=USB_PORT_TIMEOUT,
+        wall_clock=time.time,
+        sleeper=time.sleep,
+    ):
+        self.device_monitor = device_monitor
+        self.command = command
+        self.sys_root = sys_root
+        self.dev_root = dev_root
+        self.mounts_path = mounts_path
+        self.timeout = timeout
+        self.wall_clock = wall_clock
+        self.sleeper = sleeper
+        self.lock = threading.RLock()
+        self.targets = {}
+        self.data = {
+            "checked_at": None,
+            "last_error": None,
+            "hubs": [],
+            "operation": {"status": "idle"},
+        }
+
+    def _kernel_ports(self):
+        ports = {}
+        pattern = os.path.join(
+            self.sys_root, "bus", "usb", "devices", "*", "*-port*", "disable"
+        )
+        for path in glob.glob(pattern):
+            port_dir = os.path.basename(os.path.dirname(path))
+            interface = os.path.basename(os.path.dirname(os.path.dirname(path)))
+            match = re.fullmatch(r"(.+)-port(\d+)", port_dir)
+            if not match or not interface.endswith(":1.0"):
+                continue
+            interface_location = interface.removesuffix(":1.0")
+            location = (
+                interface_location[:-2]
+                if interface_location.endswith("-0")
+                else interface_location
+            )
+            if not re.fullmatch(r"\d+(?:-\d+(?:\.\d+)*)?", location):
+                continue
+            port = int(match.group(2))
+            try:
+                disabled = read_text_file(path) == "1"
+            except OSError:
+                continue
+            ports[(location, port)] = {
+                "disable_path": path,
+                "enabled": not disabled,
+            }
+        return ports
+
+    def _mounted_sources(self):
+        sources = set()
+        try:
+            with open(self.mounts_path, encoding="utf-8", errors="replace") as handle:
+                lines = handle.readlines()
+        except OSError:
+            return sources
+        for line in lines:
+            fields = line.split()
+            if fields and (
+                fields[0].startswith("/dev/")
+                or fields[0].startswith(self.dev_root.rstrip(os.sep) + os.sep)
+            ):
+                sources.add(os.path.realpath(fields[0].replace("\\040", " ")))
+        return sources
+
+    def _mounted_labels(self, labels):
+        sources = self._mounted_sources()
+        mounted = []
+        for label in labels:
+            path = os.path.join(self.dev_root, "disk", "by-label", label)
+            if os.path.exists(path) and os.path.realpath(path) in sources:
+                mounted.append(label)
+        return sorted(mounted)
+
+    @staticmethod
+    def _instances(usb_state):
+        result = []
+        for device in usb_state.get("devices", ()):
+            if device.get("present_count", 0) < 1:
+                continue
+            for instance in device.get("instances", ()):
+                result.append(
+                    {
+                        **instance,
+                        "description": device.get("description") or "USB device",
+                        "device_id": device.get("device_id"),
+                        "root_hub": bool(device.get("root_hub")),
+                    }
+                )
+        return result
+
+    @staticmethod
+    def _child_location(location, port):
+        return f"{location}-{port}" if location.isdigit() else f"{location}.{port}"
+
+    def refresh(self, usb_state=None):
+        usb_state = usb_state or self.device_monitor.refresh()
+        error = None
+        smart_hubs = {}
+        try:
+            result = self.command([SUDO, "-n", UHUBCTL], timeout=self.timeout)
+            if result.returncode:
+                detail = (result.stderr or result.stdout or "uhubctl failed").strip()
+                raise RuntimeError(detail[-500:])
+            smart_hubs = parse_uhubctl_status(result.stdout)
+        except subprocess.TimeoutExpired:
+            error = f"uhubctl status timed out after {self.timeout:g} seconds"
+        except (OSError, RuntimeError, ValueError) as exc:
+            error = str(exc)
+
+        kernel_ports = self._kernel_ports()
+        instances = self._instances(usb_state)
+        keys = set(kernel_ports)
+        for location, hub in smart_hubs.items():
+            keys.update((location, port) for port in hub["ports"])
+        hubs = {}
+        targets = {}
+        for location, port in sorted(
+            keys,
+            key=lambda item: (
+                [int(value) for value in re.split(r"[-.]", item[0])],
+                item[1],
+            ),
+        ):
+            smart_hub = smart_hubs.get(location)
+            smart_port = smart_hub.get("ports", {}).get(port) if smart_hub else None
+            kernel_port = kernel_ports.get((location, port))
+            if smart_hub:
+                method = "power"
+                enabled = (
+                    kernel_port["enabled"]
+                    if kernel_port is not None
+                    else bool(smart_port and smart_port["powered"])
+                )
+                hub_description = smart_hub["description"]
+            else:
+                method = "disable"
+                enabled = kernel_port["enabled"] if kernel_port is not None else None
+                hub_device = next(
+                    (item for item in instances if item["location"] == location), None
+                )
+                hub_description = (
+                    hub_device["description"]
+                    if hub_device
+                    else f"USB {location} hub"
+                )
+            child = self._child_location(location, port)
+            direct = [item for item in instances if item["location"] == child]
+            downstream = [
+                item
+                for item in instances
+                if item["location"] == child or item["location"].startswith(child + ".")
+            ]
+            descriptions = sorted({item["description"] for item in direct})
+            labels = sorted(
+                {label for item in downstream for label in item.get("labels", ())}
+            )
+            mounted_labels = self._mounted_labels(labels)
+            key = f"{location}:{port}"
+            public = {
+                "key": key,
+                "location": location,
+                "port": port,
+                "method": method,
+                "enabled": enabled,
+                "device_descriptions": descriptions,
+                "downstream_device_count": len(downstream),
+                "storage_labels": labels,
+                "mounted_labels": mounted_labels,
+            }
+            hubs.setdefault(
+                location,
+                {
+                    "location": location,
+                    "description": hub_description,
+                    "method": method,
+                    "ports": [],
+                },
+            )["ports"].append(public)
+            targets[key] = {
+                **public,
+                "disable_path": kernel_port.get("disable_path") if kernel_port else None,
+            }
+
+        now = int(self.wall_clock())
+        with self.lock:
+            self.targets = targets
+            self.data.update(
+                {
+                    "checked_at": now,
+                    "last_error": error,
+                    "hubs": list(hubs.values()),
+                }
+            )
+            return copy.deepcopy(self.data)
+
+    def snapshot(self):
+        with self.lock:
+            return copy.deepcopy(self.data)
+
+    def start_action(self, key, action):
+        if not isinstance(key, str) or not USB_PORT_KEY_RE.fullmatch(key):
+            raise ValueError("unknown USB port")
+        if action not in self.ACTIONS:
+            raise ValueError("USB port action must be on, off, or cycle")
+        self.refresh()
+        with self.lock:
+            if self.data["operation"].get("status") == "running":
+                raise RuntimeError("another USB port action is already running")
+            target = self.targets.get(key)
+            if target is None:
+                raise ValueError("unknown USB port")
+            if action in ("off", "cycle") and target["mounted_labels"]:
+                labels = ", ".join(target["mounted_labels"])
+                raise RuntimeError(
+                    f"refusing to disconnect mounted storage ({labels}); unmount it first"
+                )
+            started_at = int(self.wall_clock())
+            self.data["operation"] = {
+                "status": "running",
+                "key": key,
+                "action": action,
+                "started_at": started_at,
+                "completed_at": None,
+                "error": None,
+            }
+            thread = threading.Thread(
+                target=self._run_action,
+                args=(copy.deepcopy(target), action, started_at),
+                name="usb-port-action",
+                daemon=True,
+            )
+            thread.start()
+            return copy.deepcopy(self.data)
+
+    def _command_ok(self, args, input_text=None):
+        result = self.command(args, timeout=self.timeout, input_text=input_text)
+        if result.returncode:
+            detail = (result.stderr or result.stdout or "USB port command failed").strip()
+            raise RuntimeError(detail[-500:])
+
+    def _run_action(self, target, action, started_at):
+        error = None
+        try:
+            if target["method"] == "power":
+                self._command_ok(
+                    [
+                        SUDO,
+                        "-n",
+                        UHUBCTL,
+                        "-l",
+                        target["location"],
+                        "-p",
+                        str(target["port"]),
+                        "-a",
+                        action,
+                    ]
+                )
+            else:
+                path = target.get("disable_path")
+                expected_root = os.path.join(self.sys_root, "bus", "usb", "devices")
+                if not path or not path.startswith(expected_root + os.sep):
+                    raise RuntimeError("kernel USB port control disappeared")
+                values = ("1\n", "0\n") if action == "cycle" else (("1\n",) if action == "off" else ("0\n",))
+                for index, value in enumerate(values):
+                    self._command_ok(
+                        [SUDO, "-n", TEE, path],
+                        input_text=value,
+                    )
+                    if action == "cycle" and index == 0:
+                        self.sleeper(2)
+            self.sleeper(1)
+            usb_state = self.device_monitor.refresh()
+            self.refresh(usb_state)
+        except subprocess.TimeoutExpired:
+            error = f"USB port action timed out after {self.timeout:g} seconds"
+        except (OSError, RuntimeError, ValueError) as exc:
+            error = str(exc)
+        with self.lock:
+            self.data["operation"] = {
+                "status": "error" if error else "complete",
+                "key": target["key"],
+                "action": action,
+                "started_at": started_at,
+                "completed_at": int(self.wall_clock()),
+                "error": error,
+            }
 
 
 class SpeedTestManager:
@@ -2189,6 +2572,7 @@ lighting = LightingController()
 price_checks = PriceCheckController()
 system_monitor = SystemMonitorClient()
 usb_devices = UsbDeviceMonitor()
+usb_ports = UsbPortController(usb_devices)
 
 
 def api_error(message, status):
@@ -2475,7 +2859,37 @@ def api_speedtest():
 def api_usb_devices():
     if request.args:
         return api_error("USB status does not accept input", 400)
-    response = jsonify({"ok": True, "usb": usb_devices.refresh()})
+    usb_state = usb_devices.refresh()
+    response = jsonify(
+        {
+            "ok": True,
+            "usb": usb_state,
+            "usb_ports": usb_ports.refresh(usb_state),
+        }
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/api/usb-ports/action", methods=["POST"])
+def api_usb_port_action():
+    if request.args or set(request.form) != {"port", "action"}:
+        return api_error("USB port action requires only port and action", 400)
+    try:
+        state = usb_ports.start_action(
+            request.form.get("port", ""), request.form.get("action", "")
+        )
+    except ValueError as exc:
+        return api_error(str(exc), 400)
+    except RuntimeError as exc:
+        return api_error(str(exc), 409)
+    response = jsonify(
+        {
+            "ok": True,
+            "message": "USB port action started",
+            "usb_ports": state,
+        }
+    )
     response.headers["Cache-Control"] = "no-store"
     return response
 

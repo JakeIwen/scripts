@@ -31,6 +31,7 @@ HIDE_CURSOR = "\033[?25l"
 SHOW_CURSOR = "\033[?25h"
 
 LINE_RE = re.compile(r"Bus (\d+) Device (\d+): (ID \S+ ?.*)")
+USB_LOCATION_RE = re.compile(r"^\d+-\d+(?:\.\d+)*$")
 
 
 def snapshot():
@@ -91,10 +92,48 @@ def label_names_for(key, devnums, labelmap):
     return names
 
 
-def json_snapshot(current=None, labelmap=None):
+def usb_instances(sys_root="/sys"):
+    """Map ``(bus, devnum)`` to stable kernel topology locations."""
+    instances = {}
+    devices_root = os.path.join(sys_root, "bus", "usb", "devices")
+    try:
+        names = os.listdir(devices_root)
+    except OSError:
+        return instances
+    for name in names:
+        if not USB_LOCATION_RE.fullmatch(name):
+            continue
+        root = os.path.join(devices_root, name)
+        try:
+            with open(os.path.join(root, "busnum"), encoding="utf-8") as handle:
+                bus = "%03d" % int(handle.read())
+            with open(os.path.join(root, "devnum"), encoding="utf-8") as handle:
+                devnum = int(handle.read())
+        except (OSError, ValueError):
+            continue
+        if "." in name:
+            parent, raw_port = name.rsplit(".", 1)
+        else:
+            raw_bus, raw_port = name.split("-", 1)
+            parent = str(int(raw_bus))
+        try:
+            port = int(raw_port)
+        except ValueError:
+            continue
+        instances[(bus, devnum)] = {
+            "device_number": devnum,
+            "location": name,
+            "parent_location": parent,
+            "port": port,
+        }
+    return instances
+
+
+def json_snapshot(current=None, labelmap=None, instances=None):
     """Return one JSON-safe snapshot for reuse by non-terminal clients."""
     current = snapshot() if current is None else current
     labelmap = usb_labels() if labelmap is None else labelmap
+    instances = usb_instances() if instances is None else instances
     devices = []
 
     def sort_key(item):
@@ -105,6 +144,17 @@ def json_snapshot(current=None, labelmap=None):
         parts = identity.split(None, 2)
         device_id = parts[1] if len(parts) >= 2 and parts[0] == "ID" else "unknown"
         description = parts[2] if len(parts) >= 3 else "Unknown USB device"
+        device_instances = []
+        for devnum in sorted(devnums):
+            topology = instances.get((bus, devnum))
+            if topology is None:
+                continue
+            device_instances.append(
+                {
+                    **topology,
+                    "labels": sorted(set(labelmap.get((bus, devnum), ()))),
+                }
+            )
         devices.append(
             {
                 "bus": bus,
@@ -113,9 +163,10 @@ def json_snapshot(current=None, labelmap=None):
                 "present_count": len(devnums),
                 "labels": label_names_for((bus, identity), devnums, labelmap),
                 "root_hub": identity.endswith("root hub"),
+                "instances": device_instances,
             }
         )
-    return {"version": 1, "devices": devices}
+    return {"version": 2, "devices": devices}
 
 
 def now():
