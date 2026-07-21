@@ -43,8 +43,14 @@ run_control disable 2 hours >/dev/null || fail "two-word hours duration was reje
 [[ $(cat "$state") == 2007200 ]] || fail "hours deadline was calculated incorrectly"
 status=$(run_control status) || fail "status failed for active override"
 [[ $status == disabled:*remaining* ]] || fail "status did not report remaining time"
+json_status=$(run_control status --json) || fail "JSON status failed for active override"
+[[ $json_status == '{"version":1,"status":"disabled","active":false,"deadline":2007200,"remaining_seconds":7200,"checked_at":2000000}' ]] ||
+  fail "JSON disabled status was incorrect: $json_status"
 run_control enable >/dev/null || fail "manual reactivation failed"
 [[ ! -e $state ]] || fail "manual reactivation left state behind"
+json_status=$(run_control status --json) || fail "JSON status failed for enabled monitor"
+[[ $json_status == '{"version":1,"status":"active","active":true,"deadline":null,"remaining_seconds":0,"checked_at":2000000}' ]] ||
+  fail "JSON active status was incorrect: $json_status"
 
 for invalid in 0 -1 nope 2d; do
   run_control disable "$invalid" >/dev/null 2>&1 &&
@@ -55,6 +61,11 @@ mkdir -p "${state%/*}"
 printf 'partial-or-legacy-state\n' > "$state"
 run_control check >/dev/null 2>&1 && fail "malformed state disabled the monitor"
 [[ ! -e $state ]] || fail "malformed state was not removed fail-active"
+
+printf 'partial-or-legacy-state\n' > "$state"
+json_status=$(run_control status --json) || fail "JSON status failed for malformed state"
+[[ $json_status == '{"version":1,"status":"active","active":true,"deadline":null,"remaining_seconds":0,"checked_at":2000000}' ]] ||
+  fail "malformed state polluted JSON output: $json_status"
 
 TEST_NOW=3000000
 run_control disable 10m >/dev/null || fail "initial override failed"

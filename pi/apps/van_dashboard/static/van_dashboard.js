@@ -6,6 +6,8 @@ let dashboard = null,
   priceChecks = null,
   systemMonitor = null,
   backupState = null,
+  ignitionMonitor = null,
+  ignitionDurationMinutes = 120,
   systemMonitorHours = 6,
   ubntWifi = null,
   ubntLink = null,
@@ -16,6 +18,7 @@ let dashboard = null,
   crashAnalysisBusy = false,
   usbPortBusy = false,
   backupBusy = false,
+  ignitionMonitorBusy = false,
   busy = false,
   tileEditing = false,
   tileDrag = null,
@@ -26,11 +29,17 @@ let dashboard = null,
   systemMonitorPoll = 0,
   usbPoll = 0,
   backupPoll = 0,
+  ignitionMonitorPoll = 0,
   ubntPoll = 0,
   ubntLastCompletion = '',
   backupLastCompletion = '',
   sonosTimeline = { position: 0, duration: 0, playing: false, updatedAt: 0 };
 const TILE_ORDER_STORAGE_KEY = 'van-dashboard.tile-order.v1';
+const IGNITION_DURATION_UNITS = {
+  minutes: { factor: 1, max: 720 },
+  hours: { factor: 60, max: 168 },
+  days: { factor: 1440, max: 366 },
+};
 function esc(v) {
   return String(v ?? '').replace(
     /[&<>"']/g,
@@ -114,6 +123,18 @@ function backupAge(timestamp) {
   if (seconds < 90 * 60) return `${Math.round(seconds / 60)}m ago`;
   if (seconds < 48 * 60 * 60) return `${Math.round(seconds / 3600)}h ago`;
   return `${Math.round(seconds / 86400)}d ago`;
+}
+function durationWords(totalSeconds) {
+  const seconds = Math.max(0, Math.round(Number(totalSeconds) || 0));
+  if (seconds < 60) return seconds ? 'less than a minute' : 'expired';
+  const days = Math.floor(seconds / 86400),
+    hours = Math.floor((seconds % 86400) / 3600),
+    minutes = Math.floor((seconds % 3600) / 60),
+    parts = [];
+  if (days) parts.push(`${days} day${days === 1 ? '' : 's'}`);
+  if (hours) parts.push(`${hours} hour${hours === 1 ? '' : 's'}`);
+  if (minutes && !days) parts.push(`${minutes} minute${minutes === 1 ? '' : 's'}`);
+  return parts.slice(0, 2).join(' ');
 }
 function monitorRangeLabel(hours = systemMonitorHours) {
   if (hours === 168) return '7 days';
@@ -748,6 +769,152 @@ async function startBackupClone(button) {
     await refreshBackups(false).catch(() => {});
   } finally {
     backupBusy = false;
+  }
+}
+function updateIgnitionDurationPreview() {
+  $('ignition-duration-preview').textContent = durationWords(ignitionDurationMinutes * 60);
+  document.querySelectorAll('[data-ignition-preset]').forEach((button) => {
+    button.classList.toggle(
+      'selected',
+      Number(button.dataset.ignitionPreset) === ignitionDurationMinutes,
+    );
+  });
+}
+function setIgnitionDuration(minutes, preferredUnit = null) {
+  ignitionDurationMinutes = Math.max(1, Math.min(366 * 1440, Math.round(minutes)));
+  let unit = preferredUnit;
+  if (!IGNITION_DURATION_UNITS[unit]) {
+    unit =
+      ignitionDurationMinutes % 1440 === 0
+        ? 'days'
+        : ignitionDurationMinutes % 60 === 0
+          ? 'hours'
+          : 'minutes';
+  }
+  const settings = IGNITION_DURATION_UNITS[unit],
+    amount = Math.max(1, Math.min(settings.max, Math.round(ignitionDurationMinutes / settings.factor)));
+  ignitionDurationMinutes = amount * settings.factor;
+  $('ignition-duration-unit').value = unit;
+  $('ignition-duration-amount').max = settings.max;
+  $('ignition-duration-amount').value = amount;
+  $('ignition-duration-slider').max = settings.max;
+  $('ignition-duration-slider').value = amount;
+  updateIgnitionDurationPreview();
+}
+function readIgnitionDurationInput(source) {
+  const unit = $('ignition-duration-unit').value,
+    settings = IGNITION_DURATION_UNITS[unit],
+    raw = Number(source.value);
+  // Let the number field remain empty while the user replaces its contents.
+  if (source === $('ignition-duration-amount') && source.value === '') return;
+  const amount = Math.max(
+    1,
+    Math.min(settings.max, Number.isFinite(raw) ? Math.round(raw) : 1),
+  );
+  source.value = amount;
+  if (source === $('ignition-duration-slider')) $('ignition-duration-amount').value = amount;
+  else $('ignition-duration-slider').value = amount;
+  ignitionDurationMinutes = amount * settings.factor;
+  updateIgnitionDurationPreview();
+}
+function renderIgnitionMonitor(response) {
+  const state = response.ignition_monitor,
+    service = state.service || {},
+    monitor = state.monitor || {},
+    tile = $('ignition-monitor'),
+    pill = $('ignition-monitor-pill'),
+    remaining = Number.isFinite(monitor.deadline)
+      ? Math.max(0, monitor.deadline - Date.now() / 1000)
+      : 0;
+  ignitionMonitor = state;
+  tile.classList.remove('unknown', 'good', 'warning', 'critical');
+  if (!service.running) {
+    tile.classList.add('critical');
+    pill.textContent = 'SERVICE DOWN';
+  } else if (monitor.active) {
+    tile.classList.add('good');
+    pill.textContent = 'ACTIVE';
+  } else {
+    tile.classList.add('warning');
+    pill.textContent = 'PAUSED';
+  }
+  $('ignition-monitor-service').textContent = service.running
+    ? `Running · ${service.enabled ? 'starts at boot' : 'not enabled at boot'}`
+    : `${service.active_state || 'unknown'} · ${service.sub_state || 'unknown'}`;
+  $('ignition-monitor-state').textContent = monitor.active
+    ? 'Active'
+    : `Paused · ${durationWords(remaining)} left`;
+  $('ignition-monitor-summary').textContent = !service.running
+    ? 'ignitionmon.service is not running'
+    : monitor.active
+      ? 'Watching for ignition changes'
+      : `Ignition handling resumes in ${durationWords(remaining)}`;
+
+  $('ignition-service-dot').className = `backup-state-dot ${service.running ? 'good' : 'bad'}`;
+  $('ignition-service-detail').textContent = service.running
+    ? `Running · ${service.enabled ? 'enabled at boot' : 'not enabled at boot'}`
+    : `${service.active_state || 'unknown'} · ${service.sub_state || 'unknown'}`;
+  $('ignition-override-dot').className = `backup-state-dot ${monitor.active ? 'good' : 'warning'}`;
+  $('ignition-override-detail').textContent = monitor.active
+    ? 'Active — ignition-on actions are enabled'
+    : `Paused until ${eventTime(monitor.deadline)} · ${durationWords(remaining)} remaining`;
+  $('ignition-monitor-enable').disabled = ignitionMonitorBusy || monitor.active;
+  $('ignition-monitor-disable').disabled = ignitionMonitorBusy;
+  $('ignition-monitor-updated').textContent = Number.isFinite(monitor.checked_at)
+    ? `Updated ${backupAge(monitor.checked_at)}`
+    : 'Updated now';
+  $('ignition-monitor-panel').setAttribute('aria-busy', 'false');
+}
+function renderIgnitionMonitorUnavailable(message) {
+  ignitionMonitor = null;
+  const tile = $('ignition-monitor');
+  tile.classList.remove('good', 'warning', 'critical');
+  tile.classList.add('unknown');
+  $('ignition-monitor-pill').textContent = 'NO DATA';
+  $('ignition-monitor-summary').textContent = message;
+  $('ignition-monitor-service').textContent = 'Unavailable';
+  $('ignition-monitor-state').textContent = 'Unavailable';
+  $('ignition-monitor-updated').textContent = 'Unavailable';
+  $('ignition-monitor-disable').disabled = true;
+  $('ignition-monitor-enable').disabled = true;
+  $('ignition-monitor-panel').setAttribute('aria-busy', 'false');
+}
+async function refreshIgnitionMonitor(showErrors = false) {
+  try {
+    const response = await json('/api/ignition-monitor');
+    renderIgnitionMonitor(response);
+    return response;
+  } catch (error) {
+    renderIgnitionMonitorUnavailable(error.message);
+    if (showErrors) toast(error.message, true);
+    throw error;
+  }
+}
+async function changeIgnitionMonitor(paused) {
+  if (ignitionMonitorBusy) return;
+  if (
+    paused &&
+    !window.confirm(
+      `Pause ignition monitoring for ${durationWords(ignitionDurationMinutes * 60)}? Ignition-on actions will be suppressed until the deadline.`,
+    )
+  )
+    return;
+  ignitionMonitorBusy = true;
+  $('ignition-monitor-panel').setAttribute('aria-busy', 'true');
+  $('ignition-monitor-disable').disabled = true;
+  $('ignition-monitor-enable').disabled = true;
+  try {
+    const response = paused
+      ? await post('ignition-monitor/disable', { minutes: ignitionDurationMinutes })
+      : await post('ignition-monitor/enable');
+    renderIgnitionMonitor(response);
+    toast(response.message);
+  } catch (error) {
+    toast(error.message, true);
+    await refreshIgnitionMonitor(false).catch(() => {});
+  } finally {
+    ignitionMonitorBusy = false;
+    if (ignitionMonitor) renderIgnitionMonitor({ ignition_monitor: ignitionMonitor });
   }
 }
 function renderPriceChecks(response) {
@@ -1865,6 +2032,35 @@ function closeBackups() {
   $('backups').setAttribute('aria-expanded', 'false');
   $('backups').focus();
 }
+async function pollIgnitionMonitor() {
+  clearTimeout(ignitionMonitorPoll);
+  if (!$('ignition-monitor-backdrop').classList.contains('open')) return;
+  try {
+    await refreshIgnitionMonitor(false);
+  } catch (_) {
+    /* rendered by refreshIgnitionMonitor */
+  } finally {
+    ignitionMonitorPoll = setTimeout(pollIgnitionMonitor, 5000);
+  }
+}
+async function openIgnitionMonitor() {
+  $('ignition-monitor-backdrop').classList.add('open');
+  document.body.classList.add('sheet-open');
+  $('ignition-monitor').setAttribute('aria-expanded', 'true');
+  $('ignition-monitor-panel').setAttribute('aria-busy', 'true');
+  try {
+    await refreshIgnitionMonitor(true);
+  } finally {
+    ignitionMonitorPoll = setTimeout(pollIgnitionMonitor, 5000);
+  }
+}
+function closeIgnitionMonitor() {
+  clearTimeout(ignitionMonitorPoll);
+  $('ignition-monitor-backdrop').classList.remove('open');
+  document.body.classList.remove('sheet-open');
+  $('ignition-monitor').setAttribute('aria-expanded', 'false');
+  $('ignition-monitor').focus();
+}
 async function openPriceChecks() {
   $('price-backdrop').classList.add('open');
   document.body.classList.add('sheet-open');
@@ -1929,6 +2125,7 @@ function closeUbntWifi() {
 }
 const bookUrl = new URL(window.location.href);
 setupTileEditing();
+setIgnitionDuration(120, 'hours');
 bookUrl.port = '8787';
 bookUrl.pathname = '/';
 bookUrl.search = '';
@@ -1956,6 +2153,19 @@ $('usb-devices').addEventListener('click', openUsbDevices);
 $('usb-close').addEventListener('click', closeUsbDevices);
 $('backups').addEventListener('click', openBackups);
 $('backup-close').addEventListener('click', closeBackups);
+$('ignition-monitor').addEventListener('click', openIgnitionMonitor);
+$('ignition-monitor-close').addEventListener('click', closeIgnitionMonitor);
+$('ignition-monitor-disable').addEventListener('click', () => changeIgnitionMonitor(true));
+$('ignition-monitor-enable').addEventListener('click', () => changeIgnitionMonitor(false));
+$('ignition-duration-amount').addEventListener('input', (event) =>
+  readIgnitionDurationInput(event.target),
+);
+$('ignition-duration-slider').addEventListener('input', (event) =>
+  readIgnitionDurationInput(event.target),
+);
+$('ignition-duration-unit').addEventListener('change', (event) =>
+  setIgnitionDuration(ignitionDurationMinutes, event.target.value),
+);
 $('price-checks').addEventListener('click', openPriceChecks);
 $('price-close').addEventListener('click', closePriceChecks);
 $('price-check-all').addEventListener('click', () => checkPrices('all'));
@@ -1994,6 +2204,9 @@ $('usb-backdrop').addEventListener('click', (event) => {
 $('backup-backdrop').addEventListener('click', (event) => {
   if (event.target === $('backup-backdrop')) closeBackups();
 });
+$('ignition-monitor-backdrop').addEventListener('click', (event) => {
+  if (event.target === $('ignition-monitor-backdrop')) closeIgnitionMonitor();
+});
 $('price-backdrop').addEventListener('click', (event) => {
   if (event.target === $('price-backdrop')) closePriceChecks();
 });
@@ -2010,6 +2223,7 @@ document.addEventListener('keydown', (event) => {
     if ($('system-monitor-backdrop').classList.contains('open')) closeSystemMonitor();
     if ($('usb-backdrop').classList.contains('open')) closeUsbDevices();
     if ($('backup-backdrop').classList.contains('open')) closeBackups();
+    if ($('ignition-monitor-backdrop').classList.contains('open')) closeIgnitionMonitor();
     if ($('price-backdrop').classList.contains('open')) closePriceChecks();
     if ($('lighting-backdrop').classList.contains('open')) closeLighting();
     if ($('ubnt-wifi-backdrop').classList.contains('open')) closeUbntWifi();
@@ -2067,6 +2281,8 @@ document.addEventListener('change', (event) => {
     });
 });
 document.addEventListener('click', (event) => {
+  const ignitionPreset = event.target.closest('[data-ignition-preset]');
+  if (ignitionPreset) setIgnitionDuration(Number(ignitionPreset.dataset.ignitionPreset));
   const backupClone = event.target.closest('[data-backup-clone]');
   if (backupClone) startBackupClone(backupClone);
   const usbPortAction = event.target.closest('[data-usb-port-action]');
@@ -2160,6 +2376,7 @@ function refreshVisibleDashboard() {
   refreshSystemMonitor(false).catch(() => {});
   refreshUsbDevices(false).catch(() => {});
   refreshBackups(false).catch(() => {});
+  refreshIgnitionMonitor(false).catch(() => {});
   refreshPriceChecks().catch(() => {});
   refreshLighting(false).catch(() => {});
   refreshUbntWifi(false);
@@ -2173,6 +2390,7 @@ Promise.allSettled([
   refreshSystemMonitor(false),
   refreshUsbDevices(false),
   refreshBackups(false),
+  refreshIgnitionMonitor(false),
   refreshPriceChecks(),
   refreshLighting(false),
   refreshUbntWifi(false),
@@ -2202,6 +2420,10 @@ setInterval(() => {
   if (!document.hidden && !$('backup-backdrop').classList.contains('open'))
     refreshBackups(false).catch(() => {});
 }, 30000);
+setInterval(() => {
+  if (!document.hidden && !$('ignition-monitor-backdrop').classList.contains('open'))
+    refreshIgnitionMonitor(false).catch(() => {});
+}, 15000);
 setInterval(() => {
   if (!document.hidden && !priceBusy) refreshPriceChecks().catch(() => {});
 }, 30000);

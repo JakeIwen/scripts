@@ -104,6 +104,12 @@ BACKUP_STATUS_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_BACKUP_STATUS_TIMEOU
 BACKUP_CLONE_TIMEOUT = float(
     os.environ.get("VAN_DASHBOARD_BACKUP_CLONE_TIMEOUT", str(6 * 60 * 60 + 90))
 )
+IGNITIONMONCTL = os.environ.get(
+    "VAN_DASHBOARD_IGNITIONMONCTL", "/home/pi/scripts/ignitionmonctl"
+)
+SYSTEMCTL = os.environ.get("VAN_DASHBOARD_SYSTEMCTL", "/usr/bin/systemctl")
+IGNITIONMON_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_IGNITIONMON_TIMEOUT", "8"))
+IGNITIONMON_MAX_MINUTES = 366 * 24 * 60
 TUYA_POLL_INTERVAL = float(os.environ.get("VAN_DASHBOARD_TUYA_POLL_INTERVAL", "15"))
 POLICYCTL_TIMEOUT = 15
 COP_LED_TARGET = os.environ.get("VAN_DASHBOARD_COP_LED_TARGET", "light.ext_led")
@@ -2920,6 +2926,147 @@ class BackupManager:
                 )
 
 
+class IgnitionMonitorCommandError(RuntimeError):
+    pass
+
+
+class IgnitionMonitorController:
+    """Control the durable override without stopping the monitoring service."""
+
+    CONTROL_FIELDS = {
+        "version",
+        "status",
+        "active",
+        "deadline",
+        "remaining_seconds",
+        "checked_at",
+    }
+
+    def __init__(
+        self,
+        control=IGNITIONMONCTL,
+        systemctl=SYSTEMCTL,
+        command=run_command,
+        timeout=IGNITIONMON_TIMEOUT,
+    ):
+        self.control = control
+        self.systemctl = systemctl
+        self.command = command
+        self.timeout = timeout
+
+    def _run(self, args, label):
+        try:
+            result = self.command(args, timeout=self.timeout)
+        except subprocess.TimeoutExpired as exc:
+            raise IgnitionMonitorCommandError(
+                f"{label} timed out after {self.timeout:g} seconds"
+            ) from exc
+        except OSError as exc:
+            raise IgnitionMonitorCommandError(f"could not run {label}: {exc}") from exc
+        if result.returncode:
+            detail = (result.stderr or result.stdout or f"{label} failed").strip()[-500:]
+            raise IgnitionMonitorCommandError(detail)
+        return result.stdout
+
+    @classmethod
+    def parse_control_status(cls, output):
+        try:
+            payload = json.loads(output)
+        except (TypeError, ValueError) as exc:
+            raise IgnitionMonitorCommandError(
+                "ignitionmonctl returned invalid JSON"
+            ) from exc
+        if not isinstance(payload, dict) or set(payload) != cls.CONTROL_FIELDS:
+            raise IgnitionMonitorCommandError("ignitionmonctl returned an invalid schema")
+        if payload.get("version") != 1 or payload.get("status") not in ("active", "disabled"):
+            raise IgnitionMonitorCommandError("ignitionmonctl returned an invalid status")
+        if not isinstance(payload.get("active"), bool):
+            raise IgnitionMonitorCommandError("ignitionmonctl returned an invalid active state")
+        remaining = payload.get("remaining_seconds")
+        checked_at = payload.get("checked_at")
+        deadline = payload.get("deadline")
+        if (
+            not isinstance(remaining, int)
+            or isinstance(remaining, bool)
+            or remaining < 0
+            or not isinstance(checked_at, int)
+            or isinstance(checked_at, bool)
+            or checked_at <= 0
+        ):
+            raise IgnitionMonitorCommandError("ignitionmonctl returned invalid timing data")
+        if payload["status"] == "active":
+            valid = payload["active"] is True and deadline is None and remaining == 0
+        else:
+            valid = (
+                payload["active"] is False
+                and isinstance(deadline, int)
+                and not isinstance(deadline, bool)
+                and deadline > checked_at
+                and deadline - checked_at == remaining
+            )
+        if not valid:
+            raise IgnitionMonitorCommandError("ignitionmonctl returned inconsistent state")
+        return payload
+
+    @staticmethod
+    def parse_service_status(output):
+        values = {}
+        for line in str(output).splitlines():
+            key, separator, value = line.partition("=")
+            if separator and key in ("ActiveState", "SubState", "UnitFileState"):
+                values[key] = value.strip()
+        if set(values) != {"ActiveState", "SubState", "UnitFileState"} or any(
+            not value for value in values.values()
+        ):
+            raise IgnitionMonitorCommandError("systemd returned an invalid service status")
+        return {
+            "active_state": values["ActiveState"],
+            "sub_state": values["SubState"],
+            "unit_file_state": values["UnitFileState"],
+            "running": values["ActiveState"] == "active" and values["SubState"] == "running",
+            "enabled": values["UnitFileState"] in ("enabled", "enabled-runtime"),
+        }
+
+    def status(self):
+        service_output = self._run(
+            [
+                self.systemctl,
+                "show",
+                "ignitionmon.service",
+                "--property=ActiveState",
+                "--property=SubState",
+                "--property=UnitFileState",
+                "--no-pager",
+            ],
+            "ignitionmon service status",
+        )
+        control_output = self._run(
+            [self.control, "status", "--json"], "ignition monitor status"
+        )
+        return {
+            "service": self.parse_service_status(service_output),
+            "monitor": self.parse_control_status(control_output),
+        }
+
+    def disable(self, minutes):
+        if (
+            not isinstance(minutes, int)
+            or isinstance(minutes, bool)
+            or not 1 <= minutes <= IGNITIONMON_MAX_MINUTES
+        ):
+            raise ValueError(
+                f"duration must be from 1 to {IGNITIONMON_MAX_MINUTES} minutes"
+            )
+        self._run(
+            [self.control, "disable", f"{minutes}m"], "ignition monitor disable"
+        )
+        return self.status()
+
+    def enable(self):
+        self._run([self.control, "enable"], "ignition monitor enable")
+        return self.status()
+
+
 app = Flask(__name__)
 state_store = StateStore()
 engine_monitor = EngineMonitor()
@@ -2937,6 +3084,7 @@ system_monitor = SystemMonitorClient()
 usb_devices = UsbDeviceMonitor()
 usb_ports = UsbPortController(usb_devices)
 backups = BackupManager()
+ignition_monitor_control = IgnitionMonitorController()
 
 
 def api_error(message, status):
@@ -3291,6 +3439,56 @@ def api_backup_clone():
     response.status_code = 202
     response.headers["Cache-Control"] = "no-store"
     return response
+
+
+@app.route("/api/ignition-monitor")
+def api_ignition_monitor():
+    if request.args:
+        return api_error("ignition monitor status does not accept input", 400)
+    try:
+        status = ignition_monitor_control.status()
+    except IgnitionMonitorCommandError as exc:
+        return api_error(f"ignition monitor unavailable: {exc}", 503)
+    response = jsonify({"ok": True, "ignition_monitor": status})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/api/ignition-monitor/disable", methods=["POST"])
+def api_ignition_monitor_disable():
+    if not _exact_form(("minutes",)) or not request.form["minutes"].isdigit():
+        return api_error("ignition monitor disable requires a duration in minutes", 400)
+    try:
+        minutes = int(request.form["minutes"])
+        status = ignition_monitor_control.disable(minutes)
+    except ValueError as exc:
+        return api_error(str(exc), 400)
+    except IgnitionMonitorCommandError as exc:
+        return api_error(f"could not disable ignition monitoring: {exc}", 502)
+    return jsonify(
+        {
+            "ok": True,
+            "message": "Ignition monitoring paused",
+            "ignition_monitor": status,
+        }
+    )
+
+
+@app.route("/api/ignition-monitor/enable", methods=["POST"])
+def api_ignition_monitor_enable():
+    if not _exact_form(()):
+        return api_error("ignition monitor enable does not accept input", 400)
+    try:
+        status = ignition_monitor_control.enable()
+    except IgnitionMonitorCommandError as exc:
+        return api_error(f"could not enable ignition monitoring: {exc}", 502)
+    return jsonify(
+        {
+            "ok": True,
+            "message": "Ignition monitoring resumed",
+            "ignition_monitor": status,
+        }
+    )
 
 
 @app.route("/api/price-checks")

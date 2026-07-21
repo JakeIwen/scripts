@@ -77,6 +77,14 @@
         <span class="status-line"><span>m4mac</span><span id="backup-mac">Checking…</span></span>
       </span>
     </button>
+    <button class="tile ignition-monitor-tile unknown" id="ignition-monitor" data-dashboard-tile data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="ignition-monitor-panel">
+      <span class="pill" id="ignition-monitor-pill">NO DATA</span><span class="tile-heading"><span class="tile-icon" aria-hidden="true">🔑</span><span class="tile-title">Ignition Monitor</span></span>
+      <span class="tile-detail" id="ignition-monitor-summary">Checking monitoring service…</span>
+      <span class="status-lines">
+        <span class="status-line"><span>Service</span><span id="ignition-monitor-service">Checking…</span></span>
+        <span class="status-line"><span>Monitoring</span><span id="ignition-monitor-state">Checking…</span></span>
+      </span>
+    </button>
     <button class="tile price-tile" id="price-checks" data-dashboard-tile data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="price-panel">
       <span class="pill" id="price-pill">—</span><span class="tile-heading"><span class="tile-icon" aria-hidden="true">🏷️</span><span class="tile-title">Price Watch</span></span>
       <span class="tile-detail" id="price-summary">Loading watched items…</span>
@@ -196,6 +204,29 @@
     <section class="backup-section" aria-labelledby="backup-history-title">
       <div class="monitor-section-head"><div><h3 id="backup-history-title">Time Machine history</h3><p id="backup-tm-progress">Reading m4mac.sparsebundle…</p></div><span id="backup-tm-updated">—</span></div>
       <div class="backup-history" id="backup-history"><div class="speaker-loading">Reading completed snapshots…</div></div>
+    </section>
+  </section>
+</div>
+<div class="speaker-backdrop" id="ignition-monitor-backdrop">
+  <section class="speaker-sheet ignition-monitor-sheet" id="ignition-monitor-panel" role="dialog" aria-modal="true" aria-labelledby="ignition-monitor-title" aria-busy="true">
+    <div class="sheet-grabber"></div><div class="sheet-head"><h2 id="ignition-monitor-title">Ignition Monitor</h2><span class="policy-sheet-status" id="ignition-monitor-updated">Checking…</span><button class="sheet-close" id="ignition-monitor-close" aria-label="Close ignition monitor controls">&times;</button></div>
+    <p class="sheet-help">The service stays running while its ignition-on handling is paused. A pause expires automatically even if vanpi is powered off.</p>
+    <div class="ignition-monitor-overview">
+      <section class="ignition-monitor-state-card"><span class="backup-state-dot" id="ignition-service-dot"></span><span><strong>ignitionmon.service</strong><small id="ignition-service-detail">Checking systemd…</small></span></section>
+      <section class="ignition-monitor-state-card"><span class="backup-state-dot" id="ignition-override-dot"></span><span><strong>Ignition handling</strong><small id="ignition-override-detail">Checking override…</small></span></section>
+    </div>
+    <section class="ignition-duration-section" aria-labelledby="ignition-duration-title">
+      <div class="monitor-section-head"><div><h3 id="ignition-duration-title">Pause for</h3><p>Choose a preset or dial in an exact duration.</p></div><span id="ignition-duration-preview">2 hours</span></div>
+      <div class="ignition-presets" role="group" aria-label="Common pause durations">
+        <button type="button" data-ignition-preset="15">15 min</button><button type="button" data-ignition-preset="30">30 min</button><button type="button" data-ignition-preset="60">1 hour</button><button type="button" data-ignition-preset="120" class="selected">2 hours</button><button type="button" data-ignition-preset="480">8 hours</button><button type="button" data-ignition-preset="1440">1 day</button><button type="button" data-ignition-preset="4320">3 days</button><button type="button" data-ignition-preset="10080">7 days</button>
+      </div>
+      <div class="ignition-duration-editor">
+        <label><span>Amount</span><input id="ignition-duration-amount" type="number" min="1" max="168" step="1" inputmode="numeric" value="2"></label>
+        <label><span>Unit</span><select id="ignition-duration-unit"><option value="minutes">minutes</option><option value="hours" selected>hours</option><option value="days">days</option></select></label>
+      </div>
+      <input class="ignition-duration-slider" id="ignition-duration-slider" type="range" min="1" max="168" step="1" value="2" aria-label="Pause duration">
+      <div class="ignition-monitor-actions"><button class="ignition-pause" id="ignition-monitor-disable" type="button" data-action>Pause monitoring</button><button class="ignition-resume" id="ignition-monitor-enable" type="button" data-action>Resume now</button></div>
+      <p class="ignition-monitor-note">Starting a new pause replaces the current deadline. While paused, ignition-on actions are suppressed and the parked/off policy remains in effect.</p>
     </section>
   </section>
 </div>

@@ -1652,6 +1652,10 @@ body.busy [data-action] {
   background: var(--bad);
   box-shadow: 0 0 0 4px #ef706718;
 }
+.backup-state-dot.warning {
+  background: #e4b75c;
+  box-shadow: 0 0 0 4px #e4b75c18;
+}
 .backup-section {
   border-top: 1px solid var(--line);
   margin-top: 16px;
@@ -1785,6 +1789,166 @@ body.busy [data-action] {
   .backup-hotswaps,
   .backup-history {
     grid-template-columns: 1fr;
+  }
+}
+.ignition-monitor-tile {
+  min-height: 190px;
+}
+.ignition-monitor-tile .tile-detail {
+  margin-top: 10px;
+  padding-top: 0;
+}
+.ignition-monitor-tile .status-line {
+  gap: 7px;
+  font-size: 10px;
+}
+.ignition-monitor-tile.good {
+  border-color: #356c58;
+  background: linear-gradient(145deg, #1d302a, #15231f);
+}
+.ignition-monitor-tile.warning {
+  border-color: #7b633a;
+  background: linear-gradient(145deg, #30291d, #242017);
+}
+.ignition-monitor-tile.critical {
+  border-color: #8c4943;
+  background: linear-gradient(145deg, #382320, #281a19);
+}
+.ignition-monitor-tile.unknown {
+  opacity: 0.82;
+}
+.ignition-monitor-tile.good .pill {
+  background: #254b3d;
+  color: #bcebd5;
+}
+.ignition-monitor-tile.warning .pill {
+  background: #584524;
+  color: #f2d59e;
+}
+.ignition-monitor-tile.critical .pill {
+  background: #653530;
+  color: #ffd1cd;
+}
+.ignition-monitor-sheet {
+  max-height: min(88vh, 760px);
+}
+.ignition-monitor-overview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.ignition-monitor-state-card {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: #172129;
+  padding: 11px 12px;
+}
+.ignition-monitor-state-card strong,
+.ignition-monitor-state-card small {
+  display: block;
+}
+.ignition-monitor-state-card strong {
+  font-size: 11px;
+}
+.ignition-monitor-state-card small {
+  color: var(--dim);
+  font-size: 9px;
+  margin-top: 3px;
+}
+.ignition-duration-section {
+  border-top: 1px solid var(--line);
+  margin-top: 16px;
+  padding-top: 13px;
+}
+.ignition-presets {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
+.ignition-presets button {
+  border: 1px solid #42606e;
+  border-radius: 9px;
+  background: #1e2c35;
+  color: var(--dim);
+  padding: 8px 4px;
+  font-size: 9px;
+  cursor: pointer;
+}
+.ignition-presets button.selected {
+  border-color: #4a8895;
+  background: #21414a;
+  color: #c5edf3;
+}
+.ignition-duration-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+.ignition-duration-editor label {
+  color: var(--dim);
+  font-size: 9px;
+}
+.ignition-duration-editor label span {
+  display: block;
+  margin: 0 0 4px 2px;
+}
+.ignition-duration-editor input,
+.ignition-duration-editor select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #101920;
+  color: var(--ink);
+  padding: 9px 10px;
+  font-size: 12px;
+}
+.ignition-duration-slider {
+  width: 100%;
+  accent-color: var(--accent);
+  margin: 15px 0 8px;
+}
+.ignition-monitor-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 8px;
+}
+.ignition-monitor-actions button {
+  border: 1px solid #42606e;
+  border-radius: 11px;
+  padding: 10px;
+  font-size: 10px;
+  font-weight: 760;
+  cursor: pointer;
+}
+.ignition-pause {
+  background: #5b4525;
+  color: #f7dda9;
+}
+.ignition-resume {
+  background: #244b3d;
+  color: #bcebd5;
+}
+.ignition-monitor-actions button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+.ignition-monitor-note {
+  color: var(--dim);
+  font-size: 9px;
+  margin: 10px 2px 0;
+}
+@media (max-width: 420px) {
+  .ignition-monitor-overview {
+    grid-template-columns: 1fr;
+  }
+  .ignition-presets {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 .usb-sheet {

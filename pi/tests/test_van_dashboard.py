@@ -1772,6 +1772,112 @@ class BackupManagerTests(unittest.TestCase):
         self.assertNotIn('clone_to_sd.sh --init', script)
 
 
+class IgnitionMonitorControllerTests(unittest.TestCase):
+    CONTROL = {
+        "version": 1,
+        "status": "disabled",
+        "active": False,
+        "deadline": 1_700_007_200,
+        "remaining_seconds": 7200,
+        "checked_at": 1_700_000_000,
+    }
+    SERVICE = "ActiveState=active\nSubState=running\nUnitFileState=enabled\n"
+
+    def test_status_parses_exact_control_and_systemd_schemas(self):
+        calls = []
+
+        def command(args, timeout):
+            calls.append((list(args), timeout))
+            output = self.SERVICE if args[0] == "/test/systemctl" else json.dumps(self.CONTROL)
+            return SimpleNamespace(returncode=0, stdout=output, stderr="")
+
+        controller = dashboard.IgnitionMonitorController(
+            control="/test/ignitionmonctl",
+            systemctl="/test/systemctl",
+            command=command,
+            timeout=4,
+        )
+        status = controller.status()
+        self.assertTrue(status["service"]["running"])
+        self.assertTrue(status["service"]["enabled"])
+        self.assertFalse(status["monitor"]["active"])
+        self.assertEqual(status["monitor"]["remaining_seconds"], 7200)
+        self.assertEqual(
+            calls,
+            [
+                (
+                    [
+                        "/test/systemctl",
+                        "show",
+                        "ignitionmon.service",
+                        "--property=ActiveState",
+                        "--property=SubState",
+                        "--property=UnitFileState",
+                        "--no-pager",
+                    ],
+                    4,
+                ),
+                (["/test/ignitionmonctl", "status", "--json"], 4),
+            ],
+        )
+
+    def test_disable_and_enable_use_fixed_argv_then_refresh_authoritative_state(self):
+        calls = []
+
+        def command(args, timeout):
+            calls.append(list(args))
+            if args[0] == "/test/systemctl":
+                output = self.SERVICE
+            elif args[1:] == ["status", "--json"]:
+                output = json.dumps(self.CONTROL)
+            else:
+                output = "updated\n"
+            return SimpleNamespace(returncode=0, stdout=output, stderr="")
+
+        controller = dashboard.IgnitionMonitorController(
+            control="/test/ignitionmonctl",
+            systemctl="/test/systemctl",
+            command=command,
+        )
+        controller.disable(90)
+        controller.enable()
+        self.assertEqual(calls[0], ["/test/ignitionmonctl", "disable", "90m"])
+        self.assertEqual(calls[3], ["/test/ignitionmonctl", "enable"])
+        self.assertEqual(calls[2], ["/test/ignitionmonctl", "status", "--json"])
+        self.assertEqual(calls[5], ["/test/ignitionmonctl", "status", "--json"])
+        for invalid in (True, 0, -1, dashboard.IGNITIONMON_MAX_MINUTES + 1, "30"):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(ValueError):
+                    controller.disable(invalid)
+
+    def test_rejects_bad_status_and_bounds_command_failures(self):
+        invalid = (
+            "not json",
+            json.dumps({**self.CONTROL, "extra": True}),
+            json.dumps({**self.CONTROL, "active": True}),
+            json.dumps({**self.CONTROL, "remaining_seconds": 7199}),
+        )
+        for output in invalid:
+            with self.subTest(output=output):
+                with self.assertRaises(dashboard.IgnitionMonitorCommandError):
+                    dashboard.IgnitionMonitorController.parse_control_status(output)
+
+        failed = dashboard.IgnitionMonitorController(
+            command=lambda args, timeout: SimpleNamespace(
+                returncode=1, stdout="", stderr="unit unavailable"
+            )
+        )
+        with self.assertRaisesRegex(dashboard.IgnitionMonitorCommandError, "unit unavailable"):
+            failed.status()
+
+        def timeout(args, timeout):
+            raise subprocess.TimeoutExpired(args, timeout)
+
+        timed_out = dashboard.IgnitionMonitorController(command=timeout, timeout=3)
+        with self.assertRaisesRegex(dashboard.IgnitionMonitorCommandError, "timed out after 3"):
+            timed_out.status()
+
+
 class DashboardRouteTests(unittest.TestCase):
     def test_index_and_manifest(self):
         client = dashboard.app.test_client()
@@ -1800,7 +1906,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'class="network-card-heading ubnt-card-heading tile-heading"', page.data)
         self.assertIn(b'class="network-card-heading tile-heading" id="openwrt-title"', page.data)
         self.assertIn(b'class="network-card-heading speedtest-card-head"', page.data)
-        self.assertEqual(page.data.count(b"tile-heading"), 12)
+        self.assertEqual(page.data.count(b"tile-heading"), 13)
         self.assertIn(b'id="sonos-track"', page.data)
         self.assertIn(b'id="sonos-progress"', page.data)
         self.assertIn(b'data-transport="play_pause"', page.data)
@@ -1822,6 +1928,14 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="backup-panel"', page.data)
         self.assertIn(b'id="backup-hotswaps"', page.data)
         self.assertIn(b'id="backup-history"', page.data)
+        self.assertIn(b'id="ignition-monitor"', page.data)
+        self.assertIn(b'id="ignition-monitor-panel"', page.data)
+        self.assertIn(b'id="ignition-duration-amount"', page.data)
+        self.assertIn(b'id="ignition-duration-slider"', page.data)
+        self.assertIn(b'data-ignition-preset="120"', page.data)
+        self.assertIn(b'id="ignition-monitor-disable"', page.data)
+        self.assertIn(b'id="ignition-monitor-enable"', page.data)
+        self.assertIn(b"service stays running", page.data)
         self.assertIn(
             b"Initializing cards and choosing raw devices are intentionally unavailable",
             page.data,
@@ -1856,7 +1970,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertNotIn(b'id="connectivity-age"', page.data)
         self.assertIn(b'id="openwrt-card" data-dashboard-tile', page.data)
         self.assertIn(b'id="speedtest-button" data-dashboard-tile', page.data)
-        self.assertEqual(page.data.count(b"data-dashboard-tile"), 13)
+        self.assertEqual(page.data.count(b"data-dashboard-tile"), 14)
         self.assertIn(b'class="network-card speedtest-card"', page.data)
         self.assertIn(b'id="ubnt-network-list"', page.data)
         self.assertIn(b'id="ubnt-password-form"', page.data)
@@ -1909,6 +2023,10 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"function startBackupClone(button)", javascript.data)
         self.assertIn(b"/api/backups", javascript.data)
         self.assertIn(b"backups/clone", javascript.data)
+        self.assertIn(b"function renderIgnitionMonitor(response)", javascript.data)
+        self.assertIn(b"function setIgnitionDuration(minutes", javascript.data)
+        self.assertIn(b"ignition-monitor/disable", javascript.data)
+        self.assertIn(b"ignition-monitor/enable", javascript.data)
         self.assertIn(b"/api/usb-devices", javascript.data)
         self.assertIn(b"usb-ports/action", javascript.data)
         self.assertIn(b"function renderCrashAnalysis(payload)", javascript.data)
@@ -1954,6 +2072,9 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b".usb-port-actions", stylesheet.data)
         self.assertIn(b".backup-hotswap", stylesheet.data)
         self.assertIn(b".backup-history-row", stylesheet.data)
+        self.assertIn(b".ignition-monitor-tile", stylesheet.data)
+        self.assertIn(b".ignition-duration-slider", stylesheet.data)
+        self.assertIn(b".ignition-presets", stylesheet.data)
         self.assertIn(b".tile-edit-button", stylesheet.data)
         self.assertIn(
             b"body.tiles-editing #tile-grid > [data-dashboard-tile]",
@@ -2144,6 +2265,86 @@ class DashboardRouteTests(unittest.TestCase):
             calls,
             [("status",), ("clone", "hotspare-a"), ("clone", "/dev/sda")],
         )
+
+    def test_ignition_monitor_routes_are_authoritative_narrow_and_csrf_protected(self):
+        calls = []
+        active = {
+            "service": {
+                "active_state": "active",
+                "sub_state": "running",
+                "unit_file_state": "enabled",
+                "running": True,
+                "enabled": True,
+            },
+            "monitor": {
+                "version": 1,
+                "status": "active",
+                "active": True,
+                "deadline": None,
+                "remaining_seconds": 0,
+                "checked_at": 123,
+            },
+        }
+
+        class FakeIgnitionMonitor:
+            def status(self):
+                calls.append(("status",))
+                return active
+
+            def disable(self, minutes):
+                calls.append(("disable", minutes))
+                return active
+
+            def enable(self):
+                calls.append(("enable",))
+                return active
+
+        original = dashboard.ignition_monitor_control
+        dashboard.ignition_monitor_control = FakeIgnitionMonitor()
+        try:
+            client = dashboard.app.test_client()
+            status = client.get("/api/ignition-monitor")
+            disabled = client.post(
+                "/api/ignition-monitor/disable",
+                data={"minutes": "90"},
+                headers={"X-Van-Dashboard": "1"},
+            )
+            enabled = client.post(
+                "/api/ignition-monitor/enable",
+                headers={"X-Van-Dashboard": "1"},
+            )
+            bad_duration = client.post(
+                "/api/ignition-monitor/disable", data={"minutes": "2h"}
+            )
+            extra = client.post(
+                "/api/ignition-monitor/disable",
+                data={"minutes": "90", "command": "anything"},
+            )
+            enable_input = client.post(
+                "/api/ignition-monitor/enable", data={"minutes": "90"}
+            )
+            query = client.get("/api/ignition-monitor?command=anything")
+            cross_origin = client.post(
+                "/api/ignition-monitor/disable",
+                data={"minutes": "90"},
+                headers={
+                    "X-Van-Dashboard": "1",
+                    "Origin": "https://example.invalid",
+                },
+            )
+        finally:
+            dashboard.ignition_monitor_control = original
+
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.headers["Cache-Control"], "no-store")
+        self.assertEqual(disabled.status_code, 200)
+        self.assertEqual(enabled.status_code, 200)
+        self.assertEqual(bad_duration.status_code, 400)
+        self.assertEqual(extra.status_code, 400)
+        self.assertEqual(enable_input.status_code, 400)
+        self.assertEqual(query.status_code, 400)
+        self.assertEqual(cross_origin.status_code, 403)
+        self.assertEqual(calls, [("status",), ("disable", 90), ("enable",)])
 
     def test_system_monitor_route_has_bounded_ranges(self):
         calls = []
