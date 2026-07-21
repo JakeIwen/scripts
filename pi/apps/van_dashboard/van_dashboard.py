@@ -16,11 +16,14 @@ is shared with other vehicle tooling.
 """
 
 import copy
+import datetime
 import glob
 import hashlib
 import json
 import os
+import plistlib
 import re
+import shlex
 import socket
 import struct
 import subprocess
@@ -83,6 +86,23 @@ SYSTEM_MONITOR_DB = os.environ.get(
 )
 SYSTEM_MONITOR_TIMEOUT = float(
     os.environ.get("VAN_DASHBOARD_SYSTEM_MONITOR_TIMEOUT", "15")
+)
+BACKUP_CONF = os.environ.get(
+    "VAN_DASHBOARD_BACKUP_CONF", "/home/pi/scripts/backup/backup_conf.sh"
+)
+BACKUP_STAMP_DIR = os.environ.get(
+    "VAN_DASHBOARD_BACKUP_STAMP_DIR", "/home/pi/backups/stamps"
+)
+BACKUP_CLONE_NOW = os.environ.get(
+    "VAN_DASHBOARD_BACKUP_CLONE_NOW", "/home/pi/scripts/backup/clone_now.sh"
+)
+TIME_MACHINE_BUNDLE = os.environ.get(
+    "VAN_DASHBOARD_TIME_MACHINE_BUNDLE", "/mnt/mbp2tbkup/m4mac.sparsebundle"
+)
+LSBLK = os.environ.get("VAN_DASHBOARD_LSBLK", "/usr/bin/lsblk")
+BACKUP_STATUS_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_BACKUP_STATUS_TIMEOUT", "10"))
+BACKUP_CLONE_TIMEOUT = float(
+    os.environ.get("VAN_DASHBOARD_BACKUP_CLONE_TIMEOUT", str(6 * 60 * 60 + 90))
 )
 TUYA_POLL_INTERVAL = float(os.environ.get("VAN_DASHBOARD_TUYA_POLL_INTERVAL", "15"))
 POLICYCTL_TIMEOUT = 15
@@ -2557,6 +2577,349 @@ class SystemMonitorClient:
         )
 
 
+class BackupStatusError(RuntimeError):
+    pass
+
+
+class BackupManager:
+    """Read backup evidence and serialize safe hotspare clone requests.
+
+    Configuration is parsed as data rather than sourced, so inspecting status
+    cannot execute backup_conf.sh or load its secrets file. Clone targets are
+    restricted to the labels already present in CLONE_TARGETS; the dashboard
+    never accepts a block-device path and never exposes clone_to_sd.sh --init.
+    """
+
+    CLONE_TARGET_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+    def __init__(
+        self,
+        config=BACKUP_CONF,
+        stamp_dir=BACKUP_STAMP_DIR,
+        clone_tool=BACKUP_CLONE_NOW,
+        time_machine_bundle=TIME_MACHINE_BUNDLE,
+        command=run_command,
+        timeout=BACKUP_STATUS_TIMEOUT,
+        clone_timeout=BACKUP_CLONE_TIMEOUT,
+        wall_clock=time.time,
+    ):
+        self.config = config
+        self.stamp_dir = stamp_dir
+        self.clone_tool = clone_tool
+        self.time_machine_bundle = time_machine_bundle
+        self.command = command
+        self.timeout = timeout
+        self.clone_timeout = clone_timeout
+        self.wall_clock = wall_clock
+        self.lock = threading.Lock()
+        self.thread = None
+        self.operation = {
+            "status": "idle",
+            "target": None,
+            "started_at": None,
+            "completed_at": None,
+            "error": None,
+        }
+
+    @classmethod
+    def parse_config(cls, text):
+        match = re.search(r"^\s*CLONE_TARGETS=\(([^)]*)\)\s*$", text, re.MULTILINE)
+        if not match:
+            raise BackupStatusError("backup configuration has no CLONE_TARGETS")
+        try:
+            entries = shlex.split(match.group(1), comments=True, posix=True)
+        except ValueError as exc:
+            raise BackupStatusError(f"could not parse CLONE_TARGETS: {exc}") from exc
+        targets = []
+        seen = set()
+        for entry in entries:
+            label, separator, raw_interval = entry.rpartition(":")
+            if (
+                not separator
+                or not cls.CLONE_TARGET_RE.fullmatch(label)
+                or not raw_interval.isdigit()
+                or not 1 <= int(raw_interval) <= 3650
+                or label in seen
+            ):
+                raise BackupStatusError("backup configuration has an invalid clone target")
+            seen.add(label)
+            targets.append({"label": label, "interval_days": int(raw_interval)})
+        if not targets:
+            raise BackupStatusError("backup configuration has no clone targets")
+
+        def integer(name, default):
+            value = re.search(rf"^\s*{re.escape(name)}=(\d+)\s*(?:#.*)?$", text, re.MULTILINE)
+            return int(value.group(1)) if value else default
+
+        return {
+            "targets": targets,
+            "borg_stale_hours": integer("BORG_STALE_HOURS", 48),
+            "clone_stale_factor": integer("CLONE_STALE_FACTOR", 2),
+        }
+
+    def _configuration(self):
+        try:
+            return self.parse_config(read_text_file(self.config))
+        except OSError as exc:
+            raise BackupStatusError(f"could not read backup configuration: {exc}") from exc
+
+    @staticmethod
+    def _flatten_block_devices(devices, parent=None):
+        rows = []
+        for device in devices if isinstance(devices, list) else ():
+            if not isinstance(device, dict):
+                continue
+            row = dict(device)
+            row["_parent"] = parent
+            rows.append(row)
+            rows.extend(BackupManager._flatten_block_devices(device.get("children"), row))
+        return rows
+
+    def _block_devices(self):
+        args = [
+            LSBLK,
+            "--json",
+            "--bytes",
+            "--output",
+            "NAME,PATH,PKNAME,LABEL,SIZE,MOUNTPOINTS",
+        ]
+        try:
+            result = self.command(args, timeout=self.timeout)
+        except subprocess.TimeoutExpired as exc:
+            raise BackupStatusError(
+                f"storage discovery timed out after {self.timeout:g} seconds"
+            ) from exc
+        except OSError as exc:
+            raise BackupStatusError(f"could not inspect storage: {exc}") from exc
+        if result.returncode:
+            detail = (result.stderr or result.stdout or "lsblk failed").strip()[-500:]
+            raise BackupStatusError(detail)
+        try:
+            payload = json.loads(result.stdout)
+        except (TypeError, ValueError) as exc:
+            raise BackupStatusError("storage discovery returned invalid JSON") from exc
+        if not isinstance(payload, dict) or not isinstance(payload.get("blockdevices"), list):
+            raise BackupStatusError("storage discovery returned an invalid schema")
+        return self._flatten_block_devices(payload["blockdevices"])
+
+    @staticmethod
+    def _mountpoints(row):
+        points = row.get("mountpoints")
+        if not isinstance(points, list):
+            points = [row.get("mountpoint")]
+        return [point for point in points if isinstance(point, str) and point]
+
+    @staticmethod
+    def _root_row(row):
+        current = row
+        while current.get("_parent") is not None:
+            current = current["_parent"]
+        return current
+
+    @staticmethod
+    def _descendants(row):
+        values = [row]
+        for child in row.get("children") or ():
+            if isinstance(child, dict):
+                values.extend(BackupManager._descendants(child))
+        return values
+
+    @staticmethod
+    def _stamp(path):
+        try:
+            stat = os.stat(path)
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise BackupStatusError(f"could not read backup stamp: {exc}") from exc
+        return int(stat.st_mtime)
+
+    @staticmethod
+    def _plist_timestamp(value):
+        if not isinstance(value, datetime.datetime):
+            return None
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=datetime.timezone.utc)
+        return int(value.timestamp())
+
+    def _time_machine(self, now):
+        bundle = self.time_machine_bundle
+        result = {
+            "device": os.path.basename(bundle).removesuffix(".sparsebundle") or "Mac",
+            "available": os.path.isdir(bundle),
+            "last_backup_at": None,
+            "snapshots": [],
+            "running": False,
+            "progress_percent": None,
+            "bytes_copied": None,
+            "total_bytes": None,
+            "updated_at": None,
+            "error": None,
+        }
+        if not result["available"]:
+            result["error"] = "Time Machine sparsebundle is not reachable"
+            return result
+
+        history_path = os.path.join(bundle, "com.apple.TimeMachine.SnapshotHistory.plist")
+        try:
+            with open(history_path, "rb") as handle:
+                history = plistlib.load(handle)
+            raw_snapshots = history.get("Snapshots", []) if isinstance(history, dict) else []
+            timestamps = [
+                self._plist_timestamp(item.get("com.apple.backupd.SnapshotCompletionDate"))
+                for item in raw_snapshots
+                if isinstance(item, dict)
+            ]
+            result["snapshots"] = sorted(
+                (stamp for stamp in timestamps if stamp is not None), reverse=True
+            )[:24]
+            if result["snapshots"]:
+                result["last_backup_at"] = result["snapshots"][0]
+        except FileNotFoundError:
+            result["error"] = "Time Machine snapshot history is missing"
+        except (OSError, ValueError, TypeError) as exc:
+            result["error"] = f"could not read Time Machine history: {exc}"
+
+        results_path = os.path.join(bundle, "com.apple.TimeMachine.Results.plist")
+        try:
+            updated_at = int(os.stat(results_path).st_mtime)
+            with open(results_path, "rb") as handle:
+                current = plistlib.load(handle)
+            if isinstance(current, dict):
+                progress = current.get("Progress")
+                progress = progress if isinstance(progress, dict) else {}
+                percent = progress.get("Percent")
+                if isinstance(percent, (int, float)) and not isinstance(percent, bool):
+                    result["progress_percent"] = round(max(0, min(1, percent)) * 100, 1)
+                for source, target in (("bytes", "bytes_copied"), ("totalBytes", "total_bytes")):
+                    value = progress.get(source)
+                    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                        result[target] = value
+                # A stale Results.plist can retain Running=true after an interrupted
+                # backup. It must have been updated recently to count as live.
+                result["running"] = current.get("Running") is True and now - updated_at <= 900
+                result["updated_at"] = updated_at
+        except FileNotFoundError:
+            pass
+        except (OSError, ValueError, TypeError) as exc:
+            if result["error"] is None:
+                result["error"] = f"could not read Time Machine progress: {exc}"
+        return result
+
+    def status(self):
+        now = int(self.wall_clock())
+        configuration = self._configuration()
+        rows = self._block_devices()
+        labels = {row.get("label"): row for row in rows if row.get("label")}
+        clone_factor = configuration["clone_stale_factor"]
+        hotswaps = []
+        for target in configuration["targets"]:
+            label = target["label"]
+            row = labels.get(label)
+            root = self._root_row(row) if row is not None else None
+            mounts = [] if root is None else [
+                point
+                for device in self._descendants(root)
+                for point in self._mountpoints(device)
+            ]
+            last_clone_at = self._stamp(os.path.join(self.stamp_dir, f"clone_{label}"))
+            interval_seconds = target["interval_days"] * 86400
+            age_seconds = None if last_clone_at is None else max(0, now - last_clone_at)
+            hotswaps.append(
+                {
+                    **target,
+                    "attached": row is not None,
+                    "device": root.get("path") if root is not None else None,
+                    "size_bytes": root.get("size") if root is not None else None,
+                    "mounted": bool(mounts),
+                    "mountpoints": mounts,
+                    "last_clone_at": last_clone_at,
+                    "due": last_clone_at is None or age_seconds >= interval_seconds,
+                    "stale": last_clone_at is None
+                    or age_seconds > interval_seconds * clone_factor,
+                }
+            )
+
+        borg_at = self._stamp(os.path.join(self.stamp_dir, "borg_ok"))
+        borg_stale_seconds = configuration["borg_stale_hours"] * 3600
+        borg = {
+            "last_success_at": borg_at,
+            "stale_hours": configuration["borg_stale_hours"],
+            "stale": borg_at is None or now - borg_at > borg_stale_seconds,
+        }
+        time_machine = self._time_machine(now)
+        with self.lock:
+            operation = copy.deepcopy(self.operation)
+        attention = borg["stale"] or any(card["stale"] for card in hotswaps)
+        if not time_machine["available"] or time_machine["last_backup_at"] is None:
+            attention = True
+        health = "running" if operation["status"] == "running" or time_machine["running"] else (
+            "attention" if attention else "good"
+        )
+        return {
+            "checked_at": now,
+            "health": health,
+            "borg": borg,
+            "hotswaps": hotswaps,
+            "time_machine": time_machine,
+            "operation": operation,
+        }
+
+    def start_clone(self, target):
+        configuration = self._configuration()
+        allowed = {item["label"] for item in configuration["targets"]}
+        if target not in allowed:
+            raise ValueError("unknown hotspare target")
+        current = self.status()
+        card = next(item for item in current["hotswaps"] if item["label"] == target)
+        if not card["attached"]:
+            raise BackupStatusError(f"{target} is not attached")
+        if card["mounted"]:
+            raise BackupStatusError(f"{target} has mounted partitions")
+        with self.lock:
+            if self.operation["status"] == "running":
+                raise BackupStatusError("another dashboard clone is already running")
+            started_at = int(self.wall_clock())
+            self.operation = {
+                "status": "running",
+                "target": target,
+                "started_at": started_at,
+                "completed_at": None,
+                "error": None,
+            }
+            self.thread = threading.Thread(
+                target=self._run_clone,
+                args=(target, started_at),
+                name="backup-clone",
+                daemon=True,
+            )
+            self.thread.start()
+        return self.status()
+
+    def _run_clone(self, target, started_at):
+        error = None
+        try:
+            result = self.command(
+                [SUDO, "-n", self.clone_tool, target], timeout=self.clone_timeout
+            )
+            if result.returncode:
+                detail = (result.stderr or result.stdout or "clone failed").strip()[-500:]
+                error = detail
+        except subprocess.TimeoutExpired:
+            error = f"clone timed out after {self.clone_timeout:g} seconds"
+        except OSError as exc:
+            error = f"could not start clone: {exc}"
+        with self.lock:
+            if self.operation.get("started_at") == started_at:
+                self.operation.update(
+                    {
+                        "status": "error" if error else "complete",
+                        "completed_at": int(self.wall_clock()),
+                        "error": error,
+                    }
+                )
+
+
 app = Flask(__name__)
 state_store = StateStore()
 engine_monitor = EngineMonitor()
@@ -2573,6 +2936,7 @@ price_checks = PriceCheckController()
 system_monitor = SystemMonitorClient()
 usb_devices = UsbDeviceMonitor()
 usb_ports = UsbPortController(usb_devices)
+backups = BackupManager()
 
 
 def api_error(message, status):
@@ -2890,6 +3254,41 @@ def api_usb_port_action():
             "usb_ports": state,
         }
     )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/api/backups")
+def api_backups():
+    if request.args:
+        return api_error("backup status does not accept input", 400)
+    try:
+        status = backups.status()
+    except BackupStatusError as exc:
+        return api_error(f"backup status unavailable: {exc}", 503)
+    response = jsonify({"ok": True, "backups": status})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/api/backups/clone", methods=["POST"])
+def api_backup_clone():
+    if not _exact_form(("target",)):
+        return api_error("backup clone requires one hotspare target", 400)
+    try:
+        status = backups.start_clone(request.form["target"])
+    except ValueError as exc:
+        return api_error(str(exc), 400)
+    except BackupStatusError as exc:
+        return api_error(f"could not start clone: {exc}", 409)
+    response = jsonify(
+        {
+            "ok": True,
+            "message": f"Clone to {request.form['target']} started",
+            "backups": status,
+        }
+    )
+    response.status_code = 202
     response.headers["Cache-Control"] = "no-store"
     return response
 

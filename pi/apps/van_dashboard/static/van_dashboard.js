@@ -5,6 +5,7 @@ let dashboard = null,
   lighting = null,
   priceChecks = null,
   systemMonitor = null,
+  backupState = null,
   systemMonitorHours = 6,
   ubntWifi = null,
   ubntLink = null,
@@ -14,6 +15,7 @@ let dashboard = null,
   priceEditingId = null,
   crashAnalysisBusy = false,
   usbPortBusy = false,
+  backupBusy = false,
   busy = false,
   tileEditing = false,
   tileDrag = null,
@@ -23,8 +25,10 @@ let dashboard = null,
   lightingPoll = 0,
   systemMonitorPoll = 0,
   usbPoll = 0,
+  backupPoll = 0,
   ubntPoll = 0,
   ubntLastCompletion = '',
+  backupLastCompletion = '',
   sonosTimeline = { position: 0, duration: 0, playing: false, updatedAt: 0 };
 const TILE_ORDER_STORAGE_KEY = 'van-dashboard.tile-order.v1';
 function esc(v) {
@@ -102,6 +106,14 @@ function eventTime(timestamp) {
     minute: '2-digit',
     second: '2-digit',
   });
+}
+function backupAge(timestamp) {
+  if (!Number.isFinite(timestamp)) return 'never';
+  const seconds = Math.max(0, Date.now() / 1000 - timestamp);
+  if (seconds < 90) return `${Math.round(seconds)}s ago`;
+  if (seconds < 90 * 60) return `${Math.round(seconds / 60)}m ago`;
+  if (seconds < 48 * 60 * 60) return `${Math.round(seconds / 3600)}h ago`;
+  return `${Math.round(seconds / 86400)}d ago`;
 }
 function monitorRangeLabel(hours = systemMonitorHours) {
   if (hours === 168) return '7 days';
@@ -580,6 +592,162 @@ async function changeUsbPort(button) {
     await refreshUsbDevices(false).catch(() => {});
   } finally {
     usbPortBusy = false;
+  }
+}
+function renderBackups(response) {
+  const state = response.backups,
+    borg = state.borg || {},
+    tm = state.time_machine || {},
+    operation = state.operation || { status: 'idle' },
+    tile = $('backups'),
+    pill = $('backup-pill');
+  backupState = state;
+  tile.classList.remove('unknown', 'good', 'warning', 'running');
+  tile.classList.add(
+    state.health === 'good' ? 'good' : state.health === 'running' ? 'running' : 'warning',
+  );
+  pill.textContent =
+    state.health === 'running' ? 'RUNNING' : state.health === 'good' ? 'CURRENT' : 'CHECK';
+  const piLabel = Number.isFinite(borg.last_success_at)
+      ? `Borg ${backupAge(borg.last_success_at)}`
+      : 'No Borg success recorded',
+    macLabel = Number.isFinite(tm.last_backup_at)
+      ? `TM ${backupAge(tm.last_backup_at)}`
+      : tm.error || 'No Time Machine history';
+  $('backup-pi').textContent = piLabel;
+  $('backup-mac').textContent = tm.running
+    ? `Backing up${Number.isFinite(tm.progress_percent) ? ` · ${tm.progress_percent}%` : ''}`
+    : macLabel;
+  if (operation.status === 'running') {
+    $('backup-summary').textContent = `Cloning vanpi to ${operation.target}…`;
+  } else if (tm.running) {
+    $('backup-summary').textContent = 'Time Machine backup in progress';
+  } else {
+    $('backup-summary').textContent = `${piLabel} · ${macLabel}`;
+  }
+
+  const borgDot = $('backup-borg-dot');
+  borgDot.className = `backup-state-dot ${borg.stale ? 'bad' : 'good'}`;
+  $('backup-borg-detail').textContent = Number.isFinite(borg.last_success_at)
+    ? `Last successful archive ${eventTime(borg.last_success_at)} (${backupAge(borg.last_success_at)})`
+    : 'No successful Borg archive is recorded';
+  const tmDot = $('backup-tm-dot');
+  tmDot.className = `backup-state-dot ${tm.running || Number.isFinite(tm.last_backup_at) ? 'good' : 'bad'}`;
+  $('backup-tm-detail').textContent = tm.running
+    ? `Backup in progress${Number.isFinite(tm.progress_percent) ? ` · ${tm.progress_percent}%` : ''}`
+    : Number.isFinite(tm.last_backup_at)
+      ? `Last completed ${eventTime(tm.last_backup_at)} (${backupAge(tm.last_backup_at)})`
+      : tm.error || 'No completed snapshots found';
+
+  const operationKey = `${operation.status}:${operation.started_at || ''}:${operation.completed_at || ''}`;
+  if (operation.status === 'running') {
+    $('backup-operation').textContent = `Cloning ${operation.target} · ${backupAge(operation.started_at)}`;
+  } else if (operation.status === 'error') {
+    $('backup-operation').textContent = `${operation.target || 'Clone'} failed`;
+  } else if (operation.status === 'complete') {
+    $('backup-operation').textContent = `${operation.target} completed ${backupAge(operation.completed_at)}`;
+  } else {
+    $('backup-operation').textContent = 'Idle';
+  }
+  if (
+    backupLastCompletion &&
+    operationKey !== backupLastCompletion &&
+    ['complete', 'error'].includes(operation.status)
+  ) {
+    toast(
+      operation.status === 'complete'
+        ? `Clone to ${operation.target} completed`
+        : operation.error || `Clone to ${operation.target} failed`,
+      operation.status === 'error',
+    );
+  }
+  backupLastCompletion = operationKey;
+
+  const operationRunning = operation.status === 'running';
+  $('backup-hotswaps').innerHTML = (state.hotswaps || [])
+    .map((card) => {
+      const unavailable = !card.attached || card.mounted,
+        label = esc(card.label),
+        status = !card.attached
+          ? 'Not attached'
+          : card.mounted
+            ? 'Mounted — clone blocked'
+            : `${formatBytes(card.size_bytes)} card attached`,
+        generation = Number.isFinite(card.last_clone_at)
+          ? `${eventTime(card.last_clone_at)} · ${backupAge(card.last_clone_at)}`
+          : 'No successful clone recorded',
+        badge = card.stale ? 'STALE' : card.due ? 'DUE' : 'CURRENT';
+      return `<article class="backup-hotswap ${card.stale ? 'stale' : card.due ? 'due' : 'current'}">
+        <div class="backup-hotswap-head"><span><strong>${label}</strong><small>${esc(status)}</small></span><span class="backup-generation-state">${badge}</span></div>
+        <dl><div><dt>Contains vanpi as of</dt><dd>${esc(generation)}</dd></div><div><dt>Schedule</dt><dd>Every ${card.interval_days} days</dd></div></dl>
+        <button data-backup-clone="${label}" ${unavailable || operationRunning || backupBusy ? 'disabled' : ''}>Clone current vanpi to this card</button>
+      </article>`;
+    })
+    .join('');
+
+  if (tm.running) {
+    const copied = Number.isFinite(tm.bytes_copied) ? formatBytes(tm.bytes_copied) : null,
+      total = Number.isFinite(tm.total_bytes) ? formatBytes(tm.total_bytes) : null;
+    $('backup-tm-progress').textContent = `Backup running${Number.isFinite(tm.progress_percent) ? ` · ${tm.progress_percent}%` : ''}${copied && total ? ` · ${copied} of ${total}` : ''}`;
+  } else {
+    $('backup-tm-progress').textContent = tm.error || `${(tm.snapshots || []).length} recent completed snapshots found`;
+  }
+  $('backup-tm-updated').textContent = Number.isFinite(tm.updated_at)
+    ? `Updated ${backupAge(tm.updated_at)}`
+    : '—';
+  $('backup-history').innerHTML = (tm.snapshots || []).length
+    ? tm.snapshots
+        .map(
+          (timestamp, index) => `<div class="backup-history-row"><span>${index === 0 ? 'Latest' : `Previous ${index}`}</span><time datetime="${new Date(timestamp * 1000).toISOString()}">${esc(eventTime(timestamp))}</time></div>`,
+        )
+        .join('')
+    : `<div class="speaker-loading">${esc(tm.error || 'No completed Time Machine snapshots found')}</div>`;
+  $('backup-status').textContent = `Updated ${backupAge(state.checked_at)}`;
+  $('backup-panel').setAttribute('aria-busy', 'false');
+}
+function renderBackupsUnavailable(message) {
+  backupState = null;
+  const tile = $('backups');
+  tile.classList.remove('good', 'warning', 'running');
+  tile.classList.add('unknown');
+  $('backup-pill').textContent = 'NO DATA';
+  $('backup-summary').textContent = message;
+  $('backup-pi').textContent = 'Unavailable';
+  $('backup-mac').textContent = 'Unavailable';
+  $('backup-status').textContent = 'Unavailable';
+  $('backup-panel').setAttribute('aria-busy', 'false');
+}
+async function refreshBackups(showErrors = false) {
+  try {
+    const response = await json('/api/backups');
+    renderBackups(response);
+    return response;
+  } catch (error) {
+    renderBackupsUnavailable(error.message);
+    if (showErrors) toast(error.message, true);
+    throw error;
+  }
+}
+async function startBackupClone(button) {
+  if (backupBusy || backupState?.operation?.status === 'running') return;
+  const target = button.dataset.backupClone;
+  if (
+    !window.confirm(
+      `Clone the current vanpi system to ${target}? Existing files on that hotspare will be synchronized or overwritten. Keep the card attached until completion.`,
+    )
+  )
+    return;
+  backupBusy = true;
+  button.disabled = true;
+  try {
+    const response = await post('backups/clone', { target });
+    renderBackups(response);
+    toast(response.message);
+  } catch (error) {
+    toast(error.message, true);
+    await refreshBackups(false).catch(() => {});
+  } finally {
+    backupBusy = false;
   }
 }
 function renderPriceChecks(response) {
@@ -1667,6 +1835,36 @@ function closeUsbDevices() {
   $('usb-devices').setAttribute('aria-expanded', 'false');
   $('usb-devices').focus();
 }
+async function pollBackups() {
+  clearTimeout(backupPoll);
+  if (!$('backup-backdrop').classList.contains('open')) return;
+  try {
+    await refreshBackups(false);
+  } catch (_) {
+    /* rendered by refreshBackups */
+  } finally {
+    const delay = backupState?.operation?.status === 'running' ? 2500 : 10000;
+    backupPoll = setTimeout(pollBackups, delay);
+  }
+}
+async function openBackups() {
+  $('backup-backdrop').classList.add('open');
+  document.body.classList.add('sheet-open');
+  $('backups').setAttribute('aria-expanded', 'true');
+  $('backup-panel').setAttribute('aria-busy', 'true');
+  try {
+    await refreshBackups(true);
+  } finally {
+    backupPoll = setTimeout(pollBackups, 2500);
+  }
+}
+function closeBackups() {
+  clearTimeout(backupPoll);
+  $('backup-backdrop').classList.remove('open');
+  document.body.classList.remove('sheet-open');
+  $('backups').setAttribute('aria-expanded', 'false');
+  $('backups').focus();
+}
 async function openPriceChecks() {
   $('price-backdrop').classList.add('open');
   document.body.classList.add('sheet-open');
@@ -1756,6 +1954,8 @@ $('system-monitor-close').addEventListener('click', closeSystemMonitor);
 $('monitor-crash-analyze').addEventListener('click', analyzePreviousCrash);
 $('usb-devices').addEventListener('click', openUsbDevices);
 $('usb-close').addEventListener('click', closeUsbDevices);
+$('backups').addEventListener('click', openBackups);
+$('backup-close').addEventListener('click', closeBackups);
 $('price-checks').addEventListener('click', openPriceChecks);
 $('price-close').addEventListener('click', closePriceChecks);
 $('price-check-all').addEventListener('click', () => checkPrices('all'));
@@ -1791,6 +1991,9 @@ $('system-monitor-backdrop').addEventListener('click', (event) => {
 $('usb-backdrop').addEventListener('click', (event) => {
   if (event.target === $('usb-backdrop')) closeUsbDevices();
 });
+$('backup-backdrop').addEventListener('click', (event) => {
+  if (event.target === $('backup-backdrop')) closeBackups();
+});
 $('price-backdrop').addEventListener('click', (event) => {
   if (event.target === $('price-backdrop')) closePriceChecks();
 });
@@ -1806,6 +2009,7 @@ document.addEventListener('keydown', (event) => {
     if ($('storage-backdrop').classList.contains('open')) closeStorage();
     if ($('system-monitor-backdrop').classList.contains('open')) closeSystemMonitor();
     if ($('usb-backdrop').classList.contains('open')) closeUsbDevices();
+    if ($('backup-backdrop').classList.contains('open')) closeBackups();
     if ($('price-backdrop').classList.contains('open')) closePriceChecks();
     if ($('lighting-backdrop').classList.contains('open')) closeLighting();
     if ($('ubnt-wifi-backdrop').classList.contains('open')) closeUbntWifi();
@@ -1863,6 +2067,8 @@ document.addEventListener('change', (event) => {
     });
 });
 document.addEventListener('click', (event) => {
+  const backupClone = event.target.closest('[data-backup-clone]');
+  if (backupClone) startBackupClone(backupClone);
   const usbPortAction = event.target.closest('[data-usb-port-action]');
   if (usbPortAction) changeUsbPort(usbPortAction);
   const monitorRange = event.target.closest('[data-monitor-hours]');
@@ -1953,6 +2159,7 @@ function refreshVisibleDashboard() {
   refreshStoragePolicy().catch(() => {});
   refreshSystemMonitor(false).catch(() => {});
   refreshUsbDevices(false).catch(() => {});
+  refreshBackups(false).catch(() => {});
   refreshPriceChecks().catch(() => {});
   refreshLighting(false).catch(() => {});
   refreshUbntWifi(false);
@@ -1965,6 +2172,7 @@ Promise.allSettled([
   refreshStoragePolicy(),
   refreshSystemMonitor(false),
   refreshUsbDevices(false),
+  refreshBackups(false),
   refreshPriceChecks(),
   refreshLighting(false),
   refreshUbntWifi(false),
@@ -1989,6 +2197,10 @@ setInterval(() => {
 setInterval(() => {
   if (!document.hidden && !$('usb-backdrop').classList.contains('open'))
     refreshUsbDevices(false).catch(() => {});
+}, 30000);
+setInterval(() => {
+  if (!document.hidden && !$('backup-backdrop').classList.contains('open'))
+    refreshBackups(false).catch(() => {});
 }, 30000);
 setInterval(() => {
   if (!document.hidden && !priceBusy) refreshPriceChecks().catch(() => {});

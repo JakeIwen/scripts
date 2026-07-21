@@ -1520,6 +1520,258 @@ class CopAlertManagerTests(unittest.TestCase):
         manager.tick()
 
 
+class BackupManagerTests(unittest.TestCase):
+    NOW = 1_800_000_000
+
+    @staticmethod
+    def lsblk_payload(mounted=False):
+        return {
+            "blockdevices": [
+                {
+                    "name": "sdb",
+                    "path": "/dev/sdb",
+                    "pkname": None,
+                    "label": None,
+                    "size": 32_000_000_000,
+                    "mountpoints": [None],
+                    "children": [
+                        {
+                            "name": "sdb1",
+                            "path": "/dev/sdb1",
+                            "pkname": "sdb",
+                            "label": "bootfs",
+                            "size": 500_000_000,
+                            "mountpoints": ["/mnt/test"] if mounted else [None],
+                        },
+                        {
+                            "name": "sdb2",
+                            "path": "/dev/sdb2",
+                            "pkname": "sdb",
+                            "label": "hotspare-a",
+                            "size": 31_500_000_000,
+                            "mountpoints": [None],
+                        },
+                    ],
+                }
+            ]
+        }
+
+    def make_files(self, tempdir, tm_running=True):
+        config = os.path.join(tempdir, "backup_conf.sh")
+        stamps = os.path.join(tempdir, "stamps")
+        bundle = os.path.join(tempdir, "m4mac.sparsebundle")
+        os.makedirs(stamps)
+        os.makedirs(bundle)
+        with open(config, "w", encoding="utf-8") as handle:
+            handle.write(
+                "CLONE_TARGETS=(hotspare-a:7 hotspare-b:14)\n"
+                "BORG_STALE_HOURS=48\n"
+                "CLONE_STALE_FACTOR=2\n"
+            )
+        stamp_times = {
+            "borg_ok": self.NOW - 3600,
+            "clone_hotspare-a": self.NOW - 2 * 86400,
+            "clone_hotspare-b": self.NOW - 40 * 86400,
+        }
+        for name, timestamp in stamp_times.items():
+            path = os.path.join(stamps, name)
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("recorded\n")
+            os.utime(path, (timestamp, timestamp))
+        history = {
+            "Snapshots": [
+                {
+                    "com.apple.backupd.SnapshotCompletionDate": dashboard.datetime.datetime.utcfromtimestamp(
+                        timestamp
+                    ),
+                    "com.apple.backupd.SnapshotName": "test-snapshot",
+                }
+                for timestamp in (self.NOW - 7200, self.NOW - 1800)
+            ]
+        }
+        with open(
+            os.path.join(bundle, "com.apple.TimeMachine.SnapshotHistory.plist"), "wb"
+        ) as handle:
+            dashboard.plistlib.dump(history, handle)
+        results_path = os.path.join(bundle, "com.apple.TimeMachine.Results.plist")
+        with open(results_path, "wb") as handle:
+            dashboard.plistlib.dump(
+                {
+                    "Running": tm_running,
+                    "Progress": {"Percent": 0.375, "bytes": 250, "totalBytes": 1000},
+                },
+                handle,
+            )
+        os.utime(results_path, (self.NOW - 30, self.NOW - 30))
+        return config, stamps, bundle
+
+    def test_reads_borg_hotswap_and_time_machine_evidence(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            config, stamps, bundle = self.make_files(tempdir)
+
+            def command(args, timeout):
+                self.assertEqual(args[0], dashboard.LSBLK)
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(self.lsblk_payload()),
+                    stderr="",
+                )
+
+            manager = dashboard.BackupManager(
+                config=config,
+                stamp_dir=stamps,
+                time_machine_bundle=bundle,
+                command=command,
+                wall_clock=lambda: self.NOW,
+            )
+            status = manager.status()
+
+        self.assertFalse(status["borg"]["stale"])
+        self.assertEqual(status["borg"]["last_success_at"], self.NOW - 3600)
+        self.assertEqual(
+            [card["label"] for card in status["hotswaps"]],
+            ["hotspare-a", "hotspare-b"],
+        )
+        self.assertTrue(status["hotswaps"][0]["attached"])
+        self.assertFalse(status["hotswaps"][0]["mounted"])
+        self.assertFalse(status["hotswaps"][0]["stale"])
+        self.assertFalse(status["hotswaps"][1]["attached"])
+        self.assertTrue(status["hotswaps"][1]["stale"])
+        self.assertEqual(status["time_machine"]["last_backup_at"], self.NOW - 1800)
+        self.assertTrue(status["time_machine"]["running"])
+        self.assertEqual(status["time_machine"]["progress_percent"], 37.5)
+        self.assertEqual(status["health"], "running")
+
+    def test_rejects_invalid_configuration_and_stale_running_metadata(self):
+        invalid = (
+            "CLONE_TARGETS=()",
+            "CLONE_TARGETS=(hotspare-a:0)",
+            "CLONE_TARGETS=(../../sda:7)",
+            "CLONE_TARGETS=(hotspare-a:7 hotspare-a:14)",
+        )
+        for value in invalid:
+            with self.subTest(value=value):
+                with self.assertRaises(dashboard.BackupStatusError):
+                    dashboard.BackupManager.parse_config(value)
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            config, stamps, bundle = self.make_files(tempdir)
+            results = os.path.join(bundle, "com.apple.TimeMachine.Results.plist")
+            os.utime(results, (self.NOW - 3600, self.NOW - 3600))
+            manager = dashboard.BackupManager(
+                config=config,
+                stamp_dir=stamps,
+                time_machine_bundle=bundle,
+                command=lambda args, timeout: SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(self.lsblk_payload()),
+                    stderr="",
+                ),
+                wall_clock=lambda: self.NOW,
+            )
+            self.assertFalse(manager.status()["time_machine"]["running"])
+
+    def test_clone_uses_fixed_root_wrapper_and_whitelisted_attached_label(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            config, stamps, bundle = self.make_files(tempdir, tm_running=False)
+            calls = []
+
+            def command(args, timeout):
+                calls.append((list(args), timeout))
+                if args[0] == dashboard.LSBLK:
+                    return SimpleNamespace(
+                        returncode=0,
+                        stdout=json.dumps(self.lsblk_payload()),
+                        stderr="",
+                    )
+                return SimpleNamespace(returncode=0, stdout="clone complete", stderr="")
+
+            manager = dashboard.BackupManager(
+                config=config,
+                stamp_dir=stamps,
+                clone_tool="/test/clone_now.sh",
+                time_machine_bundle=bundle,
+                command=command,
+                clone_timeout=123,
+                wall_clock=lambda: self.NOW,
+            )
+            manager.start_clone("hotspare-a")
+            manager.thread.join(2)
+            self.assertFalse(manager.thread.is_alive())
+            self.assertEqual(manager.operation["status"], "complete")
+            clone_calls = [call for call in calls if call[0][0] == dashboard.SUDO]
+            self.assertEqual(
+                clone_calls,
+                [([dashboard.SUDO, "-n", "/test/clone_now.sh", "hotspare-a"], 123)],
+            )
+            with self.assertRaisesRegex(ValueError, "unknown hotspare"):
+                manager.start_clone("/dev/sda")
+
+    def test_clone_refuses_unattached_or_mounted_cards(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            config, stamps, bundle = self.make_files(tempdir, tm_running=False)
+            for mounted, target, message in (
+                (False, "hotspare-b", "not attached"),
+                (True, "hotspare-a", "mounted partitions"),
+            ):
+                manager = dashboard.BackupManager(
+                    config=config,
+                    stamp_dir=stamps,
+                    time_machine_bundle=bundle,
+                    command=lambda args, timeout, mounted=mounted: SimpleNamespace(
+                        returncode=0,
+                        stdout=json.dumps(self.lsblk_payload(mounted=mounted)),
+                        stderr="",
+                    ),
+                    wall_clock=lambda: self.NOW,
+                )
+                with self.subTest(target=target):
+                    with self.assertRaisesRegex(dashboard.BackupStatusError, message):
+                        manager.start_clone(target)
+
+    def test_clone_failure_and_timeout_are_reported_by_background_operation(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            config, stamps, bundle = self.make_files(tempdir, tm_running=False)
+            for outcome, message in (("failed", "card write failed"), ("timeout", "timed out")):
+                def command(args, timeout, outcome=outcome):
+                    if args[0] == dashboard.LSBLK:
+                        return SimpleNamespace(
+                            returncode=0,
+                            stdout=json.dumps(self.lsblk_payload()),
+                            stderr="",
+                        )
+                    if outcome == "timeout":
+                        raise subprocess.TimeoutExpired(args, timeout)
+                    return SimpleNamespace(
+                        returncode=1,
+                        stdout="",
+                        stderr="card write failed",
+                    )
+
+                manager = dashboard.BackupManager(
+                    config=config,
+                    stamp_dir=stamps,
+                    time_machine_bundle=bundle,
+                    command=command,
+                    clone_timeout=4,
+                    wall_clock=lambda: self.NOW,
+                )
+                with self.subTest(outcome=outcome):
+                    manager.start_clone("hotspare-a")
+                    manager.thread.join(2)
+                    self.assertEqual(manager.operation["status"], "error")
+                    self.assertIn(message, manager.operation["error"])
+
+    def test_clone_wrapper_uses_shared_lock_and_never_initializes_a_card(self):
+        repository = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        path = os.path.join(repository, "pi", "scripts", "backup", "clone_now.sh")
+        with open(path, encoding="utf-8") as handle:
+            script = handle.read()
+        self.assertIn("acquire_job_lock", script)
+        self.assertIn('/home/pi/scripts/clone_to_sd.sh "$label"', script)
+        self.assertNotIn('clone_to_sd.sh --init', script)
+
+
 class DashboardRouteTests(unittest.TestCase):
     def test_index_and_manifest(self):
         client = dashboard.app.test_client()
@@ -1548,7 +1800,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'class="network-card-heading ubnt-card-heading tile-heading"', page.data)
         self.assertIn(b'class="network-card-heading tile-heading" id="openwrt-title"', page.data)
         self.assertIn(b'class="network-card-heading speedtest-card-head"', page.data)
-        self.assertEqual(page.data.count(b"tile-heading"), 11)
+        self.assertEqual(page.data.count(b"tile-heading"), 12)
         self.assertIn(b'id="sonos-track"', page.data)
         self.assertIn(b'id="sonos-progress"', page.data)
         self.assertIn(b'data-transport="play_pause"', page.data)
@@ -1566,6 +1818,14 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="usb-device-list"', page.data)
         self.assertIn(b'id="usb-hub-list"', page.data)
         self.assertIn(b'id="usb-operation"', page.data)
+        self.assertIn(b'id="backups"', page.data)
+        self.assertIn(b'id="backup-panel"', page.data)
+        self.assertIn(b'id="backup-hotswaps"', page.data)
+        self.assertIn(b'id="backup-history"', page.data)
+        self.assertIn(
+            b"Initializing cards and choosing raw devices are intentionally unavailable",
+            page.data,
+        )
         self.assertIn(b"Mounted storage is protected", page.data)
         self.assertIn(b'id="monitor-io-details"', page.data)
         self.assertIn(b'id="monitor-throttling"', page.data)
@@ -1596,7 +1856,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertNotIn(b'id="connectivity-age"', page.data)
         self.assertIn(b'id="openwrt-card" data-dashboard-tile', page.data)
         self.assertIn(b'id="speedtest-button" data-dashboard-tile', page.data)
-        self.assertEqual(page.data.count(b"data-dashboard-tile"), 12)
+        self.assertEqual(page.data.count(b"data-dashboard-tile"), 13)
         self.assertIn(b'class="network-card speedtest-card"', page.data)
         self.assertIn(b'id="ubnt-network-list"', page.data)
         self.assertIn(b'id="ubnt-password-form"', page.data)
@@ -1645,6 +1905,10 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"function renderUsbDevices(response)", javascript.data)
         self.assertIn(b"function renderUsbPorts(state)", javascript.data)
         self.assertIn(b"function changeUsbPort(button)", javascript.data)
+        self.assertIn(b"function renderBackups(response)", javascript.data)
+        self.assertIn(b"function startBackupClone(button)", javascript.data)
+        self.assertIn(b"/api/backups", javascript.data)
+        self.assertIn(b"backups/clone", javascript.data)
         self.assertIn(b"/api/usb-devices", javascript.data)
         self.assertIn(b"usb-ports/action", javascript.data)
         self.assertIn(b"function renderCrashAnalysis(payload)", javascript.data)
@@ -1688,6 +1952,8 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b".usb-label", stylesheet.data)
         self.assertIn(b".usb-port-grid", stylesheet.data)
         self.assertIn(b".usb-port-actions", stylesheet.data)
+        self.assertIn(b".backup-hotswap", stylesheet.data)
+        self.assertIn(b".backup-history-row", stylesheet.data)
         self.assertIn(b".tile-edit-button", stylesheet.data)
         self.assertIn(
             b"body.tiles-editing #tile-grid > [data-dashboard-tile]",
@@ -1811,6 +2077,73 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(unknown_field.status_code, 400)
         self.assertEqual(cross_origin.status_code, 403)
         self.assertEqual(calls, [("2-2:3", "off")])
+
+    def test_backup_routes_are_narrow_nonblocking_and_uncached(self):
+        calls = []
+        state = {
+            "checked_at": 123,
+            "health": "good",
+            "borg": {"last_success_at": 100, "stale": False},
+            "hotswaps": [],
+            "time_machine": {"available": True, "snapshots": []},
+            "operation": {"status": "idle"},
+        }
+
+        class FakeBackups:
+            def status(self):
+                calls.append(("status",))
+                return state
+
+            def start_clone(self, target):
+                calls.append(("clone", target))
+                if target != "hotspare-a":
+                    raise ValueError("unknown hotspare target")
+                return {**state, "operation": {"status": "running", "target": target}}
+
+        original = dashboard.backups
+        dashboard.backups = FakeBackups()
+        try:
+            client = dashboard.app.test_client()
+            status = client.get("/api/backups")
+            started = client.post(
+                "/api/backups/clone",
+                data={"target": "hotspare-a"},
+                headers={"X-Van-Dashboard": "1"},
+            )
+            unknown = client.post(
+                "/api/backups/clone",
+                data={"target": "/dev/sda"},
+                headers={"X-Van-Dashboard": "1"},
+            )
+            extra = client.post(
+                "/api/backups/clone",
+                data={"target": "hotspare-a", "command": "--init"},
+                headers={"X-Van-Dashboard": "1"},
+            )
+            query = client.get("/api/backups?device=sda")
+            cross_origin = client.post(
+                "/api/backups/clone",
+                data={"target": "hotspare-a"},
+                headers={
+                    "X-Van-Dashboard": "1",
+                    "Origin": "https://example.invalid",
+                },
+            )
+        finally:
+            dashboard.backups = original
+
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.headers["Cache-Control"], "no-store")
+        self.assertEqual(started.status_code, 202)
+        self.assertEqual(started.headers["Cache-Control"], "no-store")
+        self.assertEqual(unknown.status_code, 400)
+        self.assertEqual(extra.status_code, 400)
+        self.assertEqual(query.status_code, 400)
+        self.assertEqual(cross_origin.status_code, 403)
+        self.assertEqual(
+            calls,
+            [("status",), ("clone", "hotspare-a"), ("clone", "/dev/sda")],
+        )
 
     def test_system_monitor_route_has_bounded_ranges(self):
         calls = []

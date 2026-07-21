@@ -69,6 +69,14 @@
         <span class="status-line"><span>Storage</span><span id="usb-storage">—</span></span>
       </span>
     </button>
+    <button class="tile backup-tile unknown" id="backups" data-dashboard-tile data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="backup-panel">
+      <span class="pill" id="backup-pill">NO DATA</span><span class="tile-heading"><span class="tile-icon" aria-hidden="true">🛟</span><span class="tile-title">Backups</span></span>
+      <span class="tile-detail" id="backup-summary">Reading backup history…</span>
+      <span class="status-lines">
+        <span class="status-line"><span>vanpi</span><span id="backup-pi">Checking…</span></span>
+        <span class="status-line"><span>m4mac</span><span id="backup-mac">Checking…</span></span>
+      </span>
+    </button>
     <button class="tile price-tile" id="price-checks" data-dashboard-tile data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="price-panel">
       <span class="pill" id="price-pill">—</span><span class="tile-heading"><span class="tile-icon" aria-hidden="true">🏷️</span><span class="tile-title">Price Watch</span></span>
       <span class="tile-detail" id="price-summary">Loading watched items…</span>
@@ -170,6 +178,25 @@
     <section class="usb-port-section" aria-labelledby="usb-port-title"><div class="monitor-section-head"><div><h3 id="usb-port-title">Hub port controls</h3><p>Mounted storage is protected from Off and Cycle actions.</p></div><span id="usb-operation">Checking…</span></div><div class="usb-hub-list" id="usb-hub-list"><div class="speaker-loading">Reading controllable ports…</div></div></section>
     <div class="monitor-section-head usb-device-heading"><div><h3>Connected &amp; remembered devices</h3><p>Two-column compact view; unplugged devices remain visible until the dashboard service restarts.</p></div></div>
     <div class="usb-device-list" id="usb-device-list"><div class="speaker-loading">Reading USB buses…</div></div>
+  </section>
+</div>
+<div class="speaker-backdrop" id="backup-backdrop">
+  <section class="speaker-sheet backup-sheet" id="backup-panel" role="dialog" aria-modal="true" aria-labelledby="backup-title" aria-busy="true">
+    <div class="sheet-grabber"></div><div class="sheet-head"><h2 id="backup-title">Backups</h2><span class="policy-sheet-status" id="backup-status">Checking…</span><button class="sheet-close" id="backup-close" aria-label="Close backups">&times;</button></div>
+    <p class="sheet-help">Versioned vanpi backups, bootable hotspare generations, and Time Machine history stored on vanpi.</p>
+    <div class="backup-overview">
+      <section class="backup-overview-card" aria-labelledby="backup-borg-title"><span class="backup-state-dot" id="backup-borg-dot"></span><span><strong id="backup-borg-title">vanpi Borg archive</strong><small id="backup-borg-detail">Checking last success…</small></span></section>
+      <section class="backup-overview-card" aria-labelledby="backup-tm-title"><span class="backup-state-dot" id="backup-tm-dot"></span><span><strong id="backup-tm-title">m4mac Time Machine</strong><small id="backup-tm-detail">Checking snapshot history…</small></span></section>
+    </div>
+    <section class="backup-section" aria-labelledby="backup-hotswap-title">
+      <div class="monitor-section-head"><div><h3 id="backup-hotswap-title">Bootable Pi hotspares</h3><p>Each date is the last successful clone recorded for that labeled card.</p></div><span id="backup-operation">Idle</span></div>
+      <div class="backup-hotswaps" id="backup-hotswaps"><div class="speaker-loading">Finding configured hotspares…</div></div>
+      <p class="backup-warning">Clone synchronizes the current vanpi system onto the selected existing hotspare. Initializing cards and choosing raw devices are intentionally unavailable here.</p>
+    </section>
+    <section class="backup-section" aria-labelledby="backup-history-title">
+      <div class="monitor-section-head"><div><h3 id="backup-history-title">Time Machine history</h3><p id="backup-tm-progress">Reading m4mac.sparsebundle…</p></div><span id="backup-tm-updated">—</span></div>
+      <div class="backup-history" id="backup-history"><div class="speaker-loading">Reading completed snapshots…</div></div>
+    </section>
   </section>
 </div>
 <div class="speaker-backdrop" id="lighting-backdrop">

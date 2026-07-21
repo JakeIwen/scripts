@@ -1569,6 +1569,224 @@ body.busy [data-action] {
   background: #584524;
   color: #f2d59e;
 }
+.backup-tile {
+  min-height: 190px;
+}
+.backup-tile .tile-detail {
+  margin-top: 10px;
+  padding-top: 0;
+}
+.backup-tile .status-line {
+  gap: 7px;
+  font-size: 10px;
+}
+.backup-tile.good {
+  border-color: #356c58;
+  background: linear-gradient(145deg, #1d302a, #15231f);
+}
+.backup-tile.warning {
+  border-color: #7b633a;
+  background: linear-gradient(145deg, #30291d, #242017);
+}
+.backup-tile.running {
+  border-color: #347181;
+  background: linear-gradient(145deg, #19313a, #16252c);
+}
+.backup-tile.unknown {
+  opacity: 0.82;
+}
+.backup-tile.good .pill {
+  background: #254b3d;
+  color: #bcebd5;
+}
+.backup-tile.warning .pill {
+  background: #584524;
+  color: #f2d59e;
+}
+.backup-tile.running .pill {
+  background: #204b58;
+  color: #b8e9f2;
+}
+.backup-sheet {
+  max-height: min(88vh, 860px);
+}
+.backup-overview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.backup-overview-card {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: #172129;
+  padding: 11px 12px;
+}
+.backup-overview-card strong,
+.backup-overview-card small {
+  display: block;
+}
+.backup-overview-card strong {
+  font-size: 11px;
+}
+.backup-overview-card small {
+  color: var(--dim);
+  font-size: 9px;
+  margin-top: 3px;
+}
+.backup-state-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #71818a;
+  box-shadow: 0 0 0 4px #71818a18;
+}
+.backup-state-dot.good {
+  background: var(--good);
+  box-shadow: 0 0 0 4px #62c89918;
+}
+.backup-state-dot.bad {
+  background: var(--bad);
+  box-shadow: 0 0 0 4px #ef706718;
+}
+.backup-section {
+  border-top: 1px solid var(--line);
+  margin-top: 16px;
+  padding-top: 13px;
+}
+.backup-hotswaps {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.backup-hotswap {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: #172129;
+  padding: 11px;
+}
+.backup-hotswap.current {
+  border-color: #356c58;
+  background: #182a25;
+}
+.backup-hotswap.due {
+  border-color: #6c5a36;
+  background: #292319;
+}
+.backup-hotswap.stale {
+  border-color: #65413f;
+  background: #291d1d;
+}
+.backup-hotswap-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.backup-hotswap-head strong,
+.backup-hotswap-head small {
+  display: block;
+}
+.backup-hotswap-head strong {
+  font-size: 12px;
+}
+.backup-hotswap-head small {
+  color: var(--dim);
+  font-size: 8px;
+  margin-top: 2px;
+}
+.backup-generation-state {
+  border: 1px solid #536873;
+  border-radius: 999px;
+  color: var(--dim);
+  padding: 2px 6px;
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+.backup-hotswap.current .backup-generation-state {
+  border-color: #39725b;
+  color: #9cdec0;
+}
+.backup-hotswap.due .backup-generation-state {
+  border-color: #7b633a;
+  color: #f0d49b;
+}
+.backup-hotswap.stale .backup-generation-state {
+  border-color: #754743;
+  color: #f2aaa5;
+}
+.backup-hotswap dl {
+  margin: 10px 0;
+}
+.backup-hotswap dl div + div {
+  margin-top: 6px;
+}
+.backup-hotswap dt {
+  color: var(--dim);
+  font-size: 8px;
+}
+.backup-hotswap dd {
+  margin: 1px 0 0;
+  font-size: 9px;
+  overflow-wrap: anywhere;
+}
+.backup-hotswap button {
+  width: 100%;
+  border: 1px solid #42606e;
+  border-radius: 9px;
+  background: #263b47;
+  color: var(--ink);
+  padding: 8px;
+  font-size: 9px;
+  font-weight: 740;
+  cursor: pointer;
+}
+.backup-hotswap button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+.backup-warning {
+  border-radius: 10px;
+  background: #33291c;
+  color: #e9cb91;
+  padding: 8px 10px;
+  font-size: 9px;
+  margin: 9px 0 0;
+}
+.backup-history {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+}
+.backup-history-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #172129;
+  padding: 8px 9px;
+  color: var(--dim);
+  font-size: 8px;
+}
+.backup-history-row time {
+  color: var(--ink);
+  text-align: right;
+}
+@media (max-width: 420px) {
+  .backup-overview,
+  .backup-hotswaps,
+  .backup-history {
+    grid-template-columns: 1fr;
+  }
+}
 .usb-sheet {
   max-height: min(88vh, 820px);
 }
