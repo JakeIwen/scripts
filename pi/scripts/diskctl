@@ -7,6 +7,7 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 . "$script_dir/disk_policy.sh" || exit 1
 
 unmount_disks=${DISKCTL_UNMOUNT_DISKS:-/home/pi/scripts/umount_disks.sh}
+mount_disks=${DISKCTL_MOUNT_DISKS:-/home/pi/scripts/mount_disks.sh}
 internet_switches=${DISKCTL_INTERNET_SWITCHES:-/home/pi/scripts/internet_switches.sh}
 policyctl=${DISKCTL_POLICYCTL:-/home/pi/scripts/policyctl}
 ignition_flag=${DISKCTL_IGNITION_FLAG:-/home/pi/hooks/ignition_is_on}
@@ -24,20 +25,28 @@ label=${2:-}
   usage
   exit 2
 }
-disk_policy_is_mount_label "$label" || {
+disk_policy_is_control_label "$label" || {
   echo "diskctl: unknown managed disk label" >&2
   exit 2
 }
 
 case "$action" in
   eject)
-    # Install the hold before waiting on the lifecycle lock. A reconciliation
-    # already in progress may finish, but the subsequent unmount wins and no
-    # later automatic pass can remount this label during the hold.
-    disk_eject_hold_set "$label" "$hold_seconds" >/dev/null || exit 1
+    # Auto-mounted labels need a temporary hold. Manual-only labels such as
+    # bigboi stay unmounted without one.
+    if disk_policy_is_mount_label "$label"; then
+      # Install the hold before waiting on the lifecycle lock. A reconciliation
+      # already in progress may finish, but the subsequent unmount wins and no
+      # later automatic pass can remount this label during the hold.
+      disk_eject_hold_set "$label" "$hold_seconds" >/dev/null || exit 1
+    fi
     exec 9>"$lifecycle_lock" || exit 1
     "$flock_command" -w 55 9 || {
-      echo "diskctl: disk policy is busy; eject hold remains active" >&2
+      if disk_policy_is_mount_label "$label"; then
+        echo "diskctl: disk policy is busy; eject hold remains active" >&2
+      else
+        echo "diskctl: disk policy is busy" >&2
+      fi
       exit 1
     }
     "$unmount_disks" "$label"
@@ -59,11 +68,24 @@ case "$action" in
       echo "diskctl: ignition is on; disk policy will not mount USB storage" >&2
       exit 1
     fi
-    # Keep an existing hold intact when policy or ignition prevents the mount.
-    # It is cleared only once this request is eligible for reconciliation.
-    disk_eject_hold_clear "$label" || exit 1
-    # Reconcile synchronously so the dashboard operation completes only after
-    # the existing policy and mount safeguards have run.
-    "$internet_switches"
+    if disk_policy_is_mount_label "$label"; then
+      # Keep an existing hold intact when policy or ignition prevents the
+      # mount. It is cleared only once this request is eligible for
+      # reconciliation.
+      disk_eject_hold_clear "$label" || exit 1
+      # Reconcile synchronously so the dashboard operation completes only
+      # after the existing policy and mount safeguards have run.
+      "$internet_switches"
+    else
+      # Manual-only disks must not invoke full reconciliation, which excludes
+      # them by design. Serialize the exact-label mount with other lifecycle
+      # work and retain mount_disks.sh's discovery and target safeguards.
+      exec 9>"$lifecycle_lock" || exit 1
+      "$flock_command" -w 55 9 || {
+        echo "diskctl: disk policy is busy" >&2
+        exit 1
+      }
+      "$mount_disks" "$label"
+    fi
     ;;
 esac

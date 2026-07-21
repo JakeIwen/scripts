@@ -3199,9 +3199,23 @@ class DiskManager:
     @classmethod
     def parse_config(cls, text):
         mount_labels = cls._parse_array(text, "MOUNT_LABELS")
+        manual_mount_labels = cls._parse_array(text, "MANUAL_MOUNT_LABELS")
         hdd_labels = cls._parse_array(text, "HDD_LABELS")
-        observed = [*mount_labels, *(label for label in hdd_labels if label not in mount_labels)]
-        return {"mount_labels": mount_labels, "hdd_labels": hdd_labels, "labels": observed}
+        controllable_labels = [
+            *mount_labels,
+            *(label for label in manual_mount_labels if label not in mount_labels),
+        ]
+        observed = [
+            *controllable_labels,
+            *(label for label in hdd_labels if label not in controllable_labels),
+        ]
+        return {
+            "mount_labels": mount_labels,
+            "manual_mount_labels": manual_mount_labels,
+            "controllable_labels": controllable_labels,
+            "hdd_labels": hdd_labels,
+            "labels": observed,
+        }
 
     def _configuration(self):
         try:
@@ -3270,6 +3284,7 @@ class DiskManager:
         configuration = self._configuration()
         rows = self._block_devices()
         mount_labels = set(configuration["mount_labels"])
+        controllable_labels = set(configuration["controllable_labels"])
         disks = []
         for label in configuration["labels"]:
             matches = [
@@ -3303,7 +3318,7 @@ class DiskManager:
                 {
                     "label": label,
                     "role": "policy" if label in mount_labels else "backup",
-                    "controllable": label in mount_labels,
+                    "controllable": label in controllable_labels,
                     "attached": attached,
                     "mounted": mounted,
                     "mountpoints": mounts,
@@ -3322,7 +3337,7 @@ class DiskManager:
 
     def start_action(self, label, action):
         configuration = self._configuration()
-        if label not in configuration["mount_labels"]:
+        if label not in configuration["controllable_labels"]:
             raise ValueError("unknown controllable disk label")
         if action not in ("eject", "mount"):
             raise ValueError("unknown disk action")
@@ -3535,7 +3550,10 @@ def api_disk_action():
     response = jsonify(
         {
             "ok": True,
-            "message": f"{request.form['action'].title()} started for {request.form['label']}",
+            "message": (
+                f"{'Unmount' if request.form['action'] == 'eject' else 'Mount'} "
+                f"started for {request.form['label']}"
+            ),
             "disk_status": status,
         }
     )

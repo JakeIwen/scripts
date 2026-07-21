@@ -14,6 +14,7 @@ fail() {
 hold_dir="$test_root/holds"
 calls="$test_root/calls"
 fake_unmount="$test_root/umount_disks.sh"
+fake_mount="$test_root/mount_disks.sh"
 fake_policy="$test_root/policyctl"
 fake_reconcile="$test_root/internet_switches.sh"
 fake_flock="$test_root/flock"
@@ -22,6 +23,10 @@ fake_flock="$test_root/flock"
 cat > "$fake_unmount" <<EOF
 #!/bin/bash
 printf 'unmount %s\n' "\$*" >> "$calls"
+EOF
+cat > "$fake_mount" <<EOF
+#!/bin/bash
+printf 'mount %s\n' "\$*" >> "$calls"
 EOF
 cat > "$fake_policy" <<'EOF'
 #!/bin/bash
@@ -35,11 +40,12 @@ cat > "$fake_flock" <<'EOF'
 #!/bin/bash
 [[ $1 == -w && $2 == 55 && $3 == 9 ]]
 EOF
-chmod +x "$fake_unmount" "$fake_policy" "$fake_reconcile" "$fake_flock"
+chmod +x "$fake_unmount" "$fake_mount" "$fake_policy" "$fake_reconcile" "$fake_flock"
 
 run_diskctl() {
   DISK_EJECT_HOLD_DIR="$hold_dir" DISK_EJECT_NOW=1000000 \
     DISKCTL_UNMOUNT_DISKS="$fake_unmount" \
+    DISKCTL_MOUNT_DISKS="$fake_mount" \
     DISKCTL_POLICYCTL="$fake_policy" \
     DISKCTL_INTERNET_SWITCHES="$fake_reconcile" \
     DISKCTL_IGNITION_FLAG="$test_root/ignition" \
@@ -65,7 +71,16 @@ run_diskctl mount movingparts >/dev/null || fail "managed disk mount failed"
 [[ ! -e "$hold_dir/movingparts" ]] || fail "manual mount did not clear eject hold"
 [[ $(cat "$calls") == "reconcile" ]] || fail "mount did not use policy reconciliation"
 
-for label in bigboi /dev/sda unknown; do
+: > "$calls"
+run_diskctl eject bigboi >/dev/null || fail "manual disk eject failed"
+[[ ! -e "$hold_dir/bigboi" ]] || fail "manual disk eject created an automatic-mount hold"
+[[ $(cat "$calls") == "unmount bigboi" ]] || fail "manual eject did not use the exact label"
+
+: > "$calls"
+run_diskctl mount bigboi >/dev/null || fail "manual disk mount failed"
+[[ $(cat "$calls") == "mount bigboi" ]] || fail "manual mount did not use the exact label"
+
+for label in /dev/sda unknown; do
   run_diskctl eject "$label" >/dev/null 2>&1 && fail "unsafe label '$label' was accepted"
 done
 

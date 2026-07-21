@@ -1598,14 +1598,15 @@ function diskState(disk, operation) {
   if (running) {
     return {
       className: '',
-      label: operation.action === 'eject' ? 'EJECTING…' : 'MOUNTING…',
+      label: operation.action === 'eject' ? 'UNMOUNTING…' : 'MOUNTING…',
       holdSeconds,
     };
   }
   if (disk.error) return { className: 'bad', label: 'ERROR', holdSeconds: 0 };
   if (!disk.attached) return { className: '', label: 'NO DEVICE', holdSeconds: 0 };
   if (disk.mounted) return { className: 'good', label: 'MOUNTED', holdSeconds: 0 };
-  if (holdSeconds) return { className: 'held', label: `EJECTED · ${holdSeconds}s`, holdSeconds };
+  if (holdSeconds)
+    return { className: 'held', label: `UNMOUNTED · ${holdSeconds}s`, holdSeconds };
   return { className: 'bad', label: 'UNMOUNTED', holdSeconds: 0 };
 }
 function diskDetail(disk, state) {
@@ -1626,16 +1627,16 @@ function renderDiskStatus(next) {
   if (operation.status === 'running') {
     diskRunningOperation = operationKey;
     operationLabel.textContent =
-      `${operation.action === 'eject' ? 'Ejecting' : 'Mounting'} ${operation.label}…`;
+      `${operation.action === 'eject' ? 'Unmounting' : 'Mounting'} ${operation.label}…`;
   } else if (operation.status === 'error') {
     operationLabel.textContent = `${operation.label || 'Disk action'} failed`;
     if (diskRunningOperation === operationKey) toast(operation.error || 'Disk action failed', true);
     if (diskRunningOperation === operationKey) diskRunningOperation = '';
   } else if (operation.status === 'complete') {
     operationLabel.textContent =
-      `${operation.action === 'eject' ? 'Ejected' : 'Mounted'} ${operation.label} · ${age(operation.completed_at)}`;
+      `${operation.action === 'eject' ? 'Unmounted' : 'Mounted'} ${operation.label} · ${age(operation.completed_at)}`;
     if (diskRunningOperation === operationKey) {
-      toast(`${operation.label} ${operation.action === 'eject' ? 'ejected' : 'mounted'}`);
+      toast(`${operation.label} ${operation.action === 'eject' ? 'unmounted' : 'mounted'}`);
       diskRunningOperation = '';
     }
   } else {
@@ -1658,9 +1659,9 @@ function renderDiskStatus(next) {
             actionTitle =
               action === 'mount' && !policyAllowsMount
                 ? 'Enable the Disks policy before mounting'
-                : `${action === 'eject' ? 'Safely eject' : 'Mount'} ${disk.label}`,
+                : `${action === 'eject' ? 'Safely unmount' : 'Mount'} ${disk.label}`,
             control = disk.controllable
-              ? `<button class="disk-device-action ${action}" type="button" data-disk-action="${action}" data-disk-label="${esc(disk.label)}" title="${esc(actionTitle)}" ${actionAllowed ? '' : 'disabled'}>${action === 'eject' ? 'Eject' : 'Mount'}</button>`
+              ? `<button class="disk-device-action ${action}" type="button" data-disk-action="${action}" data-disk-label="${esc(disk.label)}" title="${esc(actionTitle)}" ${actionAllowed ? '' : 'disabled'}>${action === 'eject' ? 'Unmount' : 'Mount'}</button>`
               : '<span class="disk-device-role">Backup-managed</span>',
             holdData = state.holdSeconds
               ? ` data-disk-hold-until="${Number(disk.hold_until)}"`
@@ -1694,7 +1695,7 @@ function updateDiskHoldCountdowns() {
       Math.ceil(Number(element.dataset.diskHoldUntil) - Date.now() / 1000),
     );
     if (remaining) {
-      element.textContent = `EJECTED · ${remaining}s`;
+      element.textContent = `UNMOUNTED · ${remaining}s`;
     } else {
       element.textContent = 'UNMOUNTED';
       delete element.dataset.diskHoldUntil;
@@ -1705,11 +1706,16 @@ function updateDiskHoldCountdowns() {
 async function changeDiskAction(button) {
   if (diskBusy || busy) return;
   const actionName = button.dataset.diskAction,
-    label = button.dataset.diskLabel;
+    label = button.dataset.diskLabel,
+    disk = diskStatus?.disks?.find((item) => item.label === label),
+    unmountResult =
+      disk?.role === 'policy'
+        ? 'Automatic mounting will resume in one minute.'
+        : 'It will stay unmounted until requested here or by the backup tools.';
   if (
     actionName === 'eject' &&
     !window.confirm(
-      `Eject ${label}? It will remain unmounted for one minute while active disk users are stopped safely.`,
+      `Unmount ${label}? Active disk users will be stopped safely. ${unmountResult}`,
     )
   )
     return;

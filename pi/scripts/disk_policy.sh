@@ -10,6 +10,13 @@ MOUNT_LABELS=(
   EXFAT512
 )
 
+# Filesystem/partition labels that may be mounted and unmounted explicitly but
+# are not part of automatic policy reconciliation. This lets backup disks stay
+# unmounted after a backup while remaining available to dashboard/user tools.
+MANUAL_MOUNT_LABELS=(
+  bigboi
+)
+
 # Filesystem labels for rotational USB disks that must be unmounted and
 # explicitly spun down while the van is running.  A newly attached disk is
 # intentionally ignored until its label is added here.
@@ -30,6 +37,18 @@ disk_policy_is_mount_label() {
     [[ "$label" == "$wanted" ]] && return 0
   done
   return 1
+}
+
+disk_policy_is_manual_mount_label() {
+  local wanted=$1 label
+  for label in "${MANUAL_MOUNT_LABELS[@]}"; do
+    [[ "$label" == "$wanted" ]] && return 0
+  done
+  return 1
+}
+
+disk_policy_is_control_label() {
+  disk_policy_is_mount_label "$1" || disk_policy_is_manual_mount_label "$1"
 }
 
 disk_eject_now_epoch() {

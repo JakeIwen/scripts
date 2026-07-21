@@ -940,6 +940,9 @@ MOUNT_LABELS=(
   movingparts
   EXFAT512
 )
+MANUAL_MOUNT_LABELS=(
+  bigboi
+)
 HDD_LABELS=(
   movingparts
   bigboi
@@ -1039,7 +1042,7 @@ HDD_LABELS=(
         self.assertEqual(exfat["hold_remaining_seconds"], 60)
         self.assertEqual(exfat["hold_until"], 1060)
         self.assertEqual(bigboi["role"], "backup")
-        self.assertFalse(bigboi["controllable"])
+        self.assertTrue(bigboi["controllable"])
         self.assertTrue(bigboi["attached"])
 
     def test_eject_runs_only_fixed_diskctl_argv_in_background(self):
@@ -1065,6 +1068,29 @@ HDD_LABELS=(
         self.assertEqual(status["operation"]["status"], "complete")
         self.assertEqual(status["operation"]["label"], "movingparts")
 
+    def test_manual_disk_mount_runs_only_fixed_diskctl_argv_in_background(self):
+        calls = []
+
+        def command(args, timeout):
+            calls.append((list(args), timeout))
+            if args[0] == dashboard.LSBLK:
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(self.lsblk()),
+                    stderr="",
+                )
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            manager = self.manager(tempdir, command, action_timeout=23)
+            manager.start_action("bigboi", "mount")
+            manager.thread.join(2)
+            status = manager.status()
+
+        self.assertIn((["/test/diskctl", "mount", "bigboi"], 23), calls)
+        self.assertEqual(status["operation"]["status"], "complete")
+        self.assertEqual(status["operation"]["label"], "bigboi")
+
     def test_rejects_unknown_labels_actions_and_inapplicable_state(self):
         def command(args, timeout):
             return SimpleNamespace(
@@ -1077,7 +1103,7 @@ HDD_LABELS=(
             manager = self.manager(tempdir, command)
             with self.assertRaisesRegex(ValueError, "unknown controllable"):
                 manager.start_action("/dev/sda", "eject")
-            with self.assertRaisesRegex(ValueError, "unknown controllable"):
+            with self.assertRaisesRegex(dashboard.DiskCommandError, "not mounted"):
                 manager.start_action("bigboi", "eject")
             with self.assertRaisesRegex(ValueError, "unknown disk action"):
                 manager.start_action("movingparts", "cycle")
@@ -2165,8 +2191,11 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="torrent-runtime-state"', page.data)
         self.assertIn(b'id="disk-device-list"', page.data)
         self.assertIn(b'id="disk-operation"', page.data)
-        self.assertIn(b"prevents automatic remounting for one minute", page.data)
-        self.assertIn(b"Backup-only disks", page.data)
+        self.assertIn(
+            b"Policy-managed disks resume automatic mounting after one minute",
+            page.data,
+        )
+        self.assertIn(b"backup-only disks stay unmounted", page.data)
         self.assertIn(b"Ignition always overrides disk permission", page.data)
         self.assertIn(b"requested-on Torrents switch is shown as blocked", page.data)
         self.assertIn(b"Requires Disks enabled", page.data)
@@ -2183,6 +2212,9 @@ class DashboardRouteTests(unittest.TestCase):
         self.addCleanup(stylesheet.close)
         self.assertEqual(javascript.status_code, 200)
         self.assertEqual(stylesheet.status_code, 200)
+        self.assertIn(b"Unmount ${label}?", javascript.data)
+        self.assertIn(b"Automatic mounting will resume in one minute", javascript.data)
+        self.assertIn(b"stay unmounted until requested here", javascript.data)
         self.assertIn(b"data-speaker-mute", javascript.data)
         self.assertIn(b"data-ubnt-profile", javascript.data)
         self.assertIn(b"startUbntWifi('provision'", javascript.data)
@@ -2947,6 +2979,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(query_rejected.status_code, 400)
         self.assertEqual(accepted.status_code, 202)
         self.assertEqual(accepted.headers["Cache-Control"], "no-store")
+        self.assertEqual(accepted.json["message"], "Unmount started for movingparts")
         self.assertEqual(raw_device.status_code, 400)
         self.assertEqual(unknown_action.status_code, 400)
         self.assertEqual(extra_input.status_code, 400)
