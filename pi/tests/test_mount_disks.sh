@@ -141,7 +141,30 @@ status=$?
 assert_eq 1 "$status" "multi-disk reconciliation must propagate one label failure"
 assert_eq 6 "${#calls[@]}" "multi-disk reconciliation must still check every label"
 
+# A dashboard eject hold must skip only that label during automatic (no-arg)
+# reconciliation. An explicit manual mount remains available after diskctl
+# clears the hold.
+DISK_EJECT_HOLD_DIR="$test_root/eject-holds"
+DISK_EJECT_NOW=4000000
+disk_eject_hold_set mbp2tbkup 60 >/dev/null || fail "could not create eject hold"
 calls=()
+mntdsk() {
+  calls+=("$1")
+  return 0
+}
+mount_disks_main >/dev/null 2>&1 || fail "eject hold made reconciliation fail"
+assert_eq 5 "${#calls[@]}" "automatic reconciliation did not skip exactly one held label"
+[[ " ${calls[*]} " != *" mbp2tbkup "* ]] || fail "held label was automatically mounted"
+calls=()
+mount_disks_main mbp2tbkup >/dev/null 2>&1 || fail "explicit mount was blocked by eject hold"
+assert_eq "mbp2tbkup" "${calls[*]}" "explicit mount did not target held label"
+disk_eject_hold_clear mbp2tbkup || fail "could not clear eject hold"
+
+calls=()
+mntdsk() {
+  calls+=("$1")
+  [[ "$1" != movingparts ]]
+}
 mount_disks_main movingparts >/dev/null 2>&1
 status=$?
 assert_eq 1 "$status" "single-label mount failure must propagate"

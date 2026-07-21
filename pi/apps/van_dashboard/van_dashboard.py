@@ -110,6 +110,15 @@ IGNITIONMONCTL = os.environ.get(
 SYSTEMCTL = os.environ.get("VAN_DASHBOARD_SYSTEMCTL", "/usr/bin/systemctl")
 IGNITIONMON_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_IGNITIONMON_TIMEOUT", "8"))
 IGNITIONMON_MAX_MINUTES = 366 * 24 * 60
+DISK_POLICY_CONF = os.environ.get(
+    "VAN_DASHBOARD_DISK_POLICY_CONF", "/home/pi/scripts/disk_policy.sh"
+)
+DISKCTL = os.environ.get("VAN_DASHBOARD_DISKCTL", "/home/pi/scripts/diskctl")
+DISK_EJECT_HOLD_DIR = os.environ.get(
+    "VAN_DASHBOARD_DISK_EJECT_HOLD_DIR", "/run/lock/vanpi-disk-eject"
+)
+DISK_STATUS_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_DISK_STATUS_TIMEOUT", "10"))
+DISK_ACTION_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_DISK_ACTION_TIMEOUT", "150"))
 TUYA_POLL_INTERVAL = float(os.environ.get("VAN_DASHBOARD_TUYA_POLL_INTERVAL", "15"))
 POLICYCTL_TIMEOUT = 15
 COP_LED_TARGET = os.environ.get("VAN_DASHBOARD_COP_LED_TARGET", "light.ext_led")
@@ -3067,6 +3076,246 @@ class IgnitionMonitorController:
         return self.status()
 
 
+class DiskCommandError(RuntimeError):
+    pass
+
+
+class DiskManager:
+    """Report configured USB disks and run label-only lifecycle actions."""
+
+    LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+    def __init__(
+        self,
+        config=DISK_POLICY_CONF,
+        control=DISKCTL,
+        hold_dir=DISK_EJECT_HOLD_DIR,
+        command=run_command,
+        timeout=DISK_STATUS_TIMEOUT,
+        action_timeout=DISK_ACTION_TIMEOUT,
+        wall_clock=time.time,
+    ):
+        self.config = config
+        self.control = control
+        self.hold_dir = hold_dir
+        self.command = command
+        self.timeout = timeout
+        self.action_timeout = action_timeout
+        self.wall_clock = wall_clock
+        self.lock = threading.Lock()
+        self.thread = None
+        self.operation = {
+            "status": "idle",
+            "action": None,
+            "label": None,
+            "started_at": None,
+            "completed_at": None,
+            "error": None,
+        }
+
+    @classmethod
+    def _parse_array(cls, text, name):
+        match = re.search(
+            rf"^\s*{re.escape(name)}=\((.*?)^\s*\)",
+            text,
+            re.MULTILINE | re.DOTALL,
+        )
+        if not match:
+            raise DiskCommandError(f"disk policy has no {name}")
+        try:
+            labels = shlex.split(match.group(1), comments=True, posix=True)
+        except ValueError as exc:
+            raise DiskCommandError(f"could not parse {name}: {exc}") from exc
+        if not labels or len(labels) != len(set(labels)) or any(
+            not cls.LABEL_RE.fullmatch(label) for label in labels
+        ):
+            raise DiskCommandError(f"disk policy has invalid {name}")
+        return labels
+
+    @classmethod
+    def parse_config(cls, text):
+        mount_labels = cls._parse_array(text, "MOUNT_LABELS")
+        hdd_labels = cls._parse_array(text, "HDD_LABELS")
+        observed = [*mount_labels, *(label for label in hdd_labels if label not in mount_labels)]
+        return {"mount_labels": mount_labels, "hdd_labels": hdd_labels, "labels": observed}
+
+    def _configuration(self):
+        try:
+            return self.parse_config(read_text_file(self.config))
+        except OSError as exc:
+            raise DiskCommandError(f"could not read disk policy: {exc}") from exc
+
+    def _block_devices(self):
+        args = [
+            LSBLK,
+            "--json",
+            "--bytes",
+            "--output",
+            "NAME,PATH,PKNAME,LABEL,PARTLABEL,FSTYPE,SIZE,TRAN,MOUNTPOINTS,TYPE",
+        ]
+        try:
+            result = self.command(args, timeout=self.timeout)
+        except subprocess.TimeoutExpired as exc:
+            raise DiskCommandError(
+                f"disk discovery timed out after {self.timeout:g} seconds"
+            ) from exc
+        except OSError as exc:
+            raise DiskCommandError(f"could not inspect disks: {exc}") from exc
+        if result.returncode:
+            detail = (result.stderr or result.stdout or "lsblk failed").strip()[-500:]
+            raise DiskCommandError(detail)
+        try:
+            payload = json.loads(result.stdout)
+        except (TypeError, ValueError) as exc:
+            raise DiskCommandError("disk discovery returned invalid JSON") from exc
+        if not isinstance(payload, dict) or not isinstance(payload.get("blockdevices"), list):
+            raise DiskCommandError("disk discovery returned an invalid schema")
+        return BackupManager._flatten_block_devices(payload["blockdevices"])
+
+    def _hold(self, label, now):
+        path = os.path.join(self.hold_dir, label)
+        try:
+            if os.path.islink(path):
+                return {"until": None, "remaining_seconds": None, "error": "unsafe hold marker"}
+            with open(path, encoding="ascii") as handle:
+                raw = handle.readline().strip()
+        except FileNotFoundError:
+            return {"until": None, "remaining_seconds": 0, "error": None}
+        except OSError as exc:
+            return {"until": None, "remaining_seconds": None, "error": str(exc)}
+        if not re.fullmatch(r"[1-9][0-9]{0,10}", raw):
+            return {"until": None, "remaining_seconds": None, "error": "malformed hold marker"}
+        deadline = int(raw)
+        if deadline <= now:
+            return {"until": None, "remaining_seconds": 0, "error": None}
+        return {
+            "until": deadline,
+            "remaining_seconds": deadline - now,
+            "error": None,
+        }
+
+    @staticmethod
+    def _row_mounts(row):
+        points = row.get("mountpoints")
+        if not isinstance(points, list):
+            points = [row.get("mountpoint")]
+        return [point for point in points if isinstance(point, str) and point]
+
+    def status(self):
+        now = int(self.wall_clock())
+        configuration = self._configuration()
+        rows = self._block_devices()
+        mount_labels = set(configuration["mount_labels"])
+        disks = []
+        for label in configuration["labels"]:
+            matches = [
+                row
+                for row in rows
+                if row.get("label") == label or row.get("partlabel") == label
+            ]
+            # LABEL and PARTLABEL can both match the same partition; flatten
+            # yields it only once. Multiple rows are an ambiguous unsafe state.
+            row = matches[0] if len(matches) == 1 else None
+            root = BackupManager._root_row(row) if row is not None else None
+            mounts = self._row_mounts(row) if row is not None else []
+            expected_mount = f"/mnt/{label}"
+            hold = self._hold(label, now) if label in mount_labels else {
+                "until": None,
+                "remaining_seconds": 0,
+                "error": None,
+            }
+            error = None
+            if len(matches) > 1:
+                error = "label resolves to multiple devices"
+            elif root is not None and root.get("tran") != "usb":
+                error = "label is not on a USB disk"
+            elif any(point != expected_mount for point in mounts):
+                error = "mounted at an unexpected path"
+            elif hold["error"]:
+                error = hold["error"]
+            attached = row is not None
+            mounted = expected_mount in mounts
+            disks.append(
+                {
+                    "label": label,
+                    "role": "policy" if label in mount_labels else "backup",
+                    "controllable": label in mount_labels,
+                    "attached": attached,
+                    "mounted": mounted,
+                    "mountpoints": mounts,
+                    "device": root.get("path") if root is not None else None,
+                    "size_bytes": root.get("size") if root is not None else None,
+                    "filesystem": row.get("fstype") if row is not None else None,
+                    "expected_mount": expected_mount,
+                    "hold_until": hold["until"],
+                    "hold_remaining_seconds": hold["remaining_seconds"],
+                    "error": error,
+                }
+            )
+        with self.lock:
+            operation = copy.deepcopy(self.operation)
+        return {"checked_at": now, "disks": disks, "operation": operation}
+
+    def start_action(self, label, action):
+        configuration = self._configuration()
+        if label not in configuration["mount_labels"]:
+            raise ValueError("unknown controllable disk label")
+        if action not in ("eject", "mount"):
+            raise ValueError("unknown disk action")
+        current = self.status()
+        disk = next(item for item in current["disks"] if item["label"] == label)
+        if disk["error"]:
+            raise DiskCommandError(f"{label}: {disk['error']}")
+        if not disk["attached"]:
+            raise DiskCommandError(f"{label} is not attached")
+        if action == "eject" and not disk["mounted"]:
+            raise DiskCommandError(f"{label} is not mounted")
+        if action == "mount" and disk["mounted"]:
+            raise DiskCommandError(f"{label} is already mounted")
+        with self.lock:
+            if self.operation["status"] == "running":
+                raise DiskCommandError("another disk action is already running")
+            started_at = int(self.wall_clock())
+            self.operation = {
+                "status": "running",
+                "action": action,
+                "label": label,
+                "started_at": started_at,
+                "completed_at": None,
+                "error": None,
+            }
+            self.thread = threading.Thread(
+                target=self._run_action,
+                args=(label, action, started_at),
+                name="disk-action",
+                daemon=True,
+            )
+            self.thread.start()
+        return self.status()
+
+    def _run_action(self, label, action, started_at):
+        error = None
+        try:
+            result = self.command(
+                [self.control, action, label], timeout=self.action_timeout
+            )
+            if result.returncode:
+                error = (result.stderr or result.stdout or "disk action failed").strip()[-500:]
+        except subprocess.TimeoutExpired:
+            error = f"disk action timed out after {self.action_timeout:g} seconds"
+        except OSError as exc:
+            error = f"could not start disk action: {exc}"
+        with self.lock:
+            if self.operation.get("started_at") == started_at:
+                self.operation.update(
+                    {
+                        "status": "error" if error else "complete",
+                        "completed_at": int(self.wall_clock()),
+                        "error": error,
+                    }
+                )
+
+
 app = Flask(__name__)
 state_store = StateStore()
 engine_monitor = EngineMonitor()
@@ -3085,6 +3334,7 @@ usb_devices = UsbDeviceMonitor()
 usb_ports = UsbPortController(usb_devices)
 backups = BackupManager()
 ignition_monitor_control = IgnitionMonitorController()
+disk_manager = DiskManager()
 
 
 def api_error(message, status):
@@ -3193,6 +3443,41 @@ def api_storage_policy():
     except PolicyCommandError as exc:
         return api_error(f"could not read storage policy: {exc}", 502)
     return jsonify({"ok": True, "policy": status})
+
+
+@app.route("/api/disks")
+def api_disks():
+    if request.args:
+        return api_error("disk status does not accept input", 400)
+    try:
+        status = disk_manager.status()
+    except DiskCommandError as exc:
+        return api_error(f"disk status unavailable: {exc}", 503)
+    response = jsonify({"ok": True, "disk_status": status})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/api/disks/action", methods=["POST"])
+def api_disk_action():
+    if not _exact_form(("label", "action")):
+        return api_error("disk action requires one label and action", 400)
+    try:
+        status = disk_manager.start_action(request.form["label"], request.form["action"])
+    except ValueError as exc:
+        return api_error(str(exc), 400)
+    except DiskCommandError as exc:
+        return api_error(f"could not start disk action: {exc}", 409)
+    response = jsonify(
+        {
+            "ok": True,
+            "message": f"{request.form['action'].title()} started for {request.form['label']}",
+            "disk_status": status,
+        }
+    )
+    response.status_code = 202
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.route("/api/lights")

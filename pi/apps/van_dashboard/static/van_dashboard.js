@@ -2,6 +2,7 @@ const $ = (id) => document.getElementById(id);
 let dashboard = null,
   speakers = null,
   storagePolicy = null,
+  diskStatus = null,
   lighting = null,
   priceChecks = null,
   systemMonitor = null,
@@ -13,6 +14,7 @@ let dashboard = null,
   ubntLink = null,
   ubntNewNetwork = null,
   policyLoading = false,
+  diskBusy = false,
   priceBusy = false,
   priceEditingId = null,
   crashAnalysisBusy = false,
@@ -33,6 +35,7 @@ let dashboard = null,
   ubntPoll = 0,
   ubntLastCompletion = '',
   backupLastCompletion = '',
+  diskRunningOperation = '',
   sonosTimeline = { position: 0, duration: 0, playing: false, updatedAt: 0 };
 const TILE_ORDER_STORAGE_KEY = 'van-dashboard.tile-order.v1';
 const IGNITION_DURATION_UNITS = {
@@ -1442,6 +1445,7 @@ function renderStoragePolicy(policy) {
   $('storage-summary').textContent =
     `Disks ${mounted ? 'mounted' : 'unmounted'} · qBittorrent ${running ? 'running' : 'stopped'}`;
   setPolicyLoading(false, 'Current state');
+  if (diskStatus) renderDiskStatus(diskStatus);
 }
 function renderStorageUnavailable(message) {
   storagePolicy = null;
@@ -1490,6 +1494,157 @@ async function changeStoragePolicy(field) {
   }
   if (operationError) throw operationError;
   return result;
+}
+function diskOperationKey(operation) {
+  return operation?.started_at
+    ? `${operation.label}|${operation.action}|${operation.started_at}`
+    : '';
+}
+function diskHoldSeconds(disk) {
+  if (!Number.isFinite(disk?.hold_until)) return 0;
+  return Math.max(0, Math.ceil(disk.hold_until - Date.now() / 1000));
+}
+function diskState(disk, operation) {
+  const running =
+      operation?.status === 'running' && operation.label === disk.label,
+    holdSeconds = diskHoldSeconds(disk);
+  if (running) {
+    return {
+      className: '',
+      label: operation.action === 'eject' ? 'EJECTING…' : 'MOUNTING…',
+      holdSeconds,
+    };
+  }
+  if (disk.error) return { className: 'bad', label: 'ERROR', holdSeconds: 0 };
+  if (!disk.attached) return { className: '', label: 'NO DEVICE', holdSeconds: 0 };
+  if (disk.mounted) return { className: 'good', label: 'MOUNTED', holdSeconds: 0 };
+  if (holdSeconds) return { className: 'held', label: `EJECTED · ${holdSeconds}s`, holdSeconds };
+  return { className: 'bad', label: 'UNMOUNTED', holdSeconds: 0 };
+}
+function diskDetail(disk, state) {
+  if (disk.error) return disk.error;
+  if (!disk.attached) return `Not attached · expects ${disk.expected_mount}`;
+  const details = [];
+  if (Number.isFinite(disk.size_bytes)) details.push(formatBytes(disk.size_bytes));
+  if (disk.filesystem) details.push(disk.filesystem);
+  if (disk.mounted) details.push(disk.expected_mount);
+  if (state.holdSeconds) details.push(`auto-mount held ${state.holdSeconds}s`);
+  return details.join(' · ') || 'Attached USB disk';
+}
+function renderDiskStatus(next) {
+  diskStatus = next;
+  const operation = next?.operation || { status: 'idle' },
+    operationKey = diskOperationKey(operation),
+    operationLabel = $('disk-operation');
+  if (operation.status === 'running') {
+    diskRunningOperation = operationKey;
+    operationLabel.textContent =
+      `${operation.action === 'eject' ? 'Ejecting' : 'Mounting'} ${operation.label}…`;
+  } else if (operation.status === 'error') {
+    operationLabel.textContent = `${operation.label || 'Disk action'} failed`;
+    if (diskRunningOperation === operationKey) toast(operation.error || 'Disk action failed', true);
+    if (diskRunningOperation === operationKey) diskRunningOperation = '';
+  } else if (operation.status === 'complete') {
+    operationLabel.textContent =
+      `${operation.action === 'eject' ? 'Ejected' : 'Mounted'} ${operation.label} · ${age(operation.completed_at)}`;
+    if (diskRunningOperation === operationKey) {
+      toast(`${operation.label} ${operation.action === 'eject' ? 'ejected' : 'mounted'}`);
+      diskRunningOperation = '';
+    }
+  } else {
+    operationLabel.textContent = `Updated · ${age(next?.checked_at)}`;
+  }
+  const disks = Array.isArray(next?.disks) ? next.disks : [];
+  $('disk-device-list').innerHTML = disks.length
+    ? disks
+        .map((disk) => {
+          const state = diskState(disk, operation),
+            action = disk.mounted ? 'eject' : 'mount',
+            canControl =
+              disk.controllable &&
+              disk.attached &&
+              !disk.error &&
+              operation.status !== 'running' &&
+              !diskBusy,
+            policyAllowsMount = storagePolicy?.disks_enabled === true,
+            actionAllowed = canControl && (action !== 'mount' || policyAllowsMount),
+            actionTitle =
+              action === 'mount' && !policyAllowsMount
+                ? 'Enable the Disks policy before mounting'
+                : `${action === 'eject' ? 'Safely eject' : 'Mount'} ${disk.label}`,
+            control = disk.controllable
+              ? `<button class="disk-device-action ${action}" type="button" data-disk-action="${action}" data-disk-label="${esc(disk.label)}" title="${esc(actionTitle)}" ${actionAllowed ? '' : 'disabled'}>${action === 'eject' ? 'Eject' : 'Mount'}</button>`
+              : '<span class="disk-device-role">Backup-managed</span>',
+            holdData = state.holdSeconds
+              ? ` data-disk-hold-until="${Number(disk.hold_until)}"`
+              : '';
+          return `<article class="disk-device-card ${state.className}"><strong class="disk-device-name">${esc(disk.label)}</strong><span class="disk-device-state"${holdData}>${esc(state.label)}</span><span class="disk-device-detail">${esc(diskDetail(disk, state))}</span>${control}</article>`;
+        })
+        .join('')
+    : '<div class="disk-device-empty">No configured disk labels were returned.</div>';
+}
+function renderDiskStatusUnavailable(message) {
+  diskStatus = null;
+  $('disk-operation').textContent = message || 'Unavailable';
+  $('disk-device-list').innerHTML =
+    '<div class="disk-device-empty">Individual disk status unavailable.</div>';
+}
+async function refreshDiskStatus(showErrors = false) {
+  try {
+    const response = await json('/api/disks');
+    renderDiskStatus(response.disk_status);
+    return response;
+  } catch (error) {
+    renderDiskStatusUnavailable(error.message);
+    if (showErrors) toast(error.message, true);
+    throw error;
+  }
+}
+function updateDiskHoldCountdowns() {
+  document.querySelectorAll('[data-disk-hold-until]').forEach((element) => {
+    const remaining = Math.max(
+      0,
+      Math.ceil(Number(element.dataset.diskHoldUntil) - Date.now() / 1000),
+    );
+    if (remaining) {
+      element.textContent = `EJECTED · ${remaining}s`;
+    } else {
+      element.textContent = 'UNMOUNTED';
+      delete element.dataset.diskHoldUntil;
+      element.closest('.disk-device-card')?.classList.replace('held', 'bad');
+    }
+  });
+}
+async function changeDiskAction(button) {
+  if (diskBusy || busy) return;
+  const actionName = button.dataset.diskAction,
+    label = button.dataset.diskLabel;
+  if (
+    actionName === 'eject' &&
+    !window.confirm(
+      `Eject ${label}? It will remain unmounted for one minute while active disk users are stopped safely.`,
+    )
+  )
+    return;
+  diskBusy = true;
+  if (diskStatus) renderDiskStatus(diskStatus);
+  let actionError = null;
+  try {
+    const response = await post('disks/action', { label, action: actionName });
+    renderDiskStatus(response.disk_status);
+    toast(response.message);
+  } catch (error) {
+    actionError = error;
+    toast(error.message, true);
+  }
+  try {
+    await refreshDiskStatus(false);
+  } catch (refreshError) {
+    if (!actionError) toast(refreshError.message, true);
+  } finally {
+    diskBusy = false;
+    if (diskStatus) renderDiskStatus(diskStatus);
+  }
 }
 function lightingDotClass(state) {
   return state === 'on' ? 'good' : state === 'off' ? 'bad' : '';
@@ -1921,9 +2076,10 @@ async function pollStorage() {
   clearTimeout(storagePoll);
   if (!$('storage-backdrop').classList.contains('open')) return;
   try {
-    if (!busy) await refreshStoragePolicy(true);
+    if (!busy && !diskBusy)
+      await Promise.allSettled([refreshStoragePolicy(true), refreshDiskStatus(false)]);
   } catch (_) {
-    /* rendered by refreshStoragePolicy */
+    /* rendered by the individual refreshers */
   } finally {
     storagePoll = setTimeout(pollStorage, 2500);
   }
@@ -1933,9 +2089,7 @@ async function openStorage() {
   document.body.classList.add('sheet-open');
   $('storage').setAttribute('aria-expanded', 'true');
   try {
-    await refreshStoragePolicy();
-  } catch (error) {
-    toast(error.message, true);
+    await Promise.allSettled([refreshStoragePolicy(), refreshDiskStatus(true)]);
   } finally {
     storagePoll = setTimeout(pollStorage, 2500);
   }
@@ -2353,6 +2507,8 @@ document.addEventListener('click', (event) => {
     });
   const policyButton = event.target.closest('[data-policy-field]');
   if (policyButton) action(() => changeStoragePolicy(policyButton.dataset.policyField));
+  const diskAction = event.target.closest('[data-disk-action]');
+  if (diskAction) changeDiskAction(diskAction);
   const profile = event.target.closest('[data-ubnt-profile]');
   if (profile) startUbntWifi('connect', { profile: profile.dataset.ubntProfile });
   const newNetwork = event.target.closest('[data-ubnt-new]');
@@ -2373,6 +2529,7 @@ function refreshVisibleDashboard() {
   refreshSpeedtest();
   refreshSonos();
   refreshStoragePolicy().catch(() => {});
+  refreshDiskStatus(false).catch(() => {});
   refreshSystemMonitor(false).catch(() => {});
   refreshUsbDevices(false).catch(() => {});
   refreshBackups(false).catch(() => {});
@@ -2387,6 +2544,7 @@ Promise.allSettled([
   refreshConnectivity(),
   refreshSpeedtest(),
   refreshStoragePolicy(),
+  refreshDiskStatus(false),
   refreshSystemMonitor(false),
   refreshUsbDevices(false),
   refreshBackups(false),
@@ -2407,7 +2565,10 @@ setInterval(() => {
   if (!document.hidden && !busy) refreshSonos();
 }, 10000);
 setInterval(() => {
-  if (!document.hidden && !busy) refreshStoragePolicy().catch(() => {});
+  if (!document.hidden && !busy && !diskBusy) {
+    refreshStoragePolicy().catch(() => {});
+    refreshDiskStatus(false).catch(() => {});
+  }
 }, 30000);
 setInterval(() => {
   if (!document.hidden) refreshSystemMonitor(false).catch(() => {});
@@ -2434,7 +2595,10 @@ setInterval(() => {
   if (!document.hidden && ubntWifi?.operation?.status !== 'running') refreshUbntWifi(false);
 }, 30000);
 setInterval(() => {
-  if (!document.hidden) updateSonosProgress();
+  if (!document.hidden) {
+    updateSonosProgress();
+    updateDiskHoldCountdowns();
+  }
 }, 1000);
 document.addEventListener('visibilitychange', refreshVisibleDashboard);
 window.addEventListener('pageshow', refreshVisibleDashboard);

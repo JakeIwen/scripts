@@ -140,6 +140,11 @@
       <div class="policy-runtime-item" id="disk-runtime"><span><strong>Managed disks</strong><small id="disk-runtime-detail">Checking mounts…</small></span><span class="policy-runtime-state" id="disk-runtime-state">NO DATA</span></div>
       <div class="policy-runtime-item" id="torrent-runtime"><span><strong>qBittorrent</strong><small id="torrent-runtime-detail">Checking process…</small></span><span class="policy-runtime-state" id="torrent-runtime-state">NO DATA</span></div>
     </div>
+    <section class="disk-device-section" aria-labelledby="disk-device-title">
+      <div class="disk-device-heading"><div><h3 id="disk-device-title">USB disks</h3><p>Exact filesystem labels managed by the van disk tools.</p></div><span id="disk-operation">Checking…</span></div>
+      <div class="disk-device-list" id="disk-device-list"><div class="disk-device-empty">Checking attached disks…</div></div>
+      <p class="disk-device-note">Eject safely unmounts the disk and prevents automatic remounting for one minute. Backup-only disks are shown here but remain under the backup tools.</p>
+    </section>
     <p class="policy-request-label">Requested policy</p>
     <div class="policy-controls">
       <button class="policy-toggle" data-action data-policy-field="disks_enabled" disabled aria-pressed="mixed"><span><strong>Disks enabled</strong><small>Keep storage mounted while parked</small></span><span class="policy-state">NO DATA</span></button>

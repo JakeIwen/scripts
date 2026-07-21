@@ -934,6 +934,180 @@ class StoragePolicyManagerTests(unittest.TestCase):
             timed_out.status()
 
 
+class DiskManagerTests(unittest.TestCase):
+    CONFIG = """\
+MOUNT_LABELS=(
+  movingparts
+  EXFAT512
+)
+HDD_LABELS=(
+  movingparts
+  bigboi
+)
+"""
+
+    @staticmethod
+    def lsblk(movingparts_mounted=True):
+        return {
+            "blockdevices": [
+                {
+                    "name": "sda",
+                    "path": "/dev/sda",
+                    "type": "disk",
+                    "tran": "usb",
+                    "size": 5_000_000_000_000,
+                    "mountpoints": [None],
+                    "children": [
+                        {
+                            "name": "sda1",
+                            "path": "/dev/sda1",
+                            "pkname": "sda",
+                            "type": "part",
+                            "label": "movingparts",
+                            "partlabel": None,
+                            "fstype": "ext4",
+                            "size": 4_999_000_000_000,
+                            "mountpoints": (
+                                ["/mnt/movingparts"] if movingparts_mounted else [None]
+                            ),
+                        }
+                    ],
+                },
+                {
+                    "name": "sdb",
+                    "path": "/dev/sdb",
+                    "type": "disk",
+                    "tran": "usb",
+                    "size": 6_000_000_000_000,
+                    "mountpoints": [None],
+                    "children": [
+                        {
+                            "name": "sdb1",
+                            "path": "/dev/sdb1",
+                            "pkname": "sdb",
+                            "type": "part",
+                            "label": "bigboi",
+                            "partlabel": None,
+                            "fstype": "ext4",
+                            "size": 5_999_000_000_000,
+                            "mountpoints": [None],
+                        }
+                    ],
+                },
+            ]
+        }
+
+    def manager(self, tempdir, command, **kwargs):
+        config = os.path.join(tempdir, "disk_policy.sh")
+        with open(config, "w", encoding="utf-8") as handle:
+            handle.write(self.CONFIG)
+        return dashboard.DiskManager(
+            config=config,
+            control="/test/diskctl",
+            hold_dir=os.path.join(tempdir, "holds"),
+            command=command,
+            wall_clock=lambda: 1_000,
+            **kwargs,
+        )
+
+    def test_status_reports_managed_backup_absent_and_eject_hold_states(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            hold_dir = os.path.join(tempdir, "holds")
+            os.mkdir(hold_dir)
+            with open(os.path.join(hold_dir, "EXFAT512"), "w", encoding="ascii") as handle:
+                handle.write("1060\n")
+
+            def command(args, timeout):
+                self.assertEqual(args[0], dashboard.LSBLK)
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(self.lsblk()),
+                    stderr="",
+                )
+
+            status = self.manager(tempdir, command).status()
+
+        self.assertEqual(
+            [disk["label"] for disk in status["disks"]],
+            ["movingparts", "EXFAT512", "bigboi"],
+        )
+        movingparts, exfat, bigboi = status["disks"]
+        self.assertTrue(movingparts["mounted"])
+        self.assertTrue(movingparts["controllable"])
+        self.assertEqual(movingparts["device"], "/dev/sda")
+        self.assertFalse(exfat["attached"])
+        self.assertEqual(exfat["hold_remaining_seconds"], 60)
+        self.assertEqual(exfat["hold_until"], 1060)
+        self.assertEqual(bigboi["role"], "backup")
+        self.assertFalse(bigboi["controllable"])
+        self.assertTrue(bigboi["attached"])
+
+    def test_eject_runs_only_fixed_diskctl_argv_in_background(self):
+        calls = []
+
+        def command(args, timeout):
+            calls.append((list(args), timeout))
+            if args[0] == dashboard.LSBLK:
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(self.lsblk()),
+                    stderr="",
+                )
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            manager = self.manager(tempdir, command, action_timeout=23)
+            manager.start_action("movingparts", "eject")
+            manager.thread.join(2)
+            status = manager.status()
+
+        self.assertIn((["/test/diskctl", "eject", "movingparts"], 23), calls)
+        self.assertEqual(status["operation"]["status"], "complete")
+        self.assertEqual(status["operation"]["label"], "movingparts")
+
+    def test_rejects_unknown_labels_actions_and_inapplicable_state(self):
+        def command(args, timeout):
+            return SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps(self.lsblk()),
+                stderr="",
+            )
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            manager = self.manager(tempdir, command)
+            with self.assertRaisesRegex(ValueError, "unknown controllable"):
+                manager.start_action("/dev/sda", "eject")
+            with self.assertRaisesRegex(ValueError, "unknown controllable"):
+                manager.start_action("bigboi", "eject")
+            with self.assertRaisesRegex(ValueError, "unknown disk action"):
+                manager.start_action("movingparts", "cycle")
+            with self.assertRaisesRegex(dashboard.DiskCommandError, "already mounted"):
+                manager.start_action("movingparts", "mount")
+            with self.assertRaisesRegex(dashboard.DiskCommandError, "not attached"):
+                manager.start_action("EXFAT512", "mount")
+
+    def test_action_failure_and_timeout_are_reported_without_blocking_request(self):
+        for failure, expected in (("failure", "diskctl failed"), ("timeout", "timed out after 3")):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tempdir:
+                def command(args, timeout):
+                    if args[0] == dashboard.LSBLK:
+                        return SimpleNamespace(
+                            returncode=0,
+                            stdout=json.dumps(self.lsblk()),
+                            stderr="",
+                        )
+                    if failure == "timeout":
+                        raise subprocess.TimeoutExpired(args, timeout)
+                    return SimpleNamespace(returncode=1, stdout="", stderr="diskctl failed")
+
+                manager = self.manager(tempdir, command, action_timeout=3)
+                manager.start_action("movingparts", "eject")
+                manager.thread.join(2)
+                operation = manager.status()["operation"]
+                self.assertEqual(operation["status"], "error")
+                self.assertIn(expected, operation["error"])
+
+
 class UsbWatchScriptTests(unittest.TestCase):
     def test_json_snapshot_reuses_usb_and_filesystem_label_discovery(self):
         current = {
@@ -1979,6 +2153,10 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'data-policy-field="allow_starlink_torrents"', page.data)
         self.assertIn(b'id="disk-runtime-state"', page.data)
         self.assertIn(b'id="torrent-runtime-state"', page.data)
+        self.assertIn(b'id="disk-device-list"', page.data)
+        self.assertIn(b'id="disk-operation"', page.data)
+        self.assertIn(b"prevents automatic remounting for one minute", page.data)
+        self.assertIn(b"Backup-only disks", page.data)
         self.assertIn(b"Ignition always overrides disk permission", page.data)
         self.assertIn(b"requested-on Torrents switch is shown as blocked", page.data)
         self.assertIn(b"Requires Disks enabled", page.data)
@@ -2013,6 +2191,11 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertNotIn(b"ubnt-dot", javascript.data)
         self.assertIn(b"Stopped because disks are disabled", javascript.data)
         self.assertIn(b"function policyRequestBlocked", javascript.data)
+        self.assertIn(b"function renderDiskStatus(next)", javascript.data)
+        self.assertIn(b"function changeDiskAction(button)", javascript.data)
+        self.assertIn(b"function updateDiskHoldCountdowns()", javascript.data)
+        self.assertIn(b"/api/disks", javascript.data)
+        self.assertIn(b"disks/action", javascript.data)
         self.assertIn(b"function renderLighting(next)", javascript.data)
         self.assertIn(b"function renderPriceChecks(response)", javascript.data)
         self.assertIn(b"function renderSystemMonitor(response)", javascript.data)
@@ -2056,6 +2239,9 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b".policy-toggle", stylesheet.data)
         self.assertIn(b".policy-toggle.blocked", stylesheet.data)
         self.assertIn(b".policy-runtime-state::before", stylesheet.data)
+        self.assertIn(b".disk-device-list", stylesheet.data)
+        self.assertIn(b".disk-device-action", stylesheet.data)
+        self.assertIn(b".disk-device-card.held", stylesheet.data)
         self.assertIn(b".monitor-crash-button", stylesheet.data)
         self.assertIn(b".monitor-crash-history-item", stylesheet.data)
         self.assertIn(b".lighting-master", stylesheet.data)
@@ -2640,6 +2826,83 @@ class DashboardRouteTests(unittest.TestCase):
                 [dashboard.POLICYCTL, "--json", "status"],
             ],
         )
+
+    def test_disk_status_and_actions_are_whitelisted_and_csrf_protected(self):
+        calls = []
+        status = {
+            "checked_at": 1000,
+            "disks": [
+                {
+                    "label": "movingparts",
+                    "controllable": True,
+                    "attached": True,
+                    "mounted": True,
+                }
+            ],
+            "operation": {"status": "idle"},
+        }
+
+        class FakeDiskManager:
+            def status(self):
+                calls.append("status")
+                return status
+
+            def start_action(self, label, action):
+                if label != "movingparts":
+                    raise ValueError("unknown controllable disk label")
+                if action not in ("mount", "eject"):
+                    raise ValueError("unknown disk action")
+                calls.append((label, action))
+                return {**status, "operation": {"status": "running"}}
+
+        original = dashboard.disk_manager
+        dashboard.disk_manager = FakeDiskManager()
+        try:
+            client = dashboard.app.test_client()
+            current = client.get("/api/disks")
+            query_rejected = client.get("/api/disks?label=movingparts")
+            accepted = client.post(
+                "/api/disks/action",
+                data={"label": "movingparts", "action": "eject"},
+                headers={"X-Van-Dashboard": "1"},
+            )
+            raw_device = client.post(
+                "/api/disks/action",
+                data={"label": "/dev/sda", "action": "eject"},
+                headers={"X-Van-Dashboard": "1"},
+            )
+            unknown_action = client.post(
+                "/api/disks/action",
+                data={"label": "movingparts", "action": "delete"},
+                headers={"X-Van-Dashboard": "1"},
+            )
+            extra_input = client.post(
+                "/api/disks/action",
+                data={"label": "movingparts", "action": "eject", "command": "anything"},
+                headers={"X-Van-Dashboard": "1"},
+            )
+            cross_origin = client.post(
+                "/api/disks/action",
+                data={"label": "movingparts", "action": "eject"},
+                headers={
+                    "X-Van-Dashboard": "1",
+                    "Origin": "https://example.invalid",
+                },
+            )
+        finally:
+            dashboard.disk_manager = original
+
+        self.assertEqual(current.status_code, 200)
+        self.assertEqual(current.headers["Cache-Control"], "no-store")
+        self.assertEqual(current.json["disk_status"]["disks"][0]["label"], "movingparts")
+        self.assertEqual(query_rejected.status_code, 400)
+        self.assertEqual(accepted.status_code, 202)
+        self.assertEqual(accepted.headers["Cache-Control"], "no-store")
+        self.assertEqual(raw_device.status_code, 400)
+        self.assertEqual(unknown_action.status_code, 400)
+        self.assertEqual(extra_input.status_code, 400)
+        self.assertEqual(cross_origin.status_code, 403)
+        self.assertEqual(calls, ["status", ("movingparts", "eject")])
 
     def test_starlink_power_change_requests_policy_reconciliation(self):
         events = []

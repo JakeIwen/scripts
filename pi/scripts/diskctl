@@ -1,0 +1,69 @@
+#!/bin/bash
+# Safe, label-only manual disk controls for the van dashboard.
+set -u
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=disk_policy.sh
+. "$script_dir/disk_policy.sh" || exit 1
+
+unmount_disks=${DISKCTL_UNMOUNT_DISKS:-/home/pi/scripts/umount_disks.sh}
+internet_switches=${DISKCTL_INTERNET_SWITCHES:-/home/pi/scripts/internet_switches.sh}
+policyctl=${DISKCTL_POLICYCTL:-/home/pi/scripts/policyctl}
+ignition_flag=${DISKCTL_IGNITION_FLAG:-/home/pi/hooks/ignition_is_on}
+lifecycle_lock=${DISKCTL_LIFECYCLE_LOCK:-/home/pi/.internet_switches.lock}
+flock_command=${DISKCTL_FLOCK:-/usr/bin/flock}
+hold_seconds=60
+
+usage() {
+  echo "usage: diskctl eject|mount <managed-label>" >&2
+}
+
+action=${1:-}
+label=${2:-}
+[[ $# == 2 && ( "$action" == eject || "$action" == mount ) ]] || {
+  usage
+  exit 2
+}
+disk_policy_is_mount_label "$label" || {
+  echo "diskctl: unknown managed disk label" >&2
+  exit 2
+}
+
+case "$action" in
+  eject)
+    # Install the hold before waiting on the lifecycle lock. A reconciliation
+    # already in progress may finish, but the subsequent unmount wins and no
+    # later automatic pass can remount this label during the hold.
+    disk_eject_hold_set "$label" "$hold_seconds" >/dev/null || exit 1
+    exec 9>"$lifecycle_lock" || exit 1
+    "$flock_command" -w 55 9 || {
+      echo "diskctl: disk policy is busy; eject hold remains active" >&2
+      exit 1
+    }
+    "$unmount_disks" "$label"
+    ;;
+  mount)
+    policy=$($policyctl read 2>&1)
+    status=$?
+    if (( status != 0 )); then
+      echo "diskctl: cannot read disk policy: $policy" >&2
+      exit 1
+    fi
+    read -r disks_enabled torrents_enabled starlink_torrents extra <<< "$policy"
+    if [[ "$disks_enabled" != 1 || ! "$torrents_enabled" =~ ^[01]$ ||
+          ! "$starlink_torrents" =~ ^[01]$ || -n ${extra:-} ]]; then
+      echo "diskctl: disks must be enabled in requested policy before mounting" >&2
+      exit 1
+    fi
+    if [[ -e "$ignition_flag" ]]; then
+      echo "diskctl: ignition is on; disk policy will not mount USB storage" >&2
+      exit 1
+    fi
+    # Keep an existing hold intact when policy or ignition prevents the mount.
+    # It is cleared only once this request is eligible for reconciliation.
+    disk_eject_hold_clear "$label" || exit 1
+    # Reconcile synchronously so the dashboard operation completes only after
+    # the existing policy and mount safeguards have run.
+    "$internet_switches"
+    ;;
+esac

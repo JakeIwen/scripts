@@ -981,8 +981,147 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   font-size: 10px;
   margin-left: auto;
 }
+.disk-device-section {
+  margin: 18px 0 20px;
+}
+.disk-device-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 3px 8px;
+}
+.disk-device-heading h3 {
+  margin: 0;
+  font-size: 13px;
+}
+.disk-device-heading p,
+.disk-device-note {
+  margin: 3px 0 0;
+  color: var(--dim);
+  font-size: 9px;
+}
+.disk-device-heading > span {
+  flex: 0 0 auto;
+  color: var(--dim);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+.disk-device-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+.disk-device-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px 10px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #152028;
+  padding: 11px;
+}
+.disk-device-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.disk-device-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #46545c;
+  border-radius: 99px;
+  padding: 4px 7px;
+  color: var(--dim);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+.disk-device-state::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #71818a;
+}
+.disk-device-card.good .disk-device-state {
+  border-color: #39725b;
+  color: #bcebd5;
+}
+.disk-device-card.good .disk-device-state::before {
+  background: var(--good);
+}
+.disk-device-card.bad .disk-device-state {
+  border-color: #754743;
+  color: #f2b5b0;
+}
+.disk-device-card.bad .disk-device-state::before {
+  background: var(--bad);
+}
+.disk-device-card.held .disk-device-state {
+  border-color: #75643f;
+  color: #edd79f;
+}
+.disk-device-card.held .disk-device-state::before {
+  background: #dab766;
+}
+.disk-device-detail {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.disk-device-action {
+  min-width: 64px;
+  border: 1px solid #526775;
+  border-radius: 9px;
+  background: #243541;
+  color: var(--ink);
+  padding: 5px 9px;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 750;
+  cursor: pointer;
+}
+.disk-device-action.eject {
+  border-color: #75504a;
+  background: #32272a;
+  color: #f3c1bc;
+}
+.disk-device-action:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.disk-device-role {
+  align-self: center;
+  min-width: 0;
+  color: var(--dim);
+  font-size: 8px;
+}
+.disk-device-empty {
+  grid-column: 1 / -1;
+  border: 1px dashed var(--line);
+  border-radius: 14px;
+  color: var(--dim);
+  padding: 14px;
+  text-align: center;
+  font-size: 10px;
+}
+.disk-device-note {
+  margin: 8px 3px 0;
+}
 @media (max-width: 520px) {
-  .policy-runtime {
+  .policy-runtime,
+  .disk-device-list {
     grid-template-columns: 1fr;
   }
 }

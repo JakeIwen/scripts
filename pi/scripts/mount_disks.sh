@@ -519,7 +519,7 @@ md_print_mounts() {
 }
 
 mount_disks_main() {
-  local had_failure=0
+  local had_failure=0 hold_status hold_remaining
   local dir
   local disk
   local -a rm_dirs=(mbp1tbkup mbp2tbkup)
@@ -544,6 +544,16 @@ mount_disks_main() {
     # Reconcile every label, but remember any unsafe result so a later missing
     # optional disk cannot overwrite an earlier failure status.
     for disk in "${disks[@]}"; do
+      hold_remaining=$(disk_eject_hold_remaining "$disk" 2>&1)
+      hold_status=$?
+      if (( hold_status == 0 )); then
+        echo "$disk: temporarily ejected; automatic mount resumes in ${hold_remaining}s"
+        continue
+      elif (( hold_status != 1 )); then
+        echo "$hold_remaining" >&2
+        had_failure=1
+        continue
+      fi
       mntdsk "$disk" || had_failure=1
     done
     # mntdsk mbbackup
