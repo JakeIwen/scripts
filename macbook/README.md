@@ -9,6 +9,13 @@ This directory contains code executed locally on Jacob's MacBook:
 
 Code that is also deployed to another host belongs in `../shared/` instead.
 
+## M4 compute worker for vanpi
+
+`scripts/van_compute_worker.py` is an outbound-only, allowlisted worker for expensive offline CAN
+analysis submitted by agents on vanpi. `scripts/install_van_compute_worker.zsh` deploys the matching
+Pi queue CLI and installs the user LaunchAgent. See [`../pi/VAN_COMPUTE.md`](../pi/VAN_COMPUTE.md)
+for the architecture, safety boundary, installation, and commands.
+
 ## Codex ntfy notifications
 
 `scripts/codex_ntfy_notify.py` is a macOS Codex external-notification hook. It
