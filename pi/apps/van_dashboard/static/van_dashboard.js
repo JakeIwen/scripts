@@ -1562,26 +1562,47 @@ function computeStateLabel(job) {
   if (job.state === 'failed') return job.timed_out ? 'TIMED OUT' : 'FAILED';
   return 'DONE';
 }
+function computeMissedReasonLabel(reason) {
+  const labels = {
+    'worker-unavailable': 'Worker unavailable',
+    unsupported: 'Unsupported profile',
+    'queue-busy': 'Queue busy',
+    'failed-offload': 'Offload failed',
+    'agent-choice': 'Agent choice',
+    other: 'Other',
+  };
+  return labels[reason] || String(reason || 'Other').replaceAll('-', ' ');
+}
 function renderComputeMetrics(response) {
   computeMetrics = response;
   const status = response.status || {},
     summary = response.summary || {},
+    localWork = response.eligible_local_work || {},
     jobs = response.jobs || [],
     tasks = response.tasks || [],
+    localCategories = Array.isArray(localWork.categories) ? localWork.categories : [],
+    localReasons = Array.isArray(localWork.reasons) ? localWork.reasons : [],
+    localEvents = Array.isArray(localWork.recent) ? localWork.recent : [],
     available = status.available === true,
     running = Number(status.running) || 0,
+    localRunning = Number(status.local_running) || 0,
     queued = Number(status.queued) || 0,
     failures = Number(summary.failed) || 0,
     telemetryJobs = Number(summary.telemetry_jobs) || 0,
+    timingJobs = Number(summary.timing_jobs) || 0,
+    eligibleEvents = Number(localWork.events) || 0,
+    recordedPlacements = (Number(summary.jobs) || 0) + eligibleEvents,
     tile = $('compute-worker'),
-    tileLevel = available ? (failures ? 'warning' : 'good') : queued ? 'warning' : 'unknown';
+    tileLevel = localRunning ? 'warning' : available ? (failures ? 'warning' : 'good') : queued ? 'warning' : 'unknown';
   tile.classList.remove('unknown', 'good', 'warning', 'critical');
   tile.classList.add(tileLevel);
-  $('compute-pill').textContent = running ? 'BUSY' : available ? 'ONLINE' : 'OFFLINE';
+  $('compute-pill').textContent = running ? 'BUSY' : localRunning ? 'PI FALLBACK' : available ? 'ONLINE' : 'OFFLINE';
   $('compute-summary').textContent = summary.jobs
     ? `${summary.jobs} job${summary.jobs === 1 ? '' : 's'} offloaded in ${computeRangeLabel()}`
     : 'No completed jobs in selected range';
-  const freshestWorker = (status.workers || [])
+  const remoteWorkers = (status.workers || []).filter((worker) => worker.placement !== 'pi-local');
+  const capacityWorkers = remoteWorkers.filter((worker) => worker.available && worker.slots_total !== null && worker.slots_total !== undefined);
+  const freshestWorker = (capacityWorkers.length ? capacityWorkers : remoteWorkers)
     .slice()
     .sort((left, right) => (left.age_seconds ?? Infinity) - (right.age_seconds ?? Infinity))[0];
   $('compute-worker-state').textContent = available
@@ -1589,8 +1610,15 @@ function renderComputeMetrics(response) {
     : freshestWorker?.seen_at
       ? `Last seen ${age(freshestWorker.seen_at)}`
       : 'No heartbeat';
-  $('compute-queue').textContent = running || queued
-    ? `${running} running · ${queued} queued`
+  const hasSlotTelemetry = status.slots_total !== null
+    && status.slots_total !== undefined
+    && Number.isFinite(Number(status.slots_total))
+    && Number.isFinite(Number(status.slots_busy));
+  $('compute-slots').textContent = hasSlotTelemetry
+    ? `${Number(status.slots_busy)} / ${Number(status.slots_total)} busy · ${Number(status.slots_available) || 0} free`
+    : 'Awaiting scheduler heartbeat';
+  $('compute-queue').textContent = running || localRunning || queued
+    ? `${running} Mac running · ${localRunning} Pi fallback · ${queued} queued`
     : 'Empty';
   $('compute-cpu').textContent = telemetryJobs
     ? formatComputeSeconds(summary.mac_cpu_seconds)
@@ -1598,20 +1626,48 @@ function renderComputeMetrics(response) {
   $('compute-memory').textContent = telemetryJobs
     ? formatBytes(summary.peak_rss_bytes)
     : 'Awaiting telemetry job';
+  $('compute-local').textContent = eligibleEvents
+    ? `${eligibleEvents} event${eligibleEvents === 1 ? '' : 's'} · ${formatComputeSeconds(localWork.cpu_seconds)} CPU`
+    : 'None recorded';
 
   $('compute-panel').setAttribute('aria-busy', 'false');
-  $('compute-status').textContent = `${available ? 'Worker online' : 'Worker offline'} · ${computeRangeLabel()}`;
+  $('compute-status').textContent = `${available ? 'Worker online' : 'Worker offline'}${localRunning ? ` · ${localRunning} Pi fallback running` : ''}${hasSlotTelemetry ? ` · ${Number(status.slots_available) || 0}/${Number(status.slots_total)} slots free` : ''} · ${computeRangeLabel()}`;
+  const leadingReason = localReasons[0];
   const overview = [
-    ['Jobs kept off Pi', `${summary.jobs || 0}`, `${summary.succeeded || 0} succeeded · ${failures} failed`],
-    ['Mac CPU delivered', telemetryJobs ? formatComputeSeconds(summary.mac_cpu_seconds) : '—', telemetryJobs ? `${Number(summary.aggregate_cpu_percent || 0).toFixed(0)}% average across job wall time` : 'New worker telemetry starts with its next job'],
-    ['Mac job wall time', telemetryJobs ? formatComputeSeconds(summary.mac_wall_seconds) : '—', `${telemetryJobs} measured job${telemetryJobs === 1 ? '' : 's'}`],
-    ['Peak job memory', telemetryJobs ? formatBytes(summary.peak_rss_bytes) : '—', 'Analysis process-tree upper bound'],
-    ['Capture/report input', formatBytes(summary.input_bytes), `${formatBytes(summary.source_bytes)} source snapshots`],
-    ['Results returned', formatBytes(summary.result_bytes), Number.isFinite(summary.average_queue_seconds) ? `${formatComputeSeconds(summary.average_queue_seconds)} average queue delay` : 'No completed queue timing'],
+    ['Recorded placement share', recordedPlacements ? `${(100 * (Number(summary.jobs) || 0) / recordedPlacements).toFixed(0)}% Mac` : '—', recordedPlacements ? `${Number(summary.jobs) || 0} completed Mac job${Number(summary.jobs) === 1 ? '' : 's'} · ${eligibleEvents} recorded Pi event${eligibleEvents === 1 ? '' : 's'}` : 'No completed placement evidence in this range'],
+    ['Offloaded jobs · Mac', `${summary.jobs || 0}`, `${summary.succeeded || 0} succeeded · ${failures} failed`],
+    ['CPU consumed · Mac', telemetryJobs ? formatComputeSeconds(summary.mac_cpu_seconds) : '—', telemetryJobs ? `${Number(summary.aggregate_cpu_percent || 0).toFixed(0)}% across measured active time` : 'New worker telemetry starts with its next job'],
+    ['Mac active time', telemetryJobs ? formatComputeSeconds(summary.mac_wall_seconds) : '—', `${telemetryJobs} measured job${telemetryJobs === 1 ? '' : 's'} · staging through non-telemetry uploads`],
+    ['Mac phase timing', timingJobs ? formatComputeSeconds(summary.mac_analysis_seconds) : '—', timingJobs ? `${formatComputeSeconds(summary.mac_preparation_seconds)} prep · ${formatComputeSeconds(summary.mac_packaging_seconds)} package · ${formatComputeSeconds(summary.mac_result_upload_seconds)} upload` : 'Detailed phase timing starts with the new scheduler'],
+    ['Peak job memory · Mac', telemetryJobs ? formatBytes(summary.peak_rss_bytes) : '—', 'Higher of sampled process-group RSS and wait4 leader maximum'],
+    ['Eligible local events · Pi', `${eligibleEvents}`, leadingReason ? `Most common: ${computeMissedReasonLabel(leadingReason.reason)} (${leadingReason.events})` : 'None recorded in this range'],
+    ['CPU consumed · Pi', eligibleEvents ? formatComputeSeconds(localWork.cpu_seconds) : '—', 'Measured eligible work that stayed local'],
+    ['Wall time · Pi', eligibleEvents ? formatComputeSeconds(localWork.wall_seconds) : '—', 'Elapsed time for recorded eligible work'],
+    ['Peak memory · Pi', eligibleEvents ? formatBytes(localWork.peak_rss_bytes) : '—', 'Largest recorded eligible command'],
+    ['Input measured', `${formatBytes(summary.input_bytes)} Mac`, `${formatBytes(localWork.input_bytes)} eligible local · ${formatBytes(summary.source_bytes)} source snapshots`],
+    ['Results returned · Mac', formatBytes(summary.result_bytes), Number.isFinite(summary.average_queue_seconds) ? `${formatComputeSeconds(summary.average_queue_seconds)} average queue delay` : 'No completed queue timing'],
   ];
   $('compute-overview').innerHTML = overview
     .map(([label, value, detail]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong><small>${esc(detail)}</small></div>`)
     .join('');
+
+  $('compute-local-count').textContent = `${eligibleEvents} recorded`;
+  $('compute-local-reasons').innerHTML = localReasons
+    .map((reason) => `<span><strong>${Number(reason.events) || 0}</strong>${esc(computeMissedReasonLabel(reason.reason))}</span>`)
+    .join('');
+  const maxLocalCpu = Math.max(0, ...localCategories.map((category) => Number(category.cpu_seconds) || 0));
+  $('compute-local-categories').innerHTML = localCategories
+    .map((category) => {
+      const width = maxLocalCpu > 0 ? Math.max(2, (100 * Number(category.cpu_seconds || 0)) / maxLocalCpu) : 0;
+      return `<article><span><strong>${esc(category.command_category)}</strong><small>${Number(category.events) || 0} event${Number(category.events) === 1 ? '' : 's'} · ${formatBytes(category.input_bytes)} input</small></span><span class="compute-task-meter"><i style="width:${width}%"></i><small>${esc(`${formatComputeSeconds(category.cpu_seconds)} Pi CPU · ${formatComputeSeconds(category.wall_seconds)} wall · ${formatBytes(category.peak_rss_bytes)} peak`)}</small></span></article>`;
+    })
+    .join('') || '<div class="speaker-loading">No eligible local work recorded in this range</div>';
+  $('compute-local-events').innerHTML = localEvents
+    .map((event) => `<article class="compute-local-event">
+      <div class="compute-job-head"><span><strong>${esc(event.label || event.command_category || 'Eligible local work')}</strong><small>${esc(eventTime(event.recorded_at))} · ${esc(event.command_category || 'uncategorized')}</small></span><b>PI LOCAL</b></div>
+      <p>${esc(`${computeMissedReasonLabel(event.reason)} · ${formatComputeSeconds(event.cpu_seconds)} CPU · ${formatComputeSeconds(event.wall_seconds)} wall · ${formatBytes(event.peak_rss_bytes)} peak`)}</p>
+    </article>`)
+    .join('') || '<div class="speaker-loading">No recent eligible local events</div>';
 
   const maxCpu = Math.max(0, ...jobs.map((job) => Number(job.cpu_seconds) || 0)),
     maxMemory = Math.max(0, ...jobs.map((job) => Number(job.peak_rss_bytes) || 0));
@@ -1622,7 +1678,9 @@ function renderComputeMetrics(response) {
         memoryWidth = maxMemory > 0 ? Math.max(2, (100 * Number(job.peak_rss_bytes || 0)) / maxMemory) : 0,
         timestamp = job.finished_at || job.started_at || job.submitted_at,
         details = job.telemetry
-          ? `${formatComputeSeconds(job.wall_seconds)} wall · ${Number(job.average_cpu_percent || 0).toFixed(0)}% avg CPU · ${formatBytes(job.input_bytes)} input`
+          ? job.detailed_timing
+            ? `${formatComputeSeconds(job.active_seconds)} active · ${formatComputeSeconds(job.analysis_seconds)} analysis · ${formatComputeSeconds(job.preparation_seconds)} prep · ${formatComputeSeconds(job.packaging_seconds)} package · ${formatComputeSeconds(job.result_upload_seconds)} upload`
+            : `${formatComputeSeconds(job.wall_seconds)} legacy job wall · ${Number(job.average_cpu_percent || 0).toFixed(0)}% avg CPU · ${formatBytes(job.input_bytes)} input`
           : `${formatBytes(job.input_bytes)} input · resource telemetry unavailable for this older job`;
       return `<article class="compute-job ${esc(job.state)}">
         <div class="compute-job-head"><span><strong>${esc(job.task)}</strong><small>${esc(eventTime(timestamp))} · ${esc(job.worker || 'unclaimed')}</small></span><b>${esc(computeStateLabel(job))}</b></div>
@@ -1655,13 +1713,18 @@ function renderComputeUnavailable(message) {
   $('compute-pill').textContent = 'NO DATA';
   $('compute-summary').textContent = 'Compute metrics unavailable';
   $('compute-worker-state').textContent = '—';
+  $('compute-slots').textContent = '—';
   $('compute-queue').textContent = '—';
   $('compute-cpu').textContent = '—';
   $('compute-memory').textContent = '—';
+  $('compute-local').textContent = '—';
   $('compute-status').textContent = 'Unavailable';
   $('compute-panel').setAttribute('aria-busy', 'false');
   $('compute-jobs').innerHTML = `<div class="speaker-loading">${esc(message)}</div>`;
   $('compute-tasks').innerHTML = `<div class="speaker-loading">${esc(message)}</div>`;
+  $('compute-local-categories').innerHTML = `<div class="speaker-loading">${esc(message)}</div>`;
+  $('compute-local-events').innerHTML = `<div class="speaker-loading">${esc(message)}</div>`;
+  $('compute-local-reasons').innerHTML = '';
   document.querySelectorAll('[data-compute-hours]').forEach((button) => {
     button.disabled = false;
   });

@@ -3035,7 +3035,7 @@ body.busy [data-action] {
   padding: 2px 6px;
 }
 .compute-tile {
-  min-height: 205px;
+  min-height: 235px;
 }
 .compute-tile .status-line {
   gap: 5px;
@@ -3077,19 +3077,45 @@ body.busy [data-action] {
   line-height: 1.35;
   margin-top: 3px;
 }
+.compute-local-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+.compute-local-reasons span {
+  border: 1px solid #6c5a32;
+  border-radius: 999px;
+  background: #211e18;
+  color: #d9c99d;
+  font-size: 8px;
+  padding: 4px 7px;
+}
+.compute-local-reasons strong {
+  color: #f0d890;
+  margin-right: 4px;
+}
 .compute-jobs,
-.compute-tasks {
+.compute-tasks,
+.compute-local-categories,
+.compute-local-events {
   display: grid;
   gap: 7px;
   margin-top: 8px;
 }
 .compute-job,
-.compute-tasks article {
+.compute-tasks article,
+.compute-local-categories article,
+.compute-local-event {
   border: 1px solid var(--line);
   border-left: 3px solid #438194;
   border-radius: 11px;
   background: #151f27;
   padding: 9px 10px;
+}
+.compute-local-categories article,
+.compute-local-event {
+  border-left-color: #d4a650;
 }
 .compute-job.failed {
   border-left-color: var(--bad);
@@ -3101,29 +3127,35 @@ body.busy [data-action] {
   border-left-color: #d4a650;
 }
 .compute-job-head,
-.compute-tasks article {
+.compute-tasks article,
+.compute-local-categories article {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
 .compute-job-head > span,
-.compute-tasks article > span {
+.compute-tasks article > span,
+.compute-local-categories article > span {
   min-width: 0;
 }
 .compute-job-head strong,
 .compute-job-head small,
 .compute-tasks strong,
-.compute-tasks small {
+.compute-tasks small,
+.compute-local-categories strong,
+.compute-local-categories small {
   display: block;
 }
 .compute-job-head strong,
-.compute-tasks strong {
+.compute-tasks strong,
+.compute-local-categories strong {
   font-size: 11px;
   overflow-wrap: anywhere;
 }
 .compute-job-head small,
-.compute-tasks small {
+.compute-tasks small,
+.compute-local-categories small {
   color: var(--dim);
   font-size: 8px;
   margin-top: 2px;
@@ -3137,7 +3169,8 @@ body.busy [data-action] {
 .compute-job.failed .compute-job-head b {
   color: #ffd2ce;
 }
-.compute-job > p {
+.compute-job > p,
+.compute-local-event > p {
   color: #bdcbd2;
   font-size: 9px;
   margin: 7px 0;
@@ -3250,7 +3283,8 @@ body.busy [data-action] {
   .compute-overview {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .compute-tasks article {
+  .compute-tasks article,
+  .compute-local-categories article {
     align-items: stretch;
     flex-direction: column;
   }
