@@ -18,6 +18,8 @@ printf '%s\n' \
 # shellcheck source=/dev/null
 . "$repo_bashrc"
 
+declare -f cronp | grep -F '/home/pi/scripts/shared/sh/parse_cron.sh' >/dev/null
+
 result=$(s price_check first second)
 [ "$result" = "python-main first second" ]
 

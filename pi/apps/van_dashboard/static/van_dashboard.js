@@ -19,6 +19,13 @@ let dashboard = null,
   diskBusy = false,
   priceBusy = false,
   priceEditingId = null,
+  priceScheduleInputTimer = 0,
+  priceScheduleRetryTimer = 0,
+  priceScheduleRequestId = 0,
+  priceScheduleRetryDelay = 1000,
+  priceSchedulePending = false,
+  priceScheduleActiveExpression = '',
+  priceScheduleParsedExpression = '',
   crashAnalysisBusy = false,
   usbPortBusy = false,
   backupBusy = false,
@@ -1024,7 +1031,12 @@ async function changeIgnitionMonitor(paused) {
   }
 }
 function renderPriceChecks(response) {
-  priceChecks = response;
+  const previousSchedule = priceChecks?.schedule;
+  priceChecks = {
+    ...response,
+    schedule: response.schedule || previousSchedule,
+  };
+  response = priceChecks;
   const items = response.items || [],
     summary = response.summary || {},
     tile = $('price-checks'),
@@ -1032,6 +1044,7 @@ function renderPriceChecks(response) {
       (value, item) => Math.max(value, Number(item.last_checked_at) || 0),
       0,
     );
+  renderPriceSchedule(response.schedule);
   if (priceEditingId !== null && !items.some((item) => item.id === priceEditingId))
     resetPriceForm();
   tile.classList.toggle('has-deal', Number(summary.below_threshold) > 0);
@@ -1070,6 +1083,131 @@ function renderPriceChecks(response) {
   $('price-add-form').querySelectorAll('input, select, button').forEach((element) => {
     element.disabled = priceBusy;
   });
+  $('price-schedule').disabled = priceBusy;
+  updatePriceScheduleSaveButton();
+}
+function renderPriceSchedule(schedule) {
+  const input = $('price-schedule'),
+    expression = schedule?.expression || '';
+  input.value = expression;
+  if (schedule?.error_code === 'rate_limit') {
+    if (
+      priceScheduleActiveExpression !== expression ||
+      (!priceSchedulePending && !priceScheduleRetryTimer)
+    )
+      beginPriceScheduleRateLimitRetry(expression);
+    return;
+  }
+  clearPriceScheduleTimers();
+  priceScheduleActiveExpression = expression;
+  priceScheduleRetryDelay = 1000;
+  if (schedule?.error || !schedule?.description) {
+    showPriceScheduleError(schedule?.error || 'empty cron description');
+    return;
+  }
+  showPriceScheduleDescription(schedule);
+}
+function normalizedPriceSchedule() {
+  return $('price-schedule').value.trim().replace(/\s+/g, ' ');
+}
+function updatePriceScheduleSaveButton() {
+  $('price-schedule-save').disabled =
+    priceBusy ||
+    priceSchedulePending ||
+    !priceScheduleParsedExpression ||
+    normalizedPriceSchedule() !== priceScheduleParsedExpression;
+}
+function clearPriceScheduleTimers() {
+  clearTimeout(priceScheduleInputTimer);
+  clearTimeout(priceScheduleRetryTimer);
+  priceScheduleInputTimer = 0;
+  priceScheduleRetryTimer = 0;
+}
+function showPriceScheduleLoading() {
+  const description = $('price-schedule-description'),
+    spinner = document.createElement('span');
+  description.textContent = '';
+  description.classList.remove('error');
+  description.setAttribute('aria-label', 'Parsing cron schedule');
+  spinner.className = 'price-cron-spinner';
+  spinner.setAttribute('aria-hidden', 'true');
+  description.append(spinner);
+  priceSchedulePending = true;
+  priceScheduleParsedExpression = '';
+  updatePriceScheduleSaveButton();
+}
+function showPriceScheduleDescription(schedule) {
+  const description = $('price-schedule-description');
+  description.removeAttribute('aria-label');
+  description.textContent = schedule.description;
+  description.classList.remove('error');
+  priceSchedulePending = false;
+  priceScheduleParsedExpression = schedule.expression;
+  if (priceChecks) priceChecks.schedule = schedule;
+  updatePriceScheduleSaveButton();
+}
+function showPriceScheduleError(detail) {
+  console.error('Could not parse cron:', detail);
+  const description = $('price-schedule-description');
+  description.removeAttribute('aria-label');
+  description.textContent = 'could not parse cron';
+  description.classList.add('error');
+  priceSchedulePending = false;
+  priceScheduleParsedExpression = '';
+  updatePriceScheduleSaveButton();
+}
+function queuePriceScheduleRetry(expression, requestId) {
+  if (requestId !== priceScheduleRequestId) return;
+  showPriceScheduleLoading();
+  const delay = priceScheduleRetryDelay;
+  priceScheduleRetryDelay *= 1.5;
+  priceScheduleRetryTimer = setTimeout(() => {
+    priceScheduleRetryTimer = 0;
+    requestPriceScheduleParse(expression, requestId);
+  }, delay);
+}
+async function requestPriceScheduleParse(expression, requestId) {
+  if (requestId !== priceScheduleRequestId) return;
+  showPriceScheduleLoading();
+  try {
+    const result = await post('price-checks/schedule/parse', { expression });
+    if (requestId !== priceScheduleRequestId) return;
+    const schedule = result.schedule || {};
+    if (schedule.error_code === 'rate_limit') {
+      queuePriceScheduleRetry(expression, requestId);
+      return;
+    }
+    clearPriceScheduleTimers();
+    priceScheduleRetryDelay = 1000;
+    if (schedule.error || !schedule.description) {
+      showPriceScheduleError(schedule.error || 'empty cron description');
+      return;
+    }
+    showPriceScheduleDescription(schedule);
+  } catch (error) {
+    if (requestId !== priceScheduleRequestId) return;
+    clearPriceScheduleTimers();
+    showPriceScheduleError(error.message);
+  }
+}
+function beginPriceScheduleParse(expression) {
+  clearPriceScheduleTimers();
+  priceScheduleRequestId += 1;
+  priceScheduleRetryDelay = 1000;
+  priceScheduleActiveExpression = expression;
+  showPriceScheduleLoading();
+  const requestId = priceScheduleRequestId;
+  priceScheduleInputTimer = setTimeout(() => {
+    priceScheduleInputTimer = 0;
+    requestPriceScheduleParse(expression, requestId);
+  }, 250);
+}
+function beginPriceScheduleRateLimitRetry(expression) {
+  clearPriceScheduleTimers();
+  priceScheduleRequestId += 1;
+  priceScheduleRetryDelay = 1000;
+  priceScheduleActiveExpression = expression;
+  queuePriceScheduleRetry(expression, priceScheduleRequestId);
 }
 async function refreshPriceChecks() {
   try {
@@ -1102,6 +1240,25 @@ async function priceAction(work) {
 }
 async function checkPrices(target) {
   return priceAction(() => post('price-checks/check', { target: String(target) }));
+}
+async function savePriceSchedule() {
+  if (priceBusy) return;
+  const expression = normalizedPriceSchedule();
+  if (expression !== priceScheduleParsedExpression) return;
+  priceBusy = true;
+  if (priceChecks) renderPriceChecks(priceChecks);
+  try {
+    const result = await post('price-checks/schedule', { expression });
+    priceChecks = { ...priceChecks, schedule: result.schedule };
+    renderPriceChecks(priceChecks);
+    toast(result.message);
+  } catch (error) {
+    toast(error.message, true);
+    await refreshPriceChecks().catch(() => {});
+  } finally {
+    priceBusy = false;
+    if (priceChecks) renderPriceChecks(priceChecks);
+  }
 }
 async function addPriceCheck() {
   const fields = {
@@ -2582,6 +2739,19 @@ $('ignition-duration-unit').addEventListener('change', (event) =>
 $('price-checks').addEventListener('click', openPriceChecks);
 $('price-close').addEventListener('click', closePriceChecks);
 $('price-check-all').addEventListener('click', () => checkPrices('all'));
+$('price-schedule').addEventListener('input', () => {
+  const expression = normalizedPriceSchedule();
+  if (expression) beginPriceScheduleParse(expression);
+  else {
+    clearPriceScheduleTimers();
+    priceScheduleRequestId += 1;
+    showPriceScheduleError('empty cron expression');
+  }
+});
+$('price-schedule-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  savePriceSchedule();
+});
 $('price-edit-cancel').addEventListener('click', resetPriceForm);
 $('price-add-form').addEventListener('submit', (event) => {
   event.preventDefault();

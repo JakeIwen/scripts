@@ -15,6 +15,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from amazon_parser import AmazonParseError, Product, parse as parse_amazon
+from cron_schedule import CronScheduleError, CronScheduleManager
 from store import PriceStore, StoreError, normalized_url
 
 
@@ -236,6 +237,15 @@ def build_parser() -> argparse.ArgumentParser:
     edit.add_argument("threshold")
     edit.add_argument("url")
     edit.add_argument("title", nargs="?", default="")
+    commands.add_parser("schedule", help="show the live price-check cron schedule")
+    schedule_parse = commands.add_parser(
+        "schedule-parse", help="describe a cron schedule without changing it"
+    )
+    schedule_parse.add_argument("expression")
+    schedule_set = commands.add_parser(
+        "schedule-set", help="replace the live price-check cron schedule"
+    )
+    schedule_set.add_argument("expression")
     remove = commands.add_parser("remove", help="remove by ID, title, or URL")
     remove.add_argument("match")
     migrate = commands.add_parser("migrate-tsv", help="import the old private TSV")
@@ -258,6 +268,36 @@ def main() -> int:
     args = build_parser().parse_args()
     command = args.command or "run"
     try:
+        schedule_manager = CronScheduleManager()
+        if command == "schedule":
+            schedule = schedule_manager.status()
+            emit(
+                args,
+                {"ok": True, "schedule": schedule},
+                f"{schedule['expression']} — "
+                f"{schedule['description'] or schedule['error']}",
+            )
+            return 0
+        if command == "schedule-parse":
+            schedule = schedule_manager.preview(args.expression)
+            emit(args, {"ok": True, "schedule": schedule})
+            return 0
+        if command == "schedule-set":
+            lock_path = args.db.with_suffix(".schedule.lock")
+            lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            os.chmod(lock_path.parent, 0o700)
+            with lock_path.open("a", encoding="utf-8") as lock:
+                os.chmod(lock_path, 0o600)
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                schedule = schedule_manager.update(args.expression)
+            emit(
+                args,
+                {"ok": True, "schedule": schedule},
+                f"updated price-check schedule: {schedule['expression']} — "
+                f"{schedule['description']}",
+            )
+            return 0
+
         with PriceStore(args.db) as store:
             if command == "list":
                 emit(args, response(store))
@@ -311,7 +351,7 @@ def main() -> int:
                     payload["message"] = "; ".join(error["message"] for error in errors)
                 emit(args, payload)
                 return 1 if errors else 0
-    except (OSError, PriceCheckError, StoreError) as error:
+    except (OSError, CronScheduleError, PriceCheckError, StoreError) as error:
         if args.json:
             print(json.dumps({"ok": False, "message": str(error)}, separators=(",", ":")))
         else:

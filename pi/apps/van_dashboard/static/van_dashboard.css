@@ -507,6 +507,53 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   justify-content: flex-end;
   margin: 4px 0 12px;
 }
+.price-schedule-form {
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #101b21;
+  margin: 0 0 12px;
+  padding: 10px;
+}
+.price-schedule-form label,
+.price-schedule-form label > span {
+  display: block;
+}
+.price-schedule-form label > span {
+  color: var(--dim);
+  font-size: 10px;
+  margin: 0 0 4px 2px;
+}
+.price-schedule-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.price-schedule-row input {
+  min-width: 0;
+  border: 1px solid #46606e;
+  border-radius: 9px;
+  background: #0f171d;
+  color: var(--ink);
+  padding: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.price-schedule-form small {
+  display: block;
+  color: var(--dim);
+  margin: 7px 2px 0;
+}
+.price-schedule-form small.error {
+  color: #f2b5b0;
+}
+.price-cron-spinner {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 2px solid #486574;
+  border-top-color: var(--ink);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
 .price-list {
   display: grid;
   gap: 8px;
@@ -575,7 +622,8 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
 }
 .price-row-controls button,
 .price-add,
-.price-edit-cancel {
+.price-edit-cancel,
+.price-schedule-save {
   border: 1px solid #42606e;
   border-radius: 9px;
   background: #263b47;
@@ -592,7 +640,8 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
 }
 .price-row-controls button:disabled,
 .price-add:disabled,
-.price-edit-cancel:disabled {
+.price-edit-cancel:disabled,
+.price-schedule-save:disabled {
   cursor: default;
   opacity: 0.6;
 }

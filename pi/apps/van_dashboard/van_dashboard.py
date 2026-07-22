@@ -2582,6 +2582,15 @@ class PriceCheckController:
             "edit", item_id, parser, threshold, url, title, timeout=20
         )
 
+    def schedule(self):
+        return self._run("schedule", timeout=25)
+
+    def parse_schedule(self, expression):
+        return self._run("schedule-parse", expression, timeout=25)
+
+    def set_schedule(self, expression):
+        return self._run("schedule-set", expression, timeout=30)
+
     def remove(self, item_id):
         return self._run("remove", item_id, timeout=20)
 
@@ -3892,6 +3901,15 @@ def api_price_checks():
         payload = price_checks.status()
     except PriceCheckCommandError as exc:
         return api_error(f"could not read price checks: {exc}", 502)
+    try:
+        payload["schedule"] = price_checks.schedule()["schedule"]
+    except PriceCheckCommandError as exc:
+        payload["schedule"] = {
+            "expression": "",
+            "description": "",
+            "error": f"could not read price-check schedule: {exc}",
+            "error_code": "parse",
+        }
     response = jsonify(payload)
     response.headers["Cache-Control"] = "no-store"
     return response
@@ -4010,6 +4028,31 @@ def api_price_checks_edit():
     except PriceCheckCommandError as exc:
         return api_error(f"could not edit price check: {exc}", 400)
     payload["message"] = f"Updated {payload['item']['display_title']}"
+    return jsonify(payload)
+
+
+@app.route("/api/price-checks/schedule", methods=["POST"])
+def api_price_checks_schedule():
+    if not _exact_form(("expression",)):
+        return api_error("price-check schedule requires one cron expression", 400)
+    try:
+        payload = price_checks.set_schedule(request.form["expression"])
+    except PriceCheckCommandError as exc:
+        return api_error(f"could not update price-check schedule: {exc}", 400)
+    payload["message"] = (
+        f"Schedule updated: {payload['schedule']['description']}"
+    )
+    return jsonify(payload)
+
+
+@app.route("/api/price-checks/schedule/parse", methods=["POST"])
+def api_price_checks_schedule_parse():
+    if not _exact_form(("expression",)):
+        return api_error("cron preview requires one expression", 400)
+    try:
+        payload = price_checks.parse_schedule(request.form["expression"])
+    except PriceCheckCommandError as exc:
+        return api_error(f"could not parse cron: {exc}", 502)
     return jsonify(payload)
 
 

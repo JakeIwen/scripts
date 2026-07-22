@@ -34,15 +34,13 @@ alias killcron="sudo pkill -f cron"
 alias cronlog="cd /var/log/cron"
 alias bkuplog='cat /var/log/cron/pi_backup.log'
 alias bkuplast="bkuplog | grep 'backup complete'"
+cronp() { /home/pi/scripts/shared/sh/parse_cron.sh "$@"; }
 bkupnow() { sudo /home/pi/scripts/backup/pi_backup.sh --force; } # manual backup to bigboi now
 sparesync() { # refresh a hot spare from the live system: sparesync a | sparesync b
   local l=${1:?usage: sparesync a|b}
   [[ "$l" == hotspare-* ]] || l="hotspare-$l"
   sudo /home/pi/scripts/clone_to_sd.sh "$l"
 }
-
-# parse cron
-cronp() { . /home/pi/scripts/parse_cron.sh "$1"; }
 
 stopcron() {
   sudo systemctl stop cron

@@ -268,7 +268,12 @@
 <div class="speaker-backdrop" id="price-backdrop">
   <section class="speaker-sheet price-sheet" id="price-panel" role="dialog" aria-modal="true" aria-labelledby="price-sheet-title" aria-busy="true">
     <div class="sheet-grabber"></div><div class="sheet-head"><h2 id="price-sheet-title">Price Watch</h2><span class="policy-sheet-status" id="price-operation">Loading…</span><button class="sheet-close" id="price-close" aria-label="Close price checks">&times;</button></div>
-    <p class="sheet-help">Private listings stored only on vanpi. Scheduled checks run at 10:00, 15:00, and 20:00.</p>
+    <p class="sheet-help">Private listings and their live schedule are stored only on vanpi.</p>
+    <form class="price-schedule-form" id="price-schedule-form">
+      <label for="price-schedule"><span>Cron schedule</span></label>
+      <div class="price-schedule-row"><input id="price-schedule" type="text" maxlength="160" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="0 10,15,20 * * *" required><button class="price-schedule-save" id="price-schedule-save" type="submit" data-action>Save schedule</button></div>
+      <small id="price-schedule-description" aria-live="polite">Loading schedule…</small>
+    </form>
     <div class="price-actions"><button class="speedtest-button" id="price-check-all" data-action><span class="speed-icon" aria-hidden="true">↻</span><span class="speed-spinner" aria-hidden="true"></span><span>Check all now</span></button></div>
     <div class="price-list" id="price-list"><div class="speaker-loading">Loading price checks…</div></div>
     <form class="price-form" id="price-add-form">

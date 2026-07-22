@@ -308,6 +308,9 @@ class PriceCheckControllerTests(unittest.TestCase):
         self.assertEqual(controller.status(), self.PAYLOAD)
         controller.add("amazon", "55", "https://example.com/item", "Example")
         controller.edit(7, "amazon", "45", "https://example.com/updated", "Updated")
+        controller.schedule()
+        controller.parse_schedule("30 8,16 * * 1-5")
+        controller.set_schedule("30 8,16 * * 1-5")
         controller.remove(7)
         controller.check(7)
         prefix = [
@@ -337,8 +340,15 @@ class PriceCheckControllerTests(unittest.TestCase):
                 20,
             ),
         )
-        self.assertEqual(calls[3], (prefix + ["remove", "7"], 20))
-        self.assertEqual(calls[4], (prefix + ["check", "7"], 91))
+        self.assertEqual(calls[3], (prefix + ["schedule"], 25))
+        self.assertEqual(
+            calls[4], (prefix + ["schedule-parse", "30 8,16 * * 1-5"], 25)
+        )
+        self.assertEqual(
+            calls[5], (prefix + ["schedule-set", "30 8,16 * * 1-5"], 30)
+        )
+        self.assertEqual(calls[6], (prefix + ["remove", "7"], 20))
+        self.assertEqual(calls[7], (prefix + ["check", "7"], 91))
 
     def test_rejects_failed_or_non_json_cli_output(self):
         def failed(_args, timeout):
@@ -471,6 +481,40 @@ class PriceCheckApiTests(unittest.TestCase):
                 calls.append(("status",))
                 return dict(payload)
 
+            def schedule(self):
+                calls.append(("schedule",))
+                return {
+                    "ok": True,
+                    "schedule": {
+                        "expression": "0 10,15,20 * * *",
+                        "description": "At minute 0 past hours 10, 15 and 20",
+                        "error": None,
+                    },
+                }
+
+            def set_schedule(self, expression):
+                calls.append(("set_schedule", expression))
+                return {
+                    "ok": True,
+                    "schedule": {
+                        "expression": expression,
+                        "description": "At minute 30 past hours 8 and 16",
+                        "error": None,
+                    },
+                }
+
+            def parse_schedule(self, expression):
+                calls.append(("parse_schedule", expression))
+                return {
+                    "ok": True,
+                    "schedule": {
+                        "expression": expression,
+                        "description": "At minute 30 past hours 8 and 16",
+                        "error": None,
+                        "error_code": None,
+                    },
+                }
+
             def add(self, *args):
                 calls.append(("add", *args))
                 return {**payload, "item": {"display_title": "Example"}}
@@ -500,6 +544,18 @@ class PriceCheckApiTests(unittest.TestCase):
         )
         self.assertEqual(add.status_code, 200)
         self.assertEqual(add.get_json()["message"], "Watching Example")
+        schedule = self.client.post(
+            "/api/price-checks/schedule",
+            data={"expression": "30 8,16 * * 1-5"},
+        )
+        self.assertEqual(schedule.status_code, 200)
+        self.assertIn("Schedule updated", schedule.get_json()["message"])
+        preview = self.client.post(
+            "/api/price-checks/schedule/parse",
+            data={"expression": "30 8,16 * * 1-5"},
+        )
+        self.assertEqual(preview.status_code, 200)
+        self.assertEqual(preview.get_json()["schedule"]["error_code"], None)
         edit = self.client.post(
             "/api/price-checks/edit",
             data={
@@ -524,7 +580,10 @@ class PriceCheckApiTests(unittest.TestCase):
             calls,
             [
                 ("status",),
+                ("schedule",),
                 ("add", "amazon", "55", "https://example.com/item", "Example"),
+                ("set_schedule", "30 8,16 * * 1-5"),
+                ("parse_schedule", "30 8,16 * * 1-5"),
                 (
                     "edit",
                     "7",
@@ -545,6 +604,21 @@ class PriceCheckApiTests(unittest.TestCase):
 
         response = self.client.post("/api/price-checks/check", data={"target": "bad"})
         self.assertEqual(response.status_code, 400)
+
+    def test_schedule_failure_reports_that_previous_crontab_was_restored(self):
+        class FailedSchedule:
+            def set_schedule(self, _expression):
+                raise dashboard.PriceCheckCommandError(
+                    "crontab update failed; previous crontab restored"
+                )
+
+        dashboard.price_checks = FailedSchedule()
+        response = self.client.post(
+            "/api/price-checks/schedule",
+            data={"expression": "30 8,16 * * 1-5"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("previous crontab restored", response.get_json()["message"])
 
 
 class UbntWifiControllerTests(unittest.TestCase):
@@ -2170,6 +2244,8 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="price-panel"', page.data)
         self.assertIn(b'id="price-add-form"', page.data)
         self.assertIn(b'id="price-edit-cancel"', page.data)
+        self.assertIn(b'id="price-schedule-form"', page.data)
+        self.assertIn(b'id="price-schedule-description"', page.data)
         self.assertIn(b"Check all now", page.data)
         self.assertIn(b"Managed disks", page.data)
         self.assertIn(b'id="lighting-title">Lighting', page.data)
@@ -2277,6 +2353,14 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"system-monitor/crash-analysis", javascript.data)
         self.assertIn(b"price-checks/check", javascript.data)
         self.assertIn(b"price-checks/edit", javascript.data)
+        self.assertIn(b"price-checks/schedule", javascript.data)
+        self.assertIn(b"price-checks/schedule/parse", javascript.data)
+        self.assertIn(b"function savePriceSchedule()", javascript.data)
+        self.assertIn(b"priceScheduleRetryDelay *= 1.5", javascript.data)
+        self.assertIn(b"function showPriceScheduleLoading()", javascript.data)
+        self.assertIn(b"Could not parse cron:", javascript.data)
+        self.assertIn(b"could not parse cron", javascript.data)
+        self.assertIn(b".price-cron-spinner", stylesheet.data)
         self.assertIn(b"data-price-edit", javascript.data)
         self.assertIn(b"data-price-remove", javascript.data)
         self.assertIn(b"data-light-brightness", javascript.data)
@@ -2342,6 +2426,16 @@ class DashboardRouteTests(unittest.TestCase):
         )
         self.assertIn(
             'cp -R "$pi_apps/van_dashboard/static" "$python_stage/"',
+            sync_script,
+        )
+        self.assertIn('shared_sh="$dsc/shared/sh"', sync_script)
+        self.assertIn(
+            'cp -a "$shared_sh/." "$staged_scripts/shared/sh/"',
+            sync_script,
+        )
+        self.assertIn("/home/pi/scripts/shared/sh/parse_cron.sh", sync_script)
+        self.assertIn(
+            "rm -f -- /home/pi/scripts/cron_helpers.sh /home/pi/scripts/parse_cron.sh",
             sync_script,
         )
 
