@@ -77,6 +77,8 @@ codexp() {
 }
 alias codexpr='codexp resume'
 alias codexpcan='codexp --sandbox danger-full-access resume --last'
+codexsearch() { "home/pi/scripts/shared/sh/codexsearch.sh" "$@"; }
+
 alias claudep='claude --permission-mode bypassPermissions'
 clauderm() {
     if [ -z "$1" ] || [ -z "$2" ]; then
