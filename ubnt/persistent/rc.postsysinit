@@ -17,9 +17,12 @@ cp "$persistent/config/.profile" "$persistent/.profile"
 
 if [ -s "$key_source" ]; then
     touch "$authorized_keys"
-    if ! grep -Fqx -f "$key_source" "$authorized_keys" 2>/dev/null; then
-        cat "$key_source" >> "$authorized_keys"
-    fi
+    while IFS= read -r key; do
+        [ -n "$key" ] || continue
+        if ! grep -Fqx "$key" "$authorized_keys" 2>/dev/null; then
+            printf '%s\n' "$key" >> "$authorized_keys"
+        fi
+    done < "$key_source"
     sort -u "$authorized_keys" > "$authorized_keys.new" && mv "$authorized_keys.new" "$authorized_keys"
     chmod 600 "$authorized_keys"
 fi

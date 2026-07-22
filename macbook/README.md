@@ -12,9 +12,11 @@ Code that is also deployed to another host belongs in `../shared/` instead.
 ## Codex ntfy notifications
 
 `scripts/codex_ntfy_notify.py` is a macOS Codex external-notification hook. It
-looks up the conversation title in the Mac's local Codex state database, then
-sends the completed notification through vanpi's existing `ntfy_send.sh` over
-SSH. Notification credentials remain on vanpi.
+uses the latest explicit `/rename` value from the Mac's Codex session index as
+the ntfy title, falling back to the current folder name when the conversation
+has not been renamed. The newest assistant response leads the notification body,
+followed by the working directory for context. The hook sends through vanpi's
+existing `ntfy_send.sh` over SSH, so notification credentials remain on vanpi.
 
 Enable it in the user-level `~/.codex/config.toml` (Codex ignores `notify` in
 project-level configuration):

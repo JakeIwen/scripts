@@ -5,7 +5,6 @@ import json
 import os
 from pathlib import Path
 import shlex
-import sqlite3
 import subprocess
 import sys
 
@@ -13,41 +12,44 @@ import sys
 SSH = "/usr/bin/ssh"
 SSH_HOST = os.environ.get("CODEX_NTFY_SSH_HOST", "pi@vanpi.lan")
 REMOTE_NTFY_SEND = "/home/pi/scripts/ntfy_send.sh"
-CODEX_STATE = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "state_5.sqlite"
+CODEX_DIR = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
+SESSION_INDEX = CODEX_DIR / "session_index.jsonl"
 MAX_MESSAGE_CHARS = 3500
+MAX_TITLE_CHARS = 200
 
 
 def conversation_title(event: dict) -> str:
-    for key in ("conversation-title", "thread-title"):
-        title = event.get(key)
-        if isinstance(title, str) and title.strip():
-            return title.strip()
-
     thread_id = event.get("thread-id")
-    if not thread_id or not CODEX_STATE.is_file():
+    if not thread_id or not SESSION_INDEX.is_file():
         return ""
+    title = ""
     try:
-        with sqlite3.connect(f"file:{CODEX_STATE}?mode=ro", uri=True, timeout=1) as connection:
-            row = connection.execute(
-                "SELECT title FROM threads WHERE id = ?",
-                (thread_id,),
-            ).fetchone()
-    except (OSError, sqlite3.Error):
+        with SESSION_INDEX.open(encoding="utf-8") as index:
+            for line in index:
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                candidate = entry.get("thread_name")
+                if entry.get("id") == thread_id and isinstance(candidate, str) and candidate.strip():
+                    title = candidate.strip()
+    except OSError:
         return ""
-    return row[0].strip() if row and isinstance(row[0], str) else ""
+    return title
 
 
 def notification(event: dict) -> tuple[str, str]:
     cwd = event.get("cwd") or "unknown directory"
     project = Path(cwd).name or cwd
     assistant_message = (event.get("last-assistant-message") or "Turn complete").strip()
-    message = f"{cwd}\n\n{assistant_message}"
     thread_title = conversation_title(event)
-    if thread_title:
-        message = f"{thread_title} - {message}"
+    title = thread_title or project
+    if len(title) > MAX_TITLE_CHARS:
+        title = title[: MAX_TITLE_CHARS - 1].rstrip() + "…"
+    message = f"{assistant_message}\n\n{cwd}"
     if len(message) > MAX_MESSAGE_CHARS:
         message = message[: MAX_MESSAGE_CHARS - 1].rstrip() + "…"
-    return f"Codex ready — {project}", message
+    return title, message
 
 
 def remote_command(title: str, message: str) -> str:
