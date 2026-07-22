@@ -2378,6 +2378,10 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"bookUrl.port", javascript.data)
         self.assertIn(b"'8787'", javascript.data)
         self.assertIn(b"eligible_local_work", javascript.data)
+        self.assertIn(b"Estimated Pi analysis avoided", javascript.data)
+        self.assertIn(b"estimated_pi_cpu_seconds_avoided", javascript.data)
+        self.assertIn(b"Pi submission, snapshot, and SSH streaming overhead excluded", javascript.data)
+        self.assertIn(b"dataset-backed work remains uncalibrated", page.data)
         self.assertIn(b"status.slots_total", javascript.data)
         self.assertIn(b"status.local_running", javascript.data)
         self.assertIn(

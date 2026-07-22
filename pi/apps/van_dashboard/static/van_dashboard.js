@@ -1577,6 +1577,7 @@ function renderComputeMetrics(response) {
   computeMetrics = response;
   const status = response.status || {},
     summary = response.summary || {},
+    benchmark = response.benchmark || {},
     localWork = response.eligible_local_work || {},
     jobs = response.jobs || [],
     tasks = response.tasks || [],
@@ -1590,6 +1591,13 @@ function renderComputeMetrics(response) {
     failures = Number(summary.failed) || 0,
     telemetryJobs = Number(summary.telemetry_jobs) || 0,
     timingJobs = Number(summary.timing_jobs) || 0,
+    calibratedJobs = Number(benchmark.calibrated_remote_jobs) || 0,
+    calibratedWorkloads = Number(benchmark.calibrated_workloads) || 0,
+    benchmarkPiSamples = Number(benchmark.pi_samples) || 0,
+    analysisRatio = Number(benchmark.analysis_speedup_ratio),
+    cpuRatio = Number(benchmark.pi_to_mac_cpu_ratio),
+    hasAnalysisRatio = benchmark.analysis_speedup_ratio !== null && Number.isFinite(analysisRatio),
+    hasCpuRatio = benchmark.pi_to_mac_cpu_ratio !== null && Number.isFinite(cpuRatio),
     eligibleEvents = Number(localWork.events) || 0,
     recordedPlacements = (Number(summary.jobs) || 0) + eligibleEvents,
     tile = $('compute-worker'),
@@ -1635,6 +1643,9 @@ function renderComputeMetrics(response) {
   const leadingReason = localReasons[0];
   const overview = [
     ['Recorded placement share', recordedPlacements ? `${(100 * (Number(summary.jobs) || 0) / recordedPlacements).toFixed(0)}% Mac` : '—', recordedPlacements ? `${Number(summary.jobs) || 0} completed Mac job${Number(summary.jobs) === 1 ? '' : 's'} · ${eligibleEvents} recorded Pi event${eligibleEvents === 1 ? '' : 's'}` : 'No completed placement evidence in this range'],
+    ['Estimated Pi analysis avoided', calibratedJobs ? formatComputeSeconds(benchmark.estimated_pi_analysis_seconds_avoided) : '—', calibratedJobs ? `${calibratedJobs} exact-content Mac job${calibratedJobs === 1 ? '' : 's'} calibrated · Pi submission, snapshot, and SSH streaming overhead excluded` : 'Needs the same exact-content workload measured on Pi and Mac'],
+    ['Estimated Pi CPU avoided', calibratedJobs ? formatComputeSeconds(benchmark.estimated_pi_cpu_seconds_avoided) : '—', calibratedJobs ? `Per-workload averages from ${benchmarkPiSamples} Pi sample${benchmarkPiSamples === 1 ? '' : 's'} across ${calibratedWorkloads} workload${calibratedWorkloads === 1 ? '' : 's'}` : 'No matched Pi/Mac samples in this range'],
+    ['Exact-content Pi / Mac', calibratedJobs && hasAnalysisRatio ? `${analysisRatio.toFixed(2)}× analysis` : '—', calibratedJobs ? `${hasCpuRatio ? `${cpuRatio.toFixed(2)}× CPU` : 'CPU ratio unavailable'} · ${formatBytes(benchmark.maximum_pi_peak_rss_bytes)} max Pi RSS` : 'Dataset-backed and unmatched work is not estimated'],
     ['Offloaded jobs · Mac', `${summary.jobs || 0}`, `${summary.succeeded || 0} succeeded · ${failures} failed`],
     ['CPU consumed · Mac', telemetryJobs ? formatComputeSeconds(summary.mac_cpu_seconds) : '—', telemetryJobs ? `${Number(summary.aggregate_cpu_percent || 0).toFixed(0)}% across measured active time` : 'New worker telemetry starts with its next job'],
     ['Mac active time', telemetryJobs ? formatComputeSeconds(summary.mac_wall_seconds) : '—', `${telemetryJobs} measured job${telemetryJobs === 1 ? '' : 's'} · staging through non-telemetry uploads`],
