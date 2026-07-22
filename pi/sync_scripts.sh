@@ -17,18 +17,35 @@ vr_ip='root@openwrt'
 
 local_stage="$(mktemp -d "/tmp/vanpi-sync.XXXXXX")" || exit 1
 staged_scripts="$local_stage/scripts"
+staged_services="$local_stage/services"
 
 cleanup_local_stage() {
   rm -rf -- "$local_stage"
 }
 trap cleanup_local_stage EXIT
 
-cp -a "$repo_scripts" "$staged_scripts"
+/bin/mkdir -p "$staged_scripts" "$staged_services"
+# The compute queue, shared protocol, and broker unit have one atomic
+# deployment owner: install_van_compute_worker.zsh.  Publishing any of them via
+# this generic sync can mix incompatible Pi and Mac protocol versions or start
+# the broker before its private runtime has been provisioned.
+/usr/bin/rsync -a \
+  --exclude '/compute/' \
+  --exclude '__pycache__/' \
+  --exclude '*.pyc' \
+  "$repo_scripts/" "$staged_scripts/" || exit 1
+/usr/bin/rsync -a \
+  --exclude '/van-compute-broker.service' \
+  "$services/" "$staged_services/" || exit 1
 cp -a "$shared_sh/." "$staged_scripts/"
 python_stage="$staged_scripts/python-automation"
 mkdir -p "$python_stage"
-find "$pi_apps" "$pi_python" "$shared_python" -type f -name "*.py" \
+/usr/bin/find "$pi_apps" "$pi_python" "$shared_python" -type f -name "*.py" \
   -exec cp {} "$python_stage/" \;
+# The command protocol moves atomically with the compute worker. Dashboard
+# metrics remain in the normal shared-Python deployment so their UI stays in
+# sync; the compute installer also carries that same read-only module.
+/bin/rm -f -- "$python_stage/van_compute_protocol.py"
 cp -R "$pi_apps/van_dashboard/templates" "$python_stage/"
 cp -R "$pi_apps/van_dashboard/static" "$python_stage/"
 
@@ -41,7 +58,7 @@ ssh $mux $pi_ip true || { echo "can't reach $pi_ip"; exit 1; }
 cp_services() {
   local remote_stage="/tmp/systemd-tmp.$$"
   ssh $mux $pi_ip "mkdir -p '$remote_stage'" || return 1
-  scp $mux -r "$services" "$staged_scripts" "$pi_ip:$remote_stage/" || return 1
+  scp $mux -r "$staged_services" "$staged_scripts" "$pi_ip:$remote_stage/" || return 1
   ssh $mux $pi_ip "bash '$remote_stage/scripts/update_services.sh' '$remote_stage'"
 }
 

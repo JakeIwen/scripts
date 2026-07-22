@@ -47,9 +47,10 @@ for staged_unit in "${staged_units[@]}"; do
     changed=true
   fi
 
-  # Restart a service when a repository-managed file named in ExecStart has
-  # changed. This catches interpreted programs such as audiobook_server.py,
-  # where the executable itself (/usr/bin/python3) does not change.
+  # Restart a service when a repository-managed file named in ExecStart or an
+  # ExecStartPre validation has changed. This catches interpreted programs and
+  # their explicitly declared runtime assets, where the executable itself
+  # (/usr/bin/python3 or /usr/bin/test) does not change.
   while IFS= read -r managed_path; do
     relative_path="${managed_path#/home/pi/scripts/}"
     staged_path="$staged_scripts/$relative_path"
@@ -59,7 +60,7 @@ for staged_unit in "${staged_units[@]}"; do
       changed=true
     fi
   done < <(
-    sed -n 's/^ExecStart=//p' "$staged_unit" \
+    sed -n -e 's/^ExecStart=//p' -e 's/^ExecStartPre=//p' "$staged_unit" \
       | grep -oE '/home/pi/scripts/[^[:space:]\"]+' \
       || true
   )
@@ -72,8 +73,13 @@ done
 mkdir -p "$live_scripts"
 cp -a "$staged_scripts/." "$live_scripts/"
 # Preserve the old sync behavior for top-level scripts, and do it before any
-# service restart so directly executed shell scripts remain runnable.
-chmod 770 "$live_scripts"/*
+# service restart so directly executed shell scripts remain runnable. Do not
+# chmod directories: compute/ is installer-owned and deliberately remains 0700.
+for staged_script in "$staged_scripts"/*; do
+  if [[ -f "$staged_script" && ! -L "$staged_script" ]]; then
+    chmod 770 "$live_scripts/${staged_script##*/}"
+  fi
+done
 
 for staged_unit in "${staged_units[@]}"; do
   sudo install -m 0644 "$staged_unit" "$live_services/${staged_unit##*/}"

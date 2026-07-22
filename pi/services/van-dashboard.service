@@ -4,6 +4,10 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_compute_metrics.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/templates/van_dashboard.html
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/static/van_dashboard.js
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/static/van_dashboard.css
 ExecStart=/usr/bin/python3 /home/pi/scripts/python-automation/van_dashboard.py
 WorkingDirectory=/home/pi
 Restart=always
