@@ -41,6 +41,9 @@ sparesync() { # refresh a hot spare from the live system: sparesync a | sparesyn
   sudo /home/pi/scripts/clone_to_sd.sh "$l"
 }
 
+# parse cron
+cronp() { . /home/pi/scripts/parse_cron.sh "$1"; }
+
 stopcron() {
   sudo systemctl stop cron
   sudo systemctl disable cron
@@ -75,6 +78,7 @@ codexp() {
     "$@"
 }
 alias codexpr='codexp resume'
+alias codexpcan='codexp --sandbox danger-full-access resume --last'
 alias claudep='claude --permission-mode bypassPermissions'
 clauderm() {
     if [ -z "$1" ] || [ -z "$2" ]; then
