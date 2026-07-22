@@ -34,7 +34,7 @@ alias killcron="sudo pkill -f cron"
 alias cronlog="cd /var/log/cron"
 alias bkuplog='cat /var/log/cron/pi_backup.log'
 alias bkuplast="bkuplog | grep 'backup complete'"
-cronp() { /home/pi/scripts/shared/sh/parse_cron.sh "$@"; }
+cronp() { /home/pi/scripts/parse_cron.sh "$@"; }
 bkupnow() { sudo /home/pi/scripts/backup/pi_backup.sh --force; } # manual backup to bigboi now
 sparesync() { # refresh a hot spare from the live system: sparesync a | sparesync b
   local l=${1:?usage: sparesync a|b}
@@ -77,7 +77,7 @@ codexp() {
 }
 alias codexpr='codexp resume'
 alias codexpcan='codexp --sandbox danger-full-access resume --last'
-codexsearch() { "home/pi/scripts/shared/sh/codexsearch.sh" "$@"; }
+codexsearch() { /home/pi/scripts/codexsearch.sh "$@"; }
 
 alias claudep='claude --permission-mode bypassPermissions'
 clauderm() {
@@ -171,8 +171,8 @@ add_pricecheck() { # add_pricecheck <parser> <threshold> <URL> [title]
     echo "usage: add_pricecheck <parser> <threshold> <URL> [title]" >&2
     return 2
   fi
-  python3 "${PRICE_CHECK_SCRIPT:-$HOME/scripts/price_check/main.py}" \
-    --db "${PRICE_CHECK_DB:-$HOME/.local/share/price_check/price_check.sqlite3}" \
+  python3 "$HOME/scripts/price_check/main.py" \
+    --db "$HOME/.local/share/price_check/price_check.sqlite3" \
     add "$@"
 }
 rm_pricecheck() { # rm_pricecheck <title-or-URL>
@@ -180,8 +180,8 @@ rm_pricecheck() { # rm_pricecheck <title-or-URL>
     echo "usage: rm_pricecheck <title-or-URL>" >&2
     return 2
   fi
-  python3 "${PRICE_CHECK_SCRIPT:-$HOME/scripts/price_check/main.py}" \
-    --db "${PRICE_CHECK_DB:-$HOME/.local/share/price_check/price_check.sqlite3}" \
+  python3 "$HOME/scripts/price_check/main.py" \
+    --db "$HOME/.local/share/price_check/price_check.sqlite3" \
     remove "$1"
 }
 sx() { sudo "$(history | perl -pe 's/^\s+[0-9]+\**\s+//g' | tail -1)"; }

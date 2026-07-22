@@ -2430,14 +2430,10 @@ class DashboardRouteTests(unittest.TestCase):
         )
         self.assertIn('shared_sh="$dsc/shared/sh"', sync_script)
         self.assertIn(
-            'cp -a "$shared_sh/." "$staged_scripts/shared/sh/"',
+            'cp -a "$shared_sh/." "$staged_scripts/"',
             sync_script,
         )
-        self.assertIn("/home/pi/scripts/shared/sh/parse_cron.sh", sync_script)
-        self.assertIn(
-            "rm -f -- /home/pi/scripts/cron_helpers.sh /home/pi/scripts/parse_cron.sh",
-            sync_script,
-        )
+        self.assertNotIn("/home/pi/scripts/shared", sync_script)
 
     def test_ntfy_helper_has_bounded_network_timeouts(self):
         repository = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

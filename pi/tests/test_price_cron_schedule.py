@@ -33,7 +33,7 @@ class FakeCommands:
 
     def __call__(self, args, **_kwargs):
         self.calls.append(list(args))
-        if args[0] == "/test/shared/sh/parse_cron.sh":
+        if args[0] == "/test/parse_cron.sh":
             if self.rate_limited:
                 return self.result(args, returncode=75, stderr="cron parser rate limited")
             if self.description:
@@ -63,7 +63,7 @@ class CronScheduleManagerTests(unittest.TestCase):
         self.commands = FakeCommands()
         self.manager = CronScheduleManager(
             crontab_bin="/test/crontab",
-            parser=Path("/test/shared/sh/parse_cron.sh"),
+            parser=Path("/test/parse_cron.sh"),
             runner=self.commands,
             temporary_directory=self.temporary.name,
         )

@@ -24,8 +24,7 @@ cleanup_local_stage() {
 trap cleanup_local_stage EXIT
 
 cp -a "$repo_scripts" "$staged_scripts"
-mkdir -p "$staged_scripts/shared/sh"
-cp -a "$shared_sh/." "$staged_scripts/shared/sh/"
+cp -a "$shared_sh/." "$staged_scripts/"
 python_stage="$staged_scripts/python-automation"
 mkdir -p "$python_stage"
 find "$pi_apps" "$pi_python" "$shared_python" -type f -name "*.py" \
@@ -69,11 +68,6 @@ wait $home_pid
 ssh $mux $pi_ip 'sudo chmod 770 /home/pi/rsync-exclude-media.txt' &
 wait $dirs_pid
 wait $services_pid || { echo "script/service deployment failed" >&2; exit 1; }
-ssh $mux $pi_ip '
-  if [ -x /home/pi/scripts/shared/sh/parse_cron.sh ]; then
-    rm -f -- /home/pi/scripts/cron_helpers.sh /home/pi/scripts/parse_cron.sh
-  fi
-' || { echo "shared shell migration cleanup failed" >&2; exit 1; }
 
 # ROUTER
 # scp -r "$vr_ip:/etc/config" "$vanrouter/etc/" &

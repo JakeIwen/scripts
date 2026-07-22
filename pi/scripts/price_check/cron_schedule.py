@@ -27,7 +27,7 @@ class CronScheduleManager:
         self,
         *,
         crontab_bin="/usr/bin/crontab",
-        parser=Path("/home/pi/scripts/shared/sh/parse_cron.sh"),
+        parser=Path("/home/pi/scripts/parse_cron.sh"),
         command=PRICE_CHECK_COMMAND,
         runner=subprocess.run,
         temporary_directory=None,
