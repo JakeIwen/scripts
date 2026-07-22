@@ -35,6 +35,11 @@ from urllib.request import Request, urlopen
 
 from flask import Flask, jsonify, render_template, request
 
+try:
+    from shared.python.van_compute_metrics import ComputeMetricsError, ComputeMetricsReader
+except ModuleNotFoundError:
+    from van_compute_metrics import ComputeMetricsError, ComputeMetricsReader
+
 
 PORT = int(os.environ.get("VAN_DASHBOARD_PORT", "8788"))
 STATE_PATH = os.path.expanduser(
@@ -92,6 +97,9 @@ SYSTEM_MONITOR_DB = os.environ.get(
 )
 SYSTEM_MONITOR_TIMEOUT = float(
     os.environ.get("VAN_DASHBOARD_SYSTEM_MONITOR_TIMEOUT", "15")
+)
+COMPUTE_ROOT = os.environ.get(
+    "VAN_DASHBOARD_COMPUTE_ROOT", "/home/pi/dev/obd-things/tmp/compute"
 )
 BACKUP_CONF = os.environ.get(
     "VAN_DASHBOARD_BACKUP_CONF", "/home/pi/scripts/backup/backup_conf.sh"
@@ -3409,6 +3417,7 @@ storage_policy = StoragePolicyManager()
 lighting = LightingController()
 price_checks = PriceCheckController()
 system_monitor = SystemMonitorClient()
+compute_monitor = ComputeMetricsReader(COMPUTE_ROOT)
 usb_devices = UsbDeviceMonitor()
 usb_ports = UsbPortController(usb_devices)
 backups = BackupManager()
@@ -3916,6 +3925,26 @@ def api_system_monitor_crashes():
         payload = system_monitor.crash_history(20)
     except SystemMonitorCommandError as exc:
         return api_error(f"crash history unavailable: {exc}", 503)
+    response = jsonify(payload)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/api/compute")
+def api_compute():
+    if set(request.args) - {"hours"} or len(request.args.getlist("hours")) > 1:
+        return api_error("compute metrics accepts only one hours value", 400)
+    raw_hours = request.args.get("hours", "168")
+    try:
+        hours = int(raw_hours)
+    except (TypeError, ValueError):
+        return api_error("compute metrics range must be 6, 24, 168, or 720 hours", 400)
+    if hours not in (6, 24, 168, 720):
+        return api_error("compute metrics range must be 6, 24, 168, or 720 hours", 400)
+    try:
+        payload = compute_monitor.report(hours)
+    except (OSError, ComputeMetricsError) as exc:
+        return api_error(f"compute metrics unavailable: {exc}", 503)
     response = jsonify(payload)
     response.headers["Cache-Control"] = "no-store"
     return response

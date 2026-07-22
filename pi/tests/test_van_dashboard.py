@@ -2116,7 +2116,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'class="network-card-heading ubnt-card-heading tile-heading"', page.data)
         self.assertIn(b'class="network-card-heading tile-heading" id="openwrt-title"', page.data)
         self.assertIn(b'class="network-card-heading speedtest-card-head"', page.data)
-        self.assertEqual(page.data.count(b"tile-heading"), 13)
+        self.assertEqual(page.data.count(b"tile-heading"), 14)
         self.assertIn(b'id="sonos-track"', page.data)
         self.assertIn(b'id="sonos-progress"', page.data)
         self.assertIn(b'data-transport="play_pause"', page.data)
@@ -2125,6 +2125,11 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"Disks &amp; Torrents", page.data)
         self.assertIn(b'id="system-monitor"', page.data)
         self.assertIn(b'id="system-monitor-panel"', page.data)
+        self.assertIn(b'id="compute-worker"', page.data)
+        self.assertIn(b'id="compute-panel"', page.data)
+        self.assertIn(b'id="compute-overview"', page.data)
+        self.assertIn(b'id="compute-jobs"', page.data)
+        self.assertIn(b'data-compute-hours="168"', page.data)
         self.assertIn(b'id="monitor-diagnosis"', page.data)
         self.assertIn(b'id="monitor-events"', page.data)
         self.assertIn(b'id="system-monitor-network"', page.data)
@@ -2180,7 +2185,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertNotIn(b'id="connectivity-age"', page.data)
         self.assertIn(b'id="openwrt-card" data-dashboard-tile', page.data)
         self.assertIn(b'id="speedtest-button" data-dashboard-tile', page.data)
-        self.assertEqual(page.data.count(b"data-dashboard-tile"), 14)
+        self.assertEqual(page.data.count(b"data-dashboard-tile"), 15)
         self.assertIn(b'class="network-card speedtest-card"', page.data)
         self.assertIn(b'id="ubnt-network-list"', page.data)
         self.assertIn(b'id="ubnt-password-form"', page.data)
@@ -2241,6 +2246,9 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"function renderLighting(next)", javascript.data)
         self.assertIn(b"function renderPriceChecks(response)", javascript.data)
         self.assertIn(b"function renderSystemMonitor(response)", javascript.data)
+        self.assertIn(b"function renderComputeMetrics(response)", javascript.data)
+        self.assertIn(b"function formatComputeSeconds(value)", javascript.data)
+        self.assertIn(b"/api/compute?hours=", javascript.data)
         self.assertIn(b"function renderUsbDevices(response)", javascript.data)
         self.assertIn(b"function renderUsbPorts(state)", javascript.data)
         self.assertIn(b"function changeUsbPort(button)", javascript.data)
@@ -2296,6 +2304,9 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b".monitor-event-state", stylesheet.data)
         self.assertIn(b".monitor-io-details", stylesheet.data)
         self.assertIn(b".monitor-io-row", stylesheet.data)
+        self.assertIn(b".compute-overview", stylesheet.data)
+        self.assertIn(b".compute-job", stylesheet.data)
+        self.assertIn(b".compute-bars", stylesheet.data)
         self.assertIn(b".usb-device-row", stylesheet.data)
         self.assertIn(b".usb-label", stylesheet.data)
         self.assertIn(b".usb-port-grid", stylesheet.data)
@@ -2678,6 +2689,40 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(bad_analysis.status_code, 400)
         self.assertEqual(bad_history.status_code, 400)
         self.assertEqual(calls, [("analyze",), ("history", 20)])
+
+    def test_compute_route_has_bounded_ranges(self):
+        calls = []
+
+        class FakeComputeMonitor:
+            def report(self, hours):
+                calls.append(hours)
+                return {
+                    "ok": True,
+                    "range_hours": hours,
+                    "status": {"available": True, "queued": 0, "running": 0},
+                    "summary": {"jobs": 2, "mac_cpu_seconds": 3.5},
+                    "tasks": [],
+                    "jobs": [],
+                }
+
+        original = dashboard.compute_monitor
+        dashboard.compute_monitor = FakeComputeMonitor()
+        try:
+            client = dashboard.app.test_client()
+            default = client.get("/api/compute")
+            day = client.get("/api/compute?hours=24")
+            invalid = client.get("/api/compute?hours=25")
+            extra = client.get("/api/compute?hours=24&command=anything")
+        finally:
+            dashboard.compute_monitor = original
+
+        self.assertEqual(default.status_code, 200)
+        self.assertEqual(default.headers["Cache-Control"], "no-store")
+        self.assertEqual(default.json["range_hours"], 168)
+        self.assertEqual(day.status_code, 200)
+        self.assertEqual(invalid.status_code, 400)
+        self.assertEqual(extra.status_code, 400)
+        self.assertEqual(calls, [168, 24])
 
     def test_lighting_routes_are_authoritative_and_reject_unknown_inputs(self):
         calls = []

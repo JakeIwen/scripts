@@ -61,6 +61,16 @@
         <span class="status-line"><span>Disk I/O</span><span id="system-monitor-disk">—</span></span>
       </span>
     </button>
+    <button class="tile compute-tile unknown" id="compute-worker" data-dashboard-tile data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="compute-panel">
+      <span class="pill" id="compute-pill">NO DATA</span><span class="tile-heading"><span class="tile-icon" aria-hidden="true">🧠</span><span class="tile-title">M4 Compute</span></span>
+      <span class="tile-detail" id="compute-summary">Checking offloaded analysis…</span>
+      <span class="status-lines">
+        <span class="status-line"><span>Worker</span><span id="compute-worker-state">Checking…</span></span>
+        <span class="status-line"><span>Queue</span><span id="compute-queue">—</span></span>
+        <span class="status-line"><span>Mac CPU delivered</span><span id="compute-cpu">—</span></span>
+        <span class="status-line"><span>Peak job memory</span><span id="compute-memory">—</span></span>
+      </span>
+    </button>
     <button class="tile usb-tile unknown" id="usb-devices" data-dashboard-tile data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="usb-panel">
       <span class="pill" id="usb-pill">NO DATA</span><span class="tile-heading"><span class="tile-icon" aria-hidden="true">🔌</span><span class="tile-title">USB Devices</span></span>
       <span class="tile-detail" id="usb-summary">Reading live USB devices…</span>
@@ -182,6 +192,19 @@
       <div class="monitor-crash-history"><h4>Saved analyses</h4><div id="monitor-crash-history"><div class="speaker-loading">Loading saved analyses…</div></div></div>
     </section>
     <section class="monitor-section" aria-labelledby="monitor-events-title"><div class="monitor-section-head"><h3 id="monitor-events-title">Event timeline</h3><span id="monitor-event-count">—</span></div><div class="monitor-events" id="monitor-events"><div class="speaker-loading">Loading events…</div></div></section>
+  </section>
+</div>
+<div class="speaker-backdrop" id="compute-backdrop">
+  <section class="speaker-sheet compute-sheet" id="compute-panel" role="dialog" aria-modal="true" aria-labelledby="compute-title" aria-busy="true">
+    <div class="sheet-grabber"></div><div class="sheet-head"><h2 id="compute-title">M4 Compute Offload</h2><span class="policy-sheet-status" id="compute-status">Loading…</span><button class="sheet-close" id="compute-close" aria-label="Close M4 compute metrics">&times;</button></div>
+    <p class="sheet-help">Measured resources consumed by offline jobs on the Mac. This is work kept off vanpi, but Mac CPU seconds are not a calibrated estimate of equivalent Pi time.</p>
+    <div class="monitor-ranges" role="group" aria-label="Compute metrics time range">
+      <button data-compute-hours="6" type="button">6 hours</button><button data-compute-hours="24" type="button">24 hours</button><button class="active" data-compute-hours="168" type="button">7 days</button><button data-compute-hours="720" type="button">30 days</button>
+    </div>
+    <div class="compute-overview" id="compute-overview" aria-label="Compute offload totals"></div>
+    <section class="monitor-section" aria-labelledby="compute-jobs-title"><div class="monitor-section-head"><div><h3 id="compute-jobs-title">Recent offloaded jobs</h3><p>CPU and memory bars are relative to the largest visible job.</p></div><span id="compute-job-count">—</span></div><div class="compute-jobs" id="compute-jobs"><div class="speaker-loading">Loading jobs…</div></div></section>
+    <section class="monitor-section" aria-labelledby="compute-tasks-title"><div class="monitor-section-head"><div><h3 id="compute-tasks-title">Work by task</h3><p>Completed jobs in the selected range.</p></div></div><div class="compute-tasks" id="compute-tasks"><div class="speaker-loading">Loading task totals…</div></div></section>
+    <p class="monitor-note" id="compute-measurement-note">Waiting for worker telemetry…</p>
   </section>
 </div>
 <div class="speaker-backdrop" id="usb-backdrop">

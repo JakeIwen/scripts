@@ -2350,7 +2350,8 @@ body.busy [data-action] {
     grid-template-columns: 1fr;
   }
 }
-.monitor-tile.good {
+.monitor-tile.good,
+.compute-tile.good {
   border-color: #356c58;
   background: linear-gradient(145deg, #1d302a, #15231f);
 }
@@ -2361,26 +2362,32 @@ body.busy [data-action] {
   gap: 5px;
   font-size: 9px;
 }
-.monitor-tile.warning {
+.monitor-tile.warning,
+.compute-tile.warning {
   border-color: #7b633a;
   background: linear-gradient(145deg, #30291d, #242017);
 }
-.monitor-tile.critical {
+.monitor-tile.critical,
+.compute-tile.critical {
   border-color: #8c4943;
   background: linear-gradient(145deg, #382320, #281a19);
 }
-.monitor-tile.unknown {
+.monitor-tile.unknown,
+.compute-tile.unknown {
   opacity: 0.82;
 }
-.monitor-tile.good .pill {
+.monitor-tile.good .pill,
+.compute-tile.good .pill {
   background: #254b3d;
   color: #bcebd5;
 }
-.monitor-tile.warning .pill {
+.monitor-tile.warning .pill,
+.compute-tile.warning .pill {
   background: #584524;
   color: #f2d59e;
 }
-.monitor-tile.critical .pill {
+.monitor-tile.critical .pill,
+.compute-tile.critical .pill {
   background: #713631;
   color: #ffd2ce;
 }
@@ -2978,6 +2985,153 @@ body.busy [data-action] {
   color: #cbd8de;
   padding: 2px 6px;
 }
+.compute-tile {
+  min-height: 205px;
+}
+.compute-tile .status-line {
+  gap: 5px;
+  font-size: 9px;
+}
+.compute-sheet {
+  max-height: min(92vh, 920px);
+  overflow-y: auto;
+}
+.compute-overview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+.compute-overview > div {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #151f27;
+  padding: 10px;
+}
+.compute-overview span,
+.compute-overview strong,
+.compute-overview small {
+  display: block;
+}
+.compute-overview span {
+  color: var(--dim);
+  font-size: 9px;
+}
+.compute-overview strong {
+  margin-top: 3px;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+.compute-overview small {
+  color: #afc0c8;
+  font-size: 8px;
+  line-height: 1.35;
+  margin-top: 3px;
+}
+.compute-jobs,
+.compute-tasks {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+}
+.compute-job,
+.compute-tasks article {
+  border: 1px solid var(--line);
+  border-left: 3px solid #438194;
+  border-radius: 11px;
+  background: #151f27;
+  padding: 9px 10px;
+}
+.compute-job.failed {
+  border-left-color: var(--bad);
+}
+.compute-job.running {
+  border-left-color: var(--good);
+}
+.compute-job.queued {
+  border-left-color: #d4a650;
+}
+.compute-job-head,
+.compute-tasks article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.compute-job-head > span,
+.compute-tasks article > span {
+  min-width: 0;
+}
+.compute-job-head strong,
+.compute-job-head small,
+.compute-tasks strong,
+.compute-tasks small {
+  display: block;
+}
+.compute-job-head strong,
+.compute-tasks strong {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.compute-job-head small,
+.compute-tasks small {
+  color: var(--dim);
+  font-size: 8px;
+  margin-top: 2px;
+}
+.compute-job-head b {
+  flex: 0 0 auto;
+  color: #bcebd5;
+  font-size: 8px;
+  letter-spacing: 0.05em;
+}
+.compute-job.failed .compute-job-head b {
+  color: #ffd2ce;
+}
+.compute-job > p {
+  color: #bdcbd2;
+  font-size: 9px;
+  margin: 7px 0;
+}
+.compute-bars {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+.compute-bars > span,
+.compute-task-meter {
+  position: relative;
+  min-width: 0;
+  border-radius: 7px;
+  background: #101820;
+  overflow: hidden;
+}
+.compute-bars i,
+.compute-task-meter i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: #397d8177;
+}
+.compute-bars > span:last-child i {
+  background: #6a5f9277;
+}
+.compute-bars small,
+.compute-task-meter small {
+  position: relative;
+  z-index: 1;
+  display: block;
+  color: #d5e1e5;
+  font-size: 8px;
+  padding: 4px 6px;
+  white-space: nowrap;
+}
+.compute-task-meter {
+  flex: 0 1 52%;
+}
+.compute-task-meter i {
+  background: #397d8177;
+}
 @media (max-width: 420px) {
   .grid {
     gap: 9px;
@@ -3042,6 +3196,17 @@ body.busy [data-action] {
     flex-direction: column;
   }
   .monitor-crash-button {
+    width: 100%;
+  }
+  .compute-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .compute-tasks article {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .compute-task-meter {
+    flex-basis: auto;
     width: 100%;
   }
 }

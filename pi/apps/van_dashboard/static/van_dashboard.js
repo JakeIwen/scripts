@@ -6,10 +6,12 @@ let dashboard = null,
   lighting = null,
   priceChecks = null,
   systemMonitor = null,
+  computeMetrics = null,
   backupState = null,
   ignitionMonitor = null,
   ignitionDurationMinutes = 120,
   systemMonitorHours = 6,
+  computeHours = 168,
   ubntWifi = null,
   ubntLink = null,
   ubntNewNetwork = null,
@@ -29,6 +31,7 @@ let dashboard = null,
   storagePoll = 0,
   lightingPoll = 0,
   systemMonitorPoll = 0,
+  computePoll = 0,
   usbPoll = 0,
   backupPoll = 0,
   ignitionMonitorPoll = 0,
@@ -171,6 +174,14 @@ function formatBytes(value) {
 function formatRate(value) {
   return Number.isFinite(value) ? `${formatBytes(value)}/s` : '—';
 }
+function formatComputeSeconds(value) {
+  if (!Number.isFinite(value)) return '—';
+  const seconds = Math.max(0, value);
+  if (seconds < 1) return `${Math.round(seconds * 1000)} ms`;
+  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 2 : 1)} s`;
+  if (seconds < 3600) return `${(seconds / 60).toFixed(1)} min`;
+  return `${(seconds / 3600).toFixed(1)} h`;
+}
 function eventTime(timestamp) {
   if (!Number.isFinite(timestamp)) return 'unknown time';
   return new Date(timestamp * 1000).toLocaleString([], {
@@ -202,6 +213,11 @@ function durationWords(totalSeconds) {
   return parts.slice(0, 2).join(' ');
 }
 function monitorRangeLabel(hours = systemMonitorHours) {
+  if (hours === 168) return '7 days';
+  if (hours === 720) return '30 days';
+  return `${hours} hour${hours === 1 ? '' : 's'}`;
+}
+function computeRangeLabel(hours = computeHours) {
   if (hours === 168) return '7 days';
   if (hours === 720) return '30 days';
   return `${hours} hour${hours === 1 ? '' : 's'}`;
@@ -1383,6 +1399,127 @@ async function refreshSystemMonitor(showErrors = false) {
     throw error;
   }
 }
+function computeStateLabel(job) {
+  if (job.state === 'running') return 'RUNNING';
+  if (job.state === 'queued') return 'QUEUED';
+  if (job.state === 'failed') return job.timed_out ? 'TIMED OUT' : 'FAILED';
+  return 'DONE';
+}
+function renderComputeMetrics(response) {
+  computeMetrics = response;
+  const status = response.status || {},
+    summary = response.summary || {},
+    jobs = response.jobs || [],
+    tasks = response.tasks || [],
+    available = status.available === true,
+    running = Number(status.running) || 0,
+    queued = Number(status.queued) || 0,
+    failures = Number(summary.failed) || 0,
+    telemetryJobs = Number(summary.telemetry_jobs) || 0,
+    tile = $('compute-worker'),
+    tileLevel = available ? (failures ? 'warning' : 'good') : queued ? 'warning' : 'unknown';
+  tile.classList.remove('unknown', 'good', 'warning', 'critical');
+  tile.classList.add(tileLevel);
+  $('compute-pill').textContent = running ? 'BUSY' : available ? 'ONLINE' : 'OFFLINE';
+  $('compute-summary').textContent = summary.jobs
+    ? `${summary.jobs} job${summary.jobs === 1 ? '' : 's'} offloaded in ${computeRangeLabel()}`
+    : 'No completed jobs in selected range';
+  const freshestWorker = (status.workers || [])
+    .slice()
+    .sort((left, right) => (left.age_seconds ?? Infinity) - (right.age_seconds ?? Infinity))[0];
+  $('compute-worker-state').textContent = available
+    ? `${freshestWorker?.worker || 'Mac'} · ${running ? 'working' : 'ready'}`
+    : freshestWorker?.seen_at
+      ? `Last seen ${age(freshestWorker.seen_at)}`
+      : 'No heartbeat';
+  $('compute-queue').textContent = running || queued
+    ? `${running} running · ${queued} queued`
+    : 'Empty';
+  $('compute-cpu').textContent = telemetryJobs
+    ? formatComputeSeconds(summary.mac_cpu_seconds)
+    : 'Awaiting telemetry job';
+  $('compute-memory').textContent = telemetryJobs
+    ? formatBytes(summary.peak_rss_bytes)
+    : 'Awaiting telemetry job';
+
+  $('compute-panel').setAttribute('aria-busy', 'false');
+  $('compute-status').textContent = `${available ? 'Worker online' : 'Worker offline'} · ${computeRangeLabel()}`;
+  const overview = [
+    ['Jobs kept off Pi', `${summary.jobs || 0}`, `${summary.succeeded || 0} succeeded · ${failures} failed`],
+    ['Mac CPU delivered', telemetryJobs ? formatComputeSeconds(summary.mac_cpu_seconds) : '—', telemetryJobs ? `${Number(summary.aggregate_cpu_percent || 0).toFixed(0)}% average across job wall time` : 'New worker telemetry starts with its next job'],
+    ['Mac job wall time', telemetryJobs ? formatComputeSeconds(summary.mac_wall_seconds) : '—', `${telemetryJobs} measured job${telemetryJobs === 1 ? '' : 's'}`],
+    ['Peak job memory', telemetryJobs ? formatBytes(summary.peak_rss_bytes) : '—', 'Analysis process-tree upper bound'],
+    ['Capture/report input', formatBytes(summary.input_bytes), `${formatBytes(summary.source_bytes)} source snapshots`],
+    ['Results returned', formatBytes(summary.result_bytes), Number.isFinite(summary.average_queue_seconds) ? `${formatComputeSeconds(summary.average_queue_seconds)} average queue delay` : 'No completed queue timing'],
+  ];
+  $('compute-overview').innerHTML = overview
+    .map(([label, value, detail]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong><small>${esc(detail)}</small></div>`)
+    .join('');
+
+  const maxCpu = Math.max(0, ...jobs.map((job) => Number(job.cpu_seconds) || 0)),
+    maxMemory = Math.max(0, ...jobs.map((job) => Number(job.peak_rss_bytes) || 0));
+  $('compute-job-count').textContent = `${jobs.length} shown`;
+  $('compute-jobs').innerHTML = jobs
+    .map((job) => {
+      const cpuWidth = maxCpu > 0 ? Math.max(2, (100 * Number(job.cpu_seconds || 0)) / maxCpu) : 0,
+        memoryWidth = maxMemory > 0 ? Math.max(2, (100 * Number(job.peak_rss_bytes || 0)) / maxMemory) : 0,
+        timestamp = job.finished_at || job.started_at || job.submitted_at,
+        details = job.telemetry
+          ? `${formatComputeSeconds(job.wall_seconds)} wall · ${Number(job.average_cpu_percent || 0).toFixed(0)}% avg CPU · ${formatBytes(job.input_bytes)} input`
+          : `${formatBytes(job.input_bytes)} input · resource telemetry unavailable for this older job`;
+      return `<article class="compute-job ${esc(job.state)}">
+        <div class="compute-job-head"><span><strong>${esc(job.task)}</strong><small>${esc(eventTime(timestamp))} · ${esc(job.worker || 'unclaimed')}</small></span><b>${esc(computeStateLabel(job))}</b></div>
+        <p>${esc(details)}</p>
+        <div class="compute-bars" aria-label="Job resource use"><span><i style="width:${cpuWidth}%"></i><small>CPU ${job.telemetry ? formatComputeSeconds(job.cpu_seconds) : '—'}</small></span><span><i style="width:${memoryWidth}%"></i><small>Memory ${job.telemetry ? formatBytes(job.peak_rss_bytes) : '—'}</small></span></div>
+      </article>`;
+    })
+    .join('') || '<div class="speaker-loading">No queued or completed jobs in this range</div>';
+
+  const maxTaskCpu = Math.max(0, ...tasks.map((task) => Number(task.cpu_seconds) || 0));
+  $('compute-tasks').innerHTML = tasks
+    .map((task) => {
+      const width = maxTaskCpu > 0 ? Math.max(2, (100 * Number(task.cpu_seconds || 0)) / maxTaskCpu) : 0;
+      const telemetryLabel = task.telemetry_jobs
+        ? `${formatComputeSeconds(task.cpu_seconds)} Mac CPU · ${formatBytes(task.peak_rss_bytes)} peak`
+        : 'Resource telemetry starts with the next job';
+      return `<article><span><strong>${esc(task.task)}</strong><small>${task.jobs} job${task.jobs === 1 ? '' : 's'} · ${formatBytes(task.input_bytes)} input</small></span><span class="compute-task-meter"><i style="width:${width}%"></i><small>${esc(telemetryLabel)}</small></span></article>`;
+    })
+    .join('') || '<div class="speaker-loading">No completed task totals in this range</div>';
+  $('compute-measurement-note').textContent = response.measurement_note || '';
+  document.querySelectorAll('[data-compute-hours]').forEach((button) => {
+    button.classList.toggle('active', Number(button.dataset.computeHours) === computeHours);
+    button.disabled = false;
+  });
+}
+function renderComputeUnavailable(message) {
+  const tile = $('compute-worker');
+  tile.classList.remove('good', 'warning', 'critical');
+  tile.classList.add('unknown');
+  $('compute-pill').textContent = 'NO DATA';
+  $('compute-summary').textContent = 'Compute metrics unavailable';
+  $('compute-worker-state').textContent = '—';
+  $('compute-queue').textContent = '—';
+  $('compute-cpu').textContent = '—';
+  $('compute-memory').textContent = '—';
+  $('compute-status').textContent = 'Unavailable';
+  $('compute-panel').setAttribute('aria-busy', 'false');
+  $('compute-jobs').innerHTML = `<div class="speaker-loading">${esc(message)}</div>`;
+  $('compute-tasks').innerHTML = `<div class="speaker-loading">${esc(message)}</div>`;
+  document.querySelectorAll('[data-compute-hours]').forEach((button) => {
+    button.disabled = false;
+  });
+}
+async function refreshComputeMetrics(showErrors = false) {
+  try {
+    const response = await json(`/api/compute?hours=${computeHours}`);
+    renderComputeMetrics(response);
+    return response;
+  } catch (error) {
+    renderComputeUnavailable(error.message);
+    if (showErrors) toast(error.message, true);
+    throw error;
+  }
+}
 function crashCountLabel(kind) {
   return String(kind || '')
     .replaceAll('_', ' ')
@@ -2220,6 +2357,32 @@ function closeSystemMonitor() {
   $('system-monitor').setAttribute('aria-expanded', 'false');
   $('system-monitor').focus();
 }
+async function pollComputeMetrics() {
+  clearTimeout(computePoll);
+  if (!$('compute-backdrop').classList.contains('open')) return;
+  try {
+    await refreshComputeMetrics(false);
+  } catch (_) {
+    /* rendered by refreshComputeMetrics */
+  } finally {
+    computePoll = setTimeout(pollComputeMetrics, 10000);
+  }
+}
+async function openComputeMetrics() {
+  $('compute-backdrop').classList.add('open');
+  document.body.classList.add('sheet-open');
+  $('compute-worker').setAttribute('aria-expanded', 'true');
+  $('compute-panel').setAttribute('aria-busy', 'true');
+  await refreshComputeMetrics(true).catch(() => {});
+  computePoll = setTimeout(pollComputeMetrics, 10000);
+}
+function closeComputeMetrics() {
+  clearTimeout(computePoll);
+  $('compute-backdrop').classList.remove('open');
+  document.body.classList.remove('sheet-open');
+  $('compute-worker').setAttribute('aria-expanded', 'false');
+  $('compute-worker').focus();
+}
 async function pollUsbDevices() {
   clearTimeout(usbPoll);
   if (!$('usb-backdrop').classList.contains('open')) return;
@@ -2395,6 +2558,8 @@ $('storage').addEventListener('click', openStorage);
 $('storage-close').addEventListener('click', closeStorage);
 $('system-monitor').addEventListener('click', openSystemMonitor);
 $('system-monitor-close').addEventListener('click', closeSystemMonitor);
+$('compute-worker').addEventListener('click', openComputeMetrics);
+$('compute-close').addEventListener('click', closeComputeMetrics);
 $('monitor-crash-analyze').addEventListener('click', analyzePreviousCrash);
 $('usb-devices').addEventListener('click', openUsbDevices);
 $('usb-close').addEventListener('click', closeUsbDevices);
@@ -2446,6 +2611,9 @@ $('storage-backdrop').addEventListener('click', (event) => {
 $('system-monitor-backdrop').addEventListener('click', (event) => {
   if (event.target === $('system-monitor-backdrop')) closeSystemMonitor();
 });
+$('compute-backdrop').addEventListener('click', (event) => {
+  if (event.target === $('compute-backdrop')) closeComputeMetrics();
+});
 $('usb-backdrop').addEventListener('click', (event) => {
   if (event.target === $('usb-backdrop')) closeUsbDevices();
 });
@@ -2469,6 +2637,7 @@ document.addEventListener('keydown', (event) => {
     if ($('speaker-backdrop').classList.contains('open')) closeSpeakers();
     if ($('storage-backdrop').classList.contains('open')) closeStorage();
     if ($('system-monitor-backdrop').classList.contains('open')) closeSystemMonitor();
+    if ($('compute-backdrop').classList.contains('open')) closeComputeMetrics();
     if ($('usb-backdrop').classList.contains('open')) closeUsbDevices();
     if ($('backup-backdrop').classList.contains('open')) closeBackups();
     if ($('ignition-monitor-backdrop').classList.contains('open')) closeIgnitionMonitor();
@@ -2544,6 +2713,17 @@ document.addEventListener('click', (event) => {
         button.disabled = true;
       });
       refreshSystemMonitor(true).catch(() => {});
+    }
+  }
+  const computeRange = event.target.closest('[data-compute-hours]');
+  if (computeRange) {
+    const hours = Number(computeRange.dataset.computeHours);
+    if (Number.isFinite(hours) && hours !== computeHours) {
+      computeHours = hours;
+      document.querySelectorAll('[data-compute-hours]').forEach((button) => {
+        button.disabled = true;
+      });
+      refreshComputeMetrics(true).catch(() => {});
     }
   }
   const priceCheck = event.target.closest('[data-price-check]');
@@ -2625,6 +2805,7 @@ function refreshVisibleDashboard() {
   refreshStoragePolicy().catch(() => {});
   refreshDiskStatus(false).catch(() => {});
   refreshSystemMonitor(false).catch(() => {});
+  refreshComputeMetrics(false).catch(() => {});
   refreshUsbDevices(false).catch(() => {});
   refreshBackups(false).catch(() => {});
   refreshIgnitionMonitor(false).catch(() => {});
@@ -2641,6 +2822,7 @@ Promise.allSettled([
   refreshStoragePolicy(),
   refreshDiskStatus(false),
   refreshSystemMonitor(false),
+  refreshComputeMetrics(false),
   refreshUsbDevices(false),
   refreshBackups(false),
   refreshIgnitionMonitor(false),
@@ -2667,6 +2849,10 @@ setInterval(() => {
 }, 30000);
 setInterval(() => {
   if (!document.hidden) refreshSystemMonitor(false).catch(() => {});
+}, 30000);
+setInterval(() => {
+  if (!document.hidden && !$('compute-backdrop').classList.contains('open'))
+    refreshComputeMetrics(false).catch(() => {});
 }, 30000);
 setInterval(() => {
   if (!document.hidden && !$('usb-backdrop').classList.contains('open'))
