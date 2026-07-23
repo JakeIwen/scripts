@@ -127,11 +127,13 @@
         </div>
         <div class="mwan-list" id="mwan-list" aria-label="mwan3 interfaces"></div>
       </div>
+      <div class="openwrt-speedtest" aria-label="Speed test">
+        <button class="speedtest-button openwrt-speedtest-button" id="speedtest-button" data-action>
+          <span class="speed-icon" aria-hidden="true">ᯓ➤</span><span class="speed-spinner" aria-hidden="true"></span><span id="speedtest-label" data-running-label="Testing…">Speed Test</span>
+        </button>
+        <span class="speed-results" id="speed-results" role="status" aria-live="polite"><strong>Not run yet</strong>Uses vanpi's current route</span>
+      </div>
     </section>
-    <button class="network-card speedtest-card" id="speedtest-button" data-dashboard-tile data-tile-label="Speed Test" data-action>
-      <span class="network-card-heading speedtest-card-head"><span class="speed-icon" aria-hidden="true">ᯓ➤</span><span class="speed-spinner" aria-hidden="true"></span><span id="speedtest-label" data-running-label="Testing…">Speed Test</span></span>
-      <span class="speed-results" id="speed-results" role="status" aria-live="polite"><strong>Not run yet</strong>Uses vanpi's current route</span>
-    </button>
   </div>
 </main>
 <div class="speaker-backdrop" id="speaker-backdrop">

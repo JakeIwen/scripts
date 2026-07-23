@@ -278,6 +278,12 @@ function restoreTileOrder() {
     if (!seen.has(tile.id)) ordered.push(tile);
   }
   for (const tile of ordered) grid.append(tile);
+  const normalized = ordered.map((tile) => tile.id);
+  if (
+    normalized.length !== stored.length ||
+    normalized.some((id, index) => stored[index] !== id)
+  )
+    saveTileOrder();
 }
 function saveTileOrder() {
   try {

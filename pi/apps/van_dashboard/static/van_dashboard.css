@@ -1377,6 +1377,11 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   padding: 15px;
   box-shadow: 0 8px 28px #050b102e;
 }
+#openwrt-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 220px;
+}
 .network-card-heading {
   font-size: 17px;
   font-weight: 760;
@@ -1467,23 +1472,6 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   color: #e6aaa5;
   background: #392624;
 }
-.speedtest-card {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  text-align: left;
-  color: var(--ink);
-  cursor: pointer;
-}
-.speedtest-card:active {
-  background: var(--raised);
-  transform: scale(0.985);
-}
-.speedtest-card:disabled {
-  opacity: 0.7;
-  cursor: default;
-}
-.speedtest-card-head,
 .speedtest-button {
   display: flex;
   align-items: center;
@@ -1508,6 +1496,18 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   opacity: 0.7;
   cursor: default;
 }
+.openwrt-speedtest {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.openwrt-speedtest-button {
+  padding: 8px 10px;
+}
 .speed-spinner {
   display: none;
   width: 13px;
@@ -1517,11 +1517,9 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
-.speedtest-card.running .speed-spinner,
 .speedtest-button.running .speed-spinner {
   display: inline-block;
 }
-.speedtest-card.running .speed-icon,
 .speedtest-button.running .speed-icon {
   display: none;
 }
@@ -1529,9 +1527,6 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   min-width: 0;
   color: var(--dim);
   font-size: 11px;
-}
-.speedtest-card .speed-results {
-  margin-top: auto;
 }
 .speed-results strong {
   display: block;
@@ -1545,6 +1540,17 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+@media (max-width: 600px) and (orientation: portrait) {
+  #openwrt-card {
+    min-height: 255px;
+  }
+  .openwrt-speedtest {
+    grid-template-columns: 1fr;
+  }
+  .openwrt-speedtest-button {
+    width: 100%;
   }
 }
 .speaker-backdrop {
