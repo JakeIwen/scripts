@@ -9,6 +9,10 @@ Backups (see `scripts/backup/backup_conf.sh`):
 - **hot-spare SD card(s)** — bootable clones via rpi-clone, staggered intervals per
   `CLONE_TARGETS`. Each card's `/boot/firmware/CLONE_INFO.txt` says when it was cloned.
 
+OpenWrt's persistent remote log is `/var/log/openwrt/dendelion.log`; restore its
+receiver with `sudo /home/pi/scripts/setup_openwrt_logging.sh`. See
+`OPENWRT_LOGGING.md` for configuration and verification.
+
 ## Scenario 1 — SD card died, hot spare is attached
 
 1. Power off. Move the spare card from the USB reader into the SD slot. Power on.

@@ -1,0 +1,15 @@
+/var/log/openwrt/dendelion.log {
+  daily
+  rotate 30
+  maxsize 5M
+  missingok
+  notifempty
+  compress
+  delaycompress
+  dateext
+  create 0640 root adm
+  sharedscripts
+  postrotate
+    /usr/bin/systemctl kill -s HUP rsyslog.service >/dev/null 2>&1 || true
+  endscript
+}

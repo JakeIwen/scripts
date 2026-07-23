@@ -2,9 +2,14 @@
 config system
 	option hostname 'OpenWrt'
 	option timezone 'UTC'
+	option zonename 'UTC'
 	option ttylogin '0'
-	option log_size '64'
+	option log_size '256'
 	option urandom_seed '0'
+	option compat_version '2.0'
+	option log_ip '192.168.6.103'
+	option log_port '514'
+	option log_proto 'udp'
 
 config timeserver 'ntp'
 	option enabled '1'
@@ -20,4 +25,3 @@ config led 'led_wan'
 	option trigger 'netdev'
 	option mode 'link tx rx'
 	option dev 'wan'
-
