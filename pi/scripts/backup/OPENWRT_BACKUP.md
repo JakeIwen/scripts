@@ -40,10 +40,12 @@ them drops out of the archive. The router refuses an export if the restricted
 backup-key entry is no longer present in `authorized_keys`.
 
 The bundle contains Wi-Fi credentials, password hashes, and private keys. It is
-mode `0600`, and its directory is mode `0700`, but the existing Borg repository
-uses `--encryption=none`. Treat `bigboi` and every Borg restore as secret-bearing.
-Changing Borg encryption is a separate migration; do not add an ad-hoc key that
-could make the only router recovery copy unreadable.
+mode `0600`, its directory is mode `0700`, and the Borg repository is encrypted
+with `repokey-blake2`. Root obtains the passphrase through `BORG_PASSCOMMAND`
+from the root-only file configured in `backup_conf.sh`. Keep the passphrase and
+exported Borg recovery key somewhere independent of both vanpi and `bigboi`;
+neither a passphrase file nor key stored only inside this repository could
+unlock it after a total Pi failure.
 
 ## Routine operation
 
@@ -72,12 +74,14 @@ Mount a selected Borg archive read-only, then copy the outer bundle somewhere
 private. The path inside a mounted archive begins with `home`, not `/home`:
 
 ```bash
-repo=/mnt/bigboi/borg/vanpi
-sudo mkdir -p /mnt/tmp
-sudo borg mount "$repo"::vanpi-YYYY-MM-DD_HHMM /mnt/tmp
-sudo cp /mnt/tmp/home/pi/backups/snapshots/openwrt/dendelion-latest.tar.gz /root/
-sudo borg umount /mnt/tmp
-sudo chmod 600 /root/dendelion-latest.tar.gz
+sudo -i
+source /home/pi/scripts/backup/backup_conf.sh
+repo=$BORG_REPO
+mkdir -p /mnt/tmp
+borg mount "$repo"::vanpi-YYYY-MM-DD_HHMM /mnt/tmp
+cp /mnt/tmp/home/pi/backups/snapshots/openwrt/dendelion-latest.tar.gz /root/
+borg umount /mnt/tmp
+chmod 600 /root/dendelion-latest.tar.gz
 ```
 
 Verify and extract the outer bundle:

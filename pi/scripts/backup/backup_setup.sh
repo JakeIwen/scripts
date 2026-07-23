@@ -15,10 +15,19 @@ fi
 mkdir -p "$STAMP_DIR" "$SNAP_DIR"
 chown -R pi:pi /home/pi/backups
 
-if ! borg info >/dev/null 2>&1; then
+if [ ! -e "$BORG_REPO" ]; then
+  [ -s "$BORG_PASSFILE" ] || {
+    echo "missing Borg passphrase file: $BORG_PASSFILE" >&2
+    echo "create it root-owned and mode 0600 before running setup" >&2
+    exit 1
+  }
   mkdir -p "$(dirname "$BORG_REPO")"
-  borg init --encryption=none
-  echo "created borg repo at $BORG_REPO"
+  borg init --encryption=repokey-blake2
+  echo "created encrypted borg repo at $BORG_REPO"
+elif ! borg info >/dev/null 2>&1; then
+  echo "borg repo exists but could not be opened: $BORG_REPO" >&2
+  echo "check the passphrase file before making any changes" >&2
+  exit 1
 fi
 
 echo "setup complete. next steps:"

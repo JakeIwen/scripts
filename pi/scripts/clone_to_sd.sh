@@ -36,13 +36,32 @@ start=$(date +%s)
 # background I/O priority: a slow or dying card must not starve the rest of the
 # system (2026-07-14: a failing card in D-state took down ssh for the whole pi)
 throttle="ionice -c2 -n7 nice -n10"
+clone_log="/tmp/vanpi_clone_${disk}_$$.log"
+cleanup_clone_log() { [ ! -e "$clone_log" ] || unlink "$clone_log"; }
+trap cleanup_clone_log EXIT
 if [ $init = 1 ]; then
   echo "initializing /dev/$disk as $label — full clone, erases the card"
-  $throttle rpi-clone "$disk" -f -U \
-    || { notify "vanpi clone" "initial clone to $label (/dev/$disk) failed" high rotating_light; exit 1; }
+  $throttle rpi-clone "$disk" -f -U 2>&1 | tee "$clone_log"
 else
-  $throttle rpi-clone "$disk" -U \
-    || { notify "vanpi clone" "clone to $label (/dev/$disk) failed" high rotating_light; exit 1; }
+  $throttle rpi-clone "$disk" -U 2>&1 | tee "$clone_log"
+fi
+# rpi-clone 2.0.27 can print an rsync code 23 error but still exit zero. Treat
+# either signal as failure so a partial clone is never stamped current.
+clone_rc=${PIPESTATUS[0]}
+if [ "$clone_rc" -ne 0 ] || grep -q '^rsync error:' "$clone_log"; then
+  notify "vanpi clone" \
+    "clone to $label (/dev/$disk) was incomplete (rpi-clone=$clone_rc or rsync error)" \
+    high rotating_light
+  exit 1
+fi
+# rpi-clone has unmounted both target partitions. A forced, read-only check
+# catches corrupt destination metadata before the card is advertised as a
+# bootable recovery generation.
+if ! e2fsck -fn "/dev/${disk}2"; then
+  notify "vanpi clone" \
+    "clone to $label (/dev/$disk) failed post-clone filesystem verification" \
+    high rotating_light
+  exit 1
 fi
 # the label is how future runs find this card (device names re-enumerate constantly here)
 e2label "/dev/${disk}2" "$label"

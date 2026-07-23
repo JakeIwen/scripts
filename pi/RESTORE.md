@@ -1,11 +1,14 @@
 # vanpi recovery playbook
 
 Backups (see `scripts/backup/backup_conf.sh`):
-- **borg repo** `/mnt/bigboi/borg/vanpi` — nightly versioned snapshots of `/` + `/boot/firmware`
+- **encrypted borg repo** `/mnt/bigboi/borg/vanpi-encrypted` — nightly versioned snapshots of `/` + `/boot/firmware`
   (14 daily / 8 weekly / 12 monthly). HA's sqlite is snapshotted to
   `/home/pi/backups/snapshots/` before each run; the live DB is excluded. A
   verified OpenWrt recovery bundle is pulled into the same snapshot tree before
-  Borg runs; see `scripts/backup/OPENWRT_BACKUP.md`.
+  Borg runs; see `scripts/backup/OPENWRT_BACKUP.md`. Unattended jobs read the
+  passphrase from `/root/.config/borg/vanpi-encrypted.passphrase`. Keep an
+  independent password-manager copy of that passphrase and an exported Borg key
+  off-device; a copy stored only inside the encrypted archive is not recoverable.
 - **hot-spare SD card(s)** — bootable clones via rpi-clone, staggered intervals per
   `CLONE_TARGETS`. Each card's `/boot/firmware/CLONE_INFO.txt` says when it was cloned.
 
@@ -27,13 +30,16 @@ receiver with `sudo /home/pi/scripts/setup_openwrt_logging.sh`. See
 ## Scenario 2 — restore individual files / roll back a mistake
 
 ```bash
-# repo is root-owned 0700 (borg runs as root to read the whole fs) — use sudo + explicit path;
-# BORG_REPO from backup_conf.sh won't survive sudo's env reset
-repo=/mnt/bigboi/borg/vanpi
-sudo borg list $repo
-sudo borg mount $repo::vanpi-2026-07-01_1300 /mnt/tmp   # browse a snapshot read-only
-sudo borg umount /mnt/tmp
-cd / && sudo borg extract $repo::vanpi-2026-07-01_1300 home/pi/scripts/foo.sh   # restore in place
+# Run as root so backup_conf.sh can use the root-only passphrase file.
+sudo -i
+source /home/pi/scripts/backup/backup_conf.sh
+repo=$BORG_REPO
+mkdir -p /mnt/tmp
+borg list $repo
+borg mount $repo::vanpi-2026-07-01_1300 /mnt/tmp   # browse a snapshot read-only
+borg umount /mnt/tmp
+cd / && borg extract $repo::vanpi-2026-07-01_1300 home/pi/scripts/foo.sh   # restore in place
+exit
 ```
 
 Home Assistant DB: restore `home/pi/backups/snapshots/home-assistant_v2.db` from the
@@ -48,16 +54,27 @@ a firmware image and must not be flashed.
 ## Scenario 3 — SD card AND spare both dead
 
 1. On the MacBook: flash **Raspberry Pi OS 64-bit** (any recent) to a card with rpi-imager.
-2. Boot the Pi from it, attach bigboi, then:
+2. Retrieve the Borg passphrase from the password manager. If Borg cannot read
+   the repository's embedded key, also retrieve the exported key. Boot the Pi
+   from the new card, attach bigboi, then:
    ```bash
    sudo apt install borgbackup
    sudo mount /dev/disk/by-label/bigboi /mnt/bigboi
-   export BORG_REPO=/mnt/bigboi/borg/vanpi
-   sudo --preserve-env=BORG_REPO borg extract --numeric-ids ::$(borg list --last 1 --format '{archive}') home/pi/scripts
+   sudo install -d -m 0700 /root/.config/borg
+   sudo install -m 0600 /dev/null /root/.config/borg/vanpi-encrypted.passphrase
+   sudoedit /root/.config/borg/vanpi-encrypted.passphrase
+   sudo -i
+   export BORG_REPO=/mnt/bigboi/borg/vanpi-encrypted
+   export BORG_PASSCOMMAND='/usr/bin/cat /root/.config/borg/vanpi-encrypted.passphrase'
+   borg extract --numeric-ids ::$(borg list --last 1 --format '{archive}') home/pi/scripts
+   exit
    # then use the restored script for the full job, onto a second card in a USB reader:
    sudo home/pi/scripts/restore_from_borg.sh sdX
    ```
-   (Or run `restore_from_borg.sh` directly if any surviving system still has the scripts.)
+   If the repository's embedded key is unavailable, import the independent key
+   copy with `borg key import /path/to/exported-key` after setting the two Borg
+   environment variables. Or run `restore_from_borg.sh` directly if any
+   surviving system still has the scripts and passphrase file.
 3. Swap the restored card into the SD slot and boot.
 
 ## Van-ignition interplay

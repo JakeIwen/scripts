@@ -7,8 +7,13 @@
 # destinations
 BACKUP_DISK_LABEL=bigboi
 BACKUP_MNT=/mnt/bigboi
-export BORG_REPO="$BACKUP_MNT/borg/vanpi"
-export BORG_PASSPHRASE=  # repo is encryption=none: same exposure as the raw images it replaces
+export BORG_REPO="$BACKUP_MNT/borg/vanpi-encrypted"
+BORG_PASSFILE=/root/.config/borg/vanpi-encrypted.passphrase
+# Backups are unattended, so root reads the repository passphrase from a
+# root-only file. Keep an independent copy in the password manager: the copy
+# inside a Borg archive cannot unlock that archive.
+unset BORG_PASSPHRASE
+export BORG_PASSCOMMAND="/usr/bin/cat $BORG_PASSFILE"
 
 # borg retention
 KEEP_DAILY=14

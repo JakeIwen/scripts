@@ -144,7 +144,12 @@ date '+%F %T' > "$STAMP_DIR/borg_ok"
 free_gb=$(( $(df -k --output=avail "$BACKUP_MNT" | tail -1) / 1024 / 1024 ))
 [ "$free_gb" -ge "$MIN_FREE_GB" ] || notify "vanpi backup" \
   "only ${free_gb}GB free on $BACKUP_MNT (limit ${MIN_FREE_GB}GB)" high warning
-[ "$UNMOUNT_AFTER" = 1 ] && umount "$BACKUP_MNT" 2>/dev/null
+if [ "$UNMOUNT_AFTER" = 1 ] && ! umount "$BACKUP_MNT"; then
+  log "WARNING: could not unmount $BACKUP_MNT (an open file or shell may be holding it)"
+  notify "vanpi backup" \
+    "backup succeeded, but $BACKUP_MNT could not be unmounted; check for an open file or shell before moving the van" \
+    high warning
+fi
 log "backup complete (${free_gb}GB free on $BACKUP_DISK_LABEL)"
 [ "$NTFY_ON_SUCCESS" = 1 ] && notify "vanpi backup OK" \
   "borg $archive done, ${free_gb}GB free. clones: ${clone_summary:-none configured}" min white_check_mark
