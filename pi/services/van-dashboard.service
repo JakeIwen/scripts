@@ -4,7 +4,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_compute_metrics.py
+ExecStartPre=/usr/bin/test -r /home/pi/van_compute/scripts/van_compute_metrics.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/templates/van_dashboard.html
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/static/van_dashboard.js
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/static/van_dashboard.css
@@ -14,6 +14,7 @@ Restart=always
 RestartSec=5
 User=pi
 Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/pi/van_compute/scripts
 RuntimeDirectory=van-dashboard
 RuntimeDirectoryMode=0750
 UMask=0027

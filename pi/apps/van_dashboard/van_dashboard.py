@@ -36,8 +36,16 @@ from urllib.request import Request, urlopen
 from flask import Flask, jsonify, render_template, request
 
 try:
-    from shared.python.van_compute_metrics import ComputeMetricsError, ComputeMetricsReader
+    from pi.van_compute.scripts.van_compute_metrics import (
+        ComputeMetricsError,
+        ComputeMetricsReader,
+    )
 except ModuleNotFoundError:
+    compute_scripts = os.environ.get(
+        "VAN_COMPUTE_SCRIPTS", "/home/pi/van_compute/scripts"
+    )
+    if compute_scripts not in sys.path:
+        sys.path.insert(0, compute_scripts)
     from van_compute_metrics import ComputeMetricsError, ComputeMetricsReader
 
 

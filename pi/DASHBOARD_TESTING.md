@@ -45,12 +45,18 @@ fi
 
 ssh -o BatchMode=yes pi@vanpi.lan \
   "install -d '$dashboard_test_dir/pi/apps' \
-    '$dashboard_test_dir/pi/tests' '$dashboard_test_dir/pi/scripts'"
+    '$dashboard_test_dir/pi/tests' '$dashboard_test_dir/pi/scripts' \
+    '$dashboard_test_dir/pi/van_compute/scripts'"
 
 scp -q -r pi/apps/van_dashboard \
   "pi@vanpi.lan:$dashboard_test_dir/pi/apps/"
 scp -q pi/tests/test_van_dashboard.py \
   "pi@vanpi.lan:$dashboard_test_dir/pi/tests/"
+scp -q pi/van_compute/__init__.py \
+  "pi@vanpi.lan:$dashboard_test_dir/pi/van_compute/"
+scp -q pi/van_compute/scripts/__init__.py \
+  pi/van_compute/scripts/van_compute_metrics.py \
+  "pi@vanpi.lan:$dashboard_test_dir/pi/van_compute/scripts/"
 scp -q pi/sync_scripts.sh \
   "pi@vanpi.lan:$dashboard_test_dir/pi/"
 scp -q pi/scripts/ntfy_send.sh \

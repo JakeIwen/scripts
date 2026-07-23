@@ -73,8 +73,8 @@ done
 mkdir -p "$live_scripts"
 cp -a "$staged_scripts/." "$live_scripts/"
 # Preserve the old sync behavior for top-level scripts, and do it before any
-# service restart so directly executed shell scripts remain runnable. Do not
-# chmod directories: compute/ is installer-owned and deliberately remains 0700.
+# service restart so directly executed shell scripts remain runnable. Directory
+# modes are preserved from the staged tree.
 for staged_script in "$staged_scripts"/*; do
   if [[ -f "$staged_script" && ! -L "$staged_script" ]]; then
     chmod 770 "$live_scripts/${staged_script##*/}"
