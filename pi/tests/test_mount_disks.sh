@@ -189,6 +189,15 @@ mount_disks_main mbp2tbkup >/dev/null 2>&1 || fail "explicit mount was blocked b
 assert_eq "mbp2tbkup" "${calls[*]}" "explicit mount did not target held label"
 disk_eject_hold_clear mbp2tbkup || fail "could not clear eject hold"
 
+ALWAYS_MOUNT_LABELS=(EXFAT512)
+disk_eject_hold_set EXFAT512 60 >/dev/null || fail "could not hold always-mounted label"
+calls=()
+mount_disks_main --always >/dev/null 2>&1 || fail "always-only held reconciliation failed"
+assert_eq 0 "${#calls[@]}" "always-only reconciliation ignored eject hold"
+disk_eject_hold_clear EXFAT512 || fail "could not clear always-mounted eject hold"
+mount_disks_main --always >/dev/null 2>&1 || fail "always-only reconciliation failed"
+assert_eq "EXFAT512" "${calls[*]}" "always-only reconciliation targeted another label"
+
 calls=()
 mntdsk() {
   calls+=("$1")

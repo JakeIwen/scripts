@@ -80,12 +80,18 @@ run_diskctl eject bigboi >/dev/null || fail "manual disk eject failed"
 run_diskctl mount bigboi >/dev/null || fail "manual disk mount failed"
 [[ $(cat "$calls") == "mount bigboi" ]] || fail "manual mount did not use the exact label"
 
+: > "$calls"
+TEST_DISK_POLICY="0 1 0"
+export TEST_DISK_POLICY
+printf '1000060\n' > "$hold_dir/EXFAT512"
+run_diskctl mount EXFAT512 >/dev/null || fail "always-mounted flash was blocked by disabled HDD policy"
+[[ ! -e "$hold_dir/EXFAT512" ]] || fail "flash remount did not clear eject hold"
+[[ $(cat "$calls") == "mount EXFAT512" ]] || fail "flash remount did not use the exact label"
+
 for label in /dev/sda unknown; do
   run_diskctl eject "$label" >/dev/null 2>&1 && fail "unsafe label '$label' was accepted"
 done
 
-TEST_DISK_POLICY="0 1 0"
-export TEST_DISK_POLICY
 mkdir -p "$hold_dir"
 printf '1000060\n' > "$hold_dir/movingparts"
 run_diskctl mount movingparts >/dev/null 2>&1 && fail "mount bypassed disabled disk policy"
@@ -95,5 +101,11 @@ touch "$test_root/ignition"
 TEST_DISK_POLICY="1 1 0"
 run_diskctl mount movingparts >/dev/null 2>&1 && fail "mount bypassed ignition state"
 [[ $(cat "$hold_dir/movingparts") == 1000060 ]] || fail "ignition refusal cleared eject hold"
+
+: > "$calls"
+printf '1000060\n' > "$hold_dir/EXFAT512"
+run_diskctl mount EXFAT512 >/dev/null || fail "ignition blocked always-mounted flash"
+[[ ! -e "$hold_dir/EXFAT512" ]] || fail "ignition-time flash remount did not clear hold"
+[[ $(cat "$calls") == "mount EXFAT512" ]] || fail "ignition-time flash mount was not exact"
 
 echo "PASS: diskctl label, hold, policy, and ignition safeguards"

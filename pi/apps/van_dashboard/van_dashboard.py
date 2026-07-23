@@ -3224,8 +3224,11 @@ class DiskManager:
     @classmethod
     def parse_config(cls, text):
         mount_labels = cls._parse_array(text, "MOUNT_LABELS")
+        always_mount_labels = cls._parse_array(text, "ALWAYS_MOUNT_LABELS")
         manual_mount_labels = cls._parse_array(text, "MANUAL_MOUNT_LABELS")
         hdd_labels = cls._parse_array(text, "HDD_LABELS")
+        if not set(always_mount_labels).issubset(mount_labels):
+            raise DiskCommandError("ALWAYS_MOUNT_LABELS must be a subset of MOUNT_LABELS")
         controllable_labels = [
             *mount_labels,
             *(label for label in manual_mount_labels if label not in mount_labels),
@@ -3236,6 +3239,7 @@ class DiskManager:
         ]
         return {
             "mount_labels": mount_labels,
+            "always_mount_labels": always_mount_labels,
             "manual_mount_labels": manual_mount_labels,
             "controllable_labels": controllable_labels,
             "hdd_labels": hdd_labels,
@@ -3309,6 +3313,7 @@ class DiskManager:
         configuration = self._configuration()
         rows = self._block_devices()
         mount_labels = set(configuration["mount_labels"])
+        always_mount_labels = set(configuration["always_mount_labels"])
         controllable_labels = set(configuration["controllable_labels"])
         disks = []
         for label in configuration["labels"]:
@@ -3342,7 +3347,13 @@ class DiskManager:
             disks.append(
                 {
                     "label": label,
-                    "role": "policy" if label in mount_labels else "backup",
+                    "role": (
+                        "always"
+                        if label in always_mount_labels
+                        else "policy" if label in mount_labels else "backup"
+                    ),
+                    "automatic_mount": label in mount_labels,
+                    "requires_disk_policy": label not in always_mount_labels,
                     "controllable": label in controllable_labels,
                     "attached": attached,
                     "mounted": mounted,

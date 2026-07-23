@@ -325,6 +325,10 @@ mount_drives() {
   fi
 }
 
+mount_always_available_drives() {
+  "$ISW_MOUNT_DISKS" --always
+}
+
 van_is_running() {
   ignition_is_on && echo "yes"
 }
@@ -349,6 +353,8 @@ kill_all() {
 }
 
 set_isw_options() {
+  local shutdown_status always_mount_status torrent_status
+
   echo ""
   echo "$(date)"
   # Stale mounts are observed unsafe runtime state, not requested policy. Deal
@@ -358,15 +364,29 @@ set_isw_options() {
   # Ignition is observed safety state and always wins, even if requested
   # policy is missing or corrupt.
   if ignition_is_on; then
-    echo "ignition is on; disabling and spinning down disks"
+    echo "ignition is on; disabling and spinning down HDDs"
     kill_all
+    shutdown_status=$?
+    # Flash media remains available while driving. Run this even if HDD
+    # shutdown reports a failure, but preserve both outcomes.
+    mount_always_available_drives
+    always_mount_status=$?
+    (( shutdown_status == 0 && always_mount_status == 0 ))
     return
   fi
 
+  # Always-available flash media is independent from requested HDD policy. A
+  # flash-mount failure must not prevent the HDD/torrent policy from reaching
+  # its own safe state, but the combined run still reports the failure.
+  mount_always_available_drives
+  always_mount_status=$?
+
   load_requested_policy || return 1
   if [[ "$POLICY_DISKS_ENABLED" == 0 ]]; then
-    echo "requested policy disables disks"
+    echo "requested policy disables HDDs"
     kill_all
+    shutdown_status=$?
+    (( always_mount_status == 0 && shutdown_status == 0 ))
     return
   fi
 
@@ -385,6 +405,8 @@ set_isw_options() {
   else
     start_torrent_client
   fi
+  torrent_status=$?
+  (( always_mount_status == 0 && torrent_status == 0 ))
 }
 #
 internet_switches_main() {

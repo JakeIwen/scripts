@@ -2022,11 +2022,12 @@ function renderDiskStatus(next) {
               !disk.error &&
               operation.status !== 'running' &&
               !diskBusy,
-            policyAllowsMount = storagePolicy?.disks_enabled === true,
+            policyAllowsMount =
+              disk.requires_disk_policy === false || storagePolicy?.disks_enabled === true,
             actionAllowed = canControl && (action !== 'mount' || policyAllowsMount),
             actionTitle =
               action === 'mount' && !policyAllowsMount
-                ? 'Enable the Disks policy before mounting'
+                ? 'Enable the HDDs policy before mounting'
                 : `${action === 'eject' ? 'Safely unmount' : 'Mount'} ${disk.label}`,
             control = disk.controllable
               ? `<button class="disk-device-action ${action}" type="button" data-disk-action="${action}" data-disk-label="${esc(disk.label)}" title="${esc(actionTitle)}" ${actionAllowed ? '' : 'disabled'}>${action === 'eject' ? 'Unmount' : 'Mount'}</button>`
@@ -2077,7 +2078,7 @@ async function changeDiskAction(button) {
     label = button.dataset.diskLabel,
     disk = diskStatus?.disks?.find((item) => item.label === label),
     unmountResult =
-      disk?.role === 'policy'
+      disk?.automatic_mount
         ? 'Automatic mounting will resume in one minute.'
         : 'It will stay unmounted until requested here or by the backup tools.';
   if (

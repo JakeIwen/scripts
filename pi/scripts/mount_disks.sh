@@ -527,8 +527,28 @@ md_print_mounts() {
   /usr/bin/grep "dev/sd" /proc/mounts || true
 }
 
+md_reconcile_labels() {
+  local had_failure=0 hold_status hold_remaining disk
+
+  for disk in "$@"; do
+    hold_remaining=$(disk_eject_hold_remaining "$disk" 2>&1)
+    hold_status=$?
+    if (( hold_status == 0 )); then
+      echo "$disk: temporarily ejected; automatic mount resumes in ${hold_remaining}s"
+      continue
+    elif (( hold_status != 1 )); then
+      echo "$hold_remaining" >&2
+      had_failure=1
+      continue
+    fi
+    mntdsk "$disk" || had_failure=1
+  done
+
+  (( had_failure == 0 ))
+}
+
 mount_disks_main() {
-  local had_failure=0 hold_status hold_remaining
+  local had_failure=0
   local dir
   local disk
   local -a rm_dirs=(mbp1tbkup mbp2tbkup)
@@ -540,8 +560,10 @@ mount_disks_main() {
   elif (( $# == 1 )) && [[ "$1" == --recover-stale ]]; then
     md_recover_stale_mounts
     return $?
+  elif (( $# == 1 )) && [[ "$1" == --always ]]; then
+    md_reconcile_labels "${ALWAYS_MOUNT_LABELS[@]}" || had_failure=1
   elif (( $# == 1 )) && [[ "$1" == --* ]]; then
-    echo "usage: ${0##*/} [label|--list-stale|--recover-stale]" >&2
+    echo "usage: ${0##*/} [label|--always|--list-stale|--recover-stale]" >&2
     return 2
   elif (( $# == 1 )); then
     mntdsk "$1" || had_failure=1
@@ -552,23 +574,11 @@ mount_disks_main() {
 
     # Reconcile every label, but remember any unsafe result so a later missing
     # optional disk cannot overwrite an earlier failure status.
-    for disk in "${disks[@]}"; do
-      hold_remaining=$(disk_eject_hold_remaining "$disk" 2>&1)
-      hold_status=$?
-      if (( hold_status == 0 )); then
-        echo "$disk: temporarily ejected; automatic mount resumes in ${hold_remaining}s"
-        continue
-      elif (( hold_status != 1 )); then
-        echo "$hold_remaining" >&2
-        had_failure=1
-        continue
-      fi
-      mntdsk "$disk" || had_failure=1
-    done
+    md_reconcile_labels "${disks[@]}" || had_failure=1
     # mntdsk mbbackup
     # mntdsk bigboi
   else
-    echo "usage: ${0##*/} [label|--list-stale|--recover-stale]" >&2
+    echo "usage: ${0##*/} [label|--always|--list-stale|--recover-stale]" >&2
     return 2
   fi
 

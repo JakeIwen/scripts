@@ -52,6 +52,20 @@ case "$action" in
     "$unmount_disks" "$label"
     ;;
   mount)
+    if disk_policy_is_always_mount_label "$label"; then
+      # Always-available flash media is independent of ignition and requested
+      # HDD policy. Serialize it with the same lifecycle lock, then clear the
+      # temporary eject hold only when the explicit remount can proceed.
+      exec 9>"$lifecycle_lock" || exit 1
+      "$flock_command" -w 55 9 || {
+        echo "diskctl: disk policy is busy; eject hold remains active" >&2
+        exit 1
+      }
+      disk_eject_hold_clear "$label" || exit 1
+      "$mount_disks" "$label"
+      exit $?
+    fi
+
     policy=$($policyctl read 2>&1)
     status=$?
     if (( status != 0 )); then

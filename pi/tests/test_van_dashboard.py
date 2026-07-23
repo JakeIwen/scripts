@@ -1014,6 +1014,9 @@ MOUNT_LABELS=(
   movingparts
   EXFAT512
 )
+ALWAYS_MOUNT_LABELS=(
+  EXFAT512
+)
 MANUAL_MOUNT_LABELS=(
   bigboi
 )
@@ -1111,13 +1114,27 @@ HDD_LABELS=(
         movingparts, exfat, bigboi = status["disks"]
         self.assertTrue(movingparts["mounted"])
         self.assertTrue(movingparts["controllable"])
+        self.assertTrue(movingparts["requires_disk_policy"])
         self.assertEqual(movingparts["device"], "/dev/sda")
         self.assertFalse(exfat["attached"])
+        self.assertEqual(exfat["role"], "always")
+        self.assertTrue(exfat["automatic_mount"])
+        self.assertFalse(exfat["requires_disk_policy"])
         self.assertEqual(exfat["hold_remaining_seconds"], 60)
         self.assertEqual(exfat["hold_until"], 1060)
         self.assertEqual(bigboi["role"], "backup")
+        self.assertFalse(bigboi["automatic_mount"])
+        self.assertTrue(bigboi["requires_disk_policy"])
         self.assertTrue(bigboi["controllable"])
         self.assertTrue(bigboi["attached"])
+
+    def test_always_mount_labels_must_be_automatic_mount_labels(self):
+        invalid = self.CONFIG.replace(
+            "ALWAYS_MOUNT_LABELS=(\n  EXFAT512\n)",
+            "ALWAYS_MOUNT_LABELS=(\n  unknown-flash\n)",
+        )
+        with self.assertRaisesRegex(dashboard.DiskCommandError, "must be a subset"):
+            dashboard.DiskManager.parse_config(invalid)
 
     def test_eject_runs_only_fixed_diskctl_argv_in_background(self):
         calls = []
@@ -2252,7 +2269,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="price-schedule-form"', page.data)
         self.assertIn(b'id="price-schedule-description"', page.data)
         self.assertIn(b"Check all now", page.data)
-        self.assertIn(b"Managed disks", page.data)
+        self.assertIn(b"Managed HDDs", page.data)
         self.assertIn(b'id="lighting-title">Lighting', page.data)
         self.assertIn(b'id="lighting-master"', page.data)
         self.assertIn(b'id="lighting-panel"', page.data)
@@ -2278,16 +2295,16 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="disk-device-list"', page.data)
         self.assertIn(b'id="disk-operation"', page.data)
         self.assertIn(
-            b"Policy-managed disks resume automatic mounting after one minute",
+            b"Automatically managed disks resume mounting after one minute",
             page.data,
         )
         self.assertIn(b"backup-only disks stay unmounted", page.data)
-        self.assertIn(b"Ignition always overrides disk permission", page.data)
+        self.assertIn(b"Ignition always overrides HDD permission", page.data)
         self.assertIn(b"requested-on Torrents switch is shown as blocked", page.data)
-        self.assertIn(b"Requires Disks enabled", page.data)
-        self.assertIn(b"does not override disk or global torrent permission", page.data)
+        self.assertIn(b"Requires HDDs enabled", page.data)
+        self.assertIn(b"does not override HDD or global torrent permission", page.data)
         self.assertIn(
-            b"Starlink torrenting requires Disks enabled, Torrents enabled", page.data
+            b"Starlink torrenting requires HDDs enabled, Torrents enabled", page.data
         )
         self.assertNotIn(b"<style>", page.data)
         self.assertIn(b'href="/static/van_dashboard.css"', page.data)
@@ -2301,6 +2318,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"Unmount ${label}?", javascript.data)
         self.assertIn(b"Automatic mounting will resume in one minute", javascript.data)
         self.assertIn(b"stay unmounted until requested here", javascript.data)
+        self.assertIn(b"disk.requires_disk_policy === false", javascript.data)
         self.assertIn(b"data-speaker-mute", javascript.data)
         self.assertIn(b"data-ubnt-profile", javascript.data)
         self.assertIn(b"startUbntWifi('provision'", javascript.data)

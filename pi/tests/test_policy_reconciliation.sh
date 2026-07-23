@@ -142,6 +142,10 @@ ACTION=""
 IO_ERROR=1
 recover_stale_mounts_if_needed() { return 0; }
 mount_drives() { ACTION="${ACTION:+$ACTION }mount"; }
+mount_always_available_drives() {
+  ACTION="${ACTION:+$ACTION }mount-always"
+  return "${TEST_ALWAYS_MOUNT_STATUS:-0}"
+}
 kill_torrent_client() { ACTION="${ACTION:+$ACTION }kill-torrent"; }
 start_torrent_client() { ACTION="${ACTION:+$ACTION }start-torrent"; }
 kill_all() { ACTION="${ACTION:+$ACTION }kill-all"; }
@@ -163,17 +167,18 @@ touch "$ISW_IGNITION_FLAG"
 export TEST_COMPACT_POLICY="invalid"
 ACTION=""
 set_isw_options >/dev/null 2>&1 || fail "ignition override returned failure"
-assert_eq "kill-all" "$ACTION" "ignition must override unreadable requested policy"
+assert_eq "kill-all mount-always" "$ACTION" \
+  "ignition must spin down HDDs and reconcile flash before reading requested policy"
 rm "$ISW_IGNITION_FLAG"
 
-run_case "disabled disks" "0 1 1" off 0 "kill-all"
-run_case "globally disabled torrents" "1 0 1" off 0 "mount kill-torrent"
-run_case "explicit Starlink permission" "1 1 1" unknown 1 "mount start-torrent"
+run_case "disabled disks" "0 1 1" off 0 "mount-always kill-all"
+run_case "globally disabled torrents" "1 0 1" off 0 "mount-always mount kill-torrent"
+run_case "explicit Starlink permission" "1 1 1" unknown 1 "mount-always mount start-torrent"
 [[ ! -e "$TEST_STARLINK_CALLS" ]] ||
   fail "explicit Starlink permission should not query Starlink power"
-run_case "Starlink blocked" "1 1 0" on 0 "mount kill-torrent"
-run_case "non-Starlink torrenting" "1 1 0" off 0 "mount start-torrent"
-run_case "unknown Starlink fails closed" "1 1 0" unknown 1 "mount kill-torrent"
+run_case "Starlink blocked" "1 1 0" on 0 "mount-always mount kill-torrent"
+run_case "non-Starlink torrenting" "1 1 0" off 0 "mount-always mount start-torrent"
+run_case "unknown Starlink fails closed" "1 1 0" unknown 1 "mount-always mount kill-torrent"
 
 export TEST_COMPACT_POLICY="1 1 0"
 export TEST_STARLINK_STATE=off
@@ -182,7 +187,7 @@ ACTION=""
 IO_ERROR=0
 rm -f "$TEST_STARLINK_CALLS"
 set_isw_options >/dev/null 2>&1 || fail "I/O-error policy returned failure"
-assert_eq "mount kill-torrent" "$ACTION" "I/O error must stop torrents"
+assert_eq "mount-always mount kill-torrent" "$ACTION" "I/O error must stop torrents"
 [[ ! -e "$TEST_STARLINK_CALLS" ]] || fail "I/O error should skip Starlink query"
 
 export TEST_COMPACT_POLICY="1 maybe 0"
@@ -190,7 +195,18 @@ ACTION=""
 if set_isw_options >/dev/null 2>&1; then
   fail "invalid compact policy was accepted"
 fi
-assert_eq "" "$ACTION" "invalid requested policy must not change runtime state"
+assert_eq "mount-always" "$ACTION" \
+  "invalid HDD policy must not block independent flash reconciliation"
+
+export TEST_ALWAYS_MOUNT_STATUS=1
+export TEST_COMPACT_POLICY="0 1 0"
+ACTION=""
+if set_isw_options >/dev/null 2>&1; then
+  fail "always-mount failure was hidden"
+fi
+assert_eq "mount-always kill-all" "$ACTION" \
+  "flash failure must not prevent disabled HDD policy from reaching kill-all"
+unset TEST_ALWAYS_MOUNT_STATUS
 
 hook_home="$test_root/hook-home"
 mkdir -p "$hook_home/scripts" "$hook_home/hooks/inactive" \

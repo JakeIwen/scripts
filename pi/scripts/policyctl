@@ -290,7 +290,7 @@ def print_status(value, as_json=False):
         return
     print("Requested policy:")
     rows = (
-        ("Disks", "enabled" if value["disks_enabled"] else "disabled"),
+        ("HDDs", "enabled" if value["disks_enabled"] else "disabled"),
         ("Torrents", "enabled" if value["torrents_enabled"] else "disabled"),
         (
             "Starlink torrents",
@@ -303,7 +303,7 @@ def print_status(value, as_json=False):
     mounted = runtime["mounted_disk_labels"]
     disk_detail = f"mounted ({', '.join(mounted)})" if mounted else "unmounted"
     print("Runtime:")
-    print(f"  Managed disks: {disk_detail}")
+    print(f"  Managed HDDs: {disk_detail}")
     print(
         "  qBittorrent: "
         + ("running" if runtime["qbittorrent_running"] else "stopped")
@@ -312,7 +312,7 @@ def print_status(value, as_json=False):
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        description="Manage requested vanpi storage and torrent policy"
+        description="Manage requested vanpi HDD and torrent policy"
     )
     parser.add_argument("--json", action="store_true", help="emit JSON")
     parser.add_argument(

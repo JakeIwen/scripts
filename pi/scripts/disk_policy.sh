@@ -1,12 +1,20 @@
 #!/bin/bash
-# Filesystem/partition labels that mount_disks.sh reconciles while disk policy
-# is enabled.  These labels are also the allowlist for stale-mount recovery.
+# Filesystem/partition labels that mount_disks.sh reconciles automatically.
+# ALWAYS_MOUNT_LABELS remain mounted independently; the other labels follow
+# requested HDD policy. This is also the allowlist for stale-mount recovery.
 MOUNT_LABELS=(
   movingparts
   mbp1tbkup
   mbp2tbkup
   hfs2tb
   usbext
+  EXFAT512
+)
+
+# Automatically mounted labels that remain available regardless of ignition or
+# the rotational-disk policy. Keep this as a subset of MOUNT_LABELS so existing
+# stale-mount recovery and dashboard eject holds apply unchanged.
+ALWAYS_MOUNT_LABELS=(
   EXFAT512
 )
 
@@ -34,6 +42,14 @@ DISK_EJECT_HOLD_DIR=${DISK_EJECT_HOLD_DIR:-/run/lock/vanpi-disk-eject}
 disk_policy_is_mount_label() {
   local wanted=$1 label
   for label in "${MOUNT_LABELS[@]}"; do
+    [[ "$label" == "$wanted" ]] && return 0
+  done
+  return 1
+}
+
+disk_policy_is_always_mount_label() {
+  local wanted=$1 label
+  for label in "${ALWAYS_MOUNT_LABELS[@]}"; do
     [[ "$label" == "$wanted" ]] && return 0
   done
   return 1
