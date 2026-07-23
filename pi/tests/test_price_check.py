@@ -123,13 +123,61 @@ class PriceStoreTests(unittest.TestCase):
             item["id"], "Scraped title", Decimal("54.99")
         )
         self.assertEqual(updated["last_price"], "54.99")
+        self.assertEqual(updated["last_price_checked_at"], 1_700_000_000)
         self.assertTrue(updated["below_threshold"])
         self.assertEqual(updated["display_title"], "Scraped title")
         failed = self.store.record_error(item["id"], "HTML changed")
         self.assertEqual(failed["last_status"], "error")
         self.assertEqual(failed["last_price"], "54.99")
+        self.assertEqual(failed["last_price_checked_at"], 1_700_000_000)
         count = self.store.connection.execute("SELECT count(*) FROM checks").fetchone()[0]
         self.assertEqual(count, 2)
+
+    def test_mutes_notifications_until_deadline_and_can_unmute(self):
+        now = [1_700_000_000]
+        self.store.clock = lambda: now[0]
+        item = self.add()
+        muted = self.store.set_notification_mute(item["id"], 3)
+        self.assertTrue(muted["notifications_muted"])
+        self.assertEqual(muted["notify_muted_until"], now[0] + 3 * 86400)
+        now[0] += 3 * 86400
+        self.assertFalse(self.store.get_item(item["id"])["notifications_muted"])
+        unmuted = self.store.set_notification_mute(item["id"], 0)
+        self.assertIsNone(unmuted["notify_muted_until"])
+
+    def test_adds_mute_and_price_timestamp_columns_to_existing_database(self):
+        legacy_db = Path(self.temporary.name) / "legacy.sqlite3"
+        connection = sqlite3.connect(legacy_db)
+        connection.executescript(
+            """
+            CREATE TABLE items (
+                id INTEGER PRIMARY KEY, parser TEXT, threshold_cents INTEGER,
+                url TEXT, normalized_url TEXT UNIQUE, title TEXT,
+                created_at INTEGER, updated_at INTEGER, last_checked_at INTEGER,
+                last_price_cents INTEGER, last_status TEXT, last_error TEXT,
+                last_title TEXT
+            );
+            CREATE TABLE checks (
+                id INTEGER PRIMARY KEY, item_id INTEGER, checked_at INTEGER,
+                status TEXT, price_cents INTEGER, title TEXT, error TEXT
+            );
+            INSERT INTO items VALUES (
+                1, 'amazon', 5500, 'https://example.com/item',
+                'https://example.com/item', 'Example', 10, 30, 30, 5499,
+                'error', 'changed', 'Example'
+            );
+            INSERT INTO checks(item_id, checked_at, status, price_cents, title)
+            VALUES (1, 20, 'ok', 5499, 'Example');
+            INSERT INTO checks(item_id, checked_at, status, error)
+            VALUES (1, 30, 'error', 'changed');
+            """
+        )
+        connection.close()
+        with price_check.PriceStore(legacy_db, clock=lambda: 40) as migrated:
+            item = migrated.get_item(1)
+            self.assertEqual(item["last_price_checked_at"], 20)
+            self.assertFalse(item["notifications_muted"])
+            self.assertIsNone(item["notify_muted_until"])
 
     @mock.patch.object(price_check, "send_ntfy")
     @mock.patch.object(price_check, "fetch", return_value=AMAZON_PAGE)
@@ -139,6 +187,16 @@ class PriceStoreTests(unittest.TestCase):
         self.assertEqual(updated["last_price"], "63.15")
         send.assert_called_once()
 
+    @mock.patch.object(price_check, "send_ntfy")
+    @mock.patch.object(price_check, "fetch", return_value=AMAZON_PAGE)
+    def test_muted_item_records_price_without_notification(self, _fetch, send):
+        item = self.add(threshold=Decimal("64"))
+        muted = self.store.set_notification_mute(item["id"], 2)
+        updated = price_check.check_item(self.store, muted)
+        self.assertEqual(updated["last_price"], "63.15")
+        self.assertTrue(updated["notifications_muted"])
+        send.assert_not_called()
+
     @mock.patch.object(price_check, "send_parser_error")
     @mock.patch.object(price_check, "fetch", return_value="<html>changed</html>")
     def test_parser_failure_is_recorded_and_notified(self, _fetch, send_error):
@@ -147,6 +205,18 @@ class PriceStoreTests(unittest.TestCase):
             price_check.check_item(self.store, item)
         self.assertEqual(self.store.get_item(item["id"])["last_status"], "error")
         send_error.assert_called_once()
+
+    @mock.patch.object(price_check, "send_parser_error")
+    @mock.patch.object(price_check, "fetch", return_value="<html>changed</html>")
+    def test_muted_parser_failure_is_recorded_without_notification(
+        self, _fetch, send_error
+    ):
+        item = self.add()
+        muted = self.store.set_notification_mute(item["id"], 2)
+        with self.assertRaisesRegex(price_check.PriceCheckError, "section was not found"):
+            price_check.check_item(self.store, muted)
+        self.assertEqual(self.store.get_item(item["id"])["last_status"], "error")
+        send_error.assert_not_called()
 
     @mock.patch.object(price_check, "fetch", return_value=AMAZON_PAGE)
     def test_dry_check_does_not_change_database(self, _fetch):
@@ -224,6 +294,30 @@ class CliTests(unittest.TestCase):
             self.assertEqual(status, 0)
             self.assertEqual(payload["item"]["display_title"], "Updated")
             self.assertEqual(payload["item"]["threshold"], "45.00")
+
+    def test_json_mute_updates_item(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / "prices.sqlite3"
+            with price_check.PriceStore(db, clock=lambda: 1_700_000_000) as store:
+                item = store.add_item(
+                    "amazon", Decimal("55"), "https://example.com/item", "Example"
+                )
+            arguments = [
+                str(SCRIPT),
+                "--db",
+                str(db),
+                "--json",
+                "mute",
+                str(item["id"]),
+                "7",
+            ]
+            with mock.patch.object(sys, "argv", arguments):
+                with mock.patch("builtins.print") as output:
+                    status = price_check.main()
+            payload = json.loads(output.call_args.args[0])
+            self.assertEqual(status, 0)
+            self.assertTrue(payload["item"]["notifications_muted"])
+            self.assertIsNotNone(payload["item"]["notify_muted_until"])
 
 
 if __name__ == "__main__":

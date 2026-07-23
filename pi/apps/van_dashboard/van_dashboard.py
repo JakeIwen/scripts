@@ -2590,6 +2590,9 @@ class PriceCheckController:
             "edit", item_id, parser, threshold, url, title, timeout=20
         )
 
+    def mute(self, item_id, days):
+        return self._run("mute", item_id, days, timeout=20)
+
     def schedule(self):
         return self._run("schedule", timeout=25)
 
@@ -4026,6 +4029,33 @@ def api_price_checks_remove():
     except PriceCheckCommandError as exc:
         return api_error(f"could not remove price check: {exc}", 400)
     payload["message"] = f"Removed {payload['removed']['display_title']}"
+    return jsonify(payload)
+
+
+@app.route("/api/price-checks/mute", methods=["POST"])
+def api_price_checks_mute():
+    if (
+        not _exact_form(("id", "days"))
+        or not request.form["id"].isdigit()
+        or not request.form["days"].isdigit()
+    ):
+        return api_error(
+            "notification mute requires an item ID and a non-negative number of days",
+            400,
+        )
+    days = int(request.form["days"])
+    try:
+        payload = price_checks.mute(request.form["id"], days)
+    except PriceCheckCommandError as exc:
+        return api_error(f"could not change notification mute: {exc}", 400)
+    item = payload["item"]
+    if days:
+        payload["message"] = (
+            f"Muted notifications for {item['display_title']} for {days} "
+            f"{'day' if days == 1 else 'days'}"
+        )
+    else:
+        payload["message"] = f"Unmuted notifications for {item['display_title']}"
     return jsonify(payload)
 
 

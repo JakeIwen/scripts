@@ -1043,6 +1043,14 @@ function renderPriceChecks(response) {
     latest = items.reduce(
       (value, item) => Math.max(value, Number(item.last_checked_at) || 0),
       0,
+    ),
+    latestPriceItem = items.reduce(
+      (selected, item) =>
+        item.last_price &&
+        Number(item.last_price_checked_at) > Number(selected?.last_price_checked_at || 0)
+          ? item
+          : selected,
+      null,
     );
   renderPriceSchedule(response.schedule);
   if (priceEditingId !== null && !items.some((item) => item.id === priceEditingId))
@@ -1053,6 +1061,10 @@ function renderPriceChecks(response) {
   $('price-summary').textContent = items.length
     ? `${summary.below_threshold || 0} below target · ${summary.errors || 0} errors`
     : 'No products watched';
+  $('price-latest-price').textContent = latestPriceItem
+    ? `$${latestPriceItem.last_price} · ${latestPriceItem.display_title}`
+    : '—';
+  $('price-latest-price').title = latestPriceItem?.display_title || '';
   $('price-last-check').textContent = latest ? age(latest) : 'never';
   $('price-operation').textContent = priceBusy
     ? 'Working…'
@@ -1065,16 +1077,20 @@ function renderPriceChecks(response) {
         const stateClass = item.last_status === 'error' ? 'error' : item.below_threshold ? 'below' : '',
           price = item.last_price ? `$${esc(item.last_price)}` : '—',
           threshold = `$${esc(item.threshold)}`,
-          meta = item.last_status === 'error'
+          checkMeta = item.last_status === 'error'
             ? `Error ${age(item.last_checked_at)} · ${esc(item.last_error || 'Unknown error')}`
             : item.last_checked_at
               ? `Checked ${age(item.last_checked_at)}${item.below_threshold ? ' · below target' : ''}`
-              : 'Not checked yet';
+              : 'Not checked yet',
+          muteMeta = item.notifications_muted
+            ? ` · notifications muted until ${esc(new Date(Number(item.notify_muted_until) * 1000).toLocaleString())}`
+            : '',
+          muteLabel = item.notifications_muted ? 'Unmute' : 'Mute';
         return `<article class="price-row ${stateClass}">
           <div class="price-row-title"><span>${esc(item.display_title)}</span><small>${esc(item.parser)} · ${esc(item.url)}</small></div>
           <div class="price-value">${price}<small>alert below ${threshold}</small></div>
-          <div class="price-row-meta">${meta}</div>
-          <div class="price-row-controls"><button data-action data-price-check="${item.id}" ${priceBusy ? 'disabled' : ''}>Check</button><button data-action data-price-edit="${item.id}" ${priceBusy ? 'disabled' : ''}>Edit</button><button class="price-remove" data-action data-price-remove="${item.id}" data-price-title="${esc(item.display_title)}" ${priceBusy ? 'disabled' : ''}>Remove</button></div>
+          <div class="price-row-meta">${checkMeta}${muteMeta}</div>
+          <div class="price-row-controls"><button data-action data-price-check="${item.id}" ${priceBusy ? 'disabled' : ''}>Check</button><button data-action data-price-edit="${item.id}" ${priceBusy ? 'disabled' : ''}>Edit</button><button class="price-mute${item.notifications_muted ? ' muted' : ''}" data-action data-price-mute="${item.id}" ${priceBusy ? 'disabled' : ''}>${muteLabel}</button><button class="price-remove" data-action data-price-remove="${item.id}" data-price-title="${esc(item.display_title)}" ${priceBusy ? 'disabled' : ''}>Remove</button></div>
         </article>`;
       })
       .join('') || '<div class="speaker-loading">No price checks yet</div>';
@@ -1216,6 +1232,7 @@ async function refreshPriceChecks() {
     return response;
   } catch (error) {
     $('price-summary').textContent = 'Price data unavailable';
+    $('price-latest-price').textContent = 'Unavailable';
     $('price-operation').textContent = 'Unavailable';
     $('price-list').innerHTML = `<div class="speaker-loading">${esc(error.message)}</div>`;
     throw error;
@@ -1240,6 +1257,27 @@ async function priceAction(work) {
 }
 async function checkPrices(target) {
   return priceAction(() => post('price-checks/check', { target: String(target) }));
+}
+async function mutePriceCheck(itemId) {
+  const item = priceChecks?.items?.find((candidate) => candidate.id === Number(itemId));
+  if (!item || priceBusy) return;
+  if (item.notifications_muted)
+    return priceAction(() =>
+      post('price-checks/mute', { id: String(item.id), days: '0' }),
+    );
+  const answer = window.prompt(
+    `Mute notifications for ${item.display_title} for how many days?`,
+    '7',
+  );
+  if (answer === null) return;
+  const days = Number(answer.trim());
+  if (!Number.isSafeInteger(days) || days < 1) {
+    toast('Enter a whole number of days greater than zero', true);
+    return;
+  }
+  return priceAction(() =>
+    post('price-checks/mute', { id: String(item.id), days: String(days) }),
+  );
 }
 async function savePriceSchedule() {
   if (priceBusy) return;
@@ -2975,6 +3013,8 @@ document.addEventListener('click', (event) => {
   if (priceCheck) checkPrices(priceCheck.dataset.priceCheck);
   const priceEdit = event.target.closest('[data-price-edit]');
   if (priceEdit) editPriceCheck(priceEdit.dataset.priceEdit);
+  const priceMute = event.target.closest('[data-price-mute]');
+  if (priceMute) mutePriceCheck(priceMute.dataset.priceMute);
   const priceRemove = event.target.closest('[data-price-remove]');
   if (
     priceRemove &&

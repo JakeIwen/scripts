@@ -118,11 +118,12 @@ def check_item(
     try:
         product = PARSERS[item["parser"]](fetch(item["url"]))
     except AmazonParseError as error:
+        failed_item = item
         if record:
-            store.record_error(item["id"], str(error))
-        if notify:
+            failed_item = store.record_error(item["id"], str(error))
+        if notify and not failed_item["notifications_muted"]:
             try:
-                send_parser_error(item, error)
+                send_parser_error(failed_item, error)
             except PriceCheckError as notify_error:
                 raise PriceCheckError(
                     f"{error}; parser-error notification failed: {notify_error}"
@@ -144,7 +145,7 @@ def check_item(
             "display_title": item["title"] or product.title,
             "below_threshold": product.price < Decimal(item["threshold"]),
         }
-    if updated["below_threshold"] and notify:
+    if updated["below_threshold"] and notify and not updated["notifications_muted"]:
         send_price_alert(updated, product)
     return updated
 
@@ -237,6 +238,11 @@ def build_parser() -> argparse.ArgumentParser:
     edit.add_argument("threshold")
     edit.add_argument("url")
     edit.add_argument("title", nargs="?", default="")
+    mute = commands.add_parser(
+        "mute", help="mute notifications for an item for a number of days; 0 unmutes"
+    )
+    mute.add_argument("id", type=int)
+    mute.add_argument("days", type=int)
     commands.add_parser("schedule", help="show the live price-check cron schedule")
     schedule_parse = commands.add_parser(
         "schedule-parse", help="describe a cron schedule without changing it"
@@ -315,6 +321,21 @@ def main() -> int:
                     response(store, item=item),
                     f"updated price check: {item['display_title']}",
                 )
+                return 0
+            if command == "mute":
+                item = store.set_notification_mute(args.id, args.days)
+                if args.days:
+                    message = (
+                        f"muted price-check notifications for "
+                        f"{item['display_title']} for {args.days} "
+                        f"{'day' if args.days == 1 else 'days'}"
+                    )
+                else:
+                    message = (
+                        f"unmuted price-check notifications for "
+                        f"{item['display_title']}"
+                    )
+                emit(args, response(store, item=item), message)
                 return 0
             if command == "remove":
                 item = store.remove_item(args.match)

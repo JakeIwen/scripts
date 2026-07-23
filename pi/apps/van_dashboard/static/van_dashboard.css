@@ -638,6 +638,11 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   background: #352526;
   color: #f2b5b0;
 }
+.price-row-controls .price-mute.muted {
+  border-color: #7b6740;
+  background: #3a3120;
+  color: #f0d598;
+}
 .price-row-controls button:disabled,
 .price-add:disabled,
 .price-edit-cancel:disabled,

@@ -308,6 +308,7 @@ class PriceCheckControllerTests(unittest.TestCase):
         self.assertEqual(controller.status(), self.PAYLOAD)
         controller.add("amazon", "55", "https://example.com/item", "Example")
         controller.edit(7, "amazon", "45", "https://example.com/updated", "Updated")
+        controller.mute(7, 3)
         controller.schedule()
         controller.parse_schedule("30 8,16 * * 1-5")
         controller.set_schedule("30 8,16 * * 1-5")
@@ -340,15 +341,16 @@ class PriceCheckControllerTests(unittest.TestCase):
                 20,
             ),
         )
-        self.assertEqual(calls[3], (prefix + ["schedule"], 25))
+        self.assertEqual(calls[3], (prefix + ["mute", "7", "3"], 20))
+        self.assertEqual(calls[4], (prefix + ["schedule"], 25))
         self.assertEqual(
-            calls[4], (prefix + ["schedule-parse", "30 8,16 * * 1-5"], 25)
+            calls[5], (prefix + ["schedule-parse", "30 8,16 * * 1-5"], 25)
         )
         self.assertEqual(
-            calls[5], (prefix + ["schedule-set", "30 8,16 * * 1-5"], 30)
+            calls[6], (prefix + ["schedule-set", "30 8,16 * * 1-5"], 30)
         )
-        self.assertEqual(calls[6], (prefix + ["remove", "7"], 20))
-        self.assertEqual(calls[7], (prefix + ["check", "7"], 91))
+        self.assertEqual(calls[7], (prefix + ["remove", "7"], 20))
+        self.assertEqual(calls[8], (prefix + ["check", "7"], 91))
 
     def test_rejects_failed_or_non_json_cli_output(self):
         def failed(_args, timeout):
@@ -527,6 +529,13 @@ class PriceCheckApiTests(unittest.TestCase):
                 calls.append(("check", target))
                 return {**payload, "checked": [{"id": 7}]}
 
+            def mute(self, item_id, days):
+                calls.append(("mute", item_id, days))
+                return {
+                    **payload,
+                    "item": {"display_title": "Updated", "notifications_muted": True},
+                }
+
             def remove(self, item_id):
                 calls.append(("remove", item_id))
                 return {**payload, "removed": {"display_title": "Example"}}
@@ -568,6 +577,13 @@ class PriceCheckApiTests(unittest.TestCase):
         )
         self.assertEqual(edit.status_code, 200)
         self.assertEqual(edit.get_json()["message"], "Updated Updated")
+        mute = self.client.post(
+            "/api/price-checks/mute", data={"id": "7", "days": "3"}
+        )
+        self.assertEqual(mute.status_code, 200)
+        self.assertEqual(
+            mute.get_json()["message"], "Muted notifications for Updated for 3 days"
+        )
         self.assertEqual(
             self.client.post("/api/price-checks/check", data={"target": "7"}).status_code,
             200,
@@ -592,6 +608,7 @@ class PriceCheckApiTests(unittest.TestCase):
                     "https://example.com/updated",
                     "Updated",
                 ),
+                ("mute", "7", 3),
                 ("check", "7"),
                 ("remove", "7"),
             ],
@@ -603,6 +620,10 @@ class PriceCheckApiTests(unittest.TestCase):
                 self.fail("controller should not be called")
 
         response = self.client.post("/api/price-checks/check", data={"target": "bad"})
+        self.assertEqual(response.status_code, 400)
+        response = self.client.post(
+            "/api/price-checks/mute", data={"id": "7", "days": "-1"}
+        )
         self.assertEqual(response.status_code, 400)
 
     def test_schedule_failure_reports_that_previous_crontab_was_restored(self):
@@ -2268,6 +2289,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="price-edit-cancel"', page.data)
         self.assertIn(b'id="price-schedule-form"', page.data)
         self.assertIn(b'id="price-schedule-description"', page.data)
+        self.assertIn(b'id="price-latest-price"', page.data)
         self.assertIn(b"Check all now", page.data)
         self.assertIn(b"Managed HDDs", page.data)
         self.assertIn(b'id="lighting-title">Lighting', page.data)
@@ -2376,6 +2398,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"system-monitor/crash-analysis", javascript.data)
         self.assertIn(b"price-checks/check", javascript.data)
         self.assertIn(b"price-checks/edit", javascript.data)
+        self.assertIn(b"price-checks/mute", javascript.data)
         self.assertIn(b"price-checks/schedule", javascript.data)
         self.assertIn(b"price-checks/schedule/parse", javascript.data)
         self.assertIn(b"function savePriceSchedule()", javascript.data)
@@ -2385,7 +2408,9 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"could not parse cron", javascript.data)
         self.assertIn(b".price-cron-spinner", stylesheet.data)
         self.assertIn(b"data-price-edit", javascript.data)
+        self.assertIn(b"data-price-mute", javascript.data)
         self.assertIn(b"data-price-remove", javascript.data)
+        self.assertIn(b".price-mute.muted", stylesheet.data)
         self.assertIn(b"data-light-brightness", javascript.data)
         self.assertIn(b"TILE_ORDER_STORAGE_KEY", javascript.data)
         self.assertIn(b"localStorage.setItem", javascript.data)

@@ -100,7 +100,10 @@
     <button class="tile price-tile" id="price-checks" data-dashboard-tile data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="price-panel">
       <span class="pill" id="price-pill">—</span><span class="tile-heading"><span class="tile-icon" aria-hidden="true">🏷️</span><span class="tile-title">Price Watch</span></span>
       <span class="tile-detail" id="price-summary">Loading watched items…</span>
-      <span class="status-lines"><span class="status-line"><span>Last check</span><span id="price-last-check">never</span></span></span>
+      <span class="status-lines">
+        <span class="status-line"><span>Latest price</span><span id="price-latest-price">—</span></span>
+        <span class="status-line"><span>Last check</span><span id="price-last-check">never</span></span>
+      </span>
     </button>
     <section class="tile lighting-tile" id="lighting-card" data-dashboard-tile aria-labelledby="lighting-title">
       <button class="lighting-open" id="lighting" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="lighting-panel">

@@ -22,10 +22,12 @@ CREATE TABLE IF NOT EXISTS items (
     updated_at INTEGER NOT NULL,
     last_checked_at INTEGER,
     last_price_cents INTEGER,
+    last_price_checked_at INTEGER,
     last_status TEXT NOT NULL DEFAULT 'never'
         CHECK (last_status IN ('never', 'ok', 'error')),
     last_error TEXT,
-    last_title TEXT
+    last_title TEXT,
+    notify_muted_until INTEGER
 );
 CREATE TABLE IF NOT EXISTS checks (
     id INTEGER PRIMARY KEY,
@@ -80,8 +82,39 @@ class PriceStore:
         self.connection.execute("PRAGMA busy_timeout=15000")
         self.connection.execute("PRAGMA journal_mode=WAL")
         self.connection.executescript(SCHEMA)
-        self.connection.commit()
+        try:
+            self.connection.execute("BEGIN IMMEDIATE")
+            self._migrate_schema()
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
         os.chmod(self.path, 0o600)
+
+    def _migrate_schema(self) -> None:
+        columns = {
+            row["name"]
+            for row in self.connection.execute("PRAGMA table_info(items)").fetchall()
+        }
+        if "last_price_checked_at" not in columns:
+            self.connection.execute(
+                "ALTER TABLE items ADD COLUMN last_price_checked_at INTEGER"
+            )
+        if "notify_muted_until" not in columns:
+            self.connection.execute(
+                "ALTER TABLE items ADD COLUMN notify_muted_until INTEGER"
+            )
+        self.connection.execute(
+            """
+            UPDATE items
+            SET last_price_checked_at = (
+                SELECT MAX(checked_at)
+                FROM checks
+                WHERE checks.item_id=items.id AND checks.status='ok'
+            )
+            WHERE last_price_checked_at IS NULL AND last_price_cents IS NOT NULL
+            """
+        )
 
     def close(self) -> None:
         self.connection.close()
@@ -92,10 +125,10 @@ class PriceStore:
     def __exit__(self, *_args) -> None:
         self.close()
 
-    @staticmethod
-    def _public(row: sqlite3.Row) -> dict:
+    def _public(self, row: sqlite3.Row) -> dict:
         price_cents = row["last_price_cents"]
         threshold_cents = row["threshold_cents"]
+        notify_muted_until = row["notify_muted_until"]
         display_title = row["title"] or row["last_title"] or row["url"]
         return {
             "id": row["id"],
@@ -110,9 +143,15 @@ class PriceStore:
             "last_checked_at": row["last_checked_at"],
             "last_price": money(price_cents),
             "last_price_cents": price_cents,
+            "last_price_checked_at": row["last_price_checked_at"],
             "last_status": row["last_status"],
             "last_error": row["last_error"],
             "last_title": row["last_title"],
+            "notify_muted_until": notify_muted_until,
+            "notifications_muted": (
+                notify_muted_until is not None
+                and notify_muted_until > int(self.clock())
+            ),
             "below_threshold": (
                 price_cents < threshold_cents if price_cents is not None else None
             ),
@@ -211,6 +250,24 @@ class PriceStore:
             raise StoreError(f"price check {item_id} was not found")
         return self.get_item(item_id)
 
+    def set_notification_mute(self, item_id: int, days: int) -> dict:
+        if days < 0:
+            raise StoreError("notification mute days cannot be negative")
+        now = int(self.clock())
+        muted_until = None if days == 0 else now + days * 24 * 60 * 60
+        cursor = self.connection.execute(
+            """
+            UPDATE items
+            SET notify_muted_until=?, updated_at=?
+            WHERE id=?
+            """,
+            (muted_until, now, item_id),
+        )
+        self.connection.commit()
+        if cursor.rowcount != 1:
+            raise StoreError(f"price check {item_id} was not found")
+        return self.get_item(item_id)
+
     def record_success(self, item_id: int, title: str, price: Decimal) -> dict:
         now = int(self.clock())
         price_cents = cents(price)
@@ -218,11 +275,12 @@ class PriceStore:
             cursor = self.connection.execute(
                 """
                 UPDATE items
-                SET last_checked_at=?, last_price_cents=?, last_status='ok',
+                SET last_checked_at=?, last_price_cents=?,
+                    last_price_checked_at=?, last_status='ok',
                     last_error=NULL, last_title=?, updated_at=?
                 WHERE id=?
                 """,
-                (now, price_cents, title, now, item_id),
+                (now, price_cents, now, title, now, item_id),
             )
             if cursor.rowcount != 1:
                 raise StoreError(f"price check {item_id} was removed during its check")
