@@ -711,8 +711,8 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
 }
 .lighting-open {
   width: 100%;
-  min-height: 148px;
-  flex: 1;
+  min-height: 122px;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -756,6 +756,70 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
 }
 .lighting-master:disabled {
   cursor: default;
+}
+.lighting-quick {
+  width: 100%;
+  display: grid;
+  gap: 4px;
+  padding: 0 12px 12px;
+}
+.lighting-quick-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(67px, auto) minmax(42px, 1fr) 30px;
+  align-items: center;
+  gap: 6px;
+  min-height: 31px;
+}
+.lighting-room-power {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #17232b;
+  color: var(--ink);
+  padding: 6px 7px;
+  font: inherit;
+  font-size: 9px;
+  text-align: left;
+  cursor: pointer;
+}
+.lighting-room-power .network-dot {
+  width: 8px;
+  height: 8px;
+  box-shadow: none;
+}
+.lighting-room-power > span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lighting-room-power strong {
+  color: var(--dim);
+  font-size: 7px;
+  letter-spacing: 0.05em;
+}
+.lighting-room-power:disabled {
+  cursor: default;
+  opacity: 0.62;
+}
+.lighting-room-slider {
+  min-width: 0;
+  width: 100%;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.lighting-room-slider:disabled {
+  opacity: 0.5;
+}
+.lighting-quick-level {
+  color: var(--dim);
+  font-size: 8px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 .lighting-sheet {
   padding-bottom: calc(24px + env(safe-area-inset-bottom));

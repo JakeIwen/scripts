@@ -113,6 +113,23 @@
       <button class="lighting-master" id="lighting-master" data-action disabled aria-pressed="mixed">
         <span class="network-dot" id="lighting-master-dot"></span><span id="lighting-master-state">NO DATA</span>
       </button>
+      <div class="lighting-quick" aria-label="Room lighting controls">
+        <div class="lighting-quick-row" data-lighting-quick-room="cab">
+          <button class="lighting-room-power" id="lighting-room-cab-power" data-action data-light-target="group:cab" disabled aria-pressed="mixed"><span class="network-dot" id="lighting-room-cab-dot"></span><span>Cab</span><strong id="lighting-room-cab-state">NO DATA</strong></button>
+          <input class="lighting-room-slider" id="lighting-room-cab-slider" data-action data-light-group-brightness="cab" type="range" min="1" max="100" value="100" disabled aria-label="Cab brightness">
+          <output class="lighting-quick-level" id="lighting-room-cab-level" for="lighting-room-cab-slider">—</output>
+        </div>
+        <div class="lighting-quick-row" data-lighting-quick-room="rear">
+          <button class="lighting-room-power" id="lighting-room-rear-power" data-action data-light-target="group:rear" disabled aria-pressed="mixed"><span class="network-dot" id="lighting-room-rear-dot"></span><span>Rear</span><strong id="lighting-room-rear-state">NO DATA</strong></button>
+          <input class="lighting-room-slider" id="lighting-room-rear-slider" data-action data-light-group-brightness="rear" type="range" min="1" max="100" value="100" disabled aria-label="Rear brightness">
+          <output class="lighting-quick-level" id="lighting-room-rear-level" for="lighting-room-rear-slider">—</output>
+        </div>
+        <div class="lighting-quick-row" data-lighting-quick-room="kitchen">
+          <button class="lighting-room-power" id="lighting-room-kitchen-power" data-action data-light-target="group:kitchen" disabled aria-pressed="mixed"><span class="network-dot" id="lighting-room-kitchen-dot"></span><span>Kitchen</span><strong id="lighting-room-kitchen-state">NO DATA</strong></button>
+          <input class="lighting-room-slider" id="lighting-room-kitchen-slider" data-action data-light-group-brightness="kitchen" type="range" min="1" max="100" value="100" disabled aria-label="Kitchen brightness">
+          <output class="lighting-quick-level" id="lighting-room-kitchen-level" for="lighting-room-kitchen-slider">—</output>
+        </div>
+      </div>
     </section>
     <button class="tile ubnt-wifi-tile" id="ubnt-wifi" data-dashboard-tile data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="ubnt-wifi-panel">
       <span class="switch-state"><span class="network-dot" id="ubnt-wifi-dot"></span><span id="ubnt-wifi-state">NO DATA</span></span>

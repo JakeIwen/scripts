@@ -2155,6 +2155,46 @@ async function changeDiskAction(button) {
 function lightingDotClass(state) {
   return state === 'on' ? 'good' : state === 'off' ? 'bad' : '';
 }
+const LIGHTING_QUICK_GROUPS = new Set(['cab', 'rear', 'kitchen']);
+function lightingGroupLevel(group) {
+  const levels = group.lights
+    .filter((light) => light.available && Number.isFinite(light.brightness))
+    .map((light) => light.brightness);
+  if (!levels.length) return 100;
+  return Math.round(levels.reduce((total, level) => total + level, 0) / levels.length);
+}
+function renderLightingQuick(next) {
+  for (const groupId of LIGHTING_QUICK_GROUPS) {
+    const group = next.groups.find((item) => item.id === groupId),
+      power = $(`lighting-room-${groupId}-power`),
+      slider = $(`lighting-room-${groupId}-slider`),
+      state = $(`lighting-room-${groupId}-state`),
+      known = Boolean(group?.lights.some((light) => light.available)),
+      enabled = group?.state === 'on',
+      level = group ? lightingGroupLevel(group) : 100;
+    networkState(
+      `lighting-room-${groupId}-dot`,
+      group?.state === 'on' ? true : group?.state === 'off' ? false : null,
+    );
+    power.disabled = !known;
+    power.dataset.lightValue = String(!enabled);
+    power.setAttribute(
+      'aria-pressed',
+      group?.state === 'on' ? 'true' : group?.state === 'off' ? 'false' : 'mixed',
+    );
+    state.textContent =
+      group?.state === 'on'
+        ? 'ON'
+        : group?.state === 'off'
+          ? 'OFF'
+          : known
+            ? 'MIXED'
+            : 'NO DATA';
+    slider.disabled = !known;
+    slider.value = level;
+    $(`lighting-room-${groupId}-level`).textContent = known ? `${level}%` : '—';
+  }
+}
 function renderLighting(next) {
   lighting = next;
   const master = $('lighting-master'),
@@ -2181,6 +2221,7 @@ function renderLighting(next) {
   const summary = [`${next.on_count} on`];
   if (unavailable) summary.push(`${unavailable} unavailable`);
   $('lighting-summary').textContent = known ? summary.join(' · ') : 'Light status unavailable';
+  renderLightingQuick(next);
   $('lighting-status').textContent = known ? 'Current state' : 'No available lights';
   $('lighting-panel').setAttribute('aria-busy', 'false');
   $('lighting-groups').innerHTML = next.groups
@@ -2215,6 +2256,7 @@ function renderLightingUnavailable(message) {
   $('lighting-master').disabled = true;
   $('lighting-master').setAttribute('aria-pressed', 'mixed');
   $('lighting-master-state').textContent = 'NO DATA';
+  renderLightingQuick({ groups: [] });
   $('lighting-summary').textContent = /usage: tuya_light\.sh/.test(message)
     ? 'Lighting helper needs deployment'
     : 'Home Assistant status unavailable';
@@ -2250,6 +2292,28 @@ async function changeLightBrightness(entity, brightness) {
     result = await post('lights/brightness', { entity, brightness });
     renderLighting(result.lighting);
     return result;
+  } catch (error) {
+    await refreshLighting(false).catch(() => {});
+    throw error;
+  }
+}
+async function changeLightGroupBrightness(groupId, brightness) {
+  if (!LIGHTING_QUICK_GROUPS.has(groupId)) throw new Error('Unknown quick lighting room');
+  const group = lighting?.groups.find((item) => item.id === groupId),
+    entities = group?.lights
+      .filter((light) => light.available)
+      .map((light) => light.entity_id);
+  if (!entities?.length) throw new Error('No available lights in this room');
+  let result;
+  try {
+    for (const entity of entities) {
+      result = await post('lights/brightness', { entity, brightness });
+    }
+    renderLighting(result.lighting);
+    return {
+      ...result,
+      message: `${group.label} brightness set to ${Number(brightness)}%`,
+    };
   } catch (error) {
     await refreshLighting(false).catch(() => {});
     throw error;
@@ -2945,12 +3009,24 @@ document.addEventListener('input', (event) => {
   if (lightSlider)
     lightSlider.closest('.lighting-row').querySelector('.lighting-level').textContent =
       `${lightSlider.value}%`;
+  const roomSlider = event.target.closest('[data-light-group-brightness]');
+  if (roomSlider)
+    roomSlider.closest('.lighting-quick-row').querySelector('.lighting-quick-level').textContent =
+      `${roomSlider.value}%`;
 });
 document.addEventListener('change', (event) => {
   const lightSlider = event.target.closest('[data-light-brightness]');
   if (lightSlider)
     action(() =>
       changeLightBrightness(lightSlider.dataset.lightBrightness, lightSlider.value),
+    );
+  const roomSlider = event.target.closest('[data-light-group-brightness]');
+  if (roomSlider)
+    action(() =>
+      changeLightGroupBrightness(
+        roomSlider.dataset.lightGroupBrightness,
+        roomSlider.value,
+      ),
     );
   const checkbox = event.target.closest('[data-group-speaker]');
   if (checkbox)
