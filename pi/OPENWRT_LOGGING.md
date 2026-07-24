@@ -26,8 +26,9 @@ sudo /home/pi/scripts/setup_openwrt_logging.sh
 ```
 
 The script installs `rsyslog` and `logrotate`, validates both configurations,
-enables the service, and verifies the UDP listener. Then configure the router
-from the tracked `vanrouter/etc/config/system` or with UCI and restart `log`.
+enables the service, and verifies the UDP listener. Configure the router with
+UCI and restart `log`; full live `/etc/config` files are deliberately not
+tracked or deployed from this repository.
 
 ## Verify
 

@@ -4,7 +4,6 @@ repo_scripts="$dsc/pi/scripts"
 services="$dsc/pi/services"
 hooks="$dsc/pi/hooks"
 twilio="$dsc/pi/secrets/.twilio"
-vanrouter="$dsc/vanrouter"
 configs="$dsc/pi/configs"
 secrets="$dsc/pi/secrets"
 pi_apps="$dsc/pi/apps"
@@ -13,7 +12,6 @@ shared_python="$dsc/shared/python"
 shared_sh="$dsc/shared/sh"
 pi_ip='pi@vanpi.lan'
 # pi_ip='pi@100.82.91.76'
-vr_ip='root@openwrt'
 
 local_stage="$(mktemp -d "/tmp/vanpi-sync.XXXXXX")" || exit 1
 staged_scripts="$local_stage/scripts"
@@ -74,13 +72,5 @@ wait $home_pid
 ssh $mux $pi_ip 'sudo chmod 770 /home/pi/rsync-exclude-media.txt' &
 wait $dirs_pid
 wait $services_pid || { echo "script/service deployment failed" >&2; exit 1; }
-
-# ROUTER
-# scp -r "$vr_ip:/etc/config" "$vanrouter/etc/" &
-# scp -r "$vanrouter/etc/config" "$vr_ip:/etc/" &
-# # scp -r "$vanrouter:/etc/config" "$vr_ip/etc/" &
-# scp "$vanrouter/root/auto_dns.sh" "$vr_ip:/root/auto_dns.sh" &
-# scp "$vanrouter/root/.profile" "$vr_ip:/root/.profile" &
-# # scp "$vanrouter/root/dnsmasq.awk" "$vr_ip:/root/dnsmasq.awk" &
 
 wait

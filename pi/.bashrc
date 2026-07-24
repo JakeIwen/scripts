@@ -75,8 +75,10 @@ codexp() {
     --config 'permissions.workspace-git-network={extends=":workspace",filesystem={":workspace_roots"={".git"="write"},"~/.config/firebase"="write","~/.config/configstore"="write","~/.npm"="write","~/.config/gcloud"="write"},network={enabled=true}}' \
     "$@"
 }
+
+
 alias codexpr='codexp resume'
-alias codexpcan='codexp --sandbox danger-full-access resume --last'
+alias codexpcan='codexpr --sandbox danger-full-access --add-dir /mnt/EXFAT512/obd-things --add-dir /dev/bus/usb'
 codexsearch() { /home/pi/scripts/codexsearch.sh "$@"; }
 
 alias claudep='claude --permission-mode bypassPermissions'
