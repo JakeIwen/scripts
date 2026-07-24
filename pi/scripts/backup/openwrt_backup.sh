@@ -122,13 +122,9 @@ for required_path in \
 	etc/config/system \
 	etc/config/wireless \
 	etc/dropbear/authorized_keys \
-	etc/dropbear/vanpi-policy-trigger \
 	etc/firewall.ttl-clientwan.nft \
-	etc/mwan3.user \
 	etc/sysupgrade.conf \
-	root/.ssh/known_hosts \
-	usr/libexec/openwrt-backup-export \
-	usr/libexec/vanpi-policy-trigger; do
+	usr/libexec/openwrt-backup-export; do
 	printf '%s\n' "$inner_members" | /bin/grep -Fx "$required_path" >/dev/null \
 		|| fail "nested archive is missing required path: $required_path"
 done

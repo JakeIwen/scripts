@@ -412,9 +412,9 @@ set_isw_options() {
 internet_switches_main() {
   local rc
 
-  # The ignition hook can invoke this at the same time as the minutely cron
-  # job. Serialize the entire policy decision so mounting and unmounting cannot
-  # race. A waiter that times out acts as the watchdog for a stuck lock holder.
+  # Ignition hooks, event-driven services, and the periodic timer can overlap.
+  # Serialize the entire policy decision so mounting and unmounting cannot race.
+  # policy_watchdog.sh independently alerts if the lock holder stalls.
   exec 9>"$ISW_LOCK_FILE" || return 1
   if ! /usr/bin/flock -w "$ISW_LOCK_WAIT_SECONDS" 9; then
     echo "another internet_switches.sh instance held the lock for $ISW_LOCK_WAIT_SECONDS seconds"

@@ -1,7 +1,7 @@
 #!/bin/bash
 # maintain a bootable hot-spare SD card with rpi-clone
-#   clone_to_sd.sh <label>               incremental clone to the attached card whose rootfs label is <label>
-#   clone_to_sd.sh --init <label> <sdX>  first-time setup of a fresh card (DESTROYS its contents)
+#   /home/pi/scripts/backup/clone_to_sd.sh <label>               incremental clone to the attached card whose rootfs label is <label>
+#   /home/pi/scripts/backup/clone_to_sd.sh --init <label> <sdX>  first-time setup of a fresh card (DESTROYS its contents)
 # exit: 0 ok, 1 failed, 2 card not attached (quiet — watchdog handles staleness)
 set -u
 . /home/pi/scripts/backup/backup_conf.sh
@@ -9,7 +9,7 @@ notify() { /home/pi/scripts/ntfy_send.sh "$@"; }
 
 init=0
 [ "${1:-}" = "--init" ] && { init=1; shift; }
-label=${1:?usage: clone_to_sd.sh [--init] <label> [sdX]}
+label=${1:?usage: /home/pi/scripts/backup/clone_to_sd.sh [--init] <label> [sdX]}
 
 if [ $init = 1 ]; then
   disk=${2:?--init needs the target device, e.g. sda}

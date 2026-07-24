@@ -1,0 +1,12 @@
+[Unit]
+Description=Detect a stalled vanpi policy reconciliation
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=pi
+Environment=HOME=/home/pi
+ExecStart=/home/pi/scripts/policy_watchdog.sh
+
+[Install]
+WantedBy=multi-user.target

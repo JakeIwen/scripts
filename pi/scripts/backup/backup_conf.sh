@@ -1,6 +1,7 @@
 #!/bin/bash
-# vanpi backup configuration — sourced by pi_backup.sh, clone_to_sd.sh,
-# backup_watchdog.sh, restore_from_borg.sh, ntfy_send.sh
+# vanpi backup configuration — sourced by pi_backup.sh,
+# /home/pi/scripts/backup/clone_to_sd.sh, backup_watchdog.sh,
+# restore_from_borg.sh, ntfy_send.sh
 
 [ -f /home/pi/secrets/.bash_variables ] && . /home/pi/secrets/.bash_variables
 
@@ -23,7 +24,8 @@ BORG_CHECK_DOM=1  # day of month for the integrity check (borg check)
 
 # bootable clone targets: "<ext4-label>:<interval-days>", staggered so hotspare-b
 # always holds an older known-good generation. Cards are found by ext4 label at
-# runtime; init new ones with: clone_to_sd.sh --init <label> sdX
+# runtime; init new ones with:
+# /home/pi/scripts/backup/clone_to_sd.sh --init <label> sdX
 CLONE_TARGETS=(hotspare-a:7 hotspare-b:14)
 CLONE_MAX_DISK_GB=500  # refuse to clone onto anything bigger (TB-drive footgun guard)
 

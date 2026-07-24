@@ -51,16 +51,12 @@ for required_path in \
 	/etc/config/mwan3 \
 	/etc/config/network \
 	/etc/config/sqm \
-	/etc/config/system \
-	/etc/config/wireless \
-	/etc/dropbear/authorized_keys \
-	/etc/dropbear/vanpi-policy-trigger \
-	/etc/firewall.ttl-clientwan.nft \
-	/etc/mwan3.user \
-	/etc/sysupgrade.conf \
-	/root/.ssh/known_hosts \
-	/usr/libexec/openwrt-backup-export \
-	/usr/libexec/vanpi-policy-trigger; do
+		/etc/config/system \
+		/etc/config/wireless \
+		/etc/dropbear/authorized_keys \
+		/etc/firewall.ttl-clientwan.nft \
+		/etc/sysupgrade.conf \
+		/usr/libexec/openwrt-backup-export; do
 	/bin/grep -Fx "$required_path" "$backup_list" >/dev/null \
 		|| fail "required path is absent from sysupgrade backup: $required_path"
 done

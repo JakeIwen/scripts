@@ -2694,7 +2694,8 @@ class BackupManager:
     Configuration is parsed as data rather than sourced, so inspecting status
     cannot execute backup_conf.sh or load its secrets file. Clone targets are
     restricted to the labels already present in CLONE_TARGETS; the dashboard
-    never accepts a block-device path and never exposes clone_to_sd.sh --init.
+    never accepts a block-device path and never exposes
+    /home/pi/scripts/backup/clone_to_sd.sh --init.
     """
 
     CLONE_TARGET_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")

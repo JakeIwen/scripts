@@ -1,0 +1,11 @@
+[Unit]
+Description=Check for stalled vanpi policy reconciliation
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Unit=vanpi-policy-watchdog.service
+
+[Install]
+WantedBy=timers.target

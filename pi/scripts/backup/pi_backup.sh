@@ -133,7 +133,7 @@ for entry in "${CLONE_TARGETS[@]}"; do
   [ -f "$stamp" ] && age_days=$(( (now - $(stat -c %Y "$stamp")) / 86400 ))
   if [ "$age_days" -ge "$interval" ]; then
     log "clone to $label due (${age_days}d >= ${interval}d)"
-    run /home/pi/scripts/clone_to_sd.sh "$label" && age_days=0
+    run /home/pi/scripts/backup/clone_to_sd.sh "$label" && age_days=0
   fi
   clone_summary+="$label: ${age_days}d old. "
 done

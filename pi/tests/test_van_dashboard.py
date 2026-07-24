@@ -2090,7 +2090,7 @@ class BackupManagerTests(unittest.TestCase):
         with open(path, encoding="utf-8") as handle:
             script = handle.read()
         self.assertIn("acquire_job_lock", script)
-        self.assertIn('/home/pi/scripts/clone_to_sd.sh "$label"', script)
+        self.assertIn('/home/pi/scripts/backup/clone_to_sd.sh "$label"', script)
         self.assertNotIn('clone_to_sd.sh --init', script)
 
 

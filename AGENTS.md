@@ -93,7 +93,7 @@ The active design is represented by:
 - `pi/scripts/backup/pi_backup.sh`: backup orchestration.
 - `pi/scripts/backup/backup_watchdog.sh`: freshness and health monitoring.
 - `pi/scripts/backup/abort_backup.sh`: coordinated termination before unmounting.
-- `pi/scripts/clone_to_sd.sh`: bootable spare-card cloning.
+- `pi/scripts/backup/clone_to_sd.sh`: bootable spare-card cloning.
 - `pi/scripts/mount_disks.sh` and `pi/scripts/umount_disks.sh`: disk lifecycle.
 
 An older mount-directory cleanup implementation once treated a failed filesystem

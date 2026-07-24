@@ -25,7 +25,11 @@ if [[ ! -d "$staged_services" || ! -d "$staged_scripts" ]]; then
 fi
 
 shopt -s nullglob
-staged_units=("$staged_services"/*.service "$staged_services"/*.path)
+staged_units=(
+  "$staged_services"/*.service
+  "$staged_services"/*.path
+  "$staged_services"/*.timer
+)
 if (( ${#staged_units[@]} == 0 )); then
   echo "service update staging contains no systemd units" >&2
   exit 1
@@ -72,6 +76,16 @@ done
 
 mkdir -p "$live_scripts"
 cp -a "$staged_scripts/." "$live_scripts/"
+# clone_to_sd.sh moved under backup/. The staged copy is installed first so an
+# interrupted deployment cannot leave the host without the cloning command.
+if [[ -f "$live_scripts/backup/clone_to_sd.sh" ]]; then
+  rm -f -- "$live_scripts/clone_to_sd.sh"
+fi
+# These unreferenced predecessors were superseded by rpi-clone and the removal
+# of the router-to-Pi mwan3 policy trigger.
+rm -f -- \
+  "$live_scripts/rsync_to_clone.sh" \
+  "$live_scripts/setup_router_policy_trigger.sh"
 # Preserve the old sync behavior for top-level scripts, and do it before any
 # service restart so directly executed shell scripts remain runnable. Directory
 # modes are preserved from the staged tree.

@@ -4,9 +4,8 @@
 
 - [ ] Put lifecycle reconciliation behind a `vanpi-policy.service` oneshot.
   Keep policy decisions in an idempotent script; use systemd for execution,
-  serialization, status, and logging.
-  - The service now exists and is used by the OpenWrt mwan3 trigger. Existing
-    ignition and cron callers still invoke the policy script directly.
+  serialization, status, and logging. Ignition hooks still invoke the policy
+  script directly.
 
 - [ ] Change the existing ignition hooks to update ignition state and dispatch
   `vanpi-policy.service` asynchronously. Ignition detection is already
@@ -17,17 +16,9 @@
   `vanpi-storage.path` delegates all work to `vanpi-policy.service`; no mounting,
   unmounting, or other long-running work occurs in the udev process itself.
 
-- [x] Trigger policy reconciliation from OpenWrt when mwan3 uplink state
-  changes. Pi-side NetworkManager cannot observe those transitions because the
-  Pi-to-router LAN connection remains up. The router notification means only
-  "reconcile now."
-  - Use a dedicated, forced-command credential that can only request the
-    policy service; do not give the router general SSH access to the Pi or
-    other devices.
-  - Make the router hook non-blocking, bounded by a short timeout, and tolerant
-    of duplicate events.
-  - Disk and torrent policy no longer varies by mwan3 state. Remove this
-    trigger after confirming it has no remaining policy consumer.
+- [x] Retire the OpenWrt mwan3 reconciliation trigger after disk and torrent
+  policy stopped depending on mwan3 state. The dedicated router credential and
+  hook were removed on 2026-07-23.
 
 - [x] Trigger reconciliation when the requested configuration changes. Prefer
   having the configuration-writing command request the service; use a
@@ -40,11 +31,10 @@
   unconditional observed-state override. The hooks never rewrite requested
   state or create `mconf_last`.
 
-- [ ] Keep periodic reconciliation after event triggers are deployed. Replace
-  the minutely cron invocation only after event coverage is verified, then use
-  a slower systemd timer to recover from missed notifications and reboot
-  races.
+- [x] Keep periodic reconciliation after event triggers are deployed.
+  `vanpi-policy.timer` now provides a 15-minute fallback instead of minutely
+  cron.
 
-- [ ] Keep stall detection independent from the policy service. Starting an
+- [x] Keep stall detection independent from the policy service. Starting an
   already-active systemd oneshot does not create a second waiter, so a separate
-  watchdog must detect and report an abnormally long policy run.
+  minutely watchdog timer detects and reports an abnormally long policy run.

@@ -21,7 +21,6 @@ id_dsa
 vanrouter/etc
 !vanrouter/etc/
 vanrouter/etc/*
-!vanrouter/etc/mwan3.user
 !vanrouter/etc/sysupgrade.conf
 *__pycache__*
 *.pyc

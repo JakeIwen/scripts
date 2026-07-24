@@ -25,7 +25,7 @@ receiver with `sudo /home/pi/scripts/setup_openwrt_logging.sh`. See
    (at boot and daily at 10:00) until you finish recovery:
    pull anything newer from borg (scenario 2), relabel the now-live card
    (`sudo e2label /dev/mmcblk0p2 rootfs`), then initialize a fresh spare:
-   `sudo clone_to_sd.sh --init hotspare-a sdX`
+   `sudo /home/pi/scripts/backup/clone_to_sd.sh --init hotspare-a sdX`
 
 ## Scenario 2 — restore individual files / roll back a mistake
 

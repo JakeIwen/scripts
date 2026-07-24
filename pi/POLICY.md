@@ -41,8 +41,13 @@ naturally when connectivity returns.
 
 `vanpi-storage.path` watches the udev-managed filesystem-label and
 partition-label directories and requests immediate policy reconciliation when
-their contents change. The periodic policy job remains a fallback for missed
-events and boot races.
+their contents change. `vanpi-policy.timer` performs a lightweight fallback
+reconciliation every 15 minutes for missed events and boot races.
+
+`vanpi-policy-watchdog.timer` checks the lifecycle lock once a minute without
+running reconciliation. It alerts when a policy run holds the lock for more
+than two minutes. This check is deliberately independent because systemd
+coalesces attempts to start an already-running oneshot.
 
 Before applying requested policy, reconciliation checks every `MOUNT_LABELS`
 target for a kernel mount whose `/dev` source vanished during a USB reset or

@@ -26,10 +26,10 @@ stop_clone() {
 }
 trap stop_clone TERM INT
 
-# clone_to_sd.sh performs the final label, block-device, size, live-root, and
-# mounted-partition checks immediately before writing.
+# /home/pi/scripts/backup/clone_to_sd.sh performs the final label, block-device,
+# size, live-root, and mounted-partition checks immediately before writing.
 /usr/bin/timeout --signal=TERM --kill-after=60 6h \
-  /home/pi/scripts/clone_to_sd.sh "$label" &
+  /home/pi/scripts/backup/clone_to_sd.sh "$label" &
 child=$!
 wait "$child"
 status=$?

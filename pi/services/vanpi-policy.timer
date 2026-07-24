@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodic fallback reconciliation of vanpi policy
+
+[Timer]
+OnBootSec=15min
+OnCalendar=*:0/15
+RandomizedDelaySec=60
+Persistent=true
+Unit=vanpi-policy.service
+
+[Install]
+WantedBy=timers.target
