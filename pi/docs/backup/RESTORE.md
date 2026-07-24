@@ -1,11 +1,15 @@
 # vanpi recovery playbook
 
-Backups (see `scripts/backup/backup_conf.sh`):
+[Pi documentation index](../../README.md)
+
+Backups (see [`backup_conf.sh`](../../scripts/backup/backup_conf.sh)):
 - **encrypted borg repo** `/mnt/bigboi/borg/vanpi-encrypted` — nightly versioned snapshots of `/` + `/boot/firmware`
   (14 daily / 8 weekly / 12 monthly). HA's sqlite is snapshotted to
   `/home/pi/backups/snapshots/` before each run; the live DB is excluded. A
-  verified OpenWrt recovery bundle is pulled into the same snapshot tree before
-  Borg runs; see `scripts/backup/OPENWRT_BACKUP.md`. Unattended jobs read the
+  verified OpenWrt recovery bundle and a verified UBNT `/etc/persistent` export
+  are pulled into the same snapshot tree before Borg runs; see
+  [`OPENWRT_BACKUP.md`](../../scripts/backup/OPENWRT_BACKUP.md) and
+  [`UBNT_BACKUP.md`](../../scripts/backup/UBNT_BACKUP.md). Unattended jobs read the
   passphrase from `/root/.config/borg/vanpi-encrypted.passphrase`. Keep an
   independent password-manager copy of that passphrase and an exported Borg key
   off-device; a copy stored only inside the encrypted archive is not recoverable.
@@ -14,7 +18,8 @@ Backups (see `scripts/backup/backup_conf.sh`):
 
 OpenWrt's persistent remote log is `/var/log/openwrt/dendelion.log`; restore its
 receiver with `sudo /home/pi/scripts/setup_openwrt_logging.sh`. See
-`OPENWRT_LOGGING.md` for configuration and verification.
+[`OPENWRT_LOGGING.md`](../networking/OPENWRT_LOGGING.md) for configuration and
+verification.
 
 ## Scenario 1 — SD card died, hot spare is attached
 
@@ -48,8 +53,15 @@ archive, stop `home-assistant.service`, copy it over
 
 OpenWrt router: restore
 `home/pi/backups/snapshots/openwrt/dendelion-latest.tar.gz` from a selected Borg
-archive, then follow `scripts/backup/OPENWRT_BACKUP.md`. The outer bundle is not
-a firmware image and must not be flashed.
+archive, then follow
+[`OPENWRT_BACKUP.md`](../../scripts/backup/OPENWRT_BACKUP.md). The outer bundle
+is not a firmware image and must not be flashed.
+
+UBNT antenna: restore
+`home/pi/backups/snapshots/ubnt/ubnt-persistent-latest.tar.gz` from a selected
+Borg archive, then follow
+[`UBNT_BACKUP.md`](../../scripts/backup/UBNT_BACKUP.md). Treat every extracted
+profile as credential-bearing.
 
 ## Scenario 3 — SD card AND spare both dead
 
@@ -88,10 +100,16 @@ unmounting — borg simply rolls back to its last checkpoint and the next parked
 retries. A restore aborted this way leaves the target card INCOMPLETE (you'll get a
 loud ntfy) — just re-run it when parked.
 
+For normal completion, `pi_backup.sh` unmounts `bigboi` only when that backup
+run mounted it. If `bigboi` was already mounted, the backup leaves it mounted.
+Ignition handling and an explicit dashboard/user eject remain authoritative
+lifecycle operations and intentionally unmount it regardless of who mounted it.
+
 ## Watchdog
 
 `backup_watchdog.sh` (daily cron) sends ntfy alerts when: no successful Borg backup in
-48h, no verified OpenWrt snapshot exists or it is stale, a clone exceeds 2× its
-interval, a card was never cloned, bigboi is unmounted, or free space < 100GB.
+48h, no verified OpenWrt or UBNT snapshot exists or either is stale, a clone
+exceeds 2× its interval, a card was never cloned, bigboi is unmounted, or free
+space < 100GB.
 Silence = healthy, but the nightly "vanpi backup OK" ping (min priority) includes
 per-card clone age if you want positive confirmation.

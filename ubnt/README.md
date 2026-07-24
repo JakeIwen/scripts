@@ -112,6 +112,12 @@ Every install records a code-only rollback under
 
 Rollback and deployment never copy, replace, or delete the profiles directory.
 
+The editable push/pull copies above remain the normal operational workflow.
+Separately, vanpi pulls the device's complete `/etc/persistent` tree immediately
+before its encrypted Borg backup to `bigboi`. That snapshot is for catastrophic
+recovery and never syncs changes back into this checkout. See
+[`UBNT_BACKUP.md`](../pi/scripts/backup/UBNT_BACKUP.md).
+
 ## Tests
 
 ```sh

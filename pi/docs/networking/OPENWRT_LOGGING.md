@@ -1,5 +1,7 @@
 # OpenWrt remote logging
 
+[Pi documentation index](../../README.md)
+
 OpenWrt sends classic syslog over the LAN to vanpi. The durable log is:
 
 ```text

@@ -13,7 +13,8 @@ now=$(date +%s)
 
 # detect running on a swapped-in hot spare (the ext4 label travels with the card,
 # so after a disaster swap the / partition still says hotspare-*). Nag until the
-# card is relabeled and a fresh spare is initialized — see RESTORE.md scenario 1.
+# card is relabeled and a fresh spare is initialized — see
+# pi/docs/backup/RESTORE.md scenario 1.
 root_src=$(findmnt -no SOURCE /)
 root_label=$(blkid -o value -s LABEL "$root_src" 2>/dev/null)
 if [[ "$root_label" == hotspare-* ]]; then
@@ -39,6 +40,17 @@ if [ -s "$OPENWRT_SNAPSHOT_FILE" ] && [ -f "$OPENWRT_BACKUP_STAMP" ]; then
     || problems+=("last good OpenWrt snapshot was ${age_h}h ago (limit ${OPENWRT_BACKUP_STALE_HOURS}h)")
 else
   problems+=("no verified OpenWrt snapshot recorded yet")
+fi
+
+# UBNT snapshot recency is independent of Borg recency for the same reason:
+# a powered-off or unreachable antenna must not erase the last valid snapshot.
+if [ -s "$UBNT_SNAPSHOT_FILE" ] && [ -f "$UBNT_BACKUP_STAMP" ]; then
+  age_h=$(( (now - $(stat -c %Y "$UBNT_BACKUP_STAMP")) / 3600 ))
+  status+="ubnt: ${age_h}h ago. "
+  [ "$age_h" -le "$UBNT_BACKUP_STALE_HOURS" ] \
+    || problems+=("last good UBNT snapshot was ${age_h}h ago (limit ${UBNT_BACKUP_STALE_HOURS}h)")
+else
+  problems+=("no verified UBNT snapshot recorded yet")
 fi
 
 # per-card clone recency

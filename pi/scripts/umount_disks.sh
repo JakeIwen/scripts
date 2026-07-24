@@ -6,6 +6,7 @@ if ! . "$script_dir/disk_policy.sh"; then
   echo "ERROR: cannot load $script_dir/disk_policy.sh" >&2
   return 1 2>/dev/null || exit 1
 fi
+samba_share_control=${UMOUNT_DISKS_SAMBA_SHARE_CONTROL:-"$script_dir/samba_share_control.sh"}
 
 UD_DEVICE=
 UD_PARENT=
@@ -437,8 +438,11 @@ umount_disks_main() {
       return 1
     fi
 
-    if ! /usr/bin/sudo /usr/sbin/service smbd stop; then
-      ud_record_failure "smbd did not stop; refusing to unmount HDDs"
+    # Release handles only for the selected disks.  Per-share preexec gates in
+    # smb.conf deny reconnects after the exact labeled mount disappears, so
+    # unrelated shares remain online without exposing a bare mount directory.
+    if ! "$samba_share_control" close "${mounted_labels[@]}"; then
+      ud_record_failure "selected Samba shares did not close; refusing to unmount disks"
       ud_notify_failures "$(( spindown && ! dry_run ))"
       return 1
     fi

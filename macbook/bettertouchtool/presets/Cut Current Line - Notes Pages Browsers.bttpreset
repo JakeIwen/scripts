@@ -1,0 +1,134 @@
+{
+  "BTTPresetCreatorNotes": "Option-Command-X cuts an existing text selection exactly. With no selection, it cuts the newline-delimited paragraph containing the insertion point. Limited to Notes, Pages, Google Chrome, and Firefox. Toggle this preset from BetterTouchTool's Presets menu. Canonical source: ~/dev/scripts/macbook/bettertouchtool/presets/.",
+  "BTTPresetInfoURL": "",
+  "BTTPresetName": "Cut Current Line — Notes, Pages & Browsers",
+  "BTTPresetColor": "68.000000, 138.000000, 255.000000, 255.000000",
+  "BTTPresetUUID": "68D25814-840B-4693-8502-DA2F8BD700FC",
+  "BTTPresetSnapAreas": [],
+  "BTTPresetContent": [
+    {
+      "BTTAppBundleIdentifier": "com.apple.Notes",
+      "BTTAppName": "Notes",
+      "BTTAppAutoInvertIcon": 1,
+      "BTTTriggers": [
+        {
+          "BTTActionCategory": 0,
+          "BTTTriggerType": 0,
+          "BTTTriggerClass": "BTTTriggerTypeKeyboardShortcut",
+          "BTTUUID": "8BDA2429-5B60-4B72-8E39-1DC9A9B34AA0",
+          "BTTPredefinedActionType": 281,
+          "BTTPredefinedActionName": "Run Real JavaScript",
+          "BTTRealJavaScriptString": "(async function cutSelectionOrLine() { const sendShortcut = async (shortcut) => trigger_action({ json: JSON.stringify({ BTTActionCategory: 0, BTTIsPureAction: true, BTTPredefinedActionType: 264, BTTPredefinedActionName: 'Send Keyboard Shortcut', BTTShortcutToSend: shortcut, BTTAdditionalActionData: { BTTActionSendKeyboardShortcutIncludeCurrentModifiers: false } }), wait_for_reply: true }); let selectedText; try { selectedText = await get_string_variable({ variable_name: 'selected_text' }); } catch (error) { await sendShortcut('cmd+x'); returnToBTT('Selection unavailable; performed standard cut.'); return; } if (typeof selectedText !== 'string') { await sendShortcut('cmd+x'); returnToBTT('Selection unavailable; performed standard cut.'); return; } const shortcuts = selectedText.length > 0 ? ['cmd+x'] : ['ctrl+a', 'option+shift+down', 'shift+right', 'cmd+x']; for (const shortcut of shortcuts) { await sendShortcut(shortcut); } returnToBTT('done'); })();",
+          "BTTTriggerConfig": {
+            "BTTActionJSRunInSeparateContext": false,
+            "BTTAppleScriptUsePath": false,
+            "BTTScriptLocation": 0
+          },
+          "BTTAdditionalConfiguration": "1572872",
+          "BTTKeyboardShortcutKeyboardType": 0,
+          "BTTTriggerOnDown": 1,
+          "BTTLayoutIndependentChar": "x",
+          "BTTEnabled": 1,
+          "BTTEnabled2": 1,
+          "BTTShortcutKeyCode": 7,
+          "BTTShortcutModifierKeys": 1572864,
+          "BTTOrder": 0,
+          "BTTAutoAdaptToKeyboardLayout": 1
+        }
+      ]
+    },
+    {
+      "BTTAppBundleIdentifier": "com.apple.iWork.Pages",
+      "BTTAppName": "Pages",
+      "BTTAppAutoInvertIcon": 1,
+      "BTTTriggers": [
+        {
+          "BTTActionCategory": 0,
+          "BTTTriggerType": 0,
+          "BTTTriggerClass": "BTTTriggerTypeKeyboardShortcut",
+          "BTTUUID": "348F7804-53F8-4506-96B0-34A4DDE8442D",
+          "BTTPredefinedActionType": 281,
+          "BTTPredefinedActionName": "Run Real JavaScript",
+          "BTTRealJavaScriptString": "(async function cutSelectionOrLine() { const sendShortcut = async (shortcut) => trigger_action({ json: JSON.stringify({ BTTActionCategory: 0, BTTIsPureAction: true, BTTPredefinedActionType: 264, BTTPredefinedActionName: 'Send Keyboard Shortcut', BTTShortcutToSend: shortcut, BTTAdditionalActionData: { BTTActionSendKeyboardShortcutIncludeCurrentModifiers: false } }), wait_for_reply: true }); let selectedText; try { selectedText = await get_string_variable({ variable_name: 'selected_text' }); } catch (error) { await sendShortcut('cmd+x'); returnToBTT('Selection unavailable; performed standard cut.'); return; } if (typeof selectedText !== 'string') { await sendShortcut('cmd+x'); returnToBTT('Selection unavailable; performed standard cut.'); return; } const shortcuts = selectedText.length > 0 ? ['cmd+x'] : ['ctrl+a', 'option+shift+down', 'shift+right', 'cmd+x']; for (const shortcut of shortcuts) { await sendShortcut(shortcut); } returnToBTT('done'); })();",
+          "BTTTriggerConfig": {
+            "BTTActionJSRunInSeparateContext": false,
+            "BTTAppleScriptUsePath": false,
+            "BTTScriptLocation": 0
+          },
+          "BTTAdditionalConfiguration": "1572872",
+          "BTTKeyboardShortcutKeyboardType": 0,
+          "BTTTriggerOnDown": 1,
+          "BTTLayoutIndependentChar": "x",
+          "BTTEnabled": 1,
+          "BTTEnabled2": 1,
+          "BTTShortcutKeyCode": 7,
+          "BTTShortcutModifierKeys": 1572864,
+          "BTTOrder": 0,
+          "BTTAutoAdaptToKeyboardLayout": 1
+        }
+      ]
+    },
+    {
+      "BTTAppBundleIdentifier": "com.google.Chrome",
+      "BTTAppName": "Google Chrome",
+      "BTTAppAutoInvertIcon": 1,
+      "BTTTriggers": [
+        {
+          "BTTActionCategory": 0,
+          "BTTTriggerType": 0,
+          "BTTTriggerClass": "BTTTriggerTypeKeyboardShortcut",
+          "BTTUUID": "038BCBD1-49B7-4825-9D4F-A788493A2723",
+          "BTTPredefinedActionType": 281,
+          "BTTPredefinedActionName": "Run Real JavaScript",
+          "BTTRealJavaScriptString": "(async function cutSelectionOrLine() { const sendShortcut = async (shortcut) => trigger_action({ json: JSON.stringify({ BTTActionCategory: 0, BTTIsPureAction: true, BTTPredefinedActionType: 264, BTTPredefinedActionName: 'Send Keyboard Shortcut', BTTShortcutToSend: shortcut, BTTAdditionalActionData: { BTTActionSendKeyboardShortcutIncludeCurrentModifiers: false } }), wait_for_reply: true }); let selectedText; try { selectedText = await get_string_variable({ variable_name: 'selected_text' }); } catch (error) { await sendShortcut('cmd+x'); returnToBTT('Selection unavailable; performed standard cut.'); return; } if (typeof selectedText !== 'string') { await sendShortcut('cmd+x'); returnToBTT('Selection unavailable; performed standard cut.'); return; } const shortcuts = selectedText.length > 0 ? ['cmd+x'] : ['ctrl+a', 'option+shift+down', 'shift+right', 'cmd+x']; for (const shortcut of shortcuts) { await sendShortcut(shortcut); } returnToBTT('done'); })();",
+          "BTTTriggerConfig": {
+            "BTTActionJSRunInSeparateContext": false,
+            "BTTAppleScriptUsePath": false,
+            "BTTScriptLocation": 0
+          },
+          "BTTAdditionalConfiguration": "1572872",
+          "BTTKeyboardShortcutKeyboardType": 0,
+          "BTTTriggerOnDown": 1,
+          "BTTLayoutIndependentChar": "x",
+          "BTTEnabled": 1,
+          "BTTEnabled2": 1,
+          "BTTShortcutKeyCode": 7,
+          "BTTShortcutModifierKeys": 1572864,
+          "BTTOrder": 0,
+          "BTTAutoAdaptToKeyboardLayout": 1
+        }
+      ]
+    },
+    {
+      "BTTAppBundleIdentifier": "org.mozilla.firefox",
+      "BTTAppName": "Firefox",
+      "BTTAppAutoInvertIcon": 1,
+      "BTTTriggers": [
+        {
+          "BTTActionCategory": 0,
+          "BTTTriggerType": 0,
+          "BTTTriggerClass": "BTTTriggerTypeKeyboardShortcut",
+          "BTTUUID": "2D2E98C0-7A74-4F83-8A12-663503DC4133",
+          "BTTPredefinedActionType": 281,
+          "BTTPredefinedActionName": "Run Real JavaScript",
+          "BTTRealJavaScriptString": "(async function cutSelectionOrLine() { const sendShortcut = async (shortcut) => trigger_action({ json: JSON.stringify({ BTTActionCategory: 0, BTTIsPureAction: true, BTTPredefinedActionType: 264, BTTPredefinedActionName: 'Send Keyboard Shortcut', BTTShortcutToSend: shortcut, BTTAdditionalActionData: { BTTActionSendKeyboardShortcutIncludeCurrentModifiers: false } }), wait_for_reply: true }); let selectedText; try { selectedText = await get_string_variable({ variable_name: 'selected_text' }); } catch (error) { await sendShortcut('cmd+x'); returnToBTT('Selection unavailable; performed standard cut.'); return; } if (typeof selectedText !== 'string') { await sendShortcut('cmd+x'); returnToBTT('Selection unavailable; performed standard cut.'); return; } const shortcuts = selectedText.length > 0 ? ['cmd+x'] : ['ctrl+a', 'option+shift+down', 'shift+right', 'cmd+x']; for (const shortcut of shortcuts) { await sendShortcut(shortcut); } returnToBTT('done'); })();",
+          "BTTTriggerConfig": {
+            "BTTActionJSRunInSeparateContext": false,
+            "BTTAppleScriptUsePath": false,
+            "BTTScriptLocation": 0
+          },
+          "BTTAdditionalConfiguration": "1572872",
+          "BTTKeyboardShortcutKeyboardType": 0,
+          "BTTTriggerOnDown": 1,
+          "BTTLayoutIndependentChar": "x",
+          "BTTEnabled": 1,
+          "BTTEnabled2": 1,
+          "BTTShortcutKeyCode": 7,
+          "BTTShortcutModifierKeys": 1572864,
+          "BTTOrder": 0,
+          "BTTAutoAdaptToKeyboardLayout": 1
+        }
+      ]
+    }
+  ]
+}

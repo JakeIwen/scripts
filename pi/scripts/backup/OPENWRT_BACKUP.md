@@ -1,5 +1,7 @@
 # OpenWrt backup and restore
 
+[Pi documentation index](../../README.md)
+
 `openwrt_backup.sh` pulls a recovery bundle from `dendelion` before each Borg
 archive. The router accepts only a dedicated SSH key whose `authorized_keys`
 entry forces `/usr/libexec/openwrt-backup-export`, disables forwarding and PTY

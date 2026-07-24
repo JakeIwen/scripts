@@ -50,6 +50,18 @@ OPENWRT_BACKUP_STALE_HOURS=72
 OPENWRT_BACKUP_HOST=root@192.168.6.1
 OPENWRT_BACKUP_KEY=/home/pi/.ssh/openwrt-backup
 OPENWRT_BACKUP_KNOWN_HOSTS=/home/pi/.ssh/known_hosts
+
+# Complete airOS /etc/persistent snapshot pulled from the primary NanoStation
+# before each Borg archive. This is independent of the repo's interactive
+# push/pull workflow, and the last valid local snapshot is retained on error.
+UBNT_SNAPSHOT_DIR="$SNAP_DIR/ubnt"
+UBNT_SNAPSHOT_FILE="$UBNT_SNAPSHOT_DIR/ubnt-persistent-latest.tar.gz"
+UBNT_BACKUP_STAMP="$STAMP_DIR/ubnt_ok"
+UBNT_BACKUP_STALE_HOURS=72
+UBNT_BACKUP_HOST=ubnt@192.168.8.20
+UBNT_BACKUP_KEY=/home/pi/.ssh/id_rsa
+UBNT_BACKUP_KNOWN_HOSTS=/home/pi/.ssh/known_hosts
+UBNT_BACKUP_MAX_BYTES=$((16 * 1024 * 1024))
 # backup alerts go to NTFY_BACKUP_URL (set in secrets, e.g. https://ntfy.sh/<topic>);
 # if unset, ntfy_send.sh's own fallbacks apply (NTFY_MESSAGE_URL, then local server).
 # exported because ntfy_send.sh runs as a child process, not sourced
@@ -59,8 +71,8 @@ BORG_STALE_HOURS=48    # watchdog alerts past this
 CLONE_STALE_FACTOR=2   # watchdog alerts when clone age > factor * interval
 MIN_FREE_GB=100        # watchdog alerts when bigboi free space drops below this
 ROOT_USED_MAX_GB=26    # watchdog alerts before the system outgrows a 32GB clone card
-UNMOUNT_AFTER=1        # unmount bigboi when the backup finishes (bigboi is not auto-mounted;
-                       # pi_backup mounts it by label at the start of each run)
+UNMOUNT_AFTER=1        # when pi_backup mounted bigboi itself, unmount it afterward;
+                       # preserve a mount that was already present when the job began
 
 # present while the van runs (ignition_monitor.sh); drives are unmounted then
 IGNITION_FLAG=/home/pi/hooks/ignition_is_on

@@ -1,5 +1,7 @@
 # Van Dashboard testing
 
+[Pi documentation index](../../README.md)
+
 ## Why Flask is required
 
 `pi/tests/test_van_dashboard.py` imports

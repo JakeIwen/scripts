@@ -2,7 +2,7 @@
 # daily backup orchestrator — replaces rsync_schedule.sh
 #   1. mount + verify bigboi          4. borg create/prune (versioned history)
 #   2. media mirror mp -> bigboi      5. bootable SD clones when due (CLONE_TARGETS)
-#   3. HA + OpenWrt snapshots         6. stamp + ntfy
+#   3. HA + router snapshots          6. stamp + ntfy
 # cron fires this hourly 03:00-08:00 (when the van is least likely to drive);
 # the first success of the day wins and later runs no-op. Defers while the van
 # runs (drives are unmounted for vibration protection); if the van starts
@@ -49,8 +49,10 @@ bail_if_driving() {
 mkdir -p "$STAMP_DIR" "$SNAP_DIR"
 
 # mounts by label, surviving USB re-enumeration and zombie mounts (source device gone)
+ENSURE_MOUNTED_DID_MOUNT=0
 ensure_mounted() { # <label> <mountpoint>
   local label=$1 mnt=$2 dev src
+  ENSURE_MOUNTED_DID_MOUNT=0
   src=$(findmnt -no SOURCE "$mnt" 2>/dev/null)
   if [ -n "$src" ] && [ ! -b "$src" ]; then
     log "zombie mount at $mnt ($src no longer exists), detaching"
@@ -62,6 +64,7 @@ ensure_mounted() { # <label> <mountpoint>
     [ -b "${dev:-}" ] || return 1
     mkdir -p "$mnt"
     mount "$dev" "$mnt" || return 1
+    ENSURE_MOUNTED_DID_MOUNT=1
   fi
   local probe="$mnt/.rw_probe_$$"
   timeout 20 touch "$probe" && rm -f "$probe"
@@ -69,6 +72,7 @@ ensure_mounted() { # <label> <mountpoint>
 
 # --- 1. backup disk ---
 ensure_mounted "$BACKUP_DISK_LABEL" "$BACKUP_MNT" || fail "$BACKUP_DISK_LABEL not attached/writable"
+backup_mounted_here=$ENSURE_MOUNTED_DID_MOUNT
 
 # --- 2. media mirror ---
 if ensure_mounted movingparts "$MEDIA_SRC"; then
@@ -98,6 +102,16 @@ else
   rc=$?
   notify "vanpi backup" \
     "OpenWrt snapshot failed (status $rc); Borg will retain the last valid router snapshot" \
+    high warning
+fi
+
+log "UBNT persistent snapshot"
+if run /home/pi/scripts/backup/ubnt_backup.sh; then
+  log "UBNT persistent snapshot verified"
+else
+  rc=$?
+  notify "vanpi backup" \
+    "UBNT snapshot failed (status $rc); Borg will retain the last valid antenna snapshot" \
     high warning
 fi
 
@@ -144,11 +158,17 @@ date '+%F %T' > "$STAMP_DIR/borg_ok"
 free_gb=$(( $(df -k --output=avail "$BACKUP_MNT" | tail -1) / 1024 / 1024 ))
 [ "$free_gb" -ge "$MIN_FREE_GB" ] || notify "vanpi backup" \
   "only ${free_gb}GB free on $BACKUP_MNT (limit ${MIN_FREE_GB}GB)" high warning
-if [ "$UNMOUNT_AFTER" = 1 ] && ! umount "$BACKUP_MNT"; then
-  log "WARNING: could not unmount $BACKUP_MNT (an open file or shell may be holding it)"
-  notify "vanpi backup" \
-    "backup succeeded, but $BACKUP_MNT could not be unmounted; check for an open file or shell before moving the van" \
-    high warning
+if [ "$UNMOUNT_AFTER" = 1 ]; then
+  if [ "$backup_mounted_here" = 1 ]; then
+    if ! umount "$BACKUP_MNT"; then
+      log "WARNING: could not unmount $BACKUP_MNT (an open file or shell may be holding it)"
+      notify "vanpi backup" \
+        "backup succeeded, but $BACKUP_MNT could not be unmounted; check for an open file or shell before moving the van" \
+        high warning
+    fi
+  else
+    log "leaving pre-existing $BACKUP_MNT mount in place"
+  fi
 fi
 log "backup complete (${free_gb}GB free on $BACKUP_DISK_LABEL)"
 [ "$NTFY_ON_SUCCESS" = 1 ] && notify "vanpi backup OK" \

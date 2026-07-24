@@ -1,5 +1,7 @@
 # Van Dashboard and COP ALERT
 
+[Pi documentation index](../../README.md)
+
 `van-dashboard.service` serves the dashboard on port `8788` (all interfaces),
 so the same URL works through the LAN hostname or a Tailscale hostname/address:
 

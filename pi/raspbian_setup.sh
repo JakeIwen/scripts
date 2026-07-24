@@ -73,7 +73,7 @@ add this text: /dev/sda1 /mnt/seegayte ext4 defaults,nofail,x-systemd.device-tim
 sudo reboot
 sudo crontab -e
 
-# backup sd card: see scripts/backup/ (borg nightly + rpi-clone hot spares) and pi/RESTORE.md
+# backup sd card: see scripts/backup/ (borg nightly + rpi-clone hot spares) and pi/docs/backup/RESTORE.md
 
 # Widevine - Chromium "Media" Launcher. (Netflix etc)
 curl -fsSL https://pi.vpetkov.net -o ventz-media-pi

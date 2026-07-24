@@ -23,7 +23,8 @@ compare it with this checkout. Deployed files may differ from the repository.
 
 ## Repository map
 
-- `pi/`: Raspberry Pi apps, backup, disk, service, deployment, and setup tooling.
+- `pi/`: Raspberry Pi apps, backup, disk, service, deployment, and setup tooling;
+  `pi/README.md` is the documentation index.
 - `vanrouter/`: reviewed OpenWrt persistence and backup-export artifacts.
 - `ubnt/`: directional wireless-device profiles and uplink scripts.
 - `macbook/`: macOS shell utilities, AppleScripts, and BetterTouchTool helpers.

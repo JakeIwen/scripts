@@ -3991,6 +3991,23 @@ def api_compute():
     return response
 
 
+@app.route("/api/compute/jobs/<job_id>")
+def api_compute_job(job_id):
+    if request.args:
+        return api_error("compute job details do not accept query parameters", 400)
+    try:
+        payload = compute_monitor.job_details(job_id)
+    except ValueError as exc:
+        return api_error(str(exc), 400)
+    except FileNotFoundError:
+        return api_error("compute job not found", 404)
+    except (OSError, ComputeMetricsError) as exc:
+        return api_error(f"compute job details unavailable: {exc}", 503)
+    response = jsonify(payload)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.route("/api/system-monitor/crash-analysis", methods=["POST"])
 def api_system_monitor_crash_analysis():
     if not _exact_form(()):

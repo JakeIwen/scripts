@@ -1,5 +1,7 @@
 # Vanpi system event monitor
 
+[Pi documentation index](../../README.md)
+
 `system-event-monitor.service` passively records evidence needed to distinguish
 Pi input-power problems from USB hub, cable, enclosure, and device problems.
 It does not reset USB devices or change power, clocks, services, or CAN state.

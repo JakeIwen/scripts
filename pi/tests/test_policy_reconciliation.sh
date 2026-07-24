@@ -67,9 +67,15 @@ cat > "$test_root/abort-backup" <<'HELPER'
 printf 'abort-backup\n' >> "$TEST_STALE_RECOVERY_CALLS"
 exit "${TEST_ABORT_BACKUP_STATUS:-0}"
 HELPER
+cat > "$test_root/samba-share-control" <<'HELPER'
+#!/bin/bash
+printf 'samba:%s\n' "$*" >> "$TEST_STALE_RECOVERY_CALLS"
+exit "${TEST_SAMBA_CONTROL_STATUS:-0}"
+HELPER
 chmod +x "$test_root/policyctl" "$test_root/tuya-status" \
   "$test_root/pgrep" "$test_root/pkill" "$test_root/sleep" \
-  "$test_root/mount-disks" "$test_root/abort-backup"
+  "$test_root/mount-disks" "$test_root/abort-backup" \
+  "$test_root/samba-share-control"
 
 export ISW_POLICYCTL="$test_root/policyctl"
 export ISW_IGNITION_FLAG="$test_root/ignition_is_on"
@@ -79,6 +85,7 @@ export ISW_PKILL="$test_root/pkill"
 export ISW_SLEEP="$test_root/sleep"
 export ISW_MOUNT_DISKS="$test_root/mount-disks"
 export ISW_ABORT_BACKUP="$test_root/abort-backup"
+export ISW_SAMBA_SHARE_CONTROL="$test_root/samba-share-control"
 export TEST_STARLINK_CALLS="$test_root/starlink-calls"
 export TEST_PGREP_CALLS="$test_root/pgrep-calls"
 export TEST_PGREP_COUNT="$test_root/pgrep-count"
@@ -119,9 +126,6 @@ assert_eq 30 "$(wc -l < "$TEST_SLEEP_CALLS" | tr -d ' ')" \
 kill_torrent_client() {
   printf 'kill-torrent\n' >> "$TEST_STALE_RECOVERY_CALLS"
 }
-stop_service() {
-  printf 'stop:%s\n' "$1" >> "$TEST_STALE_RECOVERY_CALLS"
-}
 
 : > "$TEST_STALE_RECOVERY_CALLS"
 export TEST_STALE_MOUNTS=""
@@ -134,9 +138,44 @@ assert_eq "mount:--list-stale" "$(cat "$TEST_STALE_RECOVERY_CALLS")" \
 export TEST_STALE_MOUNTS=$'EXFAT512\t/mnt/EXFAT512\t/dev/vanished'
 recover_stale_mounts_if_needed >/dev/null 2>&1 ||
   fail "stale-mount recovery orchestration returned failure"
-expected_calls=$'mount:--list-stale\nabort-backup\nkill-torrent\nstop:smbd\nmount:--recover-stale'
+expected_calls=$'mount:--list-stale\nabort-backup\nsamba:close EXFAT512\nmount:--recover-stale'
 assert_eq "$expected_calls" "$(cat "$TEST_STALE_RECOVERY_CALLS")" \
-  "stale recovery must stop consumers before normal unmount"
+  "stale flash recovery must leave unrelated torrents and Samba shares online"
+
+: > "$TEST_STALE_RECOVERY_CALLS"
+export TEST_STALE_MOUNTS=$'movingparts\t/mnt/movingparts\t/dev/vanished'
+recover_stale_mounts_if_needed >/dev/null 2>&1 ||
+  fail "stale movingparts recovery returned failure"
+expected_calls=$'mount:--list-stale\nabort-backup\nkill-torrent\nsamba:close movingparts\nmount:--recover-stale'
+assert_eq "$expected_calls" "$(cat "$TEST_STALE_RECOVERY_CALLS")" \
+  "stale media recovery must stop only its actual consumers"
+
+: > "$TEST_STALE_RECOVERY_CALLS"
+export TEST_SAMBA_CONTROL_STATUS=1
+if recover_stale_mounts_if_needed >/dev/null 2>&1; then
+  fail "stale recovery ignored Samba close failure"
+fi
+[[ $(cat "$TEST_STALE_RECOVERY_CALLS") != *"mount:--recover-stale"* ]] ||
+  fail "stale recovery unmounted after Samba close failed"
+unset TEST_SAMBA_CONTROL_STATUS
+
+ACTION=""
+kill_torrent_client() { ACTION="${ACTION:+$ACTION }kill-torrent"; }
+stop_service() { ACTION="${ACTION:+$ACTION }stop:$1"; }
+unmount_drives() { ACTION="${ACTION:+$ACTION }unmount"; }
+
+kill_all >/dev/null 2>&1 || fail "all-HDD shutdown returned failure"
+assert_eq "kill-torrent stop:smbd unmount" "$ACTION" \
+  "all-HDD shutdown must stop global Samba before unmounting"
+
+ACTION=""
+touch "$ISW_IGNITION_FLAG"
+if mount_drives >/dev/null 2>&1; then
+  fail "ignition-interrupted mount unexpectedly succeeded"
+fi
+rm "$ISW_IGNITION_FLAG"
+assert_eq "kill-torrent stop:smbd unmount" "$ACTION" \
+  "ignition-interrupted mount must stop global Samba before unmounting"
 
 ACTION=""
 IO_ERROR=1

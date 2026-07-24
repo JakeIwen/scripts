@@ -48,6 +48,9 @@ let dashboard = null,
   diskRunningOperation = '',
   sonosTimeline = { position: 0, duration: 0, playing: false, updatedAt: 0 };
 const TILE_ORDER_STORAGE_KEY = 'van-dashboard.tile-order.v1';
+const computeJobDetailCache = new Map();
+const computeJobDetailRequests = new Map();
+const computeExpandedJobIds = new Set();
 const IGNITION_DURATION_UNITS = {
   minutes: { factor: 1, max: 720 },
   hours: { factor: 60, max: 168 },
@@ -1600,11 +1603,141 @@ async function refreshSystemMonitor(showErrors = false) {
     throw error;
   }
 }
+function computeFailureLabel(classification) {
+  const labels = {
+    task: 'TASK FAILED',
+    timeout: 'TIMED OUT',
+    resource: 'RESOURCE LIMIT',
+    infrastructure: 'INFRASTRUCTURE',
+    unknown: 'FAILED · UNKNOWN',
+  };
+  return labels[classification] || 'FAILED';
+}
 function computeStateLabel(job) {
   if (job.state === 'running') return 'RUNNING';
   if (job.state === 'queued') return 'QUEUED';
-  if (job.state === 'failed') return job.timed_out ? 'TIMED OUT' : 'FAILED';
+  if (job.state === 'failed')
+    return computeFailureLabel(
+      job.failure_classification || (job.timed_out ? 'timeout' : 'unknown'),
+    );
   return 'DONE';
+}
+function computeJobDetailsId(jobId) {
+  return `compute-job-details-${jobId}`;
+}
+function collapseComputeJobDetails(clearCache = false) {
+  computeExpandedJobIds.clear();
+  if (clearCache) computeJobDetailCache.clear();
+  document.querySelectorAll('[data-compute-job-details]').forEach((button) => {
+    const jobTitle = button.dataset.computeJobTitle || button.dataset.computeJobDetails;
+    button.setAttribute('aria-expanded', 'false');
+    button.setAttribute('aria-label', `Show details for ${jobTitle}`);
+    button.textContent = 'Details';
+    const panel = $(button.getAttribute('aria-controls'));
+    if (panel) {
+      panel.setAttribute('aria-busy', 'false');
+      panel.hidden = true;
+    }
+  });
+}
+function computeJobDetailsMarkup(payload) {
+  if (payload?.detail_error)
+    return `<div class="compute-job-detail-error">${esc(payload.detail_error)} · close and reopen Details to retry</div>`;
+  const job = payload?.job || {},
+    diagnostics = payload?.diagnostics || {},
+    classification = job.failure_classification || diagnostics.failure_classification,
+    failed = job.state === 'failed',
+    diagnosticItems = [
+      ['Worker error', diagnostics.worker_error, diagnostics.truncated?.worker_error],
+      ['Resource limit', diagnostics.resource_limit, diagnostics.truncated?.resource_limit],
+      ['Resource monitor', diagnostics.resource_monitor_error, diagnostics.truncated?.resource_monitor_error],
+    ].filter(([, value]) => value),
+    rows = [
+      ['Job ID', job.id || '—'],
+      ['Outcome', failed ? computeFailureLabel(classification) : computeStateLabel(job)],
+      ['Placement', `${job.placement || '—'} · ${job.worker || 'unclaimed'}`],
+      ['Exit code', job.exit_code ?? '—'],
+      ['Submitted', job.submitted_at ? eventTime(job.submitted_at) : '—'],
+      ['Started', job.started_at ? eventTime(job.started_at) : '—'],
+      ['Finished', job.finished_at ? eventTime(job.finished_at) : '—'],
+      ['Queue delay', Number.isFinite(Number(job.queue_seconds)) ? formatComputeSeconds(job.queue_seconds) : '—'],
+      ['Active / analysis', `${formatComputeSeconds(job.active_seconds)} / ${formatComputeSeconds(job.analysis_seconds)}`],
+      ['CPU / average', job.telemetry ? `${formatComputeSeconds(job.cpu_seconds)} / ${Number(job.average_cpu_percent || 0).toFixed(0)}%` : '—'],
+      ['Peak memory', job.telemetry ? formatBytes(job.peak_rss_bytes) : '—'],
+      ['Input / source / result', `${formatBytes(job.input_bytes)} / ${formatBytes(job.source_bytes)} / ${formatBytes(job.result_bytes)}`],
+    ],
+    streamMarkup = (stream, label) => {
+      if (!stream?.available || !stream.excerpt) return '';
+      const note = stream.truncated
+        ? `tail of ${formatBytes(stream.bytes)}`
+        : `${formatBytes(stream.bytes)} retained`;
+      return `<section class="compute-job-output"><h5>${esc(label)}<small>${esc(note)}</small></h5><pre>${esc(stream.excerpt)}</pre></section>`;
+    },
+    outputMarkup = [
+      streamMarkup(payload?.stderr, 'stderr'),
+      streamMarkup(payload?.stdout, 'stdout'),
+    ].join(''),
+    noOutput = failed && !outputMarkup
+      ? '<p class="compute-job-no-output">No retained stdout or stderr was available.</p>'
+      : '';
+  return `${failed ? `<div class="compute-job-error"><strong>${esc(computeFailureLabel(classification))}</strong><p>${esc(job.failure_summary || 'Failure reason unavailable')}</p>${diagnosticItems.map(([label, value, truncated]) => `<div><b>${esc(`${label}${truncated ? ' (truncated)' : ''}`)}</b><pre>${esc(value)}</pre></div>`).join('')}${diagnostics.interrupted ? '<p>Execution was interrupted.</p>' : ''}</div>` : ''}
+    <dl class="compute-job-detail-grid">${rows.map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join('')}</dl>
+    ${outputMarkup}${noOutput}`;
+}
+async function toggleComputeJobDetails(button) {
+  const jobId = button.dataset.computeJobDetails,
+    jobTitle = button.dataset.computeJobTitle || jobId,
+    panelId = button.getAttribute('aria-controls'),
+    panel = panelId ? $(panelId) : null;
+  if (!jobId || !panel || button.disabled) return;
+  if (computeExpandedJobIds.has(jobId)) {
+    computeExpandedJobIds.delete(jobId);
+    computeJobDetailCache.delete(jobId);
+    button.setAttribute('aria-expanded', 'false');
+    button.setAttribute('aria-label', `Show details for ${jobTitle}`);
+    button.textContent = 'Details';
+    panel.setAttribute('aria-busy', 'false');
+    panel.hidden = true;
+    return;
+  }
+  computeExpandedJobIds.add(jobId);
+  button.setAttribute('aria-expanded', 'true');
+  button.setAttribute('aria-label', `Hide details for ${jobTitle}`);
+  button.textContent = 'Hide details';
+  panel.hidden = false;
+  const cached = computeJobDetailCache.get(jobId);
+  if (cached && !cached.detail_error) {
+    panel.setAttribute('aria-busy', 'false');
+    panel.innerHTML = computeJobDetailsMarkup(cached);
+    return;
+  }
+  if (cached?.detail_error) computeJobDetailCache.delete(jobId);
+  panel.setAttribute('aria-busy', 'true');
+  panel.innerHTML = '<div class="speaker-loading">Loading run details…</div>';
+  let request = computeJobDetailRequests.get(jobId);
+  if (!request) {
+    request = json(`/api/compute/jobs/${encodeURIComponent(jobId)}`).finally(() => {
+      computeJobDetailRequests.delete(jobId);
+    });
+    computeJobDetailRequests.set(jobId, request);
+  }
+  try {
+    const payload = await request;
+    computeJobDetailCache.set(jobId, payload);
+    const currentPanel = $(computeJobDetailsId(jobId));
+    if (currentPanel && computeExpandedJobIds.has(jobId)) {
+      currentPanel.innerHTML = computeJobDetailsMarkup(payload);
+      currentPanel.setAttribute('aria-busy', 'false');
+    }
+  } catch (error) {
+    const failure = { detail_error: error.message };
+    computeJobDetailCache.set(jobId, failure);
+    const currentPanel = $(computeJobDetailsId(jobId));
+    if (currentPanel && computeExpandedJobIds.has(jobId)) {
+      currentPanel.innerHTML = computeJobDetailsMarkup(failure);
+      currentPanel.setAttribute('aria-busy', 'false');
+    }
+  }
 }
 function computeMissedReasonLabel(reason) {
   const labels = {
@@ -1725,25 +1858,51 @@ function renderComputeMetrics(response) {
     .join('') || '<div class="speaker-loading">No recent eligible local events</div>';
 
   const maxCpu = Math.max(0, ...jobs.map((job) => Number(job.cpu_seconds) || 0)),
-    maxMemory = Math.max(0, ...jobs.map((job) => Number(job.peak_rss_bytes) || 0));
+    maxMemory = Math.max(0, ...jobs.map((job) => Number(job.peak_rss_bytes) || 0)),
+    preserveOpenDetails = $('compute-backdrop').classList.contains('open')
+      && computeExpandedJobIds.size > 0;
   $('compute-job-count').textContent = `${jobs.length} shown`;
-  $('compute-jobs').innerHTML = jobs
-    .map((job) => {
-      const cpuWidth = maxCpu > 0 ? Math.max(2, (100 * Number(job.cpu_seconds || 0)) / maxCpu) : 0,
-        memoryWidth = maxMemory > 0 ? Math.max(2, (100 * Number(job.peak_rss_bytes || 0)) / maxMemory) : 0,
-        timestamp = job.finished_at || job.started_at || job.submitted_at,
-        details = job.telemetry
-          ? job.detailed_timing
-            ? `${formatComputeSeconds(job.active_seconds)} active · ${formatComputeSeconds(job.analysis_seconds)} analysis · ${formatComputeSeconds(job.preparation_seconds)} prep · ${formatComputeSeconds(job.packaging_seconds)} package · ${formatComputeSeconds(job.result_upload_seconds)} upload`
-            : `${formatComputeSeconds(job.wall_seconds)} legacy job wall · ${Number(job.average_cpu_percent || 0).toFixed(0)}% avg CPU · ${formatBytes(job.input_bytes)} input`
-          : `${formatBytes(job.input_bytes)} input · resource telemetry unavailable for this older job`;
-      return `<article class="compute-job ${esc(job.state)}">
-        <div class="compute-job-head"><span><strong>${esc(job.task)}</strong><small>${esc(eventTime(timestamp))} · ${esc(job.worker || 'unclaimed')}</small></span><b>${esc(computeStateLabel(job))}</b></div>
-        <p>${esc(details)}</p>
-        <div class="compute-bars" aria-label="Job resource use"><span><i style="width:${cpuWidth}%"></i><small>CPU ${job.telemetry ? formatComputeSeconds(job.cpu_seconds) : '—'}</small></span><span><i style="width:${memoryWidth}%"></i><small>Memory ${job.telemetry ? formatBytes(job.peak_rss_bytes) : '—'}</small></span></div>
-      </article>`;
-    })
-    .join('') || '<div class="speaker-loading">No queued or completed jobs in this range</div>';
+  if (!preserveOpenDetails) {
+    const visibleJobIds = new Set(jobs.map((job) => String(job.id || '')));
+    for (const jobId of computeExpandedJobIds)
+      if (!visibleJobIds.has(jobId)) computeExpandedJobIds.delete(jobId);
+    for (const jobId of computeJobDetailCache.keys())
+      if (!visibleJobIds.has(jobId)) computeJobDetailCache.delete(jobId);
+    jobs.forEach((job) => {
+      const jobId = String(job.id || ''),
+        cached = computeJobDetailCache.get(jobId);
+      if (cached?.job?.state && cached.job.state !== job.state)
+        computeJobDetailCache.delete(jobId);
+    });
+    $('compute-jobs').innerHTML = jobs
+      .map((job) => {
+        const cpuWidth = maxCpu > 0 ? Math.max(2, (100 * Number(job.cpu_seconds || 0)) / maxCpu) : 0,
+          memoryWidth = maxMemory > 0 ? Math.max(2, (100 * Number(job.peak_rss_bytes || 0)) / maxMemory) : 0,
+          timestamp = job.finished_at || job.started_at || job.submitted_at,
+          jobId = String(job.id || ''),
+          detailsId = computeJobDetailsId(jobId),
+          detailsAvailable = job.details_available !== false,
+          expanded = detailsAvailable && computeExpandedJobIds.has(jobId),
+          cachedDetails = computeJobDetailCache.get(jobId),
+          details = job.telemetry
+            ? job.detailed_timing
+              ? `${formatComputeSeconds(job.active_seconds)} active · ${formatComputeSeconds(job.analysis_seconds)} analysis · ${formatComputeSeconds(job.preparation_seconds)} prep · ${formatComputeSeconds(job.packaging_seconds)} package · ${formatComputeSeconds(job.result_upload_seconds)} upload`
+              : `${formatComputeSeconds(job.wall_seconds)} legacy job wall · ${Number(job.average_cpu_percent || 0).toFixed(0)}% avg CPU · ${formatBytes(job.input_bytes)} input`
+            : `${formatBytes(job.input_bytes)} input · resource telemetry unavailable for this older job`,
+          summary = job.failure_summary ? `${job.failure_summary} · ${details}` : details,
+          buttonAction = expanded ? 'Hide' : 'Show',
+          jobTitle = `${job.task || 'job'} ${jobId}`,
+          buttonLabel = `${buttonAction} details for ${jobTitle}`;
+        return `<article class="compute-job ${esc(job.state)}">
+          <div class="compute-job-head"><span><strong>${esc(job.task)}</strong><small>${esc(eventTime(timestamp))} · ${esc(job.worker || 'unclaimed')}</small></span><b>${esc(computeStateLabel(job))}</b></div>
+          <p>${esc(summary)}</p>
+          <div class="compute-bars" aria-label="Job resource use"><span><i style="width:${cpuWidth}%"></i><small>CPU ${job.telemetry ? formatComputeSeconds(job.cpu_seconds) : '—'}</small></span><span><i style="width:${memoryWidth}%"></i><small>Memory ${job.telemetry ? formatBytes(job.peak_rss_bytes) : '—'}</small></span></div>
+          <div class="compute-job-actions"><button type="button" data-compute-job-details="${esc(jobId)}" data-compute-job-title="${esc(jobTitle)}" aria-label="${esc(buttonLabel)}" aria-expanded="${expanded ? 'true' : 'false'}" aria-controls="${esc(detailsId)}" ${detailsAvailable ? '' : 'disabled'}>${expanded ? 'Hide details' : 'Details'}</button></div>
+          <div class="compute-job-details" id="${esc(detailsId)}" aria-busy="${expanded && !cachedDetails ? 'true' : 'false'}" ${expanded ? '' : 'hidden'}>${expanded ? (cachedDetails ? computeJobDetailsMarkup(cachedDetails) : '<div class="speaker-loading">Loading run details…</div>') : ''}</div>
+        </article>`;
+      })
+      .join('') || '<div class="speaker-loading">No queued or completed jobs in this range</div>';
+  }
 
   const maxTaskCpu = Math.max(0, ...tasks.map((task) => Number(task.cpu_seconds) || 0));
   $('compute-tasks').innerHTML = tasks
@@ -1762,6 +1921,7 @@ function renderComputeMetrics(response) {
   });
 }
 function renderComputeUnavailable(message) {
+  collapseComputeJobDetails();
   const tile = $('compute-worker');
   tile.classList.remove('good', 'warning', 'critical');
   tile.classList.add('unknown');
@@ -2718,6 +2878,7 @@ async function openComputeMetrics() {
 }
 function closeComputeMetrics() {
   clearTimeout(computePoll);
+  collapseComputeJobDetails(true);
   $('compute-backdrop').classList.remove('open');
   document.body.classList.remove('sheet-open');
   $('compute-worker').setAttribute('aria-expanded', 'false');
@@ -3063,6 +3224,8 @@ document.addEventListener('change', (event) => {
     });
 });
 document.addEventListener('click', (event) => {
+  const computeJobDetails = event.target.closest('[data-compute-job-details]');
+  if (computeJobDetails) toggleComputeJobDetails(computeJobDetails);
   const ignitionPreset = event.target.closest('[data-ignition-preset]');
   if (ignitionPreset) setIgnitionDuration(Number(ignitionPreset.dataset.ignitionPreset));
   const backupClone = event.target.closest('[data-backup-clone]');
@@ -3085,6 +3248,7 @@ document.addEventListener('click', (event) => {
     const hours = Number(computeRange.dataset.computeHours);
     if (Number.isFinite(hours) && hours !== computeHours) {
       computeHours = hours;
+      collapseComputeJobDetails(true);
       document.querySelectorAll('[data-compute-hours]').forEach((button) => {
         button.disabled = true;
       });

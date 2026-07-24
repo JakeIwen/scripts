@@ -1,5 +1,7 @@
 # Van Dashboard USB port controls
 
+[Pi documentation index](../../README.md)
+
 The USB Devices sheet combines two passive data sources:
 
 - `usb_watch.py --json` supplies readable `lsusb` names, filesystem labels,

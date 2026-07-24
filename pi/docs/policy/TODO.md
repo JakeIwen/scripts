@@ -1,5 +1,7 @@
 # Vanpi lifecycle policy TODO
 
+[Pi documentation index](../../README.md)
+
 ## Event-driven policy migration
 
 - [ ] Put lifecycle reconciliation behind a `vanpi-policy.service` oneshot.

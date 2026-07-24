@@ -18,6 +18,7 @@ ISW_QBIT_PROCESS=${ISW_QBIT_PROCESS:-qbittorrent-nox}
 ISW_QBIT_BINARY=${ISW_QBIT_BINARY:-/usr/bin/qbittorrent-nox}
 ISW_MOUNT_DISKS=${ISW_MOUNT_DISKS:-/home/pi/scripts/mount_disks.sh}
 ISW_ABORT_BACKUP=${ISW_ABORT_BACKUP:-/home/pi/scripts/backup/abort_backup.sh}
+ISW_SAMBA_SHARE_CONTROL=${ISW_SAMBA_SHARE_CONTROL:-/home/pi/scripts/samba_share_control.sh}
 POLICY_DISKS_ENABLED=""
 POLICY_TORRENTS_ENABLED=""
 POLICY_ALLOW_STARLINK_TORRENTS=""
@@ -274,8 +275,9 @@ start_torrent_client() {
 }
 
 recover_stale_mounts_if_needed() {
-  local stale_mounts
-  local status
+  local stale_mounts status label target source extra
+  local needs_torrent_stop=0
+  local -a stale_labels=()
 
   stale_mounts=$("$ISW_MOUNT_DISKS" --list-stale)
   status=$?
@@ -288,20 +290,29 @@ recover_stale_mounts_if_needed() {
   echo "stale managed mounts detected:"
   printf '%s\n' "$stale_mounts"
 
+  while IFS=$'\t' read -r label target source extra; do
+    if [[ -z "$label" || -z "$target" || -z "$source" || -n ${extra:-} ]]; then
+      echo "ERROR: malformed stale-mount record; refusing recovery" >&2
+      return 1
+    fi
+    stale_labels+=("$label")
+    [[ "$label" == movingparts ]] && needs_torrent_stop=1
+  done <<< "$stale_mounts"
+
   # A disconnected filesystem may still be held by a backup, qBittorrent, or
-  # Samba. Stop each consumer before attempting only a normal unmount. The
-  # recovery helper never uses force or lazy detach and revalidates the source
-  # immediately before changing it.
+  # Samba. Stop only consumers of the affected labels before attempting a
+  # normal unmount. The recovery helper never uses force or lazy detach and
+  # revalidates the source immediately before changing it.
   "$ISW_ABORT_BACKUP" || {
     echo "ERROR: backup/restore did not stop; refusing stale-mount recovery" >&2
     return 1
   }
-  kill_torrent_client || {
+  if (( needs_torrent_stop )) && ! kill_torrent_client; then
     echo "ERROR: qBittorrent did not stop; refusing stale-mount recovery" >&2
     return 1
-  }
-  stop_service smbd || {
-    echo "ERROR: smbd did not stop; refusing stale-mount recovery" >&2
+  fi
+  "$ISW_SAMBA_SHARE_CONTROL" close "${stale_labels[@]}" || {
+    echo "ERROR: affected Samba shares did not close; refusing stale-mount recovery" >&2
     return 1
   }
   "$ISW_MOUNT_DISKS" --recover-stale
@@ -311,9 +322,8 @@ mount_drives() {
   if [[ $(van_is_running) ]]; then
     echo "MOUNT interrupt: van is running, unmounting drives"
     echo "will not mount drives while ignition is on"
-    kill_torrent_client
-    stop_service smbd 
-    sleep 1
+    kill_torrent_client || return 1
+    stop_service smbd || return 1
     unmount_drives
     return 1
   else
@@ -338,17 +348,20 @@ unmount_drives() {
 }
 
 stop_service() {
-  sudo /usr/sbin/service $1 stop
+  sudo /usr/sbin/service "$1" stop
 }
 
 start_service() {
-  /usr/sbin/service $1 status > /dev/null || sudo /usr/sbin/service $1 start
+  /usr/sbin/service "$1" status > /dev/null || sudo /usr/sbin/service "$1" start
 }
 
 kill_all() {
   echo 'killing all'
   kill_torrent_client || return 1
-  sleep 4
+  # Ignition and disabled-HDD policy remove the whole HDD share set, so this
+  # policy-level path intentionally takes Samba offline. Exact disk ejects and
+  # stale-mount recovery bypass kill_all and close only affected shares.
+  stop_service smbd || return 1
   unmount_drives
 }
 

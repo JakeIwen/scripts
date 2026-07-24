@@ -1,5 +1,7 @@
 # Vanpi storage and torrent policy
 
+[Pi documentation index](../../README.md)
+
 `/home/pi/.config/vanpi/policy.json` is the single source of requested state:
 
 ```json

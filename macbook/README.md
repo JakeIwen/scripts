@@ -44,7 +44,8 @@ To return to Apple's scheduler, unload
 
 `scripts/van_compute_worker.py` is an outbound-only, allowlisted worker for expensive offline CAN
 analysis submitted by agents on vanpi. `scripts/install_van_compute_worker.zsh` deploys the matching
-Pi queue CLI and installs the user LaunchAgent. See [`../pi/VAN_COMPUTE.md`](../pi/VAN_COMPUTE.md)
+Pi queue CLI and installs the user LaunchAgent. See
+[`VAN_COMPUTE.md`](../pi/docs/compute/VAN_COMPUTE.md)
 for the architecture, safety boundary, installation, and commands.
 
 ## Codex ntfy notifications

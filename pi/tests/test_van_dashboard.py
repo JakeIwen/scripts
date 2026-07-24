@@ -2251,6 +2251,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="compute-local-categories"', page.data)
         self.assertIn(b'id="compute-local-events"', page.data)
         self.assertIn(b'data-compute-hours="168"', page.data)
+        self.assertIn(b"Open Details for outcome diagnostics", page.data)
         self.assertIn(b'id="monitor-diagnosis"', page.data)
         self.assertIn(b'id="monitor-events"', page.data)
         self.assertIn(b'id="system-monitor-network"', page.data)
@@ -2374,6 +2375,10 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"function renderComputeMetrics(response)", javascript.data)
         self.assertIn(b"function formatComputeSeconds(value)", javascript.data)
         self.assertIn(b"/api/compute?hours=", javascript.data)
+        self.assertIn(b"function toggleComputeJobDetails(button)", javascript.data)
+        self.assertIn(b"/api/compute/jobs/", javascript.data)
+        self.assertIn(b"data-compute-job-details", javascript.data)
+        self.assertIn(b"aria-expanded=", javascript.data)
         self.assertIn(b"function renderUsbDevices(response)", javascript.data)
         self.assertIn(b"function renderUsbPorts(state)", javascript.data)
         self.assertIn(b"function changeUsbPort(button)", javascript.data)
@@ -2456,6 +2461,9 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b".compute-overview", stylesheet.data)
         self.assertIn(b".compute-job", stylesheet.data)
         self.assertIn(b".compute-bars", stylesheet.data)
+        self.assertIn(b".compute-job-details", stylesheet.data)
+        self.assertIn(b".compute-job-error", stylesheet.data)
+        self.assertIn(b".compute-job-output", stylesheet.data)
         self.assertIn(b".compute-local-reasons", stylesheet.data)
         self.assertIn(b".compute-local-categories", stylesheet.data)
         self.assertIn(b".usb-device-row", stylesheet.data)
@@ -2851,6 +2859,7 @@ class DashboardRouteTests(unittest.TestCase):
 
     def test_compute_route_has_bounded_ranges(self):
         calls = []
+        detail_calls = []
 
         class FakeComputeMonitor:
             def report(self, hours):
@@ -2864,6 +2873,26 @@ class DashboardRouteTests(unittest.TestCase):
                     "jobs": [],
                 }
 
+            def job_details(self, job_id):
+                detail_calls.append(job_id)
+                if job_id == "not-a-job":
+                    raise ValueError("invalid compute job id")
+                if job_id.endswith("feedface"):
+                    raise FileNotFoundError(job_id)
+                if job_id.endswith("0badc0de"):
+                    raise dashboard.ComputeMetricsError("unsafe result path")
+                return {
+                    "ok": True,
+                    "job": {
+                        "id": job_id,
+                        "state": "failed",
+                        "failure_classification": "task",
+                    },
+                    "diagnostics": {"worker_error": None},
+                    "stderr": {"available": True, "excerpt": "test failed"},
+                    "stdout": {"available": False, "excerpt": ""},
+                }
+
         original = dashboard.compute_monitor
         dashboard.compute_monitor = FakeComputeMonitor()
         try:
@@ -2872,6 +2901,19 @@ class DashboardRouteTests(unittest.TestCase):
             day = client.get("/api/compute?hours=24")
             invalid = client.get("/api/compute?hours=25")
             extra = client.get("/api/compute?hours=24&command=anything")
+            details = client.get(
+                "/api/compute/jobs/20260722T015900Z-deadbeef"
+            )
+            bad_job = client.get("/api/compute/jobs/not-a-job")
+            missing_job = client.get(
+                "/api/compute/jobs/20260722T015900Z-feedface"
+            )
+            detail_extra = client.get(
+                "/api/compute/jobs/20260722T015900Z-deadbeef?output=all"
+            )
+            unavailable_details = client.get(
+                "/api/compute/jobs/20260722T015900Z-0badc0de"
+            )
         finally:
             dashboard.compute_monitor = original
 
@@ -2881,7 +2923,25 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(day.status_code, 200)
         self.assertEqual(invalid.status_code, 400)
         self.assertEqual(extra.status_code, 400)
+        self.assertEqual(details.status_code, 200)
+        self.assertEqual(details.headers["Cache-Control"], "no-store")
+        self.assertEqual(
+            details.json["job"]["failure_classification"], "task"
+        )
+        self.assertEqual(bad_job.status_code, 400)
+        self.assertEqual(missing_job.status_code, 404)
+        self.assertEqual(detail_extra.status_code, 400)
+        self.assertEqual(unavailable_details.status_code, 503)
         self.assertEqual(calls, [168, 24])
+        self.assertEqual(
+            detail_calls,
+            [
+                "20260722T015900Z-deadbeef",
+                "not-a-job",
+                "20260722T015900Z-feedface",
+                "20260722T015900Z-0badc0de",
+            ],
+        )
 
     def test_lighting_routes_are_authoritative_and_reject_unknown_inputs(self):
         calls = []

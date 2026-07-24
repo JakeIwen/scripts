@@ -14,6 +14,9 @@ fi
 
 mkdir -p "$STAMP_DIR" "$SNAP_DIR"
 chown -R pi:pi /home/pi/backups
+install -d -o root -g root -m 0700 "$OPENWRT_SNAPSHOT_DIR" "$UBNT_SNAPSHOT_DIR"
+chown -R root:root "$OPENWRT_SNAPSHOT_DIR" "$UBNT_SNAPSHOT_DIR"
+chmod -R go-rwx "$OPENWRT_SNAPSHOT_DIR" "$UBNT_SNAPSHOT_DIR"
 
 if [ ! -e "$BORG_REPO" ]; then
   [ -s "$BORG_PASSFILE" ] || {

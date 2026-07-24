@@ -34,6 +34,19 @@ HDD_LABELS=(
   mbp2tbkup
 )
 
+# Static Samba share names for disk-backed exports.  Keep this mapping aligned
+# with configs/smb.conf.  Labels without a Samba export deliberately return 1.
+disk_policy_samba_share_name() {
+  case "$1" in
+    mbp1tbkup) printf '%s\n' mbp1tbkup ;;
+    mbp2tbkup) printf '%s\n' mbp2tbkup ;;
+    movingparts) printf '%s\n' MovingParts ;;
+    bigboi) printf '%s\n' BigBoi ;;
+    EXFAT512) printf '%s\n' EXFAT512 ;;
+    *) return 1 ;;
+  esac
+}
+
 # A dashboard/user eject is intentionally temporary: automatic policy
 # reconciliation skips that exact label until its absolute deadline. Runtime
 # state lives under /run so a reboot always clears the hold.
