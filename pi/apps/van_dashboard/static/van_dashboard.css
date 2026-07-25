@@ -3742,6 +3742,25 @@ body.busy [data-action] {
     width: 100%;
   }
 }
+@media (min-width: 700px) and (min-height: 520px) {
+  .speaker-backdrop {
+    align-items: center;
+    padding: min(3vh, 24px) 18px;
+  }
+  .speaker-sheet {
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    border-bottom: 1px solid #38505e;
+    border-radius: 22px;
+    transform: translateY(10px) scale(0.985);
+  }
+  .speaker-backdrop.open .speaker-sheet {
+    transform: translateY(0) scale(1);
+  }
+  .sheet-grabber {
+    display: none;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   * {
     transition: none !important;
