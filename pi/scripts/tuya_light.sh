@@ -27,7 +27,11 @@ if [[ "$action" == "list" ]]; then
     }
   printf '%s' "$response" | /usr/bin/jq -ce '[
     .[]
-    | select(.entity_id | startswith("light."))
+    | select(
+        (.entity_id | startswith("light."))
+        or .entity_id == "switch.ext_flood"
+        or .entity_id == "switch.solder_flood"
+      )
     | {
         entity_id,
         state,

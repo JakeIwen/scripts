@@ -221,6 +221,10 @@ LIGHT_GROUPS = (
         ),
     ),
 )
+LIGHT_POWER_SWITCHES = {
+    "exterior": ("switch.ext_flood", "Exterior power"),
+    "solder": ("switch.solder_flood", "Solder power"),
+}
 LIGHT_COMMAND_TIMEOUT = 20
 
 
@@ -1094,6 +1098,9 @@ class LightingController:
         )
         self.ordered_entities = ordered_entities
         self.entities = set(ordered_entities)
+        self.switch_entities = {
+            entity for entity, _label in LIGHT_POWER_SWITCHES.values()
+        }
         self.targets = {"all": ordered_entities}
         self.targets.update(
             {
@@ -1102,6 +1109,7 @@ class LightingController:
             }
         )
         self.targets.update({entity: (entity,) for entity in self.entities})
+        self.targets.update({entity: (entity,) for entity in self.switch_entities})
 
     @classmethod
     def parse_status(cls, output):
@@ -1122,8 +1130,14 @@ class LightingController:
             entity = item["entity_id"]
             state = item["state"]
             brightness = item["brightness"]
-            if not isinstance(entity, str) or not re.fullmatch(r"light\.[a-z0-9_]+", entity):
-                raise LightingCommandError("Home Assistant returned an invalid light entity")
+            if not isinstance(entity, str) or not (
+                re.fullmatch(r"light\.[a-z0-9_]+", entity)
+                or entity in {
+                    switch_entity
+                    for switch_entity, _label in LIGHT_POWER_SWITCHES.values()
+                }
+            ):
+                raise LightingCommandError("Home Assistant returned an invalid lighting entity")
             if state not in cls.VALID_STATES:
                 state = "unknown"
             if brightness is not None and (
@@ -1190,12 +1204,26 @@ class LightingController:
                 }
                 lights.append(light)
                 all_lights.append(light)
+            switch_config = LIGHT_POWER_SWITCHES.get(group_id)
+            power_switch = None
+            if switch_config is not None:
+                switch_entity, switch_label = switch_config
+                switch_value = observed.get(
+                    switch_entity, {"state": "unknown", "brightness": None}
+                )
+                power_switch = {
+                    "entity_id": switch_entity,
+                    "label": switch_label,
+                    "state": switch_value["state"],
+                    "available": switch_value["state"] in ("on", "off"),
+                }
             groups.append(
                 {
                     "id": group_id,
                     "label": group_label,
                     "state": self.aggregate(lights),
                     "lights": lights,
+                    "power_switch": power_switch,
                 }
             )
         return {

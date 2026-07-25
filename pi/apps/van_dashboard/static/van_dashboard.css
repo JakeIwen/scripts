@@ -887,6 +887,13 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   margin: 0;
   font-size: 14px;
 }
+.lighting-group-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
 .lighting-group-head button {
   border: 1px solid var(--line);
   border-radius: 99px;
@@ -900,6 +907,14 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
 }
 .lighting-group-head button:disabled {
   opacity: 0.55;
+}
+.lighting-group-head .lighting-switch-action.good {
+  border-color: #39725b;
+  color: #bcebd5;
+}
+.lighting-group-head .lighting-switch-action.bad {
+  border-color: #754743;
+  color: #f2b5b0;
 }
 .lighting-row {
   display: grid;

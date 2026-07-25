@@ -2446,7 +2446,15 @@ function renderLighting(next) {
     .map((group) => {
       const groupKnown = group.lights.some((light) => light.available),
         groupEnabled = group.state === 'on',
-        groupAction = groupEnabled ? 'Turn room off' : 'Turn room on';
+        groupAction = groupEnabled ? 'Turn room off' : 'Turn room on',
+        powerSwitch = group.power_switch,
+        switchEnabled = powerSwitch?.state === 'on',
+        switchAction = powerSwitch?.available
+          ? `Turn switch ${switchEnabled ? 'off' : 'on'}`
+          : 'Switch no data',
+        switchControl = powerSwitch
+          ? `<button class="lighting-switch-action ${lightingDotClass(powerSwitch.state)}" data-action data-light-target="${esc(powerSwitch.entity_id)}" data-light-value="${String(!switchEnabled)}" ${powerSwitch.available ? '' : 'disabled'} aria-pressed="${powerSwitch.available ? String(switchEnabled) : 'mixed'}">${switchAction}</button>`
+          : '';
       const rows = group.lights
         .map((light) => {
           const enabled = light.state === 'on',
@@ -2462,7 +2470,7 @@ function renderLighting(next) {
         })
         .join('');
       return `<section class="lighting-group">
-        <div class="lighting-group-head"><h3><span class="network-dot ${lightingDotClass(group.state)}"></span>${esc(group.label)}</h3><button data-action data-light-target="group:${esc(group.id)}" data-light-value="${String(!groupEnabled)}" ${groupKnown ? '' : 'disabled'}>${groupAction}</button></div>
+        <div class="lighting-group-head"><h3><span class="network-dot ${lightingDotClass(group.state)}"></span>${esc(group.label)}</h3><div class="lighting-group-actions"><button data-action data-light-target="group:${esc(group.id)}" data-light-value="${String(!groupEnabled)}" ${groupKnown ? '' : 'disabled'}>${groupAction}</button>${switchControl}</div></div>
         ${rows}
       </section>`;
     })
