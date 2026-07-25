@@ -1601,6 +1601,94 @@ class UsbPortControllerTests(unittest.TestCase):
         self.assertEqual(ports["2-2:3"]["mounted_labels"], ["movingparts"])
         self.assertEqual(ports["2-2:4"]["device_descriptions"], [])
 
+    def test_merges_companion_hub_trees_into_ten_physical_ports(self):
+        hubs = []
+        targets = {}
+        connected = {
+            ("usb3", "2", 1): {
+                "device_descriptions": ["Seagate Portable"],
+                "downstream_device_count": 1,
+                "storage_labels": ["mbp2tbkup"],
+                "mounted_labels": ["mbp2tbkup"],
+            },
+            ("usb2", "2.4", 3): {
+                "device_descriptions": ["PEAK System PCAN-USB"],
+                "downstream_device_count": 1,
+            },
+            ("usb2", "2.4.4", 1): {
+                "device_descriptions": ["Samsung Android"],
+                "downstream_device_count": 1,
+            },
+        }
+
+        for side, prefix in (("usb2", "1-1."), ("usb3", "2-")):
+            for route in ("2", "2.4", "2.4.4"):
+                location = prefix + route
+                ports = []
+                for port_number in range(1, 5):
+                    key = f"{location}:{port_number}"
+                    values = {
+                        "key": key,
+                        "location": location,
+                        "port": port_number,
+                        "method": "power",
+                        "enabled": True,
+                        "device_descriptions": [],
+                        "downstream_device_count": 0,
+                        "storage_labels": [],
+                        "mounted_labels": [],
+                    }
+                    values.update(connected.get((side, route, port_number), {}))
+                    ports.append(values)
+                    targets[key] = {**values, "disable_path": None}
+                hubs.append(
+                    {
+                        "location": location,
+                        "description": f"{side} Realtek hub",
+                        "method": "power",
+                        "ports": ports,
+                    }
+                )
+
+        presented = dashboard.UsbPortController._presentation_hubs(hubs, targets)
+
+        self.assertEqual(len(presented), 1)
+        physical = presented[0]
+        self.assertTrue(physical["physical"])
+        self.assertFalse(physical["advanced"])
+        self.assertEqual(physical["detail"], "10 physical ports · paired USB 2/USB 3")
+        self.assertEqual([port["port"] for port in physical["ports"]], list(range(1, 11)))
+        self.assertEqual(
+            physical["ports"][0]["device_descriptions"], ["Seagate Portable"]
+        )
+        self.assertEqual(
+            physical["ports"][5]["device_descriptions"], ["PEAK System PCAN-USB"]
+        )
+        self.assertEqual(
+            physical["ports"][6]["device_descriptions"], ["Samsung Android"]
+        )
+        self.assertEqual(physical["ports"][0]["mounted_labels"], ["mbp2tbkup"])
+
+        android_target = targets[physical["ports"][6]["key"]]
+        self.assertEqual(android_target["location"], "2-2.4.4")
+        self.assertEqual(android_target["port"], 1)
+        self.assertEqual(android_target["device_descriptions"], ["Samsung Android"])
+
+    def test_marks_pi_root_and_internal_hubs_as_advanced(self):
+        hubs = [
+            {
+                "location": location,
+                "description": "Internal hub",
+                "method": "power",
+                "ports": [],
+            }
+            for location in ("1", "2", "1-1")
+        ]
+
+        presented = dashboard.UsbPortController._presentation_hubs(hubs, {})
+
+        self.assertTrue(all(hub["advanced"] for hub in presented))
+
     def test_rejects_unknown_inputs_and_mounted_storage(self):
         self.controller.refresh(self.usb_state())
         with self.assertRaisesRegex(ValueError, "unknown USB port"):
@@ -2465,6 +2553,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"data-compute-job-details", javascript.data)
         self.assertIn(b"aria-expanded=", javascript.data)
         self.assertIn(b"function renderUsbDevices(response)", javascript.data)
+        self.assertIn(b"function renderUsbHubCards(hubs, running)", javascript.data)
         self.assertIn(b"function renderUsbPorts(state)", javascript.data)
         self.assertIn(b"function changeUsbPort(button)", javascript.data)
         self.assertIn(b"function recoverUsb2()", javascript.data)
@@ -2479,6 +2568,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"/api/usb-devices", javascript.data)
         self.assertIn(b"usb-ports/action", javascript.data)
         self.assertIn(b"usb-ports/recover", javascript.data)
+        self.assertIn(b"Advanced / internal ports", javascript.data)
         self.assertIn(b"function renderCrashAnalysis(payload)", javascript.data)
         self.assertIn(b"function renderCrashHistory(payload)", javascript.data)
         self.assertIn(b"function monitorEventState(event)", javascript.data)

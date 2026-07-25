@@ -2308,6 +2308,29 @@ body.busy [data-action] {
   gap: 9px;
   margin-top: 8px;
 }
+.usb-advanced {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #10181f;
+  padding: 0 10px;
+}
+.usb-advanced > summary {
+  color: var(--dim);
+  padding: 10px 0;
+  font-size: 10px;
+  font-weight: 720;
+  cursor: pointer;
+}
+.usb-advanced > summary span {
+  float: right;
+  font-size: 8px;
+  font-weight: 600;
+}
+.usb-advanced-list {
+  display: grid;
+  gap: 9px;
+  padding-bottom: 10px;
+}
 .usb-hub-card {
   border: 1px solid var(--line);
   border-radius: 13px;

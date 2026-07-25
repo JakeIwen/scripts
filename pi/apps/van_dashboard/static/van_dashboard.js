@@ -634,25 +634,12 @@ function usbEventLabel(event) {
         : 'Plugged';
   return `${label} ${eventTime(event.at)}`;
 }
-function renderUsbPorts(state) {
-  const operation = state?.operation || { status: 'idle' },
-    running = operation.status === 'running',
-    recovering = operation.action === 'restore';
-  let operationLabel = state?.checked_at ? `Updated ${age(state.checked_at)}` : 'No port data';
-  if (state?.last_error) operationLabel = 'Port status incomplete';
-  if (operation.status === 'error')
-    operationLabel = `Failed · ${operation.error || 'unknown error'}`;
-  if (operation.status === 'complete' && recovering)
-    operationLabel = operation.message || 'USB 2 restored';
-  if (running)
-    operationLabel = recovering ? 'Restoring USB 2…' : `${operation.action} · ${operation.key}`;
-  $('usb-operation').textContent = operationLabel;
-  $('usb-panel').classList.toggle('usb-port-busy', running);
-  $('usb-recover').disabled = running || usbPortBusy;
-  $('usb-hub-list').innerHTML = (state?.hubs || [])
+function renderUsbHubCards(hubs, running) {
+  return hubs
     .map((hub) => {
-      const power = hub.method === 'power';
-      return `<article class="usb-hub-card"><div class="usb-hub-head"><span><strong>${esc(hub.description)}</strong><small>Location ${esc(hub.location)}</small></span><b class="usb-method ${power ? 'power' : 'data'}">${power ? 'POWER + DATA' : 'DATA ONLY'}</b></div><div class="usb-port-grid">${(hub.ports || [])
+      const power = hub.method === 'power',
+        hubDetail = hub.detail || `Location ${hub.location}`;
+      return `<article class="usb-hub-card"><div class="usb-hub-head"><span><strong>${esc(hub.description)}</strong><small>${esc(hubDetail)}</small></span><b class="usb-method ${power ? 'power' : 'data'}">${power ? 'POWER + DATA' : 'DATA ONLY'}</b></div><div class="usb-port-grid">${(hub.ports || [])
         .map((port) => {
           const enabled = port.enabled !== false,
             mounted = port.mounted_labels || [],
@@ -673,7 +660,34 @@ function renderUsbPorts(state) {
         })
         .join('')}</div></article>`;
     })
-    .join('') || '<div class="speaker-loading">No USB port controls discovered</div>';
+    .join('');
+}
+function renderUsbPorts(state) {
+  const operation = state?.operation || { status: 'idle' },
+    running = operation.status === 'running',
+    recovering = operation.action === 'restore';
+  let operationLabel = state?.checked_at ? `Updated ${age(state.checked_at)}` : 'No port data';
+  if (state?.last_error) operationLabel = 'Port status incomplete';
+  if (operation.status === 'error')
+    operationLabel = `Failed · ${operation.error || 'unknown error'}`;
+  if (operation.status === 'complete' && recovering)
+    operationLabel = operation.message || 'USB 2 restored';
+  if (running)
+    operationLabel = recovering ? 'Restoring USB 2…' : `${operation.action} · ${operation.key}`;
+  $('usb-operation').textContent = operationLabel;
+  $('usb-panel').classList.toggle('usb-port-busy', running);
+  $('usb-recover').disabled = running || usbPortBusy;
+  const hubs = state?.hubs || [],
+    primaryHubs = hubs.filter((hub) => !hub.advanced),
+    advancedHubs = hubs.filter((hub) => hub.advanced),
+    advancedPortCount = advancedHubs.reduce((total, hub) => total + hub.ports.length, 0),
+    primaryHtml = renderUsbHubCards(primaryHubs, running),
+    advancedHtml = advancedHubs.length
+      ? `<details class="usb-advanced"><summary>Advanced / internal ports <span>${advancedPortCount} logical ports</span></summary><div class="usb-advanced-list">${renderUsbHubCards(advancedHubs, running)}</div></details>`
+      : '';
+  $('usb-hub-list').innerHTML =
+    primaryHtml + advancedHtml ||
+    '<div class="speaker-loading">No USB port controls discovered</div>';
 }
 function renderUsbDevices(response) {
   const state = response.usb,

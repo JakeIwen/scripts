@@ -2251,6 +2251,159 @@ class UsbPortController:
     def _child_location(location, port):
         return f"{location}-{port}" if location.isdigit() else f"{location}.{port}"
 
+    @staticmethod
+    def _companion_route(location):
+        """Return the Pi 4 physical-port route for USB 2/USB 3 hub companions."""
+        usb2 = re.fullmatch(r"1-1\.(\d+(?:\.\d+)*)", location)
+        if usb2:
+            return "usb2", usb2.group(1)
+        usb3 = re.fullmatch(r"2-(\d+(?:\.\d+)*)", location)
+        if usb3:
+            return "usb3", usb3.group(1)
+        return None
+
+    @classmethod
+    def _presentation_hubs(cls, hubs, targets):
+        """Merge dual USB 2/USB 3 hub trees into user-facing physical ports.
+
+        A Raspberry Pi 4 inserts its VIA USB 2 hub at ``1-1`` while USB 3 is
+        rooted directly at bus 2. Matching routes below those points are the
+        two logical sides of the same physical hub. Chained hub-controller
+        uplinks are omitted and their external ports are flattened in route
+        order.
+        """
+        companions = {"usb2": {}, "usb3": {}}
+        for hub in hubs:
+            route = cls._companion_route(hub["location"])
+            if route and hub["method"] == "power":
+                side, path = route
+                companions[side][path] = hub
+
+        paired_routes = set(companions["usb2"]) & set(companions["usb3"])
+        paired_routes = {
+            route
+            for route in paired_routes
+            if {
+                port["port"] for port in companions["usb2"][route]["ports"]
+            }
+            == {
+                port["port"] for port in companions["usb3"][route]["ports"]
+            }
+        }
+        consumed_locations = {
+            companions[side][route]["location"]
+            for route in paired_routes
+            for side in ("usb2", "usb3")
+        }
+        roots = sorted(
+            (
+                route
+                for route in paired_routes
+                if "." not in route or route.rsplit(".", 1)[0] not in paired_routes
+            ),
+            key=lambda route: [int(part) for part in route.split(".")],
+        )
+
+        presented = []
+        for root in roots:
+            physical_ports = []
+
+            def append_route(route):
+                usb2_hub = companions["usb2"][route]
+                usb3_hub = companions["usb3"][route]
+                usb2_ports = {port["port"]: port for port in usb2_hub["ports"]}
+                usb3_ports = {port["port"]: port for port in usb3_hub["ports"]}
+                for topology_port in sorted(usb2_ports):
+                    child_route = f"{route}.{topology_port}"
+                    if child_route in paired_routes:
+                        append_route(child_route)
+                        continue
+                    halves = [usb2_ports[topology_port], usb3_ports[topology_port]]
+                    primary = usb3_ports[topology_port]
+                    enabled_values = [
+                        port["enabled"] for port in halves if port["enabled"] is not None
+                    ]
+                    descriptions = sorted(
+                        {
+                            description
+                            for port in halves
+                            for description in port["device_descriptions"]
+                        }
+                    )
+                    storage_labels = sorted(
+                        {
+                            label
+                            for port in halves
+                            for label in port["storage_labels"]
+                        }
+                    )
+                    mounted_labels = sorted(
+                        {
+                            label
+                            for port in halves
+                            for label in port["mounted_labels"]
+                        }
+                    )
+                    physical_port = len(physical_ports) + 1
+                    merged = {
+                        **primary,
+                        "port": physical_port,
+                        "enabled": all(enabled_values) if enabled_values else None,
+                        "device_descriptions": descriptions,
+                        "downstream_device_count": sum(
+                            port["downstream_device_count"] for port in halves
+                        ),
+                        "storage_labels": storage_labels,
+                        "mounted_labels": mounted_labels,
+                        "topology_locations": [
+                            f"{port['location']}:{topology_port}" for port in halves
+                        ],
+                    }
+                    physical_ports.append(merged)
+
+                    # Keep the actual USB 3 location/port for uhubctl. Its
+                    # default duality handling also switches the USB 2 side.
+                    target = targets[primary["key"]]
+                    target.update(
+                        {
+                            "enabled": merged["enabled"],
+                            "device_descriptions": descriptions,
+                            "downstream_device_count": merged[
+                                "downstream_device_count"
+                            ],
+                            "storage_labels": storage_labels,
+                            "mounted_labels": mounted_labels,
+                        }
+                    )
+
+            append_route(root)
+            root_hub = companions["usb3"][root]
+            presented.append(
+                {
+                    "location": root_hub["location"],
+                    "description": "External USB hub",
+                    "detail": (
+                        f"{len(physical_ports)} physical ports · paired USB 2/USB 3"
+                    ),
+                    "method": "power",
+                    "physical": True,
+                    "advanced": False,
+                    "ports": physical_ports,
+                }
+            )
+
+        for hub in hubs:
+            if hub["location"] in consumed_locations:
+                continue
+            presented.append(
+                {
+                    **hub,
+                    "physical": False,
+                    "advanced": hub["location"] in {"1", "2", "1-1"},
+                }
+            )
+        return presented
+
     def refresh(self, usb_state=None):
         usb_state = usb_state or self.device_monitor.refresh()
         error = None
@@ -2340,6 +2493,7 @@ class UsbPortController:
                 "disable_path": kernel_port.get("disable_path") if kernel_port else None,
             }
 
+        presented_hubs = self._presentation_hubs(list(hubs.values()), targets)
         now = int(self.wall_clock())
         with self.lock:
             self.targets = targets
@@ -2347,7 +2501,7 @@ class UsbPortController:
                 {
                     "checked_at": now,
                     "last_error": error,
-                    "hubs": list(hubs.values()),
+                    "hubs": presented_hubs,
                 }
             )
             return copy.deepcopy(self.data)

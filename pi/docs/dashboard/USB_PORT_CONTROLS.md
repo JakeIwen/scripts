@@ -14,6 +14,14 @@ Ports marked **POWER + DATA** are controlled with a fixed `uhubctl` command.
 can still disconnect data without actually removing VBUS even when it advertises
 power switching.
 
+On Raspberry Pi 4, matching smart-hub routes below the internal USB 2 hub and
+the USB 3 root are presented as one physical port. Chained controller uplinks
+are omitted and their remaining ports are flattened into physical socket order.
+For example, the replacement ten-port Realtek hub is internally six logical
+hub controllers (three USB 2 and three USB 3), but the main view shows ten
+controls. Pi root and internal-hub ports remain available in a collapsed
+**Advanced / internal ports** section.
+
 Ports marked **DATA ONLY** belong to hubs that do not advertise independent
 power switching. Those controls write only `0` or `1` to the already-discovered
 Linux `...-portN/disable` file through `sudo tee`. They disconnect and reconnect
