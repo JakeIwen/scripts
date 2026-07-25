@@ -16,7 +16,8 @@ alias ch7="sudo chmod -R 777" # usage: $ ch7 .
 alias chme="sudo chown -R $(whoami)" # usage: $ chme .
 
 alias ngear='ssh -R root@192.168.6.1'
-alias rb='. /home/pi/scripts/umount_disks.sh; sudo reboot'
+alias rb='/home/pi/scripts/safe_reboot.sh'
+alias pd='/home/pi/scripts/safe_power_down.sh'
 alias rball='ubnt reboot & ngear reboot; rb'
 
 alias bootedit='sudo vi /boot/config.txt'
@@ -668,7 +669,6 @@ alias rpiplay='wake_display; nohup /home/pi/RPiPlay/build/rpiplay -r 180 &'
 
 alias ngear="ssh root@OpenWrt"
 alias ubnt="ssh -i ~/.ssh/id_rsa ubnt@192.168.8.20"
-alias pd='sudo /sbin/shutdown -r now'
 
 ### PYTHON ###
 # use py venv to run basically anything

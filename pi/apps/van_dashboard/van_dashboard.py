@@ -141,6 +141,15 @@ DISK_EJECT_HOLD_DIR = os.environ.get(
 )
 DISK_STATUS_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_DISK_STATUS_TIMEOUT", "10"))
 DISK_ACTION_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_DISK_ACTION_TIMEOUT", "150"))
+SAFE_REBOOT = os.environ.get(
+    "VAN_DASHBOARD_SAFE_REBOOT", "/home/pi/scripts/safe_reboot.sh"
+)
+SAFE_POWER_DOWN = os.environ.get(
+    "VAN_DASHBOARD_SAFE_POWER_DOWN", "/home/pi/scripts/safe_power_down.sh"
+)
+SYSTEM_POWER_TIMEOUT = float(
+    os.environ.get("VAN_DASHBOARD_SYSTEM_POWER_TIMEOUT", "180")
+)
 TUYA_POLL_INTERVAL = float(os.environ.get("VAN_DASHBOARD_TUYA_POLL_INTERVAL", "15"))
 POLICYCTL_TIMEOUT = 15
 COP_LED_TARGET = os.environ.get("VAN_DASHBOARD_COP_LED_TARGET", "light.ext_led")
@@ -3435,6 +3444,90 @@ class DiskManager:
                 )
 
 
+class SystemPowerError(RuntimeError):
+    pass
+
+
+class SystemPowerController:
+    def __init__(
+        self,
+        scripts=None,
+        command=run_command,
+        timeout=SYSTEM_POWER_TIMEOUT,
+        wall_clock=time.time,
+    ):
+        self.scripts = dict(
+            scripts
+            or {
+                "reboot": SAFE_REBOOT,
+                "power-down": SAFE_POWER_DOWN,
+            }
+        )
+        self.command = command
+        self.timeout = timeout
+        self.wall_clock = wall_clock
+        self.lock = threading.Lock()
+        self.thread = None
+        self.operation = {
+            "status": "idle",
+            "action": None,
+            "started_at": None,
+            "completed_at": None,
+            "error": None,
+        }
+
+    def snapshot(self):
+        with self.lock:
+            return copy.deepcopy(self.operation)
+
+    def start_action(self, action):
+        if action not in ("reboot", "power-down") or action not in self.scripts:
+            raise ValueError("unknown system power action")
+        with self.lock:
+            if self.operation["status"] == "running":
+                raise SystemPowerError("another system power action is already running")
+            started_at = int(self.wall_clock())
+            self.operation = {
+                "status": "running",
+                "action": action,
+                "started_at": started_at,
+                "completed_at": None,
+                "error": None,
+            }
+            self.thread = threading.Thread(
+                target=self._run_action,
+                args=(action, started_at),
+                name="system-power-action",
+                daemon=True,
+            )
+            self.thread.start()
+        return self.snapshot()
+
+    def _run_action(self, action, started_at):
+        error = None
+        try:
+            result = self.command([self.scripts[action]], timeout=self.timeout)
+            if result.returncode:
+                error = (
+                    result.stderr
+                    or result.stdout
+                    or f"{action} preparation failed"
+                ).strip()[-500:]
+        except subprocess.TimeoutExpired:
+            error = f"{action} preparation timed out after {self.timeout:g} seconds"
+        except OSError as exc:
+            error = f"could not start {action}: {exc}"
+        with self.lock:
+            if self.operation.get("started_at") == started_at:
+                self.operation.update(
+                    {
+                        "status": "error" if error else "complete",
+                        "completed_at": int(self.wall_clock()),
+                        "error": error,
+                    }
+                )
+
+
 app = Flask(__name__)
 state_store = StateStore()
 engine_monitor = EngineMonitor()
@@ -3455,6 +3548,7 @@ usb_ports = UsbPortController(usb_devices)
 backups = BackupManager()
 ignition_monitor_control = IgnitionMonitorController()
 disk_manager = DiskManager()
+system_power = SystemPowerController()
 
 
 def api_error(message, status):
@@ -3596,6 +3690,42 @@ def api_disk_action():
                 f"started for {request.form['label']}"
             ),
             "disk_status": status,
+        }
+    )
+    response.status_code = 202
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/api/system-power", methods=["GET", "POST"])
+def api_system_power():
+    if request.method == "GET":
+        if request.args:
+            return api_error("system power status does not accept input", 400)
+        response = jsonify(
+            {"ok": True, "system_power": system_power.snapshot()}
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return response
+    if not _exact_form(("action", "confirmation")):
+        return api_error(
+            "system power action requires one action and confirmation", 400
+        )
+    action = request.form["action"]
+    if request.form["confirmation"] != action:
+        return api_error("system power action was not confirmed", 400)
+    try:
+        status = system_power.start_action(action)
+    except ValueError as exc:
+        return api_error(str(exc), 400)
+    except SystemPowerError as exc:
+        return api_error(f"could not start system power action: {exc}", 409)
+    label = "Reboot" if action == "reboot" else "Power down"
+    response = jsonify(
+        {
+            "ok": True,
+            "message": f"{label} started; safely unmounting disks first",
+            "system_power": status,
         }
     )
     response.status_code = 202

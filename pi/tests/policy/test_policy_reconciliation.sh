@@ -2,7 +2,7 @@
 
 set -u
 
-repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
 
@@ -93,7 +93,7 @@ export TEST_PKILL_CALLS="$test_root/pkill-calls"
 export TEST_SLEEP_CALLS="$test_root/sleep-calls"
 export TEST_STALE_RECOVERY_CALLS="$test_root/stale-recovery-calls"
 
-# shellcheck source=../scripts/internet_switches.sh
+# shellcheck source=../../scripts/internet_switches.sh
 source "$repo_root/pi/scripts/internet_switches.sh"
 
 reset_process_test() {

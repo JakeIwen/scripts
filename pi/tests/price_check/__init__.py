@@ -1,0 +1,1 @@
+"""Price-check application tests."""

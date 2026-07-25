@@ -6,10 +6,13 @@ import tempfile
 import threading
 import unittest
 from email.message import Message
+from pathlib import Path
 from types import SimpleNamespace
 
 from pi.apps.van_dashboard import van_dashboard as dashboard
 from pi.scripts import usb_watch
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 
 
 class FakeClock:
@@ -1246,6 +1249,79 @@ HDD_LABELS=(
                 self.assertIn(expected, operation["error"])
 
 
+class SystemPowerControllerTests(unittest.TestCase):
+    def test_runs_only_the_fixed_script_for_each_action(self):
+        calls = []
+
+        def command(args, timeout):
+            calls.append((list(args), timeout))
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        controller = dashboard.SystemPowerController(
+            scripts={
+                "reboot": "/test/safe_reboot.sh",
+                "power-down": "/test/safe_power_down.sh",
+            },
+            command=command,
+            timeout=23,
+            wall_clock=FakeClock(1000),
+        )
+        controller.start_action("reboot")
+        controller.thread.join(2)
+        self.assertEqual(controller.snapshot()["status"], "complete")
+        controller.start_action("power-down")
+        controller.thread.join(2)
+        self.assertEqual(controller.snapshot()["status"], "complete")
+        self.assertEqual(
+            calls,
+            [
+                (["/test/safe_reboot.sh"], 23),
+                (["/test/safe_power_down.sh"], 23),
+            ],
+        )
+
+    def test_rejects_unknown_and_overlapping_actions(self):
+        started = threading.Event()
+        release = threading.Event()
+
+        def command(args, timeout):
+            started.set()
+            release.wait(2)
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        controller = dashboard.SystemPowerController(command=command)
+        with self.assertRaisesRegex(ValueError, "unknown system power action"):
+            controller.start_action("shell-command")
+        controller.start_action("reboot")
+        self.assertTrue(started.wait(1))
+        with self.assertRaisesRegex(dashboard.SystemPowerError, "already running"):
+            controller.start_action("power-down")
+        release.set()
+        controller.thread.join(2)
+
+    def test_reports_script_failure_and_timeout(self):
+        for failure, expected in (
+            ("failure", "unmount failed"),
+            ("timeout", "timed out after 3"),
+        ):
+            with self.subTest(failure=failure):
+                def command(args, timeout):
+                    if failure == "timeout":
+                        raise subprocess.TimeoutExpired(args, timeout)
+                    return SimpleNamespace(
+                        returncode=1, stdout="", stderr="unmount failed"
+                    )
+
+                controller = dashboard.SystemPowerController(
+                    command=command, timeout=3
+                )
+                controller.start_action("reboot")
+                controller.thread.join(2)
+                operation = controller.snapshot()
+                self.assertEqual(operation["status"], "error")
+                self.assertIn(expected, operation["error"])
+
+
 class UsbWatchScriptTests(unittest.TestCase):
     def test_json_snapshot_reuses_usb_and_filesystem_label_discovery(self):
         current = {
@@ -2085,7 +2161,7 @@ class BackupManagerTests(unittest.TestCase):
                     self.assertIn(message, manager.operation["error"])
 
     def test_clone_wrapper_uses_shared_lock_and_never_initializes_a_card(self):
-        repository = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        repository = str(REPOSITORY_ROOT)
         path = os.path.join(repository, "pi", "scripts", "backup", "clone_now.sh")
         with open(path, encoding="utf-8") as handle:
             script = handle.read()
@@ -2304,6 +2380,10 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="tile-edit"', page.data)
         self.assertIn(b'id="tile-grid"', page.data)
         self.assertIn(b'aria-label="Edit tile positions"', page.data)
+        self.assertIn(b'id="system-reboot"', page.data)
+        self.assertIn(b'id="system-power-down"', page.data)
+        self.assertIn(b'data-system-power="reboot"', page.data)
+        self.assertIn(b'data-system-power="power-down"', page.data)
         self.assertIn(b"UBNT Wi-Fi", page.data)
         self.assertIn(b'id="ubnt-radio-dot"', page.data)
         self.assertIn(b'id="openwrt-age"', page.data)
@@ -2369,6 +2449,11 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"function updateDiskHoldCountdowns()", javascript.data)
         self.assertIn(b"/api/disks", javascript.data)
         self.assertIn(b"disks/action", javascript.data)
+        self.assertIn(b"function requestSystemPower(action)", javascript.data)
+        self.assertIn(b"function pollSystemPowerResult()", javascript.data)
+        self.assertIn(b"window.confirm(", javascript.data)
+        self.assertIn(b"system-power", javascript.data)
+        self.assertIn(b"confirmation: action", javascript.data)
         self.assertIn(b"function renderLighting(next)", javascript.data)
         self.assertIn(b"function renderPriceChecks(response)", javascript.data)
         self.assertIn(b"function renderSystemMonitor(response)", javascript.data)
@@ -2447,6 +2532,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b".policy-runtime-state::before", stylesheet.data)
         self.assertIn(b".disk-device-list", stylesheet.data)
         self.assertIn(b".disk-device-action", stylesheet.data)
+        self.assertIn(b".system-power-button", stylesheet.data)
         self.assertIn(b".disk-device-card.held", stylesheet.data)
         self.assertIn(b".monitor-crash-button", stylesheet.data)
         self.assertIn(b".monitor-crash-history-item", stylesheet.data)
@@ -2494,7 +2580,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(manifest.json["name"], "Van Dashboard")
 
     def test_sync_scripts_deploys_dashboard_assets(self):
-        repository = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        repository = str(REPOSITORY_ROOT)
         with open(os.path.join(repository, "pi", "sync_scripts.sh"), encoding="utf-8") as handle:
             sync_script = handle.read()
         self.assertIn(
@@ -2513,7 +2599,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertNotIn("/home/pi/scripts/shared", sync_script)
 
     def test_ntfy_helper_has_bounded_network_timeouts(self):
-        repository = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        repository = str(REPOSITORY_ROOT)
         with open(os.path.join(repository, "pi", "scripts", "ntfy_send.sh"), encoding="utf-8") as handle:
             script = handle.read()
         self.assertIn("--connect-timeout 5", script)
@@ -3249,6 +3335,73 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(extra_input.status_code, 400)
         self.assertEqual(cross_origin.status_code, 403)
         self.assertEqual(calls, ["status", ("movingparts", "eject")])
+
+    def test_system_power_route_requires_confirmation_and_fixed_actions(self):
+        calls = []
+
+        class FakeSystemPower:
+            def snapshot(self):
+                return {"status": "idle", "action": None}
+
+            def start_action(self, action):
+                if action not in ("reboot", "power-down"):
+                    raise ValueError("unknown system power action")
+                calls.append(action)
+                return {"status": "running", "action": action}
+
+        original = dashboard.system_power
+        dashboard.system_power = FakeSystemPower()
+        try:
+            client = dashboard.app.test_client()
+            status = client.get("/api/system-power")
+            status_input = client.get("/api/system-power?command=anything")
+            accepted = client.post(
+                "/api/system-power",
+                data={"action": "reboot", "confirmation": "reboot"},
+                headers={"X-Van-Dashboard": "1"},
+            )
+            unconfirmed = client.post(
+                "/api/system-power",
+                data={"action": "power-down", "confirmation": "reboot"},
+                headers={"X-Van-Dashboard": "1"},
+            )
+            unknown = client.post(
+                "/api/system-power",
+                data={"action": "shell-command", "confirmation": "shell-command"},
+                headers={"X-Van-Dashboard": "1"},
+            )
+            extra = client.post(
+                "/api/system-power",
+                data={
+                    "action": "reboot",
+                    "confirmation": "reboot",
+                    "command": "anything",
+                },
+                headers={"X-Van-Dashboard": "1"},
+            )
+            cross_origin = client.post(
+                "/api/system-power",
+                data={"action": "reboot", "confirmation": "reboot"},
+                headers={
+                    "X-Van-Dashboard": "1",
+                    "Origin": "https://example.invalid",
+                },
+            )
+        finally:
+            dashboard.system_power = original
+
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.headers["Cache-Control"], "no-store")
+        self.assertEqual(status.json["system_power"]["status"], "idle")
+        self.assertEqual(status_input.status_code, 400)
+        self.assertEqual(accepted.status_code, 202)
+        self.assertEqual(accepted.headers["Cache-Control"], "no-store")
+        self.assertIn("safely unmounting disks", accepted.json["message"])
+        self.assertEqual(unconfirmed.status_code, 400)
+        self.assertEqual(unknown.status_code, 400)
+        self.assertEqual(extra.status_code, 400)
+        self.assertEqual(cross_origin.status_code, 403)
+        self.assertEqual(calls, ["reboot"])
 
     def test_starlink_power_change_requests_policy_reconciliation(self):
         events = []

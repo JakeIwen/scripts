@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 
-SCRIPT_DIR = Path(__file__).parents[1] / "scripts" / "price_check"
+SCRIPT_DIR = Path(__file__).parents[2] / "scripts" / "price_check"
 SCRIPT = SCRIPT_DIR / "main.py"
 sys.path.insert(0, str(SCRIPT_DIR))
 SPEC = importlib.util.spec_from_file_location("price_check", SCRIPT)

@@ -4,7 +4,7 @@
 
 ## Why Flask is required
 
-`pi/tests/test_van_dashboard.py` imports
+`pi/tests/dashboard/test_van_dashboard.py` imports
 `pi.apps.van_dashboard.van_dashboard`. The application imports Flask at module
 load time and its route tests use Flask's `test_client()`. Therefore the test
 module cannot even be imported by a Python environment that lacks Flask.
@@ -47,12 +47,12 @@ fi
 
 ssh -o BatchMode=yes pi@vanpi.lan \
   "install -d '$dashboard_test_dir/pi/apps' \
-    '$dashboard_test_dir/pi/tests' '$dashboard_test_dir/pi/scripts' \
+    '$dashboard_test_dir/pi/tests' '$dashboard_test_dir/pi/scripts/backup' \
     '$dashboard_test_dir/pi/van_compute/scripts'"
 
 scp -q -r pi/apps/van_dashboard \
   "pi@vanpi.lan:$dashboard_test_dir/pi/apps/"
-scp -q pi/tests/test_van_dashboard.py \
+scp -q -r pi/tests/dashboard \
   "pi@vanpi.lan:$dashboard_test_dir/pi/tests/"
 scp -q pi/van_compute/__init__.py \
   "pi@vanpi.lan:$dashboard_test_dir/pi/van_compute/"
@@ -65,10 +65,14 @@ scp -q pi/scripts/ntfy_send.sh \
   "pi@vanpi.lan:$dashboard_test_dir/pi/scripts/"
 scp -q pi/scripts/usb_watch.py \
   "pi@vanpi.lan:$dashboard_test_dir/pi/scripts/"
+scp -q pi/scripts/backup/clone_now.sh \
+  "pi@vanpi.lan:$dashboard_test_dir/pi/scripts/backup/"
 
 ssh -o BatchMode=yes pi@vanpi.lan \
   "cd '$dashboard_test_dir' && \
-    python3 -m unittest pi.tests.test_van_dashboard; \
+    python3 -m unittest \
+      pi.tests.dashboard.test_lighting_tile_static \
+      pi.tests.dashboard.test_van_dashboard; \
     dashboard_test_status=\$?; \
     find '$dashboard_test_dir' -depth -delete; \
     exit \$dashboard_test_status"
@@ -100,7 +104,9 @@ dashboard_test_tmp="${dashboard_test_tmp%/}"
 dashboard_test_venv="$(mktemp -d "$dashboard_test_tmp/van-dashboard-venv.XXXXXX")"
 python3 -m venv "$dashboard_test_venv"
 "$dashboard_test_venv/bin/python" -m pip install Flask
-"$dashboard_test_venv/bin/python" -m unittest pi.tests.test_van_dashboard
+"$dashboard_test_venv/bin/python" -m unittest \
+  pi.tests.dashboard.test_lighting_tile_static \
+  pi.tests.dashboard.test_van_dashboard
 ```
 
 When finished, validate that the variable still names the temporary venv and
@@ -127,15 +133,21 @@ global installation.
 When a dashboard change involves Disks & Torrents, also stage these files:
 
 ```text
-pi/tests/test_policyctl.py
+pi/tests/policy/__init__.py
+pi/tests/policy/test_policyctl.py
 pi/scripts/policyctl
 pi/scripts/disk_policy.sh
 ```
 
-Then run:
+Create `$dashboard_test_dir/pi/tests/policy`, copy the two policy test files
+there, and copy the scripts into `$dashboard_test_dir/pi/scripts` before
+running:
 
 ```bash
-python3 -m unittest pi.tests.test_policyctl pi.tests.test_van_dashboard
+python3 -m unittest \
+  pi.tests.policy.test_policyctl \
+  pi.tests.dashboard.test_lighting_tile_static \
+  pi.tests.dashboard.test_van_dashboard
 ```
 
 `disk_policy.sh` is required because a policyctl test verifies that its managed

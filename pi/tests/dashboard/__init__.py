@@ -1,0 +1,1 @@
+"""Van dashboard tests."""

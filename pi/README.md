@@ -21,6 +21,10 @@ normally live under `/home/pi/scripts/`.
 - [USB port controls](docs/dashboard/USB_PORT_CONTROLS.md)
 - [Application layout](apps/README.md)
 
+## Testing
+
+- [Test suite layout and commands](tests/README.md)
+
 ## Networking
 
 - [OpenWrt remote logging](docs/networking/OPENWRT_LOGGING.md)

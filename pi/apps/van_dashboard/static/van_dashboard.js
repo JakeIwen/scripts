@@ -30,6 +30,7 @@ let dashboard = null,
   usbPortBusy = false,
   backupBusy = false,
   ignitionMonitorBusy = false,
+  systemPowerBusy = false,
   busy = false,
   tileEditing = false,
   tileDrag = null,
@@ -42,6 +43,7 @@ let dashboard = null,
   usbPoll = 0,
   backupPoll = 0,
   ignitionMonitorPoll = 0,
+  systemPowerPoll = 0,
   ubntPoll = 0,
   ubntLastCompletion = '',
   backupLastCompletion = '',
@@ -163,6 +165,62 @@ async function action(work) {
   } finally {
     busy = false;
     document.body.classList.remove('busy');
+  }
+}
+function setSystemPowerButtonsDisabled(disabled) {
+  document.querySelectorAll('[data-system-power]').forEach((button) => {
+    button.disabled = disabled;
+  });
+}
+async function pollSystemPowerResult() {
+  clearTimeout(systemPowerPoll);
+  try {
+    const payload = await json('/api/system-power');
+    const operation = payload.system_power || {};
+    if (operation.status === 'error') {
+      setSystemPowerButtonsDisabled(false);
+      $('connection').textContent = 'Power action failed; vanpi stayed on';
+      $('dot').className = 'dot bad';
+      toast(operation.error || 'Power action failed; vanpi stayed on', true);
+      return;
+    }
+    if (operation.status === 'running') {
+      systemPowerPoll = setTimeout(pollSystemPowerResult, 750);
+    }
+  } catch (_) {
+    // Losing the dashboard is expected once reboot or poweroff takes effect.
+  }
+}
+async function requestSystemPower(action) {
+  if (systemPowerBusy) return;
+  const labels = {
+    reboot: { question: 'Reboot vanpi now?', progress: 'Rebooting vanpi…' },
+    'power-down': { question: 'Power down vanpi now?', progress: 'Powering down vanpi…' },
+  };
+  const selected = labels[action];
+  if (!selected) return;
+  const confirmed = window.confirm(
+    `${selected.question}\n\nAll managed disks will be safely unmounted and verified first. If that fails, vanpi will stay on.`,
+  );
+  if (!confirmed) return;
+
+  systemPowerBusy = true;
+  let accepted = false;
+  setSystemPowerButtonsDisabled(true);
+  try {
+    const result = await post('system-power', { action, confirmation: action });
+    accepted = true;
+    $('connection').textContent = selected.progress;
+    $('dot').className = 'dot';
+    toast(result.message);
+    systemPowerPoll = setTimeout(pollSystemPowerResult, 750);
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    systemPowerBusy = false;
+    if (!accepted) {
+      setSystemPowerButtonsDisabled(false);
+    }
   }
 }
 function age(ts) {
@@ -3052,6 +3110,9 @@ $('starlink').addEventListener('click', () => {
     await refreshConnectivity();
     return result;
   });
+});
+document.querySelectorAll('[data-system-power]').forEach((button) => {
+  button.addEventListener('click', () => requestSystemPower(button.dataset.systemPower));
 });
 $('speakers').addEventListener('click', openSpeakers);
 $('speaker-close').addEventListener('click', closeSpeakers);

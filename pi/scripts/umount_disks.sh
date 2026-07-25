@@ -19,6 +19,7 @@ UD_STATE_DIR=/run/lock/vanpi-hdd-spindown
 
 ud_usage() {
   echo "usage: ${0##*/} [--dry-run] [--spindown] [label]" >&2
+  echo "       ${0##*/} [--dry-run] --all" >&2
   echo "       ${0##*/} --clear-spindown-state" >&2
 }
 
@@ -319,8 +320,9 @@ ud_notify_recovery() {
 }
 
 umount_disks_main() {
-  local dry_run=0 spindown=0 clear_state=0 explicit_label= label arg rc expected_mount target
-  local post_mounts
+  local dry_run=0 spindown=0 clear_state=0 all_labels=0 explicit_label=
+  local label arg rc expected_mount target
+  local post_mounts all_mounts remaining_scsi_mounts
   local parent_name hd_idle_output
   local needs_torrent_stop=0 had_preflight_failure=0 had_runtime_failure=0
   local -a labels=() attached_labels=() mounted_labels=()
@@ -332,6 +334,7 @@ umount_disks_main() {
     case "$arg" in
       --dry-run) dry_run=1 ;;
       --spindown) spindown=1 ;;
+      --all) all_labels=1 ;;
       --clear-spindown-state) clear_state=1 ;;
       --help|-h) ud_usage; return 0 ;;
       --*) ud_usage; return 2 ;;
@@ -346,7 +349,7 @@ umount_disks_main() {
   done
 
   if (( clear_state )); then
-    if (( dry_run || spindown )) || [[ -n "$explicit_label" ]]; then
+    if (( dry_run || spindown || all_labels )) || [[ -n "$explicit_label" ]]; then
       ud_usage
       return 2
     fi
@@ -354,7 +357,17 @@ umount_disks_main() {
     return $?
   fi
 
-  if [[ -n "$explicit_label" ]]; then
+  if (( all_labels )) && { (( spindown )) || [[ -n "$explicit_label" ]]; }; then
+    ud_usage
+    return 2
+  fi
+
+  if (( all_labels )); then
+    # One preflight covers every filesystem this repository is permitted to
+    # mount. This is used by safe reboot/poweroff so no earlier per-label
+    # unmount can be undone before a later label is validated.
+    labels=("${MOUNT_LABELS[@]}" "${MANUAL_MOUNT_LABELS[@]}")
+  elif [[ -n "$explicit_label" ]]; then
     labels=("$explicit_label")
     if (( spindown )) && ! ud_is_hdd_label "$explicit_label"; then
       ud_record_failure "refusing to spin down label $explicit_label because it is not in HDD_LABELS"
@@ -517,6 +530,26 @@ umount_disks_main() {
         had_runtime_failure=1
       fi
     done
+  fi
+
+  if (( all_labels && ! dry_run )); then
+    # A mounted, unrecognised USB/SCSI filesystem must not silently survive a
+    # request advertised as disk-safe. Do not dynamically unmount unknown
+    # devices: fail closed so their identity and consumers can be reviewed.
+    all_mounts=$(/usr/bin/findmnt -rn -o SOURCE,TARGET 2>&1)
+    rc=$?
+    if (( rc != 0 )); then
+      ud_record_failure "cannot verify mounted filesystems after --all (findmnt status $rc): $all_mounts"
+      had_runtime_failure=1
+    else
+      remaining_scsi_mounts=$(
+        /usr/bin/grep '^/dev/sd' <<< "$all_mounts" || true
+      )
+      if [[ -n "$remaining_scsi_mounts" ]]; then
+        ud_record_failure "USB/SCSI filesystems remain mounted after --all: $remaining_scsi_mounts"
+        had_runtime_failure=1
+      fi
+    fi
   fi
 
   echo "mounted USB/SCSI filesystems after disk operation:"

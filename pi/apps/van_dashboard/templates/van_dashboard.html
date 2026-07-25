@@ -11,7 +11,16 @@
 <link rel="apple-touch-icon" href="/app-icon.svg">
 <title>Van Dashboard</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='van_dashboard.css') }}"></head><body>
-<header><div><div class="eyebrow">vanpi controls</div><h1>Van Dashboard</h1></div><div class="van-mark" aria-hidden="true">🚐</div></header>
+<header>
+  <div><div class="eyebrow">vanpi controls</div><h1>Van Dashboard</h1></div>
+  <div class="header-tools">
+    <div class="system-power-actions" role="group" aria-label="Vanpi system power">
+      <button class="system-power-button" id="system-reboot" type="button" data-action data-system-power="reboot" title="Safely reboot vanpi"><span aria-hidden="true">↻</span><span>Reboot</span></button>
+      <button class="system-power-button power-down" id="system-power-down" type="button" data-action data-system-power="power-down" title="Safely power down vanpi"><span aria-hidden="true">⏻</span><span>Power down</span></button>
+    </div>
+    <div class="van-mark" aria-hidden="true">🚐</div>
+  </div>
+</header>
 <main>
   <div class="connection"><span class="dot" id="dot"></span><span id="connection">Connecting to vanpi…</span></div>
   <div class="tile-edit-bar">

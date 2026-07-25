@@ -2,7 +2,7 @@
 
 set -u
 
-repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
 
@@ -18,7 +18,7 @@ assert_eq() {
 }
 
 export MOUNT_DISKS_LIBRARY_ONLY=1
-# shellcheck source=../scripts/mount_disks.sh
+# shellcheck source=../../scripts/mount_disks.sh
 source "$repo_root/pi/scripts/mount_disks.sh"
 
 # The production target is GNU/Linux; macOS readlink lacks GNU's -f option.

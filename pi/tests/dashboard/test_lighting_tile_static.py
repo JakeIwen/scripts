@@ -5,7 +5,7 @@ import unittest
 class LightingTileStaticTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        root = pathlib.Path(__file__).resolve().parents[2]
+        root = pathlib.Path(__file__).resolve().parents[3]
         dashboard = root / "pi" / "apps" / "van_dashboard"
         cls.template = (dashboard / "templates" / "van_dashboard.html").read_text()
         cls.javascript = (dashboard / "static" / "van_dashboard.js").read_text()

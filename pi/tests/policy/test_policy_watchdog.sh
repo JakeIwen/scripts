@@ -7,7 +7,7 @@ if [[ ! -x /usr/bin/flock ]]; then
   exit 0
 fi
 
-repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 test_root=$(mktemp -d)
 holder=
 cleanup() {
