@@ -1,3 +1,6 @@
+-- EXPERIMENTAL: this UI-automation path is slow and remains intermittent.
+-- Prefer findmy_open_items.zsh for a reliable BetterTouchTool button.
+--
 -- Select a Find My device or item by its exact displayed title and optionally
 -- invoke its contextual "Play Sound" action.
 --
