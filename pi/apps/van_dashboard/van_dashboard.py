@@ -78,6 +78,9 @@ USB2_RECOVERY_TOOL = os.environ.get(
     "VAN_DASHBOARD_USB2_RECOVERY_TOOL", "/home/pi/scripts/recover_usb2.sh"
 )
 CONNECTIVITY_INTERVAL = float(os.environ.get("VAN_DASHBOARD_CONNECTIVITY_INTERVAL", "30"))
+OPENWRT_CLIENTS_TIMEOUT = float(
+    os.environ.get("VAN_DASHBOARD_OPENWRT_CLIENTS_TIMEOUT", "15")
+)
 SPEEDTEST_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_SPEEDTEST_TIMEOUT", "180"))
 USB_WATCH_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_USB_WATCH_TIMEOUT", "10"))
 UHUBCTL = os.environ.get("VAN_DASHBOARD_UHUBCTL", "/usr/sbin/uhubctl")
@@ -1715,6 +1718,150 @@ class ConnectivityMonitor:
             remaining = max(1.0, self.interval - (self.clock() - started))
             self.refresh_event.wait(remaining)
             self.refresh_event.clear()
+
+
+class OpenWrtClientsError(RuntimeError):
+    pass
+
+
+class OpenWrtClientsController:
+    """Read the fixed, passive OpenWrt client inventory on demand."""
+
+    CLIENT_FIELDS = {
+        "name",
+        "hostname_known",
+        "ip",
+        "mac",
+        "connection",
+        "interface",
+        "neighbor_state",
+        "signal_dbm",
+        "rx_rate_bps",
+        "tx_rate_bps",
+        "rx_bytes",
+        "tx_bytes",
+        "lease_expires_at",
+    }
+    NUMBER_FIELDS = {
+        "rx_rate_bps",
+        "tx_rate_bps",
+        "rx_bytes",
+        "tx_bytes",
+        "lease_expires_at",
+    }
+
+    def __init__(
+        self,
+        collector=CONNECTIVITY_STATUS,
+        command=run_command,
+        timeout=OPENWRT_CLIENTS_TIMEOUT,
+    ):
+        self.collector = collector
+        self.command = command
+        self.timeout = timeout
+
+    @staticmethod
+    def _valid_ipv4(value):
+        if value is None:
+            return True
+        if not isinstance(value, str) or not re.fullmatch(
+            r"(?:\d{1,3}\.){3}\d{1,3}", value
+        ):
+            return False
+        return all(0 <= int(part) <= 255 for part in value.split("."))
+
+    @classmethod
+    def parse_status(cls, output):
+        try:
+            payload = json.loads(output)
+        except (TypeError, ValueError) as exc:
+            raise OpenWrtClientsError("client collector returned invalid JSON") from exc
+        if (
+            not isinstance(payload, dict)
+            or payload.get("version") != 1
+            or not isinstance(payload.get("checked_at"), int)
+            or isinstance(payload.get("checked_at"), bool)
+            or not isinstance(payload.get("clients"), list)
+            or len(payload["clients"]) > 256
+        ):
+            raise OpenWrtClientsError("client collector returned an invalid payload")
+
+        clients = []
+        for item in payload["clients"]:
+            if not isinstance(item, dict) or set(item) != cls.CLIENT_FIELDS:
+                raise OpenWrtClientsError("client collector returned an invalid device")
+            if (
+                not isinstance(item["name"], str)
+                or not item["name"]
+                or len(item["name"]) > 100
+                or not isinstance(item["hostname_known"], bool)
+                or not cls._valid_ipv4(item["ip"])
+                or not isinstance(item["mac"], str)
+                or not re.fullmatch(r"(?:[0-9a-f]{2}:){5}[0-9a-f]{2}", item["mac"])
+                or item["connection"] not in ("wifi", "lan")
+                or not isinstance(item["interface"], str)
+                or len(item["interface"]) > 50
+                or (
+                    item["neighbor_state"] is not None
+                    and item["neighbor_state"]
+                    not in ("REACHABLE", "DELAY", "PROBE", "PERMANENT", "STALE")
+                )
+                or (
+                    item["signal_dbm"] is not None
+                    and (
+                        not isinstance(item["signal_dbm"], int)
+                        or not -150 <= item["signal_dbm"] <= 0
+                    )
+                )
+                or any(
+                    item[field] is not None
+                    and (
+                        not isinstance(item[field], int)
+                        or isinstance(item[field], bool)
+                        or item[field] < 0
+                    )
+                    for field in cls.NUMBER_FIELDS
+                )
+            ):
+                raise OpenWrtClientsError("client collector returned invalid device data")
+            clients.append(item)
+
+        wifi_count = sum(item["connection"] == "wifi" for item in clients)
+        lan_count = len(clients) - wifi_count
+        invalid_counts = any(
+            not isinstance(payload.get(field), int)
+            or isinstance(payload.get(field), bool)
+            for field in ("client_count", "wifi_count", "lan_count")
+        )
+        if (
+            invalid_counts
+            or payload.get("client_count") != len(clients)
+            or payload.get("wifi_count") != wifi_count
+            or payload.get("lan_count") != lan_count
+        ):
+            raise OpenWrtClientsError("client collector returned inconsistent counts")
+        return {
+            "version": 1,
+            "checked_at": payload["checked_at"],
+            "client_count": len(clients),
+            "wifi_count": wifi_count,
+            "lan_count": lan_count,
+            "clients": clients,
+        }
+
+    def status(self):
+        try:
+            result = self.command([self.collector, "--clients"], timeout=self.timeout)
+        except subprocess.TimeoutExpired as exc:
+            raise OpenWrtClientsError(
+                f"client query timed out after {self.timeout:g} seconds"
+            ) from exc
+        except OSError as exc:
+            raise OpenWrtClientsError(f"could not start client query: {exc}") from exc
+        if result.returncode:
+            detail = (result.stderr or result.stdout or "client query failed").strip()
+            raise OpenWrtClientsError(detail[-300:])
+        return self.parse_status(result.stdout)
 
 
 class UbntWifiController:
@@ -3717,6 +3864,7 @@ cop_alert = CopAlertManager(state_store, engine_monitor)
 cop_led = CopLedManager(state_store, engine_monitor)
 sonos = SonosController(state_store)
 connectivity = ConnectivityMonitor()
+openwrt_clients = OpenWrtClientsController()
 ubnt_wifi = UbntWifiController(on_change=connectivity.request_refresh)
 speedtest = SpeedTestManager()
 starlink = TuyaSwitchManager("starlink")
@@ -3979,6 +4127,17 @@ def api_lights_brightness():
 @app.route("/api/connectivity")
 def api_connectivity():
     response = jsonify({"ok": True, "connectivity": connectivity.snapshot()})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/api/openwrt/clients")
+def api_openwrt_clients():
+    try:
+        clients = openwrt_clients.status()
+    except OpenWrtClientsError as exc:
+        return api_error(f"could not query OpenWrt clients: {exc}", 502)
+    response = jsonify({"ok": True, "openwrt": clients})
     response.headers["Cache-Control"] = "no-store"
     return response
 

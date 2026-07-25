@@ -9,6 +9,8 @@ let dashboard = null,
   computeMetrics = null,
   backupState = null,
   ignitionMonitor = null,
+  connectivityState = null,
+  openwrtClients = null,
   ignitionDurationMinutes = 120,
   systemMonitorHours = 6,
   computeHours = 168,
@@ -43,11 +45,13 @@ let dashboard = null,
   usbPoll = 0,
   backupPoll = 0,
   ignitionMonitorPoll = 0,
+  openwrtPoll = 0,
   systemPowerPoll = 0,
   ubntPoll = 0,
   ubntLastCompletion = '',
   backupLastCompletion = '',
   diskRunningOperation = '',
+  openwrtClientsBusy = false,
   sonosTimeline = { position: 0, duration: 0, playing: false, updatedAt: 0 };
 const TILE_ORDER_STORAGE_KEY = 'van-dashboard.tile-order.v1';
 const computeJobDetailCache = new Map();
@@ -75,6 +79,8 @@ const TRUNCATED_TEXT_SELECTOR = [
   '.disk-device-name',
   '.disk-device-detail',
   '.ubnt-network-name',
+  '.openwrt-client-main strong',
+  '.openwrt-client-main small',
   '.network-value',
   '.speaker-name',
   '.usb-device-main strong',
@@ -535,22 +541,57 @@ function renderUbntTile() {
   }
   $('ubnt-wifi-summary').textContent = details.join(' · ');
 }
+function mwanChips(interfaces) {
+  return (interfaces || [])
+    .map(
+      (item) =>
+        `<span class="mwan-chip ${esc(item.state)}" title="${esc(item.detail || '')}">${esc(item.name)} · ${esc(item.state)}</span>`,
+    )
+    .join('');
+}
+function renderOpenwrtPanel(connectivity) {
+  if (!connectivity) return;
+  const router = connectivity.router || {},
+    online = connectivity.internet?.online,
+    reachable = router.reachable,
+    mode =
+      router.mode ||
+      (online === false || reachable === false ? 'No active uplink' : 'Unknown mode');
+  networkState(
+    'openwrt-sheet-internet-dot',
+    online === null && reachable === false ? false : online,
+  );
+  networkState('openwrt-sheet-mwan-dot', reachable);
+  $('openwrt-sheet-internet').textContent =
+    online === true
+      ? `Online via ${router.mode || 'active uplink'}`
+      : online === false
+        ? 'Offline'
+        : 'No data';
+  $('openwrt-sheet-mode').textContent = mode;
+  $('openwrt-sheet-mwan-list').innerHTML = mwanChips(router.interfaces);
+  $('openwrt-sheet-age').textContent = router.error
+    ? `MWAN3 error · ${router.error}`
+    : connectivity.last_error
+      ? `Collector error · ${connectivity.last_error}`
+      : connectivity.checked_at
+        ? `${connectivity.stale ? 'Stale' : 'Updated'} · ${age(connectivity.checked_at)}`
+        : connectivity.refreshing
+          ? 'Checking…'
+          : 'Waiting for MWAN3';
+}
 function renderConnectivity(response) {
   const c = response.connectivity,
     r = c.router || {},
     u = c.ubnt || {},
     online = c.internet?.online;
+  connectivityState = c;
   networkState('internet-dot', online === null && r.reachable === false ? false : online);
   $('mwan-mode').textContent =
     r.mode || (online === false || r.reachable === false ? 'No active uplink' : 'Unknown');
   ubntLink = u;
   renderUbntTile();
-  $('mwan-list').innerHTML = (r.interfaces || [])
-    .map(
-      (i) =>
-        `<span class="mwan-chip ${esc(i.state)}" title="${esc(i.detail || '')}">${esc(i.name)} · ${esc(i.state)}</span>`,
-    )
-    .join('');
+  $('mwan-list').innerHTML = mwanChips(r.interfaces);
   $('openwrt-age').textContent = r.error
     ? `MWAN3 error · ${r.error}`
     : c.last_error
@@ -560,6 +601,7 @@ function renderConnectivity(response) {
         : c.refreshing
           ? 'Checking…'
           : 'Waiting for MWAN3';
+  renderOpenwrtPanel(c);
 }
 async function refreshConnectivity() {
   try {
@@ -568,6 +610,58 @@ async function refreshConnectivity() {
     $('openwrt-age').textContent = error.message;
     ubntLink = null;
     renderUbntTile();
+  }
+}
+function renderOpenwrtClients(state) {
+  openwrtClients = state;
+  const clients = state?.clients || [],
+    count = Number(state?.client_count) || 0,
+    wifi = Number(state?.wifi_count) || 0,
+    lan = Number(state?.lan_count) || 0;
+  $('openwrt-client-count').textContent = state?.checked_at
+    ? `${count} connected · ${wifi} Wi-Fi · ${lan} LAN · ${age(state.checked_at)}`
+    : 'No client data';
+  $('openwrt-client-list').innerHTML = clients.length
+    ? clients
+        .map((client) => {
+          const detail = [
+              client.ip || 'IPv4 unavailable',
+              Number.isFinite(client.signal_dbm) ? `${client.signal_dbm} dBm` : null,
+              client.neighbor_state ? client.neighbor_state.toLowerCase() : null,
+            ]
+              .filter(Boolean)
+              .join(' · '),
+            traffic =
+              Number.isFinite(client.rx_bytes) && Number.isFinite(client.tx_bytes)
+                ? `↓ ${formatBytes(client.rx_bytes)} · ↑ ${formatBytes(client.tx_bytes)}`
+                : null;
+          return `<article class="openwrt-client"><span class="network-dot good"></span><span class="openwrt-client-main"><strong>${esc(client.name)}</strong><small>${esc(detail)}</small></span><span class="openwrt-client-kind">${client.connection === 'wifi' ? 'WI-FI' : 'LAN'}</span><span class="openwrt-client-address"><code>${esc(client.mac)}</code>${traffic ? `<span>${esc(traffic)}</span>` : ''}</span></article>`;
+        })
+        .join('')
+    : '<div class="openwrt-client-empty">No associated Wi-Fi clients or active LAN neighbors were reported.</div>';
+}
+async function refreshOpenwrtClients(showLoading = true) {
+  if (openwrtClientsBusy) return;
+  openwrtClientsBusy = true;
+  $('openwrt-clients-refresh').disabled = true;
+  $('openwrt-panel').setAttribute('aria-busy', 'true');
+  if (showLoading && !openwrtClients) {
+    $('openwrt-client-count').textContent = 'Checking…';
+    $('openwrt-client-list').innerHTML =
+      '<div class="speaker-loading">Querying OpenWrt…</div>';
+  }
+  try {
+    const response = await json('/api/openwrt/clients');
+    renderOpenwrtClients(response.openwrt);
+  } catch (error) {
+    $('openwrt-client-count').textContent = 'Client query failed';
+    $('openwrt-client-list').innerHTML =
+      `<div class="openwrt-client-empty">${esc(error.message)}</div>`;
+    if (showLoading) toast(error.message, true);
+  } finally {
+    openwrtClientsBusy = false;
+    $('openwrt-clients-refresh').disabled = false;
+    $('openwrt-panel').setAttribute('aria-busy', 'false');
   }
 }
 function atTime(ts) {
@@ -2865,6 +2959,30 @@ async function refreshSonos() {
     $('sonos-card').style.backgroundImage = '';
   }
 }
+async function pollOpenwrtClients() {
+  clearTimeout(openwrtPoll);
+  if (!$('openwrt-backdrop').classList.contains('open')) return;
+  try {
+    await refreshOpenwrtClients(false);
+  } finally {
+    openwrtPoll = setTimeout(pollOpenwrtClients, 20000);
+  }
+}
+async function openOpenwrt() {
+  $('openwrt-backdrop').classList.add('open');
+  document.body.classList.add('sheet-open');
+  $('openwrt-open').setAttribute('aria-expanded', 'true');
+  renderOpenwrtPanel(connectivityState);
+  await Promise.allSettled([refreshConnectivity(), refreshOpenwrtClients(true)]);
+  openwrtPoll = setTimeout(pollOpenwrtClients, 20000);
+}
+function closeOpenwrt() {
+  clearTimeout(openwrtPoll);
+  $('openwrt-backdrop').classList.remove('open');
+  document.body.classList.remove('sheet-open');
+  $('openwrt-open').setAttribute('aria-expanded', 'false');
+  $('openwrt-open').focus();
+}
 async function openSpeakers() {
   $('speaker-backdrop').classList.add('open');
   document.body.classList.add('sheet-open');
@@ -3136,6 +3254,11 @@ $('starlink').addEventListener('click', () => {
 document.querySelectorAll('[data-system-power]').forEach((button) => {
   button.addEventListener('click', () => requestSystemPower(button.dataset.systemPower));
 });
+$('openwrt-open').addEventListener('click', openOpenwrt);
+$('openwrt-close').addEventListener('click', closeOpenwrt);
+$('openwrt-clients-refresh').addEventListener('click', () =>
+  refreshOpenwrtClients(true),
+);
 $('speakers').addEventListener('click', openSpeakers);
 $('speaker-close').addEventListener('click', closeSpeakers);
 $('storage').addEventListener('click', openStorage);
@@ -3199,6 +3322,9 @@ $('ubnt-password-form').addEventListener('submit', (event) => {
   startUbntWifi('provision', selected);
 });
 $('speedtest-button').addEventListener('click', startSpeedtest);
+$('openwrt-backdrop').addEventListener('click', (event) => {
+  if (event.target === $('openwrt-backdrop')) closeOpenwrt();
+});
 $('speaker-backdrop').addEventListener('click', (event) => {
   if (event.target === $('speaker-backdrop')) closeSpeakers();
 });
@@ -3231,6 +3357,7 @@ $('ubnt-wifi-backdrop').addEventListener('click', (event) => {
 });
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
+    if ($('openwrt-backdrop').classList.contains('open')) closeOpenwrt();
     if ($('speaker-backdrop').classList.contains('open')) closeSpeakers();
     if ($('storage-backdrop').classList.contains('open')) closeStorage();
     if ($('system-monitor-backdrop').classList.contains('open')) closeSystemMonitor();
@@ -3414,6 +3541,7 @@ function refreshVisibleDashboard() {
   if (document.hidden) return;
   refresh();
   refreshConnectivity();
+  if ($('openwrt-backdrop').classList.contains('open')) refreshOpenwrtClients(false);
   refreshSpeedtest();
   refreshSonos();
   refreshStoragePolicy().catch(() => {});

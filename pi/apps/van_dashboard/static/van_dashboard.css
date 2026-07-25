@@ -1495,9 +1495,23 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   box-shadow: 0 8px 28px #050b102e;
 }
 #openwrt-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 220px;
+}
+.openwrt-open {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.openwrt-open:focus-visible {
+  outline: 2px solid #79a9c0;
+  outline-offset: -4px;
 }
 .network-card-heading {
   font-size: 17px;
@@ -1614,6 +1628,8 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   cursor: default;
 }
 .openwrt-speedtest {
+  position: relative;
+  z-index: 2;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
@@ -1624,6 +1640,143 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
 }
 .openwrt-speedtest-button {
   padding: 8px 10px;
+}
+.openwrt-sheet {
+  width: min(100%, 780px);
+}
+.openwrt-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.openwrt-overview-card {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #172129;
+  padding: 12px;
+}
+.openwrt-overview-card > .network-dot {
+  margin-top: 3px;
+}
+.openwrt-overview-card strong,
+.openwrt-overview-card small {
+  display: block;
+}
+.openwrt-overview-card strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+.openwrt-overview-card small {
+  color: var(--dim);
+  font-size: 10px;
+  margin-top: 2px;
+}
+.openwrt-overview-card .mwan-list {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.openwrt-clients {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+.openwrt-client-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  color: var(--dim);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.openwrt-client-actions button {
+  border: 1px solid #42606e;
+  border-radius: 9px;
+  background: #263b47;
+  color: var(--ink);
+  padding: 7px 10px;
+  font-size: 10px;
+  font-weight: 720;
+}
+.openwrt-client-actions button:disabled {
+  opacity: 0.55;
+}
+.openwrt-client-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.openwrt-client {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 4px 9px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #172129;
+  padding: 10px;
+}
+.openwrt-client > .network-dot {
+  margin-top: 4px;
+}
+.openwrt-client-main {
+  min-width: 0;
+}
+.openwrt-client-main strong,
+.openwrt-client-main small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.openwrt-client-main strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+.openwrt-client-main small {
+  color: var(--dim);
+  font-size: 9px;
+  margin-top: 2px;
+}
+.openwrt-client-kind {
+  border: 1px solid #42545e;
+  border-radius: 99px;
+  color: var(--dim);
+  padding: 2px 6px;
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+}
+.openwrt-client-address {
+  grid-column: 2 / -1;
+  display: flex;
+  gap: 5px 9px;
+  min-width: 0;
+  flex-wrap: wrap;
+  color: var(--dim);
+  font-size: 9px;
+}
+.openwrt-client-address code {
+  color: #8fa6b2;
+  font-size: inherit;
+}
+.openwrt-client-empty {
+  grid-column: 1 / -1;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  color: var(--dim);
+  padding: 22px 10px;
+  text-align: center;
+  font-size: 11px;
 }
 .speed-spinner {
   display: none;
@@ -1668,6 +1821,10 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   }
   .openwrt-speedtest-button {
     width: 100%;
+  }
+  .openwrt-overview,
+  .openwrt-client-list {
+    grid-template-columns: 1fr;
   }
 }
 .speaker-backdrop {
