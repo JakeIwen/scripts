@@ -14,9 +14,10 @@ fail() {
 mount_root="$test_root/mnt"
 label_root="$test_root/by-label"
 source_root="$test_root/dev"
+drain_root="$test_root/drain"
 fake_findmnt="$test_root/findmnt"
 gated_labels=(mbp1tbkup mbp2tbkup movingparts bigboi EXFAT512)
-mkdir -p "$label_root" "$source_root"
+mkdir -p "$label_root" "$source_root" "$drain_root"
 for label in "${gated_labels[@]}"; do
   mkdir -p "$mount_root/$label"
   touch "$source_root/$label-device"
@@ -41,6 +42,7 @@ run_gate() {
     SAMBA_MOUNT_GATE_MOUNT_ROOT="$mount_root" \
     SAMBA_MOUNT_GATE_LABEL_ROOT="$label_root" \
     SAMBA_MOUNT_GATE_REQUIRE_BLOCK_DEVICE=0 \
+    SAMBA_SHARE_DRAIN_DIR="$drain_root" \
     TEST_SOURCE_ROOT="$source_root" \
     bash "$repo_root/pi/scripts/samba_require_mount.sh" "$@"
 }
@@ -48,6 +50,13 @@ run_gate() {
 for label in "${gated_labels[@]}"; do
   run_gate "$label" >/dev/null || fail "exact $label mount was rejected"
 done
+
+touch "$drain_root/movingparts"
+run_gate movingparts >/dev/null 2>&1 &&
+  fail "draining Samba share accepted a reconnect"
+rm "$drain_root/movingparts"
+run_gate movingparts >/dev/null ||
+  fail "cleared Samba drain continued blocking the exact share"
 
 TEST_MBP2_SOURCE="$source_root/wrong-device"
 export TEST_MBP2_SOURCE

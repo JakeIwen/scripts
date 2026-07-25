@@ -13,6 +13,7 @@ readlink_command=${SAMBA_MOUNT_GATE_READLINK:-/usr/bin/readlink}
 mount_root=${SAMBA_MOUNT_GATE_MOUNT_ROOT:-/mnt}
 label_root=${SAMBA_MOUNT_GATE_LABEL_ROOT:-/dev/disk/by-label}
 require_block_device=${SAMBA_MOUNT_GATE_REQUIRE_BLOCK_DEVICE:-1}
+drain_dir=${SAMBA_SHARE_DRAIN_DIR:-/run/lock/vanpi-samba-drain}
 
 label=${1:-}
 disk_policy_samba_share_name "$label" >/dev/null || {
@@ -27,9 +28,18 @@ fi
 
 target="$mount_root/$label"
 label_link="$label_root/$label"
+drain_marker="$drain_dir/$label"
 
 if [[ ! -d "$target" || -L "$target" ]]; then
   echo "Samba mount gate: $target is unavailable or unsafe" >&2
+  exit 1
+fi
+if [[ -L "$drain_dir" || ( -e "$drain_dir" && ! -d "$drain_dir" ) ]]; then
+  echo "Samba mount gate: unsafe drain state" >&2
+  exit 1
+fi
+if [[ -e "$drain_marker" || -L "$drain_marker" ]]; then
+  echo "Samba mount gate: $label is draining for disk shutdown" >&2
   exit 1
 fi
 if [[ ! -e "$label_link" ]]; then

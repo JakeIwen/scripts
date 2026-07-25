@@ -16,9 +16,11 @@ UD_FAST_PARENT=
 UD_FAST_DISKSEQ=
 UD_FAILURES=()
 UD_STATE_DIR=/run/lock/vanpi-hdd-spindown
+UD_EMERGENCY_QBIT_GRACE_SECONDS=${UMOUNT_DISKS_EMERGENCY_QBIT_GRACE_SECONDS:-8}
 
 ud_usage() {
   echo "usage: ${0##*/} [--dry-run] [--spindown] [label]" >&2
+  echo "       ${0##*/} --spindown --emergency" >&2
   echo "       ${0##*/} [--dry-run] --all" >&2
   echo "       ${0##*/} --clear-spindown-state" >&2
 }
@@ -282,7 +284,16 @@ ud_parent_is_unmounted() {
 }
 
 ud_kill_torrent_client() {
-  local rc attempt
+  local emergency=${1:-0} rc attempt wait_seconds=30
+
+  if (( emergency )); then
+    wait_seconds=$UD_EMERGENCY_QBIT_GRACE_SECONDS
+  fi
+  [[ "$wait_seconds" =~ ^[1-9][0-9]?$ ]] || {
+    echo "ERROR: invalid qBittorrent stop timeout: $wait_seconds" >&2
+    return 1
+  }
+
   /usr/bin/pgrep -x qbittorrent-nox >/dev/null 2>&1
   rc=$?
   (( rc == 1 )) && return 0
@@ -294,15 +305,144 @@ ud_kill_torrent_client() {
   (( rc <= 1 )) || return 1
 
   # This Pi's qBittorrent can need about 18 seconds to save state and exit.
-  # Keep the stop graceful, but bound ignition shutdown at 30 seconds.
-  for attempt in {1..30}; do
+  # Ordinary policy changes retain that grace period; ignition emergency mode
+  # uses a shorter deadline and then kills only the exact executable name.
+  for ((attempt = 0; attempt < wait_seconds; attempt++)); do
     /usr/bin/pgrep -x qbittorrent-nox >/dev/null 2>&1
     rc=$?
     (( rc == 1 )) && return 0
     (( rc == 0 )) || return 1
     sleep 1
   done
+
+  if (( emergency )); then
+    echo "qbittorrent-nox did not stop within ${wait_seconds}s; killing it"
+    /usr/bin/sudo /usr/bin/pkill -KILL -x qbittorrent-nox
+    rc=$?
+    (( rc <= 1 )) || return 1
+    for attempt in {1..3}; do
+      /usr/bin/pgrep -x qbittorrent-nox >/dev/null 2>&1
+      rc=$?
+      (( rc == 1 )) && return 0
+      (( rc == 0 )) || return 1
+      sleep 1
+    done
+  fi
   return 1
+}
+
+ud_mount_holder_summary() {
+  local mountpoint=$1 output rc summary
+
+  output=$(
+    /usr/bin/timeout 3 \
+      /usr/bin/sudo /usr/bin/fuser -vmM "$mountpoint" 2>&1
+  )
+  rc=$?
+  if (( rc == 124 )); then
+    printf '%s\n' "userspace-holder scan timed out"
+    return 0
+  elif (( rc != 0 && rc != 1 )); then
+    printf '%s\n' "userspace-holder scan failed (fuser status $rc)"
+    return 0
+  fi
+
+  # fuser always reports the kernel's own mount entry. Keep only userspace
+  # rows, which contain the useful user, PID, access mode, and process name.
+  summary=$(
+    /usr/bin/awk '
+      NR == 1 || /kernel[[:space:]]+mount/ { next }
+      NF {
+        sub(/^[[:space:]]+/, "")
+        printf "%s%s", separator, $0
+        separator = "; "
+      }
+      END { if (separator != "") print "" }
+    ' <<< "$output"
+  )
+  printf '%s\n' "${summary:-no userspace mount holder identified}"
+}
+
+ud_sync_mount() {
+  local mountpoint=$1 output rc
+
+  output=$(
+    /usr/bin/sudo /usr/bin/timeout --kill-after=2 8 \
+      /usr/bin/sync -f -- "$mountpoint" 2>&1
+  )
+  rc=$?
+  if (( rc != 0 )); then
+    echo "WARNING: bounded sync failed for $mountpoint (status $rc): ${output:-no diagnostic output}" >&2
+    return 1
+  fi
+}
+
+ud_normal_unmount() {
+  /usr/bin/sudo /usr/bin/timeout --kill-after=2 10 \
+    /usr/bin/umount -- "$1"
+}
+
+ud_emergency_evict_mount_holders() {
+  local mountpoint=$1 before after output rc
+
+  before=$(ud_mount_holder_summary "$mountpoint")
+  echo "emergency holder scan for $mountpoint: $before"
+  output=$(
+    /usr/bin/sudo /usr/bin/timeout --kill-after=1 3 \
+      /usr/bin/fuser -k -TERM -mM "$mountpoint" 2>&1
+  )
+  rc=$?
+  if (( rc != 0 && rc != 1 )); then
+    echo "WARNING: TERM holder eviction failed for $mountpoint (status $rc): ${output:-no diagnostic output}" >&2
+  fi
+
+  sleep 2
+  after=$(ud_mount_holder_summary "$mountpoint")
+  if [[ "$after" == "no userspace mount holder identified" ]]; then
+    return 0
+  fi
+
+  echo "holders remain for $mountpoint after TERM: $after"
+  output=$(
+    /usr/bin/sudo /usr/bin/timeout --kill-after=1 3 \
+      /usr/bin/fuser -k -KILL -mM "$mountpoint" 2>&1
+  )
+  rc=$?
+  if (( rc != 0 && rc != 1 )); then
+    echo "WARNING: KILL holder eviction failed for $mountpoint (status $rc): ${output:-no diagnostic output}" >&2
+  fi
+  sleep 1
+}
+
+ud_emergency_stop_samba() {
+  local output rc attempt
+
+  echo "share-scoped Samba closure failed; stopping smbd globally"
+  output=$(
+    /usr/bin/sudo /usr/bin/timeout --kill-after=2 8 \
+      /usr/bin/systemctl stop smbd.service 2>&1
+  )
+  rc=$?
+  if (( rc != 0 )); then
+    echo "WARNING: graceful smbd stop failed (status $rc): ${output:-no diagnostic output}" >&2
+  fi
+
+  for attempt in {1..3}; do
+    /usr/bin/pgrep -x smbd >/dev/null 2>&1
+    rc=$?
+    (( rc == 1 )) && return 0
+    (( rc == 0 )) || return 1
+    sleep 1
+  done
+
+  echo "smbd processes remain; killing the smbd service cgroup"
+  /usr/bin/sudo /usr/bin/systemctl kill --kill-who=all --signal=KILL smbd.service \
+    >/dev/null 2>&1 || true
+  /usr/bin/sudo /usr/bin/pkill -KILL -x smbd >/dev/null 2>&1 || true
+  sleep 1
+  /usr/bin/pgrep -x smbd >/dev/null 2>&1
+  rc=$?
+  (( rc == 1 ))
 }
 
 ud_notify_failures() {
@@ -320,12 +460,15 @@ ud_notify_recovery() {
 }
 
 umount_disks_main() {
-  local dry_run=0 spindown=0 clear_state=0 all_labels=0 explicit_label=
+  local dry_run=0 spindown=0 emergency=0 clear_state=0 all_labels=0 explicit_label=
   local label arg rc expected_mount target
   local post_mounts all_mounts remaining_scsi_mounts
   local parent_name hd_idle_output
+  local share samba_names samba_output samba_detail line holder_summary
+  local drain_output unmount_output first_holders final_holders
   local needs_torrent_stop=0 had_preflight_failure=0 had_runtime_failure=0
-  local -a labels=() attached_labels=() mounted_labels=()
+  local -a labels=() attached_labels=() mounted_labels=() samba_shares=()
+  local -a abort_args=()
   local -A devices=() parents=() mounts=() unmount_failed=() spun_parents=()
 
   while (( $# )); do
@@ -334,6 +477,7 @@ umount_disks_main() {
     case "$arg" in
       --dry-run) dry_run=1 ;;
       --spindown) spindown=1 ;;
+      --emergency) emergency=1 ;;
       --all) all_labels=1 ;;
       --clear-spindown-state) clear_state=1 ;;
       --help|-h) ud_usage; return 0 ;;
@@ -349,7 +493,7 @@ umount_disks_main() {
   done
 
   if (( clear_state )); then
-    if (( dry_run || spindown || all_labels )) || [[ -n "$explicit_label" ]]; then
+    if (( dry_run || spindown || emergency || all_labels )) || [[ -n "$explicit_label" ]]; then
       ud_usage
       return 2
     fi
@@ -358,6 +502,11 @@ umount_disks_main() {
   fi
 
   if (( all_labels )) && { (( spindown )) || [[ -n "$explicit_label" ]]; }; then
+    ud_usage
+    return 2
+  fi
+  if (( emergency )) &&
+      { (( ! spindown || dry_run || all_labels )) || [[ -n "$explicit_label" ]]; }; then
     ud_usage
     return 2
   fi
@@ -439,33 +588,92 @@ umount_disks_main() {
   fi
 
   if (( ${#mounted_labels[@]} )); then
-    if ! /usr/bin/sudo /home/pi/scripts/backup/abort_backup.sh; then
+    for label in "${mounted_labels[@]}"; do
+      if share=$(disk_policy_samba_share_name "$label"); then
+        samba_shares+=("$share")
+      fi
+    done
+    samba_names=${samba_shares[0]:-none}
+    for share in "${samba_shares[@]:1}"; do
+      samba_names+=", $share"
+    done
+
+    # Block Finder and other clients from reconnecting between close-share and
+    # the actual unmount. The marker remains until mount_disks explicitly
+    # accepts the mounted filesystem again.
+    drain_output=$("$samba_share_control" drain "${mounted_labels[@]}" 2>&1)
+    rc=$?
+    [[ -z "$drain_output" ]] || printf '%s\n' "$drain_output"
+    if (( rc != 0 )); then
+      ud_record_failure "cannot drain Samba shares $samba_names; refusing to unmount disks"
+      ud_notify_failures "$(( spindown && ! dry_run ))"
+      return 1
+    fi
+
+    (( emergency )) && abort_args=(--emergency)
+    if ! /usr/bin/sudo /home/pi/scripts/backup/abort_backup.sh "${abort_args[@]}"; then
       ud_record_failure "backup/restore did not stop; refusing to unmount HDDs"
       ud_notify_failures "$(( spindown && ! dry_run ))"
       return 1
     fi
 
-    if (( needs_torrent_stop )) && ! ud_kill_torrent_client; then
+    if (( needs_torrent_stop )) && ! ud_kill_torrent_client "$emergency"; then
       ud_record_failure "qbittorrent-nox did not stop; refusing to unmount HDDs"
       ud_notify_failures "$(( spindown && ! dry_run ))"
       return 1
     fi
 
-    # Release handles only for the selected disks.  Per-share preexec gates in
-    # smb.conf deny reconnects after the exact labeled mount disappears, so
-    # unrelated shares remain online without exposing a bare mount directory.
-    if ! "$samba_share_control" close "${mounted_labels[@]}"; then
-      ud_record_failure "selected Samba shares did not close; refusing to unmount disks"
-      ud_notify_failures "$(( spindown && ! dry_run ))"
-      return 1
+    # Release handles only for the drained shares. In ignition emergency mode,
+    # a failed scoped close escalates to stopping Samba globally.
+    samba_output=$("$samba_share_control" close "${mounted_labels[@]}" 2>&1)
+    rc=$?
+    [[ -z "$samba_output" ]] || printf '%s\n' "$samba_output"
+    if (( rc != 0 )); then
+      if (( emergency )) && ud_emergency_stop_samba; then
+        echo "all smbd processes stopped; continuing emergency disk shutdown"
+      else
+        samba_detail=
+        while IFS= read -r line; do
+          if [[ "$line" == "ERROR: "* ]]; then
+            line=${line#ERROR: }
+            samba_detail+="${samba_detail:+; }$line"
+          fi
+        done <<< "$samba_output"
+        if [[ -n "$samba_detail" ]]; then
+          ud_record_failure "$samba_detail; disks remain mounted"
+        else
+          ud_record_failure "Samba shares $samba_names did not close; disks remain mounted"
+        fi
+        ud_notify_failures "$(( spindown && ! dry_run ))"
+        return 1
+      fi
     fi
   fi
 
   for label in "${mounted_labels[@]}"; do
     expected_mount="/mnt/$label"
+    first_holders=
+    final_holders=
+    ud_sync_mount "$expected_mount" || true
     echo "unmounting $label from $expected_mount"
-    if ! /usr/bin/sudo /usr/bin/umount -- "$expected_mount"; then
-      ud_record_failure "normal unmount failed for $label at $expected_mount"
+    unmount_output=$(ud_normal_unmount "$expected_mount" 2>&1)
+    rc=$?
+    if (( rc != 0 && emergency )); then
+      first_holders=$(ud_mount_holder_summary "$expected_mount")
+      echo "normal unmount failed for $label (status $rc): ${unmount_output:-no diagnostic output}"
+      ud_emergency_evict_mount_holders "$expected_mount" || true
+      ud_sync_mount "$expected_mount" || true
+      echo "retrying normal unmount for $label after emergency holder eviction"
+      unmount_output=$(ud_normal_unmount "$expected_mount" 2>&1)
+      rc=$?
+    fi
+    if (( rc != 0 )); then
+      final_holders=$(ud_mount_holder_summary "$expected_mount")
+      holder_summary=${first_holders:-$final_holders}
+      [[ "$final_holders" == "$holder_summary" ]] ||
+        holder_summary+="; remaining after escalation: $final_holders"
+      ud_record_failure \
+        "normal unmount failed for $label at $expected_mount (status $rc): ${unmount_output:-no diagnostic output}; holders: $holder_summary"
       unmount_failed[$label]=1
       had_runtime_failure=1
       continue
@@ -563,10 +771,12 @@ umount_disks_main() {
   (( had_runtime_failure == 0 ))
 }
 
-umount_disks_main "$@"
-umount_disks_rc=$?
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-  exit "$umount_disks_rc"
-else
-  return "$umount_disks_rc"
+if [[ "${UMOUNT_DISKS_LIBRARY_ONLY:-0}" != 1 ]]; then
+  umount_disks_main "$@"
+  umount_disks_rc=$?
+  if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    exit "$umount_disks_rc"
+  else
+    return "$umount_disks_rc"
+  fi
 fi

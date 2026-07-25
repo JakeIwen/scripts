@@ -21,6 +21,25 @@ export MOUNT_DISKS_LIBRARY_ONLY=1
 # shellcheck source=../../scripts/mount_disks.sh
 source "$repo_root/pi/scripts/mount_disks.sh"
 
+fake_samba_control="$test_root/samba-share-control"
+fake_samba_calls="$test_root/samba-calls"
+cat > "$fake_samba_control" <<EOF
+#!/bin/bash
+printf '%s\\n' "\$*" >> "$fake_samba_calls"
+EOF
+chmod +x "$fake_samba_control"
+md_samba_share_control="$fake_samba_control"
+
+md_clear_samba_drain movingparts ||
+  fail "mounted Samba disk could not clear its reconnect drain"
+assert_eq "clear movingparts" "$(cat "$fake_samba_calls")" \
+  "Samba drain clear did not use the exact filesystem label"
+: > "$fake_samba_calls"
+md_clear_samba_drain hfs2tb ||
+  fail "non-Samba disk was treated as a drain-clear failure"
+[[ ! -s "$fake_samba_calls" ]] ||
+  fail "non-Samba disk invoked Samba drain control"
+
 # The production target is GNU/Linux; macOS readlink lacks GNU's -f option.
 md_canonical_path() {
   printf '%s\n' "$1"

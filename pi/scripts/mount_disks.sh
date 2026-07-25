@@ -6,6 +6,7 @@ if ! . "$md_script_dir/disk_policy.sh"; then
   echo "ERROR: cannot load $md_script_dir/disk_policy.sh" >&2
   return 1 2>/dev/null || exit 1
 fi
+md_samba_share_control=${MOUNT_DISKS_SAMBA_SHARE_CONTROL:-"$md_script_dir/samba_share_control.sh"}
 
 # Set by md_resolve_label on success.
 MD_DEVICE=""
@@ -139,6 +140,17 @@ md_mount_source_is_live() {
 
   resolved_source="$(md_canonical_path "$source" 2>/dev/null)"
   [[ -n "$resolved_source" && -b "$resolved_source" ]]
+}
+
+md_clear_samba_drain() {
+  local label=$1
+
+  disk_policy_samba_share_name "$label" >/dev/null 2>&1 || return 0
+  if [[ ! -x "$md_samba_share_control" ]]; then
+    echo "ERROR: cannot clear Samba drain for $label: $md_samba_share_control is unavailable" >&2
+    return 1
+  fi
+  "$md_samba_share_control" clear "$label"
 }
 
 # Return the one source mounted at exactly this path.  Unlike findmnt -T, -M
@@ -402,7 +414,10 @@ mntdsk() {
 
   md_check_existing_mount "$label" "$pth" "$device"
   status=$?
-  (( status == 0 )) && return 0
+  if (( status == 0 )); then
+    md_clear_samba_drain "$label"
+    return $?
+  fi
   (( status == 1 )) || return 1
 
   mount_targets="$(/usr/bin/findmnt -rn -S "$device" -o TARGET 2>&1)"
@@ -451,7 +466,10 @@ mntdsk() {
   /usr/bin/sudo /usr/bin/install -d -m 0777 -o pi -g pi -- "$pth" || return 1
   md_check_existing_mount "$label" "$pth" "$device"
   status=$?
-  (( status == 0 )) && return 0
+  if (( status == 0 )); then
+    md_clear_samba_drain "$label"
+    return $?
+  fi
   (( status == 1 )) || return 1
 
   md_require_empty_mount_dir "$pth" || return 1
@@ -467,7 +485,10 @@ mntdsk() {
   # silently become an underlay between validation and the mount command.
   md_check_existing_mount "$label" "$pth" "$device"
   status=$?
-  (( status == 0 )) && return 0
+  if (( status == 0 )); then
+    md_clear_samba_drain "$label"
+    return $?
+  fi
   (( status == 1 )) || return 1
 
   echo "mounting exact $label_key '$label' from $device at $pth"
@@ -479,6 +500,7 @@ mntdsk() {
     echo "ERROR: mount command succeeded but $device is not mounted at $pth" >&2
     return 1
   fi
+  md_clear_samba_drain "$label" || return 1
   echo "mounted $label at $pth"
 }
 

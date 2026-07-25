@@ -322,9 +322,7 @@ mount_drives() {
   if [[ $(van_is_running) ]]; then
     echo "MOUNT interrupt: van is running, unmounting drives"
     echo "will not mount drives while ignition is on"
-    kill_torrent_client || return 1
-    stop_service smbd || return 1
-    unmount_drives
+    kill_all --emergency
     return 1
   else
     /home/pi/scripts/umount_disks.sh --clear-spindown-state || return 1
@@ -344,7 +342,7 @@ van_is_running() {
 }
 
 unmount_drives() {
-  /home/pi/scripts/umount_disks.sh --spindown
+  /home/pi/scripts/umount_disks.sh --spindown "$@"
 }
 
 stop_service() {
@@ -356,7 +354,20 @@ start_service() {
 }
 
 kill_all() {
+  local mode=${1:-}
+
   echo 'killing all'
+  if [[ "$mode" == --emergency ]]; then
+    # Ignition safety has a bounded graceful window, then umount_disks evicts
+    # exact remaining consumers and still requires a verified normal unmount
+    # before issuing the physical spindown command.
+    unmount_drives --emergency
+    return
+  elif [[ -n "$mode" ]]; then
+    echo "ERROR: unsupported HDD shutdown mode: $mode" >&2
+    return 2
+  fi
+
   kill_torrent_client || return 1
   # Ignition and disabled-HDD policy remove the whole HDD share set, so this
   # policy-level path intentionally takes Samba offline. Exact disk ejects and
@@ -370,15 +381,14 @@ set_isw_options() {
 
   echo ""
   echo "$(date)"
-  # Stale mounts are observed unsafe runtime state, not requested policy. Deal
-  # with them before any policy branch so a vanished device never remains
-  # exposed merely because ignition or the requested configuration changed.
-  recover_stale_mounts_if_needed || return 1
   # Ignition is observed safety state and always wins, even if requested
-  # policy is missing or corrupt.
+  # policy is missing or corrupt. Do not put ordinary stale-mount recovery
+  # ahead of this branch: its graceful consumer waits are intentionally longer
+  # than the bounded ignition shutdown. A vanished source has no attached HDD
+  # left to protect, and parked reconciliation can clean up its stale mount.
   if ignition_is_on; then
     echo "ignition is on; disabling and spinning down HDDs"
-    kill_all
+    kill_all --emergency
     shutdown_status=$?
     # Flash media remains available while driving. Run this even if HDD
     # shutdown reports a failure, but preserve both outcomes.
@@ -387,6 +397,10 @@ set_isw_options() {
     (( shutdown_status == 0 && always_mount_status == 0 ))
     return
   fi
+
+  # Stale mounts are unsafe runtime state, not requested policy. Recover them
+  # whenever parked, before exposing storage or applying requested policy.
+  recover_stale_mounts_if_needed || return 1
 
   # Always-available flash media is independent from requested HDD policy. A
   # flash-mount failure must not prevent the HDD/torrent policy from reaching

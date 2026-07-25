@@ -162,11 +162,19 @@ unset TEST_SAMBA_CONTROL_STATUS
 ACTION=""
 kill_torrent_client() { ACTION="${ACTION:+$ACTION }kill-torrent"; }
 stop_service() { ACTION="${ACTION:+$ACTION }stop:$1"; }
-unmount_drives() { ACTION="${ACTION:+$ACTION }unmount"; }
+unmount_drives() {
+  ACTION="${ACTION:+$ACTION }unmount${1:+:$1}"
+}
 
 kill_all >/dev/null 2>&1 || fail "all-HDD shutdown returned failure"
 assert_eq "kill-torrent stop:smbd unmount" "$ACTION" \
   "all-HDD shutdown must stop global Samba before unmounting"
+
+ACTION=""
+kill_all --emergency >/dev/null 2>&1 ||
+  fail "ignition emergency shutdown returned failure"
+assert_eq "unmount:--emergency" "$ACTION" \
+  "ignition emergency must delegate bounded consumer eviction to umount_disks"
 
 ACTION=""
 touch "$ISW_IGNITION_FLAG"
@@ -174,12 +182,16 @@ if mount_drives >/dev/null 2>&1; then
   fail "ignition-interrupted mount unexpectedly succeeded"
 fi
 rm "$ISW_IGNITION_FLAG"
-assert_eq "kill-torrent stop:smbd unmount" "$ACTION" \
-  "ignition-interrupted mount must stop global Samba before unmounting"
+assert_eq "unmount:--emergency" "$ACTION" \
+  "ignition-interrupted mount must use emergency disk shutdown"
 
 ACTION=""
 IO_ERROR=1
-recover_stale_mounts_if_needed() { return 0; }
+STALE_RECOVERY_INVOKED=0
+recover_stale_mounts_if_needed() {
+  STALE_RECOVERY_INVOKED=$((STALE_RECOVERY_INVOKED + 1))
+  return 0
+}
 mount_drives() { ACTION="${ACTION:+$ACTION }mount"; }
 mount_always_available_drives() {
   ACTION="${ACTION:+$ACTION }mount-always"
@@ -187,7 +199,7 @@ mount_always_available_drives() {
 }
 kill_torrent_client() { ACTION="${ACTION:+$ACTION }kill-torrent"; }
 start_torrent_client() { ACTION="${ACTION:+$ACTION }start-torrent"; }
-kill_all() { ACTION="${ACTION:+$ACTION }kill-all"; }
+kill_all() { ACTION="${ACTION:+$ACTION }kill-all${1:+:$1}"; }
 has_io_error() { return "$IO_ERROR"; }
 
 run_case() {
@@ -205,12 +217,17 @@ run_case() {
 touch "$ISW_IGNITION_FLAG"
 export TEST_COMPACT_POLICY="invalid"
 ACTION=""
+STALE_RECOVERY_INVOKED=0
 set_isw_options >/dev/null 2>&1 || fail "ignition override returned failure"
-assert_eq "kill-all mount-always" "$ACTION" \
+assert_eq "kill-all:--emergency mount-always" "$ACTION" \
   "ignition must spin down HDDs and reconcile flash before reading requested policy"
+assert_eq 0 "$STALE_RECOVERY_INVOKED" \
+  "ignition shutdown must not wait for ordinary stale-mount recovery"
 rm "$ISW_IGNITION_FLAG"
 
 run_case "disabled disks" "0 1 1" off 0 "mount-always kill-all"
+assert_eq 1 "$STALE_RECOVERY_INVOKED" \
+  "parked policy must recover stale mounts before reconciliation"
 run_case "globally disabled torrents" "1 0 1" off 0 "mount-always mount kill-torrent"
 run_case "explicit Starlink permission" "1 1 1" unknown 1 "mount-always mount start-torrent"
 [[ ! -e "$TEST_STARLINK_CALLS" ]] ||

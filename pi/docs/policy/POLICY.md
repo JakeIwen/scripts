@@ -51,12 +51,35 @@ running reconciliation. It alerts when a policy run holds the lock for more
 than two minutes. This check is deliberately independent because systemd
 coalesces attempts to start an already-running oneshot.
 
-Before applying requested policy, reconciliation checks every `MOUNT_LABELS`
-target for a kernel mount whose `/dev` source vanished during a USB reset or
-disconnect. It stops backup, torrent, and SMB consumers, revalidates the exact
-stale source, and attempts a bounded normal unmount. It never force-unmounts or
-lazy-detaches a filesystem. After successful cleanup, the ordinary exact-label
-mount logic can attach a re-enumerated device at the same target.
+While parked and before applying requested policy, reconciliation checks every
+`MOUNT_LABELS` target for a kernel mount whose `/dev` source vanished during a
+USB reset or disconnect. It stops backup, torrent, and SMB consumers,
+revalidates the exact stale source, and attempts a bounded normal unmount. It
+never force-unmounts or lazy-detaches a filesystem. After successful cleanup,
+the ordinary exact-label mount logic can attach a re-enumerated device at the
+same target. Ignition shutdown deliberately takes priority over this ordinary
+recovery so its longer graceful waits cannot delay HDD protection.
+
+Ignition shutdown uses a separate bounded emergency mode. It creates
+per-filesystem Samba drain markers before disconnecting the corresponding
+shares, so Finder or another SMB client cannot reconnect during the unmount
+window. Backup and qBittorrent processes receive a short graceful deadline,
+then only their exact lock holders or process names are killed. If scoped Samba
+closure fails, ignition shutdown stops the global `smbd` service and kills any
+remaining service processes.
+
+Each filesystem is synchronized and normally unmounted. If a normal unmount is
+still busy, the script records its userspace holders, sends TERM and then KILL
+through `fuser -mM` for that exact verified mountpoint, synchronizes again, and
+retries a normal unmount. Physical spindown remains conditional on verifying
+that the filesystem and every partition on its parent disk are unmounted.
+Emergency mode never uses force (`umount -f`) or lazy (`umount -l`) detach.
+Parked policy changes, dashboard ejects, and safe system power operations retain
+their non-emergency behavior.
+
+The Samba drain markers live under `/run` and therefore clear at reboot.
+`mount_disks.sh` explicitly clears the marker for an exact share after accepting
+or mounting its labeled filesystem.
 
 ## Commands and aliases
 
