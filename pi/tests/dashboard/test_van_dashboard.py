@@ -3251,6 +3251,22 @@ class DashboardRouteTests(unittest.TestCase):
             ],
         )
 
+    def test_compute_task_filter_degrades_when_metrics_reader_is_older(self):
+        class LegacyComputeMonitor:
+            pass
+
+        original = dashboard.compute_monitor
+        dashboard.compute_monitor = LegacyComputeMonitor()
+        try:
+            response = dashboard.app.test_client().get(
+                "/api/compute/jobs?hours=24&task=repo-tests"
+            )
+        finally:
+            dashboard.compute_monitor = original
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("matching van_compute metrics release", response.json["message"])
+
     def test_lighting_routes_are_authoritative_and_reject_unknown_inputs(self):
         calls = []
         status = {

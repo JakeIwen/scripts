@@ -40,7 +40,6 @@ try:
     from pi.van_compute.scripts.van_compute_metrics import (
         ComputeMetricsError,
         ComputeMetricsReader,
-        TASK_NAME_RE,
     )
 except ModuleNotFoundError:
     compute_scripts = os.environ.get(
@@ -51,9 +50,12 @@ except ModuleNotFoundError:
     from van_compute_metrics import (
         ComputeMetricsError,
         ComputeMetricsReader,
-        TASK_NAME_RE,
     )
 
+# Keep request validation local because the dashboard and van_compute use
+# intentionally separate deployment paths. The metrics reader applies the same
+# validation before reading queue data.
+COMPUTE_TASK_NAME_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
 
 PORT = int(os.environ.get("VAN_DASHBOARD_PORT", "8788"))
 STATE_PATH = os.path.expanduser(
@@ -4672,13 +4674,19 @@ def api_compute_jobs():
         return api_error(
             "compute metrics range must be 6, 24, 168, or 720 hours", 400
         )
-    if not TASK_NAME_RE.fullmatch(task):
+    if not COMPUTE_TASK_NAME_RE.fullmatch(task):
         return api_error(
             "compute task must use 1 to 64 lowercase letters, digits, or hyphens",
             400,
         )
+    task_reader = getattr(compute_monitor, "jobs_for_task", None)
+    if task_reader is None:
+        return api_error(
+            "compute task filtering requires the matching van_compute metrics release",
+            503,
+        )
     try:
-        payload = compute_monitor.jobs_for_task(hours, task)
+        payload = task_reader(hours, task)
     except ValueError as exc:
         return api_error(str(exc), 400)
     except (OSError, ComputeMetricsError) as exc:
