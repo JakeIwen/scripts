@@ -81,6 +81,15 @@ The Samba drain markers live under `/run` and therefore clear at reboot.
 `mount_disks.sh` explicitly clears the marker for an exact share after accepting
 or mounting its labeled filesystem.
 
+`vanpi-disk-health-watchdog.timer` checks always-mounted exFAT flash media once
+a minute. A readable but read-only filesystem remains available and requires an
+explicit dashboard repair. If two consecutive checks show that `pi` can neither
+read nor write an exact mounted filesystem, the watchdog runs the same
+label-only repair used by the dashboard: drain and unmount it, run automatic
+`fsck.exfat`, verify it clean, remount it with `pi` ownership, and probe it
+again. A failed filesystem check quarantines the label against remount/retry;
+failures before quarantine receive a 15-minute retry cooldown.
+
 ## Commands and aliases
 
 ```bash

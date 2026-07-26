@@ -399,7 +399,17 @@ mntdsk() {
   local device_disk
   local actual_label
   local mounted_target
+  local pi_uid pi_gid
   local -a mount_opts=()
+
+  disk_health_is_quarantined "$label"
+  status=$?
+  if (( status == 0 )); then
+    echo "ERROR: $label is quarantined after a failed filesystem check; repair it before mounting" >&2
+    return 1
+  elif (( status != 1 )); then
+    return 1
+  fi
 
   md_resolve_label "$label"
   resolve_status=$?
@@ -460,6 +470,10 @@ mntdsk() {
   if [[ "$fstype" == "hfsplus" ]]; then
     mount_opts=(-o force,rw)
   elif [[ "$fstype" == "exfat" ]]; then
+    pi_uid=$(/usr/bin/id -u pi) || return 1
+    pi_gid=$(/usr/bin/id -g pi) || return 1
+    [[ "$pi_uid" =~ ^[0-9]+$ && "$pi_gid" =~ ^[0-9]+$ ]] || return 1
+    mount_opts=(-o "uid=$pi_uid,gid=$pi_gid,fmask=0022,dmask=0022")
     /usr/bin/sudo /usr/sbin/modprobe fuse || return 1
   fi
 

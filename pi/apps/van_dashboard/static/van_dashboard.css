@@ -1273,6 +1273,17 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   background: #32272a;
   color: #f3c1bc;
 }
+.disk-device-action.repair {
+  border-color: #75643f;
+  background: #332f24;
+  color: #edd79f;
+}
+.disk-device-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
 .disk-device-action:disabled {
   cursor: default;
   opacity: 0.5;

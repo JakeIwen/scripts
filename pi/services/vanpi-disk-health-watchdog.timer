@@ -1,0 +1,11 @@
+[Unit]
+Description=Check always-mounted flash filesystems for unusable mounts
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=1min
+AccuracySec=10s
+Unit=vanpi-disk-health-watchdog.service
+
+[Install]
+WantedBy=timers.target

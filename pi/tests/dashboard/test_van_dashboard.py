@@ -1,6 +1,7 @@
 import copy
 import json
 import os
+import sqlite3
 import subprocess
 import tempfile
 import threading
@@ -1151,6 +1152,82 @@ HDD_LABELS=(
         self.assertTrue(bigboi["requires_disk_policy"])
         self.assertTrue(bigboi["controllable"])
         self.assertTrue(bigboi["attached"])
+
+    def test_health_maps_captured_storage_errors_and_honors_later_clean_check(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            database = os.path.join(tempdir, "events.sqlite3")
+            health_dir = os.path.join(tempdir, "health")
+            os.mkdir(health_dir)
+            connection = sqlite3.connect(database)
+            connection.execute(
+                """
+                CREATE TABLE events (
+                    timestamp REAL,
+                    category TEXT,
+                    severity TEXT,
+                    message TEXT,
+                    state_json TEXT
+                )
+                """
+            )
+            connection.execute(
+                "INSERT INTO events VALUES (?, ?, ?, ?, ?)",
+                (
+                    950,
+                    "storage",
+                    "critical",
+                    "EXT4-fs (sda1): test I/O error",
+                    json.dumps(
+                        {
+                            "disk_io": {
+                                "devices": [
+                                    {"name": "sda", "labels": ["movingparts"]}
+                                ]
+                            }
+                        }
+                    ),
+                ),
+            )
+            connection.commit()
+            connection.close()
+
+            def command(args, timeout):
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(self.lsblk(movingparts_mounted=False)),
+                    stderr="",
+                )
+
+            manager = self.manager(
+                tempdir,
+                command,
+                health_dir=health_dir,
+                event_database=database,
+            )
+            disk = manager.status()["disks"][0]
+            self.assertEqual(disk["health"]["state"], "critical")
+            self.assertEqual(disk["health"]["recent_error_count"], 1)
+            self.assertIn("test I/O error", disk["health"]["message"])
+
+            with open(
+                os.path.join(health_dir, "movingparts.json"),
+                "w",
+                encoding="utf-8",
+            ) as handle:
+                json.dump(
+                    {
+                        "version": 1,
+                        "label": "movingparts",
+                        "state": "healthy",
+                        "message": "Filesystem verified clean",
+                        "checked_at": 960,
+                    },
+                    handle,
+                )
+            disk = manager.status()["disks"][0]
+            self.assertEqual(disk["health"]["state"], "healthy")
+            self.assertEqual(disk["health"]["recent_error_count"], 0)
+            self.assertEqual(disk["health"]["historical_error_count"], 1)
 
     def test_always_mount_labels_must_be_automatic_mount_labels(self):
         invalid = self.CONFIG.replace(

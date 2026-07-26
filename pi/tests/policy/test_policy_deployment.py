@@ -24,6 +24,27 @@ class PolicyDeploymentTests(unittest.TestCase):
         self.assertIn("OnUnitActiveSec=1min", watchdog_timer)
         self.assertIn("Unit=vanpi-policy-watchdog.service", watchdog_timer)
 
+    def test_disk_health_watchdog_is_bounded_and_periodic(self):
+        service = (
+            REPOSITORY_ROOT
+            / "pi"
+            / "services"
+            / "vanpi-disk-health-watchdog.service"
+        ).read_text(encoding="utf-8")
+        timer = (
+            REPOSITORY_ROOT
+            / "pi"
+            / "services"
+            / "vanpi-disk-health-watchdog.timer"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            "ExecStart=/home/pi/scripts/disk_health_watchdog.sh", service
+        )
+        self.assertIn("TimeoutStartSec=35min", service)
+        self.assertIn("OnUnitInactiveSec=1min", timer)
+        self.assertIn("Unit=vanpi-disk-health-watchdog.service", timer)
+
     def test_failed_legacy_cron_jobs_are_absent(self):
         crontab = (REPOSITORY_ROOT / "pi" / "crontab").read_text(encoding="utf-8")
 

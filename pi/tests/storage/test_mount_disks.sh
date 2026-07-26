@@ -21,6 +21,19 @@ export MOUNT_DISKS_LIBRARY_ONLY=1
 # shellcheck source=../../scripts/mount_disks.sh
 source "$repo_root/pi/scripts/mount_disks.sh"
 
+DISK_HEALTH_STATE_DIR="$test_root/disk-health"
+export DISK_HEALTH_STATE_DIR
+mkdir -p "$DISK_HEALTH_STATE_DIR/quarantine"
+touch "$DISK_HEALTH_STATE_DIR/quarantine/movingparts"
+output=$(mntdsk movingparts 2>&1)
+status=$?
+assert_eq 1 "$status" "quarantined filesystem was accepted for mounting"
+[[ "$output" == *"quarantined after a failed filesystem check"* ]] ||
+  fail "quarantine refusal was not actionable"
+rm "$DISK_HEALTH_STATE_DIR/quarantine/movingparts"
+grep -Fq 'fmask=0022,dmask=0022' "$repo_root/pi/scripts/mount_disks.sh" ||
+  fail "exFAT mount does not grant the pi owner usable permissions"
+
 fake_samba_control="$test_root/samba-share-control"
 fake_samba_calls="$test_root/samba-calls"
 cat > "$fake_samba_control" <<EOF

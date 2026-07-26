@@ -1,0 +1,17 @@
+[Unit]
+Description=Repair wholly unusable always-mounted vanpi flash filesystems
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=pi
+WorkingDirectory=/home/pi
+Environment=HOME=/home/pi
+ExecStart=/home/pi/scripts/disk_health_watchdog.sh
+TimeoutStartSec=35min
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vanpi-disk-health
+
+[Install]
+WantedBy=multi-user.target

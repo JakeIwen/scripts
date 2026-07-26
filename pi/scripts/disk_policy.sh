@@ -51,6 +51,7 @@ disk_policy_samba_share_name() {
 # reconciliation skips that exact label until its absolute deadline. Runtime
 # state lives under /run so a reboot always clears the hold.
 DISK_EJECT_HOLD_DIR=${DISK_EJECT_HOLD_DIR:-/run/lock/vanpi-disk-eject}
+DISK_HEALTH_STATE_DIR=${DISK_HEALTH_STATE_DIR:-/var/lib/vanpi-disk-health}
 
 disk_policy_is_mount_label() {
   local wanted=$1 label
@@ -154,4 +155,21 @@ disk_eject_hold_clear() {
   disk_policy_is_mount_label "$label" || return 1
   marker="$DISK_EJECT_HOLD_DIR/$label"
   [[ ! -e "$marker" && ! -L "$marker" ]] || /bin/rm -f -- "$marker"
+}
+
+disk_health_quarantine_marker() {
+  printf '%s/quarantine/%s\n' "$DISK_HEALTH_STATE_DIR" "$1"
+}
+
+disk_health_is_quarantined() {
+  local label=$1 marker
+  disk_policy_is_control_label "$label" || return 2
+  marker=$(disk_health_quarantine_marker "$label") || return 2
+  if [[ -L "$DISK_HEALTH_STATE_DIR" ||
+        -L "$DISK_HEALTH_STATE_DIR/quarantine" ||
+        -L "$marker" ]]; then
+    echo "ERROR: unsafe disk-health quarantine state for $label" >&2
+    return 2
+  fi
+  [[ -e "$marker" ]]
 }

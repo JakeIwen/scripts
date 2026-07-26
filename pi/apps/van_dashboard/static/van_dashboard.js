@@ -2336,11 +2336,20 @@ function diskState(disk, operation) {
   if (running) {
     return {
       className: '',
-      label: operation.action === 'eject' ? 'UNMOUNTING…' : 'MOUNTING…',
+      label:
+        operation.action === 'eject'
+          ? 'UNMOUNTING…'
+          : operation.action === 'repair'
+            ? 'REPAIRING…'
+            : 'MOUNTING…',
       holdSeconds,
     };
   }
   if (disk.error) return { className: 'bad', label: 'ERROR', holdSeconds: 0 };
+  if (disk.health?.state === 'critical')
+    return { className: 'bad', label: 'HEALTH ERROR', holdSeconds: 0 };
+  if (disk.health?.state === 'warning')
+    return { className: 'held', label: 'WARNING', holdSeconds: 0 };
   if (!disk.attached) return { className: '', label: 'NO DEVICE', holdSeconds: 0 };
   if (disk.mounted) return { className: 'good', label: 'MOUNTED', holdSeconds: 0 };
   if (holdSeconds)
@@ -2351,6 +2360,7 @@ function diskDetail(disk, state) {
   if (disk.error) return disk.error;
   if (!disk.attached) return `Not attached · expects ${disk.expected_mount}`;
   const details = [];
+  if (disk.health?.message) details.push(disk.health.message);
   if (Number.isFinite(disk.size_bytes)) details.push(formatBytes(disk.size_bytes));
   if (disk.filesystem) details.push(disk.filesystem);
   if (disk.mounted) details.push(disk.expected_mount);
@@ -2365,16 +2375,24 @@ function renderDiskStatus(next) {
   if (operation.status === 'running') {
     diskRunningOperation = operationKey;
     operationLabel.textContent =
-      `${operation.action === 'eject' ? 'Unmounting' : 'Mounting'} ${operation.label}…`;
+      `${operation.action === 'eject' ? 'Unmounting' : operation.action === 'repair' ? 'Repairing' : 'Mounting'} ${operation.label}…`;
   } else if (operation.status === 'error') {
     operationLabel.textContent = `${operation.label || 'Disk action'} failed`;
     if (diskRunningOperation === operationKey) toast(operation.error || 'Disk action failed', true);
     if (diskRunningOperation === operationKey) diskRunningOperation = '';
   } else if (operation.status === 'complete') {
     operationLabel.textContent =
-      `${operation.action === 'eject' ? 'Unmounted' : 'Mounted'} ${operation.label} · ${age(operation.completed_at)}`;
+      `${operation.action === 'eject' ? 'Unmounted' : operation.action === 'repair' ? 'Repaired' : 'Mounted'} ${operation.label} · ${age(operation.completed_at)}`;
     if (diskRunningOperation === operationKey) {
-      toast(`${operation.label} ${operation.action === 'eject' ? 'unmounted' : 'mounted'}`);
+      toast(
+        `${operation.label} ${
+          operation.action === 'eject'
+            ? 'unmounted'
+            : operation.action === 'repair'
+              ? 'repaired and verified'
+              : 'mounted'
+        }`,
+      );
       diskRunningOperation = '';
     }
   } else {
@@ -2399,8 +2417,15 @@ function renderDiskStatus(next) {
               action === 'mount' && !policyAllowsMount
                 ? 'Enable the HDDs policy before mounting'
                 : `${action === 'eject' ? 'Safely unmount' : 'Mount'} ${disk.label}`,
+            repairAllowed =
+              disk.health?.repairable === true &&
+              operation.status !== 'running' &&
+              !diskBusy,
+            repairControl = disk.health?.repairable
+              ? `<button class="disk-device-action repair" type="button" data-disk-action="repair" data-disk-label="${esc(disk.label)}" title="Safely repair and verify ${esc(disk.label)}" ${repairAllowed ? '' : 'disabled'}>Repair</button>`
+              : '',
             control = disk.controllable
-              ? `<button class="disk-device-action ${action}" type="button" data-disk-action="${action}" data-disk-label="${esc(disk.label)}" title="${esc(actionTitle)}" ${actionAllowed ? '' : 'disabled'}>${action === 'eject' ? 'Unmount' : 'Mount'}</button>`
+              ? `<span class="disk-device-controls"><button class="disk-device-action ${action}" type="button" data-disk-action="${action}" data-disk-label="${esc(disk.label)}" title="${esc(actionTitle)}" ${actionAllowed ? '' : 'disabled'}>${action === 'eject' ? 'Unmount' : 'Mount'}</button>${repairControl}</span>`
               : '<span class="disk-device-role">Backup-managed</span>',
             holdData = state.holdSeconds
               ? ` data-disk-hold-until="${Number(disk.hold_until)}"`
@@ -2451,13 +2476,21 @@ async function changeDiskAction(button) {
       disk?.automatic_mount
         ? 'Automatic mounting will resume in one minute.'
         : 'It will stay unmounted until requested here or by the backup tools.';
-  if (
-    actionName === 'eject' &&
-    !window.confirm(
-      `Unmount ${label}? Active disk users will be stopped safely. ${unmountResult}`,
+  if (actionName === 'eject') {
+    if (
+      !window.confirm(
+        `Unmount ${label}? Active disk users will be stopped safely. ${unmountResult}`,
+      )
     )
-  )
+      return;
+  } else if (
+    actionName === 'repair' &&
+    !window.confirm(
+      `Repair ${label}? This will disconnect disk users, safely unmount it, modify the filesystem to repair detected errors, verify it read-only, and remount only if verification succeeds.`,
+    )
+  ) {
     return;
+  }
   diskBusy = true;
   if (diskStatus) renderDiskStatus(diskStatus);
   let actionError = null;

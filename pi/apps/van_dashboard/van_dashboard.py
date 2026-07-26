@@ -24,6 +24,7 @@ import os
 import plistlib
 import re
 import shlex
+import sqlite3
 import socket
 import struct
 import subprocess
@@ -142,8 +143,11 @@ DISKCTL = os.environ.get("VAN_DASHBOARD_DISKCTL", "/home/pi/scripts/diskctl")
 DISK_EJECT_HOLD_DIR = os.environ.get(
     "VAN_DASHBOARD_DISK_EJECT_HOLD_DIR", "/run/lock/vanpi-disk-eject"
 )
+DISK_HEALTH_STATE_DIR = os.environ.get(
+    "VAN_DASHBOARD_DISK_HEALTH_STATE_DIR", "/var/lib/vanpi-disk-health"
+)
 DISK_STATUS_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_DISK_STATUS_TIMEOUT", "10"))
-DISK_ACTION_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_DISK_ACTION_TIMEOUT", "150"))
+DISK_ACTION_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_DISK_ACTION_TIMEOUT", "1800"))
 SAFE_REBOOT = os.environ.get(
     "VAN_DASHBOARD_SAFE_REBOOT", "/home/pi/scripts/safe_reboot.sh"
 )
@@ -3521,6 +3525,8 @@ class DiskManager:
         config=DISK_POLICY_CONF,
         control=DISKCTL,
         hold_dir=DISK_EJECT_HOLD_DIR,
+        health_dir=DISK_HEALTH_STATE_DIR,
+        event_database=SYSTEM_MONITOR_DB,
         command=run_command,
         timeout=DISK_STATUS_TIMEOUT,
         action_timeout=DISK_ACTION_TIMEOUT,
@@ -3529,6 +3535,8 @@ class DiskManager:
         self.config = config
         self.control = control
         self.hold_dir = hold_dir
+        self.health_dir = health_dir
+        self.event_database = event_database
         self.command = command
         self.timeout = timeout
         self.action_timeout = action_timeout
@@ -3650,6 +3658,130 @@ class DiskManager:
             points = [row.get("mountpoint")]
         return [point for point in points if isinstance(point, str) and point]
 
+    def _saved_health(self, label):
+        path = os.path.join(self.health_dir, f"{label}.json")
+        try:
+            if os.path.islink(path):
+                raise DiskCommandError("unsafe disk-health state")
+            with open(path, encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError) as exc:
+            raise DiskCommandError(f"could not read disk health for {label}: {exc}") from exc
+        if (
+            not isinstance(payload, dict)
+            or payload.get("version") != 1
+            or payload.get("label") != label
+            or payload.get("state") not in ("checking", "healthy", "warning", "critical")
+            or not isinstance(payload.get("message"), str)
+            or not isinstance(payload.get("checked_at"), int)
+            or isinstance(payload.get("checked_at"), bool)
+        ):
+            raise DiskCommandError(f"disk health for {label} has an invalid schema")
+        return payload
+
+    def _storage_events(self, labels, since):
+        mapped = {label: [] for label in labels}
+        try:
+            absolute = os.path.abspath(self.event_database)
+            uri = f"file:{absolute.replace('?', '%3f').replace('#', '%23')}?mode=ro"
+            connection = sqlite3.connect(uri, uri=True, timeout=2)
+            connection.row_factory = sqlite3.Row
+            try:
+                rows = connection.execute(
+                    """
+                    SELECT timestamp, severity, message, state_json
+                    FROM events
+                    WHERE category = 'storage' AND timestamp >= ?
+                    ORDER BY timestamp DESC
+                    LIMIT 2000
+                    """,
+                    (since,),
+                ).fetchall()
+            finally:
+                connection.close()
+        except (OSError, sqlite3.Error):
+            return mapped, "Storage event history unavailable"
+
+        wanted = set(labels)
+        for row in rows:
+            message = str(row["message"])
+            device_match = re.search(
+                r"\b((?:sd[a-z][0-9]*|mmcblk[0-9]+p?[0-9]*))(?:-[0-9]+)?\b",
+                message,
+                re.IGNORECASE,
+            )
+            if not device_match:
+                continue
+            event_device = device_match.group(1).lower()
+            if event_device.startswith("mmcblk"):
+                event_parent = re.sub(r"p[0-9]+$", "", event_device)
+            else:
+                event_parent = re.sub(r"[0-9]+$", "", event_device)
+            try:
+                state = json.loads(row["state_json"] or "{}")
+            except (TypeError, ValueError):
+                continue
+            event_labels = set()
+            disk_io = state.get("disk_io") if isinstance(state, dict) else None
+            devices = disk_io.get("devices") if isinstance(disk_io, dict) else None
+            for device in devices if isinstance(devices, list) else ():
+                if not isinstance(device, dict):
+                    continue
+                device_name = str(device.get("name") or "").lower()
+                if device_name not in (event_device, event_parent):
+                    continue
+                device_labels = device.get("labels")
+                if isinstance(device_labels, list):
+                    event_labels.update(
+                        label for label in device_labels if isinstance(label, str)
+                    )
+            for label in event_labels & wanted:
+                mapped[label].append(
+                    {
+                        "timestamp": int(row["timestamp"]),
+                        "severity": row["severity"],
+                        "message": message[:500],
+                    }
+                )
+        return mapped, None
+
+    @staticmethod
+    def _mount_health(label, mounted, expected_mount):
+        if not mounted:
+            return {
+                "read_only": None,
+                "accessible": None,
+                "writable": None,
+                "error": None,
+            }
+        try:
+            flags = os.statvfs(expected_mount).f_flag
+            read_only = bool(flags & getattr(os, "ST_RDONLY", 1))
+            accessible = os.access(expected_mount, os.R_OK | os.X_OK)
+            writable = os.access(expected_mount, os.W_OK | os.X_OK)
+        except OSError as exc:
+            return {
+                "read_only": None,
+                "accessible": False,
+                "writable": False,
+                "error": f"Cannot inspect mounted filesystem: {exc}",
+            }
+        error = None
+        if read_only:
+            error = "Filesystem is mounted read-only"
+        elif not accessible:
+            error = "Mounted filesystem is not accessible by dashboard user"
+        elif not writable:
+            error = "Mounted filesystem is not writable by dashboard user"
+        return {
+            "read_only": read_only,
+            "accessible": accessible,
+            "writable": writable,
+            "error": error,
+        }
+
     def status(self):
         now = int(self.wall_clock())
         configuration = self._configuration()
@@ -3657,6 +3789,9 @@ class DiskManager:
         mount_labels = set(configuration["mount_labels"])
         always_mount_labels = set(configuration["always_mount_labels"])
         controllable_labels = set(configuration["controllable_labels"])
+        storage_events, event_error = self._storage_events(
+            configuration["labels"], now - 7 * 24 * 60 * 60
+        )
         disks = []
         for label in configuration["labels"]:
             matches = [
@@ -3686,6 +3821,33 @@ class DiskManager:
                 error = hold["error"]
             attached = row is not None
             mounted = expected_mount in mounts
+            saved_health = self._saved_health(label)
+            checked_at = saved_health["checked_at"] if saved_health else None
+            events = storage_events.get(label, [])
+            active_events = [
+                event
+                for event in events
+                if checked_at is None or event["timestamp"] > checked_at
+            ]
+            mount_health = self._mount_health(label, mounted, expected_mount)
+            if mount_health["error"]:
+                health_state = "critical"
+                health_message = mount_health["error"]
+            elif active_events:
+                health_state = "critical"
+                health_message = active_events[0]["message"]
+            elif saved_health:
+                health_state = saved_health["state"]
+                health_message = saved_health["message"]
+            elif event_error:
+                health_state = "unknown"
+                health_message = event_error
+            elif attached:
+                health_state = "unknown"
+                health_message = "No offline filesystem check has been recorded"
+            else:
+                health_state = "unknown"
+                health_message = "Disk is not attached"
             disks.append(
                 {
                     "label": label,
@@ -3707,6 +3869,23 @@ class DiskManager:
                     "hold_until": hold["until"],
                     "hold_remaining_seconds": hold["remaining_seconds"],
                     "error": error,
+                    "health": {
+                        "state": health_state,
+                        "message": health_message,
+                        "checked_at": checked_at,
+                        "read_only": mount_health["read_only"],
+                        "accessible": mount_health["accessible"],
+                        "writable": mount_health["writable"],
+                        "recent_error_count": len(active_events),
+                        "historical_error_count": len(events),
+                        "latest_error_at": events[0]["timestamp"] if events else None,
+                        "latest_error": events[0]["message"] if events else None,
+                        "repairable": (
+                            attached
+                            and row.get("fstype") == "exfat"
+                            and label in always_mount_labels
+                        ),
+                    },
                 }
             )
         with self.lock:
@@ -3717,7 +3896,7 @@ class DiskManager:
         configuration = self._configuration()
         if label not in configuration["controllable_labels"]:
             raise ValueError("unknown controllable disk label")
-        if action not in ("eject", "mount"):
+        if action not in ("eject", "mount", "repair"):
             raise ValueError("unknown disk action")
         current = self.status()
         disk = next(item for item in current["disks"] if item["label"] == label)
@@ -3729,6 +3908,8 @@ class DiskManager:
             raise DiskCommandError(f"{label} is not mounted")
         if action == "mount" and disk["mounted"]:
             raise DiskCommandError(f"{label} is already mounted")
+        if action == "repair" and not disk["health"]["repairable"]:
+            raise DiskCommandError(f"{label} does not support automatic repair")
         with self.lock:
             if self.operation["status"] == "running":
                 raise DiskCommandError("another disk action is already running")
@@ -4016,7 +4197,7 @@ def api_disk_action():
         {
             "ok": True,
             "message": (
-                f"{'Unmount' if request.form['action'] == 'eject' else 'Mount'} "
+                f"{'Unmount' if request.form['action'] == 'eject' else 'Filesystem repair' if request.form['action'] == 'repair' else 'Mount'} "
                 f"started for {request.form['label']}"
             ),
             "disk_status": status,

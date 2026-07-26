@@ -108,4 +108,124 @@ run_diskctl mount EXFAT512 >/dev/null || fail "ignition blocked always-mounted f
 [[ ! -e "$hold_dir/EXFAT512" ]] || fail "ignition-time flash remount did not clear hold"
 [[ $(cat "$calls") == "mount EXFAT512" ]] || fail "ignition-time flash mount was not exact"
 
+rm "$test_root/ignition"
+: > "$calls"
+repair_root="$test_root/repair"
+health_dir="$repair_root/health"
+mount_root="$repair_root/mnt"
+fake_device="$repair_root/exfat-device"
+fake_parent="$repair_root/exfat-parent"
+mkdir -p "$mount_root/EXFAT512"
+touch "$fake_device" "$fake_parent"
+
+fake_sudo="$repair_root/sudo"
+fake_blkid="$repair_root/blkid"
+fake_readlink="$repair_root/readlink"
+fake_lsblk="$repair_root/lsblk"
+fake_findmnt="$repair_root/findmnt"
+fake_fsck="$repair_root/fsck.exfat"
+fake_install="$repair_root/install"
+fake_timeout="$repair_root/timeout"
+
+cat > "$fake_sudo" <<'EOF'
+#!/bin/bash
+"$@"
+EOF
+cat > "$fake_blkid" <<EOF
+#!/bin/bash
+case "\$*" in
+  *"-t LABEL=EXFAT512 -o device"*) printf '%s\\n' "$fake_device" ;;
+  *"-s LABEL -o value"*) printf '%s\\n' EXFAT512 ;;
+  *"-s TYPE -o value"*) printf '%s\\n' exfat ;;
+  *) exit 2 ;;
+esac
+EOF
+cat > "$fake_readlink" <<EOF
+#!/bin/bash
+printf '%s\\n' "$fake_device"
+EOF
+cat > "$fake_lsblk" <<EOF
+#!/bin/bash
+if [[ "\$*" == *"-s -nrpo NAME,TYPE"* ]]; then
+  printf '%s part\\n%s disk\\n' "$fake_device" "$fake_parent"
+elif [[ "\$*" == *"-dnro TRAN"* ]]; then
+  printf '%s\\n' usb
+else
+  exit 2
+fi
+EOF
+cat > "$fake_findmnt" <<EOF
+#!/bin/bash
+if [[ "\$*" == *"-S $fake_device"* ]]; then
+  exit 1
+elif [[ "\$*" == *"-M $mount_root/EXFAT512"* ]]; then
+  printf '%s\\n' "$fake_device"
+else
+  exit 2
+fi
+EOF
+cat > "$fake_fsck" <<EOF
+#!/bin/bash
+printf 'fsck %s\\n' "\$*" >> "$calls"
+printf '%s\\n' 'exFAT filesystem is clean'
+EOF
+cat > "$fake_install" <<'EOF'
+#!/bin/bash
+if [[ " $* " == *" -d "* ]]; then
+  mkdir -p "${!#}"
+else
+  target=${!#}
+  source=${@: -2:1}
+  mkdir -p "$(dirname "$target")"
+  cp "$source" "$target"
+fi
+EOF
+cat > "$fake_timeout" <<'EOF'
+#!/bin/bash
+shift
+"$@"
+EOF
+chmod +x "$fake_sudo" "$fake_blkid" "$fake_readlink" "$fake_lsblk" \
+  "$fake_findmnt" "$fake_fsck" "$fake_install" "$fake_timeout"
+
+DISK_EJECT_HOLD_DIR="$hold_dir" DISK_EJECT_NOW=1000000 \
+DISK_HEALTH_STATE_DIR="$health_dir" \
+DISKCTL_UNMOUNT_DISKS="$fake_unmount" \
+DISKCTL_MOUNT_DISKS="$fake_mount" \
+DISKCTL_IGNITION_FLAG="$test_root/ignition" \
+DISKCTL_LIFECYCLE_LOCK="$test_root/lifecycle.lock" \
+DISKCTL_FLOCK="$fake_flock" \
+DISKCTL_SUDO="$fake_sudo" \
+DISKCTL_BLKID="$fake_blkid" \
+DISKCTL_FINDMNT="$fake_findmnt" \
+DISKCTL_READLINK="$fake_readlink" \
+DISKCTL_LSBLK="$fake_lsblk" \
+DISKCTL_FSCK_EXFAT="$fake_fsck" \
+DISKCTL_PYTHON="$(command -v python3)" \
+DISKCTL_INSTALL="$fake_install" \
+DISKCTL_RM=/bin/rm \
+DISKCTL_TOUCH=/usr/bin/touch \
+DISKCTL_DATE=/bin/date \
+DISKCTL_MKTEMP=/usr/bin/mktemp \
+DISKCTL_MOUNT_ROOT="$mount_root" \
+DISKCTL_REQUIRE_BLOCK_DEVICE=0 \
+DISKCTL_TIMEOUT="$fake_timeout" \
+bash "$repo_root/pi/scripts/diskctl" repair EXFAT512 >/dev/null ||
+  fail "verified exFAT repair workflow failed"
+
+expected_repair_calls=$'unmount EXFAT512\nfsck -p -- '"$fake_device"$'\nfsck -n -- '"$fake_device"$'\nmount EXFAT512'
+[[ $(cat "$calls") == "$expected_repair_calls" ]] ||
+  fail "repair did not unmount, repair, verify, and remount in order"
+[[ ! -e "$health_dir/quarantine/EXFAT512" ]] ||
+  fail "successful repair left the filesystem quarantined"
+python3 - "$health_dir/EXFAT512.json" <<'PY' ||
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    payload = json.load(handle)
+assert payload["label"] == "EXFAT512"
+assert payload["state"] == "healthy"
+PY
+  fail "successful repair did not record healthy state"
+
 echo "PASS: diskctl label, hold, policy, and ignition safeguards"
