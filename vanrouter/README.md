@@ -40,6 +40,17 @@ The apply operation waits for both the 5 GHz client and new AP to become
 operational. If that does not happen, it deletes only `dendelion_5g`, commits
 the rollback, and reloads `radio1`.
 
+After the AP is operational, enable Wi-Fi 6 with an 80 MHz channel and run the
+same AP/STA recovery canary:
+
+```sh
+./vanrouter/deploy-5ghz-ap.sh --optimize
+```
+
+Optimization changes only `radio1.htmode` to `HE80`. If the AP and client do
+not both recover, or the deployment shell disconnects, the helper restores the
+previous mode and reloads only `radio1`.
+
 Inspect or deliberately remove the added section:
 
 ```sh

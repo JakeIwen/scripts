@@ -26,6 +26,7 @@ source_radio=radio0
 target_radio=radio1
 source_network=lan
 client_network=clientwan
+target_htmode=HE80
 
 log() {
 	"$LOGGER" -t "$tag" "$1" 2>/dev/null || true
@@ -127,6 +128,18 @@ check_live_layout() {
 		|| fail "wl1 does not advertise AP-mode concurrency"
 }
 
+check_target_ap_layout() {
+	[ "$(uci_get "wireless.$target_ap")" = wifi-iface ] \
+		|| fail "wireless section $target_ap is not installed"
+	[ "$(uci_get "wireless.$target_ap.mode")" = ap ] \
+		|| fail "$target_ap is not an AP"
+	[ "$(uci_get "wireless.$target_ap.device")" = "$target_radio" ] \
+		|| fail "$target_ap is not attached to $target_radio"
+	target_networks=$(uci_get "wireless.$target_ap.network")
+	contains_word "$target_networks" "$source_network" \
+		|| fail "$target_ap is not attached to $source_network"
+}
+
 radio1_is_ready() {
 	radio_up=$(wireless_status_value '@.radio1.up' || true)
 	[ "$radio_up" = true ] || return 1
@@ -216,6 +229,20 @@ rollback_pending_change() {
 	exit "$status"
 }
 
+rollback_radio_mode() {
+	status=$?
+	trap - 0 HUP INT TERM
+	if [ "${radio_rollback_pending:-no}" = yes ]; then
+		"$UCI" set "wireless.$target_radio.htmode=$previous_htmode"
+		"$UCI" commit wireless
+		"$WIFI" reload "$target_radio" >/dev/null 2>&1 || true
+		log "restored $target_radio htmode to $previous_htmode"
+		printf '%s\n' \
+			"Optimization failed; restored $target_radio htmode to $previous_htmode." >&2
+	fi
+	exit "$status"
+}
+
 apply_config() {
 	preflight
 
@@ -248,19 +275,45 @@ apply_config() {
 		"Enabled $target_ap on $target_radio; $client_sta remained operational."
 }
 
+optimize_radio() {
+	check_commands
+	check_live_layout
+	check_target_ap_layout
+	target_ap_is_up \
+		|| fail "$target_ap and $client_sta must be operational before optimization"
+	"$IW" phy wl1 info 2>/dev/null \
+		| "$GREP" -F 'HE Iftypes: AP' >/dev/null \
+		|| fail "wl1 does not advertise HE AP support"
+
+	previous_htmode=$(uci_get "wireless.$target_radio.htmode")
+	if [ "$previous_htmode" = "$target_htmode" ]; then
+		printf '%s\n' "$target_radio already uses $target_htmode."
+		return 0
+	fi
+
+	radio_rollback_pending=yes
+	trap rollback_radio_mode 0 HUP INT TERM
+
+	"$UCI" set "wireless.$target_radio.htmode=$target_htmode"
+	"$UCI" commit wireless
+	"$WIFI" reload "$target_radio"
+	wait_for_target_ap \
+		|| fail "$target_ap and $client_sta did not recover with $target_htmode"
+	[ "$(uci_get "wireless.$target_radio.htmode")" = "$target_htmode" ] \
+		|| fail "$target_radio did not retain $target_htmode"
+
+	radio_rollback_pending=no
+	trap - 0 HUP INT TERM
+	log "set $target_radio htmode to $target_htmode"
+	printf '%s\n' \
+		"Set $target_radio to $target_htmode; $target_ap and $client_sta recovered."
+}
+
 remove_config() {
 	check_commands
 	check_board_and_radios
 
-	[ "$(uci_get "wireless.$target_ap")" = wifi-iface ] \
-		|| fail "wireless section $target_ap is not installed"
-	[ "$(uci_get "wireless.$target_ap.mode")" = ap ] \
-		|| fail "refusing to remove non-AP section $target_ap"
-	[ "$(uci_get "wireless.$target_ap.device")" = "$target_radio" ] \
-		|| fail "refusing to remove $target_ap from an unexpected radio"
-	target_networks=$(uci_get "wireless.$target_ap.network")
-	contains_word "$target_networks" "$source_network" \
-		|| fail "refusing to remove $target_ap from an unexpected network"
+	check_target_ap_layout
 
 	"$UCI" delete "wireless.$target_ap"
 	"$UCI" commit wireless
@@ -288,10 +341,11 @@ show_status() {
 case ${1:-} in
 	preflight) preflight ;;
 	apply) apply_config ;;
+	optimize) optimize_radio ;;
 	remove) remove_config ;;
 	status) show_status ;;
 	*)
-		printf 'Usage: %s preflight|apply|remove|status\n' "$0" >&2
+		printf 'Usage: %s preflight|apply|optimize|remove|status\n' "$0" >&2
 		exit 2
 		;;
 esac

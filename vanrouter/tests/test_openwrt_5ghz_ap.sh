@@ -34,11 +34,20 @@ target_set() {
 	printf '%s\n' "$value" > "$state/target.$option"
 }
 
+radio1_htmode() {
+	if [ -f "$state/radio1.htmode" ]; then
+		sed -n '1p' "$state/radio1.htmode"
+	else
+		printf 'HT20\n'
+	fi
+}
+
 uci_get() {
 	path=$1
 	case $path in
 		wireless.radio0.band) printf '2g\n' ;;
 		wireless.radio1.band) printf '5g\n' ;;
+		wireless.radio1.htmode) radio1_htmode ;;
 		wireless.wifinet3) printf 'wifi-iface\n' ;;
 		wireless.wifinet3.mode) printf 'ap\n' ;;
 		wireless.wifinet3.device) printf 'radio0\n' ;;
@@ -81,6 +90,9 @@ case $tool in
 						;;
 					wireless.dendelion_5g.*)
 						target_set "${path#wireless.dendelion_5g.}" "$value"
+						;;
+					wireless.radio1.htmode)
+						printf '%s\n' "$value" > "$state/radio1.htmode"
 						;;
 					*) exit 1 ;;
 				esac
@@ -154,7 +166,8 @@ case $tool in
 			"phy wl1")
 				printf '%s\n' \
 					'valid interface combinations:' \
-					' * #{ AP, mesh point } <= 16, #{ managed } <= 19'
+					' * #{ AP, mesh point } <= 16, #{ managed } <= 19' \
+					'HE Iftypes: AP'
 				;;
 			"dev wl1-sta0")
 				printf 'Interface wl1-sta0\n\ttype managed\n'
@@ -167,6 +180,10 @@ case $tool in
 		;;
 	wifi)
 		printf '%s %s\n' "$1" "$2" >> "$state/wifi-calls"
+		if [ -f "$state/fail-next-reload" ]; then
+			rm -f "$state/fail-next-reload"
+			: > "$state/prevent-ap-start"
+		fi
 		;;
 	sleep)
 		:
@@ -217,6 +234,21 @@ grep -F 'Enabled dendelion_5g' "$apply_output" >/dev/null
 
 "$helper" status > "$status_output" 2>&1
 grep -F 'are operational' "$status_output" >/dev/null
+
+"$helper" optimize > "$test_root/optimize.out" 2>&1
+[ "$(sed -n '1p' "$mock_state/radio1.htmode")" = HE80 ]
+grep -F 'Set radio1 to HE80' "$test_root/optimize.out" >/dev/null
+
+printf 'HT20\n' > "$mock_state/radio1.htmode"
+: > "$mock_state/fail-next-reload"
+if "$helper" optimize > "$test_root/optimize-failure.out" 2>&1; then
+	printf 'expected failed HE80 canary to restore HT20\n' >&2
+	exit 1
+fi
+[ "$(sed -n '1p' "$mock_state/radio1.htmode")" = HT20 ]
+grep -F 'restored radio1 htmode to HT20' \
+	"$test_root/optimize-failure.out" >/dev/null
+rm -f "$mock_state/prevent-ap-start"
 
 "$helper" remove > "$remove_output" 2>&1
 [ ! -e "$mock_state/target.type" ]

@@ -9,10 +9,11 @@ target=${2:-root@192.168.6.1}
 case $mode in
 	--check) action=preflight ;;
 	--apply) action=apply ;;
+	--optimize) action=optimize ;;
 	--remove) action=remove ;;
 	--status) action=status ;;
 	*)
-		echo "Usage: $0 --check|--apply|--remove|--status [root@host]" >&2
+		echo "Usage: $0 --check|--apply|--optimize|--remove|--status [root@host]" >&2
 		exit 2
 		;;
 esac
