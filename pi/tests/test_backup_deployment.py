@@ -64,6 +64,18 @@ class BackupDeploymentTests(unittest.TestCase):
         self.assertIn(guarded_cleanup, backup)
         self.assertIn("leaving pre-existing $BACKUP_MNT mount in place", backup)
 
+    def test_unattended_backup_obeys_requested_hdd_policy(self):
+        backup = (BACKUP_DIR / "pi_backup.sh").read_text(encoding="utf-8")
+
+        policy_gate = 'backup_policy_allows_hdds'
+        backup_disk = 'ensure_mounted "$BACKUP_DISK_LABEL" "$BACKUP_MNT"'
+        self.assertIn('"$policyctl" read', backup)
+        self.assertIn("requested policy disables HDDs", backup)
+        self.assertLess(backup.index(policy_gate), backup.index(backup_disk))
+        self.assertIn('"$mount_disks" "$label" || return 1', backup)
+        self.assertNotIn('umount -l "$mnt"', backup)
+        self.assertNotIn('mount "$dev" "$mnt"', backup)
+
 
 if __name__ == "__main__":
     unittest.main()

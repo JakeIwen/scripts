@@ -7,21 +7,74 @@
 # the first success of the day wins and later runs no-op. Defers while the van
 # runs (drives are unmounted for vibration protection); if the van starts
 # mid-run, umount_disks.sh -> abort_backup.sh TERMs us and we stop cleanly
-# before the force-unmount.
+# before the bounded emergency unmount.
 set -u
-. /home/pi/scripts/backup/backup_conf.sh
+backup_conf=${PI_BACKUP_CONF:-/home/pi/scripts/backup/backup_conf.sh}
+policyctl=${PI_BACKUP_POLICYCTL:-/home/pi/scripts/policyctl}
+mount_disks=${PI_BACKUP_MOUNT_DISKS:-/home/pi/scripts/mount_disks.sh}
+. "$backup_conf"
 
 notify() { /home/pi/scripts/ntfy_send.sh "$@"; }
 log() { echo "[$(date '+%F %T')] $*"; }
 fail() { log "FATAL: $1"; notify "vanpi backup FAILED" "$1" high rotating_light; exit 1; }
 
 force=0
-[ "${1:-}" = "--force" ] && force=1  # manual runs: skip the once-a-day short-circuit
+case "$#" in
+  0) ;;
+  1)
+    if [[ "$1" == --force ]]; then
+      # A deliberate manual run overrides the daily success short-circuit.
+      # Requested HDD policy and ignition remain authoritative.
+      force=1
+    else
+      echo "usage: ${0##*/} [--force]" >&2
+      exit 2
+    fi
+    ;;
+  *)
+    echo "usage: ${0##*/} [--force]" >&2
+    exit 2
+    ;;
+esac
 
 if [ $force = 0 ] && [ -f "$STAMP_DIR/borg_ok" ] && [ "$(date -r "$STAMP_DIR/borg_ok" +%F)" = "$(date +%F)" ]; then
   log "already succeeded today, nothing to do"
   exit 0
 fi
+
+backup_policy_allows_hdds() {
+  local output status disks torrents starlink extra
+
+  if [[ ! -x "$policyctl" ]]; then
+    log "cannot verify requested HDD policy: $policyctl is unavailable"
+    return 2
+  fi
+  output=$("$policyctl" read 2>&1)
+  status=$?
+  if (( status != 0 )); then
+    log "cannot verify requested HDD policy (policyctl status $status): $output"
+    return 2
+  fi
+  read -r disks torrents starlink extra <<< "$output"
+  if [[ "$output" == *$'\n'* ||
+        ! "$disks" =~ ^[01]$ || ! "$torrents" =~ ^[01]$ ||
+        ! "$starlink" =~ ^[01]$ || -n ${extra:-} ]]; then
+    log "cannot verify requested HDD policy: malformed policyctl output"
+    return 2
+  fi
+  [[ "$disks" == 1 ]]
+}
+
+backup_policy_allows_hdds
+policy_status=$?
+if (( policy_status == 1 )); then
+  log "requested policy disables HDDs, deferring backup without mounting disks"
+  exit 0
+elif (( policy_status != 0 )); then
+  log "requested HDD policy is unavailable, refusing to mount backup disks"
+  exit 1
+fi
+
 if [ -f "$IGNITION_FLAG" ]; then
   log "van is running, deferring (drives unmounted for vibration protection)"
   exit 0
@@ -48,26 +101,40 @@ bail_if_driving() {
 
 mkdir -p "$STAMP_DIR" "$SNAP_DIR"
 
-# mounts by label, surviving USB re-enumeration and zombie mounts (source device gone)
+# Use the shared exact-label mount implementation; it owns stale-source,
+# underlay, root-disk, transport, and filesystem validation.
 ENSURE_MOUNTED_DID_MOUNT=0
 ensure_mounted() { # <label> <mountpoint>
-  local label=$1 mnt=$2 dev src
+  local label=$1 mnt=$2 src resolved_source resolved_label status
   ENSURE_MOUNTED_DID_MOUNT=0
-  src=$(findmnt -no SOURCE "$mnt" 2>/dev/null)
-  if [ -n "$src" ] && [ ! -b "$src" ]; then
-    log "zombie mount at $mnt ($src no longer exists), detaching"
-    umount -l "$mnt" 2>/dev/null
-    src=""
-  fi
-  if [ -z "$src" ]; then
-    dev=$(blkid -L "$label" 2>/dev/null || readlink -f "/dev/disk/by-label/$label" 2>/dev/null)
-    [ -b "${dev:-}" ] || return 1
-    mkdir -p "$mnt"
-    mount "$dev" "$mnt" || return 1
+
+  src=$(/usr/bin/findmnt -rn -M "$mnt" -o SOURCE 2>&1)
+  status=$?
+  if (( status == 1 )) && [[ -z "$src" ]]; then
+    "$mount_disks" "$label" || return 1
     ENSURE_MOUNTED_DID_MOUNT=1
+  elif (( status != 0 )) || [[ -z "$src" || "$src" == *$'\n'* ]]; then
+    log "cannot verify the exact mount at $mnt (findmnt status $status): ${src:-no output}"
+    return 1
   fi
+
+  src=$(/usr/bin/findmnt -rn -M "$mnt" -o SOURCE 2>&1)
+  status=$?
+  if (( status != 0 )) || [[ -z "$src" || "$src" == *$'\n'* ]]; then
+    log "$mount_disks did not establish one exact mount at $mnt"
+    return 1
+  fi
+  resolved_source=$(/usr/bin/readlink -f -- "$src" 2>/dev/null) || return 1
+  resolved_label=$(/usr/bin/readlink -f -- "/dev/disk/by-label/$label" 2>/dev/null) ||
+    return 1
+  if [[ -z "$resolved_source" || "$resolved_source" != "$resolved_label" ||
+        ! -b "$resolved_source" ]]; then
+    log "refusing $mnt because it is not backed by exact label $label"
+    return 1
+  fi
+
   local probe="$mnt/.rw_probe_$$"
-  timeout 20 touch "$probe" && rm -f "$probe"
+  /usr/bin/timeout 20 /usr/bin/touch "$probe" && /usr/bin/rm -f -- "$probe"
 }
 
 # --- 1. backup disk ---

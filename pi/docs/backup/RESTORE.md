@@ -92,7 +92,15 @@ profile as credential-bearing.
 ## Van-ignition interplay
 
 Backups run hourly 03:00–08:00 (when the van is least likely to drive); the first
-success of the day wins. While the van runs
+success of the day wins. Scheduled attempts first read requested state through
+`policyctl` and defer without mounting anything while HDD policy is disabled.
+If policy cannot be verified, the job fails closed and the backup watchdog
+eventually reports the stale backup. For a deliberate parked manual run, enable
+disks through `policyctl` or the dashboard first, then use
+`sudo /home/pi/scripts/backup/pi_backup.sh --force` to bypass only the
+once-per-day shortcut. Requested HDD policy and ignition remain authoritative.
+
+While the van runs
 (`~/hooks/ignition_is_on` exists) attempts defer, since drives are unmounted for
 vibration protection. Starting the van mid-backup is safe: `umount_disks.sh` calls
 `backup/abort_backup.sh`, which TERMs the running job and waits for it to stop before
@@ -102,6 +110,8 @@ loud ntfy) — just re-run it when parked.
 
 For normal completion, `pi_backup.sh` unmounts `bigboi` only when that backup
 run mounted it. If `bigboi` was already mounted, the backup leaves it mounted.
+It delegates mounts to `mount_disks.sh`, so backup runs use the same exact-label,
+stale-source, underlay, and root-disk safeguards as policy reconciliation.
 Ignition handling and an explicit dashboard/user eject remain authoritative
 lifecycle operations and intentionally unmount it regardless of who mounted it.
 
