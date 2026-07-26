@@ -3368,14 +3368,19 @@ function closeUbntWifi() {
   clearUbntPassword();
   $('ubnt-wifi').focus();
 }
-const bookUrl = new URL(window.location.href);
+function siblingServiceUrl(port) {
+  const url = new URL(window.location.href);
+  url.port = String(port);
+  url.pathname = '/';
+  url.search = '';
+  url.hash = '';
+  return url.toString();
+}
+
 setupTileEditing();
 setIgnitionDuration(120, 'hours');
-bookUrl.port = '8787';
-bookUrl.pathname = '/';
-bookUrl.search = '';
-bookUrl.hash = '';
-$('books').href = bookUrl.toString();
+$('books').href = siblingServiceUrl(8787);
+$('telemetry').href = siblingServiceUrl(8765);
 $('cop').addEventListener('click', () =>
   action(() => post('cop-alert', { active: dashboard?.active ? 'false' : 'true' })),
 );
