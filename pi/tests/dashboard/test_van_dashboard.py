@@ -2493,6 +2493,12 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="compute-local-events"', page.data)
         self.assertIn(b'data-compute-hours="168"', page.data)
         self.assertIn(b"Open Details for outcome diagnostics", page.data)
+        self.assertLess(
+            page.data.index(b'id="compute-tasks-title"'),
+            page.data.index(b'id="compute-jobs-title"'),
+        )
+        self.assertIn(b"Select a task to filter the queue below", page.data)
+        self.assertIn(b'id="compute-job-count" aria-live="polite"', page.data)
         self.assertIn(b'id="monitor-diagnosis"', page.data)
         self.assertIn(b'id="monitor-events"', page.data)
         self.assertIn(b'id="system-monitor-network"', page.data)
@@ -2629,6 +2635,16 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"/api/compute/jobs/", javascript.data)
         self.assertIn(b"data-compute-job-details", javascript.data)
         self.assertIn(b"aria-expanded=", javascript.data)
+        self.assertIn(b"function toggleComputeTaskFilter(button)", javascript.data)
+        self.assertIn(b"data-compute-task-filter", javascript.data)
+        self.assertIn(b"aria-pressed=", javascript.data)
+        self.assertIn(b"/api/compute/jobs?hours=", javascript.data)
+        self.assertIn(b"COMPUTE_FILTER_JOB_LIMIT = 50", javascript.data)
+        self.assertIn(
+            b"shouldFetch = !cached && visibleMatches < COMPUTE_FILTER_JOB_LIMIT",
+            javascript.data,
+        )
+        self.assertNotIn(b"taskTotal > knownMatches", javascript.data)
         self.assertIn(b"function renderUsbDevices(response)", javascript.data)
         self.assertIn(b"function renderUsbHubCards(hubs, running)", javascript.data)
         self.assertIn(b"function renderUsbPorts(state)", javascript.data)
@@ -2717,6 +2733,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b".compute-job-details", stylesheet.data)
         self.assertIn(b".compute-job-error", stylesheet.data)
         self.assertIn(b".compute-job-output", stylesheet.data)
+        self.assertIn(b".compute-task-filter[aria-pressed=\"true\"]", stylesheet.data)
         self.assertIn(b".compute-local-reasons", stylesheet.data)
         self.assertIn(b".compute-local-categories", stylesheet.data)
         self.assertIn(b".usb-device-row", stylesheet.data)
@@ -3126,6 +3143,19 @@ class DashboardRouteTests(unittest.TestCase):
                     "jobs": [],
                 }
 
+            def jobs_for_task(self, hours, task):
+                calls.append(("task", hours, task))
+                if task == "unavailable":
+                    raise dashboard.ComputeMetricsError("queue unavailable")
+                return {
+                    "ok": True,
+                    "range_hours": hours,
+                    "task": task,
+                    "matching_jobs": 1,
+                    "truncated": False,
+                    "jobs": [{"id": "20260722T015900Z-deadbeef", "task": task}],
+                }
+
             def job_details(self, job_id):
                 detail_calls.append(job_id)
                 if job_id == "not-a-job":
@@ -3152,6 +3182,20 @@ class DashboardRouteTests(unittest.TestCase):
             client = dashboard.app.test_client()
             default = client.get("/api/compute")
             day = client.get("/api/compute?hours=24")
+            task_jobs = client.get("/api/compute/jobs?hours=24&task=repo-tests")
+            missing_task = client.get("/api/compute/jobs?hours=24")
+            duplicate_task = client.get(
+                "/api/compute/jobs?hours=24&task=repo-tests&task=other"
+            )
+            invalid_task_range = client.get(
+                "/api/compute/jobs?hours=25&task=repo-tests"
+            )
+            invalid_task_name = client.get(
+                "/api/compute/jobs?hours=24&task=" + ("x" * 65)
+            )
+            unavailable_task_jobs = client.get(
+                "/api/compute/jobs?hours=24&task=unavailable"
+            )
             invalid = client.get("/api/compute?hours=25")
             extra = client.get("/api/compute?hours=24&command=anything")
             details = client.get(
@@ -3174,6 +3218,14 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(default.headers["Cache-Control"], "no-store")
         self.assertEqual(default.json["range_hours"], 168)
         self.assertEqual(day.status_code, 200)
+        self.assertEqual(task_jobs.status_code, 200)
+        self.assertEqual(task_jobs.headers["Cache-Control"], "no-store")
+        self.assertEqual(task_jobs.json["task"], "repo-tests")
+        self.assertEqual(missing_task.status_code, 400)
+        self.assertEqual(duplicate_task.status_code, 400)
+        self.assertEqual(invalid_task_range.status_code, 400)
+        self.assertEqual(invalid_task_name.status_code, 400)
+        self.assertEqual(unavailable_task_jobs.status_code, 503)
         self.assertEqual(invalid.status_code, 400)
         self.assertEqual(extra.status_code, 400)
         self.assertEqual(details.status_code, 200)
@@ -3185,7 +3237,10 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(missing_job.status_code, 404)
         self.assertEqual(detail_extra.status_code, 400)
         self.assertEqual(unavailable_details.status_code, 503)
-        self.assertEqual(calls, [168, 24])
+        self.assertEqual(
+            calls,
+            [168, 24, ("task", 24, "repo-tests"), ("task", 24, "unavailable")],
+        )
         self.assertEqual(
             detail_calls,
             [

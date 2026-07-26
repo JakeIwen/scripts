@@ -40,6 +40,7 @@ try:
     from pi.van_compute.scripts.van_compute_metrics import (
         ComputeMetricsError,
         ComputeMetricsReader,
+        TASK_NAME_RE,
     )
 except ModuleNotFoundError:
     compute_scripts = os.environ.get(
@@ -47,7 +48,11 @@ except ModuleNotFoundError:
     )
     if compute_scripts not in sys.path:
         sys.path.insert(0, compute_scripts)
-    from van_compute_metrics import ComputeMetricsError, ComputeMetricsReader
+    from van_compute_metrics import (
+        ComputeMetricsError,
+        ComputeMetricsReader,
+        TASK_NAME_RE,
+    )
 
 
 PORT = int(os.environ.get("VAN_DASHBOARD_PORT", "8788"))
@@ -4638,6 +4643,46 @@ def api_compute():
         payload = compute_monitor.report(hours)
     except (OSError, ComputeMetricsError) as exc:
         return api_error(f"compute metrics unavailable: {exc}", 503)
+    response = jsonify(payload)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/api/compute/jobs")
+def api_compute_jobs():
+    if (
+        set(request.args) - {"hours", "task"}
+        or len(request.args.getlist("hours")) > 1
+        or len(request.args.getlist("task")) > 1
+    ):
+        return api_error(
+            "compute task jobs accept one hours value and one task value", 400
+        )
+    raw_hours = request.args.get("hours", "168")
+    task = request.args.get("task")
+    if task is None:
+        return api_error("compute task jobs require a task value", 400)
+    try:
+        hours = int(raw_hours)
+    except (TypeError, ValueError):
+        return api_error(
+            "compute metrics range must be 6, 24, 168, or 720 hours", 400
+        )
+    if hours not in (6, 24, 168, 720):
+        return api_error(
+            "compute metrics range must be 6, 24, 168, or 720 hours", 400
+        )
+    if not TASK_NAME_RE.fullmatch(task):
+        return api_error(
+            "compute task must use 1 to 64 lowercase letters, digits, or hyphens",
+            400,
+        )
+    try:
+        payload = compute_monitor.jobs_for_task(hours, task)
+    except ValueError as exc:
+        return api_error(str(exc), 400)
+    except (OSError, ComputeMetricsError) as exc:
+        return api_error(f"compute task jobs unavailable: {exc}", 503)
     response = jsonify(payload)
     response.headers["Cache-Control"] = "no-store"
     return response

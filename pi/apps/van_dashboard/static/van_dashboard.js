@@ -14,6 +14,10 @@ let dashboard = null,
   ignitionDurationMinutes = 120,
   systemMonitorHours = 6,
   computeHours = 168,
+  computeTaskFilter = '',
+  computeTaskFilterRequestId = 0,
+  computeTaskFilterLoading = false,
+  computeTaskFilterError = '',
   ubntWifi = null,
   ubntLink = null,
   ubntNewNetwork = null,
@@ -57,6 +61,8 @@ const TILE_ORDER_STORAGE_KEY = 'van-dashboard.tile-order.v1';
 const computeJobDetailCache = new Map();
 const computeJobDetailRequests = new Map();
 const computeExpandedJobIds = new Set();
+const computeTaskJobCache = new Map();
+const COMPUTE_FILTER_JOB_LIMIT = 50;
 const IGNITION_DURATION_UNITS = {
   minutes: { factor: 1, max: 720 },
   hours: { factor: 60, max: 168 },
@@ -1916,13 +1922,97 @@ function computeMissedReasonLabel(reason) {
   };
   return labels[reason] || String(reason || 'Other').replaceAll('-', ' ');
 }
+function computeTaskCacheKey(hours, task) {
+  return `${hours}\u0000${task}`;
+}
+function clearComputeTaskFilter(clearCache = false) {
+  computeTaskFilterRequestId += 1;
+  computeTaskFilter = '';
+  computeTaskFilterLoading = false;
+  computeTaskFilterError = '';
+  if (clearCache) computeTaskJobCache.clear();
+}
+function computeJobSortTime(job) {
+  const timestamp = job?.finished_at || job?.started_at || job?.submitted_at;
+  if (typeof timestamp === 'number' && Number.isFinite(timestamp))
+    return timestamp * 1000;
+  const parsed = Date.parse(timestamp);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+function computeJobsForDisplay(response) {
+  const recentJobs = Array.isArray(response?.jobs) ? response.jobs : [];
+  if (!computeTaskFilter) return recentJobs;
+  const cache = computeTaskJobCache.get(
+      computeTaskCacheKey(computeHours, computeTaskFilter),
+    ),
+    matchingRecent = recentJobs.filter((job) => job.task === computeTaskFilter),
+    merged = new Map();
+  (cache?.jobs || []).forEach((job) => {
+    if (job.task === computeTaskFilter && job.id) merged.set(String(job.id), job);
+  });
+  matchingRecent.forEach((job) => {
+    if (job.id) merged.set(String(job.id), job);
+  });
+  return [...merged.values()]
+    .sort((left, right) => computeJobSortTime(right) - computeJobSortTime(left))
+    .slice(0, COMPUTE_FILTER_JOB_LIMIT);
+}
+async function toggleComputeTaskFilter(button) {
+  const task = button.dataset.computeTaskFilter;
+  if (!task) return;
+  collapseComputeJobDetails(true);
+  computeTaskFilterRequestId += 1;
+  computeTaskFilterLoading = false;
+  computeTaskFilterError = '';
+  if (computeTaskFilter === task) {
+    computeTaskFilter = '';
+    if (computeMetrics) renderComputeMetrics(computeMetrics);
+    return;
+  }
+  computeTaskFilter = task;
+  const response = computeMetrics || {},
+    cacheKey = computeTaskCacheKey(computeHours, task),
+    cached = computeTaskJobCache.get(cacheKey),
+    visibleMatches = computeJobsForDisplay(response).length,
+    shouldFetch = !cached && visibleMatches < COMPUTE_FILTER_JOB_LIMIT;
+  computeTaskFilterLoading = shouldFetch;
+  renderComputeMetrics(response);
+  if (!shouldFetch) return;
+
+  const requestId = computeTaskFilterRequestId,
+    requestedHours = computeHours;
+  try {
+    const payload = await json(
+      `/api/compute/jobs?hours=${requestedHours}&task=${encodeURIComponent(task)}`,
+    );
+    if (
+      requestId !== computeTaskFilterRequestId
+      || task !== computeTaskFilter
+      || requestedHours !== computeHours
+    )
+      return;
+    computeTaskJobCache.set(cacheKey, payload);
+    computeTaskFilterLoading = false;
+    renderComputeMetrics(computeMetrics || response);
+  } catch (error) {
+    if (
+      requestId !== computeTaskFilterRequestId
+      || task !== computeTaskFilter
+      || requestedHours !== computeHours
+    )
+      return;
+    computeTaskFilterLoading = false;
+    computeTaskFilterError = error.message;
+    renderComputeMetrics(computeMetrics || response);
+  }
+}
 function renderComputeMetrics(response) {
   computeMetrics = response;
   const status = response.status || {},
     summary = response.summary || {},
     benchmark = response.benchmark || {},
     localWork = response.eligible_local_work || {},
-    jobs = response.jobs || [],
+    jobs = computeJobsForDisplay(response),
     tasks = response.tasks || [],
     localCategories = Array.isArray(localWork.categories) ? localWork.categories : [],
     localReasons = Array.isArray(localWork.reasons) ? localWork.reasons : [],
@@ -2027,7 +2117,9 @@ function renderComputeMetrics(response) {
     maxMemory = Math.max(0, ...jobs.map((job) => Number(job.peak_rss_bytes) || 0)),
     preserveOpenDetails = $('compute-backdrop').classList.contains('open')
       && computeExpandedJobIds.size > 0;
-  $('compute-job-count').textContent = `${jobs.length} shown`;
+  $('compute-job-count').textContent = computeTaskFilter
+    ? `${jobs.length} shown · ${computeTaskFilter} only${computeTaskFilterLoading ? ' · loading older matches…' : computeTaskFilterError ? ' · older matches unavailable' : ''}`
+    : `${jobs.length} shown`;
   if (!preserveOpenDetails) {
     const visibleJobIds = new Set(jobs.map((job) => String(job.id || '')));
     for (const jobId of computeExpandedJobIds)
@@ -2070,16 +2162,25 @@ function renderComputeMetrics(response) {
       .join('') || '<div class="speaker-loading">No queued or completed jobs in this range</div>';
   }
 
-  const maxTaskCpu = Math.max(0, ...tasks.map((task) => Number(task.cpu_seconds) || 0));
+  const focusedTask = document.activeElement?.closest?.('[data-compute-task-filter]')
+      ?.dataset.computeTaskFilter,
+    maxTaskCpu = Math.max(0, ...tasks.map((task) => Number(task.cpu_seconds) || 0));
   $('compute-tasks').innerHTML = tasks
     .map((task) => {
-      const width = maxTaskCpu > 0 ? Math.max(2, (100 * Number(task.cpu_seconds || 0)) / maxTaskCpu) : 0;
+      const width = maxTaskCpu > 0 ? Math.max(2, (100 * Number(task.cpu_seconds || 0)) / maxTaskCpu) : 0,
+        selected = task.task === computeTaskFilter,
+        actionLabel = selected ? 'Clear queue filter for' : 'Filter queue jobs by';
       const telemetryLabel = task.telemetry_jobs
         ? `${formatComputeSeconds(task.cpu_seconds)} Mac CPU · ${formatBytes(task.peak_rss_bytes)} peak`
         : 'Resource telemetry starts with the next job';
-      return `<article><span><strong>${esc(task.task)}</strong><small>${task.jobs} job${task.jobs === 1 ? '' : 's'} · ${formatBytes(task.input_bytes)} input</small></span><span class="compute-task-meter"><i style="width:${width}%"></i><small>${esc(telemetryLabel)}</small></span></article>`;
+      return `<button class="compute-task-filter" type="button" data-compute-task-filter="${esc(task.task)}" aria-pressed="${selected ? 'true' : 'false'}" aria-label="${esc(`${actionLabel} ${task.task}`)}"><span><strong>${esc(task.task)}</strong><small>${task.jobs} job${task.jobs === 1 ? '' : 's'} · ${formatBytes(task.input_bytes)} input</small></span><span class="compute-task-meter"><i style="width:${width}%"></i><small>${esc(telemetryLabel)}</small></span></button>`;
     })
     .join('') || '<div class="speaker-loading">No completed task totals in this range</div>';
+  if (focusedTask) {
+    const replacement = [...document.querySelectorAll('[data-compute-task-filter]')]
+      .find((button) => button.dataset.computeTaskFilter === focusedTask);
+    if (replacement) replacement.focus({ preventScroll: true });
+  }
   $('compute-measurement-note').textContent = response.measurement_note || '';
   document.querySelectorAll('[data-compute-hours]').forEach((button) => {
     button.classList.toggle('active', Number(button.dataset.computeHours) === computeHours);
@@ -2088,6 +2189,7 @@ function renderComputeMetrics(response) {
 }
 function renderComputeUnavailable(message) {
   collapseComputeJobDetails();
+  clearComputeTaskFilter();
   const tile = $('compute-worker');
   tile.classList.remove('good', 'warning', 'critical');
   tile.classList.add('unknown');
@@ -3110,6 +3212,7 @@ async function openComputeMetrics() {
 function closeComputeMetrics() {
   clearTimeout(computePoll);
   collapseComputeJobDetails(true);
+  clearComputeTaskFilter(true);
   $('compute-backdrop').classList.remove('open');
   document.body.classList.remove('sheet-open');
   $('compute-worker').setAttribute('aria-expanded', 'false');
@@ -3469,6 +3572,8 @@ document.addEventListener('change', (event) => {
 document.addEventListener('click', (event) => {
   const computeJobDetails = event.target.closest('[data-compute-job-details]');
   if (computeJobDetails) toggleComputeJobDetails(computeJobDetails);
+  const computeTask = event.target.closest('[data-compute-task-filter]');
+  if (computeTask) toggleComputeTaskFilter(computeTask);
   const ignitionPreset = event.target.closest('[data-ignition-preset]');
   if (ignitionPreset) setIgnitionDuration(Number(ignitionPreset.dataset.ignitionPreset));
   const backupClone = event.target.closest('[data-backup-clone]');
@@ -3492,6 +3597,7 @@ document.addEventListener('click', (event) => {
     if (Number.isFinite(hours) && hours !== computeHours) {
       computeHours = hours;
       collapseComputeJobDetails(true);
+      clearComputeTaskFilter(true);
       document.querySelectorAll('[data-compute-hours]').forEach((button) => {
         button.disabled = true;
       });

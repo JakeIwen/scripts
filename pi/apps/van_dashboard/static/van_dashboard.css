@@ -3423,7 +3423,7 @@ body.busy [data-action] {
   margin-top: 8px;
 }
 .compute-job,
-.compute-tasks article,
+.compute-task-filter,
 .compute-local-categories article,
 .compute-local-event {
   border: 1px solid var(--line);
@@ -3431,6 +3431,24 @@ body.busy [data-action] {
   border-radius: 11px;
   background: #151f27;
   padding: 9px 10px;
+}
+.compute-task-filter {
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+}
+.compute-task-filter:hover,
+.compute-task-filter:focus-visible {
+  border-color: #6ca0b3;
+  background: #192730;
+  outline: none;
+}
+.compute-task-filter[aria-pressed="true"] {
+  border-color: #70b4c8;
+  background: #18313a;
+  box-shadow: inset 0 0 0 1px #70b4c855;
 }
 .compute-local-categories article,
 .compute-local-event {
@@ -3446,7 +3464,7 @@ body.busy [data-action] {
   border-left-color: #d4a650;
 }
 .compute-job-head,
-.compute-tasks article,
+.compute-task-filter,
 .compute-local-categories article {
   display: flex;
   align-items: center;
@@ -3454,26 +3472,26 @@ body.busy [data-action] {
   gap: 10px;
 }
 .compute-job-head > span,
-.compute-tasks article > span,
+.compute-task-filter > span,
 .compute-local-categories article > span {
   min-width: 0;
 }
 .compute-job-head strong,
 .compute-job-head small,
-.compute-tasks strong,
-.compute-tasks small,
+.compute-task-filter strong,
+.compute-task-filter small,
 .compute-local-categories strong,
 .compute-local-categories small {
   display: block;
 }
 .compute-job-head strong,
-.compute-tasks strong,
+.compute-task-filter strong,
 .compute-local-categories strong {
   font-size: 11px;
   overflow-wrap: anywhere;
 }
 .compute-job-head small,
-.compute-tasks small,
+.compute-task-filter small,
 .compute-local-categories small {
   color: var(--dim);
   font-size: 8px;
@@ -3743,7 +3761,7 @@ body.busy [data-action] {
   .compute-overview {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .compute-tasks article,
+  .compute-task-filter,
   .compute-local-categories article {
     align-items: stretch;
     flex-direction: column;
