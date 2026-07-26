@@ -1,0 +1,56 @@
+# Dendelion OpenWrt configuration
+
+This directory contains reviewed, credential-free artifacts for the Linksys
+E8450. Live UCI configuration remains authoritative and must be inspected before
+deployment.
+
+## Simultaneous 5 GHz AP and client
+
+`deploy-5ghz-ap.sh` stages a temporary helper on the router. The helper adds a
+named `dendelion_5g` AP to `radio1` while the existing `wifinet4` client remains
+attached to `clientwan`.
+
+The AP copies the SSID, encryption mode, and key from the existing 2.4 GHz
+`wifinet3` AP entirely on the router. Credentials are not stored in this
+checkout, passed in process arguments, or printed. Only the new UCI section is
+changed; the helper itself is removed from `/tmp` after every operation.
+
+This is same-radio AP+STA operation:
+
+- The 5 GHz AP and upstream client must share the hotspot's channel.
+- Airtime and the configured channel width are shared.
+- The hotspot must be associated when deploying and testing.
+- The 5 GHz AP may become unavailable when the hotspot disconnects.
+- `radio0` is not reloaded, so the 2.4 GHz management path remains available.
+
+Before applying, connect through the 2.4 GHz LAN or Ethernet, ensure the iPhone
+hotspot is available, and verify the read-only preflight:
+
+```sh
+./vanrouter/deploy-5ghz-ap.sh --check
+```
+
+Apply and run the AP/STA canary:
+
+```sh
+./vanrouter/deploy-5ghz-ap.sh --apply
+```
+
+The apply operation waits for both the 5 GHz client and new AP to become
+operational. If that does not happen, it deletes only `dendelion_5g`, commits
+the rollback, and reloads `radio1`.
+
+Inspect or deliberately remove the added section:
+
+```sh
+./vanrouter/deploy-5ghz-ap.sh --status
+./vanrouter/deploy-5ghz-ap.sh --remove
+```
+
+An alternate SSH target can be supplied as the second argument.
+
+## Tests
+
+```sh
+./vanrouter/tests/test_openwrt_5ghz_ap.sh
+```

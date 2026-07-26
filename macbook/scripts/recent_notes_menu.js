@@ -28,6 +28,10 @@ function requestedLimit(argv) {
   return Math.min(Math.floor(value), MAX_LIMIT);
 }
 
+function includeBackButton(argv) {
+  return !argv.includes("--no-back");
+}
+
 function timestamp(value) {
   const date = value instanceof Date ? value : new Date(value);
   const milliseconds = date.getTime();
@@ -85,13 +89,14 @@ function run(argv) {
 
   notes.sort((left, right) => right.modified - left.modified);
 
-  const items = [
-    {
+  const items = [];
+  if (includeBackButton(argv)) {
+    items.push({
       type: "back",
       title: "<<",
       icon: "sfsymbol::chevron.backward"
-    }
-  ];
+    });
+  }
 
   notes.slice(0, limit).forEach((note) => {
     const command = SHOW_NOTE_SCRIPT + " --id " + shellQuote(note.id);
@@ -104,7 +109,7 @@ function run(argv) {
     });
   });
 
-  if (items.length === 1) {
+  if (notes.length === 0) {
     items.push({
       title: "No notes found",
       icon: "sfsymbol::note.text"

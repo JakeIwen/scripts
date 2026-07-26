@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import re
 import time
 import uuid
 from pathlib import Path
@@ -72,10 +73,16 @@ def remap_entity_uuids(value: Any) -> Any:
     return replace(value)
 
 
-def dropdown_menu_config(identifier: str, item_count: int, width: int) -> dict[str, Any]:
+def dropdown_menu_config(
+    identifier: str,
+    item_count: int,
+    width: int,
+    source_config: dict[str, Any],
+) -> dict[str, Any]:
     item_height = 40
     height = max(item_height, item_height * item_count)
-    return {
+    config = copy.deepcopy(source_config)
+    config.update({
         "BTTMenuPositioningType": 1,
         "BTTMenuPositionRelativeTo": 21,
         "BTTMenuAnchorMenu": 0,
@@ -120,7 +127,22 @@ def dropdown_menu_config(identifier: str, item_count: int, width: int) -> dict[s
         "BTTMenuAlwaysUseLightMode": 1,
         "BTTMenuElementIdentifier": identifier,
         "BTTLastChangeUUID": new_uuid(),
-    }
+    })
+    return config
+
+
+def identifier_slug(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or "menu"
+
+
+def remove_content_script_settings(config: dict[str, Any]) -> None:
+    """Keep a dynamic menu's script from being inherited by its launcher."""
+    for key in list(config):
+        if key.startswith("BTTMenuScript"):
+            config.pop(key)
+    config.pop("BTTMenuCategoryContentScript", None)
+    config.pop("BTTMenuItemScriptActive", None)
 
 
 def normalize_dropdown_items(items: list[dict[str, Any]], root_uuid: str, width: int) -> None:
@@ -151,7 +173,34 @@ def make_dropdown(
     dropdown_name: str,
     parent_uuid: str,
     width: int,
+    height_items: int | None,
+    content_script_command: str | None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if content_script_command:
+        config = source.setdefault("BTTMenuConfig", {})
+        config.update(
+            {
+                "BTTMenuScriptSettings": {
+                    "BTTScriptType": 3,
+                    "BTTAppleScriptString": (
+                        "async function retrieveDropdownItems() {\n"
+                        "  return await runShellScript({script: "
+                        f"{json.dumps(content_script_command)}"
+                        "});\n"
+                        "}"
+                    ),
+                    "BTTScriptLocation": 0,
+                    "BTTAppleScriptUsePath": False,
+                    "BTTJavaScriptUseIsolatedContext": False,
+                    "BTTScriptFunctionToCall": "retrieveDropdownItems",
+                },
+                "BTTMenuCategoryContentScript": 1,
+                "BTTMenuItemScriptActive": 1,
+                "BTTMenuScriptAlwaysRunOnFirstLoad": 1,
+                "BTTMenuScriptAlwaysRunOnAppear": 1,
+            }
+        )
+
     source = remap_entity_uuids(copy.deepcopy(source))
     now = time.time()
 
@@ -160,12 +209,15 @@ def make_dropdown(
         for item in source["BTTMenuItems"]
         if item.get("BTTTriggerType") != 777
     ]
-    if not items:
+    source_config = source.get("BTTMenuConfig", {})
+    has_content_script = bool(source_config.get("BTTMenuCategoryContentScript"))
+    if not items and not has_content_script:
         raise ValueError("submenu contains no items after removing its Back button")
 
     root_uuid = new_uuid()
-    identifier = f"media-dropdown-{dropdown_name.lower().replace(' ', '-')}"
+    identifier = f"media-dropdown-{identifier_slug(dropdown_name)}"
     normalize_dropdown_items(items, root_uuid, width)
+    visible_item_count = height_items if height_items is not None else len(items)
 
     menu = {
         "BTTLastUpdatedAt": now,
@@ -177,7 +229,12 @@ def make_dropdown(
         "BTTActionCategory": 0,
         "BTTTriggerName": f"Floating Menu: {dropdown_name}",
         "BTTMenuItems": items,
-        "BTTMenuConfig": dropdown_menu_config(identifier, len(items), width),
+        "BTTMenuConfig": dropdown_menu_config(
+            identifier,
+            visible_item_count,
+            width,
+            source_config,
+        ),
         "BTTMenuAvailability": 0,
         "BTTMenuName": dropdown_name,
         "BTTGestureNotes": "Standalone vertical dropdown converted from a Media submenu",
@@ -225,6 +282,7 @@ def make_dropdown(
     )
     button.pop("BTTOrder", None)
     button_config = button.setdefault("BTTMenuConfig", {})
+    remove_content_script_settings(button_config)
     button_config["BTTMenuElementIdentifier"] = f"{identifier}-button"
     button_config["BTTLastChangeUUID"] = new_uuid()
 
@@ -238,6 +296,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-prefix", type=Path, required=True)
     parser.add_argument("--parent-uuid", default=MEDIA_UUID)
     parser.add_argument("--width", type=int, default=180)
+    parser.add_argument(
+        "--height-items",
+        type=int,
+        help="reserve this many 40-pixel rows (useful for dynamic menus)",
+    )
+    parser.add_argument(
+        "--content-script-command",
+        help="shell command whose BTT Simple JSON output dynamically populates the menu",
+    )
     return parser.parse_args()
 
 
@@ -245,12 +312,16 @@ def main() -> None:
     args = parse_args()
     if args.width < 80:
         raise ValueError("--width must be at least 80 pixels")
+    if args.height_items is not None and args.height_items < 1:
+        raise ValueError("--height-items must be at least 1")
     source = load_single_trigger(args.source)
     menu, button = make_dropdown(
         source,
         dropdown_name=args.name,
         parent_uuid=args.parent_uuid,
         width=args.width,
+        height_items=args.height_items,
+        content_script_command=args.content_script_command,
     )
 
     menu_path = args.output_prefix.with_name(f"{args.output_prefix.name}_menu.json")

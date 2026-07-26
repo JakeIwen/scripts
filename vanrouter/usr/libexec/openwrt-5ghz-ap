@@ -1,0 +1,297 @@
+#!/bin/sh
+
+# Configure dendelion's existing 5 GHz radio as a same-channel AP+STA radio.
+# This helper is staged temporarily by vanrouter/deploy-5ghz-ap.sh. It never
+# prints the source AP's key and does not persist itself on the router.
+set -eu
+
+umask 077
+
+UCI=${UCI:-/sbin/uci}
+UBUS=${UBUS:-/bin/ubus}
+JSONFILTER=${JSONFILTER:-/usr/bin/jsonfilter}
+IW=${IW:-/usr/sbin/iw}
+WIFI=${WIFI:-/sbin/wifi}
+GREP=${GREP:-/bin/grep}
+SED=${SED:-/bin/sed}
+SLEEP=${SLEEP:-/bin/sleep}
+LOGGER=${LOGGER:-/usr/bin/logger}
+
+tag=openwrt-5ghz-ap
+expected_board=linksys,e8450-ubi
+source_ap=wifinet3
+client_sta=wifinet4
+target_ap=dendelion_5g
+source_radio=radio0
+target_radio=radio1
+source_network=lan
+client_network=clientwan
+
+log() {
+	"$LOGGER" -t "$tag" "$1" 2>/dev/null || true
+}
+
+fail() {
+	log "$1"
+	printf '%s\n' "$1" >&2
+	exit 1
+}
+
+require_executable() {
+	[ -x "$1" ] || fail "required command is unavailable: $1"
+}
+
+uci_get() {
+	"$UCI" -q get "$1"
+}
+
+contains_word() {
+	haystack=$1
+	needle=$2
+	case " $haystack " in
+		*" $needle "*) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+wireless_status_value() {
+	expression=$1
+	"$UBUS" call network.wireless status 2>/dev/null \
+		| "$JSONFILTER" -e "$expression"
+}
+
+check_commands() {
+	for command_path in \
+		"$UCI" "$UBUS" "$JSONFILTER" "$IW" "$WIFI" \
+		"$GREP" "$SED" "$SLEEP" "$LOGGER"; do
+		require_executable "$command_path"
+	done
+}
+
+check_board_and_radios() {
+	board_name=$(
+		"$UBUS" call system board 2>/dev/null \
+			| "$JSONFILTER" -e '@.board_name'
+	) || fail "could not identify the OpenWrt board"
+	[ "$board_name" = "$expected_board" ] \
+		|| fail "refusing unexpected OpenWrt board: $board_name"
+
+	[ "$(uci_get "wireless.$source_radio.band")" = 2g ] \
+		|| fail "$source_radio is not the expected 2.4 GHz radio"
+	[ "$(uci_get "wireless.$target_radio.band")" = 5g ] \
+		|| fail "$target_radio is not the expected 5 GHz radio"
+}
+
+check_live_layout() {
+	check_board_and_radios
+
+	[ "$(uci_get "wireless.$source_ap")" = wifi-iface ] \
+		|| fail "source AP section $source_ap is unavailable"
+	[ "$(uci_get "wireless.$source_ap.mode")" = ap ] \
+		|| fail "$source_ap is not an AP"
+	[ "$(uci_get "wireless.$source_ap.device")" = "$source_radio" ] \
+		|| fail "$source_ap is not attached to $source_radio"
+	source_networks=$(uci_get "wireless.$source_ap.network")
+	contains_word "$source_networks" "$source_network" \
+		|| fail "$source_ap is not attached to $source_network"
+
+	source_ssid=$(uci_get "wireless.$source_ap.ssid")
+	[ -n "$source_ssid" ] || fail "$source_ap has an empty SSID"
+	source_encryption=$(uci_get "wireless.$source_ap.encryption")
+	[ -n "$source_encryption" ] || fail "$source_ap has no encryption mode"
+	case "$source_encryption" in
+		none|owe) ;;
+		*)
+			source_key=$(uci_get "wireless.$source_ap.key")
+			[ -n "$source_key" ] || fail "$source_ap has no wireless key"
+			unset source_key
+			;;
+	esac
+	unset source_ssid source_encryption
+
+	[ "$(uci_get "wireless.$client_sta")" = wifi-iface ] \
+		|| fail "client section $client_sta is unavailable"
+	[ "$(uci_get "wireless.$client_sta.mode")" = sta ] \
+		|| fail "$client_sta is not a client interface"
+	[ "$(uci_get "wireless.$client_sta.device")" = "$target_radio" ] \
+		|| fail "$client_sta is not attached to $target_radio"
+	client_networks=$(uci_get "wireless.$client_sta.network")
+	contains_word "$client_networks" "$client_network" \
+		|| fail "$client_sta is not attached to $client_network"
+
+	"$IW" phy wl1 info 2>/dev/null \
+		| "$GREP" -F '#{ managed' >/dev/null \
+		|| fail "wl1 does not advertise managed-mode concurrency"
+	"$IW" phy wl1 info 2>/dev/null \
+		| "$GREP" -F '#{ AP' >/dev/null \
+		|| fail "wl1 does not advertise AP-mode concurrency"
+}
+
+radio1_is_ready() {
+	radio_up=$(wireless_status_value '@.radio1.up' || true)
+	[ "$radio_up" = true ] || return 1
+	sections=$(wireless_status_value '@.radio1.interfaces[*].section' || true)
+	printf '%s\n' "$sections" | "$GREP" -Fx "$client_sta" >/dev/null
+}
+
+preflight() {
+	check_commands
+	check_live_layout
+	radio1_is_ready \
+		|| fail "$target_radio and $client_sta must be up before deployment"
+	if uci_get "wireless.$target_ap" >/dev/null 2>&1; then
+		fail "wireless section $target_ap already exists"
+	fi
+	printf '%s\n' \
+		"Preflight passed: $target_radio can add $target_ap alongside $client_sta."
+}
+
+copy_source_option() {
+	option_name=$1
+	source_path="wireless.$source_ap.$option_name"
+	target_path="wireless.$target_ap.$option_name"
+
+	# `uci show` supplies correctly quoted UCI syntax. Keep the value in a pipe
+	# so a wireless key never appears in argv, logs, or command output.
+	"$UCI" -q show "$source_path" \
+		| "$SED" \
+			"s/^wireless\\.$source_ap\\.$option_name=/set wireless.$target_ap.$option_name=/" \
+		| "$UCI" -q batch
+
+	source_value=$(uci_get "$source_path")
+	target_value=$(uci_get "$target_path")
+	[ "$source_value" = "$target_value" ] \
+		|| fail "failed to copy wireless option $option_name"
+	unset source_value target_value
+}
+
+target_ap_is_up() {
+	radio_up=$(wireless_status_value '@.radio1.up' || true)
+	[ "$radio_up" = true ] || return 1
+
+	sections=$(wireless_status_value '@.radio1.interfaces[*].section' || true)
+	printf '%s\n' "$sections" | "$GREP" -Fx "$client_sta" >/dev/null \
+		|| return 1
+	printf '%s\n' "$sections" | "$GREP" -Fx "$target_ap" >/dev/null \
+		|| return 1
+
+	ifnames=$(wireless_status_value '@.radio1.interfaces[*].ifname' || true)
+	ap_seen=no
+	sta_seen=no
+	for ifname in $ifnames; do
+		interface_info=$("$IW" dev "$ifname" info 2>/dev/null || true)
+		if printf '%s\n' "$interface_info" \
+			| "$GREP" -F 'type AP' >/dev/null; then
+			ap_seen=yes
+		fi
+		if printf '%s\n' "$interface_info" \
+			| "$GREP" -F 'type managed' >/dev/null; then
+			sta_seen=yes
+		fi
+	done
+	[ "$ap_seen" = yes ] && [ "$sta_seen" = yes ]
+}
+
+wait_for_target_ap() {
+	attempt=0
+	while [ "$attempt" -lt 20 ]; do
+		target_ap_is_up && return 0
+		attempt=$((attempt + 1))
+		"$SLEEP" 1
+	done
+	return 1
+}
+
+rollback_pending_change() {
+	status=$?
+	trap - 0 HUP INT TERM
+	if [ "${rollback_pending:-no}" = yes ]; then
+		"$UCI" -q delete "wireless.$target_ap" >/dev/null 2>&1 || true
+		"$UCI" -q commit wireless >/dev/null 2>&1 || true
+		"$WIFI" reload "$target_radio" >/dev/null 2>&1 || true
+		log "rolled back failed $target_ap deployment"
+		printf '%s\n' \
+			"Deployment failed; removed $target_ap and reloaded $target_radio." >&2
+	fi
+	exit "$status"
+}
+
+apply_config() {
+	preflight
+
+	rollback_pending=yes
+	trap rollback_pending_change 0 HUP INT TERM
+
+	"$UCI" set "wireless.$target_ap=wifi-iface"
+	"$UCI" set "wireless.$target_ap.device=$target_radio"
+	"$UCI" set "wireless.$target_ap.mode=ap"
+	"$UCI" set "wireless.$target_ap.network=$source_network"
+	copy_source_option ssid
+	copy_source_option encryption
+
+	source_encryption=$(uci_get "wireless.$source_ap.encryption")
+	case "$source_encryption" in
+		none|owe) ;;
+		*) copy_source_option key ;;
+	esac
+	unset source_encryption
+
+	"$UCI" commit wireless
+	"$WIFI" reload "$target_radio"
+	wait_for_target_ap \
+		|| fail "$target_ap did not become operational while $client_sta stayed up"
+
+	rollback_pending=no
+	trap - 0 HUP INT TERM
+	log "enabled $target_ap on $target_radio alongside $client_sta"
+	printf '%s\n' \
+		"Enabled $target_ap on $target_radio; $client_sta remained operational."
+}
+
+remove_config() {
+	check_commands
+	check_board_and_radios
+
+	[ "$(uci_get "wireless.$target_ap")" = wifi-iface ] \
+		|| fail "wireless section $target_ap is not installed"
+	[ "$(uci_get "wireless.$target_ap.mode")" = ap ] \
+		|| fail "refusing to remove non-AP section $target_ap"
+	[ "$(uci_get "wireless.$target_ap.device")" = "$target_radio" ] \
+		|| fail "refusing to remove $target_ap from an unexpected radio"
+	target_networks=$(uci_get "wireless.$target_ap.network")
+	contains_word "$target_networks" "$source_network" \
+		|| fail "refusing to remove $target_ap from an unexpected network"
+
+	"$UCI" delete "wireless.$target_ap"
+	"$UCI" commit wireless
+	"$WIFI" reload "$target_radio"
+	log "removed $target_ap from $target_radio"
+	printf '%s\n' "Removed $target_ap and reloaded $target_radio."
+}
+
+show_status() {
+	check_commands
+	check_live_layout
+	if ! uci_get "wireless.$target_ap" >/dev/null 2>&1; then
+		printf '%s\n' "$target_ap is not configured."
+		return 0
+	fi
+	if target_ap_is_up; then
+		printf '%s\n' "$target_ap and $client_sta are operational on $target_radio."
+		return 0
+	fi
+	printf '%s\n' \
+		"$target_ap is configured but AP+STA is not currently operational." >&2
+	return 1
+}
+
+case ${1:-} in
+	preflight) preflight ;;
+	apply) apply_config ;;
+	remove) remove_config ;;
+	status) show_status ;;
+	*)
+		printf 'Usage: %s preflight|apply|remove|status\n' "$0" >&2
+		exit 2
+		;;
+esac
