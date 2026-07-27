@@ -260,11 +260,15 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   min-height: 34px;
 }
 .telemetry-voltage {
+  position: relative;
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-end;
-  gap: 3px;
+  justify-content: center;
+  min-height: 0;
+  margin-top: 0;
+  padding-top: 0;
   text-align: center;
 }
 .telemetry-voltage strong {
@@ -279,11 +283,18 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   color: var(--dim);
   font-size: 10px;
 }
+.telemetry-voltage span {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  text-align: left;
+}
 .telemetry-observed {
   width: 100%;
   line-height: 1.25;
   min-height: 13px;
-  text-align: center;
+  text-align: left;
 }
 .cop {
   min-height: 210px;
