@@ -75,7 +75,7 @@ rm "$label_root/mbp2tbkup"
 run_gate mbp2tbkup >/dev/null 2>&1 &&
   fail "missing filesystem label was accepted"
 
-run_gate hfs2tb >/dev/null 2>&1 &&
+run_gate unshared-test >/dev/null 2>&1 &&
   fail "non-Samba label was accepted"
 
 for label in "${gated_labels[@]}"; do

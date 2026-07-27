@@ -81,6 +81,25 @@ The Samba drain markers live under `/run` and therefore clear at reboot.
 `mount_disks.sh` explicitly clears the marker for an exact share after accepting
 or mounting its labeled filesystem.
 
+The dashboard retains kernel storage errors for seven days, but only errors from
+the current boot affect a disk health badge. The compact card shows current
+mount/access state; hover the current-error badge for the diagnostic or tap it
+on mobile. Historical errors remain available to the monitor without producing
+dashboard warnings.
+The manual Repair action supports exact-label USB exFAT and ext4 filesystems. It
+serializes disk lifecycle work, preserves whether the target was mounted, stops
+its consumers, runs bounded automatic repair followed by a read-only
+verification, and restores the prior state only after success. A failed check
+quarantines the label against remounting. Filesystem repair is not presented as
+a repair for failing media, USB transport, cabling, or power.
+
+For a device-offline or USB transport fault, the dashboard also exposes the
+existing per-port `uhubctl` power cycle as **Reset USB**. It selects only a
+power-controlled port containing exactly that one filesystem label and remains
+disabled until storage on the port is unmounted. The intended recovery order is
+Unmount, Reset USB, then Repair; resetting USB is never an implicit side effect
+of filesystem repair.
+
 `vanpi-disk-health-watchdog.timer` checks always-mounted exFAT flash media once
 a minute. A readable but read-only filesystem remains available and requires an
 explicit dashboard repair. If two consecutive checks show that `pi` can neither

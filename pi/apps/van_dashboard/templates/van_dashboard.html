@@ -223,7 +223,7 @@
     <section class="disk-device-section" aria-labelledby="disk-device-title">
       <div class="disk-device-heading"><div><h3 id="disk-device-title">USB disks</h3><p>Exact filesystem labels, live accessibility, and recorded kernel storage errors.</p></div><span id="disk-operation">Checking…</span></div>
       <div class="disk-device-list" id="disk-device-list"><div class="disk-device-empty">Checking attached disks…</div></div>
-      <p class="disk-device-note">Unmount stops active disk users safely. Automatically managed disks resume mounting after one minute; backup-only disks stay unmounted until requested. Repair runs automatic repair plus read-only verification and remounts only after success; a failure quarantines the filesystem.</p>
+      <p class="disk-device-note">Only current faults change a disk health badge; hover that badge for details or tap it on mobile. Unmount stops active users safely. For device-offline or USB transport faults: unmount, Reset USB, then Repair; Reset USB is blocked while storage on that port is mounted. Repair preserves the current mounted/unmounted state, runs offline filesystem repair plus read-only verification, and remounts only after success; failure quarantines the filesystem. Filesystem repair cannot heal faulty hardware, cabling, or power.</p>
     </section>
   </section>
 </div>

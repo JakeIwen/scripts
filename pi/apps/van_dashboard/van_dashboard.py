@@ -72,6 +72,9 @@ VOLTAGE_MON_CSV = os.environ.get(
     "/home/pi/dev/obd-things/tmp/battery/bcan_voltage.csv",
 )
 PROC_UPTIME = os.environ.get("VAN_DASHBOARD_PROC_UPTIME", "/proc/uptime")
+BOOT_ID_PATH = os.environ.get(
+    "VAN_DASHBOARD_BOOT_ID_PATH", "/proc/sys/kernel/random/boot_id"
+)
 STATE_PATH = os.path.expanduser(
     os.environ.get("VAN_DASHBOARD_STATE_PATH", "~/.van_dashboard_state.json")
 )
@@ -3548,6 +3551,7 @@ class DiskManager:
         hold_dir=DISK_EJECT_HOLD_DIR,
         health_dir=DISK_HEALTH_STATE_DIR,
         event_database=SYSTEM_MONITOR_DB,
+        boot_id_path=BOOT_ID_PATH,
         command=run_command,
         timeout=DISK_STATUS_TIMEOUT,
         action_timeout=DISK_ACTION_TIMEOUT,
@@ -3558,6 +3562,7 @@ class DiskManager:
         self.hold_dir = hold_dir
         self.health_dir = health_dir
         self.event_database = event_database
+        self.boot_id_path = boot_id_path
         self.command = command
         self.timeout = timeout
         self.action_timeout = action_timeout
@@ -3744,6 +3749,11 @@ class DiskManager:
                 state = json.loads(row["state_json"] or "{}")
             except (TypeError, ValueError):
                 continue
+            event_boot_id = state.get("boot_id") if isinstance(state, dict) else None
+            if not isinstance(event_boot_id, str) or not re.fullmatch(
+                r"[0-9a-f]{32}", event_boot_id
+            ):
+                event_boot_id = None
             event_labels = set()
             disk_io = state.get("disk_io") if isinstance(state, dict) else None
             devices = disk_io.get("devices") if isinstance(disk_io, dict) else None
@@ -3764,9 +3774,19 @@ class DiskManager:
                         "timestamp": int(row["timestamp"]),
                         "severity": row["severity"],
                         "message": message[:500],
+                        "boot_id": event_boot_id,
                     }
                 )
         return mapped, None
+
+    def _current_boot_id(self):
+        try:
+            boot_id = (
+                read_text_file(self.boot_id_path).strip().lower().replace("-", "")
+            )
+        except OSError:
+            return None
+        return boot_id if re.fullmatch(r"[0-9a-f]{32}", boot_id) else None
 
     @staticmethod
     def _mount_health(label, mounted, expected_mount):
@@ -3810,6 +3830,7 @@ class DiskManager:
         mount_labels = set(configuration["mount_labels"])
         always_mount_labels = set(configuration["always_mount_labels"])
         controllable_labels = set(configuration["controllable_labels"])
+        current_boot_id = self._current_boot_id()
         storage_events, event_error = self._storage_events(
             configuration["labels"], now - 7 * 24 * 60 * 60
         )
@@ -3845,30 +3866,72 @@ class DiskManager:
             saved_health = self._saved_health(label)
             checked_at = saved_health["checked_at"] if saved_health else None
             events = storage_events.get(label, [])
-            active_events = [
+            unresolved_events = [
                 event
                 for event in events
                 if checked_at is None or event["timestamp"] > checked_at
             ]
+            current_boot_events = [
+                event
+                for event in unresolved_events
+                if current_boot_id is not None and event["boot_id"] == current_boot_id
+            ]
+            previous_boot_events = [
+                event
+                for event in unresolved_events
+                if current_boot_id is not None
+                and event["boot_id"] is not None
+                and event["boot_id"] != current_boot_id
+            ]
+            unknown_boot_events = [
+                event
+                for event in unresolved_events
+                if event not in current_boot_events and event not in previous_boot_events
+            ]
             mount_health = self._mount_health(label, mounted, expected_mount)
+            if mounted and not mount_health["error"]:
+                observation = "Currently mounted read/write; access checks pass"
+            elif mounted:
+                observation = "Currently mounted with an access fault"
+            elif attached:
+                observation = "Currently attached and unmounted"
+            else:
+                observation = "Currently not attached"
             if mount_health["error"]:
                 health_state = "critical"
                 health_message = mount_health["error"]
-            elif active_events:
+                health_basis = "mount"
+                event_scope = None
+            elif current_boot_events:
                 health_state = "critical"
-                health_message = active_events[0]["message"]
-            elif saved_health:
+                health_message = current_boot_events[0]["message"]
+                health_basis = "kernel_event"
+                event_scope = "current_boot"
+            elif saved_health and saved_health["state"] in ("warning", "critical"):
                 health_state = saved_health["state"]
                 health_message = saved_health["message"]
+                health_basis = "offline_check"
+                event_scope = "cleared" if events else None
+            elif saved_health and not unresolved_events:
+                health_state = saved_health["state"]
+                health_message = saved_health["message"]
+                health_basis = "offline_check"
+                event_scope = "cleared" if events else None
             elif event_error:
                 health_state = "unknown"
                 health_message = event_error
+                health_basis = "history_unavailable"
+                event_scope = None
             elif attached:
                 health_state = "unknown"
                 health_message = "No offline filesystem check has been recorded"
+                health_basis = "unverified"
+                event_scope = None
             else:
                 health_state = "unknown"
                 health_message = "Disk is not attached"
+                health_basis = "unverified"
+                event_scope = None
             disks.append(
                 {
                     "label": label,
@@ -3893,18 +3956,36 @@ class DiskManager:
                     "health": {
                         "state": health_state,
                         "message": health_message,
+                        "basis": health_basis,
+                        "observation": observation,
+                        "event_scope": event_scope,
                         "checked_at": checked_at,
                         "read_only": mount_health["read_only"],
                         "accessible": mount_health["accessible"],
                         "writable": mount_health["writable"],
-                        "recent_error_count": len(active_events),
+                        "recent_error_count": len(unresolved_events),
+                        "current_boot_error_count": len(current_boot_events),
+                        "previous_boot_error_count": len(previous_boot_events),
                         "historical_error_count": len(events),
                         "latest_error_at": events[0]["timestamp"] if events else None,
                         "latest_error": events[0]["message"] if events else None,
+                        "current_error_at": (
+                            current_boot_events[0]["timestamp"]
+                            if current_boot_events
+                            else checked_at
+                            if saved_health
+                            and saved_health["state"] in ("warning", "critical")
+                            else None
+                        ),
+                        "current_error_message": (
+                            health_message
+                            if health_state in ("warning", "critical")
+                            else None
+                        ),
                         "repairable": (
                             attached
-                            and row.get("fstype") == "exfat"
-                            and label in always_mount_labels
+                            and row.get("fstype") in ("exfat", "ext4")
+                            and label in controllable_labels
                         ),
                     },
                 }

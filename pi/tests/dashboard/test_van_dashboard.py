@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
+from unittest import mock
 from email.message import Message
 from pathlib import Path
 from types import SimpleNamespace
@@ -1035,6 +1036,8 @@ class StoragePolicyManagerTests(unittest.TestCase):
 
 
 class DiskManagerTests(unittest.TestCase):
+    CURRENT_BOOT_ID = "b" * 32
+    PREVIOUS_BOOT_ID = "a" * 32
     CONFIG = """\
 MOUNT_LABELS=(
   movingparts
@@ -1105,12 +1108,20 @@ HDD_LABELS=(
 
     def manager(self, tempdir, command, **kwargs):
         config = os.path.join(tempdir, "disk_policy.sh")
+        boot_id = os.path.join(tempdir, "boot_id")
         with open(config, "w", encoding="utf-8") as handle:
             handle.write(self.CONFIG)
+        with open(boot_id, "w", encoding="ascii") as handle:
+            value = self.CURRENT_BOOT_ID
+            handle.write(
+                f"{value[:8]}-{value[8:12]}-{value[12:16]}-"
+                f"{value[16:20]}-{value[20:]}\n"
+            )
         return dashboard.DiskManager(
             config=config,
             control="/test/diskctl",
             hold_dir=os.path.join(tempdir, "holds"),
+            boot_id_path=boot_id,
             command=command,
             wall_clock=lambda: 1_000,
             **kwargs,
@@ -1180,6 +1191,7 @@ HDD_LABELS=(
                     "EXT4-fs (sda1): test I/O error",
                     json.dumps(
                         {
+                            "boot_id": self.PREVIOUS_BOOT_ID,
                             "disk_io": {
                                 "devices": [
                                     {"name": "sda", "labels": ["movingparts"]}
@@ -1206,9 +1218,15 @@ HDD_LABELS=(
                 event_database=database,
             )
             disk = manager.status()["disks"][0]
-            self.assertEqual(disk["health"]["state"], "critical")
+            self.assertEqual(disk["health"]["state"], "unknown")
+            self.assertIsNone(disk["health"]["event_scope"])
+            self.assertEqual(
+                disk["health"]["observation"], "Currently attached and unmounted"
+            )
             self.assertEqual(disk["health"]["recent_error_count"], 1)
-            self.assertIn("test I/O error", disk["health"]["message"])
+            self.assertEqual(disk["health"]["current_boot_error_count"], 0)
+            self.assertEqual(disk["health"]["previous_boot_error_count"], 1)
+            self.assertIsNone(disk["health"]["current_error_message"])
 
             with open(
                 os.path.join(health_dir, "movingparts.json"),
@@ -1227,8 +1245,78 @@ HDD_LABELS=(
                 )
             disk = manager.status()["disks"][0]
             self.assertEqual(disk["health"]["state"], "healthy")
+            self.assertEqual(disk["health"]["basis"], "offline_check")
+            self.assertEqual(disk["health"]["event_scope"], "cleared")
             self.assertEqual(disk["health"]["recent_error_count"], 0)
             self.assertEqual(disk["health"]["historical_error_count"], 1)
+
+    def test_current_boot_storage_error_remains_critical(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            database = os.path.join(tempdir, "events.sqlite3")
+            connection = sqlite3.connect(database)
+            connection.execute(
+                """
+                CREATE TABLE events (
+                    timestamp REAL,
+                    category TEXT,
+                    severity TEXT,
+                    message TEXT,
+                    state_json TEXT
+                )
+                """
+            )
+            connection.execute(
+                "INSERT INTO events VALUES (?, ?, ?, ?, ?)",
+                (
+                    990,
+                    "storage",
+                    "critical",
+                    "EXT4-fs (sda1): current I/O error",
+                    json.dumps(
+                        {
+                            "boot_id": self.CURRENT_BOOT_ID,
+                            "disk_io": {
+                                "devices": [
+                                    {"name": "sda", "labels": ["movingparts"]}
+                                ]
+                            },
+                        }
+                    ),
+                ),
+            )
+            connection.commit()
+            connection.close()
+
+            manager = self.manager(
+                tempdir,
+                lambda args, timeout: SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(self.lsblk()),
+                    stderr="",
+                ),
+                event_database=database,
+            )
+            with mock.patch.object(
+                dashboard.DiskManager,
+                "_mount_health",
+                return_value={
+                    "read_only": False,
+                    "accessible": True,
+                    "writable": True,
+                    "error": None,
+                },
+            ):
+                health = manager.status()["disks"][0]["health"]
+
+        self.assertEqual(health["state"], "critical")
+        self.assertEqual(health["event_scope"], "current_boot")
+        self.assertEqual(health["current_boot_error_count"], 1)
+        self.assertIn("current I/O error", health["current_error_message"])
+        self.assertEqual(health["current_error_at"], 990)
+        self.assertEqual(
+            health["observation"], "Currently mounted read/write; access checks pass"
+        )
+        self.assertTrue(health["repairable"])
 
     def test_always_mount_labels_must_be_automatic_mount_labels(self):
         invalid = self.CONFIG.replace(
@@ -1283,6 +1371,29 @@ HDD_LABELS=(
         self.assertIn((["/test/diskctl", "mount", "bigboi"], 23), calls)
         self.assertEqual(status["operation"]["status"], "complete")
         self.assertEqual(status["operation"]["label"], "bigboi")
+
+    def test_ext4_repair_runs_only_fixed_diskctl_argv_in_background(self):
+        calls = []
+
+        def command(args, timeout):
+            calls.append((list(args), timeout))
+            if args[0] == dashboard.LSBLK:
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(self.lsblk()),
+                    stderr="",
+                )
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            manager = self.manager(tempdir, command, action_timeout=23)
+            manager.start_action("movingparts", "repair")
+            manager.thread.join(2)
+            status = manager.status()
+
+        self.assertIn((["/test/diskctl", "repair", "movingparts"], 23), calls)
+        self.assertEqual(status["operation"]["status"], "complete")
+        self.assertEqual(status["operation"]["label"], "movingparts")
 
     def test_rejects_unknown_labels_actions_and_inapplicable_state(self):
         def command(args, timeout):
@@ -2687,11 +2798,9 @@ class DashboardRouteTests(unittest.TestCase):
             page.data.index(b"Requested policy"),
             page.data.index(b'id="disk-device-title"'),
         )
-        self.assertIn(
-            b"Automatically managed disks resume mounting after one minute",
-            page.data,
-        )
-        self.assertIn(b"backup-only disks stay unmounted", page.data)
+        self.assertIn(b"Only current faults change a disk health badge", page.data)
+        self.assertIn(b"Filesystem repair cannot heal faulty hardware", page.data)
+        self.assertIn(b"unmount, Reset USB, then Repair", page.data)
         self.assertIn(b"Ignition always overrides HDD permission", page.data)
         self.assertIn(b"requested-on Torrents switch is shown as blocked", page.data)
         self.assertIn(b"Requires HDDs enabled", page.data)
@@ -2712,6 +2821,13 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"Automatic mounting will resume in one minute", javascript.data)
         self.assertIn(b"stay unmounted until requested here", javascript.data)
         self.assertIn(b"disk.requires_disk_policy === false", javascript.data)
+        self.assertNotIn(b"PAST ERROR", javascript.data)
+        self.assertIn(b"data-disk-error", javascript.data)
+        self.assertIn(b"current error", javascript.data)
+        self.assertIn(b"restore its previous mounted/unmounted state", javascript.data)
+        self.assertIn(b"data-usb-port-label", javascript.data)
+        self.assertIn(b"Reset USB", javascript.data)
+        self.assertIn(b"diskUsbPowerPort", javascript.data)
         self.assertIn(b"data-speaker-mute", javascript.data)
         self.assertIn(b"data-ubnt-profile", javascript.data)
         self.assertIn(b"startUbntWifi('provision'", javascript.data)

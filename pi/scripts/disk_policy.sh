@@ -6,8 +6,6 @@ MOUNT_LABELS=(
   movingparts
   mbp1tbkup
   mbp2tbkup
-  hfs2tb
-  usbext
   EXFAT512
 )
 

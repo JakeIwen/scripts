@@ -134,9 +134,9 @@ EOF
 cat > "$fake_blkid" <<EOF
 #!/bin/bash
 case "\$*" in
-  *"-t LABEL=EXFAT512 -o device"*) printf '%s\\n' "$fake_device" ;;
-  *"-s LABEL -o value"*) printf '%s\\n' EXFAT512 ;;
-  *"-s TYPE -o value"*) printf '%s\\n' exfat ;;
+  *"-t LABEL=\${TEST_REPAIR_LABEL:-EXFAT512} -o device"*) printf '%s\\n' "$fake_device" ;;
+  *"-s LABEL -o value"*) printf '%s\\n' "\${TEST_REPAIR_LABEL:-EXFAT512}" ;;
+  *"-s TYPE -o value"*) printf '%s\\n' "\${TEST_REPAIR_FSTYPE:-exfat}" ;;
   *) exit 2 ;;
 esac
 EOF
@@ -158,8 +158,12 @@ cat > "$fake_findmnt" <<EOF
 #!/bin/bash
 if [[ "\$*" == *"-S $fake_device"* ]]; then
   exit 1
-elif [[ "\$*" == *"-M $mount_root/EXFAT512"* ]]; then
-  printf '%s\\n' "$fake_device"
+elif [[ "\$*" == *"-M $mount_root/"* ]]; then
+  if [[ "\${TEST_WAS_MOUNTED:-1}" == 1 ]]; then
+    printf '%s\\n' "$fake_device"
+  else
+    exit 1
+  fi
 else
   exit 2
 fi
@@ -201,6 +205,7 @@ DISKCTL_FINDMNT="$fake_findmnt" \
 DISKCTL_READLINK="$fake_readlink" \
 DISKCTL_LSBLK="$fake_lsblk" \
 DISKCTL_FSCK_EXFAT="$fake_fsck" \
+DISKCTL_FSCK_EXT4="$fake_fsck" \
 DISKCTL_PYTHON="$(command -v python3)" \
 DISKCTL_INSTALL="$fake_install" \
 DISKCTL_RM=/bin/rm \
@@ -227,5 +232,96 @@ assert payload["label"] == "EXFAT512"
 assert payload["state"] == "healthy"
 PY
   fail "successful repair did not record healthy state"
+
+: > "$calls"
+mkdir -p "$mount_root/movingparts"
+TEST_REPAIR_LABEL=movingparts TEST_REPAIR_FSTYPE=ext4 \
+DISK_EJECT_HOLD_DIR="$hold_dir" DISK_EJECT_NOW=1000000 \
+DISK_HEALTH_STATE_DIR="$health_dir" \
+DISKCTL_UNMOUNT_DISKS="$fake_unmount" \
+DISKCTL_MOUNT_DISKS="$fake_mount" \
+DISKCTL_INTERNET_SWITCHES="$fake_reconcile" \
+DISKCTL_POLICYCTL="$fake_policy" \
+DISKCTL_IGNITION_FLAG="$test_root/ignition" \
+DISKCTL_LIFECYCLE_LOCK="$test_root/lifecycle.lock" \
+DISKCTL_FLOCK="$fake_flock" \
+DISKCTL_SUDO="$fake_sudo" \
+DISKCTL_BLKID="$fake_blkid" \
+DISKCTL_FINDMNT="$fake_findmnt" \
+DISKCTL_READLINK="$fake_readlink" \
+DISKCTL_LSBLK="$fake_lsblk" \
+DISKCTL_FSCK_EXFAT="$fake_fsck" \
+DISKCTL_FSCK_EXT4="$fake_fsck" \
+DISKCTL_PYTHON="$(command -v python3)" \
+DISKCTL_INSTALL="$fake_install" \
+DISKCTL_RM=/bin/rm \
+DISKCTL_TOUCH=/usr/bin/touch \
+DISKCTL_DATE=/bin/date \
+DISKCTL_MKTEMP=/usr/bin/mktemp \
+DISKCTL_MOUNT_ROOT="$mount_root" \
+DISKCTL_REQUIRE_BLOCK_DEVICE=0 \
+DISKCTL_TIMEOUT="$fake_timeout" \
+bash "$repo_root/pi/scripts/diskctl" repair movingparts >/dev/null ||
+  fail "verified ext4 repair workflow failed"
+
+expected_ext4_calls=$'unmount movingparts\nfsck -pf -- '"$fake_device"$'\nfsck -fn -- '"$fake_device"$'\nmount movingparts\nreconcile'
+[[ $(cat "$calls") == "$expected_ext4_calls" ]] ||
+  fail "ext4 repair did not preserve mount state and restore policy in order"
+[[ ! -e "$health_dir/quarantine/movingparts" ]] ||
+  fail "successful ext4 repair left the filesystem quarantined"
+python3 - "$health_dir/movingparts.json" <<'PY' ||
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    payload = json.load(handle)
+assert payload["label"] == "movingparts"
+assert payload["state"] == "healthy"
+assert payload["message"] == "ext4 repaired, verified clean, and remounted"
+PY
+  fail "successful ext4 repair did not record healthy state"
+
+: > "$calls"
+mkdir -p "$mount_root/bigboi"
+TEST_REPAIR_LABEL=bigboi TEST_REPAIR_FSTYPE=ext4 TEST_WAS_MOUNTED=0 \
+DISK_EJECT_HOLD_DIR="$hold_dir" DISK_EJECT_NOW=1000000 \
+DISK_HEALTH_STATE_DIR="$health_dir" \
+DISKCTL_UNMOUNT_DISKS="$fake_unmount" \
+DISKCTL_MOUNT_DISKS="$fake_mount" \
+DISKCTL_INTERNET_SWITCHES="$fake_reconcile" \
+DISKCTL_POLICYCTL="$fake_policy" \
+DISKCTL_IGNITION_FLAG="$test_root/ignition" \
+DISKCTL_LIFECYCLE_LOCK="$test_root/lifecycle.lock" \
+DISKCTL_FLOCK="$fake_flock" \
+DISKCTL_SUDO="$fake_sudo" \
+DISKCTL_BLKID="$fake_blkid" \
+DISKCTL_FINDMNT="$fake_findmnt" \
+DISKCTL_READLINK="$fake_readlink" \
+DISKCTL_LSBLK="$fake_lsblk" \
+DISKCTL_FSCK_EXFAT="$fake_fsck" \
+DISKCTL_FSCK_EXT4="$fake_fsck" \
+DISKCTL_PYTHON="$(command -v python3)" \
+DISKCTL_INSTALL="$fake_install" \
+DISKCTL_RM=/bin/rm \
+DISKCTL_TOUCH=/usr/bin/touch \
+DISKCTL_DATE=/bin/date \
+DISKCTL_MKTEMP=/usr/bin/mktemp \
+DISKCTL_MOUNT_ROOT="$mount_root" \
+DISKCTL_REQUIRE_BLOCK_DEVICE=0 \
+DISKCTL_TIMEOUT="$fake_timeout" \
+bash "$repo_root/pi/scripts/diskctl" repair bigboi >/dev/null ||
+  fail "unmounted ext4 repair workflow failed"
+
+expected_unmounted_calls=$'unmount bigboi\nfsck -pf -- '"$fake_device"$'\nfsck -fn -- '"$fake_device"
+[[ $(cat "$calls") == "$expected_unmounted_calls" ]] ||
+  fail "repair did not preserve an ext4 disk's unmounted state"
+python3 - "$health_dir/bigboi.json" <<'PY' ||
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    payload = json.load(handle)
+assert payload["state"] == "healthy"
+assert payload["message"].endswith("preserved unmounted state")
+PY
+  fail "unmounted ext4 repair did not record preserved state"
 
 echo "PASS: diskctl label, hold, policy, and ignition safeguards"

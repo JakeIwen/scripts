@@ -16,6 +16,7 @@ findmnt_command=${DISKCTL_FINDMNT:-/usr/bin/findmnt}
 readlink_command=${DISKCTL_READLINK:-/usr/bin/readlink}
 lsblk_command=${DISKCTL_LSBLK:-/usr/bin/lsblk}
 fsck_exfat_command=${DISKCTL_FSCK_EXFAT:-/usr/sbin/fsck.exfat}
+fsck_ext4_command=${DISKCTL_FSCK_EXT4:-/usr/sbin/e2fsck}
 python_command=${DISKCTL_PYTHON:-/usr/bin/python3}
 install_command=${DISKCTL_INSTALL:-/usr/bin/install}
 rm_command=${DISKCTL_RM:-/usr/bin/rm}
@@ -103,7 +104,7 @@ clear_health_quarantine() {
   "$sudo_command" "$rm_command" -f -- "$health_quarantine"
 }
 
-resolve_exact_exfat() {
+resolve_exact_filesystem() {
   local query actual_label actual_type parent_rows name type extra transport
   local -a matches=() parents=()
 
@@ -130,10 +131,13 @@ resolve_exact_exfat() {
   actual_type=$("$sudo_command" "$blkid_command" -s TYPE -o value -- "$device") ||
     return 1
   [[ "$actual_label" == "$label" ]] || return 1
-  if [[ "$actual_type" != exfat ]]; then
-    echo "diskctl: automated repair currently supports exFAT only ($label is $actual_type)" >&2
-    return 1
-  fi
+  case "$actual_type" in
+    exfat|ext4) filesystem=$actual_type ;;
+    *)
+      echo "diskctl: automatic repair does not support $actual_type ($label)" >&2
+      return 1
+      ;;
+  esac
 
   parent_rows=$("$lsblk_command" -s -nrpo NAME,TYPE -- "$device") || return 1
   while read -r name type extra; do
@@ -222,20 +226,35 @@ case "$action" in
     fi
     ;;
   repair)
-    disk_policy_is_always_mount_label "$label" || {
-      echo "diskctl: automated repair is currently limited to always-mounted flash media" >&2
-      exit 1
-    }
     [[ ! -e "$ignition_flag" ]] || {
       echo "diskctl: ignition is on; refusing filesystem repair" >&2
       exit 1
     }
-    [[ -x "$fsck_exfat_command" ]] || {
-      echo "diskctl: $fsck_exfat_command is unavailable" >&2
+    device=
+    filesystem=
+    parent=
+    resolve_exact_filesystem || exit 1
+    original_device=$device
+    original_filesystem=$filesystem
+    original_parent=$parent
+    case "$filesystem" in
+      exfat)
+        fsck_command=$fsck_exfat_command
+        filesystem_name=exFAT
+        ;;
+      ext4)
+        fsck_command=$fsck_ext4_command
+        filesystem_name=ext4
+        ;;
+    esac
+    [[ -x "$fsck_command" ]] || {
+      echo "diskctl: $fsck_command is unavailable" >&2
       exit 1
     }
 
-    disk_eject_hold_set "$label" 300 >/dev/null || exit 1
+    if disk_policy_is_mount_label "$label"; then
+      disk_eject_hold_set "$label" 300 >/dev/null || exit 1
+    fi
     exec 9>"$lifecycle_lock" || exit 1
     "$flock_command" -w 55 9 || {
       echo "diskctl: disk policy is busy; repair hold remains active" >&2
@@ -245,18 +264,48 @@ case "$action" in
       echo "diskctl: ignition turned on before repair started" >&2
       exit 1
     }
+    resolve_exact_filesystem || exit 1
+    if [[ "$device" != "$original_device" ||
+          "$filesystem" != "$original_filesystem" ||
+          "$parent" != "$original_parent" ]]; then
+      echo "diskctl: device identity changed before $label repair started" >&2
+      exit 1
+    fi
+    target="$mount_root/$label"
+    mounted=$("$findmnt_command" -rn -M "$target" -o SOURCE 2>&1)
+    status=$?
+    if (( status == 0 )) && [[ -n "$mounted" && "$mounted" != *$'\n'* ]]; then
+      resolved_mounted=$("$readlink_command" -f -- "$mounted") || exit 1
+      [[ "$resolved_mounted" == "$device" ]] || {
+        echo "diskctl: $target is mounted from $resolved_mounted, not $device" >&2
+        exit 1
+      }
+      was_mounted=1
+    elif (( status == 1 )) && [[ -z "$mounted" ]]; then
+      was_mounted=0
+    else
+      echo "diskctl: cannot determine the pre-repair mount state for $label" >&2
+      exit 1
+    fi
     set_health_quarantine || exit 1
-    write_health_state checking "Filesystem repair is running" || exit 1
+    write_health_state checking "$filesystem_name filesystem repair is running" || exit 1
 
     if ! "$unmount_disks" "$label"; then
       write_health_state critical "Could not safely unmount the filesystem for repair" || true
       echo "diskctl: could not safely unmount $label for repair" >&2
       exit 1
     fi
-    resolve_exact_exfat || {
-      write_health_state critical "Exact exFAT device verification failed after unmount" || true
+    resolve_exact_filesystem || {
+      write_health_state critical "Exact filesystem device verification failed after unmount" || true
       exit 1
     }
+    if [[ "$device" != "$original_device" ||
+          "$filesystem" != "$original_filesystem" ||
+          "$parent" != "$original_parent" ]]; then
+      write_health_state critical "USB device identity changed during filesystem repair" || true
+      echo "diskctl: device identity changed while preparing $label for repair" >&2
+      exit 1
+    fi
     mounted=$("$findmnt_command" -rn -S "$device" -o TARGET 2>&1)
     status=$?
     if (( status == 0 )) || (( status != 1 )) || [[ -n "$mounted" ]]; then
@@ -265,52 +314,115 @@ case "$action" in
       exit 1
     fi
 
-    repair_output=$(
-      "$sudo_command" "$fsck_exfat_command" -p -- "$device" 2>&1
-    )
+    if [[ "$filesystem" == exfat ]]; then
+      repair_output=$(
+        "$sudo_command" "$fsck_command" -p -- "$device" 2>&1
+      )
+    else
+      repair_output=$(
+        "$sudo_command" "$fsck_command" -pf -- "$device" 2>&1
+      )
+    fi
     repair_status=$?
-    if (( repair_status != 0 && repair_status != 1 )); then
-      write_health_state critical \
-        "Automatic exFAT repair failed (status $repair_status): ${repair_output: -300}" || true
-      echo "diskctl: exFAT repair failed (status $repair_status): $repair_output" >&2
+    if [[ "$filesystem" == exfat ]]; then
+      repair_status_ok=$((repair_status == 0 || repair_status == 1))
+    else
+      # e2fsck status 2 explicitly requests a system reboot. Leave that case
+      # quarantined and unmounted instead of treating it as safe to restore.
+      repair_status_ok=$((repair_status == 0 || repair_status == 1))
+    fi
+    if (( ! repair_status_ok )); then
+      if [[ "$filesystem" == ext4 && "$repair_status" == 2 ]]; then
+        write_health_state warning \
+          "ext4 repair corrected errors but requested a reboot; filesystem remains quarantined and unmounted" || true
+      else
+        write_health_state critical \
+          "Automatic $filesystem_name repair failed (status $repair_status): ${repair_output: -300}" || true
+      fi
+      echo "diskctl: $filesystem_name repair failed (status $repair_status): $repair_output" >&2
       exit 1
     fi
-    verify_output=$(
-      "$sudo_command" "$fsck_exfat_command" -n -- "$device" 2>&1
-    )
+    if [[ "$filesystem" == exfat ]]; then
+      verify_output=$(
+        "$sudo_command" "$fsck_command" -n -- "$device" 2>&1
+      )
+    else
+      verify_output=$(
+        "$sudo_command" "$fsck_command" -fn -- "$device" 2>&1
+      )
+    fi
     verify_status=$?
     if (( verify_status != 0 )); then
       write_health_state critical \
-        "exFAT remained inconsistent after repair (status $verify_status): ${verify_output: -300}" || true
-      echo "diskctl: exFAT verification failed: $verify_output" >&2
+        "$filesystem_name remained inconsistent after repair (status $verify_status): ${verify_output: -300}" || true
+      echo "diskctl: $filesystem_name verification failed: $verify_output" >&2
       exit 1
     fi
 
     clear_health_quarantine || exit 1
-    disk_eject_hold_clear "$label" || exit 1
+    if disk_policy_is_mount_label "$label"; then
+      disk_eject_hold_clear "$label" || exit 1
+    fi
+    if (( ! was_mounted )); then
+      write_health_state healthy \
+        "$filesystem_name repaired and verified clean; preserved unmounted state"
+      exit $?
+    fi
+
     [[ ! -e "$ignition_flag" ]] || {
-      write_health_state warning "Filesystem repaired but left unmounted because ignition turned on" || true
+      write_health_state warning \
+        "$filesystem_name repaired but left unmounted because ignition turned on" || true
       echo "diskctl: ignition turned on; repaired filesystem remains unmounted" >&2
       exit 1
     }
+    if disk_policy_is_mount_label "$label" &&
+       ! disk_policy_is_always_mount_label "$label"; then
+      policy=$("$policyctl" read 2>&1)
+      status=$?
+      read -r disks_enabled torrents_enabled starlink_torrents extra <<< "$policy"
+      if (( status != 0 )) ||
+         [[ ! "$disks_enabled" =~ ^[01]$ ||
+            ! "$torrents_enabled" =~ ^[01]$ ||
+            ! "$starlink_torrents" =~ ^[01]$ || -n ${extra:-} ]]; then
+        write_health_state warning \
+          "$filesystem_name repaired but requested disk policy could not be verified" || true
+        echo "diskctl: repaired $label but could not verify requested disk policy" >&2
+        exit 1
+      fi
+      if [[ "$disks_enabled" != 1 ]]; then
+        write_health_state healthy \
+          "$filesystem_name repaired and verified clean; left unmounted by requested policy"
+        exit $?
+      fi
+    fi
     "$mount_disks" "$label" || {
-      write_health_state warning "Filesystem repaired but remount failed" || true
+      write_health_state warning "$filesystem_name repaired but remount failed" || true
       exit 1
     }
-    mounted=$("$findmnt_command" -rn -M "$mount_root/$label" -o SOURCE 2>&1)
+    mounted=$("$findmnt_command" -rn -M "$target" -o SOURCE 2>&1)
     status=$?
     resolved_mounted=$("$readlink_command" -f -- "$mounted" 2>/dev/null) || true
     if (( status != 0 )) || [[ "$resolved_mounted" != "$device" ]]; then
-      write_health_state warning "Filesystem repaired but exact remount verification failed" || true
+      write_health_state warning \
+        "$filesystem_name repaired but exact remount verification failed" || true
       exit 1
     fi
-    probe="$mount_root/$label/.vanpi_health_probe.$$"
+    probe="$target/.vanpi_health_probe.$$"
     if ! "$timeout_command" 10 "$touch_command" "$probe" ||
        ! "$rm_command" -f -- "$probe"; then
-      write_health_state critical "Filesystem repaired and mounted, but pi cannot write to it" || true
+      write_health_state critical \
+        "$filesystem_name repaired and mounted, but pi cannot write to it" || true
       echo "diskctl: repaired mount is not writable by pi" >&2
       exit 1
     fi
-    write_health_state healthy "exFAT repaired, verified clean, and remounted"
+    write_health_state healthy \
+      "$filesystem_name repaired, verified clean, and remounted" || exit 1
+    if disk_policy_is_mount_label "$label" &&
+       ! disk_policy_is_always_mount_label "$label"; then
+      exec 9>&-
+      "$internet_switches" || {
+        echo "WARNING: $label was repaired but policy reconciliation failed" >&2
+      }
+    fi
     ;;
 esac

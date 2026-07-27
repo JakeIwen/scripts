@@ -1252,6 +1252,11 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   border-radius: 50%;
   background: #71818a;
 }
+.disk-error-trigger {
+  background: transparent;
+  font: inherit;
+  cursor: help;
+}
 .disk-device-card.good .disk-device-state {
   border-color: #39725b;
   color: #bcebd5;
@@ -1274,12 +1279,24 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   background: #dab766;
 }
 .disk-device-detail {
+  display: grid;
+  gap: 3px;
   min-width: 0;
-  overflow: hidden;
   color: var(--dim);
   font-size: 9px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.3;
+}
+.disk-device-detail > span {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #c4d0d7;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.disk-device-detail > small {
+  color: var(--dim);
+  font-size: 8px;
+  line-height: 1.35;
 }
 .disk-device-action {
   min-width: 64px;
@@ -1302,6 +1319,11 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   border-color: #75643f;
   background: #332f24;
   color: #edd79f;
+}
+.disk-device-action.usb-reset {
+  border-color: #526c76;
+  background: #23333a;
+  color: #b9dce7;
 }
 .disk-device-controls {
   display: flex;

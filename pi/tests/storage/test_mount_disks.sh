@@ -48,7 +48,7 @@ md_clear_samba_drain movingparts ||
 assert_eq "clear movingparts" "$(cat "$fake_samba_calls")" \
   "Samba drain clear did not use the exact filesystem label"
 : > "$fake_samba_calls"
-md_clear_samba_drain hfs2tb ||
+md_clear_samba_drain unshared-test ||
   fail "non-Samba disk was treated as a drain-clear failure"
 [[ ! -s "$fake_samba_calls" ]] ||
   fail "non-Samba disk invoked Samba drain control"
@@ -186,7 +186,7 @@ fi
 assert_eq "/dev/vanished-test-device" "$(cat "$TEST_MOVING_SOURCE_FILE")" \
   "failed normal stale unmount changed target state"
 
-MOUNT_LABELS=(movingparts mbp1tbkup mbp2tbkup hfs2tb usbext EXFAT512)
+MOUNT_LABELS=(movingparts mbp1tbkup mbp2tbkup EXFAT512)
 
 # A failure for the first label must survive later successful/missing labels.
 calls=()
@@ -200,7 +200,7 @@ md_print_mounts() { return 0; }
 mount_disks_main >/dev/null 2>&1
 status=$?
 assert_eq 1 "$status" "multi-disk reconciliation must propagate one label failure"
-assert_eq 6 "${#calls[@]}" "multi-disk reconciliation must still check every label"
+assert_eq 4 "${#calls[@]}" "multi-disk reconciliation must still check every label"
 
 # A dashboard eject hold must skip only that label during automatic (no-arg)
 # reconciliation. An explicit manual mount remains available after diskctl
@@ -214,7 +214,7 @@ mntdsk() {
   return 0
 }
 mount_disks_main >/dev/null 2>&1 || fail "eject hold made reconciliation fail"
-assert_eq 5 "${#calls[@]}" "automatic reconciliation did not skip exactly one held label"
+assert_eq 3 "${#calls[@]}" "automatic reconciliation did not skip exactly one held label"
 [[ " ${calls[*]} " != *" mbp2tbkup "* ]] || fail "held label was automatically mounted"
 calls=()
 mount_disks_main mbp2tbkup >/dev/null 2>&1 || fail "explicit mount was blocked by eject hold"

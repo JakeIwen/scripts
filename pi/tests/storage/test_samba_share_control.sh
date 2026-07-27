@@ -87,11 +87,6 @@ expected=$'smbcontrol:-t 3 smbd close-share MovingParts\nsmbcontrol:-t 3 smbd cl
   fail "share control did not target exact configured share names"
 
 : > "$calls"
-run_control close hfs2tb usbext >/dev/null ||
-  fail "labels without Samba shares were treated as failures"
-[[ ! -s "$calls" ]] || fail "unshared labels invoked smbcontrol"
-
-: > "$calls"
 TEST_SMBD_STATE=inactive run_control close bigboi >/dev/null ||
   fail "inactive smbd was treated as a close failure"
 [[ ! -s "$calls" ]] || fail "inactive smbd invoked smbcontrol"

@@ -7,6 +7,7 @@ let dashboard = null,
   priceChecks = null,
   systemMonitor = null,
   computeMetrics = null,
+  usbPortStatus = null,
   backupState = null,
   ignitionMonitor = null,
   connectivityState = null,
@@ -833,6 +834,7 @@ function renderUsbDevices(response) {
     labels = state.storage_labels || [],
     hasData = Number.isFinite(state.last_success_at),
     stale = Boolean(state.last_error);
+  usbPortStatus = response.usb_ports || null;
   tile.classList.remove('good', 'warning', 'unknown');
   tile.classList.add(!hasData ? 'unknown' : stale || unplugged ? 'warning' : 'good');
   $('usb-pill').textContent = !hasData ? 'NO DATA' : stale ? 'STALE' : unplugged ? 'CHANGE' : 'LIVE';
@@ -849,7 +851,8 @@ function renderUsbDevices(response) {
       ? `Updated ${age(state.last_success_at)}`
       : 'No data';
   $('usb-panel').setAttribute('aria-busy', 'false');
-  renderUsbPorts(response.usb_ports);
+  renderUsbPorts(usbPortStatus);
+  if (diskStatus) renderDiskStatus(diskStatus);
   const deviceRows = (state.devices || [])
     .map((device) => {
       const event = usbEventLabel(device.event),
@@ -880,6 +883,7 @@ async function refreshUsbDevices(showErrors = false) {
     renderUsbDevices(response);
     return response;
   } catch (error) {
+    usbPortStatus = null;
     $('usb-devices').classList.remove('good', 'warning');
     $('usb-devices').classList.add('unknown');
     $('usb-pill').textContent = 'NO DATA';
@@ -908,18 +912,21 @@ async function changeUsbPort(button) {
     return;
   usbPortBusy = true;
   $('usb-panel').classList.add('usb-port-busy');
+  if (diskStatus) renderDiskStatus(diskStatus);
   try {
     const response = await post('usb-ports/action', {
       port: button.dataset.usbPortKey,
       action: actionName,
     });
-    renderUsbPorts(response.usb_ports);
+    usbPortStatus = response.usb_ports;
+    renderUsbPorts(usbPortStatus);
     toast(response.message || 'USB port action started');
   } catch (error) {
     toast(error.message, true);
     await refreshUsbDevices(false).catch(() => {});
   } finally {
     usbPortBusy = false;
+    if (diskStatus) renderDiskStatus(diskStatus);
   }
 }
 async function recoverUsb2() {
@@ -2487,7 +2494,11 @@ function diskState(disk, operation) {
   if (disk.health?.state === 'critical')
     return { className: 'bad', label: 'HEALTH ERROR', holdSeconds: 0 };
   if (disk.health?.state === 'warning')
-    return { className: 'held', label: 'WARNING', holdSeconds: 0 };
+    return {
+      className: 'held',
+      label: 'WARNING',
+      holdSeconds: 0,
+    };
   if (!disk.attached) return { className: '', label: 'NO DEVICE', holdSeconds: 0 };
   if (disk.mounted) return { className: 'good', label: 'MOUNTED', holdSeconds: 0 };
   if (holdSeconds)
@@ -2495,15 +2506,56 @@ function diskState(disk, operation) {
   return { className: 'bad', label: 'UNMOUNTED', holdSeconds: 0 };
 }
 function diskDetail(disk, state) {
-  if (disk.error) return disk.error;
-  if (!disk.attached) return `Not attached · expects ${disk.expected_mount}`;
-  const details = [];
-  if (disk.health?.message) details.push(disk.health.message);
-  if (Number.isFinite(disk.size_bytes)) details.push(formatBytes(disk.size_bytes));
-  if (disk.filesystem) details.push(disk.filesystem);
-  if (disk.mounted) details.push(disk.expected_mount);
-  if (state.holdSeconds) details.push(`auto-mount held ${state.holdSeconds}s`);
-  return details.join(' · ') || 'Attached USB disk';
+  if (disk.error)
+    return {
+      primary: 'Disk status is unavailable',
+      context: '',
+      currentError: disk.error,
+    };
+  if (!disk.attached)
+    return {
+      primary: `Not attached · expects ${disk.expected_mount}`,
+      context: '',
+      currentError: '',
+    };
+  const health = disk.health || {},
+    identity = [],
+    currentError = [];
+  if (Number.isFinite(disk.size_bytes)) identity.push(formatBytes(disk.size_bytes));
+  if (disk.filesystem) identity.push(disk.filesystem);
+  if (disk.mounted) identity.push(disk.expected_mount);
+  if (state.holdSeconds) identity.push(`auto-mount held ${state.holdSeconds}s`);
+  if (health.current_error_message) {
+    currentError.push(health.current_error_message);
+    if (Number.isFinite(health.current_error_at)) {
+      currentError.push(
+        `Observed ${eventTime(health.current_error_at)} (${backupAge(health.current_error_at)})`,
+      );
+    }
+    const count = Number(health.current_boot_error_count) || 0;
+    if (count > 1) currentError.push(`${count} matching events this boot`);
+  }
+  return {
+    primary: health.observation || 'Attached USB disk',
+    context: identity.join(' · '),
+    currentError: currentError.join(' · '),
+  };
+}
+function diskUsbPowerPort(label) {
+  const matches = new Map();
+  (usbPortStatus?.hubs || []).forEach((hub) => {
+    (hub.ports || []).forEach((port) => {
+      if (
+        port.method === 'power' &&
+        Array.isArray(port.storage_labels) &&
+        port.storage_labels.length === 1 &&
+        port.storage_labels.includes(label)
+      ) {
+        matches.set(port.key, port);
+      }
+    });
+  });
+  return matches.size === 1 ? [...matches.values()][0] : null;
 }
 function renderDiskStatus(next) {
   diskStatus = next;
@@ -2541,6 +2593,7 @@ function renderDiskStatus(next) {
     ? disks
         .map((disk) => {
           const state = diskState(disk, operation),
+            detail = diskDetail(disk, state),
             action = disk.mounted ? 'eject' : 'mount',
             canControl =
               disk.controllable &&
@@ -2560,15 +2613,34 @@ function renderDiskStatus(next) {
               operation.status !== 'running' &&
               !diskBusy,
             repairControl = disk.health?.repairable
-              ? `<button class="disk-device-action repair" type="button" data-disk-action="repair" data-disk-label="${esc(disk.label)}" title="Safely repair and verify ${esc(disk.label)}" ${repairAllowed ? '' : 'disabled'}>Repair</button>`
+              ? `<button class="disk-device-action repair" type="button" data-disk-action="repair" data-disk-label="${esc(disk.label)}" title="Safely unmount, repair, verify, and restore the prior mount state for ${esc(disk.label)}" ${repairAllowed ? '' : 'disabled'}>Repair</button>`
+              : '',
+            usbPort = disk.attached ? diskUsbPowerPort(disk.label) : null,
+            usbResetAllowed =
+              Boolean(usbPort) &&
+              !disk.mounted &&
+              usbPort.enabled !== false &&
+              !(usbPort.mounted_labels || []).length &&
+              usbPortStatus?.operation?.status !== 'running' &&
+              !usbPortBusy &&
+              operation.status !== 'running' &&
+              !diskBusy,
+            usbResetTitle = disk.mounted
+              ? `Safely unmount ${disk.label} before resetting its USB power`
+              : `Power-cycle the independently controlled USB port for ${disk.label}; use this for device-offline or USB transport faults`,
+            usbResetControl = usbPort
+              ? `<button class="disk-device-action usb-reset" type="button" data-usb-port-action="cycle" data-usb-port-key="${esc(usbPort.key)}" data-usb-port-label="${esc(`USB port for ${disk.label}`)}" title="${esc(usbResetTitle)}" ${usbResetAllowed ? '' : 'disabled'}>Reset USB</button>`
               : '',
             control = disk.controllable
-              ? `<span class="disk-device-controls"><button class="disk-device-action ${action}" type="button" data-disk-action="${action}" data-disk-label="${esc(disk.label)}" title="${esc(actionTitle)}" ${actionAllowed ? '' : 'disabled'}>${action === 'eject' ? 'Unmount' : 'Mount'}</button>${repairControl}</span>`
+              ? `<span class="disk-device-controls"><button class="disk-device-action ${action}" type="button" data-disk-action="${action}" data-disk-label="${esc(disk.label)}" title="${esc(actionTitle)}" ${actionAllowed ? '' : 'disabled'}>${action === 'eject' ? 'Unmount' : 'Mount'}</button>${usbResetControl}${repairControl}</span>`
               : '<span class="disk-device-role">Backup-managed</span>',
             holdData = state.holdSeconds
               ? ` data-disk-hold-until="${Number(disk.hold_until)}"`
-              : '';
-          return `<article class="disk-device-card ${state.className}"><strong class="disk-device-name">${esc(disk.label)}</strong><span class="disk-device-state"${holdData}>${esc(state.label)}</span><span class="disk-device-detail">${esc(diskDetail(disk, state))}</span>${control}</article>`;
+              : '',
+            stateControl = detail.currentError
+              ? `<button class="disk-device-state disk-error-trigger" type="button" data-disk-error="${esc(detail.currentError)}" data-disk-error-label="${esc(disk.label)}" title="${esc(detail.currentError)}">${esc(state.label)}</button>`
+              : `<span class="disk-device-state"${holdData}>${esc(state.label)}</span>`;
+          return `<article class="disk-device-card ${state.className}"><strong class="disk-device-name">${esc(disk.label)}</strong>${stateControl}<span class="disk-device-detail" title="${esc([detail.primary, detail.context].filter(Boolean).join(' · '))}"><span>${esc(detail.primary)}</span>${detail.context ? `<small>${esc(detail.context)}</small>` : ''}</span>${control}</article>`;
         })
         .join('')
     : '<div class="disk-device-empty">No configured disk labels were returned.</div>';
@@ -2624,7 +2696,7 @@ async function changeDiskAction(button) {
   } else if (
     actionName === 'repair' &&
     !window.confirm(
-      `Repair ${label}? This will disconnect disk users, safely unmount it, modify the filesystem to repair detected errors, verify it read-only, and remount only if verification succeeds.`,
+      `Repair ${label}? This will disconnect disk users, safely unmount it if needed, run automatic ${disk?.filesystem || 'filesystem'} repair, verify it read-only, and restore its previous mounted/unmounted state only after verification succeeds. This can take a long time.`,
     )
   ) {
     return;
@@ -3603,6 +3675,11 @@ document.addEventListener('change', (event) => {
     });
 });
 document.addEventListener('click', (event) => {
+  const diskError = event.target.closest('[data-disk-error]');
+  if (diskError)
+    window.alert(
+      `${diskError.dataset.diskErrorLabel || 'Disk'} current error\n\n${diskError.dataset.diskError}`,
+    );
   const computeJobDetails = event.target.closest('[data-compute-job-details]');
   if (computeJobDetails) toggleComputeJobDetails(computeJobDetails);
   const computeTask = event.target.closest('[data-compute-task-filter]');
