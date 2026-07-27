@@ -2686,7 +2686,7 @@ function renderLightingQuick(next) {
           ? 'OFF'
           : known
             ? 'MIXED'
-            : 'NO DATA';
+            : '';
     slider.disabled = !known;
     slider.value = level;
     $(`lighting-room-${groupId}-level`).textContent = known ? `${level}%` : '—';

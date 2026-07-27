@@ -2064,6 +2064,23 @@ body.busy [data-action] {
   gap: 7px;
   font-size: 10px;
 }
+.usb-storage-summary {
+  gap: 5px;
+  font-size: 10px;
+}
+.usb-storage-heading {
+  color: var(--dim);
+}
+.usb-storage-devices {
+  width: 100%;
+  overflow: visible;
+  color: #c5d1d7;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-align: left;
+  text-overflow: clip;
+  white-space: normal;
+}
 .usb-tile.good {
   border-color: #356c58;
   background: linear-gradient(145deg, #1d302a, #15231f);

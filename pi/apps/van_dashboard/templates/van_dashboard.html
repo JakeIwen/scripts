@@ -95,9 +95,9 @@
     <button class="tile usb-tile unknown" id="usb-devices" data-dashboard-tile data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="usb-panel">
       <span class="pill" id="usb-pill">NO DATA</span><span class="tile-heading"><span class="tile-icon" aria-hidden="true">🔌</span><span class="tile-title">USB Devices</span></span>
       <span class="tile-detail" id="usb-summary">Reading live USB devices…</span>
-      <span class="status-lines">
-        <span class="status-line"><span>Connected</span><span id="usb-connected">Checking…</span></span>
-        <span class="status-line"><span>Storage</span><span id="usb-storage">—</span></span>
+      <span class="status-lines usb-storage-summary">
+        <span class="usb-storage-heading">Connected storage<span class="sr-only">; <span id="usb-connected">checking connected device count</span> total USB devices</span></span>
+        <span class="usb-storage-devices" id="usb-storage">—</span>
       </span>
     </button>
     <button class="tile backup-tile unknown" id="backups" data-dashboard-tile data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="backup-panel">
@@ -134,17 +134,17 @@
       </button>
       <div class="lighting-quick" aria-label="Room lighting controls">
         <div class="lighting-quick-row" data-lighting-quick-room="cab">
-          <button class="lighting-room-power" id="lighting-room-cab-power" data-action data-light-target="group:cab" disabled aria-pressed="mixed"><span class="network-dot" id="lighting-room-cab-dot"></span><span>Cab</span><strong id="lighting-room-cab-state">NO DATA</strong></button>
+          <button class="lighting-room-power" id="lighting-room-cab-power" data-action data-light-target="group:cab" disabled aria-pressed="mixed"><span class="network-dot" id="lighting-room-cab-dot"></span><span>Cab</span><strong id="lighting-room-cab-state"></strong></button>
           <input class="lighting-room-slider" id="lighting-room-cab-slider" data-action data-light-group-brightness="cab" type="range" min="1" max="100" value="100" disabled aria-label="Cab brightness">
           <output class="lighting-quick-level" id="lighting-room-cab-level" for="lighting-room-cab-slider">—</output>
         </div>
         <div class="lighting-quick-row" data-lighting-quick-room="rear">
-          <button class="lighting-room-power" id="lighting-room-rear-power" data-action data-light-target="group:rear" disabled aria-pressed="mixed"><span class="network-dot" id="lighting-room-rear-dot"></span><span>Rear</span><strong id="lighting-room-rear-state">NO DATA</strong></button>
+          <button class="lighting-room-power" id="lighting-room-rear-power" data-action data-light-target="group:rear" disabled aria-pressed="mixed"><span class="network-dot" id="lighting-room-rear-dot"></span><span>Rear</span><strong id="lighting-room-rear-state"></strong></button>
           <input class="lighting-room-slider" id="lighting-room-rear-slider" data-action data-light-group-brightness="rear" type="range" min="1" max="100" value="100" disabled aria-label="Rear brightness">
           <output class="lighting-quick-level" id="lighting-room-rear-level" for="lighting-room-rear-slider">—</output>
         </div>
         <div class="lighting-quick-row" data-lighting-quick-room="kitchen">
-          <button class="lighting-room-power" id="lighting-room-kitchen-power" data-action data-light-target="group:kitchen" disabled aria-pressed="mixed"><span class="network-dot" id="lighting-room-kitchen-dot"></span><span>Kitchen</span><strong id="lighting-room-kitchen-state">NO DATA</strong></button>
+          <button class="lighting-room-power" id="lighting-room-kitchen-power" data-action data-light-target="group:kitchen" disabled aria-pressed="mixed"><span class="network-dot" id="lighting-room-kitchen-dot"></span><span>Kitchen</span><strong id="lighting-room-kitchen-state"></strong></button>
           <input class="lighting-room-slider" id="lighting-room-kitchen-slider" data-action data-light-group-brightness="kitchen" type="range" min="1" max="100" value="100" disabled aria-label="Kitchen brightness">
           <output class="lighting-quick-level" id="lighting-room-kitchen-level" for="lighting-room-kitchen-slider">—</output>
         </div>
