@@ -259,12 +259,31 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   padding-top: 12px;
   min-height: 34px;
 }
+.telemetry-voltage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  text-align: center;
+}
+.telemetry-voltage strong {
+  color: #f5f8fa;
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+.telemetry-voltage span,
 .telemetry-observed {
-  width: 100%;
   color: var(--dim);
   font-size: 10px;
+}
+.telemetry-observed {
+  width: 100%;
   line-height: 1.25;
   min-height: 13px;
+  text-align: center;
 }
 .cop {
   min-height: 210px;

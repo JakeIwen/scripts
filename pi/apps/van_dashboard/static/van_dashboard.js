@@ -250,12 +250,14 @@ function formatUptime(seconds) {
 function renderTelemetrySummary(response) {
   const battery = response?.battery || {};
   if (!battery.available || !Number.isFinite(battery.value)) {
-    $('telemetry-voltage').textContent = 'Battery voltage unavailable';
+    $('telemetry-voltage-value').textContent = '—';
+    $('telemetry-voltage-source').textContent = 'Battery voltage unavailable';
     $('telemetry-observed').textContent = 'No live or voltage_mon reading';
     return;
   }
   const source = battery.source === 'live' ? 'live' : 'last voltage_mon';
-  $('telemetry-voltage').textContent = `${Number(battery.value).toFixed(2)} V · ${source}`;
+  $('telemetry-voltage-value').textContent = `${Number(battery.value).toFixed(2)} V`;
+  $('telemetry-voltage-source').textContent = source;
   const observed = new Date(battery.observed_at || '');
   $('telemetry-observed').textContent = Number.isNaN(observed.getTime())
     ? 'Timestamp unavailable'
