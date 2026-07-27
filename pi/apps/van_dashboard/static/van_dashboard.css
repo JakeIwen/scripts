@@ -2250,6 +2250,52 @@ body.busy [data-action] {
   font-size: 9px;
   margin-top: 3px;
 }
+.backup-action-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  border: 1px solid #42606e;
+  border-radius: 13px;
+  background: #192832;
+  padding: 11px 12px;
+}
+.backup-action-bar strong,
+.backup-action-bar small,
+.backup-action-bar span span {
+  display: block;
+}
+.backup-action-bar strong {
+  font-size: 11px;
+}
+.backup-action-bar small {
+  max-width: 560px;
+  color: var(--dim);
+  font-size: 9px;
+  line-height: 1.35;
+  margin-top: 3px;
+}
+.backup-action-bar span span {
+  color: #b9dce7;
+  font-size: 9px;
+  margin-top: 5px;
+}
+.backup-action-bar button {
+  border: 1px solid #4b7284;
+  border-radius: 10px;
+  background: #263b47;
+  color: var(--ink);
+  padding: 9px 11px;
+  font-size: 10px;
+  font-weight: 750;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.backup-action-bar button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
 .backup-state-dot {
   width: 11px;
   height: 11px;
@@ -2402,6 +2448,12 @@ body.busy [data-action] {
   .backup-hotswaps,
   .backup-history {
     grid-template-columns: 1fr;
+  }
+  .backup-action-bar {
+    grid-template-columns: 1fr;
+  }
+  .backup-action-bar button {
+    width: 100%;
   }
 }
 .ignition-monitor-tile {

@@ -957,6 +957,9 @@ function renderBackups(response) {
     borg = state.borg || {},
     tm = state.time_machine || {},
     operation = state.operation || { status: 'idle' },
+    operationKind = operation.kind || (operation.target ? 'clone' : null),
+    operationRunning = operation.status === 'running',
+    backupRunning = operationRunning && operationKind === 'backup',
     tile = $('backups'),
     pill = $('backup-pill');
   backupState = state;
@@ -976,7 +979,9 @@ function renderBackups(response) {
   $('backup-mac').textContent = tm.running
     ? `Backing up${Number.isFinite(tm.progress_percent) ? ` · ${tm.progress_percent}%` : ''}`
     : macLabel;
-  if (operation.status === 'running') {
+  if (backupRunning) {
+    $('backup-summary').textContent = 'Creating a new vanpi Borg backup…';
+  } else if (operationRunning) {
     $('backup-summary').textContent = `Cloning vanpi to ${operation.target}…`;
   } else if (tm.running) {
     $('backup-summary').textContent = 'Time Machine backup in progress';
@@ -986,9 +991,11 @@ function renderBackups(response) {
 
   const borgDot = $('backup-borg-dot');
   borgDot.className = `backup-state-dot ${borg.stale ? 'bad' : 'good'}`;
-  $('backup-borg-detail').textContent = Number.isFinite(borg.last_success_at)
-    ? `Last successful archive ${eventTime(borg.last_success_at)} (${backupAge(borg.last_success_at)})`
-    : 'No successful Borg archive is recorded';
+  $('backup-borg-detail').textContent = backupRunning
+    ? `Backup running · started ${backupAge(operation.started_at)}`
+    : Number.isFinite(borg.last_success_at)
+      ? `Last successful archive ${eventTime(borg.last_success_at)} (${backupAge(borg.last_success_at)})`
+      : 'No successful Borg archive is recorded';
   const tmDot = $('backup-tm-dot');
   tmDot.className = `backup-state-dot ${tm.running || Number.isFinite(tm.last_backup_at) ? 'good' : 'bad'}`;
   $('backup-tm-detail').textContent = tm.running
@@ -998,15 +1005,28 @@ function renderBackups(response) {
       : tm.error || 'No completed snapshots found';
 
   const operationKey = `${operation.status}:${operation.started_at || ''}:${operation.completed_at || ''}`;
-  if (operation.status === 'running') {
+  if (backupRunning) {
+    $('backup-operation').textContent = `Backup running · ${backupAge(operation.started_at)}`;
+  } else if (operationRunning) {
     $('backup-operation').textContent = `Cloning ${operation.target} · ${backupAge(operation.started_at)}`;
   } else if (operation.status === 'error') {
-    $('backup-operation').textContent = `${operation.target || 'Clone'} failed`;
+    $('backup-operation').textContent =
+      operationKind === 'backup' ? 'Backup failed' : `${operation.target || 'Clone'} failed`;
   } else if (operation.status === 'complete') {
-    $('backup-operation').textContent = `${operation.target} completed ${backupAge(operation.completed_at)}`;
+    $('backup-operation').textContent =
+      operationKind === 'backup'
+        ? `Backup completed ${backupAge(operation.completed_at)}`
+        : `${operation.target} completed ${backupAge(operation.completed_at)}`;
   } else {
     $('backup-operation').textContent = 'Idle';
   }
+  const backupRun = $('backup-run');
+  backupRun.disabled = backupBusy || operationRunning;
+  backupRun.textContent = backupRunning
+    ? 'Backing up…'
+    : operationRunning
+      ? 'Backup busy'
+      : 'Back up now';
   if (
     backupLastCompletion &&
     operationKey !== backupLastCompletion &&
@@ -1014,14 +1034,18 @@ function renderBackups(response) {
   ) {
     toast(
       operation.status === 'complete'
-        ? `Clone to ${operation.target} completed`
-        : operation.error || `Clone to ${operation.target} failed`,
+        ? operationKind === 'backup'
+          ? 'Vanpi Borg backup completed'
+          : `Clone to ${operation.target} completed`
+        : operation.error ||
+            (operationKind === 'backup'
+              ? 'Vanpi backup failed'
+              : `Clone to ${operation.target} failed`),
       operation.status === 'error',
     );
   }
   backupLastCompletion = operationKey;
 
-  const operationRunning = operation.status === 'running';
   $('backup-hotswaps').innerHTML = (state.hotswaps || [])
     .map((card) => {
       const unavailable = !card.attached || card.mounted,
@@ -1073,6 +1097,8 @@ function renderBackupsUnavailable(message) {
   $('backup-pi').textContent = 'Unavailable';
   $('backup-mac').textContent = 'Unavailable';
   $('backup-status').textContent = 'Unavailable';
+  $('backup-operation').textContent = 'Unavailable';
+  $('backup-run').disabled = true;
   $('backup-panel').setAttribute('aria-busy', 'false');
 }
 async function refreshBackups(showErrors = false) {
@@ -1099,6 +1125,29 @@ async function startBackupClone(button) {
   button.disabled = true;
   try {
     const response = await post('backups/clone', { target });
+    renderBackups(response);
+    toast(response.message);
+  } catch (error) {
+    toast(error.message, true);
+    await refreshBackups(false).catch(() => {});
+  } finally {
+    backupBusy = false;
+  }
+}
+async function startBorgBackup() {
+  const button = $('backup-run');
+  if (backupBusy || backupState?.operation?.status === 'running' || button.disabled) return;
+  if (
+    !window.confirm(
+      'Run a full vanpi backup now? This performs snapshots, media sync, Borg create and retention, and any due hotspare clones. Requested disk policy and ignition safety still apply, and the job may take several hours.',
+    )
+  )
+    return;
+  backupBusy = true;
+  button.disabled = true;
+  button.textContent = 'Starting…';
+  try {
+    const response = await post('backups/run');
     renderBackups(response);
     toast(response.message);
   } catch (error) {
@@ -3514,6 +3563,7 @@ $('usb-close').addEventListener('click', closeUsbDevices);
 $('usb-recover').addEventListener('click', recoverUsb2);
 $('backups').addEventListener('click', openBackups);
 $('backup-close').addEventListener('click', closeBackups);
+$('backup-run').addEventListener('click', startBorgBackup);
 $('ignition-monitor').addEventListener('click', openIgnitionMonitor);
 $('ignition-monitor-close').addEventListener('click', closeIgnitionMonitor);
 $('ignition-monitor-disable').addEventListener('click', () => changeIgnitionMonitor(true));

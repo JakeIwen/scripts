@@ -2539,6 +2539,93 @@ class BackupManagerTests(unittest.TestCase):
                     self.assertEqual(manager.operation["status"], "error")
                     self.assertIn(message, manager.operation["error"])
 
+    def test_manual_backup_uses_only_fixed_force_command_and_requires_new_stamp(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            config, stamps, bundle = self.make_files(tempdir, tm_running=False)
+            calls = []
+
+            def command(args, timeout):
+                calls.append((list(args), timeout))
+                if args[0] == dashboard.LSBLK:
+                    return SimpleNamespace(
+                        returncode=0,
+                        stdout=json.dumps(self.lsblk_payload()),
+                        stderr="",
+                    )
+                stamp = os.path.join(stamps, "borg_ok")
+                os.utime(stamp, (self.NOW + 1, self.NOW + 1))
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout="backup complete",
+                    stderr="",
+                )
+
+            manager = dashboard.BackupManager(
+                config=config,
+                stamp_dir=stamps,
+                backup_tool="/test/pi_backup.sh",
+                time_machine_bundle=bundle,
+                command=command,
+                backup_timeout=321,
+                wall_clock=lambda: self.NOW,
+            )
+            manager.start_backup()
+            manager.thread.join(2)
+
+            self.assertFalse(manager.thread.is_alive())
+            self.assertEqual(manager.operation["status"], "complete")
+            self.assertEqual(manager.operation["kind"], "backup")
+            backup_calls = [call for call in calls if call[0][0] == dashboard.SUDO]
+            self.assertEqual(
+                backup_calls,
+                [([dashboard.SUDO, "-n", "/test/pi_backup.sh", "--force"], 321)],
+            )
+
+    def test_manual_backup_failure_timeout_and_deferred_run_are_reported(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            config, stamps, bundle = self.make_files(tempdir, tm_running=False)
+            for outcome, message in (
+                ("failed", "borg failed"),
+                ("timeout", "timed out"),
+                ("deferred", "without recording a new Borg success"),
+            ):
+
+                def command(args, timeout, outcome=outcome):
+                    if args[0] == dashboard.LSBLK:
+                        return SimpleNamespace(
+                            returncode=0,
+                            stdout=json.dumps(self.lsblk_payload()),
+                            stderr="",
+                        )
+                    if outcome == "timeout":
+                        raise subprocess.TimeoutExpired(args, timeout)
+                    if outcome == "failed":
+                        return SimpleNamespace(
+                            returncode=1,
+                            stdout="",
+                            stderr="borg failed",
+                        )
+                    return SimpleNamespace(
+                        returncode=0,
+                        stdout="requested policy disables HDDs, deferring backup",
+                        stderr="",
+                    )
+
+                manager = dashboard.BackupManager(
+                    config=config,
+                    stamp_dir=stamps,
+                    backup_tool="/test/pi_backup.sh",
+                    time_machine_bundle=bundle,
+                    command=command,
+                    backup_timeout=4,
+                    wall_clock=lambda: self.NOW,
+                )
+                with self.subTest(outcome=outcome):
+                    manager.start_backup()
+                    manager.thread.join(2)
+                    self.assertEqual(manager.operation["status"], "error")
+                    self.assertIn(message, manager.operation["error"])
+
     def test_clone_wrapper_uses_shared_lock_and_never_initializes_a_card(self):
         repository = str(REPOSITORY_ROOT)
         path = os.path.join(repository, "pi", "scripts", "backup", "clone_now.sh")
@@ -2726,6 +2813,8 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="backup-panel"', page.data)
         self.assertIn(b'id="backup-hotswaps"', page.data)
         self.assertIn(b'id="backup-history"', page.data)
+        self.assertIn(b'id="backup-run" data-action disabled', page.data)
+        self.assertIn(b"Disk policy and ignition safety remain authoritative", page.data)
         self.assertIn(b'id="ignition-monitor"', page.data)
         self.assertIn(b'id="ignition-monitor-panel"', page.data)
         self.assertIn(b'id="ignition-duration-amount"', page.data)
@@ -2892,6 +2981,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"function startBackupClone(button)", javascript.data)
         self.assertIn(b"/api/backups", javascript.data)
         self.assertIn(b"backups/clone", javascript.data)
+        self.assertIn(b"backups/run", javascript.data)
         self.assertIn(b"function renderIgnitionMonitor(response)", javascript.data)
         self.assertIn(b"function setIgnitionDuration(minutes", javascript.data)
         self.assertIn(b"ignition-monitor/disable", javascript.data)
@@ -2985,6 +3075,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b".usb-port-actions", stylesheet.data)
         self.assertIn(b".backup-hotswap", stylesheet.data)
         self.assertIn(b".backup-history-row", stylesheet.data)
+        self.assertIn(b".backup-action-bar", stylesheet.data)
         self.assertIn(b".ignition-monitor-tile", stylesheet.data)
         self.assertIn(b".ignition-duration-slider", stylesheet.data)
         self.assertIn(b".ignition-presets", stylesheet.data)
@@ -3173,6 +3264,13 @@ class DashboardRouteTests(unittest.TestCase):
                 calls.append(("status",))
                 return state
 
+            def start_backup(self):
+                calls.append(("backup",))
+                return {
+                    **state,
+                    "operation": {"status": "running", "kind": "backup"},
+                }
+
             def start_clone(self, target):
                 calls.append(("clone", target))
                 if target != "hotspare-a":
@@ -3189,6 +3287,10 @@ class DashboardRouteTests(unittest.TestCase):
                 data={"target": "hotspare-a"},
                 headers={"X-Van-Dashboard": "1"},
             )
+            backup = client.post(
+                "/api/backups/run",
+                headers={"X-Van-Dashboard": "1"},
+            )
             unknown = client.post(
                 "/api/backups/clone",
                 data={"target": "/dev/sda"},
@@ -3199,10 +3301,22 @@ class DashboardRouteTests(unittest.TestCase):
                 data={"target": "hotspare-a", "command": "--init"},
                 headers={"X-Van-Dashboard": "1"},
             )
+            backup_extra = client.post(
+                "/api/backups/run",
+                data={"command": "--anything"},
+                headers={"X-Van-Dashboard": "1"},
+            )
             query = client.get("/api/backups?device=sda")
             cross_origin = client.post(
                 "/api/backups/clone",
                 data={"target": "hotspare-a"},
+                headers={
+                    "X-Van-Dashboard": "1",
+                    "Origin": "https://example.invalid",
+                },
+            )
+            backup_cross_origin = client.post(
+                "/api/backups/run",
                 headers={
                     "X-Van-Dashboard": "1",
                     "Origin": "https://example.invalid",
@@ -3215,13 +3329,22 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(status.headers["Cache-Control"], "no-store")
         self.assertEqual(started.status_code, 202)
         self.assertEqual(started.headers["Cache-Control"], "no-store")
+        self.assertEqual(backup.status_code, 202)
+        self.assertEqual(backup.headers["Cache-Control"], "no-store")
         self.assertEqual(unknown.status_code, 400)
         self.assertEqual(extra.status_code, 400)
+        self.assertEqual(backup_extra.status_code, 400)
         self.assertEqual(query.status_code, 400)
         self.assertEqual(cross_origin.status_code, 403)
+        self.assertEqual(backup_cross_origin.status_code, 403)
         self.assertEqual(
             calls,
-            [("status",), ("clone", "hotspare-a"), ("clone", "/dev/sda")],
+            [
+                ("status",),
+                ("clone", "hotspare-a"),
+                ("backup",),
+                ("clone", "/dev/sda"),
+            ],
         )
 
     def test_ignition_monitor_routes_are_authoritative_narrow_and_csrf_protected(self):

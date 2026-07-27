@@ -146,6 +146,9 @@ BACKUP_STAMP_DIR = os.environ.get(
 BACKUP_CLONE_NOW = os.environ.get(
     "VAN_DASHBOARD_BACKUP_CLONE_NOW", "/home/pi/scripts/backup/clone_now.sh"
 )
+BACKUP_RUNNER = os.environ.get(
+    "VAN_DASHBOARD_BACKUP_RUNNER", "/home/pi/scripts/backup/pi_backup.sh"
+)
 TIME_MACHINE_BUNDLE = os.environ.get(
     "VAN_DASHBOARD_TIME_MACHINE_BUNDLE", "/mnt/mbp2tbkup/m4mac.sparsebundle"
 )
@@ -153,6 +156,9 @@ LSBLK = os.environ.get("VAN_DASHBOARD_LSBLK", "/usr/bin/lsblk")
 BACKUP_STATUS_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_BACKUP_STATUS_TIMEOUT", "10"))
 BACKUP_CLONE_TIMEOUT = float(
     os.environ.get("VAN_DASHBOARD_BACKUP_CLONE_TIMEOUT", str(6 * 60 * 60 + 90))
+)
+BACKUP_RUN_TIMEOUT = float(
+    os.environ.get("VAN_DASHBOARD_BACKUP_RUN_TIMEOUT", str(8 * 60 * 60 + 90))
 )
 IGNITIONMONCTL = os.environ.get(
     "VAN_DASHBOARD_IGNITIONMONCTL", "/home/pi/scripts/ignitionmonctl"
@@ -3055,13 +3061,15 @@ class BackupStatusError(RuntimeError):
 
 
 class BackupManager:
-    """Read backup evidence and serialize safe hotspare clone requests.
+    """Read backup evidence and serialize safe manual backup requests.
 
     Configuration is parsed as data rather than sourced, so inspecting status
     cannot execute backup_conf.sh or load its secrets file. Clone targets are
     restricted to the labels already present in CLONE_TARGETS; the dashboard
     never accepts a block-device path and never exposes
-    /home/pi/scripts/backup/clone_to_sd.sh --init.
+    /home/pi/scripts/backup/clone_to_sd.sh --init. Manual Borg requests invoke
+    only the fixed pi_backup.sh --force path, which retains the orchestrator's
+    disk-policy, ignition, mount, lock, snapshot, and retention safeguards.
     """
 
     CLONE_TARGET_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -3071,24 +3079,29 @@ class BackupManager:
         config=BACKUP_CONF,
         stamp_dir=BACKUP_STAMP_DIR,
         clone_tool=BACKUP_CLONE_NOW,
+        backup_tool=BACKUP_RUNNER,
         time_machine_bundle=TIME_MACHINE_BUNDLE,
         command=run_command,
         timeout=BACKUP_STATUS_TIMEOUT,
         clone_timeout=BACKUP_CLONE_TIMEOUT,
+        backup_timeout=BACKUP_RUN_TIMEOUT,
         wall_clock=time.time,
     ):
         self.config = config
         self.stamp_dir = stamp_dir
         self.clone_tool = clone_tool
+        self.backup_tool = backup_tool
         self.time_machine_bundle = time_machine_bundle
         self.command = command
         self.timeout = timeout
         self.clone_timeout = clone_timeout
+        self.backup_timeout = backup_timeout
         self.wall_clock = wall_clock
         self.lock = threading.Lock()
         self.thread = None
         self.operation = {
             "status": "idle",
+            "kind": None,
             "target": None,
             "started_at": None,
             "completed_at": None,
@@ -3356,6 +3369,7 @@ class BackupManager:
             started_at = int(self.wall_clock())
             self.operation = {
                 "status": "running",
+                "kind": "clone",
                 "target": target,
                 "started_at": started_at,
                 "completed_at": None,
@@ -3365,6 +3379,30 @@ class BackupManager:
                 target=self._run_clone,
                 args=(target, started_at),
                 name="backup-clone",
+                daemon=True,
+            )
+            self.thread.start()
+        return self.status()
+
+    def start_backup(self):
+        current = self.status()
+        previous_borg_at = current["borg"]["last_success_at"]
+        with self.lock:
+            if self.operation["status"] == "running":
+                raise BackupStatusError("another dashboard backup operation is running")
+            started_at = int(self.wall_clock())
+            self.operation = {
+                "status": "running",
+                "kind": "backup",
+                "target": None,
+                "started_at": started_at,
+                "completed_at": None,
+                "error": None,
+            }
+            self.thread = threading.Thread(
+                target=self._run_backup,
+                args=(started_at, previous_borg_at),
+                name="borg-backup",
                 daemon=True,
             )
             self.thread.start()
@@ -3383,6 +3421,44 @@ class BackupManager:
             error = f"clone timed out after {self.clone_timeout:g} seconds"
         except OSError as exc:
             error = f"could not start clone: {exc}"
+        with self.lock:
+            if self.operation.get("started_at") == started_at:
+                self.operation.update(
+                    {
+                        "status": "error" if error else "complete",
+                        "completed_at": int(self.wall_clock()),
+                        "error": error,
+                    }
+                )
+
+    def _run_backup(self, started_at, previous_borg_at):
+        error = None
+        try:
+            result = self.command(
+                [SUDO, "-n", self.backup_tool, "--force"],
+                timeout=self.backup_timeout,
+            )
+            if result.returncode:
+                error = (
+                    result.stderr or result.stdout or "vanpi backup failed"
+                ).strip()[-500:]
+            else:
+                current_borg_at = self._stamp(
+                    os.path.join(self.stamp_dir, "borg_ok")
+                )
+                if current_borg_at is None or (
+                    previous_borg_at is not None
+                    and current_borg_at <= previous_borg_at
+                ):
+                    output = (result.stderr or result.stdout or "").strip().splitlines()
+                    detail = output[-1][-300:] if output else ""
+                    error = "backup finished without recording a new Borg success"
+                    if detail:
+                        error = f"{error}: {detail}"
+        except subprocess.TimeoutExpired:
+            error = f"backup timed out after {self.backup_timeout:g} seconds"
+        except (OSError, BackupStatusError) as exc:
+            error = f"could not run backup: {exc}"
         with self.lock:
             if self.operation.get("started_at") == started_at:
                 self.operation.update(
@@ -4755,6 +4831,26 @@ def api_backup_clone():
         {
             "ok": True,
             "message": f"Clone to {request.form['target']} started",
+            "backups": status,
+        }
+    )
+    response.status_code = 202
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/api/backups/run", methods=["POST"])
+def api_backup_run():
+    if not _exact_form(()):
+        return api_error("manual backup does not accept input", 400)
+    try:
+        status = backups.start_backup()
+    except BackupStatusError as exc:
+        return api_error(f"could not start backup: {exc}", 409)
+    response = jsonify(
+        {
+            "ok": True,
+            "message": "Vanpi backup started",
             "backups": status,
         }
     )

@@ -285,8 +285,12 @@
       <section class="backup-overview-card" aria-labelledby="backup-borg-title"><span class="backup-state-dot" id="backup-borg-dot"></span><span><strong id="backup-borg-title">vanpi Borg archive</strong><small id="backup-borg-detail">Checking last success…</small></span></section>
       <section class="backup-overview-card" aria-labelledby="backup-tm-title"><span class="backup-state-dot" id="backup-tm-dot"></span><span><strong id="backup-tm-title">m4mac Time Machine</strong><small id="backup-tm-detail">Checking snapshot history…</small></span></section>
     </div>
+    <div class="backup-action-bar">
+      <span><strong>Manual vanpi backup</strong><small>Runs snapshots, Borg create and retention, media sync, and any due hotspare clones. Disk policy and ignition safety remain authoritative.</small><span id="backup-operation">Idle</span></span>
+      <button id="backup-run" data-action disabled>Back up now</button>
+    </div>
     <section class="backup-section" aria-labelledby="backup-hotswap-title">
-      <div class="monitor-section-head"><div><h3 id="backup-hotswap-title">Bootable Pi hotspares</h3><p>Each date is the last successful clone recorded for that labeled card.</p></div><span id="backup-operation">Idle</span></div>
+      <div class="monitor-section-head"><div><h3 id="backup-hotswap-title">Bootable Pi hotspares</h3><p>Each date is the last successful clone recorded for that labeled card.</p></div></div>
       <div class="backup-hotswaps" id="backup-hotswaps"><div class="speaker-loading">Finding configured hotspares…</div></div>
       <p class="backup-warning">Clone synchronizes the current vanpi system onto the selected existing hotspare. Initializing cards and choosing raw devices are intentionally unavailable here.</p>
     </section>
