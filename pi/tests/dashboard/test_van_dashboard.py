@@ -2683,6 +2683,10 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="torrent-runtime-state"', page.data)
         self.assertIn(b'id="disk-device-list"', page.data)
         self.assertIn(b'id="disk-operation"', page.data)
+        self.assertLess(
+            page.data.index(b"Requested policy"),
+            page.data.index(b'id="disk-device-title"'),
+        )
         self.assertIn(
             b"Automatically managed disks resume mounting after one minute",
             page.data,
