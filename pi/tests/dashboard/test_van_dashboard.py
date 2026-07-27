@@ -2687,7 +2687,7 @@ class DashboardRouteTests(unittest.TestCase):
             b'class="speedtest-button openwrt-speedtest-button" id="speedtest-button"',
             page.data,
         )
-        self.assertEqual(page.data.count(b"tile-heading"), 15)
+        self.assertEqual(page.data.count(b"tile-heading"), 14)
         self.assertIn(b'id="sonos-track"', page.data)
         self.assertIn(b'id="sonos-progress"', page.data)
         self.assertIn(b'data-transport="play_pause"', page.data)
@@ -2774,6 +2774,10 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertNotIn(b"Connected \xc2\xb7 vanpi dashboard", page.data)
         self.assertIn(b"UBNT Wi-Fi", page.data)
         self.assertIn(b'id="ubnt-radio-dot"', page.data)
+        self.assertIn(b'id="ubnt-wifi" data-dashboard-tile', page.data)
+        self.assertIn(b'id="ubnt-wifi-open" data-action', page.data)
+        self.assertIn(b'class="starlink-control unknown" id="starlink"', page.data)
+        self.assertNotIn(b'id="starlink" data-dashboard-tile', page.data)
         self.assertIn(b'id="openwrt-age"', page.data)
         self.assertNotIn(b'id="connectivity-age"', page.data)
         self.assertIn(b'id="openwrt-card" data-dashboard-tile', page.data)
@@ -2783,7 +2787,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="telemetry-voltage-value"', page.data)
         self.assertIn(b'id="telemetry-voltage-source"', page.data)
         self.assertIn(b'id="telemetry-observed"', page.data)
-        self.assertEqual(page.data.count(b"data-dashboard-tile"), 15)
+        self.assertEqual(page.data.count(b"data-dashboard-tile"), 14)
         self.assertNotIn(b'class="network-card speedtest-card"', page.data)
         self.assertIn(b'id="ubnt-network-list"', page.data)
         self.assertIn(b'id="ubnt-password-form"', page.data)

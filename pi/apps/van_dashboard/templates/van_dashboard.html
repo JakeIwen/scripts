@@ -40,11 +40,6 @@
         <span class="status-line"><span>CAN wake</span><span id="wake">—</span></span>
       </span>
     </button>
-    <button class="tile starlink unknown" id="starlink" data-dashboard-tile data-action disabled aria-pressed="mixed">
-      <span class="switch-state"><span class="network-dot" id="starlink-dot"></span><span id="starlink-state">NO DATA</span></span>
-      <span class="tile-heading"><span class="tile-icon" aria-hidden="true">🛰️</span><span class="tile-title">Starlink</span></span>
-      <span class="tile-detail" id="starlink-detail">Checking Tuya status…</span>
-    </button>
     <a class="tile" id="books" data-dashboard-tile data-action href="#"><span class="tile-heading"><span class="tile-icon" aria-hidden="true">📖</span><span class="tile-title">Audiobooks</span></span><span class="tile-detail">Open the Sonos audiobook library</span></a>
     <a class="tile telemetry-tile" id="telemetry" data-dashboard-tile data-action href="#">
       <span class="tile-heading"><span class="tile-icon" aria-hidden="true">📊</span><span class="tile-title">Telemetry</span></span>
@@ -150,10 +145,17 @@
         </div>
       </div>
     </section>
-    <button class="tile ubnt-wifi-tile" id="ubnt-wifi" data-dashboard-tile data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="ubnt-wifi-panel">
+    <section class="tile ubnt-wifi-tile" id="ubnt-wifi" data-dashboard-tile data-tile-label="UBNT Wi-Fi" aria-labelledby="ubnt-wifi-title">
+      <button class="ubnt-wifi-open" id="ubnt-wifi-open" data-action aria-label="Open UBNT Wi-Fi management" aria-haspopup="dialog" aria-expanded="false" aria-controls="ubnt-wifi-panel"></button>
       <span class="switch-state"><span class="network-dot" id="ubnt-wifi-dot"></span><span id="ubnt-wifi-state">NO DATA</span></span>
-      <span class="network-card-heading ubnt-card-heading tile-heading"><span class="tile-icon" aria-hidden="true">📡</span><span class="ubnt-title"><span class="network-dot" id="ubnt-radio-dot"></span><span class="tile-title">UBNT Wi-Fi</span></span></span><span class="tile-detail" id="ubnt-wifi-summary">Scan and select upstream networks</span>
-    </button>
+      <span class="network-card-heading ubnt-card-heading tile-heading"><span class="tile-icon" aria-hidden="true">📡</span><span class="ubnt-title"><span class="network-dot" id="ubnt-radio-dot"></span><span class="tile-title" id="ubnt-wifi-title">UBNT Wi-Fi</span></span></span>
+      <span class="tile-detail" id="ubnt-wifi-summary">Scan and select upstream networks</span>
+      <button class="starlink-control unknown" id="starlink" data-action disabled aria-pressed="mixed">
+        <span class="starlink-control-heading"><span aria-hidden="true">🛰️</span><strong>Starlink</strong></span>
+        <span class="starlink-control-state"><span class="network-dot" id="starlink-dot"></span><span id="starlink-state">NO DATA</span></span>
+        <span class="starlink-control-detail" id="starlink-detail">Checking Tuya status…</span>
+      </button>
+    </section>
     <section class="network-card" id="openwrt-card" data-dashboard-tile data-tile-label="OpenWrt" aria-labelledby="openwrt-title">
       <button class="openwrt-open" id="openwrt-open" data-action aria-label="Open OpenWrt details" aria-haspopup="dialog" aria-expanded="false" aria-controls="openwrt-panel"></button>
       <div class="connectivity-head"><h2 class="network-card-heading tile-heading" id="openwrt-title"><span class="tile-icon" aria-hidden="true">🌐</span><span>OpenWrt</span></h2><span class="connectivity-age" id="openwrt-age">Checking…</span></div>

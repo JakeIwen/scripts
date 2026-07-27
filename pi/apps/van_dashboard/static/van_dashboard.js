@@ -3458,15 +3458,15 @@ function closeLighting() {
 async function openUbntWifi() {
   $('ubnt-wifi-backdrop').classList.add('open');
   document.body.classList.add('sheet-open');
-  $('ubnt-wifi').setAttribute('aria-expanded', 'true');
+  $('ubnt-wifi-open').setAttribute('aria-expanded', 'true');
   await refreshUbntWifi(true);
 }
 function closeUbntWifi() {
   $('ubnt-wifi-backdrop').classList.remove('open');
   document.body.classList.remove('sheet-open');
-  $('ubnt-wifi').setAttribute('aria-expanded', 'false');
+  $('ubnt-wifi-open').setAttribute('aria-expanded', 'false');
   clearUbntPassword();
-  $('ubnt-wifi').focus();
+  $('ubnt-wifi-open').focus();
 }
 function siblingServiceUrl(port) {
   const url = new URL(window.location.href);
@@ -3551,7 +3551,7 @@ $('price-add-form').addEventListener('submit', (event) => {
 $('lighting').addEventListener('click', openLighting);
 $('lighting-close').addEventListener('click', closeLighting);
 $('lighting-master').dataset.lightTarget = 'all';
-$('ubnt-wifi').addEventListener('click', openUbntWifi);
+$('ubnt-wifi-open').addEventListener('click', openUbntWifi);
 $('ubnt-wifi-close').addEventListener('click', closeUbntWifi);
 $('ubnt-scan').addEventListener('click', () => startUbntWifi('scan'));
 $('ubnt-resume').addEventListener('click', () => startUbntWifi('resume'));
