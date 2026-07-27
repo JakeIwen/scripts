@@ -79,6 +79,8 @@ ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "
     done
     cp -p '$remote_stage/persistent/config/.profile' \"\$persistent/config/.profile.new\"
     mv \"\$persistent/config/.profile.new\" \"\$persistent/config/.profile\"
+    cp -p \"\$persistent/config/.profile\" \"\$persistent/.profile.new\"
+    mv \"\$persistent/.profile.new\" \"\$persistent/.profile\"
     for source in '$remote_stage'/persistent/scripts/*; do
         name=\${source##*/}
         cp -p \"\$source\" \"\$persistent/scripts/\$name.new\"
