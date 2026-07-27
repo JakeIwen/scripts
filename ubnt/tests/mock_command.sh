@@ -35,6 +35,9 @@ case $command_name in
         ;;
     softrestart)
         printf 'aaa.1.wpa.psk=sensitive-test-value\n'
+        if [ -n "${UBNT_AUTHORIZED_KEYS:-}" ]; then
+            printf '%s\n' 'admin-key' > "$UBNT_AUTHORIZED_KEYS"
+        fi
         target=$(awk -F= '
             $1 == "wpasupplicant.status" && $2 == "enabled" { wpa = 1 }
             $1 == "wpasupplicant.profile.1.network.1.ssid" { wpa_ssid = $2 }

@@ -71,6 +71,10 @@ other saved network wins when available. If `config/prefer_denlink` exists,
 Runtime locks, scans, cooldowns, and logs are kept in `/tmp` or `/var/log`, not
 under `/etc/persistent`.
 
+airOS regenerates `/etc/dropbear/authorized_keys` during a wireless soft
+reload. The boot hook and Wi-Fi manager therefore reinstall the keys listed in
+`persistent/config/raspi_rsa_id.pub` after boot and after every reload.
+
 The main runtime log is capped at 256 KiB and retains its most recent 1,000
 lines when rotated. Cron error logs use the same limits through an hourly
 rotation job. Healthy-link heartbeats are written only when the SSID changes or

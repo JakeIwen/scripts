@@ -11,6 +11,11 @@ mkdir -p "$test_root/bin" "$test_root/config" "$test_root/profiles" "$test_root/
 for command_name in iwlist iwgetid mca-status ip ping softrestart cfgmtd; do
     ln -s "$script_dir/mock_command.sh" "$test_root/bin/$command_name"
 done
+ln -s "$script_dir/../persistent/scripts/ensure_ssh_keys.sh" \
+    "$test_root/bin/ensure_ssh_keys"
+
+printf '%s\n' 'admin-key' > "$test_root/authorized_keys"
+printf '%s\n' 'pi-rsa-key' 'pi-ed25519-key' > "$test_root/persistent_keys"
 
 profile="$test_root/profiles/A Network With Spaces"
 printf '%s\n' \
@@ -60,6 +65,9 @@ export UBNT_IP_CMD="$test_root/bin/ip"
 export UBNT_PING="$test_root/bin/ping"
 export UBNT_SOFTRESTART="$test_root/bin/softrestart"
 export UBNT_CFGMTD="$test_root/bin/cfgmtd"
+export UBNT_SSH_KEY_INSTALLER="$test_root/bin/ensure_ssh_keys"
+export UBNT_SSH_KEY_SOURCE="$test_root/persistent_keys"
+export UBNT_AUTHORIZED_KEYS="$test_root/authorized_keys"
 
 "$manager" connect 'A Network With Spaces' >/dev/null
 [ "$(sed -n '1p' "$MOCK_IWLIST_COUNT_FILE")" -eq 3 ]
@@ -67,6 +75,10 @@ export UBNT_CFGMTD="$test_root/bin/cfgmtd"
 grep -q '^wireless.1.scan_list.status=enabled$' "$test_root/system.cfg"
 grep -q '^wireless.1.scan_list.channels=2437$' "$test_root/system.cfg"
 [ "$(sed -n '1p' "$test_root/associated")" = 'A Network With Spaces' ]
+grep -qx 'admin-key' "$test_root/authorized_keys"
+grep -qx 'pi-rsa-key' "$test_root/authorized_keys"
+grep -qx 'pi-ed25519-key' "$test_root/authorized_keys"
+[ "$(wc -l < "$test_root/authorized_keys" | tr -d '[:space:]')" -eq 3 ]
 profile_hash_after=$(md5 -q "$profile" 2>/dev/null || md5sum "$profile" | awk '{print $1}')
 [ "$profile_hash_before" = "$profile_hash_after" ]
 

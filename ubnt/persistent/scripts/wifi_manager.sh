@@ -17,6 +17,7 @@ IP_CMD=${UBNT_IP_CMD:-/usr/bin/ip}
 PING=${UBNT_PING:-/bin/ping}
 CFGMTD=${UBNT_CFGMTD:-/sbin/cfgmtd}
 HEXDUMP=${UBNT_HEXDUMP:-/usr/bin/hexdump}
+SSH_KEY_INSTALLER=${UBNT_SSH_KEY_INSTALLER:-/etc/persistent/scripts/ensure_ssh_keys.sh}
 
 LOCK_DIR="$STATE_DIR/lock"
 PAUSE_FILE="$STATE_DIR/paused"
@@ -370,6 +371,10 @@ apply_config() {
     done
     wait "$reload_pid"
     reload_status=$?
+    if ! "$SSH_KEY_INSTALLER"; then
+        log_message "persistent SSH key restore failed after airOS reload"
+        return 1
+    fi
     rm -f "$reload_output"
     if [ "$reload_status" -eq 0 ]; then
         log_message "airOS wireless configuration applied elapsed=${reload_elapsed}s"

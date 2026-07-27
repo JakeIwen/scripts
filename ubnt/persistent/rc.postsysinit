@@ -3,8 +3,6 @@ set -u
 
 persistent=/etc/persistent
 scripts="$persistent/scripts"
-key_source="$persistent/config/raspi_rsa_id.pub"
-authorized_keys=/etc/dropbear/authorized_keys
 
 mkdir -p /etc/crontabs /tmp/ubnt-wifi /var/log
 chmod 700 /tmp/ubnt-wifi
@@ -15,17 +13,7 @@ echo nanoM2 > /proc/sys/kernel/hostname
 cp "$persistent/config/cron" /etc/crontabs/ubnt
 cp "$persistent/config/.profile" "$persistent/.profile"
 
-if [ -s "$key_source" ]; then
-    touch "$authorized_keys"
-    while IFS= read -r key; do
-        [ -n "$key" ] || continue
-        if ! grep -Fqx "$key" "$authorized_keys" 2>/dev/null; then
-            printf '%s\n' "$key" >> "$authorized_keys"
-        fi
-    done < "$key_source"
-    sort -u "$authorized_keys" > "$authorized_keys.new" && mv "$authorized_keys.new" "$authorized_keys"
-    chmod 600 "$authorized_keys"
-fi
+"$scripts/ensure_ssh_keys.sh"
 
 pkill crond 2>/dev/null || true
 crond
