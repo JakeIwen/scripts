@@ -16,10 +16,12 @@ is shared with other vehicle tooling.
 """
 
 import copy
+import csv
 import datetime
 import glob
 import hashlib
 import json
+import math
 import os
 import plistlib
 import re
@@ -58,6 +60,18 @@ except ModuleNotFoundError:
 COMPUTE_TASK_NAME_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
 
 PORT = int(os.environ.get("VAN_DASHBOARD_PORT", "8788"))
+TELEMETRY_SNAPSHOT_URL = os.environ.get(
+    "VAN_DASHBOARD_TELEMETRY_SNAPSHOT_URL",
+    "http://192.168.6.103:8765/v1/snapshot",
+)
+TELEMETRY_SNAPSHOT_TIMEOUT = float(
+    os.environ.get("VAN_DASHBOARD_TELEMETRY_SNAPSHOT_TIMEOUT", "3")
+)
+VOLTAGE_MON_CSV = os.environ.get(
+    "VAN_DASHBOARD_VOLTAGE_MON_CSV",
+    "/home/pi/dev/obd-things/tmp/battery/bcan_voltage.csv",
+)
+PROC_UPTIME = os.environ.get("VAN_DASHBOARD_PROC_UPTIME", "/proc/uptime")
 STATE_PATH = os.path.expanduser(
     os.environ.get("VAN_DASHBOARD_STATE_PATH", "~/.van_dashboard_state.json")
 )
@@ -3965,6 +3979,23 @@ class SystemPowerError(RuntimeError):
     pass
 
 
+def read_system_uptime(path=PROC_UPTIME, wall_clock=time.time):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            seconds = float(handle.read().split()[0])
+        if not math.isfinite(seconds) or seconds < 0:
+            raise ValueError("invalid uptime")
+    except (OSError, IndexError, ValueError):
+        return {"seconds": None, "booted_at": None}
+    now = float(wall_clock())
+    return {
+        "seconds": int(seconds),
+        "booted_at": datetime.datetime.fromtimestamp(
+            now - seconds, datetime.timezone.utc
+        ).isoformat(),
+    }
+
+
 class SystemPowerController:
     def __init__(
         self,
@@ -4045,6 +4076,119 @@ class SystemPowerController:
                 )
 
 
+class TelemetrySummaryReader:
+    def __init__(
+        self,
+        snapshot_url=TELEMETRY_SNAPSHOT_URL,
+        voltage_csv=VOLTAGE_MON_CSV,
+        timeout=TELEMETRY_SNAPSHOT_TIMEOUT,
+        opener=urlopen,
+    ):
+        self.snapshot_url = snapshot_url
+        self.voltage_csv = voltage_csv
+        self.timeout = timeout
+        self.opener = opener
+
+    @staticmethod
+    def _valid_voltage(value):
+        return (
+            not isinstance(value, bool)
+            and isinstance(value, (int, float))
+            and math.isfinite(value)
+            and 0 <= value <= 32
+        )
+
+    def _live_sample(self):
+        request = Request(
+            self.snapshot_url,
+            headers={"Accept": "application/json"},
+        )
+        with self.opener(request, timeout=self.timeout) as response:
+            payload = json.load(response)
+        metric = payload.get("metrics", {}).get("battery.voltage", {})
+        value = metric.get("value")
+        if (
+            not metric.get("available")
+            or metric.get("stale")
+            or not self._valid_voltage(value)
+        ):
+            return None
+        return {
+            "available": True,
+            "value": round(float(value), 3),
+            "unit": "V",
+            "source": "live",
+            "observed_at": metric.get("observed_at"),
+            "detail": "Live telemetry",
+        }
+
+    def _voltage_mon_sample(self):
+        try:
+            with open(self.voltage_csv, "rb") as handle:
+                handle.seek(0, os.SEEK_END)
+                end = handle.tell()
+                start = max(0, end - 65536)
+                handle.seek(start)
+                data = handle.read()
+        except OSError:
+            return None
+        text = data.decode("utf-8", errors="replace")
+        lines = text.splitlines()
+        if start and lines:
+            lines = lines[1:]
+        try:
+            rows = list(csv.reader(lines))
+        except csv.Error:
+            return None
+        for row in reversed(rows):
+            if len(row) < 2:
+                continue
+            try:
+                value = float(row[1])
+            except (TypeError, ValueError):
+                continue
+            if not self._valid_voltage(value):
+                continue
+            try:
+                observed = datetime.datetime.fromisoformat(row[0])
+                if observed.tzinfo is None:
+                    observed = observed.astimezone()
+            except (TypeError, ValueError):
+                continue
+            return {
+                "available": True,
+                "value": round(value, 3),
+                "unit": "V",
+                "source": "voltage_mon",
+                "observed_at": observed.isoformat(),
+                "detail": "Last voltage_mon reading",
+            }
+        return None
+
+    def snapshot(self):
+        try:
+            live = self._live_sample()
+        except (
+            AttributeError,
+            OSError,
+            ValueError,
+            TypeError,
+            json.JSONDecodeError,
+        ):
+            live = None
+        sample = live or self._voltage_mon_sample()
+        if sample:
+            return sample
+        return {
+            "available": False,
+            "value": None,
+            "unit": "V",
+            "source": None,
+            "observed_at": None,
+            "detail": "No battery voltage reading available",
+        }
+
+
 app = Flask(__name__)
 state_store = StateStore()
 engine_monitor = EngineMonitor()
@@ -4067,6 +4211,7 @@ backups = BackupManager()
 ignition_monitor_control = IgnitionMonitorController()
 disk_manager = DiskManager()
 system_power = SystemPowerController()
+telemetry_summary = TelemetrySummaryReader()
 
 
 def api_error(message, status):
@@ -4110,8 +4255,18 @@ def api_status():
             "cop_alert": cop_alert.snapshot(),
             "cop_led": cop_led.snapshot(),
             "starlink": starlink.snapshot(),
+            "system_uptime": read_system_uptime(),
         }
     )
+
+
+@app.route("/api/telemetry-summary")
+def api_telemetry_summary():
+    if request.args:
+        return api_error("telemetry summary does not accept input", 400)
+    response = jsonify({"ok": True, "battery": telemetry_summary.snapshot()})
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.route("/api/starlink", methods=["POST"])

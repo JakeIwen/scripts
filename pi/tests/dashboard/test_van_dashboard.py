@@ -1,4 +1,5 @@
 import copy
+import io
 import json
 import os
 import sqlite3
@@ -1327,6 +1328,25 @@ HDD_LABELS=(
 
 
 class SystemPowerControllerTests(unittest.TestCase):
+    def test_reads_uptime_and_reports_boot_timestamp(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            uptime = Path(tempdir) / "uptime"
+            uptime.write_text("93784.75 100.0\n", encoding="utf-8")
+            result = dashboard.read_system_uptime(
+                str(uptime), wall_clock=FakeClock(200000)
+            )
+        self.assertEqual(result["seconds"], 93784)
+        self.assertEqual(
+            result["booted_at"], "1970-01-02T05:30:15.250000+00:00"
+        )
+
+    def test_invalid_uptime_is_reported_as_unavailable(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            uptime = Path(tempdir) / "uptime"
+            uptime.write_text("not-a-number\n", encoding="utf-8")
+            result = dashboard.read_system_uptime(str(uptime))
+        self.assertEqual(result, {"seconds": None, "booted_at": None})
+
     def test_runs_only_the_fixed_script_for_each_action(self):
         calls = []
 
@@ -1397,6 +1417,89 @@ class SystemPowerControllerTests(unittest.TestCase):
                 operation = controller.snapshot()
                 self.assertEqual(operation["status"], "error")
                 self.assertIn(expected, operation["error"])
+
+
+class TelemetrySummaryReaderTests(unittest.TestCase):
+    @staticmethod
+    def opener(payload, calls):
+        def open_snapshot(request, timeout):
+            calls.append((request.full_url, timeout))
+            return io.BytesIO(json.dumps(payload).encode())
+
+        return open_snapshot
+
+    def test_prefers_fresh_live_voltage(self):
+        calls = []
+        payload = {
+            "metrics": {
+                "battery.voltage": {
+                    "available": True,
+                    "stale": False,
+                    "value": 12.61,
+                    "observed_at": "2026-07-27T01:24:52+00:00",
+                }
+            }
+        }
+        reader = dashboard.TelemetrySummaryReader(
+            snapshot_url="http://telemetry.test/v1/snapshot",
+            voltage_csv="/does/not/matter.csv",
+            timeout=2.5,
+            opener=self.opener(payload, calls),
+        )
+        result = reader.snapshot()
+        self.assertEqual(result["source"], "live")
+        self.assertEqual(result["value"], 12.61)
+        self.assertEqual(
+            result["observed_at"], "2026-07-27T01:24:52+00:00"
+        )
+        self.assertEqual(calls, [("http://telemetry.test/v1/snapshot", 2.5)])
+
+    def test_uses_latest_valid_voltage_mon_sample_when_live_is_stale(self):
+        payload = {
+            "metrics": {
+                "battery.voltage": {
+                    "available": True,
+                    "stale": True,
+                    "value": 13.2,
+                }
+            }
+        }
+        with tempfile.TemporaryDirectory() as tempdir:
+            voltage_csv = Path(tempdir) / "voltage.csv"
+            voltage_csv.write_text(
+                "2026-07-25T05:06:05,,CAN-CH confirmed\n"
+                "2026-07-26T19:24:52,12.6,wake-assisted C-CAN\n"
+                "2026-07-26T20:00:00,,bus silent\n",
+                encoding="utf-8",
+            )
+            reader = dashboard.TelemetrySummaryReader(
+                voltage_csv=str(voltage_csv),
+                opener=self.opener(payload, []),
+            )
+            result = reader.snapshot()
+        self.assertEqual(result["source"], "voltage_mon")
+        self.assertEqual(result["value"], 12.6)
+        self.assertTrue(result["observed_at"].startswith("2026-07-26T19:24:52"))
+
+    def test_live_failure_and_missing_log_return_no_data(self):
+        def unavailable(_request, timeout):
+            raise OSError(f"timeout after {timeout}")
+
+        reader = dashboard.TelemetrySummaryReader(
+            voltage_csv="/missing/voltage.csv",
+            opener=unavailable,
+        )
+        self.assertEqual(
+            reader.snapshot(),
+            {
+                "available": False,
+                "value": None,
+                "unit": "V",
+                "source": None,
+                "observed_at": None,
+                "detail": "No battery voltage reading available",
+            },
+        )
 
 
 class UsbWatchScriptTests(unittest.TestCase):
@@ -2553,8 +2656,11 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'aria-label="Edit tile positions"', page.data)
         self.assertIn(b'id="system-reboot"', page.data)
         self.assertIn(b'id="system-power-down"', page.data)
+        self.assertIn(b'id="system-uptime"', page.data)
         self.assertIn(b'data-system-power="reboot"', page.data)
         self.assertIn(b'data-system-power="power-down"', page.data)
+        self.assertNotIn(b'id="connection"', page.data)
+        self.assertNotIn(b"Connected \xc2\xb7 vanpi dashboard", page.data)
         self.assertIn(b"UBNT Wi-Fi", page.data)
         self.assertIn(b'id="ubnt-radio-dot"', page.data)
         self.assertIn(b'id="openwrt-age"', page.data)
@@ -2562,7 +2668,8 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="openwrt-card" data-dashboard-tile', page.data)
         self.assertNotIn(b'id="speedtest-button" data-dashboard-tile', page.data)
         self.assertIn(b'id="telemetry" data-dashboard-tile', page.data)
-        self.assertIn(b"Open the van telemetry dashboard", page.data)
+        self.assertIn(b'id="telemetry-voltage"', page.data)
+        self.assertIn(b'id="telemetry-observed"', page.data)
         self.assertEqual(page.data.count(b"data-dashboard-tile"), 15)
         self.assertNotIn(b'class="network-card speedtest-card"', page.data)
         self.assertIn(b'id="ubnt-network-list"', page.data)
@@ -2624,6 +2731,9 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"disks/action", javascript.data)
         self.assertIn(b"function requestSystemPower(action)", javascript.data)
         self.assertIn(b"function pollSystemPowerResult()", javascript.data)
+        self.assertIn(b"function formatUptime(seconds)", javascript.data)
+        self.assertIn(b"function refreshTelemetrySummary()", javascript.data)
+        self.assertIn(b"/api/telemetry-summary", javascript.data)
         self.assertIn(b"window.confirm(", javascript.data)
         self.assertIn(b"system-power", javascript.data)
         self.assertIn(b"confirmation: action", javascript.data)
@@ -2719,6 +2829,9 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b".disk-device-list", stylesheet.data)
         self.assertIn(b".disk-device-action", stylesheet.data)
         self.assertIn(b".system-power-button", stylesheet.data)
+        self.assertIn(b".system-uptime", stylesheet.data)
+        self.assertIn(b".telemetry-observed", stylesheet.data)
+        self.assertNotIn(b".connection", stylesheet.data)
         self.assertIn(b".disk-device-card.held", stylesheet.data)
         self.assertIn(b".monitor-crash-button", stylesheet.data)
         self.assertIn(b".monitor-crash-history-item", stylesheet.data)
@@ -3643,6 +3756,33 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(extra.status_code, 400)
         self.assertEqual(cross_origin.status_code, 403)
         self.assertEqual(calls, ["reboot"])
+
+    def test_telemetry_summary_route_is_read_only_and_uncached(self):
+        class FakeTelemetrySummary:
+            def snapshot(self):
+                return {
+                    "available": True,
+                    "value": 12.6,
+                    "unit": "V",
+                    "source": "voltage_mon",
+                    "observed_at": "2026-07-26T19:24:52-06:00",
+                    "detail": "Last voltage_mon reading",
+                }
+
+        original = dashboard.telemetry_summary
+        dashboard.telemetry_summary = FakeTelemetrySummary()
+        try:
+            client = dashboard.app.test_client()
+            status = client.get("/api/telemetry-summary")
+            rejected = client.get("/api/telemetry-summary?command=anything")
+        finally:
+            dashboard.telemetry_summary = original
+
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.headers["Cache-Control"], "no-store")
+        self.assertEqual(status.json["battery"]["value"], 12.6)
+        self.assertEqual(status.json["battery"]["source"], "voltage_mon")
+        self.assertEqual(rejected.status_code, 400)
 
     def test_starlink_power_change_requests_policy_reconciliation(self):
         events = []

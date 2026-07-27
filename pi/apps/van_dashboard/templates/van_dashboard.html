@@ -14,15 +14,17 @@
 <header>
   <div><div class="eyebrow">vanpi controls</div><h1>Van Dashboard</h1></div>
   <div class="header-tools">
-    <div class="system-power-actions" role="group" aria-label="Vanpi system power">
-      <button class="system-power-button" id="system-reboot" type="button" data-action data-system-power="reboot" title="Safely reboot vanpi"><span aria-hidden="true">↻</span><span>Reboot</span></button>
-      <button class="system-power-button power-down" id="system-power-down" type="button" data-action data-system-power="power-down" title="Safely power down vanpi"><span aria-hidden="true">⏻</span><span>Power down</span></button>
+    <div class="system-power-cluster">
+      <div class="system-power-actions" role="group" aria-label="Vanpi system power">
+        <button class="system-power-button" id="system-reboot" type="button" data-action data-system-power="reboot" title="Safely reboot vanpi"><span aria-hidden="true">↻</span><span>Reboot</span></button>
+        <button class="system-power-button power-down" id="system-power-down" type="button" data-action data-system-power="power-down" title="Safely power down vanpi"><span aria-hidden="true">⏻</span><span>Power down</span></button>
+      </div>
+      <span class="system-uptime" id="system-uptime">Uptime · checking…</span>
     </div>
     <div class="van-mark" aria-hidden="true">🚐</div>
   </div>
 </header>
 <main>
-  <div class="connection"><span class="dot" id="dot"></span><span id="connection">Connecting to vanpi…</span></div>
   <div class="tile-edit-bar">
     <span class="sr-only" id="tile-edit-help">In edit mode, drag tiles or use the arrow keys to rearrange them.</span>
     <span class="sr-only" id="tile-edit-status" role="status" aria-live="polite"></span>
@@ -44,7 +46,7 @@
       <span class="tile-detail" id="starlink-detail">Checking Tuya status…</span>
     </button>
     <a class="tile" id="books" data-dashboard-tile data-action href="#"><span class="tile-heading"><span class="tile-icon" aria-hidden="true">📖</span><span class="tile-title">Audiobooks</span></span><span class="tile-detail">Open the Sonos audiobook library</span></a>
-    <a class="tile" id="telemetry" data-dashboard-tile data-action href="#"><span class="tile-heading"><span class="tile-icon" aria-hidden="true">📊</span><span class="tile-title">Telemetry</span></span><span class="tile-detail">Open the van telemetry dashboard</span></a>
+    <a class="tile telemetry-tile" id="telemetry" data-dashboard-tile data-action href="#"><span class="tile-heading"><span class="tile-icon" aria-hidden="true">📊</span><span class="tile-title">Telemetry</span></span><span class="tile-detail" id="telemetry-voltage">Checking battery voltage…</span><span class="telemetry-observed" id="telemetry-observed">Awaiting telemetry…</span></a>
     <section class="tile sonos-tile" id="sonos-card" data-dashboard-tile aria-labelledby="sonos-title">
       <div class="sonos-head"><span class="tile-heading"><span class="tile-icon" aria-hidden="true">🔊</span><span class="tile-title" id="sonos-title">Sonos</span></span><button class="sonos-open" id="speakers" data-action aria-haspopup="dialog" aria-expanded="false" aria-controls="speaker-panel"><span id="speaker-summary">Finding…</span></button></div>
       <div class="now-playing"><strong id="sonos-track">Finding Sonos…</strong><span id="sonos-artist">—</span></div>

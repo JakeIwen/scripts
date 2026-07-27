@@ -191,8 +191,6 @@ async function pollSystemPowerResult() {
     const operation = payload.system_power || {};
     if (operation.status === 'error') {
       setSystemPowerButtonsDisabled(false);
-      $('connection').textContent = 'Power action failed; vanpi stayed on';
-      $('dot').className = 'dot bad';
       toast(operation.error || 'Power action failed; vanpi stayed on', true);
       return;
     }
@@ -206,8 +204,8 @@ async function pollSystemPowerResult() {
 async function requestSystemPower(action) {
   if (systemPowerBusy) return;
   const labels = {
-    reboot: { question: 'Reboot vanpi now?', progress: 'Rebooting vanpi…' },
-    'power-down': { question: 'Power down vanpi now?', progress: 'Powering down vanpi…' },
+    reboot: { question: 'Reboot vanpi now?' },
+    'power-down': { question: 'Power down vanpi now?' },
   };
   const selected = labels[action];
   if (!selected) return;
@@ -222,8 +220,6 @@ async function requestSystemPower(action) {
   try {
     const result = await post('system-power', { action, confirmation: action });
     accepted = true;
-    $('connection').textContent = selected.progress;
-    $('dot').className = 'dot';
     toast(result.message);
     systemPowerPoll = setTimeout(pollSystemPowerResult, 750);
   } catch (error) {
@@ -239,6 +235,44 @@ function age(ts) {
   if (!ts) return 'never';
   const secs = Math.max(0, Date.now() / 1000 - ts);
   return secs < 90 ? `${Math.round(secs)}s ago` : `${Math.round(secs / 60)}m ago`;
+}
+function formatUptime(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return 'Uptime · unavailable';
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const parts = [];
+  if (days) parts.push(`${days}d`);
+  if (days || hours) parts.push(`${hours}h`);
+  parts.push(`${minutes}m`);
+  return `Uptime · ${parts.join(' ')}`;
+}
+function renderTelemetrySummary(response) {
+  const battery = response?.battery || {};
+  if (!battery.available || !Number.isFinite(battery.value)) {
+    $('telemetry-voltage').textContent = 'Battery voltage unavailable';
+    $('telemetry-observed').textContent = 'No live or voltage_mon reading';
+    return;
+  }
+  const source = battery.source === 'live' ? 'live' : 'last voltage_mon';
+  $('telemetry-voltage').textContent = `${Number(battery.value).toFixed(2)} V · ${source}`;
+  const observed = new Date(battery.observed_at || '');
+  $('telemetry-observed').textContent = Number.isNaN(observed.getTime())
+    ? 'Timestamp unavailable'
+    : `Observed · ${observed.toLocaleString([], {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit',
+      })}`;
+}
+async function refreshTelemetrySummary() {
+  try {
+    renderTelemetrySummary(await json('/api/telemetry-summary'));
+  } catch (_) {
+    renderTelemetrySummary(null);
+  }
 }
 function formatBytes(value) {
   if (!Number.isFinite(value)) return '—';
@@ -2946,9 +2980,7 @@ function updateStatus(data) {
   const active = dashboard.active;
   const engine = dashboard.engine;
   const led = data.cop_led || {};
-  $('dot').classList.remove('bad');
-  $('dot').classList.add('on');
-  $('connection').textContent = 'Connected · vanpi dashboard';
+  $('system-uptime').textContent = formatUptime(data.system_uptime?.seconds);
   renderStarlink(data.starlink);
   $('cop').classList.toggle('active', active);
   $('cop').setAttribute('aria-pressed', String(active));
@@ -2969,17 +3001,11 @@ function updateStatus(data) {
       : dashboard.last_wake_ok
         ? `OK · ${age(dashboard.last_wake)}`
         : 'DEGRADED';
-  if (active && dashboard.last_error)
-    $('connection').textContent = `Active with warning · ${dashboard.last_error}`;
 }
 async function refresh() {
   try {
     updateStatus(await json('/api/status'));
-  } catch (error) {
-    $('dot').classList.remove('on');
-    $('dot').classList.add('bad');
-    $('connection').textContent = error.message;
-  }
+  } catch (_) {}
 }
 function muteIcon(muted) {
   return muted ? '🔇' : '🔊';
@@ -3698,6 +3724,7 @@ function refreshVisibleDashboard() {
   refreshPriceChecks().catch(() => {});
   refreshLighting(false).catch(() => {});
   refreshUbntWifi(false);
+  refreshTelemetrySummary();
 }
 setupTruncationTitles();
 Promise.allSettled([
@@ -3715,6 +3742,7 @@ Promise.allSettled([
   refreshPriceChecks(),
   refreshLighting(false),
   refreshUbntWifi(false),
+  refreshTelemetrySummary(),
 ]).then((results) => {
   if (results[1].status === 'rejected') refreshSonos();
 });
@@ -3724,6 +3752,9 @@ setInterval(() => {
 setInterval(() => {
   if (!document.hidden) refreshConnectivity();
 }, 10000);
+setInterval(() => {
+  if (!document.hidden) refreshTelemetrySummary();
+}, 15000);
 setInterval(() => {
   if (!document.hidden && !busy) refreshSonos();
 }, 10000);

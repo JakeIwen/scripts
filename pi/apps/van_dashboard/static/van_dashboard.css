@@ -76,8 +76,19 @@ h1 {
 .header-tools {
   gap: 12px;
 }
+.system-power-cluster {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+}
 .system-power-actions {
   gap: 7px;
+}
+.system-uptime {
+  color: var(--dim);
+  font-size: 10px;
+  line-height: 1;
 }
 .system-power-button {
   min-height: 34px;
@@ -104,29 +115,6 @@ h1 {
 .system-power-button:disabled {
   cursor: wait;
   opacity: 0.5;
-}
-.connection {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--dim);
-  font-size: 12px;
-  margin: 0 2px 14px;
-}
-.dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #71818a;
-  box-shadow: 0 0 0 3px #71818a18;
-}
-.dot.on {
-  background: var(--good);
-  box-shadow: 0 0 0 3px #62c89920;
-}
-.dot.bad {
-  background: var(--bad);
-  box-shadow: 0 0 0 3px #ef706718;
 }
 .grid {
   display: grid;
@@ -270,6 +258,13 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   margin-top: auto;
   padding-top: 12px;
   min-height: 34px;
+}
+.telemetry-observed {
+  width: 100%;
+  color: var(--dim);
+  font-size: 10px;
+  line-height: 1.25;
+  min-height: 13px;
 }
 .cop {
   min-height: 210px;
