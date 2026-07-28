@@ -2865,6 +2865,11 @@ body.busy [data-action] {
   font-size: 9px;
   margin-top: 2px;
 }
+.usb-device-main .usb-device-route {
+  color: #9fb4be;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
 .usb-device-row.unplugged .usb-device-main time {
   color: #f2aaa5;
 }

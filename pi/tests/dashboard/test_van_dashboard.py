@@ -1738,6 +1738,72 @@ class UsbDeviceMonitorTests(unittest.TestCase):
         self.assertEqual(stale["present_device_count"], 1)
         self.assertIn("timed out after 3", stale["last_error"])
 
+    def test_remembers_topology_for_partial_and_unplugged_devices(self):
+        def instance(device_number, location, parent, port):
+            return {
+                "device_number": device_number,
+                "location": location,
+                "parent_location": parent,
+                "port": port,
+                "labels": [],
+            }
+
+        base = self.device("abcd:1234", "Twin readers", count=2)
+        samples = [
+            json.dumps(
+                {
+                    "version": 2,
+                    "devices": [
+                        {
+                            **base,
+                            "instances": [
+                                instance(4, "2-2.1", "2-2", 1),
+                                instance(5, "2-2.2", "2-2", 2),
+                            ],
+                        }
+                    ],
+                }
+            ),
+            json.dumps(
+                {
+                    "version": 2,
+                    "devices": [
+                        {
+                            **base,
+                            "present_count": 1,
+                            "instances": [instance(4, "2-2.1", "2-2", 1)],
+                        }
+                    ],
+                }
+            ),
+            json.dumps({"version": 2, "devices": []}),
+        ]
+
+        monitor = dashboard.UsbDeviceMonitor(
+            command=lambda _args, timeout: SimpleNamespace(
+                returncode=0,
+                stdout=samples.pop(0),
+                stderr="",
+            )
+        )
+        monitor.refresh()
+        partial = monitor.refresh()["devices"][0]
+        self.assertEqual(
+            [item["location"] for item in partial["instances"]],
+            ["2-2.1"],
+        )
+        self.assertEqual(
+            [item["location"] for item in partial["known_instances"]],
+            ["2-2.1", "2-2.2"],
+        )
+
+        unplugged = monitor.refresh()["devices"][0]
+        self.assertEqual(unplugged["instances"], [])
+        self.assertEqual(
+            [item["location"] for item in unplugged["known_instances"]],
+            ["2-2.1", "2-2.2"],
+        )
+
     def test_parser_rejects_unexpected_schema(self):
         invalid = (
             "not-json",
@@ -1935,7 +2001,12 @@ class UsbPortControllerTests(unittest.TestCase):
                 hubs.append(
                     {
                         "location": location,
-                        "description": f"{side} Realtek hub",
+                        "description": (
+                            "Realtek Semiconductor Corp. RTS5411 Hub"
+                            if side == "usb2"
+                            else "Realtek Semiconductor Corp. Hub"
+                        ),
+                        "device_id": "0bda:5411" if side == "usb2" else "0bda:0411",
                         "method": "power",
                         "ports": ports,
                     }
@@ -1947,7 +2018,11 @@ class UsbPortControllerTests(unittest.TestCase):
         physical = presented[0]
         self.assertTrue(physical["physical"])
         self.assertFalse(physical["advanced"])
-        self.assertEqual(physical["detail"], "10 physical ports · paired USB 2/USB 3")
+        self.assertEqual(
+            physical["detail"],
+            "Realtek Semiconductor Corp. Hub · ID 0bda:0411"
+            " · 10 physical ports · paired USB 2/USB 3 · route 2-2",
+        )
         self.assertEqual([port["port"] for port in physical["ports"]], list(range(1, 11)))
         self.assertEqual(
             physical["ports"][0]["device_descriptions"], ["Seagate Portable"]
@@ -1964,6 +2039,62 @@ class UsbPortControllerTests(unittest.TestCase):
         self.assertEqual(android_target["location"], "2-2.4.4")
         self.assertEqual(android_target["port"], 1)
         self.assertEqual(android_target["device_descriptions"], ["Samsung Android"])
+
+    def test_keeps_distinct_root_external_hubs_in_separate_panes(self):
+        hubs = []
+        targets = {}
+        for route, manufacturer in (
+            ("2", "Realtek Semiconductor Corp. Hub"),
+            ("3", "Genesys Logic, Inc. Hub"),
+        ):
+            for side, location in (
+                ("usb2", f"1-1.{route}"),
+                ("usb3", f"2-{route}"),
+            ):
+                ports = []
+                for port_number in range(1, 5):
+                    key = f"{location}:{port_number}"
+                    port = {
+                        "key": key,
+                        "location": location,
+                        "port": port_number,
+                        "method": "power",
+                        "enabled": True,
+                        "device_descriptions": [],
+                        "downstream_device_count": 0,
+                        "storage_labels": [],
+                        "mounted_labels": [],
+                    }
+                    ports.append(port)
+                    targets[key] = {**port, "disable_path": None}
+                hubs.append(
+                    {
+                        "location": location,
+                        "description": (
+                            f"{manufacturer} USB2 companion"
+                            if side == "usb2"
+                            else manufacturer
+                        ),
+                        "device_id": (
+                            "0bda:5411"
+                            if route == "2"
+                            else "05e3:0626"
+                        ),
+                        "method": "power",
+                        "ports": ports,
+                    }
+                )
+
+        presented = dashboard.UsbPortController._presentation_hubs(hubs, targets)
+
+        self.assertEqual(len(presented), 2)
+        self.assertEqual(
+            [hub["location"] for hub in presented],
+            ["2-2", "2-3"],
+        )
+        self.assertTrue(all(hub["description"] == "External USB hub" for hub in presented))
+        self.assertIn("Realtek Semiconductor Corp. Hub", presented[0]["detail"])
+        self.assertIn("Genesys Logic, Inc. Hub", presented[1]["detail"])
 
     def test_marks_pi_root_and_internal_hubs_as_advanced(self):
         hubs = [
@@ -2975,6 +3106,13 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"function renderUsbDevices(response)", javascript.data)
         self.assertIn(b"function renderUsbHubCards(hubs, running)", javascript.data)
         self.assertIn(b"function renderUsbPorts(state)", javascript.data)
+        self.assertIn(b"function usbDeviceRoutes(device, hubs)", javascript.data)
+        self.assertIn(b"Last known USB:", javascript.data)
+        self.assertIn(
+            b"advancedOpen = Boolean(hubList.querySelector('.usb-advanced')?.open)",
+            javascript.data,
+        )
+        self.assertIn(b"advancedOpen ? ' open' : ''", javascript.data)
         self.assertIn(b"function changeUsbPort(button)", javascript.data)
         self.assertIn(b"function recoverUsb2()", javascript.data)
         self.assertIn(b"function renderBackups(response)", javascript.data)
@@ -3070,6 +3208,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b".compute-local-reasons", stylesheet.data)
         self.assertIn(b".compute-local-categories", stylesheet.data)
         self.assertIn(b".usb-device-row", stylesheet.data)
+        self.assertIn(b".usb-device-route", stylesheet.data)
         self.assertIn(b".usb-label", stylesheet.data)
         self.assertIn(b".usb-port-grid", stylesheet.data)
         self.assertIn(b".usb-port-actions", stylesheet.data)

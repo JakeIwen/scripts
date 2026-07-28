@@ -771,18 +771,27 @@ function usbEventLabel(event) {
         : 'Plugged';
   return `${label} ${eventTime(event.at)}`;
 }
+function usbHubName(hub, hubs) {
+  if (!hub.physical) return hub.description;
+  const physical = hubs.filter((item) => item.physical),
+    index = physical.indexOf(hub);
+  return physical.length > 1 && index >= 0
+    ? `${hub.description} ${index + 1}`
+    : hub.description;
+}
 function renderUsbHubCards(hubs, running) {
   return hubs
     .map((hub) => {
       const power = hub.method === 'power',
-        hubDetail = hub.detail || `Location ${hub.location}`;
-      return `<article class="usb-hub-card"><div class="usb-hub-head"><span><strong>${esc(hub.description)}</strong><small>${esc(hubDetail)}</small></span><b class="usb-method ${power ? 'power' : 'data'}">${power ? 'POWER + DATA' : 'DATA ONLY'}</b></div><div class="usb-port-grid">${(hub.ports || [])
+        hubDetail = hub.detail || `Location ${hub.location}`,
+        hubName = usbHubName(hub, hubs);
+      return `<article class="usb-hub-card"><div class="usb-hub-head"><span><strong>${esc(hubName)}</strong><small>${esc(hubDetail)}</small></span><b class="usb-method ${power ? 'power' : 'data'}">${power ? 'POWER + DATA' : 'DATA ONLY'}</b></div><div class="usb-port-grid">${(hub.ports || [])
         .map((port) => {
           const enabled = port.enabled !== false,
             mounted = port.mounted_labels || [],
             descriptions = port.device_descriptions || [],
             downstream = Number(port.downstream_device_count) || 0,
-            label = `${hub.description} port ${port.port}`,
+            label = `${hubName} port ${port.port}`,
             detail = descriptions.length
               ? descriptions.join(', ')
               : downstream
@@ -814,17 +823,42 @@ function renderUsbPorts(state) {
   $('usb-operation').textContent = operationLabel;
   $('usb-panel').classList.toggle('usb-port-busy', running);
   $('usb-recover').disabled = running || usbPortBusy;
-  const hubs = state?.hubs || [],
+  const hubList = $('usb-hub-list'),
+    advancedOpen = Boolean(hubList.querySelector('.usb-advanced')?.open),
+    hubs = state?.hubs || [],
     primaryHubs = hubs.filter((hub) => !hub.advanced),
     advancedHubs = hubs.filter((hub) => hub.advanced),
     advancedPortCount = advancedHubs.reduce((total, hub) => total + hub.ports.length, 0),
     primaryHtml = renderUsbHubCards(primaryHubs, running),
     advancedHtml = advancedHubs.length
-      ? `<details class="usb-advanced"><summary>Advanced / internal ports <span>${advancedPortCount} logical ports</span></summary><div class="usb-advanced-list">${renderUsbHubCards(advancedHubs, running)}</div></details>`
+      ? `<details class="usb-advanced"${advancedOpen ? ' open' : ''}><summary>Advanced / internal ports <span>${advancedPortCount} logical ports</span></summary><div class="usb-advanced-list">${renderUsbHubCards(advancedHubs, running)}</div></details>`
       : '';
-  $('usb-hub-list').innerHTML =
+  hubList.innerHTML =
     primaryHtml + advancedHtml ||
     '<div class="speaker-loading">No USB port controls discovered</div>';
+}
+function usbDeviceRoutes(device, hubs) {
+  const instances = device.known_instances || device.instances || [],
+    physicalHubs = hubs.filter((hub) => hub.physical),
+    labels = instances.map((instance) => {
+      const topologyKey = `${instance.parent_location}:${instance.port}`;
+      for (const hub of hubs) {
+        const port = (hub.ports || []).find(
+          (item) =>
+            item.key === topologyKey ||
+            (item.topology_locations || []).includes(topologyKey),
+        );
+        if (!port) continue;
+        const hubName = hub.physical
+          ? physicalHubs.length > 1
+            ? `${hub.description} ${physicalHubs.indexOf(hub) + 1}`
+            : hub.description
+          : hub.description;
+        return `${hubName} · port ${port.port} · route ${instance.location}`;
+      }
+      return `Hub ${instance.parent_location} · port ${instance.port} · route ${instance.location}`;
+    });
+  return [...new Set(labels)];
 }
 function renderUsbDevices(response) {
   const state = response.usb,
@@ -863,10 +897,14 @@ function renderUsbDevices(response) {
             : 'Missing',
         labelsHtml = (device.labels || [])
           .map((label) => `<span class="usb-label">${esc(label)}</span>`)
-          .join('');
+          .join(''),
+        routes = usbDeviceRoutes(device, usbPortStatus?.hubs || []),
+        routeHtml = routes.length
+          ? `<small class="usb-device-route">Last known USB: ${esc(routes.join(' · '))}</small>`
+          : '';
       return `<article class="usb-device-row ${esc(device.status)}">
         <span class="usb-device-dot" aria-hidden="true"></span>
-        <div class="usb-device-main"><strong>${esc(device.description)}</strong><small>Bus ${esc(device.bus)} · ID ${esc(device.device_id)}</small>${labelsHtml ? `<div class="usb-labels">${labelsHtml}</div>` : ''}${event ? `<time>${esc(event)}</time>` : ''}</div>
+        <div class="usb-device-main"><strong>${esc(device.description)}</strong><small>Bus ${esc(device.bus)} · ID ${esc(device.device_id)}</small>${routeHtml}${labelsHtml ? `<div class="usb-labels">${labelsHtml}</div>` : ''}${event ? `<time>${esc(event)}</time>` : ''}</div>
         <span class="usb-device-count">${esc(count)}</span>
       </article>`;
     })

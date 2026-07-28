@@ -2212,6 +2212,7 @@ class UsbDeviceMonitor:
                         self.seen[key] = {
                             **device,
                             "max_count": count,
+                            "known_instances": copy.deepcopy(device["instances"]),
                             "event": event,
                         }
                         continue
@@ -2222,11 +2223,32 @@ class UsbDeviceMonitor:
                     seen["max_count"] = max(seen["max_count"], count)
                     if device["labels"]:
                         seen["labels"] = device["labels"]
-                    seen["instances"] = device["instances"]
+                    current_instances = copy.deepcopy(device["instances"])
+                    seen["instances"] = current_instances
+                    if count >= seen["max_count"]:
+                        seen["known_instances"] = current_instances
+                    else:
+                        remembered = {
+                            item["location"]: copy.deepcopy(item)
+                            for item in seen.get("known_instances", ())
+                        }
+                        remembered.update(
+                            {item["location"]: item for item in current_instances}
+                        )
+                        current_locations = {
+                            item["location"] for item in current_instances
+                        }
+                        retained = current_instances + [
+                            item
+                            for location, item in remembered.items()
+                            if location not in current_locations
+                        ]
+                        seen["known_instances"] = retained[: seen["max_count"]]
 
                 for key, seen in self.seen.items():
                     if key not in current and seen["present_count"] > 0:
                         seen["present_count"] = 0
+                        seen["instances"] = []
                         seen["event"] = {"kind": "unplugged", "at": now}
 
                 self.baseline = False
@@ -2449,9 +2471,9 @@ class UsbPortController:
 
         A Raspberry Pi 4 inserts its VIA USB 2 hub at ``1-1`` while USB 3 is
         rooted directly at bus 2. Matching routes below those points are the
-        two logical sides of the same physical hub. Chained hub-controller
-        uplinks are omitted and their external ports are flattened in route
-        order.
+        two logical sides of the same physical hub. Each root external-hub
+        route becomes its own pane. Chained controller chips beneath that root
+        are flattened into the same pane in route order.
         """
         companions = {"usb2": {}, "usb3": {}}
         for hub in hubs:
@@ -2559,13 +2581,20 @@ class UsbPortController:
 
             append_route(root)
             root_hub = companions["usb3"][root]
+            identity = root_hub.get("description") or "Unknown USB hub"
+            device_id = root_hub.get("device_id")
+            identity_detail = identity
+            if device_id:
+                identity_detail = f"{identity} · ID {device_id}"
             presented.append(
                 {
                     "location": root_hub["location"],
                     "description": "External USB hub",
                     "detail": (
-                        f"{len(physical_ports)} physical ports · paired USB 2/USB 3"
+                        f"{identity_detail} · {len(physical_ports)} physical ports"
+                        f" · paired USB 2/USB 3 · route {root_hub['location']}"
                     ),
+                    "device_id": device_id,
                     "method": "power",
                     "physical": True,
                     "advanced": False,
@@ -2617,6 +2646,9 @@ class UsbPortController:
             smart_hub = smart_hubs.get(location)
             smart_port = smart_hub.get("ports", {}).get(port) if smart_hub else None
             kernel_port = kernel_ports.get((location, port))
+            hub_device = next(
+                (item for item in instances if item["location"] == location), None
+            )
             if smart_hub:
                 method = "power"
                 enabled = (
@@ -2624,18 +2656,25 @@ class UsbPortController:
                     if kernel_port is not None
                     else bool(smart_port and smart_port["powered"])
                 )
-                hub_description = smart_hub["description"]
+                hub_description = (
+                    hub_device["description"]
+                    if hub_device
+                    else smart_hub["description"]
+                )
+                hub_device_id = (
+                    hub_device["device_id"]
+                    if hub_device
+                    else smart_hub["device_id"]
+                )
             else:
                 method = "disable"
                 enabled = kernel_port["enabled"] if kernel_port is not None else None
-                hub_device = next(
-                    (item for item in instances if item["location"] == location), None
-                )
                 hub_description = (
                     hub_device["description"]
                     if hub_device
                     else f"USB {location} hub"
                 )
+                hub_device_id = hub_device["device_id"] if hub_device else None
             child = self._child_location(location, port)
             direct = [item for item in instances if item["location"] == child]
             downstream = [
@@ -2665,6 +2704,7 @@ class UsbPortController:
                 {
                     "location": location,
                     "description": hub_description,
+                    "device_id": hub_device_id,
                     "method": method,
                     "ports": [],
                 },
