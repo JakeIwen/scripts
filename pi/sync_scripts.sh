@@ -67,10 +67,44 @@ scp $mux -r "$hooks" "$secrets" "$twilio" "$pi_ip:/home/pi/" &
 dirs_pid=$!
 
 scp $mux "$configs/smb.conf" "$pi_ip:/etc/samba/smb.conf" &
+smb_pid=$!
 
-wait $home_pid
-ssh $mux $pi_ip 'sudo chmod 770 /home/pi/rsync-exclude-media.txt' &
-wait $dirs_pid
-wait $services_pid || { echo "script/service deployment failed" >&2; exit 1; }
+sync_failed=0
+chmod_pid=""
+if wait "$home_pid"; then
+  ssh $mux $pi_ip 'sudo chmod 770 /home/pi/rsync-exclude-media.txt' &
+  chmod_pid=$!
+else
+  echo "home-file deployment failed" >&2
+  sync_failed=1
+fi
+if ! wait "$dirs_pid"; then
+  echo "directory/secret deployment failed" >&2
+  sync_failed=1
+fi
+if ! wait "$services_pid"; then
+  echo "script/service deployment failed" >&2
+  sync_failed=1
+fi
+if ! wait "$smb_pid"; then
+  echo "Samba configuration deployment failed" >&2
+  sync_failed=1
+fi
+if [[ -n "$chmod_pid" ]] && ! wait "$chmod_pid"; then
+  echo "rsync-exclude permission update failed" >&2
+  sync_failed=1
+fi
+if (( sync_failed )); then
+  exit 1
+fi
 
-wait
+# van_compute owns a coupled Mac/Pi deployment and must never be copied through
+# the generic script staging above. Its installer performs a cheap fingerprint
+# and health check, returning immediately when current. Keep it in the
+# foreground so this one-shot updater cannot report success before a required
+# compute upgrade has actually completed.
+compute_installer="$dsc/macbook/scripts/install_van_compute_worker.zsh"
+if ! "$compute_installer" --if-needed; then
+  echo "conditional van_compute deployment failed" >&2
+  exit 1
+fi
