@@ -529,6 +529,45 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   justify-content: flex-end;
   margin: 4px 0 12px;
 }
+.deal-watch-panels {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  width: 100%;
+}
+.deal-watch-panel {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #38515e;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 100% 0, #57849a12, transparent 34%),
+    #101b21;
+  box-shadow: inset 0 1px #ffffff08;
+  padding: 14px;
+}
+.deal-watch-panel-head {
+  border-bottom: 1px solid var(--line);
+  margin: 0 0 12px;
+  padding: 0 1px 11px;
+}
+.deal-watch-panel-head h3 {
+  margin: 0;
+  font-size: 15px;
+  letter-spacing: 0.01em;
+}
+.deal-watch-panel-head p {
+  color: var(--dim);
+  font-size: 10px;
+  line-height: 1.4;
+  margin: 4px 0 0;
+}
+@media (max-width: 420px) {
+  .deal-watch-panel {
+    padding: 12px;
+  }
+}
 .price-schedule-form {
   border: 1px solid var(--line);
   border-radius: 11px;
@@ -722,6 +761,80 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
 .price-edit-cancel {
   background: transparent;
   padding: 10px 14px;
+}
+.price-search-list {
+  display: grid;
+  gap: 8px;
+}
+.price-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #172129;
+  padding: 11px 12px;
+}
+.price-search-row.error {
+  border-color: #754743;
+  background: #2a2021;
+}
+.price-search-row .price-row-meta,
+.price-search-results,
+.price-search-empty {
+  grid-column: 1 / -1;
+}
+.price-search-row a {
+  color: #acd7ee;
+}
+.price-search-results {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.price-search-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid #ffffff12;
+  padding-top: 7px;
+}
+.price-search-result a,
+.price-search-result small {
+  display: block;
+}
+.price-search-result a {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 680;
+}
+.price-search-result small,
+.price-search-empty {
+  color: var(--dim);
+  font-size: 9px;
+  margin-top: 2px;
+}
+.price-search-result button {
+  border: 1px solid #754743;
+  border-radius: 9px;
+  background: #352526;
+  color: #f2b5b0;
+  padding: 6px 8px;
+  font-size: 9px;
+  font-weight: 730;
+  cursor: pointer;
+}
+.price-search-result button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.price-search-form {
+  margin-top: 12px;
 }
 .lighting-tile {
   padding: 0;

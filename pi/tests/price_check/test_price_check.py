@@ -44,6 +44,42 @@ class AmazonParserTests(unittest.TestCase):
             price_check.parse_amazon("<title>Robot Check</title>")
 
 
+class SearchNotificationTests(unittest.TestCase):
+    WATCH = {
+        "display_title": "MicroPod II diagnostic",
+        "url": "https://www.ebay.com/sch/i.html?_nkw=micropod",
+    }
+
+    @mock.patch.object(price_check, "send_ntfy")
+    def test_sends_actionable_titles_for_each_failure_class(self, send):
+        cases = (
+            (
+                price_check.SearchCookieError("request rejected"),
+                "update eBay browser cookie",
+                "cookie,warning",
+            ),
+            (
+                price_check.SearchLoadError("timed out"),
+                "eBay search failed to load",
+                "warning",
+            ),
+            (
+                price_check.SearchParserError("markup changed"),
+                "eBay parser needs update",
+                "warning",
+            ),
+        )
+        for error, title_fragment, tags in cases:
+            with self.subTest(error=type(error).__name__):
+                send.reset_mock()
+                price_check.send_search_error(self.WATCH, error)
+                title, message, priority, actual_tags = send.call_args.args
+                self.assertIn(title_fragment, title)
+                self.assertIn(str(error), message)
+                self.assertEqual(priority, "high")
+                self.assertEqual(actual_tags, tags)
+
+
 class PriceStoreTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()

@@ -16,6 +16,16 @@ from urllib.parse import urlparse
 
 from amazon_parser import AmazonParseError, Product, parse as parse_amazon
 from cron_schedule import CronScheduleError, CronScheduleManager
+from search_watch import (
+    SearchCookieError,
+    SearchLoadError,
+    SearchParserError,
+    SearchStore,
+    SearchStoreError,
+    SearchWatchError,
+    check_watches,
+    validate_watch,
+)
 from store import PriceStore, StoreError, normalized_url
 
 
@@ -112,6 +122,54 @@ def send_parser_error(item: dict, error: AmazonParseError) -> None:
     send_ntfy(title, message, "high", "warning")
 
 
+def send_search_alert(watch: dict, results: list[dict]) -> None:
+    count = len(results)
+    title = (
+        f"{watch['display_title']}: {count} new eBay "
+        f"{'result' if count == 1 else 'results'}"
+    )
+    lines = []
+    for result in results[:5]:
+        detail = result["title"]
+        if result["price"]:
+            detail += f" — {result['price']}"
+        lines.extend((detail, result["url"]))
+    if count > 5:
+        lines.append(f"…and {count - 5} more new results")
+    send_ntfy(title, "\n".join(lines), "high", "mag")
+
+
+def send_search_error(watch: dict, error: Exception) -> None:
+    if isinstance(error, SearchCookieError):
+        title = f"{watch['display_title']}: update eBay browser cookie"
+        message = (
+            "eBay rejected or gated this saved-search request. Capture a new "
+            "signed-out Firefox Private Window request and replace "
+            "/home/pi/secrets/.ebay_headers.\n"
+            f"{error}\n{watch['url']}"
+        )
+        tags = "cookie,warning"
+    elif isinstance(error, SearchLoadError):
+        title = f"{watch['display_title']}: eBay search failed to load"
+        message = (
+            "The search page could not be downloaded. The last successful "
+            f"results were preserved.\n{error}\n{watch['url']}"
+        )
+        tags = "warning"
+    elif isinstance(error, SearchParserError):
+        title = f"{watch['display_title']}: eBay parser needs update"
+        message = (
+            "eBay loaded, but its result markup was not recognized. The last "
+            f"successful results were preserved.\n{error}\n{watch['url']}"
+        )
+        tags = "warning"
+    else:
+        title = f"{watch['display_title']}: eBay search needs attention"
+        message = f"{error}\n{watch['url']}"
+        tags = "warning"
+    send_ntfy(title, message, "high", tags)
+
+
 def check_item(
     store: PriceStore, item: dict, *, notify: bool = True, record: bool = True
 ) -> dict:
@@ -179,9 +237,16 @@ def summary(items: list[dict]) -> dict:
     }
 
 
-def response(store: PriceStore, **extra) -> dict:
+def response(store: PriceStore, search_store: SearchStore, **extra) -> dict:
     items = store.list_items()
-    return {"ok": True, "items": items, "summary": summary(items), **extra}
+    return {
+        "ok": True,
+        "items": items,
+        "summary": summary(items),
+        "searches": search_store.list_watches(),
+        "search_summary": search_store.summary(),
+        **extra,
+    }
 
 
 def migrate_tsv(store: PriceStore, path: Path) -> int:
@@ -254,6 +319,26 @@ def build_parser() -> argparse.ArgumentParser:
     schedule_set.add_argument("expression")
     remove = commands.add_parser("remove", help="remove by ID, title, or URL")
     remove.add_argument("match")
+    search_add = commands.add_parser("search-add", help="add a saved search")
+    search_add.add_argument("parser")
+    search_add.add_argument("url")
+    search_add.add_argument("title", nargs="?", default="")
+    search_remove = commands.add_parser(
+        "search-remove", help="remove a saved search by ID"
+    )
+    search_remove.add_argument("id", type=int)
+    search_dismiss = commands.add_parser(
+        "search-dismiss", help="permanently hide a result from a saved search"
+    )
+    search_dismiss.add_argument("id", type=int)
+    search_dismiss.add_argument("item_id")
+    search_check = commands.add_parser(
+        "search-check", help="check one saved-search ID or all saved searches"
+    )
+    search_check.add_argument("target", nargs="?", default="all")
+    search_check.add_argument(
+        "--no-notify", action="store_true", help="record results without notifying"
+    )
     migrate = commands.add_parser("migrate-tsv", help="import the old private TSV")
     migrate.add_argument("path", type=Path)
     return parser
@@ -268,6 +353,11 @@ def emit(args, payload: dict, message: str | None = None) -> None:
         for item in payload["items"]:
             price = f"${item['last_price']}" if item["last_price"] else "not checked"
             print(f"{item['id']}\t{item['display_title']}\t{price}\t{item['url']}")
+        for watch in payload["searches"]:
+            print(
+                f"search:{watch['id']}\t{watch['display_title']}\t"
+                f"{watch['result_count']} results\t{watch['url']}"
+            )
 
 
 def main() -> int:
@@ -304,21 +394,25 @@ def main() -> int:
             )
             return 0
 
-        with PriceStore(args.db) as store:
+        with PriceStore(args.db) as store, SearchStore(args.db) as search_store:
             if command == "list":
-                emit(args, response(store))
+                emit(args, response(store, search_store))
                 return 0
             if command == "add":
                 values = validate_listing(args.parser, args.threshold, args.url, args.title)
                 item = store.add_item(*values)
-                emit(args, response(store, item=item), f"added price check: {item['display_title']}")
+                emit(
+                    args,
+                    response(store, search_store, item=item),
+                    f"added price check: {item['display_title']}",
+                )
                 return 0
             if command == "edit":
                 values = validate_listing(args.parser, args.threshold, args.url, args.title)
                 item = store.update_item(args.id, *values)
                 emit(
                     args,
-                    response(store, item=item),
+                    response(store, search_store, item=item),
                     f"updated price check: {item['display_title']}",
                 )
                 return 0
@@ -335,15 +429,57 @@ def main() -> int:
                         f"unmuted price-check notifications for "
                         f"{item['display_title']}"
                     )
-                emit(args, response(store, item=item), message)
+                emit(args, response(store, search_store, item=item), message)
                 return 0
             if command == "remove":
                 item = store.remove_item(args.match)
-                emit(args, response(store, removed=item), f"removed price check: {item['display_title']}")
+                emit(
+                    args,
+                    response(store, search_store, removed=item),
+                    f"removed price check: {item['display_title']}",
+                )
+                return 0
+            if command == "search-add":
+                parser_name, url, title = validate_watch(
+                    args.parser, args.url, args.title
+                )
+                watch = search_store.add_watch(parser_name, url, title)
+                emit(
+                    args,
+                    response(store, search_store, search=watch),
+                    f"added saved search: {watch['display_title']}",
+                )
+                return 0
+            if command == "search-remove":
+                watch = search_store.remove_watch(args.id)
+                emit(
+                    args,
+                    response(store, search_store, removed_search=watch),
+                    f"removed saved search: {watch['display_title']}",
+                )
+                return 0
+            if command == "search-dismiss":
+                watch, dismissed = search_store.dismiss_result(
+                    args.id, args.item_id
+                )
+                emit(
+                    args,
+                    response(
+                        store,
+                        search_store,
+                        search=watch,
+                        dismissed_result=dismissed,
+                    ),
+                    f"dismissed eBay result: {dismissed['title']}",
+                )
                 return 0
             if command == "migrate-tsv":
                 count = migrate_tsv(store, args.path)
-                emit(args, response(store, migrated=count), f"migrated {count} price checks")
+                emit(
+                    args,
+                    response(store, search_store, migrated=count),
+                    f"migrated {count} price checks",
+                )
                 return 0
 
             lock_path = args.db.with_suffix(".check.lock")
@@ -360,19 +496,58 @@ def main() -> int:
                     except ValueError as error:
                         raise PriceCheckError("check target must be an item ID or 'all'") from error
                 else:
-                    items = store.list_items()
+                    items = [] if command == "search-check" else store.list_items()
+                if command == "search-check" and args.target != "all":
+                    try:
+                        searches = [search_store.get_watch(int(args.target))]
+                    except ValueError as error:
+                        raise PriceCheckError(
+                            "search-check target must be a search ID or 'all'"
+                        ) from error
+                else:
+                    searches = (
+                        search_store.list_watches()
+                        if command in {"run", "check", "search-check"}
+                        and (command != "check" or args.target == "all")
+                        else []
+                    )
                 checked, errors = check_items(
                     store,
                     items,
                     notify=not args.dry_run,
                     record=not args.dry_run,
                 )
-                payload = response(store, checked=checked, check_errors=errors)
-                if errors:
-                    payload["message"] = "; ".join(error["message"] for error in errors)
+                search_checked, search_errors = check_watches(
+                    search_store,
+                    searches,
+                    notify_new=send_search_alert,
+                    notify_error=send_search_error,
+                    notify=not args.dry_run
+                    and not getattr(args, "no_notify", False),
+                    record=not args.dry_run,
+                )
+                all_errors = errors + search_errors
+                payload = response(
+                    store,
+                    search_store,
+                    checked=checked,
+                    search_checked=search_checked,
+                    check_errors=all_errors,
+                )
+                if all_errors:
+                    payload["message"] = "; ".join(
+                        error["message"] for error in all_errors
+                    )
                 emit(args, payload)
-                return 1 if errors else 0
-    except (OSError, CronScheduleError, PriceCheckError, StoreError) as error:
+                return 1 if all_errors else 0
+    except (
+        OSError,
+        CronScheduleError,
+        PriceCheckError,
+        SearchStoreError,
+        SearchWatchError,
+        StoreError,
+    ) as error:
         if args.json:
             print(json.dumps({"ok": False, "message": str(error)}, separators=(",", ":")))
         else:

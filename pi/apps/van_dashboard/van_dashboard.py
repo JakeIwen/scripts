@@ -3020,6 +3020,18 @@ class PriceCheckController:
     def check(self, target="all"):
         return self._run("check", target)
 
+    def add_search(self, parser, url, title=""):
+        return self._run("search-add", parser, url, title, timeout=20)
+
+    def remove_search(self, search_id):
+        return self._run("search-remove", search_id, timeout=20)
+
+    def dismiss_search_result(self, search_id, item_id):
+        return self._run("search-dismiss", search_id, item_id, timeout=20)
+
+    def check_search(self, target="all"):
+        return self._run("search-check", target)
+
 
 class SystemMonitorCommandError(RuntimeError):
     pass
@@ -5213,7 +5225,80 @@ def api_price_checks_check():
         status = 409 if "already running" in str(exc) else 502
         return api_error(f"could not check price: {exc}", status)
     count = len(payload.get("checked", ()))
-    payload["message"] = f"Checked {count} price {'item' if count == 1 else 'items'}"
+    search_count = len(payload.get("search_checked", ()))
+    parts = []
+    if count:
+        parts.append(f"{count} price {'item' if count == 1 else 'items'}")
+    if search_count:
+        parts.append(
+            f"{search_count} saved {'search' if search_count == 1 else 'searches'}"
+        )
+    payload["message"] = f"Checked {' and '.join(parts) or 'nothing'}"
+    return jsonify(payload)
+
+
+@app.route("/api/price-checks/searches/add", methods=["POST"])
+def api_price_checks_searches_add():
+    if not _exact_form(("parser", "url", "title")):
+        return api_error("saved search requires parser, URL, and title", 400)
+    try:
+        payload = price_checks.add_search(
+            request.form["parser"], request.form["url"], request.form["title"]
+        )
+    except PriceCheckCommandError as exc:
+        return api_error(f"could not add saved search: {exc}", 400)
+    payload["message"] = f"Watching {payload['search']['display_title']}"
+    return jsonify(payload)
+
+
+@app.route("/api/price-checks/searches/remove", methods=["POST"])
+def api_price_checks_searches_remove():
+    if not _exact_form(("id",)) or not request.form["id"].isdigit():
+        return api_error("saved-search removal requires a search ID", 400)
+    try:
+        payload = price_checks.remove_search(request.form["id"])
+    except PriceCheckCommandError as exc:
+        return api_error(f"could not remove saved search: {exc}", 400)
+    payload["message"] = (
+        f"Removed {payload['removed_search']['display_title']}"
+    )
+    return jsonify(payload)
+
+
+@app.route("/api/price-checks/searches/dismiss", methods=["POST"])
+def api_price_checks_searches_dismiss():
+    if (
+        not _exact_form(("id", "item_id"))
+        or not request.form["id"].isdigit()
+        or not request.form["item_id"].isdigit()
+    ):
+        return api_error("result dismissal requires a search ID and item ID", 400)
+    try:
+        payload = price_checks.dismiss_search_result(
+            request.form["id"], request.form["item_id"]
+        )
+    except PriceCheckCommandError as exc:
+        return api_error(f"could not dismiss search result: {exc}", 400)
+    payload["message"] = f"Dismissed {payload['dismissed_result']['title']}"
+    return jsonify(payload)
+
+
+@app.route("/api/price-checks/searches/check", methods=["POST"])
+def api_price_checks_searches_check():
+    if not _exact_form(("target",)):
+        return api_error("saved-search check requires one search ID or all", 400)
+    target = request.form["target"]
+    if target != "all" and not target.isdigit():
+        return api_error("saved-search target must be a search ID or all", 400)
+    try:
+        payload = price_checks.check_search(target)
+    except PriceCheckCommandError as exc:
+        status = 409 if "already running" in str(exc) else 502
+        return api_error(f"could not check saved search: {exc}", status)
+    count = len(payload.get("search_checked", ()))
+    payload["message"] = (
+        f"Checked {count} saved {'search' if count == 1 else 'searches'}"
+    )
     return jsonify(payload)
 
 

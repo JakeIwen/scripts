@@ -320,6 +320,12 @@ class PriceCheckControllerTests(unittest.TestCase):
         controller.set_schedule("30 8,16 * * 1-5")
         controller.remove(7)
         controller.check(7)
+        controller.add_search(
+            "ebay", "https://www.ebay.com/sch/i.html?_nkw=tool", "Tools"
+        )
+        controller.dismiss_search_result(8, "123456789012")
+        controller.remove_search(8)
+        controller.check_search(8)
         prefix = [
             dashboard.sys.executable,
             "/test/price/main.py",
@@ -357,6 +363,25 @@ class PriceCheckControllerTests(unittest.TestCase):
         )
         self.assertEqual(calls[7], (prefix + ["remove", "7"], 20))
         self.assertEqual(calls[8], (prefix + ["check", "7"], 91))
+        self.assertEqual(
+            calls[9],
+            (
+                prefix
+                + [
+                    "search-add",
+                    "ebay",
+                    "https://www.ebay.com/sch/i.html?_nkw=tool",
+                    "Tools",
+                ],
+                20,
+            ),
+        )
+        self.assertEqual(
+            calls[10],
+            (prefix + ["search-dismiss", "8", "123456789012"], 20),
+        )
+        self.assertEqual(calls[11], (prefix + ["search-remove", "8"], 20))
+        self.assertEqual(calls[12], (prefix + ["search-check", "8"], 91))
 
     def test_rejects_failed_or_non_json_cli_output(self):
         def failed(_args, timeout):
@@ -546,6 +571,28 @@ class PriceCheckApiTests(unittest.TestCase):
                 calls.append(("remove", item_id))
                 return {**payload, "removed": {"display_title": "Example"}}
 
+            def add_search(self, *args):
+                calls.append(("add_search", *args))
+                return {**payload, "search": {"display_title": "Tools"}}
+
+            def dismiss_search_result(self, search_id, item_id):
+                calls.append(("dismiss_search_result", search_id, item_id))
+                return {
+                    **payload,
+                    "dismissed_result": {"title": "Unwanted tool"},
+                }
+
+            def remove_search(self, search_id):
+                calls.append(("remove_search", search_id))
+                return {
+                    **payload,
+                    "removed_search": {"display_title": "Tools"},
+                }
+
+            def check_search(self, target):
+                calls.append(("check_search", target))
+                return {**payload, "search_checked": [{"id": 8}]}
+
         dashboard.price_checks = FakePriceChecks()
         self.assertEqual(self.client.get("/api/price-checks").status_code, 200)
         add = self.client.post(
@@ -598,6 +645,35 @@ class PriceCheckApiTests(unittest.TestCase):
             self.client.post("/api/price-checks/remove", data={"id": "7"}).status_code,
             200,
         )
+        search_add = self.client.post(
+            "/api/price-checks/searches/add",
+            data={
+                "parser": "ebay",
+                "url": "https://www.ebay.com/sch/i.html?_nkw=tool",
+                "title": "Tools",
+            },
+        )
+        self.assertEqual(search_add.status_code, 200)
+        self.assertEqual(search_add.get_json()["message"], "Watching Tools")
+        self.assertEqual(
+            self.client.post(
+                "/api/price-checks/searches/dismiss",
+                data={"id": "8", "item_id": "123456789012"},
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.post(
+                "/api/price-checks/searches/check", data={"target": "8"}
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.post(
+                "/api/price-checks/searches/remove", data={"id": "8"}
+            ).status_code,
+            200,
+        )
         self.assertEqual(
             calls,
             [
@@ -617,6 +693,15 @@ class PriceCheckApiTests(unittest.TestCase):
                 ("mute", "7", 3),
                 ("check", "7"),
                 ("remove", "7"),
+                (
+                    "add_search",
+                    "ebay",
+                    "https://www.ebay.com/sch/i.html?_nkw=tool",
+                    "Tools",
+                ),
+                ("dismiss_search_result", "8", "123456789012"),
+                ("check_search", "8"),
+                ("remove_search", "8"),
             ],
         )
 
@@ -2971,7 +3056,19 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'data-monitor-hours="168"', page.data)
         self.assertIn(b'id="price-checks"', page.data)
         self.assertIn(b'id="price-panel"', page.data)
+        self.assertGreaterEqual(page.data.count(b"Deal Watch"), 2)
+        self.assertNotIn(b"Price Watch", page.data)
+        self.assertIn(b'id="listing-watch-panel"', page.data)
+        self.assertIn(b'id="listing-watch-title">Listing Watch', page.data)
+        self.assertIn(b'id="query-watch-panel"', page.data)
+        self.assertIn(b'id="query-watch-title">Query Watch', page.data)
+        self.assertLess(
+            page.data.index(b'id="listing-watch-panel"'),
+            page.data.index(b'id="query-watch-panel"'),
+        )
         self.assertIn(b'id="price-add-form"', page.data)
+        self.assertIn(b'id="price-search-add-form"', page.data)
+        self.assertIn(b'id="price-search-list"', page.data)
         self.assertIn(b'id="price-edit-cancel"', page.data)
         self.assertIn(b'id="price-schedule-form"', page.data)
         self.assertIn(b'id="price-schedule-description"', page.data)
@@ -3150,6 +3247,9 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"Could not parse cron:", javascript.data)
         self.assertIn(b"could not parse cron", javascript.data)
         self.assertIn(b".price-cron-spinner", stylesheet.data)
+        self.assertIn(b".deal-watch-panels", stylesheet.data)
+        self.assertIn(b"grid-template-columns: minmax(0, 1fr)", stylesheet.data)
+        self.assertIn(b".deal-watch-panel", stylesheet.data)
         self.assertIn(b"data-price-edit", javascript.data)
         self.assertIn(b"data-price-mute", javascript.data)
         self.assertIn(b"data-price-remove", javascript.data)

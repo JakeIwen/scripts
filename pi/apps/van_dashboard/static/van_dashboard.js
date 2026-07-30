@@ -1349,9 +1349,11 @@ function renderPriceChecks(response) {
   };
   response = priceChecks;
   const items = response.items || [],
+    searches = response.searches || [],
     summary = response.summary || {},
+    searchSummary = response.search_summary || {},
     tile = $('price-checks'),
-    latest = items.reduce(
+    latest = [...items, ...searches].reduce(
       (value, item) => Math.max(value, Number(item.last_checked_at) || 0),
       0,
     ),
@@ -1367,11 +1369,14 @@ function renderPriceChecks(response) {
   if (priceEditingId !== null && !items.some((item) => item.id === priceEditingId))
     resetPriceForm();
   tile.classList.toggle('has-deal', Number(summary.below_threshold) > 0);
-  tile.classList.toggle('has-error', Number(summary.errors) > 0);
-  $('price-pill').textContent = String(items.length);
-  $('price-summary').textContent = items.length
-    ? `${summary.below_threshold || 0} below target · ${summary.errors || 0} errors`
-    : 'No products watched';
+  tile.classList.toggle(
+    'has-error',
+    Number(summary.errors) + Number(searchSummary.errors) > 0,
+  );
+  $('price-pill').textContent = String(items.length + searches.length);
+  $('price-summary').textContent = items.length || searches.length
+    ? `${items.length} listings · ${searches.length} queries · ${Number(summary.errors) + Number(searchSummary.errors)} errors`
+    : 'Nothing watched';
   $('price-latest-price').textContent = latestPriceItem
     ? `$${latestPriceItem.last_price} · ${latestPriceItem.display_title}`
     : '—';
@@ -1379,8 +1384,8 @@ function renderPriceChecks(response) {
   $('price-last-check').textContent = latest ? age(latest) : 'never';
   $('price-operation').textContent = priceBusy
     ? 'Working…'
-    : items.length
-      ? `${items.length} watched`
+    : items.length || searches.length
+      ? `${items.length + searches.length} watched`
       : 'Empty';
   $('price-list').innerHTML =
     items
@@ -1404,12 +1409,43 @@ function renderPriceChecks(response) {
           <div class="price-row-controls"><button data-action data-price-check="${item.id}" ${priceBusy ? 'disabled' : ''}>Check</button><button data-action data-price-edit="${item.id}" ${priceBusy ? 'disabled' : ''}>Edit</button><button class="price-mute${item.notifications_muted ? ' muted' : ''}" data-action data-price-mute="${item.id}" ${priceBusy ? 'disabled' : ''}>${muteLabel}</button><button class="price-remove" data-action data-price-remove="${item.id}" data-price-title="${esc(item.display_title)}" ${priceBusy ? 'disabled' : ''}>Remove</button></div>
         </article>`;
       })
-      .join('') || '<div class="speaker-loading">No price checks yet</div>';
-  $('price-check-all').disabled = priceBusy || items.length === 0;
+      .join('') || '<div class="speaker-loading">No listing watches yet</div>';
+  $('price-search-list').innerHTML =
+    searches
+      .map((search) => {
+        const stateClass = search.last_status === 'error' ? 'error' : '',
+          checkMeta = search.last_status === 'error'
+            ? `Error ${age(search.last_checked_at)} · ${esc(search.last_error || 'Unknown error')}`
+            : search.last_checked_at
+              ? `Checked ${age(search.last_checked_at)} · ${search.result_count} visible · ${search.dismissed_count} dismissed`
+              : 'Not checked yet',
+          results = (search.results || [])
+            .map((result) => {
+              const details = [result.price, result.shipping].filter(Boolean).map(esc).join(' · ');
+              return `<li class="price-search-result">
+                <div><a href="${esc(result.url)}" target="_blank" rel="noopener noreferrer">${esc(result.title)}</a>${details ? `<small>${details}</small>` : ''}</div>
+                <button class="price-remove" data-action data-search-dismiss="${esc(search.id)}" data-search-item-id="${esc(result.item_id)}" data-search-result-title="${esc(result.title)}" ${priceBusy ? 'disabled' : ''}>Dismiss</button>
+              </li>`;
+            })
+            .join('');
+        return `<article class="price-search-row ${stateClass}">
+          <div class="price-row-title"><span>${esc(search.display_title)}</span><small>${esc(search.parser)} · <a href="${esc(search.url)}" target="_blank" rel="noopener noreferrer">open search</a></small></div>
+          <div class="price-row-controls"><button data-action data-search-check="${search.id}" ${priceBusy ? 'disabled' : ''}>Check</button><button class="price-remove" data-action data-search-remove="${search.id}" data-search-title="${esc(search.display_title)}" ${priceBusy ? 'disabled' : ''}>Remove</button></div>
+          <div class="price-row-meta">${checkMeta}</div>
+          ${results ? `<ul class="price-search-results">${results}</ul>` : '<div class="price-search-empty">No visible results</div>'}
+        </article>`;
+      })
+      .join('') || '<div class="speaker-loading">No query watches yet</div>';
+  $('price-check-all').disabled = priceBusy || (items.length === 0 && searches.length === 0);
   $('price-check-all').classList.toggle('running', priceBusy);
   $('price-add-form').querySelectorAll('input, select, button').forEach((element) => {
     element.disabled = priceBusy;
   });
+  $('price-search-add-form')
+    .querySelectorAll('input, select, button')
+    .forEach((element) => {
+      element.disabled = priceBusy;
+    });
   $('price-schedule').disabled = priceBusy;
   updatePriceScheduleSaveButton();
 }
@@ -1569,6 +1605,21 @@ async function priceAction(work) {
 async function checkPrices(target) {
   return priceAction(() => post('price-checks/check', { target: String(target) }));
 }
+async function checkSavedSearch(target) {
+  return priceAction(() =>
+    post('price-checks/searches/check', { target: String(target) }),
+  );
+}
+async function addSavedSearch() {
+  const result = await priceAction(() =>
+    post('price-checks/searches/add', {
+      parser: $('price-search-parser').value,
+      url: $('price-search-url').value.trim(),
+      title: $('price-search-title').value.trim(),
+    }),
+  );
+  if (result) $('price-search-add-form').reset();
+}
 async function mutePriceCheck(itemId) {
   const item = priceChecks?.items?.find((candidate) => candidate.id === Number(itemId));
   if (!item || priceBusy) return;
@@ -1624,8 +1675,8 @@ async function addPriceCheck() {
 function resetPriceForm() {
   priceEditingId = null;
   $('price-add-form').reset();
-  $('price-form-title').textContent = 'Add an item';
-  $('price-submit').textContent = 'Add price check';
+  $('price-form-title').textContent = 'Add a listing';
+  $('price-submit').textContent = 'Add listing watch';
   $('price-edit-cancel').hidden = true;
 }
 function editPriceCheck(itemId) {
@@ -3636,6 +3687,10 @@ $('price-add-form').addEventListener('submit', (event) => {
   event.preventDefault();
   addPriceCheck();
 });
+$('price-search-add-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  addSavedSearch();
+});
 $('lighting').addEventListener('click', openLighting);
 $('lighting-close').addEventListener('click', closeLighting);
 $('lighting-master').dataset.lightTarget = 'all';
@@ -3814,6 +3869,29 @@ document.addEventListener('click', (event) => {
     window.confirm(`Remove ${priceRemove.dataset.priceTitle || 'this price check'}?`)
   )
     priceAction(() => post('price-checks/remove', { id: priceRemove.dataset.priceRemove }));
+  const searchCheck = event.target.closest('[data-search-check]');
+  if (searchCheck) checkSavedSearch(searchCheck.dataset.searchCheck);
+  const searchDismiss = event.target.closest('[data-search-dismiss]');
+  if (
+    searchDismiss &&
+    window.confirm(
+      `Permanently hide ${searchDismiss.dataset.searchResultTitle || 'this result'}?`,
+    )
+  )
+    priceAction(() =>
+      post('price-checks/searches/dismiss', {
+        id: searchDismiss.dataset.searchDismiss,
+        item_id: searchDismiss.dataset.searchItemId,
+      }),
+    );
+  const searchRemove = event.target.closest('[data-search-remove]');
+  if (
+    searchRemove &&
+    window.confirm(`Remove ${searchRemove.dataset.searchTitle || 'this saved search'}?`)
+  )
+    priceAction(() =>
+      post('price-checks/searches/remove', { id: searchRemove.dataset.searchRemove }),
+    );
   const lightPower = event.target.closest('[data-light-target]');
   if (lightPower)
     action(() =>
