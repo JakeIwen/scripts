@@ -67,7 +67,10 @@ alias logdir="cd /var/log/cron"
 alias speed="~/scripts/speedtest.sh"
 
 alias corefreq='cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq; vcgencmd measure_volts'
+
 ### LLM UTILS ###
+alias codexcfg='vi ~/.codex/config.toml'
+
 codexp() {
   command codex \
     --strict-config \
@@ -76,7 +79,6 @@ codexp() {
     --config 'permissions.workspace-git-network={extends=":workspace",filesystem={":workspace_roots"={".git"="write"},"~/.config/firebase"="write","~/.config/configstore"="write","~/.npm"="write","~/.config/gcloud"="write"},network={enabled=true}}' \
     "$@"
 }
-
 
 alias codexpr='codexp resume'
 alias codexpcan='codexpr --sandbox danger-full-access --add-dir /mnt/EXFAT512/obd-things --add-dir /dev/bus/usb'
@@ -687,6 +689,34 @@ alias grao="git remote add origin"
 alias gc='git clone'
 alias gck='git checkout'
 
+git_branch() {
+  git symbolic-ref --quiet --short HEAD 2>/dev/null ||
+    git rev-parse --quiet --short HEAD 2>/dev/null
+}
+
+# Print the GitHub page for opening a pull request from the current branch.
+# Pass an optional base branch; otherwise use master.
+cpull() {
+  local base_branch="${1:-master}" branch url
+
+  url=$(git config --get remote.origin.url) || {
+    echo "cpull: this repository has no origin remote" >&2
+    return 1
+  }
+  branch=$(git_branch) || {
+    echo "cpull: not in a Git repository" >&2
+    return 1
+  }
+
+  # Normalize common GitHub clone URLs into browser URLs.
+  case "$url" in
+    git@github.com:*) url="https://github.com/${url#git@github.com:}" ;;
+    ssh://git@github.com/*) url="https://github.com/${url#ssh://git@github.com/}" ;;
+  esac
+  url="${url%.git}"
+  printf '%s/compare/%s...%s?expand=1\n' "$url" "$base_branch" "$branch"
+}
+
 ### GREP ###
 alias grep='grep --color=auto'
 alias grepi='grep -i --color=auto'
@@ -812,3 +842,35 @@ export PROMPT_COMMAND="history -a; history -c; history -r; $PROMPT_COMMAND"
 
 # if [ -f ~/.mount_aliases ]; then . ~/.mount_aliases; fi
 if [ -f ~/.bash_defaults ]; then . ~/.bash_defaults; fi
+
+# Match the Mac's skwp Zsh prompt: branch plus one colored circle for each
+# kind of working-tree change (deleted, added, modified, then untracked).
+__git_prompt_update() {
+  local line x y
+  __git_prompt_branch=
+  __git_prompt_deleted=
+  __git_prompt_added=
+  __git_prompt_modified=
+  __git_prompt_untracked=
+  __git_prompt_open=
+  __git_prompt_close=
+
+  __git_prompt_branch=$(git_branch) || return 0
+  __git_prompt_open='('
+  __git_prompt_close=')'
+  while IFS= read -r line; do
+    x=${line:0:1}
+    y=${line:1:1}
+    case "$x$y" in
+      '??') __git_prompt_untracked=●; continue ;;
+      '!!') continue ;;
+    esac
+    [[ "$x" == A ]] && __git_prompt_added=●
+    [[ "$x" == D || "$y" == D ]] && __git_prompt_deleted=●
+    [[ "$x" == M || "$y" == M || "$x" == T || "$y" == T ||
+       "$x" == U || "$y" == U ]] && __git_prompt_modified=●
+  done < <(git status --porcelain=v1 2>/dev/null)
+}
+
+PROMPT_COMMAND="__git_prompt_update; ${PROMPT_COMMAND:-}"
+PS1='\[\e[38;5;81m\]\u\[\e[0m\]@\[\e[38;5;81m\]\h\[\e[0m\] \[\e[38;5;118m\]\w\[\e[0m\] ${__git_prompt_open}\[\e[38;5;81m\]${__git_prompt_branch}\[\e[38;5;166m\]${__git_prompt_deleted}\[\e[38;5;118m\]${__git_prompt_added}\[\e[38;5;161m\]${__git_prompt_modified}\[\e[38;5;135m\]${__git_prompt_untracked}\[\e[0m\]${__git_prompt_close}$ '
