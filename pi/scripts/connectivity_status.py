@@ -41,10 +41,24 @@ for object in $(/bin/ubus -S list 'hostapd.*' 2>/dev/null); do
   printf 'OBJECT %s\n' "$object"
   /bin/ubus -S call "$object" get_clients 2>/dev/null || true
 done
+printf '__VAN_DASH_RADIOS__\n'
+wireless_status=$(/bin/ubus -S call network.wireless status 2>/dev/null || true)
+for radio in radio0 radio1; do
+  band=$(/sbin/uci -q get "wireless.$radio.band" 2>/dev/null || true)
+  [ -n "$band" ] || continue
+  printf '%s\n' "$wireless_status" \
+    | /usr/bin/jsonfilter -e "@.$radio.interfaces[*].ifname" 2>/dev/null \
+    | while IFS= read -r ifname; do
+        [ -n "$ifname" ] && printf '%s|%s|%s\n' "$ifname" "$radio" "$band"
+      done
+done
 true
 """.strip()
 CLIENT_SECTION = re.compile(r"^__VAN_DASH_([A-Z_]+)__$")
 MAC_ADDRESS = re.compile(r"^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$", re.IGNORECASE)
+WIRELESS_INTERFACE = re.compile(r"^[a-zA-Z0-9_.:-]{1,50}$")
+RADIO_NAME = re.compile(r"^radio\d+$")
+RADIO_BANDS = {"2g": "2.4 GHz", "5g": "5 GHz", "6g": "6 GHz"}
 ACTIVE_NEIGHBOR_STATES = {"REACHABLE", "DELAY", "PROBE", "PERMANENT"}
 
 
@@ -244,12 +258,31 @@ def parse_hostapd_clients(output):
     return clients
 
 
+def parse_radio_interfaces(output):
+    interfaces = {}
+    for line in output.splitlines():
+        fields = line.strip().split("|")
+        if len(fields) != 3:
+            continue
+        interface, radio, raw_band = fields
+        band = RADIO_BANDS.get(raw_band)
+        if (
+            not WIRELESS_INTERFACE.fullmatch(interface)
+            or not RADIO_NAME.fullmatch(radio)
+            or band is None
+        ):
+            continue
+        interfaces[interface] = {"radio": radio, "band": band}
+    return interfaces
+
+
 def parse_router_clients(output, checked_at):
     sections = split_client_sections(output)
     leases = parse_dhcp_leases(sections.get("leases", ""))
     static_hosts = parse_static_hosts(sections.get("static_hosts", ""))
     neighbors = parse_neighbors(sections.get("neighbors", ""))
     wireless = parse_hostapd_clients(sections.get("hostapd", ""))
+    radio_interfaces = parse_radio_interfaces(sections.get("radios", ""))
     connected_macs = set(wireless)
     connected_macs.update(
         mac
@@ -263,6 +296,9 @@ def parse_router_clients(output, checked_at):
         static = static_hosts.get(mac, {})
         neighbor = neighbors.get(mac, {})
         radio = wireless.get(mac)
+        radio_interface = (
+            radio_interfaces.get(radio.get("interface"), {}) if radio else {}
+        )
         hostname = lease.get("hostname") or static.get("hostname")
         clients.append(
             {
@@ -272,6 +308,8 @@ def parse_router_clients(output, checked_at):
                 "mac": mac,
                 "connection": "wifi" if radio is not None else "lan",
                 "interface": radio.get("interface") if radio else "br-lan",
+                "radio": radio_interface.get("radio"),
+                "band": radio_interface.get("band"),
                 "neighbor_state": neighbor.get("state"),
                 "signal_dbm": radio.get("signal_dbm") if radio else None,
                 "rx_rate_bps": radio.get("rx_rate_bps") if radio else None,

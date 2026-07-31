@@ -5,7 +5,7 @@ PATH="/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:/root/bin"
 
 0 0 * * *      su pi -c "$scripts/prune_logs.sh $cronlog 1000" >> "$cronlog/prune_cronlogs.log" 2>&1
 0 0 * * *      su pi -c "$scripts/prune_logs.sh $log 1000" >> "$cronlog/prune_logs.log" 2>&1
-0 3-8 * * *  "$scripts/backup/pi_backup.sh"  >> "$cronlog/pi_backup.log" 2>&1
+0 3-8 * * *  "$scripts/backup/backup_window.sh"  >> "$cronlog/pi_backup.log" 2>&1
 0 10 * * *  "$scripts/backup/backup_watchdog.sh"  >> "$cronlog/backup_watchdog.log" 2>&1
 @reboot     sleep 90 && "$scripts/backup/backup_watchdog.sh"  >> "$cronlog/backup_watchdog.log" 2>&1
 * * * * *      su pi -c "$scripts/log_position.sh"  >> "$cronlog/log_position.sh.log" 2>&1

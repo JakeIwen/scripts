@@ -36,7 +36,7 @@ alias cronlog="cd /var/log/cron"
 alias bkuplog='cat /var/log/cron/pi_backup.log'
 alias bkuplast="bkuplog | grep 'backup complete'"
 cronp() { /home/pi/scripts/parse_cron.sh "$@"; }
-bkupnow() { sudo /home/pi/scripts/backup/pi_backup.sh --force; } # manual backup to bigboi now
+bkupnow() { sudo /home/pi/scripts/backup/backup_window.sh --force; } # run every daily backup now
 sparesync() { # refresh a hot spare from the live system: sparesync a | sparesync b
   local l=${1:?usage: sparesync a|b}
   [[ "$l" == hotspare-* ]] || l="hotspare-$l"
@@ -732,7 +732,7 @@ rgrep() { grep -rni "$1" "${2:-.}" ; }                    # recursively search, 
 hgrep() { hist | grep "$@" | grep -v 'hgrep' | uniq -u; } # howto: pass all args to a subfunction
 hgrepn() { history | grep "$@" | grep -v 'hgrep'; } # howto: pass all args to a subxnction
 hdel() { history -d $1 && history -w; }
-# rec_find_rpl_in_files find_pattern repl_pattern
+# rec_find_rpl_in_files find_pattern repl_string
 rec_find_rpl_in_files() { find . -exec sed -i '' "s|$1|$2|g" {} \;; }
 rm_lines() {
   pattern="$1"

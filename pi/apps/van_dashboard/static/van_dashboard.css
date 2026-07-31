@@ -1983,6 +1983,7 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   border-radius: 99px;
   color: var(--dim);
   padding: 2px 6px;
+  white-space: nowrap;
   font-size: 8px;
   font-weight: 750;
   letter-spacing: 0.05em;
@@ -2338,18 +2339,21 @@ body.busy [data-action] {
 }
 .backup-overview {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 .backup-overview-card {
   display: grid;
   grid-template-columns: 12px minmax(0, 1fr);
-  align-items: center;
+  align-items: start;
   gap: 10px;
   border: 1px solid var(--line);
   border-radius: 13px;
   background: #172129;
   padding: 11px 12px;
+}
+.backup-overview-card > .backup-state-dot {
+  margin-top: 3px;
 }
 .backup-overview-card strong,
 .backup-overview-card small {
@@ -2363,38 +2367,39 @@ body.busy [data-action] {
   font-size: 9px;
   margin-top: 3px;
 }
-.backup-action-bar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  margin-top: 10px;
-  border: 1px solid #42606e;
-  border-radius: 13px;
-  background: #192832;
-  padding: 11px 12px;
+.backup-card-content {
+  display: flex;
+  min-width: 0;
+  height: 100%;
+  flex-direction: column;
 }
-.backup-action-bar strong,
-.backup-action-bar small,
-.backup-action-bar span span {
+.backup-card-detail-stack {
+  position: relative;
   display: block;
+  min-height: 3.5em;
 }
-.backup-action-bar strong {
-  font-size: 11px;
+.backup-card-current-detail,
+.backup-card-hover-detail {
+  transition: opacity 140ms ease;
 }
-.backup-action-bar small {
-  max-width: 560px;
-  color: var(--dim);
-  font-size: 9px;
+.backup-card-hover-detail {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  color: #b9dce7 !important;
   line-height: 1.35;
-  margin-top: 3px;
 }
-.backup-action-bar span span {
-  color: #b9dce7;
-  font-size: 9px;
-  margin-top: 5px;
+.backup-overview-action-card:hover .backup-card-current-detail,
+.backup-overview-action-card:focus-within .backup-card-current-detail {
+  opacity: 0;
 }
-.backup-action-bar button {
+.backup-overview-action-card:hover .backup-card-hover-detail,
+.backup-overview-action-card:focus-within .backup-card-hover-detail {
+  opacity: 1;
+}
+.backup-overview-action-card button {
+  width: 100%;
+  margin-top: auto;
   border: 1px solid #4b7284;
   border-radius: 10px;
   background: #263b47;
@@ -2405,7 +2410,7 @@ body.busy [data-action] {
   white-space: nowrap;
   cursor: pointer;
 }
-.backup-action-bar button:disabled {
+.backup-overview-action-card button:disabled {
   cursor: default;
   opacity: 0.55;
 }
@@ -2561,12 +2566,6 @@ body.busy [data-action] {
   .backup-hotswaps,
   .backup-history {
     grid-template-columns: 1fr;
-  }
-  .backup-action-bar {
-    grid-template-columns: 1fr;
-  }
-  .backup-action-bar button {
-    width: 100%;
   }
 }
 .ignition-monitor-tile {

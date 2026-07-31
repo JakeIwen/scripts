@@ -15,6 +15,11 @@ Backups (see [`backup_conf.sh`](../../scripts/backup/backup_conf.sh)):
   off-device; a copy stored only inside the encrypted archive is not recoverable.
 - **hot-spare SD card(s)** — bootable clones via rpi-clone, staggered intervals per
   `CLONE_TARGETS`. Each card's `/boot/firmware/CLONE_INFO.txt` says when it was cloned.
+- **EXFAT512 safety snapshots** — directly browsable trees under
+  `/mnt/hdd1tb/backups/EXFAT512_YYYY-MM-DD_HH-MM/`. Unchanged files are hard-linked
+  to the previous completed snapshot, while deleted or changed source files remain
+  in retained older snapshots. Retention keeps daily snapshots for 30 days, one per
+  week through 84 days, and one per month through 365 days.
 
 OpenWrt's persistent remote log is `/var/log/openwrt/dendelion.log`; restore its
 receiver with `sudo /home/pi/scripts/setup_openwrt_logging.sh`. See
@@ -63,6 +68,20 @@ Borg archive, then follow
 [`UBNT_BACKUP.md`](../../scripts/backup/UBNT_BACKUP.md). Treat every extracted
 profile as credential-bearing.
 
+EXFAT512: mount `hdd1tb` through the normal guarded disk path, then copy the
+needed file or directory from the selected snapshot. Do not modify a retained
+snapshot in place because hard-linked unchanged files may also belong to other
+snapshot directories:
+
+```bash
+sudo /home/pi/scripts/diskctl mount hdd1tb
+ls -1 /mnt/hdd1tb/backups/
+rsync -rt --info=progress2 \
+  /mnt/hdd1tb/backups/EXFAT512_2026-07-31_03-00/path/to/data/ \
+  /mnt/EXFAT512/path/to/data/
+sudo /home/pi/scripts/diskctl eject hdd1tb
+```
+
 ## Scenario 3 — SD card AND spare both dead
 
 1. On the MacBook: flash **Raspberry Pi OS 64-bit** (any recent) to a card with rpi-imager.
@@ -97,8 +116,9 @@ success of the day wins. Scheduled attempts first read requested state through
 If policy cannot be verified, the job fails closed and the backup watchdog
 eventually reports the stale backup. For a deliberate parked manual run, enable
 disks through `policyctl` or the dashboard first, then use
-`sudo /home/pi/scripts/backup/pi_backup.sh --force` to bypass only the
-once-per-day shortcut. Requested HDD policy and ignition remain authoritative.
+`sudo /home/pi/scripts/backup/backup_window.sh --force` to run both daily
+backup jobs and bypass only their once-per-day shortcuts. Requested HDD policy
+and ignition remain authoritative.
 
 While the van runs
 (`~/hooks/ignition_is_on` exists) attempts defer, since drives are unmounted for
@@ -114,12 +134,15 @@ It delegates mounts to `mount_disks.sh`, so backup runs use the same exact-label
 stale-source, underlay, and root-disk safeguards as policy reconciliation.
 Ignition handling and an explicit dashboard/user eject remain authoritative
 lifecycle operations and intentionally unmount it regardless of who mounted it.
+`exfat_snapshot.sh` always unmounts and spins down `hdd1tb` after its work,
+including cleanup after a failure. A hidden `.EXFAT512.partial` directory is
+resumed on retry and is never treated as a completed restore point.
 
 ## Watchdog
 
-`backup_watchdog.sh` (daily cron) sends ntfy alerts when: no successful Borg backup in
-48h, no verified OpenWrt or UBNT snapshot exists or either is stale, a clone
-exceeds 2× its interval, a card was never cloned, bigboi is unmounted, or free
-space < 100GB.
+`backup_watchdog.sh` (daily cron) sends ntfy alerts when: no successful Borg or
+EXFAT512 snapshot exists within 48h, the `hdd1tb` target is absent, no verified
+OpenWrt or UBNT snapshot exists or either is stale, a clone exceeds 2× its
+interval, a card was never cloned, bigboi is unmounted, or free space < 100GB.
 Silence = healthy, but the nightly "vanpi backup OK" ping (min priority) includes
 per-card clone age if you want positive confirmation.

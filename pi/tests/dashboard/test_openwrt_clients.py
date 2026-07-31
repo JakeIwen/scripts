@@ -23,6 +23,8 @@ def client_payload():
                 "mac": "5a:d2:10:cf:72:43",
                 "connection": "wifi",
                 "interface": "wl0-ap0",
+                "radio": "radio0",
+                "band": "2.4 GHz",
                 "neighbor_state": "REACHABLE",
                 "signal_dbm": -29,
                 "rx_rate_bps": 14_440_000,
@@ -39,6 +41,7 @@ class OpenWrtClientCollectorTests(unittest.TestCase):
     SAMPLE = """\
 __VAN_DASH_LEASES__
 1700010000 5a:d2:10:cf:72:43 192.168.6.116 m4mac 01:5a:d2:10:cf:72:43
+1700010000 aa:bb:cc:dd:ee:ff 192.168.6.117 ipad 01:aa:bb:cc:dd:ee:ff
 __VAN_DASH_NEIGHBORS__
 192.168.6.116 lladdr 5a:d2:10:cf:72:43 STALE
 192.168.6.103 lladdr dc:a6:32:94:7d:06 REACHABLE
@@ -50,6 +53,11 @@ dhcp.@host[0].mac='DC:A6:32:94:7D:06'
 __VAN_DASH_HOSTAPD__
 OBJECT hostapd.wl0-ap0
 {"clients":{"5a:d2:10:cf:72:43":{"assoc":true,"authorized":true,"signal":-29,"rate":{"rx":14440000,"tx":13000000},"bytes":{"rx":726265377,"tx":1717619161}},"78:28:ca:20:f2:1a":{"assoc":false,"authorized":false,"signal":-50}}}
+OBJECT hostapd.wl1-ap0
+{"clients":{"aa:bb:cc:dd:ee:ff":{"assoc":true,"authorized":true,"signal":-41,"rate":{"rx":240200000,"tx":216200000},"bytes":{"rx":1000,"tx":2000}}}}
+__VAN_DASH_RADIOS__
+wl0-ap0|radio0|2g
+wl1-ap0|radio1|5g
 """
 
     def test_parser_joins_wireless_neighbors_leases_and_static_names(self):
@@ -58,14 +66,21 @@ OBJECT hostapd.wl0-ap0
             checked_at=1_700_000_000,
         )
 
-        self.assertEqual(status["client_count"], 2)
-        self.assertEqual(status["wifi_count"], 1)
+        self.assertEqual(status["client_count"], 3)
+        self.assertEqual(status["wifi_count"], 2)
         self.assertEqual(status["lan_count"], 1)
         by_name = {client["name"]: client for client in status["clients"]}
         self.assertEqual(by_name["m4mac"]["connection"], "wifi")
+        self.assertEqual(by_name["m4mac"]["radio"], "radio0")
+        self.assertEqual(by_name["m4mac"]["band"], "2.4 GHz")
         self.assertEqual(by_name["m4mac"]["signal_dbm"], -29)
         self.assertEqual(by_name["m4mac"]["ip"], "192.168.6.116")
+        self.assertEqual(by_name["ipad"]["connection"], "wifi")
+        self.assertEqual(by_name["ipad"]["radio"], "radio1")
+        self.assertEqual(by_name["ipad"]["band"], "5 GHz")
         self.assertEqual(by_name["vanpi"]["connection"], "lan")
+        self.assertIsNone(by_name["vanpi"]["radio"])
+        self.assertIsNone(by_name["vanpi"]["band"])
         self.assertEqual(by_name["vanpi"]["ip"], "192.168.6.103")
         self.assertNotIn("78:28:ca:20:f2:1a", {item["mac"] for item in status["clients"]})
 
@@ -81,7 +96,7 @@ OBJECT hostapd.wl0-ap0
             wall_clock=lambda: 1_700_000_000,
         )
 
-        self.assertEqual(status["client_count"], 2)
+        self.assertEqual(status["client_count"], 3)
         self.assertEqual(
             calls,
             [
@@ -125,6 +140,15 @@ class OpenWrtClientDashboardTests(unittest.TestCase):
             "inconsistent counts",
         ):
             controller.parse_status(json.dumps(invalid))
+
+        invalid_radio = json.loads(json.dumps(payload))
+        invalid_radio["clients"][0]["radio"] = "radio0"
+        invalid_radio["clients"][0]["band"] = None
+        with self.assertRaisesRegex(
+            dashboard.OpenWrtClientsError,
+            "invalid device data",
+        ):
+            controller.parse_status(json.dumps(invalid_radio))
 
     def test_controller_reports_timeout(self):
         def command(args, timeout):
@@ -182,6 +206,7 @@ class OpenWrtClientDashboardTests(unittest.TestCase):
         self.assertIn('id="openwrt-client-list"', template)
         self.assertIn("function openOpenwrt()", javascript)
         self.assertIn("json('/api/openwrt/clients')", javascript)
+        self.assertIn("[client.band, client.radio]", javascript)
         self.assertIn(".openwrt-client-list", stylesheet)
         self.assertIn("grid-template-columns: repeat(2, minmax(0, 1fr))", stylesheet)
 

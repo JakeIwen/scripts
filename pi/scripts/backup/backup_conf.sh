@@ -74,6 +74,22 @@ ROOT_USED_MAX_GB=26    # watchdog alerts before the system outgrows a 32GB clone
 UNMOUNT_AFTER=1        # when pi_backup mounted bigboi itself, unmount it afterward;
                        # preserve a mount that was already present when the job began
 
+# Daily, directly browsable hard-link snapshots of the always-mounted EXFAT
+# flash drive. Unchanged files share ext4 inodes across snapshots, so the
+# mostly frozen audiobook tree occupies space only once.
+EXFAT_SNAPSHOT_SOURCE_LABEL=EXFAT512
+EXFAT_SNAPSHOT_SOURCE_MNT=/mnt/EXFAT512
+EXFAT_SNAPSHOT_DISK_LABEL=hdd1tb
+EXFAT_SNAPSHOT_MNT=/mnt/hdd1tb
+EXFAT_SNAPSHOT_ROOT="$EXFAT_SNAPSHOT_MNT/backups"
+EXFAT_SNAPSHOT_PREFIX=EXFAT512_
+EXFAT_SNAPSHOT_STAMP="$STAMP_DIR/exfat512_ok"
+EXFAT_SNAPSHOT_STALE_HOURS=48
+EXFAT_SNAPSHOT_MIN_FREE_GB=100
+EXFAT_SNAPSHOT_KEEP_DAILY_DAYS=30
+EXFAT_SNAPSHOT_KEEP_WEEKLY_DAYS=84
+EXFAT_SNAPSHOT_KEEP_MONTHLY_DAYS=365
+
 # present while the van runs (ignition_monitor.sh); drives are unmounted then
 IGNITION_FLAG=/home/pi/hooks/ignition_is_on
 

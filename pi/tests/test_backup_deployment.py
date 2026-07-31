@@ -42,11 +42,26 @@ class BackupDeploymentTests(unittest.TestCase):
             exporter.index('/bin/mv -f "$incoming" "$UBNT_SNAPSHOT_FILE"'),
         )
 
-    def test_ubnt_borg_layer_does_not_add_a_second_cron_job(self):
+    def test_backup_window_runs_independently_stamped_jobs_from_one_cron_entry(self):
         crontab = (REPOSITORY_ROOT / "pi" / "crontab").read_text(encoding="utf-8")
+        runner = (BACKUP_DIR / "backup_window.sh").read_text(encoding="utf-8")
 
         self.assertNotIn("ubnt_backup.sh", crontab)
-        self.assertIn('"$scripts/backup/pi_backup.sh"', crontab)
+        self.assertIn('"$scripts/backup/backup_window.sh"', crontab)
+        self.assertNotIn('"$scripts/backup/pi_backup.sh"', crontab)
+        self.assertIn("pi_backup.sh exfat_snapshot.sh", runner)
+
+    def test_exfat_snapshot_is_exact_label_hard_linked_and_independently_stamped(self):
+        config = (BACKUP_DIR / "backup_conf.sh").read_text(encoding="utf-8")
+        snapshot = (BACKUP_DIR / "exfat_snapshot.sh").read_text(encoding="utf-8")
+        watchdog = (BACKUP_DIR / "backup_watchdog.sh").read_text(encoding="utf-8")
+
+        self.assertIn('EXFAT_SNAPSHOT_ROOT="$EXFAT_SNAPSHOT_MNT/backups"', config)
+        self.assertIn("EXFAT_SNAPSHOT_PREFIX=EXFAT512_", config)
+        self.assertIn("--link-dest=$previous_path", snapshot)
+        self.assertIn("verify_exact_mount", snapshot)
+        self.assertIn('--spindown "$EXFAT_SNAPSHOT_DISK_LABEL"', snapshot)
+        self.assertIn('"$EXFAT_SNAPSHOT_STAMP"', watchdog)
 
     def test_backup_only_unmounts_bigboi_when_it_mounted_bigboi(self):
         backup = (BACKUP_DIR / "pi_backup.sh").read_text(encoding="utf-8")

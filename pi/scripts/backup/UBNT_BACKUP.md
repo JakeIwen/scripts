@@ -40,7 +40,8 @@ passphrase and exported Borg key somewhere independent of both vanpi and
 
 ## Schedule and monitoring
 
-No additional cron job is needed. Root's existing `pi_backup.sh` window runs
+No additional cron job is needed. Root's existing `backup_window.sh` runs
+`pi_backup.sh`, which
 hourly from 03:00 through 08:00, with the first successful run each day winning.
 The UBNT export happens immediately before `borg create`, so the existing Borg
 daily, weekly, and monthly retention versions it together with the Pi and

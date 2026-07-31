@@ -677,8 +677,12 @@ function renderOpenwrtClients(state) {
             traffic =
               Number.isFinite(client.rx_bytes) && Number.isFinite(client.tx_bytes)
                 ? `↓ ${formatBytes(client.rx_bytes)} · ↑ ${formatBytes(client.tx_bytes)}`
-                : null;
-          return `<article class="openwrt-client"><span class="network-dot good"></span><span class="openwrt-client-main"><strong>${esc(client.name)}</strong><small>${esc(detail)}</small></span><span class="openwrt-client-kind">${client.connection === 'wifi' ? 'WI-FI' : 'LAN'}</span><span class="openwrt-client-address"><code>${esc(client.mac)}</code>${traffic ? `<span>${esc(traffic)}</span>` : ''}</span></article>`;
+                : null,
+            connectionLabel =
+              client.connection === 'wifi'
+                ? [client.band, client.radio].filter(Boolean).join(' · ') || 'WI-FI'
+                : 'LAN';
+          return `<article class="openwrt-client"><span class="network-dot good"></span><span class="openwrt-client-main"><strong>${esc(client.name)}</strong><small>${esc(detail)}</small></span><span class="openwrt-client-kind">${esc(connectionLabel)}</span><span class="openwrt-client-address"><code>${esc(client.mac)}</code>${traffic ? `<span>${esc(traffic)}</span>` : ''}</span></article>`;
         })
         .join('')
     : '<div class="openwrt-client-empty">No associated Wi-Fi clients or active LAN neighbors were reported.</div>';
@@ -993,11 +997,13 @@ async function recoverUsb2() {
 function renderBackups(response) {
   const state = response.backups,
     borg = state.borg || {},
+    exfat = state.exfat_snapshot || {},
     tm = state.time_machine || {},
     operation = state.operation || { status: 'idle' },
     operationKind = operation.kind || (operation.target ? 'clone' : null),
     operationRunning = operation.status === 'running',
-    backupRunning = operationRunning && operationKind === 'backup',
+    borgRunning = operationRunning && operationKind === 'borg',
+    exfatRunning = operationRunning && operationKind === 'exfat',
     tile = $('backups'),
     pill = $('backup-pill');
   backupState = state;
@@ -1007,9 +1013,13 @@ function renderBackups(response) {
   );
   pill.textContent =
     state.health === 'running' ? 'RUNNING' : state.health === 'good' ? 'CURRENT' : 'CHECK';
-  const piLabel = Number.isFinite(borg.last_success_at)
+  const borgLabel = Number.isFinite(borg.last_success_at)
       ? `Borg ${backupAge(borg.last_success_at)}`
-      : 'No Borg success recorded',
+      : 'No Borg success',
+    exfatLabel = Number.isFinite(exfat.last_success_at)
+      ? `EXFAT ${backupAge(exfat.last_success_at)}`
+      : 'No EXFAT snapshot',
+    piLabel = `${borgLabel} · ${exfatLabel}`,
     macLabel = Number.isFinite(tm.last_backup_at)
       ? `TM ${backupAge(tm.last_backup_at)}`
       : tm.error || 'No Time Machine history';
@@ -1017,8 +1027,10 @@ function renderBackups(response) {
   $('backup-mac').textContent = tm.running
     ? `Backing up${Number.isFinite(tm.progress_percent) ? ` · ${tm.progress_percent}%` : ''}`
     : macLabel;
-  if (backupRunning) {
+  if (borgRunning) {
     $('backup-summary').textContent = 'Creating a new vanpi Borg backup…';
+  } else if (exfatRunning) {
+    $('backup-summary').textContent = 'Creating an EXFAT512 safety snapshot…';
   } else if (operationRunning) {
     $('backup-summary').textContent = `Cloning vanpi to ${operation.target}…`;
   } else if (tm.running) {
@@ -1029,11 +1041,18 @@ function renderBackups(response) {
 
   const borgDot = $('backup-borg-dot');
   borgDot.className = `backup-state-dot ${borg.stale ? 'bad' : 'good'}`;
-  $('backup-borg-detail').textContent = backupRunning
+  $('backup-borg-detail').textContent = borgRunning
     ? `Backup running · started ${backupAge(operation.started_at)}`
     : Number.isFinite(borg.last_success_at)
       ? `Last successful archive ${eventTime(borg.last_success_at)} (${backupAge(borg.last_success_at)})`
       : 'No successful Borg archive is recorded';
+  const exfatDot = $('backup-exfat-dot');
+  exfatDot.className = `backup-state-dot ${exfat.stale ? 'bad' : 'good'}`;
+  $('backup-exfat-detail').textContent = exfatRunning
+    ? `Snapshot running · started ${backupAge(operation.started_at)}`
+    : Number.isFinite(exfat.last_success_at)
+      ? `Last completed ${eventTime(exfat.last_success_at)} (${backupAge(exfat.last_success_at)})`
+      : 'No successful EXFAT512 snapshot is recorded';
   const tmDot = $('backup-tm-dot');
   tmDot.className = `backup-state-dot ${tm.running || Number.isFinite(tm.last_backup_at) ? 'good' : 'bad'}`;
   $('backup-tm-detail').textContent = tm.running
@@ -1043,28 +1062,20 @@ function renderBackups(response) {
       : tm.error || 'No completed snapshots found';
 
   const operationKey = `${operation.status}:${operation.started_at || ''}:${operation.completed_at || ''}`;
-  if (backupRunning) {
-    $('backup-operation').textContent = `Backup running · ${backupAge(operation.started_at)}`;
-  } else if (operationRunning) {
-    $('backup-operation').textContent = `Cloning ${operation.target} · ${backupAge(operation.started_at)}`;
-  } else if (operation.status === 'error') {
-    $('backup-operation').textContent =
-      operationKind === 'backup' ? 'Backup failed' : `${operation.target || 'Clone'} failed`;
-  } else if (operation.status === 'complete') {
-    $('backup-operation').textContent =
-      operationKind === 'backup'
-        ? `Backup completed ${backupAge(operation.completed_at)}`
-        : `${operation.target} completed ${backupAge(operation.completed_at)}`;
-  } else {
-    $('backup-operation').textContent = 'Idle';
-  }
-  const backupRun = $('backup-run');
-  backupRun.disabled = backupBusy || operationRunning;
-  backupRun.textContent = backupRunning
-    ? 'Backing up…'
+  const borgRun = $('backup-run-borg'),
+    exfatRun = $('backup-run-exfat');
+  borgRun.disabled = backupBusy || operationRunning;
+  exfatRun.disabled = backupBusy || operationRunning;
+  borgRun.textContent = borgRunning
+    ? 'Running Borg…'
     : operationRunning
       ? 'Backup busy'
-      : 'Back up now';
+      : 'Run Borg backup';
+  exfatRun.textContent = exfatRunning
+    ? 'Snapshotting…'
+    : operationRunning
+      ? 'Backup busy'
+      : 'Snapshot EXFAT512';
   if (
     backupLastCompletion &&
     operationKey !== backupLastCompletion &&
@@ -1072,13 +1083,17 @@ function renderBackups(response) {
   ) {
     toast(
       operation.status === 'complete'
-        ? operationKind === 'backup'
+        ? operationKind === 'borg'
           ? 'Vanpi Borg backup completed'
-          : `Clone to ${operation.target} completed`
+          : operationKind === 'exfat'
+            ? 'EXFAT512 snapshot completed'
+            : `Clone to ${operation.target} completed`
         : operation.error ||
-            (operationKind === 'backup'
-              ? 'Vanpi backup failed'
-              : `Clone to ${operation.target} failed`),
+            (operationKind === 'borg'
+              ? 'Vanpi Borg backup failed'
+              : operationKind === 'exfat'
+                ? 'EXFAT512 snapshot failed'
+                : `Clone to ${operation.target} failed`),
       operation.status === 'error',
     );
   }
@@ -1135,8 +1150,8 @@ function renderBackupsUnavailable(message) {
   $('backup-pi').textContent = 'Unavailable';
   $('backup-mac').textContent = 'Unavailable';
   $('backup-status').textContent = 'Unavailable';
-  $('backup-operation').textContent = 'Unavailable';
-  $('backup-run').disabled = true;
+  $('backup-run-borg').disabled = true;
+  $('backup-run-exfat').disabled = true;
   $('backup-panel').setAttribute('aria-busy', 'false');
 }
 async function refreshBackups(showErrors = false) {
@@ -1172,12 +1187,15 @@ async function startBackupClone(button) {
     backupBusy = false;
   }
 }
-async function startBorgBackup() {
-  const button = $('backup-run');
+async function startManualBackup(kind) {
+  const isBorg = kind === 'borg',
+    button = $(isBorg ? 'backup-run-borg' : 'backup-run-exfat');
   if (backupBusy || backupState?.operation?.status === 'running' || button.disabled) return;
   if (
     !window.confirm(
-      'Run a full vanpi backup now? This performs snapshots, media sync, Borg create and retention, and any due hotspare clones. Requested disk policy and ignition safety still apply, and the job may take several hours.',
+      isBorg
+        ? 'Run the vanpi Borg backup now? This performs local snapshots, media sync, Borg create and retention, and any due hotspare clones. Requested disk policy and ignition safety still apply, and the job may take several hours.'
+        : 'Create an EXFAT512 safety snapshot now? This mounts hdd1tb, creates a hard-link snapshot, applies retention, then unmounts and spins down the drive. Requested disk policy and ignition safety still apply.',
     )
   )
     return;
@@ -1185,7 +1203,7 @@ async function startBorgBackup() {
   button.disabled = true;
   button.textContent = 'Starting…';
   try {
-    const response = await post('backups/run');
+    const response = await post(`backups/${kind}`);
     renderBackups(response);
     toast(response.message);
   } catch (error) {
@@ -3652,7 +3670,8 @@ $('usb-close').addEventListener('click', closeUsbDevices);
 $('usb-recover').addEventListener('click', recoverUsb2);
 $('backups').addEventListener('click', openBackups);
 $('backup-close').addEventListener('click', closeBackups);
-$('backup-run').addEventListener('click', startBorgBackup);
+$('backup-run-borg').addEventListener('click', () => startManualBackup('borg'));
+$('backup-run-exfat').addEventListener('click', () => startManualBackup('exfat'));
 $('ignition-monitor').addEventListener('click', openIgnitionMonitor);
 $('ignition-monitor-close').addEventListener('click', closeIgnitionMonitor);
 $('ignition-monitor-disable').addEventListener('click', () => changeIgnitionMonitor(true));

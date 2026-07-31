@@ -50,7 +50,8 @@ unlock it after a total Pi failure.
 
 ## Routine operation
 
-The root cron invokes `pi_backup.sh` hourly from 03:00 through 08:00; the first
+The root cron invokes `backup_window.sh` hourly from 03:00 through 08:00; its
+Pi/Borg job runs `pi_backup.sh`, where the first
 successful run each day wins. The OpenWrt pull occurs immediately before
 `borg create`, so Borg's normal daily, weekly, and monthly retention versions
 the router snapshot without a second retention system.

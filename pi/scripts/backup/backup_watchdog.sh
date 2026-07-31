@@ -31,6 +31,22 @@ else
   problems+=("no successful borg backup recorded yet")
 fi
 
+# Dedicated EXFAT hard-link snapshot freshness. The target normally remains
+# unmounted and spun down, so inspect only the local stamp and the non-probing
+# udev label link here; free space is checked while the snapshot job has it
+# mounted.
+if [ -f "$EXFAT_SNAPSHOT_STAMP" ]; then
+  age_h=$(( (now - $(stat -c %Y "$EXFAT_SNAPSHOT_STAMP")) / 3600 ))
+  status+="exfat-snapshot: ${age_h}h ago. "
+  [ "$age_h" -le "$EXFAT_SNAPSHOT_STALE_HOURS" ] ||
+    problems+=("last good EXFAT snapshot was ${age_h}h ago (limit ${EXFAT_SNAPSHOT_STALE_HOURS}h)")
+else
+  problems+=("no successful EXFAT snapshot recorded yet")
+fi
+if [[ ! -b "/dev/disk/by-label/$EXFAT_SNAPSHOT_DISK_LABEL" ]]; then
+  problems+=("EXFAT backup disk '$EXFAT_SNAPSHOT_DISK_LABEL' is not attached")
+fi
+
 # OpenWrt snapshot recency is independent of Borg recency. A router pull can
 # fail while the Pi backup correctly continues with the last valid snapshot.
 if [ -s "$OPENWRT_SNAPSHOT_FILE" ] && [ -f "$OPENWRT_BACKUP_STAMP" ]; then

@@ -184,7 +184,7 @@
       <section class="openwrt-overview-card"><span class="network-dot" id="openwrt-sheet-mwan-dot"></span><span><strong>MWAN3</strong><small id="openwrt-sheet-mode">Checking mode…</small></span><div class="mwan-list" id="openwrt-sheet-mwan-list" aria-label="mwan3 interfaces"></div></section>
     </div>
     <section class="openwrt-clients" aria-labelledby="openwrt-clients-title">
-      <div class="monitor-section-head"><div><h3 id="openwrt-clients-title">Connected devices</h3><p>Wi-Fi associations plus active LAN neighbors; DHCP and static reservations supply names and addresses.</p></div><div class="openwrt-client-actions"><span id="openwrt-client-count">Checking…</span><button id="openwrt-clients-refresh" type="button">Refresh</button></div></div>
+      <div class="monitor-section-head"><div><h3 id="openwrt-clients-title">Connected devices</h3><p>Wi-Fi associations show their radio and band; active LAN neighbors use DHCP and static reservations for names and addresses.</p></div><div class="openwrt-client-actions"><span id="openwrt-client-count">Checking…</span><button id="openwrt-clients-refresh" type="button">Refresh</button></div></div>
       <div class="openwrt-client-list" id="openwrt-client-list"><div class="speaker-loading">Querying OpenWrt…</div></div>
     </section>
   </section>
@@ -280,14 +280,31 @@
 <div class="speaker-backdrop" id="backup-backdrop">
   <section class="speaker-sheet backup-sheet" id="backup-panel" role="dialog" aria-modal="true" aria-labelledby="backup-title" aria-busy="true">
     <div class="sheet-grabber"></div><div class="sheet-head"><h2 id="backup-title">Backups</h2><span class="policy-sheet-status" id="backup-status">Checking…</span><button class="sheet-close" id="backup-close" aria-label="Close backups">&times;</button></div>
-    <p class="sheet-help">Versioned vanpi backups, bootable hotspare generations, and Time Machine history stored on vanpi.</p>
+    <p class="sheet-help">Versioned vanpi backups, EXFAT512 safety snapshots, bootable hotspare generations, and Time Machine history stored on vanpi.</p>
     <div class="backup-overview">
-      <section class="backup-overview-card" aria-labelledby="backup-borg-title"><span class="backup-state-dot" id="backup-borg-dot"></span><span><strong id="backup-borg-title">vanpi Borg archive</strong><small id="backup-borg-detail">Checking last success…</small></span></section>
+      <section class="backup-overview-card backup-overview-action-card" aria-labelledby="backup-borg-title">
+        <span class="backup-state-dot" id="backup-borg-dot"></span>
+        <span class="backup-card-content">
+          <strong id="backup-borg-title">vanpi Borg archive</strong>
+          <span class="backup-card-detail-stack">
+            <small class="backup-card-current-detail" id="backup-borg-detail">Checking last success…</small>
+            <small class="backup-card-hover-detail" id="backup-borg-action-detail">Backs up vanpi with Borg, syncs media, applies retention, and refreshes due hotspares.</small>
+          </span>
+          <button id="backup-run-borg" data-action aria-describedby="backup-borg-action-detail" disabled>Run Borg backup</button>
+        </span>
+      </section>
+      <section class="backup-overview-card backup-overview-action-card" aria-labelledby="backup-exfat-title">
+        <span class="backup-state-dot" id="backup-exfat-dot"></span>
+        <span class="backup-card-content">
+          <strong id="backup-exfat-title">EXFAT512 snapshots</strong>
+          <span class="backup-card-detail-stack">
+            <small class="backup-card-current-detail" id="backup-exfat-detail">Checking last success…</small>
+            <small class="backup-card-hover-detail" id="backup-exfat-action-detail">Mounts hdd1tb, snapshots EXFAT512 with hard links, applies retention, then unmounts and spins down.</small>
+          </span>
+          <button id="backup-run-exfat" data-action aria-describedby="backup-exfat-action-detail" disabled>Snapshot EXFAT512</button>
+        </span>
+      </section>
       <section class="backup-overview-card" aria-labelledby="backup-tm-title"><span class="backup-state-dot" id="backup-tm-dot"></span><span><strong id="backup-tm-title">m4mac Time Machine</strong><small id="backup-tm-detail">Checking snapshot history…</small></span></section>
-    </div>
-    <div class="backup-action-bar">
-      <span><strong>Manual vanpi backup</strong><small>Runs snapshots, Borg create and retention, media sync, and any due hotspare clones. Disk policy and ignition safety remain authoritative.</small><span id="backup-operation">Idle</span></span>
-      <button id="backup-run" data-action disabled>Back up now</button>
     </div>
     <section class="backup-section" aria-labelledby="backup-hotswap-title">
       <div class="monitor-section-head"><div><h3 id="backup-hotswap-title">Bootable Pi hotspares</h3><p>Each date is the last successful clone recorded for that labeled card.</p></div></div>

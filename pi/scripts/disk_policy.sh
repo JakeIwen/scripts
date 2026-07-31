@@ -21,6 +21,7 @@ ALWAYS_MOUNT_LABELS=(
 # unmounted after a backup while remaining available to dashboard/user tools.
 MANUAL_MOUNT_LABELS=(
   bigboi
+  hdd1tb
 )
 
 # Filesystem labels for rotational USB disks that must be unmounted and
@@ -30,6 +31,7 @@ HDD_LABELS=(
   movingparts
   bigboi
   mbp2tbkup
+  hdd1tb
 )
 
 # Static Samba share names for disk-backed exports.  Keep this mapping aligned

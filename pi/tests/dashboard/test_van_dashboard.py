@@ -2559,10 +2559,12 @@ class BackupManagerTests(unittest.TestCase):
             handle.write(
                 "CLONE_TARGETS=(hotspare-a:7 hotspare-b:14)\n"
                 "BORG_STALE_HOURS=48\n"
+                "EXFAT_SNAPSHOT_STALE_HOURS=48\n"
                 "CLONE_STALE_FACTOR=2\n"
             )
         stamp_times = {
             "borg_ok": self.NOW - 3600,
+            "exfat512_ok": self.NOW - 5400,
             "clone_hotspare-a": self.NOW - 2 * 86400,
             "clone_hotspare-b": self.NOW - 40 * 86400,
         }
@@ -2621,6 +2623,10 @@ class BackupManagerTests(unittest.TestCase):
 
         self.assertFalse(status["borg"]["stale"])
         self.assertEqual(status["borg"]["last_success_at"], self.NOW - 3600)
+        self.assertFalse(status["exfat_snapshot"]["stale"])
+        self.assertEqual(
+            status["exfat_snapshot"]["last_success_at"], self.NOW - 5400
+        )
         self.assertEqual(
             [card["label"] for card in status["hotswaps"]],
             ["hotspare-a", "hotspare-b"],
@@ -2755,7 +2761,7 @@ class BackupManagerTests(unittest.TestCase):
                     self.assertEqual(manager.operation["status"], "error")
                     self.assertIn(message, manager.operation["error"])
 
-    def test_manual_backup_uses_only_fixed_force_command_and_requires_new_stamp(self):
+    def test_manual_backups_use_separate_fixed_force_commands_and_stamps(self):
         with tempfile.TemporaryDirectory() as tempdir:
             config, stamps, bundle = self.make_files(tempdir, tm_running=False)
             calls = []
@@ -2768,7 +2774,10 @@ class BackupManagerTests(unittest.TestCase):
                         stdout=json.dumps(self.lsblk_payload()),
                         stderr="",
                     )
-                stamp = os.path.join(stamps, "borg_ok")
+                stamp_name = (
+                    "borg_ok" if args[2] == "/test/pi_backup.sh" else "exfat512_ok"
+                )
+                stamp = os.path.join(stamps, stamp_name)
                 os.utime(stamp, (self.NOW + 1, self.NOW + 1))
                 return SimpleNamespace(
                     returncode=0,
@@ -2779,31 +2788,50 @@ class BackupManagerTests(unittest.TestCase):
             manager = dashboard.BackupManager(
                 config=config,
                 stamp_dir=stamps,
-                backup_tool="/test/pi_backup.sh",
+                borg_tool="/test/pi_backup.sh",
+                exfat_tool="/test/exfat_snapshot.sh",
                 time_machine_bundle=bundle,
                 command=command,
                 backup_timeout=321,
                 wall_clock=lambda: self.NOW,
             )
-            manager.start_backup()
+            manager.start_borg_backup()
             manager.thread.join(2)
-
             self.assertFalse(manager.thread.is_alive())
             self.assertEqual(manager.operation["status"], "complete")
-            self.assertEqual(manager.operation["kind"], "backup")
+            self.assertEqual(manager.operation["kind"], "borg")
+            manager.start_exfat_backup()
+            manager.thread.join(2)
+            self.assertFalse(manager.thread.is_alive())
+            self.assertEqual(manager.operation["status"], "complete")
+            self.assertEqual(manager.operation["kind"], "exfat")
             backup_calls = [call for call in calls if call[0][0] == dashboard.SUDO]
             self.assertEqual(
                 backup_calls,
-                [([dashboard.SUDO, "-n", "/test/pi_backup.sh", "--force"], 321)],
+                [
+                    ([dashboard.SUDO, "-n", "/test/pi_backup.sh", "--force"], 321),
+                    (
+                        [
+                            dashboard.SUDO,
+                            "-n",
+                            "/test/exfat_snapshot.sh",
+                            "--force",
+                        ],
+                        321,
+                    ),
+                ],
             )
 
-    def test_manual_backup_failure_timeout_and_deferred_run_are_reported(self):
+    def test_manual_borg_failure_timeout_and_deferred_run_are_reported(self):
         with tempfile.TemporaryDirectory() as tempdir:
             config, stamps, bundle = self.make_files(tempdir, tm_running=False)
             for outcome, message in (
                 ("failed", "borg failed"),
                 ("timeout", "timed out"),
-                ("deferred", "without recording a new Borg success"),
+                (
+                    "deferred",
+                    "without recording a new Borg success",
+                ),
             ):
 
                 def command(args, timeout, outcome=outcome):
@@ -2830,14 +2858,14 @@ class BackupManagerTests(unittest.TestCase):
                 manager = dashboard.BackupManager(
                     config=config,
                     stamp_dir=stamps,
-                    backup_tool="/test/pi_backup.sh",
+                    borg_tool="/test/pi_backup.sh",
                     time_machine_bundle=bundle,
                     command=command,
                     backup_timeout=4,
                     wall_clock=lambda: self.NOW,
                 )
                 with self.subTest(outcome=outcome):
-                    manager.start_backup()
+                    manager.start_borg_backup()
                     manager.thread.join(2)
                     self.assertEqual(manager.operation["status"], "error")
                     self.assertIn(message, manager.operation["error"])
@@ -3029,8 +3057,11 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="backup-panel"', page.data)
         self.assertIn(b'id="backup-hotswaps"', page.data)
         self.assertIn(b'id="backup-history"', page.data)
-        self.assertIn(b'id="backup-run" data-action disabled', page.data)
-        self.assertIn(b"Disk policy and ignition safety remain authoritative", page.data)
+        self.assertIn(b'id="backup-run-borg" data-action', page.data)
+        self.assertIn(b'id="backup-run-exfat" data-action', page.data)
+        self.assertIn(b'id="backup-borg-action-detail"', page.data)
+        self.assertIn(b'id="backup-exfat-action-detail"', page.data)
+        self.assertNotIn(b"Manual backups</strong>", page.data)
         self.assertIn(b'id="ignition-monitor"', page.data)
         self.assertIn(b'id="ignition-monitor-panel"', page.data)
         self.assertIn(b'id="ignition-duration-amount"', page.data)
@@ -3214,9 +3245,10 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"function recoverUsb2()", javascript.data)
         self.assertIn(b"function renderBackups(response)", javascript.data)
         self.assertIn(b"function startBackupClone(button)", javascript.data)
+        self.assertIn(b"function startManualBackup(kind)", javascript.data)
         self.assertIn(b"/api/backups", javascript.data)
         self.assertIn(b"backups/clone", javascript.data)
-        self.assertIn(b"backups/run", javascript.data)
+        self.assertIn(b"backups/${kind}", javascript.data)
         self.assertIn(b"function renderIgnitionMonitor(response)", javascript.data)
         self.assertIn(b"function setIgnitionDuration(minutes", javascript.data)
         self.assertIn(b"ignition-monitor/disable", javascript.data)
@@ -3314,7 +3346,8 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b".usb-port-actions", stylesheet.data)
         self.assertIn(b".backup-hotswap", stylesheet.data)
         self.assertIn(b".backup-history-row", stylesheet.data)
-        self.assertIn(b".backup-action-bar", stylesheet.data)
+        self.assertIn(b".backup-overview-action-card:hover", stylesheet.data)
+        self.assertIn(b".backup-card-hover-detail", stylesheet.data)
         self.assertIn(b".ignition-monitor-tile", stylesheet.data)
         self.assertIn(b".ignition-duration-slider", stylesheet.data)
         self.assertIn(b".ignition-presets", stylesheet.data)
@@ -3493,6 +3526,7 @@ class DashboardRouteTests(unittest.TestCase):
             "checked_at": 123,
             "health": "good",
             "borg": {"last_success_at": 100, "stale": False},
+            "exfat_snapshot": {"last_success_at": 100, "stale": False},
             "hotswaps": [],
             "time_machine": {"available": True, "snapshots": []},
             "operation": {"status": "idle"},
@@ -3503,11 +3537,18 @@ class DashboardRouteTests(unittest.TestCase):
                 calls.append(("status",))
                 return state
 
-            def start_backup(self):
-                calls.append(("backup",))
+            def start_borg_backup(self):
+                calls.append(("borg",))
                 return {
                     **state,
-                    "operation": {"status": "running", "kind": "backup"},
+                    "operation": {"status": "running", "kind": "borg"},
+                }
+
+            def start_exfat_backup(self):
+                calls.append(("exfat",))
+                return {
+                    **state,
+                    "operation": {"status": "running", "kind": "exfat"},
                 }
 
             def start_clone(self, target):
@@ -3526,8 +3567,12 @@ class DashboardRouteTests(unittest.TestCase):
                 data={"target": "hotspare-a"},
                 headers={"X-Van-Dashboard": "1"},
             )
-            backup = client.post(
-                "/api/backups/run",
+            borg = client.post(
+                "/api/backups/borg",
+                headers={"X-Van-Dashboard": "1"},
+            )
+            exfat = client.post(
+                "/api/backups/exfat",
                 headers={"X-Van-Dashboard": "1"},
             )
             unknown = client.post(
@@ -3540,8 +3585,8 @@ class DashboardRouteTests(unittest.TestCase):
                 data={"target": "hotspare-a", "command": "--init"},
                 headers={"X-Van-Dashboard": "1"},
             )
-            backup_extra = client.post(
-                "/api/backups/run",
+            borg_extra = client.post(
+                "/api/backups/borg",
                 data={"command": "--anything"},
                 headers={"X-Van-Dashboard": "1"},
             )
@@ -3555,7 +3600,7 @@ class DashboardRouteTests(unittest.TestCase):
                 },
             )
             backup_cross_origin = client.post(
-                "/api/backups/run",
+                "/api/backups/exfat",
                 headers={
                     "X-Van-Dashboard": "1",
                     "Origin": "https://example.invalid",
@@ -3568,11 +3613,13 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(status.headers["Cache-Control"], "no-store")
         self.assertEqual(started.status_code, 202)
         self.assertEqual(started.headers["Cache-Control"], "no-store")
-        self.assertEqual(backup.status_code, 202)
-        self.assertEqual(backup.headers["Cache-Control"], "no-store")
+        self.assertEqual(borg.status_code, 202)
+        self.assertEqual(borg.headers["Cache-Control"], "no-store")
+        self.assertEqual(exfat.status_code, 202)
+        self.assertEqual(exfat.headers["Cache-Control"], "no-store")
         self.assertEqual(unknown.status_code, 400)
         self.assertEqual(extra.status_code, 400)
-        self.assertEqual(backup_extra.status_code, 400)
+        self.assertEqual(borg_extra.status_code, 400)
         self.assertEqual(query.status_code, 400)
         self.assertEqual(cross_origin.status_code, 403)
         self.assertEqual(backup_cross_origin.status_code, 403)
@@ -3581,7 +3628,8 @@ class DashboardRouteTests(unittest.TestCase):
             [
                 ("status",),
                 ("clone", "hotspare-a"),
-                ("backup",),
+                ("borg",),
+                ("exfat",),
                 ("clone", "/dev/sda"),
             ],
         )

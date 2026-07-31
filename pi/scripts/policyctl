@@ -50,6 +50,7 @@ MANAGED_DISK_LABELS = (
     "movingparts",
     "bigboi",
     "mbp2tbkup",
+    "hdd1tb",
 )
 
 

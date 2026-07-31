@@ -146,8 +146,11 @@ BACKUP_STAMP_DIR = os.environ.get(
 BACKUP_CLONE_NOW = os.environ.get(
     "VAN_DASHBOARD_BACKUP_CLONE_NOW", "/home/pi/scripts/backup/clone_now.sh"
 )
-BACKUP_RUNNER = os.environ.get(
-    "VAN_DASHBOARD_BACKUP_RUNNER", "/home/pi/scripts/backup/pi_backup.sh"
+BACKUP_BORG_RUNNER = os.environ.get(
+    "VAN_DASHBOARD_BORG_RUNNER", "/home/pi/scripts/backup/pi_backup.sh"
+)
+BACKUP_EXFAT_RUNNER = os.environ.get(
+    "VAN_DASHBOARD_EXFAT_RUNNER", "/home/pi/scripts/backup/exfat_snapshot.sh"
 )
 TIME_MACHINE_BUNDLE = os.environ.get(
     "VAN_DASHBOARD_TIME_MACHINE_BUNDLE", "/mnt/mbp2tbkup/m4mac.sparsebundle"
@@ -1768,6 +1771,8 @@ class OpenWrtClientsController:
         "mac",
         "connection",
         "interface",
+        "radio",
+        "band",
         "neighbor_state",
         "signal_dbm",
         "rx_rate_bps",
@@ -1835,6 +1840,19 @@ class OpenWrtClientsController:
                 or item["connection"] not in ("wifi", "lan")
                 or not isinstance(item["interface"], str)
                 or len(item["interface"]) > 50
+                or (
+                    item["radio"] is not None
+                    and (
+                        not isinstance(item["radio"], str)
+                        or not re.fullmatch(r"radio\d+", item["radio"])
+                    )
+                )
+                or item["band"] not in (None, "2.4 GHz", "5 GHz", "6 GHz")
+                or (item["radio"] is None) != (item["band"] is None)
+                or (
+                    item["connection"] == "lan"
+                    and (item["radio"] is not None or item["band"] is not None)
+                )
                 or (
                     item["neighbor_state"] is not None
                     and item["neighbor_state"]
@@ -3120,8 +3138,9 @@ class BackupManager:
     restricted to the labels already present in CLONE_TARGETS; the dashboard
     never accepts a block-device path and never exposes
     /home/pi/scripts/backup/clone_to_sd.sh --init. Manual Borg requests invoke
-    only the fixed pi_backup.sh --force path, which retains the orchestrator's
-    disk-policy, ignition, mount, lock, snapshot, and retention safeguards.
+    only the fixed pi_backup.sh or exfat_snapshot.sh --force paths, which retain
+    each job's disk-policy, ignition, mount, lock, snapshot, and retention
+    safeguards.
     """
 
     CLONE_TARGET_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -3131,7 +3150,8 @@ class BackupManager:
         config=BACKUP_CONF,
         stamp_dir=BACKUP_STAMP_DIR,
         clone_tool=BACKUP_CLONE_NOW,
-        backup_tool=BACKUP_RUNNER,
+        borg_tool=BACKUP_BORG_RUNNER,
+        exfat_tool=BACKUP_EXFAT_RUNNER,
         time_machine_bundle=TIME_MACHINE_BUNDLE,
         command=run_command,
         timeout=BACKUP_STATUS_TIMEOUT,
@@ -3142,7 +3162,8 @@ class BackupManager:
         self.config = config
         self.stamp_dir = stamp_dir
         self.clone_tool = clone_tool
-        self.backup_tool = backup_tool
+        self.borg_tool = borg_tool
+        self.exfat_tool = exfat_tool
         self.time_machine_bundle = time_machine_bundle
         self.command = command
         self.timeout = timeout
@@ -3193,6 +3214,9 @@ class BackupManager:
         return {
             "targets": targets,
             "borg_stale_hours": integer("BORG_STALE_HOURS", 48),
+            "exfat_snapshot_stale_hours": integer(
+                "EXFAT_SNAPSHOT_STALE_HOURS", 48
+            ),
             "clone_stale_factor": integer("CLONE_STALE_FACTOR", 2),
         }
 
@@ -3386,10 +3410,26 @@ class BackupManager:
             "stale_hours": configuration["borg_stale_hours"],
             "stale": borg_at is None or now - borg_at > borg_stale_seconds,
         }
+        exfat_snapshot_at = self._stamp(
+            os.path.join(self.stamp_dir, "exfat512_ok")
+        )
+        exfat_snapshot_stale_seconds = (
+            configuration["exfat_snapshot_stale_hours"] * 3600
+        )
+        exfat_snapshot = {
+            "last_success_at": exfat_snapshot_at,
+            "stale_hours": configuration["exfat_snapshot_stale_hours"],
+            "stale": exfat_snapshot_at is None
+            or now - exfat_snapshot_at > exfat_snapshot_stale_seconds,
+        }
         time_machine = self._time_machine(now)
         with self.lock:
             operation = copy.deepcopy(self.operation)
-        attention = borg["stale"] or any(card["stale"] for card in hotswaps)
+        attention = (
+            borg["stale"]
+            or exfat_snapshot["stale"]
+            or any(card["stale"] for card in hotswaps)
+        )
         if not time_machine["available"] or time_machine["last_backup_at"] is None:
             attention = True
         health = "running" if operation["status"] == "running" or time_machine["running"] else (
@@ -3399,6 +3439,7 @@ class BackupManager:
             "checked_at": now,
             "health": health,
             "borg": borg,
+            "exfat_snapshot": exfat_snapshot,
             "hotswaps": hotswaps,
             "time_machine": time_machine,
             "operation": operation,
@@ -3436,29 +3477,39 @@ class BackupManager:
             self.thread.start()
         return self.status()
 
-    def start_backup(self):
+    def _start_manual_backup(self, kind, tool, stamp_name):
         current = self.status()
-        previous_borg_at = current["borg"]["last_success_at"]
+        previous_at = self._stamp(os.path.join(self.stamp_dir, stamp_name))
         with self.lock:
             if self.operation["status"] == "running":
                 raise BackupStatusError("another dashboard backup operation is running")
             started_at = int(self.wall_clock())
             self.operation = {
                 "status": "running",
-                "kind": "backup",
+                "kind": kind,
                 "target": None,
                 "started_at": started_at,
                 "completed_at": None,
                 "error": None,
             }
             self.thread = threading.Thread(
-                target=self._run_backup,
-                args=(started_at, previous_borg_at),
-                name="borg-backup",
+                target=self._run_manual_backup,
+                args=(started_at, kind, tool, stamp_name, previous_at),
+                name=f"{kind}-backup",
                 daemon=True,
             )
             self.thread.start()
         return self.status()
+
+    def start_borg_backup(self):
+        return self._start_manual_backup(
+            "borg", self.borg_tool, "borg_ok"
+        )
+
+    def start_exfat_backup(self):
+        return self._start_manual_backup(
+            "exfat", self.exfat_tool, "exfat512_ok"
+        )
 
     def _run_clone(self, target, started_at):
         error = None
@@ -3483,28 +3534,30 @@ class BackupManager:
                     }
                 )
 
-    def _run_backup(self, started_at, previous_borg_at):
+    @staticmethod
+    def _stamp_advanced(current, previous):
+        return current is not None and (previous is None or current > previous)
+
+    def _run_manual_backup(
+        self, started_at, kind, tool, stamp_name, previous_at
+    ):
+        label = "Borg" if kind == "borg" else "EXFAT512 snapshot"
         error = None
         try:
             result = self.command(
-                [SUDO, "-n", self.backup_tool, "--force"],
+                [SUDO, "-n", tool, "--force"],
                 timeout=self.backup_timeout,
             )
             if result.returncode:
                 error = (
-                    result.stderr or result.stdout or "vanpi backup failed"
+                    result.stderr or result.stdout or f"{label} backup failed"
                 ).strip()[-500:]
             else:
-                current_borg_at = self._stamp(
-                    os.path.join(self.stamp_dir, "borg_ok")
-                )
-                if current_borg_at is None or (
-                    previous_borg_at is not None
-                    and current_borg_at <= previous_borg_at
-                ):
+                current_at = self._stamp(os.path.join(self.stamp_dir, stamp_name))
+                if not self._stamp_advanced(current_at, previous_at):
                     output = (result.stderr or result.stdout or "").strip().splitlines()
                     detail = output[-1][-300:] if output else ""
-                    error = "backup finished without recording a new Borg success"
+                    error = f"backup finished without recording a new {label} success"
                     if detail:
                         error = f"{error}: {detail}"
         except subprocess.TimeoutExpired:
@@ -4891,24 +4944,38 @@ def api_backup_clone():
     return response
 
 
-@app.route("/api/backups/run", methods=["POST"])
-def api_backup_run():
+def _api_manual_backup(kind):
     if not _exact_form(()):
         return api_error("manual backup does not accept input", 400)
     try:
-        status = backups.start_backup()
+        if kind == "borg":
+            status = backups.start_borg_backup()
+            message = "Vanpi Borg backup started"
+        else:
+            status = backups.start_exfat_backup()
+            message = "EXFAT512 snapshot started"
     except BackupStatusError as exc:
-        return api_error(f"could not start backup: {exc}", 409)
+        return api_error(f"could not start {kind} backup: {exc}", 409)
     response = jsonify(
         {
             "ok": True,
-            "message": "Vanpi backup started",
+            "message": message,
             "backups": status,
         }
     )
     response.status_code = 202
     response.headers["Cache-Control"] = "no-store"
     return response
+
+
+@app.route("/api/backups/borg", methods=["POST"])
+def api_backup_borg():
+    return _api_manual_backup("borg")
+
+
+@app.route("/api/backups/exfat", methods=["POST"])
+def api_backup_exfat():
+    return _api_manual_backup("exfat")
 
 
 @app.route("/api/ignition-monitor")
