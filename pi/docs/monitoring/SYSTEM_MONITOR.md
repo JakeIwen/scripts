@@ -58,6 +58,43 @@ it through bounded monitor commands instead of opening the database itself.
 Ordinary health reports are read-only. A user-requested crash analysis writes
 only its redacted result back to the monitor database.
 
+`vanpi-usb-controller-watchdog.timer` separately checks once a minute for the
+current-boot kernel message that declares the Pi 4 VL805 xHCI controller dead.
+It sends one rate-limited ntfy alert per boot with the guarded recovery command.
+It never removes, rescans, resets, or automatically reboots the controller:
+those operations can hang the kernel or discard mounted-disk state. Use
+`sudo /home/pi/scripts/safe_reboot.sh`; if USB remains absent after the
+guarded reboot, shut down and fully power-cycle the Pi and powered hub.
+
+The known RTL9201 storage enclosure is configured to use the kernel's
+`usb-storage` driver instead of UAS after its UAS error recovery killed the
+whole VL805 controller. Install or verify the device-specific boot quirk with:
+
+```bash
+sudo /home/pi/scripts/configure_rtl9201_uas_quirk.sh
+```
+
+The helper preserves a one-time pre-change copy of `cmdline.txt`, refuses
+multiple non-empty lines or ambiguous existing parameters, and reports whether
+a reboot is required. The quirk is only for USB VID:PID `0bda:9201`.
+
+## RTL9201/VL805 failure signature
+
+On 2026-07-31 the daily EXFAT snapshot cleanly unmounted and spun down
+`hdd1tb` in its RTL9201 enclosure. A later disk-health pass used a broad
+`blkid -t LABEL=EXFAT512` lookup; that lookup touched the unrelated sleeping
+RTL9201 disk. UAS commands timed out, device resets escalated to an xHCI host
+system error, and the kernel declared the VL805 controller dead, disconnecting
+both USB buses. No firmware undervoltage or USB over-current event accompanied
+the failure.
+
+`disk_health_watchdog.sh` now verifies only the exact source already mounted
+at `/mnt/EXFAT512`, so its minutely check cannot probe unrelated sleeping
+disks. The RTL9201-specific IGNORE_UAS boot quirk limits any future error
+recovery on that enclosure to the simpler `usb-storage` driver. A guarded
+reboot restored the dead controller; PCIe remove/rescan remains prohibited
+because it has deadlocked this host before.
+
 Network totals include physical Ethernet/Wi-Fi interfaces only so virtual
 Tailscale traffic is not counted twice; the dashboard still shows Tailscale as
 a separate interface. Disk totals use whole block devices and do not add their

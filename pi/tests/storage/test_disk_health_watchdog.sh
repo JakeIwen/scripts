@@ -35,7 +35,6 @@ EOF
 cat > "$fake_blkid" <<EOF
 #!/bin/bash
 case "\$*" in
-  *"-t LABEL=EXFAT512 -o device"*) printf '%s\\n' "$fake_device" ;;
   *"-s LABEL -o value"*) printf '%s\\n' EXFAT512 ;;
   *"-s TYPE -o value"*) printf '%s\\n' exfat ;;
   *) exit 2 ;;
@@ -96,6 +95,12 @@ run_watchdog() {
   TEST_REPAIR_STATUS="${TEST_REPAIR_STATUS:-0}" \
   bash "$repo_root/pi/scripts/disk_health_watchdog.sh"
 }
+
+# Resolving the mounted health-check target must never run a broad LABEL token
+# scan, because that probes unrelated devices that may have been spun down.
+if grep -Fq -- '-t "LABEL=$label"' "$repo_root/pi/scripts/disk_health_watchdog.sh"; then
+  fail "disk-health watchdog still performs a broad label probe"
+fi
 
 run_watchdog >/dev/null || fail "first unusable observation failed"
 [[ -f "$state_dir/EXFAT512.unusable" ]] ||

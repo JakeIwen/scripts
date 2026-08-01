@@ -2555,6 +2555,7 @@ class BackupManagerTests(unittest.TestCase):
         bundle = os.path.join(tempdir, "m4mac.sparsebundle")
         os.makedirs(stamps)
         os.makedirs(bundle)
+        os.makedirs(os.path.join(tempdir, "proc"))
         with open(config, "w", encoding="utf-8") as handle:
             handle.write(
                 "CLONE_TARGETS=(hotspare-a:7 hotspare-b:14)\n"
@@ -2618,6 +2619,7 @@ class BackupManagerTests(unittest.TestCase):
                 time_machine_bundle=bundle,
                 command=command,
                 wall_clock=lambda: self.NOW,
+                process_root=os.path.join(tempdir, "proc"),
             )
             status = manager.status()
 
@@ -2639,6 +2641,43 @@ class BackupManagerTests(unittest.TestCase):
         self.assertEqual(status["time_machine"]["last_backup_at"], self.NOW - 1800)
         self.assertTrue(status["time_machine"]["running"])
         self.assertEqual(status["time_machine"]["progress_percent"], 37.5)
+        self.assertEqual(status["health"], "running")
+
+    def test_detects_scheduled_borg_and_exfat_parents_from_exact_proc_argv(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            config, stamps, bundle = self.make_files(tempdir, tm_running=False)
+            proc_root = os.path.join(tempdir, "proc")
+            for pid, script in (
+                ("101", "/test/pi_backup.sh"),
+                ("102", "/test/exfat_snapshot.sh"),
+            ):
+                process = os.path.join(proc_root, pid)
+                os.makedirs(process)
+                with open(os.path.join(process, "cmdline"), "wb") as handle:
+                    handle.write(b"/bin/bash\0" + os.fsencode(script) + b"\0")
+            false_match = os.path.join(proc_root, "103")
+            os.makedirs(false_match)
+            with open(os.path.join(false_match, "cmdline"), "wb") as handle:
+                handle.write(b"/bin/sh\0mention /test/pi_backup.sh only\0")
+
+            manager = dashboard.BackupManager(
+                config=config,
+                stamp_dir=stamps,
+                borg_tool="/test/pi_backup.sh",
+                exfat_tool="/test/exfat_snapshot.sh",
+                time_machine_bundle=bundle,
+                command=lambda args, timeout: SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(self.lsblk_payload()),
+                    stderr="",
+                ),
+                wall_clock=lambda: self.NOW,
+                process_root=proc_root,
+            )
+            status = manager.status()
+
+        self.assertTrue(status["borg"]["running"])
+        self.assertTrue(status["exfat_snapshot"]["running"])
         self.assertEqual(status["health"], "running")
 
     def test_rejects_invalid_configuration_and_stale_running_metadata(self):
@@ -2667,6 +2706,7 @@ class BackupManagerTests(unittest.TestCase):
                     stderr="",
                 ),
                 wall_clock=lambda: self.NOW,
+                process_root=os.path.join(tempdir, "proc"),
             )
             self.assertFalse(manager.status()["time_machine"]["running"])
 
@@ -2693,6 +2733,7 @@ class BackupManagerTests(unittest.TestCase):
                 command=command,
                 clone_timeout=123,
                 wall_clock=lambda: self.NOW,
+                process_root=os.path.join(tempdir, "proc"),
             )
             manager.start_clone("hotspare-a")
             manager.thread.join(2)
@@ -2723,6 +2764,7 @@ class BackupManagerTests(unittest.TestCase):
                         stderr="",
                     ),
                     wall_clock=lambda: self.NOW,
+                    process_root=os.path.join(tempdir, "proc"),
                 )
                 with self.subTest(target=target):
                     with self.assertRaisesRegex(dashboard.BackupStatusError, message):
@@ -2754,6 +2796,7 @@ class BackupManagerTests(unittest.TestCase):
                     command=command,
                     clone_timeout=4,
                     wall_clock=lambda: self.NOW,
+                    process_root=os.path.join(tempdir, "proc"),
                 )
                 with self.subTest(outcome=outcome):
                     manager.start_clone("hotspare-a")
@@ -2794,6 +2837,7 @@ class BackupManagerTests(unittest.TestCase):
                 command=command,
                 backup_timeout=321,
                 wall_clock=lambda: self.NOW,
+                process_root=os.path.join(tempdir, "proc"),
             )
             manager.start_borg_backup()
             manager.thread.join(2)
@@ -2863,6 +2907,7 @@ class BackupManagerTests(unittest.TestCase):
                     command=command,
                     backup_timeout=4,
                     wall_clock=lambda: self.NOW,
+                    process_root=os.path.join(tempdir, "proc"),
                 )
                 with self.subTest(outcome=outcome):
                     manager.start_borg_backup()
@@ -3061,6 +3106,9 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="backup-run-exfat" data-action', page.data)
         self.assertIn(b'id="backup-borg-action-detail"', page.data)
         self.assertIn(b'id="backup-exfat-action-detail"', page.data)
+        self.assertIn(b'id="backup-borg-running" hidden', page.data)
+        self.assertIn(b'id="backup-exfat-running" hidden', page.data)
+        self.assertIn(b'id="backup-tm-running" hidden', page.data)
         self.assertNotIn(b"Manual backups</strong>", page.data)
         self.assertIn(b'id="ignition-monitor"', page.data)
         self.assertIn(b'id="ignition-monitor-panel"', page.data)

@@ -2373,6 +2373,18 @@ body.busy [data-action] {
   height: 100%;
   flex-direction: column;
 }
+.backup-card-running-note {
+  width: fit-content;
+  border: 1px solid #397486;
+  border-radius: 999px;
+  background: #19343e;
+  padding: 2px 6px;
+  color: #b8e9f2 !important;
+  font-size: 8px !important;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
 .backup-card-detail-stack {
   position: relative;
   display: block;
@@ -2424,6 +2436,10 @@ body.busy [data-action] {
 .backup-state-dot.good {
   background: var(--good);
   box-shadow: 0 0 0 4px #62c89918;
+}
+.backup-state-dot.running {
+  background: #62c8df;
+  box-shadow: 0 0 0 4px #62c8df20;
 }
 .backup-state-dot.bad {
   background: var(--bad);

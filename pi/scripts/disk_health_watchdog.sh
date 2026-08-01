@@ -55,8 +55,7 @@ dhw_write_state() {
 # Set DHW_DEVICE only when the exact mount source, filesystem label, and
 # filesystem type all agree. Return 1 for an ordinary absent/unmounted label.
 dhw_resolve_mounted_exfat() {
-  local label=$1 target=$2 output status device exact_device actual_label actual_type
-  local -a matches=()
+  local label=$1 target=$2 output status device actual_label actual_type
 
   DHW_DEVICE=
   output=$("$findmnt_command" -rn -M "$target" -o SOURCE 2>&1)
@@ -69,34 +68,28 @@ dhw_resolve_mounted_exfat() {
   fi
   device=$("$readlink_command" -f -- "$output") || return 2
 
-  output=$("$sudo_command" "$blkid_command" -t "LABEL=$label" -o device 2>&1)
-  status=$?
-  if (( status == 2 )) && [[ -z "$output" ]]; then
-    return 1
-  elif (( status != 0 )); then
-    echo "ERROR: label lookup failed for $label (status $status): $output" >&2
-    return 2
-  fi
-  while IFS= read -r exact_device; do
-    [[ -n "$exact_device" ]] && matches+=("$exact_device")
-  done <<< "$output"
-  if (( ${#matches[@]} != 1 )); then
-    echo "ERROR: label $label resolved to ${#matches[@]} devices" >&2
-    return 2
-  fi
-  exact_device=$("$readlink_command" -f -- "${matches[0]}") || return 2
-  if [[ "$device" != "$exact_device" ]]; then
-    echo "ERROR: $target is mounted from $device, not exact label $label ($exact_device)" >&2
-    return 2
-  fi
-
+  # Probe only the already-mounted source. A token-only blkid label lookup
+  # scans unrelated block devices and can wake a deliberately spun-down disk.
+  # On the RTL9201/UAS path that broad probe has escalated through SCSI error
+  # recovery and killed the Pi 4's entire VL805 USB controller. The exact
+  # source plus label/type checks retain the repair identity guard without
+  # touching sleeping devices.
   actual_label=$(
     "$sudo_command" "$blkid_command" -s LABEL -o value -- "$device"
-  ) || return 2
+  ) || {
+    echo "ERROR: cannot verify the label on mounted source $device" >&2
+    return 2
+  }
   actual_type=$(
     "$sudo_command" "$blkid_command" -s TYPE -o value -- "$device"
-  ) || return 2
-  [[ "$actual_label" == "$label" ]] || return 2
+  ) || {
+    echo "ERROR: cannot verify the filesystem type on mounted source $device" >&2
+    return 2
+  }
+  if [[ "$actual_label" != "$label" ]]; then
+    echo "ERROR: $target is mounted from $device with label '$actual_label', not '$label'" >&2
+    return 2
+  fi
   if [[ "$actual_type" != exfat ]]; then
     # Automated repair is intentionally narrower than dashboard reporting.
     return 1

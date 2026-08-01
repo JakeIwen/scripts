@@ -3158,6 +3158,7 @@ class BackupManager:
         clone_timeout=BACKUP_CLONE_TIMEOUT,
         backup_timeout=BACKUP_RUN_TIMEOUT,
         wall_clock=time.time,
+        process_root="/proc",
     ):
         self.config = config
         self.stamp_dir = stamp_dir
@@ -3170,6 +3171,7 @@ class BackupManager:
         self.clone_timeout = clone_timeout
         self.backup_timeout = backup_timeout
         self.wall_clock = wall_clock
+        self.process_root = process_root
         self.lock = threading.Lock()
         self.thread = None
         self.operation = {
@@ -3297,6 +3299,41 @@ class BackupManager:
             raise BackupStatusError(f"could not read backup stamp: {exc}") from exc
         return int(stat.st_mtime)
 
+    def _running_backup_kinds(self):
+        """Identify actual scheduled/manual backup parents from Linux procfs.
+
+        Match complete NUL-delimited argv entries, never command substrings, so
+        status probes and unrelated shell commands cannot create false running
+        states. Runtime discovery is advisory; an unreadable or absent procfs
+        must not make all backup history unavailable.
+        """
+        expected = {
+            os.fsencode(self.borg_tool): "borg",
+            os.fsencode(self.exfat_tool): "exfat",
+        }
+        running = set()
+        try:
+            entries = os.scandir(self.process_root)
+        except OSError:
+            return running
+        with entries:
+            for entry in entries:
+                if not entry.name.isdigit():
+                    continue
+                try:
+                    with open(
+                        os.path.join(self.process_root, entry.name, "cmdline"), "rb"
+                    ) as handle:
+                        arguments = set(handle.read(16384).split(b"\0"))
+                except OSError:
+                    continue
+                for script, kind in expected.items():
+                    if script in arguments:
+                        running.add(kind)
+                if len(running) == len(expected):
+                    break
+        return running
+
     @staticmethod
     def _plist_timestamp(value):
         if not isinstance(value, datetime.datetime):
@@ -3371,6 +3408,7 @@ class BackupManager:
 
     def status(self):
         now = int(self.wall_clock())
+        running_kinds = self._running_backup_kinds()
         configuration = self._configuration()
         rows = self._block_devices()
         labels = {row.get("label"): row for row in rows if row.get("label")}
@@ -3409,6 +3447,7 @@ class BackupManager:
             "last_success_at": borg_at,
             "stale_hours": configuration["borg_stale_hours"],
             "stale": borg_at is None or now - borg_at > borg_stale_seconds,
+            "running": "borg" in running_kinds,
         }
         exfat_snapshot_at = self._stamp(
             os.path.join(self.stamp_dir, "exfat512_ok")
@@ -3421,10 +3460,16 @@ class BackupManager:
             "stale_hours": configuration["exfat_snapshot_stale_hours"],
             "stale": exfat_snapshot_at is None
             or now - exfat_snapshot_at > exfat_snapshot_stale_seconds,
+            "running": "exfat" in running_kinds,
         }
         time_machine = self._time_machine(now)
         with self.lock:
             operation = copy.deepcopy(self.operation)
+        if operation["status"] == "running":
+            if operation["kind"] == "borg":
+                borg["running"] = True
+            elif operation["kind"] == "exfat":
+                exfat_snapshot["running"] = True
         attention = (
             borg["stale"]
             or exfat_snapshot["stale"]
@@ -3432,7 +3477,12 @@ class BackupManager:
         )
         if not time_machine["available"] or time_machine["last_backup_at"] is None:
             attention = True
-        health = "running" if operation["status"] == "running" or time_machine["running"] else (
+        health = "running" if (
+            operation["status"] == "running"
+            or borg["running"]
+            or exfat_snapshot["running"]
+            or time_machine["running"]
+        ) else (
             "attention" if attention else "good"
         )
         return {
@@ -3451,6 +3501,8 @@ class BackupManager:
         if target not in allowed:
             raise ValueError("unknown hotspare target")
         current = self.status()
+        if current["borg"]["running"] or current["exfat_snapshot"]["running"]:
+            raise BackupStatusError("a scheduled backup is already running")
         card = next(item for item in current["hotswaps"] if item["label"] == target)
         if not card["attached"]:
             raise BackupStatusError(f"{target} is not attached")
@@ -3479,6 +3531,8 @@ class BackupManager:
 
     def _start_manual_backup(self, kind, tool, stamp_name):
         current = self.status()
+        if current["borg"]["running"] or current["exfat_snapshot"]["running"]:
+            raise BackupStatusError("a scheduled backup is already running")
         previous_at = self._stamp(os.path.join(self.stamp_dir, stamp_name))
         with self.lock:
             if self.operation["status"] == "running":

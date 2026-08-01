@@ -1002,8 +1002,9 @@ function renderBackups(response) {
     operation = state.operation || { status: 'idle' },
     operationKind = operation.kind || (operation.target ? 'clone' : null),
     operationRunning = operation.status === 'running',
-    borgRunning = operationRunning && operationKind === 'borg',
-    exfatRunning = operationRunning && operationKind === 'exfat',
+    borgRunning = borg.running === true || (operationRunning && operationKind === 'borg'),
+    exfatRunning = exfat.running === true || (operationRunning && operationKind === 'exfat'),
+    backupRuntimeBusy = borgRunning || exfatRunning,
     tile = $('backups'),
     pill = $('backup-pill');
   backupState = state;
@@ -1040,40 +1041,40 @@ function renderBackups(response) {
   }
 
   const borgDot = $('backup-borg-dot');
-  borgDot.className = `backup-state-dot ${borg.stale ? 'bad' : 'good'}`;
-  $('backup-borg-detail').textContent = borgRunning
-    ? `Backup running · started ${backupAge(operation.started_at)}`
-    : Number.isFinite(borg.last_success_at)
-      ? `Last successful archive ${eventTime(borg.last_success_at)} (${backupAge(borg.last_success_at)})`
-      : 'No successful Borg archive is recorded';
+  borgDot.className = `backup-state-dot ${borgRunning ? 'running' : borg.stale ? 'bad' : 'good'}`;
+  $('backup-borg-running').hidden = !borgRunning;
+  $('backup-borg-detail').textContent = Number.isFinite(borg.last_success_at)
+    ? `Last successful archive ${eventTime(borg.last_success_at)} (${backupAge(borg.last_success_at)})`
+    : 'No successful Borg archive is recorded';
   const exfatDot = $('backup-exfat-dot');
-  exfatDot.className = `backup-state-dot ${exfat.stale ? 'bad' : 'good'}`;
-  $('backup-exfat-detail').textContent = exfatRunning
-    ? `Snapshot running · started ${backupAge(operation.started_at)}`
-    : Number.isFinite(exfat.last_success_at)
-      ? `Last completed ${eventTime(exfat.last_success_at)} (${backupAge(exfat.last_success_at)})`
-      : 'No successful EXFAT512 snapshot is recorded';
+  exfatDot.className = `backup-state-dot ${exfatRunning ? 'running' : exfat.stale ? 'bad' : 'good'}`;
+  $('backup-exfat-running').hidden = !exfatRunning;
+  $('backup-exfat-detail').textContent = Number.isFinite(exfat.last_success_at)
+    ? `Last completed ${eventTime(exfat.last_success_at)} (${backupAge(exfat.last_success_at)})`
+    : 'No successful EXFAT512 snapshot is recorded';
   const tmDot = $('backup-tm-dot');
-  tmDot.className = `backup-state-dot ${tm.running || Number.isFinite(tm.last_backup_at) ? 'good' : 'bad'}`;
-  $('backup-tm-detail').textContent = tm.running
-    ? `Backup in progress${Number.isFinite(tm.progress_percent) ? ` · ${tm.progress_percent}%` : ''}`
-    : Number.isFinite(tm.last_backup_at)
-      ? `Last completed ${eventTime(tm.last_backup_at)} (${backupAge(tm.last_backup_at)})`
-      : tm.error || 'No completed snapshots found';
+  tmDot.className = `backup-state-dot ${tm.running ? 'running' : Number.isFinite(tm.last_backup_at) ? 'good' : 'bad'}`;
+  $('backup-tm-running').hidden = !tm.running;
+  $('backup-tm-running').textContent = Number.isFinite(tm.progress_percent)
+    ? `Backup in progress · ${tm.progress_percent}%`
+    : 'Backup in progress';
+  $('backup-tm-detail').textContent = Number.isFinite(tm.last_backup_at)
+    ? `Last completed ${eventTime(tm.last_backup_at)} (${backupAge(tm.last_backup_at)})`
+    : tm.error || 'No completed snapshots found';
 
   const operationKey = `${operation.status}:${operation.started_at || ''}:${operation.completed_at || ''}`;
   const borgRun = $('backup-run-borg'),
     exfatRun = $('backup-run-exfat');
-  borgRun.disabled = backupBusy || operationRunning;
-  exfatRun.disabled = backupBusy || operationRunning;
+  borgRun.disabled = backupBusy || operationRunning || backupRuntimeBusy;
+  exfatRun.disabled = backupBusy || operationRunning || backupRuntimeBusy;
   borgRun.textContent = borgRunning
     ? 'Running Borg…'
-    : operationRunning
+    : operationRunning || backupRuntimeBusy
       ? 'Backup busy'
       : 'Run Borg backup';
   exfatRun.textContent = exfatRunning
     ? 'Snapshotting…'
-    : operationRunning
+    : operationRunning || backupRuntimeBusy
       ? 'Backup busy'
       : 'Snapshot EXFAT512';
   if (
@@ -1115,7 +1116,7 @@ function renderBackups(response) {
       return `<article class="backup-hotswap ${card.stale ? 'stale' : card.due ? 'due' : 'current'}">
         <div class="backup-hotswap-head"><span><strong>${label}</strong><small>${esc(status)}</small></span><span class="backup-generation-state">${badge}</span></div>
         <dl><div><dt>Contains vanpi as of</dt><dd>${esc(generation)}</dd></div><div><dt>Schedule</dt><dd>Every ${card.interval_days} days</dd></div></dl>
-        <button data-backup-clone="${label}" ${unavailable || operationRunning || backupBusy ? 'disabled' : ''}>Clone current vanpi to this card</button>
+        <button data-backup-clone="${label}" ${unavailable || operationRunning || backupRuntimeBusy || backupBusy ? 'disabled' : ''}>Clone current vanpi to this card</button>
       </article>`;
     })
     .join('');
