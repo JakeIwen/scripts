@@ -95,6 +95,13 @@ recovery on that enclosure to the simpler `usb-storage` driver. A guarded
 reboot restored the dead controller; PCIe remove/rescan remains prohibited
 because it has deadlocked this host before.
 
+Mount, unmount, dashboard repair, clone discovery, and backup-health checks
+also avoid token-only `blkid` searches. They discover exact candidates from
+udev's `/dev/disk/by-label` or `/dev/disk/by-partlabel` links, cross-check live
+udev database properties for duplicate labels, and use `blkid` only against the
+selected device. This keeps deliberately stopped disks out of unrelated label
+lookups while preserving fail-closed identity checks.
+
 Network totals include physical Ethernet/Wi-Fi interfaces only so virtual
 Tailscale traffic is not counted twice; the dashboard still shows Tailscale as
 a separate interface. Disk totals use whole block devices and do not add their

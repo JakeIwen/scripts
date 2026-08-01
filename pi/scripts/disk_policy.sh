@@ -53,6 +53,201 @@ disk_policy_samba_share_name() {
 DISK_EJECT_HOLD_DIR=${DISK_EJECT_HOLD_DIR:-/run/lock/vanpi-disk-eject}
 DISK_HEALTH_STATE_DIR=${DISK_HEALTH_STATE_DIR:-/var/lib/vanpi-disk-health}
 
+# Exact-label discovery must not use `blkid -t LABEL=...`: a token lookup can
+# probe every block device and wake (or block on) unrelated disks that policy
+# deliberately spun down.  Discover candidates from udev's non-probing label
+# links, then ask blkid to verify only the selected device.  Callers may
+# override these paths for tests; production defaults remain explicit.
+DISK_POLICY_BY_LABEL_DIR=${DISK_POLICY_BY_LABEL_DIR:-/dev/disk/by-label}
+DISK_POLICY_BY_PARTLABEL_DIR=${DISK_POLICY_BY_PARTLABEL_DIR:-/dev/disk/by-partlabel}
+DISK_POLICY_READLINK=${DISK_POLICY_READLINK:-/usr/bin/readlink}
+DISK_POLICY_BLKID=${DISK_POLICY_BLKID:-/sbin/blkid}
+DISK_POLICY_SUDO=${DISK_POLICY_SUDO:-/usr/bin/sudo}
+DISK_POLICY_UDEVADM=${DISK_POLICY_UDEVADM:-/usr/bin/udevadm}
+DISK_POLICY_SYS_BLOCK_DIR=${DISK_POLICY_SYS_BLOCK_DIR:-/sys/class/block}
+DISK_POLICY_REQUIRE_BLOCK_DEVICE=${DISK_POLICY_REQUIRE_BLOCK_DEVICE:-1}
+DISK_POLICY_RESOLVED_DEVICE=
+DISK_POLICY_RESOLVED_LABEL_KEY=
+DISK_POLICY_RESOLVE_ERROR=
+
+# Resolve a filesystem LABEL, or a LABEL/PARTLABEL when requested. Returns 0
+# for one verified device, 1 when no udev mapping exists, and 2 for an unsafe
+# or unverifiable mapping. Results and diagnostics are returned in the globals
+# above so callers can preserve their own logging/error conventions.
+disk_policy_resolve_exact_label() {
+  local label=${1:-} mode=${2:-label-only}
+  local namespace directory path key resolved output rc index found sys_path
+  local property value devname fs_label partlabel
+  local -a namespaces=() devices=() keys=() udev_devices=()
+  local -a sys_paths=()
+
+  DISK_POLICY_RESOLVED_DEVICE=
+  DISK_POLICY_RESOLVED_LABEL_KEY=
+  DISK_POLICY_RESOLVE_ERROR=
+
+  if [[ -z "$label" || "$label" == */* || "$label" == . || "$label" == .. ]]; then
+    DISK_POLICY_RESOLVE_ERROR="invalid disk label"
+    return 2
+  fi
+  if [[ "$DISK_POLICY_REQUIRE_BLOCK_DEVICE" != 0 &&
+        "$DISK_POLICY_REQUIRE_BLOCK_DEVICE" != 1 ]]; then
+    DISK_POLICY_RESOLVE_ERROR="invalid block-device requirement"
+    return 2
+  fi
+  case "$mode" in
+    label-only) namespaces=(LABEL) ;;
+    label-or-partlabel) namespaces=(LABEL PARTLABEL) ;;
+    *)
+      DISK_POLICY_RESOLVE_ERROR="invalid label-resolution mode: $mode"
+      return 2
+      ;;
+  esac
+
+  for namespace in "${namespaces[@]}"; do
+    case "$namespace" in
+      LABEL) directory=$DISK_POLICY_BY_LABEL_DIR ;;
+      PARTLABEL) directory=$DISK_POLICY_BY_PARTLABEL_DIR ;;
+    esac
+    [[ -d "$directory" ]] || continue
+    path="$directory/$label"
+    if [[ ! -e "$path" && ! -L "$path" ]]; then
+      continue
+    elif [[ ! -L "$path" ]]; then
+      DISK_POLICY_RESOLVE_ERROR="$path is not a udev symlink"
+      return 2
+    fi
+
+    output=$("$DISK_POLICY_READLINK" -f -- "$path" 2>&1)
+    rc=$?
+    if (( rc != 0 )) || [[ -z "$output" ]]; then
+      DISK_POLICY_RESOLVE_ERROR="cannot resolve udev $namespace mapping $path: ${output:-readlink status $rc}"
+      return 2
+    fi
+    resolved=$output
+    if (( DISK_POLICY_REQUIRE_BLOCK_DEVICE )) && [[ ! -b "$resolved" ]]; then
+      DISK_POLICY_RESOLVE_ERROR="udev $namespace mapping $path resolved to non-block device $resolved"
+      return 2
+    fi
+
+    found=-1
+    for index in "${!devices[@]}"; do
+      if [[ "${devices[$index]}" == "$resolved" ]]; then
+        found=$index
+        break
+      fi
+    done
+    if (( found >= 0 )); then
+      # Prefer the filesystem label when one device legitimately carries both.
+      [[ "$namespace" == LABEL ]] && keys[$found]=LABEL
+    else
+      devices+=("$resolved")
+      keys+=("$namespace")
+    fi
+  done
+
+  if [[ ! -d "$DISK_POLICY_SYS_BLOCK_DIR" || ! -x "$DISK_POLICY_UDEVADM" ]]; then
+    DISK_POLICY_RESOLVE_ERROR="udev block-device database is unavailable"
+    return 2
+  fi
+  sys_paths=("$DISK_POLICY_SYS_BLOCK_DIR"/*)
+  if (( ${#sys_paths[@]} == 0 )) || [[ ! -e "${sys_paths[0]}" ]]; then
+    DISK_POLICY_RESOLVE_ERROR="no block devices are available in $DISK_POLICY_SYS_BLOCK_DIR"
+    return 2
+  fi
+
+  # The label symlink namespace can represent only one target for a given
+  # name. Cross-check every live sysfs block device against udev's cached
+  # properties so duplicate labels still fail closed without probing media.
+  for sys_path in "${sys_paths[@]}"; do
+    output=$("$DISK_POLICY_UDEVADM" info --query=property --path="$sys_path" 2>&1)
+    rc=$?
+    if (( rc != 0 )); then
+      DISK_POLICY_RESOLVE_ERROR="cannot query udev properties for $sys_path (status $rc): $output"
+      return 2
+    fi
+    devname=
+    fs_label=
+    partlabel=
+    while IFS='=' read -r property value; do
+      case "$property" in
+        DEVNAME) devname=$value ;;
+        ID_FS_LABEL) fs_label=$value ;;
+        ID_PART_ENTRY_NAME) partlabel=$value ;;
+      esac
+    done <<< "$output"
+
+    if [[ "$fs_label" == "$label" ]]; then
+      :
+    elif [[ "$mode" == label-or-partlabel && "$partlabel" == "$label" ]]; then
+      :
+    else
+      continue
+    fi
+    if [[ -z "$devname" ]]; then
+      DISK_POLICY_RESOLVE_ERROR="udev matched $label at $sys_path without a DEVNAME"
+      return 2
+    fi
+    output=$("$DISK_POLICY_READLINK" -f -- "$devname" 2>&1)
+    rc=$?
+    if (( rc != 0 )) || [[ -z "$output" ]]; then
+      DISK_POLICY_RESOLVE_ERROR="cannot resolve udev device $devname for label $label: ${output:-readlink status $rc}"
+      return 2
+    fi
+    resolved=$output
+    if (( DISK_POLICY_REQUIRE_BLOCK_DEVICE )) && [[ ! -b "$resolved" ]]; then
+      DISK_POLICY_RESOLVE_ERROR="udev device $devname for label $label is not a block device"
+      return 2
+    fi
+
+    found=-1
+    for index in "${!udev_devices[@]}"; do
+      if [[ "${udev_devices[$index]}" == "$resolved" ]]; then
+        found=$index
+        break
+      fi
+    done
+    if (( found < 0 )); then
+      udev_devices+=("$resolved")
+    fi
+  done
+
+  if (( ${#devices[@]} == 0 && ${#udev_devices[@]} == 0 )); then
+    return 1
+  elif (( ${#devices[@]} == 0 )); then
+    DISK_POLICY_RESOLVE_ERROR="udev database reports exact label $label without a matching label symlink"
+    return 2
+  elif (( ${#devices[@]} != 1 )); then
+    DISK_POLICY_RESOLVE_ERROR="exact label $label has multiple udev mappings: ${devices[*]}"
+    return 2
+  elif (( ${#udev_devices[@]} == 0 )); then
+    DISK_POLICY_RESOLVE_ERROR="udev label link for $label has no matching live database record"
+    return 2
+  elif (( ${#udev_devices[@]} != 1 )); then
+    DISK_POLICY_RESOLVE_ERROR="exact label $label matches ${#udev_devices[@]} live udev devices: ${udev_devices[*]}"
+    return 2
+  elif [[ "${devices[0]}" != "${udev_devices[0]}" ]]; then
+    DISK_POLICY_RESOLVE_ERROR="udev link and database disagree for $label (${devices[0]} vs ${udev_devices[0]})"
+    return 2
+  fi
+
+  resolved=${devices[0]}
+  key=${keys[0]}
+  output=$("$DISK_POLICY_SUDO" "$DISK_POLICY_BLKID" \
+    -s "$key" -o value -- "$resolved" 2>&1)
+  rc=$?
+  if (( rc != 0 )); then
+    DISK_POLICY_RESOLVE_ERROR="cannot verify $key on $resolved (status $rc): $output"
+    return 2
+  elif [[ "$output" != "$label" ]]; then
+    DISK_POLICY_RESOLVE_ERROR="$resolved $key changed during discovery (expected $label, got ${output:-empty})"
+    return 2
+  fi
+
+  DISK_POLICY_RESOLVED_DEVICE=$resolved
+  DISK_POLICY_RESOLVED_LABEL_KEY=$key
+  return 0
+}
+
 disk_policy_is_mount_label() {
   local wanted=$1 label
   for label in "${MOUNT_LABELS[@]}"; do

@@ -126,6 +126,13 @@ fake_findmnt="$repair_root/findmnt"
 fake_fsck="$repair_root/fsck.exfat"
 fake_install="$repair_root/install"
 fake_timeout="$repair_root/timeout"
+fake_by_label="$repair_root/by-label"
+fake_sys_block="$repair_root/sys-block"
+fake_udevadm="$repair_root/udevadm"
+mkdir -p "$fake_by_label" "$fake_sys_block/exfat-device"
+ln -s "$fake_device" "$fake_by_label/EXFAT512"
+ln -s "$fake_device" "$fake_by_label/movingparts"
+ln -s "$fake_device" "$fake_by_label/bigboi"
 
 cat > "$fake_sudo" <<'EOF'
 #!/bin/bash
@@ -134,7 +141,6 @@ EOF
 cat > "$fake_blkid" <<EOF
 #!/bin/bash
 case "\$*" in
-  *"-t LABEL=\${TEST_REPAIR_LABEL:-EXFAT512} -o device"*) printf '%s\\n' "$fake_device" ;;
   *"-s LABEL -o value"*) printf '%s\\n' "\${TEST_REPAIR_LABEL:-EXFAT512}" ;;
   *"-s TYPE -o value"*) printf '%s\\n' "\${TEST_REPAIR_FSTYPE:-exfat}" ;;
   *) exit 2 ;;
@@ -189,8 +195,14 @@ cat > "$fake_timeout" <<'EOF'
 shift
 "$@"
 EOF
+cat > "$fake_udevadm" <<EOF
+#!/bin/bash
+printf '%s\n' \
+  "DEVNAME=$fake_device" \
+  "ID_FS_LABEL=\${TEST_REPAIR_LABEL:-EXFAT512}"
+EOF
 chmod +x "$fake_sudo" "$fake_blkid" "$fake_readlink" "$fake_lsblk" \
-  "$fake_findmnt" "$fake_fsck" "$fake_install" "$fake_timeout"
+  "$fake_findmnt" "$fake_fsck" "$fake_install" "$fake_timeout" "$fake_udevadm"
 
 DISK_EJECT_HOLD_DIR="$hold_dir" DISK_EJECT_NOW=1000000 \
 DISK_HEALTH_STATE_DIR="$health_dir" \
@@ -201,6 +213,9 @@ DISKCTL_LIFECYCLE_LOCK="$test_root/lifecycle.lock" \
 DISKCTL_FLOCK="$fake_flock" \
 DISKCTL_SUDO="$fake_sudo" \
 DISKCTL_BLKID="$fake_blkid" \
+DISKCTL_BY_LABEL_DIR="$fake_by_label" \
+DISKCTL_SYS_BLOCK_DIR="$fake_sys_block" \
+DISKCTL_UDEVADM="$fake_udevadm" \
 DISKCTL_FINDMNT="$fake_findmnt" \
 DISKCTL_READLINK="$fake_readlink" \
 DISKCTL_LSBLK="$fake_lsblk" \
@@ -247,6 +262,9 @@ DISKCTL_LIFECYCLE_LOCK="$test_root/lifecycle.lock" \
 DISKCTL_FLOCK="$fake_flock" \
 DISKCTL_SUDO="$fake_sudo" \
 DISKCTL_BLKID="$fake_blkid" \
+DISKCTL_BY_LABEL_DIR="$fake_by_label" \
+DISKCTL_SYS_BLOCK_DIR="$fake_sys_block" \
+DISKCTL_UDEVADM="$fake_udevadm" \
 DISKCTL_FINDMNT="$fake_findmnt" \
 DISKCTL_READLINK="$fake_readlink" \
 DISKCTL_LSBLK="$fake_lsblk" \
@@ -294,6 +312,9 @@ DISKCTL_LIFECYCLE_LOCK="$test_root/lifecycle.lock" \
 DISKCTL_FLOCK="$fake_flock" \
 DISKCTL_SUDO="$fake_sudo" \
 DISKCTL_BLKID="$fake_blkid" \
+DISKCTL_BY_LABEL_DIR="$fake_by_label" \
+DISKCTL_SYS_BLOCK_DIR="$fake_sys_block" \
+DISKCTL_UDEVADM="$fake_udevadm" \
 DISKCTL_FINDMNT="$fake_findmnt" \
 DISKCTL_READLINK="$fake_readlink" \
 DISKCTL_LSBLK="$fake_lsblk" \

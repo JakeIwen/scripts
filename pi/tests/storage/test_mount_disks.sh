@@ -21,6 +21,161 @@ export MOUNT_DISKS_LIBRARY_ONLY=1
 # shellcheck source=../../scripts/mount_disks.sh
 source "$repo_root/pi/scripts/mount_disks.sh"
 
+# Exact-label discovery must use non-probing udev links and verify only the
+# selected target device. Regular files stand in for block devices on macOS.
+original_by_label_dir=$DISK_POLICY_BY_LABEL_DIR
+original_by_partlabel_dir=$DISK_POLICY_BY_PARTLABEL_DIR
+original_readlink=$DISK_POLICY_READLINK
+original_blkid=$DISK_POLICY_BLKID
+original_sudo=$DISK_POLICY_SUDO
+original_udevadm=$DISK_POLICY_UDEVADM
+original_sys_block_dir=$DISK_POLICY_SYS_BLOCK_DIR
+original_require_block=$DISK_POLICY_REQUIRE_BLOCK_DEVICE
+label_dir="$test_root/by-label"
+partlabel_dir="$test_root/by-partlabel"
+sys_block_dir="$test_root/sys-block"
+device_one="$test_root/device-one"
+device_two="$test_root/device-two"
+device_three="$test_root/device-three"
+device_four="$test_root/device-four"
+fake_readlink="$test_root/readlink"
+fake_blkid="$test_root/blkid"
+fake_udevadm="$test_root/udevadm"
+blkid_calls="$test_root/blkid-calls"
+mkdir -p "$label_dir" "$partlabel_dir" \
+  "$sys_block_dir/device-one" "$sys_block_dir/device-two" \
+  "$sys_block_dir/device-three" "$sys_block_dir/device-four"
+touch "$device_one" "$device_two" "$device_three" "$device_four" "$blkid_calls"
+ln -s "$device_one" "$label_dir/movingparts"
+ln -s "$device_two" "$partlabel_dir/partition-only"
+cat > "$fake_readlink" <<'EOF'
+#!/bin/bash
+[[ $1 == -f && $2 == -- ]] || exit 2
+if [[ -L "$3" ]]; then
+  target=$(/usr/bin/readlink "$3") || exit 1
+else
+  target=$3
+fi
+[[ -e "$target" ]] || exit 1
+printf '%s\n' "$target"
+EOF
+cat > "$fake_blkid" <<EOF
+#!/bin/bash
+printf '%s\n' "\$*" >> "$blkid_calls"
+case "\$*" in
+  "-s LABEL -o value -- $device_one") printf '%s\n' movingparts ;;
+  "-s PARTLABEL -o value -- $device_two") printf '%s\n' partition-only ;;
+  *) exit 2 ;;
+esac
+EOF
+cat > "$fake_udevadm" <<EOF
+#!/bin/bash
+case "\${*: -1}" in
+  "--path=$sys_block_dir/device-one")
+    printf '%s\n' \
+      "DEVNAME=$device_one" \
+      'ID_FS_LABEL=movingparts' \
+      'ID_PART_ENTRY_NAME=ambiguous'
+    ;;
+  "--path=$sys_block_dir/device-two")
+    printf '%s\n' \
+      "DEVNAME=$device_two" \
+      'ID_FS_LABEL=ambiguous' \
+      'ID_PART_ENTRY_NAME=partition-only'
+    ;;
+  "--path=$sys_block_dir/device-three")
+    printf '%s\n' \
+      "DEVNAME=$device_three" \
+      'ID_FS_LABEL=duplicate'
+    ;;
+  "--path=$sys_block_dir/device-four")
+    printf '%s\n' \
+      "DEVNAME=$device_four" \
+      'ID_FS_LABEL=duplicate'
+    ;;
+  *) exit 2 ;;
+esac
+EOF
+chmod +x "$fake_readlink" "$fake_blkid" "$fake_udevadm"
+DISK_POLICY_BY_LABEL_DIR=$label_dir
+DISK_POLICY_BY_PARTLABEL_DIR=$partlabel_dir
+DISK_POLICY_READLINK=$fake_readlink
+DISK_POLICY_BLKID=$fake_blkid
+DISK_POLICY_SUDO=/usr/bin/env
+DISK_POLICY_UDEVADM=$fake_udevadm
+DISK_POLICY_SYS_BLOCK_DIR=$sys_block_dir
+DISK_POLICY_REQUIRE_BLOCK_DEVICE=0
+
+disk_policy_resolve_exact_label movingparts label-only ||
+  fail "udev filesystem-label mapping was not resolved"
+assert_eq "$device_one" "$DISK_POLICY_RESOLVED_DEVICE" \
+  "filesystem label resolved to the wrong target"
+assert_eq LABEL "$DISK_POLICY_RESOLVED_LABEL_KEY" \
+  "filesystem label used the wrong verification key"
+assert_eq "-s LABEL -o value -- $device_one" "$(cat "$blkid_calls")" \
+  "resolver did not restrict blkid to the selected device"
+if grep -Eq '(^|[[:space:]])-t([[:space:]]|$)' "$blkid_calls"; then
+  fail "resolver used a broad blkid token scan"
+fi
+
+: > "$blkid_calls"
+disk_policy_resolve_exact_label partition-only label-or-partlabel ||
+  fail "udev partition-label mapping was not resolved"
+assert_eq "$device_two" "$DISK_POLICY_RESOLVED_DEVICE" \
+  "partition label resolved to the wrong target"
+assert_eq PARTLABEL "$DISK_POLICY_RESOLVED_LABEL_KEY" \
+  "partition label used the wrong verification key"
+
+ln -s "$device_two" "$label_dir/ambiguous"
+ln -s "$device_one" "$partlabel_dir/ambiguous"
+disk_policy_resolve_exact_label ambiguous label-or-partlabel
+status=$?
+if (( status == 0 )); then
+  fail "different LABEL and PARTLABEL devices were accepted as one target"
+fi
+assert_eq 2 "$status" "ambiguous udev mappings did not fail closed"
+[[ "$DISK_POLICY_RESOLVE_ERROR" == *"multiple udev mappings"* ]] ||
+  fail "ambiguous mapping diagnostic was not actionable"
+
+ln -s "$device_three" "$label_dir/duplicate"
+disk_policy_resolve_exact_label duplicate label-only
+status=$?
+if (( status == 0 )); then
+  fail "duplicate live filesystem labels were accepted from one udev symlink"
+fi
+assert_eq 2 "$status" "duplicate filesystem labels did not fail closed"
+[[ "$DISK_POLICY_RESOLVE_ERROR" == *"matches 2 live udev devices"* ]] ||
+  fail "duplicate filesystem-label diagnostic was not actionable"
+
+ln -s "$test_root/missing-device" "$label_dir/broken"
+disk_policy_resolve_exact_label broken label-only
+status=$?
+if (( status == 0 )); then
+  fail "broken udev label symlink was accepted"
+fi
+assert_eq 2 "$status" "broken udev mapping did not fail closed"
+
+DISK_POLICY_BY_LABEL_DIR=$original_by_label_dir
+DISK_POLICY_BY_PARTLABEL_DIR=$original_by_partlabel_dir
+DISK_POLICY_READLINK=$original_readlink
+DISK_POLICY_BLKID=$original_blkid
+DISK_POLICY_SUDO=$original_sudo
+DISK_POLICY_UDEVADM=$original_udevadm
+DISK_POLICY_SYS_BLOCK_DIR=$original_sys_block_dir
+DISK_POLICY_REQUIRE_BLOCK_DEVICE=$original_require_block
+
+for resolver_script in \
+  "$repo_root/pi/scripts/mount_disks.sh" \
+  "$repo_root/pi/scripts/umount_disks.sh" \
+  "$repo_root/pi/scripts/diskctl" \
+  "$repo_root/pi/scripts/backup/backup_watchdog.sh" \
+  "$repo_root/pi/scripts/backup/clone_to_sd.sh"; do
+  if grep -Eq '^[[:space:]]*[^#].*blkid[^[:cntrl:]]*[[:space:]]-t([[:space:]]|$)' \
+      "$resolver_script"; then
+    fail "broad blkid token lookup remains in $resolver_script"
+  fi
+done
+
 DISK_HEALTH_STATE_DIR="$test_root/disk-health"
 export DISK_HEALTH_STATE_DIR
 mkdir -p "$DISK_HEALTH_STATE_DIR/quarantine"

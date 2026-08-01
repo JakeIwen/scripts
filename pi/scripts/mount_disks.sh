@@ -15,94 +15,22 @@ MD_MOUNT_SOURCE=""
 MD_STALE_LABELS=()
 MD_STALE_SOURCES=()
 
-md_query_token() {
-  local token="$1"
-  local devices
-  local status
-
-  devices="$(/usr/bin/sudo /sbin/blkid -t "$token" -o device)"
-  status=$?
-  if (( status == 0 )); then
-    if [[ -z "$devices" ]]; then
-      echo "ERROR: blkid succeeded but returned no device for $token" >&2
-      return 2
-    fi
-    printf '%s\n' "$devices"
-    return 0
-  fi
-
-  # blkid returns 2 when no device matches a token.
-  if (( status == 2 )) && [[ -z "$devices" ]]; then
-    return 1
-  fi
-
-  echo "ERROR: blkid failed while resolving $token (status $status)" >&2
-  return 2
-}
-
 md_resolve_label() {
   local label="$1"
-  local label_devices
-  local label_status
-  local partlabel_devices
-  local partlabel_status
-  local devices
-  local device
-  local count
-  local candidate
-  local actual_label
+  local status
 
   MD_DEVICE=""
   MD_LABEL_KEY=""
-  if [[ -z "$label" ]]; then
-    echo "ERROR: refusing to resolve an empty disk label" >&2
-    return 2
+
+  disk_policy_resolve_exact_label "$label" label-or-partlabel
+  status=$?
+  if (( status == 0 )); then
+    MD_DEVICE=$DISK_POLICY_RESOLVED_DEVICE
+    MD_LABEL_KEY=$DISK_POLICY_RESOLVED_LABEL_KEY
+  elif (( status != 1 )); then
+    echo "ERROR: cannot resolve exact label '$label': $DISK_POLICY_RESOLVE_ERROR" >&2
   fi
-
-  label_devices="$(md_query_token "LABEL=$label")"
-  label_status=$?
-  (( label_status == 2 )) && return 2
-
-  partlabel_devices="$(md_query_token "PARTLABEL=$label")"
-  partlabel_status=$?
-  (( partlabel_status == 2 )) && return 2
-
-  if (( label_status == 1 && partlabel_status == 1 )); then
-    return 1
-  fi
-
-  devices="$({ printf '%s\n' "$label_devices"; printf '%s\n' "$partlabel_devices"; } \
-    | /usr/bin/awk 'NF && !seen[$0]++')"
-  count="$(printf '%s\n' "$devices" | /usr/bin/awk 'NF { count++ } END { print count + 0 }')"
-  if (( count != 1 )); then
-    echo "ERROR: exact label '$label' resolves to $count devices; refusing" >&2
-    printf '%s\n' "$devices" >&2
-    return 2
-  fi
-
-  device="$(printf '%s\n' "$devices" | /usr/bin/awk 'NF { print; exit }')"
-  device="$(/usr/bin/readlink -f -- "$device")"
-  if [[ -z "$device" || ! -b "$device" ]]; then
-    echo "ERROR: resolved device for '$label' is not a block device" >&2
-    return 2
-  fi
-
-  MD_LABEL_KEY="PARTLABEL"
-  while IFS= read -r candidate; do
-    if [[ -n "$candidate" && "$(/usr/bin/readlink -f -- "$candidate")" == "$device" ]]; then
-      MD_LABEL_KEY="LABEL"
-      break
-    fi
-  done <<< "$label_devices"
-
-  actual_label="$(/usr/bin/sudo /sbin/blkid -s "$MD_LABEL_KEY" -o value -- "$device")"
-  if [[ $? -ne 0 || "$actual_label" != "$label" ]]; then
-    echo "ERROR: $device no longer has exact $MD_LABEL_KEY '$label'; refusing" >&2
-    return 2
-  fi
-
-  MD_DEVICE="$device"
-  return 0
+  return "$status"
 }
 
 md_parent_disk() {

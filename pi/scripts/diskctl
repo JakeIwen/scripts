@@ -31,6 +31,16 @@ lifecycle_lock=${DISKCTL_LIFECYCLE_LOCK:-/home/pi/.internet_switches.lock}
 flock_command=${DISKCTL_FLOCK:-/usr/bin/flock}
 hold_seconds=60
 
+# disk_policy's resolver discovers from udev links and verifies only the exact
+# selected device. Keep diskctl's injectable commands wired into that helper.
+DISK_POLICY_BY_LABEL_DIR=${DISKCTL_BY_LABEL_DIR:-/dev/disk/by-label}
+DISK_POLICY_READLINK=$readlink_command
+DISK_POLICY_BLKID=$blkid_command
+DISK_POLICY_SUDO=$sudo_command
+DISK_POLICY_UDEVADM=${DISKCTL_UDEVADM:-/usr/bin/udevadm}
+DISK_POLICY_SYS_BLOCK_DIR=${DISKCTL_SYS_BLOCK_DIR:-/sys/class/block}
+DISK_POLICY_REQUIRE_BLOCK_DEVICE=$require_block_device
+
 [[ "$require_block_device" == 0 || "$require_block_device" == 1 ]] || {
   echo "diskctl: invalid block-device requirement" >&2
   exit 2
@@ -105,32 +115,18 @@ clear_health_quarantine() {
 }
 
 resolve_exact_filesystem() {
-  local query actual_label actual_type parent_rows name type extra transport
-  local -a matches=() parents=()
+  local actual_type parent_rows name type extra transport
+  local -a parents=()
 
-  query=$("$sudo_command" "$blkid_command" -t "LABEL=$label" -o device 2>&1)
+  disk_policy_resolve_exact_label "$label" label-only
   status=$?
   if (( status != 0 )); then
-    echo "diskctl: cannot resolve exact label $label: $query" >&2
+    echo "diskctl: cannot resolve exact label $label: ${DISK_POLICY_RESOLVE_ERROR:-no udev label mapping}" >&2
     return 1
   fi
-  while IFS= read -r device; do
-    [[ -n "$device" ]] && matches+=("$device")
-  done <<< "$query"
-  if (( ${#matches[@]} != 1 )); then
-    echo "diskctl: label $label resolved to ${#matches[@]} devices" >&2
-    return 1
-  fi
-  device=$("$readlink_command" -f -- "${matches[0]}") || return 1
-  (( ! require_block_device )) || [[ -b "$device" ]] || {
-    echo "diskctl: exact label $label did not resolve to a block device" >&2
-    return 1
-  }
-  actual_label=$("$sudo_command" "$blkid_command" -s LABEL -o value -- "$device") ||
-    return 1
+  device=$DISK_POLICY_RESOLVED_DEVICE
   actual_type=$("$sudo_command" "$blkid_command" -s TYPE -o value -- "$device") ||
     return 1
-  [[ "$actual_label" == "$label" ]] || return 1
   case "$actual_type" in
     exfat|ext4) filesystem=$actual_type ;;
     *)

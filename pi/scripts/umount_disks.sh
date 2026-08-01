@@ -172,56 +172,26 @@ ud_find_parent_disk() {
 # Resolve an exact filesystem label and validate its physical parent.
 # Returns 0 when present, 1 when safely absent, and 2 on a discovery error.
 ud_resolve_label() {
-  local label=$1 label_link query rc actual_label transport root_source root_parent
-  local -a devices=()
+  local label=$1 rc transport root_source root_parent
 
   UD_DEVICE=
   UD_PARENT=
   UD_MOUNTS=
 
-  label_link="/dev/disk/by-label/$label"
-  if [[ ! -d /dev/disk/by-label ]]; then
-    ud_record_failure "/dev/disk/by-label is unavailable; refusing disk discovery"
+  if [[ ! -d "$DISK_POLICY_BY_LABEL_DIR" ]]; then
+    ud_record_failure "$DISK_POLICY_BY_LABEL_DIR is unavailable; refusing disk discovery"
     return 2
-  elif [[ ! -e "$label_link" ]]; then
-    return 1
   fi
 
-  query=$(/usr/bin/sudo /sbin/blkid -t "LABEL=$label" -o device 2>&1)
+  disk_policy_resolve_exact_label "$label" label-only
   rc=$?
-  if (( rc == 2 )) && [[ -z "$query" ]]; then
-    ud_record_failure "udev reports label $label at $label_link but blkid found no matching filesystem"
-    return 2
+  if (( rc == 1 )); then
+    return 1
   elif (( rc != 0 )); then
-    ud_record_failure "blkid lookup for label $label failed (status $rc): $query"
+    ud_record_failure "$DISK_POLICY_RESOLVE_ERROR"
     return 2
   fi
-
-  while IFS= read -r device; do
-    [[ -n "$device" ]] && devices+=("$device")
-  done <<< "$query"
-  if (( ${#devices[@]} != 1 )); then
-    ud_record_failure "label $label resolved to ${#devices[@]} devices; expected exactly one"
-    return 2
-  fi
-
-  UD_DEVICE=$(/usr/bin/readlink -f -- "${devices[0]}") || {
-    ud_record_failure "cannot resolve ${devices[0]} for label $label"
-    return 2
-  }
-  if [[ ! -b "$UD_DEVICE" ]]; then
-    ud_record_failure "label $label resolved to non-block device $UD_DEVICE"
-    return 2
-  fi
-
-  actual_label=$(/usr/bin/sudo /sbin/blkid -s LABEL -o value "$UD_DEVICE" 2>&1) || {
-    ud_record_failure "cannot verify label on $UD_DEVICE: $actual_label"
-    return 2
-  }
-  if [[ "$actual_label" != "$label" ]]; then
-    ud_record_failure "$UD_DEVICE label changed during discovery (expected $label, got $actual_label)"
-    return 2
-  fi
+  UD_DEVICE=$DISK_POLICY_RESOLVED_DEVICE
 
   ud_find_parent_disk "$UD_DEVICE" || return 2
   transport=$(/usr/bin/lsblk -dnro TRAN "$UD_PARENT" 2>&1) || {

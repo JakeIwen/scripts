@@ -5,6 +5,8 @@
 # failed for 2+ weeks with only broken Twilio 401s to show for it).
 set -u
 . /home/pi/scripts/backup/backup_conf.sh
+backup_script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+. "$backup_script_dir/../disk_policy.sh" || exit 1
 notify() { /home/pi/scripts/ntfy_send.sh "$@"; }
 
 problems=()
@@ -73,7 +75,14 @@ fi
 for entry in "${CLONE_TARGETS[@]}"; do
   label=${entry%%:*}; interval=${entry##*:}
   attached="not attached"
-  blkid -t "LABEL=$label" >/dev/null 2>&1 && attached="attached"
+  disk_policy_resolve_exact_label "$label" label-only
+  resolve_status=$?
+  if (( resolve_status == 0 )); then
+    attached="attached"
+  elif (( resolve_status != 1 )); then
+    attached="unsafe label mapping"
+    problems+=("cannot safely identify clone target '$label': $DISK_POLICY_RESOLVE_ERROR")
+  fi
   if [ -f "$STAMP_DIR/clone_$label" ]; then
     age_d=$(( (now - $(stat -c %Y "$STAMP_DIR/clone_$label")) / 86400 ))
     status+="$label: ${age_d}d old ($attached). "

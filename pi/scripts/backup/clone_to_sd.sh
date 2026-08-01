@@ -5,6 +5,8 @@
 # exit: 0 ok, 1 failed, 2 card not attached (quiet — watchdog handles staleness)
 set -u
 . /home/pi/scripts/backup/backup_conf.sh
+backup_script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+. "$backup_script_dir/../disk_policy.sh" || exit 1
 notify() { /home/pi/scripts/ntfy_send.sh "$@"; }
 
 init=0
@@ -14,8 +16,16 @@ label=${1:?usage: /home/pi/scripts/backup/clone_to_sd.sh [--init] <label> [sdX]}
 if [ $init = 1 ]; then
   disk=${2:?--init needs the target device, e.g. sda}
 else
-  part=$(blkid -t "LABEL=$label" -o device 2>/dev/null | head -1)
-  [ -n "$part" ] || { echo "no attached card labeled $label"; exit 2; }
+  disk_policy_resolve_exact_label "$label" label-only
+  resolve_status=$?
+  if (( resolve_status == 1 )); then
+    echo "no attached card labeled $label"
+    exit 2
+  elif (( resolve_status != 0 )); then
+    echo "unsafe label mapping for $label: $DISK_POLICY_RESOLVE_ERROR" >&2
+    exit 1
+  fi
+  part=$DISK_POLICY_RESOLVED_DEVICE
   disk=$(lsblk -no pkname "$part")
 fi
 
