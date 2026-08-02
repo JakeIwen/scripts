@@ -1,0 +1,250 @@
+#!/bin/bash
+
+# Research prototype: connect vanpi's wlan0 to the PRUVEEO D90-4CH and use its local control API.
+# The NetworkManager profile owns the Wi-Fi credential; this script never does.
+
+set -u
+
+interface=${DASHCAMCTL_INTERFACE:-wlan0}
+connection=${DASHCAMCTL_CONNECTION:-dashcam}
+camera_ip=${DASHCAMCTL_CAMERA_IP:-192.168.10.1}
+camera_http_port=${DASHCAMCTL_HTTP_PORT:-8082}
+camera_rtsp_port=${DASHCAMCTL_RTSP_PORT:-8554}
+monitor_service=${DASHCAMCTL_MONITOR_SERVICE:-ignitionmon.service}
+
+nmcli_command=${DASHCAMCTL_NMCLI:-/usr/bin/nmcli}
+ip_command=${DASHCAMCTL_IP:-/usr/sbin/ip}
+curl_command=${DASHCAMCTL_CURL:-/usr/bin/curl}
+systemctl_command=${DASHCAMCTL_SYSTEMCTL:-/usr/bin/systemctl}
+sudo_command=${DASHCAMCTL_SUDO:-/usr/bin/sudo}
+sleep_command=${DASHCAMCTL_SLEEP:-/usr/bin/sleep}
+
+camera_base_url="http://${camera_ip}:${camera_http_port}"
+stream_url="rtsp://${camera_ip}:${camera_rtsp_port}/ch01"
+monitor_was_active=false
+
+usage() {
+  cat >&2 <<'EOF'
+usage: dashcamctl <command>
+
+commands:
+  connect       connect wlan0 and ensure all dashcam channels are recording
+  disconnect    disconnect vanpi; dashcam recording is left running
+  status        show Wi-Fi, camera, and recording status
+  record-start  start recording through the camera's local API
+  record-stop   stop recording through the camera's local API
+  stream-url    print the confirmed RTSP preview URL
+EOF
+}
+
+fail() {
+  printf 'dashcamctl: %s\n' "$*" >&2
+  return 1
+}
+
+require_commands() {
+  local command
+  for command in "$nmcli_command" "$ip_command" "$curl_command" \
+    "$systemctl_command" "$sudo_command" "$sleep_command"; do
+    [[ -x $command ]] || fail "required command is unavailable: $command" || return
+  done
+}
+
+profile_value() {
+  "$nmcli_command" -g "$1" connection show "$connection" 2>/dev/null
+}
+
+profile_is_active() {
+  [[ $("$nmcli_command" -g GENERAL.CONNECTION device show "$interface" 2>/dev/null) == "$connection" ]]
+}
+
+validate_profile() {
+  profile_value connection.id >/dev/null ||
+    fail "NetworkManager connection '$connection' does not exist" || return
+  [[ $(profile_value connection.autoconnect) == no ]] ||
+    fail "connection '$connection' must have connection.autoconnect=no" || return
+  [[ $(profile_value ipv4.never-default) == yes ]] ||
+    fail "connection '$connection' must have ipv4.never-default=yes" || return
+  [[ $(profile_value ipv6.method) == disabled ]] ||
+    fail "connection '$connection' must have ipv6.method=disabled" || return
+}
+
+camera_route_is_safe() {
+  local route
+  route=$("$ip_command" -4 route get "$camera_ip" 2>/dev/null) || return 1
+  [[ " $route " == *" dev $interface "* ]]
+}
+
+pause_monitor_for_transition() {
+  monitor_was_active=false
+  if "$systemctl_command" is-active --quiet "$monitor_service"; then
+    "$sudo_command" -n "$systemctl_command" stop "$monitor_service" ||
+      fail "could not pause $monitor_service for the Wi-Fi transition" || return
+    monitor_was_active=true
+  fi
+}
+
+resume_monitor_after_transition() {
+  $monitor_was_active || return 0
+  "$sudo_command" -n "$systemctl_command" start "$monitor_service" ||
+    fail "could not restart $monitor_service" || return
+  monitor_was_active=false
+}
+
+record_status() {
+  local response status
+  response=$("$curl_command" -fsS --max-time 5 \
+    "${camera_base_url}/api/getdeviceinfo/?custom=1&cmd=2005") || return 1
+  status=$(printf '%s\n' "$response" |
+    sed -n 's/.*"RecodStatus"[[:space:]]*:[[:space:]]*\([01]\).*/\1/p' |
+    head -n 1)
+  [[ $status == 0 || $status == 1 ]] || return 1
+  printf '%s\n' "$status"
+}
+
+set_recording() {
+  local requested=$1 status attempt
+  "$curl_command" -fsS --max-time 8 -X POST --data '' \
+    "${camera_base_url}/api/setdeviceinfo/?custom=1&cmd=1100&par=${requested}" \
+    >/dev/null || fail "camera rejected the recording command" || return
+
+  for attempt in 1 2 3 4 5; do
+    "$sleep_command" 1
+    status=$(record_status) || continue
+    if [[ $status == "$requested" ]]; then
+      [[ $requested == 1 ]] && printf 'recording=on\n' || printf 'recording=off\n'
+      return 0
+    fi
+  done
+  fail "camera did not confirm the requested recording state"
+}
+
+wait_for_camera() {
+  local attempt
+  for attempt in {1..15}; do
+    record_status >/dev/null 2>&1 && return 0
+    "$sleep_command" 1
+  done
+  return 1
+}
+
+ensure_recording() {
+  local status
+  status=$(record_status) || fail "camera control API is unavailable" || return
+  if [[ $status == 1 ]]; then
+    printf 'recording=on\n'
+    return 0
+  fi
+  set_recording 1
+}
+
+connect_camera() {
+  local connected_here=false
+  validate_profile || return
+
+  if ! profile_is_active; then
+    pause_monitor_for_transition || return
+    if ! "$sudo_command" -n "$nmcli_command" --wait 25 connection up id \
+      "$connection" ifname "$interface"; then
+      resume_monitor_after_transition || true
+      fail "could not connect '$connection'; is the camera's Wi-Fi enabled?"
+      return 1
+    fi
+    connected_here=true
+  fi
+
+  if ! camera_route_is_safe; then
+    $connected_here && "$sudo_command" -n "$nmcli_command" connection down "$connection" >/dev/null 2>&1
+    resume_monitor_after_transition || true
+    fail "route to $camera_ip is not pinned to $interface"
+    return 1
+  fi
+
+  resume_monitor_after_transition || return
+  if ! wait_for_camera; then
+    if $connected_here; then
+      "$sudo_command" -n "$nmcli_command" connection down "$connection" >/dev/null 2>&1 || true
+    fi
+    fail "connected to Wi-Fi, but the camera API did not respond"
+    return 1
+  fi
+
+  printf 'connection=active\n'
+  printf 'camera=%s\n' "$camera_ip"
+  ensure_recording || return
+  printf 'stream=%s\n' "$stream_url"
+}
+
+disconnect_camera() {
+  if ! profile_is_active; then
+    printf 'connection=inactive\n'
+    return 0
+  fi
+  pause_monitor_for_transition || return
+  if ! "$sudo_command" -n "$nmcli_command" connection down "$connection" >/dev/null; then
+    resume_monitor_after_transition || true
+    fail "could not disconnect '$connection'"
+    return 1
+  fi
+  resume_monitor_after_transition || return
+  printf 'connection=inactive\n'
+  printf 'recording=unchanged\n'
+}
+
+show_status() {
+  local status
+  if ! profile_is_active; then
+    printf 'connection=inactive\n'
+    return 1
+  fi
+  printf 'connection=active\n'
+  if camera_route_is_safe; then
+    printf 'route=%s\n' "$interface"
+  else
+    printf 'route=unsafe\n'
+    return 1
+  fi
+  status=$(record_status) || {
+    printf 'camera=unreachable\n'
+    return 1
+  }
+  printf 'camera=reachable\n'
+  [[ $status == 1 ]] && printf 'recording=on\n' || printf 'recording=off\n'
+  printf 'stream=%s\n' "$stream_url"
+}
+
+main() {
+  require_commands || return
+  case ${1:-} in
+    connect)
+      [[ $# == 1 ]] || { usage; return 2; }
+      connect_camera
+      ;;
+    disconnect)
+      [[ $# == 1 ]] || { usage; return 2; }
+      disconnect_camera
+      ;;
+    status)
+      [[ $# == 1 ]] || { usage; return 2; }
+      show_status
+      ;;
+    record-start)
+      [[ $# == 1 ]] || { usage; return 2; }
+      set_recording 1
+      ;;
+    record-stop)
+      [[ $# == 1 ]] || { usage; return 2; }
+      set_recording 0
+      ;;
+    stream-url)
+      [[ $# == 1 ]] || { usage; return 2; }
+      printf '%s\n' "$stream_url"
+      ;;
+    *)
+      usage
+      return 2
+      ;;
+  esac
+}
+
+main "$@"

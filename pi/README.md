@@ -29,6 +29,7 @@ normally live under `/home/pi/scripts/`.
 ## Networking
 
 - [OpenWrt remote logging](docs/networking/OPENWRT_LOGGING.md)
+- [Dashcam Wi-Fi connection research](projects/dashcam-wifi-connect/README.md)
 
 ## Compute
 

@@ -1,0 +1,37 @@
+diff --git a/pi/scripts/ignition_monitor.sh b/pi/scripts/ignition_monitor.sh
+--- a/pi/scripts/ignition_monitor.sh
++++ b/pi/scripts/ignition_monitor.sh
+@@ -6,14 +6,33 @@ hooks=/home/pi/hooks
+ histfile=/tmp/ignition_wifi_scan
+ log="$HOME/log/ignition_monitor.log"
+ override_check_failed=false
++nmcli_command=${IGNITIONMON_NMCLI:-/usr/bin/nmcli}
++dashcam_connection=${IGNITIONMON_DASHCAM_CONNECTION:-dashcam}
++dashcam_scan_suspended=false
+ 
+ > $histfile
+ 
+ uconnect_wifi_available() { sudo iwlist wlan0 scan | grep running_van_no_internet; }
+ van_ignition_on(){ [ "$(uconnect_wifi_available)" ] && echo true || echo false; }
++dashcam_owns_wlan() {
++  [[ $("$nmcli_command" -g GENERAL.CONNECTION device show wlan0 2>/dev/null) == "$dashcam_connection" ]]
++}
+ 
+ while :
+ do
++  if dashcam_owns_wlan; then
++    if ! $dashcam_scan_suspended; then
++      echo "$(date): ignition Wi-Fi scans suspended while $dashcam_connection owns wlan0" >> "$log"
++      dashcam_scan_suspended=true
++    fi
++    > $histfile
++    sleep 3
++    continue
++  elif $dashcam_scan_suspended; then
++    echo "$(date): ignition Wi-Fi scans resumed" >> "$log"
++    dashcam_scan_suspended=false
++  fi
++
+   van_ignition_on >> $histfile
+ 
+   ignition_was_on=$(test -f /home/pi/hooks/ignition_is_on && echo true || echo false)
