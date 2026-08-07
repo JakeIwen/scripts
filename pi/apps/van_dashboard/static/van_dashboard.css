@@ -1434,12 +1434,12 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
 .ubnt-card-heading {
   gap: 7px;
 }
-.ubnt-title {
+.ubnt-wifi-summary {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.ubnt-title .network-dot {
+.ubnt-wifi-summary .network-dot {
   width: 10px;
   height: 10px;
 }

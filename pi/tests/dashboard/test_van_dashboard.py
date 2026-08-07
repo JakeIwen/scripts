@@ -3170,6 +3170,10 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertNotIn(b"Connected \xc2\xb7 vanpi dashboard", page.data)
         self.assertIn(b"UBNT Wi-Fi", page.data)
         self.assertIn(b'id="ubnt-radio-dot"', page.data)
+        self.assertIn(
+            b'class="tile-detail ubnt-wifi-summary"><span class="network-dot" id="ubnt-radio-dot"></span><span id="ubnt-wifi-summary"',
+            page.data,
+        )
         self.assertIn(b'id="ubnt-wifi" data-dashboard-tile', page.data)
         self.assertIn(b'id="ubnt-wifi-open" data-action', page.data)
         self.assertIn(b'class="starlink-control unknown" id="starlink"', page.data)
