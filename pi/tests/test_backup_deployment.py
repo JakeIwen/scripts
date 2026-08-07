@@ -91,6 +91,17 @@ class BackupDeploymentTests(unittest.TestCase):
         self.assertNotIn('umount -l "$mnt"', backup)
         self.assertNotIn('mount "$dev" "$mnt"', backup)
 
+    def test_borg_excludes_pi_build_contents(self):
+        config = (BACKUP_DIR / "backup_conf.sh").read_text(encoding="utf-8")
+        backup = (BACKUP_DIR / "pi_backup.sh").read_text(encoding="utf-8")
+
+        self.assertIn("BORG_EXCLUDES=(", config)
+        self.assertIn("'/home/pi/build/*'", config)
+        self.assertIn('for exclude in "${BORG_EXCLUDES[@]}"', backup)
+        self.assertIn('borg_exclude_args+=(--exclude "$exclude")', backup)
+        self.assertIn('"${borg_exclude_args[@]}"', backup)
+        self.assertNotIn("--exclude '/home/pi/build/*'", backup)
+
 
 if __name__ == "__main__":
     unittest.main()

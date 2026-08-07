@@ -25,7 +25,9 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 mkdir -p "$stage_root/persistent/config" "$stage_root/persistent/scripts"
-cp -p "$script_dir/persistent/rc.postsysinit" "$stage_root/persistent/"
+cp -p "$script_dir/persistent/rc.postsysinit" \
+    "$script_dir/persistent/profile" \
+    "$stage_root/persistent/"
 cp -p "$script_dir/persistent/config/cron" \
     "$script_dir/persistent/config/.profile" \
     "$script_dir/persistent/config/wifi-priority" \
@@ -38,6 +40,7 @@ cp -p "$script_dir/persistent/scripts/"*.sh \
 while IFS= read -r script; do
     /bin/sh -n "$script"
 done < <(find "$stage_root/persistent" -type f \( -name '*.sh' -o -name rc.postsysinit \) -print)
+/bin/sh -n "$stage_root/persistent/profile"
 
 ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "mkdir -p '$remote_stage'"
 scp -q -r -O -o BatchMode=yes -o ConnectTimeout=5 \
@@ -45,7 +48,7 @@ scp -q -r -O -o BatchMode=yes -o ConnectTimeout=5 \
 
 ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "
     set -e
-    for script in '$remote_stage'/persistent/rc.postsysinit '$remote_stage'/persistent/scripts/*.sh; do
+    for script in '$remote_stage'/persistent/rc.postsysinit '$remote_stage'/persistent/profile '$remote_stage'/persistent/scripts/*.sh; do
         /bin/sh -n \"\$script\"
     done
     /usr/bin/awk -f '$remote_stage/persistent/scripts/parse-iwlist.awk' /dev/null >/dev/null
@@ -66,12 +69,19 @@ ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "
     rollback=\"\$persistent/rollback/code-$rollback_stamp\"
     mkdir -p \"\$rollback/config\" \"\$rollback/scripts\"
     cp -p \"\$persistent/rc.postsysinit\" \"\$rollback/\"
+    if [ -f \"\$persistent/profile\" ]; then
+        cp -p \"\$persistent/profile\" \"\$rollback/profile\"
+    else
+        : > \"\$rollback/profile.absent\"
+    fi
     cp -p \"\$persistent/config/cron\" \"\$persistent/config/.profile\" \"\$rollback/config/\"
     cp -p \"\$persistent/scripts/\"*.sh \"\$persistent/scripts/\"*.awk \"\$rollback/scripts/\"
 
     pkill crond 2>/dev/null || true
     cp -p '$remote_stage/persistent/rc.postsysinit' \"\$persistent/rc.postsysinit.new\"
     mv \"\$persistent/rc.postsysinit.new\" \"\$persistent/rc.postsysinit\"
+    cp -p '$remote_stage/persistent/profile' \"\$persistent/profile.new\"
+    mv \"\$persistent/profile.new\" \"\$persistent/profile\"
     for source in '$remote_stage'/persistent/config/*; do
         name=\${source##*/}
         cp -p \"\$source\" \"\$persistent/config/\$name.new\"
@@ -79,8 +89,6 @@ ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "
     done
     cp -p '$remote_stage/persistent/config/.profile' \"\$persistent/config/.profile.new\"
     mv \"\$persistent/config/.profile.new\" \"\$persistent/config/.profile\"
-    cp -p \"\$persistent/config/.profile\" \"\$persistent/.profile.new\"
-    mv \"\$persistent/.profile.new\" \"\$persistent/.profile\"
     for source in '$remote_stage'/persistent/scripts/*; do
         name=\${source##*/}
         cp -p \"\$source\" \"\$persistent/scripts/\$name.new\"

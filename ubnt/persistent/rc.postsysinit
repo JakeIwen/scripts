@@ -11,7 +11,6 @@ chmod 750 "$scripts"/* 2>/dev/null || true
 
 echo nanoM2 > /proc/sys/kernel/hostname
 cp "$persistent/config/cron" /etc/crontabs/ubnt
-cp "$persistent/config/.profile" "$persistent/.profile"
 
 "$scripts/ensure_ssh_keys.sh"
 

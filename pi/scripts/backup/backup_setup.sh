@@ -36,5 +36,5 @@ fi
 echo "setup complete. next steps:"
 echo "  1. run /home/pi/scripts/backup/pi_backup.sh once manually and read the output"
 echo "  2. swap the crontab entries (rsync_schedule.sh -> pi_backup.sh + backup_watchdog.sh)"
-echo "  3. when a spare card is attached: /home/pi/scripts/backup/clone_to_sd.sh --init hotspare-a sdX,"
-echo "     then add 'hotspare-a:7' to CLONE_TARGETS in backup_conf.sh"
+echo "  3. configure exactly two CLONE_TARGETS and initialize them once with clone_to_sd.sh --init"
+echo "  4. for later card replacement, leave one spare attached and run backup/new_hotspare.sh --dry-run"

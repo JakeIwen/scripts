@@ -1,0 +1,35 @@
+From: Local OpenWrt build <local@dendelion.invalid>
+Date: Sun, 2 Aug 2026 00:00:00 +0000
+Subject: [PATCH] wifi: mac80211: ignore unusable S8_MIN country power
+
+A malformed Country element can advertise 0x80 as the maximum transmit
+power. The field is signed, so mac80211 interprets this as -128 dBm and the
+802.11h calculation clamps it to 0 dBm. On a PHY shared by managed and AP
+interfaces, that makes the local AP effectively unusable as well.
+
+Treat only S8_MIN as an invalid channel-power value. Skipping the malformed
+triplet leaves the local regulatory maximum in force; valid peer power
+constraints and the separate Power Constraint element remain unchanged.
+
+---
+ net/mac80211/mlme.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+--- a/net/mac80211/mlme.c
++++ b/net/mac80211/mlme.c
+@@ -3157,6 +3157,15 @@ ieee80211_find_80211h_pwr_constr(struct
+ 
+ 		for (i = 0; i < triplet->chans.num_channels; i++) {
+ 			if (first_channel + i * chan_increment == chan) {
++				/*
++				 * S8_MIN cannot be a useful transmit-power
++				 * constraint. Applying it would be clamped to
++				 * 0 dBm below and can affect every interface on
++				 * a shared PHY. Ignore only this malformed value
++				 * and continue looking for a valid triplet.
++				 */
++				if (triplet->chans.max_power == S8_MIN)
++					goto next;
+ 				have_chan_pwr = true;
+ 				*chan_pwr = triplet->chans.max_power;
+ 				break;

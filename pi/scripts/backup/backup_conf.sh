@@ -26,8 +26,15 @@ BORG_CHECK_DOM=1  # day of month for the integrity check (borg check)
 # always holds an older known-good generation. Cards are found by ext4 label at
 # runtime; init new ones with:
 # /home/pi/scripts/backup/clone_to_sd.sh --init <label> sdX
+# Later, replace exactly one card at a time with new_hotspare.sh; it infers the
+# missing configured label and validates the new card against the other reader.
 CLONE_TARGETS=(hotspare-a:7 hotspare-b:14)
 CLONE_MAX_DISK_GB=500  # refuse to clone onto anything bigger (TB-drive footgun guard)
+# The two physical readers are different revisions. Replacement discovery accepts
+# only these USB VID:PID pairs and a card within this many GiB of the surviving
+# spare, so unrelated removable USB disks cannot become clone candidates.
+CLONE_USB_READER_IDS=(14cd:1212 14cd:125d)
+CLONE_SPARE_SIZE_TOLERANCE_GB=4
 
 # media mirror (movingparts -> bigboi), carried over from rsync_schedule.sh
 MEDIA_SRC=/mnt/movingparts
@@ -36,6 +43,22 @@ MEDIA_EXCLUDES=/home/pi/rsync-exclude-media.txt
 
 # home assistant (venv install; sqlite must be snapshotted, not live-copied)
 HA_DB=/home/homeassistant/.homeassistant/home-assistant_v2.db
+
+# Paths omitted from Borg's versioned root snapshots. Keep glob patterns quoted
+# so the shell does not expand them while this configuration is sourced.
+BORG_EXCLUDES=(
+  "$HA_DB"
+  "$HA_DB-wal"
+  "$HA_DB-shm"
+  /var/swap
+  '/var/cache/apt/archives/*'
+  '/tmp/*'
+  '/var/lib/apt/lists/*'
+  '/home/*/.cache/*'
+  '/root/.cache/*'
+  '/home/pi/build/*'
+  '/home/*/.local/share/Trash/*'
+)
 
 # state + notifications
 STAMP_DIR=/home/pi/backups/stamps

@@ -24,9 +24,17 @@ ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "
     for script in \"\$rollback/rc.postsysinit\" \"\$rollback/scripts/\"*.sh; do
         /bin/sh -n \"\$script\"
     done
+    if [ -f \"\$rollback/profile\" ]; then
+        /bin/sh -n \"\$rollback/profile\"
+    fi
 
     pkill crond 2>/dev/null || true
     cp -p \"\$rollback/rc.postsysinit\" \"\$persistent/rc.postsysinit\"
+    if [ -f \"\$rollback/profile\" ]; then
+        cp -p \"\$rollback/profile\" \"\$persistent/profile\"
+    elif [ -f \"\$rollback/profile.absent\" ]; then
+        rm -f \"\$persistent/profile\"
+    fi
     cp -p \"\$rollback/config/cron\" \"\$persistent/config/cron\"
     cp -p \"\$rollback/config/.profile\" \"\$persistent/config/.profile\"
     cp -p \"\$rollback/scripts/\"* \"\$persistent/scripts/\"

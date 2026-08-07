@@ -22,6 +22,7 @@ vanrouter/etc
 !vanrouter/etc/
 vanrouter/etc/*
 !vanrouter/etc/sysupgrade.conf
+vanrouter/build/
 *__pycache__*
 *.pyc
 node_modules/

@@ -4,6 +4,10 @@ This directory contains reviewed, credential-free artifacts for the Linksys
 E8450. Live UCI configuration remains authoritative and must be inspected before
 deployment.
 
+The source patch and staged recovery procedure for the shared-radio 0 dBm
+failure are under [kernel-5ghz-power](kernel-5ghz-power/README.md). Creating or
+testing those artifacts does not change the live router.
+
 ## Simultaneous 5 GHz AP and client
 
 `deploy-5ghz-ap.sh` stages a temporary helper on the router. The helper adds a
@@ -64,4 +68,5 @@ An alternate SSH target can be supplied as the second argument.
 
 ```sh
 ./vanrouter/tests/test_openwrt_5ghz_ap.sh
+./vanrouter/tests/test_kernel_5ghz_power.sh
 ```

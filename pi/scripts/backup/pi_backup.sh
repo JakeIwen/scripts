@@ -184,13 +184,13 @@ fi
 
 # --- 4. versioned history ---
 archive="vanpi-$(date +%F_%H%M)"
+borg_exclude_args=()
+for exclude in "${BORG_EXCLUDES[@]}"; do
+  borg_exclude_args+=(--exclude "$exclude")
+done
 log "borg create ::$archive"
 run borg create --stats --compression zstd --one-file-system \
-  --exclude "$HA_DB" --exclude "$HA_DB-wal" --exclude "$HA_DB-shm" \
-  --exclude /var/swap --exclude '/var/cache/apt/archives/*' \
-  --exclude '/tmp/*' --exclude '/var/lib/apt/lists/*' \
-  --exclude '/home/*/.cache/*' --exclude '/root/.cache/*' \
-  --exclude '/home/*/.local/share/Trash/*' \
+  "${borg_exclude_args[@]}" \
   "::$archive" / /boot/firmware
 rc=$?
 [ $rc -le 1 ] || fail "borg create exited $rc"  # rc 1 = warnings (files changed during read), acceptable on a live system

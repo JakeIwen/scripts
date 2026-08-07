@@ -1,0 +1,2 @@
+# airOS /etc/profile loads /etc/persistent/profile for interactive shells.
+. "$HOME/config/.profile"

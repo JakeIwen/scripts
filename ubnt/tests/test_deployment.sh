@@ -9,8 +9,8 @@ line_number() {
 }
 
 stage_boundary=$(line_number 'if [[ "$mode" == --stage-only ]]')
-profile_copy=$(line_number 'cp -p \"\$persistent/config/.profile\" \"\$persistent/.profile.new\"')
-profile_move=$(line_number 'mv \"\$persistent/.profile.new\" \"\$persistent/.profile\"')
+profile_copy=$(line_number "cp -p '\$remote_stage/persistent/profile'")
+profile_move=$(line_number 'mv \"\$persistent/profile.new\" \"\$persistent/profile\"')
 activation_boundary=$(line_number "if [ '\$activate' = yes ]")
 
 for required_line in \

@@ -34,8 +34,17 @@ verification.
 3. The watchdog notices the / partition is still labeled `hotspare-*` and nags via ntfy
    (at boot and daily at 10:00) until you finish recovery:
    pull anything newer from borg (scenario 2), relabel the now-live card
-   (`sudo e2label /dev/mmcblk0p2 rootfs`), then initialize a fresh spare:
-   `sudo /home/pi/scripts/backup/clone_to_sd.sh --init hotspare-a sdX`
+   (`sudo e2label /dev/mmcblk0p2 rootfs`), then replace exactly one missing spare
+   while leaving the other configured spare attached. Verify the automatic detection,
+   then initialize the new card with a full clone:
+   ```bash
+   sudo /home/pi/scripts/backup/new_hotspare.sh --dry-run
+   sudo /home/pi/scripts/backup/new_hotspare.sh
+   ```
+   The script infers the replacement generation from the one missing `CLONE_TARGETS`
+   label, accepts only one unmounted similarly sized card in an explicitly approved
+   USB-reader model, shows the device it will erase, and checks the mapping again
+   immediately before calling `clone_to_sd.sh --init`.
 
 ## Scenario 2 — restore individual files / roll back a mistake
 

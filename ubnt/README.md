@@ -105,7 +105,8 @@ Deployment modes are deliberately separate:
   then removes the staging directory without changing live files.
 - `--install-paused` installs and persists code, stops cron, and leaves automatic
   selection paused for a manual canary test. It also refreshes the login
-  `.profile` without activating automatic selection.
+  `profile` shim without activating automatic selection. airOS sources that shim
+  from `/etc/profile`, and the shim loads `config/.profile`.
 - `--activate` installs and starts the new cron configuration.
 
 Every install records a code-only rollback under
@@ -129,4 +130,5 @@ recovery and never syncs changes back into this checkout. See
 ./tests/test_parse_iwlist.sh
 ./tests/test_wifi_manager.sh
 ./tests/test_deployment.sh
+./tests/test_profile.sh
 ```
