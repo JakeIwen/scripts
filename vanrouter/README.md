@@ -8,6 +8,12 @@ The source patch and staged recovery procedure for the shared-radio 0 dBm
 failure are under [kernel-5ghz-power](kernel-5ghz-power/README.md). Creating or
 testing those artifacts does not change the live router.
 
+The default-disabled `procd` service for keeping `dendelion_5g` available
+between bounded absent-hotspot scans is under
+[5ghz-scan-gate](5ghz-scan-gate/README.md). It runs beside stock OpenWrt and
+does not require a new firmware build. It is implemented and tested offline but
+has not been installed, enabled, or deployed.
+
 ## Simultaneous 5 GHz AP and client
 
 `deploy-5ghz-ap.sh` stages a temporary helper on the router. The helper adds a
@@ -69,4 +75,5 @@ An alternate SSH target can be supplied as the second argument.
 ```sh
 ./vanrouter/tests/test_openwrt_5ghz_ap.sh
 ./vanrouter/tests/test_kernel_5ghz_power.sh
+./vanrouter/tests/test_5ghz_scan_gate.sh
 ```

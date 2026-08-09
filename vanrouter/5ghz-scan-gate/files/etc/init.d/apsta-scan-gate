@@ -1,0 +1,49 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+STOP=10
+USE_PROCD=1
+
+PROG=/usr/bin/ucode
+DAEMON=/usr/libexec/apsta-scan-gate.uc
+
+service_enabled() {
+	local enabled
+
+	config_load apsta-scan-gate
+	config_get_bool enabled main enabled 0
+	[ "$enabled" -eq 1 ]
+}
+
+start_service() {
+	service_enabled || return 0
+
+	procd_open_instance
+	procd_set_param command "$PROG" "$DAEMON"
+	procd_set_param user root
+	procd_set_param respawn 3600 5 5
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
+}
+
+stop_service() {
+	# Give the daemon a chance to return station control to stock OpenWrt.
+	local attempts=0
+	ubus call apsta_scan_gate shutdown '{}' >/dev/null 2>&1 || return 0
+	while [ "$attempts" -lt 4 ]; do
+		ubus -S call apsta_scan_gate status >/dev/null 2>&1 || return 0
+		attempts=$((attempts + 1))
+		sleep 1
+	done
+}
+
+reload_service() {
+	# Re-describe the instance so disabling the UCI section removes it.
+	rc_procd start_service
+	procd_send_signal apsta-scan-gate '*' HUP
+}
+
+service_triggers() {
+	procd_add_reload_trigger apsta-scan-gate wireless
+}
