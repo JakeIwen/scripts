@@ -8,6 +8,8 @@ script_dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 # shellcheck source=release.conf
 . "$script_dir/release.conf"
 
+manifest_version_parser="$script_dir/manifest-package-version.awk"
+
 patched_image=
 backup_bundle=
 output_dir=
@@ -114,6 +116,8 @@ build_info="$artifact_dir/BUILD-INFO.txt"
 artifact_sums="$artifact_dir/SHA256SUMS"
 [ -r "$build_info" ] || fail "BUILD-INFO.txt is missing beside the patched image"
 [ -r "$artifact_sums" ] || fail "artifact SHA256SUMS is missing"
+[ -r "$manifest_version_parser" ] \
+	|| fail "manifest package-version parser is unreadable"
 patched_name=$(basename "$patched_image")
 case $patched_name in
 	openwrt-$OPENWRT_RELEASE-$OPENWRT_TARGET-$OPENWRT_SUBTARGET-$OPENWRT_DEVICE-squashfs-sysupgrade-mac80211-s8min-fix.itb) ;;
@@ -143,6 +147,12 @@ verify_sha256_file "$artifact_dir" SHA256SUMS >/dev/null \
 	|| fail "BUILD-INFO.txt has the wrong source commit"
 [ "$(build_info_value OPENWRT_REVISION)" = "$OPENWRT_REVISION" ] \
 	|| fail "BUILD-INFO.txt has the wrong revision"
+[ "$(build_info_value OPENWRT_BASE_FILES_COMMITCOUNT)" = \
+	"$OPENWRT_BASE_FILES_COMMITCOUNT" ] \
+	|| fail "BUILD-INFO.txt has the wrong base-files history count"
+[ "$(build_info_value OPENWRT_BASE_FILES_VERSION)" = \
+	"$OPENWRT_BASE_FILES_VERSION" ] \
+	|| fail "BUILD-INFO.txt has the wrong base-files version"
 [ "$(build_info_value OPENWRT_TARGET)" = "$OPENWRT_TARGET" ] \
 	|| fail "BUILD-INFO.txt has the wrong target"
 [ "$(build_info_value OPENWRT_SUBTARGET)" = "$OPENWRT_SUBTARGET" ] \
@@ -167,6 +177,16 @@ verify_sha256_file "$artifact_dir" SHA256SUMS >/dev/null \
 	|| fail "BUILD-INFO.txt does not match the patched image"
 [ "$(build_info_value IMAGE_SIGNED)" = no ] \
 	|| fail "BUILD-INFO.txt has an unexpected signing state"
+base_files_version=$(awk -v package_name=base-files \
+	-f "$manifest_version_parser" "$artifact_dir/IMAGE-MANIFEST.txt") \
+	|| fail "image manifest must contain exactly one well-formed base-files record"
+[ "$base_files_version" = "$OPENWRT_BASE_FILES_VERSION" ] \
+	|| fail "image base-files version is $base_files_version, expected $OPENWRT_BASE_FILES_VERSION"
+kernel_version=$(awk -v package_name=kernel \
+	-f "$manifest_version_parser" "$artifact_dir/IMAGE-MANIFEST.txt") \
+	|| fail "image manifest must contain exactly one well-formed kernel record"
+[ "$(build_info_value KERNEL_PACKAGE_VERSION)" = "$kernel_version" ] \
+	|| fail "BUILD-INFO.txt kernel version differs from the image manifest"
 jq -e --arg release "$OPENWRT_RELEASE" --arg revision "$OPENWRT_REVISION" \
 	--arg target "$OPENWRT_TARGET/$OPENWRT_SUBTARGET" \
 	--arg device "$OPENWRT_DEVICE" --arg board "$OPENWRT_BOARD" \
@@ -268,6 +288,11 @@ install -m 0600 "$script_dir/release.conf" "$stage_dir/release.conf"
 {
 	printf 'OPENWRT_RELEASE=%s\n' "$OPENWRT_RELEASE"
 	printf 'OPENWRT_SOURCE_COMMIT=%s\n' "$OPENWRT_SOURCE_COMMIT"
+	printf 'OPENWRT_BASE_FILES_COMMITCOUNT=%s\n' \
+		"$OPENWRT_BASE_FILES_COMMITCOUNT"
+	printf 'OPENWRT_BASE_FILES_VERSION=%s\n' \
+		"$OPENWRT_BASE_FILES_VERSION"
+	printf 'KERNEL_PACKAGE_VERSION=%s\n' "$kernel_version"
 	printf 'OPENWRT_BOARD=%s\n' "$OPENWRT_BOARD"
 	printf 'OPENWRT_COMPAT_VERSION=%s\n' "$OPENWRT_COMPAT_VERSION"
 	printf 'PATCHED_IMAGE=%s\n' "$patched_name"

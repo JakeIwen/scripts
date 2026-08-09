@@ -11,6 +11,7 @@ patch_relative=package/kernel/mac80211/patches/subsys/999-mac80211-ignore-s8-min
 patch_file="$script_dir/patches/999-mac80211-ignore-s8-min-country-power.patch"
 package_resolver="$script_dir/resolve-package-seed.awk"
 profile_selector="$script_dir/select-sysupgrade-image.jq"
+manifest_version_parser="$script_dir/manifest-package-version.awk"
 output_dir=
 work_dir=
 stage_dir=
@@ -79,6 +80,8 @@ artifacts="$output_dir/artifacts"
 [ -r "$patch_file" ] || fail "toolkit patch is unreadable"
 [ -r "$package_resolver" ] || fail "package resolver is unreadable"
 [ -r "$profile_selector" ] || fail "profile selector is unreadable"
+[ -r "$manifest_version_parser" ] \
+	|| fail "manifest package-version parser is unreadable"
 
 for command_name in git jq awk grep cmp sort comm cut install mktemp mkdir rmdir; do
 	command -v "$command_name" >/dev/null 2>&1 \
@@ -92,6 +95,15 @@ mkdir "$lock_dir" 2>/dev/null \
 actual_commit=$(git -C "$build_source" rev-parse HEAD)
 [ "$actual_commit" = "$OPENWRT_SOURCE_COMMIT" ] \
 	|| fail "source is $actual_commit, expected $OPENWRT_SOURCE_COMMIT"
+is_shallow=$(git -C "$build_source" rev-parse --is-shallow-repository) \
+	|| fail "could not determine whether build source history is shallow"
+[ "$is_shallow" = false ] \
+	|| fail "build source is shallow; complete Git history is required"
+base_files_commitcount=$(git -C "$build_source" rev-list --count HEAD \
+	-- package/base-files) \
+	|| fail "could not count package/base-files history"
+[ "$base_files_commitcount" = "$OPENWRT_BASE_FILES_COMMITCOUNT" ] \
+	|| fail "package/base-files history count is $base_files_commitcount, expected $OPENWRT_BASE_FILES_COMMITCOUNT"
 git -C "$build_source" diff --quiet -- \
 	|| fail "build source has tracked working-tree changes"
 git -C "$build_source" diff --cached --quiet -- \
@@ -179,6 +191,22 @@ manifest_paths=$(find "$target_dir" -maxdepth 1 -type f \
 [ "$(printf '%s\n' "$manifest_paths" | sed '/^$/d' | wc -l | tr -d '[:space:]')" = 1 ] \
 	|| fail "expected exactly one device package manifest"
 manifest=$manifest_paths
+base_files_version=$(awk -v package_name=base-files \
+	-f "$manifest_version_parser" "$manifest") \
+	|| fail "image manifest must contain exactly one well-formed base-files record"
+[ "$base_files_version" = "$OPENWRT_BASE_FILES_VERSION" ] \
+	|| fail "image base-files version is $base_files_version, expected $OPENWRT_BASE_FILES_VERSION"
+kernel_version_paths=$(find "$build_source/staging_dir" -mindepth 2 \
+	-maxdepth 2 -type f -name kernel.version -print)
+[ "$(printf '%s\n' "$kernel_version_paths" | sed '/^$/d' | wc -l | tr -d '[:space:]')" = 1 ] \
+	|| fail "expected exactly one generated kernel.version file"
+kernel_version=$(cat "$kernel_version_paths")
+[ -n "$kernel_version" ] || fail "generated kernel.version is empty"
+manifest_kernel_version=$(awk -v package_name=kernel \
+	-f "$manifest_version_parser" "$manifest") \
+	|| fail "image manifest must contain exactly one well-formed kernel record"
+[ "$manifest_kernel_version" = "$kernel_version" ] \
+	|| fail "image kernel version differs from the generated kernel.version"
 
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/dendelion-finalize.XXXXXX")
 case $work_dir in
@@ -259,6 +287,11 @@ install -m 0644 "$work_dir/FWTOOL-METADATA.json" \
 	printf 'OPENWRT_RELEASE=%s\n' "$OPENWRT_RELEASE"
 	printf 'OPENWRT_SOURCE_COMMIT=%s\n' "$OPENWRT_SOURCE_COMMIT"
 	printf 'OPENWRT_REVISION=%s\n' "$OPENWRT_REVISION"
+	printf 'OPENWRT_BASE_FILES_COMMITCOUNT=%s\n' \
+		"$OPENWRT_BASE_FILES_COMMITCOUNT"
+	printf 'OPENWRT_BASE_FILES_VERSION=%s\n' \
+		"$OPENWRT_BASE_FILES_VERSION"
+	printf 'KERNEL_PACKAGE_VERSION=%s\n' "$kernel_version"
 	printf 'OPENWRT_TARGET=%s\n' "$OPENWRT_TARGET"
 	printf 'OPENWRT_SUBTARGET=%s\n' "$OPENWRT_SUBTARGET"
 	printf 'OPENWRT_DEVICE=%s\n' "$OPENWRT_DEVICE"

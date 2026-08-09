@@ -1,9 +1,15 @@
 from random import choice
 from soco.discovery import by_name, any_soco, discover
+from soco.exceptions import SoCoUPnPException
 from soco.music_library import MusicLibrary
 from contextlib import suppress
-from time import sleep
+from time import monotonic, sleep
+from xml.etree import ElementTree
 import os
+
+REAR_PHYSICAL_LEFT_UID = "RINCON_7828CA20F21A01400"
+REAR_PHYSICAL_RIGHT_UID = "RINCON_7828CA20F1DA01400"
+STEREO_PAIR_TIMEOUT = 30
 
 # to make sonos_tasks globally importable
 # run:
@@ -60,11 +66,17 @@ def prev_track():
     get_preferred_device().previous()
     
 def rear_movie(vol=47):
-    audio_source('vonRear', 'optical', vol)
+    return audio_source_device(get_rear_stereo_master(), 'optical', vol)
 def rear_normal():
-    make_stereo_pair("vonRear", "vonRear2")
+    return make_stereo_pair_by_uid(
+        REAR_PHYSICAL_LEFT_UID,
+        REAR_PHYSICAL_RIGHT_UID,
+    )
 def rear_inverted():
-    make_stereo_pair("vonRear2", "vonRear")
+    return make_stereo_pair_by_uid(
+        REAR_PHYSICAL_RIGHT_UID,
+        REAR_PHYSICAL_LEFT_UID,
+    )
 
 # soundbyte options in ~/soundbytes
 # chime warn success error deactivate
@@ -83,18 +95,139 @@ def play_soundbyte(name, device_name='vonRear'):
 # utilities
 
 def make_stereo_pair(left_master_name, right_name):
-    # import pdb; pdb.set_trace()
-    
-    slave = by_name(right_name)
-    with suppress(Exception): slave.separate_stereo_pair()
     master = by_name(left_master_name)
-    while not master:
+    slave = by_name(right_name)
+    if not master or not slave:
+        raise RuntimeError(
+            "Could not find both speakers: "
+            + left_master_name
+            + ", "
+            + right_name
+        )
+    return make_stereo_pair_by_uid(master.uid, slave.uid)
+
+def make_stereo_pair_by_uid(left_uid, right_uid, timeout=STEREO_PAIR_TIMEOUT):
+    desired_map = stereo_channel_map(left_uid, right_uid)
+    speakers = wait_for_speakers((left_uid, right_uid), timeout)
+    current_maps = get_stereo_channel_maps(speakers.values())
+
+    if desired_map in current_maps:
+        return speakers[left_uid]
+
+    existing_map = next(
+        (
+            channel_map
+            for channel_map in current_maps
+            if left_uid in channel_map and right_uid in channel_map
+        ),
+        None,
+    )
+    if existing_map:
+        speakers[left_uid].separate_stereo_pair()
+        speakers = wait_for_speakers(
+            (left_uid, right_uid),
+            timeout,
+            require_visible=True,
+        )
+    elif not all(speaker.is_visible for speaker in speakers.values()):
+        raise RuntimeError(
+            "Rear speakers are bonded in an unexpected configuration; "
+            "refusing to change it automatically"
+        )
+
+    return create_stereo_pair_with_retry(left_uid, right_uid, timeout)
+
+def create_stereo_pair_with_retry(left_uid, right_uid, timeout):
+    deadline = monotonic() + timeout
+    last_error = None
+    while monotonic() < deadline:
+        speakers = discover_speakers_by_uid((left_uid, right_uid))
+        if len(speakers) != 2:
+            sleep(1)
+            continue
+        try:
+            speakers[left_uid].create_stereo_pair(speakers[right_uid])
+        except SoCoUPnPException as error:
+            if str(error.error_code) != "402":
+                raise
+            last_error = error
+            sleep(2)
+            continue
+        remaining = max(1, deadline - monotonic())
+        return wait_for_stereo_pair(left_uid, right_uid, remaining)
+    raise RuntimeError(
+        "Timed out creating Sonos stereo pair after temporary UPnP errors"
+    ) from last_error
+
+def discover_speakers_by_uid(uids, timeout=3):
+    wanted = set(uids)
+    devices = discover(timeout, True) or set()
+    return {device.uid: device for device in devices if device.uid in wanted}
+
+def wait_for_speakers(uids, timeout, require_visible=False):
+    deadline = monotonic() + timeout
+    speakers = {}
+    while monotonic() < deadline:
+        speakers = discover_speakers_by_uid(uids)
+        if all(uid in speakers for uid in uids):
+            if not require_visible or all(
+                speakers[uid].is_visible for uid in uids
+            ):
+                return speakers
         sleep(1)
-        master = by_name(left_master_name)
-    
-    with suppress(Exception): master.create_stereo_pair(slave)
-    vis_devices = filter_vis_devices();
-    return master
+    state = "visible " if require_visible else ""
+    missing = [
+        uid
+        for uid in uids
+        if uid not in speakers or (require_visible and not speakers[uid].is_visible)
+    ]
+    raise RuntimeError(
+        "Timed out waiting for "
+        + state
+        + "speakers; missing UIDs: "
+        + ", ".join(missing)
+    )
+
+def stereo_channel_map(left_uid, right_uid):
+    return left_uid + ":LF,LF;" + right_uid + ":RF,RF"
+
+def get_stereo_channel_maps(devices):
+    last_error = None
+    for device in devices:
+        try:
+            state = device.zoneGroupTopology.GetZoneGroupState()["ZoneGroupState"]
+            root = ElementTree.fromstring(state)
+            return {
+                member.attrib["ChannelMapSet"]
+                for member in root.iter("ZoneGroupMember")
+                if member.attrib.get("ChannelMapSet")
+            }
+        except Exception as error:
+            last_error = error
+    raise RuntimeError("Could not read Sonos stereo-pair topology") from last_error
+
+def wait_for_stereo_pair(left_uid, right_uid, timeout):
+    desired_map = stereo_channel_map(left_uid, right_uid)
+    deadline = monotonic() + timeout
+    while monotonic() < deadline:
+        speakers = discover_speakers_by_uid((left_uid, right_uid))
+        if len(speakers) == 2:
+            if desired_map in get_stereo_channel_maps(speakers.values()):
+                return speakers[left_uid]
+        sleep(1)
+    raise RuntimeError(
+        "Timed out waiting for Sonos stereo pair: " + desired_map
+    )
+
+def get_rear_stereo_master():
+    rear_uids = (REAR_PHYSICAL_LEFT_UID, REAR_PHYSICAL_RIGHT_UID)
+    speakers = wait_for_speakers(rear_uids, STEREO_PAIR_TIMEOUT)
+    visible = [speaker for speaker in speakers.values() if speaker.is_visible]
+    if len(visible) != 1:
+        raise RuntimeError(
+            "Rear speakers are not currently configured as one stereo pair"
+        )
+    return visible[0]
 
 def vol_eql_all(vol=50):
     [equal_vol(member, vol, True) for member in get_preferred_device().group]
@@ -142,8 +275,10 @@ def play_from_faves(keyterm, group_all=True):
     return device
 
 def audio_source(name, source, vol=80):
+    return audio_source_device(get_spkr(name), source, vol)
+
+def audio_source_device(device, source, vol=80):
     unjoin_all()
-    device = get_spkr(name)
 
     if source == "optical":
         source_optical(device)

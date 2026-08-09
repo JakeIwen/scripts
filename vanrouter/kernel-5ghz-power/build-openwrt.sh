@@ -25,7 +25,8 @@ Usage:
 
 The full build must run on Linux. FILE is an optional list of additional
 OpenWrt package names, one per line; blank lines and # comments are ignored.
-The input checkout must be clean and contain commit $OPENWRT_SOURCE_COMMIT.
+The input checkout must have complete Git history, be clean, and contain commit
+$OPENWRT_SOURCE_COMMIT.
 EOF
 }
 
@@ -43,11 +44,20 @@ sha256_file() {
 }
 
 validate_source() {
-	local source=$1 actual_commit version source_hash
+	local source=$1 actual_commit is_shallow base_files_commitcount version source_hash
 	[ -d "$source/.git" ] || fail "not an OpenWrt Git checkout: $source"
+	is_shallow=$(git -C "$source" rev-parse --is-shallow-repository) \
+		|| fail "could not determine whether source history is shallow"
+	[ "$is_shallow" = false ] \
+		|| fail "source checkout is shallow; complete Git history is required"
 	actual_commit=$(git -C "$source" rev-parse HEAD)
 	[ "$actual_commit" = "$OPENWRT_SOURCE_COMMIT" ] \
 		|| fail "source is $actual_commit, expected $OPENWRT_SOURCE_COMMIT"
+	base_files_commitcount=$(git -C "$source" rev-list --count HEAD \
+		-- package/base-files) \
+		|| fail "could not count package/base-files history"
+	[ "$base_files_commitcount" = "$OPENWRT_BASE_FILES_COMMITCOUNT" ] \
+		|| fail "package/base-files history count is $base_files_commitcount, expected $OPENWRT_BASE_FILES_COMMITCOUNT"
 	[ -z "$(git -C "$source" status --porcelain)" ] \
 		|| fail "source checkout is not clean"
 	version=$(sed -n 's/^PKG_VERSION:=//p' \
@@ -167,6 +177,7 @@ output_dir=$(CDPATH= cd -- "$output_dir" && pwd)
 build_source="$output_dir/source"
 git clone --no-hardlinks "$source_repo" "$build_source"
 git -C "$build_source" checkout --detach "$OPENWRT_SOURCE_COMMIT"
+validate_source "$build_source"
 install -m 0644 "$patch_file" \
 	"$build_source/package/kernel/mac80211/patches/subsys/999-mac80211-ignore-s8-min-country-power.patch"
 

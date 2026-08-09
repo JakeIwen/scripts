@@ -46,9 +46,9 @@ the cookie is not placed in the command arguments. Browser cookies expire, so
 a browser-verification, rejected request, redirect trap, access-denied page, or
 other clearly gated response sends an **update eBay browser cookie**
 notification through `NTFY_PRICE_URL`. Network/download failures send a
-**failed to load** notification, while unrecognized result markup sends a
-**parser needs update** notification. All three preserve the most recent
-successful results.
+**failed to load** notification. Unrecognized Amazon or eBay result markup is
+recorded for the Deal Watch UI without sending a notification. Every failure
+preserves the most recent successful price or query results.
 
 ## Command line
 

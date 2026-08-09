@@ -116,12 +116,6 @@ def send_price_alert(item: dict, product: Product) -> None:
     send_ntfy(title, item["url"], "high", "moneybag")
 
 
-def send_parser_error(item: dict, error: AmazonParseError) -> None:
-    title = f"{item['display_title']}: price parser needs update"
-    message = f"Could not parse the product page HTML.\n{error}\n{item['url']}"
-    send_ntfy(title, message, "high", "warning")
-
-
 def send_search_alert(watch: dict, results: list[dict]) -> None:
     count = len(results)
     title = (
@@ -140,6 +134,8 @@ def send_search_alert(watch: dict, results: list[dict]) -> None:
 
 
 def send_search_error(watch: dict, error: Exception) -> None:
+    if isinstance(error, SearchParserError):
+        return
     if isinstance(error, SearchCookieError):
         title = f"{watch['display_title']}: update eBay browser cookie"
         message = (
@@ -156,13 +152,6 @@ def send_search_error(watch: dict, error: Exception) -> None:
             f"results were preserved.\n{error}\n{watch['url']}"
         )
         tags = "warning"
-    elif isinstance(error, SearchParserError):
-        title = f"{watch['display_title']}: eBay parser needs update"
-        message = (
-            "eBay loaded, but its result markup was not recognized. The last "
-            f"successful results were preserved.\n{error}\n{watch['url']}"
-        )
-        tags = "warning"
     else:
         title = f"{watch['display_title']}: eBay search needs attention"
         message = f"{error}\n{watch['url']}"
@@ -176,16 +165,8 @@ def check_item(
     try:
         product = PARSERS[item["parser"]](fetch(item["url"]))
     except AmazonParseError as error:
-        failed_item = item
         if record:
-            failed_item = store.record_error(item["id"], str(error))
-        if notify and not failed_item["notifications_muted"]:
-            try:
-                send_parser_error(failed_item, error)
-            except PriceCheckError as notify_error:
-                raise PriceCheckError(
-                    f"{error}; parser-error notification failed: {notify_error}"
-                ) from notify_error
+            store.record_error(item["id"], str(error))
         raise PriceCheckError(str(error)) from error
     except PriceCheckError as error:
         if record:

@@ -1,0 +1,559 @@
+diff --git a/package/network/config/wifi-scripts/Makefile b/package/network/config/wifi-scripts/Makefile
+index 52edd1b56764da532c7757df9496889a7d2837f6..e0ff11bf9f7856e4b072325f9811af08c287ebd2 100644
+--- a/package/network/config/wifi-scripts/Makefile
++++ b/package/network/config/wifi-scripts/Makefile
+@@ -9,7 +9,7 @@ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=wifi-scripts
+ PKG_VERSION:=1.0
+-PKG_RELEASE:=1
++PKG_RELEASE:=2
+ PKG_LICENSE:=GPL-2.0
+ 
+ PKG_MAINTAINER:=Felix Fietkau <nbd@nbd.name>
+diff --git a/package/network/config/wifi-scripts/files-ucode/usr/share/schema/wireless.wifi-iface.json b/package/network/config/wifi-scripts/files-ucode/usr/share/schema/wireless.wifi-iface.json
+index 45a409f26e74a0ca526455092d26e36f4e58ff4e..2b810a0873ff0943acb7c1ae44db1790ed7c565f 100644
+--- a/package/network/config/wifi-scripts/files-ucode/usr/share/schema/wireless.wifi-iface.json
++++ b/package/network/config/wifi-scripts/files-ucode/usr/share/schema/wireless.wifi-iface.json
+@@ -90,6 +90,25 @@
+ 			"type": "boolean",
+ 			"default": false
+ 		},
++		"apsta_retry_interval": {
++			"description": "Seconds to keep a same-radio AP available between station scan attempts",
++			"type": "number",
++			"minimum": 15,
++			"maximum": 3600,
++			"default": 60
++		},
++		"apsta_scan_gate": {
++			"description": "Bound station scan windows so a same-radio AP can remain available between attempts",
++			"type": "boolean",
++			"default": false
++		},
++		"apsta_scan_timeout": {
++			"description": "Maximum seconds to leave a same-radio AP stopped for a station scan or association attempt",
++			"type": "number",
++			"minimum": 5,
++			"maximum": 60,
++			"default": 15
++		},
+ 		"ap_max_inactivity": {
+ 			"description": "Station inactivity limit in seconds: If a station does not send anything in ap_max_inactivity seconds, an empty data frame is sent to it in order to verify whether it is still in range. If this frame is not ACKed, the station will be disassociated and then deauthenticated",
+ 			"type": "number"
+diff --git a/package/network/config/wifi-scripts/files-ucode/usr/share/ucode/wifi/supplicant.uc b/package/network/config/wifi-scripts/files-ucode/usr/share/ucode/wifi/supplicant.uc
+index 5688a1aef1793ce5d3dc8a43b13b5635a2de5e92..fc4befc10b9eca300b0af73fe8fd80ee791f8f1f 100644
+--- a/package/network/config/wifi-scripts/files-ucode/usr/share/ucode/wifi/supplicant.uc
++++ b/package/network/config/wifi-scripts/files-ucode/usr/share/ucode/wifi/supplicant.uc
+@@ -281,6 +281,20 @@ export function generate(config_list, data, interface) {
+ 		powersave: false
+ 	};
+ 
++	/*
++	 * A single-channel PHY cannot beacon while its station interface performs
++	 * an unrestricted scan.  Pass the opt-in gate policy to wpa_supplicant's
++	 * ucode controller only when a deterministic AP fallback channel exists.
++	 */
++	if (interface.config.mode == 'sta' && interface.config.apsta_scan_gate &&
++	    !interface.config.mlo && data.config.frequency) {
++		config.apsta_scan_gate = true;
++		config.apsta_retry_interval = interface.config.apsta_retry_interval;
++		config.apsta_scan_timeout = interface.config.apsta_scan_timeout;
++		config.apsta_fallback_frequency = data.config.frequency;
++	} else if (interface.config.apsta_scan_gate)
++		warn(`AP/STA scan gate requires a non-MLO station on a fixed radio channel\n`);
++
+ 	if (!interface.config.default_macaddr)
+ 		config.macaddr = interface.config.macaddr;
+ 
+diff --git a/package/network/services/hostapd/Makefile b/package/network/services/hostapd/Makefile
+index d46be1c6cbff29440db429d4d11fbec627afaf58..76bf56eabcfbd74e122c1d06c24c194d0f25e593 100644
+--- a/package/network/services/hostapd/Makefile
++++ b/package/network/services/hostapd/Makefile
+@@ -5,7 +5,7 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=hostapd
+-PKG_RELEASE:=1
++PKG_RELEASE:=2
+ 
+ PKG_SOURCE_URL:=https://w1.fi/hostap.git
+ PKG_SOURCE_PROTO:=git
+diff --git a/package/network/services/hostapd/files/wpa_supplicant.uc b/package/network/services/hostapd/files/wpa_supplicant.uc
+index c7da3bc1c4f30a1ca61b84e891112fc5db5a7630..e4449b4d09b94c6a8552921e644c748690a0383d 100644
+--- a/package/network/services/hostapd/files/wpa_supplicant.uc
++++ b/package/network/services/hostapd/files/wpa_supplicant.uc
+@@ -19,10 +19,17 @@ wpas.data.config = {};
+ wpas.data.iface_phy = {};
+ wpas.data.iface_ubus = {};
+ wpas.data.macaddr_list = {};
++wpas.data.apsta_scan_gate = {};
++
++/* These callbacks have intentional forward references through timer closures. */
++let scan_gate_remove;
++let scan_gate_state;
++let scan_gate_park;
+ 
+ function iface_stop(iface)
+ {
+ 	let ifname = iface.config.iface;
++	scan_gate_remove(ifname);
+ 
+ 	if (!iface.running)
+ 		return;
+@@ -695,6 +702,409 @@ function iface_hostapd_notify(ifname, iface, state)
+ 	}
+ }
+ 
++const scan_gate_settle_ms = 500;
++const scan_gate_result_grace_ms = 1000;
++const scan_gate_disconnect_limit = 3;
++
++function scan_gate_timer_cancel(gate, name)
++{
++	if (!gate || !gate[name])
++		return;
++
++	gate[name].cancel();
++	delete gate[name];
++}
++
++function scan_gate_cancel_timers(gate)
++{
++	for (let name in [ "watchdog", "settle", "retry", "grace" ])
++		scan_gate_timer_cancel(gate, name);
++}
++
++scan_gate_remove = function(ifname)
++{
++	let gate = wpas.data.apsta_scan_gate[ifname];
++	if (!gate)
++		return;
++
++	scan_gate_cancel_timers(gate);
++	delete wpas.data.apsta_scan_gate[ifname];
++};
++
++function scan_gate_config(ifname)
++{
++	let phy = wpas.data.iface_phy[ifname];
++	if (!phy)
++		return null;
++
++	let phy_data = wpas.data.config[phy];
++	if (!phy_data || !phy_data.data)
++		return null;
++
++	let iface_data = phy_data.data[ifname];
++	if (!iface_data || !iface_data.config)
++		return null;
++
++	let config = iface_data.config;
++	if (!config.apsta_scan_gate || config.mode != "sta" || config.mlo ||
++	    !config.apsta_fallback_frequency)
++		return null;
++
++	/* A second station can scan independently and invalidate the parked AP. */
++	let sta_ifaces = 0;
++	for (let name in phy_data.data) {
++		let data = phy_data.data[name];
++		let candidate = data ? data.config : null;
++		if (candidate && candidate.mode == "sta")
++			sta_ifaces++;
++	}
++	if (sta_ifaces != 1)
++		return null;
++
++	return config;
++}
++
++function scan_gate_get(ifname, iface)
++{
++	let gate = wpas.data.apsta_scan_gate[ifname];
++	let config = scan_gate_config(ifname);
++	if (!config) {
++		if (gate)
++			scan_gate_remove(ifname);
++		return null;
++	}
++
++	let retry_seconds = int(config.apsta_retry_interval ?? 60);
++	if (retry_seconds < 15)
++		retry_seconds = 15;
++	else if (retry_seconds > 3600)
++		retry_seconds = 3600;
++
++	let timeout_seconds = int(config.apsta_scan_timeout ?? 15);
++	if (timeout_seconds < 5)
++		timeout_seconds = 5;
++	else if (timeout_seconds > 60)
++		timeout_seconds = 60;
++
++	let fallback_frequency = int(config.apsta_fallback_frequency);
++	if (gate && gate.iface == iface &&
++	    gate.retry_ms == retry_seconds * 1000 &&
++	    gate.timeout_ms == timeout_seconds * 1000 &&
++	    gate.fallback_frequency == fallback_frequency)
++		return gate;
++
++	if (gate)
++		scan_gate_remove(ifname);
++
++	gate = {
++		iface,
++		phase: scan_gate_state(iface) == "COMPLETED" ? "connected" : "idle",
++		retry_ms: retry_seconds * 1000,
++		timeout_ms: timeout_seconds * 1000,
++		fallback_frequency,
++		association_started: false,
++		disconnect_attempts: 0,
++		disconnect_ok: false,
++	};
++	wpas.data.apsta_scan_gate[ifname] = gate;
++	wpas.printf(`AP/STA scan gate enabled on ${ifname}`);
++
++	return gate;
++}
++
++function scan_gate_valid(ifname, iface, gate)
++{
++	if (!gate || wpas.data.apsta_scan_gate[ifname] != gate ||
++	    wpas.interfaces[ifname] != iface)
++		return false;
++
++	let config = scan_gate_config(ifname);
++	if (config)
++		return true;
++
++	scan_gate_remove(ifname);
++	return false;
++}
++
++scan_gate_state = function(iface)
++{
++	let status = iface.status();
++	return status ? status.state : null;
++};
++
++function scan_gate_is_associating(state)
++{
++	return state in [
++		"AUTHENTICATING", "ASSOCIATING", "ASSOCIATED",
++		"4WAY_HANDSHAKE", "GROUP_HANDSHAKE"
++	];
++}
++
++function scan_gate_is_parkable(state)
++{
++	return state in [ "DISCONNECTED", "INACTIVE", "INTERFACE_DISABLED" ];
++}
++
++function scan_gate_hostapd_set(ifname, gate, up)
++{
++	let phy = wpas.data.iface_phy[ifname];
++	if (!phy) {
++		wpas.printf(`AP/STA scan gate has no PHY for ${ifname}`);
++		return false;
++	}
++
++	let msg = { phy, up };
++	if (up)
++		msg.frequency = gate.fallback_frequency;
++
++	ubus.call("hostapd", "apsta_state", msg);
++	let error = ubus.error();
++	if (error != null) {
++		wpas.printf(`AP/STA scan gate could not ${up ? "start" : "stop"} the AP for ${ifname}: ${error}`);
++		return false;
++	}
++	return true;
++}
++
++function scan_gate_connected(ifname, iface, gate)
++{
++	if (!scan_gate_valid(ifname, iface, gate))
++		return;
++
++	scan_gate_cancel_timers(gate);
++	gate.phase = "connected";
++	gate.association_started = false;
++	gate.disconnect_attempts = 0;
++	gate.disconnect_ok = false;
++	iface_hostapd_notify(ifname, iface, "COMPLETED");
++}
++
++function scan_gate_begin_window(ifname, iface, gate)
++{
++	if (!scan_gate_valid(ifname, iface, gate) || gate.phase == "fault")
++		return false;
++
++	if (gate.phase == "connecting")
++		return true;
++
++	scan_gate_cancel_timers(gate);
++	gate.phase = "connecting";
++	gate.association_started = false;
++	gate.disconnect_attempts = 0;
++	gate.disconnect_ok = false;
++
++	gate.watchdog = uloop.timer(gate.timeout_ms, () => {
++		delete gate.watchdog;
++		if (!scan_gate_valid(ifname, iface, gate))
++			return;
++
++		if (scan_gate_state(iface) == "COMPLETED") {
++			scan_gate_connected(ifname, iface, gate);
++			return;
++		}
++
++		scan_gate_park(ifname, iface, gate, "watchdog timeout");
++	});
++	/* Arm first, then fail closed if hostapd did not accept the AP stop. */
++	if (!scan_gate_hostapd_set(ifname, gate, false)) {
++		scan_gate_timer_cancel(gate, "watchdog");
++		gate.phase = "fault";
++		return false;
++	}
++
++	return true;
++}
++
++function scan_gate_issue_disconnect(ifname, iface, gate)
++{
++	if (!scan_gate_valid(ifname, iface, gate))
++		return;
++
++	gate.phase = "parking";
++	gate.disconnect_attempts++;
++	gate.disconnect_ok = iface.ctrl("DISCONNECT") == "OK";
++	gate.settle = uloop.timer(scan_gate_settle_ms, () => {
++		delete gate.settle;
++		if (!scan_gate_valid(ifname, iface, gate))
++			return;
++
++		let state = scan_gate_state(iface);
++		if (state == "COMPLETED") {
++			scan_gate_connected(ifname, iface, gate);
++			return;
++		}
++
++		if (!gate.disconnect_ok || !scan_gate_is_parkable(state)) {
++			if (gate.disconnect_attempts < scan_gate_disconnect_limit) {
++				gate.phase = "disconnect-retry";
++				gate.settle = uloop.timer(scan_gate_settle_ms, () => {
++					delete gate.settle;
++					scan_gate_issue_disconnect(ifname, iface, gate);
++				});
++				return;
++			}
++
++			gate.phase = "fault";
++			wpas.printf(`AP/STA scan gate could not safely park ${ifname}; AP remains stopped`);
++			return;
++		}
++
++		if (!scan_gate_hostapd_set(ifname, gate, true)) {
++			gate.phase = "fault";
++			return;
++		}
++
++		gate.phase = "parked";
++		gate.retry = uloop.timer(gate.retry_ms, () => {
++			delete gate.retry;
++			if (!scan_gate_valid(ifname, iface, gate) || gate.phase != "parked")
++				return;
++
++			wpas.printf(`AP/STA scan gate retrying ${ifname}`);
++			if (!scan_gate_begin_window(ifname, iface, gate))
++				return;
++
++			iface.ctrl("BSS_FLUSH 0");
++			if (iface.ctrl("RECONNECT") != "OK")
++				scan_gate_park(ifname, iface, gate, "RECONNECT failed");
++		});
++	});
++}
++
++scan_gate_park = function(ifname, iface, gate, reason)
++{
++	if (!scan_gate_valid(ifname, iface, gate) ||
++	    gate.phase in [ "parking", "disconnect-retry", "parked", "fault" ])
++		return;
++
++	if (scan_gate_state(iface) == "COMPLETED") {
++		scan_gate_connected(ifname, iface, gate);
++		return;
++	}
++
++	scan_gate_cancel_timers(gate);
++	gate.disconnect_attempts = 0;
++	gate.disconnect_ok = false;
++	wpas.printf(`AP/STA scan gate parking ${ifname}: ${reason}`);
++	scan_gate_issue_disconnect(ifname, iface, gate);
++};
++
++function scan_gate_defer_park(ifname, iface, gate, reason, delay_ms)
++{
++	if (!scan_gate_valid(ifname, iface, gate) || gate.phase != "connecting" ||
++	    gate.association_started)
++		return;
++
++	if (gate.grace && delay_ms >= scan_gate_result_grace_ms)
++		return;
++
++	scan_gate_timer_cancel(gate, "grace");
++	gate.grace = uloop.timer(delay_ms, () => {
++		delete gate.grace;
++		if (!scan_gate_valid(ifname, iface, gate) || gate.phase != "connecting")
++			return;
++
++		let state = scan_gate_state(iface);
++		if (state == "COMPLETED") {
++			scan_gate_connected(ifname, iface, gate);
++			return;
++		}
++		if (scan_gate_is_associating(state)) {
++			gate.association_started = true;
++			return;
++		}
++
++		scan_gate_park(ifname, iface, gate, reason);
++	});
++}
++
++function scan_gate_handle_ctrl_event(ifname, iface, ev)
++{
++	let gate = scan_gate_get(ifname, iface);
++	if (!gate || gate.phase == "fault")
++		return;
++
++	if (match(ev, /^CTRL-EVENT-SCAN-STARTED/)) {
++		if (gate.phase == "parked" || gate.phase == "idle")
++			scan_gate_begin_window(ifname, iface, gate);
++		return;
++	}
++
++	if (gate.phase != "connecting")
++		return;
++
++	if (match(ev, /^CTRL-EVENT-SCAN-RESULTS/))
++		scan_gate_defer_park(ifname, iface, gate, "scan completed without association",
++			scan_gate_result_grace_ms);
++	else if (match(ev, /^CTRL-EVENT-(NETWORK-NOT-FOUND|SCAN-FAILED)/))
++		scan_gate_defer_park(ifname, iface, gate, "network unavailable", 1);
++}
++
++function scan_gate_handle_state(ifname, iface, state)
++{
++	let gate = scan_gate_get(ifname, iface);
++	if (!gate)
++		return false;
++
++	if (state == "COMPLETED") {
++		scan_gate_connected(ifname, iface, gate);
++		return true;
++	}
++
++	if (state == "INTERFACE_DISABLED") {
++		scan_gate_remove(ifname);
++		iface_hostapd_notify(ifname, iface, state);
++		return true;
++	}
++
++	if (state == "INACTIVE") {
++		if (gate.phase in [ "parking", "disconnect-retry", "parked" ])
++			return true;
++
++		scan_gate_cancel_timers(gate);
++		gate.phase = "inactive";
++		iface_hostapd_notify(ifname, iface, state);
++		return true;
++	}
++
++	if (gate.phase == "fault") {
++		iface_hostapd_notify(ifname, iface, state);
++		return true;
++	}
++
++	/* DISCONNECT is deliberately reentrant; the settle check owns this phase. */
++	if (gate.phase in [ "parking", "disconnect-retry" ])
++		return true;
++
++	if (gate.phase == "parked") {
++		if (state == "DISCONNECTED")
++			return true;
++
++		if (state == "SCANNING" || scan_gate_is_associating(state))
++			scan_gate_begin_window(ifname, iface, gate);
++	}
++
++	if (state == "SCANNING" || state == "DISCONNECTED") {
++		scan_gate_begin_window(ifname, iface, gate);
++		if (gate.association_started) {
++			gate.association_started = false;
++			scan_gate_defer_park(ifname, iface, gate, "association ended", 1);
++		}
++		return true;
++	}
++
++	if (scan_gate_is_associating(state)) {
++		scan_gate_begin_window(ifname, iface, gate);
++		gate.association_started = true;
++		scan_gate_timer_cancel(gate, "grace");
++		iface_hostapd_notify(ifname, iface, state);
++		return true;
++	}
++
++	iface_hostapd_notify(ifname, iface, state);
++	return true;
++}
++
+ function iface_channel_switch(ifname, iface, info)
+ {
+ 	let msg = {
+@@ -805,6 +1215,8 @@ function iface_ubus_add(ifname)
+ 
+ return {
+ 	shutdown: function() {
++		for (let ifname in wpas.data.apsta_scan_gate)
++			scan_gate_remove(ifname);
+ 		for (let phy in wpas.data.config)
+ 			set_config(phy, []);
+ 		wpas.ubus.disconnect();
+@@ -821,18 +1233,21 @@ return {
+ 		iface_event("add", name);
+ 	},
+ 	iface_remove: function(name, obj) {
++		scan_gate_remove(name);
+ 		iface_event("remove", name);
+ 		iface_ubus_remove(name);
+ 	},
+ 	ctrl_event: function(name, iface, ev) {
+ 		iface_ubus_notify(name, ev);
++		scan_gate_handle_ctrl_event(name, iface, ev);
+ 	},
+ 	state: function(ifname, iface, state) {
+ 		let event_data = iface.status();
+ 		event_data.name = ifname;
+ 		iface_event("state", ifname, event_data);
+ 		try {
+-			iface_hostapd_notify(ifname, iface, state);
++			if (!scan_gate_handle_state(ifname, iface, state))
++				iface_hostapd_notify(ifname, iface, state);
+ 
+ 			if (state != "COMPLETED")
+ 				return;
+@@ -859,8 +1274,11 @@ return {
+ 		}
+ 	},
+ 	event: function(ifname, iface, ev, info) {
+-		if (ev == "CH_SWITCH_STARTED")
+-			iface_channel_switch(ifname, iface, info);
++		if (ev == "CH_SWITCH_STARTED") {
++			let gate = scan_gate_get(ifname, iface);
++			if (!gate || gate.phase == "connected")
++				iface_channel_switch(ifname, iface, info);
++		}
+ 	},
+ 	wps_credentials: function(ifname, iface, cred) {
+ 		cred.ifname = ifname;

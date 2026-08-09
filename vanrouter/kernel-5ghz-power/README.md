@@ -35,19 +35,26 @@ routing, telephony, and video feed revisions published for this release. A
 later moving feed checkout cannot silently produce an artifact under the same
 build identity.
 
+The build also requires complete Git history. OpenWrt derives the
+`base-files` package release from the number of commits that touched its source
+directory. For this release that count is `1711`, producing
+`base-files - 1711~f5dae5ece4`. A depth-one clone instead produces the invalid
+version `1~f5dae5ece4`; the builder, finalizer, and recovery-kit builder all
+reject that condition.
+
 `release.conf` also pins the official rollback and recovery image hashes from
 the OpenWrt 25.12.5 mediatek/mt7622 release.
 
 ## Validate the source and patch on this Mac
 
-The existing `~/dev/openwrt` checkout predates this release. Use an exact-tag
-checkout; this check downloads the hash-pinned backports archive, dry-runs the
-complete existing OpenWrt subsystem patch series, then dry-runs this patch with
-zero fuzz, applies it, and confirms the changed expression:
+Use an exact-tag, full-history checkout. This check downloads the hash-pinned
+backports archive, dry-runs the complete existing OpenWrt subsystem patch
+series, then dry-runs this patch with zero fuzz, applies it, and confirms the
+changed expression:
 
 ```bash
 cd /Users/jacobr/dev/scripts
-git clone --branch v25.12.5 --depth 1 \
+git clone --branch v25.12.5 --single-branch \
   https://git.openwrt.org/openwrt/openwrt.git \
   /private/tmp/openwrt-25.12.5
 ./vanrouter/kernel-5ghz-power/build-openwrt.sh \
@@ -67,7 +74,7 @@ mkdir -p vanrouter/build
 ./vanrouter/kernel-5ghz-power/packages-from-backup.sh \
   /path/to/dendelion-latest.tar.gz \
   vanrouter/build/dendelion-packages-25.12.5.txt
-git clone --branch v25.12.5 --depth 1 \
+git clone --branch v25.12.5 --single-branch \
   https://git.openwrt.org/openwrt/openwrt.git \
   /path/to/openwrt-25.12.5
 ./vanrouter/kernel-5ghz-power/build-openwrt.sh \
@@ -86,6 +93,49 @@ build emits the custom `.itb`, its SHA-256, `BUILD-INFO.txt`, and the resolved
 package map under `artifacts/`. The whole `vanrouter/build` directory is ignored
 by Git.
 
+Both the input checkout and the cloned build source must report `false` for
+`git rev-parse --is-shallow-repository` and `1711` for this command:
+
+```bash
+git rev-list --count f0a60eee2fe051741c643ea6118718aae1ef17fb -- \
+  package/base-files
+```
+
+Unshallowing a completed build tree cannot repair an image already stamped
+with the wrong package version. Rebuild into a new output directory.
+
+On vanpi, launch the long build as a system-scoped transient service so an SSH
+disconnect cannot terminate it. This returns immediately while systemd runs
+the build as `pi` and appends output to a file:
+
+```bash
+ssh pi@192.168.6.103 'sudo systemd-run \
+  --unit=dendelion-openwrt-build-fullhistory \
+  --uid=pi --gid=pi --working-directory=/home/pi/build \
+  --property=UMask=0022 --property=Nice=10 \
+  --property=IOSchedulingClass=best-effort \
+  --property=IOSchedulingPriority=7 \
+  --property=StandardOutput=append:/home/pi/build/openwrt-25.12.5-mac80211-s8min-fullhistory.log \
+  --property=StandardError=append:/home/pi/build/openwrt-25.12.5-mac80211-s8min-fullhistory.log \
+  /home/pi/build/kernel-5ghz-power-toolkit/build-openwrt.sh \
+  --source /home/pi/build/openwrt-25.12.5-source \
+  --packages /home/pi/build/dendelion-packages-25.12.5.txt \
+  --output /home/pi/build/openwrt-25.12.5-mac80211-s8min-fullhistory \
+  --jobs 1'
+```
+
+The service survives SSH logout but not a Pi reboot. Inspect it without
+attaching to the build process:
+
+```bash
+ssh pi@192.168.6.103 'systemctl show \
+  dendelion-openwrt-build-fullhistory.service \
+  -p ActiveState -p SubState -p Result -p ExecMainStatus; \
+  tail -n 50 \
+  /home/pi/build/openwrt-25.12.5-mac80211-s8min-fullhistory.log; \
+  df -h /home/pi'
+```
+
 The finalizer reads the actual sysupgrade filename, size, and SHA-256 from
 OpenWrt's `profiles.json`; it does not assume that `CONFIG_VERSION_FILENAMES`
 was enabled. If compilation completed but finalization did not, rerun only the
@@ -97,8 +147,9 @@ non-building finalizer:
 ```
 
 It refuses an existing `artifacts/` directory and validates the source commit,
-sole patch, target metadata, embedded sysupgrade metadata, image checksums, and
-exact requested package set before atomically creating artifacts.
+complete history, sole patch, target metadata, embedded sysupgrade metadata,
+image checksums, exact `base-files` version, and exact requested package set
+before atomically creating artifacts.
 
 ## Build the private recovery kit
 

@@ -63,11 +63,6 @@ class SearchNotificationTests(unittest.TestCase):
                 "eBay search failed to load",
                 "warning",
             ),
-            (
-                price_check.SearchParserError("markup changed"),
-                "eBay parser needs update",
-                "warning",
-            ),
         )
         for error, title_fragment, tags in cases:
             with self.subTest(error=type(error).__name__):
@@ -78,6 +73,13 @@ class SearchNotificationTests(unittest.TestCase):
                 self.assertIn(str(error), message)
                 self.assertEqual(priority, "high")
                 self.assertEqual(actual_tags, tags)
+
+    @mock.patch.object(price_check, "send_ntfy")
+    def test_parser_markup_errors_are_dashboard_only(self, send):
+        price_check.send_search_error(
+            self.WATCH, price_check.SearchParserError("markup changed")
+        )
+        send.assert_not_called()
 
 
 class PriceStoreTests(unittest.TestCase):
@@ -233,26 +235,18 @@ class PriceStoreTests(unittest.TestCase):
         self.assertTrue(updated["notifications_muted"])
         send.assert_not_called()
 
-    @mock.patch.object(price_check, "send_parser_error")
+    @mock.patch.object(price_check, "send_ntfy")
     @mock.patch.object(price_check, "fetch", return_value="<html>changed</html>")
-    def test_parser_failure_is_recorded_and_notified(self, _fetch, send_error):
+    def test_parser_failure_is_recorded_for_dashboard_without_notification(
+        self, _fetch, send
+    ):
         item = self.add()
         with self.assertRaisesRegex(price_check.PriceCheckError, "section was not found"):
             price_check.check_item(self.store, item)
-        self.assertEqual(self.store.get_item(item["id"])["last_status"], "error")
-        send_error.assert_called_once()
-
-    @mock.patch.object(price_check, "send_parser_error")
-    @mock.patch.object(price_check, "fetch", return_value="<html>changed</html>")
-    def test_muted_parser_failure_is_recorded_without_notification(
-        self, _fetch, send_error
-    ):
-        item = self.add()
-        muted = self.store.set_notification_mute(item["id"], 2)
-        with self.assertRaisesRegex(price_check.PriceCheckError, "section was not found"):
-            price_check.check_item(self.store, muted)
-        self.assertEqual(self.store.get_item(item["id"])["last_status"], "error")
-        send_error.assert_not_called()
+        failed = self.store.get_item(item["id"])
+        self.assertEqual(failed["last_status"], "error")
+        self.assertIn("section was not found", failed["last_error"])
+        send.assert_not_called()
 
     @mock.patch.object(price_check, "fetch", return_value=AMAZON_PAGE)
     def test_dry_check_does_not_change_database(self, _fetch):

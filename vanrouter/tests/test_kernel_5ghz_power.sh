@@ -4,6 +4,7 @@ set -euo pipefail
 script_dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 project_dir="$script_dir/../kernel-5ghz-power"
 patch_file="$project_dir/patches/999-mac80211-ignore-s8-min-country-power.patch"
+manifest_version_parser="$project_dir/manifest-package-version.awk"
 test_root=$(mktemp -d "${TMPDIR:-/tmp}/kernel-5ghz-power-test.XXXXXX")
 case $test_root in
 	"${TMPDIR:-/tmp}"/kernel-5ghz-power-test.*) ;;
@@ -28,6 +29,10 @@ for script in \
 done
 [ -r "$project_dir/select-sysupgrade-image.jq" ] || {
 	printf 'profile image selector is unreadable\n' >&2
+	exit 1
+}
+[ -r "$manifest_version_parser" ] || {
+	printf 'manifest package-version parser is unreadable\n' >&2
 	exit 1
 }
 
@@ -96,6 +101,81 @@ grep -F 'trap cleanup_remote EXIT' \
 	"$project_dir/image-action-from-vanpi.sh" >/dev/null
 grep -F 'remote_image=/tmp/dendelion-image-action-$$.itb' \
 	"$project_dir/image-action-from-vanpi.sh" >/dev/null
+grep -F 'source checkout is shallow; complete Git history is required' \
+	"$project_dir/build-openwrt.sh" >/dev/null
+grep -F 'validate_source "$build_source"' \
+	"$project_dir/build-openwrt.sh" >/dev/null
+grep -F 'build source is shallow; complete Git history is required' \
+	"$project_dir/finalize-openwrt-build.sh" >/dev/null
+grep -F 'image base-files version is $base_files_version' \
+	"$project_dir/finalize-openwrt-build.sh" >/dev/null
+if grep -F -- '--depth 1' "$project_dir/README.md" >/dev/null; then
+	printf 'README still recommends a shallow OpenWrt clone\n' >&2
+	exit 1
+fi
+
+history_origin="$test_root/history-origin"
+git init -q "$history_origin"
+git -C "$history_origin" config user.name 'Kernel build test'
+git -C "$history_origin" config user.email 'kernel-build-test@example.invalid'
+mkdir -p "$history_origin/package/base-files"
+printf 'first\n' > "$history_origin/package/base-files/history"
+git -C "$history_origin" add package/base-files/history
+git -C "$history_origin" commit -q -m first
+printf 'second\n' >> "$history_origin/package/base-files/history"
+git -C "$history_origin" commit -q -am second
+git clone -q --depth 1 "file://$history_origin" \
+	"$test_root/shallow-source"
+if "$project_dir/build-openwrt.sh" --check-source \
+	"$test_root/shallow-source" > "$test_root/shallow.out" 2>&1; then
+	printf 'expected builder to reject shallow source history\n' >&2
+	exit 1
+fi
+grep -F 'source checkout is shallow; complete Git history is required' \
+	"$test_root/shallow.out" >/dev/null
+
+mkdir "$test_root/count-toolkit"
+cp "$project_dir/build-openwrt.sh" "$test_root/count-toolkit/"
+grep -Ev '^(OPENWRT_SOURCE_COMMIT|OPENWRT_BASE_FILES_COMMITCOUNT)=' \
+	"$project_dir/release.conf" > "$test_root/count-toolkit/release.conf"
+fixture_head=$(git -C "$history_origin" rev-parse HEAD)
+{
+	printf 'OPENWRT_SOURCE_COMMIT=%s\n' "$fixture_head"
+	printf 'OPENWRT_BASE_FILES_COMMITCOUNT=3\n'
+} >> "$test_root/count-toolkit/release.conf"
+if "$test_root/count-toolkit/build-openwrt.sh" --check-source \
+	"$history_origin" > "$test_root/count.out" 2>&1; then
+	printf 'expected builder to reject the wrong base-files history count\n' >&2
+	exit 1
+fi
+grep -F 'package/base-files history count is 2, expected 3' \
+	"$test_root/count.out" >/dev/null
+
+cat > "$test_root/good-manifest" <<'EOF'
+base-files - 1711~f5dae5ece4
+kernel - 6.12.94~0123456789abcdef0123456789abcdef-r1
+EOF
+[ "$(awk -v package_name=base-files -f "$manifest_version_parser" \
+	"$test_root/good-manifest")" = '1711~f5dae5ece4' ]
+[ "$(awk -v package_name=kernel -f "$manifest_version_parser" \
+	"$test_root/good-manifest")" = \
+	'6.12.94~0123456789abcdef0123456789abcdef-r1' ]
+printf 'base-files - 1~f5dae5ece4\n' > "$test_root/bad-version-manifest"
+bad_base_files_version=$(awk -v package_name=base-files \
+	-f "$manifest_version_parser" "$test_root/bad-version-manifest")
+[ "$bad_base_files_version" != '1711~f5dae5ece4' ]
+printf 'mwan3 - 2.11.13-r1\n' > "$test_root/missing-manifest"
+printf 'base-files 1711~f5dae5ece4\n' > "$test_root/malformed-manifest"
+printf 'base-files - 1711~f5dae5ece4\nbase-files - 1711~f5dae5ece4\n' \
+	> "$test_root/duplicate-manifest"
+for invalid_manifest in missing malformed duplicate; do
+	if awk -v package_name=base-files -f "$manifest_version_parser" \
+		"$test_root/$invalid_manifest-manifest" >/dev/null 2>&1; then
+		printf 'expected parser to reject %s manifest\n' \
+			"$invalid_manifest" >&2
+		exit 1
+	fi
+done
 
 cat > "$test_root/packageinfo" <<'EOF'
 Package: jansson
@@ -152,6 +232,10 @@ grep -F 'no selector in pinned metadata: missing-package' \
 . "$project_dir/release.conf"
 [ "$OPENWRT_RELEASE" = 25.12.5 ]
 [ "$OPENWRT_SOURCE_COMMIT" = f0a60eee2fe051741c643ea6118718aae1ef17fb ]
+[ "$OPENWRT_BASE_FILES_COMMITCOUNT" = 1711 ]
+[ "$OPENWRT_BASE_FILES_VERSION" = '1711~f5dae5ece4' ]
+[ "$OPENWRT_BASE_FILES_VERSION" = \
+	"$OPENWRT_BASE_FILES_COMMITCOUNT~${OPENWRT_REVISION#*-}" ]
 [ "$OPENWRT_BOARD" = linksys,e8450-ubi ]
 [ "$OPENWRT_COMPAT_VERSION" = 2.0 ]
 [ "$OPENWRT_FEEDS_BUILDINFO_SHA256" = \
@@ -245,7 +329,10 @@ if [ "${RUN_NETWORK_TESTS:-0}" = 1 ]; then
 	cat > "$artifacts/FWTOOL-METADATA.json" <<EOF
 {"metadata_version":"1.1","compat_version":"$OPENWRT_COMPAT_VERSION","new_supported_devices":["$OPENWRT_BOARD"],"version":{"dist":"OpenWrt","version":"$OPENWRT_RELEASE","revision":"$OPENWRT_REVISION","target":"$OPENWRT_TARGET/$OPENWRT_SUBTARGET","board":"$OPENWRT_DEVICE"}}
 EOF
-	printf 'synthetic manifest\n' > "$artifacts/IMAGE-MANIFEST.txt"
+	cat > "$artifacts/IMAGE-MANIFEST.txt" <<EOF
+base-files - $OPENWRT_BASE_FILES_VERSION
+kernel - 6.12.94~0123456789abcdef0123456789abcdef-r1
+EOF
 	printf 'mwan3\tmwan3\n' > "$artifacts/PACKAGE-MAP.tsv"
 	printf 'mwan3\n' > "$artifacts/PACKAGES-RESOLVED.txt"
 	printf 'synthetic source sums\n' > "$artifacts/SOURCE-SHA256SUMS"
@@ -264,6 +351,12 @@ EOF
 		printf 'OPENWRT_RELEASE=%s\n' "$OPENWRT_RELEASE"
 		printf 'OPENWRT_SOURCE_COMMIT=%s\n' "$OPENWRT_SOURCE_COMMIT"
 		printf 'OPENWRT_REVISION=%s\n' "$OPENWRT_REVISION"
+		printf 'OPENWRT_BASE_FILES_COMMITCOUNT=%s\n' \
+			"$OPENWRT_BASE_FILES_COMMITCOUNT"
+		printf 'OPENWRT_BASE_FILES_VERSION=%s\n' \
+			"$OPENWRT_BASE_FILES_VERSION"
+		printf 'KERNEL_PACKAGE_VERSION=%s\n' \
+			'6.12.94~0123456789abcdef0123456789abcdef-r1'
 		printf 'OPENWRT_TARGET=%s\n' "$OPENWRT_TARGET"
 		printf 'OPENWRT_SUBTARGET=%s\n' "$OPENWRT_SUBTARGET"
 		printf 'OPENWRT_DEVICE=%s\n' "$OPENWRT_DEVICE"
@@ -307,6 +400,8 @@ EOF
 	grep -Fx "OFFICIAL_RECOVERY_SHA256=$OFFICIAL_RECOVERY_SHA256" \
 		"$test_root/recovery-kit/KIT-INFO.txt" >/dev/null
 	grep -Fx "OPENWRT_COMPAT_VERSION=$OPENWRT_COMPAT_VERSION" \
+		"$test_root/recovery-kit/KIT-INFO.txt" >/dev/null
+	grep -Fx "OPENWRT_BASE_FILES_VERSION=$OPENWRT_BASE_FILES_VERSION" \
 		"$test_root/recovery-kit/KIT-INFO.txt" >/dev/null
 
 	duplicate_artifacts="$test_root/duplicate-artifacts"
