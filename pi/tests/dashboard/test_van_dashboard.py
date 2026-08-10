@@ -1698,6 +1698,100 @@ class TelemetrySummaryReaderTests(unittest.TestCase):
         )
 
 
+class VoltageCheckManagerTests(unittest.TestCase):
+    def test_runs_guarded_monitor_in_background_and_blocks_duplicates(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            voltage_csv = Path(tempdir) / "voltage.csv"
+            voltage_csv.write_text(
+                "2026-08-10T10:00:00-05:00,12.4,old\n",
+                encoding="utf-8",
+            )
+            entered = threading.Event()
+            release = threading.Event()
+            calls = []
+
+            def command(args, timeout):
+                calls.append((list(args), timeout))
+                entered.set()
+                release.wait(2)
+                voltage_csv.write_text(
+                    "2026-08-10T10:01:00-05:00,12.4,new\n",
+                    encoding="utf-8",
+                )
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            manager = dashboard.VoltageCheckManager(
+                tool="/test/voltage_mon.sh",
+                voltage_csv=str(voltage_csv),
+                command=command,
+                timeout=12,
+                wall_clock=lambda: 123,
+            )
+            self.assertTrue(manager.start())
+            self.assertTrue(entered.wait(1))
+            self.assertEqual(manager.snapshot()["status"], "running")
+            self.assertFalse(manager.start())
+            release.set()
+            manager.thread.join(2)
+
+        self.assertEqual(
+            calls,
+            [(["/test/voltage_mon.sh", "--no-notify"], 12)],
+        )
+        self.assertEqual(manager.snapshot()["status"], "complete")
+
+    def test_accepts_low_voltage_exit_and_reports_failures(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            voltage_csv = Path(tempdir) / "voltage.csv"
+            voltage_csv.write_text(
+                "2026-08-10T10:00:00-05:00,12.4,old\n",
+                encoding="utf-8",
+            )
+
+            def low_voltage(_args, timeout):
+                self.assertEqual(timeout, dashboard.VOLTAGE_CHECK_TIMEOUT)
+                voltage_csv.write_text(
+                    "2026-08-10T10:01:00-05:00,11.9,new low voltage\n",
+                    encoding="utf-8",
+                )
+                return SimpleNamespace(returncode=2, stdout="", stderr="")
+
+            manager = dashboard.VoltageCheckManager(
+                voltage_csv=str(voltage_csv),
+                command=low_voltage,
+            )
+            manager.start()
+            manager.thread.join(2)
+            self.assertEqual(manager.snapshot()["status"], "complete")
+
+            for outcome, expected in (
+                ("failed", "monitor failed"),
+                ("unchanged", "did not record a new voltage sample"),
+                ("timeout", "timed out"),
+            ):
+                def command(args, timeout, outcome=outcome):
+                    if outcome == "timeout":
+                        raise subprocess.TimeoutExpired(args, timeout)
+                    if outcome == "failed":
+                        return SimpleNamespace(
+                            returncode=1,
+                            stdout="",
+                            stderr="monitor failed",
+                        )
+                    return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+                failed = dashboard.VoltageCheckManager(
+                    voltage_csv=str(voltage_csv),
+                    command=command,
+                    timeout=4,
+                )
+                with self.subTest(outcome=outcome):
+                    failed.start()
+                    failed.thread.join(2)
+                    self.assertEqual(failed.snapshot()["status"], "error")
+                    self.assertIn(expected, failed.snapshot()["error"])
+
+
 class UsbWatchScriptTests(unittest.TestCase):
     def test_json_snapshot_reuses_usb_and_filesystem_label_discovery(self):
         current = {
@@ -3219,6 +3313,9 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="openwrt-card" data-dashboard-tile', page.data)
         self.assertNotIn(b'id="speedtest-button" data-dashboard-tile', page.data)
         self.assertIn(b'id="telemetry" data-dashboard-tile', page.data)
+        self.assertIn(b'id="telemetry-open" data-action', page.data)
+        self.assertIn(b'id="telemetry-check" type="button" data-action', page.data)
+        self.assertIn(b'id="telemetry-check-label">Check voltage now', page.data)
         self.assertIn(b'id="telemetry-voltage"', page.data)
         self.assertIn(b'id="telemetry-voltage-value"', page.data)
         self.assertIn(b'id="telemetry-voltage-source"', page.data)
@@ -3296,6 +3393,8 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"function formatUptime(seconds)", javascript.data)
         self.assertIn(b"function refreshTelemetrySummary()", javascript.data)
         self.assertIn(b"/api/telemetry-summary", javascript.data)
+        self.assertIn(b"function requestVoltageCheck()", javascript.data)
+        self.assertIn(b"post('telemetry-voltage-check')", javascript.data)
         self.assertIn(b"window.confirm(", javascript.data)
         self.assertIn(b"system-power", javascript.data)
         self.assertIn(b"confirmation: action", javascript.data)
@@ -3384,7 +3483,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"ON \xc2\xb7 BLOCKED", javascript.data)
         self.assertIn(b"function siblingServiceUrl(port)", javascript.data)
         self.assertIn(b"$('books').href = siblingServiceUrl(8787)", javascript.data)
-        self.assertIn(b"$('telemetry').href = siblingServiceUrl(8765)", javascript.data)
+        self.assertIn(b"$('telemetry-open').href = siblingServiceUrl(8765)", javascript.data)
         self.assertIn(b"eligible_local_work", javascript.data)
         self.assertIn(b"Estimated Pi analysis avoided", javascript.data)
         self.assertIn(b"estimated_pi_cpu_seconds_avoided", javascript.data)
@@ -3406,6 +3505,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b".system-uptime", stylesheet.data)
         self.assertIn(b".telemetry-voltage strong", stylesheet.data)
         self.assertIn(b".telemetry-observed", stylesheet.data)
+        self.assertIn(b".telemetry-check", stylesheet.data)
         self.assertNotIn(b".connection", stylesheet.data)
         self.assertIn(b".disk-device-card.held", stylesheet.data)
         self.assertIn(b".monitor-crash-button", stylesheet.data)
@@ -4407,7 +4507,64 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(status.headers["Cache-Control"], "no-store")
         self.assertEqual(status.json["battery"]["value"], 12.6)
         self.assertEqual(status.json["battery"]["source"], "voltage_mon")
+        self.assertIn(status.json["check"]["status"], ("idle", "complete", "error"))
         self.assertEqual(rejected.status_code, 400)
+
+    def test_voltage_check_route_is_narrow_nonblocking_and_csrf_protected(self):
+        calls = []
+
+        class FakeVoltageCheck:
+            running = False
+
+            def start(self):
+                calls.append("start")
+                if self.running:
+                    return False
+                self.running = True
+                return True
+
+            def snapshot(self):
+                return {
+                    "status": "running" if self.running else "idle",
+                    "started_at": 123 if self.running else None,
+                    "completed_at": None,
+                    "error": None,
+                }
+
+        original = dashboard.voltage_check
+        dashboard.voltage_check = FakeVoltageCheck()
+        try:
+            client = dashboard.app.test_client()
+            accepted = client.post(
+                "/api/telemetry-voltage-check",
+                headers={"X-Van-Dashboard": "1"},
+            )
+            duplicate = client.post(
+                "/api/telemetry-voltage-check",
+                headers={"X-Van-Dashboard": "1"},
+            )
+            extra = client.post(
+                "/api/telemetry-voltage-check",
+                data={"command": "anything"},
+                headers={"X-Van-Dashboard": "1"},
+            )
+            cross_origin = client.post(
+                "/api/telemetry-voltage-check",
+                headers={
+                    "X-Van-Dashboard": "1",
+                    "Origin": "https://example.invalid",
+                },
+            )
+        finally:
+            dashboard.voltage_check = original
+
+        self.assertEqual(accepted.status_code, 202)
+        self.assertEqual(accepted.headers["Cache-Control"], "no-store")
+        self.assertEqual(accepted.json["check"]["status"], "running")
+        self.assertEqual(duplicate.status_code, 409)
+        self.assertEqual(extra.status_code, 400)
+        self.assertEqual(cross_origin.status_code, 403)
+        self.assertEqual(calls, ["start", "start"])
 
     def test_starlink_power_change_requests_policy_reconciliation(self):
         events = []

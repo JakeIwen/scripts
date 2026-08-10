@@ -38,6 +38,7 @@ let dashboard = null,
   backupBusy = false,
   ignitionMonitorBusy = false,
   systemPowerBusy = false,
+  voltageCheckBusy = false,
   busy = false,
   tileEditing = false,
   tileDrag = null,
@@ -249,6 +250,7 @@ function formatUptime(seconds) {
   return `Uptime · ${parts.join(' ')}`;
 }
 function renderTelemetrySummary(response) {
+  renderVoltageCheck(response?.check);
   const battery = response?.battery || {};
   if (!battery.available || !Number.isFinite(battery.value)) {
     $('telemetry-voltage-value').textContent = '—';
@@ -270,11 +272,53 @@ function renderTelemetrySummary(response) {
         second: '2-digit',
       })}`;
 }
+function renderVoltageCheck(check) {
+  const running = check?.status === 'running' || (!check && voltageCheckBusy),
+    button = $('telemetry-check');
+  button.disabled = running;
+  button.setAttribute('aria-busy', String(running));
+  $('telemetry-check-label').textContent = running ? 'Checking voltage…' : 'Check voltage now';
+}
 async function refreshTelemetrySummary() {
   try {
-    renderTelemetrySummary(await json('/api/telemetry-summary'));
+    const response = await json('/api/telemetry-summary');
+    renderTelemetrySummary(response);
+    return response;
   } catch (_) {
     renderTelemetrySummary(null);
+    return null;
+  }
+}
+async function requestVoltageCheck() {
+  if (voltageCheckBusy) return;
+  voltageCheckBusy = true;
+  renderVoltageCheck({ status: 'running' });
+  const deadline = Date.now() + 115000;
+  try {
+    let response = await post('telemetry-voltage-check');
+    renderVoltageCheck(response.check);
+    while (response?.check?.status === 'running' && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      response = await refreshTelemetrySummary();
+      if (!response) response = { check: { status: 'running' } };
+    }
+    if (response?.check?.status === 'running') {
+      throw new Error('Voltage check is still running; the tile will update when it finishes');
+    }
+    if (response?.check?.status === 'error') {
+      throw new Error(response.check.error || 'Voltage check failed');
+    }
+    const battery = response?.battery;
+    toast(
+      battery?.available && Number.isFinite(battery.value)
+        ? `Voltage check complete · ${Number(battery.value).toFixed(2)} V`
+        : 'Voltage check completed; no reading is available',
+    );
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    voltageCheckBusy = false;
+    await refreshTelemetrySummary();
   }
 }
 function formatBytes(value) {
@@ -3648,7 +3692,8 @@ function siblingServiceUrl(port) {
 setupTileEditing();
 setIgnitionDuration(120, 'hours');
 $('books').href = siblingServiceUrl(8787);
-$('telemetry').href = siblingServiceUrl(8765);
+$('telemetry-open').href = siblingServiceUrl(8765);
+$('telemetry-check').addEventListener('click', requestVoltageCheck);
 $('cop').addEventListener('click', () =>
   action(() => post('cop-alert', { active: dashboard?.active ? 'false' : 'true' })),
 );

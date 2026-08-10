@@ -71,6 +71,13 @@ VOLTAGE_MON_CSV = os.environ.get(
     "VAN_DASHBOARD_VOLTAGE_MON_CSV",
     "/home/pi/dev/obd-things/tmp/battery/bcan_voltage.csv",
 )
+VOLTAGE_MON_TOOL = os.environ.get(
+    "VAN_DASHBOARD_VOLTAGE_MON_TOOL",
+    "/home/pi/dev/obd-things/projects/battery/voltage_mon.sh",
+)
+VOLTAGE_CHECK_TIMEOUT = float(
+    os.environ.get("VAN_DASHBOARD_VOLTAGE_CHECK_TIMEOUT", "100")
+)
 PROC_UPTIME = os.environ.get("VAN_DASHBOARD_PROC_UPTIME", "/proc/uptime")
 BOOT_ID_PATH = os.environ.get(
     "VAN_DASHBOARD_BOOT_ID_PATH", "/proc/sys/kernel/random/boot_id"
@@ -4518,6 +4525,92 @@ class TelemetrySummaryReader:
         }
 
 
+class VoltageCheckManager:
+    """Run the fixed guarded voltage monitor without blocking HTTP requests."""
+
+    def __init__(
+        self,
+        tool=VOLTAGE_MON_TOOL,
+        voltage_csv=VOLTAGE_MON_CSV,
+        command=run_command,
+        timeout=VOLTAGE_CHECK_TIMEOUT,
+        wall_clock=time.time,
+    ):
+        self.tool = tool
+        self.voltage_csv = voltage_csv
+        self.command = command
+        self.timeout = timeout
+        self.wall_clock = wall_clock
+        self.lock = threading.Lock()
+        self.thread = None
+        self.start_sample = None
+        self.operation = {
+            "status": "idle",
+            "started_at": None,
+            "completed_at": None,
+            "error": None,
+        }
+
+    def _sample_marker(self):
+        sample = TelemetrySummaryReader(
+            voltage_csv=self.voltage_csv
+        )._voltage_mon_sample()
+        if not sample:
+            return None
+        return sample["observed_at"], sample["value"]
+
+    def snapshot(self):
+        with self.lock:
+            return dict(self.operation)
+
+    def start(self):
+        with self.lock:
+            if self.operation["status"] == "running":
+                return False
+            self.start_sample = self._sample_marker()
+            self.operation = {
+                "status": "running",
+                "started_at": int(self.wall_clock()),
+                "completed_at": None,
+                "error": None,
+            }
+            self.thread = threading.Thread(
+                target=self._run,
+                name="voltage-check",
+                daemon=True,
+            )
+            self.thread.start()
+            return True
+
+    def _run(self):
+        error = None
+        try:
+            result = self.command(
+                [self.tool, "--no-notify"],
+                timeout=self.timeout,
+            )
+            # voltage_mon uses 2 to report a successful measurement below its
+            # warning threshold. It is still a valid manual voltage result.
+            if result.returncode not in (0, 2):
+                detail = (
+                    result.stderr or result.stdout or "voltage check failed"
+                ).strip()
+                error = detail[-500:]
+            elif self._sample_marker() == self.start_sample:
+                error = "voltage monitor did not record a new voltage sample"
+        except subprocess.TimeoutExpired:
+            error = f"voltage check timed out after {self.timeout:g} seconds"
+        except OSError as exc:
+            error = f"could not start voltage check: {exc}"
+        except Exception as exc:
+            error = f"voltage check failed: {exc}"
+
+        with self.lock:
+            self.operation["status"] = "error" if error else "complete"
+            self.operation["completed_at"] = int(self.wall_clock())
+            self.operation["error"] = error
+
+
 app = Flask(__name__)
 state_store = StateStore()
 engine_monitor = EngineMonitor()
@@ -4541,6 +4634,7 @@ ignition_monitor_control = IgnitionMonitorController()
 disk_manager = DiskManager()
 system_power = SystemPowerController()
 telemetry_summary = TelemetrySummaryReader()
+voltage_check = VoltageCheckManager()
 
 
 def api_error(message, status):
@@ -4593,7 +4687,31 @@ def api_status():
 def api_telemetry_summary():
     if request.args:
         return api_error("telemetry summary does not accept input", 400)
-    response = jsonify({"ok": True, "battery": telemetry_summary.snapshot()})
+    response = jsonify(
+        {
+            "ok": True,
+            "battery": telemetry_summary.snapshot(),
+            "check": voltage_check.snapshot(),
+        }
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/api/telemetry-voltage-check", methods=["POST"])
+def api_telemetry_voltage_check():
+    if request.values:
+        return api_error("voltage check does not accept input", 400)
+    if not voltage_check.start():
+        return api_error("a voltage check is already running", 409)
+    response = jsonify(
+        {
+            "ok": True,
+            "check": voltage_check.snapshot(),
+            "message": "Voltage check started",
+        }
+    )
+    response.status_code = 202
     response.headers["Cache-Control"] = "no-store"
     return response
 
