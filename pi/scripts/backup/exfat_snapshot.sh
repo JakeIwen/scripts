@@ -26,10 +26,15 @@ rm_command=${EXFAT_SNAPSHOT_RM:-/usr/bin/rm}
 mv_command=${EXFAT_SNAPSHOT_MV:-/usr/bin/mv}
 install_command=${EXFAT_SNAPSHOT_INSTALL:-/usr/bin/install}
 df_command=${EXFAT_SNAPSHOT_DF:-/usr/bin/df}
+smartctl_command=${EXFAT_SNAPSHOT_SMARTCTL:-/usr/sbin/smartctl}
+ps_command=${EXFAT_SNAPSHOT_PS:-/usr/bin/ps}
+sleep_command=${EXFAT_SNAPSHOT_SLEEP:-/usr/bin/sleep}
+block_stat_root=${EXFAT_SNAPSHOT_BLOCK_STAT_ROOT:-/sys/class/block}
 lifecycle_lock=${EXFAT_SNAPSHOT_LIFECYCLE_LOCK:-/home/pi/.internet_switches.lock}
 
 # shellcheck source=backup_conf.sh
 . "$backup_conf" || exit 1
+telemetry_seconds=${EXFAT_SNAPSHOT_TELEMETRY_SECONDS:-300}
 
 notify() { "$notify_command" "$@"; }
 log() { echo "[$("$date_command" '+%F %T')] $*"; }
@@ -67,7 +72,7 @@ done
   fail "snapshot root must be the backups directory directly below the exact target mount"
 for value in "$EXFAT_SNAPSHOT_STALE_HOURS" "$EXFAT_SNAPSHOT_MIN_FREE_GB" \
   "$EXFAT_SNAPSHOT_KEEP_DAILY_DAYS" "$EXFAT_SNAPSHOT_KEEP_WEEKLY_DAYS" \
-  "$EXFAT_SNAPSHOT_KEEP_MONTHLY_DAYS"; do
+  "$EXFAT_SNAPSHOT_KEEP_MONTHLY_DAYS" "$telemetry_seconds"; do
   [[ "$value" =~ $integer_re ]] || fail "invalid numeric snapshot configuration"
 done
 (( EXFAT_SNAPSHOT_KEEP_DAILY_DAYS < EXFAT_SNAPSHOT_KEEP_WEEKLY_DAYS &&
@@ -80,11 +85,15 @@ for required in "$policyctl" "$diskctl" "$umount_disks" "$notify_command" \
   "$touch_command" "$rm_command" "$mv_command" "$install_command" "$df_command"; do
   [[ -x "$required" ]] || fail "required command is not executable: $required"
 done
+for required in "$ps_command" "$sleep_command"; do
+  [[ -x "$required" ]] || fail "required telemetry command is not executable: $required"
+done
 
 snapshot_suffix_re='[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}'
 partial_name=".${EXFAT_SNAPSHOT_PREFIX%_}.partial"
 complete_marker=.vanpi_snapshot_complete
 child=
+telemetry_child=
 backup_disk_active=0
 job_locked=0
 skip_exit_stop=0
@@ -96,6 +105,151 @@ run() {
   local rc=$?
   child=
   return "$rc"
+}
+
+stop_snapshot_telemetry() {
+  [[ -n "$telemetry_child" ]] || return 0
+  kill -TERM "$telemetry_child" 2>/dev/null || true
+  wait "$telemetry_child" 2>/dev/null || true
+  telemetry_child=
+}
+
+snapshot_block_stat() {
+  local parent_name=$1 stat_path
+  stat_path="$block_stat_root/$parent_name/stat"
+  [[ -r "$stat_path" ]] || return 1
+  IFS= read -r REPLY < "$stat_path"
+  [[ -n "$REPLY" ]]
+}
+
+snapshot_telemetry_loop() {
+  local rsync_pid=$1 parent_name=$2 sleeper= current now previous_epoch
+  local reads read_merges read_sectors read_ms writes write_merges write_sectors
+  local write_ms in_flight io_ms weighted_ms rest
+  local prev_reads prev_read_sectors prev_read_ms prev_writes prev_write_sectors
+  local prev_write_ms prev_io_ms elapsed delta_reads delta_writes
+  local process_lines process_io
+
+  trap '[[ -z "$sleeper" ]] || kill "$sleeper" 2>/dev/null; exit 0' TERM INT
+  snapshot_block_stat "$parent_name" || {
+    log "telemetry unavailable: cannot read block statistics for $parent_name"
+    return 0
+  }
+  read -r reads read_merges read_sectors read_ms writes write_merges \
+    write_sectors write_ms in_flight io_ms weighted_ms rest <<< "$REPLY"
+  prev_reads=$reads
+  prev_read_sectors=$read_sectors
+  prev_read_ms=$read_ms
+  prev_writes=$writes
+  prev_write_sectors=$write_sectors
+  prev_write_ms=$write_ms
+  prev_io_ms=$io_ms
+  previous_epoch=$($date_command +%s)
+  log "telemetry started: rsync_pid=$rsync_pid target=$parent_name block_stat=$REPLY"
+
+  while kill -0 "$rsync_pid" 2>/dev/null; do
+    "$sleep_command" "$telemetry_seconds" &
+    sleeper=$!
+    wait "$sleeper" 2>/dev/null || return 0
+    sleeper=
+    kill -0 "$rsync_pid" 2>/dev/null || return 0
+    snapshot_block_stat "$parent_name" || {
+      log "telemetry warning: block statistics disappeared for $parent_name"
+      return 0
+    }
+    current=$REPLY
+    read -r reads read_merges read_sectors read_ms writes write_merges \
+      write_sectors write_ms in_flight io_ms weighted_ms rest <<< "$current"
+    now=$($date_command +%s)
+    elapsed=$((now - previous_epoch))
+    delta_reads=$((reads - prev_reads))
+    delta_writes=$((writes - prev_writes))
+    log "telemetry target=$parent_name interval=${elapsed}s read_ops=$delta_reads read_mib=$(((read_sectors - prev_read_sectors) / 2048)) read_avg_ms=$((delta_reads ? (read_ms - prev_read_ms) / delta_reads : 0)) write_ops=$delta_writes write_mib=$(((write_sectors - prev_write_sectors) / 2048)) write_avg_ms=$((delta_writes ? (write_ms - prev_write_ms) / delta_writes : 0)) io_busy_ms=$((io_ms - prev_io_ms)) in_flight=$in_flight"
+    process_lines=$(
+      "$ps_command" -o pid=,ppid=,stat=,wchan:24=,etime=,time=,comm= \
+        -p "$rsync_pid" --ppid "$rsync_pid" 2>&1
+    ) || process_lines="ps failed: $process_lines"
+    while IFS= read -r process_line; do
+      [[ -n "$process_line" ]] && log "telemetry process: $process_line"
+    done <<< "$process_lines"
+    if [[ -r "/proc/$rsync_pid/io" ]]; then
+      process_io=$(/usr/bin/awk \
+        '/^(syscr|syscw|read_bytes|write_bytes|cancelled_write_bytes):/ { printf "%s%s=%s", separator, $1, $2; separator=" " } END { print "" }' \
+        "/proc/$rsync_pid/io" 2>/dev/null) || process_io=
+      [[ -z "$process_io" ]] || log "telemetry rsync_io: $process_io"
+    fi
+    prev_reads=$reads
+    prev_read_sectors=$read_sectors
+    prev_read_ms=$read_ms
+    prev_writes=$writes
+    prev_write_sectors=$write_sectors
+    prev_write_ms=$write_ms
+    prev_io_ms=$io_ms
+    previous_epoch=$now
+  done
+}
+
+run_snapshot_rsync() {
+  local parent_name=$1 rc final_stat
+  shift
+  "$@" &
+  child=$!
+  snapshot_telemetry_loop "$child" "$parent_name" &
+  telemetry_child=$!
+  wait "$child"
+  rc=$?
+  child=
+  stop_snapshot_telemetry
+  if snapshot_block_stat "$parent_name"; then
+    final_stat=$REPLY
+    log "telemetry finished: target=$parent_name block_stat=$final_stat rsync_status=$rc"
+  else
+    log "telemetry finished: target=$parent_name block statistics unavailable rsync_status=$rc"
+  fi
+  return "$rc"
+}
+
+snapshot_parent_device() {
+  local device=$1 block sys_path parent_name
+  block=${device##*/}
+  sys_path=$($readlink_command -f -- "$block_stat_root/$block") || return 1
+  [[ -f "$block_stat_root/$block/partition" ]] || return 1
+  parent_name=${sys_path%/*}
+  parent_name=${parent_name##*/}
+  [[ -n "$parent_name" && -b "/dev/$parent_name" ]] || return 1
+  printf '/dev/%s\n' "$parent_name"
+}
+
+log_snapshot_smart() {
+  local parent=$1 output rc line
+  if [[ ! -x "$smartctl_command" ]]; then
+    log "SMART telemetry unavailable: $smartctl_command is not executable"
+    return 0
+  fi
+  output=$(
+    /usr/bin/sudo "$timeout_command" --kill-after=2 25 \
+      "$smartctl_command" -d sat -g all -H -A -l error "$parent" 2>&1
+  )
+  rc=$?
+  log "SMART snapshot for $parent (status $rc; smartctl uses a diagnostic bitmask)"
+  while IFS= read -r line; do
+    case "$line" in
+      "SMART overall-health"*|"SMART Health Status"*|"AAM feature is:"*|\
+      "APM feature is:"*|"Rd look-ahead is:"*|"Write cache is:"*|\
+      "ATA Error Count:"*|"No Errors Logged"|\
+      *"Raw_Read_Error_Rate"*|*"Spin_Up_Time"*|*"Start_Stop_Count"*|\
+      *"Reallocated_Sector_Ct"*|*"Power_On_Hours"*|*"Spin_Retry_Count"*|\
+      *"Calibration_Retry_Count"*|*"Power_Cycle_Count"*|\
+      *"G-Sense_Error_Rate"*|*"Power-Off_Retract_Count"*|\
+      *"Temperature_Celsius"*|*"Reallocated_Event_Count"*|\
+      *"Current_Pending_Sector"*|*"Offline_Uncorrectable"*|\
+      *"UDMA_CRC_Error_Count"*|*"Load_Retry_Count"*|*"Load_Cycle_Count"*)
+        log "SMART: $line"
+        ;;
+    esac
+  done <<< "$output"
+  (( rc == 124 )) && log "SMART warning: query timed out for exact active target $parent"
+  return 0
 }
 
 release_job_lock() {
@@ -129,6 +283,7 @@ stop_backup_disk() {
 cleanup() {
   local rc=$?
   trap - EXIT TERM INT
+  stop_snapshot_telemetry
   if [[ -n "$child" ]]; then
     kill -TERM "$child" 2>/dev/null || true
     wait "$child" 2>/dev/null || true
@@ -147,6 +302,7 @@ cleanup() {
 
 aborted() {
   skip_exit_stop=1
+  stop_snapshot_telemetry
   if [[ -n "$child" ]]; then
     kill -TERM "$child" 2>/dev/null || true
     wait "$child" 2>/dev/null || true
@@ -317,7 +473,8 @@ write_success_stamp() {
 }
 
 main() {
-  local policy_status source_device source_mount_status target_real root_real
+  local policy_status source_device source_mount_status target_device target_parent
+  local target_parent_name target_real root_real
   local previous_name='' previous_path='' partial_path final_name final_path
   local marker_tmp free_gb rc
   local -a completed=()
@@ -367,6 +524,12 @@ main() {
     log "van started before snapshot copy; deferring"
     return 143
   }
+  target_device=$(resolve_label "$EXFAT_SNAPSHOT_DISK_LABEL") ||
+    fail "$EXFAT_SNAPSHOT_DISK_LABEL disappeared after its mount was verified"
+  target_parent=$(snapshot_parent_device "$target_device") ||
+    fail "could not resolve the whole-disk parent for $target_device"
+  target_parent_name=${target_parent##*/}
+  log_snapshot_smart "$target_parent"
 
   if [[ -L "$EXFAT_SNAPSHOT_ROOT" ||
         ( -e "$EXFAT_SNAPSHOT_ROOT" && ! -d "$EXFAT_SNAPSHOT_ROOT" ) ]]; then
@@ -408,7 +571,7 @@ main() {
   )
   [[ -z "$previous_path" ]] ||
     rsync_args+=("--link-dest=$previous_path")
-  run "$rsync_command" "${rsync_args[@]}" -- \
+  run_snapshot_rsync "$target_parent_name" "$rsync_command" "${rsync_args[@]}" -- \
     "$EXFAT_SNAPSHOT_SOURCE_MNT/" "$partial_path/"
   rc=$?
   (( rc == 0 )) || fail "rsync snapshot exited $rc; partial snapshot retained for retry"

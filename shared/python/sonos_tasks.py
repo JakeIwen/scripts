@@ -10,6 +10,7 @@ import os
 REAR_PHYSICAL_LEFT_UID = "RINCON_7828CA20F21A01400"
 REAR_PHYSICAL_RIGHT_UID = "RINCON_7828CA20F1DA01400"
 STEREO_PAIR_TIMEOUT = 30
+STEREO_PAIR_RETRYABLE_ERRORS = {"402", "1034"}
 
 # to make sonos_tasks globally importable
 # run:
@@ -67,6 +68,9 @@ def prev_track():
     
 def rear_movie(vol=47):
     return audio_source_device(get_rear_stereo_master(), 'optical', vol)
+def rear_movie_resume():
+    device = get_rear_stereo_master()
+    return audio_source_device(device, 'optical', int(device.volume))
 def rear_normal():
     return make_stereo_pair_by_uid(
         REAR_PHYSICAL_LEFT_UID,
@@ -138,6 +142,7 @@ def make_stereo_pair_by_uid(left_uid, right_uid, timeout=STEREO_PAIR_TIMEOUT):
     return create_stereo_pair_with_retry(left_uid, right_uid, timeout)
 
 def create_stereo_pair_with_retry(left_uid, right_uid, timeout):
+    desired_map = stereo_channel_map(left_uid, right_uid)
     deadline = monotonic() + timeout
     last_error = None
     while monotonic() < deadline:
@@ -148,11 +153,24 @@ def create_stereo_pair_with_retry(left_uid, right_uid, timeout):
         try:
             speakers[left_uid].create_stereo_pair(speakers[right_uid])
         except SoCoUPnPException as error:
-            if str(error.error_code) != "402":
+            if str(error.error_code) not in STEREO_PAIR_RETRYABLE_ERRORS:
                 raise
-            last_error = error
-            sleep(2)
-            continue
+            # Some speakers reject AddBondedZones when contacted as the new
+            # left member but accept the same ChannelMapSet via the other
+            # member of the pair.
+            try:
+                speakers[right_uid].deviceProperties.AddBondedZones(
+                    [("ChannelMapSet", desired_map)]
+                )
+            except SoCoUPnPException as alternate_error:
+                if (
+                    str(alternate_error.error_code)
+                    not in STEREO_PAIR_RETRYABLE_ERRORS
+                ):
+                    raise
+                last_error = alternate_error
+                sleep(2)
+                continue
         remaining = max(1, deadline - monotonic())
         return wait_for_stereo_pair(left_uid, right_uid, remaining)
     raise RuntimeError(

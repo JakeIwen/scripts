@@ -1,0 +1,27 @@
+[Unit]
+Description=Van Movies & TV library and VLC controller on :8789
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/video_library_server.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/templates/video_library.html
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/static/video_library.js
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/static/video_library.css
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/sonos_tasks.py
+ExecStartPre=/usr/bin/test -r /home/pi/sns.sh
+ExecStartPre=/usr/bin/test -x /usr/bin/vlc
+ExecStart=/usr/bin/python3 /home/pi/scripts/python-automation/video_library_server.py
+WorkingDirectory=/home/pi
+Restart=always
+RestartSec=5
+User=pi
+Environment=PYTHONUNBUFFERED=1
+Environment=DISPLAY=:0
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+Environment=PYTHONPATH=/home/pi/scripts/python-automation
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

@@ -4,6 +4,8 @@ Tests shared by one feature live together:
 
 - `compute/`: compute protocol, broker, deployment, upgrade, and worker tests.
 - `dashboard/`: dashboard application, routes, assets, and tile tests.
+- `media/`: Movies & TV service tests, including
+  `test_video_library_server.py`.
 - `network/`: connectivity collection and UBNT Wi-Fi tests.
 - `policy/`: storage/torrent policy CLI, reconciliation, watchdog, and deployment tests.
 - `price_check/`: price-check application and cron-schedule tests.

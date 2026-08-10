@@ -3190,7 +3190,10 @@ class DashboardRouteTests(unittest.TestCase):
             b'class="speedtest-button openwrt-speedtest-button" id="speedtest-button"',
             page.data,
         )
-        self.assertEqual(page.data.count(b"tile-heading"), 14)
+        self.assertEqual(page.data.count(b"tile-heading"), 15)
+        self.assertIn(b'id="video-library" data-dashboard-tile', page.data)
+        self.assertIn(b"Movies &amp; TV", page.data)
+        self.assertIn(b"Browse, play, and continue movies and shows", page.data)
         self.assertIn(b'id="sonos-track"', page.data)
         self.assertIn(b'id="sonos-progress"', page.data)
         self.assertIn(b'data-transport="play_pause"', page.data)
@@ -3320,7 +3323,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="telemetry-voltage-value"', page.data)
         self.assertIn(b'id="telemetry-voltage-source"', page.data)
         self.assertIn(b'id="telemetry-observed"', page.data)
-        self.assertEqual(page.data.count(b"data-dashboard-tile"), 14)
+        self.assertEqual(page.data.count(b"data-dashboard-tile"), 15)
         self.assertNotIn(b'class="network-card speedtest-card"', page.data)
         self.assertIn(b'id="ubnt-network-list"', page.data)
         self.assertIn(b'id="ubnt-password-form"', page.data)
@@ -3483,6 +3486,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"ON \xc2\xb7 BLOCKED", javascript.data)
         self.assertIn(b"function siblingServiceUrl(port)", javascript.data)
         self.assertIn(b"$('books').href = siblingServiceUrl(8787)", javascript.data)
+        self.assertIn(b"$('video-library').href = siblingServiceUrl(8789)", javascript.data)
         self.assertIn(b"$('telemetry-open').href = siblingServiceUrl(8765)", javascript.data)
         self.assertIn(b"eligible_local_work", javascript.data)
         self.assertIn(b"Estimated Pi analysis avoided", javascript.data)

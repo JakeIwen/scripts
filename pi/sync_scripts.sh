@@ -35,6 +35,9 @@ mkdir -p "$python_stage"
   -exec cp {} "$python_stage/" \;
 cp -R "$pi_apps/van_dashboard/templates" "$python_stage/"
 cp -R "$pi_apps/van_dashboard/static" "$python_stage/"
+cp "$pi_apps/video_library/templates/video_library.html" "$python_stage/templates/"
+cp "$pi_apps/video_library/static/video_library.js" "$python_stage/static/"
+cp "$pi_apps/video_library/static/video_library.css" "$python_stage/static/"
 
 # one multiplexed connection shared by every ssh/scp below: parallel transfers
 # ride it as channels instead of separate connections, so sshd's MaxStartups

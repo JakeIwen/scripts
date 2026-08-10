@@ -21,6 +21,12 @@ nsecs=`python /home/pi/scripts/python-automation/vlc_property.py NS`
 
 if [[ $file && $nsecs ]]; then
   decoded="`uridecode $file`"
+  # The web manager launches a revalidated real target and owns its SQLite
+  # progress. Only legacy /links/ launches belong in this compatibility log;
+  # otherwise resume() would prepend /links to an already absolute target.
+  if [[ "$decoded" != */links/* ]]; then
+    exit 0
+  fi
   trimmed="`echo $decoded | sed -E 's|.*\/links||g'`"
   sed -i "\|^$trimmed|d" $POSPATH # rm existing ref to file 
   line="$trimmed $nsecs $(hhmmss $nsecs)"

@@ -43,6 +43,7 @@ EXFAT_SNAPSHOT_MIN_FREE_GB=1
 EXFAT_SNAPSHOT_KEEP_DAILY_DAYS=30
 EXFAT_SNAPSHOT_KEEP_WEEKLY_DAYS=84
 EXFAT_SNAPSHOT_KEEP_MONTHLY_DAYS=365
+EXFAT_SNAPSHOT_TELEMETRY_SECONDS=1
 acquire_job_lock() {
   exec 9>'$test_root/job.lock'
   /usr/bin/flock -n 9
@@ -55,8 +56,32 @@ export EXFAT_SNAPSHOT_POLICYCTL=/usr/bin/true
 export EXFAT_SNAPSHOT_DISKCTL=/usr/bin/true
 export EXFAT_SNAPSHOT_UMOUNT_DISKS=/usr/bin/true
 export EXFAT_SNAPSHOT_NOTIFY=/usr/bin/true
+export EXFAT_SNAPSHOT_SMARTCTL=/usr/bin/true
+fake_block_root="$test_root/sys/class/block"
+mkdir -p "$fake_block_root/fakeblock"
+printf '%s\n' '100 0 200 300 400 0 500 600 0 700 800 0 0 0 0 0 0' \
+  > "$fake_block_root/fakeblock/stat"
+export EXFAT_SNAPSHOT_BLOCK_STAT_ROOT="$fake_block_root"
 # shellcheck source=../../scripts/backup/exfat_snapshot.sh
 source "$snapshot_script"
+
+# Telemetry must sample block deltas while the command runs, then terminate its
+# sampler promptly instead of leaving a five-minute sleep behind.
+(
+  /usr/bin/sleep 0.4
+  printf '%s\n' '110 0 2248 1300 420 0 4596 2600 0 1700 2800 0 0 0 0 0 0' \
+    > "$fake_block_root/fakeblock/stat"
+) &
+telemetry_fixture_pid=$!
+telemetry_output=$(run_snapshot_rsync fakeblock /usr/bin/sleep 2.2)
+telemetry_status=$?
+wait "$telemetry_fixture_pid"
+[[ $telemetry_status == 0 ]] || fail "telemetry wrapper changed command success"
+[[ "$telemetry_output" == *"telemetry target=fakeblock"* &&
+   "$telemetry_output" == *"read_ops=10 read_mib=1 read_avg_ms=100"* &&
+   "$telemetry_output" == *"write_ops=20 write_mib=2 write_avg_ms=100"* &&
+   "$telemetry_output" == *"telemetry finished: target=fakeblock"* ]] ||
+  fail "telemetry wrapper did not report the expected block-I/O deltas"
 
 # The selected rsync mode must share an unchanged file's inode, while a changed
 # source file creates a new inode and leaves the earlier snapshot untouched.

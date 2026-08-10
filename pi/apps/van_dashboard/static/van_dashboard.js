@@ -3692,6 +3692,7 @@ function siblingServiceUrl(port) {
 setupTileEditing();
 setIgnitionDuration(120, 'hours');
 $('books').href = siblingServiceUrl(8787);
+$('video-library').href = siblingServiceUrl(8789);
 $('telemetry-open').href = siblingServiceUrl(8765);
 $('telemetry-check').addEventListener('click', requestVoltageCheck);
 $('cop').addEventListener('click', () =>

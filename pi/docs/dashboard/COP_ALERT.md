@@ -13,12 +13,16 @@ The Flask backend is `pi/apps/van_dashboard/van_dashboard.py`; its page,
 stylesheet, and browser code live beside it under `templates/` and `static/`.
 `pi/sync_scripts.sh` deploys those directories beside the Python entry point.
 
-The Audiobooks tile preserves the current host and changes only the port to
-`8787`, so it also works over Tailscale.
+The Audiobooks and Movies & TV tiles preserve the current host and change only
+the port: Audiobooks uses `8787`, while the Movies & TV service uses `8789`.
+Both links therefore work through the LAN hostname or the Tailscale
+hostname/address used to open the dashboard.
 
 The service has no user-login layer; it is intended only for the trusted van
-LAN and Tailscale ACL. Do not forward port `8788` from a public interface. The
-server rejects cross-origin browser control requests to reduce CSRF risk.
+LAN and Tailscale ACL. The Movies & TV service is likewise intended only for
+those trusted networks. Do not forward ports `8788` or `8789` from a public
+interface. Both control surfaces reject cross-origin browser mutations to
+reduce CSRF risk.
 
 ## OpenWrt and speed tests
 

@@ -603,6 +603,20 @@ playf() {
 vlcmd() {
   cmd=$1
   param=$2
+  case "$cmd" in
+    PlayPause) video_action="toggle" ;;
+    Play) video_action="play" ;;
+    Pause) video_action="pause" ;;
+    Next) video_action="next" ;;
+    Previous) video_action="previous" ;;
+    Stop) video_action="stop" ;;
+    *) video_action="" ;;
+  esac
+  if [[ -n "$video_action" ]]; then
+    curl -sS -X POST "${VIDEOAPI:-http://localhost:8789/api}/control" \
+      --data-urlencode "action=$video_action"
+    return $?
+  fi
   wake_display
   dbus-send --type=method_call --dest=org.mpris.MediaPlayer2.vlc /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.$cmd $param
 }
@@ -621,6 +635,26 @@ book() { # book <fuzzy title> | book (status) | -p pause/play | -b/-f skip 60s |
 for b in json.load(sys.stdin)["books"]: print(b["name"])' ;;
     *)    curl -sG "$BOOKAPI/play" --data-urlencode "q=$*" | python3 -c 'import json,sys
 print(json.load(sys.stdin).get("message",""))' ;;
+  esac
+  echo
+}
+
+### MOVIES & TV ### (video-library.service, port 8789 — web UI at http://vanpi.lan:8789)
+VIDEOAPI="http://localhost:8789/api"
+vid() { # vid <fuzzy title> | -p play/pause | -b/-f 20s | -B/-F 5m | -n/-N next/prev | -x stop | -l <query>
+  case "${1:-}" in
+    "")   curl -sS "$VIDEOAPI/status" | python3 -m json.tool ;;
+    -p)   curl -sS -X POST "$VIDEOAPI/control" --data-urlencode "action=toggle" ;;
+    -b)   curl -sS -X POST "$VIDEOAPI/seek" --data-urlencode "seconds=-20" ;;
+    -f)   curl -sS -X POST "$VIDEOAPI/seek" --data-urlencode "seconds=20" ;;
+    -B)   curl -sS -X POST "$VIDEOAPI/seek" --data-urlencode "seconds=-300" ;;
+    -F)   curl -sS -X POST "$VIDEOAPI/seek" --data-urlencode "seconds=300" ;;
+    -n)   curl -sS -X POST "$VIDEOAPI/control" --data-urlencode "action=next" ;;
+    -N)   curl -sS -X POST "$VIDEOAPI/control" --data-urlencode "action=previous" ;;
+    -x)   curl -sS -X POST "$VIDEOAPI/control" --data-urlencode "action=stop" ;;
+    -l)   shift; curl -sSG "$VIDEOAPI/search" --data-urlencode "q=$*" | python3 -m json.tool ;;
+    -r)   shift; curl -sS -X POST "$VIDEOAPI/play" --data-urlencode "q=$*" --data-urlencode "shuffle=true" ;;
+    *)    curl -sS -X POST "$VIDEOAPI/play" --data-urlencode "q=$*" ;;
   esac
   echo
 }
