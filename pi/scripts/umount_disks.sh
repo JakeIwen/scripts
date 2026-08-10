@@ -352,6 +352,33 @@ ud_normal_unmount() {
     /usr/bin/umount -- "$1"
 }
 
+ud_findmnt_source_targets() {
+  /usr/bin/findmnt -rn -S "$1" -o TARGET
+}
+
+# umount can remain blocked in userspace long enough for timeout(1) to return
+# 124 even though the kernel has already completed the unmount. Reconcile a
+# nonzero command status against the exact source device before escalating or
+# reporting failure. Only findmnt's unambiguous "not found" result is success;
+# mounted devices and discovery errors continue to fail closed.
+ud_reconcile_unmount_result() {
+  local label=$1 device=$2 command_rc=$3 targets findmnt_rc
+  (( command_rc != 0 )) || return 0
+
+  targets=$(ud_findmnt_source_targets "$device" 2>&1)
+  findmnt_rc=$?
+  if (( findmnt_rc == 1 )) && [[ -z "$targets" ]]; then
+    echo "umount returned status $command_rc for $label, but findmnt verifies $device is unmounted; continuing"
+    return 0
+  fi
+  if (( findmnt_rc != 0 && findmnt_rc != 1 )); then
+    echo "WARNING: cannot reconcile unmount result for $label (findmnt status $findmnt_rc): ${targets:-no diagnostic output}" >&2
+  elif (( findmnt_rc == 1 )); then
+    echo "WARNING: ambiguous findmnt result while reconciling $label: $targets" >&2
+  fi
+  return 1
+}
+
 ud_emergency_evict_mount_holders() {
   local mountpoint=$1 before after output rc
 
@@ -628,6 +655,10 @@ umount_disks_main() {
     echo "unmounting $label from $expected_mount"
     unmount_output=$(ud_normal_unmount "$expected_mount" 2>&1)
     rc=$?
+    if (( rc != 0 )) &&
+        ud_reconcile_unmount_result "$label" "${devices[$label]}" "$rc"; then
+      rc=0
+    fi
     if (( rc != 0 && emergency )); then
       first_holders=$(ud_mount_holder_summary "$expected_mount")
       echo "normal unmount failed for $label (status $rc): ${unmount_output:-no diagnostic output}"
@@ -636,6 +667,10 @@ umount_disks_main() {
       echo "retrying normal unmount for $label after emergency holder eviction"
       unmount_output=$(ud_normal_unmount "$expected_mount" 2>&1)
       rc=$?
+      if (( rc != 0 )) &&
+          ud_reconcile_unmount_result "$label" "${devices[$label]}" "$rc"; then
+        rc=0
+      fi
     fi
     if (( rc != 0 )); then
       final_holders=$(ud_mount_holder_summary "$expected_mount")
@@ -649,7 +684,7 @@ umount_disks_main() {
       continue
     fi
 
-    post_mounts=$(/usr/bin/findmnt -rn -S "${devices[$label]}" -o TARGET 2>&1)
+    post_mounts=$(ud_findmnt_source_targets "${devices[$label]}" 2>&1)
     rc=$?
     if (( rc == 0 )); then
       ud_record_failure "$label still has a mount after umount returned success"

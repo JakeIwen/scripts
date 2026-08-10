@@ -15,6 +15,24 @@ export UMOUNT_DISKS_LIBRARY_ONLY=1
 # shellcheck source=../../scripts/umount_disks.sh
 source "$script"
 
+ud_findmnt_source_targets() { return 1; }
+reconcile_output=$(ud_reconcile_unmount_result hdd1tb /dev/sdz1 124 2>&1)
+[[ $? == 0 ]] ||
+  fail "a timed-out unmount was not accepted after exact-device findmnt reported it absent"
+[[ "$reconcile_output" == *"findmnt verifies /dev/sdz1 is unmounted"* ]] ||
+  fail "reconciled timed-out unmount did not explain its authoritative device check"
+
+ud_findmnt_source_targets() { printf '%s\n' /mnt/hdd1tb; return 0; }
+ud_reconcile_unmount_result hdd1tb /dev/sdz1 124 >/dev/null 2>&1 &&
+  fail "a timed-out unmount was accepted while the exact device remained mounted"
+
+ud_findmnt_source_targets() { echo "synthetic discovery error" >&2; return 2; }
+ud_reconcile_unmount_result hdd1tb /dev/sdz1 124 >/dev/null 2>&1 &&
+  fail "a timed-out unmount was accepted after findmnt failed"
+
+# Restore the production helper for any later integration assertions.
+ud_findmnt_source_targets() { /usr/bin/findmnt -rn -S "$1" -o TARGET; }
+
 umount_disks_main --emergency >/dev/null 2>&1
 [[ $? == 2 ]] ||
   fail "emergency mode was accepted without --spindown"
