@@ -2561,11 +2561,13 @@ class BackupManagerTests(unittest.TestCase):
                 "CLONE_TARGETS=(hotspare-a:7 hotspare-b:14)\n"
                 "BORG_STALE_HOURS=48\n"
                 "EXFAT_SNAPSHOT_STALE_HOURS=48\n"
+                "OPENWRT_BACKUP_STALE_HOURS=72\n"
                 "CLONE_STALE_FACTOR=2\n"
             )
         stamp_times = {
             "borg_ok": self.NOW - 3600,
             "exfat512_ok": self.NOW - 5400,
+            "openwrt_ok": self.NOW - 7200,
             "clone_hotspare-a": self.NOW - 2 * 86400,
             "clone_hotspare-b": self.NOW - 40 * 86400,
         }
@@ -2629,6 +2631,8 @@ class BackupManagerTests(unittest.TestCase):
         self.assertEqual(
             status["exfat_snapshot"]["last_success_at"], self.NOW - 5400
         )
+        self.assertFalse(status["openwrt"]["stale"])
+        self.assertEqual(status["openwrt"]["last_success_at"], self.NOW - 7200)
         self.assertEqual(
             [card["label"] for card in status["hotswaps"]],
             ["hotspare-a", "hotspare-b"],
@@ -2679,6 +2683,35 @@ class BackupManagerTests(unittest.TestCase):
         self.assertTrue(status["borg"]["running"])
         self.assertTrue(status["exfat_snapshot"]["running"])
         self.assertEqual(status["health"], "running")
+
+    def test_openwrt_status_requires_a_fresh_verified_stamp(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            config, stamps, bundle = self.make_files(tempdir, tm_running=False)
+            manager = dashboard.BackupManager(
+                config=config,
+                stamp_dir=stamps,
+                time_machine_bundle=bundle,
+                command=lambda args, timeout: SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(self.lsblk_payload()),
+                    stderr="",
+                ),
+                wall_clock=lambda: self.NOW,
+                process_root=os.path.join(tempdir, "proc"),
+            )
+
+            stamp = os.path.join(stamps, "openwrt_ok")
+            os.unlink(stamp)
+            missing = manager.status()["openwrt"]
+            self.assertTrue(missing["stale"])
+
+            with open(stamp, "w", encoding="utf-8") as handle:
+                handle.write("verified\n")
+            old_stamp = self.NOW - 73 * 3600
+            os.utime(stamp, (old_stamp, old_stamp))
+            stale = manager.status()["openwrt"]
+            self.assertTrue(stale["stale"])
+            self.assertEqual(stale["stale_hours"], 72)
 
     def test_rejects_invalid_configuration_and_stale_running_metadata(self):
         invalid = (
@@ -3104,6 +3137,9 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="backup-history"', page.data)
         self.assertIn(b'id="backup-run-borg" data-action', page.data)
         self.assertIn(b'id="backup-run-exfat" data-action', page.data)
+        self.assertIn(b'id="backup-openwrt"', page.data)
+        self.assertIn(b'id="backup-openwrt-dot"', page.data)
+        self.assertIn(b'id="backup-openwrt-detail"', page.data)
         self.assertIn(b'id="backup-borg-action-detail"', page.data)
         self.assertIn(b'id="backup-exfat-action-detail"', page.data)
         self.assertIn(b'id="backup-borg-running" hidden', page.data)

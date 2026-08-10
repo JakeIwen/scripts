@@ -998,6 +998,7 @@ function renderBackups(response) {
   const state = response.backups,
     borg = state.borg || {},
     exfat = state.exfat_snapshot || {},
+    openwrt = state.openwrt || {},
     tm = state.time_machine || {},
     operation = state.operation || { status: 'idle' },
     operationKind = operation.kind || (operation.target ? 'clone' : null),
@@ -1021,10 +1022,14 @@ function renderBackups(response) {
       ? `EXFAT ${backupAge(exfat.last_success_at)}`
       : 'No EXFAT snapshot',
     piLabel = `${borgLabel} · ${exfatLabel}`,
+    openwrtLabel = Number.isFinite(openwrt.last_success_at)
+      ? `Snapshot ${backupAge(openwrt.last_success_at)}`
+      : 'No verified snapshot',
     macLabel = Number.isFinite(tm.last_backup_at)
       ? `TM ${backupAge(tm.last_backup_at)}`
       : tm.error || 'No Time Machine history';
   $('backup-pi').textContent = piLabel;
+  $('backup-openwrt').textContent = openwrtLabel;
   $('backup-mac').textContent = tm.running
     ? `Backing up${Number.isFinite(tm.progress_percent) ? ` · ${tm.progress_percent}%` : ''}`
     : macLabel;
@@ -1052,6 +1057,11 @@ function renderBackups(response) {
   $('backup-exfat-detail').textContent = Number.isFinite(exfat.last_success_at)
     ? `Last completed ${eventTime(exfat.last_success_at)} (${backupAge(exfat.last_success_at)})`
     : 'No successful EXFAT512 snapshot is recorded';
+  const openwrtDot = $('backup-openwrt-dot');
+  openwrtDot.className = `backup-state-dot ${openwrt.stale === false ? 'good' : 'bad'}`;
+  $('backup-openwrt-detail').textContent = Number.isFinite(openwrt.last_success_at)
+    ? `Last verified ${eventTime(openwrt.last_success_at)} (${backupAge(openwrt.last_success_at)})`
+    : 'No verified OpenWrt snapshot is recorded';
   const tmDot = $('backup-tm-dot');
   tmDot.className = `backup-state-dot ${tm.running ? 'running' : Number.isFinite(tm.last_backup_at) ? 'good' : 'bad'}`;
   $('backup-tm-running').hidden = !tm.running;
@@ -1149,6 +1159,7 @@ function renderBackupsUnavailable(message) {
   $('backup-pill').textContent = 'NO DATA';
   $('backup-summary').textContent = message;
   $('backup-pi').textContent = 'Unavailable';
+  $('backup-openwrt').textContent = 'Unavailable';
   $('backup-mac').textContent = 'Unavailable';
   $('backup-status').textContent = 'Unavailable';
   $('backup-run-borg').disabled = true;

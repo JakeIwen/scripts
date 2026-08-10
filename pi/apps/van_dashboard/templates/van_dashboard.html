@@ -100,6 +100,7 @@
       <span class="tile-detail" id="backup-summary">Reading backup history…</span>
       <span class="status-lines">
         <span class="status-line"><span>vanpi</span><span id="backup-pi">Checking…</span></span>
+        <span class="status-line"><span>OpenWrt</span><span id="backup-openwrt">Checking…</span></span>
         <span class="status-line"><span>m4mac</span><span id="backup-mac">Checking…</span></span>
       </span>
     </button>
@@ -280,7 +281,7 @@
 <div class="speaker-backdrop" id="backup-backdrop">
   <section class="speaker-sheet backup-sheet" id="backup-panel" role="dialog" aria-modal="true" aria-labelledby="backup-title" aria-busy="true">
     <div class="sheet-grabber"></div><div class="sheet-head"><h2 id="backup-title">Backups</h2><span class="policy-sheet-status" id="backup-status">Checking…</span><button class="sheet-close" id="backup-close" aria-label="Close backups">&times;</button></div>
-    <p class="sheet-help">Versioned vanpi backups, EXFAT512 safety snapshots, bootable hotspare generations, and Time Machine history stored on vanpi.</p>
+    <p class="sheet-help">Versioned vanpi backups, verified OpenWrt recovery bundles, EXFAT512 safety snapshots, bootable hotspare generations, and Time Machine history stored on vanpi.</p>
     <div class="backup-overview">
       <section class="backup-overview-card backup-overview-action-card" aria-labelledby="backup-borg-title">
         <span class="backup-state-dot" id="backup-borg-dot"></span>
@@ -306,6 +307,7 @@
           <button id="backup-run-exfat" data-action aria-describedby="backup-exfat-action-detail" disabled>Snapshot EXFAT512</button>
         </span>
       </section>
+      <section class="backup-overview-card" aria-labelledby="backup-openwrt-title"><span class="backup-state-dot" id="backup-openwrt-dot"></span><span class="backup-card-content"><strong id="backup-openwrt-title">OpenWrt recovery bundle</strong><small id="backup-openwrt-detail">Checking verified snapshot…</small></span></section>
       <section class="backup-overview-card" aria-labelledby="backup-tm-title"><span class="backup-state-dot" id="backup-tm-dot"></span><span class="backup-card-content"><strong id="backup-tm-title">m4mac Time Machine</strong><small class="backup-card-running-note" id="backup-tm-running" hidden>Backup in progress</small><small id="backup-tm-detail">Checking snapshot history…</small></span></section>
     </div>
     <section class="backup-section" aria-labelledby="backup-hotswap-title">

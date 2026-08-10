@@ -3219,6 +3219,9 @@ class BackupManager:
             "exfat_snapshot_stale_hours": integer(
                 "EXFAT_SNAPSHOT_STALE_HOURS", 48
             ),
+            "openwrt_backup_stale_hours": integer(
+                "OPENWRT_BACKUP_STALE_HOURS", 72
+            ),
             "clone_stale_factor": integer("CLONE_STALE_FACTOR", 2),
         }
 
@@ -3462,6 +3465,14 @@ class BackupManager:
             or now - exfat_snapshot_at > exfat_snapshot_stale_seconds,
             "running": "exfat" in running_kinds,
         }
+        openwrt_at = self._stamp(os.path.join(self.stamp_dir, "openwrt_ok"))
+        openwrt_stale_seconds = configuration["openwrt_backup_stale_hours"] * 3600
+        openwrt = {
+            "last_success_at": openwrt_at,
+            "stale_hours": configuration["openwrt_backup_stale_hours"],
+            "stale": openwrt_at is None
+            or now - openwrt_at > openwrt_stale_seconds,
+        }
         time_machine = self._time_machine(now)
         with self.lock:
             operation = copy.deepcopy(self.operation)
@@ -3473,6 +3484,7 @@ class BackupManager:
         attention = (
             borg["stale"]
             or exfat_snapshot["stale"]
+            or openwrt["stale"]
             or any(card["stale"] for card in hotswaps)
         )
         if not time_machine["available"] or time_machine["last_backup_at"] is None:
@@ -3490,6 +3502,7 @@ class BackupManager:
             "health": health,
             "borg": borg,
             "exfat_snapshot": exfat_snapshot,
+            "openwrt": openwrt,
             "hotswaps": hotswaps,
             "time_machine": time_machine,
             "operation": operation,
