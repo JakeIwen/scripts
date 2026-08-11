@@ -16,7 +16,7 @@ label_root="$test_root/by-label"
 source_root="$test_root/dev"
 drain_root="$test_root/drain"
 fake_findmnt="$test_root/findmnt"
-gated_labels=(mbp1tbkup mbp2tbkup movingparts bigboi EXFAT512)
+gated_labels=(mbp2tbkup movingparts bigboi EXFAT512)
 mkdir -p "$label_root" "$source_root" "$drain_root"
 for label in "${gated_labels[@]}"; do
   mkdir -p "$mount_root/$label"
@@ -83,7 +83,7 @@ for label in "${gated_labels[@]}"; do
     "$repo_root/pi/configs/smb.conf" ||
     fail "$label does not use the exact mount gate"
 done
-[[ $(grep -Fc "preexec close = yes" "$repo_root/pi/configs/smb.conf") == 5 ]] ||
+[[ $(grep -Fc "preexec close = yes" "$repo_root/pi/configs/smb.conf") == 4 ]] ||
   fail "all disk-backed Samba shares must close when their mount gate fails"
 
 echo "PASS: disk-backed Samba shares require their exact mounted labels"

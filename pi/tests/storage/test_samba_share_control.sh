@@ -131,9 +131,9 @@ grep -Fq 'ud_record_failure "Samba shares $samba_names did not close; disks rema
 grep -Fq 'first_holders=$(ud_mount_holder_summary "$expected_mount")' \
   "$repo_root/pi/scripts/umount_disks.sh" ||
   fail "failed unmount does not collect bounded userspace-holder details"
-grep -Fq 'ud_emergency_evict_mount_holders "$expected_mount"' \
+grep -Fq 'ud_evict_mount_holders "$expected_mount"' \
   "$repo_root/pi/scripts/umount_disks.sh" ||
-  fail "ignition emergency does not evict exact mount holders"
+  fail "disk unmount does not evict exact mount holders"
 if grep -Fq '/usr/sbin/service smbd stop' "$repo_root/pi/scripts/umount_disks.sh"; then
   fail "disk unmount still stops global Samba"
 fi

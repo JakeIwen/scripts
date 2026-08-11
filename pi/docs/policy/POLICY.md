@@ -31,6 +31,12 @@ Ignition is observed safety state and always overrides requested state:
 | Starlink on, permission enabled, torrents enabled | mounted | running |
 | Starlink off, torrents enabled | mounted | running |
 
+`/home/pi/scripts/disk_policy.sh` is the shared source for automatic, manual,
+always-available, and rotational disk labels. Mounting, guarded unmounts,
+dashboard disk controls, and the ignition-on path all consume those arrays.
+`policyctl` keeps a small Python tuple of rotational labels for status output;
+its regression test requires that tuple to match `HDD_LABELS` exactly.
+
 In particular, Starlink torrenting requires `disks_enabled=true`,
 `torrents_enabled=true`, and `allow_starlink_torrents=true`. An unavailable or
 unrecognized Starlink power state fails closed unless Starlink torrent
@@ -60,22 +66,25 @@ the ordinary exact-label mount logic can attach a re-enumerated device at the
 same target. Ignition shutdown deliberately takes priority over this ordinary
 recovery so its longer graceful waits cannot delay HDD protection.
 
-Ignition shutdown uses a separate bounded emergency mode. It creates
-per-filesystem Samba drain markers before disconnecting the corresponding
-shares, so Finder or another SMB client cannot reconnect during the unmount
-window. Backup and qBittorrent processes receive a short graceful deadline,
-then only their exact lock holders or process names are killed. If scoped Samba
-closure fails, ignition shutdown stops the global `smbd` service and kills any
-remaining service processes.
+Ignition shutdown uses a separate bounded emergency mode. All managed-disk
+unmounts create per-filesystem Samba drain markers before disconnecting the
+corresponding shares, so Finder or another SMB client cannot reconnect during
+the unmount window. qBittorrent receives a graceful deadline and is then killed
+by exact process name; a failure to verify that stop is logged but does not
+prevent the guarded unmount attempt. Ignition mode shortens the graceful
+deadline for backup and qBittorrent processes. If scoped Samba closure fails,
+ignition shutdown stops the global `smbd` service and kills any remaining
+service processes.
 
 Each filesystem is synchronized and normally unmounted. If a normal unmount is
 still busy, the script records its userspace holders, sends TERM and then KILL
 through `fuser -mM` for that exact verified mountpoint, synchronizes again, and
 retries a normal unmount. Physical spindown remains conditional on verifying
 that the filesystem and every partition on its parent disk are unmounted.
-Emergency mode never uses force (`umount -f`) or lazy (`umount -l`) detach.
-Parked policy changes, dashboard ejects, and safe system power operations retain
-their non-emergency behavior.
+No mode uses force (`umount -f`) or lazy (`umount -l`) detach. Parked policy
+changes, dashboard ejects, and safe system power operations retain longer
+graceful deadlines and do not use ignition's global Samba fallback, but they do
+evict exact-mount holders rather than leave a verified managed disk mounted.
 
 The Samba drain markers live under `/run` and therefore clear at reboot.
 `mount_disks.sh` explicitly clears the marker for an exact share after accepting

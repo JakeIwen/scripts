@@ -16,6 +16,7 @@ UD_FAST_PARENT=
 UD_FAST_DISKSEQ=
 UD_FAILURES=()
 UD_STATE_DIR=/run/lock/vanpi-hdd-spindown
+UD_QBIT_GRACE_SECONDS=${UMOUNT_DISKS_QBIT_GRACE_SECONDS:-30}
 UD_EMERGENCY_QBIT_GRACE_SECONDS=${UMOUNT_DISKS_EMERGENCY_QBIT_GRACE_SECONDS:-8}
 
 ud_usage() {
@@ -253,8 +254,22 @@ ud_parent_is_unmounted() {
   return 0
 }
 
+ud_qbit_is_running() {
+  /usr/bin/pgrep -x qbittorrent-nox >/dev/null 2>&1
+}
+
+ud_signal_qbit() {
+  local signal=$1
+  [[ "$signal" == TERM || "$signal" == KILL ]] || return 2
+  /usr/bin/sudo /usr/bin/pkill "-$signal" -x qbittorrent-nox
+}
+
+ud_qbit_wait_one_second() {
+  sleep 1
+}
+
 ud_kill_torrent_client() {
-  local emergency=${1:-0} rc attempt wait_seconds=30
+  local emergency=${1:-0} rc attempt wait_seconds=$UD_QBIT_GRACE_SECONDS
 
   if (( emergency )); then
     wait_seconds=$UD_EMERGENCY_QBIT_GRACE_SECONDS
@@ -264,40 +279,39 @@ ud_kill_torrent_client() {
     return 1
   }
 
-  /usr/bin/pgrep -x qbittorrent-nox >/dev/null 2>&1
+  ud_qbit_is_running
   rc=$?
   (( rc == 1 )) && return 0
   (( rc == 0 )) || return 1
 
   echo "asking qbittorrent-nox to stop"
-  /usr/bin/sudo /usr/bin/pkill -TERM -x qbittorrent-nox
+  ud_signal_qbit TERM
   rc=$?
   (( rc <= 1 )) || return 1
 
   # This Pi's qBittorrent can need about 18 seconds to save state and exit.
-  # Ordinary policy changes retain that grace period; ignition emergency mode
-  # uses a shorter deadline and then kills only the exact executable name.
+  # Normal disk shutdown retains that grace period and ignition emergency mode
+  # uses a shorter deadline. Either path then kills only the exact executable
+  # name because leaving a managed filesystem mounted is the greater risk.
   for ((attempt = 0; attempt < wait_seconds; attempt++)); do
-    /usr/bin/pgrep -x qbittorrent-nox >/dev/null 2>&1
+    ud_qbit_is_running
     rc=$?
     (( rc == 1 )) && return 0
     (( rc == 0 )) || return 1
-    sleep 1
+    ud_qbit_wait_one_second
   done
 
-  if (( emergency )); then
-    echo "qbittorrent-nox did not stop within ${wait_seconds}s; killing it"
-    /usr/bin/sudo /usr/bin/pkill -KILL -x qbittorrent-nox
+  echo "qbittorrent-nox did not stop within ${wait_seconds}s; killing it"
+  ud_signal_qbit KILL
+  rc=$?
+  (( rc <= 1 )) || return 1
+  for attempt in {1..3}; do
+    ud_qbit_is_running
     rc=$?
-    (( rc <= 1 )) || return 1
-    for attempt in {1..3}; do
-      /usr/bin/pgrep -x qbittorrent-nox >/dev/null 2>&1
-      rc=$?
-      (( rc == 1 )) && return 0
-      (( rc == 0 )) || return 1
-      sleep 1
-    done
-  fi
+    (( rc == 1 )) && return 0
+    (( rc == 0 )) || return 1
+    ud_qbit_wait_one_second
+  done
   return 1
 }
 
@@ -379,36 +393,41 @@ ud_reconcile_unmount_result() {
   return 1
 }
 
-ud_emergency_evict_mount_holders() {
+ud_signal_mount_holders() {
+  local mountpoint=$1 signal=$2
+  [[ "$signal" == TERM || "$signal" == KILL ]] || return 2
+  /usr/bin/sudo /usr/bin/timeout --kill-after=1 3 \
+    /usr/bin/fuser -k "-$signal" -mM "$mountpoint"
+}
+
+ud_holder_wait() {
+  sleep "$1"
+}
+
+ud_evict_mount_holders() {
   local mountpoint=$1 before after output rc
 
   before=$(ud_mount_holder_summary "$mountpoint")
-  echo "emergency holder scan for $mountpoint: $before"
-  output=$(
-    /usr/bin/sudo /usr/bin/timeout --kill-after=1 3 \
-      /usr/bin/fuser -k -TERM -mM "$mountpoint" 2>&1
-  )
+  echo "holder eviction scan for $mountpoint: $before"
+  output=$(ud_signal_mount_holders "$mountpoint" TERM 2>&1)
   rc=$?
   if (( rc != 0 && rc != 1 )); then
     echo "WARNING: TERM holder eviction failed for $mountpoint (status $rc): ${output:-no diagnostic output}" >&2
   fi
 
-  sleep 2
+  ud_holder_wait 2
   after=$(ud_mount_holder_summary "$mountpoint")
   if [[ "$after" == "no userspace mount holder identified" ]]; then
     return 0
   fi
 
   echo "holders remain for $mountpoint after TERM: $after"
-  output=$(
-    /usr/bin/sudo /usr/bin/timeout --kill-after=1 3 \
-      /usr/bin/fuser -k -KILL -mM "$mountpoint" 2>&1
-  )
+  output=$(ud_signal_mount_holders "$mountpoint" KILL 2>&1)
   rc=$?
   if (( rc != 0 && rc != 1 )); then
     echo "WARNING: KILL holder eviction failed for $mountpoint (status $rc): ${output:-no diagnostic output}" >&2
   fi
-  sleep 1
+  ud_holder_wait 1
 }
 
 ud_emergency_stop_samba() {
@@ -615,9 +634,7 @@ umount_disks_main() {
     fi
 
     if (( needs_torrent_stop )) && ! ud_kill_torrent_client "$emergency"; then
-      ud_record_failure "qbittorrent-nox did not stop; refusing to unmount HDDs"
-      ud_notify_failures "$(( spindown && ! dry_run ))"
-      return 1
+      echo "WARNING: qbittorrent-nox stop could not be verified; continuing with guarded unmount and exact holder eviction" >&2
     fi
 
     # Release handles only for the drained shares. In ignition emergency mode,
@@ -659,12 +676,16 @@ umount_disks_main() {
         ud_reconcile_unmount_result "$label" "${devices[$label]}" "$rc"; then
       rc=0
     fi
-    if (( rc != 0 && emergency )); then
+    # Once preflight, backup termination, and share draining have succeeded,
+    # preserving a userspace process is not a reason to leave a managed disk
+    # mounted. Evict only holders of this exact mount, then retry a normal
+    # unmount so the kernel remains the authority on whether it is safe.
+    if (( rc != 0 )); then
       first_holders=$(ud_mount_holder_summary "$expected_mount")
       echo "normal unmount failed for $label (status $rc): ${unmount_output:-no diagnostic output}"
-      ud_emergency_evict_mount_holders "$expected_mount" || true
+      ud_evict_mount_holders "$expected_mount" || true
       ud_sync_mount "$expected_mount" || true
-      echo "retrying normal unmount for $label after emergency holder eviction"
+      echo "retrying normal unmount for $label after holder eviction"
       unmount_output=$(ud_normal_unmount "$expected_mount" 2>&1)
       rc=$?
       if (( rc != 0 )) &&

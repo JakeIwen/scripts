@@ -515,7 +515,7 @@ mount_disks_main() {
   local had_failure=0
   local dir
   local disk
-  local -a rm_dirs=(mbp1tbkup mbp2tbkup)
+  local -a rm_dirs=(mbp2tbkup)
   local -a disks=("${MOUNT_LABELS[@]}")
 
   if (( $# == 1 )) && [[ "$1" == --list-stale ]]; then

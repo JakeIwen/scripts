@@ -341,7 +341,7 @@ fi
 assert_eq "/dev/vanished-test-device" "$(cat "$TEST_MOVING_SOURCE_FILE")" \
   "failed normal stale unmount changed target state"
 
-MOUNT_LABELS=(movingparts mbp1tbkup mbp2tbkup EXFAT512)
+MOUNT_LABELS=(movingparts mbp2tbkup EXFAT512)
 
 # A failure for the first label must survive later successful/missing labels.
 calls=()
@@ -355,7 +355,7 @@ md_print_mounts() { return 0; }
 mount_disks_main >/dev/null 2>&1
 status=$?
 assert_eq 1 "$status" "multi-disk reconciliation must propagate one label failure"
-assert_eq 4 "${#calls[@]}" "multi-disk reconciliation must still check every label"
+assert_eq 3 "${#calls[@]}" "multi-disk reconciliation must still check every label"
 
 # A dashboard eject hold must skip only that label during automatic (no-arg)
 # reconciliation. An explicit manual mount remains available after diskctl
@@ -369,7 +369,7 @@ mntdsk() {
   return 0
 }
 mount_disks_main >/dev/null 2>&1 || fail "eject hold made reconciliation fail"
-assert_eq 3 "${#calls[@]}" "automatic reconciliation did not skip exactly one held label"
+assert_eq 2 "${#calls[@]}" "automatic reconciliation did not skip exactly one held label"
 [[ " ${calls[*]} " != *" mbp2tbkup "* ]] || fail "held label was automatically mounted"
 calls=()
 mount_disks_main mbp2tbkup >/dev/null 2>&1 || fail "explicit mount was blocked by eject hold"

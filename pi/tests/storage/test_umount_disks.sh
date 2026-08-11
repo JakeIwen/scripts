@@ -46,9 +46,14 @@ grep -Fq 'abort_backup.sh "${abort_args[@]}"' "$script" ||
   fail "disk shutdown does not pass emergency mode to backup termination"
 grep -Fq 'ud_kill_torrent_client "$emergency"' "$script" ||
   fail "disk shutdown does not escalate the exact qBittorrent process"
+grep -Fq 'continuing with guarded unmount and exact holder eviction' "$script" ||
+  fail "qBittorrent stop failure still prevents the guarded unmount attempt"
+if grep -Fq 'qbittorrent-nox did not stop; refusing to unmount' "$script"; then
+  fail "qBittorrent stop failure still terminates disk unmount"
+fi
 grep -Fq 'ud_emergency_stop_samba' "$script" ||
   fail "disk shutdown has no emergency global Samba fallback"
-grep -Fq 'ud_emergency_evict_mount_holders "$expected_mount"' "$script" ||
+grep -Fq 'ud_evict_mount_holders "$expected_mount"' "$script" ||
   fail "disk shutdown has no exact mount-holder eviction"
 grep -Fq 'ud_sync_mount "$expected_mount"' "$script" ||
   fail "disk shutdown does not sync before normal unmount"
@@ -61,4 +66,48 @@ if grep -Eq '/usr/bin/umount.*(--force|[[:space:]]-f|--lazy|[[:space:]]-l)' "$sc
   fail "disk shutdown reintroduced force or lazy unmount"
 fi
 
-echo "PASS: emergency disk shutdown escalates consumers without force/lazy unmount"
+# Ordinary shutdown must force an exact-name qBittorrent process down after its
+# grace period instead of treating graceful-stop failure as the terminal state.
+qbit_state=running
+qbit_signals=
+qbit_waits=0
+ud_qbit_is_running() {
+  [[ "$qbit_state" == running ]]
+}
+ud_signal_qbit() {
+  qbit_signals+="${qbit_signals:+ }$1"
+  [[ "$1" == KILL ]] && qbit_state=stopped
+  return 0
+}
+ud_qbit_wait_one_second() {
+  ((qbit_waits += 1))
+}
+UD_QBIT_GRACE_SECONDS=2
+ud_kill_torrent_client 0 >/dev/null 2>&1 ||
+  fail "ordinary shutdown did not recover from a stuck qBittorrent process"
+[[ "$qbit_signals" == "TERM KILL" ]] ||
+  fail "ordinary shutdown did not escalate qBittorrent from TERM to KILL"
+[[ "$qbit_waits" == 2 ]] ||
+  fail "ordinary shutdown did not honor the bounded qBittorrent grace period"
+
+# A failed ordinary unmount must evict exact-mount holders with TERM and KILL.
+holder_calls=$(mktemp)
+trap 'rm -f "$holder_calls"' EXIT
+ud_mount_holder_summary() {
+  printf '%s\n' "pi 123 f.... vlc"
+}
+ud_signal_mount_holders() {
+  printf '%s %s\n' "$2" "$1" >> "$holder_calls"
+  return 0
+}
+ud_holder_wait() { :; }
+ud_evict_mount_holders /mnt/movingparts >/dev/null 2>&1 ||
+  fail "ordinary shutdown mount-holder eviction returned failure"
+[[ $(cat "$holder_calls") == $'TERM /mnt/movingparts\nKILL /mnt/movingparts' ]] ||
+  fail "ordinary shutdown did not escalate exact mount holders from TERM to KILL"
+
+if grep -Fq 'if (( rc != 0 && emergency ))' "$script"; then
+  fail "mount-holder eviction is still restricted to ignition emergency mode"
+fi
+
+echo "PASS: guarded disk shutdown escalates consumers without force/lazy unmount"

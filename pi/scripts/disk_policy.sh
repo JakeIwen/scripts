@@ -4,7 +4,6 @@
 # requested HDD policy. This is also the allowlist for stale-mount recovery.
 MOUNT_LABELS=(
   movingparts
-  mbp1tbkup
   mbp2tbkup
   EXFAT512
 )
@@ -38,7 +37,6 @@ HDD_LABELS=(
 # with configs/smb.conf.  Labels without a Samba export deliberately return 1.
 disk_policy_samba_share_name() {
   case "$1" in
-    mbp1tbkup) printf '%s\n' mbp1tbkup ;;
     mbp2tbkup) printf '%s\n' mbp2tbkup ;;
     movingparts) printf '%s\n' MovingParts ;;
     bigboi) printf '%s\n' BigBoi ;;
