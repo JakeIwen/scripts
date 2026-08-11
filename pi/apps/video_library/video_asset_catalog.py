@@ -2405,6 +2405,7 @@ class MediaAssetCatalog:
         asset_id: str,
         work_id: str | None,
         observed_at: float,
+        authoritative: bool = False,
     ) -> bool:
         try:
             source_updated = float(row.get("updated") or observed_at)
@@ -2435,7 +2436,8 @@ class MediaAssetCatalog:
             (asset_id,),
         )
         if (
-            current_state is not None
+            not authoritative
+            and current_state is not None
             and source_updated < float(current_state["updated_at"])
         ):
             return False
@@ -2664,9 +2666,28 @@ class MediaAssetCatalog:
                     report["unresolved"] += 1
                     action = "unresolved"
                     applied = False
+                    shadow_covers_state = False
                 else:
                     if previously_bound is None:
                         report["created"] += 1
+                    current_state = self._one(
+                        db,
+                        """
+                        SELECT updated_at FROM video_v2_asset_playback_state
+                        WHERE asset_id = ?
+                        """,
+                        (asset_id,),
+                    )
+                    shadow_covers_state = bool(
+                        shadow is not None
+                        and shadow.get("asset_id") == asset_id
+                        and shadow.get("source_updated") is not None
+                        and (
+                            current_state is None
+                            or float(shadow["source_updated"])
+                            >= float(current_state["updated_at"])
+                        )
+                    )
                     applied = self._apply_v1_snapshot(
                         db,
                         media_key=media_key,
@@ -2675,6 +2696,7 @@ class MediaAssetCatalog:
                         asset_id=asset_id,
                         work_id=work_id,
                         observed_at=timestamp,
+                        authoritative=shadow_covers_state,
                     )
                     action = "applied" if applied else "stale"
                     report[action] += 1
@@ -2682,6 +2704,21 @@ class MediaAssetCatalog:
                     source_updated = float(row.get("updated") or timestamp)
                 except (TypeError, ValueError):
                     source_updated = timestamp
+                shadow_updated = source_updated
+                if (
+                    applied
+                    and shadow_covers_state
+                    and shadow is not None
+                    and shadow.get("source_updated") is not None
+                ):
+                    # A Pi clock correction can make an authoritative old-server
+                    # edit carry a lower wall timestamp than the v2 state it
+                    # replaces.  Retain the prior causal watermark atomically so
+                    # another rollback edit is still recognized even if the
+                    # process exits before the library is projected again.
+                    shadow_updated = max(
+                        source_updated, float(shadow["source_updated"])
+                    )
                 self.record_import(
                     import_id,
                     source_key=media_key,
@@ -2699,7 +2736,7 @@ class MediaAssetCatalog:
                     media_key=media_key,
                     present=True,
                     row_digest=row_digest,
-                    source_updated=source_updated,
+                    source_updated=shadow_updated,
                     asset_id=asset_id,
                     raw=row,
                     observed_at=timestamp,

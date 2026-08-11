@@ -1993,13 +1993,15 @@ class VideoService:
         self,
         reason: str,
         snapshot: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> bool:
         if self.catalog is not None and self.active_session_id is not None:
-            value = snapshot or self.last_snapshot or {}
-            position = max(0.0, float(value.get("position") or 0))
-            duration = max(0.0, float(value.get("duration") or 0))
-            completed = self.active_complete and self._is_finished(position, duration)
             try:
+                value = snapshot or self.last_snapshot or {}
+                position = max(0.0, float(value.get("position") or 0))
+                duration = max(0.0, float(value.get("duration") or 0))
+                completed = self.active_complete and self._is_finished(
+                    position, duration
+                )
                 with self.catalog.transaction() as db:
                     self.catalog.finish_session(
                         self.active_session_id,
@@ -2013,6 +2015,10 @@ class VideoService:
                         self._project_item_progress(self.active_item, connection=db)
             except (CatalogError, sqlite3.Error, OSError, ValueError) as exc:
                 self.identity_error = f"could not finish playback session: {exc}"
+                # Keep the pinned session in memory when the durable finish
+                # transaction fails.  A later healthy poll can retry the exact
+                # same session instead of orphaning it until process restart.
+                return False
         self.active_session_id = None
         self.active_asset_id = None
         self.active_work_id = None
@@ -2024,6 +2030,7 @@ class VideoService:
         self.active_complete = True
         self.last_snapshot = None
         self._reset_save_throttle()
+        return True
 
     def _checkpoint_active(
         self,
@@ -2166,7 +2173,10 @@ class VideoService:
             and self.active_track_id is not None
             and track_id != self.active_track_id
         ):
-            self._finish_active_session("track_changed")
+            if not self._finish_active_session("track_changed"):
+                # This snapshot belongs to the new track.  Until the old pinned
+                # session can be closed, never checkpoint it into the old asset.
+                return self.active_item
 
         if (
             self.active_session_id is None
@@ -2621,10 +2631,11 @@ class VideoService:
     def bookmark(self) -> None:
         self._record_snapshot(self.player.snapshot(), force=True)
 
-    def _replace_active_playback(self) -> None:
+    def _replace_active_playback(self) -> bool:
         self.bookmark()
         if self.active_session_id is not None:
-            self._finish_active_session("replaced", self.last_snapshot)
+            return self._finish_active_session("replaced", self.last_snapshot)
+        return True
 
     def play(
         self,
@@ -2643,7 +2654,7 @@ class VideoService:
                 raise RuntimeError(self.library.error or "media library unavailable")
             item, queue = self._resolve_play(item_id, show_id, query, shuffle)
             paths = [self.library.resolve_for_play(queued) for queued in queue]
-            self._replace_active_playback()
+            history_ready = self._replace_active_playback()
             progress = self._progress_all().get(item.key)
             position = 0.0
             if progress and not restart and not progress.get("finished"):
@@ -2659,7 +2670,7 @@ class VideoService:
             snapshot = self.player.launch(
                 paths, position=position, subtitles=subtitles
             )
-            if self.catalog is not None and asset_id is not None:
+            if self.catalog is not None and asset_id is not None and history_ready:
                 self._begin_catalog_session(
                     asset_id=asset_id,
                     work_id=work_id,
@@ -2669,7 +2680,7 @@ class VideoService:
                     complete=complete,
                     clear_override=True,
                 )
-            else:
+            elif self.catalog is None or asset_id is None:
                 self.store.record(
                     item.key,
                     position=position,
@@ -2731,7 +2742,7 @@ class VideoService:
                 position = max(
                     0.0, float(progress.get("position") or 0) - RESUME_REWIND
                 )
-            self._replace_active_playback()
+            history_ready = self._replace_active_playback()
             if self.sonos is not None:
                 invalidate = getattr(self.sonos, "invalidate", None)
                 if invalidate is not None:
@@ -2740,7 +2751,7 @@ class VideoService:
             snapshot = self.player.launch(
                 [real_path], position=position, subtitles=subtitles
             )
-            if self.catalog is not None and asset_id is not None:
+            if self.catalog is not None and asset_id is not None and history_ready:
                 try:
                     self._begin_catalog_session(
                         asset_id=asset_id,
@@ -2754,7 +2765,7 @@ class VideoService:
                 except (CatalogError, sqlite3.Error, OSError, ValueError) as exc:
                     self.identity_error = f"media identity tracking degraded: {exc}"
                     asset_id = None
-            elif item is not None:
+            elif item is not None and (self.catalog is None or asset_id is None):
                 self.store.record(
                     item.key,
                     position=position,
@@ -2767,7 +2778,7 @@ class VideoService:
             return {
                 "ok": True,
                 "message": "Resuming local media" if position else "Playing local media",
-                "tracked": asset_id is not None,
+                "tracked": asset_id is not None and history_ready,
                 "identity": self._asset_identity_label(asset_id),
             }
 

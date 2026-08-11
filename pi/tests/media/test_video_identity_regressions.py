@@ -106,6 +106,74 @@ class PlaybackProjectionOrderingTests(unittest.TestCase):
         self.assertEqual(asset_state["play_count"], 2)
         self.assertEqual(work_state["play_count"], 2)
 
+    def test_v1_rollback_edit_survives_wall_clock_correction(self) -> None:
+        fixture = MediaFixture()
+        self.addCleanup(fixture.cleanup)
+        target = fixture.payload("rollback-clock-correction.mkv")
+        fixture.link("Movies", "Rollback.Clock.2024.mkv", target)
+        service, library, store, _catalog, player = fixture.stack()
+        item = next(iter(library.items.values()))
+        service.play(item_id=item.id, restart=True)
+        player.snapshot_value.update(
+            path=str(target), position=240, duration=1_000, state="PAUSED"
+        )
+        service.bookmark()
+        asset_id = item.asset_id
+        store.connection.close()
+
+        corrected_time = fixture.clock() - 100
+        rollback = sqlite3.connect(fixture.database)
+        try:
+            with rollback:
+                rollback.execute(
+                    "UPDATE progress SET position = 777, updated = ? "
+                    "WHERE media_key = ?",
+                    (corrected_time, item.key),
+                )
+        finally:
+            rollback.close()
+
+        fixture.clock.value = corrected_time + 1
+        _service2, _library2, _store2, catalog2, _player2 = fixture.stack()
+
+        self.assertEqual(catalog2.get_asset_state(asset_id)["position"], 777)
+
+    def test_consecutive_low_clock_rollback_edits_survive_before_projection(self) -> None:
+        fixture = MediaFixture()
+        self.addCleanup(fixture.cleanup)
+        target = fixture.payload("rollback-clock-crash-window.mkv")
+        fixture.link("Movies", "Rollback.Clock.Crash.2024.mkv", target)
+        service, library, store, catalog, player = fixture.stack()
+        item = next(iter(library.items.values()))
+        service.play(item_id=item.id, restart=True)
+        player.snapshot_value.update(
+            path=str(target), position=240, duration=1_000, state="PAUSED"
+        )
+        service.bookmark()
+
+        corrected_time = fixture.clock() - 100
+        with store.lock, store.connection:
+            store.connection.execute(
+                "UPDATE progress SET position = 777, updated = ? WHERE media_key = ?",
+                (corrected_time, item.key),
+            )
+        first = catalog.reconcile_v1_progress(observed_at=corrected_time + 1)
+        self.assertEqual(first["applied"], 1)
+        self.assertEqual(catalog.get_asset_state(item.asset_id)["position"], 777)
+
+        # Simulate another old-server write before the normal v2 library
+        # projection gets a chance to refresh the compatibility row/shadow.
+        with store.lock, store.connection:
+            store.connection.execute(
+                "UPDATE progress SET position = 888, updated = ? WHERE media_key = ?",
+                (corrected_time + 2, item.key),
+            )
+        second = catalog.reconcile_v1_progress(observed_at=corrected_time + 3)
+
+        self.assertEqual(second["applied"], 1)
+        self.assertEqual(second["stale"], 0)
+        self.assertEqual(catalog.get_asset_state(item.asset_id)["position"], 888)
+
 
 class WorkProjectionTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -538,6 +606,123 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
         self.assertEqual(session["end_reason"], "unclean_shutdown")
         self.assertEqual(restarted.get_asset_state(asset_id)["position"], 321)
         self.assertFalse(restarted.get_asset_state(asset_id)["completed"])
+
+    def test_transient_finish_failure_keeps_session_available_for_retry(self) -> None:
+        path = self.fixture.root / "transient finish failure.mkv"
+        path.write_bytes(b"clip")
+        service, _library, _store, catalog, player = self.fixture.stack()
+        service.play_local(str(path), restart=True)
+        session_id = service.active_session_id
+        player.snapshot_value = {
+            "available": False,
+            "state": "OFFLINE",
+            "position": 0,
+            "duration": 0,
+        }
+
+        with mock.patch.object(
+            catalog,
+            "finish_session",
+            side_effect=sqlite3.OperationalError("transient finish failure"),
+        ):
+            service.bookmark()
+
+        self.assertEqual(service.active_session_id, session_id)
+        self.assertIsNone(catalog.get_session(session_id)["ended_at"])
+
+        service.bookmark()
+
+        self.assertIsNone(service.active_session_id)
+        self.assertEqual(
+            catalog.get_session(session_id)["end_reason"], "player_offline"
+        )
+
+    def test_managed_replacement_plays_but_does_not_overwrite_unfinished_session(
+        self,
+    ) -> None:
+        first_path = self.fixture.root / "managed replacement first.mkv"
+        second_path = self.fixture.root / "managed replacement second.mkv"
+        first_path.write_bytes(b"first")
+        second_path.write_bytes(b"second")
+        service, _library, store, catalog, player = self.fixture.stack()
+        service.play_local(str(first_path), restart=True)
+        first_session = service.active_session_id
+        first_asset = service.active_asset_id
+
+        with mock.patch.object(
+            catalog,
+            "finish_session",
+            side_effect=sqlite3.OperationalError("transient replacement failure"),
+        ):
+            result = service.play_local(str(second_path), restart=True)
+
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["tracked"])
+        self.assertEqual(player.launch_calls[-1]["paths"], [str(second_path.resolve())])
+        self.assertEqual(service.active_session_id, first_session)
+        self.assertEqual(service.active_asset_id, first_asset)
+        self.assertIsNone(catalog.get_session(first_session)["ended_at"])
+        self.assertEqual(
+            store.connection.execute(
+                "SELECT COUNT(*) FROM video_v2_playback_sessions"
+            ).fetchone()[0],
+            1,
+        )
+
+        service.bookmark()
+
+        self.assertIsNotNone(catalog.get_session(first_session)["ended_at"])
+        self.assertNotEqual(service.active_session_id, first_session)
+        self.assertEqual(service.active_asset_id, catalog.resolve_path(second_path))
+        self.assertEqual(
+            store.connection.execute(
+                "SELECT COUNT(*) FROM video_v2_playback_sessions "
+                "WHERE ended_at IS NULL"
+            ).fetchone()[0],
+            1,
+        )
+
+    def test_failed_external_track_change_never_checkpoints_new_track_to_old_asset(
+        self,
+    ) -> None:
+        first_path = self.fixture.root / "external first.mkv"
+        second_path = self.fixture.root / "external second.mkv"
+        first_path.write_bytes(b"first")
+        second_path.write_bytes(b"second")
+        service, _library, store, catalog, player = self.fixture.stack()
+        service.play_local(str(first_path), restart=True)
+        first_session = service.active_session_id
+        first_asset = service.active_asset_id
+        player.snapshot_value.update(
+            path=str(first_path), position=123, duration=900, state="PLAYING"
+        )
+        service.bookmark()
+
+        player.launch([str(second_path)])
+        player.snapshot_value.update(position=700, duration=1_000, state="PLAYING")
+        with mock.patch.object(
+            catalog,
+            "finish_session",
+            side_effect=sqlite3.OperationalError("transient track-change failure"),
+        ):
+            service.bookmark()
+
+        self.assertEqual(service.active_session_id, first_session)
+        self.assertEqual(catalog.get_asset_state(first_asset)["position"], 123)
+        self.assertEqual(
+            store.connection.execute(
+                "SELECT COUNT(*) FROM video_v2_playback_sessions"
+            ).fetchone()[0],
+            1,
+        )
+
+        service.bookmark()
+
+        second_asset = catalog.resolve_path(second_path)
+        self.assertIsNotNone(catalog.get_session(first_session)["ended_at"])
+        self.assertEqual(catalog.get_asset_state(first_asset)["position"], 123)
+        self.assertEqual(service.active_asset_id, second_asset)
+        self.assertEqual(catalog.get_asset_state(second_asset)["position"], 700)
 
 
 if __name__ == "__main__":
