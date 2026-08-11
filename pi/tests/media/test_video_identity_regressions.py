@@ -18,6 +18,7 @@ from pi.apps.video_library import video_qbittorrent as qb
 from pi.apps.video_library.video_asset_catalog import MediaAssetCatalog
 from pi.tests.media.test_video_identity_integration import (
     TORRENT_ID,
+    FakePlayer,
     FakeQbittorrent,
     MediaFixture,
     torrent_result,
@@ -241,6 +242,104 @@ class PlaybackProjectionOrderingTests(unittest.TestCase):
         self.assertEqual(replayed["applied"], 1)
         self.assertEqual(replayed["stale"], 0)
         self.assertEqual(catalog.get_asset_state(item.asset_id)["position"], 555)
+
+    def test_pending_v1_edit_cannot_regress_unprojected_former_library_playback(
+        self,
+    ) -> None:
+        fixture = MediaFixture()
+        self.addCleanup(fixture.cleanup)
+        target = fixture.payload("former-library-causal-edit.mkv")
+        link = fixture.link("Movies", "Former.Library.Causal.2025.mkv", target)
+        service, library, store, catalog, player = fixture.stack()
+        item = next(iter(library.items.values()))
+
+        service.play(item_id=item.id, restart=True)
+        player.snapshot_value.update(
+            path=str(target), position=240, duration=1_000, state="PAUSED"
+        )
+        service.bookmark()
+        player.snapshot_value.update(state="STOPPED")
+        service.bookmark()
+        self.assertIsNone(service.active_session_id)
+
+        link.unlink()
+        self.assertTrue(service.rescan())
+        fixture.clock.value -= 100
+        store.record(
+            item.key,
+            position=333,
+            duration=1_000,
+            updated=fixture.clock(),
+            title=item.title,
+            rel_path=item.rel_path,
+        )
+
+        launched = service.play_local(str(target), restart=True)
+        self.assertTrue(launched["tracked"])
+        self.assertEqual(service.active_asset_id, item.asset_id)
+        self.assertIsNone(service.active_item)
+        self.assertEqual(catalog.get_asset_state(item.asset_id)["position"], 0)
+
+        report = catalog.reconcile_v1_progress(observed_at=fixture.clock())
+
+        self.assertEqual(report["applied"], 0)
+        self.assertEqual(report["stale"], 1)
+        self.assertEqual(catalog.get_asset_state(item.asset_id)["position"], 0)
+        shadow = store.connection.execute(
+            "SELECT covered_state_digest FROM video_v2_v1_shadow "
+            "WHERE media_key = ?",
+            (item.key,),
+        ).fetchone()
+        self.assertEqual(shadow[0], "untrusted")
+
+    def test_pending_v1_delete_cannot_clear_unprojected_former_library_playback(
+        self,
+    ) -> None:
+        fixture = MediaFixture()
+        self.addCleanup(fixture.cleanup)
+        target = fixture.payload("former-library-causal-delete.mkv")
+        link = fixture.link("Movies", "Former.Library.Delete.2025.mkv", target)
+        service, library, store, catalog, player = fixture.stack()
+        item = next(iter(library.items.values()))
+
+        service.play(item_id=item.id, restart=True)
+        player.snapshot_value.update(
+            path=str(target), position=240, duration=1_000, state="PAUSED"
+        )
+        service.bookmark()
+        player.snapshot_value.update(state="STOPPED")
+        service.bookmark()
+
+        link.unlink()
+        self.assertTrue(service.rescan())
+        fixture.clock.value -= 100
+        self.assertTrue(store.clear(item.key))
+
+        launched = service.play_local(str(target), restart=True)
+        self.assertTrue(launched["tracked"])
+        player.snapshot_value.update(
+            path=str(target), position=500, duration=1_000, state="PAUSED"
+        )
+        service.bookmark()
+        self.assertEqual(catalog.get_asset_state(item.asset_id)["position"], 500)
+
+        report = catalog.reconcile_v1_progress(observed_at=fixture.clock())
+
+        self.assertEqual(report["cleared"], 0)
+        self.assertEqual(report["tombstones"], 1)
+        self.assertEqual(catalog.get_asset_state(item.asset_id)["position"], 500)
+        tombstone = store.connection.execute(
+            "SELECT applied_to_state FROM video_v2_v1_tombstones "
+            "WHERE media_key = ?",
+            (item.key,),
+        ).fetchone()
+        self.assertEqual(tombstone[0], 0)
+        shadow = store.connection.execute(
+            "SELECT covered_state_digest FROM video_v2_v1_shadow "
+            "WHERE media_key = ?",
+            (item.key,),
+        ).fetchone()
+        self.assertEqual(shadow[0], "untrusted")
 
 
 class WorkProjectionTests(unittest.TestCase):
@@ -654,6 +753,47 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
         self.fixture = MediaFixture()
         self.addCleanup(self.fixture.cleanup)
 
+    def _bootstrap_open_projected_session(
+        self,
+        *,
+        media_key: str,
+    ) -> tuple[str, str]:
+        store = video.ProgressStore(str(self.fixture.database))
+        catalog = MediaAssetCatalog(
+            connection=store.connection,
+            lock=store.lock,
+            clock=self.fixture.clock,
+        )
+        work_id = catalog.create_work("movie", title="Interrupted rollback movie")
+        asset_id = catalog.create_asset(work_id=work_id)
+        catalog.bind_legacy_key(asset_id, media_key)
+        session_id = catalog.start_session(asset_id, position=0)
+        catalog.checkpoint(
+            session_id,
+            position=240,
+            duration=1_000,
+            authoritative_order=True,
+        )
+        catalog.project_v1_progress(
+            media_key,
+            position=240,
+            duration=1_000,
+            updated=self.fixture.clock(),
+            asset_id=asset_id,
+        )
+        store.connection.close()
+        return asset_id, session_id
+
+    def _start_production_service(self) -> video.VideoService:
+        with (
+            mock.patch.object(video, "STATE_PATH", str(self.fixture.database)),
+            mock.patch.object(video, "QbittorrentClient", return_value=None),
+            mock.patch.object(video, "VlcController", return_value=object()),
+            mock.patch.object(video, "SonosVolumeController", return_value=None),
+            mock.patch.object(video, "_service", None),
+        ):
+            return video.active_service()
+
     def test_catalog_restart_closes_session_left_open_by_prior_process(self) -> None:
         first = MediaAssetCatalog(str(self.fixture.database), clock=self.fixture.clock)
         work_id = first.create_work("movie", title="Interrupted movie")
@@ -674,6 +814,180 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
         self.assertEqual(session["end_reason"], "unclean_shutdown")
         self.assertEqual(restarted.get_asset_state(asset_id)["position"], 321)
         self.assertFalse(restarted.get_asset_state(asset_id)["completed"])
+
+    def test_startup_applies_pending_v1_edit_before_open_session_recovery(self) -> None:
+        media_key = "feature:pending-startup-edit:2026"
+        asset_id, session_id = self._bootstrap_open_projected_session(
+            media_key=media_key
+        )
+        rollback = video.ProgressStore(str(self.fixture.database))
+        rollback.record(
+            media_key,
+            position=333,
+            duration=1_000,
+            updated=self.fixture.clock() - 100,
+        )
+        rollback.connection.close()
+
+        service = self._start_production_service()
+        self.addCleanup(service.store.connection.close)
+
+        self.assertEqual(service.catalog.get_asset_state(asset_id)["position"], 333)
+        session = service.catalog.get_session(session_id)
+        self.assertIsNotNone(session["ended_at"])
+        self.assertEqual(session["end_reason"], "unclean_shutdown")
+
+    def test_startup_applies_pending_v1_delete_before_open_session_recovery(self) -> None:
+        media_key = "feature:pending-startup-delete:2026"
+        asset_id, session_id = self._bootstrap_open_projected_session(
+            media_key=media_key
+        )
+        rollback = video.ProgressStore(str(self.fixture.database))
+        self.assertTrue(rollback.clear(media_key))
+        rollback.connection.close()
+
+        service = self._start_production_service()
+        self.addCleanup(service.store.connection.close)
+
+        self.assertEqual(service.catalog.get_asset_state(asset_id)["position"], 0)
+        session = service.catalog.get_session(session_id)
+        self.assertIsNotNone(session["ended_at"])
+        self.assertEqual(session["end_reason"], "unclean_shutdown")
+
+    def test_startup_defers_open_session_recovery_when_v1_reconcile_fails(
+        self,
+    ) -> None:
+        fake_catalog = mock.Mock()
+        fake_catalog.reconcile_v1_progress.side_effect = sqlite3.OperationalError(
+            "transient startup failure"
+        )
+        with (
+            mock.patch.object(video, "STATE_PATH", str(self.fixture.database)),
+            mock.patch.object(video, "ensure_pre_v2_backup", return_value=None),
+            mock.patch.object(video, "MediaAssetCatalog", return_value=fake_catalog),
+            mock.patch.object(video, "QbittorrentClient", return_value=None),
+            mock.patch.object(video, "VlcController", return_value=object()),
+            mock.patch.object(video, "SonosVolumeController", return_value=None),
+            mock.patch.object(video, "_service", None),
+        ):
+            service = video.active_service()
+        self.addCleanup(service.store.connection.close)
+
+        fake_catalog.recover_open_sessions.assert_not_called()
+        self.assertTrue(service.session_recovery_pending)
+        self.assertIn("recovery deferred", service.session_recovery_error)
+
+        service.thread = mock.Mock()
+        with mock.patch.object(service, "rescan", return_value=True) as rescan:
+            with self.assertRaisesRegex(
+                sqlite3.OperationalError, "transient startup failure"
+            ):
+                service.start()
+        rescan.assert_not_called()
+        self.assertTrue(service.session_recovery_pending)
+
+    def test_start_retries_fail_once_reconcile_before_rescan(self) -> None:
+        fake_catalog = mock.Mock()
+        fake_catalog.reconcile_v1_progress.side_effect = [
+            sqlite3.OperationalError("one startup failure"),
+            {"available": True},
+        ]
+        with (
+            mock.patch.object(video, "STATE_PATH", str(self.fixture.database)),
+            mock.patch.object(video, "ensure_pre_v2_backup", return_value=None),
+            mock.patch.object(video, "MediaAssetCatalog", return_value=fake_catalog),
+            mock.patch.object(video, "QbittorrentClient", return_value=None),
+            mock.patch.object(video, "VlcController", return_value=FakePlayer()),
+            mock.patch.object(video, "SonosVolumeController", return_value=None),
+            mock.patch.object(video, "_service", None),
+        ):
+            service = video.active_service()
+        self.addCleanup(service.store.connection.close)
+        self.assertTrue(service.session_recovery_pending)
+        self.assertTrue(service.status()["history"]["degraded"])
+
+        service.thread = mock.Mock()
+        with mock.patch.object(service, "rescan", return_value=True) as rescan:
+            service.start()
+
+        self.assertFalse(service.session_recovery_pending)
+        self.assertEqual(fake_catalog.reconcile_v1_progress.call_count, 2)
+        fake_catalog.recover_open_sessions.assert_called_once_with()
+        rescan.assert_called_once_with()
+        self.assertIsNone(service.session_recovery_error)
+        self.assertFalse(service.status()["history"]["degraded"])
+
+    def test_start_retries_fail_once_recovery_before_rescan(self) -> None:
+        fake_catalog = mock.Mock()
+        fake_catalog.reconcile_v1_progress.return_value = {"available": True}
+        fake_catalog.recover_open_sessions.side_effect = [
+            sqlite3.OperationalError("one recovery failure"),
+            1,
+        ]
+        with (
+            mock.patch.object(video, "STATE_PATH", str(self.fixture.database)),
+            mock.patch.object(video, "ensure_pre_v2_backup", return_value=None),
+            mock.patch.object(video, "MediaAssetCatalog", return_value=fake_catalog),
+            mock.patch.object(
+                video,
+                "QbittorrentClient",
+                side_effect=qb.QbittorrentUnavailable("unrelated qB warning"),
+            ),
+            mock.patch.object(video, "VlcController", return_value=FakePlayer()),
+            mock.patch.object(video, "SonosVolumeController", return_value=None),
+            mock.patch.object(video, "_service", None),
+        ):
+            service = video.active_service()
+        self.addCleanup(service.store.connection.close)
+        self.assertTrue(service.session_recovery_pending)
+
+        service.thread = mock.Mock()
+        with mock.patch.object(service, "rescan", return_value=True) as rescan:
+            service.start()
+
+        self.assertFalse(service.session_recovery_pending)
+        self.assertEqual(fake_catalog.reconcile_v1_progress.call_count, 2)
+        self.assertEqual(fake_catalog.recover_open_sessions.call_count, 2)
+        rescan.assert_called_once_with()
+        self.assertIsNone(service.session_recovery_error)
+        history = service.status()["history"]
+        self.assertTrue(history["degraded"])
+        self.assertIn("qBittorrent identity disabled", history["error"])
+        self.assertNotIn("recovery failure", history["error"])
+
+    def test_pending_recovery_blocks_opening_a_second_catalog_session(self) -> None:
+        store = video.ProgressStore(str(self.fixture.database))
+        self.addCleanup(store.connection.close)
+        fake_catalog = mock.Mock()
+        fake_catalog.reconcile_v1_progress.side_effect = sqlite3.OperationalError(
+            "recovery prerequisite unavailable"
+        )
+        service = video.VideoService(
+            self.fixture.library(),
+            store,
+            object(),
+            catalog=fake_catalog,
+            sonos=None,
+            clock=self.fixture.clock,
+        )
+        service.session_recovery_pending = True
+
+        with self.assertRaisesRegex(
+            sqlite3.OperationalError, "recovery prerequisite unavailable"
+        ):
+            service._begin_catalog_session(
+                asset_id="asset-new",
+                work_id=None,
+                path="/tmp/new-track.mkv",
+                snapshot={"position": 0, "track_id": "track-new"},
+                item=None,
+                complete=True,
+                clear_override=False,
+            )
+
+        fake_catalog.recover_open_sessions.assert_not_called()
+        fake_catalog.start_session.assert_not_called()
+        self.assertTrue(service.session_recovery_pending)
 
     def test_transient_finish_failure_keeps_session_available_for_retry(self) -> None:
         path = self.fixture.root / "transient finish failure.mkv"

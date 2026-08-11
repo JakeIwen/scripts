@@ -125,7 +125,16 @@ class AdditiveSchemaAndBackupTests(CatalogFixture):
             [row[0] for row in catalog.connection.execute(
                 "SELECT version FROM video_v2_schema_migrations ORDER BY version"
             )],
-            [1, 2],
+            [1, 2, 3],
+        )
+        self.assertIn(
+            "covered_state_digest",
+            {
+                row[1]
+                for row in catalog.connection.execute(
+                    "PRAGMA table_info(video_v2_v1_shadow)"
+                )
+            },
         )
         self.assertEqual(catalog.connection.execute("PRAGMA foreign_keys").fetchone()[0], 1)
         self.assertGreaterEqual(
@@ -592,6 +601,129 @@ class V1ReconciliationTests(CatalogFixture):
         self.assertEqual(report["stale"], 1)
         self.assertEqual(catalog.get_asset_state(asset)["position"], 900)
 
+    def test_migrated_null_shadow_uses_timestamp_fallback_once(self):
+        catalog = self.catalog()
+        catalog.reconcile_v1_progress(observed_at=self.clock())
+        asset = catalog.resolve_legacy_key("episode:show:s1:e1")
+        catalog.connection.execute(
+            "UPDATE video_v2_v1_shadow SET covered_state_digest = NULL "
+            "WHERE media_key = ?",
+            ("episode:show:s1:e1",),
+        )
+        catalog.connection.commit()
+
+        old_server = sqlite3.connect(self.db_path)
+        insert_v1_row(
+            old_server,
+            position=777,
+            updated=self.clock() - 100,
+        )
+        old_server.close()
+        report = catalog.reconcile_v1_progress(observed_at=self.clock.advance())
+
+        self.assertEqual(report["applied"], 1)
+        self.assertEqual(catalog.get_asset_state(asset)["position"], 777)
+        covered = catalog.connection.execute(
+            "SELECT covered_state_digest FROM video_v2_v1_shadow "
+            "WHERE media_key = ?",
+            ("episode:show:s1:e1",),
+        ).fetchone()[0]
+        self.assertIsNotNone(covered)
+        self.assertNotEqual(covered, "untrusted")
+
+    def test_migrated_null_shadow_rejects_row_older_than_work_only_state(self):
+        catalog = self.catalog()
+        catalog.reconcile_v1_progress(observed_at=self.clock())
+        asset = catalog.resolve_legacy_key("episode:show:s1:e1")
+        work = catalog.lookup_asset(asset)["work_id"]
+        catalog.connection.execute(
+            "UPDATE video_v2_v1_shadow SET covered_state_digest = NULL "
+            "WHERE media_key = ?",
+            ("episode:show:s1:e1",),
+        )
+        catalog.connection.commit()
+        catalog.set_work_watched(
+            work,
+            True,
+            manual=True,
+            asset_id=asset,
+            observed_at=self.clock() + 100,
+        )
+
+        old_server = sqlite3.connect(self.db_path)
+        insert_v1_row(
+            old_server,
+            position=777,
+            updated=self.clock() + 50,
+        )
+        old_server.close()
+        report = catalog.reconcile_v1_progress(observed_at=self.clock.advance(101))
+
+        self.assertEqual(report["applied"], 0)
+        self.assertEqual(report["stale"], 1)
+        self.assertEqual(catalog.get_asset_state(asset)["position"], 125.5)
+        self.assertTrue(catalog.get_work_watch_state(work)["watched"])
+        self.assertEqual(
+            catalog.connection.execute(
+                "SELECT covered_state_digest FROM video_v2_v1_shadow "
+                "WHERE media_key = ?",
+                ("episode:show:s1:e1",),
+            ).fetchone()[0],
+            "untrusted",
+        )
+
+        # The NULL upgrade fallback is consumed even on rejection.  A later
+        # wall-clock advance cannot make the untrusted row overwrite v2.
+        old_server = sqlite3.connect(self.db_path)
+        insert_v1_row(
+            old_server,
+            position=888,
+            updated=self.clock() + 1_000,
+        )
+        old_server.close()
+        retry = catalog.reconcile_v1_progress(observed_at=self.clock.advance())
+        self.assertEqual(retry["applied"], 0)
+        self.assertEqual(retry["stale"], 1)
+        self.assertEqual(catalog.get_asset_state(asset)["position"], 125.5)
+        self.assertTrue(catalog.get_work_watch_state(work)["watched"])
+
+    def test_migrated_null_shadow_rejects_row_older_than_asset_state(self):
+        catalog = self.catalog()
+        catalog.reconcile_v1_progress(observed_at=self.clock())
+        asset = catalog.resolve_legacy_key("episode:show:s1:e1")
+        catalog.connection.execute(
+            "UPDATE video_v2_v1_shadow SET covered_state_digest = NULL "
+            "WHERE media_key = ?",
+            ("episode:show:s1:e1",),
+        )
+        catalog.connection.commit()
+        catalog.clear_playhead(
+            asset,
+            clear_work_auto=False,
+            observed_at=self.clock() + 100,
+        )
+
+        old_server = sqlite3.connect(self.db_path)
+        insert_v1_row(
+            old_server,
+            position=777,
+            updated=self.clock() + 50,
+        )
+        old_server.close()
+        report = catalog.reconcile_v1_progress(observed_at=self.clock.advance(101))
+
+        self.assertEqual(report["applied"], 0)
+        self.assertEqual(report["stale"], 1)
+        self.assertEqual(catalog.get_asset_state(asset)["position"], 0)
+        self.assertEqual(
+            catalog.connection.execute(
+                "SELECT covered_state_digest FROM video_v2_v1_shadow "
+                "WHERE media_key = ?",
+                ("episode:show:s1:e1",),
+            ).fetchone()[0],
+            "untrusted",
+        )
+
     def test_audit_only_absence_and_projected_rows_are_idempotent(self):
         catalog = self.catalog()
         catalog.reconcile_v1_progress(observed_at=self.clock())
@@ -617,6 +749,143 @@ class V1ReconciliationTests(CatalogFixture):
         unchanged = catalog.reconcile_v1_progress(observed_at=self.clock.advance())
         self.assertEqual(unchanged["unchanged"], 1)
         self.assertEqual(len(catalog.list_events(asset)), before)
+
+    def test_identical_row_can_be_deleted_restored_and_deleted_again(self):
+        catalog = self.catalog()
+        catalog.reconcile_v1_progress(observed_at=self.clock())
+        asset = catalog.resolve_legacy_key("episode:show:s1:e1")
+
+        old_server = sqlite3.connect(self.db_path)
+        old_server.execute(
+            "DELETE FROM progress WHERE media_key = ?",
+            ("episode:show:s1:e1",),
+        )
+        old_server.commit()
+        old_server.close()
+        first_delete = catalog.reconcile_v1_progress(
+            observed_at=self.clock.advance()
+        )
+        self.assertEqual(first_delete["cleared"], 1)
+        self.assertEqual(catalog.get_asset_state(asset)["position"], 0)
+
+        old_server = sqlite3.connect(self.db_path)
+        insert_v1_row(old_server)
+        old_server.close()
+        restored = catalog.reconcile_v1_progress(observed_at=self.clock.advance())
+        self.assertEqual(restored["applied"], 1)
+        self.assertEqual(catalog.get_asset_state(asset)["position"], 125.5)
+
+        old_server = sqlite3.connect(self.db_path)
+        old_server.execute(
+            "DELETE FROM progress WHERE media_key = ?",
+            ("episode:show:s1:e1",),
+        )
+        old_server.commit()
+        old_server.close()
+        second_delete = catalog.reconcile_v1_progress(
+            observed_at=self.clock.advance()
+        )
+
+        self.assertEqual(second_delete["cleared"], 1)
+        self.assertEqual(catalog.get_asset_state(asset)["position"], 0)
+        self.assertEqual(
+            len(
+                [
+                    event
+                    for event in catalog.list_events(asset)
+                    if event["event_type"] == "playhead_cleared"
+                ]
+            ),
+            2,
+        )
+
+    def test_rejected_identical_tombstone_records_later_applied_clear(self):
+        catalog = self.catalog()
+        catalog.reconcile_v1_progress(observed_at=self.clock())
+        media_key = "episode:show:s1:e1"
+        asset = catalog.resolve_legacy_key(media_key)
+        work = catalog.lookup_asset(asset)["work_id"]
+
+        # Project an open session, then recover it behind the wall-clock
+        # watermark.  Recovery changes the exact last-event pointer without
+        # changing any field representable by the v1 row.
+        catalog.start_session(asset, position=125.5, started_at=self.clock())
+        state = catalog.get_asset_state(asset)
+        work_state = catalog.get_work_watch_state(work)
+        projected_updated = max(state["updated_at"], work_state["updated_at"])
+        catalog.project_v1_progress(
+            media_key,
+            position=state["position"],
+            duration=state["duration"],
+            updated=projected_updated,
+            finished=work_state["watched"],
+            finished_override=work_state["watched_override"],
+            play_count=state["play_count"],
+            title="Show S01E01",
+            rel_path="/TV/Show/Show.S01E01.mkv",
+            asset_id=asset,
+        )
+        prior_digest = catalog.connection.execute(
+            "SELECT row_digest FROM video_v2_v1_shadow WHERE media_key = ?",
+            (media_key,),
+        ).fetchone()[0]
+        self.assertEqual(
+            catalog.recover_open_sessions(observed_at=self.clock() - 100),
+            1,
+        )
+
+        old_server = sqlite3.connect(self.db_path)
+        old_server.execute("DELETE FROM progress WHERE media_key = ?", (media_key,))
+        old_server.commit()
+        old_server.close()
+        rejected = catalog.reconcile_v1_progress(observed_at=self.clock() - 99)
+        self.assertEqual(rejected["cleared"], 0)
+        first_tombstone = catalog.connection.execute(
+            "SELECT applied_to_state, detected_at FROM video_v2_v1_tombstones "
+            "WHERE media_key = ? AND prior_digest = ?",
+            (media_key, prior_digest),
+        ).fetchone()
+        self.assertEqual(first_tombstone[0], 0)
+
+        # The normal post-recovery projection recreates the exact same v1 row
+        # while recording coverage of the recovered v2 event state.
+        state = catalog.get_asset_state(asset)
+        work_state = catalog.get_work_watch_state(work)
+        catalog.project_v1_progress(
+            media_key,
+            position=state["position"],
+            duration=state["duration"],
+            updated=max(state["updated_at"], work_state["updated_at"]),
+            finished=work_state["watched"],
+            finished_override=work_state["watched_override"],
+            play_count=state["play_count"],
+            title="Show S01E01",
+            rel_path="/TV/Show/Show.S01E01.mkv",
+            asset_id=asset,
+        )
+        self.assertEqual(
+            catalog.connection.execute(
+                "SELECT row_digest FROM video_v2_v1_shadow WHERE media_key = ?",
+                (media_key,),
+            ).fetchone()[0],
+            prior_digest,
+        )
+
+        old_server = sqlite3.connect(self.db_path)
+        old_server.execute("DELETE FROM progress WHERE media_key = ?", (media_key,))
+        old_server.commit()
+        old_server.close()
+        applied = catalog.reconcile_v1_progress(observed_at=self.clock() + 1)
+
+        self.assertEqual(applied["cleared"], 1)
+        self.assertEqual(catalog.get_asset_state(asset)["position"], 0)
+        updated_tombstone = catalog.connection.execute(
+            "SELECT applied_to_state, detected_at FROM video_v2_v1_tombstones "
+            "WHERE media_key = ? AND prior_digest = ?",
+            (media_key, prior_digest),
+        ).fetchone()
+        self.assertEqual(updated_tombstone[0], 1)
+        self.assertGreater(updated_tombstone[1], first_tombstone[1])
 
     def test_projection_supports_pre_override_v1_schema(self):
         path = self.root / "old.sqlite3"

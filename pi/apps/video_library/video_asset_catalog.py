@@ -29,8 +29,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 DEFAULT_BUSY_TIMEOUT_MS = 5_000
+_V1_UNTRUSTED_COVERAGE = "untrusted"
 
 
 class CatalogError(RuntimeError):
@@ -411,6 +412,16 @@ _MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
                 ambiguity_note TEXT NOT NULL,
                 PRIMARY KEY(media_key, prior_digest)
             )
+            """,
+        ),
+    ),
+    (
+        3,
+        "exact legacy v1 projection coverage",
+        (
+            """
+            ALTER TABLE video_v2_v1_shadow
+            ADD COLUMN covered_state_digest TEXT
             """,
         ),
     ),
@@ -2321,6 +2332,115 @@ class MediaAssetCatalog:
     def _v1_row_digest(self, row: Mapping[str, Any]) -> str:
         return _digest(dict(row))
 
+    def _v1_covered_state_digest(
+        self,
+        db: sqlite3.Connection,
+        asset_id: str | None,
+    ) -> str | None:
+        """Fingerprint the exact v2 projections represented by one v1 row."""
+
+        if asset_id is None:
+            return None
+        asset = self._one(
+            db,
+            "SELECT asset_id, work_id FROM video_v2_assets WHERE asset_id = ?",
+            (asset_id,),
+        )
+        if asset is None:
+            return None
+        asset_state = self._one(
+            db,
+            """
+            SELECT asset_id, position, duration, completed, play_count,
+                   updated_at, last_session_id, last_event_id
+            FROM video_v2_asset_playback_state
+            WHERE asset_id = ?
+            """,
+            (asset_id,),
+        )
+        work_id = str(asset["work_id"]) if asset["work_id"] is not None else None
+        work_state = (
+            self._one(
+                db,
+                """
+                SELECT work_id, watched_auto, watched_override, play_count,
+                       updated_at, last_asset_id
+                FROM video_v2_work_watch_state
+                WHERE work_id = ?
+                """,
+                (work_id,),
+            )
+            if work_id is not None
+            else None
+        )
+        return _digest(
+            {
+                "asset_id": asset_id,
+                "work_id": work_id,
+                "asset_state": {
+                    "present": asset_state is not None,
+                    "row": asset_state,
+                },
+                "work_watch_state": {
+                    "present": work_state is not None,
+                    "row": work_state,
+                },
+            }
+        )
+
+    def _v1_shadow_covers_state(
+        self,
+        db: sqlite3.Connection,
+        *,
+        shadow: Mapping[str, Any] | None,
+        asset_id: str,
+    ) -> bool:
+        """Return whether a shadow proves it covered the current v2 state."""
+
+        if (
+            shadow is None
+            or shadow.get("asset_id") is None
+            or str(shadow["asset_id"]) != asset_id
+        ):
+            return False
+        covered_digest = shadow.get("covered_state_digest")
+        if covered_digest is not None:
+            return covered_digest == self._v1_covered_state_digest(db, asset_id)
+
+        # Migration-2 shadows predate exact coverage.  Retain the old wall-time
+        # rule only as a one-time upgrade fallback; the next actual projection,
+        # import, or clear records an exact digest.
+        if shadow.get("source_updated") is None:
+            return False
+        state_updates: list[float] = []
+        asset = self._one(
+            db,
+            "SELECT work_id FROM video_v2_assets WHERE asset_id = ?",
+            (asset_id,),
+        )
+        asset_state = self._one(
+            db,
+            """
+            SELECT updated_at FROM video_v2_asset_playback_state
+            WHERE asset_id = ?
+            """,
+            (asset_id,),
+        )
+        if asset_state is not None:
+            state_updates.append(float(asset_state["updated_at"]))
+        if asset is not None and asset["work_id"] is not None:
+            work_state = self._one(
+                db,
+                """
+                SELECT updated_at FROM video_v2_work_watch_state
+                WHERE work_id = ?
+                """,
+                (str(asset["work_id"]),),
+            )
+            if work_state is not None:
+                state_updates.append(float(work_state["updated_at"]))
+        return not state_updates or float(shadow["source_updated"]) >= max(state_updates)
+
     def _shadow_v1_row(
         self,
         db: sqlite3.Connection,
@@ -2330,6 +2450,7 @@ class MediaAssetCatalog:
         row_digest: str | None,
         source_updated: float | None,
         asset_id: str | None,
+        covered_state_digest: str | None,
         raw: Mapping[str, Any] | None,
         observed_at: float,
     ) -> None:
@@ -2337,15 +2458,16 @@ class MediaAssetCatalog:
             """
             INSERT INTO video_v2_v1_shadow
                 (media_key, was_present, row_digest, source_updated,
-                 asset_id, raw_json, last_seen_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                 asset_id, raw_json, last_seen_at, covered_state_digest)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(media_key) DO UPDATE SET
                 was_present = excluded.was_present,
                 row_digest = excluded.row_digest,
                 source_updated = excluded.source_updated,
                 asset_id = COALESCE(excluded.asset_id, video_v2_v1_shadow.asset_id),
                 raw_json = excluded.raw_json,
-                last_seen_at = excluded.last_seen_at
+                last_seen_at = excluded.last_seen_at,
+                covered_state_digest = excluded.covered_state_digest
             """,
             (
                 media_key,
@@ -2355,6 +2477,7 @@ class MediaAssetCatalog:
                 asset_id,
                 _json_or_none(dict(raw) if raw is not None else None),
                 observed_at,
+                covered_state_digest,
             ),
         )
 
@@ -2529,6 +2652,10 @@ class MediaAssetCatalog:
                 row_digest=digest,
                 source_updated=timestamp,
                 asset_id=asset_id,
+                covered_state_digest=(
+                    self._v1_covered_state_digest(db, asset_id)
+                    or _V1_UNTRUSTED_COVERAGE
+                ),
                 raw=row,
                 observed_at=timestamp,
             )
@@ -2575,6 +2702,10 @@ class MediaAssetCatalog:
                 row_digest=None,
                 source_updated=max(causal_updates),
                 asset_id=asset_id,
+                covered_state_digest=(
+                    self._v1_covered_state_digest(db, asset_id)
+                    or _V1_UNTRUSTED_COVERAGE
+                ),
                 raw=None,
                 observed_at=timestamp,
             )
@@ -2658,6 +2789,7 @@ class MediaAssetCatalog:
                         row_digest=row_digest,
                         source_updated=source_updated,
                         asset_id=str(shadow["asset_id"]) if shadow["asset_id"] else None,
+                        covered_state_digest=shadow.get("covered_state_digest"),
                         raw=row,
                         observed_at=timestamp,
                     )
@@ -2698,34 +2830,24 @@ class MediaAssetCatalog:
                 else:
                     if previously_bound is None:
                         report["created"] += 1
-                    current_state = self._one(
+                    shadow_covers_state = self._v1_shadow_covers_state(
                         db,
-                        """
-                        SELECT updated_at FROM video_v2_asset_playback_state
-                        WHERE asset_id = ?
-                        """,
-                        (asset_id,),
-                    )
-                    shadow_covers_state = bool(
-                        shadow is not None
-                        and shadow.get("asset_id") == asset_id
-                        and shadow.get("source_updated") is not None
-                        and (
-                            current_state is None
-                            or float(shadow["source_updated"])
-                            >= float(current_state["updated_at"])
-                        )
-                    )
-                    applied = self._apply_v1_snapshot(
-                        db,
-                        media_key=media_key,
-                        row=row,
-                        row_digest=row_digest,
+                        shadow=shadow,
                         asset_id=asset_id,
-                        work_id=work_id,
-                        observed_at=timestamp,
-                        authoritative=shadow_covers_state,
                     )
+                    if shadow is not None and not shadow_covers_state:
+                        applied = False
+                    else:
+                        applied = self._apply_v1_snapshot(
+                            db,
+                            media_key=media_key,
+                            row=row,
+                            row_digest=row_digest,
+                            asset_id=asset_id,
+                            work_id=work_id,
+                            observed_at=timestamp,
+                            authoritative=shadow_covers_state,
+                        )
                     action = "applied" if applied else "stale"
                     report[action] += 1
                 try:
@@ -2766,6 +2888,11 @@ class MediaAssetCatalog:
                     row_digest=row_digest,
                     source_updated=shadow_updated,
                     asset_id=asset_id,
+                    covered_state_digest=(
+                        self._v1_covered_state_digest(db, asset_id)
+                        if applied
+                        else _V1_UNTRUSTED_COVERAGE
+                    ),
                     raw=row,
                     observed_at=timestamp,
                 )
@@ -2784,12 +2911,29 @@ class MediaAssetCatalog:
                     else self.resolve_legacy_key(media_key, connection=db)
                 )
                 applied = False
-                if asset_id is not None and absence_policy == "clear":
+                shadow_covers_state = bool(
+                    asset_id is not None
+                    and self._v1_shadow_covers_state(
+                        db,
+                        shadow=shadow,
+                        asset_id=asset_id,
+                    )
+                )
+                if (
+                    asset_id is not None
+                    and absence_policy == "clear"
+                    and shadow_covers_state
+                ):
                     self.clear_playhead(
                         asset_id,
                         reason="legacy_v1_row_absent",
                         clear_work_auto=True,
-                        event_key=f"v1-absent:{media_key}:{prior_digest}",
+                        # The same exact row can be restored and deleted more
+                        # than once.  Each observed absence is a new causal
+                        # clear even when its prior row digest is identical.
+                        event_key=(
+                            f"v1-absent:{media_key}:{prior_digest}:{import_id}"
+                        ),
                         observed_at=timestamp,
                         connection=db,
                     )
@@ -2801,7 +2945,17 @@ class MediaAssetCatalog:
                         (media_key, prior_digest, asset_id, detected_at,
                          applied_to_state, ambiguity_note)
                     VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(media_key, prior_digest) DO NOTHING
+                    ON CONFLICT(media_key, prior_digest) DO UPDATE SET
+                        asset_id = COALESCE(
+                            excluded.asset_id,
+                            video_v2_v1_tombstones.asset_id
+                        ),
+                        detected_at = excluded.detected_at,
+                        applied_to_state = MAX(
+                            video_v2_v1_tombstones.applied_to_state,
+                            excluded.applied_to_state
+                        ),
+                        ambiguity_note = excluded.ambiguity_note
                     """,
                     (
                         media_key,
@@ -2851,6 +3005,11 @@ class MediaAssetCatalog:
                     row_digest=None,
                     source_updated=shadow_updated,
                     asset_id=asset_id,
+                    covered_state_digest=(
+                        self._v1_covered_state_digest(db, asset_id)
+                        if applied
+                        else _V1_UNTRUSTED_COVERAGE
+                    ),
                     raw=None,
                     observed_at=timestamp,
                 )

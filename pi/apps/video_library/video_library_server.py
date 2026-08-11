@@ -1309,6 +1309,8 @@ class VideoService:
         self.active_complete = True
         self.last_snapshot: dict[str, Any] | None = None
         self.pending_explicit_launch: dict[str, Any] | None = None
+        self.session_recovery_pending = False
+        self.session_recovery_error: str | None = None
         self.identity_error: str | None = None
 
     @staticmethod
@@ -1754,9 +1756,36 @@ class VideoService:
         )
         self._project_item_progress(item)
 
+    def _retry_session_recovery(self) -> None:
+        """Reconcile rollback intent before closing or replacing old sessions."""
+
+        if self.catalog is None or not self.session_recovery_pending:
+            return
+        with self.control_lock:
+            if not self.session_recovery_pending:
+                return
+            try:
+                self.catalog.reconcile_v1_progress()
+            except (CatalogError, sqlite3.Error, OSError, ValueError) as exc:
+                self.session_recovery_error = (
+                    "could not reconcile rollback progress; prior session "
+                    f"recovery deferred: {exc}"
+                )
+                raise
+            try:
+                self.catalog.recover_open_sessions()
+            except (CatalogError, sqlite3.Error, OSError, ValueError) as exc:
+                self.session_recovery_error = (
+                    f"could not close prior playback sessions: {exc}"
+                )
+                raise
+            self.session_recovery_pending = False
+            self.session_recovery_error = None
+
     def _sync_library_identities(self) -> None:
         if self.catalog is None:
             return
+        self._retry_session_recovery()
         self.catalog.reconcile_v1_progress()
         items, _shows = self.library.snapshot()
         # A library can contain thousands of aliases.  Nested catalog methods
@@ -1804,6 +1833,7 @@ class VideoService:
         return progress
 
     def start(self) -> None:
+        self._retry_session_recovery()
         self.rescan()
         if not self.thread:
             self.thread = threading.Thread(target=self._loop, name="video-library-poller", daemon=True)
@@ -2003,6 +2033,7 @@ class VideoService:
     ) -> None:
         if self.catalog is None:
             return
+        self._retry_session_recovery()
         position = max(0.0, float(snapshot.get("position") or 0))
         with self.catalog.transaction() as db:
             if clear_override and work_id is not None:
@@ -2315,6 +2346,11 @@ class VideoService:
         player["fraction"] = min(1.0, position / duration) if duration else None
         source = self.library.source
         sleep_remaining = max(0, int(self.sleep_deadline - self.clock())) if self.sleep_deadline else 0
+        history_error = "; ".join(
+            value
+            for value in (self.identity_error, self.session_recovery_error)
+            if value
+        ) or None
         return {
             "ok": True,
             "library": {
@@ -2331,8 +2367,8 @@ class VideoService:
                 "version": 2 if self.catalog is not None else 1,
                 "available": self.catalog is not None,
                 "session_active": self.active_session_id is not None,
-                "degraded": bool(self.identity_error),
-                "error": self.identity_error,
+                "degraded": bool(history_error),
+                "error": history_error,
             },
             "sleep_timer": {
                 "active": bool(self.sleep_deadline),
@@ -3022,12 +3058,30 @@ def active_service() -> VideoService:
                     lock=store.lock,
                 )
                 identity_warnings: list[str] = []
+                rollback_reconciled = False
+                session_recovery_complete = False
+                session_recovery_error: str | None = None
                 try:
-                    catalog.recover_open_sessions()
+                    # An old server may have changed or deleted v1 progress
+                    # after the last v2 projection.  Reconcile that intent
+                    # before orphan recovery advances the exact event/session
+                    # state covered by the compatibility shadow.  The normal
+                    # library rescan then projects the post-recovery state.
+                    catalog.reconcile_v1_progress()
+                    rollback_reconciled = True
                 except (CatalogError, sqlite3.Error, OSError, ValueError) as exc:
-                    identity_warnings.append(
-                        f"could not close prior playback sessions: {exc}"
+                    session_recovery_error = (
+                        "could not reconcile rollback progress; prior session "
+                        f"recovery deferred: {exc}"
                     )
+                if rollback_reconciled:
+                    try:
+                        catalog.recover_open_sessions()
+                        session_recovery_complete = True
+                    except (CatalogError, sqlite3.Error, OSError, ValueError) as exc:
+                        session_recovery_error = (
+                            f"could not close prior playback sessions: {exc}"
+                        )
                 qbittorrent = None
                 qbittorrent_error = None
                 try:
@@ -3049,6 +3103,8 @@ def active_service() -> VideoService:
                     catalog=catalog,
                     qbittorrent=qbittorrent,
                 )
+                _service.session_recovery_pending = not session_recovery_complete
+                _service.session_recovery_error = session_recovery_error
                 _service.identity_error = "; ".join(identity_warnings) or None
     return _service
 
