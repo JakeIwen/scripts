@@ -420,8 +420,54 @@ get_last_position() {
 }
 
 playp() {
-  path="$(pwd)/$1"
-  run_vlc "$path" 
+  if [[ "$#" -ne 1 || -z "$1" ]]; then
+    echo "usage: playp <local-media-file>" >&2
+    return 2
+  fi
+  local path="$1"
+  [[ "$path" = /* ]] || path="$(pwd -P)/$path"
+
+  # Identity is best-effort inside the manager: an ordinary file still plays
+  # when qBittorrent is offline or cannot recognize it.  If the manager itself
+  # is unavailable, retain playp's original direct VLC behavior.
+  local response_file http_code curl_status manager_timeout curl_metrics num_connects
+  manager_timeout="${VAN_VIDEO_PLAYP_MAX_TIME:-90}"
+  response_file="$(mktemp "${TMPDIR:-/tmp}/van-play-local.XXXXXX")" || {
+    run_vlc "$path"
+    return $?
+  }
+  curl_metrics="$(
+    /usr/bin/curl -sS --connect-timeout 1 --max-time "$manager_timeout" \
+      -o "$response_file" -w '%{http_code} %{num_connects}' \
+      -H 'X-Van-Video: 1' -X POST \
+      "${VIDEOAPI:-http://localhost:8789/api}/play-local" \
+      --data-urlencode "path=$path" \
+      --data-urlencode 'subtitles=auto'
+  )"
+  curl_status=$?
+  read -r http_code num_connects <<<"$curl_metrics"
+  if [[ "$curl_status" -eq 0 && "$http_code" = 2* ]]; then
+    /bin/cat "$response_file"
+    /bin/rm -f -- "$response_file"
+    echo
+    return 0
+  fi
+  # curl 7 proves that no connection was made, so direct VLC is safe.  Other
+  # transport failures (especially a response timeout) are ambiguous: the
+  # manager may already have launched VLC, and retrying would double-launch.
+  if [[ "$curl_status" -eq 7 || ( "$curl_status" -eq 28 && "${num_connects:-0}" -eq 0 ) ]]; then
+    /bin/rm -f -- "$response_file"
+    run_vlc "$path"
+    return $?
+  fi
+  if [[ -s "$response_file" ]]; then
+    /bin/cat "$response_file" >&2
+  else
+    echo "video manager request ended without a definitive response (curl $curl_status); not launching VLC again" >&2
+  fi
+  /bin/rm -f -- "$response_file"
+  echo >&2
+  return 1
 }
 
 media_all() {

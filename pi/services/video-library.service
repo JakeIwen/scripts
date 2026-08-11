@@ -5,6 +5,8 @@ Wants=network-online.target
 
 [Service]
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/video_library_server.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/video_asset_catalog.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/video_qbittorrent.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/templates/video_library.html
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/static/video_library.js
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/static/video_library.css
