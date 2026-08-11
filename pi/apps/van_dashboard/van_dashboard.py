@@ -273,6 +273,7 @@ LIGHT_POWER_SWITCHES = {
     "solder": ("switch.solder_flood", "Solder power"),
 }
 LIGHT_COMMAND_TIMEOUT = 20
+LIGHT_HUE_MODES = {"hs", "rgb", "rgbw", "rgbww", "xy"}
 
 
 def atomic_json_write(path, value):
@@ -1168,11 +1169,19 @@ class LightingController:
             raise LightingCommandError("Home Assistant returned an unexpected light schema")
         parsed = {}
         for item in values:
-            if not isinstance(item, dict) or set(item) != {
-                "entity_id",
-                "state",
-                "brightness",
-            }:
+            base_fields = {"entity_id", "state", "brightness"}
+            color_fields = {
+                "color_mode",
+                "supported_color_modes",
+                "hs_color",
+                "color_temp_kelvin",
+                "min_color_temp_kelvin",
+                "max_color_temp_kelvin",
+            }
+            if not isinstance(item, dict) or set(item) not in (
+                base_fields,
+                base_fields | color_fields,
+            ):
                 raise LightingCommandError("Home Assistant returned an unexpected light schema")
             entity = item["entity_id"]
             state = item["state"]
@@ -1193,9 +1202,78 @@ class LightingController:
                 raise LightingCommandError(
                     f"Home Assistant returned invalid brightness for {entity}"
                 )
+            color_mode = item.get("color_mode")
+            supported_modes = item.get("supported_color_modes", [])
+            hs_color = item.get("hs_color")
+            color_temp = item.get("color_temp_kelvin")
+            min_color_temp = item.get("min_color_temp_kelvin")
+            max_color_temp = item.get("max_color_temp_kelvin")
+            if color_mode is not None and (
+                not isinstance(color_mode, str)
+                or not re.fullmatch(r"[a-z0-9_]{1,32}", color_mode)
+            ):
+                raise LightingCommandError(
+                    f"Home Assistant returned invalid color mode for {entity}"
+                )
+            if (
+                not isinstance(supported_modes, list)
+                or len(supported_modes) > 16
+                or any(
+                    not isinstance(mode, str)
+                    or not re.fullmatch(r"[a-z0-9_]{1,32}", mode)
+                    for mode in supported_modes
+                )
+                or len(supported_modes) != len(set(supported_modes))
+            ):
+                raise LightingCommandError(
+                    f"Home Assistant returned invalid supported color modes for {entity}"
+                )
+            if hs_color is not None and (
+                not isinstance(hs_color, list)
+                or len(hs_color) != 2
+                or any(
+                    isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(value)
+                    for value in hs_color
+                )
+                or not 0 <= hs_color[0] <= 360
+                or not 0 <= hs_color[1] <= 100
+            ):
+                raise LightingCommandError(
+                    f"Home Assistant returned invalid hue for {entity}"
+                )
+            for name, value in (
+                ("color temperature", color_temp),
+                ("minimum color temperature", min_color_temp),
+                ("maximum color temperature", max_color_temp),
+            ):
+                if value is not None and (
+                    type(value) is not int or not 1000 <= value <= 10000
+                ):
+                    raise LightingCommandError(
+                        f"Home Assistant returned invalid {name} for {entity}"
+                    )
+            if (
+                min_color_temp is not None
+                and max_color_temp is not None
+                and min_color_temp > max_color_temp
+            ):
+                raise LightingCommandError(
+                    f"Home Assistant returned an invalid color temperature range for {entity}"
+                )
             if entity in parsed:
                 raise LightingCommandError(f"Home Assistant returned duplicate {entity}")
-            parsed[entity] = {"state": state, "brightness": brightness}
+            parsed[entity] = {
+                "state": state,
+                "brightness": brightness,
+                "color_mode": color_mode,
+                "supported_color_modes": supported_modes,
+                "hs_color": hs_color,
+                "color_temp_kelvin": color_temp,
+                "min_color_temp_kelvin": min_color_temp,
+                "max_color_temp_kelvin": max_color_temp,
+            }
         return parsed
 
     @staticmethod
@@ -1240,6 +1318,14 @@ class LightingController:
             for entity, label in configured:
                 value = observed.get(entity, {"state": "unknown", "brightness": None})
                 brightness = value["brightness"]
+                supported_modes = set(value.get("supported_color_modes") or ())
+                supports_hue = bool(supported_modes & LIGHT_HUE_MODES)
+                supports_color_temp = "color_temp" in supported_modes
+                min_color_temp = value.get("min_color_temp_kelvin")
+                max_color_temp = value.get("max_color_temp_kelvin")
+                if supports_color_temp:
+                    min_color_temp = min_color_temp or 2000
+                    max_color_temp = max_color_temp or 7000
                 light = {
                     "entity_id": entity,
                     "label": label,
@@ -1248,6 +1334,17 @@ class LightingController:
                     "brightness": (
                         round(brightness * 100 / 255) if brightness is not None else None
                     ),
+                    "color_mode": value.get("color_mode"),
+                    "supports_hue": supports_hue,
+                    "hue": (
+                        round(float(value["hs_color"][0]), 1)
+                        if supports_hue and value.get("hs_color") is not None
+                        else None
+                    ),
+                    "supports_color_temperature": supports_color_temp,
+                    "color_temp_kelvin": value.get("color_temp_kelvin"),
+                    "min_color_temp_kelvin": min_color_temp,
+                    "max_color_temp_kelvin": max_color_temp,
                 }
                 lights.append(light)
                 all_lights.append(light)
@@ -1337,6 +1434,30 @@ class LightingController:
         with self.operation_lock:
             self._run(
                 [TUYA_LIGHT, "set", entity, str(raw_brightness)],
+                expect_status=False,
+            )
+            return self.status()
+
+    def set_hue(self, entity, hue):
+        if entity not in self.entities:
+            raise ValueError("unknown light entity")
+        if type(hue) is not int or not 0 <= hue <= 360:
+            raise ValueError("hue must be from 0 to 360")
+        with self.operation_lock:
+            self._run(
+                [TUYA_LIGHT, "hue", entity, str(hue)],
+                expect_status=False,
+            )
+            return self.status()
+
+    def set_color_temperature(self, entity, kelvin):
+        if entity not in self.entities:
+            raise ValueError("unknown light entity")
+        if type(kelvin) is not int or not 2000 <= kelvin <= 7000:
+            raise ValueError("color temperature must be from 2000 to 7000 kelvin")
+        with self.operation_lock:
+            self._run(
+                [TUYA_LIGHT, "temperature", entity, str(kelvin)],
                 expect_status=False,
             )
             return self.status()
@@ -4909,6 +5030,58 @@ def api_lights_brightness():
         {
             "ok": True,
             "message": f"Brightness set to {brightness}%",
+            "lighting": status,
+        }
+    )
+
+
+@app.route("/api/lights/hue", methods=["POST"])
+def api_lights_hue():
+    if not _exact_form(("entity", "hue")):
+        return api_error("light hue requires entity and hue", 400)
+    entity = request.form["entity"]
+    if entity not in lighting.entities:
+        return api_error("unknown light entity", 400)
+    try:
+        hue = int(request.form["hue"])
+    except (TypeError, ValueError):
+        return api_error("hue must be from 0 to 360", 400)
+    if not 0 <= hue <= 360:
+        return api_error("hue must be from 0 to 360", 400)
+    try:
+        status = lighting.set_hue(entity, hue)
+    except LightingCommandError as exc:
+        return api_error(f"could not set light hue: {exc}", 502)
+    return jsonify(
+        {
+            "ok": True,
+            "message": f"Hue set to {hue}°",
+            "lighting": status,
+        }
+    )
+
+
+@app.route("/api/lights/color-temperature", methods=["POST"])
+def api_lights_color_temperature():
+    if not _exact_form(("entity", "kelvin")):
+        return api_error("light color temperature requires entity and kelvin", 400)
+    entity = request.form["entity"]
+    if entity not in lighting.entities:
+        return api_error("unknown light entity", 400)
+    try:
+        kelvin = int(request.form["kelvin"])
+    except (TypeError, ValueError):
+        return api_error("color temperature must be from 2000 to 7000 kelvin", 400)
+    if not 2000 <= kelvin <= 7000:
+        return api_error("color temperature must be from 2000 to 7000 kelvin", 400)
+    try:
+        status = lighting.set_color_temperature(entity, kelvin)
+    except LightingCommandError as exc:
+        return api_error(f"could not set light color temperature: {exc}", 502)
+    return jsonify(
+        {
+            "ok": True,
+            "message": f"Color temperature set to {kelvin} K",
             "lighting": status,
         }
     )

@@ -1132,6 +1132,76 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+.lighting-color-controls {
+  grid-column: 2 / -1;
+  display: grid;
+  gap: 7px;
+  width: 100%;
+  margin-top: 2px;
+}
+.lighting-color-control {
+  display: grid;
+  grid-template-columns: 72px minmax(90px, 1fr) 48px;
+  align-items: center;
+  gap: 8px;
+  color: var(--dim);
+  font-size: 9px;
+}
+.lighting-color-control.active > span {
+  color: var(--text);
+  font-weight: 750;
+}
+.lighting-color-slider {
+  width: 100%;
+  height: 8px;
+  margin: 0;
+  border: 1px solid #52616a;
+  border-radius: 99px;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.lighting-hue-slider {
+  background: linear-gradient(
+    90deg,
+    #ff4f4f,
+    #ffff55,
+    #55e875,
+    #55e9ff,
+    #5975ff,
+    #d95cff,
+    #ff4f4f
+  );
+}
+.lighting-temperature-slider {
+  background: linear-gradient(90deg, #ff9d47, #fff0c8 48%, #d8edff);
+}
+.lighting-color-slider::-webkit-slider-thumb {
+  width: 17px;
+  height: 17px;
+  border: 2px solid #f2f6f8;
+  border-radius: 50%;
+  background: #26333d;
+  box-shadow: 0 1px 3px #000a;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.lighting-color-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #f2f6f8;
+  border-radius: 50%;
+  background: #26333d;
+  box-shadow: 0 1px 3px #000a;
+}
+.lighting-color-slider:disabled {
+  filter: grayscale(1);
+  opacity: 0.35;
+}
+.lighting-color-value {
+  color: var(--dim);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 .policy-sheet {
   padding-bottom: calc(24px + env(safe-area-inset-bottom));
 }

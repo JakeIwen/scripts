@@ -38,6 +38,20 @@ class LightingTileStaticTests(unittest.TestCase):
         self.assertIn(".lighting-room-slider", self.stylesheet)
         self.assertIn(".lighting-quick-level", self.stylesheet)
 
+    def test_expanded_bulbs_offer_capability_driven_color_controls(self):
+        self.assertIn("light.supports_hue", self.javascript)
+        self.assertIn("light.supports_color_temperature", self.javascript)
+        self.assertIn("data-light-hue=", self.javascript)
+        self.assertIn("data-light-temperature=", self.javascript)
+        self.assertIn("post('lights/hue', { entity, hue })", self.javascript)
+        self.assertIn(
+            "post('lights/color-temperature', { entity, kelvin })",
+            self.javascript,
+        )
+        self.assertIn(".lighting-color-controls", self.stylesheet)
+        self.assertIn(".lighting-hue-slider", self.stylesheet)
+        self.assertIn(".lighting-temperature-slider", self.stylesheet)
+
 
 if __name__ == "__main__":
     unittest.main()

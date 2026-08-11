@@ -2937,6 +2937,7 @@ function lightingDotClass(state) {
   return state === 'on' ? 'good' : state === 'off' ? 'bad' : '';
 }
 const LIGHTING_QUICK_GROUPS = new Set(['cab', 'rear', 'kitchen']);
+const LIGHTING_HUE_MODES = new Set(['hs', 'rgb', 'rgbw', 'rgbww', 'xy']);
 function lightingGroupLevel(group) {
   const levels = group.lights
     .filter((light) => light.available && Number.isFinite(light.brightness))
@@ -3022,13 +3023,41 @@ function renderLighting(next) {
         .map((light) => {
           const enabled = light.state === 'on',
             level = Number.isFinite(light.brightness) ? light.brightness : 100,
-            stateLabel = enabled ? 'ON' : light.state === 'off' ? 'OFF' : 'NO DATA';
+            stateLabel = enabled ? 'ON' : light.state === 'off' ? 'OFF' : 'NO DATA',
+            hue = Number.isFinite(light.hue) ? Math.round(light.hue) : 0,
+            minKelvin = Number.isFinite(light.min_color_temp_kelvin)
+              ? light.min_color_temp_kelvin
+              : 2000,
+            maxKelvin = Number.isFinite(light.max_color_temp_kelvin)
+              ? light.max_color_temp_kelvin
+              : 7000,
+            kelvin = Number.isFinite(light.color_temp_kelvin)
+              ? Math.max(minKelvin, Math.min(maxKelvin, light.color_temp_kelvin))
+              : Math.round((minKelvin + maxKelvin) / 2),
+            hueControl = light.supports_hue
+              ? `<label class="lighting-color-control ${LIGHTING_HUE_MODES.has(light.color_mode) ? 'active' : ''}">
+                  <span>Hue</span>
+                  <input class="lighting-color-slider lighting-hue-slider" data-action data-light-hue="${esc(light.entity_id)}" type="range" min="0" max="360" value="${hue}" ${light.available ? '' : 'disabled'} aria-label="${esc(light.label)} hue">
+                  <output class="lighting-color-value">${light.available ? `${hue}°` : '—'}</output>
+                </label>`
+              : '',
+            temperatureControl = light.supports_color_temperature
+              ? `<label class="lighting-color-control ${light.color_mode === 'color_temp' ? 'active' : ''}">
+                  <span>Temperature</span>
+                  <input class="lighting-color-slider lighting-temperature-slider" data-action data-light-temperature="${esc(light.entity_id)}" type="range" min="${minKelvin}" max="${maxKelvin}" step="1" value="${kelvin}" ${light.available ? '' : 'disabled'} aria-label="${esc(light.label)} color temperature">
+                  <output class="lighting-color-value">${light.available ? `${kelvin} K` : '—'}</output>
+                </label>`
+              : '',
+            colorControls = hueControl || temperatureControl
+              ? `<div class="lighting-color-controls">${hueControl}${temperatureControl}</div>`
+              : '';
           return `<div class="lighting-row">
             <span class="lighting-bulb ${enabled ? 'on' : ''}" aria-hidden="true">●</span>
             <strong>${esc(light.label)}</strong>
             <button class="lighting-power ${lightingDotClass(light.state)}" data-action data-light-target="${esc(light.entity_id)}" data-light-value="${String(!enabled)}" ${light.available ? '' : 'disabled'} aria-pressed="${light.available ? String(enabled) : 'mixed'}">${stateLabel}</button>
             <input class="lighting-slider" data-action data-light-brightness="${esc(light.entity_id)}" type="range" min="1" max="100" value="${level}" ${light.available ? '' : 'disabled'} aria-label="${esc(light.label)} brightness">
             <span class="lighting-level">${light.available ? `${level}%` : '—'}</span>
+            ${colorControls}
           </div>`;
         })
         .join('');
@@ -3079,6 +3108,26 @@ async function changeLightBrightness(entity, brightness) {
   let result;
   try {
     result = await post('lights/brightness', { entity, brightness });
+    renderLighting(result.lighting);
+    return result;
+  } catch (error) {
+    await refreshLighting(false).catch(() => {});
+    throw error;
+  }
+}
+async function changeLightHue(entity, hue) {
+  try {
+    const result = await post('lights/hue', { entity, hue });
+    renderLighting(result.lighting);
+    return result;
+  } catch (error) {
+    await refreshLighting(false).catch(() => {});
+    throw error;
+  }
+}
+async function changeLightColorTemperature(entity, kelvin) {
+  try {
+    const result = await post('lights/color-temperature', { entity, kelvin });
     renderLighting(result.lighting);
     return result;
   } catch (error) {
@@ -3845,6 +3894,14 @@ document.addEventListener('input', (event) => {
   if (roomSlider)
     roomSlider.closest('.lighting-quick-row').querySelector('.lighting-quick-level').textContent =
       `${roomSlider.value}%`;
+  const hueSlider = event.target.closest('[data-light-hue]');
+  if (hueSlider)
+    hueSlider.closest('.lighting-color-control').querySelector('.lighting-color-value').textContent =
+      `${hueSlider.value}°`;
+  const temperatureSlider = event.target.closest('[data-light-temperature]');
+  if (temperatureSlider)
+    temperatureSlider.closest('.lighting-color-control').querySelector('.lighting-color-value').textContent =
+      `${temperatureSlider.value} K`;
 });
 document.addEventListener('change', (event) => {
   const lightSlider = event.target.closest('[data-light-brightness]');
@@ -3858,6 +3915,17 @@ document.addEventListener('change', (event) => {
       changeLightGroupBrightness(
         roomSlider.dataset.lightGroupBrightness,
         roomSlider.value,
+      ),
+    );
+  const hueSlider = event.target.closest('[data-light-hue]');
+  if (hueSlider)
+    action(() => changeLightHue(hueSlider.dataset.lightHue, hueSlider.value));
+  const temperatureSlider = event.target.closest('[data-light-temperature]');
+  if (temperatureSlider)
+    action(() =>
+      changeLightColorTemperature(
+        temperatureSlider.dataset.lightTemperature,
+        temperatureSlider.value,
       ),
     );
   const checkbox = event.target.closest('[data-group-speaker]');

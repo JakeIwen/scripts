@@ -879,6 +879,12 @@ class LightingControllerTests(unittest.TestCase):
                 "entity_id": entity,
                 "state": default_state,
                 "brightness": 128 if default_state == "on" else None,
+                "color_mode": "rgbww" if default_state == "on" else None,
+                "supported_color_modes": ["color_temp", "rgbww"],
+                "hs_color": [28.5, 75.0] if default_state == "on" else None,
+                "color_temp_kelvin": None,
+                "min_color_temp_kelvin": 2202,
+                "max_color_temp_kelvin": 6535,
             }
             for _group_id, _group_label, lights in dashboard.LIGHT_GROUPS
             for entity, _label in lights
@@ -886,7 +892,9 @@ class LightingControllerTests(unittest.TestCase):
 
     def test_status_preserves_configured_groups_and_reports_percent(self):
         values = self.light_values()
-        values[0].update(state="on", brightness=128)
+        values[0].update(
+            state="on", brightness=128, color_mode="rgbww", hs_color=[28.5, 75.0]
+        )
 
         def command(args, timeout):
             self.assertEqual(args, [dashboard.TUYA_LIGHT, "list"])
@@ -900,6 +908,14 @@ class LightingControllerTests(unittest.TestCase):
         self.assertEqual(status["on_count"], 1)
         self.assertEqual(status["available_count"], 9)
         self.assertEqual(status["groups"][0]["lights"][0]["brightness"], 50)
+        self.assertTrue(status["groups"][0]["lights"][0]["supports_hue"])
+        self.assertEqual(status["groups"][0]["lights"][0]["hue"], 28.5)
+        self.assertTrue(
+            status["groups"][0]["lights"][0]["supports_color_temperature"]
+        )
+        self.assertEqual(
+            status["groups"][0]["lights"][0]["min_color_temp_kelvin"], 2202
+        )
 
     def test_power_and_brightness_use_only_fixed_commands_then_refresh(self):
         values = self.light_values()
@@ -913,6 +929,20 @@ class LightingControllerTests(unittest.TestCase):
             elif args[:3] == [dashboard.TUYA_LIGHT, "set", "light.wiz_kitchen"]:
                 values[4]["state"] = "on"
                 values[4]["brightness"] = int(args[3])
+            elif args[:3] == [dashboard.TUYA_LIGHT, "hue", "light.wiz_kitchen"]:
+                values[4]["state"] = "on"
+                values[4]["color_mode"] = "rgbww"
+                values[4]["hs_color"] = [int(args[3]), 100]
+                values[4]["color_temp_kelvin"] = None
+            elif args[:3] == [
+                dashboard.TUYA_LIGHT,
+                "temperature",
+                "light.wiz_kitchen",
+            ]:
+                values[4]["state"] = "on"
+                values[4]["color_mode"] = "color_temp"
+                values[4]["hs_color"] = None
+                values[4]["color_temp_kelvin"] = int(args[3])
             return SimpleNamespace(
                 returncode=0,
                 stdout=json.dumps(values) if args == [dashboard.TUYA_LIGHT, "list"] else "",
@@ -922,20 +952,48 @@ class LightingControllerTests(unittest.TestCase):
         controller = dashboard.LightingController(command=command)
         powered = controller.set_power("light.wiz_kitchen", True)
         dimmed = controller.set_brightness("light.wiz_kitchen", 40)
+        colored = controller.set_hue("light.wiz_kitchen", 210)
+        warmed = controller.set_color_temperature("light.wiz_kitchen", 3200)
         self.assertEqual(powered["on_count"], 1)
         self.assertEqual(dimmed["groups"][2]["lights"][0]["brightness"], 40)
+        self.assertEqual(colored["groups"][2]["lights"][0]["hue"], 210.0)
+        self.assertEqual(
+            warmed["groups"][2]["lights"][0]["color_temp_kelvin"], 3200
+        )
         self.assertEqual(calls[0], [dashboard.TUYA_TOGGLE, "light.wiz_kitchen", "on"])
         self.assertEqual(calls[1], [dashboard.TUYA_LIGHT, "list"])
         self.assertEqual(calls[2], [dashboard.TUYA_LIGHT, "set", "light.wiz_kitchen", "102"])
         self.assertEqual(calls[3], [dashboard.TUYA_LIGHT, "list"])
+        self.assertEqual(calls[4], [dashboard.TUYA_LIGHT, "hue", "light.wiz_kitchen", "210"])
+        self.assertEqual(calls[5], [dashboard.TUYA_LIGHT, "list"])
+        self.assertEqual(
+            calls[6],
+            [dashboard.TUYA_LIGHT, "temperature", "light.wiz_kitchen", "3200"],
+        )
+        self.assertEqual(calls[7], [dashboard.TUYA_LIGHT, "list"])
         with self.assertRaisesRegex(ValueError, "unknown lighting target"):
             controller.set_power("switch.starlink", True)
         with self.assertRaisesRegex(ValueError, "unknown light entity"):
             controller.set_brightness("light.not_configured", 50)
+        with self.assertRaisesRegex(ValueError, "hue must be"):
+            controller.set_hue("light.wiz_kitchen", 361)
+        with self.assertRaisesRegex(ValueError, "color temperature must be"):
+            controller.set_color_temperature("light.wiz_kitchen", 1999)
 
     def test_rejects_bad_schema_and_reports_timeout(self):
         with self.assertRaises(dashboard.LightingCommandError):
             dashboard.LightingController.parse_status('{"not":"a list"}')
+        bad_color = self.light_values()
+        bad_color[0]["supported_color_modes"] = ["rgb", "rgb"]
+        with self.assertRaisesRegex(
+            dashboard.LightingCommandError, "supported color modes"
+        ):
+            dashboard.LightingController.parse_status(json.dumps(bad_color))
+        bad_color[0]["supported_color_modes"] = [{"mode": "rgb"}]
+        with self.assertRaisesRegex(
+            dashboard.LightingCommandError, "supported color modes"
+        ):
+            dashboard.LightingController.parse_status(json.dumps(bad_color))
 
         def timeout(_args, timeout):
             raise subprocess.TimeoutExpired("lights", timeout)
@@ -4138,6 +4196,14 @@ class DashboardRouteTests(unittest.TestCase):
                 calls.append(("brightness", entity, brightness))
                 return {**status, "state": "on", "on_count": 1}
 
+            def set_hue(self, entity, hue):
+                calls.append(("hue", entity, hue))
+                return {**status, "state": "on", "on_count": 1}
+
+            def set_color_temperature(self, entity, kelvin):
+                calls.append(("temperature", entity, kelvin))
+                return {**status, "state": "on", "on_count": 1}
+
         original = dashboard.lighting
         dashboard.lighting = FakeLighting()
         try:
@@ -4150,6 +4216,14 @@ class DashboardRouteTests(unittest.TestCase):
                 "/api/lights/brightness",
                 data={"entity": "light.wiz_kitchen", "brightness": "42"},
             )
+            hue = client.post(
+                "/api/lights/hue",
+                data={"entity": "light.wiz_kitchen", "hue": "225"},
+            )
+            temperature = client.post(
+                "/api/lights/color-temperature",
+                data={"entity": "light.wiz_kitchen", "kelvin": "3200"},
+            )
             unknown_target = client.post(
                 "/api/lights/power",
                 data={"target": "switch.starlink", "value": "true"},
@@ -4160,6 +4234,22 @@ class DashboardRouteTests(unittest.TestCase):
             )
             bad_value = client.post(
                 "/api/lights/power", data={"target": "all", "value": "toggle"}
+            )
+            bad_hue = client.post(
+                "/api/lights/hue",
+                data={"entity": "light.wiz_kitchen", "hue": "361"},
+            )
+            bad_temperature = client.post(
+                "/api/lights/color-temperature",
+                data={"entity": "light.wiz_kitchen", "kelvin": "warm"},
+            )
+            extra_color = client.post(
+                "/api/lights/hue",
+                data={
+                    "entity": "light.wiz_kitchen",
+                    "hue": "120",
+                    "command": "anything",
+                },
             )
             extra = client.post(
                 "/api/lights/power",
@@ -4172,9 +4262,14 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(read.headers["Cache-Control"], "no-store")
         self.assertEqual(power.status_code, 200)
         self.assertEqual(brightness.status_code, 200)
+        self.assertEqual(hue.status_code, 200)
+        self.assertEqual(temperature.status_code, 200)
         self.assertEqual(unknown_target.status_code, 400)
         self.assertEqual(unknown_entity.status_code, 400)
         self.assertEqual(bad_value.status_code, 400)
+        self.assertEqual(bad_hue.status_code, 400)
+        self.assertEqual(bad_temperature.status_code, 400)
+        self.assertEqual(extra_color.status_code, 400)
         self.assertEqual(extra.status_code, 400)
         self.assertEqual(
             calls,
@@ -4182,6 +4277,8 @@ class DashboardRouteTests(unittest.TestCase):
                 ("status",),
                 ("power", "all", True),
                 ("brightness", "light.wiz_kitchen", 42),
+                ("hue", "light.wiz_kitchen", 225),
+                ("temperature", "light.wiz_kitchen", 3200),
             ],
         )
 

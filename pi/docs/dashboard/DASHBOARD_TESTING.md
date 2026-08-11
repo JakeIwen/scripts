@@ -62,6 +62,7 @@ scp -q pi/van_compute/scripts/__init__.py \
 scp -q pi/sync_scripts.sh \
   "pi@vanpi.lan:$dashboard_test_dir/pi/"
 scp -q pi/scripts/ntfy_send.sh \
+  pi/scripts/tuya_light.sh \
   "pi@vanpi.lan:$dashboard_test_dir/pi/scripts/"
 scp -q pi/scripts/usb_watch.py \
   "pi@vanpi.lan:$dashboard_test_dir/pi/scripts/"
