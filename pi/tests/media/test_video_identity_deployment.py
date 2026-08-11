@@ -193,9 +193,9 @@ class VideoIdentityDeploymentTests(unittest.TestCase):
             self.assertIn("checksum mismatch", changed.stderr)
 
     def test_health_check_is_bounded_and_retried(self):
-        self.assertIn("while [ \"$attempt\" -le 15 ]", self.deploy)
+        self.assertIn("while [ \"$attempt\" -le 45 ]", self.deploy)
         self.assertIn("--connect-timeout 1 --max-time 2", self.deploy)
-        self.assertIn("did not become healthy after 15 attempts", self.deploy)
+        self.assertIn("did not become healthy after 45 attempts", self.deploy)
         self.assertIn("sleep 1", self.deploy)
 
     def test_ssh_control_socket_uses_a_short_dedicated_tmp_directory(self):

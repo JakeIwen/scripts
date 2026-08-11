@@ -293,13 +293,13 @@ set -eu
 /usr/bin/systemctl --no-pager --full is-active video-library.service
 
 attempt=1
-while [ "$attempt" -le 15 ]; do
+while [ "$attempt" -le 45 ]; do
   if /usr/bin/curl -fsS --connect-timeout 1 --max-time 2 \
       http://127.0.0.1:8789/api/status >/dev/null; then
     exit 0
   fi
-  if [ "$attempt" -eq 15 ]; then
-    echo "video-library API did not become healthy after 15 attempts" >&2
+  if [ "$attempt" -eq 45 ]; then
+    echo "video-library API did not become healthy after 45 attempts" >&2
     exit 1
   fi
   attempt=$((attempt + 1))
