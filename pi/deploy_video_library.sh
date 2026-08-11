@@ -58,11 +58,12 @@ else
 fi
 
 local_stage="$(mktemp -d "${TMPDIR:-/tmp}/van-video-deploy.XXXXXX")"
+local_mux_dir="$(mktemp -d /tmp/van-video-ssh.XXXXXX)"
 remote_stage="/tmp/systemd-tmp.$$"
-mux="-o ControlMaster=auto -o ControlPath=$local_stage/ssh-%C -o ControlPersist=120"
+mux="-o ControlMaster=auto -o ControlPath=$local_mux_dir/socket -o ControlPersist=120"
 
 cleanup() {
-  rm -rf -- "$local_stage"
+  rm -rf -- "$local_stage" "$local_mux_dir"
 }
 trap cleanup EXIT
 

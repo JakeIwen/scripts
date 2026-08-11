@@ -198,6 +198,11 @@ class VideoIdentityDeploymentTests(unittest.TestCase):
         self.assertIn("did not become healthy after 15 attempts", self.deploy)
         self.assertIn("sleep 1", self.deploy)
 
+    def test_ssh_control_socket_uses_a_short_dedicated_tmp_directory(self):
+        self.assertIn("local_mux_dir=\"$(mktemp -d /tmp/van-video-ssh.XXXXXX)\"", self.deploy)
+        self.assertIn("ControlPath=$local_mux_dir/socket", self.deploy)
+        self.assertNotIn("ControlPath=$local_stage", self.deploy)
+
     def test_documented_media_test_gate_includes_history_failure_boundaries(self):
         self.assertIn("pi.tests.media.test_video_history_edges", self.docs)
 
