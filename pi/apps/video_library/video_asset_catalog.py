@@ -2549,12 +2549,31 @@ class MediaAssetCatalog:
             result = db.execute("DELETE FROM progress WHERE media_key = ?", (key,))
             if asset_id is None:
                 asset_id = self.resolve_legacy_key(key, connection=db)
+            prior_shadow = self._one(
+                db,
+                "SELECT source_updated FROM video_v2_v1_shadow WHERE media_key = ?",
+                (key,),
+            )
+            causal_updates = [timestamp]
+            if prior_shadow is not None and prior_shadow["source_updated"] is not None:
+                causal_updates.append(float(prior_shadow["source_updated"]))
+            if asset_id is not None:
+                current_state = self._one(
+                    db,
+                    """
+                    SELECT updated_at FROM video_v2_asset_playback_state
+                    WHERE asset_id = ?
+                    """,
+                    (asset_id,),
+                )
+                if current_state is not None:
+                    causal_updates.append(float(current_state["updated_at"]))
             self._shadow_v1_row(
                 db,
                 media_key=key,
                 present=False,
                 row_digest=None,
-                source_updated=None,
+                source_updated=max(causal_updates),
                 asset_id=asset_id,
                 raw=None,
                 observed_at=timestamp,
@@ -2623,12 +2642,21 @@ class MediaAssetCatalog:
                 )
                 if not changed:
                     report["unchanged"] += 1
+                    source_updated = float(row.get("updated") or timestamp)
+                    if shadow["source_updated"] is not None:
+                        # ``source_updated`` also carries the causal watermark
+                        # proving which v2 state this projected row covered.
+                        # Never move that watermark backwards after a Pi clock
+                        # correction merely because the row itself is unchanged.
+                        source_updated = max(
+                            source_updated, float(shadow["source_updated"])
+                        )
                     self._shadow_v1_row(
                         db,
                         media_key=media_key,
                         present=True,
                         row_digest=row_digest,
-                        source_updated=float(row.get("updated") or timestamp),
+                        source_updated=source_updated,
                         asset_id=str(shadow["asset_id"]) if shadow["asset_id"] else None,
                         raw=row,
                         observed_at=timestamp,
@@ -2796,12 +2824,32 @@ class MediaAssetCatalog:
                     imported_at=timestamp,
                     connection=db,
                 )
+                shadow_updated = shadow["source_updated"]
+                if applied and asset_id is not None:
+                    cleared_state = self._one(
+                        db,
+                        """
+                        SELECT updated_at FROM video_v2_asset_playback_state
+                        WHERE asset_id = ?
+                        """,
+                        (asset_id,),
+                    )
+                    causal_updates = [timestamp]
+                    if shadow_updated is not None:
+                        causal_updates.append(float(shadow_updated))
+                    if cleared_state is not None:
+                        causal_updates.append(float(cleared_state["updated_at"]))
+                    # A v1 deletion is authoritative but carries no source wall
+                    # timestamp of its own.  Preserve which v2 state the
+                    # tombstone cleared so a row recreated after a backwards
+                    # clock correction is accepted on the next v2 start.
+                    shadow_updated = max(causal_updates)
                 self._shadow_v1_row(
                     db,
                     media_key=media_key,
                     present=False,
                     row_digest=None,
-                    source_updated=None,
+                    source_updated=shadow_updated,
                     asset_id=asset_id,
                     raw=None,
                     observed_at=timestamp,

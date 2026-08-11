@@ -1308,6 +1308,7 @@ class VideoService:
         self.active_rel_path: str | None = None
         self.active_complete = True
         self.last_snapshot: dict[str, Any] | None = None
+        self.pending_explicit_launch: dict[str, Any] | None = None
         self.identity_error: str | None = None
 
     @staticmethod
@@ -1940,6 +1941,55 @@ class VideoService:
         self.last_saved_state = None
         self.last_saved_at = 0.0
 
+    @staticmethod
+    def _launch_path_keys(path: Any) -> frozenset[str]:
+        if not isinstance(path, str) or not path or "\x00" in path:
+            return frozenset()
+        try:
+            absolute = os.path.abspath(os.path.expanduser(path))
+            return frozenset((os.path.normpath(absolute), os.path.realpath(absolute)))
+        except (OSError, TypeError, ValueError):
+            return frozenset()
+
+    def _remember_explicit_launch(
+        self, path: str, snapshot: dict[str, Any]
+    ) -> None:
+        """Retain one explicit replay intent until its exact track is adopted."""
+
+        if self.catalog is None:
+            self.pending_explicit_launch = None
+            return
+        path_keys = self._launch_path_keys(path)
+        if not path_keys:
+            self.pending_explicit_launch = None
+            return
+        self.pending_explicit_launch = {
+            "path_keys": path_keys,
+            "track_id": (
+                str(snapshot["track_id"])
+                if snapshot.get("track_id") is not None
+                else None
+            ),
+        }
+
+    def _pending_explicit_launch_matches(self, snapshot: dict[str, Any]) -> bool:
+        pending = self.pending_explicit_launch
+        if pending is None:
+            return False
+        observed_paths = self._launch_path_keys(snapshot.get("path"))
+        if not observed_paths.intersection(pending["path_keys"]):
+            return False
+        expected_track = pending.get("track_id")
+        observed_track = snapshot.get("track_id")
+        return not (
+            expected_track is not None
+            and observed_track is not None
+            and str(observed_track) != expected_track
+        )
+
+    def _clear_pending_explicit_launch(self) -> None:
+        self.pending_explicit_launch = None
+
     def _begin_catalog_session(
         self,
         *,
@@ -2163,6 +2213,7 @@ class VideoService:
         )
         if not available:
             item = self.active_item
+            self._clear_pending_explicit_launch()
             if self.active_session_id is not None:
                 self._finish_active_session("player_offline")
             return item
@@ -2183,6 +2234,11 @@ class VideoService:
             and state in ("PLAYING", "PAUSED", "PAUSED_PLAYBACK")
             and path
         ):
+            clear_override = self._pending_explicit_launch_matches(snapshot)
+            if self.pending_explicit_launch is not None and not clear_override:
+                # A different path/track won the race before the pending launch
+                # could be adopted.  Never apply its replay intent elsewhere.
+                self._clear_pending_explicit_launch()
             item = self.library.item_for_path(str(path))
             asset_id, work_id, complete = self._resolve_asset_for_path(
                 str(path), item=item
@@ -2195,8 +2251,16 @@ class VideoService:
                     snapshot=snapshot,
                     item=item,
                     complete=complete,
-                    clear_override=False,
+                    clear_override=clear_override,
                 )
+                if clear_override:
+                    self._clear_pending_explicit_launch()
+        elif (
+            self.active_session_id is None
+            and state == "STOPPED"
+            and self.pending_explicit_launch is not None
+        ):
+            self._clear_pending_explicit_launch()
         item = self.active_item or self.library.item_for_path(path)
         if self.active_session_id is not None and state in (
             "PLAYING",
@@ -2670,6 +2734,7 @@ class VideoService:
             snapshot = self.player.launch(
                 paths, position=position, subtitles=subtitles
             )
+            self._remember_explicit_launch(paths[0], snapshot)
             if self.catalog is not None and asset_id is not None and history_ready:
                 self._begin_catalog_session(
                     asset_id=asset_id,
@@ -2680,6 +2745,7 @@ class VideoService:
                     complete=complete,
                     clear_override=True,
                 )
+                self._clear_pending_explicit_launch()
             elif self.catalog is None or asset_id is None:
                 self.store.record(
                     item.key,
@@ -2751,6 +2817,7 @@ class VideoService:
             snapshot = self.player.launch(
                 [real_path], position=position, subtitles=subtitles
             )
+            self._remember_explicit_launch(real_path, snapshot)
             if self.catalog is not None and asset_id is not None and history_ready:
                 try:
                     self._begin_catalog_session(
@@ -2762,6 +2829,7 @@ class VideoService:
                         complete=complete,
                         clear_override=True,
                     )
+                    self._clear_pending_explicit_launch()
                 except (CatalogError, sqlite3.Error, OSError, ValueError) as exc:
                     self.identity_error = f"media identity tracking degraded: {exc}"
                     asset_id = None

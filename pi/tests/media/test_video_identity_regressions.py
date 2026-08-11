@@ -161,18 +161,86 @@ class PlaybackProjectionOrderingTests(unittest.TestCase):
         self.assertEqual(first["applied"], 1)
         self.assertEqual(catalog.get_asset_state(item.asset_id)["position"], 777)
 
+        unchanged = catalog.reconcile_v1_progress(observed_at=corrected_time + 2)
+        self.assertEqual(unchanged["unchanged"], 1)
+
         # Simulate another old-server write before the normal v2 library
         # projection gets a chance to refresh the compatibility row/shadow.
         with store.lock, store.connection:
             store.connection.execute(
                 "UPDATE progress SET position = 888, updated = ? WHERE media_key = ?",
-                (corrected_time + 2, item.key),
+                (corrected_time + 3, item.key),
             )
-        second = catalog.reconcile_v1_progress(observed_at=corrected_time + 3)
+        second = catalog.reconcile_v1_progress(observed_at=corrected_time + 4)
 
         self.assertEqual(second["applied"], 1)
         self.assertEqual(second["stale"], 0)
         self.assertEqual(catalog.get_asset_state(item.asset_id)["position"], 888)
+
+    def test_low_clock_rollback_delete_then_recreate_is_not_lost(self) -> None:
+        fixture = MediaFixture()
+        self.addCleanup(fixture.cleanup)
+        target = fixture.payload("rollback-clock-delete-recreate.mkv")
+        fixture.link("Movies", "Rollback.Clock.Recreate.2024.mkv", target)
+        service, library, store, catalog, player = fixture.stack()
+        item = next(iter(library.items.values()))
+        service.play(item_id=item.id, restart=True)
+        player.snapshot_value.update(
+            path=str(target), position=240, duration=1_000, state="PAUSED"
+        )
+        service.bookmark()
+
+        corrected_time = fixture.clock() - 100
+        with store.lock, store.connection:
+            store.connection.execute(
+                "DELETE FROM progress WHERE media_key = ?", (item.key,)
+            )
+        deleted = catalog.reconcile_v1_progress(observed_at=corrected_time)
+        self.assertEqual(deleted["cleared"], 1)
+        self.assertEqual(catalog.get_asset_state(item.asset_id)["position"], 0)
+
+        store.record(
+            item.key,
+            position=555,
+            duration=1_000,
+            updated=corrected_time + 1,
+            title=item.title,
+            rel_path=item.rel_path,
+        )
+        recreated = catalog.reconcile_v1_progress(observed_at=corrected_time + 2)
+
+        self.assertEqual(recreated["applied"], 1)
+        self.assertEqual(recreated["stale"], 0)
+        self.assertEqual(catalog.get_asset_state(item.asset_id)["position"], 555)
+
+    def test_v2_clear_then_low_clock_v1_replay_is_not_lost(self) -> None:
+        fixture = MediaFixture()
+        self.addCleanup(fixture.cleanup)
+        target = fixture.payload("v2-clear-low-clock-replay.mkv")
+        fixture.link("Movies", "V2.Clear.Clock.Replay.2024.mkv", target)
+        service, library, store, catalog, player = fixture.stack()
+        item = next(iter(library.items.values()))
+        service.play(item_id=item.id, restart=True)
+        player.snapshot_value.update(
+            path=str(target), position=240, duration=1_000, state="PAUSED"
+        )
+        service.bookmark()
+
+        self.assertTrue(service.update_progress(item, "clear"))
+        corrected_time = fixture.clock() - 100
+        store.record(
+            item.key,
+            position=555,
+            duration=1_000,
+            updated=corrected_time,
+            title=item.title,
+            rel_path=item.rel_path,
+        )
+        replayed = catalog.reconcile_v1_progress(observed_at=corrected_time + 1)
+
+        self.assertEqual(replayed["applied"], 1)
+        self.assertEqual(replayed["stale"], 0)
+        self.assertEqual(catalog.get_asset_state(item.asset_id)["position"], 555)
 
 
 class WorkProjectionTests(unittest.TestCase):
@@ -723,6 +791,77 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
         self.assertEqual(catalog.get_asset_state(first_asset)["position"], 123)
         self.assertEqual(service.active_asset_id, second_asset)
         self.assertEqual(catalog.get_asset_state(second_asset)["position"], 700)
+
+    def test_retried_explicit_launch_clears_watched_override_on_exact_adoption(
+        self,
+    ) -> None:
+        target = self.fixture.payload("retry-clear-override.mkv")
+        self.fixture.link("Movies", "Retry.Clear.Override.2025.mkv", target)
+        old_path = self.fixture.root / "old active generic.mkv"
+        old_path.write_bytes(b"old")
+        service, library, _store, catalog, _player = self.fixture.stack()
+        item = next(iter(library.items.values()))
+        service.update_progress(item, "watched")
+        service.play_local(str(old_path), restart=True)
+
+        with mock.patch.object(
+            catalog,
+            "finish_session",
+            side_effect=sqlite3.OperationalError("transient replacement failure"),
+        ):
+            service.play(item_id=item.id, restart=True)
+
+        before = catalog.get_work_watch_state(item.work_id)
+        self.assertTrue(before["watched"])
+        self.assertEqual(before["watched_override"], 1)
+        self.assertIsNotNone(service.pending_explicit_launch)
+
+        service.bookmark()
+
+        after = catalog.get_work_watch_state(item.work_id)
+        self.assertEqual(service.active_asset_id, item.asset_id)
+        self.assertFalse(after["watched"])
+        self.assertIsNone(after["watched_override"])
+        self.assertIsNone(service.pending_explicit_launch)
+
+    def test_mismatched_track_discards_pending_replay_without_clearing_override(
+        self,
+    ) -> None:
+        first_target = self.fixture.payload("pending-intent-first.mkv")
+        second_target = self.fixture.payload("pending-intent-second.mkv")
+        self.fixture.link("Movies", "Pending.Intent.First.2025.mkv", first_target)
+        self.fixture.link("Movies", "Pending.Intent.Second.2025.mkv", second_target)
+        old_path = self.fixture.root / "pending intent old active.mkv"
+        old_path.write_bytes(b"old")
+        service, library, _store, catalog, player = self.fixture.stack()
+        items, _shows = library.snapshot()
+        first = next(item for item in items if "First" in item.title)
+        second = next(item for item in items if "Second" in item.title)
+        service.update_progress(first, "watched")
+        service.update_progress(second, "watched")
+        service.play_local(str(old_path), restart=True)
+
+        with mock.patch.object(
+            catalog,
+            "finish_session",
+            side_effect=sqlite3.OperationalError("transient replacement failure"),
+        ):
+            service.play(item_id=first.id, restart=True)
+        self.assertIsNotNone(service.pending_explicit_launch)
+
+        player.launch([str(second_target)])
+        service.bookmark()
+
+        self.assertEqual(service.active_asset_id, second.asset_id)
+        self.assertIsNone(service.pending_explicit_launch)
+        self.assertTrue(catalog.get_work_watch_state(first.work_id)["watched"])
+        self.assertEqual(
+            catalog.get_work_watch_state(first.work_id)["watched_override"], 1
+        )
+        self.assertTrue(catalog.get_work_watch_state(second.work_id)["watched"])
+        self.assertEqual(
+            catalog.get_work_watch_state(second.work_id)["watched_override"], 1
+        )
 
 
 if __name__ == "__main__":
