@@ -2634,13 +2634,32 @@ class MediaAssetCatalog:
                     continue
                 report["changed"] += 1
                 previously_bound = self.resolve_legacy_key(media_key, connection=db)
-                asset_id, work_id = self._legacy_target(
-                    db,
-                    media_key=media_key,
-                    row=row,
-                    observed_at=timestamp,
-                    create_missing=create_missing,
+                shadow_asset_id = (
+                    str(shadow["asset_id"])
+                    if shadow is not None
+                    and bool(shadow["was_present"])
+                    and shadow["asset_id"] is not None
+                    else None
                 )
+                if shadow_asset_id is not None:
+                    # The compatibility shadow records which exact asset v2
+                    # projected into this one-key v1 row.  It is stronger than
+                    # an older parser-key binding after a symlink retarget.
+                    shadow_asset = self._assert_asset(db, shadow_asset_id)
+                    asset_id = shadow_asset_id
+                    work_id = (
+                        str(shadow_asset["work_id"])
+                        if shadow_asset["work_id"] is not None
+                        else None
+                    )
+                else:
+                    asset_id, work_id = self._legacy_target(
+                        db,
+                        media_key=media_key,
+                        row=row,
+                        observed_at=timestamp,
+                        create_missing=create_missing,
+                    )
                 if asset_id is None:
                     report["unresolved"] += 1
                     action = "unresolved"

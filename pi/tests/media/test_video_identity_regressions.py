@@ -328,6 +328,57 @@ class TransitionFailureRegressionTests(unittest.TestCase):
         # playhead must not be copied merely because the symlink name was reused.
         self.assertIsNone(catalog.get_asset_state(replacement.asset_id))
 
+    def test_v1_rollback_edit_after_symlink_retarget_applies_to_current_asset(
+        self,
+    ) -> None:
+        original_target = self.fixture.payload("rollback-old-target.mkv")
+        replacement_target = self.fixture.payload("rollback-current-target.mkv")
+        link = self.fixture.link(
+            "Movies", "Stable.Rollback.Name.2025.mkv", original_target
+        )
+        service, library, store, _catalog, player = self.fixture.stack()
+        original = self._only_item(library)
+        service.play(item_id=original.id, restart=True)
+        player.snapshot_value.update(
+            path=str(original_target), position=333, duration=1_000, state="PAUSED"
+        )
+        service.bookmark()
+
+        link.unlink()
+        link.symlink_to(replacement_target)
+        self.assertTrue(service.rescan())
+        replacement = self._only_item(library)
+        self.assertNotEqual(replacement.asset_id, original.asset_id)
+        service.play(item_id=replacement.id, restart=True)
+        player.snapshot_value.update(
+            path=str(replacement_target),
+            position=555,
+            duration=1_000,
+            state="PAUSED",
+        )
+        service.bookmark()
+        replacement_asset = replacement.asset_id
+        replacement_key = replacement.key
+        store.connection.close()
+
+        rollback = sqlite3.connect(self.fixture.database)
+        try:
+            with rollback:
+                rollback.execute(
+                    "UPDATE progress SET position = 777, updated = ? "
+                    "WHERE media_key = ?",
+                    (self.fixture.clock() + 100, replacement_key),
+                )
+        finally:
+            rollback.close()
+
+        self.fixture.clock.advance(101)
+        _service2, library2, _store2, catalog2, _player2 = self.fixture.stack()
+        current = self._only_item(library2)
+
+        self.assertEqual(current.asset_id, replacement_asset)
+        self.assertEqual(catalog2.get_asset_state(replacement_asset)["position"], 777)
+
     def test_qb_lookup_retries_real_target_after_symlink_candidate_error(self) -> None:
         incomplete = self.fixture.payload("Symlink.Retry-GROUP/video-file.mkv", incomplete=True)
         final = self.fixture.payloads / "Symlink.Retry-GROUP/video-file.mkv"
