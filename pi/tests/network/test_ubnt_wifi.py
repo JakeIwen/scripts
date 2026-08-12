@@ -20,8 +20,8 @@ def encoded(value):
 
 SNAPSHOT = "\n".join(
     (
-        f"state|{encoded('denlink')}|{encoded('denlink')}|991|no|no",
-        f"profile|{encoded('denlink')}|{encoded('denlink')}|wpa",
+        f"state|{encoded('denlink')}|{encoded('denlink')}|991|no|no|-56|-93",
+        f"profile|{encoded('denlink')}|{encoded('denlink')}|wpa|10|4E:EA:85:26:34:F4|yes|21|atheros|enabled|4",
         f"network|70|{encoded('denlink')}|wpa|2462|11|4e:ea:85:26:34:f4|-30",
         f"network|90|{encoded('denlink')}|wpa|2462|11|4e:ea:85:26:34:f4|-12",
         f"network|55|{encoded('Guest WiFi')}|none|2412|1|00:11:22:33:44:55|-48",
@@ -43,12 +43,17 @@ class SnapshotParserTests(unittest.TestCase):
 
         self.assertEqual(data["checked_at"], 1234)
         self.assertEqual(data["state"]["ccq_percent"], 99.1)
+        self.assertEqual(data["state"]["snr_db"], 37)
         self.assertFalse(data["state"]["automatic_paused"])
         self.assertEqual(len(data["networks"]), 3)
         self.assertEqual(data["networks"][0]["ssid"], "denlink")
         self.assertEqual(data["networks"][0]["quality_percent"], 90)
         self.assertTrue(data["networks"][0]["known"])
         self.assertTrue(data["networks"][0]["connected"])
+        self.assertEqual(data["profiles"][0]["bssid"], "4E:EA:85:26:34:F4")
+        self.assertTrue(data["profiles"][0]["has_password"])
+        self.assertEqual(data["profiles"][0]["output_power_dbm"], 21)
+        self.assertTrue(data["profiles"][0]["rate_auto"])
         self.assertEqual(data["networks"][1]["profiles"], [])
         self.assertFalse(data["networks"][2]["supported"])
 
@@ -105,6 +110,59 @@ class ClientTests(unittest.TestCase):
             provision_call[2],
             "New Camp\nwpa\n00:11:22:33:44:66\nsecret-test-password\n",
         )
+
+    def test_profile_update_is_fixed_validated_and_keeps_password_out_of_argv(self):
+        calls = []
+
+        def command(args, timeout, input_text=None):
+            calls.append((args, timeout, input_text))
+            if args[-1].endswith("update-profile-stdin"):
+                return Result(stdout="updated")
+            return Result(stdout=SNAPSHOT)
+
+        result = ubnt_wifi.UbntWifiClient(command=command).update_profile(
+            "denlink",
+            "replacement-password",
+            "00:11:22:33:44:66",
+            18,
+            "ewma_ht",
+            False,
+            4,
+            False,
+        )
+
+        self.assertIn("next connection", result["message"])
+        update_call = calls[1]
+        self.assertEqual(
+            update_call[0][-1],
+            "/etc/persistent/scripts/wifi_manager.sh update-profile-stdin",
+        )
+        self.assertNotIn("replacement-password", " ".join(update_call[0]))
+        self.assertEqual(
+            update_call[2],
+            "denlink\nchange\nreplacement-password\n00:11:22:33:44:66\n18\newma_ht\ndisabled\n4\nno\n",
+        )
+
+    def test_profile_update_can_keep_password_and_rejects_unsafe_values(self):
+        calls = []
+
+        def command(args, timeout, input_text=None):
+            calls.append((args, timeout, input_text))
+            return Result(stdout=SNAPSHOT)
+
+        client = ubnt_wifi.UbntWifiClient(command=command)
+        client.update_profile("denlink", "", "", 21, "atheros", True, 15, False)
+        self.assertIn("\nkeep\n\n\n21\natheros\nenabled\n15\nno\n", calls[1][2])
+        invalid = (
+            ("denlink", "short", "", 21, "atheros", True, 15, False),
+            ("denlink", "", "invalid", 21, "atheros", True, 15, False),
+            ("denlink", "", "", 24, "atheros", True, 15, False),
+            ("denlink", "", "", 21, "unknown", True, 15, False),
+            ("denlink", "", "", 21, "atheros", True, 16, False),
+        )
+        for values in invalid:
+            with self.subTest(values=values), self.assertRaises(ubnt_wifi.UbntWifiError):
+                client.update_profile(*values)
 
     def test_rejects_unsupported_or_unsafe_new_network_values(self):
         client = ubnt_wifi.UbntWifiClient(command=lambda *args, **kwargs: Result())

@@ -1766,6 +1766,175 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   background: transparent;
   color: var(--dim);
 }
+.ubnt-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 15px 2px 7px;
+}
+.ubnt-section-head h3 {
+  margin: 0;
+  font-size: 13px;
+}
+.ubnt-section-head span {
+  color: var(--dim);
+  font-size: 9px;
+}
+.ubnt-profile-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+.ubnt-profile-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid #39725b;
+  border-radius: 13px;
+  background: #182a25;
+  padding: 10px 11px;
+}
+.ubnt-profile-row.connected {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.ubnt-edit-profile {
+  background: #192932;
+}
+.ubnt-profile-form {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #42606e;
+  border-radius: 14px;
+  background: #15242d;
+  padding: 13px;
+  margin: 10px 0;
+}
+.ubnt-profile-form[hidden],
+.ubnt-profile-field[hidden] {
+  display: none;
+}
+.ubnt-profile-form-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ubnt-profile-form-head strong,
+.ubnt-profile-form-head small {
+  display: block;
+}
+.ubnt-profile-form-head strong {
+  font-size: 14px;
+}
+.ubnt-profile-form-head small {
+  color: var(--dim);
+  font-size: 9px;
+  margin-top: 2px;
+}
+.ubnt-profile-form-head button {
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  font-size: 20px;
+  cursor: pointer;
+}
+.ubnt-profile-field {
+  display: grid;
+  gap: 5px;
+  color: var(--dim);
+  font-size: 10px;
+}
+.ubnt-profile-field > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ubnt-profile-field input[type='text'],
+.ubnt-profile-field input[type='password'],
+.ubnt-profile-field select {
+  width: 100%;
+  border: 1px solid #46606e;
+  border-radius: 9px;
+  background: #0f171d;
+  color: var(--ink);
+  padding: 9px;
+}
+.ubnt-profile-field input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.ubnt-profile-field small,
+.ubnt-profile-check small,
+.ubnt-radio-settings p {
+  color: var(--dim);
+  font-size: 9px;
+}
+.ubnt-radio-settings {
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #111a21;
+  padding: 9px 10px;
+}
+.ubnt-radio-settings summary {
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 750;
+  cursor: pointer;
+}
+.ubnt-radio-settings[open] {
+  display: grid;
+  gap: 10px;
+}
+.ubnt-radio-settings p {
+  margin: 0;
+  line-height: 1.4;
+}
+.ubnt-profile-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--ink);
+  font-size: 10px;
+}
+.ubnt-profile-check span,
+.ubnt-profile-check small {
+  display: block;
+}
+.ubnt-profile-field.disabled {
+  opacity: 0.45;
+}
+.ubnt-radio-readings {
+  border-radius: 9px;
+  background: #1a2932;
+  color: #bcd1dc;
+  padding: 8px 9px;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+.ubnt-profile-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.ubnt-profile-form-actions button {
+  border: 1px solid #42606e;
+  border-radius: 9px;
+  background: #263b47;
+  color: var(--ink);
+  padding: 8px 10px;
+  font-size: 10px;
+  font-weight: 730;
+  cursor: pointer;
+}
+.ubnt-profile-form-actions button:first-child {
+  background: transparent;
+  color: var(--dim);
+}
 .ubnt-network-list {
   display: grid;
   gap: 7px;
@@ -1825,6 +1994,18 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   text-align: center;
   color: var(--dim);
   font-size: 11px;
+}
+@media (max-width: 700px) {
+  .ubnt-profile-list {
+    grid-template-columns: 1fr;
+  }
+  .ubnt-profile-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ubnt-profile-actions,
+  .ubnt-profile-form-actions {
+    justify-content: flex-start;
+  }
 }
 .network-card {
   min-width: 0;

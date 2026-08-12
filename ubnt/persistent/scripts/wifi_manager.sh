@@ -243,13 +243,20 @@ hex_encode() {
 emit_dashboard_snapshot() {
     dashboard_configured=$(effective_ssid "$SYSTEM_CFG")
     dashboard_associated=$(associated_ssid)
-    dashboard_ccq=$(current_ccq)
+    dashboard_radio_status=$("$MCA_STATUS" 2>/dev/null)
+    dashboard_ccq=$(printf '%s\n' "$dashboard_radio_status" | \
+        awk -F= '$1 == "ccq" {print $2; exit}' | tr -d '\r')
+    dashboard_signal=$(printf '%s\n' "$dashboard_radio_status" | \
+        awk -F= '$1 == "signal" {print $2; exit}' | tr -d '\r')
+    dashboard_noise=$(printf '%s\n' "$dashboard_radio_status" | \
+        awk -F= '$1 == "noise" {print $2; exit}' | tr -d '\r')
     [ -f "$PAUSE_FILE" ] && dashboard_paused=yes || dashboard_paused=no
     [ -d "$LOCK_DIR" ] && dashboard_running=yes || dashboard_running=no
-    printf 'state|%s|%s|%s|%s|%s\n' \
+    printf 'state|%s|%s|%s|%s|%s|%s|%s\n' \
         "$(hex_encode "$dashboard_configured")" \
         "$(hex_encode "$dashboard_associated")" \
-        "$dashboard_ccq" "$dashboard_paused" "$dashboard_running"
+        "$dashboard_ccq" "$dashboard_paused" "$dashboard_running" \
+        "$dashboard_signal" "$dashboard_noise"
 
     for dashboard_profile_path in "$PROFILE_DIR"/*; do
         [ -f "$dashboard_profile_path" ] || continue
@@ -257,13 +264,61 @@ emit_dashboard_snapshot() {
         case $dashboard_profile in
             system.cfg|reset|*.backup.*) continue ;;
         esac
-        dashboard_ssid=$(effective_ssid "$dashboard_profile_path")
+        dashboard_wireless_ssid=
+        dashboard_wireless_bssid=
+        dashboard_wireless_security=
+        dashboard_wpa_status=
+        dashboard_wpa_device_status=
+        dashboard_wpa_ssid=
+        dashboard_wpa_bssid=
+        dashboard_has_password=no
+        dashboard_txpower=
+        dashboard_rate_module=
+        dashboard_rate_auto=
+        dashboard_rate_mcs=
+        while IFS= read -r dashboard_line || [ -n "$dashboard_line" ]; do
+            dashboard_key=${dashboard_line%%=*}
+            dashboard_value=${dashboard_line#*=}
+            case $dashboard_key in
+                wireless.1.ssid) dashboard_wireless_ssid=$dashboard_value ;;
+                wireless.1.ap) dashboard_wireless_bssid=$dashboard_value ;;
+                wireless.1.security.type) dashboard_wireless_security=$dashboard_value ;;
+                wpasupplicant.status) dashboard_wpa_status=$dashboard_value ;;
+                wpasupplicant.device.1.status) dashboard_wpa_device_status=$dashboard_value ;;
+                wpasupplicant.profile.1.network.1.ssid) dashboard_wpa_ssid=$dashboard_value ;;
+                wpasupplicant.profile.1.network.1.bssid) dashboard_wpa_bssid=$dashboard_value ;;
+                aaa.1.wpa.psk|wpasupplicant.profile.1.network.1.psk)
+                    [ -z "$dashboard_value" ] || dashboard_has_password=yes
+                    ;;
+                radio.1.txpower) dashboard_txpower=$dashboard_value ;;
+                radio.rate_module) dashboard_rate_module=$dashboard_value ;;
+                radio.1.rate.auto) dashboard_rate_auto=$dashboard_value ;;
+                radio.1.rate.mcs) dashboard_rate_mcs=$dashboard_value ;;
+            esac
+        done < "$dashboard_profile_path"
+        if [ "$dashboard_wpa_status" = enabled ] && \
+            [ "$dashboard_wpa_device_status" = enabled ]; then
+            dashboard_ssid=$dashboard_wpa_ssid
+            dashboard_bssid=$dashboard_wpa_bssid
+            dashboard_security=wpa
+        else
+            dashboard_ssid=$dashboard_wireless_ssid
+            dashboard_bssid=$dashboard_wireless_bssid
+            case $dashboard_wireless_security in
+                wep*) dashboard_security=wep ;;
+                wpa*) dashboard_security=wpa ;;
+                *) dashboard_security=none ;;
+            esac
+        fi
         [ -n "$dashboard_ssid" ] || continue
-        dashboard_security=$(profile_security "$dashboard_profile_path")
-        printf 'profile|%s|%s|%s\n' \
+        dashboard_priority=$(profile_priority "$dashboard_profile")
+        printf 'profile|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
             "$(hex_encode "$dashboard_profile")" \
             "$(hex_encode "$dashboard_ssid")" \
-            "$dashboard_security"
+            "$dashboard_security" "$dashboard_priority" \
+            "$dashboard_bssid" "$dashboard_has_password" \
+            "$dashboard_txpower" "$dashboard_rate_module" \
+            "$dashboard_rate_auto" "$dashboard_rate_mcs"
     done
 
     if [ -s "$SCAN_FILE" ]; then
@@ -391,6 +446,7 @@ clear_failures() {
 connect_profile() {
     requested_profile=$1
     reuse_scan=${2:-no}
+    force_connect=${3:-no}
     profile_name_is_valid "$requested_profile" || {
         log_message "invalid profile name"
         return 1
@@ -406,7 +462,8 @@ connect_profile() {
         return 1
     }
 
-    if link_is_target "$target_ssid" && has_dhcp_and_route && internet_reachable; then
+    if [ "$force_connect" != yes ] && \
+        link_is_target "$target_ssid" && has_dhcp_and_route && internet_reachable; then
         clear_failures
         rm -f "$TRANSITION_FILE"
         log_message "requested profile already ready profile=$requested_profile ssid=$target_ssid"
@@ -471,7 +528,8 @@ connect_profile() {
 
 run_requested_connect() {
     requested_name=$1
-    connect_profile "$requested_name"
+    requested_force=${2:-no}
+    connect_profile "$requested_name" no "$requested_force"
     requested_status=$?
     if [ "$requested_status" -eq 1 ] && \
         profile_name_is_valid "$requested_name" && [ -f "$PROFILE_DIR/$requested_name" ]; then
@@ -675,6 +733,168 @@ provision_profile() {
     esac
 }
 
+update_profile_settings() {
+    update_name=$1
+    update_password_action=$2
+    update_password=$3
+    update_bssid=$4
+    update_txpower=$5
+    update_rate_module=$6
+    update_rate_auto=$7
+    update_rate_mcs=$8
+    update_apply=$9
+
+    profile_name_is_valid "$update_name" || {
+        log_message "invalid profile-update name"
+        return 1
+    }
+    update_source="$PROFILE_DIR/$update_name"
+    [ -f "$update_source" ] || {
+        log_message "unknown profile-update profile=$update_name"
+        return 1
+    }
+    case $update_password_action in
+        keep) ;;
+        change)
+            [ "$(profile_security "$update_source")" = wpa ] || {
+                log_message "password update requires WPA profile=$update_name"
+                return 1
+            }
+            update_password_length=$(printf '%s' "$update_password" | wc -c | tr -d '[:space:]')
+            case $update_password_length in
+                ''|*[!0-9]*) return 1 ;;
+            esac
+            [ "$update_password_length" -ge 8 ] && [ "$update_password_length" -le 63 ] || {
+                log_message "WPA password must be 8 to 63 bytes"
+                return 1
+            }
+            if printf '%s' "$update_password" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+                log_message "WPA password contains a control character"
+                return 1
+            fi
+            ;;
+        *) log_message "invalid password-update action"; return 1 ;;
+    esac
+    [ "$update_password_action" = change ] || [ -z "$update_password" ] || return 1
+    [ -z "$update_bssid" ] || printf '%s\n' "$update_bssid" | \
+        grep -Eq '^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$' || {
+            log_message "invalid profile lock-to-AP address"
+            return 1
+        }
+    case $update_txpower in
+        ''|*[!0-9]*) log_message "invalid profile output power"; return 1 ;;
+    esac
+    [ "$update_txpower" -ge 0 ] && [ "$update_txpower" -le 23 ] || {
+        log_message "profile output power must be 0 to 23 dBm"
+        return 1
+    }
+    case $update_rate_module in
+        atheros|ewma_ht) ;;
+        *) log_message "invalid profile data-rate module"; return 1 ;;
+    esac
+    case $update_rate_auto in
+        enabled|disabled) ;;
+        *) log_message "invalid profile rate-auto setting"; return 1 ;;
+    esac
+    case $update_rate_mcs in
+        ''|*[!0-9]*) log_message "invalid profile MCS rate"; return 1 ;;
+    esac
+    [ "$update_rate_mcs" -ge 0 ] && [ "$update_rate_mcs" -le 15 ] || {
+        log_message "profile MCS rate must be 0 to 15"
+        return 1
+    }
+    case $update_apply in
+        yes|no) ;;
+        *) log_message "invalid profile apply setting"; return 1 ;;
+    esac
+
+    PENDING_PROFILE="$PROFILE_DIR/.dashboard-profile.$$"
+    saw_aaa_password=no
+    saw_supplicant_password=no
+    saw_wireless_bssid=no
+    saw_supplicant_bssid=no
+    saw_txpower=no
+    saw_rate_module=no
+    saw_rate_auto=no
+    saw_rate_mcs=no
+    : > "$PENDING_PROFILE"
+    while IFS= read -r update_line || [ -n "$update_line" ]; do
+        update_key=${update_line%%=*}
+        case $update_key in
+            aaa.1.wpa.psk)
+                if [ "$update_password_action" = change ]; then
+                    printf 'aaa.1.wpa.psk=%s\n' "$update_password"
+                else
+                    printf '%s\n' "$update_line"
+                fi
+                saw_aaa_password=yes
+                ;;
+            wpasupplicant.profile.1.network.1.psk)
+                if [ "$update_password_action" = change ]; then
+                    printf 'wpasupplicant.profile.1.network.1.psk=%s\n' "$update_password"
+                else
+                    printf '%s\n' "$update_line"
+                fi
+                saw_supplicant_password=yes
+                ;;
+            wireless.1.ap)
+                printf 'wireless.1.ap=%s\n' "$update_bssid"
+                saw_wireless_bssid=yes
+                ;;
+            wpasupplicant.profile.1.network.1.bssid)
+                printf 'wpasupplicant.profile.1.network.1.bssid=%s\n' "$update_bssid"
+                saw_supplicant_bssid=yes
+                ;;
+            radio.1.txpower)
+                printf 'radio.1.txpower=%s\n' "$update_txpower"
+                saw_txpower=yes
+                ;;
+            radio.rate_module)
+                printf 'radio.rate_module=%s\n' "$update_rate_module"
+                saw_rate_module=yes
+                ;;
+            radio.1.rate.auto)
+                printf 'radio.1.rate.auto=%s\n' "$update_rate_auto"
+                saw_rate_auto=yes
+                ;;
+            radio.1.rate.mcs)
+                printf 'radio.1.rate.mcs=%s\n' "$update_rate_mcs"
+                saw_rate_mcs=yes
+                ;;
+            *) printf '%s\n' "$update_line" ;;
+        esac
+    done < "$update_source" >> "$PENDING_PROFILE"
+    if [ "$update_password_action" = change ]; then
+        [ "$saw_aaa_password" = yes ] || printf 'aaa.1.wpa.psk=%s\n' "$update_password" >> "$PENDING_PROFILE"
+        [ "$saw_supplicant_password" = yes ] || \
+            printf 'wpasupplicant.profile.1.network.1.psk=%s\n' "$update_password" >> "$PENDING_PROFILE"
+    fi
+    [ "$saw_wireless_bssid" = yes ] || printf 'wireless.1.ap=%s\n' "$update_bssid" >> "$PENDING_PROFILE"
+    [ "$saw_supplicant_bssid" = yes ] || \
+        printf 'wpasupplicant.profile.1.network.1.bssid=%s\n' "$update_bssid" >> "$PENDING_PROFILE"
+    [ "$saw_txpower" = yes ] || printf 'radio.1.txpower=%s\n' "$update_txpower" >> "$PENDING_PROFILE"
+    [ "$saw_rate_module" = yes ] || printf 'radio.rate_module=%s\n' "$update_rate_module" >> "$PENDING_PROFILE"
+    [ "$saw_rate_auto" = yes ] || printf 'radio.1.rate.auto=%s\n' "$update_rate_auto" >> "$PENDING_PROFILE"
+    [ "$saw_rate_mcs" = yes ] || printf 'radio.1.rate.mcs=%s\n' "$update_rate_mcs" >> "$PENDING_PROFILE"
+    chmod 750 "$PENDING_PROFILE"
+
+    mkdir -p "$PROFILE_DIR/.disabled"
+    update_uptime=$(uptime_seconds)
+    [ -n "$update_uptime" ] || update_uptime=0
+    cp "$update_source" \
+        "$PROFILE_DIR/.disabled/$update_name.settings-backup.$update_uptime.$$" || return 1
+    mv "$PENDING_PROFILE" "$update_source" || return 1
+    PENDING_PROFILE=
+    "$CFGMTD" -w -p /etc/ || return 1
+    log_message "updated saved profile=$update_name lock_to_ap=${update_bssid:-any} txpower=$update_txpower rate_module=$update_rate_module rate_auto=$update_rate_auto rate_mcs=$update_rate_mcs"
+    if [ "$update_apply" = yes ]; then
+        : > "$PAUSE_FILE"
+        log_message "automatic selection paused to apply updated profile=$update_name"
+        run_requested_connect "$update_name" yes
+        return $?
+    fi
+}
+
 manual_transition_active() {
     configured_ssid=$(effective_ssid "$SYSTEM_CFG")
     [ -n "$configured_ssid" ] || return 1
@@ -771,10 +991,15 @@ profile_priority() {
     priority_profile=$1
     configured_priority=
     if [ -f "$PRIORITY_FILE" ]; then
-        configured_priority=$(awk -F'|' -v wanted="$priority_profile" '
-            /^[[:space:]]*#/ { next }
-            $2 == wanted { print $1; exit }
-        ' "$PRIORITY_FILE")
+        while IFS='|' read -r priority_value priority_name; do
+            case $priority_value in
+                ''|'#'*) continue ;;
+            esac
+            if [ "$priority_name" = "$priority_profile" ]; then
+                configured_priority=$priority_value
+                break
+            fi
+        done < "$PRIORITY_FILE"
     fi
     case $configured_priority in
         ''|*[!0-9]*) configured_priority= ;;
@@ -929,7 +1154,7 @@ show_status() {
 }
 
 usage() {
-    printf 'Usage: %s auto|connect PROFILE|status|pause|resume|save-current PROFILE|disable PROFILE|dashboard-status|dashboard-scan|manual-connect-stdin|provision-stdin\n' "$0" >&2
+    printf 'Usage: %s auto|connect PROFILE|status|pause|resume|save-current PROFILE|disable PROFILE|dashboard-status|dashboard-scan|manual-connect-stdin|provision-stdin|update-profile-stdin\n' "$0" >&2
 }
 
 command_name=${1:-}
@@ -999,6 +1224,24 @@ case $command_name in
         IFS= read -r input_password || exit 1
         acquire_lock || exit 1
         provision_profile "$input_ssid" "$input_security" "$input_bssid" "$input_password"
+        exit $?
+        ;;
+    update-profile-stdin)
+        [ "$#" -eq 1 ] || { usage; exit 1; }
+        IFS= read -r input_profile || exit 1
+        IFS= read -r input_password_action || exit 1
+        IFS= read -r input_password || exit 1
+        IFS= read -r input_bssid || exit 1
+        IFS= read -r input_txpower || exit 1
+        IFS= read -r input_rate_module || exit 1
+        IFS= read -r input_rate_auto || exit 1
+        IFS= read -r input_rate_mcs || exit 1
+        IFS= read -r input_apply || exit 1
+        acquire_lock || exit 1
+        update_profile_settings "$input_profile" "$input_password_action" \
+            "$input_password" "$input_bssid" "$input_txpower" \
+            "$input_rate_module" "$input_rate_auto" "$input_rate_mcs" \
+            "$input_apply"
         exit $?
         ;;
     *)

@@ -23,6 +23,8 @@ case $command_name in
         ;;
     mca-status)
         printf 'ccq=%s\n' "${MOCK_CCQ:-900}"
+        printf 'signal=%s\n' "${MOCK_SIGNAL:--56}"
+        printf 'noise=%s\n' "${MOCK_NOISE:--93}"
         ;;
     ip)
         case " $* " in

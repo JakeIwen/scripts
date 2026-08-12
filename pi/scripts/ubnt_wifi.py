@@ -22,6 +22,7 @@ REMOTE_COMMANDS = {
     "scan": "dashboard-scan",
     "connect": "manual-connect-stdin",
     "provision": "provision-stdin",
+    "update-profile": "update-profile-stdin",
     "resume": "resume",
 }
 
@@ -67,26 +68,66 @@ def parse_snapshot(output, checked_at=None):
     observations = []
     for raw_line in output.splitlines():
         fields = raw_line.rstrip("\r").split("|")
-        if fields[0] == "state" and len(fields) == 6:
+        if fields[0] == "state" and len(fields) in (6, 8):
             ccq_raw = _int(fields[3], 0, 1000)
+            signal = _int(fields[6], -200, 100) if len(fields) == 8 else None
+            noise = _int(fields[7], -200, 100) if len(fields) == 8 else None
             state = {
                 "configured_ssid": _decode_hex(fields[1]),
                 "associated_ssid": _decode_hex(fields[2]),
                 "ccq_percent": round(ccq_raw / 10, 1) if ccq_raw is not None else None,
                 "automatic_paused": fields[4] == "yes",
                 "selector_running": fields[5] == "yes",
+                "signal_dbm": signal,
+                "noise_dbm": noise,
+                "snr_db": signal - noise if signal is not None and noise is not None else None,
             }
-        elif fields[0] == "profile" and len(fields) == 4:
+        elif fields[0] == "profile" and len(fields) in (4, 11):
             security = fields[3]
             if security not in ("wpa", "wep", "none"):
                 continue
-            profiles.append(
-                {
-                    "name": _decode_hex(fields[1]),
-                    "ssid": _decode_hex(fields[2]),
-                    "security": security,
-                }
-            )
+            profile = {
+                "name": _decode_hex(fields[1]),
+                "ssid": _decode_hex(fields[2]),
+                "security": security,
+                "priority": None,
+                "bssid": "",
+                "has_password": None,
+                "output_power_dbm": None,
+                "rate_module": None,
+                "rate_auto": None,
+                "rate_mcs": None,
+            }
+            if len(fields) == 11:
+                priority = _int(fields[4], 0, 1_000_000)
+                bssid = fields[5].upper()
+                has_password = fields[6]
+                output_power = _int(fields[7], 0, 23)
+                rate_module = fields[8]
+                rate_auto = fields[9]
+                rate_mcs = _int(fields[10], 0, 15)
+                if (
+                    priority is None
+                    or (bssid and not BSSID_RE.fullmatch(bssid))
+                    or has_password not in ("yes", "no")
+                    or output_power is None
+                    or rate_module not in ("atheros", "ewma_ht")
+                    or rate_auto not in ("enabled", "disabled")
+                    or rate_mcs is None
+                ):
+                    continue
+                profile.update(
+                    {
+                        "priority": priority,
+                        "bssid": bssid,
+                        "has_password": has_password == "yes",
+                        "output_power_dbm": output_power,
+                        "rate_module": rate_module,
+                        "rate_auto": rate_auto == "enabled",
+                        "rate_mcs": rate_mcs,
+                    }
+                )
+            profiles.append(profile)
         elif fields[0] == "network" and len(fields) == 8:
             quality = _int(fields[1], 0, 100)
             frequency = _int(fields[4], 0)
@@ -168,7 +209,12 @@ class UbntWifiClient:
     def _ssh_args(remote_command):
         return [
             SSH,
-            "-n" if remote_command not in ("manual-connect-stdin", "provision-stdin") else "-T",
+            (
+                "-n"
+                if remote_command
+                not in ("manual-connect-stdin", "provision-stdin", "update-profile-stdin")
+                else "-T"
+            ),
             "-o",
             "BatchMode=yes",
             "-o",
@@ -260,6 +306,77 @@ class UbntWifiClient:
             "wifi": refreshed,
         }
 
+    def update_profile(
+        self,
+        profile,
+        password,
+        bssid,
+        output_power_dbm,
+        rate_module,
+        rate_auto,
+        rate_mcs,
+        apply_now,
+    ):
+        profile = _validate_text(profile, "profile", 128)
+        if not isinstance(password, str):
+            raise UbntWifiError("password must be text")
+        if any(ord(character) < 32 or ord(character) == 127 for character in password):
+            raise UbntWifiError("password contains a control character")
+        password_size = len(password.encode("utf-8"))
+        if password and not 8 <= password_size <= 63:
+            raise UbntWifiError("WPA password must be 8 to 63 bytes")
+        if not isinstance(bssid, str) or (bssid and not BSSID_RE.fullmatch(bssid)):
+            raise UbntWifiError("invalid lock-to-AP address")
+        if type(output_power_dbm) is not int or not 0 <= output_power_dbm <= 23:
+            raise UbntWifiError("output power must be 0 to 23 dBm")
+        if rate_module not in ("atheros", "ewma_ht"):
+            raise UbntWifiError("invalid data-rate module")
+        if type(rate_auto) is not bool:
+            raise UbntWifiError("rate auto must be boolean")
+        if type(rate_mcs) is not int or not 0 <= rate_mcs <= 15:
+            raise UbntWifiError("maximum TX rate must be MCS 0 to 15")
+        if type(apply_now) is not bool:
+            raise UbntWifiError("apply now must be boolean")
+
+        status = self.status()
+        saved = next(
+            (item for item in status["profiles"] if item["name"] == profile), None
+        )
+        if saved is None:
+            raise UbntWifiError("selected UBNT profile is no longer available")
+        if password and saved["security"] != "wpa":
+            raise UbntWifiError("only WPA profiles have a password")
+        protocol = "\n".join(
+            (
+                profile,
+                "change" if password else "keep",
+                password,
+                bssid.upper(),
+                str(output_power_dbm),
+                rate_module,
+                "enabled" if rate_auto else "disabled",
+                str(rate_mcs),
+                "yes" if apply_now else "no",
+            )
+        ) + "\n"
+        result, _ = self._remote(
+            "update-profile",
+            timeout=260 if apply_now else 35,
+            input_text=protocol,
+            accepted=(0, 2),
+        )
+        refreshed = self.status()
+        outcome = "connected" if result.returncode == 0 else "associated_no_internet"
+        if apply_now:
+            message = (
+                f"Updated and reconnected UBNT to {profile}"
+                if outcome == "connected"
+                else f"Updated {profile}; associated but Internet login may still be required"
+            )
+        else:
+            message = f"Updated {profile}; settings apply on its next connection"
+        return {"outcome": outcome, "message": message, "wifi": refreshed}
+
     def resume(self):
         self._remote("resume", timeout=15)
         return {
@@ -300,6 +417,21 @@ def main(argv=None):
             if set(payload) != expected:
                 raise UbntWifiError("provision requires SSID, security, BSSID, and password")
             result = {"ok": True, **client.provision(**payload)}
+        elif args.action == "update-profile":
+            payload = _read_object()
+            expected = {
+                "profile",
+                "password",
+                "bssid",
+                "output_power_dbm",
+                "rate_module",
+                "rate_auto",
+                "rate_mcs",
+                "apply_now",
+            }
+            if set(payload) != expected:
+                raise UbntWifiError("profile update has an unexpected schema")
+            result = {"ok": True, **client.update_profile(**payload)}
         else:
             result = {"ok": True, **client.resume()}
     except UbntWifiError as exc:

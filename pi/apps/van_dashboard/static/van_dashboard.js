@@ -22,6 +22,7 @@ let dashboard = null,
   ubntWifi = null,
   ubntLink = null,
   ubntNewNetwork = null,
+  ubntProfileEditing = null,
   policyLoading = false,
   diskBusy = false,
   priceBusy = false,
@@ -3178,7 +3179,7 @@ function renderUbntWifi(response) {
     unavailable = wifi.reachable === false || (error && !reachable);
   $('ubnt-wifi-panel').setAttribute('aria-busy', String(running));
   $('ubnt-wifi-operation').textContent = running
-    ? `${operation.kind === 'scan' ? 'Scanning' : operation.kind === 'connect' ? 'Connecting' : operation.kind === 'provision' ? 'Saving network' : 'Updating'}…`
+    ? `${operation.kind === 'scan' ? 'Scanning' : operation.kind === 'connect' ? 'Connecting' : operation.kind === 'provision' ? 'Saving network' : operation.kind === 'update-profile' ? 'Updating profile' : 'Updating'}…`
     : error
       ? 'Failed'
       : wifi.checked_at
@@ -3203,6 +3204,48 @@ function renderUbntWifi(response) {
   scan.classList.toggle('running', running && operation.kind === 'scan');
   $('ubnt-scan-label').textContent =
     running && operation.kind === 'scan' ? 'Scanning…' : 'Scan nearby Wi-Fi';
+  const profiles = wifi.profiles || [];
+  $('ubnt-profile-count').textContent = `${profiles.length} saved`;
+  $('ubnt-profile-list').innerHTML =
+    profiles
+      .map((profile) => {
+        const matchingNetworks = (wifi.networks || []).filter(
+            (network) =>
+              network.ssid === profile.ssid && network.security === profile.security,
+          ),
+          lockVisible = profile.bssid
+            ? matchingNetworks.some(
+                (network) => network.bssid?.toUpperCase() === profile.bssid,
+              )
+            : matchingNetworks.length > 0,
+          connected = Boolean(associated && profile.ssid === associated),
+          passwordLabel =
+            profile.security !== 'wpa'
+              ? null
+              : profile.has_password === true
+                ? 'Password saved'
+                : profile.has_password === false
+                  ? 'Password missing'
+                  : 'Password status unknown',
+          meta = [
+            profile.name !== profile.ssid ? `SSID ${profile.ssid}` : null,
+            ubntSecurity(profile.security),
+            Number.isFinite(profile.priority) ? `Priority ${profile.priority}` : null,
+            passwordLabel,
+            profile.bssid ? `AP ${profile.bssid}` : 'Any matching AP',
+            matchingNetworks.length ? (lockVisible ? 'In range' : 'Locked AP not seen') : 'Out of range',
+          ].filter(Boolean),
+          editable =
+            Number.isFinite(profile.output_power_dbm) &&
+            ['atheros', 'ewma_ht'].includes(profile.rate_module) &&
+            typeof profile.rate_auto === 'boolean' &&
+            Number.isFinite(profile.rate_mcs);
+        return `<div class="ubnt-profile-row ${connected ? 'connected' : ''}">
+          <span><strong class="ubnt-network-name">${esc(profile.name)}</strong><span class="ubnt-network-meta">${meta.map((item) => `<span>${esc(item)}</span>`).join('')}</span></span>
+          <span class="ubnt-profile-actions"><button class="ubnt-network-action" data-action data-ubnt-profile="${esc(profile.name)}" ${running ? 'disabled' : ''}>${connected ? 'Reconnect' : 'Connect'}</button><button class="ubnt-network-action ubnt-edit-profile" data-action data-ubnt-edit-profile="${esc(profile.name)}" ${running || !editable ? 'disabled' : ''}>Edit</button></span>
+        </div>`;
+      })
+      .join('') || '<div class="ubnt-empty">No saved UBNT profiles reported.</div>';
   const networks = wifi.networks || [];
   $('ubnt-network-list').innerHTML =
     networks
@@ -3238,6 +3281,7 @@ function renderUbntWifi(response) {
     if (
       operation.kind === 'connect' ||
       operation.kind === 'provision' ||
+      operation.kind === 'update-profile' ||
       operation.kind === 'resume'
     )
       refreshConnectivity();
@@ -3259,6 +3303,7 @@ async function refreshUbntWifi(showError = false) {
 async function startUbntWifi(endpoint, params = {}) {
   if (ubntWifi?.operation?.status === 'running') return;
   clearUbntPassword();
+  clearUbntProfileEditor();
   try {
     const response = await post(`ubnt-wifi/${endpoint}`, params);
     renderUbntWifi(response);
@@ -3285,6 +3330,49 @@ function clearUbntPassword() {
   ubntNewNetwork = null;
   $('ubnt-password').value = '';
   $('ubnt-password-form').hidden = true;
+}
+function updateUbntRateControl() {
+  const automatic = $('ubnt-profile-rate-auto').checked;
+  $('ubnt-profile-rate-mcs').disabled = automatic;
+  $('ubnt-profile-mcs-field').classList.toggle('disabled', automatic);
+}
+function showUbntProfileEditor(button) {
+  const profile = ubntWifi?.wifi?.profiles?.find(
+    (item) => item.name === button.dataset.ubntEditProfile,
+  );
+  if (!profile) return;
+  clearUbntPassword();
+  ubntProfileEditing = profile.name;
+  $('ubnt-profile-title').textContent = `Edit ${profile.name}`;
+  $('ubnt-profile-detail').textContent =
+    `${profile.ssid} · ${ubntSecurity(profile.security)} · Priority ${profile.priority}`;
+  $('ubnt-profile-password').value = '';
+  $('ubnt-profile-password-field').hidden = profile.security !== 'wpa';
+  $('ubnt-profile-bssid').value = profile.bssid || '';
+  $('ubnt-profile-power').value = profile.output_power_dbm;
+  $('ubnt-profile-power-value').textContent = `${profile.output_power_dbm} dBm`;
+  $('ubnt-profile-rate-module').value = profile.rate_module;
+  $('ubnt-profile-rate-auto').checked = profile.rate_auto;
+  $('ubnt-profile-rate-mcs').value = String(profile.rate_mcs);
+  updateUbntRateControl();
+  const state = ubntWifi?.wifi?.state || {},
+    readings = [
+      Number.isFinite(state.signal_dbm) ? `Signal ${state.signal_dbm} dBm` : null,
+      Number.isFinite(state.noise_dbm) ? `Noise ${state.noise_dbm} dBm` : null,
+      Number.isFinite(state.snr_db) ? `SNR ${state.snr_db} dB` : null,
+      Number.isFinite(state.ccq_percent) ? `CCQ ${state.ccq_percent}%` : null,
+    ].filter(Boolean);
+  $('ubnt-radio-readings').textContent =
+    profile.ssid === state.associated_ssid && readings.length
+      ? `Current link · ${readings.join(' · ')}`
+      : 'Radio readings are shown only for the currently associated network.';
+  $('ubnt-profile-form').hidden = false;
+  $('ubnt-profile-form').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+function clearUbntProfileEditor() {
+  ubntProfileEditing = null;
+  $('ubnt-profile-password').value = '';
+  $('ubnt-profile-form').hidden = true;
 }
 function renderStarlink(status) {
   const state = status?.state || 'unknown',
@@ -3727,6 +3815,7 @@ function closeUbntWifi() {
   document.body.classList.remove('sheet-open');
   $('ubnt-wifi-open').setAttribute('aria-expanded', 'false');
   clearUbntPassword();
+  clearUbntProfileEditor();
   $('ubnt-wifi-open').focus();
 }
 function siblingServiceUrl(port) {
@@ -3825,11 +3914,32 @@ $('ubnt-wifi-close').addEventListener('click', closeUbntWifi);
 $('ubnt-scan').addEventListener('click', () => startUbntWifi('scan'));
 $('ubnt-resume').addEventListener('click', () => startUbntWifi('resume'));
 $('ubnt-password-cancel').addEventListener('click', clearUbntPassword);
+$('ubnt-profile-cancel').addEventListener('click', clearUbntProfileEditor);
+$('ubnt-profile-cancel-bottom').addEventListener('click', clearUbntProfileEditor);
+$('ubnt-profile-power').addEventListener('input', () => {
+  $('ubnt-profile-power-value').textContent = `${$('ubnt-profile-power').value} dBm`;
+});
+$('ubnt-profile-rate-auto').addEventListener('change', updateUbntRateControl);
 $('ubnt-password-form').addEventListener('submit', (event) => {
   event.preventDefault();
   if (!ubntNewNetwork) return;
   const selected = { ...ubntNewNetwork, password: $('ubnt-password').value };
   startUbntWifi('provision', selected);
+});
+$('ubnt-profile-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  if (!ubntProfileEditing) return;
+  const selected = {
+    profile: ubntProfileEditing,
+    password: $('ubnt-profile-password').value,
+    bssid: $('ubnt-profile-bssid').value.trim(),
+    output_power_dbm: $('ubnt-profile-power').value,
+    rate_module: $('ubnt-profile-rate-module').value,
+    rate_auto: String($('ubnt-profile-rate-auto').checked),
+    rate_mcs: $('ubnt-profile-rate-mcs').value,
+    apply_now: event.submitter?.dataset.ubntApply || 'false',
+  };
+  startUbntWifi('profile', selected);
 });
 $('speedtest-button').addEventListener('click', startSpeedtest);
 $('openwrt-backdrop').addEventListener('click', (event) => {
@@ -4086,6 +4196,8 @@ document.addEventListener('click', (event) => {
   if (diskAction) changeDiskAction(diskAction);
   const profile = event.target.closest('[data-ubnt-profile]');
   if (profile) startUbntWifi('connect', { profile: profile.dataset.ubntProfile });
+  const editProfile = event.target.closest('[data-ubnt-edit-profile]');
+  if (editProfile) showUbntProfileEditor(editProfile);
   const newNetwork = event.target.closest('[data-ubnt-new]');
   if (newNetwork) showUbntPassword(newNetwork);
   const openNetwork = event.target.closest('[data-ubnt-open]');

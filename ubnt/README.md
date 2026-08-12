@@ -15,19 +15,25 @@ On the NanoStation:
 /etc/persistent/scripts/wifi_manager.sh resume
 ```
 
-The van dashboard uses four additional fixed manager entry points:
+The van dashboard uses five additional fixed manager entry points:
 
 ```sh
 /etc/persistent/scripts/wifi_manager.sh dashboard-status
 /etc/persistent/scripts/wifi_manager.sh dashboard-scan
 /etc/persistent/scripts/wifi_manager.sh manual-connect-stdin
 /etc/persistent/scripts/wifi_manager.sh provision-stdin
+/etc/persistent/scripts/wifi_manager.sh update-profile-stdin
 ```
 
 The first two emit credential-free, hex-encoded records for
 `pi/scripts/ubnt_wifi.py`. The latter two read their selection or provisioning
 request from standard input so Wi-Fi passwords never appear in SSH arguments,
-process listings, command output, or manager logs. New profiles support
+process listings, command output, or manager logs. The dashboard lists saved
+profiles independently from scan results and can update a WPA password, Lock to
+AP address, output power, data-rate module, and maximum TX rate. Profile edits
+create a recoverable copy under the profile directory's `.disabled` folder and
+are persisted with `cfgmtd`. They can either wait for the next connection or be
+applied immediately with an explicit reconnect. New profiles support
 WPA/WPA2 Personal and open networks; WEP is reported to the UI as unsupported.
 After association, provisioning deliberately runs the same `save-current` and
 `cfgmtd` persistence path as an explicit profile save.

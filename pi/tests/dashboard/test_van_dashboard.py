@@ -745,7 +745,20 @@ class UbntWifiControllerTests(unittest.TestCase):
             "automatic_paused": False,
             "selector_running": False,
         },
-        "profiles": [{"name": "denlink", "ssid": "denlink", "security": "wpa"}],
+        "profiles": [
+            {
+                "name": "denlink",
+                "ssid": "denlink",
+                "security": "wpa",
+                "priority": 10,
+                "bssid": "4E:EA:85:26:34:F4",
+                "has_password": True,
+                "output_power_dbm": 21,
+                "rate_module": "atheros",
+                "rate_auto": True,
+                "rate_mcs": 4,
+            }
+        ],
         "networks": [],
     }
 
@@ -783,6 +796,42 @@ class UbntWifiControllerTests(unittest.TestCase):
         self.assertEqual(payload["password"], "")
         self.assertEqual(manager.snapshot()["operation"]["status"], "complete")
         self.assertEqual(changes, ["refresh"])
+
+    def test_profile_update_uses_fixed_tool_argv_and_does_not_retain_password(self):
+        calls = []
+
+        def command(args, timeout, input_text=None):
+            calls.append((list(args), timeout, input_text))
+            return SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps(
+                    {"ok": True, "message": "updated", "wifi": self.WIFI}
+                ),
+                stderr="",
+            )
+
+        manager = dashboard.UbntWifiController(
+            tool="/test/ubnt_wifi.py", command=command, wall_clock=FakeClock(200)
+        )
+        payload = {
+            "profile": "denlink",
+            "password": "replacement-password",
+            "bssid": "00:11:22:33:44:55",
+            "output_power_dbm": 18,
+            "rate_module": "ewma_ht",
+            "rate_auto": False,
+            "rate_mcs": 4,
+            "apply_now": False,
+        }
+        manager._run("update-profile", payload)
+
+        self.assertEqual(
+            calls[0][0], ["/test/ubnt_wifi.py", "--json", "update-profile"]
+        )
+        self.assertNotIn("replacement-password", " ".join(calls[0][0]))
+        self.assertIn('"password":"replacement-password"', calls[0][2])
+        self.assertEqual(payload["password"], "")
+        self.assertEqual(manager.snapshot()["operation"]["status"], "complete")
 
     def test_failure_refreshes_authoritative_status(self):
         calls = []
@@ -3384,7 +3433,12 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(page.data.count(b"data-dashboard-tile"), 15)
         self.assertNotIn(b'class="network-card speedtest-card"', page.data)
         self.assertIn(b'id="ubnt-network-list"', page.data)
+        self.assertIn(b'id="ubnt-profile-list"', page.data)
         self.assertIn(b'id="ubnt-password-form"', page.data)
+        self.assertIn(b'id="ubnt-profile-form"', page.data)
+        self.assertIn(b"Advanced radio tuning", page.data)
+        self.assertIn(b"Lock to AP", page.data)
+        self.assertIn(b"Default (recommended)", page.data)
         self.assertIn(b'data-policy-field="disks_enabled"', page.data)
         self.assertIn(b'data-policy-field="torrents_enabled"', page.data)
         self.assertIn(b'data-policy-field="allow_starlink_torrents"', page.data)
@@ -3428,6 +3482,9 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"diskUsbPowerPort", javascript.data)
         self.assertIn(b"data-speaker-mute", javascript.data)
         self.assertIn(b"data-ubnt-profile", javascript.data)
+        self.assertIn(b"data-ubnt-edit-profile", javascript.data)
+        self.assertIn(b"startUbntWifi('profile'", javascript.data)
+        self.assertIn(b"Current link", javascript.data)
         self.assertIn(b"startUbntWifi('provision'", javascript.data)
         self.assertIn(b"function renderUbntTile()", javascript.data)
         self.assertIn(b"networkState('ubnt-wifi-dot'", javascript.data)
@@ -3615,6 +3672,8 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertNotIn(b".speedtest-card", stylesheet.data)
         self.assertNotIn(b".openwrt-grid", stylesheet.data)
         self.assertIn(b".ubnt-network-row", stylesheet.data)
+        self.assertIn(b".ubnt-profile-row", stylesheet.data)
+        self.assertIn(b".ubnt-radio-settings", stylesheet.data)
         manifest = client.get("/manifest.webmanifest")
         self.assertEqual(manifest.status_code, 200)
         self.assertEqual(manifest.json["name"], "Van Dashboard")
@@ -4325,6 +4384,19 @@ class DashboardRouteTests(unittest.TestCase):
                     "password": "test-password",
                 },
             )
+            profile_update = client.post(
+                "/api/ubnt-wifi/profile",
+                data={
+                    "profile": "Known Camp",
+                    "password": "replacement-password",
+                    "bssid": "00:11:22:33:44:66",
+                    "output_power_dbm": "18",
+                    "rate_module": "ewma_ht",
+                    "rate_auto": "false",
+                    "rate_mcs": "4",
+                    "apply_now": "false",
+                },
+            )
             resume = client.post("/api/ubnt-wifi/resume")
             unknown_security = client.post(
                 "/api/ubnt-wifi/provision",
@@ -4342,6 +4414,19 @@ class DashboardRouteTests(unittest.TestCase):
                 "/api/ubnt-wifi/connect",
                 data={"profile": "Known Camp", "command": "anything"},
             )
+            bad_profile_update = client.post(
+                "/api/ubnt-wifi/profile",
+                data={
+                    "profile": "Known Camp",
+                    "password": "short",
+                    "bssid": "anything",
+                    "output_power_dbm": "99",
+                    "rate_module": "shell",
+                    "rate_auto": "maybe",
+                    "rate_mcs": "99",
+                    "apply_now": "maybe",
+                },
+            )
         finally:
             dashboard.ubnt_wifi = original
 
@@ -4350,10 +4435,12 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(scan.status_code, 202)
         self.assertEqual(connect.status_code, 202)
         self.assertEqual(provision.status_code, 202)
+        self.assertEqual(profile_update.status_code, 202)
         self.assertEqual(resume.status_code, 202)
         self.assertEqual(unknown_security.status_code, 400)
         self.assertEqual(extra_scan_input.status_code, 400)
         self.assertEqual(extra_connect_input.status_code, 400)
+        self.assertEqual(bad_profile_update.status_code, 400)
         self.assertEqual(
             calls,
             [
@@ -4367,6 +4454,19 @@ class DashboardRouteTests(unittest.TestCase):
                         "security": "wpa",
                         "bssid": "00:11:22:33:44:55",
                         "password": "test-password",
+                    },
+                ),
+                (
+                    "update-profile",
+                    {
+                        "profile": "Known Camp",
+                        "password": "replacement-password",
+                        "bssid": "00:11:22:33:44:66",
+                        "output_power_dbm": 18,
+                        "rate_module": "ewma_ht",
+                        "rate_auto": False,
+                        "rate_mcs": 4,
+                        "apply_now": False,
                     },
                 ),
                 ("resume", {}),

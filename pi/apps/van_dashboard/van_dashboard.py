@@ -2052,6 +2052,7 @@ class UbntWifiController:
         "scan": 45,
         "connect": 260,
         "provision": 260,
+        "update-profile": 280,
         "resume": 20,
     }
 
@@ -2178,7 +2179,7 @@ class UbntWifiController:
             result = self._tool_result(kind, payload)
             wifi = result["wifi"]
             message = result.get("message")
-            if kind in ("connect", "provision", "resume") and self.on_change:
+            if kind in ("connect", "provision", "update-profile", "resume") and self.on_change:
                 self.on_change()
         except RuntimeError as exc:
             error = str(exc)
@@ -5198,6 +5199,78 @@ def api_ubnt_wifi_resume():
     if request.form:
         return api_error("UBNT resume does not accept input", 400)
     return _start_ubnt_operation("resume")
+
+
+@app.route("/api/ubnt-wifi/profile", methods=["POST"])
+def api_ubnt_wifi_profile():
+    fields = (
+        "profile",
+        "password",
+        "bssid",
+        "output_power_dbm",
+        "rate_module",
+        "rate_auto",
+        "rate_mcs",
+        "apply_now",
+    )
+    if not _exact_form(fields):
+        return api_error("UBNT profile update has an unexpected schema", 400)
+    raw = {name: request.form[name] for name in fields}
+    profile = raw["profile"]
+    password = raw["password"]
+    bssid = raw["bssid"].upper()
+    if (
+        not profile
+        or len(profile.encode("utf-8")) > 128
+        or any(ord(character) < 32 or ord(character) == 127 for character in profile)
+    ):
+        raw["password"] = ""
+        return api_error("invalid UBNT profile", 400)
+    password_size = len(password.encode("utf-8"))
+    if password and (
+        not 8 <= password_size <= 63
+        or any(ord(character) < 32 or ord(character) == 127 for character in password)
+    ):
+        raw["password"] = ""
+        return api_error("WPA password must be blank or 8 to 63 bytes", 400)
+    if bssid and not re.fullmatch(r"(?:[0-9A-F]{2}:){5}[0-9A-F]{2}", bssid):
+        raw["password"] = ""
+        return api_error("Lock to AP must be blank or a MAC address", 400)
+    try:
+        output_power = int(raw["output_power_dbm"])
+        rate_mcs = int(raw["rate_mcs"])
+    except (TypeError, ValueError):
+        raw["password"] = ""
+        return api_error("invalid UBNT radio setting", 400)
+    if not 0 <= output_power <= 23:
+        raw["password"] = ""
+        return api_error("output power must be 0 to 23 dBm", 400)
+    if raw["rate_module"] not in ("atheros", "ewma_ht"):
+        raw["password"] = ""
+        return api_error("invalid UBNT data-rate module", 400)
+    if raw["rate_auto"] not in ("true", "false"):
+        raw["password"] = ""
+        return api_error("rate auto must be true or false", 400)
+    if not 0 <= rate_mcs <= 15:
+        raw["password"] = ""
+        return api_error("maximum TX rate must be MCS 0 to 15", 400)
+    if raw["apply_now"] not in ("true", "false"):
+        raw["password"] = ""
+        return api_error("apply now must be true or false", 400)
+    payload = {
+        "profile": profile,
+        "password": password,
+        "bssid": bssid,
+        "output_power_dbm": output_power,
+        "rate_module": raw["rate_module"],
+        "rate_auto": raw["rate_auto"] == "true",
+        "rate_mcs": rate_mcs,
+        "apply_now": raw["apply_now"] == "true",
+    }
+    response = _start_ubnt_operation("update-profile", payload)
+    payload["password"] = ""
+    raw["password"] = ""
+    return response
 
 
 @app.route("/api/speedtest", methods=["GET", "POST"])

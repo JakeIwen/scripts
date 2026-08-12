@@ -399,7 +399,7 @@
 <div class="speaker-backdrop" id="ubnt-wifi-backdrop">
   <section class="speaker-sheet ubnt-wifi-sheet" id="ubnt-wifi-panel" role="dialog" aria-modal="true" aria-labelledby="ubnt-wifi-title" aria-busy="true">
     <div class="sheet-grabber"></div><div class="sheet-head"><h2 id="ubnt-wifi-title">UBNT Wi-Fi</h2><span class="policy-sheet-status" id="ubnt-wifi-operation">Checking…</span><button class="sheet-close" id="ubnt-wifi-close" aria-label="Close UBNT Wi-Fi">&times;</button></div>
-    <p class="sheet-help">Known networks are green. Manual connections pause automatic selection until you resume it.</p>
+    <p class="sheet-help">Saved profiles remain visible even when out of range. Manual connections pause automatic selection until you resume it.</p>
     <div class="ubnt-current"><span class="network-dot" id="ubnt-current-dot"></span><span><strong id="ubnt-current-ssid">No data</strong><small id="ubnt-current-detail">Waiting for antenna status…</small></span></div>
     <div class="ubnt-actions">
       <button class="speedtest-button" id="ubnt-scan" data-action><span class="speed-icon" aria-hidden="true">⌁</span><span class="speed-spinner" aria-hidden="true"></span><span id="ubnt-scan-label">Scan nearby Wi-Fi</span></button>
@@ -410,6 +410,24 @@
       <label for="ubnt-password">Wi-Fi password</label><input id="ubnt-password" name="password" type="password" minlength="8" maxlength="63" autocomplete="current-password" required>
       <div><button type="button" id="ubnt-password-cancel">Cancel</button><button type="submit" data-action>Save &amp; connect</button></div>
     </form>
+    <form class="ubnt-profile-form" id="ubnt-profile-form" hidden>
+      <div class="ubnt-profile-form-head"><span><strong id="ubnt-profile-title">Edit saved network</strong><small id="ubnt-profile-detail"></small></span><button type="button" id="ubnt-profile-cancel" aria-label="Close saved-network editor">&times;</button></div>
+      <label class="ubnt-profile-field" id="ubnt-profile-password-field"><span>New Wi-Fi password</span><input id="ubnt-profile-password" type="password" minlength="8" maxlength="63" autocomplete="new-password" placeholder="Leave blank to keep saved password"><small>The existing password is never sent to or displayed by the dashboard.</small></label>
+      <label class="ubnt-profile-field"><span>Lock to AP</span><input id="ubnt-profile-bssid" type="text" maxlength="17" inputmode="text" placeholder="Blank selects the strongest matching AP"><small>Optional access-point MAC, such as 42:7C:3F:0B:59:10.</small></label>
+      <details class="ubnt-radio-settings">
+        <summary>Advanced radio tuning</summary>
+        <p>Profile-specific settings. Default/Auto are recommended starting points; applying now briefly interrupts the wireless link.</p>
+        <label class="ubnt-profile-field"><span>Output power <output id="ubnt-profile-power-value">21 dBm</output></span><input id="ubnt-profile-power" type="range" min="0" max="23" step="1" value="21"><small>Change deliberately and compare CCQ; more power is not always better. airOS still applies its configured regulatory limits.</small></label>
+        <label class="ubnt-profile-field"><span>Data Rate Module</span><select id="ubnt-profile-rate-module"><option value="atheros">Default (recommended)</option><option value="ewma_ht">Alternative</option></select></label>
+        <label class="ubnt-profile-check"><input id="ubnt-profile-rate-auto" type="checkbox" checked><span>Max TX Rate: Auto <small>Recommended; permits automatic fallback to robust lower rates.</small></span></label>
+        <label class="ubnt-profile-field" id="ubnt-profile-mcs-field"><span>Manual maximum TX rate</span><select id="ubnt-profile-rate-mcs"><option value="0">MCS 0</option><option value="1">MCS 1</option><option value="2">MCS 2</option><option value="3">MCS 3</option><option value="4">MCS 4</option><option value="5">MCS 5</option><option value="6">MCS 6</option><option value="7">MCS 7</option><option value="8">MCS 8</option><option value="9">MCS 9</option><option value="10">MCS 10</option><option value="11">MCS 11</option><option value="12">MCS 12</option><option value="13">MCS 13</option><option value="14">MCS 14</option><option value="15">MCS 15</option></select></label>
+        <div class="ubnt-radio-readings" id="ubnt-radio-readings">Scan or refresh status to compare signal, noise/SNR, and CCQ.</div>
+      </details>
+      <div class="ubnt-profile-form-actions"><button type="button" id="ubnt-profile-cancel-bottom">Cancel</button><button type="submit" data-action data-ubnt-apply="false">Save for next connection</button><button type="submit" data-action data-ubnt-apply="true">Save &amp; reconnect now</button></div>
+    </form>
+    <div class="ubnt-section-head"><h3>Saved networks</h3><span id="ubnt-profile-count"></span></div>
+    <div class="ubnt-profile-list" id="ubnt-profile-list"><div class="speaker-loading">Loading saved networks…</div></div>
+    <div class="ubnt-section-head"><h3>Nearby networks</h3><span>Latest scan</span></div>
     <div class="ubnt-network-list" id="ubnt-network-list"><div class="speaker-loading">Loading UBNT networks…</div></div>
   </section>
 </div>

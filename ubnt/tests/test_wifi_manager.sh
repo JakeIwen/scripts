@@ -38,6 +38,7 @@ printf '%s\n' \
     'wireless.1.scan_list.channels=' \
     'wpasupplicant.status=enabled' \
     'wpasupplicant.device.1.status=enabled' \
+    'aaa.1.wpa.psk=template-secret' \
     'wpasupplicant.profile.1.network.1.ssid=template-network' \
     'wpasupplicant.profile.1.network.1.bssid=00:00:00:00:00:01' \
     'wpasupplicant.profile.1.network.1.psk=template-secret' > "$test_root/profiles/WPA Template"
@@ -157,5 +158,42 @@ grep -q '^wpasupplicant.profile.1.network.1.psk=new-test-password$' "$test_root/
 grep -q '^wireless.1.scan_list.status=disabled$' "$test_root/profiles/dendelion"
 ! grep -q 'new-test-password' "$test_root/wifi.log"
 ! find "$test_root/profiles" -maxdepth 1 -name '.dashboard-new.*' | grep -q .
+
+printf '%s\n' \
+    'WPA Template' \
+    'change' \
+    'rotated-test-password' \
+    '02:11:22:33:44:55' \
+    '17' \
+    'ewma_ht' \
+    'disabled' \
+    '4' \
+    'no' | "$manager" update-profile-stdin >/dev/null
+grep -q '^aaa.1.wpa.psk=rotated-test-password$' "$test_root/profiles/WPA Template"
+grep -q '^wpasupplicant.profile.1.network.1.psk=rotated-test-password$' \
+    "$test_root/profiles/WPA Template"
+grep -q '^wireless.1.ap=02:11:22:33:44:55$' "$test_root/profiles/WPA Template"
+grep -q '^wpasupplicant.profile.1.network.1.bssid=02:11:22:33:44:55$' \
+    "$test_root/profiles/WPA Template"
+grep -q '^radio.1.txpower=17$' "$test_root/profiles/WPA Template"
+grep -q '^radio.rate_module=ewma_ht$' "$test_root/profiles/WPA Template"
+grep -q '^radio.1.rate.auto=disabled$' "$test_root/profiles/WPA Template"
+grep -q '^radio.1.rate.mcs=4$' "$test_root/profiles/WPA Template"
+[ "$(grep -c '^aaa.1.wpa.psk=' "$test_root/profiles/WPA Template")" -eq 1 ]
+[ "$(grep -c '^wpasupplicant.profile.1.network.1.psk=' "$test_root/profiles/WPA Template")" -eq 1 ]
+password_backup=$(find "$test_root/profiles/.disabled" -type f \
+    -name 'WPA Template.settings-backup.*' | sed -n '1p')
+[ -n "$password_backup" ]
+grep -q '^aaa.1.wpa.psk=template-secret$' "$password_backup"
+! grep -q 'rotated-test-password' "$test_root/wifi.log"
+! find "$test_root/profiles" -maxdepth 1 -name '.dashboard-password.*' | grep -q .
+
+if printf '%s\n' \
+    'A Network With Spaces' 'change' 'password-update' '' '20' \
+    'atheros' 'enabled' '15' 'no' | \
+    "$manager" update-profile-stdin >/dev/null; then
+    echo 'Open-network password update unexpectedly succeeded.' >&2
+    exit 1
+fi
 
 printf 'wifi-manager: ok\n'
