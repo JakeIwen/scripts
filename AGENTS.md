@@ -34,6 +34,13 @@ Some ignored secret directories, wireless profiles, and device configurations
 may contain credentials or private network data. Never print or commit secrets,
 and preserve unrelated local or deployed changes.
 
+## Vanpi connections
+
+When connected to the van's local network, prefer `vanpi.lan` for SSH and other
+connections to the Raspberry Pi. The bare hostname `vanpi` resolves through
+Tailscale and should generally be used only as a fallback when `vanpi.lan` is
+unavailable, such as when the client is not connected to the local network.
+
 ## Vanpi CAN/UDS workspace
 
 The primary CAN-bus research and diagnostic toolkit is a separate Git checkout

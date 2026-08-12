@@ -50,6 +50,14 @@ usage() {
   echo "usage: diskctl eject|mount|repair <managed-label>" >&2
 }
 
+print_check_output() {
+  local output=$1 line
+  [[ -n "$output" ]] || return 0
+  while IFS= read -r line; do
+    printf '  %s\n' "$line"
+  done <<< "$output"
+}
+
 action=${1:-}
 label=${2:-}
 [[ $# == 2 &&
@@ -338,6 +346,14 @@ case "$action" in
       echo "diskctl: $filesystem_name repair failed (status $repair_status): $repair_output" >&2
       exit 1
     fi
+    if (( repair_status == 0 )); then
+      repair_summary="$filesystem_name needed no repairs"
+    else
+      repair_summary="$filesystem_name errors were repaired"
+    fi
+    echo "$label: automatic check complete; $repair_summary (status $repair_status)"
+    print_check_output "$repair_output"
+
     if [[ "$filesystem" == exfat ]]; then
       verify_output=$(
         "$sudo_command" "$fsck_command" -n -- "$device" 2>&1
@@ -354,20 +370,23 @@ case "$action" in
       echo "diskctl: $filesystem_name verification failed: $verify_output" >&2
       exit 1
     fi
+    echo "$label: read-only $filesystem_name verification passed"
+    print_check_output "$verify_output"
 
     clear_health_quarantine || exit 1
     if disk_policy_is_mount_label "$label"; then
       disk_eject_hold_clear "$label" || exit 1
     fi
     if (( ! was_mounted )); then
-      write_health_state healthy \
-        "$filesystem_name repaired and verified clean; preserved unmounted state"
+      health_message="$repair_summary; verification passed; preserved unmounted state"
+      write_health_state healthy "$health_message" || exit 1
+      echo "$label: healthy: $health_message"
       exit $?
     fi
 
     [[ ! -e "$ignition_flag" ]] || {
       write_health_state warning \
-        "$filesystem_name repaired but left unmounted because ignition turned on" || true
+        "$repair_summary; verification passed; left unmounted because ignition turned on" || true
       echo "diskctl: ignition turned on; repaired filesystem remains unmounted" >&2
       exit 1
     }
@@ -381,18 +400,20 @@ case "$action" in
             ! "$torrents_enabled" =~ ^[01]$ ||
             ! "$starlink_torrents" =~ ^[01]$ || -n ${extra:-} ]]; then
         write_health_state warning \
-          "$filesystem_name repaired but requested disk policy could not be verified" || true
+          "$repair_summary; verification passed; requested disk policy could not be verified" || true
         echo "diskctl: repaired $label but could not verify requested disk policy" >&2
         exit 1
       fi
       if [[ "$disks_enabled" != 1 ]]; then
-        write_health_state healthy \
-          "$filesystem_name repaired and verified clean; left unmounted by requested policy"
+        health_message="$repair_summary; verification passed; left unmounted by requested policy"
+        write_health_state healthy "$health_message" || exit 1
+        echo "$label: healthy: $health_message"
         exit $?
       fi
     fi
     "$mount_disks" "$label" || {
-      write_health_state warning "$filesystem_name repaired but remount failed" || true
+      write_health_state warning \
+        "$repair_summary; verification passed; remount failed" || true
       exit 1
     }
     mounted=$("$findmnt_command" -rn -M "$target" -o SOURCE 2>&1)
@@ -400,19 +421,20 @@ case "$action" in
     resolved_mounted=$("$readlink_command" -f -- "$mounted" 2>/dev/null) || true
     if (( status != 0 )) || [[ "$resolved_mounted" != "$device" ]]; then
       write_health_state warning \
-        "$filesystem_name repaired but exact remount verification failed" || true
+        "$repair_summary; verification passed; exact remount verification failed" || true
       exit 1
     fi
     probe="$target/.vanpi_health_probe.$$"
     if ! "$timeout_command" 10 "$touch_command" "$probe" ||
        ! "$rm_command" -f -- "$probe"; then
       write_health_state critical \
-        "$filesystem_name repaired and mounted, but pi cannot write to it" || true
+        "$repair_summary; verification passed; remounted, but pi cannot write to it" || true
       echo "diskctl: repaired mount is not writable by pi" >&2
       exit 1
     fi
-    write_health_state healthy \
-      "$filesystem_name repaired, verified clean, and remounted" || exit 1
+    health_message="$repair_summary; verification passed; remounted read/write and write probe passed"
+    write_health_state healthy "$health_message" || exit 1
+    echo "$label: healthy: $health_message"
     if disk_policy_is_mount_label "$label" &&
        ! disk_policy_is_always_mount_label "$label"; then
       exec 9>&-

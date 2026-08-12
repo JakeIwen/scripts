@@ -177,7 +177,15 @@ EOF
 cat > "$fake_fsck" <<EOF
 #!/bin/bash
 printf 'fsck %s\\n' "\$*" >> "$calls"
-printf '%s\\n' 'exFAT filesystem is clean'
+case "\$*" in
+  *"-p -- "*|*"-pf -- "*)
+    printf '%s\\n' "\${TEST_FSCK_REPAIR_OUTPUT:-filesystem check complete}"
+    exit "\${TEST_FSCK_REPAIR_STATUS:-0}"
+    ;;
+  *)
+    printf '%s\\n' 'filesystem verification clean'
+    ;;
+esac
 EOF
 cat > "$fake_install" <<'EOF'
 #!/bin/bash
@@ -230,8 +238,20 @@ DISKCTL_MKTEMP=/usr/bin/mktemp \
 DISKCTL_MOUNT_ROOT="$mount_root" \
 DISKCTL_REQUIRE_BLOCK_DEVICE=0 \
 DISKCTL_TIMEOUT="$fake_timeout" \
-bash "$repo_root/pi/scripts/diskctl" repair EXFAT512 >/dev/null ||
+TEST_FSCK_REPAIR_STATUS=1 \
+TEST_FSCK_REPAIR_OUTPUT='filesystem metadata repaired' \
+bash "$repo_root/pi/scripts/diskctl" repair EXFAT512 > "$repair_root/exfat-output" ||
   fail "verified exFAT repair workflow failed"
+
+grep -Fq 'automatic check complete; exFAT errors were repaired (status 1)' \
+  "$repair_root/exfat-output" || fail "repair output did not report that changes were made"
+grep -Fq 'filesystem metadata repaired' "$repair_root/exfat-output" ||
+  fail "repair output suppressed successful fsck detail"
+grep -Fq 'read-only exFAT verification passed' "$repair_root/exfat-output" ||
+  fail "repair output did not report verification"
+grep -Fq \
+  'healthy: exFAT errors were repaired; verification passed; remounted read/write and write probe passed' \
+  "$repair_root/exfat-output" || fail "repair output omitted the final health summary"
 
 expected_repair_calls=$'unmount EXFAT512\nfsck -p -- '"$fake_device"$'\nfsck -n -- '"$fake_device"$'\nmount EXFAT512'
 [[ $(cat "$calls") == "$expected_repair_calls" ]] ||
@@ -245,6 +265,10 @@ with open(sys.argv[1], encoding="utf-8") as handle:
     payload = json.load(handle)
 assert payload["label"] == "EXFAT512"
 assert payload["state"] == "healthy"
+assert payload["message"] == (
+    "exFAT errors were repaired; verification passed; "
+    "remounted read/write and write probe passed"
+)
 PY
   fail "successful repair did not record healthy state"
 
@@ -294,7 +318,10 @@ with open(sys.argv[1], encoding="utf-8") as handle:
     payload = json.load(handle)
 assert payload["label"] == "movingparts"
 assert payload["state"] == "healthy"
-assert payload["message"] == "ext4 repaired, verified clean, and remounted"
+assert payload["message"] == (
+    "ext4 needed no repairs; verification passed; "
+    "remounted read/write and write probe passed"
+)
 PY
   fail "successful ext4 repair did not record healthy state"
 
