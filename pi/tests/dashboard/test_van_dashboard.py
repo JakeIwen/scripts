@@ -3341,6 +3341,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="backup-history"', page.data)
         self.assertIn(b'id="backup-run-borg" data-action', page.data)
         self.assertIn(b'id="backup-run-exfat" data-action', page.data)
+        self.assertIn(b'id="backup-exfat-preview"', page.data)
         self.assertIn(b'id="backup-openwrt"', page.data)
         self.assertIn(b'id="backup-openwrt-dot"', page.data)
         self.assertIn(b'id="backup-openwrt-detail"', page.data)

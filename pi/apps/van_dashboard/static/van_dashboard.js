@@ -1073,7 +1073,12 @@ function renderBackups(response) {
     macLabel = Number.isFinite(tm.last_backup_at)
       ? `TM ${backupAge(tm.last_backup_at)}`
       : tm.error || 'No Time Machine history';
-  $('backup-pi').textContent = piLabel;
+  $('backup-pi').textContent = Number.isFinite(borg.last_success_at)
+    ? backupAge(borg.last_success_at)
+    : 'No successful archive';
+  $('backup-exfat-preview').textContent = Number.isFinite(exfat.last_success_at)
+    ? `Snapshot ${backupAge(exfat.last_success_at)}`
+    : 'No snapshot';
   $('backup-openwrt').textContent = openwrtLabel;
   $('backup-mac').textContent = tm.running
     ? `Backing up${Number.isFinite(tm.progress_percent) ? ` · ${tm.progress_percent}%` : ''}`
@@ -1204,6 +1209,7 @@ function renderBackupsUnavailable(message) {
   $('backup-pill').textContent = 'NO DATA';
   $('backup-summary').textContent = message;
   $('backup-pi').textContent = 'Unavailable';
+  $('backup-exfat-preview').textContent = 'Unavailable';
   $('backup-openwrt').textContent = 'Unavailable';
   $('backup-mac').textContent = 'Unavailable';
   $('backup-status').textContent = 'Unavailable';
