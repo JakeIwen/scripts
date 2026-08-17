@@ -159,6 +159,9 @@ BACKUP_BORG_RUNNER = os.environ.get(
 BACKUP_EXFAT_RUNNER = os.environ.get(
     "VAN_DASHBOARD_EXFAT_RUNNER", "/home/pi/scripts/backup/exfat_snapshot.sh"
 )
+BACKUP_OPENWRT_RUNNER = os.environ.get(
+    "VAN_DASHBOARD_OPENWRT_RUNNER", "/home/pi/scripts/backup/openwrt_backup.sh"
+)
 TIME_MACHINE_BUNDLE = os.environ.get(
     "VAN_DASHBOARD_TIME_MACHINE_BUNDLE", "/mnt/mbp2tbkup/m4mac.sparsebundle"
 )
@@ -3273,6 +3276,13 @@ class BackupManager:
     """
 
     CLONE_TARGET_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+    PROGRESS_PHASE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
+    RSYNC_PROGRESS_RE = re.compile(
+        r"^\s*([0-9][0-9,]*)\s+([0-9]{1,3})%"
+    )
+    RSYNC_FILE_PROGRESS_RE = re.compile(
+        r"\(xfr#([0-9]+),\s*to-chk=([0-9]+)/([0-9]+)\)"
+    )
 
     def __init__(
         self,
@@ -3281,7 +3291,9 @@ class BackupManager:
         clone_tool=BACKUP_CLONE_NOW,
         borg_tool=BACKUP_BORG_RUNNER,
         exfat_tool=BACKUP_EXFAT_RUNNER,
+        openwrt_tool=BACKUP_OPENWRT_RUNNER,
         time_machine_bundle=TIME_MACHINE_BUNDLE,
+        progress_dir=None,
         command=run_command,
         timeout=BACKUP_STATUS_TIMEOUT,
         clone_timeout=BACKUP_CLONE_TIMEOUT,
@@ -3294,7 +3306,9 @@ class BackupManager:
         self.clone_tool = clone_tool
         self.borg_tool = borg_tool
         self.exfat_tool = exfat_tool
+        self.openwrt_tool = openwrt_tool
         self.time_machine_bundle = time_machine_bundle
+        self.progress_dir = progress_dir or os.path.join(stamp_dir, "progress")
         self.command = command
         self.timeout = timeout
         self.clone_timeout = clone_timeout
@@ -3431,7 +3445,7 @@ class BackupManager:
             raise BackupStatusError(f"could not read backup stamp: {exc}") from exc
         return int(stat.st_mtime)
 
-    def _running_backup_kinds(self):
+    def _running_backup_processes(self):
         """Identify actual scheduled/manual backup parents from Linux procfs.
 
         Match complete NUL-delimited argv entries, never command substrings, so
@@ -3442,8 +3456,9 @@ class BackupManager:
         expected = {
             os.fsencode(self.borg_tool): "borg",
             os.fsencode(self.exfat_tool): "exfat",
+            os.fsencode(self.openwrt_tool): "openwrt",
         }
-        running = set()
+        running = {kind: set() for kind in expected.values()}
         try:
             entries = os.scandir(self.process_root)
         except OSError:
@@ -3461,10 +3476,82 @@ class BackupManager:
                     continue
                 for script, kind in expected.items():
                     if script in arguments:
-                        running.add(kind)
-                if len(running) == len(expected):
-                    break
+                        running[kind].add(int(entry.name))
         return running
+
+    def _progress_state(self, kind, running_pids, now):
+        """Read telemetry only when its exact producer process is still live."""
+        if not running_pids:
+            return None
+        path = os.path.join(self.progress_dir, f"{kind}.state")
+        try:
+            with open(path, encoding="utf-8") as handle:
+                text = handle.read(4097)
+        except (FileNotFoundError, PermissionError, OSError):
+            return None
+        if len(text) > 4096:
+            return None
+        values = {}
+        for line in text.splitlines():
+            key, separator, value = line.partition("=")
+            if not separator or key in values:
+                return None
+            values[key] = value
+        if values.get("version") != "1":
+            return None
+        try:
+            pid = int(values["pid"])
+            started_at = int(values["started_at"])
+            updated_at = int(values["updated_at"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        phase = values.get("phase", "")
+        detail = values.get("detail", "")
+        if (
+            pid not in running_pids
+            or not self.PROGRESS_PHASE_RE.fullmatch(phase)
+            or not detail
+            or len(detail) > 160
+            or any(ord(character) < 32 for character in detail)
+            or started_at <= 0
+            or updated_at < started_at
+            or started_at > now + 60
+        ):
+            return None
+        return {
+            "phase": phase,
+            "detail": detail,
+            "started_at": started_at,
+            "updated_at": updated_at,
+            "elapsed_seconds": max(0, now - started_at),
+        }
+
+    def _exfat_rsync_progress(self, progress):
+        if not progress or progress.get("phase") != "copying":
+            return progress
+        path = os.path.join(self.progress_dir, "exfat.rsync")
+        try:
+            with open(path, "rb") as handle:
+                handle.seek(0, os.SEEK_END)
+                size = handle.tell()
+                handle.seek(max(0, size - 131072), os.SEEK_SET)
+                text = handle.read(131072).decode("utf-8", errors="replace")
+        except (FileNotFoundError, PermissionError, OSError):
+            return progress
+        for line in reversed(re.split(r"[\r\n]+", text)):
+            match = self.RSYNC_PROGRESS_RE.search(line)
+            if not match:
+                continue
+            result = dict(progress)
+            result["bytes_processed"] = int(match.group(1).replace(",", ""))
+            result["progress_percent"] = min(100, int(match.group(2)))
+            files = self.RSYNC_FILE_PROGRESS_RE.search(line)
+            if files:
+                result["files_transferred"] = int(files.group(1))
+                result["files_remaining"] = int(files.group(2))
+                result["file_list_total"] = int(files.group(3))
+            return result
+        return progress
 
     @staticmethod
     def _plist_timestamp(value):
@@ -3540,7 +3627,7 @@ class BackupManager:
 
     def status(self):
         now = int(self.wall_clock())
-        running_kinds = self._running_backup_kinds()
+        running_processes = self._running_backup_processes()
         configuration = self._configuration()
         rows = self._block_devices()
         labels = {row.get("label"): row for row in rows if row.get("label")}
@@ -3579,7 +3666,10 @@ class BackupManager:
             "last_success_at": borg_at,
             "stale_hours": configuration["borg_stale_hours"],
             "stale": borg_at is None or now - borg_at > borg_stale_seconds,
-            "running": "borg" in running_kinds,
+            "running": bool(running_processes["borg"]),
+            "progress": self._progress_state(
+                "borg", running_processes["borg"], now
+            ),
         }
         exfat_snapshot_at = self._stamp(
             os.path.join(self.stamp_dir, "exfat512_ok")
@@ -3592,7 +3682,10 @@ class BackupManager:
             "stale_hours": configuration["exfat_snapshot_stale_hours"],
             "stale": exfat_snapshot_at is None
             or now - exfat_snapshot_at > exfat_snapshot_stale_seconds,
-            "running": "exfat" in running_kinds,
+            "running": bool(running_processes["exfat"]),
+            "progress": self._exfat_rsync_progress(
+                self._progress_state("exfat", running_processes["exfat"], now)
+            ),
         }
         openwrt_at = self._stamp(os.path.join(self.stamp_dir, "openwrt_ok"))
         openwrt_stale_seconds = configuration["openwrt_backup_stale_hours"] * 3600
@@ -3601,6 +3694,10 @@ class BackupManager:
             "stale_hours": configuration["openwrt_backup_stale_hours"],
             "stale": openwrt_at is None
             or now - openwrt_at > openwrt_stale_seconds,
+            "running": bool(running_processes["openwrt"]),
+            "progress": self._progress_state(
+                "openwrt", running_processes["openwrt"], now
+            ),
         }
         time_machine = self._time_machine(now)
         with self.lock:
@@ -3622,6 +3719,7 @@ class BackupManager:
             operation["status"] == "running"
             or borg["running"]
             or exfat_snapshot["running"]
+            or openwrt["running"]
             or time_machine["running"]
         ) else (
             "attention" if attention else "good"

@@ -63,6 +63,7 @@ BORG_EXCLUDES=(
 # state + notifications
 STAMP_DIR=/home/pi/backups/stamps
 SNAP_DIR=/home/pi/backups/snapshots
+BACKUP_PROGRESS_DIR="$STAMP_DIR/progress"
 
 # OpenWrt snapshot pulled from dendelion before each Borg archive. The router
 # key is forced-command-only; the last valid local bundle is retained on error.

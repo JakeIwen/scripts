@@ -102,6 +102,23 @@ class BackupDeploymentTests(unittest.TestCase):
         self.assertIn('"${borg_exclude_args[@]}"', backup)
         self.assertNotIn("--exclude '/home/pi/build/*'", backup)
 
+    def test_backup_jobs_publish_dashboard_progress_without_driving_success(self):
+        config = (BACKUP_DIR / "backup_conf.sh").read_text(encoding="utf-8")
+        borg = (BACKUP_DIR / "pi_backup.sh").read_text(encoding="utf-8")
+        exfat = (BACKUP_DIR / "exfat_snapshot.sh").read_text(encoding="utf-8")
+        openwrt = (BACKUP_DIR / "openwrt_backup.sh").read_text(encoding="utf-8")
+        helper = (BACKUP_DIR / "progress.sh").read_text(encoding="utf-8")
+
+        self.assertIn('BACKUP_PROGRESS_DIR="$STAMP_DIR/progress"', config)
+        self.assertIn("backup_progress_begin borg", borg)
+        self.assertIn('backup_progress_update archiving "Creating the Borg archive"', borg)
+        self.assertIn("backup_progress_begin exfat", exfat)
+        self.assertIn("--info=progress2", exfat)
+        self.assertIn("backup_progress_begin openwrt", openwrt)
+        self.assertIn("backup_progress_update validating", openwrt)
+        self.assertIn('backup_progress_update "$phase" "$detail"', helper)
+        self.assertNotIn("exit 1", helper)
+
 
 if __name__ == "__main__":
     unittest.main()

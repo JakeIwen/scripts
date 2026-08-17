@@ -34,6 +34,9 @@ lifecycle_lock=${EXFAT_SNAPSHOT_LIFECYCLE_LOCK:-/home/pi/.internet_switches.lock
 
 # shellcheck source=backup_conf.sh
 . "$backup_conf" || exit 1
+progress_helper=${EXFAT_SNAPSHOT_PROGRESS_HELPER:-/home/pi/scripts/backup/progress.sh}
+# shellcheck source=progress.sh
+. "$progress_helper" || exit 1
 telemetry_seconds=${EXFAT_SNAPSHOT_TELEMETRY_SECONDS:-300}
 
 notify() { "$notify_command" "$@"; }
@@ -97,6 +100,7 @@ telemetry_child=
 backup_disk_active=0
 job_locked=0
 skip_exit_stop=0
+rsync_progress_file=
 
 run() {
   "$@" &
@@ -192,13 +196,23 @@ snapshot_telemetry_loop() {
 run_snapshot_rsync() {
   local parent_name=$1 rc final_stat
   shift
-  "$@" &
+  if [[ -n "$rsync_progress_file" ]]; then
+    "$@" > "$rsync_progress_file" &
+  else
+    "$@" &
+  fi
   child=$!
   snapshot_telemetry_loop "$child" "$parent_name" &
   telemetry_child=$!
   wait "$child"
   rc=$?
   child=
+  if [[ -n "$rsync_progress_file" && -r "$rsync_progress_file" ]]; then
+    while IFS= read -r line; do
+      [[ -z "$line" || "$line" =~ ^[[:space:]]*[0-9,]+[[:space:]]+[0-9]+% ]] ||
+        log "rsync: $line"
+    done < <(/usr/bin/tr '\r' '\n' < "$rsync_progress_file")
+  fi
   stop_snapshot_telemetry
   if snapshot_block_stat "$parent_name"; then
     final_stat=$REPLY
@@ -297,6 +311,8 @@ cleanup() {
   else
     release_job_lock
   fi
+  [[ -z "$rsync_progress_file" ]] || "$rm_command" -f -- "$rsync_progress_file"
+  backup_progress_end
   exit "$rc"
 }
 
@@ -503,6 +519,11 @@ main() {
     return 0
   }
   job_locked=1
+  if backup_progress_begin exfat preparing "Verifying the EXFAT512 source"; then
+    rsync_progress_file="$BACKUP_PROGRESS_DIR/exfat.rsync"
+  else
+    log "backup progress telemetry is unavailable"
+  fi
   [[ ! -f "$IGNITION_FLAG" ]] || {
     log "van started before EXFAT snapshot mount; deferring"
     return 0
@@ -518,6 +539,7 @@ main() {
     fail "$EXFAT_SNAPSHOT_SOURCE_LABEL has an unexpected or duplicate mount"
   fi
 
+  backup_progress_update mounting "Mounting and checking the snapshot disk" || true
   ensure_backup_mount ||
     fail "$EXFAT_SNAPSHOT_DISK_LABEL could not be mounted and verified writable"
   [[ ! -f "$IGNITION_FLAG" ]] || {
@@ -529,6 +551,7 @@ main() {
   target_parent=$(snapshot_parent_device "$target_device") ||
     fail "could not resolve the whole-disk parent for $target_device"
   target_parent_name=${target_parent##*/}
+  backup_progress_update checking "Checking the snapshot disk and destination" || true
   log_snapshot_smart "$target_parent"
 
   if [[ -L "$EXFAT_SNAPSHOT_ROOT" ||
@@ -568,15 +591,23 @@ main() {
     -rt
     --delete-delay
     --stats
+    --info=progress2
+    --outbuf=L
   )
   [[ -z "$previous_path" ]] ||
     rsync_args+=("--link-dest=$previous_path")
+  if [[ -n "$rsync_progress_file" ]]; then
+    "$install_command" -m 0644 /dev/null "$rsync_progress_file" ||
+      fail "could not initialize snapshot progress telemetry"
+  fi
+  backup_progress_update copying "Copying files into the hard-link snapshot" || true
   run_snapshot_rsync "$target_parent_name" "$rsync_command" "${rsync_args[@]}" -- \
     "$EXFAT_SNAPSHOT_SOURCE_MNT/" "$partial_path/"
   rc=$?
   (( rc == 0 )) || fail "rsync snapshot exited $rc; partial snapshot retained for retry"
   [[ ! -f "$IGNITION_FLAG" ]] || return 143
 
+  backup_progress_update publishing "Publishing the completed snapshot" || true
   marker_tmp="$partial_path/.$complete_marker.$$"
   if ! printf 'source=%s\ndevice=%s\ncompleted=%s\nprevious=%s\n' \
       "$EXFAT_SNAPSHOT_SOURCE_LABEL" "$source_device" \
@@ -591,6 +622,7 @@ main() {
   "$sync_command" -f "$EXFAT_SNAPSHOT_ROOT" ||
     fail "snapshot directory sync failed"
 
+  backup_progress_update pruning "Applying snapshot retention" || true
   if ! prune_snapshots; then
     notify "vanpi EXFAT backup warning" \
       "snapshot $final_name succeeded, but one or more expired snapshots could not be pruned" \
@@ -603,6 +635,7 @@ main() {
       high warning || true
   fi
 
+  backup_progress_update stopping "Unmounting and spinning down the snapshot disk" || true
   stop_backup_disk ||
     fail "snapshot succeeded, but $EXFAT_SNAPSHOT_DISK_LABEL could not be unmounted and spun down"
   write_success_stamp "$final_name" || fail "snapshot succeeded but success stamp could not be recorded"

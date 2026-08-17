@@ -189,7 +189,12 @@ ud_resolve_label() {
   if (( rc == 1 )); then
     return 1
   elif (( rc != 0 )); then
-    ud_record_failure "$DISK_POLICY_RESOLVE_ERROR"
+    # A dead USB controller can leave a by-label link pointing at a vanished
+    # /dev node. --all may handle this one classified result after proving no
+    # mount remains; every other caller and discovery failure stays fail-closed.
+    if [[ "$DISK_POLICY_RESOLVE_REASON" != vanished-udev-mapping ]]; then
+      ud_record_failure "$DISK_POLICY_RESOLVE_ERROR"
+    fi
     return 2
   fi
   UD_DEVICE=$DISK_POLICY_RESOLVED_DEVICE
@@ -228,6 +233,47 @@ ud_resolve_label() {
     ud_record_failure "findmnt failed for $UD_DEVICE (status $rc): $UD_MOUNTS"
     return 2
   fi
+  return 0
+}
+
+# A vanished udev label link is safe to ignore only for the all-filesystem
+# reboot/poweroff preflight, and only when neither its expected target nor the
+# vanished source appears anywhere in the kernel mount table. Returns 0 for
+# that narrow detached state and 1 after recording any mounted/unknown state.
+ud_accept_vanished_label_for_all() {
+  local label=$1 device=$2 expected_mount
+  local source output rc
+
+  expected_mount="/mnt/$label"
+
+  if [[ "$DISK_POLICY_RESOLVE_REASON" != vanished-udev-mapping ||
+        -z "$device" || "$device" != /dev/* || -e "$device" || -b "$device" ]]; then
+    ud_record_failure "$DISK_POLICY_RESOLVE_ERROR"
+    return 1
+  fi
+
+  output=$(ud_findmnt_exact_source "$expected_mount" 2>&1)
+  rc=$?
+  if (( rc == 0 )); then
+    source=$(printf '%s\n' "$output" | /usr/bin/awk 'NF { print; exit }')
+    ud_record_failure "$DISK_POLICY_RESOLVE_ERROR; $expected_mount remains mounted from ${source:-an unknown source}"
+    return 1
+  elif (( rc != 1 )) || [[ -n "$output" ]]; then
+    ud_record_failure "$DISK_POLICY_RESOLVE_ERROR; cannot verify $expected_mount is unmounted (findmnt status $rc): ${output:-no diagnostic output}"
+    return 1
+  fi
+
+  output=$(ud_findmnt_source_targets "$device" 2>&1)
+  rc=$?
+  if (( rc == 0 )); then
+    ud_record_failure "$DISK_POLICY_RESOLVE_ERROR; vanished source $device remains mounted at $output"
+    return 1
+  elif (( rc != 1 )) || [[ -n "$output" ]]; then
+    ud_record_failure "$DISK_POLICY_RESOLVE_ERROR; cannot verify vanished source $device is unmounted (findmnt status $rc): ${output:-no diagnostic output}"
+    return 1
+  fi
+
+  echo "$label: udev mapping points to vanished $device and no mount remains; treating as detached for --all"
   return 0
 }
 
@@ -368,6 +414,10 @@ ud_normal_unmount() {
 
 ud_findmnt_source_targets() {
   /usr/bin/findmnt -rn -S "$1" -o TARGET
+}
+
+ud_findmnt_exact_source() {
+  /usr/bin/findmnt -rn -M "$1" -o SOURCE
 }
 
 # umount can remain blocked in userspace long enough for timeout(1) to return
@@ -556,6 +606,15 @@ umount_disks_main() {
       echo "$label: not attached"
       continue
     elif (( rc != 0 )); then
+      if (( all_labels )) &&
+          [[ "$DISK_POLICY_RESOLVE_REASON" == vanished-udev-mapping ]]; then
+        if ud_accept_vanished_label_for_all \
+            "$label" "$DISK_POLICY_VANISHED_DEVICE"; then
+          continue
+        fi
+      elif [[ "$DISK_POLICY_RESOLVE_REASON" == vanished-udev-mapping ]]; then
+        ud_record_failure "$DISK_POLICY_RESOLVE_ERROR"
+      fi
       had_preflight_failure=1
       continue
     fi
@@ -728,6 +787,9 @@ umount_disks_main() {
       rc=$?
       if (( rc != 0 )); then
         [[ $rc == 1 ]] && ud_record_failure "$label disappeared before spindown"
+        if [[ "$DISK_POLICY_RESOLVE_REASON" == vanished-udev-mapping ]]; then
+          ud_record_failure "$DISK_POLICY_RESOLVE_ERROR"
+        fi
         had_runtime_failure=1
         continue
       fi

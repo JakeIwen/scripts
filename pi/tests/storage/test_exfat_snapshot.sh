@@ -57,6 +57,7 @@ export EXFAT_SNAPSHOT_DISKCTL=/usr/bin/true
 export EXFAT_SNAPSHOT_UMOUNT_DISKS=/usr/bin/true
 export EXFAT_SNAPSHOT_NOTIFY=/usr/bin/true
 export EXFAT_SNAPSHOT_SMARTCTL=/usr/bin/true
+export EXFAT_SNAPSHOT_PROGRESS_HELPER="$repo_root/pi/scripts/backup/progress.sh"
 fake_block_root="$test_root/sys/class/block"
 mkdir -p "$fake_block_root/fakeblock"
 printf '%s\n' '100 0 200 300 400 0 500 600 0 700 800 0 0 0 0 0 0' \

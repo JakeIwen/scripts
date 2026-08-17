@@ -2852,14 +2852,40 @@ class BackupManagerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tempdir:
             config, stamps, bundle = self.make_files(tempdir, tm_running=False)
             proc_root = os.path.join(tempdir, "proc")
+            progress_dir = os.path.join(stamps, "progress")
+            os.makedirs(progress_dir)
             for pid, script in (
                 ("101", "/test/pi_backup.sh"),
                 ("102", "/test/exfat_snapshot.sh"),
+                ("104", "/test/openwrt_backup.sh"),
             ):
                 process = os.path.join(proc_root, pid)
                 os.makedirs(process)
                 with open(os.path.join(process, "cmdline"), "wb") as handle:
                     handle.write(b"/bin/bash\0" + os.fsencode(script) + b"\0")
+            for kind, pid, phase, detail in (
+                ("borg", 101, "openwrt", "Exporting the OpenWrt recovery bundle"),
+                ("exfat", 102, "copying", "Copying files into the snapshot"),
+                ("openwrt", 104, "validating", "Validating router checksums"),
+            ):
+                with open(
+                    os.path.join(progress_dir, f"{kind}.state"),
+                    "w",
+                    encoding="utf-8",
+                ) as handle:
+                    handle.write(
+                        "version=1\n"
+                        f"pid={pid}\n"
+                        f"started_at={self.NOW - 120}\n"
+                        f"updated_at={self.NOW - 10}\n"
+                        f"phase={phase}\n"
+                        f"detail={detail}\n"
+                    )
+            with open(os.path.join(progress_dir, "exfat.rsync"), "wb") as handle:
+                handle.write(
+                    b"  1,048,576  25%  10.00MB/s 0:00:02 "
+                    b"(xfr#7, to-chk=12/25)\r"
+                )
             false_match = os.path.join(proc_root, "103")
             os.makedirs(false_match)
             with open(os.path.join(false_match, "cmdline"), "wb") as handle:
@@ -2870,6 +2896,7 @@ class BackupManagerTests(unittest.TestCase):
                 stamp_dir=stamps,
                 borg_tool="/test/pi_backup.sh",
                 exfat_tool="/test/exfat_snapshot.sh",
+                openwrt_tool="/test/openwrt_backup.sh",
                 time_machine_bundle=bundle,
                 command=lambda args, timeout: SimpleNamespace(
                     returncode=0,
@@ -2883,6 +2910,18 @@ class BackupManagerTests(unittest.TestCase):
 
         self.assertTrue(status["borg"]["running"])
         self.assertTrue(status["exfat_snapshot"]["running"])
+        self.assertTrue(status["openwrt"]["running"])
+        self.assertEqual(status["borg"]["progress"]["phase"], "openwrt")
+        self.assertEqual(
+            status["exfat_snapshot"]["progress"]["progress_percent"], 25
+        )
+        self.assertEqual(
+            status["exfat_snapshot"]["progress"]["bytes_processed"], 1_048_576
+        )
+        self.assertEqual(
+            status["exfat_snapshot"]["progress"]["files_remaining"], 12
+        )
+        self.assertEqual(status["openwrt"]["progress"]["phase"], "validating")
         self.assertEqual(status["health"], "running")
 
     def test_openwrt_status_requires_a_fresh_verified_stamp(self):
@@ -3349,7 +3388,10 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="backup-exfat-action-detail"', page.data)
         self.assertIn(b'id="backup-borg-running" hidden', page.data)
         self.assertIn(b'id="backup-exfat-running" hidden', page.data)
+        self.assertIn(b'id="backup-exfat-progress"', page.data)
+        self.assertIn(b'id="backup-openwrt-running" hidden', page.data)
         self.assertIn(b'id="backup-tm-running" hidden', page.data)
+        self.assertIn(b'id="backup-tm-progress-bar"', page.data)
         self.assertNotIn(b"Manual backups</strong>", page.data)
         self.assertIn(b'id="ignition-monitor"', page.data)
         self.assertIn(b'id="ignition-monitor-panel"', page.data)
@@ -3656,6 +3698,8 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b".backup-history-row", stylesheet.data)
         self.assertIn(b".backup-overview-action-card:hover", stylesheet.data)
         self.assertIn(b".backup-card-hover-detail", stylesheet.data)
+        self.assertIn(b".backup-card-running-note[hidden]", stylesheet.data)
+        self.assertIn(b".backup-linear-progress", stylesheet.data)
         self.assertIn(b".ignition-monitor-tile", stylesheet.data)
         self.assertIn(b".ignition-duration-slider", stylesheet.data)
         self.assertIn(b".ignition-presets", stylesheet.data)

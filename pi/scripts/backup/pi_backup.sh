@@ -13,6 +13,8 @@ backup_conf=${PI_BACKUP_CONF:-/home/pi/scripts/backup/backup_conf.sh}
 policyctl=${PI_BACKUP_POLICYCTL:-/home/pi/scripts/policyctl}
 mount_disks=${PI_BACKUP_MOUNT_DISKS:-/home/pi/scripts/mount_disks.sh}
 . "$backup_conf"
+progress_helper=${PI_BACKUP_PROGRESS_HELPER:-/home/pi/scripts/backup/progress.sh}
+. "$progress_helper"
 
 notify() { /home/pi/scripts/ntfy_send.sh "$@"; }
 log() { echo "[$(date '+%F %T')] $*"; }
@@ -80,6 +82,10 @@ if [ -f "$IGNITION_FLAG" ]; then
   exit 0
 fi
 acquire_job_lock || { log "another backup/restore is active, exiting"; exit 0; }
+if ! backup_progress_begin borg mounting "Mounting and verifying backup disks"; then
+  log "backup progress telemetry is unavailable"
+fi
+trap backup_progress_end EXIT
 
 # long steps go through run() so a TERM from abort_backup.sh stops them promptly
 # (bash delays traps until the foreground child exits; wait doesn't)
@@ -142,6 +148,7 @@ ensure_mounted "$BACKUP_DISK_LABEL" "$BACKUP_MNT" || fail "$BACKUP_DISK_LABEL no
 backup_mounted_here=$ENSURE_MOUNTED_DID_MOUNT
 
 # --- 2. media mirror ---
+backup_progress_update media "Synchronizing the media mirror" || true
 if ensure_mounted movingparts "$MEDIA_SRC"; then
   log "media mirror -> $MEDIA_DST"
   mkdir -p "$MEDIA_DST"
@@ -155,6 +162,7 @@ fi
 bail_if_driving
 
 # --- 3. app-consistent snapshots (files rsync/borg could tear mid-write) ---
+backup_progress_update applications "Snapshotting application data" || true
 if [ -f "$HA_DB" ]; then
   sqlite3 "$HA_DB" ".backup '$SNAP_DIR/home-assistant_v2.db'" \
     || notify "vanpi backup" "HA sqlite snapshot failed" high warning
@@ -163,6 +171,7 @@ dpkg --get-selections > "$SNAP_DIR/dpkg-selections.txt"
 /srv/homeassistant/bin/pip freeze > "$SNAP_DIR/ha-pip-freeze.txt" 2>/dev/null
 
 log "OpenWrt router snapshot"
+backup_progress_update openwrt "Exporting and verifying the OpenWrt recovery bundle" || true
 if run /home/pi/scripts/backup/openwrt_backup.sh; then
   log "OpenWrt router snapshot verified"
 else
@@ -173,6 +182,7 @@ else
 fi
 
 log "UBNT persistent snapshot"
+backup_progress_update ubnt "Exporting and verifying the UBNT recovery bundle" || true
 if run /home/pi/scripts/backup/ubnt_backup.sh; then
   log "UBNT persistent snapshot verified"
 else
@@ -189,16 +199,19 @@ for exclude in "${BORG_EXCLUDES[@]}"; do
   borg_exclude_args+=(--exclude "$exclude")
 done
 log "borg create ::$archive"
+backup_progress_update archiving "Creating the Borg archive" || true
 run borg create --stats --compression zstd --one-file-system \
   "${borg_exclude_args[@]}" \
   "::$archive" / /boot/firmware
 rc=$?
 [ $rc -le 1 ] || fail "borg create exited $rc"  # rc 1 = warnings (files changed during read), acceptable on a live system
 
+backup_progress_update retention "Applying Borg retention and compacting" || true
 run borg prune --keep-daily "$KEEP_DAILY" --keep-weekly "$KEEP_WEEKLY" --keep-monthly "$KEEP_MONTHLY"
 run borg compact
 if [ "$(date +%-d)" = "$BORG_CHECK_DOM" ]; then
   log "monthly borg check"
+  backup_progress_update integrity "Checking Borg repository integrity" || true
   run borg check || fail "borg check found repository problems"
 fi
 
@@ -214,12 +227,14 @@ for entry in "${CLONE_TARGETS[@]}"; do
   [ -f "$stamp" ] && age_days=$(( (now - $(stat -c %Y "$stamp")) / 86400 ))
   if [ "$age_days" -ge "$interval" ]; then
     log "clone to $label due (${age_days}d >= ${interval}d)"
+    backup_progress_update cloning "Refreshing bootable hotspare $label" || true
     run /home/pi/scripts/backup/clone_to_sd.sh "$label" && age_days=0
   fi
   clone_summary+="$label: ${age_days}d old. "
 done
 
 # --- 6. stamp + notify ---
+backup_progress_update finishing "Recording success and releasing the backup disk" || true
 date '+%F %T' > "$STAMP_DIR/borg_ok"
 # check free space here, while bigboi is guaranteed mounted (watchdog can't when UNMOUNT_AFTER=1)
 free_gb=$(( $(df -k --output=avail "$BACKUP_MNT" | tail -1) / 1024 / 1024 ))

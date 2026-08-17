@@ -49,7 +49,9 @@ if the fast attempt does not associate. The unrestricted fallback waits up to
 35 seconds for association before declaring the attempt unsuccessful.
 `UBNT_SCAN_PASSES`, `UBNT_SCAN_SETTLE_SECONDS`, and
 `UBNT_ASSOCIATE_FALLBACK_SECONDS` can tune this behavior. Automatic operations
-do not overwrite saved profiles.
+do not overwrite saved profiles. The manager records the configuration digest
+after each change that it applies itself, so those temporary scan-frequency
+changes are not confused with native airOS GUI changes.
 
 A user-requested switch owns one 120-second protection window beginning before
 its scan; fallback attempts do not extend that deadline. If association times
@@ -58,16 +60,26 @@ using the scan results it already collected. Raw airOS reload output is captured
 in a mode-600 temporary file and deleted, preventing configuration diffs and
 credentials from being printed to the terminal or logs.
 
-`save-current PROFILE` is the explicit profile-write operation. If the profile
+`save-current PROFILE` is the explicit profile-write operation. Native airOS
+GUI changes also enter a separate ten-minute stabilization window. The manager
+does not scan or fall back to an older SSID during that window. Once the GUI's
+target SSID is associated and has an IPv4 address, default route, and working
+Internet check, its current configuration is automatically saved under the
+SSID name. This restores the historical GUI-to-profile behavior without
+allowing automatic roaming operations to overwrite profiles. If a profile
 already exists, its previous version is copied into the profile directory's
-`.disabled` folder first. `disable PROFILE` moves a profile there instead of
-deleting it.
+`.disabled` folder first. `UBNT_GUI_GRACE_SECONDS` can tune the bounded GUI
+window; an explicit dashboard pause continues to protect the transition until
+automatic selection is resumed. `disable PROFILE` moves a profile into
+`.disabled` instead of deleting it.
 
 ## Automatic selection
 
 Cron calls `wifi_manager.sh auto` once per minute. An atomic directory lock
-prevents overlap. A GUI/manual transition receives a three-minute grace period,
-and an established connection must fail three checks before selection changes.
+prevents overlap. Native airOS GUI changes receive the ten-minute stabilization
+window described above. Other manual/config transitions retain their
+120-second protection window, and an established connection must fail three
+checks before selection changes.
 
 Unlisted profiles have priority 100. `denlink` normally has priority 10 so any
 other saved network wins when available. If `config/prefer_denlink` exists,

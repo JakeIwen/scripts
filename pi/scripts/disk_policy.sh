@@ -67,6 +67,8 @@ DISK_POLICY_REQUIRE_BLOCK_DEVICE=${DISK_POLICY_REQUIRE_BLOCK_DEVICE:-1}
 DISK_POLICY_RESOLVED_DEVICE=
 DISK_POLICY_RESOLVED_LABEL_KEY=
 DISK_POLICY_RESOLVE_ERROR=
+DISK_POLICY_RESOLVE_REASON=
+DISK_POLICY_VANISHED_DEVICE=
 
 # Resolve a filesystem LABEL, or a LABEL/PARTLABEL when requested. Returns 0
 # for one verified device, 1 when no udev mapping exists, and 2 for an unsafe
@@ -75,13 +77,16 @@ DISK_POLICY_RESOLVE_ERROR=
 disk_policy_resolve_exact_label() {
   local label=${1:-} mode=${2:-label-only}
   local namespace directory path key resolved output rc index found sys_path
+  local device_state
   local property value devname fs_label partlabel
   local -a namespaces=() devices=() keys=() udev_devices=()
-  local -a sys_paths=()
+  local -a device_states=() sys_paths=()
 
   DISK_POLICY_RESOLVED_DEVICE=
   DISK_POLICY_RESOLVED_LABEL_KEY=
   DISK_POLICY_RESOLVE_ERROR=
+  DISK_POLICY_RESOLVE_REASON=
+  DISK_POLICY_VANISHED_DEVICE=
 
   if [[ -z "$label" || "$label" == */* || "$label" == . || "$label" == .. ]]; then
     DISK_POLICY_RESOLVE_ERROR="invalid disk label"
@@ -123,8 +128,20 @@ disk_policy_resolve_exact_label() {
     fi
     resolved=$output
     if (( DISK_POLICY_REQUIRE_BLOCK_DEVICE )) && [[ ! -b "$resolved" ]]; then
-      DISK_POLICY_RESOLVE_ERROR="udev $namespace mapping $path resolved to non-block device $resolved"
-      return 2
+      # udev can leave its by-label symlink behind after a USB host controller
+      # dies and the kernel removes every affected block device. Keep the
+      # vanished candidate long enough to cross-check the live udev database.
+      # Callers still receive a failure by default; safe system shutdown has a
+      # narrowly guarded path which may accept this specific result only after
+      # verifying that no mount remains.
+      if [[ "$resolved" == /dev/* && ! -e "$resolved" ]]; then
+        device_state=vanished
+      else
+        DISK_POLICY_RESOLVE_ERROR="udev $namespace mapping $path resolved to non-block device $resolved"
+        return 2
+      fi
+    else
+      device_state=live
     fi
 
     found=-1
@@ -137,9 +154,11 @@ disk_policy_resolve_exact_label() {
     if (( found >= 0 )); then
       # Prefer the filesystem label when one device legitimately carries both.
       [[ "$namespace" == LABEL ]] && keys[$found]=LABEL
+      [[ "$device_state" == live ]] && device_states[$found]=live
     else
       devices+=("$resolved")
       keys+=("$namespace")
+      device_states+=("$device_state")
     fi
   done
 
@@ -218,7 +237,13 @@ disk_policy_resolve_exact_label() {
     DISK_POLICY_RESOLVE_ERROR="exact label $label has multiple udev mappings: ${devices[*]}"
     return 2
   elif (( ${#udev_devices[@]} == 0 )); then
-    DISK_POLICY_RESOLVE_ERROR="udev label link for $label has no matching live database record"
+    if [[ "${device_states[0]}" == vanished ]]; then
+      DISK_POLICY_RESOLVE_REASON=vanished-udev-mapping
+      DISK_POLICY_VANISHED_DEVICE=${devices[0]}
+      DISK_POLICY_RESOLVE_ERROR="udev label link for $label points to vanished device ${devices[0]} without a matching live database record"
+    else
+      DISK_POLICY_RESOLVE_ERROR="udev label link for $label has no matching live database record"
+    fi
     return 2
   elif (( ${#udev_devices[@]} != 1 )); then
     DISK_POLICY_RESOLVE_ERROR="exact label $label matches ${#udev_devices[@]} live udev devices: ${udev_devices[*]}"

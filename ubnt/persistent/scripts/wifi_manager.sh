@@ -17,11 +17,15 @@ IP_CMD=${UBNT_IP_CMD:-/usr/bin/ip}
 PING=${UBNT_PING:-/bin/ping}
 CFGMTD=${UBNT_CFGMTD:-/sbin/cfgmtd}
 HEXDUMP=${UBNT_HEXDUMP:-/usr/bin/hexdump}
+MD5SUM=${UBNT_MD5SUM:-/usr/bin/md5sum}
 SSH_KEY_INSTALLER=${UBNT_SSH_KEY_INSTALLER:-/etc/persistent/scripts/ensure_ssh_keys.sh}
 
 LOCK_DIR="$STATE_DIR/lock"
 PAUSE_FILE="$STATE_DIR/paused"
 TRANSITION_FILE="$STATE_DIR/transition_started"
+OBSERVED_CONFIG_DIGEST_FILE="$STATE_DIR/observed-system-config.md5"
+GUI_TRANSITION_FILE="$STATE_DIR/gui-transition-started"
+GUI_TARGET_FILE="$STATE_DIR/gui-transition-target"
 SCAN_FILE="$STATE_DIR/scan.results"
 SCAN_RAW="$STATE_DIR/scan.raw"
 APPLY_CFG="$STATE_DIR/apply.cfg"
@@ -30,6 +34,7 @@ PREFER_DENLINK_FLAG="$CONFIG_DIR/prefer_denlink"
 PENDING_PROFILE=
 
 MANUAL_GRACE_SECONDS=${UBNT_MANUAL_GRACE_SECONDS:-120}
+GUI_GRACE_SECONDS=${UBNT_GUI_GRACE_SECONDS:-600}
 AUTO_SCAN_INTERVAL=${UBNT_AUTO_SCAN_INTERVAL:-120}
 SCAN_PASSES=${UBNT_SCAN_PASSES:-3}
 SCAN_SETTLE_SECONDS=${UBNT_SCAN_SETTLE_SECONDS:-2}
@@ -110,6 +115,51 @@ effective_ssid() {
     else
         config_value "$profile_file" wireless.1.ssid
     fi
+}
+
+system_config_digest() {
+    [ -f "$SYSTEM_CFG" ] || return 1
+    "$MD5SUM" "$SYSTEM_CFG" 2>/dev/null | awk 'NR == 1 {print $1}'
+}
+
+record_observed_config() {
+    observed_digest=$(system_config_digest)
+    [ -n "$observed_digest" ] || return 1
+    observed_digest_new="$OBSERVED_CONFIG_DIGEST_FILE.new.$$"
+    printf '%s\n' "$observed_digest" > "$observed_digest_new" || return 1
+    mv "$observed_digest_new" "$OBSERVED_CONFIG_DIGEST_FILE"
+}
+
+clear_gui_transition() {
+    rm -f "$GUI_TRANSITION_FILE" "$GUI_TARGET_FILE"
+}
+
+observe_external_config_change() {
+    current_digest=$(system_config_digest)
+    [ -n "$current_digest" ] || return 1
+    previous_digest=$(sed -n '1p' "$OBSERVED_CONFIG_DIGEST_FILE" 2>/dev/null)
+    if [ -z "$previous_digest" ]; then
+        record_observed_config
+        return 1
+    fi
+    [ "$current_digest" != "$previous_digest" ] || return 1
+
+    record_observed_config || return 1
+    gui_target=$(effective_ssid "$SYSTEM_CFG")
+    if [ -z "$gui_target" ]; then
+        clear_gui_transition
+        log_message "external airOS configuration detected without an SSID"
+        return 1
+    fi
+
+    gui_started=$(uptime_seconds)
+    [ -n "$gui_started" ] || gui_started=0
+    printf '%s\n' "$gui_started" > "$GUI_TRANSITION_FILE"
+    printf '%s\n' "$gui_target" > "$GUI_TARGET_FILE"
+    rm -f "$TRANSITION_FILE"
+    clear_failures
+    log_message "external airOS configuration detected target=$gui_target grace=${GUI_GRACE_SECONDS}s"
+    return 0
 }
 
 profile_name_is_valid() {
@@ -409,7 +459,11 @@ begin_transition() {
 }
 
 apply_config() {
+    # Manager-driven configuration changes must not be mistaken for native
+    # airOS GUI changes by the next automatic cron invocation.
+    clear_gui_transition
     cp "$APPLY_CFG" "$SYSTEM_CFG" || return 1
+    record_observed_config || return 1
     reload_output="$STATE_DIR/softrestart.$$.log"
     : > "$reload_output"
     chmod 600 "$reload_output"
@@ -426,6 +480,10 @@ apply_config() {
     done
     wait "$reload_pid"
     reload_status=$?
+    record_observed_config || {
+        log_message "unable to record airOS configuration after reload"
+        return 1
+    }
     if ! "$SSH_KEY_INSTALLER"; then
         log_message "persistent SSH key restore failed after airOS reload"
         return 1
@@ -922,6 +980,79 @@ manual_transition_active() {
     return 1
 }
 
+handle_gui_transition() {
+    [ -f "$GUI_TRANSITION_FILE" ] && [ -f "$GUI_TARGET_FILE" ] || return 1
+
+    gui_target=$(sed -n '1p' "$GUI_TARGET_FILE" 2>/dev/null)
+    gui_start=$(sed -n '1p' "$GUI_TRANSITION_FILE" 2>/dev/null)
+    [ -n "$gui_target" ] || {
+        clear_gui_transition
+        return 1
+    }
+    gui_now=$(uptime_seconds)
+    [ -n "$gui_now" ] || gui_now=0
+    case $gui_start in
+        ''|*[!0-9]*)
+            gui_start=$gui_now
+            printf '%s\n' "$gui_start" > "$GUI_TRANSITION_FILE"
+            ;;
+    esac
+    gui_age=$((gui_now - gui_start))
+    if [ "$gui_age" -lt 0 ]; then
+        gui_age=0
+        printf '%s\n' "$gui_now" > "$GUI_TRANSITION_FILE"
+    fi
+
+    # Do not persist a stale target if airOS changes the configuration while
+    # this cron invocation is inspecting it. The next invocation will record
+    # the newer change and restart its grace window.
+    gui_configured=$(effective_ssid "$SYSTEM_CFG")
+    gui_current_digest=$(system_config_digest)
+    gui_observed_digest=$(sed -n '1p' "$OBSERVED_CONFIG_DIGEST_FILE" 2>/dev/null)
+    if [ "$gui_configured" != "$gui_target" ] || \
+        [ -z "$gui_current_digest" ] || \
+        [ "$gui_current_digest" != "$gui_observed_digest" ]; then
+        log_message "external airOS configuration changed again; deferring profile save"
+        return 0
+    fi
+
+    if link_is_target "$gui_target" && has_dhcp_and_route && internet_reachable; then
+        case $gui_target in
+            .*) gui_name_valid=no ;;
+            *) if profile_name_is_valid "$gui_target"; then gui_name_valid=yes; else gui_name_valid=no; fi ;;
+        esac
+        if [ "$gui_name_valid" != yes ]; then
+            clear_gui_transition
+            clear_failures
+            rm -f "$TRANSITION_FILE"
+            log_message "external airOS connection ready but SSID cannot be a profile name"
+            return 0
+        fi
+        if save_current_profile "$gui_target" gui; then
+            clear_gui_transition
+            clear_failures
+            rm -f "$TRANSITION_FILE"
+            log_message "external airOS connection saved target=$gui_target"
+            return 0
+        fi
+        log_message "external airOS connection ready but profile save failed target=$gui_target"
+    fi
+
+    if [ -f "$PAUSE_FILE" ]; then
+        log_message "external airOS transition protected target=$gui_target age=$gui_age paused=yes"
+        return 0
+    fi
+    if [ "$gui_age" -lt "$GUI_GRACE_SECONDS" ]; then
+        log_message "external airOS transition protected target=$gui_target age=$gui_age"
+        return 0
+    fi
+
+    clear_gui_transition
+    rm -f "$TRANSITION_FILE"
+    log_message "external airOS transition grace expired target=$gui_target age=$gui_age"
+    return 2
+}
+
 recover_after_failed_manual_switch() {
     failed_profile=$1
     failed_path="$PROFILE_DIR/$failed_profile"
@@ -1072,11 +1203,22 @@ auto_scan_due() {
 }
 
 auto_select() {
+    observe_external_config_change || true
+    gui_grace_expired=no
+    handle_gui_transition
+    gui_transition_status=$?
+    case $gui_transition_status in
+        0) return 0 ;;
+        2) gui_grace_expired=yes ;;
+    esac
+
     [ ! -f "$PAUSE_FILE" ] || {
         log_message "automatic selection paused"
         return 0
     }
-    manual_transition_active && return 0
+    if [ "$gui_grace_expired" != yes ]; then
+        manual_transition_active && return 0
+    fi
     auto_ssid=$(associated_ssid)
     auto_ccq=$(current_ccq)
     case $auto_ccq in
@@ -1114,6 +1256,7 @@ auto_select() {
 
 save_current_profile() {
     save_name=$1
+    save_source=${2:-explicit}
     profile_name_is_valid "$save_name" || return 1
     [ -f "$SYSTEM_CFG" ] || return 1
     mkdir -p "$PROFILE_DIR/.disabled"
@@ -1126,8 +1269,13 @@ save_current_profile() {
     cp "$SYSTEM_CFG" "$PROFILE_DIR/.new.$$.cfg" || return 1
     chmod 750 "$PROFILE_DIR/.new.$$.cfg"
     mv "$PROFILE_DIR/.new.$$.cfg" "$save_destination" || return 1
-    "$CFGMTD" -w -p /etc/
-    log_message "saved profile explicitly profile=$save_name"
+    "$CFGMTD" -w -p /etc/ || return 1
+    record_observed_config || return 1
+    if [ "$save_source" = explicit ]; then
+        clear_gui_transition
+        rm -f "$TRANSITION_FILE"
+    fi
+    log_message "saved profile source=$save_source profile=$save_name"
 }
 
 disable_profile() {

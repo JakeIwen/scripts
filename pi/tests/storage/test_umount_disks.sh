@@ -33,6 +33,43 @@ ud_reconcile_unmount_result hdd1tb /dev/sdz1 124 >/dev/null 2>&1 &&
 # Restore the production helper for any later integration assertions.
 ud_findmnt_source_targets() { /usr/bin/findmnt -rn -S "$1" -o TARGET; }
 
+# Only --all may accept a classified vanished udev mapping, and then only when
+# both the managed target and vanished source are absent from the mount table.
+DISK_POLICY_RESOLVE_REASON=vanished-udev-mapping
+DISK_POLICY_RESOLVE_ERROR="synthetic vanished udev mapping"
+ud_findmnt_exact_source() { return 1; }
+ud_findmnt_source_targets() { return 1; }
+ud_accept_vanished_label_for_all mbp2tbkup /dev/vanished-test-device \
+  >/dev/null 2>&1 || fail "fully unmounted vanished mapping was rejected"
+
+ud_findmnt_exact_source() { printf '%s\n' /dev/vanished-test-device; return 0; }
+if ud_accept_vanished_label_for_all mbp2tbkup /dev/vanished-test-device \
+    >/dev/null 2>&1; then
+  fail "vanished mapping was accepted while its managed target remained mounted"
+fi
+
+ud_findmnt_exact_source() { return 1; }
+ud_findmnt_source_targets() { printf '%s\n' /mnt/unexpected; return 0; }
+if ud_accept_vanished_label_for_all mbp2tbkup /dev/vanished-test-device \
+    >/dev/null 2>&1; then
+  fail "vanished mapping was accepted while its source remained mounted elsewhere"
+fi
+
+ud_findmnt_source_targets() { echo "synthetic mount discovery error" >&2; return 2; }
+if ud_accept_vanished_label_for_all mbp2tbkup /dev/vanished-test-device \
+    >/dev/null 2>&1; then
+  fail "vanished mapping was accepted after mount discovery failed"
+fi
+
+grep -Fq 'if (( all_labels )) &&' "$script" ||
+  fail "vanished mapping recovery is not gated by --all"
+grep -Fq 'ud_accept_vanished_label_for_all' "$script" ||
+  fail "--all does not invoke the guarded vanished-mapping check"
+
+# Restore production helpers for later assertions.
+ud_findmnt_source_targets() { /usr/bin/findmnt -rn -S "$1" -o TARGET; }
+ud_findmnt_exact_source() { /usr/bin/findmnt -rn -M "$1" -o SOURCE; }
+
 umount_disks_main --emergency >/dev/null 2>&1
 [[ $? == 2 ]] ||
   fail "emergency mode was accepted without --spindown"

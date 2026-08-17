@@ -2666,6 +2666,7 @@ body.busy [data-action] {
 }
 .backup-card-running-note {
   width: fit-content;
+  max-width: 100%;
   border: 1px solid #397486;
   border-radius: 999px;
   background: #19343e;
@@ -2674,7 +2675,29 @@ body.busy [data-action] {
   font-size: 8px !important;
   font-weight: 750;
   letter-spacing: 0.04em;
+  line-height: 1.35;
   text-transform: uppercase;
+}
+.backup-card-running-note[hidden],
+.backup-linear-progress[hidden] {
+  display: none;
+}
+.backup-linear-progress {
+  display: block;
+  width: 100%;
+  height: 4px;
+  margin-top: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #283943;
+}
+.backup-linear-progress > span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: #66c7da;
+  transition: width 300ms ease;
 }
 .backup-card-detail-stack {
   position: relative;

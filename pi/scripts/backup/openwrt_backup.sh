@@ -3,6 +3,7 @@
 # snapshot is replaced atomically; any failure leaves it untouched.
 set -euo pipefail
 . /home/pi/scripts/backup/backup_conf.sh
+. /home/pi/scripts/backup/progress.sh
 
 log() { echo "[$(date '+%F %T')] openwrt backup: $*"; }
 fail() { log "ERROR: $1" >&2; exit 1; }
@@ -28,6 +29,7 @@ esac
 
 child=
 cleanup() {
+	backup_progress_end
 	/bin/rm -f "$incoming"
 	/bin/rm -f \
 		"$verify_dir/dendelion-sysupgrade.tar.gz" \
@@ -45,6 +47,7 @@ interrupted() {
 trap cleanup EXIT
 trap interrupted HUP INT TERM
 
+backup_progress_begin openwrt exporting "Exporting the recovery bundle from dendelion" || true
 /usr/bin/timeout --signal=TERM --kill-after=5s 90s \
 	/usr/bin/ssh \
 		-T \
@@ -69,6 +72,7 @@ else
 fi
 [ -s "$incoming" ] || fail "router returned an empty backup"
 
+backup_progress_update validating "Validating checksums, contents, and router identity" || true
 actual_members=$(/usr/bin/tar -tzf "$incoming" | LC_ALL=C /usr/bin/sort) \
 	|| fail "outer backup archive is unreadable"
 expected_members=$(printf '%s\n' \
@@ -129,6 +133,7 @@ for required_path in \
 		|| fail "nested archive is missing required path: $required_path"
 done
 
+backup_progress_update publishing "Publishing the verified recovery bundle" || true
 /bin/chmod 0600 "$incoming"
 /bin/mv -f "$incoming" "$OPENWRT_SNAPSHOT_FILE"
 /bin/date '+%F %T' > "$OPENWRT_BACKUP_STAMP"

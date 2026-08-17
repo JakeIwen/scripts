@@ -36,6 +36,7 @@ run_backup() {
   TEST_POLICY_CALLS="$policy_calls" \
     PI_BACKUP_CONF="$fake_conf" \
     PI_BACKUP_POLICYCTL="$fake_policyctl" \
+    PI_BACKUP_PROGRESS_HELPER="$repo_root/pi/scripts/backup/progress.sh" \
     bash "$backup_script" "$@"
 }
 

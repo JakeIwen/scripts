@@ -66,6 +66,7 @@ export UBNT_IP_CMD="$test_root/bin/ip"
 export UBNT_PING="$test_root/bin/ping"
 export UBNT_SOFTRESTART="$test_root/bin/softrestart"
 export UBNT_CFGMTD="$test_root/bin/cfgmtd"
+export UBNT_MD5SUM=/sbin/md5sum
 export UBNT_SSH_KEY_INSTALLER="$test_root/bin/ensure_ssh_keys"
 export UBNT_SSH_KEY_SOURCE="$test_root/persistent_keys"
 export UBNT_AUTHORIZED_KEYS="$test_root/authorized_keys"
@@ -88,19 +89,52 @@ grep -q 'requested profile already ready profile=A Network With Spaces' "$test_r
 
 "$manager" auto >/dev/null
 grep -q 'current connection healthy ssid=A Network With Spaces' "$test_root/wifi.log"
+profile_hash_after_auto=$(md5 -q "$profile" 2>/dev/null || md5sum "$profile" | awk '{print $1}')
+[ "$profile_hash_before" = "$profile_hash_after_auto" ]
 healthy_lines_before=$(wc -l < "$test_root/wifi.log")
 "$manager" auto >/dev/null
 healthy_lines_after=$(wc -l < "$test_root/wifi.log")
 [ "$healthy_lines_before" -eq "$healthy_lines_after" ]
 
+# A native airOS GUI Apply is detected from the system configuration digest.
+# While it is stabilizing, the old association must not trigger a roaming scan.
 printf '%s\n' \
     'wireless.1.ssid=manual-target' \
     'wpasupplicant.status=disabled' \
     'wpasupplicant.device.1.status=disabled' > "$test_root/system.cfg"
 printf 'old-network\n' > "$test_root/associated"
-rm -f "$test_root/state/transition_started"
+scan_count_before_gui=$(sed -n '1p' "$MOCK_IWLIST_COUNT_FILE")
 "$manager" auto >/dev/null
-grep -q 'manual/config transition protected target=manual-target' "$test_root/wifi.log"
+grep -q 'external airOS configuration detected target=manual-target' "$test_root/wifi.log"
+grep -q 'external airOS transition protected target=manual-target' "$test_root/wifi.log"
+[ "$(sed -n '1p' "$MOCK_IWLIST_COUNT_FILE")" -eq "$scan_count_before_gui" ]
+[ "$(sed -n '1p' "$test_root/associated")" = old-network ]
+[ ! -e "$test_root/profiles/manual-target" ]
+
+# The GUI configuration becomes a persistent profile only after the target is
+# associated and the mocked DHCP, default-route, and Internet checks pass.
+printf 'manual-target\n' > "$test_root/associated"
+"$manager" auto >/dev/null
+[ -f "$test_root/profiles/manual-target" ]
+grep -q '^wireless.1.ssid=manual-target$' "$test_root/profiles/manual-target"
+grep -q 'saved profile source=gui profile=manual-target' "$test_root/wifi.log"
+grep -q 'external airOS connection saved target=manual-target' "$test_root/wifi.log"
+[ ! -e "$test_root/state/gui-transition-started" ]
+[ ! -e "$test_root/state/gui-transition-target" ]
+
+# Expiry does not accidentally start the older 120-second generic transition
+# window. The prior healthy association is eligible immediately after expiry.
+printf '%s\n' \
+    'wireless.1.ssid=expired-target' \
+    'wpasupplicant.status=disabled' \
+    'wpasupplicant.device.1.status=disabled' > "$test_root/system.cfg"
+printf 'old-network\n' > "$test_root/associated"
+export UBNT_GUI_GRACE_SECONDS=0
+"$manager" auto >/dev/null
+unset UBNT_GUI_GRACE_SECONDS
+grep -q 'external airOS transition grace expired target=expired-target' "$test_root/wifi.log"
+[ ! -e "$test_root/state/transition_started" ]
+[ ! -e "$test_root/state/gui-transition-started" ]
 
 export UBNT_MAX_LOG_BYTES=100
 export UBNT_LOG_KEEP_LINES=2

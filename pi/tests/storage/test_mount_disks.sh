@@ -56,6 +56,10 @@ if [[ -L "$3" ]]; then
 else
   target=$3
 fi
+if [[ "$target" == /dev/vanished-test-device ]]; then
+  printf '%s\n' "$target"
+  exit 0
+fi
 [[ -e "$target" ]] || exit 1
 printf '%s\n' "$target"
 EOF
@@ -154,6 +158,23 @@ if (( status == 0 )); then
   fail "broken udev label symlink was accepted"
 fi
 assert_eq 2 "$status" "broken udev mapping did not fail closed"
+
+# A dead USB controller can leave a by-label link after its /dev node and live
+# udev record have vanished. The resolver must still fail by default, while
+# classifying this exact state for the guarded --all shutdown path.
+ln -s /dev/vanished-test-device "$label_dir/vanished"
+DISK_POLICY_REQUIRE_BLOCK_DEVICE=1
+disk_policy_resolve_exact_label vanished label-only
+status=$?
+if (( status == 0 )); then
+  fail "vanished udev mapping was accepted by the general resolver"
+fi
+assert_eq 2 "$status" "vanished udev mapping did not remain fail-closed"
+assert_eq vanished-udev-mapping "$DISK_POLICY_RESOLVE_REASON" \
+  "vanished udev mapping did not expose its guarded recovery reason"
+assert_eq /dev/vanished-test-device "$DISK_POLICY_VANISHED_DEVICE" \
+  "vanished udev mapping exposed the wrong device"
+DISK_POLICY_REQUIRE_BLOCK_DEVICE=0
 
 DISK_POLICY_BY_LABEL_DIR=$original_by_label_dir
 DISK_POLICY_BY_PARTLABEL_DIR=$original_by_partlabel_dir

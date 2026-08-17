@@ -305,6 +305,7 @@
         <span class="backup-card-content">
           <strong id="backup-exfat-title">EXFAT512 snapshots</strong>
           <small class="backup-card-running-note" id="backup-exfat-running" hidden>Snapshot in progress</small>
+          <span class="backup-linear-progress" id="backup-exfat-progress" role="progressbar" aria-label="EXFAT512 snapshot progress" aria-valuemin="0" aria-valuemax="100" hidden><span id="backup-exfat-progress-fill"></span></span>
           <span class="backup-card-detail-stack">
             <small class="backup-card-current-detail" id="backup-exfat-detail">Checking last success…</small>
             <small class="backup-card-hover-detail" id="backup-exfat-action-detail">Mounts hdd1tb, snapshots EXFAT512 with hard links, applies retention, then unmounts and spins down.</small>
@@ -312,8 +313,8 @@
           <button id="backup-run-exfat" data-action aria-describedby="backup-exfat-action-detail" disabled>Snapshot EXFAT512</button>
         </span>
       </section>
-      <section class="backup-overview-card" aria-labelledby="backup-openwrt-title"><span class="backup-state-dot" id="backup-openwrt-dot"></span><span class="backup-card-content"><strong id="backup-openwrt-title">OpenWrt recovery bundle</strong><small id="backup-openwrt-detail">Checking verified snapshot…</small></span></section>
-      <section class="backup-overview-card" aria-labelledby="backup-tm-title"><span class="backup-state-dot" id="backup-tm-dot"></span><span class="backup-card-content"><strong id="backup-tm-title">m4mac Time Machine</strong><small class="backup-card-running-note" id="backup-tm-running" hidden>Backup in progress</small><small id="backup-tm-detail">Checking snapshot history…</small></span></section>
+      <section class="backup-overview-card" aria-labelledby="backup-openwrt-title"><span class="backup-state-dot" id="backup-openwrt-dot"></span><span class="backup-card-content"><strong id="backup-openwrt-title">OpenWrt recovery bundle</strong><small class="backup-card-running-note" id="backup-openwrt-running" hidden>Backup in progress</small><small id="backup-openwrt-detail">Checking verified snapshot…</small></span></section>
+      <section class="backup-overview-card" aria-labelledby="backup-tm-title"><span class="backup-state-dot" id="backup-tm-dot"></span><span class="backup-card-content"><strong id="backup-tm-title">m4mac Time Machine</strong><small class="backup-card-running-note" id="backup-tm-running" hidden>Backup in progress</small><span class="backup-linear-progress" id="backup-tm-progress-bar" role="progressbar" aria-label="Time Machine backup progress" aria-valuemin="0" aria-valuemax="100" hidden><span id="backup-tm-progress-fill"></span></span><small id="backup-tm-detail">Checking snapshot history…</small></span></section>
     </div>
     <section class="backup-section" aria-labelledby="backup-hotswap-title">
       <div class="monitor-section-head"><div><h3 id="backup-hotswap-title">Bootable Pi hotspares</h3><p>Each date is the last successful clone recorded for that labeled card.</p></div></div>

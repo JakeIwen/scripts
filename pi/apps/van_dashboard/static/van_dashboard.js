@@ -1039,18 +1039,30 @@ async function recoverUsb2() {
     usbPortBusy = false;
   }
 }
+function renderBackupProgressBar(id, fillId, percent) {
+  const bar = $(id),
+    available = Number.isFinite(percent),
+    bounded = available ? Math.max(0, Math.min(100, percent)) : 0;
+  bar.hidden = !available;
+  bar.setAttribute('aria-valuenow', available ? String(bounded) : '0');
+  $(fillId).style.width = `${bounded}%`;
+}
 function renderBackups(response) {
   const state = response.backups,
     borg = state.borg || {},
     exfat = state.exfat_snapshot || {},
     openwrt = state.openwrt || {},
     tm = state.time_machine || {},
+    borgProgress = borg.progress || {},
+    exfatProgress = exfat.progress || {},
+    openwrtProgress = openwrt.progress || {},
     operation = state.operation || { status: 'idle' },
     operationKind = operation.kind || (operation.target ? 'clone' : null),
     operationRunning = operation.status === 'running',
     borgRunning = borg.running === true || (operationRunning && operationKind === 'borg'),
     exfatRunning = exfat.running === true || (operationRunning && operationKind === 'exfat'),
-    backupRuntimeBusy = borgRunning || exfatRunning,
+    openwrtRunning = openwrt.running === true,
+    backupRuntimeBusy = borgRunning || exfatRunning || openwrtRunning,
     tile = $('backups'),
     pill = $('backup-pill');
   backupState = state;
@@ -1084,9 +1096,13 @@ function renderBackups(response) {
     ? `Backing up${Number.isFinite(tm.progress_percent) ? ` · ${tm.progress_percent}%` : ''}`
     : macLabel;
   if (borgRunning) {
-    $('backup-summary').textContent = 'Creating a new vanpi Borg backup…';
+    $('backup-summary').textContent = borgProgress.detail
+      ? `Vanpi backup: ${borgProgress.detail}`
+      : 'Creating a new vanpi Borg backup…';
   } else if (exfatRunning) {
-    $('backup-summary').textContent = 'Creating an EXFAT512 safety snapshot…';
+    $('backup-summary').textContent = exfatProgress.detail
+      ? `EXFAT512 snapshot: ${exfatProgress.detail}`
+      : 'Creating an EXFAT512 safety snapshot…';
   } else if (operationRunning) {
     $('backup-summary').textContent = `Cloning vanpi to ${operation.target}…`;
   } else if (tm.running) {
@@ -1098,17 +1114,32 @@ function renderBackups(response) {
   const borgDot = $('backup-borg-dot');
   borgDot.className = `backup-state-dot ${borgRunning ? 'running' : borg.stale ? 'bad' : 'good'}`;
   $('backup-borg-running').hidden = !borgRunning;
+  $('backup-borg-running').textContent = borgProgress.detail
+    ? `In progress · ${borgProgress.detail}`
+    : 'Backup in progress';
   $('backup-borg-detail').textContent = Number.isFinite(borg.last_success_at)
     ? `Last successful archive ${eventTime(borg.last_success_at)} (${backupAge(borg.last_success_at)})`
     : 'No successful Borg archive is recorded';
   const exfatDot = $('backup-exfat-dot');
   exfatDot.className = `backup-state-dot ${exfatRunning ? 'running' : exfat.stale ? 'bad' : 'good'}`;
   $('backup-exfat-running').hidden = !exfatRunning;
+  $('backup-exfat-running').textContent = exfatProgress.detail
+    ? `${exfatProgress.detail}${Number.isFinite(exfatProgress.progress_percent) ? ` · ${exfatProgress.progress_percent}%` : ''}${Number.isFinite(exfatProgress.bytes_processed) ? ` · ${formatBytes(exfatProgress.bytes_processed)}` : ''}`
+    : 'Snapshot in progress';
+  renderBackupProgressBar(
+    'backup-exfat-progress',
+    'backup-exfat-progress-fill',
+    exfatRunning ? exfatProgress.progress_percent : null,
+  );
   $('backup-exfat-detail').textContent = Number.isFinite(exfat.last_success_at)
     ? `Last completed ${eventTime(exfat.last_success_at)} (${backupAge(exfat.last_success_at)})`
     : 'No successful EXFAT512 snapshot is recorded';
   const openwrtDot = $('backup-openwrt-dot');
-  openwrtDot.className = `backup-state-dot ${openwrt.stale === false ? 'good' : 'bad'}`;
+  openwrtDot.className = `backup-state-dot ${openwrtRunning ? 'running' : openwrt.stale === false ? 'good' : 'bad'}`;
+  $('backup-openwrt-running').hidden = !openwrtRunning;
+  $('backup-openwrt-running').textContent = openwrtProgress.detail
+    ? `In progress · ${openwrtProgress.detail}`
+    : 'Backup in progress';
   $('backup-openwrt-detail').textContent = Number.isFinite(openwrt.last_success_at)
     ? `Last verified ${eventTime(openwrt.last_success_at)} (${backupAge(openwrt.last_success_at)})`
     : 'No verified OpenWrt snapshot is recorded';
@@ -1118,6 +1149,11 @@ function renderBackups(response) {
   $('backup-tm-running').textContent = Number.isFinite(tm.progress_percent)
     ? `Backup in progress · ${tm.progress_percent}%`
     : 'Backup in progress';
+  renderBackupProgressBar(
+    'backup-tm-progress-bar',
+    'backup-tm-progress-fill',
+    tm.running ? tm.progress_percent : null,
+  );
   $('backup-tm-detail').textContent = Number.isFinite(tm.last_backup_at)
     ? `Last completed ${eventTime(tm.last_backup_at)} (${backupAge(tm.last_backup_at)})`
     : tm.error || 'No completed snapshots found';
@@ -1215,6 +1251,12 @@ function renderBackupsUnavailable(message) {
   $('backup-status').textContent = 'Unavailable';
   $('backup-run-borg').disabled = true;
   $('backup-run-exfat').disabled = true;
+  $('backup-borg-running').hidden = true;
+  $('backup-exfat-running').hidden = true;
+  $('backup-openwrt-running').hidden = true;
+  $('backup-tm-running').hidden = true;
+  renderBackupProgressBar('backup-exfat-progress', 'backup-exfat-progress-fill', null);
+  renderBackupProgressBar('backup-tm-progress-bar', 'backup-tm-progress-fill', null);
   $('backup-panel').setAttribute('aria-busy', 'false');
 }
 async function refreshBackups(showErrors = false) {
@@ -3710,7 +3752,7 @@ async function pollBackups() {
   } catch (_) {
     /* rendered by refreshBackups */
   } finally {
-    const delay = backupState?.operation?.status === 'running' ? 2500 : 10000;
+    const delay = backupState?.health === 'running' ? 2500 : 10000;
     backupPoll = setTimeout(pollBackups, delay);
   }
 }
