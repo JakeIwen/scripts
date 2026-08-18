@@ -39,6 +39,7 @@ let dashboard = null,
   backupBusy = false,
   ignitionMonitorBusy = false,
   systemPowerBusy = false,
+  dashboardRestartBusy = false,
   voltageCheckBusy = false,
   busy = false,
   tileEditing = false,
@@ -54,6 +55,7 @@ let dashboard = null,
   ignitionMonitorPoll = 0,
   openwrtPoll = 0,
   systemPowerPoll = 0,
+  dashboardRestartPoll = 0,
   ubntPoll = 0,
   ubntLastCompletion = '',
   backupLastCompletion = '',
@@ -232,6 +234,50 @@ async function requestSystemPower(action) {
     if (!accepted) {
       setSystemPowerButtonsDisabled(false);
     }
+  }
+}
+async function pollDashboardRestart(startedAt, sawOffline = false) {
+  clearTimeout(dashboardRestartPoll);
+  const elapsed = Date.now() - startedAt;
+  try {
+    await json('/api/status');
+    if (sawOffline || elapsed >= 12000) {
+      dashboardRestartBusy = false;
+      $('dashboard-restart').disabled = false;
+      toast('Dashboard service restarted');
+      await refresh();
+      return;
+    }
+  } catch (_) {
+    sawOffline = true;
+  }
+  if (elapsed >= 45000) {
+    dashboardRestartBusy = false;
+    $('dashboard-restart').disabled = false;
+    toast('Dashboard did not return after restart', true);
+    return;
+  }
+  dashboardRestartPoll = setTimeout(
+    () => pollDashboardRestart(startedAt, sawOffline),
+    750,
+  );
+}
+async function requestDashboardRestart() {
+  if (dashboardRestartBusy) return;
+  if (!window.confirm('Restart the dashboard service now?\n\nVanpi and its other services will stay running.'))
+    return;
+  dashboardRestartBusy = true;
+  $('dashboard-restart').disabled = true;
+  try {
+    const result = await post('dashboard-service/restart', {
+      confirmation: 'restart-dashboard',
+    });
+    toast(result.message);
+    dashboardRestartPoll = setTimeout(() => pollDashboardRestart(Date.now()), 750);
+  } catch (error) {
+    dashboardRestartBusy = false;
+    $('dashboard-restart').disabled = false;
+    toast(error.message, true);
   }
 }
 function age(ts) {
@@ -3895,6 +3941,7 @@ $('starlink').addEventListener('click', () => {
 document.querySelectorAll('[data-system-power]').forEach((button) => {
   button.addEventListener('click', () => requestSystemPower(button.dataset.systemPower));
 });
+$('dashboard-restart').addEventListener('click', requestDashboardRestart);
 $('openwrt-open').addEventListener('click', openOpenwrt);
 $('openwrt-close').addEventListener('click', closeOpenwrt);
 $('openwrt-clients-refresh').addEventListener('click', () =>

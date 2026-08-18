@@ -177,6 +177,13 @@ IGNITIONMONCTL = os.environ.get(
     "VAN_DASHBOARD_IGNITIONMONCTL", "/home/pi/scripts/ignitionmonctl"
 )
 SYSTEMCTL = os.environ.get("VAN_DASHBOARD_SYSTEMCTL", "/usr/bin/systemctl")
+SYSTEMD_RUN = os.environ.get("VAN_DASHBOARD_SYSTEMD_RUN", "/usr/bin/systemd-run")
+DASHBOARD_SERVICE = os.environ.get(
+    "VAN_DASHBOARD_SERVICE", "van-dashboard.service"
+)
+DASHBOARD_RESTART_TIMEOUT = float(
+    os.environ.get("VAN_DASHBOARD_RESTART_TIMEOUT", "8")
+)
 IGNITIONMON_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_IGNITIONMON_TIMEOUT", "8"))
 IGNITIONMON_MAX_MINUTES = 366 * 24 * 60
 DISK_POLICY_CONF = os.environ.get(
@@ -4535,6 +4542,64 @@ class SystemPowerError(RuntimeError):
     pass
 
 
+class DashboardRestartError(RuntimeError):
+    pass
+
+
+class DashboardRestartController:
+    """Schedule a fixed dashboard-only restart after the HTTP response returns."""
+
+    def __init__(
+        self,
+        sudo=SUDO,
+        systemd_run=SYSTEMD_RUN,
+        systemctl=SYSTEMCTL,
+        service=DASHBOARD_SERVICE,
+        command=run_command,
+        timeout=DASHBOARD_RESTART_TIMEOUT,
+        wall_clock=time.time,
+    ):
+        self.sudo = sudo
+        self.systemd_run = systemd_run
+        self.systemctl = systemctl
+        self.service = service
+        self.command = command
+        self.timeout = timeout
+        self.wall_clock = wall_clock
+
+    def restart(self):
+        scheduled_at = int(self.wall_clock())
+        unit = f"van-dashboard-web-restart-{os.getpid()}-{scheduled_at}"
+        args = [
+            self.sudo,
+            "-n",
+            self.systemd_run,
+            "--quiet",
+            "--collect",
+            f"--unit={unit}",
+            "--on-active=1s",
+            self.systemctl,
+            "restart",
+            self.service,
+        ]
+        try:
+            result = self.command(args, timeout=self.timeout)
+        except subprocess.TimeoutExpired as exc:
+            raise DashboardRestartError(
+                f"dashboard restart scheduling timed out after {self.timeout:g} seconds"
+            ) from exc
+        except OSError as exc:
+            raise DashboardRestartError(
+                f"could not schedule dashboard restart: {exc}"
+            ) from exc
+        if result.returncode:
+            detail = (
+                result.stderr or result.stdout or "systemd rejected the restart"
+            ).strip()[-500:]
+            raise DashboardRestartError(detail)
+        return {"scheduled_at": scheduled_at}
+
+
 def read_system_uptime(path=PROC_UPTIME, wall_clock=time.time):
     try:
         with open(path, encoding="utf-8") as handle:
@@ -4853,6 +4918,7 @@ backups = BackupManager()
 ignition_monitor_control = IgnitionMonitorController()
 disk_manager = DiskManager()
 system_power = SystemPowerController()
+dashboard_restart = DashboardRestartController()
 telemetry_summary = TelemetrySummaryReader()
 voltage_check = VoltageCheckManager()
 
@@ -5066,6 +5132,28 @@ def api_system_power():
             "ok": True,
             "message": f"{label} started; safely unmounting disks first",
             "system_power": status,
+        }
+    )
+    response.status_code = 202
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.post("/api/dashboard-service/restart")
+def api_dashboard_service_restart():
+    if not _exact_form(("confirmation",)):
+        return api_error("dashboard restart requires confirmation", 400)
+    if request.form["confirmation"] != "restart-dashboard":
+        return api_error("dashboard restart was not confirmed", 400)
+    try:
+        scheduled = dashboard_restart.restart()
+    except DashboardRestartError as exc:
+        return api_error(f"could not restart dashboard service: {exc}", 409)
+    response = jsonify(
+        {
+            "ok": True,
+            "message": "Dashboard service restart scheduled",
+            "dashboard_restart": scheduled,
         }
     )
     response.status_code = 202

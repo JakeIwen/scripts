@@ -1722,6 +1722,69 @@ class SystemPowerControllerTests(unittest.TestCase):
                 self.assertIn(expected, operation["error"])
 
 
+class DashboardRestartControllerTests(unittest.TestCase):
+    def test_schedules_only_the_fixed_dashboard_service_restart(self):
+        calls = []
+
+        def command(args, timeout):
+            calls.append((list(args), timeout))
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        controller = dashboard.DashboardRestartController(
+            sudo="/test/sudo",
+            systemd_run="/test/systemd-run",
+            systemctl="/test/systemctl",
+            service="test-dashboard.service",
+            command=command,
+            timeout=7,
+            wall_clock=FakeClock(1000),
+        )
+        result = controller.restart()
+
+        self.assertEqual(result, {"scheduled_at": 1000})
+        self.assertEqual(len(calls), 1)
+        args, timeout = calls[0]
+        self.assertEqual(timeout, 7)
+        self.assertEqual(args[:5], [
+            "/test/sudo",
+            "-n",
+            "/test/systemd-run",
+            "--quiet",
+            "--collect",
+        ])
+        self.assertRegex(args[5], r"^--unit=van-dashboard-web-restart-\d+-1000$")
+        self.assertEqual(
+            args[6:],
+            [
+                "--on-active=1s",
+                "/test/systemctl",
+                "restart",
+                "test-dashboard.service",
+            ],
+        )
+
+    def test_reports_scheduler_failure_and_timeout(self):
+        for failure, expected in (
+            ("failure", "scheduler failed"),
+            ("timeout", "timed out after 4 seconds"),
+        ):
+            with self.subTest(failure=failure):
+                def command(args, timeout):
+                    if failure == "timeout":
+                        raise subprocess.TimeoutExpired(args, timeout)
+                    return SimpleNamespace(
+                        returncode=1, stdout="", stderr="scheduler failed"
+                    )
+
+                controller = dashboard.DashboardRestartController(
+                    command=command, timeout=4
+                )
+                with self.assertRaisesRegex(
+                    dashboard.DashboardRestartError, expected
+                ):
+                    controller.restart()
+
+
 class TelemetrySummaryReaderTests(unittest.TestCase):
     @staticmethod
     def opener(payload, calls):
@@ -3446,6 +3509,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'aria-label="Edit tile positions"', page.data)
         self.assertIn(b'id="system-reboot"', page.data)
         self.assertIn(b'id="system-power-down"', page.data)
+        self.assertIn(b'id="dashboard-restart"', page.data)
         self.assertIn(b'id="system-uptime"', page.data)
         self.assertIn(b'data-system-power="reboot"', page.data)
         self.assertIn(b'data-system-power="power-down"', page.data)
@@ -3559,6 +3623,8 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"window.confirm(", javascript.data)
         self.assertIn(b"system-power", javascript.data)
         self.assertIn(b"confirmation: action", javascript.data)
+        self.assertIn(b"function requestDashboardRestart()", javascript.data)
+        self.assertIn(b"post('dashboard-service/restart'", javascript.data)
         self.assertIn(b"function renderLighting(next)", javascript.data)
         self.assertIn(b"function renderPriceChecks(response)", javascript.data)
         self.assertIn(b"function renderSystemMonitor(response)", javascript.data)
@@ -4727,6 +4793,55 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(extra.status_code, 400)
         self.assertEqual(cross_origin.status_code, 403)
         self.assertEqual(calls, ["reboot"])
+
+    def test_dashboard_restart_route_is_fixed_confirmed_and_csrf_protected(self):
+        calls = []
+
+        class FakeDashboardRestart:
+            def restart(self):
+                calls.append("restart")
+                return {"scheduled_at": 123}
+
+        original = dashboard.dashboard_restart
+        dashboard.dashboard_restart = FakeDashboardRestart()
+        try:
+            client = dashboard.app.test_client()
+            accepted = client.post(
+                "/api/dashboard-service/restart",
+                data={"confirmation": "restart-dashboard"},
+                headers={"X-Van-Dashboard": "1"},
+            )
+            unconfirmed = client.post(
+                "/api/dashboard-service/restart",
+                data={"confirmation": "no"},
+                headers={"X-Van-Dashboard": "1"},
+            )
+            extra = client.post(
+                "/api/dashboard-service/restart",
+                data={"confirmation": "restart-dashboard", "service": "anything"},
+                headers={"X-Van-Dashboard": "1"},
+            )
+            cross_origin = client.post(
+                "/api/dashboard-service/restart",
+                data={"confirmation": "restart-dashboard"},
+                headers={
+                    "X-Van-Dashboard": "1",
+                    "Origin": "https://example.invalid",
+                },
+            )
+        finally:
+            dashboard.dashboard_restart = original
+
+        self.assertEqual(accepted.status_code, 202)
+        self.assertEqual(accepted.headers["Cache-Control"], "no-store")
+        self.assertEqual(
+            accepted.json["message"], "Dashboard service restart scheduled"
+        )
+        self.assertEqual(accepted.json["dashboard_restart"], {"scheduled_at": 123})
+        self.assertEqual(unconfirmed.status_code, 400)
+        self.assertEqual(extra.status_code, 400)
+        self.assertEqual(cross_origin.status_code, 403)
+        self.assertEqual(calls, ["restart"])
 
     def test_telemetry_summary_route_is_read_only_and_uncached(self):
         class FakeTelemetrySummary:
