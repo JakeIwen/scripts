@@ -3075,7 +3075,11 @@ body.busy [data-action] {
   font-size: 9px;
   text-align: right;
 }
-.usb-recover-button {
+.usb-section-buttons {
+  display: flex;
+  gap: 5px;
+}
+.usb-control-button {
   border: 1px solid #42606e;
   border-radius: 8px;
   background: #263b47;
@@ -3085,7 +3089,7 @@ body.busy [data-action] {
   font-weight: 760;
   cursor: pointer;
 }
-.usb-recover-button:disabled {
+.usb-control-button:disabled {
   cursor: default;
   opacity: 0.4;
 }

@@ -119,6 +119,9 @@ UHUBCTL = os.environ.get("VAN_DASHBOARD_UHUBCTL", "/usr/sbin/uhubctl")
 SUDO = os.environ.get("VAN_DASHBOARD_SUDO", "/usr/bin/sudo")
 TEE = os.environ.get("VAN_DASHBOARD_TEE", "/usr/bin/tee")
 USB_PORT_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_USB_PORT_TIMEOUT", "15"))
+USB_PORT_SNAPSHOT_TTL = float(
+    os.environ.get("VAN_DASHBOARD_USB_PORT_SNAPSHOT_TTL", "300")
+)
 USB2_RECOVERY_TIMEOUT = float(
     os.environ.get("VAN_DASHBOARD_USB2_RECOVERY_TIMEOUT", "30")
 )
@@ -2499,7 +2502,13 @@ def parse_uhubctl_status(output):
 
 
 class UsbPortController:
-    """Discover USB hub ports and run only previously discovered fixed actions."""
+    """Explicitly discover USB hub ports and run fixed, serialized actions.
+
+    Passive dashboard status must use :meth:`snapshot`; only an explicit control
+    request may call :meth:`discover`.  ``command_lock`` keeps every uhubctl
+    status/action and the USB 2 recovery helper single-flight across Flask
+    request threads.
+    """
 
     ACTIONS = {"off", "on", "cycle"}
 
@@ -2512,6 +2521,7 @@ class UsbPortController:
         dev_root="/dev",
         mounts_path="/proc/self/mounts",
         timeout=USB_PORT_TIMEOUT,
+        snapshot_ttl=USB_PORT_SNAPSHOT_TTL,
         recovery_timeout=USB2_RECOVERY_TIMEOUT,
         wall_clock=time.time,
         sleeper=time.sleep,
@@ -2523,13 +2533,17 @@ class UsbPortController:
         self.dev_root = dev_root
         self.mounts_path = mounts_path
         self.timeout = timeout
+        self.snapshot_ttl = snapshot_ttl
         self.recovery_timeout = recovery_timeout
         self.wall_clock = wall_clock
         self.sleeper = sleeper
         self.lock = threading.RLock()
+        self.command_lock = threading.Lock()
         self.targets = {}
         self.data = {
+            "loaded": False,
             "checked_at": None,
+            "expires_at": None,
             "last_error": None,
             "hubs": [],
             "operation": {"status": "idle"},
@@ -2733,6 +2747,7 @@ class UsbPortController:
                             ],
                             "storage_labels": storage_labels,
                             "mounted_labels": mounted_labels,
+                            "topology_locations": merged["topology_locations"],
                         }
                     )
 
@@ -2771,7 +2786,7 @@ class UsbPortController:
             )
         return presented
 
-    def refresh(self, usb_state=None):
+    def _discover_unlocked(self, usb_state=None):
         usb_state = usb_state or self.device_monitor.refresh()
         error = None
         smart_hubs = {}
@@ -2855,6 +2870,7 @@ class UsbPortController:
                 "downstream_device_count": len(downstream),
                 "storage_labels": labels,
                 "mounted_labels": mounted_labels,
+                "topology_locations": [f"{location}:{port}"],
             }
             hubs.setdefault(
                 location,
@@ -2877,76 +2893,136 @@ class UsbPortController:
             self.targets = targets
             self.data.update(
                 {
+                    "loaded": True,
                     "checked_at": now,
+                    "expires_at": now + int(self.snapshot_ttl),
                     "last_error": error,
                     "hubs": presented_hubs,
                 }
             )
             return copy.deepcopy(self.data)
 
+    def discover(self):
+        """Run one explicit uhubctl status request and cache its fixed targets."""
+        with self.command_lock:
+            with self.lock:
+                if self.data["operation"].get("status") == "running":
+                    raise RuntimeError("another USB port action is already running")
+            return self._discover_unlocked()
+
     def snapshot(self):
         with self.lock:
-            return copy.deepcopy(self.data)
+            data = copy.deepcopy(self.data)
+        data["expired"] = bool(
+            data.get("loaded")
+            and data.get("expires_at") is not None
+            and self.wall_clock() >= data["expires_at"]
+        )
+        return data
+
+    def _live_mounted_labels(self, target, usb_state):
+        instances = self._instances(usb_state)
+        labels = set()
+        topology_locations = target.get("topology_locations") or [
+            f"{target['location']}:{target['port']}"
+        ]
+        for topology_location in topology_locations:
+            location, raw_port = topology_location.rsplit(":", 1)
+            child = self._child_location(location, int(raw_port))
+            labels.update(
+                label
+                for instance in instances
+                if instance["location"] == child
+                or instance["location"].startswith(child + ".")
+                for label in instance.get("labels", ())
+            )
+        return self._mounted_labels(labels)
+
+    def _invalidate_controls_locked(self):
+        self.targets = {}
+        self.data.update(
+            {
+                "loaded": False,
+                "checked_at": None,
+                "expires_at": None,
+                "last_error": None,
+                "hubs": [],
+            }
+        )
 
     def start_action(self, key, action):
         if not isinstance(key, str) or not USB_PORT_KEY_RE.fullmatch(key):
             raise ValueError("unknown USB port")
         if action not in self.ACTIONS:
             raise ValueError("USB port action must be on, off, or cycle")
-        self.refresh()
-        with self.lock:
-            if self.data["operation"].get("status") == "running":
-                raise RuntimeError("another USB port action is already running")
-            target = self.targets.get(key)
+        with self.command_lock:
+            with self.lock:
+                if self.data["operation"].get("status") == "running":
+                    raise RuntimeError("another USB port action is already running")
+                if not self.data.get("loaded"):
+                    raise RuntimeError("load USB port controls before requesting an action")
+                if self.data.get("last_error"):
+                    raise RuntimeError("USB port discovery was incomplete; load it again")
+                if self.wall_clock() >= (self.data.get("expires_at") or 0):
+                    raise RuntimeError("USB port controls expired; load them again")
+                target = copy.deepcopy(self.targets.get(key))
             if target is None:
                 raise ValueError("unknown USB port")
-            if action in ("off", "cycle") and target["mounted_labels"]:
-                labels = ", ".join(target["mounted_labels"])
-                raise RuntimeError(
-                    f"refusing to disconnect mounted storage ({labels}); unmount it first"
+            if action in ("off", "cycle"):
+                usb_state = self.device_monitor.refresh()
+                if usb_state.get("last_error"):
+                    raise RuntimeError(
+                        "cannot verify current USB storage; refusing to disconnect the port"
+                    )
+                target["mounted_labels"] = self._live_mounted_labels(target, usb_state)
+                if target["mounted_labels"]:
+                    labels = ", ".join(target["mounted_labels"])
+                    raise RuntimeError(
+                        f"refusing to disconnect mounted storage ({labels}); unmount it first"
+                    )
+            with self.lock:
+                started_at = int(self.wall_clock())
+                self.data["operation"] = {
+                    "status": "running",
+                    "key": key,
+                    "action": action,
+                    "started_at": started_at,
+                    "completed_at": None,
+                    "error": None,
+                }
+                thread = threading.Thread(
+                    target=self._run_action,
+                    args=(target, action, started_at),
+                    name="usb-port-action",
+                    daemon=True,
                 )
-            started_at = int(self.wall_clock())
-            self.data["operation"] = {
-                "status": "running",
-                "key": key,
-                "action": action,
-                "started_at": started_at,
-                "completed_at": None,
-                "error": None,
-            }
-            thread = threading.Thread(
-                target=self._run_action,
-                args=(copy.deepcopy(target), action, started_at),
-                name="usb-port-action",
-                daemon=True,
-            )
-            thread.start()
-            return copy.deepcopy(self.data)
+                thread.start()
+                return copy.deepcopy(self.data)
 
     def start_recovery(self):
         """Start the fixed, guarded Raspberry Pi internal USB 2 hub recovery."""
-        self.refresh()
-        with self.lock:
-            if self.data["operation"].get("status") == "running":
-                raise RuntimeError("another USB port action is already running")
-            started_at = int(self.wall_clock())
-            self.data["operation"] = {
-                "status": "running",
-                "key": "Pi internal USB 2 hub",
-                "action": "restore",
-                "started_at": started_at,
-                "completed_at": None,
-                "message": None,
-                "error": None,
-            }
-            thread = threading.Thread(
-                target=self._run_recovery,
-                args=(started_at,),
-                name="usb2-recovery",
-                daemon=True,
-            )
-            thread.start()
-            return copy.deepcopy(self.data)
+        with self.command_lock:
+            with self.lock:
+                if self.data["operation"].get("status") == "running":
+                    raise RuntimeError("another USB port action is already running")
+                started_at = int(self.wall_clock())
+                self.data["operation"] = {
+                    "status": "running",
+                    "key": "Pi internal USB 2 hub",
+                    "action": "restore",
+                    "started_at": started_at,
+                    "completed_at": None,
+                    "message": None,
+                    "error": None,
+                }
+                thread = threading.Thread(
+                    target=self._run_recovery,
+                    args=(started_at,),
+                    name="usb2-recovery",
+                    daemon=True,
+                )
+                thread.start()
+                return copy.deepcopy(self.data)
 
     def _command_ok(self, args, input_text=None):
         result = self.command(args, timeout=self.timeout, input_text=input_text)
@@ -2957,41 +3033,44 @@ class UsbPortController:
     def _run_action(self, target, action, started_at):
         error = None
         try:
-            if target["method"] == "power":
-                self._command_ok(
-                    [
-                        SUDO,
-                        "-n",
-                        UHUBCTL,
-                        "-l",
-                        target["location"],
-                        "-p",
-                        str(target["port"]),
-                        "-a",
-                        action,
-                    ]
-                )
-            else:
-                path = target.get("disable_path")
-                expected_root = os.path.join(self.sys_root, "bus", "usb", "devices")
-                if not path or not path.startswith(expected_root + os.sep):
-                    raise RuntimeError("kernel USB port control disappeared")
-                values = ("1\n", "0\n") if action == "cycle" else (("1\n",) if action == "off" else ("0\n",))
-                for index, value in enumerate(values):
+            with self.command_lock:
+                if target["method"] == "power":
                     self._command_ok(
-                        [SUDO, "-n", TEE, path],
-                        input_text=value,
+                        [
+                            SUDO,
+                            "-n",
+                            UHUBCTL,
+                            "-l",
+                            target["location"],
+                            "-p",
+                            str(target["port"]),
+                            "-a",
+                            action,
+                        ]
                     )
-                    if action == "cycle" and index == 0:
-                        self.sleeper(2)
-            self.sleeper(1)
-            usb_state = self.device_monitor.refresh()
-            self.refresh(usb_state)
+                else:
+                    path = target.get("disable_path")
+                    expected_root = os.path.join(self.sys_root, "bus", "usb", "devices")
+                    if not path or not path.startswith(expected_root + os.sep):
+                        raise RuntimeError("kernel USB port control disappeared")
+                    values = (
+                        ("1\n", "0\n")
+                        if action == "cycle"
+                        else (("1\n",) if action == "off" else ("0\n",))
+                    )
+                    for index, value in enumerate(values):
+                        self._command_ok(
+                            [SUDO, "-n", TEE, path],
+                            input_text=value,
+                        )
+                        if action == "cycle" and index == 0:
+                            self.sleeper(2)
         except subprocess.TimeoutExpired:
             error = f"USB port action timed out after {self.timeout:g} seconds"
         except (OSError, RuntimeError, ValueError) as exc:
             error = str(exc)
         with self.lock:
+            self._invalidate_controls_locked()
             self.data["operation"] = {
                 "status": "error" if error else "complete",
                 "key": target["key"],
@@ -3005,21 +3084,23 @@ class UsbPortController:
         error = None
         message = None
         try:
-            result = self.command(
-                [self.recovery_tool], timeout=self.recovery_timeout
-            )
-            if result.returncode:
-                detail = (result.stderr or result.stdout or "USB 2 recovery failed").strip()
-                raise RuntimeError(detail[-500:])
-            lines = (result.stdout or "").strip().splitlines()
-            message = lines[-1][-500:] if lines else "USB 2 hub restored"
-            usb_state = self.device_monitor.refresh()
-            self.refresh(usb_state)
+            with self.command_lock:
+                result = self.command(
+                    [self.recovery_tool], timeout=self.recovery_timeout
+                )
+                if result.returncode:
+                    detail = (
+                        result.stderr or result.stdout or "USB 2 recovery failed"
+                    ).strip()
+                    raise RuntimeError(detail[-500:])
+                lines = (result.stdout or "").strip().splitlines()
+                message = lines[-1][-500:] if lines else "USB 2 hub restored"
         except subprocess.TimeoutExpired:
             error = f"USB 2 recovery timed out after {self.recovery_timeout:g} seconds"
         except (OSError, RuntimeError, ValueError) as exc:
             error = str(exc)
         with self.lock:
+            self._invalidate_controls_locked()
             self.data["operation"] = {
                 "status": "error" if error else "complete",
                 "key": "Pi internal USB 2 hub",
@@ -5477,7 +5558,26 @@ def api_usb_devices():
         {
             "ok": True,
             "usb": usb_state,
-            "usb_ports": usb_ports.refresh(usb_state),
+            "usb_ports": usb_ports.snapshot(),
+        }
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/api/usb-ports/discover", methods=["POST"])
+def api_usb_port_discovery():
+    if request.args or request.form:
+        return api_error("USB port discovery does not accept input", 400)
+    try:
+        state = usb_ports.discover()
+    except RuntimeError as exc:
+        return api_error(str(exc), 409)
+    response = jsonify(
+        {
+            "ok": True,
+            "message": "USB port controls loaded",
+            "usb_ports": state,
         }
     )
     response.headers["Cache-Control"] = "no-store"
