@@ -1034,15 +1034,7 @@ async function refreshUsbDevices(showErrors = false) {
 }
 async function changeUsbPort(button) {
   if (usbPortBusy || button.disabled) return;
-  const actionName = button.dataset.usbPortAction,
-    label = button.dataset.usbPortLabel || 'this USB port';
-  if (
-    actionName !== 'on' &&
-    !window.confirm(
-      `${actionName === 'cycle' ? 'Cycle' : 'Turn off'} ${label}? Connected devices will disconnect, and data-only controls may leave power present.`,
-    )
-  )
-    return;
+  const actionName = button.dataset.usbPortAction;
   usbPortBusy = true;
   $('usb-panel').classList.add('usb-port-busy');
   if (diskStatus) renderDiskStatus(diskStatus);

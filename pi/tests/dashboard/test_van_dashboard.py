@@ -3656,6 +3656,7 @@ class DashboardRouteTests(unittest.TestCase):
         )
         self.assertIn(b"advancedOpen ? ' open' : ''", javascript.data)
         self.assertIn(b"function changeUsbPort(button)", javascript.data)
+        self.assertNotIn(b"Connected devices will disconnect", javascript.data)
         self.assertIn(b"function recoverUsb2()", javascript.data)
         self.assertIn(b"function renderBackups(response)", javascript.data)
         self.assertIn(b"function startBackupClone(button)", javascript.data)
