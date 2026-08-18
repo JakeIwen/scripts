@@ -3578,7 +3578,15 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="system-reboot"', page.data)
         self.assertIn(b'id="system-power-down"', page.data)
         self.assertIn(b'id="dashboard-restart"', page.data)
-        self.assertIn(b'class="system-restart-actions"', page.data)
+        self.assertNotIn(b'class="system-restart-actions"', page.data)
+        self.assertLess(
+            page.data.index(b'id="system-power-down"'),
+            page.data.index(b'id="system-reboot"'),
+        )
+        self.assertLess(
+            page.data.index(b'id="system-reboot"'),
+            page.data.index(b'id="dashboard-restart"'),
+        )
         self.assertIn(b'<span>Dash</span>', page.data)
         self.assertIn(b'<span>Pi</span>', page.data)
         self.assertIn(b'aria-label="Power down vanpi"', page.data)
