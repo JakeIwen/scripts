@@ -16,9 +16,11 @@
   <div class="header-tools">
     <div class="system-power-cluster">
       <div class="system-power-actions" role="group" aria-label="Vanpi service and system power">
-        <button class="system-power-button" id="dashboard-restart" type="button" data-action title="Restart only the dashboard service"><span aria-hidden="true">⟳</span><span>Restart dashboard</span></button>
-        <button class="system-power-button" id="system-reboot" type="button" data-action data-system-power="reboot" title="Safely reboot vanpi"><span aria-hidden="true">↻</span><span>Reboot</span></button>
-        <button class="system-power-button power-down" id="system-power-down" type="button" data-action data-system-power="power-down" title="Safely power down vanpi"><span aria-hidden="true">⏻</span><span>Power down</span></button>
+        <div class="system-restart-actions" aria-label="Restart controls">
+          <button class="system-power-button" id="dashboard-restart" type="button" data-action title="Restart only the dashboard service"><span aria-hidden="true">⟳</span><span>Dash</span></button>
+          <button class="system-power-button" id="system-reboot" type="button" data-action data-system-power="reboot" title="Safely reboot vanpi"><span aria-hidden="true">↻</span><span>Pi</span></button>
+        </div>
+        <button class="system-power-button power-down" id="system-power-down" type="button" data-action data-system-power="power-down" title="Safely power down vanpi" aria-label="Power down vanpi"><span aria-hidden="true">⏻</span></button>
       </div>
       <span class="system-uptime" id="system-uptime">Uptime · checking…</span>
     </div>
