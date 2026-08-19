@@ -76,6 +76,12 @@ h1 {
 .header-tools {
   gap: 12px;
 }
+.header-van-tools {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
 .system-power-cluster {
   display: flex;
   flex-direction: column;
@@ -97,9 +103,6 @@ h1 {
   font-size: 16px;
   line-height: 1;
   text-align: center;
-}
-#dashboard-restart > span[aria-hidden="true"] {
-  font-size: 18px;
 }
 .system-uptime {
   color: var(--dim);
@@ -144,11 +147,9 @@ h1 {
   }
 }
 .tile-edit-bar {
-  min-height: 32px;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  padding: 0 3px 5px;
+  justify-content: center;
 }
 .tile-edit-button {
   width: 29px;

@@ -3575,6 +3575,15 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="tile-edit"', page.data)
         self.assertIn(b'id="tile-grid"', page.data)
         self.assertIn(b'aria-label="Edit tile positions"', page.data)
+        self.assertIn(b'class="header-van-tools"', page.data)
+        self.assertLess(
+            page.data.index(b'class="van-mark"'),
+            page.data.index(b'id="tile-edit"'),
+        )
+        self.assertLess(
+            page.data.index(b'id="tile-edit"'),
+            page.data.index(b'</header>'),
+        )
         self.assertIn(b'id="system-reboot"', page.data)
         self.assertIn(b'id="system-power-down"', page.data)
         self.assertIn(b'id="dashboard-restart"', page.data)
@@ -3589,6 +3598,10 @@ class DashboardRouteTests(unittest.TestCase):
         )
         self.assertIn(b'<span>Dash</span>', page.data)
         self.assertIn(b'<span>Pi</span>', page.data)
+        self.assertIn(
+            '<span aria-hidden="true">↻</span><span>Dash</span>'.encode(),
+            page.data,
+        )
         self.assertIn(b'aria-label="Power down vanpi"', page.data)
         self.assertNotIn(b'<span>Power down</span>', page.data)
         self.assertIn(b'id="system-uptime"', page.data)
