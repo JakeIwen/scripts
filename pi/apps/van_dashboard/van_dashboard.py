@@ -187,6 +187,8 @@ DASHBOARD_SERVICE = os.environ.get(
 DASHBOARD_RESTART_TIMEOUT = float(
     os.environ.get("VAN_DASHBOARD_RESTART_TIMEOUT", "8")
 )
+TELEMETRY_SERVICE = "van-telemetry.service"
+TELEMETRY_SERVICE_TIMEOUT = 15
 IGNITIONMON_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_IGNITIONMON_TIMEOUT", "8"))
 IGNITIONMON_MAX_MINUTES = 366 * 24 * 60
 DISK_POLICY_CONF = os.environ.get(
@@ -4891,6 +4893,48 @@ class TelemetrySummaryReader:
         }
 
 
+class TelemetryServiceError(RuntimeError):
+    pass
+
+
+telemetry_service_lock = threading.Lock()
+
+
+def run_telemetry_service_command(args, label, allowed_codes=(0,)):
+    try:
+        result = run_command(args, timeout=TELEMETRY_SERVICE_TIMEOUT)
+    except subprocess.TimeoutExpired as exc:
+        raise TelemetryServiceError(
+            f"{label} timed out after {TELEMETRY_SERVICE_TIMEOUT:g} seconds"
+        ) from exc
+    except OSError as exc:
+        raise TelemetryServiceError(f"could not run {label}: {exc}") from exc
+    if result.returncode not in allowed_codes:
+        detail = (result.stderr or result.stdout or f"{label} failed").strip()[-500:]
+        raise TelemetryServiceError(detail)
+    return result
+
+
+def telemetry_service_status():
+    result = run_telemetry_service_command(
+        [SYSTEMCTL, "is-active", "--quiet", TELEMETRY_SERVICE],
+        "telemetry service status",
+        allowed_codes=(0, 3),
+    )
+    return {"available": True, "running": result.returncode == 0}
+
+
+def toggle_telemetry_service():
+    with telemetry_service_lock:
+        current = telemetry_service_status()
+        action = "stop" if current["running"] else "start"
+        run_telemetry_service_command(
+            [SUDO, "-n", SYSTEMCTL, action, TELEMETRY_SERVICE],
+            f"telemetry service {action}",
+        )
+        return action, telemetry_service_status()
+
+
 class VoltageCheckManager:
     """Run the fixed guarded voltage monitor without blocking HTTP requests."""
 
@@ -5008,6 +5052,17 @@ def api_error(message, status):
     return jsonify({"ok": False, "message": str(message)}), status
 
 
+def telemetry_service_snapshot():
+    try:
+        return telemetry_service_status()
+    except TelemetryServiceError as exc:
+        return {
+            "available": False,
+            "running": False,
+            "error": str(exc),
+        }
+
+
 def request_boolean(name):
     raw = request.values.get(name, "").strip().lower()
     if raw not in ("1", "0", "true", "false", "on", "off"):
@@ -5059,6 +5114,26 @@ def api_telemetry_summary():
             "ok": True,
             "battery": telemetry_summary.snapshot(),
             "check": voltage_check.snapshot(),
+            "service": telemetry_service_snapshot(),
+        }
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.post("/api/telemetry-service")
+def api_telemetry_service():
+    if request.values:
+        return api_error("telemetry service toggle does not accept input", 400)
+    try:
+        action, status = toggle_telemetry_service()
+    except TelemetryServiceError as exc:
+        return api_error(f"could not toggle telemetry service: {exc}", 502)
+    response = jsonify(
+        {
+            "ok": True,
+            "message": f"Telemetry service {'started' if action == 'start' else 'stopped'}",
+            "service": status,
         }
     )
     response.headers["Cache-Control"] = "no-store"

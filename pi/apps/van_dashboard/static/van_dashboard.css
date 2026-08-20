@@ -280,6 +280,24 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
 .telemetry-tile {
   cursor: default;
 }
+.telemetry-service-toggle {
+  z-index: 2;
+  cursor: pointer;
+}
+.telemetry-service-toggle.good {
+  border-color: #39705a;
+  background: #29463acc;
+  color: #bfead5;
+}
+.telemetry-service-toggle.bad {
+  border-color: #835047;
+  background: #402d2bcc;
+  color: #f3c0bb;
+}
+.telemetry-service-toggle[aria-busy='true'] {
+  cursor: wait;
+  opacity: 0.72;
+}
 .telemetry-open {
   display: flex;
   flex: 1;

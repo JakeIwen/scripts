@@ -10,6 +10,7 @@ let dashboard = null,
   usbPortStatus = null,
   backupState = null,
   ignitionMonitor = null,
+  telemetryService = null,
   connectivityState = null,
   openwrtClients = null,
   ignitionDurationMinutes = 120,
@@ -41,6 +42,7 @@ let dashboard = null,
   systemPowerBusy = false,
   dashboardRestartBusy = false,
   voltageCheckBusy = false,
+  telemetryServiceBusy = false,
   busy = false,
   tileEditing = false,
   tileDrag = null,
@@ -296,7 +298,35 @@ function formatUptime(seconds) {
   parts.push(`${minutes}m`);
   return `Uptime · ${parts.join(' ')}`;
 }
+function renderTelemetryService(service) {
+  const button = $('telemetry-service-toggle');
+  if (service?.available) telemetryService = service;
+  else if (!telemetryServiceBusy) telemetryService = null;
+  button.classList.remove('good', 'bad');
+  button.setAttribute('aria-busy', String(telemetryServiceBusy));
+  if (telemetryServiceBusy) {
+    button.disabled = true;
+    button.textContent = 'WAIT';
+    button.title = 'Changing telemetry service state';
+    button.setAttribute('aria-label', button.title);
+    return;
+  }
+  if (!service?.available) {
+    button.disabled = true;
+    button.textContent = 'NO DATA';
+    button.title = service?.error || 'Telemetry service status unavailable';
+    button.setAttribute('aria-label', button.title);
+    return;
+  }
+  button.disabled = false;
+  button.textContent = service.running ? 'UP' : 'DOWN';
+  button.classList.add(service.running ? 'good' : 'bad');
+  const action = service.running ? 'Stop' : 'Start';
+  button.title = `${action} telemetry service`;
+  button.setAttribute('aria-label', `${button.textContent}. ${button.title}`);
+}
 function renderTelemetrySummary(response) {
+  renderTelemetryService(response?.service);
   renderVoltageCheck(response?.check);
   const battery = response?.battery || {};
   if (!battery.available || !Number.isFinite(battery.value)) {
@@ -334,6 +364,21 @@ async function refreshTelemetrySummary() {
   } catch (_) {
     renderTelemetrySummary(null);
     return null;
+  }
+}
+async function toggleTelemetryService() {
+  if (telemetryServiceBusy || !telemetryService?.available) return;
+  telemetryServiceBusy = true;
+  renderTelemetryService(telemetryService);
+  try {
+    const response = await post('telemetry-service');
+    telemetryServiceBusy = false;
+    renderTelemetryService(response.service);
+    toast(response.message);
+  } catch (error) {
+    telemetryServiceBusy = false;
+    toast(error.message, true);
+    await refreshTelemetrySummary();
   }
 }
 async function requestVoltageCheck() {
@@ -3945,6 +3990,7 @@ setIgnitionDuration(120, 'hours');
 $('books').href = siblingServiceUrl(8787);
 $('video-library').href = siblingServiceUrl(8789);
 $('telemetry-open').href = siblingServiceUrl(8765);
+$('telemetry-service-toggle').addEventListener('click', toggleTelemetryService);
 $('telemetry-check').addEventListener('click', requestVoltageCheck);
 $('cop').addEventListener('click', () =>
   action(() => post('cop-alert', { active: dashboard?.active ? 'false' : 'true' })),

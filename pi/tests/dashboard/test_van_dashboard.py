@@ -1870,6 +1870,69 @@ class TelemetrySummaryReaderTests(unittest.TestCase):
         )
 
 
+class TelemetryServiceTests(unittest.TestCase):
+    def test_status_and_toggle_use_only_the_fixed_broker(self):
+        active = False
+        calls = []
+
+        def command(args, timeout):
+            nonlocal active
+            calls.append(list(args))
+            if args[0] == dashboard.SYSTEMCTL:
+                return SimpleNamespace(
+                    returncode=0 if active else 3,
+                    stdout="",
+                    stderr="",
+                )
+            active = args[3] == "start"
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        original = dashboard.run_command
+        dashboard.run_command = command
+        try:
+            self.assertFalse(dashboard.telemetry_service_status()["running"])
+            action, status = dashboard.toggle_telemetry_service()
+            self.assertEqual((action, status["running"]), ("start", True))
+            action, status = dashboard.toggle_telemetry_service()
+            self.assertEqual((action, status["running"]), ("stop", False))
+        finally:
+            dashboard.run_command = original
+        self.assertIn(
+            [dashboard.SUDO, "-n", dashboard.SYSTEMCTL, "start", dashboard.TELEMETRY_SERVICE],
+            calls,
+        )
+        self.assertIn(
+            [dashboard.SUDO, "-n", dashboard.SYSTEMCTL, "stop", dashboard.TELEMETRY_SERVICE],
+            calls,
+        )
+
+    def test_failures_are_contained(self):
+        for failure, expected in (
+            ("failure", "systemctl failed"),
+            ("timeout", "timed out after 3 seconds"),
+        ):
+            with self.subTest(failure=failure):
+                def command(args, timeout):
+                    if failure == "timeout":
+                        raise subprocess.TimeoutExpired(args, timeout)
+                    return SimpleNamespace(
+                        returncode=1, stdout="", stderr="systemctl failed"
+                    )
+
+                original_timeout = dashboard.TELEMETRY_SERVICE_TIMEOUT
+                original_command = dashboard.run_command
+                dashboard.TELEMETRY_SERVICE_TIMEOUT = 3
+                dashboard.run_command = command
+                try:
+                    with self.assertRaisesRegex(
+                        dashboard.TelemetryServiceError, expected
+                    ):
+                        dashboard.telemetry_service_status()
+                finally:
+                    dashboard.TELEMETRY_SERVICE_TIMEOUT = original_timeout
+                    dashboard.run_command = original_command
+
+
 class VoltageCheckManagerTests(unittest.TestCase):
     def test_runs_guarded_monitor_in_background_and_blocks_duplicates(self):
         with tempfile.TemporaryDirectory() as tempdir:
@@ -3625,6 +3688,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertNotIn(b'id="speedtest-button" data-dashboard-tile', page.data)
         self.assertIn(b'id="telemetry" data-dashboard-tile', page.data)
         self.assertIn(b'id="telemetry-open" data-action', page.data)
+        self.assertIn(b'id="telemetry-service-toggle" type="button" data-action', page.data)
         self.assertIn(b'id="telemetry-check" type="button" data-action', page.data)
         self.assertIn(b'id="telemetry-check-label">Check voltage now', page.data)
         self.assertIn(b'id="telemetry-voltage"', page.data)
@@ -3710,6 +3774,9 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"function requestSystemPower(action)", javascript.data)
         self.assertIn(b"function pollSystemPowerResult()", javascript.data)
         self.assertIn(b"function formatUptime(seconds)", javascript.data)
+        self.assertIn(b"function renderTelemetryService(service)", javascript.data)
+        self.assertIn(b"function toggleTelemetryService()", javascript.data)
+        self.assertIn(b"post('telemetry-service')", javascript.data)
         self.assertIn(b"function refreshTelemetrySummary()", javascript.data)
         self.assertIn(b"/api/telemetry-summary", javascript.data)
         self.assertIn(b"function requestVoltageCheck()", javascript.data)
@@ -3834,6 +3901,8 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b".telemetry-voltage strong", stylesheet.data)
         self.assertIn(b".telemetry-observed", stylesheet.data)
         self.assertIn(b".telemetry-check", stylesheet.data)
+        self.assertIn(b".telemetry-service-toggle.good", stylesheet.data)
+        self.assertIn(b".telemetry-service-toggle.bad", stylesheet.data)
         self.assertNotIn(b".connection", stylesheet.data)
         self.assertIn(b".disk-device-card.held", stylesheet.data)
         self.assertIn(b".monitor-crash-button", stylesheet.data)
@@ -5003,21 +5072,81 @@ class DashboardRouteTests(unittest.TestCase):
                     "detail": "Last voltage_mon reading",
                 }
 
-        original = dashboard.telemetry_summary
+        class FakeTelemetryService:
+            def status(self):
+                return {
+                    "available": True,
+                    "running": False,
+                }
+
+        originals = dashboard.telemetry_summary, dashboard.telemetry_service_status
         dashboard.telemetry_summary = FakeTelemetrySummary()
+        dashboard.telemetry_service_status = FakeTelemetryService().status
         try:
             client = dashboard.app.test_client()
             status = client.get("/api/telemetry-summary")
             rejected = client.get("/api/telemetry-summary?command=anything")
         finally:
-            dashboard.telemetry_summary = original
+            dashboard.telemetry_summary, dashboard.telemetry_service_status = originals
 
         self.assertEqual(status.status_code, 200)
         self.assertEqual(status.headers["Cache-Control"], "no-store")
         self.assertEqual(status.json["battery"]["value"], 12.6)
         self.assertEqual(status.json["battery"]["source"], "voltage_mon")
+        self.assertFalse(status.json["service"]["running"])
         self.assertIn(status.json["check"]["status"], ("idle", "complete", "error"))
         self.assertEqual(rejected.status_code, 400)
+
+    def test_telemetry_service_route_is_fixed_and_csrf_protected(self):
+        calls = []
+        down = {
+            "available": True,
+            "running": False,
+        }
+        up = {
+            **down,
+            "running": True,
+        }
+
+        class FakeTelemetryService:
+            def status(self):
+                calls.append("status")
+                return down
+
+            def toggle(self):
+                calls.append("toggle")
+                return "start", up
+
+        original = dashboard.toggle_telemetry_service
+        dashboard.toggle_telemetry_service = FakeTelemetryService().toggle
+        try:
+            client = dashboard.app.test_client()
+            accepted = client.post(
+                "/api/telemetry-service",
+                headers={"X-Van-Dashboard": "1"},
+            )
+            extra = client.post(
+                "/api/telemetry-service",
+                data={"action": "shell-command"},
+                headers={"X-Van-Dashboard": "1"},
+            )
+            cross_origin = client.post(
+                "/api/telemetry-service",
+                headers={
+                    "X-Van-Dashboard": "1",
+                    "Origin": "https://example.invalid",
+                },
+            )
+        finally:
+            dashboard.toggle_telemetry_service = original
+
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(accepted.headers["Cache-Control"], "no-store")
+        self.assertTrue(accepted.json["service"]["running"])
+        self.assertEqual(accepted.json["message"], "Telemetry service started")
+        self.assertEqual(extra.status_code, 400)
+        self.assertEqual(cross_origin.status_code, 403)
+        self.assertEqual(calls, ["toggle"])
 
     def test_voltage_check_route_is_narrow_nonblocking_and_csrf_protected(self):
         calls = []
