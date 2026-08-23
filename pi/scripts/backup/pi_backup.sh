@@ -90,14 +90,37 @@ trap backup_progress_end EXIT
 # long steps go through run() so a TERM from abort_backup.sh stops them promptly
 # (bash delays traps until the foreground child exits; wait doesn't)
 child=
+backup_mounted_here=0
 run() { "$@" & child=$!; wait "$child"; local rc=$?; child=; return $rc; }
-aborted() {
+stop_active_child() {
   [ -n "$child" ] && { kill -TERM "$child" 2>/dev/null; wait "$child" 2>/dev/null; }
+  child=
+}
+aborted() {
+  stop_active_child
   log "aborted mid-run (van started?)"
   notify "vanpi backup deferred" "aborted mid-run (likely ignition-on); retrying hourly until 08:00" default warning
   exit 143
 }
+stopped_by_user() {
+  stop_active_child
+  if [ "$backup_mounted_here" = 1 ]; then
+    if umount "$BACKUP_MNT"; then
+      backup_mounted_here=0
+    else
+      log "WARNING: stopped backup could not unmount $BACKUP_MNT"
+      notify "vanpi backup stopped with cleanup warning" \
+        "$BACKUP_MNT remains mounted after the user-requested stop" high warning
+    fi
+  fi
+  log "stopped at user request; unfinished archive or clone was not marked current"
+  notify "vanpi backup stopped" \
+    "stopped at user request; unfinished work was not marked current and a scheduled run may retry later" \
+    default stop_sign
+  exit 143
+}
 trap aborted TERM INT
+trap stopped_by_user USR1
 bail_if_driving() {
   [ -f "$IGNITION_FLAG" ] || return 0
   log "van started mid-run, stopping before the next phase"

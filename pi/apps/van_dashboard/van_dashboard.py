@@ -162,6 +162,9 @@ BACKUP_BORG_RUNNER = os.environ.get(
 BACKUP_EXFAT_RUNNER = os.environ.get(
     "VAN_DASHBOARD_EXFAT_RUNNER", "/home/pi/scripts/backup/exfat_snapshot.sh"
 )
+BACKUP_ABORT = os.environ.get(
+    "VAN_DASHBOARD_BACKUP_ABORT", "/home/pi/scripts/backup/abort_backup.sh"
+)
 BACKUP_OPENWRT_RUNNER = os.environ.get(
     "VAN_DASHBOARD_OPENWRT_RUNNER", "/home/pi/scripts/backup/openwrt_backup.sh"
 )
@@ -175,6 +178,9 @@ BACKUP_CLONE_TIMEOUT = float(
 )
 BACKUP_RUN_TIMEOUT = float(
     os.environ.get("VAN_DASHBOARD_BACKUP_RUN_TIMEOUT", str(8 * 60 * 60 + 90))
+)
+BACKUP_STOP_TIMEOUT = float(
+    os.environ.get("VAN_DASHBOARD_BACKUP_STOP_TIMEOUT", "150")
 )
 IGNITIONMONCTL = os.environ.get(
     "VAN_DASHBOARD_IGNITIONMONCTL", "/home/pi/scripts/ignitionmonctl"
@@ -3362,7 +3368,8 @@ class BackupManager:
     /home/pi/scripts/backup/clone_to_sd.sh --init. Manual Borg requests invoke
     only the fixed pi_backup.sh or exfat_snapshot.sh --force paths, which retain
     each job's disk-policy, ignition, mount, lock, snapshot, and retention
-    safeguards.
+    safeguards. Stop requests invoke one fixed abort wrapper, which independently
+    verifies that the shared lock holder is the requested Borg or EXFAT parent.
     """
 
     CLONE_TARGET_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -3381,6 +3388,7 @@ class BackupManager:
         clone_tool=BACKUP_CLONE_NOW,
         borg_tool=BACKUP_BORG_RUNNER,
         exfat_tool=BACKUP_EXFAT_RUNNER,
+        abort_tool=BACKUP_ABORT,
         openwrt_tool=BACKUP_OPENWRT_RUNNER,
         time_machine_bundle=TIME_MACHINE_BUNDLE,
         progress_dir=None,
@@ -3388,6 +3396,7 @@ class BackupManager:
         timeout=BACKUP_STATUS_TIMEOUT,
         clone_timeout=BACKUP_CLONE_TIMEOUT,
         backup_timeout=BACKUP_RUN_TIMEOUT,
+        stop_timeout=BACKUP_STOP_TIMEOUT,
         wall_clock=time.time,
         process_root="/proc",
     ):
@@ -3396,6 +3405,7 @@ class BackupManager:
         self.clone_tool = clone_tool
         self.borg_tool = borg_tool
         self.exfat_tool = exfat_tool
+        self.abort_tool = abort_tool
         self.openwrt_tool = openwrt_tool
         self.time_machine_bundle = time_machine_bundle
         self.progress_dir = progress_dir or os.path.join(stamp_dir, "progress")
@@ -3403,14 +3413,23 @@ class BackupManager:
         self.timeout = timeout
         self.clone_timeout = clone_timeout
         self.backup_timeout = backup_timeout
+        self.stop_timeout = stop_timeout
         self.wall_clock = wall_clock
         self.process_root = process_root
         self.lock = threading.Lock()
         self.thread = None
+        self.stop_thread = None
         self.operation = {
             "status": "idle",
             "kind": None,
             "target": None,
+            "started_at": None,
+            "completed_at": None,
+            "error": None,
+        }
+        self.stop_operation = {
+            "status": "idle",
+            "kind": None,
             "started_at": None,
             "completed_at": None,
             "error": None,
@@ -3792,6 +3811,7 @@ class BackupManager:
         time_machine = self._time_machine(now)
         with self.lock:
             operation = copy.deepcopy(self.operation)
+            stop_operation = copy.deepcopy(self.stop_operation)
         if operation["status"] == "running":
             if operation["kind"] == "borg":
                 borg["running"] = True
@@ -3807,6 +3827,7 @@ class BackupManager:
             attention = True
         health = "running" if (
             operation["status"] == "running"
+            or stop_operation["status"] == "running"
             or borg["running"]
             or exfat_snapshot["running"]
             or openwrt["running"]
@@ -3823,6 +3844,7 @@ class BackupManager:
             "hotswaps": hotswaps,
             "time_machine": time_machine,
             "operation": operation,
+            "stop": stop_operation,
         }
 
     def start_clone(self, target):
@@ -3895,6 +3917,59 @@ class BackupManager:
             "exfat", self.exfat_tool, "exfat512_ok"
         )
 
+    def request_stop(self, kind):
+        if kind not in ("borg", "exfat"):
+            raise ValueError("unknown backup kind")
+        running = self._running_backup_processes()
+        if not running[kind]:
+            raise BackupStatusError(f"no active {kind} backup is available to stop")
+        with self.lock:
+            if self.stop_operation["status"] == "running":
+                raise BackupStatusError("another backup stop request is already running")
+            started_at = int(self.wall_clock())
+            self.stop_operation = {
+                "status": "running",
+                "kind": kind,
+                "started_at": started_at,
+                "completed_at": None,
+                "error": None,
+            }
+            self.stop_thread = threading.Thread(
+                target=self._run_stop,
+                args=(kind, started_at),
+                name=f"stop-{kind}-backup",
+                daemon=True,
+            )
+            self.stop_thread.start()
+        return self.status()
+
+    def _run_stop(self, kind, started_at):
+        error = None
+        try:
+            result = self.command(
+                [SUDO, "-n", self.abort_tool, "--user", kind],
+                timeout=self.stop_timeout,
+            )
+            if result.returncode:
+                error = (
+                    result.stderr
+                    or result.stdout
+                    or f"could not stop {kind} backup"
+                ).strip()[-500:]
+        except subprocess.TimeoutExpired:
+            error = f"backup stop timed out after {self.stop_timeout:g} seconds"
+        except OSError as exc:
+            error = f"could not request backup stop: {exc}"
+        with self.lock:
+            if self.stop_operation.get("started_at") == started_at:
+                self.stop_operation.update(
+                    {
+                        "status": "error" if error else "complete",
+                        "completed_at": int(self.wall_clock()),
+                        "error": error,
+                    }
+                )
+
     def _run_clone(self, target, started_at):
         error = None
         try:
@@ -3927,15 +4002,25 @@ class BackupManager:
     ):
         label = "Borg" if kind == "borg" else "EXFAT512 snapshot"
         error = None
+        stopped = False
         try:
             result = self.command(
                 [SUDO, "-n", tool, "--force"],
                 timeout=self.backup_timeout,
             )
             if result.returncode:
-                error = (
-                    result.stderr or result.stdout or f"{label} backup failed"
-                ).strip()[-500:]
+                with self.lock:
+                    stop_operation = copy.deepcopy(self.stop_operation)
+                stopped = (
+                    result.returncode == 143
+                    and stop_operation.get("kind") == kind
+                    and stop_operation.get("started_at") is not None
+                    and stop_operation["started_at"] >= started_at
+                )
+                if not stopped:
+                    error = (
+                        result.stderr or result.stdout or f"{label} backup failed"
+                    ).strip()[-500:]
             else:
                 current_at = self._stamp(os.path.join(self.stamp_dir, stamp_name))
                 if not self._stamp_advanced(current_at, previous_at):
@@ -3952,7 +4037,7 @@ class BackupManager:
             if self.operation.get("started_at") == started_at:
                 self.operation.update(
                     {
-                        "status": "error" if error else "complete",
+                        "status": "stopped" if stopped else "error" if error else "complete",
                         "completed_at": int(self.wall_clock()),
                         "error": error,
                     }
@@ -5768,6 +5853,38 @@ def api_backup_borg():
 @app.route("/api/backups/exfat", methods=["POST"])
 def api_backup_exfat():
     return _api_manual_backup("exfat")
+
+
+def _api_stop_backup(kind):
+    if request.args or not _exact_form(()):
+        return api_error("backup stop does not accept input", 400)
+    try:
+        status = backups.request_stop(kind)
+    except ValueError as exc:
+        return api_error(str(exc), 400)
+    except BackupStatusError as exc:
+        return api_error(f"could not stop {kind} backup: {exc}", 409)
+    label = "vanpi Borg backup" if kind == "borg" else "EXFAT512 snapshot"
+    response = jsonify(
+        {
+            "ok": True,
+            "message": f"Stopping {label} gracefully",
+            "backups": status,
+        }
+    )
+    response.status_code = 202
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/api/backups/borg/stop", methods=["POST"])
+def api_stop_borg_backup():
+    return _api_stop_backup("borg")
+
+
+@app.route("/api/backups/exfat/stop", methods=["POST"])
+def api_stop_exfat_backup():
+    return _api_stop_backup("exfat")
 
 
 @app.route("/api/ignition-monitor")

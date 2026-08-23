@@ -125,8 +125,9 @@ lock_disk() { # lock_disk sda — held for the remaining life of the calling scr
   flock -n 8 || { echo "another backup/restore is writing /dev/$1, aborting"; return 1; }
 }
 
-# one bigboi/borg operation at a time. holder PID is recorded in the lockfile so
-# abort_backup.sh (called by umount_disks.sh before pulling mounts) can TERM us
+# Serialize local backup, clone, and restore operations. The holder PID is
+# recorded so abort_backup.sh (called by umount_disks.sh before pulling mounts)
+# can TERM the active job tree.
 JOB_LOCK=/run/lock/vanpi_backup.lock
 acquire_job_lock() {
   exec 9>>"$JOB_LOCK"   # append-open: must not truncate a current holder's PID record

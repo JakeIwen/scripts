@@ -331,8 +331,23 @@ aborted() {
   exit 143
 }
 
+stopped_by_user() {
+  stop_snapshot_telemetry
+  if [[ -n "$child" ]]; then
+    kill -TERM "$child" 2>/dev/null || true
+    wait "$child" 2>/dev/null || true
+    child=
+  fi
+  log "stopped at user request; partial snapshot retained for retry"
+  notify "vanpi EXFAT backup stopped" \
+    "stopped at user request; the partial snapshot was retained and hdd1tb cleanup is running" \
+    default stop_sign || true
+  exit 143
+}
+
 trap cleanup EXIT
 trap aborted TERM INT
+trap stopped_by_user USR1
 
 policy_allows_hdds() {
   local output status disks torrents starlink extra

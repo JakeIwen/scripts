@@ -2776,6 +2776,11 @@ body.busy [data-action] {
   cursor: default;
   opacity: 0.55;
 }
+.backup-overview-action-card button.stop-action {
+  border-color: #98564f;
+  background: #4a302f;
+  color: #ffd7d3;
+}
 .backup-state-dot {
   width: 11px;
   height: 11px;

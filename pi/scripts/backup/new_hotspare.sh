@@ -399,7 +399,7 @@ fi
 
 if (( ! assume_yes )); then
   [[ -t 0 ]] || die "interactive confirmation requires a terminal; rerun with --yes only after reviewing --dry-run"
-  confirmation="ERASE $detected_disk AS $detected_label"
+  confirmation=ERASE
   printf "Type '%s' to continue: " "$confirmation"
   IFS= read -r answer
   [[ "$answer" == "$confirmation" ]] || {

@@ -61,6 +61,7 @@ let dashboard = null,
   ubntPoll = 0,
   ubntLastCompletion = '',
   backupLastCompletion = '',
+  backupLastStopCompletion = '',
   diskRunningOperation = '',
   openwrtClientsBusy = false,
   sonosTimeline = { position: 0, duration: 0, playing: false, updatedAt: 0 };
@@ -1164,8 +1165,12 @@ function renderBackups(response) {
     exfatProgress = exfat.progress || {},
     openwrtProgress = openwrt.progress || {},
     operation = state.operation || { status: 'idle' },
+    stop = state.stop || { status: 'idle' },
     operationKind = operation.kind || (operation.target ? 'clone' : null),
     operationRunning = operation.status === 'running',
+    stopRunning = stop.status === 'running',
+    borgStopping = stopRunning && stop.kind === 'borg',
+    exfatStopping = stopRunning && stop.kind === 'exfat',
     borgRunning = borg.running === true || (operationRunning && operationKind === 'borg'),
     exfatRunning = exfat.running === true || (operationRunning && operationKind === 'exfat'),
     openwrtRunning = openwrt.running === true,
@@ -1221,18 +1226,27 @@ function renderBackups(response) {
   const borgDot = $('backup-borg-dot');
   borgDot.className = `backup-state-dot ${borgRunning ? 'running' : borg.stale ? 'bad' : 'good'}`;
   $('backup-borg-running').hidden = !borgRunning;
-  $('backup-borg-running').textContent = borgProgress.detail
-    ? `In progress · ${borgProgress.detail}`
-    : 'Backup in progress';
+  $('backup-borg-running').textContent = borgStopping
+    ? 'Stopping gracefully…'
+    : borgProgress.detail
+      ? `In progress · ${borgProgress.detail}`
+      : 'Backup in progress';
   $('backup-borg-detail').textContent = Number.isFinite(borg.last_success_at)
     ? `Last successful archive ${eventTime(borg.last_success_at)} (${backupAge(borg.last_success_at)})`
     : 'No successful Borg archive is recorded';
+  $('backup-borg-action-detail').textContent = borgRunning || borgStopping
+    ? borgProgress.phase === 'cloning'
+      ? 'Stops gracefully. The in-progress hotspare may be incomplete and will not be marked current.'
+      : 'Stops gracefully. Unfinished Borg work is discarded and a scheduled run may retry later.'
+    : 'Backs up vanpi with Borg, syncs media, applies retention, and refreshes due hotspares.';
   const exfatDot = $('backup-exfat-dot');
   exfatDot.className = `backup-state-dot ${exfatRunning ? 'running' : exfat.stale ? 'bad' : 'good'}`;
   $('backup-exfat-running').hidden = !exfatRunning;
-  $('backup-exfat-running').textContent = exfatProgress.detail
-    ? `${exfatProgress.detail}${Number.isFinite(exfatProgress.progress_percent) ? ` · ${exfatProgress.progress_percent}%` : ''}${Number.isFinite(exfatProgress.bytes_processed) ? ` · ${formatBytes(exfatProgress.bytes_processed)}` : ''}`
-    : 'Snapshot in progress';
+  $('backup-exfat-running').textContent = exfatStopping
+    ? 'Stopping gracefully…'
+    : exfatProgress.detail
+      ? `${exfatProgress.detail}${Number.isFinite(exfatProgress.progress_percent) ? ` · ${exfatProgress.progress_percent}%` : ''}${Number.isFinite(exfatProgress.bytes_processed) ? ` · ${formatBytes(exfatProgress.bytes_processed)}` : ''}`
+      : 'Snapshot in progress';
   renderBackupProgressBar(
     'backup-exfat-progress',
     'backup-exfat-progress-fill',
@@ -1241,6 +1255,9 @@ function renderBackups(response) {
   $('backup-exfat-detail').textContent = Number.isFinite(exfat.last_success_at)
     ? `Last completed ${eventTime(exfat.last_success_at)} (${backupAge(exfat.last_success_at)})`
     : 'No successful EXFAT512 snapshot is recorded';
+  $('backup-exfat-action-detail').textContent = exfatRunning || exfatStopping
+    ? 'Stops gracefully, retains the partial snapshot for retry, then unmounts and spins down hdd1tb.'
+    : 'Mounts hdd1tb, snapshots EXFAT512 with hard links, applies retention, then unmounts and spins down.';
   const openwrtDot = $('backup-openwrt-dot');
   openwrtDot.className = `backup-state-dot ${openwrtRunning ? 'running' : openwrt.stale === false ? 'good' : 'bad'}`;
   $('backup-openwrt-running').hidden = !openwrtRunning;
@@ -1266,20 +1283,29 @@ function renderBackups(response) {
     : tm.error || 'No completed snapshots found';
 
   const operationKey = `${operation.status}:${operation.started_at || ''}:${operation.completed_at || ''}`;
+  const stopKey = `${stop.status}:${stop.kind || ''}:${stop.started_at || ''}:${stop.completed_at || ''}`;
   const borgRun = $('backup-run-borg'),
     exfatRun = $('backup-run-exfat');
-  borgRun.disabled = backupBusy || operationRunning || backupRuntimeBusy;
-  exfatRun.disabled = backupBusy || operationRunning || backupRuntimeBusy;
-  borgRun.textContent = borgRunning
-    ? 'Running Borg…'
-    : operationRunning || backupRuntimeBusy
-      ? 'Backup busy'
-      : 'Run Borg backup';
-  exfatRun.textContent = exfatRunning
-    ? 'Snapshotting…'
-    : operationRunning || backupRuntimeBusy
-      ? 'Backup busy'
-      : 'Snapshot EXFAT512';
+  borgRun.classList.toggle('stop-action', borgRunning || borgStopping);
+  exfatRun.classList.toggle('stop-action', exfatRunning || exfatStopping);
+  borgRun.disabled =
+    backupBusy || stopRunning || (!borgRunning && (operationRunning || backupRuntimeBusy));
+  exfatRun.disabled =
+    backupBusy || stopRunning || (!exfatRunning && (operationRunning || backupRuntimeBusy));
+  borgRun.textContent = borgStopping
+    ? 'Stopping…'
+    : borgRunning
+      ? 'Stop backup...'
+      : operationRunning || backupRuntimeBusy
+        ? 'Backup busy...'
+        : 'Run Borg backup';
+  exfatRun.textContent = exfatStopping
+    ? 'Stopping…'
+    : exfatRunning
+      ? 'Stop backup...'
+      : operationRunning || backupRuntimeBusy
+        ? 'Backup busy...'
+        : 'Snapshot EXFAT512';
   if (
     backupLastCompletion &&
     operationKey !== backupLastCompletion &&
@@ -1302,6 +1328,19 @@ function renderBackups(response) {
     );
   }
   backupLastCompletion = operationKey;
+  if (
+    backupLastStopCompletion &&
+    stopKey !== backupLastStopCompletion &&
+    ['complete', 'error'].includes(stop.status)
+  ) {
+    toast(
+      stop.status === 'complete'
+        ? `${stop.kind === 'exfat' ? 'EXFAT512' : 'Vanpi Borg'} backup stopped`
+        : stop.error || `Could not stop ${stop.kind || 'backup'}`,
+      stop.status === 'error',
+    );
+  }
+  backupLastStopCompletion = stopKey;
 
   $('backup-hotswaps').innerHTML = (state.hotswaps || [])
     .map((card) => {
@@ -1319,7 +1358,7 @@ function renderBackups(response) {
       return `<article class="backup-hotswap ${card.stale ? 'stale' : card.due ? 'due' : 'current'}">
         <div class="backup-hotswap-head"><span><strong>${label}</strong><small>${esc(status)}</small></span><span class="backup-generation-state">${badge}</span></div>
         <dl><div><dt>Contains vanpi as of</dt><dd>${esc(generation)}</dd></div><div><dt>Schedule</dt><dd>Every ${card.interval_days} days</dd></div></dl>
-        <button data-backup-clone="${label}" ${unavailable || operationRunning || backupRuntimeBusy || backupBusy ? 'disabled' : ''}>Clone current vanpi to this card</button>
+        <button data-backup-clone="${label}" ${unavailable || operationRunning || stopRunning || backupRuntimeBusy || backupBusy ? 'disabled' : ''}>Clone current vanpi to this card</button>
       </article>`;
     })
     .join('');
@@ -1424,6 +1463,55 @@ async function startManualBackup(kind) {
   } finally {
     backupBusy = false;
   }
+}
+function backupKindRunning(kind) {
+  const operation = backupState?.operation || {},
+    operationKind = operation.kind || (operation.target ? 'clone' : null);
+  if (kind === 'borg') {
+    return (
+      backupState?.borg?.running === true ||
+      (operation.status === 'running' && operationKind === 'borg')
+    );
+  }
+  return (
+    backupState?.exfat_snapshot?.running === true ||
+    (operation.status === 'running' && operationKind === 'exfat')
+  );
+}
+async function stopBackup(kind) {
+  const isBorg = kind === 'borg',
+    button = $(isBorg ? 'backup-run-borg' : 'backup-run-exfat'),
+    progress = isBorg ? backupState?.borg?.progress || {} : backupState?.exfat_snapshot?.progress || {};
+  if (backupBusy || backupState?.stop?.status === 'running' || button.disabled) return;
+  const cloneWarning =
+    isBorg && progress.phase === 'cloning'
+      ? '\n\nThe hotspare currently being written may be incomplete and will not be marked current.'
+      : '';
+  if (
+    !window.confirm(
+      isBorg
+        ? `Stop the current vanpi Borg backup gracefully? Unfinished Borg work will be discarded and the current run will not be marked successful.${cloneWarning}\n\nA scheduled run may retry later.`
+        : 'Stop the current EXFAT512 snapshot gracefully? Its partial snapshot will be retained for retry, and hdd1tb will be unmounted and spun down afterward.\n\nA scheduled run may retry later.',
+    )
+  )
+    return;
+  backupBusy = true;
+  button.disabled = true;
+  button.textContent = 'Stopping…';
+  try {
+    const response = await post(`backups/${kind}/stop`);
+    renderBackups(response);
+    toast(response.message);
+  } catch (error) {
+    toast(error.message, true);
+    await refreshBackups(false).catch(() => {});
+  } finally {
+    backupBusy = false;
+  }
+}
+function controlBackup(kind) {
+  if (backupKindRunning(kind)) return stopBackup(kind);
+  return startManualBackup(kind);
 }
 function updateIgnitionDurationPreview() {
   $('ignition-duration-preview').textContent = durationWords(ignitionDurationMinutes * 60);
@@ -4027,8 +4115,8 @@ $('usb-load-controls').addEventListener('click', loadUsbPortControls);
 $('usb-recover').addEventListener('click', recoverUsb2);
 $('backups').addEventListener('click', openBackups);
 $('backup-close').addEventListener('click', closeBackups);
-$('backup-run-borg').addEventListener('click', () => startManualBackup('borg'));
-$('backup-run-exfat').addEventListener('click', () => startManualBackup('exfat'));
+$('backup-run-borg').addEventListener('click', () => controlBackup('borg'));
+$('backup-run-exfat').addEventListener('click', () => controlBackup('exfat'));
 $('ignition-monitor').addEventListener('click', openIgnitionMonitor);
 $('ignition-monitor-close').addEventListener('click', closeIgnitionMonitor);
 $('ignition-monitor-disable').addEventListener('click', () => changeIgnitionMonitor(true));

@@ -119,6 +119,23 @@ class BackupDeploymentTests(unittest.TestCase):
         self.assertIn('backup_progress_update "$phase" "$detail"', helper)
         self.assertNotIn("exit 1", helper)
 
+    def test_dashboard_stop_is_exact_graceful_and_keeps_emergency_mode_separate(self):
+        abort = (BACKUP_DIR / "abort_backup.sh").read_text(encoding="utf-8")
+        borg = (BACKUP_DIR / "pi_backup.sh").read_text(encoding="utf-8")
+        exfat = (BACKUP_DIR / "exfat_snapshot.sh").read_text(encoding="utf-8")
+        clone = (BACKUP_DIR / "clone_to_sd.sh").read_text(encoding="utf-8")
+
+        self.assertIn("--user:borg", abort)
+        self.assertIn("process_has_exact_argument", abort)
+        self.assertIn("process_holds_job_lock", abort)
+        self.assertIn('kill -USR1 "$pid"', abort)
+        self.assertIn('/usr/bin/fuser -k -KILL "$job_lock"', abort)
+        self.assertIn("trap stopped_by_user USR1", borg)
+        self.assertIn("trap stopped_by_user USR1", exfat)
+        self.assertIn("partial snapshot retained for retry", exfat)
+        self.assertIn("terminate_clone_tree", clone)
+        self.assertIn("trap stop_clone TERM INT", clone)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -137,6 +137,13 @@ unmounting — borg simply rolls back to its last checkpoint and the next parked
 retries. A restore aborted this way leaves the target card INCOMPLETE (you'll get a
 loud ntfy) — just re-run it when parked.
 
+The dashboard can request a graceful user stop only for an exact running
+`pi_backup.sh` or `exfat_snapshot.sh` lock holder. It sends no emergency kill
+and refuses restores, hotspare initialization, and unrelated lock holders. A
+stopped Borg run is not stamped successful; an interrupted hotspare remains
+unstamped. A stopped EXFAT run retains its hidden partial snapshot for retry and
+performs its normal `hdd1tb` unmount/spindown cleanup before reporting stopped.
+
 For normal completion, `pi_backup.sh` unmounts `bigboi` only when that backup
 run mounted it. If `bigboi` was already mounted, the backup leaves it mounted.
 It delegates mounts to `mount_disks.sh`, so backup runs use the same exact-label,

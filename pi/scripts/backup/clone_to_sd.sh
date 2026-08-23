@@ -49,15 +49,44 @@ throttle="ionice -c2 -n7 nice -n10"
 clone_log="/tmp/vanpi_clone_${disk}_$$.log"
 cleanup_clone_log() { [ ! -e "$clone_log" ] || unlink "$clone_log"; }
 trap cleanup_clone_log EXIT
-if [ $init = 1 ]; then
-  echo "initializing /dev/$disk as $label — full clone, erases the card"
-  $throttle rpi-clone "$disk" -f -U 2>&1 | tee "$clone_log"
-else
-  $throttle rpi-clone "$disk" -U 2>&1 | tee "$clone_log"
-fi
+clone_pipeline_pid=
+terminate_clone_tree() {
+  local target_pid=$1 descendant
+  while IFS= read -r descendant; do
+    [[ "$descendant" =~ ^[1-9][0-9]*$ ]] || continue
+    terminate_clone_tree "$descendant"
+  done < <(/usr/bin/pgrep -P "$target_pid" 2>/dev/null || true)
+  kill -TERM "$target_pid" 2>/dev/null || true
+}
+stop_clone() {
+  trap - TERM INT
+  if [[ -n "$clone_pipeline_pid" ]]; then
+    terminate_clone_tree "$clone_pipeline_pid"
+    wait "$clone_pipeline_pid" 2>/dev/null || true
+    clone_pipeline_pid=
+  fi
+  exit 143
+}
+trap stop_clone TERM INT
+run_clone_pipeline() {
+  local pipeline_status
+  if [ $init = 1 ]; then
+    echo "initializing /dev/$disk as $label — full clone, erases the card"
+    $throttle rpi-clone "$disk" -f -U 2>&1 | tee "$clone_log"
+    pipeline_status=${PIPESTATUS[0]}
+  else
+    $throttle rpi-clone "$disk" -U 2>&1 | tee "$clone_log"
+    pipeline_status=${PIPESTATUS[0]}
+  fi
+  return "$pipeline_status"
+}
+run_clone_pipeline &
+clone_pipeline_pid=$!
+wait "$clone_pipeline_pid"
+clone_rc=$?
+clone_pipeline_pid=
 # rpi-clone 2.0.27 can print an rsync code 23 error but still exit zero. Treat
 # either signal as failure so a partial clone is never stamped current.
-clone_rc=${PIPESTATUS[0]}
 if [ "$clone_rc" -ne 0 ] || grep -q '^rsync error:' "$clone_log"; then
   notify "vanpi clone" \
     "clone to $label (/dev/$disk) was incomplete (rpi-clone=$clone_rc or rsync error)" \

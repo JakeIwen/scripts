@@ -3117,6 +3117,74 @@ class BackupManagerTests(unittest.TestCase):
         self.assertEqual(status["openwrt"]["progress"]["phase"], "validating")
         self.assertEqual(status["health"], "running")
 
+    def test_stop_request_is_nonblocking_fixed_and_requires_exact_running_kind(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            config, stamps, bundle = self.make_files(tempdir, tm_running=False)
+            proc_root = os.path.join(tempdir, "proc")
+            process = os.path.join(proc_root, "101")
+            os.makedirs(process)
+            with open(os.path.join(process, "cmdline"), "wb") as handle:
+                handle.write(b"/bin/bash\0/test/pi_backup.sh\0")
+            calls = []
+            stop_started = threading.Event()
+            release_stop = threading.Event()
+
+            def command(args, timeout):
+                calls.append((list(args), timeout))
+                if args[0] == dashboard.LSBLK:
+                    return SimpleNamespace(
+                        returncode=0,
+                        stdout=json.dumps(self.lsblk_payload()),
+                        stderr="",
+                    )
+                stop_started.set()
+                release_stop.wait(2)
+                return SimpleNamespace(returncode=0, stdout="stopped", stderr="")
+
+            manager = dashboard.BackupManager(
+                config=config,
+                stamp_dir=stamps,
+                borg_tool="/test/pi_backup.sh",
+                exfat_tool="/test/exfat_snapshot.sh",
+                abort_tool="/test/abort_backup.sh",
+                time_machine_bundle=bundle,
+                command=command,
+                stop_timeout=45,
+                wall_clock=lambda: self.NOW,
+                process_root=proc_root,
+            )
+            status = manager.request_stop("borg")
+            self.assertTrue(stop_started.wait(1))
+            self.assertEqual(status["stop"]["status"], "running")
+            self.assertEqual(status["stop"]["kind"], "borg")
+            with self.assertRaisesRegex(dashboard.BackupStatusError, "already running"):
+                manager.request_stop("borg")
+            with self.assertRaisesRegex(dashboard.BackupStatusError, "no active exfat"):
+                manager.request_stop("exfat")
+            with self.assertRaisesRegex(ValueError, "unknown backup kind"):
+                manager.request_stop("restore")
+            release_stop.set()
+            manager.stop_thread.join(2)
+            self.assertFalse(manager.stop_thread.is_alive())
+            self.assertEqual(manager.stop_operation["status"], "complete")
+
+        stop_calls = [call for call in calls if call[0][0] == dashboard.SUDO]
+        self.assertEqual(
+            stop_calls,
+            [
+                (
+                    [
+                        dashboard.SUDO,
+                        "-n",
+                        "/test/abort_backup.sh",
+                        "--user",
+                        "borg",
+                    ],
+                    45,
+                )
+            ],
+        )
+
     def test_openwrt_status_requires_a_fresh_verified_stamp(self):
         with tempfile.TemporaryDirectory() as tempdir:
             config, stamps, bundle = self.make_files(tempdir, tm_running=False)
@@ -3756,6 +3824,11 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"networkState('ubnt-radio-dot'", javascript.data)
         self.assertIn(b"label.dataset.idleLabel", javascript.data)
         self.assertIn(b"label.dataset.runningLabel", javascript.data)
+        self.assertIn(b"'Backup busy...'", javascript.data)
+        self.assertNotIn(b"'Backup busy'", javascript.data)
+        self.assertIn(b"'Stop backup...'", javascript.data)
+        self.assertIn(b"function controlBackup(kind)", javascript.data)
+        self.assertIn(b"post(`backups/${kind}/stop`)", javascript.data)
         self.assertIn(b"cop-led", javascript.data)
         self.assertNotIn(b"dashboard.ext_flood", javascript.data)
         self.assertNotIn(b"'Speed Test'", javascript.data)
@@ -3935,6 +4008,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b".backup-card-hover-detail", stylesheet.data)
         self.assertIn(b".backup-card-running-note[hidden]", stylesheet.data)
         self.assertIn(b".backup-linear-progress", stylesheet.data)
+        self.assertIn(b"button.stop-action", stylesheet.data)
         self.assertIn(b".ignition-monitor-tile", stylesheet.data)
         self.assertIn(b".ignition-duration-slider", stylesheet.data)
         self.assertIn(b".ignition-presets", stylesheet.data)
@@ -4194,6 +4268,13 @@ class DashboardRouteTests(unittest.TestCase):
                     raise ValueError("unknown hotspare target")
                 return {**state, "operation": {"status": "running", "target": target}}
 
+            def request_stop(self, kind):
+                calls.append(("stop", kind))
+                return {
+                    **state,
+                    "stop": {"status": "running", "kind": kind},
+                }
+
         original = dashboard.backups
         dashboard.backups = FakeBackups()
         try:
@@ -4212,6 +4293,14 @@ class DashboardRouteTests(unittest.TestCase):
                 "/api/backups/exfat",
                 headers={"X-Van-Dashboard": "1"},
             )
+            borg_stop = client.post(
+                "/api/backups/borg/stop",
+                headers={"X-Van-Dashboard": "1"},
+            )
+            exfat_stop = client.post(
+                "/api/backups/exfat/stop",
+                headers={"X-Van-Dashboard": "1"},
+            )
             unknown = client.post(
                 "/api/backups/clone",
                 data={"target": "/dev/sda"},
@@ -4225,6 +4314,15 @@ class DashboardRouteTests(unittest.TestCase):
             borg_extra = client.post(
                 "/api/backups/borg",
                 data={"command": "--anything"},
+                headers={"X-Van-Dashboard": "1"},
+            )
+            stop_extra = client.post(
+                "/api/backups/borg/stop",
+                data={"signal": "KILL"},
+                headers={"X-Van-Dashboard": "1"},
+            )
+            stop_query = client.post(
+                "/api/backups/exfat/stop?signal=KILL",
                 headers={"X-Van-Dashboard": "1"},
             )
             query = client.get("/api/backups?device=sda")
@@ -4243,6 +4341,13 @@ class DashboardRouteTests(unittest.TestCase):
                     "Origin": "https://example.invalid",
                 },
             )
+            stop_cross_origin = client.post(
+                "/api/backups/borg/stop",
+                headers={
+                    "X-Van-Dashboard": "1",
+                    "Origin": "https://example.invalid",
+                },
+            )
         finally:
             dashboard.backups = original
 
@@ -4254,12 +4359,19 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(borg.headers["Cache-Control"], "no-store")
         self.assertEqual(exfat.status_code, 202)
         self.assertEqual(exfat.headers["Cache-Control"], "no-store")
+        self.assertEqual(borg_stop.status_code, 202)
+        self.assertEqual(borg_stop.headers["Cache-Control"], "no-store")
+        self.assertEqual(exfat_stop.status_code, 202)
+        self.assertEqual(exfat_stop.headers["Cache-Control"], "no-store")
         self.assertEqual(unknown.status_code, 400)
         self.assertEqual(extra.status_code, 400)
         self.assertEqual(borg_extra.status_code, 400)
+        self.assertEqual(stop_extra.status_code, 400)
+        self.assertEqual(stop_query.status_code, 400)
         self.assertEqual(query.status_code, 400)
         self.assertEqual(cross_origin.status_code, 403)
         self.assertEqual(backup_cross_origin.status_code, 403)
+        self.assertEqual(stop_cross_origin.status_code, 403)
         self.assertEqual(
             calls,
             [
@@ -4267,6 +4379,8 @@ class DashboardRouteTests(unittest.TestCase):
                 ("clone", "hotspare-a"),
                 ("borg",),
                 ("exfat",),
+                ("stop", "borg"),
+                ("stop", "exfat"),
                 ("clone", "/dev/sda"),
             ],
         )
