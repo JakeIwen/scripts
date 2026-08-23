@@ -1,0 +1,128 @@
+#!/bin/sh
+
+# Distinguish the clientwan Wi-Fi gateway from public internet reachability.
+# State changes and one-minute summaries go through syslog so vanpi's existing
+# OpenWrt receiver retains them across router reboots.
+set -u
+
+UBUS=${UBUS:-/bin/ubus}
+JSONFILTER=${JSONFILTER:-/usr/bin/jsonfilter}
+IP=${IP:-/sbin/ip}
+PING=${PING:-/bin/ping}
+AWK=${AWK:-/usr/bin/awk}
+LOGGER=${LOGGER:-/usr/bin/logger}
+SLEEP=${SLEEP:-/bin/sleep}
+
+INTERFACE=${INTERFACE:-clientwan}
+PUBLIC_1=${PUBLIC_1:-1.1.1.1}
+PUBLIC_2=${PUBLIC_2:-208.67.222.222}
+INTERVAL_SECONDS=${INTERVAL_SECONDS:-5}
+REPORT_SAMPLES=${REPORT_SAMPLES:-12}
+PING_TIMEOUT=${PING_TIMEOUT:-1}
+MAX_SAMPLES=${MAX_SAMPLES:-0}
+TAG=${TAG:-clientwan-path}
+
+running=yes
+last_state=
+total_samples=0
+window_samples=0
+window_interface_up=0
+window_gateway_ok=0
+window_public_1_ok=0
+window_public_2_ok=0
+last_device=none
+last_gateway=none
+
+log() {
+	"$LOGGER" -p daemon.info -t "$TAG" "$1" 2>/dev/null || true
+}
+
+probe() {
+	device=$1
+	target=$2
+	[ -n "$device" ] && [ -n "$target" ] || return 1
+	"$PING" -I "$device" -c 1 -W "$PING_TIMEOUT" "$target" \
+		>/dev/null 2>&1
+}
+
+reset_window() {
+	window_samples=0
+	window_interface_up=0
+	window_gateway_ok=0
+	window_public_1_ok=0
+	window_public_2_ok=0
+}
+
+log_summary() {
+	[ "$window_samples" -gt 0 ] || return
+	log "summary samples=$window_samples interface_up=$window_interface_up gateway_ok=$window_gateway_ok public1_ok=$window_public_1_ok public2_ok=$window_public_2_ok device=$last_device gateway=$last_gateway"
+	reset_window
+}
+
+stop_monitor() {
+	running=no
+}
+
+trap stop_monitor HUP INT TERM
+
+log "started interface=$INTERFACE interval=${INTERVAL_SECONDS}s report_samples=$REPORT_SAMPLES public1=$PUBLIC_1 public2=$PUBLIC_2"
+
+while [ "$running" = yes ]; do
+	interface_up=0
+	gateway_ok=0
+	public_1_ok=0
+	public_2_ok=0
+	device=
+	gateway=
+
+	status=$("$UBUS" call "network.interface.$INTERFACE" status 2>/dev/null || true)
+	if [ -n "$status" ]; then
+		up=$(printf '%s\n' "$status" \
+			| "$JSONFILTER" -e '@.up' 2>/dev/null || true)
+		device=$(printf '%s\n' "$status" \
+			| "$JSONFILTER" -e '@.l3_device' 2>/dev/null || true)
+		if [ "$up" = true ] && [ -n "$device" ]; then
+			interface_up=1
+			gateway=$(
+				"$IP" -4 route show default dev "$device" 2>/dev/null \
+					| "$AWK" '$1 == "default" && $2 == "via" {print $3; exit}'
+			)
+			probe "$device" "$gateway" && gateway_ok=1
+			probe "$device" "$PUBLIC_1" && public_1_ok=1
+			probe "$device" "$PUBLIC_2" && public_2_ok=1
+		fi
+	fi
+
+	public_ok=$((public_1_ok + public_2_ok))
+	if [ "$interface_up" -eq 0 ]; then
+		state=interface-down
+	else
+		state="gateway-${gateway_ok}-public-${public_ok}"
+	fi
+
+	last_device=${device:-none}
+	last_gateway=${gateway:-none}
+	window_samples=$((window_samples + 1))
+	window_interface_up=$((window_interface_up + interface_up))
+	window_gateway_ok=$((window_gateway_ok + gateway_ok))
+	window_public_1_ok=$((window_public_1_ok + public_1_ok))
+	window_public_2_ok=$((window_public_2_ok + public_2_ok))
+	total_samples=$((total_samples + 1))
+
+	if [ "$state" != "$last_state" ]; then
+		log "state-change state=$state device=$last_device gateway=$last_gateway gateway_ok=$gateway_ok public1=$PUBLIC_1:$public_1_ok public2=$PUBLIC_2:$public_2_ok"
+		last_state=$state
+	fi
+
+	if [ "$window_samples" -ge "$REPORT_SAMPLES" ]; then
+		log_summary
+	fi
+	if [ "$MAX_SAMPLES" -gt 0 ] && [ "$total_samples" -ge "$MAX_SAMPLES" ]; then
+		break
+	fi
+
+	"$SLEEP" "$INTERVAL_SECONDS" || true
+done
+
+log_summary
+log "stopped"

@@ -8,6 +8,28 @@ The source patch and staged recovery procedure for the shared-radio 0 dBm
 failure are under [kernel-5ghz-power](kernel-5ghz-power/README.md). Creating or
 testing those artifacts does not change the live router.
 
+## Clientwan path monitoring
+
+`clientwan-path-monitor` probes the active `clientwan` gateway and two public
+addresses independently every five seconds. It logs state changes immediately
+and aggregate success counts once per minute under the `clientwan-path` syslog
+tag. The existing remote logger retains those records on vanpi, allowing a
+future incident to distinguish a Wi-Fi/hotspot gateway failure from loss beyond
+the phone.
+
+The live `clientwan` mwan3 tracker is intentionally less aggressive than its
+old two-down/one-up configuration: five failed rounds mark it offline and three
+successful recovery rounds bring it back. This avoids withdrawing the only
+usable default route and flushing connection tracking for very short cellular
+or hotspot interruptions.
+
+Inspect the current router-side log and durable vanpi history with:
+
+```sh
+ssh root@192.168.6.1 'logread -e clientwan-path'
+ssh pi@vanpi.lan "sudo grep 'clientwan-path' /var/log/openwrt/dendelion.log | tail -n 30"
+```
+
 ## Simultaneous 5 GHz AP and client
 
 `deploy-5ghz-ap.sh` stages a temporary helper on the router. The helper adds a
@@ -68,5 +90,6 @@ An alternate SSH target can be supplied as the second argument.
 
 ```sh
 ./vanrouter/tests/test_openwrt_5ghz_ap.sh
+./vanrouter/tests/test_clientwan_path_monitor.sh
 ./vanrouter/tests/test_kernel_5ghz_power.sh
 ```

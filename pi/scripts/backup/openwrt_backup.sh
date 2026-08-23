@@ -127,7 +127,10 @@ for required_path in \
 	etc/config/wireless \
 	etc/dropbear/authorized_keys \
 	etc/firewall.ttl-clientwan.nft \
+	etc/init.d/clientwan-path-monitor \
+	etc/rc.d/S20clientwan-path-monitor \
 	etc/sysupgrade.conf \
+	usr/libexec/clientwan-path-monitor \
 	usr/libexec/openwrt-backup-export; do
 	printf '%s\n' "$inner_members" | /bin/grep -Fx "$required_path" >/dev/null \
 		|| fail "nested archive is missing required path: $required_path"

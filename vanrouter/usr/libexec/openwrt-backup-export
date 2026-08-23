@@ -52,11 +52,14 @@ for required_path in \
 	/etc/config/network \
 	/etc/config/sqm \
 		/etc/config/system \
-		/etc/config/wireless \
-		/etc/dropbear/authorized_keys \
-		/etc/firewall.ttl-clientwan.nft \
-		/etc/sysupgrade.conf \
-		/usr/libexec/openwrt-backup-export; do
+	/etc/config/wireless \
+	/etc/dropbear/authorized_keys \
+	/etc/firewall.ttl-clientwan.nft \
+	/etc/init.d/clientwan-path-monitor \
+	/etc/rc.d/S20clientwan-path-monitor \
+	/etc/sysupgrade.conf \
+	/usr/libexec/clientwan-path-monitor \
+	/usr/libexec/openwrt-backup-export; do
 	/bin/grep -Fx "$required_path" "$backup_list" >/dev/null \
 		|| fail "required path is absent from sysupgrade backup: $required_path"
 done

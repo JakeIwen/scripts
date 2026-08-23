@@ -34,11 +34,12 @@ The bundle contains:
 - `sysupgrade-file-list.txt`: the paths OpenWrt declared for preservation.
 - `created-at-utc.txt` and `SHA256SUMS`.
 
-The router's `/etc/sysupgrade.conf` explicitly preserves the native TTL rule
-and the backup exporter itself. Validation also requires the core LAN, DHCP,
-firewall, wireless, MWAN, SQM, and SSH authorization files, and fails closed if
-any of them drops out of the archive. The router refuses an export if the
-restricted backup-key entry is no longer present in `authorized_keys`.
+The router's `/etc/sysupgrade.conf` explicitly preserves the native TTL rule,
+the clientwan path monitor, and the backup exporter itself. Validation also
+requires the core LAN, DHCP, firewall, wireless, MWAN, SQM, and SSH
+authorization files, and fails closed if any of them drops out of the archive.
+The router refuses an export if the restricted backup-key entry is no longer
+present in `authorized_keys`.
 
 The bundle contains Wi-Fi credentials, password hashes, and private keys. It is
 mode `0600`, its directory is mode `0700`, and the Borg repository is encrypted

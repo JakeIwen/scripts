@@ -21,6 +21,9 @@ id_dsa
 vanrouter/etc
 !vanrouter/etc/
 vanrouter/etc/*
+!vanrouter/etc/init.d/
+vanrouter/etc/init.d/*
+!vanrouter/etc/init.d/clientwan-path-monitor
 !vanrouter/etc/sysupgrade.conf
 vanrouter/build/
 *__pycache__*
