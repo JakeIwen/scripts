@@ -49,16 +49,22 @@ may remain pinned to their original member until conntrack expires.
 collector. It performs one read-only SSH query containing `mwan3 interfaces`,
 `mwan3 policies`, and the configured IPv4 default-policy name per run, one UBNT
 ping, and (only when the UBNT responds) one read-only radio-status SSH query. It
-never scans for networks. The dashboard runs it in a background thread every
-30 seconds and serves cached results through
-`GET /api/connectivity`, so browser polling adds no router load. Hosts, key
-path, and command paths can be overridden with the collector's
-`CONNECTIVITY_*` environment variables.
+never scans for networks. With no visible dashboard, the server runs it in a
+background thread every 30 seconds and serves cached results through
+`GET /api/connectivity`. A visible page renews a short activity lease with
+`GET /api/connectivity?active=1`. While that lease is current, the single
+background worker starts its next collection as soon as the previous collection
+finishes. Multiple open dashboards share the same lease and worker, so slow
+router or UBNT calls cannot overlap or build up a queue. When the last page is
+hidden or closed and the lease expires, the worker returns to its 30-second
+cadence.
 
-The page reads that cache every 10 seconds with browser caching disabled. It
-also reads immediately when a suspended tab becomes visible or focused, and a
-Starlink power change wakes the background collector without running router or
-UBNT commands in the HTTP request thread.
+The page reads the cache once per second while visible, with browser caching
+disabled; these reads never run the collector in an HTTP request thread. A
+collector failure uses a one-second retry delay to avoid a tight failure loop.
+A Starlink power or UBNT configuration change can also wake the background
+collector. Hosts, key path, and command paths can be overridden with the
+collector's `CONNECTIVITY_*` environment variables.
 
 The speed-test button starts `/home/pi/scripts/speedtest.sh` in a separate
 thread. Only one test can run at a time; `POST /api/speedtest` returns

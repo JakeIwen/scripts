@@ -282,7 +282,51 @@ class ConnectivityMonitorTests(unittest.TestCase):
         self.assertEqual(status["ubnt"]["ssid"], "denlink")
         self.assertFalse(status["stale"])
         monitor.request_refresh()
-        self.assertTrue(monitor.refresh_event.is_set())
+        self.assertTrue(monitor.refresh_requested)
+
+    def test_active_lease_runs_successful_collections_sequentially(self):
+        calls = []
+        second_collection = threading.Event()
+        command_gate = threading.Lock()
+
+        def command(args, timeout):
+            self.assertTrue(
+                command_gate.acquire(blocking=False), "collector calls overlapped"
+            )
+            try:
+                calls.append(len(calls) + 1)
+                if len(calls) >= 2:
+                    second_collection.set()
+                threading.Event().wait(0.01)
+                payload = {
+                    "checked_at": 1_700_000_100 + len(calls),
+                    "internet": {"online": True},
+                    "router": {"reachable": True},
+                    "ubnt": {"reachable": True},
+                }
+                return SimpleNamespace(
+                    returncode=0, stdout=json.dumps(payload), stderr=""
+                )
+            finally:
+                command_gate.release()
+
+        monitor = dashboard.ConnectivityMonitor(
+            collector="/test/connectivity",
+            interval=60,
+            command=command,
+        )
+        monitor.mark_active(lease=1)
+        monitor.start()
+        try:
+            self.assertTrue(
+                second_collection.wait(1), "active collection did not repeat"
+            )
+            self.assertTrue(monitor.snapshot()["active_mode"])
+        finally:
+            monitor.stop()
+            monitor.thread.join(1)
+        self.assertGreaterEqual(len(calls), 2)
+        self.assertFalse(monitor.thread.is_alive())
 
 
 class PriceCheckControllerTests(unittest.TestCase):
@@ -4072,6 +4116,43 @@ class DashboardRouteTests(unittest.TestCase):
         speedtest = client.get("/api/speedtest")
         self.assertEqual(speedtest.status_code, 200)
         self.assertIn(speedtest.json["speedtest"]["status"], ("idle", "complete", "error"))
+
+    def test_connectivity_active_query_renews_worker_lease_without_collecting(self):
+        calls = []
+
+        class FakeConnectivity:
+            def mark_active(self):
+                calls.append("active")
+
+            def snapshot(self):
+                calls.append("snapshot")
+                return {"router": {}, "active_mode": bool(calls)}
+
+        client = dashboard.app.test_client()
+        with mock.patch.object(dashboard, "connectivity", FakeConnectivity()):
+            response = client.get("/api/connectivity?active=1")
+            invalid_value = client.get("/api/connectivity?active=true")
+            unknown = client.get("/api/connectivity?fresh=1")
+            duplicate = client.get("/api/connectivity?active=1&active=1")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(calls, ["active", "snapshot"])
+        self.assertEqual(invalid_value.status_code, 400)
+        self.assertEqual(unknown.status_code, 400)
+        self.assertEqual(duplicate.status_code, 400)
+
+    def test_visible_dashboard_polls_connectivity_cache_and_renews_active_lease(self):
+        javascript = (
+            REPOSITORY_ROOT
+            / "pi"
+            / "apps"
+            / "van_dashboard"
+            / "static"
+            / "van_dashboard.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn("'/api/connectivity?active=1'", javascript)
+        self.assertIn("setTimeout(pollConnectivity, 1000)", javascript)
+        self.assertNotIn("if (!document.hidden) refreshConnectivity();", javascript)
 
     def test_usb_status_route_is_read_only_and_uncached(self):
         calls = []

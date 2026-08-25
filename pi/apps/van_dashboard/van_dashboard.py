@@ -110,6 +110,12 @@ USB2_RECOVERY_TOOL = os.environ.get(
     "VAN_DASHBOARD_USB2_RECOVERY_TOOL", "/home/pi/scripts/recover_usb2.sh"
 )
 CONNECTIVITY_INTERVAL = float(os.environ.get("VAN_DASHBOARD_CONNECTIVITY_INTERVAL", "30"))
+CONNECTIVITY_ACTIVE_LEASE = float(
+    os.environ.get("VAN_DASHBOARD_CONNECTIVITY_ACTIVE_LEASE", "10")
+)
+CONNECTIVITY_ACTIVE_RETRY_INTERVAL = float(
+    os.environ.get("VAN_DASHBOARD_CONNECTIVITY_ACTIVE_RETRY_INTERVAL", "1")
+)
 OPENWRT_CLIENTS_TIMEOUT = float(
     os.environ.get("VAN_DASHBOARD_OPENWRT_CLIENTS_TIMEOUT", "15")
 )
@@ -1818,10 +1824,12 @@ class ConnectivityMonitor:
         self.clock = clock
         self.wall_clock = wall_clock
         self.lock = threading.Lock()
+        self.condition = threading.Condition(self.lock)
         self.stop_event = threading.Event()
-        self.refresh_event = threading.Event()
         self.thread = None
         self.refreshing = False
+        self.refresh_requested = False
+        self.active_until = 0.0
         self.last_error = None
         self.data = {
             "checked_at": None,
@@ -1857,15 +1865,29 @@ class ConnectivityMonitor:
 
     def stop(self):
         self.stop_event.set()
-        self.refresh_event.set()
+        with self.condition:
+            self.condition.notify_all()
 
     def request_refresh(self):
-        """Wake the collector without doing router I/O in the request thread."""
-        self.refresh_event.set()
+        """Schedule a sample without doing router I/O in the request thread."""
+        with self.condition:
+            self.refresh_requested = True
+            self.condition.notify_all()
+
+    def mark_active(self, lease=CONNECTIVITY_ACTIVE_LEASE):
+        """Keep sequential collection active while a dashboard is visible."""
+        with self.condition:
+            self.active_until = max(self.active_until, self.clock() + lease)
+            self.condition.notify_all()
+
+    def _active_locked(self):
+        return self.clock() < self.active_until
 
     def refresh(self):
-        with self.lock:
+        with self.condition:
             self.refreshing = True
+        payload = None
+        error = None
         try:
             result = self.command([self.collector], timeout=25)
             if result.returncode:
@@ -1877,15 +1899,17 @@ class ConnectivityMonitor:
             ):
                 raise ValueError("collector returned an incomplete payload")
         except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
-            with self.lock:
-                self.last_error = str(exc)
-        else:
-            with self.lock:
-                self.data = payload
-                self.last_error = None
+            error = str(exc)
         finally:
-            with self.lock:
+            with self.condition:
+                if error is not None:
+                    self.last_error = error
+                else:
+                    assert payload is not None
+                    self.data = payload
+                    self.last_error = None
                 self.refreshing = False
+                self.condition.notify_all()
         return self.snapshot()
 
     def snapshot(self):
@@ -1893,6 +1917,7 @@ class ConnectivityMonitor:
             data = copy.deepcopy(self.data)
             data["refreshing"] = self.refreshing
             data["last_error"] = self.last_error
+            data["active_mode"] = self._active_locked()
         checked_at = data.get("checked_at")
         data["stale"] = checked_at is None or (
             self.wall_clock() - checked_at > max(60.0, self.interval * 2.5)
@@ -1901,11 +1926,26 @@ class ConnectivityMonitor:
 
     def _loop(self):
         while not self.stop_event.is_set():
+            with self.condition:
+                self.refresh_requested = False
             started = self.clock()
-            self.refresh()
+            status = self.refresh()
             remaining = max(1.0, self.interval - (self.clock() - started))
-            self.refresh_event.wait(remaining)
-            self.refresh_event.clear()
+            with self.condition:
+                if self._active_locked() and status.get("last_error") is None:
+                    continue
+                if self._active_locked():
+                    self.condition.wait_for(
+                        lambda: self.stop_event.is_set() or self.refresh_requested,
+                        timeout=min(remaining, CONNECTIVITY_ACTIVE_RETRY_INTERVAL),
+                    )
+                else:
+                    self.condition.wait_for(
+                        lambda: self.stop_event.is_set()
+                        or self.refresh_requested
+                        or self._active_locked(),
+                        timeout=remaining,
+                    )
 
 
 class OpenWrtClientsError(RuntimeError):
@@ -5519,6 +5559,13 @@ def api_lights_color_temperature():
 
 @app.route("/api/connectivity")
 def api_connectivity():
+    if set(request.args) - {"active"} or len(request.args.getlist("active")) > 1:
+        return api_error("connectivity accepts only active=1", 400)
+    active = request.args.get("active")
+    if active not in (None, "1"):
+        return api_error("active must be 1", 400)
+    if active == "1":
+        connectivity.mark_active()
     response = jsonify({"ok": True, "connectivity": connectivity.snapshot()})
     response.headers["Cache-Control"] = "no-store"
     return response

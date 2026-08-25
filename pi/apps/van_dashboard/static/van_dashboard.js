@@ -47,6 +47,7 @@ let dashboard = null,
   tileEditing = false,
   tileDrag = null,
   toastTimer = 0,
+  connectivityPoll = 0,
   speedPoll = 0,
   storagePoll = 0,
   lightingPoll = 0,
@@ -63,6 +64,7 @@ let dashboard = null,
   backupLastCompletion = '',
   backupLastStopCompletion = '',
   diskRunningOperation = '',
+  connectivityPolling = false,
   openwrtClientsBusy = false,
   sonosTimeline = { position: 0, duration: 0, playing: false, updatedAt: 0 };
 const TILE_ORDER_STORAGE_KEY = 'van-dashboard.tile-order.v1';
@@ -798,13 +800,25 @@ function renderConnectivity(response) {
           : 'Waiting for MWAN3';
   renderOpenwrtPanel(c);
 }
-async function refreshConnectivity() {
+async function refreshConnectivity(active = false) {
   try {
-    renderConnectivity(await json('/api/connectivity'));
+    const endpoint = active ? '/api/connectivity?active=1' : '/api/connectivity';
+    renderConnectivity(await json(endpoint));
   } catch (error) {
     $('openwrt-age').textContent = error.message;
     ubntLink = null;
     renderUbntTile();
+  }
+}
+async function pollConnectivity() {
+  clearTimeout(connectivityPoll);
+  if (document.hidden || connectivityPolling) return;
+  connectivityPolling = true;
+  try {
+    await refreshConnectivity(true);
+  } finally {
+    connectivityPolling = false;
+    if (!document.hidden) connectivityPoll = setTimeout(pollConnectivity, 1000);
   }
 }
 function renderOpenwrtClients(state) {
@@ -4476,7 +4490,7 @@ document.addEventListener('click', (event) => {
 function refreshVisibleDashboard() {
   if (document.hidden) return;
   refresh();
-  refreshConnectivity();
+  pollConnectivity();
   if ($('openwrt-backdrop').classList.contains('open')) refreshOpenwrtClients(false);
   refreshSpeedtest();
   refreshSonos();
@@ -4493,10 +4507,10 @@ function refreshVisibleDashboard() {
   refreshTelemetrySummary();
 }
 setupTruncationTitles();
+pollConnectivity();
 Promise.allSettled([
   refresh(),
   loadSpeakers(),
-  refreshConnectivity(),
   refreshSpeedtest(),
   refreshStoragePolicy(),
   refreshDiskStatus(false),
@@ -4515,9 +4529,6 @@ Promise.allSettled([
 setInterval(() => {
   if (!document.hidden) refresh();
 }, 5000);
-setInterval(() => {
-  if (!document.hidden) refreshConnectivity();
-}, 10000);
 setInterval(() => {
   if (!document.hidden) refreshTelemetrySummary();
 }, 15000);
