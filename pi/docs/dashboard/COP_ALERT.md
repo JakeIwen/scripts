@@ -158,6 +158,18 @@ managed `van-cop-can-wake.service` in `/home/pi/dev/obd-things` is the only
 maintained bridge from the requested-intent marker to guarded vehicle-network
 wake operations.
 
+The dashboard reads that supervisor's transition-driven status from
+`/run/van-cop-can-wake/status.json`. It checks the service is active, uses
+`lstat`, refuses symlinks and non-regular or oversized files, verifies the
+schema/service/C-CAN role, and exposes only explicitly allowed fields through
+`/api/status`. The dashboard never writes this file. An old `generated_at` is
+not considered stale because the supervisor updates the file on transitions,
+not as a heartbeat. The tile distinguishes requested COP intent from CAN-wake
+execution with IDLE, ARMING, WAKING, ACTIVE, BLOCKED, PAUSED, and OFFLINE states;
+the last blocked reason, detail, and timestamp remain visible after disarming.
+After a successful intent change, the browser briefly polls the ordinary status
+API at 500 ms intervals, then returns to its normal five-second refresh.
+
 ## Exterior LED matching
 
 The COP ALERT request is not blocked by the exterior light. A separate worker

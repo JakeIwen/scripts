@@ -21,6 +21,7 @@ import plistlib
 import re
 import shlex
 import sqlite3
+import stat
 import subprocess
 import sys
 import threading
@@ -79,6 +80,12 @@ STATE_PATH = os.path.expanduser(
 )
 RUNTIME_DIR = os.environ.get("VAN_DASHBOARD_RUNTIME_DIR", "/run/van-dashboard")
 ACTIVE_MARKER = os.path.join(RUNTIME_DIR, "cop-alert.active")
+COP_CAN_WAKE_STATUS = os.environ.get(
+    "VAN_DASHBOARD_COP_CAN_WAKE_STATUS",
+    "/run/van-cop-can-wake/status.json",
+)
+COP_CAN_WAKE_SERVICE = "van-cop-can-wake.service"
+COP_CAN_WAKE_STATUS_MAX_BYTES = 16 * 1024
 IGNITION_MARKER = os.environ.get(
     "VAN_DASHBOARD_IGNITION_MARKER", "/home/pi/hooks/ignition_is_on"
 )
@@ -335,6 +342,185 @@ def ignition_is_on(path=IGNITION_MARKER):
     except OSError:
         return True
     return True
+
+
+class CopCanWakeStatusReader:
+    """Read and sanitize the CAN-wake supervisor's untrusted status file."""
+
+    STATES = {
+        "idle",
+        "starting",
+        "arming_delay",
+        "paused_ignition",
+        "blocked",
+        "waking",
+        "active_waiting",
+        "stopping",
+        "stopped",
+    }
+    BOOLEAN_FIELDS = {
+        "marker_active",
+        "ignition_on",
+        "transaction_in_progress",
+    }
+    NUMBER_FIELDS = {
+        "activation_debounce_seconds",
+        "preexisting_marker_delay_seconds",
+        "safety_retry_seconds",
+        "fixed_success_cadence_seconds",
+    }
+    STRING_FIELDS = {
+        "next_attempt_at",
+        "last_attempt_at",
+        "last_success_at",
+        "last_reason",
+        "last_detail",
+        "last_blocked_at",
+        "last_blocked_reason",
+        "last_blocked_detail",
+        "generated_at",
+    }
+
+    def __init__(
+        self,
+        path=COP_CAN_WAKE_STATUS,
+        command=run_command,
+        systemctl=SYSTEMCTL,
+        service=COP_CAN_WAKE_SERVICE,
+        timeout=3,
+        max_bytes=COP_CAN_WAKE_STATUS_MAX_BYTES,
+    ):
+        self.path = path
+        self.command = command
+        self.systemctl = systemctl
+        self.service = service
+        self.timeout = timeout
+        self.max_bytes = max_bytes
+
+    def snapshot(self):
+        service_active, service_error = self._service_active()
+        try:
+            raw = self._read_regular_file()
+            payload = json.loads(raw.decode("utf-8"))
+            sanitized = self._sanitize(payload)
+        except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as exc:
+            return {
+                "available": False,
+                "service_active": service_active,
+                "error": service_error or self._safe_error(exc),
+            }
+
+        sanitized["service_active"] = service_active
+        sanitized["available"] = service_active
+        sanitized["error"] = service_error
+        return sanitized
+
+    def _service_active(self):
+        try:
+            result = self.command(
+                [self.systemctl, "is-active", self.service],
+                timeout=self.timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return False, "CAN wake supervisor status check timed out"
+        except OSError:
+            return False, "CAN wake supervisor status could not be checked"
+        if result.returncode == 0 and result.stdout.strip() == "active":
+            return True, None
+        return False, "CAN wake supervisor is not active"
+
+    def _read_regular_file(self):
+        before = os.lstat(self.path)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError("status path is not a regular file")
+        if before.st_size > self.max_bytes:
+            raise ValueError("status file is too large")
+
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(self.path, flags)
+        try:
+            opened = os.fstat(descriptor)
+            after = os.lstat(self.path)
+            if not stat.S_ISREG(opened.st_mode):
+                raise ValueError("opened status is not a regular file")
+            if not stat.S_ISREG(after.st_mode):
+                raise ValueError("status path changed to a non-regular file")
+            identity = (before.st_dev, before.st_ino)
+            if identity != (opened.st_dev, opened.st_ino) or identity != (
+                after.st_dev,
+                after.st_ino,
+            ):
+                raise ValueError("status file changed while opening")
+            if opened.st_size > self.max_bytes:
+                raise ValueError("status file is too large")
+            chunks = []
+            remaining = self.max_bytes + 1
+            while remaining:
+                chunk = os.read(descriptor, remaining)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            content = b"".join(chunks)
+            if len(content) > self.max_bytes:
+                raise ValueError("status file is too large")
+            return content
+        finally:
+            os.close(descriptor)
+
+    def _sanitize(self, payload):
+        if not isinstance(payload, dict):
+            raise ValueError("status JSON is not an object")
+        if payload.get("service") != "van-cop-can-wake":
+            raise ValueError("unexpected status service")
+        if payload.get("role") != "c-can":
+            raise ValueError("unexpected status role")
+        schema_version = payload.get("schema_version")
+        if isinstance(schema_version, bool) or schema_version != 1:
+            raise ValueError("unsupported status schema")
+
+        state = payload.get("state")
+        if state not in self.STATES:
+            raise ValueError("unknown supervisor state")
+        sanitized = {"state": state}
+
+        for field in self.BOOLEAN_FIELDS:
+            if field not in payload:
+                continue
+            if not isinstance(payload[field], bool):
+                raise ValueError(f"invalid {field}")
+            sanitized[field] = payload[field]
+
+        for field in self.NUMBER_FIELDS:
+            if field not in payload:
+                continue
+            value = payload[field]
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"invalid {field}")
+            if not math.isfinite(value) or value < 0:
+                raise ValueError(f"invalid {field}")
+            sanitized[field] = value
+
+        if "wake_count" in payload:
+            value = payload["wake_count"]
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError("invalid wake_count")
+            sanitized["wake_count"] = value
+
+        for field in self.STRING_FIELDS:
+            if field not in payload:
+                continue
+            value = payload[field]
+            if value is not None and (not isinstance(value, str) or len(value) > 2048):
+                raise ValueError(f"invalid {field}")
+            sanitized[field] = value
+        return sanitized
+
+    @staticmethod
+    def _safe_error(exc):
+        if isinstance(exc, FileNotFoundError):
+            return "CAN wake supervisor status is unavailable"
+        return "CAN wake supervisor status is invalid"
 
 
 class CopAlertManager:
@@ -4919,6 +5105,7 @@ class VoltageCheckManager:
 app = Flask(__name__)
 state_store = StateStore()
 cop_alert = CopAlertManager(state_store)
+cop_can_wake = CopCanWakeStatusReader()
 cop_led = CopLedManager(state_store)
 sonos = SonosController(state_store)
 connectivity = ConnectivityMonitor()
@@ -4992,6 +5179,7 @@ def api_status():
         {
             "ok": True,
             "cop_alert": cop_alert.snapshot(),
+            "cop_can_wake": cop_can_wake.snapshot(),
             "cop_led": cop_led.snapshot(),
             "starlink": starlink.snapshot(),
             "system_uptime": read_system_uptime(),

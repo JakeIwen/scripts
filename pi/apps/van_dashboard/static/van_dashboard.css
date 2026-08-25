@@ -444,6 +444,50 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.cop-wake-pill {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1.25;
+}
+.cop-wake-pill.arming,
+.cop-wake-pill.waking,
+.cop-wake-pill.paused {
+  border-color: #9a713b;
+  background: #523d22;
+  color: #ffe2aa;
+}
+.cop-wake-pill.active {
+  border-color: #3f8064;
+  background: #244838;
+  color: #c1f1d7;
+}
+.cop-wake-pill.blocked {
+  border-color: #9c554d;
+  background: #512d2a;
+  color: #ffc5bf;
+}
+.cop-wake-pill.idle,
+.cop-wake-pill.offline {
+  border-color: var(--line);
+  background: #172129;
+  color: var(--dim);
+}
+.cop-wake-detail-row[hidden] {
+  display: none;
+}
+.cop-wake-detail-row {
+  align-items: flex-start;
+}
+.cop-wake-detail-row #cop-wake-detail {
+  max-width: 70%;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
 .switch-state {
   position: absolute;
   right: 14px;

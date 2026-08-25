@@ -1,5 +1,7 @@
 const $ = (id) => document.getElementById(id);
 let dashboard = null,
+  copCanWake = null,
+  copLed = null,
   speakers = null,
   storagePolicy = null,
   diskStatus = null,
@@ -43,6 +45,10 @@ let dashboard = null,
   dashboardRestartBusy = false,
   voltageCheckBusy = false,
   telemetryServiceBusy = false,
+  copAlertPending = false,
+  copArmingOptimistic = false,
+  copStatusPollToken = 0,
+  statusRequest = null,
   busy = false,
   tileEditing = false,
   tileDrag = null,
@@ -3673,28 +3679,187 @@ function renderStarlink(status) {
         ? 'Tuya switch is off'
         : 'Tuya status unavailable';
 }
-function updateStatus(data) {
-  dashboard = data.cop_alert;
-  const active = dashboard.active;
-  const led = data.cop_led || {};
-  $('system-uptime').textContent = formatUptime(data.system_uptime?.seconds);
-  renderStarlink(data.starlink);
+function copWakeView(active, status) {
+  const state = status?.state || '';
+  if (!active) {
+    return {
+      label: status?.available && state === 'idle' ? 'IDLE' : 'OFFLINE',
+      className: status?.available && state === 'idle' ? 'idle' : 'offline',
+      detail: 'Tap to wake the dashcam and arm the exterior alert',
+    };
+  }
+  if (copArmingOptimistic) {
+    return {
+      label: 'ARMING',
+      className: 'arming',
+      detail: 'Arming dashcam wake…',
+    };
+  }
+  if (!status?.available || state === 'stopped' || state === 'stopping') {
+    return {
+      label: 'OFFLINE',
+      className: 'offline',
+      detail: 'Exterior alert armed · CAN wake supervisor unavailable',
+    };
+  }
+  if (state === 'idle' || state === 'starting' || state === 'arming_delay') {
+    return {
+      label: 'ARMING',
+      className: 'arming',
+      detail: 'Arming dashcam wake…',
+    };
+  }
+  if (state === 'waking') {
+    return {
+      label: 'WAKING',
+      className: 'waking',
+      detail: 'Waking dashcam/accessory network…',
+    };
+  }
+  if (state === 'active_waiting') {
+    return {
+      label: 'ACTIVE',
+      className: 'active',
+      detail: status.last_success_at
+        ? 'Dashcam wake, exterior alert, and 5-minute bacon notifications are active'
+        : 'Exterior alert armed · CAN wake waiting',
+    };
+  }
+  if (state === 'blocked') {
+    return {
+      label: 'BLOCKED',
+      className: 'blocked',
+      detail: 'Exterior alert armed · CAN wake waiting',
+      wakeDetail: status.last_detail || status.last_blocked_detail || '',
+    };
+  }
+  if (state === 'paused_ignition') {
+    return {
+      label: 'PAUSED',
+      className: 'paused',
+      detail: 'Exterior alert paused while ignition is on',
+    };
+  }
+  return {
+    label: 'OFFLINE',
+    className: 'offline',
+    detail: 'Exterior alert armed · CAN wake supervisor unavailable',
+  };
+}
+function copLastBlockedText(status) {
+  const values = [status?.last_blocked_reason, status?.last_blocked_detail].filter(
+    (value, index, items) => value && items.indexOf(value) === index,
+  );
+  if (status?.last_blocked_at) values.push(status.last_blocked_at);
+  return values.join(' · ');
+}
+function renderCopAlert() {
+  const active = Boolean(dashboard?.active),
+    wake = copWakeView(active, copCanWake),
+    pill = $('cop-can-wake'),
+    lastBlocked = copLastBlockedText(copCanWake),
+    wakeDetail = wake.wakeDetail || (!active ? lastBlocked : ''),
+    detailRow = $('cop-wake-detail-row');
   $('cop').classList.toggle('active', active);
   $('cop').setAttribute('aria-pressed', String(active));
+  $('cop').setAttribute('aria-busy', String(copAlertPending));
+  $('cop').disabled = copAlertPending;
   $('cop-pill').textContent = active ? 'ACTIVE' : 'OFF';
-  $('cop-detail').textContent = active
-    ? dashboard.ignition_on
-      ? 'Exterior alert paused while ignition is on'
-      : 'Exterior alert and 5-minute bacon notifications are active'
-    : 'Tap to arm the exterior alert';
-  $('cop-ignition').textContent = dashboard.ignition_on ? 'ON · alert paused' : 'OFF';
-  $('cop-led').textContent = led.message || 'No data';
-  $('cop-led').title = led.last_error || '';
+  $('cop-detail').textContent = wake.detail;
+  pill.textContent = wake.label;
+  pill.className = `cop-wake-pill ${wake.className}`;
+  $('cop-led').textContent = copLed?.message || 'No data';
+  $('cop-led').title = copLed?.last_error || '';
+  detailRow.hidden = !wakeDetail;
+  $('cop-wake-detail-label').textContent = active ? 'Wake detail' : 'Last block';
+  $('cop-wake-detail').textContent = wakeDetail || '—';
+}
+function updateStatus(data) {
+  dashboard = data.cop_alert;
+  copCanWake = data.cop_can_wake || null;
+  copLed = data.cop_led || {};
+  const wakeState = copCanWake?.state || '';
+  if (
+    copCanWake?.marker_active ||
+    ['waking', 'active_waiting', 'blocked', 'paused_ignition', 'stopping', 'stopped'].includes(
+      wakeState,
+    )
+  ) {
+    copArmingOptimistic = false;
+  }
+  $('system-uptime').textContent = formatUptime(data.system_uptime?.seconds);
+  renderStarlink(data.starlink);
+  renderCopAlert();
+}
+async function fetchStatus() {
+  if (statusRequest) return statusRequest;
+  statusRequest = json('/api/status');
+  try {
+    return await statusRequest;
+  } finally {
+    statusRequest = null;
+  }
 }
 async function refresh() {
   try {
-    updateStatus(await json('/api/status'));
+    updateStatus(await fetchStatus());
   } catch (_) {}
+}
+function copWakePollComplete(active) {
+  const state = copCanWake?.state || '';
+  if (!copCanWake?.available) return true;
+  if (active) {
+    return ['active_waiting', 'blocked', 'paused_ignition', 'stopping', 'stopped'].includes(
+      state,
+    );
+  }
+  return state === 'idle' || state === 'stopped';
+}
+function wait(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+async function pollCopCanWake(token, active) {
+  const deadline = Date.now() + 10000;
+  while (token === copStatusPollToken && Date.now() < deadline) {
+    await wait(500);
+    if (token !== copStatusPollToken) return;
+    try {
+      updateStatus(await fetchStatus());
+      if (copWakePollComplete(active)) {
+        copArmingOptimistic = false;
+        renderCopAlert();
+        return;
+      }
+    } catch (_) {}
+  }
+  if (token === copStatusPollToken) {
+    copArmingOptimistic = false;
+    renderCopAlert();
+  }
+}
+async function toggleCopAlert() {
+  if (copAlertPending) return;
+  const active = !Boolean(dashboard?.active);
+  copAlertPending = true;
+  renderCopAlert();
+  let accepted = false;
+  try {
+    const result = await post('cop-alert', { active: String(active) });
+    dashboard = result.cop_alert;
+    copArmingOptimistic = active;
+    accepted = true;
+    toast(result.message);
+  } catch (error) {
+    toast(error.message, true);
+    await refresh();
+  } finally {
+    copAlertPending = false;
+    renderCopAlert();
+  }
+  if (accepted) {
+    const token = ++copStatusPollToken;
+    pollCopCanWake(token, active);
+  }
 }
 function muteIcon(muted) {
   return muted ? '🔇' : '🔊';
@@ -4100,9 +4265,7 @@ $('video-library').href = siblingServiceUrl(8789);
 $('telemetry-open').href = siblingServiceUrl(8765);
 $('telemetry-service-toggle').addEventListener('click', toggleTelemetryService);
 $('telemetry-check').addEventListener('click', requestVoltageCheck);
-$('cop').addEventListener('click', () =>
-  action(() => post('cop-alert', { active: dashboard?.active ? 'false' : 'true' })),
-);
+$('cop').addEventListener('click', toggleCopAlert);
 $('starlink').addEventListener('click', () => {
   renderStarlink({ state: 'unknown', changing: true });
   action(async () => {

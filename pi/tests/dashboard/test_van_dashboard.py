@@ -2707,6 +2707,164 @@ class CopLedManagerTests(unittest.TestCase):
         self.assertEqual(self.calls, [])
 
 
+class CopCanWakeStatusReaderTests(unittest.TestCase):
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tempdir.cleanup)
+        self.path = os.path.join(self.tempdir.name, "status.json")
+        self.commands = []
+
+    def payload(self, **changes):
+        value = {
+            "service": "van-cop-can-wake",
+            "role": "c-can",
+            "schema_version": 1,
+            "wake_method": "must not escape the trust boundary",
+            "state": "active_waiting",
+            "marker_active": True,
+            "ignition_on": False,
+            "transaction_in_progress": False,
+            "activation_debounce_seconds": 0.25,
+            "preexisting_marker_delay_seconds": 3.0,
+            "safety_retry_seconds": 0.5,
+            "fixed_success_cadence_seconds": 15.0,
+            "next_attempt_at": "2001-01-01T00:00:15+00:00",
+            "wake_count": 4,
+            "last_attempt_at": "2001-01-01T00:00:00+00:00",
+            "last_success_at": "2001-01-01T00:00:00+00:00",
+            "last_reason": "fixed wake",
+            "last_detail": "wake accepted",
+            "last_blocked_at": None,
+            "last_blocked_reason": None,
+            "last_blocked_detail": None,
+            "generated_at": "2001-01-01T00:00:01+00:00",
+        }
+        value.update(changes)
+        return value
+
+    def write_payload(self, payload):
+        with open(self.path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle)
+
+    def command(self, args, timeout):
+        self.commands.append((list(args), timeout))
+        return SimpleNamespace(returncode=0, stdout="active\n", stderr="")
+
+    def reader(self, **changes):
+        return dashboard.CopCanWakeStatusReader(
+            path=self.path,
+            command=self.command,
+            systemctl="/test/systemctl",
+            timeout=2,
+            **changes,
+        )
+
+    def test_sanitizes_valid_status_without_treating_old_generation_as_stale(self):
+        self.write_payload(self.payload(secret="drop me"))
+        status = self.reader().snapshot()
+
+        self.assertTrue(status["available"])
+        self.assertTrue(status["service_active"])
+        self.assertEqual(status["state"], "active_waiting")
+        self.assertEqual(status["generated_at"], "2001-01-01T00:00:01+00:00")
+        self.assertEqual(status["wake_count"], 4)
+        self.assertNotIn("service", status)
+        self.assertNotIn("role", status)
+        self.assertNotIn("schema_version", status)
+        self.assertNotIn("wake_method", status)
+        self.assertNotIn("secret", status)
+        self.assertEqual(
+            self.commands,
+            [(["/test/systemctl", "is-active", "van-cop-can-wake.service"], 2)],
+        )
+
+    def test_inactive_service_preserves_sanitized_diagnostic_history(self):
+        self.write_payload(
+            self.payload(
+                state="blocked",
+                last_blocked_detail="another process owns the adapter",
+            )
+        )
+
+        def inactive(_args, timeout):
+            self.assertEqual(timeout, 2)
+            return SimpleNamespace(returncode=3, stdout="inactive\n", stderr="")
+
+        status = dashboard.CopCanWakeStatusReader(
+            path=self.path,
+            command=inactive,
+            systemctl="/test/systemctl",
+            timeout=2,
+        ).snapshot()
+        self.assertFalse(status["available"])
+        self.assertFalse(status["service_active"])
+        self.assertEqual(status["state"], "blocked")
+        self.assertEqual(
+            status["last_blocked_detail"],
+            "another process owns the adapter",
+        )
+
+    def test_rejects_malformed_identity_state_and_field_types(self):
+        invalid_payloads = (
+            self.payload(service="other-service"),
+            self.payload(role="b-can"),
+            self.payload(schema_version=2),
+            self.payload(schema_version=True),
+            self.payload(state="surprise"),
+            self.payload(marker_active="yes"),
+            self.payload(wake_count=-1),
+            self.payload(safety_retry_seconds=float("inf")),
+            self.payload(last_detail=7),
+            ["not", "an", "object"],
+        )
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload):
+                self.write_payload(payload)
+                status = self.reader().snapshot()
+                self.assertFalse(status["available"])
+                self.assertEqual(
+                    status["error"],
+                    "CAN wake supervisor status is invalid",
+                )
+                self.assertNotIn("state", status)
+
+    def test_rejects_symlink_non_regular_malformed_and_oversized_files(self):
+        target = os.path.join(self.tempdir.name, "target.json")
+        with open(target, "w", encoding="utf-8") as handle:
+            json.dump(self.payload(), handle)
+        os.symlink(target, self.path)
+        self.assertFalse(self.reader().snapshot()["available"])
+        os.unlink(self.path)
+
+        os.mkfifo(self.path)
+        self.assertFalse(self.reader().snapshot()["available"])
+        os.unlink(self.path)
+
+        with open(self.path, "w", encoding="utf-8") as handle:
+            handle.write("{not-json")
+        self.assertFalse(self.reader().snapshot()["available"])
+
+        with open(self.path, "wb") as handle:
+            handle.write(b"x" * 33)
+        self.assertFalse(self.reader(max_bytes=32).snapshot()["available"])
+
+    def test_service_check_timeout_is_offline_but_status_remains_sanitized(self):
+        self.write_payload(self.payload(state="idle", marker_active=False))
+
+        def timeout(_args, timeout):
+            raise subprocess.TimeoutExpired("systemctl", timeout)
+
+        status = dashboard.CopCanWakeStatusReader(
+            path=self.path,
+            command=timeout,
+            timeout=0.1,
+        ).snapshot()
+        self.assertFalse(status["available"])
+        self.assertFalse(status["service_active"])
+        self.assertEqual(status["state"], "idle")
+        self.assertIn("timed out", status["error"])
+
+
 class CopAlertManagerTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
@@ -3516,6 +3674,12 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"MWAN3 route", page.data)
         self.assertIn(b"ext_led", page.data)
         self.assertIn(b'id="cop-led"', page.data)
+        self.assertIn(b'id="cop-can-wake">OFFLINE', page.data)
+        self.assertIn(b'id="cop-wake-detail-row" hidden', page.data)
+        self.assertIn(
+            b"Tap to wake the dashcam and arm the exterior alert",
+            page.data,
+        )
         self.assertNotIn(b"ext_flood", page.data)
         self.assertNotIn(b'id="flood"', page.data)
         self.assertNotIn(b">Connectivity<", page.data)
@@ -3769,6 +3933,21 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"function controlBackup(kind)", javascript.data)
         self.assertIn(b"post(`backups/${kind}/stop`)", javascript.data)
         self.assertIn(b"cop-led", javascript.data)
+        self.assertIn(b"function copWakeView(active, status)", javascript.data)
+        self.assertIn(b"function pollCopCanWake(token, active)", javascript.data)
+        self.assertIn(b"await wait(500)", javascript.data)
+        self.assertIn(b"Date.now() + 10000", javascript.data)
+        self.assertIn(b"Arming dashcam wake", javascript.data)
+        self.assertIn(b"Waking dashcam/accessory network", javascript.data)
+        self.assertIn(
+            b"Dashcam wake, exterior alert, and 5-minute bacon notifications are active",
+            javascript.data,
+        )
+        self.assertIn(b"Exterior alert armed ", javascript.data)
+        self.assertIn(b"CAN wake supervisor unavailable", javascript.data)
+        self.assertIn(b"$('cop-wake-detail').textContent", javascript.data)
+        self.assertNotIn(b"$('cop-wake-detail').innerHTML", javascript.data)
+        self.assertIn(b".cop-wake-pill", stylesheet.data)
         self.assertNotIn(b"dashboard.ext_flood", javascript.data)
         self.assertNotIn(b"'Speed Test'", javascript.data)
         self.assertNotIn(b'"Speed Test"', javascript.data)
@@ -4014,6 +4193,25 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertNotIn("import isotp", source)
         self.assertNotIn("lib.can_wake", source)
         self.assertNotIn("CAN_CHANNEL", source)
+
+    def test_status_route_exposes_sanitized_cop_can_wake_snapshot(self):
+        class FakeCanWake:
+            @staticmethod
+            def snapshot():
+                return {
+                    "available": True,
+                    "service_active": True,
+                    "state": "idle",
+                    "marker_active": False,
+                }
+
+        client = dashboard.app.test_client()
+        with mock.patch.object(dashboard, "cop_can_wake", FakeCanWake()):
+            response = client.get("/api/status")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["cop_can_wake"]["state"], "idle")
+        self.assertNotIn("wake_method", response.json["cop_can_wake"])
 
     def test_connectivity_and_speedtest_status_routes(self):
         client = dashboard.app.test_client()
