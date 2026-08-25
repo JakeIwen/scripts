@@ -1,18 +1,12 @@
 #!/usr/bin/env python3
 """Phone-friendly control surface for vanpi.
 
-The first dashboard feature is COP ALERT.  While active it:
+COP ALERT publishes requested intent through a runtime marker, maintains its
+exterior alert devices, and emits periodic notifications. A separate guarded
+supervisor owns vehicle-network wake operations.
 
-* keeps Home Assistant's ``switch.ext_flood`` on while the engine is stopped;
-* periodically wakes C-CAN with a benign RF Hub identification read so the
-  dash accessory rail (and therefore the dashcam) stays awake;
-* emits a bacon ntfy notification immediately and every five minutes; and
-* publishes fresh, passive C-CAN engine-running evidence for ignition_on.sh.
-
-The CAN receive path is passive.  The only transmitted frame is the explicitly
-requested RF Hub ReadDataByIdentifier wake.  This process deliberately does not
-bring can0 up/down or change its bitrate/listen-only state because the interface
-is shared with other vehicle tooling.
+This application does not open CAN sockets, inspect CAN interfaces, or wake the
+vehicle. Vehicle telemetry is displayed only through read-only service status.
 """
 
 import copy
@@ -27,8 +21,6 @@ import plistlib
 import re
 import shlex
 import sqlite3
-import socket
-import struct
 import subprocess
 import sys
 import threading
@@ -87,7 +79,9 @@ STATE_PATH = os.path.expanduser(
 )
 RUNTIME_DIR = os.environ.get("VAN_DASHBOARD_RUNTIME_DIR", "/run/van-dashboard")
 ACTIVE_MARKER = os.path.join(RUNTIME_DIR, "cop-alert.active")
-ENGINE_MARKER = os.path.join(RUNTIME_DIR, "engine-running")
+IGNITION_MARKER = os.environ.get(
+    "VAN_DASHBOARD_IGNITION_MARKER", "/home/pi/hooks/ignition_is_on"
+)
 
 TUYA_TOGGLE = os.environ.get("VAN_DASHBOARD_TUYA_TOGGLE", "/home/pi/scripts/tuya_toggle.sh")
 TUYA_STATUS = os.environ.get("VAN_DASHBOARD_TUYA_STATUS", "/home/pi/scripts/tuya_status.sh")
@@ -237,27 +231,6 @@ COP_LED_VERIFY_INTERVAL = float(
 )
 COP_LED_CONNECT_GRACE = float(os.environ.get("VAN_DASHBOARD_COP_LED_CONNECT_GRACE", "90"))
 
-CAN_CHANNEL = os.environ.get("VAN_DASHBOARD_CAN_CHANNEL", "can0")
-CAN_BITRATE = 500000
-# Two independent C-CAN engine-speed broadcasts. 0x0FC varies naturally around
-# idle while 0x0F4 held the same steady 752 RPM value in the reference capture;
-# requiring both avoids treating either field alone as proof.
-ENGINE_FRAME_DIVISORS = {0x0F4: 8.0, 0x0FC: 4.0}
-ENGINE_ACTUAL_FRAME_ID = 0x0FC
-ENGINE_RUNNING_MIN_RPM = 300.0
-ENGINE_RUNNING_MAX_RPM = 8000.0
-ENGINE_CONFIRM_FRAMES = 5
-ENGINE_EVIDENCE_MAX_AGE = 2.5
-CAN_EFF_FLAG = 0x80000000
-CAN_RTR_FLAG = 0x40000000
-CAN_SFF_MASK = 0x7FF
-
-# An RF Hub identification read is a verified, non-actuating C-CAN wake.  Its
-# network-management wake powers the dash accessory rail for roughly 30-60 s.
-RFH_TXID = 0x18DAC7F1
-RFH_RXID = 0x18DAF1C7
-RFH_WAKE_REQUEST = bytes((0x22, 0xF1, 0x90))
-WAKE_INTERVAL = float(os.environ.get("VAN_DASHBOARD_WAKE_INTERVAL", "15"))
 NTFY_INTERVAL = float(os.environ.get("VAN_DASHBOARD_NTFY_INTERVAL", "300"))
 NTFY_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_NTFY_TIMEOUT", "20"))
 FLOOD_CHECK_INTERVAL = float(os.environ.get("VAN_DASHBOARD_FLOOD_CHECK_INTERVAL", "15"))
@@ -337,127 +310,6 @@ class StateStore:
             atomic_json_write(self.path, self.data)
 
 
-def rpm_from_engine_frame(can_id, data):
-    """Decode the verified C-CAN engine-speed broadcast, or return None.
-
-    2026-07 labeled captures on this van showed both fields at 0 with ignition
-    on/engine stopped. At idle, 0x0F4 was 0x1780 (6016 / 8 = 752 RPM) while
-    0x0FC varied around 0x0BC0 (3008 / 4 = 752 RPM).
-    """
-    divisor = ENGINE_FRAME_DIVISORS.get(can_id)
-    if divisor is None or len(data) < 2:
-        return None
-    return ((data[0] << 8) | data[1]) / divisor
-
-
-class EngineMonitor:
-    """Passively track fresh engine-running evidence from C-CAN."""
-
-    def __init__(self, channel=CAN_CHANNEL, clock=time.monotonic):
-        self.channel = channel
-        self.clock = clock
-        self.lock = threading.Lock()
-        self.stop_event = threading.Event()
-        self.thread = None
-        self.last_frame_at = None
-        self.last_running_at = {can_id: None for can_id in ENGINE_FRAME_DIVISORS}
-        self.last_rpm = {can_id: None for can_id in ENGINE_FRAME_DIVISORS}
-        self.confirmations = {can_id: 0 for can_id in ENGINE_FRAME_DIVISORS}
-        self.error = "waiting for C-CAN engine-speed frames"
-
-    def start(self):
-        if not self.thread:
-            self.thread = threading.Thread(target=self._loop, name="engine-monitor", daemon=True)
-            self.thread.start()
-
-    def stop(self):
-        self.stop_event.set()
-
-    def observe(self, can_id, data, observed_at=None):
-        """Record one frame. Public so the decoder can be tested offline."""
-        rpm = rpm_from_engine_frame(can_id, data)
-        if rpm is None:
-            return
-        now = self.clock() if observed_at is None else observed_at
-        with self.lock:
-            self.last_frame_at = now
-            self.last_rpm[can_id] = rpm
-            self.error = None
-            if ENGINE_RUNNING_MIN_RPM <= rpm <= ENGINE_RUNNING_MAX_RPM:
-                self.confirmations[can_id] = min(
-                    ENGINE_CONFIRM_FRAMES, self.confirmations[can_id] + 1
-                )
-                if self.confirmations[can_id] >= ENGINE_CONFIRM_FRAMES:
-                    self.last_running_at[can_id] = now
-            else:
-                self.confirmations[can_id] = 0
-                self.last_running_at[can_id] = None
-
-    def snapshot(self):
-        now = self.clock()
-        with self.lock:
-            running_ages = [
-                now - self.last_running_at[can_id]
-                for can_id in ENGINE_FRAME_DIVISORS
-                if self.last_running_at[can_id] is not None
-            ]
-            running_age = max(running_ages) if len(running_ages) == len(ENGINE_FRAME_DIVISORS) else None
-            frame_age = None if self.last_frame_at is None else now - self.last_frame_at
-            running = running_age is not None and running_age <= ENGINE_EVIDENCE_MAX_AGE
-            rpm = self.last_rpm[ENGINE_ACTUAL_FRAME_ID]
-            if rpm is None:
-                rpm = next((value for value in self.last_rpm.values() if value is not None), None)
-            return {
-                "running": running,
-                "rpm": round(rpm, 1) if rpm is not None else None,
-                "evidence_age_seconds": round(running_age, 2) if running_age is not None else None,
-                "frame_age_seconds": round(frame_age, 2) if frame_age is not None else None,
-                "source": "C-CAN 0x0F4 BE/8 + 0x0FC BE/4",
-                "error": self.error,
-            }
-
-    def _loop(self):
-        while not self.stop_event.is_set():
-            can_socket = None
-            try:
-                can_socket = socket.socket(socket.AF_CAN, socket.SOCK_RAW, socket.CAN_RAW)
-                can_socket.setsockopt(
-                    socket.SOL_CAN_RAW,
-                    socket.CAN_RAW_FILTER,
-                    # Match only standard, non-RTR engine-speed data frames.
-                    # Without the flag bits in the mask, unrelated extended
-                    # frames with matching low 11 bits could be misclassified.
-                    b"".join(
-                        struct.pack(
-                            "=II",
-                            can_id,
-                            CAN_EFF_FLAG | CAN_RTR_FLAG | CAN_SFF_MASK,
-                        )
-                        for can_id in ENGINE_FRAME_DIVISORS
-                    ),
-                )
-                can_socket.bind((self.channel,))
-                can_socket.settimeout(1.0)
-                with self.lock:
-                    self.error = None
-                while not self.stop_event.is_set():
-                    try:
-                        frame = can_socket.recv(16)
-                    except socket.timeout:
-                        continue
-                    can_id, dlc, payload = struct.unpack("=IB3x8s", frame)
-                    if can_id & (CAN_EFF_FLAG | CAN_RTR_FLAG):
-                        continue
-                    self.observe(can_id & CAN_SFF_MASK, payload[:dlc])
-            except OSError as exc:
-                with self.lock:
-                    self.error = f"{self.channel} receive unavailable: {exc}"
-                self.stop_event.wait(2.0)
-            finally:
-                if can_socket is not None:
-                    can_socket.close()
-
-
 def run_command(args, timeout=20, input_text=None):
     return subprocess.run(
         args,
@@ -474,85 +326,32 @@ def read_text_file(path):
         return handle.read().strip()
 
 
-def c_can_link_status(command=run_command):
-    """Confirm the shared interface is already safe for the requested C-CAN TX."""
+def ignition_is_on(path=IGNITION_MARKER):
+    """Fail safe when the ignition marker cannot be inspected."""
     try:
-        result = command(["/usr/sbin/ip", "-details", "link", "show", CAN_CHANNEL], timeout=5)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return False, f"cannot inspect {CAN_CHANNEL}: {exc}"
-    output = f"{result.stdout}\n{result.stderr}"
-    if result.returncode:
-        return False, f"{CAN_CHANNEL} is unavailable"
-    if not re.search(r"\bstate UP\b|<[^>]*\bUP\b[^>]*>", output):
-        return False, f"{CAN_CHANNEL} is down"
-    match = re.search(r"\bbitrate\s+(\d+)", output)
-    bitrate = int(match.group(1)) if match else None
-    if bitrate != CAN_BITRATE:
-        return False, f"{CAN_CHANNEL} is not C-CAN speed (found {bitrate or 'unknown'} bit/s)"
-    if "LISTEN-ONLY" in output:
-        return False, f"{CAN_CHANNEL} is listen-only; shared interface was not reconfigured"
-    return True, f"{CAN_CHANNEL} armed at {CAN_BITRATE} bit/s"
-
-
-def send_c_can_wake(command=run_command):
-    """Send one self-validating RF Hub identification read.
-
-    A response (positive or negative) proves that the addressed exchange occurred.
-    No interface settings are changed here.
-    """
-    ready, detail = c_can_link_status(command)
-    if not ready:
-        return False, detail
-    wake_socket = None
-    try:
-        import isotp  # lazy: the dashboard and Sonos UI can still start if CAN tooling is absent
-
-        wake_socket = isotp.socket()
-        wake_socket.set_fc_opts(stmin=0, bs=0)
-        wake_socket.bind(
-            CAN_CHANNEL,
-            address=isotp.Address(
-                isotp.AddressingMode.Normal_29bits,
-                txid=RFH_TXID,
-                rxid=RFH_RXID,
-            ),
-        )
-        wake_socket.settimeout(1.5)
-        wake_socket.send(RFH_WAKE_REQUEST)
-        response = wake_socket.recv()
-    except (ImportError, OSError, RuntimeError) as exc:
-        return False, f"C-CAN wake failed: {exc}"
-    except Exception as exc:  # can-isotp uses its own timeout/error classes across versions
-        return False, f"C-CAN wake got no RF Hub response: {exc}"
-    finally:
-        if wake_socket is not None:
-            try:
-                wake_socket.close()
-            except Exception:
-                pass
-    if not response:
-        return False, "C-CAN wake got no RF Hub response"
-    return True, "RF Hub answered; C-CAN/dashcam wake refreshed"
+        os.lstat(path)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    return True
 
 
 class CopAlertManager:
     def __init__(
         self,
         store,
-        engine_monitor,
         command=run_command,
-        wake=send_c_can_wake,
+        ignition_on=ignition_is_on,
         runtime_dir=RUNTIME_DIR,
         clock=time.monotonic,
         wall_clock=time.time,
     ):
         self.store = store
-        self.engine_monitor = engine_monitor
         self.command = command
-        self.wake = wake
+        self.ignition_on = ignition_on
         self.runtime_dir = runtime_dir
         self.active_marker = os.path.join(runtime_dir, os.path.basename(ACTIVE_MARKER))
-        self.engine_marker = os.path.join(runtime_dir, os.path.basename(ENGINE_MARKER))
         self.clock = clock
         self.wall_clock = wall_clock
         self.lock = threading.RLock()
@@ -560,26 +359,20 @@ class CopAlertManager:
         self.thread = None
         self.ext_flood = "unknown"
         self.errors = {}
-        self.last_wake = None
-        self.last_wake_ok = None
-        self.last_wake_message = "not attempted"
         self.last_ntfy = None
         self.ntfy_pending = False
         self.ntfy_thread = None
-        self.next_wake = 0.0
         self.next_flood_check = 0.0
         self.next_ntfy = 0.0
 
     def start(self):
         os.makedirs(self.runtime_dir, mode=0o750, exist_ok=True)
-        self.engine_monitor.start()
         if not self.thread:
             self.thread = threading.Thread(target=self._loop, name="cop-alert", daemon=True)
             self.thread.start()
 
     def stop(self):
         self.stop_event.set()
-        self.engine_monitor.stop()
 
     @property
     def active(self):
@@ -593,13 +386,11 @@ class CopAlertManager:
             self.errors.clear()
             if active:
                 self._touch(self.active_marker)
-                self.next_wake = 0.0
                 self.next_flood_check = 0.0
                 if not was_active:
                     self.next_ntfy = 0.0
             else:
                 self._remove(self.active_marker)
-                self._remove(self.engine_marker)
 
         # Begin the activation notification before touching the Wi-Fi Tuya
         # device. The single-flight worker keeps a slow or disconnected ntfy
@@ -609,28 +400,21 @@ class CopAlertManager:
 
         # Give the button immediate, deterministic switch behavior.  Background
         # retries and status reporting handle a temporarily unavailable HA API.
-        desired = "on" if active else "off"
+        desired = "on" if active and not self.ignition_on() else "off"
         ok, message = self._set_ext_flood(desired)
         if not ok:
             self._set_error("ext_flood", message)
         return self.snapshot()
 
     def snapshot(self):
-        engine = self.engine_monitor.snapshot()
         with self.lock:
             last_error = "; ".join(self.errors.values()) or None
             return {
                 "active": self.active,
-                "engine": engine,
+                "ignition_on": self.ignition_on(),
                 "ext_flood": self.ext_flood,
-                "last_wake": self.last_wake,
-                "last_wake_ok": self.last_wake_ok,
-                "last_wake_message": self.last_wake_message,
                 "last_ntfy": self.last_ntfy,
                 "last_error": last_error,
-                "wake_mode": (
-                    f"C-CAN RF Hub 22 F190 every {WAKE_INTERVAL:g} seconds while engine-stopped"
-                ),
             }
 
     def tick(self):
@@ -638,38 +422,22 @@ class CopAlertManager:
         now = self.clock()
         if not self.active:
             self._remove(self.active_marker)
-            self._remove(self.engine_marker)
             if now >= self.next_flood_check:
                 self.next_flood_check = now + FLOOD_CHECK_INTERVAL
                 self._get_ext_flood()
             return
 
         self._touch(self.active_marker)
-        engine = self.engine_monitor.snapshot()
-        if engine["running"]:
-            self._touch(self.engine_marker)
-        else:
-            self._remove(self.engine_marker)
+        ignition_on = self.ignition_on()
 
         if now >= self.next_flood_check:
             self.next_flood_check = now + FLOOD_CHECK_INTERVAL
-            desired = "off" if engine["running"] else "on"
+            desired = "off" if ignition_on else "on"
             actual = self._get_ext_flood()
             if actual != desired:
                 ok, message = self._set_ext_flood(desired)
                 if not ok:
                     self._set_error("ext_flood", message)
-
-        # A running engine is already broadcasting and powers the dashcam. Do
-        # not add diagnostic traffic; resume parked wakes if the engine stops.
-        if not engine["running"] and now >= self.next_wake:
-            ok, message = self.wake()
-            with self.lock:
-                self.last_wake = int(self.wall_clock())
-                self.last_wake_ok = bool(ok)
-                self.last_wake_message = message
-            self._set_error("can_wake", None if ok else message)
-            self.next_wake = now + (WAKE_INTERVAL if ok else min(5.0, WAKE_INTERVAL))
 
         if now >= self.next_ntfy:
             self._queue_ntfy(now)
@@ -792,9 +560,9 @@ class CopLedManager:
     def __init__(
         self,
         store,
-        engine_monitor=None,
         target=COP_LED_TARGET,
         command=run_command,
+        ignition_on=ignition_is_on,
         clock=time.monotonic,
         wall_clock=time.time,
         retry_interval=COP_LED_RETRY_INTERVAL,
@@ -804,9 +572,9 @@ class CopLedManager:
         color_temp_kelvin=COP_LED_COLOR_TEMP_KELVIN,
     ):
         self.store = store
-        self.engine_monitor = engine_monitor
         self.target = target
         self.command = command
+        self.ignition_on = ignition_on
         self.clock = clock
         self.wall_clock = wall_clock
         self.retry_interval = retry_interval
@@ -882,12 +650,12 @@ class CopLedManager:
                 return self.snapshot_unlocked()
             self.last_attempt = int(self.wall_clock())
 
-        if self.engine_monitor is not None and self.engine_monitor.snapshot()["running"]:
+        if self.ignition_on():
             with self.lock:
                 self.connect_started_at = None
             self._schedule(
                 "paused",
-                "Engine running · ext_flood is intentionally off",
+                "Ignition on · exterior alert is paused",
                 None,
                 now + self.retry_interval,
             )
@@ -5150,9 +4918,8 @@ class VoltageCheckManager:
 
 app = Flask(__name__)
 state_store = StateStore()
-engine_monitor = EngineMonitor()
-cop_alert = CopAlertManager(state_store, engine_monitor)
-cop_led = CopLedManager(state_store, engine_monitor)
+cop_alert = CopAlertManager(state_store)
+cop_led = CopLedManager(state_store)
 sonos = SonosController(state_store)
 connectivity = ConnectivityMonitor()
 openwrt_clients = OpenWrtClientsController()

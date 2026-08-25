@@ -29,100 +29,6 @@ class FakeClock:
         self.value += seconds
 
 
-class FakeEngine:
-    def __init__(self, running=False, rpm=0.0):
-        self.running = running
-        self.rpm = rpm
-
-    def snapshot(self):
-        return {
-            "running": self.running,
-            "rpm": self.rpm,
-            "evidence_age_seconds": 0.0 if self.running else None,
-            "frame_age_seconds": 0.0,
-            "source": "test",
-            "error": None,
-        }
-
-    def start(self):
-        pass
-
-    def stop(self):
-        pass
-
-
-class EngineMonitorTests(unittest.TestCase):
-    @staticmethod
-    def observe_running_pair(monitor):
-        monitor.observe(0x0F4, bytes.fromhex("17 80"))
-        monitor.observe(0x0FC, bytes.fromhex("0b c0"))
-
-    def test_rpm_decoder_matches_verified_capture_samples(self):
-        self.assertEqual(dashboard.rpm_from_engine_frame(0x0F4, bytes.fromhex("17 80")), 752.0)
-        self.assertEqual(dashboard.rpm_from_engine_frame(0x0FC, bytes.fromhex("0b c0")), 752.0)
-        self.assertEqual(dashboard.rpm_from_engine_frame(0x0F4, bytes.fromhex("00 00")), 0.0)
-        self.assertIsNone(dashboard.rpm_from_engine_frame(0x101, bytes.fromhex("17 80")))
-        self.assertIsNone(dashboard.rpm_from_engine_frame(0x0F4, b"\x17"))
-
-    def test_requires_repeated_fresh_running_frames(self):
-        clock = FakeClock()
-        monitor = dashboard.EngineMonitor(clock=clock)
-        for _ in range(dashboard.ENGINE_CONFIRM_FRAMES - 1):
-            self.observe_running_pair(monitor)
-        self.assertFalse(monitor.snapshot()["running"])
-
-        self.observe_running_pair(monitor)
-        self.assertTrue(monitor.snapshot()["running"])
-        self.assertEqual(monitor.snapshot()["rpm"], 752.0)
-
-        clock.advance(dashboard.ENGINE_EVIDENCE_MAX_AGE + 0.1)
-        self.assertFalse(monitor.snapshot()["running"])
-
-    def test_zero_rpm_immediately_revokes_running_evidence(self):
-        clock = FakeClock()
-        monitor = dashboard.EngineMonitor(clock=clock)
-        for _ in range(dashboard.ENGINE_CONFIRM_FRAMES):
-            self.observe_running_pair(monitor)
-        self.assertTrue(monitor.snapshot()["running"])
-        monitor.observe(0x0F4, bytes.fromhex("00 00"))
-        self.assertFalse(monitor.snapshot()["running"])
-
-    def test_implausibly_high_value_does_not_count_as_running(self):
-        clock = FakeClock()
-        monitor = dashboard.EngineMonitor(clock=clock)
-        for _ in range(dashboard.ENGINE_CONFIRM_FRAMES):
-            monitor.observe(0x0F4, bytes.fromhex("ff ff"))
-            monitor.observe(0x0FC, bytes.fromhex("ff ff"))
-        self.assertFalse(monitor.snapshot()["running"])
-
-    def test_one_rpm_source_alone_is_not_running_evidence(self):
-        clock = FakeClock()
-        monitor = dashboard.EngineMonitor(clock=clock)
-        for _ in range(dashboard.ENGINE_CONFIRM_FRAMES):
-            monitor.observe(0x0FC, bytes.fromhex("0b c0"))
-        self.assertFalse(monitor.snapshot()["running"])
-
-
-class CanLinkSafetyTests(unittest.TestCase):
-    @staticmethod
-    def command_with(output, returncode=0):
-        def command(_args, timeout):
-            return SimpleNamespace(stdout=output, stderr="", returncode=returncode)
-
-        return command
-
-    def test_accepts_existing_armed_c_can_without_mutation(self):
-        output = "4: can0: <NOARP,UP,LOWER_UP> state UP\n    can state ERROR-ACTIVE bitrate 500000"
-        ok, _ = dashboard.c_can_link_status(self.command_with(output))
-        self.assertTrue(ok)
-
-    def test_rejects_b_can_speed_and_listen_only(self):
-        bcan = "4: can0: <UP,LOWER_UP> state UP\n    can state ERROR-ACTIVE bitrate 125000"
-        listen = "4: can0: <UP,LOWER_UP> state UP\n    can <LISTEN-ONLY> bitrate 500000"
-        self.assertFalse(dashboard.c_can_link_status(self.command_with(bcan))[0])
-        self.assertFalse(dashboard.c_can_link_status(self.command_with(listen))[0])
-
-
 class FakeGroup:
     def __init__(self):
         self.coordinator = None
@@ -2727,7 +2633,7 @@ class CopLedManagerTests(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory()
         self.store = dashboard.StateStore(os.path.join(self.tempdir.name, "state.json"))
         self.clock = FakeClock()
-        self.engine = FakeEngine()
+        self.ignition = False
         self.target = {
             "state": "unavailable",
             "brightness": None,
@@ -2750,8 +2656,8 @@ class CopLedManagerTests(unittest.TestCase):
 
         self.manager = dashboard.CopLedManager(
             self.store,
-            self.engine,
             command=command,
+            ignition_on=lambda: self.ignition,
             clock=self.clock,
             wall_clock=lambda: 1_700_000_000 + self.clock(),
             retry_interval=5,
@@ -2779,9 +2685,9 @@ class CopLedManagerTests(unittest.TestCase):
         self.assertEqual(self.target["color_temp_kelvin"], 2702)
         self.assertTrue(any(call[1] == "set" for call in self.calls))
 
-    def test_pauses_while_engine_running_and_does_not_touch_light(self):
+    def test_pauses_while_ignition_is_on_and_does_not_touch_light(self):
         self.store.set("cop_alert", True)
-        self.engine.running = True
+        self.ignition = True
         status = self.manager.tick()
         self.assertEqual(status["phase"], "paused")
         self.assertEqual(self.calls, [])
@@ -2800,14 +2706,14 @@ class CopLedManagerTests(unittest.TestCase):
         self.assertEqual(status["phase"], "inactive")
         self.assertEqual(self.calls, [])
 
+
 class CopAlertManagerTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
         self.clock = FakeClock()
-        self.engine = FakeEngine()
+        self.ignition = False
         self.entity_state = "off"
         self.calls = []
-        self.wakes = []
         self.store = dashboard.StateStore(os.path.join(self.tempdir.name, "state.json"))
 
         def command(args, timeout):
@@ -2821,15 +2727,10 @@ class CopAlertManagerTests(unittest.TestCase):
                 return SimpleNamespace(stdout="", stderr="", returncode=0)
             raise AssertionError(args)
 
-        def wake():
-            self.wakes.append(self.clock())
-            return True, "wake ok"
-
         self.manager = dashboard.CopAlertManager(
             self.store,
-            self.engine,
             command=command,
-            wake=wake,
+            ignition_on=lambda: self.ignition,
             runtime_dir=os.path.join(self.tempdir.name, "run"),
             clock=self.clock,
             wall_clock=lambda: 1_700_000_000 + self.clock(),
@@ -2846,7 +2747,7 @@ class CopAlertManagerTests(unittest.TestCase):
             worker.join(1)
             self.assertFalse(worker.is_alive(), "ntfy test worker did not finish")
 
-    def test_parked_running_parked_transition(self):
+    def test_marker_and_exterior_alert_follow_requested_state_and_ignition(self):
         status = self.manager.set_active(True)
         self.assertTrue(status["active"])
         self.assertEqual(self.entity_state, "on")
@@ -2855,25 +2756,17 @@ class CopAlertManagerTests(unittest.TestCase):
         self.assertTrue(any(call[0] == dashboard.NTFY_SEND for call in self.calls))
 
         self.manager.tick()
-        self.assertEqual(len(self.wakes), 1)
         self.assertEqual(self.entity_state, "on")
-        self.assertFalse(os.path.exists(self.manager.engine_marker))
 
-        self.engine.running = True
-        self.engine.rpm = 752.0
-        self.clock.advance(max(dashboard.FLOOD_CHECK_INTERVAL, dashboard.WAKE_INTERVAL) + 1)
+        self.ignition = True
+        self.clock.advance(dashboard.FLOOD_CHECK_INTERVAL + 1)
         self.manager.tick()
         self.assertEqual(self.entity_state, "off")
-        self.assertEqual(len(self.wakes), 1, "running engine must suppress diagnostic wake")
-        self.assertTrue(os.path.isfile(self.manager.engine_marker))
 
-        self.engine.running = False
-        self.engine.rpm = 0.0
-        self.clock.advance(max(dashboard.FLOOD_CHECK_INTERVAL, dashboard.WAKE_INTERVAL) + 1)
+        self.ignition = False
+        self.clock.advance(dashboard.FLOOD_CHECK_INTERVAL + 1)
         self.manager.tick()
         self.assertEqual(self.entity_state, "on")
-        self.assertEqual(len(self.wakes), 2)
-        self.assertFalse(os.path.exists(self.manager.engine_marker))
 
         self.manager.set_active(False)
         self.assertEqual(self.entity_state, "off")
@@ -2906,9 +2799,8 @@ class CopAlertManagerTests(unittest.TestCase):
 
         manager = dashboard.CopAlertManager(
             self.store,
-            self.engine,
             command=command,
-            wake=lambda: (True, "wake ok"),
+            ignition_on=lambda: self.ignition,
             runtime_dir=os.path.join(self.tempdir.name, "nonblocking-run"),
             clock=self.clock,
             wall_clock=lambda: 1_700_000_000 + self.clock(),
@@ -2940,9 +2832,8 @@ class CopAlertManagerTests(unittest.TestCase):
 
         manager = dashboard.CopAlertManager(
             self.store,
-            self.engine,
             command=command,
-            wake=lambda: (True, "wake ok"),
+            ignition_on=lambda: self.ignition,
             runtime_dir=os.path.join(self.tempdir.name, "failure-run"),
             clock=self.clock,
             wall_clock=lambda: 1_700_000_000 + self.clock(),
@@ -4108,6 +3999,21 @@ class DashboardRouteTests(unittest.TestCase):
             script = handle.read()
         self.assertIn("--connect-timeout 5", script)
         self.assertIn("--max-time 15", script)
+
+    def test_dashboard_cop_controller_is_can_free(self):
+        source = (
+            REPOSITORY_ROOT
+            / "pi"
+            / "apps"
+            / "van_dashboard"
+            / "van_dashboard.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('ACTIVE_MARKER = os.path.join(RUNTIME_DIR, "cop-alert.active")', source)
+        self.assertNotIn("socket.AF_CAN", source)
+        self.assertNotIn("socket.CAN_RAW", source)
+        self.assertNotIn("import isotp", source)
+        self.assertNotIn("lib.can_wake", source)
+        self.assertNotIn("CAN_CHANNEL", source)
 
     def test_connectivity_and_speedtest_status_routes(self):
         client = dashboard.app.test_client()

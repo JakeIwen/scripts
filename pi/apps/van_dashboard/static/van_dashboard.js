@@ -3676,7 +3676,6 @@ function renderStarlink(status) {
 function updateStatus(data) {
   dashboard = data.cop_alert;
   const active = dashboard.active;
-  const engine = dashboard.engine;
   const led = data.cop_led || {};
   $('system-uptime').textContent = formatUptime(data.system_uptime?.seconds);
   renderStarlink(data.starlink);
@@ -3684,21 +3683,13 @@ function updateStatus(data) {
   $('cop').setAttribute('aria-pressed', String(active));
   $('cop-pill').textContent = active ? 'ACTIVE' : 'OFF';
   $('cop-detail').textContent = active
-    ? 'Dashcam wake and 5-minute bacon alerts are active'
-    : 'Tap to keep the dashcam awake';
-  $('engine').textContent = engine.running
-    ? `RUNNING · ${Math.round(engine.rpm)} RPM`
-    : engine.rpm === null
-      ? 'No fresh data'
-      : `Stopped · ${Math.round(engine.rpm)} RPM`;
+    ? dashboard.ignition_on
+      ? 'Exterior alert paused while ignition is on'
+      : 'Exterior alert and 5-minute bacon notifications are active'
+    : 'Tap to arm the exterior alert';
+  $('cop-ignition').textContent = dashboard.ignition_on ? 'ON · alert paused' : 'OFF';
   $('cop-led').textContent = led.message || 'No data';
   $('cop-led').title = led.last_error || '';
-  $('wake').textContent =
-    dashboard.last_wake_ok === null
-      ? 'Not attempted'
-      : dashboard.last_wake_ok
-        ? `OK · ${age(dashboard.last_wake)}`
-        : 'DEGRADED';
 }
 async function refresh() {
   try {
