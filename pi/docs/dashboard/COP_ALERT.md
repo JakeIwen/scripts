@@ -37,18 +37,20 @@ A reachable antenna configured for an absent SSID therefore shows `CONNECTED`
 with a red Wi-Fi dot and `Not associated` detail. Signal and CCQ/quality data
 appear when the radio is associated.
 
-MWAN3 comes from mwan3's existing reachability tracking. The UBNT collector
-still performs its lightweight reachability and radio queries; consolidating
-their presentation does not remove either check.
-
-The mwan3 mode lists every online uplink (for example `clientwan + wan`) so a
-balanced multi-uplink state is not mislabeled as a single primary route.
+MWAN3 interface health comes from mwan3's existing reachability tracking. The
+route shown beneath `MWAN3 route` comes from the active members of the router's
+configured IPv4 default policy. For example, when both `clientwan` and `wan`
+are healthy but the `balanced` policy has selected the preferred client path,
+the route reads `clientwan` while both interface chips remain green. A genuinely
+weighted policy shows each eligible member's percentage. Existing connections
+may remain pinned to their original member until conntrack expires.
 
 `/home/pi/scripts/connectivity_status.py` is a reusable, standard-library JSON
-collector. It performs one read-only `mwan3 interfaces` SSH query per run, one
-UBNT ping, and (only when the UBNT responds) one read-only radio-status SSH
-query. It never scans for networks. The dashboard runs it in a background
-thread every 30 seconds and serves cached results through
+collector. It performs one read-only SSH query containing `mwan3 interfaces`,
+`mwan3 policies`, and the configured IPv4 default-policy name per run, one UBNT
+ping, and (only when the UBNT responds) one read-only radio-status SSH query. It
+never scans for networks. The dashboard runs it in a background thread every
+30 seconds and serves cached results through
 `GET /api/connectivity`, so browser polling adds no router load. Hosts, key
 path, and command paths can be overridden with the collector's
 `CONNECTIVITY_*` environment variables.

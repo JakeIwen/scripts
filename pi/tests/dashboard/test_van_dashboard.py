@@ -253,6 +253,8 @@ class ConnectivityMonitorTests(unittest.TestCase):
                 "mode": "clientwan",
                 "online": ["clientwan"],
                 "interfaces": [],
+                "default_policy": "balanced",
+                "route_members": [{"name": "clientwan", "percent": 100}],
                 "error": None,
             },
             "ubnt": {
@@ -276,6 +278,7 @@ class ConnectivityMonitorTests(unittest.TestCase):
         status = monitor.refresh()
         self.assertTrue(status["internet"]["online"])
         self.assertEqual(status["router"]["mode"], "clientwan")
+        self.assertEqual(status["router"]["route_members"][0]["name"], "clientwan")
         self.assertEqual(status["ubnt"]["ssid"], "denlink")
         self.assertFalse(status["stale"])
         monitor.request_refresh()
@@ -3575,6 +3578,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="openwrt-title"><span class="tile-icon"', page.data)
         self.assertIn(b'<span>OpenWrt</span></h2>', page.data)
         self.assertIn(b"MWAN3", page.data)
+        self.assertIn(b"MWAN3 route", page.data)
         self.assertIn(b"ext_led", page.data)
         self.assertIn(b'id="cop-led"', page.data)
         self.assertNotIn(b"ext_flood", page.data)
@@ -3834,6 +3838,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertNotIn(b"'Speed Test'", javascript.data)
         self.assertNotIn(b'"Speed Test"', javascript.data)
         self.assertIn(b"$('openwrt-age').textContent", javascript.data)
+        self.assertIn(b"function mwanRouteLabel(router, online)", javascript.data)
         self.assertNotIn(b"$('connectivity-age').textContent", javascript.data)
         self.assertNotIn(b"wireless-status", javascript.data)
         self.assertNotIn(b"ubnt-dot", javascript.data)

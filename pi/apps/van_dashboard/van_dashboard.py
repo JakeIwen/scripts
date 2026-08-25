@@ -1831,6 +1831,8 @@ class ConnectivityMonitor:
                 "mode": None,
                 "online": [],
                 "interfaces": [],
+                "default_policy": None,
+                "route_members": [],
                 "error": None,
             },
             "ubnt": {

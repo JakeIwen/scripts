@@ -729,14 +729,28 @@ function mwanChips(interfaces) {
     )
     .join('');
 }
+function mwanRouteLabel(router, online) {
+  const members = Array.isArray(router?.route_members) ? router.route_members : [];
+  if (members.length) {
+    return members
+      .map((member) => {
+        const percent = Number(member.percent);
+        return members.length === 1 && percent === 100
+          ? member.name
+          : `${member.name} ${Number.isFinite(percent) ? `${percent}%` : ''}`.trim();
+      })
+      .join(' + ');
+  }
+  if (online === false || router?.reachable === false) return 'No active route';
+  return router?.default_policy ? 'No eligible route' : 'Route unavailable';
+}
 function renderOpenwrtPanel(connectivity) {
   if (!connectivity) return;
   const router = connectivity.router || {},
     online = connectivity.internet?.online,
     reachable = router.reachable,
-    mode =
-      router.mode ||
-      (online === false || reachable === false ? 'No active uplink' : 'Unknown mode');
+    route = mwanRouteLabel(router, online),
+    policy = router.default_policy;
   networkState(
     'openwrt-sheet-internet-dot',
     online === null && reachable === false ? false : online,
@@ -744,11 +758,13 @@ function renderOpenwrtPanel(connectivity) {
   networkState('openwrt-sheet-mwan-dot', reachable);
   $('openwrt-sheet-internet').textContent =
     online === true
-      ? `Online via ${router.mode || 'active uplink'}`
+      ? `Online via ${route}`
       : online === false
         ? 'Offline'
         : 'No data';
-  $('openwrt-sheet-mode').textContent = mode;
+  $('openwrt-sheet-mode').textContent = policy
+    ? `Route · ${route} · ${policy} policy`
+    : `Route · ${route}`;
   $('openwrt-sheet-mwan-list').innerHTML = mwanChips(router.interfaces);
   $('openwrt-sheet-age').textContent = router.error
     ? `MWAN3 error · ${router.error}`
@@ -767,8 +783,7 @@ function renderConnectivity(response) {
     online = c.internet?.online;
   connectivityState = c;
   networkState('internet-dot', online === null && r.reachable === false ? false : online);
-  $('mwan-mode').textContent =
-    r.mode || (online === false || r.reachable === false ? 'No active uplink' : 'Unknown');
+  $('mwan-mode').textContent = mwanRouteLabel(r, online);
   ubntLink = u;
   renderUbntTile();
   $('mwan-list').innerHTML = mwanChips(r.interfaces);

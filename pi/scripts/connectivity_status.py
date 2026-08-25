@@ -28,6 +28,12 @@ SSH = os.environ.get("CONNECTIVITY_SSH", "/usr/bin/ssh")
 PING = os.environ.get("CONNECTIVITY_PING", "/usr/bin/ping")
 
 MWAN_PRIORITY = ("clientwan", "lifiwan", "wan")
+MWAN_STATUS_COMMAND = (
+    "printf '__VAN_DASH_DEFAULT_POLICY__='; "
+    "/sbin/uci -q get mwan3.default_rule_v4.use_policy; "
+    "/usr/sbin/mwan3 interfaces; "
+    "/usr/sbin/mwan3 policies"
+)
 ROUTER_CLIENTS_COMMAND = r"""
 printf '__VAN_DASH_LEASES__\n'
 /bin/cat /tmp/dhcp.leases 2>/dev/null || true
@@ -102,6 +108,45 @@ def select_mode(interfaces):
         if item["state"] == "online" and item["name"] not in ordered
     )
     return " + ".join(ordered) or None
+
+
+def parse_mwan3_default_route(output):
+    """Return the active members of mwan3's configured IPv4 default policy."""
+    policy_match = re.search(
+        r"^__VAN_DASH_DEFAULT_POLICY__=([A-Za-z0-9_]+)$",
+        output,
+        re.MULTILINE,
+    )
+    policy = policy_match.group(1) if policy_match else None
+    if not policy:
+        return None, []
+    _prefix, separator, ipv4_output = output.partition("Current ipv4 policies:")
+    if not separator:
+        return policy, []
+    ipv4_output = ipv4_output.partition("Current ipv6 policies:")[0]
+    policy_block = re.search(
+        rf"^{re.escape(policy)}:\s*\n(?P<members>(?:[ \t]+[^\n]*(?:\n|$))*)",
+        ipv4_output,
+        re.MULTILINE,
+    )
+    if not policy_block:
+        return policy, []
+    members = []
+    member_pattern = re.compile(
+        r"^(?P<name>[A-Za-z0-9_.:-]+)\s+\((?P<percent>[0-9]+(?:\.[0-9]+)?)%\)$"
+    )
+    for line in policy_block.group("members").splitlines():
+        match = member_pattern.fullmatch(line.strip())
+        if not match:
+            continue
+        percent = float(match.group("percent"))
+        members.append(
+            {
+                "name": match.group("name"),
+                "percent": int(percent) if percent.is_integer() else percent,
+            }
+        )
+    return policy, members
 
 
 def _valid_ipv4(value):
@@ -433,13 +478,15 @@ def collect_status(command=run_command, wall_clock=time.time):
         "mode": None,
         "online": [],
         "interfaces": [],
+        "default_policy": None,
+        "route_members": [],
         "error": None,
     }
     internet_online = None
 
     try:
         result = command(
-            _ssh_args(ROUTER_TARGET) + ["/usr/sbin/mwan3 interfaces"], timeout=8
+            _ssh_args(ROUTER_TARGET) + [MWAN_STATUS_COMMAND], timeout=8
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         router["error"] = str(exc)
@@ -451,6 +498,9 @@ def collect_status(command=run_command, wall_clock=time.time):
                 item["name"] for item in router["interfaces"] if item["state"] == "online"
             ]
             router["mode"] = select_mode(router["interfaces"])
+            router["default_policy"], router["route_members"] = (
+                parse_mwan3_default_route(result.stdout)
+            )
             if router["interfaces"]:
                 internet_online = bool(router["online"])
             else:

@@ -8,6 +8,16 @@ MWAN_SAMPLE = """Interface status:
  interface wan is offline 00h:00m:00s, uptime 94h:02m:31s and tracking is active
  interface clientwan is online 00h:35m:11s, uptime 21h:16m:11s and tracking is active
  interface lifiwan is offline and tracking is paused
+__VAN_DASH_DEFAULT_POLICY__=balanced
+Current ipv4 policies:
+balanced:
+ clientwan (100%)
+wan_only:
+ wan (100%)
+
+Current ipv6 policies:
+balanced:
+ unreachable
 """
 
 DISCONNECTED_UBNT = """ath0 IEEE 802.11ng ESSID:"STARLINK"
@@ -33,12 +43,29 @@ class ConnectivityParserTests(unittest.TestCase):
         self.assertEqual([item["name"] for item in interfaces], ["wan", "clientwan", "lifiwan"])
         self.assertEqual(connectivity.select_mode(interfaces), "clientwan")
         self.assertEqual(interfaces[2]["tracking"], "paused")
+        policy, members = connectivity.parse_mwan3_default_route(MWAN_SAMPLE)
+        self.assertEqual(policy, "balanced")
+        self.assertEqual(members, [{"name": "clientwan", "percent": 100}])
 
     def test_configured_ssid_does_not_imply_association(self):
         status = connectivity.parse_ubnt_wireless(DISCONNECTED_UBNT)
         self.assertEqual(status["ssid"], "denlink")
         self.assertFalse(status["connected"])
         self.assertEqual(status["ccq_percent"], 0)
+
+    def test_weighted_default_route_preserves_each_policy_share(self):
+        weighted = MWAN_SAMPLE.replace(
+            " clientwan (100%)", " clientwan (60%)\n wan (40%)", 1
+        )
+        policy, members = connectivity.parse_mwan3_default_route(weighted)
+        self.assertEqual(policy, "balanced")
+        self.assertEqual(
+            members,
+            [
+                {"name": "clientwan", "percent": 60},
+                {"name": "wan", "percent": 40},
+            ],
+        )
 
     def test_connected_radio_metrics(self):
         status = connectivity.parse_ubnt_wireless(CONNECTED_UBNT)
@@ -55,7 +82,7 @@ class ConnectivityParserTests(unittest.TestCase):
 
         def command(args, timeout):
             calls.append(tuple(args))
-            if args[-1] == "/usr/sbin/mwan3 interfaces":
+            if args[-1] == connectivity.MWAN_STATUS_COMMAND:
                 return SimpleNamespace(returncode=0, stdout=MWAN_SAMPLE, stderr="")
             if args[0] == connectivity.PING:
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -64,6 +91,11 @@ class ConnectivityParserTests(unittest.TestCase):
         status = connectivity.collect_status(command=command, wall_clock=lambda: 1_700_000_000)
         self.assertTrue(status["internet"]["online"])
         self.assertEqual(status["router"]["mode"], "clientwan")
+        self.assertEqual(status["router"]["default_policy"], "balanced")
+        self.assertEqual(
+            status["router"]["route_members"],
+            [{"name": "clientwan", "percent": 100}],
+        )
         self.assertTrue(status["ubnt"]["reachable"])
         self.assertFalse(status["ubnt"]["connected"])
         self.assertEqual(len(calls), 3)
