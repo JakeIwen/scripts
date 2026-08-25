@@ -77,7 +77,8 @@ def parse_mwan3_interfaces(output):
     interfaces = []
     pattern = re.compile(
         r"^\s*interface\s+(?P<name>\S+)\s+is\s+"
-        r"(?P<state>online|offline|disabled|unknown)(?P<detail>.*)$",
+        r"(?P<state>online|offline|disabled|unknown|connecting|disconnecting)"
+        r"(?P<detail>.*)$",
         re.IGNORECASE,
     )
     for line in output.splitlines():

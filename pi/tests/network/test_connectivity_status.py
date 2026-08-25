@@ -36,6 +36,12 @@ ccq=881
 target_ssid=real-network
 """
 
+MWAN_TRANSITION_SAMPLE = """Interface status:
+ interface wan is online and tracking is active (online 07h:37m:37s, uptime 11h:02m:34s)
+ interface clientwan is connecting and tracking is active (0)
+ interface lifiwan is disconnecting and tracking is active (4)
+"""
+
 
 class ConnectivityParserTests(unittest.TestCase):
     def test_mwan_parser_and_priority(self):
@@ -46,6 +52,18 @@ class ConnectivityParserTests(unittest.TestCase):
         policy, members = connectivity.parse_mwan3_default_route(MWAN_SAMPLE)
         self.assertEqual(policy, "balanced")
         self.assertEqual(members, [{"name": "clientwan", "percent": 100}])
+
+    def test_mwan_parser_preserves_transitional_interfaces(self):
+        interfaces = connectivity.parse_mwan3_interfaces(MWAN_TRANSITION_SAMPLE)
+        self.assertEqual(
+            [(item["name"], item["state"]) for item in interfaces],
+            [
+                ("wan", "online"),
+                ("clientwan", "connecting"),
+                ("lifiwan", "disconnecting"),
+            ],
+        )
+        self.assertEqual(connectivity.select_mode(interfaces), "wan")
 
     def test_configured_ssid_does_not_imply_association(self):
         status = connectivity.parse_ubnt_wireless(DISCONNECTED_UBNT)

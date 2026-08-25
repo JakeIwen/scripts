@@ -4023,6 +4023,8 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b".telemetry-voltage strong", stylesheet.data)
         self.assertIn(b".telemetry-observed", stylesheet.data)
         self.assertIn(b".telemetry-check", stylesheet.data)
+        self.assertIn(b".mwan-chip.connecting", stylesheet.data)
+        self.assertIn(b".mwan-chip.disconnecting", stylesheet.data)
         self.assertIn(b".telemetry-service-toggle.good", stylesheet.data)
         self.assertIn(b".telemetry-service-toggle.bad", stylesheet.data)
         self.assertNotIn(b".connection", stylesheet.data)

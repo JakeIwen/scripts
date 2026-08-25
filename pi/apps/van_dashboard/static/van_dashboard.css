@@ -2161,6 +2161,12 @@ body.tiles-editing #tile-grid > [data-dashboard-tile].tile-dragging {
   color: #e6aaa5;
   background: #392624;
 }
+.mwan-chip.connecting,
+.mwan-chip.disconnecting {
+  border-color: #7b633a;
+  color: #f2d59e;
+  background: #584524;
+}
 .speedtest-button {
   display: flex;
   align-items: center;
