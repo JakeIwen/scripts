@@ -86,6 +86,15 @@ changes, dashboard ejects, and safe system power operations retain longer
 graceful deadlines and do not use ignition's global Samba fallback, but they do
 evict exact-mount holders rather than leave a verified managed disk mounted.
 
+Successful physical spindowns are recorded under
+`/run/lock/vanpi-hdd-spindown` using the exact device, parent, and kernel
+`diskseq`. Root-run backup cleanup and the `pi`-run ignition service share this
+state through a setgid directory with group `pi` (mode `2770`; root creates it
+as `root:pi`) and group-writable markers (mode `0660`). The state path is
+validated before any disk operation; unsafe ownership or permissions fail
+before unmount or spindown. A remount, device re-enumeration, or reboot
+invalidates the corresponding marker.
+
 The Samba drain markers live under `/run` and therefore clear at reboot.
 `mount_disks.sh` explicitly clears the marker for an exact share after accepting
 or mounting its labeled filesystem.

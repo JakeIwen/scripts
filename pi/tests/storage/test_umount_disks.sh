@@ -129,7 +129,8 @@ ud_kill_torrent_client 0 >/dev/null 2>&1 ||
 
 # A failed ordinary unmount must evict exact-mount holders with TERM and KILL.
 holder_calls=$(mktemp)
-trap 'rm -f "$holder_calls"' EXIT
+state_test_root=$(mktemp -d)
+trap 'rm -f "$holder_calls"; rm -rf "$state_test_root"' EXIT
 ud_mount_holder_summary() {
   printf '%s\n' "pi 123 f.... vlc"
 }
@@ -146,5 +147,95 @@ ud_evict_mount_holders /mnt/movingparts >/dev/null 2>&1 ||
 if grep -Fq 'if (( rc != 0 && emergency ))' "$script"; then
   fail "mount-holder eviction is still restricted to ignition emergency mode"
 fi
+
+# Root backup cleanup and the pi-run ignition service must share the same
+# spindown directory and marker files. The root path establishes a setgid pi
+# directory; markers remain group-readable/writable regardless of caller UID.
+state_calls="$state_test_root/calls"
+state_dir="$state_test_root/state"
+fake_install="$state_test_root/install"
+fake_mkdir="$state_test_root/mkdir"
+fake_stat="$state_test_root/stat"
+cat > "$fake_install" <<'EOF'
+#!/bin/bash
+printf 'install:%s\n' "$*" >> "$TEST_STATE_CALLS"
+target=${!#}
+/bin/mkdir -p -- "$target"
+/bin/chmod 770 "$target"
+EOF
+cat > "$fake_mkdir" <<'EOF'
+#!/bin/bash
+printf 'mkdir:%s\n' "$*" >> "$TEST_STATE_CALLS"
+target=${!#}
+/bin/mkdir -m 770 -- "$target"
+EOF
+cat > "$fake_stat" <<'EOF'
+#!/bin/bash
+target=${!#}
+if [[ ${TEST_STATE_BAD_METADATA:-0} == 1 ]]; then
+  printf 'root 700\n'
+elif [[ "$target" == "$TEST_STATE_DIR" ]]; then
+  printf 'pi 2770\n'
+else
+  printf 'pi 660\n'
+fi
+EOF
+chmod +x "$fake_install" "$fake_mkdir" "$fake_stat"
+export TEST_STATE_CALLS="$state_calls" TEST_STATE_DIR="$state_dir"
+UD_STATE_DIR=$state_dir
+UD_STATE_GROUP=pi
+UD_STATE_INSTALL=$fake_install
+UD_STATE_MKDIR=$fake_mkdir
+UD_STATE_MV=/bin/mv
+UD_STATE_RM=/bin/rm
+UD_STATE_STAT=$fake_stat
+
+: > "$state_calls"
+ud_running_as_root() { return 0; }
+ud_prepare_spindown_state_dir >/dev/null 2>&1 ||
+  fail "root caller could not prepare shared spindown state"
+grep -Fq "install:-d -o root -g pi -m 2770 -- $state_dir" "$state_calls" ||
+  fail "root caller did not establish the setgid pi state directory"
+
+ud_fast_identity() {
+  UD_FAST_DEVICE=/dev/sdz1
+  UD_FAST_PARENT=/dev/sdz
+  UD_FAST_DISKSEQ=123
+}
+ud_write_spindown_state movingparts /dev/sdz1 /dev/sdz >/dev/null 2>&1 ||
+  fail "root caller could not write shared spindown state"
+[[ $(cat "$state_dir/movingparts") == "/dev/sdz1 /dev/sdz 123" ]] ||
+  fail "spindown marker did not retain the exact device identity"
+
+call_count=$(wc -l < "$state_calls" | tr -d ' ')
+ud_running_as_root() { return 1; }
+ud_prepare_spindown_state_dir >/dev/null 2>&1 ||
+  fail "pi caller could not reuse root-created spindown state"
+[[ $(wc -l < "$state_calls" | tr -d ' ') == "$call_count" ]] ||
+  fail "pi caller tried to recreate an existing shared state directory"
+ud_findmnt_source_targets() { return 1; }
+ud_spindown_state_is_current movingparts >/dev/null 2>&1 ||
+  fail "pi caller could not recognize a root-created current marker"
+ud_remove_spindown_state movingparts ||
+  fail "pi caller could not remove a root-created marker"
+[[ ! -e "$state_dir/movingparts" ]] ||
+  fail "spindown marker removal used the wrong label path"
+ud_write_spindown_state movingparts /dev/sdz1 /dev/sdz >/dev/null 2>&1 ||
+  fail "pi caller could not replace shared spindown state"
+
+TEST_STATE_BAD_METADATA=1
+export TEST_STATE_BAD_METADATA
+if ud_prepare_spindown_state_dir >/dev/null 2>&1; then
+  fail "pi caller accepted unsafe root-only spindown state metadata"
+fi
+unset TEST_STATE_BAD_METADATA
+
+/bin/rm -f -- "$state_dir/movingparts"
+/bin/rmdir -- "$state_dir"
+: > "$state_calls"
+ud_prepare_spindown_state_dir >/dev/null 2>&1 ||
+  fail "pi caller could not create shared spindown state first"
+grep -Fq "mkdir:-m 2770 -- $state_dir" "$state_calls" ||
+  fail "pi caller did not create a setgid shared state directory"
 
 echo "PASS: guarded disk shutdown escalates consumers without force/lazy unmount"

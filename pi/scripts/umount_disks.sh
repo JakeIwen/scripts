@@ -15,7 +15,13 @@ UD_FAST_DEVICE=
 UD_FAST_PARENT=
 UD_FAST_DISKSEQ=
 UD_FAILURES=()
-UD_STATE_DIR=/run/lock/vanpi-hdd-spindown
+UD_STATE_DIR=${UMOUNT_DISKS_STATE_DIR:-/run/lock/vanpi-hdd-spindown}
+UD_STATE_GROUP=${UMOUNT_DISKS_STATE_GROUP:-pi}
+UD_STATE_INSTALL=${UMOUNT_DISKS_STATE_INSTALL:-/usr/bin/install}
+UD_STATE_MKDIR=${UMOUNT_DISKS_STATE_MKDIR:-/usr/bin/mkdir}
+UD_STATE_MV=${UMOUNT_DISKS_STATE_MV:-/usr/bin/mv}
+UD_STATE_RM=${UMOUNT_DISKS_STATE_RM:-/usr/bin/rm}
+UD_STATE_STAT=${UMOUNT_DISKS_STATE_STAT:-/usr/bin/stat}
 UD_QBIT_GRACE_SECONDS=${UMOUNT_DISKS_QBIT_GRACE_SECONDS:-30}
 UD_EMERGENCY_QBIT_GRACE_SECONDS=${UMOUNT_DISKS_EMERGENCY_QBIT_GRACE_SECONDS:-8}
 
@@ -57,10 +63,65 @@ ud_fast_identity() {
   [[ -n "$UD_FAST_DISKSEQ" ]]
 }
 
+ud_running_as_root() {
+  (( ${EUID:-$(/usr/bin/id -u)} == 0 ))
+}
+
+ud_state_metadata_is() {
+  local path=$1 expected_mode=$2 metadata group mode extra
+  metadata=$("$UD_STATE_STAT" -c '%G %a' -- "$path" 2>&1) || {
+    ud_record_failure "cannot inspect spindown state path $path: $metadata"
+    return 1
+  }
+  read -r group mode extra <<< "$metadata"
+  if [[ "$group" != "$UD_STATE_GROUP" || "$mode" != "$expected_mode" ||
+        -n ${extra:-} ]]; then
+    ud_record_failure \
+      "unsafe spindown state path $path (group=${group:-unknown}, mode=${mode:-unknown}; expected group=$UD_STATE_GROUP, mode=$expected_mode)"
+    return 1
+  fi
+}
+
+ud_prepare_spindown_state_dir() {
+  local mkdir_status
+  if [[ -L "$UD_STATE_DIR" || ( -e "$UD_STATE_DIR" && ! -d "$UD_STATE_DIR" ) ]]; then
+    ud_record_failure "$UD_STATE_DIR is not a regular directory"
+    return 1
+  fi
+
+  if ud_running_as_root; then
+    "$UD_STATE_INSTALL" -d -o root -g "$UD_STATE_GROUP" -m 2770 \
+      -- "$UD_STATE_DIR" || {
+      ud_record_failure "cannot create shared spindown state directory $UD_STATE_DIR"
+      return 1
+    }
+  elif [[ ! -d "$UD_STATE_DIR" ]]; then
+    # /run/lock is sticky and writable. A simultaneous root caller may win the
+    # mkdir race; accept that only after validating the resulting directory.
+    (umask 000; "$UD_STATE_MKDIR" -m 2770 -- "$UD_STATE_DIR") 2>/dev/null
+    mkdir_status=$?
+    if (( mkdir_status != 0 )) && [[ ! -d "$UD_STATE_DIR" ]]; then
+      ud_record_failure "cannot create shared spindown state directory $UD_STATE_DIR"
+      return 1
+    fi
+  fi
+
+  [[ -d "$UD_STATE_DIR" && ! -L "$UD_STATE_DIR" ]] || {
+    ud_record_failure "$UD_STATE_DIR did not resolve to a regular directory"
+    return 1
+  }
+  ud_state_metadata_is "$UD_STATE_DIR" 2770 || return 1
+  [[ -r "$UD_STATE_DIR" && -w "$UD_STATE_DIR" && -x "$UD_STATE_DIR" ]] || {
+    ud_record_failure "$UD_STATE_DIR is not accessible to the current caller"
+    return 1
+  }
+}
+
 ud_remove_spindown_state() {
-  local label=$1 marker="$UD_STATE_DIR/$label"
+  local label=$1 marker
+  marker="$UD_STATE_DIR/$label"
   if [[ -e "$marker" ]]; then
-    /usr/bin/rm -f -- "$marker" || return 1
+    "$UD_STATE_RM" -f -- "$marker" || return 1
   fi
   return 0
 }
@@ -78,7 +139,8 @@ ud_clear_spindown_state() {
 }
 
 ud_spindown_state_is_current() {
-  local label=$1 marker="$UD_STATE_DIR/$label" stored mounts rc
+  local label=$1 marker stored mounts rc
+  marker="$UD_STATE_DIR/$label"
   [[ -f "$marker" ]] || return 1
   ud_fast_identity "$label" || {
     ud_remove_spindown_state "$label"
@@ -94,7 +156,7 @@ ud_spindown_state_is_current() {
   fi
 
   # A manual remount invalidates the state even if the hardware is unchanged.
-  mounts=$(/usr/bin/findmnt -rn -S "$UD_FAST_DEVICE" -o TARGET 2>&1)
+  mounts=$(ud_findmnt_source_targets "$UD_FAST_DEVICE" 2>&1)
   rc=$?
   if (( rc == 1 )) && [[ -z "$mounts" ]]; then
     return 0
@@ -114,23 +176,24 @@ ud_write_spindown_state() {
     return 1
   fi
 
-  if [[ -e "$UD_STATE_DIR" && ! -d "$UD_STATE_DIR" ]]; then
-    ud_record_failure "$UD_STATE_DIR exists but is not a directory"
-    return 1
-  fi
-  /usr/bin/install -d -m 700 "$UD_STATE_DIR" || {
-    ud_record_failure "cannot create $UD_STATE_DIR"
-    return 1
-  }
+  ud_prepare_spindown_state_dir || return 1
   marker="$UD_STATE_DIR/$label"
   tmp="$UD_STATE_DIR/.$label.$$"
-  if ! (umask 077; printf '%s %s %s\n' \
+  if [[ -e "$tmp" || -L "$tmp" ]]; then
+    ud_record_failure "temporary spindown state path already exists for $label"
+    return 1
+  fi
+  if ! (umask 007; printf '%s %s %s\n' \
       "$UD_FAST_DEVICE" "$UD_FAST_PARENT" "$UD_FAST_DISKSEQ" > "$tmp"); then
     ud_record_failure "cannot write spindown state for $label"
     return 1
   fi
-  if ! /usr/bin/mv -f -- "$tmp" "$marker"; then
-    /usr/bin/rm -f -- "$tmp"
+  if ! ud_state_metadata_is "$tmp" 660; then
+    "$UD_STATE_RM" -f -- "$tmp"
+    return 1
+  fi
+  if ! "$UD_STATE_MV" -f -- "$tmp" "$marker"; then
+    "$UD_STATE_RM" -f -- "$tmp"
     ud_record_failure "cannot install spindown state for $label"
     return 1
   fi
@@ -563,6 +626,9 @@ umount_disks_main() {
       ud_usage
       return 2
     fi
+    if [[ -e "$UD_STATE_DIR" || -L "$UD_STATE_DIR" ]]; then
+      ud_prepare_spindown_state_dir || return 1
+    fi
     ud_clear_spindown_state
     return $?
   fi
@@ -591,6 +657,16 @@ umount_disks_main() {
     fi
   else
     labels=("${HDD_LABELS[@]}")
+  fi
+
+  # Prove that both root-run backup cleanup and the pi-run ignition service can
+  # share completion state before changing any disk. This prevents a successful
+  # physical spindown from being reported as failed only after the fact.
+  if (( spindown && ! dry_run )); then
+    if ! ud_prepare_spindown_state_dir; then
+      ud_notify_failures 1
+      return 1
+    fi
   fi
 
   # Complete all discovery and mountpoint validation before changing anything.
