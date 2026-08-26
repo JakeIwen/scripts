@@ -5,6 +5,19 @@ Wants=network-online.target
 
 [Service]
 ExecStartPre=/usr/bin/test -r /home/pi/van_compute/scripts/van_compute_metrics.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_backups.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_block_devices.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_common.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_cop.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_disks.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_home.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_integrations.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_network.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_sonos.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_storage.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_system.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_telemetry.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_usb.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/templates/van_dashboard.html
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/static/van_dashboard.js
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/static/van_dashboard.css

@@ -48,7 +48,8 @@ fi
 ssh -o BatchMode=yes pi@vanpi.lan \
   "install -d '$dashboard_test_dir/pi/apps' \
     '$dashboard_test_dir/pi/tests' '$dashboard_test_dir/pi/scripts/backup' \
-    '$dashboard_test_dir/pi/van_compute/scripts'"
+    '$dashboard_test_dir/pi/van_compute/scripts' \
+    '$dashboard_test_dir/pi/services'"
 
 scp -q -r pi/apps/van_dashboard \
   "pi@vanpi.lan:$dashboard_test_dir/pi/apps/"
@@ -61,8 +62,10 @@ scp -q pi/van_compute/scripts/__init__.py \
   "pi@vanpi.lan:$dashboard_test_dir/pi/van_compute/scripts/"
 scp -q pi/sync_scripts.sh \
   "pi@vanpi.lan:$dashboard_test_dir/pi/"
+scp -q pi/services/van-dashboard.service \
+  "pi@vanpi.lan:$dashboard_test_dir/pi/services/"
 scp -q pi/scripts/ntfy_send.sh \
-  pi/scripts/tuya_light.sh \
+  pi/scripts/tuya_light.sh pi/scripts/connectivity_status.py \
   "pi@vanpi.lan:$dashboard_test_dir/pi/scripts/"
 scp -q pi/scripts/usb_watch.py \
   "pi@vanpi.lan:$dashboard_test_dir/pi/scripts/"
@@ -71,9 +74,8 @@ scp -q pi/scripts/backup/clone_now.sh \
 
 ssh -o BatchMode=yes pi@vanpi.lan \
   "cd '$dashboard_test_dir' && \
-    python3 -m unittest \
-      pi.tests.dashboard.test_lighting_tile_static \
-      pi.tests.dashboard.test_van_dashboard; \
+    python3 -m unittest discover \
+      -s pi/tests/dashboard -p 'test_*.py'; \
     dashboard_test_status=\$?; \
     find '$dashboard_test_dir' -depth -delete; \
     exit \$dashboard_test_status"
@@ -105,9 +107,8 @@ dashboard_test_tmp="${dashboard_test_tmp%/}"
 dashboard_test_venv="$(mktemp -d "$dashboard_test_tmp/van-dashboard-venv.XXXXXX")"
 python3 -m venv "$dashboard_test_venv"
 "$dashboard_test_venv/bin/python" -m pip install Flask
-"$dashboard_test_venv/bin/python" -m unittest \
-  pi.tests.dashboard.test_lighting_tile_static \
-  pi.tests.dashboard.test_van_dashboard
+"$dashboard_test_venv/bin/python" -m unittest discover \
+  -s pi/tests/dashboard -p 'test_*.py'
 ```
 
 When finished, validate that the variable still names the temporary venv and
@@ -147,7 +148,11 @@ running:
 ```bash
 python3 -m unittest \
   pi.tests.policy.test_policyctl \
+  pi.tests.dashboard.test_desktop_sheets \
+  pi.tests.dashboard.test_lighting_power_switches \
   pi.tests.dashboard.test_lighting_tile_static \
+  pi.tests.dashboard.test_openwrt_clients \
+  pi.tests.dashboard.test_usb_tile_layout_static \
   pi.tests.dashboard.test_van_dashboard
 ```
 

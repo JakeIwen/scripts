@@ -2,8 +2,10 @@ import copy
 import io
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -4172,6 +4174,77 @@ class DashboardRouteTests(unittest.TestCase):
         )
         self.assertNotIn("/home/pi/scripts/shared", sync_script)
 
+    def test_dashboard_modules_are_flat_deployable_restart_dependencies(self):
+        backend = REPOSITORY_ROOT / "pi" / "apps" / "van_dashboard"
+        modules = sorted(
+            path.name
+            for path in backend.glob("van_dashboard_*.py")
+        )
+        self.assertEqual(
+            modules,
+            [
+                "van_dashboard_backups.py",
+                "van_dashboard_block_devices.py",
+                "van_dashboard_common.py",
+                "van_dashboard_cop.py",
+                "van_dashboard_disks.py",
+                "van_dashboard_home.py",
+                "van_dashboard_integrations.py",
+                "van_dashboard_network.py",
+                "van_dashboard_sonos.py",
+                "van_dashboard_storage.py",
+                "van_dashboard_system.py",
+                "van_dashboard_telemetry.py",
+                "van_dashboard_usb.py",
+            ],
+        )
+        service = (
+            REPOSITORY_ROOT / "pi" / "services" / "van-dashboard.service"
+        ).read_text(encoding="utf-8")
+        for module in modules:
+            self.assertIn(
+                "ExecStartPre=/usr/bin/test -r "
+                f"/home/pi/scripts/python-automation/{module}",
+                service,
+            )
+
+    def test_dashboard_imports_from_deployed_flat_layout(self):
+        backend = REPOSITORY_ROOT / "pi" / "apps" / "van_dashboard"
+        compute = (
+            REPOSITORY_ROOT
+            / "pi"
+            / "van_compute"
+            / "scripts"
+            / "van_compute_metrics.py"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            for path in backend.glob("van_dashboard*.py"):
+                shutil.copy2(path, target / path.name)
+            shutil.copy2(compute, target / "van_compute_metrics.py")
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = directory
+            environment["VAN_DASHBOARD_STATE_PATH"] = str(target / "state.json")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    (
+                        "import van_dashboard as dashboard; "
+                        "assert dashboard.app.name == 'van_dashboard'; "
+                        "assert dashboard.CopAlertManager.__module__ "
+                        "== 'van_dashboard_cop'"
+                    ),
+                ],
+                cwd=directory,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_ntfy_helper_has_bounded_network_timeouts(self):
         repository = str(REPOSITORY_ROOT)
         with open(os.path.join(repository, "pi", "scripts", "ntfy_send.sh"), encoding="utf-8") as handle:
@@ -4180,13 +4253,11 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn("--max-time 15", script)
 
     def test_dashboard_cop_controller_is_can_free(self):
-        source = (
-            REPOSITORY_ROOT
-            / "pi"
-            / "apps"
-            / "van_dashboard"
-            / "van_dashboard.py"
-        ).read_text(encoding="utf-8")
+        backend = REPOSITORY_ROOT / "pi" / "apps" / "van_dashboard"
+        source = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in sorted(backend.glob("van_dashboard*.py"))
+        )
         self.assertIn('ACTIVE_MARKER = os.path.join(RUNTIME_DIR, "cop-alert.active")', source)
         self.assertNotIn("socket.AF_CAN", source)
         self.assertNotIn("socket.CAN_RAW", source)
