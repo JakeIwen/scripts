@@ -4,6 +4,7 @@ set -eu
 script_dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 manager="$script_dir/../persistent/scripts/wifi_manager.sh"
 parser="$script_dir/../persistent/scripts/parse-iwlist.awk"
+standard_scan_frequencies='2412, 2417, 2422, 2427, 2432, 2437, 2442, 2447, 2452, 2457, 2462'
 test_root=$(mktemp -d "${TMPDIR:-/tmp}/ubnt-manager-test.XXXXXX")
 trap 'rm -rf "$test_root"' EXIT HUP INT TERM
 
@@ -72,10 +73,10 @@ export UBNT_SSH_KEY_SOURCE="$test_root/persistent_keys"
 export UBNT_AUTHORIZED_KEYS="$test_root/authorized_keys"
 
 "$manager" connect 'A Network With Spaces' >/dev/null
-[ "$(sed -n '1p' "$MOCK_IWLIST_COUNT_FILE")" -eq 3 ]
+[ ! -s "$MOCK_IWLIST_COUNT_FILE" ]
 ! grep -q 'sensitive-test-value' "$test_root/wifi.log"
-grep -q '^wireless.1.scan_list.status=enabled$' "$test_root/system.cfg"
-grep -q '^wireless.1.scan_list.channels=2437$' "$test_root/system.cfg"
+grep -Fqx 'wireless.1.scan_list.status=enabled' "$test_root/system.cfg"
+grep -Fqx "wireless.1.scan_list.channels=$standard_scan_frequencies" "$test_root/system.cfg"
 [ "$(sed -n '1p' "$test_root/associated")" = 'A Network With Spaces' ]
 grep -qx 'admin-key' "$test_root/authorized_keys"
 grep -qx 'pi-rsa-key' "$test_root/authorized_keys"
@@ -96,10 +97,36 @@ healthy_lines_before=$(wc -l < "$test_root/wifi.log")
 healthy_lines_after=$(wc -l < "$test_root/wifi.log")
 [ "$healthy_lines_before" -eq "$healthy_lines_after" ]
 
+# Automatic selection clears a stale live frequency restriction before its
+# full scan, sees channels beyond the old pin, and can select another profile.
+printf '%s\n' \
+    'wireless.1.ssid=denlink' \
+    'wireless.1.scan_list.status=enabled' \
+    'wireless.1.scan_list.channels=2462' \
+    'wpasupplicant.status=disabled' \
+    'wpasupplicant.device.1.status=disabled' > "$test_root/system.cfg"
+printf 'denlink\n' > "$test_root/associated"
+/sbin/md5sum "$test_root/system.cfg" | awk '{print $1}' > \
+    "$test_root/state/observed-system-config.md5"
+: > "$MOCK_IWLIST_COUNT_FILE"
+rm -f "$test_root/state/last_auto_scan"
+export UBNT_AUTO_SCAN_INTERVAL=0
+"$manager" auto >/dev/null
+unset UBNT_AUTO_SCAN_INTERVAL
+grep -Fqx 'wireless.1.scan_list.status=enabled' "$test_root/system.cfg"
+grep -Fqx "wireless.1.scan_list.channels=$standard_scan_frequencies" "$test_root/system.cfg"
+grep -q 'applying standard scan-frequency allowlist reason=full-scan' "$test_root/wifi.log"
+[ "$(sed -n '1p' "$MOCK_IWLIST_COUNT_FILE")" -eq 3 ]
+grep -q '|2412|1|' "$test_root/state/scan.results"
+grep -q '|2462|11|' "$test_root/state/scan.results"
+[ "$(sed -n '1p' "$test_root/associated")" = 'A Network With Spaces' ]
+
 # A native airOS GUI Apply is detected from the system configuration digest.
 # While it is stabilizing, the old association must not trigger a roaming scan.
 printf '%s\n' \
     'wireless.1.ssid=manual-target' \
+    'wireless.1.scan_list.status=enabled' \
+    'wireless.1.scan_list.channels=2462' \
     'wpasupplicant.status=disabled' \
     'wpasupplicant.device.1.status=disabled' > "$test_root/system.cfg"
 printf 'old-network\n' > "$test_root/associated"
@@ -117,6 +144,10 @@ printf 'manual-target\n' > "$test_root/associated"
 "$manager" auto >/dev/null
 [ -f "$test_root/profiles/manual-target" ]
 grep -q '^wireless.1.ssid=manual-target$' "$test_root/profiles/manual-target"
+grep -Fqx 'wireless.1.scan_list.status=enabled' "$test_root/profiles/manual-target"
+grep -Fqx "wireless.1.scan_list.channels=$standard_scan_frequencies" \
+    "$test_root/profiles/manual-target"
+grep -q 'applying standard scan-frequency allowlist reason=external-gui' "$test_root/wifi.log"
 grep -q 'saved profile source=gui profile=manual-target' "$test_root/wifi.log"
 grep -q 'external airOS connection saved target=manual-target' "$test_root/wifi.log"
 [ ! -e "$test_root/state/gui-transition-started" ]
@@ -189,7 +220,9 @@ printf '%s\n' \
 grep -q '^wpasupplicant.profile.1.network.1.ssid=dendelion$' "$test_root/profiles/dendelion"
 grep -q '^wpasupplicant.profile.1.network.1.bssid=D8:EC:5E:8D:6A:3A$' "$test_root/profiles/dendelion"
 grep -q '^wpasupplicant.profile.1.network.1.psk=new-test-password$' "$test_root/profiles/dendelion"
-grep -q '^wireless.1.scan_list.status=disabled$' "$test_root/profiles/dendelion"
+grep -Fqx 'wireless.1.scan_list.status=enabled' "$test_root/profiles/dendelion"
+grep -Fqx "wireless.1.scan_list.channels=$standard_scan_frequencies" \
+    "$test_root/profiles/dendelion"
 ! grep -q 'new-test-password' "$test_root/wifi.log"
 ! find "$test_root/profiles" -maxdepth 1 -name '.dashboard-new.*' | grep -q .
 

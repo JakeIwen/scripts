@@ -42,31 +42,38 @@ Manual dashboard connections pause automatic selection. The dashboard sheet
 shows this state and provides an explicit Resume automatic selection button,
 which keeps captive-portal onboarding from being abandoned before login.
 
-`connect` aggregates three site-scan passes because individual airOS scans can
-omit visible networks. It applies the strongest matching observation's
-frequency to a temporary profile copy, and falls back to an unrestricted scan
-if the fast attempt does not associate. The unrestricted fallback waits up to
-35 seconds for association before declaring the attempt unsuccessful.
-`UBNT_SCAN_PASSES`, `UBNT_SCAN_SETTLE_SECONDS`, and
+`connect` always applies a temporary copy of the saved profile with an explicit
+allowlist of the 11 standard US 2.4 GHz center frequencies (2412 through 2462
+MHz in 5 MHz steps) and waits up to 35 seconds for association. This excludes
+airOS's proprietary 2 MHz-offset Channel Shifting frequencies and does not pin
+the live radio to a frequency from an earlier scan. Automatic and dashboard
+site surveys aggregate three passes because individual airOS scans can omit
+visible networks. Before a survey, the manager detects and replaces any stale,
+incomplete, or unrestricted live scan list with the standard allowlist using
+one airOS reload; otherwise `iwlist` could return only one channel or waste time
+on shifted frequencies. `UBNT_SCAN_PASSES`, `UBNT_SCAN_SETTLE_SECONDS`, and
 `UBNT_ASSOCIATE_FALLBACK_SECONDS` can tune this behavior. Automatic operations
 do not overwrite saved profiles. The manager records the configuration digest
-after each change that it applies itself, so those temporary scan-frequency
-changes are not confused with native airOS GUI changes.
+after each change that it applies itself, so runtime normalization is not
+confused with a native airOS GUI change.
 
 A user-requested switch owns one 120-second protection window beginning before
-its scan; fallback attempts do not extend that deadline. If association times
-out, the same command immediately recovers to the best visible saved profile
-using the scan results it already collected. Raw airOS reload output is captured
-in a mode-600 temporary file and deleted, preventing configuration diffs and
-credentials from being printed to the terminal or logs.
+its reload; recovery attempts do not extend that deadline. If association times
+out, the same command runs a standard-frequency multi-pass scan and recovers to the
+best visible saved profile. Raw airOS reload output is captured in a mode-600
+temporary file and deleted, preventing configuration diffs and credentials
+from being printed to the terminal or logs.
 
 `save-current PROFILE` is the explicit profile-write operation. Native airOS
 GUI changes also enter a separate ten-minute stabilization window. The manager
 does not scan or fall back to an older SSID during that window. Once the GUI's
 target SSID is associated and has an IPv4 address, default route, and working
 Internet check, its current configuration is automatically saved under the
-SSID name. This restores the historical GUI-to-profile behavior without
-allowing automatic roaming operations to overwrite profiles. If a profile
+SSID name. A single-frequency setting introduced by the GUI is cleared and the
+connection revalidated before that save, keeping both later site surveys and
+the saved profile on the standard 11-frequency allowlist. This restores the historical
+GUI-to-profile behavior without allowing automatic roaming operations to
+overwrite profiles. If a profile
 already exists, its previous version is copied into the profile directory's
 `.disabled` folder first. `UBNT_GUI_GRACE_SECONDS` can tune the bounded GUI
 window; an explicit dashboard pause continues to protect the transition until

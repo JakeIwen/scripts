@@ -35,10 +35,10 @@ PENDING_PROFILE=
 
 MANUAL_GRACE_SECONDS=${UBNT_MANUAL_GRACE_SECONDS:-120}
 GUI_GRACE_SECONDS=${UBNT_GUI_GRACE_SECONDS:-600}
+STANDARD_SCAN_FREQUENCIES=${UBNT_STANDARD_SCAN_FREQUENCIES:-"2412, 2417, 2422, 2427, 2432, 2437, 2442, 2447, 2452, 2457, 2462"}
 AUTO_SCAN_INTERVAL=${UBNT_AUTO_SCAN_INTERVAL:-120}
 SCAN_PASSES=${UBNT_SCAN_PASSES:-3}
 SCAN_SETTLE_SECONDS=${UBNT_SCAN_SETTLE_SECONDS:-2}
-ASSOCIATE_FAST_SECONDS=${UBNT_ASSOCIATE_FAST_SECONDS:-24}
 ASSOCIATE_FALLBACK_SECONDS=${UBNT_ASSOCIATE_FALLBACK_SECONDS:-35}
 DHCP_SECONDS=${UBNT_DHCP_SECONDS:-30}
 FAILURES_BEFORE_SWITCH=${UBNT_FAILURES_BEFORE_SWITCH:-3}
@@ -241,6 +241,7 @@ wait_for_link() {
     waited=0
     next_wait_message=15
     log_message "waiting for association ssid=$wait_ssid timeout=${wait_seconds}s"
+    link_is_target "$wait_ssid" && return 0
     while [ "$waited" -lt "$wait_seconds" ]; do
         link_is_target "$wait_ssid" && return 0
         sleep 2
@@ -264,6 +265,10 @@ wait_for_dhcp() {
 }
 
 scan_networks() {
+    if ! normalize_runtime_scan_list full-scan preserve-gui; then
+        log_message "unable to apply standard scan-frequency allowlist"
+        return 1
+    fi
     : > "$SCAN_FILE"
     scan_pass=1
     log_message "starting multi-pass site scan passes=$SCAN_PASSES"
@@ -459,9 +464,10 @@ begin_transition() {
 }
 
 apply_config() {
+    apply_mode=${1:-manager}
     # Manager-driven configuration changes must not be mistaken for native
     # airOS GUI changes by the next automatic cron invocation.
-    clear_gui_transition
+    [ "$apply_mode" = preserve-gui ] || clear_gui_transition
     cp "$APPLY_CFG" "$SYSTEM_CFG" || return 1
     record_observed_config || return 1
     reload_output="$STATE_DIR/softrestart.$$.log"
@@ -497,14 +503,30 @@ apply_config() {
     return "$reload_status"
 }
 
+runtime_scan_list_needs_normalization() {
+    runtime_scan_status=$(config_value "$SYSTEM_CFG" wireless.1.scan_list.status)
+    runtime_scan_channels=$(config_value "$SYSTEM_CFG" wireless.1.scan_list.channels)
+    [ "$runtime_scan_status" != enabled ] || \
+        [ "$runtime_scan_channels" != "$STANDARD_SCAN_FREQUENCIES" ]
+}
+
+normalize_runtime_scan_list() {
+    normalize_reason=$1
+    normalize_mode=${2:-manager}
+    runtime_scan_list_needs_normalization || return 0
+    cp "$SYSTEM_CFG" "$APPLY_CFG" || return 1
+    set_scan_list "$APPLY_CFG" enabled "$STANDARD_SCAN_FREQUENCIES" || return 1
+    log_message "applying standard scan-frequency allowlist reason=$normalize_reason"
+    apply_config "$normalize_mode"
+}
+
 clear_failures() {
     rm -f "$STATE_DIR/failure.ssid" "$STATE_DIR/failure.count"
 }
 
 connect_profile() {
     requested_profile=$1
-    reuse_scan=${2:-no}
-    force_connect=${3:-no}
+    force_connect=${2:-no}
     profile_name_is_valid "$requested_profile" || {
         log_message "invalid profile name"
         return 1
@@ -529,45 +551,16 @@ connect_profile() {
     fi
 
     begin_transition
-
-    selected_frequency=
-    if [ "$reuse_scan" = yes ] && [ -s "$SCAN_FILE" ]; then
-        selected_frequency=$(scan_field_for_profile "$profile_path" 4)
-    else
-        scan_networks && selected_frequency=$(scan_field_for_profile "$profile_path" 4)
-    fi
     cp "$profile_path" "$APPLY_CFG" || return 1
-    case $selected_frequency in
-        ''|*[!0-9]*) selected_frequency= ;;
-    esac
-
-    if [ -n "$selected_frequency" ]; then
-        set_scan_list "$APPLY_CFG" enabled "$selected_frequency"
-        log_message "connecting profile=$requested_profile ssid=$target_ssid fast_frequency=$selected_frequency"
-        begin_transition
-        if apply_config && wait_for_link "$target_ssid" "$ASSOCIATE_FAST_SECONDS"; then
-            link_result=success
-        else
-            link_result=failed
-        fi
-    else
-        link_result=failed
-        log_message "target absent from scan; using unrestricted fallback profile=$requested_profile"
-    fi
-
-    if [ "$link_result" != success ]; then
-        cp "$profile_path" "$APPLY_CFG" || return 1
-        set_scan_list "$APPLY_CFG" disabled ""
-        log_message "retrying unrestricted profile=$requested_profile ssid=$target_ssid"
-        begin_transition
-        apply_config || {
-            log_message "soft restart failed profile=$requested_profile"
-            return 1
-        }
-        if ! wait_for_link "$target_ssid" "$ASSOCIATE_FALLBACK_SECONDS"; then
-            log_message "association timeout profile=$requested_profile ssid=$target_ssid"
-            return 1
-        fi
+    set_scan_list "$APPLY_CFG" enabled "$STANDARD_SCAN_FREQUENCIES" || return 1
+    log_message "connecting standard-frequency profile=$requested_profile ssid=$target_ssid"
+    apply_config || {
+        log_message "soft restart failed profile=$requested_profile"
+        return 1
+    }
+    if ! wait_for_link "$target_ssid" "$ASSOCIATE_FALLBACK_SECONDS"; then
+        log_message "association timeout profile=$requested_profile ssid=$target_ssid"
+        return 1
     fi
 
     rm -f "$TRANSITION_FILE"
@@ -587,7 +580,7 @@ connect_profile() {
 run_requested_connect() {
     requested_name=$1
     requested_force=${2:-no}
-    connect_profile "$requested_name" no "$requested_force"
+    connect_profile "$requested_name" "$requested_force"
     requested_status=$?
     if [ "$requested_status" -eq 1 ] && \
         profile_name_is_valid "$requested_name" && [ -f "$PROFILE_DIR/$requested_name" ]; then
@@ -646,11 +639,11 @@ write_provision_config() {
                 saw_wireless_security=yes
                 ;;
             wireless.1.scan_list.status)
-                printf 'wireless.1.scan_list.status=disabled\n'
+                printf 'wireless.1.scan_list.status=enabled\n'
                 saw_scan_status=yes
                 ;;
             wireless.1.scan_list.channels)
-                printf 'wireless.1.scan_list.channels=\n'
+                printf 'wireless.1.scan_list.channels=%s\n' "$STANDARD_SCAN_FREQUENCIES"
                 saw_scan_channels=yes
                 ;;
             wpasupplicant.status)
@@ -690,8 +683,9 @@ write_provision_config() {
     [ "$saw_wireless_ssid" = yes ] || printf 'wireless.1.ssid=%s\n' "$provision_ssid" >> "$provision_output"
     [ "$saw_wireless_ap" = yes ] || printf 'wireless.1.ap=%s\n' "$provision_bssid" >> "$provision_output"
     [ "$saw_wireless_security" = yes ] || printf 'wireless.1.security.type=none\n' >> "$provision_output"
-    [ "$saw_scan_status" = yes ] || printf 'wireless.1.scan_list.status=disabled\n' >> "$provision_output"
-    [ "$saw_scan_channels" = yes ] || printf 'wireless.1.scan_list.channels=\n' >> "$provision_output"
+    [ "$saw_scan_status" = yes ] || printf 'wireless.1.scan_list.status=enabled\n' >> "$provision_output"
+    [ "$saw_scan_channels" = yes ] || \
+        printf 'wireless.1.scan_list.channels=%s\n' "$STANDARD_SCAN_FREQUENCIES" >> "$provision_output"
     if [ "$provision_security" = wpa ]; then
         [ "$saw_wpa_status" = yes ] || printf 'wpasupplicant.status=enabled\n' >> "$provision_output"
         [ "$saw_wpa_device_status" = yes ] || printf 'wpasupplicant.device.1.status=enabled\n' >> "$provision_output"
@@ -775,7 +769,7 @@ provision_profile() {
     provision_status=$?
     case $provision_status in
         0|2)
-            set_scan_list "$SYSTEM_CFG" disabled "" || return 1
+            set_scan_list "$SYSTEM_CFG" enabled "$STANDARD_SCAN_FREQUENCIES" || return 1
             save_current_profile "$new_ssid" || return 1
             rm -f "$PENDING_PROFILE"
             PENDING_PROFILE=
@@ -1016,7 +1010,23 @@ handle_gui_transition() {
         return 0
     fi
 
+    gui_connection_ready=no
     if link_is_target "$gui_target" && has_dhcp_and_route && internet_reachable; then
+        gui_connection_ready=yes
+        if runtime_scan_list_needs_normalization; then
+            gui_connection_ready=no
+            if normalize_runtime_scan_list external-gui preserve-gui && \
+                wait_for_link "$gui_target" "$ASSOCIATE_FALLBACK_SECONDS" && \
+                wait_for_dhcp && internet_reachable; then
+                gui_connection_ready=yes
+                log_message "external airOS connection stable after clearing scan-frequency restriction target=$gui_target"
+            else
+                log_message "external airOS connection not ready after clearing scan-frequency restriction target=$gui_target"
+            fi
+        fi
+    fi
+
+    if [ "$gui_connection_ready" = yes ]; then
         case $gui_target in
             .*) gui_name_valid=no ;;
             *) if profile_name_is_valid "$gui_target"; then gui_name_valid=yes; else gui_name_valid=no; fi ;;
