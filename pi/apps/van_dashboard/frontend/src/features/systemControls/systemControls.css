@@ -1,0 +1,53 @@
+.system-controls {
+  display: grid;
+  justify-items: end;
+  gap: 5px;
+}
+
+.system-controls__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.system-controls__buttons .secondary-button,
+.system-controls__buttons .danger-button {
+  min-height: 40px;
+  padding: 7px 10px;
+  font-size: 12px;
+}
+
+.system-controls__status {
+  max-width: 380px;
+  color: var(--dim);
+  font-size: 11px;
+  line-height: 1.25;
+  text-align: right;
+}
+
+.system-controls__status--error {
+  color: var(--bad);
+}
+
+@media (max-width: 760px) {
+  .system-controls__buttons {
+    display: grid;
+    grid-template-columns: repeat(3, auto);
+  }
+}
+
+@media (max-width: 480px) {
+  .system-controls,
+  .system-controls__buttons {
+    width: 100%;
+  }
+
+  .system-controls__buttons {
+    grid-template-columns: 1fr;
+  }
+
+  .system-controls__status {
+    text-align: left;
+  }
+}

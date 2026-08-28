@@ -51,8 +51,9 @@ ssh -o BatchMode=yes pi@vanpi.lan \
     '$dashboard_test_dir/pi/van_compute/scripts' \
     '$dashboard_test_dir/pi/services'"
 
-scp -q -r pi/apps/van_dashboard \
-  "pi@vanpi.lan:$dashboard_test_dir/pi/apps/"
+rsync -a --exclude 'node_modules/' --exclude 'dist/' \
+  pi/apps/van_dashboard/ \
+  "pi@vanpi.lan:$dashboard_test_dir/pi/apps/van_dashboard/"
 scp -q -r pi/tests/dashboard \
   "pi@vanpi.lan:$dashboard_test_dir/pi/tests/"
 scp -q pi/van_compute/__init__.py \
@@ -61,6 +62,8 @@ scp -q pi/van_compute/scripts/__init__.py \
   pi/van_compute/scripts/van_compute_metrics.py \
   "pi@vanpi.lan:$dashboard_test_dir/pi/van_compute/scripts/"
 scp -q pi/sync_scripts.sh \
+  "pi@vanpi.lan:$dashboard_test_dir/pi/"
+scp -q pi/deploy_van_dashboard_preview.sh \
   "pi@vanpi.lan:$dashboard_test_dir/pi/"
 scp -q pi/services/van-dashboard.service \
   "pi@vanpi.lan:$dashboard_test_dir/pi/services/"
@@ -168,3 +171,27 @@ above for tests. For an intentional dashboard deployment from a copied
 checkout, use that checkout's reviewed local deployment helper or copy the
 exact dashboard files explicitly; do not assume `sync_scripts.sh` uses the
 current directory.
+
+## React preview tests
+
+The React source has a pinned npm lockfile and runs entirely on the Mac during
+build and test:
+
+```bash
+cd pi/apps/van_dashboard/frontend
+npm ci
+npm run format:check
+npm run typecheck
+npm test
+npm run build
+```
+
+The standalone static/proxy service is covered by the Python dashboard suite.
+For a focused run on a Python environment with Flask available:
+
+```bash
+python3 -m unittest pi.tests.dashboard.test_van_dashboard_preview
+```
+
+That test uses an isolated fake upstream. It does not contact vanpi, start a
+preview service, or invoke dashboard controls.

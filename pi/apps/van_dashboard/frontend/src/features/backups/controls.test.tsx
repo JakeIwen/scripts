@@ -1,0 +1,80 @@
+import { act, renderHook } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { startBackup, startBackupClone, stopBackup } from './api';
+import { useBackupControls } from './controls';
+import { sampleBackupStatus } from './testFixtures';
+
+vi.mock('./api', () => ({
+  startBackup: vi.fn(),
+  startBackupClone: vi.fn(),
+  stopBackup: vi.fn(),
+}));
+
+const startMock = vi.mocked(startBackup);
+const cloneMock = vi.mocked(startBackupClone);
+const stopMock = vi.mocked(stopBackup);
+
+beforeEach(() => {
+  startMock.mockResolvedValue({ message: 'started', backups: sampleBackupStatus(true) });
+  cloneMock.mockResolvedValue({ message: 'cloning', backups: sampleBackupStatus(true) });
+  stopMock.mockResolvedValue({ message: 'stopping', backups: sampleBackupStatus(true) });
+});
+
+describe('useBackupControls', () => {
+  it('requires confirmation for start, stop, and clone', async () => {
+    const confirm = vi.fn().mockReturnValue(false);
+    const status = sampleBackupStatus(true);
+    const target = status.hotswaps[0];
+    if (!target) throw new Error('missing hotspare fixture');
+    const { result } = renderHook(() =>
+      useBackupControls(vi.fn().mockResolvedValue(status), undefined, confirm),
+    );
+
+    await act(async () => result.current.start('borg'));
+    await act(async () => result.current.stop('borg', status));
+    await act(async () => result.current.clone(target));
+    expect(confirm).toHaveBeenCalledTimes(3);
+    expect(startMock).not.toHaveBeenCalled();
+    expect(stopMock).not.toHaveBeenCalled();
+    expect(cloneMock).not.toHaveBeenCalled();
+  });
+
+  it('refreshes after failure and does not retry', async () => {
+    startMock.mockRejectedValueOnce(new Error('backup response lost'));
+    const refresh = vi.fn().mockResolvedValue(sampleBackupStatus());
+    const { result } = renderHook(() => useBackupControls(refresh, undefined, () => true));
+
+    await act(async () => result.current.start('exfat'));
+    expect(startMock).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(result.current.uncertainOutcome).toBe(false);
+  });
+
+  it('keeps accepted work blocked until matching polled state is observed', async () => {
+    const running = sampleBackupStatus(true);
+    const { result } = renderHook(() =>
+      useBackupControls(vi.fn().mockResolvedValue(null), undefined, () => true),
+    );
+
+    await act(async () => result.current.start('borg'));
+    expect(result.current.pendingOperation).not.toBeNull();
+    expect(result.current.blocked).toBe(true);
+
+    act(() => result.current.reconcile(running));
+    expect(result.current.pendingOperation).toBeNull();
+  });
+
+  it('includes the in-progress clone warning when stopping Borg', async () => {
+    const status = sampleBackupStatus(true);
+    if (!status.borg.progress) throw new Error('missing Borg progress fixture');
+    status.borg.progress.phase = 'cloning';
+    const confirm = vi.fn().mockReturnValue(false);
+    const { result } = renderHook(() =>
+      useBackupControls(vi.fn().mockResolvedValue(status), undefined, confirm),
+    );
+
+    await act(async () => result.current.stop('borg', status));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('hotspare'));
+  });
+});

@@ -1,0 +1,233 @@
+.usb-read-only {
+  display: grid;
+  gap: 3px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.usb-read-only strong {
+  color: var(--accent);
+  text-transform: uppercase;
+}
+
+.usb-sheet__summary,
+.usb-sheet__heading,
+.usb-hub__header,
+.usb-port header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.usb-sheet__summary {
+  align-items: center;
+  color: var(--muted);
+}
+
+.usb-sheet__section {
+  margin-top: 24px;
+  padding-top: 22px;
+  border-top: 1px solid var(--line);
+}
+
+.usb-sheet__heading h3 {
+  font-size: 21px;
+}
+
+.usb-sheet__heading p,
+.usb-hub__header p,
+.usb-port p,
+.usb-port small,
+.usb-sheet__heading > span,
+.usb-device small,
+.usb-device time,
+.usb-controls-empty p,
+.usb-port-operation {
+  color: var(--muted);
+}
+
+.usb-sheet__heading p,
+.usb-hub__header p {
+  margin-top: 5px;
+}
+
+.usb-controls-empty {
+  margin-top: 15px;
+  padding: 20px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-medium);
+  background: var(--panel-soft);
+}
+
+.usb-controls-empty p {
+  margin-top: 5px;
+  line-height: 1.45;
+}
+
+.usb-port-operation {
+  margin: 14px 0 10px;
+  font-size: 13px;
+  text-align: right;
+}
+
+.usb-hub-list,
+.usb-device-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 15px;
+}
+
+.usb-hub {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-medium);
+  background: var(--panel-soft);
+}
+
+.usb-hub__header > span {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.usb-port-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  margin-top: 14px;
+}
+
+.usb-port {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+  background: var(--panel);
+}
+
+.usb-port p {
+  margin: 7px 0 5px;
+  line-height: 1.35;
+}
+
+.usb-port__mounted {
+  color: var(--warning) !important;
+}
+
+.usb-port__actions,
+.usb-port-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 11px;
+}
+
+.usb-port__actions .secondary-button {
+  min-height: 36px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.usb-control-message {
+  margin-top: 12px;
+  color: var(--good);
+}
+
+.usb-port__state {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.usb-port__state--on {
+  color: var(--good);
+}
+
+.usb-port__state--off {
+  color: var(--bad);
+}
+
+.usb-device {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 15px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+  background: var(--panel-soft);
+}
+
+.usb-device__dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--good);
+}
+
+.usb-device--unplugged .usb-device__dot {
+  background: var(--bad);
+}
+
+.usb-device--partial .usb-device__dot {
+  background: var(--warning);
+}
+
+.usb-device--root .usb-device__dot {
+  background: var(--dim);
+}
+
+.usb-device__identity {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.usb-device__identity strong,
+.usb-device__identity small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usb-device__count {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.usb-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.usb-labels span {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--good-background);
+  color: #c5f2d9;
+  font-size: 11px;
+}
+
+@media (max-width: 700px) {
+  .usb-port-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .usb-sheet__summary,
+  .usb-sheet__heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

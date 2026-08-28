@@ -1,0 +1,347 @@
+.deal-watch-tile__details {
+  font-size: 13px;
+}
+
+.deal-watch-tile__details dd {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deal-watch-read-only,
+.deal-watch-stale-error {
+  margin-top: 12px;
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.deal-watch-stale-error {
+  color: var(--warning);
+}
+
+.deal-watch-sheet__toolbar,
+.deal-watch-schedule > header,
+.deal-watch-section__header,
+.deal-watch-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.deal-watch-sheet__toolbar {
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.deal-watch-sheet__toolbar > span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.deal-watch-sheet__toolbar > div,
+.deal-watch-card__actions,
+.deal-watch-form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.deal-watch-sheet__empty,
+.deal-watch-section__empty {
+  padding: 28px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-small);
+  color: var(--muted);
+  text-align: center;
+}
+
+.deal-watch-sheet__sections {
+  display: grid;
+  gap: 24px;
+}
+
+.deal-watch-schedule-form,
+.deal-watch-form {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-medium);
+  background: var(--panel-soft);
+}
+
+.deal-watch-schedule-form > label,
+.deal-watch-form label > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.deal-watch-schedule-form > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.deal-watch-schedule-form input,
+.deal-watch-form input,
+.deal-watch-form select {
+  width: 100%;
+  min-height: 42px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgb(7 13 17 / 72%);
+}
+
+.deal-watch-schedule-form small {
+  min-height: 18px;
+  color: var(--muted);
+}
+
+.deal-watch-schedule-form__error {
+  color: var(--bad) !important;
+}
+
+.deal-watch-form {
+  margin-top: 4px;
+}
+
+.deal-watch-form h4 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.deal-watch-form__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.deal-watch-form label {
+  display: grid;
+  gap: 5px;
+}
+
+.deal-watch-form__wide {
+  grid-column: 1 / -1;
+}
+
+.deal-watch-form__actions {
+  justify-content: flex-end;
+}
+
+.deal-watch-schedule h3 {
+  margin-bottom: 6px;
+}
+
+.deal-watch-schedule code {
+  overflow-wrap: anywhere;
+  color: var(--accent);
+}
+
+.deal-watch-schedule p {
+  margin-top: 12px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.deal-watch-section {
+  display: grid;
+  gap: 14px;
+}
+
+.deal-watch-section__header h3 {
+  font-size: 21px;
+}
+
+.deal-watch-section__header p {
+  margin-top: 4px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.deal-watch-section__header > span {
+  min-width: 34px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-weight: 800;
+  text-align: center;
+}
+
+.deal-watch-card-list {
+  display: grid;
+  gap: 12px;
+}
+
+.deal-watch-card {
+  padding: 17px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-medium);
+  background: var(--panel-soft);
+}
+
+.deal-watch-card--good {
+  border-color: #3e765d;
+}
+
+.deal-watch-card--bad {
+  border-color: #7a4a45;
+}
+
+.deal-watch-card__header > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.deal-watch-card__header a,
+.deal-watch-result a {
+  color: var(--text);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+  text-decoration-color: var(--line-strong);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.deal-watch-card__header a:hover,
+.deal-watch-result a:hover {
+  color: var(--accent);
+}
+
+.deal-watch-card__header small,
+.deal-watch-result small,
+.deal-watch-result time,
+.deal-watch-card__empty {
+  color: var(--muted);
+}
+
+.deal-watch-card__facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 15px;
+}
+
+.deal-watch-card__facts > div {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+  background: rgb(10 17 22 / 36%);
+}
+
+.deal-watch-card__facts dt {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.deal-watch-card__facts dd {
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+.deal-watch-card__error {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-small);
+  background: var(--bad-background);
+  color: #ffd0cb;
+}
+
+.deal-watch-card__actions {
+  justify-content: flex-end;
+  margin-top: 13px;
+}
+
+.deal-watch-card__actions button,
+.deal-watch-form__actions button,
+.deal-watch-schedule-form button,
+.deal-watch-sheet__toolbar button,
+.deal-watch-result button {
+  min-height: 36px;
+  padding: 7px 11px;
+  border-radius: 9px;
+}
+
+.deal-watch-results {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 15px 0 0;
+  list-style: none;
+}
+
+.deal-watch-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 11px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.deal-watch-result > div {
+  display: grid;
+  gap: 4px;
+}
+
+.deal-watch-result time {
+  flex: 0 0 auto;
+  font-size: 12px;
+  text-align: right;
+}
+
+.deal-watch-result > span {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.deal-watch-card__empty {
+  margin-top: 14px;
+}
+
+@media (max-width: 760px) {
+  .deal-watch-card__facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .deal-watch-result {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .deal-watch-result time,
+  .deal-watch-result > span {
+    align-items: flex-start;
+    flex-direction: column;
+    text-align: left;
+  }
+}
+
+@media (max-width: 520px) {
+  .deal-watch-sheet__toolbar,
+  .deal-watch-schedule > header,
+  .deal-watch-card__header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .deal-watch-sheet__toolbar > div,
+  .deal-watch-schedule-form > div,
+  .deal-watch-form__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .deal-watch-form__wide {
+    grid-column: auto;
+  }
+}

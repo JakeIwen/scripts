@@ -1,0 +1,307 @@
+.lighting-tile {
+  min-height: 390px;
+}
+
+.lighting-tile__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.lighting-quick-rooms {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.lighting-quick-room {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel-soft);
+}
+
+.lighting-quick-room__power {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.lighting-quick-room__power strong,
+.lighting-quick-room__power small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lighting-quick-room__power small {
+  color: var(--muted);
+}
+
+.lighting-quick-room__power:disabled {
+  cursor: not-allowed;
+}
+
+.lighting-quick-room.is-on {
+  border-color: #3d765d;
+  background: var(--good-background);
+}
+
+.lighting-quick-room.is-mixed {
+  border-color: #745b34;
+  background: var(--warning-background);
+}
+
+.lighting-control-status,
+.lighting-stale-error {
+  margin-top: 12px;
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.lighting-stale-error {
+  color: var(--warning);
+}
+
+.lighting-sheet__toolbar,
+.lighting-sheet__actions,
+.lighting-overview,
+.lighting-group-card > header,
+.lighting-power-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.lighting-sheet__toolbar {
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.lighting-live-panel {
+  display: grid;
+  gap: 3px;
+  color: var(--muted);
+}
+
+.lighting-live-panel strong {
+  color: var(--accent);
+}
+
+.lighting-master-button,
+.lighting-group-power,
+.lighting-power-switch button,
+.lighting-light__power {
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 1px solid #4c8790;
+  border-radius: 10px;
+  background: #24434a;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.lighting-master-button[aria-pressed='true'],
+.lighting-group-power[aria-pressed='true'],
+.lighting-power-switch button[aria-pressed='true'],
+.lighting-light__power[aria-pressed='true'] {
+  border-color: #3d765d;
+  background: var(--good-background);
+  color: #c5f2d9;
+}
+
+.lighting-sheet__empty {
+  padding: 28px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.lighting-overview > div,
+.lighting-group-card > header > div {
+  display: grid;
+  gap: 4px;
+}
+
+.lighting-slider-control {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(80px, 1fr) 54px;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.lighting-slider-control input {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.lighting-slider-control output {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.lighting-quick-room__slider {
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.lighting-quick-room__slider > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+
+.lighting-group-brightness {
+  margin: 14px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgb(8 15 19 / 20%);
+}
+
+.lighting-overview span,
+.lighting-group-card p {
+  color: var(--muted);
+}
+
+.lighting-power-switch {
+  margin: 14px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--muted);
+}
+
+.lighting-power-switch strong {
+  color: var(--text);
+}
+
+.lighting-light-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.lighting-light {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #0f181e;
+}
+
+.lighting-light__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--dim);
+}
+
+.lighting-light__dot.is-on {
+  background: var(--good);
+  box-shadow: 0 0 0 5px rgb(112 212 160 / 10%);
+}
+
+.lighting-light__dot.is-off {
+  background: #8b9aa3;
+}
+
+.lighting-light__dot.is-unavailable,
+.lighting-light__dot.is-unknown {
+  background: var(--bad);
+}
+
+.lighting-light__identity {
+  display: grid;
+  gap: 3px;
+}
+
+.lighting-light__identity code,
+.lighting-light__colors {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.lighting-light__controls {
+  display: grid;
+  grid-column: 2 / -1;
+  gap: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+}
+
+.lighting-light__colors {
+  display: flex;
+  grid-column: 2 / -1;
+  align-items: center;
+  gap: 8px;
+}
+
+.lighting-hue-swatch {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  border: 1px solid rgb(255 255 255 / 32%);
+  border-radius: 50%;
+}
+
+@media (max-width: 640px) {
+  .lighting-sheet__toolbar,
+  .lighting-overview {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .lighting-sheet__actions {
+    justify-content: flex-start;
+  }
+
+  .lighting-tile {
+    min-height: 430px;
+  }
+
+  .lighting-quick-rooms {
+    grid-template-columns: 1fr;
+  }
+
+  .lighting-light {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .lighting-light__power,
+  .lighting-light__controls,
+  .lighting-light__colors {
+    grid-column: 2;
+    text-align: left;
+  }
+
+  .lighting-slider-control {
+    grid-template-columns: minmax(0, 1fr) 52px;
+  }
+
+  .lighting-slider-control > span {
+    grid-column: 1 / -1;
+  }
+}

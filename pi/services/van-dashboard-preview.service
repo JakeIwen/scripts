@@ -1,0 +1,36 @@
+[Unit]
+Description=Van Dashboard React preview (static UI and read-only API proxy on :8790)
+After=network-online.target van-dashboard.service
+Wants=network-online.target
+ConditionPathExists=/home/pi/scripts/van-dashboard-preview/current/react_dashboard_preview.py
+ConditionPathExists=/home/pi/scripts/van-dashboard-preview/current/index.html
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/scripts/van-dashboard-preview/current
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/van-dashboard-preview/current/react_dashboard_preview.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/van-dashboard-preview/current/index.html
+ExecStart=/usr/bin/python3 /home/pi/scripts/van-dashboard-preview/current/react_dashboard_preview.py --root /home/pi/scripts/van-dashboard-preview/current --listen 0.0.0.0 --port 8790 --backend-host 127.0.0.1 --backend-port 8788
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+UMask=0027
+
+# The preview reads static files and opens ordinary HTTP sockets only.  It has
+# no dashboard runtime directory, device access, sudo path, or control groups.
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

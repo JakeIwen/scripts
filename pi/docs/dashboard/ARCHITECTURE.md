@@ -62,3 +62,11 @@ route-wiring redesign.
 Likewise, background-operation loops remain domain-specific. Their retry,
 single-flight, secret-handling, restoration, and allowed-return-code semantics
 differ enough that a shared worker superclass would obscure important behavior.
+
+## React preview
+
+The replacement frontend is maintained under
+`pi/apps/van_dashboard/frontend/` and is introduced through the separate
+[React preview service](REACT_PREVIEW.md). It consumes the same Flask API through
+a narrow loopback proxy; it does not create another backend or import these
+controller modules.

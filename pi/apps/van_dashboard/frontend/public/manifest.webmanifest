@@ -1,0 +1,17 @@
+{
+  "name": "Van Dashboard Preview",
+  "short_name": "Van Preview",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#111820",
+  "theme_color": "#111820",
+  "icons": [
+    {
+      "src": "/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
