@@ -9,6 +9,7 @@ interface LightingSliderProps {
   maximum: number;
   unit: string;
   disabled: boolean;
+  displayValue?: string;
   className?: string;
   onCommit: (value: number) => Promise<boolean>;
 }
@@ -25,6 +26,7 @@ export function LightingSlider({
   maximum,
   unit,
   disabled,
+  displayValue,
   className = '',
   onCommit,
 }: LightingSliderProps) {
@@ -85,10 +87,7 @@ export function LightingSlider({
         onKeyUp={(event) => void commit(Number(event.currentTarget.value))}
         onBlur={(event) => void commit(Number(event.currentTarget.value))}
       />
-      <output>
-        {draft}
-        {unit}
-      </output>
+      <output>{displayValue ?? `${draft}${unit}`}</output>
     </label>
   );
 }

@@ -183,10 +183,9 @@ describe('Deal Watch views', () => {
     const onOpen = vi.fn();
     render(<DealWatchTile resource={resource()} onOpen={onOpen} />);
 
-    expect(screen.getByText('2 listings · 1 search')).toBeInTheDocument();
+    expect(screen.getByText('2 listings · 1 queries · 1 errors')).toBeInTheDocument();
     expect(screen.getByText('$49.95 · Protein shakes')).toBeInTheDocument();
-    expect(screen.getByText('1 error')).toBeInTheDocument();
-    expect(screen.getByText(/open details to manage watches/i)).toBeInTheDocument();
+    expect(screen.getByText('3')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open Deal Watch details' }));
     expect(onOpen).toHaveBeenCalledOnce();

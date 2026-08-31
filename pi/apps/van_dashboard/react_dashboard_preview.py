@@ -101,6 +101,10 @@ ALLOWED_MUTATIONS: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/api/dashboard-service/restart"),
         ("POST", "/api/system-power"),
         ("POST", "/api/system-monitor/crash-analysis"),
+        # vOnStar accepts only the fixed high-level action catalog and the
+        # separately confirmed, bodyless point-in-time access-state request.
+        ("POST", "/api/vonstar"),
+        ("POST", "/api/vonstar/access-state"),
     }
 )
 

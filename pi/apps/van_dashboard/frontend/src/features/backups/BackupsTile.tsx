@@ -1,8 +1,5 @@
 import type { PollingState } from '../../hooks/usePollingResource';
-import { KeyValueList } from '../../components/KeyValueList';
-import { StatusPill } from '../../components/StatusPill';
-import { Tile } from '../../components/Tile';
-import { backupTone, evidenceLabel, timeMachineLabel } from './presentation';
+import { lastSuccessLabel } from './presentation';
 import type { BackupStatus } from './types';
 import './backups.css';
 
@@ -11,46 +8,118 @@ export interface BackupsTileProps {
   onOpen: () => void;
 }
 
+type BackupTileState = 'good' | 'running' | 'warning' | 'unknown';
+
+function tileState(status: BackupStatus | null): BackupTileState {
+  if (!status) return 'unknown';
+  if (status.health === 'good') return 'good';
+  if (status.health === 'running') return 'running';
+  return 'warning';
+}
+
+function tilePill(status: BackupStatus | null): string {
+  if (!status) return 'NO DATA';
+  if (status.health === 'running') return 'RUNNING';
+  return status.health === 'good' ? 'CURRENT' : 'CHECK';
+}
+
+function backupAge(timestamp: number | null): string | null {
+  return timestamp === null ? null : lastSuccessLabel(timestamp);
+}
+
+function backupPresentation(status: BackupStatus) {
+  const operationRunning = status.operation.status === 'running';
+  const borgRunning = status.borg.running || (operationRunning && status.operation.kind === 'borg');
+  const exfatRunning =
+    status.exfatSnapshot.running || (operationRunning && status.operation.kind === 'exfat');
+  const borgAge = backupAge(status.borg.lastSuccessAt);
+  const exfatAge = backupAge(status.exfatSnapshot.lastSuccessAt);
+  const openwrtAge = backupAge(status.openwrt.lastSuccessAt);
+  const timeMachineAge = backupAge(status.timeMachine.lastBackupAt);
+  const piSummary = `${borgAge ? `Borg ${borgAge}` : 'No Borg success'} · ${
+    exfatAge ? `EXFAT ${exfatAge}` : 'No EXFAT snapshot'
+  }`;
+  const timeMachineSummary = timeMachineAge
+    ? `TM ${timeMachineAge}`
+    : (status.timeMachine.error ?? 'No Time Machine history');
+
+  let summary = `${piSummary} · ${timeMachineSummary}`;
+  if (borgRunning) {
+    summary = status.borg.progress?.detail
+      ? `Vanpi backup: ${status.borg.progress.detail}`
+      : 'Creating a new vanpi Borg backup…';
+  } else if (exfatRunning) {
+    summary = status.exfatSnapshot.progress?.detail
+      ? `EXFAT512 snapshot: ${status.exfatSnapshot.progress.detail}`
+      : 'Creating an EXFAT512 safety snapshot…';
+  } else if (operationRunning) {
+    summary = `Cloning vanpi to ${status.operation.target ?? 'hotspare'}…`;
+  } else if (status.timeMachine.running) {
+    summary = 'Time Machine backup in progress';
+  }
+
+  return {
+    summary,
+    borg: borgAge ?? 'No successful archive',
+    exfat: exfatAge ? `Snapshot ${exfatAge}` : 'No snapshot',
+    openwrt: openwrtAge ? `Snapshot ${openwrtAge}` : 'No verified snapshot',
+    timeMachine: status.timeMachine.running
+      ? `Backing up${
+          status.timeMachine.progressPercent === null
+            ? ''
+            : ` · ${status.timeMachine.progressPercent}%`
+        }`
+      : timeMachineSummary,
+  };
+}
+
 export function BackupsTile({ resource, onOpen }: BackupsTileProps) {
   const status = resource.data;
-  const tone = backupTone(status, resource.error);
-  const items = status
-    ? [
-        { label: 'Vanpi Borg', value: evidenceLabel(status.borg) },
-        { label: 'EXFAT snapshot', value: evidenceLabel(status.exfatSnapshot) },
-        { label: 'OpenWrt', value: evidenceLabel(status.openwrt) },
-        { label: 'Time Machine', value: timeMachineLabel(status.timeMachine) },
-      ]
-    : [
-        { label: 'Vanpi Borg', value: '—' },
-        { label: 'EXFAT snapshot', value: '—' },
-        { label: 'OpenWrt', value: '—' },
-        { label: 'Time Machine', value: '—' },
-      ];
-  const summary = status
-    ? status.health === 'running'
-      ? 'A backup operation is running'
-      : status.health === 'attention'
-        ? 'Backup evidence needs attention'
-        : 'Backup evidence is current'
-    : 'Reading backup evidence';
+  const state = tileState(status);
+  const presentation = status ? backupPresentation(status) : null;
 
   return (
-    <Tile
-      icon="🛟"
-      title="Backups"
-      summary={resource.error && !status ? resource.error.message : summary}
-      status={<StatusPill tone={tone}>{status?.health ?? 'Loading'}</StatusPill>}
-      tone={tone}
+    <button
+      type="button"
+      className={`tile backups-tile backups-tile--${state}`}
       onClick={onOpen}
-      ariaLabel="Open backup details"
-      className="backups-tile"
+      aria-label="Open backup details"
+      aria-haspopup="dialog"
     >
-      <KeyValueList items={items} />
-      <aside className="backups-read-only" aria-label="Backup controls available">
-        <strong>Controls enabled</strong>
-        <span>Open to start, stop, or clone guarded backup jobs.</span>
-      </aside>
-    </Tile>
+      <span className="backups-tile__pill">{tilePill(status)}</span>
+      <span className="backups-tile__heading">
+        <span className="backups-tile__icon" aria-hidden="true">
+          🛟
+        </span>
+        <span className="backups-tile__title" role="heading" aria-level={2}>
+          Backups
+        </span>
+      </span>
+      <span className="backups-tile__summary">
+        {presentation
+          ? presentation.summary
+          : resource.error
+            ? 'Backup status unavailable'
+            : 'Reading backup history…'}
+      </span>
+      <span className="backups-tile__status-lines">
+        <span className="backups-tile__status-line">
+          <span>Borg</span>
+          <span>{presentation?.borg ?? 'Checking…'}</span>
+        </span>
+        <span className="backups-tile__status-line">
+          <span>EXFAT512</span>
+          <span>{presentation?.exfat ?? 'Checking…'}</span>
+        </span>
+        <span className="backups-tile__status-line">
+          <span>OpenWrt</span>
+          <span>{presentation?.openwrt ?? 'Checking…'}</span>
+        </span>
+        <span className="backups-tile__status-line">
+          <span>m4mac</span>
+          <span>{presentation?.timeMachine ?? 'Checking…'}</span>
+        </span>
+      </span>
+    </button>
   );
 }

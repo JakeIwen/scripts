@@ -35,6 +35,7 @@ function EvidenceCard({
   const progressPercent = evidence.progress?.progressPercent;
   const operationRunning = status.operation.status === 'running';
   const stopRunning = status.stop.status === 'running';
+  const stopping = kind !== undefined && stopRunning && status.stop.kind === kind;
   const anyBackupRunning =
     status.borg.running || status.exfatSnapshot.running || status.openwrt.running;
   const actionDisabled = evidence.running
@@ -44,10 +45,18 @@ function EvidenceCard({
     <article className={`backup-evidence ${evidence.stale ? 'backup-evidence--stale' : ''}`}>
       <header>
         <h4>{title}</h4>
-        <span>{evidence.running ? 'Running' : evidence.stale ? 'Stale' : 'Current'}</span>
+        <span>
+          {stopping
+            ? 'Stopping'
+            : evidence.running
+              ? 'Running'
+              : evidence.stale
+                ? 'Stale'
+                : 'Current'}
+        </span>
       </header>
       <p>{evidenceLabel(evidence)}</p>
-      {progress && <small>{progress}</small>}
+      {stopping ? <small>Stopping gracefully…</small> : progress && <small>{progress}</small>}
       {progressPercent !== null && progressPercent !== undefined && (
         <div
           className="backup-progress"
@@ -61,18 +70,33 @@ function EvidenceCard({
         </div>
       )}
       {kind && (
-        <button
-          className={
-            evidence.running ? 'danger-button backup-action' : 'primary-button backup-action'
-          }
-          type="button"
-          disabled={actionDisabled}
-          onClick={() =>
-            void (evidence.running ? controls.stop(kind, status) : controls.start(kind))
-          }
-        >
-          {evidence.running ? 'Stop gracefully' : 'Run now'}
-        </button>
+        <>
+          <small className="backup-action-detail">
+            {evidence.running || stopping
+              ? kind === 'borg' && evidence.progress?.phase === 'cloning'
+                ? 'Stops gracefully. The in-progress hotspare may be incomplete and will not be marked current.'
+                : kind === 'borg'
+                  ? 'Stops gracefully. Unfinished Borg work is discarded and a scheduled run may retry later.'
+                  : 'Stops gracefully, retains the partial snapshot for retry, then unmounts and spins down hdd1tb.'
+              : kind === 'borg'
+                ? 'Backs up vanpi with Borg, syncs media, applies retention, and refreshes due hotspares.'
+                : 'Mounts hdd1tb, snapshots EXFAT512 with hard links, applies retention, then unmounts and spins down.'}
+          </small>
+          <button
+            className={
+              evidence.running || stopping
+                ? 'danger-button backup-action'
+                : 'primary-button backup-action'
+            }
+            type="button"
+            disabled={actionDisabled}
+            onClick={() =>
+              void (evidence.running ? controls.stop(kind, status) : controls.start(kind))
+            }
+          >
+            {stopping ? 'Stopping…' : evidence.running ? 'Stop gracefully' : 'Run now'}
+          </button>
+        </>
       )}
     </article>
   );

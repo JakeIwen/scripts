@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { BottomSheet } from '../../components/BottomSheet';
 import type { SonosControls } from './controls';
+import { SonosTransportControls } from './SonosTransportControls';
 import type { SonosSpeaker, SonosStatus, SonosTrackProgress } from './types';
 import './sonos.css';
 
@@ -57,38 +58,6 @@ function VolumeEditor({ label, value, disabled, onCommit }: VolumeEditorProps) {
         onClick={() => onCommit(draft)}
       >
         Set
-      </button>
-    </div>
-  );
-}
-
-function TransportControls({ status, controls }: { status: SonosStatus; controls: SonosControls }) {
-  const playing = status.nowPlaying.transportState === 'PLAYING';
-  return (
-    <div className="sonos-transport" aria-label="Playback controls" aria-busy={controls.running}>
-      <button
-        type="button"
-        disabled={controls.running}
-        aria-label="Previous track"
-        onClick={() => void controls.transport('previous')}
-      >
-        ⏮
-      </button>
-      <button
-        type="button"
-        disabled={controls.running}
-        aria-label={playing ? 'Pause' : 'Play'}
-        onClick={() => void controls.transport('play_pause')}
-      >
-        {playing ? 'Ⅱ' : '▶'}
-      </button>
-      <button
-        type="button"
-        disabled={controls.running}
-        aria-label="Next track"
-        onClick={() => void controls.transport('next')}
-      >
-        ⏭
       </button>
     </div>
   );
@@ -166,7 +135,7 @@ export function SonosSheet({
     >
       <div className="sonos-sheet__toolbar">
         <aside className="sonos-control-panel" aria-live="polite">
-          <strong>{controls.running ? 'Applying Sonos control…' : 'Controls enabled'}</strong>
+          <strong>{controls.running ? 'Applying Sonos control…' : 'Sonos controls'}</strong>
           <span>
             {controls.lastError ??
               controls.lastMessage ??
@@ -214,7 +183,7 @@ export function SonosSheet({
                 </>
               )}
             </div>
-            <TransportControls status={status} controls={controls} />
+            <SonosTransportControls status={status} controls={controls} />
           </section>
 
           <section className="panel-card sonos-group">

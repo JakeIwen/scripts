@@ -1,13 +1,5 @@
 import type { PollingState } from '../../hooks/usePollingResource';
-import { KeyValueList } from '../../components/KeyValueList';
-import { StatusPill, type StatusTone } from '../../components/StatusPill';
-import { Tile } from '../../components/Tile';
-import {
-  batterySourceLabel,
-  formatBatteryVoltage,
-  type TelemetrySummary,
-  voltageCheckLabel,
-} from './telemetrySummary';
+import { formatBatteryVoltage, type TelemetrySummary, voltageCheckLabel } from './telemetrySummary';
 import { type TelemetryControls, useTelemetryControls } from './controls';
 import { useTelemetrySummary } from './useTelemetrySummary';
 import './telemetry.css';
@@ -17,148 +9,119 @@ export interface TelemetryTileViewProps {
   controls: TelemetryControls;
 }
 
-interface ServicePresentation {
-  label: string;
-  detail: string;
-  tone: StatusTone;
+function observedLabel(observedAt: string | null): string {
+  if (!observedAt) return 'Timestamp unavailable';
+  const date = new Date(observedAt);
+  if (Number.isNaN(date.getTime())) return 'Timestamp unavailable';
+  return `Observed · ${date.toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+  })}`;
 }
 
-function siblingServiceUrl(port: number): string {
+function telemetryUrl(): string {
   const url = new URL(window.location.href);
-  url.port = String(port);
+  url.port = '8765';
   url.pathname = '/';
   url.search = '';
   url.hash = '';
   return url.toString();
 }
 
-function describeService(summary: TelemetrySummary): ServicePresentation {
-  if (!summary.service.available) {
-    return {
-      label: 'No data',
-      detail: summary.service.error ?? 'Service status unavailable',
-      tone: 'bad',
-    };
-  }
-  if (summary.service.running) {
-    return { label: 'Up', detail: 'Running', tone: 'good' };
-  }
-  return { label: 'Down', detail: 'Stopped', tone: 'bad' };
-}
-
-function observedLabel(observedAt: string | null): string {
-  if (!observedAt) return 'Unavailable';
-  const date = new Date(observedAt);
-  if (Number.isNaN(date.getTime())) return 'Invalid timestamp';
-  return date.toLocaleString([], {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    second: '2-digit',
-  });
-}
-
-function TelemetryControlPanel({
-  summary,
-  controls,
-}: {
-  summary: TelemetrySummary | null;
-  controls: TelemetryControls;
-}) {
+export function TelemetryTileView({ resource, controls }: TelemetryTileViewProps) {
+  const summary = resource.data;
   const serviceAvailable = summary?.service.available === true;
   const serviceRunning = summary?.service.running === true;
-  const checkRunning = summary?.check.status === 'running';
+  const serviceLabel = controls.serviceBusy
+    ? 'WAIT'
+    : serviceAvailable
+      ? serviceRunning
+        ? 'UP'
+        : 'DOWN'
+      : 'NO DATA';
+  const serviceActionLabel = serviceRunning ? 'Stop service' : 'Start service';
+  const checkRunning = controls.voltageCheckBusy || summary?.check.status === 'running';
+  const checkLabel = checkRunning ? 'Checking voltage…' : 'Check voltage now';
+  const batteryAvailable = summary?.battery.available === true;
+  const voltage = summary ? formatBatteryVoltage(summary.battery) : '—';
+  const source = batteryAvailable
+    ? summary?.battery.source === 'live'
+      ? 'live'
+      : summary?.battery.source === 'engine_off'
+        ? 'engine-off passive'
+        : 'last voltage_mon'
+    : 'Battery voltage unavailable';
+  const observed = batteryAvailable
+    ? observedLabel(summary?.battery.observedAt ?? null)
+    : 'No live or saved voltage reading';
 
   return (
-    <section className="telemetry-tile__controls" aria-label="Telemetry controls">
+    <section
+      className="tile telemetry-tile"
+      aria-labelledby="telemetry-tile-title"
+      title={resource.error?.message}
+    >
       <button
         type="button"
-        className="secondary-button"
+        className={`telemetry-tile__service ${
+          serviceAvailable
+            ? serviceRunning
+              ? 'telemetry-tile__service--good'
+              : 'telemetry-tile__service--bad'
+            : ''
+        }`.trim()}
         disabled={!serviceAvailable || controls.serviceBusy}
         aria-busy={controls.serviceBusy}
+        aria-label={serviceActionLabel}
+        title={
+          serviceAvailable
+            ? `${serviceRunning ? 'Stop' : 'Start'} telemetry service`
+            : (summary?.service.error ?? 'Telemetry service status unavailable')
+        }
         onClick={() => void controls.toggleService()}
       >
-        {controls.serviceBusy
-          ? 'Changing service…'
-          : serviceRunning
-            ? 'Stop service'
-            : 'Start service'}
+        {serviceLabel}
       </button>
+      <a className="telemetry-tile__open" href={telemetryUrl()}>
+        <span className="telemetry-tile__heading">
+          <span className="telemetry-tile__icon" aria-hidden="true">
+            📊
+          </span>
+          <span
+            className="telemetry-tile__title"
+            id="telemetry-tile-title"
+            role="heading"
+            aria-level={2}
+          >
+            Telemetry
+          </span>
+        </span>
+        <span className="telemetry-tile__voltage">
+          <strong>{voltage}</strong>
+          <span>{source}</span>
+        </span>
+        <span className="telemetry-tile__observed">{observed}</span>
+      </a>
       <button
         type="button"
         className="telemetry-tile__check"
-        disabled={controls.voltageCheckBusy || checkRunning}
-        aria-busy={controls.voltageCheckBusy || checkRunning}
+        disabled={checkRunning}
+        aria-busy={checkRunning}
+        aria-label={checkLabel}
         onClick={() => void controls.checkVoltage()}
       >
-        {controls.voltageCheckBusy || checkRunning ? 'Checking voltage…' : 'Check voltage now'}
+        <span aria-hidden="true">↻</span>
+        <span>{checkLabel}</span>
+        {summary && (
+          <span className="visually-hidden" aria-hidden="true">
+            {voltageCheckLabel(summary.check)}
+          </span>
+        )}
       </button>
     </section>
-  );
-}
-
-function TelemetryLink() {
-  return (
-    <a className="telemetry-tile__open" href={siblingServiceUrl(8765)}>
-      Open telemetry dashboard
-    </a>
-  );
-}
-
-export function TelemetryTileView({ resource, controls }: TelemetryTileViewProps) {
-  const summary = resource.data;
-  if (!summary) {
-    const failed = resource.error !== null;
-    return (
-      <Tile
-        icon="📊"
-        title="Telemetry"
-        summary={failed ? resource.error?.message : 'Checking battery voltage and service state…'}
-        status={
-          <StatusPill tone={failed ? 'bad' : 'neutral'}>
-            {failed ? 'No data' : 'Loading'}
-          </StatusPill>
-        }
-        tone={failed ? 'bad' : 'neutral'}
-        className="telemetry-tile"
-      >
-        <TelemetryControlPanel summary={null} controls={controls} />
-        <TelemetryLink />
-      </Tile>
-    );
-  }
-
-  const service = describeService(summary);
-  const voltage = formatBatteryVoltage(summary.battery);
-  const source = batterySourceLabel(summary.battery.source);
-  const summaryContent = (
-    <span className="telemetry-tile__reading">
-      <strong>{voltage}</strong>
-      <span>{summary.battery.available ? source : summary.battery.detail}</span>
-    </span>
-  );
-  const items = [
-    { label: 'Service', value: service.detail },
-    { label: 'Voltage check', value: voltageCheckLabel(summary.check) },
-    { label: 'Observed', value: observedLabel(summary.battery.observedAt) },
-  ];
-
-  return (
-    <Tile
-      icon="📊"
-      title="Telemetry"
-      summary={summaryContent}
-      status={<StatusPill tone={service.tone}>{service.label}</StatusPill>}
-      className="telemetry-tile"
-    >
-      <KeyValueList items={items} className="telemetry-tile__details" />
-      {resource.error && (
-        <p className="telemetry-tile__stale-error">Refresh failed · {resource.error.message}</p>
-      )}
-      <TelemetryControlPanel summary={summary} controls={controls} />
-      <TelemetryLink />
-    </Tile>
   );
 }
 

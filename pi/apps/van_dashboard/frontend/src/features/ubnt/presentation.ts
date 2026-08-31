@@ -8,22 +8,17 @@ export function ubntSecurityLabel(security: UbntSecurity): string {
   return 'WEP';
 }
 
-export function ubntTone(status: UbntWifiStatus | null, error: Error | null): StatusTone {
-  if (error && !status) return 'bad';
+export function ubntTone(status: UbntWifiStatus | null, _error: Error | null): StatusTone {
   if (!status) return 'neutral';
-  if (error || status.operation.status === 'error') return 'warning';
   if (status.reachable === false) return 'bad';
-  if (status.reachable === true && status.state.associatedSsid) return 'good';
-  if (status.reachable === true) return 'warning';
+  if (status.reachable === true) return 'good';
   return 'neutral';
 }
 
-export function ubntStatusLabel(status: UbntWifiStatus | null, refreshing: boolean): string {
-  if (!status) return refreshing ? 'Checking' : 'No data';
-  if (status.operation.status === 'running') return 'Updating';
+export function ubntStatusLabel(status: UbntWifiStatus | null, _refreshing: boolean): string {
+  if (!status) return 'No data';
   if (status.reachable === false) return 'Unavailable';
-  if (status.reachable === true && status.state.associatedSsid) return 'Connected';
-  if (status.reachable === true) return 'Disconnected';
+  if (status.reachable === true) return 'Connected';
   return 'No data';
 }
 

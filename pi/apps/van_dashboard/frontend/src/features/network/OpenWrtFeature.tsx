@@ -18,6 +18,8 @@ export function OpenWrtFeature() {
         connectivityRefreshing={connectivity.refreshing}
         speedtest={speedtest.data}
         speedtestError={speedtest.error}
+        speedtestStarting={speedtestControl.busy}
+        onStartSpeedtest={speedtestControl.start}
         onOpen={() => setSheetOpen(true)}
       />
       <OpenWrtSheet

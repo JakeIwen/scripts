@@ -66,11 +66,12 @@ describe('system health UI', () => {
       />,
     );
 
-    expect(screen.getByText('73%')).toBeInTheDocument();
+    expect(screen.getByText('73.2%')).toBeInTheDocument();
+    expect(screen.getByText('↓ 2.0 KiB/s · ↑ 1.0 KiB/s')).toBeInTheDocument();
+    expect(screen.getByText('R 4.0 KiB/s · W 8.0 KiB/s')).toBeInTheDocument();
     expect(
       screen.getByText('USB faults are present without confirmed undervoltage'),
     ).toBeInTheDocument();
-    expect(screen.getByText('Passive monitoring · read-only')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Open system health details' }));
     expect(onOpen).toHaveBeenCalledOnce();
   });

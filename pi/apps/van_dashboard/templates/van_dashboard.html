@@ -43,6 +43,17 @@
         <span class="status-line cop-wake-detail-row" id="cop-wake-detail-row" hidden><span id="cop-wake-detail-label">Wake detail</span><span id="cop-wake-detail">—</span></span>
       </span>
     </button>
+    <section class="tile vonstar-tile unknown" id="vonstar" data-dashboard-tile aria-labelledby="vonstar-title" aria-busy="false">
+      <button class="vonstar-open" id="vonstar-open" type="button" data-action aria-label="Open vOnStar status" aria-haspopup="dialog" aria-expanded="false" aria-controls="vonstar-panel"></button>
+      <span class="pill" id="vonstar-pill">OFFLINE</span><span class="tile-heading"><span class="tile-icon" aria-hidden="true">⭐</span><span class="tile-title" id="vonstar-title">vOnStar</span></span>
+      <span class="tile-detail" id="vonstar-detail">Checking vehicle lock controls…</span>
+      <div class="vonstar-actions" role="group" aria-label="Vehicle lock controls">
+        <button type="button" data-action data-vonstar-action="lock_all" disabled>Lock All</button>
+        <button type="button" data-action data-vonstar-action="unlock_front" disabled>Unlock Front</button>
+        <button type="button" data-action data-vonstar-action="unlock_cargo" disabled>Unlock Cargo</button>
+      </div>
+      <span class="status-lines"><span class="status-line"><span>Last action</span><span id="vonstar-last" role="status" aria-live="polite">—</span></span></span>
+    </section>
     <a class="tile" id="books" data-dashboard-tile data-action href="#"><span class="tile-heading"><span class="tile-icon" aria-hidden="true">📖</span><span class="tile-title">Audiobooks</span></span><span class="tile-detail">Open the Sonos audiobook library</span></a>
     <a class="tile" id="video-library" data-dashboard-tile data-action href="#"><span class="tile-heading"><span class="tile-icon" aria-hidden="true">🎬</span><span class="tile-title">Movies &amp; TV</span></span><span class="tile-detail">Browse, play, and continue movies and shows</span></a>
     <section class="tile telemetry-tile" id="telemetry" data-dashboard-tile aria-labelledby="telemetry-title">
@@ -185,6 +196,23 @@
     </section>
   </div>
 </main>
+<div class="speaker-backdrop" id="vonstar-backdrop">
+  <section class="speaker-sheet vonstar-sheet" id="vonstar-panel" role="dialog" aria-modal="true" aria-labelledby="vonstar-sheet-title" aria-busy="false">
+    <div class="sheet-grabber"></div><div class="sheet-head"><h2 id="vonstar-sheet-title">vOnStar status</h2><span class="policy-sheet-status" id="vonstar-sheet-service">Checking…</span><button class="sheet-close" id="vonstar-close" aria-label="Close vOnStar status">&times;</button></div>
+    <p class="sheet-help">Point-in-time vehicle access state. Checking wakes the vehicle buses and may power the accessory rails and dashcam.</p>
+    <div class="vonstar-access-overview">
+      <section class="vonstar-access-card unknown" id="vonstar-lock-card"><span>Lock state</span><strong id="vonstar-lock-state">Not checked this session</strong><small id="vonstar-lock-quality">Awaiting an explicit check</small></section>
+      <section class="vonstar-access-card" id="vonstar-door-card"><span>Door coverage</span><strong id="vonstar-door-coverage">Not checked this session</strong><small id="vonstar-last-checked">Last checked · never this session</small></section>
+    </div>
+    <div class="vonstar-door-list" aria-label="Door state coverage">
+      <div><span>Driver</span><strong id="vonstar-driver-door">Not checked</strong></div>
+      <div><span>Sliding</span><strong id="vonstar-sliding-door">Not checked</strong></div>
+      <div><span>Passenger / rear</span><strong id="vonstar-unmapped-doors">Not mapped</strong></div>
+    </div>
+    <button class="vonstar-check-state" id="vonstar-check-state" type="button" data-action disabled><span class="speed-spinner" aria-hidden="true"></span><span id="vonstar-check-label">Check Status</span></button>
+    <details class="vonstar-limitations"><summary>Coverage notes</summary><ul id="vonstar-limitations"><li>No state checked this session.</li></ul></details>
+  </section>
+</div>
 <div class="speaker-backdrop" id="openwrt-backdrop">
   <section class="speaker-sheet openwrt-sheet" id="openwrt-panel" role="dialog" aria-modal="true" aria-labelledby="openwrt-sheet-title" aria-busy="true">
     <div class="sheet-grabber"></div><div class="sheet-head"><h2 id="openwrt-sheet-title">OpenWrt</h2><span class="policy-sheet-status" id="openwrt-sheet-age">Checking…</span><button class="sheet-close" id="openwrt-close" aria-label="Close OpenWrt details">&times;</button></div>

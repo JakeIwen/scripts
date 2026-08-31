@@ -17,6 +17,7 @@ export interface CurrentSystemSample {
   armMegahertz: number | null;
   throttleWord: string | null;
   activeThrottleFlags: string[];
+  occurredThrottleFlags: string[];
   networkReceiveBytesPerSecond: number | null;
   networkTransmitBytesPerSecond: number | null;
   diskReadBytesPerSecond: number | null;

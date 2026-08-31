@@ -10,9 +10,9 @@ describe('tile ordering', () => {
     expect(normalizeTileOrder(['telemetry', 'cop', 'cop', 'removed'], available)).toEqual([
       'telemetry',
       'cop',
+      'vonstar',
       'books',
       'video-library',
-      'sonos-card',
     ]);
   });
 

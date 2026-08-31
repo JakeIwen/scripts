@@ -1,0 +1,246 @@
+.vonstar-tile,
+.vonstar-tile.tile--good,
+.vonstar-tile.tile--warning,
+.vonstar-tile.tile--bad {
+  min-height: 276.390625px;
+  gap: 11px;
+  border-color: #665b2d;
+  background: radial-gradient(circle at 90% 5%, rgb(242 201 76 / 14%), transparent 38%), #1d2429;
+}
+
+.vonstar-tile.tile--good {
+  border-color: #8b7937;
+}
+
+.vonstar-tile .status-pill {
+  min-height: 25px;
+  gap: 5px;
+  padding: 4px 7px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+.vonstar-tile .status-pill__dot {
+  width: 7px;
+  height: 7px;
+  box-shadow: 0 0 0 3px rgb(119 137 149 / 12%);
+}
+
+.vonstar-tile .tile__summary {
+  min-height: 34px;
+  color: var(--dim);
+  line-height: 1.35;
+}
+
+.vonstar-tile .tile__body {
+  display: grid;
+  gap: 11px;
+  margin-top: 0;
+}
+
+.vonstar-open {
+  position: absolute;
+  z-index: 2;
+  inset: 0 0 auto;
+  width: 100%;
+  height: 94px;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.vonstar-actions {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 7px;
+  width: 100%;
+}
+
+.vonstar-action {
+  width: 100%;
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid #665b2d;
+  border-radius: 9px;
+  background: #2c2a1d;
+  color: #f2e8bd;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.vonstar-action:hover:not(:disabled) {
+  border-color: #8b7937;
+  background: #393521;
+}
+
+.vonstar-action:disabled {
+  cursor: default;
+  opacity: 0.38;
+}
+
+.vonstar-last-action {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 2px;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.vonstar-last-action span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  color: #c5d1d7;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vonstar-stale-error {
+  position: relative;
+  z-index: 3;
+  color: var(--warning);
+  font-size: 12px;
+}
+
+.vonstar-sheet-toolbar,
+.vonstar-sheet-toolbar > div {
+  display: flex;
+}
+
+.vonstar-sheet-toolbar {
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.vonstar-sheet-toolbar > div {
+  flex-direction: column;
+  gap: 4px;
+}
+
+.vonstar-sheet-toolbar span,
+.vonstar-access-card span,
+.vonstar-access-card small,
+.vonstar-door-list dt {
+  color: var(--muted);
+}
+
+.vonstar-access-overview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.vonstar-access-card {
+  display: grid;
+  gap: 6px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+  background: var(--panel-soft);
+}
+
+.vonstar-access-card strong {
+  font-size: 19px;
+}
+
+.vonstar-access-card--good {
+  border-color: #3e765d;
+  background: var(--good-background);
+}
+
+.vonstar-access-card--warning {
+  border-color: #785e34;
+  background: var(--warning-background);
+}
+
+.vonstar-door-list {
+  display: grid;
+  gap: 0;
+  margin: 16px 0;
+}
+
+.vonstar-door-list > div {
+  display: grid;
+  grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.5fr);
+  gap: 14px;
+  padding: 11px 0;
+  border-top: 1px solid var(--line);
+}
+
+.vonstar-door-list dd {
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.vonstar-check-state {
+  width: 100%;
+}
+
+.vonstar-limitations {
+  margin-top: 16px;
+  color: var(--muted);
+}
+
+.vonstar-limitations summary {
+  cursor: pointer;
+  font-weight: 750;
+}
+
+.vonstar-limitations ul {
+  display: grid;
+  gap: 7px;
+  padding-left: 22px;
+}
+
+@media (max-width: 640px) {
+  .vonstar-access-overview {
+    grid-template-columns: 1fr;
+  }
+
+  .vonstar-sheet-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (min-width: 430px) and (max-width: 760px) {
+  .vonstar-tile,
+  .vonstar-tile.tile--good,
+  .vonstar-tile.tile--warning,
+  .vonstar-tile.tile--bad {
+    min-height: 287.984375px;
+  }
+}
+
+@media (max-width: 380px) {
+  .vonstar-tile,
+  .vonstar-tile.tile--good,
+  .vonstar-tile.tile--warning,
+  .vonstar-tile.tile--bad {
+    padding: 17px;
+  }
+
+  .vonstar-tile .tile__header {
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    gap: 7px;
+  }
+
+  .vonstar-tile .tile__icon {
+    font-size: 28px;
+  }
+
+  .vonstar-tile .tile__title {
+    font-size: 18px;
+  }
+}

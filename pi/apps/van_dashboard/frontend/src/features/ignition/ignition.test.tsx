@@ -173,7 +173,8 @@ describe('ignition views', () => {
 
     expect(screen.getByText('Ignition handling resumes in 1h 0m')).toBeInTheDocument();
     expect(screen.getByText('Running · starts at boot')).toBeInTheDocument();
-    expect(screen.getByText(/pause controls are available in details/i)).toBeInTheDocument();
+    expect(screen.getByText('Monitoring')).toBeInTheDocument();
+    expect(screen.getByText('Paused · 1h 0m left')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Open ignition monitor details' }));
     expect(onOpen).toHaveBeenCalledOnce();
   });

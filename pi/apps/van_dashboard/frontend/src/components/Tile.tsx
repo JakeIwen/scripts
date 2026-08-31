@@ -10,6 +10,7 @@ interface TileProps {
   className?: string;
   onClick?: () => void;
   ariaLabel?: string;
+  style?: React.CSSProperties;
 }
 
 export function Tile({
@@ -22,6 +23,7 @@ export function Tile({
   className = '',
   onClick,
   ariaLabel,
+  style,
 }: TileProps) {
   const content = (
     <>
@@ -45,12 +47,17 @@ export function Tile({
         type="button"
         onClick={onClick}
         aria-label={ariaLabel}
+        style={style}
       >
         {content}
       </button>
     );
   }
-  return <article className={classes}>{content}</article>;
+  return (
+    <article className={classes} style={style}>
+      {content}
+    </article>
+  );
 }
 
 interface ServiceLinkTileProps {

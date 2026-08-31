@@ -1,13 +1,17 @@
-# React dashboard preview
+# React dashboard frontend
 
 [Backend architecture](ARCHITECTURE.md) · [Dashboard testing](DASHBOARD_TESTING.md)
 
-The React migration runs alongside the production dashboard:
+The production dashboard and parallel canary share one atomic React build:
 
 ```text
-8788  van-dashboard.service          production Flask API and legacy UI
-8790  van-dashboard-preview.service  React static files and narrow API proxy
+8788  van-dashboard.service          React UI, Flask API, and /legacy fallback
+8790  van-dashboard-preview.service  React canary and narrow API proxy
 ```
+
+The production Flask process remains the sole dashboard manager and API owner.
+It serves React at `/`, Vite assets at `/assets/`, and the previous template at
+`/legacy`.
 
 The preview service owns no dashboard managers, runtime directory, device
 access, or CAN access. Browser requests to `/api/*` are proxied to the existing
@@ -19,11 +23,12 @@ Mutating routes use an exact method-and-path allowlist in
 `react_dashboard_preview.py`; there is no wildcard or method-wide enable
 switch. The current allowlist covers the migrated controls for media, lighting,
 telemetry, speed tests, Deal Watch, ignition, storage, USB, backups, UBNT,
-Starlink, COP ALERT intent, dashboard restart, reboot, and power-down.
+Starlink, COP ALERT intent, vOnStar's fixed confirmed requests, dashboard
+restart, reboot, and power-down.
 
 ## Deployment
 
-From the `scripts_2` clone:
+From the active reviewed checkout:
 
 ```bash
 ./pi/deploy_van_dashboard_preview.sh
@@ -39,7 +44,8 @@ Rollback requires a prior preview release:
 ./pi/deploy_van_dashboard_preview.sh --rollback
 ```
 
-Emergency disable leaves the production dashboard untouched:
+Emergency disable removes only the parallel `8790` canary; React on `8788`
+continues to be served by Flask:
 
 ```bash
 ssh pi@vanpi.lan \

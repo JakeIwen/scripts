@@ -21,6 +21,7 @@ describe('Van Dashboard preview composition', () => {
 
     for (const title of [
       'COP ALERT',
+      'vOnStar',
       'Audiobooks',
       'Movies & TV',
       'Telemetry',

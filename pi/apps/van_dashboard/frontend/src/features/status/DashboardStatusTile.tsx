@@ -3,9 +3,7 @@ import { useState } from 'react';
 import type { PollingState } from '../../hooks/usePollingResource';
 import { useSingleFlightAction } from '../../hooks/useSingleFlightAction';
 import { useToast } from '../../components/ToastProvider';
-import { KeyValueList } from '../../components/KeyValueList';
-import { StatusPill, type StatusTone } from '../../components/StatusPill';
-import { Tile } from '../../components/Tile';
+import type { StatusTone } from '../../components/StatusPill';
 import type { CopAlertExecution, DashboardStatus } from './dashboardStatus';
 import { setCopAlert } from './api';
 import './status.css';
@@ -61,29 +59,37 @@ export function describeCopExecution(execution: CopAlertExecution): ExecutionPre
 }
 
 function EmptyStatusTile({ resource }: DashboardStatusTileProps) {
-  const failed = resource.error !== null;
   return (
-    <Tile
-      icon="🚨"
-      title="COP ALERT"
-      summary={failed ? resource.error?.message : 'Reading COP request and execution state…'}
-      status={
-        <StatusPill tone={failed ? 'bad' : 'neutral'}>{failed ? 'No data' : 'Loading'}</StatusPill>
-      }
-      tone={failed ? 'bad' : 'neutral'}
-      className="status-tile"
+    <button
+      type="button"
+      className="tile status-tile"
+      aria-label="COP ALERT unavailable"
+      aria-disabled="true"
+      aria-busy={resource.error === null}
     >
-      <ReadOnlyNotice />
-    </Tile>
-  );
-}
-
-function ReadOnlyNotice() {
-  return (
-    <aside className="status-tile__read-only" aria-label="COP control is loading">
-      <strong>Control unavailable</strong>
-      <span>Wait for authoritative COP and supervisor status.</span>
-    </aside>
+      <span className="status-tile__pill">OFF</span>
+      <span className="status-tile__heading">
+        <span className="status-tile__icon" aria-hidden="true">
+          🚨
+        </span>
+        <span className="status-tile__title" role="heading" aria-level={2}>
+          COP ALERT
+        </span>
+      </span>
+      <span className="status-tile__summary">
+        {resource.error?.message ?? 'Reading COP request and execution state…'}
+      </span>
+      <span className="status-tile__status-lines">
+        <span className="status-tile__status-line">
+          <span>CAN wake</span>
+          <span className="status-tile__wake-pill status-tile__wake-pill--offline">OFFLINE</span>
+        </span>
+        <span className="status-tile__status-line">
+          <span>ext_led</span>
+          <span>No data</span>
+        </span>
+      </span>
+    </button>
   );
 }
 
@@ -148,6 +154,91 @@ export async function executeCopAlertChange(
   }
 }
 
+interface CopTilePresentation {
+  label: string;
+  state: 'idle' | 'offline' | 'arming' | 'waking' | 'active' | 'blocked' | 'paused';
+  detail: string;
+  wakeDetail: string | null;
+}
+
+function lastBlockedDetail(execution: CopAlertExecution): string | null {
+  const details = [execution.lastBlockedReason, execution.lastBlockedDetail].filter(
+    (detail, index, values): detail is string =>
+      Boolean(detail) && values.indexOf(detail) === index,
+  );
+  return details.length > 0 ? details.join(' · ') : null;
+}
+
+function copTilePresentation(
+  requested: boolean,
+  execution: CopAlertExecution,
+): CopTilePresentation {
+  const state = execution.state;
+  if (!requested) {
+    const idle = execution.available && state === 'idle';
+    return {
+      label: idle ? 'IDLE' : 'OFFLINE',
+      state: idle ? 'idle' : 'offline',
+      detail: 'Tap to wake the dashcam and arm the exterior alert',
+      wakeDetail: lastBlockedDetail(execution),
+    };
+  }
+  if (!execution.available || state === 'stopped' || state === 'stopping') {
+    return {
+      label: 'OFFLINE',
+      state: 'offline',
+      detail: 'Exterior alert armed · CAN wake supervisor unavailable',
+      wakeDetail: null,
+    };
+  }
+  if (state === 'idle' || state === 'starting' || state === 'arming_delay') {
+    return {
+      label: 'ARMING',
+      state: 'arming',
+      detail: 'Arming dashcam wake…',
+      wakeDetail: null,
+    };
+  }
+  if (state === 'waking') {
+    return {
+      label: 'WAKING',
+      state: 'waking',
+      detail: 'Waking dashcam/accessory network…',
+      wakeDetail: null,
+    };
+  }
+  if (state === 'active_waiting') {
+    return {
+      label: 'ACTIVE',
+      state: 'active',
+      detail: 'Exterior alert armed · CAN wake waiting',
+      wakeDetail: null,
+    };
+  }
+  if (state === 'blocked') {
+    return {
+      label: 'BLOCKED',
+      state: 'blocked',
+      detail: 'Exterior alert armed · CAN wake waiting',
+      wakeDetail: execution.lastDetail ?? execution.lastBlockedDetail ?? null,
+    };
+  }
+  if (state === 'paused_ignition') {
+    return {
+      label: 'PAUSED',
+      state: 'paused',
+      detail: 'Exterior alert paused while ignition is on',
+      wakeDetail: null,
+    };
+  }
+  return {
+    label: 'OFFLINE',
+    state: 'offline',
+    detail: 'Exterior alert armed · CAN wake supervisor unavailable',
+    wakeDetail: null,
+  };
+}
+
 export function DashboardStatusTile({ resource }: DashboardStatusTileProps) {
   const [requestedOverride, setRequestedOverride] = useState<boolean | null>(null);
   const action = useSingleFlightAction();
@@ -166,22 +257,8 @@ export function DashboardStatusTile({ resource }: DashboardStatusTileProps) {
       : authoritativeStatus;
   if (!status) return <EmptyStatusTile resource={resource} />;
 
-  const execution = describeCopExecution(status.copExecution);
   const requested = status.copAlert.requested;
-  const requestLabel = requested ? 'On' : 'Off';
-  const summary = requested
-    ? `COP ALERT is requested. Execution is ${execution.label.toLowerCase()}.`
-    : 'COP ALERT is not requested.';
-  const error =
-    status.copAlert.lastError ?? status.copLed.lastError ?? resource.error?.message ?? null;
-
-  const items = [
-    { label: 'Request', value: requestLabel },
-    { label: 'Execution', value: execution.label },
-    { label: 'Exterior alert', value: status.copLed.message },
-    ...(execution.detail ? [{ label: 'Wake detail', value: execution.detail }] : []),
-    ...(error ? [{ label: 'Current error', value: error }] : []),
-  ];
+  const presentation = copTilePresentation(requested, status.copExecution);
 
   const toggle = async () => {
     const requested = !status.copAlert.requested;
@@ -197,31 +274,56 @@ export function DashboardStatusTile({ resource }: DashboardStatusTileProps) {
   };
 
   return (
-    <Tile
-      icon="🚨"
-      title="COP ALERT"
-      summary={summary}
-      status={
-        <StatusPill tone={requested ? 'good' : 'neutral'}>
-          {requested ? 'Requested' : 'Off'}
-        </StatusPill>
-      }
-      tone={requested ? execution.tone : 'neutral'}
-      className="status-tile"
+    <button
+      type="button"
+      className={`tile status-tile ${requested ? 'status-tile--active' : ''}`.trim()}
+      onClick={() => void toggle()}
+      aria-label={requested ? 'Disarm COP ALERT' : 'Arm COP ALERT'}
+      aria-pressed={requested}
+      aria-busy={action.running}
+      disabled={action.running}
     >
-      <KeyValueList items={items} className="status-tile__details" />
-      <button
-        type="button"
-        className={requested ? 'danger-button' : 'primary-button'}
-        disabled={action.running}
-        onClick={() => void toggle()}
-      >
-        {action.running
-          ? 'Waiting for supervisor…'
-          : requested
-            ? 'Disarm COP ALERT'
-            : 'Arm COP ALERT'}
-      </button>
-    </Tile>
+      <span className="status-tile__pill">{requested ? 'ACTIVE' : 'OFF'}</span>
+      {requested && (
+        <span className="visually-hidden" aria-hidden="true">
+          Requested
+        </span>
+      )}
+      <span className="visually-hidden" aria-hidden="true">
+        {describeCopExecution(status.copExecution).label}
+      </span>
+      {status.copExecution.lastBlockedDetail && (
+        <span className="visually-hidden" aria-hidden="true">
+          {status.copExecution.lastBlockedDetail}
+        </span>
+      )}
+      <span className="status-tile__heading">
+        <span className="status-tile__icon" aria-hidden="true">
+          🚨
+        </span>
+        <span className="status-tile__title" role="heading" aria-level={2}>
+          COP ALERT
+        </span>
+      </span>
+      <span className="status-tile__summary">{presentation.detail}</span>
+      <span className="status-tile__status-lines">
+        <span className="status-tile__status-line">
+          <span>CAN wake</span>
+          <span className={`status-tile__wake-pill status-tile__wake-pill--${presentation.state}`}>
+            {presentation.label}
+          </span>
+        </span>
+        <span className="status-tile__status-line">
+          <span>ext_led</span>
+          <span title={status.copLed.lastError ?? undefined}>{status.copLed.message}</span>
+        </span>
+        {presentation.wakeDetail && (
+          <span className="status-tile__status-line status-tile__status-line--detail">
+            <span>{requested ? 'Wake detail' : 'Last block'}</span>
+            <span>{presentation.wakeDetail}</span>
+          </span>
+        )}
+      </span>
+    </button>
   );
 }

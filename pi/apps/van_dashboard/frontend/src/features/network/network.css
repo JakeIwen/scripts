@@ -1,9 +1,289 @@
-.openwrt-tile__route {
-  display: grid;
-  gap: 4px;
+.openwrt-tile {
+  min-width: 0;
+  min-height: 220px;
+  gap: 0;
+  padding: 15px;
+  border-radius: 19px;
+  background: linear-gradient(145deg, var(--panel), #151f28);
+  box-shadow: 0 8px 28px rgb(5 11 16 / 18%);
 }
 
-.openwrt-tile__route span,
+.openwrt-open {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.openwrt-open:focus-visible {
+  outline: 2px solid #79a9c0;
+  outline-offset: -4px;
+}
+
+.connectivity-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 13px;
+}
+
+.network-card-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  font-size: 17px;
+  font-weight: 760;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+.network-card-icon {
+  flex: 0 0 auto;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.connectivity-age {
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 10px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mwan-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+}
+
+.mwan-primary {
+  min-width: 0;
+}
+
+.network-label {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 7px;
+  color: var(--dim);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.network-dot {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #71818a;
+  box-shadow: 0 0 0 4px rgb(113 129 138 / 9%);
+}
+
+.network-dot.good {
+  background: var(--good);
+  box-shadow: 0 0 0 4px rgb(98 200 153 / 9%);
+}
+
+.network-dot.bad {
+  background: var(--bad);
+  box-shadow: 0 0 0 4px rgb(239 112 103 / 9%);
+}
+
+.network-value {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mwan-list {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.mwan-chip {
+  padding: 3px 7px;
+  border: 1px solid #42545e;
+  border-radius: 99px;
+  color: var(--dim);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.mwan-chip.online {
+  border-color: #39725b;
+  background: #1e3b31;
+  color: #9cdec0;
+}
+
+.mwan-chip.offline {
+  border-color: #6a4542;
+  background: #392624;
+  color: #e6aaa5;
+}
+
+.mwan-chip.disabled {
+  border-color: #42545e;
+  background: transparent;
+  color: var(--dim);
+}
+
+.mwan-chip.connecting,
+.mwan-chip.disconnecting {
+  border-color: #7b633a;
+  background: #584524;
+  color: #f2d59e;
+}
+
+.openwrt-speedtest {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.speedtest-button {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 11px;
+  border: 1px solid #42606e;
+  border-radius: 11px;
+  background: #263b47;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 730;
+}
+
+.speedtest-button:active {
+  transform: scale(0.98);
+}
+
+.speedtest-button:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.openwrt-speedtest-button {
+  padding: 8px 10px;
+}
+
+.speed-spinner {
+  display: none;
+  width: 13px;
+  height: 13px;
+  border: 2px solid #87a8b8;
+  border-top-color: var(--text);
+  border-radius: 50%;
+  animation: openwrt-spin 0.8s linear infinite;
+}
+
+.speedtest-button.running .speed-spinner {
+  display: inline-block;
+}
+
+.speedtest-button.running .speed-icon {
+  display: none;
+}
+
+.speed-results {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  justify-self: end;
+  color: var(--dim);
+  font-size: 11px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.speed-results strong {
+  display: block;
+  overflow: hidden;
+  color: #dce8ed;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+}
+
+.speed-results.bad strong {
+  color: #ffc1bc;
+}
+
+@keyframes openwrt-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 600px) {
+  .network-card-heading {
+    font-size: 15px;
+  }
+
+  .connectivity-head {
+    gap: 6px;
+  }
+
+  .connectivity-age {
+    font-size: 8px;
+  }
+
+  .network-label {
+    font-size: 11px;
+  }
+
+  .network-value {
+    font-size: 13px;
+  }
+
+  .mwan-overview {
+    gap: 6px;
+  }
+
+  .mwan-chip {
+    padding: 3px 6px;
+    font-size: 8px;
+  }
+
+  .speed-results {
+    font-size: 9px;
+  }
+
+  .speed-results strong {
+    font-size: 11px;
+  }
+
+  .openwrt-speedtest {
+    grid-template-columns: 1fr;
+  }
+
+  .openwrt-speedtest-button {
+    width: 100%;
+  }
+}
+
 .openwrt-speed small,
 .openwrt-overview__card small,
 .openwrt-client small,
@@ -12,14 +292,9 @@
   color: var(--muted);
 }
 
-.openwrt-tile__route strong {
-  overflow: hidden;
-  font-size: 20px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .mwan-interface-list {
+  position: relative;
+  z-index: 3;
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
@@ -28,14 +303,14 @@
 .mwan-interface,
 .mwan-interface-list__empty {
   display: inline-flex;
-  min-height: 27px;
+  min-height: 20px;
   align-items: center;
-  padding: 4px 9px;
+  padding: 3px 7px;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: var(--panel-soft);
   color: var(--muted);
-  font-size: 11px;
+  font-size: 9px;
   font-weight: 750;
   text-transform: uppercase;
 }
@@ -57,33 +332,9 @@
   color: #ffe4b4;
 }
 
-.openwrt-speed {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
-  padding: 11px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-small);
-  background: rgb(10 17 22 / 44%);
-}
-
 .openwrt-speed__icon {
   color: var(--accent);
   font-size: 20px;
-}
-
-.openwrt-speed span:last-child {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
-
-.openwrt-speed strong,
-.openwrt-speed small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .openwrt-speed--bad strong {
@@ -305,5 +556,11 @@
     grid-column: 2 / -1;
     justify-items: start;
     text-align: left;
+  }
+}
+
+@media (min-width: 430px) and (max-width: 760px) {
+  .openwrt-tile {
+    min-height: 255px;
   }
 }

@@ -25,8 +25,7 @@ export function lightingStateLabel(state: LightingAggregateState | LightDeviceSt
 
 export function lightingStateTone(state: LightingAggregateState | LightDeviceState): StatusTone {
   if (state === 'on') return 'good';
-  if (state === 'mixed') return 'warning';
-  if (state === 'unavailable' || state === 'unknown') return 'bad';
+  if (state === 'unavailable') return 'bad';
   return 'neutral';
 }
 

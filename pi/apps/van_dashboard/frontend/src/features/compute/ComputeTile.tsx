@@ -18,23 +18,37 @@ export interface ComputeTileProps {
   onOpen: () => void;
 }
 
+function legacyAge(timestamp: number | null): string {
+  if (timestamp === null) return 'never';
+  const seconds = Math.max(0, Date.now() / 1_000 - timestamp);
+  return seconds < 90 ? `${Math.round(seconds)}s ago` : `${Math.round(seconds / 60)}m ago`;
+}
+
 function workerLabel(report: ComputeReport): string {
-  const remoteWorkers = report.status.workers
-    .filter((worker) => worker.placement !== 'pi-local')
-    .sort((left, right) => (left.ageSeconds ?? Infinity) - (right.ageSeconds ?? Infinity));
-  const worker = remoteWorkers[0];
-  if (!worker) return report.status.available ? 'Remote worker ready' : 'No heartbeat';
-  return `${worker.name} · ${worker.available ? 'ready' : 'offline'}`;
+  const remoteWorkers = report.status.workers.filter((worker) => worker.placement !== 'pi-local');
+  const capacityWorkers = remoteWorkers.filter(
+    (worker) => worker.available && worker.slotsTotal !== null,
+  );
+  const worker = (capacityWorkers.length ? capacityWorkers : remoteWorkers)
+    .slice()
+    .sort((left, right) => (left.ageSeconds ?? Infinity) - (right.ageSeconds ?? Infinity))[0];
+  if (report.status.available) {
+    return `${worker?.name ?? 'Mac'} · ${report.status.running ? 'working' : 'ready'}`;
+  }
+  return worker?.seenAt ? `Last seen ${legacyAge(worker.seenAt)}` : 'No heartbeat';
 }
 
 export function ComputeTile({ report, error, refreshing, onOpen }: ComputeTileProps) {
   const tone = computeTone(report, error);
-  const slots =
-    report?.status.slotsTotal === null || report?.status.slotsTotal === undefined
-      ? 'Awaiting heartbeat'
-      : `${report.status.slotsBusy ?? 0} / ${report.status.slotsTotal} busy`;
+  const slots = !report
+    ? '—'
+    : report.status.slotsTotal === null || report.status.slotsTotal === undefined
+      ? 'Awaiting scheduler heartbeat'
+      : `${report.status.slotsBusy ?? 0} / ${report.status.slotsTotal} busy · ${report.status.slotsAvailable ?? 0} free`;
   const queue = report
-    ? `${report.status.running} Mac · ${report.status.localRunning} Pi · ${report.status.queued} queued`
+    ? report.status.running || report.status.localRunning || report.status.queued
+      ? `${report.status.running} Mac running · ${report.status.localRunning} Pi fallback · ${report.status.queued} queued`
+      : 'Empty'
     : '—';
   const items = [
     { label: 'Worker', value: report ? workerLabel(report) : '—' },
@@ -42,12 +56,27 @@ export function ComputeTile({ report, error, refreshing, onOpen }: ComputeTilePr
     { label: 'Queue', value: queue },
     {
       label: 'Mac CPU delivered',
-      value: formatComputeDuration(report?.summary.macCpuSeconds),
+      value: report?.summary.telemetryJobs
+        ? formatComputeDuration(report.summary.macCpuSeconds)
+        : report
+          ? 'Awaiting telemetry job'
+          : '—',
     },
-    { label: 'Peak job memory', value: formatBytes(report?.summary.peakResidentBytes) },
+    {
+      label: 'Peak job memory',
+      value: report?.summary.telemetryJobs
+        ? formatBytes(report.summary.peakResidentBytes)
+        : report
+          ? 'Awaiting telemetry job'
+          : '—',
+    },
     {
       label: 'Eligible left on Pi',
-      value: report ? `${report.eligibleLocalWork.events} recorded` : '—',
+      value: report
+        ? report.eligibleLocalWork.events
+          ? `${report.eligibleLocalWork.events} event${report.eligibleLocalWork.events === 1 ? '' : 's'} · ${formatComputeDuration(report.eligibleLocalWork.cpuSeconds)} CPU`
+          : 'None recorded'
+        : '—',
     },
   ];
 
@@ -57,19 +86,24 @@ export function ComputeTile({ report, error, refreshing, onOpen }: ComputeTilePr
       title="M4 Compute"
       summary={
         error && !report
-          ? error.message
+          ? 'Compute metrics unavailable'
           : report
-            ? `${report.summary.jobs} offloaded job${report.summary.jobs === 1 ? '' : 's'} in ${computeRangeLabel(report.rangeHours)}`
+            ? report.summary.jobs
+              ? `${report.summary.jobs} job${report.summary.jobs === 1 ? '' : 's'} offloaded in ${computeRangeLabel(report.rangeHours)}`
+              : 'No completed jobs in selected range'
             : 'Checking offloaded analysis…'
       }
-      status={<StatusPill tone={tone}>{computeStatusLabel(report, refreshing)}</StatusPill>}
+      status={
+        <StatusPill tone={tone} dot={false}>
+          {computeStatusLabel(report, refreshing)}
+        </StatusPill>
+      }
       tone={tone}
       onClick={onOpen}
       ariaLabel="Open M4 compute details"
       className="compute-tile"
     >
       <KeyValueList items={items} />
-      <p className="compute-tile__read-only">Metrics and queue history · read-only</p>
     </Tile>
   );
 }

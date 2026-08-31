@@ -14,28 +14,31 @@ export interface IgnitionTileProps {
   onOpen: () => void;
 }
 
-export function IgnitionTile({
-  status,
-  error,
-  refreshing,
-  remainingSeconds,
-  onOpen,
-}: IgnitionTileProps) {
+export function IgnitionTile({ status, error, remainingSeconds, onOpen }: IgnitionTileProps) {
   if (!status) {
+    const unavailable = Boolean(error);
     return (
       <Tile
         icon="🔑"
         title="Ignition Monitor"
-        summary={error?.message ?? 'Checking service and pause state…'}
+        summary={error?.message ?? 'Checking monitoring service…'}
         status={
-          <StatusPill tone={error ? 'bad' : 'neutral'}>{error ? 'No data' : 'Loading'}</StatusPill>
+          <StatusPill tone="neutral" dot={false}>
+            No data
+          </StatusPill>
         }
-        tone={error ? 'bad' : 'neutral'}
+        tone="neutral"
         onClick={onOpen}
         ariaLabel="Open ignition monitor details"
         className="ignition-tile"
       >
-        <p className="ignition-control-note">Pause controls are available in details.</p>
+        <KeyValueList
+          items={[
+            { label: 'Service', value: unavailable ? 'Unavailable' : 'Checking…' },
+            { label: 'Monitoring', value: unavailable ? 'Unavailable' : 'Checking…' },
+          ]}
+          className="ignition-tile__details"
+        />
       </Tile>
     );
   }
@@ -50,8 +53,8 @@ export function IgnitionTile({
         : `${status.service.activeState} · ${status.service.subState}`,
     },
     {
-      label: 'Ignition actions',
-      value: status.monitor.active ? 'Enabled' : `Paused · ${remainingLabel} left`,
+      label: 'Monitoring',
+      value: status.monitor.active ? 'Active' : `Paused · ${remainingLabel} left`,
     },
   ];
 
@@ -60,17 +63,17 @@ export function IgnitionTile({
       icon="🔑"
       title="Ignition Monitor"
       summary={presentation.summary}
-      status={<StatusPill tone={presentation.tone}>{presentation.label}</StatusPill>}
+      status={
+        <StatusPill tone={presentation.tone} dot={false}>
+          {presentation.label}
+        </StatusPill>
+      }
       tone={presentation.tone}
       onClick={onOpen}
       ariaLabel="Open ignition monitor details"
       className="ignition-tile"
     >
       <KeyValueList items={items} className="ignition-tile__details" />
-      {error && <p className="ignition-stale-error">Refresh failed · {error.message}</p>}
-      <p className="ignition-control-note">
-        {refreshing ? 'Refreshing monitor…' : 'Pause controls are available in details.'}
-      </p>
     </Tile>
   );
 }

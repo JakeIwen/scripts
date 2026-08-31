@@ -17,6 +17,7 @@ import { SystemHealthFeature } from './features/systemHealth';
 import { TelemetryTile } from './features/telemetry';
 import { UbntFeature } from './features/ubnt';
 import { UsbFeature, UsbStatusProvider } from './features/usb';
+import { VonstarFeature } from './features/vonstar';
 
 export function App() {
   const [editing, setEditing] = useState(false);
@@ -26,6 +27,10 @@ export function App() {
     {
       id: 'cop',
       content: <DashboardStatusTile resource={dashboardStatus} />,
+    },
+    {
+      id: 'vonstar',
+      content: <VonstarFeature />,
     },
     {
       id: 'books',
@@ -102,14 +107,14 @@ export function App() {
   return (
     <div className="dashboard-app">
       <DashboardHeader
-        editing={editing}
-        onEditingChange={setEditing}
         uptime={
           dashboardStatus.data
             ? formatDashboardUptime(dashboardStatus.data.systemUptime.seconds)
             : undefined
         }
-        systemControls={<SystemControls disabled={editing} />}
+        systemControls={
+          <SystemControls disabled={editing} editing={editing} onEditingChange={setEditing} />
+        }
       />
       <UsbStatusProvider>
         <DashboardGrid tiles={tiles} editing={editing} />

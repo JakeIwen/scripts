@@ -1,67 +1,162 @@
-.telemetry-tile {
-  min-height: 340px;
+.tile.telemetry-tile {
+  min-height: 150px;
+  align-items: flex-start;
+  gap: 0;
+  padding: 15px;
+  border-color: #2b3d49;
+  border-radius: 19px;
+  background: linear-gradient(145deg, #19232d, #151f28);
+  box-shadow: 0 8px 28px #050b102e;
+  color: #eef5f8;
+  line-height: 1.4;
+  cursor: default;
 }
 
-.telemetry-tile__reading {
-  display: grid;
-  gap: 5px;
+.telemetry-tile__service {
+  position: absolute;
+  z-index: 2;
+  top: 14px;
+  right: 14px;
+  padding: 4px 8px;
+  border: 1px solid #2b3d49;
+  border-radius: 99px;
+  background: #10171dcc;
+  color: #96a8b3;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  line-height: 14px;
+  cursor: pointer;
 }
 
-.telemetry-tile__reading strong {
-  color: var(--text);
-  font-size: clamp(30px, 4vw, 42px);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.04em;
-  line-height: 1;
+.telemetry-tile__service--good {
+  border-color: #39705a;
+  background: #29463acc;
+  color: #bfead5;
 }
 
-.telemetry-tile__reading span {
-  color: var(--muted);
-  font-size: 13px;
+.telemetry-tile__service--bad {
+  border-color: #835047;
+  background: #402d2bcc;
+  color: #f3c0bb;
 }
 
-.telemetry-tile__details {
-  margin-bottom: 16px;
-}
-
-.telemetry-tile__stale-error {
-  margin: 0 0 14px;
-  color: #ffc8c3;
-  font-size: 12px;
-}
-
-.telemetry-tile__controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-}
-
-.telemetry-tile__controls button {
-  flex: 1 1 125px;
-  min-height: 34px;
-  padding: 6px 9px;
-}
-
-.telemetry-tile__check {
-  border: 1px solid #467a69;
-  border-radius: 9px;
-  background: #173a31;
-  color: #d4f6e8;
-  font-weight: 750;
+.telemetry-tile__service[aria-busy='true'] {
+  cursor: wait;
+  opacity: 0.72;
 }
 
 .telemetry-tile__open {
-  display: inline-flex;
-  min-height: 40px;
+  display: flex;
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  color: inherit;
+  text-decoration: none;
+}
+
+.telemetry-tile__heading {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  padding-right: 88px;
+}
+
+.telemetry-tile__icon {
+  flex: 0 0 auto;
+  font-size: 31px;
+  line-height: 1;
+}
+
+.telemetry-tile__title {
+  min-width: 0;
+  font-size: 17px;
+  font-weight: 760;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+}
+
+.telemetry-tile__voltage {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  margin-top: 10px;
-  padding: 8px 12px;
-  border: 1px solid #4c8790;
+  color: #96a8b3;
+  text-align: center;
+}
+
+.telemetry-tile__voltage strong {
+  color: #f5f8fa;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.telemetry-tile__voltage > span {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  color: #96a8b3;
+  font-size: 10px;
+  line-height: 1.4;
+  text-align: left;
+}
+
+.telemetry-tile__observed {
+  width: 100%;
+  min-height: 13px;
+  color: #96a8b3;
+  font-size: 10px;
+  line-height: 1.25;
+  text-align: left;
+}
+
+.telemetry-tile__check {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  align-self: stretch;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 9px;
+  padding: 7px 10px;
+  border: 1px solid #42606e;
   border-radius: 10px;
-  background: #24434a;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 750;
-  text-decoration: none;
+  background: #263b47;
+  color: #eef5f8;
+  font-size: 10px;
+  font-weight: 760;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.telemetry-tile__check[aria-busy='true'] {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.telemetry-tile__check[aria-busy='true'] > span:first-child {
+  animation: telemetry-spin 0.8s linear infinite;
+}
+
+@keyframes telemetry-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 420px) {
+  .tile.telemetry-tile {
+    min-height: 140px;
+  }
 }

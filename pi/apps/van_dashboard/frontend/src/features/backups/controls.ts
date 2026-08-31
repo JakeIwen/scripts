@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 import { useSingleFlightAction } from '../../hooks/useSingleFlightAction';
 import { startBackup, startBackupClone, stopBackup } from './api';
@@ -59,23 +59,43 @@ export function useBackupControls(
   const [pendingStop, setPendingStop] = useState<PendingOperation | null>(null);
   const [lastMessage, setLastMessage] = useState<string | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
+  const lastStopKey = useRef<string | null>(null);
 
-  const reconcile = useCallback((status: BackupStatus | null) => {
-    if (!status) return;
-    setPending((current) => {
-      if (!current) return null;
-      return status.operation.startedAt === current.startedAt &&
-        status.operation.kind === current.kind
-        ? null
-        : current;
-    });
-    setPendingStop((current) => {
-      if (!current) return null;
-      return status.stop.startedAt === current.startedAt && status.stop.kind === current.kind
-        ? null
-        : current;
-    });
-  }, []);
+  const reconcile = useCallback(
+    (status: BackupStatus | null) => {
+      if (!status) return;
+      setPending((current) => {
+        if (!current) return null;
+        return status.operation.startedAt === current.startedAt &&
+          status.operation.kind === current.kind
+          ? null
+          : current;
+      });
+      setPendingStop((current) => {
+        if (!current) return null;
+        return status.stop.startedAt === current.startedAt && status.stop.kind === current.kind
+          ? null
+          : current;
+      });
+      const stopKey = `${status.stop.status}:${status.stop.kind ?? ''}:${status.stop.startedAt ?? ''}:${status.stop.completedAt ?? ''}`;
+      if (
+        lastStopKey.current !== null &&
+        stopKey !== lastStopKey.current &&
+        (status.stop.status === 'complete' || status.stop.status === 'error')
+      ) {
+        const label = status.stop.kind === 'exfat' ? 'EXFAT512' : 'Vanpi Borg';
+        const message =
+          status.stop.status === 'complete'
+            ? `${label} backup stopped`
+            : (status.stop.error ?? `Could not stop ${status.stop.kind ?? 'backup'}`);
+        setLastError(status.stop.status === 'error' ? message : null);
+        setLastMessage(status.stop.status === 'complete' ? message : null);
+        notify?.(message, status.stop.status === 'error' ? 'error' : 'normal');
+      }
+      lastStopKey.current = stopKey;
+    },
+    [notify],
+  );
 
   const perform = useCallback(
     async (request: () => Promise<{ message: string; backups: BackupStatus }>): Promise<void> => {
@@ -146,9 +166,9 @@ export function useBackupControls(
           : '';
       const accepted = confirm(
         kind === 'borg'
-          ? `Stop the current vanpi Borg backup gracefully? Unfinished work is discarded.${cloneWarning}`
+          ? `Stop the current vanpi Borg backup gracefully? Unfinished Borg work is discarded and the current run will not be marked successful.${cloneWarning}\n\nA scheduled run may retry later.`
           : 'Stop the current EXFAT512 snapshot gracefully? Its partial snapshot is retained ' +
-              'for retry, then hdd1tb is unmounted and spun down.',
+              'for retry, then hdd1tb is unmounted and spun down.\n\nA scheduled run may retry later.',
       );
       if (accepted) await perform(() => stopBackup(kind));
     },

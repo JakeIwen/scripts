@@ -1,6 +1,6 @@
 {
-  "name": "Van Dashboard Preview",
-  "short_name": "Van Preview",
+  "name": "Van Dashboard",
+  "short_name": "Van",
   "id": "/",
   "start_url": "/",
   "scope": "/",

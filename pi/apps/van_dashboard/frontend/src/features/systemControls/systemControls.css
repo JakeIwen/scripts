@@ -4,22 +4,60 @@
   gap: 5px;
 }
 
-.system-controls__buttons {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 7px;
+.system-controls__rows {
+  display: grid;
+  gap: 5px;
 }
 
-.system-controls__buttons .secondary-button,
-.system-controls__buttons .danger-button {
-  min-height: 40px;
-  padding: 7px 10px;
-  font-size: 12px;
+.system-controls__row {
+  display: grid;
+  grid-template-columns: 38px 29px 29px;
+  align-items: center;
+  gap: 5px;
+}
+
+.system-controls__label {
+  color: #c9e3e8;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  text-align: right;
+}
+
+.system-controls__icon {
+  display: inline-grid;
+  width: 29px;
+  height: 29px;
+  min-height: 29px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #34515e;
+  border-radius: 9px;
+  background: #17242d;
+  color: #c9e3e8;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.system-controls__icon:active {
+  transform: scale(0.97);
+}
+
+.system-controls__power {
+  border-color: #684743;
+  background: #2a1e1e;
+  color: #f2c6c1;
+}
+
+.system-controls__edit.is-active {
+  border-color: #438168;
+  background: #1d302b;
+  color: #bcebd5;
 }
 
 .system-controls__status {
-  max-width: 380px;
+  max-width: 180px;
   color: var(--dim);
   font-size: 11px;
   line-height: 1.25;
@@ -28,26 +66,4 @@
 
 .system-controls__status--error {
   color: var(--bad);
-}
-
-@media (max-width: 760px) {
-  .system-controls__buttons {
-    display: grid;
-    grid-template-columns: repeat(3, auto);
-  }
-}
-
-@media (max-width: 480px) {
-  .system-controls,
-  .system-controls__buttons {
-    width: 100%;
-  }
-
-  .system-controls__buttons {
-    grid-template-columns: 1fr;
-  }
-
-  .system-controls__status {
-    text-align: left;
-  }
 }

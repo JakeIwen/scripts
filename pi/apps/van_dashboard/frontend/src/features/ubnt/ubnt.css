@@ -1,12 +1,233 @@
-.ubnt-tile {
-  min-height: 330px;
+.tile.ubnt-tile {
+  min-height: 220px;
+  gap: 0;
+  border-color: #2b3d49;
+  border-radius: 19px;
+  background: linear-gradient(145deg, #19232d, #151f28);
+  box-shadow: 0 8px 28px #050b102e;
+  color: #eef5f8;
+  cursor: default;
 }
 
-.ubnt-tile__read-only {
-  margin-top: 16px;
-  color: var(--muted);
+.ubnt-tile.tile--good {
+  border-color: #438168;
+  background:
+    radial-gradient(circle at 88% 5%, #62c89920, transparent 38%),
+    linear-gradient(145deg, #1d2b2b, #172225);
+}
+
+.ubnt-tile.tile--bad {
+  border-color: #754743;
+}
+
+.ubnt-tile__open {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ubnt-tile__open:focus-visible {
+  outline: 2px solid #79a9c0;
+  outline-offset: -4px;
+}
+
+.ubnt-tile .tile__header {
+  grid-template-columns: 24px minmax(0, 1fr);
+  min-height: 24px;
+  gap: 7px;
+  padding-right: 88px;
+}
+
+.ubnt-tile .tile__icon {
+  width: 24px;
+  font-size: 24px;
+  line-height: 1;
+  text-align: left;
+}
+
+.ubnt-tile .tile__title {
+  font-size: 17px;
+  font-weight: 760;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+
+.ubnt-tile .tile__status {
+  top: 14px;
+  right: 14px;
+}
+
+.ubnt-tile .status-pill {
+  min-height: 0;
+  gap: 7px;
+  padding: 4px 8px;
+  border-color: #2b3d49;
+  border-radius: 99px;
+  background: #10171dcc;
+  color: #96a8b3;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 14px;
+}
+
+.ubnt-tile.tile--good .status-pill {
+  border-color: #39725b;
+  background: #10171dcc;
+  color: #bcebd5;
+}
+
+.ubnt-tile.tile--bad .status-pill {
+  border-color: #754743;
+  background: #10171dcc;
+  color: #f2b5b0;
+}
+
+.ubnt-tile .status-pill__dot,
+.ubnt-tile__radio-dot {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #71818a;
+  box-shadow: 0 0 0 4px #71818a18;
+}
+
+.ubnt-tile.tile--good .status-pill__dot,
+.ubnt-tile__radio-dot--good {
+  background: #62c899;
+  box-shadow: 0 0 0 4px #62c89918;
+}
+
+.ubnt-tile.tile--bad .status-pill__dot {
+  background: #ef7067;
+  box-shadow: 0 0 0 4px #ef706718;
+}
+
+.ubnt-tile .tile__summary {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 12px;
+  color: #96a8b3;
   font-size: 12px;
-  text-align: right;
+  line-height: 1.4;
+}
+
+.starlink-tile-control {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 3px 10px;
+  margin-top: auto;
+  padding: 8px 10px;
+  border: 1px solid #41505a;
+  border-radius: 12px;
+  background: #111920cc;
+  color: #eef5f8;
+  cursor: pointer;
+  text-align: left;
+}
+
+.starlink-tile-control__heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+}
+
+.starlink-tile-control__heading > span {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.starlink-tile-control__state {
+  display: flex;
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 7px;
+  border: 1px solid #41505a;
+  border-radius: 99px;
+  color: #96a8b3;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1.4;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.starlink-tile-control__dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #71818a;
+  box-shadow: 0 0 0 4px #71818a18;
+}
+
+.starlink-tile-control__detail {
+  min-width: 0;
+  grid-column: 1;
+  overflow: hidden;
+  color: #96a8b3;
+  font-size: 9px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.starlink-tile-control--on,
+.starlink-tile-control--on .starlink-tile-control__state {
+  border-color: #39725b;
+}
+
+.starlink-tile-control--on {
+  background: #1e3b31cc;
+}
+
+.starlink-tile-control--on .starlink-tile-control__state {
+  color: #bcebd5;
+}
+
+.starlink-tile-control--on .starlink-tile-control__dot {
+  background: #62c899;
+  box-shadow: 0 0 0 4px #62c89918;
+}
+
+.starlink-tile-control--off,
+.starlink-tile-control--off .starlink-tile-control__state {
+  border-color: #754743;
+}
+
+.starlink-tile-control--off {
+  background: #392624cc;
+}
+
+.starlink-tile-control--off .starlink-tile-control__state {
+  color: #f2b5b0;
+}
+
+.starlink-tile-control--off .starlink-tile-control__dot {
+  background: #ef7067;
+  box-shadow: 0 0 0 4px #ef706718;
+}
+
+.starlink-tile-control:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
 }
 
 .ubnt-sheet__toolbar,
@@ -310,6 +531,36 @@
 }
 
 @media (max-width: 620px) {
+  .tile.ubnt-tile {
+    min-height: 220px;
+    gap: 0;
+    padding: 15px;
+  }
+
+  .ubnt-tile .tile__header {
+    grid-template-columns: 24px minmax(0, 1fr);
+    min-height: 24px;
+    padding-right: 88px;
+  }
+
+  .ubnt-tile .tile__icon {
+    width: 24px;
+    font-size: 24px;
+  }
+
+  .ubnt-tile .tile__title {
+    font-size: 17px;
+  }
+
+  .ubnt-tile .tile__status {
+    top: 14px;
+    right: 14px;
+  }
+
+  .ubnt-tile .tile__summary {
+    font-size: 12px;
+  }
+
   .ubnt-sheet__toolbar,
   .ubnt-section-heading,
   .ubnt-profile,
@@ -331,5 +582,11 @@
   .starlink-control > button {
     grid-column: 1 / -1;
     width: 100%;
+  }
+}
+
+@media (min-width: 430px) and (max-width: 760px) {
+  .tile.ubnt-tile {
+    min-height: 255px;
   }
 }

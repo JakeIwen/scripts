@@ -159,19 +159,25 @@ describe('Sonos views', () => {
     const status = decodeSonosStatus(sonosPayload());
     const progress = projectTrackProgress(status.nowPlaying, 1_000, 6_000);
     const onOpen = vi.fn();
+    const controls = controlMocks();
     render(
       <SonosTile
         status={status}
         error={null}
         refreshing={false}
         progress={progress}
+        controls={controls}
         onOpen={onOpen}
       />,
     );
 
     expect(screen.getByText('Orange Juice')).toBeInTheDocument();
-    expect(screen.getByText('2/3 speakers')).toBeInTheDocument();
-    expect(screen.getByText(/open for playback and speaker controls/i)).toBeInTheDocument();
+    expect(screen.getByText('Front · 2/3')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Previous track' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Next track' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Next track' }));
+    expect(controls.transport).toHaveBeenCalledWith('next');
     fireEvent.click(screen.getByRole('button', { name: 'Open Sonos details' }));
     expect(onOpen).toHaveBeenCalledOnce();
   });

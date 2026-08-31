@@ -1,18 +1,52 @@
-.storage-read-only {
-  display: grid;
-  gap: 3px;
-  margin-top: 14px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-small);
-  background: var(--panel-soft);
-  color: var(--muted);
-  font-size: 12px;
+.tile.storage-tile {
+  min-height: 150px;
+  align-items: flex-start;
+  gap: 0;
+  padding: 15px;
+  border-color: #2b3d49;
+  border-radius: 19px;
+  background: linear-gradient(145deg, #19232d, #151f28);
+  box-shadow: 0 8px 28px #050b102e;
+  color: #eef5f8;
+  line-height: 1.4;
+  cursor: pointer;
 }
 
-.storage-read-only strong {
-  color: var(--accent);
-  text-transform: uppercase;
+.storage-tile__heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.storage-tile__icon {
+  flex: 0 0 auto;
+  font-size: 34px;
+  line-height: 1;
+}
+
+.storage-tile__title {
+  min-width: 0;
+  font-size: 17px;
+  font-weight: 760;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+}
+
+.storage-tile__summary {
+  display: block;
+  width: 100%;
+  min-height: 0;
+  margin-top: auto;
+  padding-top: 12px;
+  color: #96a8b3;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+@media (max-width: 420px) {
+  .tile.storage-tile {
+    min-height: 140px;
+  }
 }
 
 .storage-sheet__summary,

@@ -28,7 +28,11 @@ Controller implementations are grouped by capability:
 - `van_dashboard_system.py`: ignition-monitor, restart, uptime, and power
   controllers.
 - `van_dashboard_telemetry.py`: read-only battery summaries and guarded voltage
-  checks.
+  checks. Fresh broker telemetry wins; otherwise it validates the broker's
+  bounded regular-file engine-off sample and the scheduled `voltage_mon` CSV,
+  then returns whichever observation timestamp is newer.
+- `van_dashboard_vonstar.py`: fixed-action, intent-only client for the private
+  Vonstar Unix service; no CAN implementation or caller-selected vehicle data.
 
 The dependency direction is intentionally one-way: common and pure helpers,
 then domain controllers, then the facade. Domain modules do not import the
@@ -63,10 +67,12 @@ Likewise, background-operation loops remain domain-specific. Their retry,
 single-flight, secret-handling, restoration, and allowed-return-code semantics
 differ enough that a shared worker superclass would obscure important behavior.
 
-## React preview
+## React frontend
 
-The replacement frontend is maintained under
-`pi/apps/van_dashboard/frontend/` and is introduced through the separate
-[React preview service](REACT_PREVIEW.md). It consumes the same Flask API through
-a narrow loopback proxy; it does not create another backend or import these
-controller modules.
+The production Flask process serves the built React dashboard at `/` and its
+hashed assets at `/assets/`, while retaining the previous template at
+`/legacy`. The same process remains the sole API and controller owner; promoting
+the frontend does not create a second dashboard backend.
+
+The parallel React service on port `8790` remains available as a canary and
+rollback aid. Both surfaces consume the same backend state and API contracts.

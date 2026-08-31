@@ -52,10 +52,13 @@ function resource(status = starlinkStatus()): StarlinkStatusResource {
   };
 }
 
-function renderControl(starlinkResource: StarlinkStatusResource) {
+function renderControl(
+  starlinkResource: StarlinkStatusResource,
+  variant: 'sheet' | 'tile' = 'sheet',
+) {
   return render(
     <ToastProvider>
-      <StarlinkControl resource={starlinkResource} />
+      <StarlinkControl resource={starlinkResource} variant={variant} />
     </ToastProvider>,
   );
 }
@@ -70,6 +73,14 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('StarlinkControl', () => {
+  it('uses the legacy compact control when embedded in the UBNT tile', () => {
+    renderControl(resource(starlinkStatus('on')), 'tile');
+
+    expect(screen.getByRole('button', { name: 'Turn Starlink off' })).toBeEnabled();
+    expect(screen.getByText('Starlink')).toBeInTheDocument();
+    expect(screen.getByText('Tuya switch is on')).toBeInTheDocument();
+  });
+
   it('disables power changes when the status is unknown', () => {
     renderControl(resource(starlinkStatus('unknown')));
 

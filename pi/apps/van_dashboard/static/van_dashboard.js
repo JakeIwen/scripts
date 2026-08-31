@@ -2,6 +2,9 @@ const $ = (id) => document.getElementById(id);
 let dashboard = null,
   copCanWake = null,
   copLed = null,
+  vonstar = null,
+  vonstarAccessState = null,
+  vonstarLastAttempt = null,
   speakers = null,
   storagePolicy = null,
   diskStatus = null,
@@ -46,6 +49,7 @@ let dashboard = null,
   voltageCheckBusy = false,
   telemetryServiceBusy = false,
   copAlertPending = false,
+  vonstarBusy = false,
   copArmingOptimistic = false,
   copStatusPollToken = 0,
   statusRequest = null,
@@ -341,10 +345,15 @@ function renderTelemetrySummary(response) {
   if (!battery.available || !Number.isFinite(battery.value)) {
     $('telemetry-voltage-value').textContent = '—';
     $('telemetry-voltage-source').textContent = 'Battery voltage unavailable';
-    $('telemetry-observed').textContent = 'No live or voltage_mon reading';
+    $('telemetry-observed').textContent = 'No live or saved voltage reading';
     return;
   }
-  const source = battery.source === 'live' ? 'live' : 'last voltage_mon';
+  const source =
+    battery.source === 'live'
+      ? 'live'
+      : battery.source === 'engine_off'
+        ? 'engine-off passive'
+        : 'last voltage_mon';
   $('telemetry-voltage-value').textContent = `${Number(battery.value).toFixed(2)} V`;
   $('telemetry-voltage-source').textContent = source;
   const observed = new Date(battery.observed_at || '');
@@ -3774,10 +3783,225 @@ function renderCopAlert() {
   $('cop-wake-detail-label').textContent = active ? 'Wake detail' : 'Last block';
   $('cop-wake-detail').textContent = wakeDetail || '—';
 }
+const VONSTAR_LABELS = {
+  lock_all: 'Lock All',
+  unlock_front: 'Unlock Front',
+  unlock_cargo: 'Unlock Cargo',
+};
+function vonstarLocalTime(value) {
+  const date = new Date(value);
+  if (!value || Number.isNaN(date.getTime())) return 'unknown time';
+  return date.toLocaleString([], { dateStyle: 'short', timeStyle: 'medium' });
+}
+function renderVonstarAccessState() {
+  const state = vonstarAccessState,
+    lockDomains = state?.lock_domains || {},
+    lockCard = $('vonstar-lock-card'),
+    qualityVerified = lockDomains.quality === 'verified';
+  let lockLabel = 'Lock state unknown',
+    lockClass = 'unknown';
+  if (qualityVerified && lockDomains.state === 'locked') {
+    lockLabel = 'All locked';
+    lockClass = 'good locked';
+  } else if (
+    qualityVerified &&
+    lockDomains.state === 'front_unlocked_cargo_locked'
+  ) {
+    lockLabel = 'Front unlocked · cargo locked';
+    lockClass = 'warning unlocked';
+  } else if (
+    qualityVerified &&
+    lockDomains.state === 'front_and_cargo_unlocked'
+  ) {
+    lockLabel = 'Front + cargo unlocked';
+    lockClass = 'warning unlocked';
+  }
+  lockCard.classList.remove('good', 'locked', 'warning', 'unlocked', 'unknown');
+  lockClass.split(' ').forEach((name) => lockCard.classList.add(name));
+  $('vonstar-lock-state').textContent = state ? lockLabel : 'Not checked this session';
+  $('vonstar-lock-quality').textContent = state
+    ? qualityVerified
+      ? 'Verified lock-domain snapshot'
+      : `Insufficient lock evidence · ${lockDomains.quality || 'unknown quality'}`
+    : 'Awaiting an explicit check';
+
+  $('vonstar-door-coverage').textContent = state
+    ? state.complete
+      ? 'Complete door coverage'
+      : 'Partial door coverage'
+    : 'Not checked this session';
+  $('vonstar-last-checked').textContent = state
+    ? `Last checked · ${vonstarLocalTime(state.observed_at)}`
+    : 'Last checked · never this session';
+
+  const driverAjar = state?.doors?.driver?.ajar;
+  $('vonstar-driver-door').textContent = !state
+    ? 'Not checked'
+    : driverAjar === true
+      ? 'Driver door open (candidate)'
+      : driverAjar === false
+        ? 'Driver door closed (candidate)'
+        : 'Driver door unknown';
+  const sliding = state?.doors?.sliding;
+  $('vonstar-sliding-door').textContent = !state
+    ? 'Not checked'
+    : sliding?.physical_state_observable === false
+      ? 'Sliding door sensor bypassed — physical state unavailable'
+      : 'Sliding door physical state unknown';
+  $('vonstar-unmapped-doors').textContent = state
+    ? 'Passenger and rear ajar not mapped'
+    : 'Not mapped';
+
+  const limitationList = $('vonstar-limitations');
+  limitationList.replaceChildren();
+  const limitations = state?.limitations?.length
+    ? state.limitations
+    : ['No state checked this session.'];
+  limitations.forEach((text) => {
+    const item = document.createElement('li');
+    item.textContent = text;
+    limitationList.appendChild(item);
+  });
+}
+function renderVonstar(data) {
+  vonstar = data || {};
+  if (
+    !vonstarAccessState &&
+    vonstar.last_result?.operation === 'access_state' &&
+    vonstar.last_result?.ok === true &&
+    vonstar.last_result?.access_state
+  ) {
+    vonstarAccessState = vonstar.last_result.access_state;
+  }
+  const planOnly = vonstar.mode === 'plan_only',
+    available = vonstar.available === true && vonstar.mode === 'execute',
+    serviceBusy = vonstar.busy === true,
+    tile = $('vonstar');
+  tile.classList.toggle('unknown', !available && !planOnly);
+  tile.classList.toggle('good', available && !vonstarBusy && !serviceBusy);
+  tile.classList.toggle('working', vonstarBusy);
+  tile.classList.toggle('service-busy', !vonstarBusy && serviceBusy);
+  tile.classList.toggle('plan-only', planOnly);
+  tile.setAttribute('aria-busy', String(vonstarBusy || serviceBusy));
+  $('vonstar-pill').textContent = vonstarBusy
+    ? 'WORKING'
+    : serviceBusy
+      ? 'BUSY'
+      : planOnly
+        ? 'PLAN ONLY'
+        : available
+          ? 'READY'
+          : 'OFFLINE';
+  $('vonstar-detail').textContent = vonstarBusy
+    ? 'Requesting one guarded vehicle action…'
+    : serviceBusy
+      ? 'Another guarded vehicle action is in progress'
+      : planOnly
+        ? 'Plan-only service · vehicle actions are disabled'
+        : available
+          ? 'Guarded three-action vehicle lock controls'
+          : vonstar.error || 'Vonstar service is unavailable';
+  const last = vonstarLastAttempt || vonstar.last_result,
+    lastLabel = last?.operation === 'access_state'
+      ? 'Check Status'
+      : VONSTAR_LABELS[last?.action] || last?.label || 'Action';
+  $('vonstar-last').textContent = last
+    ? `${lastLabel} · ${last.ok === true ? 'OK' : last.ok === false ? 'FAILED' : 'WORKING'}`
+    : 'None';
+  document.querySelectorAll('[data-vonstar-action]').forEach((button) => {
+    button.disabled = vonstarBusy || serviceBusy || !available;
+  });
+  $('vonstar-check-state').disabled = vonstarBusy || serviceBusy || !available;
+  $('vonstar-check-state').classList.toggle('running', vonstarBusy);
+  $('vonstar-check-label').textContent = vonstarBusy ? 'Checking…' : 'Check Status';
+  $('vonstar-sheet-service').textContent = planOnly
+    ? 'PLAN ONLY'
+    : available
+      ? serviceBusy
+        ? 'BUSY'
+        : 'READY'
+      : 'OFFLINE';
+  $('vonstar-panel').setAttribute('aria-busy', String(vonstarBusy || serviceBusy));
+  renderVonstarAccessState();
+}
+async function refreshVonstar() {
+  const response = await json('/api/vonstar');
+  renderVonstar(response.vonstar);
+}
+async function requestVonstar(button) {
+  if (vonstarBusy || button.disabled) return;
+  const action = button.dataset.vonstarAction,
+    label = VONSTAR_LABELS[action],
+    descriptions = {
+      lock_all: 'lock every door',
+      unlock_front: 'unlock the front doors',
+      unlock_cargo: 'unlock the cargo doors',
+    },
+    validationNotes = {
+      lock_all: '\n\nLock All is capture-mapped but has not yet been independently replay-tested.',
+      unlock_front: '',
+      unlock_cargo:
+        '\n\nUnlock Cargo is capture-mapped but has not yet been independently replay-tested.',
+    };
+  if (!label || !window.confirm(`vOnStar will ${descriptions[action]}. Continue?${validationNotes[action]}`)) {
+    return;
+  }
+  vonstarBusy = true;
+  vonstarLastAttempt = { action, label, ok: null };
+  renderVonstar(vonstar);
+  try {
+    const response = await post('vonstar', { action });
+    vonstarLastAttempt = response.result;
+    renderVonstar(response.vonstar);
+    toast(response.message || `${label} completed`);
+  } catch (error) {
+    vonstarLastAttempt = { action, label, ok: false, error: error.message };
+    toast(error.message, true);
+  } finally {
+    vonstarBusy = false;
+    try {
+      await refreshVonstar();
+    } catch (_) {
+      renderVonstar(vonstar);
+    }
+  }
+}
+async function requestVonstarAccessState() {
+  if (vonstarBusy || $('vonstar-check-state').disabled) return;
+  if (!window.confirm('Wake the vehicle buses and check lock/door state?')) return;
+  vonstarBusy = true;
+  vonstarLastAttempt = { operation: 'access_state', ok: null };
+  renderVonstar(vonstar);
+  try {
+    const result = await json('/api/vonstar/access-state', {
+      method: 'POST',
+      headers: { 'X-Van-Dashboard': '1' },
+    });
+    vonstarAccessState = result.access_state;
+    vonstarLastAttempt = { operation: 'access_state', ok: true };
+    renderVonstar(vonstar);
+    toast('Vehicle access state checked');
+  } catch (error) {
+    vonstarLastAttempt = {
+      operation: 'access_state',
+      ok: false,
+      error: error.message,
+    };
+    toast(error.message, true);
+  } finally {
+    vonstarBusy = false;
+    try {
+      await refreshVonstar();
+    } catch (_) {
+      renderVonstar(vonstar);
+    }
+  }
+}
 function updateStatus(data) {
   dashboard = data.cop_alert;
   copCanWake = data.cop_can_wake || null;
   copLed = data.cop_led || {};
+  renderVonstar(data.vonstar);
   const wakeState = copCanWake?.state || '';
   if (
     copCanWake?.marker_active ||
@@ -3982,6 +4206,18 @@ async function pollOpenwrtClients() {
   } finally {
     openwrtPoll = setTimeout(pollOpenwrtClients, 20000);
   }
+}
+function openVonstar() {
+  $('vonstar-backdrop').classList.add('open');
+  document.body.classList.add('sheet-open');
+  $('vonstar-open').setAttribute('aria-expanded', 'true');
+  renderVonstar(vonstar);
+}
+function closeVonstar() {
+  $('vonstar-backdrop').classList.remove('open');
+  document.body.classList.remove('sheet-open');
+  $('vonstar-open').setAttribute('aria-expanded', 'false');
+  $('vonstar-open').focus();
 }
 async function openOpenwrt() {
   $('openwrt-backdrop').classList.add('open');
@@ -4266,6 +4502,14 @@ $('telemetry-open').href = siblingServiceUrl(8765);
 $('telemetry-service-toggle').addEventListener('click', toggleTelemetryService);
 $('telemetry-check').addEventListener('click', requestVoltageCheck);
 $('cop').addEventListener('click', toggleCopAlert);
+$('vonstar').addEventListener('click', (event) => {
+  if (!event.target.closest('[data-vonstar-action]')) openVonstar();
+});
+$('vonstar-close').addEventListener('click', closeVonstar);
+$('vonstar-check-state').addEventListener('click', requestVonstarAccessState);
+document.querySelectorAll('[data-vonstar-action]').forEach((button) => {
+  button.addEventListener('click', () => requestVonstar(button));
+});
 $('starlink').addEventListener('click', () => {
   renderStarlink({ state: 'unknown', changing: true });
   action(async () => {
@@ -4374,6 +4618,9 @@ $('ubnt-profile-form').addEventListener('submit', (event) => {
   startUbntWifi('profile', selected);
 });
 $('speedtest-button').addEventListener('click', startSpeedtest);
+$('vonstar-backdrop').addEventListener('click', (event) => {
+  if (event.target === $('vonstar-backdrop')) closeVonstar();
+});
 $('openwrt-backdrop').addEventListener('click', (event) => {
   if (event.target === $('openwrt-backdrop')) closeOpenwrt();
 });
@@ -4409,6 +4656,7 @@ $('ubnt-wifi-backdrop').addEventListener('click', (event) => {
 });
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
+    if ($('vonstar-backdrop').classList.contains('open')) closeVonstar();
     if ($('openwrt-backdrop').classList.contains('open')) closeOpenwrt();
     if ($('speaker-backdrop').classList.contains('open')) closeSpeakers();
     if ($('storage-backdrop').classList.contains('open')) closeStorage();

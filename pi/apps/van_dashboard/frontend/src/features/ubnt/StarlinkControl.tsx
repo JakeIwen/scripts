@@ -16,6 +16,7 @@ export interface StarlinkStatusResource {
 
 export interface StarlinkControlProps {
   resource: StarlinkStatusResource;
+  variant?: 'sheet' | 'tile';
 }
 
 function tone(status: StarlinkStatus | null): StatusTone {
@@ -34,7 +35,7 @@ export function starlinkConfirmation(status: StarlinkStatus): string {
   return `Turn Starlink power ${next}?\n\nThis changes the van's Starlink power switch. Network routing will reconcile separately.`;
 }
 
-export function StarlinkControl({ resource }: StarlinkControlProps) {
+export function StarlinkControl({ resource, variant = 'sheet' }: StarlinkControlProps) {
   const [returnedStatus, setReturnedStatus] = useState<StarlinkStatus | null>(null);
   const action = useSingleFlightAction();
   const { showToast } = useToast();
@@ -62,6 +63,36 @@ export function StarlinkControl({ resource }: StarlinkControlProps) {
       }
     });
   };
+
+  if (variant === 'tile') {
+    const state = known ? status.state : 'unknown';
+    const detail =
+      status?.lastError ??
+      resource.error?.message ??
+      (known ? `Tuya switch is ${status.state}` : 'Checking Tuya status…');
+    return (
+      <button
+        type="button"
+        className={`starlink-tile-control starlink-tile-control--${state}`}
+        disabled={disabled}
+        aria-label={
+          known ? `Turn Starlink ${status.state === 'on' ? 'off' : 'on'}` : 'Starlink unavailable'
+        }
+        aria-pressed={known ? status.state === 'on' : undefined}
+        onClick={() => void toggle()}
+      >
+        <span className="starlink-tile-control__heading">
+          <span aria-hidden="true">🛰️</span>
+          <strong>Starlink</strong>
+        </span>
+        <span className="starlink-tile-control__state">
+          <span className="starlink-tile-control__dot" aria-hidden="true" />
+          <span>{stateLabel(status, action.running)}</span>
+        </span>
+        <span className="starlink-tile-control__detail">{detail}</span>
+      </button>
+    );
+  }
 
   return (
     <section className="starlink-control panel-card" aria-labelledby="starlink-control-title">

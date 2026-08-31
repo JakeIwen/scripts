@@ -9,11 +9,9 @@ export function systemHealthRangeLabel(range: SystemHealthRange): string {
 
 export function systemHealthTone(
   report: SystemHealthReport | null,
-  error: Error | null,
+  _error: Error | null,
 ): StatusTone {
-  if (error && !report) return 'bad';
   if (!report) return 'neutral';
-  if (report.stale || error) return 'warning';
   if (report.level === 'critical') return 'bad';
   if (report.level === 'warning') return 'warning';
   if (report.level === 'good') return 'good';
@@ -22,11 +20,9 @@ export function systemHealthTone(
 
 export function systemHealthStatusLabel(
   report: SystemHealthReport | null,
-  error: Error | null,
-  refreshing: boolean,
+  _error: Error | null,
+  _refreshing: boolean,
 ): string {
-  if (error && !report) return 'No data';
-  if (!report) return refreshing ? 'Checking' : 'No data';
-  if (report.stale) return 'Stale';
+  if (!report) return 'No data';
   return report.level;
 }

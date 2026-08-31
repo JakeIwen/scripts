@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { fetchBackupStatus } from './api';
@@ -70,6 +70,7 @@ describe('backups feature', () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.useRealTimers();
   });
 
@@ -132,6 +133,34 @@ describe('backups feature', () => {
     );
     expect(screen.getByRole('button', { name: 'Stop gracefully' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Run now' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Clone now' })).toBeDisabled();
+    for (const button of screen.getAllByRole('button', { name: 'Clone now' })) {
+      expect(button).toBeDisabled();
+    }
+  });
+
+  it('shows an authoritative graceful-stop state and cleanup consequences', () => {
+    const data = sampleBackupStatus(true);
+    data.stop = {
+      status: 'running',
+      kind: 'borg',
+      startedAt: 1_700_000_110,
+      completedAt: null,
+      error: null,
+    };
+    if (!data.borg.progress) throw new Error('missing Borg progress fixture');
+    data.borg.progress.phase = 'cloning';
+    const resource = {
+      ...backupResource(true),
+      data,
+      refresh: vi.fn().mockResolvedValue(data),
+    };
+    render(<BackupsSheet open onClose={vi.fn()} resource={resource} controls={controlMocks()} />);
+
+    expect(screen.getByText('Stopping gracefully…')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stopping…' })).toBeDisabled();
+    expect(screen.getByText(/in-progress hotspare may be incomplete/i)).toBeInTheDocument();
+    for (const button of screen.getAllByRole('button', { name: 'Clone now' })) {
+      expect(button).toBeDisabled();
+    }
   });
 });

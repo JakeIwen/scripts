@@ -46,7 +46,8 @@ describe('compute UI', () => {
 
     expect(screen.getByText('m4mac · ready')).toBeInTheDocument();
     expect(screen.getByText('6.50 s')).toBeInTheDocument();
-    expect(screen.getByText('Metrics and queue history · read-only')).toBeInTheDocument();
+    expect(screen.getByText('3 / 10 busy · 7 free')).toBeInTheDocument();
+    expect(screen.getByText('2 events · 36.5 s CPU')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Open M4 compute details' }));
     expect(onOpen).toHaveBeenCalledOnce();
   });

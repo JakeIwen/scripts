@@ -27,6 +27,7 @@ export function UbntFeature({ onConnectivityChanged, dashboardStatus }: UbntFeat
         status={resource.data}
         error={resource.error}
         refreshing={resource.refreshing}
+        dashboardStatus={dashboardStatus}
         onOpen={openSheet}
       />
       <UbntSheet

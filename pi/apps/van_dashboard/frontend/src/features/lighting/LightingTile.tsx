@@ -43,8 +43,9 @@ function QuickRoomControl({
         aria-label={`${group.label} power · ${lightingStateLabel(group.state)}`}
         onClick={() => runControl(controls.setPower(`group:${group.id}`, !enabled))}
       >
-        <strong>{group.label}</strong>
-        <small>{lightingStateLabel(group.state)}</small>
+        <span className={`lighting-quick-room__dot is-${group.state}`} aria-hidden="true" />
+        <span className="lighting-quick-room__label">{group.label}</span>
+        <strong>{group.state === 'on' ? 'ON' : group.state === 'mixed' ? 'MIXED' : ''}</strong>
       </button>
       <LightingSlider
         label={`${group.label} brightness`}
@@ -53,6 +54,7 @@ function QuickRoomControl({
         maximum={100}
         unit="%"
         disabled={!available || controls.running}
+        displayValue={available ? undefined : '—'}
         className="lighting-quick-room__slider"
         onCommit={(value) => controls.setGroupBrightness(group.id, value)}
       />
@@ -72,11 +74,9 @@ export function LightingTile({ status, error, refreshing, onOpen, controls }: Li
         }
         tone={error ? 'bad' : 'neutral'}
         className="lighting-tile"
-      >
-        <button type="button" className="secondary-button" onClick={onOpen}>
-          Open lighting details
-        </button>
-      </Tile>
+        onClick={onOpen}
+        ariaLabel="Open lighting controls"
+      ></Tile>
     );
   }
 
@@ -94,45 +94,37 @@ export function LightingTile({ status, error, refreshing, onOpen, controls }: Li
       title="Lighting"
       summary={summary}
       status={
-        <StatusPill tone={lightingStateTone(status.state)}>
-          {lightingStateLabel(status.state)}
-        </StatusPill>
-      }
-      tone={lightingStateTone(status.state)}
-      className="lighting-tile"
-    >
-      <div className="lighting-tile__actions">
         <button
           type="button"
-          className="lighting-master-button"
+          className={`status-pill status-pill--${lightingStateTone(status.state)} lighting-master-pill`}
           disabled={status.availableCount === 0 || controls.running}
           aria-pressed={status.state === 'mixed' ? 'mixed' : status.state === 'on'}
           onClick={() => runControl(controls.setPower('all', status.state !== 'on'))}
         >
-          {status.state === 'on' ? 'Turn all off' : 'Turn all on'}
+          <span className="status-pill__dot" aria-hidden="true" />
+          {lightingStateLabel(status.state)}
         </button>
-        <button
-          type="button"
-          className="secondary-button"
-          aria-label="Open lighting details"
-          onClick={onOpen}
-        >
-          Details
-        </button>
-      </div>
+      }
+      tone="neutral"
+      className="lighting-tile"
+    >
+      <button
+        type="button"
+        className="lighting-tile__open"
+        aria-label="Open lighting controls"
+        onClick={onOpen}
+      />
       <div className="lighting-quick-rooms" aria-label="Quick room controls">
         {quickGroups.map((group) => (
           <QuickRoomControl group={group} controls={controls} key={group.id} />
         ))}
       </div>
       {error && <p className="lighting-stale-error">Refresh failed · {error.message}</p>}
-      <p className="lighting-control-status" role="status">
-        {controls.running
-          ? 'Applying lighting change…'
-          : refreshing
-            ? 'Refreshing lights…'
-            : 'Live controls'}
-      </p>
+      {(controls.running || refreshing) && (
+        <p className="lighting-control-status" role="status">
+          {controls.running ? 'Applying lighting change…' : 'Refreshing lights…'}
+        </p>
+      )}
     </Tile>
   );
 }

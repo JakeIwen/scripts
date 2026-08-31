@@ -65,6 +65,7 @@ export function projectCurrentSystemSample(value: unknown): CurrentSystemSample 
     armMegahertz: finiteNumber(current.arm_mhz),
     throttleWord: text(throttle?.hex),
     activeThrottleFlags: textList(throttle?.current),
+    occurredThrottleFlags: textList(throttle?.occurred),
     networkReceiveBytesPerSecond: finiteNumber(network?.rx_bytes_per_second),
     networkTransmitBytesPerSecond: finiteNumber(network?.tx_bytes_per_second),
     diskReadBytesPerSecond: finiteNumber(disk?.read_bytes_per_second),

@@ -8,14 +8,14 @@ export function computeRangeLabel(range: ComputeRange): string {
 }
 
 export function computeTone(report: ComputeReport | null, error: Error | null): StatusTone {
-  if (error && !report) return 'bad';
   if (!report) return 'neutral';
-  if (error || report.status.localRunning > 0 || report.summary.failed > 0) return 'warning';
-  return report.status.available ? 'good' : report.status.queued > 0 ? 'warning' : 'bad';
+  if (report.status.localRunning > 0) return 'warning';
+  if (report.status.available) return error || report.summary.failed > 0 ? 'warning' : 'good';
+  return report.status.queued > 0 ? 'warning' : 'neutral';
 }
 
-export function computeStatusLabel(report: ComputeReport | null, refreshing: boolean): string {
-  if (!report) return refreshing ? 'Checking' : 'No data';
+export function computeStatusLabel(report: ComputeReport | null, _refreshing: boolean): string {
+  if (!report) return 'No data';
   if (report.status.running > 0) return 'Busy';
   if (report.status.localRunning > 0) return 'Pi fallback';
   return report.status.available ? 'Online' : 'Offline';

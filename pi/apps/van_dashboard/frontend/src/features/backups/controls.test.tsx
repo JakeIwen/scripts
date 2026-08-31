@@ -76,5 +76,37 @@ describe('useBackupControls', () => {
 
     await act(async () => result.current.stop('borg', status));
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('hotspare'));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('scheduled run may retry'));
+  });
+
+  it('announces a polled graceful-stop completion only once', () => {
+    const notify = vi.fn();
+    const { result } = renderHook(() =>
+      useBackupControls(vi.fn().mockResolvedValue(null), notify, () => true),
+    );
+    const stopping = sampleBackupStatus(true);
+    stopping.stop = {
+      status: 'running',
+      kind: 'exfat',
+      startedAt: 1_700_000_110,
+      completedAt: null,
+      error: null,
+    };
+    const complete = sampleBackupStatus(false);
+    complete.stop = {
+      status: 'complete',
+      kind: 'exfat',
+      startedAt: 1_700_000_110,
+      completedAt: 1_700_000_120,
+      error: null,
+    };
+
+    act(() => result.current.reconcile(stopping));
+    act(() => result.current.reconcile(complete));
+    act(() => result.current.reconcile(complete));
+
+    expect(notify).toHaveBeenCalledOnce();
+    expect(notify).toHaveBeenCalledWith('EXFAT512 backup stopped', 'normal');
+    expect(result.current.lastMessage).toBe('EXFAT512 backup stopped');
   });
 });

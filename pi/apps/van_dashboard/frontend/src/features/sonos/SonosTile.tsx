@@ -1,5 +1,6 @@
-import { StatusPill, type StatusTone } from '../../components/StatusPill';
 import { Tile } from '../../components/Tile';
+import type { SonosControls } from './controls';
+import { SonosTransportControls } from './SonosTransportControls';
 import type { SonosStatus, SonosTrackProgress } from './types';
 import './sonos.css';
 
@@ -8,29 +9,18 @@ export interface SonosTileProps {
   error: Error | null;
   refreshing: boolean;
   progress: SonosTrackProgress | null;
+  controls: SonosControls;
   onOpen: () => void;
 }
 
-function transportPresentation(status: SonosStatus): {
-  label: string;
-  tone: StatusTone;
-} {
-  switch (status.nowPlaying.transportState) {
-    case 'PLAYING':
-      return { label: 'Playing', tone: 'good' };
-    case 'PAUSED_PLAYBACK':
-      return { label: 'Paused', tone: 'warning' };
-    case 'TRANSITIONING':
-      return { label: 'Changing', tone: 'warning' };
-    case 'STOPPED':
-    case 'NO_MEDIA_PRESENT':
-      return { label: 'Stopped', tone: 'neutral' };
-    case 'UNKNOWN':
-      return { label: 'Unknown', tone: 'neutral' };
-  }
-}
-
-export function SonosTile({ status, error, refreshing, progress, onOpen }: SonosTileProps) {
+export function SonosTile({
+  status,
+  error,
+  refreshing,
+  progress,
+  controls,
+  onOpen,
+}: SonosTileProps) {
   if (!status) {
     return (
       <Tile
@@ -38,21 +28,26 @@ export function SonosTile({ status, error, refreshing, progress, onOpen }: Sonos
         title="Sonos"
         summary={error?.message ?? 'Finding speakers and current playback…'}
         status={
-          <StatusPill tone={error ? 'bad' : 'neutral'}>{error ? 'No data' : 'Loading'}</StatusPill>
+          <button className="sonos-tile__speaker-summary" type="button" onClick={onOpen}>
+            {error ? 'Unavailable' : 'Finding…'}
+          </button>
         }
         tone={error ? 'bad' : 'neutral'}
-        onClick={onOpen}
-        ariaLabel="Open Sonos details"
         className="sonos-tile"
       >
-        <p className="sonos-control-hint">Open for playback and speaker controls</p>
+        <button
+          className="sonos-tile__open"
+          type="button"
+          aria-label="Open Sonos details"
+          onClick={onOpen}
+        />
       </Tile>
     );
   }
 
-  const transport = transportPresentation(status);
   const groupedCount = status.speakers.filter((speaker) => speaker.grouped).length;
   const artist = status.nowPlaying.artist || status.nowPlaying.album || status.coordinator;
+  const albumArt = status.nowPlaying.albumArt;
 
   return (
     <Tile
@@ -60,33 +55,39 @@ export function SonosTile({ status, error, refreshing, progress, onOpen }: Sonos
       title="Sonos"
       summary={
         <span className="sonos-tile__track">
-          <span>
-            <strong>{status.nowPlaying.title}</strong>
-            <small>{artist}</small>
-          </span>
+          <strong>{status.nowPlaying.title}</strong>
+          <small>{artist}</small>
         </span>
       }
-      status={<StatusPill tone={transport.tone}>{transport.label}</StatusPill>}
-      tone={transport.tone}
-      onClick={onOpen}
-      ariaLabel="Open Sonos details"
-      className="sonos-tile"
+      status={
+        <button className="sonos-tile__speaker-summary" type="button" onClick={onOpen}>
+          {status.coordinator} · {groupedCount}/{status.speakers.length}
+        </button>
+      }
+      tone="neutral"
+      className={`sonos-tile ${albumArt ? 'has-art' : ''}`}
+      style={
+        albumArt
+          ? {
+              backgroundImage: `linear-gradient(90deg,#111b22ed 0%,#111b22c7 58%,#111b226b 100%),url("${albumArt}")`,
+            }
+          : undefined
+      }
     >
+      <button
+        className="sonos-tile__open"
+        type="button"
+        aria-label="Open Sonos details"
+        onClick={onOpen}
+      />
+      <SonosTransportControls status={status} controls={controls} compact />
       {progress && (
         <div className="sonos-progress" aria-label={`Track progress: ${progress.label}`}>
           <span style={{ width: `${progress.percent}%` }} />
         </div>
       )}
-      <div className="sonos-tile__group">
-        <span>{status.coordinator}</span>
-        <strong>
-          {groupedCount}/{status.speakers.length} speakers
-        </strong>
-      </div>
       {error && <p className="sonos-stale-error">Refresh failed · {error.message}</p>}
-      <p className="sonos-control-hint">
-        {refreshing ? 'Refreshing playback…' : 'Open for playback and speaker controls'}
-      </p>
+      {refreshing && <p className="sonos-control-hint">Refreshing playback…</p>}
     </Tile>
   );
 }

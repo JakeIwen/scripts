@@ -2,10 +2,9 @@ import type { StatusTone } from '../../components/StatusPill';
 import { formatRelativeTime } from '../../utils/format';
 import type { DealWatchListing, DealWatchSavedSearch, DealWatchStatus } from './types';
 
-export function dealWatchTone(status: DealWatchStatus | null, error: Error | null): StatusTone {
-  if (!status) return error ? 'bad' : 'neutral';
+export function dealWatchTone(status: DealWatchStatus | null, _error: Error | null): StatusTone {
+  if (!status) return 'neutral';
   if (status.listingSummary.errors + status.searchSummary.errors > 0) return 'bad';
-  if (status.schedule.error || error) return 'warning';
   if (status.listingSummary.belowThreshold > 0) return 'good';
   return 'neutral';
 }

@@ -21,6 +21,7 @@ export function SonosFeature() {
         error={resource.error}
         refreshing={resource.refreshing}
         progress={progress}
+        controls={controls}
         onOpen={() => setSheetOpen(true)}
       />
       {sheetOpen && (

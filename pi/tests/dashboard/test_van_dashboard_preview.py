@@ -469,6 +469,8 @@ class PreviewDeploymentContractTests(unittest.TestCase):
                     ("POST", "/api/dashboard-service/restart"),
                     ("POST", "/api/system-power"),
                     ("POST", "/api/system-monitor/crash-analysis"),
+                    ("POST", "/api/vonstar"),
+                    ("POST", "/api/vonstar/access-state"),
                 }
             ),
         )

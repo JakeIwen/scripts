@@ -104,6 +104,7 @@ export function formatBatteryVoltage(battery: BatteryReading): string {
 
 export function batterySourceLabel(source: string | null): string {
   if (source === 'live') return 'Live telemetry';
+  if (source === 'engine_off') return 'Engine-off passive sample';
   if (source === 'voltage_mon') return 'Last voltage monitor reading';
   return source ?? 'Source unavailable';
 }

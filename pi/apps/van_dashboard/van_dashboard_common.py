@@ -21,6 +21,10 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 PORT = int(os.environ.get("VAN_DASHBOARD_PORT", "8788"))
+REACT_FRONTEND_ROOT = os.environ.get(
+    "VAN_DASHBOARD_FRONTEND_ROOT",
+    "/home/pi/scripts/van-dashboard-preview/current",
+)
 TELEMETRY_SNAPSHOT_URL = os.environ.get(
     "VAN_DASHBOARD_TELEMETRY_SNAPSHOT_URL",
     "http://192.168.6.103:8765/v1/snapshot",
@@ -32,6 +36,11 @@ VOLTAGE_MON_CSV = os.environ.get(
     "VAN_DASHBOARD_VOLTAGE_MON_CSV",
     "/home/pi/dev/obd-things/tmp/battery/bcan_voltage.csv",
 )
+ENGINE_OFF_VOLTAGE_STATUS = os.environ.get(
+    "VAN_DASHBOARD_ENGINE_OFF_VOLTAGE_STATUS",
+    "/var/lib/van-telemetry/engine-off-voltage.json",
+)
+ENGINE_OFF_VOLTAGE_STATUS_MAX_BYTES = 16 * 1024
 VOLTAGE_MON_TOOL = os.environ.get(
     "VAN_DASHBOARD_VOLTAGE_MON_TOOL",
     "/home/pi/dev/obd-things/projects/battery/voltage_mon.sh",

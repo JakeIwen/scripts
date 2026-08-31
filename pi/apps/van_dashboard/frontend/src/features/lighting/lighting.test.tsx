@@ -269,7 +269,7 @@ describe('lighting views', () => {
     expect(screen.getByRole('slider', { name: 'Kitchen brightness' })).toHaveValue('72');
     fireEvent.click(screen.getByRole('button', { name: /^Cab power/ }));
     expect(actions.setPower).toHaveBeenCalledWith('group:cab', true);
-    fireEvent.click(screen.getByRole('button', { name: 'Open lighting details' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open lighting controls' }));
     expect(onOpen).toHaveBeenCalledOnce();
   });
 

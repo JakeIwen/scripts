@@ -142,9 +142,24 @@ describe('TelemetryTileView', () => {
     screen.getByRole('button', { name: 'Stop service' }).click();
     expect(actions.toggleService).toHaveBeenCalledOnce();
     expect(screen.getByRole('button', { name: 'Checking voltage…' })).toBeDisabled();
-    expect(screen.getByRole('link', { name: 'Open telemetry dashboard' })).toHaveAttribute(
-      'href',
-      expect.stringMatching(/:8765\/$/),
+  });
+
+  it('labels the saved engine-off baseline distinctly', () => {
+    const payload = {
+      ...telemetryPayload,
+      battery: {
+        ...telemetryPayload.battery,
+        source: 'engine_off',
+        detail: 'Engine-off passive sample',
+      },
+    };
+    render(
+      <TelemetryTileView
+        resource={resource(decodeTelemetrySummary(payload))}
+        controls={controls()}
+      />,
     );
+
+    expect(screen.getByText('engine-off passive')).toBeInTheDocument();
   });
 });

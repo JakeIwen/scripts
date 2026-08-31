@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import tempfile
@@ -1751,6 +1752,24 @@ class TelemetrySummaryReaderTests(unittest.TestCase):
 
         return open_snapshot
 
+    @staticmethod
+    def engine_off_payload(value=12.7, observed_at="2026-07-26T20:30:00+00:00"):
+        return {
+            "version": 1,
+            "service": "van-telemetry",
+            "role": "engine_off_voltage",
+            "sample_type": "engine_off",
+            "value": value,
+            "unit": "V",
+            "source": "ccan.broadcast.0x41a",
+            "bus": "c-can",
+            "acquisition": "passive",
+            "quality": "verified",
+            "observed_at": observed_at,
+            "engine_stopped_at": "2026-07-26T20:29:00+00:00",
+            "saved_at": "2026-07-26T20:31:00+00:00",
+        }
+
     def test_prefers_fresh_live_voltage(self):
         calls = []
         payload = {
@@ -1803,6 +1822,79 @@ class TelemetrySummaryReaderTests(unittest.TestCase):
         self.assertEqual(result["source"], "voltage_mon")
         self.assertEqual(result["value"], 12.6)
         self.assertTrue(result["observed_at"].startswith("2026-07-26T19:24:52"))
+
+    def test_uses_engine_off_sample_when_it_is_newer_than_scheduled_log(self):
+        payload = {
+            "metrics": {
+                "battery.voltage": {
+                    "available": True,
+                    "stale": True,
+                    "value": 13.8,
+                }
+            }
+        }
+        with tempfile.TemporaryDirectory() as tempdir:
+            voltage_csv = Path(tempdir) / "voltage.csv"
+            voltage_csv.write_text(
+                "2026-07-26T20:00:00+00:00,12.5,scheduled\n",
+                encoding="utf-8",
+            )
+            engine_off = Path(tempdir) / "engine-off.json"
+            engine_off.write_text(
+                json.dumps(self.engine_off_payload()),
+                encoding="utf-8",
+            )
+            reader = dashboard.TelemetrySummaryReader(
+                voltage_csv=str(voltage_csv),
+                engine_off_status=str(engine_off),
+                opener=self.opener(payload, []),
+            )
+            result = reader.snapshot()
+
+        self.assertEqual(result["source"], "engine_off")
+        self.assertEqual(result["value"], 12.7)
+        self.assertEqual(result["detail"], "Engine-off passive sample")
+
+    def test_uses_scheduled_log_when_it_is_newer_than_engine_off_sample(self):
+        payload = {"metrics": {"battery.voltage": {"available": False}}}
+        with tempfile.TemporaryDirectory() as tempdir:
+            voltage_csv = Path(tempdir) / "voltage.csv"
+            voltage_csv.write_text(
+                "2026-07-26T22:00:00+00:00,12.4,scheduled\n",
+                encoding="utf-8",
+            )
+            engine_off = Path(tempdir) / "engine-off.json"
+            engine_off.write_text(
+                json.dumps(self.engine_off_payload()),
+                encoding="utf-8",
+            )
+            reader = dashboard.TelemetrySummaryReader(
+                voltage_csv=str(voltage_csv),
+                engine_off_status=str(engine_off),
+                opener=self.opener(payload, []),
+            )
+            result = reader.snapshot()
+
+        self.assertEqual(result["source"], "voltage_mon")
+        self.assertEqual(result["value"], 12.4)
+
+    def test_engine_off_reader_rejects_links_oversized_and_wrong_role(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            target = Path(tempdir) / "target.json"
+            target.write_text(json.dumps(self.engine_off_payload()), encoding="utf-8")
+            linked = Path(tempdir) / "linked.json"
+            linked.symlink_to(target)
+            self.assertIsNone(dashboard.read_engine_off_voltage_sample(str(linked)))
+
+            target.write_bytes(
+                b"x" * (dashboard.ENGINE_OFF_VOLTAGE_STATUS_MAX_BYTES + 1)
+            )
+            self.assertIsNone(dashboard.read_engine_off_voltage_sample(str(target)))
+
+            wrong = self.engine_off_payload()
+            wrong["role"] = "another_role"
+            target.write_text(json.dumps(wrong), encoding="utf-8")
+            self.assertIsNone(dashboard.read_engine_off_voltage_sample(str(target)))
 
     def test_live_failure_and_missing_log_return_no_data(self):
         def unavailable(_request, timeout):
@@ -3663,12 +3755,337 @@ class IgnitionMonitorControllerTests(unittest.TestCase):
             timed_out.status()
 
 
+class VonstarClientTests(unittest.TestCase):
+    def setUp(self):
+        self.responses = []
+        self.requests = []
+        self.connections = []
+
+    def socket_stat(self, _path):
+        return SimpleNamespace(st_mode=stat.S_IFSOCK | 0o660)
+
+    def factory(self, path, timeout):
+        test = self
+
+        class Connection:
+            def __init__(self):
+                self.path = path
+                self.timeout = timeout
+                self.closed = False
+
+            def request(self, method, request_path, body=None, headers=None):
+                test.requests.append((method, request_path, body, headers or {}))
+
+            def getresponse(self):
+                status, payload = test.responses.pop(0)
+                raw = json.dumps(payload).encode("utf-8")
+                return SimpleNamespace(
+                    status=status,
+                    read=lambda _limit: raw,
+                )
+
+            def close(self):
+                self.closed = True
+
+        connection = Connection()
+        self.connections.append(connection)
+        return connection
+
+    def client(self):
+        return dashboard.VonstarClient(
+            socket_path="/run/test-vonstar.sock",
+            status_timeout=1.5,
+            action_timeout=24,
+            connection_factory=self.factory,
+            lstat=self.socket_stat,
+        )
+
+    @staticmethod
+    def access_state():
+        unmapped = {
+            "locked": None,
+            "ajar": None,
+            "lock_quality": "unmapped_individual_door",
+            "ajar_quality": "unmapped_individual_door",
+        }
+        return {
+            "observed_at": "2026-08-28T01:52:00+00:00",
+            "complete": False,
+            "lock_domains": {
+                "state": "locked",
+                "front_locked": True,
+                "cargo_locked": True,
+                "quality": "verified",
+                "source": "must-be-dropped",
+            },
+            "doors": {
+                "driver": {
+                    **unmapped,
+                    "ajar": False,
+                    "ajar_quality": "candidate_one_controlled_trial",
+                },
+                "passenger": dict(unmapped),
+                "sliding": {
+                    **unmapped,
+                    "reported_closed": True,
+                    "physical_state_observable": False,
+                    "ajar_quality": "hardware_bypass_forced_closed",
+                },
+                "rear": dict(unmapped),
+            },
+            "wake": {
+                "count": 1,
+                "role": "must-be-dropped",
+                "detail": "must-be-dropped",
+                "additional_tx_after_wake": 1,
+                "restored_passive_after_sampling": True,
+            },
+            "observations": {
+                "b_can": {"frames": ["read-only-diagnostic-observation"]},
+            },
+            "limitations": ["individual door lock booleans are not mapped"],
+        }
+
+    def test_status_is_identity_checked_and_sanitized(self):
+        self.responses.append(
+            (
+                200,
+                {
+                    "ok": True,
+                    "vonstar": {
+                        "service": "vonstar",
+                        "schema_version": 1,
+                        "available": True,
+                        "mode": "execute",
+                        "busy": False,
+                        "actions": {
+                            "lock_all": {"label": "untrusted"},
+                            "unlock_front": {"label": "untrusted"},
+                            "unlock_cargo": {"label": "untrusted"},
+                        },
+                        "cooldown_seconds": 3.0,
+                        "last_result": {
+                            "ok": True,
+                            "action": "unlock_front",
+                            "label": "untrusted",
+                            "request_id": "secret-ish-internal-value",
+                            "payload_hex": "must-not-reach-browser",
+                            "counter_streak": [1, 2, 3],
+                            "send_count": 1,
+                            "completed_at": "2026-08-26T23:40:15+00:00",
+                        },
+                    },
+                },
+            )
+        )
+        status = self.client().snapshot()
+
+        self.assertTrue(status["available"])
+        self.assertEqual(status["mode"], "execute")
+        self.assertEqual(status["actions"], dashboard.VONSTAR_ACTIONS)
+        self.assertEqual(
+            status["last_result"],
+            {
+                "ok": True,
+                "action": "unlock_front",
+                "label": "Unlock Front",
+                "completed_at": "2026-08-26T23:40:15+00:00",
+            },
+        )
+        self.assertNotIn("schema_version", status)
+
+    def test_action_posts_only_unique_request_id_to_fixed_path(self):
+        self.responses.append(
+            (
+                200,
+                {
+                    "ok": True,
+                    "action": "lock_all",
+                    "label": "untrusted",
+                    "request_id": "dash-internal",
+                    "payload_hex": "must-not-reach-browser",
+                    "send_count": 1,
+                    "restored_passive": True,
+                    "started_at": "start",
+                    "completed_at": "finish",
+                },
+            )
+        )
+        with mock.patch(
+            "pi.apps.van_dashboard.van_dashboard_vonstar.secrets.token_hex",
+            return_value="a" * 32,
+        ):
+            result = self.client().perform("lock_all")
+
+        method, path, body, headers = self.requests[0]
+        self.assertEqual(method, "POST")
+        self.assertEqual(path, "/v1/actions/lock_all")
+        self.assertEqual(json.loads(body), {"request_id": "dash-" + "a" * 32})
+        self.assertEqual(headers, {"Content-Type": "application/json"})
+        self.assertEqual(self.connections[0].timeout, 24)
+        self.assertEqual(
+            result,
+            {
+                "ok": True,
+                "action": "lock_all",
+                "label": "Lock All",
+                "started_at": "start",
+                "completed_at": "finish",
+            },
+        )
+
+    def test_access_state_posts_only_unique_request_id_and_sanitizes_snapshot(self):
+        self.responses.append(
+            (
+                200,
+                {
+                    "ok": True,
+                    "operation": "access_state",
+                    "request_id": "must-be-dropped",
+                    "started_at": "start",
+                    "completed_at": "finish",
+                    "access_state": self.access_state(),
+                },
+            )
+        )
+        with mock.patch(
+            "pi.apps.van_dashboard.van_dashboard_vonstar.secrets.token_hex",
+            return_value="b" * 32,
+        ):
+            result = self.client().read_access_state()
+
+        method, path, body, headers = self.requests[0]
+        self.assertEqual(method, "POST")
+        self.assertEqual(path, "/v1/access-state")
+        self.assertEqual(
+            json.loads(body),
+            {"request_id": "dash-state-" + "b" * 32},
+        )
+        self.assertEqual(headers, {"Content-Type": "application/json"})
+        self.assertEqual(result["operation"], "access_state")
+        self.assertNotIn("request_id", result)
+        self.assertEqual(result["access_state"]["lock_domains"]["state"], "locked")
+        self.assertNotIn("source", result["access_state"]["lock_domains"])
+        self.assertEqual(
+            result["access_state"]["doors"]["sliding"]["physical_state_observable"],
+            False,
+        )
+        self.assertEqual(
+            result["access_state"]["wake"],
+            {"count": 1, "restored_passive_after_sampling": True},
+        )
+        self.assertIn("observations", result["access_state"])
+
+    def test_status_preserves_successful_access_state_as_sanitized_last_result(self):
+        self.responses.append(
+            (
+                200,
+                {
+                    "ok": True,
+                    "vonstar": {
+                        "service": "vonstar",
+                        "schema_version": 1,
+                        "available": True,
+                        "mode": "execute",
+                        "busy": False,
+                        "actions": {
+                            "lock_all": {},
+                            "unlock_front": {},
+                            "unlock_cargo": {},
+                        },
+                        "cooldown_seconds": 3.0,
+                        "last_result": {
+                            "ok": True,
+                            "operation": "access_state",
+                            "request_id": "must-be-dropped",
+                            "access_state": self.access_state(),
+                        },
+                    },
+                },
+            )
+        )
+        status = self.client().snapshot()
+        self.assertTrue(status["available"])
+        self.assertEqual(status["last_result"]["operation"], "access_state")
+        self.assertNotIn("request_id", status["last_result"])
+
+    def test_unknown_action_never_opens_a_connection(self):
+        with self.assertRaisesRegex(ValueError, "unknown Vonstar action"):
+            self.client().perform("custom_payload")
+        self.assertEqual(self.connections, [])
+
+    def test_symlink_or_non_socket_path_is_rejected(self):
+        client = dashboard.VonstarClient(
+            socket_path="/run/not-a-socket",
+            connection_factory=self.factory,
+            lstat=lambda _path: SimpleNamespace(st_mode=stat.S_IFLNK | 0o777),
+        )
+        status = client.snapshot()
+        self.assertFalse(status["available"])
+        self.assertEqual(status["mode"], "unavailable")
+        self.assertIn("socket is invalid", status["error"])
+        self.assertEqual(self.connections, [])
+
+    def test_wrong_identity_schema_and_catalog_fail_closed(self):
+        invalid_statuses = (
+            {"service": "other", "schema_version": 1},
+            {"service": "vonstar", "schema_version": True},
+            {
+                "service": "vonstar",
+                "schema_version": 1,
+                "available": True,
+                "mode": "execute",
+                "busy": False,
+                "actions": {"unlock_front": {}},
+                "cooldown_seconds": 3,
+            },
+        )
+        for invalid in invalid_statuses:
+            with self.subTest(invalid=invalid):
+                self.responses.append((200, {"ok": True, "vonstar": invalid}))
+                self.assertFalse(self.client().snapshot()["available"])
+
+    def test_oversized_response_fails_closed(self):
+        class OversizedConnection:
+            def request(self, _method, _path, body=None, headers=None):
+                pass
+
+            @staticmethod
+            def getresponse():
+                return SimpleNamespace(
+                    status=200,
+                    read=lambda _limit: b"x" * (64 * 1024 + 1),
+                )
+
+            def close(self):
+                pass
+
+        client = dashboard.VonstarClient(
+            socket_path="/run/test-vonstar.sock",
+            connection_factory=lambda _path, _timeout: OversizedConnection(),
+            lstat=self.socket_stat,
+        )
+        status = client.snapshot()
+        self.assertFalse(status["available"])
+        self.assertIn("too large", status["error"])
+
+
 class DashboardRouteTests(unittest.TestCase):
     def test_index_and_manifest(self):
         client = dashboard.app.test_client()
-        page = client.get("/")
+        page = client.get("/legacy")
         self.assertEqual(page.status_code, 200)
         self.assertIn(b"COP ALERT", page.data)
+        self.assertIn(b'id="vonstar-title">vOnStar', page.data)
+        self.assertIn(b'data-vonstar-action="lock_all"', page.data)
+        self.assertIn(b'data-vonstar-action="unlock_front"', page.data)
+        self.assertIn(b'data-vonstar-action="unlock_cargo"', page.data)
+        self.assertIn(b'id="vonstar-open"', page.data)
+        self.assertIn(b'id="vonstar-panel"', page.data)
+        self.assertIn(b'id="vonstar-check-state"', page.data)
+        self.assertIn(b'id="vonstar-lock-state"', page.data)
+        self.assertIn(b'id="vonstar-door-coverage"', page.data)
+        self.assertIn(b'id="vonstar-last-checked"', page.data)
         self.assertIn(b"Starlink", page.data)
         self.assertIn(b'id="openwrt-title"><span class="tile-icon"', page.data)
         self.assertIn(b'<span>OpenWrt</span></h2>', page.data)
@@ -3702,7 +4119,7 @@ class DashboardRouteTests(unittest.TestCase):
             b'class="speedtest-button openwrt-speedtest-button" id="speedtest-button"',
             page.data,
         )
-        self.assertEqual(page.data.count(b"tile-heading"), 15)
+        self.assertEqual(page.data.count(b"tile-heading"), 16)
         self.assertIn(b'id="video-library" data-dashboard-tile', page.data)
         self.assertIn(b"Movies &amp; TV", page.data)
         self.assertIn(b"Browse, play, and continue movies and shows", page.data)
@@ -3868,7 +4285,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b'id="telemetry-voltage-value"', page.data)
         self.assertIn(b'id="telemetry-voltage-source"', page.data)
         self.assertIn(b'id="telemetry-observed"', page.data)
-        self.assertEqual(page.data.count(b"data-dashboard-tile"), 15)
+        self.assertEqual(page.data.count(b"data-dashboard-tile"), 16)
         self.assertNotIn(b'class="network-card speedtest-card"', page.data)
         self.assertIn(b'id="ubnt-network-list"', page.data)
         self.assertIn(b'id="ubnt-profile-list"', page.data)
@@ -3935,6 +4352,41 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"function controlBackup(kind)", javascript.data)
         self.assertIn(b"post(`backups/${kind}/stop`)", javascript.data)
         self.assertIn(b"cop-led", javascript.data)
+        self.assertIn(b"function renderVonstar(data)", javascript.data)
+        self.assertIn(b"let dashboard = null", javascript.data)
+        self.assertIn(b"vonstarAccessState = null", javascript.data)
+        self.assertIn(b"function renderVonstarAccessState()", javascript.data)
+        self.assertIn(b"function requestVonstarAccessState()", javascript.data)
+        self.assertIn(
+            b"Wake the vehicle buses and check lock/door state?",
+            javascript.data,
+        )
+        self.assertEqual(javascript.data.count(b"'/api/vonstar/access-state'"), 1)
+        self.assertIn(b"method: 'POST'", javascript.data)
+        self.assertIn(b"headers: { 'X-Van-Dashboard': '1' }", javascript.data)
+        self.assertIn(b"lockDomains.quality === 'verified'", javascript.data)
+        self.assertIn(b"Partial door coverage", javascript.data)
+        self.assertIn(
+            b"Sliding door sensor bypassed ",
+            javascript.data,
+        )
+        self.assertIn(b"physical state unavailable", javascript.data)
+        self.assertNotIn(b"Sliding door closed", javascript.data)
+        self.assertIn(b"Driver door closed (candidate)", javascript.data)
+        self.assertIn(b"Passenger and rear ajar not mapped", javascript.data)
+        self.assertIn(b"function openVonstar()", javascript.data)
+        self.assertIn(b"function closeVonstar()", javascript.data)
+        self.assertIn(b"function requestVonstar(button)", javascript.data)
+        self.assertIn(b"await refreshVonstar()", javascript.data)
+        self.assertIn(b"post('vonstar', { action })", javascript.data)
+        self.assertIn(b"window.confirm(`vOnStar will", javascript.data)
+        self.assertIn(b"capture-mapped", javascript.data)
+        self.assertIn(b"vonstar-last').textContent", javascript.data)
+        self.assertNotIn(b"vonstar-last').innerHTML", javascript.data)
+        self.assertIn(b".vonstar-actions", stylesheet.data)
+        self.assertIn(b".vonstar-open", stylesheet.data)
+        self.assertIn(b".vonstar-access-overview", stylesheet.data)
+        self.assertIn(b".vonstar-check-state", stylesheet.data)
         self.assertIn(b"function copWakeView(active, status)", javascript.data)
         self.assertIn(b"function pollCopCanWake(token, active)", javascript.data)
         self.assertIn(b"await wait(500)", javascript.data)
@@ -4155,6 +4607,31 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(manifest.status_code, 200)
         self.assertEqual(manifest.json["name"], "Van Dashboard")
 
+    def test_root_serves_react_build_and_hashed_assets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            os.makedirs(os.path.join(directory, "assets"))
+            with open(os.path.join(directory, "index.html"), "wb") as handle:
+                handle.write(b"<!doctype html><main>React dashboard</main>")
+            with open(os.path.join(directory, "assets", "app-deadbeef.js"), "wb") as handle:
+                handle.write(b"window.reactDashboard = true;")
+
+            client = dashboard.app.test_client()
+            with mock.patch.object(dashboard, "REACT_FRONTEND_ROOT", directory):
+                root = client.get("/")
+                asset = client.get("/assets/app-deadbeef.js")
+
+            root_data = root.data
+            root_cache = root.headers["Cache-Control"]
+            asset_cache = asset.headers["Cache-Control"]
+            root.close()
+            asset.close()
+
+        self.assertEqual(root.status_code, 200)
+        self.assertIn(b"React dashboard", root_data)
+        self.assertEqual(root_cache, "no-store")
+        self.assertEqual(asset.status_code, 200)
+        self.assertEqual(asset_cache, "public, max-age=31536000, immutable")
+
     def test_sync_scripts_deploys_dashboard_assets(self):
         repository = str(REPOSITORY_ROOT)
         with open(os.path.join(repository, "pi", "sync_scripts.sh"), encoding="utf-8") as handle:
@@ -4196,6 +4673,7 @@ class DashboardRouteTests(unittest.TestCase):
                 "van_dashboard_system.py",
                 "van_dashboard_telemetry.py",
                 "van_dashboard_usb.py",
+                "van_dashboard_vonstar.py",
             ],
         )
         service = (
@@ -4264,6 +4742,111 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertNotIn("import isotp", source)
         self.assertNotIn("lib.can_wake", source)
         self.assertNotIn("CAN_CHANNEL", source)
+
+    def test_vonstar_dashboard_boundary_is_fixed_and_can_free(self):
+        backend = REPOSITORY_ROOT / "pi" / "apps" / "van_dashboard"
+        source = (backend / "van_dashboard_vonstar.py").read_text(encoding="utf-8")
+        facade = (backend / "van_dashboard.py").read_text(encoding="utf-8")
+        self.assertIn("socket.AF_UNIX", source)
+        self.assertIn('"/run/vonstar/api.sock"', source)
+        self.assertIn('payload={"request_id": request_id}', source)
+        self.assertEqual(
+            set(dashboard.VONSTAR_ACTIONS),
+            {"lock_all", "unlock_front", "unlock_cargo"},
+        )
+        for forbidden in (
+            "socket.AF_CAN",
+            "socket.CAN_RAW",
+            "import isotp",
+            "lib.can_wake",
+            "payload_hex",
+            "counter_streak",
+            "send_count",
+            "CAN_CHANNEL",
+        ):
+            self.assertNotIn(forbidden, source)
+            self.assertNotIn(forbidden, facade)
+
+    def test_vonstar_routes_whitelist_action_and_sanitize_response(self):
+        calls = []
+        access_calls = []
+
+        class FakeVonstar:
+            @staticmethod
+            def snapshot():
+                return {
+                    "service": "vonstar",
+                    "available": True,
+                    "mode": "execute",
+                    "busy": False,
+                    "actions": dashboard.VONSTAR_ACTIONS,
+                    "cooldown_seconds": 3,
+                    "last_result": None,
+                    "error": None,
+                }
+
+            @staticmethod
+            def perform(action):
+                calls.append(action)
+                if action not in dashboard.VONSTAR_ACTIONS:
+                    raise ValueError("unknown Vonstar action")
+                return {
+                    "action": action,
+                    "label": dashboard.VONSTAR_ACTIONS[action]["label"],
+                    "ok": True,
+                }
+
+            @staticmethod
+            def read_access_state():
+                access_calls.append("read")
+                return {
+                    "ok": True,
+                    "operation": "access_state",
+                    "access_state": VonstarClientTests.access_state(),
+                }
+
+        client = dashboard.app.test_client()
+        with mock.patch.object(dashboard, "vonstar", FakeVonstar()):
+            page = client.get("/")
+            dashboard_status = client.get("/api/status")
+            status = client.get("/api/vonstar")
+            invalid_query = client.get("/api/vonstar?fresh=1")
+            extra = client.post(
+                "/api/vonstar",
+                data={"action": "lock_all", "payload": "forbidden"},
+            )
+            duplicate = client.post(
+                "/api/vonstar",
+                data={"action": ["lock_all", "unlock_front"]},
+            )
+            unknown = client.post("/api/vonstar", data={"action": "raw_can"})
+            accepted = client.post("/api/vonstar", data={"action": "unlock_front"})
+            access_query = client.post("/api/vonstar/access-state?fresh=1")
+            access_body = client.post(
+                "/api/vonstar/access-state",
+                data={"unexpected": "input"},
+            )
+            self.assertEqual(access_calls, [])
+            access = client.post("/api/vonstar/access-state")
+
+        self.assertEqual(page.status_code, 200)
+        self.assertEqual(dashboard_status.status_code, 200)
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.headers["Cache-Control"], "no-store")
+        self.assertEqual(invalid_query.status_code, 400)
+        self.assertEqual(extra.status_code, 400)
+        self.assertEqual(duplicate.status_code, 400)
+        self.assertEqual(unknown.status_code, 400)
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(calls, ["raw_can", "unlock_front"])
+        self.assertEqual(accepted.json["result"]["action"], "unlock_front")
+        self.assertNotIn("payload_hex", accepted.json["result"])
+        self.assertEqual(access_query.status_code, 400)
+        self.assertEqual(access_body.status_code, 400)
+        self.assertEqual(access.status_code, 200)
+        self.assertEqual(access.headers["Cache-Control"], "no-store")
+        self.assertEqual(access_calls, ["read"])
+        self.assertEqual(access.json["access_state"]["lock_domains"]["state"], "locked")
 
     def test_status_route_exposes_sanitized_cop_can_wake_snapshot(self):
         class FakeCanWake:

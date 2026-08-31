@@ -29,7 +29,7 @@ import time
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_from_directory
 
 try:
     from pi.van_compute.scripts.van_compute_metrics import (
@@ -68,6 +68,7 @@ if __package__:
     from .van_dashboard_integrations import *
     from .van_dashboard_system import *
     from .van_dashboard_telemetry import *
+    from .van_dashboard_vonstar import *
 else:
     from van_dashboard_common import *
     from van_dashboard_backups import *
@@ -81,6 +82,7 @@ else:
     from van_dashboard_integrations import *
     from van_dashboard_system import *
     from van_dashboard_telemetry import *
+    from van_dashboard_vonstar import *
 
 # Preserve the historical facade-level marker constant for callers and source
 # safety checks. The implementation uses the identical value from common.
@@ -154,6 +156,7 @@ system_power = SystemPowerController()
 dashboard_restart = DashboardRestartController()
 telemetry_summary = TelemetrySummaryReader()
 voltage_check = VoltageCheckManager()
+vonstar = VonstarClient()
 
 
 def api_error(message, status):
@@ -210,8 +213,54 @@ def api_status():
             "cop_led": cop_led.snapshot(),
             "starlink": starlink.snapshot(),
             "system_uptime": read_system_uptime(),
+            "vonstar": vonstar.snapshot(),
         }
     )
+
+
+@app.route("/api/vonstar")
+def api_vonstar_status():
+    if request.args:
+        return api_error("Vonstar status does not accept input", 400)
+    response = jsonify({"ok": True, "vonstar": vonstar.snapshot()})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.post("/api/vonstar")
+def api_vonstar_action():
+    if set(request.values) != {"action"} or len(request.values.getlist("action")) != 1:
+        return api_error("Vonstar requires exactly one action", 400)
+    action = request.values["action"]
+    try:
+        result = vonstar.perform(action)
+    except ValueError as exc:
+        return api_error(str(exc), 400)
+    except VonstarClientError as exc:
+        return api_error(str(exc), exc.http_status)
+    response = jsonify(
+        {
+            "ok": True,
+            "message": f"{VONSTAR_ACTIONS[action]['label']} completed",
+            "result": result,
+            "vonstar": vonstar.snapshot(),
+        }
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.post("/api/vonstar/access-state")
+def api_vonstar_access_state():
+    if request.args or request.form or request.get_data(cache=True):
+        return api_error("Vonstar access-state does not accept input", 400)
+    try:
+        result = vonstar.read_access_state()
+    except VonstarClientError as exc:
+        return api_error(str(exc), exc.http_status)
+    response = jsonify(result)
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.route("/api/telemetry-summary")
@@ -1479,9 +1528,25 @@ def app_icon():
     return response
 
 
+@app.route("/assets/<path:filename>")
+def react_asset(filename):
+    response = send_from_directory(os.path.join(REACT_FRONTEND_ROOT, "assets"), filename)
+    response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    return response
+
+
+@app.route("/legacy")
+def legacy_index():
+    return render_template("van_dashboard.html")
+
+
 @app.route("/")
 def index():
-    return render_template("van_dashboard.html")
+    if os.path.isfile(os.path.join(REACT_FRONTEND_ROOT, "index.html")):
+        response = send_from_directory(REACT_FRONTEND_ROOT, "index.html")
+        response.headers["Cache-Control"] = "no-store"
+        return response
+    return legacy_index()
 
 
 if __name__ == "__main__":

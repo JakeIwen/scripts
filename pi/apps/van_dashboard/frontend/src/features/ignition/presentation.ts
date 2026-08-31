@@ -25,13 +25,6 @@ export function describeIgnitionMonitor(
       tone: 'warning',
     };
   }
-  if (!status.service.enabled) {
-    return {
-      label: 'Running',
-      summary: 'Watching ignition, but not enabled for the next boot',
-      tone: 'warning',
-    };
-  }
   return {
     label: 'Active',
     summary: 'Watching for ignition changes',

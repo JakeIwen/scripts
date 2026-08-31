@@ -5,6 +5,7 @@ Wants=network-online.target
 
 [Service]
 ExecStartPre=/usr/bin/test -r /home/pi/van_compute/scripts/van_compute_metrics.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/van-dashboard-preview/current/index.html
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_backups.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_block_devices.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_common.py
@@ -18,6 +19,7 @@ ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_s
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_system.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_telemetry.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_usb.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_vonstar.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/templates/van_dashboard.html
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/static/van_dashboard.js
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/static/van_dashboard.css
@@ -30,6 +32,7 @@ RestartSec=5
 User=pi
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=/home/pi/van_compute/scripts
+Environment=VAN_DASHBOARD_FRONTEND_ROOT=/home/pi/scripts/van-dashboard-preview/current
 RuntimeDirectory=van-dashboard
 RuntimeDirectoryMode=0750
 UMask=0027

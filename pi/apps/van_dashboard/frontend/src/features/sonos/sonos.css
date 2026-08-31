@@ -1,11 +1,54 @@
-.sonos-tile__track {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 12px;
+.tile.sonos-tile {
+  min-height: 194px;
+  background-position: center;
+  background-size: cover;
 }
 
-.sonos-tile__track > span {
+.sonos-tile .tile__header {
+  grid-template-columns: 24px minmax(0, 1fr);
+  min-height: 24px;
+}
+
+.sonos-tile .tile__icon {
+  width: 24px;
+  font-size: 24px;
+}
+
+.sonos-tile .tile__title {
+  font-size: 17px;
+}
+
+.sonos-tile__speaker-summary {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  min-width: 0;
+  max-width: 208px;
+  align-items: center;
+  padding: 5px 8px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #10171dcc;
+  color: var(--dim);
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sonos-tile.has-art {
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 4%),
+    var(--shadow);
+}
+
+.sonos-tile.has-art .sonos-tile__track {
+  text-shadow: 0 1px 4px #000;
+}
+
+.sonos-tile__track {
   display: grid;
   min-width: 0;
   gap: 3px;
@@ -20,7 +63,32 @@
 
 .sonos-tile__track strong {
   color: var(--text);
-  font-size: 18px;
+  font-size: 15px;
+}
+
+.sonos-tile__track small {
+  color: var(--muted);
+  margin-top: 2px;
+  font-size: 11px;
+}
+
+.sonos-tile .tile__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.sonos-tile__open {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.sonos-tile__open:focus-visible {
+  outline-offset: -4px;
 }
 
 .sonos-progress {
@@ -35,9 +103,19 @@
   height: 100%;
   border-radius: inherit;
   background: var(--accent);
+  transition: width 0.8s linear;
 }
 
-.sonos-tile__group,
+.sonos-tile .sonos-progress {
+  height: 4px;
+  margin-top: 9px;
+  background: #dce8ed42;
+}
+
+.sonos-tile .sonos-progress > span {
+  background: #e6f0f3;
+}
+
 .sonos-sheet__toolbar,
 .sonos-group header,
 .sonos-group__volume {
@@ -47,18 +125,8 @@
   gap: 14px;
 }
 
-.sonos-tile__group {
-  margin-top: 12px;
-  color: var(--muted);
-}
-
-.sonos-tile__group strong {
-  color: var(--text);
-}
-
 .sonos-control-hint,
 .sonos-stale-error {
-  margin-top: 12px;
   color: var(--dim);
   font-size: 12px;
 }
@@ -125,17 +193,63 @@
 }
 
 .sonos-transport button {
+  display: inline-flex;
   width: 42px;
   height: 42px;
   border: 1px solid var(--line);
   border-radius: 50%;
+  align-items: center;
+  justify-content: center;
   background: var(--panel-raised);
   cursor: pointer;
+  font-family: inherit;
+  font-size: 18px;
+  line-height: 1;
 }
 
 .sonos-transport button:hover:not(:disabled),
 .sonos-mute-button:hover:not(:disabled) {
   border-color: var(--line-strong);
+}
+
+.sonos-transport button.sonos-transport__play {
+  font-size: 21px;
+}
+
+.sonos-transport--tile {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin-top: auto;
+  padding-top: 12px;
+}
+
+.sonos-transport--tile button {
+  width: 46px;
+  height: 36px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  font-size: 22px;
+}
+
+.sonos-transport--tile button.sonos-transport__play {
+  font-size: 28px;
+}
+
+.sonos-transport--tile button:hover:not(:disabled),
+.sonos-transport--tile button:focus-visible {
+  background: rgb(255 255 255 / 7%);
+}
+
+.sonos-stale-error,
+.sonos-control-hint {
+  position: relative;
+  z-index: 2;
+  pointer-events: none;
 }
 
 .sonos-group header {

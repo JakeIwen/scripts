@@ -55,7 +55,7 @@ describe('UBNT UI', () => {
     );
 
     expect(screen.getByText('denlink · -56 dBm · 99.1% CCQ')).toBeInTheDocument();
-    expect(screen.getByText('Open details to manage antenna Wi-Fi')).toBeInTheDocument();
+    expect(screen.getByText('Connected')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Open UBNT Wi-Fi details' }));
     expect(onOpen).toHaveBeenCalledOnce();
   });

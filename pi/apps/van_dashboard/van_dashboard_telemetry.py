@@ -7,6 +7,8 @@ layout used by the deployed van-dashboard service.
 __all__ = [
     "TelemetrySummaryReader",
     "VoltageCheckManager",
+    "newest_voltage_sample",
+    "read_engine_off_voltage_sample",
     "read_voltage_mon_sample",
     "valid_voltage",
 ]
@@ -14,6 +16,8 @@ __all__ = [
 if __package__:
     from .van_dashboard_common import (
         Request,
+        ENGINE_OFF_VOLTAGE_STATUS,
+        ENGINE_OFF_VOLTAGE_STATUS_MAX_BYTES,
         TELEMETRY_SNAPSHOT_TIMEOUT,
         TELEMETRY_SNAPSHOT_URL,
         VOLTAGE_CHECK_TIMEOUT,
@@ -25,6 +29,7 @@ if __package__:
         math,
         os,
         run_command,
+        stat,
         subprocess,
         threading,
         time,
@@ -33,6 +38,8 @@ if __package__:
 else:
     from van_dashboard_common import (
         Request,
+        ENGINE_OFF_VOLTAGE_STATUS,
+        ENGINE_OFF_VOLTAGE_STATUS_MAX_BYTES,
         TELEMETRY_SNAPSHOT_TIMEOUT,
         TELEMETRY_SNAPSHOT_URL,
         VOLTAGE_CHECK_TIMEOUT,
@@ -44,6 +51,7 @@ else:
         math,
         os,
         run_command,
+        stat,
         subprocess,
         threading,
         time,
@@ -105,16 +113,117 @@ def read_voltage_mon_sample(voltage_csv):
     return None
 
 
+def _aware_datetime(value):
+    try:
+        parsed = datetime.datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(datetime.timezone.utc)
+
+
+def read_engine_off_voltage_sample(
+    status_path,
+    maximum_bytes=ENGINE_OFF_VOLTAGE_STATUS_MAX_BYTES,
+):
+    """Read the broker's bounded, regular-file passive engine-off sample."""
+
+    try:
+        metadata = os.lstat(status_path)
+    except OSError:
+        return None
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_size <= 0
+        or metadata.st_size > maximum_bytes
+    ):
+        return None
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(status_path, flags)
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_size <= 0
+            or opened.st_size > maximum_bytes
+        ):
+            os.close(descriptor)
+            return None
+        with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
+            text = handle.read(maximum_bytes + 1)
+        if len(text.encode("utf-8")) > maximum_bytes:
+            return None
+        payload = json.loads(text)
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    if (
+        not isinstance(payload, dict)
+        or payload.get("version") != 1
+        or payload.get("service") != "van-telemetry"
+        or payload.get("role") != "engine_off_voltage"
+        or payload.get("sample_type") != "engine_off"
+        or payload.get("unit") != "V"
+        or payload.get("quality") != "verified"
+        or payload.get("acquisition") not in ("passive", "passive_broadcast")
+        or not valid_voltage(payload.get("value"))
+    ):
+        return None
+    bus = payload.get("bus")
+    source = payload.get("source")
+    if (bus, source) not in (
+        ("c-can", "ccan.broadcast.0x41a"),
+        ("b-can", "bcan.broadcast.0x46c"),
+    ):
+        return None
+    observed = _aware_datetime(payload.get("observed_at"))
+    stopped = _aware_datetime(payload.get("engine_stopped_at"))
+    saved = _aware_datetime(payload.get("saved_at"))
+    if (
+        observed is None
+        or stopped is None
+        or saved is None
+        or observed < stopped
+        or saved < observed
+    ):
+        return None
+    return {
+        "available": True,
+        "value": round(float(payload["value"]), 3),
+        "unit": "V",
+        "source": "engine_off",
+        "observed_at": observed.isoformat(),
+        "detail": "Engine-off passive sample",
+    }
+
+
+def newest_voltage_sample(*samples):
+    """Return the valid sample with the newest aware observation timestamp."""
+
+    dated = []
+    for sample in samples:
+        if not sample or not sample.get("available"):
+            continue
+        observed = _aware_datetime(sample.get("observed_at"))
+        if observed is not None:
+            dated.append((observed, sample))
+    return max(dated, key=lambda item: item[0])[1] if dated else None
+
+
 class TelemetrySummaryReader:
     def __init__(
         self,
         snapshot_url=TELEMETRY_SNAPSHOT_URL,
         voltage_csv=VOLTAGE_MON_CSV,
+        engine_off_status=ENGINE_OFF_VOLTAGE_STATUS,
         timeout=TELEMETRY_SNAPSHOT_TIMEOUT,
         opener=urlopen,
     ):
         self.snapshot_url = snapshot_url
         self.voltage_csv = voltage_csv
+        self.engine_off_status = engine_off_status
         self.timeout = timeout
         self.opener = opener
 
@@ -149,6 +258,9 @@ class TelemetrySummaryReader:
     def _voltage_mon_sample(self):
         return read_voltage_mon_sample(self.voltage_csv)
 
+    def _engine_off_sample(self):
+        return read_engine_off_voltage_sample(self.engine_off_status)
+
     def snapshot(self):
         try:
             live = self._live_sample()
@@ -160,7 +272,10 @@ class TelemetrySummaryReader:
             json.JSONDecodeError,
         ):
             live = None
-        sample = live or self._voltage_mon_sample()
+        sample = live or newest_voltage_sample(
+            self._engine_off_sample(),
+            self._voltage_mon_sample(),
+        )
         if sample:
             return sample
         return {
