@@ -1,6 +1,6 @@
 import json
-import pathlib
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 
 from pi.apps.van_dashboard import van_dashboard as dashboard
@@ -114,22 +114,12 @@ class LightingPowerSwitchTests(unittest.TestCase):
         self.assertEqual(solder["power_switch"]["state"], "off")
         self.assertEqual(rejected.status_code, 400)
 
-    def test_helper_and_ui_include_only_the_two_power_switches(self):
-        root = pathlib.Path(__file__).resolve().parents[3]
+    def test_helper_includes_only_the_two_power_switches(self):
+        root = Path(__file__).resolve().parents[3]
         helper = (root / "pi" / "scripts" / "tuya_light.sh").read_text()
-        javascript = (
-            root / "pi" / "apps" / "van_dashboard" / "static" / "van_dashboard.js"
-        ).read_text()
-        stylesheet = (
-            root / "pi" / "apps" / "van_dashboard" / "static" / "van_dashboard.css"
-        ).read_text()
         self.assertIn('or .entity_id == "switch.ext_flood"', helper)
         self.assertIn('or .entity_id == "switch.solder_flood"', helper)
         self.assertNotIn('or .entity_id == "switch.starlink"', helper)
-        self.assertIn("Turn switch ${switchEnabled ? 'off' : 'on'}", javascript)
-        self.assertIn("lighting-switch-action", javascript)
-        self.assertIn(".lighting-group-actions", stylesheet)
-        self.assertIn(".lighting-switch-action.good", stylesheet)
 
 
 if __name__ == "__main__":

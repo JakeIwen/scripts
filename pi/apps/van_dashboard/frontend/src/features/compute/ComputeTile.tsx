@@ -18,7 +18,7 @@ export interface ComputeTileProps {
   onOpen: () => void;
 }
 
-function legacyAge(timestamp: number | null): string {
+function compactAge(timestamp: number | null): string {
   if (timestamp === null) return 'never';
   const seconds = Math.max(0, Date.now() / 1_000 - timestamp);
   return seconds < 90 ? `${Math.round(seconds)}s ago` : `${Math.round(seconds / 60)}m ago`;
@@ -35,7 +35,7 @@ function workerLabel(report: ComputeReport): string {
   if (report.status.available) {
     return `${worker?.name ?? 'Mac'} · ${report.status.running ? 'working' : 'ready'}`;
   }
-  return worker?.seenAt ? `Last seen ${legacyAge(worker.seenAt)}` : 'No heartbeat';
+  return worker?.seenAt ? `Last seen ${compactAge(worker.seenAt)}` : 'No heartbeat';
 }
 
 export function ComputeTile({ report, error, refreshing, onOpen }: ComputeTileProps) {

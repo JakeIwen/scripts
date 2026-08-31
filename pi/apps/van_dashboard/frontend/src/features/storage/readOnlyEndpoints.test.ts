@@ -14,7 +14,7 @@ function jsonResponse(payload: unknown): Response {
   });
 }
 
-describe('storage, USB, and backup preview endpoints', () => {
+describe('storage, USB, and backup read-only endpoints', () => {
   it('uses only the four audited read-only GET routes', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')

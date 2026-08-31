@@ -9,7 +9,7 @@ import type {
   DealWatchStatus,
 } from './types';
 
-/** The preview intentionally exposes only the read endpoint for Deal Watch. */
+/** Load the authoritative Deal Watch state before rendering or mutating it. */
 export async function fetchDealWatchStatus(signal: AbortSignal): Promise<DealWatchStatus> {
   const payload = await getJson('/api/price-checks', signal);
   return decodeDealWatchStatus(payload);

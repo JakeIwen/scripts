@@ -46,7 +46,7 @@ describe('OpenWrt UI', () => {
     expect(onOpen).toHaveBeenCalledOnce();
   });
 
-  it('matches the legacy tile hierarchy instead of rendering an online pill', () => {
+  it('uses the compact tile hierarchy instead of rendering an online pill', () => {
     const view = render(
       <OpenWrtTile
         connectivity={sampleConnectivity()}

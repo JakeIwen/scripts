@@ -86,6 +86,12 @@ fi
 rm -f -- \
   "$live_scripts/rsync_to_clone.sh" \
   "$live_scripts/setup_router_policy_trigger.sh"
+# The React dashboard is the sole UI. Remove retired template/static assets so
+# old files cannot silently remain reachable after an incremental deployment.
+rm -f -- \
+  "$live_scripts/python-automation/templates/van_dashboard.html" \
+  "$live_scripts/python-automation/static/van_dashboard.js" \
+  "$live_scripts/python-automation/static/van_dashboard.css"
 # Preserve the old sync behavior for top-level scripts, and do it before any
 # service restart so directly executed shell scripts remain runnable. Directory
 # modes are preserved from the staged tree.

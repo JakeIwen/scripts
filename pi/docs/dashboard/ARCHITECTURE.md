@@ -69,10 +69,11 @@ differ enough that a shared worker superclass would obscure important behavior.
 
 ## React frontend
 
-The production Flask process serves the built React dashboard at `/` and its
-hashed assets at `/assets/`, while retaining the previous template at
-`/legacy`. The same process remains the sole API and controller owner; promoting
-the frontend does not create a second dashboard backend.
+React is the sole dashboard frontend. The production Flask process serves its
+entry point at `/` and hashed assets at `/assets/`; it returns HTTP 503 if the
+atomic React build is unavailable. The same process remains the sole API and
+controller owner, so the frontend does not create a second dashboard backend.
 
 The parallel React service on port `8790` remains available as a canary and
-rollback aid. Both surfaces consume the same backend state and API contracts.
+rollback aid. Both ports serve the same React release and consume the same
+backend state and API contracts.

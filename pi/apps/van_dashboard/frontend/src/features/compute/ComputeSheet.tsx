@@ -201,7 +201,7 @@ export function ComputeSheet({
           <p className="compute-measurement-note">{report.measurementNote}</p>
         )}
         <aside className="compute-sheet__read-only">
-          Preview is read-only. Diagnostics and retained output are loaded only when expanded.
+          Compute diagnostics are read-only. Retained output is loaded only when expanded.
         </aside>
       </div>
     </BottomSheet>

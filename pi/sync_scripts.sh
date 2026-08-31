@@ -33,8 +33,7 @@ python_stage="$staged_scripts/python-automation"
 mkdir -p "$python_stage"
 /usr/bin/find "$pi_apps" "$pi_python" "$shared_python" -type f -name "*.py" \
   -exec cp {} "$python_stage/" \;
-cp -R "$pi_apps/van_dashboard/templates" "$python_stage/"
-cp -R "$pi_apps/van_dashboard/static" "$python_stage/"
+mkdir -p "$python_stage/templates" "$python_stage/static"
 cp "$pi_apps/video_library/templates/video_library.html" "$python_stage/templates/"
 cp "$pi_apps/video_library/static/video_library.js" "$python_stage/static/"
 cp "$pi_apps/video_library/static/video_library.css" "$python_stage/static/"

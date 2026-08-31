@@ -1,14 +1,14 @@
 # Van Dashboard React frontend
 
-This directory contains the human-editable React preview for the van dashboard.
-It is deliberately a client-side application: the existing Flask dashboard on
-port `8788` remains the only backend and the only process that owns device or
-service controls.
+This directory contains the human-editable production frontend for the van
+dashboard. It is deliberately a client-side application: Flask on port `8788`
+remains the only backend and the only process that owns device or service
+controls.
 
-The preview is served on port `8790` by `react_dashboard_preview.py`. That small
-server serves the production build and proxies `/api/*` to the existing Flask
-backend. It does not import dashboard controllers or create a second copy of
-their runtime state.
+Flask serves the production build on port `8788`. The same build is also served
+on port `8790` by `react_dashboard_preview.py` as a canary; that small server
+proxies `/api/*` to Flask and does not import controllers or create another copy
+of runtime state.
 
 ## Local commands
 
@@ -92,16 +92,13 @@ visible label rather than by CSS selector.
 The existing tile IDs and `van-dashboard.tile-order.v1` localStorage key are a
 compatibility contract. Reusing them preserves the user's saved arrangement.
 
-## Preview safety state
+## Canary safety boundary
 
 `react_dashboard_preview.py` proxies GET and HEAD requests and only the exact
 method/path pairs listed in `ALLOWED_MUTATIONS`. Every current React control is
 listed individually after review of its disabled states, confirmation,
 single-flight behavior, ambiguous-failure refresh, convergence, and tests.
 There is no wildcard or method-wide mutation switch.
-
-The legacy UI remains linked in the header as an immediate behavioral and
-operational fallback during the parallel-service review window.
 
 ## Build and deploy
 
@@ -111,12 +108,12 @@ The Pi never runs Node or Vite. Build and deploy from this clone with:
 ./pi/deploy_van_dashboard_preview.sh
 ```
 
-Rollback swaps the atomic preview release symlinks and restarts only the preview
-service:
+Rollback swaps the atomic release symlinks used by production and canary, then
+restarts the canary server:
 
 ```bash
 ./pi/deploy_van_dashboard_preview.sh --rollback
 ```
 
-Do not use `pi/sync_scripts.sh` from this clone; it is intentionally tied to the
-primary checkout and deploys much more than the preview.
+Do not use `pi/sync_scripts.sh` from a copied checkout; it is intentionally tied
+to the primary checkout and deploys substantially more than the React release.

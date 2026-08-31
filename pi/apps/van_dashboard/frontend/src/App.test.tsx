@@ -4,10 +4,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { ToastProvider } from './components/ToastProvider';
 
-describe('Van Dashboard preview composition', () => {
+describe('Van Dashboard React composition', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it('keeps every legacy tile represented while data is loading', () => {
+  it('keeps every dashboard tile represented while data is loading', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(() => new Promise<Response>(() => undefined)),

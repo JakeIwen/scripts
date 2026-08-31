@@ -67,9 +67,7 @@ describe('compute UI', () => {
     expect(screen.getAllByText('repo-tests').length).toBeGreaterThan(0);
     expect(screen.getByText('Task exited with code 1')).toBeInTheDocument();
     expect(screen.getByText('Worker Unavailable')).toBeInTheDocument();
-    expect(
-      screen.getByText(/diagnostics and retained output are loaded only when expanded/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/compute diagnostics are read-only/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '24 hours' }));
     expect(onRangeChange).toHaveBeenCalledWith(24);
   });

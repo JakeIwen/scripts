@@ -22,7 +22,7 @@ function tileStatusLabel(status: DealWatchStatus | null, _error: Error | null): 
   return String(watchedCount(status));
 }
 
-function legacyAge(timestamp: number | null): string {
+function compactAge(timestamp: number | null): string {
   if (timestamp === null) return 'never';
   const seconds = Math.max(0, Date.now() / 1_000 - timestamp);
   return seconds < 90 ? `${Math.round(seconds)}s ago` : `${Math.round(seconds / 60)}m ago`;
@@ -50,7 +50,7 @@ export function DealWatchTile({ resource, onOpen }: DealWatchTileProps) {
     },
     {
       label: 'Last check',
-      value: status ? legacyAge(mostRecentCheckAt(status)) : 'never',
+      value: status ? compactAge(mostRecentCheckAt(status)) : 'never',
     },
   ];
 

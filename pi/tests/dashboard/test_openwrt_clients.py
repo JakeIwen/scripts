@@ -1,5 +1,4 @@
 import json
-import pathlib
 import subprocess
 import unittest
 from types import SimpleNamespace
@@ -193,23 +192,6 @@ class OpenWrtClientDashboardTests(unittest.TestCase):
             self.assertIn("router unavailable", failed.json["message"])
         finally:
             dashboard.openwrt_clients = original
-
-    def test_tile_opens_accessible_client_sheet(self):
-        root = pathlib.Path(__file__).resolve().parents[3]
-        application = root / "pi" / "apps" / "van_dashboard"
-        template = (application / "templates" / "van_dashboard.html").read_text()
-        javascript = (application / "static" / "van_dashboard.js").read_text()
-        stylesheet = (application / "static" / "van_dashboard.css").read_text()
-
-        self.assertIn('id="openwrt-open"', template)
-        self.assertIn('aria-controls="openwrt-panel"', template)
-        self.assertIn('id="openwrt-client-list"', template)
-        self.assertIn("function openOpenwrt()", javascript)
-        self.assertIn("json('/api/openwrt/clients')", javascript)
-        self.assertIn("[client.band, client.radio]", javascript)
-        self.assertIn(".openwrt-client-list", stylesheet)
-        self.assertIn("grid-template-columns: repeat(2, minmax(0, 1fr))", stylesheet)
-
 
 if __name__ == "__main__":
     unittest.main()

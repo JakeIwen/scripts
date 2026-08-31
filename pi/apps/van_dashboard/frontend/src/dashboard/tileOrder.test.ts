@@ -16,7 +16,7 @@ describe('tile ordering', () => {
     ]);
   });
 
-  it('round-trips the legacy localStorage key', () => {
+  it('round-trips the established localStorage key', () => {
     const order = DEFAULT_TILE_ORDER.slice(0, 4);
     saveTileOrder(order);
     expect(loadTileOrder(order)).toEqual(order);

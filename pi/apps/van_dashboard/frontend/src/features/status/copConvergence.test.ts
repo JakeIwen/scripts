@@ -47,7 +47,7 @@ describe('COP status convergence', () => {
     expect(copConverged(status(true, 'idle'), false)).toBe(false);
   });
 
-  it('matches legacy terminal handling for unavailable and stopping supervisors', () => {
+  it('handles unavailable and stopping supervisors as terminal states', () => {
     expect(copConverged(status(true, 'stopping'), true)).toBe(true);
     expect(copConverged(status(true, 'stopped', false), true)).toBe(true);
   });

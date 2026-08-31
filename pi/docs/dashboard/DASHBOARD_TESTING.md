@@ -151,11 +151,8 @@ running:
 ```bash
 python3 -m unittest \
   pi.tests.policy.test_policyctl \
-  pi.tests.dashboard.test_desktop_sheets \
   pi.tests.dashboard.test_lighting_power_switches \
-  pi.tests.dashboard.test_lighting_tile_static \
   pi.tests.dashboard.test_openwrt_clients \
-  pi.tests.dashboard.test_usb_tile_layout_static \
   pi.tests.dashboard.test_van_dashboard
 ```
 
@@ -172,7 +169,7 @@ checkout, use that checkout's reviewed local deployment helper or copy the
 exact dashboard files explicitly; do not assume `sync_scripts.sh` uses the
 current directory.
 
-## React preview tests
+## React dashboard tests
 
 The React source has a pinned npm lockfile and runs entirely on the Mac during
 build and test:
@@ -186,7 +183,7 @@ npm test
 npm run build
 ```
 
-The standalone static/proxy service is covered by the Python dashboard suite.
+The standalone canary/proxy service is covered by the Python dashboard suite.
 For a focused run on a Python environment with Flask available:
 
 ```bash
@@ -194,4 +191,4 @@ python3 -m unittest pi.tests.dashboard.test_van_dashboard_preview
 ```
 
 That test uses an isolated fake upstream. It does not contact vanpi, start a
-preview service, or invoke dashboard controls.
+canary service, or invoke dashboard controls.

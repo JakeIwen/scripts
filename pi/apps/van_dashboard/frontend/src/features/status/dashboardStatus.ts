@@ -101,7 +101,7 @@ function optionalCopCanWakeState(value: unknown): CopCanWakeState | null {
   return state as CopCanWakeState;
 }
 
-/** Decode the small, stable part of /api/status used by the preview. */
+/** Decode the small, stable part of /api/status used by the React dashboard. */
 export function decodeDashboardStatus(payload: unknown): DashboardStatus {
   const response = objectValue(payload, 'dashboard status response');
   trueValue(response.ok, 'dashboard status response.ok');

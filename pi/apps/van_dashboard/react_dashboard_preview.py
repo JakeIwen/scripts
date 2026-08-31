@@ -39,8 +39,8 @@ SAFE_API_METHODS = frozenset({"GET", "HEAD"})
 MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 # Keep this list exact and easy to audit.  Do not add a wildcard or enable a
-# whole HTTP method.  Each entry should be added only when that React control
-# has reached behavioral and safety parity with the legacy dashboard.
+# whole HTTP method. Each entry is reviewed against the production React
+# control's confirmation, single-flight, reconciliation, and failure behavior.
 ALLOWED_MUTATIONS: frozenset[tuple[str, str]] = frozenset(
     {
         # Reversible media and lighting controls. Each corresponding React

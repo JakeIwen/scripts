@@ -197,7 +197,7 @@ describe('vOnStar exact API boundary', () => {
 });
 
 describe('vOnStar controls', () => {
-  it('keeps the legacy tile hierarchy compact and the three controls stacked', () => {
+  it('keeps the tile hierarchy compact and the three controls stacked', () => {
     const onOpen = vi.fn();
     const view = render(<VonstarTile controller={readyController()} onOpen={onOpen} />);
     const tile = view.container.querySelector('.vonstar-tile');
@@ -229,7 +229,7 @@ describe('vOnStar controls', () => {
     expect(onOpen).toHaveBeenCalledOnce();
   });
 
-  it('matches legacy plan-only, service-busy, and local working states', () => {
+  it('renders plan-only, service-busy, and local working states', () => {
     const planOnly = readyController();
     if (!planOnly.status) throw new Error('missing vOnStar status fixture');
     planOnly.status = { ...planOnly.status, mode: 'plan_only' };

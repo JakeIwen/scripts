@@ -16,6 +16,7 @@ normally live under `/home/pi/scripts/`.
 
 ## Dashboard
 
+- [React dashboard frontend](docs/dashboard/REACT_DASHBOARD.md)
 - [Dashboard and COP ALERT](docs/dashboard/COP_ALERT.md)
 - [Movies & TV library](docs/media/VIDEO_LIBRARY.md)
 - [Dashboard testing](docs/dashboard/DASHBOARD_TESTING.md)

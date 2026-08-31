@@ -189,7 +189,7 @@ function PortControls({ status, controls }: { status: UsbStatus; controls: UsbCo
     <>
       {(ports.expired || ports.lastError) && (
         <p className="error-message">
-          {ports.lastError ?? 'Port controls have expired; reload them in the Legacy UI.'}
+          {ports.lastError ?? 'Port controls have expired; refresh USB details to reload them.'}
         </p>
       )}
       <div className="usb-port-toolbar">

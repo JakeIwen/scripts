@@ -29,7 +29,7 @@ import time
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-from flask import Flask, jsonify, render_template, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory
 
 try:
     from pi.van_compute.scripts.van_compute_metrics import (
@@ -131,7 +131,7 @@ def toggle_telemetry_service():
         return action, telemetry_service_status()
 
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder=None)
 state_store = StateStore()
 cop_alert = CopAlertManager(state_store)
 cop_can_wake = CopCanWakeStatusReader()
@@ -1535,18 +1535,17 @@ def react_asset(filename):
     return response
 
 
-@app.route("/legacy")
-def legacy_index():
-    return render_template("van_dashboard.html")
-
-
 @app.route("/")
 def index():
     if os.path.isfile(os.path.join(REACT_FRONTEND_ROOT, "index.html")):
         response = send_from_directory(REACT_FRONTEND_ROOT, "index.html")
         response.headers["Cache-Control"] = "no-store"
         return response
-    return legacy_index()
+    return app.response_class(
+        "React dashboard build is unavailable\n",
+        status=503,
+        mimetype="text/plain",
+    )
 
 
 if __name__ == "__main__":

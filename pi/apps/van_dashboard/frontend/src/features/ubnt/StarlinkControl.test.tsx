@@ -73,7 +73,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('StarlinkControl', () => {
-  it('uses the legacy compact control when embedded in the UBNT tile', () => {
+  it('uses the compact control when embedded in the UBNT tile', () => {
     renderControl(resource(starlinkStatus('on')), 'tile');
 
     expect(screen.getByRole('button', { name: 'Turn Starlink off' })).toBeEnabled();
