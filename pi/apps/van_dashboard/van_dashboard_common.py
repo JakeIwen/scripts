@@ -203,7 +203,7 @@ SYSTEM_POWER_TIMEOUT = float(
     os.environ.get("VAN_DASHBOARD_SYSTEM_POWER_TIMEOUT", "180")
 )
 TUYA_POLL_INTERVAL = float(os.environ.get("VAN_DASHBOARD_TUYA_POLL_INTERVAL", "15"))
-POLICYCTL_TIMEOUT = 15
+POLICYCTL_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_POLICYCTL_TIMEOUT", "130"))
 COP_LED_TARGET = os.environ.get("VAN_DASHBOARD_COP_LED_TARGET", "light.ext_led")
 # Captured from solder_led on 2026-07-18. COP ALERT deliberately uses this
 # fixed look; it does not query or depend on solder_led at activation time.

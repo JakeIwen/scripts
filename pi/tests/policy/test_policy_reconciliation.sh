@@ -226,8 +226,8 @@ assert_eq 0 "$STALE_RECOVERY_INVOKED" \
 rm "$ISW_IGNITION_FLAG"
 
 run_case "disabled disks" "0 1 1" off 0 "mount-always kill-all"
-assert_eq 1 "$STALE_RECOVERY_INVOKED" \
-  "parked policy must recover stale mounts before reconciliation"
+assert_eq 2 "$STALE_RECOVERY_INVOKED" \
+  "disabled HDD policy must scan for stale mounts before and after shutdown"
 run_case "globally disabled torrents" "1 0 1" off 0 "mount-always mount kill-torrent"
 run_case "explicit Starlink permission" "1 1 1" unknown 1 "mount-always mount start-torrent"
 [[ ! -e "$TEST_STARLINK_CALLS" ]] ||

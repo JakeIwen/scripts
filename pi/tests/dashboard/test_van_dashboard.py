@@ -1153,7 +1153,6 @@ class StoragePolicyManagerTests(unittest.TestCase):
                             ],
                             7,
                         ),
-                        ([dashboard.POLICYCTL, "--json", "status"], 7),
                     ],
                 )
 
@@ -5306,7 +5305,6 @@ class DashboardRouteTests(unittest.TestCase):
             [
                 [dashboard.POLICYCTL, "--json", "status"],
                 [dashboard.POLICYCTL, "--json", "torrents", "off"],
-                [dashboard.POLICYCTL, "--json", "status"],
             ],
         )
 

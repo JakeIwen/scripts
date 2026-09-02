@@ -221,8 +221,9 @@ sync_dirpath() {
 # reconciliation; the dashboard uses the same command.
 alias policyctl='$HOME/scripts/policyctl'
 alias mconf='$HOME/scripts/policyctl status'
-alias nodisk='$HOME/scripts/policyctl disks off'
+alias nodisk='$HOME/scripts/policyctl disks off --wait'
 alias nodiskx='$HOME/scripts/policyctl disks on'
+alias mdisk=nodiskx
 alias notor='$HOME/scripts/policyctl torrents off'
 alias notorx='$HOME/scripts/policyctl torrents on'
 alias startor='$HOME/scripts/policyctl starlink-torrents on'

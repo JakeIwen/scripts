@@ -377,7 +377,7 @@ kill_all() {
 }
 
 set_isw_options() {
-  local shutdown_status always_mount_status torrent_status
+  local shutdown_status stale_status always_mount_status torrent_status
 
   echo ""
   echo "$(date)"
@@ -413,7 +413,12 @@ set_isw_options() {
     echo "requested policy disables HDDs"
     kill_all
     shutdown_status=$?
-    (( always_mount_status == 0 && shutdown_status == 0 ))
+    # USB re-enumeration can occur after the initial stale-mount scan but
+    # before umount_disks resolves a label. Catch any old /dev source left at a
+    # managed target before declaring the requested nodisk state complete.
+    recover_stale_mounts_if_needed
+    stale_status=$?
+    (( always_mount_status == 0 && shutdown_status == 0 && stale_status == 0 ))
     return
   fi
 

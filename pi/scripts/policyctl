@@ -4,6 +4,7 @@
 import argparse
 import fcntl
 import json
+import math
 import os
 from pathlib import Path
 import shlex
@@ -33,6 +34,7 @@ LEGACY_STARCONF = Path(
     os.environ.get("VANPI_POLICY_STARCONF", "/home/pi/starconf")
 )
 POLICY_VERSION = 1
+DEFAULT_RECONCILE_TIMEOUT_SECONDS = 120.0
 POLICY_FIELDS = (
     "disks_enabled",
     "torrents_enabled",
@@ -194,7 +196,12 @@ def update_policy(field, enabled):
         return value
 
 
-def request_reconciliation():
+def request_reconciliation(timeout=None):
+    if timeout is None:
+        timeout = positive_environment_float(
+            "VANPI_POLICY_RECONCILE_TIMEOUT_SECONDS",
+            DEFAULT_RECONCILE_TIMEOUT_SECONDS,
+        )
     configured = os.environ.get("VANPI_POLICY_REQUEST_COMMAND")
     command = (
         shlex.split(configured)
@@ -204,15 +211,20 @@ def request_reconciliation():
             "-n",
             "/usr/bin/systemctl",
             "start",
-            "--no-block",
             "vanpi-policy.service",
         ]
     )
     if not command:
         raise PolicyError("policy request command is empty")
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=8)
-    except (OSError, subprocess.TimeoutExpired) as exc:
+        result = subprocess.run(
+            command, capture_output=True, text=True, timeout=timeout
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise PolicyError(
+            f"policy reconciliation timed out after {timeout:g} seconds"
+        ) from exc
+    except OSError as exc:
         raise PolicyError(f"could not request policy reconciliation: {exc}") from exc
     if result.returncode:
         detail = (result.stderr or result.stdout or "command failed").strip()
@@ -275,6 +287,38 @@ def status_report(value, runtime=None):
     return report
 
 
+def positive_environment_float(name, default):
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise PolicyError(f"{name} must be a positive number") from exc
+    if not math.isfinite(value) or value <= 0:
+        raise PolicyError(f"{name} must be a positive finite number")
+    return value
+
+
+def verified_reconciled_runtime(value):
+    runtime = runtime_status()
+    problems = []
+    if not value["disks_enabled"]:
+        if runtime["disks_mounted"]:
+            labels = ", ".join(runtime["mounted_disk_labels"])
+            problems.append(f"managed HDDs remain mounted: {labels}")
+        if runtime["qbittorrent_running"]:
+            problems.append("qBittorrent remains running while HDDs are disabled")
+    elif not value["torrents_enabled"] and runtime["qbittorrent_running"]:
+        problems.append("qBittorrent remains running while torrents are disabled")
+    if problems:
+        raise PolicyError(
+            "policy reconciliation completed with inconsistent runtime: "
+            + "; ".join(problems)
+        )
+    return runtime
+
+
 def parse_on_off(value):
     if value == "on":
         return True
@@ -283,8 +327,8 @@ def parse_on_off(value):
     raise PolicyError("state must be 'on' or 'off'")
 
 
-def print_status(value, as_json=False):
-    report = status_report(value)
+def print_status(value, as_json=False, runtime=None):
+    report = status_report(value, runtime=runtime)
     if as_json:
         json.dump(report, sys.stdout, sort_keys=True)
         sys.stdout.write("\n")
@@ -329,12 +373,24 @@ def build_parser():
     for command in TARGET_FIELDS:
         target = subparsers.add_parser(command, help=f"turn {command} on or off")
         target.add_argument("state", choices=("on", "off"))
+        if command == "disks":
+            target.add_argument(
+                "--wait",
+                action="store_true",
+                help="compatibility flag; mutating commands already wait",
+            )
     return parser
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
     changed = False
+    reconciled_runtime = None
+    wait_requested = getattr(args, "wait", False)
+    if wait_requested and (args.command != "disks" or args.state != "off"):
+        raise PolicyError("--wait is supported only with 'disks off'")
+    if wait_requested and args.no_reconcile:
+        raise PolicyError("--wait cannot be combined with --no-reconcile")
     if args.command in ("status", "reconcile"):
         value = read_policy()
     elif args.command == "read":
@@ -357,7 +413,8 @@ def main(argv=None):
 
     if (changed or args.command == "reconcile") and not args.no_reconcile:
         request_reconciliation()
-    print_status(value, as_json=args.json)
+        reconciled_runtime = verified_reconciled_runtime(value)
+    print_status(value, as_json=args.json, runtime=reconciled_runtime)
     return 0
 
 

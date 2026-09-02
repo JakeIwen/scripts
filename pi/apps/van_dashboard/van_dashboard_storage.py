@@ -110,7 +110,7 @@ class StoragePolicyManager:
         )
         if requested[field] is not enabled:
             raise PolicyCommandError(f"policyctl did not confirm {field}")
-        return self.status()
+        return requested
 
     def reconcile(self):
         self._run([POLICYCTL, "reconcile"], expect_json=False)

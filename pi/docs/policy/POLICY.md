@@ -164,10 +164,23 @@ the stable compact interface consumed by the reconciler.
 
 The Bash aliases retain the previous short names:
 
-- `nodisk` / `nodiskx`: disable / enable parked storage
+- `nodisk`: disable parked storage
+- `nodiskx` / `mdisk`: enable parked storage
 - `notor` / `notorx`: disable / enable all torrenting
 - `startor` / `startorx`: allow / block torrenting while Starlink is on
 - `mconf`: display requested policy and authoritative runtime state
+
+Every policy mutation and explicit `policyctl reconcile` waits up to 120 seconds
+for `vanpi-policy.service` to finish, then reports freshly observed runtime
+state. Required off states are verified: disabling disks requires all managed
+HDD mounts and qBittorrent to be gone, and disabling torrents requires
+qBittorrent to be stopped. The legacy `disks off --wait` spelling remains
+accepted, but waiting is now the default shared by shell aliases and the
+dashboard. Read-only `policyctl read` and `status` do not start reconciliation.
+
+Parked disk-disable reconciliation also performs a second stale-mount scan
+after shutdown so a USB device that re-enumerates mid-run cannot leave an old
+`/dev` source mounted until the next minute timer.
 
 `policyctl migrate` creates the policy from legacy `mconf`, `mconf_last`, and
 `starconf` markers without overwriting an existing policy. After migration and
