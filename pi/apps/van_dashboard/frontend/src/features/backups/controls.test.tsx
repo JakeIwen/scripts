@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { startBackup, startBackupClone, stopBackup } from './api';
+import { setCloneCardNominalGb, startBackup, startBackupClone, stopBackup } from './api';
 import { useBackupControls } from './controls';
 import { sampleBackupStatus } from './testFixtures';
 
@@ -9,16 +9,19 @@ vi.mock('./api', () => ({
   startBackup: vi.fn(),
   startBackupClone: vi.fn(),
   stopBackup: vi.fn(),
+  setCloneCardNominalGb: vi.fn(),
 }));
 
 const startMock = vi.mocked(startBackup);
 const cloneMock = vi.mocked(startBackupClone);
 const stopMock = vi.mocked(stopBackup);
+const capacityMock = vi.mocked(setCloneCardNominalGb);
 
 beforeEach(() => {
   startMock.mockResolvedValue({ message: 'started', backups: sampleBackupStatus(true) });
   cloneMock.mockResolvedValue({ message: 'cloning', backups: sampleBackupStatus(true) });
   stopMock.mockResolvedValue({ message: 'stopping', backups: sampleBackupStatus(true) });
+  capacityMock.mockResolvedValue({ message: 'capacity updated', backups: sampleBackupStatus() });
 });
 
 describe('useBackupControls', () => {
@@ -49,6 +52,18 @@ describe('useBackupControls', () => {
     expect(startMock).toHaveBeenCalledTimes(1);
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(result.current.uncertainOutcome).toBe(false);
+  });
+
+  it('updates clone-card capacity without a confirmation prompt', async () => {
+    const confirm = vi.fn().mockReturnValue(false);
+    const refresh = vi.fn().mockResolvedValue(sampleBackupStatus());
+    const { result } = renderHook(() => useBackupControls(refresh, undefined, confirm));
+
+    await act(async () => result.current.setCloneCardNominalGb(128));
+
+    expect(capacityMock).toHaveBeenCalledWith(128);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(refresh).toHaveBeenCalledOnce();
   });
 
   it('keeps accepted work blocked until matching polled state is observed', async () => {

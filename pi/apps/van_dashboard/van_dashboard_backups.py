@@ -10,6 +10,7 @@ if __package__:
     from .van_dashboard_common import (
         BACKUP_ABORT,
         BACKUP_BORG_RUNNER,
+        BACKUP_CLONE_CARD_SIZE_PATH,
         BACKUP_CLONE_NOW,
         BACKUP_CLONE_TIMEOUT,
         BACKUP_CONF,
@@ -31,6 +32,7 @@ if __package__:
         read_text_file,
         run_command,
         shlex,
+        stat,
         subprocess,
         threading,
         time,
@@ -39,6 +41,7 @@ else:
     from van_dashboard_common import (
         BACKUP_ABORT,
         BACKUP_BORG_RUNNER,
+        BACKUP_CLONE_CARD_SIZE_PATH,
         BACKUP_CLONE_NOW,
         BACKUP_CLONE_TIMEOUT,
         BACKUP_CONF,
@@ -60,6 +63,7 @@ else:
         read_text_file,
         run_command,
         shlex,
+        stat,
         subprocess,
         threading,
         time,
@@ -98,6 +102,7 @@ class BackupManager:
     """
 
     CLONE_TARGET_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+    CLONE_CARD_NOMINAL_GB_OPTIONS = (32, 64, 128, 256)
     PROGRESS_PHASE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
     RSYNC_PROGRESS_RE = re.compile(
         r"^\s*([0-9][0-9,]*)\s+([0-9]{1,3})%"
@@ -110,6 +115,7 @@ class BackupManager:
         self,
         config=BACKUP_CONF,
         stamp_dir=BACKUP_STAMP_DIR,
+        clone_card_size_path=BACKUP_CLONE_CARD_SIZE_PATH,
         clone_tool=BACKUP_CLONE_NOW,
         borg_tool=BACKUP_BORG_RUNNER,
         exfat_tool=BACKUP_EXFAT_RUNNER,
@@ -127,6 +133,7 @@ class BackupManager:
     ):
         self.config = config
         self.stamp_dir = stamp_dir
+        self.clone_card_size_path = clone_card_size_path
         self.clone_tool = clone_tool
         self.borg_tool = borg_tool
         self.exfat_tool = exfat_tool
@@ -190,6 +197,12 @@ class BackupManager:
             value = re.search(rf"^\s*{re.escape(name)}=(\d+)\s*(?:#.*)?$", text, re.MULTILINE)
             return int(value.group(1)) if value else default
 
+        clone_card_nominal_gb = integer("CLONE_CARD_NOMINAL_GB", 64)
+        if clone_card_nominal_gb not in cls.CLONE_CARD_NOMINAL_GB_OPTIONS:
+            raise BackupStatusError(
+                "backup configuration has an unsupported clone card capacity"
+            )
+
         return {
             "targets": targets,
             "borg_stale_hours": integer("BORG_STALE_HOURS", 48),
@@ -200,13 +213,96 @@ class BackupManager:
                 "OPENWRT_BACKUP_STALE_HOURS", 72
             ),
             "clone_stale_factor": integer("CLONE_STALE_FACTOR", 2),
+            "clone_card_nominal_gb": clone_card_nominal_gb,
         }
 
     def _configuration(self):
         try:
-            return self.parse_config(read_text_file(self.config))
+            configuration = self.parse_config(read_text_file(self.config))
         except OSError as exc:
             raise BackupStatusError(f"could not read backup configuration: {exc}") from exc
+        nominal_gb = self._read_clone_card_nominal_gb(
+            configuration["clone_card_nominal_gb"]
+        )
+        configuration["clone_card_nominal_gb"] = nominal_gb
+        configuration["root_used_max_gib"] = nominal_gb * 13 // 16
+        return configuration
+
+    def _read_clone_card_nominal_gb(self, default):
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        try:
+            descriptor = os.open(self.clone_card_size_path, flags)
+        except FileNotFoundError:
+            return default
+        except OSError as exc:
+            raise BackupStatusError(
+                f"could not read clone card capacity: {exc}"
+            ) from exc
+        try:
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 8:
+                raise BackupStatusError("clone card capacity setting is invalid")
+            raw = os.read(descriptor, 9)
+        finally:
+            os.close(descriptor)
+        try:
+            text = raw.decode("ascii").strip()
+        except UnicodeDecodeError as exc:
+            raise BackupStatusError("clone card capacity setting is invalid") from exc
+        allowed = {str(value): value for value in self.CLONE_CARD_NOMINAL_GB_OPTIONS}
+        if text not in allowed:
+            raise BackupStatusError("clone card capacity setting is invalid")
+        return allowed[text]
+
+    def set_clone_card_nominal_gb(self, value):
+        text = str(value).strip()
+        allowed = {
+            str(option): option for option in self.CLONE_CARD_NOMINAL_GB_OPTIONS
+        }
+        if text not in allowed:
+            raise ValueError("clone card capacity must be 32, 64, 128, or 256GB")
+        nominal_gb = allowed[text]
+        parent = os.path.dirname(self.clone_card_size_path) or "."
+        temporary = (
+            f"{self.clone_card_size_path}.tmp.{os.getpid()}."
+            f"{threading.get_ident()}.{time.time_ns()}"
+        )
+        descriptor = None
+        try:
+            os.makedirs(parent, mode=0o755, exist_ok=True)
+            flags = (
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+            )
+            descriptor = os.open(temporary, flags, 0o644)
+            with os.fdopen(descriptor, "w", encoding="ascii") as handle:
+                descriptor = None
+                handle.write(f"{nominal_gb}\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            with self.lock:
+                os.replace(temporary, self.clone_card_size_path)
+        except OSError as exc:
+            raise BackupStatusError(
+                f"could not save clone card capacity: {exc}"
+            ) from exc
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
+        return self.status()
 
     @staticmethod
     def _flatten_block_devices(devices, parent=None):
@@ -548,6 +644,13 @@ class BackupManager:
         return {
             "checked_at": now,
             "health": health,
+            "settings": {
+                "clone_card_nominal_gb": configuration["clone_card_nominal_gb"],
+                "root_used_max_gib": configuration["root_used_max_gib"],
+                "clone_card_nominal_gb_options": list(
+                    self.CLONE_CARD_NOMINAL_GB_OPTIONS
+                ),
+            },
             "borg": borg,
             "exfat_snapshot": exfat_snapshot,
             "openwrt": openwrt,

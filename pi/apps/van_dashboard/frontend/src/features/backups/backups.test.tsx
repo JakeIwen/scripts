@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { fetchBackupStatus } from './api';
@@ -59,6 +59,7 @@ function controlMocks(): BackupControls {
     start: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn().mockResolvedValue(undefined),
     clone: vi.fn().mockResolvedValue(undefined),
+    setCloneCardNominalGb: vi.fn().mockResolvedValue(undefined),
     reconcile: vi.fn(),
   };
 }
@@ -83,6 +84,11 @@ describe('backups feature', () => {
       bytesProcessed: 1_073_741_824,
     });
     expect(status.hotswaps[0]).toMatchObject({ label: 'hotspare-a', attached: true });
+    expect(status.settings).toEqual({
+      cloneCardNominalGb: 64,
+      rootUsedMaxGib: 52,
+      cloneCardNominalGbOptions: [32, 64, 128, 256],
+    });
   });
 
   it('rejects unsupported aggregate health states', () => {
@@ -91,6 +97,16 @@ describe('backups feature', () => {
     backups.health = 'perfect';
     expect(() => decodeBackupStatusResponse(payload)).toThrow(
       'backups.health has an unsupported value',
+    );
+  });
+
+  it('rejects unsupported clone-card capacities', () => {
+    const payload = backupStatusPayload();
+    const backups = payload.backups as Record<string, unknown>;
+    const settings = backups.settings as Record<string, unknown>;
+    settings.clone_card_nominal_gb = 512;
+    expect(() => decodeBackupStatusResponse(payload)).toThrow(
+      'backups.settings.clone_card_nominal_gb has an unsupported value',
     );
   });
 
@@ -136,6 +152,22 @@ describe('backups feature', () => {
     for (const button of screen.getAllByRole('button', { name: 'Clone now' })) {
       expect(button).toBeDisabled();
     }
+  });
+
+  it('selects a persisted bootable clone-card capacity', () => {
+    const resource = backupResource();
+    const controls = controlMocks();
+    render(<BackupsSheet open onClose={vi.fn()} resource={resource} controls={controls} />);
+
+    const select = screen.getByRole('combobox', { name: 'Bootable clone card capacity' });
+    expect(select).toHaveValue('64');
+    expect(screen.getByText('Warn above 52 GiB root usage')).toBeInTheDocument();
+    expect(
+      screen.getAllByRole('option').map((option) => (option as HTMLOptionElement).value),
+    ).toEqual(['32', '64', '128', '256']);
+
+    fireEvent.change(select, { target: { value: '128' } });
+    expect(controls.setCloneCardNominalGb).toHaveBeenCalledWith(128);
   });
 
   it('shows an authoritative graceful-stop state and cleanup consequences', () => {

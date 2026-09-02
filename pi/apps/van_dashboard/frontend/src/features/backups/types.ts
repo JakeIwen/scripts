@@ -3,6 +3,13 @@ export type BackupOperationStatus = 'idle' | 'running' | 'complete' | 'error' | 
 export type BackupOperationKind = 'clone' | 'borg' | 'exfat';
 export type BackupStopStatus = 'idle' | 'running' | 'complete' | 'error';
 export type BackupStopKind = 'borg' | 'exfat';
+export type CloneCardNominalGb = 32 | 64 | 128 | 256;
+
+export interface BackupSettings {
+  cloneCardNominalGb: CloneCardNominalGb;
+  rootUsedMaxGib: number;
+  cloneCardNominalGbOptions: CloneCardNominalGb[];
+}
 
 export interface BackupProgress {
   phase: string;
@@ -71,6 +78,7 @@ export interface BackupStopOperation {
 export interface BackupStatus {
   checkedAt: number;
   health: BackupHealth;
+  settings: BackupSettings;
   borg: BackupEvidence;
   exfatSnapshot: BackupEvidence;
   openwrt: BackupEvidence;

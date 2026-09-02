@@ -879,6 +879,28 @@ def api_backups():
     return response
 
 
+@app.route("/api/backups/settings/clone-card-size", methods=["POST"])
+def api_backup_clone_card_size():
+    if request.args or not _exact_form(("nominal_gb",)):
+        return api_error("clone card capacity requires one nominal_gb value", 400)
+    try:
+        status = backups.set_clone_card_nominal_gb(request.form["nominal_gb"])
+    except ValueError as exc:
+        return api_error(str(exc), 400)
+    except BackupStatusError as exc:
+        return api_error(f"could not update backup settings: {exc}", 503)
+    nominal_gb = status["settings"]["clone_card_nominal_gb"]
+    response = jsonify(
+        {
+            "ok": True,
+            "message": f"Bootable clone card capacity set to {nominal_gb}GB",
+            "backups": status,
+        }
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.route("/api/backups/clone", methods=["POST"])
 def api_backup_clone():
     if not _exact_form(("target",)):

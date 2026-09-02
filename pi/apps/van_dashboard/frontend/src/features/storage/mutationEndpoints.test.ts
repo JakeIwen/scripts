@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { startBackup, startBackupClone, stopBackup } from '../backups/api';
+import { setCloneCardNominalGb, startBackup, startBackupClone, stopBackup } from '../backups/api';
 import { backupStatusPayload } from '../backups/testFixtures';
 import { discoverUsbPorts, recoverUsb2, startUsbPortAction } from '../usb/api';
 import { usbStatusPayload } from '../usb/testFixtures';
@@ -41,6 +41,7 @@ describe('storage, USB, and backup mutation forms', () => {
       jsonResponse(backups, 'Borg stopping'),
       jsonResponse(backups, 'EXFAT stopping'),
       jsonResponse(backups, 'clone started'),
+      jsonResponse(backups, 'capacity updated'),
     ];
     const fetchMock = vi.spyOn(globalThis, 'fetch');
     responses.forEach((response) => fetchMock.mockResolvedValueOnce(response));
@@ -57,6 +58,7 @@ describe('storage, USB, and backup mutation forms', () => {
     await stopBackup('borg');
     await stopBackup('exfat');
     await startBackupClone('hotspare-a');
+    await setCloneCardNominalGb(128);
 
     expect(
       fetchMock.mock.calls.map(([path, options]) => [
@@ -76,6 +78,7 @@ describe('storage, USB, and backup mutation forms', () => {
       ['/api/backups/borg/stop', ''],
       ['/api/backups/exfat/stop', ''],
       ['/api/backups/clone', 'target=hotspare-a'],
+      ['/api/backups/settings/clone-card-size', 'nominal_gb=128'],
     ]);
     for (const [, options] of fetchMock.mock.calls) {
       expect(options).toMatchObject({

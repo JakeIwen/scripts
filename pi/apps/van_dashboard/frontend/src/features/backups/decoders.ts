@@ -15,10 +15,12 @@ import type {
   BackupOperationStatus,
   BackupProgress,
   BackupStatus,
+  BackupSettings,
   BackupStopKind,
   BackupStopOperation,
   BackupStopStatus,
   HotspareStatus,
+  CloneCardNominalGb,
   TimeMachineStatus,
 } from './types';
 
@@ -63,6 +65,41 @@ function numberArray(value: unknown, label: string): number[] {
   return arrayValue(value, label).map((item, index) =>
     nonnegativeInteger(item, `${label}[${index}]`),
   );
+}
+
+const CLONE_CARD_NOMINAL_GB_OPTIONS = [32, 64, 128, 256] as const;
+
+function cloneCardNominalGb(value: unknown, label: string): CloneCardNominalGb {
+  const number = nonnegativeInteger(value, label);
+  if (!CLONE_CARD_NOMINAL_GB_OPTIONS.includes(number as CloneCardNominalGb)) {
+    throw new TypeError(`${label} has an unsupported value: ${number}`);
+  }
+  return number as CloneCardNominalGb;
+}
+
+function decodeSettings(value: unknown): BackupSettings {
+  const object = objectValue(value, 'backups.settings');
+  const options = arrayValue(
+    object.clone_card_nominal_gb_options,
+    'backups.settings.clone_card_nominal_gb_options',
+  ).map((item, index) =>
+    cloneCardNominalGb(item, `backups.settings.clone_card_nominal_gb_options[${index}]`),
+  );
+  const selected = cloneCardNominalGb(
+    object.clone_card_nominal_gb,
+    'backups.settings.clone_card_nominal_gb',
+  );
+  if (!options.includes(selected)) {
+    throw new TypeError('backups.settings must include the selected clone card capacity');
+  }
+  return {
+    cloneCardNominalGb: selected,
+    rootUsedMaxGib: nonnegativeInteger(
+      object.root_used_max_gib,
+      'backups.settings.root_used_max_gib',
+    ),
+    cloneCardNominalGbOptions: options,
+  };
 }
 
 function decodeProgress(value: unknown, label: string): BackupProgress | null {
@@ -185,6 +222,7 @@ export function decodeBackupStatusResponse(value: unknown): BackupStatus {
   return {
     checkedAt: nonnegativeInteger(backups.checked_at, 'backups.checked_at'),
     health: oneOf(backups.health, HEALTH_STATES, 'backups.health'),
+    settings: decodeSettings(backups.settings),
     borg: decodeEvidence(backups.borg, 'backups.borg'),
     exfatSnapshot: decodeEvidence(backups.exfat_snapshot, 'backups.exfat_snapshot'),
     openwrt: decodeEvidence(backups.openwrt, 'backups.openwrt'),

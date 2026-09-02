@@ -1,12 +1,13 @@
 import { useCallback, useRef, useState } from 'react';
 
 import { useSingleFlightAction } from '../../hooks/useSingleFlightAction';
-import { startBackup, startBackupClone, stopBackup } from './api';
+import { setCloneCardNominalGb, startBackup, startBackupClone, stopBackup } from './api';
 import type {
   BackupOperation,
   BackupStatus,
   BackupStopKind,
   BackupStopOperation,
+  CloneCardNominalGb,
   HotspareStatus,
 } from './types';
 
@@ -29,6 +30,7 @@ export interface BackupControls {
   start: (kind: BackupStopKind) => Promise<void>;
   stop: (kind: BackupStopKind, status: BackupStatus) => Promise<void>;
   clone: (target: HotspareStatus) => Promise<void>;
+  setCloneCardNominalGb: (value: CloneCardNominalGb) => Promise<void>;
   reconcile: (status: BackupStatus | null) => void;
 }
 
@@ -186,6 +188,13 @@ export function useBackupControls(
     [confirm, perform],
   );
 
+  const setCardCapacity = useCallback(
+    async (value: CloneCardNominalGb): Promise<void> => {
+      await perform(() => setCloneCardNominalGb(value));
+    },
+    [perform],
+  );
+
   return {
     running,
     blocked: running || uncertainOutcome || pending !== null || pendingStop !== null,
@@ -197,6 +206,7 @@ export function useBackupControls(
     start,
     stop,
     clone,
+    setCloneCardNominalGb: setCardCapacity,
     reconcile,
   };
 }

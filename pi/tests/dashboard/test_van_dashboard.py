@@ -3146,6 +3146,7 @@ class BackupManagerTests(unittest.TestCase):
                 "EXFAT_SNAPSHOT_STALE_HOURS=48\n"
                 "OPENWRT_BACKUP_STALE_HOURS=72\n"
                 "CLONE_STALE_FACTOR=2\n"
+                "CLONE_CARD_NOMINAL_GB=64\n"
             )
         stamp_times = {
             "borg_ok": self.NOW - 3600,
@@ -3228,7 +3229,50 @@ class BackupManagerTests(unittest.TestCase):
         self.assertEqual(status["time_machine"]["last_backup_at"], self.NOW - 1800)
         self.assertTrue(status["time_machine"]["running"])
         self.assertEqual(status["time_machine"]["progress_percent"], 37.5)
+        self.assertEqual(
+            status["settings"],
+            {
+                "clone_card_nominal_gb": 64,
+                "root_used_max_gib": 52,
+                "clone_card_nominal_gb_options": [32, 64, 128, 256],
+            },
+        )
         self.assertEqual(status["health"], "running")
+
+    def test_clone_card_capacity_is_validated_persisted_and_reported(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            config, stamps, bundle = self.make_files(tempdir, tm_running=False)
+            setting = os.path.join(tempdir, "clone_card_nominal_gb")
+            manager = dashboard.BackupManager(
+                config=config,
+                stamp_dir=stamps,
+                clone_card_size_path=setting,
+                time_machine_bundle=bundle,
+                command=lambda args, timeout: SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(self.lsblk_payload()),
+                    stderr="",
+                ),
+                wall_clock=lambda: self.NOW,
+                process_root=os.path.join(tempdir, "proc"),
+            )
+
+            updated = manager.set_clone_card_nominal_gb("128")
+            self.assertEqual(Path(setting).read_text(encoding="utf-8"), "128\n")
+            self.assertEqual(updated["settings"]["clone_card_nominal_gb"], 128)
+            self.assertEqual(updated["settings"]["root_used_max_gib"], 104)
+            for invalid in ("", "16", "032", "512", "64; touch /tmp/nope"):
+                with self.subTest(invalid=invalid):
+                    with self.assertRaisesRegex(ValueError, "32, 64, 128, or 256"):
+                        manager.set_clone_card_nominal_gb(invalid)
+            self.assertEqual(Path(setting).read_text(encoding="utf-8"), "128\n")
+
+            with open(setting, "w", encoding="utf-8") as handle:
+                handle.write("unsupported\n")
+            with self.assertRaisesRegex(
+                dashboard.BackupStatusError, "capacity setting is invalid"
+            ):
+                manager.status()
 
     def test_detects_scheduled_borg_and_exfat_parents_from_exact_proc_argv(self):
         with tempfile.TemporaryDirectory() as tempdir:
@@ -4565,6 +4609,11 @@ class DashboardRouteTests(unittest.TestCase):
         state = {
             "checked_at": 123,
             "health": "good",
+            "settings": {
+                "clone_card_nominal_gb": 64,
+                "root_used_max_gib": 52,
+                "clone_card_nominal_gb_options": [32, 64, 128, 256],
+            },
             "borg": {"last_success_at": 100, "stale": False},
             "exfat_snapshot": {"last_success_at": 100, "stale": False},
             "hotswaps": [],
@@ -4597,6 +4646,19 @@ class DashboardRouteTests(unittest.TestCase):
                     raise ValueError("unknown hotspare target")
                 return {**state, "operation": {"status": "running", "target": target}}
 
+            def set_clone_card_nominal_gb(self, value):
+                calls.append(("capacity", value))
+                if value not in ("32", "64", "128", "256"):
+                    raise ValueError("unsupported clone card capacity")
+                return {
+                    **state,
+                    "settings": {
+                        **state["settings"],
+                        "clone_card_nominal_gb": int(value),
+                        "root_used_max_gib": int(value) * 13 // 16,
+                    },
+                }
+
             def request_stop(self, kind):
                 calls.append(("stop", kind))
                 return {
@@ -4612,6 +4674,21 @@ class DashboardRouteTests(unittest.TestCase):
             started = client.post(
                 "/api/backups/clone",
                 data={"target": "hotspare-a"},
+                headers={"X-Van-Dashboard": "1"},
+            )
+            capacity = client.post(
+                "/api/backups/settings/clone-card-size",
+                data={"nominal_gb": "128"},
+                headers={"X-Van-Dashboard": "1"},
+            )
+            bad_capacity = client.post(
+                "/api/backups/settings/clone-card-size",
+                data={"nominal_gb": "512"},
+                headers={"X-Van-Dashboard": "1"},
+            )
+            capacity_extra = client.post(
+                "/api/backups/settings/clone-card-size",
+                data={"nominal_gb": "64", "path": "/dev/sda"},
                 headers={"X-Van-Dashboard": "1"},
             )
             borg = client.post(
@@ -4670,6 +4747,14 @@ class DashboardRouteTests(unittest.TestCase):
                     "Origin": "https://example.invalid",
                 },
             )
+            capacity_cross_origin = client.post(
+                "/api/backups/settings/clone-card-size",
+                data={"nominal_gb": "64"},
+                headers={
+                    "X-Van-Dashboard": "1",
+                    "Origin": "https://example.invalid",
+                },
+            )
             stop_cross_origin = client.post(
                 "/api/backups/borg/stop",
                 headers={
@@ -4684,6 +4769,13 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(status.headers["Cache-Control"], "no-store")
         self.assertEqual(started.status_code, 202)
         self.assertEqual(started.headers["Cache-Control"], "no-store")
+        self.assertEqual(capacity.status_code, 200)
+        self.assertEqual(capacity.headers["Cache-Control"], "no-store")
+        self.assertEqual(
+            capacity.json["backups"]["settings"]["clone_card_nominal_gb"], 128
+        )
+        self.assertEqual(bad_capacity.status_code, 400)
+        self.assertEqual(capacity_extra.status_code, 400)
         self.assertEqual(borg.status_code, 202)
         self.assertEqual(borg.headers["Cache-Control"], "no-store")
         self.assertEqual(exfat.status_code, 202)
@@ -4701,11 +4793,14 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(cross_origin.status_code, 403)
         self.assertEqual(backup_cross_origin.status_code, 403)
         self.assertEqual(stop_cross_origin.status_code, 403)
+        self.assertEqual(capacity_cross_origin.status_code, 403)
         self.assertEqual(
             calls,
             [
                 ("status",),
                 ("clone", "hotspare-a"),
+                ("capacity", "128"),
+                ("capacity", "512"),
                 ("borg",),
                 ("exfat",),
                 ("stop", "borg"),

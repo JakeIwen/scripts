@@ -8,7 +8,13 @@ import {
   progressLabel,
   timeMachineLabel,
 } from './presentation';
-import type { BackupEvidence, BackupStatus, HotspareStatus, TimeMachineStatus } from './types';
+import type {
+  BackupEvidence,
+  BackupSettings,
+  BackupStatus,
+  HotspareStatus,
+  TimeMachineStatus,
+} from './types';
 import './backups.css';
 
 export interface BackupsSheetProps {
@@ -188,13 +194,47 @@ function TimeMachineCard({ status }: { status: TimeMachineStatus }) {
   );
 }
 
+function CloneCardCapacity({
+  settings,
+  controls,
+}: {
+  settings: BackupSettings;
+  controls: BackupControls;
+}) {
+  return (
+    <div className="backup-capacity-control">
+      <label>
+        <span>Clone card size</span>
+        <select
+          aria-label="Bootable clone card capacity"
+          value={settings.cloneCardNominalGb}
+          disabled={controls.blocked}
+          onChange={(event) => {
+            const selected = settings.cloneCardNominalGbOptions.find(
+              (option) => String(option) === event.currentTarget.value,
+            );
+            if (selected !== undefined) void controls.setCloneCardNominalGb(selected);
+          }}
+        >
+          {settings.cloneCardNominalGbOptions.map((option) => (
+            <option value={option} key={option}>
+              {option} GB
+            </option>
+          ))}
+        </select>
+      </label>
+      <small>Warn above {settings.rootUsedMaxGib} GiB root usage</small>
+    </div>
+  );
+}
+
 export function BackupsSheet({ open, onClose, resource, controls }: BackupsSheetProps) {
   const status = resource.data;
   return (
     <BottomSheet
       open={open}
       title="Backups"
-      description="Read-only freshness, runtime progress, hotspares, and Time Machine evidence."
+      description="Freshness, runtime progress, hotspares, and Time Machine evidence."
       onClose={onClose}
     >
       <header className="backups-sheet__summary">
@@ -260,7 +300,11 @@ export function BackupsSheet({ open, onClose, resource, controls }: BackupsSheet
             <h3 id="backup-hotspares-title">Bootable hotspares</h3>
             <p>Configured labels, cadence, attachment, and clone age.</p>
           </div>
-          <span>{controls.blocked ? 'Controls blocked pending status' : 'Guarded controls'}</span>
+          {status ? (
+            <CloneCardCapacity settings={status.settings} controls={controls} />
+          ) : (
+            <span>Loading capacity…</span>
+          )}
         </div>
         <div className="backup-hotspare-grid">
           {status?.hotswaps.length ? (

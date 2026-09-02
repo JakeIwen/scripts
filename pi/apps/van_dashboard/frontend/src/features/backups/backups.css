@@ -243,6 +243,36 @@
   color: var(--good);
 }
 
+.backup-capacity-control {
+  display: grid;
+  justify-items: end;
+  gap: 5px;
+}
+
+.backup-capacity-control label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.backup-capacity-control select {
+  min-width: 104px;
+  min-height: 40px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #0f181e;
+  color: var(--text);
+}
+
+.backup-capacity-control small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .backup-hotspare dl {
   display: grid;
   gap: 6px;
@@ -286,5 +316,14 @@
   .backup-evidence-grid,
   .backup-hotspare-grid {
     grid-template-columns: 1fr;
+  }
+
+  .backup-capacity-control {
+    width: 100%;
+    justify-items: stretch;
+  }
+
+  .backup-capacity-control label {
+    justify-content: space-between;
   }
 }

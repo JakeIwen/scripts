@@ -1,7 +1,12 @@
 import { getJson, postForm } from '../../api/client';
 import { objectValue, stringValue } from '../../api/validation';
 import { decodeBackupStatusResponse } from './decoders';
-import type { BackupMutationResult, BackupStatus, BackupStopKind } from './types';
+import type {
+  BackupMutationResult,
+  BackupStatus,
+  BackupStopKind,
+  CloneCardNominalGb,
+} from './types';
 
 export async function fetchBackupStatus(signal: AbortSignal): Promise<BackupStatus> {
   const payload = await getJson('/api/backups', signal);
@@ -34,5 +39,14 @@ export async function startBackupClone(target: string): Promise<BackupMutationRe
   return decodeMutation(
     await postForm('/api/backups/clone', { target: label }),
     'backup clone response',
+  );
+}
+
+export async function setCloneCardNominalGb(
+  nominalGb: CloneCardNominalGb,
+): Promise<BackupMutationResult> {
+  return decodeMutation(
+    await postForm('/api/backups/settings/clone-card-size', { nominal_gb: nominalGb }),
+    'clone card capacity response',
   );
 }

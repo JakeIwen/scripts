@@ -17,6 +17,11 @@ export function backupStatusPayload(running = false): Record<string, unknown> {
     backups: {
       checked_at: 1_700_000_100,
       health: running ? 'running' : 'attention',
+      settings: {
+        clone_card_nominal_gb: 64,
+        root_used_max_gib: 52,
+        clone_card_nominal_gb_options: [32, 64, 128, 256],
+      },
       borg: {
         last_success_at: 1_699_900_000,
         stale_hours: 48,

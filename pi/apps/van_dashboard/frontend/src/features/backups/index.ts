@@ -15,6 +15,8 @@ export type {
   BackupOperation,
   BackupProgress,
   BackupStatus,
+  BackupSettings,
+  CloneCardNominalGb,
   HotspareStatus,
   TimeMachineStatus,
 } from './types';

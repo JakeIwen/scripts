@@ -1,5 +1,7 @@
-from pathlib import Path
+import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -7,6 +9,46 @@ BACKUP_DIR = REPOSITORY_ROOT / "pi" / "scripts" / "backup"
 
 
 class BackupDeploymentTests(unittest.TestCase):
+    def test_clone_fit_warning_uses_configured_64gb_media_capacity(self):
+        config_path = BACKUP_DIR / "backup_conf.sh"
+        watchdog = (BACKUP_DIR / "backup_watchdog.sh").read_text(encoding="utf-8")
+        result = subprocess.run(
+            [
+                "/bin/bash",
+                "-c",
+                'source "$1"; printf "%s %s\\n" '
+                '"$CLONE_CARD_NOMINAL_GB" "$ROOT_USED_MAX_GB"',
+                "test",
+                str(config_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.stdout, "64 52\n")
+        self.assertIn("${CLONE_CARD_NOMINAL_GB}GB clone cards", watchdog)
+        self.assertNotIn("32GB", watchdog)
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            setting = Path(tempdir) / "clone_card_nominal_gb"
+            setting.write_text("128\n", encoding="utf-8")
+            configured = subprocess.run(
+                [
+                    "/bin/bash",
+                    "-c",
+                    'source "$1"; printf "%s %s\\n" '
+                    '"$CLONE_CARD_NOMINAL_GB" "$ROOT_USED_MAX_GB"',
+                    "test",
+                    str(config_path),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                env={"CLONE_CARD_NOMINAL_GB_FILE": str(setting)},
+            )
+        self.assertEqual(configured.stdout, "128 104\n")
+
     def test_ubnt_snapshot_is_versioned_by_the_existing_borg_job(self):
         backup = (BACKUP_DIR / "pi_backup.sh").read_text(encoding="utf-8")
         ubnt_call = backup.index("/home/pi/scripts/backup/ubnt_backup.sh")

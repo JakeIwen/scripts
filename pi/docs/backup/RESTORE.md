@@ -160,5 +160,11 @@ resumed on retry and is never treated as a completed restore point.
 EXFAT512 snapshot exists within 48h, the `hdd1tb` target is absent, no verified
 OpenWrt or UBNT snapshot exists or either is stale, a clone exceeds 2× its
 interval, a card was never cloned, bigboi is unmounted, or free space < 100GB.
+It also warns before root usage outgrows the bootable clone cards. Configure
+their nominal capacity from the Backups pane using the 32/64/128/256GB selector.
+The dashboard stores that validated selection in
+`/home/pi/backups/clone_card_nominal_gb`; `CLONE_CARD_NOMINAL_GB` in
+`backup_conf.sh` remains the default when no selection has been saved. The
+default 64GB setting produces a conservative 52GiB root-usage limit.
 Silence = healthy, but the nightly "vanpi backup OK" ping (min priority) includes
 per-card clone age if you want positive confirmation.

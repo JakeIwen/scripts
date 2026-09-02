@@ -94,11 +94,11 @@ for entry in "${CLONE_TARGETS[@]}"; do
   fi
 done
 
-# all spare cards are 32GB or 64GB — warn before the system no longer fits the small ones
-used_gb=$(( $(df -k --output=used / | tail -1) / 1024 / 1024 ))
-status+="rootfs: ${used_gb}GB used. "
-[ "$used_gb" -le "$ROOT_USED_MAX_GB" ] \
-  || problems+=("rootfs holds ${used_gb}GB (limit ${ROOT_USED_MAX_GB}GB — 32GB cards may stop fitting clones)")
+# Warn before the system outgrows the configured bootable clone-card capacity.
+used_gib=$(( $(df -k --output=used / | tail -1) / 1024 / 1024 ))
+status+="rootfs: ${used_gib}GiB used. "
+[ "$used_gib" -le "$ROOT_USED_MAX_GB" ] \
+  || problems+=("rootfs uses ${used_gib}GiB (limit ${ROOT_USED_MAX_GB}GiB for configured ${CLONE_CARD_NOMINAL_GB}GB clone cards)")
 
 # backup disk presence + free space
 src=$(findmnt -no SOURCE "$BACKUP_MNT" 2>/dev/null)

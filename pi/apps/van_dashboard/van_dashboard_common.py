@@ -137,6 +137,10 @@ BACKUP_CONF = os.environ.get(
 BACKUP_STAMP_DIR = os.environ.get(
     "VAN_DASHBOARD_BACKUP_STAMP_DIR", "/home/pi/backups/stamps"
 )
+BACKUP_CLONE_CARD_SIZE_PATH = os.environ.get(
+    "VAN_DASHBOARD_BACKUP_CLONE_CARD_SIZE_PATH",
+    "/home/pi/backups/clone_card_nominal_gb",
+)
 BACKUP_CLONE_NOW = os.environ.get(
     "VAN_DASHBOARD_BACKUP_CLONE_NOW", "/home/pi/scripts/backup/clone_now.sh"
 )

@@ -94,7 +94,20 @@ NTFY_ON_SUCCESS=1      # 0 = only notify on failures/watchdog findings
 BORG_STALE_HOURS=48    # watchdog alerts past this
 CLONE_STALE_FACTOR=2   # watchdog alerts when clone age > factor * interval
 MIN_FREE_GB=100        # watchdog alerts when bigboi free space drops below this
-ROOT_USED_MAX_GB=26    # watchdog alerts before the system outgrows a 32GB clone card
+# Default nominal capacity shared by the live boot card and bootable clone
+# cards. The dashboard selector persists an override in the data file below.
+# Keep the root-usage warning at the original 26/32 safety ratio so changing
+# capacity adjusts the clone-fit guard while retaining filesystem-growth headroom.
+CLONE_CARD_NOMINAL_GB=64
+CLONE_CARD_NOMINAL_GB_FILE=${CLONE_CARD_NOMINAL_GB_FILE:-/home/pi/backups/clone_card_nominal_gb}
+if [[ -f "$CLONE_CARD_NOMINAL_GB_FILE" && ! -L "$CLONE_CARD_NOMINAL_GB_FILE" ]]; then
+  configured_clone_card_nominal_gb=$(< "$CLONE_CARD_NOMINAL_GB_FILE")
+  case "$configured_clone_card_nominal_gb" in
+    32|64|128|256) CLONE_CARD_NOMINAL_GB=$configured_clone_card_nominal_gb ;;
+  esac
+  unset configured_clone_card_nominal_gb
+fi
+ROOT_USED_MAX_GB=$((CLONE_CARD_NOMINAL_GB * 13 / 16))
 UNMOUNT_AFTER=1        # when pi_backup mounted bigboi itself, unmount it afterward;
                        # preserve a mount that was already present when the job began
 
