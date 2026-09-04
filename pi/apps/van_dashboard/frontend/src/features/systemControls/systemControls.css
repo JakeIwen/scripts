@@ -55,15 +55,3 @@
   background: #1d302b;
   color: #bcebd5;
 }
-
-.system-controls__status {
-  max-width: 180px;
-  color: var(--dim);
-  font-size: 11px;
-  line-height: 1.25;
-  text-align: right;
-}
-
-.system-controls__status--error {
-  color: var(--bad);
-}

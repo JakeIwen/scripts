@@ -31,6 +31,7 @@ describe('SystemControls', () => {
     expect(screen.getByRole('button', { name: 'Restart Pi' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Power down Pi' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Arrange tiles' })).toBeEnabled();
-    expect(screen.getByText('Dashboard disconnected while vanpi reboots')).toBeInTheDocument();
+    const announcement = screen.getByText('Dashboard disconnected while vanpi reboots');
+    expect(announcement).toHaveClass('visually-hidden');
   });
 });

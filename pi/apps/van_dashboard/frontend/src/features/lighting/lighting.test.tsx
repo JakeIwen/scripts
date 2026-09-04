@@ -273,6 +273,22 @@ describe('lighting views', () => {
     expect(onOpen).toHaveBeenCalledOnce();
   });
 
+  it('announces background refreshes without inserting a visible layout row', () => {
+    render(
+      <LightingTile
+        status={decodeLightingStatus(lightingPayload())}
+        error={null}
+        refreshing
+        onOpen={vi.fn()}
+        controls={controls()}
+      />,
+    );
+
+    const announcement = screen.getByText('Refreshing lights…');
+    expect(announcement).toHaveClass('visually-hidden');
+    expect(screen.getByLabelText('Quick room controls')).toBeVisible();
+  });
+
   it('shows supported color data and disables all mutations during a single-flight action', () => {
     const status = decodeLightingStatus(lightingPayload());
     const onRefresh = vi.fn().mockResolvedValue(status);

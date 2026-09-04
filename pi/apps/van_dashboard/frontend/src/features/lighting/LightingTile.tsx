@@ -1,5 +1,5 @@
 import { StatusPill } from '../../components/StatusPill';
-import { Tile } from '../../components/Tile';
+import { Tile, TileStatusAnnouncement } from '../../components/Tile';
 import { LightingSlider } from './LightingSlider';
 import {
   averageGroupBrightness,
@@ -119,12 +119,15 @@ export function LightingTile({ status, error, refreshing, onOpen, controls }: Li
           <QuickRoomControl group={group} controls={controls} key={group.id} />
         ))}
       </div>
-      {error && <p className="lighting-stale-error">Refresh failed · {error.message}</p>}
-      {(controls.running || refreshing) && (
-        <p className="lighting-control-status" role="status">
-          {controls.running ? 'Applying lighting change…' : 'Refreshing lights…'}
-        </p>
-      )}
+      <TileStatusAnnouncement>
+        {controls.running
+          ? 'Applying lighting change…'
+          : refreshing
+            ? 'Refreshing lights…'
+            : error
+              ? `Refresh failed · ${error.message}`
+              : ''}
+      </TileStatusAnnouncement>
     </Tile>
   );
 }

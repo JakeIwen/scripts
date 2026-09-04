@@ -182,6 +182,24 @@ describe('Sonos views', () => {
     expect(onOpen).toHaveBeenCalledOnce();
   });
 
+  it('announces playback refreshes without adding a visible tile row', () => {
+    const status = decodeSonosStatus(sonosPayload());
+    render(
+      <SonosTile
+        status={status}
+        error={null}
+        refreshing
+        progress={projectTrackProgress(status.nowPlaying, 1_000, 6_000)}
+        controls={controlMocks()}
+        onOpen={vi.fn()}
+      />,
+    );
+
+    const announcement = screen.getByText('Refreshing playback…');
+    expect(announcement).toHaveClass('visually-hidden');
+    expect(screen.getByRole('group', { name: 'Sonos playback controls' })).toBeVisible();
+  });
+
   it('renders functional transport, grouping, mute, selection, and volume controls', () => {
     const status = decodeSonosStatus(sonosPayload());
     const progress = projectTrackProgress(status.nowPlaying, 1_000, 6_000);

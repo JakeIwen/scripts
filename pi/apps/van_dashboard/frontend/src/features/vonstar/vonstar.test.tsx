@@ -220,7 +220,7 @@ describe('vOnStar controls', () => {
     ]);
     for (const button of actions) expect(button).toHaveClass('vonstar-action');
 
-    const lastAction = screen.getByRole('status');
+    const lastAction = screen.getByText('Last action').closest('[role="status"]');
     expect(lastAction).toHaveClass('vonstar-last-action');
     expect(lastAction).toHaveTextContent('Last action');
     expect(lastAction).toHaveTextContent('None');
@@ -248,7 +248,18 @@ describe('vOnStar controls', () => {
     render(<VonstarTile controller={busy} onOpen={vi.fn()} />);
     expect(screen.getByText('Busy')).toBeVisible();
     expect(screen.getByText(/another guarded vehicle operation/i)).toBeVisible();
-    expect(screen.getByRole('status')).toHaveTextContent('Unlock Front · WORKING');
+    expect(screen.getByText('Last action').closest('[role="status"]')).toHaveTextContent(
+      'Unlock Front · WORKING',
+    );
+  });
+
+  it('keeps stale refresh errors out of tile layout flow', () => {
+    const controller = readyController();
+    controller.error = new Error('temporary status timeout');
+    render(<VonstarTile controller={controller} onOpen={vi.fn()} />);
+
+    const announcement = screen.getByText('Status refresh failed · temporary status timeout');
+    expect(announcement).toHaveClass('visually-hidden');
   });
 
   it('does one initial GET, no automatic access check, and no polling', async () => {

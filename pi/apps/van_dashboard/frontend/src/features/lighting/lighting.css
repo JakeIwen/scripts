@@ -127,17 +127,6 @@
   opacity: 0.68;
 }
 
-.lighting-control-status,
-.lighting-stale-error {
-  margin-top: 12px;
-  color: var(--dim);
-  font-size: 12px;
-}
-
-.lighting-stale-error {
-  color: var(--warning);
-}
-
 .lighting-sheet__toolbar,
 .lighting-sheet__actions,
 .lighting-overview,

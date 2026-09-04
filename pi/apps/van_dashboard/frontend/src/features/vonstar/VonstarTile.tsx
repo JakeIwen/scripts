@@ -1,5 +1,5 @@
 import { StatusPill } from '../../components/StatusPill';
-import { Tile } from '../../components/Tile';
+import { Tile, TileStatusAnnouncement } from '../../components/Tile';
 import { actionConfirmation, attemptLabel, describeVonstar, resultAttempt } from './presentation';
 import {
   VONSTAR_ACTION_NAMES,
@@ -63,9 +63,11 @@ export function VonstarTile({
         <span>Last action</span>
         <span>{attemptLabel(last)}</span>
       </div>
-      {controller.error && controller.status && (
-        <p className="vonstar-stale-error">Status refresh failed · {controller.error.message}</p>
-      )}
+      <TileStatusAnnouncement>
+        {controller.error && controller.status
+          ? `Status refresh failed · ${controller.error.message}`
+          : ''}
+      </TileStatusAnnouncement>
     </Tile>
   );
 }

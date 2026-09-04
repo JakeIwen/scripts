@@ -67,14 +67,9 @@ export function SystemControls({
           </button>
         </div>
       </div>
-      {(controls.error || controls.message) && (
-        <span
-          className={`system-controls__status ${controls.error ? 'system-controls__status--error' : ''}`}
-          aria-live="polite"
-        >
-          {controls.error ?? controls.message}
-        </span>
-      )}
+      <span className="visually-hidden" role="status" aria-live="polite">
+        {controls.error ?? controls.message ?? ''}
+      </span>
     </div>
   );
 }

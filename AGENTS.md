@@ -94,6 +94,12 @@ the interface, and retain the CAN-transmission safeguards below.
 - A CAN adapter may be connected to a live vehicle network. Do not transmit CAN
   frames unless explicitly requested and the target channel is verified.
 
+## Deployment commits
+
+- After a successful deployment from this repository, commit and push the
+  deployed repository changes once validation passes. Keep unrelated worktree
+  changes unstaged and out of that commit.
+
 ## Backup and disk tooling
 
 The active design is represented by:

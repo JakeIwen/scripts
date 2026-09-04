@@ -104,13 +104,6 @@
   white-space: nowrap;
 }
 
-.vonstar-stale-error {
-  position: relative;
-  z-index: 3;
-  color: var(--warning);
-  font-size: 12px;
-}
-
 .vonstar-sheet-toolbar,
 .vonstar-sheet-toolbar > div {
   display: flex;

@@ -1,4 +1,4 @@
-import { Tile } from '../../components/Tile';
+import { Tile, TileStatusAnnouncement } from '../../components/Tile';
 import type { SonosControls } from './controls';
 import { SonosTransportControls } from './SonosTransportControls';
 import type { SonosStatus, SonosTrackProgress } from './types';
@@ -86,8 +86,9 @@ export function SonosTile({
           <span style={{ width: `${progress.percent}%` }} />
         </div>
       )}
-      {error && <p className="sonos-stale-error">Refresh failed · {error.message}</p>}
-      {refreshing && <p className="sonos-control-hint">Refreshing playback…</p>}
+      <TileStatusAnnouncement>
+        {refreshing ? 'Refreshing playback…' : error ? `Refresh failed · ${error.message}` : ''}
+      </TileStatusAnnouncement>
     </Tile>
   );
 }

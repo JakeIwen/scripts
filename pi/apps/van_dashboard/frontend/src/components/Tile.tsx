@@ -86,3 +86,11 @@ export function ServiceLinkTile({ icon, title, detail, port }: ServiceLinkTilePr
     </a>
   );
 }
+
+export function TileStatusAnnouncement({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="visually-hidden" role="status" aria-live="polite">
+      {children}
+    </span>
+  );
+}
