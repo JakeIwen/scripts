@@ -9,6 +9,41 @@ BACKUP_DIR = REPOSITORY_ROOT / "pi" / "scripts" / "backup"
 
 
 class BackupDeploymentTests(unittest.TestCase):
+    def test_shared_job_lock_is_precreated_and_validated(self):
+        config = (BACKUP_DIR / "backup_conf.sh").read_text(encoding="utf-8")
+        abort = (BACKUP_DIR / "abort_backup.sh").read_text(encoding="utf-8")
+        tmpfiles = (
+            REPOSITORY_ROOT / "pi" / "tmpfiles.d" / "vanpi-backup.conf"
+        ).read_text(encoding="utf-8")
+        sync = (REPOSITORY_ROOT / "pi" / "sync_scripts.sh").read_text(
+            encoding="utf-8"
+        )
+        updater = (
+            REPOSITORY_ROOT / "pi" / "scripts" / "update_services.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            "f /run/lock/vanpi_backup.lock 0660 root pi -", tmpfiles
+        )
+        self.assertIn("validate_job_lock_file", config)
+        self.assertIn("JOB_LOCK_OWNER", config)
+        self.assertIn("JOB_LOCK_GROUP", config)
+        self.assertIn("JOB_LOCK_MODE", config)
+        self.assertLess(
+            config.index("validate_job_lock_file || return 1"),
+            config.index('exec 9>>"$JOB_LOCK"'),
+        )
+        self.assertIn('exec {job_lock_fd}<"$job_lock"', abort)
+        self.assertIn('"$flock_command" -n "$job_lock_fd"', abort)
+        self.assertNotIn('flock -n "$job_lock"', abort)
+        self.assertIn('tmpfiles="$dsc/pi/tmpfiles.d"', sync)
+        self.assertIn('"$staged_tmpfiles"', sync)
+        self.assertIn('sudo systemd-tmpfiles --create "$live_tmpfile"', updater)
+        self.assertLess(
+            updater.index('sudo systemd-tmpfiles --create "$live_tmpfile"'),
+            updater.index('cp -a "$staged_scripts/." "$live_scripts/"'),
+        )
+
     def test_clone_fit_warning_uses_configured_64gb_media_capacity(self):
         config_path = BACKUP_DIR / "backup_conf.sh"
         watchdog = (BACKUP_DIR / "backup_watchdog.sh").read_text(encoding="utf-8")

@@ -2,6 +2,7 @@
 dsc="/Users/jacobr/dev/scripts"
 repo_scripts="$dsc/pi/scripts"
 services="$dsc/pi/services"
+tmpfiles="$dsc/pi/tmpfiles.d"
 hooks="$dsc/pi/hooks"
 twilio="$dsc/pi/secrets/.twilio"
 configs="$dsc/pi/configs"
@@ -16,18 +17,20 @@ pi_ip='pi@vanpi.lan'
 local_stage="$(mktemp -d "/tmp/vanpi-sync.XXXXXX")" || exit 1
 staged_scripts="$local_stage/scripts"
 staged_services="$local_stage/services"
+staged_tmpfiles="$local_stage/tmpfiles.d"
 
 cleanup_local_stage() {
   rm -rf -- "$local_stage"
 }
 trap cleanup_local_stage EXIT
 
-/bin/mkdir -p "$staged_scripts" "$staged_services"
+/bin/mkdir -p "$staged_scripts" "$staged_services" "$staged_tmpfiles"
 /usr/bin/rsync -a \
   --exclude '__pycache__/' \
   --exclude '*.pyc' \
   "$repo_scripts/" "$staged_scripts/" || exit 1
 /usr/bin/rsync -a "$services/" "$staged_services/" || exit 1
+/usr/bin/rsync -a "$tmpfiles/" "$staged_tmpfiles/" || exit 1
 cp -a "$shared_sh/." "$staged_scripts/"
 python_stage="$staged_scripts/python-automation"
 mkdir -p "$python_stage"
@@ -47,7 +50,8 @@ ssh $mux $pi_ip true || { echo "can't reach $pi_ip"; exit 1; }
 cp_services() {
   local remote_stage="/tmp/systemd-tmp.$$"
   ssh $mux $pi_ip "mkdir -p '$remote_stage'" || return 1
-  scp $mux -r "$staged_services" "$staged_scripts" "$pi_ip:$remote_stage/" || return 1
+  scp $mux -r "$staged_services" "$staged_scripts" "$staged_tmpfiles" \
+    "$pi_ip:$remote_stage/" || return 1
   ssh $mux $pi_ip "bash '$remote_stage/scripts/update_services.sh' '$remote_stage'"
 }
 

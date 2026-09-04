@@ -137,6 +137,23 @@ unmounting — borg simply rolls back to its last checkpoint and the next parked
 retries. A restore aborted this way leaves the target card INCOMPLETE (you'll get a
 loud ntfy) — just re-run it when parked.
 
+Backup, clone, and restore jobs share `/run/lock/vanpi_backup.lock`. The
+`vanpi-backup.conf` systemd-tmpfiles rule creates this volatile lock at boot as
+`root:pi 0660`, allowing root-run jobs and pi-initiated lifecycle checks to use
+one root-owned inode even with `/run/lock` sticky-directory protections enabled.
+Lock acquisition fails closed if the file is missing, symlinked, or has different
+ownership or permissions. Status checks must open the existing lock read-only;
+do not use path-form `flock /run/lock/vanpi_backup.lock ...` as a probe because
+path-form flock may create a missing file under the caller's ownership.
+
+Verify or reconstruct the runtime lock configuration with:
+
+```bash
+sudo systemd-tmpfiles --create /etc/tmpfiles.d/vanpi-backup.conf
+stat -c '%A %U:%G %n' /run/lock/vanpi_backup.lock
+# Expected: -rw-rw---- root:pi /run/lock/vanpi_backup.lock
+```
+
 The dashboard can request a graceful user stop only for an exact running
 `pi_backup.sh` or `exfat_snapshot.sh` lock holder. It sends no emergency kill
 and refuses restores, hotspare initialization, and unrelated lock holders. A

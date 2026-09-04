@@ -25,6 +25,7 @@ kill_wait_seconds=${ABORT_BACKUP_EMERGENCY_KILL_WAIT_SECONDS:-3}
 user_grace_seconds=${ABORT_BACKUP_USER_GRACE_SECONDS:-120}
 borg_tool=${ABORT_BACKUP_BORG_TOOL:-/home/pi/scripts/backup/pi_backup.sh}
 exfat_tool=${ABORT_BACKUP_EXFAT_TOOL:-/home/pi/scripts/backup/exfat_snapshot.sh}
+flock_command=${ABORT_BACKUP_FLOCK:-/usr/bin/flock}
 if [[ ! "$grace_seconds" =~ ^[1-9][0-9]?$ ||
       ! "$kill_wait_seconds" =~ ^[1-9][0-9]?$ ||
       ! "$user_grace_seconds" =~ ^[1-9][0-9]{0,2}$ ]] ||
@@ -52,12 +53,25 @@ process_holds_job_lock() {
   return 1
 }
 
+if [[ -L "$job_lock" ]]; then
+  echo "ERROR: backup job lock is a symlink; refusing it" >&2
+  exit 1
+fi
 if [[ ! -f "$job_lock" ]]; then
   [[ -z "$user_kind" ]] && exit 0
   echo "ERROR: no active $user_kind backup lock was found" >&2
   exit 3
 fi
-if /usr/bin/flock -n "$job_lock" true 2>/dev/null; then
+# Open the existing inode without O_CREAT. Path-form flock may create a missing
+# file and can be denied by fs.protected_regular when /run/lock contains an
+# otherwise readable file owned by another user.
+job_lock_fd=
+if ! exec {job_lock_fd}<"$job_lock"; then
+  echo "ERROR: cannot open existing backup job lock" >&2
+  exit 1
+fi
+if "$flock_command" -n "$job_lock_fd"; then
+  "$flock_command" -u "$job_lock_fd" || exit 1
   [[ -z "$user_kind" ]] && exit 0
   echo "ERROR: no active $user_kind backup is holding the shared lock" >&2
   exit 3
@@ -80,7 +94,7 @@ if [[ -n "$user_kind" ]]; then
   echo "asking $user_kind backup (pid $pid) to stop at the user's request"
   kill -USR1 "$pid"
   stop_deadline=$((SECONDS + user_grace_seconds))
-  if ! /usr/bin/flock -w "$user_grace_seconds" "$job_lock" true; then
+  if ! "$flock_command" -w "$user_grace_seconds" "$job_lock_fd"; then
     echo "ERROR: $user_kind backup did not release its lock within ${user_grace_seconds}s" >&2
     exit 1
   fi
@@ -100,14 +114,14 @@ if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
 fi
 
 if (( ! emergency )); then
-  if ! /usr/bin/flock -w 60 "$job_lock" true; then
+  if ! "$flock_command" -w 60 "$job_lock_fd"; then
     echo "ERROR: backup/restore did not release its lock within 60s" >&2
     exit 1
   fi
   exit 0
 fi
 
-if /usr/bin/flock -w "$grace_seconds" "$job_lock" true; then
+if "$flock_command" -w "$grace_seconds" "$job_lock_fd"; then
   exit 0
 fi
 
@@ -116,7 +130,7 @@ fi
 # relying on process names or a potentially reused PID.
 echo "backup/restore did not stop within ${grace_seconds}s; killing lock holders"
 /usr/bin/fuser -k -KILL "$job_lock" >/dev/null 2>&1 || true
-if ! /usr/bin/flock -w "$kill_wait_seconds" "$job_lock" true; then
+if ! "$flock_command" -w "$kill_wait_seconds" "$job_lock_fd"; then
   echo "ERROR: backup/restore still holds its lock after emergency kill" >&2
   exit 1
 fi

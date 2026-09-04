@@ -96,4 +96,18 @@ fi
 grep -Fq "no active exfat backup" "$test_root/idle.out" ||
   fail "idle stop did not explain that no EXFAT backup was active"
 
+# An idle check must open the existing lock read-only and must not create a
+# missing lock file merely to decide that no job is active.
+chmod 0444 "$job_lock"
+ABORT_BACKUP_CONF="$fake_conf" "$abort_script" >/dev/null 2>&1 ||
+  fail "idle abort check could not use a read-only lock file"
+rm -f "$job_lock"
+ABORT_BACKUP_CONF="$fake_conf" "$abort_script" >/dev/null 2>&1 ||
+  fail "idle abort check rejected an absent lock file"
+[[ ! -e "$job_lock" ]] ||
+  fail "idle abort check created the missing lock file"
+
+grep -Fq 'exec {job_lock_fd}<"$job_lock"' "$abort_script" ||
+  fail "abort helper does not open the existing lock through a read-only descriptor"
+
 echo "PASS: guarded backup stop tests"

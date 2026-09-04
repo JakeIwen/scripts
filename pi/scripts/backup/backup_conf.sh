@@ -138,12 +138,38 @@ lock_disk() { # lock_disk sda — held for the remaining life of the calling scr
   flock -n 8 || { echo "another backup/restore is writing /dev/$1, aborting"; return 1; }
 }
 
-# Serialize local backup, clone, and restore operations. The holder PID is
-# recorded so abort_backup.sh (called by umount_disks.sh before pulling mounts)
-# can TERM the active job tree.
-JOB_LOCK=/run/lock/vanpi_backup.lock
+# Serialize local backup, clone, and restore operations. systemd-tmpfiles
+# pre-creates this file as root:pi 0660. Keeping a root-owned inode is
+# important because /run/lock is sticky and fs.protected_regular may otherwise
+# prevent a root abort helper from reopening a lock first created by pi.
+# The holder PID is recorded so abort_backup.sh (called by umount_disks.sh
+# before pulling mounts) can TERM the active job tree.
+JOB_LOCK=${VANPI_BACKUP_JOB_LOCK:-/run/lock/vanpi_backup.lock}
+JOB_LOCK_OWNER=${VANPI_BACKUP_JOB_LOCK_OWNER:-root}
+JOB_LOCK_GROUP=${VANPI_BACKUP_JOB_LOCK_GROUP:-pi}
+JOB_LOCK_MODE=${VANPI_BACKUP_JOB_LOCK_MODE:-660}
+JOB_LOCK_STAT=${VANPI_BACKUP_JOB_LOCK_STAT:-/usr/bin/stat}
+JOB_LOCK_FLOCK=${VANPI_BACKUP_JOB_LOCK_FLOCK:-/usr/bin/flock}
+validate_job_lock_file() {
+  local metadata owner group mode extra
+  if [[ -L "$JOB_LOCK" || ! -f "$JOB_LOCK" ]]; then
+    echo "backup job lock is missing or unsafe: $JOB_LOCK" >&2
+    return 1
+  fi
+  metadata=$("$JOB_LOCK_STAT" -c '%U %G %a' -- "$JOB_LOCK" 2>&1) || {
+    echo "cannot inspect backup job lock $JOB_LOCK: $metadata" >&2
+    return 1
+  }
+  read -r owner group mode extra <<< "$metadata"
+  if [[ "$owner" != "$JOB_LOCK_OWNER" || "$group" != "$JOB_LOCK_GROUP" ||
+        "$mode" != "$JOB_LOCK_MODE" || -n ${extra:-} ]]; then
+    echo "unsafe backup job lock metadata for $JOB_LOCK (owner=${owner:-unknown}, group=${group:-unknown}, mode=${mode:-unknown}; expected $JOB_LOCK_OWNER:$JOB_LOCK_GROUP $JOB_LOCK_MODE)" >&2
+    return 1
+  fi
+}
 acquire_job_lock() {
+  validate_job_lock_file || return 1
   exec 9>>"$JOB_LOCK"   # append-open: must not truncate a current holder's PID record
-  flock -n 9 || return 1
-  echo $$ > "$JOB_LOCK"
+  "$JOB_LOCK_FLOCK" -n 9 || return 1
+  printf '%s\n' "$$" > "$JOB_LOCK"
 }

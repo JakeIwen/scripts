@@ -9,8 +9,10 @@ fi
 
 staged_services="$stage/services"
 staged_scripts="$stage/scripts"
+staged_tmpfiles="$stage/tmpfiles.d"
 live_services="/etc/systemd/system"
 live_scripts="/home/pi/scripts"
+live_tmpfiles="/etc/tmpfiles.d"
 
 cleanup() {
   case "$stage" in
@@ -19,7 +21,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if [[ ! -d "$staged_services" || ! -d "$staged_scripts" ]]; then
+if [[ ! -d "$staged_services" || ! -d "$staged_scripts" ||
+      ! -d "$staged_tmpfiles" ]]; then
   echo "service update staging is incomplete: $stage" >&2
   exit 1
 fi
@@ -32,6 +35,11 @@ staged_units=(
 )
 if (( ${#staged_units[@]} == 0 )); then
   echo "service update staging contains no systemd units" >&2
+  exit 1
+fi
+staged_tmpfile_configs=("$staged_tmpfiles"/*.conf)
+if (( ${#staged_tmpfile_configs[@]} == 0 )); then
+  echo "service update staging contains no tmpfiles configuration" >&2
   exit 1
 fi
 
@@ -72,6 +80,17 @@ for staged_unit in "${staged_units[@]}"; do
   if [[ "$changed" == true && "$is_new" == false ]]; then
     changed_units+=("$unit")
   fi
+done
+
+# Runtime locks must exist with their cross-user ownership before updated
+# scripts can reference them. systemd-tmpfiles creates missing files and
+# reconciles owner/mode without replacing an inode held by a running process.
+sudo install -d -m 0755 "$live_tmpfiles"
+for staged_tmpfile in "${staged_tmpfile_configs[@]}"; do
+  tmpfile_name="${staged_tmpfile##*/}"
+  live_tmpfile="$live_tmpfiles/$tmpfile_name"
+  sudo install -m 0644 "$staged_tmpfile" "$live_tmpfile"
+  sudo systemd-tmpfiles --create "$live_tmpfile"
 done
 
 mkdir -p "$live_scripts"
