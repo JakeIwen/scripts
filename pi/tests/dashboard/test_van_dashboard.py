@@ -838,6 +838,48 @@ class UbntWifiControllerTests(unittest.TestCase):
         manager.request_refresh(max_age=20)
         self.assertEqual(starts, ["status"])
 
+    def test_abort_waits_for_safe_completion_then_resumes_automatic_selection(self):
+        connect_started = threading.Event()
+        release_connect = threading.Event()
+        calls = []
+
+        def command(args, timeout, input_text=None):
+            calls.append(list(args))
+            if args[-1] == "connect":
+                connect_started.set()
+                self.assertTrue(release_connect.wait(2))
+            return SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps(
+                    {"ok": True, "message": "complete", "wifi": self.WIFI}
+                ),
+                stderr="",
+            )
+
+        manager = dashboard.UbntWifiController(
+            tool="/test/ubnt_wifi.py", command=command, wall_clock=FakeClock(200)
+        )
+        self.assertTrue(manager.start("connect", {"profile": "denlink"}))
+        self.assertTrue(connect_started.wait(1))
+
+        self.assertTrue(manager.abort())
+        self.assertEqual(manager.snapshot()["operation"]["kind"], "abort")
+        self.assertFalse(manager.abort())
+        release_connect.set()
+        manager.thread.join(2)
+
+        operation = manager.snapshot()["operation"]
+        self.assertEqual(operation["status"], "complete")
+        self.assertEqual(operation["kind"], "abort")
+        self.assertIn("automatic selection resumed", operation["message"])
+        self.assertEqual(
+            calls,
+            [
+                ["/test/ubnt_wifi.py", "--json", "connect"],
+                ["/test/ubnt_wifi.py", "--json", "resume"],
+            ],
+        )
+
 
 class TuyaSwitchManagerTests(unittest.TestCase):
     def test_reads_and_toggles_confirmed_starlink_state(self):
@@ -5226,6 +5268,10 @@ class DashboardRouteTests(unittest.TestCase):
                 calls.append((kind, dict(payload or {})))
                 return True
 
+            def abort(self):
+                calls.append(("abort", None))
+                return True
+
             def snapshot(self):
                 return {
                     "wifi": wifi,
@@ -5264,6 +5310,7 @@ class DashboardRouteTests(unittest.TestCase):
                 },
             )
             resume = client.post("/api/ubnt-wifi/resume")
+            abort = client.post("/api/ubnt-wifi/abort")
             unknown_security = client.post(
                 "/api/ubnt-wifi/provision",
                 data={
@@ -5303,6 +5350,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(provision.status_code, 202)
         self.assertEqual(profile_update.status_code, 202)
         self.assertEqual(resume.status_code, 202)
+        self.assertEqual(abort.status_code, 202)
         self.assertEqual(unknown_security.status_code, 400)
         self.assertEqual(extra_scan_input.status_code, 400)
         self.assertEqual(extra_connect_input.status_code, 400)
@@ -5336,6 +5384,7 @@ class DashboardRouteTests(unittest.TestCase):
                     },
                 ),
                 ("resume", {}),
+                ("abort", None),
             ],
         )
 

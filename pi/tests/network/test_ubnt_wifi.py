@@ -1,7 +1,11 @@
 import importlib.util
+import io
+import json
 import os
 import subprocess
 import unittest
+from contextlib import redirect_stdout
+from unittest import mock
 
 
 MODULE_PATH = os.path.join(
@@ -183,6 +187,38 @@ class ClientTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ubnt_wifi.UbntWifiError, "timed out"):
             ubnt_wifi.UbntWifiClient(command=command).scan()
+
+
+class AbortTests(unittest.TestCase):
+    def test_abort_signal_defers_until_connect_finishes_then_resumes(self):
+        calls = []
+
+        class FakeClient:
+            def connect(self, profile):
+                calls.append(("connect", profile))
+                ubnt_wifi._request_abort(None, None)
+                return {"message": "connected", "wifi": {"version": 1}}
+
+            def resume(self):
+                calls.append(("resume", None))
+                return {
+                    "message": "automatic selection resumed",
+                    "wifi": {"version": 1},
+                }
+
+        output = io.StringIO()
+        with (
+            mock.patch.object(ubnt_wifi, "UbntWifiClient", return_value=FakeClient()),
+            mock.patch("sys.stdin", io.StringIO(json.dumps({"profile": "denlink"}))),
+            redirect_stdout(output),
+        ):
+            returncode = ubnt_wifi.main(["--json", "connect"])
+
+        payload = json.loads(output.getvalue())
+        self.assertEqual(returncode, 0)
+        self.assertTrue(payload["aborted"])
+        self.assertIn("automatic selection resumed", payload["message"])
+        self.assertEqual(calls, [("connect", "denlink"), ("resume", None)])
 
 
 if __name__ == "__main__":

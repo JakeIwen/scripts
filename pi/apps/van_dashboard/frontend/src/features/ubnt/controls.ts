@@ -4,6 +4,7 @@ import { useToast } from '../../components/ToastProvider';
 import type { PollingState } from '../../hooks/usePollingResource';
 import { useSingleFlightAction } from '../../hooks/useSingleFlightAction';
 import {
+  abortUbntOperation,
   connectUbntProfile,
   provisionUbntNetwork,
   resumeUbntAutomaticSelection,
@@ -29,6 +30,8 @@ type ShowToast = (message: string, tone?: 'normal' | 'error') => void;
 
 export interface UbntControls {
   busy: boolean;
+  aborting: boolean;
+  abort: () => Promise<boolean>;
   scan: () => Promise<boolean>;
   connect: (profile: string) => Promise<boolean>;
   provision: (request: UbntProvisionRequest) => Promise<boolean>;
@@ -61,7 +64,11 @@ export async function convergeUbntOperation(
 
 function changesConnectivity(kind: UbntOperationKind | null): boolean {
   return (
-    kind === 'connect' || kind === 'provision' || kind === 'update-profile' || kind === 'resume'
+    kind === 'connect' ||
+    kind === 'provision' ||
+    kind === 'update-profile' ||
+    kind === 'resume' ||
+    kind === 'abort'
   );
 }
 
@@ -73,11 +80,14 @@ export async function executeUbntMutation(
   pause: Wait = wait,
 ): Promise<boolean> {
   try {
-    await mutation();
+    const accepted = await mutation();
     const status = await convergeUbntOperation(refresh, pause);
     if (status === null) throw new Error('UBNT status refresh failed during convergence');
     if (status.operation.status === 'error') {
       throw new Error(status.operation.error ?? 'UBNT Wi-Fi operation failed');
+    }
+    if (status.operation.kind === 'abort' && accepted.status.operation.kind !== 'abort') {
+      return false;
     }
 
     showToast(status.operation.message ?? 'UBNT Wi-Fi updated');
@@ -111,6 +121,7 @@ export function useUbntControls(
 ): UbntControls {
   const { showToast } = useToast();
   const { running, run } = useSingleFlightAction();
+  const { running: aborting, run: runAbort } = useSingleFlightAction();
 
   const execute = useCallback(
     async (mutation: Mutation): Promise<boolean> => {
@@ -122,8 +133,17 @@ export function useUbntControls(
     [onConnectivityChanged, resource.refresh, run, showToast],
   );
 
+  const abort = useCallback(async (): Promise<boolean> => {
+    const completed = await runAbort(() =>
+      executeUbntMutation(abortUbntOperation, resource.refresh, showToast, onConnectivityChanged),
+    );
+    return completed ?? false;
+  }, [onConnectivityChanged, resource.refresh, runAbort, showToast]);
+
   return {
     busy: running,
+    aborting,
+    abort,
     scan: () => execute(scanUbntNetworks),
     connect: (profile) => execute(() => connectUbntProfile(profile)),
     provision: (request) => execute(() => provisionUbntNetwork(request)),

@@ -93,6 +93,7 @@ ALLOWED_MUTATIONS: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/api/ubnt-wifi/connect"),
         ("POST", "/api/ubnt-wifi/provision"),
         ("POST", "/api/ubnt-wifi/resume"),
+        ("POST", "/api/ubnt-wifi/abort"),
         ("POST", "/api/ubnt-wifi/profile"),
         # COP ALERT publishes requested intent only. The independent guarded
         # supervisor remains the sole CAN-wake authority.

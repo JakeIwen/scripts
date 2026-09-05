@@ -120,6 +120,10 @@ export async function resumeUbntAutomaticSelection(): Promise<UbntMutationResult
   return decodeMutation(await postForm('/api/ubnt-wifi/resume'), 'resume');
 }
 
+export async function abortUbntOperation(): Promise<UbntMutationResult> {
+  return decodeMutation(await postForm('/api/ubnt-wifi/abort'), 'abort');
+}
+
 export async function updateUbntProfile(update: UbntProfileUpdate): Promise<UbntMutationResult> {
   let secret = update.password;
   try {

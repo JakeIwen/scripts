@@ -111,6 +111,18 @@ export function UbntSheet({ open, onClose, resource, controls, dashboardStatus }
               : `Updated ${formatRelativeTime(status.checkedAt)}`}
         </span>
         <div>
+          {operationRunning && operation.kind !== 'status' && (
+            <button
+              className="danger-button"
+              type="button"
+              disabled={controls.aborting || operation.kind === 'abort'}
+              onClick={() => void controls.abort()}
+            >
+              {controls.aborting || operation.kind === 'abort'
+                ? 'Abort requested…'
+                : 'Abort operation'}
+            </button>
+          )}
           {status?.state.automaticPaused === true && (
             <button
               type="button"

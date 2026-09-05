@@ -63,4 +63,22 @@ describe('UBNT operation orchestration', () => {
     expect(showToast).toHaveBeenCalledWith('Network saved and connected');
     expect(refresh).toHaveBeenCalledTimes(2); // convergence plus final reconciliation
   });
+
+  it('lets an abort completion end the original mutation without a success toast', async () => {
+    const started = sampleUbntStatus('running');
+    started.operation.kind = 'connect';
+    const aborted = sampleUbntStatus('complete');
+    aborted.operation.kind = 'abort';
+    aborted.operation.message = 'UBNT operation aborted; automatic selection resumed';
+    const mutation = vi.fn().mockResolvedValue({ message: 'started', status: started });
+    const refresh = vi.fn().mockResolvedValue(aborted);
+    const showToast = vi.fn();
+    const pause = vi.fn().mockResolvedValue(undefined);
+
+    const result = await executeUbntMutation(mutation, refresh, showToast, undefined, pause);
+
+    expect(result).toBe(false);
+    expect(showToast).not.toHaveBeenCalled();
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
 });

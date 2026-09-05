@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -25,10 +26,17 @@ REMOTE_COMMANDS = {
     "update-profile": "update-profile-stdin",
     "resume": "resume",
 }
+ABORT_REQUESTED = False
 
 
 class UbntWifiError(RuntimeError):
     pass
+
+
+def _request_abort(_signum, _frame):
+    """Defer cancellation until the remote manager reaches a safe boundary."""
+    global ABORT_REQUESTED
+    ABORT_REQUESTED = True
 
 
 def run_command(args, timeout, input_text=None):
@@ -396,11 +404,15 @@ def _read_object():
 
 
 def main(argv=None):
+    global ABORT_REQUESTED
+    ABORT_REQUESTED = False
+    previous_abort_handler = signal.signal(signal.SIGUSR1, _request_abort)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", action="store_true", required=True)
     parser.add_argument("action", choices=tuple(REMOTE_COMMANDS))
     args = parser.parse_args(argv)
     client = UbntWifiClient()
+    operation_error = None
     try:
         if args.action == "status":
             result = {"ok": True, "wifi": client.status()}
@@ -435,7 +447,40 @@ def main(argv=None):
         else:
             result = {"ok": True, **client.resume()}
     except UbntWifiError as exc:
-        print(json.dumps({"ok": False, "message": str(exc)}, separators=(",", ":")))
+        operation_error = exc
+    finally:
+        signal.signal(signal.SIGUSR1, previous_abort_handler)
+
+    if ABORT_REQUESTED and args.action in (
+        "connect",
+        "provision",
+        "update-profile",
+    ):
+        try:
+            resumed = client.resume()
+        except UbntWifiError as exc:
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "message": f"operation stopped, but automatic selection could not resume: {exc}",
+                    },
+                    separators=(",", ":"),
+                )
+            )
+            return 1
+        result = {
+            "ok": True,
+            "aborted": True,
+            "message": "UBNT operation aborted; automatic selection resumed",
+            **resumed,
+        }
+    elif operation_error is not None:
+        print(
+            json.dumps(
+                {"ok": False, "message": str(operation_error)}, separators=(",", ":")
+            )
+        )
         return 1
     print(json.dumps(result, separators=(",", ":"), sort_keys=True))
     return 0

@@ -708,6 +708,24 @@ def api_ubnt_wifi_resume():
     return _start_ubnt_operation("resume")
 
 
+@app.route("/api/ubnt-wifi/abort", methods=["POST"])
+def api_ubnt_wifi_abort():
+    if request.form:
+        return api_error("UBNT abort does not accept input", 400)
+    if not ubnt_wifi.abort():
+        return api_error("no cancellable UBNT Wi-Fi operation is running", 409)
+    return (
+        jsonify(
+            {
+                "ok": True,
+                "message": "UBNT abort requested",
+                **ubnt_wifi.snapshot(),
+            }
+        ),
+        202,
+    )
+
+
 @app.route("/api/ubnt-wifi/profile", methods=["POST"])
 def api_ubnt_wifi_profile():
     fields = (

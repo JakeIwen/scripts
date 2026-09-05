@@ -94,6 +94,7 @@ const OPERATION_KINDS = [
   'provision',
   'update-profile',
   'resume',
+  'abort',
 ] as const satisfies readonly UbntOperationKind[];
 
 function decodeProfile(value: unknown, index: number): UbntProfile {

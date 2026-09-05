@@ -98,6 +98,12 @@ background operations; their POST endpoints return immediately and the sheet
 polls authoritative status rather than changing the selected network
 optimistically.
 
+While a scan or network change is running, the sheet offers **Abort operation**.
+Abort is deliberately cooperative: the Pi asks `ubnt_wifi.py` to finish the
+current airOS reload boundary, including restoration of the dashboard SSH key,
+then resumes automatic selection and refreshes authoritative status. It does
+not kill the remote manager in the middle of a wireless configuration reload.
+
 ## Starlink power
 
 The Starlink tile reads `switch.starlink` through the existing Tuya/Home

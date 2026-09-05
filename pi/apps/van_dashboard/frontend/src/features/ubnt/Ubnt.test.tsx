@@ -38,6 +38,8 @@ function resource(status: UbntWifiStatus): PollingState<UbntWifiStatus> {
 function controls(overrides: Partial<UbntControls> = {}): UbntControls {
   return {
     busy: false,
+    aborting: false,
+    abort: vi.fn().mockResolvedValue(true),
     scan: vi.fn().mockResolvedValue(true),
     connect: vi.fn().mockResolvedValue(true),
     provision: vi.fn().mockResolvedValue(true),
@@ -166,6 +168,18 @@ describe('UBNT UI', () => {
     expect(screen.getByRole('button', { name: 'Reconnect' })).toBeDisabled();
     expect(screen.getAllByRole('button', { name: 'Edit' })[0]).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Add' })).toBeDisabled();
+  });
+
+  it('offers abort while a network change is running', () => {
+    const status = sampleUbntStatus('running');
+    status.operation.kind = 'connect';
+    const actions = controls();
+    render(<UbntSheet open onClose={vi.fn()} resource={resource(status)} controls={actions} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Abort operation' }));
+
+    expect(actions.abort).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: 'Scan nearby Wi-Fi' })).toBeDisabled();
   });
 
   it('provisions open networks without a password and resumes automatic selection', () => {

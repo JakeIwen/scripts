@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  abortUbntOperation,
   connectUbntProfile,
   provisionUbntNetwork,
   resumeUbntAutomaticSelection,
@@ -31,6 +32,7 @@ describe('UBNT mutation API', () => {
       'provision',
       'provision',
       'resume',
+      'abort',
       'update-profile',
     ];
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
@@ -67,6 +69,7 @@ describe('UBNT mutation API', () => {
       await provisionUbntNetwork(wpa),
       await provisionUbntNetwork(open),
       await resumeUbntAutomaticSelection(),
+      await abortUbntOperation(),
       await updateUbntProfile(profile),
     ];
 
@@ -82,6 +85,7 @@ describe('UBNT mutation API', () => {
         'ssid=Park+Guest&security=none&bssid=00%3A11%3A22%3A33%3A44%3A99&password=',
       ],
       ['/api/ubnt-wifi/resume', ''],
+      ['/api/ubnt-wifi/abort', ''],
       [
         '/api/ubnt-wifi/profile',
         'profile=Camp+Guest&password=replacement-secret&bssid=AA%3ABB%3ACC%3ADD%3AEE%3AFF&output_power_dbm=19&rate_module=ewma_ht&rate_auto=false&rate_mcs=7&apply_now=true',

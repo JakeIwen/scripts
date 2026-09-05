@@ -1,4 +1,5 @@
 export {
+  abortUbntOperation,
   connectUbntProfile,
   fetchUbntWifiStatus,
   provisionUbntNetwork,

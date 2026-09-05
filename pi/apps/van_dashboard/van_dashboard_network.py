@@ -4,6 +4,8 @@ This module supports both repository package imports and the flat sibling
 layout used by the deployed van-dashboard service.
 """
 
+import signal
+
 __all__ = [
     "ConnectivityMonitor",
     "OpenWrtClientsController",
@@ -366,7 +368,7 @@ class UbntWifiController:
     def __init__(
         self,
         tool=UBNT_WIFI_TOOL,
-        command=run_command,
+        command=None,
         wall_clock=time.time,
         on_change=None,
     ):
@@ -376,6 +378,8 @@ class UbntWifiController:
         self.on_change = on_change
         self.lock = threading.Lock()
         self.thread = None
+        self.process = None
+        self.abort_requested = None
         self.wifi = {
             "version": 1,
             "reachable": None,
@@ -434,23 +438,93 @@ class UbntWifiController:
                 "message": None,
                 "error": None,
             }
+            self.abort_requested = threading.Event()
             self.thread = threading.Thread(
                 target=self._run,
-                args=(kind, dict(payload or {})),
+                args=(kind, dict(payload or {}), self.abort_requested),
                 name=f"ubnt-wifi-{kind}",
                 daemon=True,
             )
             self.thread.start()
             return True
 
-    def _tool_result(self, kind, payload=None):
+    def abort(self):
+        """Request a safe stop without killing an airOS wireless reload.
+
+        The reusable tool catches SIGUSR1 and waits for the in-flight remote
+        manager command to reach a safe boundary before resuming automatic
+        selection.  In particular, this lets the manager finish restoring its
+        SSH key after an airOS soft reload.
+        """
+        process = None
+        with self.lock:
+            if (
+                self.operation["status"] != "running"
+                or self.operation["kind"] in (None, "status", "abort")
+                or self.abort_requested is None
+            ):
+                return False
+            self.abort_requested.set()
+            process = self.process
+            self.operation = {
+                "status": "running",
+                "kind": "abort",
+                "started_at": self.operation["started_at"],
+                "completed_at": None,
+                "message": "Abort requested; waiting for a safe antenna boundary",
+                "error": None,
+            }
+        if process is not None:
+            try:
+                process.send_signal(signal.SIGUSR1)
+            except ProcessLookupError:
+                pass
+        return True
+
+    def _run_cancellable_command(self, args, timeout, input_text, abort_requested):
+        process = subprocess.Popen(
+            args,
+            stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        with self.lock:
+            self.process = process
+            already_aborting = abort_requested.is_set()
+        if already_aborting:
+            try:
+                process.send_signal(signal.SIGUSR1)
+            except ProcessLookupError:
+                pass
+        try:
+            stdout, stderr = process.communicate(input=input_text, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate()
+            raise
+        finally:
+            with self.lock:
+                if self.process is process:
+                    self.process = None
+        return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
+
+    def _tool_result(self, kind, payload=None, abort_requested=None):
         input_text = json.dumps(payload, separators=(",", ":")) if payload else None
         try:
-            result = self.command(
-                [self.tool, "--json", kind],
-                timeout=self.TIMEOUTS[kind],
-                input_text=input_text,
-            )
+            if self.command is None:
+                result = self._run_cancellable_command(
+                    [self.tool, "--json", kind],
+                    timeout=self.TIMEOUTS[kind],
+                    input_text=input_text,
+                    abort_requested=abort_requested or threading.Event(),
+                )
+            else:
+                result = self.command(
+                    [self.tool, "--json", kind],
+                    timeout=self.TIMEOUTS[kind],
+                    input_text=input_text,
+                )
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(f"UBNT {kind} timed out") from exc
         except OSError as exc:
@@ -478,19 +552,38 @@ class UbntWifiController:
         except RuntimeError:
             return None
 
-    def _run(self, kind, payload):
+    def _run(self, kind, payload, abort_requested=None):
+        abort_requested = abort_requested or threading.Event()
         error = None
         message = None
         wifi = None
+        final_kind = kind
         try:
-            result = self._tool_result(kind, payload)
+            result = self._tool_result(kind, payload, abort_requested)
             wifi = result["wifi"]
             message = result.get("message")
+            if abort_requested.is_set() or result.get("aborted") is True:
+                final_kind = "abort"
+                if result.get("aborted") is not True:
+                    result = self._tool_result("resume")
+                    wifi = result["wifi"]
+                message = "UBNT operation aborted; automatic selection resumed"
             if kind in ("connect", "provision", "update-profile", "resume") and self.on_change:
                 self.on_change()
         except RuntimeError as exc:
-            error = str(exc)
-            wifi = self._refresh_after_failure()
+            if abort_requested.is_set():
+                final_kind = "abort"
+                try:
+                    result = self._tool_result("resume")
+                    wifi = result["wifi"]
+                    message = "UBNT operation aborted; automatic selection resumed"
+                    if self.on_change:
+                        self.on_change()
+                except RuntimeError as resume_exc:
+                    error = f"UBNT operation stopped, but automatic selection could not resume: {resume_exc}"
+            else:
+                error = str(exc)
+                wifi = self._refresh_after_failure()
         finally:
             if "password" in payload:
                 payload["password"] = ""
@@ -499,12 +592,13 @@ class UbntWifiController:
                 self.wifi = wifi
             self.operation = {
                 "status": "error" if error else "complete",
-                "kind": kind,
+                "kind": final_kind,
                 "started_at": self.operation["started_at"],
                 "completed_at": int(self.wall_clock()),
                 "message": message,
                 "error": error,
             }
+            self.abort_requested = None
 
 
 def parse_speedtest_output(output):

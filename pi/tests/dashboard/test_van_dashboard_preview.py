@@ -463,6 +463,7 @@ class PreviewDeploymentContractTests(unittest.TestCase):
                     ("POST", "/api/ubnt-wifi/connect"),
                     ("POST", "/api/ubnt-wifi/provision"),
                     ("POST", "/api/ubnt-wifi/resume"),
+                    ("POST", "/api/ubnt-wifi/abort"),
                     ("POST", "/api/ubnt-wifi/profile"),
                     ("POST", "/api/cop-alert"),
                     ("POST", "/api/starlink"),
