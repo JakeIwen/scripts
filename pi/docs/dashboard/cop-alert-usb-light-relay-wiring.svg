@@ -1,0 +1,130 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <style>
+      .title { font: 700 34px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; fill: #132238; }
+      .heading { font: 700 27px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; fill: #132238; }
+      .label { font: 600 21px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; fill: #132238; }
+      .small { font: 500 18px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; fill: #26364c; }
+      .tiny { font: 500 16px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; fill: #26364c; }
+      .box { fill: #f7faff; stroke: #245aa5; stroke-width: 4; rx: 18; }
+      .note { fill: #fff9df; stroke: #bd8710; stroke-width: 3; rx: 14; }
+      .red { stroke: #e3262e; fill: none; stroke-width: 8; stroke-linejoin: round; stroke-linecap: round; }
+      .black { stroke: #17191c; fill: none; stroke-width: 8; stroke-linejoin: round; stroke-linecap: round; }
+      .yellow { stroke: #e5a900; fill: none; stroke-width: 8; stroke-linejoin: round; stroke-linecap: round; }
+      .terminal { fill: white; stroke: #24435f; stroke-width: 4; }
+      .junction-red { fill: #e3262e; }
+      .junction-black { fill: #17191c; }
+      .junction-yellow { fill: #e5a900; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="900" fill="white"/>
+  <text x="800" y="52" text-anchor="middle" class="title">PI-HEADER-POWERED USB TOUCHLIGHT — 5 V RELAY</text>
+
+  <!-- Raspberry Pi header -->
+  <rect x="45" y="115" width="475" height="470" class="box"/>
+  <text x="282" y="160" text-anchor="middle" class="heading">Raspberry Pi 4 — 40-pin header</text>
+
+  <text x="82" y="207" class="label">Physical pin 2</text>
+  <text x="82" y="235" class="small">+5 V power rail</text>
+  <circle cx="500" cy="215" r="13" class="terminal"/>
+
+  <text x="82" y="317" class="label">Physical pin 6</text>
+  <text x="82" y="345" class="small">GND</text>
+  <circle cx="500" cy="325" r="13" class="terminal"/>
+
+  <text x="82" y="437" class="label">Physical pin 11</text>
+  <text x="82" y="465" class="small">BCM GPIO17 — control signal</text>
+  <circle cx="500" cy="445" r="13" class="terminal"/>
+
+  <rect x="82" y="505" width="385" height="50" fill="#eaf1fa" stroke="#8ea8c7" stroke-width="2" rx="9"/>
+  <text x="274" y="537" text-anchor="middle" class="small">Only GPIO17 is a programmable GPIO.</text>
+
+  <!-- Relay module -->
+  <rect x="760" y="115" width="520" height="470" class="box"/>
+  <text x="1020" y="160" text-anchor="middle" class="heading">Tongling 5 V relay module</text>
+
+  <!-- Relay control terminals -->
+  <circle cx="760" cy="245" r="13" class="terminal"/>
+  <circle cx="760" cy="325" r="13" class="terminal"/>
+  <circle cx="760" cy="445" r="13" class="terminal"/>
+  <text x="790" y="253" class="label">+ (module power)</text>
+  <text x="790" y="333" class="label">− (module ground)</text>
+  <text x="790" y="453" class="label">S (trigger)</text>
+
+  <!-- Relay coil symbol -->
+  <rect x="940" y="250" width="70" height="145" fill="white" stroke="#24435f" stroke-width="4"/>
+  <path d="M950 375 L1000 270" stroke="#24435f" stroke-width="4"/>
+  <text x="975" y="420" text-anchor="middle" class="tiny">coil</text>
+
+  <!-- Relay contact terminals -->
+  <circle cx="1280" cy="335" r="13" class="terminal"/>
+  <circle cx="1280" cy="445" r="13" class="terminal"/>
+  <circle cx="1280" cy="525" r="13" class="terminal"/>
+  <text x="1240" y="342" text-anchor="end" class="label">NO</text>
+  <text x="1240" y="452" text-anchor="end" class="label">COM</text>
+  <text x="1240" y="532" text-anchor="end" class="label">NC</text>
+  <text x="1170" y="558" text-anchor="middle" class="tiny">UNUSED</text>
+
+  <!-- Open relay contact, default/off -->
+  <circle cx="1125" cy="335" r="8" fill="#17191c"/>
+  <circle cx="1125" cy="445" r="8" fill="#17191c"/>
+  <path d="M1125 335 H1280 M1125 445 H1280" stroke="#17191c" stroke-width="5"/>
+  <path d="M1125 445 L1085 365" stroke="#17191c" stroke-width="6" stroke-linecap="round"/>
+  <line x1="1200" y1="525" x2="1280" y2="525" stroke="#8b929b" stroke-width="5"/>
+  <text x="1105" y="300" text-anchor="middle" class="small">open by default</text>
+
+  <!-- +5 V from Pi through fuse, then branch to relay module + and relay COM -->
+  <path d="M513 215 H555" class="red"/>
+  <rect x="555" y="188" width="125" height="54" fill="#ffe6e7" stroke="#b91e25" stroke-width="3" rx="8"/>
+  <text x="617" y="222" text-anchor="middle" class="label">1 A fuse</text>
+  <path d="M680 215 H720" class="red"/>
+  <circle cx="720" cy="215" r="9" class="junction-red"/>
+  <path d="M720 215 V245 H747" class="red"/>
+  <path d="M720 215 V625 H1320 V445 H1293" class="red"/>
+  <rect x="805" y="602" width="300" height="42" fill="white"/>
+  <text x="955" y="629" text-anchor="middle" class="small" fill="#c8222a">fused +5 V to relay COM</text>
+
+  <!-- Ground from Pi branches to relay module and light -->
+  <path d="M513 325 H747" class="black"/>
+  <circle cx="590" cy="325" r="9" class="junction-black"/>
+  <path d="M590 325 V660 H1355 V445" class="black"/>
+  <rect x="805" y="642" width="330" height="42" fill="white"/>
+  <text x="970" y="669" text-anchor="middle" class="small">continuous GND to light</text>
+
+  <!-- GPIO signal and pulldown -->
+  <path d="M513 445 H555" class="yellow"/>
+  <rect x="555" y="418" width="105" height="54" fill="#fff3bf" stroke="#805f00" stroke-width="3" rx="8"/>
+  <text x="607" y="452" text-anchor="middle" class="label">1 kΩ</text>
+  <path d="M660 445 H747" class="yellow"/>
+  <circle cx="705" cy="445" r="9" class="junction-yellow"/>
+  <path d="M705 445 V480" class="yellow"/>
+  <rect x="680" y="480" width="50" height="95" fill="#fff3bf" stroke="#805f00" stroke-width="3" rx="6"/>
+  <text x="745" y="520" class="small">10 kΩ</text>
+  <text x="745" y="546" class="small">pull-down</text>
+  <path d="M705 575 V660" class="black"/>
+
+  <!-- Relay NO switches lamp positive -->
+  <path d="M1293 335 H1355" class="red"/>
+
+  <!-- Touchlight/output pigtail -->
+  <rect x="1355" y="205" width="210" height="330" class="box"/>
+  <text x="1460" y="250" text-anchor="middle" class="heading">USB Touchlight</text>
+  <circle cx="1355" cy="335" r="13" class="terminal"/>
+  <circle cx="1355" cy="445" r="13" class="terminal"/>
+  <text x="1380" y="343" class="label" fill="#e3262e">RED +5 V</text>
+  <text x="1380" y="453" class="label">BLACK GND</text>
+  <circle cx="1460" cy="390" r="43" fill="#fff6bd" stroke="#bd8710" stroke-width="5"/>
+  <path d="M1438 390 H1482 M1460 368 V412" stroke="#bd8710" stroke-width="5"/>
+  <text x="1460" y="495" text-anchor="middle" class="tiny">female USB pigtail</text>
+  <text x="1460" y="518" text-anchor="middle" class="tiny">red + black only</text>
+
+  <!-- Notes -->
+  <rect x="45" y="710" width="1510" height="150" class="note"/>
+  <text x="78" y="755" class="heading">Required checks</text>
+  <text x="78" y="798" class="small">1. Identify COM and NO with an unpowered continuity meter; the module’s screw-terminal order is not assumed.</text>
+  <text x="78" y="832" class="small">2. Verify pigtail polarity. Connect only red (+5 V) and black (GND); cut and individually insulate white D−, green D+, and shield.</text>
+  <text x="875" y="755" class="label" fill="#218739">GPIO HIGH → LIGHT ON</text>
+  <text x="875" y="798" class="label" fill="#c8222a">GPIO LOW / PI OFF → LIGHT OFF</text>
+  <text x="875" y="832" class="small">Never power the relay coil or lamp from GPIO17.</text>
+</svg>

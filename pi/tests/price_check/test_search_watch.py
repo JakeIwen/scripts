@@ -30,7 +30,9 @@ EBAY_PAGE = """
   <li class="s-item">
     <a class="s-item__link"
        href="https://www.ebay.com/itm/MicroPod-tool/123456789012?hash=abc">
-      <div class="s-item__title"><span>New Listing</span> MicroPod II Tool</div>
+      <div class="s-item__title"><span>New Listing</span> MicroPod II Tool
+        <span>Opens in a new window or tab</span>
+      </div>
     </a>
     <span class="s-item__price">US $499.00</span>
     <span class="s-item__shipping">Free shipping</span>
@@ -78,6 +80,13 @@ class EbayParserTests(unittest.TestCase):
             "123456789012",
         )
         self.assertIsNone(item_id_from_url("https://www.ebay.com/sch/i.html"))
+
+    def test_keeps_similar_text_when_it_is_not_the_trailing_accessibility_suffix(self):
+        page = EBAY_PAGE.replace(
+            "MicroPod II Tool\n        <span>Opens in a new window or tab</span>",
+            "Opens in a new window or tab collector card",
+        )
+        self.assertEqual(parse(page)[0].title, "Opens in a new window or tab collector card")
 
     def test_rejects_browser_challenge(self):
         with self.assertRaisesRegex(EbayGateError, "gated page"):

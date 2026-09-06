@@ -25,6 +25,9 @@ GATED_CONTENT_TEXT = (
 TITLE_CLASSES = {"s-item__title", "s-card__title"}
 PRICE_CLASSES = {"s-item__price", "s-card__price"}
 SHIPPING_CLASSES = {"s-item__shipping", "s-card__shipping"}
+ACCESSIBILITY_TITLE_SUFFIX_RE = re.compile(
+    r"\s+opens in (?:a )?new window or tab[.!]?\s*$", re.IGNORECASE
+)
 VOID_TAGS = {
     "area",
     "base",
@@ -69,6 +72,11 @@ def item_id_from_url(url: str) -> str | None:
 def _clean(parts: list[str]) -> str | None:
     text = " ".join(" ".join(parts).split())
     return text or None
+
+
+def _clean_title(title: str) -> str:
+    title = re.sub(r"^(?:New Listing|Open box)\s+", "", title).strip()
+    return ACCESSIBILITY_TITLE_SUFFIX_RE.sub("", title).strip()
 
 
 class _SearchParser(HTMLParser):
@@ -207,7 +215,7 @@ class _SearchParser(HTMLParser):
         title = _clean(current["title"]) or current["link_title"]
         if not title:
             return
-        title = re.sub(r"^(?:New Listing|Open box)\s+", "", title).strip()
+        title = _clean_title(title)
         self.result_ids.add(item_id)
         self.results.append(
             SearchResult(

@@ -355,16 +355,19 @@
 }
 
 .deal-watch-result {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 18px;
+  width: 100%;
+  box-sizing: border-box;
   padding: 11px 12px;
   border-top: 1px solid var(--line);
 }
 
 .deal-watch-result > div {
   display: grid;
+  min-width: 0;
   gap: 4px;
 }
 
@@ -376,7 +379,9 @@
 
 .deal-watch-result > span {
   display: flex;
+  min-width: 0;
   align-items: center;
+  justify-content: flex-end;
   gap: 9px;
 }
 
@@ -421,13 +426,15 @@
 
   .deal-watch-result {
     align-items: flex-start;
-    flex-direction: column;
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .deal-watch-result time,
   .deal-watch-result > span {
-    align-items: flex-start;
-    flex-direction: column;
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .deal-watch-result time {
     text-align: left;
   }
 }
