@@ -143,6 +143,29 @@ class SonosControllerTests(unittest.TestCase):
             self.assertEqual(controller.select("Solo"), "Solo")
             self.assertEqual(store.get("sonos_device"), "Solo")
 
+    def test_idle_track_sentinels_are_reported_as_missing_progress(self):
+        speaker = FakeSpeaker("Front", 28, "PAUSED_PLAYBACK")
+        speaker.track_info = {
+            "title": "",
+            "artist": "",
+            "album": "",
+            "position": "NOT_IMPLEMENTED",
+            "duration": "NOT_IMPLEMENTED",
+            "album_art": "",
+        }
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            store = dashboard.StateStore(os.path.join(tempdir, "state.json"))
+            controller = dashboard.SonosController(
+                store, discover_func=lambda timeout: {speaker}
+            )
+            now_playing = controller.snapshot()["now_playing"]
+
+        self.assertEqual(now_playing["title"], "Nothing playing")
+        self.assertEqual(now_playing["position"], "")
+        self.assertEqual(now_playing["duration"], "")
+        self.assertIsNone(now_playing["album_art"])
+
     def test_invalid_transport_action_fails_before_discovery(self):
         controller = dashboard.SonosController(
             dashboard.StateStore("/dev/null"),

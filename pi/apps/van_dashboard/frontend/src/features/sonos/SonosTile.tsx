@@ -26,7 +26,9 @@ export function SonosTile({
       <Tile
         icon="🔊"
         title="Sonos"
-        summary={error?.message ?? 'Finding speakers and current playback…'}
+        summary={
+          error ? 'Could not read current Sonos status' : 'Finding speakers and current playback…'
+        }
         status={
           <button className="sonos-tile__speaker-summary" type="button" onClick={onOpen}>
             {error ? 'Unavailable' : 'Finding…'}

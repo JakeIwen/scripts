@@ -106,6 +106,22 @@ describe('Sonos response decoder', () => {
     expect(status.group).toEqual({ volume: 61, muted: false });
   });
 
+  it('treats the Sonos idle clock sentinel as unavailable progress', () => {
+    const payload = sonosPayload();
+    const nowPlaying = payload.now_playing as Record<string, unknown>;
+    nowPlaying.title = 'Nothing playing';
+    nowPlaying.position = 'NOT_IMPLEMENTED';
+    nowPlaying.duration = 'NOT_IMPLEMENTED';
+    nowPlaying.transport_state = 'PAUSED_PLAYBACK';
+    nowPlaying.album_art = null;
+
+    const status = decodeSonosStatus(payload);
+
+    expect(status.nowPlaying.positionSeconds).toBeNull();
+    expect(status.nowPlaying.durationSeconds).toBeNull();
+    expect(projectTrackProgress(status.nowPlaying, 1_000, 6_000)).toBeNull();
+  });
+
   it('rejects unsafe art paths, invalid clocks, and mismatched coordinators', () => {
     const unsafeArt = sonosPayload();
     (unsafeArt.now_playing as Record<string, unknown>).album_art = 'http://speaker/art.jpg';
@@ -155,6 +171,22 @@ describe('Sonos polling and local progress', () => {
 });
 
 describe('Sonos views', () => {
+  it('keeps decoder details out of the unavailable tile', () => {
+    render(
+      <SonosTile
+        status={null}
+        error={new Error('now_playing.position must use H:MM:SS or MM:SS clock text')}
+        refreshing={false}
+        progress={null}
+        controls={controlMocks()}
+        onOpen={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Could not read current Sonos status')).toBeInTheDocument();
+    expect(screen.queryByText(/H:MM:SS/)).not.toBeInTheDocument();
+  });
+
   it('shows playback and opens the control sheet', () => {
     const status = decodeSonosStatus(sonosPayload());
     const progress = projectTrackProgress(status.nowPlaying, 1_000, 6_000);

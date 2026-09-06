@@ -47,7 +47,9 @@ function transportState(value: unknown): SonosTransportState {
 /** Parse Sonos H:MM:SS or MM:SS clock text at the API boundary. */
 export function decodeSonosClock(value: unknown, label: string): number | null {
   const text = stringValue(value, label);
-  if (text === '') return null;
+  // Sonos/UPnP uses NOT_IMPLEMENTED when an idle queue has no meaningful
+  // position or duration. Treat it as absent progress, not a broken speaker.
+  if (text === '' || text === 'NOT_IMPLEMENTED') return null;
 
   const parts = text.split(':');
   if ((parts.length !== 2 && parts.length !== 3) || parts.some((part) => !/^\d+$/.test(part))) {

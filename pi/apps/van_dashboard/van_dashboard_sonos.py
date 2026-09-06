@@ -111,8 +111,8 @@ class SonosController:
             "title": track.get("title") or track.get("radio_show") or "Nothing playing",
             "artist": track.get("artist") or track.get("album") or "",
             "album": track.get("album") or "",
-            "position": track.get("position") or "",
-            "duration": track.get("duration") or "",
+            "position": self._track_clock(track.get("position")),
+            "duration": self._track_clock(track.get("duration")),
             "transport_state": transport_state,
             "album_art": self.album_art_path(track.get("album_art")),
         }
@@ -143,6 +143,11 @@ class SonosController:
             "now_playing": now_playing,
             "speakers": speakers,
         }
+
+    @staticmethod
+    def _track_clock(value):
+        """Normalize SoCo's idle/no-media clock sentinel to no progress data."""
+        return "" if value in (None, "", "NOT_IMPLEMENTED") else value
 
     @staticmethod
     def album_art_path(art_url):
