@@ -268,6 +268,7 @@ join_by() { local IFS="$1"; shift; echo "$*"; }
 export POSPATH="$HOME/vlc-positions.txt"
 export VLCQTPATH="$HOME/.config/vlc/vlc-qt-interface.conf"
 alias mounts='grep "dev/sd" /proc/mounts'
+alias blklbl='sudo /sbin/blkid -s LABEL -o value'
 alias blk="sudo blkid | grep 'dev/sd'"
 alias drives="sudo lsblk -o NAME,FSTYPE,SIZE,MOUNTPOINT,LABEL"
 alias pp="vlcmd PlayPause"
