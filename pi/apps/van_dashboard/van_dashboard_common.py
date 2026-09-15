@@ -208,20 +208,9 @@ SYSTEM_POWER_TIMEOUT = float(
 )
 TUYA_POLL_INTERVAL = float(os.environ.get("VAN_DASHBOARD_TUYA_POLL_INTERVAL", "15"))
 POLICYCTL_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_POLICYCTL_TIMEOUT", "130"))
-COP_LED_TARGET = os.environ.get("VAN_DASHBOARD_COP_LED_TARGET", "light.ext_led")
-# Captured from solder_led on 2026-07-18. COP ALERT deliberately uses this
-# fixed look; it does not query or depend on solder_led at activation time.
-COP_LED_BRIGHTNESS = 255
-COP_LED_COLOR_TEMP_KELVIN = 2702
-COP_LED_RETRY_INTERVAL = float(os.environ.get("VAN_DASHBOARD_COP_LED_RETRY_INTERVAL", "5"))
-COP_LED_VERIFY_INTERVAL = float(
-    os.environ.get("VAN_DASHBOARD_COP_LED_VERIFY_INTERVAL", "30")
-)
-COP_LED_CONNECT_GRACE = float(os.environ.get("VAN_DASHBOARD_COP_LED_CONNECT_GRACE", "90"))
 
 NTFY_INTERVAL = float(os.environ.get("VAN_DASHBOARD_NTFY_INTERVAL", "300"))
 NTFY_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_NTFY_TIMEOUT", "20"))
-FLOOD_CHECK_INTERVAL = float(os.environ.get("VAN_DASHBOARD_FLOOD_CHECK_INTERVAL", "15"))
 
 DEFAULT_SONOS_DEVICE = os.environ.get("VAN_DASHBOARD_SONOS_DEVICE", "vonFront")
 SONOS_ART_TIMEOUT = 5

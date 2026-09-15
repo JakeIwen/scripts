@@ -148,17 +148,15 @@ While active, the dashboard:
 
 - persists the active state in `/home/pi/.van_dashboard_state.json`;
 - publishes requested intent through `/run/van-dashboard/cop-alert.active`;
-- keeps Home Assistant entity `switch.ext_flood` on while the ignition marker is
-  absent;
-- asynchronously configures `light.ext_led` to fixed brightness `255/255` and
-  `2702 K`, then reads it back for confirmation;
+- drives BCM GPIO17 (physical pin 11) high for the USB Touchlight relay while
+  the ignition marker is absent, and low while ignition is on;
 - starts a single-flight background send of `🥓 COP ALERT is active` through
   `ntfy_send.sh` immediately on activation and every five minutes. A bounded
   curl timeout, exception containment, and retry scheduling keep a disconnected
   network from blocking the request or the COP-alert maintenance loop.
 
 Turning COP ALERT off removes the requested-intent marker, stops ntfy messages,
-and turns `ext_flood` off. If the service restarts while the persisted state is
+and turns the GPIO17 relay off. If the service restarts while the persisted state is
 active, it republishes the marker and resumes the exterior alert behavior.
 
 The dashboard is CAN-free: it does not import SocketCAN or ISO-TP, inspect a
@@ -179,25 +177,52 @@ the last blocked reason, detail, and timestamp remain visible after disarming.
 After a successful intent change, the browser briefly polls the ordinary status
 API at 500 ms intervals, then returns to its normal five-second refresh.
 
-## Exterior LED matching
+## USB relay lighting
 
-The COP ALERT request is not blocked by the exterior light. A separate worker
-waits for `light.ext_led` to join Wi-Fi after `ext_flood` supplies power, then
-uses `tuya_light.sh` to apply and read back the desired light settings. It
-retries every five seconds while the target is unavailable and re-verifies a
-confirmed light every 30 seconds. The tile shows `Waiting for ext_led Wi-Fi`
-during a 90-second connection grace period, then `ext_led unavailable · still
-retrying` if RF remains blocked. Neither state disables the alert, CAN wake,
-`ext_flood`, or ntfy behavior.
+The user-tested active-high relay switches the USB Touchlight through COM/NO.
+The hub powers the lamp and relay; GPIO17 supplies only the control signal.
+The control input has a hardware pull-down. Software controls on/off only;
+brightness is set on the Touchlight itself.
 
-The fixed look—brightness `255/255` (100%) and `2702 K` in color-temperature
-mode—was captured from `light.solder_led` on 2026-07-18. The worker never reads
-or depends on `solder_led` during COP ALERT. It pauses while the ignition marker
-is present and resumes when the marker clears.
+`CopRelayManager` exclusively requests GPIO17 using Raspberry Pi OS's libgpiod
+v1 Python API, checks the BCM2711 controller/line identity, initializes low and
+keeps the request for the service lifetime. COP button changes update the relay
+immediately; the maintenance loop checks ignition and GPIO readback every second.
+An occupied pin or GPIO error is reported and retried without taking the line
+from another consumer. Lighting failures do not cancel COP intent or ntfy.
+
+The `cop_led` API key is retained for the React tile, now reporting target
+`GPIO17`, backend `gpio-relay`, and `state` on/off/unknown. `confirmed` means GPIO
+readback agrees, not that lamp current or optical output has been measured.
+`cop_alert.relay_state` replaces the old `cop_alert.ext_flood` field.
+
+Normal SIGTERM/exit cleanup drives low before releasing the GPIO. The systemd
+`ExecStopPost` helper requests low again after termination, including a crash or
+forced kill; it refuses an occupied line. A frozen process that continues to own
+the line high can still leave the light on until systemd stops it. Restarting with
+persisted COP intent briefly initializes low, then resumes on if ignition is off.
+
+COP ALERT no longer reads or controls `switch.ext_flood` or `light.ext_led`.
+They remain available through ordinary lighting controls. Ignition may turn off
+`ext_flood` normally; `cop_alert_ext_flood_guard.sh` is a compatibility shim that
+always permits this. Obsolete `VAN_DASHBOARD_COP_LED_*` and flood-check settings
+are no longer used.
+
+Read-only verification on the Pi:
+
+```bash
+curl -fsS http://localhost:8788/api/status | jq '{cop_alert, cop_led}'
+gpioinfo gpiochip0 | grep '"GPIO17"'
+```
+
+Expect the consumer `cop-alert-light`. Do not use manual `gpioset`/`pinctrl`
+commands while the dashboard owns the line.
 
 ## Dependencies
 
-The system Python used by the service needs `flask` and `soco`.
+The system Python used by the service needs `flask`, `soco`, and the libgpiod v1
+binding (`python3-libgpiod`, already present on the deployed Pi). The service
+uses the `gpio` supplementary group for `/dev/gpiochip0` access.
 The existing speed-test script needs `speedtest-cli`; the connectivity
 collector adds no Python packages or router-side software.
 The existing `tuya_toggle.sh`, `tuya_status.sh`, and `ntfy_send.sh` scripts plus

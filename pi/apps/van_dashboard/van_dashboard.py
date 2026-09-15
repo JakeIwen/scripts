@@ -20,6 +20,7 @@ import os
 import plistlib
 import re
 import shlex
+import signal
 import sqlite3
 import stat
 import subprocess
@@ -135,7 +136,8 @@ app = Flask(__name__, static_folder=None)
 state_store = StateStore()
 cop_alert = CopAlertManager(state_store)
 cop_can_wake = CopCanWakeStatusReader()
-cop_led = CopLedManager(state_store)
+# Retain the API field used by the React tile; there is only one relay owner.
+cop_led = cop_alert.light
 sonos = SonosController(state_store)
 connectivity = ConnectivityMonitor()
 openwrt_clients = OpenWrtClientsController()
@@ -1405,7 +1407,6 @@ def api_cop_alert():
         return api_error("active must be true or false", 400)
     active = raw in ("1", "true", "on")
     status = cop_alert.set_active(active)
-    cop_led.notify()
     verb = "armed" if active else "disarmed"
     return jsonify({"ok": True, "message": f"COP ALERT {verb}", "cop_alert": status})
 
@@ -1589,8 +1590,14 @@ def index():
 
 
 if __name__ == "__main__":
-    cop_alert.start()
-    cop_led.start()
-    connectivity.start()
-    starlink.start()
-    app.run(host="0.0.0.0", port=PORT, threaded=True)
+    def terminate(_signum, _frame):
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, terminate)
+    try:
+        cop_alert.start()
+        connectivity.start()
+        starlink.start()
+        app.run(host="0.0.0.0", port=PORT, threaded=True)
+    finally:
+        cop_alert.stop()

@@ -23,10 +23,12 @@ ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_v
 ExecStartPre=/usr/bin/test -x /home/pi/scripts/safe_reboot.sh
 ExecStartPre=/usr/bin/test -x /home/pi/scripts/safe_power_down.sh
 ExecStart=/usr/bin/python3 /home/pi/scripts/python-automation/van_dashboard.py
+ExecStopPost=/usr/bin/python3 /home/pi/scripts/python-automation/van_dashboard_cop.py --relay-off
 WorkingDirectory=/home/pi
 Restart=always
 RestartSec=5
 User=pi
+SupplementaryGroups=gpio
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=/home/pi/van_compute/scripts
 Environment=VAN_DASHBOARD_FRONTEND_ROOT=/home/pi/scripts/van-dashboard-preview/current

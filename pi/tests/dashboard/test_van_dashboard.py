@@ -2786,83 +2786,156 @@ class SpeedTestManagerTests(unittest.TestCase):
         self.assertEqual(status["completed_at"], 1234)
 
 
-class CopLedManagerTests(unittest.TestCase):
+class FakeRelayLine:
+    def __init__(self):
+        self.value = 1  # exercise the initial-low request
+        self.requested = False
+        self.events = []
+        self.busy = False
+        self.reject_write = False
+
+    def name(self):
+        return "GPIO17"
+
+    def request(self, **kwargs):
+        if self.busy or self.requested:
+            raise OSError("Device or resource busy")
+        self.requested = True
+        self.value = kwargs["default_val"]
+        self.events.append(("request", kwargs))
+
+    def get_value(self):
+        return self.value
+
+    def set_value(self, value):
+        if self.reject_write:
+            raise OSError("write failed")
+        self.value = value
+        self.events.append(("write", value))
+
+    def release(self):
+        self.requested = False
+        self.events.append(("release", self.value))
+
+
+class FakeRelayChip:
+    def __init__(self, line):
+        self.line = line
+        self.closed = False
+        self.identity = "pinctrl-bcm2711"
+
+    def label(self):
+        return self.identity
+
+    def get_line(self, offset):
+        assert offset == 17
+        return self.line
+
+    def close(self):
+        self.closed = True
+
+
+def fake_relay():
+    line = FakeRelayLine()
+    chip = FakeRelayChip(line)
+
+    def open_chip(name):
+        assert name == "gpiochip0"
+        chip.closed = False
+        return chip
+
+    gpio = SimpleNamespace(
+        Chip=open_chip, LINE_REQ_DIR_OUT=3, LINE_REQ_FLAG_BIAS_PULL_DOWN=16
+    )
+    relay = dashboard.CopRelayManager(gpio_module=gpio, wall_clock=lambda: 1234)
+    return relay, line, chip
+
+
+class CopRelayManagerTests(unittest.TestCase):
     def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.store = dashboard.StateStore(os.path.join(self.tempdir.name, "state.json"))
-        self.clock = FakeClock()
-        self.ignition = False
-        self.target = {
-            "state": "unavailable",
-            "brightness": None,
-            "color_temp_kelvin": None,
-        }
-        self.calls = []
+        self.relay, self.line, self.chip = fake_relay()
 
-        def command(args, timeout):
-            self.calls.append(tuple(args))
-            if args[1:3] == ["status", "light.ext_led"]:
-                return SimpleNamespace(returncode=0, stdout=json.dumps(self.target), stderr="")
-            if args[1:3] == ["set", "light.ext_led"]:
-                self.target = {
-                    "state": "on",
-                    "brightness": int(args[3]),
-                    "color_temp_kelvin": int(args[4]),
-                }
-                return SimpleNamespace(returncode=0, stdout="{}", stderr="")
-            raise AssertionError(args)
+    def test_lazy_import_and_snapshot_do_not_claim_gpio(self):
+        self.assertEqual(self.relay.snapshot()["state"], "unknown")
+        self.assertEqual(self.line.events, [])
 
-        self.manager = dashboard.CopLedManager(
-            self.store,
-            command=command,
-            ignition_on=lambda: self.ignition,
-            clock=self.clock,
-            wall_clock=lambda: 1_700_000_000 + self.clock(),
-            retry_interval=5,
-            verify_interval=30,
-        )
+    def test_initial_low_then_on_and_idempotent_readback(self):
+        status = self.relay.update(True, False)
+        self.assertEqual(status["state"], "on")
+        self.assertEqual(status["phase"], "confirmed")
+        self.assertEqual(self.line.events[0][1], {
+            "consumer": "cop-alert-light", "type": 3, "flags": 16, "default_val": 0,
+        })
+        self.assertEqual(self.line.events[1], ("write", 1))
+        before = list(self.line.events)
+        self.relay.update(True, False)
+        self.assertEqual(before, self.line.events)
+        self.assertIn("not measured", status["verification"])
 
-    def tearDown(self):
-        self.tempdir.cleanup()
+    def test_ignition_pauses_and_resumes_and_disarm_is_low(self):
+        self.relay.update(True, False)
+        self.assertEqual(self.relay.update(True, True)["phase"], "paused")
+        self.assertEqual(self.line.value, 0)
+        self.relay.update(True, False)
+        self.assertEqual(self.line.value, 1)
+        self.assertEqual(self.relay.update(False, False)["phase"], "inactive")
+        self.assertEqual(self.line.value, 0)
 
-    def test_waits_for_wifi_then_applies_and_confirms_fixed_settings(self):
-        self.store.set("cop_alert", True)
-        waiting = self.manager.tick()
-        self.assertEqual(waiting["phase"], "waiting")
-        self.assertEqual(
-            waiting["desired"], {"brightness": 255, "color_temp_kelvin": 2702}
-        )
-        self.assertFalse(any(call[1] == "set" for call in self.calls))
+    def test_stop_drives_low_before_release_and_cannot_reactivate(self):
+        self.relay.update(True, False)
+        self.relay.stop()
+        self.assertEqual(self.line.events[-2:], [("write", 0), ("release", 0)])
+        self.assertTrue(self.chip.closed)
+        self.relay.update(True, False)
+        self.assertFalse(self.line.requested)
+        self.assertEqual(self.line.value, 0)
+        self.relay.stop()  # idempotent
 
-        self.target = {"state": "off", "brightness": 1, "color_temp_kelvin": 6500}
-        self.clock.advance(5)
-        confirmed = self.manager.tick()
-        self.assertEqual(confirmed["phase"], "confirmed")
-        self.assertIn("100%", confirmed["message"])
-        self.assertEqual(self.target["brightness"], 255)
-        self.assertEqual(self.target["color_temp_kelvin"], 2702)
-        self.assertTrue(any(call[1] == "set" for call in self.calls))
+    def test_busy_line_reports_error_without_touching_owner_then_retries(self):
+        self.line.busy = True
+        status = self.relay.update(True, False)
+        self.assertEqual(status["state"], "unknown")
+        self.assertIn("busy", status["last_error"])
+        self.assertEqual(self.line.events, [])
+        self.assertTrue(self.chip.closed)
+        self.line.busy = False
+        self.assertEqual(self.relay.update(True, False)["state"], "on")
 
-    def test_pauses_while_ignition_is_on_and_does_not_touch_light(self):
-        self.store.set("cop_alert", True)
-        self.ignition = True
-        status = self.manager.tick()
-        self.assertEqual(status["phase"], "paused")
-        self.assertEqual(self.calls, [])
+    def test_wrong_chip_fails_closed(self):
+        self.chip.identity = "other-controller"
+        status = self.relay.update(True, False)
+        self.assertEqual(status["phase"], "error")
+        self.assertEqual(self.line.events, [])
+        self.assertTrue(self.chip.closed)
 
-    def test_reports_unavailable_after_wifi_grace_but_keeps_retrying(self):
-        self.store.set("cop_alert", True)
-        self.assertEqual(self.manager.tick()["phase"], "waiting")
-        self.clock.advance(dashboard.COP_LED_CONNECT_GRACE)
-        status = self.manager.tick()
-        self.assertEqual(status["phase"], "unavailable")
-        self.assertIn("still retrying", status["message"])
-        self.assertIsNotNone(status["last_error"])
+    def test_write_failure_is_not_confirmed_and_can_recover(self):
+        self.relay.update(False, False)
+        self.line.reject_write = True
+        status = self.relay.update(True, False)
+        self.assertEqual(status["phase"], "error")
+        self.assertIsNone(status["confirmed_at"])
+        self.line.reject_write = False
+        self.assertEqual(self.relay.update(True, False)["state"], "on")
 
-    def test_inactive_alert_never_queries_or_sets_lights(self):
-        status = self.manager.tick()
-        self.assertEqual(status["phase"], "inactive")
-        self.assertEqual(self.calls, [])
+    def test_wrong_line_name_fails_closed(self):
+        self.line.name = lambda: "GPIO18"
+        self.assertEqual(self.relay.update(True, False)["phase"], "error")
+        self.assertEqual(self.line.events, [])
+        self.assertTrue(self.chip.closed)
+
+    def test_failed_initial_low_releases_claim_and_chip(self):
+        self.line.get_value = lambda: 1
+        self.assertEqual(self.relay.update(True, False)["phase"], "error")
+        self.assertFalse(self.line.requested)
+        self.assertTrue(self.chip.closed)
+        self.assertNotIn(("write", 1), self.line.events)
+
+    def test_readback_mismatch_attempts_low(self):
+        self.relay.update(False, False)
+        self.line.get_value = lambda: 0
+        status = self.relay.update(True, False)
+        self.assertEqual(status["phase"], "error")
+        self.assertEqual(self.line.events[-1], ("write", 0))
 
 
 class CopCanWakeStatusReaderTests(unittest.TestCase):
@@ -3028,23 +3101,19 @@ class CopAlertManagerTests(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory()
         self.clock = FakeClock()
         self.ignition = False
-        self.entity_state = "off"
+        self.light, self.line, self.chip = fake_relay()
         self.calls = []
         self.store = dashboard.StateStore(os.path.join(self.tempdir.name, "state.json"))
 
         def command(args, timeout):
             self.calls.append(tuple(args))
-            if args[0] == dashboard.TUYA_STATUS:
-                return SimpleNamespace(stdout=self.entity_state + "\n", stderr="", returncode=0)
-            if args[0] == dashboard.TUYA_TOGGLE:
-                self.entity_state = args[2]
-                return SimpleNamespace(stdout=args[2] + "\n", stderr="", returncode=0)
             if args[0] == dashboard.NTFY_SEND:
                 return SimpleNamespace(stdout="", stderr="", returncode=0)
             raise AssertionError(args)
 
         self.manager = dashboard.CopAlertManager(
             self.store,
+            light=self.light,
             command=command,
             ignition_on=lambda: self.ignition,
             runtime_dir=os.path.join(self.tempdir.name, "run"),
@@ -3054,6 +3123,7 @@ class CopAlertManagerTests(unittest.TestCase):
 
     def tearDown(self):
         self.wait_for_ntfy()
+        self.manager.stop()
         self.tempdir.cleanup()
 
     def wait_for_ntfy(self, manager=None):
@@ -3063,29 +3133,29 @@ class CopAlertManagerTests(unittest.TestCase):
             worker.join(1)
             self.assertFalse(worker.is_alive(), "ntfy test worker did not finish")
 
-    def test_marker_and_exterior_alert_follow_requested_state_and_ignition(self):
+    def test_marker_and_relay_follow_requested_state_and_ignition(self):
         status = self.manager.set_active(True)
         self.assertTrue(status["active"])
-        self.assertEqual(self.entity_state, "on")
+        self.assertEqual(self.line.value, 1)
         self.assertTrue(os.path.isfile(self.manager.active_marker))
         self.wait_for_ntfy()
         self.assertTrue(any(call[0] == dashboard.NTFY_SEND for call in self.calls))
 
         self.manager.tick()
-        self.assertEqual(self.entity_state, "on")
+        self.assertEqual(self.line.value, 1)
 
         self.ignition = True
-        self.clock.advance(dashboard.FLOOD_CHECK_INTERVAL + 1)
+        self.clock.advance(1)
         self.manager.tick()
-        self.assertEqual(self.entity_state, "off")
+        self.assertEqual(self.line.value, 0)
 
         self.ignition = False
-        self.clock.advance(dashboard.FLOOD_CHECK_INTERVAL + 1)
+        self.clock.advance(1)
         self.manager.tick()
-        self.assertEqual(self.entity_state, "on")
+        self.assertEqual(self.line.value, 1)
 
         self.manager.set_active(False)
-        self.assertEqual(self.entity_state, "off")
+        self.assertEqual(self.line.value, 0)
         self.assertFalse(os.path.exists(self.manager.active_marker))
 
     def test_state_persists_across_manager_recreation(self):
@@ -3115,6 +3185,7 @@ class CopAlertManagerTests(unittest.TestCase):
 
         manager = dashboard.CopAlertManager(
             self.store,
+            light=self.light,
             command=command,
             ignition_on=lambda: self.ignition,
             runtime_dir=os.path.join(self.tempdir.name, "nonblocking-run"),
@@ -3148,6 +3219,7 @@ class CopAlertManagerTests(unittest.TestCase):
 
         manager = dashboard.CopAlertManager(
             self.store,
+            light=self.light,
             command=command,
             ignition_on=lambda: self.ignition,
             runtime_dir=os.path.join(self.tempdir.name, "failure-run"),
@@ -3159,6 +3231,59 @@ class CopAlertManagerTests(unittest.TestCase):
         self.assertTrue(manager.snapshot()["active"])
         self.assertIn("network unavailable", manager.snapshot()["last_error"])
         manager.tick()
+
+
+    def test_gpio_failure_keeps_intent_and_is_reported_without_tuya(self):
+        self.line.busy = True
+        status = self.manager.set_active(True)
+        self.assertTrue(status["active"])
+        self.assertTrue(os.path.isfile(self.manager.active_marker))
+        self.assertEqual(status["relay_state"], "unknown")
+        self.assertIn("busy", status["last_error"])
+        self.wait_for_ntfy()
+        self.assertTrue(all(call[0] == dashboard.NTFY_SEND for call in self.calls))
+        self.line.busy = False
+        self.manager.tick()
+        self.assertEqual(self.manager.snapshot()["relay_state"], "on")
+
+    def test_restart_restores_intent_without_reusing_gpio_claim(self):
+        self.manager.set_active(True)
+        self.wait_for_ntfy()
+        self.manager.stop()
+        self.assertEqual(self.line.value, 0)
+        light, line, _chip = fake_relay()
+        manager = dashboard.CopAlertManager(
+            dashboard.StateStore(self.store.path),
+            command=lambda *_a, **_k: SimpleNamespace(returncode=0, stdout="", stderr=""),
+            runtime_dir=self.tempdir.name,
+            light=light, ignition_on=lambda: False,
+        )
+        manager.tick()
+        self.wait_for_ntfy(manager)
+        self.assertEqual(line.value, 1)
+        manager.stop()
+        manager.tick()
+        self.assertEqual(line.value, 0)
+        with self.assertRaises(RuntimeError):
+            manager.set_active(True)
+
+    def test_service_post_stop_cleanup_uses_exclusive_gpio_request(self):
+        unit = (REPOSITORY_ROOT / "pi/services/van-dashboard.service").read_text()
+        self.assertIn("van_dashboard_cop.py --relay-off", unit)
+        self.assertIn("SupplementaryGroups=gpio", unit)
+
+    def test_cop_endpoint_uses_the_same_relay(self):
+        with mock.patch.object(dashboard, "cop_alert", self.manager), \
+             mock.patch.object(dashboard, "cop_led", self.light):
+            client = dashboard.app.test_client()
+            on = client.post("/api/cop-alert", data={"active": "true"})
+            self.assertEqual(on.status_code, 200)
+            self.assertEqual(on.json["cop_alert"]["relay_state"], "on")
+            self.assertEqual(self.light.snapshot()["target"], "GPIO17")
+            self.assertNotIn("ext_flood", on.json["cop_alert"])
+            off = client.post("/api/cop-alert", data={"active": "false"})
+            self.assertEqual(off.status_code, 200)
+            self.assertEqual(self.line.value, 0)
 
 
 class BackupManagerTests(unittest.TestCase):

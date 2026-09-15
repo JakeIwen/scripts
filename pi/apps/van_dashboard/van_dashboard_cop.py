@@ -7,7 +7,7 @@ layout used by the deployed van-dashboard service.
 __all__ = [
     "CopAlertManager",
     "CopCanWakeStatusReader",
-    "CopLedManager",
+    "CopRelayManager",
     "ignition_is_on",
 ]
 
@@ -17,23 +17,12 @@ if __package__:
         COP_CAN_WAKE_SERVICE,
         COP_CAN_WAKE_STATUS,
         COP_CAN_WAKE_STATUS_MAX_BYTES,
-        COP_LED_BRIGHTNESS,
-        COP_LED_COLOR_TEMP_KELVIN,
-        COP_LED_CONNECT_GRACE,
-        COP_LED_RETRY_INTERVAL,
-        COP_LED_TARGET,
-        COP_LED_VERIFY_INTERVAL,
-        FLOOD_CHECK_INTERVAL,
         IGNITION_MARKER,
         NTFY_INTERVAL,
         NTFY_SEND,
         NTFY_TIMEOUT,
         RUNTIME_DIR,
         SYSTEMCTL,
-        TUYA_LIGHT,
-        TUYA_STATUS,
-        TUYA_TOGGLE,
-        copy,
         json,
         math,
         os,
@@ -49,23 +38,12 @@ else:
         COP_CAN_WAKE_SERVICE,
         COP_CAN_WAKE_STATUS,
         COP_CAN_WAKE_STATUS_MAX_BYTES,
-        COP_LED_BRIGHTNESS,
-        COP_LED_COLOR_TEMP_KELVIN,
-        COP_LED_CONNECT_GRACE,
-        COP_LED_RETRY_INTERVAL,
-        COP_LED_TARGET,
-        COP_LED_VERIFY_INTERVAL,
-        FLOOD_CHECK_INTERVAL,
         IGNITION_MARKER,
         NTFY_INTERVAL,
         NTFY_SEND,
         NTFY_TIMEOUT,
         RUNTIME_DIR,
         SYSTEMCTL,
-        TUYA_LIGHT,
-        TUYA_STATUS,
-        TUYA_TOGGLE,
-        copy,
         json,
         math,
         os,
@@ -276,6 +254,7 @@ class CopAlertManager:
         runtime_dir=RUNTIME_DIR,
         clock=time.monotonic,
         wall_clock=time.time,
+        light=None,
     ):
         self.store = store
         self.command = command
@@ -287,92 +266,81 @@ class CopAlertManager:
         self.lock = threading.RLock()
         self.stop_event = threading.Event()
         self.thread = None
-        self.ext_flood = "unknown"
+        self.light = light if light is not None else CopRelayManager(wall_clock=wall_clock)
         self.errors = {}
         self.last_ntfy = None
         self.ntfy_pending = False
         self.ntfy_thread = None
-        self.next_flood_check = 0.0
         self.next_ntfy = 0.0
 
     def start(self):
         os.makedirs(self.runtime_dir, mode=0o750, exist_ok=True)
+        # Claim the line low before restoring persisted intent.
+        self.light.update(False, False)
         if not self.thread:
             self.thread = threading.Thread(target=self._loop, name="cop-alert", daemon=True)
             self.thread.start()
 
     def stop(self):
-        self.stop_event.set()
+        # Serialize against both request threads and the maintenance loop.
+        with self.lock:
+            self.stop_event.set()
+            self.light.stop()
 
     @property
     def active(self):
         return bool(self.store.get("cop_alert", False))
 
     def set_active(self, active):
-        active = bool(active)
-        was_active = self.active
-        self.store.set("cop_alert", active)
         with self.lock:
+            if self.stop_event.is_set():
+                raise RuntimeError("COP ALERT manager is stopping")
+            active = bool(active)
+            was_active = self.active
+            self.store.set("cop_alert", active)
             self.errors.clear()
             if active:
                 self._touch(self.active_marker)
-                self.next_flood_check = 0.0
                 if not was_active:
                     self.next_ntfy = 0.0
             else:
                 self._remove(self.active_marker)
 
-        # Begin the activation notification before touching the Wi-Fi Tuya
-        # device. The single-flight worker keeps a slow or disconnected ntfy
-        # endpoint off both the request thread and the COP maintenance loop.
-        if active and not was_active:
-            self._queue_ntfy(self.clock())
-
-        # Give the button immediate, deterministic switch behavior.  Background
-        # retries and status reporting handle a temporarily unavailable HA API.
-        desired = "on" if active and not self.ignition_on() else "off"
-        ok, message = self._set_ext_flood(desired)
-        if not ok:
-            self._set_error("ext_flood", message)
-        return self.snapshot()
+            # GPIO commands are local and serialized. Never call Tuya lighting.
+            self.light.update(active, self.ignition_on())
+            if active and not was_active:
+                self._queue_ntfy(self.clock())
+            return self.snapshot()
 
     def snapshot(self):
         with self.lock:
-            last_error = "; ".join(self.errors.values()) or None
+            light = self.light.snapshot()
+            messages = list(self.errors.values())
+            if light["last_error"]:
+                messages.append(light["last_error"])
             return {
                 "active": self.active,
                 "ignition_on": self.ignition_on(),
-                "ext_flood": self.ext_flood,
+                "relay_state": light["state"],
                 "last_ntfy": self.last_ntfy,
-                "last_error": last_error,
+                "last_error": "; ".join(messages) or None,
             }
 
     def tick(self):
-        """Run one manager iteration; separated for focused tests."""
-        now = self.clock()
-        if not self.active:
-            self._remove(self.active_marker)
-            if now >= self.next_flood_check:
-                self.next_flood_check = now + FLOOD_CHECK_INTERVAL
-                self._get_ext_flood()
-            return
-
-        self._touch(self.active_marker)
-        ignition_on = self.ignition_on()
-
-        if now >= self.next_flood_check:
-            self.next_flood_check = now + FLOOD_CHECK_INTERVAL
-            desired = "off" if ignition_on else "on"
-            actual = self._get_ext_flood()
-            if actual != desired:
-                ok, message = self._set_ext_flood(desired)
-                if not ok:
-                    self._set_error("ext_flood", message)
-
-        if now >= self.next_ntfy:
-            self._queue_ntfy(now)
-
-        self._set_error("manager", None)
+        """Reconcile the dedicated relay every second, including while inactive."""
+        with self.lock:
+            if self.stop_event.is_set():
+                return
+            now = self.clock()
+            active = self.active
+            self.light.update(active, self.ignition_on())
+            if not active:
+                self._remove(self.active_marker)
+                return
+            self._touch(self.active_marker)
+            if now >= self.next_ntfy:
+                self._queue_ntfy(now)
+            self._set_error("manager", None)
 
     def _loop(self):
         while not self.stop_event.is_set():
@@ -381,36 +349,6 @@ class CopAlertManager:
             except Exception as exc:
                 self._set_error("manager", f"COP ALERT loop error: {exc}")
             self.stop_event.wait(1.0)
-
-    def _set_ext_flood(self, desired):
-        try:
-            result = self.command([TUYA_TOGGLE, "ext_flood", desired], timeout=20)
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            return False, f"ext_flood {desired} failed: {exc}"
-        if result.returncode:
-            detail = (result.stderr or result.stdout or "command failed").strip()
-            return False, f"ext_flood {desired} failed: {detail}"
-        with self.lock:
-            self.ext_flood = desired
-        self._set_error("ext_flood", None)
-        return True, f"ext_flood is {desired}"
-
-    def _get_ext_flood(self):
-        try:
-            result = self.command([TUYA_STATUS, "ext_flood"], timeout=20)
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            self._set_error("ext_flood", f"ext_flood status failed: {exc}")
-            return "unknown"
-        state = result.stdout.strip().lower()
-        if result.returncode == 0 and state in ("on", "off"):
-            with self.lock:
-                self.ext_flood = state
-            self._set_error("ext_flood", None)
-            return state
-        with self.lock:
-            self.ext_flood = "unknown"
-        self._set_error("ext_flood", "could not read ext_flood state")
-        return "unknown"
 
     def _queue_ntfy(self, now=None):
         now = self.clock() if now is None else now
@@ -484,253 +422,153 @@ class CopAlertManager:
             pass
 
 
-class CopLedManager:
-    """Apply and verify the COP ALERT exterior LED look off-thread."""
+class CopRelayManager:
+    """Own GPIO17 for the active-high relay; readback verifies GPIO, not light.
 
-    def __init__(
-        self,
-        store,
-        target=COP_LED_TARGET,
-        command=run_command,
-        ignition_on=ignition_is_on,
-        clock=time.monotonic,
-        wall_clock=time.time,
-        retry_interval=COP_LED_RETRY_INTERVAL,
-        verify_interval=COP_LED_VERIFY_INTERVAL,
-        connect_grace=COP_LED_CONNECT_GRACE,
-        brightness=COP_LED_BRIGHTNESS,
-        color_temp_kelvin=COP_LED_COLOR_TEMP_KELVIN,
-    ):
-        self.store = store
-        self.target = target
-        self.command = command
-        self.ignition_on = ignition_on
-        self.clock = clock
+    Uses the deployed Raspberry Pi OS libgpiod v1 Python API. Imports and line
+    requests are lazy so module imports and read-only API snapshots have no
+    hardware effects. One lock covers acquisition, writes, readback and stop.
+    """
+
+    def __init__(self, gpio_module=None, wall_clock=time.time):
+        self.gpio_module = gpio_module
         self.wall_clock = wall_clock
-        self.retry_interval = retry_interval
-        self.verify_interval = verify_interval
-        self.connect_grace = connect_grace
-        self.desired = {
-            "brightness": brightness,
-            "color_temp_kelvin": color_temp_kelvin,
-        }
-        self.lock = threading.Lock()
-        self.stop_event = threading.Event()
-        self.wake_event = threading.Event()
-        self.thread = None
-        self.was_active = False
-        self.connect_started_at = None
-        self.next_attempt = 0.0
+        self.lock = threading.RLock()
+        self.chip = None
+        self.line = None
+        self.stopped = False
+        self.state = "unknown"
         self.phase = "inactive"
-        self.message = "COP ALERT is off"
+        self.message = "USB light relay not initialized"
         self.last_error = None
         self.last_attempt = None
         self.confirmed_at = None
 
-    def start(self):
-        if not self.thread:
-            self.thread = threading.Thread(
-                target=self._loop, name="cop-alert-ext-led", daemon=True
+    def _acquire(self):
+        if self.line is not None:
+            return
+        gpio = self.gpio_module
+        if gpio is None:
+            import gpiod
+
+            gpio = gpiod
+        chip = gpio.Chip("gpiochip0")
+        line = None
+        requested = False
+        try:
+            if chip.label() != "pinctrl-bcm2711":
+                raise RuntimeError("refusing GPIO controller other than Pi 4 BCM2711")
+            line = chip.get_line(17)
+            if line.name() != "GPIO17":
+                raise RuntimeError("GPIO17 identity did not match")
+            line.request(
+                consumer="cop-alert-light",
+                type=gpio.LINE_REQ_DIR_OUT,
+                flags=gpio.LINE_REQ_FLAG_BIAS_PULL_DOWN,
+                default_val=0,
             )
-            self.thread.start()
+            requested = True
+            if line.get_value() != 0:
+                raise RuntimeError("GPIO17 initial low was not confirmed")
+        except Exception:
+            try:
+                if requested:
+                    try:
+                        line.set_value(0)
+                    finally:
+                        line.release()
+            finally:
+                chip.close()
+            raise
+        self.chip = chip
+        self.line = line
 
-    def stop(self):
-        self.stop_event.set()
-        self.wake_event.set()
-
-    def notify(self):
+    def update(self, active, ignition_on):
         with self.lock:
-            self.next_attempt = 0.0
-        self.wake_event.set()
+            if self.stopped:
+                return self.snapshot()
+            self.last_attempt = int(self.wall_clock())
+            desired = int(bool(active) and not ignition_on)
+            try:
+                self._acquire()
+                if self.line.get_value() != desired:
+                    self.line.set_value(desired)
+                if self.line.get_value() != desired:
+                    raise RuntimeError("GPIO17 readback did not match requested state")
+                self.state = "on" if desired else "off"
+                self.phase = (
+                    "confirmed" if desired else ("paused" if active else "inactive")
+                )
+                self.message = (
+                    "USB light relay on · GPIO17"
+                    if desired else
+                    ("Ignition on · USB light relay off" if active else "USB light relay off")
+                )
+                self.last_error = None
+                self.confirmed_at = int(self.wall_clock())
+            except Exception as exc:
+                self.state = "unknown"
+                self.phase = "error"
+                self.message = "USB light relay unavailable"
+                self.last_error = f"GPIO17 relay: {exc}"
+                self.confirmed_at = None
+                # If we own it, prefer low after an I/O/readback failure.
+                # Keep ownership so the next tick can retry; never steal a line.
+                if self.line is not None:
+                    try:
+                        self.line.set_value(0)
+                    except Exception:
+                        pass
+            return self.snapshot()
 
     def snapshot(self):
         with self.lock:
             return {
+                "target": "GPIO17",
+                "backend": "gpio-relay",
+                "state": self.state,
                 "phase": self.phase,
                 "message": self.message,
                 "last_error": self.last_error,
                 "last_attempt": self.last_attempt,
                 "confirmed_at": self.confirmed_at,
-                "desired": copy.deepcopy(self.desired),
-                "target": self.target,
+                "verification": "GPIO readback; lamp output is not measured",
             }
 
-    def tick(self):
-        now = self.clock()
-        active = bool(self.store.get("cop_alert", False))
+    def stop(self):
         with self.lock:
-            if not active:
-                self.was_active = False
-                self.connect_started_at = None
-                self.next_attempt = 0.0
-                self.phase = "inactive"
-                self.message = "COP ALERT is off"
-                self.last_error = None
-                self.confirmed_at = None
-                return self.snapshot_unlocked()
-            if not self.was_active:
-                self.was_active = True
-                self.connect_started_at = now
-                self.next_attempt = 0.0
-                self.phase = "preparing"
-                self.message = "Preparing ext_led"
-                self.last_error = None
-                self.confirmed_at = None
-            if now < self.next_attempt:
-                return self.snapshot_unlocked()
-            self.last_attempt = int(self.wall_clock())
-
-        if self.ignition_on():
-            with self.lock:
-                self.connect_started_at = None
-            self._schedule(
-                "paused",
-                "Ignition on · exterior alert is paused",
-                None,
-                now + self.retry_interval,
-            )
-            return self.snapshot()
-
-        with self.lock:
-            if self.connect_started_at is None:
-                self.connect_started_at = now
-
-        with self.lock:
-            desired = copy.deepcopy(self.desired)
-
-        target_status, target_error = self._read_light(self.target)
-        if target_error or not target_status or target_status.get("state") == "unavailable":
-            with self.lock:
-                waiting_for = now - self.connect_started_at
-            if waiting_for >= self.connect_grace:
-                message = "ext_led unavailable · still retrying"
-                error = target_error or (
-                    f"{self.target} did not join Wi-Fi within {self.connect_grace:g} seconds"
-                )
-                phase = "unavailable"
-            else:
-                message = "Waiting for ext_led Wi-Fi"
-                error = target_error
-                phase = "waiting"
-            self._schedule(phase, message, error, now + self.retry_interval)
-            return self.snapshot()
-
-        if self._matches(target_status, desired):
-            self._confirmed(desired, now)
-            return self.snapshot()
-
-        with self.lock:
-            self.phase = "applying"
-            self.message = "Applying ext_led brightness and color"
-            self.last_error = None
-        set_error = self._set_light(self.target, desired)
-        if set_error:
-            self._schedule(
-                "error", "Could not configure ext_led; retrying", set_error, now + self.retry_interval
-            )
-            return self.snapshot()
-
-        confirmed, confirm_error = self._read_light(self.target)
-        if confirmed and self._matches(confirmed, desired):
-            self._confirmed(desired, now)
-        elif confirm_error or not confirmed or confirmed.get("state") == "unavailable":
-            self._schedule(
-                "waiting",
-                "ext_led accepted settings; waiting for Wi-Fi confirmation",
-                confirm_error,
-                now + self.retry_interval,
-            )
-        else:
-            self._schedule(
-                "verifying",
-                "ext_led settings not confirmed yet; retrying",
-                None,
-                now + self.retry_interval,
-            )
-        return self.snapshot()
-
-    def snapshot_unlocked(self):
-        return {
-            "phase": self.phase,
-            "message": self.message,
-            "last_error": self.last_error,
-            "last_attempt": self.last_attempt,
-            "confirmed_at": self.confirmed_at,
-            "desired": copy.deepcopy(self.desired),
-            "target": self.target,
-        }
-
-    def _read_light(self, entity):
-        try:
-            result = self.command([TUYA_LIGHT, "status", entity], timeout=20)
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            return None, f"could not read {entity}: {exc}"
-        if result.returncode:
-            detail = (result.stderr or result.stdout or "status failed").strip()
-            return None, f"could not read {entity}: {detail[-300:]}"
-        try:
-            status = json.loads(result.stdout)
-        except (TypeError, ValueError):
-            return None, f"could not read {entity}: invalid status response"
-        return status if isinstance(status, dict) else None, None
-
-    @staticmethod
-    def _matches(status, desired):
-        if not status or status.get("state") != "on":
-            return False
-        try:
-            brightness = int(status.get("brightness"))
-            kelvin = int(status.get("color_temp_kelvin"))
-        except (TypeError, ValueError):
-            return False
-        return brightness == desired["brightness"] and abs(
-            kelvin - desired["color_temp_kelvin"]
-        ) <= 10
-
-    def _set_light(self, entity, desired):
-        try:
-            result = self.command(
-                [
-                    TUYA_LIGHT,
-                    "set",
-                    entity,
-                    str(desired["brightness"]),
-                    str(desired["color_temp_kelvin"]),
-                ],
-                timeout=20,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            return f"could not set {entity}: {exc}"
-        if result.returncode:
-            detail = (result.stderr or result.stdout or "set failed").strip()
-            return f"could not set {entity}: {detail[-300:]}"
-        return None
-
-    def _schedule(self, phase, message, error, next_attempt):
-        with self.lock:
-            self.phase = phase
-            self.message = message
-            self.last_error = error
-            self.next_attempt = next_attempt
-
-    def _confirmed(self, desired, now):
-        percent = round(desired["brightness"] * 100 / 255)
-        with self.lock:
-            self.phase = "confirmed"
-            self.message = f"Matched · {percent}% · {desired['color_temp_kelvin']} K"
-            self.last_error = None
-            self.confirmed_at = int(self.wall_clock())
-            self.next_attempt = now + self.verify_interval
-
-    def _loop(self):
-        while not self.stop_event.is_set():
+            self.stopped = True
             try:
-                self.tick()
-            except Exception as exc:
-                with self.lock:
-                    self.phase = "error"
-                    self.message = "ext_led manager failed; retrying"
-                    self.last_error = str(exc)
-                    self.next_attempt = self.clock() + self.retry_interval
-            self.wake_event.wait(1.0)
-            self.wake_event.clear()
+                if self.line is not None:
+                    self.line.set_value(0)
+                    if self.line.get_value() != 0:
+                        raise RuntimeError("GPIO17 shutdown low was not confirmed")
+                    self.state = "off"
+                    self.phase = "inactive"
+                    self.message = "USB light relay off"
+                    self.last_error = None
+            finally:
+                try:
+                    if self.line is not None:
+                        self.line.release()
+                finally:
+                    self.line = None
+                    if self.chip is not None:
+                        self.chip.close()
+                        self.chip = None
+
+
+if __name__ == "__main__":
+    # systemd ExecStopPost: low after normal exit, crash, or forced termination.
+    # Exclusive request fails if another consumer owns GPIO17; no pinctrl bypass.
+    import sys
+
+    if sys.argv[1:] != ["--relay-off"]:
+        raise SystemExit("usage: van_dashboard_cop.py --relay-off")
+    relay = CopRelayManager()
+    result = relay.update(False, False)
+    try:
+        if result["last_error"]:
+            raise SystemExit(result["last_error"])
+    finally:
+        relay.stop()
