@@ -98,4 +98,25 @@ describe('Deal Watch cron preview', () => {
     expect(previewMock).toHaveBeenCalledOnce();
     expect(screen.getByRole('button', { name: 'Save schedule' })).toBeDisabled();
   });
+
+  it('does not present a transient parser limit as a saved-schedule failure', () => {
+    render(
+      <DealWatchScheduleForm
+        schedule={{
+          ...savedSchedule,
+          description: '',
+          error: 'cron parser rate limited',
+          errorCode: 'rate_limit',
+        }}
+        disabled={false}
+        onSave={vi.fn().mockResolvedValue(true)}
+      />,
+    );
+
+    expect(
+      screen.getByText('Schedule saved · description temporarily unavailable'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('cron parser rate limited')).not.toBeInTheDocument();
+    expect(previewMock).not.toHaveBeenCalled();
+  });
 });

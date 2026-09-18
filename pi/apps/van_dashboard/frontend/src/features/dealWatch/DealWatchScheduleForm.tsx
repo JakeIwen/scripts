@@ -77,6 +77,9 @@ export function DealWatchScheduleForm({ schedule, disabled, onSave }: DealWatchS
   }, [expression, schedule]);
 
   const normalized = normalizeCronExpression(expression);
+  const savedExpression = normalizeCronExpression(schedule.expression);
+  const showingSavedSchedule = normalized === savedExpression;
+  const savedDescriptionRateLimited = showingSavedSchedule && preview.errorCode === 'rate_limit';
   const canSave =
     !disabled &&
     !parsing &&
@@ -112,10 +115,18 @@ export function DealWatchScheduleForm({ schedule, disabled, onSave }: DealWatchS
         </button>
       </div>
       <small
-        className={preview.error ? 'deal-watch-schedule-form__error' : undefined}
+        className={
+          preview.error && !savedDescriptionRateLimited
+            ? 'deal-watch-schedule-form__error'
+            : undefined
+        }
         aria-live="polite"
       >
-        {parsing ? 'Parsing schedule…' : (preview.error ?? preview.description)}
+        {parsing
+          ? 'Parsing schedule…'
+          : savedDescriptionRateLimited
+            ? 'Schedule saved · description temporarily unavailable'
+            : (preview.error ?? preview.description)}
       </small>
     </form>
   );

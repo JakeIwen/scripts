@@ -420,6 +420,12 @@
   color: #ffd5d1;
 }
 
+.bottom-sheet > .toast {
+  position: absolute;
+  right: 18px;
+  bottom: calc(18px + var(--safe-bottom));
+}
+
 .error-message {
   padding: 12px 14px;
   border: 1px solid #7a4a45;

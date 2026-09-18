@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import stat
 import subprocess
 import tempfile
 from pathlib import Path
@@ -31,12 +33,14 @@ class CronScheduleManager:
         command=PRICE_CHECK_COMMAND,
         runner=subprocess.run,
         temporary_directory=None,
+        cache_path=None,
     ):
         self.crontab_bin = str(crontab_bin)
         self.parser = Path(parser)
         self.command = command
         self.runner = runner
         self.temporary_directory = temporary_directory
+        self.cache_path = Path(cache_path) if cache_path is not None else None
 
     def _run(self, argv, *, timeout=20):
         try:
@@ -87,6 +91,62 @@ class CronScheduleManager:
             )
         return result.stdout
 
+    def _cached_description(self, expression: str) -> str | None:
+        if self.cache_path is None:
+            return None
+        try:
+            metadata = self.cache_path.lstat()
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 4096:
+                return None
+            payload = json.loads(self.cache_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError):
+            return None
+        if (
+            not isinstance(payload, dict)
+            or payload.get("version") != 1
+            or payload.get("expression") != expression
+            or not isinstance(payload.get("description"), str)
+            or not payload["description"].strip()
+        ):
+            return None
+        return payload["description"]
+
+    def _cache_description(self, expression: str, description: str) -> None:
+        if self.cache_path is None:
+            return
+        temporary_path = None
+        try:
+            self.cache_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=f".{self.cache_path.name}.", dir=self.cache_path.parent
+            )
+            temporary_path = Path(temporary_name)
+            os.fchmod(descriptor, 0o600)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "version": 1,
+                        "expression": expression,
+                        "description": description,
+                    },
+                    handle,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+                handle.write("\n")
+            os.replace(temporary_path, self.cache_path)
+            temporary_path = None
+        except OSError:
+            # The description is convenience metadata. Never fail a read or a
+            # verified crontab update because its cache could not be written.
+            pass
+        finally:
+            if temporary_path is not None:
+                try:
+                    temporary_path.unlink()
+                except OSError:
+                    pass
+
     def _find_entry(self, crontab: str) -> tuple[int, str]:
         matches = []
         for index, line in enumerate(crontab.splitlines(keepends=True)):
@@ -106,8 +166,17 @@ class CronScheduleManager:
     def status(self) -> dict:
         crontab = self._read_crontab()
         _, expression = self._find_entry(crontab)
+        description = self._cached_description(expression)
+        if description is not None:
+            return {
+                "expression": expression,
+                "description": description,
+                "error": None,
+                "error_code": None,
+            }
         try:
             description = self.describe(expression)
+            self._cache_description(expression, description)
             error = None
             error_code = None
         except CronScheduleRateLimitError as parse_error:
@@ -215,6 +284,8 @@ class CronScheduleManager:
                 self._rollback(backup, f"could not verify crontab update: {error}")
             if current != candidate_text:
                 self._rollback(backup, "crontab verification failed")
+
+        self._cache_description(expression, description)
 
         return {
             "expression": expression,

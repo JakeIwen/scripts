@@ -345,7 +345,9 @@ def main() -> int:
     args = build_parser().parse_args()
     command = args.command or "run"
     try:
-        schedule_manager = CronScheduleManager()
+        schedule_manager = CronScheduleManager(
+            cache_path=args.db.with_suffix(".schedule-description.json")
+        )
         if command == "schedule":
             schedule = schedule_manager.status()
             emit(

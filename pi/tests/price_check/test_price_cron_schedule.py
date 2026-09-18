@@ -66,6 +66,7 @@ class CronScheduleManagerTests(unittest.TestCase):
             parser=Path("/test/parse_cron.sh"),
             runner=self.commands,
             temporary_directory=self.temporary.name,
+            cache_path=Path(self.temporary.name) / "schedule-description.json",
         )
 
     def tearDown(self):
@@ -77,6 +78,33 @@ class CronScheduleManagerTests(unittest.TestCase):
         self.assertEqual(status["description"], self.commands.description)
         self.assertIsNone(status["error"])
         self.assertIsNone(status["error_code"])
+
+    def test_status_reuses_the_saved_description_without_reparsing(self):
+        first = self.manager.status()
+        self.commands.rate_limited = True
+        second = self.manager.status()
+
+        self.assertEqual(second, first)
+        parser_calls = [
+            call for call in self.commands.calls if call[0] == "/test/parse_cron.sh"
+        ]
+        self.assertEqual(len(parser_calls), 1)
+
+    def test_status_reparses_after_an_external_expression_change(self):
+        self.manager.status()
+        self.commands.current = self.commands.current.replace(
+            "0 10,15,20 * * *", "30 8,16 * * 1-5"
+        )
+        self.commands.description = "At minute 30 past hours 8 and 16 on weekdays"
+
+        status = self.manager.status()
+
+        self.assertEqual(status["expression"], "30 8,16 * * 1-5")
+        self.assertEqual(status["description"], self.commands.description)
+        parser_calls = [
+            call for call in self.commands.calls if call[0] == "/test/parse_cron.sh"
+        ]
+        self.assertEqual(len(parser_calls), 2)
 
     def test_status_keeps_expression_when_cronp_is_unavailable(self):
         self.commands.description = ""
@@ -110,6 +138,8 @@ class CronScheduleManagerTests(unittest.TestCase):
         self.assertTrue(
             any(call[:2] == ["/test/crontab", "-n"] for call in self.commands.calls)
         )
+        self.commands.rate_limited = True
+        self.assertEqual(self.manager.status(), result)
 
     def test_unresolved_cronp_never_attempts_crontab_edit(self):
         self.commands.description = ""

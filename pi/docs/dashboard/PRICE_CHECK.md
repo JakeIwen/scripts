@@ -13,6 +13,12 @@ seen eBay item IDs, permanent result dismissals, and recent check status. The
 database directory is mode `700` and the database is mode `600`.
 
 The existing price-check cron entry runs both product and saved-search checks.
+The dashboard stores the last successfully resolved human-readable description
+beside the price-check database, keyed by the exact five-field expression.
+Routine tile and sheet refreshes therefore read the live crontab but do not
+repeatedly call the external cron-description service. Editing a schedule still
+requests a fresh preview, and a changed crontab expression invalidates the
+cached description automatically.
 The dashboard's **Check all now** button does the same.
 
 ## eBay browser headers
