@@ -24,8 +24,11 @@ vanrouter/etc/*
 !vanrouter/etc/init.d/
 vanrouter/etc/init.d/*
 !vanrouter/etc/init.d/clientwan-path-monitor
+!vanrouter/etc/init.d/uplink-https-monitor
 !vanrouter/etc/sysupgrade.conf
 vanrouter/build/
+macbook/build/
+macbook/scripts/performance-audio-jobs/
 *__pycache__*
 *.pyc
 node_modules/

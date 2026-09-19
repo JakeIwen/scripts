@@ -71,7 +71,7 @@ def base_menu_config(element_identifier="New", label_text=None):
         "BTTMenuAttributedText": rtf_label(label_text or element_identifier),
         "BTTMenuTextMinimumScaleFactor": 0.30,
         "BTTMenuHoverStartAnimationDuration": 0.15,
-        "BTTMenuItemMaxWidth": 40,
+        "BTTMenuItemMaxWidth": 50,
         "BTTMenuItemVisibleWhileActive": 1,
         "BTTMenuItemIconColor1": "255.000000, 255.000000, 255.000000, 255.000000",
     }
@@ -79,6 +79,7 @@ def base_menu_config(element_identifier="New", label_text=None):
 def base_menu_item_config(element_identifier, label_text=None):
     cfg = base_menu_config(element_identifier, label_text=label_text or element_identifier)
     cfg["BTTMenuItemMinWidth"] = 60
+    cfg["BTTMenuItemMaxWidth"] = 60
     cfg["BTTMenuUseStyleForSubmenu"] = 1
     return cfg
 

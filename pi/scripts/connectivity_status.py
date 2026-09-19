@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Report van network uplink, UBNT radio, or OpenWrt client state as JSON.
 
-This collector is intentionally passive and cheap: it reuses mwan3's existing
-reachability tracking, pings the UBNT once to distinguish an unplugged cable,
+This collector is intentionally cheap: it combines mwan3 routing state with
+cached router-side HTTPS probes, pings the UBNT once to distinguish an unplugged cable,
 and reads the UBNT's current association data without running a wireless scan.
 The optional ``--clients`` mode performs one bounded, read-only router query for
 the dashboard's OpenWrt sheet; it is not part of the recurring uplink poll.
@@ -32,7 +32,11 @@ MWAN_STATUS_COMMAND = (
     "printf '__VAN_DASH_DEFAULT_POLICY__='; "
     "/sbin/uci -q get mwan3.default_rule_v4.use_policy; "
     "/usr/sbin/mwan3 interfaces; "
-    "/usr/sbin/mwan3 policies"
+    "/usr/sbin/mwan3 policies; "
+    "printf '__VAN_DASH_ROUTER_TIME__='; /bin/date +%s; "
+    "for iface in wan clientwan lifiwan; do "
+    "if [ -r /tmp/uplink-https/$iface ]; then "
+    "printf '__VAN_DASH_HTTPS__='; /bin/cat /tmp/uplink-https/$iface; fi; done; true"
 )
 ROUTER_CLIENTS_COMMAND = r"""
 printf '__VAN_DASH_LEASES__\n'
@@ -98,7 +102,7 @@ def parse_mwan3_interfaces(output):
 
 
 def select_mode(interfaces):
-    online = {item["name"] for item in interfaces if item["state"] == "online"}
+    online = {item["name"] for item in interfaces if item["state"] in ("online", "degraded")}
     ordered = []
     for name in MWAN_PRIORITY:
         if name in online:
@@ -106,9 +110,67 @@ def select_mode(interfaces):
     ordered.extend(
         item["name"]
         for item in interfaces
-        if item["state"] == "online" and item["name"] not in ordered
+        if item["state"] in ("online", "degraded") and item["name"] not in ordered
     )
     return " + ".join(ordered) or None
+
+
+def apply_https_health(interfaces, output):
+    """Require fresh application evidence before calling a ping-online link healthy."""
+    now_match = re.search(r"^__VAN_DASH_ROUTER_TIME__=(\d+)$", output, re.MULTILINE)
+    now = int(now_match.group(1)) if now_match else None
+    samples = {}
+    pattern = re.compile(
+        r"^__VAN_DASH_HTTPS__=(wan|clientwan|lifiwan)\|(\d+)\|"
+        r"(online|degraded|offline|unknown|down)\|(\d{3})\|(\d{1,3})\|(\d{3})\|(\d{1,3})$",
+        re.MULTILINE,
+    )
+    for match in pattern.finditer(output):
+        name, timestamp, state, google, google_rc, cloudflare, cloudflare_rc = match.groups()
+        if now is None or not 0 <= now - int(timestamp) <= 90:
+            continue
+        samples[name] = {
+            "state": state,
+            "checked_at": int(timestamp),
+            "age_seconds": now - int(timestamp),
+            "google": {"http_code": int(google), "curl_exit": int(google_rc)},
+            "cloudflare": {"http_code": int(cloudflare), "curl_exit": int(cloudflare_rc)},
+        }
+    for item in interfaces:
+        item["mwan_state"] = item["state"]
+        health = samples.get(item["name"])
+        item["https"] = health
+        if item["state"] != "online":
+            continue
+        state = health["state"] if health else "unknown"
+        # A down snapshot may belong to the previous association. Wait for the
+        # monitor to test this new link instead of reusing a result from it.
+        item["state"] = state if state in ("online", "degraded", "offline") else "unknown"
+        if health and state in ("online", "degraded", "offline"):
+            detail = (
+                f"HTTPS {state} ({health['age_seconds']}s ago); "
+                f"Google HTTP {health['google']['http_code']}, curl {health['google']['curl_exit']}; "
+                f"Cloudflare HTTP {health['cloudflare']['http_code']}, curl {health['cloudflare']['curl_exit']}"
+            )
+        else:
+            detail = "HTTPS unchecked (missing, stale, or unavailable probe)"
+        item["detail"] = f"mwan3 ping: online; {detail}"
+
+
+def selected_route_health(router):
+    """A healthy standby must not hide a broken member of the selected policy."""
+    if not router["default_policy"]:
+        return None
+    members = [member["name"] for member in router["route_members"] if member["percent"] > 0]
+    if not members:
+        return False
+    states = {item["name"]: item["state"] for item in router["interfaces"]}
+    selected = [states.get(name, "unknown") for name in members]
+    if any(state in ("offline", "disabled", "disconnecting") for state in selected):
+        return False
+    if all(state in ("online", "degraded") for state in selected):
+        return True
+    return None
 
 
 def parse_mwan3_default_route(output):
@@ -495,15 +557,16 @@ def collect_status(command=run_command, wall_clock=time.time):
         if result.returncode == 0:
             router["reachable"] = True
             router["interfaces"] = parse_mwan3_interfaces(result.stdout)
+            apply_https_health(router["interfaces"], result.stdout)
             router["online"] = [
-                item["name"] for item in router["interfaces"] if item["state"] == "online"
+                item["name"] for item in router["interfaces"] if item["state"] in ("online", "degraded")
             ]
             router["mode"] = select_mode(router["interfaces"])
             router["default_policy"], router["route_members"] = (
                 parse_mwan3_default_route(result.stdout)
             )
             if router["interfaces"]:
-                internet_online = bool(router["online"])
+                internet_online = selected_route_health(router)
             else:
                 router["error"] = "mwan3 returned no interface state"
         else:
@@ -556,7 +619,7 @@ def collect_status(command=run_command, wall_clock=time.time):
         "checked_at": checked_at,
         "internet": {
             "online": internet_online,
-            "source": "mwan3 reachability tracking",
+            "source": "mwan3 selected route + cached per-uplink HTTPS checks",
         },
         "router": router,
         "ubnt": ubnt,

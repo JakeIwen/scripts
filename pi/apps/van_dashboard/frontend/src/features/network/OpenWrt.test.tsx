@@ -20,6 +20,35 @@ beforeAll(() => {
 });
 
 describe('OpenWrt UI', () => {
+  it('shows degraded HTTPS health and keeps the selected route visible', () => {
+    const connectivity = sampleConnectivity();
+    connectivity.router.interfaces[1] = {
+      name: 'wan',
+      state: 'degraded',
+      tracking: 'active',
+      detail: 'mwan3 ping: online; HTTPS degraded; Cloudflare HTTP 000, curl 28',
+    };
+    const view = render(
+      <OpenWrtTile
+        connectivity={connectivity}
+        connectivityError={null}
+        connectivityRefreshing={false}
+        speedtest={null}
+        speedtestError={null}
+        speedtestStarting={false}
+        onStartSpeedtest={vi.fn().mockResolvedValue(undefined)}
+        onOpen={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('wan · degraded')).toHaveClass('degraded');
+    expect(screen.getByText('wan · degraded')).toHaveAttribute(
+      'title',
+      expect.stringContaining('curl 28'),
+    );
+    expect(screen.getByText('clientwan')).toBeInTheDocument();
+    view.unmount();
+  });
+
   it('renders the active route and read-only speed-test result on the tile', () => {
     const onOpen = vi.fn();
     const onStartSpeedtest = vi.fn(async () => undefined);

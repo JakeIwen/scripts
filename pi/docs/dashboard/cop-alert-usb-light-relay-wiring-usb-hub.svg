@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1420" viewBox="0 0 1600 1420" role="img" aria-labelledby="title desc">
+  <title id="title">USB hub powered Touchlight and relay, with Raspberry Pi GPIO control</title>
+  <desc id="desc">Hub 5 volts passes through a 1 amp fuse and branches to relay plus and COM. Relay NO feeds lamp positive. Hub ground connects to lamp negative, relay minus, and the control pull-down. Pi ground is already connected to hub ground through the existing upstream USB cable; there is no added pin 6 wire. Pi GPIO17, physical pin 11, connects through 1 kilohm to relay S, with a 10 kilohm resistor from S to hub ground. Pi 5 volt header pins are not connected. Direct trigger wiring is conditional on verifying the module accepts 3.3 volt active-high control without feeding voltage into an unpowered Pi.</desc>
+  <style>
+    text { font-family: Arial, Helvetica, sans-serif; fill: #17304c; }
+    .title { font-size: 32px; font-weight: 700; }
+    .heading { font-size: 25px; font-weight: 700; }
+    .label { font-size: 22px; font-weight: 700; }
+    .body { font-size: 20px; }
+    .small { font-size: 18px; }
+    .panel { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 2; }
+    .component { fill: #edf4ff; stroke: #32639c; stroke-width: 3; }
+    .power, .ground, .signal { fill: none; stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; }
+    .power { stroke: #d32f36; }
+    .ground { stroke: #242a32; }
+    .signal { stroke: #aa7300; }
+    .terminal { fill: white; stroke: #32639c; stroke-width: 3; }
+  </style>
+  <rect width="1600" height="1420" fill="white"/>
+  <text x="55" y="55" class="title">USB HUB POWER → RELAY + TOUCHLIGHT</text>
+  <text x="55" y="90" class="body">One relay module. Only one added Pi header wire: GPIO17. Ground reference uses the existing upstream USB cable.</text>
+
+  <!-- POWER PANEL: no crossings; filled dots mark branches. -->
+  <rect x="35" y="120" width="1530" height="440" rx="16" class="panel"/>
+  <text x="60" y="160" class="heading">1 · Power wiring</text>
+  <rect x="65" y="190" width="290" height="250" rx="12" class="component"/>
+  <text x="90" y="230" class="heading">Powered USB hub</text>
+  <text x="90" y="260" class="small">USB-A male source pigtail</text>
+  <text x="90" y="300" class="label">+5 V · red*</text>
+  <text x="90" y="400" class="label">GND · black*</text>
+
+  <rect x="735" y="190" width="395" height="260" rx="12" class="component"/>
+  <text x="760" y="230" class="heading">Tongling 5 V relay module</text>
+  <text x="760" y="300" class="label">+  Module supply</text>
+  <text x="760" y="385" class="label">COM</text>
+  <text x="1065" y="385" class="label">NO</text>
+  <text x="910" y="430" class="label">− GND</text>
+  <text x="1025" y="430" class="small">NC unused</text>
+
+  <rect x="1280" y="190" width="260" height="260" rx="12" class="component"/>
+  <text x="1300" y="230" class="heading">USB Touchlight</text>
+  <text x="1300" y="265" class="small">Female output pigtail</text>
+  <text x="1300" y="295" class="small">5 V / 400 mA running</text>
+  <text x="1300" y="385" class="label">+5 V · red*</text>
+  <text x="1360" y="430" class="label">GND · black*</text>
+
+  <!-- Source +5V -> fuse -> module + and COM -->
+  <path d="M355 295 H430 M555 295 H735 M645 295 V380 H735" class="power"/>
+  <rect x="430" y="276" width="125" height="38" rx="5" fill="#ffe4e6" stroke="#d32f36" stroke-width="3"/>
+  <text x="492" y="302" text-anchor="middle" class="label">1 A fuse</text>
+  <text x="490" y="253" text-anchor="middle" class="small">Near source</text>
+  <circle cx="645" cy="295" r="7" fill="#d32f36"/>
+  <!-- Functional normally-open contact, not physical terminal order -->
+  <path d="M840 380 H900 M1030 380 H1050 M900 380 L990 340" fill="none" stroke="#242a32" stroke-width="4"/>
+  <circle cx="900" cy="380" r="6" fill="white" stroke="#242a32" stroke-width="3"/>
+  <circle cx="1030" cy="380" r="6" fill="white" stroke="#242a32" stroke-width="3"/>
+  <text x="965" y="325" text-anchor="middle" class="small">Open when released</text>
+  <path d="M1130 380 H1280" class="power"/>
+  <text x="1205" y="355" text-anchor="middle" class="small">Switched +5 V</text>
+
+  <!-- Ground bus: module, lamp, and Pi reference, always connected -->
+  <path d="M355 395 H400 V490 H1430 V450 M945 450 V490 M610 490 V525" class="ground"/>
+  <circle cx="945" cy="490" r="7" fill="#242a32"/>
+  <circle cx="610" cy="490" r="7" fill="#242a32"/>
+  <text x="645" y="535" class="body">HUB GND → relay −, lamp return and control pull-down</text>
+  <g class="terminal">
+    <circle cx="355" cy="295" r="7"/><circle cx="355" cy="395" r="7"/>
+    <circle cx="735" cy="295" r="7"/><circle cx="735" cy="380" r="7"/>
+    <circle cx="1130" cy="380" r="7"/><circle cx="945" cy="450" r="7"/>
+    <circle cx="1280" cy="380" r="7"/><circle cx="1430" cy="450" r="7"/>
+  </g>
+
+  <!-- CONTROL PANEL: same module, no power sourced from Pi. -->
+  <rect x="35" y="580" width="1530" height="355" rx="16" class="panel"/>
+  <text x="60" y="620" class="heading">2 · GPIO control — conditional on verifying the relay input (see below)</text>
+  <rect x="65" y="655" width="400" height="225" rx="12" class="component"/>
+  <text x="90" y="695" class="heading">Raspberry Pi 4 header</text>
+  <text x="90" y="740" class="label">Physical pin 11 · GPIO17</text>
+  <text x="90" y="795" class="small">Pin 6: no added wire</text>
+  <text x="90" y="825" class="small">Ground reference: existing USB cable</text>
+  <text x="90" y="860" class="small">5 V pins 2 and 4: NOT CONNECTED</text>
+  <rect x="1090" y="655" width="450" height="225" rx="12" class="component"/>
+  <text x="1120" y="695" class="heading">Same relay module</text>
+  <text x="1120" y="740" class="label">S · trigger</text>
+  <text x="1120" y="825" class="label">− · HUB GND</text>
+  <text x="1120" y="860" class="small">Same ground connection as panel 1</text>
+
+  <path d="M465 735 H555 M660 735 H1090 M790 735 V760" class="signal"/>
+  <rect x="555" y="716" width="105" height="38" rx="5" fill="#fff1bf" stroke="#aa7300" stroke-width="3"/>
+  <text x="608" y="742" text-anchor="middle" class="label">1 kΩ</text>
+  <circle cx="790" cy="735" r="7" fill="#aa7300"/>
+  <rect x="776" y="760" width="28" height="45" fill="#fff1bf" stroke="#aa7300" stroke-width="3"/>
+  <text x="827" y="780" class="label">10 kΩ</text>
+  <text x="827" y="805" class="small">Pull-down</text>
+  <path d="M790 805 V820 H1090" class="ground"/>
+  <g class="terminal">
+    <circle cx="465" cy="735" r="7"/>
+    <circle cx="1090" cy="735" r="7"/><circle cx="1090" cy="820" r="7"/>
+  </g>
+  <text x="60" y="915" class="body">For a verified active-high module: GPIO HIGH energizes the relay; GPIO LOW releases it and opens COM–NO.</text>
+
+  <!-- Existing connection, not a new header wire. -->
+  <rect x="35" y="955" width="1530" height="190" rx="16" class="panel"/>
+  <text x="60" y="995" class="heading">3 · Existing ground reference — keep connected while GPIO17 is connected</text>
+  <rect x="65" y="1020" width="330" height="90" rx="12" class="component"/>
+  <text x="90" y="1058" class="label">Pi USB port · GND</text>
+  <text x="90" y="1088" class="small">Internally common with Pi ground</text>
+  <rect x="1110" y="1020" width="430" height="90" rx="12" class="component"/>
+  <text x="1135" y="1058" class="label">Same powered hub · GND</text>
+  <text x="1135" y="1088" class="small">Common with the source pigtail ground</text>
+  <path d="M395 1075 H1110" class="ground"/>
+  <text x="750" y="1055" text-anchor="middle" class="body">Ground conductor in existing upstream USB cable</text>
+  <text x="750" y="1125" text-anchor="middle" class="small">If another ordinary USB hub is in between, its ground connections complete this path.</text>
+
+  <rect x="35" y="1165" width="1530" height="230" rx="16" fill="#fff8e5" stroke="#b58a24" stroke-width="2"/>
+  <text x="60" y="1202" class="heading">Before connecting GPIO17</text>
+  <text x="60" y="1234" class="body">Confirm active-high 3.3 V trigger operation with the shown resistors; this inventory module is untested.</text>
+  <text x="60" y="1266" class="body">The hub may stay on when the Pi is off. Verify the relay input cannot backfeed GPIO17, or add a suitable driver.</text>
+  <text x="60" y="1298" class="body">Identify COM / NO / NC by markings or a contact test. Configure software to drive GPIO17 low at startup and shutdown.</text>
+  <text x="60" y="1330" class="body">* Verify pigtail polarity. Individually insulate unused pigtail D+, D− and shield ends. Leave the upstream USB cable intact.</text>
+  <text x="60" y="1362" class="body">No hub +5 V connection to Pi header pins 2 or 4. Startup current can exceed 400 mA; the fuse does not limit peak current.</text>
+</svg>

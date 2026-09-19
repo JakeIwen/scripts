@@ -1,5 +1,5 @@
 export type MwanInterfaceState =
-  'online' | 'offline' | 'disabled' | 'unknown' | 'connecting' | 'disconnecting';
+  'online' | 'degraded' | 'offline' | 'disabled' | 'unknown' | 'connecting' | 'disconnecting';
 
 export interface MwanInterface {
   name: string;

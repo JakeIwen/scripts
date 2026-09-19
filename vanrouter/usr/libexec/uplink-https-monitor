@@ -1,0 +1,73 @@
+#!/bin/sh
+# Application reachability only: never changes mwan3, routes, or conntrack.
+set -u
+
+UBUS=${UBUS:-/bin/ubus}
+JSONFILTER=${JSONFILTER:-/usr/bin/jsonfilter}
+MWAN3=${MWAN3:-/usr/sbin/mwan3}
+CURL=${CURL:-/usr/bin/curl}
+MWAN_WRAP=${MWAN_WRAP:-/lib/mwan3/libwrap_mwan3_sockopt.so.1.0}
+LOGGER=${LOGGER:-/usr/bin/logger}
+DATE=${DATE:-/bin/date}
+SLEEP=${SLEEP:-/bin/sleep}
+INTERFACE=${INTERFACE:-wan}
+STATE_DIR=${STATE_DIR:-/tmp/uplink-https}
+INTERVAL_SECONDS=${INTERVAL_SECONDS:-30}
+MAX_SAMPLES=${MAX_SAMPLES:-0}
+
+case "$INTERFACE" in wan|clientwan|lifiwan) ;; *) exit 2 ;; esac
+mkdir -p "$STATE_DIR" || exit 1
+temporary="$STATE_DIR/$INTERFACE.$$"
+trap 'rm -f "$temporary"' EXIT
+trap 'exit 0' HUP INT TERM
+samples=0
+previous=
+
+probe() {
+	# mwan3 use sets the socket mark AND device. --interface alone can be
+	# redirected by the OUTPUT policy and falsely report a backup as broken.
+	# DNS uses the router's shared resolver; TLS/data use this specific uplink.
+	code=$("$MWAN3" use "$INTERFACE" "$CURL" -q -4 --noproxy '*' \
+		--connect-timeout 4 --max-time 8 --max-filesize 4096 \
+		--silent --output /dev/null --write-out '%{http_code}' "$1" 2>/dev/null)
+	rc=$?
+	case "$code" in [0-9][0-9][0-9]) ;; *) code=000 ;; esac
+}
+
+while :; do
+	state=unknown
+	google_code=000 google_rc=0 cloudflare_code=000 cloudflare_rc=0
+	status=$("$UBUS" call "network.interface.$INTERFACE" status 2>/dev/null)
+	if [ "$?" -eq 0 ]; then
+		up=$(printf '%s\n' "$status" | "$JSONFILTER" -e '@.up' 2>/dev/null)
+		case "$up" in
+			false) state=down ;;
+			true)
+				if [ -x "$CURL" ] && [ -x "$MWAN3" ] &&
+					[ -r "$MWAN_WRAP" ]; then
+					probe https://www.google.com/generate_204
+					google_code=$code google_rc=$rc
+					probe https://cp.cloudflare.com/generate_204
+					cloudflare_code=$code cloudflare_rc=$rc
+					passed=0
+					[ "$google_rc:$google_code" = 0:204 ] && passed=$((passed + 1))
+					[ "$cloudflare_rc:$cloudflare_code" = 0:204 ] && passed=$((passed + 1))
+					case "$passed" in 2) state=online ;; 1) state=degraded ;; 0) state=offline ;; esac
+				fi
+				;;
+		esac
+	fi
+	checked_at=$("$DATE" +%s) || exit 1
+	printf '%s|%s|%s|%s|%s|%s|%s\n' "$INTERFACE" "$checked_at" "$state" \
+		"$google_code" "$google_rc" "$cloudflare_code" "$cloudflare_rc" > "$temporary" || exit 1
+	mv -f "$temporary" "$STATE_DIR/$INTERFACE" || exit 1
+	# Keep a minute-scale history on the existing remote syslog receiver.
+	detail="state=$state google=$google_code/$google_rc cloudflare=$cloudflare_code/$cloudflare_rc"
+	if [ "$detail" != "$previous" ] || [ $((samples % 2)) -eq 0 ]; then
+		"$LOGGER" -p daemon.info -t uplink-https "interface=$INTERFACE $detail" 2>/dev/null || true
+	fi
+	previous=$detail
+	samples=$((samples + 1))
+	[ "$MAX_SAMPLES" -gt 0 ] && [ "$samples" -ge "$MAX_SAMPLES" ] && break
+	"$SLEEP" "$INTERVAL_SECONDS"
+done

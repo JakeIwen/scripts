@@ -40,8 +40,17 @@ A reachable antenna configured for an absent SSID therefore shows `CONNECTED`
 with a red Wi-Fi dot and `Not associated` detail. Signal and CCQ/quality data
 appear when the radio is associated.
 
-MWAN3 interface health comes from mwan3's existing reachability tracking. The
-route shown beneath `MWAN3 route` comes from the active members of the router's
+Interface chips combine mwan3 reachability with cached, route-pinned HTTPS
+checks from the router's `uplink-https-monitor`. A ping-online link is green
+only when both Google and Cloudflare return the expected HTTPS 204 response;
+one success is amber `degraded`, and neither succeeding is `offline`. Missing
+or older-than-90-second probes show `unknown`. Chip tooltips retain the raw
+mwan3 state and HTTP/curl results; the API also exposes `mwan_state` and `https`.
+These display states do not change mwan3 routing. The overall internet dot
+follows the selected policy members, not any healthy standby. A degraded
+member still has some internet access.
+
+The route shown beneath `MWAN3 route` comes from the active members of the router's
 configured IPv4 default policy. For example, when both `clientwan` and `wan`
 are healthy but the `balanced` policy has selected the preferred client path,
 the route reads `clientwan` while both interface chips remain green. A genuinely
@@ -50,9 +59,11 @@ may remain pinned to their original member until conntrack expires.
 
 `/home/pi/scripts/connectivity_status.py` is a reusable, standard-library JSON
 collector. It performs one read-only SSH query containing `mwan3 interfaces`,
-`mwan3 policies`, and the configured IPv4 default-policy name per run, one UBNT
+`mwan3 policies`, the configured IPv4 default-policy name, and cached HTTPS
+results per run, one UBNT
 ping, and (only when the UBNT responds) one read-only radio-status SSH query. It
-never scans for networks. With no visible dashboard, the server runs it in a
+never scans for networks or starts HTTPS probes. Router probes run independently
+at a bounded cadence, even when multiple dashboards are open. With no visible dashboard, the server runs it in a
 background thread every 30 seconds and serves cached results through
 `GET /api/connectivity`. A visible page renews a short activity lease with
 `GET /api/connectivity?active=1`. While that lease is current, the single

@@ -74,3 +74,14 @@ Useful reusable tools could be derived from this work: a read-only duplicate
 identifier/modifier auditor, a guarded contiguous-order repair, and a subtree
 export/import tool that validates schemas and remaps primary keys. None of the
 scripts in this directory currently provides those general guarantees.
+## September 2026 click-regression rollback
+
+`test_media_clicks.js` reverts `BTTMenuDisableDrag=1`, added by the layout
+stabilizer. The user confirmed that this one-setting rollback restored working
+held-modifier clicks on BTT 6.826. It makes a verified private full Media backup,
+changes only that property to `0` through the persistent style API, and checks
+that the shortcut, positions, sizes, actions, and children are otherwise unchanged.
+Run with `osascript -l JavaScript test_media_clicks.js`; `--undo` restores `1`
+after another backup but may reintroduce the click regression. No restart or
+JSON-tree import. `stabilize_media.py` now preserves this setting, so it will not
+re-enable the drag lock after the rollback.

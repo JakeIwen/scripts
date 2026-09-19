@@ -8,6 +8,15 @@ import {
 import { clientsPayload, connectivityPayload, speedtestPayload } from './testFixtures';
 
 describe('network response decoders', () => {
+  it('accepts partial HTTPS reachability as degraded', () => {
+    const payload = connectivityPayload();
+    const connectivity = payload.connectivity as Record<string, unknown>;
+    const router = connectivity.router as Record<string, unknown>;
+    const interfaces = router.interfaces as Record<string, unknown>[];
+    if (interfaces[0]) interfaces[0].state = 'degraded';
+    expect(decodeConnectivityResponse(payload).router.interfaces[0]?.state).toBe('degraded');
+  });
+
   it('decodes connectivity and normalizes optional UBNT fields', () => {
     const status = decodeConnectivityResponse(connectivityPayload());
 

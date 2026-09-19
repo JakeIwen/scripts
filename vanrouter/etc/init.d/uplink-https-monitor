@@ -1,0 +1,15 @@
+#!/bin/sh /etc/rc.common
+START=21
+STOP=89
+USE_PROCD=1
+
+start_service() {
+	local interface
+	for interface in wan clientwan lifiwan; do
+		procd_open_instance "$interface"
+		procd_set_param command /usr/libexec/uplink-https-monitor
+		procd_set_param env "INTERFACE=$interface"
+		procd_set_param respawn 3600 5 5
+		procd_close_instance
+	done
+}

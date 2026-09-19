@@ -30,6 +30,43 @@ ssh root@192.168.6.1 'logread -e clientwan-path'
 ssh pi@vanpi.lan "sudo grep 'clientwan-path' /var/log/openwrt/dendelion.log | tail -n 30"
 ```
 
+## HTTPS uplink health
+
+`uplink-https-monitor` runs one procd worker per configured van uplink. Each
+worker checks Google and Cloudflare HTTPS 204 endpoints, with certificate
+verification, no redirects or proxies, four-second connect and eight-second
+request limits, then waits 30 seconds. Down interfaces send no probes. Both
+successes mean `online`, one means `degraded`, and neither means `offline`.
+Missing dependencies or unreadable interface state mean `unknown`.
+
+Each request uses `mwan3 use <interface>` to set both device and socket mark;
+`curl --interface` alone is insufficient under mwan3 OUTPUT rules. DNS still
+uses the router's shared resolver, so these are per-uplink HTTPS checks, not
+isolated per-uplink DNS checks. Two reachable providers cannot guarantee that
+every website, IPv6 path, VPN, or client application works.
+
+Atomic `/tmp/uplink-https/<interface>` snapshots feed the dashboard's existing
+SSH query; results older than 90 seconds are ignored. The collector preserves
+raw `mwan_state`, effective display `state`, and structured `https` results.
+Route membership still comes directly from mwan3. No probe changes routes,
+firewall rules, link state, or connection tracking. State changes and periodic
+summaries use the `uplink-https` syslog tag, retained by the existing vanpi
+receiver. Snapshot columns are interface, Unix time, state, Google HTTP status,
+Google curl exit code, Cloudflare HTTP status, and Cloudflare curl exit code.
+
+```sh
+ssh root@192.168.6.1 'cat /tmp/uplink-https/*; logread -e uplink-https'
+ssh pi@vanpi.lan "sudo grep 'uplink-https' /var/log/openwrt/dendelion.log | tail -n 30"
+python3 vanrouter/tests/test_uplink_https_monitor.py
+python3 -m unittest pi.tests.network.test_connectivity_status
+```
+
+During the September 17 website outage investigation, mwan3 still used ping
+tracking with one reachable target sufficient for online. Subsequent properly
+pinned WAN tests passed Reddit, Google, Cloudflare, and public DNS queries, so
+the earlier cause could not be established. The new history addresses that
+observability gap without changing failover policy based on an unproven cause.
+
 ## Simultaneous 5 GHz AP and client
 
 `deploy-5ghz-ap.sh` stages a temporary helper on the router. The helper adds a

@@ -66,6 +66,7 @@ function stringArray(value: unknown, label: string): string[] {
 
 const MWAN_INTERFACE_STATES = [
   'online',
+  'degraded',
   'offline',
   'disabled',
   'unknown',

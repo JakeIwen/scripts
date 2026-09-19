@@ -18,6 +18,8 @@ wan_only:
 Current ipv6 policies:
 balanced:
  unreachable
+__VAN_DASH_ROUTER_TIME__=1700000000
+__VAN_DASH_HTTPS__=clientwan|1699999990|online|204|0|204|0
 """
 
 DISCONNECTED_UBNT = """ath0 IEEE 802.11ng ESSID:"STARLINK"
@@ -44,6 +46,61 @@ MWAN_TRANSITION_SAMPLE = """Interface status:
 
 
 class ConnectivityParserTests(unittest.TestCase):
+    def test_ping_online_https_failed_is_offline(self):
+        interfaces = connectivity.parse_mwan3_interfaces(MWAN_SAMPLE)
+        output = MWAN_SAMPLE.replace("online|204|0|204|0", "offline|000|28|000|28")
+        connectivity.apply_https_health(interfaces, output)
+        self.assertEqual(interfaces[1]["state"], "offline")
+        self.assertEqual(interfaces[1]["mwan_state"], "online")
+        self.assertIn("curl 28", interfaces[1]["detail"])
+
+    def test_one_provider_failure_is_degraded(self):
+        interfaces = connectivity.parse_mwan3_interfaces(MWAN_SAMPLE)
+        output = MWAN_SAMPLE.replace("online|204|0|204|0", "degraded|204|0|503|0")
+        connectivity.apply_https_health(interfaces, output)
+        self.assertEqual(interfaces[1]["state"], "degraded")
+        self.assertEqual(connectivity.select_mode(interfaces), "clientwan")
+
+    def test_missing_stale_future_or_malformed_health_is_not_online(self):
+        for output in (
+            "", MWAN_SAMPLE.replace("1699999990", "1699999909"),
+            MWAN_SAMPLE.replace("1699999990", "1700000001"),
+            MWAN_SAMPLE.replace("|204|0|204|0", "|garbage"),
+            MWAN_SAMPLE.replace("|online|", "|down|"),
+        ):
+            with self.subTest(output=output):
+                interfaces = connectivity.parse_mwan3_interfaces(MWAN_SAMPLE)
+                connectivity.apply_https_health(interfaces, output)
+                self.assertEqual(interfaces[1]["state"], "unknown")
+                self.assertEqual(interfaces[0]["state"], "offline")
+
+    def test_selected_route_health_ignores_healthy_backup(self):
+        router = {
+            "default_policy": "balanced",
+            "route_members": [{"name": "wan", "percent": 100}],
+            "interfaces": [{"name": "wan", "state": "offline"},
+                           {"name": "clientwan", "state": "online"}],
+        }
+        self.assertFalse(connectivity.selected_route_health(router))
+        router["interfaces"][0]["state"] = "unknown"
+        self.assertIsNone(connectivity.selected_route_health(router))
+        router["interfaces"][0]["state"] = "degraded"
+        self.assertTrue(connectivity.selected_route_health(router))
+        router["route_members"] = []
+        self.assertFalse(connectivity.selected_route_health(router))
+        router["default_policy"] = None
+        self.assertIsNone(connectivity.selected_route_health(router))
+
+    def test_weighted_route_with_failed_member_is_not_healthy(self):
+        router = {
+            "default_policy": "balanced",
+            "route_members": [{"name": "wan", "percent": 40},
+                              {"name": "clientwan", "percent": 60}],
+            "interfaces": [{"name": "wan", "state": "offline"},
+                           {"name": "clientwan", "state": "online"}],
+        }
+        self.assertFalse(connectivity.selected_route_health(router))
+
     def test_mwan_parser_and_priority(self):
         interfaces = connectivity.parse_mwan3_interfaces(MWAN_SAMPLE)
         self.assertEqual([item["name"] for item in interfaces], ["wan", "clientwan", "lifiwan"])

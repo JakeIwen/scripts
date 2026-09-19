@@ -140,6 +140,7 @@
   color: var(--dim);
 }
 
+.mwan-chip.degraded,
 .mwan-chip.connecting,
 .mwan-chip.disconnecting {
   border-color: #7b633a;
@@ -326,6 +327,7 @@
   color: #eeb8b3;
 }
 
+.mwan-interface--degraded,
 .mwan-interface--connecting,
 .mwan-interface--disconnecting {
   border-color: #785e34;
