@@ -38,6 +38,7 @@ class UplinkTests(unittest.TestCase):
 
     def test_hotspot_allowed_even_when_standby_antenna_is_starlink(self):
         e = evidence(); e['ubnt']['ssid'] = 'denlink'
+        e['router']['default_policy'] = 'clientwan_only'
         e['router']['route_members'] = [{'name': 'clientwan', 'percent': 100}]
         self.assertTrue(self.check(e))
 

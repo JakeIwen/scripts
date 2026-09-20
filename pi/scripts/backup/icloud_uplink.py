@@ -23,7 +23,7 @@ def decide(evidence, blocked_ssids, now=None):
         if not ipaddress.ip_address(route['prefsrc']).is_private:
             return False, 'unexpected Pi source address'
         router = evidence['router']
-        if not router['reachable'] or router['default_policy'] != 'balanced':
+        if not router['reachable'] or router['default_policy'] not in ('balanced', 'wan_only', 'clientwan_only', 'lifiwan_only'):
             return False, 'unverified router policy'
         if evidence['rule_names'] != ['default_rule_v4']:
             return False, 'source-specific routing rules need review'
