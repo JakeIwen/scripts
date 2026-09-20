@@ -50,8 +50,9 @@ def command_failure(program, operation, returncode, stderr):
                 'trust token expired', 'missing icloud trust token',
                 'invalid session token')):
             return AuthenticationRequired(
-                'iCloud rejected the saved session and requires fresh 2FA; '
-                'run icloud_backup.sh --login')
+                'iCloud rejected the saved web session. If login just succeeded, '
+                'check iCloud.com for pending account terms or web-data approval '
+                'before repeating 2FA; otherwise renew with icloud_backup.sh --login')
         if 'missing pcs cookies' in text or 'requestpcs:' in text:
             return AuthenticationRequired(
                 'iCloud web-data access needs approval on a trusted Apple device; '
@@ -358,7 +359,7 @@ def weekly(cfg, state):
     if not credentials_ready(cfg) or not (STATE_DIR / 'authenticated.json').is_file():
         raise Deferred('iCloud login is required; run icloud_backup.sh --login')
     if (STATE_DIR / 'authentication-error.json').is_file():
-        raise Deferred('iCloud session needs renewal; run icloud_backup.sh --login')
+        raise Deferred('iCloud authentication needs attention; inspect icloud_backup.sh --status before retrying')
     check_parked()
     guard(cfg)
     stamp = Path(os.environ['VANPI_ICLOUD_BORG_STAMP'])

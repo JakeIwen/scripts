@@ -89,6 +89,25 @@ authentication errors without printing cookies or server response bodies.
 "Trust token expired" can mean Apple requests fresh 2FA, even after recent setup;
 it is not proof that 30 days elapsed. A recorded authentication failure defers
 weekly retries until the login helper completes its cloud test successfully.
+If the same failure happens immediately after entering a valid 2FA code, check
+iCloud Drive in a browser for an account approval or updated-terms prompt before
+repeating authentication. The missing-web-session-cookie failure has been
+[reported upstream](https://github.com/rclone/rclone/issues/9658), including
+cases involving pending terms and disabled web access; neither cause should be
+assumed solely from the error text.
+
+On macOS, open the account check with:
+
+```sh
+/usr/bin/open https://www.icloud.com/iclouddrive
+```
+
+Account terms and web access are user decisions; the backup script does not
+accept terms or change Apple security settings. On iOS 26.4+, web access is under
+Settings → your name → iCloud → icloud.com → Allow Data Access. On earlier iOS,
+the toggle is Access iCloud Data on the Web. There is no supported CLI toggle;
+see [Apple's web-access instructions](https://support.apple.com/102630).
+
 Retry just the test, without requesting another login, with:
 
 ```sh
