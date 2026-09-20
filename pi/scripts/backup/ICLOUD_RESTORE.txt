@@ -1,0 +1,37 @@
+VANPI OFFSITE RECOVERY COPY
+
+This directory holds a frozen copy of the encrypted Borg 1.x repository.
+It contains versioned root and boot snapshots, not a raw bootable disk image.
+Media and Time Machine disks are separate and are not included here.
+
+Use a generation only if _COMPLETE.json is present, has owner
+vanpi-icloud-weekly-v1, and says verification=download-compared.
+manifest.json has the size and SHA-256 of each repository file.
+
+Recovery after losing all van devices:
+1. Recover your Apple account and Borg passphrase from independently accessible
+   recovery/password-manager records. The encrypted repository config contains
+   its wrapped Borg key. A password copy inside the backup cannot unlock itself.
+2. Download the ENTIRE selected generation from iCloud Drive, including every
+   repository/data segment. Use an empty local directory with umask 077.
+3. Compare repository files against manifest.json's SHA-256 values. A missing
+   segment or mismatched hash means the download is not ready for restoration.
+4. On Linux, install Borg 1.2 or a compatible Borg 1.x release. Keep the downloaded
+   repository as a recovery source: do not create, prune, compact, or recreate
+   archives in this copy while its original might still be used elsewhere.
+5. Set BORG_REPO to the downloaded repository directory. Supply the existing
+   Borg passphrase privately at Borg's prompt, never in command arguments.
+   Run borg check --verify-data, then borg list. The transfer omitted transient
+   lock files, so breaking the original repository's lock is never required.
+6. Flash suitable Raspberry Pi OS 64-bit onto replacement storage. Recover the
+   archived pi/docs/backup/RESTORE.md (or the Git repository) and follow its
+   full-system restoration procedure. Restore root and boot files with proper
+   permissions, fix fstab/cmdline identifiers for the replacement card, and
+   use a compatible OS/firmware when replacing the Pi with a different model.
+7. Home Assistant uses the app-consistent database from
+   home/pi/backups/snapshots/home-assistant_v2.db. Restore it with HA stopped.
+   Router/antenna recovery exports are under the same snapshots directory;
+   they contain credentials and must be handled privately.
+
+Downloading a generation and checking its contents is separate from testing
+that replacement hardware actually boots and applications restore correctly.

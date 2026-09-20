@@ -1,0 +1,11 @@
+{
+  "remote": "icloud:VanRecovery/vanpi/weekly",
+  "rclone_config": "/root/.config/rclone/vanpi-icloud.conf",
+  "interval_days": 7,
+  "keep_generations": 8,
+  "max_source_age_hours": 48,
+  "guard_interval_seconds": 5,
+  "blocked_ssids": ["denlink", "Starlink"],
+  "bandwidth_limit": "8M",
+  "minimum_free_gib": 100
+}

@@ -3,6 +3,11 @@
 [Pi documentation index](../../README.md)
 
 Backups (see [`backup_conf.sh`](../../scripts/backup/backup_conf.sh)):
+- **weekly offsite iCloud copy** — encrypted Borg repository generations under
+  `VanRecovery/vanpi/weekly`, with a completion marker written only after
+  download verification. Requires initial Apple login and periodic renewal;
+  see [iCloud setup and recovery](ICLOUD.md). Local installation alone is not
+  evidence that a remote recovery generation has completed.
 - **encrypted borg repo** `/mnt/bigboi/borg/vanpi-encrypted` — nightly versioned snapshots of `/` + `/boot/firmware`
   (14 daily / 8 weekly / 12 monthly). HA's sqlite is snapshotted to
   `/home/pi/backups/snapshots/` before each run; the live DB is excluded. A

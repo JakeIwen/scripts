@@ -9,6 +9,7 @@ normally live under `/home/pi/scripts/`.
 
 - [Recovery playbook](docs/backup/RESTORE.md)
 - [Time Machine backup](docs/backup/TIME_MACHINE.md)
+- [Weekly Pi recovery copies in iCloud](docs/backup/ICLOUD.md)
 - [OpenWrt backup and restore](scripts/backup/OPENWRT_BACKUP.md)
 - [UBNT backup and restore](scripts/backup/UBNT_BACKUP.md)
 - [Storage and torrent policy](docs/policy/POLICY.md)

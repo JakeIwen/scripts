@@ -1,0 +1,16 @@
+[Unit]
+Description=Weekly encrypted vanpi recovery copy to iCloud, excluding Starlink
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+ExecStart=/bin/bash /home/pi/scripts/backup/icloud_backup.sh --run
+Nice=15
+IOSchedulingClass=idle
+KillMode=control-group
+TimeoutStartSec=4h
+TimeoutStopSec=45s
+

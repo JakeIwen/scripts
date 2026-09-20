@@ -1,0 +1,11 @@
+[Unit]
+Description=Retry weekly iCloud copy during the daytime parked window
+
+[Timer]
+OnCalendar=*-*-* 09..23:17:00
+RandomizedDelaySec=5m
+Persistent=true
+Unit=vanpi-icloud-backup.service
+
+[Install]
+WantedBy=timers.target
