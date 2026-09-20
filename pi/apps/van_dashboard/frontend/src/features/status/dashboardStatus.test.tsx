@@ -128,6 +128,6 @@ describe('DashboardStatusTile', () => {
     expect(screen.getByText('Blocked')).toBeInTheDocument();
     expect(screen.getByText('No wake response')).toBeInTheDocument();
     expect(screen.getByText('Exterior LED is on')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Disarm COP ALERT' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Disarm STRANGER DANGER' })).toBeEnabled();
   });
 });

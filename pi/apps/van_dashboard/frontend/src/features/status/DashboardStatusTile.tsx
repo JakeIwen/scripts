@@ -63,7 +63,7 @@ function EmptyStatusTile({ resource }: DashboardStatusTileProps) {
     <button
       type="button"
       className="tile status-tile"
-      aria-label="COP ALERT unavailable"
+      aria-label="STRANGER DANGER unavailable"
       aria-disabled="true"
       aria-busy={resource.error === null}
     >
@@ -73,11 +73,13 @@ function EmptyStatusTile({ resource }: DashboardStatusTileProps) {
           🚨
         </span>
         <span className="status-tile__title" role="heading" aria-level={2}>
-          COP ALERT
+          STRANGER
+          <br />
+          DANGER
         </span>
       </span>
       <span className="status-tile__summary">
-        {resource.error?.message ?? 'Reading COP request and execution state…'}
+        {resource.error?.message ?? 'Reading alert request and execution state…'}
       </span>
       <span className="status-tile__status-lines">
         <span className="status-tile__status-line">
@@ -179,7 +181,7 @@ function copTilePresentation(
     return {
       label: idle ? 'IDLE' : 'OFFLINE',
       state: idle ? 'idle' : 'offline',
-      detail: 'Tap to wake the dashcam and arm the exterior alert',
+      detail: 'Tap to wake the dashcam and arm the exterior light',
       wakeDetail: lastBlockedDetail(execution),
     };
   }
@@ -278,7 +280,7 @@ export function DashboardStatusTile({ resource }: DashboardStatusTileProps) {
       type="button"
       className={`tile status-tile ${requested ? 'status-tile--active' : ''}`.trim()}
       onClick={() => void toggle()}
-      aria-label={requested ? 'Disarm COP ALERT' : 'Arm COP ALERT'}
+      aria-label={requested ? 'Disarm STRANGER DANGER' : 'Arm STRANGER DANGER'}
       aria-pressed={requested}
       aria-busy={action.running}
       disabled={action.running}
@@ -302,7 +304,9 @@ export function DashboardStatusTile({ resource }: DashboardStatusTileProps) {
           🚨
         </span>
         <span className="status-tile__title" role="heading" aria-level={2}>
-          COP ALERT
+          STRANGER
+          <br />
+          DANGER
         </span>
       </span>
       <span className="status-tile__summary">{presentation.detail}</span>

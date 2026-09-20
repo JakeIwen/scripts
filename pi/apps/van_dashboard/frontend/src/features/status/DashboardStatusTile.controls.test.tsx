@@ -85,7 +85,7 @@ describe('COP ALERT control', () => {
       </ToastProvider>,
     );
 
-    const arm = screen.getByRole('button', { name: 'Arm COP ALERT' });
+    const arm = screen.getByRole('button', { name: 'Arm STRANGER DANGER' });
     fireEvent.click(arm);
     fireEvent.click(arm);
     expect(setCopAlertMock).toHaveBeenCalledOnce();
@@ -96,6 +96,6 @@ describe('COP ALERT control', () => {
     });
 
     expect(refresh).toHaveBeenCalledTimes(2);
-    expect(screen.getByRole('button', { name: 'Arm COP ALERT' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Arm STRANGER DANGER' })).toBeEnabled();
   });
 });

@@ -1,4 +1,5 @@
 .tile.status-tile {
+  container-type: inline-size;
   min-height: 210px;
   align-items: flex-start;
   gap: 0;
@@ -63,7 +64,7 @@
   width: 100%;
   align-items: center;
   gap: 10px;
-  padding-right: 88px;
+  padding-right: 64px;
 }
 
 .status-tile__icon {
@@ -174,6 +175,21 @@
 .status-tile:disabled {
   cursor: wait;
   opacity: 0.72;
+}
+
+@container (max-width: 230px) {
+  .status-tile__heading {
+    padding-top: 30px;
+    padding-right: 0;
+  }
+
+  .status-tile__icon {
+    font-size: 32px;
+  }
+
+  .status-tile__title {
+    font-size: 20px;
+  }
 }
 
 @media (max-width: 420px) {
