@@ -8,6 +8,7 @@ normally live under `/home/pi/scripts/`.
 ## Critical operations
 
 - [Recovery playbook](docs/backup/RESTORE.md)
+- [Time Machine backup](docs/backup/TIME_MACHINE.md)
 - [OpenWrt backup and restore](scripts/backup/OPENWRT_BACKUP.md)
 - [UBNT backup and restore](scripts/backup/UBNT_BACKUP.md)
 - [Storage and torrent policy](docs/policy/POLICY.md)

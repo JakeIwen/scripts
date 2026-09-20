@@ -85,5 +85,10 @@ for label in "${gated_labels[@]}"; do
 done
 [[ $(grep -Fc "preexec close = yes" "$repo_root/pi/configs/smb.conf") == 4 ]] ||
   fail "all disk-backed Samba shares must close when their mount gate fails"
+grep -Fq "fruit:time machine max size = 1100G" \
+  "$repo_root/pi/configs/smb.conf" ||
+  fail "Time Machine share does not preserve physical disk headroom"
+grep -Fq "veto files = /archive/" "$repo_root/pi/configs/smb.conf" ||
+  fail "retired Time Machine bundles are visible through the live share"
 
 echo "PASS: disk-backed Samba shares require their exact mounted labels"

@@ -32,6 +32,8 @@ SupplementaryGroups=gpio
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=/home/pi/van_compute/scripts
 Environment=VAN_DASHBOARD_FRONTEND_ROOT=/home/pi/scripts/van-dashboard-preview/current
+# Native Time Machine creation selected this name during the 64 MiB migration.
+Environment=VAN_DASHBOARD_TIME_MACHINE_BUNDLE=/mnt/mbp2tbkup/m4mac0.sparsebundle
 RuntimeDirectory=van-dashboard
 RuntimeDirectoryMode=0750
 UMask=0027
