@@ -37,6 +37,35 @@ class Deferred(Exception):
     pass
 
 
+class AuthenticationRequired(RuntimeError):
+    """A safe, actionable description of a rejected saved Apple session."""
+
+
+def command_failure(program, operation, returncode, stderr):
+    """Classify known failures without logging server bodies or credentials."""
+    base = Path(program).name
+    text = stderr.casefold()
+    if base == 'rclone':
+        if any(message in text for message in (
+                'trust token expired', 'missing icloud trust token',
+                'invalid session token')):
+            return AuthenticationRequired(
+                'iCloud rejected the saved session and requires fresh 2FA; '
+                'run icloud_backup.sh --login')
+        if 'missing pcs cookies' in text or 'requestpcs:' in text:
+            return AuthenticationRequired(
+                'iCloud web-data access needs approval on a trusted Apple device; '
+                'run icloud_backup.sh --login')
+        if 'authsrpcomplete' in text or 'incorrect username or password' in text:
+            return AuthenticationRequired(
+                'Apple rejected the account sign-in before 2FA; check the regular '
+                'Apple password privately with icloud_backup.sh --login')
+    safe_operation = operation if operation in {
+        'config', 'copy', 'copyto', 'cat', 'deletefile', 'lsjson', 'check', 'purge',
+        'with-lock'} else 'command'
+    return RuntimeError(f'{base} {safe_operation} failed (exit {returncode})')
+
+
 def atomic_json(path, value):
     fd, name = tempfile.mkstemp(prefix='.' + path.name + '.', dir=path.parent)
     try:
@@ -133,6 +162,8 @@ def check_parked():
 def run(args, cfg, network=False, interactive=False, parked=True):
     """Guard every network command, including retries, checks and retention."""
     global CHILD, CHILD_INTERACTIVE
+    program = args[0]
+    operation = args[1] if len(args) > 1 else 'command'
     if parked:
         check_parked()
     proof = guard(cfg) if network else None
@@ -183,8 +214,8 @@ def run(args, cfg, network=False, interactive=False, parked=True):
             output.seek(0)
             data = output.read()
             if rc:
-                # Never put Apple cookies, request URLs, or login output in logs.
-                raise RuntimeError(Path(args[0]).name + ' failed (exit ' + str(rc) + ')')
+                errors.seek(0)
+                raise command_failure(program, operation, rc, errors.read(65536))
             return data
         finally:
             if CHILD.poll() is None:
@@ -326,6 +357,8 @@ def weekly(cfg, state):
         return 'not due'
     if not credentials_ready(cfg) or not (STATE_DIR / 'authenticated.json').is_file():
         raise Deferred('iCloud login is required; run icloud_backup.sh --login')
+    if (STATE_DIR / 'authentication-error.json').is_file():
+        raise Deferred('iCloud session needs renewal; run icloud_backup.sh --login')
     check_parked()
     guard(cfg)
     stamp = Path(os.environ['VANPI_ICLOUD_BORG_STAMP'])
@@ -418,8 +451,13 @@ def login(cfg):
         print('Configure the remote named icloud, type iclouddrive, service drive. Enter Apple credentials only at the private prompts. Save and quit the menu to continue.', flush=True)
         command = [RCLONE, 'config']
     run(command, cfg, network=True, interactive=True, parked=False)
+    verify_login(cfg)
+
+
+def verify_login(cfg):
+    """Test saved credentials without issuing a new interactive login."""
     if not credentials_ready(cfg):
-        raise RuntimeError('the icloud Drive remote is not authenticated')
+        raise AuthenticationRequired('the icloud Drive remote needs login; run icloud_backup.sh --login')
     # A small round-trip check before enabling the first full repository upload.
     token = uuid.uuid4().hex
     local = STATE_DIR / ('canary-' + token + '.txt')
@@ -433,6 +471,7 @@ def login(cfg):
     finally:
         local.unlink()
     atomic_json(STATE_DIR / 'authenticated.json', {'checked_at': time.time()})
+    (STATE_DIR / 'authentication-error.json').unlink(missing_ok=True)
     print('iCloud authentication and upload/download check passed.', flush=True)
     subprocess.run(['/usr/bin/systemctl', 'start', '--no-block', 'vanpi-icloud-backup.service'], check=True)
 
@@ -448,6 +487,8 @@ def main():
         raise RuntimeError('unsafe state directory')
     state = read_json(STATE_DIR / 'state.json', {})
     if mode == '--status':
+        if (STATE_DIR / 'authentication-error.json').is_file():
+            state['authentication_error'] = read_json(STATE_DIR / 'authentication-error.json')
         print(json.dumps(state, sort_keys=True, indent=2))
         return 0
     try:
@@ -463,11 +504,23 @@ def main():
         if mode == '--login':
             login(cfg)
             return 0
+        if mode == '--verify-login':
+            verify_login(cfg)
+            return 0
         if mode != '--run':
             raise ValueError('unsupported mode')
         result = weekly(cfg, state)
         state.update(phase=result, last_attempt_at=time.time(), last_error=None)
         return 0
+    except AuthenticationRequired as exc:
+        message = str(exc)
+        atomic_json(STATE_DIR / 'authentication-error.json',
+                    {'failed_at': time.time(), 'reason': message})
+        state.update(phase='authentication_required', last_attempt_at=time.time(), last_error=message)
+        print('Authentication required: ' + message, file=sys.stderr, flush=True)
+        if mode == '--run':
+            notify(state, 'vanpi iCloud login needed', message)
+        return 1
     except Deferred as exc:
         state.update(phase='deferred', last_attempt_at=time.time(), last_error=str(exc))
         print('Deferred: ' + str(exc), flush=True)

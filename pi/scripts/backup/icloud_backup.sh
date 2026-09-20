@@ -3,7 +3,7 @@
 set -euo pipefail
 source /home/pi/scripts/backup/backup_conf.sh
 mode=${1:---run}
-case "$mode" in --run|--preflight|--status|--login) ;; *) exit 2;; esac
+case "$mode" in --run|--preflight|--status|--login|--verify-login) ;; *) exit 2;; esac
 [[ $# -le 1 ]] || exit 2
 if [[ "$mode" == --run ]]; then
   acquire_job_lock || exit 0

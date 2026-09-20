@@ -83,6 +83,18 @@ canary, removes that canary, and requests the initial backup. For an existing
 authenticated remote, the same helper invokes rclone's reconnect flow directly
 and repeats the canary. No weekly transfer runs before the first canary succeeds.
 
+If setup saves credentials but the cloud test fails, do not treat the saved
+cookies/token as proof of a usable session. The helper reports recognized Apple
+authentication errors without printing cookies or server response bodies.
+"Trust token expired" can mean Apple requests fresh 2FA, even after recent setup;
+it is not proof that 30 days elapsed. A recorded authentication failure defers
+weekly retries until the login helper completes its cloud test successfully.
+Retry just the test, without requesting another login, with:
+
+```sh
+ssh pi@vanpi.lan 'sudo /bin/bash /home/pi/scripts/backup/icloud_backup.sh --verify-login'
+```
+
 Before relying on recovery, keep the Borg passphrase and Apple account recovery
 material somewhere accessible after loss of every van device. The Borg
 passphrase stored inside an encrypted backup cannot unlock that backup.

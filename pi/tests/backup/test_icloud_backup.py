@@ -64,6 +64,49 @@ class UplinkTests(unittest.TestCase):
 
 
 class SnapshotTests(unittest.TestCase):
+    def test_auth_errors_are_actionable_without_echoing_credentials(self):
+        for text in ('trust token expired, please reauth', 'missing icloud trust token',
+                     'Invalid Session Token', 'Missing PCS cookies from the request',
+                     'authSRPComplete: sign in failed: 401'):
+            failure = backup.command_failure('/usr/local/bin/rclone','copyto',1,
+                text + ' password=PRIVATE cookie=SECRET https://private.invalid/?token=TOKEN')
+            self.assertIsInstance(failure,backup.AuthenticationRequired)
+            self.assertIn('--login',str(failure))
+            for secret in ('PRIVATE','SECRET','private.invalid','TOKEN'):
+                self.assertNotIn(secret,str(failure))
+
+    def test_unknown_errors_do_not_echo_server_bodies(self):
+        failure=backup.command_failure('/usr/local/bin/rclone','copyto',1,'private account and token')
+        self.assertEqual(str(failure),'rclone copyto failed (exit 1)')
+
+    def test_cloud_canary_failure_never_marks_authenticated_or_starts_job(self):
+        cfg=json.loads((PI/'configs'/'icloud-backup.json').read_text())
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            with mock.patch.object(backup,'STATE_DIR',root), mock.patch.object(backup,'credentials_ready',return_value=True), \
+                 mock.patch.object(backup,'run',side_effect=backup.AuthenticationRequired('fresh 2FA required')), \
+                 mock.patch.object(backup.subprocess,'run') as service:
+                with self.assertRaises(backup.AuthenticationRequired):backup.verify_login(cfg)
+                service.assert_not_called()
+                self.assertFalse((root/'authenticated.json').exists())
+                self.assertEqual(list(root.glob('canary-*.txt')),[])
+
+    def test_cloud_canary_success_clears_auth_error_then_starts_job(self):
+        cfg=json.loads((PI/'configs'/'icloud-backup.json').read_text())
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);(root/'authentication-error.json').write_text('{}')
+            def run(args,*a,**kw):
+                if args[1]=='cat':return next(root.glob('canary-*.txt')).read_text()
+                return ''
+            with mock.patch.object(backup,'STATE_DIR',root), mock.patch.object(backup,'credentials_ready',return_value=True), \
+                 mock.patch.object(backup,'run',side_effect=run) as operations, \
+                 mock.patch.object(backup.subprocess,'run') as service:
+                backup.verify_login(cfg)
+                self.assertEqual([c.args[0][1] for c in operations.call_args_list],['copyto','cat','deletefile'])
+                self.assertTrue((root/'authenticated.json').is_file())
+                self.assertFalse((root/'authentication-error.json').exists())
+                service.assert_called_once()
+
     @unittest.skipUnless(Path('/usr/bin/borg').is_file(), 'Borg integration runs on the Pi')
     def test_real_encrypted_repository_roundtrip(self):
         cfg=json.loads((PI/'configs'/'icloud-backup.json').read_text())
