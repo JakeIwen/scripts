@@ -16,6 +16,13 @@ windows and graphs 60 samples across an audio/video file. **Tools → BPM Over T
 opens an offline report with hover details, ambiguity indicators, PNG/SVG graphs
 and CSV/JSON data. See [setup, interpretation, and tuning](docs/BPM_OVER_TIME.md).
 
+## Rhythm practice
+
+[`scripts/rhythm_practice.py`](scripts/rhythm_practice.py) creates an offline report
+with editable candidate attacks, a reference beat grid, early/late timing,
+repeated-position comparisons and looped playback. **Tools → Rhythm Practice**
+uses Finder selection or a picker. See [setup and practice workflow](docs/RHYTHM_PRACTICE.md).
+
 ## Video conversion for sharing
 
 [`scripts/convert_video.py`](scripts/convert_video.py) makes MP4 copies at original
