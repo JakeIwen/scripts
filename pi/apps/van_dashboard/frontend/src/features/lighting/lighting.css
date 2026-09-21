@@ -143,6 +143,31 @@
   margin-bottom: 18px;
 }
 
+.lighting-group-card > header {
+  position: relative;
+  min-height: 58px;
+}
+
+.lighting-group-expand {
+  position: absolute;
+  inset: -8px;
+  width: calc(100% + 16px);
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.lighting-group-card .lighting-group-power {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+}
+
+.lighting-group-chevron {
+  color: var(--muted);
+}
+
 .lighting-live-panel {
   display: grid;
   gap: 3px;

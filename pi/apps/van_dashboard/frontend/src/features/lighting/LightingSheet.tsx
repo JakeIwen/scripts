@@ -1,3 +1,5 @@
+import { useEffect, useId, useState } from 'react';
+
 import { BottomSheet } from '../../components/BottomSheet';
 import { StatusPill } from '../../components/StatusPill';
 import { LightingSlider } from './LightingSlider';
@@ -113,18 +115,38 @@ function LightRow({ light, controls }: { light: LightingLight; controls: Lightin
 function LightingGroupCard({
   group,
   controls,
+  sheetOpen,
 }: {
   group: LightingGroup;
   controls: LightingControlActions;
+  sheetOpen: boolean;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const contentId = useId();
+  useEffect(() => {
+    if (!sheetOpen) setExpanded(false);
+  }, [sheetOpen]);
   const brightness = averageGroupBrightness(group);
   const available = group.lights.some((light) => light.available);
   const enabled = group.state === 'on';
   return (
     <section className="panel-card lighting-group-card">
       <header>
+        <button
+          type="button"
+          className="lighting-group-expand"
+          aria-label={`${expanded ? 'Collapse' : 'Expand'} ${group.label} lights`}
+          aria-expanded={expanded}
+          aria-controls={contentId}
+          onClick={() => setExpanded((current) => !current)}
+        />
         <div>
-          <h3>{group.label}</h3>
+          <h3>
+            <span className="lighting-group-chevron" aria-hidden="true">
+              {expanded ? '▾' : '▸'}
+            </span>{' '}
+            {group.label}
+          </h3>
           <p>
             {group.lights.length} {group.lights.length === 1 ? 'light' : 'lights'}
             {brightness === null ? '' : ` · average ${brightness}%`}
@@ -144,38 +166,40 @@ function LightingGroupCard({
           {enabled ? 'Turn room off' : 'Turn room on'}
         </button>
       </header>
-      {group.powerSwitch && (
-        <div className="lighting-power-switch">
-          <span>{group.powerSwitch.label}</span>
-          <button
-            type="button"
-            disabled={!group.powerSwitch.available || controls.running}
-            aria-pressed={group.powerSwitch.state === 'on'}
-            aria-label={group.powerSwitch.label}
-            onClick={() =>
-              runControl(
-                controls.setPower(group.powerSwitch!.entityId, group.powerSwitch!.state !== 'on'),
-              )
-            }
-          >
-            {lightingStateLabel(group.powerSwitch.state)}
-          </button>
+      <div id={contentId} hidden={!expanded}>
+        {group.powerSwitch && (
+          <div className="lighting-power-switch">
+            <span>{group.powerSwitch.label}</span>
+            <button
+              type="button"
+              disabled={!group.powerSwitch.available || controls.running}
+              aria-pressed={group.powerSwitch.state === 'on'}
+              aria-label={group.powerSwitch.label}
+              onClick={() =>
+                runControl(
+                  controls.setPower(group.powerSwitch!.entityId, group.powerSwitch!.state !== 'on'),
+                )
+              }
+            >
+              {lightingStateLabel(group.powerSwitch.state)}
+            </button>
+          </div>
+        )}
+        <LightingSlider
+          label={`${group.label} room brightness`}
+          value={Math.max(1, brightness ?? 100)}
+          minimum={1}
+          maximum={100}
+          unit="%"
+          disabled={!available || controls.running}
+          className="lighting-group-brightness"
+          onCommit={(value) => controls.setGroupBrightness(group.id, value)}
+        />
+        <div className="lighting-light-list">
+          {group.lights.map((light) => (
+            <LightRow light={light} controls={controls} key={light.entityId} />
+          ))}
         </div>
-      )}
-      <LightingSlider
-        label={`${group.label} room brightness`}
-        value={Math.max(1, brightness ?? 100)}
-        minimum={1}
-        maximum={100}
-        unit="%"
-        disabled={!available || controls.running}
-        className="lighting-group-brightness"
-        onCommit={(value) => controls.setGroupBrightness(group.id, value)}
-      />
-      <div className="lighting-light-list">
-        {group.lights.map((light) => (
-          <LightRow light={light} controls={controls} key={light.entityId} />
-        ))}
       </div>
     </section>
   );
@@ -244,7 +268,7 @@ export function LightingSheet({
             </button>
           </section>
           {status.groups.map((group) => (
-            <LightingGroupCard group={group} controls={controls} key={group.id} />
+            <LightingGroupCard group={group} controls={controls} sheetOpen={open} key={group.id} />
           ))}
         </div>
       )}

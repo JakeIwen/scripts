@@ -305,6 +305,7 @@ describe('lighting views', () => {
     );
 
     expect(screen.getByRole('dialog')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Cab lights' }));
     expect(screen.getByText(/Hue 29°/)).toBeInTheDocument();
     expect(screen.getByText(/3200 K · 2202–6535 K/)).toBeInTheDocument();
     expect(screen.getByText('Exterior power')).toBeInTheDocument();
@@ -336,6 +337,8 @@ describe('lighting views', () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Cab lights' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Rear lights' }));
     expect(screen.getByRole('button', { name: 'Passenger power' })).toBeDisabled();
     expect(screen.getByRole('slider', { name: 'Passenger brightness' })).toBeDisabled();
     expect(screen.getByRole('slider', { name: 'Passenger hue' })).toBeDisabled();
