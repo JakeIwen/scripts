@@ -1,5 +1,6 @@
 import type { PollingState } from '../../hooks/usePollingResource';
 import { BottomSheet } from '../../components/BottomSheet';
+import { ICloudBackupCard } from './ICloudBackupCard';
 import { formatBytes, formatRelativeTime } from '../../utils/format';
 import type { BackupControls } from './controls';
 import {
@@ -43,7 +44,10 @@ function EvidenceCard({
   const stopRunning = status.stop.status === 'running';
   const stopping = kind !== undefined && stopRunning && status.stop.kind === kind;
   const anyBackupRunning =
-    status.borg.running || status.exfatSnapshot.running || status.openwrt.running;
+    status.borg.running ||
+    status.exfatSnapshot.running ||
+    status.openwrt.running ||
+    status.icloud?.running;
   const actionDisabled = evidence.running
     ? controls.blocked || stopRunning
     : controls.blocked || operationRunning || stopRunning || anyBackupRunning;
@@ -158,6 +162,7 @@ function HotspareCard({
           status.borg.running ||
           status.exfatSnapshot.running ||
           status.openwrt.running ||
+          status.icloud?.running ||
           !card.attached ||
           card.mounted
         }
@@ -293,6 +298,8 @@ export function BackupsSheet({ open, onClose, resource, controls }: BackupsSheet
           )}
         </div>
       </section>
+
+      {status?.icloud && <ICloudBackupCard status={status.icloud} />}
 
       <section className="backups-sheet__section" aria-labelledby="backup-hotspares-title">
         <div className="backups-sheet__heading">

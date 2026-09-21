@@ -25,6 +25,7 @@ import uuid
 
 from icloud_uplink import decide
 from icloud_progress import ProcessIO, ProgressWatch, RcloneStats, StreamDigest
+from icloud_status import begin_attempt, save_attempt
 
 CONFIG = Path('/etc/vanpi-icloud-backup.json')
 STATE_DIR = Path('/var/lib/vanpi-icloud-backup')
@@ -357,7 +358,7 @@ def file_manifest(root, check=None):
     return result
 
 
-def make_snapshot(cfg, root, repo, name):
+def make_snapshot(cfg, root, repo, name, state=None):
     generation = safe_generation(root, name)
     generation.mkdir(mode=0o700, exist_ok=True)
     payload = generation / 'payload'
@@ -368,13 +369,16 @@ def make_snapshot(cfg, root, repo, name):
         raise RuntimeError('unsafe staging subdirectory')
     # Deletion is limited to this unfinished, private staging repository;
     # it has never been uploaded until its manifest is atomically published.
+    report = (lambda counters: record_progress(state, 'preparing')) if state is not None else None
     run(['/usr/bin/borg', 'with-lock', str(repo), '/usr/bin/rsync', '-a', '--delete',
-         '--exclude=/lock.exclusive', '--exclude=/lock.roster', str(repo) + '/', str(dest) + '/'], cfg)
-    run(['/usr/bin/borg', 'check', '--verify-data', str(dest)], cfg)
+         '--exclude=/lock.exclusive', '--exclude=/lock.roster', str(repo) + '/', str(dest) + '/'], cfg, progress=report)
+    run(['/usr/bin/borg', 'check', '--verify-data', str(dest)], cfg, progress=report)
     last_check = [0.0]
     def check():
         if time.monotonic() - last_check[0] >= cfg['guard_interval_seconds']:
             check_work_allowed(cfg)
+            if report:
+                report({})
             last_check[0] = time.monotonic()
     files = file_manifest(dest, check)
     if 'config' not in files or not any(k.startswith('data/') for k in files):
@@ -439,10 +443,28 @@ def remote_inventory(cfg, destination):
 
 
 def record_progress(state, phase, **values):
-    state.update(phase=phase, last_error=None, progress_updated_at=time.time())
+    changed = state.get('phase') != phase
+    state.update(phase=phase, work_phase=phase, last_work_phase=phase,
+                 last_error=None, progress_updated_at=time.time())
     if values:
         state.setdefault('progress', {}).update(values)
     atomic_json(STATE_DIR / 'state.json', state)
+    if changed:
+        save_attempt(STATE_DIR, state)
+
+
+def upload_progress(expected, inventory, counters):
+    """Size-based estimate includes complete objects saved by earlier attempts.
+
+    Transferred bytes can include retries; this is never verification evidence.
+    """
+    total = sum(item['bytes'] for item in expected.values())
+    existing = sum(item['bytes'] for path, item in expected.items()
+                   if remote_fingerprint(inventory.get(path)) is not None
+                   and inventory[path]['Size'] == item['bytes'])
+    sent = counters.get('bytes', 0)
+    return {'upload_total_bytes': total, 'upload_estimated_bytes': min(total, existing + sent),
+            'command_bytes': sent, 'command_idle_seconds': counters.get('idle_seconds', 0)}
 
 
 def verify_generation(cfg, generation, destination, state):
@@ -596,6 +618,7 @@ def weekly(cfg, state):
         if not pending:
             pending = 'vanpi-' + dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + uuid.uuid4().hex[:8]
             state['pending'] = pending
+            state['progress'] = {}
             atomic_json(STATE_DIR / 'state.json', state)
         generation = safe_generation(root, pending)
         if not (generation / 'payload' / 'manifest.json').is_file():
@@ -603,16 +626,20 @@ def weekly(cfg, state):
             if shutil.disk_usage(root).free < size + cfg['minimum_free_gib'] * 1024**3:
                 raise Deferred('insufficient staging disk headroom')
             record_progress(state, 'preparing')
-            make_snapshot(cfg, root, repo, pending)
+            make_snapshot(cfg, root, repo, pending, state)
         payload = generation / 'payload'
         destination = cfg['remote'] + '/' + pending
         record_progress(state, 'uploading', command_bytes=0)
+        expected, _ = verification_plan(payload, pending)
+        run([RCLONE, 'mkdir', destination], cfg, network=True)
+        inventory = remote_inventory(cfg, destination)
+        record_progress(state, 'uploading', **upload_progress(expected, inventory, {}))
         run([RCLONE, 'copy', str(payload), destination, '--immutable'], cfg, network=True,
             progress=lambda counters: record_progress(state, 'uploading',
-                command_bytes=counters.get('bytes', 0),
-                command_completed_files=counters.get('transfers', 0),
-                command_idle_seconds=counters.get('idle_seconds', 0)))
+                **upload_progress(expected, inventory, counters)))
+        record_progress(state, 'uploading', upload_estimated_bytes=sum(x['bytes'] for x in expected.values()))
         verified = verify_generation(cfg, generation, destination, state)
+        record_progress(state, 'publishing')
         marker = generation / '_COMPLETE.json'
         atomic_json(marker, {'owner': OWNER, 'generation': pending, 'verification': 'download-compared',
                             'verification_version': 2, **verified, 'completed_at': time.time()})
@@ -621,7 +648,10 @@ def weekly(cfg, state):
         if remote_marker != read_json(marker):
             raise RuntimeError('completion marker verification failed')
         state.update(last_success_at=time.time(), last_generation=pending, pending=None, phase='complete')
+        state['attempt_verified_at'] = state['last_success_at']
         atomic_json(STATE_DIR / 'state.json', state)
+        save_attempt(STATE_DIR, state)
+        record_progress(state, 'retention')
         retention(cfg, root, pending)
         notify(state, 'vanpi iCloud backup verified', 'Weekly encrypted recovery copy uploaded and download-compared: ' + pending)
         return 'complete'
@@ -713,7 +743,12 @@ def main():
             return 0
         if mode != '--run':
             raise ValueError('unsupported mode')
-        state.update(last_attempt_at=time.time(), last_error=None, phase='checking', progress={})
+        due = time.time() - state.get('last_success_at', 0) >= cfg['interval_days'] * 86400
+        if due:
+            begin_attempt(STATE_DIR, state)
+        else:
+            state.pop('attempt_id', None)
+        state.update(last_attempt_at=time.time(), last_error=None, phase='checking', worker_pid=os.getpid())
         atomic_json(STATE_DIR / 'state.json', state)
         result = weekly(cfg, state)
         state.update(phase=result, last_attempt_at=time.time(), last_error=None)
@@ -742,6 +777,7 @@ def main():
     finally:
         if mode == '--run':
             atomic_json(STATE_DIR / 'state.json', state)
+            save_attempt(STATE_DIR, state, finished=True)
 
 
 if __name__ == '__main__':

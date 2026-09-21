@@ -23,6 +23,7 @@ import type {
   CloneCardNominalGb,
   TimeMachineStatus,
 } from './types';
+import { decodeICloud } from './icloud';
 
 function trueValue(value: unknown, label: string): true {
   if (value !== true) throw new TypeError(`${label} must be true`);
@@ -228,6 +229,7 @@ export function decodeBackupStatusResponse(value: unknown): BackupStatus {
     openwrt: decodeEvidence(backups.openwrt, 'backups.openwrt'),
     hotswaps: arrayValue(backups.hotswaps, 'backups.hotswaps').map(decodeHotspare),
     timeMachine: decodeTimeMachine(backups.time_machine),
+    icloud: decodeICloud(backups.icloud),
     operation: decodeOperation(backups.operation),
     stop: decodeStopOperation(backups.stop),
   };

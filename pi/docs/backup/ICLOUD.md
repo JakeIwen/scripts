@@ -56,6 +56,41 @@ size. This design trades bandwidth for independent, verifiable recovery copies.
   as restore sources; do not independently create/prune/recreate Borg archives
   in a copy while the original repository is in use.
 
+## Dashboard progress and history
+
+The Backups tile and pane include **Pi offsite · iCloud**. Running means a live
+systemd worker exists; a saved `uploading` phase without that worker is reported
+as interrupted, not running. Paused attempts show their last saved progress and
+a safe explanation, plus the next timer check. A timer check is not a promised
+start time: the uplink, disk policy, shared lock and local-backup window still apply.
+
+- Upload progress is an **estimate**: matching-size objects already on iCloud
+  plus bytes sent by this attempt. Retries may inflate it; 100% is not proof of
+  a restorable copy. Download verification is displayed separately, counting only
+  files whose complete SHA-256 check has passed. The current file's downloaded
+  bytes are shown separately and credited only when it passes.
+- No ETA is guessed. The pane shows the worker phase, heartbeat freshness,
+  byte/file counters, last verified recovery point, next eligibility check,
+  weekly cadence and retention. An unverified first copy is explicitly warned.
+- Root-private `history.json` retains the latest 100 attempts and 52 historical
+  verification successes. Tracking starts with the first run after this feature
+  is deployed; earlier attempts remain in the systemd journal. History is not
+  a cloud inventory: retention may already have removed older successful copies.
+- `icloud_status.py` is a fixed read-only helper called by the dashboard. It
+  reads local root-private status and systemd metadata only, exports safe reasons
+  and numeric counters, and never reads Apple credentials. Dashboard polling
+  does not contact iCloud, inspect the router, mount disks or start jobs. The
+  pane polls every 2.5 seconds while backups run, otherwise every 10 seconds;
+  worker counters normally update every five seconds plus uplink-probe latency.
+- Manual local backup/clone starts are disabled while the iCloud worker owns
+  the shared backup workflow. No cloud start/abort controls are exposed here.
+
+Read the same safe status directly on the Pi:
+
+```sh
+sudo /usr/bin/python3 /home/pi/scripts/backup/icloud_status.py
+```
+
 ## Starlink exclusion
 
 The job inspects the router's selected IPv4 policy and every selected member.

@@ -1,5 +1,6 @@
 import type { PollingState } from '../../hooks/usePollingResource';
 import { lastSuccessLabel } from './presentation';
+import { iCloudPhaseLabel, iCloudProgress } from './icloud';
 import type { BackupStatus } from './types';
 import './backups.css';
 
@@ -56,10 +57,23 @@ function backupPresentation(status: BackupStatus) {
     summary = `Cloning vanpi to ${status.operation.target ?? 'hotspare'}…`;
   } else if (status.timeMachine.running) {
     summary = 'Time Machine backup in progress';
+  } else if (status.icloud?.available && status.icloud.running) {
+    summary = `Pi → iCloud: ${status.icloud.message}`;
   }
+
+  const cloud = status.icloud;
+  const cloudPercent = cloud?.available ? iCloudProgress(cloud).percent : null;
+  const icloud = !cloud?.available
+    ? 'Status unavailable'
+    : cloud.phase === 'not due' || cloud.phase === 'complete'
+      ? cloud.lastSuccessAt === null
+        ? 'Not yet verified'
+        : `Verified ${backupAge(cloud.lastSuccessAt)}`
+      : `${iCloudPhaseLabel(cloud.phase)}${cloudPercent === null ? '' : ` · ${cloudPercent.toFixed(1)}%`}`;
 
   return {
     summary,
+    icloud,
     borg: borgAge ?? 'No successful archive',
     exfat: exfatAge ? `Snapshot ${exfatAge}` : 'No snapshot',
     openwrt: openwrtAge ? `Snapshot ${openwrtAge}` : 'No verified snapshot',
@@ -103,6 +117,12 @@ export function BackupsTile({ resource, onOpen }: BackupsTileProps) {
             : 'Reading backup history…'}
       </span>
       <span className="backups-tile__status-lines">
+        {status?.icloud && (
+          <span className="backups-tile__status-line">
+            <span>Pi · iCloud</span>
+            <span>{presentation?.icloud}</span>
+          </span>
+        )}
         <span className="backups-tile__status-line">
           <span>Borg</span>
           <span>{presentation?.borg ?? 'Checking…'}</span>

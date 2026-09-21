@@ -3289,6 +3289,12 @@ class CopAlertManagerTests(unittest.TestCase):
 class BackupManagerTests(unittest.TestCase):
     NOW = 1_800_000_000
 
+    def setUp(self):
+        # Never inspect the test host's actual privileged iCloud state.
+        patcher = mock.patch.object(dashboard.BackupManager, '_icloud_status', return_value=None)
+        self.icloud_status = patcher.start()
+        self.addCleanup(patcher.stop)
+
     @staticmethod
     def lsblk_payload(mounted=False):
         return {
@@ -3376,6 +3382,18 @@ class BackupManagerTests(unittest.TestCase):
             )
         os.utime(results_path, (self.NOW - 30, self.NOW - 30))
         return config, stamps, bundle
+
+    def test_icloud_aggregate_running_requires_a_live_cloud_worker(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            config, stamps, bundle = self.make_files(tempdir, tm_running=False)
+            manager = dashboard.BackupManager(
+                config=config, stamp_dir=stamps, time_machine_bundle=bundle,
+                command=lambda args, timeout: SimpleNamespace(returncode=0, stdout=json.dumps(self.lsblk_payload()), stderr=''),
+                wall_clock=lambda: self.NOW, process_root=os.path.join(tempdir, 'proc'))
+            self.icloud_status.return_value = {'available': True, 'running': True, 'attention': True}
+            self.assertEqual(manager.status()['health'], 'running')
+            self.icloud_status.return_value = {'available': True, 'running': False, 'attention': True, 'phase': 'deferred'}
+            self.assertEqual(manager.status()['health'], 'attention')
 
     def test_reads_borg_hotswap_and_time_machine_evidence(self):
         with tempfile.TemporaryDirectory() as tempdir:

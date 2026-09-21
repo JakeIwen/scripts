@@ -5,11 +5,13 @@ repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 target=${1:-pi@vanpi.lan}
 [[ $# -le 1 ]] || exit 2
 python3 "$repo/pi/tests/backup/test_icloud_backup.py"
+python3 "$repo/pi/tests/backup/test_icloud_status.py"
 bash -n "$repo/pi/scripts/backup/icloud_backup.sh"
 stage=$(ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" /usr/bin/mktemp -d /tmp/vanpi-icloud.XXXXXX)
 [[ "$stage" =~ ^/tmp/vanpi-icloud\.[[:alnum:]]{6}$ ]] || exit 1
 scp -q "$repo/pi/scripts/backup/icloud_backup.py" \
   "$repo/pi/scripts/backup/icloud_progress.py" \
+  "$repo/pi/scripts/backup/icloud_status.py" \
   "$repo/pi/scripts/backup/icloud_uplink.py" \
   "$repo/pi/scripts/backup/icloud_backup.sh" \
   "$repo/pi/scripts/backup/ICLOUD_RESTORE.txt" \
@@ -21,7 +23,7 @@ set -euo pipefail
 stage=$1
 [[ "$stage" =~ ^/tmp/vanpi-icloud\.[[:alnum:]]{6}$ ]] || exit 1
 [[ -x /usr/local/bin/rclone ]]
-/usr/bin/python3 -m py_compile "$stage/icloud_backup.py" "$stage/icloud_uplink.py" "$stage/icloud_progress.py"
+/usr/bin/python3 -m py_compile "$stage/icloud_backup.py" "$stage/icloud_uplink.py" "$stage/icloud_progress.py" "$stage/icloud_status.py"
 /bin/bash -n "$stage/icloud_backup.sh"
 /usr/bin/python3 -m json.tool "$stage/icloud-backup.json" >/dev/null
 /usr/bin/systemd-analyze verify "$stage/vanpi-icloud-backup.service" "$stage/vanpi-icloud-backup.timer"
@@ -32,7 +34,7 @@ case "$service_state" in
   *) echo 'iCloud backup may be active; defer deployment until it stops.' >&2; exit 1 ;;
 esac
 /usr/bin/install -d -m 0700 "$stage/previous"
-for name in icloud_backup.py icloud_progress.py icloud_uplink.py icloud_backup.sh ICLOUD_RESTORE.txt; do
+for name in icloud_backup.py icloud_progress.py icloud_status.py icloud_uplink.py icloud_backup.sh ICLOUD_RESTORE.txt; do
   live=/home/pi/scripts/backup/$name
   [[ ! -e "$live" ]] || /usr/bin/cp -p "$live" "$stage/previous/$name"
   /usr/bin/sudo -n /usr/bin/install -o pi -g pi -m 0750 "$stage/$name" "$live"

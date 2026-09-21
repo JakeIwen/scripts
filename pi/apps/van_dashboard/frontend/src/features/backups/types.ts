@@ -1,3 +1,5 @@
+import type { ICloudStatus } from './icloud';
+
 export type BackupHealth = 'running' | 'attention' | 'good';
 export type BackupOperationStatus = 'idle' | 'running' | 'complete' | 'error' | 'stopped';
 export type BackupOperationKind = 'clone' | 'borg' | 'exfat';
@@ -84,6 +86,7 @@ export interface BackupStatus {
   openwrt: BackupEvidence;
   hotswaps: HotspareStatus[];
   timeMachine: TimeMachineStatus;
+  icloud: ICloudStatus | null;
   operation: BackupOperation;
   stop: BackupStopOperation;
 }

@@ -327,3 +327,69 @@
     justify-content: space-between;
   }
 }
+.backup-icloud__badge {
+  align-self: flex-start;
+  border: 1px solid var(--border-color, #34505d);
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  white-space: nowrap;
+  font-weight: 700;
+}
+.backup-icloud .backup-icloud__badge--running {
+  color: #97d7e3;
+  background: #223f49;
+}
+.backup-icloud .backup-icloud__badge--attention,
+.backup-icloud__warning {
+  color: #f1c475;
+}
+.backup-icloud__progress {
+  display: grid;
+  gap: 0.65rem;
+  margin: 1rem 0;
+}
+.backup-icloud__progress small,
+.backup-icloud__note,
+.backup-icloud__history p,
+.backup-icloud__history small {
+  color: var(--text-muted, #9bafba);
+}
+.backup-icloud__schedule {
+  display: grid;
+  gap: 0.6rem;
+}
+.backup-icloud__schedule > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  justify-content: space-between;
+}
+.backup-icloud__schedule dd {
+  margin: 0;
+}
+.backup-icloud__history {
+  margin-top: 1rem;
+}
+.backup-icloud__history summary {
+  cursor: pointer;
+  padding: 0.75rem 0;
+  font-weight: 700;
+}
+.backup-icloud__history ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.backup-icloud__history li {
+  padding: 1rem 0;
+  border-top: 1px solid var(--border-color, #34505d);
+}
+.backup-icloud__history li p {
+  margin: 0.5rem 0;
+}
+.backup-icloud__history small,
+.backup-icloud__history code {
+  display: block;
+  margin-top: 0.4rem;
+  overflow-wrap: anywhere;
+}

@@ -172,7 +172,7 @@ class SnapshotTests(unittest.TestCase):
             root=Path(tmp); repo=root/'source'; repo.mkdir()
             stage=root/'stage'; stage.mkdir()
             name='vanpi-20260920T010203Z-12345678'
-            def child(args,cfg):
+            def child(args,cfg,**kwargs):
                 dest=stage/name/'payload'/'repository'
                 if args[1]=='with-lock':
                     self.assertIn('--exclude=/lock.exclusive',args)
