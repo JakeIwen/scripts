@@ -14,11 +14,20 @@ size. This design trades bandwidth for independent, verifiable recovery copies.
 ## Schedule and data safety
 
 - A systemd timer checks hourly at :17 plus up to five minutes of jitter,
-  09:00–23:59 in the Pi's local timezone. Work is due seven days after the last
+  in the Pi's local timezone. Work is due seven days after the last
   verified upload. Deferrals retry in subsequent windows; manual login also
   requests the first run immediately.
-- Ignition, HDD policy, and the existing shared backup job lock apply. Each
-  attempt has a four-hour deadline. An interrupted copy/upload can retry.
+- Ignition, HDD policy, and the existing shared backup job lock apply. There is
+  no total-duration cutoff: healthy transfers may continue beyond four hours.
+  A configurable **15-minute no-progress watchdog** stops stalled commands.
+  It uses rclone's actual bytes/check/list counters, streamed download bytes,
+  or local Borg/rsync process-tree I/O. Elapsed-time/error messages do not count
+  as transfer progress. Interactive login is exempt from this watchdog.
+- From **02:55 to 09:00**, an active offsite job stops gracefully and releases
+  the HDD/lock while either daily Borg or EXFAT backup lacks today's success
+  stamp. This gives the existing 03:00–08:00 local retry window priority.
+  The offsite timer can resume early once both local backups succeed, otherwise
+  it resumes after 09:00. No local backup/clone schedule is changed.
 - The latest local Borg success must be no more than 48 hours old.
 - The exact labeled backup disk is verified before use. Staging lives in the
   root-only `icloud-weekly/` directory on that disk, not on the boot SD card.
@@ -26,8 +35,18 @@ size. This design trades bandwidth for independent, verifiable recovery copies.
   gets a full Borg data-integrity check and a SHA-256 manifest before publication.
   An unfinished local copy may be refreshed; a manifested generation is frozen.
 - Destination: `icloud:VanRecovery/vanpi/weekly/<generation>/`. rclone copies
-  immutable data, then downloads and compares every file. `_COMPLETE.json` is
+  immutable data, then downloads and hashes every file. `_COMPLETE.json` is
   published last and read back before recording success.
+- Verification checkpoints live in `<generation>/verification.json`, outside
+  the uploaded payload. Each file is streamed through SHA-256 and checked
+  against the frozen manifest before its checkpoint is atomically saved. A retry
+  skips already verified files only when the manifest digest and remote file
+  identity/size/modification time still match. Changed metadata invalidates
+  the affected checkpoint; remote inventory is checked again before completion.
+- Interrupted uploads may restart the current file, but completed uploads are
+  skipped. Interrupted verification restarts only the unfinished file; completed
+  verification checkpoints survive timeouts, local-backup yields and restarts.
+  Weekly generations remain independent full repository copies.
 - Retention affects only this job's validated, completed generation directories.
   Eight complete generations are retained. Older completed local staging copies
   are removed only after the corresponding remote retention operation succeeds.
@@ -121,7 +140,10 @@ passphrase stored inside an encrypted backup cannot unlock that backup.
 ## Settings, status, and recovery
 
 Defaults live in `pi/configs/icloud-backup.json`. The active root-only file is
-`/etc/vanpi-icloud-backup.json`; deployment preserves existing settings.
+`/etc/vanpi-icloud-backup.json`; deployment adds missing defaults while preserving
+existing settings. `no_progress_timeout_seconds` defaults to 900. The local
+priority window is set by `local_backup_window_start` and
+`local_backup_window_end`; equal values disable that window.
 
 ```sh
 ssh pi@vanpi.lan 'sudo /bin/bash /home/pi/scripts/backup/icloud_backup.sh --preflight'
@@ -130,8 +152,13 @@ ssh pi@vanpi.lan 'systemctl list-timers vanpi-icloud-backup.timer --all'
 ssh pi@vanpi.lan 'sudo journalctl -u vanpi-icloud-backup.service -n 40 --no-pager'
 ```
 
-Status is `/var/lib/vanpi-icloud-backup/state.json`. Login/transfer problems
-notify through the existing backup ntfy mechanism, rate-limited to once daily.
+Status is `/var/lib/vanpi-icloud-backup/state.json`, with active transfer counters,
+verification file/byte totals and current-file progress. Upload `command_bytes`
+counts this attempt's traffic, not previously uploaded files. Stale errors are
+cleared when a new attempt begins. Login/transfer problems notify through the
+existing backup ntfy mechanism. Consecutive notices with the same title are
+limited to once per day; a previous failure does not suppress the later
+verified-success notice.
 `last_success_at` requires verified remote data, not just a queued upload.
 
 Restore only a generation with a valid `_COMPLETE.json`. Download its entire
@@ -147,7 +174,7 @@ Deploy scripts, configuration defaults and units with:
 ```
 
 The installer requires a verified iCloud-capable rclone at `/usr/local/bin/rclone`
-and refuses to update code during an active offsite run. It preserves settings
+and refuses to update code during an active/activating offsite run. It preserves settings
 and credentials and enables the timer, not an immediate unauthenticated upload.
 
 References: [rclone iCloud authentication](https://rclone.org/iclouddrive/),

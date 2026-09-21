@@ -6,11 +6,12 @@ it so ignition's emergency abort can find the entire operation. The uploader
 never creates/prunes Borg archives in a copied repository.
 """
 import configparser
+from contextlib import suppress
 import datetime as dt
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shutil
 import signal
@@ -23,6 +24,7 @@ import time
 import uuid
 
 from icloud_uplink import decide
+from icloud_progress import ProcessIO, ProgressWatch, RcloneStats, StreamDigest
 
 CONFIG = Path('/etc/vanpi-icloud-backup.json')
 STATE_DIR = Path('/var/lib/vanpi-icloud-backup')
@@ -90,13 +92,19 @@ def read_json(path, default=None):
 
 def load_config(path=CONFIG):
     cfg = read_json(path)
+    cfg.setdefault('no_progress_timeout_seconds', 900)
+    cfg.setdefault('local_backup_window_start', '02:55')
+    cfg.setdefault('local_backup_window_end', '09:00')
     if not re.fullmatch(r'icloud:[A-Za-z0-9_-]+/vanpi/weekly', cfg['remote']):
         raise ValueError('remote must be a dedicated icloud:<folder>/vanpi/weekly prefix')
     for k, low, high in [('interval_days', 1, 31), ('keep_generations', 2, 52),
                          ('max_source_age_hours', 1, 168), ('guard_interval_seconds', 1, 10),
-                         ('minimum_free_gib', 1, 1000)]:
+                         ('minimum_free_gib', 1, 1000), ('no_progress_timeout_seconds', 30, 7200)]:
         if type(cfg[k]) is not int or not low <= cfg[k] <= high:
             raise ValueError('invalid setting: ' + k)
+    for key in ('local_backup_window_start', 'local_backup_window_end'):
+        if not re.fullmatch(r'(?:[01][0-9]|2[0-3]):[0-5][0-9]', cfg[key]):
+            raise ValueError('invalid setting: ' + key)
     if not re.fullmatch(r'[1-9][0-9]*[kM]', cfg['bandwidth_limit']):
         raise ValueError('invalid bandwidth_limit')
     if not cfg['blocked_ssids'] or not all(isinstance(x, str) and x for x in cfg['blocked_ssids']):
@@ -109,17 +117,21 @@ def stop_child():
     if CHILD is None or CHILD.poll() is not None:
         return
     if CHILD_INTERACTIVE:
-        CHILD.terminate()
+        with suppress(ProcessLookupError):
+            CHILD.terminate()
     else:
-        os.killpg(CHILD.pid, signal.SIGCONT)
-        os.killpg(CHILD.pid, signal.SIGTERM)
+        with suppress(ProcessLookupError):
+            os.killpg(CHILD.pid, signal.SIGCONT)
+            os.killpg(CHILD.pid, signal.SIGTERM)
     try:
         CHILD.wait(timeout=10)
     except subprocess.TimeoutExpired:
         if CHILD_INTERACTIVE:
-            CHILD.kill()
+            with suppress(ProcessLookupError):
+                CHILD.kill()
         else:
-            os.killpg(CHILD.pid, signal.SIGKILL)
+            with suppress(ProcessLookupError):
+                os.killpg(CHILD.pid, signal.SIGKILL)
         CHILD.wait(timeout=5)
 
 
@@ -160,13 +172,50 @@ def check_parked():
         raise Deferred('HDD policy is off or unavailable')
 
 
-def run(args, cfg, network=False, interactive=False, parked=True):
+def local_backup_window(cfg, now=None):
+    now = dt.datetime.now() if now is None else now
+    def minutes(value):
+        hours, mins = map(int, value.split(':'))
+        return hours * 60 + mins
+    start = minutes(cfg.get('local_backup_window_start', '02:55'))
+    end = minutes(cfg.get('local_backup_window_end', '09:00'))
+    current = now.hour * 60 + now.minute
+    if start == end:
+        return False
+    return start <= current < end if start < end else current >= start or current < end
+
+
+def check_work_allowed(cfg):
+    check_parked()
+    if local_backup_window(cfg) and not local_backups_complete():
+        raise Deferred('yielding the HDD and shared lock to the local-backup window')
+
+
+def local_backups_complete(now=None):
+    now = dt.datetime.now() if now is None else now
+    for key in ('VANPI_ICLOUD_BORG_STAMP', 'VANPI_ICLOUD_EXFAT_STAMP'):
+        value = os.environ.get(key)
+        if not value:
+            return False
+        path = Path(value)
+        try:
+            if path.is_symlink() or not path.is_file():
+                return False
+            completed = dt.datetime.fromtimestamp(path.stat().st_mtime)
+        except OSError:
+            return False
+        if completed > now or completed.date() != now.date():
+            return False
+    return True
+
+
+def run(args, cfg, network=False, interactive=False, parked=True, stream_hash=False, progress=None):
     """Guard every network command, including retries, checks and retention."""
     global CHILD, CHILD_INTERACTIVE
     program = args[0]
     operation = args[1] if len(args) > 1 else 'command'
     if parked:
-        check_parked()
+        check_work_allowed(cfg)
     proof = guard(cfg) if network else None
     source = proof[0] if network else None
     env = os.environ.copy()
@@ -178,7 +227,9 @@ def run(args, cfg, network=False, interactive=False, parked=True):
         args = [args[0], '--config', cfg['rclone_config'], '--bind', source,
                 '--bwlimit', cfg['bandwidth_limit'], '--transfers', '2',
                 '--checkers', '2', '--retries', '1', '--low-level-retries', '2',
-                '--contimeout', '20s', '--timeout', '60s', '--stats', '0'] + args[1:]
+                '--contimeout', '20s', '--timeout', '60s'] + (
+                ['--stats', '0'] if interactive else
+                ['--stats', '5s', '--stats-log-level', 'NOTICE', '--use-json-log']) + args[1:]
     inherited = ()
     try:
         os.fstat(9)
@@ -186,37 +237,53 @@ def run(args, cfg, network=False, interactive=False, parked=True):
     except OSError:
         pass
     terminal = termios.tcgetattr(sys.stdin.fileno()) if interactive and sys.stdin.isatty() else None
+    watch = ProgressWatch(cfg.get('no_progress_timeout_seconds', 900))
+    stats, io = RcloneStats(), ProcessIO()
     with tempfile.TemporaryFile(mode='w+t') as output, tempfile.TemporaryFile(mode='w+t') as errors:
         CHILD_INTERACTIVE = interactive
         CHILD = subprocess.Popen(args, stdin=None if interactive else subprocess.DEVNULL,
-                                 stdout=None if interactive else output,
+                                 stdout=None if interactive else (subprocess.PIPE if stream_hash else output),
                                  stderr=None if interactive else errors, env=env,
                                  start_new_session=not interactive, pass_fds=inherited)
+        reader = StreamDigest(CHILD.stdout) if stream_hash else None
         next_check = time.monotonic() + cfg['guard_interval_seconds']
         try:
             while CHILD.poll() is None:
                 time.sleep(0.25)
+                counters = stats.read(errors.fileno()) if network else io.sample(CHILD.pid)
+                if reader is not None:
+                    counters.update(reader.counters())
+                watch.observe(counters)
+                if not interactive and watch.expired():
+                    raise RuntimeError(f'{Path(program).name} {operation} made no progress for {watch.timeout} seconds; retry will resume completed files')
                 if time.monotonic() < next_check:
                     continue
                 if parked:
-                    check_parked()
+                    check_work_allowed(cfg)
                 if network:
                     # Pause while collecting fresh evidence: a slow/failed probe
                     # must not leave the upload running throughout its timeout.
                     try:
-                        os.kill(CHILD.pid, signal.SIGSTOP)
+                        with suppress(ProcessLookupError):
+                            os.kill(CHILD.pid, signal.SIGSTOP)
                         if guard(cfg) != proof:
                             raise Deferred('uplink or association changed during transfer')
                     finally:
                         if CHILD.poll() is None:
-                            os.kill(CHILD.pid, signal.SIGCONT)
+                            with suppress(ProcessLookupError):
+                                os.kill(CHILD.pid, signal.SIGCONT)
+                if progress is not None:
+                    progress({**counters, 'idle_seconds': round(watch.idle_seconds(), 1)})
                 next_check = time.monotonic() + cfg['guard_interval_seconds']
             rc = CHILD.returncode
             output.seek(0)
             data = output.read()
             if rc:
-                errors.seek(0)
-                raise command_failure(program, operation, rc, errors.read(65536))
+                size = os.fstat(errors.fileno()).st_size
+                tail = os.pread(errors.fileno(), 65536, max(0, size - 65536)).decode(errors='replace')
+                raise command_failure(program, operation, rc, tail)
+            if reader is not None:
+                return reader.result()
             return data
         finally:
             if CHILD.poll() is None:
@@ -230,6 +297,9 @@ def run(args, cfg, network=False, interactive=False, parked=True):
                 else:
                     stop_child()
             CHILD = None
+            if reader is not None:
+                reader.thread.join(timeout=5)
+                reader.stream.close()
             if terminal is not None:
                 termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, terminal)
 
@@ -267,7 +337,7 @@ def credentials_ready(cfg):
             and bool(c['icloud'].get('cookies')))
 
 
-def file_manifest(root):
+def file_manifest(root, check=None):
     result = {}
     for directory, dirs, files in os.walk(root, followlinks=False):
         for name in dirs + files:
@@ -280,6 +350,8 @@ def file_manifest(root):
             h = hashlib.sha256()
             with p.open('rb') as f:
                 for data in iter(lambda: f.read(4 * 1024 * 1024), b''):
+                    if check is not None:
+                        check()
                     h.update(data)
             result[str(p.relative_to(root))] = {'bytes': p.stat().st_size, 'sha256': h.hexdigest()}
     return result
@@ -299,7 +371,12 @@ def make_snapshot(cfg, root, repo, name):
     run(['/usr/bin/borg', 'with-lock', str(repo), '/usr/bin/rsync', '-a', '--delete',
          '--exclude=/lock.exclusive', '--exclude=/lock.roster', str(repo) + '/', str(dest) + '/'], cfg)
     run(['/usr/bin/borg', 'check', '--verify-data', str(dest)], cfg)
-    files = file_manifest(dest)
+    last_check = [0.0]
+    def check():
+        if time.monotonic() - last_check[0] >= cfg['guard_interval_seconds']:
+            check_work_allowed(cfg)
+            last_check[0] = time.monotonic()
+    files = file_manifest(dest, check)
     if 'config' not in files or not any(k.startswith('data/') for k in files):
         raise RuntimeError('copied repository is incomplete')
     manifest = {'owner': OWNER, 'generation': name, 'created_at': time.time(),
@@ -308,6 +385,125 @@ def make_snapshot(cfg, root, repo, name):
     atomic_json(payload / 'manifest.json', manifest)
     shutil.copyfile(Path(__file__).with_name('ICLOUD_RESTORE.txt'), payload / 'RESTORE.txt')
     return name
+
+
+def verification_plan(payload, generation):
+    raw = (payload / 'manifest.json').read_bytes()
+    manifest = json.loads(raw)
+    if manifest.get('owner') != OWNER or manifest.get('generation') != generation:
+        raise ValueError('verification manifest identity mismatch')
+    files = manifest.get('files')
+    if not isinstance(files, dict) or not files:
+        raise ValueError('verification manifest has no files')
+    expected = {}
+    for path, entry in files.items():
+        if (not isinstance(path, str) or not path or
+                str(PurePosixPath(path)) != path or PurePosixPath(path).is_absolute() or
+                any(part in ('.', '..') for part in PurePosixPath(path).parts) or
+                any(ord(char) < 32 for char in path)):
+            raise ValueError('unsafe path in verification manifest')
+        if (not isinstance(entry, dict) or type(entry.get('bytes')) is not int or
+                entry['bytes'] < 0 or not isinstance(entry.get('sha256'), str) or
+                not re.fullmatch('[0-9a-f]{64}', entry['sha256'])):
+            raise ValueError('invalid digest in verification manifest')
+        expected['repository/' + path] = {'bytes': entry['bytes'], 'sha256': entry['sha256']}
+    for name in ('manifest.json', 'RESTORE.txt'):
+        if (payload / name).is_symlink():
+            raise ValueError('unsafe verification metadata path')
+        data = raw if name == 'manifest.json' else (payload / name).read_bytes()
+        expected[name] = {'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+    return expected, hashlib.sha256(raw).hexdigest()
+
+
+def remote_fingerprint(row):
+    if (not isinstance(row, dict) or row.get('IsDir') is not False or
+            type(row.get('Size')) is not int or not isinstance(row.get('ModTime'), str) or
+            not row['ModTime']):
+        return None
+    return {'size': row['Size'], 'mtime': row['ModTime'], 'id': row.get('ID', '')}
+
+
+def remote_inventory(cfg, destination):
+    rows = json.loads(run([RCLONE, 'lsjson', destination, '--recursive', '--files-only'], cfg, network=True))
+    if not isinstance(rows, list):
+        raise RuntimeError('invalid cloud inventory')
+    result = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            raise RuntimeError('invalid cloud inventory entry')
+        path = row.get('Path')
+        if not isinstance(path, str) or path in result:
+            raise RuntimeError('ambiguous cloud inventory')
+        result[path] = row
+    return result
+
+
+def record_progress(state, phase, **values):
+    state.update(phase=phase, last_error=None, progress_updated_at=time.time())
+    if values:
+        state.setdefault('progress', {}).update(values)
+    atomic_json(STATE_DIR / 'state.json', state)
+
+
+def verify_generation(cfg, generation, destination, state):
+    """Hash each remote file; commit a reusable checkpoint only after EOF/match."""
+    payload = generation / 'payload'
+    expected, manifest_hash = verification_plan(payload, generation.name)
+    checkpoint_path = generation / 'verification.json'
+    if checkpoint_path.is_symlink():
+        raise RuntimeError('unsafe verification checkpoint')
+    try:
+        checkpoint = read_json(checkpoint_path, {})
+    except ValueError:
+        checkpoint = {}
+    identity = {'owner': OWNER, 'generation': generation.name, 'manifest_sha256': manifest_hash}
+    if (not isinstance(checkpoint, dict) or any(checkpoint.get(k) != v for k, v in identity.items())
+            or not isinstance(checkpoint.get('verified'), dict)):
+        checkpoint = {**identity, 'verified': {}}
+    rows = remote_inventory(cfg, destination)
+    verified = {}
+    for path, entry in expected.items():
+        remote = remote_fingerprint(rows.get(path))
+        if remote is None or remote['size'] != entry['bytes']:
+            raise RuntimeError('cloud file missing or wrong size before verification: ' + path)
+        old = checkpoint['verified'].get(path)
+        if isinstance(old, dict) and old.get('expected') == entry and old.get('remote') == remote:
+            verified[path] = old
+    checkpoint['verified'] = verified
+    atomic_json(checkpoint_path, checkpoint)
+    total = sum(x['bytes'] for x in expected.values())
+    def report(**extra):
+        record_progress(state, 'verifying', verified_files=len(verified),
+                        verification_total_files=len(expected),
+                        verified_bytes=sum(x['expected']['bytes'] for x in verified.values()),
+                        verification_total_bytes=total, **extra)
+    report(current_file=None, current_file_bytes=0)
+    for path in sorted(expected, key=lambda p: (expected[p]['bytes'], p)):
+        if path in verified:
+            continue
+        check_work_allowed(cfg)
+        report(current_file=path, current_file_bytes=0)
+        result = run([RCLONE, 'cat', destination + '/' + path], cfg, network=True,
+                     stream_hash=True, progress=lambda counters: report(
+                         current_file=path, current_file_bytes=counters.get('download_bytes', 0)))
+        if result != expected[path]:
+            raise RuntimeError('downloaded file failed SHA-256 verification: ' + path)
+        verified[path] = {'expected': expected[path], 'remote': remote_fingerprint(rows[path])}
+        atomic_json(checkpoint_path, checkpoint)
+        report(current_file=None, current_file_bytes=0)
+    # Check remote identities again before publishing a completion marker.
+    final_rows = remote_inventory(cfg, destination)
+    changed = [path for path, entry in verified.items()
+               if remote_fingerprint(final_rows.get(path)) != entry['remote']]
+    if changed:
+        for path in changed:
+            del verified[path]
+        atomic_json(checkpoint_path, checkpoint)
+        report(current_file=None, current_file_bytes=0)
+        raise Deferred('cloud files changed during verification; affected checkpoints invalidated')
+    if verification_plan(payload, generation.name) != (expected, manifest_hash):
+        raise RuntimeError('local manifest changed during verification')
+    return {'manifest_sha256': manifest_hash, 'verified_files': len(verified)}
 
 
 def choose_prunable(names, current, keep):
@@ -343,7 +539,8 @@ def retention(cfg, root, current):
 
 
 def notify(state, title, message):
-    if time.time() - state.get('last_notification_at', 0) < 86400:
+    if (state.get('last_notification_title') == title and
+            time.time() - state.get('last_notification_at', 0) < 86400):
         return
     try:
         subprocess.run(['/home/pi/scripts/ntfy_send.sh', title, message, 'default', 'cloud'],
@@ -351,6 +548,7 @@ def notify(state, title, message):
     except (OSError, subprocess.SubprocessError):
         return
     state['last_notification_at'] = time.time()
+    state['last_notification_title'] = title
 
 
 def weekly(cfg, state):
@@ -360,7 +558,7 @@ def weekly(cfg, state):
         raise Deferred('iCloud login is required; run icloud_backup.sh --login')
     if (STATE_DIR / 'authentication-error.json').is_file():
         raise Deferred('iCloud authentication needs attention; inspect icloud_backup.sh --status before retrying')
-    check_parked()
+    check_work_allowed(cfg)
     guard(cfg)
     stamp = Path(os.environ['VANPI_ICLOUD_BORG_STAMP'])
     if not stamp.is_file() or not 0 <= time.time() - stamp.stat().st_mtime <= cfg['max_source_age_hours'] * 3600:
@@ -404,19 +602,20 @@ def weekly(cfg, state):
             size = sum((Path(directory)/name).stat().st_size for directory, dirs, files in os.walk(repo) for name in files)
             if shutil.disk_usage(root).free < size + cfg['minimum_free_gib'] * 1024**3:
                 raise Deferred('insufficient staging disk headroom')
-            state['phase'] = 'preparing'
-            atomic_json(STATE_DIR / 'state.json', state)
+            record_progress(state, 'preparing')
             make_snapshot(cfg, root, repo, pending)
         payload = generation / 'payload'
         destination = cfg['remote'] + '/' + pending
-        state['phase'] = 'uploading'
-        atomic_json(STATE_DIR / 'state.json', state)
-        run([RCLONE, 'copy', str(payload), destination, '--immutable'], cfg, network=True)
-        state['phase'] = 'verifying'
-        atomic_json(STATE_DIR / 'state.json', state)
-        run([RCLONE, 'check', str(payload), destination, '--download', '--one-way'], cfg, network=True)
+        record_progress(state, 'uploading', command_bytes=0)
+        run([RCLONE, 'copy', str(payload), destination, '--immutable'], cfg, network=True,
+            progress=lambda counters: record_progress(state, 'uploading',
+                command_bytes=counters.get('bytes', 0),
+                command_completed_files=counters.get('transfers', 0),
+                command_idle_seconds=counters.get('idle_seconds', 0)))
+        verified = verify_generation(cfg, generation, destination, state)
         marker = generation / '_COMPLETE.json'
-        atomic_json(marker, {'owner': OWNER, 'generation': pending, 'verification': 'download-compared', 'completed_at': time.time()})
+        atomic_json(marker, {'owner': OWNER, 'generation': pending, 'verification': 'download-compared',
+                            'verification_version': 2, **verified, 'completed_at': time.time()})
         run([RCLONE, 'copyto', str(marker), destination + '/_COMPLETE.json'], cfg, network=True)
         remote_marker = json.loads(run([RCLONE, 'cat', destination + '/_COMPLETE.json'], cfg, network=True))
         if remote_marker != read_json(marker):
@@ -494,7 +693,11 @@ def main():
         return 0
     try:
         if mode == '--preflight':
-            result = {'credentials_ready': credentials_ready(cfg), 'remote': cfg['remote'], 'keep_generations': cfg['keep_generations']}
+            result = {'credentials_ready': credentials_ready(cfg), 'remote': cfg['remote'],
+                      'keep_generations': cfg['keep_generations'],
+                      'no_progress_timeout_seconds': cfg['no_progress_timeout_seconds'],
+                      'local_backup_window_active': local_backup_window(cfg),
+                      'yielding_to_local_backups': local_backup_window(cfg) and not local_backups_complete()}
             try:
                 result['bind_address'] = guard(cfg)[0]
                 result['uplink_allowed'] = True
@@ -510,6 +713,8 @@ def main():
             return 0
         if mode != '--run':
             raise ValueError('unsupported mode')
+        state.update(last_attempt_at=time.time(), last_error=None, phase='checking', progress={})
+        atomic_json(STATE_DIR / 'state.json', state)
         result = weekly(cfg, state)
         state.update(phase=result, last_attempt_at=time.time(), last_error=None)
         return 0

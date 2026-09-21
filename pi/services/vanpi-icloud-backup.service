@@ -11,6 +11,6 @@ ExecStart=/bin/bash /home/pi/scripts/backup/icloud_backup.sh --run
 Nice=15
 IOSchedulingClass=idle
 KillMode=control-group
-TimeoutStartSec=4h
+# The worker enforces no-progress and local-backup-window limits.
+TimeoutStartSec=infinity
 TimeoutStopSec=45s
-
