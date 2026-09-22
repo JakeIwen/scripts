@@ -67,7 +67,7 @@ export UBNT_IP_CMD="$test_root/bin/ip"
 export UBNT_PING="$test_root/bin/ping"
 export UBNT_SOFTRESTART="$test_root/bin/softrestart"
 export UBNT_CFGMTD="$test_root/bin/cfgmtd"
-export UBNT_MD5SUM=/sbin/md5sum
+export UBNT_MD5SUM=$(command -v md5sum)
 export UBNT_SSH_KEY_INSTALLER="$test_root/bin/ensure_ssh_keys"
 export UBNT_SSH_KEY_SOURCE="$test_root/persistent_keys"
 export UBNT_AUTHORIZED_KEYS="$test_root/authorized_keys"
@@ -106,7 +106,7 @@ printf '%s\n' \
     'wpasupplicant.status=disabled' \
     'wpasupplicant.device.1.status=disabled' > "$test_root/system.cfg"
 printf 'denlink\n' > "$test_root/associated"
-/sbin/md5sum "$test_root/system.cfg" | awk '{print $1}' > \
+"$UBNT_MD5SUM" "$test_root/system.cfg" | awk '{print $1}' > \
     "$test_root/state/observed-system-config.md5"
 : > "$MOCK_IWLIST_COUNT_FILE"
 rm -f "$test_root/state/last_auto_scan"
@@ -260,6 +260,25 @@ if printf '%s\n' \
     'atheros' 'enabled' '15' 'no' | \
     "$manager" update-profile-stdin >/dev/null; then
     echo 'Open-network password update unexpectedly succeeded.' >&2
+    exit 1
+fi
+
+# Forget a disconnected profile without disturbing the current radio/hold.
+export MOCK_CFGMTD_HANGUP=1
+printf 'WPA Template\n' | "$manager" forget-stdin >/dev/null
+unset MOCK_CFGMTD_HANGUP
+[ ! -e "$test_root/profiles/WPA Template" ]
+find "$test_root/profiles/.disabled" -name 'WPA Template.forgotten.*' | grep -q .
+grep -qx 'pi-rsa-key' "$test_root/authorized_keys"
+
+# Active forget clears the manual hold and targets a different saved network.
+printf 'dendelion\n' | "$manager" forget-stdin >/dev/null
+[ ! -e "$test_root/profiles/dendelion" ]
+[ ! -e "$test_root/state/paused" ]
+[ "$(sed -n '1p' "$test_root/associated")" != dendelion ]
+grep -qx 'pi-rsa-key' "$test_root/authorized_keys"
+if printf 'reset\n' | "$manager" forget-stdin >/dev/null; then
+    echo 'Internal reset profile should not be removable' >&2
     exit 1
 fi
 

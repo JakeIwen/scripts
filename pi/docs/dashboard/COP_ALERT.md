@@ -115,6 +115,17 @@ current airOS reload boundary, including restoration of the dashboard SSH key,
 then resumes automatic selection and refreshes authoritative status. It does
 not kill the remote manager in the middle of a wireless configuration reload.
 
+Live radio snapshots now run independently of network changes (at most once
+every five seconds while busy). Status reads cannot overwrite the latest
+operation result. Failed reads are shown explicitly alongside the last known
+data, and a configured SSID with zero CCQ is not labeled as an active link.
+The subprocess timeout also bounds cleanup when a child SSH process survives.
+
+Saved networks have a **Forget** action. After confirmation, the selected
+profile is archived out of the active list; forgetting the current network
+disconnects it and resumes roaming. Credentials remain in the antenna's
+restricted recovery directory, not in the dashboard.
+
 ## Starlink power
 
 The Starlink tile reads `switch.starlink` through the existing Tuya/Home

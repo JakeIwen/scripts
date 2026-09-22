@@ -69,6 +69,21 @@ class SnapshotParserTests(unittest.TestCase):
 
 
 class ClientTests(unittest.TestCase):
+    def test_forget_uses_stdin_and_verifies_profile_removed(self):
+        calls = []
+        def command(args, timeout, input_text=None):
+            calls.append((args, input_text))
+            if args[-1].endswith('forget-stdin'):
+                return Result(stdout='forgot')
+            snapshot = SNAPSHOT if len(calls) == 1 else '\n'.join(
+                line for line in SNAPSHOT.splitlines() if not line.startswith('profile|')
+            )
+            return Result(stdout=snapshot)
+        result = ubnt_wifi.UbntWifiClient(command=command).forget('denlink')
+        self.assertEqual(calls[1][1], 'denlink\n')
+        self.assertTrue(calls[1][0][-1].endswith('forget-stdin'))
+        self.assertEqual(result['message'], 'Forgot denlink')
+
     def test_connect_uses_fixed_remote_command_and_accepts_captive_portal_state(self):
         calls = []
 

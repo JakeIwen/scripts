@@ -1,5 +1,5 @@
 import { StatusPill } from '../../components/StatusPill';
-import { ubntStatusLabel, ubntTone } from './presentation';
+import { ubntRadioConnected, ubntStatusLabel, ubntTone } from './presentation';
 import { StarlinkControl, type StarlinkStatusResource } from './StarlinkControl';
 import type { UbntWifiStatus } from './types';
 import './ubnt.css';
@@ -28,7 +28,7 @@ export function UbntTile({ status, error, refreshing, dashboardStatus, onOpen }:
     status?.reachable === false
       ? 'No UBNT Ethernet response'
       : status?.reachable === true
-        ? `${associated || 'Unknown SSID'} · ${status.state.associatedSsid ? radioDetail(status) : 'Not associated'}`
+        ? `${associated || 'Unknown SSID'} · ${status.lastError ? 'Status unavailable' : ubntRadioConnected(status) ? radioDetail(status) : 'Not associated'}`
         : 'Waiting for antenna status…';
 
   return (
@@ -52,7 +52,7 @@ export function UbntTile({ status, error, refreshing, dashboardStatus, onOpen }:
       </header>
       <div className="tile__summary">
         <span
-          className={`ubnt-tile__radio-dot${status?.reachable === true && status.state.associatedSsid ? ' ubnt-tile__radio-dot--good' : ''}`}
+          className={`ubnt-tile__radio-dot${ubntRadioConnected(status) ? ' ubnt-tile__radio-dot--good' : ''}`}
           aria-hidden="true"
         />
         <span>{summary}</span>

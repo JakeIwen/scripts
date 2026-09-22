@@ -8,6 +8,15 @@ export function ubntSecurityLabel(security: UbntSecurity): string {
   return 'WEP';
 }
 
+export function ubntRadioConnected(status: UbntWifiStatus | null): boolean {
+  return (
+    status?.reachable === true &&
+    !status.lastError &&
+    Boolean(status.state.associatedSsid) &&
+    (status.state.ccqPercent ?? 0) > 0
+  );
+}
+
 export function ubntTone(status: UbntWifiStatus | null, _error: Error | null): StatusTone {
   if (!status) return 'neutral';
   if (status.reachable === false) return 'bad';
@@ -26,7 +35,7 @@ export function ubntOperationLabel(operation: UbntOperation): string {
   if (operation.status === 'idle') return 'Idle';
   const kind =
     operation.kind === 'update-profile' ? 'profile update' : (operation.kind ?? 'status refresh');
-  if (operation.status === 'running') return `${kind} running`;
+  if (operation.status === 'running') return operation.message ?? `${kind} running`;
   if (operation.status === 'error') return `${kind} failed`;
   return operation.message ?? `${kind} complete`;
 }

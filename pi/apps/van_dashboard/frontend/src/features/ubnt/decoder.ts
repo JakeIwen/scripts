@@ -95,6 +95,7 @@ const OPERATION_KINDS = [
   'update-profile',
   'resume',
   'abort',
+  'forget',
 ] as const satisfies readonly UbntOperationKind[];
 
 function decodeProfile(value: unknown, index: number): UbntProfile {
@@ -154,6 +155,7 @@ export function decodeUbntWifiStatus(value: unknown): UbntWifiStatus {
 
   return {
     reachable: nullableBoolean(wifi.reachable, 'wifi.reachable'),
+    lastError: optionalNullableString(response.last_error, 'UBNT last_error'),
     checkedAt: nullableNumber(wifi.checked_at, 'wifi.checked_at'),
     state: {
       configuredSsid: nullableString(state.configured_ssid, 'wifi.state.configured_ssid'),

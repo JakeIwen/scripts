@@ -4,7 +4,7 @@ import { BottomSheet } from '../../components/BottomSheet';
 import type { PollingState } from '../../hooks/usePollingResource';
 import { formatRelativeTime } from '../../utils/format';
 import type { UbntControls } from './controls';
-import { ubntOperationLabel, ubntSecurityLabel } from './presentation';
+import { ubntOperationLabel, ubntSecurityLabel, ubntRadioConnected } from './presentation';
 import type { UbntNetwork, UbntProfile, UbntWifiStatus } from './types';
 import { UbntProfileForm } from './UbntProfileForm';
 import { UbntProvisionForm } from './UbntProvisionForm';
@@ -104,7 +104,7 @@ export function UbntSheet({ open, onClose, resource, controls, dashboardStatus }
     >
       <div className="ubnt-sheet__toolbar">
         <span aria-live="polite">
-          {controls.busy
+          {controls.busy || operationRunning
             ? 'Antenna operation in progress…'
             : status?.checkedAt === null || status?.checkedAt === undefined
               ? 'No status timestamp'
@@ -138,7 +138,7 @@ export function UbntSheet({ open, onClose, resource, controls, dashboardStatus }
           <button
             className="secondary-button"
             type="button"
-            disabled={resource.refreshing || controlsDisabled}
+            disabled={resource.refreshing}
             onClick={() => void resource.refresh()}
           >
             {resource.refreshing ? 'Refreshing…' : 'Refresh status'}
@@ -147,19 +147,26 @@ export function UbntSheet({ open, onClose, resource, controls, dashboardStatus }
       </div>
 
       {resource.error && <p className="error-message">{resource.error.message}</p>}
+      {status?.lastError && (
+        <p className="error-message">
+          Antenna status could not refresh: {status.lastError}. Showing the last observation.
+        </p>
+      )}
 
       <div className="ubnt-sheet__stack" aria-busy={resource.refreshing || controlsDisabled}>
         <section className="ubnt-current panel-card">
           <span
-            className={`ubnt-current__dot ubnt-current__dot--${status?.reachable === true && associated ? 'good' : status?.reachable === false ? 'bad' : 'neutral'}`}
+            className={`ubnt-current__dot ubnt-current__dot--${ubntRadioConnected(status) ? 'good' : status?.reachable === false || status?.state.ccqPercent === 0 ? 'bad' : 'neutral'}`}
             aria-hidden="true"
           />
           <span>
             <strong>{associated || 'Not associated'}</strong>
             <small>
-              {status?.state.signalDbm === null || status?.state.signalDbm === undefined
-                ? 'Radio measurements unavailable'
-                : `${status.state.signalDbm} dBm · ${status.state.snrDb ?? '—'} dB SNR · ${status.state.ccqPercent ?? '—'}% CCQ`}
+              {!ubntRadioConnected(status)
+                ? 'Not currently associated · last configured network'
+                : status?.state.signalDbm === null || status?.state.signalDbm === undefined
+                  ? 'Radio measurements unavailable'
+                  : `${status.state.signalDbm} dBm · ${status.state.snrDb ?? '—'} dB SNR · ${status.state.ccqPercent ?? '—'}% CCQ`}
             </small>
           </span>
         </section>
@@ -197,7 +204,8 @@ export function UbntSheet({ open, onClose, resource, controls, dashboardStatus }
           <div className="ubnt-profile-list">
             {status?.profiles.length ? (
               status.profiles.map((profile) => {
-                const connected = profile.ssid === status.state.associatedSsid;
+                const connected =
+                  ubntRadioConnected(status) && profile.ssid === status.state.associatedSsid;
                 const radio = radioProfileDetails(profile);
                 return (
                   <article
@@ -228,6 +236,25 @@ export function UbntSheet({ open, onClose, resource, controls, dashboardStatus }
                         }}
                       >
                         Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="danger-button"
+                        disabled={controlsDisabled}
+                        onClick={() => {
+                          const current =
+                            profile.ssid === status.state.associatedSsid ||
+                            profile.ssid === status.state.configuredSsid;
+                          if (
+                            window.confirm(
+                              `Forget ${profile.name}?${current ? ' This disconnects the current network and resumes automatic selection.' : ''}`,
+                            )
+                          ) {
+                            void controls.forget(profile.name);
+                          }
+                        }}
+                      >
+                        Forget
                       </button>
                     </div>
                   </article>

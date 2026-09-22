@@ -5,6 +5,7 @@ import type { PollingState } from '../../hooks/usePollingResource';
 import { useSingleFlightAction } from '../../hooks/useSingleFlightAction';
 import {
   abortUbntOperation,
+  forgetUbntProfile,
   connectUbntProfile,
   provisionUbntNetwork,
   resumeUbntAutomaticSelection,
@@ -32,6 +33,7 @@ export interface UbntControls {
   busy: boolean;
   aborting: boolean;
   abort: () => Promise<boolean>;
+  forget: (profile: string) => Promise<boolean>;
   scan: () => Promise<boolean>;
   connect: (profile: string) => Promise<boolean>;
   provision: (request: UbntProvisionRequest) => Promise<boolean>;
@@ -68,7 +70,8 @@ function changesConnectivity(kind: UbntOperationKind | null): boolean {
     kind === 'provision' ||
     kind === 'update-profile' ||
     kind === 'resume' ||
-    kind === 'abort'
+    kind === 'abort' ||
+    kind === 'forget'
   );
 }
 
@@ -144,6 +147,7 @@ export function useUbntControls(
     busy: running,
     aborting,
     abort,
+    forget: (profile) => execute(() => forgetUbntProfile(profile)),
     scan: () => execute(scanUbntNetworks),
     connect: (profile) => execute(() => connectUbntProfile(profile)),
     provision: (request) => execute(() => provisionUbntNetwork(request)),

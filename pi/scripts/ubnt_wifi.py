@@ -25,6 +25,7 @@ REMOTE_COMMANDS = {
     "provision": "provision-stdin",
     "update-profile": "update-profile-stdin",
     "resume": "resume",
+    "forget": "forget-stdin",
 }
 ABORT_REQUESTED = False
 
@@ -175,7 +176,10 @@ def parse_snapshot(output, checked_at=None):
         network = dict(network)
         network["profiles"] = known_profiles
         network["known"] = bool(known_profiles)
-        network["connected"] = network["ssid"] == state["associated_ssid"]
+        network["connected"] = (
+            network["ssid"] == state["associated_ssid"]
+            and (state["ccq_percent"] or 0) > 0
+        )
         network["supported"] = network["security"] in ("wpa", "none")
         networks.append(network)
     networks.sort(
@@ -220,13 +224,17 @@ class UbntWifiClient:
             (
                 "-n"
                 if remote_command
-                not in ("manual-connect-stdin", "provision-stdin", "update-profile-stdin")
+                not in ("manual-connect-stdin", "provision-stdin", "update-profile-stdin", "forget-stdin")
                 else "-T"
             ),
             "-o",
             "BatchMode=yes",
             "-o",
             "ConnectTimeout=5",
+            "-o",
+            "ServerAliveInterval=5",
+            "-o",
+            "ServerAliveCountMax=3",
             "-i",
             IDENTITY,
             TARGET,
@@ -392,6 +400,18 @@ class UbntWifiClient:
             "wifi": self.status(),
         }
 
+    def forget(self, profile):
+        profile = _validate_text(profile, "profile", 128)
+        if profile.startswith('.') or '/' in profile or profile in ('reset', 'system.cfg'):
+            raise UbntWifiError("cannot forget an internal profile")
+        if profile not in {item["name"] for item in self.status()["profiles"]}:
+            raise UbntWifiError("selected UBNT profile is no longer available")
+        self._remote("forget", timeout=240, input_text=f"{profile}\n")
+        refreshed = self.status()
+        if profile in {item["name"] for item in refreshed["profiles"]}:
+            raise UbntWifiError("profile is still present after forget")
+        return {"message": f"Forgot {profile}", "wifi": refreshed}
+
 
 def _read_object():
     try:
@@ -418,6 +438,11 @@ def main(argv=None):
             result = {"ok": True, "wifi": client.status()}
         elif args.action == "scan":
             result = {"ok": True, "wifi": client.scan(), "message": "UBNT scan complete"}
+        elif args.action == "forget":
+            payload = _read_object()
+            if set(payload) != {"profile"}:
+                raise UbntWifiError("forget requires only profile")
+            result = {"ok": True, **client.forget(payload["profile"])}
         elif args.action == "connect":
             payload = _read_object()
             if set(payload) != {"profile"}:

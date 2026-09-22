@@ -849,17 +849,50 @@ class UbntWifiControllerTests(unittest.TestCase):
     def test_failed_status_refresh_is_not_retried_on_every_poll(self):
         clock = FakeClock(200)
         manager = dashboard.UbntWifiController(wall_clock=clock)
-        manager.operation.update(
-            {"status": "error", "kind": "status", "completed_at": 200}
-        )
+        manager.last_refresh_attempt = 200
         starts = []
-        manager.start = lambda kind: starts.append(kind)
+        manager._refresh_status = lambda: starts.append("status")
 
         manager.request_refresh(max_age=20)
         self.assertEqual(starts, [])
         clock.advance(21)
         manager.request_refresh(max_age=20)
+        manager.refresh_thread.join(2)
         self.assertEqual(starts, ["status"])
+
+    def test_live_reads_continue_without_replacing_pending_operation(self):
+        started = threading.Event()
+        release = threading.Event()
+        def command(args, timeout, input_text=None):
+            if args[-1] == "provision":
+                started.set()
+                release.wait(3)
+            return SimpleNamespace(returncode=0, stdout=json.dumps({"ok": True, "wifi": self.WIFI}), stderr="")
+        manager = dashboard.UbntWifiController(command=command)
+        manager.start("provision", {"ssid": "Camp"})
+        self.assertTrue(started.wait(1))
+        try:
+            manager.request_refresh()
+            manager.refresh_thread.join(1)
+            snapshot = manager.snapshot()
+            self.assertEqual(snapshot["wifi"], self.WIFI)
+            self.assertEqual(snapshot["operation"]["kind"], "provision")
+            self.assertEqual(snapshot["operation"]["status"], "running")
+        finally:
+            release.set()
+            manager.thread.join(2)
+        self.assertEqual(manager.snapshot()["operation"]["status"], "complete")
+        manager.request_refresh(max_age=0)
+        manager.refresh_thread.join(2)
+        self.assertEqual(manager.snapshot()["operation"]["kind"], "provision")
+
+    def test_timeout_cleanup_is_bounded_even_with_a_child_holding_output(self):
+        manager = dashboard.UbntWifiController()
+        with self.assertRaises(subprocess.TimeoutExpired):
+            manager._run_cancellable_command(
+                [sys.executable, "-c", "import subprocess,time,sys; subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)']); time.sleep(30)"],
+                timeout=0.15, input_text=None, abort_requested=threading.Event(),
+            )
 
     def test_abort_waits_for_safe_completion_then_resumes_automatic_selection(self):
         connect_started = threading.Event()
@@ -5477,6 +5510,9 @@ class DashboardRouteTests(unittest.TestCase):
             )
             resume = client.post("/api/ubnt-wifi/resume")
             abort = client.post("/api/ubnt-wifi/abort")
+            forget = client.post("/api/ubnt-wifi/forget", data={"profile": "Known Camp"})
+            for invalid in ({"profile": "reset"}, {"profile": "../Camp"}, {"profile": "Camp", "command": "rm"}):
+                self.assertEqual(client.post("/api/ubnt-wifi/forget", data=invalid).status_code, 400)
             unknown_security = client.post(
                 "/api/ubnt-wifi/provision",
                 data={
@@ -5517,6 +5553,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(profile_update.status_code, 202)
         self.assertEqual(resume.status_code, 202)
         self.assertEqual(abort.status_code, 202)
+        self.assertEqual(forget.status_code, 202)
         self.assertEqual(unknown_security.status_code, 400)
         self.assertEqual(extra_scan_input.status_code, 400)
         self.assertEqual(extra_connect_input.status_code, 400)
@@ -5551,6 +5588,7 @@ class DashboardRouteTests(unittest.TestCase):
                 ),
                 ("resume", {}),
                 ("abort", None),
+                ("forget", {"profile": "Known Camp"}),
             ],
         )
 

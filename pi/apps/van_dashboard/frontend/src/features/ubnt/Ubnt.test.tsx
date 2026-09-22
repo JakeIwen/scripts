@@ -38,6 +38,7 @@ function resource(status: UbntWifiStatus): PollingState<UbntWifiStatus> {
 function controls(overrides: Partial<UbntControls> = {}): UbntControls {
   return {
     busy: false,
+    forget: vi.fn().mockResolvedValue(true),
     aborting: false,
     abort: vi.fn().mockResolvedValue(true),
     scan: vi.fn().mockResolvedValue(true),
@@ -50,6 +51,15 @@ function controls(overrides: Partial<UbntControls> = {}): UbntControls {
 }
 
 describe('UBNT UI', () => {
+  it('does not show a radio link just because a configured SSID exists', () => {
+    const status = sampleUbntStatus();
+    status.state.ccqPercent = 0;
+    const { container } = render(
+      <UbntTile status={status} error={null} refreshing={false} onOpen={vi.fn()} />,
+    );
+    expect(screen.getByText('denlink · Not associated')).toBeInTheDocument();
+    expect(container.querySelector('.ubnt-tile__radio-dot--good')).toBeNull();
+  });
   it('shows physical and radio state on the tile', () => {
     const onOpen = vi.fn();
     render(

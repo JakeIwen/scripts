@@ -3,7 +3,7 @@ export type UbntProfileSecurity = Exclude<UbntSecurity, 'enterprise'>;
 export type UbntRateModule = 'atheros' | 'ewma_ht';
 export type UbntOperationState = 'idle' | 'running' | 'complete' | 'error';
 export type UbntOperationKind =
-  'status' | 'scan' | 'connect' | 'provision' | 'update-profile' | 'resume' | 'abort';
+  'status' | 'scan' | 'connect' | 'provision' | 'update-profile' | 'resume' | 'abort' | 'forget';
 
 export interface UbntRadioState {
   configuredSsid: string | null;
@@ -53,6 +53,7 @@ export interface UbntOperation {
 }
 
 export interface UbntWifiStatus {
+  lastError?: string | null;
   reachable: boolean | null;
   checkedAt: number | null;
   state: UbntRadioState;

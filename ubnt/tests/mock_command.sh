@@ -51,7 +51,13 @@ case $command_name in
         fi
         ;;
     cfgmtd)
-        :
+        if [ "${MOCK_CFGMTD_HANGUP:-0}" = 1 ]; then
+            kill -HUP "$PPID"
+        fi
+        if [ -n "${UBNT_AUTHORIZED_KEYS:-}" ]; then
+            printf '%s\n' 'admin-key' > "$UBNT_AUTHORIZED_KEYS"
+        fi
+        exit "${MOCK_CFGMTD_STATUS:-0}"
         ;;
     *)
         printf 'Unknown mock command: %s\n' "$command_name" >&2

@@ -5,6 +5,8 @@ layout used by the deployed van-dashboard service.
 """
 
 import signal
+import os
+import tempfile
 
 __all__ = [
     "ConnectivityMonitor",
@@ -363,6 +365,7 @@ class UbntWifiController:
         "provision": 260,
         "update-profile": 280,
         "resume": 20,
+        "forget": 280,
     }
 
     def __init__(
@@ -380,6 +383,10 @@ class UbntWifiController:
         self.thread = None
         self.process = None
         self.abort_requested = None
+        self.refreshing = False
+        self.last_refresh_attempt = None
+        self.last_error = None
+        self.refresh_thread = None
         self.wifi = {
             "version": 1,
             "reachable": None,
@@ -408,21 +415,42 @@ class UbntWifiController:
             return {
                 "wifi": copy.deepcopy(self.wifi),
                 "operation": dict(self.operation),
+                "refreshing": self.refreshing,
+                "last_error": self.last_error,
             }
 
     def request_refresh(self, max_age=20):
         with self.lock:
-            checked_at = self.wifi.get("checked_at")
-            running = self.operation["status"] == "running"
-            completed_at = self.operation.get("completed_at")
-        recent_attempt = completed_at is not None and (
-            self.wall_clock() - completed_at <= max_age
-        )
-        if not running and (
-            (checked_at is None and not recent_attempt)
-            or (checked_at is not None and self.wall_clock() - checked_at > max_age)
-        ):
-            self.start("status")
+            interval = min(max_age, 5) if self.operation["status"] == "running" else max_age
+            if self.refreshing or (
+                self.last_refresh_attempt is not None
+                and self.wall_clock() - self.last_refresh_attempt <= interval
+            ):
+                return
+            self.last_refresh_attempt = self.wall_clock()
+            self.refreshing = True
+            self.refresh_thread = threading.Thread(
+                target=self._refresh_status, name="ubnt-wifi-status", daemon=True
+            )
+            self.refresh_thread.start()
+
+    def _refresh_status(self):
+        # Reads never replace the mutation result or its cancellable process.
+        try:
+            wifi = self._tool_result("status")["wifi"]
+            with self.lock:
+                self._accept_wifi_locked(wifi)
+                self.last_error = None
+        except Exception as exc:
+            with self.lock:
+                self.last_error = str(exc)
+        finally:
+            with self.lock:
+                self.refreshing = False
+
+    def _accept_wifi_locked(self, wifi):
+        if (wifi.get("checked_at") or 0) >= (self.wifi.get("checked_at") or 0):
+            self.wifi = wifi
 
     def start(self, kind, payload=None):
         if kind not in self.TIMEOUTS:
@@ -435,7 +463,10 @@ class UbntWifiController:
                 "kind": kind,
                 "started_at": int(self.wall_clock()),
                 "completed_at": None,
-                "message": None,
+                "message": (
+                    f"{kind}: {(payload or {}).get('ssid') or (payload or {}).get('profile')}"
+                    if (payload or {}).get('ssid') or (payload or {}).get('profile') else None
+                ),
                 "error": None,
             }
             self.abort_requested = threading.Event()
@@ -451,12 +482,10 @@ class UbntWifiController:
     def abort(self):
         """Request a safe stop without killing an airOS wireless reload.
 
-        The reusable tool catches SIGUSR1 and waits for the in-flight remote
-        manager command to reach a safe boundary before resuming automatic
-        selection.  In particular, this lets the manager finish restoring its
-        SSH key after an airOS soft reload.
+        The worker observes the event after the current remote call settles,
+        then resumes automatic selection. No signal can interrupt startup or
+        the antenna's credential-save/key-restoration steps.
         """
-        process = None
         with self.lock:
             if (
                 self.operation["status"] != "running"
@@ -465,7 +494,6 @@ class UbntWifiController:
             ):
                 return False
             self.abort_requested.set()
-            process = self.process
             self.operation = {
                 "status": "running",
                 "kind": "abort",
@@ -474,39 +502,37 @@ class UbntWifiController:
                 "message": "Abort requested; waiting for a safe antenna boundary",
                 "error": None,
             }
-        if process is not None:
-            try:
-                process.send_signal(signal.SIGUSR1)
-            except ProcessLookupError:
-                pass
+        # Let the remote command reach its safe boundary. Signalling a child
+        # before its Python handler is installed can terminate it outright.
         return True
 
     def _run_cancellable_command(self, args, timeout, input_text, abort_requested):
-        process = subprocess.Popen(
-            args,
-            stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        with self.lock:
-            self.process = process
-            already_aborting = abort_requested.is_set()
-        if already_aborting:
-            try:
-                process.send_signal(signal.SIGUSR1)
-            except ProcessLookupError:
-                pass
-        try:
-            stdout, stderr = process.communicate(input=input_text, timeout=timeout)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.communicate()
-            raise
-        finally:
+        # A surviving SSH child can keep PIPE descriptors open after the CLI
+        # times out. Files let wait() stay bounded even in that failure mode.
+        with tempfile.TemporaryFile(mode="w+") as output, tempfile.TemporaryFile(mode="w+") as errors:
+            process = subprocess.Popen(
+                args, stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
+                stdout=output, stderr=errors, text=True, start_new_session=True,
+            )
             with self.lock:
-                if self.process is process:
-                    self.process = None
+                if args[-1] != "status":
+                    self.process = process
+            try:
+                process.communicate(input=input_text, timeout=timeout)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.wait(timeout=2)
+                raise
+            finally:
+                with self.lock:
+                    if self.process is process:
+                        self.process = None
+            output.seek(0)
+            errors.seek(0)
+            stdout, stderr = output.read(), errors.read()
         return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
 
     def _tool_result(self, kind, payload=None, abort_requested=None):
@@ -568,9 +594,9 @@ class UbntWifiController:
                     result = self._tool_result("resume")
                     wifi = result["wifi"]
                 message = "UBNT operation aborted; automatic selection resumed"
-            if kind in ("connect", "provision", "update-profile", "resume") and self.on_change:
+            if kind in ("connect", "provision", "update-profile", "resume", "forget") and self.on_change:
                 self.on_change()
-        except RuntimeError as exc:
+        except Exception as exc:
             if abort_requested.is_set():
                 final_kind = "abort"
                 try:
@@ -589,7 +615,7 @@ class UbntWifiController:
                 payload["password"] = ""
         with self.lock:
             if wifi is not None:
-                self.wifi = wifi
+                self._accept_wifi_locked(wifi)
             self.operation = {
                 "status": "error" if error else "complete",
                 "kind": final_kind,

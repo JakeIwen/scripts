@@ -172,7 +172,7 @@ profile_name_is_valid() {
 acquire_lock() {
     if mkdir "$LOCK_DIR" 2>/dev/null; then
         printf '%s\n' "$$" > "$LOCK_DIR/pid"
-        trap 'release_lock' EXIT HUP INT TERM
+        install_lock_traps
         return 0
     fi
 
@@ -188,13 +188,28 @@ acquire_lock() {
     rm -f "$LOCK_DIR/pid"
     if rmdir "$LOCK_DIR" 2>/dev/null && mkdir "$LOCK_DIR" 2>/dev/null; then
         printf '%s\n' "$$" > "$LOCK_DIR/pid"
-        trap 'release_lock' EXIT HUP INT TERM
+        install_lock_traps
         log_message "removed stale selector lock"
         return 0
     fi
 
     log_message "unable to acquire selector lock"
     return 1
+}
+
+install_lock_traps() {
+    trap 'release_lock' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    case ${command_name:-} in
+        manual-connect-stdin|provision-stdin|update-profile-stdin|forget-stdin)
+            # Wireless reloads can close the initiating SSH channel. Finish
+            # saving credentials and restoring keys even after that hangup.
+            trap '' HUP PIPE
+            exec >/dev/null 2>&1
+            ;;
+        *) trap 'exit 129' HUP ;;
+    esac
 }
 
 release_lock() {
@@ -204,7 +219,7 @@ release_lock() {
     rm -f "$APPLY_CFG" "$STATE_DIR/softrestart.$$.log"
     rm -f "$LOCK_DIR/pid"
     rmdir "$LOCK_DIR" 2>/dev/null || true
-    trap - EXIT HUP INT TERM
+    trap - EXIT HUP INT TERM PIPE
 }
 
 associated_ssid() {
@@ -937,7 +952,7 @@ update_profile_settings() {
         "$PROFILE_DIR/.disabled/$update_name.settings-backup.$update_uptime.$$" || return 1
     mv "$PENDING_PROFILE" "$update_source" || return 1
     PENDING_PROFILE=
-    "$CFGMTD" -w -p /etc/ || return 1
+    persist_profiles || return 1
     log_message "updated saved profile=$update_name lock_to_ap=${update_bssid:-any} txpower=$update_txpower rate_module=$update_rate_module rate_auto=$update_rate_auto rate_mcs=$update_rate_mcs"
     if [ "$update_apply" = yes ]; then
         : > "$PAUSE_FILE"
@@ -1264,6 +1279,19 @@ auto_select() {
     return 0
 }
 
+persist_profiles() {
+    log_message "saving profiles to flash"
+    "$CFGMTD" -w -p /etc/
+    persist_status=$?
+    # airOS may regenerate authorized_keys during configuration persistence.
+    "$SSH_KEY_INSTALLER" || return 1
+    [ "$persist_status" -eq 0 ] || {
+        log_message "profile persistence failed status=$persist_status"
+        return "$persist_status"
+    }
+    log_message "profiles saved to flash"
+}
+
 save_current_profile() {
     save_name=$1
     save_source=${2:-explicit}
@@ -1279,7 +1307,7 @@ save_current_profile() {
     cp "$SYSTEM_CFG" "$PROFILE_DIR/.new.$$.cfg" || return 1
     chmod 750 "$PROFILE_DIR/.new.$$.cfg"
     mv "$PROFILE_DIR/.new.$$.cfg" "$save_destination" || return 1
-    "$CFGMTD" -w -p /etc/ || return 1
+    persist_profiles || return 1
     record_observed_config || return 1
     if [ "$save_source" = explicit ]; then
         clear_gui_transition
@@ -1297,8 +1325,49 @@ disable_profile() {
     disable_uptime=$(uptime_seconds)
     [ -n "$disable_uptime" ] || disable_uptime=0
     mv "$disable_source" "$PROFILE_DIR/.disabled/$disable_name.$disable_uptime.$$" || return 1
-    "$CFGMTD" -w -p /etc/
+    persist_profiles || return 1
     log_message "disabled profile recoverably profile=$disable_name"
+}
+
+forget_profile() {
+    forget_name=$1
+    case $forget_name in
+        ''|.*|*/*|reset|system.cfg|*.backup.*)
+            log_message "cannot forget an internal profile"; return 1 ;;
+    esac
+    forget_path="$PROFILE_DIR/$forget_name"
+    [ -f "$forget_path" ] && [ ! -L "$forget_path" ] || return 1
+    forget_ssid=$(effective_ssid "$forget_path")
+    [ -n "$forget_ssid" ] || return 1
+    forget_active=no
+    if [ "$(effective_ssid "$SYSTEM_CFG")" = "$forget_ssid" ] || \
+        [ "$(associated_ssid)" = "$forget_ssid" ]; then
+        forget_active=yes
+    fi
+    mkdir -p "$PROFILE_DIR/.disabled" || return 1
+    forget_backup="$PROFILE_DIR/.disabled/$forget_name.forgotten.$(uptime_seconds).$$"
+    mv "$forget_path" "$forget_backup" || return 1
+    if [ "$forget_active" = yes ]; then
+        # Preserve current Ethernet/management settings. The historical reset
+        # profile is a complete unrelated AP configuration, not a disconnect.
+        write_provision_config "$SYSTEM_CFG" "$APPLY_CFG" \
+            "vanpi-disconnected-$$" none '02:00:00:00:00:00' '' || return 1
+        apply_config || return 1
+        rm -f "$PAUSE_FILE" "$TRANSITION_FILE" "$STATE_DIR/last_auto_scan"
+        clear_gui_transition
+        clear_failures
+    fi
+    persist_profiles || return 1
+    log_message "forgot profile=$forget_name active=$forget_active backup=$forget_backup"
+    if [ "$forget_active" = yes ]; then
+        scan_networks || return 0
+        roam_profile=$(choose_candidate "$forget_ssid") || return 0
+        connect_profile "$roam_profile" yes
+        roam_status=$?
+        [ "$roam_status" -eq 0 ] || set_cooldown "$roam_profile"
+        # Forgetting succeeded even if no other uplink can be joined yet.
+    fi
+    return 0
 }
 
 show_status() {
@@ -1312,7 +1381,7 @@ show_status() {
 }
 
 usage() {
-    printf 'Usage: %s auto|connect PROFILE|status|pause|resume|save-current PROFILE|disable PROFILE|dashboard-status|dashboard-scan|manual-connect-stdin|provision-stdin|update-profile-stdin\n' "$0" >&2
+    printf 'Usage: %s auto|connect PROFILE|status|pause|resume|save-current PROFILE|disable PROFILE|dashboard-status|dashboard-scan|manual-connect-stdin|provision-stdin|update-profile-stdin|forget-stdin\n' "$0" >&2
 }
 
 command_name=${1:-}
@@ -1372,6 +1441,13 @@ case $command_name in
         log_message "automatic selection paused for manual profile=$manual_profile"
         acquire_lock || exit 1
         run_requested_connect "$manual_profile"
+        exit $?
+        ;;
+    forget-stdin)
+        [ "$#" -eq 1 ] || { usage; exit 1; }
+        IFS= read -r input_profile || exit 1
+        acquire_lock || exit 1
+        forget_profile "$input_profile"
         exit $?
         ;;
     provision-stdin)

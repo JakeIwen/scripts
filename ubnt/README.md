@@ -15,7 +15,7 @@ On the NanoStation:
 /etc/persistent/scripts/wifi_manager.sh resume
 ```
 
-The van dashboard uses five additional fixed manager entry points:
+The van dashboard uses these additional fixed manager entry points:
 
 ```sh
 /etc/persistent/scripts/wifi_manager.sh dashboard-status
@@ -23,10 +23,11 @@ The van dashboard uses five additional fixed manager entry points:
 /etc/persistent/scripts/wifi_manager.sh manual-connect-stdin
 /etc/persistent/scripts/wifi_manager.sh provision-stdin
 /etc/persistent/scripts/wifi_manager.sh update-profile-stdin
+/etc/persistent/scripts/wifi_manager.sh forget-stdin
 ```
 
 The first two emit credential-free, hex-encoded records for
-`pi/scripts/ubnt_wifi.py`. The latter two read their selection or provisioning
+`pi/scripts/ubnt_wifi.py`. The remaining commands read their selection or provisioning
 request from standard input so Wi-Fi passwords never appear in SSH arguments,
 process listings, command output, or manager logs. The dashboard lists saved
 profiles independently from scan results and can update a WPA password, Lock to
@@ -41,6 +42,18 @@ After association, provisioning deliberately runs the same `save-current` and
 Manual dashboard connections pause automatic selection. The dashboard sheet
 shows this state and provides an explicit Resume automatic selection button,
 which keeps captive-portal onboarding from being abandoned before login.
+
+`forget-stdin` reads one saved profile name. It moves that profile into
+`.disabled` for recovery and persists the removal. Forgetting the active SSID
+also applies a disconnected temporary radio configuration while preserving
+current Ethernet settings, clears the manual hold, and scans for a different
+saved uplink. It does not load the historical `reset` profile (which actually
+targets an unrelated network). Internal profiles cannot be forgotten.
+
+Dashboard network changes retain their lock and complete credential saving
+even if the initiating SSH connection hangs up during an airOS reload.
+Flash-save completion and failures are logged explicitly, and persistent SSH
+keys are restored after both reloads and profile writes.
 
 `connect` always applies a temporary copy of the saved profile with an explicit
 allowlist of the 11 standard US 2.4 GHz center frequencies (2412 through 2462

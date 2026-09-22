@@ -663,6 +663,21 @@ def api_ubnt_wifi_connect():
     return _start_ubnt_operation("connect", {"profile": profile})
 
 
+@app.route("/api/ubnt-wifi/forget", methods=["POST"])
+def api_ubnt_wifi_forget():
+    if not _exact_form(("profile",)):
+        return api_error("UBNT forget requires one profile", 400)
+    profile = request.form["profile"]
+    if (
+        not profile or len(profile.encode("utf-8")) > 128
+        or profile.startswith(".") or "/" in profile
+        or profile in ("reset", "system.cfg")
+        or any(ord(char) < 32 or ord(char) == 127 for char in profile)
+    ):
+        return api_error("invalid UBNT profile", 400)
+    return _start_ubnt_operation("forget", {"profile": profile})
+
+
 @app.route("/api/ubnt-wifi/provision", methods=["POST"])
 def api_ubnt_wifi_provision():
     fields = ("ssid", "security", "bssid", "password")

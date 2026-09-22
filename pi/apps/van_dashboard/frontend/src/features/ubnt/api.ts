@@ -72,6 +72,13 @@ export async function scanUbntNetworks(): Promise<UbntMutationResult> {
   return decodeMutation(await postForm('/api/ubnt-wifi/scan'), 'scan');
 }
 
+export async function forgetUbntProfile(profile: string): Promise<UbntMutationResult> {
+  return decodeMutation(
+    await postForm('/api/ubnt-wifi/forget', { profile: profileName(profile) }),
+    'forget',
+  );
+}
+
 export async function connectUbntProfile(profile: string): Promise<UbntMutationResult> {
   const payload = await postForm('/api/ubnt-wifi/connect', {
     profile: profileName(profile),
