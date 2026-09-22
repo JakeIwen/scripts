@@ -31,6 +31,16 @@ receiver with `sudo /home/pi/scripts/setup_openwrt_logging.sh`. See
 [`OPENWRT_LOGGING.md`](../networking/OPENWRT_LOGGING.md) for configuration and
 verification.
 
+MovingParts and BigBoi use Samba `fruit streams_xattr` for Mac metadata.
+Resource forks remain in `._` AppleDouble files (`fruit:resource = file`);
+Finder metadata uses Netatalk-compatible xattrs. The media mirror uses
+`rsync -aHX` and preserves AppleDouble files. Retain both xattrs and sidecars
+when restoring media, including Finder custom icons. These ordinary shares
+do not advertise Time Machine support. Existing SMB clients must reconnect
+after changing the module configuration; Apple's AAPL extensions are negotiated
+on the first share connection, so connecting first to a non-fruit share can
+still disable those extensions for that connection.
+
 ## Scenario 1 — SD card died, hot spare is attached
 
 1. Power off. Move the spare card from the USB reader into the SD slot. Power on.

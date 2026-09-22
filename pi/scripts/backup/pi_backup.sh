@@ -175,7 +175,8 @@ backup_progress_update media "Synchronizing the media mirror" || true
 if ensure_mounted movingparts "$MEDIA_SRC"; then
   log "media mirror -> $MEDIA_DST"
   mkdir -p "$MEDIA_DST"
-  run rsync -aH --delete-during --delete-excluded --exclude-from="$MEDIA_EXCLUDES" \
+  # Mac SMB metadata lives in xattrs and ._ resource-fork files; preserve both.
+  run rsync -aHX --delete-during --delete-excluded --exclude-from="$MEDIA_EXCLUDES" \
     "$MEDIA_SRC/" "$MEDIA_DST" \
     || notify "vanpi backup" "media rsync exited $? (partial sync)" high warning
 else
