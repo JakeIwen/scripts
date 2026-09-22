@@ -1,6 +1,6 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 const dir=path.join(__dirname,'../bettertouchtool');
-const source=fs.readFileSync(path.join(dir,'stabilize_media.js'),'utf8');
+const source=require('./btt_test_support.cjs').withCommon(fs.readFileSync(path.join(dir,'stabilize_media.js'),'utf8'));
 
 test('flattening creates explicit persistent children and action records in parent-first order',()=>{
  const context=vm.createContext({ObjC:{import(){}}});vm.runInContext(source,context);
@@ -60,7 +60,7 @@ for(const alreadySaved of [false,true])test('apply uses individual adds; skips s
  const store=new Map(),configs=new Map(),events=[];
  function $(x){return x;}$.NSString={stringWithContentsOfFileEncodingError(p){
   if(p==='/plan.json')return JSON.stringify(plan);
-  return fs.readFileSync(path.join(dir,path.basename(p)),'utf8');
+  return fs.readFileSync(path.join(dir,p.split('/macbook/bettertouchtool/')[1]),'utf8');
  }};
  const context=vm.createContext({$,ObjC:{import(){},unwrap(x){return x;}},Application(){return{
   add_new_trigger(json,{parent_uuid}){const item=JSON.parse(json);store.set(item.BTTUUID,{...item,parent:parent_uuid});events.push('add');},

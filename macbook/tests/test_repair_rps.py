@@ -69,7 +69,8 @@ class RPSPersistenceTests(unittest.TestCase):
 
     def test_backup_retains_full_sqlite_and_exports(self):
         snapshot={'media':{'BTTUUID':module.MEDIA},'sync':{'BTTUUID':module.SYNC}}
-        with patch.object(module,'ROOT',self.root):path=module.backup_configuration(self.path,snapshot)
+        with patch.dict(module.backup_configuration.__globals__,{'ROOT':self.root}):
+            path=module.backup_configuration(self.path,snapshot)
         self.assertEqual(json.loads(path.read_text()),snapshot)
         self.assertEqual(path.parent.stat().st_mode & 0o777,0o700)
         self.assertFalse(module.preflight(path.parent/'configuration.sqlite'))

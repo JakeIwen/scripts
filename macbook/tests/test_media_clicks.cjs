@@ -1,8 +1,8 @@
 const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), vm = require('node:vm'), path = require('node:path');
 const dir = path.join(__dirname, '../bettertouchtool');
-const source = fs.readFileSync(path.join(dir, 'one_off_fixes/test_media_clicks.js'), 'utf8');
-const helpers = fs.readFileSync(path.join(dir, 'fix_menu_sizes.js'), 'utf8');
+const source = fs.readFileSync(path.join(dir, 'one_off_fixes/2026-09-18-restore-modifier-clicks.js'), 'utf8');
+const helpers = require('./btt_test_support.cjs').withCommon(fs.readFileSync(path.join(dir, 'fix_menu_sizes.js'), 'utf8'));
 
 function fixture(failure) {
  const original = {BTTUUID:'D9B0ED12-C4BE-4E74-B0DA-0CC3BE092289', BTTTriggerType:767,

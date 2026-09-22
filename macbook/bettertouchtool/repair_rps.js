@@ -70,7 +70,7 @@ function run(argv) {
         return JSON.stringify({media,sync:get(RPS_SYNC)});
     }
     if(mode!=='apply')throw new Error('Unknown worker mode.');
-    const fingerprint=new Function(read(repo+'/macbook/bettertouchtool/fix_menu_sizes.js')+
-        '\nreturn sizeFingerprint;')();
+    const fingerprint=new Function(read(repo+'/macbook/bettertouchtool/btt_common.js')+
+        '\nreturn BTTCommon.fingerprint;')();
     return rpsApply(btt,JSON.parse(read(argv[2])),fingerprint);
 }

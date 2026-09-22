@@ -37,8 +37,10 @@ function clicksTest(btt, backup, fingerprint, undo) {
 }
 
 function run(argv) {
+    if (argv[0] !== '--run-historical') throw new Error('ARCHIVED click repair: review one_off_fixes/README.md; --undo REINTRODUCES THE CLICK BUG.');
+    argv = argv.slice(1);
     if (argv.length > 1 || (argv.length === 1 && argv[0] !== '--undo')) {
-        throw new Error('Usage: test_media_clicks.js [--undo]');
+        throw new Error('Usage: 2026-09-18-restore-modifier-clicks.js --run-historical [--undo]');
     }
     const repo = ObjC.unwrap($('~/dev/scripts').stringByExpandingTildeInPath);
     function library(file, expression) {
@@ -47,8 +49,8 @@ function run(argv) {
         if (!text) throw new Error('Cannot read helper ' + file);
         return new Function(ObjC.unwrap(text) + '\nreturn ' + expression + ';')();
     }
-    const backup = library('install_notes.js', 'notesBackup');
-    const fingerprint = library('fix_menu_sizes.js', 'sizeFingerprint');
+    const backup = library('btt_common.js', 'BTTCommon.backup');
+    const fingerprint = library('btt_common.js', 'BTTCommon.fingerprint');
     const directory = repo + '/tmp/btt-click-test-backup-' + ObjC.unwrap($.NSUUID.UUID.UUIDString);
     return clicksTest(Application('/Applications/BetterTouchTool.app'),
         snapshot => backup(snapshot, directory), fingerprint, argv[0] === '--undo');

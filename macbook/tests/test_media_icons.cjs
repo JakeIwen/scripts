@@ -1,7 +1,7 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 const dir=path.join(__dirname,'../bettertouchtool');
 const source=fs.readFileSync(path.join(dir,'port_media_icons.js'),'utf8');
-const helpers=fs.readFileSync(path.join(dir,'fix_menu_sizes.js'),'utf8');
+const helpers=require('./btt_test_support.cjs').withCommon(fs.readFileSync(path.join(dir,'fix_menu_sizes.js'),'utf8'));
 function fixture(failure) {
  const original={BTTUUID:'D9B0ED12-C4BE-4E74-B0DA-0CC3BE092289',BTTTriggerType:767,
   BTTMenuConfig:{BTTMenuDisableDrag:0,BTTMenuVerticalSpacing:2.5},BTTMenuItems:[

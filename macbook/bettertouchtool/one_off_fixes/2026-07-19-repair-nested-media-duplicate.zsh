@@ -1,5 +1,11 @@
 #!/bin/zsh
 
+# ARCHIVED: exact 6.011 Core Data repair; never a routine maintenance command.
+[[ "${BTT_RUN_HISTORICAL:-0}" == 1 ]] || {
+  print -u2 -- 'ARCHIVED database repair: review one_off_fixes/README.md before setting BTT_RUN_HISTORICAL=1.'
+  exit 1
+}
+
 set -euo pipefail
 
 readonly media_uuid="D9B0ED12-C4BE-4E74-B0DA-0CC3BE092289"

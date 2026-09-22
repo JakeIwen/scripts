@@ -1,3 +1,5 @@
+// ARCHIVED / NONPERSISTENT: this nested-import approach did not survive restart.
+// Use btt.py repair persistence for current recovery. Retained for reference.
 // Restore missing speaker-menu contents/Notes actions, narrow Notes, add Screen Cap.
 // All writes use BTT's API with complete item trees and a verified private backup.
 ObjC.import('Foundation');
@@ -119,6 +121,9 @@ function controlsArchives(repo) {
         .sort((a,b)=>b.modified-a.modified);
 }
 function run(argv) {
+    const historical = argv[0] === '--run-historical';
+    if (historical) argv = argv.slice(1);
+    if (!historical && argv[0] !== '--inspect') throw new Error('ARCHIVED / NONPERSISTENT: review one_off_fixes/README.md; use btt.py repair persistence instead.');
     if (argv.length && argv[0]!=='--inspect') throw new Error('Usage: repair_media_controls.js [--inspect]');
     const repo=ObjC.unwrap($('~/dev/scripts').stringByExpandingTildeInPath);
     const notes=new Function(controlsRead(repo+'/macbook/bettertouchtool/install_notes.js')+

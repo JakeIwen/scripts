@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const source = fs.readFileSync(path.join(__dirname, '../bettertouchtool/fix_menu_sizes.js'), 'utf8');
+const source = require('./btt_test_support.cjs').withCommon(fs.readFileSync(path.join(__dirname, '../bettertouchtool/fix_menu_sizes.js'), 'utf8'));
 const media = 'D9B0ED12-C4BE-4E74-B0DA-0CC3BE092289';
 const clone = x => JSON.parse(JSON.stringify(x));
 

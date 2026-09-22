@@ -10,10 +10,9 @@ from pathlib import Path
 import sqlite3
 import subprocess
 import sys
-import tempfile
 import time
 
-from stabilize_media import ROOT, MEDIA, connect, current_database, records, check_entity
+from btt_common import ROOT, MEDIA, connect, current_database, records, check_entity, backup_configuration
 
 BUTTON = '103D7824-47C1-4B1B-9106-71E4997BCB58'
 ACTION = '525212E9-F6F3-4CF0-A9F7-86C1A52EEB30'
@@ -74,21 +73,6 @@ def worker(mode, argument=''):
     return result.stdout.strip()
 
 
-def backup_configuration(database, snapshot, prefix='btt-rps-backup-'):
-    directory = Path(tempfile.mkdtemp(prefix=prefix, dir=ROOT/'tmp'))
-    path = directory/'backup.json'
-    path.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2)+'\n')
-    if json.loads(path.read_text()) != snapshot:
-        raise RuntimeError('Export backup verification failed; no changes made.')
-    source = connect(database)
-    try:
-        with sqlite3.connect(directory/'configuration.sqlite') as destination:
-            source.backup(destination)
-            if destination.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
-                raise RuntimeError('Full configuration backup verification failed; no changes made.')
-    finally:
-        source.close()
-    return path
 
 
 def repair(inspect=False):
@@ -104,8 +88,8 @@ def repair(inspect=False):
     if not Path(COMMAND).is_file():
         raise RuntimeError('Sync script is missing; no changes made.')
     snapshot = json.loads(worker('snapshot'))
-    backup = backup_configuration(database, snapshot)
-    print('Verified full BTT backup: '+str(backup.parent), flush=True)
+    backup = backup_configuration(database, snapshot, prefix='btt-rps-backup-')
+    print('Verified BTT configuration snapshot: '+str(backup.parent), flush=True)
     if preflight(database):
         print('RPS was repaired while preparing the backup; no changes or sync performed.')
         return

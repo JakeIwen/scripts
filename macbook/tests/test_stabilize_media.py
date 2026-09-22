@@ -2,11 +2,15 @@
 import importlib.util
 from pathlib import Path
 import sqlite3
+import sys
 import tempfile
 import unittest
 
 spec=importlib.util.spec_from_file_location('stabilize_media',Path(__file__).resolve().parents[1]/'bettertouchtool/stabilize_media.py')
-module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+module=importlib.util.module_from_spec(spec)
+sys.path.insert(0,str(Path(spec.origin).parent))
+spec.loader.exec_module(module)
+sys.path.pop(0)
 
 
 class PersistenceTests(unittest.TestCase):

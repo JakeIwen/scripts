@@ -14,8 +14,7 @@ import sys
 import tempfile
 import time
 
-from stabilize_media import ROOT, MEDIA, connect, current_database, records, disk_errors
-from repair_rps import backup_configuration
+from btt_common import ROOT, MEDIA, connect, current_database, records, disk_errors, backup_configuration
 
 WORKER = Path(__file__).with_suffix('.js')
 STATUS_BUTTON = 'BDFEAEF1-6961-4B05-9A62-E70C54332C4C'
@@ -192,7 +191,7 @@ def main():
     plan = {'media': media, 'changes': changes, 'entities': [], 'presetPath': preset_path(database),
             'configChanges': [{'uuid': c['uuid'], 'patch': c['patch']} for c in changes]}
     path = backup_configuration(database, plan, prefix='btt-transport-icons-backup-')
-    print('Verified full BTT backup: '+str(path.parent), flush=True)
+    print('Verified BTT configuration snapshot: '+str(path.parent), flush=True)
     try:
         if build(database) != changes:
             raise RuntimeError('Transport configuration changed during backup; no changes made.')

@@ -23,26 +23,14 @@ function notesRTF(text, size, centered) {
         '\\f0\\fs' + (2 * size) + ' \\cf1 ' +
         text.replace(/\\/g, '\\\\').replace(/[{}]/g, '\\$&').replace(/\r\n|\r|\n/g, '\\line ') + '}';
 }
-function notesReadJSON(path) {
-    const value = $.NSString.stringWithContentsOfFileEncodingError(path, $.NSUTF8StringEncoding, null);
-    if (!value) throw new Error('Cannot read ' + path);
-    return JSON.parse(ObjC.unwrap(value));
-}
-function notesBackup(snapshot, directory) {
-    const manager = $.NSFileManager.defaultManager;
-    if (!manager.createDirectoryAtPathWithIntermediateDirectoriesAttributesError(
-        directory, false, $({NSFilePosixPermissions: 448}), null)) {
-        throw new Error('Cannot create private backup directory; no BTT changes made.');
-    }
-    const path = directory + '/backup.json';
-    if (!$(JSON.stringify(snapshot, null, 2)).writeToFileAtomicallyEncodingError(
-        path, true, $.NSUTF8StringEncoding, null) ||
-        !manager.setAttributesOfItemAtPathError($({NSFilePosixPermissions: 384}), path, null) ||
-        JSON.stringify(notesReadJSON(path)) !== JSON.stringify(snapshot)) {
-        throw new Error('Backup verification failed; no BTT changes made.');
-    }
-    return path;
-}
+const NOTES_COMMON = typeof BTTCommon === 'object' ? BTTCommon : (function () {
+    const path = ObjC.unwrap($('~/dev/scripts/macbook/bettertouchtool/btt_common.js').stringByExpandingTildeInPath);
+    const source = $.NSString.stringWithContentsOfFileEncodingError(path, $.NSUTF8StringEncoding, null);
+    if (!source) throw new Error('Cannot load shared BTT safety helpers.');
+    return new Function(ObjC.unwrap(source) + '\nreturn BTTCommon;')();
+})();
+function notesReadJSON(path) { return NOTES_COMMON.readJSON(path); }
+function notesBackup(snapshot, directory) { return NOTES_COMMON.backup(snapshot, directory); }
 function notesMenuDefinition(spec, provider) {
     const command = '/usr/bin/python3 -B ' + notesShellQuote(provider) + ' ' + spec.mode;
     const functionName = spec.mode === 'recent' ? 'retrieveRecentNotesDropdown' : 'retrievePinnedNotesDropdown';

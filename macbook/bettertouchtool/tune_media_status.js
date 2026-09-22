@@ -76,8 +76,8 @@ function run(argv) {
         if (!text) throw new Error('Cannot read ' + file);
         return ObjC.unwrap(text);
     }
-    const backup = new Function(read('install_notes.js') + '\nreturn notesBackup;')();
-    const fingerprint = new Function(read('fix_menu_sizes.js') + '\nreturn sizeFingerprint;')();
+    const shared = new Function(read('btt_common.js') + '\nreturn BTTCommon;')();
+    const backup = shared.backup, fingerprint = shared.fingerprint;
     const directory = repo + '/tmp/btt-status-spacing-backup-' + ObjC.unwrap($.NSUUID.UUID.UUIDString);
     return statusApply(Application('/Applications/BetterTouchTool.app'), read('play_status.js'),
         snapshot => backup(snapshot, directory), fingerprint, argv[0] === '--inspect');

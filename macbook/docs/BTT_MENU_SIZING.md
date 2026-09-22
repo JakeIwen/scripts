@@ -30,7 +30,7 @@ These invalid bounds are worth fixing, but are not proven to cause that hang.
 
 ```zsh
 cd ~/dev/scripts
-osascript -l JavaScript macbook/bettertouchtool/fix_menu_sizes.js
+/usr/bin/python3 -B macbook/bettertouchtool/btt.py repair sizes --apply
 ```
 
 Before editing, the script writes and reads back a full private Media export
@@ -50,11 +50,11 @@ Read-only inspection:
 
 ```zsh
 cd ~/dev/scripts
-osascript -l JavaScript macbook/bettertouchtool/fix_menu_sizes.js --inspect
+/usr/bin/python3 -B macbook/bettertouchtool/btt.py repair sizes
 ```
 
-For restoration, run the same script with `--restore` followed by the exact
-backup path printed during the repair. This restores only changed maximum
+For restoration, use `btt.py restore-sizes BACKUP.json --apply`, substituting the
+exact backup path printed during the repair. This restores only changed maximum
 dimensions, preserves unrelated later edits, and refuses to overwrite sizes
 that were subsequently edited. It makes a new backup before restoring.
 Restoration intentionally reinstates the old bounds, including their conflicts.

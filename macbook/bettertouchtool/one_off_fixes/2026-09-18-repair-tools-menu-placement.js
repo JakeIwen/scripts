@@ -1,3 +1,5 @@
+// ARCHIVED: fixed three-item Tools layout from September 18, not the current menu.
+// Default execution is blocked; --inspect is read-only.
 // Match Tools action height/font to the parent Tools button; order Convert Video
 // between the other two actions. Full verified private backup precedes any edit.
 ObjC.import('Foundation');
@@ -109,6 +111,9 @@ function toolsBackup(snapshot) {
     return path;
 }
 function run(argv) {
+    const historical = argv[0] === '--run-historical';
+    if (historical) argv = argv.slice(1);
+    if (!historical && argv[0] !== '--inspect') throw new Error('ARCHIVED Tools repair: review one_off_fixes/README.md before --run-historical.');
     if(argv.length>1 || (argv.length && !['--apply','--inspect'].includes(argv[0])))
         throw new Error('Usage: fix_tools_menu.js [--apply | --inspect]');
     const btt=Application('/Applications/BetterTouchTool.app');

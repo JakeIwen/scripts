@@ -1,5 +1,11 @@
 #!/bin/zsh
 
+# Historical recovery/reproducer, never part of routine maintenance.
+[[ "${BTT_RUN_HISTORICAL:-0}" == 1 ]] || {
+  print -u2 -- 'ARCHIVED: read one_off_fixes/README.md before setting BTT_RUN_HISTORICAL=1.'
+  exit 1
+}
+
 # CRASHES BTT 6.011: BTT crashed while importing the generated
 # JSON this placed on the clipboard. Keep this as a reproducer/reference; it is
 # not a recommended installation method.

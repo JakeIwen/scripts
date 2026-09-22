@@ -108,15 +108,17 @@ project-level configuration):
 notify = ["/Users/jacobr/dev/scripts/macbook/scripts/codex_ntfy_notify.py"]
 ```
 
-## BetterTouchTool path migration
+## BetterTouchTool maintenance
 
-`bettertouchtool/update_repo_paths.js` audits enabled named triggers, other
-non-Touch Bar triggers, and Floating Menus. It is a dry run by default:
+Use the [BTT tooling index](bettertouchtool/README.md) for maintained commands,
+runtime providers, feature installers and the dated recovery archive.
 
 ```sh
-./macbook/bettertouchtool/update_repo_paths.js
-./macbook/bettertouchtool/update_repo_paths.js --apply
+/usr/bin/python3 -B ~/dev/scripts/macbook/bettertouchtool/btt.py inspect
+/usr/bin/python3 -B ~/dev/scripts/macbook/bettertouchtool/btt.py --help
 ```
 
-Touch Bar trigger and group IDs are deliberately excluded. Run
-`bettertouchtool/btt_backup.zsh` before applying a future migration.
+Style/setup/repair commands inspect by default and require `--apply` for live
+changes. The July path migration and superseded import/repair experiments are
+documented under `bettertouchtool/one_off_fixes/`, not routine setup steps.
+Keep personal exports and snapshots in ignored output directories, not Git.

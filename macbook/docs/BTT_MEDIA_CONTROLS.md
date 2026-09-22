@@ -3,7 +3,7 @@
 ## Black main-bar text and original Sonos icons
 
 ```zsh
-/usr/bin/python3 -B ~/dev/scripts/macbook/bettertouchtool/port_media_icons.py --main-style
+/usr/bin/python3 -B ~/dev/scripts/macbook/bettertouchtool/btt.py style main --apply
 ```
 
 This mode colors the text of every direct Media button/submenu launcher black,
@@ -24,7 +24,7 @@ keep their charcoal/off-white palette.
 
 Like the transport-only mode below, it makes a full verified configuration backup
 first, checks the full Media tree for unintended changes, and verifies saved
-properties. Add `--inspect` for a read-only plan. No import or restart is needed.
+properties. Omit `--apply` for a read-only plan. No import or restart is needed.
 
 The partymode/join button is explicitly centered: its old asymmetric horizontal
 padding (left 8, right −9) is reset to zero on both sides, with centered icon
@@ -42,13 +42,13 @@ To update only the center play/status icon and text to black (without revisiting
 the speaker icons or other labels):
 
 ```zsh
-/usr/bin/python3 -B ~/dev/scripts/macbook/bettertouchtool/port_media_icons.py --status-style
+/usr/bin/python3 -B ~/dev/scripts/macbook/bettertouchtool/btt.py style status --apply
 ```
 
 ## Original Touch Bar transport icons
 
 ```zsh
-/usr/bin/python3 -B ~/dev/scripts/macbook/bettertouchtool/port_media_icons.py
+/usr/bin/python3 -B ~/dev/scripts/macbook/bettertouchtool/btt.py style transport --apply
 ```
 
 The original Touch Bar entries still contain monochrome PNG/TIFF icon data.
@@ -71,13 +71,13 @@ Only icon, label, and tooltip appearance properties are updated through
 identifiers, order, colors, row spacing, and drag/modifier behavior are preserved.
 The complete exported tree is checked for unintended changes, and saved icon
 properties are verified in SQLite. No restart, import, or media action is run.
-`--inspect` lists the proposed buttons without contacting BTT's scripting API.
+`btt.py style transport` lists the proposed buttons without contacting BTT's scripting API.
 
 ## RPS link and Escape dismissal
 
 ```zsh
 cd ~/dev/scripts
-/usr/bin/python3 -B macbook/bettertouchtool/repair_rps.py --with-escape
+/usr/bin/python3 -B macbook/bettertouchtool/btt.py repair rps --with-escape --apply
 ```
 
 The RPS repair restores only its missing `Sync RPi Scripts` action, preserving
@@ -97,14 +97,14 @@ new shortcut disabled, validates the condition with macOS Foundation and verifie
 the saved settings, then enables it. This addition has its own full configuration
 backup. Future unrelated dropdowns are not automatically included.
 
-Omit `--with-escape` to restore RPS alone. Add `--inspect` for read-only checks.
+Omit `--with-escape` to restore RPS alone. Omit `--apply` for read-only checks.
 The agent cannot exercise actual keyboard dispatch from its sandbox; saved
 configuration checks do not represent a live sync or physical-key test.
 
 ## Playback-status cleanup and compact row spacing
 
 ```zsh
-osascript -l JavaScript ~/dev/scripts/macbook/bettertouchtool/tune_media_status.js
+/usr/bin/python3 -B ~/dev/scripts/macbook/bettertouchtool/btt.py status --apply
 ```
 
 This makes a verified private full Media backup before two persistent style
@@ -118,7 +118,7 @@ curl progress/errors from the idle-player fallback). Idle status is blank;
 failed SSH queries become `Status unavailable`. Valid playback
 title/time output is preserved. Queries use the verified LAN hostname, SSH batch
 mode, a connection timeout, and keepalive failure limits. No Pi files are changed.
-`--inspect` reports the proposed changes without writing a backup or modifying BTT.
+`btt.py status` reports the proposed changes without writing a backup or modifying BTT.
 
 ## Persistent submenu recovery
 
@@ -126,7 +126,7 @@ For the current persistence repair and screen/content layout, run from Terminal:
 
 ```zsh
 cd ~/dev/scripts
-/usr/bin/python3 -B macbook/bettertouchtool/stabilize_media.py
+/usr/bin/python3 -B macbook/bettertouchtool/btt.py repair persistence --apply
 ```
 
 This supersedes the earlier nested-JSON recovery command below. That command's
@@ -160,36 +160,21 @@ does not produce the desired dropdown height, the user's requested fallback is:
 
 ```zsh
 cd ~/dev/scripts
-/usr/bin/python3 -B macbook/bettertouchtool/stabilize_media.py --full-height-dropdowns
+/usr/bin/python3 -B macbook/bettertouchtool/btt.py repair persistence --full-height-dropdowns --apply
 ```
 
 This uses 100% of the usable screen height for the three standalone dropdowns;
-Media itself remains content-sized. `--inspect` checks the plan without changing
+Media itself remains content-sized. Omitting `--apply` checks the plan without changing
 configuration or restarting BTT. A repair that fails persistence checks reports
 the missing/incorrect record IDs and its backup location.
 
-## Earlier recovery helper
+## Historical recovery
 
-The installer backs up the current complete Media menu to a private
-`tmp/btt-controls-backup-<UUID>/backup.json` before applying any changes.
-It then:
-
-- Recovers missing rear-speaker and Sonos submenu descendants/actions from the
-  newest complete saved Media exports. Current labels, top-level positions, and
-  existing custom descendants are retained. Restored invalid widths are corrected.
-- Restores the existing Recent/Pinned Notes Show Floating Menu actions and keeps
-  their two-line 14pt labels. Width bounds become 54–78px (40% below 90–130).
-- Adds one **Screen Cap** button at the end of Media. It is configured not to
-  close the menu on click and runs no synthetic keyboard shortcuts.
-- Verifies restored descendants, action payloads, widths, and existing order;
-  invokes the two Notes launchers to check visibility/content readiness.
-
-The source backups stay intact. All updates use complete item exports with
-explicit parents, rather than assuming that partial updates preserve children.
-Rerunning merges missing definitions without duplicating the capture button.
-`--inspect` prints the plan and recovery-source paths without changes.
-Use `stabilize_media.py` for repairs now; full nested exports alone did not prove
-durability on the user's BTT6.826 installation.
+The older nested-import recovery is archived under
+[one_off_fixes/](../bettertouchtool/one_off_fixes/README.md). It could appear fixed
+in memory yet lose descendants after restart; use the maintained persistence
+repair instead. Its reusable planning functions are now separate from the
+archived executable. Historical backups and reproductions are retained.
 
 ## Capture usage
 

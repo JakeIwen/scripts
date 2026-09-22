@@ -2,6 +2,7 @@
 """Install Escape dismissal for Media's persistent dropdowns, never its main bar."""
 from __future__ import annotations
 
+import argparse
 from contextlib import closing
 import json
 import os
@@ -10,8 +11,7 @@ import subprocess
 import time
 import uuid
 
-from stabilize_media import ROOT, MEDIA, connect, current_database, records
-from repair_rps import backup_configuration
+from btt_common import ROOT, MEDIA, connect, current_database, records, backup_configuration
 
 SHORTCUT = str(uuid.uuid5(uuid.UUID('bd9b2717-342e-482e-b7a4-9abdc4177937'), 'media-dropdown-escape')).upper()
 MENUS = [
@@ -122,7 +122,7 @@ def install(inspect=False):
     if exists:
         disk_check(database, plan, preset)
     path = backup_configuration(database, plan, prefix='btt-menu-escape-backup-')
-    print('Verified full BTT backup for Escape: '+str(path.parent), flush=True)
+    print('Verified BTT configuration snapshot for Escape: '+str(path.parent), flush=True)
     _, fresh, now_exists = preflight(database)
     if fresh != plan or exists != now_exists:
         raise RuntimeError('Shortcut configuration changed during backup; no Escape changes made.')
@@ -144,4 +144,6 @@ def install(inspect=False):
 
 
 if __name__ == '__main__':
-    install()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--inspect', action='store_true')
+    install(parser.parse_args().inspect)

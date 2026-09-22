@@ -1,7 +1,7 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 const dir=path.join(__dirname,'../bettertouchtool');
 const source=fs.readFileSync(path.join(dir,'repair_rps.js'),'utf8');
-const helpers=fs.readFileSync(path.join(dir,'fix_menu_sizes.js'),'utf8');
+const helpers=require('./btt_test_support.cjs').withCommon(fs.readFileSync(path.join(dir,'fix_menu_sizes.js'),'utf8'));
 const MAIN='D9B0ED12-C4BE-4E74-B0DA-0CC3BE092289',BUTTON='103D7824-47C1-4B1B-9106-71E4997BCB58';
 const ACTION='525212E9-F6F3-4CF0-A9F7-86C1A52EEB30',SYNC='DA200AE7-BB01-4AB5-89A7-CF1587728D7D';
 function fixture(failure) {

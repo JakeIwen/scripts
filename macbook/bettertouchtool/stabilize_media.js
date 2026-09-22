@@ -68,7 +68,7 @@ function stableLayout(config,screen,main,fullHeight) {
 function run(argv) {
     const mode=argv[0],repo=argv[1];
     const btt=Application('/Applications/BetterTouchTool.app');
-    const recovery=stableLibrary(repo,'repair_media_controls.js',
+    const recovery=stableLibrary(repo,'lib/media_recovery.js',
         '{media:CONTROL_MEDIA,speakers:CONTROL_SPEAKERS,archives:controlsArchives,restore:controlsRestoreSpeaker}');
     const notes=stableLibrary(repo,'install_notes.js','{specs:NOTES_MENUS,launcher:notesLauncher,check:notesCheckOpening}');
     const sizes=stableLibrary(repo,'fix_menu_sizes.js','{edits:sizeEdits,set:sizeSet}');

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the import-safe shell for a dynamic Apple Notes submenu.
+"""ARCHIVED / CRASH RISK: old 6.011 Notes import experiment, not current setup.
 
 BTT 6.011 crashes its configuration UI when BTTMenuScriptSettings are imported
 on a submenu. The content script is therefore installed manually after this
@@ -10,6 +10,9 @@ import json
 import sys
 import time
 import uuid
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from btt_touchbar_folder_to_floating_submenu import (
     back_button_item,
@@ -57,4 +60,7 @@ def main():
 
 
 if __name__ == "__main__":
+    if '--run-historical' not in sys.argv:
+        raise SystemExit('CRASH RISK: archived import generator; use btt.py notes for current Notes menus.')
+    sys.argv.remove('--run-historical')
     main()

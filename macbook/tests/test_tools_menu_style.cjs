@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
-const code=fs.readFileSync(path.join(__dirname,'../bettertouchtool/fix_tools_menu.js'),'utf8');
+const code=fs.readFileSync(path.join(__dirname,'../bettertouchtool/one_off_fixes/2026-09-18-repair-tools-menu-placement.js'),'utf8');
 const MEDIA='D9B0ED12-C4BE-4E74-B0DA-0CC3BE092289',TOOLS='FC3F8235-F102-55C4-8432-B6ADFB0D9992';
 const AUDIO='9FEF3881-D2EC-5F35-A63A-D57A97A5099A',CONVERT='C819638D-72E5-53E2-A94C-B7790C26DB47',STRIP='B6C11844-111C-5283-B497-C88063BBC131';
 const LEGACY='7EA51E57-335B-5A4F-8B04-B6D5F8325EA0';
@@ -40,7 +40,7 @@ function setup(failure){
     }};
     const context=vm.createContext({$,ObjC:{import(){},unwrap:x=>x},Application:()=>btt});
     vm.runInContext(code,context);
-    return {run:mode=>context.run(mode?[mode]:[]),root,tools,original,events,files};
+    return {run:mode=>context.run(['--run-historical',...(mode?[mode]:[])]),root,tools,original,events,files};
 }
 
 test('matches parent size/font and puts Convert between Audio and Strip, preserving actions/other menus',()=>{

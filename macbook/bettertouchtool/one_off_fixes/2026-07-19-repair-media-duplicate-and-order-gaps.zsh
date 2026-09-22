@@ -1,5 +1,11 @@
 #!/bin/zsh
 
+# Historical recovery/reproducer, never part of routine maintenance.
+[[ "${BTT_RUN_HISTORICAL:-0}" == 1 ]] || {
+  print -u2 -- 'ARCHIVED: read one_off_fixes/README.md before setting BTT_RUN_HISTORICAL=1.'
+  exit 1
+}
+
 # ONE-OFF RECOVERY: detach the known duplicate Media record, optionally restore
 # the known Display Power record, and compact the known Media item's ordering.
 # The database build and all affected UUIDs are fixed below.

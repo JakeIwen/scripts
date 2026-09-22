@@ -208,7 +208,7 @@ function run(argv) {
         return JSON.stringify(hits[0]);
     }
     if(mode!=='apply')throw new Error('Unknown icon updater mode.');
-    const fingerprint=new Function(read(repo+'/macbook/bettertouchtool/fix_menu_sizes.js')+'\nreturn sizeFingerprint;')();
+    const fingerprint=new Function(read(repo+'/macbook/bettertouchtool/btt_common.js')+'\nreturn BTTCommon.fingerprint;')();
     const plan=JSON.parse(read(argv[2]));
     return iconApply(btt,plan,fingerprint,iconValidate,
         (actual,expected)=>normalizeIconTree(actual,expected,nativeIconMatcher(plan.presetPath)));

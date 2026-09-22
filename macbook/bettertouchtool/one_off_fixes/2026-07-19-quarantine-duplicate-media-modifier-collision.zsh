@@ -1,5 +1,11 @@
 #!/bin/zsh
 
+# Historical recovery/reproducer, never part of routine maintenance.
+[[ "${BTT_RUN_HISTORICAL:-0}" == 1 ]] || {
+  print -u2 -- 'ARCHIVED: read one_off_fixes/README.md before setting BTT_RUN_HISTORICAL=1.'
+  exit 1
+}
+
 # ONE-OFF RECOVERY: quarantine the exact stale Media menu whose embedded
 # identifier and modifier chord collided with the current Media menu.
 # Both menu UUIDs and the BTT database build are fixed below.

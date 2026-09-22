@@ -28,6 +28,14 @@ vanrouter/etc/init.d/*
 !vanrouter/etc/sysupgrade.conf
 vanrouter/build/
 macbook/build/
+# Personal BTT dumps belong in ignored output folders, not alongside source.
+macbook/bettertouchtool/backups/
+macbook/bettertouchtool/generated/
+macbook/bettertouchtool/*.json
+macbook/bettertouchtool/*.sqlite*
+macbook/bettertouchtool/*.bttpreset
+macbook/bettertouchtool/*.bttpresetzip
+macbook/bettertouchtool/btt_data_store*
 macbook/scripts/performance-audio-jobs/
 *__pycache__*
 *.pyc

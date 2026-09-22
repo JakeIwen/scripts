@@ -3,27 +3,15 @@
 ObjC.import('Foundation');
 
 const SIZE_MENU_UUID = 'D9B0ED12-C4BE-4E74-B0DA-0CC3BE092289';
-const SIZE_VOLATILE = new Set(['BTTLastUpdatedAt', 'BTTLastChangeUUID']);
-
-function sizeClone(value) { return JSON.parse(JSON.stringify(value)); }
-function sizeCanonical(value) {
-    if (Array.isArray(value)) {
-        const items = value.map(sizeCanonical);
-        if (items.length && items.every(x => x && typeof x === 'object' && x.BTTUUID)) {
-            items.sort((a, b) => a.BTTUUID.localeCompare(b.BTTUUID));
-        }
-        return items;
-    }
-    if (value && typeof value === 'object') {
-        const result = {};
-        Object.keys(value).sort().forEach(k => {
-            if (!SIZE_VOLATILE.has(k)) result[k] = sizeCanonical(value[k]);
-        });
-        return result;
-    }
-    return value;
-}
-function sizeFingerprint(value) { return JSON.stringify(sizeCanonical(value)); }
+const SIZE_COMMON = typeof BTTCommon === 'object' ? BTTCommon : (function () {
+    const path = ObjC.unwrap($('~/dev/scripts/macbook/bettertouchtool/btt_common.js').stringByExpandingTildeInPath);
+    const source = $.NSString.stringWithContentsOfFileEncodingError(path, $.NSUTF8StringEncoding, null);
+    if (!source) throw new Error('Cannot load shared BTT safety helpers.');
+    return new Function(ObjC.unwrap(source) + '\nreturn BTTCommon;')();
+})();
+function sizeClone(value) { return SIZE_COMMON.clone(value); }
+function sizeCanonical(value) { return SIZE_COMMON.canonical(value); }
+function sizeFingerprint(value) { return SIZE_COMMON.fingerprint(value); }
 function sizeNodes(root) {
     const result = new Map();
     function visit(item, parent) {
@@ -77,27 +65,11 @@ function sizePlan(root) {
     });
     return changes;
 }
-function sizeReadJSON(path) {
-    const value = $.NSString.stringWithContentsOfFileEncodingError(path, $.NSUTF8StringEncoding, null);
-    if (!value) throw new Error('Cannot read ' + path);
-    return JSON.parse(ObjC.unwrap(value));
-}
+function sizeReadJSON(path) { return SIZE_COMMON.readJSON(path); }
 function sizeBackup(snapshot) {
     const directory = ObjC.unwrap($('~/dev/scripts/tmp/btt-sizing-backup-' +
         ObjC.unwrap($.NSUUID.UUID.UUIDString)).stringByExpandingTildeInPath);
-    const fm = $.NSFileManager.defaultManager;
-    if (!fm.createDirectoryAtPathWithIntermediateDirectoriesAttributesError(
-        directory, false, $({NSFilePosixPermissions: 448}), null)) {
-        throw new Error('Cannot create private backup directory; no changes made.');
-    }
-    const path = directory + '/backup.json';
-    if (!$(JSON.stringify(snapshot, null, 2)).writeToFileAtomicallyEncodingError(
-        path, true, $.NSUTF8StringEncoding, null) ||
-        !fm.setAttributesOfItemAtPathError($({NSFilePosixPermissions: 384}), path, null) ||
-        sizeFingerprint(sizeReadJSON(path)) !== sizeFingerprint(snapshot)) {
-        throw new Error('Backup verification failed; no changes made.');
-    }
-    return path;
+    return SIZE_COMMON.backup(snapshot, directory);
 }
 function sizeRestorePlan(root, saved) {
     if (saved.version !== 1 || saved.menu !== SIZE_MENU_UUID || !saved.mediaExport ||

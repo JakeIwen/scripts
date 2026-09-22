@@ -1,5 +1,6 @@
 #!/usr/bin/osascript -l JavaScript
 
+// ARCHIVED: July 18 directory migration, not a general path repair tool.
 /*
  * Update enabled, non-Touch Bar BetterTouchTool triggers after this repository's
  * directory reorganization. The script is a dry run unless passed --apply.
@@ -17,6 +18,8 @@ for (let index = 0; index < processArguments.count; index += 1) {
   args.push(ObjC.unwrap(processArguments.objectAtIndex(index)));
 }
 const applyChanges = args.includes("--apply");
+if (applyChanges && !args.includes('--run-historical'))
+  throw new Error('ARCHIVED path migration: review one_off_fixes/README.md before --apply --run-historical.');
 const btt = Application("/Applications/BetterTouchTool.app");
 
 const repoRoot = "/Users/jacobr/dev/scripts";

@@ -59,7 +59,7 @@ Then install from Terminal (the agent sandbox cannot send BTT Apple Events):
 
 ```zsh
 cd ~/dev/scripts
-osascript -l JavaScript macbook/bettertouchtool/install_notes.js
+/usr/bin/python3 -B macbook/bettertouchtool/btt.py notes --apply
 ```
 
 The script checks Notes access from Terminal, exports the original Media menu,
@@ -84,14 +84,14 @@ both Notes buttons on two lines), with a verified backup and no action changes:
 
 ```zsh
 cd ~/dev/scripts
-osascript -l JavaScript macbook/bettertouchtool/install_notes.js --labels-only
+/usr/bin/python3 -B macbook/bettertouchtool/btt.py notes --labels-only --apply
 ```
 
 Read-only configuration/data check:
 
 ```zsh
 cd ~/dev/scripts
-osascript -l JavaScript macbook/bettertouchtool/install_notes.js --inspect
+/usr/bin/python3 -B macbook/bettertouchtool/btt.py notes
 ```
 
 Metadata checks (counts only, no titles or note contents):

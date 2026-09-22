@@ -3,7 +3,7 @@ const fs = require('node:fs'), path = require('node:path'), vm = require('node:v
 const dir = path.join(__dirname, '../bettertouchtool');
 const script = fs.readFileSync(path.join(dir, 'play_status.js'), 'utf8');
 const installer = fs.readFileSync(path.join(dir, 'tune_media_status.js'), 'utf8');
-const helpers = fs.readFileSync(path.join(dir, 'fix_menu_sizes.js'), 'utf8');
+const helpers = require('./btt_test_support.cjs').withCommon(fs.readFileSync(path.join(dir, 'fix_menu_sizes.js'), 'utf8'));
 
 for (const [result, expected] of [['', ''], [' \n', ''],
     ['A Movie\n01:02 / 1:23:45', 'A Movie\n01:02 / 1:23:45'],

@@ -1,5 +1,11 @@
 #!/bin/zsh
 
+# Historical recovery/reproducer, never part of routine maintenance.
+[[ "${BTT_RUN_HISTORICAL:-0}" == 1 ]] || {
+  print -u2 -- 'ARCHIVED: read one_off_fixes/README.md before setting BTT_RUN_HISTORICAL=1.'
+  exit 1
+}
+
 # ONE-OFF RECOVERY: restore Jacob's exact July 18 BTT snapshot through a staged
 # copy, run the paired Media repair, and preserve the displaced live directory.
 

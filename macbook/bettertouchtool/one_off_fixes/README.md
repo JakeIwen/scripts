@@ -1,9 +1,33 @@
 # BetterTouchTool one-off fixes
 
-These scripts preserve the recovery work from the July 19, 2026 BetterTouchTool
-floating-menu incident. They are dated and deliberately specific to the BTT
-database snapshots, UUIDs, and application build involved in that incident.
-They are reference material, not a general BTT maintenance interface.
+These scripts preserve dated recovery work and failed experiments. They are
+specific to the recorded snapshots, UUIDs, and BTT versions. They are reference
+material, not a general maintenance interface. Use [btt.py](../README.md) for
+current inspection, backed-up appearance changes, and supported repairs.
+
+Historical shell scripts require `BTT_RUN_HISTORICAL=1`. Archived JS/Python
+mutations or generated-import experiments require `--run-historical`; supported
+read-only `--inspect` / `--preview` modes do not. These guards prevent accidental
+execution, not make the old procedures safe. Review targets, version and recovery
+paths before deliberately opting in. Never paste a **CRASHES BTT / CRASH RISK**
+payload into a working configuration.
+
+## Additional archived work
+
+| File | What it addressed / why archived |
+| --- | --- |
+| `2026-07-18-update-reorganized-script-paths.js` | One-time repository directory migration; old-path substitutions are not a general updater. |
+| `2026-07-19-CRASH-RISK-recent-notes-submenu.py` | Legacy Notes submenu-import experiment associated with BTT 6.011 configuration crashes; replaced by `install_notes.js` and the runtime Notes provider. |
+| `2026-07-19-repair-nested-media-duplicate.zsh` | Earlier duplicate repair variant requiring the stale menu to be nested under Media. Direct Core Data edits; exact 6.011 lineage only. |
+| `2026-07-25-build-media-vertical-dropdowns.py` | Built replacement dropdown packs from a fixed set of temporary exports. Current menus no longer use this migration path. |
+| `2026-09-18-NONPERSISTENT-nested-media-repair.js` | Restored speaker/Notes descendants in memory, but they disappeared after restart. Superseded by individual-record persistence recovery. |
+| `2026-09-18-repair-tools-menu-placement.js` | Aligned/reordered three specific Tools entries; the menu has since gained more entries. |
+| `2026-09-18-reorder-rps-after-row-breaker.js` | Applied that day's RPS ordering request, preserving other order slots. Later manual layout changes must not be overwritten by replaying it. |
+| `2026-09-18-restore-modifier-clicks.js` | Reverted the `Disable Drag` flag that broke Ctrl–Option–Command clicks on BTT 6.826. `--undo` REINTRODUCES THE CLICK BUG. |
+
+No current maintenance script imports executable code from this archive. The
+reusable recovery planner lives in `../lib/media_recovery.js`; common backup and
+verification code lives in `../btt_common.py` and `../btt_common.js`.
 
 ## Incident summary
 
@@ -76,12 +100,12 @@ export/import tool that validates schemas and remaps primary keys. None of the
 scripts in this directory currently provides those general guarantees.
 ## September 2026 click-regression rollback
 
-`test_media_clicks.js` reverts `BTTMenuDisableDrag=1`, added by the layout
+`2026-09-18-restore-modifier-clicks.js` reverts `BTTMenuDisableDrag=1`, added by the layout
 stabilizer. The user confirmed that this one-setting rollback restored working
 held-modifier clicks on BTT 6.826. It makes a verified private full Media backup,
 changes only that property to `0` through the persistent style API, and checks
 that the shortcut, positions, sizes, actions, and children are otherwise unchanged.
-Run with `osascript -l JavaScript test_media_clicks.js`; `--undo` restores `1`
-after another backup but may reintroduce the click regression. No restart or
+The archived script requires `--run-historical`; `--undo` restores `1`
+after another backup and can reintroduce the click regression. No restart or
 JSON-tree import. `stabilize_media.py` now preserves this setting, so it will not
 re-enable the drag lock after the rollback.

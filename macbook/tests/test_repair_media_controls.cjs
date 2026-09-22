@@ -1,6 +1,6 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 const base=path.join(__dirname,'../bettertouchtool');
-const code=fs.readFileSync(path.join(base,'repair_media_controls.js'),'utf8');
+const code=require('./btt_test_support.cjs').withCommon(fs.readFileSync(path.join(base,'one_off_fixes/2026-09-18-NONPERSISTENT-nested-media-repair.js'),'utf8'));
 const mediaID='D9B0ED12-C4BE-4E74-B0DA-0CC3BE092289';
 const rearID='D6D639BB-B1D1-4C90-85E3-B8F5C8310E56',sonosID='F3CC5F44-0D08-49DD-8B5C-3D6C1C022759';
 const notesIDs=['0F8AEB59-60C1-4B1F-A356-26AD45E3A0A3','0C21404E-6EBD-41F5-97D0-2D18DD60A386'];
@@ -55,7 +55,7 @@ function setup(failure) {
   setAttributesOfItemAtPathError(a){assert.equal(a.value.NSFilePosixPermissions,384);return true;}}};
  const context=vm.createContext({$,ObjC:{import(){},unwrap(x){return x;},deepUnwrap(x){return x;}},Application(){return btt;},console:{log(){}},delay(){throw Error('Should be ready without waiting');}});
  vm.runInContext(code,context);
- return {run(args=[]){context.args=args;return vm.runInContext('run(args)',context);},root,initial,events,files};
+ return {run(args=[]){context.args=['--run-historical',...args];return vm.runInContext('run(args)',context);},root,initial,events,files};
 }
 test('recovers real hierarchy shapes with replacement-style API; narrows Notes and adds keep-open screenshot',()=>{
  const s=setup();assert.match(s.run(),/Recent Notes: visible/);

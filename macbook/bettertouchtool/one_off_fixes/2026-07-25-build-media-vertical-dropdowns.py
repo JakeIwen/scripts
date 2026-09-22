@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build importable vertical dropdown replacements for Media submenus.
+"""ARCHIVED: July 25 import experiment using a fixed set of temporary exports.
 
 The result contains one top-level floating-menu pack and one Media launcher
 button pack. Each generated entity gets a fresh UUID, so the current submenus
@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from create_floating_dropdown_from_submenu import (
     MEDIA_UUID,
     load_single_trigger,
@@ -21,7 +23,7 @@ from create_floating_dropdown_from_submenu import (
 )
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 RECENT_NOTES_COMMAND = (
     "/usr/bin/osascript -l JavaScript "
     "/Users/jacobr/dev/scripts/macbook/scripts/recent_notes_menu.js "
@@ -219,4 +221,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    if '--run-historical' not in sys.argv:
+        raise SystemExit('ARCHIVED dropdown generator: review one_off_fixes/README.md before --run-historical.')
+    sys.argv.remove('--run-historical')
     main()

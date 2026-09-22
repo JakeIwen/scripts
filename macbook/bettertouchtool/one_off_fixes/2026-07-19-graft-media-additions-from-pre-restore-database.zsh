@@ -1,5 +1,11 @@
 #!/bin/zsh
 
+# Historical recovery/reproducer, never part of routine maintenance.
+[[ "${BTT_RUN_HISTORICAL:-0}" == 1 ]] || {
+  print -u2 -- 'ARCHIVED: read one_off_fixes/README.md before setting BTT_RUN_HISTORICAL=1.'
+  exit 1
+}
+
 # ONE-OFF RECOVERY: graft the seven July 19 Media additions from the exact
 # preserved pre-restore BTT database into the restored database lineage.
 # Paths, database build, UUIDs, expected row count, and final order are fixed.
