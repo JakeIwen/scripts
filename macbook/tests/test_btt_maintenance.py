@@ -18,7 +18,7 @@ sys.path.pop(0)
 class MaintenanceTests(unittest.TestCase):
     def test_every_change_command_defaults_to_inspection(self):
         for argv in [['style'],['style','transport'],['style','status'],['status'],['notes'],['notes','--labels-only'],
-                     ['escape'],['repair','rps'],['repair','rps','--with-escape'],['repair','sizes'],['repair','persistence']]:
+                     ['escape'],['repair','rps'],['repair','rps','--with-escape'],['repair','sizes'],['repair','persistence'],['repair','paths']]:
             with self.subTest(argv=argv):
                 command=module.command_for(module.parser().parse_args(argv))
                 self.assertIn('--inspect',command)
@@ -30,6 +30,9 @@ class MaintenanceTests(unittest.TestCase):
         self.assertIn('--status-style',command);self.assertNotIn('--inspect',command)
         command=module.command_for(module.parser().parse_args(['notes','--labels-only','--apply']))
         self.assertEqual(command[-1],'--labels-only')
+        command=module.command_for(module.parser().parse_args(['repair','paths','--apply']))
+        self.assertEqual(command[-1],'--apply')
+        self.assertTrue(command[-2].endswith('repair_script_paths.py'))
 
     def test_deleted_media_recovery_requires_explicit_apply(self):
         command=module.command_for(module.parser().parse_args(['restore-media']))

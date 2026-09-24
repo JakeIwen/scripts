@@ -30,6 +30,7 @@ Apple Events access is sandboxed. `inspect` and `backup` need no Apple Events.
 | `escape` | Escape dismissal while the three Media dropdowns are visible. |
 | `repair rps` | Restore the missing sync-button link without running a deployment; optional `--with-escape`. |
 | `repair sizes` | Repair conflicting min/max dimensions without normalizing valid custom sizes. |
+| `repair paths` | Repair reviewed moved-script paths in active floating-menu actions and named triggers; `--apply` changes command fields only. |
 | `repair persistence` | Targeted speaker/Notes recovery; **restarts BTT when applied**. |
 | `restore-sizes BACKUP.json --apply` | Guarded restoration of a sizing repair's prior values only. |
 
@@ -70,6 +71,37 @@ when complete; they no longer abort after8seconds.
 
 ## Code organization
 
+### Stale script references
+
+```sh
+/usr/bin/python3 -B ~/dev/scripts/macbook/bettertouchtool/btt.py repair paths
+/usr/bin/python3 -B ~/dev/scripts/macbook/bettertouchtool/btt.py repair paths --apply
+```
+
+The read-only preview checks the current saved configuration and verifies that
+replacement files exist. The updater takes a private SQLite/action-export backup,
+checks for concurrent changes, and patches individual command fields through
+BTT's API. No parent menu is reimported; arguments, layout, titles and ordering
+are preserved. Disabled entries, inactive presets and Touch Bar records are
+excluded. Mappings are reviewed exact file moves, not broad directory rewrites.
+The old missing Python3.9 interpreter is replaced only for the migrated,
+standard-library-only wake-device helper. No action is executed during testing.
+
+BTT can delay disk saves beyond60seconds. Runtime readback and saved-state
+verification are reported separately; if saving is pending, don't restart yet.
+Run the preview again later: zero stale actions confirms the path changes reached
+the saved configuration. Do not rerun Media restoration to fix paths.
+
+The Sonos launcher `macbook/scripts/sns.sh` sets its module path from its own
+checkout location before using the Sonos virtualenv. BTT runs a noninteractive
+shell and does not load Terminal's `.zshrc` PYTHONPATH. Python output is unbuffered
+and stderr is merged into the result stream so failures appear in BTT's script
+result. Changing this launcher takes effect on the next button use without a
+BTT import or restart. Wrapper regression tests use a fake Sonos module and never
+play audio or discover speakers.
+
+### Sources
+
 - `btt.py`: maintained CLI; fixed argument-list dispatch, no shell interpolation.
 - `btt_common.py` / `btt_common.js`: shared read-only database checks, private
   verified snapshots/exports, and canonical comparisons. Importing them never
@@ -79,6 +111,8 @@ when complete; they no longer abort after8seconds.
 - `port_media_icons.*`, `tune_media_status.js`, `fix_menu_sizes.js`,
   `install_notes.js`, `install_menu_escape.*`, `repair_rps.*`, `stabilize_media.*`:
   implementations behind the CLI. Existing paths remain supported.
+- `repair_script_paths.py/.js`: read-only discovery and guarded field-only path
+  repair, with independent runtime and disk verification.
 - `install_*_menu.*`, `build_performance_audio_menu.py`, `tools_menu_style.py`:
   app-specific installers for Audio, BPM, Rhythm, video conversion and metadata
   stripping. Kept at their established paths for their build/install workflows.
