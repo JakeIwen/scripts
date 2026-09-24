@@ -3,6 +3,7 @@ import { KeyValueList } from '../../components/KeyValueList';
 import type { PollingState } from '../../hooks/usePollingResource';
 import { formatBytes, formatPercent, formatRelativeTime } from '../../utils/format';
 import type { CrashAnalysisControls } from './crashControls';
+import { groupSystemHealthEvents } from './eventGroups';
 import { HealthRangeSelector } from './HealthRangeSelector';
 import { systemHealthRangeLabel } from './presentation';
 import type {
@@ -103,6 +104,7 @@ export function SystemHealthSheet({
   crashAnalysis,
 }: SystemHealthSheetProps) {
   const report = resource.data;
+  const eventGroups = groupSystemHealthEvents(report?.events ?? []);
   const current = report?.current;
   const awaitingSelectedRange = report !== null && report.rangeHours !== rangeHours;
   const rangeStatus = awaitingSelectedRange
@@ -229,18 +231,41 @@ export function SystemHealthSheet({
         <section className="panel-card">
           <h3>Recent event timeline</h3>
           <div className="system-health-events">
-            {report?.events.length ? (
-              report.events.map((event) => (
+            {eventGroups.length ? (
+              eventGroups.map(({ key, event, timestamps, firstSeen, lastSeen }) => (
                 <article
                   className={`system-health-event system-health-event--${event.severity}`}
-                  key={`${event.timestamp}:${event.summary}`}
+                  key={key}
                 >
                   <header>
-                    <span>{event.category}</span>
-                    <time>{formatRelativeTime(event.timestamp)}</time>
+                    <span>
+                      {event.category}
+                      {timestamps.length > 1 ? ` · ${timestamps.length} occurrences` : ''}
+                    </span>
+                    <time
+                      dateTime={new Date(lastSeen * 1000).toISOString()}
+                      title={new Date(lastSeen * 1000).toLocaleString()}
+                    >
+                      {timestamps.length > 1 ? 'Last ' : ''}
+                      {formatRelativeTime(lastSeen)}
+                    </time>
                   </header>
                   <strong>{event.summary}</strong>
                   {event.message && <p>{event.message}</p>}
+                  {timestamps.length > 1 && (
+                    <details className="system-health-event__occurrences">
+                      <summary>First {formatRelativeTime(firstSeen)} · View timestamps</summary>
+                      <ul>
+                        {timestamps.map((timestamp, index) => (
+                          <li key={`${timestamp}:${index}`}>
+                            <time dateTime={new Date(timestamp * 1000).toISOString()}>
+                              {new Date(timestamp * 1000).toLocaleString()}
+                            </time>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
                 </article>
               ))
             ) : (
