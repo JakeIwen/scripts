@@ -144,6 +144,9 @@ ignored to reduce accidental inclusion; reviewed source fixtures remain separate
 Tests use fake BTT APIs or read-only/generated SQLite fixtures; they do not click
 RPS, change speakers, import presets, or restart BTT. Native image/RTF tests require
 macOS but do not contact BTT's scripting interface.
+Behavior tests cover maintained tools, not archived one-off repairs. Archive
+checks only protect the current boundary: historical tools stay inert by default
+and maintained tools do not import them.
 
 ```sh
 cd ~/dev/scripts
