@@ -37,14 +37,6 @@ export const HOSTED_PROJECTS: HostedProject[] = [
     links: [{ label: 'This Mac', url: 'http://127.0.0.1:4317/' }],
   },
   {
-    id: 'van-dashboard',
-    name: 'Van Dashboard',
-    icon: '🚐',
-    host: 'Vanpi',
-    description: 'Van controls, lighting, network, storage, backups, and system health.',
-    links: piLinks(8788),
-  },
-  {
     id: 'telemetry',
     name: 'Vehicle Telemetry',
     icon: '📊',
@@ -85,37 +77,11 @@ export const HOSTED_PROJECTS: HostedProject[] = [
     links: piLinks(8123),
   },
   {
-    id: 'notifications',
-    name: 'Notifications · ntfy',
-    icon: '🔔',
-    host: 'Vanpi',
-    description: 'Local notification server and topic subscriptions.',
-    links: piLinks(80),
-  },
-  {
     id: 'soundbytes',
     name: 'Sound Library',
     icon: '🔊',
     host: 'Vanpi',
     description: 'Browse the sound files hosted on the Pi.',
     links: piLinks(8000),
-  },
-  {
-    id: 'qbittorrent',
-    name: 'qBittorrent',
-    icon: '⬇️',
-    host: 'Vanpi',
-    description: 'Torrent transfers and queue management.',
-    note: 'Available when torrent policy permits qBittorrent to run.',
-    links: piLinks(8080),
-  },
-  {
-    id: 'dashboard-canary',
-    name: 'Dashboard Canary',
-    icon: '🧪',
-    host: 'Vanpi',
-    description:
-      'Alternate dashboard listener for checking releases; shares the production backend.',
-    links: piLinks(8790),
   },
 ];
