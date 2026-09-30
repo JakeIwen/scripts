@@ -9,6 +9,7 @@ import { DealWatchFeature } from './features/dealWatch';
 import { IgnitionFeature } from './features/ignition';
 import { LightingFeature } from './features/lighting';
 import { OpenWrtFeature } from './features/network';
+import { NetworkHistoryFeature } from './features/networkHistory';
 import { SonosFeature } from './features/sonos';
 import { DashboardStatusTile, formatDashboardUptime, useDashboardStatus } from './features/status';
 import { StorageFeature } from './features/storage';
@@ -97,6 +98,10 @@ export function App() {
     {
       id: 'ubnt-wifi',
       content: <UbntFeature dashboardStatus={dashboardStatus} />,
+    },
+    {
+      id: 'network-history',
+      content: <NetworkHistoryFeature />,
     },
     {
       id: 'openwrt-card',

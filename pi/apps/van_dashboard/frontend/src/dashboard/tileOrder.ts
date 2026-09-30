@@ -16,6 +16,7 @@ export const DEFAULT_TILE_ORDER = [
   'price-checks',
   'lighting-card',
   'ubnt-wifi',
+  'network-history',
   'openwrt-card',
 ] as const;
 

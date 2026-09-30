@@ -1,0 +1,84 @@
+{
+  "fixture_kind": "observed_redacted",
+  "collected_at": "2026-09-29",
+  "provenance": "Read-only inspection of the Pi's durable OpenWrt syslog; source paths and original physical line numbers are retained below.",
+  "time_semantics": "The leading RFC3339 timestamp is Pi receipt time from rsyslog timegenerated. The original router source timestamp was not retained. It is not an import timestamp.",
+  "redaction": "Client MAC replaced by a fixed locally administered identifier. No device configuration or credentials are included.",
+  "records": [
+    {
+      "path": "/var/log/openwrt/dendelion.log-20260918.gz",
+      "line": 12657,
+      "text": "2026-09-17T11:11:53.330671-06:00 192.168.6.1 OpenWrt clientwan-path: state-change state=gateway-0-public-0 device=wl1-sta0 gateway=172.20.10.1 gateway_ok=0 public1=1.1.1.1:0 public2=208.67.222.222:0"
+    },
+    {
+      "path": "/var/log/openwrt/dendelion.log-20260925.gz",
+      "line": 3491,
+      "text": "2026-09-24T03:18:19.556026-06:00 192.168.6.1 OpenWrt clientwan-path: state-change state=gateway-1-public-0 device=wl1-sta0 gateway=172.20.10.1 gateway_ok=1 public1=1.1.1.1:0 public2=208.67.222.222:0"
+    },
+    {
+      "path": "/var/log/openwrt/dendelion.log-20260918.gz",
+      "line": 27156,
+      "text": "2026-09-17T23:05:28.825468-06:00 192.168.6.1 OpenWrt uplink-https: interface=clientwan state=degraded google=204/0 cloudflare=000/28"
+    },
+    {
+      "path": "/var/log/openwrt/dendelion.log-20260918.gz",
+      "line": 33,
+      "text": "2026-09-17T00:00:48.181142-06:00 192.168.6.1 OpenWrt clientwan-path: summary samples=12 interface_up=0 gateway_ok=0 public1_ok=0 public2_ok=0 device=none gateway=none"
+    },
+    {
+      "path": "/var/log/openwrt/dendelion.log-20260918.gz",
+      "line": 25765,
+      "text": "2026-09-17T22:51:27.785932-06:00 192.168.6.1 OpenWrt uplink-https: interface=wan state=online google=204/0 cloudflare=204/0"
+    },
+    {
+      "path": "/var/log/openwrt/dendelion.log-20260918.gz",
+      "line": 149,
+      "text": "2026-09-17T00:03:48.160501-06:00 192.168.6.1 OpenWrt hostapd: wl0-ap0: AP-STA-CONNECTED 02:00:00:00:00:01 auth_alg=sae"
+    },
+    {
+      "path": "/var/log/openwrt/dendelion.log-20260918.gz",
+      "line": 150,
+      "text": "2026-09-17T00:03:48.160821-06:00 192.168.6.1 OpenWrt hostapd: wl0-ap0: STA 02:00:00:00:00:01 WPA: pairwise key handshake completed (RSN)"
+    },
+    {
+      "path": "/var/log/openwrt/dendelion.log-20260918.gz",
+      "line": 632,
+      "text": "2026-09-17T00:14:35.305527-06:00 192.168.6.1 OpenWrt hostapd: wl0-ap0: AP-STA-DISCONNECTED 02:00:00:00:00:01"
+    },
+    {
+      "path": "/var/log/openwrt/dendelion.log-20260918.gz",
+      "line": 584,
+      "text": "2026-09-17T00:14:18.188438-06:00 192.168.6.1 OpenWrt netifd: Network device 'wl1-sta0' link is up"
+    },
+    {
+      "path": "/var/log/openwrt/dendelion.log-20260918.gz",
+      "line": 598,
+      "text": "2026-09-17T00:14:21.187679-06:00 192.168.6.1 OpenWrt netifd: Interface 'clientwan' is now up"
+    },
+    {
+      "path": "/var/log/openwrt/dendelion.log-20260918.gz",
+      "line": 8,
+      "text": "2026-09-17T00:00:14.254077-06:00 192.168.6.1 OpenWrt mwan3track[1909]: Interface wan (wan) is offline"
+    },
+    {
+      "path": "/var/log/openwrt/dendelion.log-20260918.gz",
+      "line": 10,
+      "text": "2026-09-17T00:00:15.224542-06:00 192.168.6.1 OpenWrt mwan3-hotplug[17556]: Connection tracking flushed for interface 'wan' on action 'disconnected'"
+    },
+    {
+      "path": "/var/log/openwrt/dendelion.log-20260918.gz",
+      "line": 13,
+      "text": "2026-09-17T00:00:17.522354-06:00 192.168.6.1 OpenWrt mwan3track[1909]: Interface wan (wan) is connecting"
+    },
+    {
+      "path": "/var/log/openwrt/dendelion.log-20260918.gz",
+      "line": 30,
+      "text": "2026-09-17T00:00:36.631150-06:00 192.168.6.1 OpenWrt netifd: wan (28000): udhcpc: lease of 192.168.8.229 obtained from 192.168.8.20, lease time 600"
+    },
+    {
+      "path": "/var/log/openwrt/dendelion.log-20260918.gz",
+      "line": 18076,
+      "text": "2026-09-17T15:36:04.873706-06:00 192.168.6.1 OpenWrt dnsmasq[1]: no servers found in /tmp/resolv.conf.d/resolv.conf.auto, will retry"
+    }
+  ]
+}

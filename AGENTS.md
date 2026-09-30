@@ -142,6 +142,49 @@ the dashboard shares bounded cached reads across clients. Schema/index updates
 belong to collector initialization, never read-only report requests. See
 `pi/docs/monitoring/SYSTEM_MONITOR.md` for details.
 
+## Network flight recorder
+
+For network troubleshooting or disconnect diagnosis, start with
+`pi/docs/networking/NETWORK_FLIGHT_RECORDER.md` and a read-only recorder report
+covering the incident's time range. Use the dashboard's Network History view or
+the CLI `report`/`export` commands. Check source freshness, historical-import
+coverage and retention, then inspect supporting observations and provenance
+before drawing conclusions or proposing changes. Do not assume that an empty
+timeline proves uninterrupted connectivity.
+
+`pi/scripts/network_flight_recorder.py` and `pi/scripts/network_recorder/`
+consume existing probe/syslog evidence, the antenna's uptime log, and selected
+system-monitor context. Collection runs independently of dashboard requests in
+`network-flight-recorder.service`. Its active SQLite database and durable router
+logs live under `/mnt/EXFAT512/vanpi-network/`, on the verified flash filesystem.
+The CLI/dashboard select storage automatically using
+`/etc/vanpi-network-storage.json`; inspect the `storage` coverage entry rather
+than assuming the flash drive is present. Missing or failed flash uses a bounded
+volatile database and raw-log ring under `/run/vanpi-network/`, never SD fallback.
+RAM evidence does not survive reboot. The old `/var/lib/vanpi-network/` and
+`/var/log/openwrt/` are frozen migration recovery copies, excluded from Borg.
+
+Keep reports read-only and full-range counts independent of displayed row
+limits. Schema/index changes and incident materialization belong to the
+collector. Preserve physical-record checkpoints, backfill provenance and
+boot/clock boundaries when changing ingestion or correlation.
+
+Legacy OpenWrt log timestamps are Pi receipt times; the additive JSON spool
+retains receipt and reported times separately. Classic syslog's reported clock
+is unverified, and antenna time is approximately anchored from boot/uptime.
+Never substitute import time for historical occurrence. A stale source or
+collection gap is not a confirmed internet outage; a down/disabled uplink is
+not by itself a measured failure. Preserve existing probe budgets, mwan3 marks
+and the shared-DNS limitation.
+
+Use the guarded, targeted `pi/deploy_network_storage.py` installer and
+manifest-specific rollback; the older recorder installer refuses storage-managed
+deployments. Preserve mount identity checks, bounded RAM buffering and idempotent
+recovery. Never write through an absent mount or unlink a database beneath active
+readers. Avoid repository-wide sync for recorder updates.
+See `pi/docs/networking/NETWORK_FLIGHT_RECORDER.md` for commands, limits and
+remaining evidence gaps.
+
 ## macOS video thumbnails
 
 On affected macOS versions, Finder may select frame zero for videos that fade in

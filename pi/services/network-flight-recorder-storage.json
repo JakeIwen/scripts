@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "mountpoint": "/mnt/EXFAT512",
+  "uuid": "122C-A219",
+  "fstype": "exfat",
+  "flash_root": "/mnt/EXFAT512/vanpi-network",
+  "runtime_root": "/run/vanpi-network",
+  "ram_max_bytes": 16777216,
+  "flash_max_bytes": 268435456,
+  "flash_max_events": 150000,
+  "retention_days": 30
+}

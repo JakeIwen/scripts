@@ -1,0 +1,3 @@
+# Disabled by the guarded network storage migration.
+# Active syslog lives in bounded /run/vanpi-network/spool RAM rings. The recorder
+# owns flash archival/retention; this retired SD directory must not be rotated.

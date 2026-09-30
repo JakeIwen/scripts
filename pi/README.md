@@ -34,6 +34,8 @@ normally live under `/home/pi/scripts/`.
 ## Networking
 
 - [OpenWrt remote logging](docs/networking/OPENWRT_LOGGING.md)
+- [Network flight recorder](docs/networking/NETWORK_FLIGHT_RECORDER.md)
+- [Network recorder verification](docs/networking/NETWORK_FLIGHT_RECORDER_VERIFICATION.md)
 - [Dashcam Wi-Fi connection research](projects/dashcam-wifi-connect/README.md)
 
 ## Compute

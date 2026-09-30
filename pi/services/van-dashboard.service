@@ -11,6 +11,7 @@ ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_b
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_common.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_cop.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_disks.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_history.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_home.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_integrations.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_network.py

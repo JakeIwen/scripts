@@ -1,0 +1,34 @@
+[Unit]
+Description=Passive van network incident flight recorder
+After=systemd-tmpfiles-setup.service rsyslog.service system-event-monitor.service
+Wants=rsyslog.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /home/pi/scripts/network_flight_recorder.py --storage-config /etc/vanpi-network-storage.json run
+Restart=on-failure
+RestartSec=5
+User=pi
+Group=pi
+SupplementaryGroups=adm
+RuntimeDirectory=vanpi-network
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
+UMask=0027
+Environment=PYTHONUNBUFFERED=1
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadOnlyPaths=-/var/lib/vanpi-network -/var/log/openwrt
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+Nice=10
+IOSchedulingClass=idle
+CPUQuota=20%
+MemoryMax=128M
+
+[Install]
+WantedBy=multi-user.target

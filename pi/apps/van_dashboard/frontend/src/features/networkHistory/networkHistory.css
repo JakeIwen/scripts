@@ -1,0 +1,169 @@
+.network-history {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.network-history h3,
+.network-history h4 {
+  margin: 0 0 8px;
+}
+
+.network-history p,
+.network-history-tile-note {
+  color: var(--muted);
+}
+
+.network-history-tile-note {
+  font-size: 12px;
+}
+
+.network-history-filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+  gap: 12px;
+}
+
+.network-history-filters label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+}
+
+.network-history-filters input,
+.network-history-filters select {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+}
+
+.network-history-search {
+  grid-column: span 2;
+}
+
+.network-history-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: var(--muted);
+}
+
+.network-history-range,
+.network-history-limitations {
+  font-size: 12px;
+}
+
+.network-history-coverage details,
+.network-history-evidence,
+.network-history-detail {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 8px;
+  overflow-wrap: anywhere;
+}
+
+.network-history-coverage summary {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  cursor: pointer;
+}
+
+.network-history-coverage summary .status-pill {
+  margin-left: auto;
+}
+
+.network-history-incident {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  padding: 14px;
+  margin: 0 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--panel-raised);
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.network-history-incident span,
+.network-history-incident small,
+.network-history-evidence small,
+.network-history-evidence time {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.network-history-incident .network-history-evidence-link {
+  color: var(--accent);
+}
+
+.network-history-incident-summary,
+.network-history-evidence summary {
+  display: grid;
+  gap: 4px;
+}
+
+.network-history-evidence summary {
+  cursor: pointer;
+}
+
+.network-history-provenance {
+  display: grid;
+  grid-template-columns: minmax(100px, 1fr) minmax(0, 2fr);
+  gap: 6px 12px;
+  font-size: 12px;
+}
+
+.network-history-provenance dt {
+  color: var(--muted);
+}
+
+.network-history-provenance dd {
+  margin: 0;
+}
+
+.network-history pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  color: var(--muted);
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.network-history .network-history-warning {
+  color: var(--warning);
+  padding: 10px;
+  border-left: 3px solid var(--warning);
+  background: var(--warning-background);
+}
+
+@media (max-width: 500px) {
+  .network-history-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .network-history-search {
+    grid-column: auto;
+  }
+
+  .network-history-provenance {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -65,6 +65,7 @@ if __package__:
     from .van_dashboard_storage import *
     from .van_dashboard_sonos import *
     from .van_dashboard_network import *
+    from .van_dashboard_history import *
     from .van_dashboard_usb import *
     from .van_dashboard_integrations import *
     from .van_dashboard_system import *
@@ -79,6 +80,7 @@ else:
     from van_dashboard_storage import *
     from van_dashboard_sonos import *
     from van_dashboard_network import *
+    from van_dashboard_history import *
     from van_dashboard_usb import *
     from van_dashboard_integrations import *
     from van_dashboard_system import *
@@ -148,6 +150,7 @@ storage_policy = StoragePolicyManager()
 lighting = LightingController()
 price_checks = PriceCheckController()
 system_monitor = SystemMonitorClient()
+network_history = NetworkHistoryClient()
 compute_monitor = ComputeMetricsReader(COMPUTE_ROOT)
 usb_devices = UsbDeviceMonitor()
 usb_ports = UsbPortController(usb_devices)
@@ -1091,6 +1094,35 @@ def api_price_checks():
             "error": f"could not read price-check schedule: {exc}",
             "error_code": "parse",
         }
+    response = jsonify(payload)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/api/network-history")
+def api_network_history():
+    try:
+        query = network_history_query(request.args)
+        payload = network_history.report(query)
+    except ValueError as exc:
+        return api_error(str(exc), 400)
+    except NetworkHistoryError as exc:
+        return api_error(str(exc), 503)
+    response = jsonify(payload)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/api/network-history/incidents/<incident_id>")
+def api_network_history_incident(incident_id):
+    if request.args:
+        return api_error("incident details do not accept query parameters", 400)
+    try:
+        payload = network_history.incident(incident_id)
+    except ValueError as exc:
+        return api_error(str(exc), 400)
+    except NetworkHistoryError as exc:
+        return api_error(str(exc), 503)
     response = jsonify(payload)
     response.headers["Cache-Control"] = "no-store"
     return response

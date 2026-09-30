@@ -35,6 +35,7 @@ describe('Van Dashboard React composition', () => {
       'Deal Watch',
       'Lighting',
       'UBNT Wi-Fi',
+      'Network History',
       'OpenWrt',
     ]) {
       expect(screen.getByRole('heading', { name: title })).toBeInTheDocument();

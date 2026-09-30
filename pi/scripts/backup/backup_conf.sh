@@ -58,6 +58,8 @@ BORG_EXCLUDES=(
   '/root/.cache/*'
   '/home/pi/build/*'
   '/home/*/.local/share/Trash/*'
+  '/var/lib/vanpi-network'
+  '/var/log/openwrt'
 )
 
 # state + notifications

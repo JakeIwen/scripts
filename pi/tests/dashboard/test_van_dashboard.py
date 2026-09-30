@@ -4498,6 +4498,7 @@ class DashboardRouteTests(unittest.TestCase):
                 "van_dashboard_common.py",
                 "van_dashboard_cop.py",
                 "van_dashboard_disks.py",
+                "van_dashboard_history.py",
                 "van_dashboard_home.py",
                 "van_dashboard_integrations.py",
                 "van_dashboard_network.py",
