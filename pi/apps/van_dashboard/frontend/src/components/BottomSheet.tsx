@@ -4,11 +4,19 @@ interface BottomSheetProps {
   open: boolean;
   title: string;
   description?: string;
+  className?: string;
   onClose: () => void;
   children: React.ReactNode;
 }
 
-export function BottomSheet({ open, title, description, onClose, children }: BottomSheetProps) {
+export function BottomSheet({
+  open,
+  title,
+  description,
+  className = '',
+  onClose,
+  children,
+}: BottomSheetProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleId = useId();
 
@@ -21,7 +29,7 @@ export function BottomSheet({ open, title, description, onClose, children }: Bot
 
   return (
     <dialog
-      className="bottom-sheet"
+      className={`bottom-sheet ${className}`.trim()}
       ref={dialogRef}
       aria-labelledby={titleId}
       onCancel={(event) => {
