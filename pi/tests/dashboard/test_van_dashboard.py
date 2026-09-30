@@ -445,6 +445,61 @@ class SystemMonitorClientTests(unittest.TestCase):
         with self.assertRaisesRegex(dashboard.SystemMonitorCommandError, "invalid output"):
             malformed.report()
 
+    def test_cached_reports_are_shared_isolated_and_expire(self):
+        clock = FakeClock(100)
+        command = mock.Mock(return_value=SimpleNamespace(
+            returncode=0, stdout=json.dumps(self.PAYLOAD), stderr=""
+        ))
+        client = dashboard.SystemMonitorClient(command=command, clock=clock)
+        client.report(6)["events"].append("caller mutation")
+        self.assertEqual(client.report(6)["events"], [])
+        self.assertEqual(command.call_count, 1)
+        client.report(24)
+        self.assertEqual(command.call_count, 2)
+        clock.advance(11)
+        client.report(6)
+        self.assertEqual(command.call_count, 3)
+
+    def test_concurrent_readers_generate_one_report(self):
+        started, release = threading.Event(), threading.Event()
+        calls, results = [], []
+        def command(args, timeout):
+            calls.append(args)
+            started.set()
+            release.wait(2)
+            return SimpleNamespace(returncode=0, stdout=json.dumps(self.PAYLOAD), stderr="")
+        client = dashboard.SystemMonitorClient(command=command)
+        threads = [threading.Thread(target=lambda: results.append(client.report(6))) for _ in range(4)]
+        try:
+            for thread in threads:
+                thread.start()
+            self.assertTrue(started.wait(1))
+        finally:
+            release.set()
+            for thread in threads:
+                thread.join(3)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(results, [self.PAYLOAD] * 4)
+
+    def test_failure_cooldown_recovers_and_analysis_invalidates_history(self):
+        clock = FakeClock(100)
+        command = mock.Mock(side_effect=subprocess.TimeoutExpired("monitor", 15))
+        client = dashboard.SystemMonitorClient(command=command, clock=clock)
+        for _ in range(2):
+            with self.assertRaises(dashboard.SystemMonitorCommandError):
+                client.report(6)
+        self.assertEqual(command.call_count, 1)
+        clock.advance(3)
+        command.side_effect = None
+        command.return_value = SimpleNamespace(returncode=0, stdout=json.dumps(self.PAYLOAD), stderr="")
+        client.report(6)
+        client.crash_history()
+        client.crash_history()
+        self.assertEqual(command.call_count, 3)
+        client.crash_analysis()
+        client.crash_history()
+        self.assertEqual(command.call_count, 5)
+
     def test_uses_fixed_crash_analysis_and_full_history_commands(self):
         calls = []
 
@@ -6015,7 +6070,9 @@ class DashboardRouteTests(unittest.TestCase):
         dashboard.connectivity = FakeConnectivity()
         dashboard.storage_policy = dashboard.StoragePolicyManager(command=command)
         try:
-            response = dashboard.app.test_client().post("/api/starlink")
+            with mock.patch.object(dashboard.ubnt_wifi, "starlink_power_changed") as power_changed:
+                response = dashboard.app.test_client().post("/api/starlink")
+                power_changed.assert_called_once_with("on")
         finally:
             dashboard.starlink, dashboard.connectivity, dashboard.storage_policy = originals
 
@@ -6024,6 +6081,22 @@ class DashboardRouteTests(unittest.TestCase):
             events,
             ["toggle", "connectivity", [dashboard.POLICYCTL, "reconcile"]],
         )
+
+    def test_starlink_off_cancels_pending_connection_and_power_failure_does_not_queue(self):
+        with (
+            mock.patch.object(dashboard.starlink, "toggle", return_value={"state": "off"}),
+            mock.patch.object(dashboard.ubnt_wifi, "starlink_power_changed") as changed,
+            mock.patch.object(dashboard.connectivity, "request_refresh"),
+            mock.patch.object(dashboard.storage_policy, "reconcile"),
+        ):
+            self.assertEqual(dashboard.app.test_client().post("/api/starlink").status_code, 200)
+            changed.assert_called_once_with("off")
+        with (
+            mock.patch.object(dashboard.starlink, "toggle", side_effect=RuntimeError("switch failed")),
+            mock.patch.object(dashboard.ubnt_wifi, "starlink_power_changed") as changed,
+        ):
+            self.assertEqual(dashboard.app.test_client().post("/api/starlink").status_code, 502)
+            changed.assert_not_called()
 
     def test_sonos_transport_volume_and_mute_routes(self):
         front = FakeSpeaker("Front", 28, "PLAYING")

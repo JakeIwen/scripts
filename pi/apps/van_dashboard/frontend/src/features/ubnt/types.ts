@@ -3,13 +3,22 @@ export type UbntProfileSecurity = Exclude<UbntSecurity, 'enterprise'>;
 export type UbntRateModule = 'atheros' | 'ewma_ht';
 export type UbntOperationState = 'idle' | 'running' | 'complete' | 'error';
 export type UbntOperationKind =
-  'status' | 'scan' | 'connect' | 'provision' | 'update-profile' | 'resume' | 'abort' | 'forget';
+  | 'status'
+  | 'scan'
+  | 'connect'
+  | 'provision'
+  | 'update-profile'
+  | 'resume'
+  | 'abort'
+  | 'forget'
+  | 'starlink';
 
 export interface UbntRadioState {
   configuredSsid: string | null;
   associatedSsid: string | null;
   ccqPercent: number | null;
   automaticPaused: boolean | null;
+  manualHoldRemainingSeconds?: number | null;
   selectorRunning: boolean | null;
   signalDbm: number | null;
   noiseDbm: number | null;
@@ -54,6 +63,7 @@ export interface UbntOperation {
 
 export interface UbntWifiStatus {
   lastError?: string | null;
+  starlinkPending?: boolean;
   reachable: boolean | null;
   checkedAt: number | null;
   state: UbntRadioState;

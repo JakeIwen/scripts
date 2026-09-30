@@ -96,6 +96,7 @@ const OPERATION_KINDS = [
   'resume',
   'abort',
   'forget',
+  'starlink',
 ] as const satisfies readonly UbntOperationKind[];
 
 function decodeProfile(value: unknown, index: number): UbntProfile {
@@ -154,6 +155,10 @@ export function decodeUbntWifiStatus(value: unknown): UbntWifiStatus {
   const operation = objectValue(response.operation, 'UBNT operation');
 
   return {
+    starlinkPending:
+      response.starlink_pending === undefined
+        ? false
+        : booleanValue(response.starlink_pending, 'UBNT starlink_pending'),
     reachable: nullableBoolean(wifi.reachable, 'wifi.reachable'),
     lastError: optionalNullableString(response.last_error, 'UBNT last_error'),
     checkedAt: nullableNumber(wifi.checked_at, 'wifi.checked_at'),
@@ -161,6 +166,12 @@ export function decodeUbntWifiStatus(value: unknown): UbntWifiStatus {
       configuredSsid: nullableString(state.configured_ssid, 'wifi.state.configured_ssid'),
       associatedSsid: nullableString(state.associated_ssid, 'wifi.state.associated_ssid'),
       ccqPercent: nullableNumber(state.ccq_percent, 'wifi.state.ccq_percent'),
+      manualHoldRemainingSeconds: optionalNullableInteger(
+        state.manual_hold_remaining_seconds,
+        'wifi.state.manual_hold_remaining_seconds',
+        0,
+        86400,
+      ),
       automaticPaused: nullableBoolean(state.automatic_paused, 'wifi.state.automatic_paused'),
       selectorRunning: nullableBoolean(state.selector_running, 'wifi.state.selector_running'),
       signalDbm: optionalNullableNumber(state.signal_dbm, 'wifi.state.signal_dbm'),

@@ -58,6 +58,18 @@ it through bounded monitor commands instead of opening the database itself.
 Ordinary health reports are read-only. A user-requested crash analysis writes
 only its redacted result back to the monitor database.
 
+Reports aggregate event counts and latest occurrences in SQLite using the
+covering `events_report_idx` index. Only the displayed events and undervoltage
+transitions are loaded into Python; USB correlations use indexed time windows.
+Counts and diagnoses still cover the full selected range, even during a USB
+error storm. Existing databases receive the index when the collector initializes;
+read-only report commands never migrate the schema.
+
+The dashboard shares report/history results between clients for 10 seconds and
+serializes generation. Failed reads have a two-second retry cooldown rather than
+serving an old report as fresh. Saving a crash analysis invalidates these caches.
+The command timeout remains 15 seconds. Raw events and their retention are unchanged.
+
 `vanpi-usb-controller-watchdog.timer` separately checks once a minute for the
 current-boot kernel message that declares the Pi 4 VL805 xHCI controller dead.
 It sends one rate-limited ntfy alert per boot with the guarded recovery command.

@@ -4,6 +4,10 @@ This module supports both repository package imports and the flat sibling
 layout used by the deployed van-dashboard service.
 """
 
+import copy
+import threading
+import time
+
 __all__ = [
     "PriceCheckCommandError",
     "PriceCheckController",
@@ -140,11 +144,17 @@ class SystemMonitorClient:
         database=SYSTEM_MONITOR_DB,
         command=run_command,
         timeout=SYSTEM_MONITOR_TIMEOUT,
+        clock=time.monotonic,
+        cache_seconds=10,
     ):
         self.tool = tool
         self.database = database
         self.command = command
         self.timeout = timeout
+        self.clock = clock
+        self.cache_seconds = cache_seconds
+        self.cache_lock = threading.Lock()
+        self.read_cache = {}
 
     def _run_json(self, command_args):
         args = [
@@ -176,7 +186,7 @@ class SystemMonitorClient:
         return payload
 
     def report(self, hours=6):
-        return self._run_json(
+        return self._cached_read(
             [
                 "report",
                 "--hours",
@@ -188,10 +198,35 @@ class SystemMonitorClient:
         )
 
     def crash_analysis(self):
-        return self._run_json(["crash-report", "--save", "--json"])
+        with self.cache_lock:
+            try:
+                return self._run_json(["crash-report", "--save", "--json"])
+            finally:
+                self.read_cache.clear()
+
+    def _cached_read(self, command_args):
+        # Shared across all HTTP clients. Serialize generation and recheck the
+        # cache after acquiring the lock so concurrent requests join one read.
+        key = tuple(command_args)
+        with self.cache_lock:
+            cached = self.read_cache.get(key)
+            if cached is not None and self.clock() < cached[0]:
+                if cached[2] is not None:
+                    raise SystemMonitorCommandError(cached[2])
+                return copy.deepcopy(cached[1])
+            try:
+                payload = self._run_json(command_args)
+            except SystemMonitorCommandError as exc:
+                # Do not turn a failing reader into a tight subprocess loop.
+                self.read_cache[key] = (self.clock() + 2, None, str(exc))
+                raise
+            self.read_cache[key] = (self.clock() + self.cache_seconds, payload, None)
+            if len(self.read_cache) > 8:
+                del self.read_cache[next(iter(self.read_cache))]
+            return copy.deepcopy(payload)
 
     def crash_history(self, limit=20):
-        return self._run_json(
+        return self._cached_read(
             [
                 "crash-history",
                 "--limit",

@@ -1,5 +1,5 @@
 import { StatusPill } from '../../components/StatusPill';
-import { ubntRadioConnected, ubntStatusLabel, ubntTone } from './presentation';
+import { ubntRadioConnected, ubntRecovering, ubntStatusLabel, ubntTone } from './presentation';
 import { StarlinkControl, type StarlinkStatusResource } from './StarlinkControl';
 import type { UbntWifiStatus } from './types';
 import './ubnt.css';
@@ -24,12 +24,15 @@ function radioDetail(status: UbntWifiStatus | null): string {
 export function UbntTile({ status, error, refreshing, dashboardStatus, onOpen }: UbntTileProps) {
   const tone = ubntTone(status, error);
   const associated = status?.state.associatedSsid || status?.state.configuredSsid;
-  const summary =
-    status?.reachable === false
-      ? 'No UBNT Ethernet response'
-      : status?.reachable === true
-        ? `${associated || 'Unknown SSID'} · ${status.lastError ? 'Status unavailable' : ubntRadioConnected(status) ? radioDetail(status) : 'Not associated'}`
-        : 'Waiting for antenna status…';
+  const summary = ubntRecovering(status)
+    ? 'Antenna reconnecting; waiting for fresh status…'
+    : status?.starlinkPending
+      ? 'Starlink connection queued…'
+      : status?.reachable === false
+        ? 'No UBNT Ethernet response'
+        : status?.reachable === true
+          ? `${associated || 'Unknown SSID'} · ${status.lastError ? 'Status unavailable' : ubntRadioConnected(status) ? radioDetail(status) : 'Not associated'}`
+          : 'Waiting for antenna status…';
 
   return (
     <section className={`tile tile--${tone} ubnt-tile`} aria-labelledby="ubnt-tile-title">

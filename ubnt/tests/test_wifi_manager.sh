@@ -9,6 +9,11 @@ test_root=$(mktemp -d "${TMPDIR:-/tmp}/ubnt-manager-test.XXXXXX")
 trap 'rm -rf "$test_root"' EXIT HUP INT TERM
 
 mkdir -p "$test_root/bin" "$test_root/config" "$test_root/profiles" "$test_root/state"
+export UBNT_UPTIME_FILE=/proc/uptime
+if [ ! -r "$UBNT_UPTIME_FILE" ]; then
+    export UBNT_UPTIME_FILE="$test_root/uptime"
+    printf '100000.0 0.0\n' > "$UBNT_UPTIME_FILE"
+fi
 for command_name in iwlist iwgetid mca-status ip ping softrestart cfgmtd; do
     ln -s "$script_dir/mock_command.sh" "$test_root/bin/$command_name"
 done
@@ -206,7 +211,8 @@ printf '%s\n' "$dashboard_output" | grep -q '^network|'
 rm -f "$test_root/state/paused"
 printf 'old-network\n' > "$test_root/associated"
 printf 'A Network With Spaces\n' | "$manager" manual-connect-stdin >/dev/null
-[ -f "$test_root/state/paused" ]
+[ ! -e "$test_root/state/paused" ]
+[ ! -e "$test_root/state/manual-hold" ]
 [ "$(sed -n '1p' "$test_root/associated")" = 'A Network With Spaces' ]
 
 rm -f "$test_root/state/paused"
@@ -215,7 +221,8 @@ printf '%s\n' \
     'wpa' \
     'D8:EC:5E:8D:6A:3A' \
     'new-test-password' | "$manager" provision-stdin >/dev/null
-[ -f "$test_root/state/paused" ]
+[ ! -e "$test_root/state/paused" ]
+[ ! -e "$test_root/state/manual-hold" ]
 [ -f "$test_root/profiles/dendelion" ]
 grep -q '^wpasupplicant.profile.1.network.1.ssid=dendelion$' "$test_root/profiles/dendelion"
 grep -q '^wpasupplicant.profile.1.network.1.bssid=D8:EC:5E:8D:6A:3A$' "$test_root/profiles/dendelion"
@@ -281,5 +288,79 @@ if printf 'reset\n' | "$manager" forget-stdin >/dev/null; then
     echo 'Internal reset profile should not be removable' >&2
     exit 1
 fi
+
+# Dashboard/CLI selections get bounded onboarding protection, never an
+# implicit maintenance pause. Use current kernel uptime so this runs in BusyBox.
+cp "$profile" "$test_root/system.cfg"
+printf 'A Network With Spaces\n' > "$test_root/associated"
+rm -f "$test_root/state/observed-system-config.md5" "$test_root/state/transition_started"
+export MOCK_PING_STATUS=1
+if printf 'A Network With Spaces\n' | "$manager" manual-connect-stdin >/dev/null; then
+    echo 'Captive portal unexpectedly reported Internet ready.' >&2
+    exit 1
+else
+    [ "$?" -eq 2 ]
+fi
+[ ! -e "$test_root/state/paused" ]
+[ -f "$test_root/state/manual-hold" ]
+hold_start=$(sed -n '1p' "$test_root/state/manual-hold")
+"$manager" dashboard-status | awk -F'|' '$1 == "state" {exit !(NF == 9 && $5 == "yes" && $9 > 0 && $9 <= 600)}'
+: > "$MOCK_IWLIST_COUNT_FILE"
+"$manager" auto >/dev/null
+"$manager" auto >/dev/null
+[ ! -s "$MOCK_IWLIST_COUNT_FILE" ]
+[ "$(sed -n '1p' "$test_root/state/manual-hold")" = "$hold_start" ]
+grep -q 'captive portal protection' "$test_root/wifi.log"
+
+# A lost radio link ends the portal hold at the two-minute connection deadline.
+now=$(awk '{split($1,a,"."); print a[1]}' "$UBNT_UPTIME_FILE")
+printf '%s\n%s\n' "$((now - 121))" 'A Network With Spaces' > "$test_root/state/manual-hold"
+export MOCK_CCQ=0
+"$manager" auto >/dev/null
+unset MOCK_CCQ
+[ ! -e "$test_root/state/manual-hold" ]
+[ -s "$MOCK_IWLIST_COUNT_FILE" ]
+grep -q 'manual target unavailable; automatic selection resumed' "$test_root/wifi.log"
+
+# Ten-minute portal expiry cannot be extended by polls or another grace window.
+now=$(awk '{split($1,a,"."); print a[1]}' "$UBNT_UPTIME_FILE")
+printf '%s\n%s\n' "$((now - 601))" 'A Network With Spaces' > "$test_root/state/manual-hold"
+export UBNT_FAILURES_BEFORE_SWITCH=1
+: > "$MOCK_IWLIST_COUNT_FILE"
+"$manager" auto >/dev/null
+unset UBNT_FAILURES_BEFORE_SWITCH
+[ ! -e "$test_root/state/manual-hold" ]
+[ -s "$MOCK_IWLIST_COUNT_FILE" ]
+grep -q 'manual connection protection expired; automatic selection resumed' "$test_root/wifi.log"
+
+# Login success releases protection immediately, preserving the healthy link.
+unset MOCK_PING_STATUS
+printf '%s\n%s\n' "$now" 'A Network With Spaces' > "$test_root/state/manual-hold"
+"$manager" auto >/dev/null
+[ ! -e "$test_root/state/manual-hold" ]
+[ "$(cat "$test_root/associated")" = 'A Network With Spaces' ]
+
+# Maintenance pause remains explicit and indefinite; resume clears both kinds.
+"$manager" pause >/dev/null
+printf '%s\n%s\n' "$((now - 601))" 'A Network With Spaces' > "$test_root/state/manual-hold"
+: > "$MOCK_IWLIST_COUNT_FILE"
+"$manager" auto >/dev/null
+[ -f "$test_root/state/paused" ]
+[ ! -s "$MOCK_IWLIST_COUNT_FILE" ]
+"$manager" resume >/dev/null
+[ ! -e "$test_root/state/paused" ]
+[ ! -e "$test_root/state/manual-hold" ]
+
+# A competing manual request cannot set a hold when it cannot acquire the lock.
+mkdir "$test_root/state/lock"
+printf '%s\n' "$$" > "$test_root/state/lock/pid"
+if printf 'A Network With Spaces\n' | "$manager" manual-connect-stdin >/dev/null; then
+    echo 'Locked manual operation unexpectedly succeeded.' >&2
+    exit 1
+fi
+[ ! -e "$test_root/state/manual-hold" ]
+[ ! -e "$test_root/state/paused" ]
+rm "$test_root/state/lock/pid"
+rmdir "$test_root/state/lock"
 
 printf 'wifi-manager: ok\n'

@@ -4,7 +4,12 @@ import { BottomSheet } from '../../components/BottomSheet';
 import type { PollingState } from '../../hooks/usePollingResource';
 import { formatRelativeTime } from '../../utils/format';
 import type { UbntControls } from './controls';
-import { ubntOperationLabel, ubntSecurityLabel, ubntRadioConnected } from './presentation';
+import {
+  ubntOperationLabel,
+  ubntSecurityLabel,
+  ubntRadioConnected,
+  ubntRecovering,
+} from './presentation';
 import type { UbntNetwork, UbntProfile, UbntWifiStatus } from './types';
 import { UbntProfileForm } from './UbntProfileForm';
 import { UbntProvisionForm } from './UbntProvisionForm';
@@ -146,8 +151,26 @@ export function UbntSheet({ open, onClose, resource, controls, dashboardStatus }
         </div>
       </div>
 
+      {(status?.state.manualHoldRemainingSeconds ?? 0) > 0 && (
+        <p role="status">
+          Captive-portal login protection: at most{' '}
+          {Math.ceil((status?.state.manualHoldRemainingSeconds ?? 0) / 60)} min remaining. Automatic
+          selection resumes when online, after a lost connection, or when this time expires.
+        </p>
+      )}
       {resource.error && <p className="error-message">{resource.error.message}</p>}
-      {status?.lastError && (
+      {status?.starlinkPending && (
+        <p role="status">
+          Starlink connection queued until the current antenna operation finishes.
+        </p>
+      )}
+      {ubntRecovering(status) && (
+        <p role="status">
+          Antenna reconnecting after the network change. This can take a minute; status will update
+          automatically.
+        </p>
+      )}
+      {status?.lastError && !ubntRecovering(status) && (
         <p className="error-message">
           Antenna status could not refresh: {status.lastError}. Showing the last observation.
         </p>
@@ -156,17 +179,19 @@ export function UbntSheet({ open, onClose, resource, controls, dashboardStatus }
       <div className="ubnt-sheet__stack" aria-busy={resource.refreshing || controlsDisabled}>
         <section className="ubnt-current panel-card">
           <span
-            className={`ubnt-current__dot ubnt-current__dot--${ubntRadioConnected(status) ? 'good' : status?.reachable === false || status?.state.ccqPercent === 0 ? 'bad' : 'neutral'}`}
+            className={`ubnt-current__dot ubnt-current__dot--${ubntRecovering(status) ? 'neutral' : ubntRadioConnected(status) ? 'good' : status?.reachable === false || status?.state.ccqPercent === 0 ? 'bad' : 'neutral'}`}
             aria-hidden="true"
           />
           <span>
             <strong>{associated || 'Not associated'}</strong>
             <small>
-              {!ubntRadioConnected(status)
-                ? 'Not currently associated · last configured network'
-                : status?.state.signalDbm === null || status?.state.signalDbm === undefined
-                  ? 'Radio measurements unavailable'
-                  : `${status.state.signalDbm} dBm · ${status.state.snrDb ?? '—'} dB SNR · ${status.state.ccqPercent ?? '—'}% CCQ`}
+              {ubntRecovering(status)
+                ? 'Reconnecting · showing the last observation'
+                : !ubntRadioConnected(status)
+                  ? 'Not currently associated · last configured network'
+                  : status?.state.signalDbm === null || status?.state.signalDbm === undefined
+                    ? 'Radio measurements unavailable'
+                    : `${status.state.signalDbm} dBm · ${status.state.snrDb ?? '—'} dB SNR · ${status.state.ccqPercent ?? '—'}% CCQ`}
             </small>
           </span>
         </section>

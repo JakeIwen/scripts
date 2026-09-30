@@ -39,9 +39,15 @@ WPA/WPA2 Personal and open networks; WEP is reported to the UI as unsupported.
 After association, provisioning deliberately runs the same `save-current` and
 `cfgmtd` persistence path as an explicit profile save.
 
-Manual dashboard connections pause automatic selection. The dashboard sheet
-shows this state and provides an explicit Resume automatic selection button,
-which keeps captive-portal onboarding from being abandoned before login.
+Manual connections never create an indefinite pause. They retain the existing
+120-second association/reload protection. An associated network without Internet
+gets up to ten minutes from the original request for captive-portal login
+(`UBNT_PORTAL_GRACE_SECONDS`); polling never renews that deadline. Protection
+ends early when Internet works, or when the link is lost after the initial
+two-minute window. The dashboard shows the remaining upper bound and allows
+Resume automatic selection to end it early. `pause` remains an explicit,
+indefinite maintenance override for deployment/canary work; ordinary connect,
+provision, and apply-profile actions do not create it.
 
 `forget-stdin` reads one saved profile name. It moves that profile into
 `.disabled` for recovery and persists the removal. Forgetting the active SSID
@@ -89,7 +95,7 @@ GUI-to-profile behavior without allowing automatic roaming operations to
 overwrite profiles. If a profile
 already exists, its previous version is copied into the profile directory's
 `.disabled` folder first. `UBNT_GUI_GRACE_SECONDS` can tune the bounded GUI
-window; an explicit dashboard pause continues to protect the transition until
+window; an explicit maintenance pause continues to protect the transition until
 automatic selection is resumed. `disable PROFILE` moves a profile into
 `.disabled` instead of deleting it.
 

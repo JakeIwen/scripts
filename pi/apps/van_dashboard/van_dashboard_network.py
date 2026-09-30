@@ -361,12 +361,15 @@ class UbntWifiController:
     TIMEOUTS = {
         "status": 20,
         "scan": 45,
-        "connect": 260,
-        "provision": 260,
-        "update-profile": 280,
+        "connect": 410,
+        "provision": 410,
+        "update-profile": 430,
         "resume": 20,
-        "forget": 280,
+        "forget": 410,
+        "starlink": 650,
     }
+    STARLINK_BOOT_SECONDS = 30
+    STARLINK_DISCOVERY_SECONDS = 180
 
     def __init__(
         self,
@@ -387,6 +390,8 @@ class UbntWifiController:
         self.last_refresh_attempt = None
         self.last_error = None
         self.refresh_thread = None
+        self.starlink_pending = None
+        self.starlink_thread = None
         self.wifi = {
             "version": 1,
             "reachable": None,
@@ -417,7 +422,31 @@ class UbntWifiController:
                 "operation": dict(self.operation),
                 "refreshing": self.refreshing,
                 "last_error": self.last_error,
+                "starlink_pending": self.starlink_pending is not None,
             }
+
+    def starlink_power_changed(self, state):
+        """Queue power-on intent behind any current mutation; power-off cancels it."""
+        with self.lock:
+            if self.starlink_pending is not None:
+                self.starlink_pending.set()
+                self.starlink_pending = None
+            if self.operation["status"] == "running" and self.operation["kind"] == "starlink":
+                self.abort_requested.set()
+            if state != "on":
+                return
+            pending = threading.Event()
+            self.starlink_pending = pending
+            self.starlink_thread = threading.Thread(
+                target=self._queue_starlink, args=(pending,), name="starlink-queue", daemon=True
+            )
+            self.starlink_thread.start()
+
+    def _queue_starlink(self, pending):
+        while not pending.is_set():
+            if self.start("starlink", power_request=pending):
+                return
+            pending.wait(0.5)
 
     def request_refresh(self, max_age=20):
         with self.lock:
@@ -452,18 +481,25 @@ class UbntWifiController:
         if (wifi.get("checked_at") or 0) >= (self.wifi.get("checked_at") or 0):
             self.wifi = wifi
 
-    def start(self, kind, payload=None):
+    def start(self, kind, payload=None, *, power_request=None):
         if kind not in self.TIMEOUTS:
             raise ValueError("unknown UBNT Wi-Fi operation")
         with self.lock:
+            if power_request is not None and (
+                power_request is not self.starlink_pending or power_request.is_set()
+            ):
+                return False
             if self.operation["status"] == "running":
                 return False
+            if power_request is not None:
+                self.starlink_pending = None
             self.operation = {
                 "status": "running",
                 "kind": kind,
                 "started_at": int(self.wall_clock()),
                 "completed_at": None,
                 "message": (
+                    "Waiting for Starlink to boot and broadcast denlink…" if kind == "starlink" else
                     f"{kind}: {(payload or {}).get('ssid') or (payload or {}).get('profile')}"
                     if (payload or {}).get('ssid') or (payload or {}).get('profile') else None
                 ),
@@ -478,6 +514,40 @@ class UbntWifiController:
             )
             self.thread.start()
             return True
+
+    def _connect_starlink(self, abort_requested):
+        if abort_requested.wait(self.STARLINK_BOOT_SECONDS):
+            raise RuntimeError("Starlink connection cancelled")
+        deadline = time.monotonic() + self.STARLINK_DISCOVERY_SECONDS
+        while not abort_requested.is_set():
+            visible = False
+            try:
+                wifi = self._tool_result("status")["wifi"]
+                if not any(p["name"] == "denlink" for p in wifi["profiles"]):
+                    raise ValueError("The saved denlink profile is missing")
+                if not wifi["state"]["selector_running"]:
+                    if (wifi["state"]["associated_ssid"] == "denlink"
+                            and (wifi["state"]["ccq_percent"] or 0) > 0):
+                        return {"wifi": wifi, "message": "UBNT is connected to denlink"}
+                    scan = self._tool_result("scan")["wifi"]
+                    with self.lock:
+                        self._accept_wifi_locked(scan)
+                    visible = any("denlink" in n["profiles"] for n in scan["networks"])
+            except RuntimeError:
+                # Boot/reload/selector-lock races are retried only while
+                # discovering. Never replay the actual connection mutation.
+                pass
+            if visible:
+                if abort_requested.is_set():
+                    break
+                with self.lock:
+                    self.operation["message"] = "Connecting to denlink; waiting for the antenna to reconnect…"
+                return self._tool_result("connect", {"profile": "denlink"}, abort_requested)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError("Starlink is powered on, but denlink did not become available within 3 minutes")
+            abort_requested.wait(min(10, remaining))
+        raise RuntimeError("Starlink connection cancelled")
 
     def abort(self):
         """Request a safe stop without killing an airOS wireless reload.
@@ -585,7 +655,8 @@ class UbntWifiController:
         wifi = None
         final_kind = kind
         try:
-            result = self._tool_result(kind, payload, abort_requested)
+            result = (self._connect_starlink(abort_requested) if kind == "starlink"
+                      else self._tool_result(kind, payload, abort_requested))
             wifi = result["wifi"]
             message = result.get("message")
             if abort_requested.is_set() or result.get("aborted") is True:
@@ -594,7 +665,7 @@ class UbntWifiController:
                     result = self._tool_result("resume")
                     wifi = result["wifi"]
                 message = "UBNT operation aborted; automatic selection resumed"
-            if kind in ("connect", "provision", "update-profile", "resume", "forget") and self.on_change:
+            if kind in ("connect", "provision", "update-profile", "resume", "forget", "starlink") and self.on_change:
                 self.on_change()
         except Exception as exc:
             if abort_requested.is_set():
@@ -616,6 +687,7 @@ class UbntWifiController:
         with self.lock:
             if wifi is not None:
                 self._accept_wifi_locked(wifi)
+                self.last_error = None
             self.operation = {
                 "status": "error" if error else "complete",
                 "kind": final_kind,

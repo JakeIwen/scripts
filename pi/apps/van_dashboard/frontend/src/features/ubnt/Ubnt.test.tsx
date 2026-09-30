@@ -209,3 +209,43 @@ describe('UBNT UI', () => {
     expect(actions.resumeAutomatic).toHaveBeenCalledOnce();
   });
 });
+
+describe('antenna reload recovery', () => {
+  it('shows reconnecting during a dropped SSH session, then exposes a real failure', () => {
+    const status = sampleUbntStatus();
+    status.lastError = 'UBNT status interrupted: Connection refused';
+    status.operation = { ...status.operation, status: 'running', kind: 'connect' };
+    const view = render(
+      <UbntSheet open onClose={() => {}} resource={resource(status)} controls={controls()} />,
+    );
+    expect(screen.getByText(/Antenna reconnecting after/)).toBeInTheDocument();
+    expect(screen.queryByText(/Antenna status could not refresh/)).not.toBeInTheDocument();
+    status.operation = { ...status.operation, status: 'error', error: 'Recovery timed out' };
+    view.rerender(
+      <UbntSheet open onClose={() => {}} resource={resource(status)} controls={controls()} />,
+    );
+    expect(screen.getByText(/Antenna status could not refresh/)).toBeInTheDocument();
+    expect(screen.getByText('Recovery timed out')).toBeInTheDocument();
+  });
+
+  it('keeps unrelated errors visible and displays queued Starlink intent', () => {
+    const status = sampleUbntStatus();
+    status.lastError = 'UBNT Wi-Fi tool returned invalid JSON';
+    status.starlinkPending = true;
+    status.operation = { ...status.operation, status: 'running', kind: 'connect' };
+    render(<UbntSheet open onClose={() => {}} resource={resource(status)} controls={controls()} />);
+    expect(screen.getByText(/Antenna status could not refresh/)).toBeInTheDocument();
+    expect(screen.getByText(/Starlink connection queued/)).toBeInTheDocument();
+  });
+});
+
+it('explains the bounded portal hold and allows early resume', () => {
+  const status = sampleUbntStatus();
+  status.state.automaticPaused = true;
+  status.state.manualHoldRemainingSeconds = 480;
+  render(<UbntSheet open onClose={() => {}} resource={resource(status)} controls={controls()} />);
+  expect(
+    screen.getByText(/Captive-portal login protection: at most 8 min remaining/),
+  ).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Resume automatic selection' })).toBeEnabled();
+});

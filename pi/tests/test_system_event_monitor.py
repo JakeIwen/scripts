@@ -362,6 +362,39 @@ class StoreAndDiagnosisTests(unittest.TestCase):
         count = self.store.connection.execute("SELECT COUNT(*) FROM events").fetchone()[0]
         self.assertEqual(count, 1)
 
+    def test_aggregate_report_matches_full_history_with_limited_timeline(self):
+        since = self.now - 3600
+        self.insert(since - 1, "usb_error", category="usb")
+        self.insert(since, "undervoltage_started")
+        self.insert(since + 10, "usb_error", category="usb")
+        self.insert(since + 20, "undervoltage_cleared")
+        self.insert(self.now - 50, "undervoltage_started")
+        self.insert(self.now - 40, "undervoltage_cleared")
+        self.insert(self.now - 20, "storage_io_error", category="storage", severity="critical")
+        self.insert(self.now - 10, "firmware_throttled_active")
+        self.insert(self.now - 5, "firmware_throttled_cleared")
+        for i in range(200):
+            self.insert(since + 100 + i, "usb_error", category="usb")
+        current = {"timestamp": self.now, "throttle": {"current": [], "occurred": []}}
+        self.store.set_meta("current", current)
+        rows = self.store.connection.execute(
+            "SELECT * FROM events WHERE timestamp >= ? ORDER BY timestamp ASC", (since,)
+        ).fetchall()
+        all_events = [monitor.event_public(row) for row in rows]
+        counts = monitor.collections.Counter(e["kind"] for e in all_events)
+        with mock.patch.object(monitor, "event_public", wraps=monitor.event_public) as public:
+            report = monitor.build_report(self.store, hours=1, limit=1, now=self.now)
+        self.assertEqual(public.call_count, 1)
+        self.assertEqual(report["diagnosis"], monitor.build_diagnosis(all_events, current))
+        self.assertEqual(report["summary"]["events"], len(all_events))
+        self.assertEqual(report["summary"]["by_kind"], dict(counts))
+        self.assertEqual(report["throttling"], monitor.build_throttling_report(current, counts, all_events))
+        plan = self.store.connection.execute(
+            "EXPLAIN QUERY PLAN SELECT kind,severity,category,COUNT(*),MAX(timestamp) "
+            "FROM events WHERE timestamp >= ? GROUP BY kind,severity,category", (since,)
+        ).fetchall()
+        self.assertTrue(any("COVERING INDEX events_report_idx" in row[3] for row in plan))
+
     def test_read_only_store_can_generate_report_without_writing(self):
         self.store.set_meta("current", {"timestamp": self.now, "throttle": {}})
         readonly = monitor.EventStore(self.database, clock=lambda: self.now, read_only=True)

@@ -102,9 +102,13 @@ in URLs, process arguments, output, or logs. Successful association explicitly
 runs the manager's `save-current`/`cfgmtd` path so the full airOS profile and its
 credential survive reboot.
 
-Manual selections pause the antenna's automatic selector until Resume automatic
-selection is pressed. This permits captive-portal login even though Internet
-reachability initially fails. Scans, switches, and provisioning are single-flight
+Manual selections protect connection attempts for two minutes and allow up to
+ten minutes from the request for captive-portal login while associated. This
+protection ends early once Internet works, or after a lost link beyond the
+initial two-minute window. The sheet shows its remaining upper bound; Resume
+automatic selection ends it early. Ordinary selections no longer create an
+indefinite pause; only the explicit maintenance `pause` command does.
+Scans, switches, and provisioning are single-flight
 background operations; their POST endpoints return immediately and the sheet
 polls authoritative status rather than changing the selected network
 optimistically.
@@ -250,3 +254,20 @@ collector adds no Python packages or router-side software.
 The existing `tuya_toggle.sh`, `tuya_status.sh`, and `ntfy_send.sh` scripts plus
 the new `tuya_light.sh` helper use the existing secret files for Home
 Assistant/ntfy integrations; the dashboard contains no credentials.
+
+### Starlink power-on and antenna reconnects
+
+Dashboard Starlink power-on queues a connection to the saved `denlink` profile
+behind any in-flight antenna operation. It allows 30 seconds for startup, then
+checks for the network for up to three minutes before issuing one connection
+request. Power-off cancels queued/startup work; a connection already applying
+finishes its safe boundary before automatic selection resumes.
+
+After an airOS connection change drops SSH, `ubnt_wifi.py` polls read-only status
+for up to two minutes instead of replaying the mutation. It verifies the requested
+SSID, positive CCQ, and an idle remote manager before completing; provisioning
+also requires the saved profile to appear. An SSH-recovered result confirms the
+radio link only; OpenWrt reports Internet availability separately. The UI shows
+reconnecting during temporary transport errors, retains the last observation,
+and exposes errors when recovery expires. Authentication failures before a
+mutation and explicit remote command failures still fail immediately.

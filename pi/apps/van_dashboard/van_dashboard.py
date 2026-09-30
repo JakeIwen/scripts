@@ -326,6 +326,7 @@ def api_starlink():
         return api_error(exc, 503)
     except RuntimeError as exc:
         return api_error(exc, 502)
+    ubnt_wifi.starlink_power_changed(status["state"])
     connectivity.request_refresh()
     try:
         storage_policy.reconcile()
@@ -337,7 +338,8 @@ def api_starlink():
     return jsonify(
         {
             "ok": True,
-            "message": f"Starlink power {status['state']}",
+            "message": ("Starlink powered on; UBNT will connect when denlink is ready"
+                        if status["state"] == "on" else "Starlink power off"),
             "starlink": status,
         }
     )

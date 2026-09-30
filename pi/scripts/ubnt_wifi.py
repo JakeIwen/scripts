@@ -34,6 +34,10 @@ class UbntWifiError(RuntimeError):
     pass
 
 
+class UbntTransportError(UbntWifiError):
+    """The remote operation may still be finishing after an airOS reload."""
+
+
 def _request_abort(_signum, _frame):
     """Defer cancellation until the remote manager reaches a safe boundary."""
     global ABORT_REQUESTED
@@ -77,15 +81,16 @@ def parse_snapshot(output, checked_at=None):
     observations = []
     for raw_line in output.splitlines():
         fields = raw_line.rstrip("\r").split("|")
-        if fields[0] == "state" and len(fields) in (6, 8):
+        if fields[0] == "state" and len(fields) in (6, 8, 9):
             ccq_raw = _int(fields[3], 0, 1000)
-            signal = _int(fields[6], -200, 100) if len(fields) == 8 else None
-            noise = _int(fields[7], -200, 100) if len(fields) == 8 else None
+            signal = _int(fields[6], -200, 100) if len(fields) >= 8 else None
+            noise = _int(fields[7], -200, 100) if len(fields) >= 8 else None
             state = {
                 "configured_ssid": _decode_hex(fields[1]),
                 "associated_ssid": _decode_hex(fields[2]),
                 "ccq_percent": round(ccq_raw / 10, 1) if ccq_raw is not None else None,
                 "automatic_paused": fields[4] == "yes",
+                "manual_hold_remaining_seconds": _int(fields[8], 0) if len(fields) == 9 else None,
                 "selector_running": fields[5] == "yes",
                 "signal_dbm": signal,
                 "noise_dbm": noise,
@@ -213,9 +218,13 @@ def _validate_text(value, label, maximum_bytes):
 
 
 class UbntWifiClient:
-    def __init__(self, command=run_command, wall_clock=time.time):
+    def __init__(self, command=run_command, wall_clock=time.time,
+                 clock=time.monotonic, sleep=time.sleep, recovery_seconds=120):
         self.command = command
         self.wall_clock = wall_clock
+        self.clock = clock
+        self.sleep = sleep
+        self.recovery_seconds = recovery_seconds
 
     @staticmethod
     def _ssh_args(remote_command):
@@ -249,10 +258,17 @@ class UbntWifiClient:
                 timeout=timeout,
                 input_text=input_text,
             )
-        except (OSError, subprocess.TimeoutExpired) as exc:
+        except subprocess.TimeoutExpired as exc:
+            raise UbntTransportError(f"UBNT {operation} timed out") from exc
+        except OSError as exc:
             raise UbntWifiError(f"UBNT {operation} timed out or could not start") from exc
         if result.returncode not in accepted:
             detail = (result.stderr or result.stdout or "command failed").strip()
+            if result.returncode == 255 and any(text in detail.lower() for text in (
+                "closed by remote host", "connection reset", "broken pipe",
+                "connection refused", "connection timed out", "connection to",
+            )):
+                raise UbntTransportError(f"UBNT {operation} interrupted: {detail[-300:]}")
             raise UbntWifiError(f"UBNT {operation} failed: {detail[-300:]}")
         return result, parse_snapshot(result.stdout, self.wall_clock()) if operation in ("status", "scan") else None
 
@@ -262,15 +278,50 @@ class UbntWifiClient:
     def scan(self):
         return self._remote("scan", timeout=35)[1]
 
+    def _change_and_verify(self, operation, protocol, timeout, verified):
+        # Never replay a mutation after losing SSH: it can still own the remote
+        # lock, reload the radio, or save credentials. Reconcile using reads.
+        result = None
+        try:
+            result, _ = self._remote(operation, timeout, input_text=protocol, accepted=(0, 2))
+        except UbntTransportError:
+            pass
+        deadline = self.clock() + self.recovery_seconds
+        while True:
+            try:
+                wifi = self.status()
+                if not wifi["state"]["selector_running"] and verified(wifi):
+                    return result, wifi
+            except UbntWifiError:
+                pass
+            remaining = deadline - self.clock()
+            if remaining <= 0:
+                raise UbntWifiError(
+                    f"UBNT {operation} could not be confirmed after waiting for the antenna "
+                    "to reconnect; refresh status before retrying"
+                )
+            self.sleep(min(5, remaining))
+
+    @staticmethod
+    def _associated(wifi, ssid):
+        state = wifi["state"]
+        return (state["configured_ssid"] == ssid and state["associated_ssid"] == ssid
+                and (state["ccq_percent"] or 0) > 0)
+
     def connect(self, profile):
         profile = _validate_text(profile, "profile", 128)
         status = self.status()
-        if profile not in {item["name"] for item in status["profiles"]}:
+        saved = next((item for item in status["profiles"] if item["name"] == profile), None)
+        if saved is None:
             raise UbntWifiError("selected UBNT profile is no longer available")
-        result, _ = self._remote(
-            "connect", timeout=240, input_text=f"{profile}\n", accepted=(0, 2)
+        result, refreshed = self._change_and_verify(
+            "connect", f"{profile}\n", 240,
+            lambda wifi: self._associated(wifi, saved["ssid"]),
         )
-        refreshed = self.status()
+        if result is None:
+            return {"outcome": "radio_connected", "message":
+                    f"UBNT connected to {profile}; antenna recovered, Internet status checked separately",
+                    "wifi": refreshed}
         outcome = "connected" if result.returncode == 0 else "associated_no_internet"
         return {
             "outcome": outcome,
@@ -307,10 +358,16 @@ class UbntWifiClient:
         ):
             raise UbntWifiError("network already has a saved UBNT profile")
         protocol = "\n".join((ssid, security, bssid.upper(), password)) + "\n"
-        result, _ = self._remote(
-            "provision", timeout=240, input_text=protocol, accepted=(0, 2)
+        result, refreshed = self._change_and_verify(
+            "provision", protocol, 240,
+            lambda wifi: self._associated(wifi, ssid) and any(
+                item["ssid"] == ssid and item["security"] == security for item in wifi["profiles"]
+            ),
         )
-        refreshed = self.status()
+        if result is None:
+            return {"outcome": "radio_connected", "message":
+                    f"Saved and connected UBNT to {ssid}; Internet status checked separately",
+                    "wifi": refreshed}
         outcome = "connected" if result.returncode == 0 else "associated_no_internet"
         return {
             "outcome": outcome,
@@ -375,13 +432,23 @@ class UbntWifiClient:
                 "yes" if apply_now else "no",
             )
         ) + "\n"
-        result, _ = self._remote(
-            "update-profile",
-            timeout=260 if apply_now else 35,
-            input_text=protocol,
-            accepted=(0, 2),
-        )
-        refreshed = self.status()
+        if apply_now:
+            expected = {"bssid": bssid.upper(), "output_power_dbm": output_power_dbm,
+                        "rate_module": rate_module, "rate_auto": rate_auto, "rate_mcs": rate_mcs}
+            result, refreshed = self._change_and_verify(
+                "update-profile", protocol, 260,
+                lambda wifi: self._associated(wifi, saved["ssid"]) and any(
+                    item["name"] == profile and all(item[key] == value for key, value in expected.items())
+                    for item in wifi["profiles"]
+                ),
+            )
+            if result is None:
+                return {"outcome": "radio_connected", "message":
+                        f"Updated and reconnected UBNT to {profile}; Internet status checked separately",
+                        "wifi": refreshed}
+        else:
+            result, _ = self._remote("update-profile", timeout=35, input_text=protocol, accepted=(0, 2))
+            refreshed = self.status()
         outcome = "connected" if result.returncode == 0 else "associated_no_internet"
         if apply_now:
             message = (
@@ -406,10 +473,10 @@ class UbntWifiClient:
             raise UbntWifiError("cannot forget an internal profile")
         if profile not in {item["name"] for item in self.status()["profiles"]}:
             raise UbntWifiError("selected UBNT profile is no longer available")
-        self._remote("forget", timeout=240, input_text=f"{profile}\n")
-        refreshed = self.status()
-        if profile in {item["name"] for item in refreshed["profiles"]}:
-            raise UbntWifiError("profile is still present after forget")
+        _, refreshed = self._change_and_verify(
+            "forget", f"{profile}\n", 240,
+            lambda wifi: profile not in {item["name"] for item in wifi["profiles"]},
+        )
         return {"message": f"Forgot {profile}", "wifi": refreshed}
 
 

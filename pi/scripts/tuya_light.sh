@@ -3,7 +3,7 @@ set -euo pipefail
 
 action=${1:-}
 entity=${2:-}
-ha_url=${TUYA_HA_URL:-http://vanpi.local:8123}
+ha_url=${TUYA_HA_URL:-http://vanpi.lan:8123}
 token_file=${TUYA_TOKEN_FILE:-/home/pi/secrets/localtuya_token}
 
 if [[ "$action" != "list" && "$action" != "status" && "$action" != "set" && \

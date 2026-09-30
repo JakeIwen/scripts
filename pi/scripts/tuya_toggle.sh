@@ -45,7 +45,7 @@ if ! /usr/bin/curl -fsS --max-time 15 -X POST \
   -H "Authorization: Bearer $token" \
   -H "Content-Type: application/json" \
   -d "{\"entity_id\": \"$type_name\"}" \
-  "http://vanpi.local:8123/api/services/$type/turn_$to_state" > /dev/null; then
+  "http://vanpi.lan:8123/api/services/$type/turn_$to_state" > /dev/null; then
   write_log "failed to turn $type_name $to_state"
   if return 2>/dev/null; then return 1; else exit 1; fi
 fi

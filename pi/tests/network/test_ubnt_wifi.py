@@ -42,6 +42,14 @@ class Result:
 
 
 class SnapshotParserTests(unittest.TestCase):
+    def test_bounded_hold_and_legacy_state_records(self):
+        self.assertIsNone(ubnt_wifi.parse_snapshot(SNAPSHOT)["state"]["manual_hold_remaining_seconds"])
+        bounded = SNAPSHOT.replace('|991|no|no|-56|-93', '|991|yes|no|-56|-93|480')
+        state = ubnt_wifi.parse_snapshot(bounded)["state"]
+        self.assertTrue(state["automatic_paused"])
+        self.assertEqual(state["manual_hold_remaining_seconds"], 480)
+        self.assertEqual(state["signal_dbm"], -56)
+
     def test_parses_known_networks_and_keeps_strongest_observation(self):
         data = ubnt_wifi.parse_snapshot(SNAPSHOT, checked_at=1234)
 
@@ -69,6 +77,59 @@ class SnapshotParserTests(unittest.TestCase):
 
 
 class ClientTests(unittest.TestCase):
+    def recovery_client(self, results, seconds=15):
+        calls = []
+        now = [0]
+        def command(args, timeout, input_text=None):
+            calls.append(args[-1])
+            result = results.pop(0) if len(results) > 1 else results[0]
+            if isinstance(result, Exception):
+                raise result
+            return result
+        def sleep(seconds):
+            now[0] += seconds
+        return ubnt_wifi.UbntWifiClient(command=command, clock=lambda: now[0],
+                                       sleep=sleep, recovery_seconds=seconds), calls
+
+    def test_disconnect_then_refusal_then_recovery_does_not_repeat_connect(self):
+        client, calls = self.recovery_client([
+            Result(stdout=SNAPSHOT), Result(255, stderr='Connection closed by remote host'),
+            Result(255, stderr='Connection refused'),
+            Result(stdout=SNAPSHOT.replace('|no|no|', '|yes|yes|')),
+            Result(stdout=SNAPSHOT),
+        ])
+        result = client.connect('denlink')
+        self.assertEqual(result['outcome'], 'radio_connected')
+        self.assertEqual(sum(c.endswith('manual-connect-stdin') for c in calls), 1)
+        self.assertEqual(len(calls), 5)
+
+    def test_wrong_network_or_zero_ccq_does_not_count_as_recovery(self):
+        for snapshot in (SNAPSHOT.replace('|991|', '|0|'),
+                         SNAPSHOT.replace('state|' + encoded('denlink'), 'state|' + encoded('Other'))):
+            with self.subTest(snapshot=snapshot):
+                client, calls = self.recovery_client([
+                    Result(stdout=SNAPSHOT), Result(255, stderr='Connection reset'),
+                    Result(stdout=snapshot),
+                ])
+                with self.assertRaisesRegex(ubnt_wifi.UbntWifiError, 'could not be confirmed'):
+                    client.connect('denlink')
+                self.assertEqual(sum(c.endswith('manual-connect-stdin') for c in calls), 1)
+
+    def test_real_command_or_authentication_errors_are_not_hidden(self):
+        for failure in (Result(1, stderr='invalid profile'), Result(255, stderr='Permission denied (publickey).')):
+            client, calls = self.recovery_client([Result(stdout=SNAPSHOT), failure])
+            with self.assertRaisesRegex(ubnt_wifi.UbntWifiError, 'failed'):
+                client.connect('denlink')
+            self.assertEqual(len(calls), 2)
+
+    def test_successful_change_waits_for_status_service_to_return(self):
+        client, calls = self.recovery_client([
+            Result(stdout=SNAPSHOT), Result(), Result(255, stderr='Connection refused'),
+            Result(stdout=SNAPSHOT),
+        ])
+        self.assertEqual(client.connect('denlink')['outcome'], 'connected')
+        self.assertEqual(len(calls), 4)
+
     def test_forget_uses_stdin_and_verifies_profile_removed(self):
         calls = []
         def command(args, timeout, input_text=None):
@@ -111,7 +172,10 @@ class ClientTests(unittest.TestCase):
             calls.append((args, timeout, input_text))
             if args[-1].endswith("provision-stdin"):
                 return Result(stdout="provisioned")
-            return Result(stdout=SNAPSHOT)
+            snapshot = SNAPSHOT
+            if len(calls) > 1:
+                snapshot = snapshot.replace(encoded('denlink'), encoded('New Camp'))
+            return Result(stdout=snapshot)
 
         result = ubnt_wifi.UbntWifiClient(command=command).provision(
             "New Camp", "wpa", "00:11:22:33:44:66", "secret-test-password"

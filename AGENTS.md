@@ -40,6 +40,20 @@ When connected to the van's local network, prefer `vanpi.lan` for SSH and other
 connections to the Raspberry Pi. The bare hostname `vanpi` resolves through
 Tailscale and should generally be used only as a fallback when `vanpi.lan` is
 unavailable, such as when the client is not connected to the local network.
+Use `vanpi.lan` in new connection defaults and command examples, including SSH,
+HTTP, and media URLs; do not introduce bare `vanpi` or `vanpi.local` as a primary
+connection target. Keep device identities, service names, and filesystem paths
+unchanged.
+
+## UBNT manual-selection protection
+
+Ordinary antenna connections must not create indefinite automatic-selection
+pauses. Keep the 120-second connection grace and bounded captive-portal hold
+(default ten minutes from the original request, ending early when online or
+the link is lost after the connection grace). The explicit manager `pause`
+command is reserved for maintenance/canary work and still requires `resume`.
+See `ubnt/README.md`; do not conflate that maintenance override with dashboard
+network selections when changing roaming behavior.
 
 ## Vanpi CAN/UDS workspace
 
@@ -119,6 +133,14 @@ weaken or bypass them.
 Keep bootable spare generations staggered so a bad current configuration does
 not immediately propagate to every recovery card. Revalidate the live schedule,
 capacity limits, labels, and deployed versions before changing clone behavior.
+
+## System monitor reports
+
+Health reports must preserve full-range event counts without loading every raw
+event into Python. Keep the covering report index and targeted power/USB queries;
+the dashboard shares bounded cached reads across clients. Schema/index updates
+belong to collector initialization, never read-only report requests. See
+`pi/docs/monitoring/SYSTEM_MONITOR.md` for details.
 
 ## macOS video thumbnails
 

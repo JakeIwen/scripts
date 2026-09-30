@@ -200,7 +200,7 @@ sync_comps() {
 
 sync_new_torrents(){
   locpath=/Users/jacobr/Desktop/vidtmp
-  pi_user='pi@vanpi.local'
+  pi_user='pi@vanpi.lan'
   rempath="$pi_user:/mnt/movingparts/torrent/New"
   rsync -ur "$rempath/**/*.mkv" "$locpath"
 }

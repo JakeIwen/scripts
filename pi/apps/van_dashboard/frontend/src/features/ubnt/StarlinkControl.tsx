@@ -32,7 +32,7 @@ function stateLabel(status: StarlinkStatus | null, running: boolean): string {
 
 export function starlinkConfirmation(status: StarlinkStatus): string {
   const next = status.state === 'on' ? 'off' : 'on';
-  return `Turn Starlink power ${next}?\n\nThis changes the van's Starlink power switch. Network routing will reconcile separately.`;
+  return `Turn Starlink power ${next}?\n\nThis changes the van's Starlink power switch. ${next === 'on' ? 'UBNT will connect to denlink once Starlink is ready.' : 'Any pending Starlink connection will be cancelled.'} Network routing will reconcile separately.`;
 }
 
 export function StarlinkControl({ resource, variant = 'sheet' }: StarlinkControlProps) {

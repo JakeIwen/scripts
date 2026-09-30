@@ -362,6 +362,8 @@ class EventStore:
             );
             CREATE INDEX IF NOT EXISTS events_timestamp_idx ON events(timestamp DESC);
             CREATE INDEX IF NOT EXISTS events_kind_timestamp_idx ON events(kind, timestamp DESC);
+            CREATE INDEX IF NOT EXISTS events_report_idx
+                ON events(timestamp, kind, severity, category);
             CREATE TABLE IF NOT EXISTS resource_rollups (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 period_start REAL NOT NULL,
@@ -2649,6 +2651,14 @@ def build_diagnosis(events, current):
         if nearby:
             correlated.append({"started_at": episode["started_at"], "usb_events": len(nearby)})
     uncorrelated = max(0, len(episodes) - len(correlated))
+    return diagnosis_from_evidence(
+        current, episodes, correlated, len(usb_failures), len(usb_overcurrents), len(storage_errors)
+    )
+
+
+def diagnosis_from_evidence(current, episodes, correlated, usb_failures, usb_overcurrents, storage_errors):
+    """One diagnosis policy shared by in-memory and indexed database evidence."""
+    uncorrelated = max(0, len(episodes) - len(correlated))
     throttle = (current or {}).get("throttle") or {}
     current_flags = set(throttle.get("current", ()))
     occurred_flags = set(throttle.get("occurred", ()))
@@ -2672,7 +2682,7 @@ def build_diagnosis(events, current):
             )
         if usb_overcurrents:
             findings.append(
-                f"The kernel also reported {len(usb_overcurrents)} USB over-current change event(s), which is direct evidence of a USB power-path disturbance."
+                f"The kernel also reported {usb_overcurrents} USB over-current change event(s), which is direct evidence of a USB power-path disturbance."
             )
         if uncorrelated:
             findings.append(
@@ -2707,7 +2717,7 @@ def build_diagnosis(events, current):
         level = "warning"
         headline = "USB faults are present without confirmed undervoltage"
         findings.append(
-            f"The kernel recorded {len(usb_failures)} USB reset, disconnect, or communication failure event(s)."
+            f"The kernel recorded {usb_failures} USB reset, disconnect, or communication failure event(s)."
         )
         findings.append(
             "This pattern points more directly at a hub, cable, port, enclosure, or device data path, though it cannot rule out a brief power disturbance missed before monitoring began."
@@ -2716,7 +2726,7 @@ def build_diagnosis(events, current):
         level = "warning"
         headline = "USB over-current signaling was recorded"
         findings.append(
-            f"The kernel reported {len(usb_overcurrents)} USB over-current change event(s), which keeps the hub, attached devices, and USB/Pi power path in scope."
+            f"The kernel reported {usb_overcurrents} USB over-current change event(s), which keeps the hub, attached devices, and USB/Pi power path in scope."
         )
     else:
         level = "good" if current else "unknown"
@@ -2727,7 +2737,7 @@ def build_diagnosis(events, current):
 
     if storage_errors:
         findings.append(
-            f"There are also {len(storage_errors)} storage I/O error event(s); verify filesystem and device health before trusting affected disks."
+            f"There are also {storage_errors} storage I/O error event(s); verify filesystem and device health before trusting affected disks."
         )
         level = "critical"
     if current_flags:
@@ -2745,12 +2755,57 @@ def build_diagnosis(events, current):
             ),
             "undervoltage_near_usb": len(correlated),
             "undervoltage_without_usb": uncorrelated,
-            "usb_failures": len(usb_failures),
-            "usb_overcurrent_events": len(usb_overcurrents),
-            "storage_errors": len(storage_errors),
+            "usb_failures": usb_failures,
+            "usb_overcurrent_events": usb_overcurrents,
+            "storage_errors": storage_errors,
             "episodes": episodes,
         },
     }
+
+
+def report_event_evidence(store, since):
+    """Count the full range using a covering index; fetch only power transitions.
+
+    Event rows contain large state snapshots. Reading all those table pages for
+    a USB storm used to dominate every dashboard refresh, even with LIMIT 100.
+    """
+    grouped = store.connection.execute(
+        """
+        SELECT kind, severity, category, COUNT(*) AS count, MAX(timestamp) AS last_seen
+        FROM events WHERE timestamp >= ? GROUP BY kind, severity, category
+        """, (since,),
+    ).fetchall()
+    counts, severities, categories = (collections.Counter() for _ in range(3))
+    latest = {}
+    usb_failures = 0
+    for row in grouped:
+        kind, severity, category, count, last_seen = row
+        counts[kind] += count
+        severities[severity] += count
+        categories[category] += count
+        latest[kind] = max(latest.get(kind, last_seen), last_seen)
+        if category == "usb" and kind in (
+            "usb_error", "usb_controller_error", "usb_reset", "usb_disconnected"
+        ):
+            usb_failures += count
+    power_events = store.connection.execute(
+        """
+        SELECT kind, timestamp, boot_id FROM events
+        WHERE kind IN ('undervoltage_started', 'undervoltage_cleared') AND timestamp >= ?
+        ORDER BY timestamp ASC
+        """, (since,),
+    ).fetchall()
+    episodes = power_episodes(power_events)
+    correlated = []
+    for episode in episodes:
+        nearby = store.connection.execute(
+            """SELECT COUNT(*) FROM events
+               WHERE timestamp >= ? AND timestamp <= ? AND category = 'usb'""",
+            (max(since, episode["started_at"] - 15), episode["started_at"] + 15),
+        ).fetchone()[0]
+        if nearby:
+            correlated.append({"started_at": episode["started_at"], "usb_events": nearby})
+    return counts, severities, categories, latest, episodes, correlated, usb_failures
 
 
 def build_report(store, hours=24, limit=100, now=None):
@@ -2760,16 +2815,9 @@ def build_report(store, hours=24, limit=100, now=None):
         "SELECT * FROM events WHERE timestamp >= ? ORDER BY timestamp DESC LIMIT ?",
         (since, max(1, min(int(limit), 500))),
     ).fetchall()
-    # Diagnosis and counts must use every event in range, independent of display limit.
-    all_event_rows = store.connection.execute(
-        """
-        SELECT id, timestamp, boot_id, category, kind, severity, source, summary, message
-        FROM events WHERE timestamp >= ? ORDER BY timestamp ASC
-        """,
-        (since,),
-    ).fetchall()
+    # Counts and diagnosis still cover every event, independent of display limit.
+    counts, severity, category, latest, episodes, correlated, usb_failures = report_event_evidence(store, since)
     events = [event_public(row) for row in event_rows]
-    all_events = [event_public(row, include_state=False) for row in all_event_rows]
     rollup_rows = store.connection.execute(
         "SELECT * FROM resource_rollups WHERE period_end >= ? ORDER BY period_end ASC",
         (since,),
@@ -2781,9 +2829,6 @@ def build_report(store, hours=24, limit=100, now=None):
         (row, decode_row_json(row, "metrics_json") or {}) for row in rollup_rows
     ]
     current = store.get_meta("current")
-    counts = collections.Counter(event["kind"] for event in all_events)
-    severity = collections.Counter(event["severity"] for event in all_events)
-    category = collections.Counter(event["category"] for event in all_events)
     peaks = {
         "cpu_percent": best_rollup_metric(decoded_rollups, "cpu"),
         "memory_percent": best_rollup_metric(decoded_rollups, "memory"),
@@ -2892,7 +2937,10 @@ def build_report(store, hours=24, limit=100, now=None):
                 }
             )
 
-    diagnosis = build_diagnosis(all_events, current)
+    diagnosis = diagnosis_from_evidence(
+        current, episodes, correlated, usb_failures,
+        counts.get("usb_overcurrent", 0), category.get("storage", 0),
+    )
     return {
         "ok": True,
         "version": REPORT_VERSION,
@@ -2905,14 +2953,17 @@ def build_report(store, hours=24, limit=100, now=None):
             "current": current,
         },
         "summary": {
-            "events": len(all_events),
+            "events": sum(counts.values()),
             "shown_events": len(events),
             "by_severity": dict(severity),
             "by_category": dict(category),
             "by_kind": dict(counts),
         },
         "peaks": peaks,
-        "throttling": build_throttling_report(current or {}, counts, all_events),
+        "throttling": build_throttling_report(
+            current or {}, counts,
+            [{"kind": kind, "timestamp": timestamp} for kind, timestamp in latest.items()],
+        ),
         "processes": build_process_report(decoded_rollups, current),
         "diagnosis": diagnosis,
         "events": events,

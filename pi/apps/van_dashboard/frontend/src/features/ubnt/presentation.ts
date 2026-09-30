@@ -18,6 +18,7 @@ export function ubntRadioConnected(status: UbntWifiStatus | null): boolean {
 }
 
 export function ubntTone(status: UbntWifiStatus | null, _error: Error | null): StatusTone {
+  if (ubntRecovering(status) || status?.operation.status === 'running') return 'neutral';
   if (!status) return 'neutral';
   if (status.reachable === false) return 'bad';
   if (status.reachable === true) return 'good';
@@ -25,6 +26,8 @@ export function ubntTone(status: UbntWifiStatus | null, _error: Error | null): S
 }
 
 export function ubntStatusLabel(status: UbntWifiStatus | null, _refreshing: boolean): string {
+  if (ubntRecovering(status)) return 'Reconnecting';
+  if (status?.operation.status === 'running') return 'Working';
   if (!status) return 'No data';
   if (status.reachable === false) return 'Unavailable';
   if (status.reachable === true) return 'Connected';
@@ -38,4 +41,15 @@ export function ubntOperationLabel(operation: UbntOperation): string {
   if (operation.status === 'running') return operation.message ?? `${kind} running`;
   if (operation.status === 'error') return `${kind} failed`;
   return operation.message ?? `${kind} complete`;
+}
+
+export function ubntRecovering(status: UbntWifiStatus | null): boolean {
+  return Boolean(
+    status?.operation.status === 'running' &&
+    ['connect', 'provision', 'update-profile', 'forget', 'starlink', 'scan', 'abort'].includes(
+      status.operation.kind ?? '',
+    ) &&
+    status.lastError &&
+    /connection|timed out|broken pipe|permission denied/i.test(status.lastError),
+  );
 }

@@ -23,7 +23,7 @@ fi
 if ! response=$(/usr/bin/curl -fsS --max-time 15 -X GET \
   -H "Authorization: Bearer $token" \
   -H "Content-Type: application/json" \
-  "http://vanpi.local:8123/api/states/$type_name"); then
+  "http://vanpi.lan:8123/api/states/$type_name"); then
   echo "failed to read $type_name" >&2
   exit 1
 fi

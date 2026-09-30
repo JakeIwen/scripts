@@ -89,7 +89,7 @@ def play_soundbyte(name, device_name='vonRear'):
     remove_from_group(device_name) # will be a problem if device.is_coordinator
     orig_vol = device.volume
     device.volume = 80
-    chime_uri = "http://vanpi.local:8000/" + name + ".mp3"
+    chime_uri = "http://vanpi.lan:8000/" + name + ".mp3"
     device.play_uri(chime_uri)
 
     sleep(5)

@@ -18,10 +18,12 @@ PING=${UBNT_PING:-/bin/ping}
 CFGMTD=${UBNT_CFGMTD:-/sbin/cfgmtd}
 HEXDUMP=${UBNT_HEXDUMP:-/usr/bin/hexdump}
 MD5SUM=${UBNT_MD5SUM:-/usr/bin/md5sum}
+UPTIME_FILE=${UBNT_UPTIME_FILE:-/proc/uptime}
 SSH_KEY_INSTALLER=${UBNT_SSH_KEY_INSTALLER:-/etc/persistent/scripts/ensure_ssh_keys.sh}
 
 LOCK_DIR="$STATE_DIR/lock"
 PAUSE_FILE="$STATE_DIR/paused"
+MANUAL_HOLD_FILE="$STATE_DIR/manual-hold"
 TRANSITION_FILE="$STATE_DIR/transition_started"
 OBSERVED_CONFIG_DIGEST_FILE="$STATE_DIR/observed-system-config.md5"
 GUI_TRANSITION_FILE="$STATE_DIR/gui-transition-started"
@@ -34,6 +36,7 @@ PREFER_DENLINK_FLAG="$CONFIG_DIR/prefer_denlink"
 PENDING_PROFILE=
 
 MANUAL_GRACE_SECONDS=${UBNT_MANUAL_GRACE_SECONDS:-120}
+PORTAL_GRACE_SECONDS=${UBNT_PORTAL_GRACE_SECONDS:-600}
 GUI_GRACE_SECONDS=${UBNT_GUI_GRACE_SECONDS:-600}
 STANDARD_SCAN_FREQUENCIES=${UBNT_STANDARD_SCAN_FREQUENCIES:-"2412, 2417, 2422, 2427, 2432, 2437, 2442, 2447, 2452, 2457, 2462"}
 AUTO_SCAN_INTERVAL=${UBNT_AUTO_SCAN_INTERVAL:-120}
@@ -52,7 +55,7 @@ mkdir -p "$STATE_DIR" "$(dirname "$LOG_FILE")"
 chmod 700 "$STATE_DIR" 2>/dev/null || true
 
 uptime_seconds() {
-    awk '{split($1, value, "."); print value[1]}' /proc/uptime 2>/dev/null
+    awk '{split($1, value, "."); print value[1]}' "$UPTIME_FILE" 2>/dev/null
 }
 
 log_message() {
@@ -320,13 +323,17 @@ emit_dashboard_snapshot() {
         awk -F= '$1 == "signal" {print $2; exit}' | tr -d '\r')
     dashboard_noise=$(printf '%s\n' "$dashboard_radio_status" | \
         awk -F= '$1 == "noise" {print $2; exit}' | tr -d '\r')
-    [ -f "$PAUSE_FILE" ] && dashboard_paused=yes || dashboard_paused=no
+    dashboard_hold_remaining=$(manual_hold_remaining)
+    dashboard_paused=no
+    if [ -f "$PAUSE_FILE" ] || [ "$dashboard_hold_remaining" -gt 0 ]; then
+        dashboard_paused=yes
+    fi
     [ -d "$LOCK_DIR" ] && dashboard_running=yes || dashboard_running=no
-    printf 'state|%s|%s|%s|%s|%s|%s|%s\n' \
+    printf 'state|%s|%s|%s|%s|%s|%s|%s|%s\n' \
         "$(hex_encode "$dashboard_configured")" \
         "$(hex_encode "$dashboard_associated")" \
         "$dashboard_ccq" "$dashboard_paused" "$dashboard_running" \
-        "$dashboard_signal" "$dashboard_noise"
+        "$dashboard_signal" "$dashboard_noise" "$dashboard_hold_remaining"
 
     for dashboard_profile_path in "$PROFILE_DIR"/*; do
         [ -f "$dashboard_profile_path" ] || continue
@@ -595,8 +602,11 @@ connect_profile() {
 run_requested_connect() {
     requested_name=$1
     requested_force=${2:-no}
+    profile_name_is_valid "$requested_name" && [ -f "$PROFILE_DIR/$requested_name" ] || return 1
+    start_manual_hold "$(effective_ssid "$PROFILE_DIR/$requested_name")" || return 1
     connect_profile "$requested_name" "$requested_force"
     requested_status=$?
+    [ "$requested_status" -ne 0 ] || rm -f "$MANUAL_HOLD_FILE"
     if [ "$requested_status" -eq 1 ] && \
         profile_name_is_valid "$requested_name" && [ -f "$PROFILE_DIR/$requested_name" ]; then
         recover_after_failed_manual_switch "$requested_name" || true
@@ -772,8 +782,7 @@ provision_profile() {
         log_message "no saved template for security=$new_security"
         return 1
     }
-    : > "$PAUSE_FILE"
-    log_message "automatic selection paused for new profile=$new_ssid"
+    start_manual_hold "$new_ssid" || return 1
     pending_name=.dashboard-new.$$
     PENDING_PROFILE="$PROFILE_DIR/$pending_name"
     write_provision_config "$provision_template" "$PENDING_PROFILE" \
@@ -786,6 +795,7 @@ provision_profile() {
         0|2)
             set_scan_list "$SYSTEM_CFG" enabled "$STANDARD_SCAN_FREQUENCIES" || return 1
             save_current_profile "$new_ssid" || return 1
+            [ "$provision_status" -ne 0 ] || rm -f "$MANUAL_HOLD_FILE"
             rm -f "$PENDING_PROFILE"
             PENDING_PROFILE=
             log_message "provisioned profile=$new_ssid security=$new_security"
@@ -955,11 +965,64 @@ update_profile_settings() {
     persist_profiles || return 1
     log_message "updated saved profile=$update_name lock_to_ap=${update_bssid:-any} txpower=$update_txpower rate_module=$update_rate_module rate_auto=$update_rate_auto rate_mcs=$update_rate_mcs"
     if [ "$update_apply" = yes ]; then
-        : > "$PAUSE_FILE"
-        log_message "automatic selection paused to apply updated profile=$update_name"
         run_requested_connect "$update_name" yes
         return $?
     fi
+}
+
+start_manual_hold() {
+    hold_started=$(uptime_seconds)
+    [ -n "$hold_started" ] && [ -n "$1" ] || return 1
+    printf '%s\n%s\n' "$hold_started" "$1" > "$MANUAL_HOLD_FILE.new.$$" || return 1
+    mv "$MANUAL_HOLD_FILE.new.$$" "$MANUAL_HOLD_FILE" || return 1
+    clear_failures
+    log_message "manual connection protection target=$1 portal_grace=${PORTAL_GRACE_SECONDS}s"
+}
+
+manual_hold_remaining() {
+    hold_start=$(sed -n '1p' "$MANUAL_HOLD_FILE" 2>/dev/null)
+    hold_target=$(sed -n '2p' "$MANUAL_HOLD_FILE" 2>/dev/null)
+    hold_now=$(uptime_seconds)
+    case $hold_start:$hold_now in
+        *[!0-9:]*|:*|*:) printf '0\n'; return ;;
+    esac
+    hold_age=$((hold_now - hold_start))
+    if [ "$hold_age" -ge 0 ] && [ "$hold_age" -lt "$PORTAL_GRACE_SECONDS" ] && \
+        [ -n "$hold_target" ] && [ "$hold_target" = "$(effective_ssid "$SYSTEM_CFG")" ]; then
+        printf '%s\n' $((PORTAL_GRACE_SECONDS - hold_age))
+    else
+        printf '0\n'
+    fi
+}
+
+manual_hold_active() {
+    [ -f "$MANUAL_HOLD_FILE" ] || return 1
+    hold_remaining=$(manual_hold_remaining)
+    if [ "$hold_remaining" -le 0 ]; then
+        rm -f "$MANUAL_HOLD_FILE"
+        log_message "manual connection protection expired; automatic selection resumed"
+        return 2
+    fi
+    hold_target=$(sed -n '2p' "$MANUAL_HOLD_FILE" 2>/dev/null)
+    if link_is_target "$hold_target"; then
+        if has_dhcp_and_route && internet_reachable; then
+            rm -f "$MANUAL_HOLD_FILE"
+            log_message "manual connection online; automatic selection resumed"
+            return 1
+        fi
+        log_message "captive portal protection target=$hold_target remaining=${hold_remaining}s"
+        return 0
+    fi
+    # The association/reload grace is shorter than the captive-portal grace.
+    # Losing an established network must not strand the selector for ten minutes.
+    hold_age=$((PORTAL_GRACE_SECONDS - hold_remaining))
+    if [ "$hold_age" -lt "$MANUAL_GRACE_SECONDS" ]; then
+        log_message "manual connection protection target=$hold_target age=${hold_age}s"
+        return 0
+    fi
+    rm -f "$MANUAL_HOLD_FILE" "$TRANSITION_FILE"
+    log_message "manual target unavailable; automatic selection resumed"
+    return 2
 }
 
 manual_transition_active() {
@@ -1079,6 +1142,7 @@ handle_gui_transition() {
 }
 
 recover_after_failed_manual_switch() {
+    rm -f "$MANUAL_HOLD_FILE"
     failed_profile=$1
     failed_path="$PROFILE_DIR/$failed_profile"
     failed_ssid=$(effective_ssid "$failed_path")
@@ -1241,7 +1305,10 @@ auto_select() {
         log_message "automatic selection paused"
         return 0
     }
-    if [ "$gui_grace_expired" != yes ]; then
+    manual_hold_active
+    manual_hold_status=$?
+    [ "$manual_hold_status" -ne 0 ] || return 0
+    if [ "$gui_grace_expired" != yes ] && [ "$manual_hold_status" -ne 2 ]; then
         manual_transition_active && return 0
     fi
     auto_ssid=$(associated_ssid)
@@ -1353,7 +1420,7 @@ forget_profile() {
         write_provision_config "$SYSTEM_CFG" "$APPLY_CFG" \
             "vanpi-disconnected-$$" none '02:00:00:00:00:00' '' || return 1
         apply_config || return 1
-        rm -f "$PAUSE_FILE" "$TRANSITION_FILE" "$STATE_DIR/last_auto_scan"
+        rm -f "$PAUSE_FILE" "$MANUAL_HOLD_FILE" "$TRANSITION_FILE" "$STATE_DIR/last_auto_scan"
         clear_gui_transition
         clear_failures
     fi
@@ -1376,8 +1443,9 @@ show_status() {
     status_ccq=$(current_ccq)
     [ -f "$PAUSE_FILE" ] && status_paused=yes || status_paused=no
     [ -d "$LOCK_DIR" ] && status_running=yes || status_running=no
-    printf 'configured_ssid=%s\nassociated_ssid=%s\nccq=%s\npaused=%s\nselector_running=%s\n' \
-        "$status_configured" "$status_associated" "$status_ccq" "$status_paused" "$status_running"
+    printf 'configured_ssid=%s\nassociated_ssid=%s\nccq=%s\npaused=%s\nselector_running=%s\nmanual_hold_remaining_seconds=%s\n' \
+        "$status_configured" "$status_associated" "$status_ccq" "$status_paused" "$status_running" \
+        "$(manual_hold_remaining)"
 }
 
 usage() {
@@ -1404,7 +1472,7 @@ case $command_name in
         log_message "automatic selection paused"
         ;;
     resume)
-        rm -f "$PAUSE_FILE"
+        rm -f "$PAUSE_FILE" "$MANUAL_HOLD_FILE"
         log_message "automatic selection resumed"
         ;;
     save-current)
@@ -1437,8 +1505,6 @@ case $command_name in
             log_message "unknown manual profile"
             exit 1
         }
-        : > "$PAUSE_FILE"
-        log_message "automatic selection paused for manual profile=$manual_profile"
         acquire_lock || exit 1
         run_requested_connect "$manual_profile"
         exit $?

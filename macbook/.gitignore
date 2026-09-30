@@ -1,0 +1,2 @@
+# Private agent notes, diagnostics, and recovery artifacts stay out of Git.
+.agent/

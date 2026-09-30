@@ -27,6 +27,7 @@ test('failed query never renders exception or stderr text in the button', async 
 });
 
 function fixture(failure) {
+    // Legacy installed menu for migration/rollback coverage, not a connection default.
     const original = {BTTUUID:'D9B0ED12-C4BE-4E74-B0DA-0CC3BE092289', BTTTriggerType:767,
         BTTMenuConfig:{BTTMenuVerticalSpacing:5,BTTMenuHorizontalSpacing:5,BTTMenuDisableDrag:0,
             BTTMenuSizingBehavior:3,BTTMenuModifierKeys:1835008},
