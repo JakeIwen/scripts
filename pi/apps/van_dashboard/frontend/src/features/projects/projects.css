@@ -46,6 +46,7 @@
 }
 
 .project-directory__row {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 96px;
   align-items: center;
@@ -53,6 +54,34 @@
   min-height: 36px;
   font-size: 14px;
   white-space: nowrap;
+  border-radius: 6px;
+}
+
+.project-directory__row:hover,
+.project-directory__row:focus-within {
+  background: var(--panel-raised);
+}
+
+.project-directory__primary {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* Expand the primary anchor over the row, keeping explicit links above it. */
+.project-directory__primary::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+.project-directory__primary:focus-visible {
+  outline: none;
+}
+
+.project-directory__primary:focus-visible::after {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 
 .project-directory__links {
@@ -62,6 +91,8 @@
 }
 
 .project-directory__links a {
+  position: relative;
+  z-index: 1;
   padding: 8px 0;
   color: var(--accent);
   font-size: 12px;

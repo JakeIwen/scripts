@@ -1,20 +1,32 @@
 /** Human-maintained directory of web projects. Keep addresses here, not in JSX. */
+export interface ProjectLink {
+  kind: 'local' | 'lan' | 'ts' | 'web';
+  label: string;
+  url: string;
+}
+
+const LINK_PRIORITY = { local: 0, lan: 1, ts: 2, web: 3 };
+
+export function preferredProjectLink(links: ProjectLink[]): ProjectLink | undefined {
+  return [...links].sort((a, b) => LINK_PRIORITY[a.kind] - LINK_PRIORITY[b.kind])[0];
+}
+
 export interface HostedProject {
   id: string;
   name: string;
   host: 'This Mac' | 'Vanpi';
   description: string;
   note?: string;
-  links: { label: string; url: string }[];
+  links: ProjectLink[];
 }
 
 const VANPI_LAN = 'vanpi.lan';
 const VANPI_TAILSCALE = '100.82.91.76';
 
-function piLinks(port: number, path = '/') {
+function piLinks(port: number, path = '/'): ProjectLink[] {
   return [
-    { label: 'LAN', url: `http://${VANPI_LAN}:${port}${path}` },
-    { label: 'Tailscale', url: `http://${VANPI_TAILSCALE}:${port}${path}` },
+    { kind: 'lan', label: 'LAN', url: `http://${VANPI_LAN}:${port}${path}` },
+    { kind: 'ts', label: 'Tailscale', url: `http://${VANPI_TAILSCALE}:${port}${path}` },
   ];
 }
 
@@ -24,14 +36,14 @@ export const HOSTED_PROJECTS: HostedProject[] = [
     name: 'ProMaster Service Library',
     host: 'This Mac',
     description: 'Search the 2022 ProMaster service documentation and diagrams.',
-    links: [{ label: 'This Mac', url: 'http://127.0.0.1:8766/' }],
+    links: [{ kind: 'local', label: 'This Mac', url: 'http://127.0.0.1:8766/' }],
   },
   {
     id: 'fieldwork',
     name: 'Fieldwork',
     host: 'This Mac',
     description: 'Job-search workspace.',
-    links: [{ label: 'This Mac', url: 'http://127.0.0.1:4317/' }],
+    links: [{ kind: 'local', label: 'This Mac', url: 'http://127.0.0.1:4317/' }],
   },
   {
     id: 'telemetry',
