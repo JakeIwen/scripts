@@ -9,6 +9,16 @@ from pi.apps.van_dashboard.van_dashboard_backups import BackupManager, BackupSta
 
 
 class ICloudDashboardTests(unittest.TestCase):
+    def test_time_machine_cloud_is_a_separate_fixed_helper(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            helper = Path(tmp) / 'time_machine_icloud_status.py'; helper.touch()
+            command = mock.Mock(return_value=subprocess.CompletedProcess([], 0, '{"available":true,"running":true}'))
+            manager = BackupManager(icloud_tool='', time_machine_icloud_tool=str(helper), command=command)
+            self.assertTrue(manager._icloud_status(time_machine=True)['running'])
+            self.assertEqual(command.call_args.args[0][1:], ['-n','/usr/bin/python3',str(helper)])
+            with mock.patch.object(manager, 'status', return_value={'time_machine_icloud': {'running':True}}):
+                with self.assertRaisesRegex(BackupStatusError, 'Time Machine'):
+                    manager.start_borg_backup()
     def test_fixed_read_only_helper_and_failure_isolated(self):
         with tempfile.TemporaryDirectory() as tmp:
             helper = Path(tmp) / 'icloud_status.py'

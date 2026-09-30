@@ -230,6 +230,7 @@ export function decodeBackupStatusResponse(value: unknown): BackupStatus {
     hotswaps: arrayValue(backups.hotswaps, 'backups.hotswaps').map(decodeHotspare),
     timeMachine: decodeTimeMachine(backups.time_machine),
     icloud: decodeICloud(backups.icloud),
+    timeMachineIcloud: decodeICloud(backups.time_machine_icloud),
     operation: decodeOperation(backups.operation),
     stop: decodeStopOperation(backups.stop),
   };

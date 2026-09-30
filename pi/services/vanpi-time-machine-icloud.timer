@@ -1,0 +1,11 @@
+[Unit]
+Description=Retry weekly Time Machine offsite copy without interrupting active Mac backups
+
+[Timer]
+OnCalendar=*-*-* *:37:00
+RandomizedDelaySec=5m
+Persistent=true
+Unit=vanpi-time-machine-icloud.service
+
+[Install]
+WantedBy=timers.target

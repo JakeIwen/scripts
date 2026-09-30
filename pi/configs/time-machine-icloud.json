@@ -1,0 +1,10 @@
+{
+  "remote": "icloud:VanRecovery/m4mac/time-machine",
+  "interval_days": 7,
+  "keep_generations": 2,
+  "minimum_free_gib": 100,
+  "max_cloud_store_gib": 900,
+  "max_source_age_hours": 72,
+  "capture_wait_seconds": 1800,
+  "capture_max_seconds": 21600
+}

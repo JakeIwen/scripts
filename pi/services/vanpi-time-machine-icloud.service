@@ -1,0 +1,17 @@
+[Unit]
+Description=Weekly encrypted Time Machine replication to iCloud, excluding Starlink
+After=network-online.target smbd.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+ExecStart=/bin/bash /home/pi/scripts/backup/time_machine_icloud.sh --run
+ExecStopPost=/usr/bin/python3 /home/pi/scripts/backup/time_machine_icloud.py --release-capture
+Nice=15
+IOSchedulingClass=idle
+KillMode=control-group
+TimeoutStartSec=infinity
+TimeoutStopSec=45s
+

@@ -87,6 +87,7 @@ export interface BackupStatus {
   hotswaps: HotspareStatus[];
   timeMachine: TimeMachineStatus;
   icloud: ICloudStatus | null;
+  timeMachineIcloud: ICloudStatus | null;
   operation: BackupOperation;
   stop: BackupStopOperation;
 }

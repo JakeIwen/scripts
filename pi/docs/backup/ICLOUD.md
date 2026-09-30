@@ -4,7 +4,9 @@ This job uploads **encrypted copies of the existing Borg repository** directly
 from vanpi. Each generation contains its own root/boot backup history, the
 Home Assistant SQLite snapshot, and the OpenWrt/UBNT exports already captured
 by the local daily job. It excludes external media, EXFAT snapshots, and Mac
-Time Machine history. It is not a bootable raw card image.
+Time Machine history. It is not a bootable raw card image. The separate
+[Time Machine replication job](TIME_MACHINE_ICLOUD.md) handles the Mac's
+encrypted sparsebundle using the same account and uplink safeguards.
 
 The repository was approximately 13.7 GB when configured. Eight weekly copies
 would occupy roughly 110 GB at that size; both figures grow with the repository.

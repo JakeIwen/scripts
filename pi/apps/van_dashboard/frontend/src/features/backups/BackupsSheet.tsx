@@ -47,7 +47,8 @@ function EvidenceCard({
     status.borg.running ||
     status.exfatSnapshot.running ||
     status.openwrt.running ||
-    status.icloud?.running;
+    status.icloud?.running ||
+    status.timeMachineIcloud?.running;
   const actionDisabled = evidence.running
     ? controls.blocked || stopRunning
     : controls.blocked || operationRunning || stopRunning || anyBackupRunning;
@@ -163,6 +164,7 @@ function HotspareCard({
           status.exfatSnapshot.running ||
           status.openwrt.running ||
           status.icloud?.running ||
+          status.timeMachineIcloud?.running ||
           !card.attached ||
           card.mounted
         }
@@ -300,6 +302,9 @@ export function BackupsSheet({ open, onClose, resource, controls }: BackupsSheet
       </section>
 
       {status?.icloud && <ICloudBackupCard status={status.icloud} />}
+      {status?.timeMachineIcloud && (
+        <ICloudBackupCard status={status.timeMachineIcloud} kind="time-machine" />
+      )}
 
       <section className="backups-sheet__section" aria-labelledby="backup-hotspares-title">
         <div className="backups-sheet__heading">

@@ -24,6 +24,8 @@ export const ICLOUD_PHASES = [
 ] as const;
 export type ICloudPhase = (typeof ICLOUD_PHASES)[number];
 export interface ICloudProgress {
+  captureBytes?: number | null;
+  captureTotalBytes?: number | null;
   uploadEstimatedBytes: number | null;
   uploadTotalBytes: number | null;
   commandBytes: number | null;
@@ -82,6 +84,9 @@ function phase(value: unknown): ICloudPhase {
 function progress(value: unknown): ICloudProgress {
   const row = objectValue(value, 'iCloud progress');
   return {
+    captureBytes: row.capture_bytes === undefined ? null : nullableNumeric(row.capture_bytes),
+    captureTotalBytes:
+      row.capture_total_bytes === undefined ? null : nullableNumeric(row.capture_total_bytes),
     uploadEstimatedBytes: nullableNumeric(row.upload_estimated_bytes),
     uploadTotalBytes: nullableNumeric(row.upload_total_bytes),
     commandBytes: nullableNumeric(row.command_bytes),
@@ -159,13 +164,23 @@ export function iCloudPhaseLabel(value: ICloudPhase): string {
 
 export function iCloudProgress(status: AvailableICloudStatus) {
   const p = status.progress;
+  const capturing = (status.running ? status.phase : status.lastWorkPhase) === 'preparing';
   const verification = ['verifying', 'publishing', 'retention', 'complete'].includes(
     status.running ? status.phase : status.lastWorkPhase,
   );
-  const done = verification ? p.verifiedBytes : p.uploadEstimatedBytes;
-  const total = verification ? p.verificationTotalBytes : p.uploadTotalBytes;
+  const done = capturing
+    ? (p.captureBytes ?? null)
+    : verification
+      ? p.verifiedBytes
+      : p.uploadEstimatedBytes;
+  const total = capturing
+    ? (p.captureTotalBytes ?? null)
+    : verification
+      ? p.verificationTotalBytes
+      : p.uploadTotalBytes;
   return {
     verification,
+    capturing,
     done,
     total,
     percent:

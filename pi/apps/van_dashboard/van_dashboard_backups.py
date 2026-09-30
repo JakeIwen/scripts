@@ -131,6 +131,7 @@ class BackupManager:
         wall_clock=time.time,
         process_root="/proc",
         icloud_tool="/home/pi/scripts/backup/icloud_status.py",
+        time_machine_icloud_tool="/home/pi/scripts/backup/time_machine_icloud_status.py",
     ):
         self.config = config
         self.stamp_dir = stamp_dir
@@ -150,6 +151,7 @@ class BackupManager:
         self.wall_clock = wall_clock
         self.process_root = process_root
         self.icloud_tool = icloud_tool
+        self.time_machine_icloud_tool = time_machine_icloud_tool
         self.lock = threading.Lock()
         self.thread = None
         self.stop_thread = None
@@ -542,11 +544,12 @@ class BackupManager:
                 result["error"] = f"could not read Time Machine progress: {exc}"
         return result
 
-    def _icloud_status(self):
-        if not self.icloud_tool or not os.path.isfile(self.icloud_tool):
+    def _icloud_status(self, time_machine=False):
+        tool = self.time_machine_icloud_tool if time_machine else self.icloud_tool
+        if not tool or not os.path.isfile(tool):
             return None
         try:
-            result = self.command([SUDO, "-n", "/usr/bin/python3", self.icloud_tool], timeout=8)
+            result = self.command([SUDO, "-n", "/usr/bin/python3", tool], timeout=8)
             if result.returncode:
                 raise ValueError("status helper failed")
             value = json.loads(result.stdout)
@@ -632,6 +635,7 @@ class BackupManager:
         }
         time_machine = self._time_machine(now)
         icloud = self._icloud_status()
+        time_machine_icloud = self._icloud_status(time_machine=True)
         with self.lock:
             operation = copy.deepcopy(self.operation)
             stop_operation = copy.deepcopy(self.stop_operation)
@@ -646,6 +650,7 @@ class BackupManager:
             or openwrt["stale"]
             or any(card["stale"] for card in hotswaps)
             or bool(icloud and icloud.get("attention", True))
+            or bool(time_machine_icloud and time_machine_icloud.get("attention", True))
         )
         if not time_machine["available"] or time_machine["last_backup_at"] is None:
             attention = True
@@ -657,6 +662,7 @@ class BackupManager:
             or openwrt["running"]
             or time_machine["running"]
             or bool(icloud and icloud.get("running"))
+            or bool(time_machine_icloud and time_machine_icloud.get("running"))
         ) else (
             "attention" if attention else "good"
         )
@@ -676,6 +682,7 @@ class BackupManager:
             "hotswaps": hotswaps,
             "time_machine": time_machine,
             "icloud": icloud,
+            "time_machine_icloud": time_machine_icloud,
             "operation": operation,
             "stop": stop_operation,
         }
@@ -686,6 +693,8 @@ class BackupManager:
         if target not in allowed:
             raise ValueError("unknown hotspare target")
         current = self.status()
+        if current.get("time_machine_icloud") and current["time_machine_icloud"].get("running"):
+            raise BackupStatusError("the Time Machine iCloud copy is using the shared backup lock")
         if current.get("icloud") and current["icloud"].get("running"):
             raise BackupStatusError("the iCloud backup is using the shared backup lock")
         if current["borg"]["running"] or current["exfat_snapshot"]["running"]:
@@ -718,6 +727,8 @@ class BackupManager:
 
     def _start_manual_backup(self, kind, tool, stamp_name):
         current = self.status()
+        if current.get("time_machine_icloud") and current["time_machine_icloud"].get("running"):
+            raise BackupStatusError("the Time Machine iCloud copy is using the shared backup lock")
         if current.get("icloud") and current["icloud"].get("running"):
             raise BackupStatusError("the iCloud backup is using the shared backup lock")
         if current["borg"]["running"] or current["exfat_snapshot"]["running"]:

@@ -1,0 +1,53 @@
+TIME MACHINE OFFSITE RECOVERY — VANPI ICLOUD V1
+
+This store contains the encrypted native Time Machine sparsebundle, represented
+by immutable SHA-256-named objects plus generation manifests. Shared objects
+avoid re-uploading unchanged 64 MiB bands. It is NOT a directly mountable bundle
+until reassembled. Keep your Time Machine encryption password somewhere that
+survives loss of the van, Mac, phone and Pi. It is not stored by this uploader.
+
+1. Obtain rclone on a surviving/replacement computer, configure its iclouddrive
+   remote privately, and download VanRecovery/m4mac/time-machine to a local disk.
+   Example (replace /Volumes/Recovery with a real disk you have checked):
+
+   rclone copy icloud:VanRecovery/m4mac/time-machine /Volumes/Recovery/tm-cloud
+
+   rclone skips completed files if the download is interrupted. Do not use sync
+   or delete anything from iCloud. The store can contain two recovery points and
+   partial uploads; leave room for the downloaded objects AND assembled bundle.
+
+2. Select a directory under generations/ that contains BOTH manifest.json and
+   _COMPLETE.json. The marker must have owner=vanpi-time-machine-icloud-v1 and
+   verification=sha256-download-compared. Ignore unmarked/partial generations.
+   Newest generation name is generally the newest source capture, not upload time.
+
+3. Run the supplied OFFLINE assembler (Python 3.9+), replacing the generation:
+
+   python3 /Volumes/Recovery/tm-cloud/time_machine_store.py --store /Volumes/Recovery/tm-cloud --generation tm-YYYYMMDDTHHMMSSZ-XXXXXXXX --destination /Volumes/Recovery/m4mac0.sparsebundle
+
+   Destination must NOT exist. The tool verifies the manifest completion marker
+   and every SHA-256 object, copies (never hard-links) the writable image files,
+   and publishes the finished bundle only after all checks pass. It preserves
+   any partial local restore for inspection. No Apple password is needed here.
+
+4. On a Mac, inspect the restored encrypted image read-only:
+
+   hdiutil attach -readonly /Volumes/Recovery/m4mac0.sparsebundle
+
+   Enter the Time Machine encryption password at the private prompt, never in
+   a command argument. Use Disk Utility First Aid / diskutil verifyVolume for
+   the attached APFS backup volume and restore a test file. hdiutil verify alone
+   is not a filesystem/restore test for a writable sparsebundle.
+
+5. Use macOS Migration Assistant with the recovered Time Machine backup to
+   restore onto the replacement Mac. A real Mac attach/filesystem/restore test
+   is distinct from the Pi's completed byte-for-byte download verification.
+
+Safety: upload and checkpoint verification can resume. The completion marker
+is written and read back LAST. Retention keeps two verified generations; old
+objects are retired only after a new recovery point succeeds. A generation
+references objects outside its folder: do not download only generations/.
+
+The Pi still keeps the ordinary Time Machine sparsebundle and preserved old
+archive independently. This offsite store does not contain Pi Borg recovery
+copies; those are under VanRecovery/vanpi/weekly.

@@ -59,6 +59,8 @@ function backupPresentation(status: BackupStatus) {
     summary = 'Time Machine backup in progress';
   } else if (status.icloud?.available && status.icloud.running) {
     summary = `Pi → iCloud: ${status.icloud.message}`;
+  } else if (status.timeMachineIcloud?.available && status.timeMachineIcloud.running) {
+    summary = `Mac → iCloud: ${status.timeMachineIcloud.message}`;
   }
 
   const cloud = status.icloud;
@@ -71,9 +73,20 @@ function backupPresentation(status: BackupStatus) {
         : `Verified ${backupAge(cloud.lastSuccessAt)}`
       : `${iCloudPhaseLabel(cloud.phase)}${cloudPercent === null ? '' : ` · ${cloudPercent.toFixed(1)}%`}`;
 
+  const tmCloud = status.timeMachineIcloud;
+  const tmPercent = tmCloud?.available ? iCloudProgress(tmCloud).percent : null;
+  const timeMachineIcloud = !tmCloud?.available
+    ? 'Status unavailable'
+    : tmCloud.phase === 'complete' || tmCloud.phase === 'not due'
+      ? tmCloud.lastSuccessAt === null
+        ? 'Not yet verified'
+        : `Verified ${backupAge(tmCloud.lastSuccessAt)}`
+      : `${iCloudPhaseLabel(tmCloud.phase)}${tmPercent === null ? '' : ` · ${tmPercent.toFixed(1)}%`}`;
+
   return {
     summary,
     icloud,
+    timeMachineIcloud,
     borg: borgAge ?? 'No successful archive',
     exfat: exfatAge ? `Snapshot ${exfatAge}` : 'No snapshot',
     openwrt: openwrtAge ? `Snapshot ${openwrtAge}` : 'No verified snapshot',
@@ -117,6 +130,12 @@ export function BackupsTile({ resource, onOpen }: BackupsTileProps) {
             : 'Reading backup history…'}
       </span>
       <span className="backups-tile__status-lines">
+        {status?.timeMachineIcloud && (
+          <span className="backups-tile__status-line">
+            <span>Mac · iCloud</span>
+            <span>{presentation?.timeMachineIcloud}</span>
+          </span>
+        )}
         {status?.icloud && (
           <span className="backups-tile__status-line">
             <span>Pi · iCloud</span>

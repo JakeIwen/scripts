@@ -40,6 +40,23 @@ function cloud(): AvailableICloudStatus {
 
 afterEach(cleanup);
 describe('iCloud dashboard', () => {
+  it('tracks the Mac frozen capture separately from Pi upload progress', () => {
+    const status = cloud();
+    Object.assign(status, {
+      running: true,
+      phase: 'preparing',
+      message: 'Capturing a frozen encrypted Time Machine image.',
+    });
+    Object.assign(status.progress, { captureBytes: 250, captureTotalBytes: 1000 });
+    render(<ICloudBackupCard status={status} kind="time-machine" />);
+    expect(screen.getByRole('heading', { name: 'Mac Time Machine · iCloud' })).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Time Machine frozen copy' })).toHaveAttribute(
+      'aria-valuenow',
+      '25',
+    );
+    expect(screen.getByText(/normal Time Machine backups resume/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Upload percentage is size-based/)).not.toBeInTheDocument();
+  });
   it('shows paused saved progress without claiming a verified recovery point', () => {
     render(<ICloudBackupCard status={cloud()} />);
     expect(screen.getByText('Paused')).toBeInTheDocument();
@@ -49,7 +66,9 @@ describe('iCloud dashboard', () => {
       '75',
     );
     expect(screen.getByText(/Last saved progress/)).toBeInTheDocument();
-    expect(screen.getByText(/Mac Time Machine is not copied/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Mac Time Machine replication is tracked separately/),
+    ).toBeInTheDocument();
   });
 
   it('distinguishes verified files from the current unverified stream', () => {

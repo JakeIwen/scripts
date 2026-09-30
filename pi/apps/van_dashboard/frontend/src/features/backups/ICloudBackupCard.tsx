@@ -6,11 +6,19 @@ function date(value: number | null): string {
   return value === null ? 'Not scheduled' : new Date(value * 1000).toLocaleString();
 }
 
-export function ICloudBackupCard({ status }: { status: ICloudStatus }) {
+export function ICloudBackupCard({
+  status,
+  kind = 'pi',
+}: {
+  status: ICloudStatus;
+  kind?: 'pi' | 'time-machine';
+}) {
+  const title = kind === 'time-machine' ? 'Mac Time Machine · iCloud' : 'Pi offsite · iCloud';
+  const titleId = `backup-icloud-title-${kind}`;
   if (!status.available)
     return (
-      <section className="backups-sheet__section" aria-label="Pi offsite · iCloud">
-        <h3>Pi offsite · iCloud</h3>
+      <section className="backups-sheet__section" aria-label={title}>
+        <h3>{title}</h3>
         <p className="error-message">
           Local iCloud status is unavailable. Other backups are still shown.
         </p>
@@ -21,13 +29,15 @@ export function ICloudBackupCard({ status }: { status: ICloudStatus }) {
     status.running ||
     (status.generation !== null && status.phase !== 'not due' && status.phase !== 'complete');
   return (
-    <section className="backups-sheet__section backup-icloud" aria-labelledby="backup-icloud-title">
+    <section className="backups-sheet__section backup-icloud" aria-labelledby={titleId}>
       <div className="backups-sheet__heading">
         <div>
-          <h3 id="backup-icloud-title">Pi offsite · iCloud</h3>
+          <h3 id={titleId}>{title}</h3>
           <p>
-            Encrypted Borg recovery copy · every {status.intervalDays} days · keep{' '}
-            {status.keepGenerations} verified copies.
+            {kind === 'time-machine'
+              ? 'Encrypted Time Machine image'
+              : 'Encrypted Borg recovery copy'}{' '}
+            · every {status.intervalDays} days · keep {status.keepGenerations} verified copies.
           </p>
         </div>
         <span
@@ -53,7 +63,11 @@ export function ICloudBackupCard({ status }: { status: ICloudStatus }) {
       {showProgress && (
         <div className="backup-icloud__progress">
           <strong>
-            {p.verification ? 'Download verification' : 'Upload estimate'}
+            {p.capturing
+              ? 'Local frozen copy'
+              : p.verification
+                ? 'Download verification'
+                : 'Upload estimate'}
             {p.percent === null ? '' : ` · ${p.percent.toFixed(1)}%`}
           </strong>
           {p.percent !== null ? (
@@ -62,7 +76,11 @@ export function ICloudBackupCard({ status }: { status: ICloudStatus }) {
                 className="backup-progress"
                 role="progressbar"
                 aria-label={
-                  p.verification ? 'iCloud download verification' : 'iCloud upload estimate'
+                  p.capturing
+                    ? 'Time Machine frozen copy'
+                    : p.verification
+                      ? 'iCloud download verification'
+                      : 'iCloud upload estimate'
                 }
                 aria-valuemin={0}
                 aria-valuemax={100}
@@ -72,9 +90,11 @@ export function ICloudBackupCard({ status }: { status: ICloudStatus }) {
               </div>
               <small>
                 {formatBytes(p.done)} of {formatBytes(p.total)}
-                {p.verification
-                  ? ` · ${status.progress.verifiedFiles ?? 0}/${status.progress.verificationTotalFiles ?? '—'} files verified`
-                  : ' · includes files saved by earlier attempts'}
+                {p.capturing
+                  ? ' · local capture; no cloud recovery point yet'
+                  : p.verification
+                    ? ` · ${status.progress.verifiedFiles ?? 0}/${status.progress.verificationTotalFiles ?? '—'} files verified`
+                    : ' · includes files saved by earlier attempts'}
               </small>
               {p.verification && status.running && (status.progress.currentFileBytes ?? 0) > 0 && (
                 <small>
@@ -84,14 +104,18 @@ export function ICloudBackupCard({ status }: { status: ICloudStatus }) {
               )}
             </>
           ) : (
-            <small>Progress will update when the worker reaches the transfer phase.</small>
+            <small>
+              {p.capturing
+                ? 'Waiting for a clean image detach or the first capture counters.'
+                : 'Progress will update when the worker reaches the transfer phase.'}
+            </small>
           )}
           <small>
             {status.running ? 'Worker update' : 'Last saved progress'}:{' '}
             {status.updatedAt === null ? 'not recorded yet' : formatRelativeTime(status.updatedAt)}
             {status.progressStale ? ' · waiting for fresh counters' : ''}
           </small>
-          {!p.verification && (
+          {!p.verification && !p.capturing && (
             <small>
               Upload percentage is size-based, not verification. Every file must pass a downloaded
               SHA-256 check before this is a verified recovery copy.
@@ -116,8 +140,10 @@ export function ICloudBackupCard({ status }: { status: ICloudStatus }) {
         )}
       </dl>
       <p className="backup-icloud__note">
-        Starlink routes are excluded. Local backups take priority. This is Pi recovery only; Mac
-        Time Machine is not copied to iCloud.
+        Starlink routes are excluded. Local backups take priority.{' '}
+        {kind === 'time-machine'
+          ? 'Normal Time Machine backups resume after local capture; the upload uses only the frozen copy. Unchanged bands are shared between recovery points.'
+          : 'This job is Pi recovery only; Mac Time Machine replication is tracked separately.'}
       </p>
       <details className="backup-icloud__history">
         <summary>Attempt history ({status.attempts.length})</summary>

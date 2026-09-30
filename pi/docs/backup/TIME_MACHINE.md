@@ -64,10 +64,12 @@ creation procedure rather than the unsuccessful pre-created-image procedure.
 
 ## Offsite replication
 
-No offsite copy is configured by this change. Replicate only a closed image or
-a consistent storage snapshot and retain a previous complete remote generation
-through interrupted updates. Smaller bands reduce whole-file transfer
-amplification; actual iCloud or VPN transfer savings must be measured.
+The separate [Time Machine iCloud replication job](TIME_MACHINE_ICLOUD.md)
+captures a cleanly detached image into immutable local objects, then uploads
+only changed objects and verifies them. It keeps two completed recovery points
+through interrupted updates and uses the same Starlink guard as Pi offsite
+backups. Initial installation/running is not evidence of a completed offsite
+recovery point: check its completion marker and dashboard verification status.
 
 Verify the filesystem and test restoration after downloading a remote copy.
 `hdiutil verify` alone does not validate a writable sparsebundle: its documented

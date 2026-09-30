@@ -52,7 +52,7 @@ def number(value):
 
 
 def generation(value):
-    return value if isinstance(value, str) and re.fullmatch(r'vanpi-\d{8}T\d{6}Z-[0-9a-f]{8}', value) else None
+    return value if isinstance(value, str) and re.fullmatch(r'(?:vanpi|tm)-\d{8}T\d{6}Z-[0-9a-f]{8}', value) else None
 
 
 def phase(value):
@@ -62,6 +62,14 @@ def phase(value):
 def reason(state):
     """Translate known conditions without exposing paths, SSIDs or server bodies."""
     value = str(state.get('last_error') or '').casefold()
+    if state.get('kind') == 'time-machine' and state.get('phase') == 'preparing':
+        return ('Waiting for the Mac to cleanly detach its idle Time Machine image.'
+                if state.get('progress', {}).get('capture_waiting') else
+                'Capturing a frozen encrypted Time Machine image; normal backups resume afterward.')
+    if 'coordinator unavailable' in value:
+        return 'Waiting for the Mac capture helper; install it or wake the Mac. Normal local backups remain enabled.'
+    if 'mac clean detach' in value or 'image handles remain' in value:
+        return 'Waiting for a clean Mac image detach; check the capture coordinator.'
     if state.get('phase') == 'authentication_required' or 'login' in value or 'authentication' in value:
         return 'iCloud sign-in needs attention.'
     if 'local-backup window' in value:
