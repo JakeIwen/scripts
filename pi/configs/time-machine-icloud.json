@@ -6,5 +6,6 @@
   "max_cloud_store_gib": 900,
   "max_source_age_hours": 72,
   "capture_wait_seconds": 1800,
+  "smb_handle_drain_seconds": 90,
   "capture_max_seconds": 21600
 }

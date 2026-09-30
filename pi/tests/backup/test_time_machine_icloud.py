@@ -197,11 +197,28 @@ class CaptureGateTests(unittest.TestCase):
 
     def test_never_closes_share_with_open_image_handles(self):
         if not Path('/proc/self/stat').exists(): self.skipTest('Linux process evidence')
+        self.cfg['smb_handle_drain_seconds'] = 0
         with self.gate_context(), mock.patch.object(job.time, 'sleep', side_effect=self.ack_on_sleep), mock.patch.object(job, 'smb_state', return_value=(3, 1)), mock.patch.object(cloud, 'capture') as command:
             with self.assertRaises(cloud.Deferred):
                 with job.quiesced(self.cfg, self.state): self.fail('unsafe capture started')
             command.assert_not_called()
         self.assertFalse(self.drain.exists())
+
+    def test_deferred_smb_closes_are_allowed_to_drain_without_forcing(self):
+        self.drain.write_text('our gate')
+        with mock.patch.object(job, 'smb_state', side_effect=[(5, 1), (2, 1), (0, 1)]), mock.patch.object(job.time, 'sleep') as sleep, mock.patch.object(cloud, 'capture') as command:
+            job.wait_image_handles(self.cfg, self.state, 'our gate')
+            self.assertEqual(sleep.call_count, 2)
+            command.assert_not_called()
+        self.assertTrue(self.drain.exists())
+
+    def test_handle_drain_fails_closed_if_probe_fails_or_gate_disappears(self):
+        self.drain.write_text('our gate')
+        with mock.patch.object(job, 'smb_state', side_effect=RuntimeError('probe failed')):
+            with self.assertRaises(RuntimeError): job.wait_image_handles(self.cfg, self.state, 'our gate')
+        self.drain.unlink()
+        with mock.patch.object(job, 'smb_state', return_value=(1, 1)):
+            with self.assertRaises(cloud.Deferred): job.wait_image_handles(self.cfg, self.state, 'our gate')
 
     def test_timeout_releases_gate_without_smb_disconnect(self):
         if not Path('/proc/self/stat').exists(): self.skipTest('Linux process evidence')

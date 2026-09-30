@@ -35,11 +35,13 @@ SERVICE = 'vanpi-time-machine-icloud.service'
 def config():
     cfg = cloud.load_config()
     cfg.update(store.read_json(CONFIG))
+    cfg.setdefault('smb_handle_drain_seconds', 90)
     if cfg['remote'] != 'icloud:VanRecovery/m4mac/time-machine':
         raise ValueError('unexpected Time Machine cloud prefix')
     for key, low, high in (('interval_days', 1, 31), ('keep_generations', 2, 8),
                           ('minimum_free_gib', 20, 500), ('max_cloud_store_gib', 100, 1500),
                           ('max_source_age_hours', 1, 168), ('capture_wait_seconds', 120, 7200),
+                          ('smb_handle_drain_seconds', 1, 600),
                           ('capture_max_seconds', 600, 43200)):
         if type(cfg.get(key)) is not int or not low <= cfg[key] <= high:
             raise ValueError('invalid Time Machine setting: ' + key)
@@ -116,6 +118,25 @@ def smb_state():
     return len(handles), len(trees)
 
 
+def wait_image_handles(cfg, state, marker):
+    """A clean Mac detach can precede the SMB client's deferred CLOSEs.
+
+    Wait boundedly for ZERO image handles; never force-close them or interpret
+    a failed Samba probe as an empty result.
+    """
+    deadline = time.monotonic() + cfg.get('smb_handle_drain_seconds', 90)
+    while smb_state()[0]:
+        cloud.check_work_allowed(cfg)
+        cloud.exact_mount(MOUNT, 'mbp2tbkup')
+        if DRAIN.is_symlink() or not DRAIN.is_file() or DRAIN.read_text() != marker:
+            raise cloud.Deferred('Time Machine capture lost exclusive source access')
+        if time.monotonic() >= deadline:
+            raise cloud.Deferred('Mac acknowledgement received but image handles remain open')
+        cloud.record_progress(state, 'preparing', capture_waiting=False, capture_draining=True)
+        time.sleep(2)
+    cloud.record_progress(state, 'preparing', capture_waiting=False, capture_draining=False)
+
+
 @contextmanager
 def quiesced(cfg, state):
     release_capture()  # Recover only this job's orphaned marker, never a live one.
@@ -137,7 +158,8 @@ def quiesced(cfg, state):
         (STATE / 'capture.json').unlink()
         raise cloud.Deferred('Time Machine share is already draining')
     try:
-        cloud.record_progress(state, 'preparing', capture_waiting=True)
+        cloud.record_progress(state, 'preparing', capture_waiting=True, capture_draining=False,
+                              capture_bytes=0, capture_total_bytes=None)
         print('Waiting for Mac to cleanly detach its idle Time Machine image.', flush=True)
         while True:
             cloud.check_work_allowed(cfg)
@@ -148,8 +170,7 @@ def quiesced(cfg, state):
                 raise cloud.Deferred('waiting for Mac clean detach; coordinator may need installation')
             cloud.record_progress(state, 'preparing', capture_waiting=True)
             time.sleep(5)
-        if smb_state()[0]:
-            raise cloud.Deferred('Mac acknowledgement received but image handles remain open')
+        wait_image_handles(cfg, state, marker)
         # The image has been cleanly detached. Closing only its now-idle share
         # prevents an old tree connection bypassing the already-active preexec gate.
         cloud.capture(['/usr/bin/smbcontrol', 'smbd', 'close-share', 'mbp2tbkup'])

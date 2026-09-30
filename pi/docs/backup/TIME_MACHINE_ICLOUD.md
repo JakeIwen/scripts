@@ -19,7 +19,11 @@ roughly twice that amount; a completed transfer is not yet a Mac restore test.
    matching encrypted image through `hdiutil info`, and detaches it WITHOUT
    force. Busy/active/unknown images are left alone. It acknowledges the exact
    request nonce only after confirming the image is no longer attached.
-3. The Pi confirms there are no image handles, then closes only the now-idle
+3. After clean-detach acknowledgement, the Pi allows up to 90 seconds for
+   deferred SMB file CLOSEs (`smb_handle_drain_seconds`, configurable). It still
+   requires **zero image handles** and fails closed on probe/gate errors; it
+   never forces live image handles closed. The dashboard shows this drain phase
+   separately from waiting for the Mac. It then closes only the now-idle
    `mbp2tbkup` tree connections. It continuously checks the drain gate, mount,
    Samba handles, ignition and local-backup priority during capture.
 4. Files are copied and hashed into root-private immutable objects under
