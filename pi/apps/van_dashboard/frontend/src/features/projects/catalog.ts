@@ -3,6 +3,7 @@ export interface ProjectLink {
   kind: 'local' | 'lan' | 'ts' | 'web';
   label: string;
   url: string;
+  note?: string;
 }
 
 const LINK_PRIORITY = { local: 0, lan: 1, ts: 2, web: 3 };
@@ -31,6 +32,21 @@ function piLinks(port: number, path = '/'): ProjectLink[] {
 }
 
 export const HOSTED_PROJECTS: HostedProject[] = [
+  {
+    id: 'lionfeather-dev',
+    name: 'LionFeather Dev Page',
+    host: 'This Mac',
+    description: 'Local LionFeather development site.',
+    links: [
+      { kind: 'local', label: 'Local', url: 'http://127.0.0.1:5174/' },
+      {
+        kind: 'web',
+        label: 'Web*',
+        url: 'https://lionfeather.dev/',
+        note: 'Not hosting content yet.',
+      },
+    ],
+  },
   {
     id: 'promaster-library',
     name: 'ProMaster Service Library',

@@ -35,8 +35,10 @@ export function ProjectDirectory({ open, onClose }: { open: boolean; onClose: ()
                     target="_blank"
                     rel="noopener noreferrer"
                     key={link.label}
-                    title={link.url}
-                    aria-label={`${project.name} · ${link.label} · ${link.url}`}
+                    title={[link.url, link.note].filter(Boolean).join(' · ')}
+                    aria-label={[project.name, link.label, link.url, link.note]
+                      .filter(Boolean)
+                      .join(' · ')}
                   >
                     {link.label === 'Tailscale' ? 'TS' : link.label}
                   </a>
@@ -47,7 +49,7 @@ export function ProjectDirectory({ open, onClose }: { open: boolean; onClose: ()
         })}
       </ul>
       <p className="project-directory__legend">
-        LAN: van network · TS: Tailscale · This Mac: local apps
+        LAN: van network · TS: Tailscale · Local / This Mac: local apps · * Not live yet
       </p>
     </BottomSheet>
   );
