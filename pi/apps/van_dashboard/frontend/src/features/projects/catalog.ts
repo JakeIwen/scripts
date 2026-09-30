@@ -2,7 +2,6 @@
 export interface HostedProject {
   id: string;
   name: string;
-  icon: string;
   host: 'This Mac' | 'Vanpi';
   description: string;
   note?: string;
@@ -23,7 +22,6 @@ export const HOSTED_PROJECTS: HostedProject[] = [
   {
     id: 'promaster-library',
     name: 'ProMaster Service Library',
-    icon: '📚',
     host: 'This Mac',
     description: 'Search the 2022 ProMaster service documentation and diagrams.',
     links: [{ label: 'This Mac', url: 'http://127.0.0.1:8766/' }],
@@ -31,7 +29,6 @@ export const HOSTED_PROJECTS: HostedProject[] = [
   {
     id: 'fieldwork',
     name: 'Fieldwork',
-    icon: '💼',
     host: 'This Mac',
     description: 'Job-search workspace.',
     links: [{ label: 'This Mac', url: 'http://127.0.0.1:4317/' }],
@@ -39,7 +36,6 @@ export const HOSTED_PROJECTS: HostedProject[] = [
   {
     id: 'telemetry',
     name: 'Vehicle Telemetry',
-    icon: '📊',
     host: 'Vanpi',
     description: 'Vehicle readings, drive data, and diagnostics.',
     links: piLinks(8765),
@@ -47,7 +43,6 @@ export const HOSTED_PROJECTS: HostedProject[] = [
   {
     id: 'network-history',
     name: 'Network History',
-    icon: '🌐',
     host: 'Vanpi',
     description: 'Network flight recorder: connectivity history, incidents, and evidence.',
     links: piLinks(8788, '/#network-history?hours=6'),
@@ -55,7 +50,6 @@ export const HOSTED_PROJECTS: HostedProject[] = [
   {
     id: 'audiobooks',
     name: 'Audiobooks',
-    icon: '📖',
     host: 'Vanpi',
     description: 'Browse the audiobook library and play through Sonos.',
     links: piLinks(8787),
@@ -63,7 +57,6 @@ export const HOSTED_PROJECTS: HostedProject[] = [
   {
     id: 'movies-tv',
     name: 'Movies & TV',
-    icon: '🎬',
     host: 'Vanpi',
     description: 'Browse, play, and resume movies and shows.',
     links: piLinks(8789),
@@ -71,7 +64,6 @@ export const HOSTED_PROJECTS: HostedProject[] = [
   {
     id: 'home-assistant',
     name: 'Home Assistant',
-    icon: '🏠',
     host: 'Vanpi',
     description: 'Smart-home devices, automations, and settings.',
     links: piLinks(8123),
@@ -79,7 +71,6 @@ export const HOSTED_PROJECTS: HostedProject[] = [
   {
     id: 'soundbytes',
     name: 'Sound Library',
-    icon: '🔊',
     host: 'Vanpi',
     description: 'Browse the sound files hosted on the Pi.',
     links: piLinks(8000),
