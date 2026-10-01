@@ -2,10 +2,10 @@
 
 [Operations and semantics](NETWORK_FLIGHT_RECORDER.md) · [Pi documentation index](../../README.md)
 
-Current storage deployment: `network-storage-20260930T093830Z-fba885dc`, using
-verified flash with bounded RAM fallback. See the final section for migration
-integrity, current browser checks and storage-specific rollback. The earlier
-sections retain the original recorder verification history.
+Current storage deployment: `network-storage-20261001T102241Z-0dc55a92`, using
+verified flash with bounded RAM fallback. The final section records the October
+1 permission/replay repair, recovery integrity and current browser checks. The
+earlier sections retain the original installation and migration history.
 
 Verification date: 2026-09-30 UTC. Release
 `network-20260930T022426Z-10d451d2` was deployed through the checked targeted
@@ -439,7 +439,11 @@ four platform-specific skips**, including **60 recorder cases**. The earlier
 28-case isolated Pi storage run remains applicable; no UI code changed for this
 fix, so the previously verified flash browser flows remain valid.
 
-Exact update rollback from the repository root, preserving flash storage:
+The following commands describe the September 30 release chain. Later
+recorder-only updates must be rolled back first; use the current chain in
+[operations](NETWORK_FLIGHT_RECORDER.md#targeted-installation-update-and-rollback).
+
+Historical update rollback, preserving flash storage:
 
 ```bash
 python3 pi/deploy_network_storage.py rollback --release network-storage-20260930T093830Z-fba885dc
@@ -456,3 +460,82 @@ Both steps require verified flash and consolidate pending RAM history. The
 second step restores the preceding SD-backed service using current consolidated
 history, while retaining the flash copy. The original recorder rollback commands
 above remain guarded until the storage migration rollback completes.
+
+## October 1 RAM warning: permissions, replay and recovery
+
+Current release: **`network-storage-20261001T102241Z-0dc55a92`**. At the final
+10:24–10:25 UTC checks, the recorder selected verified flash, reported no
+storage error or pending replay, and received fresh router evidence. The
+recorder, OpenWrt and historical-import coverage entries were current. This is
+observed live state, separate from the isolated failure fixtures below.
+
+The warning was real. The flash volume was mounted read/write with 39 GiB free,
+but rotated RAM spool files were `root:root 0640`; the collector runs as `pi`
+with supplementary `adm` and received `PermissionError` opening them. The old
+storage path swallowed that error and retried in RAM. A separate root receiver
+and unprivileged reader reproduced the failure with the Pi's rsyslog 8.2302,
+global file mode `0640` and umask `0022`. The earlier same-user fixture did not
+test this ownership boundary.
+
+The spool now inherits `adm` through a `02750 root:adm` directory. Installation
+repairs only the eight active/rotated files through pinned, validated file
+descriptors. Actual tmpfiles `z` testing rejected the ownership hierarchy, so
+no such rules were deployed. The real repair preserved all eight contents and
+left `.4` sentinel files untouched; repeated isolated rotations subsequently
+remained readable. Status/coverage now expose safe error categories and
+operations, with transition-only journal messages and no exception payloads.
+
+Before repair, a SQLite backup and all surviving raw generations were preserved
+on verified flash under `ram-recovery-20261001T0945Z/`. Recovery exposed a second
+defect: incoming raw backlog could evict RAM observations between replay batches.
+Replay now drains existing observations before further source import or RAM
+pruning; raw reception and mirroring continue. Failure resumes RAM collection.
+The 164 prematurely evicted observations were restored from that safety copy
+under the recorder's writer lock. **All 3,242 saved fingerprints are present on
+flash.** All fields match for the 3,241 newly recovered records. One record was
+already present before repair and retains its earlier receipt/import/backfill
+metadata; that difference was measured before recovery. SQLite quick-check
+passed and repeated physical records were not duplicated.
+
+Router evidence remains missing between **2026-09-30 13:21:25.674 UTC and
+22:19:14.244 UTC** (about nine hours). Those older raw generations had already
+rotated away before inspection. This is a monitoring coverage gap, not proof
+of a network outage; other source observations survived. Current historical
+import completion does not imply that missing generations were recovered.
+
+Validation and operational evidence:
+
+- **151 local tests run: 145 passed, six platform skips.** All 28 installer
+  cases passed on the Pi. The two new replay-order cases also passed on the Pi
+  in 17.6 seconds with 37.9 MiB peak RSS, using only `/run` fixtures. They verify
+  1,001 pending records survive a subsequent 1,001-record burst, and failure
+  during replay resumes RAM capture then recovers all 1,002 records.
+- The initial update's 180-second readiness allowance expired during healthy
+  replay under the unchanged 20% CPU quota. Its automatic code rollback kept
+  evidence and repaired live permissions. Readiness now allows a bounded ten
+  minutes, with a 220-second fixture. The retry completed; the final replay-order
+  update became ready in 4.1 seconds with zero pending RAM records.
+- Recorder-only deployment preserved the receiver, dashboard, preview and CAN
+  recorder PIDs/states. Retired SD file sizes/mtimes and the checked receiver,
+  backup and dashboard-adapter hashes remained unchanged. No routing, mount,
+  probe, backup-policy or network-interface changes were made.
+- CLI and HTTP reports for the same fixed ten-minute interval agreed on
+  **84 observations and two incidents**. Measured latency during final checks
+  was 1.37 seconds for CLI and 2.91 seconds for HTTP. The database was about
+  61.5 MiB; existing limits remain in effect.
+- `browser_clean` verified the live history modal at
+  `http://vanpi.lan:8788/#network-history?hours=24`, including a 390-pixel
+  viewport. The RAM warning cleared and history requests returned HTTP 200.
+  The only console error was the pre-existing, unrelated Sonos artwork 502.
+
+Ignored evidence artifacts are under `tmp/network-flight-recorder/`: the
+rotation ownership/setgid JSON files, replay-order Pi results, before/final
+storage snapshots, snapshot restoration result, CLI/API agreement, final
+deployment result and desktop/mobile screenshots. The safety copy remains on
+flash; it is a one-time recovery artifact, not a growing log stream.
+
+Current update rollback, preserving evidence and flash storage:
+
+```bash
+python3 pi/deploy_network_storage.py rollback --release network-storage-20261001T102241Z-0dc55a92
+```

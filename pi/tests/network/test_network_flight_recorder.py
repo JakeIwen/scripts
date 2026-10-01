@@ -917,7 +917,7 @@ class RecorderWaitTests(unittest.TestCase):
         from pi.scripts.network_recorder import storage
         config = SimpleNamespace(flash_logs=Path("/fixture/flash"), spool_dir=Path("/fixture/ram"))
         store = mock.Mock()
-        manager = mock.Mock(store=store, mode="flash")
+        manager = mock.Mock(store=store, mode="flash", replaying=False)
         manager.tick.return_value = store
         collector = mock.Mock()
         handlers = {}

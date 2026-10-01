@@ -3,6 +3,8 @@
 
 check --plan /tmp/network-storage-plan.json
 apply --plan /tmp/network-storage-plan.json
+check --recorder-only --plan /tmp/recorder-update-plan.json
+apply --recorder-only --plan /tmp/recorder-update-plan.json
 rollback --release network-storage-RELEASE
 
 No mounts, routes, backup jobs, or Git state are changed. The only backup change
@@ -12,6 +14,7 @@ descriptor so a disappearing mount cannot redirect writes onto the SD card.
 """
 import argparse
 import base64
+import grp
 import hashlib
 import importlib.util
 import json
@@ -37,6 +40,7 @@ BACKUPS = Path('/var/lib/vanpi-network-deploy/storage')
 BACKUP_CONF = Path('/home/pi/scripts/backup/backup_conf.sh')
 OLD_DB = Path('/var/lib/vanpi-network/events.sqlite3')
 OLD_LOGS = Path('/var/log/openwrt')
+RUN_ROOT = Path('/run')
 SERVICES = ('network-flight-recorder', 'rsyslog', 'van-dashboard', 'van-dashboard-preview')
 TARGETS = {
     'pi/scripts/network_flight_recorder.py':'/home/pi/scripts/network_flight_recorder.py',
@@ -53,6 +57,12 @@ TARGETS = {
 }
 for name in ('__init__','collector','parsers','report','store','storage'):
     TARGETS[f'pi/scripts/network_recorder/{name}.py'] = f'/home/pi/scripts/network_recorder/{name}.py'
+RECORDER_TARGETS = {
+    source: destination for source, destination in TARGETS.items()
+    if source == 'pi/scripts/network_flight_recorder.py'
+    or source.startswith('pi/scripts/network_recorder/')
+    or source == 'pi/tmpfiles.d/vanpi-network.conf'
+}
 
 # Read-only inspection on 2026-09-30 verified these prior recorder versions
 # against the checkout before storage work began. Later updates use the last
@@ -179,6 +189,69 @@ def copy_bytes(source, directory_fd, name):
     return result.hexdigest()
 
 
+def repair_spool_permissions(config):
+    """Repair eight known RAM files through validated FDs, without reading data.
+
+    The pi-owned runtime parent is deliberately traversed with pinned directory
+    FDs; generic tmpfiles z path traversal refuses its root-owned child. Setgid
+    must already be applied to that child by the d-only tmpfiles configuration.
+    Missing names are normal before initial capture or during live rotation.
+    """
+    runtime = Path(config['runtime_root'])
+    if (runtime.parent != RUN_ROOT or not runtime.is_absolute()
+            or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*', runtime.name)):
+        raise ValueError('spool runtime must be a direct child of /run')
+    result = base.command(['/usr/bin/findmnt', '--json', '--mountpoint', str(RUN_ROOT),
+                           '-o', 'TARGET,FSTYPE,MAJ:MIN'])
+    rows = json.loads(result.stdout).get('filesystems', [])
+    if len(rows) != 1 or rows[0].get('target') != str(RUN_ROOT) or rows[0].get('fstype') != 'tmpfs':
+        raise ValueError('spool repair requires the verified /run tmpfs mount')
+    adm_gid = grp.getgrnam('adm').gr_gid
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    directories = []
+    files = []
+    missing = 0
+    try:
+        run_fd = os.open(RUN_ROOT, directory_flags)
+        directories.append(run_fd)
+        device = os.fstat(run_fd).st_dev
+        if rows[0].get('maj:min') != f'{os.major(device)}:{os.minor(device)}':
+            raise ValueError('/run changed during spool repair inspection')
+        runtime_fd = os.open(runtime.name, directory_flags, dir_fd=run_fd)
+        directories.append(runtime_fd)
+        if os.fstat(runtime_fd).st_dev != device:
+            raise ValueError('runtime is not on the verified /run filesystem')
+        spool_fd = os.open('spool', directory_flags, dir_fd=runtime_fd)
+        directories.append(spool_fd)
+        spool_info = os.fstat(spool_fd)
+        if (not stat.S_ISDIR(spool_info.st_mode) or spool_info.st_uid != 0
+                or spool_info.st_gid != adm_gid or spool_info.st_dev != device
+                or stat.S_IMODE(spool_info.st_mode) != 0o2750):
+            raise ValueError('spool must be root:adm mode 02750 on the verified tmpfs')
+        for stream in ('dendelion.log', 'network.jsonl'):
+            for suffix in ('', '.1', '.2', '.3'):
+                try:
+                    fd = os.open(stream + suffix, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                                 dir_fd=spool_fd)
+                except FileNotFoundError:
+                    missing += 1
+                    continue
+                files.append(fd)
+                info = os.fstat(fd)
+                if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+                        or info.st_nlink != 1 or info.st_dev != device):
+                    raise ValueError('unsafe spool file type, ownership, links or filesystem')
+        # Validate the entire bounded set before the first metadata mutation.
+        # Pinned files may be renamed by concurrent rsyslog rotation, safely.
+        for fd in files:
+            os.fchown(fd, -1, adm_gid)
+            os.fchmod(fd, 0o640)
+        return dict(checked=len(files), repaired=len(files), missing=missing)
+    finally:
+        for fd in reversed(files + directories):
+            os.close(fd)
+
+
 def database_snapshot(source, destination):
     original = sqlite3.connect(Path(source).absolute().as_uri() + '?mode=ro',uri=True,timeout=10)
     target = sqlite3.connect(Path(destination).absolute().as_uri() + '?mode=rw',uri=True,timeout=10)
@@ -196,8 +269,15 @@ def database_snapshot(source, destination):
 def validate_plan(plan):
     if plan.get('schema_version') != 1 or not re.fullmatch(r'network-storage-[A-Za-z0-9._-]+',plan['release']):
         raise ValueError('invalid storage deployment manifest')
-    if {(r['source'],r['destination']) for r in plan['files']} != set(TARGETS.items()) or len(plan['files']) != len(TARGETS):
+    if not isinstance(plan.get('recorder_only', False), bool):
+        raise ValueError('invalid recorder-only mode')
+    targets = RECORDER_TARGETS if plan.get('recorder_only') else TARGETS
+    if {(r['source'],r['destination']) for r in plan['files']} != set(targets.items()) or len(plan['files']) != len(targets):
         raise ValueError('unexpected managed storage targets')
+    if plan.get('recorder_only'):
+        if plan.get('frontend_files') != [] or plan.get('migration') not in (None, False):
+            raise ValueError('recorder-only plans cannot deploy frontend or migrate storage')
+        return
     for row in plan['frontend_files']:
         path=Path(row['relative'])
         if path.is_absolute() or '..' in path.parts or str(path) in ('BUILD_ID','react_dashboard_preview.py'):
@@ -206,23 +286,35 @@ def validate_plan(plan):
         raise ValueError('frontend build missing index')
 
 
-def inspect(plan):
-    validate_plan(plan)
-    for command in ('/usr/bin/findmnt','/usr/bin/systemd-tmpfiles','/usr/bin/systemctl','/usr/sbin/runuser','/usr/sbin/rsyslogd','/usr/sbin/logrotate','/usr/bin/curl'):
-        if not os.access(command,os.X_OK):
-            raise ValueError('required trusted command is unavailable: '+command)
-    base.command(['/usr/bin/findmnt','--noheadings','--types','tmpfs','--mountpoint','/run'])
-    plan['mount'] = mount_identity(plan['config'])
+def known_hashes():
+    """Partial releases update their targets without discarding full lineage."""
     old = {}
     for path in sorted(BACKUPS.glob('network-storage-*/manifest.json')):
         if (path.parent/'complete').is_file() and not (path.parent/'rolled-back').exists():
             previous = json.loads(path.read_text())
             old.update({r['destination']:r['sha256'] for r in previous['files']})
+    return old
+
+
+def inspect_files(plan, old):
     for row in plan['files']:
         info = base.regular_info(row['destination'])
         if info and info['sha256'] not in (row['sha256'],row['head_sha256'],INITIAL.get(row['destination']),old.get(row['destination'])):
             raise ValueError('unreviewed deployed difference: '+row['destination'])
         row['before'] = info
+
+
+def inspect(plan):
+    validate_plan(plan)
+    if plan.get('recorder_only'):
+        return inspect_recorder(plan)
+    for command in ('/usr/bin/findmnt','/usr/bin/systemd-tmpfiles','/usr/bin/systemctl','/usr/sbin/runuser','/usr/sbin/rsyslogd','/usr/sbin/logrotate','/usr/bin/curl'):
+        if not os.access(command,os.X_OK):
+            raise ValueError('required trusted command is unavailable: '+command)
+    base.command(['/usr/bin/findmnt','--noheadings','--types','tmpfs','--mountpoint','/run'])
+    plan['mount'] = mount_identity(plan['config'])
+    old = known_hashes()
+    inspect_files(plan, old)
     # A missing config after a successful migration is a repair/update, never
     # permission to replace the flash database with the frozen SD copy.
     plan['migration'] = not CONFIG.exists() and not old
@@ -245,6 +337,8 @@ def inspect(plan):
 
 
 def verify(plan):
+    if plan.get('recorder_only'):
+        return verify_recorder(plan)
     base.command(['/usr/bin/findmnt','--noheadings','--types','tmpfs','--mountpoint','/run'])
     if mount_identity(plan['config']) != plan['mount']:
         raise ValueError('flash identity changed since check')
@@ -261,6 +355,168 @@ def verify(plan):
             raise ValueError('frontend changed after check')
     if base.tree_digest(base.FRONTEND/before['current'])!=before['tree_sha256']:
         raise ValueError('frontend contents changed after check')
+
+
+def inspect_recorder(plan):
+    """A narrow update takes existing storage configuration as authoritative."""
+    info = base.regular_info(CONFIG)
+    if info is None or CONFIG.stat().st_size > 16384:
+        raise ValueError('recorder-only updates require an existing storage configuration')
+    for command in ('/usr/bin/findmnt', '/usr/bin/systemd-tmpfiles',
+                    '/usr/bin/systemctl', '/usr/sbin/runuser', '/usr/bin/python3'):
+        if not os.access(command, os.X_OK):
+            raise ValueError('required trusted command is unavailable: ' + command)
+    plan['config'] = json.loads(CONFIG.read_text())
+    plan['config_before'] = info
+    base.command(['/usr/bin/findmnt', '--noheadings', '--types', 'tmpfs', '--mountpoint', '/run'])
+    plan['mount'] = mount_identity(plan['config'])
+    inspect_files(plan, known_hashes())
+    plan['migration'] = False
+    plan['services_before'] = {'network-flight-recorder': base.service_state('network-flight-recorder')}
+    plan['source_database_bytes'] = plan['source_log_bytes'] = 0
+    return plan
+
+
+def verify_recorder(plan):
+    if plan.get('migration') is not False or base.regular_info(CONFIG) != plan['config_before']:
+        raise ValueError('recorder-only storage configuration changed or migration requested')
+    base.command(['/usr/bin/findmnt', '--noheadings', '--types', 'tmpfs', '--mountpoint', '/run'])
+    if mount_identity(plan['config']) != plan['mount']:
+        raise ValueError('flash identity changed since check')
+    for row in plan['files']:
+        if base.regular_info(row['destination']) != row['before']:
+            raise ValueError('managed file changed after check: ' + row['destination'])
+    if base.service_state('network-flight-recorder') != plan['services_before']['network-flight-recorder']:
+        raise ValueError('recorder service state changed after check')
+
+
+def recorder_report_ready(timeout):
+    """Read one bounded CLI report as pi; never expose its evidence payload."""
+    try:
+        result = subprocess.run(
+            ['/usr/sbin/runuser', '-u', 'pi', '--', '/usr/bin/python3',
+             '/home/pi/scripts/network_flight_recorder.py', '--storage-config', str(CONFIG),
+             'report', '--hours', '1', '--limit', '1', '--json'],
+            capture_output=True, text=True, timeout=timeout, check=False,
+        )
+        return (result.returncode == 0 and len(result.stdout) <= 4 * 1024 * 1024
+                and json.loads(result.stdout).get('ok') is True)
+    except (OSError, subprocess.TimeoutExpired, ValueError, AttributeError):
+        return False
+
+
+def ram_pending_count(config):
+    path = Path(config['runtime_root']) / 'events.sqlite3'
+    if not path.is_file() or path.is_symlink():
+        return None
+    connection = None
+    try:
+        connection = sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=0.2)
+        connection.execute('PRAGMA query_only=ON')
+        row = connection.execute("SELECT value FROM checkpoints WHERE key='flash-drained-through'").fetchone()
+        acknowledged = int(json.loads(row[0])) if row else 0
+        return connection.execute('SELECT count(*) FROM events WHERE id>?', (acknowledged,)).fetchone()[0]
+    except (OSError, sqlite3.Error, ValueError, TypeError):
+        return None
+    finally:
+        if connection is not None:
+            connection.close()
+
+
+def wait_recorder_ready(plan, root, started_at, timeout=600):
+    """Allow bounded replay under the recorder CPU quota, independent of the UI."""
+    began = time.monotonic()
+    deadline = began + timeout
+    progress_at = 0
+    status_path = Path(plan['config']['runtime_root']) / 'storage-status.json'
+    expected = str(Path(plan['config']['flash_root']) / 'events.sqlite3')
+    while time.monotonic() < deadline:
+        active = base.service_state('network-flight-recorder')['active']
+        status = {}
+        try:
+            if (not status_path.is_symlink() and status_path.is_file()
+                    and status_path.stat().st_size <= 16384):
+                parsed = json.loads(status_path.read_text())
+                if isinstance(parsed, dict):
+                    status = parsed
+        except (OSError, ValueError):
+            pass
+        now = time.monotonic()
+        fresh = (isinstance(status.get('checked_at'), (int, float))
+                 and status['checked_at'] >= started_at)
+        report_ok = False
+        if active and fresh and status.get('mode') == 'flash' and status.get('active_database') == expected:
+            report_ok = recorder_report_ready(max(0.1, min(10, deadline - now)))
+        if now >= progress_at or report_ok:
+            progress = dict(elapsed_seconds=round(now-began, 1), recorder_active=active,
+                            mode=status.get('mode') if status.get('mode') in ('ram', 'flash') else 'unknown',
+                            fresh_status=fresh, report_ok=report_ok,
+                            ram_pending_events=ram_pending_count(plan['config']))
+            (root / 'readiness.json').write_text(json.dumps(progress) + '\n')
+            progress_at = now + 5
+        if report_ok:
+            if mount_identity(plan['config']) != plan['mount']:
+                raise ValueError('flash changed during recorder readiness')
+            return progress
+        time.sleep(min(2, max(0, deadline-time.monotonic())))
+    raise RuntimeError(f'recorder did not finish flash recovery within {timeout:g} seconds; see readiness.json')
+
+
+def restore_recorder(plan, root):
+    for index, row in enumerate(plan['files']):
+        target = Path(row['destination'])
+        if row['before'] is None:
+            if target.exists():
+                if (target.is_symlink() or not target.is_file()
+                        or target.parent.resolve() != target.parent or os.path.ismount(target)):
+                    raise ValueError('unexpected recorder rollback file')
+                target.unlink()
+        else:
+            if base.digest(root / f'before-{index}') != row['before']['sha256']:
+                raise ValueError('recorder rollback snapshot checksum mismatch')
+            base.atomic_file(root / f'before-{index}', target, row['before'])
+    # Restore old tmpfiles bytes, but do not apply an older directory mode over
+    # repaired live spool ownership/setgid. Database and raw files stay in place.
+    base.systemctl('restart' if plan['services_before']['network-flight-recorder']['active'] else 'stop',
+                   'network-flight-recorder')
+
+
+def apply_recorder(plan, stage):
+    import pwd
+    root = BACKUPS / plan['release']
+    root.mkdir(parents=True, mode=0o700)
+    os.chmod(root.parent, 0o700)
+    for index, row in enumerate(plan['files']):
+        if row['before']:
+            shutil.copyfile(row['destination'], root / f'before-{index}')
+            if base.digest(root / f'before-{index}') != row['before']['sha256']:
+                raise ValueError('recorder rollback snapshot checksum mismatch')
+    (root / 'manifest.json').write_text(json.dumps(plan, indent=2) + '\n')
+    verify_recorder(plan)
+    try:
+        base.systemctl('stop', 'network-flight-recorder')
+        pi = pwd.getpwnam('pi')
+        for index, row in enumerate(plan['files']):
+            metadata = row['before'] or dict(
+                uid=pi.pw_uid if row['destination'].startswith('/home/pi/') else 0,
+                gid=pi.pw_gid if row['destination'].startswith('/home/pi/') else 0,
+                mode=0o755 if row['source'].endswith('/network_flight_recorder.py') else 0o644,
+            )
+            base.atomic_file(stage / str(index), row['destination'], metadata)
+        tmpfiles = RECORDER_TARGETS['pi/tmpfiles.d/vanpi-network.conf']
+        base.command(['/usr/bin/systemd-tmpfiles', '--create', tmpfiles])
+        repair = repair_spool_permissions(plan['config'])
+        started_at = time.time()
+        base.systemctl('restart', 'network-flight-recorder')
+        readiness = wait_recorder_ready(plan, root, started_at)
+        (root / 'complete').write_text(str(time.time()) + '\n')
+        return dict(ok=True, release=plan['release'], recorder_only=True,
+                    mode='flash', readiness=readiness, spool_permissions=repair,
+                    evidence='preserved in place')
+    except Exception:
+        base.command(['/usr/bin/systemctl', 'stop', 'network-flight-recorder'], False)
+        restore_recorder(plan, root)
+        raise
 
 
 def restore_code(plan, root):
@@ -330,6 +586,8 @@ def apply(plan, stage):
     for index,row in enumerate(plan['frontend_files']):
         if base.digest(stage/f'frontend-{index}')!=row['sha256']:
             raise ValueError('frontend staged checksum mismatch')
+    if plan.get('recorder_only'):
+        return apply_recorder(plan, stage)
     receiver = next(i for i,r in enumerate(plan['files']) if r['destination'].endswith('30-openwrt-dendelion.conf'))
     base.command(['/usr/sbin/rsyslogd','-N1','-f',str(stage/str(receiver))])
     root = BACKUPS/plan['release']
@@ -366,6 +624,7 @@ def apply(plan, stage):
         base.command(['/bin/bash','-n',str(patched)])
         base.atomic_file(patched,BACKUP_CONF,plan['backup_conf_before'])
         base.command(['/usr/bin/systemd-tmpfiles','--create','/etc/tmpfiles.d/vanpi-network.conf'])
+        repair_spool_permissions(plan['config'])
         base.command(['/usr/sbin/rsyslogd','-N1'])
         base.command(['/usr/sbin/logrotate','--debug','/etc/logrotate.d/openwrt-dendelion'])
         frontend=base.FRONTEND/'releases'/plan['release']
@@ -425,6 +684,14 @@ def rollback(release):
         info = base.regular_info(row['destination'])
         if info is None or info['sha256']!=row['sha256']:
             raise ValueError('managed files changed since deployment; refusing rollback')
+    if plan.get('recorder_only'):
+        if base.regular_info(CONFIG) != plan['config_before']:
+            raise ValueError('storage configuration changed since deployment; refusing rollback')
+        base.systemctl('stop', 'network-flight-recorder')
+        restore_recorder(plan, root)
+        (root / 'rolled-back').write_text(str(time.time()) + '\n')
+        return dict(ok=True, rolled_back=release, recorder_only=True,
+                    evidence='preserved in place', live_spool_permissions='preserved')
     if base.regular_info(BACKUP_CONF)['sha256']!=plan['backup_conf_sha256']:
         raise ValueError('backup configuration changed since deployment; refusing rollback')
     if base.link_info(base.FRONTEND/'current')!='releases/'+release or base.tree_digest(base.FRONTEND/'releases'/release)!=plan['installed_tree_sha256']:
@@ -481,21 +748,24 @@ def remote(target, action, request):
     return json.loads(result.stdout)
 
 
-def make_plan(target):
+def make_plan(target, recorder_only=False):
     rows=[]
-    for source,destination in TARGETS.items():
+    targets = RECORDER_TARGETS if recorder_only else TARGETS
+    for source,destination in targets.items():
         path=REPO/source
         if path.is_symlink() or not path.is_file():
             raise ValueError('missing regular deployment source: '+source)
         head=subprocess.run(['git','-C',str(REPO),'show','HEAD:'+source],capture_output=True)
         rows.append(dict(source=source,destination=destination,sha256=base.digest(path),head_sha256=base.sha(head.stdout) if head.returncode==0 else None))
-    dist=REPO/'pi/apps/van_dashboard/frontend/dist'
     frontend=[]
-    for path in sorted(dist.rglob('*')):
-        if path.is_symlink():raise ValueError('symlinked frontend artifact')
-        if path.is_file():frontend.append(dict(relative=str(path.relative_to(dist)),sha256=base.digest(path)))
+    if not recorder_only:
+        dist=REPO/'pi/apps/van_dashboard/frontend/dist'
+        for path in sorted(dist.rglob('*')):
+            if path.is_symlink():raise ValueError('symlinked frontend artifact')
+            if path.is_file():frontend.append(dict(relative=str(path.relative_to(dist)),sha256=base.digest(path)))
     return dict(schema_version=1,target=target,release='network-storage-'+time.strftime('%Y%m%dT%H%M%SZ',time.gmtime())+'-'+uuid.uuid4().hex[:8],
-                files=rows,frontend_files=frontend,config=json.loads((REPO/'pi/services/network-flight-recorder-storage.json').read_text()))
+                files=rows, frontend_files=frontend, recorder_only=recorder_only,
+                config=None if recorder_only else json.loads((REPO/'pi/services/network-flight-recorder-storage.json').read_text()))
 
 
 def main():
@@ -503,7 +773,10 @@ def main():
     parser.add_argument('--target',default='pi@vanpi.lan')
     sub=parser.add_subparsers(dest='action',required=True)
     for action in ('check','apply'):
-        sub.add_parser(action).add_argument('--plan',required=True)
+        action_parser=sub.add_parser(action)
+        action_parser.add_argument('--plan',required=True)
+        action_parser.add_argument('--recorder-only',action='store_true',
+                                   help='update only recorder code and tmpfiles; require existing storage configuration')
     sub.add_parser('rollback').add_argument('--release',required=True)
     args=parser.parse_args()
     if not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.@:-]*',args.target):
@@ -512,15 +785,18 @@ def main():
         path=Path(args.plan)
         if path.exists():
             raise ValueError('plan file already exists')
-        plan=remote(args.target,'check',make_plan(args.target))
+        plan=remote(args.target,'check',make_plan(args.target,args.recorder_only))
         path.write_text(json.dumps(plan,indent=2)+'\n');path.chmod(0o600)
         print(json.dumps(dict(ok=True,plan=str(path.absolute()),release=plan['release'],managed_files=len(plan['files']),mount=plan['mount'],
                               migration=plan['migration'],source_database_bytes=plan['source_database_bytes'],source_log_bytes=plan['source_log_bytes'],
-                              backup_change=['/var/lib/vanpi-network','/var/log/openwrt']),indent=2))
+                              recorder_only=args.recorder_only,
+                              backup_change=[] if args.recorder_only else ['/var/lib/vanpi-network','/var/log/openwrt']),indent=2))
     elif args.action=='apply':
         plan=json.loads(Path(args.plan).read_text());validate_plan(plan)
-        current=make_plan(args.target)
-        if (plan['target']!=args.target or plan['config']!=current['config'] or plan['frontend_files']!=current['frontend_files'] or
+        if bool(plan.get('recorder_only')) != args.recorder_only:
+            raise ValueError('plan mode mismatch; use --recorder-only for a recorder-only plan')
+        current=make_plan(args.target,args.recorder_only)
+        if (plan['target']!=args.target or (not args.recorder_only and plan['config']!=current['config']) or plan['frontend_files']!=current['frontend_files'] or
                 [{k:v for k,v in r.items() if k!='before'} for r in plan['files']]!=current['files']):
             raise ValueError('local sources or target changed; create a fresh checked plan')
         stage=base.command(['ssh','-o','BatchMode=yes',args.target,'mktemp -d /tmp/network-storage-stage.XXXXXXXX']).stdout.strip()

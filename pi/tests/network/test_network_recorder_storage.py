@@ -130,6 +130,46 @@ class RecorderStorageTests(unittest.TestCase):
         self.assertEqual(self.data(self.config.flash_database)["counts"]["events"], 1)
         self.assertEqual(self.data()["counts"]["events"], 1)
 
+    def test_unreadable_rotated_spool_explains_ram_and_recovers_pending_evidence(self):
+        self.guard.available = True
+        self.manager.open().ingest([self.event(10, failure=True)])
+        denied = PermissionError(errno.EACCES, "secret password=hunter2", "/secret/token-file")
+        with mock.patch.object(self.manager, "mirror_logs", side_effect=denied), \
+                mock.patch.object(sys, "stderr", new_callable=io.StringIO) as journal:
+            self.manager.tick().ingest([self.event(20)])
+            self.assertEqual(self.manager.mode, "ram")
+            self.monotonic += 10
+            self.manager.tick()
+            self.monotonic += 10
+            self.manager.tick()
+            # One message per changed failure/operation, not every retry.
+            self.assertEqual(len(journal.getvalue().splitlines()), 2)
+            status = json.loads(self.config.status_path.read_text())
+            self.assertEqual(status["last_error"]["code"], "permission-denied")
+            self.assertEqual(status["last_error"]["operation"], "replay")
+            exposed = json.dumps(self.data()) + json.dumps(status) + journal.getvalue()
+            self.assertIn("Permission denied", exposed)
+            for secret in ("hunter2", "/secret", "token-file"):
+                self.assertNotIn(secret, exposed)
+        self.to_flash()
+        self.assertEqual(self.data()["counts"], {"events": 2, "incidents": 1})
+        self.assertIsNone(json.loads(self.config.status_path.read_text())["last_error"])
+        self.assertNotIn("Permission denied", json.dumps(self.data()["coverage"]))
+
+    def test_storage_errors_never_publish_external_exception_text(self):
+        import sqlite3
+        self.manager.open()
+        for error, code in ((sqlite3.OperationalError("password=secret-fixture"), "database-error"),
+                            (self.storage.StorageUnavailable("https://secret-fixture"), "storage-check-failed"),
+                            (OSError(errno.EIO, "secret-fixture"), "io-error")):
+            with self.subTest(code=code), mock.patch.object(sys, "stderr", new_callable=io.StringIO) as journal:
+                self.manager.storage_error(error, "secret-fixture")
+                self.manager.record_coverage()
+                status = json.loads(self.config.status_path.read_text())
+                self.assertEqual(status["last_error"]["code"], code)
+                self.assertEqual(status["last_error"]["operation"], "storage")
+                self.assertNotIn("secret-fixture", json.dumps(status) + json.dumps(self.data()) + journal.getvalue())
+
     def test_changed_verified_mount_identity_reopens_instead_of_reusing_writer(self):
         self.guard.available = True
         original = self.manager.open()
@@ -362,6 +402,104 @@ class RecorderStorageTests(unittest.TestCase):
         self.to_flash()
         self.assertEqual(self.data()["counts"]["events"], 1001)
 
+    def test_run_storage_finishes_ram_replay_before_collecting_a_pressure_burst(self):
+        self.manager.open().ingest([self.event(number) for number in range(1, 1002)])
+        self.guard.available = True
+        self.monotonic = 5000
+        opened = self.manager.open
+        collector = SimpleNamespace(store=None, files=None, log_dir=None)
+        collected_modes, pruned_modes, waits = [], [], []
+        handlers = {}
+        pressure = [self.event(number) for number in range(2001, 3002)]
+        prune = self.storage.Store.prune
+
+        def bounded_open():
+            store = opened()
+            store.max_events = 1001
+            return store
+
+        def collect(_slow):
+            collected_modes.append(self.manager.mode)
+            # If admitted into RAM during replay, this equally sized burst
+            # would evict the still-unacknowledged original observations.
+            collector.store.ingest(pressure)
+
+        def observed_prune(store, *args, **kwargs):
+            pruned_modes.append(self.manager.mode)
+            return prune(store, *args, **kwargs)
+
+        def wait(deadline, _stopped):
+            waits.append(self.manager.mode)
+            self.assertLessEqual(len(waits), 8, "replay did not make bounded progress")
+            self.monotonic = deadline + 1
+            if self.manager.mode == "flash" and collected_modes:
+                handlers[self.storage.signal.SIGTERM](None, None)
+
+        collector.once = collect
+        with mock.patch.object(self.storage, "MountGuard", return_value=self.guard), \
+                mock.patch.object(self.storage, "StorageManager", return_value=self.manager), \
+                mock.patch.object(self.manager, "open", side_effect=bounded_open), \
+                mock.patch.object(self.storage, "Collector", return_value=collector), \
+                mock.patch.object(self.storage.Store, "prune", new=observed_prune), \
+                mock.patch.object(self.storage, "wait_until", side_effect=wait), \
+                mock.patch.object(self.storage.signal, "signal", side_effect=lambda signum, handler: handlers.__setitem__(signum, handler)), \
+                mock.patch.object(sys, "stderr", new_callable=io.StringIO):
+            self.storage.run_storage(self.config)
+        self.assertEqual(collected_modes, ["flash"])
+        self.assertEqual(pruned_modes, ["flash"])
+        data = self.data(self.config.flash_database)
+        self.assertEqual(data["counts"], {"events": 2002, "incidents": 0})
+        from pi.scripts.network_recorder.store import connect_readonly
+        database = connect_readonly(self.config.flash_database)
+        try:
+            original_count = database.execute("SELECT count(*) FROM events WHERE time BETWEEN ? AND ?",
+                                              (BASE + 1, BASE + 1001)).fetchone()[0]
+        finally:
+            database.close()
+        self.assertEqual(original_count, 1001)
+
+    def test_failed_flash_replay_resumes_ram_collection_and_can_retry(self):
+        self.manager.open().ingest([self.event(number) for number in range(1, 1002)])
+        self.guard.available = True
+        self.monotonic = 5000
+        collector = SimpleNamespace(store=None, files=None, log_dir=None)
+        collected_modes, waits = [], []
+        handlers = {}
+
+        def collect(_slow):
+            self.assertFalse(self.manager.replaying)
+            collected_modes.append(self.manager.mode)
+            collector.store.ingest([self.event(2001)])
+
+        def wait(deadline, _stopped):
+            waits.append(self.manager.replaying)
+            self.assertLessEqual(len(waits), 4, "failed replay prevented source collection")
+            self.monotonic = deadline + 1
+            if len(waits) == 1:
+                self.assertTrue(self.manager.replaying)
+                self.guard.available = False
+            elif collected_modes:
+                handlers[self.storage.signal.SIGTERM](None, None)
+
+        collector.once = collect
+        with mock.patch.object(self.storage, "MountGuard", return_value=self.guard), \
+                mock.patch.object(self.storage, "StorageManager", return_value=self.manager), \
+                mock.patch.object(self.storage, "Collector", return_value=collector), \
+                mock.patch.object(self.storage, "wait_until", side_effect=wait), \
+                mock.patch.object(self.storage.signal, "signal", side_effect=lambda signum, handler: handlers.__setitem__(signum, handler)), \
+                mock.patch.object(sys, "stderr", new_callable=io.StringIO):
+            self.storage.run_storage(self.config)
+        self.assertEqual(collected_modes, ["ram"])
+        self.assertEqual(waits, [True, False])
+        self.assertEqual(self.data(self.config.ram_database)["counts"]["events"], 1002)
+        partial = self.data(self.config.flash_database)["counts"]["events"]
+        self.assertGreater(partial, 0)
+        self.assertLess(partial, 1001)
+        self.manager = self.storage.StorageManager(self.config, guard=self.guard)
+        self.manager.open()
+        self.to_flash()
+        self.assertEqual(self.data()["counts"], {"events": 1002, "incidents": 0})
+
     def test_second_usb_absence_collects_new_rows_after_previous_ram_acknowledgement(self):
         self.manager.open().ingest([self.event(10, failure=True), self.event(20)])
         inode = self.config.ram_database.stat().st_ino
@@ -546,6 +684,7 @@ class StorageConfigurationTests(unittest.TestCase):
         rows = [line.split() for line in config.splitlines() if line.strip() and not line.lstrip().startswith("#")]
         self.assertEqual({row[1] for row in rows}, {"/run/vanpi-network", "/run/vanpi-network/spool"})
         self.assertTrue(all(row[0] == "d" for row in rows))
+        self.assertEqual(next(row[2] for row in rows if row[1] == "/run/vanpi-network/spool"), "02750")
         self.assertTrue(all(row[1].startswith("/run/") for row in rows))
         dropin = (PI_ROOT / "services/rsyslog-vanpi-network.conf").read_text()
         self.assertIn("ExecStartPre=/usr/bin/systemd-tmpfiles --create /etc/tmpfiles.d/vanpi-network.conf", dropin)

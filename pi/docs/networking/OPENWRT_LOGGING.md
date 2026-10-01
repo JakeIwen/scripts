@@ -97,10 +97,13 @@ The test line should appear on vanpi within a second. If it does not, first
 confirm that vanpi still owns `192.168.6.103` and that the router can reach it.
 Do not expose UDP/514 through the WAN firewall.
 
-Validate the structured receiver with an isolated loopback listener and
-temporary files (no live service changes):
+On a Pi/Linux checkout with rsyslog installed, validate the receiver with an
+isolated loopback listener and temporary files under `/run` (no live service
+changes). The root receiver and separate `pi`/`adm` reader reproduce the old
+post-rotation permissions failure, verify setgid inheritance and exercise the
+bounded installer repair. Initial file readability alone is insufficient:
 
 ```bash
-python3 pi/tests/network/check_openwrt_network_spool.py pi/scripts/openwrt-logging/30-openwrt-dendelion.conf pi/scripts/openwrt-logging/rotate_network_log.py
+sudo python3 pi/tests/network/check_openwrt_network_spool.py pi/scripts/openwrt-logging/30-openwrt-dendelion.conf pi/scripts/openwrt-logging/rotate_network_log.py --tmpfiles pi/tmpfiles.d/vanpi-network.conf --repair-installer pi/deploy_network_storage.py --compare-modes
 python3 -m unittest pi.tests.network.test_openwrt_network_spool
 ```

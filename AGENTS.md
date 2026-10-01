@@ -169,10 +169,22 @@ volatile database and raw-log ring under `/run/vanpi-network/`, never SD fallbac
 RAM evidence does not survive reboot. The old `/var/lib/vanpi-network/` and
 `/var/log/openwrt/` are frozen migration recovery copies, excluded from Borg.
 
+A RAM warning can mean failed log access/replay even with healthy mounted flash;
+inspect `storage-status.json`'s error category and the recorder journal. Preserve
+the receiver spool's `02750 root:adm` directory and bounded installer permission
+repair: Pi rsyslog size-limit rotation otherwise recreates unreadable files.
+Do not add tmpfiles `z` repairs through this Pi-owned/runtime, root-owned/spool
+hierarchy; systemd rejects that ownership transition.
+Rotation tests must use separate root-writer and unprivileged `adm`-reader
+identities. Use `deploy_network_storage.py check/apply --recorder-only` for
+recorder code/permission updates that must preserve an independently deployed UI.
+
 Keep reports read-only and full-range counts independent of displayed row
 limits. Schema/index changes and incident materialization belong to the
 collector. Preserve physical-record checkpoints, backfill provenance and
 boot/clock boundaries when changing ingestion or correlation.
+Drain pending RAM observations before resuming backlog import or RAM pruning
+after flash returns; otherwise incoming history can evict records awaiting replay.
 
 Legacy OpenWrt log timestamps are Pi receipt times; the additive JSON spool
 retains receipt and reported times separately. Classic syslog's reported clock

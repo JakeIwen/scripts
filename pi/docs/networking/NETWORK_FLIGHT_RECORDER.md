@@ -195,11 +195,40 @@ does not prove there was no incident. The dashboard tile reports a storage
 warning, and timeline/incident views show the warning without opening a
 coverage dropdown. CLI/exports include the same `storage` coverage explanation.
 
+A RAM warning can also mean a receiver permission error or failed replay while
+the drive remains mounted. Inspect the current error category and operation:
+
+```bash
+ssh pi@vanpi.lan 'cat /run/vanpi-network/storage-status.json; journalctl -u network-flight-recorder --since "1 hour ago" --no-pager'
+```
+
+Errors expose fixed diagnostic categories, not exception contents or raw logs.
+They are journaled when the category/operation changes, rather than every retry.
+Do not reboot to clear a RAM warning: first diagnose it and preserve buffered
+evidence. Successful replay clears the current error.
+
+The receiver spool directory must be `02750 root:adm`. On the deployed rsyslog
+8.2302, size-limit rotation reopens files without reapplying `fileGroup`; the
+setgid directory preserves `adm` inheritance. The installer repairs permissions
+on only the two active streams and their three rotated generations through
+verified directory/file descriptors. Tmpfiles `z` rules cannot perform that
+repair here: systemd rejects the transition from the Pi-owned runtime directory
+to the root-owned spool. Rotation acceptance must use a root receiver and a separate
+unprivileged reader with supplementary `adm`; a same-user test misses this
+failure. Existing raw files remain private to root and the read group in RAM.
+
 The collector owns return-to-flash reconciliation. Physical record identities
 deduplicate replay, and incident aliases preserve links when RAM rows receive
 new numeric database IDs. Status and coverage distinguish durable flash from
 volatile RAM. Do not manually move an open SQLite database/WAL pair or create
 mountpoint contents to bypass a failed volume check.
+
+While return-to-flash replay is succeeding, saved RAM observations drain before
+new source import or RAM pruning resumes. The independent receiver keeps
+capturing, and raw-file mirroring continues during replay. This prevents a
+backlog import from evicting queued observations before they reach flash. A
+failed replay resumes bounded RAM collection; the `replaying` status flag and
+coverage explanation distinguish this deliberate import pause.
 
 Persistent defaults are 30 days, 150,000 observations and a 256 MiB
 database/sidecar budget; the RAM database/sidecar budget is 16 MiB.
@@ -260,6 +289,25 @@ not raw device logs or configurations.
 
 ## Targeted installation, update and rollback
 
+For recorder code or receiver-permission maintenance on an existing
+storage-managed installation, use a narrow checked update. It preserves the
+deployed storage configuration and only restarts the recorder; receiver,
+dashboard, frontend and backup configuration remain outside its target set.
+Choose a new plan filename for each update:
+
+```bash
+python3 /Users/jacobr/dev/scripts/pi/deploy_network_storage.py check --recorder-only --plan /private/tmp/network-recorder-update.json
+python3 /Users/jacobr/dev/scripts/pi/deploy_network_storage.py apply --recorder-only --plan /private/tmp/network-recorder-update.json
+```
+
+The manifest captures exact pre-update hashes and supports the same `rollback
+--release` command below. Recorder-only rollback preserves database/raw evidence
+in place, including pending RAM records, and restores just the recorder code
+and tmpfiles configuration. Repaired live spool permissions remain in place;
+restoring an older tmpfiles file can reintroduce its permissions bug at the next
+boot or receiver restart. Readiness allows up to ten minutes for bounded RAM
+replay and checks a fresh flash selection plus a read-only CLI report.
+
 Build the frontend from the repository root:
 
 ```bash
@@ -299,20 +347,24 @@ Rollback the release recorded in that plan with this single command:
 python3 pi/deploy_network_storage.py rollback --release "$(python3 -c 'import json; print(json.load(open("/private/tmp/van-network-storage-plan.json"))["release"])')"
 ```
 
-The current storage release is `network-storage-20260930T093830Z-fba885dc`.
-To undo that update while retaining flash storage:
+The current recorder/storage release is
+`network-storage-20261001T102241Z-0dc55a92`. To undo its replay-order update while
+retaining flash storage:
 
 ```bash
-python3 pi/deploy_network_storage.py rollback --release network-storage-20260930T093830Z-fba885dc
+python3 pi/deploy_network_storage.py rollback --release network-storage-20261001T102241Z-0dc55a92
 ```
 
-To undo the original flash migration as well, run that command first, then:
+To undo the preceding permission/diagnostic update and original flash migration
+as well, run that command first, then these in order:
 
 ```bash
+python3 pi/deploy_network_storage.py rollback --release network-storage-20261001T101434Z-45aed0a4
+python3 pi/deploy_network_storage.py rollback --release network-storage-20260930T093830Z-fba885dc
 python3 pi/deploy_network_storage.py rollback --release network-storage-20260930T090204Z-e02b828b
 ```
 
-Storage rollback stops the recorder and receiver and consolidates pending RAM
+Full storage rollback stops the recorder and receiver and consolidates pending RAM
 evidence onto verified flash through `storage-sync`. Rolling back an update
 restores the preceding flash-aware version. Rolling back the original migration
 also backs up the latest consolidated database into the former SD location

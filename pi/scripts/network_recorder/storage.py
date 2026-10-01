@@ -16,6 +16,7 @@ from pathlib import Path
 import signal
 import sqlite3
 import stat
+import sys
 import time
 
 from .collector import Collector, FileImporter, wait_until
@@ -251,6 +252,57 @@ class StorageManager:
         self.raw_pruned = 0
         self.flash_retry_after = 0
         self.last_raw_prune = 0
+        self.last_error = None
+        self.replaying = False
+
+    def storage_error(self, exc, operation):
+        """Expose bounded diagnostics, never exception text/paths or raw data."""
+        if isinstance(exc, PermissionError):
+            code, detail = (
+                "permission-denied",
+                "Permission denied; check receiver file and storage access.",
+            )
+        elif isinstance(exc, sqlite3.Error):
+            code, detail = (
+                "database-error",
+                "SQLite operation failed; check database access, capacity and integrity.",
+            )
+        elif isinstance(exc, StorageUnavailable):
+            code, detail = (
+                "storage-check-failed",
+                "Storage identity or raw-generation consistency check failed.",
+            )
+        else:
+            code, detail = (
+                "io-error",
+                "Storage I/O failed; check filesystem availability and local service status.",
+            )
+        # Operations are caller-owned labels, never external command arguments.
+        operation = (
+            operation
+            if operation in ("open", "mirror", "replay", "collect")
+            else "storage"
+        )
+        previous = self.last_error
+        if previous and (previous["code"], previous["operation"]) == (code, operation):
+            return
+        self.last_error = dict(
+            code=code, operation=operation, detail=detail, since=time.time()
+        )
+        print(
+            f"network recorder storage: {operation}: {code}; using bounded RAM",
+            file=sys.stderr,
+            flush=True,
+        )
+
+    def storage_recovered(self):
+        if self.last_error:
+            print(
+                "network recorder storage: flash access and replay recovered",
+                file=sys.stderr,
+                flush=True,
+            )
+        self.last_error = None
 
     def _flash_guard(self, token):
         if self.guard.flash() != token:
@@ -375,7 +427,8 @@ class StorageManager:
             self._cache_checkpoints()
             self.record_coverage()
             return self.store
-        except (OSError, sqlite3.Error):
+        except (OSError, sqlite3.Error) as exc:
+            self.storage_error(exc, "open")
             self.flash_retry_after = time.monotonic() + 5
             return self._ram()
 
@@ -569,6 +622,7 @@ class StorageManager:
             self.store.close()
             self.store = target
             self.mode, self.token = "flash", token
+            self.storage_recovered()
             self._cache_checkpoints()
             self.record_coverage()
             # Keep the bounded RAM database inode. Unlinking a SQLite database
@@ -582,8 +636,10 @@ class StorageManager:
             raise
 
     def tick(self):
+        self.replaying = False
         if self.store is None:
             return self.open()
+        operation = "mirror" if self.mode == "flash" else "replay"
         try:
             token = self.guard.flash()
             if self.mode == "flash":
@@ -593,10 +649,14 @@ class StorageManager:
                     self.token = token
                 self.mirror_logs(token)
                 self._cache_checkpoints()
+                self.storage_recovered()
             elif time.monotonic() >= self.flash_retry_after:
                 self._drain(token)
+                self.replaying = self.mode == "ram"
             self.record_coverage()
-        except (OSError, sqlite3.Error):
+        except (OSError, sqlite3.Error) as exc:
+            self.replaying = False
+            self.storage_error(exc, operation)
             self.flash_retry_after = time.monotonic() + 5
             if self.mode != "ram":
                 self._ram()
@@ -616,6 +676,10 @@ class StorageManager:
         )
         if self.mode == "ram" and loss:
             detail += f" RAM retention evicted {loss} observations; raw replay may recover some."
+        if self.mode == "ram" and self.last_error:
+            detail += f" {self.last_error['detail']} Operation: {self.last_error['operation']}; error: {self.last_error['code']}."
+        if self.replaying:
+            detail += " Replaying saved observations before resuming source import to protect pending RAM evidence."
         self.store.coverage(
             "storage",
             "vanpi",
@@ -630,6 +694,8 @@ class StorageManager:
             checked_at=time.time(),
             volatile=self.mode == "ram",
             raw_generations_pruned=self.raw_pruned,
+            last_error=self.last_error,
+            replaying=self.replaying,
         )
         temporary = self.config.status_path.with_name("storage-status.json.new")
         if temporary.is_symlink():
@@ -724,6 +790,16 @@ def run_storage(config, once=False, sync_only=False):
                 collector.log_dir = str(
                     config.flash_logs if manager.mode == "flash" else config.spool_dir
                 )
+                if manager.replaying:
+                    # Drain saved RAM observations before admitting a raw-file
+                    # backlog that could evict them. The receiver keeps its RAM
+                    # ring and mirror_logs continues copying it to flash. Once
+                    # replay completes, normal import catches up from those
+                    # durable files; a failed replay resumes RAM collection.
+                    if once:
+                        return
+                    wait_until(started + 5, lambda: stop)
+                    continue
                 slow = started - last_slow >= 60
                 try:
                     collector.once(slow)
@@ -734,7 +810,8 @@ def run_storage(config, once=False, sync_only=False):
                         last_prune = started
                     manager._cache_checkpoints()
                     manager.record_coverage()
-                except (OSError, sqlite3.Error):
+                except (OSError, sqlite3.Error) as exc:
+                    manager.storage_error(exc, "collect")
                     manager._ram()
                 if once:
                     return
