@@ -110,7 +110,9 @@ export function UbntSheet({ open, onClose, resource, controls, dashboardStatus }
       <div className="ubnt-sheet__toolbar">
         <span aria-live="polite">
           {controls.busy || operationRunning
-            ? 'Antenna operation in progress…'
+            ? operation?.kind === 'scan'
+              ? 'Scanning nearby Wi-Fi…'
+              : 'Antenna operation in progress…'
             : status?.checkedAt === null || status?.checkedAt === undefined
               ? 'No status timestamp'
               : `Updated ${formatRelativeTime(status.checkedAt)}`}
@@ -166,8 +168,9 @@ export function UbntSheet({ open, onClose, resource, controls, dashboardStatus }
       )}
       {ubntRecovering(status) && (
         <p role="status">
-          Antenna reconnecting after the network change. This can take a minute; status will update
-          automatically.
+          {operation?.kind === 'scan'
+            ? 'Waiting for antenna status during the scan. Results will update automatically.'
+            : 'Antenna reconnecting after the network change. This can take a minute; status will update automatically.'}
         </p>
       )}
       {status?.lastError && !ubntRecovering(status) && (
@@ -186,7 +189,9 @@ export function UbntSheet({ open, onClose, resource, controls, dashboardStatus }
             <strong>{associated || 'Not associated'}</strong>
             <small>
               {ubntRecovering(status)
-                ? 'Reconnecting · showing the last observation'
+                ? operation?.kind === 'scan'
+                  ? 'Scanning · showing the last observation'
+                  : 'Reconnecting · showing the last observation'
                 : !ubntRadioConnected(status)
                   ? 'Not currently associated · last configured network'
                   : status?.state.signalDbm === null || status?.state.signalDbm === undefined
@@ -217,6 +222,76 @@ export function UbntSheet({ open, onClose, resource, controls, dashboardStatus }
             }}
           />
         )}
+
+        <section className="panel-card">
+          <header className="ubnt-section-heading">
+            <div>
+              <h3>Nearby networks</h3>
+              <p>The latest scan retained by the antenna controller.</p>
+            </div>
+            <strong>{status?.networks.length ?? 0} visible</strong>
+          </header>
+          <div className="ubnt-network-list">
+            {status?.networks.length ? (
+              status.networks.map((network) => {
+                const canProvision =
+                  network.supported &&
+                  !network.known &&
+                  (network.security === 'wpa' || network.security === 'none');
+                return (
+                  <article
+                    className={
+                      network.connected ? 'ubnt-network ubnt-network--connected' : 'ubnt-network'
+                    }
+                    key={`${network.ssid}:${network.bssid}`}
+                  >
+                    <span>
+                      <strong>{network.ssid || 'Hidden network'}</strong>
+                      <small>{networkDetails(network).join(' · ')}</small>
+                    </span>
+                    <div className="ubnt-network__control">
+                      <NetworkState network={network} />
+                      {network.known ? (
+                        network.profiles.map((profile) => (
+                          <button
+                            type="button"
+                            disabled={controlsDisabled || network.connected}
+                            onClick={() => void controls.connect(profile)}
+                            key={profile}
+                          >
+                            {network.connected
+                              ? 'Connected'
+                              : network.profiles.length > 1
+                                ? profile
+                                : 'Connect'}
+                          </button>
+                        ))
+                      ) : canProvision ? (
+                        <button
+                          type="button"
+                          disabled={controlsDisabled}
+                          onClick={() => {
+                            setEditingProfileName(null);
+                            if (network.security === 'none') provisionOpenNetwork(network);
+                            else setJoiningNetwork(network);
+                          }}
+                        >
+                          {network.security === 'none' ? 'Add & connect' : 'Add'}
+                        </button>
+                      ) : null}
+                    </div>
+                  </article>
+                );
+              })
+            ) : (
+              <p className="ubnt-sheet__empty">
+                {operationRunning && operation?.kind === 'scan'
+                  ? 'Scanning nearby networks…'
+                  : 'No scan results yet. Run a nearby Wi-Fi scan.'}
+              </p>
+            )}
+          </div>
+        </section>
 
         <section className="panel-card">
           <header className="ubnt-section-heading">
@@ -304,76 +379,6 @@ export function UbntSheet({ open, onClose, resource, controls, dashboardStatus }
             }}
           />
         )}
-
-        <section className="panel-card">
-          <header className="ubnt-section-heading">
-            <div>
-              <h3>Nearby networks</h3>
-              <p>The latest scan retained by the antenna controller.</p>
-            </div>
-            <strong>{status?.networks.length ?? 0} visible</strong>
-          </header>
-          <div className="ubnt-network-list">
-            {status?.networks.length ? (
-              status.networks.map((network) => {
-                const canProvision =
-                  network.supported &&
-                  !network.known &&
-                  (network.security === 'wpa' || network.security === 'none');
-                return (
-                  <article
-                    className={
-                      network.connected ? 'ubnt-network ubnt-network--connected' : 'ubnt-network'
-                    }
-                    key={`${network.ssid}:${network.bssid}`}
-                  >
-                    <span>
-                      <strong>{network.ssid || 'Hidden network'}</strong>
-                      <small>{networkDetails(network).join(' · ')}</small>
-                    </span>
-                    <div className="ubnt-network__control">
-                      <NetworkState network={network} />
-                      {network.known ? (
-                        network.profiles.map((profile) => (
-                          <button
-                            type="button"
-                            disabled={controlsDisabled || network.connected}
-                            onClick={() => void controls.connect(profile)}
-                            key={profile}
-                          >
-                            {network.connected
-                              ? 'Connected'
-                              : network.profiles.length > 1
-                                ? profile
-                                : 'Connect'}
-                          </button>
-                        ))
-                      ) : canProvision ? (
-                        <button
-                          type="button"
-                          disabled={controlsDisabled}
-                          onClick={() => {
-                            setEditingProfileName(null);
-                            if (network.security === 'none') provisionOpenNetwork(network);
-                            else setJoiningNetwork(network);
-                          }}
-                        >
-                          {network.security === 'none' ? 'Add & connect' : 'Add'}
-                        </button>
-                      ) : null}
-                    </div>
-                  </article>
-                );
-              })
-            ) : (
-              <p className="ubnt-sheet__empty">
-                {operationRunning && operation?.kind === 'scan'
-                  ? 'Scanning nearby networks…'
-                  : 'No scan results yet. Run a nearby Wi-Fi scan.'}
-              </p>
-            )}
-          </div>
-        </section>
 
         <aside className="ubnt-sheet__domain-note">
           Internet-route status is owned by the OpenWrt tile and reconciles on its independent poll.
