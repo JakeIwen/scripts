@@ -55,6 +55,11 @@ command is reserved for maintenance/canary work and still requires `resume`.
 See `ubnt/README.md`; do not conflate that maintenance override with dashboard
 network selections when changing roaming behavior.
 
+Channel-aware connections may temporarily pin the live radio to a fresh scan's
+matching AP frequency. Keep the standard-channel fallback and full-survey
+normalization. Save the full allowlist into profile copies without changing the
+live configuration to conceal a pin that is still applied to the radio.
+
 ## Vanpi CAN/UDS workspace
 
 The primary CAN-bus research and diagnostic toolkit is a separate Git checkout

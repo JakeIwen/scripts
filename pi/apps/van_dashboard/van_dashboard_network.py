@@ -359,13 +359,15 @@ class UbntWifiController:
     """Run scans and network changes off-thread through the reusable JSON tool."""
 
     TIMEOUTS = {
-        "status": 20,
-        "scan": 45,
-        "connect": 410,
-        "provision": 410,
-        "update-profile": 430,
-        "resume": 20,
-        "forget": 410,
+        # Allow the CLI's 60-second reads plus process/SSH cleanup. Mutations
+        # include a preflight read, remote work, and post-reload reconciliation.
+        "status": 70,
+        "scan": 70,
+        "connect": 550,
+        "provision": 550,
+        "update-profile": 570,
+        "resume": 85,
+        "forget": 550,
         "starlink": 650,
     }
     STARLINK_BOOT_SECONDS = 30

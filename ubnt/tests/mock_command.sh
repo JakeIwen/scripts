@@ -36,6 +36,10 @@ case $command_name in
         exit "${MOCK_PING_STATUS:-0}"
         ;;
     softrestart)
+        scan_channels=$(awk -F= '$1 == "wireless.1.scan_list.channels" {print $2}' "$UBNT_SYSTEM_CFG")
+        if [ -n "${MOCK_RELOAD_CHANNELS:-}" ]; then
+            printf '%s\n' "$scan_channels" >> "$MOCK_RELOAD_CHANNELS"
+        fi
         printf 'aaa.1.wpa.psk=sensitive-test-value\n'
         if [ -n "${UBNT_AUTHORIZED_KEYS:-}" ]; then
             printf '%s\n' 'admin-key' > "$UBNT_AUTHORIZED_KEYS"
@@ -46,7 +50,8 @@ case $command_name in
             $1 == "wireless.1.ssid" { wireless_ssid = $2 }
             END { if (wpa) print wpa_ssid; else print wireless_ssid }
         ' "$UBNT_SYSTEM_CFG")
-        if [ "$target" != "${MOCK_FAIL_SSID:-}" ]; then
+        if [ "$target" != "${MOCK_FAIL_SSID:-}" ] && \
+            [ "$scan_channels" != "${MOCK_FAIL_FREQUENCY:-}" ]; then
             printf '%s\n' "$target" > "$MOCK_ASSOCIATED"
         fi
         ;;

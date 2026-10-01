@@ -61,20 +61,27 @@ even if the initiating SSH connection hangs up during an airOS reload.
 Flash-save completion and failures are logged explicitly, and persistent SSH
 keys are restored after both reloads and profile writes.
 
-`connect` always applies a temporary copy of the saved profile with an explicit
-allowlist of the 11 standard US 2.4 GHz center frequencies (2412 through 2462
-MHz in 5 MHz steps) and waits up to 35 seconds for association. This excludes
-airOS's proprietary 2 MHz-offset Channel Shifting frequencies and does not pin
-the live radio to a frequency from an earlier scan. Automatic and dashboard
-site surveys aggregate three passes because individual airOS scans can omit
-visible networks. Before a survey, the manager detects and replaces any stale,
-incomplete, or unrestricted live scan list with the standard allowlist using
-one airOS reload; otherwise `iwlist` could return only one channel or waste time
-on shifted frequencies. `UBNT_SCAN_PASSES`, `UBNT_SCAN_SETTLE_SECONDS`, and
-`UBNT_ASSOCIATE_FALLBACK_SECONDS` can tune this behavior. Automatic operations
-do not overwrite saved profiles. The manager records the configuration digest
-after each change that it applies itself, so runtime normalization is not
-confused with a native airOS GUI change.
+`connect` first uses the frequency of the strongest matching SSID/security/AP
+from a completed scan at most five minutes old. It gives that channel 15 seconds
+for association, then reloads with all 11 standard US 2.4 GHz center frequencies
+(2412 through 2462 MHz in 5 MHz steps) and waits up to 60 seconds if the targeted
+attempt fails. Missing, stale, or nonstandard-frequency hints go directly to the
+full allowlist. Channel hints never overwrite saved profiles. `UBNT_SCAN_MAX_AGE_SECONDS`,
+`UBNT_ASSOCIATE_FAST_SECONDS`, and `UBNT_ASSOCIATE_FALLBACK_SECONDS` tune these bounds.
+
+Automatic and dashboard site surveys aggregate three passes because individual
+airOS scans can omit visible networks. Before a survey, the manager replaces any
+live channel pin or incomplete/unrestricted scan list with the standard allowlist
+using one airOS reload. This prevents a successful targeted connection from
+limiting later discovery, and excludes proprietary 2 MHz-offset Channel Shifting
+frequencies. `UBNT_SCAN_PASSES` and `UBNT_SCAN_SETTLE_SECONDS` tune surveys. Saved
+profile copies always contain the full allowlist; saving never changes the live
+configuration behind the radio's back. The manager records the configuration
+digest after changes it applies itself, keeping them distinct from native GUI edits.
+
+The Pi CLI allows 60 seconds for status and scan requests. Dashboard process
+deadlines include headroom for those reads and post-reload reconciliation;
+a slow preliminary status read must not prevent a connection attempt after 15 seconds.
 
 A user-requested switch owns one 120-second protection window beginning before
 its reload; recovery attempts do not extend that deadline. If association times

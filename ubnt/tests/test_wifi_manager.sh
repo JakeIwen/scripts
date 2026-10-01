@@ -119,7 +119,7 @@ export UBNT_AUTO_SCAN_INTERVAL=0
 "$manager" auto >/dev/null
 unset UBNT_AUTO_SCAN_INTERVAL
 grep -Fqx 'wireless.1.scan_list.status=enabled' "$test_root/system.cfg"
-grep -Fqx "wireless.1.scan_list.channels=$standard_scan_frequencies" "$test_root/system.cfg"
+grep -Fqx 'wireless.1.scan_list.channels=2437' "$test_root/system.cfg"
 grep -q 'applying standard scan-frequency allowlist reason=full-scan' "$test_root/wifi.log"
 [ "$(sed -n '1p' "$MOCK_IWLIST_COUNT_FILE")" -eq 3 ]
 grep -q '|2412|1|' "$test_root/state/scan.results"
@@ -362,5 +362,61 @@ fi
 [ ! -e "$test_root/state/paused" ]
 rm "$test_root/state/lock/pid"
 rmdir "$test_root/state/lock"
+
+# Fresh observations select the matching AP and security, not a stronger
+# unrelated BSSID or an identically named open network. Saved profiles stay
+# unchanged, and the next full survey clears the runtime-only channel pin.
+printf '%s\n' 'wireless.1.ap=00:11:22:33:44:55' >> "$profile"
+profile_hash_before=$(md5 -q "$profile" 2>/dev/null || md5sum "$profile" | awk '{print $1}')
+printf '%s\n' \
+    '90|A Network With Spaces|none|2462|11|00:11:22:33:44:66|-30' \
+    '95|A Network With Spaces|wpa|2412|1|00:11:22:33:44:55|-20' \
+    '55|A Network With Spaces|none|2437|6|00:11:22:33:44:55|-44' > "$test_root/state/scan.results"
+now=$(awk '{split($1,a,"."); print a[1]}' "$UBNT_UPTIME_FILE")
+printf '%s\n' "$now" > "$test_root/state/scan-completed"
+export MOCK_RELOAD_CHANNELS="$test_root/reload-channels"
+printf 'old-network\n' > "$test_root/associated"
+"$manager" connect 'A Network With Spaces' >/dev/null
+[ "$(cat "$MOCK_RELOAD_CHANNELS")" = 2437 ]
+profile_hash_after=$(md5 -q "$profile" 2>/dev/null || md5sum "$profile" | awk '{print $1}')
+[ "$profile_hash_before" = "$profile_hash_after" ]
+
+# Saving never hides the radio's actual pin from the next full scan.
+"$manager" save-current 'Fast saved copy' >/dev/null
+grep -Fqx "wireless.1.scan_list.channels=$standard_scan_frequencies" "$test_root/profiles/Fast saved copy"
+grep -Fqx 'wireless.1.scan_list.channels=2437' "$test_root/system.cfg"
+cp "$test_root/state/scan.results" "$test_root/hint-results"
+"$manager" dashboard-scan >/dev/null
+grep -Fqx "wireless.1.scan_list.channels=$standard_scan_frequencies" "$test_root/system.cfg"
+grep -q '|2412|1|' "$test_root/state/scan.results"
+grep -q '|2462|11|' "$test_root/state/scan.results"
+
+# A failed targeted attempt falls back to all channels in the same request.
+cp "$test_root/hint-results" "$test_root/state/scan.results"
+printf '%s\n' "$now" > "$test_root/state/scan-completed"
+printf 'old-network\n' > "$test_root/associated"
+: > "$MOCK_RELOAD_CHANNELS"
+export MOCK_FAIL_FREQUENCY=2437 UBNT_ASSOCIATE_FAST_SECONDS=0
+"$manager" connect 'A Network With Spaces' >/dev/null
+unset MOCK_FAIL_FREQUENCY UBNT_ASSOCIATE_FAST_SECONDS
+[ "$(sed -n '1p' "$MOCK_RELOAD_CHANNELS")" = 2437 ]
+[ "$(sed -n '2p' "$MOCK_RELOAD_CHANNELS")" = "$standard_scan_frequencies" ]
+[ "$(wc -l < "$MOCK_RELOAD_CHANNELS" | tr -d '[:space:]')" -eq 2 ]
+[ "$(cat "$test_root/associated")" = 'A Network With Spaces' ]
+
+# Stale, unknown-age and nonstandard-channel observations cannot pin a radio.
+for hint_case in stale missing shifted; do
+    printf '%s\n' "$now" > "$test_root/state/scan-completed"
+    cp "$test_root/hint-results" "$test_root/state/scan.results"
+    case $hint_case in
+        stale) printf '%s\n' "$((now - 301))" > "$test_root/state/scan-completed" ;;
+        missing) rm "$test_root/state/scan-completed" ;;
+        shifted) sed 's/2437/2439/' "$test_root/hint-results" > "$test_root/state/scan.results" ;;
+    esac
+    printf 'old-network\n' > "$test_root/associated"
+    : > "$MOCK_RELOAD_CHANNELS"
+    "$manager" connect 'A Network With Spaces' >/dev/null
+    [ "$(cat "$MOCK_RELOAD_CHANNELS")" = "$standard_scan_frequencies" ]
+done
 
 printf 'wifi-manager: ok\n'

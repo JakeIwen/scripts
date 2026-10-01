@@ -30,6 +30,7 @@ GUI_TRANSITION_FILE="$STATE_DIR/gui-transition-started"
 GUI_TARGET_FILE="$STATE_DIR/gui-transition-target"
 SCAN_FILE="$STATE_DIR/scan.results"
 SCAN_RAW="$STATE_DIR/scan.raw"
+SCAN_COMPLETED_FILE="$STATE_DIR/scan-completed"
 APPLY_CFG="$STATE_DIR/apply.cfg"
 PRIORITY_FILE="$CONFIG_DIR/wifi-priority"
 PREFER_DENLINK_FLAG="$CONFIG_DIR/prefer_denlink"
@@ -42,7 +43,9 @@ STANDARD_SCAN_FREQUENCIES=${UBNT_STANDARD_SCAN_FREQUENCIES:-"2412, 2417, 2422, 2
 AUTO_SCAN_INTERVAL=${UBNT_AUTO_SCAN_INTERVAL:-120}
 SCAN_PASSES=${UBNT_SCAN_PASSES:-3}
 SCAN_SETTLE_SECONDS=${UBNT_SCAN_SETTLE_SECONDS:-2}
-ASSOCIATE_FALLBACK_SECONDS=${UBNT_ASSOCIATE_FALLBACK_SECONDS:-35}
+ASSOCIATE_FAST_SECONDS=${UBNT_ASSOCIATE_FAST_SECONDS:-15}
+ASSOCIATE_FALLBACK_SECONDS=${UBNT_ASSOCIATE_FALLBACK_SECONDS:-60}
+SCAN_MAX_AGE_SECONDS=${UBNT_SCAN_MAX_AGE_SECONDS:-300}
 DHCP_SECONDS=${UBNT_DHCP_SECONDS:-30}
 FAILURES_BEFORE_SWITCH=${UBNT_FAILURES_BEFORE_SWITCH:-3}
 COOLDOWN_SECONDS=${UBNT_COOLDOWN_SECONDS:-3600}
@@ -283,6 +286,7 @@ wait_for_dhcp() {
 }
 
 scan_networks() {
+    rm -f "$SCAN_COMPLETED_FILE"
     if ! normalize_runtime_scan_list full-scan preserve-gui; then
         log_message "unable to apply standard scan-frequency allowlist"
         return 1
@@ -306,6 +310,7 @@ scan_networks() {
         log_message "multi-pass site scan contained no visible SSIDs"
         return 1
     fi
+    uptime_seconds > "$SCAN_COMPLETED_FILE"
     return 0
 }
 
@@ -474,6 +479,23 @@ set_scan_list() {
     mv "$config_rewrite" "$config_path"
 }
 
+recent_frequency_for_profile() {
+    [ -s "$SCAN_FILE" ] || return 1
+    frequency_scan_time=$(sed -n '1p' "$SCAN_COMPLETED_FILE" 2>/dev/null)
+    frequency_now=$(uptime_seconds)
+    case $frequency_scan_time:$frequency_now in
+        *[!0-9:]*|:*|*:) return 1 ;;
+    esac
+    frequency_age=$((frequency_now - frequency_scan_time))
+    [ "$frequency_age" -ge 0 ] && [ "$frequency_age" -le "$SCAN_MAX_AGE_SECONDS" ] || return 1
+    frequency_hint=$(scan_field_for_profile "$1" 4)
+    case $frequency_hint in
+        2412|2417|2422|2427|2432|2437|2442|2447|2452|2457|2462)
+            printf '%s\n' "$frequency_hint" ;;
+        *) return 1 ;;
+    esac
+}
+
 begin_transition() {
     existing_transition=$(sed -n '1p' "$TRANSITION_FILE" 2>/dev/null)
     case $existing_transition in
@@ -573,16 +595,28 @@ connect_profile() {
     fi
 
     begin_transition
-    cp "$profile_path" "$APPLY_CFG" || return 1
-    set_scan_list "$APPLY_CFG" enabled "$STANDARD_SCAN_FREQUENCIES" || return 1
-    log_message "connecting standard-frequency profile=$requested_profile ssid=$target_ssid"
-    apply_config || {
-        log_message "soft restart failed profile=$requested_profile"
-        return 1
-    }
-    if ! wait_for_link "$target_ssid" "$ASSOCIATE_FALLBACK_SECONDS"; then
-        log_message "association timeout profile=$requested_profile ssid=$target_ssid"
-        return 1
+    selected_frequency=$(recent_frequency_for_profile "$profile_path") || selected_frequency=
+    link_result=failed
+    if [ -n "$selected_frequency" ]; then
+        cp "$profile_path" "$APPLY_CFG" || return 1
+        set_scan_list "$APPLY_CFG" enabled "$selected_frequency" || return 1
+        log_message "connecting scanned-frequency profile=$requested_profile ssid=$target_ssid frequency=$selected_frequency"
+        if apply_config && wait_for_link "$target_ssid" "$ASSOCIATE_FAST_SECONDS"; then
+            link_result=success
+        fi
+    fi
+    if [ "$link_result" != success ]; then
+        cp "$profile_path" "$APPLY_CFG" || return 1
+        set_scan_list "$APPLY_CFG" enabled "$STANDARD_SCAN_FREQUENCIES" || return 1
+        log_message "connecting standard-frequency fallback profile=$requested_profile ssid=$target_ssid"
+        apply_config || {
+            log_message "soft restart failed profile=$requested_profile"
+            return 1
+        }
+        if ! wait_for_link "$target_ssid" "$ASSOCIATE_FALLBACK_SECONDS"; then
+            log_message "association timeout profile=$requested_profile ssid=$target_ssid"
+            return 1
+        fi
     fi
 
     rm -f "$TRANSITION_FILE"
@@ -793,7 +827,6 @@ provision_profile() {
     provision_status=$?
     case $provision_status in
         0|2)
-            set_scan_list "$SYSTEM_CFG" enabled "$STANDARD_SCAN_FREQUENCIES" || return 1
             save_current_profile "$new_ssid" || return 1
             [ "$provision_status" -ne 0 ] || rm -f "$MANUAL_HOLD_FILE"
             rm -f "$PENDING_PROFILE"
@@ -1372,6 +1405,9 @@ save_current_profile() {
         cp "$save_destination" "$PROFILE_DIR/.disabled/$save_name.backup.$save_uptime.$$" || return 1
     fi
     cp "$SYSTEM_CFG" "$PROFILE_DIR/.new.$$.cfg" || return 1
+    # Normalize the saved copy only. The live config must continue to describe
+    # the actual radio so the next survey detects and clears a fast-connect pin.
+    set_scan_list "$PROFILE_DIR/.new.$$.cfg" enabled "$STANDARD_SCAN_FREQUENCIES" || return 1
     chmod 750 "$PROFILE_DIR/.new.$$.cfg"
     mv "$PROFILE_DIR/.new.$$.cfg" "$save_destination" || return 1
     persist_profiles || return 1

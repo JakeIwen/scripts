@@ -273,10 +273,10 @@ class UbntWifiClient:
         return result, parse_snapshot(result.stdout, self.wall_clock()) if operation in ("status", "scan") else None
 
     def status(self):
-        return self._remote("status", timeout=15)[1]
+        return self._remote("status", timeout=60)[1]
 
     def scan(self):
-        return self._remote("scan", timeout=35)[1]
+        return self._remote("scan", timeout=60)[1]
 
     def _change_and_verify(self, operation, protocol, timeout, verified):
         # Never replay a mutation after losing SSH: it can still own the remote

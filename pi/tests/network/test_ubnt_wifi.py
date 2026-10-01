@@ -77,6 +77,17 @@ class SnapshotParserTests(unittest.TestCase):
 
 
 class ClientTests(unittest.TestCase):
+    def test_status_and_scan_allow_slow_antenna_snapshots(self):
+        def command(args, timeout, input_text=None):
+            # The observed 15.25-second snapshot must fit within both budgets.
+            if timeout < 15.25:
+                raise subprocess.TimeoutExpired(args, timeout)
+            self.assertEqual(timeout, 60)
+            return Result(stdout=SNAPSHOT)
+        client = ubnt_wifi.UbntWifiClient(command=command)
+        self.assertTrue(client.status()["reachable"])
+        self.assertTrue(client.scan()["reachable"])
+
     def recovery_client(self, results, seconds=15):
         calls = []
         now = [0]
