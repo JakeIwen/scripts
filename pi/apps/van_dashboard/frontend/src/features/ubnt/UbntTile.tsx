@@ -27,7 +27,7 @@ export function UbntTile({ status, error, refreshing, dashboardStatus, onOpen }:
   const summary = ubntRecovering(status)
     ? 'Antenna reconnecting; waiting for fresh status…'
     : status?.starlinkPending
-      ? 'Starlink connection queued…'
+      ? 'Starlink antenna change queued…'
       : status?.reachable === false
         ? 'No UBNT Ethernet response'
         : status?.reachable === true

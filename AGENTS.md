@@ -55,6 +55,12 @@ command is reserved for maintenance/canary work and still requires `resume`.
 See `ubnt/README.md`; do not conflate that maintenance override with dashboard
 network selections when changing roaming behavior.
 
+Dashboard Starlink power-off releases denlink and scans for another saved
+network immediately, keeping the denlink profile and leaving unrelated Wi-Fi
+connections alone. Serialize power intents behind active antenna mutations;
+never kill a radio reload to accelerate power-off. Preserve explicit maintenance
+pauses and the bounded cooldown that prevents reselecting the shutting-down AP.
+
 Channel-aware connections may temporarily pin the live radio to a fresh scan's
 matching AP frequency. Keep the standard-channel fallback and full-survey
 normalization. Save the full allowlist into profile copies without changing the

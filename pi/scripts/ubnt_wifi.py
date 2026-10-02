@@ -26,6 +26,7 @@ REMOTE_COMMANDS = {
     "update-profile": "update-profile-stdin",
     "resume": "resume",
     "forget": "forget-stdin",
+    "starlink-off": "starlink-off",
 }
 ABORT_REQUESTED = False
 
@@ -467,6 +468,18 @@ class UbntWifiClient:
             "wifi": self.status(),
         }
 
+    def starlink_off(self):
+        # Check/act on the device under its manager lock. A preliminary full
+        # dashboard snapshot would unnecessarily delay releasing the radio.
+        _, refreshed = self._change_and_verify(
+            "starlink-off", None, 360,
+            lambda wifi: wifi["state"]["configured_ssid"] != "denlink"
+            and not (wifi["state"]["associated_ssid"] == "denlink"
+                     and (wifi["state"]["ccq_percent"] or 0) > 0),
+        )
+        return {"message": "Starlink is off; UBNT is no longer targeting denlink",
+                "wifi": refreshed}
+
     def forget(self, profile):
         profile = _validate_text(profile, "profile", 128)
         if profile.startswith('.') or '/' in profile or profile in ('reset', 'system.cfg'):
@@ -505,6 +518,8 @@ def main(argv=None):
             result = {"ok": True, "wifi": client.status()}
         elif args.action == "scan":
             result = {"ok": True, "wifi": client.scan(), "message": "UBNT scan complete"}
+        elif args.action == "starlink-off":
+            result = {"ok": True, **client.starlink_off()}
         elif args.action == "forget":
             payload = _read_object()
             if set(payload) != {"profile"}:

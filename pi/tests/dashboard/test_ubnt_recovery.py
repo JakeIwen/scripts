@@ -56,23 +56,80 @@ class StarlinkConnectionTests(unittest.TestCase):
         manager.STARLINK_BOOT_SECONDS = 60
         with mock.patch.object(manager, "_tool_result", return_value={"wifi": self.wifi()}) as tool:
             manager.start("starlink")
+            boot_worker = manager.thread
             self.assertIn("boot", manager.snapshot()["operation"]["message"])
             manager.starlink_power_changed("off")
+            boot_worker.join(2)
+            manager.starlink_thread.join(2)
             manager.thread.join(2)
             self.assertFalse(manager.thread.is_alive())
-        self.assertEqual([c.args[0] for c in tool.call_args_list], ["resume"])
+        self.assertEqual([c.args[0] for c in tool.call_args_list], ["starlink-off"])
 
     def test_power_on_queues_behind_existing_operation_and_off_cancels_queue(self):
         manager = self.manager()
         manager.operation["status"] = "running"
         manager.operation["kind"] = "provision"
-        manager.starlink_power_changed("on")
-        self.assertTrue(manager.snapshot()["starlink_pending"])
-        manager.starlink_power_changed("off")
-        manager.starlink_thread.join(2)
-        self.assertFalse(manager.starlink_thread.is_alive())
+        with mock.patch.object(manager, "_tool_result", return_value={"wifi": self.wifi()}) as tool:
+            manager.starlink_power_changed("on")
+            old_queue = manager.starlink_thread
+            self.assertTrue(manager.snapshot()["starlink_pending"])
+            manager.starlink_power_changed("off")
+            old_queue.join(2)
+            self.assertFalse(old_queue.is_alive())
+            self.assertEqual(manager.snapshot()["operation"]["kind"], "provision")
+            tool.assert_not_called()
+            with manager.lock:
+                manager.operation["status"] = "complete"
+            manager.starlink_thread.join(2)
+            manager.thread.join(2)
+        self.assertEqual([c.args[0] for c in tool.call_args_list], ["starlink-off"])
         self.assertFalse(manager.snapshot()["starlink_pending"])
-        self.assertEqual(manager.snapshot()["operation"]["kind"], "provision")
+
+    def test_power_off_when_idle_dispatches_without_boot_delay_or_status_read(self):
+        manager = self.manager()
+        with mock.patch.object(manager, "_tool_result", return_value={"wifi": self.wifi()}) as tool:
+            manager.starlink_power_changed("off")
+            manager.starlink_thread.join(2)
+            manager.thread.join(2)
+        self.assertEqual([c.args[0] for c in tool.call_args_list], ["starlink-off"])
+        self.assertEqual(manager.snapshot()["operation"]["status"], "complete")
+
+    def test_latest_power_on_supersedes_queued_power_off(self):
+        manager = self.manager()
+        manager.operation.update(status="running", kind="scan")
+        with mock.patch.object(manager, "_connect_starlink", return_value={"wifi": self.wifi()}) as connect, \
+                mock.patch.object(manager, "_tool_result") as tool:
+            manager.starlink_power_changed("off")
+            old_queue = manager.starlink_thread
+            manager.starlink_power_changed("on")
+            old_queue.join(2)
+            with manager.lock:
+                manager.operation["status"] = "complete"
+            manager.starlink_thread.join(2)
+            manager.thread.join(2)
+        connect.assert_called_once()
+        tool.assert_not_called()
+
+    def test_power_off_waits_for_inflight_connect_before_releasing_denlink(self):
+        manager = self.manager()
+        entered, finish = threading.Event(), threading.Event()
+        def connecting(_abort):
+            entered.set()
+            if not finish.wait(2):
+                raise RuntimeError("test connect did not finish")
+            return {"wifi": self.wifi()}
+        with mock.patch.object(manager, "_connect_starlink", side_effect=connecting), \
+                mock.patch.object(manager, "_tool_result", return_value={"wifi": self.wifi()}) as tool:
+            manager.start("starlink")
+            worker = manager.thread
+            self.assertTrue(entered.wait(1))
+            manager.starlink_power_changed("off")
+            tool.assert_not_called()
+            finish.set()
+            worker.join(2)
+            manager.starlink_thread.join(2)
+            manager.thread.join(2)
+        self.assertEqual([c.args[0] for c in tool.call_args_list], ["starlink-off"])
 
     def test_queued_power_on_starts_after_existing_operation(self):
         manager = self.manager()

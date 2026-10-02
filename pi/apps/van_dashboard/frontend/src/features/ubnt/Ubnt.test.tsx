@@ -235,7 +235,7 @@ describe('antenna reload recovery', () => {
     status.operation = { ...status.operation, status: 'running', kind: 'connect' };
     render(<UbntSheet open onClose={() => {}} resource={resource(status)} controls={controls()} />);
     expect(screen.getByText(/Antenna status could not refresh/)).toBeInTheDocument();
-    expect(screen.getByText(/Starlink connection queued/)).toBeInTheDocument();
+    expect(screen.getByText(/Starlink antenna change queued/)).toBeInTheDocument();
   });
 });
 

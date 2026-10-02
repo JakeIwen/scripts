@@ -77,6 +77,29 @@ class SnapshotParserTests(unittest.TestCase):
 
 
 class ClientTests(unittest.TestCase):
+    def test_starlink_off_is_sent_before_any_status_read(self):
+        snapshot = SNAPSHOT.replace(encoded('denlink'), encoded('Other Network'))
+        client, calls = self.recovery_client([Result(), Result(stdout=snapshot)])
+        result = client.starlink_off()
+        self.assertTrue(calls[0].endswith(' starlink-off'))
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(result['wifi']['state']['associated_ssid'], 'Other Network')
+
+    def test_starlink_off_reconciles_after_reload_without_replaying(self):
+        snapshot = SNAPSHOT.replace(encoded('denlink'), encoded('Other Network'))
+        client, calls = self.recovery_client([
+            Result(255, stderr='Connection closed by remote host'),
+            Result(stdout=SNAPSHOT), Result(stdout=snapshot),
+        ])
+        client.starlink_off()
+        self.assertEqual(sum(c.endswith(' starlink-off') for c in calls), 1)
+
+    def test_starlink_off_does_not_claim_success_while_still_targeting_denlink(self):
+        client, calls = self.recovery_client([Result(), Result(stdout=SNAPSHOT.replace('|991|', '|0|'))])
+        with self.assertRaisesRegex(ubnt_wifi.UbntWifiError, 'could not be confirmed'):
+            client.starlink_off()
+        self.assertEqual(sum(c.endswith(' starlink-off') for c in calls), 1)
+
     def test_status_and_scan_allow_slow_antenna_snapshots(self):
         def command(args, timeout, input_text=None):
             # The observed 15.25-second snapshot must fit within both budgets.

@@ -208,7 +208,7 @@ install_lock_traps() {
     trap 'exit 130' INT
     trap 'exit 143' TERM
     case ${command_name:-} in
-        manual-connect-stdin|provision-stdin|update-profile-stdin|forget-stdin)
+        manual-connect-stdin|provision-stdin|update-profile-stdin|forget-stdin|starlink-off)
             # Wireless reloads can close the initiating SSH channel. Finish
             # saving credentials and restoring keys even after that hangup.
             trap '' HUP PIPE
@@ -1097,6 +1097,9 @@ manual_hold_active() {
 manual_transition_active() {
     configured_ssid=$(effective_ssid "$SYSTEM_CFG")
     [ -n "$configured_ssid" ] || return 1
+    case $configured_ssid in
+        vanpi-disconnected-*) return 1 ;;
+    esac
     if link_is_target "$configured_ssid"; then
         rm -f "$TRANSITION_FILE"
         return 1
@@ -1317,7 +1320,7 @@ set_cooldown() {
     cooldown_profile=$1
     cooldown_now=$(uptime_seconds)
     [ -n "$cooldown_now" ] || cooldown_now=0
-    printf '%s\n' $((cooldown_now + COOLDOWN_SECONDS)) > "$STATE_DIR/cooldown.$cooldown_profile"
+    printf '%s\n' $((cooldown_now + ${2:-$COOLDOWN_SECONDS})) > "$STATE_DIR/cooldown.$cooldown_profile"
 }
 
 choose_candidate() {
@@ -1468,6 +1471,46 @@ disable_profile() {
     log_message "disabled profile recoverably profile=$disable_name"
 }
 
+starlink_power_off() {
+    off_configured=$(effective_ssid "$SYSTEM_CFG")
+    if [ "$off_configured" != denlink ] && ! link_is_target denlink; then
+        log_message "Starlink powered off; antenna already targets another network"
+        return 0
+    fi
+    # Leave denlink's profile intact. Only the live wireless selection changes;
+    # use the current config to preserve management addressing and admin login.
+    log_message "Starlink powered off; releasing denlink immediately"
+    write_provision_config "$SYSTEM_CFG" "$APPLY_CFG" \
+        "vanpi-disconnected-$$" none '02:00:00:00:00:00' '' || return 1
+    apply_config || return 1
+    rm -f "$MANUAL_HOLD_FILE" "$TRANSITION_FILE" "$STATE_DIR/last_auto_scan"
+    clear_gui_transition
+    clear_failures
+    for off_profile in "$PROFILE_DIR"/*; do
+        [ -f "$off_profile" ] || continue
+        if [ "$(effective_ssid "$off_profile")" = denlink ]; then
+            # Let the powered-down AP disappear before cron can select it.
+            # Explicit power-on/connect requests bypass this short cooldown.
+            set_cooldown "${off_profile##*/}" 120
+        fi
+    done
+    [ ! -f "$PAUSE_FILE" ] || {
+        log_message "denlink released; explicit maintenance pause retained"
+        return 0
+    }
+    scan_networks || return 0
+    off_candidate=$(choose_candidate denlink) || {
+        log_message "denlink released; no other saved network visible"
+        return 0
+    }
+    log_message "Starlink power-off roaming selected profile=$off_candidate"
+    connect_profile "$off_candidate" yes
+    off_result=$?
+    [ "$off_result" -eq 0 ] || set_cooldown "$off_candidate"
+    # Releasing denlink succeeded even if the alternative is unavailable.
+    return 0
+}
+
 forget_profile() {
     forget_name=$1
     case $forget_name in
@@ -1521,7 +1564,7 @@ show_status() {
 }
 
 usage() {
-    printf 'Usage: %s auto|connect PROFILE|status|pause|resume|save-current PROFILE|disable PROFILE|dashboard-status|dashboard-scan|manual-connect-stdin|provision-stdin|update-profile-stdin|forget-stdin\n' "$0" >&2
+    printf 'Usage: %s auto|connect PROFILE|status|pause|resume|save-current PROFILE|disable PROFILE|dashboard-status|dashboard-scan|manual-connect-stdin|provision-stdin|update-profile-stdin|forget-stdin|starlink-off\n' "$0" >&2
 }
 
 command_name=${1:-}
@@ -1566,6 +1609,17 @@ case $command_name in
         acquire_lock || exit 1
         scan_networks || true
         emit_dashboard_snapshot
+        ;;
+    starlink-off)
+        [ "$#" -eq 1 ] || { usage; exit 1; }
+        off_lock_wait=0
+        until acquire_lock; do
+            [ "$off_lock_wait" -lt 120 ] || exit 1
+            sleep 2
+            off_lock_wait=$((off_lock_wait + 2))
+        done
+        starlink_power_off
+        exit $?
         ;;
     manual-connect-stdin)
         [ "$#" -eq 1 ] || { usage; exit 1; }

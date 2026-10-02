@@ -369,6 +369,7 @@ class UbntWifiController:
         "resume": 85,
         "forget": 550,
         "starlink": 650,
+        "starlink-off": 550,
     }
     STARLINK_BOOT_SECONDS = 30
     STARLINK_DISCOVERY_SECONDS = 180
@@ -428,25 +429,25 @@ class UbntWifiController:
             }
 
     def starlink_power_changed(self, state):
-        """Queue power-on intent behind any current mutation; power-off cancels it."""
+        """Serialize the latest power intent behind any active antenna mutation."""
+        if state not in ("on", "off"):
+            return
         with self.lock:
             if self.starlink_pending is not None:
                 self.starlink_pending.set()
                 self.starlink_pending = None
             if self.operation["status"] == "running" and self.operation["kind"] == "starlink":
                 self.abort_requested.set()
-            if state != "on":
-                return
             pending = threading.Event()
             self.starlink_pending = pending
             self.starlink_thread = threading.Thread(
-                target=self._queue_starlink, args=(pending,), name="starlink-queue", daemon=True
+                target=self._queue_starlink, args=(pending, state), name="starlink-queue", daemon=True
             )
             self.starlink_thread.start()
 
-    def _queue_starlink(self, pending):
+    def _queue_starlink(self, pending, state):
         while not pending.is_set():
-            if self.start("starlink", power_request=pending):
+            if self.start("starlink", {"power": state}, power_request=pending):
                 return
             pending.wait(0.5)
 
@@ -501,7 +502,9 @@ class UbntWifiController:
                 "started_at": int(self.wall_clock()),
                 "completed_at": None,
                 "message": (
-                    "Waiting for Starlink to boot and broadcast denlink…" if kind == "starlink" else
+                    ("Releasing denlink and looking for another saved network…"
+                     if (payload or {}).get("power") == "off" else
+                     "Waiting for Starlink to boot and broadcast denlink…") if kind == "starlink" else
                     f"{kind}: {(payload or {}).get('ssid') or (payload or {}).get('profile')}"
                     if (payload or {}).get('ssid') or (payload or {}).get('profile') else None
                 ),
@@ -650,6 +653,10 @@ class UbntWifiController:
         except RuntimeError:
             return None
 
+    def _power_request_superseded(self, kind):
+        with self.lock:
+            return kind == "starlink" and self.starlink_pending is not None
+
     def _run(self, kind, payload, abort_requested=None):
         abort_requested = abort_requested or threading.Event()
         error = None
@@ -657,29 +664,40 @@ class UbntWifiController:
         wifi = None
         final_kind = kind
         try:
-            result = (self._connect_starlink(abort_requested) if kind == "starlink"
+            result = (self._tool_result("starlink-off", abort_requested=abort_requested)
+                      if kind == "starlink" and payload.get("power") == "off" else
+                      self._connect_starlink(abort_requested) if kind == "starlink"
                       else self._tool_result(kind, payload, abort_requested))
             wifi = result["wifi"]
             message = result.get("message")
             if abort_requested.is_set() or result.get("aborted") is True:
                 final_kind = "abort"
-                if result.get("aborted") is not True:
+                if self._power_request_superseded(kind):
+                    # The queued power request owns cleanup. Do not add a slow
+                    # resume/status round trip or clear a maintenance pause.
+                    message = "Starlink power changed; handling the latest request"
+                elif result.get("aborted") is not True:
                     result = self._tool_result("resume")
                     wifi = result["wifi"]
-                message = "UBNT operation aborted; automatic selection resumed"
+                    message = "UBNT operation aborted; automatic selection resumed"
+                else:
+                    message = "UBNT operation aborted; automatic selection resumed"
             if kind in ("connect", "provision", "update-profile", "resume", "forget", "starlink") and self.on_change:
                 self.on_change()
         except Exception as exc:
             if abort_requested.is_set():
                 final_kind = "abort"
-                try:
-                    result = self._tool_result("resume")
-                    wifi = result["wifi"]
-                    message = "UBNT operation aborted; automatic selection resumed"
-                    if self.on_change:
-                        self.on_change()
-                except RuntimeError as resume_exc:
-                    error = f"UBNT operation stopped, but automatic selection could not resume: {resume_exc}"
+                if self._power_request_superseded(kind):
+                    message = "Starlink power changed; handling the latest request"
+                else:
+                    try:
+                        result = self._tool_result("resume")
+                        wifi = result["wifi"]
+                        message = "UBNT operation aborted; automatic selection resumed"
+                        if self.on_change:
+                            self.on_change()
+                    except RuntimeError as resume_exc:
+                        error = f"UBNT operation stopped, but automatic selection could not resume: {resume_exc}"
             else:
                 error = str(exc)
                 wifi = self._refresh_after_failure()

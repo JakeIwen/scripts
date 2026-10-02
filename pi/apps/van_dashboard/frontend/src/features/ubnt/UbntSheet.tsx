@@ -162,9 +162,7 @@ export function UbntSheet({ open, onClose, resource, controls, dashboardStatus }
       )}
       {resource.error && <p className="error-message">{resource.error.message}</p>}
       {status?.starlinkPending && (
-        <p role="status">
-          Starlink connection queued until the current antenna operation finishes.
-        </p>
+        <p role="status">Starlink antenna change queued until the current operation finishes.</p>
       )}
       {ubntRecovering(status) && (
         <p role="status">

@@ -30,10 +30,11 @@ The van dashboard uses these additional fixed manager entry points:
 /etc/persistent/scripts/wifi_manager.sh provision-stdin
 /etc/persistent/scripts/wifi_manager.sh update-profile-stdin
 /etc/persistent/scripts/wifi_manager.sh forget-stdin
+/etc/persistent/scripts/wifi_manager.sh starlink-off
 ```
 
 The first two emit credential-free, hex-encoded records for
-`pi/scripts/ubnt_wifi.py`. The remaining commands read their selection or provisioning
+`pi/scripts/ubnt_wifi.py`. The `*-stdin` commands read their selection or provisioning
 request from standard input so Wi-Fi passwords never appear in SSH arguments,
 process listings, command output, or manager logs. The dashboard lists saved
 profiles independently from scan results and can update a WPA password, Lock to
@@ -66,6 +67,20 @@ Dashboard network changes retain their lock and complete credential saving
 even if the initiating SSH connection hangs up during an airOS reload.
 Flash-save completion and failures are logged explicitly, and persistent SSH
 keys are restored after both reloads and profile writes.
+
+Dashboard Starlink power-off queues an immediate `starlink-off` operation. It
+releases denlink if configured or connected, clears that connection's temporary
+protection, and scans for the best other saved network without waiting for cron
+or repeated Internet failures. The denlink profile stays saved. A two-minute
+cooldown prevents automatic reselection while the AP powers down; an explicit
+power-on connection bypasses it. Other Wi-Fi connections are untouched, and an
+explicit maintenance pause is retained (disconnect only, no automatic roam).
+If another antenna operation is in progress, the latest power intent runs after
+that operation reaches a safe boundary; rapid off/on changes replace queued
+intent. The CLI reconciles a dropped reload connection without replaying the
+mutation. A deliberate disconnected state does not start another association
+grace period, so subsequent automatic scans can continue if no alternative is
+currently visible.
 
 `connect` first uses the frequency of the strongest matching SSID/security/AP
 from a completed scan at most five minutes old. It gives that channel 15 seconds
@@ -187,6 +202,7 @@ recovery and never syncs changes back into this checkout. See
 ./tests/test_parse_iwlist.sh
 ./tests/test_wifi_manager.sh
 ./tests/test_admin_login.sh
+./tests/test_starlink_power_off.sh
 ./tests/test_deployment.sh
 ./tests/test_profile.sh
 ```
