@@ -25,6 +25,8 @@ printf '%s\n' 'pi-rsa-key' 'pi-ed25519-key' > "$test_root/persistent_keys"
 
 profile="$test_root/profiles/A Network With Spaces"
 printf '%s\n' \
+    'users.1.name=ubnt' \
+    'users.1.password=live-admin-test-hash' \
     'wireless.1.ssid=A Network With Spaces' \
     'wireless.1.scan_list.status=disabled' \
     'wireless.1.scan_list.channels=' \
@@ -37,6 +39,8 @@ printf '%s\n' \
     'wpasupplicant.status=disabled' \
     'wpasupplicant.device.1.status=disabled' > "$test_root/profiles/missing-target"
 printf '%s\n' \
+    'users.1.name=ubnt' \
+    'users.1.password=obsolete-template-test-hash' \
     'wireless.1.ssid=template-network' \
     'wireless.1.ap=00:00:00:00:00:01' \
     'wireless.1.security.type=none' \
@@ -105,6 +109,8 @@ healthy_lines_after=$(wc -l < "$test_root/wifi.log")
 # Automatic selection clears a stale live frequency restriction before its
 # full scan, sees channels beyond the old pin, and can select another profile.
 printf '%s\n' \
+    'users.1.name=ubnt' \
+    'users.1.password=live-admin-test-hash' \
     'wireless.1.ssid=denlink' \
     'wireless.1.scan_list.status=enabled' \
     'wireless.1.scan_list.channels=2462' \
@@ -129,6 +135,8 @@ grep -q '|2462|11|' "$test_root/state/scan.results"
 # A native airOS GUI Apply is detected from the system configuration digest.
 # While it is stabilizing, the old association must not trigger a roaming scan.
 printf '%s\n' \
+    'users.1.name=ubnt' \
+    'users.1.password=live-admin-test-hash' \
     'wireless.1.ssid=manual-target' \
     'wireless.1.scan_list.status=enabled' \
     'wireless.1.scan_list.channels=2462' \
@@ -161,6 +169,8 @@ grep -q 'external airOS connection saved target=manual-target' "$test_root/wifi.
 # Expiry does not accidentally start the older 120-second generic transition
 # window. The prior healthy association is eligible immediately after expiry.
 printf '%s\n' \
+    'users.1.name=ubnt' \
+    'users.1.password=live-admin-test-hash' \
     'wireless.1.ssid=expired-target' \
     'wpasupplicant.status=disabled' \
     'wpasupplicant.device.1.status=disabled' > "$test_root/system.cfg"
@@ -224,6 +234,8 @@ printf '%s\n' \
 [ ! -e "$test_root/state/paused" ]
 [ ! -e "$test_root/state/manual-hold" ]
 [ -f "$test_root/profiles/dendelion" ]
+grep -qx 'users.1.password=live-admin-test-hash' "$test_root/profiles/dendelion"
+grep -qx 'users.1.password=live-admin-test-hash' "$test_root/system.cfg"
 grep -q '^wpasupplicant.profile.1.network.1.ssid=dendelion$' "$test_root/profiles/dendelion"
 grep -q '^wpasupplicant.profile.1.network.1.bssid=D8:EC:5E:8D:6A:3A$' "$test_root/profiles/dendelion"
 grep -q '^wpasupplicant.profile.1.network.1.psk=new-test-password$' "$test_root/profiles/dendelion"

@@ -507,8 +507,43 @@ begin_transition() {
     printf '%s\n' "$transition_uptime" > "$TRANSITION_FILE"
 }
 
+preserve_current_login() {
+    login_destination=$1
+    [ "$login_destination" != "$SYSTEM_CFG" ] || return 1
+    login_rewrite="$login_destination.login.$$"
+    # Pass paths only: password hashes must never enter command arguments or
+    # logs. The live device owns its admin login; network templates do not.
+    if ! awk -F= '
+        FILENAME == ARGV[1] {
+            if ($1 == "users.1.name") { name = substr($0, index($0, "=") + 1); names++ }
+            if ($1 == "users.1.password") { password = substr($0, index($0, "=") + 1); passwords++ }
+            next
+        }
+        {
+            if (names != 1 || passwords != 1 || name == "" || password == "") exit 1
+            if ($1 == "users.1.name") {
+                if (!wrote_name++) print "users.1.name=" name
+            } else if ($1 == "users.1.password") {
+                if (!wrote_password++) print "users.1.password=" password
+            } else print
+        }
+        END {
+            if (names != 1 || passwords != 1 || name == "" || password == "") exit 1
+            if (!wrote_name) print "users.1.name=" name
+            if (!wrote_password) print "users.1.password=" password
+        }
+    ' "$SYSTEM_CFG" "$login_destination" > "$login_rewrite"; then
+        rm -f "$login_rewrite"
+        log_message "cannot preserve live admin login; configuration left unchanged"
+        return 1
+    fi
+    chmod 600 "$login_rewrite" || return 1
+    mv "$login_rewrite" "$login_destination"
+}
+
 apply_config() {
     apply_mode=${1:-manager}
+    preserve_current_login "$APPLY_CFG" || return 1
     # Manager-driven configuration changes must not be mistaken for native
     # airOS GUI changes by the next automatic cron invocation.
     [ "$apply_mode" = preserve-gui ] || clear_gui_transition
@@ -755,6 +790,7 @@ write_provision_config() {
         [ "$saw_wpa_status" = yes ] || printf 'wpasupplicant.status=disabled\n' >> "$provision_output"
         [ "$saw_wpa_device_status" = yes ] || printf 'wpasupplicant.device.1.status=disabled\n' >> "$provision_output"
     fi
+    preserve_current_login "$provision_output"
 }
 
 provision_profile() {

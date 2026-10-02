@@ -4,6 +4,12 @@ The device stores full airOS configurations for saved networks under
 `/etc/persistent/profiles`. Those files contain credentials, are ignored by Git,
 and are never included in a normal code deployment.
 
+The antenna's live admin username/password take precedence over saved network
+templates. Before applying a profile or provisioning a new one, the manager
+copies only those login fields from the current device configuration, without
+logging them or passing them in command arguments. Missing or ambiguous live
+credentials fail closed. Upstream Wi-Fi passwords remain network-specific.
+
 ## Manager commands
 
 On the NanoStation:
@@ -180,6 +186,7 @@ recovery and never syncs changes back into this checkout. See
 ```sh
 ./tests/test_parse_iwlist.sh
 ./tests/test_wifi_manager.sh
+./tests/test_admin_login.sh
 ./tests/test_deployment.sh
 ./tests/test_profile.sh
 ```

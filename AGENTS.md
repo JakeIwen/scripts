@@ -60,6 +60,12 @@ matching AP frequency. Keep the standard-channel fallback and full-survey
 normalization. Save the full allowlist into profile copies without changing the
 live configuration to conceal a pin that is still applied to the radio.
 
+The live UBNT admin login belongs to the device, not a saved Wi-Fi profile.
+Preserve it when applying old profiles or provisioning from templates. Never
+log credential fields or pass hashes in process arguments. Normalize saved
+login fields only from an explicitly selected trusted source, with a private
+backup and verification that upstream Wi-Fi credentials remain unchanged.
+
 ## Vanpi CAN/UDS workspace
 
 The primary CAN-bus research and diagnostic toolkit is a separate Git checkout
