@@ -29,7 +29,9 @@ from urllib.parse import unquote, urlsplit
 
 from flask import Flask, jsonify, render_template, request
 
-try:
+if __package__:
+    from . import config, identity, library, media_models, naming, playback, routes, service
+    from .players import sonos_volume, vlc_player
     from .video_asset_catalog import (
         CatalogConflict,
         CatalogError,
@@ -46,7 +48,17 @@ try:
         ResolvedTorrentFile,
         TorrentFileIdentity,
     )
-except ImportError:  # Direct execution from the Pi's flat deployment directory.
+else:  # Direct execution from the Pi's flat deployment directory.
+    import config  # type: ignore[no-redef]
+    import identity  # type: ignore[no-redef]
+    import library  # type: ignore[no-redef]
+    import media_models  # type: ignore[no-redef]
+    import naming  # type: ignore[no-redef]
+    import playback  # type: ignore[no-redef]
+    import routes  # type: ignore[no-redef]
+    import service  # type: ignore[no-redef]
+    import sonos_volume  # type: ignore[no-redef]
+    import vlc_player  # type: ignore[no-redef]
     from video_asset_catalog import (  # type: ignore[no-redef]
         CatalogConflict,
         CatalogError,

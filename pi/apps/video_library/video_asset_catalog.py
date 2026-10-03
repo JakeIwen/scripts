@@ -28,6 +28,14 @@ from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any, Callable
 
+if __package__:
+    from . import catalog, catalog_values, schema, v1_bridge
+else:  # Direct execution from the Pi's flat deployment directory.
+    import catalog  # type: ignore[no-redef]
+    import catalog_values  # type: ignore[no-redef]
+    import schema  # type: ignore[no-redef]
+    import v1_bridge  # type: ignore[no-redef]
+
 
 SCHEMA_VERSION = 3
 DEFAULT_BUSY_TIMEOUT_MS = 5_000

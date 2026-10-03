@@ -38,6 +38,20 @@ v2_files=(
   pi/scripts/alias_media.sh
   pi/apps/video_library/video_asset_catalog.py
   pi/apps/video_library/video_qbittorrent.py
+  pi/apps/video_library/config.py
+  pi/apps/video_library/naming.py
+  pi/apps/video_library/library.py
+  pi/apps/video_library/identity.py
+  pi/apps/video_library/playback.py
+  pi/apps/video_library/service.py
+  pi/apps/video_library/routes.py
+  pi/apps/video_library/catalog.py
+  pi/apps/video_library/catalog_values.py
+  pi/apps/video_library/schema.py
+  pi/apps/video_library/v1_bridge.py
+  pi/apps/video_library/media_models.py
+  pi/apps/video_library/players/vlc_player.py
+  pi/apps/video_library/players/sonos_volume.py
 )
 
 if [[ "$mode" == rollback ]]; then
@@ -95,6 +109,34 @@ if [[ "$mode" == deploy ]]; then
     "$local_stage/scripts/python-automation/video_asset_catalog.py"
   stage_file pi/apps/video_library/video_qbittorrent.py \
     "$local_stage/scripts/python-automation/video_qbittorrent.py"
+  stage_file pi/apps/video_library/config.py \
+    "$local_stage/scripts/python-automation/config.py"
+  stage_file pi/apps/video_library/naming.py \
+    "$local_stage/scripts/python-automation/naming.py"
+  stage_file pi/apps/video_library/library.py \
+    "$local_stage/scripts/python-automation/library.py"
+  stage_file pi/apps/video_library/identity.py \
+    "$local_stage/scripts/python-automation/identity.py"
+  stage_file pi/apps/video_library/playback.py \
+    "$local_stage/scripts/python-automation/playback.py"
+  stage_file pi/apps/video_library/service.py \
+    "$local_stage/scripts/python-automation/service.py"
+  stage_file pi/apps/video_library/routes.py \
+    "$local_stage/scripts/python-automation/routes.py"
+  stage_file pi/apps/video_library/catalog.py \
+    "$local_stage/scripts/python-automation/catalog.py"
+  stage_file pi/apps/video_library/catalog_values.py \
+    "$local_stage/scripts/python-automation/catalog_values.py"
+  stage_file pi/apps/video_library/schema.py \
+    "$local_stage/scripts/python-automation/schema.py"
+  stage_file pi/apps/video_library/v1_bridge.py \
+    "$local_stage/scripts/python-automation/v1_bridge.py"
+  stage_file pi/apps/video_library/media_models.py \
+    "$local_stage/scripts/python-automation/media_models.py"
+  stage_file pi/apps/video_library/players/vlc_player.py \
+    "$local_stage/scripts/python-automation/vlc_player.py"
+  stage_file pi/apps/video_library/players/sonos_volume.py \
+    "$local_stage/scripts/python-automation/sonos_volume.py"
 fi
 stage_file pi/apps/video_library/templates/video_library.html \
   "$local_stage/scripts/python-automation/templates/video_library.html"
@@ -264,7 +306,24 @@ python_live=/home/pi/scripts/python-automation
   "$python_live/video_library_server.py"
 /usr/bin/install -m 0644 "$stage/scripts/python-automation/sonos_tasks.py" \
   "$python_live/sonos_tasks.py"
-for module in video_asset_catalog.py video_qbittorrent.py; do
+for module in \
+  video_asset_catalog.py \
+  video_qbittorrent.py \
+  config.py \
+  naming.py \
+  library.py \
+  identity.py \
+  playback.py \
+  service.py \
+  routes.py \
+  catalog.py \
+  catalog_values.py \
+  schema.py \
+  v1_bridge.py \
+  media_models.py \
+  vlc_player.py \
+  sonos_volume.py
+do
   if [ -f "$stage/scripts/python-automation/$module" ]; then
     /usr/bin/install -m 0644 "$stage/scripts/python-automation/$module" \
       "$python_live/$module"
