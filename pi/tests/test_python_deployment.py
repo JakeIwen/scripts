@@ -20,8 +20,8 @@ DEPLOY_SCRIPT = REPOSITORY_ROOT / "pi" / "deploy_python.py"
 FIXTURE_MODULES = {
     "pi/apps/audiobooks": ("audiobook_server.py",),
     "pi/apps/bme280": ("bme280_mqtt.py", "bme280_testread.py"),
-    "pi/apps/van_dashboard": ("van_dashboard.py", "react_dashboard_preview.py"),
-    "pi/apps/van_dashboard/routes": ("__init__.py", "common.py"),
+    "pi/apps/van_dashboard": ("van_dashboard.py", "van_dashboard_projects.py", "react_dashboard_preview.py"),
+    "pi/apps/van_dashboard/routes": ("__init__.py", "common.py", "projects.py"),
     "pi/apps/video_library": ("video_library_server.py",),
     "pi/apps/video_library/players": ("vlc_player.py", "sonos_volume.py"),
     "pi/scripts/python": ("ip_info.py", "vlc_property.py"),
@@ -711,6 +711,35 @@ class PythonDeploymentTests(unittest.TestCase):
                     result = self._install(deployment.build_plan(repo), repo, root, "update", services=services)
                     self.assertEqual(result["restarted"], expected)
                     self.assertEqual(services.restart_calls, expected)
+
+    def test_hosted_project_modules_are_dashboard_release_dependencies(self):
+        project_sources = (
+            "pi/apps/van_dashboard/van_dashboard_projects.py",
+            "pi/apps/van_dashboard/routes/projects.py",
+        )
+        actual = deployment.build_plan(REPOSITORY_ROOT)
+        for relative in project_sources:
+            self.assertIn(relative, actual["manifest"]["files"])
+            self.assertNotIn(relative, actual["manifest"]["legacy"])
+        with self.fixture() as repo, tempfile.TemporaryDirectory() as name:
+            root = Path(name) / "packages"
+            services = self._services()
+            previous = deployment.build_plan(repo)
+            self._install(previous, repo, root, "activate", services=services)
+            for relative in project_sources:
+                with self.subTest(relative=relative):
+                    services.restart_calls.clear()
+                    services.install_calls.clear()
+                    path = repo / relative
+                    path.write_text(path.read_text() + "CHANGED = True\n")
+                    current = deployment.build_plan(repo)
+                    self.assertNotEqual(previous["manifest"]["services"][deployment.UNIT],
+                                        current["manifest"]["services"][deployment.UNIT])
+                    result = self._install(current, repo, root, "update", services=services)
+                    self.assertEqual(result["restarted"], [deployment.UNIT])
+                    self.assertEqual(services.restart_calls, [deployment.UNIT])
+                    self.assertEqual(services.install_calls, [])
+                    previous = current
 
     def test_legacy_flatten_only_updates_flat_safe_files_and_active_changed_services(self):
         with self.fixture() as repo, tempfile.TemporaryDirectory() as name:

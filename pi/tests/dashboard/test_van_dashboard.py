@@ -4666,7 +4666,7 @@ class DashboardRouteTests(unittest.TestCase):
                         "from pi.apps.van_dashboard import runtime; "
                         "import van_compute_metrics; "
                         "app = create_app(); "
-                        "assert len(list(app.url_map.iter_rules())) == 77; "
+                        "assert len(list(app.url_map.iter_rules())) == 78; "
                         "assert Path(pi.__path__[0]).resolve() == (Path(os.environ['EXPECTED_RELEASE']) / 'pi').resolve(); "
                         "compute_path = Path(van_compute_metrics.__file__).resolve(); "
                         "external = Path(os.environ['EXPECTED_EXTERNAL']).resolve(); "
