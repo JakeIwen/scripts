@@ -14,6 +14,7 @@ import unittest
 from unittest import mock
 
 from pi.apps.video_library import identity
+from pi.apps.video_library import service as video_service
 from pi.apps.video_library import video_library_server as video
 from pi.apps.video_library import video_qbittorrent as qb
 from pi.apps.video_library.video_asset_catalog import MediaAssetCatalog
@@ -787,11 +788,11 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
 
     def _start_production_service(self) -> video.VideoService:
         with (
-            mock.patch.object(video, "STATE_PATH", str(self.fixture.database)),
-            mock.patch.object(video, "QbittorrentClient", return_value=None),
-            mock.patch.object(video, "VlcController", return_value=object()),
-            mock.patch.object(video, "SonosVolumeController", return_value=None),
-            mock.patch.object(video, "_service", None),
+            mock.patch.object(video_service, "STATE_PATH", str(self.fixture.database)),
+            mock.patch.object(video_service, "QbittorrentClient", return_value=None),
+            mock.patch.object(video_service, "VlcController", return_value=object()),
+            mock.patch.object(video_service, "SonosVolumeController", return_value=None),
+            mock.patch.object(video_service, "_service", None),
         ):
             return video.active_service()
 
@@ -863,13 +864,13 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
             "transient startup failure"
         )
         with (
-            mock.patch.object(video, "STATE_PATH", str(self.fixture.database)),
-            mock.patch.object(video, "ensure_pre_v2_backup", return_value=None),
-            mock.patch.object(video, "MediaAssetCatalog", return_value=fake_catalog),
-            mock.patch.object(video, "QbittorrentClient", return_value=None),
-            mock.patch.object(video, "VlcController", return_value=object()),
-            mock.patch.object(video, "SonosVolumeController", return_value=None),
-            mock.patch.object(video, "_service", None),
+            mock.patch.object(video_service, "STATE_PATH", str(self.fixture.database)),
+            mock.patch.object(video_service, "ensure_pre_v2_backup", return_value=None),
+            mock.patch.object(video_service, "MediaAssetCatalog", return_value=fake_catalog),
+            mock.patch.object(video_service, "QbittorrentClient", return_value=None),
+            mock.patch.object(video_service, "VlcController", return_value=object()),
+            mock.patch.object(video_service, "SonosVolumeController", return_value=None),
+            mock.patch.object(video_service, "_service", None),
         ):
             service = video.active_service()
         self.addCleanup(service.store.connection.close)
@@ -894,13 +895,13 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
             {"available": True},
         ]
         with (
-            mock.patch.object(video, "STATE_PATH", str(self.fixture.database)),
-            mock.patch.object(video, "ensure_pre_v2_backup", return_value=None),
-            mock.patch.object(video, "MediaAssetCatalog", return_value=fake_catalog),
-            mock.patch.object(video, "QbittorrentClient", return_value=None),
-            mock.patch.object(video, "VlcController", return_value=FakePlayer()),
-            mock.patch.object(video, "SonosVolumeController", return_value=None),
-            mock.patch.object(video, "_service", None),
+            mock.patch.object(video_service, "STATE_PATH", str(self.fixture.database)),
+            mock.patch.object(video_service, "ensure_pre_v2_backup", return_value=None),
+            mock.patch.object(video_service, "MediaAssetCatalog", return_value=fake_catalog),
+            mock.patch.object(video_service, "QbittorrentClient", return_value=None),
+            mock.patch.object(video_service, "VlcController", return_value=FakePlayer()),
+            mock.patch.object(video_service, "SonosVolumeController", return_value=None),
+            mock.patch.object(video_service, "_service", None),
         ):
             service = video.active_service()
         self.addCleanup(service.store.connection.close)
@@ -926,17 +927,17 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
             1,
         ]
         with (
-            mock.patch.object(video, "STATE_PATH", str(self.fixture.database)),
-            mock.patch.object(video, "ensure_pre_v2_backup", return_value=None),
-            mock.patch.object(video, "MediaAssetCatalog", return_value=fake_catalog),
+            mock.patch.object(video_service, "STATE_PATH", str(self.fixture.database)),
+            mock.patch.object(video_service, "ensure_pre_v2_backup", return_value=None),
+            mock.patch.object(video_service, "MediaAssetCatalog", return_value=fake_catalog),
             mock.patch.object(
-                video,
+                video_service,
                 "QbittorrentClient",
                 side_effect=qb.QbittorrentUnavailable("unrelated qB warning"),
             ),
-            mock.patch.object(video, "VlcController", return_value=FakePlayer()),
-            mock.patch.object(video, "SonosVolumeController", return_value=None),
-            mock.patch.object(video, "_service", None),
+            mock.patch.object(video_service, "VlcController", return_value=FakePlayer()),
+            mock.patch.object(video_service, "SonosVolumeController", return_value=None),
+            mock.patch.object(video_service, "_service", None),
         ):
             service = video.active_service()
         self.addCleanup(service.store.connection.close)
