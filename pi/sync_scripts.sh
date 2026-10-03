@@ -1,5 +1,5 @@
 #! /bin/bash
-dsc="/Users/jacobr/dev/scripts"
+dsc="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 repo_scripts="$dsc/pi/scripts"
 services="$dsc/pi/services"
 tmpfiles="$dsc/pi/tmpfiles.d"
@@ -13,6 +13,9 @@ shared_python="$dsc/shared/python"
 shared_sh="$dsc/shared/sh"
 pi_ip='pi@vanpi.lan'
 # pi_ip='pi@100.82.91.76'
+
+python3 "$dsc/pi/deploy_python.py" --update || exit 1
+python3 "$dsc/pi/deploy_python.py" --legacy-flatten || exit 1
 
 local_stage="$(mktemp -d "/tmp/vanpi-sync.XXXXXX")" || exit 1
 staged_scripts="$local_stage/scripts"
@@ -29,17 +32,10 @@ trap cleanup_local_stage EXIT
   --exclude '__pycache__/' \
   --exclude '*.pyc' \
   "$repo_scripts/" "$staged_scripts/" || exit 1
-/usr/bin/rsync -a "$services/" "$staged_services/" || exit 1
+/usr/bin/rsync -a --exclude 'van-dashboard.service' "$services/" "$staged_services/" || exit 1
 /usr/bin/rsync -a "$tmpfiles/" "$staged_tmpfiles/" || exit 1
 cp -a "$shared_sh/." "$staged_scripts/"
-python_stage="$staged_scripts/python-automation"
-mkdir -p "$python_stage"
-/usr/bin/find "$pi_apps" "$pi_python" "$shared_python" -type f -name "*.py" \
-  -exec cp {} "$python_stage/" \;
-mkdir -p "$python_stage/templates" "$python_stage/static"
-cp "$pi_apps/video_library/templates/video_library.html" "$python_stage/templates/"
-cp "$pi_apps/video_library/static/video_library.js" "$python_stage/static/"
-cp "$pi_apps/video_library/static/video_library.css" "$python_stage/static/"
+# deploy_python.py owns allowlisted Python deployment.
 
 # one multiplexed connection shared by every ssh/scp below: parallel transfers
 # ride it as channels instead of separate connections, so sshd's MaxStartups
