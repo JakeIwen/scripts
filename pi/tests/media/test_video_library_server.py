@@ -17,6 +17,7 @@ from pi.apps.video_library.playback import PlaybackState
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 APP_DIR = REPOSITORY_ROOT / "pi" / "apps" / "video_library"
+VIDEO_MODULE_DIRS = (APP_DIR, APP_DIR / "players")
 
 
 class FakeClock:
@@ -2391,6 +2392,15 @@ class ApiRouteTests(unittest.TestCase):
 
 
 class DeploymentWiringTests(unittest.TestCase):
+    @staticmethod
+    def _video_module_sources():
+        return {
+            path.relative_to(REPOSITORY_ROOT).as_posix()
+            for directory in VIDEO_MODULE_DIRS
+            for path in directory.glob("*.py")
+            if path.name != "__init__.py"
+        }
+
     def test_service_declares_every_runtime_asset_and_session_dependency(self):
         unit = (
             REPOSITORY_ROOT / "pi" / "services" / "video-library.service"
@@ -2410,18 +2420,45 @@ class DeploymentWiringTests(unittest.TestCase):
             or argument in {"/home/pi/sns.sh", "/usr/bin/vlc"}
         }
 
+        deploy_script = (
+            REPOSITORY_ROOT / "pi" / "deploy_video_library.sh"
+        ).read_text(encoding="utf-8")
         plan = deploy_python.build_plan(REPOSITORY_ROOT, mode="legacy")
         legacy = plan["manifest"]["legacy"]
-        expected_sources = {
-            path.relative_to(REPOSITORY_ROOT).as_posix()
-            for path in APP_DIR.glob("*.py")
-            if path.name != "__init__.py"
-        }
+        expected_sources = self._video_module_sources()
         expected_sources.update(
             {
                 "shared/python/sonos_tasks.py",
                 *deploy_python.ASSETS,
             }
+        )
+        expected_module_sources = {
+            relative for relative in expected_sources if relative.endswith(".py")
+        }
+        expected_module_names = {
+            Path(relative).name for relative in expected_module_sources
+        }
+        declared_deploy_sources = {
+            line.strip()
+            for line in deploy_script.splitlines()
+            if line.strip().endswith(".py")
+            and line.strip().startswith(("pi/apps/video_library/", "shared/python/"))
+        }
+        self.assertEqual(declared_deploy_sources, expected_module_sources)
+        declared_deploy_modules = {
+            Path(relative).name for relative in declared_deploy_sources
+        }
+        self.assertEqual(declared_deploy_modules, expected_module_names)
+        install_loop_start = deploy_script.index("for module in \\\n")
+        install_loop_end = deploy_script.index("\ndo\n", install_loop_start)
+        declared_install_modules = {
+            line.strip().rstrip(" \\")
+            for line in deploy_script[install_loop_start:install_loop_end].splitlines()[1:]
+            if line.strip()
+        }
+        self.assertEqual(
+            declared_install_modules,
+            expected_module_names - {"video_library_server.py", "sonos_tasks.py"},
         )
         expected_flat_paths = {
             f"/home/pi/scripts/python-automation/{legacy[relative]}"
@@ -2436,6 +2473,8 @@ class DeploymentWiringTests(unittest.TestCase):
                 source = REPOSITORY_ROOT / path
                 self.assertTrue(source.is_file(), str(source))
                 self.assertTrue(source.resolve().is_relative_to(REPOSITORY_ROOT))
+                if path.endswith(".py"):
+                    self.assertEqual(legacy[path], Path(path).name)
         sns = REPOSITORY_ROOT / "pi" / "sns.sh"
         self.assertTrue(sns.is_file(), str(sns))
         self.assertIn("/usr/bin/vlc", declared_paths)
@@ -2468,11 +2507,7 @@ class DeploymentWiringTests(unittest.TestCase):
         )
         plan = deploy_python.build_plan(REPOSITORY_ROOT, mode="legacy")
         legacy = plan["manifest"]["legacy"]
-        expected_sources = {
-            path.relative_to(REPOSITORY_ROOT).as_posix()
-            for path in APP_DIR.glob("*.py")
-            if path.name != "__init__.py"
-        }
+        expected_sources = self._video_module_sources()
         expected_sources.update({"shared/python/sonos_tasks.py", *deploy_python.ASSETS})
         for relative in sorted(expected_sources):
             with self.subTest(relative=relative):
