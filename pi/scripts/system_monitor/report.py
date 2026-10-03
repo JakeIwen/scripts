@@ -507,7 +507,6 @@ def _include_thermal_peaks(peaks, decoded_rollups, current):
                     "average": legacy_temperature.get("average"),
                 }
             )
-    return
 
 
 def build_report(store, hours=24, limit=100, now=None):
