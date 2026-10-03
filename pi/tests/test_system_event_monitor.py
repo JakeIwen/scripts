@@ -6,6 +6,7 @@ from unittest import mock
 
 from pi.scripts import system_event_monitor as monitor
 from pi.scripts.system_monitor import crash
+from pi.scripts.system_monitor import report as monitor_report
 
 
 class ThrottleDecodeTests(unittest.TestCase):
@@ -383,7 +384,7 @@ class StoreAndDiagnosisTests(unittest.TestCase):
         ).fetchall()
         all_events = [monitor.event_public(row) for row in rows]
         counts = monitor.collections.Counter(e["kind"] for e in all_events)
-        with mock.patch.object(monitor, "event_public", wraps=monitor.event_public) as public:
+        with mock.patch.object(monitor_report, "event_public", wraps=monitor.event_public) as public:
             report = monitor.build_report(self.store, hours=1, limit=1, now=self.now)
         self.assertEqual(public.call_count, 1)
         self.assertEqual(report["diagnosis"], monitor.build_diagnosis(all_events, current))
