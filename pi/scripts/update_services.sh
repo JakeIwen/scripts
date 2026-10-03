@@ -10,9 +10,10 @@ fi
 staged_services="$stage/services"
 staged_scripts="$stage/scripts"
 staged_tmpfiles="$stage/tmpfiles.d"
-live_services="/etc/systemd/system"
-live_scripts="/home/pi/scripts"
-live_tmpfiles="/etc/tmpfiles.d"
+# Overridable only so tests can run this against a temporary tree.
+live_services="${UPDATE_SERVICES_LIVE_SERVICES:-/etc/systemd/system}"
+live_scripts="${UPDATE_SERVICES_LIVE_SCRIPTS:-/home/pi/scripts}"
+live_tmpfiles="${UPDATE_SERVICES_LIVE_TMPFILES:-/etc/tmpfiles.d}"
 
 cleanup() {
   case "$stage" in
@@ -93,6 +94,16 @@ for staged_tmpfile in "${staged_tmpfile_configs[@]}"; do
   sudo systemd-tmpfiles --create "$live_tmpfile"
 done
 
+# Preserve the old sync behavior for top-level scripts (mode 770), applied to the
+# staged copies so cp -a installs them already executable. A copy that fails
+# partway (set -e) can then never leave a live script non-executable, and the
+# mode is in place before any service restart. Directory modes are preserved
+# from the staged tree.
+for staged_script in "$staged_scripts"/*; do
+  if [[ -f "$staged_script" && ! -L "$staged_script" ]]; then
+    chmod 770 "$staged_script"
+  fi
+done
 mkdir -p "$live_scripts"
 cp -a "$staged_scripts/." "$live_scripts/"
 # clone_to_sd.sh moved under backup/. The staged copy is installed first so an
@@ -105,14 +116,6 @@ fi
 rm -f -- \
   "$live_scripts/rsync_to_clone.sh" \
   "$live_scripts/setup_router_policy_trigger.sh"
-# Preserve the old sync behavior for top-level scripts, and do it before any
-# service restart so directly executed shell scripts remain runnable. Directory
-# modes are preserved from the staged tree.
-for staged_script in "$staged_scripts"/*; do
-  if [[ -f "$staged_script" && ! -L "$staged_script" ]]; then
-    chmod 770 "$live_scripts/${staged_script##*/}"
-  fi
-done
 
 for staged_unit in "${staged_units[@]}"; do
   sudo install -m 0644 "$staged_unit" "$live_services/${staged_unit##*/}"
