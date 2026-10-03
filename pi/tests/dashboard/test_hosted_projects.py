@@ -4,8 +4,13 @@ import threading
 import unittest
 from unittest import mock
 
+from pi.apps.van_dashboard import runtime
+from pi.apps.van_dashboard.van_dashboard import create_app
 from pi.apps.van_dashboard.van_dashboard_common import StateStore
 from pi.apps.van_dashboard.van_dashboard_projects import HostedProjectStore, HostedProjectConflict
+
+
+dashboard_app = create_app()
 
 
 class HostedProjectTests(unittest.TestCase):
@@ -65,11 +70,10 @@ class HostedProjectTests(unittest.TestCase):
 
 class HostedProjectRouteTests(unittest.TestCase):
     def test_routes_validate_and_preserve_csrf_protection(self):
-        from pi.apps.van_dashboard import van_dashboard as dashboard
         with tempfile.TemporaryDirectory() as folder:
             projects = HostedProjectStore(StateStore(os.path.join(folder, "state.json")))
-            with mock.patch.object(dashboard, "hosted_projects", projects):
-                client = dashboard.app.test_client()
+            with mock.patch.object(runtime, "hosted_projects", projects):
+                client = dashboard_app.test_client()
                 url = "/api/hosted-projects"
                 self.assertEqual(client.get(url).get_json()["projects"], [])
                 self.assertEqual(client.post(url, json={"name": "Example"}).status_code, 400)

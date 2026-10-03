@@ -22,6 +22,7 @@ def create_app():
     from .routes.home import bp as home_bp
     from .routes.integrations import bp as integrations_bp
     from .routes.network import bp as network_bp
+    from .routes.projects import bp as projects_bp
     from .routes.sonos import bp as sonos_bp
     from .routes.storage import bp as storage_bp
     from .routes.system import bp as system_bp
@@ -40,6 +41,7 @@ def create_app():
         disks_bp,
         system_bp,
         network_bp,
+        projects_bp,
         usb_bp,
         backups_bp,
         history_bp,

@@ -15,6 +15,7 @@ from .van_dashboard_network import (
     SpeedTestManager,
     UbntWifiController,
 )
+from .van_dashboard_projects import HostedProjectStore
 from .van_dashboard_sonos import SonosController
 from .van_dashboard_storage import StoragePolicyManager
 from .van_dashboard_system import (
@@ -28,6 +29,7 @@ from .van_dashboard_vonstar import VonstarClient
 
 
 state_store = StateStore()
+hosted_projects = HostedProjectStore(state_store)
 cop_alert = CopAlertManager(state_store)
 cop_can_wake = CopCanWakeStatusReader()
 # Retain the API field used by the React tile; there is only one relay owner.

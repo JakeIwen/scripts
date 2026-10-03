@@ -16,6 +16,7 @@ from pi.apps.van_dashboard import van_dashboard as dashboard_module
 
 RUNTIME_NAMES = (
     "state_store",
+    "hosted_projects",
     "cop_alert",
     "cop_can_wake",
     "cop_led",
@@ -73,7 +74,7 @@ class DashboardFactoryTests(unittest.TestCase):
         ):
             app = dashboard_module.create_app()
 
-        self.assertEqual(len(list(app.url_map.iter_rules())), 77)
+        self.assertEqual(len(list(app.url_map.iter_rules())), 78)
         cop_start.assert_not_called()
         connectivity_start.assert_not_called()
         starlink_start.assert_not_called()
