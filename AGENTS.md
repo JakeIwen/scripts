@@ -250,7 +250,9 @@ Use the guarded, targeted `pi/deploy_network_storage.py` installer and
 manifest-specific rollback; the older recorder installer refuses storage-managed
 deployments. Preserve mount identity checks, bounded RAM buffering and idempotent
 recovery. Never write through an absent mount or unlink a database beneath active
-readers. Avoid repository-wide sync for recorder updates.
+readers. Avoid repository-wide sync for recorder updates; `pi/sync_storage_managed.exclude`
+keeps the broad sync from staging any file this installer owns, so add new storage-managed
+targets there too.
 See `pi/docs/networking/NETWORK_FLIGHT_RECORDER.md` for commands, limits and
 remaining evidence gaps.
 

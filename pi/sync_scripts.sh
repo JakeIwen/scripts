@@ -31,12 +31,17 @@ sync_non_python() {
   trap cleanup_local_stage EXIT
 
   /bin/mkdir -p "$staged_scripts" "$staged_services" "$staged_tmpfiles"
+  # deploy_network_storage.py owns the recorder files it installs; never stage them.
+  storage_managed="$dsc/pi/sync_storage_managed.exclude"
   /usr/bin/rsync -a \
     --exclude '__pycache__/' \
     --exclude '*.pyc' \
+    --exclude-from="$storage_managed" \
     "$repo_scripts/" "$staged_scripts/" || return 1
-  /usr/bin/rsync -a --exclude 'van-dashboard.service' "$services/" "$staged_services/" || return 1
-  /usr/bin/rsync -a "$tmpfiles/" "$staged_tmpfiles/" || return 1
+  /usr/bin/rsync -a --exclude 'van-dashboard.service' --exclude-from="$storage_managed" \
+    "$services/" "$staged_services/" || return 1
+  /usr/bin/rsync -a --exclude-from="$storage_managed" \
+    "$tmpfiles/" "$staged_tmpfiles/" || return 1
   cp -a "$shared_sh/." "$staged_scripts/"
   # deploy_python.py owns allowlisted Python deployment.
 
@@ -71,7 +76,16 @@ sync_non_python() {
   scp $mux -r "$hooks" "$secrets" "$twilio" "$pi_ip:/home/pi/" &
   dirs_pid=$!
 
-  scp $mux "$configs/smb.conf" "$pi_ip:/etc/samba/smb.conf" &
+  # /etc/samba/smb.conf is root-owned; install it with sudo, and only when changed.
+  cp_smb_conf() {
+    local remote_tmp
+    remote_tmp="$(ssh $mux $pi_ip 'mktemp /tmp/vanpi-smb.conf.XXXXXX')" || return 1
+    scp $mux "$configs/smb.conf" "$pi_ip:$remote_tmp" || return 1
+    ssh $mux $pi_ip "cmp -s '$remote_tmp' /etc/samba/smb.conf ||
+      sudo install -m 0644 -o root -g root -- '$remote_tmp' /etc/samba/smb.conf
+      status=\$?; rm -f -- '$remote_tmp'; exit \$status"
+  }
+  cp_smb_conf &
   smb_pid=$!
 
   sync_failed=0
