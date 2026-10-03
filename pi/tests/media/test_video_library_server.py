@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 from pi.apps.video_library import video_library_server as video
+from pi.apps.video_library import routes
 from pi.apps.video_library.playback import PlaybackState
 
 
@@ -1975,7 +1976,7 @@ class ApiRouteTests(unittest.TestCase):
             legacy_positions=str(self.fixture.root / "missing-legacy.txt"),
         )
         self.active_service_patch = mock.patch.object(
-            video, "active_service", return_value=self.service
+            routes, "active_service", return_value=self.service
         )
         self.active_service_patch.start()
         self.addCleanup(self.active_service_patch.stop)
