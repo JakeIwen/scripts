@@ -1,10 +1,34 @@
+import { useEffect, useState } from 'react';
+
 import { BottomSheet } from '../../components/BottomSheet';
-import { HOSTED_PROJECTS, preferredProjectLink } from './catalog';
+import { HOSTED_PROJECTS, preferredProjectLink, type HostedProject } from './catalog';
+import { fetchHostedProjects } from './api';
+import { NewProjectForm } from './NewProjectForm';
 import './projects.css';
 
-const projects = [...HOSTED_PROJECTS].sort((a, b) => a.name.localeCompare(b.name));
-
 export function ProjectDirectory({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [saved, setSaved] = useState<HostedProject[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    if (!open) return;
+    const controller = new AbortController();
+    setLoading(true);
+    setError('');
+    void fetchHostedProjects(controller.signal)
+      .then((projects) => {
+        if (!controller.signal.aborted) setSaved(projects);
+      })
+      .catch((reason: unknown) => {
+        if (!controller.signal.aborted)
+          setError(reason instanceof Error ? reason.message : 'Could not load saved projects');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [open]);
+  const projects = [...HOSTED_PROJECTS, ...saved].sort((a, b) => a.name.localeCompare(b.name));
   return (
     <BottomSheet
       open={open}
@@ -22,7 +46,7 @@ export function ProjectDirectory({ open, onClose }: { open: boolean; onClose: ()
                 href={preferred?.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                title={[project.description, project.note, preferred?.url]
+                title={[project.name, project.description, project.note, preferred?.url]
                   .filter(Boolean)
                   .join(' ')}
               >
@@ -49,8 +73,14 @@ export function ProjectDirectory({ open, onClose }: { open: boolean; onClose: ()
         })}
       </ul>
       <p className="project-directory__legend">
-        LAN: van network · TS: Tailscale · Local / This Mac: local apps · * Not live yet
+        LAN: van network · TS: Tailscale · This Mac: local apps · * Not live yet
       </p>
+      {error && (
+        <p className="error-message" role="alert">
+          {error}
+        </p>
+      )}
+      <NewProjectForm projects={projects} disabled={loading || Boolean(error)} onSaved={setSaved} />
     </BottomSheet>
   );
 }

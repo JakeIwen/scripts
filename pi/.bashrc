@@ -83,6 +83,7 @@ codexp() {
 alias codexpr='codexp resume'
 alias codexpcan='codexpr --sandbox danger-full-access --add-dir /mnt/EXFAT512/obd-things --add-dir /dev/bus/usb'
 codexsearch() { /home/pi/scripts/codexsearch.sh "$@"; }
+claudesearch() { /home/pi/scripts/claudesearch.sh "$@"; }
 
 alias claudep='claude --permission-mode bypassPermissions'
 clauderm() {

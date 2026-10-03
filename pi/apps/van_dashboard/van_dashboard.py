@@ -66,6 +66,7 @@ if __package__:
     from .van_dashboard_sonos import *
     from .van_dashboard_network import *
     from .van_dashboard_history import *
+    from .van_dashboard_projects import *
     from .van_dashboard_usb import *
     from .van_dashboard_integrations import *
     from .van_dashboard_system import *
@@ -81,6 +82,7 @@ else:
     from van_dashboard_sonos import *
     from van_dashboard_network import *
     from van_dashboard_history import *
+    from van_dashboard_projects import *
     from van_dashboard_usb import *
     from van_dashboard_integrations import *
     from van_dashboard_system import *
@@ -136,6 +138,7 @@ def toggle_telemetry_service():
 
 app = Flask(__name__, static_folder=None)
 state_store = StateStore()
+hosted_projects = HostedProjectStore(state_store)
 cop_alert = CopAlertManager(state_store)
 cop_can_wake = CopCanWakeStatusReader()
 # Retain the API field used by the React tile; there is only one relay owner.
@@ -206,6 +209,28 @@ def reject_cross_origin_mutations():
     elif referer and urlsplit(referer).netloc != request.host:
         return api_error("cross-origin control request rejected", 403)
     return None
+
+
+@app.route("/api/hosted-projects", methods=["GET", "POST"])
+def api_hosted_projects():
+    if request.method == "POST":
+        if request.mimetype != "application/x-www-form-urlencoded" or any(
+            len(request.form.getlist(key)) != 1 for key in request.form
+        ):
+            return api_error("Project input must be a URL-encoded form with unique fields", 400)
+        try:
+            projects = hosted_projects.add(request.form.to_dict())
+        except HostedProjectConflict as exc:
+            return api_error(exc, 409)
+        except ValueError as exc:
+            return api_error(exc, 400)
+        except OSError:
+            return api_error("Could not save project; please try again", 503)
+    else:
+        projects = hosted_projects.snapshot()
+    response = jsonify({"ok": True, "projects": projects})
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.route("/api/status")
