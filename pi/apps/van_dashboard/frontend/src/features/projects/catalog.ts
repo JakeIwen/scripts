@@ -33,6 +33,13 @@ function piLinks(port: number, path = '/'): ProjectLink[] {
 
 export const HOSTED_PROJECTS: HostedProject[] = [
   {
+    id: 'health-calendar',
+    name: 'Health Calendar',
+    host: 'This Mac',
+    description: 'Local health calendar.',
+    links: [{ kind: 'local', label: 'This Mac', url: 'http://127.0.0.1:4328/' }],
+  },
+  {
     id: 'lionfeather-dev',
     name: 'LionFeather Dev Page',
     host: 'This Mac',
