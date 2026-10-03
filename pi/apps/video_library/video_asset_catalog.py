@@ -3,6 +3,16 @@
 
 from __future__ import annotations
 
+__all__ = (
+    "CatalogConflict",
+    "CatalogError",
+    "CatalogNotFound",
+    "DEFAULT_BUSY_TIMEOUT_MS",
+    "MediaAssetCatalog",
+    "SCHEMA_VERSION",
+    "ensure_pre_v2_backup",
+)
+
 if __package__:
     from .catalog import (
         contextlib as contextlib,
