@@ -9,6 +9,7 @@ import tarfile
 import tempfile
 from contextlib import contextmanager
 import unittest
+from unittest import mock
 
 from pi import deploy_python as deployment
 
@@ -798,6 +799,66 @@ class PythonDeploymentTests(unittest.TestCase):
             )
             self.assertEqual(result["restarted"], ["audiobooks.service"])
             self.assertEqual(services.restart_calls, ["audiobooks.service"])
+
+    def test_legacy_refuses_symlinked_destination_directory(self):
+        with self.fixture() as repo, tempfile.TemporaryDirectory() as name:
+            root = Path(name) / "packages"
+            flat = Path(name) / "flat"
+            outside = Path(name) / "outside"
+            flat.mkdir()
+            outside.mkdir()
+            (flat / "static").symlink_to(outside, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, "legacy symlink"):
+                self._install(deployment.build_plan(repo), repo, root, "legacy",
+                              services=self._services(), flat_root=flat)
+            self.assertEqual(list(outside.iterdir()), [])
+            self.assertEqual([p.name for p in flat.iterdir()], ["static"])
+
+    def test_legacy_failed_restart_retries_after_files_already_match(self):
+        with self.fixture() as repo, tempfile.TemporaryDirectory() as name:
+            root = Path(name) / "packages"
+            flat = Path(name) / "flat"
+            services = self._services()
+            services.restart_failures = 1
+            plan = deployment.build_plan(repo, mode="legacy")
+            with self.assertRaises(RuntimeError):
+                self._install(plan, repo, root, "legacy", services=services, flat_root=flat)
+            journal = root / "legacy-pending-restarts.json"
+            self.assertEqual(json.loads(journal.read_bytes()), sorted(services.active - {deployment.UNIT}))
+            services.active.clear()
+            services.restart_calls.clear()
+            result = self._install(plan, repo, root, "legacy", services=services, flat_root=flat)
+            self.assertEqual(result["restarted"], ["audiobooks.service", "bme280-mqtt.service", "video-library.service"])
+            self.assertEqual(services.restart_calls, result["restarted"])
+            self.assertFalse(journal.exists())
+            services.restart_calls.clear()
+            self._install(plan, repo, root, "legacy", services=services, flat_root=flat)
+            self.assertEqual(services.restart_calls, [])
+
+    def test_legacy_partial_copy_preserves_restart_intent(self):
+        with self.fixture() as repo, tempfile.TemporaryDirectory() as name:
+            root = Path(name) / "packages"
+            flat = Path(name) / "flat"
+            services = self._services()
+            plan = deployment.build_plan(repo, mode="legacy")
+            real_copy = shutil.copyfile
+            copies = []
+
+            def interrupted_copy(source, destination):
+                copies.append(destination)
+                if len(copies) == 2:
+                    raise OSError("simulated copy interruption")
+                return real_copy(source, destination)
+
+            with mock.patch.object(deployment.shutil, "copyfile", side_effect=interrupted_copy):
+                with self.assertRaisesRegex(OSError, "copy interruption"):
+                    self._install(plan, repo, root, "legacy", services=services, flat_root=flat)
+            self.assertEqual(services.restart_calls, [])
+            self.assertTrue((root / "legacy-pending-restarts.json").is_file())
+            self.assertTrue((flat / "audiobook_server.py").is_file())
+            result = self._install(plan, repo, root, "legacy", services=services, flat_root=flat)
+            self.assertEqual(result["restarted"], ["audiobooks.service", "bme280-mqtt.service", "video-library.service"])
+            self.assertFalse((root / "legacy-pending-restarts.json").exists())
 
     def test_legacy_flatten_updates_inactive_owned_service_without_restart(self):
         with self.fixture() as repo, tempfile.TemporaryDirectory() as name:

@@ -90,7 +90,7 @@ def build_plan(repo=ROOT, mode='stage'):
     units = {UNIT: ('unchanged (stage only)' if mode in ('stage', 'legacy') else
                    'compare live dependency digest and unit; restart only if changed')}
     if mode == 'legacy':
-        units.update({u: 'restart only if an owned file changed and service is active'
+        units.update({u: 'restart changed active service, or complete a pending failed restart'
                       for u in ('audiobooks.service', 'bme280-mqtt.service', 'video-library.service')})
     return {'mode': mode, 'release': release, 'manifest': manifest,
             'destination': str(LIVE_ROOT / 'releases' / release),
@@ -260,12 +260,11 @@ def install_release(stream, root, mode, services=None, flat_root=FLAT_ROOT):
             changed_legacy = set()
             for relative, destination in mapping.items():
                 path = flat_root / destination
-                path.parent.mkdir(parents=True, exist_ok=True)
-                if path.is_symlink():
+                if any(parent.is_symlink() for parent in (path, *path.parents)
+                       if parent.is_relative_to(flat_root)):
                     raise ValueError(f'refusing legacy symlink: {path}')
                 if not path.exists() or digest(path.read_bytes()) != manifest['files'][relative]:
                     changed_legacy.add(relative)
-                    shutil.copyfile(release / relative, path)
             affected = set()
             for relative in changed_legacy:
                 if relative.startswith('pi/apps/video_library/') or relative == 'shared/python/sonos_tasks.py':
@@ -274,11 +273,45 @@ def install_release(stream, root, mode, services=None, flat_root=FLAT_ROOT):
                     affected.add('audiobooks.service')
                 if relative == 'pi/apps/bme280/bme280_mqtt.py':
                     affected.add('bme280-mqtt.service')
+            journal = root / 'legacy-pending-restarts.json'
+            pending_units = set()
+            if journal.exists():
+                saved = json.loads(journal.read_bytes())
+                allowed = {'video-library.service', 'audiobooks.service', 'bme280-mqtt.service'}
+                if not isinstance(saved, list) or any(not isinstance(unit, str) or unit not in allowed for unit in saved):
+                    raise ValueError('invalid legacy restart journal')
+                pending_units.update(saved)
+            if services is not None:
+                pending_units.update(unit for unit in affected if services.is_active(unit))
+            if pending_units and services is None:
+                raise ValueError('pending legacy restarts require a service manager')
+
+            def save_pending():
+                descriptor, name = tempfile.mkstemp(prefix='.legacy-restarts-', dir=root)
+                try:
+                    with os.fdopen(descriptor, 'wb') as handle:
+                        handle.write(encoded(sorted(pending_units)))
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                    os.replace(name, journal)
+                finally:
+                    Path(name).unlink(missing_ok=True)
+
+            # Journal BEFORE copying: a partial copy or failed restart must not
+            # become an apparent no-op when the same release is retried.
+            if pending_units:
+                save_pending()
+            for relative in sorted(changed_legacy):
+                path = flat_root / mapping[relative]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(release / relative, path)
             restarted = []
-            for unit in sorted(affected):
-                if services is not None and services.is_active(unit):
-                    services.restart(unit)
-                    restarted.append(unit)
+            for unit in sorted(pending_units):
+                services.restart(unit)
+                restarted.append(unit)
+                pending_units.remove(unit)
+                save_pending()
+            journal.unlink(missing_ok=True)
             return {'release': str(release), 'restarted': restarted}
         if services is None:
             raise ValueError('activation requires a service manager')
