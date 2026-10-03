@@ -18,6 +18,7 @@ ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/catalog.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/catalog_values.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/schema.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/v1_bridge.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/legacy_progress.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/media_models.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/vlc_player.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/sonos_volume.py

@@ -49,6 +49,7 @@ v2_files=(
   pi/apps/video_library/catalog_values.py
   pi/apps/video_library/schema.py
   pi/apps/video_library/v1_bridge.py
+  pi/apps/video_library/legacy_progress.py
   pi/apps/video_library/media_models.py
   pi/apps/video_library/players/vlc_player.py
   pi/apps/video_library/players/sonos_volume.py
@@ -131,6 +132,8 @@ if [[ "$mode" == deploy ]]; then
     "$local_stage/scripts/python-automation/schema.py"
   stage_file pi/apps/video_library/v1_bridge.py \
     "$local_stage/scripts/python-automation/v1_bridge.py"
+  stage_file pi/apps/video_library/legacy_progress.py \
+    "$local_stage/scripts/python-automation/legacy_progress.py"
   stage_file pi/apps/video_library/media_models.py \
     "$local_stage/scripts/python-automation/media_models.py"
   stage_file pi/apps/video_library/players/vlc_player.py \
@@ -320,6 +323,7 @@ for module in \
   catalog_values.py \
   schema.py \
   v1_bridge.py \
+  legacy_progress.py \
   media_models.py \
   vlc_player.py \
   sonos_volume.py
