@@ -4,6 +4,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from pi.apps.van_dashboard import van_dashboard as dashboard
+from pi.apps.van_dashboard import van_dashboard_common as dashboard_common
+from pi.apps.van_dashboard import van_dashboard_home as dashboard_home
 
 
 class LightingPowerSwitchTests(unittest.TestCase):
@@ -15,7 +17,7 @@ class LightingPowerSwitchTests(unittest.TestCase):
                 "state": "off",
                 "brightness": None,
             }
-            for _group_id, _group_label, lights in dashboard.LIGHT_GROUPS
+            for _group_id, _group_label, lights in dashboard_common.LIGHT_GROUPS
             for entity, _label in lights
         ]
         values.extend(
@@ -38,12 +40,12 @@ class LightingPowerSwitchTests(unittest.TestCase):
         values = self.states()
 
         def command(args, timeout):
-            self.assertEqual(args, [dashboard.TUYA_LIGHT, "list"])
+            self.assertEqual(args, [dashboard_common.TUYA_LIGHT, "list"])
             return SimpleNamespace(returncode=0, stdout=json.dumps(values), stderr="")
 
         groups = {
             group["id"]: group
-            for group in dashboard.LightingController(command=command).status()["groups"]
+            for group in dashboard_home.LightingController(command=command).status()["groups"]
         }
         self.assertEqual(groups["exterior"]["power_switch"]["entity_id"], "switch.ext_flood")
         self.assertEqual(groups["exterior"]["power_switch"]["state"], "off")
@@ -58,23 +60,23 @@ class LightingPowerSwitchTests(unittest.TestCase):
 
         def command(args, timeout):
             calls.append(list(args))
-            if args[:2] == [dashboard.TUYA_TOGGLE, "switch.ext_flood"]:
+            if args[:2] == [dashboard_common.TUYA_TOGGLE, "switch.ext_flood"]:
                 values[-2]["state"] = args[2]
             return SimpleNamespace(
                 returncode=0,
-                stdout=json.dumps(values) if args == [dashboard.TUYA_LIGHT, "list"] else "",
+                stdout=json.dumps(values) if args == [dashboard_common.TUYA_LIGHT, "list"] else "",
                 stderr="",
             )
 
-        controller = dashboard.LightingController(command=command)
+        controller = dashboard_home.LightingController(command=command)
         status = controller.set_power("switch.ext_flood", True)
         exterior = next(group for group in status["groups"] if group["id"] == "exterior")
         self.assertEqual(exterior["power_switch"]["state"], "on")
         self.assertEqual(
             calls,
             [
-                [dashboard.TUYA_TOGGLE, "switch.ext_flood", "on"],
-                [dashboard.TUYA_LIGHT, "list"],
+                [dashboard_common.TUYA_TOGGLE, "switch.ext_flood", "on"],
+                [dashboard_common.TUYA_LIGHT, "list"],
             ],
         )
         with self.assertRaisesRegex(ValueError, "unknown lighting target"):
@@ -84,16 +86,16 @@ class LightingPowerSwitchTests(unittest.TestCase):
         values = self.states()
 
         def command(args, timeout):
-            if args[:2] == [dashboard.TUYA_TOGGLE, "switch.solder_flood"]:
+            if args[:2] == [dashboard_common.TUYA_TOGGLE, "switch.solder_flood"]:
                 values[-1]["state"] = args[2]
             return SimpleNamespace(
                 returncode=0,
-                stdout=json.dumps(values) if args == [dashboard.TUYA_LIGHT, "list"] else "",
+                stdout=json.dumps(values) if args == [dashboard_common.TUYA_LIGHT, "list"] else "",
                 stderr="",
             )
 
         original = dashboard.lighting
-        dashboard.lighting = dashboard.LightingController(command=command)
+        dashboard.lighting = dashboard_home.LightingController(command=command)
         try:
             client = dashboard.app.test_client()
             accepted = client.post(

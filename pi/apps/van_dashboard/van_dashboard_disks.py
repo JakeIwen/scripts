@@ -1,64 +1,35 @@
 """Managed USB-disk status and guarded lifecycle controller.
 
-This module supports both repository package imports and the flat sibling
-layout used by the deployed van-dashboard service.
+This module is imported as part of the van_dashboard package.
 """
 
 __all__ = ["DiskCommandError", "DiskManager"]
 
-if __package__:
-    from .van_dashboard_common import (
-        BOOT_ID_PATH,
-        DISKCTL,
-        DISK_ACTION_TIMEOUT,
-        DISK_EJECT_HOLD_DIR,
-        DISK_HEALTH_STATE_DIR,
-        DISK_POLICY_CONF,
-        DISK_STATUS_TIMEOUT,
-        LSBLK,
-        SUDO,
-        SYSTEM_MONITOR_DB,
-        copy,
-        json,
-        os,
-        re,
-        read_text_file,
-        run_command,
-        shlex,
-        sqlite3,
-        subprocess,
-        threading,
-        time,
-    )
-else:
-    from van_dashboard_common import (
-        BOOT_ID_PATH,
-        DISKCTL,
-        DISK_ACTION_TIMEOUT,
-        DISK_EJECT_HOLD_DIR,
-        DISK_HEALTH_STATE_DIR,
-        DISK_POLICY_CONF,
-        DISK_STATUS_TIMEOUT,
-        LSBLK,
-        SUDO,
-        SYSTEM_MONITOR_DB,
-        copy,
-        json,
-        os,
-        re,
-        read_text_file,
-        run_command,
-        shlex,
-        sqlite3,
-        subprocess,
-        threading,
-        time,
-    )
+from .van_dashboard_common import (
+    BOOT_ID_PATH,
+    DISKCTL,
+    DISK_ACTION_TIMEOUT,
+    DISK_EJECT_HOLD_DIR,
+    DISK_HEALTH_STATE_DIR,
+    DISK_POLICY_CONF,
+    DISK_STATUS_TIMEOUT,
+    LSBLK,
+    SUDO,
+    SYSTEM_MONITOR_DB,
+    copy,
+    json,
+    os,
+    re,
+    read_text_file,
+    run_command,
+    shlex,
+    sqlite3,
+    subprocess,
+    threading,
+    time,
+)
 
-if __package__:
-    from .van_dashboard_block_devices import flatten_block_devices, root_block_device
-else:
-    from van_dashboard_block_devices import flatten_block_devices, root_block_device
+from .van_dashboard_block_devices import flatten_block_devices, root_block_device
 
 
 class DiskCommandError(RuntimeError):

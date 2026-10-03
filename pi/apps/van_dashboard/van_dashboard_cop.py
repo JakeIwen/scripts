@@ -1,7 +1,6 @@
 """COP intent, exterior-alert, and read-only CAN-wake status controllers.
 
-This module supports both repository package imports and the flat sibling
-layout used by the deployed van-dashboard service.
+This module is imported as part of the van_dashboard package.
 """
 
 __all__ = [
@@ -11,48 +10,26 @@ __all__ = [
     "ignition_is_on",
 ]
 
-if __package__:
-    from .van_dashboard_common import (
-        ACTIVE_MARKER,
-        COP_CAN_WAKE_SERVICE,
-        COP_CAN_WAKE_STATUS,
-        COP_CAN_WAKE_STATUS_MAX_BYTES,
-        IGNITION_MARKER,
-        NTFY_INTERVAL,
-        NTFY_SEND,
-        NTFY_TIMEOUT,
-        RUNTIME_DIR,
-        SYSTEMCTL,
-        json,
-        math,
-        os,
-        run_command,
-        stat,
-        subprocess,
-        threading,
-        time,
-    )
-else:
-    from van_dashboard_common import (
-        ACTIVE_MARKER,
-        COP_CAN_WAKE_SERVICE,
-        COP_CAN_WAKE_STATUS,
-        COP_CAN_WAKE_STATUS_MAX_BYTES,
-        IGNITION_MARKER,
-        NTFY_INTERVAL,
-        NTFY_SEND,
-        NTFY_TIMEOUT,
-        RUNTIME_DIR,
-        SYSTEMCTL,
-        json,
-        math,
-        os,
-        run_command,
-        stat,
-        subprocess,
-        threading,
-        time,
-    )
+from .van_dashboard_common import (
+    ACTIVE_MARKER,
+    COP_CAN_WAKE_SERVICE,
+    COP_CAN_WAKE_STATUS,
+    COP_CAN_WAKE_STATUS_MAX_BYTES,
+    IGNITION_MARKER,
+    NTFY_INTERVAL,
+    NTFY_SEND,
+    NTFY_TIMEOUT,
+    RUNTIME_DIR,
+    SYSTEMCTL,
+    json,
+    math,
+    os,
+    run_command,
+    stat,
+    subprocess,
+    threading,
+    time,
+)
 
 
 def ignition_is_on(path=IGNITION_MARKER):

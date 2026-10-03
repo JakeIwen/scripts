@@ -1,47 +1,27 @@
 """Tuya switch and Home Assistant lighting controllers.
 
-This module supports both repository package imports and the flat sibling
-layout used by the deployed van-dashboard service.
+This module is imported as part of the van_dashboard package.
 """
 
 __all__ = ["LightingCommandError", "LightingController", "TuyaSwitchManager"]
 
-if __package__:
-    from .van_dashboard_common import (
-        LIGHT_COMMAND_TIMEOUT,
-        LIGHT_GROUPS,
-        LIGHT_HUE_MODES,
-        LIGHT_POWER_SWITCHES,
-        TUYA_LIGHT,
-        TUYA_POLL_INTERVAL,
-        TUYA_STATUS,
-        TUYA_TOGGLE,
-        json,
-        math,
-        re,
-        run_command,
-        subprocess,
-        threading,
-        time,
-    )
-else:
-    from van_dashboard_common import (
-        LIGHT_COMMAND_TIMEOUT,
-        LIGHT_GROUPS,
-        LIGHT_HUE_MODES,
-        LIGHT_POWER_SWITCHES,
-        TUYA_LIGHT,
-        TUYA_POLL_INTERVAL,
-        TUYA_STATUS,
-        TUYA_TOGGLE,
-        json,
-        math,
-        re,
-        run_command,
-        subprocess,
-        threading,
-        time,
-    )
+from .van_dashboard_common import (
+    LIGHT_COMMAND_TIMEOUT,
+    LIGHT_GROUPS,
+    LIGHT_HUE_MODES,
+    LIGHT_POWER_SWITCHES,
+    TUYA_LIGHT,
+    TUYA_POLL_INTERVAL,
+    TUYA_STATUS,
+    TUYA_TOGGLE,
+    json,
+    math,
+    re,
+    run_command,
+    subprocess,
+    threading,
+    time,
+)
 
 
 class TuyaSwitchManager:

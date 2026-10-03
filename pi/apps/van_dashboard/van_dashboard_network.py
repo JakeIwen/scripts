@@ -1,7 +1,6 @@
 """Connectivity, OpenWrt, UBNT Wi-Fi, and speed-test controllers.
 
-This module supports both repository package imports and the flat sibling
-layout used by the deployed van-dashboard service.
+This module is imported as part of the van_dashboard package.
 """
 
 import signal
@@ -17,42 +16,23 @@ __all__ = [
     "parse_speedtest_output",
 ]
 
-if __package__:
-    from .van_dashboard_common import (
-        CONNECTIVITY_ACTIVE_LEASE,
-        CONNECTIVITY_ACTIVE_RETRY_INTERVAL,
-        CONNECTIVITY_INTERVAL,
-        CONNECTIVITY_STATUS,
-        OPENWRT_CLIENTS_TIMEOUT,
-        SPEEDTEST,
-        SPEEDTEST_TIMEOUT,
-        UBNT_WIFI_TOOL,
-        copy,
-        json,
-        re,
-        run_command,
-        subprocess,
-        threading,
-        time,
-    )
-else:
-    from van_dashboard_common import (
-        CONNECTIVITY_ACTIVE_LEASE,
-        CONNECTIVITY_ACTIVE_RETRY_INTERVAL,
-        CONNECTIVITY_INTERVAL,
-        CONNECTIVITY_STATUS,
-        OPENWRT_CLIENTS_TIMEOUT,
-        SPEEDTEST,
-        SPEEDTEST_TIMEOUT,
-        UBNT_WIFI_TOOL,
-        copy,
-        json,
-        re,
-        run_command,
-        subprocess,
-        threading,
-        time,
-    )
+from .van_dashboard_common import (
+    CONNECTIVITY_ACTIVE_LEASE,
+    CONNECTIVITY_ACTIVE_RETRY_INTERVAL,
+    CONNECTIVITY_INTERVAL,
+    CONNECTIVITY_STATUS,
+    OPENWRT_CLIENTS_TIMEOUT,
+    SPEEDTEST,
+    SPEEDTEST_TIMEOUT,
+    UBNT_WIFI_TOOL,
+    copy,
+    json,
+    re,
+    run_command,
+    subprocess,
+    threading,
+    time,
+)
 
 
 class ConnectivityMonitor:

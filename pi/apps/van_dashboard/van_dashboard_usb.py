@@ -1,57 +1,32 @@
 """USB inventory, hub discovery, and guarded port-control controllers.
 
-This module supports both repository package imports and the flat sibling
-layout used by the deployed van-dashboard service.
+This module is imported as part of the van_dashboard package.
 """
 
 __all__ = ["UsbDeviceMonitor", "UsbPortController", "parse_uhubctl_status"]
 
-if __package__:
-    from .van_dashboard_common import (
-        SUDO,
-        TEE,
-        UHUBCTL,
-        USB2_RECOVERY_TIMEOUT,
-        USB2_RECOVERY_TOOL,
-        USB_PORT_SNAPSHOT_TTL,
-        USB_PORT_TIMEOUT,
-        USB_WATCH_TIMEOUT,
-        USB_WATCH_TOOL,
-        copy,
-        glob,
-        json,
-        os,
-        re,
-        read_text_file,
-        run_command,
-        subprocess,
-        sys,
-        threading,
-        time,
-    )
-else:
-    from van_dashboard_common import (
-        SUDO,
-        TEE,
-        UHUBCTL,
-        USB2_RECOVERY_TIMEOUT,
-        USB2_RECOVERY_TOOL,
-        USB_PORT_SNAPSHOT_TTL,
-        USB_PORT_TIMEOUT,
-        USB_WATCH_TIMEOUT,
-        USB_WATCH_TOOL,
-        copy,
-        glob,
-        json,
-        os,
-        re,
-        read_text_file,
-        run_command,
-        subprocess,
-        sys,
-        threading,
-        time,
-    )
+from .van_dashboard_common import (
+    SUDO,
+    TEE,
+    UHUBCTL,
+    USB2_RECOVERY_TIMEOUT,
+    USB2_RECOVERY_TOOL,
+    USB_PORT_SNAPSHOT_TTL,
+    USB_PORT_TIMEOUT,
+    USB_WATCH_TIMEOUT,
+    USB_WATCH_TOOL,
+    copy,
+    glob,
+    json,
+    os,
+    re,
+    read_text_file,
+    run_command,
+    subprocess,
+    sys,
+    threading,
+    time,
+)
 
 
 class UsbDeviceMonitor:

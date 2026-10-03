@@ -4,6 +4,7 @@ import unittest
 from types import SimpleNamespace
 
 from pi.apps.van_dashboard import van_dashboard as dashboard
+from pi.apps.van_dashboard import van_dashboard_network as dashboard_network
 from pi.scripts import connectivity_status
 
 
@@ -125,7 +126,7 @@ class OpenWrtClientDashboardTests(unittest.TestCase):
             calls.append((list(args), timeout))
             return SimpleNamespace(returncode=0, stdout=json.dumps(payload), stderr="")
 
-        controller = dashboard.OpenWrtClientsController(
+        controller = dashboard_network.OpenWrtClientsController(
             collector="/test/connectivity",
             command=command,
             timeout=7,
@@ -135,7 +136,7 @@ class OpenWrtClientDashboardTests(unittest.TestCase):
 
         invalid = {**payload, "client_count": 2}
         with self.assertRaisesRegex(
-            dashboard.OpenWrtClientsError,
+            dashboard_network.OpenWrtClientsError,
             "inconsistent counts",
         ):
             controller.parse_status(json.dumps(invalid))
@@ -144,7 +145,7 @@ class OpenWrtClientDashboardTests(unittest.TestCase):
         invalid_radio["clients"][0]["radio"] = "radio0"
         invalid_radio["clients"][0]["band"] = None
         with self.assertRaisesRegex(
-            dashboard.OpenWrtClientsError,
+            dashboard_network.OpenWrtClientsError,
             "invalid device data",
         ):
             controller.parse_status(json.dumps(invalid_radio))
@@ -153,13 +154,13 @@ class OpenWrtClientDashboardTests(unittest.TestCase):
         def command(args, timeout):
             raise subprocess.TimeoutExpired(args, timeout)
 
-        controller = dashboard.OpenWrtClientsController(
+        controller = dashboard_network.OpenWrtClientsController(
             collector="/test/connectivity",
             command=command,
             timeout=3,
         )
         with self.assertRaisesRegex(
-            dashboard.OpenWrtClientsError,
+            dashboard_network.OpenWrtClientsError,
             "timed out after 3 seconds",
         ):
             controller.status()
@@ -173,7 +174,7 @@ class OpenWrtClientDashboardTests(unittest.TestCase):
 
             def status(self):
                 if self.error:
-                    raise dashboard.OpenWrtClientsError("router unavailable")
+                    raise dashboard_network.OpenWrtClientsError("router unavailable")
                 return payload
 
         fake = FakeClients()

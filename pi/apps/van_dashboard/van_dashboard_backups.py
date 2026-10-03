@@ -1,86 +1,46 @@
 """Backup evidence and guarded manual backup controllers.
 
-This module supports both repository package imports and the flat sibling
-layout used by the deployed van-dashboard service.
+This module is imported as part of the van_dashboard package.
 """
 
 __all__ = ["BackupManager", "BackupStatusError"]
 
-if __package__:
-    from .van_dashboard_common import (
-        BACKUP_ABORT,
-        BACKUP_BORG_RUNNER,
-        BACKUP_CLONE_CARD_SIZE_PATH,
-        BACKUP_CLONE_NOW,
-        BACKUP_CLONE_TIMEOUT,
-        BACKUP_CONF,
-        BACKUP_EXFAT_RUNNER,
-        BACKUP_OPENWRT_RUNNER,
-        BACKUP_RUN_TIMEOUT,
-        BACKUP_STAMP_DIR,
-        BACKUP_STATUS_TIMEOUT,
-        BACKUP_STOP_TIMEOUT,
-        LSBLK,
-        SUDO,
-        TIME_MACHINE_BUNDLE,
-        copy,
-        datetime,
-        json,
-        os,
-        plistlib,
-        re,
-        read_text_file,
-        run_command,
-        shlex,
-        stat,
-        subprocess,
-        threading,
-        time,
-    )
-else:
-    from van_dashboard_common import (
-        BACKUP_ABORT,
-        BACKUP_BORG_RUNNER,
-        BACKUP_CLONE_CARD_SIZE_PATH,
-        BACKUP_CLONE_NOW,
-        BACKUP_CLONE_TIMEOUT,
-        BACKUP_CONF,
-        BACKUP_EXFAT_RUNNER,
-        BACKUP_OPENWRT_RUNNER,
-        BACKUP_RUN_TIMEOUT,
-        BACKUP_STAMP_DIR,
-        BACKUP_STATUS_TIMEOUT,
-        BACKUP_STOP_TIMEOUT,
-        LSBLK,
-        SUDO,
-        TIME_MACHINE_BUNDLE,
-        copy,
-        datetime,
-        json,
-        os,
-        plistlib,
-        re,
-        read_text_file,
-        run_command,
-        shlex,
-        stat,
-        subprocess,
-        threading,
-        time,
-    )
+from .van_dashboard_common import (
+    BACKUP_ABORT,
+    BACKUP_BORG_RUNNER,
+    BACKUP_CLONE_CARD_SIZE_PATH,
+    BACKUP_CLONE_NOW,
+    BACKUP_CLONE_TIMEOUT,
+    BACKUP_CONF,
+    BACKUP_EXFAT_RUNNER,
+    BACKUP_OPENWRT_RUNNER,
+    BACKUP_RUN_TIMEOUT,
+    BACKUP_STAMP_DIR,
+    BACKUP_STATUS_TIMEOUT,
+    BACKUP_STOP_TIMEOUT,
+    LSBLK,
+    SUDO,
+    TIME_MACHINE_BUNDLE,
+    copy,
+    datetime,
+    json,
+    os,
+    plistlib,
+    re,
+    read_text_file,
+    run_command,
+    shlex,
+    stat,
+    subprocess,
+    threading,
+    time,
+)
 
-if __package__:
-    from .van_dashboard_block_devices import (
-        block_device_descendants,
-        flatten_block_devices,
-        root_block_device,
-    )
-else:
-    from van_dashboard_block_devices import (
-        block_device_descendants,
-        flatten_block_devices,
-        root_block_device,
-    )
+from .van_dashboard_block_devices import (
+    block_device_descendants,
+    flatten_block_devices,
+    root_block_device,
+)
 
 
 class BackupStatusError(RuntimeError):

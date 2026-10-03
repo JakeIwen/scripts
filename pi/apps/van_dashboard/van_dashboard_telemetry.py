@@ -1,7 +1,6 @@
 """Read-only telemetry summary and guarded voltage-check controllers.
 
-This module supports both repository package imports and the flat sibling
-layout used by the deployed van-dashboard service.
+This module is imported as part of the van_dashboard package.
 """
 
 __all__ = [
@@ -13,50 +12,27 @@ __all__ = [
     "valid_voltage",
 ]
 
-if __package__:
-    from .van_dashboard_common import (
-        Request,
-        ENGINE_OFF_VOLTAGE_STATUS,
-        ENGINE_OFF_VOLTAGE_STATUS_MAX_BYTES,
-        TELEMETRY_SNAPSHOT_TIMEOUT,
-        TELEMETRY_SNAPSHOT_URL,
-        VOLTAGE_CHECK_TIMEOUT,
-        VOLTAGE_MON_CSV,
-        VOLTAGE_MON_TOOL,
-        csv,
-        datetime,
-        json,
-        math,
-        os,
-        run_command,
-        stat,
-        subprocess,
-        threading,
-        time,
-        urlopen,
-    )
-else:
-    from van_dashboard_common import (
-        Request,
-        ENGINE_OFF_VOLTAGE_STATUS,
-        ENGINE_OFF_VOLTAGE_STATUS_MAX_BYTES,
-        TELEMETRY_SNAPSHOT_TIMEOUT,
-        TELEMETRY_SNAPSHOT_URL,
-        VOLTAGE_CHECK_TIMEOUT,
-        VOLTAGE_MON_CSV,
-        VOLTAGE_MON_TOOL,
-        csv,
-        datetime,
-        json,
-        math,
-        os,
-        run_command,
-        stat,
-        subprocess,
-        threading,
-        time,
-        urlopen,
-    )
+from .van_dashboard_common import (
+    Request,
+    ENGINE_OFF_VOLTAGE_STATUS,
+    ENGINE_OFF_VOLTAGE_STATUS_MAX_BYTES,
+    TELEMETRY_SNAPSHOT_TIMEOUT,
+    TELEMETRY_SNAPSHOT_URL,
+    VOLTAGE_CHECK_TIMEOUT,
+    VOLTAGE_MON_CSV,
+    VOLTAGE_MON_TOOL,
+    csv,
+    datetime,
+    json,
+    math,
+    os,
+    run_command,
+    stat,
+    subprocess,
+    threading,
+    time,
+    urlopen,
+)
 
 
 def valid_voltage(value):

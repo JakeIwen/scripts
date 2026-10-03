@@ -24,7 +24,6 @@ import signal
 import sqlite3
 import stat
 import subprocess
-import sys
 import threading
 import time
 from urllib.parse import urlsplit
@@ -32,60 +31,65 @@ from urllib.request import Request, urlopen
 
 from flask import Flask, jsonify, request, send_from_directory
 
-try:
-    from pi.van_compute.scripts.van_compute_metrics import (
-        ComputeMetricsError,
-        ComputeMetricsReader,
-    )
-except ModuleNotFoundError:
-    compute_scripts = os.environ.get(
-        "VAN_COMPUTE_SCRIPTS", "/home/pi/van_compute/scripts"
-    )
-    if compute_scripts not in sys.path:
-        sys.path.insert(0, compute_scripts)
-    from van_compute_metrics import (
-        ComputeMetricsError,
-        ComputeMetricsReader,
-    )
+from van_compute_metrics import ComputeMetricsError, ComputeMetricsReader
 
 # Keep request validation local because the dashboard and van_compute use
 # intentionally separate deployment paths. The metrics reader applies the same
 # validation before reading queue data.
 COMPUTE_TASK_NAME_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
 
-# Domain implementations are kept behind this compatibility facade. The
-# explicit branch supports both package imports in tests and the deployed flat
-# sibling layout where this file is executed directly.
-if __package__:
-    from .van_dashboard_common import *
-    from .van_dashboard_backups import *
-    from .van_dashboard_cop import *
-    from .van_dashboard_disks import *
-    from .van_dashboard_home import *
-    from .van_dashboard_storage import *
-    from .van_dashboard_sonos import *
-    from .van_dashboard_network import *
-    from .van_dashboard_history import *
-    from .van_dashboard_usb import *
-    from .van_dashboard_integrations import *
-    from .van_dashboard_system import *
-    from .van_dashboard_telemetry import *
-    from .van_dashboard_vonstar import *
-else:
-    from van_dashboard_common import *
-    from van_dashboard_backups import *
-    from van_dashboard_cop import *
-    from van_dashboard_disks import *
-    from van_dashboard_home import *
-    from van_dashboard_storage import *
-    from van_dashboard_sonos import *
-    from van_dashboard_network import *
-    from van_dashboard_history import *
-    from van_dashboard_usb import *
-    from van_dashboard_integrations import *
-    from van_dashboard_system import *
-    from van_dashboard_telemetry import *
-    from van_dashboard_vonstar import *
+from .van_dashboard_backups import BackupManager, BackupStatusError
+from .van_dashboard_common import (
+    COMPUTE_ROOT,
+    PORT,
+    REACT_FRONTEND_ROOT,
+    RUNTIME_DIR,
+    SUDO,
+    SYSTEMCTL,
+    TELEMETRY_SERVICE,
+    TELEMETRY_SERVICE_TIMEOUT,
+    StateStore,
+    run_command,
+)
+from .van_dashboard_cop import CopAlertManager, CopCanWakeStatusReader
+from .van_dashboard_disks import DiskCommandError, DiskManager
+from .van_dashboard_history import (
+    NetworkHistoryClient,
+    NetworkHistoryError,
+    network_history_query,
+)
+from .van_dashboard_home import (
+    LightingCommandError,
+    LightingController,
+    TuyaSwitchManager,
+)
+from .van_dashboard_integrations import (
+    PriceCheckCommandError,
+    PriceCheckController,
+    SystemMonitorClient,
+    SystemMonitorCommandError,
+)
+from .van_dashboard_network import (
+    ConnectivityMonitor,
+    OpenWrtClientsController,
+    OpenWrtClientsError,
+    SpeedTestManager,
+    UbntWifiController,
+)
+from .van_dashboard_sonos import SonosController
+from .van_dashboard_storage import PolicyCommandError, StoragePolicyManager
+from .van_dashboard_system import (
+    DashboardRestartController,
+    DashboardRestartError,
+    IgnitionMonitorCommandError,
+    IgnitionMonitorController,
+    SystemPowerController,
+    SystemPowerError,
+    read_system_uptime,
+)
+from .van_dashboard_telemetry import TelemetrySummaryReader, VoltageCheckManager
+from .van_dashboard_usb import UsbDeviceMonitor, UsbPortController
+from .van_dashboard_vonstar import VONSTAR_ACTIONS, VonstarClient, VonstarClientError
 
 # Preserve the historical facade-level marker constant for callers and source
 # safety checks. The implementation uses the identical value from common.

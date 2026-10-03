@@ -1,7 +1,6 @@
 """Ignition-monitor, service-restart, uptime, and system-power controllers.
 
-This module supports both repository package imports and the flat sibling
-layout used by the deployed van-dashboard service.
+This module is imported as part of the van_dashboard package.
 """
 
 __all__ = [
@@ -14,54 +13,29 @@ __all__ = [
     "read_system_uptime",
 ]
 
-if __package__:
-    from .van_dashboard_common import (
-        DASHBOARD_RESTART_TIMEOUT,
-        DASHBOARD_SERVICE,
-        IGNITIONMONCTL,
-        IGNITIONMON_MAX_MINUTES,
-        IGNITIONMON_TIMEOUT,
-        PROC_UPTIME,
-        SAFE_POWER_DOWN,
-        SAFE_REBOOT,
-        SUDO,
-        SYSTEMCTL,
-        SYSTEMD_RUN,
-        SYSTEM_POWER_TIMEOUT,
-        copy,
-        datetime,
-        json,
-        math,
-        os,
-        run_command,
-        subprocess,
-        threading,
-        time,
-    )
-else:
-    from van_dashboard_common import (
-        DASHBOARD_RESTART_TIMEOUT,
-        DASHBOARD_SERVICE,
-        IGNITIONMONCTL,
-        IGNITIONMON_MAX_MINUTES,
-        IGNITIONMON_TIMEOUT,
-        PROC_UPTIME,
-        SAFE_POWER_DOWN,
-        SAFE_REBOOT,
-        SUDO,
-        SYSTEMCTL,
-        SYSTEMD_RUN,
-        SYSTEM_POWER_TIMEOUT,
-        copy,
-        datetime,
-        json,
-        math,
-        os,
-        run_command,
-        subprocess,
-        threading,
-        time,
-    )
+from .van_dashboard_common import (
+    DASHBOARD_RESTART_TIMEOUT,
+    DASHBOARD_SERVICE,
+    IGNITIONMONCTL,
+    IGNITIONMON_MAX_MINUTES,
+    IGNITIONMON_TIMEOUT,
+    PROC_UPTIME,
+    SAFE_POWER_DOWN,
+    SAFE_REBOOT,
+    SUDO,
+    SYSTEMCTL,
+    SYSTEMD_RUN,
+    SYSTEM_POWER_TIMEOUT,
+    copy,
+    datetime,
+    json,
+    math,
+    os,
+    run_command,
+    subprocess,
+    threading,
+    time,
+)
 
 
 class IgnitionMonitorCommandError(RuntimeError):

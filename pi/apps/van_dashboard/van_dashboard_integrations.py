@@ -1,7 +1,6 @@
 """Price-watch and system-monitor integrations.
 
-This module supports both repository package imports and the flat sibling
-layout used by the deployed van-dashboard service.
+This module is imported as part of the van_dashboard package.
 """
 
 import copy
@@ -15,32 +14,18 @@ __all__ = [
     "SystemMonitorCommandError",
 ]
 
-if __package__:
-    from .van_dashboard_common import (
-        PRICE_CHECK_DB,
-        PRICE_CHECK_TIMEOUT,
-        PRICE_CHECK_TOOL,
-        SYSTEM_MONITOR_DB,
-        SYSTEM_MONITOR_TIMEOUT,
-        SYSTEM_MONITOR_TOOL,
-        json,
-        run_command,
-        subprocess,
-        sys,
-    )
-else:
-    from van_dashboard_common import (
-        PRICE_CHECK_DB,
-        PRICE_CHECK_TIMEOUT,
-        PRICE_CHECK_TOOL,
-        SYSTEM_MONITOR_DB,
-        SYSTEM_MONITOR_TIMEOUT,
-        SYSTEM_MONITOR_TOOL,
-        json,
-        run_command,
-        subprocess,
-        sys,
-    )
+from .van_dashboard_common import (
+    PRICE_CHECK_DB,
+    PRICE_CHECK_TIMEOUT,
+    PRICE_CHECK_TOOL,
+    SYSTEM_MONITOR_DB,
+    SYSTEM_MONITOR_TIMEOUT,
+    SYSTEM_MONITOR_TOOL,
+    json,
+    run_command,
+    subprocess,
+    sys,
+)
 
 
 class PriceCheckCommandError(RuntimeError):

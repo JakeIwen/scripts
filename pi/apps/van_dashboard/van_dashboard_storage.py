@@ -1,27 +1,17 @@
 """Requested storage and torrent policy controller.
 
-This module supports both repository package imports and the flat sibling
-layout used by the deployed van-dashboard service.
+This module is imported as part of the van_dashboard package.
 """
 
 __all__ = ["PolicyCommandError", "StoragePolicyManager"]
 
-if __package__:
-    from .van_dashboard_common import (
-        POLICYCTL,
-        POLICYCTL_TIMEOUT,
-        json,
-        run_command,
-        subprocess,
-    )
-else:
-    from van_dashboard_common import (
-        POLICYCTL,
-        POLICYCTL_TIMEOUT,
-        json,
-        run_command,
-        subprocess,
-    )
+from .van_dashboard_common import (
+    POLICYCTL,
+    POLICYCTL_TIMEOUT,
+    json,
+    run_command,
+    subprocess,
+)
 
 
 class PolicyCommandError(RuntimeError):

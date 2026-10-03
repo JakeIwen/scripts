@@ -1,35 +1,21 @@
 """Sonos discovery, grouping, transport, and album-art controller.
 
-This module supports both repository package imports and the flat sibling
-layout used by the deployed van-dashboard service.
+This module is imported as part of the van_dashboard package.
 """
 
 __all__ = ["SonosController"]
 
-if __package__:
-    from .van_dashboard_common import (
-        DEFAULT_SONOS_DEVICE,
-        Request,
-        SONOS_ART_MAX_BYTES,
-        SONOS_ART_TIMEOUT,
-        hashlib,
-        threading,
-        time,
-        urlopen,
-        urlsplit,
-    )
-else:
-    from van_dashboard_common import (
-        DEFAULT_SONOS_DEVICE,
-        Request,
-        SONOS_ART_MAX_BYTES,
-        SONOS_ART_TIMEOUT,
-        hashlib,
-        threading,
-        time,
-        urlopen,
-        urlsplit,
-    )
+from .van_dashboard_common import (
+    DEFAULT_SONOS_DEVICE,
+    Request,
+    SONOS_ART_MAX_BYTES,
+    SONOS_ART_TIMEOUT,
+    hashlib,
+    threading,
+    time,
+    urlopen,
+    urlsplit,
+)
 
 
 class SonosController:

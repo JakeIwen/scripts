@@ -1,7 +1,9 @@
 import copy
+import datetime
 import io
 import json
 import os
+import plistlib
 import shutil
 import sqlite3
 import stat
@@ -16,7 +18,21 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from pi.apps.van_dashboard import van_dashboard as dashboard
+from pi.apps.van_dashboard import van_dashboard_backups as dashboard_backups
+from pi.apps.van_dashboard import van_dashboard_common as dashboard_common
+from pi.apps.van_dashboard import van_dashboard_cop as dashboard_cop
+from pi.apps.van_dashboard import van_dashboard_disks as dashboard_disks
+from pi.apps.van_dashboard import van_dashboard_home as dashboard_home
+from pi.apps.van_dashboard import van_dashboard_integrations as dashboard_integrations
+from pi.apps.van_dashboard import van_dashboard_network as dashboard_network
+from pi.apps.van_dashboard import van_dashboard_sonos as dashboard_sonos
+from pi.apps.van_dashboard import van_dashboard_storage as dashboard_storage
+from pi.apps.van_dashboard import van_dashboard_system as dashboard_system
+from pi.apps.van_dashboard import van_dashboard_telemetry as dashboard_telemetry
+from pi.apps.van_dashboard import van_dashboard_usb as dashboard_usb
+from pi.apps.van_dashboard import van_dashboard_vonstar as dashboard_vonstar
 from pi.scripts import usb_watch
+import van_compute_metrics as compute_metrics
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 
@@ -110,9 +126,9 @@ class SonosControllerTests(unittest.TestCase):
         zones = {front, rear, solo}
 
         with tempfile.TemporaryDirectory() as tempdir:
-            store = dashboard.StateStore(os.path.join(tempdir, "state.json"))
+            store = dashboard_common.StateStore(os.path.join(tempdir, "state.json"))
             store.set("sonos_device", "Front")
-            controller = dashboard.SonosController(store, discover_func=lambda timeout: zones)
+            controller = dashboard_sonos.SonosController(store, discover_func=lambda timeout: zones)
             snapshot = controller.snapshot()
             self.assertEqual(snapshot["coordinator"], "Front")
             self.assertEqual(snapshot["group"], {"volume": 61, "muted": False})
@@ -155,8 +171,8 @@ class SonosControllerTests(unittest.TestCase):
         }
 
         with tempfile.TemporaryDirectory() as tempdir:
-            store = dashboard.StateStore(os.path.join(tempdir, "state.json"))
-            controller = dashboard.SonosController(
+            store = dashboard_common.StateStore(os.path.join(tempdir, "state.json"))
+            controller = dashboard_sonos.SonosController(
                 store, discover_func=lambda timeout: {speaker}
             )
             now_playing = controller.snapshot()["now_playing"]
@@ -167,8 +183,8 @@ class SonosControllerTests(unittest.TestCase):
         self.assertIsNone(now_playing["album_art"])
 
     def test_invalid_transport_action_fails_before_discovery(self):
-        controller = dashboard.SonosController(
-            dashboard.StateStore("/dev/null"),
+        controller = dashboard_sonos.SonosController(
+            dashboard_common.StateStore("/dev/null"),
             discover_func=lambda timeout: self.fail("discovery should not run"),
         )
         with self.assertRaisesRegex(ValueError, "unknown Sonos transport action"):
@@ -202,7 +218,7 @@ class ConnectivityMonitorTests(unittest.TestCase):
             self.assertEqual(timeout, 25)
             return SimpleNamespace(returncode=0, stdout=json.dumps(payload), stderr="")
 
-        monitor = dashboard.ConnectivityMonitor(
+        monitor = dashboard_network.ConnectivityMonitor(
             collector="/test/connectivity",
             command=command,
             wall_clock=lambda: 1_700_000_110,
@@ -242,7 +258,7 @@ class ConnectivityMonitorTests(unittest.TestCase):
             finally:
                 command_gate.release()
 
-        monitor = dashboard.ConnectivityMonitor(
+        monitor = dashboard_network.ConnectivityMonitor(
             collector="/test/connectivity",
             interval=60,
             command=command,
@@ -284,7 +300,7 @@ class PriceCheckControllerTests(unittest.TestCase):
                 returncode=0, stdout=json.dumps(self.PAYLOAD), stderr=""
             )
 
-        controller = dashboard.PriceCheckController(
+        controller = dashboard_integrations.PriceCheckController(
             tool="/test/price/main.py",
             database="/private/prices.sqlite3",
             command=command,
@@ -306,7 +322,7 @@ class PriceCheckControllerTests(unittest.TestCase):
         controller.remove_search(8)
         controller.check_search(8)
         prefix = [
-            dashboard.sys.executable,
+            sys.executable,
             "/test/price/main.py",
             "--db",
             "/private/prices.sqlite3",
@@ -370,14 +386,14 @@ class PriceCheckControllerTests(unittest.TestCase):
                 stderr="",
             )
 
-        with self.assertRaisesRegex(dashboard.PriceCheckCommandError, "duplicate URL"):
-            dashboard.PriceCheckController(command=failed).status()
+        with self.assertRaisesRegex(dashboard_integrations.PriceCheckCommandError, "duplicate URL"):
+            dashboard_integrations.PriceCheckController(command=failed).status()
 
         def malformed(_args, timeout):
             return SimpleNamespace(returncode=0, stdout="not-json", stderr="broken")
 
-        with self.assertRaisesRegex(dashboard.PriceCheckCommandError, "invalid output"):
-            dashboard.PriceCheckController(command=malformed).status()
+        with self.assertRaisesRegex(dashboard_integrations.PriceCheckCommandError, "invalid output"):
+            dashboard_integrations.PriceCheckController(command=malformed).status()
 
 
 class SystemMonitorClientTests(unittest.TestCase):
@@ -398,7 +414,7 @@ class SystemMonitorClientTests(unittest.TestCase):
                 returncode=0, stdout=json.dumps(self.PAYLOAD), stderr=""
             )
 
-        client = dashboard.SystemMonitorClient(
+        client = dashboard_integrations.SystemMonitorClient(
             tool="/test/system_event_monitor.py",
             database="/test/events.sqlite3",
             command=command,
@@ -410,7 +426,7 @@ class SystemMonitorClientTests(unittest.TestCase):
             [
                 (
                     [
-                        dashboard.sys.executable,
+                        sys.executable,
                         "/test/system_event_monitor.py",
                         "--database",
                         "/test/events.sqlite3",
@@ -427,22 +443,22 @@ class SystemMonitorClientTests(unittest.TestCase):
         )
 
     def test_rejects_failed_or_malformed_report(self):
-        failed = dashboard.SystemMonitorClient(
+        failed = dashboard_integrations.SystemMonitorClient(
             command=lambda args, timeout: SimpleNamespace(
                 returncode=1, stdout="", stderr="database unavailable"
             )
         )
         with self.assertRaisesRegex(
-            dashboard.SystemMonitorCommandError, "database unavailable"
+            dashboard_integrations.SystemMonitorCommandError, "database unavailable"
         ):
             failed.report()
 
-        malformed = dashboard.SystemMonitorClient(
+        malformed = dashboard_integrations.SystemMonitorClient(
             command=lambda args, timeout: SimpleNamespace(
                 returncode=0, stdout="not-json", stderr="broken"
             )
         )
-        with self.assertRaisesRegex(dashboard.SystemMonitorCommandError, "invalid output"):
+        with self.assertRaisesRegex(dashboard_integrations.SystemMonitorCommandError, "invalid output"):
             malformed.report()
 
     def test_cached_reports_are_shared_isolated_and_expire(self):
@@ -450,7 +466,7 @@ class SystemMonitorClientTests(unittest.TestCase):
         command = mock.Mock(return_value=SimpleNamespace(
             returncode=0, stdout=json.dumps(self.PAYLOAD), stderr=""
         ))
-        client = dashboard.SystemMonitorClient(command=command, clock=clock)
+        client = dashboard_integrations.SystemMonitorClient(command=command, clock=clock)
         client.report(6)["events"].append("caller mutation")
         self.assertEqual(client.report(6)["events"], [])
         self.assertEqual(command.call_count, 1)
@@ -468,7 +484,7 @@ class SystemMonitorClientTests(unittest.TestCase):
             started.set()
             release.wait(2)
             return SimpleNamespace(returncode=0, stdout=json.dumps(self.PAYLOAD), stderr="")
-        client = dashboard.SystemMonitorClient(command=command)
+        client = dashboard_integrations.SystemMonitorClient(command=command)
         threads = [threading.Thread(target=lambda: results.append(client.report(6))) for _ in range(4)]
         try:
             for thread in threads:
@@ -484,9 +500,9 @@ class SystemMonitorClientTests(unittest.TestCase):
     def test_failure_cooldown_recovers_and_analysis_invalidates_history(self):
         clock = FakeClock(100)
         command = mock.Mock(side_effect=subprocess.TimeoutExpired("monitor", 15))
-        client = dashboard.SystemMonitorClient(command=command, clock=clock)
+        client = dashboard_integrations.SystemMonitorClient(command=command, clock=clock)
         for _ in range(2):
-            with self.assertRaises(dashboard.SystemMonitorCommandError):
+            with self.assertRaises(dashboard_integrations.SystemMonitorCommandError):
                 client.report(6)
         self.assertEqual(command.call_count, 1)
         clock.advance(3)
@@ -507,7 +523,7 @@ class SystemMonitorClientTests(unittest.TestCase):
             calls.append(list(args))
             return SimpleNamespace(returncode=0, stdout='{"ok": true}', stderr="")
 
-        client = dashboard.SystemMonitorClient(
+        client = dashboard_integrations.SystemMonitorClient(
             tool="/test/monitor.py",
             database="/test/events.sqlite3",
             command=command,
@@ -515,7 +531,7 @@ class SystemMonitorClientTests(unittest.TestCase):
         client.crash_analysis()
         client.crash_history(20)
         prefix = [
-            dashboard.sys.executable,
+            sys.executable,
             "/test/monitor.py",
             "--database",
             "/test/events.sqlite3",
@@ -754,7 +770,7 @@ class PriceCheckApiTests(unittest.TestCase):
     def test_schedule_failure_reports_that_previous_crontab_was_restored(self):
         class FailedSchedule:
             def set_schedule(self, _expression):
-                raise dashboard.PriceCheckCommandError(
+                raise dashboard_integrations.PriceCheckCommandError(
                     "crontab update failed; previous crontab restored"
                 )
 
@@ -810,7 +826,7 @@ class UbntWifiControllerTests(unittest.TestCase):
                 stderr="",
             )
 
-        manager = dashboard.UbntWifiController(
+        manager = dashboard_network.UbntWifiController(
             tool="/test/ubnt_wifi.py",
             command=command,
             wall_clock=FakeClock(200),
@@ -844,7 +860,7 @@ class UbntWifiControllerTests(unittest.TestCase):
                 stderr="",
             )
 
-        manager = dashboard.UbntWifiController(
+        manager = dashboard_network.UbntWifiController(
             tool="/test/ubnt_wifi.py", command=command, wall_clock=FakeClock(200)
         )
         payload = {
@@ -884,7 +900,7 @@ class UbntWifiControllerTests(unittest.TestCase):
                 stderr="",
             )
 
-        manager = dashboard.UbntWifiController(
+        manager = dashboard_network.UbntWifiController(
             tool="/test/ubnt_wifi.py", command=command, wall_clock=FakeClock(200)
         )
         manager._run("connect", {"profile": "denlink"})
@@ -903,7 +919,7 @@ class UbntWifiControllerTests(unittest.TestCase):
 
     def test_failed_status_refresh_is_not_retried_on_every_poll(self):
         clock = FakeClock(200)
-        manager = dashboard.UbntWifiController(wall_clock=clock)
+        manager = dashboard_network.UbntWifiController(wall_clock=clock)
         manager.last_refresh_attempt = 200
         starts = []
         manager._refresh_status = lambda: starts.append("status")
@@ -923,7 +939,7 @@ class UbntWifiControllerTests(unittest.TestCase):
                 started.set()
                 release.wait(3)
             return SimpleNamespace(returncode=0, stdout=json.dumps({"ok": True, "wifi": self.WIFI}), stderr="")
-        manager = dashboard.UbntWifiController(command=command)
+        manager = dashboard_network.UbntWifiController(command=command)
         manager.start("provision", {"ssid": "Camp"})
         self.assertTrue(started.wait(1))
         try:
@@ -942,7 +958,7 @@ class UbntWifiControllerTests(unittest.TestCase):
         self.assertEqual(manager.snapshot()["operation"]["kind"], "provision")
 
     def test_timeout_cleanup_is_bounded_even_with_a_child_holding_output(self):
-        manager = dashboard.UbntWifiController()
+        manager = dashboard_network.UbntWifiController()
         with self.assertRaises(subprocess.TimeoutExpired):
             manager._run_cancellable_command(
                 [sys.executable, "-c", "import subprocess,time,sys; subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)']); time.sleep(30)"],
@@ -967,7 +983,7 @@ class UbntWifiControllerTests(unittest.TestCase):
                 stderr="",
             )
 
-        manager = dashboard.UbntWifiController(
+        manager = dashboard_network.UbntWifiController(
             tool="/test/ubnt_wifi.py", command=command, wall_clock=FakeClock(200)
         )
         self.assertTrue(manager.start("connect", {"profile": "denlink"}))
@@ -1000,28 +1016,28 @@ class TuyaSwitchManagerTests(unittest.TestCase):
         def command(args, timeout):
             nonlocal state
             calls.append(tuple(args))
-            if args[0] == dashboard.TUYA_STATUS:
+            if args[0] == dashboard_common.TUYA_STATUS:
                 return SimpleNamespace(returncode=0, stdout=state + "\n", stderr="")
-            if args[0] == dashboard.TUYA_TOGGLE:
+            if args[0] == dashboard_common.TUYA_TOGGLE:
                 state = args[2]
                 return SimpleNamespace(returncode=0, stdout=state + "\n", stderr="")
             raise AssertionError(args)
 
-        switch = dashboard.TuyaSwitchManager(
+        switch = dashboard_home.TuyaSwitchManager(
             "starlink", command=command, wall_clock=lambda: 1_700_000_000
         )
         self.assertEqual(switch.refresh()["state"], "on")
         toggled = switch.toggle()
         self.assertEqual(toggled["state"], "off")
         self.assertTrue(toggled["available"])
-        self.assertEqual(calls[1], (dashboard.TUYA_TOGGLE, "starlink", "off"))
-        self.assertEqual(calls[2], (dashboard.TUYA_STATUS, "starlink"))
+        self.assertEqual(calls[1], (dashboard_common.TUYA_TOGGLE, "starlink", "off"))
+        self.assertEqual(calls[2], (dashboard_common.TUYA_STATUS, "starlink"))
 
     def test_failed_status_is_neutral_and_cannot_guess_toggle_direction(self):
         def command(args, timeout):
             return SimpleNamespace(returncode=1, stdout="unavailable\n", stderr="")
 
-        switch = dashboard.TuyaSwitchManager("starlink", command=command)
+        switch = dashboard_home.TuyaSwitchManager("starlink", command=command)
         status = switch.refresh()
         self.assertEqual(status["state"], "unknown")
         self.assertFalse(status["available"])
@@ -1044,7 +1060,7 @@ class LightingControllerTests(unittest.TestCase):
                 "min_color_temp_kelvin": 2202,
                 "max_color_temp_kelvin": 6535,
             }
-            for _group_id, _group_label, lights in dashboard.LIGHT_GROUPS
+            for _group_id, _group_label, lights in dashboard_common.LIGHT_GROUPS
             for entity, _label in lights
         ]
 
@@ -1055,10 +1071,10 @@ class LightingControllerTests(unittest.TestCase):
         )
 
         def command(args, timeout):
-            self.assertEqual(args, [dashboard.TUYA_LIGHT, "list"])
+            self.assertEqual(args, [dashboard_common.TUYA_LIGHT, "list"])
             return SimpleNamespace(returncode=0, stdout=json.dumps(values), stderr="")
 
-        status = dashboard.LightingController(command=command).status()
+        status = dashboard_home.LightingController(command=command).status()
         self.assertEqual([group["label"] for group in status["groups"]], [
             "Cab", "Rear", "Kitchen", "Exterior", "Solder", "Extra"
         ])
@@ -1081,19 +1097,19 @@ class LightingControllerTests(unittest.TestCase):
 
         def command(args, timeout):
             calls.append(list(args))
-            if args[:2] == [dashboard.TUYA_TOGGLE, "light.wiz_kitchen"]:
+            if args[:2] == [dashboard_common.TUYA_TOGGLE, "light.wiz_kitchen"]:
                 values[4]["state"] = args[2]
                 values[4]["brightness"] = 255 if args[2] == "on" else None
-            elif args[:3] == [dashboard.TUYA_LIGHT, "set", "light.wiz_kitchen"]:
+            elif args[:3] == [dashboard_common.TUYA_LIGHT, "set", "light.wiz_kitchen"]:
                 values[4]["state"] = "on"
                 values[4]["brightness"] = int(args[3])
-            elif args[:3] == [dashboard.TUYA_LIGHT, "hue", "light.wiz_kitchen"]:
+            elif args[:3] == [dashboard_common.TUYA_LIGHT, "hue", "light.wiz_kitchen"]:
                 values[4]["state"] = "on"
                 values[4]["color_mode"] = "rgbww"
                 values[4]["hs_color"] = [int(args[3]), 100]
                 values[4]["color_temp_kelvin"] = None
             elif args[:3] == [
-                dashboard.TUYA_LIGHT,
+                dashboard_common.TUYA_LIGHT,
                 "temperature",
                 "light.wiz_kitchen",
             ]:
@@ -1103,11 +1119,11 @@ class LightingControllerTests(unittest.TestCase):
                 values[4]["color_temp_kelvin"] = int(args[3])
             return SimpleNamespace(
                 returncode=0,
-                stdout=json.dumps(values) if args == [dashboard.TUYA_LIGHT, "list"] else "",
+                stdout=json.dumps(values) if args == [dashboard_common.TUYA_LIGHT, "list"] else "",
                 stderr="",
             )
 
-        controller = dashboard.LightingController(command=command)
+        controller = dashboard_home.LightingController(command=command)
         powered = controller.set_power("light.wiz_kitchen", True)
         dimmed = controller.set_brightness("light.wiz_kitchen", 40)
         colored = controller.set_hue("light.wiz_kitchen", 210)
@@ -1118,17 +1134,17 @@ class LightingControllerTests(unittest.TestCase):
         self.assertEqual(
             warmed["groups"][2]["lights"][0]["color_temp_kelvin"], 3200
         )
-        self.assertEqual(calls[0], [dashboard.TUYA_TOGGLE, "light.wiz_kitchen", "on"])
-        self.assertEqual(calls[1], [dashboard.TUYA_LIGHT, "list"])
-        self.assertEqual(calls[2], [dashboard.TUYA_LIGHT, "set", "light.wiz_kitchen", "102"])
-        self.assertEqual(calls[3], [dashboard.TUYA_LIGHT, "list"])
-        self.assertEqual(calls[4], [dashboard.TUYA_LIGHT, "hue", "light.wiz_kitchen", "210"])
-        self.assertEqual(calls[5], [dashboard.TUYA_LIGHT, "list"])
+        self.assertEqual(calls[0], [dashboard_common.TUYA_TOGGLE, "light.wiz_kitchen", "on"])
+        self.assertEqual(calls[1], [dashboard_common.TUYA_LIGHT, "list"])
+        self.assertEqual(calls[2], [dashboard_common.TUYA_LIGHT, "set", "light.wiz_kitchen", "102"])
+        self.assertEqual(calls[3], [dashboard_common.TUYA_LIGHT, "list"])
+        self.assertEqual(calls[4], [dashboard_common.TUYA_LIGHT, "hue", "light.wiz_kitchen", "210"])
+        self.assertEqual(calls[5], [dashboard_common.TUYA_LIGHT, "list"])
         self.assertEqual(
             calls[6],
-            [dashboard.TUYA_LIGHT, "temperature", "light.wiz_kitchen", "3200"],
+            [dashboard_common.TUYA_LIGHT, "temperature", "light.wiz_kitchen", "3200"],
         )
-        self.assertEqual(calls[7], [dashboard.TUYA_LIGHT, "list"])
+        self.assertEqual(calls[7], [dashboard_common.TUYA_LIGHT, "list"])
         with self.assertRaisesRegex(ValueError, "unknown lighting target"):
             controller.set_power("switch.starlink", True)
         with self.assertRaisesRegex(ValueError, "unknown light entity"):
@@ -1139,25 +1155,25 @@ class LightingControllerTests(unittest.TestCase):
             controller.set_color_temperature("light.wiz_kitchen", 1999)
 
     def test_rejects_bad_schema_and_reports_timeout(self):
-        with self.assertRaises(dashboard.LightingCommandError):
-            dashboard.LightingController.parse_status('{"not":"a list"}')
+        with self.assertRaises(dashboard_home.LightingCommandError):
+            dashboard_home.LightingController.parse_status('{"not":"a list"}')
         bad_color = self.light_values()
         bad_color[0]["supported_color_modes"] = ["rgb", "rgb"]
         with self.assertRaisesRegex(
-            dashboard.LightingCommandError, "supported color modes"
+            dashboard_home.LightingCommandError, "supported color modes"
         ):
-            dashboard.LightingController.parse_status(json.dumps(bad_color))
+            dashboard_home.LightingController.parse_status(json.dumps(bad_color))
         bad_color[0]["supported_color_modes"] = [{"mode": "rgb"}]
         with self.assertRaisesRegex(
-            dashboard.LightingCommandError, "supported color modes"
+            dashboard_home.LightingCommandError, "supported color modes"
         ):
-            dashboard.LightingController.parse_status(json.dumps(bad_color))
+            dashboard_home.LightingController.parse_status(json.dumps(bad_color))
 
         def timeout(_args, timeout):
             raise subprocess.TimeoutExpired("lights", timeout)
 
-        with self.assertRaisesRegex(dashboard.LightingCommandError, "timed out"):
-            dashboard.LightingController(command=timeout).status()
+        with self.assertRaisesRegex(dashboard_home.LightingCommandError, "timed out"):
+            dashboard_home.LightingController(command=timeout).status()
 
     def test_room_and_all_targets_expand_only_to_configured_entities(self):
         calls = []
@@ -1167,24 +1183,24 @@ class LightingControllerTests(unittest.TestCase):
             calls.append(list(args))
             return SimpleNamespace(
                 returncode=0,
-                stdout=json.dumps(values) if args == [dashboard.TUYA_LIGHT, "list"] else "",
+                stdout=json.dumps(values) if args == [dashboard_common.TUYA_LIGHT, "list"] else "",
                 stderr="",
             )
 
-        controller = dashboard.LightingController(command=command)
+        controller = dashboard_home.LightingController(command=command)
         controller.set_power("group:cab", False)
         self.assertEqual(
             calls,
             [
-                [dashboard.TUYA_TOGGLE, "light.wiz_front_driver", "off"],
-                [dashboard.TUYA_TOGGLE, "light.wiz_front_passenger", "off"],
-                [dashboard.TUYA_LIGHT, "list"],
+                [dashboard_common.TUYA_TOGGLE, "light.wiz_front_driver", "off"],
+                [dashboard_common.TUYA_TOGGLE, "light.wiz_front_passenger", "off"],
+                [dashboard_common.TUYA_LIGHT, "list"],
             ],
         )
         calls.clear()
         controller.set_power("all", True)
         self.assertEqual(len(calls), 10)
-        self.assertEqual(calls[-1], [dashboard.TUYA_LIGHT, "list"])
+        self.assertEqual(calls[-1], [dashboard_common.TUYA_LIGHT, "list"])
         self.assertEqual(
             {call[1] for call in calls[:-1]},
             controller.entities,
@@ -1195,13 +1211,13 @@ class LightingControllerTests(unittest.TestCase):
 
         def command(args, timeout):
             calls.append(list(args))
-            if args == [dashboard.TUYA_LIGHT, "list"]:
+            if args == [dashboard_common.TUYA_LIGHT, "list"]:
                 return SimpleNamespace(
                     returncode=2,
                     stdout="",
                     stderr="usage: tuya_light.sh <status|set> <light.entity>",
                 )
-            self.assertEqual(args[:2], [dashboard.TUYA_LIGHT, "status"])
+            self.assertEqual(args[:2], [dashboard_common.TUYA_LIGHT, "status"])
             return SimpleNamespace(
                 returncode=0,
                 stdout=json.dumps(
@@ -1215,7 +1231,7 @@ class LightingControllerTests(unittest.TestCase):
                 stderr="",
             )
 
-        controller = dashboard.LightingController(command=command)
+        controller = dashboard_home.LightingController(command=command)
         status = controller.status()
         self.assertEqual(status["on_count"], 1)
         self.assertEqual(status["available_count"], 9)
@@ -1241,7 +1257,7 @@ class StoragePolicyManagerTests(unittest.TestCase):
 
     def test_parses_only_the_exact_v1_boolean_schema(self):
         self.assertEqual(
-            dashboard.StoragePolicyManager.parse_status(json.dumps(self.POLICY)),
+            dashboard_storage.StoragePolicyManager.parse_status(json.dumps(self.POLICY)),
             self.POLICY,
         )
         invalid_values = (
@@ -1270,8 +1286,8 @@ class StoragePolicyManagerTests(unittest.TestCase):
         )
         for value in invalid_values:
             with self.subTest(value=value):
-                with self.assertRaises(dashboard.PolicyCommandError):
-                    dashboard.StoragePolicyManager.parse_status(value)
+                with self.assertRaises(dashboard_storage.PolicyCommandError):
+                    dashboard_storage.StoragePolicyManager.parse_status(value)
 
     def test_each_update_uses_fixed_argv_and_refreshes_status(self):
         cases = (
@@ -1292,14 +1308,14 @@ class StoragePolicyManagerTests(unittest.TestCase):
                         returncode=0, stdout=json.dumps(policy), stderr=""
                     )
 
-                manager = dashboard.StoragePolicyManager(command=command, timeout=7)
+                manager = dashboard_storage.StoragePolicyManager(command=command, timeout=7)
                 self.assertEqual(manager.update(field, enabled), policy)
                 self.assertEqual(
                     calls,
                     [
                         (
                             [
-                                dashboard.POLICYCTL,
+                                dashboard_common.POLICYCTL,
                                 "--json",
                                 target,
                                 "on" if enabled else "off",
@@ -1310,7 +1326,7 @@ class StoragePolicyManagerTests(unittest.TestCase):
                 )
 
     def test_rejects_unknown_fields_and_non_boolean_values(self):
-        manager = dashboard.StoragePolicyManager(
+        manager = dashboard_storage.StoragePolicyManager(
             command=lambda args, timeout: self.fail("policyctl must not run")
         )
         with self.assertRaises(ValueError):
@@ -1319,19 +1335,19 @@ class StoragePolicyManagerTests(unittest.TestCase):
             manager.update("disks_enabled", "true")
 
     def test_subprocess_failure_and_timeout_are_bounded_errors(self):
-        failed = dashboard.StoragePolicyManager(
+        failed = dashboard_storage.StoragePolicyManager(
             command=lambda args, timeout: SimpleNamespace(
                 returncode=1, stdout="", stderr="policy unavailable"
             )
         )
-        with self.assertRaisesRegex(dashboard.PolicyCommandError, "policy unavailable"):
+        with self.assertRaisesRegex(dashboard_storage.PolicyCommandError, "policy unavailable"):
             failed.status()
 
         def timeout(args, timeout):
             raise subprocess.TimeoutExpired(args, timeout)
 
-        timed_out = dashboard.StoragePolicyManager(command=timeout, timeout=4)
-        with self.assertRaisesRegex(dashboard.PolicyCommandError, "timed out after 4"):
+        timed_out = dashboard_storage.StoragePolicyManager(command=timeout, timeout=4)
+        with self.assertRaisesRegex(dashboard_storage.PolicyCommandError, "timed out after 4"):
             timed_out.status()
 
 
@@ -1419,7 +1435,7 @@ HDD_LABELS=(
                 f"{value[:8]}-{value[8:12]}-{value[12:16]}-"
                 f"{value[16:20]}-{value[20:]}\n"
             )
-        return dashboard.DiskManager(
+        return dashboard_disks.DiskManager(
             config=config,
             control="/test/diskctl",
             hold_dir=os.path.join(tempdir, "holds"),
@@ -1437,7 +1453,7 @@ HDD_LABELS=(
                 handle.write("1060\n")
 
             def command(args, timeout):
-                self.assertEqual(args[0], dashboard.LSBLK)
+                self.assertEqual(args[0], dashboard_common.LSBLK)
                 return SimpleNamespace(
                     returncode=0,
                     stdout=json.dumps(self.lsblk()),
@@ -1599,7 +1615,7 @@ HDD_LABELS=(
                 event_database=database,
             )
             with mock.patch.object(
-                dashboard.DiskManager,
+                dashboard_disks.DiskManager,
                 "_mount_health",
                 return_value={
                     "read_only": False,
@@ -1625,15 +1641,15 @@ HDD_LABELS=(
             "ALWAYS_MOUNT_LABELS=(\n  EXFAT512\n)",
             "ALWAYS_MOUNT_LABELS=(\n  unknown-flash\n)",
         )
-        with self.assertRaisesRegex(dashboard.DiskCommandError, "must be a subset"):
-            dashboard.DiskManager.parse_config(invalid)
+        with self.assertRaisesRegex(dashboard_disks.DiskCommandError, "must be a subset"):
+            dashboard_disks.DiskManager.parse_config(invalid)
 
     def test_eject_runs_only_fixed_diskctl_argv_in_background(self):
         calls = []
 
         def command(args, timeout):
             calls.append((list(args), timeout))
-            if args[0] == dashboard.LSBLK:
+            if args[0] == dashboard_common.LSBLK:
                 return SimpleNamespace(
                     returncode=0,
                     stdout=json.dumps(self.lsblk()),
@@ -1656,7 +1672,7 @@ HDD_LABELS=(
 
         def command(args, timeout):
             calls.append((list(args), timeout))
-            if args[0] == dashboard.LSBLK:
+            if args[0] == dashboard_common.LSBLK:
                 return SimpleNamespace(
                     returncode=0,
                     stdout=json.dumps(self.lsblk()),
@@ -1679,7 +1695,7 @@ HDD_LABELS=(
 
         def command(args, timeout):
             calls.append((list(args), timeout))
-            if args[0] == dashboard.LSBLK:
+            if args[0] == dashboard_common.LSBLK:
                 return SimpleNamespace(
                     returncode=0,
                     stdout=json.dumps(self.lsblk()),
@@ -1709,20 +1725,20 @@ HDD_LABELS=(
             manager = self.manager(tempdir, command)
             with self.assertRaisesRegex(ValueError, "unknown controllable"):
                 manager.start_action("/dev/sda", "eject")
-            with self.assertRaisesRegex(dashboard.DiskCommandError, "not mounted"):
+            with self.assertRaisesRegex(dashboard_disks.DiskCommandError, "not mounted"):
                 manager.start_action("bigboi", "eject")
             with self.assertRaisesRegex(ValueError, "unknown disk action"):
                 manager.start_action("movingparts", "cycle")
-            with self.assertRaisesRegex(dashboard.DiskCommandError, "already mounted"):
+            with self.assertRaisesRegex(dashboard_disks.DiskCommandError, "already mounted"):
                 manager.start_action("movingparts", "mount")
-            with self.assertRaisesRegex(dashboard.DiskCommandError, "not attached"):
+            with self.assertRaisesRegex(dashboard_disks.DiskCommandError, "not attached"):
                 manager.start_action("EXFAT512", "mount")
 
     def test_action_failure_and_timeout_are_reported_without_blocking_request(self):
         for failure, expected in (("failure", "diskctl failed"), ("timeout", "timed out after 3")):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tempdir:
                 def command(args, timeout):
-                    if args[0] == dashboard.LSBLK:
+                    if args[0] == dashboard_common.LSBLK:
                         return SimpleNamespace(
                             returncode=0,
                             stdout=json.dumps(self.lsblk()),
@@ -1745,7 +1761,7 @@ class SystemPowerControllerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tempdir:
             uptime = Path(tempdir) / "uptime"
             uptime.write_text("93784.75 100.0\n", encoding="utf-8")
-            result = dashboard.read_system_uptime(
+            result = dashboard_system.read_system_uptime(
                 str(uptime), wall_clock=FakeClock(200000)
             )
         self.assertEqual(result["seconds"], 93784)
@@ -1757,7 +1773,7 @@ class SystemPowerControllerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tempdir:
             uptime = Path(tempdir) / "uptime"
             uptime.write_text("not-a-number\n", encoding="utf-8")
-            result = dashboard.read_system_uptime(str(uptime))
+            result = dashboard_system.read_system_uptime(str(uptime))
         self.assertEqual(result, {"seconds": None, "booted_at": None})
 
     def test_runs_only_the_fixed_script_for_each_action(self):
@@ -1767,7 +1783,7 @@ class SystemPowerControllerTests(unittest.TestCase):
             calls.append((list(args), timeout))
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-        controller = dashboard.SystemPowerController(
+        controller = dashboard_system.SystemPowerController(
             scripts={
                 "reboot": "/test/safe_reboot.sh",
                 "power-down": "/test/safe_power_down.sh",
@@ -1799,12 +1815,12 @@ class SystemPowerControllerTests(unittest.TestCase):
             release.wait(2)
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-        controller = dashboard.SystemPowerController(command=command)
+        controller = dashboard_system.SystemPowerController(command=command)
         with self.assertRaisesRegex(ValueError, "unknown system power action"):
             controller.start_action("shell-command")
         controller.start_action("reboot")
         self.assertTrue(started.wait(1))
-        with self.assertRaisesRegex(dashboard.SystemPowerError, "already running"):
+        with self.assertRaisesRegex(dashboard_system.SystemPowerError, "already running"):
             controller.start_action("power-down")
         release.set()
         controller.thread.join(2)
@@ -1822,7 +1838,7 @@ class SystemPowerControllerTests(unittest.TestCase):
                         returncode=1, stdout="", stderr="unmount failed"
                     )
 
-                controller = dashboard.SystemPowerController(
+                controller = dashboard_system.SystemPowerController(
                     command=command, timeout=3
                 )
                 controller.start_action("reboot")
@@ -1840,7 +1856,7 @@ class DashboardRestartControllerTests(unittest.TestCase):
             calls.append((list(args), timeout))
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-        controller = dashboard.DashboardRestartController(
+        controller = dashboard_system.DashboardRestartController(
             sudo="/test/sudo",
             systemd_run="/test/systemd-run",
             systemctl="/test/systemctl",
@@ -1886,11 +1902,11 @@ class DashboardRestartControllerTests(unittest.TestCase):
                         returncode=1, stdout="", stderr="scheduler failed"
                     )
 
-                controller = dashboard.DashboardRestartController(
+                controller = dashboard_system.DashboardRestartController(
                     command=command, timeout=4
                 )
                 with self.assertRaisesRegex(
-                    dashboard.DashboardRestartError, expected
+                    dashboard_system.DashboardRestartError, expected
                 ):
                     controller.restart()
 
@@ -1934,7 +1950,7 @@ class TelemetrySummaryReaderTests(unittest.TestCase):
                 }
             }
         }
-        reader = dashboard.TelemetrySummaryReader(
+        reader = dashboard_telemetry.TelemetrySummaryReader(
             snapshot_url="http://telemetry.test/v1/snapshot",
             voltage_csv="/does/not/matter.csv",
             timeout=2.5,
@@ -1966,7 +1982,7 @@ class TelemetrySummaryReaderTests(unittest.TestCase):
                 "2026-07-26T20:00:00,,bus silent\n",
                 encoding="utf-8",
             )
-            reader = dashboard.TelemetrySummaryReader(
+            reader = dashboard_telemetry.TelemetrySummaryReader(
                 voltage_csv=str(voltage_csv),
                 opener=self.opener(payload, []),
             )
@@ -1996,7 +2012,7 @@ class TelemetrySummaryReaderTests(unittest.TestCase):
                 json.dumps(self.engine_off_payload()),
                 encoding="utf-8",
             )
-            reader = dashboard.TelemetrySummaryReader(
+            reader = dashboard_telemetry.TelemetrySummaryReader(
                 voltage_csv=str(voltage_csv),
                 engine_off_status=str(engine_off),
                 opener=self.opener(payload, []),
@@ -2020,7 +2036,7 @@ class TelemetrySummaryReaderTests(unittest.TestCase):
                 json.dumps(self.engine_off_payload()),
                 encoding="utf-8",
             )
-            reader = dashboard.TelemetrySummaryReader(
+            reader = dashboard_telemetry.TelemetrySummaryReader(
                 voltage_csv=str(voltage_csv),
                 engine_off_status=str(engine_off),
                 opener=self.opener(payload, []),
@@ -2036,23 +2052,23 @@ class TelemetrySummaryReaderTests(unittest.TestCase):
             target.write_text(json.dumps(self.engine_off_payload()), encoding="utf-8")
             linked = Path(tempdir) / "linked.json"
             linked.symlink_to(target)
-            self.assertIsNone(dashboard.read_engine_off_voltage_sample(str(linked)))
+            self.assertIsNone(dashboard_telemetry.read_engine_off_voltage_sample(str(linked)))
 
             target.write_bytes(
-                b"x" * (dashboard.ENGINE_OFF_VOLTAGE_STATUS_MAX_BYTES + 1)
+                b"x" * (dashboard_common.ENGINE_OFF_VOLTAGE_STATUS_MAX_BYTES + 1)
             )
-            self.assertIsNone(dashboard.read_engine_off_voltage_sample(str(target)))
+            self.assertIsNone(dashboard_telemetry.read_engine_off_voltage_sample(str(target)))
 
             wrong = self.engine_off_payload()
             wrong["role"] = "another_role"
             target.write_text(json.dumps(wrong), encoding="utf-8")
-            self.assertIsNone(dashboard.read_engine_off_voltage_sample(str(target)))
+            self.assertIsNone(dashboard_telemetry.read_engine_off_voltage_sample(str(target)))
 
     def test_live_failure_and_missing_log_return_no_data(self):
         def unavailable(_request, timeout):
             raise OSError(f"timeout after {timeout}")
 
-        reader = dashboard.TelemetrySummaryReader(
+        reader = dashboard_telemetry.TelemetrySummaryReader(
             voltage_csv="/missing/voltage.csv",
             opener=unavailable,
         )
@@ -2077,7 +2093,7 @@ class TelemetryServiceTests(unittest.TestCase):
         def command(args, timeout):
             nonlocal active
             calls.append(list(args))
-            if args[0] == dashboard.SYSTEMCTL:
+            if args[0] == dashboard_common.SYSTEMCTL:
                 return SimpleNamespace(
                     returncode=0 if active else 3,
                     stdout="",
@@ -2097,11 +2113,11 @@ class TelemetryServiceTests(unittest.TestCase):
         finally:
             dashboard.run_command = original
         self.assertIn(
-            [dashboard.SUDO, "-n", dashboard.SYSTEMCTL, "start", dashboard.TELEMETRY_SERVICE],
+            [dashboard_common.SUDO, "-n", dashboard_common.SYSTEMCTL, "start", dashboard_common.TELEMETRY_SERVICE],
             calls,
         )
         self.assertIn(
-            [dashboard.SUDO, "-n", dashboard.SYSTEMCTL, "stop", dashboard.TELEMETRY_SERVICE],
+            [dashboard_common.SUDO, "-n", dashboard_common.SYSTEMCTL, "stop", dashboard_common.TELEMETRY_SERVICE],
             calls,
         )
 
@@ -2154,7 +2170,7 @@ class VoltageCheckManagerTests(unittest.TestCase):
                 )
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-            manager = dashboard.VoltageCheckManager(
+            manager = dashboard_telemetry.VoltageCheckManager(
                 tool="/test/voltage_mon.sh",
                 voltage_csv=str(voltage_csv),
                 command=command,
@@ -2183,14 +2199,14 @@ class VoltageCheckManagerTests(unittest.TestCase):
             )
 
             def low_voltage(_args, timeout):
-                self.assertEqual(timeout, dashboard.VOLTAGE_CHECK_TIMEOUT)
+                self.assertEqual(timeout, dashboard_common.VOLTAGE_CHECK_TIMEOUT)
                 voltage_csv.write_text(
                     "2026-08-10T10:01:00-05:00,11.9,new low voltage\n",
                     encoding="utf-8",
                 )
                 return SimpleNamespace(returncode=2, stdout="", stderr="")
 
-            manager = dashboard.VoltageCheckManager(
+            manager = dashboard_telemetry.VoltageCheckManager(
                 voltage_csv=str(voltage_csv),
                 command=low_voltage,
             )
@@ -2214,7 +2230,7 @@ class VoltageCheckManagerTests(unittest.TestCase):
                         )
                     return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-                failed = dashboard.VoltageCheckManager(
+                failed = dashboard_telemetry.VoltageCheckManager(
                     voltage_csv=str(voltage_csv),
                     command=command,
                     timeout=4,
@@ -2296,7 +2312,7 @@ class UsbDeviceMonitorTests(unittest.TestCase):
             calls.append((list(args), timeout))
             return SimpleNamespace(returncode=0, stdout=samples.pop(0), stderr="")
 
-        monitor = dashboard.UsbDeviceMonitor(
+        monitor = dashboard_usb.UsbDeviceMonitor(
             tool="/test/usb_watch.py", command=command, timeout=4, wall_clock=clock
         )
         baseline = monitor.refresh()
@@ -2326,7 +2342,7 @@ class UsbDeviceMonitorTests(unittest.TestCase):
         self.assertEqual(storage["event"], {"kind": "replugged", "at": 1010})
         self.assertEqual(
             calls[0],
-            ([dashboard.sys.executable, "/test/usb_watch.py", "--json"], 4),
+            ([sys.executable, "/test/usb_watch.py", "--json"], 4),
         )
 
     def test_failure_is_bounded_and_keeps_last_good_snapshot(self):
@@ -2345,7 +2361,7 @@ class UsbDeviceMonitorTests(unittest.TestCase):
                 raise response
             return response
 
-        monitor = dashboard.UsbDeviceMonitor(command=command, timeout=3)
+        monitor = dashboard_usb.UsbDeviceMonitor(command=command, timeout=3)
         self.assertEqual(monitor.refresh()["present_device_count"], 1)
         stale = monitor.refresh()
         self.assertEqual(stale["present_device_count"], 1)
@@ -2392,7 +2408,7 @@ class UsbDeviceMonitorTests(unittest.TestCase):
             json.dumps({"version": 2, "devices": []}),
         ]
 
-        monitor = dashboard.UsbDeviceMonitor(
+        monitor = dashboard_usb.UsbDeviceMonitor(
             command=lambda _args, timeout: SimpleNamespace(
                 returncode=0,
                 stdout=samples.pop(0),
@@ -2427,7 +2443,7 @@ class UsbDeviceMonitorTests(unittest.TestCase):
         for payload in invalid:
             with self.subTest(payload=payload):
                 with self.assertRaises(ValueError):
-                    dashboard.UsbDeviceMonitor.parse_current(payload)
+                    dashboard_usb.UsbDeviceMonitor.parse_current(payload)
 
     def test_parser_accepts_version_two_topology_instances(self):
         device = {
@@ -2442,7 +2458,7 @@ class UsbDeviceMonitorTests(unittest.TestCase):
                 }
             ],
         }
-        parsed = dashboard.UsbDeviceMonitor.parse_current(
+        parsed = dashboard_usb.UsbDeviceMonitor.parse_current(
             json.dumps({"version": 2, "devices": [device]})
         )
         self.assertEqual(next(iter(parsed.values()))["instances"][0]["port"], 3)
@@ -2540,11 +2556,11 @@ class UsbPortControllerTests(unittest.TestCase):
 
         def command(args, timeout, input_text=None):
             self.calls.append((list(args), timeout, input_text))
-            if args == [dashboard.SUDO, "-n", dashboard.UHUBCTL]:
+            if args == [dashboard_common.SUDO, "-n", dashboard_common.UHUBCTL]:
                 return SimpleNamespace(returncode=0, stdout=self.UHUB_STATUS, stderr="")
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-        self.controller = dashboard.UsbPortController(
+        self.controller = dashboard_usb.UsbPortController(
             Devices(),
             command=command,
             sys_root=self.sys_root,
@@ -2595,7 +2611,7 @@ class UsbPortControllerTests(unittest.TestCase):
 
         def command(args, timeout, input_text=None):
             nonlocal active, maximum
-            self.assertEqual(args, [dashboard.SUDO, "-n", dashboard.UHUBCTL])
+            self.assertEqual(args, [dashboard_common.SUDO, "-n", dashboard_common.UHUBCTL])
             with state_lock:
                 active += 1
                 maximum = max(maximum, active)
@@ -2606,7 +2622,7 @@ class UsbPortControllerTests(unittest.TestCase):
                 active -= 1
             return SimpleNamespace(returncode=0, stdout=self.UHUB_STATUS, stderr="")
 
-        controller = dashboard.UsbPortController(
+        controller = dashboard_usb.UsbPortController(
             Devices(),
             command=command,
             sys_root=self.sys_root,
@@ -2679,7 +2695,7 @@ class UsbPortControllerTests(unittest.TestCase):
                     }
                 )
 
-        presented = dashboard.UsbPortController._presentation_hubs(hubs, targets)
+        presented = dashboard_usb.UsbPortController._presentation_hubs(hubs, targets)
 
         self.assertEqual(len(presented), 1)
         physical = presented[0]
@@ -2752,7 +2768,7 @@ class UsbPortControllerTests(unittest.TestCase):
                     }
                 )
 
-        presented = dashboard.UsbPortController._presentation_hubs(hubs, targets)
+        presented = dashboard_usb.UsbPortController._presentation_hubs(hubs, targets)
 
         self.assertEqual(len(presented), 2)
         self.assertEqual(
@@ -2774,7 +2790,7 @@ class UsbPortControllerTests(unittest.TestCase):
             for location in ("1", "2", "1-1")
         ]
 
-        presented = dashboard.UsbPortController._presentation_hubs(hubs, {})
+        presented = dashboard_usb.UsbPortController._presentation_hubs(hubs, {})
 
         self.assertTrue(all(hub["advanced"] for hub in presented))
 
@@ -2796,9 +2812,9 @@ class UsbPortControllerTests(unittest.TestCase):
         self.assertIn(
             (
                 [
-                    dashboard.SUDO,
+                    dashboard_common.SUDO,
                     "-n",
-                    dashboard.UHUBCTL,
+                    dashboard_common.UHUBCTL,
                     "-l",
                     "2",
                     "-p",
@@ -2811,12 +2827,12 @@ class UsbPortControllerTests(unittest.TestCase):
             ),
             self.calls,
         )
-        tee_calls = [call for call in self.calls if dashboard.TEE in call[0]]
+        tee_calls = [call for call in self.calls if dashboard_common.TEE in call[0]]
         self.assertEqual([call[2] for call in tee_calls], ["1\n", "0\n"])
         status_calls = [
             call
             for call in self.calls
-            if call[0] == [dashboard.SUDO, "-n", dashboard.UHUBCTL]
+            if call[0] == [dashboard_common.SUDO, "-n", dashboard_common.UHUBCTL]
         ]
         self.assertEqual(len(status_calls), 1)
         self.assertFalse(self.controller.snapshot()["loaded"])
@@ -2825,13 +2841,13 @@ class UsbPortControllerTests(unittest.TestCase):
         self.controller._run_recovery(1000)
 
         self.assertIn(
-            ([dashboard.USB2_RECOVERY_TOOL], dashboard.USB2_RECOVERY_TIMEOUT, None),
+            ([dashboard_common.USB2_RECOVERY_TOOL], dashboard_common.USB2_RECOVERY_TIMEOUT, None),
             self.calls,
         )
         self.assertEqual(self.controller.snapshot()["operation"]["status"], "complete")
         self.assertEqual(self.controller.snapshot()["operation"]["action"], "restore")
         self.assertNotIn(
-            ([dashboard.SUDO, "-n", dashboard.UHUBCTL], 4, None),
+            ([dashboard_common.SUDO, "-n", dashboard_common.UHUBCTL], 4, None),
             self.calls,
         )
 
@@ -2840,7 +2856,7 @@ class SpeedTestManagerTests(unittest.TestCase):
     def test_parser_accepts_existing_speedtest_script_output(self):
         output = "Download Speed: 42.75 Mbps\nUpload Speed:   8.5 Mbps\nLatency:        37.2 ms\n"
         self.assertEqual(
-            dashboard.parse_speedtest_output(output),
+            dashboard_network.parse_speedtest_output(output),
             {"download_mbps": 42.75, "upload_mbps": 8.5, "latency_ms": 37.2},
         )
 
@@ -2859,7 +2875,7 @@ class SpeedTestManagerTests(unittest.TestCase):
                 stderr="",
             )
 
-        manager = dashboard.SpeedTestManager(
+        manager = dashboard_network.SpeedTestManager(
             script="/test/speedtest.sh", command=command, timeout=180, wall_clock=lambda: 1234
         )
         self.assertTrue(manager.start())
@@ -2935,7 +2951,7 @@ def fake_relay():
     gpio = SimpleNamespace(
         Chip=open_chip, LINE_REQ_DIR_OUT=3, LINE_REQ_FLAG_BIAS_PULL_DOWN=16
     )
-    relay = dashboard.CopRelayManager(gpio_module=gpio, wall_clock=lambda: 1234)
+    relay = dashboard_cop.CopRelayManager(gpio_module=gpio, wall_clock=lambda: 1234)
     return relay, line, chip
 
 
@@ -3070,7 +3086,7 @@ class CopCanWakeStatusReaderTests(unittest.TestCase):
         return SimpleNamespace(returncode=0, stdout="active\n", stderr="")
 
     def reader(self, **changes):
-        return dashboard.CopCanWakeStatusReader(
+        return dashboard_cop.CopCanWakeStatusReader(
             path=self.path,
             command=self.command,
             systemctl="/test/systemctl",
@@ -3109,7 +3125,7 @@ class CopCanWakeStatusReaderTests(unittest.TestCase):
             self.assertEqual(timeout, 2)
             return SimpleNamespace(returncode=3, stdout="inactive\n", stderr="")
 
-        status = dashboard.CopCanWakeStatusReader(
+        status = dashboard_cop.CopCanWakeStatusReader(
             path=self.path,
             command=inactive,
             systemctl="/test/systemctl",
@@ -3173,7 +3189,7 @@ class CopCanWakeStatusReaderTests(unittest.TestCase):
         def timeout(_args, timeout):
             raise subprocess.TimeoutExpired("systemctl", timeout)
 
-        status = dashboard.CopCanWakeStatusReader(
+        status = dashboard_cop.CopCanWakeStatusReader(
             path=self.path,
             command=timeout,
             timeout=0.1,
@@ -3191,15 +3207,15 @@ class CopAlertManagerTests(unittest.TestCase):
         self.ignition = False
         self.light, self.line, self.chip = fake_relay()
         self.calls = []
-        self.store = dashboard.StateStore(os.path.join(self.tempdir.name, "state.json"))
+        self.store = dashboard_common.StateStore(os.path.join(self.tempdir.name, "state.json"))
 
         def command(args, timeout):
             self.calls.append(tuple(args))
-            if args[0] == dashboard.NTFY_SEND:
+            if args[0] == dashboard_common.NTFY_SEND:
                 return SimpleNamespace(stdout="", stderr="", returncode=0)
             raise AssertionError(args)
 
-        self.manager = dashboard.CopAlertManager(
+        self.manager = dashboard_cop.CopAlertManager(
             self.store,
             light=self.light,
             command=command,
@@ -3227,7 +3243,7 @@ class CopAlertManagerTests(unittest.TestCase):
         self.assertEqual(self.line.value, 1)
         self.assertTrue(os.path.isfile(self.manager.active_marker))
         self.wait_for_ntfy()
-        self.assertTrue(any(call[0] == dashboard.NTFY_SEND for call in self.calls))
+        self.assertTrue(any(call[0] == dashboard_common.NTFY_SEND for call in self.calls))
 
         self.manager.tick()
         self.assertEqual(self.line.value, 1)
@@ -3249,7 +3265,7 @@ class CopAlertManagerTests(unittest.TestCase):
     def test_state_persists_across_manager_recreation(self):
         self.manager.set_active(True)
         self.wait_for_ntfy()
-        reloaded = dashboard.StateStore(self.store.path)
+        reloaded = dashboard_common.StateStore(self.store.path)
         self.assertTrue(reloaded.get("cop_alert"))
 
     def test_activation_ntfy_is_immediate_nonblocking_and_single_flight(self):
@@ -3259,19 +3275,19 @@ class CopAlertManagerTests(unittest.TestCase):
         ntfy_timeouts = []
 
         def command(args, timeout):
-            if args[0] == dashboard.NTFY_SEND:
+            if args[0] == dashboard_common.NTFY_SEND:
                 ntfy_calls.append(tuple(args))
                 ntfy_timeouts.append(timeout)
                 started.set()
                 release.wait(2)
                 return SimpleNamespace(stdout="", stderr="", returncode=0)
-            if args[0] == dashboard.TUYA_TOGGLE:
+            if args[0] == dashboard_common.TUYA_TOGGLE:
                 return SimpleNamespace(stdout=args[2] + "\n", stderr="", returncode=0)
-            if args[0] == dashboard.TUYA_STATUS:
+            if args[0] == dashboard_common.TUYA_STATUS:
                 return SimpleNamespace(stdout="on\n", stderr="", returncode=0)
             raise AssertionError(args)
 
-        manager = dashboard.CopAlertManager(
+        manager = dashboard_cop.CopAlertManager(
             self.store,
             light=self.light,
             command=command,
@@ -3286,9 +3302,9 @@ class CopAlertManagerTests(unittest.TestCase):
             self.assertTrue(started.wait(1), "activation did not start ntfy")
             self.assertTrue(manager.ntfy_pending)
             self.assertEqual(len(ntfy_calls), 1)
-            self.assertEqual(ntfy_timeouts, [dashboard.NTFY_TIMEOUT])
+            self.assertEqual(ntfy_timeouts, [dashboard_common.NTFY_TIMEOUT])
 
-            self.clock.advance(dashboard.NTFY_INTERVAL + 1)
+            self.clock.advance(dashboard_common.NTFY_INTERVAL + 1)
             manager.tick()
             self.assertEqual(len(ntfy_calls), 1, "a blocked send must not accumulate workers")
         finally:
@@ -3297,15 +3313,15 @@ class CopAlertManagerTests(unittest.TestCase):
 
     def test_ntfy_worker_failure_does_not_escape_or_stop_cop_alert(self):
         def command(args, timeout):
-            if args[0] == dashboard.NTFY_SEND:
+            if args[0] == dashboard_common.NTFY_SEND:
                 raise RuntimeError("network unavailable")
-            if args[0] == dashboard.TUYA_TOGGLE:
+            if args[0] == dashboard_common.TUYA_TOGGLE:
                 return SimpleNamespace(stdout=args[2] + "\n", stderr="", returncode=0)
-            if args[0] == dashboard.TUYA_STATUS:
+            if args[0] == dashboard_common.TUYA_STATUS:
                 return SimpleNamespace(stdout="on\n", stderr="", returncode=0)
             raise AssertionError(args)
 
-        manager = dashboard.CopAlertManager(
+        manager = dashboard_cop.CopAlertManager(
             self.store,
             light=self.light,
             command=command,
@@ -3329,7 +3345,7 @@ class CopAlertManagerTests(unittest.TestCase):
         self.assertEqual(status["relay_state"], "unknown")
         self.assertIn("busy", status["last_error"])
         self.wait_for_ntfy()
-        self.assertTrue(all(call[0] == dashboard.NTFY_SEND for call in self.calls))
+        self.assertTrue(all(call[0] == dashboard_common.NTFY_SEND for call in self.calls))
         self.line.busy = False
         self.manager.tick()
         self.assertEqual(self.manager.snapshot()["relay_state"], "on")
@@ -3340,8 +3356,8 @@ class CopAlertManagerTests(unittest.TestCase):
         self.manager.stop()
         self.assertEqual(self.line.value, 0)
         light, line, _chip = fake_relay()
-        manager = dashboard.CopAlertManager(
-            dashboard.StateStore(self.store.path),
+        manager = dashboard_cop.CopAlertManager(
+            dashboard_common.StateStore(self.store.path),
             command=lambda *_a, **_k: SimpleNamespace(returncode=0, stdout="", stderr=""),
             runtime_dir=self.tempdir.name,
             light=light, ignition_on=lambda: False,
@@ -3379,7 +3395,7 @@ class BackupManagerTests(unittest.TestCase):
 
     def setUp(self):
         # Never inspect the test host's actual privileged iCloud state.
-        patcher = mock.patch.object(dashboard.BackupManager, '_icloud_status', return_value=None)
+        patcher = mock.patch.object(dashboard_backups.BackupManager, '_icloud_status', return_value=None)
         self.icloud_status = patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -3447,7 +3463,7 @@ class BackupManagerTests(unittest.TestCase):
         history = {
             "Snapshots": [
                 {
-                    "com.apple.backupd.SnapshotCompletionDate": dashboard.datetime.datetime.utcfromtimestamp(
+                    "com.apple.backupd.SnapshotCompletionDate": datetime.datetime.utcfromtimestamp(
                         timestamp
                     ),
                     "com.apple.backupd.SnapshotName": "test-snapshot",
@@ -3458,10 +3474,10 @@ class BackupManagerTests(unittest.TestCase):
         with open(
             os.path.join(bundle, "com.apple.TimeMachine.SnapshotHistory.plist"), "wb"
         ) as handle:
-            dashboard.plistlib.dump(history, handle)
+            plistlib.dump(history, handle)
         results_path = os.path.join(bundle, "com.apple.TimeMachine.Results.plist")
         with open(results_path, "wb") as handle:
-            dashboard.plistlib.dump(
+            plistlib.dump(
                 {
                     "Running": tm_running,
                     "Progress": {"Percent": 0.375, "bytes": 250, "totalBytes": 1000},
@@ -3474,7 +3490,7 @@ class BackupManagerTests(unittest.TestCase):
     def test_icloud_aggregate_running_requires_a_live_cloud_worker(self):
         with tempfile.TemporaryDirectory() as tempdir:
             config, stamps, bundle = self.make_files(tempdir, tm_running=False)
-            manager = dashboard.BackupManager(
+            manager = dashboard_backups.BackupManager(
                 config=config, stamp_dir=stamps, time_machine_bundle=bundle,
                 command=lambda args, timeout: SimpleNamespace(returncode=0, stdout=json.dumps(self.lsblk_payload()), stderr=''),
                 wall_clock=lambda: self.NOW, process_root=os.path.join(tempdir, 'proc'))
@@ -3488,14 +3504,14 @@ class BackupManagerTests(unittest.TestCase):
             config, stamps, bundle = self.make_files(tempdir)
 
             def command(args, timeout):
-                self.assertEqual(args[0], dashboard.LSBLK)
+                self.assertEqual(args[0], dashboard_common.LSBLK)
                 return SimpleNamespace(
                     returncode=0,
                     stdout=json.dumps(self.lsblk_payload()),
                     stderr="",
                 )
 
-            manager = dashboard.BackupManager(
+            manager = dashboard_backups.BackupManager(
                 config=config,
                 stamp_dir=stamps,
                 time_machine_bundle=bundle,
@@ -3539,7 +3555,7 @@ class BackupManagerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tempdir:
             config, stamps, bundle = self.make_files(tempdir, tm_running=False)
             setting = os.path.join(tempdir, "clone_card_nominal_gb")
-            manager = dashboard.BackupManager(
+            manager = dashboard_backups.BackupManager(
                 config=config,
                 stamp_dir=stamps,
                 clone_card_size_path=setting,
@@ -3566,7 +3582,7 @@ class BackupManagerTests(unittest.TestCase):
             with open(setting, "w", encoding="utf-8") as handle:
                 handle.write("unsupported\n")
             with self.assertRaisesRegex(
-                dashboard.BackupStatusError, "capacity setting is invalid"
+                dashboard_backups.BackupStatusError, "capacity setting is invalid"
             ):
                 manager.status()
 
@@ -3613,7 +3629,7 @@ class BackupManagerTests(unittest.TestCase):
             with open(os.path.join(false_match, "cmdline"), "wb") as handle:
                 handle.write(b"/bin/sh\0mention /test/pi_backup.sh only\0")
 
-            manager = dashboard.BackupManager(
+            manager = dashboard_backups.BackupManager(
                 config=config,
                 stamp_dir=stamps,
                 borg_tool="/test/pi_backup.sh",
@@ -3660,7 +3676,7 @@ class BackupManagerTests(unittest.TestCase):
 
             def command(args, timeout):
                 calls.append((list(args), timeout))
-                if args[0] == dashboard.LSBLK:
+                if args[0] == dashboard_common.LSBLK:
                     return SimpleNamespace(
                         returncode=0,
                         stdout=json.dumps(self.lsblk_payload()),
@@ -3670,7 +3686,7 @@ class BackupManagerTests(unittest.TestCase):
                 release_stop.wait(2)
                 return SimpleNamespace(returncode=0, stdout="stopped", stderr="")
 
-            manager = dashboard.BackupManager(
+            manager = dashboard_backups.BackupManager(
                 config=config,
                 stamp_dir=stamps,
                 borg_tool="/test/pi_backup.sh",
@@ -3686,9 +3702,9 @@ class BackupManagerTests(unittest.TestCase):
             self.assertTrue(stop_started.wait(1))
             self.assertEqual(status["stop"]["status"], "running")
             self.assertEqual(status["stop"]["kind"], "borg")
-            with self.assertRaisesRegex(dashboard.BackupStatusError, "already running"):
+            with self.assertRaisesRegex(dashboard_backups.BackupStatusError, "already running"):
                 manager.request_stop("borg")
-            with self.assertRaisesRegex(dashboard.BackupStatusError, "no active exfat"):
+            with self.assertRaisesRegex(dashboard_backups.BackupStatusError, "no active exfat"):
                 manager.request_stop("exfat")
             with self.assertRaisesRegex(ValueError, "unknown backup kind"):
                 manager.request_stop("restore")
@@ -3697,13 +3713,13 @@ class BackupManagerTests(unittest.TestCase):
             self.assertFalse(manager.stop_thread.is_alive())
             self.assertEqual(manager.stop_operation["status"], "complete")
 
-        stop_calls = [call for call in calls if call[0][0] == dashboard.SUDO]
+        stop_calls = [call for call in calls if call[0][0] == dashboard_common.SUDO]
         self.assertEqual(
             stop_calls,
             [
                 (
                     [
-                        dashboard.SUDO,
+                        dashboard_common.SUDO,
                         "-n",
                         "/test/abort_backup.sh",
                         "--user",
@@ -3717,7 +3733,7 @@ class BackupManagerTests(unittest.TestCase):
     def test_openwrt_status_requires_a_fresh_verified_stamp(self):
         with tempfile.TemporaryDirectory() as tempdir:
             config, stamps, bundle = self.make_files(tempdir, tm_running=False)
-            manager = dashboard.BackupManager(
+            manager = dashboard_backups.BackupManager(
                 config=config,
                 stamp_dir=stamps,
                 time_machine_bundle=bundle,
@@ -3752,14 +3768,14 @@ class BackupManagerTests(unittest.TestCase):
         )
         for value in invalid:
             with self.subTest(value=value):
-                with self.assertRaises(dashboard.BackupStatusError):
-                    dashboard.BackupManager.parse_config(value)
+                with self.assertRaises(dashboard_backups.BackupStatusError):
+                    dashboard_backups.BackupManager.parse_config(value)
 
         with tempfile.TemporaryDirectory() as tempdir:
             config, stamps, bundle = self.make_files(tempdir)
             results = os.path.join(bundle, "com.apple.TimeMachine.Results.plist")
             os.utime(results, (self.NOW - 3600, self.NOW - 3600))
-            manager = dashboard.BackupManager(
+            manager = dashboard_backups.BackupManager(
                 config=config,
                 stamp_dir=stamps,
                 time_machine_bundle=bundle,
@@ -3780,7 +3796,7 @@ class BackupManagerTests(unittest.TestCase):
 
             def command(args, timeout):
                 calls.append((list(args), timeout))
-                if args[0] == dashboard.LSBLK:
+                if args[0] == dashboard_common.LSBLK:
                     return SimpleNamespace(
                         returncode=0,
                         stdout=json.dumps(self.lsblk_payload()),
@@ -3788,7 +3804,7 @@ class BackupManagerTests(unittest.TestCase):
                     )
                 return SimpleNamespace(returncode=0, stdout="clone complete", stderr="")
 
-            manager = dashboard.BackupManager(
+            manager = dashboard_backups.BackupManager(
                 config=config,
                 stamp_dir=stamps,
                 clone_tool="/test/clone_now.sh",
@@ -3802,10 +3818,10 @@ class BackupManagerTests(unittest.TestCase):
             manager.thread.join(2)
             self.assertFalse(manager.thread.is_alive())
             self.assertEqual(manager.operation["status"], "complete")
-            clone_calls = [call for call in calls if call[0][0] == dashboard.SUDO]
+            clone_calls = [call for call in calls if call[0][0] == dashboard_common.SUDO]
             self.assertEqual(
                 clone_calls,
-                [([dashboard.SUDO, "-n", "/test/clone_now.sh", "hotspare-a"], 123)],
+                [([dashboard_common.SUDO, "-n", "/test/clone_now.sh", "hotspare-a"], 123)],
             )
             with self.assertRaisesRegex(ValueError, "unknown hotspare"):
                 manager.start_clone("/dev/sda")
@@ -3817,7 +3833,7 @@ class BackupManagerTests(unittest.TestCase):
                 (False, "hotspare-b", "not attached"),
                 (True, "hotspare-a", "mounted partitions"),
             ):
-                manager = dashboard.BackupManager(
+                manager = dashboard_backups.BackupManager(
                     config=config,
                     stamp_dir=stamps,
                     time_machine_bundle=bundle,
@@ -3830,7 +3846,7 @@ class BackupManagerTests(unittest.TestCase):
                     process_root=os.path.join(tempdir, "proc"),
                 )
                 with self.subTest(target=target):
-                    with self.assertRaisesRegex(dashboard.BackupStatusError, message):
+                    with self.assertRaisesRegex(dashboard_backups.BackupStatusError, message):
                         manager.start_clone(target)
 
     def test_clone_failure_and_timeout_are_reported_by_background_operation(self):
@@ -3838,7 +3854,7 @@ class BackupManagerTests(unittest.TestCase):
             config, stamps, bundle = self.make_files(tempdir, tm_running=False)
             for outcome, message in (("failed", "card write failed"), ("timeout", "timed out")):
                 def command(args, timeout, outcome=outcome):
-                    if args[0] == dashboard.LSBLK:
+                    if args[0] == dashboard_common.LSBLK:
                         return SimpleNamespace(
                             returncode=0,
                             stdout=json.dumps(self.lsblk_payload()),
@@ -3852,7 +3868,7 @@ class BackupManagerTests(unittest.TestCase):
                         stderr="card write failed",
                     )
 
-                manager = dashboard.BackupManager(
+                manager = dashboard_backups.BackupManager(
                     config=config,
                     stamp_dir=stamps,
                     time_machine_bundle=bundle,
@@ -3874,7 +3890,7 @@ class BackupManagerTests(unittest.TestCase):
 
             def command(args, timeout):
                 calls.append((list(args), timeout))
-                if args[0] == dashboard.LSBLK:
+                if args[0] == dashboard_common.LSBLK:
                     return SimpleNamespace(
                         returncode=0,
                         stdout=json.dumps(self.lsblk_payload()),
@@ -3891,7 +3907,7 @@ class BackupManagerTests(unittest.TestCase):
                     stderr="",
                 )
 
-            manager = dashboard.BackupManager(
+            manager = dashboard_backups.BackupManager(
                 config=config,
                 stamp_dir=stamps,
                 borg_tool="/test/pi_backup.sh",
@@ -3912,14 +3928,14 @@ class BackupManagerTests(unittest.TestCase):
             self.assertFalse(manager.thread.is_alive())
             self.assertEqual(manager.operation["status"], "complete")
             self.assertEqual(manager.operation["kind"], "exfat")
-            backup_calls = [call for call in calls if call[0][0] == dashboard.SUDO]
+            backup_calls = [call for call in calls if call[0][0] == dashboard_common.SUDO]
             self.assertEqual(
                 backup_calls,
                 [
-                    ([dashboard.SUDO, "-n", "/test/pi_backup.sh", "--force"], 321),
+                    ([dashboard_common.SUDO, "-n", "/test/pi_backup.sh", "--force"], 321),
                     (
                         [
-                            dashboard.SUDO,
+                            dashboard_common.SUDO,
                             "-n",
                             "/test/exfat_snapshot.sh",
                             "--force",
@@ -3942,7 +3958,7 @@ class BackupManagerTests(unittest.TestCase):
             ):
 
                 def command(args, timeout, outcome=outcome):
-                    if args[0] == dashboard.LSBLK:
+                    if args[0] == dashboard_common.LSBLK:
                         return SimpleNamespace(
                             returncode=0,
                             stdout=json.dumps(self.lsblk_payload()),
@@ -3962,7 +3978,7 @@ class BackupManagerTests(unittest.TestCase):
                         stderr="",
                     )
 
-                manager = dashboard.BackupManager(
+                manager = dashboard_backups.BackupManager(
                     config=config,
                     stamp_dir=stamps,
                     borg_tool="/test/pi_backup.sh",
@@ -4007,7 +4023,7 @@ class IgnitionMonitorControllerTests(unittest.TestCase):
             output = self.SERVICE if args[0] == "/test/systemctl" else json.dumps(self.CONTROL)
             return SimpleNamespace(returncode=0, stdout=output, stderr="")
 
-        controller = dashboard.IgnitionMonitorController(
+        controller = dashboard_system.IgnitionMonitorController(
             control="/test/ignitionmonctl",
             systemctl="/test/systemctl",
             command=command,
@@ -4050,7 +4066,7 @@ class IgnitionMonitorControllerTests(unittest.TestCase):
                 output = "updated\n"
             return SimpleNamespace(returncode=0, stdout=output, stderr="")
 
-        controller = dashboard.IgnitionMonitorController(
+        controller = dashboard_system.IgnitionMonitorController(
             control="/test/ignitionmonctl",
             systemctl="/test/systemctl",
             command=command,
@@ -4061,7 +4077,7 @@ class IgnitionMonitorControllerTests(unittest.TestCase):
         self.assertEqual(calls[3], ["/test/ignitionmonctl", "enable"])
         self.assertEqual(calls[2], ["/test/ignitionmonctl", "status", "--json"])
         self.assertEqual(calls[5], ["/test/ignitionmonctl", "status", "--json"])
-        for invalid in (True, 0, -1, dashboard.IGNITIONMON_MAX_MINUTES + 1, "30"):
+        for invalid in (True, 0, -1, dashboard_common.IGNITIONMON_MAX_MINUTES + 1, "30"):
             with self.subTest(invalid=invalid):
                 with self.assertRaises(ValueError):
                     controller.disable(invalid)
@@ -4075,22 +4091,22 @@ class IgnitionMonitorControllerTests(unittest.TestCase):
         )
         for output in invalid:
             with self.subTest(output=output):
-                with self.assertRaises(dashboard.IgnitionMonitorCommandError):
-                    dashboard.IgnitionMonitorController.parse_control_status(output)
+                with self.assertRaises(dashboard_system.IgnitionMonitorCommandError):
+                    dashboard_system.IgnitionMonitorController.parse_control_status(output)
 
-        failed = dashboard.IgnitionMonitorController(
+        failed = dashboard_system.IgnitionMonitorController(
             command=lambda args, timeout: SimpleNamespace(
                 returncode=1, stdout="", stderr="unit unavailable"
             )
         )
-        with self.assertRaisesRegex(dashboard.IgnitionMonitorCommandError, "unit unavailable"):
+        with self.assertRaisesRegex(dashboard_system.IgnitionMonitorCommandError, "unit unavailable"):
             failed.status()
 
         def timeout(args, timeout):
             raise subprocess.TimeoutExpired(args, timeout)
 
-        timed_out = dashboard.IgnitionMonitorController(command=timeout, timeout=3)
-        with self.assertRaisesRegex(dashboard.IgnitionMonitorCommandError, "timed out after 3"):
+        timed_out = dashboard_system.IgnitionMonitorController(command=timeout, timeout=3)
+        with self.assertRaisesRegex(dashboard_system.IgnitionMonitorCommandError, "timed out after 3"):
             timed_out.status()
 
 
@@ -4131,7 +4147,7 @@ class VonstarClientTests(unittest.TestCase):
         return connection
 
     def client(self):
-        return dashboard.VonstarClient(
+        return dashboard_vonstar.VonstarClient(
             socket_path="/run/test-vonstar.sock",
             status_timeout=1.5,
             action_timeout=24,
@@ -4221,7 +4237,7 @@ class VonstarClientTests(unittest.TestCase):
 
         self.assertTrue(status["available"])
         self.assertEqual(status["mode"], "execute")
-        self.assertEqual(status["actions"], dashboard.VONSTAR_ACTIONS)
+        self.assertEqual(status["actions"], dashboard_vonstar.VONSTAR_ACTIONS)
         self.assertEqual(
             status["last_result"],
             {
@@ -4354,7 +4370,7 @@ class VonstarClientTests(unittest.TestCase):
         self.assertEqual(self.connections, [])
 
     def test_symlink_or_non_socket_path_is_rejected(self):
-        client = dashboard.VonstarClient(
+        client = dashboard_vonstar.VonstarClient(
             socket_path="/run/not-a-socket",
             connection_factory=self.factory,
             lstat=lambda _path: SimpleNamespace(st_mode=stat.S_IFLNK | 0o777),
@@ -4399,7 +4415,7 @@ class VonstarClientTests(unittest.TestCase):
             def close(self):
                 pass
 
-        client = dashboard.VonstarClient(
+        client = dashboard_vonstar.VonstarClient(
             socket_path="/run/test-vonstar.sock",
             connection_factory=lambda _path, _timeout: OversizedConnection(),
             lstat=self.socket_stat,
@@ -4545,9 +4561,10 @@ class DashboardRouteTests(unittest.TestCase):
                     sys.executable,
                     "-c",
                     (
+                        "import van_dashboard_cop; "
                         "import van_dashboard as dashboard; "
                         "assert dashboard.app.name == 'van_dashboard'; "
-                        "assert dashboard.CopAlertManager.__module__ "
+                        "assert dashboard_cop.CopAlertManager.__module__ "
                         "== 'van_dashboard_cop'"
                     ),
                 ],
@@ -4588,7 +4605,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn('"/run/vonstar/api.sock"', source)
         self.assertIn('payload={"request_id": request_id}', source)
         self.assertEqual(
-            set(dashboard.VONSTAR_ACTIONS),
+            set(dashboard_vonstar.VONSTAR_ACTIONS),
             {"lock_all", "unlock_front", "unlock_cargo"},
         )
         for forbidden in (
@@ -4616,7 +4633,7 @@ class DashboardRouteTests(unittest.TestCase):
                     "available": True,
                     "mode": "execute",
                     "busy": False,
-                    "actions": dashboard.VONSTAR_ACTIONS,
+                    "actions": dashboard_vonstar.VONSTAR_ACTIONS,
                     "cooldown_seconds": 3,
                     "last_result": None,
                     "error": None,
@@ -4625,11 +4642,11 @@ class DashboardRouteTests(unittest.TestCase):
             @staticmethod
             def perform(action):
                 calls.append(action)
-                if action not in dashboard.VONSTAR_ACTIONS:
+                if action not in dashboard_vonstar.VONSTAR_ACTIONS:
                     raise ValueError("unknown Vonstar action")
                 return {
                     "action": action,
-                    "label": dashboard.VONSTAR_ACTIONS[action]["label"],
+                    "label": dashboard_vonstar.VONSTAR_ACTIONS[action]["label"],
                     "ok": True,
                 }
 
@@ -5271,7 +5288,7 @@ class DashboardRouteTests(unittest.TestCase):
             def jobs_for_task(self, hours, task):
                 calls.append(("task", hours, task))
                 if task == "unavailable":
-                    raise dashboard.ComputeMetricsError("queue unavailable")
+                    raise compute_metrics.ComputeMetricsError("queue unavailable")
                 return {
                     "ok": True,
                     "range_hours": hours,
@@ -5288,7 +5305,7 @@ class DashboardRouteTests(unittest.TestCase):
                 if job_id.endswith("feedface"):
                     raise FileNotFoundError(job_id)
                 if job_id.endswith("0badc0de"):
-                    raise dashboard.ComputeMetricsError("unsafe result path")
+                    raise compute_metrics.ComputeMetricsError("unsafe result path")
                 return {
                     "ok": True,
                     "job": {
@@ -5664,12 +5681,12 @@ class DashboardRouteTests(unittest.TestCase):
 
         def command(args, timeout):
             calls.append(list(args))
-            if args == [dashboard.POLICYCTL, "--json", "torrents", "off"]:
+            if args == [dashboard_common.POLICYCTL, "--json", "torrents", "off"]:
                 policy["torrents_enabled"] = False
             return SimpleNamespace(returncode=0, stdout=json.dumps(policy), stderr="")
 
         original = dashboard.storage_policy
-        dashboard.storage_policy = dashboard.StoragePolicyManager(command=command)
+        dashboard.storage_policy = dashboard_storage.StoragePolicyManager(command=command)
         try:
             client = dashboard.app.test_client()
             status = client.get("/api/storage-policy")
@@ -5707,8 +5724,8 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(
             calls,
             [
-                [dashboard.POLICYCTL, "--json", "status"],
-                [dashboard.POLICYCTL, "--json", "torrents", "off"],
+                [dashboard_common.POLICYCTL, "--json", "status"],
+                [dashboard_common.POLICYCTL, "--json", "torrents", "off"],
             ],
         )
 
@@ -6069,7 +6086,7 @@ class DashboardRouteTests(unittest.TestCase):
         originals = (dashboard.starlink, dashboard.connectivity, dashboard.storage_policy)
         dashboard.starlink = FakeStarlink()
         dashboard.connectivity = FakeConnectivity()
-        dashboard.storage_policy = dashboard.StoragePolicyManager(command=command)
+        dashboard.storage_policy = dashboard_storage.StoragePolicyManager(command=command)
         try:
             with mock.patch.object(dashboard.ubnt_wifi, "starlink_power_changed") as power_changed:
                 response = dashboard.app.test_client().post("/api/starlink")
@@ -6080,7 +6097,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             events,
-            ["toggle", "connectivity", [dashboard.POLICYCTL, "reconcile"]],
+            ["toggle", "connectivity", [dashboard_common.POLICYCTL, "reconcile"]],
         )
 
     def test_starlink_off_cancels_pending_connection_and_power_failure_does_not_queue(self):
@@ -6109,8 +6126,8 @@ class DashboardRouteTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tempdir:
             original = dashboard.sonos
-            dashboard.sonos = dashboard.SonosController(
-                dashboard.StateStore(os.path.join(tempdir, "state.json")),
+            dashboard.sonos = dashboard_sonos.SonosController(
+                dashboard_common.StateStore(os.path.join(tempdir, "state.json")),
                 discover_func=lambda timeout: {front},
                 art_opener=art_opener,
             )
@@ -6139,7 +6156,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(album_art.data, b"\xff\xd8\xfffake-jpeg")
         self.assertEqual(
             art_requests,
-            [(front.track_info["album_art"], dashboard.SONOS_ART_TIMEOUT)],
+            [(front.track_info["album_art"], dashboard_common.SONOS_ART_TIMEOUT)],
         )
         self.assertEqual(front.transport_calls, ["pause"])
         self.assertEqual(group_volume.json["volume"], 74)
