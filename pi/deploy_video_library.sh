@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Deliberately scoped deployment for media development clones.  The repository-
 # wide sync also publishes ignored secrets, Samba configuration, and compute
-# assets, so it requires a checkout with reviewed local private configuration.
+# assets, so it must continue to run only from the primary trusted checkout.
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 repo_root="$(cd -- "$script_dir/.." && pwd -P)"

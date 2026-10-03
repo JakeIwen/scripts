@@ -129,8 +129,12 @@ the interface, and retain the CAN-transmission safeguards below.
 
 The dashboard uses allowlisted immutable package releases managed by
 `pi/deploy_python.py`; first cutover requires explicit `--activate`. Routine
-`pi/sync_scripts.sh` resolves its own checkout, checks the activation marker,
-installs non-Python dependencies before Python restarts, and leaves compute last.
+`pi/sync_scripts.sh` stays pinned to `/Users/jacobr/dev/scripts`, the primary
+trusted checkout, because it also publishes ignored private inputs. It checks
+the activation marker, installs non-Python dependencies before Python restarts,
+and leaves compute last. Use a chosen clone's checkout-relative
+`pi/deploy_python.py` directly for scoped Python updates without private inputs;
+it records provenance and replaces the live Python code with that clone's version.
 See `pi/docs/deployment.md` for staging, restricted factory-only smoke, rollback,
 and manual retention. Keep the pre-cutover flat dashboard intact for rollback;
 `--legacy-flatten` only updates the documented flat-safe non-dashboard subset.

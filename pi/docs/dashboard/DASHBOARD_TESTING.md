@@ -87,7 +87,11 @@ modules or running the broad sync as a test. Its factory-only loopback smoke has
 an explicit alternate port and a restricted request list that avoids hardware
 and controller side effects. No on-Pi validation is implied by local tests.
 
-`pi/sync_scripts.sh` now derives its source checkout from its own location.
-Initial package cutover still requires explicit activation; routine sync refuses
-on an unconverted host. Broad sync continues to need that checkout's private
-ignored inputs and is not a replacement for isolated tests.
+`pi/sync_scripts.sh` intentionally remains pinned to the primary trusted checkout
+`/Users/jacobr/dev/scripts`, because broad sync publishes ignored secrets,
+configuration and hooks. It refuses all deployment before explicit package
+activation (and after rollback). For backend updates from this or another clone,
+use that clone's `pi/deploy_python.py` directly: it is checkout-relative, records
+provenance and ships no private inputs. Like the scoped preview/video deployers,
+it replaces live code with the selected clone's version. Neither deployment path
+is a replacement for isolated tests.

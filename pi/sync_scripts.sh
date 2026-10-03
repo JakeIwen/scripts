@@ -1,5 +1,5 @@
 #! /bin/bash
-dsc="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+dsc="/Users/jacobr/dev/scripts"
 repo_scripts="$dsc/pi/scripts"
 services="$dsc/pi/services"
 tmpfiles="$dsc/pi/tmpfiles.d"
@@ -7,9 +7,6 @@ hooks="$dsc/pi/hooks"
 twilio="$dsc/pi/secrets/.twilio"
 configs="$dsc/pi/configs"
 secrets="$dsc/pi/secrets"
-pi_apps="$dsc/pi/apps"
-pi_python="$dsc/pi/scripts/python"
-shared_python="$dsc/shared/python"
 shared_sh="$dsc/shared/sh"
 pi_ip='pi@vanpi.lan'
 # pi_ip='pi@100.82.91.76'

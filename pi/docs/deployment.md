@@ -11,6 +11,18 @@ If the first package restart fails, go directly to [Rollback](#rollback).
 Do not flatten the new dashboard, delete a release, run a network installer's
 UI deployment, or repeatedly run broad sync to try to repair it.
 
+**Broad sync is blocked until cutover.** Once this change is in the primary
+checkout/branch used for routine sync, `pi/sync_scripts.sh`—including the BTT
+button that invokes it—exits **1** at the preflight with
+`Python package activation preflight failed` until step 3 succeeds. It deploys
+**nothing**: no shell scripts, units, home files, `smb.conf`, secrets or compute.
+The same block returns after rollback until explicit re-activation. If a
+non-Python change must ship first, use its specific scoped deployer when one
+exists (for example the preview deployer for frontend assets); otherwise do the
+cutover first. Do not bypass the preflight to force a broad sync. After setting
+`REPO` as shown below, the scoped frontend command is
+`bash "$REPO/pi/deploy_van_dashboard_preview.sh"`.
+
 ## Architecture and ownership
 
 The stdlib-only `pi/deploy_python.py` resolves its checkout from `__file__`, not
@@ -106,12 +118,25 @@ hooks, secrets, Samba configuration, tmpfiles, shell scripts and other units.
 Only after all those transfers succeed does it run package `--update` and the
 explicit legacy subset, so Python never restarts ahead of its updated script
 and tmpfiles dependencies. The conditional van_compute installer remains last.
-It now derives **all** source paths from its own checkout. The generic service
-updater still handles
-non-package units and their script changes; it does not install the dashboard
-unit or remove anything from the preserved flat dashboard. Only use broad sync
-from a checkout containing the intended ignored secrets/configs; checkout-relative
-does not mean every clone has those private inputs.
+Broad sync deliberately stays pinned to the primary trusted checkout,
+`/Users/jacobr/dev/scripts`, even when its launcher is invoked from another clone.
+It publishes ignored private inputs (`pi/secrets`, `.twilio`, `pi/configs`,
+including `smb.conf`, and hooks); an alternate clone may have stale or incomplete
+copies. Its package and compute installer calls use that same primary checkout.
+The generic service updater still handles non-package units and their script
+changes; it does not install the dashboard unit or remove the flat dashboard.
+
+For Python backend deployment from an alternate clone, run that clone's
+`pi/deploy_python.py` directly. All four modes—default stage, `--activate`,
+`--update` and `--legacy-flatten`—resolve their own checkout, record provenance
+and ship no private inputs. Like the scoped preview/video deployers, this
+replaces live code with the selected clone's version; a later primary-checkout
+broad sync can replace it again. For example:
+
+```bash
+python3 "$HOME/dev/scripts_3/pi/deploy_python.py" --dry-run --update
+python3 "$HOME/dev/scripts_3/pi/deploy_python.py" --update
+```
 
 ### Consumers deliberately staying flat
 
@@ -134,6 +159,7 @@ legacy retry journal to conceal an incomplete operation.
 | `bme280-mqtt.service` | Flat; legacy subset, retaining `/home/pi/pyvenv/bin/python` and the sensor environment. |
 | `van-dashboard-preview.service` | Existing independently owned preview `current` release. Continue `pi/deploy_van_dashboard_preview.sh`; the package copy of its source is not its running server. |
 | `pi/.bashrc` (`ipinfo`, VLC helper, Sonos helper, PYTHONPATH) | Retains utility flat paths. Legacy subset updates `ip_info.py`, `vlc_property.py`, `sonos_tasks.py`, `ip_only.py`; broad sync still updates `.bashrc`. Do not use the shell's flat PYTHONPATH to launch the packaged dashboard. |
+| `pi/sns.sh` | Runs `python3 -c "from sonos_tasks import ..."`, inheriting the flat-directory PYTHONPATH from `.bashrc` (or the video service). The legacy subset keeps `sonos_tasks.py` current. The Mac wrapper uses its own checkout's `shared/python` and is unaffected. |
 | `pi/scripts/log_position.sh` | Retains `vlc_property.py` flat calls; source/guards unchanged, helper updated by legacy subset. |
 | `pi/raspbian_setup.sh` | Historical setup still creates/configures the flat utility directory. It does not perform package activation; use this runbook afterward. |
 | Mac BTT `repair_rps.py` / `repair_script_paths.py` | The former saves a button pointing at its checkout's `pi/sync_scripts.sh`; the latter remaps old sync paths. Neither directly launches flat Python today. Keep py/js pairing untouched; the saved sync entrypoint now observes the activation preflight. The archived July path-rewrite helper still mentions the former flat layout and is historical, not a new deploy path. |
@@ -211,6 +237,7 @@ STAGED="/home/pi/scripts/python-packages/releases/$RELEASE"
 test -r "$STAGED/manifest.json"
 cd "$STAGED"
 PYTHONPATH="$STAGED:/home/pi/van_compute/scripts" PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -P -c 'import pi,sys,van_compute_metrics; print(sys.version); print(list(pi.__path__)); print(van_compute_metrics.__file__)'
+/usr/bin/python3 -c 'import importlib.metadata as m; print(m.version("flask"))'
 ```
 
 Expect Python 3.11+, exactly this release's `pi` directory, and metrics from
@@ -229,18 +256,31 @@ sudo /usr/bin/systemctl cat van-dashboard.service
 
 Stay on the Pi. **Do not use `python -m pi.apps.van_dashboard` for a parallel
 smoke:** production main starts COP/relay, connectivity and Starlink loops.
-Instead Flask loads the factory directly and never enters production main:
+Instead Flask loads the factory directly and never enters production main.
+The `flask --app` option requires **Flask 2.2 or newer**; use the version printed
+in step 1 to select the command. With Flask >= 2.2:
 
 ```bash
 SMOKE_STATE=$(mktemp -d /tmp/van-dashboard-package-smoke.XXXXXX)
 cd "$STAGED"
-PYTHONPATH="$STAGED:/home/pi/van_compute/scripts" PYTHONDONTWRITEBYTECODE=1 VAN_DASHBOARD_STATE_PATH="$SMOKE_STATE/state.json" VAN_DASHBOARD_FRONTEND_ROOT=/home/pi/scripts/van-dashboard-preview/current FLASK_DEBUG=0 /usr/bin/python3 -P -m flask --app pi.apps.van_dashboard:create_app run --host 127.0.0.1 --port 8791 --no-reload --no-debugger
+PYTHONPATH="$STAGED:/home/pi/van_compute/scripts" PYTHONDONTWRITEBYTECODE=1 VAN_DASHBOARD_STATE_PATH="$SMOKE_STATE/state.json" VAN_DASHBOARD_RUNTIME_DIR="$SMOKE_STATE/runtime" VAN_DASHBOARD_FRONTEND_ROOT=/home/pi/scripts/van-dashboard-preview/current FLASK_DEBUG=0 /usr/bin/python3 -P -m flask --app pi.apps.van_dashboard:create_app run --host 127.0.0.1 --port 8791 --no-reload --no-debugger
+```
+
+If the installed Flask is older, use its `FLASK_APP` environment-variable form
+instead; do not upgrade the live Flask installation just to obtain `--app`:
+
+```bash
+SMOKE_STATE=$(mktemp -d /tmp/van-dashboard-package-smoke.XXXXXX)
+cd "$STAGED"
+PYTHONPATH="$STAGED:/home/pi/van_compute/scripts" PYTHONDONTWRITEBYTECODE=1 VAN_DASHBOARD_STATE_PATH="$SMOKE_STATE/state.json" VAN_DASHBOARD_RUNTIME_DIR="$SMOKE_STATE/runtime" VAN_DASHBOARD_FRONTEND_ROOT=/home/pi/scripts/van-dashboard-preview/current FLASK_DEBUG=0 FLASK_APP=pi.apps.van_dashboard:create_app /usr/bin/python3 -P -m flask run --host 127.0.0.1 --port 8791 --no-reload --no-debugger
 ```
 
 `--port 8791` is Flask CLI's port override, without code changes. It binds
 loopback only. Factory/controller construction reads state and allocates objects;
 it does not start worker threads, claim GPIO or issue network/process commands.
 The factory preserves one controller set per process across app instances.
+Both its state file and runtime/COP marker directory are isolated beneath
+`SMOKE_STATE`, rather than using the live owner's paths.
 
 **This is not a sandbox for arbitrary API requests.** Existing handlers can
 perform work, even some GETs (for example UBNT refresh). Do not browse the staged

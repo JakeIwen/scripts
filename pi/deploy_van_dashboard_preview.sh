@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Scoped deployment for the React dashboard preview.  This helper deliberately
 # derives its source checkout, stages only preview files, and never invokes the
-# repository-wide sync (which also publishes unrelated private configuration).
+# repository-wide sync (which is tied to the primary trusted checkout).
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 repo_root="$(cd -- "$script_dir/.." && pwd -P)"

@@ -7,11 +7,24 @@ import unittest
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = REPOSITORY_ROOT / "sync_workflow.sh"
+SYNC_SCRIPT = REPOSITORY_ROOT / "sync_scripts.sh"
 PHASES = ("sync_preflight", "sync_non_python", "sync_python_packages", "sync_compute")
 FAILURE_STATUS = 23
 
 
 class SyncWorkflowTests(unittest.TestCase):
+    def test_sync_script_uses_primary_trusted_checkout(self):
+        assignment = next(
+            line.strip()
+            for line in SYNC_SCRIPT.read_text(encoding="utf-8").splitlines()
+            if line.strip().startswith("dsc=")
+        )
+        parsed = shlex.split(assignment, comments=False, posix=True)
+        self.assertEqual(len(parsed), 1)
+        name, value = parsed[0].split("=", 1)
+        self.assertEqual(name, "dsc")
+        self.assertEqual(value, "/Users/jacobr/dev/scripts")
+
     def _run_harness(self, failing_phase=None):
         with tempfile.TemporaryDirectory(prefix="sync-workflow-") as directory:
             root = Path(directory)
