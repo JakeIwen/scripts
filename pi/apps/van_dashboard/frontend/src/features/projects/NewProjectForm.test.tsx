@@ -31,9 +31,9 @@ describe('New Hosted Project', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add project' }));
     expect(screen.getByRole('alert')).toHaveTextContent('Enter at least one URL');
     expect(addHostedProject).not.toHaveBeenCalled();
-    for (const label of ['Local', 'LAN', 'TS', 'Web']) {
+    for (const label of ['This Mac', 'LAN', 'TS', 'Web']) {
       fireEvent.change(screen.getByLabelText(`${label} URL`), {
-        target: { value: `https://example.com/${label}` },
+        target: { value: `https://example.com/${label.replaceAll(' ', '-')}` },
       });
     }
     const button = screen.getByRole('button', { name: 'Add project' });
@@ -43,7 +43,7 @@ describe('New Hosted Project', () => {
     expect(addHostedProject).toHaveBeenCalledOnce();
     expect(addHostedProject).toHaveBeenCalledWith({
       name: 'Test project',
-      local: 'https://example.com/Local',
+      local: 'https://example.com/This-Mac',
       lan: 'https://example.com/LAN',
       ts: 'https://example.com/TS',
       web: 'https://example.com/Web',

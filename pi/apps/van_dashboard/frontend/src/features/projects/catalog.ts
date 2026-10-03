@@ -45,7 +45,7 @@ export const HOSTED_PROJECTS: HostedProject[] = [
     host: 'This Mac',
     description: 'Local LionFeather development site.',
     links: [
-      { kind: 'local', label: 'Local', url: 'http://127.0.0.1:5174/' },
+      { kind: 'local', label: 'This Mac', url: 'http://127.0.0.1:5174/' },
       {
         kind: 'web',
         label: 'Web*',

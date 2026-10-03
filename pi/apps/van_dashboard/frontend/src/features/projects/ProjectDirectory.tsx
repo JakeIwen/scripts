@@ -73,7 +73,7 @@ export function ProjectDirectory({ open, onClose }: { open: boolean; onClose: ()
         })}
       </ul>
       <p className="project-directory__legend">
-        LAN: van network · TS: Tailscale · Local / This Mac: local apps · * Not live yet
+        LAN: van network · TS: Tailscale · This Mac: local apps · * Not live yet
       </p>
       {error && (
         <p className="error-message" role="alert">

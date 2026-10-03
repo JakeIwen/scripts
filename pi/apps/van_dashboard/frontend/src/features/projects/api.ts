@@ -3,7 +3,7 @@ import { arrayValue, objectValue, stringValue } from '../../api/validation';
 import type { HostedProject, ProjectLink } from './catalog';
 
 export const PROJECT_URL_FIELDS = [
-  { kind: 'local', label: 'Local', placeholder: 'http://127.0.0.1:4328/' },
+  { kind: 'local', label: 'This Mac', placeholder: 'http://127.0.0.1:4328/' },
   { kind: 'lan', label: 'LAN', placeholder: 'http://vanpi.lan:8788/' },
   { kind: 'ts', label: 'TS', placeholder: 'http://100.82.91.76:8788/' },
   { kind: 'web', label: 'Web', placeholder: 'https://example.com/' },
