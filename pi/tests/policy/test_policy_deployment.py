@@ -1,6 +1,8 @@
 from pathlib import Path
 import unittest
 
+from pi.tests.unit_contract import command_arguments, parse_directives
+
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 
@@ -17,12 +19,19 @@ class PolicyDeploymentTests(unittest.TestCase):
             / "services"
             / "vanpi-policy-watchdog.timer"
         ).read_text(encoding="utf-8")
+        policy_directives = parse_directives(policy_timer)
+        watchdog_directives = parse_directives(watchdog_timer)
 
         self.assertNotIn('su pi -c "$scripts/internet_switches.sh"', crontab)
-        self.assertIn("OnCalendar=*:0/15", policy_timer)
-        self.assertIn("Unit=vanpi-policy.service", policy_timer)
-        self.assertIn("OnUnitActiveSec=1min", watchdog_timer)
-        self.assertIn("Unit=vanpi-policy-watchdog.service", watchdog_timer)
+        self.assertEqual(policy_directives["OnCalendar"], ["*:0/15"])
+        self.assertEqual(policy_directives["Unit"], ["vanpi-policy.service"])
+        self.assertEqual(watchdog_directives["OnUnitActiveSec"], ["1min"])
+        self.assertEqual(
+            watchdog_directives["Unit"], ["vanpi-policy-watchdog.service"]
+        )
+        for unit in policy_directives["Unit"] + watchdog_directives["Unit"]:
+            service = REPOSITORY_ROOT / "pi" / "services" / unit
+            self.assertTrue(service.is_file(), str(service))
 
     def test_disk_health_watchdog_is_bounded_and_periodic(self):
         service = (
@@ -37,13 +46,20 @@ class PolicyDeploymentTests(unittest.TestCase):
             / "services"
             / "vanpi-disk-health-watchdog.timer"
         ).read_text(encoding="utf-8")
+        service_directives = parse_directives(service)
+        timer_directives = parse_directives(timer)
 
-        self.assertIn(
-            "ExecStart=/home/pi/scripts/disk_health_watchdog.sh", service
+        command = command_arguments(service_directives["ExecStart"][0])
+        self.assertEqual(command, ["/home/pi/scripts/disk_health_watchdog.sh"])
+        script = REPOSITORY_ROOT / "pi" / Path(*command[0].removeprefix("/home/pi/").split("/"))
+        self.assertTrue(script.is_file(), str(script))
+        self.assertEqual(service_directives["TimeoutStartSec"], ["35min"])
+        self.assertEqual(timer_directives["OnUnitInactiveSec"], ["1min"])
+        self.assertEqual(
+            timer_directives["Unit"], ["vanpi-disk-health-watchdog.service"]
         )
-        self.assertIn("TimeoutStartSec=35min", service)
-        self.assertIn("OnUnitInactiveSec=1min", timer)
-        self.assertIn("Unit=vanpi-disk-health-watchdog.service", timer)
+        timer_service = REPOSITORY_ROOT / "pi" / "services" / timer_directives["Unit"][0]
+        self.assertTrue(timer_service.is_file(), str(timer_service))
 
     def test_failed_legacy_cron_jobs_are_absent(self):
         crontab = (REPOSITORY_ROOT / "pi" / "crontab").read_text(encoding="utf-8")

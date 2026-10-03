@@ -1,12 +1,15 @@
 import ast
 import json
 import os
+import shlex
 import tempfile
 import threading
 import unittest
 from pathlib import Path
 from unittest import mock
 
+from pi import deploy_python
+from pi.tests.unit_contract import parse_directives, parse_environment
 from pi.apps.video_library import video_library_server as video
 
 
@@ -2244,34 +2247,72 @@ class ApiRouteTests(unittest.TestCase):
 
 class DeploymentWiringTests(unittest.TestCase):
     def test_service_declares_every_runtime_asset_and_session_dependency(self):
-        unit = (REPOSITORY_ROOT / "pi" / "services" / "video-library.service").read_text(
-            encoding="utf-8"
+        unit = (
+            REPOSITORY_ROOT / "pi" / "services" / "video-library.service"
+        ).read_text(encoding="utf-8")
+        directives = parse_directives(unit)
+        environment = parse_environment(directives)
+        command_lines = directives.get("ExecStartPre", []) + directives.get(
+            "ExecStart", []
         )
-        expected_paths = (
-            "/home/pi/scripts/python-automation/video_library_server.py",
-            "/home/pi/scripts/python-automation/templates/video_library.html",
-            "/home/pi/scripts/python-automation/static/video_library.js",
-            "/home/pi/scripts/python-automation/static/video_library.css",
-            "/home/pi/scripts/python-automation/sonos_tasks.py",
-            "/home/pi/sns.sh",
+        command_arguments = [
+            argument for command in command_lines for argument in shlex.split(command)
+        ]
+        declared_paths = {
+            argument
+            for argument in command_arguments
+            if argument.startswith("/home/pi/scripts/python-automation/")
+            or argument in {"/home/pi/sns.sh", "/usr/bin/vlc"}
+        }
+
+        plan = deploy_python.build_plan(REPOSITORY_ROOT, mode="legacy")
+        legacy = plan["manifest"]["legacy"]
+        expected_sources = {
+            path.relative_to(REPOSITORY_ROOT).as_posix()
+            for path in APP_DIR.glob("*.py")
+            if path.name != "__init__.py"
+        }
+        expected_sources.update(
+            {
+                "shared/python/sonos_tasks.py",
+                *deploy_python.ASSETS,
+            }
         )
-        for path in expected_paths:
+        expected_flat_paths = {
+            f"/home/pi/scripts/python-automation/{legacy[relative]}"
+            for relative in expected_sources
+        }
+        expected_flat_paths.update({"/home/pi/sns.sh", "/usr/bin/vlc"})
+        self.assertEqual(declared_paths, expected_flat_paths)
+
+        for path in sorted(expected_sources):
             with self.subTest(path=path):
-                self.assertIn(f"ExecStartPre=/usr/bin/test -r {path}", unit)
-        self.assertIn(
-            "ExecStart=/usr/bin/python3 /home/pi/scripts/python-automation/video_library_server.py",
-            unit,
+                self.assertIn(path, legacy)
+                source = REPOSITORY_ROOT / path
+                self.assertTrue(source.is_file(), str(source))
+                self.assertTrue(source.resolve().is_relative_to(REPOSITORY_ROOT))
+        sns = REPOSITORY_ROOT / "pi" / "sns.sh"
+        self.assertTrue(sns.is_file(), str(sns))
+        self.assertIn("/usr/bin/vlc", declared_paths)
+
+        self.assertEqual(
+            shlex.split(directives["ExecStart"][0]),
+            [
+                "/usr/bin/python3",
+                "/home/pi/scripts/python-automation/video_library_server.py",
+            ],
         )
-        self.assertIn("Environment=DISPLAY=:0", unit)
-        self.assertIn("Environment=XDG_RUNTIME_DIR=/run/user/1000", unit)
-        self.assertIn(
-            "Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus", unit
+        self.assertEqual(environment["DISPLAY"], ":0")
+        self.assertEqual(environment["XDG_RUNTIME_DIR"], "/run/user/1000")
+        self.assertEqual(
+            environment["DBUS_SESSION_BUS_ADDRESS"],
+            "unix:path=/run/user/1000/bus",
         )
-        self.assertIn(
-            "Environment=PYTHONPATH=/home/pi/scripts/python-automation", unit
+        self.assertEqual(
+            environment["PYTHONPATH"], "/home/pi/scripts/python-automation"
         )
-        self.assertIn("User=pi", unit)
-        self.assertIn("WantedBy=multi-user.target", unit)
+        self.assertEqual(directives["User"], ["pi"])
+        self.assertEqual(directives["WantedBy"], ["multi-user.target"])
 
     def test_sync_stages_python_template_and_static_assets_for_unit_restart_tracking(self):
         sync = (REPOSITORY_ROOT / "pi" / "sync_scripts.sh").read_text(
@@ -2280,20 +2321,25 @@ class DeploymentWiringTests(unittest.TestCase):
         updater = (REPOSITORY_ROOT / "pi" / "scripts" / "update_services.sh").read_text(
             encoding="utf-8"
         )
-        self.assertIn(
-            'cp "$pi_apps/video_library/templates/video_library.html" "$python_stage/templates/"',
-            sync,
+        plan = deploy_python.build_plan(REPOSITORY_ROOT, mode="legacy")
+        legacy = plan["manifest"]["legacy"]
+        expected_sources = {
+            path.relative_to(REPOSITORY_ROOT).as_posix()
+            for path in APP_DIR.glob("*.py")
+            if path.name != "__init__.py"
+        }
+        expected_sources.update({"shared/python/sonos_tasks.py", *deploy_python.ASSETS})
+        for relative in sorted(expected_sources):
+            with self.subTest(relative=relative):
+                self.assertIn(relative, legacy)
+                self.assertTrue((REPOSITORY_ROOT / relative).is_file())
+        self.assertFalse(
+            any(relative.startswith("pi/apps/van_dashboard/") for relative in legacy)
         )
-        for asset in ("video_library.js", "video_library.css"):
-            self.assertIn(
-                f'cp "$pi_apps/video_library/static/{asset}" "$python_stage/static/"',
-                sync,
-            )
-        self.assertIn('"$pi_apps" "$pi_python" "$shared_python" -type f -name "*.py"', sync)
         self.assertIn('"$dsc/pi/sns.sh"', sync)
         self.assertIn("ExecStartPre", updater)
         self.assertIn("/home/pi/scripts/", updater)
-        self.assertIn("changed_units+=(\"$unit\")", updater)
+        self.assertIn('changed_units+=("$unit")', updater)
 
     def test_template_static_assets_dashboard_and_cli_use_the_same_api(self):
         template = (APP_DIR / "templates" / "video_library.html").read_text(
@@ -2303,12 +2349,6 @@ class DeploymentWiringTests(unittest.TestCase):
             encoding="utf-8"
         )
         css = (APP_DIR / "static" / "video_library.css").read_text(encoding="utf-8")
-        dashboard_template = (
-            REPOSITORY_ROOT / "pi" / "apps" / "van_dashboard" / "templates" / "van_dashboard.html"
-        ).read_text(encoding="utf-8")
-        dashboard_javascript = (
-            REPOSITORY_ROOT / "pi" / "apps" / "van_dashboard" / "static" / "van_dashboard.js"
-        ).read_text(encoding="utf-8")
         bashrc = (REPOSITORY_ROOT / "pi" / ".bashrc").read_text(encoding="utf-8")
 
         self.assertIn("video_library.css", template)
@@ -2332,8 +2372,6 @@ class DeploymentWiringTests(unittest.TestCase):
         self.assertIn('$("volume").disabled = !audio.available;', javascript)
         self.assertIn("Number.isFinite(audio.volume)", javascript)
         self.assertNotIn("Number.isFinite(player.volume)", javascript)
-        self.assertIn('id="video-library"', dashboard_template)
-        self.assertIn("$('video-library').href = siblingServiceUrl(8789)", dashboard_javascript)
         self.assertIn('VIDEOAPI="http://localhost:8789/api"', bashrc)
         self.assertIn("vid()", bashrc)
         vlcmd = bashrc[

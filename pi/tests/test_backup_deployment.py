@@ -1,4 +1,5 @@
 import subprocess
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -22,9 +23,19 @@ class BackupDeploymentTests(unittest.TestCase):
             REPOSITORY_ROOT / "pi" / "scripts" / "update_services.sh"
         ).read_text(encoding="utf-8")
 
-        self.assertIn(
-            "f /run/lock/vanpi_backup.lock 0660 root pi -", tmpfiles
+        records = [
+            line.split()
+            for line in tmpfiles.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        lock_records = [
+            record for record in records if len(record) > 1 and record[1] == "/run/lock/vanpi_backup.lock"
+        ]
+        self.assertEqual(
+            lock_records,
+            [["f", "/run/lock/vanpi_backup.lock", "0660", "root", "pi", "-"]],
         )
+        self.assertEqual(stat.S_IMODE(int(lock_records[0][2], 8)), 0o660)
         self.assertIn("validate_job_lock_file", config)
         self.assertIn("JOB_LOCK_OWNER", config)
         self.assertIn("JOB_LOCK_GROUP", config)

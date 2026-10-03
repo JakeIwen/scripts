@@ -17,6 +17,7 @@ from email.message import Message
 from pathlib import Path
 from types import SimpleNamespace
 
+from pi import deploy_python
 from pi.apps.van_dashboard import runtime
 from pi.apps.van_dashboard.routes import common as dashboard_common_routes
 from pi.apps.van_dashboard.routes import telemetry as dashboard_telemetry_routes
@@ -35,6 +36,7 @@ from pi.apps.van_dashboard import van_dashboard_telemetry as dashboard_telemetry
 from pi.apps.van_dashboard import van_dashboard_usb as dashboard_usb
 from pi.apps.van_dashboard import van_dashboard_vonstar as dashboard_vonstar
 from pi.scripts import usb_watch
+from pi.tests.unit_contract import command_arguments, parse_directives
 import van_compute_metrics as compute_metrics
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
@@ -3377,7 +3379,22 @@ class CopAlertManagerTests(unittest.TestCase):
 
     def test_service_post_stop_cleanup_uses_exclusive_gpio_request(self):
         unit = (REPOSITORY_ROOT / "pi/services/van-dashboard.service").read_text()
-        self.assertIn("van_dashboard_cop.py --relay-off", unit)
+        directives = parse_directives(unit)
+        stop_post = command_arguments(directives["ExecStopPost"][0])
+        self.assertEqual(
+            stop_post,
+            [
+                "/usr/bin/python3",
+                "-P",
+                "-m",
+                "pi.apps.van_dashboard.van_dashboard_cop",
+                "--relay-off",
+            ],
+        )
+        module_path = Path(*stop_post[3].split(".")).with_suffix(".py")
+        plan = deploy_python.build_plan()
+        self.assertTrue((REPOSITORY_ROOT / module_path).is_file())
+        self.assertIn(module_path.as_posix(), plan["manifest"]["files"])
         self.assertIn("SupplementaryGroups=gpio", unit)
 
     def test_cop_endpoint_uses_the_same_relay(self):
@@ -4485,66 +4502,114 @@ class DashboardRouteTests(unittest.TestCase):
         repository = str(REPOSITORY_ROOT)
         with open(os.path.join(repository, "pi", "sync_scripts.sh"), encoding="utf-8") as handle:
             sync_script = handle.read()
-        self.assertNotIn("$pi_apps/van_dashboard/templates", sync_script)
-        self.assertNotIn("$pi_apps/van_dashboard/static", sync_script)
-        self.assertIn('mkdir -p "$python_stage/templates" "$python_stage/static"', sync_script)
         self.assertIn('shared_sh="$dsc/shared/sh"', sync_script)
         self.assertIn(
             'cp -a "$shared_sh/." "$staged_scripts/"',
             sync_script,
         )
         self.assertNotIn("/home/pi/scripts/shared", sync_script)
-        update_services = (
-            REPOSITORY_ROOT / "pi" / "scripts" / "update_services.sh"
-        ).read_text(encoding="utf-8")
-        for retired in (
-            "templates/van_dashboard.html",
-            "static/van_dashboard.js",
-            "static/van_dashboard.css",
-        ):
-            self.assertIn(retired, update_services)
 
-    def test_dashboard_modules_are_flat_deployable_restart_dependencies(self):
+        plan = deploy_python.build_plan(mode="stage")
+        manifest_files = set(plan["manifest"]["files"])
         backend = REPOSITORY_ROOT / "pi" / "apps" / "van_dashboard"
-        modules = sorted(
-            path.name
-            for path in backend.glob("van_dashboard_*.py")
+        expected_dashboard_modules = {
+            path.relative_to(REPOSITORY_ROOT).as_posix()
+            for path in backend.rglob("*.py")
+            if "frontend" not in path.parts and "__pycache__" not in path.parts
+        }
+        actual_dashboard_modules = {
+            path
+            for path in manifest_files
+            if path.startswith("pi/apps/van_dashboard/") and path.endswith(".py")
+        }
+        self.assertEqual(actual_dashboard_modules, expected_dashboard_modules)
+        self.assertTrue(set(deploy_python.ASSETS).issubset(manifest_files))
+        dashboard_manifest_files = {
+            path for path in manifest_files if path.startswith("pi/apps/van_dashboard/")
+        }
+        self.assertFalse(
+            any(
+                path.startswith("pi/apps/van_dashboard/frontend/")
+                or "node_modules" in path
+                for path in manifest_files
+            )
         )
-        self.assertEqual(
-            modules,
-            [
-                "van_dashboard_backups.py",
-                "van_dashboard_block_devices.py",
-                "van_dashboard_common.py",
-                "van_dashboard_cop.py",
-                "van_dashboard_disks.py",
-                "van_dashboard_history.py",
-                "van_dashboard_home.py",
-                "van_dashboard_integrations.py",
-                "van_dashboard_network.py",
-                "van_dashboard_sonos.py",
-                "van_dashboard_storage.py",
-                "van_dashboard_system.py",
-                "van_dashboard_telemetry.py",
-                "van_dashboard_usb.py",
-                "van_dashboard_vonstar.py",
-            ],
+        self.assertFalse(
+            any(
+                "/templates/" in path or "/static/" in path
+                for path in dashboard_manifest_files
+            )
         )
+
+        legacy_plan = deploy_python.build_plan(mode="legacy")
+        self.assertFalse(
+            any(
+                path.startswith("pi/apps/van_dashboard/")
+                for path in legacy_plan["manifest"]["legacy"]
+            )
+        )
+
+    def test_dashboard_package_is_deployable_restart_dependency(self):
+        plan = deploy_python.build_plan(mode="stage")
+        manifest_files = set(plan["manifest"]["files"])
+        backend = REPOSITORY_ROOT / "pi" / "apps" / "van_dashboard"
+        expected_dashboard_modules = {
+            path.relative_to(REPOSITORY_ROOT).as_posix()
+            for path in backend.rglob("*.py")
+            if "frontend" not in path.parts and "__pycache__" not in path.parts
+        }
+        self.assertTrue(expected_dashboard_modules <= manifest_files)
+
         service = (
             REPOSITORY_ROOT / "pi" / "services" / "van-dashboard.service"
         ).read_text(encoding="utf-8")
-        for module in modules:
-            self.assertIn(
-                "ExecStartPre=/usr/bin/test -r "
-                f"/home/pi/scripts/python-automation/{module}",
-                service,
-            )
-        self.assertNotIn("van_dashboard.html", service)
-        self.assertNotIn("static/van_dashboard.js", service)
-        self.assertNotIn("static/van_dashboard.css", service)
+        directives = parse_directives(service)
+        prechecks = [
+            command_arguments(value) for value in directives["ExecStartPre"]
+        ]
+        self.assertIn(
+            [
+                "/usr/bin/test",
+                "-r",
+                "/home/pi/scripts/python-packages/current/manifest.json",
+            ],
+            prechecks,
+        )
+        start = command_arguments(directives["ExecStart"][0])
+        stop_post = command_arguments(directives["ExecStopPost"][0])
+        self.assertEqual(
+            start,
+            ["/usr/bin/python3", "-P", "-m", "pi.apps.van_dashboard"],
+        )
+        self.assertEqual(
+            stop_post,
+            [
+                "/usr/bin/python3",
+                "-P",
+                "-m",
+                "pi.apps.van_dashboard.van_dashboard_cop",
+                "--relay-off",
+            ],
+        )
+        for module in (start[3], stop_post[3]):
+            module_path = Path(*module.split("."))
+            if module == "pi.apps.van_dashboard":
+                module_path /= "__main__.py"
+            else:
+                module_path = module_path.with_suffix(".py")
+            self.assertIn(module_path.as_posix(), manifest_files)
+        self.assertIn("pi/apps/van_dashboard/__init__.py", manifest_files)
+        for retired in (
+            "van_dashboard.html",
+            "static/van_dashboard.js",
+            "static/van_dashboard.css",
+        ):
+            self.assertNotIn(retired, service)
+            relative = f"templates/{retired}" if retired == "van_dashboard.html" else retired
+            self.assertNotIn(f"pi/apps/van_dashboard/{relative}", manifest_files)
 
-    def test_dashboard_imports_from_deployed_flat_layout(self):
-        backend = REPOSITORY_ROOT / "pi" / "apps" / "van_dashboard"
+    def test_dashboard_package_imports_from_deployed_layout(self):
+        plan = deploy_python.build_plan(mode="stage")
         compute = (
             REPOSITORY_ROOT
             / "pi"
@@ -4554,25 +4619,63 @@ class DashboardRouteTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)
-            for path in backend.glob("van_dashboard*.py"):
-                shutil.copy2(path, target / path.name)
-            shutil.copy2(compute, target / "van_compute_metrics.py")
+            release = target / "release"
+            for relative in plan["manifest"]["files"]:
+                source = REPOSITORY_ROOT / relative
+                destination = release / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination)
+            (release / "manifest.json").write_bytes(
+                deploy_python.encoded(plan["manifest"])
+            )
+
+            external = target / "external-compute" / "scripts"
+            external.mkdir(parents=True)
+            shutil.copy2(compute, external / compute.name)
+            self.assertFalse((release / "pi" / "van_compute").exists())
+
+            poisoned = target / "poisoned"
+            poisoned.mkdir()
+            (poisoned / "pi.py").write_text(
+                "raise AssertionError('poisoned pi.py was imported')\n",
+                encoding="utf-8",
+            )
             environment = os.environ.copy()
-            environment["PYTHONPATH"] = directory
-            environment["VAN_DASHBOARD_STATE_PATH"] = str(target / "state.json")
+            environment["PYTHONPATH"] = os.pathsep.join(
+                (str(release), str(external))
+            )
+            environment["VAN_DASHBOARD_STATE_PATH"] = str(
+                target / "state.json"
+            )
+            environment["VAN_DASHBOARD_RUNTIME_DIR"] = str(
+                target / "runtime"
+            )
+            environment["EXPECTED_RELEASE"] = str(release)
+            environment["EXPECTED_EXTERNAL"] = str(external)
+            environment["REPOSITORY_ROOT"] = str(REPOSITORY_ROOT)
             result = subprocess.run(
                 [
                     sys.executable,
+                    "-P",
                     "-c",
                     (
-                        "import van_dashboard_cop; "
-                        "import van_dashboard as dashboard; "
-                        "assert dashboard.create_app().name == 'van_dashboard'; "
-                        "assert dashboard_cop.CopAlertManager.__module__ "
-                        "== 'van_dashboard_cop'"
+                        "import os; "
+                        "from pathlib import Path; "
+                        "import pi; "
+                        "from pi.apps.van_dashboard import create_app; "
+                        "from pi.apps.van_dashboard import runtime; "
+                        "import van_compute_metrics; "
+                        "app = create_app(); "
+                        "assert len(list(app.url_map.iter_rules())) == 77; "
+                        "assert Path(pi.__path__[0]).resolve() == (Path(os.environ['EXPECTED_RELEASE']) / 'pi').resolve(); "
+                        "compute_path = Path(van_compute_metrics.__file__).resolve(); "
+                        "external = Path(os.environ['EXPECTED_EXTERNAL']).resolve(); "
+                        "assert compute_path.is_relative_to(external); "
+                        "assert not compute_path.is_relative_to(Path(os.environ['REPOSITORY_ROOT']).resolve()); "
+                        "assert runtime.cop_alert.__class__.__module__ == 'pi.apps.van_dashboard.van_dashboard_cop'"
                     ),
                 ],
-                cwd=directory,
+                cwd=poisoned,
                 env=environment,
                 capture_output=True,
                 text=True,
