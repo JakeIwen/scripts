@@ -108,8 +108,8 @@ sync_non_python() {
 }
 
 sync_python_packages() {
-  python3 "$dsc/pi/deploy_python.py" --update || return 1
-  python3 "$dsc/pi/deploy_python.py" --legacy-flatten || return 1
+  python3 "$dsc/pi/deploy_python.py" --target "$pi_ip" --update || return 1
+  python3 "$dsc/pi/deploy_python.py" --target "$pi_ip" --legacy-flatten || return 1
 }
 
 sync_compute() {
