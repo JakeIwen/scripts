@@ -337,6 +337,7 @@ class MediaParsingAndIndexTests(unittest.TestCase):
             str(self.fixture.index / "TV" / "Example Show" / hash_name),
             str(target),
             "movingparts",
+            library_root=str(self.fixture.mount),
         )
         self.assertEqual(item.media_type, "episode")
         self.assertEqual(item.series, "Example Show")
@@ -383,6 +384,106 @@ class MediaParsingAndIndexTests(unittest.TestCase):
             unnumbered.id,
             video.stable_id("episode:tv:sealab:s3:e4"),
         )
+
+    def test_scan_does_not_use_episode_code_above_configured_mount_root(self):
+        mount = self.fixture.root / "S05E82" / "movingparts"
+        index = mount / "links"
+        target = mount / "torrent" / "Example Show" / "Episode Without Code.mkv"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"fake video")
+        link = index / "TV" / "Example Show" / target.name
+        link.parent.mkdir(parents=True)
+        link.symlink_to(target)
+
+        library = video.MediaLibrary(
+            [video.LibrarySource("movingparts", str(mount), str(index))],
+            mount_check=lambda path: path == str(mount),
+        )
+        self.assertTrue(library.scan())
+        item = next(iter(library.items.values()))
+        self.assertEqual((item.season, item.episode), (None, None))
+
+    def test_parent_episode_code_at_library_root_is_excluded(self):
+        mount = self.fixture.root / "S05E82"
+        target = mount / "torrent" / "Example Show" / "Episode Without Code.mkv"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"fake video")
+        item = video.parse_candidate(
+            "TV",
+            "TV/Example Show/Episode Without Code.mkv",
+            str(self.fixture.index / "TV/Example Show/Episode Without Code.mkv"),
+            str(target),
+            "movingparts",
+            library_root=str(mount),
+        )
+        self.assertIsNone(item.season)
+        self.assertIsNone(item.episode)
+
+    def test_parent_episode_code_below_library_root_is_retained(self):
+        mount = self.fixture.mount
+        target = mount / "torrent" / "Example Show" / "S04E03" / "Episode.mkv"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"fake video")
+        item = video.parse_candidate(
+            "TV",
+            "TV/Example Show/Episode.mkv",
+            str(self.fixture.index / "TV/Example Show/Episode.mkv"),
+            str(target),
+            "movingparts",
+            library_root=str(mount),
+        )
+        self.assertEqual((item.season, item.episode), (4, 3))
+
+    def test_parent_episode_code_requires_a_root_and_stays_inside_it(self):
+        target = (
+            self.fixture.mount
+            / "torrent"
+            / "Example Show"
+            / "S08E06"
+            / "Episode.mkv"
+        )
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"fake video")
+        arguments = (
+            "TV",
+            "TV/Example Show/Episode.mkv",
+            str(self.fixture.index / "TV/Example Show/Episode.mkv"),
+            str(target),
+            "movingparts",
+        )
+        outside_root = self.fixture.root / "other-mount"
+        outside_root.mkdir()
+        for root in (None, outside_root):
+            with self.subTest(root=root):
+                if root is None:
+                    item = video.parse_candidate(*arguments)
+                else:
+                    item = video.parse_candidate(*arguments, library_root=str(root))
+                self.assertIsNone(item.season)
+                self.assertIsNone(item.episode)
+
+    def test_symlinked_library_root_accepts_below_root_episode_code(self):
+        real_mount = self.fixture.root / "real-mount"
+        linked_mount = self.fixture.root / "mount-link"
+        target = (
+            real_mount
+            / "torrent"
+            / "Example Show"
+            / "S03E02"
+            / "Episode.mkv"
+        )
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"fake video")
+        linked_mount.symlink_to(real_mount, target_is_directory=True)
+        item = video.parse_candidate(
+            "TV",
+            "TV/Example Show/Episode.mkv",
+            str(self.fixture.index / "TV/Example Show/Episode.mkv"),
+            str(target),
+            "movingparts",
+            library_root=str(linked_mount),
+        )
+        self.assertEqual((item.season, item.episode), (3, 2))
 
     def test_tv_episode_alias_precedence_beats_part_suffix(self):
         target = (

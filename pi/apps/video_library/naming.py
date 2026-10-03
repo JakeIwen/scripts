@@ -55,17 +55,35 @@ def clean_name(value: str) -> str:
 def stable_id(key: str) -> str:
     return hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
 
-def parse_candidate(category: str, relative: str, link_path: str, real_path: str, source: str) -> MediaItem:
+def parse_candidate(
+    category: str,
+    relative: str,
+    link_path: str,
+    real_path: str,
+    source: str,
+    *,
+    library_root: str | None = None,
+) -> MediaItem:
     parts = Path(relative).parts
     content_parts = parts[1:] if parts and parts[0] == category else parts
     basename = parts[-1]
     basename_match = EPISODE_RE.search(basename) or X_EPISODE_RE.search(basename)
     path_match = None
-    if category == "TV" and not basename_match:
-        for segment in reversed(Path(real_path).parts[:-1]):
-            path_match = EPISODE_RE.search(segment) or X_EPISODE_RE.search(segment)
-            if path_match:
-                break
+    if category == "TV" and not basename_match and library_root is not None:
+        resolved_root = os.path.realpath(library_root)
+        resolved_real_path = os.path.realpath(real_path)
+        try:
+            relative_real_path = os.path.relpath(resolved_real_path, resolved_root)
+        except ValueError:
+            relative_real_path = None
+        if relative_real_path is not None and not (
+            relative_real_path == os.pardir
+            or relative_real_path.startswith(os.pardir + os.sep)
+        ):
+            for segment in reversed(Path(relative_real_path).parts[:-1]):
+                path_match = EPISODE_RE.search(segment) or X_EPISODE_RE.search(segment)
+                if path_match:
+                    break
     match = basename_match or path_match
     part_match = PART_EPISODE_RE.search(basename)
     part_is_episode = bool(part_match and category in ("TV", "Documentaries"))

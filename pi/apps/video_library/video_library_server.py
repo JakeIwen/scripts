@@ -329,7 +329,14 @@ class MediaLibrary:
                     if not os.path.isfile(real_path) or Path(real_path).suffix.casefold() not in VIDEO_EXTENSIONS:
                         continue
                     relative = os.path.relpath(link_path, source.index_path)
-                    candidate = parse_candidate(category, relative, link_path, real_path, source.name)
+                    candidate = parse_candidate(
+                        category,
+                        relative,
+                        link_path,
+                        real_path,
+                        source.name,
+                        library_root=source.mount_path,
+                    )
                     existing = found_by_target.get(real_path) or found.get(candidate.key)
                     if existing:
                         existing.categories.update(candidate.categories)
