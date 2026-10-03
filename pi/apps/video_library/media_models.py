@@ -70,6 +70,27 @@ class MediaItem:
             value["progress"] = public_progress(progress)
         return value
 
+@dataclass(frozen=True)
+class LibrarySource:
+    name: str
+    mount_path: str
+    index_path: str
+
+
+@dataclass
+class Show:
+    key: str
+    id: str
+    name: str
+    kind: str
+    episodes: list[MediaItem]
+
+    @property
+    def new(self) -> bool:
+        return any(item.new for item in self.episodes)
+
+
+
 def public_progress(value: dict[str, Any]) -> dict[str, Any]:
     position = float(value.get("position") or 0)
     duration = float(value.get("duration") or 0)
