@@ -1,0 +1,11 @@
+# Files that pi/deploy_network_storage.py installs at the same destination the
+# repository-wide sync would use. That guarded installer owns them (hash pins,
+# manifests, rollback, root-owned directories), so pi/sync_scripts.sh must not
+# stage them. Update them with deploy_network_storage.py check/apply --recorder-only.
+# Anchored rsync patterns, applied to the pi/scripts, pi/services and
+# pi/tmpfiles.d staging copies.
+/network_flight_recorder.py
+/network_recorder/
+/setup_openwrt_logging.sh
+/network-flight-recorder.service
+/vanpi-network.conf
