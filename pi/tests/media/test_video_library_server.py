@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 from pi.apps.video_library import video_library_server as video
+from pi.apps.video_library.playback import PlaybackState
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
@@ -1235,6 +1236,48 @@ class VlcControllerTests(unittest.TestCase):
             self.assertEqual(fixed["volume"], video.VLC_FIXED_VOLUME)
 
 
+class PlaybackStateTests(unittest.TestCase):
+    def test_defaults_match_previous_video_service_state(self):
+        self.assertEqual(
+            vars(PlaybackState()),
+            {
+                "sleep_deadline": None,
+                "last_saved_key": None,
+                "last_saved_position": None,
+                "last_saved_duration": None,
+                "last_saved_at": 0.0,
+                "last_saved_state": None,
+                "audio_was_preparing": False,
+                "last_audio_volume": None,
+                "active_session_id": None,
+                "active_asset_id": None,
+                "active_work_id": None,
+                "active_track_id": None,
+                "active_item": None,
+                "active_legacy_key": None,
+                "active_title": None,
+                "active_rel_path": None,
+                "active_complete": True,
+                "last_snapshot": None,
+                "pending_explicit_launch": None,
+            },
+        )
+
+    def test_video_services_have_distinct_playback_state(self):
+        first = video.VideoService(
+            mock.sentinel.library,
+            mock.sentinel.store,
+            mock.sentinel.player,
+        )
+        second = video.VideoService(
+            mock.sentinel.library,
+            mock.sentinel.store,
+            mock.sentinel.player,
+        )
+
+        self.assertIsNot(first.playback, second.playback)
+
+
 class VideoServiceTests(unittest.TestCase):
     def setUp(self):
         self.fixture = MediaFixture()
@@ -1672,7 +1715,7 @@ class VideoServiceTests(unittest.TestCase):
         )
         service.control_lock = ObservedRLock()
         service.stop_event = OneIterationStopEvent()
-        service.sleep_deadline = self.clock() - 1
+        service.playback.sleep_deadline = self.clock() - 1
 
         def resume():
             try:
@@ -1695,7 +1738,7 @@ class VideoServiceTests(unittest.TestCase):
                 "sleep expiry did not attempt to acquire the playback lock",
             )
             self.assertNotIn("pause", player.action_calls)
-            self.assertIsNotNone(service.sleep_deadline)
+            self.assertIsNotNone(service.playback.sleep_deadline)
         finally:
             allow_prep.set()
             resume_thread.join(2)
@@ -1706,7 +1749,7 @@ class VideoServiceTests(unittest.TestCase):
         self.assertFalse(expiry_thread.is_alive())
         self.assertEqual(errors, [])
         self.assertEqual(player.action_calls, ["play", "pause"])
-        self.assertIsNone(service.sleep_deadline)
+        self.assertIsNone(service.playback.sleep_deadline)
         self.assertEqual(
             events,
             ["prepare", "volume:61", "action:play", "action:pause"],
@@ -1782,14 +1825,14 @@ class VideoServiceTests(unittest.TestCase):
                 return self.calls > 1
 
         deadline = self.clock() - 1
-        self.service.sleep_deadline = deadline
+        self.service.playback.sleep_deadline = deadline
         self.service.stop_event = TwoPassStopEvent()
         with mock.patch.object(
             self.player, "action", side_effect=RuntimeError("pause unavailable")
         ) as action:
             self.service._loop()
         action.assert_called_once_with("pause")
-        self.assertEqual(self.service.sleep_deadline, deadline)
+        self.assertEqual(self.service.playback.sleep_deadline, deadline)
         self.assertEqual(self.service.last_error, "pause unavailable")
 
     def test_play_re_resolves_queue_and_passes_verified_real_paths(self):

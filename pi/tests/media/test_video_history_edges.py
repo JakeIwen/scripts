@@ -308,7 +308,7 @@ class HistoryFailureBoundaryTests(unittest.TestCase):
 
         service.play_local(str(paths[0]), restart=True)
         first_asset = catalog.resolve_path(paths[0])
-        first_session = service.active_session_id
+        first_session = service.playback.active_session_id
         player.snapshot_value.update(
             path=str(paths[0]), position=123.0, duration=900.0, state="PAUSED"
         )
@@ -321,7 +321,7 @@ class HistoryFailureBoundaryTests(unittest.TestCase):
         }
         service.bookmark()
 
-        self.assertIsNone(service.active_session_id)
+        self.assertIsNone(service.playback.active_session_id)
         self.assertEqual(catalog.get_session(first_session)["end_reason"], "player_offline")
         self.assertAlmostEqual(catalog.get_asset_state(first_asset)["position"], 123.0)
 
@@ -330,7 +330,7 @@ class HistoryFailureBoundaryTests(unittest.TestCase):
         player.launch([str(paths[1])])
         service.bookmark()
         second_asset = catalog.resolve_path(paths[1])
-        second_session = service.active_session_id
+        second_session = service.playback.active_session_id
         player.snapshot_value.update(
             path=str(paths[2]),
             url=paths[2].as_uri(),
@@ -342,7 +342,7 @@ class HistoryFailureBoundaryTests(unittest.TestCase):
         )
         service.bookmark()
         third_asset = catalog.resolve_path(paths[2])
-        third_session = service.active_session_id
+        third_session = service.playback.active_session_id
 
         self.assertEqual(len({first_asset, second_asset, third_asset}), 3)
         self.assertNotEqual(second_session, third_session)
@@ -561,7 +561,7 @@ class HistoryFailureBoundaryTests(unittest.TestCase):
             qbittorrent=fake_qb
         )
         service.play_local(str(incomplete), restart=True)
-        asset_id = service.active_asset_id
+        asset_id = service.playback.active_asset_id
         player.snapshot_value.update(
             path=str(incomplete),
             position=411.0,

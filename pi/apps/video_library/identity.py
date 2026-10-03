@@ -611,18 +611,18 @@ class CatalogIdentityMixin:
         with self.catalog.transaction():
             for item in items:
                 self._bind_catalog_item(item)
-        if self.active_asset_id is not None:
+        if self.playback.active_asset_id is not None:
             with self.control_lock:
                 matches = [
-                    item for item in items if item.asset_id == self.active_asset_id
+                    item for item in items if item.asset_id == self.playback.active_asset_id
                 ]
                 if len(matches) == 1:
                     active = matches[0]
-                    self.active_item = active
-                    self.active_work_id = active.work_id
-                    self.active_legacy_key = active.key
-                    self.active_title = active.title
-                    self.active_rel_path = active.rel_path
+                    self.playback.active_item = active
+                    self.playback.active_work_id = active.work_id
+                    self.playback.active_legacy_key = active.key
+                    self.playback.active_title = active.title
+                    self.playback.active_rel_path = active.rel_path
 
     @catalog_degrades(fallback=_degraded_sentinel)
     def _catalog_item_progress(self, item: MediaItem) -> dict[str, Any] | None | object:
