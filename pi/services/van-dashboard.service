@@ -9,6 +9,7 @@ ExecStartPre=/usr/bin/test -r /home/pi/scripts/van-dashboard-preview/current/ind
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_backups.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_block_devices.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_common.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_projects.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_cop.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_disks.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard_history.py

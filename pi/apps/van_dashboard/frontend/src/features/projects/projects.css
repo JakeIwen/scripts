@@ -65,6 +65,8 @@
 .project-directory__primary {
   color: inherit;
   text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Expand the primary anchor over the row, keeping explicit links above it. */
@@ -86,7 +88,8 @@
 
 .project-directory__links {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
   gap: 8px;
 }
 
@@ -100,10 +103,6 @@
   text-decoration: none;
 }
 
-.project-directory__links a:only-child {
-  grid-column: 1 / -1;
-}
-
 .project-directory__links a:hover {
   text-decoration: underline;
 }
@@ -112,6 +111,49 @@
   margin-top: 10px;
   color: var(--muted);
   font-size: 10px;
+}
+
+.project-directory__row:has(.project-directory__links a:nth-child(3)) {
+  grid-template-columns: minmax(0, 1fr) 160px;
+}
+
+.project-directory__new {
+  margin-top: 12px;
+  font-size: 12px;
+}
+
+.project-directory__new summary {
+  padding: 8px 0;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.project-directory__new fieldset {
+  display: grid;
+  gap: 10px;
+  margin: 8px 0;
+  padding: 0;
+  border: 0;
+}
+
+.project-directory__new label {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.project-directory__new input {
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.project-directory__new small {
+  color: var(--muted);
 }
 
 @media (max-width: 360px) {

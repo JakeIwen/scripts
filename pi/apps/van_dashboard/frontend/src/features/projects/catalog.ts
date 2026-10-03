@@ -15,7 +15,7 @@ export function preferredProjectLink(links: ProjectLink[]): ProjectLink | undefi
 export interface HostedProject {
   id: string;
   name: string;
-  host: 'This Mac' | 'Vanpi';
+  host: 'This Mac' | 'Vanpi' | 'Custom';
   description: string;
   note?: string;
   links: ProjectLink[];

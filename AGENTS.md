@@ -131,6 +131,14 @@ the interface, and retain the CAN-transmission safeguards below.
   deployed repository changes once validation passes. Keep unrelated worktree
   changes unstaged and out of that commit.
 
+## Hosted project directory
+
+The title-menu defaults live in the React `features/projects/catalog.ts` file.
+User-added links are persisted separately under `hosted_projects` in the
+dashboard's existing StateStore JSON, shared by LAN and Tailscale clients.
+Preserve that runtime state during deployment. Links are HTTP/HTTPS only and
+are never fetched by the backend; preference is local, LAN, Tailscale, then web.
+
 ## Backup and disk tooling
 
 The active design is represented by:

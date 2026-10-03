@@ -422,6 +422,7 @@ class PreviewDeploymentContractTests(unittest.TestCase):
             preview.ALLOWED_MUTATIONS,
             frozenset(
                 {
+                    ("POST", "/api/hosted-projects"),
                     ("POST", "/api/speakers/select"),
                     ("POST", "/api/speakers/group"),
                     ("POST", "/api/speakers/volume"),
