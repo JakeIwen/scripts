@@ -60,10 +60,6 @@ else:
     )
 
 
-
-
-
-
 class VideoService(LegacyProgressMixin, LibraryViewMixin, playback.PlaybackMixin, identity.CatalogIdentityMixin):
     def __init__(
         self,
@@ -131,8 +127,6 @@ class VideoService(LegacyProgressMixin, LibraryViewMixin, playback.PlaybackMixin
             if self.catalog is not None and imported:
                 self._sync_library_identities()
         return available
-
-
 
 
 _service: VideoService | None = None

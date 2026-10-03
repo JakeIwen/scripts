@@ -39,7 +39,6 @@ class V1CatalogBridge:
             return value
         return str(value)
 
-
     def _read_v1_progress(self, db: sqlite3.Connection) -> dict[str, dict[str, Any]] | None:
         exists = db.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'progress'"
@@ -58,10 +57,8 @@ class V1CatalogBridge:
             }
         return rows
 
-
     def _v1_row_digest(self, row: Mapping[str, Any]) -> str:
         return _digest(dict(row))
-
 
     def _v1_covered_state_digest(
         self,
@@ -119,7 +116,6 @@ class V1CatalogBridge:
             }
         )
 
-
     def _v1_shadow_covers_state(
         self,
         db: sqlite3.Connection,
@@ -173,7 +169,6 @@ class V1CatalogBridge:
                 state_updates.append(float(work_state["updated_at"]))
         return not state_updates or float(shadow["source_updated"]) >= max(state_updates)
 
-
     def _shadow_v1_row(
         self,
         db: sqlite3.Connection,
@@ -214,7 +209,6 @@ class V1CatalogBridge:
             ),
         )
 
-
     def _legacy_target(
         self,
         db: sqlite3.Connection,
@@ -251,7 +245,6 @@ class V1CatalogBridge:
             return None, None
         asset = self._assert_asset(db, asset_id)
         return asset_id, str(asset["work_id"]) if asset["work_id"] is not None else None
-
 
     def _apply_v1_snapshot(
         self,
@@ -321,7 +314,6 @@ class V1CatalogBridge:
                 allow_auto_reset=True,
             )
         return applied
-
 
     def project_v1_progress(
         self,
@@ -396,7 +388,6 @@ class V1CatalogBridge:
                 observed_at=timestamp,
             )
 
-
     def project_v1_clear(
         self,
         media_key: str,
@@ -447,7 +438,6 @@ class V1CatalogBridge:
                 observed_at=timestamp,
             )
             return bool(result.rowcount)
-
 
     def _reconcile_v1_present_row(
         self,
@@ -596,7 +586,6 @@ class V1CatalogBridge:
             observed_at=timestamp,
         )
 
-
     def _reconcile_v1_missing_row(
         self,
         db: sqlite3.Connection,
@@ -718,7 +707,6 @@ class V1CatalogBridge:
             raw=None,
             observed_at=timestamp,
         )
-
 
     def reconcile_v1_progress(
         self,

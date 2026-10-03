@@ -10,11 +10,13 @@ else:
 from dataclasses import dataclass, field
 from typing import Any
 
+
 def seconds_text(seconds: float | int | None) -> str:
     total = max(0, int(seconds or 0))
     hours, remainder = divmod(total, 3600)
     minutes, secs = divmod(remainder, 60)
     return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
+
 
 @dataclass
 class MediaItem:
@@ -70,6 +72,7 @@ class MediaItem:
             value["progress"] = public_progress(progress)
         return value
 
+
 @dataclass(frozen=True)
 class LibrarySource:
     name: str
@@ -88,7 +91,6 @@ class Show:
     @property
     def new(self) -> bool:
         return any(item.new for item in self.episodes)
-
 
 
 def public_progress(value: dict[str, Any]) -> dict[str, Any]:

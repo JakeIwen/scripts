@@ -2003,17 +2003,6 @@ class MediaAssetCatalog(V1CatalogBridge):
                 raise CatalogNotFound(f"unknown import {import_id}")
 
 
-
-
-
-
-
-
-
-
-
-
-
 __all__ = (
     "CatalogConflict",
     "CatalogError",

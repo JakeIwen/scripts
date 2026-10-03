@@ -34,12 +34,15 @@ BARE_EPISODE_RE = re.compile(
 FALLBACK_EPISODE_RE = re.compile(r"^(?P<code>\d{3})(?:\s|$)")
 FEATURE_YEAR_RE = re.compile(r"(?<!\d)(?P<year>(?:19|20)\d{2})(?!\d)")
 
+
 def natural_key(value: str) -> list[Any]:
     return [int(part) if part.isdigit() else part.casefold() for part in re.split(r"(\d+)", value)]
+
 
 def normalized(value: str) -> str:
     value = value.casefold().replace("&", " and ")
     return " ".join(re.sub(r"[^a-z0-9]+", " ", value).split())
+
 
 def canonical_series(value: str) -> str:
     name = normalized(value)
@@ -47,13 +50,16 @@ def canonical_series(value: str) -> str:
     name = re.sub(r"\s+(?:19|20)\d{2}$", "", name)
     return name
 
+
 def clean_name(value: str) -> str:
     if Path(value).suffix.casefold() in VIDEO_EXTENSIONS:
         value = str(Path(value).with_suffix(""))
     return " ".join(re.sub(r"[._]+", " ", value).split())
 
+
 def stable_id(key: str) -> str:
     return hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
+
 
 def parse_candidate(
     category: str,

@@ -152,7 +152,6 @@ class ProgressStore:
             )
 
 
-
 class LegacyProgressMixin:
     def _legacy_path_evidence(
         self,
@@ -196,7 +195,6 @@ class LegacyProgressMixin:
                     prefix = f"/{marker}" if marker else ""
                     evidence.add(f"{prefix}/{relative}".replace(os.sep, "/"))
         return {value.replace(os.sep, "/") for value in evidence if value}
-
 
     def _apply_deferred_legacy_positions(
         self,
@@ -249,7 +247,6 @@ class LegacyProgressMixin:
                 raw=raw,
             )
 
-
     def _legacy_progress_for_asset(
         self, asset_id: str, work_id: str | None = None
     ) -> dict[str, Any] | None:
@@ -288,7 +285,6 @@ class LegacyProgressMixin:
             ),
         }
 
-
     def _project_item_progress(
         self,
         item: MediaItem,
@@ -318,7 +314,6 @@ class LegacyProgressMixin:
             connection=connection,
         )
         return {**progress, "title": item.title, "rel_path": item.rel_path}
-
 
     def _record_legacy_snapshot(
         self, snapshot: dict[str, Any], *, force: bool = False
@@ -367,7 +362,6 @@ class LegacyProgressMixin:
                 self.playback.last_saved_state = str(snapshot.get("state") or "")
                 self.playback.last_saved_at = now
         return item
-
 
     def import_legacy_positions(self) -> int:
         try:

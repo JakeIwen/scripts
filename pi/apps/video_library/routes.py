@@ -29,12 +29,6 @@ else:  # Direct execution from the Pi's flat deployment directory.
 app = Flask(__name__)
 
 
-
-
-
-
-
-
 def api_error(message: Any, status: int):
     return jsonify({"ok": False, "message": str(message)}), status
 

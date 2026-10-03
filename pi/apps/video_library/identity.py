@@ -311,8 +311,6 @@ class CatalogIdentityMixin:
             return "unavailable"
         return "torrent" if asset and asset.get("asset_kind") == "torrent" else "catalog"
 
-
-
     def _path_is_probably_incomplete(self, path: str) -> bool:
         """Fail safe on partial media even when qBittorrent is unavailable.
 
@@ -332,8 +330,6 @@ class CatalogIdentityMixin:
             except (OSError, TypeError, ValueError):
                 continue
         return "incomplete" in {part.casefold() for part in Path(normalized).parts}
-
-
 
     def _bind_library_item(self, item: MediaItem) -> None:
         if self.catalog is None:

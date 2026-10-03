@@ -264,7 +264,6 @@ class PlaybackMixin:
         self.playback.last_saved_at = now
         self.playback.last_snapshot = dict(snapshot)
 
-
     def _record_snapshot(
         self, snapshot: dict[str, Any], *, force: bool = False
     ) -> MediaItem | None:

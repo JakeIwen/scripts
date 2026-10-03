@@ -57,6 +57,7 @@ else:  # Direct execution from the Pi's flat deployment directory.
         XSET,
     )
 
+
 def native(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): native(item) for key, item in value.items()}

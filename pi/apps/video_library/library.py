@@ -224,8 +224,6 @@ class MediaLibrary:
             return list(self.items.values()), list(self.shows.values())
 
 
-
-
 class LibraryViewMixin:
     def show_for_item(self, item: MediaItem) -> Show | None:
         if not item.series:
@@ -435,7 +433,6 @@ class LibraryViewMixin:
             raise RuntimeError("no unwatched choices are available")
         chosen = self.random.choice(choices)
         return self.play(item_id=chosen.id, restart=True, subtitles=subtitles)
-
 
 
 def default_sources() -> tuple[LibrarySource, ...]:
