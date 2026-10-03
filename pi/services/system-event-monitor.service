@@ -5,6 +5,16 @@ After=systemd-journald.service vanpi-crash-capture.service
 
 [Service]
 Type=simple
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/system_monitor/__init__.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/system_monitor/common.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/system_monitor/probes.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/system_monitor/journal.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/system_monitor/store.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/system_monitor/rollups.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/system_monitor/daemon.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/system_monitor/crash.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/system_monitor/report.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/system_monitor/cli.py
 ExecStart=/usr/bin/python3 /home/pi/scripts/system_event_monitor.py --database /var/lib/vanpi-monitor/events.sqlite3 run
 Restart=on-failure
 RestartSec=5

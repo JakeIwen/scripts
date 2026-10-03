@@ -28,6 +28,33 @@ import sys
 import threading
 import time
 
+if __package__:
+    from . import system_monitor
+    from .system_monitor import (
+        common,
+        probes,
+        journal,
+        store,
+        rollups,
+        daemon,
+        crash,
+        report,
+        cli,
+    )
+else:
+    import system_monitor
+    from system_monitor import (
+        common,
+        probes,
+        journal,
+        store,
+        rollups,
+        daemon,
+        crash,
+        report,
+        cli,
+    )
+
 
 DEFAULT_DATABASE = os.environ.get(
     "VANPI_MONITOR_DATABASE", "/var/lib/vanpi-monitor/events.sqlite3"
