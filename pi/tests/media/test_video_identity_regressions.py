@@ -13,6 +13,7 @@ import sqlite3
 import unittest
 from unittest import mock
 
+from pi.apps.video_library import identity
 from pi.apps.video_library import video_library_server as video
 from pi.apps.video_library import video_qbittorrent as qb
 from pi.apps.video_library.video_asset_catalog import MediaAssetCatalog
@@ -1175,6 +1176,165 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
         self.assertTrue(catalog.get_work_watch_state(second.work_id)["watched"])
         self.assertEqual(
             catalog.get_work_watch_state(second.work_id)["watched_override"], 1
+        )
+
+
+class CatalogDegradationAdapterTests(unittest.TestCase):
+    class Probe:
+        def __init__(self) -> None:
+            self.identity_error = None
+
+        @identity.catalog_degrades(fallback=lambda _self, _failure: "fallback")
+        def degrade(self, failure):
+            raise failure
+
+    def test_decorator_catches_only_catalog_degradation_families_and_subclasses(
+        self,
+    ) -> None:
+        class CatalogFailure(identity.CatalogError):
+            pass
+
+        class SqliteFailure(sqlite3.Error):
+            pass
+
+        class OsFailure(OSError):
+            pass
+
+        class ValueFailure(ValueError):
+            pass
+
+        families = (
+            identity.CatalogError,
+            CatalogFailure,
+            sqlite3.Error,
+            SqliteFailure,
+            OSError,
+            OsFailure,
+            ValueError,
+            ValueFailure,
+        )
+        for failure_type in families:
+            with self.subTest(failure_type=failure_type.__name__):
+                probe = self.Probe()
+                failure = failure_type("injected failure")
+
+                self.assertEqual(probe.degrade(failure), "fallback")
+                self.assertEqual(
+                    probe.identity_error,
+                    "media identity tracking degraded: injected failure",
+                )
+
+    def test_decorator_propagates_unexpected_runtime_and_key_errors(self) -> None:
+        fallback = mock.Mock(return_value="fallback")
+
+        class Probe:
+            def __init__(self) -> None:
+                self.identity_error = None
+
+            @identity.catalog_degrades(fallback=fallback)
+            def degrade(self, failure):
+                raise failure
+
+        for failure in (RuntimeError("runtime"), KeyError("key")):
+            with self.subTest(failure_type=type(failure).__name__):
+                probe = Probe()
+                with self.assertRaises(type(failure)) as raised:
+                    probe.degrade(failure)
+                self.assertIs(raised.exception, failure)
+                self.assertIsNone(probe.identity_error)
+        fallback.assert_not_called()
+
+    def test_catalog_progress_none_is_distinct_from_degradation_sentinel(self) -> None:
+        probe = identity.CatalogIdentityMixin()
+        probe.identity_error = None
+        probe._legacy_progress_for_asset = mock.Mock(return_value=None)
+        item = mock.Mock(asset_id="asset", work_id="work")
+
+        self.assertIsNone(probe._catalog_item_progress(item))
+
+        probe._legacy_progress_for_asset.side_effect = OSError("catalog offline")
+        self.assertIs(
+            probe._catalog_item_progress(item),
+            identity._CATALOG_DEGRADED,
+        )
+
+    def test_decorator_does_not_catch_fallback_exception(self) -> None:
+        fallback_failure = sqlite3.OperationalError("fallback failed")
+
+        def failed_fallback(_self, _failure):
+            raise fallback_failure
+
+        class Probe:
+            def __init__(self) -> None:
+                self.identity_error = None
+
+            @identity.catalog_degrades(fallback=failed_fallback)
+            def degrade(self, failure):
+                raise failure
+
+        probe = Probe()
+        with self.assertRaises(sqlite3.OperationalError) as raised:
+            probe.degrade(ValueError("catalog failed"))
+
+        self.assertIs(raised.exception, fallback_failure)
+        self.assertEqual(
+            probe.identity_error,
+            "media identity tracking degraded: catalog failed",
+        )
+
+    def test_snapshot_fallback_runs_while_control_lock_is_held(self) -> None:
+        class TrackingLock:
+            def __init__(self) -> None:
+                self.held = False
+
+            def __enter__(self):
+                self.held = True
+                return self
+
+            def __exit__(self, exc_type, exc, traceback) -> None:
+                self.held = False
+
+        lock = TrackingLock()
+        service = object.__new__(video.VideoService)
+        service.control_lock = lock
+        service.identity_error = None
+        service._record_snapshot_locked = mock.Mock(
+            side_effect=ValueError("catalog failed")
+        )
+        fallback_item = object()
+
+        def record_legacy(snapshot, *, force=False):
+            self.assertTrue(lock.held)
+            self.assertEqual(snapshot, {"available": True})
+            self.assertTrue(force)
+            return fallback_item
+
+        service._record_legacy_snapshot = record_legacy
+
+        self.assertIs(
+            service._record_snapshot({"available": True}, force=True),
+            fallback_item,
+        )
+        self.assertFalse(lock.held)
+
+    def test_status_store_fallback_failure_is_not_recaught(self) -> None:
+        service = object.__new__(video.VideoService)
+        service.identity_error = None
+        service._legacy_progress_for_asset = mock.Mock(
+            side_effect=ValueError("catalog failed")
+        )
+        service.store = mock.Mock()
+        store_failure = sqlite3.OperationalError("legacy store failed")
+        service.store.get.side_effect = store_failure
+        item = mock.Mock(asset_id="asset", work_id="work", key="media-key")
+
+        with self.assertRaises(sqlite3.OperationalError) as raised:
+            service._status_item_progress(item)
+
+        self.assertIs(raised.exception, store_failure)
+        self.assertEqual(
+            service.identity_error,
+            "media identity tracking degraded: catalog failed",
         )
 
 
