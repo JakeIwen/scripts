@@ -17,7 +17,10 @@ from email.message import Message
 from pathlib import Path
 from types import SimpleNamespace
 
-from pi.apps.van_dashboard import van_dashboard as dashboard
+from pi.apps.van_dashboard import runtime
+from pi.apps.van_dashboard.routes import common as dashboard_common_routes
+from pi.apps.van_dashboard.routes import telemetry as dashboard_telemetry_routes
+from pi.apps.van_dashboard.van_dashboard import create_app
 from pi.apps.van_dashboard import van_dashboard_backups as dashboard_backups
 from pi.apps.van_dashboard import van_dashboard_common as dashboard_common
 from pi.apps.van_dashboard import van_dashboard_cop as dashboard_cop
@@ -35,6 +38,7 @@ from pi.scripts import usb_watch
 import van_compute_metrics as compute_metrics
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+dashboard_app = create_app()
 
 
 class FakeClock:
@@ -545,11 +549,11 @@ class SystemMonitorClientTests(unittest.TestCase):
 
 class PriceCheckApiTests(unittest.TestCase):
     def setUp(self):
-        self.original = dashboard.price_checks
-        self.client = dashboard.app.test_client()
+        self.original = runtime.price_checks
+        self.client = dashboard_app.test_client()
 
     def tearDown(self):
-        dashboard.price_checks = self.original
+        runtime.price_checks = self.original
 
     def test_list_add_check_and_remove(self):
         calls = []
@@ -643,7 +647,7 @@ class PriceCheckApiTests(unittest.TestCase):
                 calls.append(("check_search", target))
                 return {**payload, "search_checked": [{"id": 8}]}
 
-        dashboard.price_checks = FakePriceChecks()
+        runtime.price_checks = FakePriceChecks()
         self.assertEqual(self.client.get("/api/price-checks").status_code, 200)
         add = self.client.post(
             "/api/price-checks/add",
@@ -774,7 +778,7 @@ class PriceCheckApiTests(unittest.TestCase):
                     "crontab update failed; previous crontab restored"
                 )
 
-        dashboard.price_checks = FailedSchedule()
+        runtime.price_checks = FailedSchedule()
         response = self.client.post(
             "/api/price-checks/schedule",
             data={"expression": "30 8,16 * * 1-5"},
@@ -2102,16 +2106,16 @@ class TelemetryServiceTests(unittest.TestCase):
             active = args[3] == "start"
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-        original = dashboard.run_command
-        dashboard.run_command = command
+        original = dashboard_telemetry_routes.run_command
+        dashboard_telemetry_routes.run_command = command
         try:
-            self.assertFalse(dashboard.telemetry_service_status()["running"])
-            action, status = dashboard.toggle_telemetry_service()
+            self.assertFalse(dashboard_telemetry_routes.telemetry_service_status()["running"])
+            action, status = dashboard_telemetry_routes.toggle_telemetry_service()
             self.assertEqual((action, status["running"]), ("start", True))
-            action, status = dashboard.toggle_telemetry_service()
+            action, status = dashboard_telemetry_routes.toggle_telemetry_service()
             self.assertEqual((action, status["running"]), ("stop", False))
         finally:
-            dashboard.run_command = original
+            dashboard_telemetry_routes.run_command = original
         self.assertIn(
             [dashboard_common.SUDO, "-n", dashboard_common.SYSTEMCTL, "start", dashboard_common.TELEMETRY_SERVICE],
             calls,
@@ -2134,18 +2138,18 @@ class TelemetryServiceTests(unittest.TestCase):
                         returncode=1, stdout="", stderr="systemctl failed"
                     )
 
-                original_timeout = dashboard.TELEMETRY_SERVICE_TIMEOUT
-                original_command = dashboard.run_command
-                dashboard.TELEMETRY_SERVICE_TIMEOUT = 3
-                dashboard.run_command = command
+                original_timeout = dashboard_telemetry_routes.TELEMETRY_SERVICE_TIMEOUT
+                original_command = dashboard_telemetry_routes.run_command
+                dashboard_telemetry_routes.TELEMETRY_SERVICE_TIMEOUT = 3
+                dashboard_telemetry_routes.run_command = command
                 try:
                     with self.assertRaisesRegex(
-                        dashboard.TelemetryServiceError, expected
+                        dashboard_telemetry_routes.TelemetryServiceError, expected
                     ):
-                        dashboard.telemetry_service_status()
+                        dashboard_telemetry_routes.telemetry_service_status()
                 finally:
-                    dashboard.TELEMETRY_SERVICE_TIMEOUT = original_timeout
-                    dashboard.run_command = original_command
+                    dashboard_telemetry_routes.TELEMETRY_SERVICE_TIMEOUT = original_timeout
+                    dashboard_telemetry_routes.run_command = original_command
 
 
 class VoltageCheckManagerTests(unittest.TestCase):
@@ -3377,9 +3381,9 @@ class CopAlertManagerTests(unittest.TestCase):
         self.assertIn("SupplementaryGroups=gpio", unit)
 
     def test_cop_endpoint_uses_the_same_relay(self):
-        with mock.patch.object(dashboard, "cop_alert", self.manager), \
-             mock.patch.object(dashboard, "cop_led", self.light):
-            client = dashboard.app.test_client()
+        with mock.patch.object(runtime, "cop_alert", self.manager), \
+             mock.patch.object(runtime, "cop_led", self.light):
+            client = dashboard_app.test_client()
             on = client.post("/api/cop-alert", data={"active": "true"})
             self.assertEqual(on.status_code, 200)
             self.assertEqual(on.json["cop_alert"]["relay_state"], "on")
@@ -4427,7 +4431,7 @@ class VonstarClientTests(unittest.TestCase):
 
 class DashboardRouteTests(unittest.TestCase):
     def test_manifest_and_legacy_routes_are_removed(self):
-        client = dashboard.app.test_client()
+        client = dashboard_app.test_client()
         legacy = client.get("/legacy")
         javascript = client.get("/static/van_dashboard.js")
         stylesheet = client.get("/static/van_dashboard.css")
@@ -4444,7 +4448,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(manifest.json["name"], "Van Dashboard")
 
         with tempfile.TemporaryDirectory() as directory:
-            with mock.patch.object(dashboard, "REACT_FRONTEND_ROOT", directory):
+            with mock.patch.object(dashboard_common_routes, "REACT_FRONTEND_ROOT", directory):
                 missing = client.get("/")
             missing_data = missing.data
             missing.close()
@@ -4460,8 +4464,8 @@ class DashboardRouteTests(unittest.TestCase):
             with open(os.path.join(directory, "assets", "app-deadbeef.js"), "wb") as handle:
                 handle.write(b"window.reactDashboard = true;")
 
-            client = dashboard.app.test_client()
-            with mock.patch.object(dashboard, "REACT_FRONTEND_ROOT", directory):
+            client = dashboard_app.test_client()
+            with mock.patch.object(dashboard_common_routes, "REACT_FRONTEND_ROOT", directory):
                 root = client.get("/")
                 asset = client.get("/assets/app-deadbeef.js")
 
@@ -4563,7 +4567,7 @@ class DashboardRouteTests(unittest.TestCase):
                     (
                         "import van_dashboard_cop; "
                         "import van_dashboard as dashboard; "
-                        "assert dashboard.app.name == 'van_dashboard'; "
+                        "assert dashboard.create_app().name == 'van_dashboard'; "
                         "assert dashboard_cop.CopAlertManager.__module__ "
                         "== 'van_dashboard_cop'"
                     ),
@@ -4588,7 +4592,7 @@ class DashboardRouteTests(unittest.TestCase):
         backend = REPOSITORY_ROOT / "pi" / "apps" / "van_dashboard"
         source = "\n".join(
             path.read_text(encoding="utf-8")
-            for path in sorted(backend.glob("van_dashboard*.py"))
+            for path in sorted(backend.rglob("*.py"))
         )
         self.assertIn('ACTIVE_MARKER = os.path.join(RUNTIME_DIR, "cop-alert.active")', source)
         self.assertNotIn("socket.AF_CAN", source)
@@ -4600,7 +4604,7 @@ class DashboardRouteTests(unittest.TestCase):
     def test_vonstar_dashboard_boundary_is_fixed_and_can_free(self):
         backend = REPOSITORY_ROOT / "pi" / "apps" / "van_dashboard"
         source = (backend / "van_dashboard_vonstar.py").read_text(encoding="utf-8")
-        facade = (backend / "van_dashboard.py").read_text(encoding="utf-8")
+        route_source = (backend / "routes" / "vonstar.py").read_text(encoding="utf-8")
         self.assertIn("socket.AF_UNIX", source)
         self.assertIn('"/run/vonstar/api.sock"', source)
         self.assertIn('payload={"request_id": request_id}', source)
@@ -4619,7 +4623,7 @@ class DashboardRouteTests(unittest.TestCase):
             "CAN_CHANNEL",
         ):
             self.assertNotIn(forbidden, source)
-            self.assertNotIn(forbidden, facade)
+            self.assertNotIn(forbidden, route_source)
 
     def test_vonstar_routes_whitelist_action_and_sanitize_response(self):
         calls = []
@@ -4659,8 +4663,8 @@ class DashboardRouteTests(unittest.TestCase):
                     "access_state": VonstarClientTests.access_state(),
                 }
 
-        client = dashboard.app.test_client()
-        with mock.patch.object(dashboard, "vonstar", FakeVonstar()):
+        client = dashboard_app.test_client()
+        with mock.patch.object(runtime, "vonstar", FakeVonstar()):
             page = client.get("/")
             dashboard_status = client.get("/api/status")
             status = client.get("/api/vonstar")
@@ -4713,8 +4717,8 @@ class DashboardRouteTests(unittest.TestCase):
                     "marker_active": False,
                 }
 
-        client = dashboard.app.test_client()
-        with mock.patch.object(dashboard, "cop_can_wake", FakeCanWake()):
+        client = dashboard_app.test_client()
+        with mock.patch.object(runtime, "cop_can_wake", FakeCanWake()):
             response = client.get("/api/status")
 
         self.assertEqual(response.status_code, 200)
@@ -4722,7 +4726,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertNotIn("wake_method", response.json["cop_can_wake"])
 
     def test_connectivity_and_speedtest_status_routes(self):
-        client = dashboard.app.test_client()
+        client = dashboard_app.test_client()
         connectivity = client.get("/api/connectivity")
         self.assertEqual(connectivity.status_code, 200)
         self.assertEqual(connectivity.headers["Cache-Control"], "no-store")
@@ -4742,8 +4746,8 @@ class DashboardRouteTests(unittest.TestCase):
                 calls.append("snapshot")
                 return {"router": {}, "active_mode": bool(calls)}
 
-        client = dashboard.app.test_client()
-        with mock.patch.object(dashboard, "connectivity", FakeConnectivity()):
+        client = dashboard_app.test_client()
+        with mock.patch.object(runtime, "connectivity", FakeConnectivity()):
             response = client.get("/api/connectivity?active=1")
             invalid_value = client.get("/api/connectivity?active=true")
             unknown = client.get("/api/connectivity?fresh=1")
@@ -4781,17 +4785,17 @@ class DashboardRouteTests(unittest.TestCase):
                     "operation": {"status": "idle"},
                 }
 
-        original = dashboard.usb_devices
-        original_ports = dashboard.usb_ports
-        dashboard.usb_devices = FakeUsbDevices()
-        dashboard.usb_ports = FakeUsbPorts()
+        original = runtime.usb_devices
+        original_ports = runtime.usb_ports
+        runtime.usb_devices = FakeUsbDevices()
+        runtime.usb_ports = FakeUsbPorts()
         try:
-            client = dashboard.app.test_client()
+            client = dashboard_app.test_client()
             response = client.get("/api/usb-devices")
             rejected = client.get("/api/usb-devices?command=anything")
         finally:
-            dashboard.usb_devices = original
-            dashboard.usb_ports = original_ports
+            runtime.usb_devices = original
+            runtime.usb_ports = original_ports
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["Cache-Control"], "no-store")
@@ -4812,10 +4816,10 @@ class DashboardRouteTests(unittest.TestCase):
                     "operation": {"status": "idle"},
                 }
 
-        original = dashboard.usb_ports
-        dashboard.usb_ports = FakeUsbPorts()
+        original = runtime.usb_ports
+        runtime.usb_ports = FakeUsbPorts()
         try:
-            client = dashboard.app.test_client()
+            client = dashboard_app.test_client()
             accepted = client.post(
                 "/api/usb-ports/discover",
                 headers={"X-Van-Dashboard": "1"},
@@ -4833,7 +4837,7 @@ class DashboardRouteTests(unittest.TestCase):
                 },
             )
         finally:
-            dashboard.usb_ports = original
+            runtime.usb_ports = original
 
         self.assertEqual(accepted.status_code, 200)
         self.assertEqual(accepted.headers["Cache-Control"], "no-store")
@@ -4850,10 +4854,10 @@ class DashboardRouteTests(unittest.TestCase):
                 calls.append((port, action))
                 return {"operation": {"status": "running", "key": port, "action": action}}
 
-        original = dashboard.usb_ports
-        dashboard.usb_ports = FakeUsbPorts()
+        original = runtime.usb_ports
+        runtime.usb_ports = FakeUsbPorts()
         try:
-            client = dashboard.app.test_client()
+            client = dashboard_app.test_client()
             accepted = client.post(
                 "/api/usb-ports/action",
                 data={"port": "2-2:3", "action": "off"},
@@ -4873,7 +4877,7 @@ class DashboardRouteTests(unittest.TestCase):
                 },
             )
         finally:
-            dashboard.usb_ports = original
+            runtime.usb_ports = original
 
         self.assertEqual(accepted.status_code, 200)
         self.assertEqual(accepted.headers["Cache-Control"], "no-store")
@@ -4889,10 +4893,10 @@ class DashboardRouteTests(unittest.TestCase):
                 calls.append("recover")
                 return {"operation": {"status": "running", "action": "restore"}}
 
-        original = dashboard.usb_ports
-        dashboard.usb_ports = FakeUsbPorts()
+        original = runtime.usb_ports
+        runtime.usb_ports = FakeUsbPorts()
         try:
-            client = dashboard.app.test_client()
+            client = dashboard_app.test_client()
             accepted = client.post(
                 "/api/usb-ports/recover",
                 headers={"X-Van-Dashboard": "1"},
@@ -4910,7 +4914,7 @@ class DashboardRouteTests(unittest.TestCase):
                 },
             )
         finally:
-            dashboard.usb_ports = original
+            runtime.usb_ports = original
 
         self.assertEqual(accepted.status_code, 200)
         self.assertEqual(accepted.headers["Cache-Control"], "no-store")
@@ -4980,10 +4984,10 @@ class DashboardRouteTests(unittest.TestCase):
                     "stop": {"status": "running", "kind": kind},
                 }
 
-        original = dashboard.backups
-        dashboard.backups = FakeBackups()
+        original = runtime.backups
+        runtime.backups = FakeBackups()
         try:
-            client = dashboard.app.test_client()
+            client = dashboard_app.test_client()
             status = client.get("/api/backups")
             started = client.post(
                 "/api/backups/clone",
@@ -5077,7 +5081,7 @@ class DashboardRouteTests(unittest.TestCase):
                 },
             )
         finally:
-            dashboard.backups = original
+            runtime.backups = original
 
         self.assertEqual(status.status_code, 200)
         self.assertEqual(status.headers["Cache-Control"], "no-store")
@@ -5156,10 +5160,10 @@ class DashboardRouteTests(unittest.TestCase):
                 calls.append(("enable",))
                 return active
 
-        original = dashboard.ignition_monitor_control
-        dashboard.ignition_monitor_control = FakeIgnitionMonitor()
+        original = runtime.ignition_monitor_control
+        runtime.ignition_monitor_control = FakeIgnitionMonitor()
         try:
-            client = dashboard.app.test_client()
+            client = dashboard_app.test_client()
             status = client.get("/api/ignition-monitor")
             disabled = client.post(
                 "/api/ignition-monitor/disable",
@@ -5190,7 +5194,7 @@ class DashboardRouteTests(unittest.TestCase):
                 },
             )
         finally:
-            dashboard.ignition_monitor_control = original
+            runtime.ignition_monitor_control = original
 
         self.assertEqual(status.status_code, 200)
         self.assertEqual(status.headers["Cache-Control"], "no-store")
@@ -5217,16 +5221,16 @@ class DashboardRouteTests(unittest.TestCase):
                     "events": [],
                 }
 
-        original = dashboard.system_monitor
-        dashboard.system_monitor = FakeSystemMonitor()
+        original = runtime.system_monitor
+        runtime.system_monitor = FakeSystemMonitor()
         try:
-            client = dashboard.app.test_client()
+            client = dashboard_app.test_client()
             default = client.get("/api/system-monitor")
             week = client.get("/api/system-monitor?hours=168")
             invalid = client.get("/api/system-monitor?hours=25")
             extra = client.get("/api/system-monitor?hours=24&command=anything")
         finally:
-            dashboard.system_monitor = original
+            runtime.system_monitor = original
 
         self.assertEqual(default.status_code, 200)
         self.assertEqual(default.headers["Cache-Control"], "no-store")
@@ -5247,10 +5251,10 @@ class DashboardRouteTests(unittest.TestCase):
                 calls.append(("history", limit))
                 return {"ok": True, "history": []}
 
-        original = dashboard.system_monitor
-        dashboard.system_monitor = FakeSystemMonitor()
+        original = runtime.system_monitor
+        runtime.system_monitor = FakeSystemMonitor()
         try:
-            client = dashboard.app.test_client()
+            client = dashboard_app.test_client()
             analysis = client.post("/api/system-monitor/crash-analysis")
             history = client.get("/api/system-monitor/crashes")
             bad_analysis = client.post(
@@ -5258,7 +5262,7 @@ class DashboardRouteTests(unittest.TestCase):
             )
             bad_history = client.get("/api/system-monitor/crashes?limit=2")
         finally:
-            dashboard.system_monitor = original
+            runtime.system_monitor = original
 
         self.assertEqual(analysis.status_code, 200)
         self.assertTrue(analysis.json["saved"])
@@ -5318,10 +5322,10 @@ class DashboardRouteTests(unittest.TestCase):
                     "stdout": {"available": False, "excerpt": ""},
                 }
 
-        original = dashboard.compute_monitor
-        dashboard.compute_monitor = FakeComputeMonitor()
+        original = runtime.compute_monitor
+        runtime.compute_monitor = FakeComputeMonitor()
         try:
-            client = dashboard.app.test_client()
+            client = dashboard_app.test_client()
             default = client.get("/api/compute")
             day = client.get("/api/compute?hours=24")
             task_jobs = client.get("/api/compute/jobs?hours=24&task=repo-tests")
@@ -5354,7 +5358,7 @@ class DashboardRouteTests(unittest.TestCase):
                 "/api/compute/jobs/20260722T015900Z-0badc0de"
             )
         finally:
-            dashboard.compute_monitor = original
+            runtime.compute_monitor = original
 
         self.assertEqual(default.status_code, 200)
         self.assertEqual(default.headers["Cache-Control"], "no-store")
@@ -5397,14 +5401,14 @@ class DashboardRouteTests(unittest.TestCase):
         class LegacyComputeMonitor:
             pass
 
-        original = dashboard.compute_monitor
-        dashboard.compute_monitor = LegacyComputeMonitor()
+        original = runtime.compute_monitor
+        runtime.compute_monitor = LegacyComputeMonitor()
         try:
-            response = dashboard.app.test_client().get(
+            response = dashboard_app.test_client().get(
                 "/api/compute/jobs?hours=24&task=repo-tests"
             )
         finally:
-            dashboard.compute_monitor = original
+            runtime.compute_monitor = original
 
         self.assertEqual(response.status_code, 503)
         self.assertIn("matching van_compute metrics release", response.json["message"])
@@ -5443,10 +5447,10 @@ class DashboardRouteTests(unittest.TestCase):
                 calls.append(("temperature", entity, kelvin))
                 return {**status, "state": "on", "on_count": 1}
 
-        original = dashboard.lighting
-        dashboard.lighting = FakeLighting()
+        original = runtime.lighting
+        runtime.lighting = FakeLighting()
         try:
-            client = dashboard.app.test_client()
+            client = dashboard_app.test_client()
             read = client.get("/api/lights")
             power = client.post(
                 "/api/lights/power", data={"target": "all", "value": "true"}
@@ -5495,7 +5499,7 @@ class DashboardRouteTests(unittest.TestCase):
                 data={"target": "all", "value": "true", "command": "anything"},
             )
         finally:
-            dashboard.lighting = original
+            runtime.lighting = original
 
         self.assertEqual(read.status_code, 200)
         self.assertEqual(read.headers["Cache-Control"], "no-store")
@@ -5550,10 +5554,10 @@ class DashboardRouteTests(unittest.TestCase):
                     "operation": {"status": "running", "kind": "test"},
                 }
 
-        original = dashboard.ubnt_wifi
-        dashboard.ubnt_wifi = FakeUbntWifi()
+        original = runtime.ubnt_wifi
+        runtime.ubnt_wifi = FakeUbntWifi()
         try:
-            client = dashboard.app.test_client()
+            client = dashboard_app.test_client()
             status = client.get("/api/ubnt-wifi")
             scan = client.post("/api/ubnt-wifi/scan")
             connect = client.post(
@@ -5616,7 +5620,7 @@ class DashboardRouteTests(unittest.TestCase):
                 },
             )
         finally:
-            dashboard.ubnt_wifi = original
+            runtime.ubnt_wifi = original
 
         self.assertEqual(status.status_code, 200)
         self.assertEqual(status.headers["Cache-Control"], "no-store")
@@ -5685,10 +5689,10 @@ class DashboardRouteTests(unittest.TestCase):
                 policy["torrents_enabled"] = False
             return SimpleNamespace(returncode=0, stdout=json.dumps(policy), stderr="")
 
-        original = dashboard.storage_policy
-        dashboard.storage_policy = dashboard_storage.StoragePolicyManager(command=command)
+        original = runtime.storage_policy
+        runtime.storage_policy = dashboard_storage.StoragePolicyManager(command=command)
         try:
-            client = dashboard.app.test_client()
+            client = dashboard_app.test_client()
             status = client.get("/api/storage-policy")
             updated = client.post(
                 "/api/storage-policy",
@@ -5711,7 +5715,7 @@ class DashboardRouteTests(unittest.TestCase):
                 data={"field": ["disks_enabled", "torrents_enabled"], "value": "true"},
             )
         finally:
-            dashboard.storage_policy = original
+            runtime.storage_policy = original
 
         self.assertEqual(status.status_code, 200)
         self.assertEqual(status.json["policy"]["version"], 1)
@@ -5757,10 +5761,10 @@ class DashboardRouteTests(unittest.TestCase):
                 calls.append((label, action))
                 return {**status, "operation": {"status": "running"}}
 
-        original = dashboard.disk_manager
-        dashboard.disk_manager = FakeDiskManager()
+        original = runtime.disk_manager
+        runtime.disk_manager = FakeDiskManager()
         try:
-            client = dashboard.app.test_client()
+            client = dashboard_app.test_client()
             current = client.get("/api/disks")
             query_rejected = client.get("/api/disks?label=movingparts")
             accepted = client.post(
@@ -5792,7 +5796,7 @@ class DashboardRouteTests(unittest.TestCase):
                 },
             )
         finally:
-            dashboard.disk_manager = original
+            runtime.disk_manager = original
 
         self.assertEqual(current.status_code, 200)
         self.assertEqual(current.headers["Cache-Control"], "no-store")
@@ -5820,10 +5824,10 @@ class DashboardRouteTests(unittest.TestCase):
                 calls.append(action)
                 return {"status": "running", "action": action}
 
-        original = dashboard.system_power
-        dashboard.system_power = FakeSystemPower()
+        original = runtime.system_power
+        runtime.system_power = FakeSystemPower()
         try:
-            client = dashboard.app.test_client()
+            client = dashboard_app.test_client()
             status = client.get("/api/system-power")
             status_input = client.get("/api/system-power?command=anything")
             accepted = client.post(
@@ -5859,7 +5863,7 @@ class DashboardRouteTests(unittest.TestCase):
                 },
             )
         finally:
-            dashboard.system_power = original
+            runtime.system_power = original
 
         self.assertEqual(status.status_code, 200)
         self.assertEqual(status.headers["Cache-Control"], "no-store")
@@ -5882,10 +5886,10 @@ class DashboardRouteTests(unittest.TestCase):
                 calls.append("restart")
                 return {"scheduled_at": 123}
 
-        original = dashboard.dashboard_restart
-        dashboard.dashboard_restart = FakeDashboardRestart()
+        original = runtime.dashboard_restart
+        runtime.dashboard_restart = FakeDashboardRestart()
         try:
-            client = dashboard.app.test_client()
+            client = dashboard_app.test_client()
             accepted = client.post(
                 "/api/dashboard-service/restart",
                 data={"confirmation": "restart-dashboard"},
@@ -5910,7 +5914,7 @@ class DashboardRouteTests(unittest.TestCase):
                 },
             )
         finally:
-            dashboard.dashboard_restart = original
+            runtime.dashboard_restart = original
 
         self.assertEqual(accepted.status_code, 202)
         self.assertEqual(accepted.headers["Cache-Control"], "no-store")
@@ -5942,15 +5946,15 @@ class DashboardRouteTests(unittest.TestCase):
                     "running": False,
                 }
 
-        originals = dashboard.telemetry_summary, dashboard.telemetry_service_status
-        dashboard.telemetry_summary = FakeTelemetrySummary()
-        dashboard.telemetry_service_status = FakeTelemetryService().status
+        originals = runtime.telemetry_summary, dashboard_telemetry_routes.telemetry_service_status
+        runtime.telemetry_summary = FakeTelemetrySummary()
+        dashboard_telemetry_routes.telemetry_service_status = FakeTelemetryService().status
         try:
-            client = dashboard.app.test_client()
+            client = dashboard_app.test_client()
             status = client.get("/api/telemetry-summary")
             rejected = client.get("/api/telemetry-summary?command=anything")
         finally:
-            dashboard.telemetry_summary, dashboard.telemetry_service_status = originals
+            runtime.telemetry_summary, dashboard_telemetry_routes.telemetry_service_status = originals
 
         self.assertEqual(status.status_code, 200)
         self.assertEqual(status.headers["Cache-Control"], "no-store")
@@ -5980,10 +5984,10 @@ class DashboardRouteTests(unittest.TestCase):
                 calls.append("toggle")
                 return "start", up
 
-        original = dashboard.toggle_telemetry_service
-        dashboard.toggle_telemetry_service = FakeTelemetryService().toggle
+        original = dashboard_telemetry_routes.toggle_telemetry_service
+        dashboard_telemetry_routes.toggle_telemetry_service = FakeTelemetryService().toggle
         try:
-            client = dashboard.app.test_client()
+            client = dashboard_app.test_client()
             accepted = client.post(
                 "/api/telemetry-service",
                 headers={"X-Van-Dashboard": "1"},
@@ -6001,7 +6005,7 @@ class DashboardRouteTests(unittest.TestCase):
                 },
             )
         finally:
-            dashboard.toggle_telemetry_service = original
+            dashboard_telemetry_routes.toggle_telemetry_service = original
 
         self.assertEqual(accepted.status_code, 200)
         self.assertEqual(accepted.headers["Cache-Control"], "no-store")
@@ -6032,10 +6036,10 @@ class DashboardRouteTests(unittest.TestCase):
                     "error": None,
                 }
 
-        original = dashboard.voltage_check
-        dashboard.voltage_check = FakeVoltageCheck()
+        original = runtime.voltage_check
+        runtime.voltage_check = FakeVoltageCheck()
         try:
-            client = dashboard.app.test_client()
+            client = dashboard_app.test_client()
             accepted = client.post(
                 "/api/telemetry-voltage-check",
                 headers={"X-Van-Dashboard": "1"},
@@ -6057,7 +6061,7 @@ class DashboardRouteTests(unittest.TestCase):
                 },
             )
         finally:
-            dashboard.voltage_check = original
+            runtime.voltage_check = original
 
         self.assertEqual(accepted.status_code, 202)
         self.assertEqual(accepted.headers["Cache-Control"], "no-store")
@@ -6083,16 +6087,16 @@ class DashboardRouteTests(unittest.TestCase):
             events.append(list(args))
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-        originals = (dashboard.starlink, dashboard.connectivity, dashboard.storage_policy)
-        dashboard.starlink = FakeStarlink()
-        dashboard.connectivity = FakeConnectivity()
-        dashboard.storage_policy = dashboard_storage.StoragePolicyManager(command=command)
+        originals = (runtime.starlink, runtime.connectivity, runtime.storage_policy)
+        runtime.starlink = FakeStarlink()
+        runtime.connectivity = FakeConnectivity()
+        runtime.storage_policy = dashboard_storage.StoragePolicyManager(command=command)
         try:
-            with mock.patch.object(dashboard.ubnt_wifi, "starlink_power_changed") as power_changed:
-                response = dashboard.app.test_client().post("/api/starlink")
+            with mock.patch.object(runtime.ubnt_wifi, "starlink_power_changed") as power_changed:
+                response = dashboard_app.test_client().post("/api/starlink")
                 power_changed.assert_called_once_with("on")
         finally:
-            dashboard.starlink, dashboard.connectivity, dashboard.storage_policy = originals
+            runtime.starlink, runtime.connectivity, runtime.storage_policy = originals
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
@@ -6102,18 +6106,18 @@ class DashboardRouteTests(unittest.TestCase):
 
     def test_starlink_off_cancels_pending_connection_and_power_failure_does_not_queue(self):
         with (
-            mock.patch.object(dashboard.starlink, "toggle", return_value={"state": "off"}),
-            mock.patch.object(dashboard.ubnt_wifi, "starlink_power_changed") as changed,
-            mock.patch.object(dashboard.connectivity, "request_refresh"),
-            mock.patch.object(dashboard.storage_policy, "reconcile"),
+            mock.patch.object(runtime.starlink, "toggle", return_value={"state": "off"}),
+            mock.patch.object(runtime.ubnt_wifi, "starlink_power_changed") as changed,
+            mock.patch.object(runtime.connectivity, "request_refresh"),
+            mock.patch.object(runtime.storage_policy, "reconcile"),
         ):
-            self.assertEqual(dashboard.app.test_client().post("/api/starlink").status_code, 200)
+            self.assertEqual(dashboard_app.test_client().post("/api/starlink").status_code, 200)
             changed.assert_called_once_with("off")
         with (
-            mock.patch.object(dashboard.starlink, "toggle", side_effect=RuntimeError("switch failed")),
-            mock.patch.object(dashboard.ubnt_wifi, "starlink_power_changed") as changed,
+            mock.patch.object(runtime.starlink, "toggle", side_effect=RuntimeError("switch failed")),
+            mock.patch.object(runtime.ubnt_wifi, "starlink_power_changed") as changed,
         ):
-            self.assertEqual(dashboard.app.test_client().post("/api/starlink").status_code, 502)
+            self.assertEqual(dashboard_app.test_client().post("/api/starlink").status_code, 502)
             changed.assert_not_called()
 
     def test_sonos_transport_volume_and_mute_routes(self):
@@ -6125,14 +6129,14 @@ class DashboardRouteTests(unittest.TestCase):
             return FakeArtResponse()
 
         with tempfile.TemporaryDirectory() as tempdir:
-            original = dashboard.sonos
-            dashboard.sonos = dashboard_sonos.SonosController(
+            original = runtime.sonos
+            runtime.sonos = dashboard_sonos.SonosController(
                 dashboard_common.StateStore(os.path.join(tempdir, "state.json")),
                 discover_func=lambda timeout: {front},
                 art_opener=art_opener,
             )
             try:
-                client = dashboard.app.test_client()
+                client = dashboard_app.test_client()
                 speakers = client.get("/api/speakers")
                 album_art = client.get(speakers.json["now_playing"]["album_art"])
                 transport = client.post(
@@ -6148,7 +6152,7 @@ class DashboardRouteTests(unittest.TestCase):
                     "/api/speakers/mute", data={"name": "Front", "muted": "true"}
                 )
             finally:
-                dashboard.sonos = original
+                runtime.sonos = original
 
         self.assertEqual(transport.status_code, 200)
         self.assertEqual(album_art.status_code, 200)
@@ -6167,12 +6171,12 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertTrue(front.mute)
 
     def test_cop_alert_rejects_ambiguous_input_without_side_effects(self):
-        client = dashboard.app.test_client()
+        client = dashboard_app.test_client()
         response = client.post("/api/cop-alert", data={"active": "maybe"})
         self.assertEqual(response.status_code, 400)
 
     def test_cross_origin_control_is_rejected(self):
-        client = dashboard.app.test_client()
+        client = dashboard_app.test_client()
         response = client.post(
             "/api/cop-alert",
             data={"active": "true"},

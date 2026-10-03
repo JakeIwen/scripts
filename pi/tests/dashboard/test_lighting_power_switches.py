@@ -3,9 +3,13 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from pi.apps.van_dashboard import van_dashboard as dashboard
+from pi.apps.van_dashboard import runtime
+from pi.apps.van_dashboard.van_dashboard import create_app
 from pi.apps.van_dashboard import van_dashboard_common as dashboard_common
 from pi.apps.van_dashboard import van_dashboard_home as dashboard_home
+
+
+dashboard_app = create_app()
 
 
 class LightingPowerSwitchTests(unittest.TestCase):
@@ -94,10 +98,10 @@ class LightingPowerSwitchTests(unittest.TestCase):
                 stderr="",
             )
 
-        original = dashboard.lighting
-        dashboard.lighting = dashboard_home.LightingController(command=command)
+        original = runtime.lighting
+        runtime.lighting = dashboard_home.LightingController(command=command)
         try:
-            client = dashboard.app.test_client()
+            client = dashboard_app.test_client()
             accepted = client.post(
                 "/api/lights/power",
                 data={"target": "switch.solder_flood", "value": "false"},
@@ -107,7 +111,7 @@ class LightingPowerSwitchTests(unittest.TestCase):
                 data={"target": "switch.starlink", "value": "false"},
             )
         finally:
-            dashboard.lighting = original
+            runtime.lighting = original
 
         self.assertEqual(accepted.status_code, 200)
         solder = next(

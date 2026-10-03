@@ -3,9 +3,13 @@ import subprocess
 import unittest
 from types import SimpleNamespace
 
-from pi.apps.van_dashboard import van_dashboard as dashboard
+from pi.apps.van_dashboard import runtime
+from pi.apps.van_dashboard.van_dashboard import create_app
 from pi.apps.van_dashboard import van_dashboard_network as dashboard_network
 from pi.scripts import connectivity_status
+
+
+dashboard_app = create_app()
 
 
 def client_payload():
@@ -178,10 +182,10 @@ class OpenWrtClientDashboardTests(unittest.TestCase):
                 return payload
 
         fake = FakeClients()
-        original = dashboard.openwrt_clients
-        dashboard.openwrt_clients = fake
+        original = runtime.openwrt_clients
+        runtime.openwrt_clients = fake
         try:
-            client = dashboard.app.test_client()
+            client = dashboard_app.test_client()
             response = client.get("/api/openwrt/clients")
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.headers["Cache-Control"], "no-store")
@@ -192,7 +196,7 @@ class OpenWrtClientDashboardTests(unittest.TestCase):
             self.assertEqual(failed.status_code, 502)
             self.assertIn("router unavailable", failed.json["message"])
         finally:
-            dashboard.openwrt_clients = original
+            runtime.openwrt_clients = original
 
 if __name__ == "__main__":
     unittest.main()

@@ -22,14 +22,14 @@ UNIT = 'van-dashboard.service'
 # Only immediate Python modules in these reviewed directories are inputs.
 MODULE_DIRS = (
     'pi/apps/audiobooks', 'pi/apps/bme280', 'pi/apps/van_dashboard',
-    'pi/apps/video_library', 'pi/scripts/python', 'shared/python',
+    'pi/apps/van_dashboard/routes', 'pi/apps/video_library', 'pi/scripts/python', 'shared/python',
 )
 INITIALIZERS = ('pi/__init__.py', 'pi/apps/__init__.py',
                 'pi/scripts/__init__.py', 'shared/__init__.py')
 ASSETS = ('pi/apps/video_library/templates/video_library.html',
           'pi/apps/video_library/static/video_library.js',
           'pi/apps/video_library/static/video_library.css')
-LEGACY_DIRS = tuple(p for p in MODULE_DIRS if p != 'pi/apps/van_dashboard')
+LEGACY_DIRS = tuple(p for p in MODULE_DIRS if not p.startswith('pi/apps/van_dashboard'))
 
 
 def encoded(value):
@@ -82,7 +82,8 @@ def build_plan(repo=ROOT, mode='stage'):
         raise ValueError('duplicate legacy destination (basename collision)')
     dependencies = {p: sha for p, sha in files.items()
                     if (p.startswith('pi/apps/van_dashboard/') and
-                        not p.endswith('/react_dashboard_preview.py')) or p in INITIALIZERS}
+                        not p.endswith('/react_dashboard_preview.py')) or
+                    p in ('pi/__init__.py', 'pi/apps/__init__.py')}
     manifest = {'schema': 1, 'provenance': provenance(repo), 'files': files,
                 'services': {UNIT: digest(encoded(dependencies))}, 'legacy': legacy}
     release = digest(encoded(manifest))[:24]
@@ -174,6 +175,8 @@ def current_release(root):
     if not re.fullmatch(r'releases/[0-9a-f]{24}', target):
         raise ValueError('unexpected current release target')
     release = root / target
+    if release.is_symlink() or (root / 'releases').is_symlink():
+        raise ValueError('release paths must not be symlinks')
     if not release.is_dir():
         raise ValueError('current release is missing')
     return release
@@ -220,6 +223,8 @@ class SystemServices:
 def install_release(stream, root, mode, services=None, flat_root=FLAT_ROOT):
     """Install under a lock; injectable paths/services enable offline behavioral tests."""
     import fcntl
+    if root.is_symlink() or (root / 'releases').is_symlink():
+        raise ValueError('release root must not be a symlink')
     root.mkdir(parents=True, exist_ok=True)
     with (root / '.install.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -233,6 +238,8 @@ def install_release(stream, root, mode, services=None, flat_root=FLAT_ROOT):
             manifest = unpack_archive(stream, incoming)
             release_id = digest(encoded(manifest))[:24]
             release = releases / release_id
+            if release.is_symlink():
+                raise ValueError('release directory must not be a symlink')
             if release.exists():
                 if (release / 'manifest.json').read_bytes() != encoded(manifest):
                     raise ValueError('release manifest collision')

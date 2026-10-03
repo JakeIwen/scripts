@@ -13,7 +13,8 @@ from unittest import mock
 
 from werkzeug.datastructures import MultiDict
 
-from pi.apps.van_dashboard import van_dashboard as dashboard
+from pi.apps.van_dashboard import runtime
+from pi.apps.van_dashboard.van_dashboard import create_app
 from pi.apps.van_dashboard.van_dashboard_history import (
     NetworkHistoryClient,
     NetworkHistoryError,
@@ -21,6 +22,9 @@ from pi.apps.van_dashboard.van_dashboard_history import (
 )
 from pi.scripts.network_recorder.parsers import observation
 from pi.scripts.network_recorder.store import Store
+
+
+dashboard_app = create_app()
 
 
 class HistoryQueryTests(unittest.TestCase):
@@ -105,11 +109,11 @@ class HistoryClientTests(unittest.TestCase):
 
 class HistoryRouteTests(unittest.TestCase):
     def setUp(self):
-        self.client = dashboard.app.test_client()
+        self.client = dashboard_app.test_client()
 
     def test_history_is_read_only_and_does_not_cache_http_responses(self):
         payload = {"ok": True, "schema_version": 1}
-        with mock.patch.object(dashboard, "network_history") as history:
+        with mock.patch.object(runtime, "network_history") as history:
             history.report.return_value = payload
             response = self.client.get("/api/network-history?hours=24&uplink=clientwan")
             self.assertEqual(response.status_code, 200)
@@ -119,19 +123,19 @@ class HistoryRouteTests(unittest.TestCase):
             self.assertEqual(self.client.post("/api/network-history").status_code, 405)
 
     def test_rejects_invalid_query_before_read(self):
-        with mock.patch.object(dashboard, "network_history") as history:
+        with mock.patch.object(runtime, "network_history") as history:
             response = self.client.get("/api/network-history?hours=6&hours=24")
             self.assertEqual(response.status_code, 400)
             history.report.assert_not_called()
 
     def test_unavailable_recorder_is_503_not_old_healthy_state(self):
-        with mock.patch.object(dashboard.network_history, "report", side_effect=NetworkHistoryError("Recorder unavailable")):
+        with mock.patch.object(runtime.network_history, "report", side_effect=NetworkHistoryError("Recorder unavailable")):
             response = self.client.get("/api/network-history")
             self.assertEqual(response.status_code, 503)
             self.assertFalse(response.json["ok"])
 
     def test_incident_endpoint_is_bounded_and_rejects_extra_parameters(self):
-        with mock.patch.object(dashboard, "network_history") as history:
+        with mock.patch.object(runtime, "network_history") as history:
             history.incident.return_value = {"ok": True, "incident": {"id": "inc-123"}}
             self.assertEqual(self.client.get("/api/network-history/incidents/inc-123").status_code, 200)
             history.incident.assert_called_once_with("inc-123")
@@ -183,8 +187,8 @@ class HistoryIntegrationTests(unittest.TestCase):
                 return NetworkHistoryClient(tool=str(root / "pi/scripts/network_flight_recorder.py"), database="auto")
 
             with mock.patch.dict(os.environ, {"VANPI_NETWORK_STORAGE_CONFIG": str(configuration)}):
-                with mock.patch.object(dashboard, "network_history", reader()):
-                    client = dashboard.app.test_client()
+                with mock.patch.object(runtime, "network_history", reader()):
+                    client = dashboard_app.test_client()
                     response = client.get("/api/network-history?start=1699999999&end=1700000040")
                     self.assertEqual(response.status_code, 200, response.json)
                     self.assertEqual(response.json["counts"], {"events": 2, "incidents": 1})
@@ -204,13 +208,13 @@ class HistoryIntegrationTests(unittest.TestCase):
                 status = json.loads(status_path.read_text())
                 status.update(mode="flash", active_database=str(flash_root / "events.sqlite3"))
                 status_path.write_text(json.dumps(status))
-                with mock.patch.object(dashboard, "network_history", reader()):
-                    failed = dashboard.app.test_client().get("/api/network-history")
+                with mock.patch.object(runtime, "network_history", reader()):
+                    failed = dashboard_app.test_client().get("/api/network-history")
                     self.assertEqual(failed.status_code, 503)
                     self.assertFalse(failed.json["ok"])
                 configuration.unlink()
-                with mock.patch.object(dashboard, "network_history", reader()):
-                    missing = dashboard.app.test_client().get("/api/network-history")
+                with mock.patch.object(runtime, "network_history", reader()):
+                    missing = dashboard_app.test_client().get("/api/network-history")
                     self.assertEqual(missing.status_code, 503)
 
     def test_actual_cli_report_and_incident_export_through_flask(self):
@@ -230,8 +234,8 @@ class HistoryIntegrationTests(unittest.TestCase):
             store.close()
             before = database.stat().st_mtime_ns
             reader = NetworkHistoryClient(tool=str(root / "pi/scripts/network_flight_recorder.py"), database=str(database))
-            with mock.patch.object(dashboard, "network_history", reader):
-                client = dashboard.app.test_client()
+            with mock.patch.object(runtime, "network_history", reader):
+                client = dashboard_app.test_client()
                 response = client.get("/api/network-history?start=1699999999&end=1700000040&device=fixture-router")
                 self.assertEqual(response.status_code, 200, response.json)
                 report = response.json

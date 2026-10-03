@@ -20,6 +20,7 @@ FIXTURE_MODULES = {
     "pi/apps/audiobooks": ("audiobook_server.py",),
     "pi/apps/bme280": ("bme280_mqtt.py", "bme280_testread.py"),
     "pi/apps/van_dashboard": ("van_dashboard.py", "react_dashboard_preview.py"),
+    "pi/apps/van_dashboard/routes": ("__init__.py", "common.py"),
     "pi/apps/video_library": ("video_library_server.py",),
     "pi/scripts/python": ("ip_info.py", "vlc_property.py"),
     "shared/python": ("shared_tool.py", "sonos_tasks.py"),
@@ -667,6 +668,47 @@ class PythonDeploymentTests(unittest.TestCase):
                 self._install(plan, repo, root, "update", services=self._services())
             self.assertEqual(os.readlink(current), before)
             self.assertEqual(sorted(path.name for path in releases.iterdir()), [])
+
+    def test_receiver_refuses_symlinked_release_directories(self):
+        with self.fixture() as repo:
+            plan = deployment.build_plan(repo)
+            for component in ("root", "releases", "release"):
+                with self.subTest(component=component), tempfile.TemporaryDirectory() as name:
+                    base = Path(name)
+                    root = base / "packages"
+                    outside = base / "outside"
+                    outside.mkdir()
+                    if component == "root":
+                        root.symlink_to(outside, target_is_directory=True)
+                    else:
+                        root.mkdir()
+                        if component == "releases":
+                            (root / "releases").symlink_to(outside, target_is_directory=True)
+                        else:
+                            (root / "releases").mkdir()
+                            (root / "releases" / plan["release"]).symlink_to(outside, target_is_directory=True)
+                    with self.assertRaises(ValueError):
+                        self._install(plan, repo, root, "stage")
+                    self.assertEqual(list(outside.iterdir()), [])
+                    self.assertFalse((root / "current").exists())
+
+    def test_blueprint_changes_restart_but_unrelated_initializers_do_not(self):
+        with self.fixture() as repo, tempfile.TemporaryDirectory() as name:
+            root = Path(name) / "packages"
+            services = self._services()
+            self._install(deployment.build_plan(repo), repo, root, "activate", services=services)
+            for relative, expected in (
+                ("shared/__init__.py", []),
+                ("pi/scripts/__init__.py", []),
+                ("pi/apps/van_dashboard/routes/common.py", [deployment.UNIT]),
+            ):
+                with self.subTest(relative=relative):
+                    services.restart_calls.clear()
+                    path = repo / relative
+                    path.write_text(path.read_text() + "CHANGED = True\n")
+                    result = self._install(deployment.build_plan(repo), repo, root, "update", services=services)
+                    self.assertEqual(result["restarted"], expected)
+                    self.assertEqual(services.restart_calls, expected)
 
     def test_legacy_flatten_only_updates_flat_safe_files_and_active_changed_services(self):
         with self.fixture() as repo, tempfile.TemporaryDirectory() as name:
