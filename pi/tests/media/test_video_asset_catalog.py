@@ -533,6 +533,74 @@ class V1ReconciliationTests(CatalogFixture):
         insert_v1_row(connection)
         connection.close()
 
+    def test_reconcile_transaction_ownership_success_rollback_and_caller_reuse(self):
+        catalog = self.catalog()
+        statements = []
+        catalog.connection.set_trace_callback(statements.append)
+        self.addCleanup(catalog.connection.set_trace_callback, None)
+
+        first = catalog.reconcile_v1_progress(observed_at=self.clock())
+        self.assertEqual(first["applied"], 1)
+        self.assertEqual(
+            [
+                statement.split()[0].upper()
+                for statement in statements
+                if statement.split()[0].upper() in {"BEGIN", "COMMIT", "ROLLBACK"}
+            ],
+            ["BEGIN", "COMMIT"],
+        )
+        asset = catalog.resolve_legacy_key("episode:show:s1:e1")
+        import_count = catalog.connection.execute(
+            "SELECT COUNT(*) FROM video_v2_import_runs"
+        ).fetchone()[0]
+
+        catalog.connection.execute(
+            "UPDATE progress SET position = -1, title = 'invalid' WHERE media_key = ?",
+            ("episode:show:s1:e1",),
+        )
+        catalog.connection.commit()
+        statements.clear()
+        with self.assertRaisesRegex(ValueError, "legacy position"):
+            catalog.reconcile_v1_progress(observed_at=self.clock.advance())
+        self.assertEqual(
+            [
+                statement.split()[0].upper()
+                for statement in statements
+                if statement.split()[0].upper() in {"BEGIN", "COMMIT", "ROLLBACK"}
+            ],
+            ["BEGIN", "ROLLBACK"],
+        )
+        self.assertEqual(
+            catalog.connection.execute(
+                "SELECT COUNT(*) FROM video_v2_import_runs"
+            ).fetchone()[0],
+            import_count,
+        )
+        self.assertEqual(catalog.get_asset_state(asset)["position"], 125.5)
+
+        catalog.connection.execute(
+            "UPDATE progress SET position = 777, title = 'caller owned' "
+            "WHERE media_key = ?",
+            ("episode:show:s1:e1",),
+        )
+        catalog.connection.commit()
+        statements.clear()
+        with catalog.transaction() as db:
+            reused = catalog.reconcile_v1_progress(
+                observed_at=self.clock.advance(), connection=db
+            )
+            self.assertEqual(reused["applied"], 1)
+            self.assertTrue(db.in_transaction)
+        self.assertEqual(
+            [
+                statement.split()[0].upper()
+                for statement in statements
+                if statement.split()[0].upper() in {"BEGIN", "COMMIT", "ROLLBACK"}
+            ],
+            ["BEGIN", "COMMIT"],
+        )
+        self.assertEqual(catalog.get_asset_state(asset)["position"], 777)
+
     def test_repeated_snapshots_old_server_updates_and_deletion_round_trip(self):
         catalog = self.catalog()
         first = catalog.reconcile_v1_progress(observed_at=self.clock())

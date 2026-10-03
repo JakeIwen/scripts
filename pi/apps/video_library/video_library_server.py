@@ -25,12 +25,8 @@ from urllib.parse import unquote, urlsplit
 from flask import Flask, jsonify, render_template, request
 
 if __package__:
-    from .catalog import (
-        CatalogConflict,
-        CatalogError,
-        MediaAssetCatalog,
-        ensure_pre_v2_backup,
-    )
+    from .catalog import MediaAssetCatalog, ensure_pre_v2_backup
+    from .catalog_values import CatalogConflict, CatalogError
     from .config import (
         CATEGORY_PRIORITY,
         DBUS_PROPERTIES,
@@ -69,8 +65,8 @@ if __package__:
         VLC_FIXED_VOLUME,
         WATCHED_FRACTION,
         XSET,
-        _UNSET,
     )
+    from .legacy_progress import ProgressStore, _UNSET
     from .library import MediaLibrary, default_sources
     from .media_models import LibrarySource, MediaItem, Show, public_progress, seconds_text
     from .naming import (
@@ -120,7 +116,7 @@ if __package__:
         reject_cross_origin_mutations,
         require_loopback_peer,
     )
-    from .service import ProgressStore, VideoService, active_service
+    from .service import VideoService, active_service
     from .video_qbittorrent import (
         QbittorrentAuthenticationError,
         QbittorrentClient,
@@ -132,12 +128,8 @@ if __package__:
         TorrentFileIdentity,
     )
 else:  # Direct execution from the Pi's flat deployment directory.
-    from catalog import (  # type: ignore[no-redef]
-        CatalogConflict,
-        CatalogError,
-        MediaAssetCatalog,
-        ensure_pre_v2_backup,
-    )
+    from catalog import MediaAssetCatalog, ensure_pre_v2_backup  # type: ignore[no-redef]
+    from catalog_values import CatalogConflict, CatalogError  # type: ignore[no-redef]
     from config import (  # type: ignore[no-redef]
         CATEGORY_PRIORITY,
         DBUS_PROPERTIES,
@@ -176,8 +168,8 @@ else:  # Direct execution from the Pi's flat deployment directory.
         VLC_FIXED_VOLUME,
         WATCHED_FRACTION,
         XSET,
-        _UNSET,
     )
+    from legacy_progress import ProgressStore, _UNSET  # type: ignore[no-redef]
     from library import MediaLibrary, default_sources  # type: ignore[no-redef]
     from media_models import LibrarySource, MediaItem, Show, public_progress, seconds_text  # type: ignore[no-redef]
     from naming import (  # type: ignore[no-redef]
@@ -227,7 +219,7 @@ else:  # Direct execution from the Pi's flat deployment directory.
         reject_cross_origin_mutations,
         require_loopback_peer,
     )
-    from service import ProgressStore, VideoService, active_service  # type: ignore[no-redef]
+    from service import VideoService, active_service  # type: ignore[no-redef]
     from video_qbittorrent import (  # type: ignore[no-redef]
         QbittorrentAuthenticationError,
         QbittorrentClient,

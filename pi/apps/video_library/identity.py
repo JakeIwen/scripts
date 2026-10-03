@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import sqlite3
 from functools import wraps
@@ -11,7 +10,7 @@ from typing import Any, Callable
 
 if __package__:
     from .catalog import CatalogConflict, CatalogError
-    from .config import QBITTORRENT_FINAL_ROOTS, QBITTORRENT_TEMP_ROOTS
+    from .config import QBITTORRENT_TEMP_ROOTS
     from .media_models import MediaItem
     from .naming import clean_name
     from .video_qbittorrent import (
@@ -24,10 +23,7 @@ if __package__:
     )
 else:
     from catalog import CatalogConflict, CatalogError  # type: ignore[no-redef]
-    from config import (  # type: ignore[no-redef]
-        QBITTORRENT_FINAL_ROOTS,
-        QBITTORRENT_TEMP_ROOTS,
-    )
+    from config import QBITTORRENT_TEMP_ROOTS  # type: ignore[no-redef]
     from media_models import MediaItem  # type: ignore[no-redef]
     from naming import clean_name  # type: ignore[no-redef]
     from video_qbittorrent import (  # type: ignore[no-redef]
@@ -315,99 +311,7 @@ class CatalogIdentityMixin:
             return "unavailable"
         return "torrent" if asset and asset.get("asset_kind") == "torrent" else "catalog"
 
-    def _legacy_path_evidence(
-        self,
-        *,
-        requested_path: str,
-        normalized_path: str,
-        item: MediaItem | None,
-        torrent: ResolvedTorrentFile | None,
-    ) -> set[str]:
-        evidence = {requested_path, normalized_path}
-        candidates = [requested_path, normalized_path]
-        if item is not None:
-            evidence.update((item.path, item.real_path, item.rel_path, *item.aliases))
-            candidates.extend((item.path, item.real_path))
-        if torrent is not None:
-            torrent_paths = (
-                torrent.matched_path,
-                *torrent.temporary_paths,
-                *torrent.final_paths,
-            )
-            evidence.update(torrent_paths)
-            candidates.extend(torrent_paths)
 
-        temp_roots = tuple(getattr(self.qbittorrent, "temp_roots", ()) or ())
-        temp_roots = tuple(dict.fromkeys((*temp_roots, *QBITTORRENT_TEMP_ROOTS)))
-        final_roots = tuple(getattr(self.qbittorrent, "final_roots", ()) or ())
-        final_roots = tuple(dict.fromkeys((*final_roots, *QBITTORRENT_FINAL_ROOTS)))
-        for candidate in candidates:
-            candidate_path = os.path.abspath(candidate)
-            for marker, roots in (("incomplete", temp_roots), (None, final_roots)):
-                for root in roots:
-                    root_path = os.path.abspath(os.fspath(root))
-                    try:
-                        if os.path.commonpath((candidate_path, root_path)) != root_path:
-                            continue
-                        relative = os.path.relpath(candidate_path, root_path)
-                    except (OSError, TypeError, ValueError):
-                        continue
-                    if relative == os.curdir or relative.startswith(os.pardir):
-                        continue
-                    prefix = f"/{marker}" if marker else ""
-                    evidence.add(f"{prefix}/{relative}".replace(os.sep, "/"))
-        return {value.replace(os.sep, "/") for value in evidence if value}
-
-    def _apply_deferred_legacy_positions(
-        self,
-        asset_id: str,
-        work_id: str | None,
-        *,
-        requested_path: str,
-        normalized_path: str,
-        item: MediaItem | None,
-        torrent: ResolvedTorrentFile | None,
-    ) -> None:
-        """Resolve raw legacy rows only when exact path evidence becomes known."""
-
-        if self.catalog is None:
-            return
-        evidence = self._legacy_path_evidence(
-            requested_path=requested_path,
-            normalized_path=normalized_path,
-            item=item,
-            torrent=torrent,
-        )
-        for record in self.catalog.list_import_records(action="unresolved"):
-            if record.get("source_kind") != "legacy-vlc-position-log":
-                continue
-            try:
-                raw = json.loads(record.get("raw_json") or "{}")
-                legacy_path = str(raw["relative_path"]).replace(os.sep, "/")
-                micros = int(raw["position_microseconds"])
-            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-                continue
-            if legacy_path not in evidence:
-                continue
-            applied = self.catalog.apply_imported_playhead(
-                asset_id,
-                position=micros / 1_000_000,
-                source_updated=float(
-                    record.get("source_updated") or record.get("imported_at") or self.clock()
-                ),
-                event_key=f"legacy-raw:{record['import_record_id']}",
-                source=str(record["source_ref"]),
-            )
-            self.catalog.record_import(
-                str(record["import_id"]),
-                source_key=str(record["source_key"]),
-                action="applied" if applied else "matched-stale",
-                content_digest=record.get("content_digest"),
-                source_updated=record.get("source_updated"),
-                asset_id=asset_id,
-                work_id=work_id,
-                raw=raw,
-            )
 
     def _path_is_probably_incomplete(self, path: str) -> bool:
         """Fail safe on partial media even when qBittorrent is unavailable.
@@ -429,73 +333,7 @@ class CatalogIdentityMixin:
                 continue
         return "incomplete" in {part.casefold() for part in Path(normalized).parts}
 
-    def _legacy_progress_for_asset(
-        self, asset_id: str, work_id: str | None = None
-    ) -> dict[str, Any] | None:
-        if self.catalog is None:
-            return None
-        if work_id is None:
-            asset = self.catalog.lookup_asset(asset_id)
-            work_id = str(asset["work_id"]) if asset and asset.get("work_id") else None
-        work = self.catalog.get_work_watch_state(work_id) if work_id else None
-        state = self.catalog.get_asset_state(asset_id)
-        if state is None and work is None:
-            return None
-        state = state or {
-            "position": 0,
-            "duration": 0,
-            "completed": 0,
-            "play_count": 0,
-            "updated_at": float((work or {}).get("updated_at") or self.clock()),
-        }
-        override = work.get("watched_override") if work else None
-        finished = (
-            bool(work.get("watched"))
-            if work is not None
-            else bool(state.get("completed"))
-        )
-        return {
-            "position": float(state.get("position") or 0),
-            "duration": float(state.get("duration") or 0),
-            "updated": float(
-                max(state.get("updated_at") or 0, (work or {}).get("updated_at") or 0)
-            ),
-            "finished": int(finished),
-            "finished_override": override,
-            "play_count": int(
-                state.get("play_count") or (work or {}).get("play_count") or 0
-            ),
-        }
 
-    def _project_item_progress(
-        self,
-        item: MediaItem,
-        *,
-        connection: sqlite3.Connection | None = None,
-    ) -> dict[str, Any] | None:
-        if self.catalog is None or item.asset_id is None:
-            return self.store.get(item.key)
-        progress = self._legacy_progress_for_asset(item.asset_id, item.work_id)
-        if progress is None:
-            return self.store.get(item.key)
-        self.catalog.project_v1_progress(
-            item.key,
-            position=progress["position"],
-            duration=progress["duration"],
-            updated=progress["updated"],
-            finished=bool(progress["finished"]),
-            finished_override=(
-                None
-                if progress.get("finished_override") is None
-                else bool(progress["finished_override"])
-            ),
-            play_count=progress["play_count"],
-            title=item.title,
-            rel_path=item.rel_path,
-            asset_id=item.asset_id,
-            connection=connection,
-        )
-        return {**progress, "title": item.title, "rel_path": item.rel_path}
 
     def _bind_library_item(self, item: MediaItem) -> None:
         if self.catalog is None:

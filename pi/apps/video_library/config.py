@@ -125,5 +125,3 @@ DEFAULT_FAVORITES = (
     ("Metalocalypse", True),
     ("Gospel", True),
 )
-
-_UNSET = object()

@@ -264,53 +264,6 @@ class PlaybackMixin:
         self.playback.last_saved_at = now
         self.playback.last_snapshot = dict(snapshot)
 
-    def _record_legacy_snapshot(
-        self, snapshot: dict[str, Any], *, force: bool = False
-    ) -> MediaItem | None:
-        """Original parser-key tracker retained as the instant rollback model."""
-
-        item = self.library.item_for_path(snapshot.get("path"))
-        if not item or not snapshot.get("available"):
-            return item
-        if snapshot.get("state") not in ("PLAYING", "PAUSED", "PAUSED_PLAYBACK", "STOPPED"):
-            return item
-        position = float(snapshot.get("position") or 0)
-        duration = float(snapshot.get("duration") or 0)
-        if position or duration:
-            now = self.clock()
-            previous = self.store.get(item.key)
-            automatic_finished = self._is_finished(position, duration)
-            override = (previous or {}).get("finished_override")
-            finished = bool(override) if override is not None else automatic_finished
-            changed_item = item.key != self.playback.last_saved_key
-            changed_position = (
-                self.playback.last_saved_position is None
-                or abs(position - self.playback.last_saved_position) >= 1
-            )
-            changed_duration = (
-                self.playback.last_saved_duration is None
-                or abs(duration - self.playback.last_saved_duration) >= 1
-            )
-            changed_state = str(snapshot.get("state") or "") != self.playback.last_saved_state
-            became_finished = finished and not (previous or {}).get("finished")
-            due = now < self.playback.last_saved_at or now - self.playback.last_saved_at >= 10
-            if force or changed_item or changed_state or became_finished or (
-                due and (changed_position or changed_duration)
-            ):
-                self.store.record(
-                    item.key,
-                    position=position,
-                    duration=duration,
-                    finished=finished,
-                    title=item.title,
-                    rel_path=item.rel_path,
-                )
-                self.playback.last_saved_key = item.key
-                self.playback.last_saved_position = position
-                self.playback.last_saved_duration = duration
-                self.playback.last_saved_state = str(snapshot.get("state") or "")
-                self.playback.last_saved_at = now
-        return item
 
     def _record_snapshot(
         self, snapshot: dict[str, Any], *, force: bool = False
