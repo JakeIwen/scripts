@@ -279,7 +279,8 @@ def install_release(stream, root, mode, services=None, flat_root=FLAT_ROOT):
         new_unit = (release / f'pi/services/{UNIT}').read_bytes()
         old_manifest = json.loads((old / 'manifest.json').read_bytes()) if old else {}
         pending = root / 'pending-restart'
-        changed = (pending.exists() or live_unit != new_unit or
+        retry_pending = pending.exists()
+        changed = (retry_pending or live_unit != new_unit or
                    old_manifest.get('services', {}).get(UNIT) != manifest['services'][UNIT])
         if not (root / 'activated.json').exists() and not (root / 'pre-package-units').exists():
             if b'/home/pi/scripts/python-automation/van_dashboard.py' not in live_unit:
@@ -292,13 +293,15 @@ def install_release(stream, root, mode, services=None, flat_root=FLAT_ROOT):
                 replace_link(root, 'previous', 'releases/' + old.name)
             replace_link(root, 'current', 'releases/' + release_id)
         # A restart failure is explicit, not silently rolled back across safety hooks.
-        if live_unit != new_unit:
+        if live_unit != new_unit or retry_pending:
+            # A previous daemon-reload may have failed after the unit copy.
             services.install_unit(UNIT, release / f'pi/services/{UNIT}')
-        if changed:
+        restarted = changed and (mode == 'activate' or retry_pending or services.is_active(UNIT))
+        if restarted:
             services.restart(UNIT)
         (root / 'activated.json').write_bytes(encoded({'release': release_id}))
         pending.unlink(missing_ok=True)
-        return {'release': str(release), 'restarted': [UNIT] if changed else []}
+        return {'release': str(release), 'restarted': [UNIT] if restarted else []}
 
 
 def main(argv=None):

@@ -17,6 +17,7 @@ RestartSec=5
 User=pi
 SupplementaryGroups=gpio
 Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PYTHONPATH=/home/pi/scripts/python-packages/current:/home/pi/van_compute/scripts
 Environment=VAN_DASHBOARD_FRONTEND_ROOT=/home/pi/scripts/van-dashboard-preview/current
 # Native Time Machine creation selected this name during the 64 MiB migration.
