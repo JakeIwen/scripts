@@ -26,6 +26,8 @@ Controller implementations are grouped by capability:
 - `van_dashboard_sonos.py`: Sonos grouping, transport, volume, and album art.
 - `van_dashboard_network.py`: cached connectivity, OpenWrt clients, UBNT Wi-Fi,
   and speed tests.
+- `van_dashboard_projects.py`: validated user-added project links in StateStore;
+  GET/POST `/api/hosted-projects` shares additions across dashboard devices.
 - `van_dashboard_usb.py`: USB inventory and guarded hub/port control.
 - `van_dashboard_storage.py`: requested disk/torrent policy.
 - `van_dashboard_backups.py`: backup evidence and guarded manual jobs.

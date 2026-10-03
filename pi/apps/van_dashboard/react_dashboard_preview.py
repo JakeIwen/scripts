@@ -43,6 +43,7 @@ MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 # control's confirmation, single-flight, reconciliation, and failure behavior.
 ALLOWED_MUTATIONS: frozenset[tuple[str, str]] = frozenset(
     {
+        ("POST", "/api/hosted-projects"),
         # Reversible media and lighting controls. Each corresponding React
         # feature is single-flight and performs an authoritative refresh after
         # both successful and ambiguous outcomes.

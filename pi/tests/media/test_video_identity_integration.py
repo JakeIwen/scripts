@@ -19,6 +19,7 @@ from unittest import mock
 
 from pi.apps.video_library import video_asset_catalog as identity
 from pi.apps.video_library import video_library_server as video
+from pi.apps.video_library import routes
 from pi.apps.video_library import video_qbittorrent as qb
 
 
@@ -498,7 +499,7 @@ class VideoIdentityIntegrationTests(unittest.TestCase):
         self.assertAlmostEqual(catalog.get_asset_state(asset_id)["position"], 125.0)
         self.assertAlmostEqual(store.get(item.key)["position"], 125.0)
 
-        with mock.patch.object(video, "active_service", return_value=service):
+        with mock.patch.object(routes, "active_service", return_value=service):
             video.app.config.update(TESTING=True)
             client = video.app.test_client()
             watched = client.post(
@@ -600,7 +601,7 @@ class LocalOnlyIdentityRouteTests(unittest.TestCase):
         self.local_file.write_bytes(b"private video")
         self.fake_qb.set_path(self.local_file, None)
         self.service_patch = mock.patch.object(
-            video, "active_service", return_value=self.service
+            routes, "active_service", return_value=self.service
         )
         self.service_patch.start()
         self.addCleanup(self.service_patch.stop)

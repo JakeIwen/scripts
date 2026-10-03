@@ -5,6 +5,8 @@ import unittest
 from unittest import mock
 
 from pi.scripts import system_event_monitor as monitor
+from pi.scripts.system_monitor import crash
+from pi.scripts.system_monitor import report as monitor_report
 
 
 class ThrottleDecodeTests(unittest.TestCase):
@@ -382,7 +384,7 @@ class StoreAndDiagnosisTests(unittest.TestCase):
         ).fetchall()
         all_events = [monitor.event_public(row) for row in rows]
         counts = monitor.collections.Counter(e["kind"] for e in all_events)
-        with mock.patch.object(monitor, "event_public", wraps=monitor.event_public) as public:
+        with mock.patch.object(monitor_report, "event_public", wraps=monitor.event_public) as public:
             report = monitor.build_report(self.store, hours=1, limit=1, now=self.now)
         self.assertEqual(public.call_count, 1)
         self.assertEqual(report["diagnosis"], monitor.build_diagnosis(all_events, current))
@@ -617,10 +619,10 @@ class FlightRecorderTests(unittest.TestCase):
             sampler = mock.Mock()
             sampler.sample.return_value = current_sample
             output = os.path.join(tempdir, "reports")
-            with mock.patch.object(monitor, "build_crash_report", return_value=report), mock.patch.object(
-                monitor, "ResourceSampler", return_value=sampler
-            ), mock.patch.object(monitor, "collect_usb_state", return_value=[]), mock.patch.object(
-                monitor, "collect_mount_state", return_value=[]
+            with mock.patch.object(crash, "build_crash_report", return_value=report), mock.patch.object(
+                crash, "ResourceSampler", return_value=sampler
+            ), mock.patch.object(crash, "collect_usb_state", return_value=[]), mock.patch.object(
+                crash, "collect_mount_state", return_value=[]
             ):
                 captured = monitor.capture_previous_boot(store, output)
             self.assertTrue(captured["saved"])

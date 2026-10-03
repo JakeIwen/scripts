@@ -13,6 +13,8 @@ import sqlite3
 import unittest
 from unittest import mock
 
+from pi.apps.video_library import identity
+from pi.apps.video_library import service as video_service
 from pi.apps.video_library import video_library_server as video
 from pi.apps.video_library import video_qbittorrent as qb
 from pi.apps.video_library.video_asset_catalog import MediaAssetCatalog
@@ -260,7 +262,7 @@ class PlaybackProjectionOrderingTests(unittest.TestCase):
         service.bookmark()
         player.snapshot_value.update(state="STOPPED")
         service.bookmark()
-        self.assertIsNone(service.active_session_id)
+        self.assertIsNone(service.playback.active_session_id)
 
         link.unlink()
         self.assertTrue(service.rescan())
@@ -276,8 +278,8 @@ class PlaybackProjectionOrderingTests(unittest.TestCase):
 
         launched = service.play_local(str(target), restart=True)
         self.assertTrue(launched["tracked"])
-        self.assertEqual(service.active_asset_id, item.asset_id)
-        self.assertIsNone(service.active_item)
+        self.assertEqual(service.playback.active_asset_id, item.asset_id)
+        self.assertIsNone(service.playback.active_item)
         self.assertEqual(catalog.get_asset_state(item.asset_id)["position"], 0)
 
         report = catalog.reconcile_v1_progress(observed_at=fixture.clock())
@@ -524,7 +526,7 @@ class TransitionFailureRegressionTests(unittest.TestCase):
             player.launch_calls[-1]["position"], 456 - video.RESUME_REWIND
         )
         self.assertEqual(len(catalog.list_import_records(action="applied")), 1)
-        asset_id = service.active_asset_id
+        asset_id = service.playback.active_asset_id
         legacy_events = [
             event
             for event in catalog.list_events(asset_id)
@@ -647,7 +649,7 @@ class TransitionFailureRegressionTests(unittest.TestCase):
             catalog.lookup_torrent_asset(
                 client_id="vanpi", torrent_id=TORRENT_ID, file_index=0
             ),
-            service.active_asset_id,
+            service.playback.active_asset_id,
         )
 
     def test_catalog_failure_during_resume_lookup_still_launches(self) -> None:
@@ -685,8 +687,8 @@ class TransitionFailureRegressionTests(unittest.TestCase):
             qbittorrent=qbittorrent
         )
         service.play_local(str(incomplete), restart=True)
-        asset_id = service.active_asset_id
-        work_id = service.active_work_id
+        asset_id = service.playback.active_asset_id
+        work_id = service.playback.active_work_id
         player.snapshot_value.update(
             path=str(incomplete), position=95, duration=100, state="PAUSED"
         )
@@ -786,11 +788,11 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
 
     def _start_production_service(self) -> video.VideoService:
         with (
-            mock.patch.object(video, "STATE_PATH", str(self.fixture.database)),
-            mock.patch.object(video, "QbittorrentClient", return_value=None),
-            mock.patch.object(video, "VlcController", return_value=object()),
-            mock.patch.object(video, "SonosVolumeController", return_value=None),
-            mock.patch.object(video, "_service", None),
+            mock.patch.object(video_service, "STATE_PATH", str(self.fixture.database)),
+            mock.patch.object(video_service, "QbittorrentClient", return_value=None),
+            mock.patch.object(video_service, "VlcController", return_value=object()),
+            mock.patch.object(video_service, "SonosVolumeController", return_value=None),
+            mock.patch.object(video_service, "_service", None),
         ):
             return video.active_service()
 
@@ -862,13 +864,13 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
             "transient startup failure"
         )
         with (
-            mock.patch.object(video, "STATE_PATH", str(self.fixture.database)),
-            mock.patch.object(video, "ensure_pre_v2_backup", return_value=None),
-            mock.patch.object(video, "MediaAssetCatalog", return_value=fake_catalog),
-            mock.patch.object(video, "QbittorrentClient", return_value=None),
-            mock.patch.object(video, "VlcController", return_value=object()),
-            mock.patch.object(video, "SonosVolumeController", return_value=None),
-            mock.patch.object(video, "_service", None),
+            mock.patch.object(video_service, "STATE_PATH", str(self.fixture.database)),
+            mock.patch.object(video_service, "ensure_pre_v2_backup", return_value=None),
+            mock.patch.object(video_service, "MediaAssetCatalog", return_value=fake_catalog),
+            mock.patch.object(video_service, "QbittorrentClient", return_value=None),
+            mock.patch.object(video_service, "VlcController", return_value=object()),
+            mock.patch.object(video_service, "SonosVolumeController", return_value=None),
+            mock.patch.object(video_service, "_service", None),
         ):
             service = video.active_service()
         self.addCleanup(service.store.connection.close)
@@ -893,13 +895,13 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
             {"available": True},
         ]
         with (
-            mock.patch.object(video, "STATE_PATH", str(self.fixture.database)),
-            mock.patch.object(video, "ensure_pre_v2_backup", return_value=None),
-            mock.patch.object(video, "MediaAssetCatalog", return_value=fake_catalog),
-            mock.patch.object(video, "QbittorrentClient", return_value=None),
-            mock.patch.object(video, "VlcController", return_value=FakePlayer()),
-            mock.patch.object(video, "SonosVolumeController", return_value=None),
-            mock.patch.object(video, "_service", None),
+            mock.patch.object(video_service, "STATE_PATH", str(self.fixture.database)),
+            mock.patch.object(video_service, "ensure_pre_v2_backup", return_value=None),
+            mock.patch.object(video_service, "MediaAssetCatalog", return_value=fake_catalog),
+            mock.patch.object(video_service, "QbittorrentClient", return_value=None),
+            mock.patch.object(video_service, "VlcController", return_value=FakePlayer()),
+            mock.patch.object(video_service, "SonosVolumeController", return_value=None),
+            mock.patch.object(video_service, "_service", None),
         ):
             service = video.active_service()
         self.addCleanup(service.store.connection.close)
@@ -925,17 +927,17 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
             1,
         ]
         with (
-            mock.patch.object(video, "STATE_PATH", str(self.fixture.database)),
-            mock.patch.object(video, "ensure_pre_v2_backup", return_value=None),
-            mock.patch.object(video, "MediaAssetCatalog", return_value=fake_catalog),
+            mock.patch.object(video_service, "STATE_PATH", str(self.fixture.database)),
+            mock.patch.object(video_service, "ensure_pre_v2_backup", return_value=None),
+            mock.patch.object(video_service, "MediaAssetCatalog", return_value=fake_catalog),
             mock.patch.object(
-                video,
+                video_service,
                 "QbittorrentClient",
                 side_effect=qb.QbittorrentUnavailable("unrelated qB warning"),
             ),
-            mock.patch.object(video, "VlcController", return_value=FakePlayer()),
-            mock.patch.object(video, "SonosVolumeController", return_value=None),
-            mock.patch.object(video, "_service", None),
+            mock.patch.object(video_service, "VlcController", return_value=FakePlayer()),
+            mock.patch.object(video_service, "SonosVolumeController", return_value=None),
+            mock.patch.object(video_service, "_service", None),
         ):
             service = video.active_service()
         self.addCleanup(service.store.connection.close)
@@ -994,7 +996,7 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
         path.write_bytes(b"clip")
         service, _library, _store, catalog, player = self.fixture.stack()
         service.play_local(str(path), restart=True)
-        session_id = service.active_session_id
+        session_id = service.playback.active_session_id
         player.snapshot_value = {
             "available": False,
             "state": "OFFLINE",
@@ -1009,12 +1011,12 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
         ):
             service.bookmark()
 
-        self.assertEqual(service.active_session_id, session_id)
+        self.assertEqual(service.playback.active_session_id, session_id)
         self.assertIsNone(catalog.get_session(session_id)["ended_at"])
 
         service.bookmark()
 
-        self.assertIsNone(service.active_session_id)
+        self.assertIsNone(service.playback.active_session_id)
         self.assertEqual(
             catalog.get_session(session_id)["end_reason"], "player_offline"
         )
@@ -1028,8 +1030,8 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
         second_path.write_bytes(b"second")
         service, _library, store, catalog, player = self.fixture.stack()
         service.play_local(str(first_path), restart=True)
-        first_session = service.active_session_id
-        first_asset = service.active_asset_id
+        first_session = service.playback.active_session_id
+        first_asset = service.playback.active_asset_id
 
         with mock.patch.object(
             catalog,
@@ -1041,8 +1043,8 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertFalse(result["tracked"])
         self.assertEqual(player.launch_calls[-1]["paths"], [str(second_path.resolve())])
-        self.assertEqual(service.active_session_id, first_session)
-        self.assertEqual(service.active_asset_id, first_asset)
+        self.assertEqual(service.playback.active_session_id, first_session)
+        self.assertEqual(service.playback.active_asset_id, first_asset)
         self.assertIsNone(catalog.get_session(first_session)["ended_at"])
         self.assertEqual(
             store.connection.execute(
@@ -1054,8 +1056,8 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
         service.bookmark()
 
         self.assertIsNotNone(catalog.get_session(first_session)["ended_at"])
-        self.assertNotEqual(service.active_session_id, first_session)
-        self.assertEqual(service.active_asset_id, catalog.resolve_path(second_path))
+        self.assertNotEqual(service.playback.active_session_id, first_session)
+        self.assertEqual(service.playback.active_asset_id, catalog.resolve_path(second_path))
         self.assertEqual(
             store.connection.execute(
                 "SELECT COUNT(*) FROM video_v2_playback_sessions "
@@ -1073,8 +1075,8 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
         second_path.write_bytes(b"second")
         service, _library, store, catalog, player = self.fixture.stack()
         service.play_local(str(first_path), restart=True)
-        first_session = service.active_session_id
-        first_asset = service.active_asset_id
+        first_session = service.playback.active_session_id
+        first_asset = service.playback.active_asset_id
         player.snapshot_value.update(
             path=str(first_path), position=123, duration=900, state="PLAYING"
         )
@@ -1089,7 +1091,7 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
         ):
             service.bookmark()
 
-        self.assertEqual(service.active_session_id, first_session)
+        self.assertEqual(service.playback.active_session_id, first_session)
         self.assertEqual(catalog.get_asset_state(first_asset)["position"], 123)
         self.assertEqual(
             store.connection.execute(
@@ -1103,7 +1105,7 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
         second_asset = catalog.resolve_path(second_path)
         self.assertIsNotNone(catalog.get_session(first_session)["ended_at"])
         self.assertEqual(catalog.get_asset_state(first_asset)["position"], 123)
-        self.assertEqual(service.active_asset_id, second_asset)
+        self.assertEqual(service.playback.active_asset_id, second_asset)
         self.assertEqual(catalog.get_asset_state(second_asset)["position"], 700)
 
     def test_retried_explicit_launch_clears_watched_override_on_exact_adoption(
@@ -1128,15 +1130,15 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
         before = catalog.get_work_watch_state(item.work_id)
         self.assertTrue(before["watched"])
         self.assertEqual(before["watched_override"], 1)
-        self.assertIsNotNone(service.pending_explicit_launch)
+        self.assertIsNotNone(service.playback.pending_explicit_launch)
 
         service.bookmark()
 
         after = catalog.get_work_watch_state(item.work_id)
-        self.assertEqual(service.active_asset_id, item.asset_id)
+        self.assertEqual(service.playback.active_asset_id, item.asset_id)
         self.assertFalse(after["watched"])
         self.assertIsNone(after["watched_override"])
-        self.assertIsNone(service.pending_explicit_launch)
+        self.assertIsNone(service.playback.pending_explicit_launch)
 
     def test_mismatched_track_discards_pending_replay_without_clearing_override(
         self,
@@ -1161,13 +1163,13 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
             side_effect=sqlite3.OperationalError("transient replacement failure"),
         ):
             service.play(item_id=first.id, restart=True)
-        self.assertIsNotNone(service.pending_explicit_launch)
+        self.assertIsNotNone(service.playback.pending_explicit_launch)
 
         player.launch([str(second_target)])
         service.bookmark()
 
-        self.assertEqual(service.active_asset_id, second.asset_id)
-        self.assertIsNone(service.pending_explicit_launch)
+        self.assertEqual(service.playback.active_asset_id, second.asset_id)
+        self.assertIsNone(service.playback.pending_explicit_launch)
         self.assertTrue(catalog.get_work_watch_state(first.work_id)["watched"])
         self.assertEqual(
             catalog.get_work_watch_state(first.work_id)["watched_override"], 1
@@ -1175,6 +1177,165 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
         self.assertTrue(catalog.get_work_watch_state(second.work_id)["watched"])
         self.assertEqual(
             catalog.get_work_watch_state(second.work_id)["watched_override"], 1
+        )
+
+
+class CatalogDegradationAdapterTests(unittest.TestCase):
+    class Probe:
+        def __init__(self) -> None:
+            self.identity_error = None
+
+        @identity.catalog_degrades(fallback=lambda _self, _failure: "fallback")
+        def degrade(self, failure):
+            raise failure
+
+    def test_decorator_catches_only_catalog_degradation_families_and_subclasses(
+        self,
+    ) -> None:
+        class CatalogFailure(identity.CatalogError):
+            pass
+
+        class SqliteFailure(sqlite3.Error):
+            pass
+
+        class OsFailure(OSError):
+            pass
+
+        class ValueFailure(ValueError):
+            pass
+
+        families = (
+            identity.CatalogError,
+            CatalogFailure,
+            sqlite3.Error,
+            SqliteFailure,
+            OSError,
+            OsFailure,
+            ValueError,
+            ValueFailure,
+        )
+        for failure_type in families:
+            with self.subTest(failure_type=failure_type.__name__):
+                probe = self.Probe()
+                failure = failure_type("injected failure")
+
+                self.assertEqual(probe.degrade(failure), "fallback")
+                self.assertEqual(
+                    probe.identity_error,
+                    "media identity tracking degraded: injected failure",
+                )
+
+    def test_decorator_propagates_unexpected_runtime_and_key_errors(self) -> None:
+        fallback = mock.Mock(return_value="fallback")
+
+        class Probe:
+            def __init__(self) -> None:
+                self.identity_error = None
+
+            @identity.catalog_degrades(fallback=fallback)
+            def degrade(self, failure):
+                raise failure
+
+        for failure in (RuntimeError("runtime"), KeyError("key")):
+            with self.subTest(failure_type=type(failure).__name__):
+                probe = Probe()
+                with self.assertRaises(type(failure)) as raised:
+                    probe.degrade(failure)
+                self.assertIs(raised.exception, failure)
+                self.assertIsNone(probe.identity_error)
+        fallback.assert_not_called()
+
+    def test_catalog_progress_none_is_distinct_from_degradation_sentinel(self) -> None:
+        probe = identity.CatalogIdentityMixin()
+        probe.identity_error = None
+        probe._legacy_progress_for_asset = mock.Mock(return_value=None)
+        item = mock.Mock(asset_id="asset", work_id="work")
+
+        self.assertIsNone(probe._catalog_item_progress(item))
+
+        probe._legacy_progress_for_asset.side_effect = OSError("catalog offline")
+        self.assertIs(
+            probe._catalog_item_progress(item),
+            identity._CATALOG_DEGRADED,
+        )
+
+    def test_decorator_does_not_catch_fallback_exception(self) -> None:
+        fallback_failure = sqlite3.OperationalError("fallback failed")
+
+        def failed_fallback(_self, _failure):
+            raise fallback_failure
+
+        class Probe:
+            def __init__(self) -> None:
+                self.identity_error = None
+
+            @identity.catalog_degrades(fallback=failed_fallback)
+            def degrade(self, failure):
+                raise failure
+
+        probe = Probe()
+        with self.assertRaises(sqlite3.OperationalError) as raised:
+            probe.degrade(ValueError("catalog failed"))
+
+        self.assertIs(raised.exception, fallback_failure)
+        self.assertEqual(
+            probe.identity_error,
+            "media identity tracking degraded: catalog failed",
+        )
+
+    def test_snapshot_fallback_runs_while_control_lock_is_held(self) -> None:
+        class TrackingLock:
+            def __init__(self) -> None:
+                self.held = False
+
+            def __enter__(self):
+                self.held = True
+                return self
+
+            def __exit__(self, exc_type, exc, traceback) -> None:
+                self.held = False
+
+        lock = TrackingLock()
+        service = object.__new__(video.VideoService)
+        service.control_lock = lock
+        service.identity_error = None
+        service._record_snapshot_locked = mock.Mock(
+            side_effect=ValueError("catalog failed")
+        )
+        fallback_item = object()
+
+        def record_legacy(snapshot, *, force=False):
+            self.assertTrue(lock.held)
+            self.assertEqual(snapshot, {"available": True})
+            self.assertTrue(force)
+            return fallback_item
+
+        service._record_legacy_snapshot = record_legacy
+
+        self.assertIs(
+            service._record_snapshot({"available": True}, force=True),
+            fallback_item,
+        )
+        self.assertFalse(lock.held)
+
+    def test_status_store_fallback_failure_is_not_recaught(self) -> None:
+        service = object.__new__(video.VideoService)
+        service.identity_error = None
+        service._legacy_progress_for_asset = mock.Mock(
+            side_effect=ValueError("catalog failed")
+        )
+        service.store = mock.Mock()
+        store_failure = sqlite3.OperationalError("legacy store failed")
+        service.store.get.side_effect = store_failure
+        item = mock.Mock(asset_id="asset", work_id="work", key="media-key")
+
+        with self.assertRaises(sqlite3.OperationalError) as raised:
+            service._status_item_progress(item)
+
+        self.assertIs(raised.exception, store_failure)
+        self.assertEqual(
+            service.identity_error,
+            "media identity tracking degraded: catalog failed",
         )
 
 
