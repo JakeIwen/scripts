@@ -5,6 +5,7 @@ import unittest
 from unittest import mock
 
 from pi.scripts import system_event_monitor as monitor
+from pi.scripts.system_monitor import crash
 
 
 class ThrottleDecodeTests(unittest.TestCase):
@@ -617,10 +618,10 @@ class FlightRecorderTests(unittest.TestCase):
             sampler = mock.Mock()
             sampler.sample.return_value = current_sample
             output = os.path.join(tempdir, "reports")
-            with mock.patch.object(monitor, "build_crash_report", return_value=report), mock.patch.object(
-                monitor, "ResourceSampler", return_value=sampler
-            ), mock.patch.object(monitor, "collect_usb_state", return_value=[]), mock.patch.object(
-                monitor, "collect_mount_state", return_value=[]
+            with mock.patch.object(crash, "build_crash_report", return_value=report), mock.patch.object(
+                crash, "ResourceSampler", return_value=sampler
+            ), mock.patch.object(crash, "collect_usb_state", return_value=[]), mock.patch.object(
+                crash, "collect_mount_state", return_value=[]
             ):
                 captured = monitor.capture_previous_boot(store, output)
             self.assertTrue(captured["saved"])
