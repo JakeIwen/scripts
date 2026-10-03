@@ -22,7 +22,8 @@ UNIT = 'van-dashboard.service'
 # Only immediate Python modules in these reviewed directories are inputs.
 MODULE_DIRS = (
     'pi/apps/audiobooks', 'pi/apps/bme280', 'pi/apps/van_dashboard',
-    'pi/apps/van_dashboard/routes', 'pi/apps/video_library', 'pi/scripts/python', 'shared/python',
+    'pi/apps/van_dashboard/routes', 'pi/apps/video_library',
+    'pi/apps/video_library/players', 'pi/scripts/python', 'shared/python',
 )
 INITIALIZERS = ('pi/__init__.py', 'pi/apps/__init__.py',
                 'pi/scripts/__init__.py', 'shared/__init__.py')

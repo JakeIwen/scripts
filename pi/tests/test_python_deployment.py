@@ -23,6 +23,7 @@ FIXTURE_MODULES = {
     "pi/apps/van_dashboard": ("van_dashboard.py", "react_dashboard_preview.py"),
     "pi/apps/van_dashboard/routes": ("__init__.py", "common.py"),
     "pi/apps/video_library": ("video_library_server.py",),
+    "pi/apps/video_library/players": ("vlc_player.py", "sonos_volume.py"),
     "pi/scripts/python": ("ip_info.py", "vlc_property.py"),
     "shared/python": ("shared_tool.py", "sonos_tasks.py"),
 }
@@ -799,6 +800,36 @@ class PythonDeploymentTests(unittest.TestCase):
             )
             self.assertEqual(result["restarted"], ["audiobooks.service"])
             self.assertEqual(services.restart_calls, ["audiobooks.service"])
+
+    def test_legacy_player_changes_restart_only_active_video_service(self):
+        with self.fixture() as repo, tempfile.TemporaryDirectory() as name:
+            root = Path(name) / "packages"
+            flat = Path(name) / "flat"
+            services = self._services()
+            self._install(deployment.build_plan(repo), repo, root, "legacy",
+                          services=services, flat_root=flat)
+            for player, active in (("vlc_player.py", True), ("sonos_volume.py", True),
+                                   ("vlc_player.py", False)):
+                with self.subTest(player=player, active=active):
+                    if not active:
+                        services.active.remove("video-library.service")
+                    services.restart_calls.clear()
+                    path = repo / "pi/apps/video_library/players" / player
+                    path.write_text(path.read_text() + "CHANGED = True\n")
+                    plan = deployment.build_plan(repo, mode="legacy")
+                    self.assertEqual(plan["manifest"]["legacy"][path.relative_to(repo).as_posix()], player)
+                    result = self._install(plan, repo, root, "legacy",
+                                           services=services, flat_root=flat)
+                    expected = ["video-library.service"] if active else []
+                    self.assertEqual(result["restarted"], expected)
+                    self.assertEqual(services.restart_calls, expected)
+                    self.assertEqual((flat / player).read_bytes(), path.read_bytes())
+
+    def test_legacy_players_share_basename_collision_guard(self):
+        with self.fixture() as repo:
+            (repo / "pi/apps/video_library/vlc_player.py").write_text("COLLISION = True\n")
+            with self.assertRaisesRegex(ValueError, "basename collision"):
+                deployment.build_plan(repo, mode="legacy")
 
     def test_legacy_refuses_symlinked_destination_directory(self):
         with self.fixture() as repo, tempfile.TemporaryDirectory() as name:
