@@ -125,6 +125,23 @@ the interface, and retain the CAN-transmission safeguards below.
 - A CAN adapter may be connected to a live vehicle network. Do not transmit CAN
   frames unless explicitly requested and the target channel is verified.
 
+## Pi Python package deployment
+
+The dashboard uses allowlisted immutable package releases managed by
+`pi/deploy_python.py`; first cutover requires explicit `--activate`. Routine
+`pi/sync_scripts.sh` resolves its own checkout, checks the activation marker,
+installs non-Python dependencies before Python restarts, and leaves compute last.
+See `pi/docs/deployment.md` for staging, restricted factory-only smoke, rollback,
+and manual retention. Keep the pre-cutover flat dashboard intact for rollback;
+`--legacy-flatten` only updates the documented flat-safe non-dashboard subset.
+
+Do not bundle `pi/van_compute/`: its coupled installer owns the separately
+imported metrics module. The existing network installers' dashboard/UI paths do
+not update a package backend; preserve their guards and use the documented
+recorder-only workflow rather than overwriting the flat fallback. Blueprints
+live under `pi/apps/van_dashboard/routes/`; mutable process controllers live in
+`runtime.py`, and the relay-off controller CLI remains independent of Flask.
+
 ## Deployment commits
 
 - After a successful deployment from this repository, commit and push the

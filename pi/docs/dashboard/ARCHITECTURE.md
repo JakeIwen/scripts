@@ -2,12 +2,19 @@
 
 [Pi documentation index](../../README.md) · [Testing](DASHBOARD_TESTING.md)
 
-The backend keeps `pi/apps/van_dashboard/van_dashboard.py` as a thin compatibility
-facade and composition root. It owns the Flask application, process-level
-singletons, HTTP routes, telemetry-service toggle wrappers, static assets, and
-the startup lifecycle. Existing tests and callers can continue importing
-`pi.apps.van_dashboard.van_dashboard` and replacing route-level singleton
-objects.
+`pi/apps/van_dashboard/van_dashboard.py` owns `create_app()` and production
+startup. It registers feature blueprints rather than re-exporting controller
+implementations. The package entry point runs that lifecycle with
+`python3 -P -m pi.apps.van_dashboard`.
+
+Controller singletons have one explicit process-level home in `runtime.py`.
+Blueprints resolve them at request time through named proxies, preserving shared
+identity and replacement semantics. Tests import controller definitions from
+their feature module and patch mutable instances at their runtime home. Factory
+calls create distinct Flask apps but intentionally share this process's hardware
+owner; they do not start its background loops. HTTP helpers live in `http.py`;
+blueprints live in `routes/`, one per existing domain. Keeping Flask out of the
+controller modules preserves the relay-off CLI's minimal dependency path.
 
 Controller implementations are grouped by capability:
 
@@ -34,38 +41,31 @@ Controller implementations are grouped by capability:
 - `van_dashboard_vonstar.py`: fixed-action, intent-only client for the private
   Vonstar Unix service; no CAN implementation or caller-selected vehicle data.
 
-The dependency direction is intentionally one-way: common and pure helpers,
-then domain controllers, then the facade. Domain modules do not import the
-facade or Flask routes. Constructors retain their command, clock, and path
-injection seams, while safety-sensitive validation and error policies remain
-inside their domain rather than being hidden behind a universal command
-abstraction.
+Controller dependency direction remains common/pure helpers, then domains, then
+runtime composition. Existing controller bodies and their command, clock and
+path injection seams are unchanged. Route functions are grouped in a matching
+`routes/<feature>.py` module; `common` serves the static shell, `cop` owns the aggregate status
+route, and `integrations` owns compute/price/system-monitor routes. The pure
+block-device module has no HTTP routes. Blueprint endpoint names are namespaced;
+URL paths and methods are unchanged.
 
-## Flat deployment compatibility
+## Package deployment
 
-`pi/sync_scripts.sh` currently flattens Python application files into
-`/home/pi/scripts/python-automation/`, and systemd executes the facade directly.
-For that reason every backend filename has a globally unique
-`van_dashboard_` prefix and every domain import explicitly supports both the
-repository package layout and deployed sibling layout. Each required module is
-also an `ExecStartPre` dependency in `van-dashboard.service`, ensuring that the
-service updater notices module-only deployments and restarts the application.
-
-The test suite exercises both import layouts. Do not introduce an unconditional
-relative import or a generic unprefixed module without updating the deployment
-contract and its flat-layout smoke test.
+[Deployment and rollback](../deployment.md) defines the allowlisted immutable
+release, explicit first activation, separate compute/frontend ownership and
+preserved pre-cutover flat fallback. Dashboard imports are package-only; there
+is no star-import facade or sys.path mutation. Tests exercise imports from a
+staged package outside the checkout. The separately installed compute metrics
+module is a test fixture dependency, not part of the package payload.
 
 ## Deliberate limits
 
-Routes remain in the facade for now. Moving them into Blueprints would require
-an explicit dependency container because tests and maintenance tools replace
-facade singletons at runtime. Controller extraction provides most of the
-readability benefit without combining that work with an application-factory or
-route-wiring redesign.
-
-Likewise, background-operation loops remain domain-specific. Their retry,
-single-flight, secret-handling, restoration, and allowed-return-code semantics
-differ enough that a shared worker superclass would obscure important behavior.
+Do not instantiate another production lifecycle beside the live hardware owner.
+The runbook's factory-only localhost smoke restricts requests to non-controller
+routes; arbitrary API requests can still have effects even without background
+loops. The existing per-domain workers retain their retry, single-flight,
+secret-handling, restoration and allowed-return-code behavior rather than being
+hidden behind a universal controller abstraction.
 
 ## React frontend
 

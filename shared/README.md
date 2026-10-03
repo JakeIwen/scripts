@@ -1,8 +1,10 @@
 # Shared code
 
 This directory is for code used on more than one host. `python/` is added to
-the MacBook's `PYTHONPATH` and is normally flattened into vanpi's deployed
-`/home/pi/scripts/python-automation/` directory by `pi/sync_scripts.sh`.
+the MacBook's `PYTHONPATH`. Pi package releases preserve its package path;
+flat-safe legacy consumers continue receiving an explicit utility subset in
+`/home/pi/scripts/python-automation/`. See
+[Pi deployment and rollback](../pi/docs/deployment.md).
 
 Compute-specific cross-host modules live under `pi/van_compute/scripts/`, not
 here. They are deployed atomically by the compute installer to

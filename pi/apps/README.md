@@ -1,9 +1,10 @@
 # Raspberry Pi applications
 
-Long-running Pi applications and their source assets live here. The Mac-side
-`pi/sync_scripts.sh` deployment script stages their Python entry points into
-vanpi's existing `/home/pi/scripts/python-automation/` directory so deployed
-service paths remain stable.
+Long-running Pi applications and their source assets live here. The dashboard
+uses allowlisted package releases under `/home/pi/scripts/python-packages/`.
+Initial cutover is explicit; the preserved flat directory remains a rollback
+source. Other apps retain their dedicated/legacy deployment contracts. See
+[package deployment and rollback](../docs/deployment.md) before deploying.
 
 - `van_dashboard/` contains the dashboard backend and browser assets served by
   `van-dashboard.service` on port `8788`.

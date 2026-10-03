@@ -1,194 +1,93 @@
 # Van Dashboard testing
 
-[Pi documentation index](../../README.md)
+[Pi documentation index](../../README.md) · [Deployment and rollback](../deployment.md)
 
-## Why Flask is required
+## Local package tests
 
-`pi/tests/dashboard/test_van_dashboard.py` imports
-`pi.apps.van_dashboard.van_dashboard`. The application imports Flask at module
-load time and its route tests use Flask's `test_client()`. Therefore the test
-module cannot even be imported by a Python environment that lacks Flask.
+Use a local venv with Flask; do not install dependencies into macOS system Python.
+The production interpreter is Python 3.11. Local verification may use a newer
+interpreter, but source must remain 3.11-compatible.
 
-Check the active Python environment with:
-
-```bash
-python3 -c 'import flask; import importlib.metadata as metadata; print(metadata.version("Flask"))'
-```
-
-The macOS system Python used during the dashboard work did not have Flask
-installed. No virtual environment was created in `scripts`, `scripts_2`, or any
-other repository checkout. Do not assume that a neighboring checkout contains
-a usable venv, and do not install Flask globally into the macOS system Python.
-
-## Option 1: stage tests temporarily on vanpi (preferred)
-
-Prefer this workflow for dashboard testing. Vanpi already has the runtime
-dependencies used by the deployed dashboard, while the temporary staging tree
-keeps tests isolated from live application files and services.
-
-The dashboard tests were commonly run with vanpi's existing Python/Flask
-installation. This did **not** create a venv, deploy dashboard files, invoke
-`sync_scripts.sh`, restart a service, or activate COP ALERT. The relevant source
-and test files were copied into a unique directory under `/tmp`, tests ran from
-that isolated tree, and the tree was deleted afterward.
-
-From the root of the checkout being tested:
+From the selected checkout:
 
 ```bash
-dashboard_test_dir="$(
-  ssh -o BatchMode=yes -o ConnectTimeout=8 pi@vanpi.lan \
-    'mktemp -d /tmp/van-dashboard-tests.XXXXXX'
-)"
-
-if [[ ! "$dashboard_test_dir" =~ ^/tmp/van-dashboard-tests\.[[:alnum:]]+$ ]]; then
-  echo "unexpected remote test path: $dashboard_test_dir" >&2
-  exit 1
-fi
-
-ssh -o BatchMode=yes pi@vanpi.lan \
-  "install -d '$dashboard_test_dir/pi/apps' \
-    '$dashboard_test_dir/pi/tests' '$dashboard_test_dir/pi/scripts/backup' \
-    '$dashboard_test_dir/pi/van_compute/scripts' \
-    '$dashboard_test_dir/pi/services'"
-
-rsync -a --exclude 'node_modules/' --exclude 'dist/' \
-  pi/apps/van_dashboard/ \
-  "pi@vanpi.lan:$dashboard_test_dir/pi/apps/van_dashboard/"
-scp -q -r pi/tests/dashboard \
-  "pi@vanpi.lan:$dashboard_test_dir/pi/tests/"
-scp -q pi/van_compute/__init__.py \
-  "pi@vanpi.lan:$dashboard_test_dir/pi/van_compute/"
-scp -q pi/van_compute/scripts/__init__.py \
-  pi/van_compute/scripts/van_compute_metrics.py \
-  "pi@vanpi.lan:$dashboard_test_dir/pi/van_compute/scripts/"
-scp -q pi/sync_scripts.sh \
-  "pi@vanpi.lan:$dashboard_test_dir/pi/"
-scp -q pi/deploy_van_dashboard_preview.sh \
-  "pi@vanpi.lan:$dashboard_test_dir/pi/"
-scp -q pi/services/van-dashboard.service \
-  "pi@vanpi.lan:$dashboard_test_dir/pi/services/"
-scp -q pi/scripts/ntfy_send.sh \
-  pi/scripts/tuya_light.sh pi/scripts/connectivity_status.py \
-  "pi@vanpi.lan:$dashboard_test_dir/pi/scripts/"
-scp -q pi/scripts/usb_watch.py \
-  "pi@vanpi.lan:$dashboard_test_dir/pi/scripts/"
-scp -q pi/scripts/backup/clone_now.sh \
-  "pi@vanpi.lan:$dashboard_test_dir/pi/scripts/backup/"
-
-ssh -o BatchMode=yes pi@vanpi.lan \
-  "cd '$dashboard_test_dir' && \
-    python3 -m unittest discover \
-      -s pi/tests/dashboard -p 'test_*.py'; \
-    dashboard_test_status=\$?; \
-    find '$dashboard_test_dir' -depth -delete; \
-    exit \$dashboard_test_status"
+REPO="/absolute/path/to/your/scripts-checkout"
+cd "$REPO"
+python3 -m venv /tmp/scripts-venv
+/tmp/scripts-venv/bin/python -m pip install Flask
+PYTHONDONTWRITEBYTECODE=1 /tmp/scripts-venv/bin/python -m unittest pi.tests.dashboard.test_van_dashboard
+PYTHONDONTWRITEBYTECODE=1 /tmp/scripts-venv/bin/python -m unittest pi.tests.test_python_deployment
 ```
 
-The copied `sync_scripts.sh` is only a fixture for a test that inspects its
-dashboard asset rules. It is not executed.
-
-If transfer or setup fails before the final command, the temporary directory
-may remain. Confirm that its path still matches the validated
-`/tmp/van-dashboard-tests.<suffix>` form, then remove that exact tree with:
+If the venv already exists, skip creation and check Flask with:
 
 ```bash
-ssh -o BatchMode=yes pi@vanpi.lan \
-  "find '$dashboard_test_dir' -depth -delete"
+/tmp/scripts-venv/bin/python -c 'import importlib.metadata; print(importlib.metadata.version("Flask"))'
 ```
 
-Do not substitute a broad path, `/tmp`, `$HOME`, or `~` in that cleanup command.
-
-## Option 2: use an isolated local venv
-
-Use a local venv only when vanpi is unavailable or local iteration is
-materially more convenient. Create it outside the repository so it cannot be
-mistaken for shared project state:
+Tests import the package, not a flattened sibling copy. `pi.tests` supplies the
+repository copy of `van_compute_metrics` under its separately installed runtime
+module name, without editing sys.path. That fixture is never a package-deployment
+input. For an interactive import outside the test harness, explicitly provide
+both source roots:
 
 ```bash
-dashboard_test_tmp="${TMPDIR:-/tmp}"
-dashboard_test_tmp="${dashboard_test_tmp%/}"
-dashboard_test_venv="$(mktemp -d "$dashboard_test_tmp/van-dashboard-venv.XXXXXX")"
-python3 -m venv "$dashboard_test_venv"
-"$dashboard_test_venv/bin/python" -m pip install Flask
-"$dashboard_test_venv/bin/python" -m unittest discover \
-  -s pi/tests/dashboard -p 'test_*.py'
+PYTHONPATH="$REPO:$REPO/pi/van_compute/scripts" PYTHONDONTWRITEBYTECODE=1 /tmp/scripts-venv/bin/python -P -c 'from pi.apps.van_dashboard import create_app; print(create_app().url_map)'
 ```
 
-When finished, validate that the variable still names the temporary venv and
-remove that exact tree:
+The app factory does not start COP, connectivity or Starlink loops. It is **not**
+an arbitrary safe API sandbox: some route calls start work. Unit tests substitute
+controllers or injected commands. Tests must patch classes/constants at their
+actual feature-module home and shared controller instances at `runtime.py`, not
+a re-exporting facade. Do not weaken assertions while updating those targets.
+
+Run each Python test module separately for comparisons with the recorded
+baseline; several modules have process-global fixtures:
 
 ```bash
-case "$dashboard_test_venv" in
-  "$dashboard_test_tmp"/van-dashboard-venv.*)
-    find "$dashboard_test_venv" -depth -delete
-    ;;
-  *)
-    echo "refusing unexpected venv cleanup path: $dashboard_test_venv" >&2
-    ;;
-esac
+for f in $(find pi/tests -name 'test_*.py' | sort); do m=${f%.py}; m=${m//\//.}; printf '%s\n' "$m"; PYTHONDONTWRITEBYTECODE=1 /tmp/scripts-venv/bin/python -m unittest "$m"; done
 ```
 
-This repository does not currently pin Flask in a requirements or project
-metadata file. If reproducible local environments become important, add and
-review a pinned dependency declaration rather than relying on an undocumented
-global installation.
-
-## Combined policyctl and dashboard tests
-
-When a dashboard change involves Disks & Torrents, also stage these files:
-
-```text
-pi/tests/policy/__init__.py
-pi/tests/policy/test_policyctl.py
-pi/scripts/policyctl
-pi/scripts/disk_policy.sh
-```
-
-Create `$dashboard_test_dir/pi/tests/policy`, copy the two policy test files
-there, and copy the scripts into `$dashboard_test_dir/pi/scripts` before
-running:
+For storage/torrent changes also run the policy and relevant shell suites:
 
 ```bash
-python3 -m unittest \
-  pi.tests.policy.test_policyctl \
-  pi.tests.dashboard.test_lighting_power_switches \
-  pi.tests.dashboard.test_openwrt_clients \
-  pi.tests.dashboard.test_van_dashboard
+PYTHONDONTWRITEBYTECODE=1 /tmp/scripts-venv/bin/python -m unittest pi.tests.policy.test_policyctl pi.tests.policy.test_policy_deployment
+bash pi/tests/policy/test_policy_reconciliation.sh
 ```
 
-`disk_policy.sh` is required because a policyctl test verifies that its managed
-disk labels remain consistent with the disk lifecycle policy.
+Package deployment tests use temporary local trees and fake service managers.
+CLI invocations are `--dry-run` only. They check checkout provenance, allowlist,
+imports, corrupt/incomplete archives, preserved flat fallback, explicit activation,
+selective restarts and retries. Never point their fixtures at a live release or
+invoke a real system service manager from a test.
 
-## Copied-checkout warning
+## React tests
 
-`pi/sync_scripts.sh` currently contains an absolute source path for the primary
-`scripts` checkout. Running it from `scripts_2`, `scripts_3`, or another copy
-can deploy files from the wrong checkout. Use the temporary testing procedure
-above for tests. For an intentional dashboard deployment from a copied
-checkout, use that checkout's reviewed local deployment helper or copy the
-exact dashboard files explicitly; do not assume `sync_scripts.sh` uses the
-current directory.
-
-## React dashboard tests
-
-The React source has a pinned npm lockfile and runs entirely on the Mac during
-build and test:
+Frontend source and its lockfile remain independently owned:
 
 ```bash
-cd pi/apps/van_dashboard/frontend
-npm ci
-npm run format:check
+cd "$REPO/pi/apps/van_dashboard/frontend"
+npm ci --no-audit --no-fund
 npm run typecheck
-npm test
+npm test -- --run
 npm run build
 ```
 
-The standalone canary/proxy service is covered by the Python dashboard suite.
-For a focused run on a Python environment with Flask available:
+The preview Python tests use a fake upstream, not vanpi:
 
 ```bash
-python3 -m unittest pi.tests.dashboard.test_van_dashboard_preview
+cd "$REPO"
+PYTHONDONTWRITEBYTECODE=1 /tmp/scripts-venv/bin/python -m unittest pi.tests.dashboard.test_van_dashboard_preview
 ```
 
-That test uses an isolated fake upstream. It does not contact vanpi, start a
-canary service, or invoke dashboard controls.
+## On-Pi staging
+
+Use the [package runbook](../deployment.md), not ad-hoc copying of a subset of
+modules or running the broad sync as a test. Its factory-only loopback smoke has
+an explicit alternate port and a restricted request list that avoids hardware
+and controller side effects. No on-Pi validation is implied by local tests.
+
+`pi/sync_scripts.sh` now derives its source checkout from its own location.
+Initial package cutover still requires explicit activation; routine sync refuses
+on an unconverted host. Broad sync continues to need that checkout's private
+ignored inputs and is not a replacement for isolated tests.

@@ -7,6 +7,8 @@ normally live under `/home/pi/scripts/`.
 
 ## Critical operations
 
+- [Python package deployment and rollback](docs/deployment.md)
+
 - [Recovery playbook](docs/backup/RESTORE.md)
 - [Time Machine backup](docs/backup/TIME_MACHINE.md)
 - [Weekly Pi recovery copies in iCloud](docs/backup/ICLOUD.md)
