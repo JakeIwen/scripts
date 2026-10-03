@@ -37,7 +37,8 @@ is immediate Python modules in these directories, package initializers, the
 three video runtime assets, and the dashboard unit:
 
 - `pi/apps/{audiobooks,bme280,van_dashboard,video_library}`
-- `pi/apps/van_dashboard/routes` (explicit feature blueprint package)
+- `pi/apps/van_dashboard/routes` (15 feature blueprints, including `projects`)
+- `pi/apps/video_library/players` (explicit immediate modules, not recursive)
 - `pi/scripts/python` and `shared/python`
 - `pi/apps/video_library/templates/video_library.html`
 - `pi/apps/video_library/static/{video_library.js,video_library.css}`
@@ -152,23 +153,90 @@ failed restart completes the originally active services' restarts even when
 files now match (or the failed service is now inactive). Do not delete the
 legacy retry journal to conceal an incomplete operation.
 
+The subset contains **28 destinations: 25 Python modules and 3 video assets**.
+Its 18 video modules are `video_library_server`, `video_asset_catalog`,
+`video_qbittorrent`, `catalog_values`, `catalog`, `config`, `identity`,
+`legacy_progress`, `library`, `media_models`, `naming`, `playback`, `routes`,
+`schema`, `service`, `v1_bridge`, `vlc_player`, and `sonos_volume` (all `.py`).
+The last two come from `players/` but flatten by basename like the former
+`find -exec cp` transfer. The remaining modules are `audiobook_server.py`,
+`bme280_mqtt.py`, `bme280_testread.py`, and the four utilities `ip_info.py`,
+`vlc_property.py`, `sonos_tasks.py`, `ip_only.py`. Assets retain
+`templates/video_library.html` and `static/{video_library.js,video_library.css}`.
+Generic video basenames still pass the shared collision guard; any later
+collision is an error, not permission to overwrite another app's module.
+Changes anywhere under `pi/apps/video_library/`, including `players/`, restart
+an active video service. The players directory remains a namespace subpackage
+(no new `__init__.py` is needed); its flat-import branches remain load-bearing.
+
 | Consumer | Disposition and update path |
 | --- | --- |
-| `video-library.service` | Flat, preserving the existing media/data migration contract. Update through its checkout-relative `pi/deploy_video_library.sh` (including git-ref/data-safe rollback), or routine sync's legacy subset. Its unit and dedicated deployer are not converted independently of one another. |
+| `video-library.service` | Flat, preserving the existing media/data migration contract and Rank 3's 18-module manifest (including flattened players). Keep package/flat import guards. Update through its checkout-relative `pi/deploy_video_library.sh` (including git-ref/data-safe rollback), or routine sync's complete legacy subset after cutover. Its unit and dedicated deployer are not converted independently of one another. |
 | `audiobooks.service` | Flat; routine sync / explicit legacy subset updates `audiobook_server.py`. |
 | `bme280-mqtt.service` | Flat; legacy subset, retaining `/home/pi/pyvenv/bin/python` and the sensor environment. |
 | `van-dashboard-preview.service` | Existing independently owned preview `current` release. Continue `pi/deploy_van_dashboard_preview.sh`; the package copy of its source is not its running server. |
 | `pi/.bashrc` (`ipinfo`, VLC helper, Sonos helper, PYTHONPATH) | Retains utility flat paths. Legacy subset updates `ip_info.py`, `vlc_property.py`, `sonos_tasks.py`, `ip_only.py`; broad sync still updates `.bashrc`. Do not use the shell's flat PYTHONPATH to launch the packaged dashboard. |
-| `pi/sns.sh` | Runs `python3 -c "from sonos_tasks import ..."`, inheriting the flat-directory PYTHONPATH from `.bashrc` (or the video service). The legacy subset keeps `sonos_tasks.py` current. The Mac wrapper uses its own checkout's `shared/python` and is unaffected. |
+| `pi/sns.sh` | Runs `python3 -c "from sonos_tasks import ..."`, inheriting the flat-directory PYTHONPATH from `.bashrc` (or the video service). The legacy subset keeps `sonos_tasks.py` current alongside the video's flat `sonos_volume.py` player; neither becomes a dashboard package import. The Mac wrapper uses its own checkout's `shared/python` and is unaffected. |
 | `pi/scripts/log_position.sh` | Retains `vlc_property.py` flat calls; source/guards unchanged, helper updated by legacy subset. |
 | `pi/raspbian_setup.sh` | Historical setup still creates/configures the flat utility directory. It does not perform package activation; use this runbook afterward. |
 | Mac BTT `repair_rps.py` / `repair_script_paths.py` | The former saves a button pointing at its checkout's `pi/sync_scripts.sh`; the latter remaps old sync paths. Neither directly launches flat Python today. Keep py/js pairing untouched; the saved sync entrypoint now observes the activation preflight. The archived July path-rewrite helper still mentions the former flat layout and is historical, not a new deploy path. |
 | Compute installer cleanup of old `van_compute_protocol.py` | Independently owned migration cleanup; no compute file ships in this package. |
-| `pi/scripts` programs, cron/timers, `system_event_monitor` | Existing `/home/pi/scripts` deployment, unit and cron paths unchanged. The separate system-monitor/package split has not happened. |
+| `pi/scripts` programs, cron/timers, `system_event_monitor` | Rank 3's shim plus `system_monitor/` package still ship through broad sync under `/home/pi/scripts`, with existing service/cron paths. Keep script/package import guards. No service uses a package-release copy, so `pi/scripts/system_monitor` is not allowlisted. Package-release conversion is a follow-up. |
 
 The exact base-commit consumer inventory is retained in local verification
 artifacts, including all unit and cron/timer references. References in tests and
 architecture docs describe contracts rather than additional live processes.
+
+### Interaction with Rank 3 deployment
+
+Rank 3 is merged but **undeployed**. Its system-monitor half ships with broad
+sync, which this branch blocks until dashboard cutover. The owner must either
+ship Rank 3 from master **before merging this branch**, or complete this
+runbook's dashboard cutover before syncing it. Do not bypass the activation
+preflight or remove the script/flat import guards in either Rank 3 component.
+
+All commands below are owner-run on the Mac from the primary trusted checkout,
+not this integration worktree. Before merging Rank 4, with the primary checkout
+on the Rank 3 master containing `94620e3` and no package deployer yet:
+
+```bash
+cd /Users/jacobr/dev/scripts
+git status --short
+git branch --show-current
+git merge-base --is-ancestor 94620e3 HEAD && test ! -f pi/deploy_python.py && bash pi/sync_scripts.sh
+```
+
+Otherwise, after merging Rank 4, first follow steps 1–3 below with
+`REPO=/Users/jacobr/dev/scripts`. Only after supervised activation and health
+checks, ship the system-monitor shim/package and other broad-sync dependencies:
+
+```bash
+cd /Users/jacobr/dev/scripts
+bash pi/sync_scripts.sh
+```
+
+The video half can ship **at any time**, independent of dashboard activation,
+through its scoped deployer (including its complete module manifest and unit):
+
+```bash
+cd /Users/jacobr/dev/scripts
+bash pi/deploy_video_library.sh
+```
+
+Or after cutover, broad sync includes it through the legacy subset. A scoped
+code/assets-only legacy update (not an installer for a missing video unit) is:
+
+```bash
+cd /Users/jacobr/dev/scripts
+python3 pi/deploy_python.py --dry-run --legacy-flatten
+python3 pi/deploy_python.py --legacy-flatten
+```
+
+The projects API is the `projects` blueprint in `routes/projects.py`.
+`runtime.hosted_projects` is constructed immediately after the shared
+`state_store`, preserving master's initialization order. Both the controller
+module and route module are covered by the dashboard release dependency digest;
+there is no flat projects prerequisite or file update in the dashboard unit.
 
 ### Network installer boundary
 

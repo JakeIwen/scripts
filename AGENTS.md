@@ -146,6 +146,15 @@ recorder-only workflow rather than overwriting the flat fallback. Blueprints
 live under `pi/apps/van_dashboard/routes/`; mutable process controllers live in
 `runtime.py`, and the relay-off controller CLI remains independent of Flask.
 
+Rank 3's video modules still execute flat via `deploy_video_library.sh` or the
+28-file legacy subset (25 Python modules plus three assets). The package
+allowlist includes `pi/apps/video_library/players` explicitly; its two modules
+flatten by basename. Preserve the video and system-monitor package/flat import
+guards: sysmon's shim/package still deploy under `/home/pi/scripts` with broad
+sync, not the package release. System-monitor package-release conversion is a
+follow-up. Broad sync cannot ship its Rank 3 changes before dashboard activation;
+see the runbook's pre-merge-master versus post-cutover owner commands.
+
 ## Deployment commits
 
 - After a successful deployment from this repository, commit and push the
@@ -159,6 +168,8 @@ User-added links are persisted separately under `hosted_projects` in the
 dashboard's existing StateStore JSON, shared by LAN and Tailscale clients.
 Preserve that runtime state during deployment. Links are HTTP/HTTPS only and
 are never fetched by the backend; preference is local, LAN, Tailscale, then web.
+The `projects` blueprint owns `/api/hosted-projects`; `runtime.hosted_projects`
+shares the existing state store and is initialized immediately after it.
 
 ## Backup and disk tooling
 
