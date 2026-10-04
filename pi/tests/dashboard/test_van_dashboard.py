@@ -4541,13 +4541,10 @@ class DashboardRouteTests(unittest.TestCase):
             )
         )
 
-        legacy_plan = deploy_python.build_plan(mode="legacy")
-        self.assertFalse(
-            any(
-                path.startswith("pi/apps/van_dashboard/")
-                for path in legacy_plan["manifest"]["legacy"]
-            )
-        )
+        stage_plan = deploy_python.build_plan(mode="stage")
+        self.assertNotIn("legacy", stage_plan["manifest"])
+        with self.assertRaises(ValueError):
+            deploy_python.build_plan(mode="legacy")
 
     def test_dashboard_package_is_deployable_restart_dependency(self):
         plan = deploy_python.build_plan(mode="stage")

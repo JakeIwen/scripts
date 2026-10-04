@@ -25,15 +25,41 @@ def broad_sync_destination(source):
 
 
 class SyncStorageOwnershipTests(unittest.TestCase):
+    def package_units(self):
+        result = subprocess.run(
+            [sys.executable, str(PI / "deploy_python.py"), "--list-units"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        units = result.stdout.splitlines()
+        self.assertEqual(
+            set(units),
+            {
+                "van-dashboard.service",
+                "video-library.service",
+                "audiobooks.service",
+                "bme280-mqtt.service",
+            },
+        )
+        self.assertEqual(len(units), 4)
+        return units
+
     def stage(self, root):
         """Stage the three trees exactly as pi/sync_scripts.sh does."""
-        exclude = f"--exclude-from={EXCLUDES}"
+        package_exclude = root / "python-package-units.exclude"
+        package_exclude.write_text(
+            "".join(f"/{unit}\n" for unit in self.package_units()),
+            encoding="utf-8",
+        )
+        storage_exclude = f"--exclude-from={EXCLUDES}"
+        package_exclude_arg = f"--exclude-from={package_exclude}"
         trees = (
-            ([RSYNC, "-a", "--exclude", "__pycache__/", "--exclude", "*.pyc", exclude],
+            ([RSYNC, "-a", "--exclude", "__pycache__/", "--exclude", "*.pyc", storage_exclude],
              PI / "scripts", root / "scripts"),
-            ([RSYNC, "-a", "--exclude", "van-dashboard.service", exclude],
+            ([RSYNC, "-a", package_exclude_arg, storage_exclude],
              PI / "services", root / "services"),
-            ([RSYNC, "-a", exclude], PI / "tmpfiles.d", root / "tmpfiles.d"),
+            ([RSYNC, "-a", storage_exclude], PI / "tmpfiles.d", root / "tmpfiles.d"),
         )
         for command, source, destination in trees:
             subprocess.run([*command, f"{source}/", f"{destination}/"], check=True)
@@ -50,17 +76,18 @@ class SyncStorageOwnershipTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            units = self.package_units()
             self.stage(root)
             for source in sorted(shared):
                 with self.subTest(source=source):
                     staged = root / Path(source).relative_to("pi")
                     self.assertFalse(staged.exists(), staged)
+            for unit in units:
+                with self.subTest(unit=unit):
+                    self.assertFalse((root / "services" / unit).exists())
             # The root-owned directory itself must not be staged, or cp -a fails
             # to preserve its timestamp on the Pi.
             self.assertFalse((root / "scripts" / "network_recorder").exists())
-            # deploy_python.py installs the dashboard unit from its release.
-            self.assertFalse((root / "services" / "van-dashboard.service").exists())
-
             # Everything else still deploys, including the setup script's
             # pi-owned openwrt-logging sources.
             for kept in (
@@ -68,7 +95,6 @@ class SyncStorageOwnershipTests(unittest.TestCase):
                 "scripts/update_services.sh",
                 "scripts/openwrt-logging/30-openwrt-dendelion.conf",
                 "services/system-event-monitor.service",
-                "services/video-library.service",
                 "tmpfiles.d/vanpi-backup.conf",
             ):
                 with self.subTest(kept=kept):
@@ -78,6 +104,13 @@ class SyncStorageOwnershipTests(unittest.TestCase):
         sync = (PI / "sync_scripts.sh").read_text(encoding="utf-8")
         self.assertIn('storage_managed="$dsc/pi/sync_storage_managed.exclude"', sync)
         self.assertEqual(sync.count('--exclude-from="$storage_managed"'), 3)
+        self.assertIn(
+            'python3 "$dsc/pi/deploy_python.py" --list-units',
+            sync,
+        )
+        self.assertIn('package_units_exclude="$local_stage/python-package-units.exclude"', sync)
+        self.assertIn('--exclude-from="$package_units_exclude"', sync)
+        self.assertNotIn('--exclude \'van-dashboard.service\'', sync)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 #! /bin/bash
+export PYTHONDONTWRITEBYTECODE=1
 
 POSPATH="/home/pi/vlc-positions.txt"
 
@@ -16,8 +17,9 @@ function hhmmss {
 }
 
 [[ -z "$(pgrep vlc)" ]] && exit 0
-file=`python /home/pi/scripts/python-automation/vlc_property.py URL`
-nsecs=`python /home/pi/scripts/python-automation/vlc_property.py NS`
+VLC_PROPERTY='/home/pi/scripts/python-packages/current/pi/scripts/python/vlc_property.py'
+file=`python "$VLC_PROPERTY" URL`
+nsecs=`python "$VLC_PROPERTY" NS`
 
 if [[ $file && $nsecs ]]; then
   decoded="`uridecode $file`"

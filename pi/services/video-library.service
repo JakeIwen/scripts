@@ -4,40 +4,45 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/video_library_server.py
-ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/video_asset_catalog.py
-ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/video_qbittorrent.py
-ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/config.py
-ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/naming.py
-ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/library.py
-ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/identity.py
-ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/playback.py
-ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/service.py
-ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/routes.py
-ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/catalog.py
-ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/catalog_values.py
-ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/schema.py
-ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/v1_bridge.py
-ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/legacy_progress.py
-ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/media_models.py
-ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/vlc_player.py
-ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/sonos_volume.py
-ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/templates/video_library.html
-ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/static/video_library.js
-ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/static/video_library.css
-ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-automation/sonos_tasks.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/package_runtime.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/__main__.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/video_library_server.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/video_asset_catalog.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/video_qbittorrent.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/config.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/naming.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/library.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/identity.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/playback.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/service.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/routes.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/catalog.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/catalog_values.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/schema.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/v1_bridge.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/legacy_progress.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/media_models.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/players/vlc_player.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/players/sonos_volume.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/templates/video_library.html
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/static/video_library.js
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/static/video_library.css
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/shared/python/sonos_tasks.py
 ExecStartPre=/usr/bin/test -r /home/pi/sns.sh
 ExecStartPre=/usr/bin/test -x /usr/bin/vlc
-ExecStart=/usr/bin/python3 /home/pi/scripts/python-automation/video_library_server.py
+ExecStart=/usr/bin/python3 -P -m pi.apps.video_library
 WorkingDirectory=/home/pi
 Restart=always
 RestartSec=5
 User=pi
 Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=DISPLAY=:0
 Environment=XDG_RUNTIME_DIR=/run/user/1000
 Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
-Environment=PYTHONPATH=/home/pi/scripts/python-automation
+Environment=PYTHONPATH=/home/pi/scripts/python-packages/current:/home/pi/scripts/python-packages/current/shared/python
+RuntimeDirectory=video-library
+RuntimeDirectoryMode=0750
 UMask=0027
 
 [Install]

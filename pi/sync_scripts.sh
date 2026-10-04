@@ -10,13 +10,33 @@ secrets="$dsc/pi/secrets"
 shared_sh="$dsc/shared/sh"
 pi_ip='pi@vanpi.lan'
 # pi_ip='pi@100.82.91.76'
+package_units=""
 
 sync_preflight() {
+  if ! package_units="$(python3 "$dsc/pi/deploy_python.py" --list-units)" ||
+    [[ -z "$package_units" ]]; then
+    echo "Python package unit discovery failed; see pi/deploy_python.py" >&2
+    return 1
+  fi
+
   if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$pi_ip" \
     'test -f /home/pi/scripts/python-packages/activated.json'; then
     echo "Python package activation preflight failed; see pi/docs/deployment.md" >&2
     return 1
   fi
+
+  while IFS= read -r unit; do
+    [[ -n "$unit" ]] || continue
+    if [[ ! "$unit" =~ ^[A-Za-z0-9_.@:-]+\.service$ ]]; then
+      echo "invalid Python package unit from deploy_python.py: $unit" >&2
+      return 1
+    fi
+    if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$pi_ip" \
+      "test -f '/home/pi/scripts/python-packages/service-state/$unit.json'"; then
+      echo "Python package service activation preflight failed: $unit" >&2
+      return 1
+    fi
+  done <<< "$package_units"
 }
 
 sync_non_python() {
@@ -33,12 +53,26 @@ sync_non_python() {
   /bin/mkdir -p "$staged_scripts" "$staged_services" "$staged_tmpfiles"
   # deploy_network_storage.py owns the recorder files it installs; never stage them.
   storage_managed="$dsc/pi/sync_storage_managed.exclude"
+  package_units_exclude="$local_stage/python-package-units.exclude"
+  if ! {
+    while IFS= read -r unit; do
+      [[ -n "$unit" ]] || continue
+      printf '/%s\n' "$unit"
+    done <<< "$package_units"
+  } > "$package_units_exclude"; then
+    return 1
+  fi
+  if [[ ! -s "$package_units_exclude" ]]; then
+    echo "Python package unit exclusion list is empty" >&2
+    return 1
+  fi
   /usr/bin/rsync -a \
     --exclude '__pycache__/' \
     --exclude '*.pyc' \
     --exclude-from="$storage_managed" \
     "$repo_scripts/" "$staged_scripts/" || return 1
-  /usr/bin/rsync -a --exclude 'van-dashboard.service' --exclude-from="$storage_managed" \
+  /usr/bin/rsync -a --exclude-from="$package_units_exclude" \
+    --exclude-from="$storage_managed" \
     "$services/" "$staged_services/" || return 1
   /usr/bin/rsync -a --exclude-from="$storage_managed" \
     "$tmpfiles/" "$staged_tmpfiles/" || return 1
@@ -120,7 +154,6 @@ sync_non_python() {
 
 sync_python_packages() {
   python3 "$dsc/pi/deploy_python.py" --target "$pi_ip" --update || return 1
-  python3 "$dsc/pi/deploy_python.py" --target "$pi_ip" --legacy-flatten || return 1
 }
 
 sync_compute() {

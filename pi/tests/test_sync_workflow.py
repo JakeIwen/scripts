@@ -25,6 +25,29 @@ class SyncWorkflowTests(unittest.TestCase):
         self.assertEqual(name, "dsc")
         self.assertEqual(value, "/Users/jacobr/dev/scripts")
 
+    def test_sync_preflight_requires_each_package_service_marker(self):
+        sync = SYNC_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn(
+            "test -f /home/pi/scripts/python-packages/activated.json",
+            sync,
+        )
+        self.assertIn(
+            "test -f '/home/pi/scripts/python-packages/service-state/$unit.json'",
+            sync,
+        )
+        self.assertIn(
+            'python3 "$dsc/pi/deploy_python.py" --list-units',
+            sync,
+        )
+
+    def test_broad_sync_does_not_run_legacy_flatten(self):
+        sync = SYNC_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn(
+            'python3 "$dsc/pi/deploy_python.py" --target "$pi_ip" --update',
+            sync,
+        )
+        self.assertNotIn("--legacy-flatten", sync)
+
     def _run_harness(self, failing_phase=None):
         with tempfile.TemporaryDirectory(prefix="sync-workflow-") as directory:
             root = Path(directory)

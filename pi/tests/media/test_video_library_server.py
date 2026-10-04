@@ -2413,18 +2413,14 @@ class DeploymentWiringTests(unittest.TestCase):
         command_arguments = [
             argument for command in command_lines for argument in shlex.split(command)
         ]
+        package_root = "/home/pi/scripts/python-packages/current/"
         declared_paths = {
             argument
             for argument in command_arguments
-            if argument.startswith("/home/pi/scripts/python-automation/")
+            if argument.startswith(package_root)
             or argument in {"/home/pi/sns.sh", "/usr/bin/vlc"}
         }
 
-        deploy_script = (
-            REPOSITORY_ROOT / "pi" / "deploy_video_library.sh"
-        ).read_text(encoding="utf-8")
-        plan = deploy_python.build_plan(REPOSITORY_ROOT, mode="legacy")
-        legacy = plan["manifest"]["legacy"]
         expected_sources = self._video_module_sources()
         expected_sources.update(
             {
@@ -2432,58 +2428,23 @@ class DeploymentWiringTests(unittest.TestCase):
                 *deploy_python.ASSETS,
             }
         )
-        expected_module_sources = {
-            relative for relative in expected_sources if relative.endswith(".py")
+        plan = deploy_python.build_plan(REPOSITORY_ROOT)
+        self.assertTrue(expected_sources.issubset(plan["manifest"]["files"]))
+        expected_package_paths = {
+            package_root + relative for relative in expected_sources
         }
-        expected_module_names = {
-            Path(relative).name for relative in expected_module_sources
-        }
-        declared_deploy_sources = {
-            line.strip()
-            for line in deploy_script.splitlines()
-            if line.strip().endswith(".py")
-            and line.strip().startswith(("pi/apps/video_library/", "shared/python/"))
-        }
-        self.assertEqual(declared_deploy_sources, expected_module_sources)
-        declared_deploy_modules = {
-            Path(relative).name for relative in declared_deploy_sources
-        }
-        self.assertEqual(declared_deploy_modules, expected_module_names)
-        install_loop_start = deploy_script.index("for module in \\\n")
-        install_loop_end = deploy_script.index("\ndo\n", install_loop_start)
-        declared_install_modules = {
-            line.strip().rstrip(" \\")
-            for line in deploy_script[install_loop_start:install_loop_end].splitlines()[1:]
-            if line.strip()
-        }
-        self.assertEqual(
-            declared_install_modules,
-            expected_module_names - {"video_library_server.py", "sonos_tasks.py"},
-        )
-        expected_flat_paths = {
-            f"/home/pi/scripts/python-automation/{legacy[relative]}"
-            for relative in expected_sources
-        }
-        expected_flat_paths.update({"/home/pi/sns.sh", "/usr/bin/vlc"})
-        self.assertEqual(declared_paths, expected_flat_paths)
-
-        for path in sorted(expected_sources):
-            with self.subTest(path=path):
-                self.assertIn(path, legacy)
-                source = REPOSITORY_ROOT / path
-                self.assertTrue(source.is_file(), str(source))
-                self.assertTrue(source.resolve().is_relative_to(REPOSITORY_ROOT))
-                if path.endswith(".py"):
-                    self.assertEqual(legacy[path], Path(path).name)
-        sns = REPOSITORY_ROOT / "pi" / "sns.sh"
-        self.assertTrue(sns.is_file(), str(sns))
+        self.assertTrue(expected_package_paths.issubset(declared_paths))
+        self.assertNotIn("/home/pi/scripts/python-automation/", unit)
+        self.assertIn("/home/pi/sns.sh", declared_paths)
         self.assertIn("/usr/bin/vlc", declared_paths)
 
         self.assertEqual(
             shlex.split(directives["ExecStart"][0]),
             [
                 "/usr/bin/python3",
-                "/home/pi/scripts/python-automation/video_library_server.py",
+                "-P",
+                "-m",
+                "pi.apps.video_library",
             ],
         )
         self.assertEqual(environment["DISPLAY"], ":0")
@@ -2493,7 +2454,13 @@ class DeploymentWiringTests(unittest.TestCase):
             "unix:path=/run/user/1000/bus",
         )
         self.assertEqual(
-            environment["PYTHONPATH"], "/home/pi/scripts/python-automation"
+            environment["PYTHONPATH"],
+            ":".join(
+                (
+                    "/home/pi/scripts/python-packages/current",
+                    "/home/pi/scripts/python-packages/current/shared/python",
+                )
+            ),
         )
         self.assertEqual(directives["User"], ["pi"])
         self.assertEqual(directives["WantedBy"], ["multi-user.target"])
@@ -2505,21 +2472,50 @@ class DeploymentWiringTests(unittest.TestCase):
         updater = (REPOSITORY_ROOT / "pi" / "scripts" / "update_services.sh").read_text(
             encoding="utf-8"
         )
-        plan = deploy_python.build_plan(REPOSITORY_ROOT, mode="legacy")
-        legacy = plan["manifest"]["legacy"]
-        expected_sources = self._video_module_sources()
-        expected_sources.update({"shared/python/sonos_tasks.py", *deploy_python.ASSETS})
-        for relative in sorted(expected_sources):
-            with self.subTest(relative=relative):
-                self.assertIn(relative, legacy)
-                self.assertTrue((REPOSITORY_ROOT / relative).is_file())
-        self.assertFalse(
-            any(relative.startswith("pi/apps/van_dashboard/") for relative in legacy)
-        )
+        self.assertIn('package_units_exclude="$local_stage/python-package-units.exclude"', sync)
+        self.assertIn('--exclude-from="$package_units_exclude"', sync)
+        self.assertNotIn("--legacy-flatten", sync)
         self.assertIn('"$dsc/pi/sns.sh"', sync)
         self.assertIn("ExecStartPre", updater)
         self.assertIn("/home/pi/scripts/", updater)
         self.assertIn('changed_units+=("$unit")', updater)
+
+    def test_shell_utilities_follow_current_package_and_preserve_flat_rollback(self):
+        bashrc = (REPOSITORY_ROOT / "pi" / ".bashrc").read_text(encoding="utf-8")
+        sns = (REPOSITORY_ROOT / "pi" / "sns.sh").read_text(encoding="utf-8")
+        logger = (
+            REPOSITORY_ROOT / "pi" / "scripts" / "log_position.sh"
+        ).read_text(encoding="utf-8")
+        package_paths = (
+            "/home/pi/scripts/python-packages/current",
+            "/home/pi/scripts/python-packages/current/shared/python",
+            "/home/pi/scripts/python-packages/current/pi/scripts/python",
+        )
+        for path in package_paths:
+            with self.subTest(path=path):
+                self.assertIn(path, bashrc)
+        self.assertIn(
+            'package_sonos_path="$package_root/shared/python"',
+            sns,
+        )
+        self.assertIn(
+            'package_paths="$package_root:$package_sonos_path:$package_root/pi/scripts/python"',
+            sns,
+        )
+        self.assertIn(
+            "/home/pi/scripts/python-packages/current/pi/scripts/python/vlc_property.py",
+            bashrc,
+        )
+        self.assertIn(
+            "/home/pi/scripts/python-packages/current/pi/scripts/python/vlc_property.py",
+            logger,
+        )
+        self.assertIn("flat_sonos_path=/home/pi/scripts/python-automation", sns)
+        self.assertIn("export PYTHONDONTWRITEBYTECODE=1", bashrc)
+        self.assertIn("export PYTHONDONTWRITEBYTECODE=1", sns)
+        self.assertIn("export PYTHONDONTWRITEBYTECODE=1", logger)
+        self.assertNotIn("flock", sns)
+        self.assertNotIn("/home/pi/scripts/python-automation/vlc_property.py", logger)
 
     def test_template_static_assets_dashboard_and_cli_use_the_same_api(self):
         template = (APP_DIR / "templates" / "video_library.html").read_text(

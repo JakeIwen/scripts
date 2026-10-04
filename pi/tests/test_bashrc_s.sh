@@ -19,6 +19,11 @@ printf '%s\n' \
 . "$repo_bashrc"
 
 declare -f cronp | grep -F '/home/pi/scripts/parse_cron.sh' >/dev/null
+grep -Fq '/home/pi/scripts/python-packages/current/pi/scripts/python/ip_info.py' "$repo_bashrc"
+grep -Fq '/home/pi/scripts/python-packages/current/pi/scripts/python/vlc_property.py' "$repo_bashrc"
+grep -Fq 'scripts/python-packages/current/shared/python/sonos_tasks.py' "$repo_bashrc"
+grep -Fq 'export PYTHONPATH="/home/pi/scripts/python-packages/current:/home/pi/scripts/python-packages/current/shared/python:/home/pi/scripts/python-packages/current/pi/scripts/python' "$repo_bashrc"
+grep -Fq 'export PYTHONDONTWRITEBYTECODE=1' "$repo_bashrc"
 
 result=$(s price_check first second)
 [ "$result" = "python-main first second" ]

@@ -25,7 +25,7 @@ alias bootconf='sudo cat /boot/config.txt'
 
 alias dirsize='sudo du -hsc .[^.]* *'
 alias disku='df -h'
-alias ipinfo="py /home/pi/scripts/python-automation/ip_info.py"
+alias ipinfo="py /home/pi/scripts/python-packages/current/pi/scripts/python/ip_info.py"
 alias active_ssh_sessions="sudo netstat -tnpa | grep 'ESTABLISHED.*sshd'"
 alias num_ssh="active_ssh_sessions | wc -l"
 
@@ -715,7 +715,7 @@ play_status() {
     delims="\.|\+|\-"
     pattern="$delims|$keys|$groups"
     # pattern="($delims)(\[?($keys)\]?(?=\.)|(($groups)\.)?\.?$)|\'"
-    py_vlc_path='/home/pi/scripts/python-automation/vlc_property.py'
+    py_vlc_path='/home/pi/scripts/python-packages/current/pi/scripts/python/vlc_property.py'
     position=`py $py_vlc_path Position`
     total=`py $py_vlc_path TotalTime`
     title=`py $py_vlc_path Title | perl -pe "s~$pattern|~~g"`
@@ -877,7 +877,7 @@ airupnp() {
   sudo systemctl $cmd airupnp.service
 }
 sns_list() {
-  fpath="$HOME/scripts/python-automation/sonos_tasks.py"
+  fpath="$HOME/scripts/python-packages/current/shared/python/sonos_tasks.py"
   while read f; do       
     helpers=`echo $f | grep '# helpers'`
     if [[ $helpers ]]; then break; fi
@@ -920,7 +920,8 @@ export DISPLAY=:0
 export HISTSIZE=1000000
 export HISTFILESIZE=10000000
 export PATH="$PATH:/home/pi/.local/bin"
-export PYTHONPATH="/home/pi/scripts/python-automation"
+export PYTHONPATH="/home/pi/scripts/python-packages/current:/home/pi/scripts/python-packages/current/shared/python:/home/pi/scripts/python-packages/current/pi/scripts/python${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONDONTWRITEBYTECODE=1
 export PROMPT_COMMAND="history -a; history -c; history -r; $PROMPT_COMMAND"
 
 # if [ -f ~/.mount_aliases ]; then . ~/.mount_aliases; fi

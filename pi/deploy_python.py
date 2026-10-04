@@ -18,11 +18,29 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 LIVE_ROOT = Path('/home/pi/scripts/python-packages')
-FLAT_ROOT = Path('/home/pi/scripts/python-automation')
-UNIT = 'van-dashboard.service'
+# This table also supplies the generic sync's unit exclusion list.
+SERVICES = {
+    'van-dashboard.service': {
+        'app': 'van_dashboard', 'interpreter': '/usr/bin/python3',
+        'flat': 'van_dashboard.py', 'extra': (),
+    },
+    'video-library.service': {
+        'app': 'video_library', 'interpreter': '/usr/bin/python3',
+        'flat': 'video_library_server.py',
+        'extra': ('shared/__init__.py', 'shared/python/__init__.py', 'shared/python/sonos_tasks.py'),
+    },
+    'audiobooks.service': {
+        'app': 'audiobooks', 'interpreter': '/usr/bin/python3',
+        'flat': 'audiobook_server.py', 'extra': (),
+    },
+    'bme280-mqtt.service': {
+        'app': 'bme280', 'interpreter': '/home/pi/pyvenv/bin/python',
+        'flat': 'bme280_mqtt.py', 'extra': (),
+    },
+}
+DASHBOARD = 'van-dashboard.service'
 RETAIN_NEWEST = 3
 GC_DELETE_LIMIT = 16
-RUNNING_RECORD = Path('/run/van-dashboard/package-release')
 # Only immediate Python modules in these reviewed directories are inputs.
 MODULE_DIRS = (
     'pi/apps/audiobooks', 'pi/apps/bme280', 'pi/apps/van_dashboard',
@@ -30,11 +48,10 @@ MODULE_DIRS = (
     'pi/apps/video_library/players', 'pi/scripts/python', 'shared/python',
 )
 INITIALIZERS = ('pi/__init__.py', 'pi/apps/__init__.py',
-                'pi/scripts/__init__.py', 'shared/__init__.py')
+                'pi/scripts/__init__.py', 'shared/__init__.py', 'pi/package_runtime.py')
 ASSETS = ('pi/apps/video_library/templates/video_library.html',
           'pi/apps/video_library/static/video_library.js',
           'pi/apps/video_library/static/video_library.css')
-LEGACY_DIRS = tuple(p for p in MODULE_DIRS if not p.startswith('pi/apps/van_dashboard'))
 
 
 def encoded(value):
@@ -46,7 +63,7 @@ def digest(data):
 
 
 def source_files(repo):
-    paths = list(INITIALIZERS) + list(ASSETS) + [f'pi/services/{UNIT}']
+    paths = list(INITIALIZERS) + list(ASSETS) + [f'pi/services/{unit}' for unit in SERVICES]
     for directory in MODULE_DIRS:
         found = sorted((repo / directory).glob('*.py'))
         if not found:
@@ -70,40 +87,40 @@ def provenance(repo):
             'dirty': bool(git('status', '--porcelain'))}
 
 
-def legacy_destination(relative):
-    path = PurePosixPath(relative)
-    if relative in ASSETS:
-        return '/'.join(path.parts[-2:])
-    if str(path.parent) in LEGACY_DIRS and path.name != '__init__.py':
-        return path.name
-    return None
+def selected_units(selected=None):
+    units = list(SERVICES) if selected is None else list(dict.fromkeys(selected))
+    if not units or any(unit not in SERVICES for unit in units):
+        raise ValueError('unknown or empty package service selection')
+    return units
 
 
-def build_plan(repo=ROOT, mode='stage'):
+def build_plan(repo=ROOT, mode='stage', selected=None):
+    if mode not in ('stage', 'activate', 'update'):
+        raise ValueError('legacy flatten is retired; the flat rollback tree is frozen')
+    selected = selected_units(selected)
     repo = repo.resolve()
     files = {p: digest((repo / p).read_bytes()) for p in source_files(repo)}
-    legacy = {p: legacy_destination(p) for p in files if legacy_destination(p)}
-    if len(set(legacy.values())) != len(legacy):
-        raise ValueError('duplicate legacy destination (basename collision)')
-    dependencies = {p: sha for p, sha in files.items()
-                    if (p.startswith('pi/apps/van_dashboard/') and
-                        not p.endswith('/react_dashboard_preview.py')) or
-                    p in ('pi/__init__.py', 'pi/apps/__init__.py')}
+    dependencies = {}
+    for unit, spec in SERVICES.items():
+        paths = {p: sha for p, sha in files.items()
+                 if (p.startswith(f"pi/apps/{spec['app']}/") and
+                     not p.endswith('/react_dashboard_preview.py')) or
+                 p in ('pi/__init__.py', 'pi/apps/__init__.py', 'pi/package_runtime.py', *spec['extra'])}
+        dependencies[unit] = digest(encoded(paths))
     manifest = {'schema': 1, 'provenance': provenance(repo), 'files': files,
-                'services': {UNIT: digest(encoded(dependencies))}, 'legacy': legacy}
+                'services': dependencies}
     release = digest(encoded(manifest))[:24]
-    units = {UNIT: ('unchanged (stage only)' if mode in ('stage', 'legacy') else
-                   'compare live dependency digest and unit; restart only if changed')}
-    if mode == 'legacy':
-        units.update({u: 'restart changed active service, or complete a pending failed restart'
-                      for u in ('audiobooks.service', 'bme280-mqtt.service', 'video-library.service')})
+    units = {unit: ('unchanged (stage only)' if mode == 'stage' else
+                    'not selected; running release protected' if unit not in selected else
+                    'explicit cutover: verify/save flat unit once; restart changed active service; retry pending intent'
+                    if mode == 'activate' else
+                    'require prior activation; compare service digest/unit; restart changed active service; retry pending intent')
+             for unit in SERVICES}
     return {'mode': mode, 'release': release, 'manifest': manifest,
             'destination': str(LIVE_ROOT / 'releases' / release),
             'sources': [{'source': str(repo / p), 'relative': p,
                          'destination': str(LIVE_ROOT / 'releases' / release / p)}
-                        for p in files], 'units': units,
-            'legacy_destinations': {str(repo / p): str(FLAT_ROOT / dest)
-                                    for p, dest in legacy.items()} if mode == 'legacy' else {}}
+                        for p in files], 'units': units}
 
 
 def make_archive(plan, repo, output):
@@ -283,25 +300,25 @@ def check_release_tree(release, device):
     return info
 
 
-def dashboard_release(root, services):
+def running_release(root, services, unit):
     if services is None:
-        raise ValueError('dashboard service state unavailable')
-    state = services.dashboard_state()
+        raise ValueError(f'{unit} service state unavailable')
+    state = services.service_state(unit)
     if state['ActiveState'] in ('inactive', 'failed') and state['MainPID'] == '0':
         return None
     if state['ActiveState'] != 'active':
-        raise ValueError('dashboard service is transitional or unknown')
-    record = services.read_running_record()
+        raise ValueError(f'{unit} service is transitional or unknown')
+    record = services.read_running_record(unit)
     if (not re.fullmatch('[0-9a-f]{32}', state['InvocationID']) or
             str(record['pid']) != state['MainPID'] or state['MainPID'] == '0' or
             record['invocation_id'] != state['InvocationID']):
-        raise ValueError('dashboard running record identity mismatch')
+        raise ValueError(f'{unit} running record identity mismatch')
     # The entrypoint records the already-pinned pi.__path__, not current.
     package = Path(record['package_path'])
     release = package.parent
     if (package.name != 'pi' or release.parent != root / 'releases' or
             not re.fullmatch('[0-9a-f]{24}', release.name)):
-        raise ValueError('unexpected dashboard running release')
+        raise ValueError(f'unexpected {unit} running release')
     return release.name
 
 
@@ -346,9 +363,10 @@ def collect_releases(root, lock, services, installed):
             if not re.fullmatch(r'releases/[0-9a-f]{24}', target):
                 raise ValueError(f'unexpected {name} release target')
             keep.add(Path(target).name)
-        running = dashboard_release(root, services)
-        if running:
-            keep.add(running)
+        for unit in SERVICES:
+            running = running_release(root, services, unit)
+            if running:
+                keep.add(running)
         if not keep <= snapshots.keys():
             raise ValueError('protected release is missing')
         newest = sorted(snapshots, key=lambda name: (snapshots[name].st_mtime_ns, name), reverse=True)
@@ -383,22 +401,49 @@ class SystemServices:
         self.units = units
 
     def read_unit(self, unit):
-        return (self.units / unit).read_bytes()
+        path = self.units / unit
+        if path.is_symlink():
+            raise ValueError(f'refusing symlinked unit: {unit}')
+        return path.read_bytes()
 
-    def save_legacy(self, destination):
+    def dropins(self, unit):
+        # Refuse vendor/runtime fragments or overrides we cannot save/restore
+        # exactly. Do not silently deploy underneath a different effective unit.
+        result = subprocess.run(
+            ['/usr/bin/systemctl', 'show', '-p', 'FragmentPath', '-p', 'DropInPaths', unit],
+            check=True, text=True, capture_output=True, timeout=10)
+        properties = dict(line.split('=', 1) for line in result.stdout.splitlines())
+        if properties.get('FragmentPath') != str(self.units / unit):
+            raise ValueError(f'unexpected effective unit path: {unit}')
+        if 'DropInPaths' not in properties:
+            raise ValueError(f'missing effective drop-in paths: {unit}')
+        directory = self.units / (unit + '.d')
+        if directory.is_symlink():
+            raise ValueError(f'symlinked drop-in directory: {unit}')
+        effective = properties['DropInPaths'].split()
+        local = sorted(directory.glob('*.conf')) if directory.exists() else []
+        if set(effective) != {str(path) for path in local}:
+            raise ValueError(f'nonlocal or stale drop-ins require operator review: {unit}')
+        if any(path.is_symlink() or not path.is_file() for path in local):
+            raise ValueError(f'unsafe drop-in: {unit}')
+        return {path.name: path.read_bytes() for path in local}
+
+    def save_legacy(self, unit, destination, dropins):
         if destination.exists():
+            if not (destination / unit).is_file():
+                raise ValueError(f'incomplete original-unit backup: {destination}')
             return
-        temporary = destination.with_name(destination.name + '.incoming')
-        temporary.mkdir(mode=0o700)
-        try:
-            shutil.copy2(self.units / UNIT, temporary / UNIT)
-            dropins = self.units / (UNIT + '.d')
-            if dropins.exists():
-                shutil.copytree(dropins, temporary / dropins.name)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix='.unit-backup-', dir=destination.parent) as name:
+            temporary = Path(name)
+            (temporary / unit).write_bytes(self.read_unit(unit))
+            if dropins:
+                directory = temporary / (unit + '.d')
+                directory.mkdir()
+                for filename, data in dropins.items():
+                    (directory / filename).write_bytes(data)
             os.replace(temporary, destination)
-        finally:
-            if temporary.exists():
-                shutil.rmtree(temporary)
+            temporary.mkdir()
 
     def install_unit(self, unit, source):
         subprocess.run(['sudo', '/usr/bin/install', '-m', '0644', str(source),
@@ -411,28 +456,96 @@ class SystemServices:
             raise RuntimeError(f'cannot determine service state: {unit}')
         return result.returncode == 0
 
-    def dashboard_state(self):
+    def service_state(self, unit):
         result = subprocess.run(
             ['/usr/bin/systemctl', 'show', '-p', 'ActiveState', '-p', 'MainPID',
-             '-p', 'InvocationID', UNIT], check=True, text=True, capture_output=True,
+             '-p', 'InvocationID', unit], check=True, text=True, capture_output=True,
             timeout=10)
         state = dict(line.split('=', 1) for line in result.stdout.splitlines())
         if set(state) != {'ActiveState', 'MainPID', 'InvocationID'}:
-            raise ValueError('incomplete dashboard service state')
+            raise ValueError(f'incomplete service state: {unit}')
         return state
 
-    def read_running_record(self):
-        if RUNNING_RECORD.resolve(strict=True) != RUNNING_RECORD:
-            raise ValueError('symlinked dashboard running record')
-        return json.loads(read_gc_file(RUNNING_RECORD, RUNNING_RECORD.parent.stat().st_dev))
+    def read_running_record(self, unit):
+        record = Path('/run') / unit.removesuffix('.service') / 'package-release'
+        if record.resolve(strict=True) != record:
+            raise ValueError(f'symlinked running record: {unit}')
+        return json.loads(read_gc_file(record, record.parent.stat().st_dev))
 
     def restart(self, unit):
         subprocess.run(['sudo', '/usr/bin/systemctl', 'restart', unit], check=True)
 
 
-def install_release(stream, root, mode, services=None, flat_root=FLAT_ROOT):
-    """Install under a lock; injectable paths/services enable offline behavioral tests."""
+def directives(raw):
+    """Recognize simple systemd launch directives; refuse ambiguous continuations."""
+    text = raw.decode()
+    if '\\\n' in text or '\r' in text:
+        raise ValueError('unit continuations require operator review')
+    section = None
+    entries = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith(('#', ';')):
+            continue
+        if line.startswith('['):
+            section = line
+        elif section == '[Service]' and '=' in line:
+            entries.append(tuple(part.strip() for part in line.split('=', 1)))
+    return entries
+
+
+def recognized_unit(raw, unit, package):
+    spec = SERVICES[unit]
+    expected = (f"{spec['interpreter']} -P -m pi.apps.{spec['app']}" if package else
+                f"{spec['interpreter']} /home/pi/scripts/python-automation/{spec['flat']}")
+    return [value for key, value in directives(raw) if key == 'ExecStart'] == [expected]
+
+
+def validate_dropins(unit, dropins):
+    import shlex
+    for name, raw in dropins.items():
+        for key, value in directives(raw):
+            if (key in ('ExecStart', 'ExecStartPre', 'ExecStopPost', 'EnvironmentFile',
+                        'UnsetEnvironment', 'PassEnvironment', 'RootDirectory', 'RootImage', 'User') or
+                    key.startswith('RuntimeDirectory') or
+                    (key == 'Environment' and (not value or any(
+                        item.split('=', 1)[0] in ('PYTHONPATH', 'PYTHONHOME', 'PYTHONDONTWRITEBYTECODE')
+                        for item in shlex.split(value))))):
+                raise ValueError(f'{unit} drop-in {name} overrides package launch: {key}')
+
+
+def atomic_json(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, name = tempfile.mkstemp(prefix='.state-', dir=path.parent)
+    try:
+        with os.fdopen(descriptor, 'wb') as handle:
+            handle.write(encoded(data))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(name, path)
+    finally:
+        Path(name).unlink(missing_ok=True)
+
+
+def read_state(path):
+    if path.is_symlink():
+        raise ValueError(f'symlinked service state: {path}')
+    if not path.exists():
+        return None
+    value = json.loads(path.read_bytes())
+    if (not isinstance(value, dict) or
+            not re.fullmatch('[0-9a-f]{24}', value.get('release', '')) or
+            not re.fullmatch('[0-9a-f]{64}', value.get('digest', ''))):
+        raise ValueError(f'invalid service state: {path}')
+    return value
+
+
+def install_release(stream, root, mode, services=None, selected=None):
+    """Install under a lock; per-service intent survives link switches and failures."""
     import fcntl
+    if mode not in ('stage', 'activate', 'update'):
+        raise ValueError('legacy flatten is retired; the flat rollback tree is frozen')
+    selected = selected_units(selected)
     if root.is_symlink() or (root / 'releases').is_symlink():
         raise ValueError('release root must not be a symlink')
     root.mkdir(parents=True, exist_ok=True)
@@ -444,7 +557,7 @@ def install_release(stream, root, mode, services=None, flat_root=FLAT_ROOT):
                     'gc': collect_releases(root, lock, services, release)}
 
         old = current_release(root)
-        if mode == 'update' and (old is None or not (root / 'activated.json').is_file()):
+        if mode == 'update' and old is None:
             raise ValueError('initial cutover requires --activate; routine deployment refused')
         releases = root / 'releases'
         releases.mkdir(exist_ok=True)
@@ -467,117 +580,123 @@ def install_release(stream, root, mode, services=None, flat_root=FLAT_ROOT):
         print(f'RELEASE {release}')
         if mode == 'stage':
             return completed(release, [])
-        if mode == 'legacy':
-            # Never include dashboard modules: they no longer support flat execution.
-            mapping = {p: legacy_destination(p) for p in manifest['files'] if legacy_destination(p)}
-            if len(set(mapping.values())) != len(mapping):
-                raise ValueError('duplicate legacy destination')
-            changed_legacy = set()
-            for relative, destination in mapping.items():
-                path = flat_root / destination
-                if any(parent.is_symlink() for parent in (path, *path.parents)
-                       if parent.is_relative_to(flat_root)):
-                    raise ValueError(f'refusing legacy symlink: {path}')
-                if not path.exists() or digest(path.read_bytes()) != manifest['files'][relative]:
-                    changed_legacy.add(relative)
-            affected = set()
-            for relative in changed_legacy:
-                if relative.startswith('pi/apps/video_library/') or relative == 'shared/python/sonos_tasks.py':
-                    affected.add('video-library.service')
-                if relative.startswith('pi/apps/audiobooks/'):
-                    affected.add('audiobooks.service')
-                if relative == 'pi/apps/bme280/bme280_mqtt.py':
-                    affected.add('bme280-mqtt.service')
-            journal = root / 'legacy-pending-restarts.json'
-            pending_units = set()
-            if journal.exists():
-                saved = json.loads(journal.read_bytes())
-                allowed = {'video-library.service', 'audiobooks.service', 'bme280-mqtt.service'}
-                if not isinstance(saved, list) or any(not isinstance(unit, str) or unit not in allowed for unit in saved):
-                    raise ValueError('invalid legacy restart journal')
-                pending_units.update(saved)
-            if services is not None:
-                pending_units.update(unit for unit in affected if services.is_active(unit))
-            if pending_units and services is None:
-                raise ValueError('pending legacy restarts require a service manager')
-
-            def save_pending():
-                descriptor, name = tempfile.mkstemp(prefix='.legacy-restarts-', dir=root)
-                try:
-                    with os.fdopen(descriptor, 'wb') as handle:
-                        handle.write(encoded(sorted(pending_units)))
-                        handle.flush()
-                        os.fsync(handle.fileno())
-                    os.replace(name, journal)
-                finally:
-                    Path(name).unlink(missing_ok=True)
-
-            # Journal BEFORE copying: a partial copy or failed restart must not
-            # become an apparent no-op when the same release is retried.
-            if pending_units:
-                save_pending()
-            for relative in sorted(changed_legacy):
-                path = flat_root / mapping[relative]
-                path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(release / relative, path)
-            restarted = []
-            for unit in sorted(pending_units):
-                services.restart(unit)
-                restarted.append(unit)
-                pending_units.remove(unit)
-                save_pending()
-            journal.unlink(missing_ok=True)
-            return completed(release, restarted)
         if services is None:
             raise ValueError('activation requires a service manager')
-        live_unit = services.read_unit(UNIT)
-        new_unit = (release / f'pi/services/{UNIT}').read_bytes()
-        old_manifest = json.loads((old / 'manifest.json').read_bytes()) if old else {}
-        pending = root / 'pending-restart'
-        retry_pending = pending.exists()
-        changed = (retry_pending or live_unit != new_unit or
-                   old_manifest.get('services', {}).get(UNIT) != manifest['services'][UNIT])
-        if not (root / 'activated.json').exists() and not (root / 'pre-package-units').exists():
-            if b'/home/pi/scripts/python-automation/van_dashboard.py' not in live_unit:
-                raise ValueError('first activation requires an existing flat dashboard unit')
-            services.save_legacy(root / 'pre-package-units')
-        if changed:
-            pending.write_text(release_id + '\n')
+        work = []
+        # Validate ALL selected services before saving, journaling or changing
+        # current/units. --update cannot silently undo a deliberate flat rollback.
+        for unit in selected:
+            state_path = root / 'service-state' / (unit + '.json')
+            pending_path = root / 'pending-restarts' / (unit + '.json')
+            saved = read_state(state_path)
+            pending = read_state(pending_path)
+            if pending is not None and not isinstance(pending.get('restart'), bool):
+                raise ValueError(f'invalid pending restart intent: {unit}')
+            live = services.read_unit(unit)
+            packaged = recognized_unit(live, unit, package=True)
+            flat = recognized_unit(live, unit, package=False)
+            # Upgrade the pre-existing dashboard installer state without
+            # demanding a second first-cutover backup of its package unit.
+            old_dashboard = (unit == DASHBOARD and saved is None and old is not None and
+                             (root / 'activated.json').is_file() and packaged)
+            old_pending = unit == DASHBOARD and (root / 'pending-restart').is_file()
+            if old_dashboard:
+                # Another service may already have advanced current. The legacy
+                # activation marker, not that shared link, identifies the last
+                # dashboard dependency comparison.
+                activation = json.loads((root / 'activated.json').read_bytes())
+                prior_id = activation.get('release', '')
+                if not re.fullmatch('[0-9a-f]{24}', prior_id):
+                    raise ValueError('invalid legacy dashboard activation marker')
+                prior = root / 'releases' / prior_id
+                if prior.is_symlink():
+                    raise ValueError('symlinked legacy dashboard release')
+                prior_manifest = json.loads((prior / 'manifest.json').read_bytes())
+                prior_digest = prior_manifest.get('services', {}).get(unit, '')
+                if (digest(encoded(prior_manifest))[:24] != prior_id or
+                        not re.fullmatch('[0-9a-f]{64}', prior_digest)):
+                    raise ValueError('invalid legacy dashboard activation manifest')
+                saved = {'release': prior_id, 'digest': prior_digest}
+            backup = root / 'pre-package-units' / (unit + '.backup')
+            old_backup = unit == DASHBOARD and (root / 'pre-package-units' / unit).is_file()
+            if mode == 'update' and (saved is None or not packaged):
+                raise ValueError(f'{unit}: explicit --activate --service {unit} required')
+            if not flat and not packaged:
+                raise ValueError(f'{unit}: expected recognizable flat or package ExecStart')
+            if saved is None and packaged and not ((pending or old_pending) and (backup.exists() or old_backup)):
+                raise ValueError(f'{unit}: first activation requires the expected flat unit')
+            dropins = services.dropins(unit)
+            validate_dropins(unit, dropins)
+            new = (release / f'pi/services/{unit}').read_bytes()
+            if not recognized_unit(new, unit, package=True):
+                raise ValueError(f'{unit}: invalid packaged source unit')
+            changed = (pending is not None or old_pending or live != new or saved is None or
+                       saved['digest'] != manifest['services'][unit])
+            restart = changed and (services.is_active(unit) or old_pending or
+                                   (pending is not None and pending['restart']))
+            work.append({'unit': unit, 'state': state_path, 'pending': pending_path,
+                         'backup': backup, 'save': flat and not old_backup,
+                         'dropins': dropins, 'changed': changed, 'restart': restart,
+                         'install': live != new or pending is not None or old_pending,
+                         'old_pending': old_pending})
+        for item in work:
+            unit = item['unit']
+            if item['save']:
+                services.save_legacy(unit, item['backup'], item['dropins'])
+            if item['changed']:
+                atomic_json(item['pending'], {'release': release_id,
+                            'digest': manifest['services'][unit], 'restart': item['restart']})
         if old != release:
             if old:
                 replace_link(root, 'previous', 'releases/' + old.name)
             replace_link(root, 'current', 'releases/' + release_id)
-        # A restart failure is explicit, not silently rolled back across safety hooks.
-        if live_unit != new_unit or retry_pending:
-            # A previous daemon-reload may have failed after the unit copy.
-            services.install_unit(UNIT, release / f'pi/services/{UNIT}')
-        restarted = changed and (mode == 'activate' or retry_pending or services.is_active(UNIT))
-        if restarted:
-            services.restart(UNIT)
-        (root / 'activated.json').write_bytes(encoded({'release': release_id}))
-        pending.unlink(missing_ok=True)
-        return completed(release, [UNIT] if restarted else [])
+        restarted = []
+        for item in work:
+            unit = item['unit']
+            if item['install']:
+                # Retry reload even when a previous install copied matching bytes.
+                services.install_unit(unit, release / f'pi/services/{unit}')
+            if item['restart']:
+                services.restart(unit)
+                restarted.append(unit)
+            atomic_json(item['state'], {'release': release_id, 'digest': manifest['services'][unit]})
+            if unit == DASHBOARD:
+                atomic_json(root / 'activated.json', {'release': release_id})
+            item['pending'].unlink(missing_ok=True)
+            if item['old_pending']:
+                (root / 'pending-restart').unlink(missing_ok=True)
+        return completed(release, restarted)
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dry-run', action='store_true', help='print a local JSON plan; never connect')
+    parser.add_argument('--list-units', action='store_true', help='print package-owned units locally; never connect')
     parser.add_argument('--target', default='pi@vanpi.lan')
+    parser.add_argument('--service', action='append', choices=tuple(SERVICES), help='select service(s); default all')
     group = parser.add_mutually_exclusive_group()
-    group.add_argument('--activate', action='store_true', help='explicit first cutover (saves old units)')
-    group.add_argument('--update', action='store_true', help='update only an already activated host')
-    group.add_argument('--legacy-flatten', action='store_true', help='only flat-safe apps/utilities; never dashboard')
-    parser.add_argument('--receive', choices=('stage', 'activate', 'update', 'legacy'), help=argparse.SUPPRESS)
+    group.add_argument('--activate', action='store_true', help='explicit per-service first cutover (saves old units)')
+    group.add_argument('--update', action='store_true', help='update only already activated services')
+    group.add_argument('--legacy-flatten', action='store_true', help='retired: always refuses; flat tree is frozen')
+    parser.add_argument('--receive', choices=('stage', 'activate', 'update'), help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if args.legacy_flatten:
+        parser.error('--legacy-flatten is retired; the flat rollback tree is frozen')
+    if args.list_units:
+        if args.receive or args.activate or args.update or args.service or args.dry_run:
+            parser.error('--list-units must be used alone')
+        print('\n'.join(SERVICES))
+        return
     if args.receive:
         if args.dry_run:
             parser.error('--receive cannot be combined with --dry-run')
         if sys.version_info < (3, 11):
             parser.error('Python 3.11 or newer is required')
-        print(json.dumps(install_release(sys.stdin.buffer, LIVE_ROOT, args.receive, SystemServices())))
+        print(json.dumps(install_release(sys.stdin.buffer, LIVE_ROOT, args.receive,
+                                         SystemServices(), selected=args.service)))
         return
-    mode = 'activate' if args.activate else 'update' if args.update else 'legacy' if args.legacy_flatten else 'stage'
-    plan = build_plan(mode=mode)
+    mode = 'activate' if args.activate else 'update' if args.update else 'stage'
+    plan = build_plan(mode=mode, selected=args.service)
     print(json.dumps(plan, indent=2, sort_keys=True), flush=True)
     if args.dry_run:
         return
@@ -585,9 +704,10 @@ def main(argv=None):
         parser.error('invalid SSH target')
     import shlex
     receiver = Path(__file__).read_text()
-    # -c has no __file__; only receiver mode uses this harmless replacement root.
     receiver = receiver.replace('ROOT = Path(__file__).resolve().parents[1]', 'ROOT = Path.cwd()')
     command = '/usr/bin/python3 -c ' + shlex.quote(receiver) + ' --receive ' + mode
+    for unit in args.service or ():
+        command += ' --service ' + shlex.quote(unit)
     with tempfile.TemporaryFile() as archive:
         make_archive(plan, ROOT, archive)
         archive.seek(0)

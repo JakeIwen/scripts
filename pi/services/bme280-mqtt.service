@@ -6,9 +6,13 @@ Wants=network-online.target
 [Service]
 User=pi
 Environment="PATH=/home/pi/pyvenv/bin:/usr/bin"
-ExecStart=/home/pi/pyvenv/bin/python /home/pi/scripts/python-automation/bme280_mqtt.py
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONPATH=/home/pi/scripts/python-packages/current
+ExecStart=/home/pi/pyvenv/bin/python -P -m pi.apps.bme280
 Restart=always
 RestartSec=5
+RuntimeDirectory=bme280-mqtt
+RuntimeDirectoryMode=0750
 
 [Install]
 WantedBy=multi-user.target
