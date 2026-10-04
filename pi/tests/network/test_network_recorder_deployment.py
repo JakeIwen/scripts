@@ -22,6 +22,7 @@ class DeploymentTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix='network-deploy-test-', dir='/private/tmp' if Path('/private/tmp').is_dir() else '/tmp')
         self.root = Path(self.directory.name).resolve()
+        self.activation = self.root / 'activated.json'
         self.frontend = self.root / 'frontend'
         for name in ('old', 'older'):
             release = self.frontend / 'releases' / name
@@ -59,6 +60,7 @@ class DeploymentTests(unittest.TestCase):
         patches = [mock.patch.object(deploy,'TARGETS',self.targets),
                    mock.patch.object(deploy,'FRONTEND',self.frontend),
                    mock.patch.object(deploy,'STORAGE_CONFIG',self.root / 'storage.json'),
+                   mock.patch.object(deploy,'PACKAGE_ACTIVATION',self.root / 'activated.json'),
                    mock.patch.object(deploy,'DEPLOY_ROOT',self.root / 'backups'),
                    mock.patch.object(deploy,'regular_info',side_effect=info),
                    mock.patch.object(deploy,'command',side_effect=run),
@@ -126,6 +128,118 @@ class DeploymentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'storage has migrated'):
             deploy.rollback_remote('network-test')
         self.assertEqual(self.calls,[])
+
+    def test_package_activation_refuses_all_protected_legacy_entrypoints(self):
+        self.activation.write_text('not json')
+        with self.assertRaisesRegex(ValueError, 'deploy_network_storage.py.*deploy_python.py --update'):
+            deploy.inspect_remote(self.plan)
+        with self.assertRaisesRegex(ValueError, 'deploy_network_storage.py.*deploy_python.py --update'):
+            deploy.apply_remote(self.plan, self.stage())
+        with self.assertRaisesRegex(ValueError, 'deploy_network_storage.py.*deploy_python.py --update'):
+            deploy.rollback_remote('network-test')
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.old.read_text(), 'value = "old"\n')
+
+        self.activation.unlink()
+        deploy.inspect_remote(self.plan)
+        self.calls.clear()
+        self.activation.write_text('still not json')
+        with self.assertRaisesRegex(ValueError, 'deploy_network_storage.py.*deploy_python.py --update'):
+            deploy.verify_remote(self.plan)
+        self.assertEqual(self.calls, [])
+
+    def test_storage_guard_remains_in_verify(self):
+        deploy.inspect_remote(self.plan)
+        self.calls.clear()
+        deploy.STORAGE_CONFIG.write_text('{}')
+        with self.assertRaisesRegex(ValueError, 'storage has migrated'):
+            deploy.verify_remote(self.plan)
+        self.assertEqual(self.calls, [])
+
+    def test_missing_activation_marker_allows_legacy_behavior(self):
+        self.assertFalse(self.activation.exists())
+        self.assertIs(deploy.inspect_remote(self.plan), self.plan)
+
+    def test_activation_after_plan_check_is_refused_before_apply(self):
+        deploy.inspect_remote(self.plan)
+        self.calls.clear()
+        self.activation.write_text('{}')
+        with self.assertRaisesRegex(ValueError, 'deploy_network_storage.py.*deploy_python.py --update'):
+            deploy.apply_remote(self.plan, self.stage())
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.old.read_text(), 'value = "old"\n')
+
+    def test_activation_before_second_verify_prevents_service_mutations(self):
+        deploy.inspect_remote(self.plan)
+        self.calls.clear()
+        original_verify = deploy.verify_remote
+        verify_count = 0
+
+        def verify(plan):
+            nonlocal verify_count
+            verify_count += 1
+            result = original_verify(plan)
+            if verify_count == 1:
+                self.activation.write_text('{}')
+            return result
+
+        with mock.patch.object(deploy, 'verify_remote', side_effect=verify):
+            with self.assertRaisesRegex(ValueError, 'deploy_network_storage.py.*deploy_python.py --update'):
+                deploy.apply_remote(self.plan, self.stage())
+        self.assertEqual(verify_count, 2)
+        self.assertFalse(any(args and args[0] == '/usr/bin/systemctl' for args in self.calls))
+        self.assertEqual(self.old.read_text(), 'value = "old"\n')
+
+    def test_legacy_rollback_refuses_after_activation(self):
+        deploy.inspect_remote(self.plan)
+        deploy.apply_remote(self.plan, self.stage())
+        self.activation.write_text('{}')
+        self.calls.clear()
+        with self.assertRaisesRegex(ValueError, 'deploy_network_storage.py.*deploy_python.py --update'):
+            deploy.rollback_remote('network-test')
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.old.read_text(), 'value = "new"\n')
+        self.assertEqual(os.readlink(self.frontend / 'current'), 'releases/network-test')
+
+    def test_automatic_rollback_cannot_overwrite_activated_host(self):
+        deploy.inspect_remote(self.plan)
+        actual_systemctl = deploy.systemctl
+
+        def fail_after_activation(*args):
+            if args == ('restart', 'rsyslog'):
+                self.activation.write_text('{}')
+                raise RuntimeError('fixture activation failure')
+            return actual_systemctl(*args)
+
+        with mock.patch.object(deploy, 'systemctl', side_effect=fail_after_activation):
+            with self.assertRaisesRegex(ValueError, 'deploy_network_storage.py.*deploy_python.py --update'):
+                deploy.apply_remote(self.plan, self.stage())
+        self.assertEqual(self.old.read_text(), 'value = "new"\n')
+        self.assertEqual(self.receiver.read_text(), 'new receiver')
+        self.assertEqual(os.readlink(self.frontend / 'current'), 'releases/network-test')
+
+    def test_marker_presence_refuses_malformed_directory_and_dangling_symlink(self):
+        for kind in ('malformed', 'directory', 'dangling symlink'):
+            with self.subTest(kind=kind):
+                if kind == 'malformed':
+                    self.activation.write_text('{not json')
+                elif kind == 'directory':
+                    self.activation.mkdir()
+                else:
+                    self.activation.symlink_to(self.root / 'missing-target')
+                with self.assertRaisesRegex(ValueError, 'deploy_network_storage.py.*deploy_python.py --update'):
+                    deploy.inspect_remote(self.plan)
+                if self.activation.is_dir():
+                    self.activation.rmdir()
+                else:
+                    self.activation.unlink()
+
+    def test_marker_lstat_errors_propagate(self):
+        marker = mock.Mock()
+        marker.lstat.side_effect = PermissionError('marker unavailable')
+        with mock.patch.object(deploy, 'PACKAGE_ACTIVATION', marker):
+            with self.assertRaisesRegex(PermissionError, 'marker unavailable'):
+                deploy.inspect_remote(self.plan)
 
     def test_changed_file_after_review_is_not_overwritten(self):
         deploy.inspect_remote(self.plan)

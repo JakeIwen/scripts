@@ -240,28 +240,84 @@ there is no flat projects prerequisite or file update in the dashboard unit.
 
 ### Network installer boundary
 
-`pi/deploy_network_storage.py` and `pi/deploy_network_flight_recorder.py` remain
-unchanged: they are hash-pinned, manifest-guarded installers with their own
-rollback. Their dashboard writes still target
-`/home/pi/scripts/python-automation/van_dashboard_history.py` and, in the older
-recorder installer, `van_dashboard.py`. After cutover those writes **do not update
-the package backend**. A `van-dashboard` restart only restarts the package.
+**Dashboard backend code and `van-dashboard.service` belong only to
+`pi/deploy_python.py`.** The storage installer no longer owns or pins the flat
+`van_dashboard_history.py`, on any host. Giving it a second package-release
+implementation would split backend ownership and rollback. Its full plans now
+contain only recorder/storage/logging files and the independently owned
+`van-dashboard.service.d/network-storage.conf` drop-in; they still publish a
+separate React frontend release. Full apply/rollback may restart the package
+backend to pick up the drop-in or frontend, but never install its code or unit.
 
-Use the storage installer's existing `check/apply --recorder-only` workflow for
-recorder-only updates. Preserve its existing storage validation and rollback
-procedure. Do **not** rely on either installer's dashboard deployment or UI
-rollback after cutover: it can overwrite the flat fallback without updating the
-running package. The older flight-recorder installer's `TARGETS` also includes
-`pi/services/van-dashboard.service`: from this branch it would install the
-**package** unit, despite its flat backend-file targets. Its `inspect_remote`,
-`apply_remote` and `rollback_remote` explicitly refuse whenever
-`/etc/vanpi-network-storage.json` exists. A storage-managed host is therefore
-blocked before those old operations; on an unmanaged host the mixed
-flat-files/package-unit plan is unsafe and cannot bootstrap the package release.
-Do not remove storage configuration to evade the refusal. **Follow-up:** teach
-those installers package releases while preserving their hashes, manifests,
-storage safeguards and independent frontend ownership. Do not work around their
-guards with a repository-wide sync.
+Use `pi/deploy_network_storage.py check/apply --recorder-only` for routine
+recorder code and spool-permission updates. This mode still leaves the frontend,
+drop-in, backend, backup configuration and other services alone. Full mode keeps
+its existing hash pins, checked manifests, mount identity validation, flash/RAM
+migration safeguards, bounded spool repair, frontend links and readiness checks.
+The broad-sync exclusion list continues to protect every storage-owned target
+that broad sync could otherwise install; removing the flat history target does
+not add anything back to broad sync.
+
+**Historical storage manifests containing a flat dashboard target are rejected
+in their entirety**, including `rollback --release`, before managed-file reads,
+service stops or writes. This applies both before and after package activation.
+The diagnostic contains `retired dashboard backend targets`. Do not delete a
+manifest row, rename numbered `before-*` snapshots, use an older installer to
+bypass the refusal, or remove activation/storage markers. This deliberate
+fail-closed boundary keeps the frozen flat fallback intact and avoids claiming
+an exact rollback while silently skipping a dashboard change. Current-format
+full and recorder-only manifests retain exact, manifest-specific rollback and
+all existing history-preservation checks. To recover a pre-boundary recorder
+version, prepare a reviewed forward deployment from a checkout retaining these
+installer guards and containing the desired recorder sources, then create a
+fresh checked plan. Backend recovery is separate: use the package workflow or
+the [flat cutover rollback](#rollback), not a network manifest.
+
+The older `pi/deploy_network_flight_recorder.py` refuses inspection, apply and
+rollback (including automatic rollback) when storage configuration exists or
+`/home/pi/scripts/python-packages/activated.json` is present. Any marker type,
+including invalid contents or a dangling symlink, blocks the legacy operation;
+it is not interpreted as permission to overwrite the frozen backend. Apply
+rechecks the boundary during verification as well as at entry, so activation
+after an old check invalidates that plan. Its shared utility functions remain
+usable by the storage installer's embedded payload. The legacy installer's
+flat-files/package-unit mix is not a bootstrap path on an unactivated host
+either: follow this runbook for initial package activation. Do not run package
+activation/rollback concurrently with a network deployment.
+
+#### Coupled recorder and dashboard changes
+
+`van_dashboard_history.py` consumes the recorder's report CLI/SQLite data, not
+a copy bundled into the dashboard release. Ship a **backward-compatible recorder
+change first**, preserving the running dashboard's report/schema contract. Wait
+for the recorder update's flash/readiness checks, then ship the dashboard through
+`deploy_python.py --update`. Do not change both protocols incompatibly in one
+step: expand compatibility, update the consumer, and only remove the old contract
+in a later reviewed recorder release. If React also changes, ship its independent
+frontend release after the compatible backend; recorder-only never builds it.
+
+Owner-run on the Mac, from the reviewed checkout (the check is read-only on the
+Pi; it writes only the local plan). Use a new plan filename each time:
+
+```bash
+REPO="/absolute/path/to/your/scripts-checkout"
+mkdir -p "$REPO/tmp"
+python3 "$REPO/pi/deploy_network_storage.py" --target pi@vanpi.lan check --recorder-only --plan "$REPO/tmp/recorder-package-update-plan.json"
+python3 "$REPO/pi/deploy_network_storage.py" --target pi@vanpi.lan apply --recorder-only --plan "$REPO/tmp/recorder-package-update-plan.json"
+python3 "$REPO/pi/deploy_python.py" --dry-run --update
+python3 "$REPO/pi/deploy_python.py" --update
+```
+
+Run each command only after reviewing the prior result. Successful check exits 0
+with `ok: true`, `recorder_only: true`, `migration: false`, `managed_files: 8`,
+empty `backup_change`, zero source database/log migration bytes, and the verified
+flash `mount` identity. This proves planning, not runtime compatibility. Apply
+must finish with `ok: true`, `mode: "flash"` and `readiness.report_ok: true` before
+updating the dashboard. Verify the dashboard's `/api/network-history?hours=1`
+response and service logs afterward using the existing network recorder runbook.
+For coupled recovery restore a compatible dashboard first, then roll back the
+recorder via an eligible manifest; never downgrade the provider under a consumer
+that requires its new contract.
 
 ## Prerequisites and local plan
 

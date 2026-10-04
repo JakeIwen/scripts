@@ -44,7 +44,6 @@ RUN_ROOT = Path('/run')
 SERVICES = ('network-flight-recorder', 'rsyslog', 'van-dashboard', 'van-dashboard-preview')
 TARGETS = {
     'pi/scripts/network_flight_recorder.py':'/home/pi/scripts/network_flight_recorder.py',
-    'pi/apps/van_dashboard/van_dashboard_history.py':'/home/pi/scripts/python-automation/van_dashboard_history.py',
     'pi/services/network-flight-recorder.service':'/etc/systemd/system/network-flight-recorder.service',
     'pi/services/rsyslog-vanpi-network.conf':'/etc/systemd/system/rsyslog.service.d/vanpi-network.conf',
     'pi/services/van-dashboard-network-storage.conf':'/etc/systemd/system/van-dashboard.service.d/network-storage.conf',
@@ -74,7 +73,6 @@ INITIAL = {
  '/home/pi/scripts/network_recorder/store.py':'4370a1f87f939d6bc2260bf639bad3fdb74546f44997999260b619c71390aeb9',
  '/home/pi/scripts/network_recorder/report.py':'6f1fb154b8d7c4b810dea436f0f1697c9066c84343259198d31f5e657ab151fb',
  '/home/pi/scripts/network_recorder/parsers.py':'9f7fdc6e6b5afe4b4661989f3ad61fc4c929d132821677e17a028c7503d91cdf',
- '/home/pi/scripts/python-automation/van_dashboard_history.py':'cfad30ecd4c8661e584a4d56043eb582ec8af5ec1f0731aed0618f22248a62a9',
  '/etc/systemd/system/network-flight-recorder.service':'15e712b68bcbf6ea0daa18bdcf5b86bb7705db1d3fca1e8b555173a604775b9f',
  '/etc/rsyslog.d/30-openwrt-dendelion.conf':'269cf4095e6ef6bbf6f6f5ffc166761697ee66cb0ebfd5bfb1c99e5cf75ebc7f',
  '/usr/local/libexec/vanpi-rotate-network-log':'c813071bf7e54cb50f6cbfaf66053493b311b5562daded6a4abd4386f8744788',
@@ -271,6 +269,16 @@ def validate_plan(plan):
         raise ValueError('invalid storage deployment manifest')
     if not isinstance(plan.get('recorder_only', False), bool):
         raise ValueError('invalid recorder-only mode')
+    # Backend ownership moved to deploy_python.py. Reject historical manifests
+    # intact, even before activation: silently dropping a row would turn an exact
+    # rollback into a partial one and could misalign numbered before-* snapshots.
+    for row in plan['files']:
+        destination = Path(row['destination'])
+        if (destination.is_relative_to('/home/pi/scripts/python-automation')
+                or destination == Path('/etc/systemd/system/van-dashboard.service')):
+            raise ValueError('storage manifest includes retired dashboard backend targets; '
+                             'refusing check/apply/rollback; use a fresh storage plan and '
+                             'deploy_python.py for the dashboard')
     targets = RECORDER_TARGETS if plan.get('recorder_only') else TARGETS
     if {(r['source'],r['destination']) for r in plan['files']} != set(targets.items()) or len(plan['files']) != len(targets):
         raise ValueError('unexpected managed storage targets')

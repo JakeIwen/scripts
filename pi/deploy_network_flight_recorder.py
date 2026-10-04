@@ -30,6 +30,7 @@ REPO = Path(__file__).resolve().parents[1]
 DEPLOY_ROOT = Path('/var/lib/vanpi-network-deploy/releases')
 FRONTEND = Path('/home/pi/scripts/van-dashboard-preview')
 STORAGE_CONFIG = Path('/etc/vanpi-network-storage.json')
+PACKAGE_ACTIVATION = Path('/home/pi/scripts/python-packages/activated.json')
 SERVICES = ('network-flight-recorder', 'van-dashboard', 'rsyslog', 'van-dashboard-preview')
 TARGETS = {
     'pi/scripts/network_flight_recorder.py': '/home/pi/scripts/network_flight_recorder.py',
@@ -110,6 +111,17 @@ def service_state(name):
     return dict(enabled=enabled.stdout.strip() or 'not-found', active=active.stdout.strip() == 'active')
 
 
+def refuse_managed_host(storage_message='network storage has migrated; use deploy_network_storage.py'):
+    if STORAGE_CONFIG.exists():
+        raise ValueError(storage_message)
+    try:
+        PACKAGE_ACTIVATION.lstat()
+    except FileNotFoundError:
+        return
+    raise ValueError('dashboard package is activated; use deploy_network_storage.py for recorder changes '
+                     'and deploy_python.py --update for dashboard changes')
+
+
 def validate_plan(plan):
     safe_release(plan['release'])
     if plan.get('schema_version') != 1:
@@ -127,8 +139,7 @@ def validate_plan(plan):
 
 
 def inspect_remote(plan):
-    if STORAGE_CONFIG.exists():
-        raise ValueError('network storage has migrated; use deploy_network_storage.py')
+    refuse_managed_host()
     validate_plan(plan)
     current = link_info(FRONTEND / 'current')
     prior_files = {}
@@ -162,6 +173,7 @@ def inspect_remote(plan):
 
 
 def verify_remote(plan):
+    refuse_managed_host()
     dependency = regular_info('/home/pi/scripts/system_event_monitor.py')
     if dependency is None or dependency['sha256'] != plan['monitor_dependency']:
         raise ValueError('system monitor dependency changed after check')
@@ -245,8 +257,7 @@ def restore_services(plan):
 
 
 def rollback_remote(release, automatic=False):
-    if STORAGE_CONFIG.exists():
-        raise ValueError('network storage has migrated; use deploy_network_storage.py rollback')
+    refuse_managed_host('network storage has migrated; use deploy_network_storage.py rollback')
     root = DEPLOY_ROOT / safe_release(release)
     plan = json.loads((root / 'manifest.json').read_text())
     validate_plan(plan)
@@ -292,8 +303,7 @@ def rollback_remote(release, automatic=False):
 
 
 def apply_remote(plan, stage):
-    if STORAGE_CONFIG.exists():
-        raise ValueError('network storage has migrated; use deploy_network_storage.py')
+    refuse_managed_host()
     import pwd
     validate_plan(plan)
     verify_remote(plan)

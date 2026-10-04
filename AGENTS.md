@@ -140,9 +140,13 @@ and manual retention. Keep the pre-cutover flat dashboard intact for rollback;
 `--legacy-flatten` only updates the documented flat-safe non-dashboard subset.
 
 Do not bundle `pi/van_compute/`: its coupled installer owns the separately
-imported metrics module. The existing network installers' dashboard/UI paths do
-not update a package backend; preserve their guards and use the documented
-recorder-only workflow rather than overwriting the flat fallback. Blueprints
+imported metrics module. Only `deploy_python.py` owns dashboard backend code and
+its unit. The storage installer owns the independent frontend and storage drop-in,
+never the flat dashboard; historical manifests containing dashboard backend targets
+fail closed, including rollback. The legacy recorder installer refuses both
+storage-managed and package-activated hosts. Ship compatible recorder changes first
+with the storage installer's recorder-only workflow, then package backend updates;
+see the network installer boundary in the runbook. Blueprints
 live under `pi/apps/van_dashboard/routes/`; mutable process controllers live in
 `runtime.py`, and the relay-off controller CLI remains independent of Flask.
 
@@ -248,8 +252,9 @@ and the shared-DNS limitation.
 
 Use the guarded, targeted `pi/deploy_network_storage.py` installer and
 manifest-specific rollback; the older recorder installer refuses storage-managed
-deployments. Preserve mount identity checks, bounded RAM buffering and idempotent
-recovery. Never write through an absent mount or unlink a database beneath active
+or package-activated deployments. Preserve mount identity checks, bounded RAM
+buffering and idempotent recovery. Never write through an absent mount or unlink
+a database beneath active
 readers. Avoid repository-wide sync for recorder updates; `pi/sync_storage_managed.exclude`
 keeps the broad sync from staging any file this installer owns, so add new storage-managed
 targets there too.
