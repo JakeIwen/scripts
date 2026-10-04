@@ -1,670 +1,378 @@
 # Pi Python deployment
 
-**The owner runs these commands later. This refactor has not touched the Pi.**
-Use this runbook for the dashboard package cutover or recovery. Do not use broad
-sync for the first cutover. Keep the existing flat dashboard until a later,
-separately reviewed cleanup.
-
-## Quick recovery
-
-If the first package restart fails, go directly to [Rollback](#rollback).
-Do not flatten the new dashboard, delete a release, run a network installer's
-UI deployment, or repeatedly run broad sync to try to repair it.
-
-**Broad sync is blocked until cutover.** Once this change is in the primary
-checkout/branch used for routine sync, `pi/sync_scripts.sh`—including the BTT
-button that invokes it—exits **1** at the preflight with
-`Python package activation preflight failed` until step 3 succeeds. It deploys
-**nothing**: no shell scripts, units, home files, `smb.conf`, secrets or compute.
-The same block returns after rollback until explicit re-activation. If a
-non-Python change must ship first, use its specific scoped deployer when one
-exists (for example the preview deployer for frontend assets); otherwise do the
-cutover first. Do not bypass the preflight to force a broad sync. After setting
-`REPO` as shown below, the scoped frontend command is
-`bash "$REPO/pi/deploy_van_dashboard_preview.sh"`.
+The owner performs the live cutover after review/merge. Local tests and dry-runs
+are not evidence of Pi health. **Never delete or write the existing
+`/home/pi/scripts/python-automation/` tree:** it is the frozen flat rollback copy.
 
 ## Architecture and ownership
 
-The stdlib-only `pi/deploy_python.py` resolves its checkout from `__file__`, not
-cwd, `$HOME`, or another clone. Its JSON dry-run is entirely local: it runs Git
-for provenance, reads allowlisted sources, and never opens a network connection.
-The real transport is one SSH invocation to `pi@vanpi.lan`; only unit installation
-and systemd operations use sudo. No dependency installation occurs on the Pi.
+`pi/deploy_python.py` resolves its checkout from `__file__`, records Git commit,
+branch, checkout and dirty status, and transfers an allowlisted source release
+with one SSH invocation to `pi@vanpi.lan`. `--dry-run` and `--list-units` are local
+only. Only systemd operations and unit installation use sudo; it does not install
+dependencies. Review dirty sources and provenance before deploying.
 
-A source-tree release, rather than a wheel, minimizes changes to these personal
-scripts and their independent dependency environments. Its explicit allowlist
-is immediate Python modules in these directories, package initializers, the
-three video runtime assets, and the dashboard unit:
+Allowlisted inputs are immediate Python modules in:
 
-- `pi/apps/{audiobooks,bme280,van_dashboard,video_library}`
-- `pi/apps/van_dashboard/routes` (15 feature blueprints, including `projects`)
-- `pi/apps/video_library/players` (explicit immediate modules, not recursive)
-- `pi/scripts/python` and `shared/python`
-- `pi/apps/video_library/templates/video_library.html`
-- `pi/apps/video_library/static/{video_library.js,video_library.css}`
+- `pi/apps/{audiobooks,bme280,van_dashboard,video_library}`;
+- `pi/apps/van_dashboard/routes` and `pi/apps/video_library/players`;
+- `pi/scripts/python` and `shared/python`;
+- explicit `pi`, `pi/apps`, `pi/scripts`, and `shared` initializers plus
+  `pi/package_runtime.py`;
+- video `templates/video_library.html` and
+  `static/{video_library.js,video_library.css}`;
+- the four units named in the installer's `SERVICES` table.
 
-There is **no recursive transfer of `pi/`**. Secrets, configs, tests, frontend
-source/build dependencies, node_modules, caches, bytecode and `pi/van_compute/`
-are not inputs. Reject symlinked inputs and review every dry-run source before
-shipping. React builds retain their independent preview-release deployment.
-
-On the Pi:
+There is no recursive transfer of `pi/`. Secrets, configs, tests, frontend builds,
+node_modules, caches, bytecode, system-monitor code and `pi/van_compute/` are not
+inputs. Source symlinks are rejected. Python 3.11+ is required, including the
+existing BME280 venv (currently 3.11.2).
 
 ```text
 /home/pi/scripts/python-packages/
-  releases/<content-and-provenance-digest>/
-    manifest.json
-    pi/apps/van_dashboard/...
-    pi/apps/{audiobooks,bme280,video_library}/...
-    pi/scripts/python/...
-    shared/python/...
-    pi/services/van-dashboard.service
+  releases/<24-hex-digest>/manifest.json
+  releases/<24-hex-digest>/{pi,shared}/...
   current -> releases/<digest>
   previous -> releases/<prior-digest>
-  pre-package-units/                 # automatic first-cutover unit backup
-  activated.json                     # opt-in cutover gate
-  pending-restart                    # only while activation needs completion
-  legacy-pending-restarts.json        # interrupted legacy copy/restart recovery
-/home/pi/scripts/python-automation/  # existing flat fallback; never delete
-/home/pi/van_compute/scripts/        # separately installed compute modules
+  .install.lock
+  activated.json                            # dashboard/host activation gate
+  service-state/<unit>.json                  # completed service dependency digest
+  pending-restarts/<unit>.json               # durable reload/restart intent
+  pre-package-units/<unit>.backup/<unit>     # first flat unit, saved once
+  pre-package-units/<unit>.backup/<unit>.d/   # effective local drop-ins, if any
+  pre-package-units/van-dashboard.service    # earlier dashboard backup, preserved
+/home/pi/scripts/python-automation/          # frozen recovery copy, never written
 ```
 
-Every release records absolute source checkout, Git commit, branch, dirty flag,
-file checksums and per-service dependency digests. A receiver lock serializes
-package and legacy installs. Incoming regular files are checked for paths,
-hashes, completeness and Python syntax before an atomic rename publishes the
-release. Only then can `current` be atomically replaced. Re-running identical
-inputs/provenance verifies the existing release and does not restart an unchanged
-service. Different checkout provenance can create a new release without a
-runtime restart. Every successful mode also attempts conservative automatic
-release retention under the same lock; see [Automatic release retention](#automatic-release-retention).
+The receiver validates regular-file paths, hashes, completeness and Python syntax
+before publishing an immutable release. It serializes installation and collection
+under `.install.lock`. `current`/`previous` are atomically replaced. Identical
+inputs/provenance verify the existing release; provenance-only differences can
+publish a release without restarting any service.
 
-Only `van-dashboard.service` converts in this ticket. It keeps that exact name,
-including independently managed `van-dashboard.service.d/network-storage.conf`.
-It runs `/usr/bin/python3 -P -m pi.apps.van_dashboard`. Its relay-off safety hook
-runs `-m pi.apps.van_dashboard.van_dashboard_cop --relay-off`. It retains GPIO
-membership and all other runtime configuration. Python 3.11 is required; `-P`
-omits the unsafe working-directory import entry. An explicit `pi/__init__.py`
-prevents namespace merging and pins its package path to the resolved immutable
-release, so a running process cannot lazily import modules from a newer release
-when `current` changes. `shared` is pinned similarly. Bytecode writing is disabled
-in the dashboard unit. Verify `pi.__path__` below rather than assuming a package
-named `pi` is unambiguous on this host. The production `__main__` entrypoint
-atomically writes that already-pinned path, its PID and systemd `INVOCATION_ID`
-to `/run/van-dashboard/package-release` before starting the worker lifecycle.
-It does not resolve `current` again: a concurrent link switch cannot change the
-recorded import location. A failed write warns but does not prevent startup;
-retention then fails closed. The relay-off helper and factory-only smoke never
-write the production record.
+### Consumers
 
-The unit's PYTHONPATH contains the package release root and
-`/home/pi/van_compute/scripts`. The dashboard imports `van_compute_metrics`
-directly from the latter. There is no runtime sys.path mutation and no bundled
-`pi.van_compute` copy. The coupled compute installer retains its flat import
-branches and owns compute upgrades/restarts. **Follow-up:** van_compute package
-conversion must update both its Pi and Mac installer layouts together.
-
-The package installer compares the dashboard dependency digest and live unit.
-A changed dashboard module or unit restarts an active dashboard; unrelated
-staged apps and the independent preview server do not. Inactive services stay
-inactive during routine updates. First activation starts the dashboard; an
-unchanged repeat is a no-op.
-A failed unit reload/restart leaves a retry marker; retries reload the unit and
-complete the restart instead of incorrectly deciding that matching bytes mean
-success. Service health still needs the operator's checks below.
-
-The retention change leaves the service unit byte-for-byte unchanged, including
-`-P -m`, PYTHONPATH, runtime-directory permissions and the relay-off ExecStopPost.
-Its new entrypoint record **does change the dashboard dependency digest**, so the
-first normal package update restarts an active dashboard once. Subsequent
-unrelated-file updates still do not restart it.
-
-### First cutover is opt-in
-
-Default deployment **stages only**. `--activate` is the explicit first-cutover
-operation; `--update` refuses unless activation was completed. After merging,
-routine `pi/sync_scripts.sh` first performs a read-only activation-marker SSH
-preflight, so a normal run cannot bypass this staged runbook on an unconverted
-or deliberately rolled-back host.
-
-After successful cutover, routine sync installs and waits for its home files,
-hooks, secrets, Samba configuration, tmpfiles, shell scripts and other units.
-Only after all those transfers succeed does it run package `--update` and the
-explicit legacy subset, so Python never restarts ahead of its updated script
-and tmpfiles dependencies. The conditional van_compute installer remains last.
-Broad sync deliberately stays pinned to the primary trusted checkout,
-`/Users/jacobr/dev/scripts`, even when its launcher is invoked from another clone.
-It publishes ignored private inputs (`pi/secrets`, `.twilio`, `pi/configs`,
-including `smb.conf`, and hooks); an alternate clone may have stale or incomplete
-copies. Its package and compute installer calls use that same primary checkout.
-The generic service updater still handles non-package units and their script
-changes; it does not install the dashboard unit or remove the flat dashboard.
-
-For Python backend deployment from an alternate clone, run that clone's
-`pi/deploy_python.py` directly. All four modes—default stage, `--activate`,
-`--update` and `--legacy-flatten`—resolve their own checkout, record provenance
-and ship no private inputs. Like the scoped preview/video deployers, this
-replaces live code with the selected clone's version; a later primary-checkout
-broad sync can replace it again. For example:
-
-```bash
-python3 "$HOME/dev/scripts_3/pi/deploy_python.py" --dry-run --update
-python3 "$HOME/dev/scripts_3/pi/deploy_python.py" --update
-```
-
-### Consumers deliberately staying flat
-
-`--legacy-flatten` exists for one transition release. It copies only flat-safe
-audiobook, BME280, video-library and utility modules plus video assets. It refuses
-basename collisions. It **never** flattens dashboard modules or the preview
-server, including after imports become package-only. Default stage/activate/update
-never write the flat directory; the explicit legacy option does update its
-non-dashboard subset. Legacy copies are not an atomic app release. Changed
-active audiobook/BME280/video services restart; unchanged/inactive ones do not.
-Restart intent is journaled before copying, so retrying an interrupted copy or
-failed restart completes the originally active services' restarts even when
-files now match (or the failed service is now inactive). Do not delete the
-legacy retry journal to conceal an incomplete operation.
-
-The subset contains **28 destinations: 25 Python modules and 3 video assets**.
-Its 18 video modules are `video_library_server`, `video_asset_catalog`,
-`video_qbittorrent`, `catalog_values`, `catalog`, `config`, `identity`,
-`legacy_progress`, `library`, `media_models`, `naming`, `playback`, `routes`,
-`schema`, `service`, `v1_bridge`, `vlc_player`, and `sonos_volume` (all `.py`).
-The last two come from `players/` but flatten by basename like the former
-`find -exec cp` transfer. The remaining modules are `audiobook_server.py`,
-`bme280_mqtt.py`, `bme280_testread.py`, and the four utilities `ip_info.py`,
-`vlc_property.py`, `sonos_tasks.py`, `ip_only.py`. Assets retain
-`templates/video_library.html` and `static/{video_library.js,video_library.css}`.
-Generic video basenames still pass the shared collision guard; any later
-collision is an error, not permission to overwrite another app's module.
-Changes anywhere under `pi/apps/video_library/`, including `players/`, restart
-an active video service. The players directory remains a namespace subpackage
-(no new `__init__.py` is needed); its flat-import branches remain load-bearing.
-
-| Consumer | Disposition and update path |
+| Consumer | Owner and runtime |
 | --- | --- |
-| `video-library.service` | Flat, preserving the existing media/data migration contract and Rank 3's 18-module manifest (including flattened players). Keep package/flat import guards. Update through its checkout-relative `pi/deploy_video_library.sh` (including git-ref/data-safe rollback), or routine sync's complete legacy subset after cutover. Its unit and dedicated deployer are not converted independently of one another. |
-| `audiobooks.service` | Flat; routine sync / explicit legacy subset updates `audiobook_server.py`. |
-| `bme280-mqtt.service` | Flat; legacy subset, retaining `/home/pi/pyvenv/bin/python` and the sensor environment. |
-| `van-dashboard-preview.service` | Existing independently owned preview `current` release. Continue `pi/deploy_van_dashboard_preview.sh`; the package copy of its source is not its running server. |
-| `pi/.bashrc` (`ipinfo`, VLC helper, Sonos helper, PYTHONPATH) | Retains utility flat paths. Legacy subset updates `ip_info.py`, `vlc_property.py`, `sonos_tasks.py`, `ip_only.py`; broad sync still updates `.bashrc`. Do not use the shell's flat PYTHONPATH to launch the packaged dashboard. |
-| `pi/sns.sh` | Runs `python3 -c "from sonos_tasks import ..."`, inheriting the flat-directory PYTHONPATH from `.bashrc` (or the video service). The legacy subset keeps `sonos_tasks.py` current alongside the video's flat `sonos_volume.py` player; neither becomes a dashboard package import. The Mac wrapper uses its own checkout's `shared/python` and is unaffected. |
-| `pi/scripts/log_position.sh` | Retains `vlc_property.py` flat calls; source/guards unchanged, helper updated by legacy subset. |
-| `pi/raspbian_setup.sh` | Historical setup still creates/configures the flat utility directory. It does not perform package activation; use this runbook afterward. |
-| Mac BTT `repair_rps.py` / `repair_script_paths.py` | The former saves a button pointing at its checkout's `pi/sync_scripts.sh`; the latter remaps old sync paths. Neither directly launches flat Python today. Keep py/js pairing untouched; the saved sync entrypoint now observes the activation preflight. The archived July path-rewrite helper still mentions the former flat layout and is historical, not a new deploy path. |
-| Compute installer cleanup of old `van_compute_protocol.py` | Independently owned migration cleanup; no compute file ships in this package. |
-| `pi/scripts` programs, cron/timers, `system_event_monitor` | Rank 3's shim plus `system_monitor/` package still ship through broad sync under `/home/pi/scripts`, with existing service/cron paths. Keep script/package import guards. No service uses a package-release copy, so `pi/scripts/system_monitor` is not allowlisted. Package-release conversion is a follow-up. |
+| `van-dashboard.service` | Package; `/usr/bin/python3 -P -m pi.apps.van_dashboard`; port 8788. Compute metrics remain separately installed in `/home/pi/van_compute/scripts`. Existing relay-off hook, GPIO group and network-storage drop-in are preserved. |
+| `video-library.service` | Package; `/usr/bin/python3 -P -m pi.apps.video_library`; port 8789. Original DISPLAY, DBUS, Sonos/VLC and data/migration behavior is unchanged. |
+| `audiobooks.service` | Package; `/usr/bin/python3 -P -m pi.apps.audiobooks`; port 8787. |
+| `bme280-mqtt.service` | Package; `/home/pi/pyvenv/bin/python -P -m pi.apps.bme280`; existing sensor/MQTT environment. |
+| `pi/.bashrc` | Package-root/utility PYTHONPATH and current-release `ipinfo`, VLC and Sonos helper paths; installed by broad sync. |
+| `pi/sns.sh` | Sonos wrapper; preserves an inherited import path (including the saved flat video unit on rollback) and supplies package utility paths for clean interactive use. No Sonos command semantics change. |
+| `pi/scripts/log_position.sh` | Calls the current release's VLC helper; installed by broad sync. |
+| `van-dashboard-preview.service` | Independent frontend/preview current release, not the staged package copy of `react_dashboard_preview.py`. Use its existing preview deployer. |
+| `system_event_monitor.py` and `system_monitor/`, other script services/cron/timers | Coherent broad-sync layout under `/home/pi/scripts`. No package-release conversion in this change. Keep Rank 3 flat/package import guards. |
+| `van_compute` | Coupled independent Mac/Pi installer; no package copy. |
+| historical `raspbian_setup.sh` and archived path-repair tools | Not package bootstrap or deployment paths. Do not use them to refresh the frozen flat directory. |
 
-The exact base-commit consumer inventory is retained in local verification
-artifacts, including all unit and cron/timer references. References in tests and
-architecture docs describe contracts rather than additional live processes.
+`-P` removes the unsafe working-directory import entry. Each unit sets
+`PYTHONPATH=/home/pi/scripts/python-packages/current`; dashboard additionally
+includes compute, video additionally includes `current/shared/python` for the
+`sns.sh` subprocess. `pi.__path__` (and `shared.__path__`) pins the resolved release
+at import time. Bytecode writing is disabled for all four services and the shell
+utility entrypoints, so interactive imports cannot dirty releases with `__pycache__`.
 
-### Interaction with Rank 3 deployment
+The video unit's existing Python/asset prechecks now point into the package tree,
+including nested `players/` and `shared/python/sonos_tasks.py`. Its `/home/pi/sns.sh`
+and `/usr/bin/vlc` checks and DISPLAY/DBUS settings remain unchanged. Audiobooks
+and BME280 gain PYTHONPATH, no-bytecode and private runtime-directory settings.
+All three gain a record-writing `__main__.py`; application logic is unchanged.
+`players/` remains a namespace subpackage; all video flat-import guards remain.
+The dashboard unit is byte-for-byte unchanged; its record writer moves into the
+shared helper, changing its dependency digest and causing one active restart.
 
-Rank 3 is merged but **undeployed**. Its system-monitor half ships with broad
-sync, which this branch blocks until dashboard cutover. The owner must either
-ship Rank 3 from master **before merging this branch**, or complete this
-runbook's dashboard cutover before syncing it. Do not bypass the activation
-preflight or remove the script/flat import guards in either Rank 3 component.
+Each service has its own digest: its entire allowlisted app (video includes assets
+and players), common Pi initializers/record helper, and for video the Sonos helper
+and shared initializers. The independent preview module is excluded from the
+dashboard digest. A unit-only change reloads/restarts that service. An unrelated
+app change does not restart it. Selection with `--service` affects unit installation
+and restarts, not release contents: all allowlisted sources are staged and the
+shared `current` changes. Utilities use current at each invocation.
 
-All commands below are owner-run on the Mac from the primary trusted checkout,
-not this integration worktree. Before merging Rank 4, with the primary checkout
-on the Rank 3 master containing `94620e3` and no package deployer yet:
+## Cutover and retry policy
+
+Default deployment **stages only**. First switch of **each** flat service requires
+`--activate --service <unit>`; ordinary `--update` refuses an unactivated or
+flat-restored selected service. This explicit gate makes the supervised service
+order deliberate and prevents a future broad sync from undoing a rollback.
+Omitting `--service` selects all four; the option may be repeated.
+
+Before any link/unit changes, all selected services are checked. First activation
+requires the exact expected flat ExecStart interpreter and script, not a comment
+containing a familiar pathname. The live unit and effective local drop-ins are
+saved once. Symlinked units/drop-ins, nonlocal or stale effective drop-ins and
+drop-ins overriding package launch/runtime settings are refused for operator
+review, never silently ignored. Existing unrelated drop-ins are left untouched.
+The dashboard's older `activated.json` state is adopted from that marker's release
+manifest (not the possibly advanced shared current link) without backing up its
+package unit over the original flat backup.
+
+Changed active services restart; deliberately inactive services stay inactive,
+**even on first activation**. A restart intent is persisted before changing
+`current` or copying any selected unit. A failed reload/restart leaves per-service
+pending state; repeat the same activation/update command. A formerly active
+service still retries if the failed restart left it inactive. Successful services
+save their own digests immediately, so a failure later in a multi-service deploy
+does not cause completed services to restart again. Matching unit bytes do not
+hide an unfinished daemon-reload. Existing dashboard `pending-restart` is migrated
+on retry. Do not erase pending state to claim success; use the rollback below.
+
+### Broad sync and scoped video deployment
+
+`pi/sync_scripts.sh` remains pinned to `/Users/jacobr/dev/scripts`, the primary
+trusted checkout, because it publishes ignored private inputs. Its read-only
+preflight requires `activated.json` and all four service-state markers before any
+upload. The block remains until the supervised service cutovers complete and
+returns after a rollback. Do not bypass it.
+
+After the preflight, sync waits for home files/hooks/secrets/Samba/tmpfiles/scripts
+and non-package units, then runs **only** `deploy_python.py --update`, then the
+conditional compute installer last. The package `SERVICES` table supplies the
+local `--list-units` exclusion list; generic service staging cannot install any
+of the four package units. The independent storage exclusion file continues to
+protect recorder/storage ownership. `update_services.sh` is otherwise unchanged.
+
+`--legacy-flatten` is retained only to fail with an explicit retired/frozen-tree
+error, including dry-run; its mapping and copy implementation are gone.
+`pi/deploy_video_library.sh` also refuses without connecting and points to the
+package installer. Its old `--rollback` to v1 is deliberately retired: rewriting
+the only frozen fallback or installing a flat unit behind package state is not a
+safe escape hatch. Use saved-unit rollback instead. Video database rollback and
+v1 migration recovery are separate from package rollback; neither this cutover
+nor its rollback restores, replaces or deletes a media database.
+
+## Orchestrator cutover checklist
+
+Run these commands **after merge**, from the primary Mac checkout. No commands in
+this checklist were run against the Pi by the implementation agent. Stop other
+installers/factory smokes first. Recheck live units, dependencies and health; this
+runbook is not evidence they match the recorded 2026-10-03 state.
 
 ```bash
 cd /Users/jacobr/dev/scripts
 git status --short
-git branch --show-current
-git merge-base --is-ancestor 94620e3 HEAD && test ! -f pi/deploy_python.py && bash pi/sync_scripts.sh
+python3 pi/deploy_python.py --dry-run
+python3 pi/deploy_python.py --dry-run --update
+ssh pi@vanpi.lan 'for u in van-dashboard video-library audiobooks bme280-mqtt; do /usr/bin/systemctl cat "$u.service"; /usr/bin/systemctl is-active "$u.service"; done'
+ssh pi@vanpi.lan '/usr/bin/python3 --version; /home/pi/pyvenv/bin/python --version; test -r /home/pi/sns.sh; test -x /usr/bin/vlc; test -r /home/pi/scripts/python-automation/video_library_server.py; test -r /home/pi/scripts/python-automation/audiobook_server.py; test -r /home/pi/scripts/python-automation/bme280_mqtt.py'
+python3 pi/deploy_python.py
 ```
 
-Otherwise, after merging Rank 4, first follow steps 1–3 below with
-`REPO=/Users/jacobr/dev/scripts`. Only after supervised activation and health
-checks, ship the system-monitor shim/package and other broad-sync dependencies:
+Expect the plan to name all four units and sources solely under this checkout.
+Staging prints `RELEASE .../releases/<digest>`, restarts nobody and does not switch
+current. Review its provenance/dirty flag. Check Python >=3.11 in both environments.
+Do not start parallel media/sensor production workers as a smoke.
+
+**1. Dashboard migration/update** (already packaged; no new flat cutover).
 
 ```bash
-cd /Users/jacobr/dev/scripts
+python3 pi/deploy_python.py --update --service van-dashboard.service
+ssh pi@vanpi.lan '/usr/bin/systemctl is-active van-dashboard.service; /usr/bin/journalctl -u van-dashboard.service -n 60 --no-pager'
+ssh pi@vanpi.lan 'curl --retry 10 --retry-connrefused --retry-delay 1 -fsS http://127.0.0.1:8788/api/status; curl -fsS http://127.0.0.1:8788/manifest.webmanifest'
+```
+
+Expect `active`, normal port-8788 startup and unchanged safety/controller health;
+`restarted` includes dashboard once because its entrypoint/helper changed. Do not
+arm COP/relay as a deployment test. Existing external-service errors require
+comparison with the pre-deploy baseline, not automatic attribution to packaging.
+
+**2. Video first switch**, then verify before proceeding.
+
+```bash
+python3 pi/deploy_python.py --dry-run --activate --service video-library.service
+python3 pi/deploy_python.py --activate --service video-library.service
+ssh pi@vanpi.lan '/usr/bin/systemctl is-active video-library.service; /usr/bin/journalctl -u video-library.service -n 60 --no-pager; curl --retry 10 --retry-connrefused --retry-delay 1 -fsS http://127.0.0.1:8789/api/status'
+```
+
+Expect `active`, HTTP 200 JSON on 8789, no import/precheck errors, and a saved
+`pre-package-units/video-library.service.backup/video-library.service`. Confirm
+normal UI/library/resume state. Sonos routing, desktop VLC playback and audio
+volume need an intentional owner playback test, not an automated mutation.
+
+**3. Audiobooks first switch**.
+
+```bash
+python3 pi/deploy_python.py --activate --service audiobooks.service
+ssh pi@vanpi.lan '/usr/bin/systemctl is-active audiobooks.service; /usr/bin/journalctl -u audiobooks.service -n 60 --no-pager; curl --retry 10 --retry-connrefused --retry-delay 1 -fsS http://127.0.0.1:8787/ > /dev/null'
+```
+
+Expect `active`, HTTP 200 on 8787 and unchanged audiobook/resume state.
+
+**4. BME280 first switch**.
+
+```bash
+python3 pi/deploy_python.py --activate --service bme280-mqtt.service
+ssh pi@vanpi.lan '/usr/bin/systemctl is-active bme280-mqtt.service; /usr/bin/journalctl -u bme280-mqtt.service -n 100 --no-pager'
+ssh pi@vanpi.lan "/usr/bin/timeout 30 /home/pi/pyvenv/bin/python -c 'import paho.mqtt.subscribe as s; [print(m.payload.decode()) for m in s.simple(\"vanpi/sensors/vanpi_bme280_1/state\", hostname=\"127.0.0.1\", msg_count=2, retained=False)]'"
+```
+
+Expect `active`, no import, I2C, broker connection or restart-loop errors, and two
+fresh JSON readings with temperature, humidity and pressure roughly ten seconds
+apart. The existing publisher does **not** log each publication, so clean journal
+lines alone are not proof; the subscription deliberately ignores retained samples.
+A timeout or missing samples is a failed verification. Preserve the existing
+venv/interpreter.
+
+**5. All records, idempotence, then utility/home-file sync**.
+
+```bash
+ssh pi@vanpi.lan 'for u in van-dashboard video-library audiobooks bme280-mqtt; do /usr/bin/systemctl show -p ActiveState -p MainPID -p InvocationID "$u.service"; /usr/bin/python3 -m json.tool "/run/$u/package-release"; done'
+python3 pi/deploy_python.py --update
 bash pi/sync_scripts.sh
+ssh pi@vanpi.lan '/usr/bin/readlink -e /home/pi/scripts/python-packages/current; /usr/bin/readlink -e /home/pi/scripts/python-packages/previous'
 ```
 
-The video half can ship **at any time**, independent of dashboard activation,
-through its scoped deployer (including its complete module manifest and unit):
+Each active record must match systemd PID/invocation and name
+`.../releases/<digest>/pi`. The repeated identical update should report
+`"restarted": []`. Broad sync now supplies the utility shell edits without
+flattening anything. It may independently update non-Python dependencies/compute;
+review their own validation. Expect no package-record warnings. Before broad
+sync, the old interactive helpers intentionally still use the frozen flat copy;
+the package video unit already supplies the Sonos path, so it has no prerequisite
+on a new `.bashrc` or `sns.sh`.
+
+If any step fails, stop and inspect logs. New tracebacks, import errors, missing
+prechecks, ownership errors, restart loops or API regressions are rollback
+triggers. Retry only understood transient reload/restart failures.
+
+## Per-service flat rollback
+
+These exact commands run from the primary Mac checkout. **Select exactly one**
+service; repeat for others only if needed. They hold the installer lock, verify
+the saved unit contains the expected flat command, restore it, retire only that
+service's activation/retry state, reload systemd and restart it. No release links,
+flat files, application data or frontend assets are changed.
+
+For video:
 
 ```bash
 cd /Users/jacobr/dev/scripts
-bash pi/deploy_video_library.sh
+UNIT=video-library.service
+FLAT=video_library_server.py
 ```
 
-Or after cutover, broad sync includes it through the legacy subset. A scoped
-code/assets-only legacy update (not an installer for a missing video unit) is:
+For audiobooks instead:
 
 ```bash
-cd /Users/jacobr/dev/scripts
-python3 pi/deploy_python.py --dry-run --legacy-flatten
-python3 pi/deploy_python.py --legacy-flatten
+UNIT=audiobooks.service
+FLAT=audiobook_server.py
 ```
 
-The projects API is the `projects` blueprint in `routes/projects.py`.
-`runtime.hosted_projects` is constructed immediately after the shared
-`state_store`, preserving master's initialization order. Both the controller
-module and route module are covered by the dashboard release dependency digest;
-there is no flat projects prerequisite or file update in the dashboard unit.
-
-### Network installer boundary
-
-**Dashboard backend code and `van-dashboard.service` belong only to
-`pi/deploy_python.py`.** The storage installer no longer owns or pins the flat
-`van_dashboard_history.py`, on any host. Giving it a second package-release
-implementation would split backend ownership and rollback. Its full plans now
-contain only recorder/storage/logging files and the independently owned
-`van-dashboard.service.d/network-storage.conf` drop-in; they still publish a
-separate React frontend release. Full apply/rollback may restart the package
-backend to pick up the drop-in or frontend, but never install its code or unit.
-
-Use `pi/deploy_network_storage.py check/apply --recorder-only` for routine
-recorder code and spool-permission updates. This mode still leaves the frontend,
-drop-in, backend, backup configuration and other services alone. Full mode keeps
-its existing hash pins, checked manifests, mount identity validation, flash/RAM
-migration safeguards, bounded spool repair, frontend links and readiness checks.
-The broad-sync exclusion list continues to protect every storage-owned target
-that broad sync could otherwise install; removing the flat history target does
-not add anything back to broad sync.
-
-**Historical storage manifests containing a flat dashboard target are rejected
-in their entirety**, including `rollback --release`, before managed-file reads,
-service stops or writes. This applies both before and after package activation.
-The diagnostic contains `retired dashboard backend targets`. Do not delete a
-manifest row, rename numbered `before-*` snapshots, use an older installer to
-bypass the refusal, or remove activation/storage markers. This deliberate
-fail-closed boundary keeps the frozen flat fallback intact and avoids claiming
-an exact rollback while silently skipping a dashboard change. Current-format
-full and recorder-only manifests retain exact, manifest-specific rollback and
-all existing history-preservation checks. To recover a pre-boundary recorder
-version, prepare a reviewed forward deployment from a checkout retaining these
-installer guards and containing the desired recorder sources, then create a
-fresh checked plan. Backend recovery is separate: use the package workflow or
-the [flat cutover rollback](#rollback), not a network manifest.
-
-The older `pi/deploy_network_flight_recorder.py` refuses inspection, apply and
-rollback (including automatic rollback) when storage configuration exists or
-`/home/pi/scripts/python-packages/activated.json` is present. Any marker type,
-including invalid contents or a dangling symlink, blocks the legacy operation;
-it is not interpreted as permission to overwrite the frozen backend. Apply
-rechecks the boundary during verification as well as at entry, so activation
-after an old check invalidates that plan. Its shared utility functions remain
-usable by the storage installer's embedded payload. The legacy installer's
-flat-files/package-unit mix is not a bootstrap path on an unactivated host
-either: follow this runbook for initial package activation. Do not run package
-activation/rollback concurrently with a network deployment.
-
-#### Coupled recorder and dashboard changes
-
-`van_dashboard_history.py` consumes the recorder's report CLI/SQLite data, not
-a copy bundled into the dashboard release. Ship a **backward-compatible recorder
-change first**, preserving the running dashboard's report/schema contract. Wait
-for the recorder update's flash/readiness checks, then ship the dashboard through
-`deploy_python.py --update`. Do not change both protocols incompatibly in one
-step: expand compatibility, update the consumer, and only remove the old contract
-in a later reviewed recorder release. If React also changes, ship its independent
-frontend release after the compatible backend; recorder-only never builds it.
-
-Owner-run on the Mac, from the reviewed checkout (the check is read-only on the
-Pi; it writes only the local plan). Use a new plan filename each time:
+For BME280 instead:
 
 ```bash
-REPO="/absolute/path/to/your/scripts-checkout"
-mkdir -p "$REPO/tmp"
-python3 "$REPO/pi/deploy_network_storage.py" --target pi@vanpi.lan check --recorder-only --plan "$REPO/tmp/recorder-package-update-plan.json"
-python3 "$REPO/pi/deploy_network_storage.py" --target pi@vanpi.lan apply --recorder-only --plan "$REPO/tmp/recorder-package-update-plan.json"
-python3 "$REPO/pi/deploy_python.py" --dry-run --update
-python3 "$REPO/pi/deploy_python.py" --update
+UNIT=bme280-mqtt.service
+FLAT=bme280_mqtt.py
 ```
 
-Run each command only after reviewing the prior result. Successful check exits 0
-with `ok: true`, `recorder_only: true`, `migration: false`, `managed_files: 8`,
-empty `backup_change`, zero source database/log migration bytes, and the verified
-flash `mount` identity. This proves planning, not runtime compatibility. Apply
-must finish with `ok: true`, `mode: "flash"` and `readiness.report_ok: true` before
-updating the dashboard. Verify the dashboard's `/api/network-history?hours=1`
-response and service logs afterward using the existing network recorder runbook.
-For coupled recovery restore a compatible dashboard first, then roll back the
-recorder via an eligible manifest; never downgrade the provider under a consumer
-that requires its new contract.
-
-## Prerequisites and local plan
-
-Run these on the Mac. Edit only the first line for your chosen clone. Keep this
-checkout unchanged from staging through activation; avoid deploying unreviewed
-dirty sources. The plan prints the dirty flag rather than silently ignoring them.
+For dashboard instead (also retires the host gate):
 
 ```bash
-REPO="/absolute/path/to/your/scripts-checkout"
-cd "$REPO"
-mkdir -p "$REPO/tmp"
-python3 "$REPO/pi/deploy_python.py" --dry-run > "$REPO/tmp/package-plan.json"
-python3 -m json.tool "$REPO/tmp/package-plan.json"
-RELEASE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["release"])' "$REPO/tmp/package-plan.json")
-printf 'Selected release: %s\n' "$RELEASE"
+UNIT=van-dashboard.service
+FLAT=van_dashboard.py
 ```
 
-Verify that every
-`source` starts with the selected checkout, provenance is right, and no forbidden
-inputs are listed. Staging does not build React or install Flask/compute. Before
-cutover ensure the existing frontend, `/home/pi/van_compute/scripts`, Flask and
-GPIO dependencies are present. Do not create a second COP owner to test them.
-
-## 1. Stage beside the live flat tree
-
-On the Mac, using the same `REPO` and `RELEASE`:
+Then execute this single command (not a heredoc):
 
 ```bash
-python3 "$REPO/pi/deploy_python.py"
-ssh pi@vanpi.lan "test -r /home/pi/scripts/python-packages/releases/$RELEASE/manifest.json"
-ssh pi@vanpi.lan
+ssh pi@vanpi.lan "bash -s -- '$UNIT' '$FLAT'" < pi/rollback_python_service.sh
 ```
 
-The first command stages only: no unit changes, no current-link switch, no
-restart, and no flat file writes. Confirm its printed release matches `RELEASE`;
-if not, stop and re-review the plan. On the Pi, set the printed digest explicitly:
+The reviewed rollback script restores `pre-package-units/<unit>.backup/<unit>`;
+for the previously converted dashboard it accepts the original
+`pre-package-units/van-dashboard.service`. It prints the retired state directory
+and restored unit. Check `active`, logs and the relevant HTTP/MQTT checks above.
+Broad sync is now blocked until explicit reactivation; an ordinary package update
+also refuses the flat unit even if someone forgot to retire its state marker.
 
-```bash
-RELEASE="paste-the-reviewed-release-digest"
-STAGED="/home/pi/scripts/python-packages/releases/$RELEASE"
-test -r "$STAGED/manifest.json"
-cd "$STAGED"
-PYTHONPATH="$STAGED:/home/pi/van_compute/scripts" PYTHONDONTWRITEBYTECODE=1 /usr/bin/flock -s /home/pi/scripts/python-packages/.install.lock /usr/bin/python3 -P -c 'import pi,sys,van_compute_metrics; print(sys.version); print(list(pi.__path__)); print(van_compute_metrics.__file__)'
-/usr/bin/python3 -c 'import importlib.metadata as m; print(m.version("flask"))'
-```
-
-Expect Python 3.11+, exactly this release's `pi` directory, and metrics from
-`/home/pi/van_compute/scripts/van_compute_metrics.py`. Anything else is a stop,
-not a reason to remove `-P` or reintroduce a sys.path hack. Check the effective
-live unit/drop-ins before changing them:
-
-```bash
-sudo /usr/bin/systemctl cat van-dashboard.service
-/usr/bin/test -r /home/pi/scripts/van-dashboard-preview/current/index.html
-/usr/bin/test -r /home/pi/van_compute/scripts/van_compute_metrics.py
-/usr/bin/test -r /home/pi/scripts/python-automation/van_dashboard.py
-```
-
-## 2. Side-effect-free staging smoke on 8791
-
-Stay on the Pi. **Do not use `python -m pi.apps.van_dashboard` for a parallel
-smoke:** production main starts COP/relay, connectivity and Starlink loops.
-Instead Flask loads the factory directly and never enters production main.
-The `flask --app` option requires **Flask 2.2 or newer**; use the version printed
-in step 1 to select the command. With Flask >= 2.2:
-
-```bash
-SMOKE_STATE=$(mktemp -d /tmp/van-dashboard-package-smoke.XXXXXX)
-cd "$STAGED"
-PYTHONPATH="$STAGED:/home/pi/van_compute/scripts" PYTHONDONTWRITEBYTECODE=1 VAN_DASHBOARD_STATE_PATH="$SMOKE_STATE/state.json" VAN_DASHBOARD_RUNTIME_DIR="$SMOKE_STATE/runtime" VAN_DASHBOARD_FRONTEND_ROOT=/home/pi/scripts/van-dashboard-preview/current FLASK_DEBUG=0 /usr/bin/flock -s /home/pi/scripts/python-packages/.install.lock /usr/bin/python3 -P -m flask --app pi.apps.van_dashboard:create_app run --host 127.0.0.1 --port 8791 --no-reload --no-debugger
-```
-
-If the installed Flask is older, use its `FLASK_APP` environment-variable form
-instead; do not upgrade the live Flask installation just to obtain `--app`:
-
-```bash
-SMOKE_STATE=$(mktemp -d /tmp/van-dashboard-package-smoke.XXXXXX)
-cd "$STAGED"
-PYTHONPATH="$STAGED:/home/pi/van_compute/scripts" PYTHONDONTWRITEBYTECODE=1 VAN_DASHBOARD_STATE_PATH="$SMOKE_STATE/state.json" VAN_DASHBOARD_RUNTIME_DIR="$SMOKE_STATE/runtime" VAN_DASHBOARD_FRONTEND_ROOT=/home/pi/scripts/van-dashboard-preview/current FLASK_DEBUG=0 FLASK_APP=pi.apps.van_dashboard:create_app /usr/bin/flock -s /home/pi/scripts/python-packages/.install.lock /usr/bin/python3 -P -m flask run --host 127.0.0.1 --port 8791 --no-reload --no-debugger
-```
-
-`--port 8791` is Flask CLI's port override, without code changes. It binds
-loopback only. Factory/controller construction reads state and allocates objects;
-it does not start worker threads, claim GPIO or issue network/process commands.
-The factory preserves one controller set per process across app instances.
-Both its state file and runtime/COP marker directory are isolated beneath
-`SMOKE_STATE`, rather than using the live owner's paths. The shared `flock` holds
-`.install.lock` for the smoke's entire lifetime, protecting its staged imports
-from retention. **Installs, including broad sync, block until it exits. Stop the
-smoke before deploying.** Any other manually launched release consumer must
-hold this same shared lock for its full lifetime; only the production systemd
-entrypoint has automatic running-release ownership.
-
-**This is not a sandbox for arbitrary API requests.** Existing handlers can
-perform work, even some GETs (for example UBNT refresh). Do not browse the staged
-UI: its JavaScript polls APIs. Do not POST controls or run full dashboard API
-smokes concurrently with the live owner. In a second Pi SSH terminal, curl only:
-
-```bash
-curl -fsS http://127.0.0.1:8791/manifest.webmanifest | /usr/bin/python3 -m json.tool
-curl -fsS http://127.0.0.1:8791/app-icon.svg > /dev/null
-curl -fsS http://127.0.0.1:8791/ > /dev/null
-test "$(curl -sS -o /dev/null -w '%{http_code}' 'http://127.0.0.1:8791/api/vonstar?unexpected=1')" = 400
-```
-
-The malformed GET verifies blueprint routing/validation without reaching a
-controller. `/` must be 200 when the independent React release exists; 503 means
-its build is missing. Stop the staging server with **Ctrl-C before cutover**.
-This Flask-CLI exit does not execute the production COP stop/relay hook because
-it never started the owner. The temporary state directory can simply remain in
-`/tmp`; do not recursively clean a guessed path.
-
-## 3. Save live units and cut over
-
-In a Pi terminal, before activation:
-
-```bash
-(
-set -euo pipefail
-umask 077
-BACKUP="/home/pi/scripts/python-packages/operator-backup-$(date -u +%Y%m%dT%H%M%SZ)"
-install -d -m 700 "$BACKUP"
-sudo cp -a /etc/systemd/system/van-dashboard.service "$BACKUP/van-dashboard.service"
-if sudo test -d /etc/systemd/system/van-dashboard.service.d; then sudo cp -a /etc/systemd/system/van-dashboard.service.d "$BACKUP/van-dashboard.service.d"; fi
-sudo /usr/bin/systemctl cat van-dashboard.service > "$BACKUP/van-dashboard.effective.txt"
-printf '%s\n' "$BACKUP" > /home/pi/scripts/python-packages/LAST_OPERATOR_BACKUP
-sudo grep -F '/home/pi/scripts/python-automation/van_dashboard.py' "$BACKUP/van-dashboard.service"
-)
-```
-
-The final check must show the old flat ExecStart. If it does not, investigate the
-actual layout; do not claim this is the flat-to-package first cutover. Keep the
-flat directory in place. The installer also saves `pre-package-units` once,
-without replacing an existing backup.
-
-On the Mac:
-
-```bash
-python3 "$REPO/pi/deploy_python.py" --dry-run --activate
-python3 "$REPO/pi/deploy_python.py" --activate
-```
-
-Activation verifies/copies the same release, switches `current`, installs the
-package unit, reloads systemd and restarts `van-dashboard.service`. It does not
-change/drop network-storage drop-ins. If any command fails, inspect the error
-and use rollback; do not delete the pending-restart marker to fake success.
-
-On the Pi, watch first restart:
-
-```bash
-sudo journalctl -u van-dashboard.service -n 100 --no-pager
-sudo journalctl -u van-dashboard.service -f
-```
-
-Expect normal Flask startup listening on 8788, without repeated exits/restarts.
-Stop on `ModuleNotFoundError`, `ImportError`, missing ExecStartPre inputs,
-`Address already in use`, tracebacks, GPIO ownership/permission errors, or a
-restart loop. In another Pi terminal:
-
-```bash
-/usr/bin/systemctl is-active van-dashboard.service
-curl -fsS http://127.0.0.1:8788/manifest.webmanifest > /dev/null
-curl -fsS http://127.0.0.1:8788/ > /dev/null
-curl --retry 10 --retry-connrefused --retry-delay 1 --connect-timeout 2 --max-time 5 -fsS http://127.0.0.1:8788/api/status | /usr/bin/python3 -m json.tool
-```
-
-Now there is only one production controller owner. Inspect the COP/relay fields
-for expected intent and no new errors; do not arm it merely to test deployment.
-Existing unavailable external services are not automatically a packaging failure.
-Compare against pre-cutover health and investigate new errors. If preview/media
-is involved, its independent logs remain:
-
-```bash
-sudo journalctl -u van-dashboard-preview.service -f
-sudo journalctl -u video-library.service -f
-```
-
-## Rollback
-
-Rollback means restoring the saved old unit and starting the **untouched old flat
-dashboard**, never re-flattening post-refactor sources. No package release needs
-to be deleted. On the Pi:
-
-```bash
-(
-  set -euo pipefail
-  ROOT=/home/pi/scripts/python-packages
-  exec 9>"$ROOT/.install.lock"
-  /usr/bin/flock -x 9
-  BACKUP=$(cat "$ROOT/LAST_OPERATOR_BACKUP")
-  case "$BACKUP" in "$ROOT"/operator-backup-*|"$ROOT"/pre-package-units) ;; *) exit 1 ;; esac
-  test "$(/usr/bin/readlink -e "$BACKUP")" = "$BACKUP"
-  sudo test -r "$BACKUP/van-dashboard.service"
-  sudo grep -F '/home/pi/scripts/python-automation/van_dashboard.py' "$BACKUP/van-dashboard.service"
-  test -r /home/pi/scripts/python-automation/van_dashboard.py
-  sudo install -m 644 "$BACKUP/van-dashboard.service" /etc/systemd/system/van-dashboard.service
-  if test -f "$ROOT/activated.json"; then mv "$ROOT/activated.json" "$ROOT/activated.rolled-back.$(date -u +%Y%m%dT%H%M%SZ).$$.json"; fi
-  sudo /usr/bin/systemctl daemon-reload
-  sudo /usr/bin/systemctl restart van-dashboard.service
-)
-sudo journalctl -u van-dashboard.service -n 100 --no-pager
-curl --retry 10 --retry-connrefused --retry-delay 1 --connect-timeout 2 --max-time 5 -fsS http://127.0.0.1:8788/api/status | /usr/bin/python3 -m json.tool
-```
-
-The activation marker is retired so routine sync cannot silently re-cut over.
-The package installer never changed the drop-in directory, so leave it in place;
-its archived copy is evidence/recovery material, not permission to overwrite a
-later independent storage configuration. If `LAST_OPERATOR_BACKUP` is unavailable,
-verify/select the automatic backup with these commands, then rerun the rollback
-block. Do not roll back the media database or React release as part of backend
-package rollback.
-
-```bash
-sudo grep -F '/home/pi/scripts/python-automation/van_dashboard.py' /home/pi/scripts/python-packages/pre-package-units/van-dashboard.service && printf '%s\n' /home/pi/scripts/python-packages/pre-package-units > /home/pi/scripts/python-packages/LAST_OPERATOR_BACKUP
-```
-
-After diagnosing a failed cutover, repeat staging/import checks, then use
-`--activate` explicitly again. An installer retry keeps the saved flat unit and
-retries a pending reload/restart even if release bytes already match.
+The installer never edits drop-ins. Their saved copies are recovery evidence;
+leave current drop-ins in place, especially the independently owned dashboard
+network-storage configuration. The rollback script requires them to match the
+saved copies when a new-style backup exists; if a separate owner changed them,
+stop and reconcile that owner's version instead of overwriting it. For the older
+dashboard backup, review current versus saved drop-ins before rollback. Never
+concurrently run package rollback and a network or other service installer.
+After diagnosis, run `--activate --service "$UNIT"` explicitly and reverify; the
+original flat backup is never replaced.
 
 ## Automatic release retention
 
-A new commit/branch/checkout provenance creates a release even when runtime
-files are unchanged. After every successful **stage, activate, update or legacy**
-install, the receiver attempts GC while still holding its exclusive
-`.install.lock`. It keeps the union of:
+Every successful stage/activate/update attempts best-effort GC under the same
+exclusive lock. It keeps current, previous, just-installed, the newest three
+(by directory mtime, digest tie-break), and **every service's verified running
+release**, even if none of the links points to it. At most 16 retired releases
+are removed per install, oldest first. This is a retention target, not a quota.
 
-- `current` and `previous` (if present);
-- the release actually imported by the running dashboard;
-- the **three newest** releases, ordered by release-directory modification time
-  (digest breaks ties), for manual rollback;
-- the just-installed release, even when retrying an older staged release.
+Each production entrypoint writes its pinned `pi.__path__`, PID and
+`INVOCATION_ID` atomically to `/run/<service-name>/package-release` before starting
+the original worker. Dashboard uses its existing runtime directory; the other
+three have `RuntimeDirectory=` and mode 0750. Write failure only warns. The
+record is not an installer's guess based on current. GC checks PID/invocation
+against `systemctl show` independently for all four services.
 
-Only retired real `releases/<24-lowercase-hex>` directories are eligible. At most
-**16 releases per install** are removed, oldest first; later installs drain any
-remaining backlog. This is a retention target, not a quota: safety always wins,
-so an ambiguous host can retain everything until the cause is resolved.
+Any missing/unreadable/mismatched record, transitional/unknown state or query
+failure skips deletion. Only inactive/failed with MainPID 0 needs no record.
+This also deliberately retains everything while an active service still runs
+flat during partial cutover or rollback. Immediately after a Type=simple restart,
+systemd can return before the entrypoint writes its record; a later install
+retries GC. Do not treat an install's success as proof collection ran.
 
-### Running ownership and races
+The collector retains the existing safety boundary: held lock/inode, canonical
+owned root, exact release names, recognized manifests/trees, filesystem identity,
+no symlinks/hardlinks/foreign or writable nodes, no unknown files, and complete
+mountinfo checks including same-device bind mounts. It revalidates immediately
+before fd-safe recursion. Ambiguity keeps everything; a deletion failure never
+fails the install. JSON `gc` reports status, kept, removed, reason and any deferred
+backlog. It never traverses flat files, backups, state journals, compute or
+frontend trees. Do not replace it with a blanket recursive cleanup.
 
-GC reads `systemctl show`'s `ActiveState`, `MainPID` and `InvocationID`. For an
-active service, `/run/van-dashboard/package-release` must identify that exact PID
-and invocation and name a real validated release. It is written by the process
-from its pinned `pi.__path__`, not by the installer and not from a fresh `current`
-lookup. Thus a crash/reboot/operator restart updates ownership correctly, while
-an unrelated-file install can leave an older running release protected even
-after both links move on.
-
-Missing, unreadable, stale or unexpected records while active, transitional
-states, or failed service queries cause **no deletion**. Only an inactive/failed
-service with MainPID 0 needs no running-release protection. The record is under
-systemd's existing RuntimeDirectory, which is cleared on stop; identity checks
-also reject a stale record before a new process writes its own. A restart after
-GC's snapshot can only start from the protected `current` while the installer
-lock prevents another link switch. The relay-off ExecStopPost also uses this
-protected `current`. A RuntimeDirectory override that moves the record away
-from `/run/van-dashboard` conservatively disables GC until the collector's record
-location is deliberately updated.
-
-### Fail-closed deletion boundary
-
-GC checks the held lock/inode, canonical root, ownership and permissions, exact
-release names, manifest identity and declared tree structure before deleting
-anything. It refuses symlinks (including nested links), hardlinked files, foreign
-or writable nodes, unexpected files/directories, incomplete releases and a
-missing protected target. Every release must be on the package root's filesystem.
-Linux mountinfo detects mounts underneath `releases`, including same-device bind
-mounts; mount discovery failures also stop GC. Tree and mount checks repeat
-immediately before fd-safe recursive removal. Do not mutate releases or links
-outside the installer lock, or mount filesystems in this immutable namespace.
-
-GC never traverses the flat directory, `operator-backup-*`, `pre-package-units`,
-activation/restart journals, compute installation or frontend releases. A
-validation/deletion failure is reported but **never fails an otherwise successful
-install**. A failed removal may leave a partial retired tree; subsequent GC
-refuses that tree rather than silently deleting unrecognized leftovers.
-
-The receiver's final JSON includes `gc.status` (`ok` or `skipped`), `kept`,
-`removed`, a diagnostic `reason`, and on success `deferred` for the deletion-cap
-backlog. A skipped collection can have already removed earlier validated retired
-releases before encountering a deletion error; `removed` lists only completed
-removals. Inspect skipped results rather than treating deployment success as
-proof that retention ran. With this `Type=simple` service, systemd may return
-from restart before Python writes the record; that install safely skips GC and
-a later successful install retries it.
-
-### Read-only checks and manual escape hatch
-
-Run on the Pi after the normal sync:
+Factory-only dashboard smokes and custom long-lived package consumers must hold
+a shared `.install.lock` for their entire lifetime and stop before deployment:
 
 ```bash
-/usr/bin/systemctl show -p ActiveState -p MainPID -p InvocationID van-dashboard.service
-/usr/bin/python3 -m json.tool /run/van-dashboard/package-release
-/usr/bin/readlink -e /home/pi/scripts/python-packages/current
-/usr/bin/readlink -e /home/pi/scripts/python-packages/previous
-/usr/bin/find /home/pi/scripts/python-packages/releases -mindepth 1 -maxdepth 1 -printf '%f %y\n'
-/usr/bin/journalctl -u van-dashboard.service -n 100 --no-pager
+ssh pi@vanpi.lan '/usr/bin/flock -s /home/pi/scripts/python-packages/.install.lock /bin/bash'
 ```
 
-Expect `ActiveState=active`, matching record PID/invocation, and a `package_path`
-ending in `/releases/<digest>/pi`. That digest may intentionally differ from
-`current` and `previous` after unrelated updates. All listed releases should be
-real directories; the JSON should explain which were kept/removed. After the
-first rollout, check for normal startup and no package-record warnings.
+Never smoke with production `-m pi.apps.van_dashboard` alongside the live owner:
+it starts COP/relay and connectivity workers. A reviewed Flask factory-only
+smoke needs an isolated state/runtime directory, loopback port 8791, no debug or
+reloader, and only non-mutating manifest/icon/root requests. Even some GET APIs
+have side effects. The factory/relay-off helper never claims the production
+record. Short flat-import utility subprocesses use standalone modules; do not
+hold the installer lock inside `sns.sh` invoked by a restarting video service,
+which would deadlock that restart.
 
-For manual recovery, **leave ambiguous releases in place**, stop any factory
-smokes, diagnose the reported boundary, then retry a normal install to run the
-same guarded collector. Do not replace it with a blanket `rm -rf`. If a separate
-manual inspection must freeze retention, hold the existing lock in a Pi terminal:
+## Network installer boundary
 
-```bash
-/usr/bin/flock -s /home/pi/scripts/python-packages/.install.lock /bin/bash
-```
+Only `deploy_python.py` owns the dashboard backend and base unit. The storage
+installer owns recorder/storage/logging, independent React releases and
+`van-dashboard.service.d/network-storage.conf`, never package or frozen flat
+backend files. Full apply/rollback may restart the backend to pick up its drop-in
+or frontend. Use `deploy_network_storage.py check/apply --recorder-only` for
+routine recorder/spool changes; it preserves unrelated UI/backend/drop-in state.
 
-Keep that shell open while inspecting and `exit` when finished; all installs
-wait meanwhile. The flat rollback procedure above does not require release
-pruning and its backups remain untouched.
+Historical storage manifests containing retired flat dashboard targets are
+rejected in their entirety, including rollback, before reads/stops/writes. Do
+not edit manifests or bypass guards using an old installer. Recover recorder
+code with a reviewed forward deployment retaining the current ownership guards.
+The legacy recorder installer refuses storage-managed or package-activated hosts,
+including malformed/dangling activation markers. Neither installer bootstraps
+package services. See `networking/NETWORK_FLIGHT_RECORDER.md` for storage/retention,
+provenance and manifest-specific rollback safeguards.
 
-## Verification and limits
+For a coupled recorder/dashboard change, ship a backward-compatible recorder
+first with the storage installer's recorder-only workflow, verify flash/readiness,
+then package `--update`. Never downgrade a provider underneath a consumer needing
+its new contract. React follows independently. No network installer, monitor,
+compute or vehicle transmission behavior changes in this retirement.
 
-Route paths and methods are unchanged. The comparison is sorted
-`(rule, sorted(methods))`, including Flask's automatic HEAD/OPTIONS; endpoint names
-change to `blueprint.function`. No `url_for`, `request.endpoint`, endpoint-specific
-registration or `view_functions` consumer was found in the dashboard/frontend,
-tests, network installers or dashboard docs. Consumers use URL paths.
+## Verification limits
 
-The route bodies and existing controller definitions are mechanically equivalent
-to the base commit; tests patch the actual owning feature or runtime module, not
-facade re-exports. The process runtime preserves shared mutable controller
-identity; a new Flask app does not mean a second safe hardware owner. Production
-`-m` starts the original worker lifecycle and SIGTERM handling. Factory-only
-staging intentionally does not test hardware startup; the first real restart
-must be supervised as above.
-
-Local verification uses Python 3.13 and checks Python 3.11 grammar. That is not a
-claim of a live Python 3.11/Pi/GPIO deployment test. Review the recorded baseline
-failures separately; do not hide them by weakening route or frontend assertions.
+Offline tests validate archive integrity, frozen-tree preservation, per-service
+cutover/retry/idempotence, unit ownership, entrypoint dispatch/records and fail-
+closed GC. Application regression suites remain authoritative for behavior.
+Python 3.11 grammar checks on another interpreter do not prove Pi dependencies,
+GPIO/I2C, MQTT publication, desktop DBUS/VLC/Sonos playback, systemd permissions,
+actual frozen-backup freshness or runtime record identity. Those require the
+supervised live checklist above.

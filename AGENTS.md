@@ -127,24 +127,34 @@ the interface, and retain the CAN-transmission safeguards below.
 
 ## Pi Python package deployment
 
-The dashboard uses allowlisted immutable package releases managed by
-`pi/deploy_python.py`; first cutover requires explicit `--activate`. Routine
-`pi/sync_scripts.sh` stays pinned to `/Users/jacobr/dev/scripts`, the primary
-trusted checkout, because it also publishes ignored private inputs. It checks
-the activation marker, installs non-Python dependencies before Python restarts,
-and leaves compute last. Use a chosen clone's checkout-relative
-`pi/deploy_python.py` directly for scoped Python updates without private inputs;
-it records provenance and replaces the live Python code with that clone's version.
-See `pi/docs/deployment.md` for staging, restricted factory-only smoke, rollback,
-and automatic retention. Keep the pre-cutover flat dashboard intact for rollback;
-`--legacy-flatten` only updates the documented flat-safe non-dashboard subset.
-All successful modes attempt fail-closed GC under `.install.lock`, protecting
-current/previous, the actual dashboard import release and the newest three.
-The production entrypoint records pinned `pi.__path__`, PID and systemd invocation
-in `/run/van-dashboard/package-release`; missing or stale active ownership skips
-GC. Factory smokes/custom package consumers must hold a shared `.install.lock`
-for their full lifetime (and stop before deployment). Never infer the running
-release solely from `current`, `previous` or the installer's last restart.
+Dashboard, video-library, audiobooks and BME280 use allowlisted immutable
+package releases owned by `pi/deploy_python.py`. First cutover of each service
+requires `--activate --service <unit>`; routine `--update` refuses unactivated or
+flat-restored services. Backups under `pre-package-units/<unit>.backup/` are
+write-once; preserve the earlier dashboard backup too. Per-service state and
+pending restart intent survive partial installs and failed reloads/restarts.
+See `pi/docs/deployment.md` for exact supervised cutover and saved-unit rollback.
+The entire `/home/pi/scripts/python-automation/` directory is frozen: never write
+or delete it. `--legacy-flatten` and the old video deployer (including v1 rollback)
+now refuse; do not bypass them with an older deployer.
+
+Routine `pi/sync_scripts.sh` stays pinned to `/Users/jacobr/dev/scripts` because
+it publishes ignored private inputs. Its preflight requires host activation and
+all four service-state markers. It installs non-Python dependencies first,
+package updates next, compute last. Generic unit staging excludes all package
+units using the installer's `SERVICES` table via local `--list-units`. Use a
+chosen clone's checkout-relative package installer for scoped updates without
+private inputs; provenance records that clone. `--service` selects unit actions,
+not release contents: the shared current link and utility code still advance.
+
+GC under `.install.lock` protects current, previous, just-installed, newest three,
+and all four verified running releases. Each entrypoint records pinned
+`pi.__path__`, PID and INVOCATION_ID in `/run/<service-name>/package-release`.
+Missing/stale active records or ambiguous service state retain everything,
+including during partial flat cutover/rollback. Record-write failure only warns.
+Factory smokes/custom long-lived consumers must hold a shared installer lock for
+their full lifetime and stop before deployment. Never infer a running release
+solely from current, previous or the last installer restart.
 
 Do not bundle `pi/van_compute/`: its coupled installer owns the separately
 imported metrics module. Only `deploy_python.py` owns dashboard backend code and
@@ -157,14 +167,13 @@ see the network installer boundary in the runbook. Blueprints
 live under `pi/apps/van_dashboard/routes/`; mutable process controllers live in
 `runtime.py`, and the relay-off controller CLI remains independent of Flask.
 
-Rank 3's video modules still execute flat via `deploy_video_library.sh` or the
-28-file legacy subset (25 Python modules plus three assets). The package
-allowlist includes `pi/apps/video_library/players` explicitly; its two modules
-flatten by basename. Preserve the video and system-monitor package/flat import
-guards: sysmon's shim/package still deploy under `/home/pi/scripts` with broad
-sync, not the package release. System-monitor package-release conversion is a
-follow-up. Broad sync cannot ship its Rank 3 changes before dashboard activation;
-see the runbook's pre-merge-master versus post-cutover owner commands.
+The video allowlist explicitly includes `players/` as a namespace subpackage.
+Preserve all Rank 3 video and system-monitor package/flat import guards. Sysmon's
+shim/package still deploy coherently under `/home/pi/scripts` via broad sync;
+its package-release conversion is out of scope. Pi interactive utility consumers
+use package current paths; `sns.sh` also preserves the saved flat video's import
+path for rollback. Never acquire the installer lock inside a subprocess needed
+by a restarting package service (that would deadlock deployment).
 
 ## Deployment commits
 
