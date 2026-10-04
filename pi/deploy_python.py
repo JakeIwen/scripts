@@ -10,6 +10,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -19,6 +20,9 @@ ROOT = Path(__file__).resolve().parents[1]
 LIVE_ROOT = Path('/home/pi/scripts/python-packages')
 FLAT_ROOT = Path('/home/pi/scripts/python-automation')
 UNIT = 'van-dashboard.service'
+RETAIN_NEWEST = 3
+GC_DELETE_LIMIT = 16
+RUNNING_RECORD = Path('/run/van-dashboard/package-release')
 # Only immediate Python modules in these reviewed directories are inputs.
 MODULE_DIRS = (
     'pi/apps/audiobooks', 'pi/apps/bme280', 'pi/apps/van_dashboard',
@@ -183,6 +187,196 @@ def current_release(root):
     return release
 
 
+def mount_points():
+    """Linux mountinfo includes same-device bind mounts (st_dev alone cannot)."""
+    points = []
+    for line in Path('/proc/self/mountinfo').read_text().splitlines():
+        fields = line.split()
+        if len(fields) < 10 or '-' not in fields[6:]:
+            raise ValueError('unrecognized mountinfo')
+        point = re.sub(r'\\([0-7]{3})', lambda m: chr(int(m[1], 8)), fields[4])
+        if not point.startswith('/'):
+            raise ValueError('nonabsolute mountpoint')
+        points.append(Path(point))
+    if not points:
+        raise ValueError('empty mountinfo')
+    return points
+
+
+def check_gc_lock(root, lock):
+    """Verify the receiver's open lock still names the locked, owned inode."""
+    import fcntl
+    info = (root / '.install.lock').lstat()
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or
+            info.st_mode & 0o022 or info.st_nlink != 1 or
+            not os.path.samestat(info, os.fstat(lock.fileno()))):
+        raise ValueError('unsafe or replaced install lock')
+    # A separate open description must conflict with the receiver's flock.
+    descriptor = os.open(root / '.install.lock', os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(descriptor, 'rb') as probe:
+        if not os.path.samestat(info, os.fstat(probe.fileno())):
+            raise ValueError('install lock replaced during cleanup')
+        try:
+            fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            # Also reject a descriptor that belongs to a different lock owner.
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        else:
+            raise ValueError('install lock is not held')
+
+
+def check_gc_node(path, device, directory=False):
+    info = path.lstat()
+    expected = stat.S_ISDIR if directory else stat.S_ISREG
+    if (not expected(info.st_mode) or info.st_dev != device or
+            info.st_uid != os.geteuid() or info.st_mode & 0o022 or
+            (not directory and info.st_nlink != 1)):
+        raise ValueError(f'unsafe release node: {path}')
+    return info
+
+
+def read_gc_file(path, device):
+    info = check_gc_node(path, device)
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(descriptor, 'rb') as handle:
+        if not os.path.samestat(info, os.fstat(handle.fileno())):
+            raise ValueError(f'file replaced during cleanup: {path}')
+        return handle.read()
+
+
+def check_release_tree(release, device):
+    """Recognize receiver-owned trees, without following any links."""
+    info = check_gc_node(release, device, directory=True)
+    raw = read_gc_file(release / 'manifest.json', device)
+    manifest = json.loads(raw)
+    if (manifest.get('schema') != 1 or digest(encoded(manifest))[:24] != release.name
+            or not isinstance(manifest.get('files'), dict) or not manifest['files']):
+        raise ValueError(f'unrecognized release manifest: {release.name}')
+    files = {'manifest.json'}
+    directories = set()
+    for name, sha in manifest['files'].items():
+        path = PurePosixPath(name)
+        if (path.is_absolute() or '..' in path.parts or str(path) != name or
+                name in ('.', 'manifest.json') or not re.fullmatch('[0-9a-f]{64}', sha)):
+            raise ValueError(f'unsafe release manifest: {release.name}')
+        files.add(name)
+        directories.update(str(parent) for parent in path.parents if str(parent) != '.')
+    seen_files, seen_dirs = set(), set()
+
+    def visit(directory):
+        for child in directory.iterdir():
+            relative = child.relative_to(release).as_posix()
+            is_directory = stat.S_ISDIR(child.lstat().st_mode)
+            check_gc_node(child, device, directory=is_directory)
+            if is_directory:
+                if relative not in directories:
+                    raise ValueError(f'unexpected release directory: {child}')
+                seen_dirs.add(relative)
+                visit(child)
+            else:
+                if relative not in files:
+                    raise ValueError(f'unexpected release file: {child}')
+                seen_files.add(relative)
+    visit(release)
+    if seen_files != files or seen_dirs != directories:
+        raise ValueError(f'incomplete release tree: {release.name}')
+    return info
+
+
+def dashboard_release(root, services):
+    if services is None:
+        raise ValueError('dashboard service state unavailable')
+    state = services.dashboard_state()
+    if state['ActiveState'] in ('inactive', 'failed') and state['MainPID'] == '0':
+        return None
+    if state['ActiveState'] != 'active':
+        raise ValueError('dashboard service is transitional or unknown')
+    record = services.read_running_record()
+    if (not re.fullmatch('[0-9a-f]{32}', state['InvocationID']) or
+            str(record['pid']) != state['MainPID'] or state['MainPID'] == '0' or
+            record['invocation_id'] != state['InvocationID']):
+        raise ValueError('dashboard running record identity mismatch')
+    # The entrypoint records the already-pinned pi.__path__, not current.
+    package = Path(record['package_path'])
+    release = package.parent
+    if (package.name != 'pi' or release.parent != root / 'releases' or
+            not re.fullmatch('[0-9a-f]{24}', release.name)):
+        raise ValueError('unexpected dashboard running release')
+    return release.name
+
+
+def collect_releases(root, lock, services, installed):
+    """Best effort only: ambiguity retains everything, never fails an install.
+
+    Installers are the only writers of release trees/links. A service restarting
+    after the state snapshot can only import current (also protected), because
+    this caller keeps the installer lock through collection.
+    """
+    result = {'status': 'skipped', 'kept': [], 'removed': [], 'reason': None}
+    entries = []
+    try:
+        check_gc_lock(root, lock)
+        if root.resolve(strict=True) != root:
+            raise ValueError('release root has symlinked ancestors')
+        device = root.lstat().st_dev
+        check_gc_node(root, device, directory=True)
+        releases = root / 'releases'
+        check_gc_node(releases, device, directory=True)
+        entries = sorted(releases.iterdir())
+        # Check the entire namespace before deleting anything, including trees
+        # that will be kept. Unknown debris is an operator decision, not ours.
+        for path in entries:
+            if not re.fullmatch('[0-9a-f]{24}', path.name):
+                raise ValueError(f'unexpected release name: {path.name}')
+        def check_mounts():
+            if any(point == releases or point.is_relative_to(releases) for point in mount_points()):
+                raise ValueError('mount at or beneath releases')
+        check_mounts()
+        snapshots = {path.name: check_release_tree(path, device) for path in entries}
+        keep = {installed.name}
+        for name in ('current', 'previous'):
+            link = root / name
+            try:
+                info = link.lstat()
+            except FileNotFoundError:
+                continue
+            if not stat.S_ISLNK(info.st_mode):
+                raise ValueError(f'{name} is not a symlink')
+            target = os.readlink(link)
+            if not re.fullmatch(r'releases/[0-9a-f]{24}', target):
+                raise ValueError(f'unexpected {name} release target')
+            keep.add(Path(target).name)
+        running = dashboard_release(root, services)
+        if running:
+            keep.add(running)
+        if not keep <= snapshots.keys():
+            raise ValueError('protected release is missing')
+        newest = sorted(snapshots, key=lambda name: (snapshots[name].st_mtime_ns, name), reverse=True)
+        keep.update(newest[:RETAIN_NEWEST])
+        if not shutil.rmtree.avoids_symlink_attacks:
+            raise ValueError('fd-safe directory removal unavailable')
+        retired = [name for name in reversed(newest) if name not in keep]
+        for name in retired[:GC_DELETE_LIMIT]:
+            path = releases / name
+            # Revalidate immediately before recursion, including bind mounts.
+            check_gc_lock(root, lock)
+            if path.resolve(strict=True) != path:
+                raise ValueError(f'release path changed during cleanup: {name}')
+            check_mounts()
+            info = check_release_tree(path, device)
+            if not os.path.samestat(info, snapshots[name]):
+                raise ValueError(f'release replaced during cleanup: {name}')
+            shutil.rmtree(path)
+            result['removed'].append(name)
+        result['status'] = 'ok'
+        result['deferred'] = retired[GC_DELETE_LIMIT:]
+    except Exception as error:
+        # Even failed validation or a partial removal must not undo deployment.
+        result['reason'] = f'{type(error).__name__}: {error}'
+    result['kept'] = [path.name for path in entries if path.name not in result['removed']]
+    return result
+
+
 class SystemServices:
     """Only instantiated on the Pi receiver; tests supply a fake service manager."""
     def __init__(self, units=Path('/etc/systemd/system')):
@@ -217,6 +411,21 @@ class SystemServices:
             raise RuntimeError(f'cannot determine service state: {unit}')
         return result.returncode == 0
 
+    def dashboard_state(self):
+        result = subprocess.run(
+            ['/usr/bin/systemctl', 'show', '-p', 'ActiveState', '-p', 'MainPID',
+             '-p', 'InvocationID', UNIT], check=True, text=True, capture_output=True,
+            timeout=10)
+        state = dict(line.split('=', 1) for line in result.stdout.splitlines())
+        if set(state) != {'ActiveState', 'MainPID', 'InvocationID'}:
+            raise ValueError('incomplete dashboard service state')
+        return state
+
+    def read_running_record(self):
+        if RUNNING_RECORD.resolve(strict=True) != RUNNING_RECORD:
+            raise ValueError('symlinked dashboard running record')
+        return json.loads(read_gc_file(RUNNING_RECORD, RUNNING_RECORD.parent.stat().st_dev))
+
     def restart(self, unit):
         subprocess.run(['sudo', '/usr/bin/systemctl', 'restart', unit], check=True)
 
@@ -229,6 +438,11 @@ def install_release(stream, root, mode, services=None, flat_root=FLAT_ROOT):
     root.mkdir(parents=True, exist_ok=True)
     with (root / '.install.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+
+        def completed(release, restarted):
+            return {'release': str(release), 'restarted': restarted,
+                    'gc': collect_releases(root, lock, services, release)}
+
         old = current_release(root)
         if mode == 'update' and (old is None or not (root / 'activated.json').is_file()):
             raise ValueError('initial cutover requires --activate; routine deployment refused')
@@ -252,7 +466,7 @@ def install_release(stream, root, mode, services=None, flat_root=FLAT_ROOT):
                 incoming.mkdir()
         print(f'RELEASE {release}')
         if mode == 'stage':
-            return {'release': str(release), 'restarted': []}
+            return completed(release, [])
         if mode == 'legacy':
             # Never include dashboard modules: they no longer support flat execution.
             mapping = {p: legacy_destination(p) for p in manifest['files'] if legacy_destination(p)}
@@ -313,7 +527,7 @@ def install_release(stream, root, mode, services=None, flat_root=FLAT_ROOT):
                 pending_units.remove(unit)
                 save_pending()
             journal.unlink(missing_ok=True)
-            return {'release': str(release), 'restarted': restarted}
+            return completed(release, restarted)
         if services is None:
             raise ValueError('activation requires a service manager')
         live_unit = services.read_unit(UNIT)
@@ -342,7 +556,7 @@ def install_release(stream, root, mode, services=None, flat_root=FLAT_ROOT):
             services.restart(UNIT)
         (root / 'activated.json').write_bytes(encoded({'release': release_id}))
         pending.unlink(missing_ok=True)
-        return {'release': str(release), 'restarted': [UNIT] if restarted else []}
+        return completed(release, [UNIT] if restarted else [])
 
 
 def main(argv=None):

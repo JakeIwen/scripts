@@ -4610,6 +4610,10 @@ class DashboardRouteTests(unittest.TestCase):
 
     def test_dashboard_package_imports_from_deployed_layout(self):
         plan = deploy_python.build_plan(mode="stage")
+        expected_routes = sorted(
+            (rule.rule, tuple(sorted(rule.methods)))
+            for rule in create_app().url_map.iter_rules()
+        )
         compute = (
             REPOSITORY_ROOT
             / "pi"
@@ -4666,7 +4670,9 @@ class DashboardRouteTests(unittest.TestCase):
                         "from pi.apps.van_dashboard import runtime; "
                         "import van_compute_metrics; "
                         "app = create_app(); "
-                        "assert len(list(app.url_map.iter_rules())) == 78; "
+                        "routes = sorted((rule.rule, tuple(sorted(rule.methods))) "
+                        "for rule in app.url_map.iter_rules()); "
+                        "assert routes == " + repr(expected_routes) + "; "
                         "assert Path(pi.__path__[0]).resolve() == (Path(os.environ['EXPECTED_RELEASE']) / 'pi').resolve(); "
                         "compute_path = Path(van_compute_metrics.__file__).resolve(); "
                         "external = Path(os.environ['EXPECTED_EXTERNAL']).resolve(); "
