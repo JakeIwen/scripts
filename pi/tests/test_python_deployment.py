@@ -2,11 +2,13 @@ import io
 import json
 import os
 from pathlib import Path, PurePosixPath
+import runpy
 import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
+import types
 from contextlib import contextmanager
 import unittest
 from unittest import mock
@@ -16,11 +18,17 @@ from pi import deploy_python as deployment
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_SCRIPT = REPOSITORY_ROOT / "pi" / "deploy_python.py"
+DASHBOARD_ENTRYPOINT = REPOSITORY_ROOT / "pi" / "apps" / "van_dashboard" / "__main__.py"
 
 FIXTURE_MODULES = {
     "pi/apps/audiobooks": ("audiobook_server.py",),
     "pi/apps/bme280": ("bme280_mqtt.py", "bme280_testread.py"),
-    "pi/apps/van_dashboard": ("van_dashboard.py", "van_dashboard_projects.py", "react_dashboard_preview.py"),
+    "pi/apps/van_dashboard": (
+        "__main__.py",
+        "van_dashboard.py",
+        "van_dashboard_projects.py",
+        "react_dashboard_preview.py",
+    ),
     "pi/apps/van_dashboard/routes": ("__init__.py", "common.py", "projects.py"),
     "pi/apps/video_library": ("video_library_server.py",),
     "pi/apps/video_library/players": ("vlc_player.py", "sonos_volume.py"),
@@ -39,6 +47,26 @@ class FakeSystemServices:
         self.install_calls = []
         self.restart_calls = []
         self.saved_legacy = []
+        self.release_root = None
+        self.main_pid = 4100
+        self.invocation_number = 0
+        self.running_record = None
+        self.dashboard_state_override = None
+        self.dashboard_state_error = None
+        self.running_record_error = None
+
+    def bind_release_root(self, root):
+        self.release_root = root.resolve()
+
+    def set_running_release(self, release):
+        self.main_pid += 1
+        self.invocation_number += 1
+        invocation_id = f"{self.invocation_number:032x}"
+        self.running_record = {
+            "package_path": str(release.resolve() / "pi"),
+            "pid": self.main_pid,
+            "invocation_id": invocation_id,
+        }
 
     def read_unit(self, unit):
         return self.units[unit]
@@ -55,11 +83,41 @@ class FakeSystemServices:
     def is_active(self, unit):
         return unit in self.active
 
+    def dashboard_state(self):
+        if self.dashboard_state_error is not None:
+            raise self.dashboard_state_error
+        if self.dashboard_state_override is not None:
+            return dict(self.dashboard_state_override)
+        if deployment.UNIT not in self.active:
+            return {"ActiveState": "inactive", "MainPID": "0", "InvocationID": ""}
+        invocation_id = (
+            self.running_record["invocation_id"]
+            if self.running_record is not None
+            else f"{self.invocation_number:032x}"
+        )
+        return {
+            "ActiveState": "active",
+            "MainPID": str(self.main_pid),
+            "InvocationID": invocation_id,
+        }
+
+    def read_running_record(self):
+        if self.running_record_error is not None:
+            raise self.running_record_error
+        if self.running_record is None:
+            raise FileNotFoundError("dashboard running record is absent")
+        return dict(self.running_record)
+
     def restart(self, unit):
         self.restart_calls.append(unit)
         if self.restart_failures:
             self.restart_failures -= 1
             raise RuntimeError("simulated restart failure")
+        if unit == deployment.UNIT and self.release_root is not None:
+            current = deployment.current_release(self.release_root)
+            if current is None:
+                raise RuntimeError("dashboard restart requires a current release")
+            self.set_running_release(current)
 
 
 class InterruptedArchive(io.BytesIO):
@@ -167,6 +225,8 @@ class PythonDeploymentTests(unittest.TestCase):
 
     @staticmethod
     def _install(plan, repo, root, mode, services=None, flat_root=None):
+        if services is not None and hasattr(services, "bind_release_root"):
+            services.bind_release_root(root)
         stream = io.BytesIO(PythonDeploymentTests._archive(plan, repo))
         return deployment.install_release(
             stream,
@@ -218,6 +278,71 @@ class PythonDeploymentTests(unittest.TestCase):
                     member.size = len(data)
                     archive.addfile(member, io.BytesIO(data))
             return output.getvalue()
+
+    @staticmethod
+    def _make_release(root, marker, mtime_ns=None):
+        payload = f"RELEASE_MARKER = {marker!r}\n".encode()
+        manifest = {
+            "schema": 1,
+            "files": {"payload.py": deployment.digest(payload)},
+        }
+        release_id = deployment.digest(deployment.encoded(manifest))[:24]
+        release = root / "releases" / release_id
+        release.mkdir(parents=True)
+        (release / "payload.py").write_bytes(payload)
+        (release / "manifest.json").write_bytes(deployment.encoded(manifest))
+        if mtime_ns is not None:
+            os.utime(release, ns=(mtime_ns, mtime_ns))
+        return release
+
+    @classmethod
+    @contextmanager
+    def _gc_root(cls, count=6):
+        with tempfile.TemporaryDirectory(prefix="python-release-gc-") as name:
+            root = Path(name).resolve() / "packages"
+            (root / "releases").mkdir(parents=True)
+            releases = [
+                cls._make_release(root, f"seed-{index}", (index + 1) * 1_000_000_000)
+                for index in range(count)
+            ]
+            services = FakeSystemServices(b"fixture unit", active=set())
+            services.bind_release_root(root)
+            yield root, releases, services
+
+    @staticmethod
+    def _collect_gc(root, services, installed, mount_points=None):
+        import fcntl
+
+        mounts = [Path("/")] if mount_points is None else mount_points
+        if isinstance(mounts, BaseException):
+            mount_patch = mock.patch.object(
+                deployment, "mount_points", side_effect=mounts
+            )
+        else:
+            mount_patch = mock.patch.object(
+                deployment, "mount_points", return_value=mounts
+            )
+        with (root / ".install.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            with mount_patch:
+                return deployment.collect_releases(root, lock, services, installed)
+
+    @staticmethod
+    def _entrypoint_modules(runtime_dir, production_main):
+        apps = types.ModuleType("pi.apps")
+        apps.__path__ = []
+        package = types.ModuleType("pi.apps.van_dashboard")
+        package.__path__ = []
+        dashboard = types.ModuleType("pi.apps.van_dashboard.van_dashboard")
+        dashboard.main = production_main
+        common = types.ModuleType("pi.apps.van_dashboard.van_dashboard_common")
+        common.RUNTIME_DIR = runtime_dir
+        return {
+            "pi.apps": apps,
+            "pi.apps.van_dashboard": package,
+            "pi.apps.van_dashboard.van_dashboard": dashboard,
+            "pi.apps.van_dashboard.van_dashboard_common": common,
+        }
 
     @staticmethod
     def _network_poison(root):
@@ -954,6 +1079,578 @@ class PythonDeploymentTests(unittest.TestCase):
                 (flat_root / "audiobook_server.py").read_bytes(),
                 audiobook.read_bytes(),
             )
+
+    def test_mount_points_keeps_same_device_mounts_and_decodes_paths(self):
+        mountinfo = (
+            "36 25 0:31 / / rw,relatime - apfs /dev/disk1s1 rw\n"
+            "37 36 0:31 /bind /tmp/same\\040device rw - apfs /dev/disk1s1 rw\n"
+        )
+        with mock.patch.object(Path, "read_text", return_value=mountinfo):
+            self.assertEqual(
+                deployment.mount_points(),
+                [Path("/"), Path("/tmp/same device")],
+            )
+
+        for label, mountinfo in (
+            ("empty", ""),
+            ("malformed", "too few fields\n"),
+            ("nonabsolute", "37 36 0:31 /bind relative rw - apfs disk rw\n"),
+        ):
+            with self.subTest(label=label), mock.patch.object(
+                Path, "read_text", return_value=mountinfo
+            ):
+                with self.assertRaises(ValueError):
+                    deployment.mount_points()
+        with mock.patch.object(
+            Path, "read_text", side_effect=PermissionError("mountinfo unreadable")
+        ):
+            with self.assertRaises(PermissionError):
+                deployment.mount_points()
+
+    def test_collect_releases_retains_every_protected_release(self):
+        with self._gc_root(count=10) as (root, releases, services):
+            (root / "current").symlink_to(f"releases/{releases[0].name}")
+            (root / "previous").symlink_to(f"releases/{releases[1].name}")
+            installed = releases[2]
+            services.active.add(deployment.UNIT)
+            services.set_running_release(releases[3])
+
+            info = deployment.check_release_tree(
+                releases[0], root.lstat().st_dev
+            )
+            self.assertTrue(os.path.samestat(info, releases[0].lstat()))
+
+            result = self._collect_gc(root, services, installed)
+            expected = {
+                releases[0].name,
+                releases[1].name,
+                releases[2].name,
+                releases[3].name,
+                releases[7].name,
+                releases[8].name,
+                releases[9].name,
+            }
+            actual = {path.name for path in (root / "releases").iterdir()}
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(actual, expected)
+            self.assertEqual(set(result["kept"]), expected)
+            self.assertEqual(
+                set(result["removed"]),
+                {releases[4].name, releases[5].name, releases[6].name},
+            )
+
+    def test_collect_releases_deletes_at_most_sixteen_per_run(self):
+        with self._gc_root(count=22) as (root, releases, services):
+            first = self._collect_gc(root, services, releases[-1])
+            self.assertEqual(first["status"], "ok")
+            self.assertEqual(len(first["removed"]), 16)
+            self.assertEqual(len(first["deferred"]), 3)
+            self.assertEqual(len(list((root / "releases").iterdir())), 6)
+
+            second = self._collect_gc(root, services, releases[-1])
+            self.assertEqual(second["status"], "ok")
+            self.assertEqual(len(second["removed"]), 3)
+            self.assertEqual(second["deferred"], [])
+            self.assertEqual(
+                {path.name for path in (root / "releases").iterdir()},
+                {release.name for release in releases[-3:]},
+            )
+
+    def test_stage_and_legacy_success_collect_old_releases(self):
+        for mode in ("stage", "legacy"):
+            with self.subTest(mode=mode), self.fixture() as repo, tempfile.TemporaryDirectory() as name:
+                root = Path(name).resolve() / "packages"
+                old = [
+                    self._make_release(root, f"{mode}-{index}", (index + 1) * 1_000_000_000)
+                    for index in range(5)
+                ]
+                backup = root / "backups" / "operator-copy"
+                backup.parent.mkdir()
+                backup.write_bytes(b"backup sentinel")
+                flat = Path(name).resolve() / "flat"
+                flat.mkdir()
+                flat_sentinel = flat / "foreign.keep"
+                flat_sentinel.write_bytes(b"flat sentinel")
+                services = FakeSystemServices(b"fixture unit", active=set())
+                plan = deployment.build_plan(repo, mode=mode)
+
+                with mock.patch.object(deployment, "mount_points", return_value=[Path("/")]):
+                    result = self._install(
+                        plan, repo, root, mode, services=services, flat_root=flat
+                    )
+
+                self.assertEqual(result["gc"]["status"], "ok")
+                self.assertFalse(old[0].exists())
+                self.assertFalse(old[1].exists())
+                self.assertTrue((root / "releases" / plan["release"]).is_dir())
+                self.assertFalse((root / "current").exists())
+                self.assertEqual(backup.read_bytes(), b"backup sentinel")
+                self.assertEqual(flat_sentinel.read_bytes(), b"flat sentinel")
+
+    def test_activate_and_update_success_collect_old_releases(self):
+        with self.fixture() as repo, tempfile.TemporaryDirectory() as name:
+            root = Path(name).resolve() / "packages"
+            old = [
+                self._make_release(root, f"activate-{index}", (index + 1) * 1_000_000_000)
+                for index in range(5)
+            ]
+            backup = root / "backups" / "operator-copy"
+            backup.parent.mkdir()
+            backup.write_bytes(b"backup sentinel")
+            flat = Path(name).resolve() / "flat"
+            flat.mkdir()
+            flat_sentinel = flat / "foreign.keep"
+            flat_sentinel.write_bytes(b"flat sentinel")
+            services = self._services()
+
+            with mock.patch.object(deployment, "mount_points", return_value=[Path("/")]):
+                first = deployment.build_plan(repo)
+                activated = self._install(
+                    first, repo, root, "activate", services=services, flat_root=flat
+                )
+                self.assertEqual(activated["gc"]["status"], "ok")
+                self.assertFalse(old[0].exists())
+
+                update_candidates = [
+                    self._make_release(root, f"update-{index}", (index + 10) * 1_000_000_000)
+                    for index in range(5)
+                ]
+                services.restart_calls.clear()
+                audiobook = repo / "pi/apps/audiobooks/audiobook_server.py"
+                audiobook.write_text("SOURCE_MARKER = 'gc update'\n")
+                second = deployment.build_plan(repo)
+                updated = self._install(
+                    second, repo, root, "update", services=services, flat_root=flat
+                )
+
+            self.assertEqual(updated["gc"]["status"], "ok")
+            self.assertFalse(update_candidates[0].exists())
+            self.assertEqual(services.restart_calls, [])
+            self.assertEqual(os.readlink(root / "current"), f"releases/{second['release']}")
+            self.assertEqual(os.readlink(root / "previous"), f"releases/{first['release']}")
+            self.assertEqual(backup.read_bytes(), b"backup sentinel")
+            self.assertEqual(flat_sentinel.read_bytes(), b"flat sentinel")
+
+    def test_collect_releases_skips_unsafe_filesystem_ambiguity(self):
+        cases = (
+            "same-device-mount",
+            "mountinfo-error",
+            "release-symlink",
+            "nested-symlink",
+            "unexpected-name",
+            "invalid-manifest",
+            "foreign-file",
+            "writable-node",
+            "hardlinked-node",
+            "foreign-owner",
+            "different-device",
+            "missing-previous-target",
+        )
+        for case in cases:
+            with self.subTest(case=case), self._gc_root() as (root, releases, services):
+                candidate = releases[0]
+                mounts = [Path("/")]
+                outside_sentinels = []
+                if case == "same-device-mount":
+                    mounts.append(root / "releases" / releases[1].name / "bind")
+                elif case == "mountinfo-error":
+                    mounts = PermissionError("mountinfo unreadable")
+                elif case == "release-symlink":
+                    outside = root / "outside-release"
+                    outside.mkdir()
+                    sentinel = outside / "sentinel"
+                    sentinel.write_bytes(b"outside")
+                    outside_sentinels.append((sentinel, b"outside"))
+                    shutil.rmtree(candidate)
+                    candidate.symlink_to(outside, target_is_directory=True)
+                elif case == "nested-symlink":
+                    outside = root / "outside.py"
+                    outside.write_bytes(b"outside")
+                    outside_sentinels.append((outside, b"outside"))
+                    (candidate / "payload.py").unlink()
+                    (candidate / "payload.py").symlink_to(outside)
+                elif case == "unexpected-name":
+                    (root / "releases" / "backup-copy").mkdir()
+                elif case == "invalid-manifest":
+                    (candidate / "manifest.json").write_bytes(b"{not json")
+                elif case == "foreign-file":
+                    (candidate / "operator-notes.txt").write_bytes(b"keep me")
+                elif case == "writable-node":
+                    (candidate / "payload.py").chmod(0o666)
+                elif case == "hardlinked-node":
+                    outside = root / "outside-hardlink.py"
+                    payload = candidate / "payload.py"
+                    os.link(payload, outside)
+                    outside_sentinels.append((outside, payload.read_bytes()))
+                elif case == "missing-previous-target":
+                    (root / "previous").symlink_to("releases/" + "f" * 24)
+
+                backup = root / "backups" / "sentinel"
+                backup.parent.mkdir(exist_ok=True)
+                backup.write_bytes(b"untouched")
+                before = {path.name for path in (root / "releases").iterdir()}
+                if case in ("foreign-owner", "different-device"):
+                    original_lstat = Path.lstat
+
+                    def ambiguous_lstat(path, *args, **kwargs):
+                        info = original_lstat(path, *args, **kwargs)
+                        if path == candidate:
+                            fields = list(info)
+                            index = 4 if case == "foreign-owner" else 2
+                            fields[index] = fields[index] + 1
+                            return os.stat_result(fields)
+                        return info
+
+                    with mock.patch.object(Path, "lstat", ambiguous_lstat):
+                        result = self._collect_gc(
+                            root, services, releases[-1], mount_points=mounts
+                        )
+                else:
+                    result = self._collect_gc(
+                        root, services, releases[-1], mount_points=mounts
+                    )
+
+                self.assertEqual(result["status"], "skipped")
+                self.assertEqual(result["removed"], [])
+                self.assertEqual(
+                    {path.name for path in (root / "releases").iterdir()}, before
+                )
+                self.assertEqual(backup.read_bytes(), b"untouched")
+                for sentinel, expected in outside_sentinels:
+                    self.assertEqual(sentinel.read_bytes(), expected)
+
+    def test_collect_releases_skips_ambiguous_active_service_records(self):
+        cases = (
+            "missing-record",
+            "unreadable-record",
+            "pid-mismatch",
+            "invocation-mismatch",
+            "package-mismatch",
+            "transitional-state",
+            "service-query-error",
+        )
+        for case in cases:
+            with self.subTest(case=case), self._gc_root() as (root, releases, services):
+                services.active.add(deployment.UNIT)
+                services.set_running_release(releases[0])
+                valid_state = services.dashboard_state()
+                if case == "missing-record":
+                    services.running_record = None
+                elif case == "unreadable-record":
+                    services.running_record_error = PermissionError("record unreadable")
+                elif case == "pid-mismatch":
+                    services.dashboard_state_override = valid_state
+                    services.running_record["pid"] += 1
+                elif case == "invocation-mismatch":
+                    services.dashboard_state_override = valid_state
+                    services.running_record["invocation_id"] = "f" * 32
+                elif case == "package-mismatch":
+                    services.running_record["package_path"] = str(root / "outside" / "pi")
+                elif case == "transitional-state":
+                    services.dashboard_state_override = {
+                        "ActiveState": "activating",
+                        "MainPID": valid_state["MainPID"],
+                        "InvocationID": valid_state["InvocationID"],
+                    }
+                elif case == "service-query-error":
+                    services.dashboard_state_error = RuntimeError("systemctl unavailable")
+
+                before = {path.name for path in (root / "releases").iterdir()}
+                result = self._collect_gc(root, services, releases[-1])
+                self.assertEqual(result["status"], "skipped")
+                self.assertEqual(result["removed"], [])
+                self.assertEqual(
+                    {path.name for path in (root / "releases").iterdir()}, before
+                )
+
+    def test_collect_releases_skips_absent_unheld_or_replaced_lock(self):
+        import fcntl
+
+        for case in ("absent", "unheld", "replaced"):
+            with self.subTest(case=case), self._gc_root() as (root, releases, services):
+                lock_path = root / ".install.lock"
+                lock = lock_path.open("a")
+                try:
+                    if case != "unheld":
+                        fcntl.flock(lock, fcntl.LOCK_EX)
+                    if case == "absent":
+                        lock_path.unlink()
+                    elif case == "replaced":
+                        lock_path.unlink()
+                        lock_path.write_bytes(b"replacement")
+                    before = {path.name for path in (root / "releases").iterdir()}
+                    with mock.patch.object(
+                        deployment, "mount_points", return_value=[Path("/")]
+                    ):
+                        result = deployment.collect_releases(
+                            root, lock, services, releases[-1]
+                        )
+                finally:
+                    lock.close()
+
+                self.assertEqual(result["status"], "skipped")
+                self.assertEqual(result["removed"], [])
+                self.assertEqual(
+                    {path.name for path in (root / "releases").iterdir()}, before
+                )
+
+    def test_gc_deletion_error_does_not_undo_activation_or_restart(self):
+        with self.fixture() as repo, tempfile.TemporaryDirectory() as name:
+            root = Path(name).resolve() / "packages"
+            flat = Path(name).resolve() / "flat"
+            flat.mkdir()
+            flat_sentinel = flat / "foreign.keep"
+            flat_sentinel.write_bytes(b"flat sentinel")
+            backup = root / "backups" / "operator-copy"
+            backup.parent.mkdir(parents=True)
+            backup.write_bytes(b"backup sentinel")
+            services = self._services()
+            with mock.patch.object(deployment, "mount_points", return_value=[Path("/")]):
+                first = deployment.build_plan(repo)
+                self._install(first, repo, root, "activate", services=services, flat_root=flat)
+                candidates = [
+                    self._make_release(root, f"delete-error-{index}", (index + 1) * 1_000_000_000)
+                    for index in range(5)
+                ]
+                dashboard = repo / "pi/apps/van_dashboard/van_dashboard.py"
+                dashboard.write_text("SOURCE_MARKER = 'restart before gc error'\n")
+                second = deployment.build_plan(repo)
+                services.restart_calls.clear()
+                real_rmtree = shutil.rmtree
+
+                def fail_candidate(path, *args, **kwargs):
+                    if Path(path) == candidates[0]:
+                        raise OSError("simulated release deletion failure")
+                    return real_rmtree(path, *args, **kwargs)
+
+                with mock.patch.object(
+                    deployment.shutil, "rmtree", side_effect=fail_candidate
+                ):
+                    result = self._install(
+                        second, repo, root, "update", services=services, flat_root=flat
+                    )
+
+            self.assertEqual(result["release"], str(root / "releases" / second["release"]))
+            self.assertEqual(result["restarted"], [deployment.UNIT])
+            self.assertEqual(services.restart_calls, [deployment.UNIT])
+            self.assertEqual(result["gc"]["status"], "skipped")
+            self.assertIn("simulated release deletion failure", result["gc"]["reason"])
+            self.assertEqual(deployment.current_release(root).name, second["release"])
+            self.assertEqual(
+                Path(services.running_record["package_path"]).parent.name,
+                second["release"],
+            )
+            self.assertEqual(
+                json.loads((root / "activated.json").read_bytes()),
+                {"release": second["release"]},
+            )
+            self.assertTrue(candidates[0].is_dir())
+            self.assertEqual(backup.read_bytes(), b"backup sentinel")
+            self.assertEqual(flat_sentinel.read_bytes(), b"flat sentinel")
+
+    def test_gc_tracks_actual_runtime_across_updates_and_external_restart(self):
+        with self.fixture() as repo, tempfile.TemporaryDirectory() as name:
+            root = Path(name).resolve() / "packages"
+            services = self._services()
+            audiobook = repo / "pi/apps/audiobooks/audiobook_server.py"
+            with mock.patch.object(deployment, "mount_points", return_value=[Path("/")]):
+                first = deployment.build_plan(repo)
+                self._install(first, repo, root, "activate", services=services)
+                original_runtime = root / "releases" / first["release"]
+                services.restart_calls.clear()
+
+                latest = first
+                for index in range(6):
+                    audiobook.write_text(f"SOURCE_MARKER = 'unrelated-{index}'\n")
+                    latest = deployment.build_plan(repo)
+                    result = self._install(
+                        latest, repo, root, "update", services=services
+                    )
+                    self.assertEqual(result["restarted"], [])
+
+                self.assertTrue(original_runtime.is_dir())
+                self.assertNotEqual(deployment.current_release(root), original_runtime)
+                self.assertNotEqual(
+                    (root / os.readlink(root / "previous")).resolve(),
+                    original_runtime,
+                )
+                self.assertEqual(services.restart_calls, [])
+
+                external_runtime = deployment.current_release(root)
+                services.restart(deployment.UNIT)
+                self.assertEqual(
+                    Path(services.running_record["package_path"]).parent,
+                    external_runtime,
+                )
+                services.restart_calls.clear()
+                for index in range(6, 12):
+                    audiobook.write_text(f"SOURCE_MARKER = 'unrelated-{index}'\n")
+                    latest = deployment.build_plan(repo)
+                    result = self._install(
+                        latest, repo, root, "update", services=services
+                    )
+                    self.assertEqual(result["restarted"], [])
+
+            self.assertFalse(original_runtime.exists())
+            self.assertTrue(external_runtime.is_dir())
+            self.assertNotEqual(deployment.current_release(root), external_runtime)
+            self.assertNotEqual(
+                (root / os.readlink(root / "previous")).resolve(),
+                external_runtime,
+            )
+            self.assertEqual(services.restart_calls, [])
+
+    def test_system_services_dashboard_state_parses_and_rejects_queries(self):
+        services = deployment.SystemServices()
+        completed = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=(
+                "ActiveState=active\n"
+                "MainPID=4321\n"
+                "InvocationID=0123456789abcdef0123456789abcdef\n"
+            ),
+        )
+        with mock.patch.object(deployment.subprocess, "run", return_value=completed):
+            self.assertEqual(
+                services.dashboard_state(),
+                {
+                    "ActiveState": "active",
+                    "MainPID": "4321",
+                    "InvocationID": "0123456789abcdef0123456789abcdef",
+                },
+            )
+
+        for output in (
+            "ActiveState=active\nMainPID=4321\n",
+            "ActiveState=active\nMainPID=4321\nInvocationID=abc\nOther=value\n",
+        ):
+            with self.subTest(output=output), mock.patch.object(
+                deployment.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess([], 0, stdout=output),
+            ):
+                with self.assertRaises(ValueError):
+                    services.dashboard_state()
+        with mock.patch.object(
+            deployment.subprocess,
+            "run",
+            side_effect=subprocess.CalledProcessError(1, ["systemctl", "show"]),
+        ):
+            with self.assertRaises(subprocess.CalledProcessError):
+                services.dashboard_state()
+
+    def test_system_services_reads_regular_running_record_and_rejects_symlink(self):
+        with tempfile.TemporaryDirectory(prefix="running-record-") as name:
+            runtime = Path(name).resolve()
+            record_path = runtime / "package-release"
+            record = {
+                "package_path": "/packages/releases/" + "1" * 24 + "/pi",
+                "pid": 4321,
+                "invocation_id": "a" * 32,
+            }
+            record_path.write_bytes(deployment.encoded(record))
+            services = deployment.SystemServices()
+            with mock.patch.object(deployment, "RUNNING_RECORD", record_path):
+                self.assertEqual(services.read_running_record(), record)
+
+            target = runtime / "record-target"
+            target.write_bytes(deployment.encoded(record))
+            link = runtime / "record-link"
+            link.symlink_to(target)
+            with mock.patch.object(deployment, "RUNNING_RECORD", link):
+                with self.assertRaises(ValueError):
+                    services.read_running_record()
+
+    def test_dashboard_entrypoint_change_is_deployed_and_restarts_once(self):
+        with self.fixture() as repo, tempfile.TemporaryDirectory() as name:
+            root = Path(name).resolve() / "packages"
+            services = self._services()
+            with mock.patch.object(deployment, "mount_points", return_value=[Path("/")]):
+                first = deployment.build_plan(repo)
+                self._install(first, repo, root, "activate", services=services)
+                services.restart_calls.clear()
+                services.install_calls.clear()
+                entrypoint = repo / "pi/apps/van_dashboard/__main__.py"
+                entrypoint.write_text("SOURCE_MARKER = 'entrypoint v2'\n")
+                second = deployment.build_plan(repo)
+                result = self._install(
+                    second, repo, root, "update", services=services
+                )
+
+            self.assertNotEqual(
+                first["manifest"]["services"][deployment.UNIT],
+                second["manifest"]["services"][deployment.UNIT],
+            )
+            self.assertEqual(result["restarted"], [deployment.UNIT])
+            self.assertEqual(services.restart_calls, [deployment.UNIT])
+            self.assertEqual(services.install_calls, [])
+            self.assertEqual(
+                (root / "releases" / second["release"] / "pi/apps/van_dashboard/__main__.py").read_bytes(),
+                entrypoint.read_bytes(),
+            )
+
+    def test_dashboard_entrypoint_records_pinned_package_and_identity(self):
+        with tempfile.TemporaryDirectory(prefix="dashboard-entrypoint-") as name:
+            base = Path(name).resolve()
+            root = base / "packages"
+            release_one = root / "releases" / ("1" * 24)
+            release_two = root / "releases" / ("2" * 24)
+            (release_one / "pi").mkdir(parents=True)
+            (release_two / "pi").mkdir(parents=True)
+            (root / "current").symlink_to(f"releases/{release_two.name}")
+            runtime = base / "run"
+            runtime.mkdir()
+            invocation_id = "a" * 32
+            production_main = mock.Mock()
+            modules = self._entrypoint_modules(runtime, production_main)
+            pi_package = sys.modules["pi"]
+
+            with mock.patch.object(
+                pi_package, "__path__", [str(release_one / "pi")]
+            ), mock.patch.dict(sys.modules, modules), mock.patch.dict(
+                os.environ, {"INVOCATION_ID": invocation_id}, clear=False
+            ):
+                runpy.run_path(
+                    str(DASHBOARD_ENTRYPOINT),
+                    run_name="pi.apps.van_dashboard.__main__",
+                )
+
+            record = json.loads((runtime / "package-release").read_bytes())
+            self.assertEqual(record["package_path"], str(release_one / "pi"))
+            self.assertEqual(record["pid"], os.getpid())
+            self.assertEqual(record["invocation_id"], invocation_id)
+            self.assertEqual((root / "current").resolve(), release_two)
+            production_main.assert_called_once_with()
+
+    def test_dashboard_entrypoint_warns_but_runs_when_record_publish_fails(self):
+        with tempfile.TemporaryDirectory(prefix="dashboard-entrypoint-") as name:
+            base = Path(name).resolve()
+            release = base / "packages" / "releases" / ("1" * 24)
+            (release / "pi").mkdir(parents=True)
+            runtime = base / "run"
+            runtime.mkdir()
+            production_main = mock.Mock()
+            modules = self._entrypoint_modules(runtime, production_main)
+            pi_package = sys.modules["pi"]
+            stderr = io.StringIO()
+
+            with mock.patch.object(
+                pi_package, "__path__", [str(release / "pi")]
+            ), mock.patch.dict(sys.modules, modules), mock.patch.object(
+                os, "replace", side_effect=OSError("replace denied")
+            ), mock.patch("sys.stderr", stderr):
+                runpy.run_path(
+                    str(DASHBOARD_ENTRYPOINT),
+                    run_name="pi.apps.van_dashboard.__main__",
+                )
+
+            self.assertIn(
+                "WARNING: cannot record dashboard package release: replace denied",
+                stderr.getvalue(),
+            )
+            production_main.assert_called_once_with()
+            self.assertEqual(list(runtime.iterdir()), [])
 
 
 if __name__ == "__main__":

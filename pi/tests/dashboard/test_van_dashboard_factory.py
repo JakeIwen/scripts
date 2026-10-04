@@ -12,6 +12,7 @@ from unittest import mock
 
 from pi.apps.van_dashboard import runtime
 from pi.apps.van_dashboard import van_dashboard as dashboard_module
+from pi.apps.van_dashboard import van_dashboard_common as common
 
 
 RUNTIME_NAMES = (
@@ -73,15 +74,18 @@ class DashboardFactoryTests(unittest.TestCase):
             mock.patch.object(runtime.starlink, "start") as starlink_start,
         ):
             app = dashboard_module.create_app()
+            expected_routes = route_map(dashboard_module.create_app())
 
-        self.assertEqual(len(list(app.url_map.iter_rules())), 78)
+        self.assertEqual(route_map(app), expected_routes)
         cop_start.assert_not_called()
         connectivity_start.assert_not_called()
         starlink_start.assert_not_called()
 
     def test_package_entrypoint_calls_main_without_running_server(self):
-        with mock.patch.object(dashboard_module, "main") as main:
-            runpy.run_module("pi.apps.van_dashboard", run_name="__main__")
+        with tempfile.TemporaryDirectory() as runtime_dir:
+            with mock.patch.object(common, "RUNTIME_DIR", runtime_dir):
+                with mock.patch.object(dashboard_module, "main") as main:
+                    runpy.run_module("pi.apps.van_dashboard", run_name="__main__")
 
         main.assert_called_once_with()
 

@@ -136,8 +136,15 @@ and leaves compute last. Use a chosen clone's checkout-relative
 `pi/deploy_python.py` directly for scoped Python updates without private inputs;
 it records provenance and replaces the live Python code with that clone's version.
 See `pi/docs/deployment.md` for staging, restricted factory-only smoke, rollback,
-and manual retention. Keep the pre-cutover flat dashboard intact for rollback;
+and automatic retention. Keep the pre-cutover flat dashboard intact for rollback;
 `--legacy-flatten` only updates the documented flat-safe non-dashboard subset.
+All successful modes attempt fail-closed GC under `.install.lock`, protecting
+current/previous, the actual dashboard import release and the newest three.
+The production entrypoint records pinned `pi.__path__`, PID and systemd invocation
+in `/run/van-dashboard/package-release`; missing or stale active ownership skips
+GC. Factory smokes/custom package consumers must hold a shared `.install.lock`
+for their full lifetime (and stop before deployment). Never infer the running
+release solely from `current`, `previous` or the installer's last restart.
 
 Do not bundle `pi/van_compute/`: its coupled installer owns the separately
 imported metrics module. The existing network installers' dashboard/UI paths do

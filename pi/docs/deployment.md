@@ -76,7 +76,8 @@ hashes, completeness and Python syntax before an atomic rename publishes the
 release. Only then can `current` be atomically replaced. Re-running identical
 inputs/provenance verifies the existing release and does not restart an unchanged
 service. Different checkout provenance can create a new release without a
-runtime restart. No release garbage collection is automatic.
+runtime restart. Every successful mode also attempts conservative automatic
+release retention under the same lock; see [Automatic release retention](#automatic-release-retention).
 
 Only `van-dashboard.service` converts in this ticket. It keeps that exact name,
 including independently managed `van-dashboard.service.d/network-storage.conf`.
@@ -88,7 +89,13 @@ prevents namespace merging and pins its package path to the resolved immutable
 release, so a running process cannot lazily import modules from a newer release
 when `current` changes. `shared` is pinned similarly. Bytecode writing is disabled
 in the dashboard unit. Verify `pi.__path__` below rather than assuming a package
-named `pi` is unambiguous on this host.
+named `pi` is unambiguous on this host. The production `__main__` entrypoint
+atomically writes that already-pinned path, its PID and systemd `INVOCATION_ID`
+to `/run/van-dashboard/package-release` before starting the worker lifecycle.
+It does not resolve `current` again: a concurrent link switch cannot change the
+recorded import location. A failed write warns but does not prevent startup;
+retention then fails closed. The relay-off helper and factory-only smoke never
+write the production record.
 
 The unit's PYTHONPATH contains the package release root and
 `/home/pi/van_compute/scripts`. The dashboard imports `van_compute_metrics`
@@ -105,6 +112,12 @@ unchanged repeat is a no-op.
 A failed unit reload/restart leaves a retry marker; retries reload the unit and
 complete the restart instead of incorrectly deciding that matching bytes mean
 success. Service health still needs the operator's checks below.
+
+The retention change leaves the service unit byte-for-byte unchanged, including
+`-P -m`, PYTHONPATH, runtime-directory permissions and the relay-off ExecStopPost.
+Its new entrypoint record **does change the dashboard dependency digest**, so the
+first normal package update restarts an active dashboard once. Subsequent
+unrelated-file updates still do not restart it.
 
 ### First cutover is opt-in
 
@@ -304,7 +317,7 @@ RELEASE="paste-the-reviewed-release-digest"
 STAGED="/home/pi/scripts/python-packages/releases/$RELEASE"
 test -r "$STAGED/manifest.json"
 cd "$STAGED"
-PYTHONPATH="$STAGED:/home/pi/van_compute/scripts" PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -P -c 'import pi,sys,van_compute_metrics; print(sys.version); print(list(pi.__path__)); print(van_compute_metrics.__file__)'
+PYTHONPATH="$STAGED:/home/pi/van_compute/scripts" PYTHONDONTWRITEBYTECODE=1 /usr/bin/flock -s /home/pi/scripts/python-packages/.install.lock /usr/bin/python3 -P -c 'import pi,sys,van_compute_metrics; print(sys.version); print(list(pi.__path__)); print(van_compute_metrics.__file__)'
 /usr/bin/python3 -c 'import importlib.metadata as m; print(m.version("flask"))'
 ```
 
@@ -331,7 +344,7 @@ in step 1 to select the command. With Flask >= 2.2:
 ```bash
 SMOKE_STATE=$(mktemp -d /tmp/van-dashboard-package-smoke.XXXXXX)
 cd "$STAGED"
-PYTHONPATH="$STAGED:/home/pi/van_compute/scripts" PYTHONDONTWRITEBYTECODE=1 VAN_DASHBOARD_STATE_PATH="$SMOKE_STATE/state.json" VAN_DASHBOARD_RUNTIME_DIR="$SMOKE_STATE/runtime" VAN_DASHBOARD_FRONTEND_ROOT=/home/pi/scripts/van-dashboard-preview/current FLASK_DEBUG=0 /usr/bin/python3 -P -m flask --app pi.apps.van_dashboard:create_app run --host 127.0.0.1 --port 8791 --no-reload --no-debugger
+PYTHONPATH="$STAGED:/home/pi/van_compute/scripts" PYTHONDONTWRITEBYTECODE=1 VAN_DASHBOARD_STATE_PATH="$SMOKE_STATE/state.json" VAN_DASHBOARD_RUNTIME_DIR="$SMOKE_STATE/runtime" VAN_DASHBOARD_FRONTEND_ROOT=/home/pi/scripts/van-dashboard-preview/current FLASK_DEBUG=0 /usr/bin/flock -s /home/pi/scripts/python-packages/.install.lock /usr/bin/python3 -P -m flask --app pi.apps.van_dashboard:create_app run --host 127.0.0.1 --port 8791 --no-reload --no-debugger
 ```
 
 If the installed Flask is older, use its `FLASK_APP` environment-variable form
@@ -340,7 +353,7 @@ instead; do not upgrade the live Flask installation just to obtain `--app`:
 ```bash
 SMOKE_STATE=$(mktemp -d /tmp/van-dashboard-package-smoke.XXXXXX)
 cd "$STAGED"
-PYTHONPATH="$STAGED:/home/pi/van_compute/scripts" PYTHONDONTWRITEBYTECODE=1 VAN_DASHBOARD_STATE_PATH="$SMOKE_STATE/state.json" VAN_DASHBOARD_RUNTIME_DIR="$SMOKE_STATE/runtime" VAN_DASHBOARD_FRONTEND_ROOT=/home/pi/scripts/van-dashboard-preview/current FLASK_DEBUG=0 FLASK_APP=pi.apps.van_dashboard:create_app /usr/bin/python3 -P -m flask run --host 127.0.0.1 --port 8791 --no-reload --no-debugger
+PYTHONPATH="$STAGED:/home/pi/van_compute/scripts" PYTHONDONTWRITEBYTECODE=1 VAN_DASHBOARD_STATE_PATH="$SMOKE_STATE/state.json" VAN_DASHBOARD_RUNTIME_DIR="$SMOKE_STATE/runtime" VAN_DASHBOARD_FRONTEND_ROOT=/home/pi/scripts/van-dashboard-preview/current FLASK_DEBUG=0 FLASK_APP=pi.apps.van_dashboard:create_app /usr/bin/flock -s /home/pi/scripts/python-packages/.install.lock /usr/bin/python3 -P -m flask run --host 127.0.0.1 --port 8791 --no-reload --no-debugger
 ```
 
 `--port 8791` is Flask CLI's port override, without code changes. It binds
@@ -348,7 +361,12 @@ loopback only. Factory/controller construction reads state and allocates objects
 it does not start worker threads, claim GPIO or issue network/process commands.
 The factory preserves one controller set per process across app instances.
 Both its state file and runtime/COP marker directory are isolated beneath
-`SMOKE_STATE`, rather than using the live owner's paths.
+`SMOKE_STATE`, rather than using the live owner's paths. The shared `flock` holds
+`.install.lock` for the smoke's entire lifetime, protecting its staged imports
+from retention. **Installs, including broad sync, block until it exits. Stop the
+smoke before deploying.** Any other manually launched release consumer must
+hold this same shared lock for its full lifetime; only the production systemd
+entrypoint has automatic running-release ownership.
 
 **This is not a sandbox for arbitrary API requests.** Existing handlers can
 perform work, even some GETs (for example UBNT refresh). Do not browse the staged
@@ -477,73 +495,103 @@ After diagnosing a failed cutover, repeat staging/import checks, then use
 `--activate` explicitly again. An installer retry keeps the saved flat unit and
 retries a pending reload/restart even if release bytes already match.
 
-## Manual release pruning
+## Automatic release retention
 
-A new commit/branch/checkout provenance creates a new release directory even if
-runtime files are unchanged. There is no automatic GC. **Follow-up:** bounded
-retention with explicit running-release ownership, including staged processes.
-Do not delete everything except `current`/`previous` while running: an unchanged
-service may still have an older release pinned after an unrelated-file update.
+A new commit/branch/checkout provenance creates a release even when runtime
+files are unchanged. After every successful **stage, activate, update or legacy**
+install, the receiver attempts GC while still holding its exclusive
+`.install.lock`. It keeps the union of:
 
-For manual pruning, schedule brief dashboard downtime, stop all factory-smoke
-processes, and run the following **Bash block on the Pi**, only after cutover has
-passed health checks. It keeps `current` and `previous`, serializes against
-installers, refuses symlinks/mounts, and restores the previously active dashboard
-on exit. Do not use it if another custom process consumes these releases.
+- `current` and `previous` (if present);
+- the release actually imported by the running dashboard;
+- the **three newest** releases, ordered by release-directory modification time
+  (digest breaks ties), for manual rollback;
+- the just-installed release, even when retrying an older staged release.
+
+Only retired real `releases/<24-lowercase-hex>` directories are eligible. At most
+**16 releases per install** are removed, oldest first; later installs drain any
+remaining backlog. This is a retention target, not a quota: safety always wins,
+so an ambiguous host can retain everything until the cause is resolved.
+
+### Running ownership and races
+
+GC reads `systemctl show`'s `ActiveState`, `MainPID` and `InvocationID`. For an
+active service, `/run/van-dashboard/package-release` must identify that exact PID
+and invocation and name a real validated release. It is written by the process
+from its pinned `pi.__path__`, not by the installer and not from a fresh `current`
+lookup. Thus a crash/reboot/operator restart updates ownership correctly, while
+an unrelated-file install can leave an older running release protected even
+after both links move on.
+
+Missing, unreadable, stale or unexpected records while active, transitional
+states, or failed service queries cause **no deletion**. Only an inactive/failed
+service with MainPID 0 needs no running-release protection. The record is under
+systemd's existing RuntimeDirectory, which is cleared on stop; identity checks
+also reject a stale record before a new process writes its own. A restart after
+GC's snapshot can only start from the protected `current` while the installer
+lock prevents another link switch. The relay-off ExecStopPost also uses this
+protected `current`. A RuntimeDirectory override that moves the record away
+from `/run/van-dashboard` conservatively disables GC until the collector's record
+location is deliberately updated.
+
+### Fail-closed deletion boundary
+
+GC checks the held lock/inode, canonical root, ownership and permissions, exact
+release names, manifest identity and declared tree structure before deleting
+anything. It refuses symlinks (including nested links), hardlinked files, foreign
+or writable nodes, unexpected files/directories, incomplete releases and a
+missing protected target. Every release must be on the package root's filesystem.
+Linux mountinfo detects mounts underneath `releases`, including same-device bind
+mounts; mount discovery failures also stop GC. Tree and mount checks repeat
+immediately before fd-safe recursive removal. Do not mutate releases or links
+outside the installer lock, or mount filesystems in this immutable namespace.
+
+GC never traverses the flat directory, `operator-backup-*`, `pre-package-units`,
+activation/restart journals, compute installation or frontend releases. A
+validation/deletion failure is reported but **never fails an otherwise successful
+install**. A failed removal may leave a partial retired tree; subsequent GC
+refuses that tree rather than silently deleting unrecognized leftovers.
+
+The receiver's final JSON includes `gc.status` (`ok` or `skipped`), `kept`,
+`removed`, a diagnostic `reason`, and on success `deferred` for the deletion-cap
+backlog. A skipped collection can have already removed earlier validated retired
+releases before encountering a deletion error; `removed` lists only completed
+removals. Inspect skipped results rather than treating deployment success as
+proof that retention ran. With this `Type=simple` service, systemd may return
+from restart before Python writes the record; that install safely skips GC and
+a later successful install retries it.
+
+### Read-only checks and manual escape hatch
+
+Run on the Pi after the normal sync:
 
 ```bash
-(
-  set -euo pipefail
-  ROOT=/home/pi/scripts/python-packages
-  test "$(/usr/bin/readlink -e "$ROOT")" = "$ROOT"
-  test -f "$ROOT/activated.json"
-  test -d "$ROOT/releases"
-  test ! -L "$ROOT/releases"
-  exec 9>"$ROOT/.install.lock"
-  /usr/bin/flock -x 9
-  CURRENT=$(/usr/bin/readlink -e "$ROOT/current")
-  PREVIOUS=$(/usr/bin/readlink -e "$ROOT/previous")
-  for keep in "$CURRENT" "$PREVIOUS"; do
-    test "$(/usr/bin/dirname "$keep")" = "$ROOT/releases"
-    test -d "$keep"
-    test ! -L "$keep"
-  done
-  /usr/bin/systemctl is-active --quiet van-dashboard.service
-  sudo /usr/bin/systemctl stop van-dashboard.service
-  trap 'sudo /usr/bin/systemctl start van-dashboard.service' EXIT
-  if /usr/bin/pgrep -af 'pi[.]apps[.]van_dashboard'; then
-    printf '%s\n' 'Another dashboard/Flask process remains; refusing prune.' >&2
-    exit 1
-  else
-    test "$?" = 1
-  fi
-  for old in "$ROOT"/releases/*; do
-    test -e "$old" || continue
-    name=${old##*/}
-    [[ "$name" =~ ^[0-9a-f]{24}$ ]] || continue
-    test "$old" != "$CURRENT" && test "$old" != "$PREVIOUS" || continue
-    test -d "$old"
-    test ! -L "$old"
-    test "$(/usr/bin/readlink -e "$old")" = "$old"
-    mounts=$(/usr/bin/findmnt -rn -o TARGET)
-    test -n "$mounts"
-    if ! printf '%s\n' "$mounts" | while IFS= read -r point; do
-      case "$point" in "$old"|"$old"/*) exit 1 ;; esac
-    done; then
-      printf 'Mounted path beneath %s; refusing prune.\n' "$old" >&2
-      exit 1
-    fi
-    printf 'Removing retired release %s\n' "$old"
-    /bin/rm -rf --one-file-system -- "$old"
-  done
-)
-curl --retry 10 --retry-connrefused --retry-delay 1 --connect-timeout 2 --max-time 5 -fsS http://127.0.0.1:8788/api/status | /usr/bin/python3 -m json.tool
+/usr/bin/systemctl show -p ActiveState -p MainPID -p InvocationID van-dashboard.service
+/usr/bin/python3 -m json.tool /run/van-dashboard/package-release
+/usr/bin/readlink -e /home/pi/scripts/python-packages/current
+/usr/bin/readlink -e /home/pi/scripts/python-packages/previous
+/usr/bin/find /home/pi/scripts/python-packages/releases -mindepth 1 -maxdepth 1 -printf '%f %y\n'
+/usr/bin/journalctl -u van-dashboard.service -n 100 --no-pager
 ```
 
-If `previous` does not exist yet, do not prune: wait until a later verified
-update provides a rollback package. This never removes the flat fallback,
-operator/automatic unit backups, compute installation, or frontend releases.
-Inspect `journalctl -u van-dashboard.service -n 100 --no-pager` after the restart.
+Expect `ActiveState=active`, matching record PID/invocation, and a `package_path`
+ending in `/releases/<digest>/pi`. That digest may intentionally differ from
+`current` and `previous` after unrelated updates. All listed releases should be
+real directories; the JSON should explain which were kept/removed. After the
+first rollout, check for normal startup and no package-record warnings.
+
+For manual recovery, **leave ambiguous releases in place**, stop any factory
+smokes, diagnose the reported boundary, then retry a normal install to run the
+same guarded collector. Do not replace it with a blanket `rm -rf`. If a separate
+manual inspection must freeze retention, hold the existing lock in a Pi terminal:
+
+```bash
+/usr/bin/flock -s /home/pi/scripts/python-packages/.install.lock /bin/bash
+```
+
+Keep that shell open while inspecting and `exit` when finished; all installs
+wait meanwhile. The flat rollback procedure above does not require release
+pruning and its backups remain untouched.
 
 ## Verification and limits
 
