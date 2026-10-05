@@ -1,6 +1,6 @@
 """Process-wide controller instances for the van dashboard."""
 
-from van_compute_metrics import ComputeMetricsReader
+from van_compute.metrics import ComputeMetricsReader
 
 from .van_dashboard_backups import BackupManager
 from .van_dashboard_common import COMPUTE_ROOT, StateStore

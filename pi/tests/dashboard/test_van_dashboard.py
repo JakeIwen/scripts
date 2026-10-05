@@ -37,7 +37,7 @@ from pi.apps.van_dashboard import van_dashboard_usb as dashboard_usb
 from pi.apps.van_dashboard import van_dashboard_vonstar as dashboard_vonstar
 from pi.scripts import usb_watch
 from pi.tests.unit_contract import command_arguments, parse_directives
-import van_compute_metrics as compute_metrics
+from van_compute import metrics as compute_metrics
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 dashboard_app = create_app()
@@ -4611,13 +4611,7 @@ class DashboardRouteTests(unittest.TestCase):
             (rule.rule, tuple(sorted(rule.methods)))
             for rule in create_app().url_map.iter_rules()
         )
-        compute = (
-            REPOSITORY_ROOT
-            / "pi"
-            / "van_compute"
-            / "scripts"
-            / "van_compute_metrics.py"
-        )
+        compute_package = REPOSITORY_ROOT / "van_compute"
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)
             release = target / "release"
@@ -4630,10 +4624,12 @@ class DashboardRouteTests(unittest.TestCase):
                 deploy_python.encoded(plan["manifest"])
             )
 
-            external = target / "external-compute" / "scripts"
-            external.mkdir(parents=True)
-            shutil.copy2(compute, external / compute.name)
-            self.assertFalse((release / "pi" / "van_compute").exists())
+            external = target / "external-compute"
+            external_package = external / "van_compute"
+            external_package.mkdir(parents=True)
+            for name in ("__init__.py", "metrics.py"):
+                shutil.copy2(compute_package / name, external_package / name)
+            self.assertFalse((release / "van_compute").exists())
 
             poisoned = target / "poisoned"
             poisoned.mkdir()
@@ -4665,15 +4661,17 @@ class DashboardRouteTests(unittest.TestCase):
                         "import pi; "
                         "from pi.apps.van_dashboard import create_app; "
                         "from pi.apps.van_dashboard import runtime; "
-                        "import van_compute_metrics; "
+                        "import van_compute; "
+                        "import van_compute.metrics; "
                         "app = create_app(); "
                         "routes = sorted((rule.rule, tuple(sorted(rule.methods))) "
                         "for rule in app.url_map.iter_rules()); "
                         "assert routes == " + repr(expected_routes) + "; "
                         "assert Path(pi.__path__[0]).resolve() == (Path(os.environ['EXPECTED_RELEASE']) / 'pi').resolve(); "
-                        "compute_path = Path(van_compute_metrics.__file__).resolve(); "
+                        "compute_path = Path(van_compute.metrics.__file__).resolve(); "
                         "external = Path(os.environ['EXPECTED_EXTERNAL']).resolve(); "
                         "assert compute_path.is_relative_to(external); "
+                        "assert not compute_path.is_relative_to(Path(os.environ['EXPECTED_RELEASE']).resolve()); "
                         "assert not compute_path.is_relative_to(Path(os.environ['REPOSITORY_ROOT']).resolve()); "
                         "assert runtime.cop_alert.__class__.__module__ == 'pi.apps.van_dashboard.van_dashboard_cop'"
                     ),

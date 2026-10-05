@@ -4,7 +4,7 @@ import re
 
 from flask import Blueprint, jsonify, request
 
-from van_compute_metrics import ComputeMetricsError
+from van_compute.metrics import ComputeMetricsError
 
 from ..http import _exact_form, api_error, runtime_proxy
 from ..van_dashboard_integrations import (
