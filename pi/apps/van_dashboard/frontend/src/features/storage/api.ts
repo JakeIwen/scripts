@@ -1,6 +1,10 @@
 import { getJson, postForm } from '../../api/client';
-import { objectValue, stringValue } from '../../api/validation';
-import { decodeDiskStatusResponse, decodeStoragePolicyResponse } from './decoders';
+import {
+  decodeDiskMutation,
+  decodeDiskStatusResponse,
+  decodeStoragePolicyMutation,
+  decodeStoragePolicyResponse,
+} from './schema';
 import type {
   DiskAction,
   DiskMutationResult,
@@ -20,17 +24,6 @@ export async function fetchDiskStatus(signal: AbortSignal): Promise<DiskStatus> 
   return decodeDiskStatusResponse(payload);
 }
 
-function trueValue(value: unknown, label: string): true {
-  if (value !== true) throw new TypeError(`${label} must be true`);
-  return true;
-}
-
-function mutationMessage(payload: unknown, label: string): string {
-  const response = objectValue(payload, label);
-  trueValue(response.ok, `${label}.ok`);
-  return stringValue(response.message, `${label}.message`);
-}
-
 export async function updateStoragePolicy(
   field: StoragePolicyField,
   enabled: boolean,
@@ -39,10 +32,7 @@ export async function updateStoragePolicy(
     field,
     value: enabled ? 'true' : 'false',
   });
-  return {
-    message: mutationMessage(payload, 'storage policy mutation response'),
-    policy: decodeStoragePolicyResponse(payload),
-  };
+  return decodeStoragePolicyMutation(payload);
 }
 
 export async function startDiskAction(
@@ -52,8 +42,5 @@ export async function startDiskAction(
   const diskLabel = label.trim();
   if (!diskLabel) throw new TypeError('disk label must not be empty');
   const payload = await postForm('/api/disks/action', { label: diskLabel, action });
-  return {
-    message: mutationMessage(payload, 'disk mutation response'),
-    diskStatus: decodeDiskStatusResponse(payload),
-  };
+  return decodeDiskMutation(payload);
 }
