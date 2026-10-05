@@ -192,6 +192,26 @@ are never fetched by the backend; preference is local, LAN, Tailscale, then web.
 The `projects` blueprint owns `/api/hosted-projects`; `runtime.hosted_projects`
 shares the existing state store and is initialized immediately after it.
 
+## Dashboard response schemas
+
+The React frontend's USB, network and storage response schemas live in each
+feature's `schema.ts`, with shared primitives and the only Valibot parsing
+boundary in `pi/apps/van_dashboard/frontend/src/api/schema.ts`. Preserve
+fail-fast `TypeError` wording and check order; error messages reach tiles and
+toasts. Response types are inferred from schemas, while UI-only computed types
+remain presentation types. Other features retain their decoders where staged
+schemas add no real savings.
+
+`pi/apps/van_dashboard/frontend/src/test/parity.ts` generates fixture/path
+mutations. Its compact oracles retain a corpus-name hash, interned rejection
+messages and canonical output fingerprints. Prove old/new strict parity, freeze
+OLD results and commit before deleting a decoder. Final parity tests read those
+files without a snapshot-update write path; never silently regenerate them from
+the replacement.
+The production boundary is `Response.json()`; sparse JS arrays, accessors and
+Proxies are outside that wire contract. Native arrays do not preserve hole
+semantics from the old `.map()` decoders.
+
 ## Backup and disk tooling
 
 The active design is represented by:
