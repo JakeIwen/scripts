@@ -1,0 +1,1046 @@
+{
+  "diagnosis": {
+    "evidence": {
+      "episodes": [
+        {
+          "duration_seconds": 10.0,
+          "ended_at": 1700091010.0,
+          "started_at": 1700091000.0
+        },
+        {
+          "duration_seconds": 20.0,
+          "ended_at": 1700099520.0,
+          "started_at": 1700099500.0
+        },
+        {
+          "duration_seconds": 6.0,
+          "ended_at": 1700099806.0,
+          "started_at": 1700099800.0
+        }
+      ],
+      "storage_errors": 1,
+      "undervoltage_episodes": 3,
+      "undervoltage_near_usb": 1,
+      "undervoltage_seconds": 36.0,
+      "undervoltage_without_usb": 2,
+      "usb_failures": 33,
+      "usb_overcurrent_events": 1
+    },
+    "findings": [
+      "The kernel recorded 3 undervoltage episode(s) totaling at least 36.0 seconds in this range.",
+      "1 undervoltage episode(s) occurred within 15 seconds of logged USB activity; hub inrush, back-powering, a downstream device, or total USB load is a plausible trigger.",
+      "The kernel also reported 1 USB over-current change event(s), which is direct evidence of a USB power-path disturbance.",
+      "2 episode(s) had no nearby logged USB activity. The evidence therefore does not isolate the powered hub; the Pi supply, cable, connector, and upstream 5 V path remain suspects.",
+      "There are also 1 storage I/O error event(s); verify filesystem and device health before trusting affected disks."
+    ],
+    "headline": "Pi input undervoltage is confirmed",
+    "level": "critical",
+    "next_steps": [
+      "After safely unmounting affected storage, reboot with the powered hub disconnected to clear the sticky firmware history and establish a baseline.",
+      "Repeat with a known-good short Pi power cable/supply, then add the powered hub with no downstream devices and add devices one at a time.",
+      "Treat USB errors without undervoltage as data-path/device evidence; treat undervoltage without USB activity as Pi input-power-path evidence."
+    ]
+  },
+  "events": [
+    {
+      "boot_id": "boot-one",
+      "category": "kernel",
+      "id": 15,
+      "kind": "kernel_oops",
+      "message": "kernel_oops message https://example.invalid/secret?token=abc",
+      "severity": "critical",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 40
+      },
+      "summary": "kernel oops",
+      "timestamp": 1700099960.0,
+      "timestamp_iso": "2023-11-16T01:59:20Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "throttle",
+      "id": 14,
+      "kind": "firmware_throttled_cleared",
+      "message": "firmware_throttled_cleared message https://example.invalid/secret?token=abc",
+      "severity": "info",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 50
+      },
+      "summary": "firmware throttled cleared",
+      "timestamp": 1700099950.0,
+      "timestamp_iso": "2023-11-16T01:59:10Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "throttle",
+      "id": 13,
+      "kind": "firmware_throttled_active",
+      "message": "firmware_throttled_active message https://example.invalid/secret?token=abc",
+      "severity": "critical",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 100
+      },
+      "summary": "firmware throttled active",
+      "timestamp": 1700099900.0,
+      "timestamp_iso": "2023-11-16T01:58:20Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "power",
+      "id": 12,
+      "kind": "undervoltage_cleared",
+      "message": "undervoltage_cleared message https://example.invalid/secret?token=abc",
+      "severity": "info",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 194
+      },
+      "summary": "undervoltage cleared",
+      "timestamp": 1700099806.0,
+      "timestamp_iso": "2023-11-16T01:56:46Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "power",
+      "id": 11,
+      "kind": "undervoltage_started",
+      "message": "undervoltage_started message https://example.invalid/secret?token=abc",
+      "severity": "critical",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 200
+      },
+      "summary": "undervoltage started",
+      "timestamp": 1700099800.0,
+      "timestamp_iso": "2023-11-16T01:56:40Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 10,
+      "kind": "usb_disconnected",
+      "message": "usb_disconnected message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 240
+      },
+      "summary": "usb disconnected",
+      "timestamp": 1700099760.0,
+      "timestamp_iso": "2023-11-16T01:56:00Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 9,
+      "kind": "usb_reset",
+      "message": "usb_reset message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 250
+      },
+      "summary": "usb reset",
+      "timestamp": 1700099750.0,
+      "timestamp_iso": "2023-11-16T01:55:50Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "storage",
+      "id": 8,
+      "kind": "storage_io_error",
+      "message": "storage_io_error message https://example.invalid/secret?token=abc",
+      "severity": "critical",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 300
+      },
+      "summary": "storage io error",
+      "timestamp": 1700099700.0,
+      "timestamp_iso": "2023-11-16T01:55:00Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "power",
+      "id": 7,
+      "kind": "undervoltage_cleared",
+      "message": "undervoltage_cleared message https://example.invalid/secret?token=abc",
+      "severity": "info",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 480
+      },
+      "summary": "undervoltage cleared",
+      "timestamp": 1700099520.0,
+      "timestamp_iso": "2023-11-16T01:52:00Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "power",
+      "id": 6,
+      "kind": "usb_overcurrent",
+      "message": "usb_overcurrent message https://example.invalid/secret?token=abc",
+      "severity": "critical",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 494
+      },
+      "summary": "usb overcurrent",
+      "timestamp": 1700099506.0,
+      "timestamp_iso": "2023-11-16T01:51:46Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 5,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 495
+      },
+      "summary": "usb error",
+      "timestamp": 1700099505.0,
+      "timestamp_iso": "2023-11-16T01:51:45Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 4,
+      "kind": "usb_connected",
+      "message": "usb_connected message https://example.invalid/secret?token=abc",
+      "severity": "info",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 496
+      },
+      "summary": "usb connected",
+      "timestamp": 1700099504.0,
+      "timestamp_iso": "2023-11-16T01:51:44Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "power",
+      "id": 3,
+      "kind": "undervoltage_started",
+      "message": "undervoltage_started message https://example.invalid/secret?token=abc",
+      "severity": "critical",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 500
+      },
+      "summary": "undervoltage started",
+      "timestamp": 1700099500.0,
+      "timestamp_iso": "2023-11-16T01:51:40Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 16,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3000
+      },
+      "summary": "usb error",
+      "timestamp": 1700097000.0,
+      "timestamp_iso": "2023-11-16T01:10:00Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 17,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3001
+      },
+      "summary": "usb error",
+      "timestamp": 1700096999.0,
+      "timestamp_iso": "2023-11-16T01:09:59Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 18,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3002
+      },
+      "summary": "usb error",
+      "timestamp": 1700096998.0,
+      "timestamp_iso": "2023-11-16T01:09:58Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 19,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3003
+      },
+      "summary": "usb error",
+      "timestamp": 1700096997.0,
+      "timestamp_iso": "2023-11-16T01:09:57Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 20,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3004
+      },
+      "summary": "usb error",
+      "timestamp": 1700096996.0,
+      "timestamp_iso": "2023-11-16T01:09:56Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 21,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3005
+      },
+      "summary": "usb error",
+      "timestamp": 1700096995.0,
+      "timestamp_iso": "2023-11-16T01:09:55Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 22,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3006
+      },
+      "summary": "usb error",
+      "timestamp": 1700096994.0,
+      "timestamp_iso": "2023-11-16T01:09:54Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 23,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3007
+      },
+      "summary": "usb error",
+      "timestamp": 1700096993.0,
+      "timestamp_iso": "2023-11-16T01:09:53Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 24,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3008
+      },
+      "summary": "usb error",
+      "timestamp": 1700096992.0,
+      "timestamp_iso": "2023-11-16T01:09:52Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 25,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3009
+      },
+      "summary": "usb error",
+      "timestamp": 1700096991.0,
+      "timestamp_iso": "2023-11-16T01:09:51Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 26,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3010
+      },
+      "summary": "usb error",
+      "timestamp": 1700096990.0,
+      "timestamp_iso": "2023-11-16T01:09:50Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 27,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3011
+      },
+      "summary": "usb error",
+      "timestamp": 1700096989.0,
+      "timestamp_iso": "2023-11-16T01:09:49Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 28,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3012
+      },
+      "summary": "usb error",
+      "timestamp": 1700096988.0,
+      "timestamp_iso": "2023-11-16T01:09:48Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 29,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3013
+      },
+      "summary": "usb error",
+      "timestamp": 1700096987.0,
+      "timestamp_iso": "2023-11-16T01:09:47Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 30,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3014
+      },
+      "summary": "usb error",
+      "timestamp": 1700096986.0,
+      "timestamp_iso": "2023-11-16T01:09:46Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 31,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3015
+      },
+      "summary": "usb error",
+      "timestamp": 1700096985.0,
+      "timestamp_iso": "2023-11-16T01:09:45Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 32,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3016
+      },
+      "summary": "usb error",
+      "timestamp": 1700096984.0,
+      "timestamp_iso": "2023-11-16T01:09:44Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 33,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3017
+      },
+      "summary": "usb error",
+      "timestamp": 1700096983.0,
+      "timestamp_iso": "2023-11-16T01:09:43Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 34,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3018
+      },
+      "summary": "usb error",
+      "timestamp": 1700096982.0,
+      "timestamp_iso": "2023-11-16T01:09:42Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 35,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3019
+      },
+      "summary": "usb error",
+      "timestamp": 1700096981.0,
+      "timestamp_iso": "2023-11-16T01:09:41Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 36,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3020
+      },
+      "summary": "usb error",
+      "timestamp": 1700096980.0,
+      "timestamp_iso": "2023-11-16T01:09:40Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 37,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3021
+      },
+      "summary": "usb error",
+      "timestamp": 1700096979.0,
+      "timestamp_iso": "2023-11-16T01:09:39Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 38,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3022
+      },
+      "summary": "usb error",
+      "timestamp": 1700096978.0,
+      "timestamp_iso": "2023-11-16T01:09:38Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 39,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3023
+      },
+      "summary": "usb error",
+      "timestamp": 1700096977.0,
+      "timestamp_iso": "2023-11-16T01:09:37Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 40,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3024
+      },
+      "summary": "usb error",
+      "timestamp": 1700096976.0,
+      "timestamp_iso": "2023-11-16T01:09:36Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 41,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3025
+      },
+      "summary": "usb error",
+      "timestamp": 1700096975.0,
+      "timestamp_iso": "2023-11-16T01:09:35Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 42,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3026
+      },
+      "summary": "usb error",
+      "timestamp": 1700096974.0,
+      "timestamp_iso": "2023-11-16T01:09:34Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 43,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3027
+      },
+      "summary": "usb error",
+      "timestamp": 1700096973.0,
+      "timestamp_iso": "2023-11-16T01:09:33Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 44,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3028
+      },
+      "summary": "usb error",
+      "timestamp": 1700096972.0,
+      "timestamp_iso": "2023-11-16T01:09:32Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "usb",
+      "id": 45,
+      "kind": "usb_error",
+      "message": "usb_error message https://example.invalid/secret?token=abc",
+      "severity": "warning",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 3029
+      },
+      "summary": "usb error",
+      "timestamp": 1700096971.0,
+      "timestamp_iso": "2023-11-16T01:09:31Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "power",
+      "id": 2,
+      "kind": "undervoltage_cleared",
+      "message": "undervoltage_cleared message https://example.invalid/secret?token=abc",
+      "severity": "info",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 8990
+      },
+      "summary": "undervoltage cleared",
+      "timestamp": 1700091010.0,
+      "timestamp_iso": "2023-11-15T23:30:10Z"
+    },
+    {
+      "boot_id": "boot-one",
+      "category": "power",
+      "id": 1,
+      "kind": "undervoltage_started",
+      "message": "undervoltage_started message https://example.invalid/secret?token=abc",
+      "severity": "critical",
+      "source": "kernel",
+      "state": {
+        "capture": "snapshot",
+        "offset": 9000
+      },
+      "summary": "undervoltage started",
+      "timestamp": 1700091000.0,
+      "timestamp_iso": "2023-11-15T23:30:00Z"
+    }
+  ],
+  "generated_at": 1700100000.0,
+  "ok": true,
+  "peaks": {
+    "cpu_percent": {
+      "at": 1700096015.0,
+      "top_process": {
+        "cpu_percent": 30,
+        "name": "proc3"
+      },
+      "value": 80
+    },
+    "disk_busy_percent": {
+      "at": 1700096015.0,
+      "top_device": null,
+      "value": 90
+    },
+    "disk_read_bytes_per_second": {
+      "at": 1700099690.0,
+      "average": null,
+      "value": 10000
+    },
+    "disk_write_bytes_per_second": {
+      "at": 1700099690.0,
+      "average": null,
+      "top_device": {
+        "labels": [
+          "movingparts"
+        ],
+        "name": "sda"
+      },
+      "value": 15000
+    },
+    "load1": {
+      "at": 1700099680.0,
+      "average": null,
+      "value": 5
+    },
+    "memory_percent": {
+      "at": 1700096015.0,
+      "available_min_bytes": 997,
+      "top_process": {
+        "name": "mem3",
+        "rss_bytes": 300
+      },
+      "value": 80
+    },
+    "minimum_arm_mhz": {
+      "at": 1700099440.0,
+      "average": null,
+      "value": 600
+    },
+    "network_rx_bytes_per_second": {
+      "at": 1700099685.0,
+      "average": null,
+      "top_interface": {
+        "name": "wlan0",
+        "physical": true,
+        "rx_bytes_per_second": 900
+      },
+      "value": 5000
+    },
+    "network_tx_bytes_per_second": {
+      "at": 1700099685.0,
+      "average": null,
+      "value": 2500
+    },
+    "root_used_percent": {
+      "at": 1700099440.0,
+      "average": null,
+      "value": 50
+    },
+    "swap_percent": {
+      "at": 1700099680.0,
+      "average": null,
+      "value": 4
+    },
+    "temperature_c": {
+      "at": 1700099680.0,
+      "average": 75,
+      "value": 84
+    },
+    "thermal_sensors": [
+      {
+        "at": 1700099700.0,
+        "average": 78,
+        "cpu_ids": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "shared": true,
+        "type": "cpu-thermal",
+        "value": 84,
+        "zone": "thermal_zone0"
+      }
+    ]
+  },
+  "processes": {
+    "current_cpu": [
+      {
+        "cpu_percent": 30,
+        "name": "proc3"
+      }
+    ],
+    "current_memory": [
+      {
+        "name": "mem3",
+        "rss_bytes": 300
+      }
+    ],
+    "repeat_offenders": [
+      {
+        "cpu_peak_count": 0,
+        "last_seen_at": 1700099675.0,
+        "latest_pid": 200,
+        "max_cpu_percent": null,
+        "max_rss_bytes": 300000004,
+        "memory_peak_count": 5,
+        "name": "hass",
+        "peak_count": 5,
+        "pid_count": 1
+      },
+      {
+        "cpu_peak_count": 3,
+        "last_seen_at": 1700099670.0,
+        "latest_pid": 104,
+        "max_cpu_percent": 54,
+        "max_rss_bytes": 20000000,
+        "memory_peak_count": 0,
+        "name": "smbd",
+        "peak_count": 3,
+        "pid_count": 3
+      },
+      {
+        "cpu_peak_count": 2,
+        "last_seen_at": 1700099610.0,
+        "latest_pid": 103,
+        "max_cpu_percent": 53,
+        "max_rss_bytes": 20000000,
+        "memory_peak_count": 0,
+        "name": "rsync",
+        "peak_count": 2,
+        "pid_count": 2
+      }
+    ],
+    "rollup_count": 5
+  },
+  "range": {
+    "hours": 6.0,
+    "since": 1700078400.0,
+    "until": 1700100000.0
+  },
+  "status": {
+    "available": true,
+    "current": {
+      "arm_mhz": 1200,
+      "boot_id": "fedcba9876543210fedcba9876543210",
+      "cpu_percent": 80,
+      "disk_io": {
+        "busy_percent": 90,
+        "read_bytes_per_second": 3,
+        "write_bytes_per_second": 6
+      },
+      "load": {
+        "1m": 3
+      },
+      "memory": {
+        "available_bytes": 997,
+        "used_percent": 80
+      },
+      "network_io": {
+        "rx_bytes_per_second": 9,
+        "tx_bytes_per_second": 12
+      },
+      "swap": {
+        "used_percent": 3
+      },
+      "temperature_c": 63,
+      "timestamp": 1700096015.0,
+      "top_cpu": [
+        {
+          "cpu_percent": 30,
+          "name": "proc3"
+        }
+      ],
+      "top_memory": [
+        {
+          "name": "mem3",
+          "rss_bytes": 300
+        }
+      ],
+      "uptime_seconds": 915
+    },
+    "sample_age_seconds": 3985.0,
+    "stale": true
+  },
+  "summary": {
+    "by_category": {
+      "kernel": 1,
+      "power": 7,
+      "storage": 1,
+      "throttle": 2,
+      "usb": 34
+    },
+    "by_kind": {
+      "firmware_throttled_active": 1,
+      "firmware_throttled_cleared": 1,
+      "kernel_oops": 1,
+      "storage_io_error": 1,
+      "undervoltage_cleared": 3,
+      "undervoltage_started": 3,
+      "usb_connected": 1,
+      "usb_disconnected": 1,
+      "usb_error": 31,
+      "usb_overcurrent": 1,
+      "usb_reset": 1
+    },
+    "by_severity": {
+      "critical": 7,
+      "info": 5,
+      "warning": 33
+    },
+    "events": 45,
+    "shown_events": 45
+  },
+  "throttling": {
+    "active": [],
+    "available": false,
+    "flags": [
+      {
+        "active": false,
+        "active_transitions": 0,
+        "cleared_transitions": 0,
+        "key": "under_voltage",
+        "label": "Undervoltage",
+        "last_active_at": null,
+        "last_cleared_at": null,
+        "occurred_since_boot": false,
+        "sticky_observations": 0
+      },
+      {
+        "active": false,
+        "active_transitions": 0,
+        "cleared_transitions": 0,
+        "key": "frequency_capped",
+        "label": "Arm frequency capped",
+        "last_active_at": null,
+        "last_cleared_at": null,
+        "occurred_since_boot": false,
+        "sticky_observations": 0
+      },
+      {
+        "active": false,
+        "active_transitions": 1,
+        "cleared_transitions": 1,
+        "key": "throttled",
+        "label": "Throttling",
+        "last_active_at": 1700099900.0,
+        "last_cleared_at": 1700099950.0,
+        "occurred_since_boot": false,
+        "sticky_observations": 0
+      },
+      {
+        "active": false,
+        "active_transitions": 0,
+        "cleared_transitions": 0,
+        "key": "soft_temperature_limit",
+        "label": "Soft temperature limit",
+        "last_active_at": null,
+        "last_cleared_at": null,
+        "occurred_since_boot": false,
+        "sticky_observations": 0
+      }
+    ],
+    "hex": null,
+    "occurred_since_boot": [],
+    "raw": null
+  },
+  "version": 1
+}

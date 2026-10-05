@@ -15,9 +15,11 @@ from unittest import mock
 
 from pi.apps.video_library import identity
 from pi.apps.video_library import service as video_service
-from pi.apps.video_library import video_library_server as video
 from pi.apps.video_library import video_qbittorrent as qb
-from pi.apps.video_library.video_asset_catalog import MediaAssetCatalog
+from pi.apps.video_library.catalog import MediaAssetCatalog
+from pi.apps.video_library.config import RESUME_REWIND
+from pi.apps.video_library.legacy_progress import ProgressStore
+from pi.apps.video_library.service import VideoService, active_service
 from pi.tests.media.test_video_identity_integration import (
     TORRENT_ID,
     FakePlayer,
@@ -523,7 +525,7 @@ class TransitionFailureRegressionTests(unittest.TestCase):
         service.play_local(str(incomplete))
 
         self.assertAlmostEqual(
-            player.launch_calls[-1]["position"], 456 - video.RESUME_REWIND
+            player.launch_calls[-1]["position"], 456 - RESUME_REWIND
         )
         self.assertEqual(len(catalog.list_import_records(action="applied")), 1)
         asset_id = service.playback.active_asset_id
@@ -760,7 +762,7 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
         *,
         media_key: str,
     ) -> tuple[str, str]:
-        store = video.ProgressStore(str(self.fixture.database))
+        store = ProgressStore(str(self.fixture.database))
         catalog = MediaAssetCatalog(
             connection=store.connection,
             lock=store.lock,
@@ -786,7 +788,7 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
         store.connection.close()
         return asset_id, session_id
 
-    def _start_production_service(self) -> video.VideoService:
+    def _start_production_service(self) -> VideoService:
         with (
             mock.patch.object(video_service, "STATE_PATH", str(self.fixture.database)),
             mock.patch.object(video_service, "QbittorrentClient", return_value=None),
@@ -794,7 +796,7 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
             mock.patch.object(video_service, "SonosVolumeController", return_value=None),
             mock.patch.object(video_service, "_service", None),
         ):
-            return video.active_service()
+            return active_service()
 
     def test_catalog_restart_closes_session_left_open_by_prior_process(self) -> None:
         first = MediaAssetCatalog(str(self.fixture.database), clock=self.fixture.clock)
@@ -822,7 +824,7 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
         asset_id, session_id = self._bootstrap_open_projected_session(
             media_key=media_key
         )
-        rollback = video.ProgressStore(str(self.fixture.database))
+        rollback = ProgressStore(str(self.fixture.database))
         rollback.record(
             media_key,
             position=333,
@@ -844,7 +846,7 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
         asset_id, session_id = self._bootstrap_open_projected_session(
             media_key=media_key
         )
-        rollback = video.ProgressStore(str(self.fixture.database))
+        rollback = ProgressStore(str(self.fixture.database))
         self.assertTrue(rollback.clear(media_key))
         rollback.connection.close()
 
@@ -872,7 +874,7 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
             mock.patch.object(video_service, "SonosVolumeController", return_value=None),
             mock.patch.object(video_service, "_service", None),
         ):
-            service = video.active_service()
+            service = active_service()
         self.addCleanup(service.store.connection.close)
 
         fake_catalog.recover_open_sessions.assert_not_called()
@@ -903,7 +905,7 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
             mock.patch.object(video_service, "SonosVolumeController", return_value=None),
             mock.patch.object(video_service, "_service", None),
         ):
-            service = video.active_service()
+            service = active_service()
         self.addCleanup(service.store.connection.close)
         self.assertTrue(service.session_recovery_pending)
         self.assertTrue(service.status()["history"]["degraded"])
@@ -939,7 +941,7 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
             mock.patch.object(video_service, "SonosVolumeController", return_value=None),
             mock.patch.object(video_service, "_service", None),
         ):
-            service = video.active_service()
+            service = active_service()
         self.addCleanup(service.store.connection.close)
         self.assertTrue(service.session_recovery_pending)
 
@@ -958,13 +960,13 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
         self.assertNotIn("recovery failure", history["error"])
 
     def test_pending_recovery_blocks_opening_a_second_catalog_session(self) -> None:
-        store = video.ProgressStore(str(self.fixture.database))
+        store = ProgressStore(str(self.fixture.database))
         self.addCleanup(store.connection.close)
         fake_catalog = mock.Mock()
         fake_catalog.reconcile_v1_progress.side_effect = sqlite3.OperationalError(
             "recovery prerequisite unavailable"
         )
-        service = video.VideoService(
+        service = VideoService(
             self.fixture.library(),
             store,
             object(),
@@ -1296,7 +1298,7 @@ class CatalogDegradationAdapterTests(unittest.TestCase):
                 self.held = False
 
         lock = TrackingLock()
-        service = object.__new__(video.VideoService)
+        service = object.__new__(VideoService)
         service.control_lock = lock
         service.identity_error = None
         service._record_snapshot_locked = mock.Mock(
@@ -1319,7 +1321,7 @@ class CatalogDegradationAdapterTests(unittest.TestCase):
         self.assertFalse(lock.held)
 
     def test_status_store_fallback_failure_is_not_recaught(self) -> None:
-        service = object.__new__(video.VideoService)
+        service = object.__new__(VideoService)
         service.identity_error = None
         service._legacy_progress_for_asset = mock.Mock(
             side_effect=ValueError("catalog failed")

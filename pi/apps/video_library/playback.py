@@ -8,24 +8,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-if __package__:
-    from .catalog import CatalogError
-    from .config import RESUME_REWIND, VLC_FIXED_VOLUME, WATCHED_FRACTION
-    from .media_models import MediaItem, seconds_text
-    from .naming import clean_name
-    from .players.sonos_volume import AudioPreparingError
-    from .players.vlc_player import RoomPreparationError
-else:
-    from catalog import CatalogError  # type: ignore[no-redef]
-    from config import (  # type: ignore[no-redef]
-        RESUME_REWIND,
-        VLC_FIXED_VOLUME,
-        WATCHED_FRACTION,
-    )
-    from media_models import MediaItem, seconds_text  # type: ignore[no-redef]
-    from naming import clean_name  # type: ignore[no-redef]
-    from sonos_volume import AudioPreparingError  # type: ignore[no-redef]
-    from vlc_player import RoomPreparationError  # type: ignore[no-redef]
+from .catalog import CatalogError
+from .config import RESUME_REWIND, VLC_FIXED_VOLUME, WATCHED_FRACTION
+from .media_models import MediaItem, seconds_text
+from .naming import clean_name
+from .players.sonos_volume import AudioPreparingError
+from .players.vlc_player import RoomPreparationError
 
 
 @dataclass

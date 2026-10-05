@@ -1,4 +1,4 @@
-import { decodeDiskStatusResponse, decodeStoragePolicyResponse } from './decoders';
+import { decodeDiskStatusResponse, decodeStoragePolicyResponse } from './schema';
 
 export function storagePolicyPayload(): Record<string, unknown> {
   return {

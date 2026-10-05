@@ -9,25 +9,9 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-if __package__:
-    from .config import CATEGORY_PRIORITY, DEFAULT_FAVORITES, MIN_CONTINUE_POSITION, VIDEO_EXTENSIONS
-    from .media_models import LibrarySource, MediaItem, Show
-    from .naming import canonical_series, natural_key, normalized, parse_candidate, stable_id
-else:
-    from config import (  # type: ignore[no-redef]
-        CATEGORY_PRIORITY,
-        DEFAULT_FAVORITES,
-        MIN_CONTINUE_POSITION,
-        VIDEO_EXTENSIONS,
-    )
-    from media_models import LibrarySource, MediaItem, Show  # type: ignore[no-redef]
-    from naming import (  # type: ignore[no-redef]
-        canonical_series,
-        natural_key,
-        normalized,
-        parse_candidate,
-        stable_id,
-    )
+from .config import CATEGORY_PRIORITY, DEFAULT_FAVORITES, MIN_CONTINUE_POSITION, VIDEO_EXTENSIONS
+from .media_models import LibrarySource, MediaItem, Show
+from .naming import canonical_series, natural_key, normalized, parse_candidate, stable_id
 
 
 class MediaLibrary:

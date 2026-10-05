@@ -51,7 +51,4 @@ export function optionalString(value: unknown, label: string): string | undefine
   return value === undefined ? undefined : stringValue(value, label);
 }
 
-export function messageFrom(value: unknown): string | undefined {
-  const object = objectValue(value, 'response');
-  return optionalString(object.message, 'response.message');
-}
+export { messageFrom } from './schema';

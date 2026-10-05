@@ -4,7 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { ToastProvider } from '../../components/ToastProvider';
 import { fetchUsbStatus } from './api';
 import type { UsbControls } from './controls';
-import { decodeUsbStatusResponse } from './decoders';
+import { decodeUsbStatusResponse } from './schema';
 import {
   USB_SHEET_POLL_INTERVAL_MS,
   USB_TILE_POLL_INTERVAL_MS,

@@ -7,32 +7,18 @@ import subprocess
 import threading
 import time
 
-if __package__:
-    from .common import (
-        DEFAULT_SAMPLE_INTERVAL,
-        DEFAULT_ROLLUP_INTERVAL,
-        DEFAULT_RETENTION_DAYS,
-        THROTTLE_FLAGS,
-        utc_timestamp,
-        event_fingerprint,
-        normalize_boot_id,
-    )
-    from .probes import ResourceSampler, collect_usb_state, collect_mount_state, run_text
-    from .journal import parse_journal_record
-    from .rollups import RollupAccumulator, metric_value
-else:
-    from common import (
-        DEFAULT_SAMPLE_INTERVAL,
-        DEFAULT_ROLLUP_INTERVAL,
-        DEFAULT_RETENTION_DAYS,
-        THROTTLE_FLAGS,
-        utc_timestamp,
-        event_fingerprint,
-        normalize_boot_id,
-    )
-    from probes import ResourceSampler, collect_usb_state, collect_mount_state, run_text
-    from journal import parse_journal_record
-    from rollups import RollupAccumulator, metric_value
+from .common import (
+    DEFAULT_SAMPLE_INTERVAL,
+    DEFAULT_ROLLUP_INTERVAL,
+    DEFAULT_RETENTION_DAYS,
+    THROTTLE_FLAGS,
+    utc_timestamp,
+    event_fingerprint,
+    normalize_boot_id,
+)
+from .probes import ResourceSampler, collect_usb_state, collect_mount_state, run_text
+from .journal import parse_journal_record
+from .rollups import RollupAccumulator, metric_value
 
 
 class SystemEventMonitor:

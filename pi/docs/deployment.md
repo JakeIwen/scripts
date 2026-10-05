@@ -62,7 +62,7 @@ publish a release without restarting any service.
 | `pi/sns.sh` | Sonos wrapper; preserves an inherited import path (including the saved flat video unit on rollback) and supplies package utility paths for clean interactive use. No Sonos command semantics change. |
 | `pi/scripts/log_position.sh` | Calls the current release's VLC helper; installed by broad sync. |
 | `van-dashboard-preview.service` | Independent frontend/preview current release, not the staged package copy of `react_dashboard_preview.py`. Use its existing preview deployer. |
-| `system_event_monitor.py` and `system_monitor/`, other script services/cron/timers | Coherent broad-sync layout under `/home/pi/scripts`. No package-release conversion in this change. Keep Rank 3 flat/package import guards. |
+| `system_event_monitor.py` and `system_monitor/`, other script services/cron/timers | Coherent broad-sync layout under `/home/pi/scripts`, not a package release. The shim retains the script/package switch for `main` and recorder `redact_log_message`; `system_monitor` internals use relative imports in both layouts. |
 | `van_compute` | Coupled independent Mac/Pi installer; no package copy. |
 | historical `raspbian_setup.sh` and archived path-repair tools | Not package bootstrap or deployment paths. Do not use them to refresh the frozen flat directory. |
 
@@ -78,7 +78,10 @@ including nested `players/` and `shared/python/sonos_tasks.py`. Its `/home/pi/sn
 and `/usr/bin/vlc` checks and DISPLAY/DBUS settings remain unchanged. Audiobooks
 and BME280 gain PYTHONPATH, no-bytecode and private runtime-directory settings.
 All three gain a record-writing `__main__.py`; application logic is unchanged.
-`players/` remains a namespace subpackage; all video flat-import guards remain.
+`players/` remains a namespace subpackage; video imports are package-only.
+`video_library_server.py` retains the package entrypoint's `main` dispatch, and
+`video_asset_catalog.py` retains its public `__all__` exports; both files remain
+for the unit's readability prechecks.
 The dashboard unit is byte-for-byte unchanged; its record writer moves into the
 shared helper, changing its dependency digest and causing one active restart.
 

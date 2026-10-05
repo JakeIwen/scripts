@@ -23,7 +23,10 @@ from typing import Any
 from urllib.parse import parse_qs
 from unittest import mock
 
-from pi.apps.video_library import video_library_server as video
+from pi.apps.video_library.config import RESUME_REWIND
+from pi.apps.video_library.library import MediaLibrary
+from pi.apps.video_library.media_models import MediaItem
+from pi.apps.video_library.video_qbittorrent import QbittorrentError
 from pi.tests.media.test_video_identity_integration import (
     TORRENT_ID,
     FakePlayer,
@@ -207,7 +210,7 @@ class HistoryFailureBoundaryTests(unittest.TestCase):
         self.addCleanup(self.fixture.cleanup)
 
     @staticmethod
-    def _only_item(library: video.MediaLibrary) -> video.MediaItem:
+    def _only_item(library: MediaLibrary) -> MediaItem:
         items, _shows = library.snapshot()
         if len(items) != 1:
             raise AssertionError(f"expected one library item, found {len(items)}")
@@ -456,7 +459,7 @@ class HistoryFailureBoundaryTests(unittest.TestCase):
     def test_offline_qb_still_treats_incomplete_path_as_partial(self) -> None:
         incomplete = self.fixture.payload("offline/video.mkv", incomplete=True)
         fake_qb = FakeQbittorrent()
-        fake_qb.set_path(incomplete, video.QbittorrentError("offline"))
+        fake_qb.set_path(incomplete, QbittorrentError("offline"))
         service, _library, _store, catalog, player = self.fixture.stack(
             qbittorrent=fake_qb
         )
@@ -538,7 +541,7 @@ class HistoryFailureBoundaryTests(unittest.TestCase):
         self.assertAlmostEqual(store.get(item.key)["position"], 411.0)
         service.play(item_id=item.id)
         self.assertAlmostEqual(
-            player.launch_calls[-1]["position"], 411.0 - video.RESUME_REWIND
+            player.launch_calls[-1]["position"], 411.0 - RESUME_REWIND
         )
 
     def test_active_incomplete_to_final_checkpoints_keep_v1_projection_current(

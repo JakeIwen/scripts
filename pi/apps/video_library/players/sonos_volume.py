@@ -6,10 +6,7 @@ import threading
 import time
 from typing import Any, Callable, Iterable
 
-if __package__:
-    from ..config import REAR_SONOS_UIDS, SONOS_DISCOVERY_TTL
-else:  # Direct execution from the Pi's flat deployment directory.
-    from config import REAR_SONOS_UIDS, SONOS_DISCOVERY_TTL  # type: ignore[no-redef]
+from ..config import REAR_SONOS_UIDS, SONOS_DISCOVERY_TTL
 
 
 class AudioPreparingError(RuntimeError):

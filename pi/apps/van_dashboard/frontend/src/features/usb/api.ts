@@ -1,20 +1,10 @@
 import { getJson, postForm } from '../../api/client';
-import { objectValue, stringValue } from '../../api/validation';
-import { decodeUsbPortState, decodeUsbStatusResponse } from './decoders';
+import { decodeMutation, decodeUsbStatusResponse } from './schema';
 import type { UsbPortAction, UsbPortMutationResult, UsbStatus } from './types';
 
 export async function fetchUsbStatus(signal: AbortSignal): Promise<UsbStatus> {
   const payload = await getJson('/api/usb-devices', signal);
   return decodeUsbStatusResponse(payload);
-}
-
-function decodeMutation(payload: unknown, label: string): UsbPortMutationResult {
-  const response = objectValue(payload, label);
-  if (response.ok !== true) throw new TypeError(`${label}.ok must be true`);
-  return {
-    message: stringValue(response.message, `${label}.message`),
-    ports: decodeUsbPortState(response.usb_ports),
-  };
 }
 
 export async function discoverUsbPorts(): Promise<UsbPortMutationResult> {

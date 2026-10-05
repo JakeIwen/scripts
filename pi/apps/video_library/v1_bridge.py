@@ -7,24 +7,14 @@ import sqlite3
 from collections.abc import Mapping
 from typing import Any
 
-if __package__:
-    from .catalog_values import (
-        CatalogError,
-        CatalogNotFound,
-        _digest,
-        _finite_nonnegative,
-        _json_or_none,
-        _required_text,
-    )
-else:
-    from catalog_values import (  # type: ignore[no-redef]
-        CatalogError,
-        CatalogNotFound,
-        _digest,
-        _finite_nonnegative,
-        _json_or_none,
-        _required_text,
-    )
+from .catalog_values import (
+    CatalogError,
+    CatalogNotFound,
+    _digest,
+    _finite_nonnegative,
+    _json_or_none,
+    _required_text,
+)
 
 
 _V1_UNTRUSTED_COVERAGE = "untrusted"

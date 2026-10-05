@@ -1,10 +1,11 @@
 import { getJson, postForm } from '../../api/client';
-import { objectValue, stringValue } from '../../api/validation';
 import {
   decodeConnectivityResponse,
   decodeOpenWrtClientsResponse,
   decodeSpeedtestResponse,
-} from './decoders';
+  decodeStartSpeedtestResponse,
+  type SpeedtestStartResult,
+} from './schema';
 import type { ConnectivityStatus, OpenWrtClientStatus, SpeedtestStatus } from './types';
 
 export async function fetchActiveConnectivity(signal: AbortSignal): Promise<ConnectivityStatus> {
@@ -22,17 +23,10 @@ export async function fetchSpeedtestStatus(signal: AbortSignal): Promise<Speedte
   return decodeSpeedtestResponse(payload);
 }
 
-export interface SpeedtestStartResult {
-  message: string;
-  status: SpeedtestStatus;
-}
+export type { SpeedtestStartResult };
 
 /** Start one speed test with the endpoint's exact empty form. */
 export async function startSpeedtest(): Promise<SpeedtestStartResult> {
   const payload = await postForm('/api/speedtest');
-  const response = objectValue(payload, 'speed test start response');
-  return {
-    message: stringValue(response.message, 'speed test start response.message'),
-    status: decodeSpeedtestResponse(payload),
-  };
+  return decodeStartSpeedtestResponse(payload);
 }

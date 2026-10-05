@@ -7,12 +7,8 @@ import unittest
 from contextlib import closing
 from pathlib import Path
 
-from pi.apps.video_library.video_asset_catalog import (
-    CatalogConflict,
-    CatalogNotFound,
-    MediaAssetCatalog,
-    ensure_pre_v2_backup,
-)
+from pi.apps.video_library.catalog import MediaAssetCatalog, ensure_pre_v2_backup
+from pi.apps.video_library.catalog_values import CatalogConflict, CatalogNotFound
 
 
 class FakeClock:

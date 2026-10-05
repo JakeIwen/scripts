@@ -3,7 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import { fetchDiskStatus, fetchStoragePolicy } from './api';
 import type { StorageControls } from './controls';
-import { decodeDiskStatusResponse, decodeStoragePolicyResponse } from './decoders';
+import { decodeDiskStatusResponse, decodeStoragePolicyResponse } from './schema';
 import {
   STORAGE_SHEET_POLL_INTERVAL_MS,
   STORAGE_TILE_POLL_INTERVAL_MS,
