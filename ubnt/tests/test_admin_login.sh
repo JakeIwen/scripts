@@ -8,7 +8,8 @@ export UBNT_STATE_DIR="$test_root/state"
 export UBNT_LOG_FILE="$test_root/manager.log"
 export UBNT_UPTIME_FILE="$test_root/uptime"
 printf '1000.0 0.0\n' > "$UBNT_UPTIME_FILE"
-sed '/^command_name=/,$d' "$script_dir/../persistent/scripts/wifi_manager.sh" > "$test_root/functions.sh"
+# Source definitions only; the unique final main "$@" line is the dispatch boundary.
+sed '/^main "\$@"$/,$d' "$script_dir/../persistent/scripts/wifi_manager.sh" > "$test_root/functions.sh"
 . "$test_root/functions.sh"
 
 printf '%s\n' 'users.1.name=ubnt' 'users.1.password=preferred-test-hash' > "$SYSTEM_CFG"

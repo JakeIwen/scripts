@@ -57,6 +57,121 @@ umask 077
 mkdir -p "$STATE_DIR" "$(dirname "$LOG_FILE")"
 chmod 700 "$STATE_DIR" 2>/dev/null || true
 
+usage() {
+    printf 'Usage: %s auto|connect PROFILE|status|pause|resume|save-current PROFILE|disable PROFILE|dashboard-status|dashboard-scan|manual-connect-stdin|provision-stdin|update-profile-stdin|forget-stdin|starlink-off\n' "$0" >&2
+}
+
+main() {
+    command_name=${1:-}
+    case $command_name in
+        auto)
+            acquire_lock || exit 0
+            auto_select
+            ;;
+        connect)
+            [ "$#" -eq 2 ] || { usage; exit 1; }
+            acquire_lock || exit 1
+            run_requested_connect "$2"
+            exit $?
+            ;;
+        status)
+            show_status
+            ;;
+        pause)
+            : > "$PAUSE_FILE"
+            log_message "automatic selection paused"
+            ;;
+        resume)
+            rm -f "$PAUSE_FILE" "$MANUAL_HOLD_FILE"
+            log_message "automatic selection resumed"
+            ;;
+        save-current)
+            [ "$#" -eq 2 ] || { usage; exit 1; }
+            acquire_lock || exit 1
+            save_current_profile "$2"
+            ;;
+        disable)
+            [ "$#" -eq 2 ] || { usage; exit 1; }
+            acquire_lock || exit 1
+            disable_profile "$2"
+            ;;
+        dashboard-status)
+            [ "$#" -eq 1 ] || { usage; exit 1; }
+            emit_dashboard_snapshot
+            ;;
+        dashboard-scan)
+            [ "$#" -eq 1 ] || { usage; exit 1; }
+            acquire_lock || exit 1
+            scan_networks || true
+            emit_dashboard_snapshot
+            ;;
+        starlink-off)
+            [ "$#" -eq 1 ] || { usage; exit 1; }
+            off_lock_wait=0
+            until acquire_lock; do
+                [ "$off_lock_wait" -lt 120 ] || exit 1
+                sleep 2
+                off_lock_wait=$((off_lock_wait + 2))
+            done
+            starlink_power_off
+            exit $?
+            ;;
+        manual-connect-stdin)
+            [ "$#" -eq 1 ] || { usage; exit 1; }
+            IFS= read -r manual_profile || {
+                log_message "manual profile was not provided"
+                exit 1
+            }
+            profile_name_is_valid "$manual_profile" && [ -f "$PROFILE_DIR/$manual_profile" ] || {
+                log_message "unknown manual profile"
+                exit 1
+            }
+            acquire_lock || exit 1
+            run_requested_connect "$manual_profile"
+            exit $?
+            ;;
+        forget-stdin)
+            [ "$#" -eq 1 ] || { usage; exit 1; }
+            IFS= read -r input_profile || exit 1
+            acquire_lock || exit 1
+            forget_profile "$input_profile"
+            exit $?
+            ;;
+        provision-stdin)
+            [ "$#" -eq 1 ] || { usage; exit 1; }
+            IFS= read -r input_ssid || exit 1
+            IFS= read -r input_security || exit 1
+            IFS= read -r input_bssid || exit 1
+            IFS= read -r input_password || exit 1
+            acquire_lock || exit 1
+            provision_profile "$input_ssid" "$input_security" "$input_bssid" "$input_password"
+            exit $?
+            ;;
+        update-profile-stdin)
+            [ "$#" -eq 1 ] || { usage; exit 1; }
+            IFS= read -r input_profile || exit 1
+            IFS= read -r input_password_action || exit 1
+            IFS= read -r input_password || exit 1
+            IFS= read -r input_bssid || exit 1
+            IFS= read -r input_txpower || exit 1
+            IFS= read -r input_rate_module || exit 1
+            IFS= read -r input_rate_auto || exit 1
+            IFS= read -r input_rate_mcs || exit 1
+            IFS= read -r input_apply || exit 1
+            acquire_lock || exit 1
+            update_profile_settings "$input_profile" "$input_password_action" \
+                "$input_password" "$input_bssid" "$input_txpower" \
+                "$input_rate_module" "$input_rate_auto" "$input_rate_mcs" \
+                "$input_apply"
+            exit $?
+            ;;
+        *)
+            usage
+            exit 1
+            ;;
+    esac
+}
+
 uptime_seconds() {
     awk '{split($1, value, "."); print value[1]}' "$UPTIME_FILE" 2>/dev/null
 }
@@ -1832,115 +1947,4 @@ show_status() {
         "$(manual_hold_remaining)"
 }
 
-usage() {
-    printf 'Usage: %s auto|connect PROFILE|status|pause|resume|save-current PROFILE|disable PROFILE|dashboard-status|dashboard-scan|manual-connect-stdin|provision-stdin|update-profile-stdin|forget-stdin|starlink-off\n' "$0" >&2
-}
-
-command_name=${1:-}
-case $command_name in
-    auto)
-        acquire_lock || exit 0
-        auto_select
-        ;;
-    connect)
-        [ "$#" -eq 2 ] || { usage; exit 1; }
-        acquire_lock || exit 1
-        run_requested_connect "$2"
-        exit $?
-        ;;
-    status)
-        show_status
-        ;;
-    pause)
-        : > "$PAUSE_FILE"
-        log_message "automatic selection paused"
-        ;;
-    resume)
-        rm -f "$PAUSE_FILE" "$MANUAL_HOLD_FILE"
-        log_message "automatic selection resumed"
-        ;;
-    save-current)
-        [ "$#" -eq 2 ] || { usage; exit 1; }
-        acquire_lock || exit 1
-        save_current_profile "$2"
-        ;;
-    disable)
-        [ "$#" -eq 2 ] || { usage; exit 1; }
-        acquire_lock || exit 1
-        disable_profile "$2"
-        ;;
-    dashboard-status)
-        [ "$#" -eq 1 ] || { usage; exit 1; }
-        emit_dashboard_snapshot
-        ;;
-    dashboard-scan)
-        [ "$#" -eq 1 ] || { usage; exit 1; }
-        acquire_lock || exit 1
-        scan_networks || true
-        emit_dashboard_snapshot
-        ;;
-    starlink-off)
-        [ "$#" -eq 1 ] || { usage; exit 1; }
-        off_lock_wait=0
-        until acquire_lock; do
-            [ "$off_lock_wait" -lt 120 ] || exit 1
-            sleep 2
-            off_lock_wait=$((off_lock_wait + 2))
-        done
-        starlink_power_off
-        exit $?
-        ;;
-    manual-connect-stdin)
-        [ "$#" -eq 1 ] || { usage; exit 1; }
-        IFS= read -r manual_profile || {
-            log_message "manual profile was not provided"
-            exit 1
-        }
-        profile_name_is_valid "$manual_profile" && [ -f "$PROFILE_DIR/$manual_profile" ] || {
-            log_message "unknown manual profile"
-            exit 1
-        }
-        acquire_lock || exit 1
-        run_requested_connect "$manual_profile"
-        exit $?
-        ;;
-    forget-stdin)
-        [ "$#" -eq 1 ] || { usage; exit 1; }
-        IFS= read -r input_profile || exit 1
-        acquire_lock || exit 1
-        forget_profile "$input_profile"
-        exit $?
-        ;;
-    provision-stdin)
-        [ "$#" -eq 1 ] || { usage; exit 1; }
-        IFS= read -r input_ssid || exit 1
-        IFS= read -r input_security || exit 1
-        IFS= read -r input_bssid || exit 1
-        IFS= read -r input_password || exit 1
-        acquire_lock || exit 1
-        provision_profile "$input_ssid" "$input_security" "$input_bssid" "$input_password"
-        exit $?
-        ;;
-    update-profile-stdin)
-        [ "$#" -eq 1 ] || { usage; exit 1; }
-        IFS= read -r input_profile || exit 1
-        IFS= read -r input_password_action || exit 1
-        IFS= read -r input_password || exit 1
-        IFS= read -r input_bssid || exit 1
-        IFS= read -r input_txpower || exit 1
-        IFS= read -r input_rate_module || exit 1
-        IFS= read -r input_rate_auto || exit 1
-        IFS= read -r input_rate_mcs || exit 1
-        IFS= read -r input_apply || exit 1
-        acquire_lock || exit 1
-        update_profile_settings "$input_profile" "$input_password_action" \
-            "$input_password" "$input_bssid" "$input_txpower" \
-            "$input_rate_module" "$input_rate_auto" "$input_rate_mcs" \
-            "$input_apply"
-        exit $?
-        ;;
-    *)
-        usage
-        exit 1
-        ;;
-esac
+main "$@"
