@@ -20,9 +20,33 @@ export const positiveInteger = v.pipe(
   v.check((value) => value > 0, 'must be positive'),
 );
 export const stringArray = v.array(text);
+// A shape-only preflight retains fields for legacy decoders that check all objects first.
+export const objectInput = v.pipe(
+  v.unknown(),
+  v.check(
+    (input) => typeof input === 'object' && input !== null && !Array.isArray(input),
+    'must be an object',
+  ),
+);
+
+// Only for intentional legacy opaque records or preprocessing before a stripping DTO schema.
+export const rawObjectInput = v.custom<Record<string, unknown>>(
+  (input): input is Record<string, unknown> =>
+    typeof input === 'object' && input !== null && !Array.isArray(input),
+  'must be an object',
+);
 
 export function oneOf<const T extends readonly string[]>(choices: T) {
-  return v.picklist(choices);
+  return v.picklist(choices, (issue) =>
+    typeof issue.input === 'string' ? `has an unsupported value: ${issue.input}` : 'must be text',
+  );
+}
+
+export function numberOneOf<const T extends readonly number[]>(choices: T) {
+  return v.pipe(
+    finiteNumber,
+    v.picklist(choices, (issue) => `has an unsupported value: ${String(issue.input)}`),
+  );
 }
 
 export function nullableOneOf<const T extends readonly string[]>(choices: T) {
@@ -35,8 +59,7 @@ export function nullableOneOf<const T extends readonly string[]>(choices: T) {
  */
 export function object<const T extends v.ObjectEntries>(entries: T) {
   return v.pipe(
-    v.unknown(),
-    v.check((input) => !Array.isArray(input), 'must be an object'),
+    objectInput,
     v.object(entries, (issue) => {
       const missing = issue.path?.at(-1);
       if (missing?.origin === 'key') {
@@ -71,9 +94,8 @@ function issueSuffix(issue: v.BaseIssue<unknown>): string {
     case 'literal':
       return 'must be true';
     case 'picklist':
-      return typeof issue.input === 'string'
-        ? `has an unsupported value: ${issue.input}`
-        : 'must be text';
+      // Enum factories supply their legacy suffix after the appropriate type check.
+      return issue.message;
     // Checks carry a suffix only; forward() supplies any cross-field path.
     default:
       return issue.message;
@@ -90,7 +112,11 @@ export function decode<T extends v.GenericSchema>(
   if (result.success) return result.output;
   const issue = result.issues[0];
   const path = (issue.path ?? [])
-    .map((item) => (item.type === 'array' ? `[${String(item.key)}]` : `.${String(item.key)}`))
+    .map((item) =>
+      item.type === 'array' || (item.type === 'unknown' && Array.isArray(item.input))
+        ? `[${String(item.key)}]`
+        : `.${String(item.key)}`,
+    )
     .join('');
   throw new TypeError(`${rootLabel}${path} ${issueSuffix(issue)}`);
 }

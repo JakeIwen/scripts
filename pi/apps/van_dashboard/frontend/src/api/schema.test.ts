@@ -7,17 +7,20 @@ import {
   finiteNumber,
   messageFrom,
   nonnegativeInteger,
+  numberOneOf,
   nullableBoolean,
   nullableNumber,
   nullableOneOf,
   nullableString,
   object,
+  objectInput,
   oneOf,
   optionalNullableBoolean,
   optionalNullableNumber,
   optionalNullableString,
   optionalString,
   positiveInteger,
+  rawObjectInput,
   stringArray,
   text,
   trueValue,
@@ -72,6 +75,16 @@ describe('shared response schemas', () => {
     error(fields.choice, 'future', 'root has an unsupported value: future');
     expect(decode(fields.choice, 'known', 'root')).toBe('known');
     expect(decode(fields.nullableChoice, null, 'root')).toBeNull();
+  });
+
+  it('validates numeric enum inputs before reporting unsupported finite values', () => {
+    const ranges = numberOneOf([6, 24, 168, 720]);
+    expect(decode(ranges, 24, 'root')).toBe(24);
+    error(ranges, 42, 'root has an unsupported value: 42');
+    for (const invalid of ['24', null, undefined, false, Infinity, NaN]) {
+      error(ranges, invalid, 'root must be a finite number');
+    }
+    error(oneOf(['24']), 24, 'root must be text');
   });
 
   it('strips unknown keys, rejects arrays as objects, and keeps optional keys absent', () => {
@@ -148,6 +161,36 @@ describe('shared response schemas', () => {
     });
     error(schema, { first: 42, second: 'x' }, 'root.first must be text');
     expect(checked).toBe(false);
+  });
+
+  it('retains raw object fields for shape-only preflights', () => {
+    const input = { later: 'validated after sibling shapes' };
+    expect(decode(objectInput, input, 'root')).toBe(input);
+    expect(decode(rawObjectInput, input, 'root')).toBe(input);
+    expect(decode(rawObjectInput, input, 'root').later).toBe(input.later);
+    for (const invalid of [undefined, null, [], 'x', 42, true]) {
+      error(objectInput, invalid, 'root must be an object');
+      error(rawObjectInput, invalid, 'root must be an object');
+    }
+  });
+
+  it('keeps forwarded array indices distinct from numeric object keys', () => {
+    const arraySchema = v.pipe(
+      object({ rows: v.array(object({ count: finiteNumber })) }),
+      v.forward(
+        v.check(() => false, 'must match'),
+        ['rows', 0, 'count'],
+      ),
+    );
+    error(arraySchema, { rows: [{ count: 1 }] }, 'root.rows[0].count must match');
+    const numericKeySchema = v.pipe(
+      object({ '0': finiteNumber }),
+      v.forward(
+        v.check(() => false, 'must match'),
+        ['0'],
+      ),
+    );
+    error(numericKeySchema, { '0': 1 }, 'root.0 must match');
   });
 
   it('formats forwarded custom suffixes and extracts response messages', () => {
