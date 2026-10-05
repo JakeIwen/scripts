@@ -17,10 +17,15 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from pi.apps.video_library import video_asset_catalog as identity
-from pi.apps.video_library import video_library_server as video
 from pi.apps.video_library import routes
 from pi.apps.video_library import video_qbittorrent as qb
+from pi.apps.video_library.catalog import MediaAssetCatalog
+from pi.apps.video_library.config import RESUME_REWIND
+from pi.apps.video_library.legacy_progress import ProgressStore
+from pi.apps.video_library.library import MediaLibrary
+from pi.apps.video_library.media_models import LibrarySource, MediaItem
+from pi.apps.video_library.routes import app
+from pi.apps.video_library.service import VideoService
 
 
 TORRENT_ID = "a" * 40
@@ -193,7 +198,7 @@ class MediaFixture:
         self.database = self.root / "progress.sqlite3"
         self.legacy = self.root / "missing-vlc-positions.txt"
         self.clock = FakeClock()
-        self._stores: list[video.ProgressStore] = []
+        self._stores: list[ProgressStore] = []
 
     def cleanup(self) -> None:
         for store in self._stores:
@@ -216,9 +221,9 @@ class MediaFixture:
         link.symlink_to(target)
         return link
 
-    def library(self) -> video.MediaLibrary:
-        return video.MediaLibrary(
-            [video.LibrarySource("movingparts", str(self.mount), str(self.index))],
+    def library(self) -> MediaLibrary:
+        return MediaLibrary(
+            [LibrarySource("movingparts", str(self.mount), str(self.index))],
             require_mount=False,
         )
 
@@ -228,22 +233,22 @@ class MediaFixture:
         player: FakePlayer | None = None,
         qbittorrent: FakeQbittorrent | None = None,
     ) -> tuple[
-        video.VideoService,
-        video.MediaLibrary,
-        video.ProgressStore,
-        identity.MediaAssetCatalog,
+        VideoService,
+        MediaLibrary,
+        ProgressStore,
+        MediaAssetCatalog,
         FakePlayer,
     ]:
         library = self.library()
-        store = video.ProgressStore(str(self.database))
+        store = ProgressStore(str(self.database))
         self._stores.append(store)
-        catalog = identity.MediaAssetCatalog(
+        catalog = MediaAssetCatalog(
             connection=store.connection,
             lock=store.lock,
             clock=self.clock,
         )
         player = player or FakePlayer()
-        service = video.VideoService(
+        service = VideoService(
             library,
             store,
             player,
@@ -257,7 +262,7 @@ class MediaFixture:
         return service, library, store, catalog, player
 
     @staticmethod
-    def assert_rescan(service: video.VideoService) -> None:
+    def assert_rescan(service: VideoService) -> None:
         if not service.rescan():
             raise AssertionError(service.library.error)
 
@@ -279,7 +284,7 @@ class VideoIdentityIntegrationTests(unittest.TestCase):
         self.addCleanup(self.fixture.cleanup)
 
     @staticmethod
-    def only_item(library: video.MediaLibrary) -> video.MediaItem:
+    def only_item(library: MediaLibrary) -> MediaItem:
         items, _shows = library.snapshot()
         if len(items) != 1:
             raise AssertionError(f"expected one indexed item, found {len(items)}")
@@ -338,7 +343,7 @@ class VideoIdentityIntegrationTests(unittest.TestCase):
         service.play(item_id=renamed.id)
         self.assertAlmostEqual(
             player.launch_calls[-1]["position"],
-            421.0 - video.RESUME_REWIND,
+            421.0 - RESUME_REWIND,
         )
 
     def test_play_local_never_depends_on_qbittorrent_or_a_parsed_identity(self):
@@ -422,7 +427,7 @@ class VideoIdentityIntegrationTests(unittest.TestCase):
         service.play_local(str(final))
         self.assertAlmostEqual(
             player.launch_calls[-1]["position"],
-            360.0 - video.RESUME_REWIND,
+            360.0 - RESUME_REWIND,
         )
 
     def test_active_session_remains_pinned_when_its_launch_path_moves(self):
@@ -500,8 +505,8 @@ class VideoIdentityIntegrationTests(unittest.TestCase):
         self.assertAlmostEqual(store.get(item.key)["position"], 125.0)
 
         with mock.patch.object(routes, "active_service", return_value=service):
-            video.app.config.update(TESTING=True)
-            client = video.app.test_client()
+            app.config.update(TESTING=True)
+            client = app.test_client()
             watched = client.post(
                 "/api/progress", data={"item": item.id, "action": "watched"}
             )
@@ -605,8 +610,8 @@ class LocalOnlyIdentityRouteTests(unittest.TestCase):
         )
         self.service_patch.start()
         self.addCleanup(self.service_patch.stop)
-        video.app.config.update(TESTING=True)
-        self.client = video.app.test_client()
+        app.config.update(TESTING=True)
+        self.client = app.test_client()
 
     def post(
         self,

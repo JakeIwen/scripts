@@ -14,9 +14,26 @@ from urllib.parse import urlsplit
 
 from pi import deploy_python
 from pi.tests.unit_contract import parse_directives, parse_environment
-from pi.apps.video_library import video_library_server as video
+from pi.apps.video_library import library as library_module
 from pi.apps.video_library import routes
+from pi.apps.video_library.config import (
+    DISPLAY,
+    MPRIS_PLAYER,
+    RESUME_REWIND,
+    SNS,
+    SYSTEMD_RUN,
+    VLC_FIXED_VOLUME,
+    XSET,
+)
+from pi.apps.video_library.legacy_progress import ProgressStore
+from pi.apps.video_library.library import MediaLibrary
+from pi.apps.video_library.media_models import LibrarySource, public_progress
+from pi.apps.video_library.naming import canonical_series, parse_candidate, stable_id
 from pi.apps.video_library.playback import PlaybackState
+from pi.apps.video_library.players import vlc_player
+from pi.apps.video_library.players.sonos_volume import SonosVolumeController
+from pi.apps.video_library.players.vlc_player import RoomPreparationError, VlcController
+from pi.apps.video_library.service import VideoService
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
@@ -216,8 +233,8 @@ class MediaFixture:
         return link, target
 
     def library(self, *, mounted=True):
-        return video.MediaLibrary(
-            [video.LibrarySource("movingparts", str(self.mount), str(self.index))],
+        return MediaLibrary(
+            [LibrarySource("movingparts", str(self.mount), str(self.index))],
             mount_check=lambda path: mounted and path == str(self.mount),
         )
 
@@ -246,7 +263,7 @@ class MediaParsingAndIndexTests(unittest.TestCase):
 
     def test_parse_candidate_understands_episode_movie_year_and_fallback_code(self):
         episode_path = self.fixture.target("Galaxy.Quest.S02E03.The.Mutiny.mkv")
-        episode = video.parse_candidate(
+        episode = parse_candidate(
             "TV",
             "TV/Galaxy Quest/Galaxy.Quest.S02E03.The.Mutiny.mkv",
             str(self.fixture.index / "TV/Galaxy Quest/Galaxy.Quest.S02E03.The.Mutiny.mkv"),
@@ -264,7 +281,7 @@ class MediaParsingAndIndexTests(unittest.TestCase):
         )
 
         fallback_path = self.fixture.target("Galaxy.Quest.304.mkv")
-        fallback = video.parse_candidate(
+        fallback = parse_candidate(
             "TV",
             "TV/Galaxy Quest/Galaxy.Quest.304.mkv",
             str(self.fixture.index / "TV/Galaxy Quest/Galaxy.Quest.304.mkv"),
@@ -275,7 +292,7 @@ class MediaParsingAndIndexTests(unittest.TestCase):
         self.assertEqual((fallback.season, fallback.episode), (3, 4))
 
         movie_path = self.fixture.target("Dune.Part.Two.2024.mkv")
-        movie = video.parse_candidate(
+        movie = parse_candidate(
             "Movies",
             "Movies/Dune.Part.Two.2024.mkv",
             str(self.fixture.index / "Movies/Dune.Part.Two.2024.mkv"),
@@ -303,7 +320,7 @@ class MediaParsingAndIndexTests(unittest.TestCase):
         for category, relative, media_type, episode, year in cases:
             with self.subTest(category=category):
                 target = self.fixture.target(Path(relative).name)
-                item = video.parse_candidate(
+                item = parse_candidate(
                     category,
                     relative,
                     str(self.fixture.index / relative),
@@ -328,7 +345,7 @@ class MediaParsingAndIndexTests(unittest.TestCase):
         )
         target.parent.mkdir(parents=True)
         target.write_bytes(b"fake video")
-        item = video.parse_candidate(
+        item = parse_candidate(
             "TV",
             "TV/Example Show/Example.Show.E07E08.Double.Feature.mkv",
             str(
@@ -344,7 +361,7 @@ class MediaParsingAndIndexTests(unittest.TestCase):
         self.assertEqual(item.episode_code, "S02E07")
         self.assertEqual(
             item.id,
-            video.stable_id("episode:tv:example show:s2:e7"),
+            stable_id("episode:tv:example show:s2:e7"),
         )
 
     def test_hash_tv_alias_prefers_verified_real_parent_episode_code(self):
@@ -357,7 +374,7 @@ class MediaParsingAndIndexTests(unittest.TestCase):
         )
         target.parent.mkdir(parents=True)
         target.write_bytes(b"fake video")
-        item = video.parse_candidate(
+        item = parse_candidate(
             "TV",
             f"TV/Example Show/{hash_name}",
             str(self.fixture.index / "TV" / "Example Show" / hash_name),
@@ -371,7 +388,7 @@ class MediaParsingAndIndexTests(unittest.TestCase):
         self.assertEqual(item.episode_code, "S08E06")
         self.assertEqual(
             item.id,
-            video.stable_id("episode:tv:example show:s8:e6"),
+            stable_id("episode:tv:example show:s8:e6"),
         )
 
     def test_anchored_three_digit_fallback_does_not_decode_hash_internals(self):
@@ -380,7 +397,7 @@ class MediaParsingAndIndexTests(unittest.TestCase):
         )
         numbered_target.parent.mkdir(parents=True)
         numbered_target.write_bytes(b"fake video")
-        numbered = video.parse_candidate(
+        numbered = parse_candidate(
             "TV",
             "TV/SeaLab_2021/407_Butchslap.mkv",
             str(self.fixture.index / "TV/SeaLab_2021/407_Butchslap.mkv"),
@@ -395,7 +412,7 @@ class MediaParsingAndIndexTests(unittest.TestCase):
         hash_target = self.fixture.media / "SeaLab_2021" / "unsorted" / hash_name
         hash_target.parent.mkdir(parents=True)
         hash_target.write_bytes(b"fake video")
-        unnumbered = video.parse_candidate(
+        unnumbered = parse_candidate(
             "TV",
             f"TV/SeaLab_2021/{hash_name}",
             str(self.fixture.index / "TV" / "SeaLab_2021" / hash_name),
@@ -408,7 +425,7 @@ class MediaParsingAndIndexTests(unittest.TestCase):
         self.assertIsNone(unnumbered.episode_code)
         self.assertNotEqual(
             unnumbered.id,
-            video.stable_id("episode:tv:sealab:s3:e4"),
+            stable_id("episode:tv:sealab:s3:e4"),
         )
 
     def test_scan_does_not_use_episode_code_above_configured_mount_root(self):
@@ -421,8 +438,8 @@ class MediaParsingAndIndexTests(unittest.TestCase):
         link.parent.mkdir(parents=True)
         link.symlink_to(target)
 
-        library = video.MediaLibrary(
-            [video.LibrarySource("movingparts", str(mount), str(index))],
+        library = MediaLibrary(
+            [LibrarySource("movingparts", str(mount), str(index))],
             mount_check=lambda path: path == str(mount),
         )
         self.assertTrue(library.scan())
@@ -434,7 +451,7 @@ class MediaParsingAndIndexTests(unittest.TestCase):
         target = mount / "torrent" / "Example Show" / "Episode Without Code.mkv"
         target.parent.mkdir(parents=True)
         target.write_bytes(b"fake video")
-        item = video.parse_candidate(
+        item = parse_candidate(
             "TV",
             "TV/Example Show/Episode Without Code.mkv",
             str(self.fixture.index / "TV/Example Show/Episode Without Code.mkv"),
@@ -450,7 +467,7 @@ class MediaParsingAndIndexTests(unittest.TestCase):
         target = mount / "torrent" / "Example Show" / "S04E03" / "Episode.mkv"
         target.parent.mkdir(parents=True)
         target.write_bytes(b"fake video")
-        item = video.parse_candidate(
+        item = parse_candidate(
             "TV",
             "TV/Example Show/Episode.mkv",
             str(self.fixture.index / "TV/Example Show/Episode.mkv"),
@@ -482,9 +499,9 @@ class MediaParsingAndIndexTests(unittest.TestCase):
         for root in (None, outside_root):
             with self.subTest(root=root):
                 if root is None:
-                    item = video.parse_candidate(*arguments)
+                    item = parse_candidate(*arguments)
                 else:
-                    item = video.parse_candidate(*arguments, library_root=str(root))
+                    item = parse_candidate(*arguments, library_root=str(root))
                 self.assertIsNone(item.season)
                 self.assertIsNone(item.episode)
 
@@ -501,7 +518,7 @@ class MediaParsingAndIndexTests(unittest.TestCase):
         target.parent.mkdir(parents=True)
         target.write_bytes(b"fake video")
         linked_mount.symlink_to(real_mount, target_is_directory=True)
-        item = video.parse_candidate(
+        item = parse_candidate(
             "TV",
             "TV/Example Show/Episode.mkv",
             str(self.fixture.index / "TV/Example Show/Episode.mkv"),
@@ -526,7 +543,7 @@ class MediaParsingAndIndexTests(unittest.TestCase):
         )
         for basename, season, episode in cases:
             with self.subTest(basename=basename):
-                item = video.parse_candidate(
+                item = parse_candidate(
                     "TV",
                     f"TV/Example_Show/{basename}",
                     str(self.fixture.index / "TV" / "Example_Show" / basename),
@@ -552,15 +569,15 @@ class MediaParsingAndIndexTests(unittest.TestCase):
         self.assertEqual(
             {item.id for item in items},
             {
-                video.stable_id("episode:tv:yellowstone:s1:e1"),
-                video.stable_id("episode:documentary:yellowstone:s1:e1"),
+                stable_id("episode:tv:yellowstone:s1:e1"),
+                stable_id("episode:documentary:yellowstone:s1:e1"),
             },
         )
         self.assertEqual(
             {show.id for show in shows},
             {
-                video.stable_id("show:tv:yellowstone"),
-                video.stable_id("show:documentary:yellowstone"),
+                stable_id("show:tv:yellowstone"),
+                stable_id("show:documentary:yellowstone"),
             },
         )
         self.assertEqual(
@@ -584,7 +601,7 @@ class MediaParsingAndIndexTests(unittest.TestCase):
         for relative, title, year in cases:
             with self.subTest(relative=relative):
                 target = self.fixture.target(Path(relative).name)
-                item = video.parse_candidate(
+                item = parse_candidate(
                     "Movies",
                     relative,
                     str(self.fixture.index / relative),
@@ -675,9 +692,9 @@ class MediaParsingAndIndexTests(unittest.TestCase):
                 self.assertIs(library.item_for_path(str(path)), item)
 
     def test_canonical_series_merges_article_and_year_folder_variants(self):
-        self.assertEqual(video.canonical_series("The_Last_of_Us"), "last of us")
-        self.assertEqual(video.canonical_series("The_Last_of_Us_2023"), "last of us")
-        self.assertEqual(video.canonical_series("Last_of_Us"), "last of us")
+        self.assertEqual(canonical_series("The_Last_of_Us"), "last of us")
+        self.assertEqual(canonical_series("The_Last_of_Us_2023"), "last of us")
+        self.assertEqual(canonical_series("Last_of_Us"), "last of us")
 
         first_target = self.fixture.target(
             "The_Last_of_Us_S01E01_When_Youre_Lost_in_the_Darkness.mkv"
@@ -702,18 +719,18 @@ class MediaParsingAndIndexTests(unittest.TestCase):
         self.assertEqual(len(items), 2)
         self.assertEqual(len(shows), 1)
         show = shows[0]
-        self.assertEqual(show.id, video.stable_id("show:tv:last of us"))
+        self.assertEqual(show.id, stable_id("show:tv:last of us"))
         self.assertEqual(
             [(item.season, item.episode) for item in show.episodes], [(1, 1), (1, 2)]
         )
         first = show.episodes[0]
         self.assertEqual(
-            first.id, video.stable_id("episode:tv:last of us:s1:e1")
+            first.id, stable_id("episode:tv:last of us:s1:e1")
         )
         self.assertEqual(len(first.aliases), 2)
-        store = video.ProgressStore(":memory:")
+        store = ProgressStore(":memory:")
         self.addCleanup(store.connection.close)
-        service = video.VideoService(
+        service = VideoService(
             library, store, FakePlayer(), sonos=FakeSonosVolume()
         )
         for episode in show.episodes:
@@ -740,15 +757,15 @@ class MediaParsingAndIndexTests(unittest.TestCase):
         self.assertIs(library.item_for_path(os.path.realpath(good)), items[0])
 
     def test_mount_check_fails_closed_before_reading_an_index(self):
-        source = video.LibrarySource(
+        source = LibrarySource(
             "movingparts", str(self.fixture.mount), str(self.fixture.index)
         )
         checked = []
-        library = video.MediaLibrary(
+        library = MediaLibrary(
             [source], mount_check=lambda path: checked.append(path) or False
         )
         with mock.patch.object(
-            video.os.path,
+            library_module.os.path,
             "isdir",
             side_effect=AssertionError("index must not be probed on an unmounted source"),
         ):
@@ -768,12 +785,12 @@ class MediaParsingAndIndexTests(unittest.TestCase):
         target.write_bytes(b"fake video")
         (backup_index / "Movies" / target.name).symlink_to(target)
         sources = (
-            video.LibrarySource(
+            LibrarySource(
                 "movingparts", str(self.fixture.mount), str(self.fixture.index)
             ),
-            video.LibrarySource("bigboi", str(backup_mount), str(backup_index)),
+            LibrarySource("bigboi", str(backup_mount), str(backup_index)),
         )
-        library = video.MediaLibrary(
+        library = MediaLibrary(
             sources, mount_check=lambda path: path == str(backup_mount)
         )
         self.assertTrue(library.scan())
@@ -783,9 +800,9 @@ class MediaParsingAndIndexTests(unittest.TestCase):
     def test_failed_rescan_after_mount_loss_blocks_stale_index_playback(self):
         self.fixture.link("Movies", "Primer.2004.mkv")
         mounted = {"value": True}
-        library = video.MediaLibrary(
+        library = MediaLibrary(
             [
-                video.LibrarySource(
+                LibrarySource(
                     "movingparts", str(self.fixture.mount), str(self.fixture.index)
                 )
             ],
@@ -796,9 +813,9 @@ class MediaParsingAndIndexTests(unittest.TestCase):
         mounted["value"] = False
         self.assertFalse(library.scan())
         player = FakePlayer()
-        store = video.ProgressStore(":memory:")
+        store = ProgressStore(":memory:")
         self.addCleanup(store.connection.close)
-        service = video.VideoService(
+        service = VideoService(
             library,
             store,
             player,
@@ -812,7 +829,7 @@ class MediaParsingAndIndexTests(unittest.TestCase):
 
 class ProgressAndLegacyImportTests(unittest.TestCase):
     def setUp(self):
-        self.store = video.ProgressStore(":memory:")
+        self.store = ProgressStore(":memory:")
         self.addCleanup(self.store.connection.close)
 
     def test_progress_store_merges_fields_marks_and_clears(self):
@@ -840,7 +857,7 @@ class ProgressAndLegacyImportTests(unittest.TestCase):
         watched = self.store.mark("feature:test:2024", True)
         self.assertEqual(watched["position"], 1_000)
         self.assertEqual(watched["finished"], 1)
-        public = video.public_progress(watched)
+        public = public_progress(watched)
         self.assertEqual(public["position_text"], "16:40")
         self.assertEqual(public["duration_text"], "16:40")
         self.assertEqual(public["fraction"], 1.0)
@@ -864,7 +881,7 @@ class ProgressAndLegacyImportTests(unittest.TestCase):
             encoding="utf-8",
         )
         os.utime(legacy, (1_700_000_123, 1_700_000_123))
-        service = video.VideoService(
+        service = VideoService(
             library,
             self.store,
             FakePlayer(),
@@ -890,7 +907,7 @@ class ProgressAndLegacyImportTests(unittest.TestCase):
         legacy.write_text(
             f"{item.rel_path} 100000000 0:01:40\n", encoding="utf-8"
         )
-        service = video.VideoService(
+        service = VideoService(
             library,
             self.store,
             FakePlayer(),
@@ -919,7 +936,7 @@ class SonosVolumeControllerTests(unittest.TestCase):
             discovery_calls.append((timeout, include_invisible))
             return {front, rear, bonded_partner}
 
-        controller = video.SonosVolumeController(
+        controller = SonosVolumeController(
             discover_func=discover
         )
 
@@ -957,7 +974,7 @@ class SonosVolumeControllerTests(unittest.TestCase):
                 def discover(timeout, include_invisible=False, zones=zones):
                     return zones
 
-                controller = video.SonosVolumeController(
+                controller = SonosVolumeController(
                     discover_func=discover
                 )
                 snapshot = controller.snapshot()
@@ -1014,26 +1031,26 @@ class VlcControllerTests(unittest.TestCase):
     def test_room_prep_wakes_display_and_runs_readable_sonos_script_with_bash(self):
         run = mock.Mock()
         popen = mock.Mock()
-        controller = video.VlcController(run=run, popen=popen)
+        controller = VlcController(run=run, popen=popen)
         with (
-            mock.patch.object(video.os.path, "isfile", return_value=True),
-            mock.patch.object(video.os, "access", return_value=True) as access,
+            mock.patch.object(vlc_player.os.path, "isfile", return_value=True),
+            mock.patch.object(vlc_player.os, "access", return_value=True) as access,
         ):
             controller._prepare_room()
 
         run.assert_called_once_with(
-            [video.XSET, "-display", video.DISPLAY, "dpms", "force", "on"],
+            [XSET, "-display", DISPLAY, "dpms", "force", "on"],
             capture_output=True,
             text=True,
             timeout=5,
             check=False,
         )
-        access.assert_called_once_with(video.SNS, os.R_OK)
+        access.assert_called_once_with(SNS, os.R_OK)
         popen.assert_called_once_with(
-            ["/bin/bash", video.SNS, "rear_movie"],
-            stdin=video.subprocess.DEVNULL,
-            stdout=video.subprocess.DEVNULL,
-            stderr=video.subprocess.DEVNULL,
+            ["/bin/bash", SNS, "rear_movie"],
+            stdin=vlc_player.subprocess.DEVNULL,
+            stdout=vlc_player.subprocess.DEVNULL,
+            stderr=vlc_player.subprocess.DEVNULL,
             start_new_session=True,
         )
 
@@ -1043,19 +1060,19 @@ class VlcControllerTests(unittest.TestCase):
         process.poll.return_value = None
         process.wait.return_value = 0
         popen = mock.Mock(return_value=process)
-        controller = video.VlcController(run=run, popen=popen)
+        controller = VlcController(run=run, popen=popen)
 
         with (
-            mock.patch.object(video.os.path, "isfile", return_value=True),
-            mock.patch.object(video.os, "access", return_value=True),
+            mock.patch.object(vlc_player.os.path, "isfile", return_value=True),
+            mock.patch.object(vlc_player.os, "access", return_value=True),
         ):
             controller.prepare_room(wait=True)
 
         popen.assert_called_once_with(
-            ["/bin/bash", video.SNS, "rear_movie_resume"],
-            stdin=video.subprocess.DEVNULL,
-            stdout=video.subprocess.DEVNULL,
-            stderr=video.subprocess.DEVNULL,
+            ["/bin/bash", SNS, "rear_movie_resume"],
+            stdin=vlc_player.subprocess.DEVNULL,
+            stdout=vlc_player.subprocess.DEVNULL,
+            stderr=vlc_player.subprocess.DEVNULL,
             start_new_session=True,
         )
         process.wait.assert_called_once()
@@ -1068,11 +1085,11 @@ class VlcControllerTests(unittest.TestCase):
         replacement = mock.Mock()
         replacement.poll.return_value = None
         popen = mock.Mock(side_effect=(running, replacement))
-        controller = video.VlcController(run=run, popen=popen)
+        controller = VlcController(run=run, popen=popen)
 
         with (
-            mock.patch.object(video.os.path, "isfile", return_value=True),
-            mock.patch.object(video.os, "access", return_value=True),
+            mock.patch.object(vlc_player.os.path, "isfile", return_value=True),
+            mock.patch.object(vlc_player.os, "access", return_value=True),
         ):
             controller._prepare_room()
             controller._prepare_room()
@@ -1091,7 +1108,7 @@ class VlcControllerTests(unittest.TestCase):
         running = mock.Mock()
         running.poll.return_value = None
         running.wait.return_value = 0
-        controller = video.VlcController(run=run, popen=popen)
+        controller = VlcController(run=run, popen=popen)
         controller.room_process = running
 
         controller.prepare_room(wait=True)
@@ -1105,7 +1122,7 @@ class VlcControllerTests(unittest.TestCase):
 
     def test_waiting_room_prep_reports_timeout_nonzero_and_missing_setup(self):
         outcomes = (
-            video.subprocess.TimeoutExpired(cmd="rear_movie", timeout=1),
+            vlc_player.subprocess.TimeoutExpired(cmd="rear_movie", timeout=1),
             9,
         )
         for outcome in outcomes:
@@ -1116,35 +1133,35 @@ class VlcControllerTests(unittest.TestCase):
                     process.wait.side_effect = outcome
                 else:
                     process.wait.return_value = outcome
-                controller = video.VlcController(run=mock.Mock())
+                controller = VlcController(run=mock.Mock())
                 controller.room_process = process
 
-                with self.assertRaises(video.RoomPreparationError):
+                with self.assertRaises(RoomPreparationError):
                     controller.prepare_room(wait=True)
                 self.assertIsNone(controller.room_process)
                 if isinstance(outcome, BaseException):
                     self.assertTrue(process.terminate.called or process.kill.called)
 
-        controller = video.VlcController(run=mock.Mock())
-        with mock.patch.object(video.os.path, "isfile", return_value=False):
-            with self.assertRaises(video.RoomPreparationError):
+        controller = VlcController(run=mock.Mock())
+        with mock.patch.object(vlc_player.os.path, "isfile", return_value=False):
+            with self.assertRaises(RoomPreparationError):
                 controller.prepare_room(wait=True)
 
     def test_waiting_room_prep_timeout_terminates_process_group_and_clears_owner(self):
         process = mock.Mock(pid=4321)
         process.poll.return_value = None
         process.wait.side_effect = (
-            video.subprocess.TimeoutExpired(cmd="rear_movie_resume", timeout=1),
+            vlc_player.subprocess.TimeoutExpired(cmd="rear_movie_resume", timeout=1),
             0,
         )
         killpg = mock.Mock()
-        controller = video.VlcController(run=mock.Mock(), killpg=killpg)
+        controller = VlcController(run=mock.Mock(), killpg=killpg)
         controller.room_process = process
 
-        with self.assertRaisesRegex(video.RoomPreparationError, "did not finish"):
+        with self.assertRaisesRegex(RoomPreparationError, "did not finish"):
             controller.prepare_room(wait=True)
 
-        killpg.assert_called_once_with(4321, video.signal.SIGTERM)
+        killpg.assert_called_once_with(4321, vlc_player.signal.SIGTERM)
         self.assertEqual(process.wait.call_count, 2)
         self.assertIsNone(controller.room_process)
 
@@ -1154,7 +1171,7 @@ class VlcControllerTests(unittest.TestCase):
             return_value=mock.Mock(returncode=0, stdout="", stderr="")
         )
         sleep = mock.Mock()
-        controller = video.VlcController(run=run, sleep=sleep)
+        controller = VlcController(run=run, sleep=sleep)
         early_registration = {
             "available": True,
             "state": "STOPPED",
@@ -1199,7 +1216,7 @@ class VlcControllerTests(unittest.TestCase):
             ) as snapshot,
             mock.patch.object(controller, "set_position") as set_position,
             mock.patch.object(
-                controller, "set_volume", return_value=video.VLC_FIXED_VOLUME
+                controller, "set_volume", return_value=VLC_FIXED_VOLUME
             ) as set_volume,
         ):
             result = controller.launch([first_path], position=321)
@@ -1207,7 +1224,7 @@ class VlcControllerTests(unittest.TestCase):
         launch_command = next(
             call.args[0]
             for call in run.call_args_list
-            if call.args and video.SYSTEMD_RUN in call.args[0]
+            if call.args and SYSTEMD_RUN in call.args[0]
         )
         self.assertIn("--volume=256", launch_command)
         self.assertIn("--no-volume-save", launch_command)
@@ -1215,7 +1232,7 @@ class VlcControllerTests(unittest.TestCase):
         self.assertGreaterEqual(snapshot.call_count, 4)
         self.assertGreaterEqual(sleep.call_count, 2)
         self.assertEqual(sleep.call_args_list[:2], [mock.call(0.25), mock.call(0.25)])
-        set_volume.assert_called_once_with(video.VLC_FIXED_VOLUME)
+        set_volume.assert_called_once_with(VLC_FIXED_VOLUME)
         set_position.assert_called_once_with("/fake/track/new", 321)
         self.assertEqual(result, resumed)
 
@@ -1237,10 +1254,10 @@ class VlcControllerTests(unittest.TestCase):
         }
 
         def get_all(interface):
-            return player_values if interface == video.MPRIS_PLAYER else {}
+            return player_values if interface == MPRIS_PLAYER else {}
 
         props.GetAll.side_effect = get_all
-        controller = video.VlcController(dbus_module=module)
+        controller = VlcController(dbus_module=module)
         with mock.patch.object(
             controller,
             "_interfaces",
@@ -1248,17 +1265,17 @@ class VlcControllerTests(unittest.TestCase):
         ):
             drifted = controller.snapshot()
             props.Set.assert_called_once_with(
-                video.MPRIS_PLAYER,
+                MPRIS_PLAYER,
                 "Volume",
-                video.VLC_FIXED_VOLUME,
+                VLC_FIXED_VOLUME,
             )
-            self.assertEqual(drifted["volume"], video.VLC_FIXED_VOLUME)
+            self.assertEqual(drifted["volume"], VLC_FIXED_VOLUME)
 
             props.Set.reset_mock()
-            player_values["Volume"] = video.VLC_FIXED_VOLUME
+            player_values["Volume"] = VLC_FIXED_VOLUME
             fixed = controller.snapshot()
             props.Set.assert_not_called()
-            self.assertEqual(fixed["volume"], video.VLC_FIXED_VOLUME)
+            self.assertEqual(fixed["volume"], VLC_FIXED_VOLUME)
 
 
 class PlaybackStateTests(unittest.TestCase):
@@ -1289,12 +1306,12 @@ class PlaybackStateTests(unittest.TestCase):
         )
 
     def test_video_services_have_distinct_playback_state(self):
-        first = video.VideoService(
+        first = VideoService(
             mock.sentinel.library,
             mock.sentinel.store,
             mock.sentinel.player,
         )
-        second = video.VideoService(
+        second = VideoService(
             mock.sentinel.library,
             mock.sentinel.store,
             mock.sentinel.player,
@@ -1308,12 +1325,12 @@ class VideoServiceTests(unittest.TestCase):
         self.fixture = MediaFixture()
         self.addCleanup(self.fixture.cleanup)
         self.library = add_sample_library(self.fixture)
-        self.store = video.ProgressStore(":memory:")
+        self.store = ProgressStore(":memory:")
         self.addCleanup(self.store.connection.close)
         self.player = FakePlayer()
         self.sonos = FakeSonosVolume()
         self.clock = FakeClock()
-        self.service = video.VideoService(
+        self.service = VideoService(
             self.library,
             self.store,
             self.player,
@@ -1360,7 +1377,7 @@ class VideoServiceTests(unittest.TestCase):
         self.assertEqual(
             call["paths"], [os.path.realpath(two.path), os.path.realpath(three.path)]
         )
-        self.assertEqual(call["position"], 160 - video.RESUME_REWIND)
+        self.assertEqual(call["position"], 160 - RESUME_REWIND)
         self.assertEqual(call["subtitles"], "off")
         self.assertEqual(self.store.get(two.key)["play_count"], 1)
 
@@ -1466,7 +1483,7 @@ class VideoServiceTests(unittest.TestCase):
                 player = FakePlayer()
                 player.snapshot_value.update(available=True, state=state)
                 sonos = FakeSonosVolume(volume=volume)
-                service = video.VideoService(
+                service = VideoService(
                     self.library,
                     self.store,
                     player,
@@ -1511,7 +1528,7 @@ class VideoServiceTests(unittest.TestCase):
             with self.subTest(state=state, action=action):
                 player = FakePlayer()
                 player.snapshot_value.update(available=True, state=state)
-                service = video.VideoService(
+                service = VideoService(
                     self.library,
                     self.store,
                     player,
@@ -1535,7 +1552,7 @@ class VideoServiceTests(unittest.TestCase):
                 player = FakePlayer()
                 player.snapshot_value.update(available=available, state=state)
                 player.action = mock.Mock(side_effect=RuntimeError("VLC unavailable"))
-                service = video.VideoService(
+                service = VideoService(
                     self.library,
                     self.store,
                     player,
@@ -1552,12 +1569,12 @@ class VideoServiceTests(unittest.TestCase):
 
     def test_failed_room_prep_does_not_resume_or_restore_volume(self):
         self.player.snapshot_value.update(available=True, state="PAUSED")
-        self.player.prepare_room_error = video.RoomPreparationError(
+        self.player.prepare_room_error = RoomPreparationError(
             "rear_movie timed out"
         )
         self.sonos.snapshot_value["volume"] = 61
 
-        with self.assertRaisesRegex(video.RoomPreparationError, "timed out"):
+        with self.assertRaisesRegex(RoomPreparationError, "timed out"):
             self.service.control_player("toggle")
 
         self.assertEqual(self.player.prepare_room_calls, [{"wait": True}])
@@ -1623,7 +1640,7 @@ class VideoServiceTests(unittest.TestCase):
             return original_set_volume(value)
 
         sonos.set_volume = record_volume
-        service = video.VideoService(
+        service = VideoService(
             self.library,
             self.store,
             player,
@@ -1730,7 +1747,7 @@ class VideoServiceTests(unittest.TestCase):
             return original_set_volume(value)
 
         sonos.set_volume = record_volume
-        service = video.VideoService(
+        service = VideoService(
             self.library,
             self.store,
             player,
@@ -1988,11 +2005,11 @@ class ApiRouteTests(unittest.TestCase):
         self.fixture = MediaFixture()
         self.addCleanup(self.fixture.cleanup)
         self.library = add_sample_library(self.fixture)
-        self.store = video.ProgressStore(":memory:")
+        self.store = ProgressStore(":memory:")
         self.addCleanup(self.store.connection.close)
         self.player = FakePlayer()
         self.sonos = FakeSonosVolume()
-        self.service = video.VideoService(
+        self.service = VideoService(
             self.library,
             self.store,
             self.player,
@@ -2004,8 +2021,8 @@ class ApiRouteTests(unittest.TestCase):
         )
         self.active_service_patch.start()
         self.addCleanup(self.active_service_patch.stop)
-        video.app.config.update(TESTING=True)
-        self.client = video.app.test_client()
+        routes.app.config.update(TESTING=True)
+        self.client = routes.app.test_client()
         self.item = next(
             item for item in self.library.items.values() if item.media_type == "movie"
         )
@@ -2135,7 +2152,7 @@ class ApiRouteTests(unittest.TestCase):
 
     def test_control_route_fails_closed_when_room_setup_fails(self):
         self.player.snapshot_value.update(available=True, state="PAUSED")
-        self.player.prepare_room_error = video.RoomPreparationError(
+        self.player.prepare_room_error = RoomPreparationError(
             "rear_movie exited 7"
         )
 
@@ -2297,7 +2314,7 @@ class ApiRouteTests(unittest.TestCase):
     def test_sonos_volume_waits_for_rear_movie_room_preparation(self):
         process = mock.Mock()
         process.poll.return_value = None
-        player = video.VlcController()
+        player = VlcController()
         player.room_process = process
         self.service.player = player
 
@@ -2417,7 +2434,7 @@ class ApiRouteTests(unittest.TestCase):
                 self.assertTrue(
                     any(
                         rule.rule == path and "POST" in rule.methods
-                        for rule in video.app.url_map.iter_rules()
+                        for rule in routes.app.url_map.iter_rules()
                     ),
                     f"{path} is not bound to POST",
                 )
@@ -2608,7 +2625,7 @@ class DeploymentWiringTests(unittest.TestCase):
         self.assertNotIn("/home/pi/scripts/python-automation/vlc_property.py", logger)
 
     def test_template_static_assets_dashboard_and_cli_use_the_same_api(self):
-        client = video.app.test_client()
+        client = routes.app.test_client()
         page = client.get("/")
         self.assertEqual(page.status_code, 200)
         parser = ServedPageParser()
