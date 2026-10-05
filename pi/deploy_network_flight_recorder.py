@@ -44,6 +44,13 @@ TARGETS = {
 for name in ('__init__', 'collector', 'parsers', 'report', 'store'):
     TARGETS[f'pi/scripts/network_recorder/{name}.py'] = f'/home/pi/scripts/network_recorder/{name}.py'
 
+# Importing the redaction shim also imports the CLI and its package dependencies.
+# These are checked prerequisites, never managed deployment targets.
+MONITOR_PACKAGE_DEPENDENCIES = {
+    f'pi/scripts/system_monitor/{name}.py': f'/home/pi/scripts/system_monitor/{name}.py'
+    for name in ('__init__', 'cli', 'common', 'crash', 'daemon', 'journal', 'probes', 'report', 'rollups', 'store')
+}
+
 
 def sha(data):
     return hashlib.sha256(data).hexdigest()
@@ -126,6 +133,12 @@ def validate_plan(plan):
     safe_release(plan['release'])
     if plan.get('schema_version') != 1:
         raise ValueError('unsupported deployment manifest')
+    dependencies = plan.get('monitor_package_dependencies')
+    if not isinstance(dependencies, dict) or set(dependencies) != set(MONITOR_PACKAGE_DEPENDENCIES.values()):
+        raise ValueError('manifest differs from system monitor dependency allowlist')
+    for value in [plan.get('monitor_dependency'), *dependencies.values()]:
+        if not isinstance(value, str) or not re.fullmatch(r'[0-9a-f]{64}', value):
+            raise ValueError('invalid system monitor dependency checksum')
     expected = set(TARGETS.items())
     supplied = {(entry['source'], entry['destination']) for entry in plan['files']}
     if supplied != expected or len(plan['files']) != len(expected):
@@ -161,6 +174,10 @@ def inspect_remote(plan):
     info = regular_info('/home/pi/scripts/system_event_monitor.py')
     if info is None or info['sha256'] != dependency:
         raise ValueError('existing system monitor redaction dependency differs from reviewed checkout')
+    for path, expected in plan['monitor_package_dependencies'].items():
+        info = regular_info(path)
+        if info is None or info['sha256'] != expected:
+            raise ValueError(f'existing system monitor dependency differs from reviewed checkout: {path}')
     plan['frontend_before'] = {name: link_info(FRONTEND / name) for name in ('current', 'previous')}
     current = plan['frontend_before']['current']
     if current is None:
@@ -174,9 +191,14 @@ def inspect_remote(plan):
 
 def verify_remote(plan):
     refuse_managed_host()
+    validate_plan(plan)
     dependency = regular_info('/home/pi/scripts/system_event_monitor.py')
     if dependency is None or dependency['sha256'] != plan['monitor_dependency']:
         raise ValueError('system monitor dependency changed after check')
+    for path, expected in plan['monitor_package_dependencies'].items():
+        info = regular_info(path)
+        if info is None or info['sha256'] != expected:
+            raise ValueError(f'system monitor dependency changed after check: {path}')
     for entry in plan['files']:
         if regular_info(entry['destination']) != entry['before']:
             raise ValueError(f'live managed file changed after check: {entry["destination"]}')
@@ -403,7 +425,13 @@ def remote_call(target, action, request):
 
 def make_plan(target):
     plan = dict(schema_version=1, target=target, release='network-' + time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()) + '-' + uuid.uuid4().hex[:8],
-                files=[], frontend_files=[], monitor_dependency=digest(REPO / 'pi/scripts/system_event_monitor.py'))
+                files=[], frontend_files=[], monitor_dependency=digest(REPO / 'pi/scripts/system_event_monitor.py'),
+                monitor_package_dependencies={})
+    for source, destination in MONITOR_PACKAGE_DEPENDENCIES.items():
+        info = regular_info(REPO / source)
+        if info is None:
+            raise ValueError(f'missing regular system monitor dependency: {source}')
+        plan['monitor_package_dependencies'][destination] = info['sha256']
     for source, destination in TARGETS.items():
         path = REPO / source
         if not path.is_file() or path.is_symlink():
@@ -447,7 +475,8 @@ def main(argv=None):
         if plan['target'] != args.target:
             raise ValueError('plan SSH target mismatch')
         current = make_plan(args.target)
-        if current['monitor_dependency'] != plan['monitor_dependency']:
+        if (current['monitor_dependency'] != plan['monitor_dependency']
+                or current['monitor_package_dependencies'] != plan['monitor_package_dependencies']):
             raise ValueError('local system monitor dependency changed after check')
         for key in ('files', 'frontend_files'):
             expected = [{k:v for k,v in item.items() if k != 'before'} for item in plan[key]]

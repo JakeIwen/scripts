@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tarfile
 import tempfile
 import types
@@ -43,10 +44,15 @@ class DeploymentTests(unittest.TestCase):
         self.states = {name:dict(enabled='enabled',active=True) for name in deploy.SERVICES}
         self.states['network-flight-recorder'] = dict(enabled='not-found',active=False)
         self.calls = []
+        self.monitor_hashes = {
+            path: deploy.sha(path.encode())
+            for path in ['/home/pi/scripts/system_event_monitor.py', *deploy.MONITOR_PACKAGE_DEPENDENCIES.values()]
+        }
         original_info = deploy.regular_info
         def info(path):
-            if str(path) == '/home/pi/scripts/system_event_monitor.py':
-                return dict(sha256='dependency',mode=0o644,uid=0,gid=0)
+            if str(path) in self.monitor_hashes:
+                value = self.monitor_hashes[str(path)]
+                return dict(sha256=value,mode=0o644,uid=0,gid=0) if value is not None else None
             return original_info(path)
         def run(args, check=True):
             self.calls.append(args)
@@ -71,7 +77,10 @@ class DeploymentTests(unittest.TestCase):
             patch.start()
             self.addCleanup(patch.stop)
         self.addCleanup(self.directory.cleanup)
-        self.plan = dict(schema_version=1,release='network-test',monitor_dependency='dependency',target='fixture',files=[],
+        self.plan = dict(schema_version=1,release='network-test',target='fixture',files=[],
+                         monitor_dependency=self.monitor_hashes['/home/pi/scripts/system_event_monitor.py'],
+                         monitor_package_dependencies={path: self.monitor_hashes[path]
+                                                       for path in deploy.MONITOR_PACKAGE_DEPENDENCIES.values()},
                          frontend_files=[dict(relative='index.html',sha256=deploy.sha(b'new frontend'))])
         for source,destination in self.targets.items():
             before = original_info(destination)
@@ -118,6 +127,104 @@ class DeploymentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'live files differ'):
             deploy.inspect_remote(self.plan)
         self.assertEqual(self.calls,[])
+
+    def test_monitor_dependency_mismatch_or_missing_refused_at_check(self):
+        for path, expected in list(self.monitor_hashes.items()):
+            for value in (None, deploy.sha(b'changed')):
+                with self.subTest(path=path, value=value):
+                    self.monitor_hashes[path] = value
+                    with self.assertRaisesRegex(ValueError, 'system monitor.*dependency differs'):
+                        deploy.inspect_remote(copy.deepcopy(self.plan))
+                    self.assertEqual(self.calls, [])
+                    self.monitor_hashes[path] = expected
+
+    def test_monitor_dependency_mismatch_or_missing_refused_at_verify_and_apply(self):
+        deploy.inspect_remote(self.plan)
+        stage = self.stage()
+        for path, expected in list(self.monitor_hashes.items()):
+            for value in (None, deploy.sha(b'changed')):
+                with self.subTest(path=path, value=value):
+                    self.monitor_hashes[path] = value
+                    with self.assertRaisesRegex(ValueError, 'system monitor dependency changed after check'):
+                        deploy.verify_remote(self.plan)
+                    with self.assertRaisesRegex(ValueError, 'system monitor dependency changed after check'):
+                        deploy.apply_remote(self.plan, stage)
+                    self.assertEqual(self.calls, [])
+                    self.assertEqual(self.old.read_text(), 'value = "old"\n')
+                    self.assertFalse((stage / 'payload').exists())
+                    self.monitor_hashes[path] = expected
+
+    def test_monitor_dependency_plan_validation_is_strict(self):
+        original = self.plan['monitor_package_dependencies']
+        first = next(iter(original))
+        invalid = [None, [], {}, {**original, '/home/pi/scripts/other.py': deploy.sha(b'other')},
+                   {key: value for key, value in original.items() if key != first}]
+        invalid.extend({**original, first: value} for value in (None, 1, '', 'g' * 64, 'A' * 64, '0' * 63))
+        for dependencies in invalid:
+            with self.subTest(dependencies=dependencies):
+                plan = {**self.plan, 'monitor_package_dependencies': dependencies}
+                with self.assertRaisesRegex(ValueError, 'system monitor dependency'):
+                    deploy.validate_plan(plan)
+        plan = dict(self.plan)
+        del plan['monitor_package_dependencies']
+        with self.assertRaisesRegex(ValueError, 'dependency allowlist'):
+            deploy.validate_plan(plan)
+        for value in (None, 'dependency', 1):
+            with self.subTest(shim=value):
+                with self.assertRaisesRegex(ValueError, 'dependency checksum'):
+                    deploy.validate_plan({**self.plan, 'monitor_dependency': value})
+
+    def test_local_monitor_module_change_refused_before_apply_staging(self):
+        plan_file = self.root / 'plan.json'
+        plan_file.write_text(json.dumps(self.plan))
+        current = copy.deepcopy(self.plan)
+        first = next(iter(current['monitor_package_dependencies']))
+        current['monitor_package_dependencies'][first] = deploy.sha(b'local change')
+        with mock.patch.object(deploy, 'make_plan', return_value=current), \
+                mock.patch.object(deploy, 'remote_call') as remote:
+            with self.assertRaisesRegex(ValueError, 'local system monitor dependency changed after check'):
+                deploy.main(['--target', 'fixture', 'apply', '--plan', str(plan_file)])
+        remote.assert_not_called()
+        self.assertEqual(self.calls, [])
+
+    def test_make_plan_hashes_every_monitor_module(self):
+        root = self.root / 'checkout'
+        for source in deploy.MONITOR_PACKAGE_DEPENDENCIES:
+            path = root / source
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('# ' + source + '\n')
+        shim = root / 'pi/scripts/system_event_monitor.py'
+        shim.write_text('# shim\n')
+        for source in self.targets:
+            (root / source).write_bytes(self.contents[source])
+        dist = root / 'pi/apps/van_dashboard/frontend/dist'
+        dist.mkdir(parents=True)
+        (dist / 'index.html').write_text('fixture')
+        with mock.patch.object(deploy, 'REPO', root), \
+                mock.patch.object(deploy.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, b'', b'')):
+            plan = deploy.make_plan('fixture')
+        self.assertEqual(plan['monitor_dependency'], deploy.digest(shim))
+        self.assertEqual(plan['monitor_package_dependencies'], {
+            destination: deploy.digest(root / source)
+            for source, destination in deploy.MONITOR_PACKAGE_DEPENDENCIES.items()
+        })
+
+    def test_monitor_pins_cover_the_recorders_loaded_package(self):
+        script = '''
+import json, sys
+from pathlib import Path
+import pi.scripts.network_recorder.parsers
+root = Path(sys.argv[1]).resolve()
+print(json.dumps(sorted(str(Path(module.__file__).resolve().relative_to(root))
+    for name, module in sys.modules.items()
+    if name == 'pi.scripts.system_monitor' or name.startswith('pi.scripts.system_monitor.'))))
+'''
+        root = SCRIPT.parents[1]
+        result = subprocess.run([sys.executable, '-B', '-P', '-c', script, str(root)],
+                                cwd=self.root, env={**os.environ, 'PYTHONPATH': str(root),
+                                                   'PYTHONDONTWRITEBYTECODE': '1'},
+                                capture_output=True, text=True, check=True, timeout=10)
+        self.assertEqual(json.loads(result.stdout), sorted(deploy.MONITOR_PACKAGE_DEPENDENCIES))
 
     def test_legacy_deployer_refuses_after_storage_migration(self):
         deploy.STORAGE_CONFIG.write_text('{}')
