@@ -1007,6 +1007,14 @@ provision_profile() {
 }
 
 update_profile_settings() {
+    validate_profile_settings "$@" || return 1
+    # PENDING_PROFILE stays global so exit-trap cleanup owns pending output.
+    PENDING_PROFILE="$PROFILE_DIR/.dashboard-profile.$$"
+    rewrite_profile_settings "$PROFILE_DIR/$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8"
+    commit_profile_settings "$1" "$4" "$5" "$6" "$7" "$8" "$9"
+}
+
+validate_profile_settings() {
     local update_name=""
     local update_password_action=""
     local update_password=""
@@ -1018,17 +1026,6 @@ update_profile_settings() {
     local update_apply=""
     local update_source=""
     local update_password_length=""
-    local saw_aaa_password=""
-    local saw_supplicant_password=""
-    local saw_wireless_bssid=""
-    local saw_supplicant_bssid=""
-    local saw_txpower=""
-    local saw_rate_module=""
-    local saw_rate_auto=""
-    local saw_rate_mcs=""
-    local update_line=""
-    local update_key=""
-    local update_uptime=""
     update_name=$1
     update_password_action=$2
     update_password=$3
@@ -1102,8 +1099,37 @@ update_profile_settings() {
         yes|no) ;;
         *) log_message "invalid profile apply setting"; return 1 ;;
     esac
+    return 0
+}
 
-    PENDING_PROFILE="$PROFILE_DIR/.dashboard-profile.$$"
+rewrite_profile_settings() {
+    local update_source=""
+    local update_password_action=""
+    local update_password=""
+    local update_bssid=""
+    local update_txpower=""
+    local update_rate_module=""
+    local update_rate_auto=""
+    local update_rate_mcs=""
+    local saw_aaa_password=""
+    local saw_supplicant_password=""
+    local saw_wireless_bssid=""
+    local saw_supplicant_bssid=""
+    local saw_txpower=""
+    local saw_rate_module=""
+    local saw_rate_auto=""
+    local saw_rate_mcs=""
+    local update_line=""
+    local update_key=""
+    update_source=$1
+    update_password_action=$2
+    update_password=$3
+    update_bssid=$4
+    update_txpower=$5
+    update_rate_module=$6
+    update_rate_auto=$7
+    update_rate_mcs=$8
+
     saw_aaa_password=no
     saw_supplicant_password=no
     saw_wireless_bssid=no
@@ -1172,6 +1198,26 @@ update_profile_settings() {
     [ "$saw_rate_auto" = yes ] || printf 'radio.1.rate.auto=%s\n' "$update_rate_auto" >> "$PENDING_PROFILE"
     [ "$saw_rate_mcs" = yes ] || printf 'radio.1.rate.mcs=%s\n' "$update_rate_mcs" >> "$PENDING_PROFILE"
     chmod 750 "$PENDING_PROFILE"
+}
+
+commit_profile_settings() {
+    local update_name=""
+    local update_bssid=""
+    local update_txpower=""
+    local update_rate_module=""
+    local update_rate_auto=""
+    local update_rate_mcs=""
+    local update_apply=""
+    local update_source=""
+    local update_uptime=""
+    update_name=$1
+    update_bssid=$2
+    update_txpower=$3
+    update_rate_module=$4
+    update_rate_auto=$5
+    update_rate_mcs=$6
+    update_apply=$7
+    update_source="$PROFILE_DIR/$update_name"
 
     mkdir -p "$PROFILE_DIR/.disabled"
     update_uptime=$(uptime_seconds)
