@@ -4,42 +4,23 @@ import collections
 import json
 import os
 
-if __package__:
-    from .common import (
-        DEFAULT_CRASH_REPORT_DIRECTORY,
-        REPORT_VERSION,
-        SEVERITY_RANK,
-        normalize_boot_id,
-        utc_timestamp,
-        event_fingerprint,
-    )
-    from .journal import (
-        classify_kernel_message,
-        redact_log_message,
-        read_journal_records,
-        journal_monotonic_seconds,
-        journal_order_key,
-    )
-    from .probes import read_text, ResourceSampler, collect_usb_state, collect_mount_state
-    from .rollups import metric_value
-else:
-    from common import (
-        DEFAULT_CRASH_REPORT_DIRECTORY,
-        REPORT_VERSION,
-        SEVERITY_RANK,
-        normalize_boot_id,
-        utc_timestamp,
-        event_fingerprint,
-    )
-    from journal import (
-        classify_kernel_message,
-        redact_log_message,
-        read_journal_records,
-        journal_monotonic_seconds,
-        journal_order_key,
-    )
-    from probes import read_text, ResourceSampler, collect_usb_state, collect_mount_state
-    from rollups import metric_value
+from .common import (
+    DEFAULT_CRASH_REPORT_DIRECTORY,
+    REPORT_VERSION,
+    SEVERITY_RANK,
+    normalize_boot_id,
+    utc_timestamp,
+    event_fingerprint,
+)
+from .journal import (
+    classify_kernel_message,
+    redact_log_message,
+    read_journal_records,
+    journal_monotonic_seconds,
+    journal_order_key,
+)
+from .probes import read_text, ResourceSampler, collect_usb_state, collect_mount_state
+from .rollups import metric_value
 
 
 def read_pstore_directory(base, source):

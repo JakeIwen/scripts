@@ -3,10 +3,7 @@
 import math
 import statistics
 
-if __package__:
-    from .common import DEFAULT_ROLLUP_INTERVAL
-else:
-    from common import DEFAULT_ROLLUP_INTERVAL
+from .common import DEFAULT_ROLLUP_INTERVAL
 
 
 def metric_value(sample, path):

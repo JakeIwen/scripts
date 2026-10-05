@@ -4,30 +4,17 @@ import json
 import os
 import sqlite3
 
-if __package__:
-    from .common import (
-        DEFAULT_CRASH_SAMPLE_LIMIT,
-        DEFAULT_DATABASE,
-        DEFAULT_RETENTION_DAYS,
-        DEFAULT_SAMPLE_INTERVAL,
-        DEFAULT_SAMPLE_RETENTION_HOURS,
-        event_fingerprint,
-        json_dumps,
-        normalize_boot_id,
-        utc_timestamp,
-    )
-else:
-    from common import (
-        DEFAULT_CRASH_SAMPLE_LIMIT,
-        DEFAULT_DATABASE,
-        DEFAULT_RETENTION_DAYS,
-        DEFAULT_SAMPLE_INTERVAL,
-        DEFAULT_SAMPLE_RETENTION_HOURS,
-        event_fingerprint,
-        json_dumps,
-        normalize_boot_id,
-        utc_timestamp,
-    )
+from .common import (
+    DEFAULT_CRASH_SAMPLE_LIMIT,
+    DEFAULT_DATABASE,
+    DEFAULT_RETENTION_DAYS,
+    DEFAULT_SAMPLE_INTERVAL,
+    DEFAULT_SAMPLE_RETENTION_HOURS,
+    event_fingerprint,
+    json_dumps,
+    normalize_boot_id,
+    utc_timestamp,
+)
 
 
 class EventStore:
