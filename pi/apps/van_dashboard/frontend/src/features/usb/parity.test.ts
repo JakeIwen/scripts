@@ -1,8 +1,9 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { objectValue } from '../../api/validation';
-import { captureDecode, freezeResults, parityCorpus, thawResults } from '../../test/parity';
-import * as legacy from './decoders';
+import { captureDecode, parityCorpus, thawResults, type FrozenResults } from '../../test/parity';
 import { decodeMutation, decodeUsbPortState, decodeUsbStatusResponse } from './schema';
 import { usbStatusPayload } from './testFixtures';
 
@@ -40,13 +41,11 @@ const groups = [
   {
     name: 'status',
     fixtures: statusFixtures,
-    old: legacy.decodeUsbStatusResponse,
     current: decodeUsbStatusResponse,
   },
   {
     name: 'ports',
     fixtures: portFixtures,
-    old: legacy.decodeUsbPortState,
     current: decodeUsbPortState,
   },
   ...[
@@ -59,7 +58,6 @@ const groups = [
   ].map(({ label, messages }) => ({
     name: label,
     fixtures: Object.fromEntries(messages.map((message) => [message, mutationFixtures[message]])),
-    old: (value: unknown) => legacy.decodeMutation(value, label),
     current: (value: unknown) => decodeMutation(value, label),
   })),
 ];
@@ -67,23 +65,29 @@ const groups = [
 describe('USB generated decoder parity', () => {
   for (const group of groups) {
     const corpus = parityCorpus(group.fixtures);
-    it(`${group.name}: matches frozen expectations on ${corpus.length} generated inputs`, async () => {
-      const results = corpus.map(({ name, input }) => {
-        const old = captureDecode(group.old, input);
+    it(`${group.name}: matches frozen expectations on ${corpus.length} generated inputs`, () => {
+      // Frozen from the legacy decoder while it and the schema passed toStrictEqual.
+      // Deliberately read-only: snapshot-update flags cannot silently rewrite the oracle.
+      const path = join(
+        process.cwd(),
+        'src/features/usb',
+        `parity.${group.name.replaceAll(' ', '-')}.json.snap`,
+      );
+      const frozen: FrozenResults = JSON.parse(readFileSync(path, 'utf8'));
+      const expectations = thawResults(frozen);
+      expect(expectations.map((row) => row.name)).toStrictEqual(corpus.map((row) => row.name));
+      corpus.forEach(({ name, input }, index) => {
         const current = captureDecode(group.current, input);
-        const expected = old.accepted
-          ? old
-          : { ...old, message: MESSAGE_DRIFT[old.message] ?? old.message };
+        const old = expectations[index]?.result;
+        const expected =
+          old !== null &&
+          typeof old === 'object' &&
+          'message' in old &&
+          typeof old.message === 'string'
+            ? { ...old, message: MESSAGE_DRIFT[old.message] ?? old.message }
+            : old;
         expect(current, name).toStrictEqual(expected);
-        return old;
       });
-      const frozen = freezeResults(corpus, results);
-      expect(thawResults(frozen)).toStrictEqual(
-        corpus.map(({ name }, index) => ({ name, result: results[index] })),
-      );
-      await expect(JSON.stringify(frozen)).toMatchFileSnapshot(
-        `./parity.${group.name.replaceAll(' ', '-')}.json.snap`,
-      );
     });
   }
 
@@ -93,9 +97,11 @@ describe('USB generated decoder parity', () => {
     inventory.present_device_count = 2;
     inventory.checked_at = 'invalid';
     payload.usb_ports = null;
-    expect(captureDecode(decodeUsbStatusResponse, payload)).toStrictEqual(
-      captureDecode(legacy.decodeUsbStatusResponse, payload),
-    );
+    expect(captureDecode(decodeUsbStatusResponse, payload)).toStrictEqual({
+      accepted: false,
+      error: 'TypeError',
+      message: 'usb.present_device_count does not match usb.devices',
+    });
     expect(() => decodeUsbStatusResponse(payload)).toThrow(
       'usb.present_device_count does not match usb.devices',
     );
