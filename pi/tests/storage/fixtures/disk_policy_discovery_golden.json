@@ -1,0 +1,1073 @@
+{
+  "cases": [
+    {
+      "adapter": "umount",
+      "name": "umount_success_repeated_parent",
+      "result": {
+        "commands": [
+          [
+            "lsblk",
+            "-s",
+            "-nrpo",
+            "NAME,TYPE",
+            "/dev/sdz1"
+          ],
+          [
+            "lsblk",
+            "-dnro",
+            "TRAN",
+            "/dev/sdz"
+          ],
+          [
+            "findmnt",
+            "-nro",
+            "SOURCE",
+            "/"
+          ],
+          [
+            "readlink",
+            "-f",
+            "--",
+            "/dev/mmcblk0p2"
+          ],
+          [
+            "lsblk",
+            "-s",
+            "-nrpo",
+            "NAME,TYPE",
+            "/dev/mmcblk0p2"
+          ],
+          [
+            "lsblk",
+            "-s",
+            "-nrpo",
+            "NAME,TYPE",
+            "/dev/sdz1"
+          ],
+          [
+            "findmnt",
+            "-rn",
+            "-S",
+            "/dev/sdz1",
+            "-o",
+            "TARGET"
+          ]
+        ],
+        "failures": [],
+        "globals": {
+          "DISK_POLICY_RESOLVED_DEVICE": "/dev/sdz1",
+          "DISK_POLICY_RESOLVED_LABEL_KEY": "LABEL",
+          "DISK_POLICY_RESOLVE_ERROR": "",
+          "DISK_POLICY_RESOLVE_REASON": "",
+          "DISK_POLICY_VANISHED_DEVICE": "",
+          "UD_DEVICE": "/dev/sdz1",
+          "UD_MOUNTS": "",
+          "UD_PARENT": "/dev/sdz"
+        },
+        "status": 0,
+        "stderr": "",
+        "stdout": ""
+      }
+    },
+    {
+      "adapter": "umount",
+      "name": "umount_transport_stderr_on_success",
+      "result": {
+        "commands": [
+          [
+            "lsblk",
+            "-s",
+            "-nrpo",
+            "NAME,TYPE",
+            "/dev/sdz1"
+          ],
+          [
+            "lsblk",
+            "-dnro",
+            "TRAN",
+            "/dev/sdz"
+          ]
+        ],
+        "failures": [
+          "refusing label movingparts on non-USB parent /dev/sdz (transport=transport-warningusb)"
+        ],
+        "globals": {
+          "DISK_POLICY_RESOLVED_DEVICE": "/dev/sdz1",
+          "DISK_POLICY_RESOLVED_LABEL_KEY": "LABEL",
+          "DISK_POLICY_RESOLVE_ERROR": "",
+          "DISK_POLICY_RESOLVE_REASON": "",
+          "DISK_POLICY_VANISHED_DEVICE": "",
+          "UD_DEVICE": "/dev/sdz1",
+          "UD_MOUNTS": "",
+          "UD_PARENT": "/dev/sdz"
+        },
+        "status": 2,
+        "stderr": "ERROR: refusing label movingparts on non-USB parent /dev/sdz (transport=transport-warningusb)\n",
+        "stdout": ""
+      }
+    },
+    {
+      "adapter": "umount",
+      "name": "umount_parent_command_error",
+      "result": {
+        "commands": [
+          [
+            "lsblk",
+            "-s",
+            "-nrpo",
+            "NAME,TYPE",
+            "/dev/sdz1"
+          ]
+        ],
+        "failures": [
+          "lsblk failed for /dev/sdz1: ancestry-failed"
+        ],
+        "globals": {
+          "DISK_POLICY_RESOLVED_DEVICE": "/dev/sdz1",
+          "DISK_POLICY_RESOLVED_LABEL_KEY": "LABEL",
+          "DISK_POLICY_RESOLVE_ERROR": "",
+          "DISK_POLICY_RESOLVE_REASON": "",
+          "DISK_POLICY_VANISHED_DEVICE": "",
+          "UD_DEVICE": "/dev/sdz1",
+          "UD_MOUNTS": "",
+          "UD_PARENT": ""
+        },
+        "status": 2,
+        "stderr": "ERROR: lsblk failed for /dev/sdz1: ancestry-failed\n",
+        "stdout": ""
+      }
+    },
+    {
+      "adapter": "umount",
+      "name": "umount_transport_command_error",
+      "result": {
+        "commands": [
+          [
+            "lsblk",
+            "-s",
+            "-nrpo",
+            "NAME,TYPE",
+            "/dev/sdz1"
+          ],
+          [
+            "lsblk",
+            "-dnro",
+            "TRAN",
+            "/dev/sdz"
+          ]
+        ],
+        "failures": [
+          "cannot determine transport for /dev/sdz: transport-failed"
+        ],
+        "globals": {
+          "DISK_POLICY_RESOLVED_DEVICE": "/dev/sdz1",
+          "DISK_POLICY_RESOLVED_LABEL_KEY": "LABEL",
+          "DISK_POLICY_RESOLVE_ERROR": "",
+          "DISK_POLICY_RESOLVE_REASON": "",
+          "DISK_POLICY_VANISHED_DEVICE": "",
+          "UD_DEVICE": "/dev/sdz1",
+          "UD_MOUNTS": "",
+          "UD_PARENT": "/dev/sdz"
+        },
+        "status": 2,
+        "stderr": "ERROR: cannot determine transport for /dev/sdz: transport-failed\n",
+        "stdout": ""
+      }
+    },
+    {
+      "adapter": "umount",
+      "name": "umount_non_usb_stops_before_root",
+      "result": {
+        "commands": [
+          [
+            "lsblk",
+            "-s",
+            "-nrpo",
+            "NAME,TYPE",
+            "/dev/sdz1"
+          ],
+          [
+            "lsblk",
+            "-dnro",
+            "TRAN",
+            "/dev/sdz"
+          ]
+        ],
+        "failures": [
+          "refusing label movingparts on non-USB parent /dev/sdz (transport=ata)"
+        ],
+        "globals": {
+          "DISK_POLICY_RESOLVED_DEVICE": "/dev/sdz1",
+          "DISK_POLICY_RESOLVED_LABEL_KEY": "LABEL",
+          "DISK_POLICY_RESOLVE_ERROR": "",
+          "DISK_POLICY_RESOLVE_REASON": "",
+          "DISK_POLICY_VANISHED_DEVICE": "",
+          "UD_DEVICE": "/dev/sdz1",
+          "UD_MOUNTS": "",
+          "UD_PARENT": "/dev/sdz"
+        },
+        "status": 2,
+        "stderr": "ERROR: refusing label movingparts on non-USB parent /dev/sdz (transport=ata)\n",
+        "stdout": ""
+      }
+    },
+    {
+      "adapter": "umount",
+      "name": "umount_root_source_command_error",
+      "result": {
+        "commands": [
+          [
+            "lsblk",
+            "-s",
+            "-nrpo",
+            "NAME,TYPE",
+            "/dev/sdz1"
+          ],
+          [
+            "lsblk",
+            "-dnro",
+            "TRAN",
+            "/dev/sdz"
+          ],
+          [
+            "findmnt",
+            "-nro",
+            "SOURCE",
+            "/"
+          ]
+        ],
+        "failures": [
+          "cannot identify the root filesystem source: root-source-failed"
+        ],
+        "globals": {
+          "DISK_POLICY_RESOLVED_DEVICE": "/dev/sdz1",
+          "DISK_POLICY_RESOLVED_LABEL_KEY": "LABEL",
+          "DISK_POLICY_RESOLVE_ERROR": "",
+          "DISK_POLICY_RESOLVE_REASON": "",
+          "DISK_POLICY_VANISHED_DEVICE": "",
+          "UD_DEVICE": "/dev/sdz1",
+          "UD_MOUNTS": "",
+          "UD_PARENT": "/dev/sdz"
+        },
+        "status": 2,
+        "stderr": "ERROR: cannot identify the root filesystem source: root-source-failed\n",
+        "stdout": ""
+      }
+    },
+    {
+      "adapter": "umount",
+      "name": "umount_root_source_readlink_error",
+      "result": {
+        "commands": [
+          [
+            "lsblk",
+            "-s",
+            "-nrpo",
+            "NAME,TYPE",
+            "/dev/sdz1"
+          ],
+          [
+            "lsblk",
+            "-dnro",
+            "TRAN",
+            "/dev/sdz"
+          ],
+          [
+            "findmnt",
+            "-nro",
+            "SOURCE",
+            "/"
+          ],
+          [
+            "readlink",
+            "-f",
+            "--",
+            "/dev/mmcblk0p2"
+          ]
+        ],
+        "failures": [
+          "cannot resolve root filesystem source "
+        ],
+        "globals": {
+          "DISK_POLICY_RESOLVED_DEVICE": "/dev/sdz1",
+          "DISK_POLICY_RESOLVED_LABEL_KEY": "LABEL",
+          "DISK_POLICY_RESOLVE_ERROR": "",
+          "DISK_POLICY_RESOLVE_REASON": "",
+          "DISK_POLICY_VANISHED_DEVICE": "",
+          "UD_DEVICE": "/dev/sdz1",
+          "UD_MOUNTS": "",
+          "UD_PARENT": "/dev/sdz"
+        },
+        "status": 2,
+        "stderr": "root-readlink-failedERROR: cannot resolve root filesystem source \n",
+        "stdout": ""
+      }
+    },
+    {
+      "adapter": "umount",
+      "name": "umount_root_parent_command_error",
+      "result": {
+        "commands": [
+          [
+            "lsblk",
+            "-s",
+            "-nrpo",
+            "NAME,TYPE",
+            "/dev/sdz1"
+          ],
+          [
+            "lsblk",
+            "-dnro",
+            "TRAN",
+            "/dev/sdz"
+          ],
+          [
+            "findmnt",
+            "-nro",
+            "SOURCE",
+            "/"
+          ],
+          [
+            "readlink",
+            "-f",
+            "--",
+            "/dev/mmcblk0p2"
+          ],
+          [
+            "lsblk",
+            "-s",
+            "-nrpo",
+            "NAME,TYPE",
+            "/dev/mmcblk0p2"
+          ]
+        ],
+        "failures": [
+          "lsblk failed for /dev/mmcblk0p2: root-ancestry-failed"
+        ],
+        "globals": {
+          "DISK_POLICY_RESOLVED_DEVICE": "/dev/sdz1",
+          "DISK_POLICY_RESOLVED_LABEL_KEY": "LABEL",
+          "DISK_POLICY_RESOLVE_ERROR": "",
+          "DISK_POLICY_RESOLVE_REASON": "",
+          "DISK_POLICY_VANISHED_DEVICE": "",
+          "UD_DEVICE": "/dev/sdz1",
+          "UD_MOUNTS": "",
+          "UD_PARENT": "/dev/sdz"
+        },
+        "status": 2,
+        "stderr": "ERROR: lsblk failed for /dev/mmcblk0p2: root-ancestry-failed\n",
+        "stdout": ""
+      }
+    },
+    {
+      "adapter": "umount",
+      "name": "umount_mount_command_error",
+      "result": {
+        "commands": [
+          [
+            "lsblk",
+            "-s",
+            "-nrpo",
+            "NAME,TYPE",
+            "/dev/sdz1"
+          ],
+          [
+            "lsblk",
+            "-dnro",
+            "TRAN",
+            "/dev/sdz"
+          ],
+          [
+            "findmnt",
+            "-nro",
+            "SOURCE",
+            "/"
+          ],
+          [
+            "readlink",
+            "-f",
+            "--",
+            "/dev/mmcblk0p2"
+          ],
+          [
+            "lsblk",
+            "-s",
+            "-nrpo",
+            "NAME,TYPE",
+            "/dev/mmcblk0p2"
+          ],
+          [
+            "lsblk",
+            "-s",
+            "-nrpo",
+            "NAME,TYPE",
+            "/dev/sdz1"
+          ],
+          [
+            "findmnt",
+            "-rn",
+            "-S",
+            "/dev/sdz1",
+            "-o",
+            "TARGET"
+          ]
+        ],
+        "failures": [
+          "findmnt failed for /dev/sdz1 (status 7): mount-discovery-failed"
+        ],
+        "globals": {
+          "DISK_POLICY_RESOLVED_DEVICE": "/dev/sdz1",
+          "DISK_POLICY_RESOLVED_LABEL_KEY": "LABEL",
+          "DISK_POLICY_RESOLVE_ERROR": "",
+          "DISK_POLICY_RESOLVE_REASON": "",
+          "DISK_POLICY_VANISHED_DEVICE": "",
+          "UD_DEVICE": "/dev/sdz1",
+          "UD_MOUNTS": "mount-discovery-failed",
+          "UD_PARENT": "/dev/sdz"
+        },
+        "status": 2,
+        "stderr": "ERROR: findmnt failed for /dev/sdz1 (status 7): mount-discovery-failed\n",
+        "stdout": ""
+      }
+    },
+    {
+      "adapter": "umount",
+      "name": "umount_root_guard_same_parent",
+      "result": {
+        "commands": [
+          [
+            "lsblk",
+            "-s",
+            "-nrpo",
+            "NAME,TYPE",
+            "/dev/sdz1"
+          ],
+          [
+            "lsblk",
+            "-dnro",
+            "TRAN",
+            "/dev/sdz"
+          ],
+          [
+            "findmnt",
+            "-nro",
+            "SOURCE",
+            "/"
+          ],
+          [
+            "readlink",
+            "-f",
+            "--",
+            "/dev/mmcblk0p2"
+          ],
+          [
+            "lsblk",
+            "-s",
+            "-nrpo",
+            "NAME,TYPE",
+            "/dev/mmcblk0p2"
+          ],
+          [
+            "lsblk",
+            "-s",
+            "-nrpo",
+            "NAME,TYPE",
+            "/dev/sdz1"
+          ]
+        ],
+        "failures": [
+          "refusing label movingparts because /dev/sdz contains the root filesystem"
+        ],
+        "globals": {
+          "DISK_POLICY_RESOLVED_DEVICE": "/dev/sdz1",
+          "DISK_POLICY_RESOLVED_LABEL_KEY": "LABEL",
+          "DISK_POLICY_RESOLVE_ERROR": "",
+          "DISK_POLICY_RESOLVE_REASON": "",
+          "DISK_POLICY_VANISHED_DEVICE": "",
+          "UD_DEVICE": "/dev/sdz1",
+          "UD_MOUNTS": "",
+          "UD_PARENT": "/dev/sdz"
+        },
+        "status": 2,
+        "stderr": "ERROR: refusing label movingparts because /dev/sdz contains the root filesystem\n",
+        "stdout": ""
+      }
+    },
+    {
+      "adapter": "umount",
+      "name": "umount_parent_count_error",
+      "result": {
+        "commands": [
+          [
+            "lsblk",
+            "-s",
+            "-nrpo",
+            "NAME,TYPE",
+            "/dev/sdz1"
+          ]
+        ],
+        "failures": [
+          "/dev/sdz1 has 2 whole-disk ancestors; expected exactly one"
+        ],
+        "globals": {
+          "DISK_POLICY_RESOLVED_DEVICE": "/dev/sdz1",
+          "DISK_POLICY_RESOLVED_LABEL_KEY": "LABEL",
+          "DISK_POLICY_RESOLVE_ERROR": "",
+          "DISK_POLICY_RESOLVE_REASON": "",
+          "DISK_POLICY_VANISHED_DEVICE": "",
+          "UD_DEVICE": "/dev/sdz1",
+          "UD_MOUNTS": "",
+          "UD_PARENT": ""
+        },
+        "status": 2,
+        "stderr": "ERROR: /dev/sdz1 has 2 whole-disk ancestors; expected exactly one\n",
+        "stdout": ""
+      }
+    },
+    {
+      "adapter": "umount",
+      "name": "umount_label_absent_rc1",
+      "result": {
+        "commands": [],
+        "failures": [],
+        "globals": {
+          "DISK_POLICY_RESOLVED_DEVICE": "/dev/sdz1",
+          "DISK_POLICY_RESOLVED_LABEL_KEY": "LABEL",
+          "DISK_POLICY_RESOLVE_ERROR": "label not present",
+          "DISK_POLICY_RESOLVE_REASON": "",
+          "DISK_POLICY_VANISHED_DEVICE": "",
+          "UD_DEVICE": "",
+          "UD_MOUNTS": "",
+          "UD_PARENT": ""
+        },
+        "status": 1,
+        "stderr": "",
+        "stdout": ""
+      }
+    },
+    {
+      "adapter": "umount",
+      "name": "umount_label_vanished_rc2",
+      "result": {
+        "commands": [],
+        "failures": [],
+        "globals": {
+          "DISK_POLICY_RESOLVED_DEVICE": "/dev/vanished",
+          "DISK_POLICY_RESOLVED_LABEL_KEY": "LABEL",
+          "DISK_POLICY_RESOLVE_ERROR": "udev mapping points to vanished device /dev/vanished",
+          "DISK_POLICY_RESOLVE_REASON": "vanished-udev-mapping",
+          "DISK_POLICY_VANISHED_DEVICE": "/dev/vanished",
+          "UD_DEVICE": "",
+          "UD_MOUNTS": "",
+          "UD_PARENT": ""
+        },
+        "status": 2,
+        "stderr": "",
+        "stdout": ""
+      }
+    },
+    {
+      "adapter": "diskctl",
+      "name": "diskctl_repair_success",
+      "result": {
+        "commands": [
+          [
+            "sudo",
+            "<TMP>/blkid",
+            "-s",
+            "TYPE",
+            "-o",
+            "value",
+            "--",
+            "/dev/sdz1"
+          ],
+          [
+            "blkid",
+            "-s",
+            "TYPE",
+            "-o",
+            "value",
+            "--",
+            "/dev/sdz1"
+          ],
+          [
+            "lsblk",
+            "-s",
+            "-nrpo",
+            "NAME,TYPE",
+            "--",
+            "/dev/sdz1"
+          ],
+          [
+            "lsblk",
+            "-dnro",
+            "TRAN",
+            "--",
+            "/dev/sdz"
+          ]
+        ],
+        "failures": [],
+        "globals": {
+          "DISK_POLICY_RESOLVED_DEVICE": "/dev/sdz1",
+          "DISK_POLICY_RESOLVED_LABEL_KEY": "LABEL",
+          "DISK_POLICY_RESOLVE_ERROR": "",
+          "DISK_POLICY_RESOLVE_REASON": "",
+          "DISK_POLICY_VANISHED_DEVICE": "",
+          "device": "/dev/sdz1",
+          "filesystem": "exfat",
+          "parent": "/dev/sdz"
+        },
+        "status": 0,
+        "stderr": "",
+        "stdout": ""
+      }
+    },
+    {
+      "adapter": "diskctl",
+      "name": "diskctl_type_command_error",
+      "result": {
+        "commands": [
+          [
+            "sudo",
+            "<TMP>/blkid",
+            "-s",
+            "TYPE",
+            "-o",
+            "value",
+            "--",
+            "/dev/sdz1"
+          ],
+          [
+            "blkid",
+            "-s",
+            "TYPE",
+            "-o",
+            "value",
+            "--",
+            "/dev/sdz1"
+          ]
+        ],
+        "failures": [],
+        "globals": {
+          "DISK_POLICY_RESOLVED_DEVICE": "/dev/sdz1",
+          "DISK_POLICY_RESOLVED_LABEL_KEY": "LABEL",
+          "DISK_POLICY_RESOLVE_ERROR": "",
+          "DISK_POLICY_RESOLVE_REASON": "",
+          "DISK_POLICY_VANISHED_DEVICE": "",
+          "device": "/dev/sdz1",
+          "filesystem": "",
+          "parent": ""
+        },
+        "status": 1,
+        "stderr": "type-check-failed",
+        "stdout": ""
+      }
+    },
+    {
+      "adapter": "diskctl",
+      "name": "diskctl_unsupported_filesystem",
+      "result": {
+        "commands": [
+          [
+            "sudo",
+            "<TMP>/blkid",
+            "-s",
+            "TYPE",
+            "-o",
+            "value",
+            "--",
+            "/dev/sdz1"
+          ],
+          [
+            "blkid",
+            "-s",
+            "TYPE",
+            "-o",
+            "value",
+            "--",
+            "/dev/sdz1"
+          ]
+        ],
+        "failures": [],
+        "globals": {
+          "DISK_POLICY_RESOLVED_DEVICE": "/dev/sdz1",
+          "DISK_POLICY_RESOLVED_LABEL_KEY": "LABEL",
+          "DISK_POLICY_RESOLVE_ERROR": "",
+          "DISK_POLICY_RESOLVE_REASON": "",
+          "DISK_POLICY_VANISHED_DEVICE": "",
+          "device": "/dev/sdz1",
+          "filesystem": "",
+          "parent": ""
+        },
+        "status": 1,
+        "stderr": "diskctl: automatic repair does not support ntfs (movingparts)\n",
+        "stdout": ""
+      }
+    },
+    {
+      "adapter": "diskctl",
+      "name": "diskctl_parent_command_error",
+      "result": {
+        "commands": [
+          [
+            "sudo",
+            "<TMP>/blkid",
+            "-s",
+            "TYPE",
+            "-o",
+            "value",
+            "--",
+            "/dev/sdz1"
+          ],
+          [
+            "blkid",
+            "-s",
+            "TYPE",
+            "-o",
+            "value",
+            "--",
+            "/dev/sdz1"
+          ],
+          [
+            "lsblk",
+            "-s",
+            "-nrpo",
+            "NAME,TYPE",
+            "--",
+            "/dev/sdz1"
+          ]
+        ],
+        "failures": [],
+        "globals": {
+          "DISK_POLICY_RESOLVED_DEVICE": "/dev/sdz1",
+          "DISK_POLICY_RESOLVED_LABEL_KEY": "LABEL",
+          "DISK_POLICY_RESOLVE_ERROR": "",
+          "DISK_POLICY_RESOLVE_REASON": "",
+          "DISK_POLICY_VANISHED_DEVICE": "",
+          "device": "/dev/sdz1",
+          "filesystem": "exfat",
+          "parent": ""
+        },
+        "status": 1,
+        "stderr": "parent-failed",
+        "stdout": ""
+      }
+    },
+    {
+      "adapter": "diskctl",
+      "name": "diskctl_parent_count_error",
+      "result": {
+        "commands": [
+          [
+            "sudo",
+            "<TMP>/blkid",
+            "-s",
+            "TYPE",
+            "-o",
+            "value",
+            "--",
+            "/dev/sdz1"
+          ],
+          [
+            "blkid",
+            "-s",
+            "TYPE",
+            "-o",
+            "value",
+            "--",
+            "/dev/sdz1"
+          ],
+          [
+            "lsblk",
+            "-s",
+            "-nrpo",
+            "NAME,TYPE",
+            "--",
+            "/dev/sdz1"
+          ]
+        ],
+        "failures": [],
+        "globals": {
+          "DISK_POLICY_RESOLVED_DEVICE": "/dev/sdz1",
+          "DISK_POLICY_RESOLVED_LABEL_KEY": "LABEL",
+          "DISK_POLICY_RESOLVE_ERROR": "",
+          "DISK_POLICY_RESOLVE_REASON": "",
+          "DISK_POLICY_VANISHED_DEVICE": "",
+          "device": "/dev/sdz1",
+          "filesystem": "exfat",
+          "parent": ""
+        },
+        "status": 1,
+        "stderr": "",
+        "stdout": ""
+      }
+    },
+    {
+      "adapter": "diskctl",
+      "name": "diskctl_non_usb_stops_after_transport",
+      "result": {
+        "commands": [
+          [
+            "sudo",
+            "<TMP>/blkid",
+            "-s",
+            "TYPE",
+            "-o",
+            "value",
+            "--",
+            "/dev/sdz1"
+          ],
+          [
+            "blkid",
+            "-s",
+            "TYPE",
+            "-o",
+            "value",
+            "--",
+            "/dev/sdz1"
+          ],
+          [
+            "lsblk",
+            "-s",
+            "-nrpo",
+            "NAME,TYPE",
+            "--",
+            "/dev/sdz1"
+          ],
+          [
+            "lsblk",
+            "-dnro",
+            "TRAN",
+            "--",
+            "/dev/sdz"
+          ]
+        ],
+        "failures": [],
+        "globals": {
+          "DISK_POLICY_RESOLVED_DEVICE": "/dev/sdz1",
+          "DISK_POLICY_RESOLVED_LABEL_KEY": "LABEL",
+          "DISK_POLICY_RESOLVE_ERROR": "",
+          "DISK_POLICY_RESOLVE_REASON": "",
+          "DISK_POLICY_VANISHED_DEVICE": "",
+          "device": "/dev/sdz1",
+          "filesystem": "exfat",
+          "parent": "/dev/sdz"
+        },
+        "status": 1,
+        "stderr": "diskctl: refusing repair on non-USB parent /dev/sdz\n",
+        "stdout": ""
+      }
+    },
+    {
+      "adapter": "diskctl",
+      "name": "diskctl_transport_command_error",
+      "result": {
+        "commands": [
+          [
+            "sudo",
+            "<TMP>/blkid",
+            "-s",
+            "TYPE",
+            "-o",
+            "value",
+            "--",
+            "/dev/sdz1"
+          ],
+          [
+            "blkid",
+            "-s",
+            "TYPE",
+            "-o",
+            "value",
+            "--",
+            "/dev/sdz1"
+          ],
+          [
+            "lsblk",
+            "-s",
+            "-nrpo",
+            "NAME,TYPE",
+            "--",
+            "/dev/sdz1"
+          ],
+          [
+            "lsblk",
+            "-dnro",
+            "TRAN",
+            "--",
+            "/dev/sdz"
+          ]
+        ],
+        "failures": [],
+        "globals": {
+          "DISK_POLICY_RESOLVED_DEVICE": "/dev/sdz1",
+          "DISK_POLICY_RESOLVED_LABEL_KEY": "LABEL",
+          "DISK_POLICY_RESOLVE_ERROR": "",
+          "DISK_POLICY_RESOLVE_REASON": "",
+          "DISK_POLICY_VANISHED_DEVICE": "",
+          "device": "/dev/sdz1",
+          "filesystem": "exfat",
+          "parent": "/dev/sdz"
+        },
+        "status": 1,
+        "stderr": "transport-failed",
+        "stdout": ""
+      }
+    },
+    {
+      "adapter": "diskctl",
+      "name": "diskctl_strict_extra_non_disk",
+      "result": {
+        "commands": [
+          [
+            "sudo",
+            "<TMP>/blkid",
+            "-s",
+            "TYPE",
+            "-o",
+            "value",
+            "--",
+            "/dev/sdz1"
+          ],
+          [
+            "blkid",
+            "-s",
+            "TYPE",
+            "-o",
+            "value",
+            "--",
+            "/dev/sdz1"
+          ],
+          [
+            "lsblk",
+            "-s",
+            "-nrpo",
+            "NAME,TYPE",
+            "--",
+            "/dev/sdz1"
+          ]
+        ],
+        "failures": [],
+        "globals": {
+          "DISK_POLICY_RESOLVED_DEVICE": "/dev/sdz1",
+          "DISK_POLICY_RESOLVED_LABEL_KEY": "LABEL",
+          "DISK_POLICY_RESOLVE_ERROR": "",
+          "DISK_POLICY_RESOLVE_REASON": "",
+          "DISK_POLICY_VANISHED_DEVICE": "",
+          "device": "/dev/sdz1",
+          "filesystem": "exfat",
+          "parent": ""
+        },
+        "status": 1,
+        "stderr": "",
+        "stdout": ""
+      }
+    },
+    {
+      "adapter": "diskctl",
+      "name": "diskctl_transport_stderr_on_success",
+      "result": {
+        "commands": [
+          [
+            "sudo",
+            "<TMP>/blkid",
+            "-s",
+            "TYPE",
+            "-o",
+            "value",
+            "--",
+            "/dev/sdz1"
+          ],
+          [
+            "blkid",
+            "-s",
+            "TYPE",
+            "-o",
+            "value",
+            "--",
+            "/dev/sdz1"
+          ],
+          [
+            "lsblk",
+            "-s",
+            "-nrpo",
+            "NAME,TYPE",
+            "--",
+            "/dev/sdz1"
+          ],
+          [
+            "lsblk",
+            "-dnro",
+            "TRAN",
+            "--",
+            "/dev/sdz"
+          ]
+        ],
+        "failures": [],
+        "globals": {
+          "DISK_POLICY_RESOLVED_DEVICE": "/dev/sdz1",
+          "DISK_POLICY_RESOLVED_LABEL_KEY": "LABEL",
+          "DISK_POLICY_RESOLVE_ERROR": "",
+          "DISK_POLICY_RESOLVE_REASON": "",
+          "DISK_POLICY_VANISHED_DEVICE": "",
+          "device": "/dev/sdz1",
+          "filesystem": "exfat",
+          "parent": "/dev/sdz"
+        },
+        "status": 0,
+        "stderr": "transport-warning",
+        "stdout": ""
+      }
+    },
+    {
+      "adapter": "diskctl",
+      "name": "diskctl_label_rc1",
+      "result": {
+        "commands": [],
+        "failures": [],
+        "globals": {
+          "DISK_POLICY_RESOLVED_DEVICE": "/dev/sdz1",
+          "DISK_POLICY_RESOLVED_LABEL_KEY": "LABEL",
+          "DISK_POLICY_RESOLVE_ERROR": "label not present",
+          "DISK_POLICY_RESOLVE_REASON": "",
+          "DISK_POLICY_VANISHED_DEVICE": "",
+          "device": "",
+          "filesystem": "",
+          "parent": ""
+        },
+        "status": 1,
+        "stderr": "diskctl: cannot resolve exact label movingparts: label not present\n",
+        "stdout": ""
+      }
+    },
+    {
+      "adapter": "diskctl",
+      "name": "diskctl_label_rc2_vanished",
+      "result": {
+        "commands": [],
+        "failures": [],
+        "globals": {
+          "DISK_POLICY_RESOLVED_DEVICE": "/dev/vanished",
+          "DISK_POLICY_RESOLVED_LABEL_KEY": "LABEL",
+          "DISK_POLICY_RESOLVE_ERROR": "udev mapping points to vanished device /dev/vanished",
+          "DISK_POLICY_RESOLVE_REASON": "vanished-udev-mapping",
+          "DISK_POLICY_VANISHED_DEVICE": "/dev/vanished",
+          "device": "",
+          "filesystem": "",
+          "parent": ""
+        },
+        "status": 1,
+        "stderr": "diskctl: cannot resolve exact label movingparts: udev mapping points to vanished device /dev/vanished\n",
+        "stdout": ""
+      }
+    }
+  ],
+  "oracle": {
+    "source_sha256": {
+      "disk_policy.sh": "3624d09bfe2973c51f9f19fe9f5e63009ce61e057c5375114d97fbc63ff34cd5",
+      "diskctl": "9c0356f657608d7925eb4d9680f42fbbcacd45c2d60c02ba694ccab0291a74b2",
+      "umount_disks.sh": "be5f82d1b44097c47ec31332bf911eeb0d348680a0ae8eb28985ba7bc1d6cfe6"
+    }
+  },
+  "schema": 1
+}

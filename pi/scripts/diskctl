@@ -123,8 +123,7 @@ clear_health_quarantine() {
 }
 
 resolve_exact_filesystem() {
-  local actual_type parent_rows name type extra transport
-  local -a parents=()
+  local actual_type parent_rows transport
 
   disk_policy_resolve_exact_label "$label" label-only
   status=$?
@@ -144,14 +143,10 @@ resolve_exact_filesystem() {
   esac
 
   parent_rows=$("$lsblk_command" -s -nrpo NAME,TYPE -- "$device") || return 1
-  while read -r name type extra; do
-    [[ -z ${extra:-} ]] || return 1
-    [[ "$type" == disk ]] && parents+=("$name")
-  done <<< "$parent_rows"
-  (( ${#parents[@]} == 1 )) || return 1
-  parent=${parents[0]}
+  disk_policy_parent_from_rows "$parent_rows" strict || return 1
+  parent=$DISK_POLICY_PARENT_DISK
   transport=$("$lsblk_command" -dnro TRAN -- "$parent") || return 1
-  [[ "$transport" == usb ]] || {
+  disk_policy_transport_is_usb "$transport" || {
     echo "diskctl: refusing repair on non-USB parent $parent" >&2
     return 1
   }
