@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-if __package__:
-    pass
-else:
-    pass
 
 from dataclasses import dataclass, field
 from typing import Any

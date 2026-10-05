@@ -25,34 +25,19 @@ from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any, Callable
 
-if __package__:
-    from .catalog_values import (
-        CatalogConflict,
-        CatalogError,
-        CatalogNotFound,
-        _finite_nonnegative,
-        _json_or_none,
-        _new_id,
-        _optional_locator,
-        _path_key,
-        _required_text,
-    )
-    from .schema import SCHEMA_VERSION, _MIGRATIONS
-    from .v1_bridge import V1CatalogBridge
-else:
-    from catalog_values import (  # type: ignore[no-redef]
-        CatalogConflict,
-        CatalogError,
-        CatalogNotFound,
-        _finite_nonnegative,
-        _json_or_none,
-        _new_id,
-        _optional_locator,
-        _path_key,
-        _required_text,
-    )
-    from schema import SCHEMA_VERSION, _MIGRATIONS  # type: ignore[no-redef]
-    from v1_bridge import V1CatalogBridge  # type: ignore[no-redef]
+from .catalog_values import (
+    CatalogConflict,
+    CatalogError,
+    CatalogNotFound,
+    _finite_nonnegative,
+    _json_or_none,
+    _new_id,
+    _optional_locator,
+    _path_key,
+    _required_text,
+)
+from .schema import SCHEMA_VERSION, _MIGRATIONS
+from .v1_bridge import V1CatalogBridge
 
 
 DEFAULT_BUSY_TIMEOUT_MS = 5_000
