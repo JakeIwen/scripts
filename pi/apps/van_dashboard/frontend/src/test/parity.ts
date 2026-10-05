@@ -49,7 +49,11 @@ function replace(value: unknown, path: Path, replacement: unknown, remove = fals
   throw new Error(`No parity mutation path: ${path.join('.')}`);
 }
 
-/** Generated from fixtures, including every nested key and array element. Never mutates a seed. */
+/** Generated from response fixtures, including every nested key and array element.
+ * Production inputs come from Response.json(): array removal splices, never creates holes.
+ * Undefined/non-finite values additionally probe guards; arbitrary JS proxies/accessors and
+ * sparse arrays are outside the wire contract. Never mutates a seed.
+ */
 export function parityCorpus(fixtures: Record<string, unknown>): ParityCase[] {
   const cases: ParityCase[] = [];
   for (const [name, fixture] of Object.entries(fixtures)) {
