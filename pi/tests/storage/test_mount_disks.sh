@@ -6,16 +6,8 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
 
-fail() {
-  echo "FAIL: $*" >&2
-  exit 1
-}
-
-assert_eq() {
-  local expected=$1 actual=$2 description=$3
-  [[ "$actual" == "$expected" ]] ||
-    fail "$description (expected '$expected', got '$actual')"
-}
+# shellcheck source=../lib.sh
+source "$repo_root/pi/tests/lib.sh"
 
 export MOUNT_DISKS_LIBRARY_ONLY=1
 # shellcheck source=../../scripts/mount_disks.sh

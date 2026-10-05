@@ -7,10 +7,8 @@ script="$repo_root/pi/scripts/backup/new_hotspare.sh"
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
 
-fail() {
-  echo "FAIL: $*" >&2
-  exit 1
-}
+# shellcheck source=../lib.sh
+source "$repo_root/pi/tests/lib.sh"
 
 fake_conf="$test_root/backup_conf.sh"
 fake_policy="$test_root/disk_policy.sh"
