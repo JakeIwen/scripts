@@ -1,12 +1,9 @@
 import { readFileSync } from 'node:fs';
-import { inspect } from 'node:util';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, it } from 'vitest';
 
 import {
   assertFrozenParity,
-  captureDecode,
-  freezeResults,
   parityCorpus,
   type FrozenResults,
   type ParityCase,
@@ -26,10 +23,6 @@ import {
   startFixtures,
   startTargeted,
 } from './parityFixtures';
-import { decodeLegacyStartSpeedtestResponse } from './legacyStartDecoder';
-import { decodeConnectivityResponse as decodeLegacyConnectivityResponse } from './decoders';
-import { decodeOpenWrtClientsResponse as decodeLegacyOpenWrtClientsResponse } from './decoders';
-import { decodeSpeedtestResponse as decodeLegacySpeedtestResponse } from './decoders';
 
 // Explicit per-feature message drift table. Empty means every rejected case stays verbatim.
 const MESSAGE_DRIFT: Record<string, string> = {};
@@ -42,7 +35,6 @@ interface ParityGroup {
   fixtures: Record<string, Record<string, unknown>>;
   targeted: ParityCase[];
   current: Decoder;
-  legacy: Decoder;
 }
 
 const groups: ParityGroup[] = [
@@ -51,28 +43,24 @@ const groups: ParityGroup[] = [
     fixtures: connectivityFixtures,
     targeted: connectivityTargeted,
     current: decodeConnectivityResponse,
-    legacy: decodeLegacyConnectivityResponse,
   },
   {
     name: 'openwrt-clients',
     fixtures: clientFixtures,
     targeted: clientTargeted,
     current: decodeOpenWrtClientsResponse,
-    legacy: decodeLegacyOpenWrtClientsResponse,
   },
   {
     name: 'speedtest',
     fixtures: speedtestFixtures,
     targeted: [],
     current: decodeSpeedtestResponse,
-    legacy: decodeLegacySpeedtestResponse,
   },
   {
     name: 'start-speedtest',
     fixtures: startFixtures,
     targeted: startTargeted,
     current: decodeStartSpeedtestResponse,
-    legacy: decodeLegacyStartSpeedtestResponse,
   },
 ];
 
@@ -86,25 +74,10 @@ function casesFor(group: ParityGroup): ParityCase[] {
 
 describe('network generated decoder parity', () => {
   for (const group of groups) {
-    it(`${group.name}: matches the legacy decoder on frozen generated inputs`, async () => {
+    it(`${group.name}: matches frozen expectations on generated inputs`, () => {
       const cases = casesFor(group);
-      const oldResults = cases.map(({ input }) => captureDecode(group.legacy, input));
-
-      cases.forEach((parityCase, index) => {
-        const oldResult = oldResults[index];
-        if (!oldResult) throw new Error(`Missing legacy result for ${parityCase.name}`);
-        const currentResult = captureDecode(group.current, parityCase.input);
-        expect(
-          currentResult,
-          `${group.name} parity case ${parityCase.name}; input ${inspect(parityCase.input, { depth: null, sorted: true })}`,
-        ).toStrictEqual(oldResult);
-      });
-
-      const frozen = freezeResults(cases, oldResults);
-      const path = snapshotPath(group.name);
-      await expect(JSON.stringify(frozen)).toMatchFileSnapshot(path);
-      const fromSnapshot: FrozenResults = JSON.parse(readFileSync(path, 'utf8'));
-      assertFrozenParity(cases, group.current, fromSnapshot, MESSAGE_DRIFT);
+      const frozen: FrozenResults = JSON.parse(readFileSync(snapshotPath(group.name), 'utf8'));
+      assertFrozenParity(cases, group.current, frozen, MESSAGE_DRIFT);
     });
   }
 });
