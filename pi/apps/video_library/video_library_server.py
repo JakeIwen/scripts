@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Package entrypoint shim retained for runpy dispatch and unit prechecks."""
 
+import os
+
+from .config import DISPLAY, PORT, RUNTIME_DIR, SESSION_BUS
+from .routes import app
+from .service import active_service
+
 
 def main():
-    import os
-
-    from .config import DISPLAY, PORT, RUNTIME_DIR, SESSION_BUS
-    from .routes import app
-    from .service import active_service
-
     os.environ.setdefault("DISPLAY", DISPLAY)
     os.environ.setdefault("XDG_RUNTIME_DIR", RUNTIME_DIR)
     os.environ.setdefault("DBUS_SESSION_BUS_ADDRESS", SESSION_BUS)
