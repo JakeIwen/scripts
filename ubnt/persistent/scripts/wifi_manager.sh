@@ -62,6 +62,7 @@ uptime_seconds() {
 }
 
 log_message() {
+    local log_uptime=""
     rotate_log_if_needed
     log_uptime=$(uptime_seconds)
     [ -n "$log_uptime" ] || log_uptime=unknown
@@ -70,6 +71,8 @@ log_message() {
 }
 
 rotate_log_if_needed() {
+    local log_size=""
+    local rotation_file=""
     [ -f "$LOG_FILE" ] || return 0
     log_size=$(wc -c < "$LOG_FILE" 2>/dev/null | tr -d '[:space:]')
     case $log_size in
@@ -83,6 +86,11 @@ rotate_log_if_needed() {
 }
 
 log_healthy_connection() {
+    local healthy_ssid=""
+    local healthy_ccq=""
+    local healthy_now=""
+    local healthy_last=""
+    local healthy_last_ssid=""
     healthy_ssid=$1
     healthy_ccq=$2
     healthy_now=$(uptime_seconds)
@@ -101,6 +109,8 @@ log_healthy_connection() {
 }
 
 config_value() {
+    local config_file=""
+    local config_key=""
     config_file=$1
     config_key=$2
     awk -F= -v wanted="$config_key" '
@@ -113,6 +123,9 @@ config_value() {
 }
 
 effective_ssid() {
+    local profile_file=""
+    local wpa_status=""
+    local wpa_device_status=""
     profile_file=$1
     wpa_status=$(config_value "$profile_file" wpasupplicant.status)
     wpa_device_status=$(config_value "$profile_file" wpasupplicant.device.1.status)
@@ -129,6 +142,8 @@ system_config_digest() {
 }
 
 record_observed_config() {
+    local observed_digest=""
+    local observed_digest_new=""
     observed_digest=$(system_config_digest)
     [ -n "$observed_digest" ] || return 1
     observed_digest_new="$OBSERVED_CONFIG_DIGEST_FILE.new.$$"
@@ -141,6 +156,9 @@ clear_gui_transition() {
 }
 
 observe_external_config_change() {
+    local current_digest=""
+    local previous_digest=""
+    local gui_started=""
     current_digest=$(system_config_digest)
     [ -n "$current_digest" ] || return 1
     previous_digest=$(sed -n '1p' "$OBSERVED_CONFIG_DIGEST_FILE" 2>/dev/null)
@@ -176,6 +194,7 @@ profile_name_is_valid() {
 }
 
 acquire_lock() {
+    local lock_pid=""
     if mkdir "$LOCK_DIR" 2>/dev/null; then
         printf '%s\n' "$$" > "$LOCK_DIR/pid"
         install_lock_traps
@@ -237,6 +256,9 @@ current_ccq() {
 }
 
 link_is_target() {
+    local wanted_ssid=""
+    local actual_ssid=""
+    local link_ccq=""
     wanted_ssid=$1
     actual_ssid=$(associated_ssid)
     link_ccq=$(current_ccq)
@@ -257,6 +279,9 @@ internet_reachable() {
 }
 
 wait_for_link() {
+    local wait_ssid=""
+    local wait_seconds=""
+    local next_wait_message=""
     wait_ssid=$1
     wait_seconds=$2
     waited=0
@@ -286,6 +311,8 @@ wait_for_dhcp() {
 }
 
 scan_networks() {
+    local scan_pass=""
+    local scan_pass_raw=""
     rm -f "$SCAN_COMPLETED_FILE"
     if ! normalize_runtime_scan_list full-scan preserve-gui; then
         log_message "unable to apply standard scan-frequency allowlist"
@@ -319,6 +346,39 @@ hex_encode() {
 }
 
 emit_dashboard_snapshot() {
+    local dashboard_configured=""
+    local dashboard_associated=""
+    local dashboard_radio_status=""
+    local dashboard_ccq=""
+    local dashboard_signal=""
+    local dashboard_noise=""
+    local dashboard_hold_remaining=""
+    local dashboard_paused=""
+    local dashboard_running=""
+    local dashboard_profile_path=""
+    local dashboard_profile=""
+    local dashboard_wireless_ssid=""
+    local dashboard_wireless_bssid=""
+    local dashboard_wireless_security=""
+    local dashboard_wpa_status=""
+    local dashboard_wpa_device_status=""
+    local dashboard_wpa_ssid=""
+    local dashboard_wpa_bssid=""
+    local dashboard_has_password=""
+    local dashboard_txpower=""
+    local dashboard_rate_module=""
+    local dashboard_rate_auto=""
+    local dashboard_rate_mcs=""
+    local dashboard_line=""
+    local dashboard_key=""
+    local dashboard_value=""
+    local dashboard_ssid=""
+    local dashboard_bssid=""
+    local dashboard_security=""
+    local dashboard_priority=""
+    local dashboard_quality=""
+    local dashboard_frequency=""
+    local dashboard_channel=""
     dashboard_configured=$(effective_ssid "$SYSTEM_CFG")
     dashboard_associated=$(associated_ssid)
     dashboard_radio_status=$("$MCA_STATUS" 2>/dev/null)
@@ -416,6 +476,10 @@ emit_dashboard_snapshot() {
 }
 
 profile_security() {
+    local security_profile=""
+    local security_wpa=""
+    local security_wpa_device=""
+    local security_type=""
     security_profile=$1
     security_wpa=$(config_value "$security_profile" wpasupplicant.status)
     security_wpa_device=$(config_value "$security_profile" wpasupplicant.device.1.status)
@@ -432,6 +496,11 @@ profile_security() {
 }
 
 scan_field_for_profile() {
+    local scan_profile=""
+    local scan_profile_field=""
+    local scan_profile_ssid=""
+    local scan_profile_bssid=""
+    local scan_profile_security=""
     scan_profile=$1
     scan_profile_field=$2
     scan_profile_ssid=$(effective_ssid "$scan_profile")
@@ -455,6 +524,10 @@ scan_field_for_profile() {
 }
 
 set_scan_list() {
+    local config_path=""
+    local scan_status=""
+    local scan_frequency=""
+    local config_rewrite=""
     config_path=$1
     scan_status=$2
     scan_frequency=$3
@@ -480,6 +553,10 @@ set_scan_list() {
 }
 
 recent_frequency_for_profile() {
+    local frequency_scan_time=""
+    local frequency_now=""
+    local frequency_age=""
+    local frequency_hint=""
     [ -s "$SCAN_FILE" ] || return 1
     frequency_scan_time=$(sed -n '1p' "$SCAN_COMPLETED_FILE" 2>/dev/null)
     frequency_now=$(uptime_seconds)
@@ -497,6 +574,8 @@ recent_frequency_for_profile() {
 }
 
 begin_transition() {
+    local existing_transition=""
+    local transition_uptime=""
     existing_transition=$(sed -n '1p' "$TRANSITION_FILE" 2>/dev/null)
     case $existing_transition in
         *[!0-9]*|'') ;;
@@ -508,6 +587,8 @@ begin_transition() {
 }
 
 preserve_current_login() {
+    local login_destination=""
+    local login_rewrite=""
     login_destination=$1
     [ "$login_destination" != "$SYSTEM_CFG" ] || return 1
     login_rewrite="$login_destination.login.$$"
@@ -542,6 +623,11 @@ preserve_current_login() {
 }
 
 apply_config() {
+    local apply_mode=""
+    local reload_output=""
+    local reload_pid=""
+    local reload_elapsed=""
+    local reload_status=""
     apply_mode=${1:-manager}
     preserve_current_login "$APPLY_CFG" || return 1
     # Manager-driven configuration changes must not be mistaken for native
@@ -583,6 +669,8 @@ apply_config() {
 }
 
 runtime_scan_list_needs_normalization() {
+    local runtime_scan_status=""
+    local runtime_scan_channels=""
     runtime_scan_status=$(config_value "$SYSTEM_CFG" wireless.1.scan_list.status)
     runtime_scan_channels=$(config_value "$SYSTEM_CFG" wireless.1.scan_list.channels)
     [ "$runtime_scan_status" != enabled ] || \
@@ -590,6 +678,8 @@ runtime_scan_list_needs_normalization() {
 }
 
 normalize_runtime_scan_list() {
+    local normalize_reason=""
+    local normalize_mode=""
     normalize_reason=$1
     normalize_mode=${2:-manager}
     runtime_scan_list_needs_normalization || return 0
@@ -604,6 +694,12 @@ clear_failures() {
 }
 
 connect_profile() {
+    local requested_profile=""
+    local force_connect=""
+    local profile_path=""
+    local target_ssid=""
+    local selected_frequency=""
+    local link_result=""
     requested_profile=$1
     force_connect=${2:-no}
     profile_name_is_valid "$requested_profile" || {
@@ -669,6 +765,9 @@ connect_profile() {
 }
 
 run_requested_connect() {
+    local requested_name=""
+    local requested_force=""
+    local requested_status=""
     requested_name=$1
     requested_force=${2:-no}
     profile_name_is_valid "$requested_name" && [ -f "$PROFILE_DIR/$requested_name" ] || return 1
@@ -684,6 +783,9 @@ run_requested_connect() {
 }
 
 profile_template_for_security() {
+    local wanted_security=""
+    local template_path=""
+    local template_name=""
     wanted_security=$1
     for template_path in "$PROFILE_DIR"/*; do
         [ -f "$template_path" ] || continue
@@ -699,6 +801,23 @@ profile_template_for_security() {
 }
 
 write_provision_config() {
+    local provision_output=""
+    local provision_ssid=""
+    local provision_security=""
+    local provision_bssid=""
+    local provision_password=""
+    local saw_wireless_ssid=""
+    local saw_wireless_ap=""
+    local saw_wireless_security=""
+    local saw_scan_status=""
+    local saw_scan_channels=""
+    local saw_wpa_status=""
+    local saw_wpa_device_status=""
+    local saw_wpa_ssid=""
+    local saw_wpa_bssid=""
+    local saw_wpa_psk=""
+    local provision_line=""
+    local provision_key=""
     provision_template=$1
     provision_output=$2
     provision_ssid=$3
@@ -794,6 +913,14 @@ write_provision_config() {
 }
 
 provision_profile() {
+    local new_ssid=""
+    local new_security=""
+    local new_bssid=""
+    local new_password=""
+    local ssid_length=""
+    local password_length=""
+    local pending_name=""
+    local provision_status=""
     new_ssid=$1
     new_security=$2
     new_bssid=$3
@@ -880,6 +1007,28 @@ provision_profile() {
 }
 
 update_profile_settings() {
+    local update_name=""
+    local update_password_action=""
+    local update_password=""
+    local update_bssid=""
+    local update_txpower=""
+    local update_rate_module=""
+    local update_rate_auto=""
+    local update_rate_mcs=""
+    local update_apply=""
+    local update_source=""
+    local update_password_length=""
+    local saw_aaa_password=""
+    local saw_supplicant_password=""
+    local saw_wireless_bssid=""
+    local saw_supplicant_bssid=""
+    local saw_txpower=""
+    local saw_rate_module=""
+    local saw_rate_auto=""
+    local saw_rate_mcs=""
+    local update_line=""
+    local update_key=""
+    local update_uptime=""
     update_name=$1
     update_password_action=$2
     update_password=$3
@@ -1040,6 +1189,7 @@ update_profile_settings() {
 }
 
 start_manual_hold() {
+    local hold_started=""
     hold_started=$(uptime_seconds)
     [ -n "$hold_started" ] && [ -n "$1" ] || return 1
     printf '%s\n%s\n' "$hold_started" "$1" > "$MANUAL_HOLD_FILE.new.$$" || return 1
@@ -1049,6 +1199,8 @@ start_manual_hold() {
 }
 
 manual_hold_remaining() {
+    local hold_start=""
+    local hold_now=""
     hold_start=$(sed -n '1p' "$MANUAL_HOLD_FILE" 2>/dev/null)
     hold_target=$(sed -n '2p' "$MANUAL_HOLD_FILE" 2>/dev/null)
     hold_now=$(uptime_seconds)
@@ -1065,6 +1217,7 @@ manual_hold_remaining() {
 }
 
 manual_hold_active() {
+    local hold_remaining=""
     [ -f "$MANUAL_HOLD_FILE" ] || return 1
     hold_remaining=$(manual_hold_remaining)
     if [ "$hold_remaining" -le 0 ]; then
@@ -1095,6 +1248,10 @@ manual_hold_active() {
 }
 
 manual_transition_active() {
+    local configured_ssid=""
+    local now_uptime=""
+    local transition_start=""
+    local transition_age=""
     configured_ssid=$(effective_ssid "$SYSTEM_CFG")
     [ -n "$configured_ssid" ] || return 1
     case $configured_ssid in
@@ -1125,6 +1282,14 @@ manual_transition_active() {
 }
 
 handle_gui_transition() {
+    local gui_start=""
+    local gui_now=""
+    local gui_age=""
+    local gui_configured=""
+    local gui_current_digest=""
+    local gui_observed_digest=""
+    local gui_connection_ready=""
+    local gui_name_valid=""
     [ -f "$GUI_TRANSITION_FILE" ] && [ -f "$GUI_TARGET_FILE" ] || return 1
 
     gui_target=$(sed -n '1p' "$GUI_TARGET_FILE" 2>/dev/null)
@@ -1214,6 +1379,15 @@ handle_gui_transition() {
 }
 
 recover_after_failed_manual_switch() {
+    local failed_profile=""
+    local failed_path=""
+    local recovery_start=""
+    local recovery_now=""
+    local recovery_elapsed=""
+    local recovery_remaining=""
+    local recovery_sleep=""
+    local recovery_profile=""
+    local recovery_status=""
     rm -f "$MANUAL_HOLD_FILE"
     failed_profile=$1
     failed_path="$PROFILE_DIR/$failed_profile"
@@ -1266,6 +1440,8 @@ recover_after_failed_manual_switch() {
 }
 
 record_failure() {
+    local previous_ssid=""
+    local previous_count=""
     failed_ssid=$1
     previous_ssid=$(sed -n '1p' "$STATE_DIR/failure.ssid" 2>/dev/null)
     previous_count=$(sed -n '1p' "$STATE_DIR/failure.count" 2>/dev/null)
@@ -1280,6 +1456,10 @@ record_failure() {
 }
 
 profile_priority() {
+    local priority_profile=""
+    local configured_priority=""
+    local priority_value=""
+    local priority_name=""
     priority_profile=$1
     configured_priority=
     if [ -f "$PRIORITY_FILE" ]; then
@@ -1306,6 +1486,7 @@ profile_priority() {
 }
 
 cooldown_active() {
+    local cooldown_until=""
     cooldown_profile=$1
     cooldown_until=$(sed -n '1p' "$STATE_DIR/cooldown.$cooldown_profile" 2>/dev/null)
     case $cooldown_until in
@@ -1324,6 +1505,15 @@ set_cooldown() {
 }
 
 choose_candidate() {
+    local candidate_current_ssid=""
+    local best_score=""
+    local best_profile=""
+    local candidate_path=""
+    local candidate_profile=""
+    local candidate_ssid=""
+    local candidate_quality=""
+    local candidate_priority=""
+    local candidate_score=""
     candidate_current_ssid=$1
     best_score=-1
     best_profile=
@@ -1353,6 +1543,8 @@ choose_candidate() {
 }
 
 auto_scan_due() {
+    local scan_now=""
+    local last_scan=""
     scan_now=$(uptime_seconds)
     [ -n "$scan_now" ] || scan_now=0
     last_scan=$(sed -n '1p' "$STATE_DIR/last_auto_scan" 2>/dev/null)
@@ -1364,6 +1556,13 @@ auto_scan_due() {
 }
 
 auto_select() {
+    local gui_grace_expired=""
+    local gui_transition_status=""
+    local manual_hold_status=""
+    local auto_ssid=""
+    local auto_ccq=""
+    local selected_profile=""
+    local connect_status=""
     observe_external_config_change || true
     gui_grace_expired=no
     handle_gui_transition
@@ -1419,6 +1618,7 @@ auto_select() {
 }
 
 persist_profiles() {
+    local persist_status=""
     log_message "saving profiles to flash"
     "$CFGMTD" -w -p /etc/
     persist_status=$?
@@ -1432,6 +1632,10 @@ persist_profiles() {
 }
 
 save_current_profile() {
+    local save_name=""
+    local save_source=""
+    local save_destination=""
+    local save_uptime=""
     save_name=$1
     save_source=${2:-explicit}
     profile_name_is_valid "$save_name" || return 1
@@ -1459,6 +1663,9 @@ save_current_profile() {
 }
 
 disable_profile() {
+    local disable_name=""
+    local disable_source=""
+    local disable_uptime=""
     disable_name=$1
     profile_name_is_valid "$disable_name" || return 1
     disable_source="$PROFILE_DIR/$disable_name"
@@ -1472,6 +1679,10 @@ disable_profile() {
 }
 
 starlink_power_off() {
+    local off_configured=""
+    local off_profile=""
+    local off_candidate=""
+    local off_result=""
     off_configured=$(effective_ssid "$SYSTEM_CFG")
     if [ "$off_configured" != denlink ] && ! link_is_target denlink; then
         log_message "Starlink powered off; antenna already targets another network"
@@ -1512,6 +1723,13 @@ starlink_power_off() {
 }
 
 forget_profile() {
+    local forget_name=""
+    local forget_path=""
+    local forget_ssid=""
+    local forget_active=""
+    local forget_backup=""
+    local roam_profile=""
+    local roam_status=""
     forget_name=$1
     case $forget_name in
         ''|.*|*/*|reset|system.cfg|*.backup.*)
@@ -1553,6 +1771,11 @@ forget_profile() {
 }
 
 show_status() {
+    local status_configured=""
+    local status_associated=""
+    local status_ccq=""
+    local status_paused=""
+    local status_running=""
     status_configured=$(effective_ssid "$SYSTEM_CFG")
     status_associated=$(associated_ssid)
     status_ccq=$(current_ccq)
