@@ -1,18 +1,19 @@
+import collections
 import json
 import os
 import tempfile
 import unittest
 from unittest import mock
 
-from pi.scripts import system_event_monitor as monitor
-from pi.scripts.system_monitor import crash
+from pi.scripts.system_monitor import common, crash, daemon, journal, probes, rollups
 from pi.scripts.system_monitor import report as monitor_report
+from pi.scripts.system_monitor.store import EventStore
 
 
 class ThrottleDecodeTests(unittest.TestCase):
     def test_decodes_current_and_sticky_firmware_flags(self):
         self.assertEqual(
-            monitor.parse_throttled("throttled=0x50000"),
+            probes.parse_throttled("throttled=0x50000"),
             {
                 "raw": 0x50000,
                 "hex": "0x50000",
@@ -20,13 +21,13 @@ class ThrottleDecodeTests(unittest.TestCase):
                 "occurred": ["under_voltage", "throttled"],
             },
         )
-        decoded = monitor.parse_throttled(0xF000F)
+        decoded = probes.parse_throttled(0xF000F)
         self.assertEqual(
             decoded["current"],
             ["under_voltage", "frequency_capped", "throttled", "soft_temperature_limit"],
         )
         self.assertEqual(decoded["occurred"], decoded["current"])
-        self.assertIsNone(monitor.parse_throttled("not available"))
+        self.assertIsNone(probes.parse_throttled("not available"))
 
 
 class ThermalDiscoveryTests(unittest.TestCase):
@@ -67,8 +68,8 @@ class ThermalDiscoveryTests(unittest.TestCase):
             self.write(os.path.join(policy, "cpuinfo_max_freq"), "1500000\n")
             self.write(os.path.join(policy, "scaling_governor"), "ondemand\n")
 
-            sensors = monitor.collect_thermal_sensors(sys_root)
-            policies = monitor.collect_cpu_frequency_policies(sys_root)
+            sensors = probes.collect_thermal_sensors(sys_root)
+            policies = probes.collect_cpu_frequency_policies(sys_root)
 
         self.assertEqual(len(sensors), 2)
         self.assertEqual(sensors[0]["temperature_c"], 97.87)
@@ -96,9 +97,9 @@ class KernelClassificationTests(unittest.TestCase):
         }
         for message, expected in cases.items():
             with self.subTest(message=message):
-                classified = monitor.classify_kernel_message(message)
+                classified = journal.classify_kernel_message(message)
                 self.assertEqual(classified[:2], expected)
-        self.assertIsNone(monitor.classify_kernel_message("ordinary kernel message"))
+        self.assertIsNone(journal.classify_kernel_message("ordinary kernel message"))
 
     def test_journal_event_has_stable_boot_monotonic_fingerprint(self):
         record = {
@@ -107,8 +108,8 @@ class KernelClassificationTests(unittest.TestCase):
             "__MONOTONIC_TIMESTAMP": "123456",
             "_BOOT_ID": "boot-one",
         }
-        first = monitor.parse_journal_record(record)
-        second = monitor.parse_journal_record(dict(record))
+        first = journal.parse_journal_record(record)
+        second = journal.parse_journal_record(dict(record))
         self.assertEqual(first["timestamp"], 1700000000.25)
         self.assertEqual(first["fingerprint"], second["fingerprint"])
         self.assertEqual(first["severity"], "critical")
@@ -116,15 +117,15 @@ class KernelClassificationTests(unittest.TestCase):
 
 class IoMetricTests(unittest.TestCase):
     def test_parses_and_rates_network_without_counting_virtual_interface_twice(self):
-        previous = monitor.parse_network_counters(
+        previous = probes.parse_network_counters(
             """eth0: 1000 10 0 1 0 0 0 0 500 5 0 0 0 0 0 0
 tailscale0: 200 2 0 0 0 0 0 0 300 3 0 0 0 0 0 0"""
         )
-        current = monitor.parse_network_counters(
+        current = probes.parse_network_counters(
             """eth0: 1500 14 0 1 0 0 0 0 700 7 0 0 0 0 0 0
 tailscale0: 1000 8 0 0 0 0 0 0 1300 9 0 0 0 0 0 0"""
         )
-        result = monitor.calculate_network_io(
+        result = probes.calculate_network_io(
             current, previous, elapsed=2, physical_names={"eth0"}
         )
         self.assertEqual(result["rx_bytes_per_second"], 250)
@@ -133,15 +134,15 @@ tailscale0: 1000 8 0 0 0 0 0 0 1300 9 0 0 0 0 0 0"""
         self.assertFalse(result["interfaces"][1]["physical"])
 
     def test_parses_whole_disk_throughput_iops_and_busy_time(self):
-        previous = monitor.parse_disk_counters(
+        previous = probes.parse_disk_counters(
             "8 0 sda 10 0 100 50 20 0 200 70 0 300 400"
         )["sda"]
-        current = monitor.parse_disk_counters(
+        current = probes.parse_disk_counters(
             "8 0 sda 14 0 104 60 26 0 208 90 1 800 900"
         )["sda"]
         previous.update({"sector_size": 512, "labels": ["movingparts"]})
         current.update({"sector_size": 512, "labels": ["movingparts"]})
-        result = monitor.calculate_disk_io(
+        result = probes.calculate_disk_io(
             {"sda": current}, {"sda": previous}, elapsed=2
         )
         self.assertEqual(result["read_bytes_per_second"], 1024)
@@ -157,7 +158,7 @@ class CrashAnalysisTests(unittest.TestCase):
     def record(timestamp, message, **overrides):
         record = {
             "timestamp": timestamp,
-            "timestamp_iso": monitor.iso_time(timestamp),
+            "timestamp_iso": common.iso_time(timestamp),
             "boot_id": "crashed-boot",
             "monotonic": str(int(timestamp * 1_000_000)),
             "priority": 6,
@@ -179,7 +180,7 @@ class CrashAnalysisTests(unittest.TestCase):
                 pid1=True,
             ),
         ]
-        analysis = monitor.analyze_previous_boot(records, current_boot_started_at=205)
+        analysis = crash.analyze_previous_boot(records, current_boot_started_at=205)
         self.assertTrue(analysis["available"])
         self.assertTrue(analysis["previous_boot"]["ended_cleanly"])
         self.assertEqual(analysis["level"], "good")
@@ -192,7 +193,7 @@ class CrashAnalysisTests(unittest.TestCase):
             self.record(182, "Buffer I/O error on dev sda1"),
             self.record(183, "Kernel panic - not syncing: fatal exception", priority=0),
         ]
-        analysis = monitor.analyze_previous_boot(
+        analysis = crash.analyze_previous_boot(
             records,
             current_boot_started_at=190,
             pstore_records=[{"name": "dmesg-ramoops-0", "content": "panic"}],
@@ -206,7 +207,7 @@ class CrashAnalysisTests(unittest.TestCase):
         self.assertTrue(analysis["timeline"])
 
     def test_redacts_urls_and_secrets_from_saved_log_text(self):
-        redacted = monitor.redact_log_message(
+        redacted = journal.redact_log_message(
             "request https://private.example/path token=do-not-store password:secret"
         )
         self.assertNotIn("private.example", redacted)
@@ -218,7 +219,7 @@ class CrashAnalysisTests(unittest.TestCase):
             self.record(500, "Linux version test", monotonic="1000000"),
             self.record(100, "final kernel message", monotonic="11000000"),
         ]
-        analysis = monitor.analyze_previous_boot(records)
+        analysis = crash.analyze_previous_boot(records)
         self.assertEqual(analysis["previous_boot"]["duration_seconds"], 10)
         self.assertEqual(analysis["previous_boot"]["started_at"], 500)
         self.assertEqual(analysis["previous_boot"]["ended_at"], 100)
@@ -227,7 +228,7 @@ class CrashAnalysisTests(unittest.TestCase):
 class CrashHistoryStoreTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
-        self.store = monitor.EventStore(os.path.join(self.tempdir.name, "events.sqlite3"))
+        self.store = EventStore(os.path.join(self.tempdir.name, "events.sqlite3"))
 
     def tearDown(self):
         self.store.close()
@@ -274,7 +275,7 @@ class CrashHistoryStoreTests(unittest.TestCase):
         previous = self.report("boot-old", 100, count=3)
         self.store.save_crash_analysis(previous)
         current = self.report("boot-new", 200, count=1)["analysis"]
-        comparison = monitor.compare_crash_history(current, self.store.crash_history())
+        comparison = crash.compare_crash_history(current, self.store.crash_history())
         self.assertEqual(comparison["previous_boot_id"], "boot-old")
         self.assertEqual(comparison["count_deltas"]["undervoltage_started"], -2)
 
@@ -284,7 +285,7 @@ class StoreAndDiagnosisTests(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory()
         self.now = 1_700_100_000.0
         self.database = os.path.join(self.tempdir.name, "events.sqlite3")
-        self.store = monitor.EventStore(self.database, clock=lambda: self.now)
+        self.store = EventStore(self.database, clock=lambda: self.now)
 
     def tearDown(self):
         self.store.close()
@@ -300,7 +301,7 @@ class StoreAndDiagnosisTests(unittest.TestCase):
             source="kernel",
             summary=kind.replace("_", " "),
             message=kind,
-            fingerprint=monitor.event_fingerprint(timestamp, kind),
+            fingerprint=common.event_fingerprint(timestamp, kind),
             state={"capture": "test"},
         )
 
@@ -344,7 +345,7 @@ class StoreAndDiagnosisTests(unittest.TestCase):
                 },
             },
         )
-        report = monitor.build_report(self.store, hours=1, now=self.now)
+        report = monitor_report.build_report(self.store, hours=1, now=self.now)
         evidence = report["diagnosis"]["evidence"]
         self.assertEqual(report["diagnosis"]["headline"], "Pi input undervoltage is confirmed")
         self.assertEqual(evidence["undervoltage_episodes"], 2)
@@ -382,15 +383,15 @@ class StoreAndDiagnosisTests(unittest.TestCase):
         rows = self.store.connection.execute(
             "SELECT * FROM events WHERE timestamp >= ? ORDER BY timestamp ASC", (since,)
         ).fetchall()
-        all_events = [monitor.event_public(row) for row in rows]
-        counts = monitor.collections.Counter(e["kind"] for e in all_events)
-        with mock.patch.object(monitor_report, "event_public", wraps=monitor.event_public) as public:
-            report = monitor.build_report(self.store, hours=1, limit=1, now=self.now)
+        all_events = [monitor_report.event_public(row) for row in rows]
+        counts = collections.Counter(e["kind"] for e in all_events)
+        with mock.patch.object(monitor_report, "event_public", wraps=monitor_report.event_public) as public:
+            report = monitor_report.build_report(self.store, hours=1, limit=1, now=self.now)
         self.assertEqual(public.call_count, 1)
-        self.assertEqual(report["diagnosis"], monitor.build_diagnosis(all_events, current))
+        self.assertEqual(report["diagnosis"], monitor_report.build_diagnosis(all_events, current))
         self.assertEqual(report["summary"]["events"], len(all_events))
         self.assertEqual(report["summary"]["by_kind"], dict(counts))
-        self.assertEqual(report["throttling"], monitor.build_throttling_report(current, counts, all_events))
+        self.assertEqual(report["throttling"], monitor_report.build_throttling_report(current, counts, all_events))
         plan = self.store.connection.execute(
             "EXPLAIN QUERY PLAN SELECT kind,severity,category,COUNT(*),MAX(timestamp) "
             "FROM events WHERE timestamp >= ? GROUP BY kind,severity,category", (since,)
@@ -399,9 +400,9 @@ class StoreAndDiagnosisTests(unittest.TestCase):
 
     def test_read_only_store_can_generate_report_without_writing(self):
         self.store.set_meta("current", {"timestamp": self.now, "throttle": {}})
-        readonly = monitor.EventStore(self.database, clock=lambda: self.now, read_only=True)
+        readonly = EventStore(self.database, clock=lambda: self.now, read_only=True)
         try:
-            report = monitor.build_report(readonly, hours=24, now=self.now)
+            report = monitor_report.build_report(readonly, hours=24, now=self.now)
         finally:
             readonly.close()
         self.assertTrue(report["ok"])
@@ -492,7 +493,7 @@ class StoreAndDiagnosisTests(unittest.TestCase):
             },
         )
 
-        report = monitor.build_report(self.store, hours=1, now=self.now)
+        report = monitor_report.build_report(self.store, hours=1, now=self.now)
 
         self.assertEqual(report["processes"]["repeat_offenders"][0]["name"], "smbd")
         offenders = {item["name"]: item for item in report["processes"]["repeat_offenders"]}
@@ -535,7 +536,7 @@ class StoreAndDiagnosisTests(unittest.TestCase):
 
 class FlightRecorderTests(unittest.TestCase):
     def test_pressure_parser_and_resource_summary_keep_crash_precursors(self):
-        pressure = monitor.parse_pressure(
+        pressure = probes.parse_pressure(
             "some avg10=1.25 avg60=0.50 avg300=0.10 total=12345\n"
             "full avg10=0.25 avg60=0.10 avg300=0.01 total=99"
         )
@@ -573,7 +574,7 @@ class FlightRecorderTests(unittest.TestCase):
                 "arm_mhz": 600,
             },
         ]
-        evidence = monitor.build_resource_evidence(samples)
+        evidence = crash.build_resource_evidence(samples)
         self.assertEqual(evidence["span_seconds"], 10)
         self.assertEqual(evidence["peaks"]["cpu_percent"]["value"], 95)
         self.assertEqual(
@@ -583,7 +584,7 @@ class FlightRecorderTests(unittest.TestCase):
 
     def test_boot_capture_saves_database_and_atomic_json_copy(self):
         with tempfile.TemporaryDirectory() as tempdir:
-            store = monitor.EventStore(os.path.join(tempdir, "events.sqlite3"))
+            store = EventStore(os.path.join(tempdir, "events.sqlite3"))
             report = {
                 "ok": True,
                 "version": 1,
@@ -624,7 +625,7 @@ class FlightRecorderTests(unittest.TestCase):
             ), mock.patch.object(crash, "collect_usb_state", return_value=[]), mock.patch.object(
                 crash, "collect_mount_state", return_value=[]
             ):
-                captured = monitor.capture_previous_boot(store, output)
+                captured = crash.capture_previous_boot(store, output)
             self.assertTrue(captured["saved"])
             self.assertTrue(os.path.isfile(captured["report_path"]))
             with open(captured["report_path"], encoding="utf-8") as handle:
@@ -692,7 +693,7 @@ class RollupTests(unittest.TestCase):
         }
 
     def test_preserves_peak_value_time_and_process(self):
-        accumulator = monitor.RollupAccumulator(interval=60)
+        accumulator = rollups.RollupAccumulator(interval=60)
         accumulator.add(self.sample(100, 10, 30, 50, "idle"))
         accumulator.add(self.sample(160, 92, 55, 67, "worker"))
         self.assertTrue(accumulator.ready(160))
@@ -713,12 +714,12 @@ class RollupTests(unittest.TestCase):
 class FirmwareTransitionTests(unittest.TestCase):
     def test_sticky_flags_are_logged_once_per_boot(self):
         with tempfile.TemporaryDirectory() as tempdir:
-            store = monitor.EventStore(os.path.join(tempdir, "events.sqlite3"))
-            service = monitor.SystemEventMonitor(store)
+            store = EventStore(os.path.join(tempdir, "events.sqlite3"))
+            service = daemon.SystemEventMonitor(store)
             sample = {
                 "timestamp": 1000,
                 "boot_id": "boot-one",
-                "throttle": monitor.parse_throttled(0x50000),
+                "throttle": probes.parse_throttled(0x50000),
             }
             service.current = sample
             service.context_cache = {"usb_devices": [], "mounts": [], "failed_units": []}
