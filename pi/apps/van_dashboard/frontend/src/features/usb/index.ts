@@ -8,7 +8,7 @@ export {
   useSharedUsbStatus,
   useUsbStatus,
 } from './hooks';
-export { decodeUsbStatusResponse } from './decoders';
+export { decodeUsbStatusResponse } from './schema';
 export { useUsbControls } from './controls';
 export type { UsbControls } from './controls';
 export type { UsbDevice, UsbHub, UsbInventory, UsbPort, UsbPortState, UsbStatus } from './types';

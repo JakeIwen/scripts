@@ -18,6 +18,7 @@ import type {
   UsbPort,
   UsbPortAction,
   UsbPortMethod,
+  UsbPortMutationResult,
   UsbPortOperation,
   UsbPortOperationStatus,
   UsbPortState,
@@ -219,6 +220,15 @@ export function decodeUsbPortState(value: unknown): UsbPortState {
     hubs: arrayValue(object.hubs, 'usb_ports.hubs').map(decodeHub),
     operation: decodeOperation(object.operation),
     expired: booleanValue(object.expired, 'usb_ports.expired'),
+  };
+}
+
+export function decodeMutation(payload: unknown, label: string): UsbPortMutationResult {
+  const response = objectValue(payload, label);
+  if (response.ok !== true) throw new TypeError(`${label}.ok must be true`);
+  return {
+    message: stringValue(response.message, `${label}.message`),
+    ports: decodeUsbPortState(response.usb_ports),
   };
 }
 
