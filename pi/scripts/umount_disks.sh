@@ -215,22 +215,17 @@ ud_is_hdd_label() {
 
 # Set UD_PARENT to the one whole-disk ancestor of a block device.
 ud_find_parent_disk() {
-  local device=$1 ancestry name type extra
-  local -a parents=()
+  local device=$1 ancestry
 
   ancestry=$(/usr/bin/lsblk -s -nrpo NAME,TYPE "$device" 2>&1) || {
     ud_record_failure "lsblk failed for $device: $ancestry"
     return 1
   }
-  while read -r name type extra; do
-    [[ "$type" == "disk" ]] && parents+=("$name")
-  done <<< "$ancestry"
-
-  if (( ${#parents[@]} != 1 )); then
-    ud_record_failure "$device has ${#parents[@]} whole-disk ancestors; expected exactly one"
+  if ! disk_policy_parent_from_rows "$ancestry" allow-extra; then
+    ud_record_failure "$device has $DISK_POLICY_PARENT_COUNT whole-disk ancestors; expected exactly one"
     return 1
   fi
-  UD_PARENT=${parents[0]}
+  UD_PARENT=$DISK_POLICY_PARENT_DISK
 }
 
 # Resolve an exact filesystem label and validate its physical parent.
@@ -267,7 +262,7 @@ ud_resolve_label() {
     ud_record_failure "cannot determine transport for $UD_PARENT: $transport"
     return 2
   }
-  if [[ "$transport" != "usb" ]]; then
+  if ! disk_policy_transport_is_usb "$transport"; then
     ud_record_failure "refusing label $label on non-USB parent $UD_PARENT (transport=${transport:-unknown})"
     return 2
   fi
@@ -588,77 +583,10 @@ ud_notify_recovery() {
   /home/pi/scripts/hdd_alert.sh recovery || true
 }
 
-umount_disks_main() {
-  local dry_run=0 spindown=0 emergency=0 clear_state=0 all_labels=0 explicit_label=
-  local label arg rc expected_mount target
-  local post_mounts all_mounts remaining_scsi_mounts
-  local parent_name hd_idle_output
-  local share samba_names samba_output samba_detail line holder_summary
-  local drain_output unmount_output first_holders final_holders
-  local needs_torrent_stop=0 had_preflight_failure=0 had_runtime_failure=0
-  local -a labels=() attached_labels=() mounted_labels=() samba_shares=()
-  local -a abort_args=()
-  local -A devices=() parents=() mounts=() unmount_failed=() spun_parents=()
-
-  while (( $# )); do
-    arg=$1
-    shift
-    case "$arg" in
-      --dry-run) dry_run=1 ;;
-      --spindown) spindown=1 ;;
-      --emergency) emergency=1 ;;
-      --all) all_labels=1 ;;
-      --clear-spindown-state) clear_state=1 ;;
-      --help|-h) ud_usage; return 0 ;;
-      --*) ud_usage; return 2 ;;
-      *)
-        if [[ -n "$explicit_label" ]]; then
-          ud_usage
-          return 2
-        fi
-        explicit_label=$arg
-        ;;
-    esac
-  done
-
-  if (( clear_state )); then
-    if (( dry_run || spindown || emergency || all_labels )) || [[ -n "$explicit_label" ]]; then
-      ud_usage
-      return 2
-    fi
-    if [[ -e "$UD_STATE_DIR" || -L "$UD_STATE_DIR" ]]; then
-      ud_prepare_spindown_state_dir || return 1
-    fi
-    ud_clear_spindown_state
-    return $?
-  fi
-
-  if (( all_labels )) && { (( spindown )) || [[ -n "$explicit_label" ]]; }; then
-    ud_usage
-    return 2
-  fi
-  if (( emergency )) &&
-      { (( ! spindown || dry_run || all_labels )) || [[ -n "$explicit_label" ]]; }; then
-    ud_usage
-    return 2
-  fi
-
-  if (( all_labels )); then
-    # One preflight covers every filesystem this repository is permitted to
-    # mount. This is used by safe reboot/poweroff so no earlier per-label
-    # unmount can be undone before a later label is validated.
-    labels=("${MOUNT_LABELS[@]}" "${MANUAL_MOUNT_LABELS[@]}")
-  elif [[ -n "$explicit_label" ]]; then
-    labels=("$explicit_label")
-    if (( spindown )) && ! ud_is_hdd_label "$explicit_label"; then
-      ud_record_failure "refusing to spin down label $explicit_label because it is not in HDD_LABELS"
-      ud_notify_failures "$(( spindown && ! dry_run ))"
-      return 1
-    fi
-  else
-    labels=("${HDD_LABELS[@]}")
-  fi
-
+# Private phases of umount_disks_main. Bash dynamic scope intentionally shares
+# its option flags, label/device maps and failure accumulators across phases.
+# Do not invoke these independently or shadow that operation state with locals.
+ud_preflight() {
   # Prove that both root-run backup cleanup and the pi-run ignition service can
   # share completion state before changing any disk. This prevents a successful
   # physical spindown from being reported as failed only after the fact.
@@ -726,18 +654,10 @@ umount_disks_main() {
     return 1
   fi
 
-  for label in "${attached_labels[@]}"; do
-    if [[ -n "${mounts[$label]}" ]]; then
-      echo "$label: ${devices[$label]} -> ${mounts[$label]}; parent=${parents[$label]}; action=unmount$([[ $spindown == 1 ]] && echo '+spindown')"
-    else
-      echo "$label: ${devices[$label]} is unmounted; parent=${parents[$label]}; action=$([[ $spindown == 1 ]] && echo spindown || echo none)"
-    fi
-  done
-  if (( dry_run )); then
-    echo "dry run: no services, mounts, or disks were changed"
-    return 0
-  fi
+  return 0
+}
 
+ud_unmount_all() {
   if (( ${#mounted_labels[@]} )); then
     for label in "${mounted_labels[@]}"; do
       if share=$(disk_policy_samba_share_name "$label"); then
@@ -853,6 +773,10 @@ umount_disks_main() {
     fi
   done
 
+  return 0
+}
+
+ud_spindown() {
   if (( spindown )); then
     for label in "${attached_labels[@]}"; do
       [[ -z "${unmount_failed[$label]:-}" ]] || continue
@@ -903,6 +827,97 @@ umount_disks_main() {
       fi
     done
   fi
+
+  return 0
+}
+
+umount_disks_main() {
+  local dry_run=0 spindown=0 emergency=0 clear_state=0 all_labels=0 explicit_label=
+  local label arg rc expected_mount target
+  local post_mounts all_mounts remaining_scsi_mounts
+  local parent_name hd_idle_output
+  local share samba_names samba_output samba_detail line holder_summary
+  local drain_output unmount_output first_holders final_holders
+  local needs_torrent_stop=0 had_preflight_failure=0 had_runtime_failure=0
+  local -a labels=() attached_labels=() mounted_labels=() samba_shares=()
+  local -a abort_args=()
+  local -A devices=() parents=() mounts=() unmount_failed=() spun_parents=()
+
+  while (( $# )); do
+    arg=$1
+    shift
+    case "$arg" in
+      --dry-run) dry_run=1 ;;
+      --spindown) spindown=1 ;;
+      --emergency) emergency=1 ;;
+      --all) all_labels=1 ;;
+      --clear-spindown-state) clear_state=1 ;;
+      --help|-h) ud_usage; return 0 ;;
+      --*) ud_usage; return 2 ;;
+      *)
+        if [[ -n "$explicit_label" ]]; then
+          ud_usage
+          return 2
+        fi
+        explicit_label=$arg
+        ;;
+    esac
+  done
+
+  if (( clear_state )); then
+    if (( dry_run || spindown || emergency || all_labels )) || [[ -n "$explicit_label" ]]; then
+      ud_usage
+      return 2
+    fi
+    if [[ -e "$UD_STATE_DIR" || -L "$UD_STATE_DIR" ]]; then
+      ud_prepare_spindown_state_dir || return 1
+    fi
+    ud_clear_spindown_state
+    return $?
+  fi
+
+  if (( all_labels )) && { (( spindown )) || [[ -n "$explicit_label" ]]; }; then
+    ud_usage
+    return 2
+  fi
+  if (( emergency )) &&
+      { (( ! spindown || dry_run || all_labels )) || [[ -n "$explicit_label" ]]; }; then
+    ud_usage
+    return 2
+  fi
+
+  if (( all_labels )); then
+    # One preflight covers every filesystem this repository is permitted to
+    # mount. This is used by safe reboot/poweroff so no earlier per-label
+    # unmount can be undone before a later label is validated.
+    labels=("${MOUNT_LABELS[@]}" "${MANUAL_MOUNT_LABELS[@]}")
+  elif [[ -n "$explicit_label" ]]; then
+    labels=("$explicit_label")
+    if (( spindown )) && ! ud_is_hdd_label "$explicit_label"; then
+      ud_record_failure "refusing to spin down label $explicit_label because it is not in HDD_LABELS"
+      ud_notify_failures "$(( spindown && ! dry_run ))"
+      return 1
+    fi
+  else
+    labels=("${HDD_LABELS[@]}")
+  fi
+
+  ud_preflight || return 1
+
+  for label in "${attached_labels[@]}"; do
+    if [[ -n "${mounts[$label]}" ]]; then
+      echo "$label: ${devices[$label]} -> ${mounts[$label]}; parent=${parents[$label]}; action=unmount$([[ $spindown == 1 ]] && echo '+spindown')"
+    else
+      echo "$label: ${devices[$label]} is unmounted; parent=${parents[$label]}; action=$([[ $spindown == 1 ]] && echo spindown || echo none)"
+    fi
+  done
+  if (( dry_run )); then
+    echo "dry run: no services, mounts, or disks were changed"
+    return 0
+  fi
+
+  ud_unmount_all || return 1
+  ud_spindown
 
   if (( all_labels && ! dry_run )); then
     # A mounted, unrecognised USB/SCSI filesystem must not silently survive a

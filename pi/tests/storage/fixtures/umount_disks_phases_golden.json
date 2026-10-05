@@ -1,0 +1,310 @@
+{
+  "case_count": 50,
+  "cases": {
+    "all_clean": {
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "movingparts: not attached\nmounted USB/SCSI filesystems after disk operation:\n",
+      "trace": "resolve:movingparts:1:status=1:device=none:parent=none:mounts=none\nall-mounts:status=0\nreport-mounts:status=0\nnotify-recovery:0\n"
+    },
+    "all_final_discovery_failure": {
+      "returncode": 1,
+      "stderr": "ERROR: cannot verify mounted filesystems after --all (findmnt status 2): findmnt final failure\n",
+      "stdout": "movingparts: not attached\nmounted USB/SCSI filesystems after disk operation:\n",
+      "trace": "resolve:movingparts:1:status=1:device=none:parent=none:mounts=none\nall-mounts:status=2\nfailure:cannot verify mounted filesystems after --all (findmnt status 2): findmnt final failure\nreport-mounts:status=0\nnotify-failures:0\n"
+    },
+    "all_unknown_mount": {
+      "returncode": 1,
+      "stderr": "ERROR: USB/SCSI filesystems remain mounted after --all: /dev/sdx1 /mnt/unknown\n",
+      "stdout": "movingparts: not attached\nmounted USB/SCSI filesystems after disk operation:\n/dev/sdx1 /mnt/unknown\n",
+      "trace": "resolve:movingparts:1:status=1:device=none:parent=none:mounts=none\nall-mounts:status=0\nfailure:USB/SCSI filesystems remain mounted after --all: /dev/sdx1 /mnt/unknown\nreport-mounts:status=0\nnotify-failures:0\n"
+    },
+    "all_vanished_accepted": {
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "movingparts: accepted vanished mapping /dev/vanished-test\nmounted USB/SCSI filesystems after disk operation:\n",
+      "trace": "resolve:movingparts:1:status=2:device=/dev/sdz1:parent=/dev/sdz:mounts=none\naccept-vanished:movingparts:/dev/vanished-test\nall-mounts:status=0\nreport-mounts:status=0\nnotify-recovery:0\n"
+    },
+    "all_vanished_rejected": {
+      "returncode": 1,
+      "stderr": "ERROR: vanished mapping still mounted\nrefusing all disk changes because preflight validation failed\n",
+      "stdout": "",
+      "trace": "resolve:movingparts:1:status=2:device=/dev/sdz1:parent=/dev/sdz:mounts=none\naccept-vanished:movingparts:/dev/vanished-test\nfailure:vanished mapping still mounted\nnotify-failures:0\n"
+    },
+    "backup_abort_failure": {
+      "returncode": 1,
+      "stderr": "ERROR: backup/restore did not stop; refusing to unmount HDDs\n",
+      "stdout": "movingparts: /dev/sdz1 -> /mnt/movingparts; parent=/dev/sdz; action=unmount\nabort refused\n",
+      "trace": "resolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=/mnt/movingparts\nshare-name:movingparts\nsamba:drain:movingparts\nabort-backup:normal\nfailure:backup/restore did not stop; refusing to unmount HDDs\nnotify-failures:0\n"
+    },
+    "clear_state_conflict": {
+      "returncode": 2,
+      "stderr": "usage: driver.sh [--dry-run] [--spindown] [label]\n       driver.sh --spindown --emergency\n       driver.sh [--dry-run] --all\n       driver.sh --clear-spindown-state\n",
+      "stdout": "",
+      "trace": ""
+    },
+    "clear_state_empty": {
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "",
+      "trace": "clear-state\n"
+    },
+    "clear_state_existing": {
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "",
+      "trace": "prepare-state\nclear-state\n"
+    },
+    "clear_state_prepare_failure": {
+      "returncode": 1,
+      "stderr": "ERROR: state metadata rejected\n",
+      "stdout": "",
+      "trace": "prepare-state\nfailure:state metadata rejected\n"
+    },
+    "dry_run_absent": {
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "movingparts: not attached\ndry run: no services, mounts, or disks were changed\n",
+      "trace": "resolve:movingparts:1:status=1:device=none:parent=none:mounts=none\n"
+    },
+    "dry_run_mounted": {
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "movingparts: /dev/sdz1 -> /mnt/movingparts; parent=/dev/sdz; action=unmount\ndry run: no services, mounts, or disks were changed\n",
+      "trace": "resolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=/mnt/movingparts\n"
+    },
+    "dry_run_unmounted": {
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "movingparts: /dev/sdz1 is unmounted; parent=/dev/sdz; action=none\ndry run: no services, mounts, or disks were changed\n",
+      "trace": "resolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\n"
+    },
+    "emergency_samba_fallback_failure": {
+      "returncode": 1,
+      "stderr": "ERROR: Samba shares MovingParts did not close; disks remain mounted\n",
+      "stdout": "movingparts: /dev/sdz1 -> /mnt/movingparts; parent=/dev/sdz; action=unmount+spindown\nscoped close failed\nglobal stop failed\n",
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=/mnt/movingparts\nhd-idle-available:1\nshare-name:movingparts\nsamba:drain:movingparts\nabort-backup:--emergency\nqbit-stop:1\nsamba:close:movingparts\nemergency-samba\nfailure:Samba shares MovingParts did not close; disks remain mounted\nnotify-failures:1\n"
+    },
+    "emergency_samba_fallback_success": {
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "movingparts: /dev/sdz1 -> /mnt/movingparts; parent=/dev/sdz; action=unmount+spindown\nscoped close failed\nall smbd processes stopped; continuing emergency disk shutdown\nunmounting movingparts from /mnt/movingparts\nspinning down movingparts on /dev/sdz\nmounted USB/SCSI filesystems after disk operation:\n",
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=/mnt/movingparts\nhd-idle-available:1\nshare-name:movingparts\nsamba:drain:movingparts\nabort-backup:--emergency\nqbit-stop:1\nsamba:close:movingparts\nemergency-samba\nsync:/mnt/movingparts\nunmount:/mnt/movingparts:1:status=0\nfindmnt-source:/dev/sdz1:1:status=1:output=none\nresolve:movingparts:2:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nparent-check:/dev/sdz:status=0\nhd-idle:/dev/sdz:status=0:output=none\nwrite-state:movingparts:/dev/sdz1:/dev/sdz:status=0\nreport-mounts:status=0\nnotify-recovery:1\n"
+    },
+    "hd_idle_nonzero_diagnostic": {
+      "returncode": 1,
+      "stderr": "ERROR: hd-idle failed for movingparts on /dev/sdz (status 1): device open failed\n",
+      "stdout": "movingparts: /dev/sdz1 is unmounted; parent=/dev/sdz; action=spindown\nspinning down movingparts on /dev/sdz\nmounted USB/SCSI filesystems after disk operation:\n",
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nresolve:movingparts:2:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nparent-check:/dev/sdz:status=0\nhd-idle:/dev/sdz:status=1:output=device open failed\nfailure:hd-idle failed for movingparts on /dev/sdz (status 1): device open failed\nreport-mounts:status=0\nnotify-failures:1\n"
+    },
+    "hd_idle_zero_with_diagnostic": {
+      "returncode": 1,
+      "stderr": "ERROR: hd-idle failed for movingparts on /dev/sdz (status 0): unexpected diagnostic\n",
+      "stdout": "movingparts: /dev/sdz1 is unmounted; parent=/dev/sdz; action=spindown\nspinning down movingparts on /dev/sdz\nmounted USB/SCSI filesystems after disk operation:\n",
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nresolve:movingparts:2:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nparent-check:/dev/sdz:status=0\nhd-idle:/dev/sdz:status=0:output=unexpected diagnostic\nfailure:hd-idle failed for movingparts on /dev/sdz (status 0): unexpected diagnostic\nreport-mounts:status=0\nnotify-failures:1\n"
+    },
+    "help_long": {
+      "returncode": 0,
+      "stderr": "usage: driver.sh [--dry-run] [--spindown] [label]\n       driver.sh --spindown --emergency\n       driver.sh [--dry-run] --all\n       driver.sh --clear-spindown-state\n",
+      "stdout": "",
+      "trace": ""
+    },
+    "invalid_option": {
+      "returncode": 2,
+      "stderr": "usage: driver.sh [--dry-run] [--spindown] [label]\n       driver.sh --spindown --emergency\n       driver.sh [--dry-run] --all\n       driver.sh --clear-spindown-state\n",
+      "stdout": "",
+      "trace": ""
+    },
+    "marker_skip": {
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "movingparts: already stopped on /dev/sdz; skipping disk probe\nmounted USB/SCSI filesystems after disk operation:\n",
+      "trace": "prepare-state\nmarker-check:movingparts\nreport-mounts:status=0\nnotify-recovery:1\n"
+    },
+    "multiple_positional_labels": {
+      "returncode": 2,
+      "stderr": "usage: driver.sh [--dry-run] [--spindown] [label]\n       driver.sh --spindown --emergency\n       driver.sh [--dry-run] --all\n       driver.sh --clear-spindown-state\n",
+      "stdout": "",
+      "trace": ""
+    },
+    "post_unmount_discovery_error": {
+      "returncode": 1,
+      "stderr": "ERROR: cannot verify movingparts after unmount (findmnt status 2): findmnt unavailable\n",
+      "stdout": "movingparts: /dev/sdz1 -> /mnt/movingparts; parent=/dev/sdz; action=unmount\nunmounting movingparts from /mnt/movingparts\nmounted USB/SCSI filesystems after disk operation:\n",
+      "trace": "resolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=/mnt/movingparts\nshare-name:movingparts\nsamba:drain:movingparts\nabort-backup:normal\nqbit-stop:0\nsamba:close:movingparts\nsync:/mnt/movingparts\nunmount:/mnt/movingparts:1:status=0\nfindmnt-source:/dev/sdz1:1:status=2:output=findmnt unavailable\nfailure:cannot verify movingparts after unmount (findmnt status 2): findmnt unavailable\nreport-mounts:status=0\nnotify-failures:0\n"
+    },
+    "post_unmount_still_mounted": {
+      "returncode": 1,
+      "stderr": "ERROR: movingparts still has a mount after umount returned success\n",
+      "stdout": "movingparts: /dev/sdz1 -> /mnt/movingparts; parent=/dev/sdz; action=unmount\nunmounting movingparts from /mnt/movingparts\nmounted USB/SCSI filesystems after disk operation:\n",
+      "trace": "resolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=/mnt/movingparts\nshare-name:movingparts\nsamba:drain:movingparts\nabort-backup:normal\nqbit-stop:0\nsamba:close:movingparts\nsync:/mnt/movingparts\nunmount:/mnt/movingparts:1:status=0\nfindmnt-source:/dev/sdz1:1:status=0:output=/mnt/movingparts\nfailure:movingparts still has a mount after umount returned success\nreport-mounts:status=0\nnotify-failures:0\n"
+    },
+    "preflight_discovery_failure": {
+      "returncode": 1,
+      "stderr": "ERROR: synthetic discovery failure\nrefusing all disk changes because preflight validation failed\n",
+      "stdout": "",
+      "trace": "resolve:movingparts:1:status=2:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nfailure:synthetic discovery failure\nnotify-failures:0\n"
+    },
+    "preflight_multi_label_failure_prevents_mutation": {
+      "returncode": 1,
+      "stderr": "ERROR: bigboi is mounted at unexpected target /mnt/wrong (expected /mnt/bigboi)\nrefusing all disk changes because preflight validation failed\n",
+      "stdout": "",
+      "trace": "resolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=/mnt/movingparts\nresolve:bigboi:1:status=0:device=/dev/sdy1:parent=/dev/sdy:mounts=/mnt/wrong\nfailure:bigboi is mounted at unexpected target /mnt/wrong (expected /mnt/bigboi)\nnotify-failures:0\n"
+    },
+    "preflight_unexpected_mount": {
+      "returncode": 1,
+      "stderr": "ERROR: movingparts is mounted at unexpected target /mnt/wrong (expected /mnt/movingparts)\nrefusing all disk changes because preflight validation failed\n",
+      "stdout": "",
+      "trace": "resolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=/mnt/wrong\nfailure:movingparts is mounted at unexpected target /mnt/wrong (expected /mnt/movingparts)\nnotify-failures:0\n"
+    },
+    "qbit_failure_continues": {
+      "returncode": 0,
+      "stderr": "WARNING: qbittorrent-nox stop could not be verified; continuing with guarded unmount and exact holder eviction\n",
+      "stdout": "movingparts: /dev/sdz1 -> /mnt/movingparts; parent=/dev/sdz; action=unmount\nunmounting movingparts from /mnt/movingparts\nmounted USB/SCSI filesystems after disk operation:\n",
+      "trace": "resolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=/mnt/movingparts\nshare-name:movingparts\nsamba:drain:movingparts\nabort-backup:normal\nqbit-stop:0\nsamba:close:movingparts\nsync:/mnt/movingparts\nunmount:/mnt/movingparts:1:status=0\nfindmnt-source:/dev/sdz1:1:status=1:output=none\nreport-mounts:status=0\nnotify-recovery:0\n"
+    },
+    "reject_all_with_spindown": {
+      "returncode": 2,
+      "stderr": "usage: driver.sh [--dry-run] [--spindown] [label]\n       driver.sh --spindown --emergency\n       driver.sh [--dry-run] --all\n       driver.sh --clear-spindown-state\n",
+      "stdout": "",
+      "trace": ""
+    },
+    "reject_emergency_with_label": {
+      "returncode": 2,
+      "stderr": "usage: driver.sh [--dry-run] [--spindown] [label]\n       driver.sh --spindown --emergency\n       driver.sh [--dry-run] --all\n       driver.sh --clear-spindown-state\n",
+      "stdout": "",
+      "trace": ""
+    },
+    "reject_emergency_without_spindown": {
+      "returncode": 2,
+      "stderr": "usage: driver.sh [--dry-run] [--spindown] [label]\n       driver.sh --spindown --emergency\n       driver.sh [--dry-run] --all\n       driver.sh --clear-spindown-state\n",
+      "stdout": "",
+      "trace": ""
+    },
+    "samba_close_failure_detail": {
+      "returncode": 1,
+      "stderr": "ERROR: share MovingParts still has clients; close denied; disks remain mounted\n",
+      "stdout": "movingparts: /dev/sdz1 -> /mnt/movingparts; parent=/dev/sdz; action=unmount\nERROR: share MovingParts still has clients\nERROR: close denied\n",
+      "trace": "resolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=/mnt/movingparts\nshare-name:movingparts\nsamba:drain:movingparts\nabort-backup:normal\nqbit-stop:0\nsamba:close:movingparts\nfailure:share MovingParts still has clients; close denied; disks remain mounted\nnotify-failures:0\n"
+    },
+    "samba_close_failure_generic": {
+      "returncode": 1,
+      "stderr": "ERROR: Samba shares MovingParts did not close; disks remain mounted\n",
+      "stdout": "movingparts: /dev/sdz1 -> /mnt/movingparts; parent=/dev/sdz; action=unmount\nclose failed without structured detail\n",
+      "trace": "resolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=/mnt/movingparts\nshare-name:movingparts\nsamba:drain:movingparts\nabort-backup:normal\nqbit-stop:0\nsamba:close:movingparts\nfailure:Samba shares MovingParts did not close; disks remain mounted\nnotify-failures:0\n"
+    },
+    "samba_drain_failure": {
+      "returncode": 1,
+      "stderr": "ERROR: cannot drain Samba shares MovingParts; refusing to unmount disks\n",
+      "stdout": "movingparts: /dev/sdz1 -> /mnt/movingparts; parent=/dev/sdz; action=unmount\ndrain refused\n",
+      "trace": "resolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=/mnt/movingparts\nshare-name:movingparts\nsamba:drain:movingparts\nfailure:cannot drain Samba shares MovingParts; refusing to unmount disks\nnotify-failures:0\n"
+    },
+    "spindown_duplicate_parent_once": {
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "movingparts: /dev/sdz1 is unmounted; parent=/dev/sdz; action=spindown\nbigboi: /dev/sdz2 is unmounted; parent=/dev/sdz; action=spindown\nspinning down movingparts on /dev/sdz\nmounted USB/SCSI filesystems after disk operation:\n",
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nmarker-check:bigboi\nresolve:bigboi:1:status=0:device=/dev/sdz2:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nresolve:movingparts:2:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nparent-check:/dev/sdz:status=0\nhd-idle:/dev/sdz:status=0:output=none\nwrite-state:movingparts:/dev/sdz1:/dev/sdz:status=0\nresolve:bigboi:2:status=0:device=/dev/sdz2:parent=/dev/sdz:mounts=none\nreport-mounts:status=0\nnotify-recovery:1\n"
+    },
+    "spindown_failure_continues_independent_disk": {
+      "returncode": 1,
+      "stderr": "ERROR: movingparts device mapping changed before spindown; refusing it\n",
+      "stdout": "movingparts: /dev/sdz1 is unmounted; parent=/dev/sdz; action=spindown\nbigboi: /dev/sdy1 is unmounted; parent=/dev/sdy; action=spindown\nspinning down bigboi on /dev/sdy\nmounted USB/SCSI filesystems after disk operation:\n",
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nmarker-check:bigboi\nresolve:bigboi:1:status=0:device=/dev/sdy1:parent=/dev/sdy:mounts=none\nhd-idle-available:1\nresolve:movingparts:2:status=0:device=/dev/sdx1:parent=/dev/sdx:mounts=none\nfailure:movingparts device mapping changed before spindown; refusing it\nresolve:bigboi:2:status=0:device=/dev/sdy1:parent=/dev/sdy:mounts=none\nparent-check:/dev/sdy:status=0\nhd-idle:/dev/sdy:status=0:output=none\nwrite-state:bigboi:/dev/sdy1:/dev/sdy:status=0\nreport-mounts:status=0\nnotify-failures:1\n"
+    },
+    "spindown_hd_idle_unavailable": {
+      "returncode": 1,
+      "stderr": "ERROR: /usr/sbin/hd-idle is unavailable; refusing ignition disk shutdown\n",
+      "stdout": "",
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:0\nfailure:/usr/sbin/hd-idle is unavailable; refusing ignition disk shutdown\nnotify-failures:1\n"
+    },
+    "spindown_mapping_changed": {
+      "returncode": 1,
+      "stderr": "ERROR: movingparts device mapping changed before spindown; refusing it\n",
+      "stdout": "movingparts: /dev/sdz1 is unmounted; parent=/dev/sdz; action=spindown\nmounted USB/SCSI filesystems after disk operation:\n",
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nresolve:movingparts:2:status=0:device=/dev/sdy1:parent=/dev/sdy:mounts=none\nfailure:movingparts device mapping changed before spindown; refusing it\nreport-mounts:status=0\nnotify-failures:1\n"
+    },
+    "spindown_other_partition_mounted": {
+      "returncode": 1,
+      "stderr": "ERROR: refusing to spin down /dev/sdz: /dev/sdz2 is still mounted at /mnt/other\n",
+      "stdout": "movingparts: /dev/sdz1 is unmounted; parent=/dev/sdz; action=spindown\nmounted USB/SCSI filesystems after disk operation:\n",
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nresolve:movingparts:2:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nparent-check:/dev/sdz:status=1\nfailure:refusing to spin down /dev/sdz: /dev/sdz2 is still mounted at /mnt/other\nreport-mounts:status=0\nnotify-failures:1\n"
+    },
+    "spindown_reject_non_hdd": {
+      "returncode": 1,
+      "stderr": "ERROR: refusing to spin down label EXFAT512 because it is not in HDD_LABELS\n",
+      "stdout": "",
+      "trace": "failure:refusing to spin down label EXFAT512 because it is not in HDD_LABELS\nnotify-failures:1\n"
+    },
+    "spindown_remounted": {
+      "returncode": 1,
+      "stderr": "ERROR: movingparts was remounted at /mnt/movingparts before spindown\n",
+      "stdout": "movingparts: /dev/sdz1 is unmounted; parent=/dev/sdz; action=spindown\nmounted USB/SCSI filesystems after disk operation:\n",
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nresolve:movingparts:2:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=/mnt/movingparts\nfailure:movingparts was remounted at /mnt/movingparts before spindown\nreport-mounts:status=0\nnotify-failures:1\n"
+    },
+    "spindown_reresolve_absent": {
+      "returncode": 1,
+      "stderr": "ERROR: movingparts disappeared before spindown\n",
+      "stdout": "movingparts: /dev/sdz1 is unmounted; parent=/dev/sdz; action=spindown\nmounted USB/SCSI filesystems after disk operation:\n",
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nresolve:movingparts:2:status=1:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nfailure:movingparts disappeared before spindown\nreport-mounts:status=0\nnotify-failures:1\n"
+    },
+    "spindown_reresolve_vanished": {
+      "returncode": 1,
+      "stderr": "ERROR: udev mapping points to vanished device /dev/vanished-test\n",
+      "stdout": "movingparts: /dev/sdz1 is unmounted; parent=/dev/sdz; action=spindown\nmounted USB/SCSI filesystems after disk operation:\n",
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nresolve:movingparts:2:status=2:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nfailure:udev mapping points to vanished device /dev/vanished-test\nreport-mounts:status=0\nnotify-failures:1\n"
+    },
+    "spindown_state_prepare_failure": {
+      "returncode": 1,
+      "stderr": "ERROR: cannot prepare shared state\n",
+      "stdout": "",
+      "trace": "prepare-state\nfailure:cannot prepare shared state\nnotify-failures:1\n"
+    },
+    "spindown_state_write_failure": {
+      "returncode": 1,
+      "stderr": "ERROR: cannot record spindown state\n",
+      "stdout": "movingparts: /dev/sdz1 is unmounted; parent=/dev/sdz; action=spindown\nspinning down movingparts on /dev/sdz\nmounted USB/SCSI filesystems after disk operation:\n",
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nresolve:movingparts:2:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nparent-check:/dev/sdz:status=0\nhd-idle:/dev/sdz:status=0:output=none\nwrite-state:movingparts:/dev/sdz1:/dev/sdz:status=1\nfailure:cannot record spindown state\nreport-mounts:status=0\nnotify-failures:1\n"
+    },
+    "spindown_success": {
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "movingparts: /dev/sdz1 is unmounted; parent=/dev/sdz; action=spindown\nspinning down movingparts on /dev/sdz\nmounted USB/SCSI filesystems after disk operation:\n",
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nresolve:movingparts:2:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nparent-check:/dev/sdz:status=0\nhd-idle:/dev/sdz:status=0:output=none\nwrite-state:movingparts:/dev/sdz1:/dev/sdz:status=0\nreport-mounts:status=0\nnotify-recovery:1\n"
+    },
+    "unmount_failure_continues_independent_disk": {
+      "returncode": 1,
+      "stderr": "ERROR: normal unmount failed for movingparts at /mnt/movingparts (status 32): busy two; holders: pi 333 f.... first; remaining after escalation: pi 444 f.... final\n",
+      "stdout": "movingparts: /dev/sdz1 -> /mnt/movingparts; parent=/dev/sdz; action=unmount\nbigboi: /dev/sdy1 -> /mnt/bigboi; parent=/dev/sdy; action=unmount\nunmounting movingparts from /mnt/movingparts\nnormal unmount failed for movingparts (status 32): busy one\nretrying normal unmount for movingparts after holder eviction\nunmounting bigboi from /mnt/bigboi\nmounted USB/SCSI filesystems after disk operation:\n",
+      "trace": "resolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=/mnt/movingparts\nresolve:bigboi:1:status=0:device=/dev/sdy1:parent=/dev/sdy:mounts=/mnt/bigboi\nshare-name:movingparts\nshare-name:bigboi\nsamba:drain:movingparts bigboi\nabort-backup:normal\nqbit-stop:0\nsamba:close:movingparts bigboi\nsync:/mnt/movingparts\nunmount:/mnt/movingparts:1:status=32\nfindmnt-source:/dev/sdz1:1:status=0:output=/mnt/movingparts\nholder-summary:/mnt/movingparts:1:pi 333 f.... first\nevict:/mnt/movingparts\nsync:/mnt/movingparts\nunmount:/mnt/movingparts:2:status=32\nfindmnt-source:/dev/sdz1:2:status=0:output=/mnt/movingparts\nholder-summary:/mnt/movingparts:2:pi 444 f.... final\nfailure:normal unmount failed for movingparts at /mnt/movingparts (status 32): busy two; holders: pi 333 f.... first; remaining after escalation: pi 444 f.... final\nsync:/mnt/bigboi\nunmount:/mnt/bigboi:1:status=0\nfindmnt-source:/dev/sdy1:1:status=1:output=none\nall-mounts:status=0\nreport-mounts:status=0\nnotify-failures:0\n"
+    },
+    "unmount_reconciled_first_attempt": {
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "movingparts: /dev/sdz1 -> /mnt/movingparts; parent=/dev/sdz; action=unmount\nunmounting movingparts from /mnt/movingparts\numount returned status 124 for movingparts, but findmnt verifies /dev/sdz1 is unmounted; continuing\nmounted USB/SCSI filesystems after disk operation:\n",
+      "trace": "resolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=/mnt/movingparts\nshare-name:movingparts\nsamba:drain:movingparts\nabort-backup:normal\nqbit-stop:0\nsamba:close:movingparts\nsync:/mnt/movingparts\nunmount:/mnt/movingparts:1:status=124\nfindmnt-source:/dev/sdz1:1:status=1:output=none\nfindmnt-source:/dev/sdz1:2:status=1:output=none\nreport-mounts:status=0\nnotify-recovery:0\n"
+    },
+    "unmount_reconciled_retry": {
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "movingparts: /dev/sdz1 -> /mnt/movingparts; parent=/dev/sdz; action=unmount\nunmounting movingparts from /mnt/movingparts\nnormal unmount failed for movingparts (status 32): busy\nretrying normal unmount for movingparts after holder eviction\numount returned status 124 for movingparts, but findmnt verifies /dev/sdz1 is unmounted; continuing\nmounted USB/SCSI filesystems after disk operation:\n",
+      "trace": "resolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=/mnt/movingparts\nshare-name:movingparts\nsamba:drain:movingparts\nabort-backup:normal\nqbit-stop:0\nsamba:close:movingparts\nsync:/mnt/movingparts\nunmount:/mnt/movingparts:1:status=32\nfindmnt-source:/dev/sdz1:1:status=0:output=/mnt/movingparts\nholder-summary:/mnt/movingparts:1:pi 222 f.... worker\nevict:/mnt/movingparts\nsync:/mnt/movingparts\nunmount:/mnt/movingparts:2:status=124\nfindmnt-source:/dev/sdz1:2:status=1:output=none\nfindmnt-source:/dev/sdz1:3:status=1:output=none\nreport-mounts:status=0\nnotify-recovery:0\n"
+    },
+    "unmount_retry_success": {
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "movingparts: /dev/sdz1 -> /mnt/movingparts; parent=/dev/sdz; action=unmount\nunmounting movingparts from /mnt/movingparts\nnormal unmount failed for movingparts (status 32): busy\nretrying normal unmount for movingparts after holder eviction\nmounted USB/SCSI filesystems after disk operation:\n",
+      "trace": "resolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=/mnt/movingparts\nshare-name:movingparts\nsamba:drain:movingparts\nabort-backup:normal\nqbit-stop:0\nsamba:close:movingparts\nsync:/mnt/movingparts\nunmount:/mnt/movingparts:1:status=32\nfindmnt-source:/dev/sdz1:1:status=0:output=/mnt/movingparts\nholder-summary:/mnt/movingparts:1:pi 111 f.... worker\nevict:/mnt/movingparts\nsync:/mnt/movingparts\nunmount:/mnt/movingparts:2:status=0\nfindmnt-source:/dev/sdz1:2:status=1:output=none\nreport-mounts:status=0\nnotify-recovery:0\n"
+    },
+    "unmount_success": {
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "bigboi: /dev/sdy1 -> /mnt/bigboi; parent=/dev/sdy; action=unmount\nunmounting bigboi from /mnt/bigboi\nmounted USB/SCSI filesystems after disk operation:\n",
+      "trace": "resolve:bigboi:1:status=0:device=/dev/sdy1:parent=/dev/sdy:mounts=/mnt/bigboi\nshare-name:bigboi\nsamba:drain:bigboi\nabort-backup:normal\nsamba:close:bigboi\nsync:/mnt/bigboi\nunmount:/mnt/bigboi:1:status=0\nfindmnt-source:/dev/sdy1:1:status=1:output=none\nreport-mounts:status=0\nnotify-recovery:0\n"
+    }
+  },
+  "oracle": {
+    "name": "pre-extraction umount_disks.sh",
+    "sha256": "be5f82d1b44097c47ec31332bf911eeb0d348680a0ae8eb28985ba7bc1d6cfe6"
+  },
+  "schema": 1
+}

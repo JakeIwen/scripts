@@ -70,6 +70,40 @@ DISK_POLICY_RESOLVE_ERROR=
 DISK_POLICY_RESOLVE_REASON=
 DISK_POLICY_VANISHED_DEVICE=
 
+# Non-probing ancestry/transport primitives. Callers retain command execution,
+# discovery order and diagnostics; these outputs are separate from the exact
+# label resolver's five-global interface below.
+DISK_POLICY_PARENT_DISK=
+DISK_POLICY_PARENT_COUNT=0
+
+# Return 0 for exactly one whole-disk row, 1 for any other count, or 2 for
+# an invalid mode or extra fields in strict mode. Unmount's historical parser
+# allows extra fields; repair rejects them even on non-disk rows. Do not deduplicate.
+disk_policy_parent_from_rows() {
+  local rows=$1 mode=$2 name type extra
+  local -a parents=()
+
+  DISK_POLICY_PARENT_DISK=
+  DISK_POLICY_PARENT_COUNT=0
+  case "$mode" in
+    allow-extra|strict) ;;
+    *) return 2 ;;
+  esac
+  while read -r name type extra; do
+    if [[ "$mode" == strict ]]; then
+      [[ -z ${extra:-} ]] || return 2
+    fi
+    [[ "$type" == disk ]] && parents+=("$name")
+  done <<< "$rows"
+  DISK_POLICY_PARENT_COUNT=${#parents[@]}
+  (( DISK_POLICY_PARENT_COUNT == 1 )) || return 1
+  DISK_POLICY_PARENT_DISK=${parents[0]}
+}
+
+disk_policy_transport_is_usb() {
+  [[ "$1" == usb ]]
+}
+
 # Resolve a filesystem LABEL, or a LABEL/PARTLABEL when requested. Returns 0
 # for one verified device, 1 when no udev mapping exists, and 2 for an unsafe
 # or unverifiable mapping. Results and diagnostics are returned in the globals
