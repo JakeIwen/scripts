@@ -122,6 +122,102 @@ class DeploymentTests(unittest.TestCase):
             self.assertEqual(self.states[name]['active'],original[name]['active'])
         self.assertEqual(self.database.read_bytes(),b'untouched database sentinel')
 
+    def test_install_then_rollback_accepts_historical_manifest_without_package_pins(self):
+        expected_files = {
+            path: path.read_bytes() if path.exists() else None
+            for path in (self.old, self.new, self.receiver)
+        }
+        expected_links = {
+            name: os.readlink(self.frontend / name)
+            for name in ('current', 'previous')
+        }
+        expected_database = self.database.read_bytes()
+        expected_active = {name: state['active'] for name, state in self.states.items()}
+
+        deploy.inspect_remote(self.plan)
+        deploy.apply_remote(self.plan, self.stage())
+        manifest_path = self.root / 'backups' / 'network-test' / 'manifest.json'
+        manifest = json.loads(manifest_path.read_text())
+        del manifest['monitor_package_dependencies']
+        manifest_path.write_text(json.dumps(manifest) + '\n')
+
+        original_info = deploy.regular_info
+
+        def reject_package_dependency_queries(path):
+            if str(path) in deploy.MONITOR_PACKAGE_DEPENDENCIES.values():
+                self.fail(f'rollback queried monitor package dependency {path}')
+            return original_info(path)
+
+        self.calls.clear()
+        with mock.patch.object(deploy, 'regular_info', side_effect=reject_package_dependency_queries):
+            result = deploy.rollback_remote('network-test')
+        self.assertTrue(result['ok'])
+        self.assertEqual(
+            {path: path.read_bytes() if path.exists() else None for path in expected_files},
+            expected_files,
+        )
+        self.assertEqual(
+            {name: os.readlink(self.frontend / name) for name in expected_links},
+            expected_links,
+        )
+        self.assertEqual(self.database.read_bytes(), expected_database)
+        self.assertEqual(
+            {name: state['active'] for name, state in self.states.items()},
+            expected_active,
+        )
+
+    def test_inspect_accepts_previous_install_hash_from_historical_manifest(self):
+        deploy.inspect_remote(self.plan)
+        deploy.apply_remote(self.plan, self.stage())
+        manifest_path = self.root / 'backups' / 'network-test' / 'manifest.json'
+        manifest = json.loads(manifest_path.read_text())
+        del manifest['monitor_package_dependencies']
+        manifest_path.write_text(json.dumps(manifest) + '\n')
+
+        update = copy.deepcopy(self.plan)
+        update['release'] = 'network-next'
+        update['files'][0]['sha256'] = deploy.sha(b'value = "next"\n')
+        live = deploy.sha(self.old.read_bytes())
+        self.assertNotIn(live, (update['files'][0]['baseline_sha256'], update['files'][0]['sha256']))
+        deploy.inspect_remote(update)
+        self.assertEqual(update['files'][0]['before']['sha256'], live)
+
+    def test_malformed_historical_package_dependency_manifest_refused_before_mutation(self):
+        deploy.inspect_remote(self.plan)
+        deploy.apply_remote(self.plan, self.stage())
+        manifest_path = self.root / 'backups' / 'network-test' / 'manifest.json'
+        original = json.loads(manifest_path.read_text())
+        dependencies = original['monitor_package_dependencies']
+        first = next(iter(dependencies))
+        cases = (
+            ('none', None, 'manifest differs from system monitor dependency allowlist'),
+            ('missing', {key: value for key, value in dependencies.items() if key != first},
+             'manifest differs from system monitor dependency allowlist'),
+            ('extra', {**dependencies, '/home/pi/scripts/other.py': deploy.sha(b'other')},
+             'manifest differs from system monitor dependency allowlist'),
+            ('bad digest', {**dependencies, first: 'g' * 64}, 'invalid system monitor dependency checksum'),
+        )
+        update = copy.deepcopy(self.plan)
+        update['release'] = 'network-next'
+        for name, malformed, message in cases:
+            with self.subTest(name=name):
+                manifest = copy.deepcopy(original)
+                manifest['monitor_package_dependencies'] = malformed
+                manifest_path.write_text(json.dumps(manifest) + '\n')
+                self.calls.clear()
+                with self.assertRaisesRegex(ValueError, message):
+                    deploy.inspect_remote(update)
+                self.assertEqual(self.calls, [])
+                self.assertEqual(self.old.read_text(), 'value = "new"\n')
+                self.assertEqual(os.readlink(self.frontend / 'current'), 'releases/network-test')
+
+                self.calls.clear()
+                with self.assertRaisesRegex(ValueError, message):
+                    deploy.rollback_remote('network-test')
+                self.assertEqual(self.calls, [])
+                self.assertEqual(self.old.read_text(), 'value = "new"\n')
+                self.assertEqual(os.readlink(self.frontend / 'current'), 'releases/network-test')
+
     def test_remote_difference_fails_before_staging_or_service_changes(self):
         self.old.write_text('user edit')
         with self.assertRaisesRegex(ValueError,'live files differ'):
@@ -163,12 +259,25 @@ class DeploymentTests(unittest.TestCase):
         for dependencies in invalid:
             with self.subTest(dependencies=dependencies):
                 plan = {**self.plan, 'monitor_package_dependencies': dependencies}
-                with self.assertRaisesRegex(ValueError, 'system monitor dependency'):
-                    deploy.validate_plan(plan)
-        plan = dict(self.plan)
-        del plan['monitor_package_dependencies']
-        with self.assertRaisesRegex(ValueError, 'dependency allowlist'):
-            deploy.validate_plan(plan)
+                for historical in (False, True):
+                    with self.subTest(historical=historical):
+                        with self.assertRaisesRegex(ValueError, 'system monitor dependency'):
+                            deploy.validate_plan(plan, require_monitor_package_dependencies=not historical)
+
+        missing = dict(self.plan)
+        del missing['monitor_package_dependencies']
+        actions = {
+            'new': lambda: deploy.validate_plan(missing),
+            'check': lambda: deploy.inspect_remote(missing),
+            'apply': lambda: deploy.apply_remote(missing, self.stage()),
+            'verify': lambda: deploy.verify_remote(missing),
+        }
+        for action, invoke in actions.items():
+            with self.subTest(action=action):
+                with self.assertRaisesRegex(ValueError, 'dependency allowlist'):
+                    invoke()
+        historical = dict(missing)
+        deploy.validate_plan(historical, require_monitor_package_dependencies=False)
         for value in (None, 'dependency', 1):
             with self.subTest(shim=value):
                 with self.assertRaisesRegex(ValueError, 'dependency checksum'):

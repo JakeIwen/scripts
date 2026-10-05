@@ -129,13 +129,16 @@ def refuse_managed_host(storage_message='network storage has migrated; use deplo
                      'and deploy_python.py --update for dashboard changes')
 
 
-def validate_plan(plan):
+def validate_plan(plan, *, require_monitor_package_dependencies=True):
+    """Only historical saved manifests may predate the package dependency pins."""
     safe_release(plan['release'])
     if plan.get('schema_version') != 1:
         raise ValueError('unsupported deployment manifest')
-    dependencies = plan.get('monitor_package_dependencies')
-    if not isinstance(dependencies, dict) or set(dependencies) != set(MONITOR_PACKAGE_DEPENDENCIES.values()):
-        raise ValueError('manifest differs from system monitor dependency allowlist')
+    dependencies = {}
+    if require_monitor_package_dependencies or 'monitor_package_dependencies' in plan:
+        dependencies = plan.get('monitor_package_dependencies')
+        if not isinstance(dependencies, dict) or set(dependencies) != set(MONITOR_PACKAGE_DEPENDENCIES.values()):
+            raise ValueError('manifest differs from system monitor dependency allowlist')
     for value in [plan.get('monitor_dependency'), *dependencies.values()]:
         if not isinstance(value, str) or not re.fullmatch(r'[0-9a-f]{64}', value):
             raise ValueError('invalid system monitor dependency checksum')
@@ -160,7 +163,7 @@ def inspect_remote(plan):
         prior_root = DEPLOY_ROOT / safe_release(current.split('/', 1)[1])
         if (prior_root / 'complete').is_file() and not (prior_root / 'rolled-back').exists():
             prior = json.loads((prior_root / 'manifest.json').read_text())
-            validate_plan(prior)
+            validate_plan(prior, require_monitor_package_dependencies=False)
             prior_files = {entry['destination']: entry['sha256'] for entry in prior['files']}
     mismatches = []
     for entry in plan['files']:
@@ -282,7 +285,7 @@ def rollback_remote(release, automatic=False):
     refuse_managed_host('network storage has migrated; use deploy_network_storage.py rollback')
     root = DEPLOY_ROOT / safe_release(release)
     plan = json.loads((root / 'manifest.json').read_text())
-    validate_plan(plan)
+    validate_plan(plan, require_monitor_package_dependencies=False)
     if not automatic:
         completed = (root / 'complete').is_file()
         for entry in plan['files']:
