@@ -1,3 +1,7 @@
+import { createHash } from 'node:crypto';
+import { inspect } from 'node:util';
+import { expect } from 'vitest';
+
 export interface ParityCase {
   name: string;
   input: unknown;
@@ -108,76 +112,141 @@ export function captureDecode(decoder: (input: unknown) => unknown, input: unkno
   }
 }
 
-type FrozenValue =
-  | ['value', string | number | boolean | null]
-  | ['undefined']
-  | ['number', string]
-  | ['array', number[]]
-  | ['object', [string, number][]];
+type FrozenOutcome = string | { output: string };
 
 export interface FrozenResults {
-  rows: [string, number][];
-  values: FrozenValue[];
+  namesSha256: string;
+  rows: number[];
+  outcomes: FrozenOutcome[];
 }
 
-/** Intern repeated subtrees: a one-field mutation need not freeze the entire payload again.
- * Tagged values preserve undefined, negative zero, and non-finite numbers through JSON.
- */
-export function freezeResults(cases: ParityCase[], results: DecodeResult[]): FrozenResults {
-  const values: FrozenValue[] = [];
-  const ids = new Map<string, number>();
-  const intern = (value: unknown): number => {
-    let node: FrozenValue;
-    if (value === undefined) node = ['undefined'];
-    else if (typeof value === 'number' && (!Number.isFinite(value) || Object.is(value, -0))) {
-      node = ['number', Object.is(value, -0) ? '-0' : String(value)];
-    } else if (
-      value === null ||
-      typeof value === 'string' ||
-      typeof value === 'number' ||
-      typeof value === 'boolean'
-    ) {
-      node = ['value', value];
-    } else if (Array.isArray(value)) node = ['array', value.map(intern)];
-    else if (record(value) && Object.getPrototypeOf(value) === Object.prototype) {
-      node = [
-        'object',
-        Object.entries(value).map(([key, item]): [string, number] => [key, intern(item)]),
-      ];
-    } else throw new Error('Parity expectations require plain JSON-like outputs');
-    const key = JSON.stringify(node);
-    let id = ids.get(key);
-    if (id === undefined) {
-      id = values.length;
-      ids.set(key, id);
-      values.push(node);
+function sha256(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+function namesHash(cases: ParityCase[]): string {
+  return sha256(cases.map(({ name }) => name).join('\n'));
+}
+
+function plainRecord(value: object): value is Record<string, unknown> {
+  return Object.getPrototypeOf(value) === Object.prototype;
+}
+
+function canonicalTagged(value: unknown, stack: Set<object> = new Set<object>()): string {
+  if (value === undefined) return 'undefined;';
+  if (value === null) return 'null;';
+  switch (typeof value) {
+    case 'string':
+      return `string:${JSON.stringify(value)};`;
+    case 'boolean':
+      return `boolean:${value ? 'true' : 'false'};`;
+    case 'number':
+      if (Number.isNaN(value)) return 'number:NaN;';
+      if (Object.is(value, -0)) return 'number:-0;';
+      if (value === Infinity) return 'number:+Infinity;';
+      if (value === -Infinity) return 'number:-Infinity;';
+      return `number:${String(value)};`;
+    case 'object': {
+      if (stack.has(value)) throw new Error('Parity expectations do not support cyclic outputs');
+      stack.add(value);
+      try {
+        if (Array.isArray(value)) {
+          const keys = Reflect.ownKeys(value);
+          if (
+            Object.getPrototypeOf(value) !== Array.prototype ||
+            keys.length !== value.length + 1 ||
+            keys.some((key, index) => key !== (index < value.length ? String(index) : 'length'))
+          ) {
+            throw new Error('Parity expectations require dense plain JSON-like outputs');
+          }
+          return `array:[${value.map((item: unknown) => canonicalTagged(item, stack)).join(',')}]`;
+        }
+        if (!plainRecord(value) || Reflect.ownKeys(value).length !== Object.keys(value).length) {
+          throw new Error('Parity expectations require plain JSON-like outputs');
+        }
+        const fields = Object.keys(value)
+          .sort()
+          .map((key) => `key:${JSON.stringify(key)}=${canonicalTagged(value[key], stack)}`)
+          .join(',');
+        return `object:{${fields}}`;
+      } finally {
+        stack.delete(value);
+      }
     }
+    default:
+      throw new Error('Parity expectations require plain JSON-like outputs');
+  }
+}
+
+function outputFingerprint(value: unknown): string {
+  return sha256(canonicalTagged(value)).slice(0, 16);
+}
+
+function normalizeResult(result: DecodeResult): FrozenOutcome {
+  return result.accepted ? { output: outputFingerprint(result.output) } : result.message;
+}
+
+/** Freeze TypeError messages and compact fingerprints of accepted decoder outputs. */
+export function freezeResults(cases: ParityCase[], results: DecodeResult[]): FrozenResults {
+  if (results.length !== cases.length) {
+    throw new Error(
+      `Parity result count ${results.length} does not match case count ${cases.length}`,
+    );
+  }
+  const outcomes: FrozenOutcome[] = [];
+  const ids = new Map<string, number>();
+  const intern = (outcome: FrozenOutcome): number => {
+    const key = JSON.stringify(outcome);
+    const existing = ids.get(key);
+    if (existing !== undefined) return existing;
+    const id = outcomes.length;
+    ids.set(key, id);
+    outcomes.push(outcome);
     return id;
   };
-  const rows: FrozenResults['rows'] = cases.map(({ name }, index) => {
-    const result = results[index];
-    if (!result) throw new Error(`Missing result for ${name}`);
-    return [name, intern(result)];
+  const rows = results.map((result, index) => {
+    const parityCase = cases[index];
+    if (!parityCase) throw new Error(`Missing case for parity result ${index}`);
+    return intern(normalizeResult(result));
   });
-  return { rows, values };
+  return { namesSha256: namesHash(cases), rows, outcomes };
 }
 
-export function thawResults(frozen: FrozenResults): { name: string; result: unknown }[] {
-  const expand = (id: number): unknown => {
-    const node = frozen.values[id];
-    if (!node) throw new Error(`Missing frozen node ${id}`);
-    switch (node[0]) {
-      case 'value':
-        return node[1];
-      case 'undefined':
-        return undefined;
-      case 'number':
-        return Number(node[1]);
-      case 'array':
-        return node[1].map(expand);
-      case 'object':
-        return Object.fromEntries(node[1].map(([key, child]) => [key, expand(child)]));
+export function assertFrozenParity(
+  cases: ParityCase[],
+  decoder: (input: unknown) => unknown,
+  frozen: FrozenResults,
+  drift: Record<string, string> = {},
+): void {
+  const recomputedNamesSha256 = namesHash(cases);
+  expect(
+    recomputedNamesSha256,
+    `Parity names hash mismatch: recomputed ${recomputedNamesSha256}, frozen ${frozen.namesSha256}`,
+  ).toBe(frozen.namesSha256);
+  expect(
+    frozen.rows.length,
+    `Parity row count mismatch: recomputed case count ${cases.length}, frozen row count ${frozen.rows.length}`,
+  ).toBe(cases.length);
+
+  cases.forEach((parityCase, index) => {
+    const row = frozen.rows[index];
+    if (row === undefined) {
+      throw new Error(`Parity case ${parityCase.name} has no frozen row`);
     }
-  };
-  return frozen.rows.map(([name, id]) => ({ name, result: expand(id) }));
+    const expectedOutcome = frozen.outcomes[row];
+    if (expectedOutcome === undefined) {
+      throw new Error(`Parity case ${parityCase.name} references missing frozen outcome ${row}`);
+    }
+    const actualResult = captureDecode(decoder, parityCase.input);
+    const actualOutcome = normalizeResult(actualResult);
+    const expected =
+      typeof expectedOutcome === 'string'
+        ? (drift[expectedOutcome] ?? expectedOutcome)
+        : expectedOutcome;
+    const actualOutput = actualResult.accepted
+      ? `; actual decoded output ${inspect(actualResult.output, { depth: null, sorted: true })}`
+      : '';
+    const context = `Parity mismatch for recomputed case name ${parityCase.name}; expected outcome ${inspect(expected, { depth: null, sorted: true })}; actual outcome ${inspect(actualOutcome, { depth: null, sorted: true })}${actualOutput}`;
+    expect(actualOutcome, context).toStrictEqual(expected);
+  });
 }

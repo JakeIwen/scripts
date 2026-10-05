@@ -3,7 +3,12 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { objectValue } from '../../api/validation';
-import { captureDecode, parityCorpus, thawResults, type FrozenResults } from '../../test/parity';
+import {
+  assertFrozenParity,
+  captureDecode,
+  parityCorpus,
+  type FrozenResults,
+} from '../../test/parity';
 import { decodeMutation, decodeUsbPortState, decodeUsbStatusResponse } from './schema';
 import { usbStatusPayload } from './testFixtures';
 
@@ -74,20 +79,7 @@ describe('USB generated decoder parity', () => {
         `parity.${group.name.replaceAll(' ', '-')}.json.snap`,
       );
       const frozen: FrozenResults = JSON.parse(readFileSync(path, 'utf8'));
-      const expectations = thawResults(frozen);
-      expect(expectations.map((row) => row.name)).toStrictEqual(corpus.map((row) => row.name));
-      corpus.forEach(({ name, input }, index) => {
-        const current = captureDecode(group.current, input);
-        const old = expectations[index]?.result;
-        const expected =
-          old !== null &&
-          typeof old === 'object' &&
-          'message' in old &&
-          typeof old.message === 'string'
-            ? { ...old, message: MESSAGE_DRIFT[old.message] ?? old.message }
-            : old;
-        expect(current, name).toStrictEqual(expected);
-      });
+      assertFrozenParity(corpus, group.current, frozen, MESSAGE_DRIFT);
     });
   }
 
