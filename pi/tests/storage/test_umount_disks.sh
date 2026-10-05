@@ -6,10 +6,8 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 script="$repo_root/pi/scripts/umount_disks.sh"
 abort_script="$repo_root/pi/scripts/backup/abort_backup.sh"
 
-fail() {
-  echo "FAIL: $*" >&2
-  exit 1
-}
+# shellcheck source=../lib.sh
+source "$repo_root/pi/tests/lib.sh"
 
 export UMOUNT_DISKS_LIBRARY_ONLY=1
 # shellcheck source=../../scripts/umount_disks.sh
