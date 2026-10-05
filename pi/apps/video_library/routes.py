@@ -10,20 +10,12 @@ from urllib.parse import urlsplit
 
 from flask import Flask, jsonify, render_template, request
 
-if __package__:
-    from .catalog import CatalogConflict
-    from .media_models import seconds_text
-    from .players.sonos_volume import AudioPreparingError
-    from .players.vlc_player import RoomPreparationError
-    from .service import active_service
-    from .video_qbittorrent import QbittorrentError
-else:  # Direct execution from the Pi's flat deployment directory.
-    from catalog import CatalogConflict  # type: ignore[no-redef]
-    from media_models import seconds_text  # type: ignore[no-redef]
-    from sonos_volume import AudioPreparingError  # type: ignore[no-redef]
-    from vlc_player import RoomPreparationError  # type: ignore[no-redef]
-    from service import active_service  # type: ignore[no-redef]
-    from video_qbittorrent import QbittorrentError  # type: ignore[no-redef]
+from .catalog import CatalogConflict
+from .media_models import seconds_text
+from .players.sonos_volume import AudioPreparingError
+from .players.vlc_player import RoomPreparationError
+from .service import active_service
+from .video_qbittorrent import QbittorrentError
 
 
 app = Flask(__name__)

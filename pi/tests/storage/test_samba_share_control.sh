@@ -6,10 +6,8 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
 
-fail() {
-  echo "FAIL: $*" >&2
-  exit 1
-}
+# shellcheck source=../lib.sh
+source "$repo_root/pi/tests/lib.sh"
 
 calls="$test_root/calls"
 fake_systemctl="$test_root/systemctl"

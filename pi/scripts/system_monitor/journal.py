@@ -4,10 +4,7 @@ import json
 import re
 import subprocess
 
-if __package__:
-    from .common import event_fingerprint, iso_time
-else:
-    from common import event_fingerprint, iso_time
+from .common import event_fingerprint, iso_time
 
 
 def classify_kernel_message(message):

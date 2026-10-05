@@ -167,10 +167,11 @@ see the network installer boundary in the runbook. Blueprints
 live under `pi/apps/van_dashboard/routes/`; mutable process controllers live in
 `runtime.py`, and the relay-off controller CLI remains independent of Flask.
 
-The video allowlist explicitly includes `players/` as a namespace subpackage.
-Preserve all Rank 3 video and system-monitor package/flat import guards. Sysmon's
-shim/package still deploy coherently under `/home/pi/scripts` via broad sync;
-its package-release conversion is out of scope. Pi interactive utility consumers
+The video allowlist explicitly includes `players/` as a namespace subpackage;
+video imports are package-only. Sysmon's shim/package still deploy coherently
+under `/home/pi/scripts` via broad sync; only `system_event_monitor.py` keeps the
+script/package import switch, exporting `main` and `redact_log_message`. Its
+package-release conversion is out of scope. Pi interactive utility consumers
 use package current paths; `sns.sh` also preserves the saved flat video's import
 path for rollback. Never acquire the installer lock inside a subprocess needed
 by a restarting package service (that would deadlock deployment).

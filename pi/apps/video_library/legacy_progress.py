@@ -10,18 +10,9 @@ import threading
 import time
 from typing import Any
 
-if __package__:
-    from .config import LEGACY_LINE_RE, QBITTORRENT_FINAL_ROOTS, QBITTORRENT_TEMP_ROOTS
-    from .media_models import MediaItem
-    from .video_qbittorrent import ResolvedTorrentFile
-else:
-    from config import (  # type: ignore[no-redef]
-        LEGACY_LINE_RE,
-        QBITTORRENT_FINAL_ROOTS,
-        QBITTORRENT_TEMP_ROOTS,
-    )
-    from media_models import MediaItem  # type: ignore[no-redef]
-    from video_qbittorrent import ResolvedTorrentFile  # type: ignore[no-redef]
+from .config import LEGACY_LINE_RE, QBITTORRENT_FINAL_ROOTS, QBITTORRENT_TEMP_ROOTS
+from .media_models import MediaItem
+from .video_qbittorrent import ResolvedTorrentFile
 
 
 _UNSET = object()

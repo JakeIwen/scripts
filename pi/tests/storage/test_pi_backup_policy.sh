@@ -7,10 +7,8 @@ backup_script="$repo_root/pi/scripts/backup/pi_backup.sh"
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
 
-fail() {
-  echo "FAIL: $*" >&2
-  exit 1
-}
+# shellcheck source=../lib.sh
+source "$repo_root/pi/tests/lib.sh"
 
 fake_conf="$test_root/backup_conf.sh"
 fake_policyctl="$test_root/policyctl"

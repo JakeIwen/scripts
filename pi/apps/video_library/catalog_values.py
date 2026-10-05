@@ -9,10 +9,6 @@ import os
 import uuid
 from typing import Any
 
-if __package__:
-    pass
-else:
-    pass
 
 
 class CatalogError(RuntimeError):

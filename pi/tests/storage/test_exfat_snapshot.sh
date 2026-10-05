@@ -8,10 +8,8 @@ window_script="$repo_root/pi/scripts/backup/backup_window.sh"
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
 
-fail() {
-  echo "FAIL: $*" >&2
-  exit 1
-}
+# shellcheck source=../lib.sh
+source "$repo_root/pi/tests/lib.sh"
 
 for required in /usr/bin/rsync /usr/bin/find /usr/bin/date /usr/bin/flock; do
   [[ -x "$required" ]] || {

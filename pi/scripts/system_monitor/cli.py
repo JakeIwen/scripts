@@ -16,34 +16,19 @@ import signal
 import sqlite3
 import sys
 
-if __package__:
-    from .common import (
-        DEFAULT_DATABASE,
-        DEFAULT_SAMPLE_INTERVAL,
-        DEFAULT_ROLLUP_INTERVAL,
-        DEFAULT_RETENTION_DAYS,
-        DEFAULT_CRASH_REPORT_DIRECTORY,
-        SEVERITY_RANK,
-        iso_time,
-    )
-    from .store import EventStore
-    from .daemon import SystemEventMonitor
-    from .crash import build_crash_report, capture_previous_boot, compare_crash_history
-    from .report import build_report, list_events
-else:
-    from common import (
-        DEFAULT_DATABASE,
-        DEFAULT_SAMPLE_INTERVAL,
-        DEFAULT_ROLLUP_INTERVAL,
-        DEFAULT_RETENTION_DAYS,
-        DEFAULT_CRASH_REPORT_DIRECTORY,
-        SEVERITY_RANK,
-        iso_time,
-    )
-    from store import EventStore
-    from daemon import SystemEventMonitor
-    from crash import build_crash_report, capture_previous_boot, compare_crash_history
-    from report import build_report, list_events
+from .common import (
+    DEFAULT_DATABASE,
+    DEFAULT_SAMPLE_INTERVAL,
+    DEFAULT_ROLLUP_INTERVAL,
+    DEFAULT_RETENTION_DAYS,
+    DEFAULT_CRASH_REPORT_DIRECTORY,
+    SEVERITY_RANK,
+    iso_time,
+)
+from .store import EventStore
+from .daemon import SystemEventMonitor
+from .crash import build_crash_report, capture_previous_boot, compare_crash_history
+from .report import build_report, list_events
 
 
 def format_bytes(value):
