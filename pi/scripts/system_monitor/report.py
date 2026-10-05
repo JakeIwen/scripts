@@ -3,14 +3,9 @@
 import collections
 import math
 
-if __package__:
-    from .common import DEFAULT_SAMPLE_INTERVAL, REPORT_VERSION, THROTTLE_FLAGS, iso_time
-    from .store import decode_row_json
-    from .rollups import metric_value
-else:
-    from common import DEFAULT_SAMPLE_INTERVAL, REPORT_VERSION, THROTTLE_FLAGS, iso_time
-    from store import decode_row_json
-    from rollups import metric_value
+from .common import DEFAULT_SAMPLE_INTERVAL, REPORT_VERSION, THROTTLE_FLAGS, iso_time
+from .store import decode_row_json
+from .rollups import metric_value
 
 
 def event_public(row, include_state=True):

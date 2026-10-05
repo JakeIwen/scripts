@@ -8,32 +8,18 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Callable
 
-if __package__:
-    from .catalog import CatalogConflict, CatalogError
-    from .config import QBITTORRENT_TEMP_ROOTS
-    from .media_models import MediaItem
-    from .naming import clean_name
-    from .video_qbittorrent import (
-        QbittorrentAuthenticationError,
-        QbittorrentConfigurationError,
-        QbittorrentError,
-        QbittorrentProtocolError,
-        QbittorrentUnavailable,
-        ResolvedTorrentFile,
-    )
-else:
-    from catalog import CatalogConflict, CatalogError  # type: ignore[no-redef]
-    from config import QBITTORRENT_TEMP_ROOTS  # type: ignore[no-redef]
-    from media_models import MediaItem  # type: ignore[no-redef]
-    from naming import clean_name  # type: ignore[no-redef]
-    from video_qbittorrent import (  # type: ignore[no-redef]
-        QbittorrentAuthenticationError,
-        QbittorrentConfigurationError,
-        QbittorrentError,
-        QbittorrentProtocolError,
-        QbittorrentUnavailable,
-        ResolvedTorrentFile,
-    )
+from .catalog import CatalogConflict, CatalogError
+from .config import QBITTORRENT_TEMP_ROOTS
+from .media_models import MediaItem
+from .naming import clean_name
+from .video_qbittorrent import (
+    QbittorrentAuthenticationError,
+    QbittorrentConfigurationError,
+    QbittorrentError,
+    QbittorrentProtocolError,
+    QbittorrentUnavailable,
+    ResolvedTorrentFile,
+)
 
 
 _CATALOG_DEGRADED = object()

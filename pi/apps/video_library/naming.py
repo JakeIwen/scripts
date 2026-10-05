@@ -8,12 +8,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-if __package__:
-    from .config import CATEGORY_PRIORITY, VIDEO_EXTENSIONS
-    from .media_models import MediaItem
-else:
-    from config import CATEGORY_PRIORITY, VIDEO_EXTENSIONS  # type: ignore[no-redef]
-    from media_models import MediaItem  # type: ignore[no-redef]
+from .config import CATEGORY_PRIORITY, VIDEO_EXTENSIONS
+from .media_models import MediaItem
 
 EPISODE_RE = re.compile(
     r"(?i)(?:^|[._\s-])S(?P<season>\d{1,2})[._\s-]*E(?P<episode>\d{1,3})"

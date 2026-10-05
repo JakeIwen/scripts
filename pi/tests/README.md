@@ -28,6 +28,10 @@ bash pi/tests/storage/test_mount_disks.sh
 bash pi/tests/policy/test_policy_reconciliation.sh
 ```
 
+The bash shell tests under `pi/tests/storage/` source `pi/tests/lib.sh`
+for the shared `fail` and `assert_eq` helpers. Each test keeps its own
+`set -u`, temp dir, and trap.
+
 Dashboard tests require Flask. See
 [`../docs/dashboard/DASHBOARD_TESTING.md`](../docs/dashboard/DASHBOARD_TESTING.md)
 for the isolated vanpi and local-venv runners.

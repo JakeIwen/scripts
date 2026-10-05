@@ -14,48 +14,26 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import unquote, urlsplit
 
-if __package__:
-    from ..config import (
-        DBUS_PROPERTIES,
-        DISPLAY,
-        MKVMERGE,
-        MPRIS_NAME,
-        MPRIS_PATH,
-        MPRIS_PLAYER,
-        MPRIS_ROOT,
-        PKILL,
-        PLAYER_UNIT,
-        ROOM_PREPARE_TIMEOUT,
-        RUNTIME_DIR,
-        SESSION_BUS,
-        SNS,
-        SYSTEMCTL,
-        SYSTEMD_RUN,
-        VLC,
-        VLC_FIXED_VOLUME,
-        XSET,
-    )
-else:  # Direct execution from the Pi's flat deployment directory.
-    from config import (  # type: ignore[no-redef]
-        DBUS_PROPERTIES,
-        DISPLAY,
-        MKVMERGE,
-        MPRIS_NAME,
-        MPRIS_PATH,
-        MPRIS_PLAYER,
-        MPRIS_ROOT,
-        PKILL,
-        PLAYER_UNIT,
-        ROOM_PREPARE_TIMEOUT,
-        RUNTIME_DIR,
-        SESSION_BUS,
-        SNS,
-        SYSTEMCTL,
-        SYSTEMD_RUN,
-        VLC,
-        VLC_FIXED_VOLUME,
-        XSET,
-    )
+from ..config import (
+    DBUS_PROPERTIES,
+    DISPLAY,
+    MKVMERGE,
+    MPRIS_NAME,
+    MPRIS_PATH,
+    MPRIS_PLAYER,
+    MPRIS_ROOT,
+    PKILL,
+    PLAYER_UNIT,
+    ROOM_PREPARE_TIMEOUT,
+    RUNTIME_DIR,
+    SESSION_BUS,
+    SNS,
+    SYSTEMCTL,
+    SYSTEMD_RUN,
+    VLC,
+    VLC_FIXED_VOLUME,
+    XSET,
+)
 
 
 def native(value: Any) -> Any:

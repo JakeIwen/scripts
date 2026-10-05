@@ -6,7 +6,7 @@ export {
   STORAGE_TILE_POLL_INTERVAL_MS,
   useStorageResources,
 } from './hooks';
-export { decodeDiskStatusResponse, decodeStoragePolicyResponse } from './decoders';
+export { decodeDiskStatusResponse, decodeStoragePolicyResponse } from './schema';
 export { assessUsbReset } from './resetEligibility';
 export { useStorageControls } from './controls';
 export type { StorageControls } from './controls';

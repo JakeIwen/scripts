@@ -1,4 +1,4 @@
-import { decodeUsbStatusResponse } from './decoders';
+import { decodeUsbStatusResponse } from './schema';
 
 export function usbStatusPayload(): Record<string, unknown> {
   const diskInstance = {

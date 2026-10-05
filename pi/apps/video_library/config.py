@@ -6,10 +6,6 @@ import math
 import os
 import re
 
-if __package__:
-    pass
-else:
-    pass
 
 
 VIDEO_EXTENSIONS = {

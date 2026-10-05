@@ -16,10 +16,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-fail() {
-  echo "FAIL: $*" >&2
-  exit 1
-}
+# shellcheck source=../lib.sh
+source "$repo_root/pi/tests/lib.sh"
 
 for required in /usr/bin/flock /usr/bin/readlink /bin/sleep; do
   [[ -x "$required" ]] || {

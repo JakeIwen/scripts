@@ -7,11 +7,6 @@ import os
 import re
 import time
 
-if __package__:
-    pass
-else:
-    pass
-
 
 DEFAULT_DATABASE = os.environ.get(
     "VANPI_MONITOR_DATABASE", "/var/lib/vanpi-monitor/events.sqlite3"

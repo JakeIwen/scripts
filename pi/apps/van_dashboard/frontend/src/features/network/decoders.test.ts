@@ -4,7 +4,7 @@ import {
   decodeConnectivityResponse,
   decodeOpenWrtClientsResponse,
   decodeSpeedtestResponse,
-} from './decoders';
+} from './schema';
 import { clientsPayload, connectivityPayload, speedtestPayload } from './testFixtures';
 
 describe('network response decoders', () => {

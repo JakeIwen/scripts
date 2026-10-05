@@ -7,10 +7,7 @@ import re
 import subprocess
 import time
 
-if __package__:
-    from .common import THROTTLE_FLAGS, iso_time, normalize_boot_id, utc_timestamp
-else:
-    from common import THROTTLE_FLAGS, iso_time, normalize_boot_id, utc_timestamp
+from .common import THROTTLE_FLAGS, iso_time, normalize_boot_id, utc_timestamp
 
 
 def read_text(path, default=None):

@@ -2,7 +2,7 @@ import {
   decodeConnectivityResponse,
   decodeOpenWrtClientsResponse,
   decodeSpeedtestResponse,
-} from './decoders';
+} from './schema';
 
 export function connectivityPayload(): Record<string, unknown> {
   return {

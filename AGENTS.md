@@ -167,10 +167,11 @@ see the network installer boundary in the runbook. Blueprints
 live under `pi/apps/van_dashboard/routes/`; mutable process controllers live in
 `runtime.py`, and the relay-off controller CLI remains independent of Flask.
 
-The video allowlist explicitly includes `players/` as a namespace subpackage.
-Preserve all Rank 3 video and system-monitor package/flat import guards. Sysmon's
-shim/package still deploy coherently under `/home/pi/scripts` via broad sync;
-its package-release conversion is out of scope. Pi interactive utility consumers
+The video allowlist explicitly includes `players/` as a namespace subpackage;
+video imports are package-only. Sysmon's shim/package still deploy coherently
+under `/home/pi/scripts` via broad sync; only `system_event_monitor.py` keeps the
+script/package import switch, exporting `main` and `redact_log_message`. Its
+package-release conversion is out of scope. Pi interactive utility consumers
 use package current paths; `sns.sh` also preserves the saved flat video's import
 path for rollback. Never acquire the installer lock inside a subprocess needed
 by a restarting package service (that would deadlock deployment).
@@ -190,6 +191,26 @@ Preserve that runtime state during deployment. Links are HTTP/HTTPS only and
 are never fetched by the backend; preference is local, LAN, Tailscale, then web.
 The `projects` blueprint owns `/api/hosted-projects`; `runtime.hosted_projects`
 shares the existing state store and is initialized immediately after it.
+
+## Dashboard response schemas
+
+The React frontend's USB, network and storage response schemas live in each
+feature's `schema.ts`, with shared primitives and the only Valibot parsing
+boundary in `pi/apps/van_dashboard/frontend/src/api/schema.ts`. Preserve
+fail-fast `TypeError` wording and check order; error messages reach tiles and
+toasts. Response types are inferred from schemas, while UI-only computed types
+remain presentation types. Other features retain their decoders where staged
+schemas add no real savings.
+
+`pi/apps/van_dashboard/frontend/src/test/parity.ts` generates fixture/path
+mutations. Its compact oracles retain a corpus-name hash, interned rejection
+messages and canonical output fingerprints. Prove old/new strict parity, freeze
+OLD results and commit before deleting a decoder. Final parity tests read those
+files without a snapshot-update write path; never silently regenerate them from
+the replacement.
+The production boundary is `Response.json()`; sparse JS arrays, accessors and
+Proxies are outside that wire contract. Native arrays do not preserve hole
+semantics from the old `.map()` decoders.
 
 ## Backup and disk tooling
 

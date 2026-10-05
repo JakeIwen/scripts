@@ -8,56 +8,24 @@ import threading
 import time
 from typing import Any, Callable
 
-if __package__:
-    from . import identity, playback
-    from .catalog import CatalogError, MediaAssetCatalog, ensure_pre_v2_backup
-    from .config import (
-        LEGACY_POSITIONS_PATH,
-        POLL_INTERVAL,
-        QBITTORRENT_CLIENT_ID,
-        QBITTORRENT_FINAL_ROOTS,
-        QBITTORRENT_TEMP_ROOTS,
-        QBITTORRENT_TIMEOUT,
-        QBITTORRENT_URL,
-        SCAN_INTERVAL,
-        STATE_PATH,
-    )
-    from .library import LibraryViewMixin, MediaLibrary, default_sources
-    from .legacy_progress import LegacyProgressMixin, ProgressStore
-    from .players.sonos_volume import SonosVolumeController
-    from .players.vlc_player import VlcController
-    from .video_qbittorrent import QbittorrentClient, QbittorrentError
-else:
-    import identity  # type: ignore[no-redef]
-    import playback  # type: ignore[no-redef]
-    from catalog import (  # type: ignore[no-redef]
-        CatalogError,
-        MediaAssetCatalog,
-        ensure_pre_v2_backup,
-    )
-    from config import (  # type: ignore[no-redef]
-        LEGACY_POSITIONS_PATH,
-        POLL_INTERVAL,
-        QBITTORRENT_CLIENT_ID,
-        QBITTORRENT_FINAL_ROOTS,
-        QBITTORRENT_TEMP_ROOTS,
-        QBITTORRENT_TIMEOUT,
-        QBITTORRENT_URL,
-        SCAN_INTERVAL,
-        STATE_PATH,
-    )
-    from library import (  # type: ignore[no-redef]
-        LibraryViewMixin,
-        MediaLibrary,
-        default_sources,
-    )
-    from legacy_progress import LegacyProgressMixin, ProgressStore  # type: ignore[no-redef]
-    from sonos_volume import SonosVolumeController  # type: ignore[no-redef]
-    from vlc_player import VlcController  # type: ignore[no-redef]
-    from video_qbittorrent import (  # type: ignore[no-redef]
-        QbittorrentClient,
-        QbittorrentError,
-    )
+from . import identity, playback
+from .catalog import CatalogError, MediaAssetCatalog, ensure_pre_v2_backup
+from .config import (
+    LEGACY_POSITIONS_PATH,
+    POLL_INTERVAL,
+    QBITTORRENT_CLIENT_ID,
+    QBITTORRENT_FINAL_ROOTS,
+    QBITTORRENT_TEMP_ROOTS,
+    QBITTORRENT_TIMEOUT,
+    QBITTORRENT_URL,
+    SCAN_INTERVAL,
+    STATE_PATH,
+)
+from .library import LibraryViewMixin, MediaLibrary, default_sources
+from .legacy_progress import LegacyProgressMixin, ProgressStore
+from .players.sonos_volume import SonosVolumeController
+from .players.vlc_player import VlcController
+from .video_qbittorrent import QbittorrentClient, QbittorrentError
 
 
 class VideoService(LegacyProgressMixin, LibraryViewMixin, playback.PlaybackMixin, identity.CatalogIdentityMixin):
