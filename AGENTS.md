@@ -156,8 +156,8 @@ Factory smokes/custom long-lived consumers must hold a shared installer lock for
 their full lifetime and stop before deployment. Never infer a running release
 solely from current, previous or the last installer restart.
 
-Do not bundle `pi/van_compute/`: its coupled installer owns the separately
-imported metrics module. Only `deploy_python.py` owns dashboard backend code and
+Do not bundle the root-level `van_compute/` package: its coupled installer owns
+the separately imported metrics module. Only `deploy_python.py` owns dashboard backend code and
 its unit. The storage installer owns the independent frontend and storage drop-in,
 never the flat dashboard; historical manifests containing dashboard backend targets
 fail closed, including rollback. The legacy recorder installer refuses both
@@ -175,6 +175,24 @@ package-release conversion is out of scope. Pi interactive utility consumers
 use package current paths; `sns.sh` also preserves the saved flat video's import
 path for rollback. Never acquire the installer lock inside a subprocess needed
 by a restarting package service (that would deadlock deployment).
+
+## Compute execution contracts
+
+The root `van_compute/` package owns the protocol, queue, broker, Mac worker,
+metrics, typed runtime config and shared child/result engine. Host adapters keep
+Pi bwrap and Mac sandbox-exec boundaries distinct; staging, ownership, admission,
+telemetry and publication are intentionally host-specific. Preserve all 260
+compute golden files (258 protocol fixtures plus two child-environment fixtures)
+and the host drift decisions in `pi/docs/compute/VAN_COMPUTE.md`. First cutover
+must install compute before updating the dashboard package: its unit/imports
+require `/home/pi/van_compute/current/van_compute/metrics.py`. Broad sync's
+package-before-compute order is not a first-cutover workflow.
+
+The worker's host-wide retry gate applies only to transport outages, across all
+four control connections and all ten slots. It never blindly replays an upload
+or finish; exact-slot lease recovery remains authoritative. Drain cancels new
+admission/waiting claims, not active jobs. Keep `limited_child.py` standalone and
+free of package imports or untrusted startup PYTHONPATH.
 
 ## Deployment commits
 

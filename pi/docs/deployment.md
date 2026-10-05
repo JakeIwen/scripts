@@ -24,8 +24,8 @@ Allowlisted inputs are immediate Python modules in:
 - the four units named in the installer's `SERVICES` table.
 
 There is no recursive transfer of `pi/`. Secrets, configs, tests, frontend builds,
-node_modules, caches, bytecode, system-monitor code and `pi/van_compute/` are not
-inputs. Source symlinks are rejected. Python 3.11+ is required, including the
+node_modules, caches, bytecode, system-monitor code and the root `van_compute/`
+package are not inputs. Source symlinks are rejected. Python 3.11+ is required, including the
 existing BME280 venv (currently 3.11.2).
 
 ```text
@@ -54,7 +54,7 @@ publish a release without restarting any service.
 
 | Consumer | Owner and runtime |
 | --- | --- |
-| `van-dashboard.service` | Package; `/usr/bin/python3 -P -m pi.apps.van_dashboard`; port 8788. Compute metrics remain separately installed in `/home/pi/van_compute/scripts`. Existing relay-off hook, GPIO group and network-storage drop-in are preserved. |
+| `van-dashboard.service` | Package; `/usr/bin/python3 -P -m pi.apps.van_dashboard`; port 8788. Compute metrics remain separately installed in `/home/pi/van_compute/current/van_compute`. Existing relay-off hook, GPIO group and network-storage drop-in are preserved. |
 | `video-library.service` | Package; `/usr/bin/python3 -P -m pi.apps.video_library`; port 8789. Original DISPLAY, DBUS, Sonos/VLC and data/migration behavior is unchanged. |
 | `audiobooks.service` | Package; `/usr/bin/python3 -P -m pi.apps.audiobooks`; port 8787. |
 | `bme280-mqtt.service` | Package; `/home/pi/pyvenv/bin/python -P -m pi.apps.bme280`; existing sensor/MQTT environment. |
@@ -120,6 +120,16 @@ save their own digests immediately, so a failure later in a multi-service deploy
 does not cause completed services to restart again. Matching unit bytes do not
 hide an unfinished daemon-reload. Existing dashboard `pending-restart` is migrated
 on retry. Do not erase pending state to claim success; use the rollback below.
+
+### Compute package prerequisite
+
+Before the first dashboard update containing the root-level compute package
+imports, deploy compute with its coupled installer. The dashboard unit now
+requires `/home/pi/van_compute/current/van_compute/metrics.py`; an old flat
+compute installation does not satisfy that precheck. Follow
+[`compute/VAN_COMPUTE.md`](compute/VAN_COMPUTE.md) for the supervised compute-first
+cutover and rollback. Do not use broad sync to bootstrap this transition: its
+routine ordering still updates dashboard packages before compute.
 
 ### Broad sync and scoped video deployment
 
