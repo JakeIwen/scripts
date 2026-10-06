@@ -241,157 +241,164 @@ if __name__ == "__main__":
 '''
 
 
-def populate(database):
-    store = EventStore(database, clock=lambda: NOW)
-
-    def insert(offset, kind, category="power", severity="warning", boot="boot-one"):
-        timestamp = NOW - offset
-        store.insert_event(
-            timestamp=timestamp,
-            boot_id=boot,
-            category=category,
-            kind=kind,
-            severity=severity,
-            source="kernel",
-            summary=kind.replace("_", " "),
-            message=f"{kind} message https://example.invalid/secret?token=abc",
-            fingerprint=event_fingerprint(timestamp, kind),
-            state={"capture": "snapshot", "offset": offset},
-        )
-
-    insert(9000, "undervoltage_started", severity="critical")
-    insert(8990, "undervoltage_cleared", severity="info")
-    insert(500, "undervoltage_started", severity="critical")
-    insert(496, "usb_connected", category="usb", severity="info")
-    insert(495, "usb_error", category="usb")
-    insert(494, "usb_overcurrent", category="power", severity="critical")
-    insert(480, "undervoltage_cleared", severity="info")
-    insert(300, "storage_io_error", category="storage", severity="critical")
-    insert(250, "usb_reset", category="usb")
-    insert(240, "usb_disconnected", category="usb")
-    insert(200, "undervoltage_started", severity="critical")
-    insert(194, "undervoltage_cleared", severity="info")
-    insert(100, "firmware_throttled_active", category="throttle", severity="critical")
-    insert(50, "firmware_throttled_cleared", category="throttle", severity="info")
-    insert(40, "kernel_oops", category="kernel", severity="critical")
-    for index in range(30):
-        insert(3000 + index, "usb_error", category="usb")
-
-    for index in range(5):
-        store.insert_rollup(
-            {
-                "period_start": NOW - 600 + index * 60,
-                "period_end": NOW - 541 + index * 60,
-                "boot_id": "boot-one",
-                "sample_count": 12,
-                "cpu_peak": 70 + index,
-                "memory_peak": 40 + index,
-                "swap_peak": index,
-                "load1_peak": 1 + index,
-                "temperature_peak": 80 + index,
-                "root_used_peak": 50,
-                "arm_mhz_min": 600 + index,
-                "metrics": {
-                    "cpu": {
-                        "peak": 70 + index,
-                        "at": NOW - 570 + index * 60,
-                        "top_process": {
-                            "name": "smbd" if index % 2 == 0 else "rsync",
-                            "pid": 100 + index,
-                            "cpu_percent": 50 + index,
-                            "rss_bytes": 20_000_000,
-                        },
-                    },
-                    "memory": {
-                        "peak": 40 + index,
-                        "at": NOW - 565 + index * 60,
-                        "top_process": {"name": "hass", "pid": 200, "rss_bytes": 300_000_000 + index},
-                    },
-                    "swap": {"peak": index, "at": NOW - 560 + index * 60},
-                    "load1": {"peak": 1 + index, "at": NOW - 560 + index * 60},
-                    "temperature": {"peak": 80 + index, "at": NOW - 560 + index * 60, "average": 75},
-                    "root_used": {"peak": 50, "at": NOW - 560 + index * 60},
-                    "arm_mhz": {"peak": 600 + index, "at": NOW - 560 + index * 60},
-                    "network_rx": {
-                        "peak": 1000 * (index + 1),
-                        "at": NOW - 555 + index * 60,
-                        "top_interface": {"name": "wlan0", "physical": True, "rx_bytes_per_second": 900},
-                    },
-                    "network_tx": {"peak": 500 * (index + 1), "at": NOW - 555 + index * 60},
-                    "disk_read": {"peak": 2000 * (index + 1), "at": NOW - 550 + index * 60},
-                    "disk_write": {
-                        "peak": 3000 * (index + 1),
-                        "at": NOW - 550 + index * 60,
-                        "top_device": {"name": "sda", "labels": ["movingparts"]},
-                    },
-                    "disk_busy": {"peak": 10 + index, "at": NOW - 550 + index * 60},
-                    "thermal_sensors": [
-                        {
-                            "zone": "thermal_zone0",
-                            "type": "cpu-thermal",
-                            "cpu_ids": [0, 1, 2, 3],
-                            "shared": True,
-                            "peak": 80 + index,
-                            "average": 78,
-                            "at": NOW - 540 + index * 60,
-                        }
-                    ],
-                },
-            }
-        )
-
-    store.set_meta(
-        "current",
-        {
-            "timestamp": NOW - 3,
-            "cpu_percent": 99.5,
-            "memory": {"used_percent": 41, "available_bytes": 1_000_000},
-            "swap": {"used_percent": 0},
-            "load": {"1m": 0.2},
-            "temperature_c": 55,
-            "arm_mhz": 1500,
-            "root_filesystem": {"used_percent": 42},
-            "network_io": {
-                "rx_bytes_per_second": 999_999,
-                "tx_bytes_per_second": 512,
-                "interfaces": [
-                    {"name": "eth0", "physical": True, "rx_bytes_per_second": 999_999, "tx_bytes_per_second": 512},
-                    {"name": "wg0", "physical": False, "rx_bytes_per_second": 5, "tx_bytes_per_second": 5},
-                ],
-            },
-            "disk_io": {
-                "read_bytes_per_second": 2048,
-                "write_bytes_per_second": 99_999,
-                "busy_percent": 98,
-                "devices": [{"name": "sdb", "read_bytes_per_second": 2048, "write_bytes_per_second": 99_999, "busy_percent": 98}],
-            },
-            "thermal_sensors": [
-                {"zone": "thermal_zone0", "type": "cpu-thermal", "cpu_ids": [0, 1, 2, 3], "shared": True, "temperature_c": 79}
-            ],
-            "top_cpu": [{"name": "python3", "pid": 4, "cpu_percent": 80}],
-            "top_memory": [{"name": "hass", "pid": 200, "rss_bytes": 300_000_000}],
-            "throttle": {"raw": 0x50005, "hex": "0x50005", "current": ["under_voltage", "throttled"], "occurred": ["under_voltage", "throttled"]},
-        },
+def _insert_snapshot_event(
+    store, offset, kind, category="power", severity="warning", boot="boot-one"
+):
+    timestamp = NOW - offset
+    store.insert_event(
+        timestamp=timestamp,
+        boot_id=boot,
+        category=category,
+        kind=kind,
+        severity=severity,
+        source="kernel",
+        summary=kind.replace("_", " "),
+        message=f"{kind} message https://example.invalid/secret?token=abc",
+        fingerprint=event_fingerprint(timestamp, kind),
+        state={"capture": "snapshot", "offset": offset},
     )
 
-    def crash(boot_id, analyzed_at, headline, count):
-        return {
-            "ok": True,
-            "generated_at": analyzed_at,
-            "analysis": {
-                "available": True,
-                "level": "warning",
-                "headline": headline,
-                "findings": [headline],
-                "counts": {"undervoltage_started": count},
-                "timeline": [{"timestamp": analyzed_at - 1, "message": headline}],
-                "pstore": [],
-                "previous_boot": {"boot_id": boot_id, "started_at": analyzed_at - 100, "ended_at": analyzed_at - 10},
-            },
-        }
 
-    store.save_crash_analysis(crash("boot-old", NOW - 7200, "Abrupt restart", 3))
-    store.save_crash_analysis(crash("boot-older", NOW - 9000, "Clean shutdown", 0))
+def _populate_events(store):
+    _insert_snapshot_event(store, 9000, "undervoltage_started", severity="critical")
+    _insert_snapshot_event(store, 8990, "undervoltage_cleared", severity="info")
+    _insert_snapshot_event(store, 500, "undervoltage_started", severity="critical")
+    _insert_snapshot_event(store, 496, "usb_connected", category="usb", severity="info")
+    _insert_snapshot_event(store, 495, "usb_error", category="usb")
+    _insert_snapshot_event(store, 494, "usb_overcurrent", category="power", severity="critical")
+    _insert_snapshot_event(store, 480, "undervoltage_cleared", severity="info")
+    _insert_snapshot_event(store, 300, "storage_io_error", category="storage", severity="critical")
+    _insert_snapshot_event(store, 250, "usb_reset", category="usb")
+    _insert_snapshot_event(store, 240, "usb_disconnected", category="usb")
+    _insert_snapshot_event(store, 200, "undervoltage_started", severity="critical")
+    _insert_snapshot_event(store, 194, "undervoltage_cleared", severity="info")
+    _insert_snapshot_event(store, 100, "firmware_throttled_active", category="throttle", severity="critical")
+    _insert_snapshot_event(store, 50, "firmware_throttled_cleared", category="throttle", severity="info")
+    _insert_snapshot_event(store, 40, "kernel_oops", category="kernel", severity="critical")
+    for index in range(30):
+        _insert_snapshot_event(store, 3000 + index, "usb_error", category="usb")
+
+
+def _snapshot_rollup(index):
+    return {
+        "period_start": NOW - 600 + index * 60,
+        "period_end": NOW - 541 + index * 60,
+        "boot_id": "boot-one",
+        "sample_count": 12,
+        "cpu_peak": 70 + index,
+        "memory_peak": 40 + index,
+        "swap_peak": index,
+        "load1_peak": 1 + index,
+        "temperature_peak": 80 + index,
+        "root_used_peak": 50,
+        "arm_mhz_min": 600 + index,
+        "metrics": {
+            "cpu": {
+                "peak": 70 + index,
+                "at": NOW - 570 + index * 60,
+                "top_process": {
+                    "name": "smbd" if index % 2 == 0 else "rsync",
+                    "pid": 100 + index,
+                    "cpu_percent": 50 + index,
+                    "rss_bytes": 20_000_000,
+                },
+            },
+            "memory": {
+                "peak": 40 + index,
+                "at": NOW - 565 + index * 60,
+                "top_process": {"name": "hass", "pid": 200, "rss_bytes": 300_000_000 + index},
+            },
+            "swap": {"peak": index, "at": NOW - 560 + index * 60},
+            "load1": {"peak": 1 + index, "at": NOW - 560 + index * 60},
+            "temperature": {"peak": 80 + index, "at": NOW - 560 + index * 60, "average": 75},
+            "root_used": {"peak": 50, "at": NOW - 560 + index * 60},
+            "arm_mhz": {"peak": 600 + index, "at": NOW - 560 + index * 60},
+            "network_rx": {
+                "peak": 1000 * (index + 1),
+                "at": NOW - 555 + index * 60,
+                "top_interface": {"name": "wlan0", "physical": True, "rx_bytes_per_second": 900},
+            },
+            "network_tx": {"peak": 500 * (index + 1), "at": NOW - 555 + index * 60},
+            "disk_read": {"peak": 2000 * (index + 1), "at": NOW - 550 + index * 60},
+            "disk_write": {
+                "peak": 3000 * (index + 1),
+                "at": NOW - 550 + index * 60,
+                "top_device": {"name": "sda", "labels": ["movingparts"]},
+            },
+            "disk_busy": {"peak": 10 + index, "at": NOW - 550 + index * 60},
+            "thermal_sensors": [
+                {
+                    "zone": "thermal_zone0",
+                    "type": "cpu-thermal",
+                    "cpu_ids": [0, 1, 2, 3],
+                    "shared": True,
+                    "peak": 80 + index,
+                    "average": 78,
+                    "at": NOW - 540 + index * 60,
+                }
+            ],
+        },
+    }
+
+
+def _populate_rollups(store):
+    for index in range(5):
+        store.insert_rollup(_snapshot_rollup(index))
+
+
+def _current_snapshot():
+    return {
+        "timestamp": NOW - 3,
+        "cpu_percent": 99.5,
+        "memory": {"used_percent": 41, "available_bytes": 1_000_000},
+        "swap": {"used_percent": 0},
+        "load": {"1m": 0.2},
+        "temperature_c": 55,
+        "arm_mhz": 1500,
+        "root_filesystem": {"used_percent": 42},
+        "network_io": {
+            "rx_bytes_per_second": 999_999,
+            "tx_bytes_per_second": 512,
+            "interfaces": [
+                {"name": "eth0", "physical": True, "rx_bytes_per_second": 999_999, "tx_bytes_per_second": 512},
+                {"name": "wg0", "physical": False, "rx_bytes_per_second": 5, "tx_bytes_per_second": 5},
+            ],
+        },
+        "disk_io": {
+            "read_bytes_per_second": 2048,
+            "write_bytes_per_second": 99_999,
+            "busy_percent": 98,
+            "devices": [{"name": "sdb", "read_bytes_per_second": 2048, "write_bytes_per_second": 99_999, "busy_percent": 98}],
+        },
+        "thermal_sensors": [
+            {"zone": "thermal_zone0", "type": "cpu-thermal", "cpu_ids": [0, 1, 2, 3], "shared": True, "temperature_c": 79}
+        ],
+        "top_cpu": [{"name": "python3", "pid": 4, "cpu_percent": 80}],
+        "top_memory": [{"name": "hass", "pid": 200, "rss_bytes": 300_000_000}],
+        "throttle": {"raw": 0x50005, "hex": "0x50005", "current": ["under_voltage", "throttled"], "occurred": ["under_voltage", "throttled"]},
+    }
+
+
+def _crash_analysis(boot_id, analyzed_at, headline, count):
+    return {
+        "ok": True,
+        "generated_at": analyzed_at,
+        "analysis": {
+            "available": True,
+            "level": "warning",
+            "headline": headline,
+            "findings": [headline],
+            "counts": {"undervoltage_started": count},
+            "timeline": [{"timestamp": analyzed_at - 1, "message": headline}],
+            "pstore": [],
+            "previous_boot": {"boot_id": boot_id, "started_at": analyzed_at - 100, "ended_at": analyzed_at - 10},
+        },
+    }
+
+
+def _populate_crash_and_samples(store):
+    store.save_crash_analysis(_crash_analysis("boot-old", NOW - 7200, "Abrupt restart", 3))
+    store.save_crash_analysis(_crash_analysis("boot-older", NOW - 9000, "Clean shutdown", 0))
     store.record_sample({"timestamp": NOW - 5, "uptime_seconds": 20, "boot_id": "boot-one", "cpu_percent": 2})
     for index in range(4):
         store.record_sample({
@@ -410,6 +417,14 @@ def populate(database):
             "top_memory": [{"name": f"mem{index}", "rss_bytes": 100 * index}],
         })
     store.set_meta("last_boot_id", PREVIOUS_BOOT)
+
+
+def populate(database):
+    store = EventStore(database, clock=lambda: NOW)
+    _populate_events(store)
+    _populate_rollups(store)
+    store.set_meta("current", _current_snapshot())
+    _populate_crash_and_samples(store)
     store.close()
 
 
