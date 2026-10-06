@@ -70,19 +70,25 @@ plan_pruning() {
     done < "$stage/old-code.list"
 }
 
-install_code() {
-    root=$1
+code_files() {
     for source in "$stage/persistent/rc.postsysinit" "$stage/persistent/profile" \
         "$stage"/persistent/config/* "$stage/persistent/config/.profile" \
         "$stage"/persistent/scripts/*; do
-        relative=${source#"$stage/persistent/"}
+        printf '%s\n' "${source#"$stage/persistent/"}"
+    done
+}
+
+install_code() {
+    root=$1
+    code_files > "$stage/code-files.list"
+    while IFS= read -r relative; do
         [ ! -d "$root/$relative" ] && [ ! -L "$root/$relative" ] || fail "unsafe code destination: $relative"
         # Remove only our temporary file; never follow a stale .new symlink.
         rm -f "$root/$relative.new"
-        cp -p "$source" "$root/$relative.new"
+        cp -p "$stage/persistent/$relative" "$root/$relative.new"
         case $relative in rc.postsysinit|scripts/*) chmod 750 "$root/$relative.new" ;; esac
         mv "$root/$relative.new" "$root/$relative"
-    done
+    done < "$stage/code-files.list"
 }
 
 prepare() {
