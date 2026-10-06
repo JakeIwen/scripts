@@ -209,7 +209,12 @@ def fake_scp(arguments: list[str]) -> int:
         destination_path = map_remote_path(remote_destination[1])
         destination_path.mkdir(parents=True, exist_ok=True)
         for source in sources:
-            copy_item(Path(source), destination_path)
+            source_path = Path(source)
+            copy_item(source_path, destination_path)
+            if source_path.name == "persistent" and source_path.is_dir():
+                for path in sorted(source_path.rglob("*")):
+                    if path.is_file():
+                        append_event("staged-code-file", path.relative_to(source_path))
         append_event("scp-upload", destination, *sources)
         return 0
     if not remote_destination and all(remote_sources):

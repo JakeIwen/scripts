@@ -90,19 +90,26 @@ case $name in
                 mkdir -p "$destination"
                 cp -pR "$FAKE_DEVICE_ROOT/flash/persistent" "$destination/persistent"
                 cp -p "$FAKE_DEVICE_ROOT/flash/system.cfg" "$config_file"
+                readback_root="$destination/persistent"
                 case ${FAKE_CFGMTD_LAYOUT:-} in
-                    direct) mv "$destination/persistent/scripts" "$destination/scripts" ;;
-                    ambiguous) cp -pR "$destination/persistent/scripts" "$destination/scripts" ;;
+                    direct)
+                        cp -pR "$readback_root/." "$destination"
+                        rm -rf "$readback_root"
+                        readback_root=$destination
+                        ;;
+                    ambiguous) cp -pR "$readback_root/." "$destination" ;;
                 esac
                 if [ -n "${FAKE_CFGMTD_READBACK_CORRUPT:-}" ] && mark_once cfgmtd-readback-corrupted; then
-                    printf '\ncorrupted-by-test\n' >> "$destination/persistent/$FAKE_CFGMTD_READBACK_CORRUPT"
+                    printf '\ncorrupted-by-test\n' >> "$readback_root/$FAKE_CFGMTD_READBACK_CORRUPT"
                 fi
                 if [ -n "${FAKE_CFGMTD_READBACK_MISSING:-}" ] && mark_once cfgmtd-readback-removed; then
-                    rm -f "$destination/persistent/$FAKE_CFGMTD_READBACK_MISSING"
+                    rm -f "$readback_root/$FAKE_CFGMTD_READBACK_MISSING"
                 fi
-                if [ "${FAKE_CFGMTD_READBACK_SYMLINK:-}" = 1 ] && mark_once cfgmtd-readback-symlinked; then
-                    rm -rf "$destination/persistent/scripts"
-                    ln -s "$FAKE_DEVICE_ROOT/etc/persistent/scripts" "$destination/persistent/scripts"
+                if [ -n "${FAKE_CFGMTD_READBACK_SYMLINK:-}" ] && mark_once cfgmtd-readback-symlinked; then
+                    link_path=$FAKE_CFGMTD_READBACK_SYMLINK
+                    [ "$link_path" != 1 ] || link_path=scripts
+                    rm -rf "$readback_root/$link_path"
+                    ln -s "$FAKE_DEVICE_ROOT/etc/persistent/$link_path" "$readback_root/$link_path"
                 fi
                 ;;
             *) exit 64 ;;

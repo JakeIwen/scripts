@@ -173,6 +173,21 @@ verify_installed_tree() {
         fail 'rc.postsysinit mode is not 750'
 }
 
+assert_all_code_verified() {
+    staged_count=$(grep -c '^staged-code-file[[:space:]]' "$EVENT_LOG")
+    grep -Fx "Active flash verified $staged_count code files." "$DEPLOY_OUTPUT" >/dev/null || \
+        fail "verification count does not match $staged_count staged files"
+    verified_lines=$(grep -c '^Active flash verified ' "$DEPLOY_OUTPUT")
+    [ "$verified_lines" -eq 1 ] || fail 'expected exactly one verification success line'
+    readback_count=$(grep -c '^md5sum[[:space:]].*/readback/' "$EVENT_LOG")
+    [ "$readback_count" -eq "$staged_count" ] || fail 'not every staged file was checksummed after readback'
+    sed -n 's/^staged-code-file[[:space:]]//p' "$EVENT_LOG" > "$CASE_ROOT/staged-files.list"
+    while IFS= read -r relative; do
+        assert_order "md5sum.*ubnt-code-stage.*/persistent/$relative$" '^pkill[[:space:]]'
+        assert_order '^cfgmtd[[:space:]]-r[[:space:]]' "md5sum.*/readback/.*$relative$"
+    done < "$CASE_ROOT/staged-files.list"
+}
+
 case_stage_only() {
     live_before=$(tree_digest "$DEVICE_ROOT/etc")
     flash_before=$(tree_digest "$DEVICE_ROOT/flash")
@@ -196,6 +211,7 @@ case_activate() {
     printf '%s\n' 'ssh-rsa AAAATEST deployment@test.invalid' > "$WORK_UBNT/persistent/config/raspi_rsa_id.pub"
     expect_success --activate
     verify_installed_tree
+    assert_all_code_verified
     assert_file_equal "$profile_fixture" "$DEVICE_ROOT/etc/persistent/profiles/camp.cfg"
     grep -F 'ssh-rsa AAAAEXISTING' "$DEVICE_ROOT/etc/dropbear/authorized_keys" >/dev/null || \
         fail 'activation removed existing authorized key'
@@ -225,6 +241,7 @@ PY
 case_install_paused() {
     expect_success --install-paused
     verify_installed_tree
+    assert_all_code_verified
     [ ! -e "$DEVICE_ROOT/state/crond.running" ] || fail 'paused install restarted cron'
     [ -e "$DEVICE_ROOT/tmp/ubnt-wifi/paused" ] || fail 'paused install omitted pause marker'
     assert_contains "$EVENT_LOG" "pkill"
@@ -354,7 +371,48 @@ case_readback_missing() {
     /bin/cp "$WORK_UBNT/persistent/scripts/wifi_manager.sh" "$DEVICE_ROOT/etc/persistent/scripts/wifi_manager.sh"
     export FAKE_CFGMTD_READBACK_MISSING=scripts/wifi_manager.sh
     expect_failure --activate
-    assert_contains "$DEPLOY_OUTPUT" 'missing wifi_manager.sh'
+    assert_contains "$DEPLOY_OUTPUT" 'missing or unsafe: scripts/wifi_manager.sh'
+    assert_cron_restarted
+}
+
+case_readback_module_mismatch() {
+    export FAKE_CFGMTD_READBACK_CORRUPT=scripts/wifi_manager_status.sh
+    expect_failure --activate
+    assert_contains "$DEPLOY_OUTPUT" 'scripts/wifi_manager_status.sh md5 mismatch'
+    assert_not_contains "$DEPLOY_OUTPUT" 'Active flash verified'
+    assert_cron_restarted
+}
+
+case_readback_config_missing() {
+    export FAKE_CFGMTD_READBACK_MISSING=config/cron
+    expect_failure --install-paused
+    assert_contains "$DEPLOY_OUTPUT" 'missing or unsafe: config/cron'
+    assert_not_contains "$DEPLOY_OUTPUT" 'Active flash verified'
+    [ ! -e "$DEVICE_ROOT/tmp/ubnt-wifi/paused" ] || fail 'failed paused install created pause marker'
+    assert_cron_restarted
+}
+
+case_direct_module_mismatch() {
+    export FAKE_CFGMTD_LAYOUT=direct
+    case_readback_module_mismatch
+}
+
+case_direct_config_missing() {
+    export FAKE_CFGMTD_LAYOUT=direct
+    case_readback_config_missing
+}
+
+case_readback_config_symlink() {
+    export FAKE_CFGMTD_READBACK_SYMLINK=config
+    expect_failure --activate
+    assert_contains "$DEPLOY_OUTPUT" 'symlinked code directory'
+    assert_cron_restarted
+}
+
+case_readback_module_symlink() {
+    export FAKE_CFGMTD_READBACK_SYMLINK=scripts/wifi_manager_status.sh
+    expect_failure --activate
+    assert_contains "$DEPLOY_OUTPUT" 'missing or unsafe: scripts/wifi_manager_status.sh'
     assert_cron_restarted
 }
 
@@ -420,7 +478,7 @@ case_signal_recovery() {
 case_direct_readback() {
     export FAKE_CFGMTD_LAYOUT=direct
     expect_success --activate
-    assert_contains "$DEPLOY_OUTPUT" 'md5 verified'
+    assert_all_code_verified
 }
 
 case_ambiguous_readback() {
@@ -484,6 +542,12 @@ run_case cfg-write-segv case_cfg_write_segv
 run_case cfg-read-failure case_cfg_read_failure
 run_case readback-mismatch case_readback_mismatch
 run_case readback-missing case_readback_missing
+run_case readback-module-mismatch case_readback_module_mismatch
+run_case readback-config-missing case_readback_config_missing
+run_case direct-module-mismatch case_direct_module_mismatch
+run_case direct-config-missing case_direct_config_missing
+run_case readback-config-symlink case_readback_config_symlink
+run_case readback-module-symlink case_readback_module_symlink
 run_case readback-symlink case_readback_symlink
 run_case post-stop-copy-failure case_post_stop_copy_failure
 run_case activation-failure case_activation_failure

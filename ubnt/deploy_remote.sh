@@ -91,6 +91,44 @@ install_code() {
     done < "$stage/code-files.list"
 }
 
+write_expected_manifest() {
+    code_files > "$stage/code-files.list"
+    : > "$stage/expected-code.md5"
+    while IFS= read -r relative; do
+        expected_digest=$(digest "$stage/persistent/$relative") || fail "cannot checksum staged code: $relative"
+        printf '%s %s\n' "$expected_digest" "$relative" >> "$stage/expected-code.md5"
+    done < "$stage/code-files.list"
+}
+
+resolve_readback_root() {
+    for directory in "$stage/readback" "$stage/readback/persistent" \
+        "$stage/readback/persistent/config" "$stage/readback/persistent/scripts" \
+        "$stage/readback/config" "$stage/readback/scripts"; do
+        [ ! -L "$directory" ] || fail 'active flash readback contains a symlinked code directory'
+    done
+    readback_root="$stage/readback/persistent"
+    # Allow either archive root, but never combine layouts or search rollbacks.
+    if [ -e "$stage/readback/scripts" ] || [ -e "$stage/readback/config" ] || \
+        [ -e "$stage/readback/rc.postsysinit" ] || [ -e "$stage/readback/profile" ]; then
+        [ ! -e "$readback_root" ] || fail 'ambiguous active flash readback layout'
+        readback_root="$stage/readback"
+    fi
+}
+
+verify_readback_code() {
+    resolve_readback_root
+    verified_count=0
+    # Keep failures in this shell so finish always restores cron after a stop.
+    while IFS=' ' read -r expected_digest relative; do
+        readback="$readback_root/$relative"
+        [ -f "$readback" ] && [ ! -L "$readback" ] || fail "active flash readback is missing or unsafe: $relative"
+        actual_digest=$(digest "$readback") || fail "cannot checksum active flash code: $relative"
+        [ "$actual_digest" = "$expected_digest" ] || fail "active flash $relative md5 mismatch"
+        verified_count=$((verified_count + 1))
+    done < "$stage/expected-code.md5"
+    printf 'Active flash verified %s code files.\n' "$verified_count"
+}
+
 prepare() {
     check_layout "$persistent"
     tar -cf "$stage/live.tar" -C /etc persistent
@@ -166,7 +204,7 @@ install() {
     current_config=$(digest /tmp/system.cfg)
     expected_config=$(digest "$stage/candidate/system.cfg")
     [ "$current_config" = "$expected_config" ] || fail 'system.cfg changed since preflight; retry deployment'
-    expected_wifi=$(digest "$stage/persistent/scripts/wifi_manager.sh")
+    write_expected_manifest
 
     # Arm recovery BEFORE pkill, including interruption while pkill is running.
     cron_stopped=yes
@@ -182,19 +220,7 @@ install() {
 
     mkdir "$stage/readback"
     /sbin/cfgmtd -r -t 1 -p "$stage/readback/" -f "$stage/readback/system.cfg"
-    for directory in "$stage/readback/persistent" "$stage/readback/persistent/scripts" "$stage/readback/scripts"; do
-        [ ! -L "$directory" ] || fail 'active flash readback contains a symlinked code directory'
-    done
-    readback="$stage/readback/persistent/scripts/wifi_manager.sh"
-    # Allow an archive rooted at persistent or at its parent directory.
-    # Accept only one exact deployed path, never a recursive rollback match.
-    if [ -f "$stage/readback/scripts/wifi_manager.sh" ]; then
-        [ ! -e "$readback" ] || fail 'ambiguous active flash readback layout'
-        readback="$stage/readback/scripts/wifi_manager.sh"
-    fi
-    [ -f "$readback" ] && [ ! -L "$readback" ] || fail 'active flash readback is missing wifi_manager.sh'
-    [ "$(digest "$readback")" = "$expected_wifi" ] || fail 'active flash wifi_manager.sh md5 mismatch'
-    printf 'Active flash wifi_manager.sh md5 verified.\n'
+    verify_readback_code
 
     if [ "$activate" = yes ]; then
         /bin/sh "$persistent/rc.postsysinit"
