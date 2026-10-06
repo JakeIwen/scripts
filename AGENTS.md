@@ -36,6 +36,12 @@ compare it with this checkout. Deployed files may differ from the repository.
   (power-off roaming). Ship the entrypoint and every sibling together.
 - `macbook/`: macOS shell utilities, AppleScripts, and BetterTouchTool helpers.
 - `shared/`: code imported or deployed on more than one host.
+- Deal Watch cookie renewal: `pi/scripts/price_check/search_watch/browser_refresh.py`
+  owns the durable request queue and request contract; `refresh_install.py`
+  validates submitted headers on the Pi before replacement. The bridge is
+  `pi/scripts/price_check/ebay_refresh.py`; the Mac polling worker and managed
+  clean-browser client are `macbook/scripts/deal_watch_refresh.py` and
+  `macbook/scripts/ebay_browser_headers.mjs`. See `pi/docs/dashboard/PRICE_CHECK.md`.
 
 Some ignored secret directories, wireless profiles, and device configurations
 may contain credentials or private network data. Never print or commit secrets,

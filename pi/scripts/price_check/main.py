@@ -139,9 +139,10 @@ def send_search_error(watch: dict, error: Exception) -> None:
     if isinstance(error, SearchCookieError):
         title = f"{watch['display_title']}: update eBay browser cookie"
         message = (
-            "eBay rejected or gated this saved-search request. Capture a new "
-            "signed-out Firefox Private Window request and replace "
-            "/home/pi/secrets/.ebay_headers.\n"
+            "eBay rejected or gated this saved-search request. An anonymous "
+            "browser refresh is queued for the Mac hook (Mac must be awake "
+            "and logged in). If it remains blocked, replace the signed-out "
+            "browser headers in /home/pi/secrets/.ebay_headers.\n"
             f"{error}\n{watch['url']}"
         )
         tags = "cookie,warning"

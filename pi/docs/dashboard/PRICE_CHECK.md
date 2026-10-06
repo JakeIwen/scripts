@@ -23,8 +23,50 @@ The dashboard's **Check all now** button does the same.
 
 ## eBay browser headers
 
-eBay search downloads use an anonymous Firefox Private Window session. Do not
-use a logged-in eBay session.
+eBay search downloads use anonymous browser headers, not an eBay API token.
+Do not use a logged-in eBay session.
+
+### Automatic renewal
+
+A rejected/gated check queues a durable request in `search_browser_refresh` in
+the existing private database. The Mac's `com.jacobr.deal-watch-refresh`
+LaunchAgent polls over SSH to `vanpi.lan` every five minutes. It uses the existing
+clean headless browser MCP service at `http://localhost:8931/mcp`, with a new
+isolated signed-out session; it never launches a browser or accesses daily Chrome.
+The Mac must be awake and logged in, with the managed clean service available.
+
+The browser visits eBay's homepage, lets its session initialize, then opens the
+saved search and waits for real listings. A CAPTCHA or persistent rejection
+leaves the request pending; the hook does not solve interactive challenges.
+Attempts are limited to one per thirty minutes, including crashes or network
+failures. Successful ordinary checks cancel obsolete requests automatically.
+
+Fresh headers travel over SSH stdin, never command arguments or logs. The Pi
+uses a private temporary file to download and parse the search itself before
+atomically replacing `/home/pi/secrets/.ebay_headers`. A failed validation keeps
+the old headers and saved results. A successful install checks the saved search
+with normal notification behavior. The Mac also updates its ignored
+`pi/secrets/.ebay_headers`, so broad sync retains the current cookie.
+
+Install the scheduled hook from a normal Mac Terminal in this checkout:
+
+```bash
+zsh macbook/scripts/install_deal_watch_refresh.zsh
+```
+
+Run one pending renewal manually:
+
+```bash
+python3 macbook/scripts/deal_watch_refresh.py
+```
+
+Inspect `tmp/deal-watch-refresh/worker.log` for non-secret success/failure status.
+The Pi bridge is `pi/scripts/price_check/ebay_refresh.py`; `request <search-id>`
+queues a deliberate renewal, `claim` leases a pending request with the cooldown,
+and `install` consumes the private JSON submission. All normal checks retain
+the existing schedule. Cookie renewal does not change ntfy delivery or retries.
+
+### Manual fallback
 
 1. Open the saved search in a Firefox Private Window and verify that eBay shows
    you as signed out.

@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from .parsers import SearchResult
+from .browser_refresh import SCHEMA as REFRESH_SCHEMA
 
 
 SCHEMA = """
@@ -55,7 +56,7 @@ CREATE INDEX IF NOT EXISTS search_results_current
     ON search_results(search_id, is_current, listing_order);
 CREATE INDEX IF NOT EXISTS search_checks_watch_time
     ON search_checks(search_id, checked_at DESC);
-"""
+""" + REFRESH_SCHEMA
 
 
 class SearchStoreError(RuntimeError):

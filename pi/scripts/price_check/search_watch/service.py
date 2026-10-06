@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from .parsers import EbayGateError, EbayParseError, parse as parse_ebay
 from .store import SearchStore, SearchStoreError
+from .browser_refresh import clear_refresh, request_refresh
 
 
 CURL = "/usr/bin/curl"
@@ -60,8 +61,8 @@ def validate_watch(parser: str, url: str, title: str = "") -> tuple[str, str, st
     return parser, url.strip(), display_title
 
 
-def _validated_headers_file() -> Path:
-    path = Path(os.environ.get("EBAY_HEADERS_FILE", DEFAULT_EBAY_HEADERS))
+def _validated_headers_file(path: Path | None = None) -> Path:
+    path = path or Path(os.environ.get("EBAY_HEADERS_FILE", DEFAULT_EBAY_HEADERS))
     try:
         details = path.lstat()
     except OSError as error:
@@ -98,8 +99,8 @@ def _validated_headers_file() -> Path:
     return path
 
 
-def fetch_ebay(url: str) -> str:
-    headers = _validated_headers_file()
+def fetch_ebay(url: str, *, headers_path: Path | None = None) -> str:
+    headers = _validated_headers_file(headers_path)
     command = [
         CURL,
         "--location",
@@ -194,6 +195,8 @@ def check_watch(
         results = _fetch_and_parse(watch, fetcher)
     except SearchWatchError as error:
         failed_watch = store.record_error(watch["id"], str(error)) if record else watch
+        if record and isinstance(error, SearchCookieError):
+            request_refresh(store, watch)
         if notify and notify_error:
             try:
                 notify_error(failed_watch, error)
@@ -205,6 +208,7 @@ def check_watch(
 
     if record:
         updated, new_results = store.record_success(watch["id"], results)
+        clear_refresh(store, watch["id"])
     else:
         updated = {**watch, "result_count": len(results)}
         new_results = []
