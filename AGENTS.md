@@ -27,6 +27,13 @@ compare it with this checkout. Deployed files may differ from the repository.
   `pi/README.md` is the documentation index.
 - `vanrouter/`: reviewed OpenWrt persistence and backup-export artifacts.
 - `ubnt/`: directional wireless-device profiles and uplink scripts.
+  `ubnt/persistent/scripts/wifi_manager.sh` owns initialization and command
+  dispatch; its flat `wifi_manager_*.sh` siblings contain function definitions:
+  `runtime` (logging, locks, failures/cooldowns), `profiles` (inspection, admin
+  login, editing/persistence), `scanning` (surveys, channels, automatic selection),
+  `connect` (link checks, reloads/recovery), `transitions` (GUI/manual holds),
+  `provision` (new networks), `status` (status/dashboard output), and `starlink`
+  (power-off roaming). Ship the entrypoint and every sibling together.
 - `macbook/`: macOS shell utilities, AppleScripts, and BetterTouchTool helpers.
 - `shared/`: code imported or deployed on more than one host.
 

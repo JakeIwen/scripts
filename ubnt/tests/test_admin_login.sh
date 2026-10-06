@@ -8,9 +8,16 @@ export UBNT_STATE_DIR="$test_root/state"
 export UBNT_LOG_FILE="$test_root/manager.log"
 export UBNT_UPTIME_FILE="$test_root/uptime"
 printf '1000.0 0.0\n' > "$UBNT_UPTIME_FILE"
-# Source definitions only; the unique final main "$@" line is the dispatch boundary.
-sed '/^main "\$@"$/,$d' "$script_dir/../persistent/scripts/wifi_manager.sh" > "$test_root/functions.sh"
-. "$test_root/functions.sh"
+# Source only the login-preservation module and its logging dependencies.
+. "$script_dir/../persistent/scripts/wifi_manager_runtime.sh"
+. "$script_dir/../persistent/scripts/wifi_manager_profiles.sh"
+SYSTEM_CFG=$UBNT_SYSTEM_CFG
+STATE_DIR=$UBNT_STATE_DIR
+LOG_FILE=$UBNT_LOG_FILE
+UPTIME_FILE=$UBNT_UPTIME_FILE
+MAX_LOG_BYTES=262144
+LOG_KEEP_LINES=1000
+mkdir -p "$STATE_DIR"
 
 printf '%s\n' 'users.1.name=ubnt' 'users.1.password=preferred-test-hash' > "$SYSTEM_CFG"
 printf '%s\n' 'users.1.name=old-account' 'users.1.password=obsolete-test-hash' \

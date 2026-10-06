@@ -216,8 +216,9 @@ with tarfile.open(sys.argv[1]) as archive:
     assert 'persistent/config/.profile' in names
     assert 'system.cfg' in names
     assert any('/rollback/code-' in name and name.endswith('/scripts/old.sh') for name in names)
-    payload = archive.extractfile('persistent/scripts/wifi_manager.sh').read()
-    assert payload == pathlib.Path(sys.argv[2], 'persistent/scripts/wifi_manager.sh').read_bytes()
+    for source in pathlib.Path(sys.argv[2], 'persistent/scripts').glob('wifi_manager*.sh'):
+        payload = archive.extractfile('persistent/scripts/' + source.name).read()
+        assert payload == source.read_bytes()
 PY
 }
 
