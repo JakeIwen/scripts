@@ -194,6 +194,18 @@ verified before drain, ignoring only runtime bytecode. Mac repair/`--rebuild`
 creates a new immutable `<deployment24>-<build_uuid32>` generation, never mutates
 retained releases, and skips pruning; legacy unsuffixed releases remain valid.
 
+The Mac `.py`/`.zsh` installer paths stay stable; implementation lives in
+`macbook/scripts/van_compute_installer/`. Its allowlisted modules travel with
+frozen installers, including recovery/rollback copies. `van_compute.engine`
+reexports shared child supervision from `engine_process.py`; host adapters still
+own staging and publication. Shared compute test fixtures live beside the suites
+in `pi/tests/compute/van_compute_test_fixtures.py` and deployment support modules.
+Failed Mac builds are disposable only when this invocation owns the generation
+and no installed/prior LaunchAgent reference protects it. Once Pi cutover starts,
+only the remote cutover script may remove its stage: local SSH interruption does
+not establish that the remote script stopped. Dashboard-selected package updates
+run the existing compute-provider preflight before transferring a package.
+
 The worker's host-wide retry gate applies only to transport outages, across all
 four control connections and all ten slots. Cooldowns cap at 30 seconds and the
 exclusive nonmutating recovery probe at 10 seconds, including connection setup;
