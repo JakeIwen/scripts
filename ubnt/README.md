@@ -182,13 +182,73 @@ Deployment modes are deliberately separate:
 - `--activate` installs and starts the new cron configuration.
 
 Every install records a code-only rollback under
-`/etc/persistent/rollback/code-TIMESTAMP`. Restore one with:
+`/etc/persistent/rollback/code-TIMESTAMP`. The new rollback plus the newest
+previous rollback are retained by default (two total); oldest timestamp-named
+`code-*` directories are pruned first. The rollback contains code, not another
+copy of the rollback tree. `--keep-rollbacks N` changes the total (positive
+integer, minimum one). `profile-*`, `auth-*`, profiles, and unrelated persistent
+files are never pruned. Symlinked or unrecognized code rollback names fail
+closed for manual review.
+
+To archive the exact rollbacks that will be pruned **before deleting them**:
+
+```sh
+./scp_to_device.sh --activate --keep-rollbacks 2 --backup-pruned
+```
+
+This optional archive and its MD5 receipt are stored in a private, ignored
+`private-backups/pruned-code-TIMESTAMP.XXXXXX/` directory. Transfer, checksum,
+or archive-integrity failure aborts before any live changes. Without
+`--backup-pruned`, old code rollbacks are pruned without this extra Mac copy;
+the usual automatic profile backup still runs in either case.
+
+Before creating a live rollback, deleting anything, stopping cron, or replacing
+code, `deploy_remote.sh` builds a complete prospective tree in `/tmp`: existing
+persistent files, the new code rollback, the retained older rollbacks, and the
+new code. It compresses that tree plus a copy of `/tmp/system.cfg` and measures
+it with `wc -c`. The maximum is **112 KiB (114,688 bytes)**. The observed cfg
+partition is 256 KiB and contains active and backup slots; 128 KiB per slot
+minus 16 KiB headroom gives this conservative ceiling. This is a safety budget,
+not a claim to know the firmware's exact headers, slot layout, or serializer.
+`--max-bytes N` may lower the ceiling, never raise it. Oversize or archive errors
+leave live files and cron untouched. Preserved profile/auth history counts
+toward the limit; lower code retention or review/archive that history manually
+rather than bypassing the limit.
+
+Installation takes the Wi-Fi manager's existing runtime lock without killing
+an active manager. It then rechecks the complete persistent snapshot and
+`system.cfg`; concurrent changes during preparation or the Mac backup cause a
+refusal/retry. Avoid native airOS GUI edits and other flash-writing tools during
+deployment: they do not honor the manager lock. The preview never replaces the
+whole live tree—only explicit code files, the new rollback, and the listed old
+code rollbacks change.
+
+After `cfgmtd -w -p /etc/`, deployment reads active slot 1 into a fresh directory
+using `cfgmtd -r -t 1 -p /tmp/<transaction>/readback/ -f /tmp/<transaction>/readback/system.cfg`.
+It checks the staged `wifi_manager.sh` MD5 against the extracted deployed file,
+not RAM or a matching rollback copy. Only the exact `persistent/scripts/` or
+`scripts/` extraction layout is accepted; missing, ambiguous, or mismatched
+readback fails the deploy. These layouts are fake-test contracts, not a claim
+of live firmware validation.
+
+Any ordinary error or HUP/INT/TERM after the cron-stop attempt triggers
+`rc.postsysinit`, with `crond` fallback and a process check, and exits nonzero.
+This includes a child `cfgmtd` segfault and failed readback. Cron recovery is
+reported; it is **not** an automatic rollback of partially installed code or
+flash. Power loss/SIGKILL cannot be trapped. Successful `--install-paused`
+still leaves cron stopped; `--activate` still preserves an existing explicit
+maintenance pause. Once installation starts, remote cleanup owns the staging
+directory so an SSH disconnect cannot delete files the worker still needs.
+
+Restore a retained rollback with:
 
 ```sh
 ./rollback_device.sh code-YYYYMMDDTHHMMSSZ
 ```
 
-Rollback and deployment never copy, replace, or delete the profiles directory.
+The legacy rollback helper is unchanged and does not provide the new deploy
+preflight/readback/recovery safeguards; use it only in supervised maintenance.
+Rollback and deployment never replace or delete the live profiles directory.
 
 The editable push/pull copies above remain the normal operational workflow.
 Separately, vanpi pulls the device's complete `/etc/persistent` tree immediately
@@ -199,10 +259,10 @@ recovery and never syncs changes back into this checkout. See
 ## Tests
 
 ```sh
-./tests/test_parse_iwlist.sh
-./tests/test_wifi_manager.sh
-./tests/test_admin_login.sh
-./tests/test_starlink_power_off.sh
-./tests/test_deployment.sh
-./tests/test_profile.sh
+for test in tests/test_*.sh; do /bin/dash "$test" || exit; done
+bash -n scp_to_device.sh
+dash -n deploy_remote.sh
 ```
+
+Deployment tests use fake SSH/SCP and `cfgmtd` with isolated filesystem/process
+fixtures; they never contact an antenna. Python 3 is required for that harness.

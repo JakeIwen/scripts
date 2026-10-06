@@ -1,28 +1,65 @@
 #!/bin/bash
 set -euo pipefail
+umask 077
 
 script_dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 mode=${1:-}
-target=${2:-ubnt@192.168.8.20}
+target=ubnt@192.168.8.20
+keep_rollbacks=2
+max_bytes=114688
+backup_pruned=no
+
+usage() {
+    echo "Usage: $0 --stage-only|--install-paused|--activate [user@host] [--keep-rollbacks N] [--max-bytes N] [--backup-pruned]" >&2
+    exit 1
+}
 
 case $mode in
-    --stage-only|--install-paused|--activate) ;;
-    *)
-        echo "Usage: $0 --stage-only|--install-paused|--activate [user@host]" >&2
-        exit 1
-        ;;
+    --stage-only|--install-paused|--activate) shift ;;
+    *) usage ;;
 esac
+have_target=no
+while (( $# )); do
+    case $1 in
+        --keep-rollbacks|--max-bytes)
+            [[ $# -ge 2 ]] || usage
+            case $2 in ''|*[!0-9]*|0*) usage ;; esac
+            if [[ $1 == --keep-rollbacks ]]; then
+                [[ ${#2} -le 4 ]] || usage
+                keep_rollbacks=$2
+            else
+                [[ ${#2} -le 6 && $2 -le 114688 ]] || usage
+                max_bytes=$2
+            fi
+            shift 2
+            ;;
+        --backup-pruned) backup_pruned=yes; shift ;;
+        -*) usage ;;
+        *)
+            [[ $have_target == no ]] || usage
+            target=$1
+            have_target=yes
+            shift
+            ;;
+    esac
+done
 
 "$script_dir/backup_profiles.sh" "$target" --sync-working
 
-stage_root=$(mktemp -d /tmp/ubnt-code-stage.XXXXXX)
-remote_stage="/tmp/ubnt-code-stage.$$"
+stage_root=$(mktemp -d "${TMPDIR:-/tmp}/ubnt-code-stage.XXXXXX")
+remote_stage="/tmp/${stage_root##*/}"
 
+remote_owns_stage=no
 cleanup() {
     rm -rf "$stage_root"
-    ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "rm -rf '$remote_stage'" >/dev/null 2>&1 || true
+    if [[ $remote_owns_stage == no ]]; then
+        ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "rm -rf '$remote_stage'" >/dev/null 2>&1 || true
+    fi
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 mkdir -p "$stage_root/persistent/config" "$stage_root/persistent/scripts"
 cp -p "$script_dir/persistent/rc.postsysinit" \
@@ -42,7 +79,7 @@ while IFS= read -r script; do
 done < <(find "$stage_root/persistent" -type f \( -name '*.sh' -o -name rc.postsysinit \) -print)
 /bin/sh -n "$stage_root/persistent/profile"
 
-ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "mkdir -p '$remote_stage'"
+ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "umask 077; mkdir '$remote_stage'"
 scp -q -r -O -o BatchMode=yes -o ConnectTimeout=5 \
     "$stage_root/persistent" "$target:$remote_stage/"
 
@@ -63,48 +100,37 @@ rollback_stamp=$(date -u +%Y%m%dT%H%M%SZ)
 activate=no
 [[ "$mode" == --activate ]] && activate=yes
 
-ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "
-    set -e
-    persistent=/etc/persistent
-    rollback=\"\$persistent/rollback/code-$rollback_stamp\"
-    mkdir -p \"\$rollback/config\" \"\$rollback/scripts\"
-    cp -p \"\$persistent/rc.postsysinit\" \"\$rollback/\"
-    if [ -f \"\$persistent/profile\" ]; then
-        cp -p \"\$persistent/profile\" \"\$rollback/profile\"
-    else
-        : > \"\$rollback/profile.absent\"
-    fi
-    cp -p \"\$persistent/config/cron\" \"\$persistent/config/.profile\" \"\$rollback/config/\"
-    cp -p \"\$persistent/scripts/\"*.sh \"\$persistent/scripts/\"*.awk \"\$rollback/scripts/\"
+remote_phase() {
+    ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" \
+        "/bin/sh -s -- '$1' '$remote_stage' 'code-$rollback_stamp' '$keep_rollbacks' '$max_bytes' '$activate' '$backup_pruned'" \
+        < "$script_dir/deploy_remote.sh"
+}
 
-    pkill crond 2>/dev/null || true
-    cp -p '$remote_stage/persistent/rc.postsysinit' \"\$persistent/rc.postsysinit.new\"
-    mv \"\$persistent/rc.postsysinit.new\" \"\$persistent/rc.postsysinit\"
-    cp -p '$remote_stage/persistent/profile' \"\$persistent/profile.new\"
-    mv \"\$persistent/profile.new\" \"\$persistent/profile\"
-    for source in '$remote_stage'/persistent/config/*; do
-        name=\${source##*/}
-        cp -p \"\$source\" \"\$persistent/config/\$name.new\"
-        mv \"\$persistent/config/\$name.new\" \"\$persistent/config/\$name\"
-    done
-    cp -p '$remote_stage/persistent/config/.profile' \"\$persistent/config/.profile.new\"
-    mv \"\$persistent/config/.profile.new\" \"\$persistent/config/.profile\"
-    for source in '$remote_stage'/persistent/scripts/*; do
-        name=\${source##*/}
-        cp -p \"\$source\" \"\$persistent/scripts/\$name.new\"
-        chmod 750 \"\$persistent/scripts/\$name.new\"
-        mv \"\$persistent/scripts/\$name.new\" \"\$persistent/scripts/\$name\"
-    done
-    chmod 750 \"\$persistent/rc.postsysinit\"
-    /sbin/cfgmtd -w -p /etc/
-
-    if [ '$activate' = yes ]; then
-        /bin/sh \"\$persistent/rc.postsysinit\"
+remote_phase prepare
+if [[ $backup_pruned == yes ]]; then
+    backup_dir=$(mktemp -d "$script_dir/private-backups/pruned-code-$rollback_stamp.XXXXXX")
+    scp -q -O -o BatchMode=yes -o ConnectTimeout=5 \
+        "$target:$remote_stage/pruned-rollbacks.tar.gz" \
+        "$target:$remote_stage/pruned-rollbacks.md5" "$backup_dir/"
+    expected=$(< "$backup_dir/pruned-rollbacks.md5")
+    if command -v md5sum >/dev/null 2>&1; then
+        actual=$(md5sum "$backup_dir/pruned-rollbacks.tar.gz")
+        actual=${actual%% *}
     else
-        mkdir -p /tmp/ubnt-wifi
-        : > /tmp/ubnt-wifi/paused
+        actual=$(md5 -q "$backup_dir/pruned-rollbacks.tar.gz")
     fi
-"
+    [[ $expected =~ ^[0-9a-f]{32}$ && $actual == "$expected" ]] || {
+        echo 'Pruned rollback backup checksum failed; live files and cron unchanged.' >&2
+        exit 1
+    }
+    tar -tzf "$backup_dir/pruned-rollbacks.tar.gz" > /dev/null
+    echo "Pruned rollback backup verified: $backup_dir"
+fi
+
+# Once install starts only its remote EXIT handler may remove the transaction.
+# An SSH interruption is not proof that the remote worker has exited.
+remote_owns_stage=yes
+remote_phase install
 
 if [[ "$activate" == yes ]]; then
     echo "Installed and activated. Rollback: /etc/persistent/rollback/code-$rollback_stamp"
