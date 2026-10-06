@@ -668,6 +668,24 @@ def install_release(stream, root, mode, services=None, selected=None):
         return completed(release, restarted)
 
 
+def check_dashboard_compute_provider(target):
+    """Refuse a dashboard update before transferring a dependent package."""
+    guard = (ROOT / 'pi/check_compute_provider.py').read_bytes()
+    try:
+        subprocess.run(
+            ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', '--',
+             target, '/usr/bin/python3 -B -'],
+            input=guard, check=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError(
+            'Dashboard update refused: the canonical compute provider at '
+            '/home/pi/van_compute/current/van_compute/metrics.py must be healthy '
+            'and unfenced. Run the coupled install_van_compute_worker.zsh from '
+            "the owner's Terminal first; no package deployment was started."
+        ) from error
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dry-run', action='store_true', help='print a local JSON plan; never connect')
@@ -702,6 +720,8 @@ def main(argv=None):
         return
     if not re.fullmatch(r'[A-Za-z0-9_.@:-]+', args.target) or args.target.startswith('-'):
         parser.error('invalid SSH target')
+    if mode == 'update' and DASHBOARD in selected_units(args.service):
+        check_dashboard_compute_provider(args.target)
     import shlex
     receiver = Path(__file__).read_text()
     receiver = receiver.replace('ROOT = Path(__file__).resolve().parents[1]', 'ROOT = Path.cwd()')
