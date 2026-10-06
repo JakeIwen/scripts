@@ -20,7 +20,8 @@ describe('Van Dashboard React composition', () => {
     );
 
     for (const title of [
-      'COP ALERT',
+      // The tile title's <br> adds no space to its accessible name.
+      'STRANGERDANGER',
       'vOnStar',
       'Audiobooks',
       'Movies & TV',
