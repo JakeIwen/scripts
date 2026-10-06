@@ -13,6 +13,14 @@ pi_ip='pi@vanpi.lan'
 package_units=""
 
 sync_preflight() {
+  # Refuse before staging or updating anything: the dashboard's new unit and
+  # imports need the supervised, coupled compute cutover to have completed.
+  if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$pi_ip" \
+    /usr/bin/python3 -B - < "$dsc/pi/check_compute_provider.py"; then
+    echo "Compute provider preflight refused sync; run ./macbook/scripts/install_van_compute_worker.zsh from the owner's Terminal in the reviewed checkout first." >&2
+    return 1
+  fi
+
   if ! package_units="$(python3 "$dsc/pi/deploy_python.py" --list-units)" ||
     [[ -z "$package_units" ]]; then
     echo "Python package unit discovery failed; see pi/deploy_python.py" >&2

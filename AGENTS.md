@@ -186,11 +186,20 @@ compute golden files (258 protocol fixtures plus two child-environment fixtures)
 and the host drift decisions in `pi/docs/compute/VAN_COMPUTE.md`. First cutover
 must install compute before updating the dashboard package: its unit/imports
 require `/home/pi/van_compute/current/van_compute/metrics.py`. Broad sync's
-package-before-compute order is not a first-cutover workflow.
+package-before-compute order is not a first-cutover workflow; its earliest
+preflight now checks the installed canonical metrics provider and refuses
+missing/unsafe providers or maintenance/upgrade-owner fences before any writes.
+Keep the compute installer in the owner's Terminal. Reused Pi releases are
+verified before drain, ignoring only runtime bytecode. Mac repair/`--rebuild`
+creates a new immutable `<deployment24>-<build_uuid32>` generation, never mutates
+retained releases, and skips pruning; legacy unsuffixed releases remain valid.
 
 The worker's host-wide retry gate applies only to transport outages, across all
-four control connections and all ten slots. It never blindly replays an upload
-or finish; exact-slot lease recovery remains authoritative. Drain cancels new
+four control connections and all ten slots. Cooldowns cap at 30 seconds and the
+exclusive nonmutating recovery probe at 10 seconds, including connection setup;
+bulk transfers run outside that exclusive probe so heartbeats can progress.
+It never blindly replays an upload or finish; exact-slot lease recovery remains
+authoritative. Drain cancels new
 admission/waiting claims, not active jobs. Keep `limited_child.py` standalone and
 free of package imports or untrusted startup PYTHONPATH.
 
