@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 import re
 import stat
 import subprocess
@@ -18,6 +19,20 @@ from .browser_refresh import clear_refresh, request_refresh
 CURL = "/usr/bin/curl"
 DEFAULT_EBAY_HEADERS = Path("/home/pi/secrets/.ebay_headers")
 PARSERS = {"ebay": parse_ebay}
+HEADER_SCHEMA = json.loads(Path(__file__).with_name("browser_headers.json").read_text())
+REQUIRED_HEADERS = set(HEADER_SCHEMA["required"])
+ALLOWED_HEADERS = REQUIRED_HEADERS | set(HEADER_SCHEMA["optional"])
+LEGACY_HEADERS = (
+    "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language: en-US,en;q=0.9",
+    "Sec-GPC: 1",
+    "Upgrade-Insecure-Requests: 1",
+    "Sec-Fetch-Dest: document",
+    "Sec-Fetch-Mode: navigate",
+    "Sec-Fetch-Site: none",
+    "Pragma: no-cache",
+    "Cache-Control: no-cache",
+)
 
 
 class SearchWatchError(RuntimeError):
@@ -61,7 +76,7 @@ def validate_watch(parser: str, url: str, title: str = "") -> tuple[str, str, st
     return parser, url.strip(), display_title
 
 
-def _validated_headers_file(path: Path | None = None) -> Path:
+def _validated_headers(path: Path | None = None) -> tuple[Path, dict[str, str]]:
     path = path or Path(os.environ.get("EBAY_HEADERS_FILE", DEFAULT_EBAY_HEADERS))
     try:
         details = path.lstat()
@@ -85,22 +100,26 @@ def _validated_headers_file(path: Path | None = None) -> Path:
             continue
         name, separator, value = line.partition(":")
         lowered = name.strip().lower()
-        if not separator or lowered not in {"user-agent", "cookie"} or lowered in headers:
+        if not separator or lowered not in ALLOWED_HEADERS or lowered in headers:
             raise SearchCookieError(
-                "eBay browser headers must contain only User-Agent and Cookie"
+                "eBay browser headers contain an unsupported or duplicate header"
             )
         if not value.strip() or any(character in value for character in ("\r", "\n")):
             raise SearchCookieError("eBay browser headers contain an invalid value")
         headers[lowered] = value.strip()
-    if set(headers) != {"user-agent", "cookie"}:
+    if not REQUIRED_HEADERS <= set(headers):
         raise SearchCookieError(
             "eBay browser headers must contain User-Agent and Cookie"
         )
-    return path
+    if "referer" in headers:
+        referer = urlsplit(headers["referer"])
+        if (referer.scheme != "https" or referer.netloc != "www.ebay.com"):
+            raise SearchCookieError("eBay browser Referer must stay on https://www.ebay.com")
+    return path, headers
 
 
 def fetch_ebay(url: str, *, headers_path: Path | None = None) -> str:
-    headers = _validated_headers_file(headers_path)
+    headers, values = _validated_headers(headers_path)
     command = [
         CURL,
         "--location",
@@ -122,26 +141,13 @@ def fetch_ebay(url: str, *, headers_path: Path | None = None) -> str:
         "=https",
         "-H",
         f"@{headers}",
-        "-H",
-        "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "-H",
-        "Accept-Language: en-US,en;q=0.9",
-        "-H",
-        "Sec-GPC: 1",
-        "-H",
-        "Upgrade-Insecure-Requests: 1",
-        "-H",
-        "Sec-Fetch-Dest: document",
-        "-H",
-        "Sec-Fetch-Mode: navigate",
-        "-H",
-        "Sec-Fetch-Site: none",
-        "-H",
-        "Pragma: no-cache",
-        "-H",
-        "Cache-Control: no-cache",
-        url,
     ]
+    # Two-line Firefox captures retain their original request profile. Full browser
+    # captures must not receive conflicting client hints or duplicate fetch headers.
+    if set(values) == REQUIRED_HEADERS:
+        for value in LEGACY_HEADERS:
+            command.extend(("-H", value))
+    command.append(url)
     try:
         result = subprocess.run(
             command,

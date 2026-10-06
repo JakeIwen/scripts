@@ -31,15 +31,27 @@ Do not use a logged-in eBay session.
 A rejected/gated check queues a durable request in `search_browser_refresh` in
 the existing private database. The Mac's `com.jacobr.deal-watch-refresh`
 LaunchAgent polls over SSH to `vanpi.lan` every five minutes. It uses the existing
-clean headless browser MCP service at `http://localhost:8931/mcp`, with a new
-isolated signed-out session; it never launches a browser or accesses daily Chrome.
+clean headless browser MCP service at `http://localhost:8931/mcp`, with an
+isolated signed-out context and its own private anonymous browser state. It never
+launches a browser or accesses daily Chrome.
 The Mac must be awake and logged in, with the managed clean service available.
 
-The browser visits eBay's homepage, lets its session initialize, then opens the
-saved search and waits for real listings. A CAPTCHA or persistent rejection
+The browser opens the saved search and allows any automatic verification to
+finish. A bare 403 response starts eBay's anonymous verification flow explicitly.
+It waits for real listings, the completed page load, and session-cookie updates,
+then confirms the exact saved-search parameters and signed-out state. A CAPTCHA or persistent rejection
 leaves the request pending; the hook does not solve interactive challenges.
 Attempts are limited to one per thirty minutes, including crashes or network
 failures. Successful ordinary checks cancel obsolete requests automatically.
+
+Chromium's user agent, language and client hints use a consistent desktop profile.
+The hook retains the successful document request's allowed headers, with its
+latest cookies, instead of replaying Chromium cookies with Firefox header
+defaults. `search_watch/browser_headers.json` is the canonical header allowlist
+shared by the Mac exporter and Pi validator. User-Agent and Cookie are required;
+authorization, Host and HTTP/2 pseudo-headers are never exported. Referer is
+restricted to HTTPS on `www.ebay.com`. Existing two-line Firefox captures retain
+their original request defaults.
 
 Fresh headers travel over SSH stdin, never command arguments or logs. The Pi
 uses a private temporary file to download and parse the search itself before
@@ -60,7 +72,10 @@ Run one pending renewal manually:
 python3 macbook/scripts/deal_watch_refresh.py
 ```
 
-Inspect `tmp/deal-watch-refresh/worker.log` for non-secret success/failure status.
+Inspect `tmp/deal-watch-refresh/worker.log` for non-secret success/failure status,
+including the failing browser phase or Pi exception class. The private,
+mode-0600 `tmp/deal-watch-refresh/browser-state.json` contains only this hook's
+anonymous session and must not be committed or printed.
 The Pi bridge is `pi/scripts/price_check/ebay_refresh.py`; `request <search-id>`
 queues a deliberate renewal, `claim` leases a pending request with the cooldown,
 and `install` consumes the private JSON submission. All normal checks retain

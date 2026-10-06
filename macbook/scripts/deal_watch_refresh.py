@@ -7,6 +7,7 @@ import argparse
 import fcntl
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -17,13 +18,28 @@ REMOTE = "/usr/bin/python3 /home/pi/scripts/price_check/ebay_refresh.py"
 NODE = "/Users/jacobr/.nvm/versions/node/v22.22.0/bin/node"
 
 
+class RefreshFailure(RuntimeError):
+    """A deliberately credential-free diagnostic suitable for the worker log."""
+
+
 def remote(host: str, command: str, payload=None):
-    result = subprocess.run(
-        ["/usr/bin/ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
-         "-o", "StrictHostKeyChecking=yes", host, f"{REMOTE} {command}"],
-        input=json.dumps(payload) if payload is not None else None,
-        text=True, capture_output=True, timeout=90, check=True,
-    )
+    try:
+        result = subprocess.run(
+            ["/usr/bin/ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
+             "-o", "StrictHostKeyChecking=yes", host, f"{REMOTE} {command}"],
+            input=json.dumps(payload) if payload is not None else None,
+            text=True, capture_output=True, timeout=90, check=True,
+        )
+    except subprocess.CalledProcessError as error:
+        reason = f"Pi {command} failed"
+        try:
+            result = json.loads(error.stdout)
+            cause = result.get("cause") or result.get("error")
+            if isinstance(cause, str) and re.fullmatch(r"[A-Za-z_]{1,40}", cause):
+                reason += f" ({cause})"
+        except (ValueError, TypeError, AttributeError):
+            pass
+        raise RefreshFailure(reason) from error
     return json.loads(result.stdout)
 
 
@@ -46,10 +62,20 @@ def refresh(host: str) -> bool:
         return False
     if not isinstance(request, dict) or set(request) != {"search_id", "request_id", "url"}:
         raise ValueError("invalid refresh request")
-    browser = subprocess.run(
-        [NODE, str(Path(__file__).with_name("ebay_browser_headers.mjs")), request["url"]],
-        capture_output=True, text=True, timeout=120, check=True,
-    )
+    try:
+        browser = subprocess.run(
+            [NODE, str(Path(__file__).with_name("ebay_browser_headers.mjs")), request["url"]],
+            capture_output=True, text=True, timeout=120, check=True,
+        )
+    except subprocess.CalledProcessError as error:
+        reason = "anonymous browser capture failed"
+        detail = (error.stderr or "").strip()
+        if re.fullmatch(
+            r"eBay anonymous browser refresh failed at [A-Za-z0-9 (),.-]{1,180}; "
+            r"existing headers retained\.", detail
+        ):
+            reason = detail
+        raise RefreshFailure(reason) from error
     headers = json.loads(browser.stdout)["headers"]
     result = remote(host, "install", {**request, "headers": headers})
     if not result.get("ok"):
@@ -76,6 +102,9 @@ def main() -> int:
         try:
             refresh(args.host)
             return 0
+        except RefreshFailure as error:
+            print(f"Deal Watch refresh deferred: {error}; will retry.", flush=True)
+            return 1
         except Exception as error:
             # Exceptions can include captured secret payloads: report only the type.
             print(f"Deal Watch refresh deferred ({type(error).__name__}); will retry.", flush=True)

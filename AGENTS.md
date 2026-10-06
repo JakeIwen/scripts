@@ -41,7 +41,11 @@ compare it with this checkout. Deployed files may differ from the repository.
   validates submitted headers on the Pi before replacement. The bridge is
   `pi/scripts/price_check/ebay_refresh.py`; the Mac polling worker and managed
   clean-browser client are `macbook/scripts/deal_watch_refresh.py` and
-  `macbook/scripts/ebay_browser_headers.mjs`. See `pi/docs/dashboard/PRICE_CHECK.md`.
+  `macbook/scripts/ebay_browser_headers.mjs`. Browser session/verification code is
+  `macbook/scripts/deal_watch_browser.mjs`; the shared header-name contract is
+  `pi/scripts/price_check/search_watch/browser_headers.json`. Preserve full captured
+  Chromium headers without adding legacy Firefox defaults. See
+  `pi/docs/dashboard/PRICE_CHECK.md`.
 
 Some ignored secret directories, wireless profiles, and device configurations
 may contain credentials or private network data. Never print or commit secrets,

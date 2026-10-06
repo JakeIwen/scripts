@@ -215,6 +215,33 @@ class SearchServiceTests(unittest.TestCase):
             ), self.assertRaisesRegex(SearchCookieError, "permissions 600"):
                 fetch_ebay("https://www.ebay.com/sch/i.html?_nkw=x")
 
+    def test_full_browser_headers_are_not_overridden_with_firefox_defaults(self):
+        with tempfile.TemporaryDirectory() as directory:
+            headers = self.headers_file(directory)
+            with headers.open("a") as target:
+                target.write('Sec-CH-UA: "Chromium";v="151"\nSec-Fetch-Site: same-origin\n')
+            with mock.patch(
+                "pi.scripts.price_check.search_watch.service.subprocess.run",
+                return_value=SimpleNamespace(stdout=EBAY_PAGE),
+            ) as run:
+                fetch_ebay("https://www.ebay.com/sch/i.html?_nkw=x", headers_path=headers)
+            argv = run.call_args.args[0]
+            self.assertEqual(argv.count("-H"), 1)
+            self.assertIn(f"@{headers}", argv)
+            self.assertNotIn("anonymous=value", " ".join(argv))
+
+    def test_full_browser_headers_refuse_foreign_referer_and_unknown_headers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for extra in ("Referer: https://example.com/\n", "Authorization: bad\n"):
+                headers = self.headers_file(directory)
+                with headers.open("a") as target:
+                    target.write(extra)
+                with mock.patch(
+                    "pi.scripts.price_check.search_watch.service.subprocess.run"
+                ) as run, self.assertRaises(SearchCookieError):
+                    fetch_ebay("https://www.ebay.com/sch/i.html?_nkw=x", headers_path=headers)
+                run.assert_not_called()
+
     def test_http_rejection_requests_cookie_refresh(self):
         with tempfile.TemporaryDirectory() as directory:
             headers = self.headers_file(directory)

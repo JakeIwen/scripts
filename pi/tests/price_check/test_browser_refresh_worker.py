@@ -65,6 +65,16 @@ class BrowserRefreshWorkerTests(unittest.TestCase):
                 self.assertEqual(worker.main(), 1)
             self.assertNotIn("private=value", output.getvalue())
 
+    def test_bridge_failure_reports_its_cause_without_the_payload(self):
+        error = subprocess.CalledProcessError(1, ["ssh"], output=json.dumps({
+            "ok": False, "cause": "SearchCookieError", "headers": "Cookie: private=value",
+        }))
+        with mock.patch.object(worker.subprocess, "run", side_effect=error):
+            with self.assertRaises(worker.RefreshFailure) as failed:
+                worker.remote("pi@vanpi.lan", "install", {"headers": "Cookie: private=value"})
+        self.assertIn("SearchCookieError", str(failed.exception))
+        self.assertNotIn("private=value", str(failed.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
