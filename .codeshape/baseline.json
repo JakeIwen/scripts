@@ -134,7 +134,8 @@
    ],
    "digest": [
     "pi/deploy_network_flight_recorder.py",
-    "pi/deploy_python.py"
+    "pi/deploy_python.py",
+    "ubnt/deploy_remote.sh"
    ],
    "duration": [
     "macbook/scripts/performance_audio.py",
@@ -166,6 +167,10 @@
     "macbook/bettertouchtool/install_rhythm_menu.js",
     "macbook/scripts/performance_audio.py"
    ],
+   "finish": [
+    "macbook/scripts/performance_audio.py",
+    "ubnt/deploy_remote.sh"
+   ],
    "finiteNumber": [
     "pi/apps/van_dashboard/frontend/src/features/compute/projections.ts",
     "pi/apps/van_dashboard/frontend/src/features/systemHealth/projections.ts"
@@ -181,7 +186,8 @@
    ],
    "install": [
     "macbook/bettertouchtool/install_menu_escape.py",
-    "macbook/scripts/time_machine_offsite_coordinator.py"
+    "macbook/scripts/time_machine_offsite_coordinator.py",
+    "ubnt/deploy_remote.sh"
    ],
    "integer": [
     "pi/apps/van_dashboard/frontend/src/features/ignition/decoders.ts",
@@ -328,6 +334,10 @@
     "macbook/bettertouchtool/install_menu_escape.py",
     "macbook/bettertouchtool/repair_rps.py",
     "macbook/bettertouchtool/restore_media.py"
+   ],
+   "prepare": [
+    "macbook/scripts/performance_audio.py",
+    "ubnt/deploy_remote.sh"
    ],
    "print_json": [
     "van_compute/frontend.py",
@@ -578,8 +588,8 @@
     "name": "mntdsk"
    },
    {
-    "file": "ubnt/persistent/scripts/wifi_manager.sh",
-    "line": 463,
+    "file": "ubnt/persistent/scripts/wifi_manager_status.sh",
+    "line": 8,
     "lines": 129,
     "name": "emit_dashboard_snapshot"
    },
@@ -632,8 +642,8 @@
     "name": "ubntPayload"
    },
    {
-    "file": "ubnt/persistent/scripts/wifi_manager.sh",
-    "line": 918,
+    "file": "ubnt/persistent/scripts/wifi_manager_provision.sh",
+    "line": 4,
     "lines": 111,
     "name": "write_provision_config"
    },
@@ -680,8 +690,8 @@
     "name": "decodeListing"
    },
    {
-    "file": "ubnt/persistent/scripts/wifi_manager.sh",
-    "line": 1220,
+    "file": "ubnt/persistent/scripts/wifi_manager_profiles.sh",
+    "line": 209,
     "lines": 97,
     "name": "rewrite_profile_settings"
    },
@@ -753,7 +763,7 @@
    }
   ]
  },
- "date": "2026-10-05",
+ "date": "2026-10-06",
  "files": {
   "macbook/bettertouchtool/btt.py": 131,
   "macbook/bettertouchtool/btt_backup.zsh": 58,
@@ -893,7 +903,7 @@
   "pi/apps/bme280/bme280_testread.py": 14,
   "pi/apps/van_dashboard/__init__.py": 7,
   "pi/apps/van_dashboard/__main__.py": 13,
-  "pi/apps/van_dashboard/frontend/src/App.test.tsx": 46,
+  "pi/apps/van_dashboard/frontend/src/App.test.tsx": 47,
   "pi/apps/van_dashboard/frontend/src/App.tsx": 129,
   "pi/apps/van_dashboard/frontend/src/api/client.test.ts": 52,
   "pi/apps/van_dashboard/frontend/src/api/client.ts": 81,
@@ -1443,6 +1453,7 @@
   "shared/sh/codexsearch.sh": 106,
   "shared/sh/parse_cron.sh": 48,
   "ubnt/backup_profiles.sh": 57,
+  "ubnt/deploy_remote.sh": 210,
   "ubnt/persistent/scripts/ensure_ssh_keys.sh": 19,
   "ubnt/persistent/scripts/reboot.sh": 12,
   "ubnt/persistent/scripts/rm_old_files.sh": 51,
@@ -1450,17 +1461,31 @@
   "ubnt/persistent/scripts/save_current_profile.sh": 11,
   "ubnt/persistent/scripts/truncate_file.sh": 3,
   "ubnt/persistent/scripts/update_wifi.sh": 10,
-  "ubnt/persistent/scripts/wifi_manager.sh": 1950,
+  "ubnt/persistent/scripts/wifi_manager.sh": 193,
+  "ubnt/persistent/scripts/wifi_manager_connect.sh": 261,
+  "ubnt/persistent/scripts/wifi_manager_profiles.sh": 448,
+  "ubnt/persistent/scripts/wifi_manager_provision.sh": 208,
+  "ubnt/persistent/scripts/wifi_manager_runtime.sh": 146,
+  "ubnt/persistent/scripts/wifi_manager_scanning.sh": 275,
+  "ubnt/persistent/scripts/wifi_manager_starlink.sh": 46,
+  "ubnt/persistent/scripts/wifi_manager_status.sh": 152,
+  "ubnt/persistent/scripts/wifi_manager_transitions.sh": 255,
   "ubnt/rollback_device.sh": 46,
-  "ubnt/scp_to_device.sh": 113,
+  "ubnt/scp_to_device.sh": 139,
   "ubnt/sync_devices.sh": 30,
+  "ubnt/tests/fake_deployment_transport.py": 332,
+  "ubnt/tests/fixtures/fake_remote_command.sh": 171,
   "ubnt/tests/mock_command.sh": 71,
-  "ubnt/tests/test_admin_login.sh": 49,
-  "ubnt/tests/test_deployment.sh": 30,
+  "ubnt/tests/mock_sleep.sh": 8,
+  "ubnt/tests/mock_softrestart.sh": 5,
+  "ubnt/tests/test_admin_login.sh": 56,
+  "ubnt/tests/test_deployment.sh": 503,
   "ubnt/tests/test_parse_iwlist.sh": 19,
   "ubnt/tests/test_profile.sh": 17,
   "ubnt/tests/test_starlink_power_off.sh": 99,
   "ubnt/tests/test_wifi_manager.sh": 434,
+  "ubnt/tests/test_wifi_manager_differential.py": 402,
+  "ubnt/tests/wifi_manager_differential_driver.sh": 73,
   "van_compute/__init__.py": 5,
   "van_compute/backoff.py": 93,
   "van_compute/broker.py": 1748,
@@ -1488,7 +1513,7 @@
   "vanrouter/tests/test_openwrt_5ghz_ap.sh": 266,
   "vanrouter/tests/test_uplink_https_monitor.py": 82
  },
- "head": "408845528f248c6a162b800d4e7d3544fb0e4d93",
+ "head": "c2309ba16313d2b4b935b0f1c0bf353263f09eb3",
  "limits": {
   "enforce_tests": true,
   "file_lines": 800,
@@ -5773,6 +5798,45 @@
    "wait_for_speakers": 23,
    "wait_for_stereo_pair": 12
   },
+  "ubnt/tests/fake_deployment_transport.py": {
+   "append_event": 5,
+   "copy_item": 8,
+   "device_root": 2,
+   "fake_date": 13,
+   "fake_mktemp": 20,
+   "fake_scp": 36,
+   "fake_ssh": 21,
+   "main": 16,
+   "map_remote_path": 8,
+   "remote_bin": 2,
+   "remote_environment": 6,
+   "remote_shell": 18,
+   "required_env": 5,
+   "rewrite_remote_script": 44,
+   "run_dash_script": 16,
+   "scp_operands": 13,
+   "split_remote": 7,
+   "strip_ssh_options": 13,
+   "tree_digest": 22
+  },
+  "ubnt/tests/test_wifi_manager_differential.py": {
+   "apply_setup": 24,
+   "base_environment": 43,
+   "build_base_seed": 28,
+   "compare_outputs": 26,
+   "digest_entries": 5,
+   "dispatch_cases": 41,
+   "extract_old_entrypoint": 6,
+   "main": 46,
+   "parse_args": 7,
+   "profile_bytes": 37,
+   "resolve_value": 4,
+   "run_case": 27,
+   "set_system_profile": 5,
+   "stdin_cases": 23,
+   "tree_entries": 11,
+   "write_bytes": 3
+  },
   "van_compute/__init__.py": {},
   "van_compute/backoff.py": {
    "HostRetryGate.__init__": 15,
@@ -6336,13 +6400,19 @@
   "pi/tests/test_update_services.py",
   "pi/tests/test_usb_controller_watchdog.sh",
   "pi/tests/unit_contract.py",
+  "ubnt/tests/fake_deployment_transport.py",
+  "ubnt/tests/fixtures/fake_remote_command.sh",
   "ubnt/tests/mock_command.sh",
+  "ubnt/tests/mock_sleep.sh",
+  "ubnt/tests/mock_softrestart.sh",
   "ubnt/tests/test_admin_login.sh",
   "ubnt/tests/test_deployment.sh",
   "ubnt/tests/test_parse_iwlist.sh",
   "ubnt/tests/test_profile.sh",
   "ubnt/tests/test_starlink_power_off.sh",
   "ubnt/tests/test_wifi_manager.sh",
+  "ubnt/tests/test_wifi_manager_differential.py",
+  "ubnt/tests/wifi_manager_differential_driver.sh",
   "vanrouter/tests/test_clientwan_path_monitor.sh",
   "vanrouter/tests/test_kernel_5ghz_power.sh",
   "vanrouter/tests/test_openwrt_5ghz_ap.sh",
