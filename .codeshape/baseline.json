@@ -536,12 +536,6 @@
   },
   "heuristic_long_functions": [
    {
-    "file": "pi/scripts/umount_disks.sh",
-    "line": 591,
-    "lines": 346,
-    "name": "umount_disks_main"
-   },
-   {
     "file": "pi/apps/van_dashboard/frontend/src/features/ubnt/UbntSheet.tsx",
     "line": 79,
     "lines": 309,
@@ -555,7 +549,7 @@
    },
    {
     "file": "pi/scripts/disk_policy.sh",
-    "line": 77,
+    "line": 111,
     "lines": 196,
     "name": "disk_policy_resolve_exact_label"
    },
@@ -584,6 +578,12 @@
     "name": "mntdsk"
    },
    {
+    "file": "ubnt/persistent/scripts/wifi_manager.sh",
+    "line": 463,
+    "lines": 129,
+    "name": "emit_dashboard_snapshot"
+   },
+   {
     "file": "pi/apps/van_dashboard/frontend/src/features/compute/testFixtures.ts",
     "line": 4,
     "lines": 125,
@@ -602,6 +602,18 @@
     "name": "lightingPayload"
    },
    {
+    "file": "pi/scripts/umount_disks.sh",
+    "line": 660,
+    "lines": 118,
+    "name": "ud_unmount_all"
+   },
+   {
+    "file": "pi/scripts/umount_disks.sh",
+    "line": 834,
+    "lines": 118,
+    "name": "umount_disks_main"
+   },
+   {
     "file": "pi/apps/van_dashboard/frontend/src/features/dealWatch/DealWatchScheduleForm.tsx",
     "line": 18,
     "lines": 116,
@@ -618,6 +630,12 @@
     "line": 4,
     "lines": 111,
     "name": "ubntPayload"
+   },
+   {
+    "file": "ubnt/persistent/scripts/wifi_manager.sh",
+    "line": 918,
+    "lines": 111,
+    "name": "write_provision_config"
    },
    {
     "file": "pi/apps/van_dashboard/frontend/src/features/vonstar/hooks.ts",
@@ -662,22 +680,16 @@
     "name": "decodeListing"
    },
    {
+    "file": "ubnt/persistent/scripts/wifi_manager.sh",
+    "line": 1220,
+    "lines": 97,
+    "name": "rewrite_profile_settings"
+   },
+   {
     "file": "pi/apps/van_dashboard/frontend/src/features/backups/BackupsSheet.tsx",
     "line": 238,
     "lines": 96,
     "name": "BackupsSheet"
-   },
-   {
-    "file": "ubnt/persistent/scripts/wifi_manager.sh",
-    "line": 321,
-    "lines": 96,
-    "name": "emit_dashboard_snapshot"
-   },
-   {
-    "file": "ubnt/persistent/scripts/wifi_manager.sh",
-    "line": 701,
-    "lines": 94,
-    "name": "write_provision_config"
    },
    {
     "file": "pi/apps/van_dashboard/frontend/src/features/telemetry/TelemetryTile.tsx",
@@ -1253,7 +1265,7 @@
   "pi/scripts/cop_alert_ext_flood_guard.sh": 5,
   "pi/scripts/cycle_switch.sh": 24,
   "pi/scripts/disk_health_watchdog.sh": 207,
-  "pi/scripts/disk_policy.sh": 393,
+  "pi/scripts/disk_policy.sh": 427,
   "pi/scripts/find_large_files.sh": 44,
   "pi/scripts/fix_hfs_fs.sh": 15,
   "pi/scripts/hdd_alert.sh": 108,
@@ -1320,7 +1332,7 @@
   "pi/scripts/tuya_status.sh": 31,
   "pi/scripts/tuya_toggle.sh": 53,
   "pi/scripts/ubnt_wifi.py": 597,
-  "pi/scripts/umount_disks.sh": 946,
+  "pi/scripts/umount_disks.sh": 961,
   "pi/scripts/update_services.sh": 141,
   "pi/scripts/usb_controller_watchdog.sh": 64,
   "pi/scripts/usb_watch.py": 266,
@@ -1393,9 +1405,11 @@
   "pi/tests/price_check/test_price_cron_schedule.py": 190,
   "pi/tests/price_check/test_search_watch.py": 297,
   "pi/tests/storage/__init__.py": 1,
+  "pi/tests/storage/_umount_phase_support.py": 614,
   "pi/tests/storage/test_abort_backup.sh": 111,
   "pi/tests/storage/test_backup_job_lock.sh": 96,
   "pi/tests/storage/test_disk_health_watchdog.sh": 143,
+  "pi/tests/storage/test_disk_policy.py": 679,
   "pi/tests/storage/test_diskctl.sh": 373,
   "pi/tests/storage/test_exfat_snapshot.sh": 159,
   "pi/tests/storage/test_mount_disks.sh": 416,
@@ -1404,6 +1418,8 @@
   "pi/tests/storage/test_samba_require_mount.sh": 92,
   "pi/tests/storage/test_samba_share_control.sh": 142,
   "pi/tests/storage/test_umount_disks.sh": 239,
+  "pi/tests/storage/test_umount_disks_phases.py": 24,
+  "pi/tests/storage/test_umount_disks_phases_golden.py": 401,
   "pi/tests/test_backup_deployment.py": 229,
   "pi/tests/test_bashrc_s.sh": 53,
   "pi/tests/test_ignitionmonctl.sh": 75,
@@ -1434,12 +1450,12 @@
   "ubnt/persistent/scripts/save_current_profile.sh": 11,
   "ubnt/persistent/scripts/truncate_file.sh": 3,
   "ubnt/persistent/scripts/update_wifi.sh": 10,
-  "ubnt/persistent/scripts/wifi_manager.sh": 1677,
+  "ubnt/persistent/scripts/wifi_manager.sh": 1950,
   "ubnt/rollback_device.sh": 46,
   "ubnt/scp_to_device.sh": 113,
   "ubnt/sync_devices.sh": 30,
   "ubnt/tests/mock_command.sh": 71,
-  "ubnt/tests/test_admin_login.sh": 48,
+  "ubnt/tests/test_admin_login.sh": 49,
   "ubnt/tests/test_deployment.sh": 30,
   "ubnt/tests/test_parse_iwlist.sh": 19,
   "ubnt/tests/test_profile.sh": 17,
@@ -1472,7 +1488,7 @@
   "vanrouter/tests/test_openwrt_5ghz_ap.sh": 266,
   "vanrouter/tests/test_uplink_https_monitor.py": 82
  },
- "head": "d08480a3d32ce1ad31d3f273ae45764f838d089a",
+ "head": "408845528f248c6a162b800d4e7d3544fb0e4d93",
  "limits": {
   "enforce_tests": true,
   "file_lines": 800,
@@ -5432,6 +5448,55 @@
    "SearchStoreTests.test_new_identity_current_state_and_permanent_dismissal": 27
   },
   "pi/tests/storage/__init__.py": {},
+  "pi/tests/storage/_umount_phase_support.py": {
+   "_array": 2,
+   "_assoc": 5,
+   "_bash_major": 11,
+   "_quote": 2,
+   "_run_scenario": 61,
+   "_scenario_config": 79,
+   "_select_bash": 29,
+   "_sequence_fields": 12,
+   "_source_sha256": 2,
+   "_transform_source": 43,
+   "load_golden": 4
+  },
+  "pi/tests/storage/test_disk_policy.py": {
+   "DiskPolicyTests.test_adapter_success_command_shapes_and_order": 24,
+   "DiskPolicyTests.test_current_adapters_match_frozen_old_results": 13,
+   "DiskPolicyTests.test_parent_parser_cases_and_sentinel_globals": 31,
+   "DiskPolicyTests.test_parent_parser_resets_after_success_then_failure": 13,
+   "DiskPolicyTests.test_transport_is_exact_literal": 23,
+   "command_log": 7,
+   "extract_diskctl_resolver": 5,
+   "fake_command": 8,
+   "fixture_record": 2,
+   "make_fakes": 52,
+   "normal_diskctl": 14,
+   "normal_umount": 17,
+   "normalized": 2,
+   "parse_markers": 20,
+   "response": 2,
+   "response_script": 19,
+   "run_adapter": 4,
+   "run_bash": 19,
+   "run_diskctl_adapter": 51,
+   "run_umount_adapter": 60,
+   "shell_literal": 2,
+   "write_executable": 3
+  },
+  "pi/tests/storage/test_umount_disks_phases.py": {
+   "PhaseStructureTests.test_extracted_phases_are_wired_in_order": 12
+  },
+  "pi/tests/storage/test_umount_disks_phases_golden.py": {
+   "PhaseGoldenRegressionTests.setUpClass": 2,
+   "PhaseGoldenRegressionTests.test_frozen_fixture_covers_exact_named_cases": 13,
+   "_make_case_test": 12,
+   "_make_case_test.test": 7,
+   "attached": 7,
+   "discovery_error": 2,
+   "vanished": 7
+  },
   "pi/tests/test_backup_deployment.py": {
    "BackupDeploymentTests.test_backup_jobs_publish_dashboard_progress_without_driving_success": 16,
    "BackupDeploymentTests.test_backup_only_unmounts_bigboi_when_it_mounted_bigboi": 15,
@@ -6241,9 +6306,11 @@
   "pi/tests/price_check/test_price_cron_schedule.py",
   "pi/tests/price_check/test_search_watch.py",
   "pi/tests/storage/__init__.py",
+  "pi/tests/storage/_umount_phase_support.py",
   "pi/tests/storage/test_abort_backup.sh",
   "pi/tests/storage/test_backup_job_lock.sh",
   "pi/tests/storage/test_disk_health_watchdog.sh",
+  "pi/tests/storage/test_disk_policy.py",
   "pi/tests/storage/test_diskctl.sh",
   "pi/tests/storage/test_exfat_snapshot.sh",
   "pi/tests/storage/test_mount_disks.sh",
@@ -6252,6 +6319,8 @@
   "pi/tests/storage/test_samba_require_mount.sh",
   "pi/tests/storage/test_samba_share_control.sh",
   "pi/tests/storage/test_umount_disks.sh",
+  "pi/tests/storage/test_umount_disks_phases.py",
+  "pi/tests/storage/test_umount_disks_phases_golden.py",
   "pi/tests/test_backup_deployment.py",
   "pi/tests/test_bashrc_s.sh",
   "pi/tests/test_ignitionmonctl.sh",
