@@ -91,6 +91,10 @@
     "pi/apps/van_dashboard/frontend/src/features/compute/ComputeTile.tsx",
     "pi/apps/van_dashboard/frontend/src/features/dealWatch/DealWatchTile.tsx"
    ],
+   "control": [
+    "pi/scripts/backup/cloud_backup_control.py",
+    "pi/scripts/backup/time_machine_icloud_control.py"
+   ],
    "controlsArchives": [
     "macbook/bettertouchtool/lib/media_recovery.js",
     "macbook/bettertouchtool/one_off_fixes/2026-09-18-NONPERSISTENT-nested-media-repair.js"
@@ -133,6 +137,7 @@
     "macbook/bettertouchtool/install_strip_metadata_menu.py"
    ],
    "digest": [
+    "pi/apps/video_library/maintenance/same_file_repair.py",
     "pi/deploy_network_flight_recorder.py",
     "pi/deploy_python.py",
     "ubnt/deploy_remote.sh"
@@ -438,6 +443,10 @@
     "vanrouter/kernel-5ghz-power/finalize-openwrt-build.sh",
     "vanrouter/kernel-5ghz-power/prepare-recovery-kit.sh"
    ],
+   "snapshot": [
+    "pi/apps/video_library/maintenance/same_file_repair.py",
+    "pi/scripts/usb_watch.py"
+   ],
    "status": [
     "macbook/scripts/rhythm_ui.js",
     "pi/scripts/backup/time_machine_icloud_status.py"
@@ -650,6 +659,12 @@
     "name": "write_provision_config"
    },
    {
+    "file": "pi/apps/van_dashboard/frontend/src/features/backups/BackupsSheet.tsx",
+    "line": 242,
+    "lines": 109,
+    "name": "BackupsSheet"
+   },
+   {
     "file": "pi/apps/van_dashboard/frontend/src/features/vonstar/hooks.ts",
     "line": 24,
     "lines": 109,
@@ -672,12 +687,6 @@
     "line": 51,
     "lines": 105,
     "name": "run"
-   },
-   {
-    "file": "pi/apps/van_dashboard/frontend/src/features/backups/BackupsSheet.tsx",
-    "line": 238,
-    "lines": 101,
-    "name": "BackupsSheet"
    },
    {
     "file": "pi/apps/van_dashboard/frontend/src/features/usb/controls.ts",
@@ -742,7 +751,7 @@
    {
     "file": "pi/apps/van_dashboard/frontend/src/features/backups/testFixtures.ts",
     "line": 3,
-    "lines": 87,
+    "lines": 88,
     "name": "backupStatusPayload"
    },
    {
@@ -765,7 +774,9 @@
    }
   ]
  },
- "date": "2026-10-06",
+ "date": "2026-10-07",
+ "exceptions": {},
+ "file_limits": {},
  "files": {
   "macbook/bettertouchtool/btt.py": 131,
   "macbook/bettertouchtool/btt_backup.zsh": 58,
@@ -931,22 +942,24 @@
   "pi/apps/van_dashboard/frontend/src/dashboard/tileOrder.ts": 58,
   "pi/apps/van_dashboard/frontend/src/dashboard/useTileOrder.ts": 40,
   "pi/apps/van_dashboard/frontend/src/features/backups/BackupsFeature.tsx": 26,
-  "pi/apps/van_dashboard/frontend/src/features/backups/BackupsSheet.tsx": 338,
-  "pi/apps/van_dashboard/frontend/src/features/backups/BackupsTile.tsx": 164,
-  "pi/apps/van_dashboard/frontend/src/features/backups/ICloudBackupCard.tsx": 227,
-  "pi/apps/van_dashboard/frontend/src/features/backups/TimeMachineCloudControls.tsx": 91,
-  "pi/apps/van_dashboard/frontend/src/features/backups/api.ts": 68,
-  "pi/apps/van_dashboard/frontend/src/features/backups/backups.test.tsx": 198,
+  "pi/apps/van_dashboard/frontend/src/features/backups/BackupsSheet.tsx": 350,
+  "pi/apps/van_dashboard/frontend/src/features/backups/BackupsTile.tsx": 151,
+  "pi/apps/van_dashboard/frontend/src/features/backups/ICloudBackupCard.tsx": 241,
+  "pi/apps/van_dashboard/frontend/src/features/backups/ICloudBackupControls.tsx": 101,
+  "pi/apps/van_dashboard/frontend/src/features/backups/ICloudPauseSelector.tsx": 24,
+  "pi/apps/van_dashboard/frontend/src/features/backups/api.ts": 67,
+  "pi/apps/van_dashboard/frontend/src/features/backups/backups.test.tsx": 202,
+  "pi/apps/van_dashboard/frontend/src/features/backups/cloudPresentation.ts": 51,
   "pi/apps/van_dashboard/frontend/src/features/backups/controls.test.tsx": 127,
   "pi/apps/van_dashboard/frontend/src/features/backups/controls.ts": 212,
-  "pi/apps/van_dashboard/frontend/src/features/backups/decoders.ts": 237,
+  "pi/apps/van_dashboard/frontend/src/features/backups/decoders.ts": 238,
   "pi/apps/van_dashboard/frontend/src/features/backups/hooks.ts": 27,
-  "pi/apps/van_dashboard/frontend/src/features/backups/icloud.test.tsx": 215,
-  "pi/apps/van_dashboard/frontend/src/features/backups/icloud.ts": 205,
+  "pi/apps/van_dashboard/frontend/src/features/backups/icloud.test.tsx": 315,
+  "pi/apps/van_dashboard/frontend/src/features/backups/icloud.ts": 219,
   "pi/apps/van_dashboard/frontend/src/features/backups/index.ts": 22,
   "pi/apps/van_dashboard/frontend/src/features/backups/presentation.ts": 58,
-  "pi/apps/van_dashboard/frontend/src/features/backups/testFixtures.ts": 93,
-  "pi/apps/van_dashboard/frontend/src/features/backups/types.ts": 98,
+  "pi/apps/van_dashboard/frontend/src/features/backups/testFixtures.ts": 94,
+  "pi/apps/van_dashboard/frontend/src/features/backups/types.ts": 99,
   "pi/apps/van_dashboard/frontend/src/features/compute/Compute.test.tsx": 74,
   "pi/apps/van_dashboard/frontend/src/features/compute/ComputeFeature.tsx": 30,
   "pi/apps/van_dashboard/frontend/src/features/compute/ComputeJobList.tsx": 117,
@@ -1182,7 +1195,7 @@
   "pi/apps/van_dashboard/http.py": 53,
   "pi/apps/van_dashboard/react_dashboard_preview.py": 616,
   "pi/apps/van_dashboard/routes/__init__.py": 0,
-  "pi/apps/van_dashboard/routes/backups.py": 171,
+  "pi/apps/van_dashboard/routes/backups.py": 193,
   "pi/apps/van_dashboard/routes/common.py": 71,
   "pi/apps/van_dashboard/routes/cop.py": 43,
   "pi/apps/van_dashboard/routes/disks.py": 50,
@@ -1197,16 +1210,17 @@
   "pi/apps/van_dashboard/routes/telemetry.py": 133,
   "pi/apps/van_dashboard/routes/usb.py": 91,
   "pi/apps/van_dashboard/routes/vonstar.py": 58,
-  "pi/apps/van_dashboard/runtime.py": 60,
+  "pi/apps/van_dashboard/runtime.py": 61,
   "pi/apps/van_dashboard/van_dashboard.py": 73,
-  "pi/apps/van_dashboard/van_dashboard_backups.py": 852,
+  "pi/apps/van_dashboard/van_dashboard_backups.py": 827,
   "pi/apps/van_dashboard/van_dashboard_block_devices.py": 31,
-  "pi/apps/van_dashboard/van_dashboard_cloud_controls.py": 27,
+  "pi/apps/van_dashboard/van_dashboard_cloud_controls.py": 32,
   "pi/apps/van_dashboard/van_dashboard_common.py": 303,
   "pi/apps/van_dashboard/van_dashboard_cop.py": 551,
   "pi/apps/van_dashboard/van_dashboard_disks.py": 553,
   "pi/apps/van_dashboard/van_dashboard_history.py": 122,
   "pi/apps/van_dashboard/van_dashboard_home.py": 476,
+  "pi/apps/van_dashboard/van_dashboard_hotspares.py": 71,
   "pi/apps/van_dashboard/van_dashboard_integrations.py": 222,
   "pi/apps/van_dashboard/van_dashboard_network.py": 784,
   "pi/apps/van_dashboard/van_dashboard_projects.py": 89,
@@ -1218,12 +1232,15 @@
   "pi/apps/van_dashboard/van_dashboard_vonstar.py": 375,
   "pi/apps/video_library/__init__.py": 1,
   "pi/apps/video_library/__main__.py": 9,
-  "pi/apps/video_library/catalog.py": 1990,
+  "pi/apps/video_library/catalog.py": 1907,
   "pi/apps/video_library/catalog_values.py": 69,
   "pi/apps/video_library/config.py": 123,
-  "pi/apps/video_library/identity.py": 600,
-  "pi/apps/video_library/legacy_progress.py": 445,
+  "pi/apps/video_library/deferred_positions.py": 49,
+  "pi/apps/video_library/file_observations.py": 141,
+  "pi/apps/video_library/identity.py": 609,
+  "pi/apps/video_library/legacy_progress.py": 442,
   "pi/apps/video_library/library.py": 426,
+  "pi/apps/video_library/maintenance/same_file_repair.py": 581,
   "pi/apps/video_library/media_models.py": 104,
   "pi/apps/video_library/naming.py": 216,
   "pi/apps/video_library/playback.py": 733,
@@ -1239,11 +1256,11 @@
   "pi/apps/video_library/video_qbittorrent.py": 949,
   "pi/canbus_funcs.sh": 94,
   "pi/check_compute_provider.py": 63,
-  "pi/deploy_icloud_backup.sh": 72,
+  "pi/deploy_icloud_backup.sh": 81,
   "pi/deploy_network_flight_recorder.py": 509,
   "pi/deploy_network_storage.py": 834,
   "pi/deploy_python.py": 739,
-  "pi/deploy_time_machine_icloud.sh": 113,
+  "pi/deploy_time_machine_icloud.sh": 117,
   "pi/deploy_van_dashboard_preview.sh": 307,
   "pi/deploy_video_library.sh": 9,
   "pi/hooks/ignition_off.sh": 16,
@@ -1264,20 +1281,22 @@
   "pi/scripts/backup/backup_window.sh": 36,
   "pi/scripts/backup/clone_now.sh": 37,
   "pi/scripts/backup/clone_to_sd.sh": 124,
+  "pi/scripts/backup/cloud_backup_control.py": 101,
   "pi/scripts/backup/exfat_snapshot.sh": 667,
-  "pi/scripts/backup/icloud_backup.py": 785,
+  "pi/scripts/backup/icloud_backup.py": 786,
   "pi/scripts/backup/icloud_backup.sh": 16,
+  "pi/scripts/backup/icloud_backup_control.py": 10,
   "pi/scripts/backup/icloud_progress.py": 123,
-  "pi/scripts/backup/icloud_status.py": 213,
+  "pi/scripts/backup/icloud_status.py": 280,
   "pi/scripts/backup/icloud_uplink.py": 109,
   "pi/scripts/backup/new_hotspare.sh": 440,
   "pi/scripts/backup/openwrt_backup.sh": 144,
   "pi/scripts/backup/pi_backup.sh": 282,
   "pi/scripts/backup/progress.sh": 62,
-  "pi/scripts/backup/time_machine_icloud.py": 510,
+  "pi/scripts/backup/time_machine_icloud.py": 511,
   "pi/scripts/backup/time_machine_icloud.sh": 12,
-  "pi/scripts/backup/time_machine_icloud_control.py": 87,
-  "pi/scripts/backup/time_machine_icloud_status.py": 58,
+  "pi/scripts/backup/time_machine_icloud_control.py": 23,
+  "pi/scripts/backup/time_machine_icloud_status.py": 47,
   "pi/scripts/backup/time_machine_store.py": 257,
   "pi/scripts/backup/ubnt_backup.sh": 120,
   "pi/scripts/claude_ntfy_notify.py": 111,
@@ -1365,8 +1384,8 @@
   "pi/sync_scripts.sh": 181,
   "pi/sync_workflow.sh": 6,
   "pi/tests/__init__.py": 1,
-  "pi/tests/backup/test_icloud_backup.py": 446,
-  "pi/tests/backup/test_icloud_status.py": 115,
+  "pi/tests/backup/test_icloud_backup.py": 578,
+  "pi/tests/backup/test_icloud_status.py": 158,
   "pi/tests/backup/test_time_machine_icloud.py": 513,
   "pi/tests/compute/__init__.py": 1,
   "pi/tests/compute/test_van_compute.py": 2136,
@@ -1391,8 +1410,9 @@
   "pi/tests/compute/van_compute_test_fixtures.py": 265,
   "pi/tests/dashboard/__init__.py": 1,
   "pi/tests/dashboard/_frontend_test_support.py": 24,
-  "pi/tests/dashboard/test_cloud_controls.py": 47,
+  "pi/tests/dashboard/test_cloud_controls.py": 70,
   "pi/tests/dashboard/test_hosted_projects.py": 90,
+  "pi/tests/dashboard/test_hotspare_usage.py": 42,
   "pi/tests/dashboard/test_icloud_dashboard.py": 51,
   "pi/tests/dashboard/test_lighting_power_switches.py": 132,
   "pi/tests/dashboard/test_network_history.py": 258,
@@ -1412,6 +1432,9 @@
   "pi/tests/media/test_video_library_server.py": 2579,
   "pi/tests/media/test_video_package_boot.py": 370,
   "pi/tests/media/test_video_qbittorrent.py": 510,
+  "pi/tests/media/test_video_same_file_repair.py": 281,
+  "pi/tests/media/test_video_scan_performance.py": 90,
+  "pi/tests/media/test_video_scan_playback.py": 136,
   "pi/tests/network/__init__.py": 1,
   "pi/tests/network/_network_storage_support.py": 28,
   "pi/tests/network/check_openwrt_network_spool.py": 294,
@@ -1534,7 +1557,8 @@
   "vanrouter/tests/test_openwrt_5ghz_ap.sh": 266,
   "vanrouter/tests/test_uplink_https_monitor.py": 82
  },
- "head": "096bb5d62f567f23813f8f62c9caf6ecdab63abc",
+ "func_limits": {},
+ "head": "29d91c536a8682a8eca6623eaaa3356f41ba367b",
  "limits": {
   "enforce_tests": true,
   "file_lines": 800,
@@ -2305,14 +2329,18 @@
   "pi/apps/van_dashboard/routes/backups.py": {
    "_api_manual_backup": 22,
    "_api_stop_backup": 20,
-   "_time_machine_cloud_action": 16,
+   "_cloud_action": 17,
    "api_backup_borg": 2,
    "api_backup_clone": 19,
    "api_backup_clone_card_size": 19,
    "api_backup_exfat": 2,
    "api_backups": 10,
+   "api_pause_pi_cloud": 2,
    "api_pause_time_machine_cloud": 2,
+   "api_resume_pi_cloud": 2,
    "api_resume_time_machine_cloud": 2,
+   "api_select_pi_cloud": 2,
+   "api_select_time_machine_cloud": 2,
    "api_stop_borg_backup": 2,
    "api_stop_exfat_backup": 2
   },
@@ -2454,7 +2482,7 @@
    "BackupManager.start_borg_backup": 4,
    "BackupManager.start_clone": 37,
    "BackupManager.start_exfat_backup": 4,
-   "BackupManager.status": 127
+   "BackupManager.status": 100
   },
   "pi/apps/van_dashboard/van_dashboard_block_devices.py": {
    "block_device_descendants": 7,
@@ -2462,8 +2490,8 @@
    "root_block_device": 6
   },
   "pi/apps/van_dashboard/van_dashboard_cloud_controls.py": {
-   "TimeMachineCloudControl.__init__": 2,
-   "TimeMachineCloudControl.request": 17
+   "CloudBackupControl.__init__": 3,
+   "CloudBackupControl.request": 19
   },
   "pi/apps/van_dashboard/van_dashboard_common.py": {
    "StateStore.__init__": 11,
@@ -2545,6 +2573,10 @@
    "TuyaSwitchManager.start": 6,
    "TuyaSwitchManager.stop": 2,
    "TuyaSwitchManager.toggle": 29
+  },
+  "pi/apps/van_dashboard/van_dashboard_hotspares.py": {
+   "build_hotspares": 33,
+   "hotspare_used_bytes": 27
   },
   "pi/apps/van_dashboard/van_dashboard_integrations.py": {
    "PriceCheckController.__init__": 11,
@@ -2760,7 +2792,7 @@
    "MediaAssetCatalog.recover_open_sessions": 26,
    "MediaAssetCatalog.resolve_alias": 21,
    "MediaAssetCatalog.resolve_legacy_key": 18,
-   "MediaAssetCatalog.resolve_or_create_provisional_file": 160,
+   "MediaAssetCatalog.resolve_or_create_provisional_file": 76,
    "MediaAssetCatalog.resolve_or_create_torrent_asset": 148,
    "MediaAssetCatalog.resolve_path": 27,
    "MediaAssetCatalog.retire_alias": 24,
@@ -2784,10 +2816,20 @@
    "_required_text": 5
   },
   "pi/apps/video_library/config.py": {},
+  "pi/apps/video_library/deferred_positions.py": {
+   "DeferredLegacyPositions.__init__": 13,
+   "DeferredLegacyPositions.discard": 3,
+   "DeferredLegacyPositions.matching": 10
+  },
+  "pi/apps/video_library/file_observations.py": {
+   "_accepts_file_stat": 19,
+   "matching_file_assets": 54,
+   "record_file_identity": 51
+  },
   "pi/apps/video_library/identity.py": {
    "CatalogIdentityMixin._asset_identity_label": 8,
-   "CatalogIdentityMixin._bind_catalog_item": 2,
-   "CatalogIdentityMixin._bind_library_item": 71,
+   "CatalogIdentityMixin._bind_catalog_item": 4,
+   "CatalogIdentityMixin._bind_library_item": 74,
    "CatalogIdentityMixin._catalog_item_progress": 3,
    "CatalogIdentityMixin._ensure_asset_work": 29,
    "CatalogIdentityMixin._path_is_probably_incomplete": 19,
@@ -2799,7 +2841,7 @@
    "CatalogIdentityMixin._retry_session_recovery": 25,
    "CatalogIdentityMixin._seed_catalog_asset": 23,
    "CatalogIdentityMixin._status_item_progress": 7,
-   "CatalogIdentityMixin._sync_library_identities": 24,
+   "CatalogIdentityMixin._sync_library_identities": 27,
    "CatalogIdentityMixin._torrent_metadata": 11,
    "CatalogIdentityMixin.reconcile_torrents": 80,
    "CatalogIdentityMixin.update_progress": 33,
@@ -2813,7 +2855,7 @@
    "catalog_degrades.decorate.degrading": 11
   },
   "pi/apps/video_library/legacy_progress.py": {
-   "LegacyProgressMixin._apply_deferred_legacy_positions": 50,
+   "LegacyProgressMixin._apply_deferred_legacy_positions": 47,
    "LegacyProgressMixin._legacy_path_evidence": 42,
    "LegacyProgressMixin._legacy_progress_for_asset": 37,
    "LegacyProgressMixin._project_item_progress": 29,
@@ -2849,6 +2891,33 @@
    "MediaLibrary.scan": 108,
    "MediaLibrary.snapshot": 3,
    "default_sources": 5
+  },
+  "pi/apps/video_library/maintenance/same_file_repair.py": {
+   "authorize": 2,
+   "current_states": 3,
+   "digest": 2,
+   "ensure_unused": 20,
+   "equal_rows": 2,
+   "invalidate_reused_inode": 51,
+   "legacy_same_file": 14,
+   "load_plan": 22,
+   "main": 54,
+   "observation_status": 21,
+   "one": 5,
+   "postcheck": 32,
+   "project_progress": 16,
+   "repair_legacy": 30,
+   "repair_pair": 36,
+   "repair_timestamp": 9,
+   "require": 3,
+   "rows": 2,
+   "run_repair": 33,
+   "scan": 39,
+   "snapshot": 10,
+   "stat_value": 4,
+   "validate_legacy_evidence": 14,
+   "validate_pair": 41,
+   "validate_playback": 20
   },
   "pi/apps/video_library/media_models.py": {
    "MediaItem.as_dict": 20,
@@ -3132,6 +3201,14 @@
    "record_running_release": 29
   },
   "pi/scripts/__init__.py": {},
+  "pi/scripts/backup/cloud_backup_control.py": {
+   "admit_worker": 8,
+   "control": 31,
+   "is_paused": 3,
+   "request_service": 3,
+   "run_cli": 11,
+   "take_turn": 17
+  },
   "pi/scripts/backup/icloud_backup.py": {
    "abort": 3,
    "atomic_json": 12,
@@ -3149,12 +3226,12 @@
    "local_backup_window.minutes": 3,
    "local_backups_complete": 16,
    "login": 15,
-   "main": 72,
+   "main": 74,
    "make_snapshot": 31,
    "make_snapshot.check": 6,
    "notify": 11,
    "read_json": 5,
-   "record_progress": 9,
+   "record_progress": 11,
    "remote_fingerprint": 6,
    "remote_inventory": 13,
    "retention": 24,
@@ -3163,11 +3240,12 @@
    "stop_child": 21,
    "upload_progress": 13,
    "verification_plan": 26,
-   "verify_generation": 59,
+   "verify_generation": 60,
    "verify_generation.report": 5,
    "verify_login": 20,
-   "weekly": 92
+   "weekly": 87
   },
+  "pi/scripts/backup/icloud_backup_control.py": {},
   "pi/scripts/backup/icloud_progress.py": {
    "ProcessIO.__init__": 2,
    "ProcessIO.sample": 19,
@@ -3183,18 +3261,22 @@
    "StreamDigest.result": 5
   },
   "pi/scripts/backup/icloud_status.py": {
+   "apply_manual_control": 17,
    "attempt_row": 7,
    "begin_attempt": 5,
-   "build_status": 37,
-   "dashboard_status": 17,
+   "build_status": 38,
+   "dashboard_status": 20,
    "dashboard_status.capture": 2,
    "generation": 2,
    "number": 2,
+   "pause_deadline": 8,
    "phase": 2,
    "progress": 3,
+   "queued_backup_message": 23,
    "read_json": 5,
    "reason": 49,
    "save_attempt": 12,
+   "transfer_stalled": 5,
    "write_json": 12
   },
   "pi/scripts/backup/icloud_uplink.py": {
@@ -3218,7 +3300,7 @@
    "smb_state": 9,
    "storage_root": 17,
    "transfer": 52,
-   "verify_objects": 37,
+   "verify_objects": 38,
    "verify_objects.report": 4,
    "wait_image_handles": 17,
    "weekly": 35,
@@ -3226,14 +3308,11 @@
    "worker_alive": 11
   },
   "pi/scripts/backup/time_machine_icloud_control.py": {
-   "admit_worker": 8,
-   "control": 31,
-   "is_paused": 3,
-   "main": 9,
-   "pause_deadline": 8
+   "control": 3,
+   "main": 2
   },
   "pi/scripts/backup/time_machine_icloud_status.py": {
-   "status": 33,
+   "status": 24,
    "status.capture": 2
   },
   "pi/scripts/backup/time_machine_store.py": {
@@ -3679,6 +3758,17 @@
    "CheckpointTests.test_manifest_change_invalidates_previous_generation_proof": 7,
    "CheckpointTests.test_metadata_change_during_verification_prevents_completion": 6,
    "CheckpointTests.verify": 3,
+   "PiPauseTests.setUp": 15,
+   "PiPauseTests.setUp.root_owner": 6,
+   "PiPauseTests.test_busy_control_refuses_switch_without_partial_intents": 9,
+   "PiPauseTests.test_failed_peer_stop_keeps_safe_hold_and_queue_without_forcing_start": 8,
+   "PiPauseTests.test_indefinite_hold_never_expires_and_resume_clears_it": 13,
+   "PiPauseTests.test_pause_blocks_pi_worker_without_overwriting_saved_state": 15,
+   "PiPauseTests.test_pending_copy_survives_long_pause_and_recent_success": 29,
+   "PiPauseTests.test_pending_copy_survives_long_pause_and_recent_success.run": 5,
+   "PiPauseTests.test_pi_expiry_queues_until_worker_admission_and_does_not_pause_mac": 13,
+   "PiPauseTests.test_take_turn_pauses_peer_before_starting_selection": 13,
+   "PiPauseTests.turn_fixture": 4,
    "ProgressTests.test_final_auth_error_survives_a_large_progress_log": 11,
    "ProgressTests.test_final_auth_error_survives_a_large_progress_log.Client.poll": 1,
    "ProgressTests.test_final_auth_error_survives_a_large_progress_log.spawn": 4,
@@ -3729,12 +3819,16 @@
    "StatusTests.test_bounded_history_and_verified_evidence_survive_failures": 15,
    "StatusTests.test_dead_worker_is_not_running": 5,
    "StatusTests.test_exclusive_access_loss_has_a_specific_public_reason": 3,
+   "StatusTests.test_indefinite_pause_has_no_retry_deadline_or_stall_warning": 8,
+   "StatusTests.test_manual_projection_preserves_upload_history_and_clears_only_on_expiry": 11,
    "StatusTests.test_matching_worker_and_stale_heartbeat": 8,
    "StatusTests.test_new_worker_does_not_inherit_old_progress": 5,
    "StatusTests.test_paused_keeps_numeric_progress_but_never_exports_secrets": 11,
    "StatusTests.test_phase_updates_persist_history_without_per_tick_history_writes": 9,
+   "StatusTests.test_queued_message_names_verified_lock_owner_and_rejects_stale_pid": 11,
    "StatusTests.test_speed_only_comes_from_a_fresh_matching_live_upload": 7,
    "StatusTests.test_stale_open_history_marked_interrupted": 5,
+   "StatusTests.test_stall_requires_live_fresh_transfer_idle_evidence": 9,
    "StatusTests.test_upload_estimate_includes_prior_objects_and_clamps_retries": 6
   },
   "pi/tests/backup/test_time_machine_icloud.py": {
@@ -4325,10 +4419,12 @@
    "react_index_page": 13
   },
   "pi/tests/dashboard/test_cloud_controls.py": {
-   "CloudControlTests.setUp": 10,
+   "CloudControlTests.setUp": 13,
    "CloudControlTests.test_failed_command_does_not_expose_private_output": 5,
+   "CloudControlTests.test_indefinite_pause_and_selection_are_fixed_allowlisted_commands": 10,
    "CloudControlTests.test_invalid_and_cross_origin_requests_cannot_control_backups": 8,
-   "CloudControlTests.test_pause_and_resume_use_fixed_commands": 8
+   "CloudControlTests.test_pause_and_resume_use_fixed_commands": 8,
+   "CloudControlTests.test_pi_pause_and_resume_use_pi_helper_only": 8
   },
   "pi/tests/dashboard/test_hosted_projects.py": {
    "HostedProjectRouteTests.test_routes_validate_and_preserve_csrf_protection": 15,
@@ -4338,6 +4434,13 @@
    "HostedProjectTests.test_failed_disk_write_does_not_leave_a_phantom_project": 5,
    "HostedProjectTests.test_rejects_invalid_input_without_saving": 11,
    "HostedProjectTests.test_same_submission_is_idempotent_but_conflicting_name_is_rejected": 6
+  },
+  "pi/tests/dashboard/test_hotspare_usage.py": {
+   "HotspareUsageTests.setUp": 5,
+   "HotspareUsageTests.test_ambiguous_labels_are_never_probed": 6,
+   "HotspareUsageTests.test_missing_dirty_mismatched_and_failed_probes_are_unknown": 10,
+   "HotspareUsageTests.test_mounted_volume_uses_live_fsused_instead_of_superblock": 4,
+   "HotspareUsageTests.test_reads_unmounted_allocation_by_label_without_mounting": 5
   },
   "pi/tests/dashboard/test_icloud_dashboard.py": {
    "ICloudDashboardTests.test_fixed_read_only_helper_and_failure_isolated": 12,
@@ -5168,6 +5271,45 @@
    "_LoginServerHandler.log_message": 2,
    "torrent": 24,
    "torrent_file": 17
+  },
+  "pi/tests/media/test_video_same_file_repair.py": {
+   "SameFileRepairTests.add_inode_exception": 24,
+   "SameFileRepairTests.invoke": 12,
+   "SameFileRepairTests.make_pair": 15,
+   "SameFileRepairTests.setUp": 38,
+   "SameFileRepairTests.snapshot": 2,
+   "SameFileRepairTests.test_apply_preserves_history_and_second_apply_is_noop": 17,
+   "SameFileRepairTests.test_apply_requires_explicit_stopped_acknowledgement": 6,
+   "SameFileRepairTests.test_changed_legacy_binding_skips_entire_pair": 8,
+   "SameFileRepairTests.test_changed_playback_is_not_overwritten": 7,
+   "SameFileRepairTests.test_changed_stat_skips_pair_and_rolls_back_entire_transaction": 8,
+   "SameFileRepairTests.test_changed_work_is_not_merged": 7,
+   "SameFileRepairTests.test_default_dry_run_never_changes_file_and_reports_transfer": 10,
+   "SameFileRepairTests.test_holder_check_rejects_active_holder_or_diagnostic_errors": 8,
+   "SameFileRepairTests.test_inode_exception_only_invalidates_identity_without_playback_transfer": 11,
+   "SameFileRepairTests.test_inode_exception_refuses_if_old_file_reappears": 8,
+   "SameFileRepairTests.test_newer_target_playback_is_not_overwritten": 7,
+   "SameFileRepairTests.test_no_holder_tools_requires_confirmed_inactive_service": 5,
+   "SameFileRepairTests.test_older_device_same_file_binding_is_rebound_without_merging_asset": 21,
+   "SameFileRepairTests.test_postcheck_failure_rolls_back_everything": 6,
+   "SameFileRepairTests.test_unexpected_api_failure_rolls_back_earlier_transfer": 8,
+   "SameFileRepairTests.test_unrelated_encode_binding_is_retained": 9
+  },
+  "pi/tests/media/test_video_scan_performance.py": {
+   "VideoScanPerformanceTests.seed_positions": 13,
+   "VideoScanPerformanceTests.setUp": 7,
+   "VideoScanPerformanceTests.test_bound_files_use_indexed_identity_queries": 14,
+   "VideoScanPerformanceTests.test_next_rescan_sees_history_added_after_previous_scan": 8,
+   "VideoScanPerformanceTests.test_rescan_preserves_history_order_and_only_applies_matches_once": 15,
+   "VideoScanPerformanceTests.test_rescan_reads_unresolved_history_once_not_once_per_item": 14
+  },
+  "pi/tests/media/test_video_scan_playback.py": {
+   "StatusSignalPlayer.__init__": 4,
+   "StatusSignalPlayer.snapshot": 5,
+   "VideoScanPlaybackTests.assert_durable_progress": 24,
+   "VideoScanPlaybackTests.setUp": 3,
+   "VideoScanPlaybackTests.test_status_save_waits_for_scan_transaction_and_survives_rollback": 77,
+   "VideoScanPlaybackTests.test_status_save_waits_for_scan_transaction_and_survives_rollback.save_status": 7
   },
   "pi/tests/network/__init__.py": {},
   "pi/tests/network/_network_storage_support.py": {
@@ -6475,6 +6617,7 @@
   "pi/tests/dashboard/_frontend_test_support.py",
   "pi/tests/dashboard/test_cloud_controls.py",
   "pi/tests/dashboard/test_hosted_projects.py",
+  "pi/tests/dashboard/test_hotspare_usage.py",
   "pi/tests/dashboard/test_icloud_dashboard.py",
   "pi/tests/dashboard/test_lighting_power_switches.py",
   "pi/tests/dashboard/test_network_history.py",
@@ -6494,6 +6637,9 @@
   "pi/tests/media/test_video_library_server.py",
   "pi/tests/media/test_video_package_boot.py",
   "pi/tests/media/test_video_qbittorrent.py",
+  "pi/tests/media/test_video_same_file_repair.py",
+  "pi/tests/media/test_video_scan_performance.py",
+  "pi/tests/media/test_video_scan_playback.py",
   "pi/tests/network/__init__.py",
   "pi/tests/network/_network_storage_support.py",
   "pi/tests/network/check_openwrt_network_spool.py",
