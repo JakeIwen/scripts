@@ -119,6 +119,8 @@ def reason(state):
     """Translate known conditions without exposing paths, SSIDs or server bodies."""
     value = str(state.get('last_error') or '').casefold()
     if state.get('kind') == 'time-machine' and state.get('phase') == 'preparing':
+        if state.get('progress', {}).get('capture_cleaning'):
+            return 'Reclaiming unused local staging chunks before Time Machine capture.'
         if state.get('progress', {}).get('capture_draining'):
             return 'Mac image detached; waiting for its SMB file handles to close before capture.'
         return ('Waiting for the Mac to cleanly detach its idle Time Machine image.'

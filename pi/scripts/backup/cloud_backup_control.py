@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 
-from icloud_status import INDEFINITE_PAUSE, pause_deadline, write_json
+from icloud_status import INDEFINITE_PAUSE, number, pause_deadline, read_json, write_json
 
 MAX_PAUSE_MINUTES = 7 * 24 * 60
 CLOUD_JOBS = {
@@ -34,6 +34,12 @@ def admit_worker(directory, now=None):
 def request_service(operation, service, command):
     command(['/usr/bin/systemctl', operation, '--no-block', service],
             check=True, capture_output=True, text=True, timeout=10)
+
+
+def automatic_retry_due(directory, now):
+    state = read_json(directory / 'state.json', {})
+    retry_at = number(state.get('retry_at'))
+    return bool(state.get('phase') == 'deferred' and retry_at is not None and retry_at <= now)
 
 
 def take_turn(service, *, jobs=CLOUD_JOBS, now=None, command=subprocess.run):
@@ -77,8 +83,11 @@ def control(action, minutes=None, *, directory, service, now=None, command=subpr
             operation = 'stop'
         else:
             deadline = pause_deadline(directory)
-            if action == 'resume-if-due' and (deadline in (None, INDEFINITE_PAUSE) or deadline > now):
-                return {'ok': True, 'changed': False}
+            if action == 'resume-if-due':
+                if deadline == INDEFINITE_PAUSE or (deadline is not None and deadline > now):
+                    return {'ok': True, 'changed': False}
+                if deadline is None and not automatic_retry_due(directory, now):
+                    return {'ok': True, 'changed': False}
             # The worker consumes this only after acquiring the backup lock.
             # A busy Pi backup therefore leaves the resume queued for the timer.
             if action == 'resume':

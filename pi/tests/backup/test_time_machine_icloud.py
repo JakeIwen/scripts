@@ -97,6 +97,31 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(list(self.directory.iterdir()), [])
         self.command.assert_not_called()
 
+    def test_first_copy_retry_wakes_automatically_but_obeys_explicit_hold(self):
+        store.atomic_json(self.directory / 'state.json', {'phase': 'deferred', 'retry_at': 1060})
+        control.control('resume-if-due', directory=self.directory, now=1059, command=self.command)
+        self.command.assert_not_called()
+        control.control('resume-if-due', directory=self.directory, now=1060, command=self.command)
+        self.assertEqual(self.command.call_args.args[0][1], 'start')
+        control.control('pause', 'indefinite', self.directory, now=1060, command=self.command)
+        self.command.reset_mock()
+        control.control('resume-if-due', directory=self.directory, now=5000, command=self.command)
+        self.command.assert_not_called()
+
+    def test_deferred_first_copy_records_bounded_automatic_retry(self):
+        store.atomic_json(self.directory / 'state.json', {'pending': GEN})
+        with mock.patch.object(job, 'STATE', self.directory), mock.patch.object(job, 'private_directory'), \
+                mock.patch.object(cloud, 'STATE_DIR', self.directory), \
+                mock.patch.object(job, 'config', return_value={'interval_days': 7}), \
+                mock.patch.object(job.signal, 'signal'), \
+                mock.patch.object(sys, 'argv', ['worker', '--run']), \
+                mock.patch.object(job, 'weekly', side_effect=cloud.Deferred('yielding to local-backup window')):
+            self.assertEqual(job.main(), 0)
+        state = store.read_json(self.directory / 'state.json')
+        self.assertEqual(state['phase'], 'deferred')
+        self.assertGreater(state['retry_at'], time.time() + 295)
+        self.assertLessEqual(state['retry_at'], time.time() + 300)
+
     def test_worker_does_not_record_or_run_attempt_while_paused(self):
         control.control('pause', '60', self.directory, command=self.command)
         with mock.patch.object(job, 'STATE', self.directory), mock.patch.object(job, 'private_directory'), \

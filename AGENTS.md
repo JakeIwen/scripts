@@ -51,6 +51,12 @@ compare it with this checkout. Deployed files may differ from the repository.
   never delete or force-release the common backup lock or stop local backups.
   Frontend cloud labels/estimates live in `features/backups/cloudPresentation.ts`;
   `ICloudPauseSelector.tsx` owns the shared pause duration choices.
+- `pi/scripts/backup/time_machine_staging.py` owns local orphan-chunk cleanup.
+  Plan/apply require the common backup lock, verified mount and owned store,
+  preserving capture-index, pending/published manifests and upload/verification
+  references. Cleanup runs before new captures; never delete the live image or
+  archived backups. First-copy transient deferrals retry after five minutes,
+  while explicit cloud pause settings retain priority.
 - Bootable clone evidence is built in `van_dashboard_hotspares.py`, using the
   existing normalized device-tree helpers in `van_dashboard_block_devices.py`.
   Root usage comes from mounted `lsblk` counters or a read-only, label-verified

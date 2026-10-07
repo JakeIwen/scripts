@@ -6,6 +6,7 @@ target=${1:-pi@vanpi.lan}
 [[ $# -le 1 && "$target" != -* && "$target" != *[[:space:]]* ]] || exit 2
 cd "$repo"
 python3 pi/tests/backup/test_time_machine_icloud.py
+python3 -m unittest pi.tests.backup.test_time_machine_staging
 python3 pi/tests/backup/test_icloud_status.py
 python3 pi/tests/backup/test_icloud_backup.py
 bash pi/tests/storage/test_samba_share_control.sh
@@ -21,8 +22,10 @@ gate_hash=$(shasum -a 256 pi/scripts/samba_require_mount.sh | awk '{print $1}')
 old_status_hash=${VANPI_TM_PREVIOUS_STATUS_SHA256:-$(git show HEAD:pi/scripts/backup/icloud_status.py | shasum -a 256 | awk '{print $1}')}
 [[ "$old_status_hash" =~ ^[0-9a-f]{64}$ ]] || exit 1
 COPYFILE_DISABLE=1 /usr/bin/tar --no-xattrs -cf - \
+  pi/__init__.py pi/tests/__init__.py \
   pi/scripts/backup/time_machine_icloud.py pi/scripts/backup/time_machine_icloud.sh \
   pi/scripts/backup/time_machine_store.py pi/scripts/backup/TIME_MACHINE_ICLOUD_RESTORE.txt \
+  pi/scripts/backup/time_machine_staging.py pi/tests/backup/test_time_machine_staging.py \
   pi/scripts/backup/time_machine_icloud_status.py \
   pi/scripts/backup/time_machine_icloud_control.py pi/scripts/backup/cloud_backup_control.py \
   pi/scripts/backup/icloud_backup.py pi/scripts/backup/icloud_backup_control.py pi/scripts/backup/icloud_progress.py \
@@ -48,6 +51,7 @@ cd "$stage"
 exec 9</run/lock/vanpi_backup.lock
 /usr/bin/flock -n 9 || { echo 'Backup lock became busy; retry deployment later.' >&2; exit 1; }
 /usr/bin/python3 pi/tests/backup/test_time_machine_icloud.py
+/usr/bin/python3 -m unittest pi.tests.backup.test_time_machine_staging
 /usr/bin/python3 pi/tests/backup/test_icloud_status.py
 /usr/bin/python3 pi/tests/backup/test_icloud_backup.py
 bash pi/tests/storage/test_samba_share_control.sh
@@ -95,7 +99,7 @@ install_atomic() {
   sudo -n /usr/bin/mv -Tf "$temporary" "$target"
 }
 /usr/bin/install -d -m 0700 previous
-for name in icloud_status.py cloud_backup_control.py icloud_progress.py icloud_backup.py icloud_backup_control.py time_machine_icloud_control.py time_machine_store.py time_machine_icloud.py time_machine_icloud.sh time_machine_icloud_status.py TIME_MACHINE_ICLOUD_RESTORE.txt; do
+for name in icloud_status.py cloud_backup_control.py icloud_progress.py icloud_backup.py icloud_backup_control.py time_machine_icloud_control.py time_machine_store.py time_machine_staging.py time_machine_icloud.py time_machine_icloud.sh time_machine_icloud_status.py TIME_MACHINE_ICLOUD_RESTORE.txt; do
   live=/home/pi/scripts/backup/$name
   [[ ! -e "$live" ]] || /usr/bin/cp -p "$live" previous/"$name"
   install_atomic pi/scripts/backup/"$name" "$live" 0750

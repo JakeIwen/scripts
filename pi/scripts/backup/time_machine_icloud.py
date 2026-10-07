@@ -22,6 +22,7 @@ import uuid
 import icloud_backup as cloud
 import icloud_status as history
 import time_machine_store as store
+import time_machine_staging as staging
 from time_machine_icloud_control import admit_worker, is_paused
 
 CONFIG = Path('/etc/vanpi-time-machine-icloud.json')
@@ -235,6 +236,33 @@ def storage_root():
     return ROOT
 
 
+def cleanup_staging(cfg, apply=False, state=None):
+    cloud.exact_mount(MOUNT, 'mbp2tbkup')
+    if (MOUNT / 'archive').is_symlink() or ROOT.lstat().st_uid != 0:
+        raise RuntimeError('unsafe staging root')
+    mount_identity = (MOUNT.stat().st_dev, MOUNT.stat().st_ino)
+    last_check = [0.0]
+
+    def check():
+        current = MOUNT.stat()
+        if (current.st_dev, current.st_ino) != mount_identity:
+            raise cloud.Deferred('backup mount changed during staging cleanup')
+        if time.monotonic() - last_check[0] >= 1:
+            cloud.check_work_allowed(cfg)
+            cloud.exact_mount(MOUNT, 'mbp2tbkup')
+            last_check[0] = time.monotonic()
+
+    if state is not None:
+        cloud.record_progress(state, 'preparing', capture_cleaning=True, capture_waiting=False)
+    plan = staging.plan_cleanup(ROOT, check)
+    result = staging.apply_cleanup(plan, check) if apply else plan.summary()
+    if state is not None:
+        state['last_staging_cleanup'] = {'at': time.time(), **result}
+        cloud.record_progress(state, 'preparing', capture_cleaning=False)
+        print(f"Reclaimed {result['objects']} unused staging objects ({result['allocated_bytes']} bytes).", flush=True)
+    return result
+
+
 def network(cfg, *args, **kwargs):
     return cloud.run([cloud.RCLONE, *args], cfg, network=True, **kwargs)
 
@@ -434,6 +462,7 @@ def weekly(cfg, state):
             # Do not block the Mac's ordinary hourly backups while its helper
             # is not installed, asleep or unable to inspect Time Machine.
             raise cloud.Deferred('Mac capture coordinator unavailable')
+        cleanup_staging(cfg, apply=True, state=state)
         with quiesced(cfg, state) as check:
             last_report = [0.0]
             def report(done, total, files, count):
@@ -466,6 +495,8 @@ def main():
         release_capture(); return 0
     if args == ['--status']:
         print(json.dumps(store.read_json(STATE / 'state.json', {}), indent=2)); return 0
+    if args in (['--staging-gc-plan'], ['--staging-gc-apply']):
+        print(json.dumps(cleanup_staging(config(), apply=args == ['--staging-gc-apply']))); return 0
     if args != ['--run']:
         raise ValueError('unsupported operation')
     cloud.STATE_DIR = STATE
@@ -482,7 +513,7 @@ def main():
     else:
         state.pop('attempt_id', None)
     try:
-        state.update(worker_pid=os.getpid(), phase='checking', last_attempt_at=time.time(), last_error=None)
+        state.update(worker_pid=os.getpid(), phase='checking', last_attempt_at=time.time(), last_error=None, retry_at=None)
         cloud.record_progress(state, 'checking')
         state['phase'] = weekly(cfg, state)
         return 0
@@ -494,6 +525,8 @@ def main():
         return 1
     except cloud.Deferred as exc:
         state.update(phase='deferred', last_error=str(exc))
+        if state.get('pending') and not state.get('last_success_at') and 'login' not in str(exc):
+            state['retry_at'] = time.time() + 300
         print('Deferred: ' + str(exc), flush=True)
         return 0
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:

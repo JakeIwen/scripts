@@ -48,6 +48,33 @@ or global Samba restart is used. Samba documents its share-specific
 [preexec gate](https://www.samba.org/samba/docs/current/man-html/smb.conf.5.html#PREEXECCLOSE)
 and [close-share operation](https://www.samba.org/samba/docs/current/man-html/smbcontrol.1.html).
 
+## Local staging space and first-copy recovery
+
+Before starting a new frozen capture, the lock-owning worker reclaims local
+SHA-256 objects that are unreachable from the capture index, pending manifest,
+all local generation manifests, upload list and verification checkpoints. This
+also runs before the first verified cloud copy, so interrupted captures cannot
+accumulate old band versions indefinitely while waiting for cloud retention.
+
+The planner validates the exact mounted filesystem, store owner, private
+directories and all reference metadata. Apply re-plans, pins the objects directory,
+then checks mount/path/reference/file identity immediately before every unlink.
+Unknown paths, malformed or changing references, writable/shared objects and
+symlinks fail closed. There is no recursive deletion, cloud deletion, live image
+mutation, archive removal or reduction of the configured free-space reserve.
+
+The existing wrapper exposes `--staging-gc-plan` and `--staging-gc-apply`; both
+require its usual backup lock and disk/ignition guards. Plan prints candidate
+count and allocated bytes without deleting objects. Apply makes a fresh plan;
+it does not trust an old candidate list. The worker records cleanup totals in
+its private state and journal.
+
+Before the first verified Mac cloud copy, temporary deferrals schedule a retry
+in five minutes through the existing minute timer. The retry remains pending
+while another job owns the backup lock, and explicit timed/indefinite manual
+pauses always take precedence. Authentication errors and invalid staging
+metadata still require attention rather than blind retries.
+
 ## Incremental cloud layout and retention
 
 `objects/<sha256>` contains immutable encrypted bands and image metadata.
