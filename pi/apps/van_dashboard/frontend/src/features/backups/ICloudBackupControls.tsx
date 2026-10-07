@@ -1,30 +1,30 @@
 import { useState } from 'react';
 import { useSingleFlightAction } from '../../hooks/useSingleFlightAction';
-import { controlTimeMachineCloud } from './api';
-import type { AvailableICloudStatus, TimeMachineCloudAction } from './icloud';
+import { controlICloudBackup } from './api';
+import type { AvailableICloudStatus, ICloudControlAction } from './icloud';
 
-interface TimeMachineCloudControlsProps {
+interface ICloudBackupControlsProps {
   status: AvailableICloudStatus;
   refresh: () => Promise<unknown>;
   blocked: boolean;
 }
 
-export function TimeMachineCloudControls({
+export function ICloudBackupControls({
   status,
   refresh,
   blocked,
-}: TimeMachineCloudControlsProps) {
+}: ICloudBackupControlsProps) {
   const [minutes, setMinutes] = useState('60');
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { running, run } = useSingleFlightAction();
   const disabled = blocked || running;
-  async function perform(action: TimeMachineCloudAction) {
+  async function perform(action: ICloudControlAction) {
     await run(async () => {
       setError(null);
       setMessage(null);
       try {
-        setMessage(await controlTimeMachineCloud(action, minutes));
+        setMessage(await controlICloudBackup(action, minutes));
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : String(reason));
       } finally {

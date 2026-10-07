@@ -47,6 +47,16 @@ def write_json(path, value):
             os.unlink(name)
 
 
+def pause_deadline(directory):
+    value = read_json(directory / 'pause.json', {})
+    if not isinstance(value, dict):
+        raise ValueError('invalid manual pause state')
+    deadline = value.get('paused_until')
+    if deadline is not None and number(deadline) is None:
+        raise ValueError('invalid manual pause deadline')
+    return deadline
+
+
 def number(value):
     return value if type(value) in (int, float) and math.isfinite(value) and value >= 0 else None
 

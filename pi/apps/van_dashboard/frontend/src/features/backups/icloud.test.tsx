@@ -4,7 +4,7 @@ import { ICloudBackupCard } from './ICloudBackupCard';
 import { BackupsTile } from './BackupsTile';
 import { decodeICloud, type AvailableICloudStatus } from './icloud';
 import { sampleBackupStatus } from './testFixtures';
-import { TimeMachineCloudControls } from './TimeMachineCloudControls';
+import { ICloudBackupControls } from './ICloudBackupControls';
 
 const generation = 'vanpi-20260920T225254Z-ebf57e14';
 function cloud(): AvailableICloudStatus {
@@ -186,7 +186,7 @@ describe('iCloud dashboard', () => {
       );
     const refresh = vi.fn().mockResolvedValue(null);
     const status = cloud();
-    render(<TimeMachineCloudControls status={status} refresh={refresh} blocked={false} />);
+    render(<ICloudBackupControls status={status} refresh={refresh} blocked={false} />);
     fireEvent.change(screen.getByRole('combobox', { name: 'Pause for' }), {
       target: { value: '240' },
     });
@@ -207,7 +207,7 @@ describe('iCloud dashboard', () => {
 
   it('shows a manual deadline and allows a running upload to be paused', () => {
     const status = { ...cloud(), running: true, manualPauseUntil: 1800003600 };
-    render(<TimeMachineCloudControls status={status} refresh={vi.fn()} blocked={false} />);
+    render(<ICloudBackupControls status={status} refresh={vi.fn()} blocked={false} />);
     expect(screen.getByText(/Automatic resume/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Pause' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Resume now' })).toBeEnabled();

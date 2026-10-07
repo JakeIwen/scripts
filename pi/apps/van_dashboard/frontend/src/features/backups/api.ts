@@ -1,7 +1,7 @@
 import { getJson, postForm } from '../../api/client';
 import { objectValue, stringValue } from '../../api/validation';
 import { decodeBackupStatusResponse } from './decoders';
-import type { TimeMachineCloudAction } from './icloud';
+import type { ICloudControlAction } from './icloud';
 import type {
   BackupMutationResult,
   BackupStatus,
@@ -14,8 +14,8 @@ export async function fetchBackupStatus(signal: AbortSignal): Promise<BackupStat
   return decodeBackupStatusResponse(payload);
 }
 
-export async function controlTimeMachineCloud(
-  action: TimeMachineCloudAction,
+export async function controlICloudBackup(
+  action: ICloudControlAction,
   minutes: string,
 ): Promise<string> {
   const response = objectValue(

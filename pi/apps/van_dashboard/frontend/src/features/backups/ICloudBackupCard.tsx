@@ -1,7 +1,7 @@
 import { formatBytes, formatDuration, formatRelativeTime } from '../../utils/format';
 import { iCloudPhaseLabel, iCloudProgress } from './icloud';
 import type { AvailableICloudStatus, ICloudStatus } from './icloud';
-import { TimeMachineCloudControls } from './TimeMachineCloudControls';
+import { ICloudBackupControls } from './ICloudBackupControls';
 
 function ICloudUploadSpeed({ status }: { status: AvailableICloudStatus }) {
   if (!status.running || status.phase !== 'uploading') return null;
@@ -65,7 +65,7 @@ export function ICloudBackupCard({
       </div>
       <p>{status.message}</p>
       {kind === 'time-machine' && status.controlsAvailable && refresh && (
-        <TimeMachineCloudControls status={status} refresh={refresh} blocked={blocked} />
+        <ICloudBackupControls status={status} refresh={refresh} blocked={blocked} />
       )}
       <ICloudUploadSpeed status={status} />
       {status.lastSuccessAt === null ? (
