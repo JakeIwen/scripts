@@ -78,6 +78,167 @@ those operations can hang the kernel or discard mounted-disk state. Use
 `sudo /home/pi/scripts/safe_reboot.sh`; if USB remains absent after the
 guarded reboot, shut down and fully power-cycle the Pi and powered hub.
 
+## Seagate/VL805 failure and IGNORE_UAS mitigation
+
+On **2026-10-07 at 05:58:51 MDT (11:58:51 UTC)**, UAS write commands to
+`mbp2tbkup`, a Seagate Portable 2.5-inch HDD (`0bc2:2344`), timed out.
+Device resets escalated to an xHCI Host System Error and `HC died`; both
+USB buses disconnected. A guarded reboot restored the controller. This repeats
+the July failure signature below with different hardware; it does not prove
+that the disk, cable, hub, or power supply is healthy.
+
+The owner approved this active mitigation for **both** Seagate Portables,
+`mbp2tbkup` and `movingparts`, which share `0bc2:2344`:
+
+```text
+usb-storage.quirks=0bc2:2344:u
+```
+
+`u` is IGNORE_UAS: bind that VID:PID to `usb-storage` instead of `uas` at boot.
+It is not serial-specific. A modest throughput/queue-depth cost is accepted
+for these spinning disks; gigabit Ethernet or 2.4 GHz Wi-Fi usually limits
+network transfers first. This avoids one failure path, not all USB failures.
+
+**Preparation status, 2026-10-07:** the utility passed a live `--dry-run`;
+no boot file was changed and no reboot was performed for this change. The live
+249-byte, one-line cmdline had no quirk token, and the live module parameter was
+empty. Do not call the mitigation deployed until post-reboot verification passes.
+On kernel `6.12.62+rpt-rpi-v8`, `usb_storage` is built in (absent from `lsmod`,
+but `/sys/module/usb_storage/parameters/quirks` exists). An `/etc/modprobe.d`
+option therefore will not fix this host; edit the firmware's kernel command
+line at `/boot/firmware/cmdline.txt`.
+
+### Apply, verify, and revert
+
+The standalone tool is `pi/scripts/apply_usb_storage_quirks.py` in this repo.
+Copy only that file to a private staging directory on the Pi; do not run broad
+`sync_scripts.sh` from a worktree. In a Pi shell, set `q` to its absolute staged
+path (for example `/tmp/seagate-uas.Jb3n7Y/apply.py` for the prepared run), then:
+
+```bash
+python3 -I "$q" --dry-run
+sudo python3 -I "$q"
+```
+
+The default target must be a root-owned, regular, singly linked file on the
+mounted FAT boot filesystem. The tool requires exactly one nonempty ASCII line
+with one final LF; CRLF, extra/embedded newlines, NUL/control bytes, ambiguous
+quirk syntax, duplicate parameters/devices, and `--` init-argument separators
+fail closed. Other parameters, ordering, quotes, and whitespace remain byte-for-
+byte unchanged. Existing comma-separated `VID:PID:flags` entries are retained;
+the tool appends this device or adds `u` to its existing flags. It recognizes
+`usb_storage.quirks=` as the kernel's equivalent spelling and preserves it.
+Already-present `u` is a no-op, without another backup. A quirk value exceeding
+127 bytes or a resulting ARM64 cmdline exceeding 2048 bytes is refused.
+
+Each actual edit first saves and fsyncs an exclusive UTC backup next to the
+original, `cmdline.txt.bak-YYYYMMDDTHHMMSS.microsecondsZ`. Record the exact
+`Backup:` path printed by apply. The new file is staged **in the same directory**,
+metadata-preserved, fsynced, checked, renamed, directory-fsynced, and read back.
+Directory locking serializes this tool's writers; a final source-content and
+metadata comparison refuses concurrent edits. It cannot lock out unrelated
+editors: do not edit boot settings or run a clone/restore at the same time.
+No fsync failure is ignored, including on FAT. If an error occurs after rename,
+the new file may already be installed: inspect it and the backup, and **do not
+reboot** merely because a backup was printed. Atomic rename/fsync reduces but
+cannot eliminate power-loss/corrupt-media risk on FAT.
+
+The utility never reboots, mounts, repairs, unbinds, or resets a device. After a
+successful apply, arrange a parked maintenance window with no active writes,
+then separately invoke the existing guarded reboot (never plain `reboot`):
+
+```bash
+sudo /home/pi/scripts/safe_reboot.sh
+```
+
+Reconnect, set `q` again if needed, and verify without changing any mount:
+
+```bash
+python3 -I "$q" --verify
+cat /proc/cmdline
+cat /sys/module/usb_storage/parameters/quirks
+lsusb -t
+```
+
+`--verify` requires the running kernel cmdline and live module parameter to
+contain `0bc2:2344` with `u`. For each named Seagate label it resolves the current
+block/sysfs ancestry, checks VID:PID and the USB interface's `usb-storage` driver
+(not `uas`), and checks exact mount source plus `rw` at `/mnt/mbp2tbkup`,
+`/mnt/movingparts`, and `/mnt/EXFAT512`. It does not assume stable `sdX` names,
+probe sleeping disks with a broad `blkid`, or attempt recovery. This is mount
+state verification, **not** a filesystem-integrity test or sustained-I/O test.
+The two HDD mounts can legitimately be absent under ignition/policy/eject holds;
+verify in the normal parked, disks-enabled state rather than forcing mounts.
+`bigboi` and `hdd1tb` are manual/backup mounts and are not required to be mounted.
+If `/tmp` is cleared on reboot, re-copy the identical tool before verification.
+
+To revert, set `backup` to the exact pre-apply backup path, then:
+
+```bash
+sudo python3 -I "$q" --revert "$backup" --dry-run
+sudo python3 -I "$q" --revert "$backup"
+sudo /home/pi/scripts/safe_reboot.sh
+```
+
+Revert uses the same backup/atomic-write/read-back path and refuses unless the
+current cmdline equals that saved backup **plus only this quirk edit**. It will
+not clobber later kernel-parameter changes or restore a pre-clone root PARTUUID.
+After reboot, compare the cmdline/live parameter with the saved original and
+check bindings using `lsusb -t`; `--verify` deliberately fails when UAS is restored.
+Retain the backup and an independent recovery card until normal workload is stable.
+
+### Boot/backup compatibility audit
+
+- `backup/clone_to_sd.sh` calls external `rpi-clone` (`-U`, or `-f -U` for
+  initialization); it does not parse/rewrite cmdline itself. The upstream
+  geerlingguy **2.0.27** implementation copies mounted boot files with rsync,
+  then substitutes the source disk ID/device reference in the destination
+  cmdline, not the whole line. The colon-delimited quirk survives both full
+  and incremental clones. This was source-reviewed, **not** a spare clone test
+  or inspection of the live external executable; `backup_setup.sh` installs an
+  unpinned upstream checkout. Recheck deployed `rpi-clone` before relying on it.
+- `backup/pi_backup.sh`, `backup/clone_now.sh`, and `backup/new_hotspare.sh`
+  delegate to that clone flow. The new-card tool checks approved SD-reader IDs,
+  labels and size, not HDD transport-driver names. No parsing changes are needed.
+  `backup_conf.sh` retains staggered 7-/14-day generations; the quirk reaches
+  each spare on its **next successful clone**, not immediately. Do not refresh
+  both recovery generations just to propagate it.
+- Borg creation explicitly includes `/` **and** `/boot/firmware`, even with
+  `--one-file-system`; `BORG_EXCLUDES` does not omit cmdline or its backups.
+  `backup/icloud_backup.py` transports Borg repository data without interpreting
+  boot parameters. Media/exFAT/Time Machine/router backups do not write the Pi's
+  boot cmdline. Archives predating this change necessarily lack the mitigation.
+- `restore_from_borg.sh` extracts the archive's boot tree and runs
+  `s/PARTUUID=[0-9a-f]{8}-0([12])/PARTUUID=$diskid-0\1/g` on fstab/cmdline.
+  That substitution matches the identifier only, **not** the rest of the line;
+  it preserves this quirk. An old archive restores the old quirk state. Restored
+  `.bak-*` files retain their historical root IDs; the guarded revert refuses
+  such a backup after the restored root ID changes. The iCloud restore notes
+  likewise require replacement-card identifier repair, not a new cmdline.
+- `van_dashboard_hotspares.py` reads normalized block topology, clone stamps,
+  and label-verified read-only ext4 usage evidence, not boot parameters. The
+  dashboard's “current/bootable” evidence and `backup_watchdog.sh`'s stamps or
+  `CLONE_INFO.txt` are **not proof** of the quirk's presence on a spare. Do not
+  mount a spare to render dashboard evidence.
+- `pi/configs/vanpi-crash-evidence.txt` supplies a `ramoops` overlay through
+  firmware `config.txt`, not cmdline. Repository sync/deployment has no managed
+  `cmdline.txt` to overwrite this edit. `/proc/<pid>/cmdline` readers inspect
+  process arguments and are unrelated to the kernel's `/proc/cmdline`.
+- The legacy `pi/raspbian_setup.sh` notes invoke external `raspi-config` and
+  `rpi-update`; they do not implement a cmdline rewrite. Fresh OS images replace
+  boot configuration, and external configuration/kernel tools are not pinned by
+  this repo. Recheck the token and actual binding after using them or upgrading
+  the kernel; do not assume a restored/reimaged host inherits the quirk.
+
+No in-repo token-parsing incompatibility was found; no clone/restore behavior
+or scheduling was changed. `039dbd7` introduced the old RTL9201-only tool and
+`350a0a4` removed it after replacement; the new tool does not revive its obsolete
+VID:PID or rewrite other quirks. Test locally with:
+
+```bash
+bash pi/tests/storage/test_apply_usb_storage_quirks.sh
+```
+
 ## Retired RTL9201/VL805 failure signature
 
 On 2026-07-31 the daily EXFAT snapshot cleanly unmounted and spun down
