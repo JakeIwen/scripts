@@ -40,6 +40,13 @@ compare it with this checkout. Deployed files may differ from the repository.
   `pi/tests/network/_network_storage_support.py`.
 - `pi/tests/dashboard/_frontend_test_support.py` provides a temporary React
   index response for route tests, independent of deployed frontend builds.
+- One-off video catalog maintenance lives in
+  `pi/apps/video_library/maintenance/same_file_repair.py`, with behavior tests in
+  `pi/tests/media/test_video_same_file_repair.py`. It is deliberately outside the
+  package allowlist: copy it explicitly and import the deployed package via
+  `PYTHONPATH`; never wire it into service startup. It requires reviewed,
+  version-1 enriched evidence, defaults to an in-memory dry run, and refuses
+  apply without a quiescence acknowledgement and a database-holder check.
 - Cloud holds: `pi/scripts/backup/cloud_backup_control.py` shares admission and
   durable `pause.json` controls. `icloud_backup_control.py` and
   `time_machine_icloud_control.py` are fixed Pi/Mac entry points; their separate minute resume timers,
