@@ -47,6 +47,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   `PYTHONPATH`; never wire it into service startup. It requires reviewed,
   version-1 enriched evidence, defaults to an in-memory dry run, and refuses
   apply without a quiescence acknowledgement and a database-holder check.
+  It was applied once on 2026-10-07 (2,013 same-file pairs); rerunning it is a
+  no-op. Its audit trail and pre-repair backup are on vanpi under
+  `~/.local/share/van-video-library/` (`repair-audit-20261007/`,
+  `video-catalog-final-20261007T044424Z.sqlite3`).
 - Cloud holds: `pi/scripts/backup/cloud_backup_control.py` shares admission and
   durable `pause.json` controls. `icloud_backup_control.py` and
   `time_machine_icloud_control.py` are fixed Pi/Mac entry points; their separate minute resume timers,
