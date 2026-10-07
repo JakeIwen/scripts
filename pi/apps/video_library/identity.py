@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 from .catalog import CatalogConflict, CatalogError
 from .config import QBITTORRENT_TEMP_ROOTS
+from .deferred_positions import DeferredLegacyPositions
 from .media_models import MediaItem
 from .naming import clean_name
 from .video_qbittorrent import (
@@ -67,7 +68,7 @@ def _resolve_catalog_asset_fallback(
     return None, None, complete_without_qbittorrent
 
 
-def _catalog_item_prefix(_self: Any, item: MediaItem) -> str:
+def _catalog_item_prefix(_self: Any, item: MediaItem, **_kwargs: Any) -> str:
     return f"could not catalog {item.title}"
 
 
@@ -317,7 +318,9 @@ class CatalogIdentityMixin:
                 continue
         return "incomplete" in {part.casefold() for part in Path(normalized).parts}
 
-    def _bind_library_item(self, item: MediaItem) -> None:
+    def _bind_library_item(
+        self, item: MediaItem, *, pending_positions: DeferredLegacyPositions | None = None
+    ) -> None:
         if self.catalog is None:
             return
         legacy_asset_id = self.catalog.resolve_legacy_key(item.key)
@@ -386,6 +389,7 @@ class CatalogIdentityMixin:
             normalized_path=item.real_path,
             item=item,
             torrent=None,
+            pending_positions=pending_positions,
         )
         self._project_item_progress(item)
 
@@ -416,8 +420,10 @@ class CatalogIdentityMixin:
             self.session_recovery_error = None
 
     @catalog_degrades(prefix=_catalog_item_prefix)
-    def _bind_catalog_item(self, item: MediaItem) -> None:
-        self._bind_library_item(item)
+    def _bind_catalog_item(
+        self, item: MediaItem, *, pending_positions: DeferredLegacyPositions | None = None
+    ) -> None:
+        self._bind_library_item(item, pending_positions=pending_positions)
 
     def _sync_library_identities(self) -> None:
         if self.catalog is None:
@@ -425,12 +431,15 @@ class CatalogIdentityMixin:
         self._retry_session_recovery()
         self.catalog.reconcile_v1_progress()
         items, _shows = self.library.snapshot()
-        # A library can contain thousands of aliases.  Nested catalog methods
-        # reuse this caller-owned transaction, avoiding thousands of fsyncs on
-        # the Pi while retaining per-item idempotence.
-        with self.catalog.transaction():
+        # Keep atomic binding without reserving the SQLite writer during history
+        # preparation. The lock also keeps this scan-local index current as rows
+        # are resolved; another playback thread cannot consume them underneath it.
+        with self.catalog.transaction(immediate=False):
+            pending_positions = DeferredLegacyPositions(
+                self.catalog.list_import_records(action="unresolved")
+            )
             for item in items:
-                self._bind_catalog_item(item)
+                self._bind_catalog_item(item, pending_positions=pending_positions)
         if self.playback.active_asset_id is not None:
             with self.control_lock:
                 matches = [

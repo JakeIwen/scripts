@@ -36,6 +36,7 @@ from .catalog_values import (
     _path_key,
     _required_text,
 )
+from .file_observations import matching_file_assets, record_file_identity
 from .schema import SCHEMA_VERSION, _MIGRATIONS
 from .v1_bridge import V1CatalogBridge
 
@@ -668,73 +669,16 @@ class MediaAssetCatalog(V1CatalogBridge):
         )
 
         with self.transaction(connection=connection) as db:
-            asset_ids: set[str] = set()
-            path_row = self._one(
-                db,
-                "SELECT asset_id FROM video_v2_locations WHERE path = ? AND valid_to IS NULL",
-                (normalized_path,),
+            asset_ids = matching_file_assets(
+                self, db,
+                path=normalized_path,
+                device_id=device_id,
+                inode=inode,
+                size=size,
+                fingerprint_algorithm=fingerprint_algo,
+                fingerprint=fingerprint_value,
+                preferred_asset_id=preferred_asset_id,
             )
-            if path_row is not None:
-                path_asset_id = str(path_row["asset_id"])
-                prior_identities = self._all(
-                    db,
-                    """
-                    SELECT device_id, inode, size
-                    FROM video_v2_file_identities
-                    WHERE asset_id = ? AND device_id IS NOT NULL AND inode IS NOT NULL
-                    """,
-                    (path_asset_id,),
-                )
-                identity_matches = any(
-                    str(row["device_id"]) == str(device_id)
-                    and int(row["inode"]) == int(inode)
-                    for row in prior_identities
-                ) if device_id is not None and inode is not None else False
-                # record_location versions a replaced path only after all
-                # observations agree, even in a caller-owned scan transaction.
-                if not prior_identities or identity_matches:
-                    asset_ids.add(path_asset_id)
-            if fingerprint_value is not None:
-                rows = self._all(
-                    db,
-                    """
-                    SELECT DISTINCT asset_id FROM video_v2_file_identities
-                    WHERE fingerprint_algorithm = ? AND fingerprint = ?
-                      AND (size = ? OR size IS NULL OR ? IS NULL)
-                    """,
-                    (fingerprint_algo, fingerprint_value, size, size),
-                )
-                asset_ids.update(str(row["asset_id"]) for row in rows)
-            if device_id is not None and inode is not None:
-                rows = self._all(
-                    db,
-                    """
-                    SELECT DISTINCT asset_id FROM video_v2_file_identities
-                    WHERE device_id = ? AND inode = ?
-                    """,
-                    (str(device_id), int(inode)),
-                )
-                asset_ids.update(str(row["asset_id"]) for row in rows)
-            if not asset_ids and preferred_asset_id is not None:
-                self._assert_asset(db, preferred_asset_id)
-                preferred_identities = self._all(
-                    db,
-                    """
-                    SELECT device_id, inode, size
-                    FROM video_v2_file_identities
-                    WHERE asset_id = ? AND device_id IS NOT NULL AND inode IS NOT NULL
-                    """,
-                    (preferred_asset_id,),
-                )
-                preferred_matches = any(
-                    str(row["device_id"]) == str(device_id)
-                    and int(row["inode"]) == int(inode)
-                    for row in preferred_identities
-                ) if device_id is not None and inode is not None else False
-                if not preferred_identities or preferred_matches:
-                    asset_ids.add(preferred_asset_id)
-            if len(asset_ids) > 1:
-                raise CatalogConflict("file observations resolve to multiple assets")
             if asset_ids:
                 asset_id = asset_ids.pop()
             else:
@@ -747,44 +691,17 @@ class MediaAssetCatalog(V1CatalogBridge):
                     observed_at=timestamp,
                     connection=db,
                 )
-            identity_match = self._one(
-                db,
-                """
-                SELECT identity_id FROM video_v2_file_identities
-                WHERE asset_id = ?
-                  AND device_id IS ? AND inode IS ? AND size IS ?
-                  AND fingerprint_algorithm IS ? AND fingerprint IS ?
-                ORDER BY observed_at DESC LIMIT 1
-                """,
-                (
-                    asset_id,
-                    str(device_id) if device_id is not None else None,
-                    int(inode) if inode is not None else None,
-                    int(size) if size is not None else None,
-                    fingerprint_algo,
-                    fingerprint_value,
-                ),
+            record_file_identity(
+                self, db,
+                asset_id=asset_id,
+                device_id=device_id,
+                inode=inode,
+                size=size,
+                mtime_ns=mtime_ns,
+                fingerprint_algorithm=fingerprint_algo,
+                fingerprint=fingerprint_value,
+                observed_at=timestamp,
             )
-            if identity_match is None:
-                db.execute(
-                    """
-                    INSERT INTO video_v2_file_identities
-                        (identity_id, asset_id, device_id, inode, size, mtime_ns,
-                         fingerprint_algorithm, fingerprint, observed_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        _new_id("fid"),
-                        asset_id,
-                        str(device_id) if device_id is not None else None,
-                        int(inode) if inode is not None else None,
-                        int(size) if size is not None else None,
-                        int(mtime_ns) if mtime_ns is not None else None,
-                        fingerprint_algo,
-                        fingerprint_value,
-                        timestamp,
-                    ),
-                )
             self.record_location(
                 asset_id,
                 normalized_path,
