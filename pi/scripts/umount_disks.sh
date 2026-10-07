@@ -585,8 +585,15 @@ ud_notify_recovery() {
 
 # Private phases of umount_disks_main. Bash dynamic scope intentionally shares
 # its option flags, label/device maps and failure accumulators across phases.
+# Each phase checks its immediate FUNCNAME caller before reading that state;
+# a mutable sentinel could be inherited by an unrelated nested caller.
 # Do not invoke these independently or shadow that operation state with locals.
 ud_preflight() {
+  if [[ ${FUNCNAME[1]:-} != umount_disks_main ]]; then
+    echo "ERROR: ud_preflight may only be called by umount_disks_main" >&2
+    return 1
+  fi
+
   # Prove that both root-run backup cleanup and the pi-run ignition service can
   # share completion state before changing any disk. This prevents a successful
   # physical spindown from being reported as failed only after the fact.
@@ -658,6 +665,11 @@ ud_preflight() {
 }
 
 ud_unmount_all() {
+  if [[ ${FUNCNAME[1]:-} != umount_disks_main ]]; then
+    echo "ERROR: ud_unmount_all may only be called by umount_disks_main" >&2
+    return 1
+  fi
+
   if (( ${#mounted_labels[@]} )); then
     for label in "${mounted_labels[@]}"; do
       if share=$(disk_policy_samba_share_name "$label"); then
@@ -777,6 +789,11 @@ ud_unmount_all() {
 }
 
 ud_spindown() {
+  if [[ ${FUNCNAME[1]:-} != umount_disks_main ]]; then
+    echo "ERROR: ud_spindown may only be called by umount_disks_main" >&2
+    return 1
+  fi
+
   if (( spindown )); then
     for label in "${attached_labels[@]}"; do
       [[ -z "${unmount_failed[$label]:-}" ]] || continue

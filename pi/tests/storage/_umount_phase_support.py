@@ -495,6 +495,76 @@ exit $?
 """
 
 
+DIRECT_PHASE_DRIVER = r"""#!/usr/bin/env bash
+
+export UMOUNT_DISKS_LIBRARY_ONLY=1
+source "$HARNESS_DIR/umount_disks.sh"
+
+# A missing guard must never turn this regression test into a live alert.
+ud_notify_failures() {
+  printf '%s\n' notify-failures >> "$SIDE_EFFECT_FILE"
+}
+ud_notify_recovery() {
+  printf '%s\n' notify-recovery >> "$SIDE_EFFECT_FILE"
+}
+
+case "$PHASE" in
+  ud_preflight)
+    spindown=1
+    dry_run=0
+    ud_prepare_spindown_state_dir() {
+      printf '%s\n' prepare-state >> "$SIDE_EFFECT_FILE"
+      return 1
+    }
+    ;;
+  ud_unmount_all)
+    spindown=0
+    dry_run=0
+    emergency=0
+    mounted_labels=(movingparts)
+    disk_policy_samba_share_name() {
+      printf '%s\n' share-name >> "$SIDE_EFFECT_FILE"
+      return 1
+    }
+    ud_direct_samba() {
+      printf '%s\n' samba-control >> "$SIDE_EFFECT_FILE"
+      return 1
+    }
+    samba_share_control=ud_direct_samba
+    ;;
+  ud_spindown)
+    spindown=1
+    attached_labels=(movingparts)
+    ud_resolve_label() {
+      printf '%s\n' resolve-label >> "$SIDE_EFFECT_FILE"
+      DISK_POLICY_RESOLVE_REASON=
+      return 1
+    }
+    ;;
+  *)
+    printf 'unknown phase: %s\n' "$PHASE" >&2
+    exit 2
+    ;;
+esac
+
+"$PHASE"
+exit $?
+"""
+
+
+def _harness_environment(**updates: str) -> dict[str, str]:
+    environment = os.environ.copy()
+    for variable in tuple(environment):
+        if variable.startswith("UMOUNT_DISKS_") or variable in {
+            "BASH_ENV",
+            "CDPATH",
+            "ENV",
+        }:
+            environment.pop(variable)
+    environment.update({"LC_ALL": "C", **updates})
+    return environment
+
+
 def _run_scenario(source: Path, bash: Path, scenario: Scenario) -> dict[str, object]:
     with tempfile.TemporaryDirectory(prefix="umount-phase-regression-") as temp_name:
         root = Path(temp_name)
@@ -523,22 +593,11 @@ def _run_scenario(source: Path, bash: Path, scenario: Scenario) -> dict[str, obj
         driver.chmod(0o700)
         trace_file = root / "trace"
 
-        environment = os.environ.copy()
-        for variable in tuple(environment):
-            if variable.startswith("UMOUNT_DISKS_") or variable in {
-                "BASH_ENV",
-                "CDPATH",
-                "ENV",
-            }:
-                environment.pop(variable)
-        environment.update(
-            {
-                "HARNESS_DIR": str(harness),
-                "TRACE_FILE": str(trace_file),
-                "COUNTER_DIR": str(counters),
-                "UMOUNT_DISKS_STATE_DIR": str(state_dir),
-                "LC_ALL": "C",
-            }
+        environment = _harness_environment(
+            HARNESS_DIR=str(harness),
+            TRACE_FILE=str(trace_file),
+            COUNTER_DIR=str(counters),
+            UMOUNT_DISKS_STATE_DIR=str(state_dir),
         )
         completed = subprocess.run(
             [str(bash), str(driver)],
@@ -555,6 +614,46 @@ def _run_scenario(source: Path, bash: Path, scenario: Scenario) -> dict[str, obj
             "stdout": completed.stdout.replace(temp_name, marker),
             "stderr": completed.stderr.replace(temp_name, marker),
             "trace": trace.replace(temp_name, marker),
+        }
+
+
+def _run_direct_phase(source: Path, bash: Path, phase: str) -> dict[str, object]:
+    with tempfile.TemporaryDirectory(prefix="umount-phase-direct-") as temp_name:
+        root = Path(temp_name)
+        harness = root / "harness"
+        harness.mkdir()
+        (harness / "umount_disks.sh").write_text(
+            source.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+        (harness / "disk_policy.sh").write_text(DISK_POLICY_STUB, encoding="utf-8")
+        driver = harness / "driver.sh"
+        driver.write_text(DIRECT_PHASE_DRIVER, encoding="utf-8")
+        driver.chmod(0o700)
+        side_effect_file = root / "side-effects"
+        environment = _harness_environment(
+            HARNESS_DIR=str(harness),
+            PHASE=phase,
+            SIDE_EFFECT_FILE=str(side_effect_file),
+        )
+        completed = subprocess.run(
+            [str(bash), str(driver)],
+            cwd=root,
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        side_effects = (
+            side_effect_file.read_text(encoding="utf-8")
+            if side_effect_file.exists()
+            else ""
+        )
+        marker = "$TMP"
+        return {
+            "returncode": completed.returncode,
+            "stdout": completed.stdout.replace(temp_name, marker),
+            "stderr": completed.stderr.replace(temp_name, marker),
+            "side_effects": side_effects.replace(temp_name, marker),
         }
 
 
@@ -599,7 +698,12 @@ def _select_bash() -> tuple[Path, str]:
         detail = "only older Bash interpreters were found: " + ", ".join(old_versions)
     else:
         detail = "no Bash interpreter was found"
-    raise unittest.SkipTest(f"phase regression needs Bash >=4; {detail}")
+    message = f"phase regression needs Bash >=4; {detail}"
+    if os.environ.get("UMOUNT_PHASE_TEST_REQUIRE") == "1":
+        raise RuntimeError(
+            f"{message}; UMOUNT_PHASE_TEST_REQUIRE=1 forbids skipping"
+        )
+    raise unittest.SkipTest(message)
 
 
 def _source_sha256(path: Path) -> str:

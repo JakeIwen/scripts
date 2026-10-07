@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import os
 import unittest
+from pathlib import Path
+from unittest import mock
 
+from . import _umount_phase_support as phase_support
 from ._umount_phase_support import (
     ORACLE_SHA256,
     SOURCE,
@@ -351,6 +355,97 @@ SCENARIOS: tuple[Scenario, ...] = (
         manual_mount_labels=(),
     ),
 )
+
+
+class PhaseDirectInvocationTests(unittest.TestCase):
+    def _assert_phase_refused(self, phase: str) -> None:
+        bash = Path("/bin/bash")
+        if not bash.is_file() or not os.access(bash, os.X_OK):
+            self.skipTest("direct phase guard tests need executable /bin/bash")
+        self.assertEqual(
+            {
+                "returncode": 1,
+                "stdout": "",
+                "stderr": (
+                    f"ERROR: {phase} may only be called by umount_disks_main\n"
+                ),
+                "side_effects": "",
+            },
+            phase_support._run_direct_phase(SOURCE, bash, phase),
+        )
+
+    def test_preflight_refuses_direct_invocation(self) -> None:
+        self._assert_phase_refused("ud_preflight")
+
+    def test_unmount_all_refuses_direct_invocation(self) -> None:
+        self._assert_phase_refused("ud_unmount_all")
+
+    def test_spindown_refuses_direct_invocation(self) -> None:
+        self._assert_phase_refused("ud_spindown")
+
+
+class BashSelectionTests(unittest.TestCase):
+    def test_known_install_locations_are_checked_before_skipping(self) -> None:
+        observed: list[Path] = []
+        versions = {
+            Path("/bin/bash"): (3, "3.2"),
+            Path("/opt/homebrew/bin/bash"): (3, "3.2-homebrew"),
+            Path("/usr/local/bin/bash"): (5, "5.2"),
+        }
+
+        def probe(candidate: Path) -> tuple[int, str]:
+            observed.append(candidate)
+            return versions[candidate]
+
+        clean_environment = {
+            "UMOUNT_PHASE_TEST_BASH": "",
+            "UMOUNT_PHASE_TEST_REQUIRE": "",
+        }
+        with (
+            mock.patch.dict(os.environ, clean_environment),
+            mock.patch.object(phase_support.shutil, "which", return_value="/bin/bash"),
+            mock.patch.object(Path, "is_file", return_value=True),
+            mock.patch.object(phase_support.os, "access", return_value=True),
+            mock.patch.object(phase_support, "_bash_major", side_effect=probe),
+        ):
+            selected = phase_support._select_bash()
+
+        self.assertEqual((Path("/usr/local/bin/bash"), "5.2"), selected)
+        self.assertEqual(list(versions), observed)
+
+    def test_missing_bash_four_skips_by_default(self) -> None:
+        clean_environment = {
+            "UMOUNT_PHASE_TEST_BASH": "",
+            "UMOUNT_PHASE_TEST_REQUIRE": "",
+        }
+        with (
+            mock.patch.dict(os.environ, clean_environment),
+            mock.patch.object(phase_support.shutil, "which", return_value="/bin/bash"),
+            mock.patch.object(Path, "is_file", return_value=True),
+            mock.patch.object(phase_support.os, "access", return_value=True),
+            mock.patch.object(
+                phase_support, "_bash_major", return_value=(3, "3.2")
+            ),
+        ):
+            with self.assertRaisesRegex(
+                unittest.SkipTest, "phase regression needs Bash >=4"
+            ):
+                phase_support._select_bash()
+
+    def test_require_flag_turns_missing_bash_four_into_failure(self) -> None:
+        required_environment = {
+            "UMOUNT_PHASE_TEST_BASH": "",
+            "UMOUNT_PHASE_TEST_REQUIRE": "1",
+        }
+        with (
+            mock.patch.dict(os.environ, required_environment),
+            mock.patch.object(phase_support.shutil, "which", return_value=None),
+            mock.patch.object(Path, "is_file", return_value=False),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "UMOUNT_PHASE_TEST_REQUIRE=1 forbids skipping"
+            ):
+                phase_support._select_bash()
 
 
 class PhaseGoldenRegressionTests(unittest.TestCase):
