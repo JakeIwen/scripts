@@ -38,6 +38,8 @@ compare it with this checkout. Deployed files may differ from the repository.
 - `shared/`: code imported or deployed on more than one host.
 - Network storage deployment test filesystem fixtures live in
   `pi/tests/network/_network_storage_support.py`.
+- `pi/tests/dashboard/_frontend_test_support.py` provides a temporary React
+  index response for route tests, independent of deployed frontend builds.
 - Time Machine cloud holds: `pi/scripts/backup/time_machine_icloud_control.py`
   owns `pause.json` independently of worker state; the minute resume timer,
   worker and Mac heartbeat all honor it. Dashboard mutations use

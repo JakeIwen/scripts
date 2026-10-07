@@ -36,6 +36,7 @@ from pi.apps.van_dashboard import van_dashboard_telemetry as dashboard_telemetry
 from pi.apps.van_dashboard import van_dashboard_usb as dashboard_usb
 from pi.apps.van_dashboard import van_dashboard_vonstar as dashboard_vonstar
 from pi.scripts import usb_watch
+from pi.tests.dashboard._frontend_test_support import react_index_page
 from pi.tests.unit_contract import command_arguments, parse_directives
 from van_compute import metrics as compute_metrics
 
@@ -4769,7 +4770,8 @@ class DashboardRouteTests(unittest.TestCase):
 
         client = dashboard_app.test_client()
         with mock.patch.object(runtime, "vonstar", FakeVonstar()):
-            page = client.get("/")
+            with react_index_page(client) as page:
+                self.assertEqual(page.status_code, 200)
             dashboard_status = client.get("/api/status")
             status = client.get("/api/vonstar")
             invalid_query = client.get("/api/vonstar?fresh=1")
@@ -4791,7 +4793,6 @@ class DashboardRouteTests(unittest.TestCase):
             self.assertEqual(access_calls, [])
             access = client.post("/api/vonstar/access-state")
 
-        self.assertEqual(page.status_code, 200)
         self.assertEqual(dashboard_status.status_code, 200)
         self.assertEqual(status.status_code, 200)
         self.assertEqual(status.headers["Cache-Control"], "no-store")
