@@ -46,6 +46,8 @@ compare it with this checkout. Deployed files may differ from the repository.
   worker and Mac heartbeat all honor it. Dashboard mutations use
   `van_dashboard_cloud_controls.py`. Samba mount reconciliation clears only
   empty shutdown gates; nonempty capture gates are released by their owner.
+  Frontend cloud labels/estimates live in `features/backups/cloudPresentation.ts`;
+  `ICloudPauseSelector.tsx` owns the shared pause duration choices.
 - Bootable clone evidence is built in `van_dashboard_hotspares.py`, using the
   existing normalized device-tree helpers in `van_dashboard_block_devices.py`.
   Root usage comes from mounted `lsblk` counters or a read-only, label-verified

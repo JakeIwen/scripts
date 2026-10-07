@@ -1,6 +1,6 @@
 import type { PollingState } from '../../hooks/usePollingResource';
 import { lastSuccessLabel } from './presentation';
-import { iCloudPhaseLabel, iCloudProgress } from './icloud';
+import { iCloudTileLabel } from './cloudPresentation';
 import type { BackupStatus } from './types';
 import './backups.css';
 
@@ -63,25 +63,8 @@ function backupPresentation(status: BackupStatus) {
     summary = `Mac → iCloud: ${status.timeMachineIcloud.message}`;
   }
 
-  const cloud = status.icloud;
-  const cloudPercent = cloud?.available ? iCloudProgress(cloud).percent : null;
-  const icloud = !cloud?.available
-    ? 'Status unavailable'
-    : cloud.phase === 'not due' || cloud.phase === 'complete'
-      ? cloud.lastSuccessAt === null
-        ? 'Not yet verified'
-        : `Verified ${backupAge(cloud.lastSuccessAt)}`
-      : `${iCloudPhaseLabel(cloud.phase)}${cloudPercent === null ? '' : ` · ${cloudPercent.toFixed(1)}%`}`;
-
-  const tmCloud = status.timeMachineIcloud;
-  const tmPercent = tmCloud?.available ? iCloudProgress(tmCloud).percent : null;
-  const timeMachineIcloud = !tmCloud?.available
-    ? 'Status unavailable'
-    : tmCloud.phase === 'complete' || tmCloud.phase === 'not due'
-      ? tmCloud.lastSuccessAt === null
-        ? 'Not yet verified'
-        : `Verified ${backupAge(tmCloud.lastSuccessAt)}`
-      : `${iCloudPhaseLabel(tmCloud.phase)}${tmPercent === null ? '' : ` · ${tmPercent.toFixed(1)}%`}`;
+  const icloud = iCloudTileLabel(status.icloud);
+  const timeMachineIcloud = iCloudTileLabel(status.timeMachineIcloud);
 
   return {
     summary,
