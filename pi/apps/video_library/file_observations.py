@@ -15,23 +15,21 @@ def _accepts_file_stat(
     catalog: MediaAssetCatalog,
     db: sqlite3.Connection,
     asset_id: str,
-    device_id: str | None,
-    inode: int | None,
+    stat_asset_ids: set[str],
 ) -> bool:
-    prior_identities = catalog._all(
+    if asset_id in stat_asset_ids:
+        return True
+    # The indexed device/inode lookup already found every exact match. Only
+    # path-only seeds need the fallback; stop at the first contrary observation.
+    return catalog._one(
         db,
         """
-        SELECT device_id, inode, size
-        FROM video_v2_file_identities
+        SELECT 1 FROM video_v2_file_identities
         WHERE asset_id = ? AND device_id IS NOT NULL AND inode IS NOT NULL
+        LIMIT 1
         """,
         (asset_id,),
-    )
-    identity_matches = any(
-        str(row["device_id"]) == str(device_id) and int(row["inode"]) == int(inode)
-        for row in prior_identities
-    ) if device_id is not None and inode is not None else False
-    return not prior_identities or identity_matches
+    ) is None
 
 
 def matching_file_assets(
@@ -52,11 +50,23 @@ def matching_file_assets(
         "SELECT asset_id FROM video_v2_locations WHERE path = ? AND valid_to IS NULL",
         (path,),
     )
+    stat_asset_ids: set[str] = set()
+    if device_id is not None and inode is not None:
+        rows = catalog._all(
+            db,
+            """
+            SELECT DISTINCT asset_id FROM video_v2_file_identities
+            WHERE device_id = ? AND inode = ?
+            """,
+            (str(device_id), int(inode)),
+        )
+        stat_asset_ids.update(str(row["asset_id"]) for row in rows)
+    asset_ids.update(stat_asset_ids)
     if path_row is not None:
         path_asset_id = str(path_row["asset_id"])
         # Locations are versioned only after all observations agree, including
         # when the caller owns the surrounding scan transaction.
-        if _accepts_file_stat(catalog, db, path_asset_id, device_id, inode):
+        if _accepts_file_stat(catalog, db, path_asset_id, stat_asset_ids):
             asset_ids.add(path_asset_id)
     if fingerprint is not None:
         rows = catalog._all(
@@ -69,19 +79,9 @@ def matching_file_assets(
             (fingerprint_algorithm, fingerprint, size, size),
         )
         asset_ids.update(str(row["asset_id"]) for row in rows)
-    if device_id is not None and inode is not None:
-        rows = catalog._all(
-            db,
-            """
-            SELECT DISTINCT asset_id FROM video_v2_file_identities
-            WHERE device_id = ? AND inode = ?
-            """,
-            (str(device_id), int(inode)),
-        )
-        asset_ids.update(str(row["asset_id"]) for row in rows)
     if not asset_ids and preferred_asset_id is not None:
         catalog._assert_asset(db, preferred_asset_id)
-        if _accepts_file_stat(catalog, db, preferred_asset_id, device_id, inode):
+        if _accepts_file_stat(catalog, db, preferred_asset_id, stat_asset_ids):
             asset_ids.add(preferred_asset_id)
     if len(asset_ids) > 1:
         raise CatalogConflict("file observations resolve to multiple assets")

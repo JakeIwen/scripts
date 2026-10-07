@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import sqlite3
 import threading
@@ -11,6 +10,7 @@ import time
 from typing import Any
 
 from .config import LEGACY_LINE_RE, QBITTORRENT_FINAL_ROOTS, QBITTORRENT_TEMP_ROOTS
+from .deferred_positions import DeferredLegacyPositions
 from .media_models import MediaItem
 from .video_qbittorrent import ResolvedTorrentFile
 
@@ -196,6 +196,7 @@ class LegacyProgressMixin:
         normalized_path: str,
         item: MediaItem | None,
         torrent: ResolvedTorrentFile | None,
+        pending_positions: DeferredLegacyPositions | None = None,
     ) -> None:
         """Resolve raw legacy rows only when exact path evidence becomes known."""
 
@@ -207,20 +208,15 @@ class LegacyProgressMixin:
             item=item,
             torrent=torrent,
         )
-        for record in self.catalog.list_import_records(action="unresolved"):
-            if record.get("source_kind") != "legacy-vlc-position-log":
-                continue
-            try:
-                raw = json.loads(record.get("raw_json") or "{}")
-                legacy_path = str(raw["relative_path"]).replace(os.sep, "/")
-                micros = int(raw["position_microseconds"])
-            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-                continue
-            if legacy_path not in evidence:
-                continue
+        if pending_positions is None:
+            pending_positions = DeferredLegacyPositions(
+                self.catalog.list_import_records(action="unresolved")
+            )
+        for position in pending_positions.matching(evidence):
+            record = position.record
             applied = self.catalog.apply_imported_playhead(
                 asset_id,
-                position=micros / 1_000_000,
+                position=position.microseconds / 1_000_000,
                 source_updated=float(
                     record.get("source_updated") or record.get("imported_at") or self.clock()
                 ),
@@ -235,8 +231,9 @@ class LegacyProgressMixin:
                 source_updated=record.get("source_updated"),
                 asset_id=asset_id,
                 work_id=work_id,
-                raw=raw,
+                raw=position.raw,
             )
+            pending_positions.discard(position)
 
     def _legacy_progress_for_asset(
         self, asset_id: str, work_id: str | None = None
