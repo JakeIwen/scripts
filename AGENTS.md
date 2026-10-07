@@ -46,6 +46,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   worker and Mac heartbeat all honor it. Dashboard mutations use
   `van_dashboard_cloud_controls.py`. Samba mount reconciliation clears only
   empty shutdown gates; nonempty capture gates are released by their owner.
+  Indefinite holds use `paused_until: "indefinite"`. Switching clouds locks both
+  control records, pauses the peer indefinitely, then queues the selected job;
+  never delete or force-release the common backup lock or stop local backups.
   Frontend cloud labels/estimates live in `features/backups/cloudPresentation.ts`;
   `ICloudPauseSelector.tsx` owns the shared pause duration choices.
 - Bootable clone evidence is built in `van_dashboard_hotspares.py`, using the

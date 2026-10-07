@@ -24,8 +24,9 @@ export const ICLOUD_PHASES = [
   'paused',
 ] as const;
 export type ICloudPhase = (typeof ICLOUD_PHASES)[number];
-export type ICloudControlAction = 'pause' | 'resume';
+export type ICloudControlAction = 'pause' | 'resume' | 'take-turn';
 export type ICloudBackupKind = 'pi' | 'time-machine';
+export const INDEFINITE_PAUSE = 'indefinite';
 export interface ICloudProgress {
   uploadBytesPerSecond?: number | null;
   captureBytes?: number | null;
@@ -53,6 +54,9 @@ export interface ICloudAttempt {
 export interface AvailableICloudStatus {
   controlsAvailable?: boolean;
   manualPauseUntil?: number | null;
+  manualPauseIndefinite?: boolean;
+  resumePending?: boolean;
+  stalled?: boolean;
   available: true;
   running: boolean;
   phase: ICloudPhase;
@@ -119,6 +123,15 @@ export function decodeICloud(value: unknown): ICloudStatus | null {
         : booleanValue(row.controls_available, 'iCloud.controls_available'),
     manualPauseUntil:
       row.manual_pause_until === undefined ? null : nullableNumeric(row.manual_pause_until),
+    manualPauseIndefinite:
+      row.manual_pause_indefinite === undefined
+        ? false
+        : booleanValue(row.manual_pause_indefinite, 'iCloud.manual_pause_indefinite'),
+    resumePending:
+      row.resume_pending === undefined
+        ? false
+        : booleanValue(row.resume_pending, 'iCloud.resume_pending'),
+    stalled: row.stalled === undefined ? false : booleanValue(row.stalled, 'iCloud.stalled'),
     running: booleanValue(row.running, 'iCloud.running'),
     phase: phase(row.phase),
     message: stringValue(row.message, 'iCloud.message'),
@@ -181,10 +194,10 @@ export function iCloudPhaseLabel(value: ICloudPhase): string {
 
 export function iCloudProgress(status: AvailableICloudStatus) {
   const p = status.progress;
-  const capturing = (status.running ? status.phase : status.lastWorkPhase) === 'preparing';
-  const verification = ['verifying', 'publishing', 'retention', 'complete'].includes(
-    status.running ? status.phase : status.lastWorkPhase,
-  );
+  const activePhase =
+    status.running && status.phase !== 'paused' ? status.phase : status.lastWorkPhase;
+  const capturing = activePhase === 'preparing';
+  const verification = ['verifying', 'publishing', 'retention', 'complete'].includes(activePhase);
   const done = capturing
     ? (p.captureBytes ?? null)
     : verification

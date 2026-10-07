@@ -146,7 +146,7 @@ def api_stop_exfat_backup():
 
 def _cloud_action(action, controller, label):
     fields = ("minutes",) if action == "pause" else ()
-    if request.args or not _exact_form(fields) or (request.content_length and not request.form and action == "resume"):
+    if request.args or not _exact_form(fields) or (request.content_length and not request.form and action != "pause"):
         return api_error("invalid cloud backup control input", 400)
     try:
         controller.request(action, request.form.get("minutes"))
@@ -154,7 +154,8 @@ def _cloud_action(action, controller, label):
         return api_error(str(exc), 400)
     except RuntimeError as exc:
         return api_error(str(exc), 503)
-    message = (f"{label} pause requested" if action == "pause" else
+    message = (f"Switch to {label} requested; the other iCloud backup is paused until resumed" if action == "take-turn" else
+               f"{label} pause requested" if action == "pause" else
                f"{label} resume requested; existing safety checks still apply")
     response = jsonify({"ok": True, "message": message})
     response.status_code = 202
@@ -180,3 +181,13 @@ def api_pause_pi_cloud():
 @bp.route("/api/backups/icloud/resume", methods=["POST"])
 def api_resume_pi_cloud():
     return _cloud_action("resume", pi_cloud_control, "Pi iCloud")
+
+
+@bp.route("/api/backups/icloud/take-turn", methods=["POST"])
+def api_select_pi_cloud():
+    return _cloud_action("take-turn", pi_cloud_control, "Pi iCloud")
+
+
+@bp.route("/api/backups/time-machine-icloud/take-turn", methods=["POST"])
+def api_select_time_machine_cloud():
+    return _cloud_action("take-turn", time_machine_cloud_control, "Time Machine iCloud")

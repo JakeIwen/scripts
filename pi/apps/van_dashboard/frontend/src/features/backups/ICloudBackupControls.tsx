@@ -2,11 +2,20 @@ import { ICloudPauseSelector } from './ICloudPauseSelector';
 import { useState } from 'react';
 import { useSingleFlightAction } from '../../hooks/useSingleFlightAction';
 import { controlICloudBackup } from './api';
-import type { AvailableICloudStatus, ICloudBackupKind, ICloudControlAction } from './icloud';
+import type {
+  AvailableICloudStatus,
+  ICloudBackupKind,
+  ICloudControlAction,
+  ICloudStatus,
+} from './icloud';
+
+const RESUME_HELP =
+  'Resume retries saved work when the backup lock, disk, ignition and network checks allow it.';
 
 interface ICloudBackupControlsProps {
   kind: ICloudBackupKind;
   status: AvailableICloudStatus;
+  other?: ICloudStatus | null;
   refresh: () => Promise<unknown>;
   blocked: boolean;
 }
@@ -14,6 +23,7 @@ interface ICloudBackupControlsProps {
 export function ICloudBackupControls({
   kind,
   status,
+  other,
   refresh,
   blocked,
 }: ICloudBackupControlsProps) {
@@ -22,6 +32,7 @@ export function ICloudBackupControls({
   const [error, setError] = useState<string | null>(null);
   const { running, run } = useSingleFlightAction();
   const disabled = blocked || running;
+  const manuallyPaused = status.manualPauseUntil != null || status.manualPauseIndefinite;
   async function perform(action: ICloudControlAction) {
     await run(async () => {
       setError(null);
@@ -37,6 +48,7 @@ export function ICloudBackupControls({
   }
   return (
     <div className="backup-cloud-controls">
+      {status.manualPauseIndefinite && <p>Paused indefinitely. Resume manually when ready.</p>}
       {status.manualPauseUntil != null && (
         <p>
           Automatic resume:{' '}
@@ -50,7 +62,9 @@ export function ICloudBackupControls({
         <button
           type="button"
           className="primary-button"
-          disabled={disabled || (status.running && status.manualPauseUntil == null)}
+          disabled={disabled || (status.running && !manuallyPaused)}
+          title={RESUME_HELP}
+          aria-description={RESUME_HELP}
           onClick={() => void perform('resume')}
         >
           {running ? 'Applying…' : 'Resume now'}
@@ -64,10 +78,18 @@ export function ICloudBackupControls({
         >
           Pause
         </button>
+        {other?.available && !status.running && (other.running || other.resumePending) && (
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={disabled}
+            title={`Pause ${kind === 'pi' ? 'Mac' : 'Pi'} iCloud indefinitely, then resume this backup. Existing safety checks still apply.`}
+            onClick={() => void perform('take-turn')}
+          >
+            Run this instead
+          </button>
+        )}
       </div>
-      <small>
-        Resume retries saved work when the backup lock, disk, ignition and network checks allow it.
-      </small>
       {message && <p role="status">{message}</p>}
       {error && (
         <p role="alert" className="error-message">

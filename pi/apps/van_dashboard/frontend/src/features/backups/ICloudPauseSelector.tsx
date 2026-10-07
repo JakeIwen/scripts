@@ -16,7 +16,9 @@ export function ICloudPauseSelector({ value, onChange, disabled }: ICloudPauseSe
         <option value="720">12 hours</option>
         <option value="1440">24 hours</option>
         <option value="10080">7 days</option>
+        <option value={INDEFINITE_PAUSE}>Indefinitely</option>
       </select>
     </label>
   );
 }
+import { INDEFINITE_PAUSE } from './icloud';

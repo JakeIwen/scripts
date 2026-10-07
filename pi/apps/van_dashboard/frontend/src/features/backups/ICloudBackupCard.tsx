@@ -2,6 +2,7 @@ import { formatBytes, formatDuration, formatRelativeTime } from '../../utils/for
 import { iCloudPhaseLabel, iCloudProgress } from './icloud';
 import type { AvailableICloudStatus, ICloudBackupKind, ICloudStatus } from './icloud';
 import { ICloudBackupControls } from './ICloudBackupControls';
+import { iCloudUploadTimeLeft } from './cloudPresentation';
 
 function ICloudUploadSpeed({ status }: { status: AvailableICloudStatus }) {
   if (!status.running || status.phase !== 'uploading') return null;
@@ -23,11 +24,13 @@ export function ICloudBackupCard({
   status,
   kind = 'pi',
   refresh,
+  other,
   blocked = false,
 }: {
   status: ICloudStatus;
   kind?: ICloudBackupKind;
   refresh?: () => Promise<unknown>;
+  other?: ICloudStatus | null;
   blocked?: boolean;
 }) {
   const title = kind === 'time-machine' ? 'Mac Time Machine · iCloud' : 'Pi offsite · iCloud';
@@ -65,7 +68,13 @@ export function ICloudBackupCard({
       </div>
       <p>{status.message}</p>
       {status.controlsAvailable && refresh && (
-        <ICloudBackupControls kind={kind} status={status} refresh={refresh} blocked={blocked} />
+        <ICloudBackupControls
+          kind={kind}
+          status={status}
+          other={other}
+          refresh={refresh}
+          blocked={blocked}
+        />
       )}
       <ICloudUploadSpeed status={status} />
       {status.lastSuccessAt === null ? (
@@ -90,6 +99,7 @@ export function ICloudBackupCard({
                 ? 'Download verification'
                 : 'Upload estimate'}
             {p.percent === null ? '' : ` · ${p.percent.toFixed(1)}%`}
+            <UploadTimeLeft status={status} />
           </strong>
           {p.percent !== null ? (
             <>
@@ -220,5 +230,12 @@ export function ICloudBackupCard({
         </details>
       )}
     </section>
+  );
+}
+
+function UploadTimeLeft({ status }: { status: AvailableICloudStatus }) {
+  const remaining = iCloudUploadTimeLeft(status);
+  return remaining === null ? null : (
+    <span title="Estimated upload time at the current rate; download verification follows.">{` · ${remaining} left`}</span>
   );
 }

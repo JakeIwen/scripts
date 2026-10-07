@@ -308,6 +308,7 @@ export function BackupsSheet({ open, onClose, resource, controls }: BackupsSheet
       {status?.icloud && (
         <ICloudBackupCard
           status={status.icloud}
+          other={status.timeMachineIcloud}
           refresh={resource.refresh}
           blocked={controls.blocked}
         />
@@ -315,6 +316,7 @@ export function BackupsSheet({ open, onClose, resource, controls }: BackupsSheet
       {status?.timeMachineIcloud && (
         <ICloudBackupCard
           status={status.timeMachineIcloud}
+          other={status.icloud}
           kind="time-machine"
           refresh={resource.refresh}
           blocked={controls.blocked}

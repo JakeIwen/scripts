@@ -43,6 +43,17 @@ class CloudControlTests(unittest.TestCase):
                              '/home/pi/scripts/backup/icloud_backup_control.py')
             self.assertEqual(self.command.call_args.args[0][4], '--' + action)
 
+    def test_indefinite_pause_and_selection_are_fixed_allowlisted_commands(self):
+        for path in ('icloud', 'time-machine-icloud'):
+            response = self.client.post(f'/api/backups/{path}/pause', data={'minutes': 'indefinite'})
+            self.assertEqual(response.status_code, 202)
+            self.assertEqual(self.command.call_args.args[0][-2:], ['--pause', 'indefinite'])
+            response = self.client.post(f'/api/backups/{path}/take-turn')
+            self.assertEqual(response.status_code, 202)
+            self.assertEqual(self.command.call_args.args[0][-1], '--take-turn')
+            self.assertIn('other iCloud backup is paused until resumed', response.json['message'])
+            self.assertEqual(self.client.post(f'/api/backups/{path}/take-turn', json={'unit': 'anything'}).status_code, 400)
+
     def test_invalid_and_cross_origin_requests_cannot_control_backups(self):
         for data in ({}, {'minutes': '0'}, {'minutes': '1.5'}, {'minutes': '10081'},
                      {'minutes': '60', 'unit': 'other'}, MultiDict([('minutes', '1'), ('minutes', '2')])):

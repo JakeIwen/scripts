@@ -411,3 +411,25 @@
   padding: 0.5rem;
   font: inherit;
 }
+.backups-tile__status-line--paused,
+.backups-tile__status-line--stalled {
+  padding: 4px 6px;
+  border-radius: 5px;
+  border-left: 3px solid currentColor;
+  font-weight: 700;
+}
+
+.backups-tile__status-line--paused {
+  color: #ffd58a;
+  background: #71542644;
+}
+
+.backups-tile__status-line--stalled {
+  color: #ffaaa5;
+  background: #7d343444;
+}
+
+.backups-tile .backups-tile__status-line--paused > span:last-child,
+.backups-tile .backups-tile__status-line--stalled > span:last-child {
+  color: inherit;
+}

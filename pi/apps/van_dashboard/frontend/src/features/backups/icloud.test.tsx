@@ -5,6 +5,7 @@ import { BackupsTile } from './BackupsTile';
 import { decodeICloud, type AvailableICloudStatus } from './icloud';
 import { sampleBackupStatus } from './testFixtures';
 import { ICloudBackupControls } from './ICloudBackupControls';
+import { iCloudUploadTimeLeft } from './cloudPresentation';
 
 const generation = 'vanpi-20260920T225254Z-ebf57e14';
 function cloud(): AvailableICloudStatus {
@@ -39,8 +40,101 @@ function cloud(): AvailableICloudStatus {
   };
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 describe('iCloud dashboard', () => {
+  it('estimates remaining upload time only from fresh, moving upload counters', () => {
+    const status = cloud();
+    Object.assign(status, { running: true, phase: 'uploading', updatedAt: Date.now() / 1000 });
+    Object.assign(status.progress, {
+      uploadTotalBytes: 252352941,
+      uploadEstimatedBytes: 243772941,
+      uploadBytesPerSecond: 1000,
+    });
+    expect(iCloudUploadTimeLeft(status)).toBe('2h 23m');
+    const view = render(<ICloudBackupCard status={status} />);
+    expect(screen.getByText(/2h 23m left/)).toBeInTheDocument();
+    expect(screen.getByText(/Upload estimate.*96.6%/)).toBeInTheDocument();
+    for (const changes of [
+      { running: false },
+      { progressStale: true },
+      { stalled: true },
+      { updatedAt: 1000 },
+    ]) {
+      expect(iCloudUploadTimeLeft({ ...status, ...changes })).toBeNull();
+    }
+    expect(iCloudUploadTimeLeft({ ...status, phase: 'verifying' })).toBeNull();
+    expect(
+      iCloudUploadTimeLeft({
+        ...status,
+        progress: { ...status.progress, uploadBytesPerSecond: 0 },
+      }),
+    ).toBeNull();
+    view.rerender(<ICloudBackupCard status={{ ...status, stalled: true }} />);
+    expect(screen.queryByText(/2h 23m left/)).not.toBeInTheDocument();
+  });
+
+  it('highlights paused and stalled cloud rows while another backup is running', () => {
+    const data = sampleBackupStatus(true);
+    data.timeMachineIcloud = { ...cloud(), phase: 'paused', manualPauseIndefinite: true };
+    data.icloud = { ...cloud(), running: true, phase: 'uploading', stalled: true };
+    render(
+      <BackupsTile
+        resource={{
+          data,
+          error: null,
+          initialLoading: false,
+          refreshing: false,
+          lastUpdatedAt: Date.now(),
+          refresh: vi.fn(),
+        }}
+        onOpen={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('Mac · iCloud').parentElement).toHaveClass(
+      'backups-tile__status-line--paused',
+    );
+    expect(screen.getByText('Pi · iCloud').parentElement).toHaveClass(
+      'backups-tile__status-line--stalled',
+    );
+    expect(screen.getByText('Stalled · 75.0%')).toBeInTheDocument();
+    expect(screen.getByText('Manually paused · 75.0%')).toBeInTheDocument();
+  });
+
+  it('offers indefinite pause, keeps Resume help in its tooltip and requests a safe switch', async () => {
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(
+        async () =>
+          new Response(JSON.stringify({ ok: true, message: 'Accepted' }), { status: 202 }),
+      );
+    const status = { ...cloud(), phase: 'paused' as const, manualPauseIndefinite: true };
+    render(
+      <ICloudBackupControls
+        kind="time-machine"
+        status={status}
+        other={{ ...cloud(), running: true }}
+        refresh={vi.fn()}
+        blocked={false}
+      />,
+    );
+    const help =
+      'Resume retries saved work when the backup lock, disk, ignition and network checks allow it.';
+    expect(screen.getByRole('button', { name: 'Resume now' })).toHaveAttribute('title', help);
+    expect(screen.queryByText(help)).not.toBeInTheDocument();
+    expect(screen.getByText(/Paused indefinitely/)).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'indefinite' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
+    await screen.findByRole('status');
+    expect(String(fetch.mock.calls[0]?.[1]?.body)).toBe('minutes=indefinite');
+    fireEvent.click(screen.getByRole('button', { name: 'Run this instead' }));
+    await screen.findByRole('status');
+    expect(fetch.mock.calls[1]?.[0]).toBe('/api/backups/time-machine-icloud/take-turn');
+    expect(String(fetch.mock.calls[1]?.[1]?.body)).toBe('');
+  });
+
   it('tracks the Mac frozen capture separately from Pi upload progress', () => {
     const status = cloud();
     Object.assign(status, {

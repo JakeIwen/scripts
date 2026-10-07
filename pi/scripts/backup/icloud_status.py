@@ -17,6 +17,8 @@ import uuid
 
 STATE_DIR = Path('/var/lib/vanpi-icloud-backup')
 CONFIG = Path('/etc/vanpi-icloud-backup.json')
+INDEFINITE_PAUSE = 'indefinite'
+TRANSFER_STALL_SECONDS = 120
 PHASES = {'checking', 'preparing', 'uploading', 'verifying', 'publishing',
           'retention', 'complete', 'not due', 'deferred', 'error',
           'authentication_required', 'interrupted', 'unavailable'}
@@ -52,7 +54,7 @@ def pause_deadline(directory):
     if not isinstance(value, dict):
         raise ValueError('invalid manual pause state')
     deadline = value.get('paused_until')
-    if deadline is not None and number(deadline) is None:
+    if deadline not in (None, INDEFINITE_PAUSE) and number(deadline) is None:
         raise ValueError('invalid manual pause deadline')
     return deadline
 
@@ -84,14 +86,18 @@ def queued_backup_message(lock_file=Path('/run/lock/vanpi_backup.lock'), process
 
 def apply_manual_control(result, deadline, now=None):
     now = time.time() if now is None else now
-    paused = deadline is not None and deadline > now
-    result['manual_pause_until'] = deadline if paused else None
+    indefinite = deadline == INDEFINITE_PAUSE
+    paused = indefinite or (deadline is not None and deadline > now)
+    result['manual_pause_indefinite'] = indefinite
+    result['manual_pause_until'] = deadline if paused and not indefinite else None
     result['resume_pending'] = deadline is not None and not paused
     result['controls_available'] = True
     if paused:
         result.update(phase='paused', message=('Stopping safely for the manual pause.' if result['running']
+                                             else 'Manually paused until you resume it.' if indefinite
                                              else 'Manually paused; automatic retries resume when the pause expires.'))
-        result['next_check_at'] = deadline
+        result['next_check_at'] = None if indefinite else deadline
+        result['stalled'] = False
     elif result['resume_pending'] and not result['running']:
         result.update(phase='deferred', message=queued_backup_message())
     return result
@@ -195,6 +201,13 @@ def begin_attempt(directory, state):
     save_attempt(directory, state)
 
 
+def transfer_stalled(state, matching, updated, now):
+    idle = number(state.get('progress', {}).get('command_idle_seconds'))
+    return bool(matching and state.get('phase') in ('uploading', 'verifying')
+                and updated is not None and now - updated <= 60
+                and idle is not None and idle >= TRANSFER_STALL_SECONDS)
+
+
 def build_status(state, history, cfg, service, next_check_at, now=None, auth_error=False):
     now = time.time() if now is None else now
     live = service.get('ActiveState') in ('active', 'activating', 'deactivating') and int(service.get('MainPID') or 0) > 0
@@ -210,6 +223,7 @@ def build_status(state, history, cfg, service, next_check_at, now=None, auth_err
     last_success = number(state.get('last_success_at'))
     interval = cfg.get('interval_days', 7)
     updated = number(state.get('progress_updated_at'))
+    stalled = transfer_stalled(current, matching, updated, now)
     current_progress = progress(current)
     current_progress['upload_bytes_per_second'] = (
         number(current.get('progress', {}).get('upload_bytes_per_second'))
@@ -222,13 +236,13 @@ def build_status(state, history, cfg, service, next_check_at, now=None, auth_err
         elif row.get('ended_at') is None:
             row.update(phase='interrupted', message='Worker stopped without a final status.')
         attempts.append(row)
-    return {'available': True, 'running': live, 'phase': current_phase,
+    return {'available': True, 'running': live, 'phase': current_phase, 'stalled': stalled,
             'message': reason(current), 'last_work_phase': phase(state.get('last_work_phase', 'checking')),
             'generation': generation(state.get('pending') or state.get('last_generation')),
             'last_success_at': last_success, 'next_check_at': next_check_at,
             'next_due_at': last_success + interval * 86400 if last_success else None,
             'updated_at': updated, 'progress_stale': bool(live and (not matching or updated is None or now - updated > 60)),
-            'attention': last_success is None or now - last_success > (interval + 1) * 86400 or current_phase in ('error', 'authentication_required', 'interrupted', 'unavailable'),
+            'attention': stalled or last_success is None or now - last_success > (interval + 1) * 86400 or current_phase in ('error', 'authentication_required', 'interrupted', 'unavailable'),
             'interval_days': interval, 'keep_generations': cfg.get('keep_generations', 8),
             'progress': current_progress, 'history_started_at': number(history.get('started_at')),
             'attempts': attempts, 'verified_generations': list(reversed(history.get('verified', [])))}

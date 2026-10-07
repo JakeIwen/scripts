@@ -445,6 +445,8 @@ def remote_inventory(cfg, destination):
 
 def record_progress(state, phase, **values):
     changed = state.get('phase') != phase
+    if changed:
+        state.setdefault('progress', {})['command_idle_seconds'] = 0
     state.update(phase=phase, work_phase=phase, last_work_phase=phase,
                  last_error=None, progress_updated_at=time.time())
     if values:
@@ -496,11 +498,11 @@ def verify_generation(cfg, generation, destination, state):
     checkpoint['verified'] = verified
     atomic_json(checkpoint_path, checkpoint)
     total = sum(x['bytes'] for x in expected.values())
-    def report(**extra):
+    def report(command_idle_seconds=0, **extra):
         record_progress(state, 'verifying', verified_files=len(verified),
                         verification_total_files=len(expected),
                         verified_bytes=sum(x['expected']['bytes'] for x in verified.values()),
-                        verification_total_bytes=total, **extra)
+                        verification_total_bytes=total, command_idle_seconds=command_idle_seconds, **extra)
     report(current_file=None, current_file_bytes=0)
     for path in sorted(expected, key=lambda p: (expected[p]['bytes'], p)):
         if path in verified:
@@ -509,7 +511,8 @@ def verify_generation(cfg, generation, destination, state):
         report(current_file=path, current_file_bytes=0)
         result = run([RCLONE, 'cat', destination + '/' + path], cfg, network=True,
                      stream_hash=True, progress=lambda counters: report(
-                         current_file=path, current_file_bytes=counters.get('download_bytes', 0)))
+                         current_file=path, current_file_bytes=counters.get('download_bytes', 0),
+                         command_idle_seconds=counters.get('idle_seconds', 0)))
         if result != expected[path]:
             raise RuntimeError('downloaded file failed SHA-256 verification: ' + path)
         verified[path] = {'expected': expected[path], 'remote': remote_fingerprint(rows[path])}

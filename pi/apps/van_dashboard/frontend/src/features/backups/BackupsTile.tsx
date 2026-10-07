@@ -1,6 +1,6 @@
 import type { PollingState } from '../../hooks/usePollingResource';
 import { lastSuccessLabel } from './presentation';
-import { iCloudTileLabel } from './cloudPresentation';
+import { iCloudTileLabel, iCloudTileTone } from './cloudPresentation';
 import type { BackupStatus } from './types';
 import './backups.css';
 
@@ -114,13 +114,17 @@ export function BackupsTile({ resource, onOpen }: BackupsTileProps) {
       </span>
       <span className="backups-tile__status-lines">
         {status?.timeMachineIcloud && (
-          <span className="backups-tile__status-line">
+          <span
+            className={`backups-tile__status-line backups-tile__status-line--${iCloudTileTone(status.timeMachineIcloud) ?? 'normal'}`}
+          >
             <span>Mac · iCloud</span>
             <span>{presentation?.timeMachineIcloud}</span>
           </span>
         )}
         {status?.icloud && (
-          <span className="backups-tile__status-line">
+          <span
+            className={`backups-tile__status-line backups-tile__status-line--${iCloudTileTone(status.icloud) ?? 'normal'}`}
+          >
             <span>Pi · iCloud</span>
             <span>{presentation?.icloud}</span>
           </span>

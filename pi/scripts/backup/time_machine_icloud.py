@@ -320,16 +320,17 @@ def verify_objects(cfg, expected, state):
         if cache.get(digest, {}).get('remote') == fp and cache[digest].get('expected') == entry:
             verified[digest] = cache[digest]
     total = sum(v['bytes'] for v in expected.values())
-    def report(**extra):
+    def report(command_idle_seconds=0, **extra):
         cloud.record_progress(state, 'verifying', verified_files=len(verified),
             verification_total_files=len(expected), verified_bytes=sum(expected[k]['bytes'] for k in verified),
-            verification_total_bytes=total, **extra)
+            verification_total_bytes=total, command_idle_seconds=command_idle_seconds, **extra)
     report(current_file_bytes=0)
     for digest in sorted(expected, key=lambda k: (expected[k]['bytes'], k)):
         if digest in verified:
             continue
         result = network(cfg, 'cat', remote + '/' + digest, stream_hash=True,
-                         progress=lambda c: report(current_file_bytes=c.get('download_bytes', 0)))
+                         progress=lambda c: report(current_file_bytes=c.get('download_bytes', 0),
+                                                   command_idle_seconds=c.get('idle_seconds', 0)))
         if result != expected[digest]:
             raise RuntimeError('cloud object failed downloaded SHA-256 check')
         cache[digest] = {'expected': expected[digest], 'remote': cloud.remote_fingerprint(rows[digest]),

@@ -67,12 +67,22 @@ a safe explanation, plus the next timer check. A timer check is not a promised
 start time: the uplink, disk policy, shared lock and local-backup window still apply.
 
 Both cloud cards offer **Resume now** and **Pause for** (15/30 minutes,
-1/4/12/24 hours, or seven days). Each has its own root-private `pause.json`;
+1/4/12/24 hours, seven days, or indefinitely). Each has its own root-private `pause.json`;
 pausing Pi recovery does not pause Time Machine replication. Stops are graceful,
 and existing uploaded files and verification checkpoints are retained. Pending
 Pi generations continue after a long pause even when older than the weekly
 interval. Resume queues behind other backup work and checks each minute until
 the worker acquires the lock. The dashboard names a recognized lock holder.
+
+**Run this instead** pauses the other cloud job indefinitely and queues the
+selected job. Both control records are locked before either changes; a concurrent
+control is rejected without partial intents. The peer receives a graceful stop
+before the selected service receives a start request. The existing backup lock
+is never deleted, replaced or forcibly unlocked, and local jobs are never stopped.
+If stopping is delayed, the selected job remains queued for the minute timer.
+The other cloud job stays paused until explicitly resumed. `paused_until` is a
+timestamp for timed holds/queued resumes, or the literal `indefinite`; old readers
+reject the latter rather than accidentally expiring the hold.
 
 `icloud_backup_control.py` and `time_machine_icloud_control.py` are fixed CLI
 entry points backed by `cloud_backup_control.py`. Their separate `*-resume.timer`
@@ -84,9 +94,15 @@ priority, image-consistency and uplink checks still apply after manual resume.
   a restorable copy. Download verification is displayed separately, counting only
   files whose complete SHA-256 check has passed. The current file's downloaded
   bytes are shown separately and credited only when it passes.
-- No ETA is guessed. The pane shows the worker phase, heartbeat freshness,
+- Upload time remaining is estimated from remaining bytes and a fresh positive
+  upload rate; it excludes download verification and is hidden for paused,
+  stalled, stale or non-uploading jobs. The pane shows the worker phase, heartbeat freshness,
   byte/file counters, last verified recovery point, next eligibility check,
   weekly cadence and retention. An unverified first copy is explicitly warned.
+- Cloud rows on the tile highlight manual pauses and safety deferrals in amber;
+  failed/interrupted jobs and stalled transfers in red. Stalled means a live,
+  fresh upload or verification worker reports at least two minutes without
+  progress. Stale progress is labeled separately; it does not prove a stall.
 - Root-private `history.json` retains the latest 100 attempts and 52 historical
   verification successes. Tracking starts with the first run after this feature
   is deployed; earlier attempts remain in the systemd journal. History is not

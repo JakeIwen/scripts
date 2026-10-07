@@ -83,6 +83,25 @@ class StatusTests(unittest.TestCase):
         self.assertTrue(queued['resume_pending'])
         self.assertEqual(queued['message'], 'Waiting for local backup')
 
+    def test_indefinite_pause_has_no_retry_deadline_or_stall_warning(self):
+        result = status.apply_manual_control({**self.build(), 'stalled': True}, 'indefinite', now=10**12)
+        self.assertEqual(result['phase'], 'paused')
+        self.assertTrue(result['manual_pause_indefinite'])
+        self.assertFalse(result['resume_pending'])
+        self.assertFalse(result['stalled'])
+        self.assertIsNone(result['next_check_at'])
+        self.assertIsNone(result['manual_pause_until'])
+
+    def test_stall_requires_live_fresh_transfer_idle_evidence(self):
+        state = {'phase': 'uploading', 'worker_pid': 123, 'progress_updated_at': 995,
+                 'progress': {'command_idle_seconds': 120}}
+        self.assertTrue(self.build(state, live=True)['stalled'])
+        self.assertTrue(self.build({**state, 'phase': 'verifying'}, live=True)['stalled'])
+        self.assertFalse(self.build(state)['stalled'])
+        for changes in ({'phase': 'preparing'}, {'progress_updated_at': 900}, {'worker_pid': 124},
+                        {'progress': {'command_idle_seconds': 119}}):
+            self.assertFalse(self.build({**state, **changes}, live=True)['stalled'])
+
     def test_speed_only_comes_from_a_fresh_matching_live_upload(self):
         state = {'phase': 'uploading', 'worker_pid': 123, 'progress_updated_at': 995,
                  'progress': {'upload_bytes_per_second': 1234.5}}

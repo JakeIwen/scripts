@@ -1,6 +1,7 @@
 import json
 import datetime as dt
 import hashlib
+import fcntl
 import io
 import os
 import signal
@@ -490,6 +491,58 @@ class PiPauseTests(unittest.TestCase):
         self.assertEqual(control.pause_deadline(self.state_dir), 1060)
         self.assertTrue(control.admit_worker(self.state_dir, now=1060))
         self.assertIsNone(control.pause_deadline(self.state_dir))
+
+    def test_indefinite_hold_never_expires_and_resume_clears_it(self):
+        command = mock.Mock()
+        control.control('pause', 'indefinite', directory=self.state_dir,
+                        service='vanpi-icloud-backup.service', now=1000, command=command)
+        self.assertEqual(control.pause_deadline(self.state_dir), 'indefinite')
+        command.reset_mock()
+        control.control('resume-if-due', directory=self.state_dir,
+                        service='vanpi-icloud-backup.service', now=10**12, command=command)
+        command.assert_not_called()
+        self.assertFalse(control.admit_worker(self.state_dir, now=10**12))
+        control.control('resume', directory=self.state_dir,
+                        service='vanpi-icloud-backup.service', now=1100, command=command)
+        self.assertTrue(control.admit_worker(self.state_dir, now=1100))
+
+    def turn_fixture(self):
+        other = self.root / 'other'; other.mkdir()
+        return {'vanpi-icloud-backup.service': self.state_dir,
+                'vanpi-time-machine-icloud.service': other}
+
+    def test_take_turn_pauses_peer_before_starting_selection(self):
+        jobs = self.turn_fixture()
+        for selected in jobs:
+            command = mock.Mock()
+            control.take_turn(selected, jobs=jobs, now=1000, command=command)
+            other = next(name for name in jobs if name != selected)
+            self.assertEqual(control.pause_deadline(jobs[other]), 'indefinite')
+            self.assertEqual(control.pause_deadline(jobs[selected]), 1000)
+            self.assertEqual([call.args[0] for call in command.call_args_list], [
+                ['/usr/bin/systemctl', 'stop', '--no-block', other],
+                ['/usr/bin/systemctl', 'start', '--no-block', selected]])
+            self.assertFalse(control.admit_worker(jobs[other], now=1000))
+            self.assertTrue(control.admit_worker(jobs[selected], now=1000))
+
+    def test_busy_control_refuses_switch_without_partial_intents(self):
+        jobs = self.turn_fixture()
+        command = mock.Mock()
+        with (self.state_dir / 'control.lock').open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with self.assertRaises(BlockingIOError):
+                control.take_turn('vanpi-icloud-backup.service', jobs=jobs, command=command)
+        self.assertTrue(all(not (directory / 'pause.json').exists() for directory in jobs.values()))
+        command.assert_not_called()
+
+    def test_failed_peer_stop_keeps_safe_hold_and_queue_without_forcing_start(self):
+        jobs = self.turn_fixture()
+        command = mock.Mock(side_effect=subprocess.TimeoutExpired('systemctl', 10))
+        with self.assertRaises(subprocess.TimeoutExpired):
+            control.take_turn('vanpi-icloud-backup.service', jobs=jobs, now=1000, command=command)
+        self.assertEqual(command.call_count, 1)
+        self.assertEqual(control.pause_deadline(jobs['vanpi-time-machine-icloud.service']), 'indefinite')
+        self.assertEqual(control.pause_deadline(self.state_dir), 1000)
 
     def test_pending_copy_survives_long_pause_and_recent_success(self):
         cfg = test_config()
