@@ -653,15 +653,13 @@ class MediaAssetCatalog(V1CatalogBridge):
         normalized_path = _path_key(path)
         timestamp = self._now(observed_at)
         if size is None or device_id is None or inode is None or mtime_ns is None:
-            try:
-                stat = os.stat(normalized_path)
-            except OSError:
-                stat = None
-            if stat is not None:
-                size = stat.st_size if size is None else size
-                device_id = str(stat.st_dev) if device_id is None else str(device_id)
-                inode = stat.st_ino if inode is None else inode
-                mtime_ns = stat.st_mtime_ns if mtime_ns is None else mtime_ns
+            # Missing evidence must not retire a known location or create a
+            # path-only replacement that conflicts when the drive returns.
+            stat = os.stat(normalized_path)
+            size = stat.st_size if size is None else size
+            device_id = str(stat.st_dev) if device_id is None else str(device_id)
+            inode = stat.st_ino if inode is None else inode
+            mtime_ns = stat.st_mtime_ns if mtime_ns is None else mtime_ns
         if size is not None and int(size) < 0:
             raise ValueError("size must be non-negative")
         fingerprint_value = _optional_locator(fingerprint)
@@ -692,17 +690,10 @@ class MediaAssetCatalog(V1CatalogBridge):
                     and int(row["inode"]) == int(inode)
                     for row in prior_identities
                 ) if device_id is not None and inode is not None else False
+                # record_location versions a replaced path only after all
+                # observations agree, even in a caller-owned scan transaction.
                 if not prior_identities or identity_matches:
                     asset_ids.add(path_asset_id)
-                else:
-                    # A pathname is observation evidence, not permanent
-                    # identity.  Reuse after replacement must not inherit the
-                    # prior file's playhead.
-                    self.retire_location(
-                        normalized_path,
-                        observed_at=timestamp,
-                        connection=db,
-                    )
             if fingerprint_value is not None:
                 rows = self._all(
                     db,
