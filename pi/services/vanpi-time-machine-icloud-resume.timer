@@ -1,0 +1,11 @@
+[Unit]
+Description=Check timed Time Machine iCloud pauses every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+AccuracySec=1s
+Persistent=true
+Unit=vanpi-time-machine-icloud-resume.service
+
+[Install]
+WantedBy=timers.target

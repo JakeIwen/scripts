@@ -15,12 +15,14 @@ import signal
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 
 import icloud_backup as cloud
 import icloud_status as history
 import time_machine_store as store
+from time_machine_icloud_control import admit_worker, is_paused
 
 CONFIG = Path('/etc/vanpi-time-machine-icloud.json')
 STATE = Path('/var/lib/vanpi-time-machine-icloud')
@@ -89,7 +91,7 @@ def mac_present():
     cfg = config()
     due = state.get('pending') or now - state.get('last_success_at', 0) >= cfg['interval_days'] * 86400
     retry = now - state.get('last_attempt_at', 0) >= 3600 or state.get('last_error') == 'Mac capture coordinator unavailable'
-    if due and retry:
+    if due and retry and not is_paused(STATE):
         subprocess.run(['/usr/bin/systemctl', 'start', '--no-block', SERVICE], check=True, timeout=10)
     return {'ok': True}
 
@@ -137,6 +139,16 @@ def wait_image_handles(cfg, state, marker):
     cloud.record_progress(state, 'preparing', capture_waiting=False, capture_draining=False)
 
 
+def create_capture_gate(marker):
+    # Publish a populated gate atomically: mount reconciliation treats an
+    # empty marker as a shutdown gate that it may clear.
+    with tempfile.NamedTemporaryFile(mode='w', dir=DRAIN.parent) as stream:
+        stream.write(marker)
+        stream.flush()
+        os.fsync(stream.fileno())
+        os.link(stream.name, DRAIN)
+
+
 @contextmanager
 def quiesced(cfg, state):
     release_capture()  # Recover only this job's orphaned marker, never a live one.
@@ -152,8 +164,7 @@ def quiesced(cfg, state):
     # up even if the worker is killed immediately after creating its marker.
     store.atomic_json(STATE / 'capture.json', request)
     try:
-        with DRAIN.open('x') as f:
-            f.write(marker); f.flush(); os.fsync(f.fileno())
+        create_capture_gate(marker)
     except FileExistsError:
         (STATE / 'capture.json').unlink()
         raise cloud.Deferred('Time Machine share is already draining')
@@ -457,6 +468,8 @@ def main():
     if args != ['--run']:
         raise ValueError('unsupported operation')
     cloud.STATE_DIR = STATE
+    if not admit_worker(STATE):
+        return 0
     cfg = config()
     state = store.read_json(STATE / 'state.json', {})
     state['kind'] = 'time-machine'

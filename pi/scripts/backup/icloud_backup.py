@@ -464,6 +464,7 @@ def upload_progress(expected, inventory, counters):
                    and inventory[path]['Size'] == item['bytes'])
     sent = counters.get('bytes', 0)
     return {'upload_total_bytes': total, 'upload_estimated_bytes': min(total, existing + sent),
+            'upload_bytes_per_second': counters.get('speed'),
             'command_bytes': sent, 'command_idle_seconds': counters.get('idle_seconds', 0)}
 
 

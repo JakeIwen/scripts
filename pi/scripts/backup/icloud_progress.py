@@ -1,6 +1,7 @@
 """Progress signals without exposing rclone messages or downloaded contents."""
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import threading
@@ -53,6 +54,9 @@ class RcloneStats:
             stats = value.get('stats') if isinstance(value, dict) else None
             if not isinstance(stats, dict):
                 continue
+            speed = stats.get('speed')
+            self.counters['speed'] = (float(speed) if type(speed) in (int, float)
+                                      and math.isfinite(speed) and speed >= 0 else None)
             for key in ('bytes', 'checks', 'transfers', 'listed', 'deletes', 'renames'):
                 value = stats.get(key)
                 if type(value) is int and value >= 0:

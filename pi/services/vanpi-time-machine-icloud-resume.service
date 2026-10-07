@@ -1,0 +1,8 @@
+[Unit]
+Description=Resume Time Machine iCloud after a manual pause expires
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+ExecStart=/usr/bin/python3 /home/pi/scripts/backup/time_machine_icloud_control.py --resume-if-due

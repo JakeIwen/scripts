@@ -117,6 +117,18 @@ run_control clear bigboi >/dev/null || fail "could not clear exact Samba drain"
 [[ -f "$drain_dir/movingparts" && ! -e "$drain_dir/bigboi" ]] ||
   fail "clearing one drain modified the wrong Samba share"
 
+printf '%s\n' 'time-machine-capture:owned-nonce' > "$drain_dir/mbp2tbkup"
+run_control clear mbp2tbkup >/dev/null || fail "owned capture gate blocked mount reconciliation"
+[[ $(cat "$drain_dir/mbp2tbkup") == 'time-machine-capture:owned-nonce' ]] ||
+  fail "mount reconciliation erased the live capture gate"
+run_control drain mbp2tbkup >/dev/null || fail "shutdown could not replace capture gate"
+[[ -f "$drain_dir/mbp2tbkup" && ! -s "$drain_dir/mbp2tbkup" ]] ||
+  fail "shutdown did not take ownership of the gate"
+run_control clear mbp2tbkup >/dev/null || fail "shutdown gate could not clear"
+ln -s "$drain_dir/movingparts" "$drain_dir/mbp2tbkup"
+run_control clear mbp2tbkup >/dev/null 2>&1 && fail "symlink gate accepted"
+[[ -f "$drain_dir/movingparts" ]] || fail "symlink target changed"
+
 grep -Fq '"$samba_share_control" close "${mounted_labels[@]}"' \
   "$repo_root/pi/scripts/umount_disks.sh" ||
   fail "disk unmount does not close only the selected Samba shares"

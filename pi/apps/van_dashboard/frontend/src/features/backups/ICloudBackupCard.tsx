@@ -1,6 +1,19 @@
 import { formatBytes, formatDuration, formatRelativeTime } from '../../utils/format';
 import { iCloudPhaseLabel, iCloudProgress } from './icloud';
-import type { ICloudStatus } from './icloud';
+import type { AvailableICloudStatus, ICloudStatus } from './icloud';
+import { TimeMachineCloudControls } from './TimeMachineCloudControls';
+
+function ICloudUploadSpeed({ status }: { status: AvailableICloudStatus }) {
+  if (!status.running || status.phase !== 'uploading') return null;
+  return (
+    <p className="backup-icloud__speed">
+      Upload speed:{' '}
+      {status.progressStale || status.progress.uploadBytesPerSecond == null
+        ? 'Waiting for a fresh measurement…'
+        : `${formatBytes(status.progress.uploadBytesPerSecond)}/s`}
+    </p>
+  );
+}
 
 function date(value: number | null): string {
   return value === null ? 'Not scheduled' : new Date(value * 1000).toLocaleString();
@@ -9,9 +22,13 @@ function date(value: number | null): string {
 export function ICloudBackupCard({
   status,
   kind = 'pi',
+  refresh,
+  blocked = false,
 }: {
   status: ICloudStatus;
   kind?: 'pi' | 'time-machine';
+  refresh?: () => Promise<unknown>;
+  blocked?: boolean;
 }) {
   const title = kind === 'time-machine' ? 'Mac Time Machine · iCloud' : 'Pi offsite · iCloud';
   const titleId = `backup-icloud-title-${kind}`;
@@ -47,6 +64,10 @@ export function ICloudBackupCard({
         </span>
       </div>
       <p>{status.message}</p>
+      {kind === 'time-machine' && status.controlsAvailable && refresh && (
+        <TimeMachineCloudControls status={status} refresh={refresh} blocked={blocked} />
+      )}
+      <ICloudUploadSpeed status={status} />
       {status.lastSuccessAt === null ? (
         <p className="backup-icloud__warning">No verified offsite backup yet.</p>
       ) : (
@@ -152,7 +173,8 @@ export function ICloudBackupCard({
           {status.historyStartedAt === null
             ? 'starts with the next attempt'
             : `since ${date(status.historyStartedAt)}`}
-          ; older attempts remain in the service journal.
+          ; older attempts remain in the service journal. Waiting attempts are deferred safety
+          checks, not completed uploads or lost backups.
         </p>
         {status.attempts.length === 0 ? (
           <p>No recorded attempts yet.</p>

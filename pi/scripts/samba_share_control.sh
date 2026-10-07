@@ -89,6 +89,17 @@ ssc_clear() {
   [[ -d "$drain_dir" ]] || return 0
   for index in "${!labels[@]}"; do
     marker="$drain_dir/${labels[$index]}"
+    # Nonempty gates belong to a capture worker and only its owner may
+    # release them. Mount reconciliation clears only empty shutdown gates.
+    [[ -e "$marker" || -L "$marker" ]] || continue
+    if [[ -L "$marker" || ! -f "$marker" ]]; then
+      echo "ERROR: unsafe Samba drain marker for ${shares[$index]}" >&2
+      return 1
+    fi
+    if [[ -s "$marker" ]]; then
+      echo "preserved owned Samba drain for ${shares[$index]}"
+      continue
+    fi
     if ! "$sudo_command" /usr/bin/rm -f -- "$marker"; then
       echo "ERROR: cannot clear Samba drain for ${shares[$index]}" >&2
       return 1

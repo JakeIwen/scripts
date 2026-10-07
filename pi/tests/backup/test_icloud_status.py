@@ -59,6 +59,18 @@ class StatusTests(unittest.TestCase):
         self.assertFalse(result['attention'])
         self.assertEqual(result['next_due_at'], 990 + 7 * 86400)
 
+    def test_speed_only_comes_from_a_fresh_matching_live_upload(self):
+        state = {'phase': 'uploading', 'worker_pid': 123, 'progress_updated_at': 995,
+                 'progress': {'upload_bytes_per_second': 1234.5}}
+        self.assertEqual(self.build(state, live=True)['progress']['upload_bytes_per_second'], 1234.5)
+        self.assertIsNone(self.build(state)['progress']['upload_bytes_per_second'])
+        for changes in ({'phase': 'verifying'}, {'worker_pid': 124}, {'progress_updated_at': 900}):
+            self.assertIsNone(self.build({**state, **changes}, live=True)['progress']['upload_bytes_per_second'])
+
+    def test_exclusive_access_loss_has_a_specific_public_reason(self):
+        status = self.build({'phase': 'deferred', 'last_error': 'Time Machine capture lost exclusive source access'})
+        self.assertIn('exclusive Time Machine access was lost', status['message'])
+
     def test_bounded_history_and_verified_evidence_survive_failures(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)

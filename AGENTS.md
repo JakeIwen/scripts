@@ -36,6 +36,11 @@ compare it with this checkout. Deployed files may differ from the repository.
   (power-off roaming). Ship the entrypoint and every sibling together.
 - `macbook/`: macOS shell utilities, AppleScripts, and BetterTouchTool helpers.
 - `shared/`: code imported or deployed on more than one host.
+- Time Machine cloud holds: `pi/scripts/backup/time_machine_icloud_control.py`
+  owns `pause.json` independently of worker state; the minute resume timer,
+  worker and Mac heartbeat all honor it. Dashboard mutations use
+  `van_dashboard_cloud_controls.py`. Samba mount reconciliation clears only
+  empty shutdown gates; nonempty capture gates are released by their owner.
 - Deal Watch cookie renewal: `pi/scripts/price_check/search_watch/browser_refresh.py`
   owns the durable request queue and request contract; `refresh_install.py`
   validates submitted headers on the Pi before replacement. The bridge is

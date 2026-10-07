@@ -70,6 +70,8 @@ def reason(state):
                 'Capturing a frozen encrypted Time Machine image; normal backups resume afterward.')
     if 'coordinator unavailable' in value:
         return 'Waiting for the Mac capture helper; install it or wake the Mac. Normal local backups remain enabled.'
+    if 'capture lost exclusive source access' in value:
+        return 'Capture stopped because its exclusive Time Machine access was lost; it will retry safely.'
     if 'mac clean detach' in value or 'image handles remain' in value:
         return 'Waiting for a clean Mac image detach; check the capture coordinator.'
     if state.get('phase') == 'authentication_required' or 'login' in value or 'authentication' in value:
@@ -158,6 +160,10 @@ def build_status(state, history, cfg, service, next_check_at, now=None, auth_err
     last_success = number(state.get('last_success_at'))
     interval = cfg.get('interval_days', 7)
     updated = number(state.get('progress_updated_at'))
+    current_progress = progress(current)
+    current_progress['upload_bytes_per_second'] = (
+        number(current.get('progress', {}).get('upload_bytes_per_second'))
+        if matching and current_phase == 'uploading' and updated is not None and now - updated <= 60 else None)
     attempts = []
     for raw in reversed(history.get('attempts', [])[-100:]):
         row = dict(raw)
@@ -174,7 +180,7 @@ def build_status(state, history, cfg, service, next_check_at, now=None, auth_err
             'updated_at': updated, 'progress_stale': bool(live and (not matching or updated is None or now - updated > 60)),
             'attention': last_success is None or now - last_success > (interval + 1) * 86400 or current_phase in ('error', 'authentication_required', 'interrupted', 'unavailable'),
             'interval_days': interval, 'keep_generations': cfg.get('keep_generations', 8),
-            'progress': progress(current), 'history_started_at': number(history.get('started_at')),
+            'progress': current_progress, 'history_started_at': number(history.get('started_at')),
             'attempts': attempts, 'verified_generations': list(reversed(history.get('verified', [])))}
 
 

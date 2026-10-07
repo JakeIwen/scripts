@@ -1,6 +1,7 @@
 import { getJson, postForm } from '../../api/client';
 import { objectValue, stringValue } from '../../api/validation';
 import { decodeBackupStatusResponse } from './decoders';
+import type { TimeMachineCloudAction } from './icloud';
 import type {
   BackupMutationResult,
   BackupStatus,
@@ -11,6 +12,21 @@ import type {
 export async function fetchBackupStatus(signal: AbortSignal): Promise<BackupStatus> {
   const payload = await getJson('/api/backups', signal);
   return decodeBackupStatusResponse(payload);
+}
+
+export async function controlTimeMachineCloud(
+  action: TimeMachineCloudAction,
+  minutes: string,
+): Promise<string> {
+  const response = objectValue(
+    await postForm(
+      `/api/backups/time-machine-icloud/${action}`,
+      action === 'pause' ? { minutes } : {},
+    ),
+    'Time Machine control response',
+  );
+  if (response.ok !== true) throw new TypeError('Time Machine control response.ok must be true');
+  return stringValue(response.message, 'Time Machine control response.message');
 }
 
 function decodeMutation(payload: unknown, label: string): BackupMutationResult {

@@ -92,6 +92,24 @@ capture gives up the lock when local backups need the window.
 
 The Backups pane tracks the Mac copy separately from Pi/Borg: local capture,
 upload estimate, downloaded verification, last success and attempt history.
+Both iCloud cards show rclone's current upload rate while uploading; stale or
+inactive counters are never presented as a live speed. **Resume now** retries
+saved work through the normal safety checks. If another backup holds the common
+lock, the request stays queued and is retried each minute until admitted.
+**Pause for** offers 15/30 minutes, 1/4/12/24 hours or seven days. It stops the
+worker gracefully, preserves saved work and records a durable deadline in
+`pause.json`, separately from worker state. The minute resume timer honors that
+deadline across reboots; the Mac heartbeat and hourly timer cannot bypass it.
+The card distinguishes **Manually paused** from **Waiting to retry** and shows
+the automatic resume time. Manual resume never bypasses ignition, storage,
+local-backup priority, image consistency or the Starlink exclusion.
+
+Mount reconciliation clears only empty shutdown drain markers. A populated
+capture marker is published atomically and only the capture worker releases it.
+Disk shutdown can still replace it and interrupt capture safely. Once capture
+finishes, hourly Mac backups and cloud upload proceed independently; upload
+and verification reuse previously completed work.
+
 Settings are root-private `/etc/vanpi-time-machine-icloud.json`. State/history
 are under `/var/lib/vanpi-time-machine-icloud`; Apple credentials and sign-in
 renewal reuse the existing Pi job, with no additional Apple login.

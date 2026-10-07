@@ -21,9 +21,12 @@ export const ICLOUD_PHASES = [
   'authentication_required',
   'interrupted',
   'unavailable',
+  'paused',
 ] as const;
 export type ICloudPhase = (typeof ICLOUD_PHASES)[number];
+export type TimeMachineCloudAction = 'pause' | 'resume';
 export interface ICloudProgress {
+  uploadBytesPerSecond?: number | null;
   captureBytes?: number | null;
   captureTotalBytes?: number | null;
   uploadEstimatedBytes: number | null;
@@ -47,6 +50,8 @@ export interface ICloudAttempt {
   verifiedAt: number | null;
 }
 export interface AvailableICloudStatus {
+  controlsAvailable?: boolean;
+  manualPauseUntil?: number | null;
   available: true;
   running: boolean;
   phase: ICloudPhase;
@@ -84,6 +89,10 @@ function phase(value: unknown): ICloudPhase {
 function progress(value: unknown): ICloudProgress {
   const row = objectValue(value, 'iCloud progress');
   return {
+    uploadBytesPerSecond:
+      row.upload_bytes_per_second === undefined
+        ? null
+        : nullableNumeric(row.upload_bytes_per_second),
     captureBytes: row.capture_bytes === undefined ? null : nullableNumeric(row.capture_bytes),
     captureTotalBytes:
       row.capture_total_bytes === undefined ? null : nullableNumeric(row.capture_total_bytes),
@@ -103,6 +112,12 @@ export function decodeICloud(value: unknown): ICloudStatus | null {
   if (!booleanValue(row.available, 'iCloud.available')) return { available: false, running: false };
   return {
     available: true,
+    controlsAvailable:
+      row.controls_available === undefined
+        ? false
+        : booleanValue(row.controls_available, 'iCloud.controls_available'),
+    manualPauseUntil:
+      row.manual_pause_until === undefined ? null : nullableNumeric(row.manual_pause_until),
     running: booleanValue(row.running, 'iCloud.running'),
     phase: phase(row.phase),
     message: stringValue(row.message, 'iCloud.message'),
@@ -154,7 +169,8 @@ export function iCloudPhaseLabel(value: ICloudPhase): string {
     retention: 'Verified · cleanup',
     complete: 'Verified',
     'not due': 'Scheduled',
-    deferred: 'Paused',
+    deferred: 'Waiting to retry',
+    paused: 'Manually paused',
     error: 'Failed',
     authentication_required: 'Sign-in needed',
     interrupted: 'Interrupted',

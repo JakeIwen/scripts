@@ -274,12 +274,24 @@ class ProgressTests(unittest.TestCase):
             parser=RcloneStats()
             f.write(b'{"stats":{"bytes":12,"checks":1,"errors":99,"elapsedTime":100},"msg":"private"}\n')
             f.flush();pos=f.tell()
-            self.assertEqual(parser.read(f.fileno()),{'bytes':12,'checks':1})
+            self.assertEqual(parser.read(f.fileno()),{'bytes':12,'checks':1,'speed':None})
             self.assertEqual(f.tell(),pos)
             f.write(b'{"stats":{"bytes":24');f.flush()
             self.assertEqual(parser.read(f.fileno())['bytes'],12)
             f.write(b'}}\n');f.flush()
             self.assertEqual(parser.read(f.fileno())['bytes'],24)
+
+    def test_upload_speed_is_numeric_and_not_a_watchdog_progress_counter(self):
+        with tempfile.TemporaryFile() as f:
+            parser = RcloneStats()
+            for speed, expected in ((1024.5, 1024.5), (0, 0.0), (-1, None),
+                                    ('PRIVATE', None), (True, None), (float('nan'), None)):
+                f.write((json.dumps({'stats': {'speed': speed}}) + '\n').encode())
+                f.flush()
+                counters = parser.read(f.fileno())
+                self.assertEqual(counters['speed'], expected)
+                self.assertFalse(ProgressWatch(60).observe(counters))
+                self.assertEqual(backup.upload_progress({}, {}, counters)['upload_bytes_per_second'], expected)
 
     def test_stream_hash_preserves_binary_contents(self):
         value=bytes(range(256))*1024

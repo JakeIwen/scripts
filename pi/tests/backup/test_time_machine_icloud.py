@@ -18,6 +18,8 @@ sys.path.insert(0, str(REPO / 'pi/scripts/backup'))
 import time_machine_store as store
 import time_machine_icloud as job
 import icloud_backup as cloud
+import time_machine_icloud_control as control
+import time_machine_icloud_status as dashboard_status
 
 spec = importlib.util.spec_from_file_location('coordinator', REPO / 'macbook/scripts/time_machine_offsite_coordinator.py')
 coordinator = importlib.util.module_from_spec(spec)
@@ -38,6 +40,127 @@ def source_fixture(root):
     (source / 'com.apple.TimeMachine.SnapshotHistory.plist').write_bytes(plistlib.dumps({
         'Snapshots': [{'com.apple.backupd.SnapshotCompletionDate': dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)}]}))
     return source
+
+
+class ControlTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.directory = Path(tmp.name)
+        self.command = mock.Mock()
+
+    def test_pause_survives_worker_state_writes_and_resume_uses_same_service(self):
+        control.control('pause', '60', self.directory, now=1000, command=self.command)
+        self.assertTrue(control.is_paused(self.directory, now=4599))
+        self.assertFalse(control.is_paused(self.directory, now=4600))
+        store.atomic_json(self.directory / 'state.json', {'phase': 'uploading'})
+        self.assertEqual(control.pause_deadline(self.directory), 4600)
+        self.command.assert_called_once_with(
+            ['/usr/bin/systemctl', 'stop', '--no-block', control.SERVICE],
+            check=True, capture_output=True, text=True, timeout=10)
+        control.control('resume', directory=self.directory, now=1001, command=self.command)
+        self.assertEqual(control.pause_deadline(self.directory), 1001)
+        self.assertTrue(control.admit_worker(self.directory, now=1001))
+        self.assertIsNone(control.pause_deadline(self.directory))
+        self.assertEqual(self.command.call_args.args[0][1], 'start')
+
+    def test_expiry_starts_once_and_failed_start_is_retryable(self):
+        control.control('pause', '1', self.directory, now=1000, command=self.command)
+        self.command.reset_mock()
+        control.control('resume-if-due', directory=self.directory, now=1059, command=self.command)
+        self.command.assert_not_called()
+        self.command.side_effect = subprocess.TimeoutExpired('systemctl', 10)
+        with self.assertRaises(subprocess.TimeoutExpired):
+            control.control('resume-if-due', directory=self.directory, now=1060, command=self.command)
+        self.assertIsNotNone(control.pause_deadline(self.directory))
+        self.command.side_effect = None
+        control.control('resume-if-due', directory=self.directory, now=1061, command=self.command)
+        self.assertTrue(control.admit_worker(self.directory, now=1061))
+        self.command.reset_mock()
+        control.control('resume-if-due', directory=self.directory, now=1062, command=self.command)
+        self.command.assert_not_called()
+
+    def test_expiry_retries_until_worker_acquires_backup_slot(self):
+        control.control('pause', '1', self.directory, now=1000, command=self.command)
+        self.assertFalse(control.admit_worker(self.directory, now=1020))
+        self.command.reset_mock()
+        for now in (1060, 1120):
+            control.control('resume-if-due', directory=self.directory, now=now, command=self.command)
+        self.assertEqual(self.command.call_count, 2)
+        self.assertTrue(control.admit_worker(self.directory, now=1120))
+        self.assertIsNone(control.pause_deadline(self.directory))
+
+    def test_invalid_durations_do_not_mutate_or_start_services(self):
+        for value in ('0', '-1', '10081', '1.5', '1; reboot', '', '１２', None, True):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                control.control('pause', value, self.directory, command=self.command)
+        self.assertEqual(list(self.directory.iterdir()), [])
+        self.command.assert_not_called()
+
+    def test_worker_does_not_record_or_run_attempt_while_paused(self):
+        control.control('pause', '60', self.directory, command=self.command)
+        with mock.patch.object(job, 'STATE', self.directory), mock.patch.object(job, 'private_directory'), \
+                mock.patch.object(cloud, 'STATE_DIR', self.directory), \
+                mock.patch.object(sys, 'argv', ['worker', '--run']), mock.patch.object(job, 'weekly') as weekly:
+            self.assertEqual(job.main(), 0)
+            weekly.assert_not_called()
+        self.assertFalse((self.directory / 'history.json').exists())
+
+    def test_mac_heartbeat_does_not_override_manual_pause(self):
+        control.control('pause', '60', self.directory, command=self.command)
+        with mock.patch.object(job, 'STATE', self.directory), \
+                mock.patch.object(job, 'config', return_value={'interval_days': 7}), \
+                mock.patch.object(job.subprocess, 'run') as run:
+            self.assertEqual(job.mac_present(), {'ok': True})
+            run.assert_not_called()
+        self.assertTrue((self.directory / 'mac-coordinator.json').exists())
+
+    def test_dashboard_reports_manual_hold_without_overwriting_worker_state(self):
+        control.control('pause', '60', self.directory, command=self.command)
+        original = {'phase': 'deferred', 'last_error': 'ignition is on'}
+        store.atomic_json(self.directory / 'state.json', original)
+        with mock.patch.object(dashboard_status, 'STATE', self.directory), \
+                mock.patch.object(dashboard_status, 'AUTH_ERROR', self.directory / 'auth-error.json'), \
+                mock.patch.object(dashboard_status, 'CONFIG', self.directory / 'config.json'), \
+                mock.patch.object(dashboard_status.subprocess, 'run', side_effect=[
+                    subprocess.CompletedProcess([], 0, 'ActiveState=inactive\nMainPID=0'),
+                    subprocess.CompletedProcess([], 0, 'n/a')]):
+            status = dashboard_status.status()
+        self.assertEqual(status['phase'], 'paused')
+        self.assertEqual(status['next_check_at'], status['manual_pause_until'])
+        self.assertEqual(store.read_json(self.directory / 'state.json'), original)
+
+    def test_capture_gate_is_populated_on_publication_and_never_replaces_shutdown(self):
+        gate = self.directory / 'gate'
+        real_link = os.link
+        def publish(source, target):
+            self.assertEqual(Path(source).read_text(), 'owner:nonce\n')
+            self.assertFalse(target.exists())
+            real_link(source, target)
+        with mock.patch.object(job, 'DRAIN', gate), mock.patch.object(job.os, 'link', side_effect=publish):
+            job.create_capture_gate('owner:nonce\n')
+        self.assertEqual(gate.read_text(), 'owner:nonce\n')
+        gate.write_text('')
+        with mock.patch.object(job, 'DRAIN', gate), self.assertRaises(FileExistsError):
+            job.create_capture_gate('owner:nonce\n')
+        self.assertEqual(gate.read_text(), '')
+
+    def test_queued_resume_reports_minute_timer_instead_of_hourly_timer(self):
+        control.control('resume', directory=self.directory, now=1000, command=self.command)
+        def capture(args, **kwargs):
+            if args[0] == '/usr/bin/date':
+                return subprocess.CompletedProcess(args, 0, '1060')
+            if 'vanpi-time-machine-icloud-resume.timer' in args:
+                return subprocess.CompletedProcess(args, 0, '1970-01-01 00:17:40 UTC')
+            return subprocess.CompletedProcess(args, 0, 'ActiveState=inactive\nMainPID=0')
+        with mock.patch.object(dashboard_status, 'STATE', self.directory), \
+                mock.patch.object(dashboard_status, 'AUTH_ERROR', self.directory / 'auth-error.json'), \
+                mock.patch.object(dashboard_status, 'CONFIG', self.directory / 'config.json'), \
+                mock.patch.object(dashboard_status.subprocess, 'run', side_effect=capture):
+            status = dashboard_status.status()
+        self.assertTrue(status['resume_pending'])
+        self.assertEqual(status['next_check_at'], 1060)
+        self.assertIsNone(status['manual_pause_until'])
 
 
 class StoreTests(unittest.TestCase):

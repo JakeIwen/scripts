@@ -4,6 +4,7 @@ import { ICloudBackupCard } from './ICloudBackupCard';
 import { BackupsTile } from './BackupsTile';
 import { decodeICloud, type AvailableICloudStatus } from './icloud';
 import { sampleBackupStatus } from './testFixtures';
+import { TimeMachineCloudControls } from './TimeMachineCloudControls';
 
 const generation = 'vanpi-20260920T225254Z-ebf57e14';
 function cloud(): AvailableICloudStatus {
@@ -59,7 +60,7 @@ describe('iCloud dashboard', () => {
   });
   it('shows paused saved progress without claiming a verified recovery point', () => {
     render(<ICloudBackupCard status={cloud()} />);
-    expect(screen.getByText('Paused')).toBeInTheDocument();
+    expect(screen.getByText('Waiting to retry')).toBeInTheDocument();
     expect(screen.getByText('No verified offsite backup yet.')).toBeInTheDocument();
     expect(screen.getByRole('progressbar', { name: 'iCloud upload estimate' })).toHaveAttribute(
       'aria-valuenow',
@@ -134,7 +135,7 @@ describe('iCloud dashboard', () => {
         onOpen={vi.fn()}
       />,
     );
-    expect(screen.getByText('Paused · 75.0%')).toBeInTheDocument();
+    expect(screen.getByText('Waiting to retry · 75.0%')).toBeInTheDocument();
     expect(screen.queryByText('RUNNING')).not.toBeInTheDocument();
   });
 
@@ -160,5 +161,55 @@ describe('iCloud dashboard', () => {
         last_success_at: -5,
       }),
     ).toThrow('nonnegative');
+  });
+
+  it.each(['pi', 'time-machine'] as const)(
+    'shows current speed only for a fresh %s upload',
+    (kind) => {
+      const status = cloud();
+      Object.assign(status, { running: true, phase: 'uploading' });
+      status.progress.uploadBytesPerSecond = 1024;
+      const view = render(<ICloudBackupCard status={status} kind={kind} />);
+      expect(screen.getByText('Upload speed: 1.0 KiB/s')).toBeInTheDocument();
+      view.rerender(<ICloudBackupCard status={{ ...status, progressStale: true }} kind={kind} />);
+      expect(screen.getByText(/Waiting for a fresh measurement/)).toBeInTheDocument();
+      view.rerender(<ICloudBackupCard status={{ ...status, running: false }} kind={kind} />);
+      expect(screen.queryByText(/Upload speed/)).not.toBeInTheDocument();
+    },
+  );
+
+  it('sends the selected pause and resume, and refreshes after each control', async () => {
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(JSON.stringify({ ok: true, message: 'Accepted' }), { status: 202 }),
+      );
+    const refresh = vi.fn().mockResolvedValue(null);
+    const status = cloud();
+    render(<TimeMachineCloudControls status={status} refresh={refresh} blocked={false} />);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Pause for' }), {
+      target: { value: '240' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('Accepted');
+    expect(fetch.mock.calls[0]?.[0]).toBe('/api/backups/time-machine-icloud/pause');
+    expect(String(fetch.mock.calls[0]?.[1]?.body)).toBe('minutes=240');
+    expect(refresh).toHaveBeenCalledTimes(1);
+    fetch.mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, message: 'Resumed' }), { status: 202 }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Resume now' }));
+    expect(await screen.findByText('Resumed')).toBeInTheDocument();
+    expect(fetch.mock.calls[1]?.[0]).toBe('/api/backups/time-machine-icloud/resume');
+    expect(String(fetch.mock.calls[1]?.[1]?.body)).toBe('');
+    fetch.mockRestore();
+  });
+
+  it('shows a manual deadline and allows a running upload to be paused', () => {
+    const status = { ...cloud(), running: true, manualPauseUntil: 1800003600 };
+    render(<TimeMachineCloudControls status={status} refresh={vi.fn()} blocked={false} />);
+    expect(screen.getByText(/Automatic resume/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Resume now' })).toBeEnabled();
   });
 });

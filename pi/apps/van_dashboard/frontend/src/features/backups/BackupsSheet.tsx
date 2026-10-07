@@ -303,7 +303,12 @@ export function BackupsSheet({ open, onClose, resource, controls }: BackupsSheet
 
       {status?.icloud && <ICloudBackupCard status={status.icloud} />}
       {status?.timeMachineIcloud && (
-        <ICloudBackupCard status={status.timeMachineIcloud} kind="time-machine" />
+        <ICloudBackupCard
+          status={status.timeMachineIcloud}
+          kind="time-machine"
+          refresh={resource.refresh}
+          blocked={controls.blocked}
+        />
       )}
 
       <section className="backups-sheet__section" aria-labelledby="backup-hotspares-title">

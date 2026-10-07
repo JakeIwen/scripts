@@ -8,6 +8,7 @@ from ..van_dashboard_backups import BackupStatusError
 
 bp = Blueprint("backups", __name__)
 backups = runtime_proxy("backups")
+time_machine_cloud_control = runtime_proxy("time_machine_cloud_control")
 
 
 
@@ -140,3 +141,31 @@ def api_stop_borg_backup():
 @bp.route("/api/backups/exfat/stop", methods=["POST"])
 def api_stop_exfat_backup():
     return _api_stop_backup("exfat")
+
+
+def _time_machine_cloud_action(action):
+    fields = ("minutes",) if action == "pause" else ()
+    if request.args or not _exact_form(fields) or (request.content_length and not request.form and action == "resume"):
+        return api_error("invalid Time Machine control input", 400)
+    try:
+        time_machine_cloud_control.request(action, request.form.get("minutes"))
+    except ValueError as exc:
+        return api_error(str(exc), 400)
+    except RuntimeError as exc:
+        return api_error(str(exc), 503)
+    message = ("Time Machine iCloud pause requested" if action == "pause" else
+               "Time Machine iCloud resume requested; existing safety checks still apply")
+    response = jsonify({"ok": True, "message": message})
+    response.status_code = 202
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@bp.route("/api/backups/time-machine-icloud/pause", methods=["POST"])
+def api_pause_time_machine_cloud():
+    return _time_machine_cloud_action("pause")
+
+
+@bp.route("/api/backups/time-machine-icloud/resume", methods=["POST"])
+def api_resume_time_machine_cloud():
+    return _time_machine_cloud_action("resume")
