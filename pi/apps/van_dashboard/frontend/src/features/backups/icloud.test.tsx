@@ -55,7 +55,7 @@ describe('iCloud dashboard', () => {
       'aria-valuenow',
       '25',
     );
-    expect(screen.getByText(/normal Time Machine backups resume/i)).toBeInTheDocument();
+    expect(screen.queryByText(/normal Time Machine backups resume/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Upload percentage is size-based/)).not.toBeInTheDocument();
   });
   it('shows paused saved progress without claiming a verified recovery point', () => {
@@ -68,8 +68,8 @@ describe('iCloud dashboard', () => {
     );
     expect(screen.getByText(/Last saved progress/)).toBeInTheDocument();
     expect(
-      screen.getByText(/Mac Time Machine replication is tracked separately/),
-    ).toBeInTheDocument();
+      screen.queryByText(/Mac Time Machine replication is tracked separately/),
+    ).not.toBeInTheDocument();
   });
 
   it('distinguishes verified files from the current unverified stream', () => {
@@ -178,36 +178,42 @@ describe('iCloud dashboard', () => {
     },
   );
 
-  it('sends the selected pause and resume, and refreshes after each control', async () => {
-    const fetch = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(
-        new Response(JSON.stringify({ ok: true, message: 'Accepted' }), { status: 202 }),
+  it.each(['pi', 'time-machine'] as const)(
+    'sends the selected %s pause and resume',
+    async (kind) => {
+      const path = kind === 'pi' ? 'icloud' : 'time-machine-icloud';
+      const fetch = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValue(
+          new Response(JSON.stringify({ ok: true, message: 'Accepted' }), { status: 202 }),
+        );
+      const refresh = vi.fn().mockResolvedValue(null);
+      const status = cloud();
+      render(
+        <ICloudBackupControls kind={kind} status={status} refresh={refresh} blocked={false} />,
       );
-    const refresh = vi.fn().mockResolvedValue(null);
-    const status = cloud();
-    render(<ICloudBackupControls status={status} refresh={refresh} blocked={false} />);
-    fireEvent.change(screen.getByRole('combobox', { name: 'Pause for' }), {
-      target: { value: '240' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
-    expect(await screen.findByRole('status')).toHaveTextContent('Accepted');
-    expect(fetch.mock.calls[0]?.[0]).toBe('/api/backups/time-machine-icloud/pause');
-    expect(String(fetch.mock.calls[0]?.[1]?.body)).toBe('minutes=240');
-    expect(refresh).toHaveBeenCalledTimes(1);
-    fetch.mockResolvedValue(
-      new Response(JSON.stringify({ ok: true, message: 'Resumed' }), { status: 202 }),
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Resume now' }));
-    expect(await screen.findByText('Resumed')).toBeInTheDocument();
-    expect(fetch.mock.calls[1]?.[0]).toBe('/api/backups/time-machine-icloud/resume');
-    expect(String(fetch.mock.calls[1]?.[1]?.body)).toBe('');
-    fetch.mockRestore();
-  });
+      fireEvent.change(screen.getByRole('combobox', { name: 'Pause for' }), {
+        target: { value: '240' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
+      expect(await screen.findByRole('status')).toHaveTextContent('Accepted');
+      expect(fetch.mock.calls[0]?.[0]).toBe(`/api/backups/${path}/pause`);
+      expect(String(fetch.mock.calls[0]?.[1]?.body)).toBe('minutes=240');
+      expect(refresh).toHaveBeenCalledTimes(1);
+      fetch.mockResolvedValue(
+        new Response(JSON.stringify({ ok: true, message: 'Resumed' }), { status: 202 }),
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Resume now' }));
+      expect(await screen.findByText('Resumed')).toBeInTheDocument();
+      expect(fetch.mock.calls[1]?.[0]).toBe(`/api/backups/${path}/resume`);
+      expect(String(fetch.mock.calls[1]?.[1]?.body)).toBe('');
+      fetch.mockRestore();
+    },
+  );
 
   it('shows a manual deadline and allows a running upload to be paused', () => {
     const status = { ...cloud(), running: true, manualPauseUntil: 1800003600 };
-    render(<ICloudBackupControls status={status} refresh={vi.fn()} blocked={false} />);
+    render(<ICloudBackupControls kind="pi" status={status} refresh={vi.fn()} blocked={false} />);
     expect(screen.getByText(/Automatic resume/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Pause' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Resume now' })).toBeEnabled();

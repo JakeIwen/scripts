@@ -1,11 +1,14 @@
-"""Fixed privileged entry point for Time Machine cloud pause/resume."""
+"""Fixed privileged entry points for cloud backup pause/resume."""
 import subprocess
 
 from .van_dashboard_common import SUDO, run_command
 
 
-class TimeMachineCloudControl:
-    def __init__(self, command=run_command):
+class CloudBackupControl:
+    HELPERS = {'pi': 'icloud_backup_control.py', 'time-machine': 'time_machine_icloud_control.py'}
+
+    def __init__(self, kind='time-machine', command=run_command):
+        self.helper = '/home/pi/scripts/backup/' + self.HELPERS[kind]
         self.command = command
 
     def request(self, action, minutes=None):
@@ -17,11 +20,11 @@ class TimeMachineCloudControl:
         elif action == 'resume' and minutes is None:
             args = ['--resume']
         else:
-            raise ValueError('unsupported Time Machine control')
+            raise ValueError('unsupported cloud backup control')
         try:
             result = self.command([SUDO, '-n', '/usr/bin/python3',
-                '/home/pi/scripts/backup/time_machine_icloud_control.py', *args], timeout=15)
+                self.helper, *args], timeout=15)
             if result.returncode:
-                raise RuntimeError('Time Machine control was not accepted; refresh status before retrying')
+                raise RuntimeError('Cloud backup control was not accepted; refresh status before retrying')
         except (OSError, subprocess.SubprocessError) as exc:
-            raise RuntimeError('Time Machine control is unavailable; refresh status before retrying') from exc
+            raise RuntimeError('Cloud backup control is unavailable; refresh status before retrying') from exc

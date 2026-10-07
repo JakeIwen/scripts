@@ -26,6 +26,7 @@ import uuid
 from icloud_uplink import decide
 from icloud_progress import ProcessIO, ProgressWatch, RcloneStats, StreamDigest
 from icloud_status import begin_attempt, save_attempt
+from cloud_backup_control import admit_worker
 
 CONFIG = Path('/etc/vanpi-icloud-backup.json')
 STATE_DIR = Path('/var/lib/vanpi-icloud-backup')
@@ -575,7 +576,7 @@ def notify(state, title, message):
 
 
 def weekly(cfg, state):
-    if time.time() - state.get('last_success_at', 0) < cfg['interval_days'] * 86400:
+    if not state.get('pending') and time.time() - state.get('last_success_at', 0) < cfg['interval_days'] * 86400:
         return 'not due'
     if not credentials_ready(cfg) or not (STATE_DIR / 'authenticated.json').is_file():
         raise Deferred('iCloud login is required; run icloud_backup.sh --login')
@@ -611,11 +612,6 @@ def weekly(cfg, state):
         if not meta.has_option('repository', 'key'):
             raise RuntimeError('expected a repokey-encrypted Borg repository')
         pending = state.get('pending')
-        if pending:
-            old = safe_generation(root, pending)
-            manifest = read_json(old / 'payload' / 'manifest.json', {})
-            if manifest and time.time() - manifest['created_at'] > cfg['interval_days'] * 86400:
-                pending = None  # Preserve the old partial; publish a fresh recovery point.
         if not pending:
             pending = 'vanpi-' + dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + uuid.uuid4().hex[:8]
             state['pending'] = pending
@@ -716,6 +712,8 @@ def main():
     STATE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
     if STATE_DIR.is_symlink() or STATE_DIR.stat().st_uid != 0:
         raise RuntimeError('unsafe state directory')
+    if mode == '--run' and not admit_worker(STATE_DIR):
+        return 0
     state = read_json(STATE_DIR / 'state.json', {})
     if mode == '--status':
         if (STATE_DIR / 'authentication-error.json').is_file():
@@ -744,7 +742,7 @@ def main():
             return 0
         if mode != '--run':
             raise ValueError('unsupported mode')
-        due = time.time() - state.get('last_success_at', 0) >= cfg['interval_days'] * 86400
+        due = state.get('pending') or time.time() - state.get('last_success_at', 0) >= cfg['interval_days'] * 86400
         if due:
             begin_attempt(STATE_DIR, state)
         else:

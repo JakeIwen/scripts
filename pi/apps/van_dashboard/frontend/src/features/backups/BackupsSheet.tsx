@@ -152,6 +152,10 @@ function HotspareCard({
           <dt>Size</dt>
           <dd>{card.sizeBytes === null ? '—' : formatBytes(card.sizeBytes)}</dd>
         </div>
+        <div>
+          <dt>Used (root)</dt>
+          <dd>{card.usedBytes == null ? 'Unavailable' : formatBytes(card.usedBytes)}</dd>
+        </div>
       </dl>
       <button
         className="primary-button backup-action"
@@ -301,7 +305,13 @@ export function BackupsSheet({ open, onClose, resource, controls }: BackupsSheet
         </div>
       </section>
 
-      {status?.icloud && <ICloudBackupCard status={status.icloud} />}
+      {status?.icloud && (
+        <ICloudBackupCard
+          status={status.icloud}
+          refresh={resource.refresh}
+          blocked={controls.blocked}
+        />
+      )}
       {status?.timeMachineIcloud && (
         <ICloudBackupCard
           status={status.timeMachineIcloud}

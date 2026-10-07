@@ -280,7 +280,7 @@ class BackupManager:
             "--json",
             "--bytes",
             "--output",
-            "NAME,PATH,PKNAME,LABEL,SIZE,MOUNTPOINTS",
+            "NAME,PATH,PKNAME,LABEL,SIZE,FSTYPE,FSUSED,MOUNTPOINTS",
         ]
         try:
             result = self.command(args, timeout=self.timeout)
@@ -526,7 +526,8 @@ class BackupManager:
         running_processes = self._running_backup_processes()
         configuration = self._configuration()
         rows = self._block_devices()
-        hotswaps = build_hotspares(configuration, rows, self.stamp_dir, self._stamp, now, self._mountpoints)
+        hotswaps = build_hotspares(configuration, rows, self.stamp_dir, self._stamp,
+                                  now, self._mountpoints, self.command, self.timeout)
 
         borg_at = self._stamp(os.path.join(self.stamp_dir, "borg_ok"))
         borg_stale_seconds = configuration["borg_stale_hours"] * 3600

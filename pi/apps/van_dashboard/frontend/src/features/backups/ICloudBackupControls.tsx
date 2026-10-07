@@ -1,15 +1,17 @@
 import { useState } from 'react';
 import { useSingleFlightAction } from '../../hooks/useSingleFlightAction';
 import { controlICloudBackup } from './api';
-import type { AvailableICloudStatus, ICloudControlAction } from './icloud';
+import type { AvailableICloudStatus, ICloudBackupKind, ICloudControlAction } from './icloud';
 
 interface ICloudBackupControlsProps {
+  kind: ICloudBackupKind;
   status: AvailableICloudStatus;
   refresh: () => Promise<unknown>;
   blocked: boolean;
 }
 
 export function ICloudBackupControls({
+  kind,
   status,
   refresh,
   blocked,
@@ -24,7 +26,7 @@ export function ICloudBackupControls({
       setError(null);
       setMessage(null);
       try {
-        setMessage(await controlICloudBackup(action, minutes));
+        setMessage(await controlICloudBackup(action, minutes, kind));
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : String(reason));
       } finally {

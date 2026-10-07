@@ -1,0 +1,11 @@
+[Unit]
+Description=Check timed Pi iCloud pauses every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+AccuracySec=1s
+Persistent=true
+Unit=vanpi-icloud-backup-resume.service
+
+[Install]
+WantedBy=timers.target

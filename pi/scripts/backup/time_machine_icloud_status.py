@@ -4,10 +4,8 @@ import json
 from pathlib import Path
 import subprocess
 import sys
-import time
 
-from icloud_status import build_status, number, read_json
-from time_machine_icloud_control import pause_deadline
+from icloud_status import apply_manual_control, build_status, number, pause_deadline, read_json
 
 STATE = Path('/var/lib/vanpi-time-machine-icloud')
 CONFIG = Path('/etc/vanpi-time-machine-icloud.json')
@@ -32,16 +30,7 @@ def status():
     state = read_json(STATE / 'state.json', {})
     result = build_status(state, read_json(STATE / 'history.json', {}), read_json(CONFIG, {}),
                           service, next_check, auth_error=AUTH_ERROR.exists())
-    paused = deadline is not None and deadline > time.time()
-    result['manual_pause_until'] = deadline if paused else None
-    result['resume_pending'] = deadline is not None and not paused
-    result['controls_available'] = True
-    if paused:
-        result.update(phase='paused', message=('Stopping safely for the manual pause.' if result['running']
-                                             else 'Manually paused; automatic retries resume when the pause expires.'))
-        result['next_check_at'] = deadline
-    elif result['resume_pending'] and not result['running']:
-        result.update(phase='deferred', message='Resume requested; waiting for the shared backup slot.')
+    apply_manual_control(result, deadline)
     # Numeric capture counters are public; paths, credentials and raw errors are not.
     if state.get('worker_pid') == int(service.get('MainPID') or 0) or not result['running']:
         for key in ('capture_bytes', 'capture_total_bytes'):

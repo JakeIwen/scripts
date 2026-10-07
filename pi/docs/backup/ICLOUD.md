@@ -66,6 +66,19 @@ as interrupted, not running. Paused attempts show their last saved progress and
 a safe explanation, plus the next timer check. A timer check is not a promised
 start time: the uplink, disk policy, shared lock and local-backup window still apply.
 
+Both cloud cards offer **Resume now** and **Pause for** (15/30 minutes,
+1/4/12/24 hours, or seven days). Each has its own root-private `pause.json`;
+pausing Pi recovery does not pause Time Machine replication. Stops are graceful,
+and existing uploaded files and verification checkpoints are retained. Pending
+Pi generations continue after a long pause even when older than the weekly
+interval. Resume queues behind other backup work and checks each minute until
+the worker acquires the lock. The dashboard names a recognized lock holder.
+
+`icloud_backup_control.py` and `time_machine_icloud_control.py` are fixed CLI
+entry points backed by `cloud_backup_control.py`. Their separate `*-resume.timer`
+units enforce durable deadlines across reboots. All ignition, disk, local-backup
+priority, image-consistency and uplink checks still apply after manual resume.
+
 - Upload progress is an **estimate**: matching-size objects already on iCloud
   plus bytes sent by this attempt. Retries may inflate it; 100% is not proof of
   a restorable copy. Download verification is displayed separately, counting only

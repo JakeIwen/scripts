@@ -16,6 +16,7 @@ from unittest import mock
 PI = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PI / 'scripts' / 'backup'))
 import icloud_backup as backup
+import cloud_backup_control as control
 from icloud_uplink import decide
 from icloud_progress import ProgressWatch, RcloneStats, StreamDigest
 
@@ -441,6 +442,84 @@ class CheckpointTests(unittest.TestCase):
             self.assertEqual(set(self.calls),set(self.data))
             p=self.payload/'manifest.json';m=backup.read_json(p);m['files']['../outside']=m['files']['repository/a'] if 'repository/a' in m['files'] else m['files']['a'];backup.atomic_json(p,m)
             with self.assertRaisesRegex(ValueError,'unsafe path'):backup.verification_plan(self.payload,generation.name)
+
+
+class PiPauseTests(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.state_dir = self.root / 'state'; self.state_dir.mkdir(mode=0o700)
+        original_stat = Path.stat
+        def root_owner(path, *args, **kwargs):
+            result = original_stat(path, *args, **kwargs)
+            if path in (self.state_dir, self.root / 'icloud-weekly'):
+                fields = list(result); fields[4] = 0
+                return os.stat_result(fields)
+            return result
+        for patcher in (mock.patch.object(backup, 'STATE_DIR', self.state_dir),
+                        mock.patch.object(Path, 'stat', root_owner)):
+            patcher.start(); self.addCleanup(patcher.stop)
+
+    def test_pause_blocks_pi_worker_without_overwriting_saved_state(self):
+        saved = {'pending': 'vanpi-20260920T010203Z-12345678', 'phase': 'uploading'}
+        backup.atomic_json(self.state_dir / 'state.json', saved)
+        command = mock.Mock()
+        control.control('pause', '60', directory=self.state_dir,
+                        service='vanpi-icloud-backup.service', command=command)
+        self.assertEqual(command.call_args.args[0],
+                         ['/usr/bin/systemctl', 'stop', '--no-block', 'vanpi-icloud-backup.service'])
+        with mock.patch.object(backup, 'load_config', return_value=test_config()), \
+                mock.patch.object(sys, 'argv', ['worker', '--run']), \
+                mock.patch.object(backup.signal, 'signal'), mock.patch.object(backup, 'weekly') as weekly:
+            self.assertEqual(backup.main(), 0)
+            weekly.assert_not_called()
+        self.assertEqual(backup.read_json(self.state_dir / 'state.json'), saved)
+        self.assertFalse((self.state_dir / 'history.json').exists())
+
+    def test_pi_expiry_queues_until_worker_admission_and_does_not_pause_mac(self):
+        mac = self.root / 'mac'; mac.mkdir()
+        command = mock.Mock()
+        control.control('pause', '1', directory=self.state_dir,
+                        service='vanpi-icloud-backup.service', now=1000, command=command)
+        self.assertFalse(control.is_paused(mac, now=1020))
+        self.assertFalse(control.admit_worker(self.state_dir, now=1020))
+        control.control('resume-if-due', directory=self.state_dir,
+                        service='vanpi-icloud-backup.service', now=1060, command=command)
+        self.assertEqual(command.call_args.args[0][1], 'start')
+        self.assertEqual(control.pause_deadline(self.state_dir), 1060)
+        self.assertTrue(control.admit_worker(self.state_dir, now=1060))
+        self.assertIsNone(control.pause_deadline(self.state_dir))
+
+    def test_pending_copy_survives_long_pause_and_recent_success(self):
+        cfg = test_config()
+        name = 'vanpi-20260920T010203Z-12345678'
+        stage = self.root / 'icloud-weekly'; stage.mkdir(mode=0o700)
+        payload = stage / name / 'payload'; payload.mkdir(parents=True)
+        backup.atomic_json(payload / 'manifest.json', {'created_at': time.time() - 20 * 86400})
+        repo = self.root / 'borg'; repo.mkdir()
+        (repo / 'config').write_text('[repository]\nkey = encrypted-test-key\n')
+        stamp = self.root / 'borg_ok'; stamp.touch()
+        (self.state_dir / 'authenticated.json').write_text('{}')
+        state = {'pending': name, 'last_success_at': time.time()}
+        env = {'VANPI_ICLOUD_BORG_STAMP': str(stamp), 'VANPI_ICLOUD_BACKUP_MNT': str(self.root),
+               'VANPI_ICLOUD_BACKUP_LABEL': 'backup', 'BORG_REPO': str(repo)}
+        def run(args, *a, **kw):
+            if args[1] == 'copy':
+                self.assertEqual(args[2], str(payload))
+                raise backup.Deferred('test stops before network transfer')
+            return ''
+        with mock.patch.dict(os.environ, env), mock.patch.object(backup, 'credentials_ready', return_value=True), \
+                mock.patch.object(backup, 'check_work_allowed'), mock.patch.object(backup, 'guard'), \
+                mock.patch.object(backup, 'exact_mount'), mock.patch.object(backup, 'record_progress'), \
+                mock.patch.object(backup.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '/dev/test')), \
+                mock.patch.object(backup, 'make_snapshot') as snapshot, mock.patch.object(backup, 'run', side_effect=run), \
+                mock.patch.object(backup, 'verification_plan', return_value=({}, 'hash')), \
+                mock.patch.object(backup, 'remote_inventory', return_value={}):
+            with self.assertRaisesRegex(backup.Deferred, 'test stops'):
+                backup.weekly(cfg, state)
+            snapshot.assert_not_called()
+        self.assertEqual(state['pending'], name)
 
 
 if __name__ == '__main__': unittest.main()

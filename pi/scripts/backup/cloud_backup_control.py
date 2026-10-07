@@ -27,7 +27,7 @@ def admit_worker(directory, now=None):
 
 def control(action, minutes=None, *, directory, service, now=None, command=subprocess.run):
     if action not in ('pause', 'resume', 'resume-if-due'):
-        raise ValueError('unsupported Time Machine control')
+        raise ValueError('unsupported cloud backup control')
     if action == 'pause':
         if not isinstance(minutes, str) or not minutes.isascii() or not minutes.isdecimal():
             raise ValueError('pause duration must be whole minutes')

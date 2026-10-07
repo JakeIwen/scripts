@@ -25,6 +25,7 @@ export const ICLOUD_PHASES = [
 ] as const;
 export type ICloudPhase = (typeof ICLOUD_PHASES)[number];
 export type ICloudControlAction = 'pause' | 'resume';
+export type ICloudBackupKind = 'pi' | 'time-machine';
 export interface ICloudProgress {
   uploadBytesPerSecond?: number | null;
   captureBytes?: number | null;

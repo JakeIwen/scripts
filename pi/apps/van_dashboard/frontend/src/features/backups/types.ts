@@ -40,6 +40,7 @@ export interface HotspareStatus {
   attached: boolean;
   device: string | null;
   sizeBytes: number | null;
+  usedBytes: number | null;
   mounted: boolean;
   mountpoints: string[];
   lastCloneAt: number | null;

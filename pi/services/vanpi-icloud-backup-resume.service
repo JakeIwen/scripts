@@ -1,0 +1,8 @@
+[Unit]
+Description=Resume Pi iCloud backup after a manual pause expires
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+ExecStart=/usr/bin/python3 /home/pi/scripts/backup/icloud_backup_control.py --resume-if-due

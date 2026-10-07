@@ -59,6 +59,30 @@ class StatusTests(unittest.TestCase):
         self.assertFalse(result['attention'])
         self.assertEqual(result['next_due_at'], 990 + 7 * 86400)
 
+    def test_queued_message_names_verified_lock_owner_and_rejects_stale_pid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            lock = root / 'backup.lock'; lock.write_text('123\n')
+            proc = root / 'proc/123'; (proc / 'fd').mkdir(parents=True)
+            (proc / 'cmdline').write_bytes(b'python3\0/home/pi/scripts/backup/icloud_backup.py\0--run\0')
+            self.assertNotIn('Pi iCloud', status.queued_backup_message(lock, root / 'proc'))
+            (proc / 'fd/9').symlink_to(lock)
+            self.assertIn('waiting for Pi iCloud backup to finish', status.queued_backup_message(lock, root / 'proc'))
+            (proc / 'cmdline').write_bytes(b'python3\0/private/unrelated.py\0')
+            self.assertNotIn('private', status.queued_backup_message(lock, root / 'proc'))
+
+    def test_manual_projection_preserves_upload_history_and_clears_only_on_expiry(self):
+        original = self.build({'phase': 'deferred', 'pending': GEN})
+        paused = status.apply_manual_control(dict(original), 2000, now=1000)
+        self.assertEqual(paused['phase'], 'paused')
+        self.assertEqual(paused['next_check_at'], 2000)
+        self.assertEqual(paused['generation'], GEN)
+        with mock.patch.object(status, 'queued_backup_message', return_value='Waiting for local backup'):
+            queued = status.apply_manual_control(dict(original), 2000, now=2000)
+        self.assertIsNone(queued['manual_pause_until'])
+        self.assertTrue(queued['resume_pending'])
+        self.assertEqual(queued['message'], 'Waiting for local backup')
+
     def test_speed_only_comes_from_a_fresh_matching_live_upload(self):
         state = {'phase': 'uploading', 'worker_pid': 123, 'progress_updated_at': 995,
                  'progress': {'upload_bytes_per_second': 1234.5}}

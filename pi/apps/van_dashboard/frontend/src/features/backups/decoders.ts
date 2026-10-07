@@ -143,6 +143,7 @@ function decodeHotspare(value: unknown, index: number): HotspareStatus {
     attached: booleanValue(object.attached, `${label}.attached`),
     device: nullableString(object.device, `${label}.device`),
     sizeBytes: nullableNumber(object.size_bytes, `${label}.size_bytes`),
+    usedBytes: optionalNullableNumber(object.used_bytes, `${label}.used_bytes`),
     mounted: booleanValue(object.mounted, `${label}.mounted`),
     mountpoints: stringArray(object.mountpoints, `${label}.mountpoints`),
     lastCloneAt: nullableNumber(object.last_clone_at, `${label}.last_clone_at`),

@@ -50,6 +50,7 @@ export function backupStatusPayload(running = false): Record<string, unknown> {
           attached: true,
           device: '/dev/sdc',
           size_bytes: 64_000_000_000,
+          used_bytes: 21_474_836_480,
           mounted: false,
           mountpoints: [],
           last_clone_at: 1_699_500_000,

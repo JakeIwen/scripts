@@ -1,6 +1,6 @@
 import { formatBytes, formatDuration, formatRelativeTime } from '../../utils/format';
 import { iCloudPhaseLabel, iCloudProgress } from './icloud';
-import type { AvailableICloudStatus, ICloudStatus } from './icloud';
+import type { AvailableICloudStatus, ICloudBackupKind, ICloudStatus } from './icloud';
 import { ICloudBackupControls } from './ICloudBackupControls';
 
 function ICloudUploadSpeed({ status }: { status: AvailableICloudStatus }) {
@@ -26,7 +26,7 @@ export function ICloudBackupCard({
   blocked = false,
 }: {
   status: ICloudStatus;
-  kind?: 'pi' | 'time-machine';
+  kind?: ICloudBackupKind;
   refresh?: () => Promise<unknown>;
   blocked?: boolean;
 }) {
@@ -64,8 +64,8 @@ export function ICloudBackupCard({
         </span>
       </div>
       <p>{status.message}</p>
-      {kind === 'time-machine' && status.controlsAvailable && refresh && (
-        <ICloudBackupControls status={status} refresh={refresh} blocked={blocked} />
+      {status.controlsAvailable && refresh && (
+        <ICloudBackupControls kind={kind} status={status} refresh={refresh} blocked={blocked} />
       )}
       <ICloudUploadSpeed status={status} />
       {status.lastSuccessAt === null ? (
@@ -161,10 +161,7 @@ export function ICloudBackupCard({
         )}
       </dl>
       <p className="backup-icloud__note">
-        Starlink routes are excluded. Local backups take priority.{' '}
-        {kind === 'time-machine'
-          ? 'Normal Time Machine backups resume after local capture; the upload uses only the frozen copy. Unchanged bands are shared between recovery points.'
-          : 'This job is Pi recovery only; Mac Time Machine replication is tracked separately.'}
+        Starlink routes are excluded. Local backups take priority.
       </p>
       <details className="backup-icloud__history">
         <summary>Attempt history ({status.attempts.length})</summary>

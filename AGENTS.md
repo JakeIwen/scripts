@@ -41,13 +41,15 @@ compare it with this checkout. Deployed files may differ from the repository.
 - `pi/tests/dashboard/_frontend_test_support.py` provides a temporary React
   index response for route tests, independent of deployed frontend builds.
 - Cloud holds: `pi/scripts/backup/cloud_backup_control.py` shares admission and
-  durable `pause.json` controls. `time_machine_icloud_control.py` retains the
-  Time Machine CLI contract; the minute resume timer,
+  durable `pause.json` controls. `icloud_backup_control.py` and
+  `time_machine_icloud_control.py` are fixed Pi/Mac entry points; their separate minute resume timers,
   worker and Mac heartbeat all honor it. Dashboard mutations use
   `van_dashboard_cloud_controls.py`. Samba mount reconciliation clears only
   empty shutdown gates; nonempty capture gates are released by their owner.
 - Bootable clone evidence is built in `van_dashboard_hotspares.py`, using the
   existing normalized device-tree helpers in `van_dashboard_block_devices.py`.
+  Root usage comes from mounted `lsblk` counters or a read-only, label-verified
+  ext4 superblock probe. Never mount a spare merely to render its usage.
 - Deal Watch cookie renewal: `pi/scripts/price_check/search_watch/browser_refresh.py`
   owns the durable request queue and request contract; `refresh_install.py`
   validates submitted headers on the Pi before replacement. The bridge is

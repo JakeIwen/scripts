@@ -83,7 +83,11 @@ describe('backups feature', () => {
       progressPercent: 42,
       bytesProcessed: 1_073_741_824,
     });
-    expect(status.hotswaps[0]).toMatchObject({ label: 'hotspare-a', attached: true });
+    expect(status.hotswaps[0]).toMatchObject({
+      label: 'hotspare-a',
+      attached: true,
+      usedBytes: 21_474_836_480,
+    });
     expect(status.settings).toEqual({
       cloneCardNominalGb: 64,
       rootUsedMaxGib: 52,

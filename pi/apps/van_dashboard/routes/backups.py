@@ -9,6 +9,7 @@ from ..van_dashboard_backups import BackupStatusError
 bp = Blueprint("backups", __name__)
 backups = runtime_proxy("backups")
 time_machine_cloud_control = runtime_proxy("time_machine_cloud_control")
+pi_cloud_control = runtime_proxy("pi_cloud_control")
 
 
 
@@ -143,18 +144,18 @@ def api_stop_exfat_backup():
     return _api_stop_backup("exfat")
 
 
-def _time_machine_cloud_action(action):
+def _cloud_action(action, controller, label):
     fields = ("minutes",) if action == "pause" else ()
     if request.args or not _exact_form(fields) or (request.content_length and not request.form and action == "resume"):
-        return api_error("invalid Time Machine control input", 400)
+        return api_error("invalid cloud backup control input", 400)
     try:
-        time_machine_cloud_control.request(action, request.form.get("minutes"))
+        controller.request(action, request.form.get("minutes"))
     except ValueError as exc:
         return api_error(str(exc), 400)
     except RuntimeError as exc:
         return api_error(str(exc), 503)
-    message = ("Time Machine iCloud pause requested" if action == "pause" else
-               "Time Machine iCloud resume requested; existing safety checks still apply")
+    message = (f"{label} pause requested" if action == "pause" else
+               f"{label} resume requested; existing safety checks still apply")
     response = jsonify({"ok": True, "message": message})
     response.status_code = 202
     response.headers["Cache-Control"] = "no-store"
@@ -163,9 +164,19 @@ def _time_machine_cloud_action(action):
 
 @bp.route("/api/backups/time-machine-icloud/pause", methods=["POST"])
 def api_pause_time_machine_cloud():
-    return _time_machine_cloud_action("pause")
+    return _cloud_action("pause", time_machine_cloud_control, "Time Machine iCloud")
 
 
 @bp.route("/api/backups/time-machine-icloud/resume", methods=["POST"])
 def api_resume_time_machine_cloud():
-    return _time_machine_cloud_action("resume")
+    return _cloud_action("resume", time_machine_cloud_control, "Time Machine iCloud")
+
+
+@bp.route("/api/backups/icloud/pause", methods=["POST"])
+def api_pause_pi_cloud():
+    return _cloud_action("pause", pi_cloud_control, "Pi iCloud")
+
+
+@bp.route("/api/backups/icloud/resume", methods=["POST"])
+def api_resume_pi_cloud():
+    return _cloud_action("resume", pi_cloud_control, "Pi iCloud")

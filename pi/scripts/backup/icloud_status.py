@@ -57,6 +57,46 @@ def pause_deadline(directory):
     return deadline
 
 
+def queued_backup_message(lock_file=Path('/run/lock/vanpi_backup.lock'), process_root=Path('/proc')):
+    owners = {
+        'icloud_backup.py': 'Pi iCloud backup',
+        'time_machine_icloud.py': 'Mac Time Machine iCloud backup',
+        'pi_backup.sh': 'local Pi backup',
+        'exfat_snapshot.sh': 'EXFAT512 snapshot',
+        'clone_to_sd.sh': 'hotspare clone',
+        'clone_now.sh': 'hotspare clone',
+    }
+    try:
+        pid = lock_file.read_text().strip()
+        if re.fullmatch(r'[1-9][0-9]{0,9}', pid):
+            proc = process_root / pid
+            # The PID record alone can be stale; require the live process's
+            # inherited backup-lock descriptor and an exact known entry point.
+            if (proc / 'fd/9').samefile(lock_file):
+                args = (proc / 'cmdline').read_bytes().split(b'\0')
+                for filename, label in owners.items():
+                    if ('/home/pi/scripts/backup/' + filename).encode() in args:
+                        return f'Resume queued: waiting for {label} to finish. Checks every minute.'
+    except (OSError, ValueError):
+        pass
+    return 'Resume queued: another backup may be using the disks. Checks every minute.'
+
+
+def apply_manual_control(result, deadline, now=None):
+    now = time.time() if now is None else now
+    paused = deadline is not None and deadline > now
+    result['manual_pause_until'] = deadline if paused else None
+    result['resume_pending'] = deadline is not None and not paused
+    result['controls_available'] = True
+    if paused:
+        result.update(phase='paused', message=('Stopping safely for the manual pause.' if result['running']
+                                             else 'Manually paused; automatic retries resume when the pause expires.'))
+        result['next_check_at'] = deadline
+    elif result['resume_pending'] and not result['running']:
+        result.update(phase='deferred', message=queued_backup_message())
+    return result
+
+
 def number(value):
     return value if type(value) in (int, float) and math.isfinite(value) and value >= 0 else None
 
@@ -200,17 +240,20 @@ def dashboard_status():
     raw = capture(['/usr/bin/systemctl', 'show', 'vanpi-icloud-backup.service',
                    '-p', 'ActiveState', '-p', 'MainPID'])
     service = dict(line.split('=', 1) for line in raw.splitlines() if '=' in line)
+    deadline = pause_deadline(STATE_DIR)
+    timer_unit = 'vanpi-icloud-backup' + ('-resume' if deadline is not None else '')
     next_check = None
     try:
-        timer = capture(['/usr/bin/systemctl', 'show', 'vanpi-icloud-backup.timer',
+        timer = capture(['/usr/bin/systemctl', 'show', timer_unit + '.timer',
                          '-p', 'NextElapseUSecRealtime', '--value'])
         if timer and timer != 'n/a':
             next_check = float(capture(['/usr/bin/date', '--date=' + timer, '+%s']))
     except (ValueError, OSError, subprocess.SubprocessError):
         pass
-    return build_status(read_json(STATE_DIR / 'state.json', {}),
+    result = build_status(read_json(STATE_DIR / 'state.json', {}),
                         read_json(STATE_DIR / 'history.json', {}), read_json(CONFIG, {}),
                         service, next_check, auth_error=(STATE_DIR / 'authentication-error.json').exists())
+    return apply_manual_control(result, deadline)
 
 
 if __name__ == '__main__':
