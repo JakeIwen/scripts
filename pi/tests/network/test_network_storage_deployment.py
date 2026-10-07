@@ -16,6 +16,8 @@ import types
 import unittest
 from unittest import mock
 
+from ._network_storage_support import create_frontend
+
 PI = Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(PI))
 import deploy_network_storage as deploy
@@ -227,13 +229,7 @@ class FullStorageUpdateTests(unittest.TestCase):
         self.marker = self.backend[-1]
         self.database = self.flash / 'events.sqlite3'; self.database.write_bytes(b'live history')
         self.backup = self.root / 'backup.conf'; self.backup.write_text("BORG_EXCLUDES=(\n  '/keep'\n)\n")
-        self.frontend = self.root / 'frontend'
-        for name in ('old', 'older'):
-            path = self.frontend / 'releases' / name; path.mkdir(parents=True)
-            (path / 'index.html').write_text(name)
-            (path / 'react_dashboard_preview.py').write_text('existing preview server')
-        (self.frontend / 'current').symlink_to('releases/old')
-        (self.frontend / 'previous').symlink_to('releases/older')
+        self.frontend = create_frontend(self.root, 'existing preview server')
         self.states = {name: dict(active=True, enabled='enabled') for name in deploy.SERVICES}
         self.calls = []
         self.fail_once = False
@@ -705,13 +701,7 @@ class StorageMigrationIntegration(unittest.TestCase):
         (self.old_logs/'dendelion.log').write_bytes(b'old-first\nrepeated\nrepeated\n')
         self.conf=self.root/'storage.json'
         self.backup_conf=self.root/'backup.conf';self.backup_conf.write_text("PREFIX=keep\nBORG_EXCLUDES=(\n  '/keep'\n)\nSUFFIX=keep\n")
-        self.frontend=self.root/'frontend'
-        for name in ('old','older'):
-            path=self.frontend/'releases'/name;path.mkdir(parents=True)
-            (path/'index.html').write_text(name)
-            (path/'react_dashboard_preview.py').write_text('existing server')
-        (self.frontend/'current').symlink_to('releases/old')
-        (self.frontend/'previous').symlink_to('releases/older')
+        self.frontend=create_frontend(self.root)
         self.core=self.root/'core.py';self.core.write_text('old=True\n')
         self.receiver=self.root/'30-openwrt-dendelion.conf';self.receiver.write_text('old receiver')
         self.new=self.root/'new.py'
