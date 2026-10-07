@@ -335,6 +335,12 @@ Rotation tests must use separate root-writer and unprivileged `adm`-reader
 identities. Use `deploy_network_storage.py check/apply --recorder-only` for
 recorder code/permission updates that must preserve an independently deployed UI.
 
+The storage installer's read-only sysmon prerequisite pins live in
+`pi/network_storage_dependencies.py`; its dependency allowlist reuses the legacy
+recorder installer's package list. These files remain broad-sync-owned, not
+storage-managed targets. Fresh checks pin them; historical rollback manifests
+may omit the pins.
+
 Keep reports read-only and full-range counts independent of displayed row
 limits. Schema/index changes and incident materialization belong to the
 collector. Preserve physical-record checkpoints, backfill provenance and

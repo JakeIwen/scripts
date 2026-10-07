@@ -33,6 +33,7 @@ import types
 import uuid
 
 import deploy_network_flight_recorder as base
+import network_storage_dependencies as dependencies
 
 REPO = Path(__file__).resolve().parents[1]
 CONFIG = Path('/etc/vanpi-network-storage.json')
@@ -264,7 +265,7 @@ def database_snapshot(source, destination):
         original.close()
 
 
-def validate_plan(plan):
+def validate_plan(plan, *, historical=False):
     if plan.get('schema_version') != 1 or not re.fullmatch(r'network-storage-[A-Za-z0-9._-]+',plan['release']):
         raise ValueError('invalid storage deployment manifest')
     if not isinstance(plan.get('recorder_only', False), bool):
@@ -279,6 +280,7 @@ def validate_plan(plan):
             raise ValueError('storage manifest includes retired dashboard backend targets; '
                              'refusing check/apply/rollback; use a fresh storage plan and '
                              'deploy_python.py for the dashboard')
+    dependencies.validate_pins(plan, historical=historical)
     targets = RECORDER_TARGETS if plan.get('recorder_only') else TARGETS
     if {(r['source'],r['destination']) for r in plan['files']} != set(targets.items()) or len(plan['files']) != len(targets):
         raise ValueError('unexpected managed storage targets')
@@ -314,6 +316,7 @@ def inspect_files(plan, old):
 
 def inspect(plan):
     validate_plan(plan)
+    dependencies.verify_pins(plan)
     if plan.get('recorder_only'):
         return inspect_recorder(plan)
     for command in ('/usr/bin/findmnt','/usr/bin/systemd-tmpfiles','/usr/bin/systemctl','/usr/sbin/runuser','/usr/sbin/rsyslogd','/usr/sbin/logrotate','/usr/bin/curl'):
@@ -347,6 +350,7 @@ def inspect(plan):
 def verify(plan):
     if plan.get('recorder_only'):
         return verify_recorder(plan)
+    dependencies.verify_pins(plan)
     base.command(['/usr/bin/findmnt','--noheadings','--types','tmpfs','--mountpoint','/run'])
     if mount_identity(plan['config']) != plan['mount']:
         raise ValueError('flash identity changed since check')
@@ -386,6 +390,7 @@ def inspect_recorder(plan):
 
 
 def verify_recorder(plan):
+    dependencies.verify_pins(plan)
     if plan.get('migration') is not False or base.regular_info(CONFIG) != plan['config_before']:
         raise ValueError('recorder-only storage configuration changed or migration requested')
     base.command(['/usr/bin/findmnt', '--noheadings', '--types', 'tmpfs', '--mountpoint', '/run'])
@@ -687,7 +692,7 @@ def rollback(release):
         raise ValueError('invalid storage release')
     root = BACKUPS/release
     plan = json.loads((root/'manifest.json').read_text())
-    validate_plan(plan)
+    validate_plan(plan, historical=True)
     for row in plan['files']:
         info = base.regular_info(row['destination'])
         if info is None or info['sha256']!=row['sha256']:
@@ -747,6 +752,8 @@ def remote(target, action, request):
     source = Path(__file__).read_text()
     source = source[:source.rindex("\nif __name__ == '__main__':")]
     payload = "import types,sys\nbase=types.ModuleType('deploy_network_flight_recorder')\nbase.__file__='/tmp/pi/deploy_network_flight_recorder.py'\nsys.modules[base.__name__]=base\nexec("+repr(base_source)+",base.__dict__)\n"
+    dependency_source = (REPO/'pi/network_storage_dependencies.py').read_text()
+    payload += "dependencies=types.ModuleType('network_storage_dependencies')\nsys.modules[dependencies.__name__]=dependencies\nexec("+repr(dependency_source)+",dependencies.__dict__)\n"
     payload += source + '\nrequest='+repr(request)+'\n'
     call = {'check':'inspect(request)','apply':'apply(request["plan"],request["stage"])','rollback':'rollback(request["release"])'}[action]
     payload += 'print(json.dumps('+call+'))\n'
@@ -773,6 +780,7 @@ def make_plan(target, recorder_only=False):
             if path.is_file():frontend.append(dict(relative=str(path.relative_to(dist)),sha256=base.digest(path)))
     return dict(schema_version=1,target=target,release='network-storage-'+time.strftime('%Y%m%dT%H%M%SZ',time.gmtime())+'-'+uuid.uuid4().hex[:8],
                 files=rows, frontend_files=frontend, recorder_only=recorder_only,
+                monitor_dependencies=dependencies.make_pins(REPO),
                 config=None if recorder_only else json.loads((REPO/'pi/services/network-flight-recorder-storage.json').read_text()))
 
 
@@ -804,6 +812,7 @@ def main():
         if bool(plan.get('recorder_only')) != args.recorder_only:
             raise ValueError('plan mode mismatch; use --recorder-only for a recorder-only plan')
         current=make_plan(args.target,args.recorder_only)
+        dependencies.verify_local_pins(plan, current)
         if (plan['target']!=args.target or (not args.recorder_only and plan['config']!=current['config']) or plan['frontend_files']!=current['frontend_files'] or
                 [{k:v for k,v in r.items() if k!='before'} for r in plan['files']]!=current['files']):
             raise ValueError('local sources or target changed; create a fresh checked plan')

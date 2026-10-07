@@ -16,7 +16,7 @@ import types
 import unittest
 from unittest import mock
 
-from ._network_storage_support import create_frontend
+from ._network_storage_support import create_frontend, monitor_fixture
 
 PI = Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(PI))
@@ -38,7 +38,7 @@ class StorageDeploymentTests(unittest.TestCase):
     def test_full_plan_owns_frontend_and_dropin_but_no_dashboard_backend(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for source in deploy.TARGETS:
+            for source in (*deploy.TARGETS, *deploy.dependencies.MONITOR_DEPENDENCIES):
                 path = root / source
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text('{}' if path.suffix == '.json' else '# fixture\n')
@@ -64,7 +64,7 @@ class StorageDeploymentTests(unittest.TestCase):
         self.assertEqual(set(deploy.RECORDER_TARGETS), expected)
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
-            for source in expected:
+            for source in (*expected, *deploy.dependencies.MONITOR_DEPENDENCIES):
                 path=root/source;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('# fixture\n')
             with mock.patch.object(deploy,'REPO',root),\
                  mock.patch.object(deploy.subprocess,'run',return_value=subprocess.CompletedProcess([],1,b'',b'')),\
@@ -267,6 +267,7 @@ class FullStorageUpdateTests(unittest.TestCase):
             self.plan['files'].append(dict(source=source, destination=destination,
                                            sha256=deploy.base.sha(self.contents[source]),
                                            head_sha256=deploy.base.digest(destination)))
+        self.plan['monitor_dependencies'] = monitor_fixture(self, deploy)
         deploy.inspect(self.plan)
         self.assertFalse(self.plan['migration'])
         directory = tempfile.TemporaryDirectory(prefix='network-storage-stage.', dir='/tmp')
@@ -428,6 +429,7 @@ class RecorderOnlyUpdateTests(unittest.TestCase):
             self.plan['files'].append(dict(source=source,destination=destination,
                                            sha256=deploy.base.sha(self.contents[source]),
                                            head_sha256=deploy.base.digest(destination)))
+        self.plan['monitor_dependencies'] = monitor_fixture(self, deploy)
         deploy.inspect(self.plan)
         directory=tempfile.TemporaryDirectory(prefix='network-storage-stage.',dir='/tmp')
         self.addCleanup(directory.cleanup);self.stage=Path(directory.name)
@@ -448,6 +450,7 @@ class RecorderOnlyUpdateTests(unittest.TestCase):
                 embedded.STORAGE_CONFIG = self.conf
                 embedded.command = deploy.base.command
                 embedded.service_state = deploy.base.service_state
+                namespace['dependencies'].MONITOR_DEPENDENCIES = deploy.dependencies.MONITOR_DEPENDENCIES
                 with self.assertRaisesRegex(ValueError, 'storage has migrated'):
                     embedded.inspect_remote({})
                 embedded.STORAGE_CONFIG = self.root / 'no-storage.json'
@@ -736,6 +739,7 @@ class StorageMigrationIntegration(unittest.TestCase):
         for source,destination in targets.items():
             info=deploy.base.regular_info(destination)
             self.plan['files'].append(dict(source=source,destination=destination,sha256=deploy.base.sha(self.contents[source]),head_sha256=info['sha256'] if info else None))
+        self.plan['monitor_dependencies'] = monitor_fixture(self, deploy)
         deploy.inspect(self.plan)
         directory=tempfile.TemporaryDirectory(prefix='network-storage-stage.',dir='/tmp')
         self.addCleanup(directory.cleanup);self.stage=Path(directory.name)
