@@ -40,6 +40,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   `pi/tests/network/_network_storage_support.py`.
 - `pi/tests/dashboard/_frontend_test_support.py` provides a temporary React
   index response for route tests, independent of deployed frontend builds.
+- Physical-file identity matching and observation persistence live in
+  `pi/apps/video_library/file_observations.py`; the catalog owns their transaction
+  and performs location versioning only after all observations agree.
 - One-off video catalog maintenance lives in
   `pi/apps/video_library/maintenance/same_file_repair.py`, with behavior tests in
   `pi/tests/media/test_video_same_file_repair.py`. It is deliberately outside the
