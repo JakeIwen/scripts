@@ -4,6 +4,19 @@ import { decodeUbntWifiStatus } from './decoder';
 import { ubntPayload } from './testFixtures';
 
 describe('decodeUbntWifiStatus', () => {
+  it('preserves the background refresh flag and rejects malformed flags', () => {
+    expect(decodeUbntWifiStatus({ ...ubntPayload(), refreshing: true }).statusRefreshing).toBe(
+      true,
+    );
+    expect(decodeUbntWifiStatus({ ...ubntPayload(), refreshing: false }).statusRefreshing).toBe(
+      false,
+    );
+    expect(decodeUbntWifiStatus(ubntPayload()).statusRefreshing).toBe(false);
+    expect(() => decodeUbntWifiStatus({ ...ubntPayload(), refreshing: 'true' })).toThrow(
+      'UBNT refreshing must be true or false',
+    );
+  });
+
   it('strictly decodes state, profiles, networks, and operation', () => {
     const status = decodeUbntWifiStatus(ubntPayload());
 

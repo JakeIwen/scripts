@@ -58,7 +58,36 @@ describe('UBNT UI', () => {
       <UbntTile status={status} error={null} refreshing={false} onOpen={vi.fn()} />,
     );
     expect(screen.getByText('denlink · Not associated')).toBeInTheDocument();
+    expect(screen.queryByText('Connected')).not.toBeInTheDocument();
+    expect(container.querySelector('.tile--good')).toBeNull();
     expect(container.querySelector('.ubnt-tile__radio-dot--good')).toBeNull();
+  });
+  it('does not present stale disconnect status as a connected network', () => {
+    const status = sampleUbntStatus('error');
+    status.state.configuredSsid = 'vanpi-disconnected-27615';
+    status.state.associatedSsid = null;
+    status.lastError = 'UBNT status interrupted: Connection refused';
+    const { container } = render(
+      <UbntTile status={status} error={null} refreshing={false} onOpen={vi.fn()} />,
+    );
+    expect(screen.getByText('Status unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Waiting for fresh antenna status…')).toBeInTheDocument();
+    expect(screen.queryByText(/vanpi-disconnected/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Connected')).not.toBeInTheDocument();
+    expect(container.querySelector('.tile--good')).toBeNull();
+  });
+  it('qualifies cached radio status when the HTTP refresh fails', () => {
+    const { container } = render(
+      <UbntTile
+        status={sampleUbntStatus()}
+        error={new Error('Offline')}
+        refreshing={false}
+        onOpen={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('Status unavailable')).toBeInTheDocument();
+    expect(container.querySelector('.ubnt-tile__radio-dot--good')).toBeNull();
+    expect(container.querySelector('.tile--good')).toBeNull();
   });
   it('shows physical and radio state on the tile', () => {
     const onOpen = vi.fn();

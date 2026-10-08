@@ -4,7 +4,7 @@ import { usePollingResource, type PollingState } from '../../hooks/usePollingRes
 import { fetchUbntWifiStatus } from './api';
 import type { UbntWifiStatus } from './types';
 
-export const UBNT_IDLE_INTERVAL_MS = 30_000;
+export const UBNT_IDLE_INTERVAL_MS = 10_000;
 export const UBNT_OPERATION_INTERVAL_MS = 1_200;
 
 export function useUbntWifiStatus(): PollingState<UbntWifiStatus> {
@@ -15,12 +15,20 @@ export function useUbntWifiStatus(): PollingState<UbntWifiStatus> {
   });
 
   useEffect(() => {
+    // HTTP returns the cached snapshot while the antenna read runs separately.
+    // Collect its result promptly, including after a mutation has timed out.
+    const status = resource.data;
     const next =
-      resource.data?.operation.status === 'running'
+      status?.operation.status === 'running' ||
+      status?.statusRefreshing ||
+      status?.starlinkPending ||
+      status?.state.selectorRunning ||
+      status?.lastError ||
+      resource.error
         ? UBNT_OPERATION_INTERVAL_MS
         : UBNT_IDLE_INTERVAL_MS;
     setIntervalMs((current) => (current === next ? current : next));
-  }, [resource.data?.operation.status]);
+  }, [resource.data, resource.error]);
 
   return resource;
 }

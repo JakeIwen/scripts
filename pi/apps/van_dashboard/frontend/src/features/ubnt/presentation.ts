@@ -17,20 +17,25 @@ export function ubntRadioConnected(status: UbntWifiStatus | null): boolean {
   );
 }
 
-export function ubntTone(status: UbntWifiStatus | null, _error: Error | null): StatusTone {
+export function ubntTone(status: UbntWifiStatus | null, error: Error | null): StatusTone {
   if (ubntRecovering(status) || status?.operation.status === 'running') return 'neutral';
+  if (error || status?.lastError || status?.starlinkPending) return 'neutral';
   if (!status) return 'neutral';
   if (status.reachable === false) return 'bad';
-  if (status.reachable === true) return 'good';
+  if (ubntRadioConnected(status)) return 'good';
   return 'neutral';
 }
 
-export function ubntStatusLabel(status: UbntWifiStatus | null, _refreshing: boolean): string {
+export function ubntStatusLabel(status: UbntWifiStatus | null, error: Error | null): string {
   if (ubntRecovering(status)) return 'Reconnecting';
   if (status?.operation.status === 'running') return 'Working';
+  if (status?.starlinkPending) return 'Queued';
+  if (error || status?.lastError) return 'Status unavailable';
   if (!status) return 'No data';
   if (status.reachable === false) return 'Unavailable';
-  if (status.reachable === true) return 'Connected';
+  if (ubntRadioConnected(status)) return 'Connected';
+  if (status.state.selectorRunning) return 'Reconnecting';
+  if (status.reachable === true) return 'Not associated';
   return 'No data';
 }
 

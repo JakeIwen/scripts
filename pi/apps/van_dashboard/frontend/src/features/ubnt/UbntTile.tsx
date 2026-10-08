@@ -21,18 +21,22 @@ function radioDetail(status: UbntWifiStatus | null): string {
   return parts.join(' · ') || 'No radio measurements';
 }
 
-export function UbntTile({ status, error, refreshing, dashboardStatus, onOpen }: UbntTileProps) {
+export function UbntTile({ status, error, dashboardStatus, onOpen }: UbntTileProps) {
   const tone = ubntTone(status, error);
   const associated = status?.state.associatedSsid || status?.state.configuredSsid;
+  const ssid = associated?.startsWith('vanpi-disconnected-') ? null : associated;
+  const radioConnected = !error && ubntRadioConnected(status);
   const summary = ubntRecovering(status)
     ? 'Antenna reconnecting; waiting for fresh status…'
     : status?.starlinkPending
       ? 'Starlink antenna change queued…'
-      : status?.reachable === false
-        ? 'No UBNT Ethernet response'
-        : status?.reachable === true
-          ? `${associated || 'Unknown SSID'} · ${status.lastError ? 'Status unavailable' : ubntRadioConnected(status) ? radioDetail(status) : 'Not associated'}`
-          : 'Waiting for antenna status…';
+      : error || status?.lastError
+        ? 'Waiting for fresh antenna status…'
+        : status?.reachable === false
+          ? 'No UBNT Ethernet response'
+          : status?.reachable === true
+            ? `${ssid || 'No Wi-Fi network'} · ${radioConnected ? radioDetail(status) : 'Not associated'}`
+            : 'Waiting for antenna status…';
 
   return (
     <section className={`tile tile--${tone} ubnt-tile`} aria-labelledby="ubnt-tile-title">
@@ -50,12 +54,12 @@ export function UbntTile({ status, error, refreshing, dashboardStatus, onOpen }:
           UBNT Wi-Fi
         </h2>
         <div className="tile__status">
-          <StatusPill tone={tone}>{ubntStatusLabel(status, refreshing)}</StatusPill>
+          <StatusPill tone={tone}>{ubntStatusLabel(status, error)}</StatusPill>
         </div>
       </header>
       <div className="tile__summary">
         <span
-          className={`ubnt-tile__radio-dot${ubntRadioConnected(status) ? ' ubnt-tile__radio-dot--good' : ''}`}
+          className={`ubnt-tile__radio-dot${radioConnected ? ' ubnt-tile__radio-dot--good' : ''}`}
           aria-hidden="true"
         />
         <span>{summary}</span>

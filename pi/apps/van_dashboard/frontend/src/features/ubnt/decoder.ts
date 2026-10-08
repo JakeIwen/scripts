@@ -155,6 +155,10 @@ export function decodeUbntWifiStatus(value: unknown): UbntWifiStatus {
   const operation = objectValue(response.operation, 'UBNT operation');
 
   return {
+    statusRefreshing:
+      response.refreshing === undefined
+        ? false
+        : booleanValue(response.refreshing, 'UBNT refreshing'),
     starlinkPending:
       response.starlink_pending === undefined
         ? false

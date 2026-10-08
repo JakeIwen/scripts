@@ -62,6 +62,7 @@ export interface UbntOperation {
 }
 
 export interface UbntWifiStatus {
+  statusRefreshing?: boolean;
   lastError?: string | null;
   starlinkPending?: boolean;
   reachable: boolean | null;
