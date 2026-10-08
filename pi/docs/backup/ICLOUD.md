@@ -66,6 +66,15 @@ as interrupted, not running. Paused attempts show their last saved progress and
 a safe explanation, plus the next timer check. A timer check is not a promised
 start time: the uplink, disk policy, shared lock and local-backup window still apply.
 
+Failed, interrupted and sign-in attempts have a clickable **details** link in
+both cloud cards and their histories. The popup shows the selected attempt's
+timing, stage and recognized service-journal failure reasons with explanations.
+The read-only endpoint accepts only a known job and retained attempt ID; it reads
+at most 200 journal records from that attempt's time range with a five-second
+timeout. It never publishes arbitrary journal text, credentials or provider
+responses. Missing/rotated logs and older errors without a recorded cause are
+identified explicitly. Opening or retrying the popup does not resume a backup.
+
 Both cloud cards offer **Resume now** and **Pause for** (15/30 minutes,
 1/4/12/24 hours, seven days, or indefinitely). Each has its own root-private `pause.json`;
 pausing Pi recovery does not pause Time Machine replication. Stops are graceful,

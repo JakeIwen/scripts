@@ -69,6 +69,12 @@ compare it with this checkout. Deployed files may differ from the repository.
   never delete or force-release the common backup lock or stop local backups.
   Frontend cloud labels/estimates live in `features/backups/cloudPresentation.ts`;
   `ICloudPauseSelector.tsx` owns the shared pause duration choices.
+- Cloud failure popups: `pi/apps/van_dashboard/cloud_backup_details.py` reads
+  bounded journal evidence for a retained Pi/Mac attempt selected by server-owned
+  history. Only recognized worker diagnoses are exposed; raw journal/provider
+  text stays private. `features/backups/ICloudAttemptMessage.tsx` owns the popup,
+  with its response contract in `attemptDetails.ts`. Neither endpoint nor popup
+  changes worker state, and nested dialogs close independently.
 - `pi/scripts/backup/time_machine_staging.py` owns local orphan-chunk cleanup.
   Plan/apply require the common backup lock, verified mount and owned store,
   preserving capture-index, pending/published manifests and upload/verification

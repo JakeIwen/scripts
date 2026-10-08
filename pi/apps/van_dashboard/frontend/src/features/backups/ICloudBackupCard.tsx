@@ -3,6 +3,7 @@ import { iCloudPhaseLabel, iCloudProgress } from './icloud';
 import type { AvailableICloudStatus, ICloudBackupKind, ICloudStatus } from './icloud';
 import { ICloudBackupControls } from './ICloudBackupControls';
 import { iCloudUploadTimeLeft } from './cloudPresentation';
+import { ICloudAttemptMessage } from './ICloudAttemptMessage';
 
 function ICloudUploadSpeed({ status }: { status: AvailableICloudStatus }) {
   if (!status.running || status.phase !== 'uploading') return null;
@@ -66,7 +67,7 @@ export function ICloudBackupCard({
           {iCloudPhaseLabel(status.phase)}
         </span>
       </div>
-      <p>{status.message}</p>
+      <ICloudAttemptMessage {...status} kind={kind} id={status.attempts[0]?.id} />
       {status.controlsAvailable && refresh && (
         <ICloudBackupControls
           kind={kind}
@@ -198,7 +199,7 @@ export function ICloudBackupCard({
                   {attempt.endedAt !== null &&
                     ` · ${formatDuration(attempt.endedAt - attempt.startedAt)}`}
                 </div>
-                <p>{attempt.message}</p>
+                <ICloudAttemptMessage {...attempt} kind={kind} />
                 <small>
                   Reached: {iCloudPhaseLabel(attempt.workPhase)}
                   {attempt.progress.verifiedFiles !== null

@@ -121,6 +121,20 @@ function progress(value: unknown): ICloudProgress {
     currentFileBytes: nullableNumeric(row.current_file_bytes),
   };
 }
+export function decodeICloudAttempt(value: unknown): ICloudAttempt {
+  const attempt = objectValue(value, 'iCloud attempt');
+  return {
+    id: stringValue(attempt.id, 'attempt.id'),
+    startedAt: numeric(attempt.started_at),
+    endedAt: nullableNumeric(attempt.ended_at),
+    phase: phase(attempt.phase),
+    workPhase: phase(attempt.work_phase),
+    generation: nullableString(attempt.generation, 'attempt.generation'),
+    message: stringValue(attempt.message, 'attempt.message'),
+    progress: progress(attempt.progress),
+    verifiedAt: nullableNumeric(attempt.verified_at),
+  };
+}
 export function decodeICloud(value: unknown): ICloudStatus | null {
   if (value === undefined || value === null) return null; // Rolling backend deployments.
   const row = objectValue(value, 'iCloud');
@@ -157,20 +171,7 @@ export function decodeICloud(value: unknown): ICloudStatus | null {
     keepGenerations: numeric(row.keep_generations),
     progress: progress(row.progress),
     historyStartedAt: nullableNumeric(row.history_started_at),
-    attempts: arrayValue(row.attempts, 'iCloud.attempts').map((value) => {
-      const attempt = objectValue(value, 'iCloud attempt');
-      return {
-        id: stringValue(attempt.id, 'attempt.id'),
-        startedAt: numeric(attempt.started_at),
-        endedAt: nullableNumeric(attempt.ended_at),
-        phase: phase(attempt.phase),
-        workPhase: phase(attempt.work_phase),
-        generation: nullableString(attempt.generation, 'attempt.generation'),
-        message: stringValue(attempt.message, 'attempt.message'),
-        progress: progress(attempt.progress),
-        verifiedAt: nullableNumeric(attempt.verified_at),
-      };
-    }),
+    attempts: arrayValue(row.attempts, 'iCloud.attempts').map(decodeICloudAttempt),
     verifiedGenerations: arrayValue(row.verified_generations, 'iCloud.verified_generations').map(
       (value) => {
         const entry = objectValue(value, 'iCloud verified generation');

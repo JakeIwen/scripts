@@ -4,12 +4,30 @@ from flask import Blueprint, jsonify, request
 
 from ..http import _exact_form, api_error, runtime_proxy
 from ..van_dashboard_backups import BackupStatusError
+from ..cloud_backup_details import attempt_details
 
 
 bp = Blueprint("backups", __name__)
 backups = runtime_proxy("backups")
 time_machine_cloud_control = runtime_proxy("time_machine_cloud_control")
 pi_cloud_control = runtime_proxy("pi_cloud_control")
+
+
+@bp.route("/api/backups/cloud/<kind>/attempts/<attempt_id>")
+def api_cloud_attempt_details(kind, attempt_id):
+    if request.args:
+        return api_error("backup attempt details do not accept query parameters", 400)
+    try:
+        details = attempt_details(kind, attempt_id, backups.status)
+    except ValueError as exc:
+        return api_error(str(exc), 400)
+    except LookupError as exc:
+        return api_error(str(exc), 404)
+    except (BackupStatusError, RuntimeError):
+        return api_error("Cloud backup attempt details are unavailable.", 503)
+    response = jsonify({"ok": True, "details": details})
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 

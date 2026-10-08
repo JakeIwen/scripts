@@ -129,6 +129,9 @@ capture gives up the lock when local backups need the window.
 
 The Backups pane tracks the Mac copy separately from Pi/Borg: local capture,
 upload estimate, downloaded verification, last success and attempt history.
+Failed attempts include a **details** popup with the recorded service-journal
+diagnosis and attempt timing/stage, including retained historical attempts. See
+[dashboard failure details](ICLOUD.md#dashboard-progress-and-history) for limits.
 Capture shows both byte and file counts. Byte progress is capped at 99.9% until
 the complete source inventory is revalidated and the pending manifest is saved;
 rounded byte totals alone do not establish a finished frozen copy.

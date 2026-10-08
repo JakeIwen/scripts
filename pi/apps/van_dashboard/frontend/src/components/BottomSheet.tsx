@@ -23,7 +23,14 @@ export function BottomSheet({
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
-    if (open && !dialog.open) dialog.showModal();
+    if (open && !dialog.open) {
+      const opener = document.activeElement;
+      dialog.showModal();
+      return () => {
+        if (dialog.open) dialog.close();
+        if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+      };
+    }
     if (!open && dialog.open) dialog.close();
   }, [open]);
 
@@ -34,6 +41,7 @@ export function BottomSheet({
       aria-labelledby={titleId}
       onCancel={(event) => {
         event.preventDefault();
+        event.stopPropagation();
         onClose();
       }}
       onClose={onClose}

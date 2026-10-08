@@ -1,0 +1,26 @@
+.backup-attempt-details-link {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  color: var(--accent);
+  background: none;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  cursor: pointer;
+}
+
+.backup-attempt-details__entries {
+  list-style: none;
+  padding: 0;
+}
+
+.backup-attempt-details__entries pre,
+.backup-attempt-details__generation {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.backup-attempt-details__entries time {
+  color: var(--muted);
+}
