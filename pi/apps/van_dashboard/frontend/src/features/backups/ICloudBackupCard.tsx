@@ -8,12 +8,12 @@ import { ICloudAttemptMessage } from './ICloudAttemptMessage';
 function ICloudUploadSpeed({ status }: { status: AvailableICloudStatus }) {
   if (!status.running || status.phase !== 'uploading') return null;
   return (
-    <p className="backup-icloud__speed">
-      Upload speed:{' '}
+    <span className="backup-icloud__speed">
+      {' · '}
       {status.progressStale || status.progress.uploadBytesPerSecond == null
-        ? 'Waiting for a fresh measurement…'
+        ? 'measuring speed…'
         : `${formatBytes(status.progress.uploadBytesPerSecond)}/s`}
-    </p>
+    </span>
   );
 }
 
@@ -77,7 +77,6 @@ export function ICloudBackupCard({
           blocked={blocked}
         />
       )}
-      <ICloudUploadSpeed status={status} />
       {status.lastSuccessAt === null ? (
         <p className="backup-icloud__warning">No verified offsite backup yet.</p>
       ) : (
@@ -100,6 +99,7 @@ export function ICloudBackupCard({
                 ? 'Download verification'
                 : 'Upload estimate'}
             {p.percent === null ? '' : ` · ${p.percent.toFixed(1)}%`}
+            <ICloudUploadSpeed status={status} />
             <UploadTimeLeft status={status} />
           </strong>
           {p.percent !== null ? (
