@@ -37,6 +37,7 @@ from .catalog_values import (
     _required_text,
 )
 from .file_observations import matching_file_assets, record_file_identity
+from .filesystem_identity import file_stat_values
 from .schema import SCHEMA_VERSION, _MIGRATIONS
 from .v1_bridge import V1CatalogBridge
 
@@ -653,14 +654,9 @@ class MediaAssetCatalog(V1CatalogBridge):
 
         normalized_path = _path_key(path)
         timestamp = self._now(observed_at)
-        if size is None or device_id is None or inode is None or mtime_ns is None:
-            # Missing evidence must not retire a known location or create a
-            # path-only replacement that conflicts when the drive returns.
-            stat = os.stat(normalized_path)
-            size = stat.st_size if size is None else size
-            device_id = str(stat.st_dev) if device_id is None else str(device_id)
-            inode = stat.st_ino if inode is None else inode
-            mtime_ns = stat.st_mtime_ns if mtime_ns is None else mtime_ns
+        size, device_id, inode, mtime_ns = file_stat_values(
+            normalized_path, size=size, device_id=device_id, inode=inode, mtime_ns=mtime_ns
+        )
         if size is not None and int(size) < 0:
             raise ValueError("size must be non-negative")
         fingerprint_value = _optional_locator(fingerprint)
@@ -675,6 +671,7 @@ class MediaAssetCatalog(V1CatalogBridge):
                 device_id=device_id,
                 inode=inode,
                 size=size,
+                mtime_ns=mtime_ns,
                 fingerprint_algorithm=fingerprint_algo,
                 fingerprint=fingerprint_value,
                 preferred_asset_id=preferred_asset_id,

@@ -55,7 +55,7 @@ class AssetReplacementIdentityTests(unittest.TestCase):
         historical = catalog.list_locations(original)
         self.assertTrue(any(row["valid_to"] is not None for row in historical))
 
-    def test_same_inode_can_grow_without_changing_asset(self) -> None:
+    def test_growth_without_torrent_evidence_cannot_prove_same_asset(self) -> None:
         catalog = MediaAssetCatalog(":memory:")
         self.addCleanup(catalog.close)
         path = "/tmp/growing-incomplete-video.mkv"
@@ -75,8 +75,8 @@ class AssetReplacementIdentityTests(unittest.TestCase):
             mtime_ns=2_000,
         )
 
-        self.assertEqual(grown, partial)
-        self.assertEqual(catalog.resolve_path(path), partial)
+        self.assertNotEqual(grown, partial)
+        self.assertEqual(catalog.resolve_path(path), grown)
 
 
 class PlaybackProjectionOrderingTests(unittest.TestCase):
