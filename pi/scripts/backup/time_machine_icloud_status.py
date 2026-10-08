@@ -36,8 +36,9 @@ def status():
     apply_manual_control(result, deadline)
     # Numeric capture counters are public; paths, credentials and raw errors are not.
     if state.get('worker_pid') == int(service.get('MainPID') or 0) or not result['running']:
-        for key in ('capture_bytes', 'capture_total_bytes'):
+        for key in ('capture_bytes', 'capture_total_bytes', 'capture_files', 'capture_total_files'):
             result['progress'][key] = number(state.get('progress', {}).get(key))
+        result['progress']['capture_complete'] = state.get('progress', {}).get('capture_complete') is True
     return result
 
 

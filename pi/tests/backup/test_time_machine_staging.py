@@ -124,6 +124,38 @@ class StagingCleanupTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.plan()
         self.assertTrue(orphan.exists())
 
+    def test_abandoned_capture_temporary_file_is_removed_under_worker_lock(self):
+        temporary = self.root / 'objects' / '.capture-ltpuret4'
+        temporary.write_bytes(b'partial metadata'); temporary.chmod(0o600)
+        plan = self.plan()
+        self.assertEqual(plan.summary()['temporary_objects'], 1)
+        self.apply(plan)
+        self.assertFalse(temporary.exists())
+        for entry in self.manifest['files'].values():
+            self.assertTrue((self.root / 'objects' / entry['sha256']).exists())
+        self.assertEqual(self.plan().summary()['objects'], 0)
+
+    def test_interrupted_first_file_before_index_can_be_cleaned(self):
+        for path in (self.root / 'objects').iterdir():
+            path.unlink()
+        (self.root / 'capture-index.json').unlink()
+        (self.root / 'pending.json').unlink()
+        temporary = self.root / 'objects' / '.capture-ab12_c34'
+        temporary.write_bytes(b'partial'); temporary.chmod(0o600)
+        self.apply(self.plan())
+        self.assertFalse(temporary.exists())
+
+    def test_temporary_name_does_not_bypass_link_or_permission_checks(self):
+        temporary = self.root / 'objects' / '.capture-abcdefgh'
+        temporary.symlink_to(self.source / 'token')
+        with self.assertRaises(ValueError): self.plan()
+        temporary.unlink()
+        os.link(self.source / 'token', temporary)
+        with self.assertRaises(ValueError): self.plan()
+        temporary.unlink()
+        temporary.write_bytes(b'partial'); temporary.chmod(0o666)
+        with self.assertRaises(ValueError): self.plan()
+
     def test_corrupt_or_missing_metadata_preserves_orphans(self):
         orphan = self.orphan()
         index = self.root / 'capture-index.json'

@@ -63,17 +63,27 @@ Unknown paths, malformed or changing references, writable/shared objects and
 symlinks fail closed. There is no recursive deletion, cloud deletion, live image
 mutation, archive removal or reduction of the configured free-space reserve.
 
+A killed worker or storage interruption can leave an unpublished `.capture-`
+temporary file. Cleanup recognizes only the worker's exact temporary-name format,
+on the same filesystem, owned by the store owner, regular and singly linked,
+with mode 0400 or 0600. The common backup lock excludes a live writer. These
+unreferenced temporaries can be recovered even before the first capture index
+exists; arbitrary writable objects still stop cleanup.
+
 The existing wrapper exposes `--staging-gc-plan` and `--staging-gc-apply`; both
 require its usual backup lock and disk/ignition guards. Plan prints candidate
 count and allocated bytes without deleting objects. Apply makes a fresh plan;
 it does not trust an old candidate list. The worker records cleanup totals in
 its private state and journal.
 
-Before the first verified Mac cloud copy, temporary deferrals schedule a retry
-in five minutes through the existing minute timer. The retry remains pending
+Before the first verified Mac cloud copy, temporary deferrals and recognized
+disk I/O, missing-file, read-only-filesystem, helper-check/timeout and transfer
+stall failures schedule a retry in five minutes through the existing minute
+timer. Public status explains these failures without exposing private command
+output. The retry remains pending
 while another job owns the backup lock, and explicit timed/indefinite manual
-pauses always take precedence. Authentication errors and invalid staging
-metadata still require attention rather than blind retries.
+pauses always take precedence. Authentication, permission, full-disk and invalid
+staging metadata failures still require attention rather than rapid retries.
 
 ## Incremental cloud layout and retention
 
@@ -119,6 +129,9 @@ capture gives up the lock when local backups need the window.
 
 The Backups pane tracks the Mac copy separately from Pi/Borg: local capture,
 upload estimate, downloaded verification, last success and attempt history.
+Capture shows both byte and file counts. Byte progress is capped at 99.9% until
+the complete source inventory is revalidated and the pending manifest is saved;
+rounded byte totals alone do not establish a finished frozen copy.
 Both iCloud cards show rclone's current upload rate while uploading; stale or
 inactive counters are never presented as a live speed. **Resume now** retries
 saved work through the normal safety checks. If another backup holds the common

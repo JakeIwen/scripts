@@ -5,6 +5,8 @@ The dashboard CLI reads local metadata only: no credentials, disks, mounts,
 router probes or cloud requests. Never export raw exception/server messages.
 """
 import json
+import errno
+from enum import Enum
 import math
 import os
 from pathlib import Path
@@ -23,6 +25,46 @@ PHASES = {'checking', 'preparing', 'uploading', 'verifying', 'publishing',
           'retention', 'complete', 'not due', 'deferred', 'error',
           'authentication_required', 'interrupted', 'unavailable'}
 WORK_PHASES = {'checking', 'preparing', 'uploading', 'verifying', 'publishing', 'retention'}
+
+
+class BackupFailure(str, Enum):
+    DISK_IO = 'disk_io'
+    DISK_UNAVAILABLE = 'disk_unavailable'
+    DISK_READ_ONLY = 'disk_read_only'
+    DISK_FULL = 'disk_full'
+    PERMISSION = 'permission'
+    HELPER_TIMEOUT = 'helper_timeout'
+    PREREQUISITE = 'prerequisite'
+    TRANSFER_STALLED = 'transfer_stalled'
+
+
+FAILURE_MESSAGES = {
+    BackupFailure.DISK_IO: 'Backup disk I/O was interrupted; saved chunks will be reused on retry.',
+    BackupFailure.DISK_UNAVAILABLE: 'The backup disk or a required file is unavailable; waiting to retry safely.',
+    BackupFailure.DISK_READ_ONLY: 'The backup filesystem is read-only; waiting for writable storage before retrying.',
+    BackupFailure.DISK_FULL: 'The backup disk is full; more staging space is needed before capture can continue.',
+    BackupFailure.PERMISSION: 'A required backup file is not accessible; its permissions need attention.',
+    BackupFailure.HELPER_TIMEOUT: 'A backup prerequisite check timed out; it will retry.',
+    BackupFailure.PREREQUISITE: 'A backup disk or prerequisite check failed; it will retry safely.',
+    BackupFailure.TRANSFER_STALLED: 'The transfer stopped making progress; saved work will be reused on retry.',
+}
+RETRYABLE_FAILURES = frozenset(FAILURE_MESSAGES) - {BackupFailure.PERMISSION, BackupFailure.DISK_FULL}
+
+
+def classify_failure(exc):
+    if isinstance(exc, OSError):
+        return {errno.EIO: BackupFailure.DISK_IO, errno.ENODEV: BackupFailure.DISK_UNAVAILABLE,
+                errno.ENXIO: BackupFailure.DISK_UNAVAILABLE, errno.ENOENT: BackupFailure.DISK_UNAVAILABLE,
+                errno.ESTALE: BackupFailure.DISK_UNAVAILABLE, errno.EROFS: BackupFailure.DISK_READ_ONLY,
+                errno.ENOSPC: BackupFailure.DISK_FULL,
+                errno.EACCES: BackupFailure.PERMISSION, errno.EPERM: BackupFailure.PERMISSION}.get(exc.errno)
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return BackupFailure.HELPER_TIMEOUT
+    if isinstance(exc, subprocess.CalledProcessError):
+        return BackupFailure.PREREQUISITE
+    if isinstance(exc, RuntimeError) and 'made no progress' in str(exc):
+        return BackupFailure.TRANSFER_STALLED
+    return None
 COUNTERS = ('upload_estimated_bytes', 'upload_total_bytes', 'command_bytes',
             'verified_bytes', 'verification_total_bytes', 'verified_files',
             'verification_total_files', 'current_file_bytes')
@@ -118,6 +160,8 @@ def phase(value):
 def reason(state):
     """Translate known conditions without exposing paths, SSIDs or server bodies."""
     value = str(state.get('last_error') or '').casefold()
+    if state.get('phase') in ('error', 'deferred') and state.get('failure_code') in FAILURE_MESSAGES:
+        return FAILURE_MESSAGES[state['failure_code']]
     if state.get('kind') == 'time-machine' and state.get('phase') == 'preparing':
         if state.get('progress', {}).get('capture_cleaning'):
             return 'Reclaiming unused local staging chunks before Time Machine capture.'
@@ -148,6 +192,10 @@ def reason(state):
         return 'Waiting for a fresh local Borg backup.'
     if 'headroom' in value:
         return 'Not enough free staging space.'
+    if 'unsafe staging object' in value:
+        return 'Local staging contains an unrecognized or unsafe file; cleanup stopped to protect backup data.'
+    if 'image changed' in value:
+        return 'The Time Machine image changed during capture; a consistent frozen copy has not been completed.'
     if 'shutdown' in value or 'disk lifecycle' in value:
         return 'Stopped safely; saved work will be reused.'
     if 'progress' in value and ('timeout' in value or 'no ' in value):
@@ -199,7 +247,7 @@ def save_attempt(directory, state, finished=False):
 def begin_attempt(directory, state):
     state.update(attempt_id=uuid.uuid4().hex, attempt_started_at=time.time(),
                  worker_pid=os.getpid(), attempt_verified_at=None,
-                 phase='checking', work_phase='checking', last_error=None)
+                 phase='checking', work_phase='checking', last_error=None, failure_code=None)
     save_attempt(directory, state)
 
 
@@ -216,7 +264,7 @@ def build_status(state, history, cfg, service, next_check_at, now=None, auth_err
     matching = live and int(service['MainPID']) == state.get('worker_pid')
     current = dict(state)
     if live and not matching:
-        current.update(phase='checking', last_error=None, progress={})
+        current.update(phase='checking', last_error=None, failure_code=None, progress={})
     elif not live and current.get('phase') in WORK_PHASES:
         current.update(phase='interrupted', last_error=None)
     if auth_error and not live:

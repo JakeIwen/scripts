@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import datetime as dt
+import errno
 import hashlib
 import importlib.util
 import json
@@ -121,6 +122,23 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(state['phase'], 'deferred')
         self.assertGreater(state['retry_at'], time.time() + 295)
         self.assertLessEqual(state['retry_at'], time.time() + 300)
+
+    def test_storage_interruption_schedules_retry_and_preserves_capture_cache(self):
+        for failure in (OSError(errno.EIO, 'PRIVATE disk error'), FileNotFoundError(errno.ENOENT, 'PRIVATE'),
+                        subprocess.CalledProcessError(1, ['/usr/bin/findmnt'], stderr='PRIVATE')):
+            store.atomic_json(self.directory / 'state.json', {'pending': GEN, 'progress': {'capture_bytes': 500}})
+            with mock.patch.object(job, 'STATE', self.directory), mock.patch.object(job, 'private_directory'), \
+                    mock.patch.object(cloud, 'STATE_DIR', self.directory), \
+                    mock.patch.object(job, 'config', return_value={'interval_days': 7}), \
+                    mock.patch.object(job.signal, 'signal'), \
+                    mock.patch.object(sys, 'argv', ['worker', '--run']), \
+                    mock.patch.object(job, 'weekly', side_effect=failure):
+                self.assertEqual(job.main(), 0)
+            state = store.read_json(self.directory / 'state.json')
+            self.assertEqual(state['phase'], 'deferred')
+            self.assertGreater(state['retry_at'], time.time() + 295)
+            self.assertEqual(state['progress']['capture_bytes'], 500)
+            self.assertNotIn('PRIVATE', job.history.reason(state))
 
     def test_worker_does_not_record_or_run_attempt_while_paused(self):
         control.control('pause', '60', self.directory, command=self.command)

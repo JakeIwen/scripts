@@ -99,10 +99,11 @@ It is not serial-specific. A modest throughput/queue-depth cost is accepted
 for these spinning disks; gigabit Ethernet or 2.4 GHz Wi-Fi usually limits
 network transfers first. This avoids one failure path, not all USB failures.
 
-**Preparation status, 2026-10-07:** the utility passed a live `--dry-run`;
-no boot file was changed and no reboot was performed for this change. The live
-249-byte, one-line cmdline had no quirk token, and the live module parameter was
-empty. Do not call the mitigation deployed until post-reboot verification passes.
+**Verified active, 2026-10-07 at 22:47 MDT:** the utility's read-only `--verify`
+confirmed `0bc2:2344:u` in the running kernel command line and live module
+parameter. Both Seagate disks were bound to `usb-storage`, and `mbp2tbkup`,
+`movingparts` and `EXFAT512` were mounted read/write with verified identities.
+This confirms the mitigation is active, not that all hardware faults are resolved.
 On kernel `6.12.62+rpt-rpi-v8`, `usb_storage` is built in (absent from `lsmod`,
 but `/sys/module/usb_storage/parameters/quirks` exists). An `/etc/modprobe.d`
 option therefore will not fix this host; edit the firmware's kernel command

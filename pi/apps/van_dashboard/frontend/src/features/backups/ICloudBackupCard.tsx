@@ -141,6 +141,7 @@ export function ICloudBackupCard({
                 : 'Progress will update when the worker reaches the transfer phase.'}
             </small>
           )}
+          <CaptureDetails status={status} />
           <small>
             {status.running ? 'Worker update' : 'Last saved progress'}:{' '}
             {status.updatedAt === null ? 'not recorded yet' : formatRelativeTime(status.updatedAt)}
@@ -237,5 +238,22 @@ function UploadTimeLeft({ status }: { status: AvailableICloudStatus }) {
   const remaining = iCloudUploadTimeLeft(status);
   return remaining === null ? null : (
     <span title="Estimated upload time at the current rate; download verification follows.">{` · ${remaining} left`}</span>
+  );
+}
+
+function CaptureDetails({ status }: { status: AvailableICloudStatus }) {
+  if (!iCloudProgress(status).capturing) return null;
+  const {
+    captureFiles: files,
+    captureTotalFiles: total,
+    captureComplete: complete,
+  } = status.progress;
+  return (
+    <small>
+      {files != null && total != null
+        ? `${files.toLocaleString()} / ${total.toLocaleString()} files processed · `
+        : ''}
+      {complete ? 'Capture validated; ready for upload.' : 'Capture not finalized yet.'}
+    </small>
   );
 }

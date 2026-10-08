@@ -171,7 +171,8 @@ def quiesced(cfg, state):
         raise cloud.Deferred('Time Machine share is already draining')
     try:
         cloud.record_progress(state, 'preparing', capture_waiting=True, capture_draining=False,
-                              capture_bytes=0, capture_total_bytes=None)
+                              capture_bytes=0, capture_total_bytes=None, capture_files=0,
+                              capture_total_files=None, capture_complete=False)
         print('Waiting for Mac to cleanly detach its idle Time Machine image.', flush=True)
         while True:
             cloud.check_work_allowed(cfg)
@@ -253,7 +254,7 @@ def cleanup_staging(cfg, apply=False, state=None):
             last_check[0] = time.monotonic()
 
     if state is not None:
-        cloud.record_progress(state, 'preparing', capture_cleaning=True, capture_waiting=False)
+        cloud.record_progress(state, 'preparing', capture_cleaning=True, capture_waiting=False, capture_complete=False)
     plan = staging.plan_cleanup(ROOT, check)
     result = staging.apply_cleanup(plan, check) if apply else plan.summary()
     if state is not None:
@@ -473,12 +474,34 @@ def weekly(cfg, state):
             manifest = store.freeze(SOURCE, ROOT, state['pending'], cfg['max_source_age_hours'],
                                     cfg['minimum_free_gib'] * 1024**3, check, report)
         print('Frozen encrypted image captured; normal Mac backups are allowed again.', flush=True)
+        cloud.record_progress(state, 'preparing', capture_complete=True)
     name = transfer(cfg, manifest, state)
     cloud.record_progress(state, 'retention')
     retention(cfg, name)
     cloud.notify(state, 'Mac Time Machine iCloud copy verified',
                  'Encrypted Time Machine recovery copy uploaded and download-verified: ' + name)
     return 'complete'
+
+
+def schedule_first_copy_retry(state, message):
+    if (state.get('pending') and not state.get('last_success_at')
+            and not any(word in message.casefold() for word in ('login', 'authentication'))):
+        state['retry_at'] = time.time() + 300
+
+
+def failed_attempt(state, exc):
+    code = history.classify_failure(exc)
+    retryable = code in history.RETRYABLE_FAILURES
+    message = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else type(exc).__name__
+    state.update(phase='deferred' if retryable else 'error', last_error=message, failure_code=code)
+    if retryable:
+        schedule_first_copy_retry(state, history.FAILURE_MESSAGES[code])
+    print(('Retrying: ' if retryable else 'Failed: ') + history.FAILURE_MESSAGES.get(code, message)
+          + (f' (errno {exc.errno})' if isinstance(exc, OSError) and exc.errno is not None else ''), flush=True)
+    if not retryable:
+        cloud.notify(state, 'Mac Time Machine iCloud copy needs attention',
+                     'No new recovery point was published. Previous copies are preserved.')
+    return 0 if retryable else 1
 
 
 def main():
@@ -525,16 +548,11 @@ def main():
         return 1
     except cloud.Deferred as exc:
         state.update(phase='deferred', last_error=str(exc))
-        if state.get('pending') and not state.get('last_success_at') and 'login' not in str(exc):
-            state['retry_at'] = time.time() + 300
+        schedule_first_copy_retry(state, str(exc))
         print('Deferred: ' + str(exc), flush=True)
         return 0
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
-        message = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else type(exc).__name__
-        state.update(phase='error', last_error=message)
-        print('Failed: ' + message, flush=True)
-        cloud.notify(state, 'Mac Time Machine iCloud copy needs attention', 'No new recovery point was published. Previous copies are preserved.')
-        return 1
+        return failed_attempt(state, exc)
     finally:
         store.atomic_json(STATE / 'state.json', state)
         history.save_attempt(STATE, state, finished=True)

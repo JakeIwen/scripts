@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import errno
 import os
 from pathlib import Path
 import sys
@@ -113,6 +114,18 @@ class StatusTests(unittest.TestCase):
     def test_exclusive_access_loss_has_a_specific_public_reason(self):
         status = self.build({'phase': 'deferred', 'last_error': 'Time Machine capture lost exclusive source access'})
         self.assertIn('exclusive Time Machine access was lost', status['message'])
+
+    def test_storage_failure_reason_is_actionable_without_private_exception_details(self):
+        code = status.classify_failure(OSError(errno.EIO, 'PRIVATE', '/secret/path'))
+        value = self.build({'phase': 'deferred', 'failure_code': code, 'last_error': 'PRIVATE'})
+        self.assertIn('disk I/O', value['message'])
+        self.assertNotIn('PRIVATE', json.dumps(value))
+        self.assertNotIn(status.classify_failure(PermissionError(errno.EACCES, 'private')), status.RETRYABLE_FAILURES)
+        self.assertNotIn(status.classify_failure(OSError(errno.ENOSPC, 'private')), status.RETRYABLE_FAILURES)
+
+    def test_staging_failure_explains_why_automatic_cleanup_stopped(self):
+        value = self.build({'phase': 'error', 'last_error': 'unsafe staging object; cleanup refused'})
+        self.assertIn('unrecognized or unsafe file', value['message'])
 
     def test_bounded_history_and_verified_evidence_survive_failures(self):
         with tempfile.TemporaryDirectory() as tmp:

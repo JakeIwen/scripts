@@ -31,6 +31,9 @@ export interface ICloudProgress {
   uploadBytesPerSecond?: number | null;
   captureBytes?: number | null;
   captureTotalBytes?: number | null;
+  captureFiles?: number | null;
+  captureTotalFiles?: number | null;
+  captureComplete?: boolean;
   uploadEstimatedBytes: number | null;
   uploadTotalBytes: number | null;
   commandBytes: number | null;
@@ -101,6 +104,13 @@ function progress(value: unknown): ICloudProgress {
     captureBytes: row.capture_bytes === undefined ? null : nullableNumeric(row.capture_bytes),
     captureTotalBytes:
       row.capture_total_bytes === undefined ? null : nullableNumeric(row.capture_total_bytes),
+    captureFiles: row.capture_files === undefined ? null : nullableNumeric(row.capture_files),
+    captureTotalFiles:
+      row.capture_total_files === undefined ? null : nullableNumeric(row.capture_total_files),
+    captureComplete:
+      row.capture_complete === undefined
+        ? false
+        : booleanValue(row.capture_complete, 'iCloud.capture_complete'),
     uploadEstimatedBytes: nullableNumeric(row.upload_estimated_bytes),
     uploadTotalBytes: nullableNumeric(row.upload_total_bytes),
     commandBytes: nullableNumeric(row.command_bytes),
@@ -208,12 +218,14 @@ export function iCloudProgress(status: AvailableICloudStatus) {
     : verification
       ? p.verificationTotalBytes
       : p.uploadTotalBytes;
+  const percent =
+    done !== null && total !== null && total > 0 ? Math.min(100, (done / total) * 100) : null;
   return {
     verification,
     capturing,
     done,
     total,
     percent:
-      done !== null && total !== null && total > 0 ? Math.min(100, (done / total) * 100) : null,
+      capturing && !p.captureComplete && percent !== null ? Math.min(99.9, percent) : percent,
   };
 }

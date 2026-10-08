@@ -1,6 +1,7 @@
 """Collect unreachable local capture objects while the backup lock is held.
 
-Only validated SHA-256 files inside the owned objects directory are candidates.
+Candidates are validated SHA-256 files and abandoned capture temporary files
+inside the owned objects directory, inspected only with the worker lock held.
 Neither cloud objects, the live sparsebundle, nor archived images are touched.
 """
 from dataclasses import dataclass
@@ -8,12 +9,14 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import re
 import stat
 
 import time_machine_store as store
 
 JOB_LOCK = Path('/run/lock/vanpi_backup.lock')
 MAX_METADATA_BYTES = 64 * 1024**2
+CAPTURE_TEMP = re.compile(re.escape(store.CAPTURE_TEMP_PREFIX) + r'[a-z0-9_]{8}\Z')
 ROOT_FILES = {'OWNER.json', 'capture-index.json', 'pending.json', 'retiring.json',
               'verified-objects.json', 'upload-files.txt'}
 
@@ -37,6 +40,7 @@ class CleanupPlan:
     def summary(self):
         return {'objects': len(self.candidates),
                 'allocated_bytes': sum(row.allocated_bytes for row in self.candidates),
+                'temporary_objects': sum(bool(CAPTURE_TEMP.fullmatch(row.name)) for row in self.candidates),
                 'protected_objects': self.protected_count}
 
 
@@ -154,9 +158,13 @@ def object_signature(value):
 
 
 def validate_object(name, value, owner, device):
-    if (not store.DIGEST.fullmatch(name) or not stat.S_ISREG(value.st_mode)
+    # A crash can leave a writable mkstemp file before hash publication. No
+    # manifest can reference this name, and the lock excludes its live writer.
+    temporary = bool(CAPTURE_TEMP.fullmatch(name))
+    safe_mode = stat.S_IMODE(value.st_mode) in (0o400, 0o600) if temporary else not value.st_mode & 0o222
+    if ((not store.DIGEST.fullmatch(name) and not temporary) or not stat.S_ISREG(value.st_mode)
             or value.st_uid != owner or value.st_dev != device
-            or value.st_nlink != 1 or value.st_mode & 0o222):
+            or value.st_nlink != 1 or not safe_mode):
         raise ValueError('unsafe staging object; cleanup refused')
 
 
@@ -185,7 +193,7 @@ def plan_cleanup(root, check, *, lock_fd=9, lock_path=JOB_LOCK):
     for path in sorted((root / 'objects').iterdir()):
         value = path.lstat()
         validate_object(path.name, value, owner, identity[0])
-        if metadata[root / 'capture-index.json'] is None:
+        if metadata[root / 'capture-index.json'] is None and not CAPTURE_TEMP.fullmatch(path.name):
             raise ValueError('capture index missing from nonempty staging store')
         if path.name not in refs:
             candidates.append(ObjectCandidate(path.name, object_signature(value), value.st_blocks * 512))

@@ -19,6 +19,7 @@ OWNER = 'vanpi-time-machine-icloud-v1'
 GENERATION = re.compile(r'tm-\d{8}T\d{6}Z-[0-9a-f]{8}\Z')
 DIGEST = re.compile(r'[0-9a-f]{64}\Z')
 BUNDLE = 'm4mac0.sparsebundle'
+CAPTURE_TEMP_PREFIX = '.capture-'
 
 
 def atomic_json(path, value):
@@ -130,7 +131,7 @@ def validate_manifest(manifest):
 
 def copy_object(source, objects, check):
     before = signature(source)
-    fd, name = tempfile.mkstemp(prefix='.capture-', dir=objects)
+    fd, name = tempfile.mkstemp(prefix=CAPTURE_TEMP_PREFIX, dir=objects)
     sha = hashlib.sha256()
     try:
         with source.open('rb') as inp, os.fdopen(fd, 'wb') as out:

@@ -45,6 +45,29 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe('iCloud dashboard', () => {
+  it('does not round an unfinished capture up to complete', () => {
+    const status = cloud();
+    Object.assign(status, { phase: 'error', lastWorkPhase: 'preparing' });
+    Object.assign(status.progress, {
+      captureBytes: 432546435316,
+      captureTotalBytes: 432555930936,
+      captureFiles: 8267,
+      captureTotalFiles: 12904,
+      captureComplete: false,
+    });
+    const view = render(<ICloudBackupCard status={status} kind="time-machine" />);
+    expect(screen.getByText('Local frozen copy · 99.9%')).toBeInTheDocument();
+    expect(screen.getByText(/8,267 \/ 12,904 files processed/)).toBeInTheDocument();
+    expect(screen.getByText(/Capture not finalized yet/)).toBeInTheDocument();
+    status.progress.captureBytes = status.progress.captureTotalBytes;
+    view.rerender(<ICloudBackupCard status={{ ...status }} kind="time-machine" />);
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '99.9');
+    Object.assign(status.progress, { captureFiles: 12904, captureComplete: true });
+    view.rerender(<ICloudBackupCard status={{ ...status }} kind="time-machine" />);
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '100');
+    expect(screen.getByText(/Capture validated; ready for upload/)).toBeInTheDocument();
+  });
+
   it('estimates remaining upload time only from fresh, moving upload counters', () => {
     const status = cloud();
     Object.assign(status, { running: true, phase: 'uploading', updatedAt: Date.now() / 1000 });
