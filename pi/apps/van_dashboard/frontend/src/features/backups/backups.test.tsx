@@ -158,7 +158,7 @@ describe('backups feature', () => {
     expect(
       screen.getByLabelText('Updated 3s ago').closest('.bottom-sheet__subtitle'),
     ).toHaveTextContent(
-      /Freshness, runtime progress, hotspares, and Time Machine evidence\.\s*\/ ~3s/,
+      /Freshness, runtime progress, hotspares, and Time Machine evidence\.\s*~3s/,
     );
     act(() => vi.advanceTimersByTime(2000));
     expect(screen.getByLabelText('Updated 5s ago')).toHaveTextContent('~5s');

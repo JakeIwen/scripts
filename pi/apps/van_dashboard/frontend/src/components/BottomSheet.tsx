@@ -98,7 +98,6 @@ function UpdatedAge({ timestamp, active }: { timestamp: number | null; active: b
           : new Date(timestamp * 1000).toLocaleString()
       }
     >
-      <span aria-hidden="true">/ </span>
       <span aria-label={age === null ? 'No successful update yet' : `Updated ${age}`}>
         {age === null ? '—' : `~${age.replace(/ ago$/, '')}`}
       </span>

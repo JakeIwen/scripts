@@ -155,7 +155,7 @@ describe('USB feature', () => {
     expect(screen.queryByRole('button', { name: 'Refresh' })).not.toBeInTheDocument();
     expect(
       screen.getByLabelText('Updated 3s ago').closest('.bottom-sheet__subtitle'),
-    ).toHaveTextContent(/Remembered USB inventory and guarded live port controls\.\s*\/ ~3s/);
+    ).toHaveTextContent(/Remembered USB inventory and guarded live port controls\.\s*~3s/);
     expect(resource.refresh).not.toHaveBeenCalled();
   });
 });
