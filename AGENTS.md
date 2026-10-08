@@ -73,12 +73,19 @@ compare it with this checkout. Deployed files may differ from the repository.
   `video-catalog-final-20261007T044424Z.sqlite3`).
   `maintenance/filesystem_identity_repair.py` is the separate, NOT-YET-APPLIED
   Silo S03E07 repair; `identity_repair_evidence.py` pins its reviewed rows and
-  validates enriched plans. Copy these alongside `same_file_repair.py` into a
-  temporary package tree and invoke with `python3 -m` and that tree's PYTHONPATH;
+  validates enriched version-2 plans (older Silo-only plans are refused). Copy the
+  maintenance directory into a temporary package
+  tree and invoke with `python3 -m` and that tree's PYTHONPATH;
   maintenance remains outside the release allowlist. Capture a fresh plan after
-  deployment and quiescence. It preserves Counterpart duplicates and all playback,
-  versions only the Silo attachments, and reports unrelated legacy-key mismatches.
-  Tests live in `pi/tests/media/test_video_filesystem_repair.py`.
+  deployment and quiescence. It preserves all assets/history and versions only
+  the Silo attachments. `legacy_churn_evidence.py` validates the remaining legacy
+  keys against the SHA-256-pinned October 7 repair plan or the ten Counterpart
+  same-file duplicates; its identity index is transaction-local. The canonical
+  pair contract and proof kinds live there. `legacy_churn_repair.py` rebinds those
+  keys, transfers only differing newer playheads, and reuses the earlier repair's
+  v1 projection helper. Any changed evidence aborts the transaction after reporting
+  skipped pairs; postcheck requires zero legacy mismatches. Tests live in
+  `pi/tests/media/test_video_filesystem_repair.py` and `test_video_legacy_churn_repair.py`.
 - Cloud holds: `pi/scripts/backup/cloud_backup_control.py` shares admission and
   durable `pause.json` controls. `icloud_backup_control.py` and
   `time_machine_icloud_control.py` are fixed Pi/Mac entry points; their separate minute resume timers,

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Guarded one-time repair for the Silo S03E07 filesystem identity.
+"""Guarded Silo identity and device-churn legacy-key repair.
 
-Capture reviewed evidence with --capture-plan. Repair runs require that plan,
+Capture version-2 reviewed evidence with --capture-plan. Repair runs require it,
 default to an in-memory dry run, and never modify media or torrent state.
 """
 from __future__ import annotations
@@ -22,6 +22,7 @@ from pi.apps.video_library.catalog_values import CatalogConflict
 from pi.apps.video_library.file_observations import matching_file_assets, record_file_identity
 from pi.apps.video_library.library import MediaLibrary, default_sources
 from pi.apps.video_library.maintenance import identity_repair_evidence as evidence
+from pi.apps.video_library.maintenance import legacy_churn_evidence, legacy_churn_repair
 from pi.apps.video_library.maintenance.same_file_repair import (
     ChangedEvidence,
     PairStatus,
@@ -241,6 +242,9 @@ def _verify_postconditions(db, runtime, plan, before, changes, report, library, 
     report["scan_after"] = scan
     if scan["conflicts"] or scan["stat_errors"] or scan["unresolved"]:
         raise RuntimeError("post-repair file conflicts, stat errors or unresolved identities remain")
+    if scan["legacy_binding_mismatches"]:
+        raise RuntimeError("post-repair legacy binding mismatches remain")
+    legacy_churn_repair.verify_legacy_repair(catalog, plan["legacy_churn"], library)
     if _library_membership(library) != report["library_membership_before"]:
         raise RuntimeError("library membership changed during repair")
     targets = scan["target_resolutions"]
@@ -261,7 +265,7 @@ def _apply_steps(catalog, runtime, timestamp, changes):
     }
 
 
-def run_repair(db, plan, report, library, apply):
+def run_repair(db, plan, report, library, apply, prior):
     db.row_factory = sqlite3.Row
     _schema_check(db)
     db.execute("PRAGMA foreign_keys=ON")
@@ -277,6 +281,8 @@ def run_repair(db, plan, report, library, apply):
         changes = _new_changes()
         report["repair_timestamp"] = timestamp
         report["repair"] = _apply_steps(catalog, runtime, timestamp, changes)
+        legacy_churn_repair.run_legacy_repair(
+            catalog, plan["legacy_churn"], prior, library, changes, report)
         final = _verify_postconditions(
             db, runtime, plan, before, changes, report, library, catalog)
         report["counterpart_duplicates"] = final["counterpart_duplicates"]
@@ -317,13 +323,22 @@ def _write_json_exclusive(path: Path, value: dict[str, Any]) -> None:
         os.fsync(output.fileno())
 
 
-def capture_plan(db_path: Path, output_path: Path) -> int:
+def capture_plan(db_path: Path, output_path: Path, prior_path: Path) -> int:
+    prior = legacy_churn_evidence.load_prior_plan(prior_path)
+    library = MediaLibrary(default_sources())
+    if not library.scan():
+        raise RuntimeError(f"library unavailable: {library.error}")
     with closing(sqlite3.connect(db_path.as_uri() + "?mode=ro", uri=True, timeout=5)) as db:
         db.row_factory = sqlite3.Row
         _schema_check(db)
         db.execute("BEGIN")
         try:
             plan = evidence.build_plan(db)
+            # The matcher takes its read connection explicitly; no catalog migration
+            # or writer reservation is performed against the captured database.
+            with MediaAssetCatalog(":memory:") as catalog:
+                plan["legacy_churn"] = legacy_churn_evidence.capture_churn_plan(
+                    db, library, catalog, prior)
         finally:
             db.rollback()
     _write_json_exclusive(output_path, plan)
@@ -333,15 +348,17 @@ def capture_plan(db_path: Path, output_path: Path) -> int:
 
 
 def _repair_run(args, plan, report):
+    prior = legacy_churn_evidence.load_prior_plan(args.prior_repair_plan)
+    legacy_churn_evidence.validate_churn_plan(plan.get("legacy_churn"), prior)
     mode = "rw" if args.apply else "ro"
     with closing(sqlite3.connect(args.db.as_uri() + f"?mode={mode}", uri=True, timeout=5)) as source:
         library = MediaLibrary(default_sources())
         if args.apply:
-            run_repair(source, plan, report, library, True)
+            run_repair(source, plan, report, library, True, prior)
         else:
             with closing(sqlite3.connect(":memory:")) as memory:
                 source.backup(memory)
-                run_repair(memory, plan, report, library, False)
+                run_repair(memory, plan, report, library, False, prior)
 
 
 def _run_with_report(args) -> int:
@@ -381,6 +398,8 @@ def _run_with_report(args) -> int:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", type=Path, required=True)
+    parser.add_argument("--prior-repair-plan", type=Path,
+                        default=legacy_churn_evidence.PRIOR_PLAN_PATH)
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--capture-plan", type=Path, metavar="OUTPUT")
     source.add_argument("--plan", type=Path)
@@ -403,7 +422,7 @@ def main(argv=None):
         if output == args.db:
             parser.error("plan must not overwrite the database")
         try:
-            return capture_plan(args.db, output)
+            return capture_plan(args.db, output, args.prior_repair_plan)
         except Exception as exc:
             print(f"{type(exc).__name__}: {exc}")
             return 1

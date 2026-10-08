@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -15,6 +16,7 @@ from pi.apps.video_library.catalog import MediaAssetCatalog
 from pi.apps.video_library.legacy_progress import ProgressStore
 from pi.apps.video_library.maintenance import filesystem_identity_repair as repair
 from pi.apps.video_library.maintenance import identity_repair_evidence as evidence
+from pi.apps.video_library.maintenance import legacy_churn_evidence as churn
 from pi.apps.video_library.maintenance.same_file_repair import snapshot
 
 
@@ -41,12 +43,16 @@ class FilesystemIdentityRepairTests(unittest.TestCase):
         catalog = MediaAssetCatalog(str(self.db))
         catalog.close()
         self._seed_database()
+        self.prior = self.root / "prior.json"
+        self.prior.write_text(json.dumps({"repair_input_version": 1, "same_file_pairs": []}))
         self.observations = {
             evidence.TARGET_PATH: {"path": evidence.TARGET_PATH,
                 "device_id": evidence.FILESYSTEM_DEVICE_ID, "inode": evidence.TARGET_INODE,
                 "size": evidence.TARGET_SIZE, "mtime_ns": evidence.TARGET_MTIME_NS},
         }
         self.patchers = [
+            patch.object(churn, "PRIOR_PLAN_SHA256", hashlib.sha256(self.prior.read_bytes()).hexdigest()),
+            patch.object(churn, "EXPECTED_COUNTS", {}),
             patch.object(evidence, "filesystem_observation", side_effect=self._observation),
             patch.object(evidence, "target_link_resolves", return_value=True),
             patch.object(evidence, "former_audio_path_status", return_value=[
@@ -118,13 +124,16 @@ class FilesystemIdentityRepairTests(unittest.TestCase):
         return dict(self.observations[path])
 
     def _capture(self, path):
-        with contextlib.redirect_stdout(io.StringIO()):
-            return repair.main(["--db", str(self.db), "--capture-plan", str(path)])
+        with contextlib.redirect_stdout(io.StringIO()), patch.object(
+                repair, "MediaLibrary", return_value=FakeLibrary(self.items)):
+            return repair.main(["--db", str(self.db), "--capture-plan", str(path),
+                                "--prior-repair-plan", str(self.prior)])
 
     def _invoke(self, *, apply=False, holder_error=None):
         self.sequence += 1
         report = self.root / f"report-{self.sequence}.json"
-        args = ["--db", str(self.db), "--plan", str(self.plan), "--report", str(report)]
+        args = ["--db", str(self.db), "--plan", str(self.plan), "--report", str(report),
+                "--prior-repair-plan", str(self.prior)]
         if apply:
             args.extend(["--apply", "--i-have-stopped-video-library"])
         holder = patch.object(repair, "ensure_unused", side_effect=holder_error,
@@ -274,7 +283,7 @@ class FilesystemIdentityRepairTests(unittest.TestCase):
         self.assertEqual(self._capture(changed_plan), 1)
         self.assertFalse(changed_plan.exists())
 
-    def test_postscan_reports_other_legacy_mismatches_without_claiming_clear(self):
+    def test_postscan_rejects_unplanned_legacy_mismatches(self):
         other_path = "/mnt/movingparts/torrent/New/Vietnam.fixture.mkv"
         other_key = "episode:tv:vietnam:s1:e1"
         other_work = "wrk_vietnam_fixture"
@@ -308,7 +317,9 @@ class FilesystemIdentityRepairTests(unittest.TestCase):
         db.commit()
         db.close()
         code, report = self._invoke()
-        self.assertEqual(code, 0, report.get("error"))
+        self.assertEqual(code, 1)
+        self.assertIn("legacy binding mismatches remain", report["error"])
+        self.assertTrue(report["rolled_back"])
         scan = report["scan_after"]
         self.assertEqual(scan["catalog_status"], "remaining mismatches or scan errors")
         self.assertEqual(scan["legacy_binding_mismatches"], [{

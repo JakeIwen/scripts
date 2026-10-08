@@ -22,7 +22,7 @@ class RepairPhase(str, Enum):
 
 
 PREFIX = "video_v2_"
-PLAN_VERSION = 1
+PLAN_VERSION = 2
 WRONG_ASSET = "ast_7d8867cca92542dabab4cb845e6b5113"
 CORRECT_ASSET = "ast_31b4bf73c8324ee98b32d2aa81d81010"
 AUDIO_ASSET = "ast_d6006b1770f5472aa498fd87199ad08d"
