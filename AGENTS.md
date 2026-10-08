@@ -71,6 +71,14 @@ compare it with this checkout. Deployed files may differ from the repository.
   no-op. Its audit trail and pre-repair backup are on vanpi under
   `~/.local/share/van-video-library/` (`repair-audit-20261007/`,
   `video-catalog-final-20261007T044424Z.sqlite3`).
+  `maintenance/filesystem_identity_repair.py` is the separate, NOT-YET-APPLIED
+  Silo S03E07 repair; `identity_repair_evidence.py` pins its reviewed rows and
+  validates enriched plans. Copy these alongside `same_file_repair.py` into a
+  temporary package tree and invoke with `python3 -m` and that tree's PYTHONPATH;
+  maintenance remains outside the release allowlist. Capture a fresh plan after
+  deployment and quiescence. It preserves Counterpart duplicates and all playback,
+  versions only the Silo attachments, and reports unrelated legacy-key mismatches.
+  Tests live in `pi/tests/media/test_video_filesystem_repair.py`.
 - Cloud holds: `pi/scripts/backup/cloud_backup_control.py` shares admission and
   durable `pause.json` controls. `icloud_backup_control.py` and
   `time_machine_icloud_control.py` are fixed Pi/Mac entry points; their separate minute resume timers,
