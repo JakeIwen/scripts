@@ -2,7 +2,7 @@ import type { PollingState } from '../../hooks/usePollingResource';
 import { BottomSheet } from '../../components/BottomSheet';
 import { formatRelativeTime } from '../../utils/format';
 import type { UsbControls } from './controls';
-import { usbDeviceEventLabel, usbOperationLabel, usbUpdatedLabel } from './presentation';
+import { usbDeviceEventLabel, usbOperationLabel } from './presentation';
 import type { UsbDevice, UsbHub, UsbPort, UsbStatus } from './types';
 import './usb.css';
 
@@ -233,20 +233,12 @@ export function UsbSheet({ open, onClose, resource, controls }: UsbSheetProps) {
       open={open}
       title="USB Devices"
       description="Remembered USB inventory and guarded live port controls."
+      updatedAt={status?.inventory.lastSuccessAt ?? null}
       onClose={onClose}
     >
-      <header className="usb-sheet__summary">
-        <span>{usbUpdatedLabel(status)}</span>
-        <button
-          className="secondary-button"
-          type="button"
-          disabled={resource.refreshing || controls.running || !open}
-          onClick={() => void resource.refresh()}
-        >
-          {resource.refreshing ? 'Refreshing…' : 'Refresh'}
-        </button>
-      </header>
-      {resource.error && <p className="error-message">{resource.error.message}</p>}
+      {(resource.error || status?.inventory.lastError) && (
+        <p className="error-message">{resource.error?.message ?? status?.inventory.lastError}</p>
+      )}
       {(controls.lastError || controls.lastMessage) && (
         <p className={controls.lastError ? 'error-message' : 'usb-control-message'}>
           {controls.lastError ?? controls.lastMessage}

@@ -137,6 +137,7 @@ describe('backups feature', () => {
 
   it('renders operation-aware start, stop, and clone controls', () => {
     const resource = backupResource(true);
+    resource.data.checkedAt = Date.now() / 1000 - 3;
     const controls = controlMocks();
     render(
       <>
@@ -153,6 +154,14 @@ describe('backups feature', () => {
     );
     expect(screen.getByRole('button', { name: 'Stop gracefully' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Run now' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Refresh' })).not.toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Updated 3s ago').closest('.bottom-sheet__subtitle'),
+    ).toHaveTextContent(
+      /Freshness, runtime progress, hotspares, and Time Machine evidence\.\s*\/ ~3s/,
+    );
+    act(() => vi.advanceTimersByTime(2000));
+    expect(screen.getByLabelText('Updated 5s ago')).toHaveTextContent('~5s');
     for (const button of screen.getAllByRole('button', { name: 'Clone now' })) {
       expect(button).toBeDisabled();
     }

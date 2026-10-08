@@ -125,7 +125,6 @@
   }
 }
 
-.backups-sheet__summary,
 .backups-sheet__heading,
 .backup-evidence header,
 .backup-hotspare header,
@@ -136,15 +135,16 @@
   gap: 16px;
 }
 
-.backups-sheet__summary {
-  align-items: center;
-  color: var(--muted);
-}
-
 .backups-sheet__section {
   margin-top: 24px;
   padding-top: 22px;
   border-top: 1px solid var(--line);
+}
+
+.backups-sheet__section:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
 }
 
 .backups-sheet__heading h3 {
@@ -308,7 +308,6 @@
 }
 
 @media (max-width: 700px) {
-  .backups-sheet__summary,
   .backups-sheet__heading {
     align-items: stretch;
     flex-direction: column;

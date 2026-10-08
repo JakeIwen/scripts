@@ -246,19 +246,12 @@ export function BackupsSheet({ open, onClose, resource, controls }: BackupsSheet
       open={open}
       title="Backups"
       description="Freshness, runtime progress, hotspares, and Time Machine evidence."
+      updatedAt={status?.checkedAt ?? null}
       onClose={onClose}
     >
-      <header className="backups-sheet__summary">
-        <span>{status ? backupOperationLabel(status) : 'Loading backup evidence…'}</span>
-        <button
-          className="secondary-button"
-          type="button"
-          disabled={resource.refreshing || controls.running || !open}
-          onClick={() => void resource.refresh()}
-        >
-          {resource.refreshing ? 'Refreshing…' : 'Refresh'}
-        </button>
-      </header>
+      {status && (status.stop.status !== 'idle' || status.operation.status !== 'idle') && (
+        <p className="backup-control-message">{backupOperationLabel(status)}</p>
+      )}
       {resource.error && <p className="error-message">{resource.error.message}</p>}
       {(controls.lastError || controls.lastMessage) && (
         <p className={controls.lastError ? 'error-message' : 'backup-control-message'}>

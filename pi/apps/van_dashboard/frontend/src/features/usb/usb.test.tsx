@@ -137,6 +137,7 @@ describe('USB feature', () => {
 
   it('renders guarded cached controls', () => {
     const resource = resourceWithData();
+    resource.data.inventory.lastSuccessAt = Date.now() / 1000 - 3;
     const controls = controlMocks();
     render(
       <>
@@ -151,7 +152,10 @@ describe('USB feature', () => {
     expect(screen.getByRole('button', { name: 'Disable' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Enable' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Recover USB 2' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
-    expect(resource.refresh).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('button', { name: 'Refresh' })).not.toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Updated 3s ago').closest('.bottom-sheet__subtitle'),
+    ).toHaveTextContent(/Remembered USB inventory and guarded live port controls\.\s*\/ ~3s/);
+    expect(resource.refresh).not.toHaveBeenCalled();
   });
 });

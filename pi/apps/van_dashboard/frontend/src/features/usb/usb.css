@@ -115,7 +115,6 @@
   }
 }
 
-.usb-sheet__summary,
 .usb-sheet__heading,
 .usb-hub__header,
 .usb-port header {
@@ -125,15 +124,16 @@
   gap: 16px;
 }
 
-.usb-sheet__summary {
-  align-items: center;
-  color: var(--muted);
-}
-
 .usb-sheet__section {
   margin-top: 24px;
   padding-top: 22px;
   border-top: 1px solid var(--line);
+}
+
+.usb-sheet__section:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
 }
 
 .usb-sheet__heading h3 {
@@ -325,7 +325,6 @@
     grid-template-columns: 1fr;
   }
 
-  .usb-sheet__summary,
   .usb-sheet__heading {
     align-items: stretch;
     flex-direction: column;
