@@ -6,6 +6,7 @@ interface BottomSheetProps {
   title: string;
   description?: string;
   updatedAt?: number | null;
+  headerActions?: React.ReactNode;
   className?: string;
   onClose: () => void;
   children: React.ReactNode;
@@ -16,6 +17,7 @@ export function BottomSheet({
   title,
   description,
   updatedAt,
+  headerActions,
   className = '',
   onClose,
   children,
@@ -60,14 +62,9 @@ export function BottomSheet({
           <h2 id={titleId}>{title}</h2>
           {description && updatedAt === undefined && <p>{description}</p>}
         </div>
-        <button
-          className="icon-button"
-          type="button"
-          onClick={onClose}
-          aria-label={`Close ${title}`}
-        >
-          ×
-        </button>
+        <SheetActions title={title} onClose={onClose}>
+          {headerActions}
+        </SheetActions>
         {updatedAt !== undefined && (
           <div className="bottom-sheet__subtitle">
             <p>{description}</p>
@@ -77,6 +74,25 @@ export function BottomSheet({
       </header>
       <div className="bottom-sheet__content">{children}</div>
     </dialog>
+  );
+}
+
+function SheetActions({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="bottom-sheet__actions">
+      {children}
+      <button className="icon-button" type="button" onClick={onClose} aria-label={`Close ${title}`}>
+        ×
+      </button>
+    </div>
   );
 }
 

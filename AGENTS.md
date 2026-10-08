@@ -112,6 +112,19 @@ compare it with this checkout. Deployed files may differ from the repository.
   text stays private. `features/backups/ICloudAttemptMessage.tsx` owns the popup,
   with its response contract in `attemptDetails.ts`. Neither endpoint nor popup
   changes worker state, and nested dialogs close independently.
+- Backup priority: `pi/scripts/backup/backup_priority.py` owns the cloud job
+  registry and the protected until-verified override; `backup_priority_control.py`
+  is the fixed CLI. The existing shared lock admits only the selected cloud while
+  the override is active. Cloud guards skip only the daily scheduling window;
+  mount, ignition, uplink and manual-pause checks remain. Verification completion
+  is latched so a later generation cannot reactivate an old override.
+  `mac_capture_control.py` issues expiring, one-use stop permission bound to a live
+  capture nonce. The root Mac coordinator verifies the active destination before
+  `tmutil stopbackup`, then a later poll must prove idle and non-force detach.
+  Dashboard `van_dashboard_backup_priority.py` and `routes/backup_priority.py`
+  serve the gear-menu UI in `features/backups/BackupPriorityMenu.tsx`; `priority.ts`
+  owns its response contract. Both targeted cloud installers ship these modules
+  and verify the shared backup configuration before updating it.
 - `pi/scripts/backup/time_machine_staging.py` owns local orphan-chunk cleanup.
   Plan/apply require the common backup lock, verified mount and owned store,
   preserving capture-index, pending/published manifests and upload/verification

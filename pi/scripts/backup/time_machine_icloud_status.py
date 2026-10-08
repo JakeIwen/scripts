@@ -5,7 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from icloud_status import apply_manual_control, build_status, number, pause_deadline, read_json
+from icloud_status import apply_manual_control, apply_priority_control, build_status, number, pause_deadline, read_json
 
 STATE = Path('/var/lib/vanpi-time-machine-icloud')
 CONFIG = Path('/etc/vanpi-time-machine-icloud.json')
@@ -34,6 +34,7 @@ def status():
     result = build_status(state, read_json(STATE / 'history.json', {}), read_json(CONFIG, {}),
                           service, next_check, auth_error=AUTH_ERROR.exists())
     apply_manual_control(result, deadline)
+    apply_priority_control(result, STATE)
     # Numeric capture counters are public; paths, credentials and raw errors are not.
     if state.get('worker_pid') == int(service.get('MainPID') or 0) or not result['running']:
         for key in ('capture_bytes', 'capture_total_bytes', 'capture_files', 'capture_total_files'):

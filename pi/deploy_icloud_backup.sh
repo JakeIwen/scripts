@@ -7,9 +7,15 @@ target=${1:-pi@vanpi.lan}
 python3 "$repo/pi/tests/backup/test_icloud_backup.py"
 python3 "$repo/pi/tests/backup/test_icloud_status.py"
 bash -n "$repo/pi/scripts/backup/icloud_backup.sh"
+conf_hash=$(git -C "$repo" show HEAD:pi/scripts/backup/backup_conf.sh | shasum -a 256 | awk '{print $1}')
 stage=$(ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" /usr/bin/mktemp -d /tmp/vanpi-icloud.XXXXXX)
 [[ "$stage" =~ ^/tmp/vanpi-icloud\.[[:alnum:]]{6}$ ]] || exit 1
 scp -q "$repo/pi/scripts/backup/icloud_backup.py" \
+  "$repo/pi/scripts/backup/backup_priority.py" \
+  "$repo/pi/scripts/backup/backup_priority_control.py" \
+  "$repo/pi/scripts/backup/mac_capture_control.py" \
+  "$repo/pi/scripts/backup/time_machine_store.py" \
+  "$repo/pi/scripts/backup/backup_conf.sh" \
   "$repo/pi/scripts/backup/icloud_progress.py" \
   "$repo/pi/scripts/backup/icloud_status.py" \
   "$repo/pi/scripts/backup/cloud_backup_control.py" \
@@ -22,7 +28,7 @@ scp -q "$repo/pi/scripts/backup/icloud_backup.py" \
   "$repo/pi/services/vanpi-icloud-backup.timer" \
   "$repo/pi/services/vanpi-icloud-backup-resume.service" \
   "$repo/pi/services/vanpi-icloud-backup-resume.timer" "$target:$stage/"
-ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" /bin/bash -s -- "$stage" <<'REMOTE'
+ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" /bin/bash -s -- "$stage" "$conf_hash" <<'REMOTE'
 set -euo pipefail
 stage=$1
 [[ "$stage" =~ ^/tmp/vanpi-icloud\.[[:alnum:]]{6}$ ]] || exit 1
@@ -41,8 +47,11 @@ esac
    $(/usr/bin/stat -c '%U %G %a' /run/lock/vanpi_backup.lock) == 'root pi 660' ]] || exit 1
 exec 9</run/lock/vanpi_backup.lock
 /usr/bin/flock -n 9 || { echo 'Another backup is active; defer deployment.' >&2; exit 1; }
+live_conf_hash=$(sha256sum /home/pi/scripts/backup/backup_conf.sh | awk '{print $1}')
+new_conf_hash=$(sha256sum "$stage/backup_conf.sh" | awk '{print $1}')
+[[ "$live_conf_hash" == "$2" || "$live_conf_hash" == "$new_conf_hash" ]] || { echo 'Live backup configuration differs; inspect before deploying.' >&2; exit 1; }
 /usr/bin/install -d -m 0700 "$stage/previous"
-for name in icloud_status.py cloud_backup_control.py icloud_backup_control.py icloud_progress.py icloud_backup.py icloud_uplink.py icloud_backup.sh ICLOUD_RESTORE.txt; do
+for name in time_machine_store.py backup_priority.py mac_capture_control.py icloud_status.py cloud_backup_control.py backup_priority_control.py icloud_backup_control.py icloud_progress.py icloud_backup.py icloud_uplink.py icloud_backup.sh backup_conf.sh ICLOUD_RESTORE.txt; do
   live=/home/pi/scripts/backup/$name
   [[ ! -e "$live" ]] || /usr/bin/cp -p "$live" "$stage/previous/$name"
   /usr/bin/sudo -n /usr/bin/install -o pi -g pi -m 0750 "$stage/$name" "$live.new"

@@ -17,7 +17,12 @@ roughly twice that amount; a completed transfer is not yet a Mac restore test.
 2. A small Mac root LaunchDaemon checks every two minutes. Only on an explicit,
    current Pi capture request, it checks Time Machine is idle, identifies the
    matching encrypted image through `hdiutil info`, and detaches it WITHOUT
-   force. Busy/active/unknown images are left alone. It acknowledges the exact
+   force. Normally active backups are left to finish. An explicit dashboard
+   capture-stop request can authorize one `tmutil stopbackup` after the coordinator
+   verifies the active destination ID belongs to the configured Pi SMB share.
+   That permission expires after 30 minutes and is consumed against the live
+   capture nonce before the command. A later poll must establish idle state;
+   busy/unknown images are never forced off. It acknowledges the exact
    request nonce only after confirming the image is no longer attached.
 3. After clean-detach acknowledgement, the Pi allows up to 90 seconds for
    deferred SMB file CLOSEs (`smb_handle_drain_seconds`, configurable). It still
@@ -126,6 +131,9 @@ mixed policies; network-path changes interrupt the connection. This is the same
 polling guard, not a promise of zero in-flight bytes during a sudden route switch.
 The 02:55–09:00 local-backup priority window and common lock also apply. A waiting
 capture gives up the lock when local backups need the window.
+The **Backup priority** dialog can temporarily put this cloud job first until
+verification, including across that daily window. Only scheduling order changes;
+the storage, ignition, network and source-consistency guards remain mandatory.
 
 The Backups pane tracks the Mac copy separately from Pi/Borg: local capture,
 upload estimate, downloaded verification, last success and attempt history.

@@ -6,7 +6,7 @@ mode=${1:---run}
 case "$mode" in --run|--preflight|--status|--login|--verify-login) ;; *) exit 2;; esac
 [[ $# -le 1 ]] || exit 2
 if [[ "$mode" == --run ]]; then
-  acquire_job_lock || exit 0
+  acquire_job_lock pi || exit 0
 fi
 export VANPI_ICLOUD_BACKUP_MNT="$BACKUP_MNT"
 export VANPI_ICLOUD_BACKUP_LABEL="$BACKUP_DISK_LABEL"

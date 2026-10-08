@@ -1,6 +1,7 @@
 import type { PollingState } from '../../hooks/usePollingResource';
 import { BottomSheet } from '../../components/BottomSheet';
 import { ICloudBackupCard } from './ICloudBackupCard';
+import { BackupPriorityMenu } from './BackupPriorityMenu';
 import { formatBytes, formatRelativeTime } from '../../utils/format';
 import type { BackupControls } from './controls';
 import {
@@ -247,6 +248,7 @@ export function BackupsSheet({ open, onClose, resource, controls }: BackupsSheet
       title="Backups"
       description="Freshness, runtime progress, hotspares, and Time Machine evidence."
       updatedAt={status?.checkedAt ?? null}
+      headerActions={<BackupPriorityMenu backups={status} refresh={resource.refresh} />}
       onClose={onClose}
     >
       {status && (status.stop.status !== 'idle' || status.operation.status !== 'idle') && (

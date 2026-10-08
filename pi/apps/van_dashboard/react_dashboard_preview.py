@@ -88,6 +88,9 @@ ALLOWED_MUTATIONS: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/api/backups/exfat"),
         ("POST", "/api/backups/borg/stop"),
         ("POST", "/api/backups/exfat/stop"),
+        ("POST", "/api/backups/priority"),
+        ("POST", "/api/backups/priority/capture"),
+        ("POST", "/api/backups/priority/capture/cancel"),
         # Network-changing UBNT operations retain credential scrubbing and
         # converge through the controller's authoritative operation status.
         ("POST", "/api/ubnt-wifi/scan"),

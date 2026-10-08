@@ -152,6 +152,7 @@ JOB_LOCK_GROUP=${VANPI_BACKUP_JOB_LOCK_GROUP:-pi}
 JOB_LOCK_MODE=${VANPI_BACKUP_JOB_LOCK_MODE:-660}
 JOB_LOCK_STAT=${VANPI_BACKUP_JOB_LOCK_STAT:-/usr/bin/stat}
 JOB_LOCK_FLOCK=${VANPI_BACKUP_JOB_LOCK_FLOCK:-/usr/bin/flock}
+BACKUP_PRIORITY_TOOL=${VANPI_BACKUP_PRIORITY_TOOL:-/home/pi/scripts/backup/backup_priority_control.py}
 validate_job_lock_file() {
   local metadata owner group mode extra
   if [[ -L "$JOB_LOCK" || ! -f "$JOB_LOCK" ]]; then
@@ -173,5 +174,17 @@ acquire_job_lock() {
   validate_job_lock_file || return 1
   exec 9>>"$JOB_LOCK"   # append-open: must not truncate a current holder's PID record
   "$JOB_LOCK_FLOCK" -n 9 || return 1
+  if [[ -f "$BACKUP_PRIORITY_TOOL" ]]; then
+    if ! /usr/bin/python3 "$BACKUP_PRIORITY_TOOL" --admit "${1:-disk}"; then
+      "$JOB_LOCK_FLOCK" -u 9
+      exec 9>&-
+      return 1
+    fi
+  elif [[ -d /var/lib/vanpi-backup-priority ]]; then
+    echo 'backup priority helper is unavailable; refusing admission' >&2
+    "$JOB_LOCK_FLOCK" -u 9
+    exec 9>&-
+    return 1
+  fi
   printf '%s\n' "$$" > "$JOB_LOCK"
 }

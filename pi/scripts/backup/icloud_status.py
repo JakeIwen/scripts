@@ -16,6 +16,7 @@ import sys
 import tempfile
 import time
 import uuid
+import backup_priority
 
 STATE_DIR = Path('/var/lib/vanpi-icloud-backup')
 CONFIG = Path('/etc/vanpi-icloud-backup.json')
@@ -145,6 +146,16 @@ def apply_manual_control(result, deadline, now=None):
     return result
 
 
+def apply_priority_control(result, directory):
+    selected = backup_priority.policy()
+    if (selected != backup_priority.PriorityMode.NORMAL and not result['running']
+            and result['phase'] not in ('paused', 'not due', 'complete')
+            and backup_priority.JOBS[selected].directory != directory):
+        result.update(phase='deferred', message='Waiting for ' + backup_priority.JOBS[selected].label
+                      + ' to finish; selected in Backup priority.')
+    return result
+
+
 def number(value):
     return value if type(value) in (int, float) and math.isfinite(value) and value >= 0 else None
 
@@ -180,6 +191,8 @@ def reason(state):
         return 'iCloud sign-in needs attention.'
     if 'local-backup window' in value:
         return 'Waiting for the daily local backups.'
+    if value.startswith('yielding to selected '):
+        return 'Waiting for the cloud backup selected in Backup priority.'
     if 'ignition' in value:
         return 'Paused while ignition is on.'
     if 'policy' in value and 'hdd' in value:
@@ -317,7 +330,7 @@ def dashboard_status():
     result = build_status(read_json(STATE_DIR / 'state.json', {}),
                         read_json(STATE_DIR / 'history.json', {}), read_json(CONFIG, {}),
                         service, next_check, auth_error=(STATE_DIR / 'authentication-error.json').exists())
-    return apply_manual_control(result, deadline)
+    return apply_priority_control(apply_manual_control(result, deadline), STATE_DIR)
 
 
 if __name__ == '__main__':

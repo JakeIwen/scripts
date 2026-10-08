@@ -30,7 +30,9 @@ size. This design trades bandwidth for independent, verifiable recovery copies.
   stamp. This gives the existing 03:00–08:00 local retry window priority.
   The offsite timer can resume early once both local backups succeed, otherwise
   it resumes after 09:00. No local backup/clone schedule is changed.
-- The latest local Borg success must be no more than 48 hours old.
+- When freezing a new generation, the latest Pi Borg success must be no more
+  than 48 hours old. Resuming an already frozen generation does not require
+  another Borg run merely because that source stamp has aged.
 - The exact labeled backup disk is verified before use. Staging lives in the
   root-only `icloud-weekly/` directory on that disk, not on the boot SD card.
 - `borg with-lock` protects the copy. Transient locks are omitted; the copy
@@ -59,6 +61,33 @@ size. This design trades bandwidth for independent, verifiable recovery copies.
   in a copy while the original repository is in use.
 
 ## Dashboard progress and history
+
+The Backups header's **Backup priority** gear opens a separate dialog. Normal
+schedule reserves the daily Pi Borg/EXFAT512 window. **Mac iCloud until verified**
+or **Pi iCloud until verified** gives that pending/due recovery point the shared
+backup slot across that window. An already-running disk job finishes safely;
+subsequent disk jobs and the other cloud wait for their next eligible start.
+The selected cloud is resumed, but the other jobs' manual pause records are not
+changed. The menu shows their backup freshness. A current cloud copy cannot
+reserve priority for an entire future week; a new Pi capture also requires a
+fresh Borg source before it can reserve priority.
+
+The root-private `/var/lib/vanpi-backup-priority/priority.json` override survives
+reboots and clears effectively when the selected recovery point is verified.
+The worker/minute timer latches completion so later generations cannot reactivate
+an old override. Choose **Normal schedule** to cancel it. Existing cloud switching
+refuses to conflict with the selected priority; change priority in the menu first.
+Ignition, storage policy, mount identity, network-path and Starlink checks still
+apply. This setting never force-releases the common backup lock.
+
+The same dialog offers a separate, explicit **Stop current Mac backup for
+capture** action. It is available only with a fresh capable Mac coordinator and
+when a frozen capture is needed. Permission expires after 30 minutes and is
+consumed once against a live worker's capture nonce. The Mac validates its active
+destination before stopping; normal idle/detach/Samba checks still gate capture.
+It never disables automatic Time Machine scheduling. The action is unnecessary
+and disabled while a completed frozen copy is uploading. See the
+[Mac coordinator installation](TIME_MACHINE_ICLOUD.md#installation-and-recovery).
 
 The Backups tile and pane include **Pi offsite · iCloud**. Running means a live
 systemd worker exists; a saved `uploading` phase without that worker is reported

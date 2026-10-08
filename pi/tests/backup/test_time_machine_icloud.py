@@ -49,6 +49,8 @@ class ControlTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.directory = Path(tmp.name)
         self.command = mock.Mock()
+        patch = mock.patch.object(job.priority, 'DIRECTORY', self.directory / 'priority')
+        patch.start(); self.addCleanup(patch.stop)
 
     def test_pause_survives_worker_state_writes_and_resume_uses_same_service(self):
         control.control('pause', '60', self.directory, now=1000, command=self.command)
@@ -522,6 +524,37 @@ class VerificationTests(unittest.TestCase):
 
 
 class CoordinatorTests(unittest.TestCase):
+    def test_dashboard_permission_stops_only_the_configured_active_destination(self):
+        destination = '00000000-0000-0000-0000-000000000001'
+        request = {'requested': True, 'generation': GEN, 'capture_id': 'a'*32,
+                   'expires_at': time.time()+60, 'bundle': store.BUNDLE,
+                   'stop_request': {'id':'b'*32, 'expires_at':time.time()+60}}
+        active = f'Running = 1; DestinationID = "{destination}";'.encode()
+        destinations = {'Destinations': [{'ID':destination, 'Kind':'Network', 'URL':'smb://vanpi.lan/mbp2tbkup'}]}
+        with mock.patch.object(coordinator, 'remote', side_effect=[{'ok':True}, request, {'authorized':True,'expires_at':time.time()+20}]) as remote, \
+                mock.patch.object(coordinator, 'command', side_effect=[active, plistlib.dumps(destinations), b'']) as command:
+            self.assertIn('graceful', coordinator.coordinate({'user':'test'}))
+            self.assertEqual(command.call_args.args[0], ['/usr/bin/tmutil','stopbackup'])
+            self.assertEqual(remote.call_args.args, ('test','--claim-capture-stop',GEN,'a'*32,'b'*32))
+            self.assertFalse(any('hdiutil' in ' '.join(c.args[0]) for c in command.call_args_list))
+            self.assertFalse(any('--capture-ready' in c.args for c in remote.call_args_list))
+
+    def test_unknown_destination_or_declined_stop_permission_never_stops_backup(self):
+        destination = '00000000-0000-0000-0000-000000000001'
+        request = {'requested':True, 'generation':GEN, 'capture_id':'a'*32,
+                   'expires_at':time.time()+60, 'bundle':store.BUNDLE,
+                   'stop_request':{'id':'b'*32,'expires_at':time.time()+60}}
+        active = f'Running = 1; DestinationID = "{destination}";'.encode()
+        for url, accepted in [('smb://foreign/mbp2tbkup',True), ('smb://vanpi.lan/other',True), ('smb://vanpi.lan/mbp2tbkup',False)]:
+            destinations = {'Destinations':[{'ID':destination,'Kind':'Network','URL':url}]}
+            with mock.patch.object(coordinator,'remote',side_effect=[{'ok':True},request,{'authorized':accepted,'expires_at':time.time()+20}]), \
+                    mock.patch.object(coordinator,'command',side_effect=[active,plistlib.dumps(destinations)]) as command:
+                if accepted:
+                    with self.assertRaisesRegex(RuntimeError,'destination'): coordinator.coordinate({'user':'test'})
+                else:
+                    self.assertIn('left running',coordinator.coordinate({'user':'test'}))
+                self.assertFalse(any('stopbackup' in c.args[0] for c in command.call_args_list))
+
     def test_image_identity_requires_exact_host_share_and_bundle(self):
         for path in ('/Volumes/.timemachine/not-vanpi.local/id/mbp2tbkup/'+store.BUNDLE,
                      '/Volumes/.timemachine/vanpi.lan/id/other/'+store.BUNDLE,

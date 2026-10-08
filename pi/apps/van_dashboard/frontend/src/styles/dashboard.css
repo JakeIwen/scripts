@@ -384,6 +384,11 @@
   row-gap: 6px;
 }
 
+.bottom-sheet__actions {
+  display: flex;
+  gap: 8px;
+}
+
 .bottom-sheet__subtitle {
   grid-column: 1 / -1;
   display: flex;

@@ -159,8 +159,7 @@ export function ICloudBackupCard({
         )}
       </dl>
       <p className="backup-icloud__note">
-        Starlink routes are excluded. Scheduled Pi Borg backups and EXFAT512 snapshots take
-        priority.
+        Starlink routes are excluded. Backup order follows the Backup priority setting.
       </p>
       <details className="backup-icloud__history">
         <summary>Attempt history ({status.attempts.length})</summary>

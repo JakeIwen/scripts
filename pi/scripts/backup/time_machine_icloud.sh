@@ -5,7 +5,7 @@ source /home/pi/scripts/backup/backup_conf.sh
 mode=${1:---run}
 [[ $# -le 1 ]] || exit 2
 case "$mode" in --run|--staging-gc-plan|--staging-gc-apply) ;; *) exit 2;; esac
-acquire_job_lock || { [[ "$mode" == --run ]] && exit 0; exit 1; }
+acquire_job_lock time-machine || { [[ "$mode" == --run ]] && exit 0; exit 1; }
 export VANPI_ICLOUD_BACKUP_MNT="$BACKUP_MNT"
 export VANPI_ICLOUD_BACKUP_LABEL="$BACKUP_DISK_LABEL"
 export VANPI_ICLOUD_BORG_STAMP="$STAMP_DIR/borg_ok"

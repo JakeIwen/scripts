@@ -1,0 +1,25 @@
+.backup-priority-section + .backup-priority-section {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+.backup-priority-section p {
+  margin: 0.7rem 0;
+}
+.backup-priority-section small {
+  display: block;
+  color: var(--muted);
+}
+.backup-priority-section button {
+  margin: 0.5rem 0.5rem 0.5rem 0;
+}
+.backup-priority-selection {
+  display: grid;
+  gap: 0.35rem;
+  margin-block: 1rem;
+}
+.backup-priority-selection select {
+  max-width: 100%;
+  padding: 0.6rem;
+  font: inherit;
+}

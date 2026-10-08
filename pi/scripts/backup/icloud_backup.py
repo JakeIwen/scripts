@@ -27,6 +27,7 @@ from icloud_uplink import decide
 from icloud_progress import ProcessIO, ProgressWatch, RcloneStats, StreamDigest
 from icloud_status import begin_attempt, save_attempt
 from cloud_backup_control import admit_worker
+import backup_priority as priority
 
 CONFIG = Path('/etc/vanpi-icloud-backup.json')
 STATE_DIR = Path('/var/lib/vanpi-icloud-backup')
@@ -189,6 +190,11 @@ def local_backup_window(cfg, now=None):
 
 def check_work_allowed(cfg):
     check_parked()
+    selected = priority.policy() if cfg.get('priority_job') else priority.PriorityMode.NORMAL
+    if selected != priority.PriorityMode.NORMAL:
+        if selected != cfg['priority_job']:
+            raise Deferred('yielding to selected ' + priority.JOBS[selected].label + ' priority')
+        return
     if local_backup_window(cfg) and not local_backups_complete():
         raise Deferred('yielding the HDD and shared lock to the local-backup window')
 
@@ -587,9 +593,6 @@ def weekly(cfg, state):
         raise Deferred('iCloud authentication needs attention; inspect icloud_backup.sh --status before retrying')
     check_work_allowed(cfg)
     guard(cfg)
-    stamp = Path(os.environ['VANPI_ICLOUD_BORG_STAMP'])
-    if not stamp.is_file() or not 0 <= time.time() - stamp.stat().st_mtime <= cfg['max_source_age_hours'] * 3600:
-        raise Deferred('local Borg backup is missing or stale')
     mount = Path(os.environ['VANPI_ICLOUD_BACKUP_MNT'])
     label = os.environ['VANPI_ICLOUD_BACKUP_LABEL']
     probe = subprocess.run(['/usr/bin/findmnt', '-rn', '-M', str(mount), '-o', 'SOURCE'], capture_output=True, text=True)
@@ -622,6 +625,7 @@ def weekly(cfg, state):
             atomic_json(STATE_DIR / 'state.json', state)
         generation = safe_generation(root, pending)
         if not (generation / 'payload' / 'manifest.json').is_file():
+            require_fresh_borg(cfg)
             size = sum((Path(directory)/name).stat().st_size for directory, dirs, files in os.walk(repo) for name in files)
             if shutil.disk_usage(root).free < size + cfg['minimum_free_gib'] * 1024**3:
                 raise Deferred('insufficient staging disk headroom')
@@ -665,6 +669,12 @@ def weekly(cfg, state):
                 subprocess.run(['/usr/bin/umount', str(mount)], check=True)
             elif current.returncode != 1 or current.stdout.strip() or current.stderr.strip():
                 raise RuntimeError('cannot verify backup mount during cleanup')
+
+
+def require_fresh_borg(cfg):
+    stamp = Path(os.environ['VANPI_ICLOUD_BORG_STAMP'])
+    if not stamp.is_file() or not 0 <= time.time() - stamp.stat().st_mtime <= cfg['max_source_age_hours'] * 3600:
+        raise Deferred('local Borg backup is missing or stale')
 
 
 def login(cfg):
@@ -745,6 +755,7 @@ def main():
             return 0
         if mode != '--run':
             raise ValueError('unsupported mode')
+        cfg['priority_job'] = priority.PriorityMode.PI
         due = state.get('pending') or time.time() - state.get('last_success_at', 0) >= cfg['interval_days'] * 86400
         if due:
             begin_attempt(STATE_DIR, state)
@@ -780,6 +791,7 @@ def main():
         if mode == '--run':
             atomic_json(STATE_DIR / 'state.json', state)
             save_attempt(STATE_DIR, state, finished=True)
+            priority.complete_job(priority.PriorityMode.PI, state)
 
 
 if __name__ == '__main__':

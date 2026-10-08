@@ -8,12 +8,10 @@ import sys
 import time
 
 from icloud_status import INDEFINITE_PAUSE, number, pause_deadline, read_json, write_json
+import backup_priority as priority
 
 MAX_PAUSE_MINUTES = 7 * 24 * 60
-CLOUD_JOBS = {
-    'vanpi-icloud-backup.service': Path('/var/lib/vanpi-icloud-backup'),
-    'vanpi-time-machine-icloud.service': Path('/var/lib/vanpi-time-machine-icloud'),
-}
+CLOUD_JOBS = {job.service: job.directory for job in priority.JOBS.values()}
 
 
 def is_paused(directory, now=None):
@@ -38,14 +36,22 @@ def request_service(operation, service, command):
 
 def automatic_retry_due(directory, now):
     state = read_json(directory / 'state.json', {})
+    for mode, job in priority.JOBS.items():
+        if job.directory == directory:
+            priority.complete_job(mode, state)
     retry_at = number(state.get('retry_at'))
-    return bool(state.get('phase') == 'deferred' and retry_at is not None and retry_at <= now)
+    due = state.get('phase') == 'deferred' and retry_at is not None and retry_at <= now
+    selected = priority.selected_directory(directory) and state.get('phase') != 'authentication_required'
+    return bool(due or (selected and now - state.get('last_attempt_at', 0) >= 300))
 
 
 def take_turn(service, *, jobs=CLOUD_JOBS, now=None, command=subprocess.run):
     """Pause the peer and queue this job, without touching the common backup lock."""
     if service not in jobs or set(jobs) != set(CLOUD_JOBS):
         raise ValueError('unsupported cloud backup selection')
+    selected = priority.policy()
+    if selected != priority.PriorityMode.NORMAL and priority.JOBS[selected].service != service:
+        raise ValueError('Change Backup priority before switching cloud jobs.')
     now = time.time() if now is None else now
     other = next(name for name in jobs if name != service)
     # Both intents are serialized against worker admission and ordinary

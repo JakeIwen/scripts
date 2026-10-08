@@ -23,6 +23,8 @@ import icloud_backup as cloud
 import icloud_status as history
 import time_machine_store as store
 import time_machine_staging as staging
+import backup_priority as priority
+import mac_capture_control
 from time_machine_icloud_control import admit_worker, is_paused
 
 CONFIG = Path('/etc/vanpi-time-machine-icloud.json')
@@ -38,6 +40,7 @@ SERVICE = 'vanpi-time-machine-icloud.service'
 def config():
     cfg = cloud.load_config()
     cfg.update(store.read_json(CONFIG))
+    cfg['priority_job'] = priority.PriorityMode.TIME_MACHINE
     cfg.setdefault('smb_handle_drain_seconds', 90)
     if cfg['remote'] != 'icloud:VanRecovery/m4mac/time-machine':
         raise ValueError('unexpected Time Machine cloud prefix')
@@ -70,8 +73,10 @@ def capture_request():
             not worker_alive(request) or not DRAIN.is_file() or DRAIN.is_symlink() or
             DRAIN.read_text() != request.get('marker')):
         return {'requested': False}
-    return {'requested': True, 'generation': request['generation'],
+    result = {'requested': True, 'generation': request['generation'],
             'capture_id': request['capture_id'], 'expires_at': request['expires_at'], 'bundle': store.BUNDLE}
+    result['stop_request'] = mac_capture_control.authorization(result, STATE)
+    return result
 
 
 def acknowledge(name, capture_id):
@@ -84,10 +89,10 @@ def acknowledge(name, capture_id):
     return {'accepted': True}
 
 
-def mac_present():
+def mac_present(stop_for_capture=False):
     """A live, functioning Mac helper can wake a due job without hourly delay."""
     now = time.time()
-    store.atomic_json(STATE / 'mac-coordinator.json', {'seen_at': now})
+    store.atomic_json(STATE / 'mac-coordinator.json', {'seen_at': now, 'stop_for_capture': stop_for_capture})
     state = store.read_json(STATE / 'state.json', {})
     cfg = config()
     due = state.get('pending') or now - state.get('last_success_at', 0) >= cfg['interval_days'] * 86400
@@ -512,6 +517,12 @@ def main():
         print(json.dumps(capture_request())); return 0
     if args == ['--mac-present']:
         print(json.dumps(mac_present())); return 0
+    if args == ['--mac-present-v2']:
+        print(json.dumps(mac_present(stop_for_capture=True))); return 0
+    if len(args) == 4 and args[0] == '--claim-capture-stop':
+        if not store.GENERATION.fullmatch(args[1]) or not all(re.fullmatch('[0-9a-f]{32}', a) for a in args[2:]):
+            raise ValueError('invalid capture stop request')
+        print(json.dumps(mac_capture_control.claim_stop(*args[1:], STATE, capture_request))); return 0
     if len(args) == 3 and args[0] == '--capture-ready':
         print(json.dumps(acknowledge(args[1], args[2]))); return 0
     if args == ['--release-capture']:
@@ -556,6 +567,7 @@ def main():
     finally:
         store.atomic_json(STATE / 'state.json', state)
         history.save_attempt(STATE, state, finished=True)
+        priority.complete_job(priority.PriorityMode.TIME_MACHINE, state)
 
 
 if __name__ == '__main__':

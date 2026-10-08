@@ -4,6 +4,7 @@ from van_compute.metrics import ComputeMetricsReader
 
 from .van_dashboard_backups import BackupManager
 from .van_dashboard_cloud_controls import CloudBackupControl
+from .van_dashboard_backup_priority import BackupPriorityControl
 from .van_dashboard_common import COMPUTE_ROOT, StateStore
 from .van_dashboard_cop import CopAlertManager, CopCanWakeStatusReader
 from .van_dashboard_disks import DiskManager
@@ -52,6 +53,7 @@ usb_ports = UsbPortController(usb_devices)
 backups = BackupManager()
 time_machine_cloud_control = CloudBackupControl('time-machine')
 pi_cloud_control = CloudBackupControl('pi')
+backup_priority_control = BackupPriorityControl()
 ignition_monitor_control = IgnitionMonitorController()
 disk_manager = DiskManager()
 system_power = SystemPowerController()

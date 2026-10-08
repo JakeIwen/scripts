@@ -27,6 +27,8 @@ for required in /usr/bin/flock /usr/bin/stat /usr/bin/id; do
 done
 
 lock="$test_root/job.lock"
+priority_tool="$test_root/priority.py"
+printf '%s\n' 'raise SystemExit(0)' > "$priority_tool"
 owner=$(/usr/bin/id -un)
 group=$(/usr/bin/id -gn)
 
@@ -35,6 +37,7 @@ run_with_lock_config() {
     VANPI_BACKUP_JOB_LOCK_OWNER="$owner" \
     VANPI_BACKUP_JOB_LOCK_GROUP="$group" \
     VANPI_BACKUP_JOB_LOCK_MODE=660 \
+    VANPI_BACKUP_PRIORITY_TOOL="$priority_tool" \
     /bin/bash "$@"
 }
 
@@ -44,6 +47,16 @@ run_with_lock_config -c 'source "$1"; acquire_job_lock' test "$config" ||
   fail "valid pre-created lock was rejected"
 [[ $(< "$lock") =~ ^[1-9][0-9]*$ ]] ||
   fail "lock holder PID was not recorded"
+
+saved_pid=$(< "$lock")
+printf '%s\n' 'raise SystemExit(1)' > "$priority_tool"
+if run_with_lock_config -c 'source "$1"; acquire_job_lock' test "$config"; then
+  fail "lower-priority backup was admitted"
+fi
+[[ $(< "$lock") == "$saved_pid" ]] || fail "denied admission changed the lock owner record"
+printf '%s\n' 'raise SystemExit(0)' > "$priority_tool"
+run_with_lock_config -c 'source "$1"; acquire_job_lock' test "$config" ||
+  fail "denied priority admission did not release its lock"
 
 chmod 0644 "$lock"
 if run_with_lock_config -c 'source "$1"; acquire_job_lock' test "$config" \
@@ -72,6 +85,7 @@ VANPI_BACKUP_JOB_LOCK="$lock" \
   VANPI_BACKUP_JOB_LOCK_OWNER="$owner" \
   VANPI_BACKUP_JOB_LOCK_GROUP="$group" \
   VANPI_BACKUP_JOB_LOCK_MODE=660 \
+  VANPI_BACKUP_PRIORITY_TOOL="$priority_tool" \
   /bin/bash -c '
   source "$1"
   acquire_job_lock || exit 1

@@ -459,6 +459,7 @@ class PiPauseTests(unittest.TestCase):
                 return os.stat_result(fields)
             return result
         for patcher in (mock.patch.object(backup, 'STATE_DIR', self.state_dir),
+                        mock.patch.object(backup.priority, 'DIRECTORY', self.root / 'priority'),
                         mock.patch.object(Path, 'stat', root_owner)):
             patcher.start(); self.addCleanup(patcher.stop)
 
@@ -553,6 +554,7 @@ class PiPauseTests(unittest.TestCase):
         repo = self.root / 'borg'; repo.mkdir()
         (repo / 'config').write_text('[repository]\nkey = encrypted-test-key\n')
         stamp = self.root / 'borg_ok'; stamp.touch()
+        os.utime(stamp, (time.time() - 20 * 86400, time.time() - 20 * 86400))
         (self.state_dir / 'authenticated.json').write_text('{}')
         state = {'pending': name, 'last_success_at': time.time()}
         env = {'VANPI_ICLOUD_BORG_STAMP': str(stamp), 'VANPI_ICLOUD_BACKUP_MNT': str(self.root),
