@@ -327,6 +327,38 @@
     justify-content: space-between;
   }
 }
+.backup-icloud__summary {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  list-style: none;
+  cursor: pointer;
+}
+.backup-icloud__summary::-webkit-details-marker {
+  display: none;
+}
+.backup-icloud__summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+.backup-icloud__summary h3 {
+  flex: 1;
+  min-width: 0;
+  font-size: 21px;
+}
+.backup-icloud__chevron {
+  color: var(--muted);
+}
+.backup-icloud__disclosure[open] > summary .backup-icloud__chevron {
+  transform: rotate(90deg);
+}
+.backup-icloud__body {
+  margin-top: 0.6rem;
+}
+.backup-icloud__description {
+  color: var(--muted);
+}
 .backup-icloud__badge {
   align-self: flex-start;
   border: 1px solid var(--border-color, #34505d);

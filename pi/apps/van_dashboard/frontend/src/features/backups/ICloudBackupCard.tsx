@@ -35,38 +35,24 @@ export function ICloudBackupCard({
   blocked?: boolean;
 }) {
   const title = kind === 'time-machine' ? 'Mac Time Machine · iCloud' : 'Pi offsite · iCloud';
-  const titleId = `backup-icloud-title-${kind}`;
   if (!status.available)
     return (
-      <section className="backups-sheet__section" aria-label={title}>
-        <h3>{title}</h3>
+      <ICloudBackupSection title={title} kind={kind} status={status}>
         <p className="error-message">
           Local iCloud status is unavailable. Other backups are still shown.
         </p>
-      </section>
+      </ICloudBackupSection>
     );
   const p = iCloudProgress(status);
   const showProgress =
     status.running ||
     (status.generation !== null && status.phase !== 'not due' && status.phase !== 'complete');
   return (
-    <section className="backups-sheet__section backup-icloud" aria-labelledby={titleId}>
-      <div className="backups-sheet__heading">
-        <div>
-          <h3 id={titleId}>{title}</h3>
-          <p>
-            {kind === 'time-machine'
-              ? 'Encrypted Time Machine image'
-              : 'Encrypted Borg recovery copy'}{' '}
-            · every {status.intervalDays} days · keep {status.keepGenerations} verified copies.
-          </p>
-        </div>
-        <span
-          className={`backup-icloud__badge ${status.running ? 'backup-icloud__badge--running' : status.attention ? 'backup-icloud__badge--attention' : ''}`}
-        >
-          {iCloudPhaseLabel(status.phase)}
-        </span>
-      </div>
+    <ICloudBackupSection title={title} kind={kind} status={status}>
+      <p className="backup-icloud__description">
+        {kind === 'time-machine' ? 'Encrypted Time Machine image' : 'Encrypted Borg recovery copy'}{' '}
+        · every {status.intervalDays} days · keep {status.keepGenerations} verified copies.
+      </p>
       <ICloudAttemptMessage {...status} kind={kind} id={status.attempts[0]?.id} />
       {status.controlsAvailable && refresh && (
         <ICloudBackupControls
@@ -232,6 +218,41 @@ export function ICloudBackupCard({
           </ol>
         </details>
       )}
+    </ICloudBackupSection>
+  );
+}
+
+function ICloudBackupSection({
+  title,
+  kind,
+  status,
+  children,
+}: {
+  title: string;
+  kind: ICloudBackupKind;
+  status: ICloudStatus;
+  children: React.ReactNode;
+}) {
+  const titleId = `backup-icloud-title-${kind}`;
+  const badge = status.running
+    ? 'backup-icloud__badge--running'
+    : !status.available || status.attention
+      ? 'backup-icloud__badge--attention'
+      : '';
+  return (
+    <section className="backups-sheet__section backup-icloud" aria-labelledby={titleId}>
+      <details className="backup-icloud__disclosure" open>
+        <summary className="backup-icloud__summary">
+          <span className="backup-icloud__chevron" aria-hidden="true">
+            ▸
+          </span>
+          <h3 id={titleId}>{title}</h3>
+          <span className={`backup-icloud__badge ${badge}`}>
+            {status.available ? iCloudPhaseLabel(status.phase) : 'Unavailable'}
+          </span>
+        </summary>
+        <div className="backup-icloud__body">{children}</div>
+      </details>
     </section>
   );
 }
