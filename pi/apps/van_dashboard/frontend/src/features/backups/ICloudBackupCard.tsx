@@ -83,7 +83,7 @@ export function ICloudBackupCard({
               ? 'Local frozen copy'
               : p.verification
                 ? 'Download verification'
-                : 'Upload estimate'}
+                : `${formatBytes(p.done)} of ${formatBytes(p.total)}`}
             {p.percent === null ? '' : ` · ${p.percent.toFixed(1)}%`}
             <ICloudUploadSpeed status={status} />
             <UploadTimeLeft status={status} />
@@ -106,14 +106,14 @@ export function ICloudBackupCard({
               >
                 <span style={{ width: `${p.percent}%` }} />
               </div>
-              <small>
-                {formatBytes(p.done)} of {formatBytes(p.total)}
-                {p.capturing
-                  ? ' · local capture; no cloud recovery point yet'
-                  : p.verification
-                    ? ` · ${status.progress.verifiedFiles ?? 0}/${status.progress.verificationTotalFiles ?? '—'} files verified`
-                    : ' · includes files saved by earlier attempts'}
-              </small>
+              {(p.capturing || p.verification) && (
+                <small>
+                  {formatBytes(p.done)} of {formatBytes(p.total)}
+                  {p.capturing
+                    ? ' · local capture; no cloud recovery point yet'
+                    : ` · ${status.progress.verifiedFiles ?? 0}/${status.progress.verificationTotalFiles ?? '—'} files verified`}
+                </small>
+              )}
               {p.verification && status.running && (status.progress.currentFileBytes ?? 0) > 0 && (
                 <small>
                   Checking current file: {formatBytes(status.progress.currentFileBytes)} downloaded;

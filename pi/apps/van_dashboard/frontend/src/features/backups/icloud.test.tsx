@@ -79,7 +79,7 @@ describe('iCloud dashboard', () => {
     expect(iCloudUploadTimeLeft(status)).toBe('2h 23m');
     const view = render(<ICloudBackupCard status={status} />);
     expect(screen.getByText(/2h 23m left/)).toBeInTheDocument();
-    expect(screen.getByText(/Upload estimate.*96.6%/)).toBeInTheDocument();
+    expect(screen.getByText(/232 MiB of 241 MiB.*96.6%/)).toBeInTheDocument();
     for (const changes of [
       { running: false },
       { progressStale: true },
@@ -286,19 +286,21 @@ describe('iCloud dashboard', () => {
       const status = cloud();
       Object.assign(status, { running: true, phase: 'uploading', updatedAt: Date.now() / 1000 });
       const speed = 2.2 * 1024 ** 2;
-      const total = ((2 * 86400 + 2 * 3600 + 33 * 60 - 1) * speed) / 0.989;
       Object.assign(status.progress, {
         uploadBytesPerSecond: speed,
-        uploadTotalBytes: total,
-        uploadEstimatedBytes: total * 0.011,
+        uploadTotalBytes: 403 * 1024 ** 3,
+        uploadEstimatedBytes: 20 * 1024 ** 3,
       });
       const view = render(<ICloudBackupCard status={status} kind={kind} />);
-      const headline = screen.getByText(/Upload estimate/);
-      expect(headline).toHaveTextContent('Upload estimate · 1.1% · 2.2 MiB/s · 2d 2h 33m left');
+      const headline = screen.getByText(/20 GiB of 403 GiB/);
+      expect(headline).toHaveTextContent('20 GiB of 403 GiB · 5.0% · 2.2 MiB/s · 2d 1h 32m left');
+      expect(
+        screen.queryByText(/includes files saved by earlier attempts/),
+      ).not.toBeInTheDocument();
       expect(screen.queryByText(/Upload speed:/)).not.toBeInTheDocument();
       view.rerender(<ICloudBackupCard status={{ ...status, progressStale: true }} kind={kind} />);
-      expect(headline).toHaveTextContent('Upload estimate · 1.1% · measuring speed…');
-      expect(screen.queryByText(/2.2 MiB\/s|2d 2h 33m left/)).not.toBeInTheDocument();
+      expect(headline).toHaveTextContent('20 GiB of 403 GiB · 5.0% · measuring speed…');
+      expect(screen.queryByText(/2.2 MiB\/s|2d 1h 32m left/)).not.toBeInTheDocument();
       view.rerender(<ICloudBackupCard status={{ ...status, running: false }} kind={kind} />);
       expect(screen.queryByText(/MiB\/s|measuring speed/)).not.toBeInTheDocument();
     },
