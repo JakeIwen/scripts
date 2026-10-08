@@ -118,12 +118,15 @@ def pending_config_changes(saved, changes):
     return result
 
 
-def backup_configuration(database, snapshot, prefix='btt-config-backup-', filename='backup.json'):
+def backup_configuration(database, snapshot, prefix='btt-config-backup-', filename='backup.json', directory_root=None):
     if '/' in prefix or '\\' in prefix:
         raise ValueError('Backup prefix must not contain path separators.')
     if Path(filename).name != filename or filename in ('.', '..'):
         raise ValueError('Backup filename must be a simple filename.')
-    directory = Path(tempfile.mkdtemp(prefix=prefix, dir=ROOT/'tmp'))
+    parent = ROOT/'tmp' if directory_root is None else Path(directory_root)
+    if not parent.is_dir() or parent.is_symlink():
+        raise ValueError('Backup parent must be an existing real directory.')
+    directory = Path(tempfile.mkdtemp(prefix=prefix, dir=parent))
     path = directory/filename
     path.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2)+'\n', encoding='utf-8')
     if json.loads(path.read_text(encoding='utf-8')) != snapshot:

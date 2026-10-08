@@ -35,6 +35,15 @@ compare it with this checkout. Deployed files may differ from the repository.
   `provision` (new networks), `status` (status/dashboard output), and `starlink`
   (power-off roaming). Ship the entrypoint and every sibling together.
 - `macbook/`: macOS shell utilities, AppleScripts, and BetterTouchTool helpers.
+  `macbook/bettertouchtool/btt.py` is the maintenance CLI; `btt_common.py/.js`
+  share read-only inspection and backup helpers. `repair_media_actions.py`
+  defines the action-recovery wire contract consumed by its JXA worker.
+  `macbook/bettertouchtool/btt_guard/` owns explicit known-good checkpoints,
+  read-only integrity audits, approved restoration, ntfy warnings and periodic
+  launchd control. Its `model.py` owns shared contracts/statuses; `storage.py`
+  owns private atomic state. Never promote audit output into the known-good
+  pointer automatically. Checkpoint integration fixtures live in
+  `macbook/tests/btt_guard_fixtures.py`.
 - `shared/`: code imported or deployed on more than one host.
 - `pi/apps/van_dashboard/van_dashboard_ubnt_recovery.py` reconciles uncertain
   Starlink antenna operations against fresh radio state without replaying them.

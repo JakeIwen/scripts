@@ -28,6 +28,7 @@ vanrouter/etc/init.d/*
 !vanrouter/etc/sysupgrade.conf
 vanrouter/build/
 macbook/build/
+.local/btt-guard/
 # Personal BTT dumps belong in ignored output folders, not alongside source.
 macbook/bettertouchtool/backups/
 macbook/bettertouchtool/generated/

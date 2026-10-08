@@ -20,6 +20,9 @@ def parser():
     commands = result.add_subparsers(dest='command')
     commands.add_parser('inspect', help='read-only saved Media configuration summary; no Apple Events')
     commands.add_parser('backup', help='create a private SQLite configuration snapshot; no live changes')
+    commands.add_parser('restart', help='cleanly restart BTT without executing configured actions')
+    guard = commands.add_parser('guard', help='known-good checkpoints, audits, approved repairs and monitoring')
+    guard.add_argument('arguments', nargs=argparse.REMAINDER)
     media_restore = commands.add_parser('restore-media', help='recover a deleted Media tree only; inspect by default')
     media_restore.add_argument('--source', type=Path, help='appearance backup.json; defaults to newest')
     media_restore.add_argument('--apply', action='store_true')
@@ -35,7 +38,7 @@ def parser():
         if name == 'notes':
             command.add_argument('--labels-only', action='store_true')
     repair = commands.add_parser('repair', help='targeted recovery; persistence recovery restarts BTT')
-    repair.add_argument('target', choices=('rps', 'persistence', 'sizes', 'paths'))
+    repair.add_argument('target', choices=('rps', 'persistence', 'sizes', 'paths', 'actions', 'dependencies'))
     repair.add_argument('--apply', action='store_true')
     repair.add_argument('--with-escape', action='store_true', help='RPS repair only')
     repair.add_argument('--full-height-dropdowns', action='store_true', help='persistence repair only')
@@ -72,6 +75,10 @@ def command_for(args):
             raise ValueError('--full-height-dropdowns is only valid for repair persistence')
         if args.target == 'paths':
             return python('repair_script_paths.py', *(['--apply'] if args.apply else ['--inspect']))
+        if args.target == 'actions':
+            return python('repair_media_actions.py', *(['--apply'] if args.apply else ['--inspect']))
+        if args.target == 'dependencies':
+            return python('repair_media_actions.py', '--dependencies-only', *(['--apply'] if args.apply else ['--inspect']))
         if args.target == 'rps':
             return python('repair_rps.py', *inspect, *(['--with-escape'] if args.with_escape else []))
         if args.target == 'persistence':
@@ -100,9 +107,18 @@ def inspect_saved(database):
 
 def main(argv=None):
     cli = parser()
-    args = cli.parse_args(argv)
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] == 'guard':
+        return subprocess.run([sys.executable, '-B', '-m', 'macbook.bettertouchtool.btt_guard',
+                               *arguments[1:]], cwd=DIRECTORY.parents[1], check=False).returncode
+    args = cli.parse_args(arguments)
     if args.command is None:
         cli.print_help()
+        return 0
+    if args.command == 'restart':
+        from stabilize_media import restart_btt
+        restart_btt()
+        print('BTT restarted cleanly.')
         return 0
     if args.command == 'inspect':
         print(json.dumps(inspect_saved(current_database()), ensure_ascii=False, indent=2))

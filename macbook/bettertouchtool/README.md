@@ -21,6 +21,8 @@ Apple Events access is sandboxed. `inspect` and `backup` need no Apple Events.
 | --- | --- |
 | `inspect` | Read-only saved Media summary, including unassigned buttons; no action execution. |
 | `backup` | Private, consistent SQLite configuration snapshot under ignored `tmp/`. |
+| `guard …` | Known-good checkpoints, read-only audits, approved repair and scheduled ntfy warnings; see below. |
+| `restart` | Clean restart through the existing maintenance helper; no button execution. |
 | `restore-media` | Inspect recovery of a **deleted** Media tree from the latest appearance backup; `--apply` restores missing records individually. Optional `--source BACKUP.json`. |
 | `style main` | Main-bar typography, partymode centering, original speaker icons. |
 | `style transport` | Original transport artwork and `20s` / `5m` captions. |
@@ -31,6 +33,8 @@ Apple Events access is sandboxed. `inspect` and `backup` need no Apple Events.
 | `repair rps` | Restore the missing sync-button link without running a deployment; optional `--with-escape`. |
 | `repair sizes` | Repair conflicting min/max dimensions without normalizing valid custom sizes. |
 | `repair paths` | Repair reviewed moved-script paths in active floating-menu actions and named triggers; `--apply` changes command fields only. |
+| `repair actions` | Recover empty Media buttons from prior exports; `--apply` backs up, adds individual actions, and **restarts BTT to verify persistence**. |
+| `repair dependencies` | Preview missing named dependencies; `--apply` copies unambiguous simple dependencies without enabling old presets, then verifies after restart. |
 | `repair persistence` | Targeted speaker/Notes recovery; **restarts BTT when applied**. |
 | `restore-sizes BACKUP.json --apply` | Guarded restoration of a sizing repair's prior values only. |
 
@@ -70,6 +74,103 @@ children are rejected. Save checks poll for up to60seconds and stop immediately
 when complete; they no longer abort after8seconds.
 
 ## Code organization
+
+### BTT Guard: known-good recovery and warnings
+
+Commands below are run from the repository root. `guard inspect` checks the
+current graph even before there is a checkpoint. Checkpoints require the owning
+user's Terminal because their runtime export uses BTT's Apple Events API.
+
+```sh
+./macbook/bettertouchtool/btt.py guard inspect
+./macbook/bettertouchtool/btt.py guard checkpoint --accept-current
+./macbook/bettertouchtool/btt.py guard audit
+./macbook/bettertouchtool/btt.py guard repair
+./macbook/bettertouchtool/btt.py guard repair --apply
+```
+
+Checkpoint promotion is explicit; replacing one also requires `--replace`.
+The active pointer never advances during ordinary audits, BTT upgrades, failed
+captures, or repairs. Prior generations are retained without automatic pruning.
+Each generation contains a consistent SQLite backup, validated runtime exports,
+flat recovery definitions, and self-contained copies of managed preset images.
+Files are private and checksummed under ignored `.local/btt-guard/`. Runtime and
+saved state must agree, and unresolved dependencies/empty active buttons block
+promotion. Failed export validation preserves private diagnostics under
+`rejected-captures/`, never a replacement known-good checkpoint.
+
+Audits compare UUID relationships, active presets, app scopes, action payloads,
+enabled flags, action sequence, scripts and operational menu settings. Pure label,
+font, color and main-item reorder changes do not trigger warnings. Named triggers
+and referenced floating dropdowns are included. Unreadable databases, unsupported
+schemas or invalid checkpoints are **unavailable**, never silently healthy.
+
+Repair is preview-only without `--apply`. It creates missing records individually
+and reattaches genuinely detached records; detached actions also regain their
+sequence position. Changed commands, a new owning parent, disabled dependencies,
+missing presets or ambiguous scope stop the repair for review. It never edits
+live SQLite, runs a button, activates an old preset or imports a replacement
+menu tree. A safety backup precedes writes, followed by a clean BTT restart,
+saved-state audit and runtime verification. Legacy unscoped named triggers can
+be checkpointed/audited but are not automatically recreated if deleted: their
+app binding needs explicit review. Integrity checks are not playback tests;
+external scripts, services, network connectivity and arbitrary external icon
+files remain outside this configuration monitor's guarantee.
+
+```sh
+./macbook/bettertouchtool/btt.py guard service prepare
+./macbook/bettertouchtool/btt.py guard service install
+./macbook/bettertouchtool/btt.py guard service verify
+./macbook/bettertouchtool/btt.py guard service status
+```
+
+The optional boot-time `com.jacobr.btt-guard` LaunchDaemon runs as the owning user
+once per minute, with absolute interpreter/workspace paths and private logs.
+This is a finite scheduled check, not a continuously running web app: it uses
+`StartInterval`, not KeepAlive or an HTTP server. `prepare` only writes/lints the
+plist. `install` uses sudo only for the plist/launchctl operations. `verify`
+requires a fresh completion heartbeat from the real registered job. Do not call
+it installed merely because preparation or a foreground monitor pass succeeded.
+`service stop/start/uninstall` controls only this matching registration; state
+and checkpoints are retained. Uninstall before moving the checkout.
+
+Warnings use `NTFY_WARNING_URL` sourced privately from `pi/secrets/.bash_variables`.
+The URL is never placed in process arguments, logs, plists or checkpoints.
+Two identical unhealthy checks at least 60 seconds apart produce an alert;
+successful alerts are deduplicated, failed deliveries retry after five minutes,
+and two healthy checks produce one recovery notice. Alerts contain generic
+finding counts only, not commands, labels, note titles or UUIDs. `last-audit.json`
+is the private detailed report; a failed delivery does not erase the warning.
+Malformed monitor state stays preserved while a separate recovery-state file
+maintains bounded warnings and unavailable heartbeats. `guard notify-test --send`
+sends one clearly labelled test; `guard monitor --no-notify` runs a local pass.
+
+`guard service status` distinguishes job supervision from `audit_status`; a
+running monitor reporting unavailable is not proof that the menu is healthy.
+As with any local monitor, a stopped/uninstalled job cannot notify about itself.
+
+### Missing action assignments
+
+`btt.py repair actions` checks all enabled standard items in the current Media
+tree and finds the newest export that still has actions for each empty item.
+Existing actions, names, layout, icons and item order are preserved. Applying
+creates explicit child records (not a nested menu reimport), repairs reviewed
+stale paths in restored commands, and checks named-trigger dependencies. A simple
+dependency present only in one inactive preset can be copied into Master without
+enabling or modifying that old preset. Ambiguous or unsupported recovery refuses
+to proceed. No speaker, media, clipboard or sync action is executed by the repair.
+
+Apply backs up the current database and runtime definitions before writing,
+checks API associations, then quits/reopens BTT cleanly and verifies saved parent
+links, actions, enabled flags and named-trigger resolution. It does not wait for
+the asynchronous save timer and mistake a delayed save for permanent loss.
+No force quit or automatic rollback is attempted if verification fails.
+
+The supported scope is restoring **empty** existing buttons, not rolling back
+modified action chains or deleted buttons. An offline database/export can be
+inspected with `repair_media_actions.py --database ... --source ... --inspect`;
+an alternate database cannot be applied. API plan validation and read-only
+inspection tests do not contact speakers or send media commands.
 
 ### Stale script references
 
@@ -113,6 +214,16 @@ play audio or discover speakers.
   implementations behind the CLI. Existing paths remain supported.
 - `repair_script_paths.py/.js`: read-only discovery and guarded field-only path
   repair, with independent runtime and disk verification.
+- `repair_media_actions.py/.js`: missing-assignment recovery; the Python module
+  defines the `ActionRepairPlan` wire contract consumed by its JXA worker. Reuses
+  common snapshots, action normalization/path mappings and clean restart helpers.
+- `btt_guard/`: package-based guard; `model.py` owns wire/status contracts,
+  `database.py`/`audit.py` read and compare saved state, `definitions.py` and
+  `checkpoint.py` validate immutable recovery material, `repair.py`/`worker.js`
+  implement approved restoration, and `monitor.py`/`notify.py`/`service.py` own
+  warning state, private delivery and boot scheduling. `storage.py` shares private
+  atomic file writes/locking. Legacy standalone helpers are called through their
+  CLI instead of introducing import-path shims.
 - `install_*_menu.*`, `build_performance_audio_menu.py`, `tools_menu_style.py`:
   app-specific installers for Audio, BPM, Rhythm, video conversion and metadata
   stripping. Kept at their established paths for their build/install workflows.

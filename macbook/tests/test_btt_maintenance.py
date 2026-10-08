@@ -18,7 +18,7 @@ sys.path.pop(0)
 class MaintenanceTests(unittest.TestCase):
     def test_every_change_command_defaults_to_inspection(self):
         for argv in [['style'],['style','transport'],['style','status'],['status'],['notes'],['notes','--labels-only'],
-                     ['escape'],['repair','rps'],['repair','rps','--with-escape'],['repair','sizes'],['repair','persistence'],['repair','paths']]:
+                     ['escape'],['repair','rps'],['repair','rps','--with-escape'],['repair','sizes'],['repair','persistence'],['repair','paths'],['repair','actions'],['repair','dependencies']]:
             with self.subTest(argv=argv):
                 command=module.command_for(module.parser().parse_args(argv))
                 self.assertIn('--inspect',command)
@@ -33,6 +33,21 @@ class MaintenanceTests(unittest.TestCase):
         command=module.command_for(module.parser().parse_args(['repair','paths','--apply']))
         self.assertEqual(command[-1],'--apply')
         self.assertTrue(command[-2].endswith('repair_script_paths.py'))
+        command=module.command_for(module.parser().parse_args(['repair','actions','--apply']))
+        self.assertEqual(command[-1],'--apply')
+        self.assertTrue(command[-2].endswith('repair_media_actions.py'))
+        command=module.command_for(module.parser().parse_args(['repair','dependencies','--apply']))
+        self.assertIn('--dependencies-only',command)
+        self.assertEqual(command[-1],'--apply')
+
+    def test_guard_uses_package_entry_without_import_path_shims(self):
+        with patch.object(module.subprocess,'run') as runner:
+            runner.return_value.returncode=0
+            self.assertEqual(module.main(['guard','--state-dir','/private/tmp/fixture','audit']),0)
+        command=runner.call_args.args[0]
+        self.assertIn('macbook.bettertouchtool.btt_guard',command)
+        self.assertEqual(command[-3:],['--state-dir','/private/tmp/fixture','audit'])
+        self.assertEqual(runner.call_args.kwargs['cwd'],DIRECTORY.parents[1])
 
     def test_deleted_media_recovery_requires_explicit_apply(self):
         command=module.command_for(module.parser().parse_args(['restore-media']))
