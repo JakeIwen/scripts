@@ -24,6 +24,7 @@ from pi.apps.video_library.library import MediaLibrary, default_sources
 from pi.apps.video_library.maintenance import identity_repair_evidence as evidence
 from pi.apps.video_library.maintenance.same_file_repair import (
     ChangedEvidence,
+    PairStatus,
     digest,
     ensure_unused,
     one,
@@ -92,7 +93,7 @@ def _ensure_canonical_identity(catalog, runtime, timestamp, changes):
 
 
 def _version_locations(catalog, runtime, timestamp, changes):
-    if runtime["observations"]["location_status"] == "done":
+    if runtime["observations"]["location_status"] == evidence.RepairPhase.DONE:
         return []
     inserted = []
     for old in runtime["observations"]["active_locations"]:
@@ -108,7 +109,7 @@ def _version_locations(catalog, runtime, timestamp, changes):
 
 
 def _version_aliases(catalog, runtime, timestamp, changes):
-    if runtime["observations"]["alias_status"] == "done":
+    if runtime["observations"]["alias_status"] == evidence.RepairPhase.DONE:
         return []
     inserted = []
     for old in runtime["observations"]["active_aliases"]:
@@ -124,7 +125,7 @@ def _version_aliases(catalog, runtime, timestamp, changes):
 
 
 def _rebind_legacy(catalog, runtime, timestamp, changes):
-    if runtime["legacy_status"] == "done":
+    if runtime["legacy_status"] == evidence.RepairPhase.DONE:
         return False
     old = runtime["legacy"]
     _mark(changes, "updated", PREFIX + "legacy_keys", old["source"], old["media_key"])
@@ -221,14 +222,14 @@ def _library_membership(library):
 
 def _verify_postconditions(db, runtime, plan, before, changes, report, library, catalog):
     final = evidence.validate_against_plan(db, plan)
-    if final["identities"]["wrong_status"] != "done":
+    if final["identities"]["wrong_status"] != evidence.RepairPhase.DONE:
         raise RuntimeError("wrong Silo physical identity remains active")
     if final["identities"]["canonical_stable"] is None:
         raise RuntimeError("canonical stable identity missing")
     for key in ("location_status", "alias_status"):
-        if final["observations"][key] != "done":
+        if final["observations"][key] != evidence.RepairPhase.DONE:
             raise RuntimeError(f"post-repair {key} is not canonical")
-    if final["legacy_status"] != "done":
+    if final["legacy_status"] != evidence.RepairPhase.DONE:
         raise RuntimeError("legacy key was not rebound")
     integrity = [row[0] for row in db.execute("PRAGMA integrity_check")]
     foreign_keys = [list(row) for row in db.execute("PRAGMA foreign_key_check")]
@@ -290,7 +291,7 @@ def run_repair(db, plan, report, library, apply):
         }
         report["sqlite_changes"] = db.total_changes
         changed = any(changes[kind][table] for kind in changes for table in changes[kind])
-        report["status"] = "approved" if changed else "already_repaired"
+        report["status"] = PairStatus.READY if changed else PairStatus.DONE
         if apply:
             db.commit()
             report["committed"] = True
@@ -299,7 +300,7 @@ def run_repair(db, plan, report, library, apply):
             report["rolled_back"] = True
     except (ChangedEvidence, OSError) as exc:
         db.rollback()
-        report.update(status="skipped", skipped_reason=str(exc), rolled_back=True,
+        report.update(status=PairStatus.SKIPPED, skipped_reason=str(exc), rolled_back=True,
                       sqlite_changes=db.total_changes)
     except BaseException:
         db.rollback()
@@ -357,13 +358,13 @@ def _run_with_report(args) -> int:
             if args.apply:
                 report["quiescence"] = ensure_unused(args.db)
             _repair_run(args, plan, report)
-            code = 2 if report.get("status") == "skipped" else 0
+            code = 2 if report.get("status") == PairStatus.SKIPPED else 0
         except Exception as exc:
             report["error"] = f"{type(exc).__name__}: {exc}"
         finally:
             report["runtime_seconds"] = round(time.monotonic() - started, 3)
             report["summary"] = {"status": report.get("status", "error"),
-                                 "skipped": int(report.get("status") == "skipped"),
+                                 "skipped": int(report.get("status") == PairStatus.SKIPPED),
                                  "committed": report["committed"]}
             json.dump(report, output, indent=2)
             output.write("\n")

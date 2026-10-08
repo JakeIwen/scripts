@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from enum import Enum
 import os
 import sqlite3
 from typing import Any
@@ -14,6 +15,11 @@ from pi.apps.video_library.maintenance.same_file_repair import (
     require,
     rows,
 )
+
+class RepairPhase(str, Enum):
+    READY = "ready"
+    DONE = "done"
+
 
 PREFIX = "video_v2_"
 PLAN_VERSION = 1
@@ -217,7 +223,7 @@ def _identity_evidence(db, observation):
     wrong_target = [by_id[WRONG_IDENTITY], *wrong_extra]
     active = [row for row in wrong_target if row["device_id"] is not None]
     return {"rows": all_rows, "wrong_target": wrong_target,
-            "wrong_status": "ready" if active else "done",
+            "wrong_status": RepairPhase.READY if active else RepairPhase.DONE,
             "canonical_stable": correct_extra[0] if correct_extra else None}
 
 
@@ -229,7 +235,7 @@ def _active_observation_status(db, table, source_rows, selector):
         current.append(one(db, table, f"WHERE {where}", tuple(source[field] for field in fields)))
     if all(row is not None and row["asset_id"] == WRONG_ASSET for row in current):
         require(current == source_rows, f"{table}: active source versions changed")
-        return "ready", current
+        return RepairPhase.READY, current
     if all(row is not None and row["asset_id"] == CORRECT_ASSET for row in current):
         ignored = {"location_id", "alias_id", "asset_id", "valid_from", "valid_to", "last_seen"}
         for source, replacement in zip(source_rows, current):
@@ -238,7 +244,7 @@ def _active_observation_status(db, table, source_rows, selector):
             require(source["valid_to"] is not None and
                     replacement["valid_from"] == source["valid_to"],
                     f"{table}: replacement version boundary changed")
-        return "done", current
+        return RepairPhase.DONE, current
     raise ChangedEvidence(f"{table}: partial or unexpected active ownership")
 
 
@@ -270,7 +276,7 @@ def _legacy_evidence(db):
         require(actual[field] == EXPECTED_LEGACY[field], f"legacy binding changed: {field}")
     require(actual["last_seen"] >= EXPECTED_LEGACY["last_seen"], "legacy last_seen regressed")
     require(actual["asset_id"] in (AUDIO_ASSET, CORRECT_ASSET), "legacy binding target changed")
-    return actual, "ready" if actual["asset_id"] == AUDIO_ASSET else "done"
+    return actual, RepairPhase.READY if actual["asset_id"] == AUDIO_ASSET else RepairPhase.DONE
 
 
 def _counterpart_summary(db):
