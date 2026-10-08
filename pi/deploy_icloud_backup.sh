@@ -17,6 +17,7 @@ scp -q "$repo/pi/scripts/backup/icloud_backup.py" \
   "$repo/pi/scripts/backup/time_machine_store.py" \
   "$repo/pi/scripts/backup/backup_conf.sh" \
   "$repo/pi/scripts/backup/icloud_progress.py" \
+  "$repo/pi/scripts/backup/icloud_inventory.py" \
   "$repo/pi/scripts/backup/icloud_status.py" \
   "$repo/pi/scripts/backup/cloud_backup_control.py" \
   "$repo/pi/scripts/backup/icloud_backup_control.py" \
@@ -51,7 +52,7 @@ live_conf_hash=$(sha256sum /home/pi/scripts/backup/backup_conf.sh | awk '{print 
 new_conf_hash=$(sha256sum "$stage/backup_conf.sh" | awk '{print $1}')
 [[ "$live_conf_hash" == "$2" || "$live_conf_hash" == "$new_conf_hash" ]] || { echo 'Live backup configuration differs; inspect before deploying.' >&2; exit 1; }
 /usr/bin/install -d -m 0700 "$stage/previous"
-for name in time_machine_store.py backup_priority.py mac_capture_control.py icloud_status.py cloud_backup_control.py backup_priority_control.py icloud_backup_control.py icloud_progress.py icloud_backup.py icloud_uplink.py icloud_backup.sh backup_conf.sh ICLOUD_RESTORE.txt; do
+for name in time_machine_store.py backup_priority.py mac_capture_control.py icloud_status.py cloud_backup_control.py backup_priority_control.py icloud_backup_control.py icloud_inventory.py icloud_progress.py icloud_backup.py icloud_uplink.py icloud_backup.sh backup_conf.sh ICLOUD_RESTORE.txt; do
   live=/home/pi/scripts/backup/$name
   [[ ! -e "$live" ]] || /usr/bin/cp -p "$live" "$stage/previous/$name"
   /usr/bin/sudo -n /usr/bin/install -o pi -g pi -m 0750 "$stage/$name" "$live.new"

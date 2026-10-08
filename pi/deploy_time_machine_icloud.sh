@@ -35,6 +35,7 @@ COPYFILE_DISABLE=1 /usr/bin/tar --no-xattrs -cf - \
   pi/scripts/backup/time_machine_icloud_control.py pi/scripts/backup/cloud_backup_control.py \
   pi/scripts/backup/icloud_backup.py pi/scripts/backup/icloud_backup_control.py pi/scripts/backup/icloud_progress.py \
   pi/scripts/backup/icloud_status.py pi/scripts/backup/icloud_uplink.py \
+  pi/scripts/backup/icloud_inventory.py \
   pi/scripts/backup/ICLOUD_RESTORE.txt \
   pi/scripts/connectivity_status.py pi/configs/icloud-backup.json \
   pi/configs/time-machine-icloud.json pi/services/vanpi-time-machine-icloud.service \
@@ -107,7 +108,7 @@ install_atomic() {
   sudo -n /usr/bin/mv -Tf "$temporary" "$target"
 }
 /usr/bin/install -d -m 0700 previous
-for name in time_machine_store.py backup_priority.py mac_capture_control.py icloud_status.py cloud_backup_control.py backup_priority_control.py icloud_progress.py icloud_backup.py icloud_backup_control.py time_machine_icloud_control.py time_machine_staging.py time_machine_icloud.py icloud_backup.sh time_machine_icloud.sh time_machine_icloud_status.py backup_conf.sh TIME_MACHINE_ICLOUD_RESTORE.txt; do
+for name in time_machine_store.py backup_priority.py mac_capture_control.py icloud_status.py cloud_backup_control.py backup_priority_control.py icloud_inventory.py icloud_progress.py icloud_backup.py icloud_backup_control.py time_machine_icloud_control.py time_machine_staging.py time_machine_icloud.py icloud_backup.sh time_machine_icloud.sh time_machine_icloud_status.py backup_conf.sh TIME_MACHINE_ICLOUD_RESTORE.txt; do
   live=/home/pi/scripts/backup/$name
   [[ ! -e "$live" ]] || /usr/bin/cp -p "$live" previous/"$name"
   install_atomic pi/scripts/backup/"$name" "$live" 0750

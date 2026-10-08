@@ -125,6 +125,8 @@ compare it with this checkout. Deployed files may differ from the repository.
   serve the gear-menu UI in `features/backups/BackupPriorityMenu.tsx`; `priority.ts`
   owns its response contract. Both targeted cloud installers ship these modules
   and verify the shared backup configuration before updating it.
+- `pi/scripts/backup/icloud_inventory.py` owns cloud object fingerprint parsing
+  and size-based upload estimates, re-exported by the shared cloud worker.
 - `pi/scripts/backup/time_machine_staging.py` owns local orphan-chunk cleanup.
   Plan/apply require the common backup lock, verified mount and owned store,
   preserving capture-index, pending/published manifests and upload/verification
