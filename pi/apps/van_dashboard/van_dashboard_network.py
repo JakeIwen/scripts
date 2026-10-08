@@ -6,6 +6,7 @@ This module is imported as part of the van_dashboard package.
 import signal
 import os
 import tempfile
+from .van_dashboard_ubnt_recovery import UbntConfirmationPending, reconcile_starlink_confirmation
 
 __all__ = [
     "ConnectivityMonitor",
@@ -463,6 +464,7 @@ class UbntWifiController:
     def _accept_wifi_locked(self, wifi):
         if (wifi.get("checked_at") or 0) >= (self.wifi.get("checked_at") or 0):
             self.wifi = wifi
+            self.operation = reconcile_starlink_confirmation(self.operation, wifi)
 
     def start(self, kind, payload=None, *, power_request=None):
         if kind not in self.TIMEOUTS:
@@ -621,6 +623,8 @@ class UbntWifiController:
         if not isinstance(parsed, dict):
             raise RuntimeError("UBNT Wi-Fi tool returned invalid data")
         if result.returncode or parsed.get("ok") is not True:
+            if parsed.get("confirmation_pending") is True:
+                raise UbntConfirmationPending(str(parsed.get("message") or "Confirmation pending"))
             raise RuntimeError(str(parsed.get("message") or "UBNT Wi-Fi operation failed"))
         wifi = parsed.get("wifi")
         if not isinstance(wifi, dict) or wifi.get("version") != 1:
@@ -643,6 +647,7 @@ class UbntWifiController:
         message = None
         wifi = None
         final_kind = kind
+        confirmation_pending = False
         try:
             result = (self._tool_result("starlink-off", abort_requested=abort_requested)
                       if kind == "starlink" and payload.get("power") == "off" else
@@ -680,6 +685,7 @@ class UbntWifiController:
                         error = f"UBNT operation stopped, but automatic selection could not resume: {resume_exc}"
             else:
                 error = str(exc)
+                confirmation_pending = isinstance(exc, UbntConfirmationPending)
                 wifi = self._refresh_after_failure()
         finally:
             if "password" in payload:
@@ -695,6 +701,8 @@ class UbntWifiController:
                 "completed_at": int(self.wall_clock()),
                 "message": message,
                 "error": error,
+                "confirmation_pending": confirmation_pending,
+                "power": payload.get("power"),
             }
             self.abort_requested = None
 

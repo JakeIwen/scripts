@@ -185,6 +185,10 @@ export function decodeUbntWifiStatus(value: unknown): UbntWifiStatus {
     profiles: arrayValue(wifi.profiles, 'wifi.profiles').map(decodeProfile),
     networks: arrayValue(wifi.networks, 'wifi.networks').map(decodeNetwork),
     operation: {
+      confirmationPending:
+        operation.confirmation_pending === undefined
+          ? false
+          : booleanValue(operation.confirmation_pending, 'UBNT operation.confirmation_pending'),
       status: oneOf(operation.status, OPERATION_STATES, 'UBNT operation.status'),
       kind: nullableOneOf(operation.kind, OPERATION_KINDS, 'UBNT operation.kind'),
       startedAt: nullableNumber(operation.started_at, 'UBNT operation.started_at'),

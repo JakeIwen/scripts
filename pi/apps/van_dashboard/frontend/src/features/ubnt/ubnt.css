@@ -355,6 +355,10 @@
   border-color: #86504a;
 }
 
+.ubnt-operation--pending > small {
+  color: var(--muted);
+}
+
 .ubnt-section-heading {
   margin-bottom: 12px;
 }

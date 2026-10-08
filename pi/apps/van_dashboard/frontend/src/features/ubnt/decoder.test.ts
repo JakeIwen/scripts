@@ -4,6 +4,21 @@ import { decodeUbntWifiStatus } from './decoder';
 import { ubntPayload } from './testFixtures';
 
 describe('decodeUbntWifiStatus', () => {
+  it('decodes uncertain confirmation separately from a known operation failure', () => {
+    const payload = ubntPayload('error');
+    expect(decodeUbntWifiStatus(payload).operation.confirmationPending).toBe(false);
+    const operation = { ...payload.operation, confirmation_pending: true };
+    expect(decodeUbntWifiStatus({ ...payload, operation }).operation.confirmationPending).toBe(
+      true,
+    );
+    expect(() =>
+      decodeUbntWifiStatus({
+        ...payload,
+        operation: { ...operation, confirmation_pending: 'true' },
+      }),
+    ).toThrow('UBNT operation.confirmation_pending must be true or false');
+  });
+
   it('preserves the background refresh flag and rejects malformed flags', () => {
     expect(decodeUbntWifiStatus({ ...ubntPayload(), refreshing: true }).statusRefreshing).toBe(
       true,

@@ -32,11 +32,17 @@ ABORT_REQUESTED = False
 
 
 class UbntWifiError(RuntimeError):
-    pass
+    def response(self):
+        return {"ok": False, "message": str(self),
+                "confirmation_pending": isinstance(self, UbntUnconfirmedError)}
 
 
 class UbntTransportError(UbntWifiError):
     """The remote operation may still be finishing after an airOS reload."""
+
+
+class UbntUnconfirmedError(UbntWifiError):
+    """Read-only reconciliation expired without establishing the outcome."""
 
 
 def _request_abort(_signum, _frame):
@@ -283,11 +289,16 @@ class UbntWifiClient:
         # Never replay a mutation after losing SSH: it can still own the remote
         # lock, reload the radio, or save credentials. Reconcile using reads.
         result = None
+        started = self.clock()
         try:
             result, _ = self._remote(operation, timeout, input_text=protocol, accepted=(0, 2))
         except UbntTransportError:
             pass
         deadline = self.clock() + self.recovery_seconds
+        if result is None:
+            # Losing SSH does not shorten the remote command's execution budget.
+            # Reloads and surveys continue on the antenna after the disconnect.
+            deadline = max(deadline, started + timeout)
         while True:
             try:
                 wifi = self.status()
@@ -297,9 +308,9 @@ class UbntWifiClient:
                 pass
             remaining = deadline - self.clock()
             if remaining <= 0:
-                raise UbntWifiError(
-                    f"UBNT {operation} could not be confirmed after waiting for the antenna "
-                    "to reconnect; refresh status before retrying"
+                raise UbntUnconfirmedError(
+                    f"UBNT {operation} could not be confirmed yet. The antenna may still "
+                    "be switching networks; status will continue to update."
                 )
             self.sleep(min(5, remaining))
 
@@ -583,11 +594,7 @@ def main(argv=None):
             **resumed,
         }
     elif operation_error is not None:
-        print(
-            json.dumps(
-                {"ok": False, "message": str(operation_error)}, separators=(",", ":")
-            )
-        )
+        print(json.dumps(operation_error.response(), separators=(",", ":")))
         return 1
     print(json.dumps(result, separators=(",", ":"), sort_keys=True))
     return 0

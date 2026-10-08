@@ -53,6 +53,7 @@ export interface UbntNetwork {
 }
 
 export interface UbntOperation {
+  confirmationPending?: boolean;
   status: UbntOperationState;
   kind: UbntOperationKind | null;
   startedAt: number | null;

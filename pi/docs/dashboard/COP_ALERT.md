@@ -264,10 +264,21 @@ request. Power-off cancels queued/startup work; a connection already applying
 finishes its safe boundary before automatic selection resumes.
 
 After an airOS connection change drops SSH, `ubnt_wifi.py` polls read-only status
-for up to two minutes instead of replaying the mutation. It verifies the requested
+through the original command deadline or two minutes after the disconnect,
+whichever is later, instead of replaying the mutation. Starlink power-off keeps
+its six-minute roaming allowance across the disconnect; reloads and the
+three-pass survey can outlast a two-minute confirmation window even for a known,
+strong network. Existing dashboard process deadlines cover this bounded wait
+and the final status read. It verifies the requested
 SSID, positive CCQ, and an idle remote manager before completing; provisioning
 also requires the saved profile to appear. An SSH-recovered result confirms the
 radio link only; OpenWrt reports Internet availability separately. The UI shows
 reconnecting during temporary transport errors, retains the last observation,
-and exposes errors when recovery expires. Authentication failures before a
+and describes expired confirmation as an uncertain outcome. A later observation
+newer than the timeout clears a Starlink confirmation warning only after the
+remote selector is idle and the requested result is established: power-on needs
+a positive denlink radio link; power-off needs the antenna to have left denlink.
+The completed result replaces the warning, so a later unrelated outage does not
+resurrect it. This confirms antenna state, not Internet access or profile writes.
+Authentication failures before a
 mutation and explicit remote command failures still fail immediately.

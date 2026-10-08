@@ -4,14 +4,10 @@ import { BottomSheet } from '../../components/BottomSheet';
 import type { PollingState } from '../../hooks/usePollingResource';
 import { formatRelativeTime } from '../../utils/format';
 import type { UbntControls } from './controls';
-import {
-  ubntOperationLabel,
-  ubntSecurityLabel,
-  ubntRadioConnected,
-  ubntRecovering,
-} from './presentation';
+import { ubntSecurityLabel, ubntRadioConnected, ubntRecovering } from './presentation';
 import type { UbntNetwork, UbntProfile, UbntWifiStatus } from './types';
 import { UbntProfileForm } from './UbntProfileForm';
+import { UbntOperationNotice } from './UbntOperationNotice';
 import { UbntProvisionForm } from './UbntProvisionForm';
 import { StarlinkControl, type StarlinkStatusResource } from './StarlinkControl';
 import './ubnt.css';
@@ -201,13 +197,7 @@ export function UbntSheet({ open, onClose, resource, controls, dashboardStatus }
 
         {dashboardStatus && <StarlinkControl resource={dashboardStatus} />}
 
-        {operation && (
-          <section className={`ubnt-operation ubnt-operation--${operation.status}`}>
-            <strong>Latest antenna operation</strong>
-            <span>{ubntOperationLabel(operation)}</span>
-            {operation.error && <small>{operation.error}</small>}
-          </section>
-        )}
+        <UbntOperationNotice operation={operation} />
 
         {joiningNetwork && (
           <UbntProvisionForm

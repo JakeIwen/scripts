@@ -36,6 +36,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   (power-off roaming). Ship the entrypoint and every sibling together.
 - `macbook/`: macOS shell utilities, AppleScripts, and BetterTouchTool helpers.
 - `shared/`: code imported or deployed on more than one host.
+- `pi/apps/van_dashboard/van_dashboard_ubnt_recovery.py` reconciles uncertain
+  Starlink antenna operations against fresh radio state without replaying them.
+  Frontend `features/ubnt/UbntOperationNotice.tsx` distinguishes pending
+  confirmation from an actual failure; the CLI emits `confirmation_pending`.
 - Network storage deployment test filesystem fixtures live in
   `pi/tests/network/_network_storage_support.py`.
 - `pi/tests/dashboard/_frontend_test_support.py` provides a temporary React

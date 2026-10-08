@@ -1,11 +1,93 @@
+import json
 import threading
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 from pi.apps.van_dashboard.van_dashboard_network import UbntWifiController
 
 
 class StarlinkConnectionTests(unittest.TestCase):
+    def pending_manager(self, power='off', pending=True):
+        observed = [self.wifi(True)]
+        observed[0]['checked_at'] = 90
+        calls = []
+
+        def command(args, timeout, input_text=None):
+            calls.append(args[-1])
+            if args[-1] in ('starlink-off', 'connect'):
+                payload = {'ok': False, 'message': 'Antenna outcome unconfirmed',
+                           'confirmation_pending': pending}
+                return SimpleNamespace(returncode=1, stdout=json.dumps(payload), stderr='')
+            return SimpleNamespace(returncode=0, stdout=json.dumps(
+                {'ok': True, 'wifi': observed[0]}), stderr='')
+
+        manager = UbntWifiController(command=command, wall_clock=lambda: 100)
+        manager.STARLINK_BOOT_SECONDS = 0
+        manager.start('starlink', {'power': power})
+        manager.thread.join(2)
+        self.assertFalse(manager.thread.is_alive())
+        self.assertEqual(manager.snapshot()['operation']['status'], 'error')
+        observed[0]['checked_at'] = 101
+        return manager, observed, calls
+
+    def refresh_manager(self, manager):
+        manager.request_refresh(max_age=0)
+        manager.refresh_thread.join(2)
+        self.assertFalse(manager.refresh_thread.is_alive())
+        return manager.snapshot()['operation']
+
+    def test_fresh_recovery_clears_uncertain_starlink_off_without_replaying(self):
+        manager, observed, calls = self.pending_manager()
+        operation = self.refresh_manager(manager)
+        self.assertEqual(operation['status'], 'complete')
+        self.assertIsNone(operation['error'])
+        self.assertFalse(operation['confirmation_pending'])
+        self.assertEqual(operation['message'], 'Antenna connected to Old')
+        self.assertEqual(calls, ['starlink-off', 'status', 'status'])
+        observed[0]['checked_at'] = 201
+        observed[0]['state'].update(associated_ssid=None, ccq_percent=0)
+        with mock.patch.object(manager, 'wall_clock', return_value=200):
+            self.assertEqual(self.refresh_manager(manager)['status'], 'complete')
+
+    def test_fresh_denlink_connection_clears_uncertain_power_on(self):
+        manager, observed, calls = self.pending_manager(power='on')
+        observed[0]['state'].update(configured_ssid='denlink', associated_ssid='denlink')
+        self.assertEqual(self.refresh_manager(manager)['status'], 'complete')
+        self.assertEqual(calls.count('connect'), 1)
+
+    def test_unrelated_connection_does_not_confirm_power_on(self):
+        manager, _, _ = self.pending_manager(power='on')
+        self.assertEqual(self.refresh_manager(manager)['status'], 'error')
+
+    def test_stale_or_unsettled_status_does_not_clear_confirmation(self):
+        for changes in ({'checked_at': 90}, {'checked_at': 100}, {'reachable': False},
+                        {'state': {'selector_running': True}},
+                        {'state': {'configured_ssid': 'denlink'}},
+                        {'state': {'associated_ssid': 'denlink'}},
+                        {'state': {'configured_ssid': None}}):
+            with self.subTest(changes=changes):
+                manager, observed, _ = self.pending_manager()
+                observed[0].update({k: v for k, v in changes.items() if k != 'state'})
+                observed[0]['state'].update(changes.get('state', {}))
+                operation = self.refresh_manager(manager)
+                self.assertEqual(operation['status'], 'error')
+                self.assertTrue(operation['confirmation_pending'])
+
+    def test_completed_release_without_alternative_does_not_claim_a_radio_link(self):
+        manager, observed, _ = self.pending_manager()
+        observed[0]['state'].update(configured_ssid='vanpi-disconnected-123',
+                                    associated_ssid=None, ccq_percent=0, automatic_paused=True)
+        operation = self.refresh_manager(manager)
+        self.assertEqual(operation['status'], 'complete')
+        self.assertEqual(operation['message'], 'Antenna has left the Starlink Wi-Fi network')
+
+    def test_genuine_failure_remains_visible_even_with_a_healthy_connection(self):
+        manager, _, _ = self.pending_manager(pending=False)
+        operation = self.refresh_manager(manager)
+        self.assertEqual(operation['status'], 'error')
+        self.assertEqual(operation['error'], 'Antenna outcome unconfirmed')
+
     def manager(self):
         manager = UbntWifiController()
         manager.STARLINK_BOOT_SECONDS = 0

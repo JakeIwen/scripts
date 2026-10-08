@@ -41,8 +41,13 @@ export function ubntStatusLabel(status: UbntWifiStatus | null, error: Error | nu
 
 export function ubntOperationLabel(operation: UbntOperation): string {
   if (operation.status === 'idle') return 'Idle';
+  if (operation.confirmationPending) return 'Wi-Fi change awaiting confirmation';
   const kind =
-    operation.kind === 'update-profile' ? 'profile update' : (operation.kind ?? 'status refresh');
+    operation.kind === 'starlink'
+      ? 'Antenna switch'
+      : operation.kind === 'update-profile'
+        ? 'Profile update'
+        : (operation.kind ?? 'status refresh');
   if (operation.status === 'running') return operation.message ?? `${kind} running`;
   if (operation.status === 'error') return `${kind} failed`;
   return operation.message ?? `${kind} complete`;

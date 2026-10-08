@@ -77,6 +77,65 @@ class SnapshotParserTests(unittest.TestCase):
 
 
 class ClientTests(unittest.TestCase):
+    def test_dropped_ssh_preserves_roaming_budget_and_late_recovery_headroom(self):
+        for disconnected_at, ready_at in ((20, 164), (340, 445)):
+            with self.subTest(disconnected_at=disconnected_at):
+                now, mutations = [0], []
+
+                def command(args, timeout, input_text=None):
+                    if args[-1].endswith(' starlink-off'):
+                        mutations.append(args[-1])
+                        now[0] = disconnected_at
+                        return Result(255, stderr='Connection closed by remote host')
+                    now[0] += 12
+                    snapshot = SNAPSHOT.replace(encoded('denlink'), encoded('Other Network'))
+                    if now[0] < ready_at:
+                        snapshot = snapshot.replace('|no|no|', '|no|yes|')
+                    return Result(stdout=snapshot)
+
+                client = ubnt_wifi.UbntWifiClient(
+                    command=command, clock=lambda: now[0],
+                    sleep=lambda seconds: now.__setitem__(0, now[0] + seconds),
+                )
+                result = client.starlink_off()
+                self.assertEqual(result['wifi']['state']['associated_ssid'], 'Other Network')
+                self.assertEqual(len(mutations), 1)
+                self.assertGreaterEqual(now[0], ready_at)
+                self.assertLess(now[0], max(360, disconnected_at + 120) + 60)
+
+    def test_roaming_confirmation_remains_bounded_when_ssh_is_lost(self):
+        now, mutations = [0], []
+
+        def command(args, timeout, input_text=None):
+            if args[-1].endswith(' starlink-off'):
+                mutations.append(args[-1])
+                return Result(255, stderr='Connection closed by remote host')
+            now[0] += 12
+            return Result(stdout=SNAPSHOT)
+
+        client = ubnt_wifi.UbntWifiClient(
+            command=command, clock=lambda: now[0],
+            sleep=lambda seconds: now.__setitem__(0, now[0] + seconds),
+        )
+        with self.assertRaises(ubnt_wifi.UbntUnconfirmedError):
+            client.starlink_off()
+        self.assertEqual(len(mutations), 1)
+        self.assertGreaterEqual(now[0], 360)
+        self.assertLessEqual(now[0], 420)
+
+    def test_cli_distinguishes_unconfirmed_outcomes_from_failed_commands(self):
+        for error, pending in ((ubnt_wifi.UbntUnconfirmedError('Still switching'), True),
+                               (ubnt_wifi.UbntWifiError('Command failed'), False)):
+            client = mock.Mock()
+            client.starlink_off.side_effect = error
+            output = io.StringIO()
+            with mock.patch.object(ubnt_wifi, 'UbntWifiClient', return_value=client), \
+                    redirect_stdout(output):
+                self.assertEqual(ubnt_wifi.main(['--json', 'starlink-off']), 1)
+            result = json.loads(output.getvalue())
+            self.assertFalse(result['ok'])
+            self.assertEqual(result['confirmation_pending'], pending)
+
     def test_starlink_off_is_sent_before_any_status_read(self):
         snapshot = SNAPSHOT.replace(encoded('denlink'), encoded('Other Network'))
         client, calls = self.recovery_client([Result(), Result(stdout=snapshot)])
