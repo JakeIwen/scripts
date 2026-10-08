@@ -22,6 +22,7 @@ ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/v
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/v1_bridge.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/legacy_progress.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/file_observations.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/filesystem_identity.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/deferred_positions.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/media_models.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/players/vlc_player.py

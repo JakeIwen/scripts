@@ -51,6 +51,15 @@ compare it with this checkout. Deployed files may differ from the repository.
 - Physical-file identity matching and observation persistence live in
   `pi/apps/video_library/file_observations.py`; the catalog owns their transaction
   and performs location versioning only after all observations agree.
+  `filesystem_identity.py` resolves Linux mount devices through `/dev/disk/by-uuid`
+  and stores `fsuuid:<UUID>` in the existing TEXT `device_id` column (schema v3).
+  Numeric history is retained; only live exact active paths with matching inode,
+  size and known nanosecond mtime can promote it. UUID resolution fails closed on
+  Linux; non-Linux numeric observations are not advertised as reboot-stable.
+  Identity matching requires equal size and compatible mtime; growing files need
+  an exact torrent locator for continuity, not an inode-only exception.
+  Older packages can open this schema but their matcher remains unsafe: rollback
+  requires quiescing the service and restoring the matching pre-change backup.
 - One-off video catalog maintenance lives in
   `pi/apps/video_library/maintenance/same_file_repair.py`, with behavior tests in
   `pi/tests/media/test_video_same_file_repair.py`. It is deliberately outside the
