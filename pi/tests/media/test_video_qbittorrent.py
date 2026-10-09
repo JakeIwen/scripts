@@ -374,6 +374,38 @@ class QbittorrentResolutionTests(unittest.TestCase):
 
         self.assertEqual(records[2].piece_range, (200, 0))
 
+    def test_seeding_torrent_unknown_availability_resolves(self):
+        transport = self.multi_file_transport()
+        transport.torrents[0].update(
+            state="forcedUP",
+            progress=1.0,
+            download_path="",
+            content_path=str(self.fixture.final / "Example Show Season 1"),
+        )
+        for item in transport.files[HASH_A]:
+            item.update(progress=1.0, availability=-1)
+        client = self.fixture.client(transport)
+        final_path = (
+            self.fixture.final / "Example Show Season 1" / "Season 01" / "Episode One.mkv"
+        )
+
+        records = client.reconcile_completed_torrent(HASH_A)
+        record = client.resolve_path(final_path)
+
+        self.assertEqual([item.availability for item in records], [None, None])
+        self.assertEqual(record.identity, qbt.TorrentFileIdentity("vanpi-qbt", HASH_A, 0))
+        self.assertIsNone(record.availability)
+
+    def test_other_out_of_range_availability_is_rejected(self):
+        for value in (-0.5, 1.5, True):
+            with self.subTest(value=value):
+                transport = self.multi_file_transport()
+                transport.files[HASH_A][0]["availability"] = value
+                client = self.fixture.client(transport)
+
+                with self.assertRaises(qbt.QbittorrentProtocolError):
+                    client.torrent_files(HASH_A)
+
 
 class QbittorrentAuthenticationAndHookTests(unittest.TestCase):
     def setUp(self):

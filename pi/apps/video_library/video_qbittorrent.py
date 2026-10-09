@@ -33,6 +33,7 @@ from urllib.request import (
     build_opener,
 )
 
+from .qbittorrent_availability import availability_unknown
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8080"
 DEFAULT_TIMEOUT = 3.0
@@ -369,7 +370,7 @@ class QbittorrentClient:
             size = _required_int(item, "size", minimum=0)
             progress = _required_fraction(item, "progress")
             priority = _required_int(item, "priority", minimum=0)
-            availability = _optional_fraction(item, "availability")
+            availability = None if availability_unknown(item) else _required_fraction(item, "availability")
             piece_range = _piece_range(item.get("piece_range"))
             files.append(
                 TorrentFile(
@@ -891,12 +892,6 @@ def _required_fraction(item: Mapping[str, Any], key: str) -> float:
     if not math.isfinite(result) or not 0.0 <= result <= 1.0:
         raise QbittorrentProtocolError(f"invalid qBittorrent field {key}")
     return result
-
-
-def _optional_fraction(item: Mapping[str, Any], key: str) -> float | None:
-    if key not in item or item[key] is None:
-        return None
-    return _required_fraction(item, key)
 
 
 def _piece_range(value: Any) -> tuple[int, int]:

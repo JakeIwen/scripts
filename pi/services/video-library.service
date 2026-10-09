@@ -9,6 +9,7 @@ ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/v
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/video_library_server.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/video_asset_catalog.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/video_qbittorrent.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/qbittorrent_availability.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/config.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/naming.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/pi/apps/video_library/library.py
