@@ -108,7 +108,8 @@ compare it with this checkout. Deployed files may differ from the repository.
   control records, pauses the peer indefinitely, then queues the selected job;
   never delete or force-release the common backup lock or stop local backups.
   Frontend cloud labels/estimates live in `features/backups/cloudPresentation.ts`;
-  `ICloudPauseSelector.tsx` owns the shared pause duration choices.
+  `ICloudPauseSelector.tsx` owns the shared pause split button: the main action
+  pauses indefinitely, while choosing a duration applies a timed pause immediately.
 - Cloud failure popups: `pi/apps/van_dashboard/cloud_backup_details.py` reads
   bounded journal evidence for a retained Pi/Mac attempt selected by server-owned
   history. Only recognized worker diagnoses are exposed; raw journal/provider

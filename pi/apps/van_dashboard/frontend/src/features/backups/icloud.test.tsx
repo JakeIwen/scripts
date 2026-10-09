@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ICloudBackupCard } from './ICloudBackupCard';
 import { BackupsTile } from './BackupsTile';
@@ -223,7 +223,6 @@ describe('iCloud dashboard', () => {
     expect(screen.getByRole('button', { name: 'Resume now' })).toHaveAttribute('title', help);
     expect(screen.queryByText(help)).not.toBeInTheDocument();
     expect(screen.getByText(/Paused indefinitely/)).toBeInTheDocument();
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'indefinite' } });
     fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
     await screen.findByRole('status');
     expect(String(fetch.mock.calls[0]?.[1]?.body)).toBe('minutes=indefinite');
@@ -382,7 +381,7 @@ describe('iCloud dashboard', () => {
   );
 
   it.each(['pi', 'time-machine'] as const)(
-    'sends the selected %s pause and resume',
+    'applies a timed %s pause immediately, keeps the main Pause indefinite, and resumes',
     async (kind) => {
       const path = kind === 'pi' ? 'icloud' : 'time-machine-icloud';
       const fetch = vi
@@ -395,24 +394,66 @@ describe('iCloud dashboard', () => {
       render(
         <ICloudBackupControls kind={kind} status={status} refresh={refresh} blocked={false} />,
       );
-      fireEvent.change(screen.getByRole('combobox', { name: 'Pause for' }), {
+      const duration = screen.getByRole('combobox', { name: 'Pause duration' });
+      fireEvent.change(duration, {
         target: { value: '240' },
       });
-      fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
       expect(await screen.findByRole('status')).toHaveTextContent('Accepted');
       expect(fetch.mock.calls[0]?.[0]).toBe(`/api/backups/${path}/pause`);
       expect(String(fetch.mock.calls[0]?.[1]?.body)).toBe('minutes=240');
       expect(refresh).toHaveBeenCalledTimes(1);
+      expect(duration).toHaveValue('');
+      fetch.mockResolvedValue(
+        new Response(JSON.stringify({ ok: true, message: 'Paused indefinitely' }), { status: 202 }),
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
+      expect(await screen.findByRole('status')).toHaveTextContent('Paused indefinitely');
+      expect(fetch.mock.calls[1]?.[0]).toBe(`/api/backups/${path}/pause`);
+      expect(String(fetch.mock.calls[1]?.[1]?.body)).toBe('minutes=indefinite');
+      expect(refresh).toHaveBeenCalledTimes(2);
       fetch.mockResolvedValue(
         new Response(JSON.stringify({ ok: true, message: 'Resumed' }), { status: 202 }),
       );
       fireEvent.click(screen.getByRole('button', { name: 'Resume now' }));
       expect(await screen.findByText('Resumed')).toBeInTheDocument();
-      expect(fetch.mock.calls[1]?.[0]).toBe(`/api/backups/${path}/resume`);
-      expect(String(fetch.mock.calls[1]?.[1]?.body)).toBe('');
+      expect(fetch.mock.calls[2]?.[0]).toBe(`/api/backups/${path}/resume`);
+      expect(String(fetch.mock.calls[2]?.[1]?.body)).toBe('');
       fetch.mockRestore();
     },
   );
+
+  it('disables both pause halves while refreshing an action and when controls are blocked', async () => {
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(JSON.stringify({ ok: true, message: 'Accepted' }), { status: 202 }),
+      );
+    let finishRefresh = () => {};
+    const refresh = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishRefresh = resolve;
+        }),
+    );
+    const status = cloud();
+    const view = render(
+      <ICloudBackupControls kind="pi" status={status} refresh={refresh} blocked={false} />,
+    );
+    const pause = screen.getByRole('button', { name: 'Pause' });
+    const duration = screen.getByRole('combobox', { name: 'Pause duration' });
+    fireEvent.click(pause);
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    expect(pause).toBeDisabled();
+    expect(duration).toBeDisabled();
+    fireEvent.click(pause);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await act(async () => finishRefresh());
+    expect(pause).toBeEnabled();
+    expect(duration).toBeEnabled();
+    view.rerender(<ICloudBackupControls kind="pi" status={status} refresh={refresh} blocked />);
+    expect(pause).toBeDisabled();
+    expect(duration).toBeDisabled();
+  });
 
   it('shows a manual deadline and allows a running upload to be paused', () => {
     const status = { ...cloud(), running: true, manualPauseUntil: 1800003600 };
