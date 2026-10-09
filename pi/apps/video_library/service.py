@@ -59,6 +59,7 @@ class VideoService(LegacyProgressMixin, LibraryViewMixin, playback.PlaybackMixin
         self.session_recovery_pending = False
         self.session_recovery_error: str | None = None
         self.identity_error: str | None = None
+        self.reconcile_error: str | None = None
 
     def start(self) -> None:
         self._retry_session_recovery()

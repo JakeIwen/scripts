@@ -370,7 +370,11 @@ class PlaybackMixin:
         sleep_remaining = max(0, int(self.playback.sleep_deadline - self.clock())) if self.playback.sleep_deadline else 0
         history_error = "; ".join(
             value
-            for value in (self.identity_error, self.session_recovery_error)
+            for value in (
+                self.identity_error,
+                self.reconcile_error,
+                self.session_recovery_error,
+            )
             if value
         ) or None
         return {

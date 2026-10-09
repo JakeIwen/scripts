@@ -532,13 +532,11 @@ class CatalogIdentityMixin:
                     QbittorrentConfigurationError,
                     QbittorrentProtocolError,
                 ) as exc:
-                    self.identity_error = f"qBittorrent reconciliation failed: {exc}"
-                    return {
-                        "ok": True,
-                        "available": False,
-                        "checked": len(results_list),
-                        "updated": 0,
-                    }
+                    return self._finish_reconcile(
+                        len(results_list),
+                        0,
+                        error=f"qBittorrent reconciliation failed: {exc}",
+                    )
                 except QbittorrentError:
                     continue
                 results_list.extend(
@@ -567,10 +565,19 @@ class CatalogIdentityMixin:
             updated += 1
         if updated:
             self.rescan()
+        return self._finish_reconcile(len(results), updated)
+
+    def _finish_reconcile(
+        self, checked: int, updated: int, *, error: str | None = None
+    ) -> dict[str, Any]:
+        # Reconciliation owns its own slot, so a later success clears its
+        # failure (e.g. qBittorrent stopped by policy, then restarted) without
+        # hiding unrelated identity warnings.
+        self.reconcile_error = error
         return {
             "ok": True,
-            "available": True,
-            "checked": len(results),
+            "available": error is None,
+            "checked": checked,
             "updated": updated,
         }
 

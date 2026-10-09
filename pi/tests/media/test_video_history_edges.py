@@ -26,7 +26,10 @@ from unittest import mock
 from pi.apps.video_library.config import RESUME_REWIND
 from pi.apps.video_library.library import MediaLibrary
 from pi.apps.video_library.media_models import MediaItem
-from pi.apps.video_library.video_qbittorrent import QbittorrentError
+from pi.apps.video_library.video_qbittorrent import (
+    QbittorrentError,
+    QbittorrentUnavailable,
+)
 from pi.tests.media.test_video_identity_integration import (
     TORRENT_ID,
     FakePlayer,
@@ -542,6 +545,53 @@ class HistoryFailureBoundaryTests(unittest.TestCase):
         service.play(item_id=item.id)
         self.assertAlmostEqual(
             player.launch_calls[-1]["position"], 411.0 - RESUME_REWIND
+        )
+
+    def test_periodic_reconcile_failure_clears_when_qbittorrent_returns(self) -> None:
+        incomplete = self.fixture.payload(
+            "Policy.Stopped-GROUP/video-file.mkv", incomplete=True
+        )
+        final = self.fixture.payloads / "Policy.Stopped-GROUP/video-file.mkv"
+        fake_qb = FakeQbittorrent()
+        fake_qb.set_path(
+            incomplete,
+            torrent_result(incomplete, temporary_path=incomplete, final_path=final),
+        )
+        service, _library, _store, _catalog, _player = self.fixture.stack(
+            qbittorrent=fake_qb
+        )
+        service.play_local(str(incomplete), restart=True)
+        self.assertFalse(service.status()["history"]["degraded"])
+
+        with mock.patch.object(
+            fake_qb,
+            "reconcile_completed_torrent",
+            side_effect=QbittorrentUnavailable("qBittorrent Web API is unavailable"),
+        ):
+            failed = service.reconcile_torrents()
+        history = service.status()["history"]
+        self.assertFalse(failed["available"])
+        self.assertTrue(history["degraded"])
+        self.assertIn("reconciliation failed", history["error"])
+
+        recovered = service.reconcile_torrents()
+        history = service.status()["history"]
+        self.assertTrue(recovered["available"])
+        self.assertEqual(fake_qb.completed_calls, [TORRENT_ID])
+        self.assertFalse(history["degraded"])
+        self.assertIsNone(history["error"])
+
+    def test_reconcile_success_keeps_unrelated_identity_warning(self) -> None:
+        service, _library, _store, _catalog, _player = self.fixture.stack(
+            qbittorrent=FakeQbittorrent()
+        )
+        service.identity_error = "legacy media key needs review: example"
+
+        service.reconcile_torrents()
+
+        self.assertEqual(
+            service.status()["history"]["error"],
+            "legacy media key needs review: example",
         )
 
     def test_active_incomplete_to_final_checkpoints_keep_v1_projection_current(
