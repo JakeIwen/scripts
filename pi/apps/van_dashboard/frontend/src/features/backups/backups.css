@@ -327,6 +327,7 @@
     justify-content: space-between;
   }
 }
+.backups-sheet__summary,
 .backup-icloud__summary {
   display: flex;
   align-items: center;
@@ -334,25 +335,31 @@
   list-style: none;
   cursor: pointer;
 }
+.backups-sheet__summary::-webkit-details-marker,
 .backup-icloud__summary::-webkit-details-marker {
   display: none;
 }
+.backups-sheet__summary:focus-visible,
 .backup-icloud__summary:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 4px;
   border-radius: 4px;
 }
+.backups-sheet__summary h3,
 .backup-icloud__summary h3 {
   flex: 1;
   min-width: 0;
   font-size: 21px;
 }
+.backups-sheet__chevron,
 .backup-icloud__chevron {
   color: var(--muted);
 }
+.backups-sheet__disclosure[open] > summary .backups-sheet__chevron,
 .backup-icloud__disclosure[open] > summary .backup-icloud__chevron {
   transform: rotate(90deg);
 }
+.backups-sheet__body,
 .backup-icloud__body {
   margin-top: 0.6rem;
 }

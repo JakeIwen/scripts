@@ -240,6 +240,46 @@ function CloneCardCapacity({
   );
 }
 
+function HotsparesSection({
+  status,
+  controls,
+}: {
+  status: BackupStatus | null;
+  controls: BackupControls;
+}) {
+  return (
+    <section className="backups-sheet__section" aria-labelledby="backup-hotspares-title">
+      <details className="backups-sheet__disclosure" open>
+        <summary className="backups-sheet__summary">
+          <span className="backups-sheet__chevron" aria-hidden="true">
+            ▸
+          </span>
+          <h3 id="backup-hotspares-title">Bootable hotspares</h3>
+        </summary>
+        <div className="backups-sheet__body">
+          <div className="backups-sheet__heading">
+            <p>Configured labels, cadence, attachment, and clone age.</p>
+            {status ? (
+              <CloneCardCapacity settings={status.settings} controls={controls} />
+            ) : (
+              <span>Loading capacity…</span>
+            )}
+          </div>
+          <div className="backup-hotspare-grid">
+            {status?.hotswaps.length ? (
+              status.hotswaps.map((card) => (
+                <HotspareCard card={card} status={status} controls={controls} key={card.label} />
+              ))
+            ) : (
+              <p className="backups-empty">No configured hotspares were returned.</p>
+            )}
+          </div>
+        </div>
+      </details>
+    </section>
+  );
+}
+
 export function BackupsSheet({ open, onClose, resource, controls }: BackupsSheetProps) {
   const status = resource.data;
   return (
@@ -318,28 +358,7 @@ export function BackupsSheet({ open, onClose, resource, controls }: BackupsSheet
         />
       )}
 
-      <section className="backups-sheet__section" aria-labelledby="backup-hotspares-title">
-        <div className="backups-sheet__heading">
-          <div>
-            <h3 id="backup-hotspares-title">Bootable hotspares</h3>
-            <p>Configured labels, cadence, attachment, and clone age.</p>
-          </div>
-          {status ? (
-            <CloneCardCapacity settings={status.settings} controls={controls} />
-          ) : (
-            <span>Loading capacity…</span>
-          )}
-        </div>
-        <div className="backup-hotspare-grid">
-          {status?.hotswaps.length ? (
-            status.hotswaps.map((card) => (
-              <HotspareCard card={card} status={status} controls={controls} key={card.label} />
-            ))
-          ) : (
-            <p className="backups-empty">No configured hotspares were returned.</p>
-          )}
-        </div>
-      </section>
+      <HotsparesSection status={status} controls={controls} />
     </BottomSheet>
   );
 }
