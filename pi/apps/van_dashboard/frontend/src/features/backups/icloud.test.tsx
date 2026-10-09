@@ -227,7 +227,7 @@ describe('iCloud dashboard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
     await screen.findByRole('status');
     expect(String(fetch.mock.calls[0]?.[1]?.body)).toBe('minutes=indefinite');
-    fireEvent.click(screen.getByRole('button', { name: 'Run this instead' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Prioritize & run' }));
     await screen.findByRole('status');
     expect(fetch.mock.calls[1]?.[0]).toBe('/api/backups/time-machine-icloud/take-turn');
     expect(String(fetch.mock.calls[1]?.[1]?.body)).toBe('');

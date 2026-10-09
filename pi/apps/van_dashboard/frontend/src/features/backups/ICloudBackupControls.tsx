@@ -86,7 +86,7 @@ export function ICloudBackupControls({
             title={`Pause ${kind === 'pi' ? 'Mac' : 'Pi'} iCloud indefinitely, then resume this backup. Existing safety checks still apply.`}
             onClick={() => void perform('take-turn')}
           >
-            Run this instead
+            Prioritize &amp; run
           </button>
         )}
       </div>
