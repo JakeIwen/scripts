@@ -7,9 +7,9 @@ import tempfile
 from pathlib import Path
 from typing import TypedDict
 
-from .browser_refresh import RefreshRequest, clear_refresh, is_current_request
+from .browser_refresh import RefreshRequest, clear_refresh, is_current_request, validate_request
 from .parsers import parse
-from .service import SearchWatchError, fetch_ebay, validate_watch
+from .service import SearchCookieError, SearchWatchError, check_watch, fetch_ebay, validate_watch
 
 
 class RefreshSubmission(RefreshRequest):
@@ -21,15 +21,28 @@ def validate_submission(payload: object) -> RefreshSubmission:
         "search_id", "request_id", "url", "headers"
     }:
         raise ValueError("invalid browser refresh payload")
-    if type(payload["search_id"]) is not int or payload["search_id"] < 1:
-        raise ValueError("invalid search ID")
-    for key in ("request_id", "url", "headers"):
-        if not isinstance(payload[key], str):
-            raise ValueError("invalid browser refresh fields")
-    if len(payload["request_id"]) != 32 or not 0 < len(payload["headers"]) <= 65536:
+    validate_request({key: payload[key] for key in RefreshRequest.__annotations__})
+    if not isinstance(payload["headers"], str) or not 0 < len(payload["headers"]) <= 65536:
         raise ValueError("invalid browser refresh size")
     validate_watch("ebay", payload["url"])
     return payload
+
+
+def recheck_headers(store, payload: object, *, notify_new=None, fetcher=fetch_ebay) -> bool:
+    """Return whether a still-current request needs new browser credentials."""
+    request = validate_request(payload)
+    if not is_current_request(store, request):
+        return False
+    try:
+        check_watch(
+            store, store.get_watch(request["search_id"]),
+            fetcher=fetcher, notify_new=notify_new,
+        )
+    except SearchCookieError:
+        return True
+    # A successful check records results and cancels the pending renewal. Other
+    # failures propagate so network/parser errors don't start browser verification.
+    return False
 
 
 def install_headers(store, payload: object, destination: Path) -> str:

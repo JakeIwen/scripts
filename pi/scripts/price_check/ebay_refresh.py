@@ -13,14 +13,14 @@ from pathlib import Path
 from main import DEFAULT_DB, send_search_alert, send_search_error
 from search_watch import SearchStore, check_watch
 from search_watch.browser_refresh import claim_refresh, request_refresh
-from search_watch.refresh_install import install_headers
+from search_watch.refresh_install import install_headers, recheck_headers
 from search_watch.service import DEFAULT_EBAY_HEADERS
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", type=Path, default=DEFAULT_DB)
-    parser.add_argument("command", choices=("claim", "install", "request"))
+    parser.add_argument("command", choices=("claim", "recheck", "install", "request"))
     parser.add_argument("search_id", type=int, nargs="?")
     args = parser.parse_args()
     try:
@@ -36,6 +36,10 @@ def main() -> int:
                     print(json.dumps({"ok": True}))
                     return 0
                 payload = json.loads(sys.stdin.read(70000))
+                if args.command == "recheck":
+                    needed = recheck_headers(store, payload, notify_new=send_search_alert)
+                    print(json.dumps({"ok": True, "renewal_needed": needed}))
+                    return 0
                 path = Path(os.environ.get("EBAY_HEADERS_FILE", DEFAULT_EBAY_HEADERS))
                 page = install_headers(store, payload, path)
                 watch = store.get_watch(payload["search_id"])

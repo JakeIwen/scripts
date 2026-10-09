@@ -16,6 +16,7 @@ class BrowserRefreshWorkerTests(unittest.TestCase):
         "search_id": 1, "request_id": "a" * 32,
         "url": "https://www.ebay.com/sch/i.html?_nkw=x",
     }
+    NEEDS_RENEWAL = {"ok": True, "renewal_needed": True}
 
     @mock.patch.object(worker, "remote", return_value=None)
     @mock.patch.object(worker.subprocess, "run")
@@ -30,7 +31,7 @@ class BrowserRefreshWorkerTests(unittest.TestCase):
         self.assertIn("private=value", run.call_args.kwargs["input"])
 
     def test_rejected_remote_install_does_not_replace_local_secret(self):
-        with mock.patch.object(worker, "remote", side_effect=[self.REQUEST, {"ok": False}]), \
+        with mock.patch.object(worker, "remote", side_effect=[self.REQUEST, self.NEEDS_RENEWAL, {"ok": False}]), \
              mock.patch.object(worker.subprocess, "run", return_value=SimpleNamespace(
                  stdout=json.dumps({"headers": "Cookie: private=value"}))), \
              mock.patch.object(worker, "sync_local_headers") as sync:
@@ -44,7 +45,7 @@ class BrowserRefreshWorkerTests(unittest.TestCase):
             (root / "pi/secrets").mkdir(parents=True)
             output = io.StringIO()
             with mock.patch.object(worker, "ROOT", root), \
-                 mock.patch.object(worker, "remote", side_effect=[self.REQUEST, {"ok": True}]), \
+                 mock.patch.object(worker, "remote", side_effect=[self.REQUEST, self.NEEDS_RENEWAL, {"ok": True}]), \
                  mock.patch.object(worker.subprocess, "run", return_value=SimpleNamespace(
                      stdout=json.dumps({"headers": "Cookie: private=value"}))), \
                  contextlib.redirect_stdout(output):
@@ -53,6 +54,27 @@ class BrowserRefreshWorkerTests(unittest.TestCase):
             self.assertEqual(destination.stat().st_mode & 0o777, 0o600)
             self.assertIn("private=value", destination.read_text())
             self.assertNotIn("private=value", output.getvalue())
+
+    def test_successful_recheck_skips_browser_and_preserves_local_headers(self):
+        with mock.patch.object(worker, "remote", side_effect=[
+            self.REQUEST, {"ok": True, "renewal_needed": False},
+        ]) as remote, mock.patch.object(worker.subprocess, "run") as run, \
+             mock.patch.object(worker, "sync_local_headers") as sync, \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertFalse(worker.refresh("pi@vanpi.lan"))
+        self.assertEqual(remote.call_args.args, ("pi@vanpi.lan", "recheck", self.REQUEST))
+        run.assert_not_called()
+        sync.assert_not_called()
+
+    def test_failed_or_invalid_recheck_does_not_start_browser(self):
+        for response in ({"ok": False}, {"ok": True, "renewal_needed": "true"},
+                         worker.RefreshFailure("Pi recheck failed")):
+            with self.subTest(response=response), \
+                 mock.patch.object(worker, "remote", side_effect=[self.REQUEST, response]), \
+                 mock.patch.object(worker.subprocess, "run") as run:
+                with self.assertRaises((ValueError, worker.RefreshFailure)):
+                    worker.refresh("pi@vanpi.lan")
+                run.assert_not_called()
 
     def test_worker_failure_does_not_log_captured_secrets(self):
         with tempfile.TemporaryDirectory() as directory:

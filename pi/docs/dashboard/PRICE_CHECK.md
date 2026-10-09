@@ -43,6 +43,11 @@ then confirms the exact saved-search parameters and signed-out state. A CAPTCHA 
 leaves the request pending; the hook does not solve interactive challenges.
 Attempts are limited to one per thirty minutes, including crashes or network
 failures. Successful ordinary checks cancel obsolete requests automatically.
+Each claimed attempt first checks the saved search with the existing headers on
+the Pi. If they work, normal results and notifications are recorded and renewal
+is cancelled without opening a browser or replacing either header file. Only
+another gated response starts browser renewal; network or parser failures defer
+the attempt. A 403 is a rejected request, not proof that the cookie expired.
 
 Chromium's user agent, language and client hints use a consistent desktop profile.
 The hook retains the successful document request's allowed headers, with its
@@ -78,7 +83,8 @@ mode-0600 `tmp/deal-watch-refresh/browser-state.json` contains only this hook's
 anonymous session and must not be committed or printed.
 The Pi bridge is `pi/scripts/price_check/ebay_refresh.py`; `request <search-id>`
 queues a deliberate renewal, `claim` leases a pending request with the cooldown,
-and `install` consumes the private JSON submission. All normal checks retain
+`recheck` tests whether that request still needs renewal using the existing
+headers, and `install` consumes the private JSON submission. All normal checks retain
 the existing schedule. Cookie renewal does not change ntfy delivery or retries.
 
 ### Manual fallback

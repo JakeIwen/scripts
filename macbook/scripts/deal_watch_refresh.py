@@ -62,6 +62,12 @@ def refresh(host: str) -> bool:
         return False
     if not isinstance(request, dict) or set(request) != {"search_id", "request_id", "url"}:
         raise ValueError("invalid refresh request")
+    recheck = remote(host, "recheck", request)
+    if recheck.get("ok") is not True or type(recheck.get("renewal_needed")) is not bool:
+        raise ValueError("invalid browser refresh recheck response")
+    if not recheck["renewal_needed"]:
+        print("eBay renewal no longer needed; existing browser headers retained.", flush=True)
+        return False
     try:
         browser = subprocess.run(
             [NODE, str(Path(__file__).with_name("ebay_browser_headers.mjs")), request["url"]],

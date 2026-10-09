@@ -23,6 +23,17 @@ class RefreshRequest(TypedDict):
     url: str
 
 
+def validate_request(payload: object) -> RefreshRequest:
+    if not isinstance(payload, dict) or set(payload) != set(RefreshRequest.__annotations__):
+        raise ValueError("invalid browser refresh request")
+    if type(payload["search_id"]) is not int or payload["search_id"] < 1:
+        raise ValueError("invalid search ID")
+    if (not isinstance(payload["request_id"], str) or len(payload["request_id"]) != 32
+            or not isinstance(payload["url"], str) or not 0 < len(payload["url"]) <= 4096):
+        raise ValueError("invalid browser refresh fields")
+    return payload
+
+
 def request_refresh(store, watch: dict) -> None:
     with store.connection:
         store.connection.execute(

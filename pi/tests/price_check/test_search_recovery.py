@@ -6,9 +6,9 @@ from unittest import mock
 from pi.scripts.price_check.search_watch.browser_refresh import (
     RETRY_SECONDS, claim_refresh, request_refresh,
 )
-from pi.scripts.price_check.search_watch.refresh_install import install_headers
+from pi.scripts.price_check.search_watch.refresh_install import install_headers, recheck_headers
 from pi.scripts.price_check.search_watch.service import (
-    SearchCookieError, SearchParserError, SearchWatchError, check_watch,
+    SearchCookieError, SearchLoadError, SearchParserError, SearchWatchError, check_watch,
 )
 from pi.scripts.price_check.search_watch.store import SearchStore
 from pi.tests.price_check.test_search_watch import EBAY_PAGE
@@ -33,9 +33,58 @@ class SearchRecoveryTests(unittest.TestCase):
     def check(self, **kwargs):
         return check_watch(self.store, self.watch, fetcher=lambda _: EBAY_PAGE, **kwargs)
 
-    def request(self):
+    def request(self, *, with_headers=True):
         request_refresh(self.store, self.watch)
-        return {**claim_refresh(self.store), "headers": "User-Agent: new\nCookie: new=value\n"}
+        request = claim_refresh(self.store)
+        return {**request, "headers": "User-Agent: new\nCookie: new=value\n"} if with_headers else request
+
+    def test_recheck_recovers_results_and_cancels_renewal_without_replacing_headers(self):
+        request = self.request(with_headers=False)
+        self.store.record_error(self.watch["id"], "request rejected")
+        before = self.headers.read_bytes(), self.headers.stat().st_mtime_ns
+        notify = mock.Mock()
+        self.assertFalse(recheck_headers(
+            self.store, request, fetcher=lambda _: EBAY_PAGE, notify_new=notify,
+        ))
+        self.assertEqual(self.store.get_watch(self.watch["id"])["last_status"], "ok")
+        self.assertEqual(self.store.get_watch(self.watch["id"])["result_count"], 2)
+        notify.assert_called_once()
+        self.now[0] += RETRY_SECONDS
+        self.assertIsNone(claim_refresh(self.store))
+        self.assertEqual((self.headers.read_bytes(), self.headers.stat().st_mtime_ns), before)
+
+    def test_recheck_gate_keeps_request_and_cooldown_for_browser_renewal(self):
+        request = self.request(with_headers=False)
+        self.assertTrue(recheck_headers(
+            self.store, request, fetcher=lambda _: "<title>Pardon Our Interruption</title>",
+        ))
+        self.assertIsNone(claim_refresh(self.store))
+        self.now[0] += RETRY_SECONDS
+        self.assertEqual(claim_refresh(self.store)["request_id"], request["request_id"])
+
+    def test_recheck_network_or_parser_failure_defers_without_requesting_new_headers(self):
+        request = self.request(with_headers=False)
+        cases = (
+            (mock.Mock(side_effect=SearchLoadError("network unavailable")), SearchLoadError),
+            (lambda _: "unknown page markup", SearchParserError),
+        )
+        for fetcher, error in cases:
+            with self.assertRaises(error):
+                recheck_headers(self.store, request, fetcher=fetcher)
+        self.assertIsNone(claim_refresh(self.store))
+        self.now[0] += RETRY_SECONDS
+        self.assertEqual(claim_refresh(self.store)["request_id"], request["request_id"])
+
+    def test_obsolete_or_malformed_recheck_never_downloads_a_page(self):
+        request = self.request(with_headers=False)
+        self.check(notify=False)
+        fetcher = mock.Mock()
+        self.assertFalse(recheck_headers(self.store, request, fetcher=fetcher))
+        for invalid in (None, {**request, "search_id": True}, {**request, "url": []},
+                        {**request, "request_id": "short"}, {**request, "unexpected": 1}):
+            with self.assertRaises(ValueError):
+                recheck_headers(self.store, invalid, fetcher=fetcher)
+        fetcher.assert_not_called()
 
     def test_cookie_failure_queues_refresh_and_rate_limits_claims(self):
         for _ in range(2):
