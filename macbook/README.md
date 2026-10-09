@@ -130,7 +130,7 @@ Use the account normally, without sudo; HOME/CODEX_HOME overrides are ignored.
 ## BetterTouchTool maintenance
 
 Use the [BTT tooling index](bettertouchtool/README.md) for maintained commands,
-runtime providers, feature installers and the dated recovery archive.
+runtime providers and feature installers.
 
 ```sh
 /usr/bin/python3 -B ~/dev/scripts/macbook/bettertouchtool/btt.py inspect
@@ -138,6 +138,6 @@ runtime providers, feature installers and the dated recovery archive.
 ```
 
 Style/setup/repair commands inspect by default and require `--apply` for live
-changes. The July path migration and superseded import/repair experiments are
-documented under `bettertouchtool/one_off_fixes/`, not routine setup steps.
+changes. Historical incident notes remain under `bettertouchtool/one_off_fixes/`;
+the completed migration and superseded repair executables are in Git history.
 Keep personal exports and snapshots in ignored output directories, not Git.

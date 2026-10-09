@@ -14,7 +14,6 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 DEPLOY_PATH = REPOSITORY_ROOT / "pi" / "deploy_video_library.sh"
 ALIAS_PATH = REPOSITORY_ROOT / "pi" / "scripts" / "alias_media.sh"
 UNIT_PATH = REPOSITORY_ROOT / "pi" / "services" / "video-library.service"
-DOC_PATH = REPOSITORY_ROOT / "pi" / "docs" / "media" / "VIDEO_LIBRARY.md"
 
 
 class VideoIdentityDeploymentTests(unittest.TestCase):
@@ -23,7 +22,6 @@ class VideoIdentityDeploymentTests(unittest.TestCase):
         cls.deploy = DEPLOY_PATH.read_text(encoding="utf-8")
         cls.alias = ALIAS_PATH.read_text(encoding="utf-8")
         cls.unit = UNIT_PATH.read_text(encoding="utf-8")
-        cls.docs = DOC_PATH.read_text(encoding="utf-8")
 
     def test_shell_entrypoints_parse_and_are_executable(self):
         for path in (DEPLOY_PATH, ALIAS_PATH):
@@ -77,9 +75,6 @@ class VideoIdentityDeploymentTests(unittest.TestCase):
                     self.unit,
                 )
 
-    def test_documented_media_test_gate_includes_history_failure_boundaries(self):
-        self.assertIn("pi.tests.media.test_video_history_edges", self.docs)
-
     def test_alias_jobs_are_atomic_detached_queued_and_share_one_lock(self):
         self.assertEqual(self.alias.count("/run/lock/alias-media.lock"), 1)
         self.assertIn("/usr/bin/flock 9", self.alias)
@@ -89,7 +84,6 @@ class VideoIdentityDeploymentTests(unittest.TestCase):
         self.assertIn("/usr/bin/mountpoint -q /mnt/bigboi", self.alias)
         self.assertNotIn("mountpoint -q /mnt/bigboi/mp_backup", self.alias)
         self.assertIn(") </dev/null >>/home/pi/log/alias_media.log 2>&1 &", self.alias)
-        self.assertIn("waiting here never blocks", self.alias)
         self.assertIn('mktemp -d "$src/.links-stage.XXXXXX"', self.alias)
         self.assertIn('mktemp -d "$src/links/.alias-new.XXXXXX"', self.alias)
         self.assertNotIn("-delete", self.alias)

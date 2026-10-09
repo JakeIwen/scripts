@@ -69,35 +69,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   an exact torrent locator for continuity, not an inode-only exception.
   Older packages can open this schema but their matcher remains unsafe: rollback
   requires quiescing the service and restoring the matching pre-change backup.
-- One-off video catalog maintenance lives in
-  `pi/apps/video_library/maintenance/same_file_repair.py`, with behavior tests in
-  `pi/tests/media/test_video_same_file_repair.py`. It is deliberately outside the
-  package allowlist: copy it explicitly and import the deployed package via
-  `PYTHONPATH`; never wire it into service startup. It requires reviewed,
-  version-1 enriched evidence, defaults to an in-memory dry run, and refuses
-  apply without a quiescence acknowledgement and a database-holder check.
-  It was applied once on 2026-10-07 (2,013 same-file pairs); rerunning it is a
-  no-op. Its audit trail and pre-repair backup are on vanpi under
-  `~/.local/share/van-video-library/` (`repair-audit-20261007/`,
-  `video-catalog-final-20261007T044424Z.sqlite3`).
-  `maintenance/filesystem_identity_repair.py` is the separate Silo S03E07 repair,
-  applied with the legacy-churn repair on 2026-10-08 (2,132 changes; rerunning
-  is a no-op). Its evidence and backups are on vanpi under
-  `~/.local/share/van-video-library/identity-repair-20261008-0249/`.
-  `identity_repair_evidence.py` pins its reviewed rows and
-  validates enriched version-2 plans (older Silo-only plans are refused). Copy the
-  maintenance directory into a temporary package
-  tree and invoke with `python3 -m` and that tree's PYTHONPATH;
-  maintenance remains outside the release allowlist. Capture a fresh plan after
-  deployment and quiescence. It preserves all assets/history and versions only
-  the Silo attachments. `legacy_churn_evidence.py` validates the remaining legacy
-  keys against the SHA-256-pinned October 7 repair plan or the ten Counterpart
-  same-file duplicates; its identity index is transaction-local. The canonical
-  pair contract and proof kinds live there. `legacy_churn_repair.py` rebinds those
-  keys, transfers only differing newer playheads, and reuses the earlier repair's
-  v1 projection helper. Any changed evidence aborts the transaction after reporting
-  skipped pairs; postcheck requires zero legacy mismatches. Tests live in
-  `pi/tests/media/test_video_filesystem_repair.py` and `test_video_legacy_churn_repair.py`.
+- Completed October 2026 video-catalog repairs are documented in
+  `pi/docs/media/VIDEO_LIBRARY.md` under "Catalog repair history". Their one-time
+  executables and exclusive tests are retained in Git history; runtime identity
+  matching and its regression tests remain in the active package.
 - Cloud holds: `pi/scripts/backup/cloud_backup_control.py` shares admission and
   durable `pause.json` controls. `icloud_backup_control.py` and
   `time_machine_icloud_control.py` are fixed Pi/Mac entry points; their separate minute resume timers,

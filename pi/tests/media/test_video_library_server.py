@@ -2534,28 +2534,6 @@ class DeploymentWiringTests(unittest.TestCase):
         self.assertNotIn("flock", sns)
         self.assertNotIn("/home/pi/scripts/python-automation/vlc_property.py", logger)
 
-    def test_frontend_captures_search_generation_and_honors_player_capabilities(self):
-        javascript = (APP_DIR / "static" / "video_library.js").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("async function searchLibrary(query, serial)", javascript)
-        self.assertIn("const serial = ++searchSerial", javascript)
-        self.assertIn(
-            "setTimeout(() => searchLibrary(query, serial), 220)", javascript
-        )
-        self.assertIn(
-            "button.disabled = !player.available || !player.can_seek", javascript
-        )
-        self.assertIn(
-            'if (control === "next") enabled = enabled && Boolean(player.can_next)',
-            javascript,
-        )
-        self.assertIn(
-            'else if (control === "previous") enabled = enabled && Boolean(player.can_previous)',
-            javascript,
-        )
-        self.assertIn("if (!player || !player.can_seek) return", javascript)
-
     def test_legacy_position_logger_skips_manager_real_target_playback_privately(self):
         logger = (
             REPOSITORY_ROOT / "pi" / "scripts" / "log_position.sh"

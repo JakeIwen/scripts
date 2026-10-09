@@ -170,11 +170,10 @@ the missing/incorrect record IDs and its backup location.
 
 ## Historical recovery
 
-The older nested-import recovery is archived under
-[one_off_fixes/](../bettertouchtool/one_off_fixes/README.md). It could appear fixed
-in memory yet lose descendants after restart; use the maintained persistence
-repair instead. Its reusable planning functions are now separate from the
-archived executable. Historical backups and reproductions are retained.
+The older nested-import recovery could appear fixed in memory yet lose descendants
+after restart; use the maintained persistence repair. Its reusable planner lives
+in `lib/media_recovery.js`. [Historical incident notes](../bettertouchtool/one_off_fixes/README.md)
+remain available; retired executables are retained in Git history.
 
 ## Capture usage
 

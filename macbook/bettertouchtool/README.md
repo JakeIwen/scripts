@@ -7,8 +7,7 @@ Use one maintenance entry point:
 ```
 
 The underlying current script paths remain available for compatibility. Runtime
-providers and app-specific installers have not moved. No command invokes an
-archived fix automatically.
+providers and app-specific installers have not moved.
 
 ## Maintained commands
 
@@ -233,9 +232,8 @@ play audio or discover speakers.
 - `btt_touchbar_folder_to_floating_submenu.py` and
   `create_floating_dropdown_from_submenu.py`: reusable offline conversion tools;
   inspect generated definitions before importing them.
-- [one_off_fixes/](one_off_fixes/README.md): dated, guarded historical repairs and
-  failure reproductions—not routine maintenance. Known crash paths have ALL CAPS
-  warnings in their filenames.
+- [Historical repairs](one_off_fixes/README.md): incident context for retired
+  snapshot-specific fixes; executable versions are retained in Git history.
 - `presets/`: small, reviewed reusable presets, not full personal configuration dumps.
 
 ## Data hygiene
@@ -255,9 +253,7 @@ ignored to reduce accidental inclusion; reviewed source fixtures remain separate
 Tests use fake BTT APIs or read-only/generated SQLite fixtures; they do not click
 RPS, change speakers, import presets, or restart BTT. Native image/RTF tests require
 macOS but do not contact BTT's scripting interface.
-Behavior tests cover maintained tools, not archived one-off repairs. Archive
-checks only protect the current boundary: historical tools stay inert by default
-and maintained tools do not import them.
+Behavior tests cover the maintained tools and their inspection/apply boundaries.
 
 ```sh
 cd ~/dev/scripts

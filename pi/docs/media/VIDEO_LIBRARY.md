@@ -63,6 +63,20 @@ to record shell-launched `/links/` playback, but deliberately ignores the
 manager's revalidated real-target launches so it cannot add entries that the
 legacy `resume()` function would misinterpret.
 
+## Catalog repair history
+
+The reviewed October 7, 2026 repair handled 2,013 same-file pairs. The October 8
+Silo S03E07 identity and legacy device-churn repair recorded 2,132 changes. Both
+completed with no-op reruns. Their snapshot-specific utilities and exclusive
+tests are retained in Git history; they were never in the package allowlist.
+Runtime identity matching and its regression coverage remain maintained.
+
+Audit evidence and pre-repair backups remain on vanpi under
+`~/.local/share/van-video-library/`: `repair-audit-20261007/`,
+`video-catalog-final-20261007T044424Z.sqlite3` and
+`identity-repair-20261008-0249/`. Preserve those artifacts when investigating
+historical catalog state; do not replay an old repair against new observations.
+
 ## Player behavior
 
 Playback uses the existing Pi GUI and MPRIS session bus. VLC is launched as a
