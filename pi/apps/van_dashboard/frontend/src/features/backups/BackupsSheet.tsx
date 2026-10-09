@@ -240,6 +240,62 @@ function CloneCardCapacity({
   );
 }
 
+function EvidenceSection({
+  status,
+  controls,
+}: {
+  status: BackupStatus | null;
+  controls: BackupControls;
+}) {
+  return (
+    <section className="backups-sheet__section" aria-labelledby="backup-evidence-title">
+      <details className="backups-sheet__disclosure" open>
+        <summary className="backups-sheet__summary">
+          <span className="backups-sheet__chevron" aria-hidden="true">
+            ▸
+          </span>
+          <h3 id="backup-evidence-title">Backup evidence</h3>
+          <span className="backups-sheet__health">{status?.health ?? 'No data'}</span>
+        </summary>
+        <div className="backups-sheet__body">
+          <div className="backups-sheet__heading">
+            <p>Freshness stamps and live process evidence.</p>
+          </div>
+          <div className="backup-evidence-grid">
+            {status ? (
+              <>
+                <EvidenceCard
+                  title="Vanpi Borg"
+                  evidence={status.borg}
+                  kind="borg"
+                  status={status}
+                  controls={controls}
+                />
+                <EvidenceCard
+                  title="EXFAT512 snapshot"
+                  evidence={status.exfatSnapshot}
+                  kind="exfat"
+                  status={status}
+                  controls={controls}
+                />
+                <EvidenceCard
+                  title="OpenWrt export"
+                  evidence={status.openwrt}
+                  status={status}
+                  controls={controls}
+                />
+                <TimeMachineCard status={status.timeMachine} />
+              </>
+            ) : (
+              <p className="backups-empty">Loading evidence…</p>
+            )}
+          </div>
+        </div>
+      </details>
+    </section>
+  );
+}
+
 function HotsparesSection({
   status,
   controls,
@@ -301,44 +357,7 @@ export function BackupsSheet({ open, onClose, resource, controls }: BackupsSheet
         </p>
       )}
 
-      <section className="backups-sheet__section" aria-labelledby="backup-evidence-title">
-        <div className="backups-sheet__heading">
-          <div>
-            <h3 id="backup-evidence-title">Backup evidence</h3>
-            <p>Freshness stamps and live process evidence.</p>
-          </div>
-          <span>{status?.health ?? 'No data'}</span>
-        </div>
-        <div className="backup-evidence-grid">
-          {status ? (
-            <>
-              <EvidenceCard
-                title="Vanpi Borg"
-                evidence={status.borg}
-                kind="borg"
-                status={status}
-                controls={controls}
-              />
-              <EvidenceCard
-                title="EXFAT512 snapshot"
-                evidence={status.exfatSnapshot}
-                kind="exfat"
-                status={status}
-                controls={controls}
-              />
-              <EvidenceCard
-                title="OpenWrt export"
-                evidence={status.openwrt}
-                status={status}
-                controls={controls}
-              />
-              <TimeMachineCard status={status.timeMachine} />
-            </>
-          ) : (
-            <p className="backups-empty">Loading evidence…</p>
-          )}
-        </div>
-      </section>
+      <EvidenceSection status={status} controls={controls} />
 
       {status?.icloud && (
         <ICloudBackupCard
