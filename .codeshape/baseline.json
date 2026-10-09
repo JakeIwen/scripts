@@ -98,8 +98,11 @@
    "build_plan": [
     "macbook/bettertouchtool/repair_script_paths.py",
     "macbook/bettertouchtool/restore_media.py",
-    "pi/apps/video_library/maintenance/identity_repair_evidence.py",
     "pi/deploy_python.py"
+   ],
+   "canonical": [
+    "macbook/bettertouchtool/install_rhythm_menu.js",
+    "pi/projects/visual-guides/deploy.py"
    ],
    "capture": [
     "macbook/bettertouchtool/btt_guard/checkpoint.py",
@@ -116,22 +119,6 @@
    "control": [
     "pi/scripts/backup/cloud_backup_control.py",
     "pi/scripts/backup/time_machine_icloud_control.py"
-   ],
-   "controlsArchives": [
-    "macbook/bettertouchtool/lib/media_recovery.js",
-    "macbook/bettertouchtool/one_off_fixes/2026-09-18-NONPERSISTENT-nested-media-repair.js"
-   ],
-   "controlsClone": [
-    "macbook/bettertouchtool/lib/media_recovery.js",
-    "macbook/bettertouchtool/one_off_fixes/2026-09-18-NONPERSISTENT-nested-media-repair.js"
-   ],
-   "controlsRead": [
-    "macbook/bettertouchtool/lib/media_recovery.js",
-    "macbook/bettertouchtool/one_off_fixes/2026-09-18-NONPERSISTENT-nested-media-repair.js"
-   ],
-   "controlsRestoreSpeaker": [
-    "macbook/bettertouchtool/lib/media_recovery.js",
-    "macbook/bettertouchtool/one_off_fixes/2026-09-18-NONPERSISTENT-nested-media-repair.js"
    ],
    "conversation_title": [
     "macbook/scripts/codex_ntfy_notify.py",
@@ -163,7 +150,6 @@
     "macbook/bettertouchtool/install_strip_metadata_menu.py"
    ],
    "digest": [
-    "pi/apps/video_library/maintenance/same_file_repair.py",
     "pi/deploy_network_flight_recorder.py",
     "pi/deploy_python.py",
     "ubnt/deploy_remote.sh"
@@ -215,6 +201,10 @@
     "pi/apps/van_dashboard/routes/common.py",
     "pi/apps/video_library/routes.py"
    ],
+   "inspect_remote": [
+    "pi/deploy_network_flight_recorder.py",
+    "pi/projects/visual-guides/deploy.py"
+   ],
    "install": [
     "macbook/bettertouchtool/install_menu_escape.py",
     "macbook/scripts/time_machine_offsite_coordinator.py",
@@ -244,6 +234,10 @@
    "load_json": [
     "macbook/bettertouchtool/btt_guard/storage.py",
     "van_compute/queue.py"
+   ],
+   "make_archive": [
+    "pi/deploy_python.py",
+    "pi/projects/visual-guides/deploy.py"
    ],
    "make_plan": [
     "macbook/scripts/convert_video.py",
@@ -278,8 +272,7 @@
    ],
    "new_uuid": [
     "macbook/bettertouchtool/btt_touchbar_folder_to_floating_submenu.py",
-    "macbook/bettertouchtool/create_floating_dropdown_from_submenu.py",
-    "macbook/bettertouchtool/one_off_fixes/2026-07-19-CRASH-RISK-recent-notes-submenu.py"
+    "macbook/bettertouchtool/create_floating_dropdown_from_submenu.py"
    ],
    "nonemptyString": [
     "pi/apps/van_dashboard/frontend/src/features/dealWatch/decoders.ts",
@@ -400,8 +393,7 @@
     "macbook/bettertouchtool/install_convert_video_menu.js",
     "macbook/bettertouchtool/install_performance_audio_menu.js",
     "macbook/bettertouchtool/install_rhythm_menu.js",
-    "macbook/bettertouchtool/install_strip_metadata_menu.js",
-    "macbook/bettertouchtool/one_off_fixes/2026-09-18-reorder-rps-after-row-breaker.js"
+    "macbook/bettertouchtool/install_strip_metadata_menu.js"
    ],
    "read_json": [
     "pi/scripts/backup/icloud_backup.py",
@@ -435,13 +427,10 @@
     "macbook/scripts/claude_ntfy_notify.py",
     "macbook/scripts/codex_ntfy_notify.py"
    ],
-   "repair_pair": [
-    "pi/apps/video_library/maintenance/legacy_churn_repair.py",
-    "pi/apps/video_library/maintenance/same_file_repair.py"
-   ],
    "replace_link": [
     "pi/deploy_python.py",
-    "pi/deploy_van_dashboard_preview.sh"
+    "pi/deploy_van_dashboard_preview.sh",
+    "pi/projects/visual-guides/deploy.py"
    ],
    "restart_btt": [
     "macbook/bettertouchtool/btt_guard/api.py",
@@ -455,10 +444,6 @@
     "pi/scripts/backup/icloud_backup.py",
     "pi/scripts/backup/time_machine_icloud.py"
    ],
-   "row_count": [
-    "macbook/bettertouchtool/one_off_fixes/2026-07-19-repair-media-duplicate-and-order-gaps.zsh",
-    "macbook/bettertouchtool/one_off_fixes/2026-07-19-repair-nested-media-duplicate.zsh"
-   ],
    "runControl": [
     "pi/apps/van_dashboard/frontend/src/features/lighting/LightingSheet.tsx",
     "pi/apps/van_dashboard/frontend/src/features/lighting/LightingTile.tsx"
@@ -471,10 +456,6 @@
    "run_once": [
     "van_compute/broker.py",
     "van_compute/worker.py"
-   ],
-   "run_repair": [
-    "pi/apps/video_library/maintenance/filesystem_identity_repair.py",
-    "pi/apps/video_library/maintenance/same_file_repair.py"
    ],
    "save_report": [
     "macbook/scripts/bpm_over_time.py",
@@ -490,12 +471,9 @@
     "vanrouter/kernel-5ghz-power/finalize-openwrt-build.sh",
     "vanrouter/kernel-5ghz-power/prepare-recovery-kit.sh"
    ],
-   "snapshot": [
-    "pi/apps/video_library/maintenance/same_file_repair.py",
-    "pi/scripts/usb_watch.py"
-   ],
    "status": [
     "macbook/scripts/rhythm_ui.js",
+    "pi/projects/visual-guides/hardware_setup.py",
     "pi/scripts/backup/backup_priority.py",
     "pi/scripts/backup/mac_capture_control.py",
     "pi/scripts/backup/time_machine_icloud_status.py"
@@ -513,6 +491,10 @@
     "macbook/bettertouchtool/install_performance_audio_menu.js",
     "macbook/scripts/rhythm_ui.js",
     "pi/scripts/price_check/main.py"
+   ],
+   "systemctl": [
+    "pi/deploy_network_flight_recorder.py",
+    "pi/projects/visual-guides/deploy.py"
    ],
    "temperature": [
     "pi/apps/van_dashboard/frontend/src/features/systemHealth/SystemHealthSheet.tsx",
@@ -568,10 +550,6 @@
     "van_compute/engine.py",
     "van_compute/worker.py"
    ],
-   "validate_pair": [
-    "pi/apps/video_library/maintenance/legacy_churn_evidence.py",
-    "pi/apps/video_library/maintenance/same_file_repair.py"
-   ],
    "validate_plan": [
     "pi/deploy_network_flight_recorder.py",
     "pi/deploy_network_storage.py"
@@ -603,7 +581,6 @@
    ],
    "write_json": [
     "macbook/bettertouchtool/btt_guard/storage.py",
-    "macbook/bettertouchtool/one_off_fixes/2026-07-25-build-media-vertical-dropdowns.py",
     "pi/scripts/backup/icloud_status.py"
    ],
    "write_log": [
@@ -739,12 +716,6 @@
     "name": "run"
    },
    {
-    "file": "pi/apps/van_dashboard/frontend/src/features/backups/BackupsSheet.tsx",
-    "line": 243,
-    "lines": 103,
-    "name": "BackupsSheet"
-   },
-   {
     "file": "pi/apps/van_dashboard/frontend/src/features/usb/controls.ts",
     "line": 50,
     "lines": 101,
@@ -872,20 +843,6 @@
   "macbook/bettertouchtool/install_strip_metadata_menu.js": 86,
   "macbook/bettertouchtool/install_strip_metadata_menu.py": 77,
   "macbook/bettertouchtool/lib/media_recovery.js": 55,
-  "macbook/bettertouchtool/one_off_fixes/2026-07-18-update-reorganized-script-paths.js": 110,
-  "macbook/bettertouchtool/one_off_fixes/2026-07-19-CRASH-RISK-recent-notes-submenu.py": 66,
-  "macbook/bettertouchtool/one_off_fixes/2026-07-19-CRASHES-BTT-batch-json-paste-reproducer.zsh": 38,
-  "macbook/bettertouchtool/one_off_fixes/2026-07-19-CRASHES-BTT-single-item-json-paste-reproducer.zsh": 40,
-  "macbook/bettertouchtool/one_off_fixes/2026-07-19-graft-media-additions-from-pre-restore-database.zsh": 156,
-  "macbook/bettertouchtool/one_off_fixes/2026-07-19-quarantine-duplicate-media-modifier-collision.zsh": 84,
-  "macbook/bettertouchtool/one_off_fixes/2026-07-19-repair-media-duplicate-and-order-gaps.zsh": 127,
-  "macbook/bettertouchtool/one_off_fixes/2026-07-19-repair-nested-media-duplicate.zsh": 118,
-  "macbook/bettertouchtool/one_off_fixes/2026-07-19-restore-btt-snapshot-and-repair-media.zsh": 63,
-  "macbook/bettertouchtool/one_off_fixes/2026-07-25-build-media-vertical-dropdowns.py": 227,
-  "macbook/bettertouchtool/one_off_fixes/2026-09-18-NONPERSISTENT-nested-media-repair.js": 196,
-  "macbook/bettertouchtool/one_off_fixes/2026-09-18-reorder-rps-after-row-breaker.js": 146,
-  "macbook/bettertouchtool/one_off_fixes/2026-09-18-repair-tools-menu-placement.js": 143,
-  "macbook/bettertouchtool/one_off_fixes/2026-09-18-restore-modifier-clicks.js": 57,
   "macbook/bettertouchtool/play_status.js": 20,
   "macbook/bettertouchtool/port_media_icons.js": 215,
   "macbook/bettertouchtool/port_media_icons.py": 216,
@@ -964,7 +921,7 @@
   "macbook/tests/test_btt_guard_repair.cjs": 204,
   "macbook/tests/test_btt_guard_repair.py": 190,
   "macbook/tests/test_btt_guard_service.py": 253,
-  "macbook/tests/test_btt_maintenance.py": 106,
+  "macbook/tests/test_btt_maintenance.py": 82,
   "macbook/tests/test_cleanup_codex_releases.py": 168,
   "macbook/tests/test_convert_video.py": 140,
   "macbook/tests/test_convert_video_menu.cjs": 85,
@@ -1031,23 +988,23 @@
   "pi/apps/van_dashboard/frontend/src/dashboard/useTileOrder.ts": 40,
   "pi/apps/van_dashboard/frontend/src/features/backups/BackupPriorityMenu.tsx": 258,
   "pi/apps/van_dashboard/frontend/src/features/backups/BackupsFeature.tsx": 26,
-  "pi/apps/van_dashboard/frontend/src/features/backups/BackupsSheet.tsx": 345,
+  "pi/apps/van_dashboard/frontend/src/features/backups/BackupsSheet.tsx": 383,
   "pi/apps/van_dashboard/frontend/src/features/backups/BackupsTile.tsx": 151,
   "pi/apps/van_dashboard/frontend/src/features/backups/ConcurrentVerification.tsx": 59,
   "pi/apps/van_dashboard/frontend/src/features/backups/ICloudAttemptMessage.tsx": 140,
-  "pi/apps/van_dashboard/frontend/src/features/backups/ICloudBackupCard.tsx": 283,
-  "pi/apps/van_dashboard/frontend/src/features/backups/ICloudBackupControls.tsx": 101,
-  "pi/apps/van_dashboard/frontend/src/features/backups/ICloudPauseSelector.tsx": 24,
+  "pi/apps/van_dashboard/frontend/src/features/backups/ICloudBackupCard.tsx": 281,
+  "pi/apps/van_dashboard/frontend/src/features/backups/ICloudBackupControls.tsx": 95,
+  "pi/apps/van_dashboard/frontend/src/features/backups/ICloudPauseSelector.tsx": 52,
   "pi/apps/van_dashboard/frontend/src/features/backups/api.ts": 67,
   "pi/apps/van_dashboard/frontend/src/features/backups/attemptDetails.test.tsx": 149,
   "pi/apps/van_dashboard/frontend/src/features/backups/attemptDetails.ts": 39,
   "pi/apps/van_dashboard/frontend/src/features/backups/backups.test.tsx": 211,
-  "pi/apps/van_dashboard/frontend/src/features/backups/cloudPresentation.ts": 51,
+  "pi/apps/van_dashboard/frontend/src/features/backups/cloudPresentation.ts": 84,
   "pi/apps/van_dashboard/frontend/src/features/backups/controls.test.tsx": 127,
   "pi/apps/van_dashboard/frontend/src/features/backups/controls.ts": 212,
   "pi/apps/van_dashboard/frontend/src/features/backups/decoders.ts": 238,
   "pi/apps/van_dashboard/frontend/src/features/backups/hooks.ts": 27,
-  "pi/apps/van_dashboard/frontend/src/features/backups/icloud.test.tsx": 424,
+  "pi/apps/van_dashboard/frontend/src/features/backups/icloud.test.tsx": 511,
   "pi/apps/van_dashboard/frontend/src/features/backups/icloud.ts": 268,
   "pi/apps/van_dashboard/frontend/src/features/backups/index.ts": 22,
   "pi/apps/van_dashboard/frontend/src/features/backups/presentation.ts": 58,
@@ -1338,23 +1295,18 @@
   "pi/apps/video_library/deferred_positions.py": 49,
   "pi/apps/video_library/file_observations.py": 183,
   "pi/apps/video_library/filesystem_identity.py": 59,
-  "pi/apps/video_library/identity.py": 609,
+  "pi/apps/video_library/identity.py": 616,
   "pi/apps/video_library/legacy_progress.py": 442,
   "pi/apps/video_library/library.py": 426,
-  "pi/apps/video_library/maintenance/filesystem_identity_repair.py": 442,
-  "pi/apps/video_library/maintenance/identity_repair_evidence.py": 480,
-  "pi/apps/video_library/maintenance/legacy_churn_evidence.py": 266,
-  "pi/apps/video_library/maintenance/legacy_churn_repair.py": 140,
-  "pi/apps/video_library/maintenance/same_file_repair.py": 581,
   "pi/apps/video_library/media_models.py": 104,
   "pi/apps/video_library/naming.py": 216,
-  "pi/apps/video_library/playback.py": 733,
+  "pi/apps/video_library/playback.py": 737,
   "pi/apps/video_library/players/sonos_volume.py": 103,
   "pi/apps/video_library/players/vlc_player.py": 429,
   "pi/apps/video_library/qbittorrent_availability.py": 17,
   "pi/apps/video_library/routes.py": 372,
   "pi/apps/video_library/schema.py": 273,
-  "pi/apps/video_library/service.py": 164,
+  "pi/apps/video_library/service.py": 165,
   "pi/apps/video_library/static/video_library.js": 629,
   "pi/apps/video_library/v1_bridge.py": 790,
   "pi/apps/video_library/video_asset_catalog.py": 16,
@@ -1374,6 +1326,14 @@
   "pi/network_storage_dependencies.py": 44,
   "pi/package_runtime.py": 40,
   "pi/projects/dashcam-wifi-connect/test_dashcamctl.sh": 121,
+  "pi/projects/visual-guides/ac_ir.py": 181,
+  "pi/projects/visual-guides/app.py": 412,
+  "pi/projects/visual-guides/deploy.py": 413,
+  "pi/projects/visual-guides/hardware_setup.py": 340,
+  "pi/projects/visual-guides/static/guide.js": 129,
+  "pi/projects/visual-guides/test_deploy.py": 103,
+  "pi/projects/visual-guides/test_hardware_setup.py": 75,
+  "pi/projects/visual-guides/tests/test_app.py": 460,
   "pi/pull_crontabs.sh": 19,
   "pi/push_crontabs.sh": 19,
   "pi/raspbian_setup.sh": 103,
@@ -1522,7 +1482,6 @@
   "pi/tests/compute/test_van_compute_golden.py": 623,
   "pi/tests/compute/test_van_compute_package_update.py": 79,
   "pi/tests/compute/test_van_compute_repair.py": 168,
-  "pi/tests/compute/test_van_compute_runbook.py": 43,
   "pi/tests/compute/test_van_compute_upgrade_gate.py": 399,
   "pi/tests/compute/test_van_compute_worker.py": 1131,
   "pi/tests/compute/test_van_compute_worker_ssh_lifecycle.py": 214,
@@ -1548,16 +1507,13 @@
   "pi/tests/media/test_video_asset_catalog.py": 973,
   "pi/tests/media/test_video_file_observations.py": 103,
   "pi/tests/media/test_video_filesystem_identity.py": 172,
-  "pi/tests/media/test_video_filesystem_repair.py": 331,
-  "pi/tests/media/test_video_history_edges.py": 685,
-  "pi/tests/media/test_video_identity_deployment.py": 108,
+  "pi/tests/media/test_video_history_edges.py": 735,
+  "pi/tests/media/test_video_identity_deployment.py": 102,
   "pi/tests/media/test_video_identity_integration.py": 692,
   "pi/tests/media/test_video_identity_regressions.py": 1345,
-  "pi/tests/media/test_video_legacy_churn_repair.py": 146,
-  "pi/tests/media/test_video_library_server.py": 2579,
+  "pi/tests/media/test_video_library_server.py": 2557,
   "pi/tests/media/test_video_package_boot.py": 370,
   "pi/tests/media/test_video_qbittorrent.py": 542,
-  "pi/tests/media/test_video_same_file_repair.py": 281,
   "pi/tests/media/test_video_scan_performance.py": 90,
   "pi/tests/media/test_video_scan_playback.py": 136,
   "pi/tests/network/__init__.py": 1,
@@ -1684,7 +1640,7 @@
   "vanrouter/tests/test_uplink_https_monitor.py": 82
  },
  "func_limits": {},
- "head": "dc6e60f0391c08b060b0669eb8a68746801df05c",
+ "head": "2daad9a49c88de6bd451d9c6da6a361511267df9",
  "limits": {
   "enforce_tests": true,
   "file_lines": 800,
@@ -1694,7 +1650,7 @@
   "bare_except": 1,
   "dual_import_guard": 1,
   "lint_disable": 9,
-  "sys_path_hack": 6,
+  "sys_path_hack": 4,
   "ts_any": 0,
   "type_ignore": 3
  },
@@ -1935,19 +1891,6 @@
    "definition": 29,
    "main": 20,
    "uid": 2
-  },
-  "macbook/bettertouchtool/one_off_fixes/2026-07-19-CRASH-RISK-recent-notes-submenu.py": {
-   "build_submenu": 22,
-   "main": 7,
-   "new_uuid": 2
-  },
-  "macbook/bettertouchtool/one_off_fixes/2026-07-25-build-media-vertical-dropdowns.py": {
-   "collect_uuids": 12,
-   "main": 33,
-   "parse_args": 8,
-   "readme_text": 30,
-   "validate": 30,
-   "write_json": 5
   },
   "macbook/bettertouchtool/port_media_icons.py": {
    "appearance_disk_errors": 19,
@@ -2396,12 +2339,10 @@
    "GuardServiceTests.test_workspace_mismatch_is_rejected": 17
   },
   "macbook/tests/test_btt_maintenance.py": {
-   "MaintenanceTests.test_active_sources_do_not_import_archived_helpers": 7,
    "MaintenanceTests.test_deleted_media_recovery_requires_explicit_apply": 8,
-   "MaintenanceTests.test_every_change_command_defaults_to_inspection": 7,
+   "MaintenanceTests.test_every_change_command_defaults_to_inspection": 6,
    "MaintenanceTests.test_explicit_apply_preserves_feature_scope": 15,
    "MaintenanceTests.test_guard_uses_package_entry_without_import_path_shims": 8,
-   "MaintenanceTests.test_historical_shell_and_import_generators_are_inert_by_default": 12,
    "MaintenanceTests.test_invalid_repair_option_combinations_are_rejected": 3,
    "MaintenanceTests.test_no_arguments_only_prints_help": 4,
    "MaintenanceTests.test_restore_requires_explicit_apply_and_does_not_shell_interpolate": 7,
@@ -3333,6 +3274,7 @@
    "CatalogIdentityMixin._bind_library_item": 74,
    "CatalogIdentityMixin._catalog_item_progress": 3,
    "CatalogIdentityMixin._ensure_asset_work": 29,
+   "CatalogIdentityMixin._finish_reconcile": 13,
    "CatalogIdentityMixin._path_is_probably_incomplete": 19,
    "CatalogIdentityMixin._progress_all": 19,
    "CatalogIdentityMixin._record_snapshot_degrading": 4,
@@ -3344,7 +3286,7 @@
    "CatalogIdentityMixin._status_item_progress": 7,
    "CatalogIdentityMixin._sync_library_identities": 27,
    "CatalogIdentityMixin._torrent_metadata": 11,
-   "CatalogIdentityMixin.reconcile_torrents": 80,
+   "CatalogIdentityMixin.reconcile_torrents": 73,
    "CatalogIdentityMixin.update_progress": 33,
    "_catalog_item_prefix": 2,
    "_degraded_sentinel": 2,
@@ -3393,105 +3335,6 @@
    "MediaLibrary.snapshot": 3,
    "default_sources": 5
   },
-  "pi/apps/video_library/maintenance/filesystem_identity_repair.py": {
-   "_apply_steps": 10,
-   "_ensure_canonical_identity": 19,
-   "_invalidate_wrong_identities": 17,
-   "_library_membership": 3,
-   "_mark": 2,
-   "_new_changes": 2,
-   "_parser": 14,
-   "_rebind_legacy": 11,
-   "_repair_run": 12,
-   "_run_with_report": 32,
-   "_scan_item": 9,
-   "_schema_check": 4,
-   "_verify_deltas": 21,
-   "_verify_postconditions": 30,
-   "_version_aliases": 14,
-   "_version_locations": 14,
-   "_write_json_exclusive": 7,
-   "capture_plan": 22,
-   "main": 25,
-   "read_only_matcher_scan": 42,
-   "run_repair": 47
-  },
-  "pi/apps/video_library/maintenance/identity_repair_evidence.py": {
-   "_active_observation_status": 19,
-   "_counterpart_summary": 14,
-   "_fixed_row": 4,
-   "_forward_identity_rows": 10,
-   "_forward_version_rows": 11,
-   "_identity_evidence": 28,
-   "_legacy_evidence": 9,
-   "_observation_evidence": 18,
-   "_playback_evidence": 12,
-   "_target_identity": 6,
-   "_validate_planned_identities": 21,
-   "_validate_planned_version_rows": 11,
-   "_version_row": 10,
-   "build_plan": 9,
-   "build_plan_pins": 5,
-   "capture_evidence": 23,
-   "filesystem_observation": 4,
-   "former_audio_path_status": 3,
-   "target_link_resolves": 2,
-   "validate_against_plan": 27,
-   "validate_plan_shape": 36
-  },
-  "pi/apps/video_library/maintenance/legacy_churn_evidence.py": {
-   "IdentityIndex.for_assets": 3,
-   "IdentityIndex.read": 5,
-   "_asset_rows": 3,
-   "_pair_snapshot": 17,
-   "_same_physical_source": 11,
-   "_unchanged_locations": 8,
-   "capture_churn_plan": 26,
-   "current_candidate": 12,
-   "load_prior_plan": 10,
-   "playhead_transfer_needed": 13,
-   "validate_churn_plan": 18,
-   "validate_pair": 26,
-   "validate_proof": 22
-  },
-  "pi/apps/video_library/maintenance/legacy_churn_repair.py": {
-   "_project": 9,
-   "_track_row": 4,
-   "_transfer": 13,
-   "_verify_projection": 17,
-   "_verify_transferred_state": 18,
-   "repair_pair": 19,
-   "run_legacy_repair": 14,
-   "verify_done": 8,
-   "verify_legacy_repair": 6
-  },
-  "pi/apps/video_library/maintenance/same_file_repair.py": {
-   "authorize": 2,
-   "current_states": 3,
-   "digest": 2,
-   "ensure_unused": 20,
-   "equal_rows": 2,
-   "invalidate_reused_inode": 51,
-   "legacy_same_file": 14,
-   "load_plan": 22,
-   "main": 54,
-   "observation_status": 21,
-   "one": 5,
-   "postcheck": 32,
-   "project_progress": 16,
-   "repair_legacy": 30,
-   "repair_pair": 36,
-   "repair_timestamp": 9,
-   "require": 3,
-   "rows": 2,
-   "run_repair": 33,
-   "scan": 39,
-   "snapshot": 10,
-   "stat_value": 4,
-   "validate_legacy_evidence": 14,
-   "validate_pair": 41,
-   "validate_playback": 20
-  },
   "pi/apps/video_library/media_models.py": {
    "MediaItem.as_dict": 20,
    "MediaItem.episode_code": 4,
@@ -3532,7 +3375,7 @@
    "PlaybackMixin.room_preparing": 3,
    "PlaybackMixin.set_audio_volume": 19,
    "PlaybackMixin.set_sleep_timer": 9,
-   "PlaybackMixin.status": 61
+   "PlaybackMixin.status": 65
   },
   "pi/apps/video_library/players/sonos_volume.py": {
    "SonosVolumeController.__init__": 17,
@@ -3597,7 +3440,7 @@
   },
   "pi/apps/video_library/schema.py": {},
   "pi/apps/video_library/service.py": {
-   "VideoService.__init__": 30,
+   "VideoService.__init__": 31,
    "VideoService._loop": 13,
    "VideoService.rescan": 14,
    "VideoService.start": 6,
@@ -3774,6 +3617,130 @@
   },
   "pi/package_runtime.py": {
    "record_running_release": 29
+  },
+  "pi/projects/visual-guides/ac_ir.py": {
+   "Command.__post_init__": 11,
+   "Command.preview": 12,
+   "IrCtlTransport.__init__": 10,
+   "IrCtlTransport.send": 20,
+   "Transport.send": 2,
+   "_compatibility_command": 11,
+   "_nec_extended_waveform": 11,
+   "format_mode2": 15
+  },
+  "pi/projects/visual-guides/app.py": {
+   "AcIrHandler._discard_body": 3,
+   "AcIrHandler._error": 3,
+   "AcIrHandler._json": 11,
+   "AcIrHandler._origin_allowed": 7,
+   "AcIrHandler._read_json_body": 23,
+   "AcIrHandler._serve_static": 27,
+   "AcIrHandler._transmit": 32,
+   "AcIrHandler.app": 2,
+   "AcIrHandler.do_GET": 22,
+   "AcIrHandler.do_HEAD": 6,
+   "AcIrHandler.do_OPTIONS": 2,
+   "AcIrHandler.do_POST": 23,
+   "AcIrHandler.log_message": 3,
+   "AcIrHandler.setup": 3,
+   "AcIrServer.__init__": 5,
+   "AppConfig.__post_init__": 6,
+   "build_parser": 17,
+   "command_or_error": 5,
+   "delivery_response": 8,
+   "main": 50,
+   "read_token": 14,
+   "send_via_server": 35
+  },
+  "pi/projects/visual-guides/deploy.py": {
+   "artifact_paths": 15,
+   "build_manifest": 11,
+   "canonical": 2,
+   "ensure_private_token": 21,
+   "extract_release": 21,
+   "health_ok": 12,
+   "inspect_remote": 26,
+   "link_release": 12,
+   "listener_owner": 6,
+   "main": 27,
+   "make_archive": 15,
+   "regular_sha": 8,
+   "remote_apply": 47,
+   "replace_link": 4,
+   "restore_deployment": 26,
+   "run_ssh": 18,
+   "safe_manifest": 17,
+   "sha256": 2,
+   "systemctl": 2,
+   "verify_release": 16
+  },
+  "pi/projects/visual-guides/hardware_setup.py": {
+   "activate": 31,
+   "boot_config": 11,
+   "configure": 26,
+   "deactivate": 12,
+   "driver_for_device": 23,
+   "fixed_file_state": 6,
+   "gpio_consumer": 8,
+   "inspect_pin": 9,
+   "main": 25,
+   "overlay_state": 17,
+   "pin_state": 5,
+   "require_pi_owner": 3,
+   "run": 12,
+   "save_private_backup": 14,
+   "status": 18,
+   "verify_transmit_device": 11,
+   "wait_api": 12,
+   "write_fixed": 8
+  },
+  "pi/projects/visual-guides/test_deploy.py": {
+   "DeployTests.test_artifact_allowlist_excludes_tests_docs_and_secrets": 16,
+   "DeployTests.test_listener_discovery_fails_closed": 5,
+   "DeployTests.test_restore_deployment_restores_links_unit_and_service_state": 32,
+   "DeployTests.test_reused_release_verifies_every_file_and_rejects_extras": 20,
+   "DeployTests.test_unit_has_fixed_safe_process_contract": 8
+  },
+  "pi/projects/visual-guides/test_hardware_setup.py": {
+   "HardwareSetupTests.test_boot_config_accepts_only_exact_overlay": 8,
+   "HardwareSetupTests.test_boot_config_prefers_firmware_and_requires_known_legacy_stub": 10,
+   "HardwareSetupTests.test_device_requires_gpio_ir_tx_parent": 6,
+   "HardwareSetupTests.test_foreign_managed_file_is_reported": 5,
+   "HardwareSetupTests.test_gpio_consumer_refuses_occupied_pin_but_recognizes_own": 10,
+   "HardwareSetupTests.test_hardware_dropin_has_fixed_transmit_arguments": 4,
+   "HardwareSetupTests.test_wait_api_retries_until_expected_mode": 8
+  },
+  "pi/projects/visual-guides/tests/test_app.py": {
+   "ApiTests.config": 7,
+   "ApiTests.setUp": 12,
+   "ApiTests.tearDown": 2,
+   "ApiTests.test_ambiguous_transport_failure_still_starts_rate_limit": 26,
+   "ApiTests.test_disabled_hardware_and_bad_bodies_never_transmit": 26,
+   "ApiTests.test_get_endpoints_are_read_only_and_do_not_transmit": 20,
+   "ApiTests.test_preview_is_default_safe_behavior_and_needs_no_token": 15,
+   "ApiTests.test_real_send_requires_hardware_auth_and_same_origin": 41,
+   "ApiTests.test_rejected_request_closes_connection": 11,
+   "ApiTests.test_static_assets_have_browser_usable_content_types": 16,
+   "ApiTests.test_static_paths_are_bounded_to_static_root": 12,
+   "CliTests.private_token_file": 5,
+   "CliTests.test_send_requires_explicit_hardware_acknowledgement_before_network": 15,
+   "CliTests.test_send_to_disabled_service_never_transmits_or_retries": 25,
+   "CliTests.test_send_transport_error_is_not_retried": 22,
+   "CliTests.test_send_uses_running_service_transport_once": 30,
+   "CliTests.test_unknown_send_fails_before_token_read_or_network": 8,
+   "FakeTransport.__init__": 6,
+   "FakeTransport.send": 6,
+   "RunningServer.__enter__": 3,
+   "RunningServer.__exit__": 4,
+   "RunningServer.__init__": 3,
+   "RunningServer.port": 2,
+   "RunningServer.request": 16,
+   "TokenTests.test_token_contents_are_bounded_and_whitespace_free": 7,
+   "TokenTests.test_token_file_must_be_private": 9,
+   "WaveformTests.test_candidate_nec_waveform_uses_converted_lsb_first_bytes": 9,
+   "WaveformTests.test_catalog_excludes_unproven_absolute_state_commands": 17,
+   "WaveformTests.test_mode2_alternates_pulses_and_spaces": 5,
+   "WaveformTests.test_mode2_rejects_invalid_or_even_length_data": 5
   },
   "pi/scripts/__init__.py": {},
   "pi/scripts/apply_usb_storage_quirks.py": {
@@ -5021,10 +4988,6 @@
    "ProvisioningLocal.__init__": 3,
    "ProvisioningLocal.run": 10
   },
-  "pi/tests/compute/test_van_compute_runbook.py": {
-   "ComputeRunbookTests.test_forward_recovery_uses_frozen_release_without_a_worktree": 14,
-   "ComputeRunbookTests.test_rollback_pins_baseline_and_overlays_fixed_frozen_installer": 17
-  },
   "pi/tests/compute/test_van_compute_upgrade_gate.py": {
    "VanComputeUpgradeGateTests.test_acquire_and_restore_are_a_complete_owned_transition": 34,
    "VanComputeUpgradeGateTests.test_acquire_recovers_if_owner_was_written_before_backup": 23,
@@ -5763,30 +5726,6 @@
    "FilesystemIdentityTests.test_unknown_to_known_mtime_records_stronger_observation": 12,
    "FilesystemIdentityTests.test_uuid_resolves_same_filesystem_after_kernel_device_change": 11
   },
-  "pi/tests/media/test_video_filesystem_repair.py": {
-   "FakeLibrary.__init__": 3,
-   "FakeLibrary.scan": 2,
-   "FakeLibrary.snapshot": 2,
-   "FilesystemIdentityRepairTests._capture": 5,
-   "FilesystemIdentityRepairTests._insert": 5,
-   "FilesystemIdentityRepairTests._invoke": 13,
-   "FilesystemIdentityRepairTests._observation": 2,
-   "FilesystemIdentityRepairTests._rows": 7,
-   "FilesystemIdentityRepairTests._seed_database": 21,
-   "FilesystemIdentityRepairTests._seed_playback": 17,
-   "FilesystemIdentityRepairTests._snapshot": 7,
-   "FilesystemIdentityRepairTests.setUp": 39,
-   "FilesystemIdentityRepairTests.test_apply_preserves_history_metadata_and_has_only_intended_deltas": 25,
-   "FilesystemIdentityRepairTests.test_apply_requires_acknowledgement_and_holder_check": 12,
-   "FilesystemIdentityRepairTests.test_capture_refuses_changed_work_instead_of_rubber_stamping_it": 9,
-   "FilesystemIdentityRepairTests.test_changed_evidence_skips_without_mutation": 13,
-   "FilesystemIdentityRepairTests.test_default_dry_run_uses_memory_backup_and_leaves_bytes_unchanged": 10,
-   "FilesystemIdentityRepairTests.test_postscan_conflict_rolls_back_entire_repair": 9,
-   "FilesystemIdentityRepairTests.test_postscan_rejects_unplanned_legacy_mismatches": 42,
-   "FilesystemIdentityRepairTests.test_repeat_with_same_plan_is_noop": 9,
-   "FilesystemIdentityRepairTests.test_unreviewed_source_version_skips_without_mutation": 13,
-   "FilesystemIdentityRepairTests.test_wrong_uuid_attachment_is_also_invalidated": 15
-  },
   "pi/tests/media/test_video_history_edges.py": {
    "HistoryFailureBoundaryTests._only_item": 5,
    "HistoryFailureBoundaryTests.setUp": 3,
@@ -5805,6 +5744,8 @@
    "HistoryFailureBoundaryTests.test_legacy_position_log_audits_raw_resolved_and_unresolved_lines.json_contains_exact": 8,
    "HistoryFailureBoundaryTests.test_offline_qb_still_treats_incomplete_path_as_partial": 19,
    "HistoryFailureBoundaryTests.test_parser_key_rename_during_v1_rollback_preserves_newer_progress": 48,
+   "HistoryFailureBoundaryTests.test_periodic_reconcile_failure_clears_when_qbittorrent_returns": 33,
+   "HistoryFailureBoundaryTests.test_reconcile_success_keeps_unrelated_identity_warning": 12,
    "PlaypFallbackTests._run_playp": 37,
    "PlaypFallbackTests._server": 14,
    "PlaypFallbackTests.setUp": 10,
@@ -5816,10 +5757,9 @@
    "_RecordingHandler.log_message": 2
   },
   "pi/tests/media/test_video_identity_deployment.py": {
-   "VideoIdentityDeploymentTests.setUpClass": 5,
-   "VideoIdentityDeploymentTests.test_alias_jobs_are_atomic_detached_queued_and_share_one_lock": 13,
+   "VideoIdentityDeploymentTests.setUpClass": 4,
+   "VideoIdentityDeploymentTests.test_alias_jobs_are_atomic_detached_queued_and_share_one_lock": 12,
    "VideoIdentityDeploymentTests.test_alias_notification_is_loopback_only_and_bounded": 8,
-   "VideoIdentityDeploymentTests.test_documented_media_test_gate_includes_history_failure_boundaries": 2,
    "VideoIdentityDeploymentTests.test_retired_deployer_refuses_without_network_or_file_operations": 23,
    "VideoIdentityDeploymentTests.test_rollback_refuses_and_points_to_saved_package_unit_rollback": 12,
    "VideoIdentityDeploymentTests.test_shell_entrypoints_parse_and_are_executable": 5,
@@ -5922,16 +5862,6 @@
    "WorkProjectionTests.test_explicit_replay_clears_automatic_watched_state": 31,
    "WorkProjectionTests.test_marking_unplayed_item_watched_projects_to_v1_and_ui": 21
   },
-  "pi/tests/media/test_video_legacy_churn_repair.py": {
-   "LegacyChurnRepairTests._seed_pair": 32,
-   "LegacyChurnRepairTests.setUp": 20,
-   "LegacyChurnRepairTests.test_changed_file_stat_is_reported_without_committing_other_pairs": 7,
-   "LegacyChurnRepairTests.test_changed_legacy_row_is_reported_and_whole_transaction_rolls_back": 10,
-   "LegacyChurnRepairTests.test_old_silo_only_plan_is_refused_before_writes": 10,
-   "LegacyChurnRepairTests.test_rebinds_all_keys_transfers_two_and_projects_shadows": 25,
-   "LegacyChurnRepairTests.test_reviewed_prior_plan_checksum_is_required": 7,
-   "LegacyChurnRepairTests.test_timestamp_only_copy_does_not_need_another_transfer": 6
-  },
   "pi/tests/media/test_video_library_server.py": {
    "ApiRouteTests.post": 2,
    "ApiRouteTests.setUp": 25,
@@ -5954,7 +5884,6 @@
    "ApiRouteTests.test_volume_route_controls_sonos_only_and_requires_integer_0_to_100": 27,
    "ApiRouteTests.test_web_assets_manifest_and_api_cache_policy_are_served": 17,
    "DeploymentWiringTests._video_module_sources": 7,
-   "DeploymentWiringTests.test_frontend_captures_search_generation_and_honors_player_capabilities": 21,
    "DeploymentWiringTests.test_legacy_position_logger_skips_manager_real_target_playback_privately": 17,
    "DeploymentWiringTests.test_service_declares_every_runtime_asset_and_session_dependency": 63,
    "DeploymentWiringTests.test_shell_utilities_follow_current_package_and_preserve_flat_rollback": 36,
@@ -6121,29 +6050,6 @@
    "_LoginServerHandler.log_message": 2,
    "torrent": 24,
    "torrent_file": 17
-  },
-  "pi/tests/media/test_video_same_file_repair.py": {
-   "SameFileRepairTests.add_inode_exception": 24,
-   "SameFileRepairTests.invoke": 12,
-   "SameFileRepairTests.make_pair": 15,
-   "SameFileRepairTests.setUp": 38,
-   "SameFileRepairTests.snapshot": 2,
-   "SameFileRepairTests.test_apply_preserves_history_and_second_apply_is_noop": 17,
-   "SameFileRepairTests.test_apply_requires_explicit_stopped_acknowledgement": 6,
-   "SameFileRepairTests.test_changed_legacy_binding_skips_entire_pair": 8,
-   "SameFileRepairTests.test_changed_playback_is_not_overwritten": 7,
-   "SameFileRepairTests.test_changed_stat_skips_pair_and_rolls_back_entire_transaction": 8,
-   "SameFileRepairTests.test_changed_work_is_not_merged": 7,
-   "SameFileRepairTests.test_default_dry_run_never_changes_file_and_reports_transfer": 10,
-   "SameFileRepairTests.test_holder_check_rejects_active_holder_or_diagnostic_errors": 8,
-   "SameFileRepairTests.test_inode_exception_only_invalidates_identity_without_playback_transfer": 11,
-   "SameFileRepairTests.test_inode_exception_refuses_if_old_file_reappears": 8,
-   "SameFileRepairTests.test_newer_target_playback_is_not_overwritten": 7,
-   "SameFileRepairTests.test_no_holder_tools_requires_confirmed_inactive_service": 5,
-   "SameFileRepairTests.test_older_device_same_file_binding_is_rebound_without_merging_asset": 21,
-   "SameFileRepairTests.test_postcheck_failure_rolls_back_everything": 6,
-   "SameFileRepairTests.test_unexpected_api_failure_rolls_back_earlier_transfer": 8,
-   "SameFileRepairTests.test_unrelated_encode_binding_is_retained": 9
   },
   "pi/tests/media/test_video_scan_performance.py": {
    "VideoScanPerformanceTests.seed_positions": 13,
@@ -7464,6 +7370,9 @@
   "pi/apps/van_dashboard/frontend/src/test/parity.test.ts",
   "pi/apps/van_dashboard/frontend/src/test/parity.ts",
   "pi/apps/van_dashboard/frontend/src/test/setup.ts",
+  "pi/projects/visual-guides/test_deploy.py",
+  "pi/projects/visual-guides/test_hardware_setup.py",
+  "pi/projects/visual-guides/tests/test_app.py",
   "pi/tests/__init__.py",
   "pi/tests/backup/test_backup_priority.py",
   "pi/tests/backup/test_icloud_backup.py",
@@ -7488,7 +7397,6 @@
   "pi/tests/compute/test_van_compute_golden.py",
   "pi/tests/compute/test_van_compute_package_update.py",
   "pi/tests/compute/test_van_compute_repair.py",
-  "pi/tests/compute/test_van_compute_runbook.py",
   "pi/tests/compute/test_van_compute_upgrade_gate.py",
   "pi/tests/compute/test_van_compute_worker.py",
   "pi/tests/compute/test_van_compute_worker_ssh_lifecycle.py",
@@ -7514,16 +7422,13 @@
   "pi/tests/media/test_video_asset_catalog.py",
   "pi/tests/media/test_video_file_observations.py",
   "pi/tests/media/test_video_filesystem_identity.py",
-  "pi/tests/media/test_video_filesystem_repair.py",
   "pi/tests/media/test_video_history_edges.py",
   "pi/tests/media/test_video_identity_deployment.py",
   "pi/tests/media/test_video_identity_integration.py",
   "pi/tests/media/test_video_identity_regressions.py",
-  "pi/tests/media/test_video_legacy_churn_repair.py",
   "pi/tests/media/test_video_library_server.py",
   "pi/tests/media/test_video_package_boot.py",
   "pi/tests/media/test_video_qbittorrent.py",
-  "pi/tests/media/test_video_same_file_repair.py",
   "pi/tests/media/test_video_scan_performance.py",
   "pi/tests/media/test_video_scan_playback.py",
   "pi/tests/network/__init__.py",
