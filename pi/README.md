@@ -29,6 +29,10 @@ normally live under `/home/pi/scripts/`.
 - [USB port controls](docs/dashboard/USB_PORT_CONTROLS.md)
 - [Application layout](apps/README.md)
 
+## Project guides
+
+- [Visual Guides & A/C IR controller](projects/visual-guides/README.md)
+
 ## Testing
 
 - [Test suite layout and commands](tests/README.md)
