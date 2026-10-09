@@ -127,6 +127,12 @@ compare it with this checkout. Deployed files may differ from the repository.
   and verify the shared backup configuration before updating it.
 - `pi/scripts/backup/icloud_inventory.py` owns cloud object fingerprint parsing
   and size-based upload estimates, re-exported by the shared cloud worker.
+- `pi/scripts/backup/time_machine_pipeline.py` supervises a single verifier
+  alongside the Mac uploader, preserving the inherited backup lock. Completed
+  upload events admit new chunks; the initial remote inventory seeds catch-up.
+  `time_machine_verification.py` owns the existing SHA-256 checkpoint format for
+  both background and final checks. Only the parent writes dashboard state and
+  publishes completion, after an exhaustive final inventory/fingerprint check.
 - `pi/scripts/backup/time_machine_staging.py` owns local orphan-chunk cleanup.
   Plan/apply require the common backup lock, verified mount and owned store,
   preserving capture-index, pending/published manifests and upload/verification

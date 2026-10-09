@@ -45,6 +45,50 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe('iCloud dashboard', () => {
+  it('shows verification catching up independently while uploading, and retains saved checks when paused', () => {
+    const status = cloud();
+    Object.assign(status, { running: true, phase: 'uploading', updatedAt: Date.now() / 1000 });
+    Object.assign(status.progress, {
+      parallelVerification: true,
+      verifiedBytes: 100,
+      verificationTotalBytes: 1000,
+      verifiedFiles: 2,
+      verificationTotalFiles: 20,
+      verificationBytesPerSecond: 1024,
+      verificationUpdatedAt: Date.now() / 1000,
+    });
+    const view = render(<ICloudBackupCard status={status} kind="time-machine" />);
+    expect(screen.getByRole('progressbar', { name: 'iCloud upload estimate' })).toHaveAttribute(
+      'aria-valuenow',
+      '75',
+    );
+    expect(
+      screen.getByRole('progressbar', { name: 'Concurrent iCloud download verification' }),
+    ).toHaveAttribute('aria-valuenow', '10');
+    expect(screen.getByText(/Download verification.*10.0%/)).toHaveTextContent('1.0 KiB/s');
+    view.rerender(
+      <ICloudBackupCard
+        status={{ ...status, running: false, phase: 'paused' }}
+        kind="time-machine"
+      />,
+    );
+    expect(screen.getByText(/Saved verification.*10.0%/)).not.toHaveTextContent('KiB/s');
+    view.rerender(
+      <ICloudBackupCard
+        status={{
+          ...status,
+          progress: {
+            ...status.progress,
+            verificationWaiting: true,
+            verificationBytesPerSecond: null,
+          },
+        }}
+        kind="time-machine"
+      />,
+    );
+    expect(screen.getByText(/Caught up with completed uploads/)).toBeInTheDocument();
+  });
+
   it('does not round an unfinished capture up to complete', () => {
     const status = cloud();
     Object.assign(status, { phase: 'error', lastWorkPhase: 'preparing' });

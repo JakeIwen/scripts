@@ -111,6 +111,20 @@ class StatusTests(unittest.TestCase):
         for changes in ({'phase': 'verifying'}, {'worker_pid': 124}, {'progress_updated_at': 900}):
             self.assertIsNone(self.build({**state, **changes}, live=True)['progress']['upload_bytes_per_second'])
 
+    def test_parallel_verification_has_its_own_freshness_and_stall_signal(self):
+        state = {'phase':'uploading','worker_pid':123,'progress_updated_at':995,
+                 'progress':{'parallel_verification':True,'verification_updated_at':995,
+                             'verification_bytes_per_second':2048,'verification_idle_seconds':121}}
+        live = self.build(state, live=True)
+        self.assertEqual(live['progress']['verification_bytes_per_second'], 2048)
+        self.assertTrue(live['stalled'])
+        self.assertIn('verifying completed uploads', live['message'])
+        self.assertIsNone(self.build(state)['progress']['verification_bytes_per_second'])
+        for changes in ({'verification_waiting':True}, {'verification_updated_at':900}):
+            changed = self.build({**state,'progress':{**state['progress'],**changes}}, live=True)
+            self.assertFalse(changed['stalled'])
+            self.assertIsNone(changed['progress']['verification_bytes_per_second'])
+
     def test_exclusive_access_loss_has_a_specific_public_reason(self):
         status = self.build({'phase': 'deferred', 'last_error': 'Time Machine capture lost exclusive source access'})
         self.assertIn('exclusive Time Machine access was lost', status['message'])

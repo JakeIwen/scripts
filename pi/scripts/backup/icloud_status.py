@@ -171,6 +171,8 @@ def phase(value):
 def reason(state):
     """Translate known conditions without exposing paths, SSIDs or server bodies."""
     value = str(state.get('last_error') or '').casefold()
+    if state.get('phase') == 'uploading' and state.get('progress', {}).get('parallel_verification'):
+        return 'Uploading frozen chunks and verifying completed uploads.'
     if state.get('phase') in ('error', 'deferred') and state.get('failure_code') in FAILURE_MESSAGES:
         return FAILURE_MESSAGES[state['failure_code']]
     if state.get('kind') == 'time-machine' and state.get('phase') == 'preparing':
@@ -265,10 +267,29 @@ def begin_attempt(directory, state):
 
 
 def transfer_stalled(state, matching, updated, now):
-    idle = number(state.get('progress', {}).get('command_idle_seconds'))
+    values = state.get('progress', {})
+    idle = number(values.get('command_idle_seconds'))
+    verification_idle = number(values.get('verification_idle_seconds'))
+    verification_updated = number(values.get('verification_updated_at'))
+    if (values.get('parallel_verification') and not values.get('verification_waiting') and verification_idle is not None
+            and verification_updated is not None and 0 <= now - verification_updated <= 60):
+        idle = max(idle or 0, verification_idle)
     return bool(matching and state.get('phase') in ('uploading', 'verifying')
                 and updated is not None and now - updated <= 60
                 and idle is not None and idle >= TRANSFER_STALL_SECONDS)
+
+
+def add_verification_progress(result, state, matching, now):
+    raw = state.get('progress', {})
+    updated = number(raw.get('verification_updated_at'))
+    result['parallel_verification'] = raw.get('parallel_verification') is True
+    result['verification_waiting'] = raw.get('verification_waiting') is True
+    result['verification_updated_at'] = updated
+    result['verification_bytes_per_second'] = (
+        number(raw.get('verification_bytes_per_second'))
+        if matching and result['parallel_verification'] and not result['verification_waiting']
+        and state.get('phase') in ('uploading', 'verifying')
+        and updated is not None and 0 <= now - updated <= 60 else None)
 
 
 def build_status(state, history, cfg, service, next_check_at, now=None, auth_error=False):
@@ -291,6 +312,7 @@ def build_status(state, history, cfg, service, next_check_at, now=None, auth_err
     current_progress['upload_bytes_per_second'] = (
         number(current.get('progress', {}).get('upload_bytes_per_second'))
         if matching and current_phase == 'uploading' and updated is not None and now - updated <= 60 else None)
+    add_verification_progress(current_progress, current, matching, now)
     attempts = []
     for raw in reversed(history.get('attempts', [])[-100:]):
         row = dict(raw)

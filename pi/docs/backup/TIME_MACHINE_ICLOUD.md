@@ -104,6 +104,27 @@ inventory detects objects changed during verification. Manifest and completion
 marker are uploaded and read back last. Only `_COMPLETE.json` marks a verified
 recovery point. Interrupted uploads/checks resume without changing prior points.
 
+The Mac uploader overlaps upload and download verification by default. One
+lower-priority verifier first checks objects already present when the attempt
+starts, then follows rclone's completed-copy events. Merely observing an in-flight
+object in a listing never admits it to this background queue. Rclone v1.75.1 emits
+these [completion events after its copy/rename checks](https://github.com/rclone/rclone/blob/v1.75.1/fs/operations/copy.go#L331-L355).
+Unrecognized/missed events fall back to the exhaustive post-upload check.
+
+The verifier retains the same common backup lock, has its own guarded rclone
+client and no-progress watchdog, and stops if its parent disappears. Parent
+shutdown stops both clients. Only the parent writes dashboard state; the child
+writes the existing `verified-objects.json` after a complete matching download.
+The same checkpoints survive an interrupted upload or a return to sequential
+verification. Downloaded contents stream through bounded memory, not another HDD
+copy. The final inventory and completion-marker checks are still mandatory.
+
+`overlap_verification` defaults to true; false retains sequential behavior.
+`verification_bandwidth_limit` defaults to the existing per-client bandwidth
+limit, independently of the uploader. The dashboard shows separate upload and
+verification progress/rates. Upload ETA still estimates upload time; any remaining
+verification continues afterward. Total network bytes are unchanged by overlap.
+
 Retain **two verified recovery points** by default. Remove old manifests and
 unreferenced objects only AFTER a new point passes verification. A private
 retirement journal makes metadata deletion resumable. Unknown paths/proofs

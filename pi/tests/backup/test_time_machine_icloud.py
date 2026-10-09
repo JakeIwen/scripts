@@ -410,6 +410,33 @@ class CaptureGateTests(unittest.TestCase):
 
 
 class VerificationTests(unittest.TestCase):
+    def test_parallel_failure_preserves_frozen_manifest_and_never_publishes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); source=source_fixture(root)
+            local=root/'store'; local.mkdir()
+            manifest=store.freeze(source,local,GEN,72,0,lambda:None,lambda *a:None)
+            original=(local/'pending.json').read_bytes()
+            cfg={'remote':'icloud:test','max_cloud_store_gib':900,'overlap_verification':True}
+            with mock.patch.object(job,'ROOT',local), mock.patch.object(job,'ensure_remote'), \
+                    mock.patch.object(cloud,'remote_inventory',return_value={}), \
+                    mock.patch.object(cloud,'record_progress'), \
+                    mock.patch.object(job,'upload_and_follow',side_effect=RuntimeError('failed SHA-256 check')), \
+                    mock.patch.object(job,'network') as network:
+                with self.assertRaisesRegex(RuntimeError,'SHA-256'): job.transfer(cfg,manifest,{'pending':GEN})
+            network.assert_not_called()
+            self.assertEqual((local/'pending.json').read_bytes(),original)
+            self.assertFalse((local/'generations').exists())
+
+    def test_loaded_config_enables_overlap_with_existing_bandwidth_limit(self):
+        base=json.loads((REPO/'pi/configs/icloud-backup.json').read_text())
+        specific=json.loads((REPO/'pi/configs/time-machine-icloud.json').read_text())
+        with mock.patch.object(cloud,'load_config',return_value=base), mock.patch.object(store,'read_json',return_value=specific):
+            cfg=job.config()
+            self.assertIs(cfg['overlap_verification'],True)
+            self.assertEqual(cfg['verification_bandwidth_limit'],base['bandwidth_limit'])
+        with mock.patch.object(cloud,'load_config',return_value=base), mock.patch.object(store,'read_json',return_value={**specific,'overlap_verification':'yes'}):
+            with self.assertRaises(ValueError): job.config()
+
     def test_completion_publication_is_idempotent_after_readback_interruption(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); source = source_fixture(root)

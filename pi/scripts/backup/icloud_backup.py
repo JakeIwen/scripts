@@ -218,7 +218,7 @@ def local_backups_complete(now=None):
     return True
 
 
-def run(args, cfg, network=False, interactive=False, parked=True, stream_hash=False, progress=None):
+def run(args, cfg, network=False, interactive=False, parked=True, stream_hash=False, progress=None, on_completed=None):
     """Guard every network command, including retries, checks and retention."""
     global CHILD, CHILD_INTERACTIVE
     program = args[0]
@@ -247,7 +247,7 @@ def run(args, cfg, network=False, interactive=False, parked=True, stream_hash=Fa
         pass
     terminal = termios.tcgetattr(sys.stdin.fileno()) if interactive and sys.stdin.isatty() else None
     watch = ProgressWatch(cfg.get('no_progress_timeout_seconds', 900))
-    stats, io = RcloneStats(), ProcessIO()
+    stats, io = RcloneStats(on_completed), ProcessIO()
     with tempfile.TemporaryFile(mode='w+t') as output, tempfile.TemporaryFile(mode='w+t') as errors:
         CHILD_INTERACTIVE = interactive
         CHILD = subprocess.Popen(args, stdin=None if interactive else subprocess.DEVNULL,

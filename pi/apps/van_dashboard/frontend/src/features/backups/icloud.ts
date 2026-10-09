@@ -28,6 +28,10 @@ export type ICloudControlAction = 'pause' | 'resume' | 'take-turn';
 export type ICloudBackupKind = 'pi' | 'time-machine';
 export const INDEFINITE_PAUSE = 'indefinite';
 export interface ICloudProgress {
+  parallelVerification?: boolean;
+  verificationWaiting?: boolean;
+  verificationUpdatedAt?: number | null;
+  verificationBytesPerSecond?: number | null;
   uploadBytesPerSecond?: number | null;
   captureBytes?: number | null;
   captureTotalBytes?: number | null;
@@ -97,6 +101,22 @@ function phase(value: unknown): ICloudPhase {
 function progress(value: unknown): ICloudProgress {
   const row = objectValue(value, 'iCloud progress');
   return {
+    parallelVerification:
+      row.parallel_verification === undefined
+        ? false
+        : booleanValue(row.parallel_verification, 'parallel verification'),
+    verificationWaiting:
+      row.verification_waiting === undefined
+        ? false
+        : booleanValue(row.verification_waiting, 'verification waiting'),
+    verificationUpdatedAt:
+      row.verification_updated_at === undefined
+        ? null
+        : nullableNumeric(row.verification_updated_at),
+    verificationBytesPerSecond:
+      row.verification_bytes_per_second === undefined
+        ? null
+        : nullableNumeric(row.verification_bytes_per_second),
     uploadBytesPerSecond:
       row.upload_bytes_per_second === undefined
         ? null

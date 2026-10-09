@@ -4,6 +4,7 @@ import type { AvailableICloudStatus, ICloudBackupKind, ICloudStatus } from './ic
 import { ICloudBackupControls } from './ICloudBackupControls';
 import { iCloudUploadTimeLeft } from './cloudPresentation';
 import { ICloudAttemptMessage } from './ICloudAttemptMessage';
+import { ConcurrentVerification } from './ConcurrentVerification';
 
 function ICloudUploadSpeed({ status }: { status: AvailableICloudStatus }) {
   if (!status.running || status.phase !== 'uploading') return null;
@@ -129,6 +130,7 @@ export function ICloudBackupCard({
             </small>
           )}
           <CaptureDetails status={status} />
+          <ConcurrentVerification status={status} />
           <small>
             {status.running ? 'Worker update' : 'Last saved progress'}:{' '}
             {status.updatedAt === null ? 'not recorded yet' : formatRelativeTime(status.updatedAt)}
@@ -259,7 +261,7 @@ function ICloudBackupSection({
 function UploadTimeLeft({ status }: { status: AvailableICloudStatus }) {
   const remaining = iCloudUploadTimeLeft(status);
   return remaining === null ? null : (
-    <span title="Estimated upload time at the current rate; download verification follows.">{` · ${remaining} left`}</span>
+    <span title="Estimated upload time at the current rate; any remaining verification continues afterward.">{` · ${remaining} left`}</span>
   );
 }
 

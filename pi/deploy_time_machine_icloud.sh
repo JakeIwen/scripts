@@ -10,11 +10,13 @@ python3 -m unittest pi.tests.backup.test_time_machine_staging
 python3 pi/tests/backup/test_icloud_status.py
 python3 pi/tests/backup/test_icloud_backup.py
 PYTHONPATH=pi/scripts/backup python3 -m unittest pi.tests.backup.test_backup_priority
+PYTHONPATH=pi/scripts/backup python3 -m unittest pi.tests.backup.test_time_machine_pipeline
 bash pi/tests/storage/test_samba_share_control.sh
 bash -n pi/scripts/backup/time_machine_icloud.sh
 stage=$(ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" /usr/bin/mktemp -d /tmp/vanpi-tm-icloud.XXXXXX)
 [[ "$stage" =~ ^/tmp/vanpi-tm-icloud\.[[:alnum:]]{6}$ ]] || exit 1
-shared_hash=$(git show HEAD:pi/scripts/backup/icloud_backup.py | shasum -a 256 | awk '{print $1}')
+shared_hash=${VANPI_TM_PREVIOUS_CLOUD_SHA256:-$(git show HEAD:pi/scripts/backup/icloud_backup.py | shasum -a 256 | awk '{print $1}')}
+[[ "$shared_hash" =~ ^[0-9a-f]{64}$ ]] || exit 1
 progress_hash=$(git show HEAD:pi/scripts/backup/icloud_progress.py | shasum -a 256 | awk '{print $1}')
 share_hash=$(git show HEAD:pi/scripts/samba_share_control.sh | shasum -a 256 | awk '{print $1}')
 gate_hash=$(shasum -a 256 pi/scripts/samba_require_mount.sh | awk '{print $1}')
@@ -31,6 +33,8 @@ COPYFILE_DISABLE=1 /usr/bin/tar --no-xattrs -cf - \
   pi/scripts/backup/time_machine_icloud.py pi/scripts/backup/time_machine_icloud.sh \
   pi/scripts/backup/time_machine_store.py pi/scripts/backup/TIME_MACHINE_ICLOUD_RESTORE.txt \
   pi/scripts/backup/time_machine_staging.py pi/tests/backup/test_time_machine_staging.py \
+  pi/scripts/backup/time_machine_pipeline.py pi/scripts/backup/time_machine_verification.py \
+  pi/tests/backup/test_time_machine_pipeline.py \
   pi/scripts/backup/time_machine_icloud_status.py \
   pi/scripts/backup/time_machine_icloud_control.py pi/scripts/backup/cloud_backup_control.py \
   pi/scripts/backup/icloud_backup.py pi/scripts/backup/icloud_backup_control.py pi/scripts/backup/icloud_progress.py \
@@ -61,6 +65,7 @@ exec 9</run/lock/vanpi_backup.lock
 /usr/bin/python3 pi/tests/backup/test_icloud_status.py
 /usr/bin/python3 pi/tests/backup/test_icloud_backup.py
 PYTHONPATH=pi/scripts/backup /usr/bin/python3 -m unittest pi.tests.backup.test_backup_priority
+PYTHONPATH=pi/scripts/backup /usr/bin/python3 -m unittest pi.tests.backup.test_time_machine_pipeline
 bash pi/tests/storage/test_backup_job_lock.sh
 bash pi/tests/storage/test_samba_share_control.sh
 verify_previous() {
@@ -108,7 +113,7 @@ install_atomic() {
   sudo -n /usr/bin/mv -Tf "$temporary" "$target"
 }
 /usr/bin/install -d -m 0700 previous
-for name in time_machine_store.py backup_priority.py mac_capture_control.py icloud_status.py cloud_backup_control.py backup_priority_control.py icloud_inventory.py icloud_progress.py icloud_backup.py icloud_backup_control.py time_machine_icloud_control.py time_machine_staging.py time_machine_icloud.py icloud_backup.sh time_machine_icloud.sh time_machine_icloud_status.py backup_conf.sh TIME_MACHINE_ICLOUD_RESTORE.txt; do
+for name in time_machine_store.py backup_priority.py mac_capture_control.py icloud_status.py cloud_backup_control.py backup_priority_control.py icloud_inventory.py icloud_progress.py icloud_backup.py icloud_backup_control.py time_machine_icloud_control.py time_machine_staging.py time_machine_verification.py time_machine_pipeline.py time_machine_icloud.py icloud_backup.sh time_machine_icloud.sh time_machine_icloud_status.py backup_conf.sh TIME_MACHINE_ICLOUD_RESTORE.txt; do
   live=/home/pi/scripts/backup/$name
   [[ ! -e "$live" ]] || /usr/bin/cp -p "$live" previous/"$name"
   install_atomic pi/scripts/backup/"$name" "$live" 0750

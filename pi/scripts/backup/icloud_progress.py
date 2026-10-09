@@ -7,6 +7,12 @@ from pathlib import Path
 import threading
 import time
 
+COPY_COMPLETIONS = frozenset({
+    'Copied (new)', 'Copied (replaced existing)', 'Copied (server-side copy)',
+    'Copied (Rcat, new)', 'Copied (Rcat, replaced existing)',
+    'Multi-thread Copied (new)', 'Multi-thread Copied (replaced existing)',
+})
+
 
 class ProgressWatch:
     def __init__(self, timeout, clock=time.monotonic):
@@ -33,10 +39,11 @@ class ProgressWatch:
 
 
 class RcloneStats:
-    def __init__(self):
+    def __init__(self, on_completed=None):
         self.offset = 0
         self.partial = b''
         self.counters = {}
+        self.on_completed = on_completed
 
     def read(self, fd):
         # pread does not move the file offset shared with the child's stderr.
@@ -51,6 +58,11 @@ class RcloneStats:
                 value = json.loads(line)
             except (ValueError, UnicodeError):
                 continue
+            if self.on_completed is not None and isinstance(value, dict):
+                message, name = value.get('msg'), value.get('object')
+                if (value.get('level') == 'info' and isinstance(name, str) and isinstance(message, str)
+                        and message.split(' to: ', 1)[0] in COPY_COMPLETIONS):
+                    self.on_completed(name)
             stats = value.get('stats') if isinstance(value, dict) else None
             if not isinstance(stats, dict):
                 continue

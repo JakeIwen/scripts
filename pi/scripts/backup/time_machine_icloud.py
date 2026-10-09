@@ -25,6 +25,8 @@ import time_machine_store as store
 import time_machine_staging as staging
 import backup_priority as priority
 import mac_capture_control
+from time_machine_pipeline import upload_and_follow
+from time_machine_verification import ObjectVerifier
 from time_machine_icloud_control import admit_worker, is_paused
 
 CONFIG = Path('/etc/vanpi-time-machine-icloud.json')
@@ -42,6 +44,10 @@ def config():
     cfg.update(store.read_json(CONFIG))
     cfg['priority_job'] = priority.PriorityMode.TIME_MACHINE
     cfg.setdefault('smb_handle_drain_seconds', 90)
+    cfg.setdefault('overlap_verification', True)
+    cfg.setdefault('verification_bandwidth_limit', cfg['bandwidth_limit'])
+    if type(cfg['overlap_verification']) is not bool or not re.fullmatch(r'[1-9][0-9]*[kM]', cfg['verification_bandwidth_limit']):
+        raise ValueError('invalid Time Machine verification setting')
     if cfg['remote'] != 'icloud:VanRecovery/m4mac/time-machine':
         raise ValueError('unexpected Time Machine cloud prefix')
     for key, low, high in (('interval_days', 1, 31), ('keep_generations', 2, 8),
@@ -302,13 +308,17 @@ def transfer(cfg, manifest, state):
     files = ROOT / 'upload-files.txt'
     # All entries are validated lowercase SHA-256 names, not caller paths.
     files.write_text(''.join(name + '\n' for name in sorted(expected)))
-    cloud.record_progress(state, 'uploading', **cloud.upload_progress(expected, rows, {}))
-    network(cfg, 'copy', str(ROOT / 'objects'), objects_remote,
-            '--files-from-raw', str(files), '--immutable', '--size-only',
-            progress=lambda counters: cloud.record_progress(state, 'uploading',
-                **cloud.upload_progress(expected, rows, counters)))
+    if cfg.get('overlap_verification'):
+        upload_and_follow(cfg, ROOT, expected, rows, files, state)
+    else:
+        cloud.record_progress(state, 'uploading', **cloud.upload_progress(expected, rows, {}))
+        network(cfg, 'copy', str(ROOT / 'objects'), objects_remote,
+                '--files-from-raw', str(files), '--immutable', '--size-only',
+                progress=lambda counters: cloud.record_progress(state, 'uploading',
+                    **cloud.upload_progress(expected, rows, counters)))
     total = sum(x['bytes'] for x in expected.values())
-    cloud.record_progress(state, 'verifying', upload_estimated_bytes=total)
+    cloud.record_progress(state, 'verifying', upload_estimated_bytes=total,
+                          parallel_verification=False, verification_bytes_per_second=None)
     verify_objects(cfg, expected, state)
     name = manifest['generation']
     gen = ROOT / 'generations' / name
@@ -344,40 +354,22 @@ def transfer(cfg, manifest, state):
 def verify_objects(cfg, expected, state):
     remote = cfg['remote'] + '/objects'
     rows = cloud.remote_inventory(cfg, remote)
-    cache_path = ROOT / 'verified-objects.json'
-    cache = store.read_json(cache_path, {})
-    verified = {}
-    for digest, entry in expected.items():
-        fp = cloud.remote_fingerprint(rows.get(digest))
-        if fp is None or fp['size'] != entry['bytes']:
-            raise RuntimeError('cloud object missing or wrong size')
-        if cache.get(digest, {}).get('remote') == fp and cache[digest].get('expected') == entry:
-            verified[digest] = cache[digest]
-    total = sum(v['bytes'] for v in expected.values())
+    verifier = ObjectVerifier(expected, ROOT / 'verified-objects.json')
+    verifier.observe(rows)
+    if any(not verifier.available(k, rows) for k in expected):
+        raise RuntimeError('cloud object missing or wrong size')
     def report(command_idle_seconds=0, **extra):
-        cloud.record_progress(state, 'verifying', verified_files=len(verified),
-            verification_total_files=len(expected), verified_bytes=sum(expected[k]['bytes'] for k in verified),
-            verification_total_bytes=total, command_idle_seconds=command_idle_seconds, **extra)
+        cloud.record_progress(state, 'verifying', **verifier.counters(),
+                              command_idle_seconds=command_idle_seconds, **extra)
     report(current_file_bytes=0)
     for digest in sorted(expected, key=lambda k: (expected[k]['bytes'], k)):
-        if digest in verified:
+        if digest in verifier.verified:
             continue
-        result = network(cfg, 'cat', remote + '/' + digest, stream_hash=True,
-                         progress=lambda c: report(current_file_bytes=c.get('download_bytes', 0),
-                                                   command_idle_seconds=c.get('idle_seconds', 0)))
-        if result != expected[digest]:
-            raise RuntimeError('cloud object failed downloaded SHA-256 check')
-        cache[digest] = {'expected': expected[digest], 'remote': cloud.remote_fingerprint(rows[digest]),
-                         'verified_at': time.time()}
-        store.atomic_json(cache_path, cache)
-        verified[digest] = cache[digest]
+        verifier.verify(digest, rows[digest], lambda key: network(cfg, 'cat', remote + '/' + key,
+            stream_hash=True, progress=lambda c: report(current_file_bytes=c.get('download_bytes', 0),
+                                                       command_idle_seconds=c.get('idle_seconds', 0))))
         report(current_file_bytes=0)
-    final = cloud.remote_inventory(cfg, remote)
-    changed = [k for k in expected if cloud.remote_fingerprint(final.get(k)) != verified[k]['remote']]
-    if changed:
-        for k in changed:
-            cache.pop(k, None)
-        store.atomic_json(cache_path, cache)
+    if verifier.invalidate_changed(cloud.remote_inventory(cfg, remote)):
         raise cloud.Deferred('cloud objects changed during verification; checkpoints invalidated')
 
 

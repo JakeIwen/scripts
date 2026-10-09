@@ -295,6 +295,23 @@ class ProgressTests(unittest.TestCase):
                 self.assertFalse(ProgressWatch(60).observe(counters))
                 self.assertEqual(backup.upload_progress({}, {}, counters)['upload_bytes_per_second'], expected)
 
+    def test_copy_completion_events_are_separate_from_numeric_stats(self):
+        completed = []
+        with tempfile.TemporaryFile() as f:
+            parser = RcloneStats(completed.append)
+            rows = [
+                {'level':'info','msg':'Copied (new)','object':'a'},
+                {'level':'info','msg':'Multi-thread Copied (new) to: b','object':'b'},
+                {'level':'error','msg':'Copied (new)','object':'not-complete'},
+                {'level':'info','msg':'Failed to copy','object':'not-complete'},
+                {'level':'info','msg':'Copied (50% progress)','object':'not-complete'},
+                {'stats':{'bytes':10},'msg':'PRIVATE'},
+            ]
+            f.write(('\n'.join(json.dumps(row) for row in rows)+'\n').encode()); f.flush()
+            counters = parser.read(f.fileno())
+            self.assertEqual(completed, ['a','b'])
+            self.assertEqual(counters, {'bytes':10,'speed':None})
+
     def test_stream_hash_preserves_binary_contents(self):
         value=bytes(range(256))*1024
         reader=StreamDigest(io.BytesIO(value))
