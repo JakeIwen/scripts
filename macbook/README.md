@@ -108,6 +108,25 @@ project-level configuration):
 notify = ["/Users/jacobr/dev/scripts/macbook/scripts/codex_ntfy_notify.py"]
 ```
 
+## Codex release cleanup
+
+`scripts/cleanup_codex_releases.py` previews removal from the invoking macOS
+account's `~/.codex/packages/standalone/releases/`; `--apply` deletes. It keeps
+the three highest stable version numbers plus current/running releases, checks
+package manifests and paths, coordinates with the installer lock, and refuses
+mounts or uncertain process inspection. Unknown names, prereleases and symlinks
+are left alone; an unfamiliar manifest or current layout stops cleanup.
+
+The installed user cron job runs Sundays at 9:00 PM local time (`0 21 * * 0`)
+and calls the cleanup script directly with `--apply`. Inspect it with
+`crontab -l`; use `crontab -e` to change or remove its managed block. The job
+references this checkout, so update its path if the checkout moves.
+`~/.codex/codex-release-cleanup.log` holds only the most recent scheduled run;
+inspect it for `STOP`/`SKIP` if space is not being reclaimed. The pre-install
+crontab backup is at `~/.codex/codex-release-crontab.previous`.
+Cron skips runs while the Mac is asleep/off and does not catch up on wake.
+Use the account normally, without sudo; HOME/CODEX_HOME overrides are ignored.
+
 ## BetterTouchTool maintenance
 
 Use the [BTT tooling index](bettertouchtool/README.md) for maintained commands,
