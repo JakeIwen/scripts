@@ -286,7 +286,10 @@ Missing/stale active records or ambiguous service state retain everything,
 including during partial flat cutover/rollback. Record-write failure only warns.
 Factory smokes/custom long-lived consumers must hold a shared installer lock for
 their full lifetime and stop before deployment. Never infer a running release
-solely from current, previous or the last installer restart.
+solely from current, previous or the last installer restart. Ad-hoc tools that
+import a release (PYTHONPATH into `releases/` or `current`) must set
+`PYTHONDONTWRITEBYTECODE=1`: GC skips everything when any release tree differs
+from its manifest, so one stray `__pycache__` stops all pruning.
 
 Do not bundle the root-level `van_compute/` package: its coupled installer owns
 the separately imported metrics module. Only `deploy_python.py` owns dashboard backend code and
