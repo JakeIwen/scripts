@@ -27,7 +27,16 @@ export type ICloudPhase = (typeof ICLOUD_PHASES)[number];
 export type ICloudControlAction = 'pause' | 'resume' | 'take-turn';
 export type ICloudBackupKind = 'pi' | 'time-machine';
 export const INDEFINITE_PAUSE = 'indefinite';
+export const VERIFICATION_ACTIVITIES = [
+  'connecting',
+  'downloading',
+  'network-check',
+  'inventory',
+  'waiting',
+] as const;
+export type VerificationActivity = (typeof VERIFICATION_ACTIVITIES)[number];
 export interface ICloudProgress {
+  verificationActivity?: VerificationActivity | null;
   parallelVerification?: boolean;
   verificationWaiting?: boolean;
   verificationUpdatedAt?: number | null;
@@ -100,7 +109,14 @@ function phase(value: unknown): ICloudPhase {
 }
 function progress(value: unknown): ICloudProgress {
   const row = objectValue(value, 'iCloud progress');
+  const activity =
+    row.verification_activity == null
+      ? null
+      : stringValue(row.verification_activity, 'verification activity');
+  if (activity !== null && !VERIFICATION_ACTIVITIES.includes(activity as VerificationActivity))
+    throw new TypeError('Unsupported verification activity');
   return {
+    verificationActivity: activity as VerificationActivity | null,
     parallelVerification:
       row.parallel_verification === undefined
         ? false

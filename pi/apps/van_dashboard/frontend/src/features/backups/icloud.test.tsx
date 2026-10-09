@@ -89,6 +89,37 @@ describe('iCloud dashboard', () => {
     expect(screen.getByText(/Caught up with completed uploads/)).toBeInTheDocument();
   });
 
+  it('identifies verification waits and labels its effective rate', () => {
+    const status = cloud();
+    Object.assign(status, { running: true, phase: 'uploading' });
+    Object.assign(status.progress, {
+      parallelVerification: true,
+      verificationTotalBytes: 1000,
+      verifiedBytes: 100,
+      verificationUpdatedAt: Date.now() / 1000,
+      verificationBytesPerSecond: 1024,
+      verificationActivity: 'network-check',
+    });
+    const view = render(<ICloudBackupCard status={status} kind="time-machine" />);
+    expect(screen.getByText(/Checking network route/)).toBeInTheDocument();
+    expect(screen.getByText(/1.0 KiB\/s average/)).toHaveAttribute(
+      'title',
+      expect.stringContaining('including connection'),
+    );
+    view.rerender(
+      <ICloudBackupCard
+        status={{ ...status, progress: { ...status.progress, verificationActivity: 'connecting' } }}
+        kind="time-machine"
+      />,
+    );
+    expect(screen.getByText(/Waiting for iCloud data/)).toBeInTheDocument();
+    view.rerender(
+      <ICloudBackupCard status={{ ...status, progressStale: true }} kind="time-machine" />,
+    );
+    expect(screen.queryByText(/Checking network route/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/KiB\/s average/)).not.toBeInTheDocument();
+  });
+
   it('does not round an unfinished capture up to complete', () => {
     const status = cloud();
     Object.assign(status, { phase: 'error', lastWorkPhase: 'preparing' });

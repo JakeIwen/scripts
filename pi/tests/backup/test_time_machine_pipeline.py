@@ -44,12 +44,16 @@ class PipelineTests(unittest.TestCase):
         operation = args[1]
         if operation == 'lsjson':
             return json.dumps([object_row(p.name,p.read_bytes()) for p in self.remote.iterdir()])
-        self.assertEqual(operation,'cat')
-        self.assertTrue(kwargs['stream_hash'])
-        digest = args[2].rsplit('/',1)[1]
-        code = 'import pathlib,sys; sys.stdout.buffer.write(pathlib.Path(sys.argv[1]).read_bytes())'
-        return self.real_run([sys.executable,'-c',code,str(self.remote/digest)],cfg,parked=False,
-                             stream_hash=True,progress=kwargs.get('progress'))
+        self.assertEqual(operation, 'hashsum')
+        self.assertIn('--download', args)
+        files = args[args.index('--files-from-raw') + 1]
+        report = args[args.index('--output-file') + 1]
+        code = ('import pathlib,sys,hashlib; root=pathlib.Path(sys.argv[1]); '
+                'names=pathlib.Path(sys.argv[2]).read_text().splitlines(); '
+                'out=open(sys.argv[3],"w"); '
+                '[out.write(hashlib.sha256((root/n).read_bytes()).hexdigest()+"  "+n+"\\n") for n in names]; out.close()')
+        return self.real_run([sys.executable, '-c', code, str(self.remote), files, report],
+                             cfg, parked=False, progress=kwargs.get('progress'))
 
     def pipeline(self, network=None):
         patches = [mock.patch.object(cloud,'run',side_effect=network or self.fake_network),

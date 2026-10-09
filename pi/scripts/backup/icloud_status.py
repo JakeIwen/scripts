@@ -17,6 +17,7 @@ import tempfile
 import time
 import uuid
 import backup_priority
+from icloud_progress import TransferActivity
 
 STATE_DIR = Path('/var/lib/vanpi-icloud-backup')
 CONFIG = Path('/etc/vanpi-icloud-backup.json')
@@ -285,6 +286,8 @@ def add_verification_progress(result, state, matching, now):
     result['parallel_verification'] = raw.get('parallel_verification') is True
     result['verification_waiting'] = raw.get('verification_waiting') is True
     result['verification_updated_at'] = updated
+    result['verification_activity'] = (raw.get('verification_activity')
+        if raw.get('verification_activity') in {value.value for value in TransferActivity} else None)
     result['verification_bytes_per_second'] = (
         number(raw.get('verification_bytes_per_second'))
         if matching and result['parallel_verification'] and not result['verification_waiting']

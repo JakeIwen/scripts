@@ -115,6 +115,27 @@ The verifier retains the same common backup lock, has its own guarded rclone
 client and no-progress watchdog, and stops if its parent disappears. Parent
 shutdown stops both clients. Only the parent writes dashboard state; the child
 writes the existing `verified-objects.json` after a complete matching download.
+Verification batches up to 128 admitted chunks through one
+[`rclone hashsum --download SHA256`](https://rclone.org/commands/rclone_hashsum/)
+client with one download at a time. Each complete hash report is checked against
+the frozen manifest before saving that chunk's proof. Partial lines, unknown
+objects, wrong hashes and incomplete batches cannot complete verification.
+The downloads are hashed as they stream, without retaining a second local copy.
+The dashboard's rolling minute rate includes connection and network-check waits;
+its activity text distinguishes downloading, waiting for data, checking the route,
+checking inventory and waiting for completed uploads.
+
+Fresh network checks still stop each transfer every configured guard interval.
+The collector combines router routing/SSID inspection in one query and inspects
+the antenna association whenever that uplink is selected. It skips unrelated
+dashboard diagnostics and unused antenna probes, without caching route evidence
+or extending the permitted transfer interval. A changed or unverifiable route
+still stops the worker.
+The read-only probes reuse SSH connections for up to 30 seconds idle through a
+validated, private `.vanpi-icloud-uplink` directory in the probe user's home.
+Every invocation executes fresh commands; no routing or association results are
+cached. This avoids repeating slow antenna key exchange at each safety check.
+
 The same checkpoints survive an interrupted upload or a return to sequential
 verification. Downloaded contents stream through bounded memory, not another HDD
 copy. The final inventory and completion-marker checks are still mandatory.

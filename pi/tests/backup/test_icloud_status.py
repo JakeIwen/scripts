@@ -125,6 +125,12 @@ class StatusTests(unittest.TestCase):
             self.assertFalse(changed['stalled'])
             self.assertIsNone(changed['progress']['verification_bytes_per_second'])
 
+    def test_verification_activity_exposes_only_known_states(self):
+        for activity, expected in [('network-check', 'network-check'), ('PRIVATE', None)]:
+            value = self.build({'progress': {'verification_activity': activity}})
+            self.assertEqual(value['progress']['verification_activity'], expected)
+            self.assertNotIn('PRIVATE', json.dumps(value))
+
     def test_exclusive_access_loss_has_a_specific_public_reason(self):
         status = self.build({'phase': 'deferred', 'last_error': 'Time Machine capture lost exclusive source access'})
         self.assertIn('exclusive Time Machine access was lost', status['message'])

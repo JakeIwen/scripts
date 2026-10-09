@@ -15,6 +15,8 @@ from typing import TypedDict
 
 import icloud_backup as cloud
 from icloud_inventory import parse_inventory
+from icloud_progress import TransferActivity
+from time_machine_downloads import download_batch, VerificationMeter
 from time_machine_staging import JOB_LOCK, require_lock
 from time_machine_verification import ObjectVerifier
 
@@ -44,7 +46,9 @@ class Follower:
         self.parent_pid, self.completed, self.updates, self.done = parent_pid, completed, updates, done
         self.last_report = 0
         self.last_inventory = 0
-        self.last_sample = (time.monotonic(), 0)
+        self.meter = VerificationMeter()
+        self.downloaded = 0
+        self.batch_start = 0
 
     def check(self):
         if os.getppid() != self.parent_pid:
@@ -57,15 +61,13 @@ class Follower:
         counters = counters or {}
         if not force and now - self.last_report < self.cfg['guard_interval_seconds']:
             return
-        amount = counters.get('download_bytes', 0)
-        previous, before = self.last_sample
-        speed = max(0, amount - before) / max(0.001, now - previous)
-        self.last_sample = (now, amount)
-        values = {**self.verifier.counters(), 'current_file_bytes': amount,
+        telemetry = self.meter.sample(self.downloaded + counters.get('bytes', 0) if counters else None)
+        checked = self.verifier.counters()
+        amount = max(0, counters.get('bytes', 0) - (checked['verified_bytes'] - self.batch_start))
+        values = {**checked, **telemetry, 'current_file_bytes': amount,
                   'verification_ready_files': len(self.ready),
-                  'verification_bytes_per_second': speed if counters and not waiting else None,
                   'verification_idle_seconds': counters.get('idle_seconds', 0),
-                  'verification_waiting': waiting, 'verification_updated_at': time.time()}
+                  'verification_waiting': waiting}
         with suppress(Full):
             self.updates.put_nowait(values)
         self.last_report = now
@@ -73,7 +75,12 @@ class Follower:
     def network(self, operation, path, *args, **kwargs):
         self.check()
         return cloud.run([cloud.RCLONE, operation, path, *args], self.cfg, network=True,
-                         progress=lambda counters: self.report(counters), **kwargs)
+                         progress=lambda _: self.activity(TransferActivity.INVENTORY),
+                         on_activity=self.activity, **kwargs)
+
+    def activity(self, value):
+        self.meter.activity = value
+        self.report(waiting=value == TransferActivity.WAITING, force=True)
 
     def inventory(self):
         self.rows = parse_inventory(self.network('lsjson', self.remote, '--recursive', '--files-only'))
@@ -99,10 +106,13 @@ class Follower:
             if available:
                 # Follow the sorted upload list rather than spending the
                 # catch-up window on hundreds of tiny metadata requests.
-                digest = min(available)
-                self.last_sample = (time.monotonic(), 0)
-                self.verifier.verify(digest, self.rows[digest],
-                                     lambda k: self.network('cat', self.remote + '/' + k, stream_hash=True))
+                names = sorted(available)[:128]
+                self.batch_start = self.verifier.counters()['verified_bytes']
+                download_batch(self.cfg, self.remote, names, self.verifier, self.rows,
+                               lambda counters: self.report(counters, force=True), self.activity)
+                self.downloaded = max(self.meter.amount,
+                    self.downloaded + sum(self.verifier.expected[k]['bytes'] for k in names))
+                self.meter.sample(self.downloaded)
                 self.report(force=True)
             elif self.done.is_set():
                 # The parent now checks the complete inventory, including any
@@ -112,6 +122,7 @@ class Follower:
             elif pending and time.monotonic() - self.last_inventory >= 15:
                 self.inventory()
             else:
+                self.meter.activity = TransferActivity.WAITING if not pending else TransferActivity.INVENTORY
                 self.report(waiting=not pending)
                 time.sleep(0.25)
 

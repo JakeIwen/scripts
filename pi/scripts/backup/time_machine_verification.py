@@ -50,6 +50,15 @@ class ObjectVerifier:
             return
         if download(digest) != self.expected[digest]:
             raise RuntimeError('cloud object failed downloaded SHA-256 check')
+        self.accept_hash(digest, row, self.expected[digest]['sha256'])
+
+    def accept_hash(self, digest, row, downloaded_sha256):
+        """Accept only a complete downloaded hash, never a provider checksum."""
+        fp = remote_fingerprint(row)
+        if fp is None or fp['size'] != self.expected[digest]['bytes']:
+            raise RuntimeError('cloud object missing or wrong size')
+        if downloaded_sha256 != self.expected[digest]['sha256']:
+            raise RuntimeError('cloud object failed downloaded SHA-256 check')
         proof: VerifiedObject = {'expected': self.expected[digest], 'remote': fp, 'verified_at': time.time()}
         self.cache[digest] = proof
         atomic_json(self.checkpoint, self.cache)

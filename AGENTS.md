@@ -133,6 +133,11 @@ compare it with this checkout. Deployed files may differ from the repository.
   `time_machine_verification.py` owns the existing SHA-256 checkpoint format for
   both background and final checks. Only the parent writes dashboard state and
   publishes completion, after an exhaustive final inventory/fingerprint check.
+  `time_machine_downloads.py` batches streamed rclone SHA-256 downloads, validates
+  each completed hash before checkpointing, and measures a rolling rate including
+  waits. `icloud_progress.TransferActivity` defines safe verification activities.
+  `icloud_uplink.py` collects only fresh route/selected-association evidence;
+  never substitute cached dashboard health or skip selected antenna checks.
 - `pi/scripts/backup/time_machine_staging.py` owns local orphan-chunk cleanup.
   Plan/apply require the common backup lock, verified mount and owned store,
   preserving capture-index, pending/published manifests and upload/verification

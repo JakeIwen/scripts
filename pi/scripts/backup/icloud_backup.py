@@ -25,7 +25,7 @@ import uuid
 
 from icloud_uplink import decide
 from icloud_inventory import remote_fingerprint, parse_inventory, upload_progress
-from icloud_progress import ProcessIO, ProgressWatch, RcloneStats, StreamDigest
+from icloud_progress import ProcessIO, ProgressWatch, RcloneStats, StreamDigest, TransferActivity
 from icloud_status import begin_attempt, save_attempt
 from cloud_backup_control import admit_worker
 import backup_priority as priority
@@ -219,7 +219,7 @@ def local_backups_complete(now=None):
 
 
 def monitor_child(cfg, program, operation, proof, parked, network, interactive, progress,
-                  stats, io, reader, errors, watch, next_check):
+                  stats, io, reader, errors, watch, next_check, on_activity):
     while CHILD.poll() is None:
         time.sleep(0.25)
         counters = stats.read(errors.fileno()) if network else io.sample(CHILD.pid)
@@ -235,28 +235,34 @@ def monitor_child(cfg, program, operation, proof, parked, network, interactive, 
         if network:
             # Pause while collecting fresh evidence: a slow/failed probe
             # must not leave the upload running throughout its timeout.
-            try:
+            with suppress(ProcessLookupError):
+                os.kill(CHILD.pid, signal.SIGSTOP)
+            if on_activity is not None:
+                on_activity(TransferActivity.NETWORK_CHECK)
+            if guard(cfg) != proof:
+                raise Deferred('uplink or association changed during transfer')
+            # A failed check leaves the client stopped until termination.
+            if CHILD.poll() is None:
                 with suppress(ProcessLookupError):
-                    os.kill(CHILD.pid, signal.SIGSTOP)
-                if guard(cfg) != proof:
-                    raise Deferred('uplink or association changed during transfer')
-            finally:
-                if CHILD.poll() is None:
-                    with suppress(ProcessLookupError):
-                        os.kill(CHILD.pid, signal.SIGCONT)
+                    os.kill(CHILD.pid, signal.SIGCONT)
         if progress is not None:
             progress({**counters, 'idle_seconds': round(watch.idle_seconds(), 1)})
         next_check = time.monotonic() + cfg['guard_interval_seconds']
 
 
-def run(args, cfg, network=False, interactive=False, parked=True, stream_hash=False, progress=None, on_completed=None):
+def run(args, cfg, network=False, interactive=False, parked=True, stream_hash=False, progress=None,
+        on_completed=None, on_activity=None):
     """Guard every network command, including retries, checks and retention."""
     global CHILD, CHILD_INTERACTIVE
     program = args[0]
     operation = args[1] if len(args) > 1 else 'command'
     if parked:
         check_work_allowed(cfg)
+    if network and on_activity is not None:
+        on_activity(TransferActivity.NETWORK_CHECK)
     proof = guard(cfg) if network else None
+    if on_activity is not None:
+        on_activity(TransferActivity.CONNECTING)
     source = proof[0] if network else None
     env = os.environ.copy()
     if network:
@@ -289,7 +295,7 @@ def run(args, cfg, network=False, interactive=False, parked=True, stream_hash=Fa
         next_check = time.monotonic() + cfg['guard_interval_seconds']
         try:
             monitor_child(cfg, program, operation, proof, parked, network, interactive, progress,
-                          stats, io, reader, errors, watch, next_check)
+                          stats, io, reader, errors, watch, next_check, on_activity)
             rc = CHILD.returncode
             output.seek(0)
             data = output.read()

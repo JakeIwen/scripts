@@ -1,11 +1,20 @@
 """Progress signals without exposing rclone messages or downloaded contents."""
 import hashlib
+from enum import Enum
 import json
 import math
 import os
 from pathlib import Path
 import threading
 import time
+
+
+class TransferActivity(str, Enum):
+    CONNECTING = 'connecting'
+    DOWNLOADING = 'downloading'
+    NETWORK_CHECK = 'network-check'
+    INVENTORY = 'inventory'
+    WAITING = 'waiting'
 
 COPY_COMPLETIONS = frozenset({
     'Copied (new)', 'Copied (replaced existing)', 'Copied (server-side copy)',

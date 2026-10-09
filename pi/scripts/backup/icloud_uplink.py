@@ -4,6 +4,7 @@ import ipaddress
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import time
@@ -75,18 +76,39 @@ for iface in clientwan lifiwan; do
 done
 '''
 
+ROUTER_ROUTES = ("printf '__VAN_DASH_DEFAULT_POLICY__='; "
+                 "/sbin/uci -q get mwan3.default_rule_v4.use_policy; "
+                 "/usr/sbin/mwan3 policies")
 
-def collect():
-    evidence = connectivity_status.collect_status()
-    route = subprocess.run(['/usr/bin/ip', '-j', '-4', 'route', 'get', '1.1.1.1'],
-                           check=True, capture_output=True, text=True, timeout=5)
+
+def probe_ssh_args(target, identity=None):
+    # Reuse the authenticated LAN connection, never the probe result. Slow
+    # antenna key exchange otherwise suspends cloud traffic on every check.
+    directory = Path.home() / '.vanpi-icloud-uplink'
+    directory.mkdir(mode=0o700, exist_ok=True)
+    info = directory.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise ValueError('unsafe uplink connection directory')
+    args = connectivity_status._ssh_args(target, identity)
+    return args[:-1] + ['-o', 'ControlMaster=auto', '-o', 'ControlPersist=30s',
+                       '-o', 'ControlPath=' + str(directory / '%C'), args[-1]]
+
+
+def collect(command=connectivity_status.run_command, wall_clock=time.time):
+    # Backup admission needs fresh routing/association evidence, not dashboard
+    # radio statistics or a reachability ping to an unused antenna.
+    evidence = {'checked_at': wall_clock(), 'ubnt': {}}
+    route = command(['/usr/bin/ip', '-j', '-4', 'route', 'get', '1.1.1.1'], timeout=5)
+    route.check_returncode()
     routes = json.loads(route.stdout)
     if len(routes) != 1:
         raise ValueError('ambiguous local route')
     evidence['local_route'] = routes[0]
-    query = subprocess.run(connectivity_status._ssh_args(connectivity_status.ROUTER_TARGET)
-                           + [ROUTER_IDENTITIES], check=True, capture_output=True,
-                           text=True, timeout=10)
+    query = command(probe_ssh_args(connectivity_status.ROUTER_TARGET)
+                    + [ROUTER_ROUTES + '\n' + ROUTER_IDENTITIES], timeout=10)
+    query.check_returncode()
+    policy, members = connectivity_status.parse_mwan3_default_route(query.stdout)
+    evidence['router'] = {'reachable': True, 'default_policy': policy, 'route_members': members}
     rules, uplinks = [], {}
     for line in query.stdout.splitlines():
         if line.startswith('RULE '):
@@ -97,6 +119,13 @@ def collect():
                 value == 'true' if kind == 'UP' else value)
     evidence['rule_names'] = sorted(rules)
     evidence['wireless_uplinks'] = uplinks
+    if any(m['name'] == 'wan' and m['percent'] > 0 for m in members):
+        association = command(probe_ssh_args(
+            connectivity_status.UBNT_TARGET, connectivity_status.UBNT_IDENTITY)
+            + ['/sbin/iwconfig ath0'], timeout=8)
+        association.check_returncode()
+        evidence['ubnt'] = {'reachable': True,
+                           **connectivity_status.parse_ubnt_wireless(association.stdout)}
     return evidence
 
 

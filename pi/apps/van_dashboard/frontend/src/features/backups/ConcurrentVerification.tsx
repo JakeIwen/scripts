@@ -1,5 +1,13 @@
 import { formatBytes, formatPercent } from '../../utils/format';
-import type { AvailableICloudStatus } from './icloud';
+import type { AvailableICloudStatus, VerificationActivity } from './icloud';
+
+const activities: Record<VerificationActivity, string> = {
+  connecting: 'Waiting for iCloud data',
+  downloading: 'Downloading and checking',
+  'network-check': 'Checking network route · transfer briefly paused',
+  inventory: 'Checking available cloud chunks',
+  waiting: 'Caught up with completed uploads',
+};
 
 export function ConcurrentVerification({ status }: { status: AvailableICloudStatus }) {
   const p = status.progress;
@@ -18,9 +26,11 @@ export function ConcurrentVerification({ status }: { status: AvailableICloudStat
         {status.running ? 'Download verification' : 'Saved verification'} ·{' '}
         {formatPercent(percent, 1)} · {formatBytes(p.verifiedBytes)} of{' '}
         {formatBytes(p.verificationTotalBytes)}
-        {fresh &&
-          p.verificationBytesPerSecond != null &&
-          ` · ${formatBytes(p.verificationBytesPerSecond)}/s`}
+        {fresh && p.verificationBytesPerSecond != null && (
+          <span title="Average download rate over the last minute, including connection and network-check waits.">
+            {` · ${formatBytes(p.verificationBytesPerSecond)}/s average`}
+          </span>
+        )}
       </strong>
       <div
         className="backup-progress"
@@ -34,7 +44,11 @@ export function ConcurrentVerification({ status }: { status: AvailableICloudStat
       </div>
       <small>
         {p.verifiedFiles ?? 0}/{p.verificationTotalFiles ?? '—'} chunks checked
-        {fresh && p.verificationWaiting ? ' · Caught up with completed uploads' : ''}
+        {fresh && p.verificationActivity
+          ? ` · ${activities[p.verificationActivity]}`
+          : fresh && p.verificationWaiting
+            ? ' · Caught up with completed uploads'
+            : ''}
         {status.running && !fresh ? ' · Waiting for fresh verification counters' : ''}
         {fresh && (p.currentFileBytes ?? 0) > 0
           ? ` · Checking next chunk: ${formatBytes(p.currentFileBytes)} received`
