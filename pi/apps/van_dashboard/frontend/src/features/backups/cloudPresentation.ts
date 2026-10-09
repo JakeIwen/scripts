@@ -1,7 +1,40 @@
 import { lastSuccessLabel } from './presentation';
 import { iCloudPhaseLabel, iCloudProgress } from './icloud';
-import type { ICloudStatus } from './icloud';
+import type { AvailableICloudStatus, ICloudStatus } from './icloud';
 import { formatDuration } from '../../utils/format';
+
+function hasVerifiedGeneration(status: AvailableICloudStatus): boolean {
+  return (
+    status.generation !== null &&
+    status.verifiedGenerations.some((entry) => entry.generation === status.generation)
+  );
+}
+
+export function iCloudShowsProgress(status: AvailableICloudStatus): boolean {
+  return (
+    status.running ||
+    (status.generation !== null &&
+      status.phase !== 'not due' &&
+      status.phase !== 'complete' &&
+      !hasVerifiedGeneration(status))
+  );
+}
+
+export function iCloudResumePresentation(status: AvailableICloudStatus) {
+  const paused = status.manualPauseUntil != null || status.manualPauseIndefinite;
+  if (!status.running && hasVerifiedGeneration(status)) {
+    return {
+      label: paused ? 'Resume schedule' : 'Check schedule',
+      help: paused
+        ? 'Remove the manual pause and re-enable scheduled backups. This copy is already verified; a new copy starts only when due.'
+        : 'Check whether the next scheduled backup is due. This copy is already verified.',
+    };
+  }
+  return {
+    label: paused ? 'Resume backup' : 'Resume now',
+    help: 'Resume retries unfinished work when the backup lock, disk, ignition and network checks allow it. If no work is pending, the weekly schedule applies.',
+  };
+}
 
 export function iCloudTileTone(
   status: ICloudStatus | null | undefined,

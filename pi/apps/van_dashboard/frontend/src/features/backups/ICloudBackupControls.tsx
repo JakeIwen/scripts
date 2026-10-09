@@ -2,6 +2,7 @@ import { ICloudPauseSelector } from './ICloudPauseSelector';
 import { useState } from 'react';
 import { useSingleFlightAction } from '../../hooks/useSingleFlightAction';
 import { controlICloudBackup } from './api';
+import { iCloudResumePresentation } from './cloudPresentation';
 import {
   INDEFINITE_PAUSE,
   type AvailableICloudStatus,
@@ -9,9 +10,6 @@ import {
   type ICloudControlAction,
   type ICloudStatus,
 } from './icloud';
-
-const RESUME_HELP =
-  'Resume retries saved work when the backup lock, disk, ignition and network checks allow it.';
 
 interface ICloudBackupControlsProps {
   kind: ICloudBackupKind;
@@ -33,6 +31,7 @@ export function ICloudBackupControls({
   const { running, run } = useSingleFlightAction();
   const disabled = blocked || running;
   const manuallyPaused = status.manualPauseUntil != null || status.manualPauseIndefinite;
+  const resume = iCloudResumePresentation(status);
   async function perform(action: ICloudControlAction, minutes = INDEFINITE_PAUSE) {
     await run(async () => {
       setError(null);
@@ -63,11 +62,11 @@ export function ICloudBackupControls({
           type="button"
           className="primary-button"
           disabled={disabled || (status.running && !manuallyPaused)}
-          title={RESUME_HELP}
-          aria-description={RESUME_HELP}
+          title={resume.help}
+          aria-description={resume.help}
           onClick={() => void perform('resume')}
         >
-          {running ? 'Applying…' : 'Resume now'}
+          {running ? 'Applying…' : resume.label}
         </button>
         <ICloudPauseSelector
           onPause={(minutes) => void perform('pause', minutes)}

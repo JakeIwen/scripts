@@ -2,7 +2,7 @@ import { formatBytes, formatDuration, formatRelativeTime } from '../../utils/for
 import { iCloudPhaseLabel, iCloudProgress } from './icloud';
 import type { AvailableICloudStatus, ICloudBackupKind, ICloudStatus } from './icloud';
 import { ICloudBackupControls } from './ICloudBackupControls';
-import { iCloudUploadTimeLeft } from './cloudPresentation';
+import { iCloudShowsProgress, iCloudUploadTimeLeft } from './cloudPresentation';
 import { ICloudAttemptMessage } from './ICloudAttemptMessage';
 import { ConcurrentVerification } from './ConcurrentVerification';
 
@@ -45,9 +45,7 @@ export function ICloudBackupCard({
       </ICloudBackupSection>
     );
   const p = iCloudProgress(status);
-  const showProgress =
-    status.running ||
-    (status.generation !== null && status.phase !== 'not due' && status.phase !== 'complete');
+  const showProgress = iCloudShowsProgress(status);
   return (
     <ICloudBackupSection title={title} kind={kind} status={status}>
       <p className="backup-icloud__description">

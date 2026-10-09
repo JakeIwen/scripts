@@ -219,8 +219,8 @@ describe('iCloud dashboard', () => {
       />,
     );
     const help =
-      'Resume retries saved work when the backup lock, disk, ignition and network checks allow it.';
-    expect(screen.getByRole('button', { name: 'Resume now' })).toHaveAttribute('title', help);
+      'Resume retries unfinished work when the backup lock, disk, ignition and network checks allow it. If no work is pending, the weekly schedule applies.';
+    expect(screen.getByRole('button', { name: 'Resume backup' })).toHaveAttribute('title', help);
     expect(screen.queryByText(help)).not.toBeInTheDocument();
     expect(screen.getByText(/Paused indefinitely/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
@@ -230,6 +230,52 @@ describe('iCloud dashboard', () => {
     await screen.findByRole('status');
     expect(fetch.mock.calls[1]?.[0]).toBe('/api/backups/time-machine-icloud/take-turn');
     expect(String(fetch.mock.calls[1]?.[1]?.body)).toBe('');
+  });
+
+  it('resumes the schedule for a verified copy without presenting its old progress as unfinished', async () => {
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(JSON.stringify({ ok: true, message: 'Accepted' }), { status: 202 }),
+      );
+    const status: AvailableICloudStatus = {
+      ...cloud(),
+      phase: 'paused',
+      lastWorkPhase: 'verifying',
+      manualPauseIndefinite: true,
+      controlsAvailable: true,
+      lastSuccessAt: 1800000000,
+      nextDueAt: 1800604800,
+      verifiedGenerations: [{ generation, completedAt: 1800000000 }],
+      progress: {
+        ...cloud().progress,
+        verifiedBytes: 1000,
+        verificationTotalBytes: 1000,
+        verifiedFiles: 10,
+        verificationTotalFiles: 10,
+      },
+    };
+    const refresh = vi.fn().mockResolvedValue(null);
+    const view = render(<ICloudBackupCard status={status} refresh={refresh} />);
+    const resume = screen.getByRole('button', { name: 'Resume schedule' });
+    expect(resume).toHaveAttribute('title', expect.stringContaining('already verified'));
+    expect(screen.getByText(/Last verified/)).toBeInTheDocument();
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    fireEvent.click(resume);
+    expect(await screen.findByRole('status')).toHaveTextContent('Accepted');
+    expect(fetch.mock.calls[0]?.[0]).toBe('/api/backups/icloud/resume');
+    expect(String(fetch.mock.calls[0]?.[1]?.body)).toBe('');
+
+    view.rerender(
+      <ICloudBackupCard
+        status={{ ...status, generation: 'vanpi-20261008T000000Z-12345678' }}
+        refresh={refresh}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Resume backup' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('progressbar', { name: 'iCloud download verification' }),
+    ).toHaveAttribute('aria-valuenow', '100');
   });
 
   it('tracks the Mac frozen capture separately from Pi upload progress', () => {
@@ -460,6 +506,6 @@ describe('iCloud dashboard', () => {
     render(<ICloudBackupControls kind="pi" status={status} refresh={vi.fn()} blocked={false} />);
     expect(screen.getByText(/Automatic resume/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Pause' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Resume now' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Resume backup' })).toBeEnabled();
   });
 });
