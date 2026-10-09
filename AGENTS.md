@@ -80,8 +80,11 @@ compare it with this checkout. Deployed files may differ from the repository.
   no-op. Its audit trail and pre-repair backup are on vanpi under
   `~/.local/share/van-video-library/` (`repair-audit-20261007/`,
   `video-catalog-final-20261007T044424Z.sqlite3`).
-  `maintenance/filesystem_identity_repair.py` is the separate, NOT-YET-APPLIED
-  Silo S03E07 repair; `identity_repair_evidence.py` pins its reviewed rows and
+  `maintenance/filesystem_identity_repair.py` is the separate Silo S03E07 repair,
+  applied with the legacy-churn repair on 2026-10-08 (2,132 changes; rerunning
+  is a no-op). Its evidence and backups are on vanpi under
+  `~/.local/share/van-video-library/identity-repair-20261008-0249/`.
+  `identity_repair_evidence.py` pins its reviewed rows and
   validates enriched version-2 plans (older Silo-only plans are refused). Copy the
   maintenance directory into a temporary package
   tree and invoke with `python3 -m` and that tree's PYTHONPATH;
