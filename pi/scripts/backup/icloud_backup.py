@@ -218,6 +218,37 @@ def local_backups_complete(now=None):
     return True
 
 
+def monitor_child(cfg, program, operation, proof, parked, network, interactive, progress,
+                  stats, io, reader, errors, watch, next_check):
+    while CHILD.poll() is None:
+        time.sleep(0.25)
+        counters = stats.read(errors.fileno()) if network else io.sample(CHILD.pid)
+        if reader is not None:
+            counters.update(reader.counters())
+        watch.observe(counters)
+        if not interactive and watch.expired():
+            raise RuntimeError(f'{Path(program).name} {operation} made no progress for {watch.timeout} seconds; retry will resume completed files')
+        if time.monotonic() < next_check:
+            continue
+        if parked:
+            check_work_allowed(cfg)
+        if network:
+            # Pause while collecting fresh evidence: a slow/failed probe
+            # must not leave the upload running throughout its timeout.
+            try:
+                with suppress(ProcessLookupError):
+                    os.kill(CHILD.pid, signal.SIGSTOP)
+                if guard(cfg) != proof:
+                    raise Deferred('uplink or association changed during transfer')
+            finally:
+                if CHILD.poll() is None:
+                    with suppress(ProcessLookupError):
+                        os.kill(CHILD.pid, signal.SIGCONT)
+        if progress is not None:
+            progress({**counters, 'idle_seconds': round(watch.idle_seconds(), 1)})
+        next_check = time.monotonic() + cfg['guard_interval_seconds']
+
+
 def run(args, cfg, network=False, interactive=False, parked=True, stream_hash=False, progress=None, on_completed=None):
     """Guard every network command, including retries, checks and retention."""
     global CHILD, CHILD_INTERACTIVE
@@ -257,33 +288,8 @@ def run(args, cfg, network=False, interactive=False, parked=True, stream_hash=Fa
         reader = StreamDigest(CHILD.stdout) if stream_hash else None
         next_check = time.monotonic() + cfg['guard_interval_seconds']
         try:
-            while CHILD.poll() is None:
-                time.sleep(0.25)
-                counters = stats.read(errors.fileno()) if network else io.sample(CHILD.pid)
-                if reader is not None:
-                    counters.update(reader.counters())
-                watch.observe(counters)
-                if not interactive and watch.expired():
-                    raise RuntimeError(f'{Path(program).name} {operation} made no progress for {watch.timeout} seconds; retry will resume completed files')
-                if time.monotonic() < next_check:
-                    continue
-                if parked:
-                    check_work_allowed(cfg)
-                if network:
-                    # Pause while collecting fresh evidence: a slow/failed probe
-                    # must not leave the upload running throughout its timeout.
-                    try:
-                        with suppress(ProcessLookupError):
-                            os.kill(CHILD.pid, signal.SIGSTOP)
-                        if guard(cfg) != proof:
-                            raise Deferred('uplink or association changed during transfer')
-                    finally:
-                        if CHILD.poll() is None:
-                            with suppress(ProcessLookupError):
-                                os.kill(CHILD.pid, signal.SIGCONT)
-                if progress is not None:
-                    progress({**counters, 'idle_seconds': round(watch.idle_seconds(), 1)})
-                next_check = time.monotonic() + cfg['guard_interval_seconds']
+            monitor_child(cfg, program, operation, proof, parked, network, interactive, progress,
+                          stats, io, reader, errors, watch, next_check)
             rc = CHILD.returncode
             output.seek(0)
             data = output.read()
