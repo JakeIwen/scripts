@@ -1,6 +1,7 @@
 #! /bin/bash
 shopt -s expand_aliases # run aliased commands inline with ssh ...@.... 
 shopt -s dotglob # match all items in directory except . and ..
+# codeshape: allow-size the Pi's single interactive shell profile, deployed as one file to ~/.bashrc; splitting it is a separate refactor
 
 # Block Model Gateway's `setup` on this Pi; it would replace the locally built
 # claude-code-proxy (see pi/docs/compute/CLAUDE_MODEL_GATEWAY.md). Exported only
