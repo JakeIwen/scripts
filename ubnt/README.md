@@ -86,6 +86,8 @@ profile stays saved. A two-minute
 cooldown prevents automatic reselection while the AP powers down; an explicit
 power-on connection bypasses it. Other Wi-Fi connections are untouched, and an
 explicit maintenance pause is retained (disconnect only, no automatic roam).
+Pauses requested during discovery are rechecked before starting an alternative
+connection.
 If another antenna operation is in progress, the latest power intent runs after
 that operation reaches a safe boundary; rapid off/on changes replace queued
 intent. The CLI reconciles a dropped reload connection without replaying the

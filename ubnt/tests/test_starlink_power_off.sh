@@ -61,6 +61,25 @@ cached_full_scan() {
     : > "$MOCK_RADIO_EVENTS"
 }
 
+# The public pause command can run during either survey without taking the
+# selector lock. Finish releasing denlink, but do not start another connection.
+for pause_scan_channels in "$standard_scan_frequencies" 2462; do
+    reset_denlink
+    printf '%s\n' 'wireless.1.scan_list.status=enabled' \
+        "wireless.1.scan_list.channels=$pause_scan_channels" >> "$UBNT_SYSTEM_CFG"
+    export MOCK_PAUSE_MANAGER="$manager"
+    "$manager" starlink-off >/dev/null
+    [ -f "$UBNT_STATE_DIR/paused" ]
+    case $(cat "$MOCK_ASSOCIATED") in
+        vanpi-disconnected-*) ;;
+        *) printf 'maintenance pause during survey allowed roaming\n' >&2; exit 1 ;;
+    esac
+    [ "$(cat "$MOCK_RELOAD_CHANNELS")" = "$standard_scan_frequencies" ]
+    [ "$(cat "$MOCK_IWLIST_COUNT_FILE")" = 3 ]
+    "$manager" resume >/dev/null
+done
+unset MOCK_PAUSE_MANAGER
+
 # Leave denlink, clear its grace/portal protection, and prefer an alternative
 # even though denlink is still visible, stronger, and explicitly preferred.
 reset_denlink

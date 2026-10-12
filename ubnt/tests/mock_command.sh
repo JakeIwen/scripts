@@ -11,6 +11,9 @@ case $command_name in
 esac
 case $command_name in
     iwlist)
+        if [ -n "${MOCK_PAUSE_MANAGER:-}" ]; then
+            "$MOCK_PAUSE_MANAGER" pause >/dev/null
+        fi
         selected_fixture=$MOCK_FIXTURE
         if [ -n "${MOCK_IWLIST_COUNT_FILE:-}" ]; then
             invocation_count=$(sed -n '1p' "$MOCK_IWLIST_COUNT_FILE" 2>/dev/null || true)

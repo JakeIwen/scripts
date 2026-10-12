@@ -51,6 +51,8 @@ starlink_power_off() {
         log_message "Starlink powered off; antenna already targets another network"
         return 0
     fi
+    # Pause does not take the selector lock; recheck it after discovery and
+    # profile inspection, immediately before admitting either connection.
     off_scan_status=2
     if [ ! -f "$PAUSE_FILE" ]; then
         off_candidate=$(starlink_direct_candidate)
@@ -58,6 +60,10 @@ starlink_power_off() {
         if [ "$off_scan_status" -eq 0 ]; then
             clear_starlink_transition
             cooldown_starlink_profiles
+            if [ -f "$PAUSE_FILE" ]; then
+                release_denlink
+                return $?
+            fi
             log_message "Starlink power-off switching directly to profile=$off_candidate"
             connect_profile "$off_candidate" yes
             off_result=$?
@@ -84,6 +90,7 @@ starlink_power_off() {
         log_message "denlink released; no other saved network visible"
         return 0
     }
+    [ ! -f "$PAUSE_FILE" ] || return 0
     log_message "Starlink power-off roaming selected profile=$off_candidate"
     connect_profile "$off_candidate" yes
     off_result=$?
