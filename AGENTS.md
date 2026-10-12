@@ -55,6 +55,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   owned process group; `conversion_worker.py` runs foreground batch jobs.
   `conversion_storage.py` atomically publishes recipes/progress. Completed outputs
   are recorded at the publisher boundary before cancellation can interrupt reporting.
+  `media_formats.py` owns container choices; `video_export.py` owns resize/remux
+  preservation, including decoded frame-timing validation and Dolby Vision profile
+  8 MP4 encoding. SDR conversion stays in `convert_video.py`.
   `conversion_reports.py` stores audio measurements and conversion recipes under
   ignored `macbook/build/conversion-reports/`, keyed by captured output generation.
   Job manifests retain report generation IDs; the editor serves only authenticated,
