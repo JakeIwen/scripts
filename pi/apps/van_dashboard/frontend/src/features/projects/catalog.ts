@@ -69,6 +69,16 @@ export const HOSTED_PROJECTS: HostedProject[] = [
     links: [{ kind: 'local', label: 'This Mac', url: 'http://127.0.0.1:4317/' }],
   },
   {
+    id: 'visual-guides',
+    name: 'Visual Guides',
+    host: 'Vanpi',
+    description: 'Wiring, setup and reference guides.',
+    links: [
+      { kind: 'local', label: 'This Mac', url: 'http://127.0.0.1:8792/' },
+      ...piLinks(8791),
+    ],
+  },
+  {
     id: 'telemetry',
     name: 'Vehicle Telemetry',
     host: 'Vanpi',
