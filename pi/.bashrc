@@ -2,6 +2,15 @@
 shopt -s expand_aliases # run aliased commands inline with ssh ...@.... 
 shopt -s dotglob # match all items in directory except . and ..
 
+# Block Model Gateway's `setup` on this Pi; it would replace the locally built
+# claude-code-proxy (see pi/docs/compute/CLAUDE_MODEL_GATEWAY.md). Exported only
+# when the file exists: a missing --require target would stop every node process.
+gateway_guard=/home/pi/scripts/model_gateway_setup_guard.cjs
+if [ -f "$gateway_guard" ] && [[ " ${NODE_OPTIONS:-} " != *" --require $gateway_guard "* ]]; then
+  export NODE_OPTIONS="--require $gateway_guard${NODE_OPTIONS:+ $NODE_OPTIONS}"
+fi
+unset gateway_guard
+
 alias sudo='sudo '
 alias vi='/usr/bin/vim.tiny'
 
@@ -93,42 +102,86 @@ clauderm() {
     fi
     rm -v "/home/pi/.claude/projects/$1/$2.jsonl"
 }
-# fzf-based Claude session picker with Ctrl-D to delete.
-# Deletion is handled AFTER fzf exits (via --expect) so the y/N prompt is
-# always visible — fzf's in-picker execute() doesn't render reliably over SSH.
+# Resume via Claude Code's built-in picker (Ctrl+A all projects, Space preview,
+# Ctrl+R rename, Ctrl+B branch). A session ID as the first arg resumes directly.
+# Mirrors the Mac's ~/.zshrc functions.
 clauder() {
-    local out key result sid jsonl confirm
+    claude --resume "$@"
+}
+
+claudepr() {
+    claude --permission-mode bypassPermissions --resume "$@"
+}
+
+# Same as claudep / claudepr, but this one session talks to Anthropic directly
+# instead of through Model Gateway, so /remote-control is available. No GPT/Grok
+# models in that session; everything else keeps the gateway. The Mac passes the
+# same settings as ~/.claude/no-gateway.json; inline JSON avoids deploying a file.
+claude_no_gateway='{"env":{"ANTHROPIC_BASE_URL":"https://api.anthropic.com"}}'
+claudepd() {
+    claude --permission-mode bypassPermissions --settings "$claude_no_gateway" "$@"
+}
+
+claudeprd() {
+    claude --permission-mode bypassPermissions --settings "$claude_no_gateway" --resume "$@"
+}
+
+# Prints the pid of a running claude that has session $1 open. Returns 0 when
+# one does, 1 when none does, and 2 when the session registry can't be read, so
+# callers can refuse to delete rather than guess.
+_claude_session_live_pid() {
+    local registry="$HOME/.claude/sessions" files status f pid
+    [ -d "$registry" ] && [ -r "$registry" ] && [ -x "$registry" ] || return 2
+    files=$(grep -rlF --include='*.json' -- "$1" "$registry")
+    status=$?
+    [ "$status" -gt 1 ] && return 2
+    for f in $files; do
+        pid=$(basename "$f" .json)
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "$pid"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Delete sessions (the built-in picker can't). The y/N prompt runs after fzf
+# exits because fzf's execute() doesn't render reliably over SSH. Refuses
+# sessions still open in a running claude, since it would recreate the
+# transcript; the check repeats after confirmation in case one resumed meanwhile.
+claudeclean() {
+    local out key result sid jsonl confirm live status
     while true; do
         out=$(python3 "$HOME/.claude/session-picker.py" | fzf \
             --ansi \
             --delimiter=$'\t' \
             --with-nth=1 \
             --border=rounded \
-            --prompt='Resume session › ' \
-            --header=$'Enter: resume  ·  Ctrl-D: delete  ·  Type to search  ·  Esc: cancel' \
+            --prompt='Delete session › ' \
+            --header=$'Ctrl-D: delete  ·  Type to search  ·  Esc: done' \
+            --bind='enter:ignore' \
             --expect=ctrl-d)
-        # With --expect, line 1 is the key pressed (empty for Enter), line 2 the row.
+        # With --expect, line 1 is the key pressed, line 2 the row.
         key=$(sed -n 1p <<<"$out")
         result=$(sed -n 2p <<<"$out")
-        [[ -z "$result" ]] && return 0          # Esc / no selection
-        if [[ "$key" == "ctrl-d" ]]; then
-            jsonl=$(cut -f3 <<<"$result")
+        [[ "$key" == "ctrl-d" && -n "$result" ]] || return 0
+        sid=$(cut -f2 <<<"$result")
+        jsonl=$(cut -f3 <<<"$result")
+        live=$(_claude_session_live_pid "$sid"); status=$?
+        if [ "$status" -eq 1 ]; then
             printf 'Delete %s ? [y/N] ' "$jsonl"
             read -r confirm < /dev/tty
-            if [[ "$confirm" == [yY] ]]; then
-                rm -f "$jsonl" && echo "Deleted."
-            else
+            if [[ "$confirm" != [yY] ]]; then
                 echo "Cancelled."
+            else
+                live=$(_claude_session_live_pid "$sid"); status=$?
+                [ "$status" -eq 1 ] && rm -f -- "$jsonl" && echo "Deleted."
             fi
-            continue                            # reload the list
         fi
-        sid=$(cut -f2 <<<"$result")
-        claude --resume "$sid" "$@"
-        return 0
+        [ "$status" -eq 0 ] && echo "Still open in claude pid $live; exit that session first."
+        [ "$status" -eq 2 ] && echo "Can't read ~/.claude/sessions to check for open sessions; nothing deleted."
+        read -r -p 'Press Enter to continue...' < /dev/tty
     done
-}
-claudepr() {
-    clauder --permission-mode bypassPermissions "$@"
 }
 ### END CLAUDE ###
 

@@ -74,7 +74,9 @@ compare it with this checkout. Deployed files may differ from the repository.
 - `shared/`: code imported or deployed on more than one host.
 - `pi/scripts/build_claude_code_proxy.sh` builds `claude-code-proxy` from source for
   Claude Code's Model Gateway (the release binary needs glibc 2.39). Never run the
-  gateway's `setup` on the Pi; see `pi/docs/compute/CLAUDE_MODEL_GATEWAY.md`.
+  gateway's `setup` on the Pi; `pi/scripts/model_gateway_setup_guard.cjs`, preloaded
+  via `NODE_OPTIONS` in `pi/.bashrc`, blocks it. See
+  `pi/docs/compute/CLAUDE_MODEL_GATEWAY.md`.
 - `pi/apps/van_dashboard/van_dashboard_ubnt_recovery.py` reconciles uncertain
   Starlink antenna operations against fresh radio state without replaying them.
   Frontend `features/ubnt/UbntOperationNotice.tsx` distinguishes pending

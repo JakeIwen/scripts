@@ -29,6 +29,10 @@ normally live under `/home/pi/scripts/`.
 - [USB port controls](docs/dashboard/USB_PORT_CONTROLS.md)
 - [Application layout](apps/README.md)
 
+## Claude Code
+
+- [Model Gateway and Remote Control on the Pi](docs/compute/CLAUDE_MODEL_GATEWAY.md)
+
 ## Project guides
 
 - [Visual Guides & A/C IR controller](projects/visual-guides/README.md)
