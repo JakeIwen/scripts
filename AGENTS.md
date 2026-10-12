@@ -55,6 +55,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   owned process group; `conversion_worker.py` runs foreground batch jobs.
   `conversion_storage.py` atomically publishes recipes/progress. Completed outputs
   are recorded at the publisher boundary before cancellation can interrupt reporting.
+  `conversion_reports.py` stores audio measurements and conversion recipes under
+  ignored `macbook/build/conversion-reports/`, keyed by captured output generation.
+  Job manifests retain report generation IDs; the editor serves only authenticated,
+  indexed report requests, independent of whether the video still exists.
   `macbook/bettertouchtool/btt.py` is the maintenance CLI; `btt_common.py/.js`
   share read-only inspection and backup helpers. `repair_media_actions.py`
   defines the action-recovery wire contract consumed by its JXA worker.
