@@ -3,6 +3,13 @@ set -eu
 
 command_name=${0##*/}
 case $command_name in
+    iwlist|softrestart)
+        if [ -n "${MOCK_RADIO_EVENTS:-}" ]; then
+            printf '%s\n' "$command_name" >> "$MOCK_RADIO_EVENTS"
+        fi
+        ;;
+esac
+case $command_name in
     iwlist)
         selected_fixture=$MOCK_FIXTURE
         if [ -n "${MOCK_IWLIST_COUNT_FILE:-}" ]; then

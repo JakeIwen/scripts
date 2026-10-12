@@ -68,10 +68,21 @@ even if the initiating SSH connection hangs up during an airOS reload.
 Flash-save completion and failures are logged explicitly, and persistent SSH
 keys are restored after both reloads and profile writes.
 
-Dashboard Starlink power-off queues an immediate `starlink-off` operation. It
-releases denlink if configured or connected, clears that connection's temporary
-protection, and scans for the best other saved network without waiting for cron
-or repeated Internet failures. The denlink profile stays saved. A two-minute
+Dashboard Starlink power-off queues an immediate `starlink-off` operation. When
+denlink is configured or connected, it first looks for an eligible alternative
+in a completed full survey at most five minutes old. Without a usable cached
+candidate, it scans before disconnecting if the live scan list already covers
+all standard channels. A candidate from either path is applied directly, avoiding
+the intermediate disconnected configuration and its reload. Candidate ranking,
+security/AP matching and cooldowns are unchanged.
+
+A pinned or otherwise incomplete scan list without a usable recent candidate
+takes the disconnect-first/full-survey path. Failed direct association also falls
+back to that path, cooling down the failed candidate; an associated network needing
+DHCP or portal login remains connected. A fresh scan with no alternative clears
+denlink without repeating the survey. Both paths clear denlink's temporary
+protection without waiting for cron or repeated Internet failures. The denlink
+profile stays saved. A two-minute
 cooldown prevents automatic reselection while the AP powers down; an explicit
 power-on connection bypasses it. Other Wi-Fi connections are untouched, and an
 explicit maintenance pause is retained (disconnect only, no automatic roam).

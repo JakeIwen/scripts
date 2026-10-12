@@ -23,6 +23,8 @@ export UBNT_SCAN_SETTLE_SECONDS=0
 export MOCK_FIXTURE="$script_dir/fixtures/iwlist-scan.txt"
 export MOCK_ASSOCIATED="$test_root/associated" MOCK_RELOAD_CHANNELS="$test_root/reloads"
 export MOCK_IWLIST_COUNT_FILE="$test_root/scans"
+export MOCK_RADIO_EVENTS="$test_root/radio-events"
+standard_scan_frequencies='2412, 2417, 2422, 2427, 2432, 2437, 2442, 2447, 2452, 2457, 2462'
 printf '1000.0 0.0\n' > "$UBNT_UPTIME_FILE"
 printf '%s\n' 'users.1.name=ubnt' 'users.1.password=admin-test-hash' \
     'wireless.1.ssid=denlink' 'wireless.1.ap=4E:EA:85:26:34:F4' \
@@ -43,6 +45,20 @@ reset_denlink() {
     printf '1000\n' > "$UBNT_STATE_DIR/transition_started"
     : > "$MOCK_RELOAD_CHANNELS"
     : > "$MOCK_IWLIST_COUNT_FILE"
+    : > "$MOCK_RADIO_EVENTS"
+    rm -f "$UBNT_STATE_DIR/scan-completed" "$UBNT_STATE_DIR/scan.results" \
+        "$UBNT_STATE_DIR/cooldown.Other"
+}
+
+cached_full_scan() {
+    "$manager" dashboard-scan >/dev/null
+    # Model a connection pin applied after the completed full survey.
+    cp "$UBNT_PROFILE_DIR/denlink" "$UBNT_SYSTEM_CFG"
+    printf '%s\n' 'wireless.1.scan_list.status=enabled' \
+        'wireless.1.scan_list.channels=2462' >> "$UBNT_SYSTEM_CFG"
+    : > "$MOCK_RELOAD_CHANNELS"
+    : > "$MOCK_IWLIST_COUNT_FILE"
+    : > "$MOCK_RADIO_EVENTS"
 }
 
 # Leave denlink, clear its grace/portal protection, and prefer an alternative
@@ -96,4 +112,145 @@ export MOCK_CCQ=0
 [ ! -f "$UBNT_STATE_DIR/transition_started" ]
 [ "$(md5sum "$UBNT_PROFILE_DIR/denlink" | awk '{print $1}')" = "$before" ]
 ! grep -qE 'admin-test-hash|wifi-test-password' "$UBNT_LOG_FILE"
+
+# All-channel radio: survey while still configured for denlink, then apply
+# the alternative directly. There is no intermediate disconnect reload.
+unset MOCK_CCQ
+export MOCK_FIXTURE="$script_dir/fixtures/iwlist-scan.txt"
+reset_denlink
+printf '%s\n' 'wireless.1.scan_list.status=enabled' \
+    "wireless.1.scan_list.channels=$standard_scan_frequencies" >> "$UBNT_SYSTEM_CFG"
+"$manager" starlink-off >/dev/null
+[ "$(cat "$MOCK_ASSOCIATED")" = 'A Network With Spaces' ]
+[ "$(cat "$MOCK_RELOAD_CHANNELS")" = 2437 ]
+[ "$(cat "$MOCK_IWLIST_COUNT_FILE")" = 3 ]
+[ "$(sed -n '1p' "$MOCK_RADIO_EVENTS")" = iwlist ]
+[ ! -f "$UBNT_STATE_DIR/manual-hold" ]
+[ ! -f "$UBNT_STATE_DIR/transition_started" ]
+
+# A recent full survey works even when the live radio is pinned. The five-minute
+# boundary is inclusive and no new survey or disconnect is needed.
+for scan_time in 1000 700; do
+    reset_denlink
+    cached_full_scan
+    printf '%s\n' "$scan_time" > "$UBNT_STATE_DIR/scan-completed"
+    "$manager" starlink-off >/dev/null
+    [ "$(cat "$MOCK_ASSOCIATED")" = 'A Network With Spaces' ]
+    [ "$(cat "$MOCK_RELOAD_CHANNELS")" = 2437 ]
+    [ ! -s "$MOCK_IWLIST_COUNT_FILE" ]
+    [ "$(cat "$UBNT_STATE_DIR/cooldown.denlink")" = 1120 ]
+done
+
+# Stale, incomplete, future-dated and empty cache entries need the original
+# disconnect/full-survey path on a pinned radio.
+for cache_case in stale missing future malformed empty; do
+    reset_denlink
+    cached_full_scan
+    case $cache_case in
+        stale) printf '699\n' > "$UBNT_STATE_DIR/scan-completed" ;;
+        missing) rm "$UBNT_STATE_DIR/scan-completed" ;;
+        future) printf '1001\n' > "$UBNT_STATE_DIR/scan-completed" ;;
+        malformed) printf 'unknown\n' > "$UBNT_STATE_DIR/scan-completed" ;;
+        empty) : > "$UBNT_STATE_DIR/scan.results" ;;
+    esac
+    "$manager" starlink-off >/dev/null
+    [ "$(wc -l < "$MOCK_RELOAD_CHANNELS" | tr -d '[:space:]')" -eq 2 ]
+    [ "$(sed -n '1p' "$MOCK_RELOAD_CHANNELS")" = "$standard_scan_frequencies" ]
+    [ "$(cat "$MOCK_IWLIST_COUNT_FILE")" = 3 ]
+    [ "$(sed -n '1p' "$MOCK_RADIO_EVENTS")" = softrestart ]
+done
+
+# Cached profiles still obey cooldown, security and AP-lock matching.
+for unavailable_case in cooldown security bssid; do
+    reset_denlink
+    cached_full_scan
+    cp "$UBNT_PROFILE_DIR/Other" "$test_root/other-before"
+    case $unavailable_case in
+        cooldown) printf '2000\n' > "$UBNT_STATE_DIR/cooldown.Other" ;;
+        security) sed 's/|none|/|wpa|/g' "$UBNT_STATE_DIR/scan.results" > "$test_root/changed-scan"
+            mv "$test_root/changed-scan" "$UBNT_STATE_DIR/scan.results" ;;
+        bssid) printf 'wireless.1.ap=00:11:22:33:44:99\n' >> "$UBNT_PROFILE_DIR/Other" ;;
+    esac
+    "$manager" starlink-off >/dev/null
+    [ "$(sed -n '1p' "$MOCK_RELOAD_CHANNELS")" = "$standard_scan_frequencies" ]
+    [ "$(cat "$MOCK_IWLIST_COUNT_FILE")" = 3 ]
+    cp "$test_root/other-before" "$UBNT_PROFILE_DIR/Other"
+done
+
+# No alternative after a fresh all-channel scan: clear denlink once, without
+# repeating the survey or creating a manual grace period.
+reset_denlink
+printf '%s\n' 'wireless.1.scan_list.status=enabled' \
+    "wireless.1.scan_list.channels=$standard_scan_frequencies" >> "$UBNT_SYSTEM_CFG"
+export MOCK_FIXTURE="$test_root/empty-scan"
+"$manager" starlink-off >/dev/null
+[ "$(wc -l < "$MOCK_RELOAD_CHANNELS" | tr -d '[:space:]')" -eq 1 ]
+[ "$(cat "$MOCK_IWLIST_COUNT_FILE")" = 3 ]
+[ "$(cat "$MOCK_ASSOCIATED")" != denlink ]
+[ ! -f "$UBNT_STATE_DIR/transition_started" ]
+export MOCK_FIXTURE="$script_dir/fixtures/iwlist-scan.txt"
+
+# A stale candidate can disappear after the survey. Failed direct association
+# must release denlink, cool down that candidate and run a fresh full survey.
+reset_denlink
+cached_full_scan
+export MOCK_FAIL_SSID='A Network With Spaces'
+export UBNT_ASSOCIATE_FAST_SECONDS=0 UBNT_ASSOCIATE_FALLBACK_SECONDS=0
+"$manager" starlink-off >/dev/null
+[ "$(wc -l < "$MOCK_RELOAD_CHANNELS" | tr -d '[:space:]')" -eq 3 ]
+[ "$(cat "$MOCK_IWLIST_COUNT_FILE")" = 3 ]
+case $(cat "$MOCK_ASSOCIATED") in vanpi-disconnected-*) ;; *) exit 1 ;; esac
+[ -f "$UBNT_STATE_DIR/cooldown.Other" ]
+[ ! -f "$UBNT_STATE_DIR/transition_started" ]
+[ ! -f "$UBNT_STATE_DIR/manual-hold" ]
+unset MOCK_FAIL_SSID UBNT_ASSOCIATE_FAST_SECONDS UBNT_ASSOCIATE_FALLBACK_SECONDS
+
+# Recovery can select a different saved candidate after cooling down the miss.
+reset_denlink
+sed -e 's/denlink/dendelion/g' -e 's/4E:EA:85:26:34:F4/D8:EC:5E:8D:6A:3A/g' \
+    "$UBNT_PROFILE_DIR/denlink" > "$UBNT_PROFILE_DIR/Backup"
+cached_full_scan
+export MOCK_FAIL_SSID='A Network With Spaces'
+export UBNT_ASSOCIATE_FAST_SECONDS=0 UBNT_ASSOCIATE_FALLBACK_SECONDS=0
+"$manager" starlink-off >/dev/null
+[ "$(cat "$MOCK_ASSOCIATED")" = dendelion ]
+[ "$(wc -l < "$MOCK_RELOAD_CHANNELS" | tr -d '[:space:]')" -eq 4 ]
+[ "$(cat "$MOCK_IWLIST_COUNT_FILE")" = 3 ]
+[ -f "$UBNT_STATE_DIR/cooldown.Other" ]
+rm "$UBNT_PROFILE_DIR/Backup"
+unset MOCK_FAIL_SSID UBNT_ASSOCIATE_FAST_SECONDS UBNT_ASSOCIATE_FALLBACK_SECONDS
+
+# A targeted-channel miss retains the normal all-channel connection fallback.
+reset_denlink
+cached_full_scan
+export MOCK_FAIL_FREQUENCY=2437 UBNT_ASSOCIATE_FAST_SECONDS=0
+"$manager" starlink-off >/dev/null
+[ "$(wc -l < "$MOCK_RELOAD_CHANNELS" | tr -d '[:space:]')" -eq 2 ]
+[ "$(sed -n '2p' "$MOCK_RELOAD_CHANNELS")" = "$standard_scan_frequencies" ]
+[ "$(cat "$MOCK_ASSOCIATED")" = 'A Network With Spaces' ]
+[ ! -s "$MOCK_IWLIST_COUNT_FILE" ]
+unset MOCK_FAIL_FREQUENCY UBNT_ASSOCIATE_FAST_SECONDS
+
+# Association without working Internet is retained for portal login.
+reset_denlink
+cached_full_scan
+export MOCK_PING_STATUS=1
+"$manager" starlink-off >/dev/null
+[ "$(cat "$MOCK_ASSOCIATED")" = 'A Network With Spaces' ]
+[ "$(cat "$MOCK_RELOAD_CHANNELS")" = 2437 ]
+[ ! -s "$MOCK_IWLIST_COUNT_FILE" ]
+unset MOCK_PING_STATUS
+
+# A maintenance pause takes precedence over even a fresh cached alternative.
+reset_denlink
+cached_full_scan
+: > "$UBNT_STATE_DIR/paused"
+"$manager" starlink-off >/dev/null
+[ -f "$UBNT_STATE_DIR/paused" ]
+[ "$(cat "$MOCK_RELOAD_CHANNELS")" = "$standard_scan_frequencies" ]
+[ ! -s "$MOCK_IWLIST_COUNT_FILE" ]
+[ "$(cat "$MOCK_ASSOCIATED")" != denlink ]
+[ "$(md5sum "$UBNT_PROFILE_DIR/denlink" | awk '{print $1}')" = "$before" ]
+grep -qx 'users.1.password=admin-test-hash' "$UBNT_SYSTEM_CFG"
+! grep -qE 'admin-test-hash|wifi-test-password|sensitive-test-value' "$UBNT_LOG_FILE"
 printf 'starlink-power-off: ok\n'
