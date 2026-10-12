@@ -20,6 +20,40 @@ function itemMatches(actual, wanted) {
     actions[0].BTTShellTaskActionConfig === target.BTTShellTaskActionConfig
   );
 }
+function visibleRow(item) {
+  const config = item.BTTMenuConfig || {};
+  return (
+    enabled(item) &&
+    Number(item.BTTTriggerType) === 773 &&
+    (Number(config.BTTMenuItemVisibleWhileActive ?? 1) === 1 ||
+      Number(config.BTTMenuItemVisibleWhileInactive ?? 1) === 1)
+  );
+}
+function requiredHeight(parent, desired, previous) {
+  const config = parent.BTTMenuConfig || {},
+    rows = parent.BTTMenuItems.filter(visibleRow);
+  if (!previous) rows.push(desired);
+  const number = (row, key, fallback = 0) => {
+    const value = Number(
+      (row.BTTMenuConfig || {})[key] ?? config[key] ?? fallback,
+    );
+    if (!Number.isFinite(value) || value < 0)
+      throw Error("Invalid existing menu size; no changes made.");
+    return value;
+  };
+  const content = rows.reduce(
+    (total, row) =>
+      total +
+      number(row, "BTTMenuItemMaxHeight", number(row, "BTTMenuItemMinHeight")) +
+      number(row, "BTTMenuItemPaddingTop") +
+      number(row, "BTTMenuItemPaddingBottom"),
+    0,
+  );
+  return (
+    content +
+    number(parent, "BTTMenuVerticalSpacing") * Math.max(0, rows.length - 1)
+  );
+}
 function plan(parent, payload) {
   if (
     !enabled(parent) ||
@@ -69,6 +103,8 @@ function plan(parent, payload) {
     "BTTMenuItemMaxWidth",
     "BTTMenuItemMinHeight",
     "BTTMenuItemMaxHeight",
+    "BTTMenuItemPaddingTop",
+    "BTTMenuItemPaddingBottom",
   ])
     if (style[key] !== undefined) desired.BTTMenuConfig[key] = style[key];
   desired.BTTOrder = previous
@@ -78,11 +114,13 @@ function plan(parent, payload) {
   if (previous && !itemMatches(previous, desired))
     throw Error("Existing Custom conversion action differs; no changes made.");
   const layout = {};
-  if (!previous && Number(parent.BTTMenuConfig.BTTMenuSizingBehavior) === 1)
-    layout.BTTMenuFrameHeight =
-      Number(parent.BTTMenuConfig.BTTMenuFrameHeight) +
-      Number(style.BTTMenuItemMaxHeight) +
-      Number(parent.BTTMenuConfig.BTTMenuVerticalSpacing || 0);
+  if (Number(parent.BTTMenuConfig.BTTMenuSizingBehavior) === 1) {
+    const current = Number(parent.BTTMenuConfig.BTTMenuFrameHeight),
+      required = requiredHeight(parent, desired, previous);
+    if (!Number.isFinite(current) || current <= 0)
+      throw Error("Invalid existing menu size; no changes made.");
+    if (required > current) layout.BTTMenuFrameHeight = required;
+  }
   if (Object.values(layout).some((x) => !Number.isFinite(x) || x <= 0))
     throw Error("Invalid existing menu size; no changes made.");
   return { desired, previous, layout };
@@ -116,7 +154,7 @@ function run(argv) {
       item: change.desired.BTTMenuName,
       layout: change.layout,
     });
-  if (change.previous)
+  if (change.previous && !Object.keys(change.layout).length)
     return "Already configured: Tools > Performance Audio > Custom conversion…";
   const backup = common.backup(
     { parent, media },
@@ -127,9 +165,10 @@ function run(argv) {
     common.fingerprint(get(payload.media)) !== common.fingerprint(media)
   )
     throw Error("Menus changed during backup; no changes made.");
-  btt.add_new_trigger(JSON.stringify(change.desired), {
-    parent_uuid: payload.parent,
-  });
+  if (!change.previous)
+    btt.add_new_trigger(JSON.stringify(change.desired), {
+      parent_uuid: payload.parent,
+    });
   if (Object.keys(change.layout).length)
     btt.update_menu_item(payload.parent, {
       json: JSON.stringify(change.layout),
@@ -142,9 +181,15 @@ function run(argv) {
   if (!itemMatches(actual, change.desired))
     throw Error("New item verification failed. Backup: " + backup);
   const clean = common.clone(after);
-  clean.BTTMenuItems = clean.BTTMenuItems.filter(
-    (x) => x.BTTUUID !== change.desired.BTTUUID,
-  );
+  if (change.previous) {
+    clean.BTTMenuItems = clean.BTTMenuItems.map((item) =>
+      item.BTTUUID === change.desired.BTTUUID ? change.previous : item,
+    );
+  } else {
+    clean.BTTMenuItems = clean.BTTMenuItems.filter(
+      (x) => x.BTTUUID !== change.desired.BTTUUID,
+    );
+  }
   for (const key of Object.keys(change.layout)) {
     if (clean.BTTMenuConfig[key] !== change.layout[key])
       throw Error("Menu size verification failed. Backup: " + backup);

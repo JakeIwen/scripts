@@ -18,6 +18,8 @@ function fixture(options = {}) {
     BTTMenuConfig: {
       BTTMenuAttributedText: "{\\rtf1\\fs28 Existing}",
       BTTMenuItemMaxHeight: 40,
+      BTTMenuItemPaddingTop: 2,
+      BTTMenuItemPaddingBottom: 2,
     },
     BTTMenuItemActions: [
       { BTTUUID: "keep", BTTShellTaskActionScript: "untouched" },
@@ -29,8 +31,9 @@ function fixture(options = {}) {
     BTTMenuItems: [peer],
     BTTMenuConfig: {
       BTTMenuSizingBehavior: 1,
-      BTTMenuFrameHeight: 300,
+      BTTMenuFrameHeight: 44,
       BTTMenuVerticalSpacing: 4,
+      BTTMenuAppearanceStyle: 7,
     },
   };
   const media = {
@@ -59,7 +62,8 @@ function fixture(options = {}) {
     },
   };
   let writes = 0,
-    backup = false;
+    backup = false,
+    resizeFailures = options.resizeFailures || 0;
   const common = {
     readJSON: () => JSON.parse(JSON.stringify(payload)),
     clone: (x) => JSON.parse(JSON.stringify(x)),
@@ -83,6 +87,7 @@ function fixture(options = {}) {
       assert.equal(persist, true);
       assert.equal(id, "parent");
       writes++;
+      if (resizeFailures-- > 0) throw Error("resize failed");
       Object.assign(parent.BTTMenuConfig, JSON.parse(json));
     },
   };
@@ -111,12 +116,14 @@ function fixture(options = {}) {
 test("adds one styled item, grows fixed menu and preserves prior actions", () => {
   const f = fixture(),
     peer = JSON.stringify(f.peer),
-    media = JSON.stringify(f.media);
+    media = JSON.stringify(f.media),
+    appearance = f.parent.BTTMenuConfig.BTTMenuAppearanceStyle;
   assert.match(f.run(), /Verified/);
   assert.equal(f.writes(), 2);
-  assert.equal(f.parent.BTTMenuConfig.BTTMenuFrameHeight, 344);
+  assert.equal(f.parent.BTTMenuConfig.BTTMenuFrameHeight, 92);
   assert.equal(JSON.stringify(f.peer), peer);
   assert.equal(JSON.stringify(f.media), media);
+  assert.equal(f.parent.BTTMenuConfig.BTTMenuAppearanceStyle, appearance);
   assert.match(
     f.parent.BTTMenuItems[1].BTTMenuConfig.BTTMenuAttributedText,
     /\\fs28/,
@@ -124,6 +131,37 @@ test("adds one styled item, grows fixed menu and preserves prior actions", () =>
   assert.equal(f.parent.BTTMenuItems[1].BTTOrder, 4);
   assert.match(f.run(), /Already configured/);
   assert.equal(f.writes(), 2);
+});
+test("repairs a failed resize without duplicate item or repeated growth", () => {
+  const f = fixture({ resizeFailures: 1 }),
+    peer = JSON.stringify(f.peer),
+    media = JSON.stringify(f.media),
+    parentKeys = Object.keys(f.parent.BTTMenuConfig).sort();
+  assert.throws(() => f.run(), /resize failed/);
+  assert.equal(
+    f.parent.BTTMenuItems.filter((x) => x.BTTUUID === "custom").length,
+    1,
+  );
+  assert.equal(f.parent.BTTMenuConfig.BTTMenuFrameHeight, 44);
+  assert.match(f.run(), /Verified/);
+  assert.equal(
+    f.parent.BTTMenuItems.filter((x) => x.BTTUUID === "custom").length,
+    1,
+  );
+  assert.equal(f.parent.BTTMenuConfig.BTTMenuFrameHeight, 92);
+  assert.equal(JSON.stringify(f.peer), peer);
+  assert.equal(JSON.stringify(f.media), media);
+  assert.deepEqual(Object.keys(f.parent.BTTMenuConfig).sort(), parentKeys);
+  assert.match(f.run(), /Already configured/);
+  assert.equal(f.parent.BTTMenuConfig.BTTMenuFrameHeight, 92);
+  assert.equal(f.writes(), 3);
+});
+test("never shrinks an already sufficient fixed frame", () => {
+  const f = fixture();
+  f.parent.BTTMenuConfig.BTTMenuFrameHeight = 300;
+  assert.match(f.run(), /Verified/);
+  assert.equal(f.parent.BTTMenuConfig.BTTMenuFrameHeight, 300);
+  assert.equal(f.writes(), 1);
 });
 test("inspect and backup failure do not mutate", () => {
   const f = fixture();
@@ -144,6 +182,7 @@ test("refuses conflicting existing action", () => {
 test("content-sized menu remains content-sized", () => {
   const f = fixture();
   f.parent.BTTMenuConfig.BTTMenuSizingBehavior = 3;
+  f.parent.BTTMenuConfig.BTTMenuFrameHeight = 300;
   f.run();
   assert.equal(f.parent.BTTMenuConfig.BTTMenuFrameHeight, 300);
   assert.equal(f.writes(), 1);

@@ -49,6 +49,12 @@ compare it with this checkout. Deployed files may differ from the repository.
   with its HTML/CSS/JS siblings. It is not an always-on service. Dolby Vision audio
   replacement uses MP4 with lossless ALAC unless AAC is explicitly selected;
   `performance_audio.py` validates preserved video/HDR metadata before publication.
+  `media_selection.py` owns Finder/picker selection provenance; Performance Audio
+  and Convert Video's interactive paths both open the confirmation editor.
+  `media_task_control.py` owns the job-state wire contract and cancellation of an
+  owned process group; `conversion_worker.py` runs foreground batch jobs.
+  `conversion_storage.py` atomically publishes recipes/progress. Completed outputs
+  are recorded at the publisher boundary before cancellation can interrupt reporting.
   `macbook/bettertouchtool/btt.py` is the maintenance CLI; `btt_common.py/.js`
   share read-only inspection and backup helpers. `repair_media_actions.py`
   defines the action-recovery wire contract consumed by its JXA worker.
@@ -59,6 +65,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   pointer automatically. Checkpoint integration fixtures live in
   `macbook/tests/btt_guard_fixtures.py`.
 - `shared/`: code imported or deployed on more than one host.
+- `pi/scripts/build_claude_code_proxy.sh` builds `claude-code-proxy` from source for
+  Claude Code's Model Gateway (the release binary needs glibc 2.39). Never run the
+  gateway's `setup` on the Pi; see `pi/docs/compute/CLAUDE_MODEL_GATEWAY.md`.
 - `pi/apps/van_dashboard/van_dashboard_ubnt_recovery.py` reconciles uncertain
   Starlink antenna operations against fresh radio state without replaying them.
   Frontend `features/ubnt/UbntOperationNotice.tsx` distinguishes pending
