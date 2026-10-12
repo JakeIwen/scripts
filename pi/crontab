@@ -13,7 +13,6 @@ PATH="/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:/root/bin"
 */5 * * * *    su pi -c "$scripts/keepalive.sh"  >> "$cronlog/keepalive.log" 2>&1
 # 30 9 * * *   su pi -c "$scripts/reboot.sh" >> "$cronlog/reboot.log" 2>&1
 # * * * * *    su pi -c "/home/pi/sns.sh standby_grouped" >> "$cronlog/sonos_standby_grouped.log" 2>&1
-# * * * * *    su pi -c "$scripts/log_zrate.sh"  >> "$cronlog/log_zrate.log" 2>&1
 0 * * * *     su pi -c "$scripts/streetlight.sh"  >> "$cronlog/streetlight.log" 2>&1
 
 
