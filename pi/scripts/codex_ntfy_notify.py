@@ -11,6 +11,7 @@ import sys
 NTFY_SEND = "/home/pi/scripts/ntfy_send.sh"
 CODEX_DIR = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
 SESSION_INDEX = CODEX_DIR / "session_index.jsonl"
+SESSIONS_DIR = CODEX_DIR / "sessions"
 MAX_MESSAGE_CHARS = 3500
 MAX_TITLE_CHARS = 200
 
@@ -33,6 +34,26 @@ def conversation_title(event: dict) -> str:
     except OSError:
         return ""
     return title
+
+
+def is_subagent_thread(event: dict) -> bool:
+    # The notify payload doesn't say who spawned the thread; its rollout's
+    # session_meta line does. Unknown threads count as top-level so a lookup
+    # failure never swallows a real notification.
+    thread_id = event.get("thread-id")
+    if not thread_id or not SESSIONS_DIR.is_dir():
+        return False
+    for rollout in sorted(SESSIONS_DIR.glob(f"*/*/*/rollout-*-{thread_id}.jsonl"), reverse=True):
+        try:
+            with rollout.open(encoding="utf-8") as lines:
+                meta = json.loads(lines.readline()).get("payload", {})
+        except (OSError, json.JSONDecodeError, AttributeError):
+            continue
+        source = meta.get("source")
+        return meta.get("thread_source") == "subagent" or (
+            isinstance(source, dict) and "subagent" in source
+        )
+    return False
 
 
 def notification(event: dict) -> tuple[str, str]:
@@ -60,7 +81,7 @@ def main() -> int:
         print(f"codex_ntfy_notify: invalid JSON: {exc}", file=sys.stderr)
         return 2
 
-    if event.get("type") != "agent-turn-complete":
+    if event.get("type") != "agent-turn-complete" or is_subagent_thread(event):
         return 0
 
     title, message = notification(event)
