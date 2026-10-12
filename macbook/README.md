@@ -11,6 +11,9 @@ Code that is also deployed to another host belongs in `../shared/` instead.
 
 ## BPM over time
 
+For editable audio presets with reference values and explicit video preservation
+or SDR adjustments, see [Custom conversion](docs/CUSTOM_CONVERSION.md).
+
 [`scripts/bpm_over_time.py`](scripts/bpm_over_time.py) estimates tempo in overlapping
 windows and graphs 60 samples across an audio/video file. **Tools → BPM Over Time**
 opens an offline report with hover details, ambiguity indicators, PNG/SVG graphs

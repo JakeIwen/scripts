@@ -43,6 +43,12 @@ compare it with this checkout. Deployed files may differ from the repository.
   `provision` (new networks), `status` (status/dashboard output), and `starlink`
   (power-off roaming). Ship the entrypoint and every sibling together.
 - `macbook/`: macOS shell utilities, AppleScripts, and BetterTouchTool helpers.
+  `macbook/scripts/conversion_settings.py` owns custom media-conversion settings;
+  `conversion_jobs.py` reuses the audio/video engines and stores user presets.
+  `conversion_editor.py` serves a short-lived loopback editor for BTT-selected files,
+  with its HTML/CSS/JS siblings. It is not an always-on service. Dolby Vision audio
+  replacement uses MP4 with lossless ALAC unless AAC is explicitly selected;
+  `performance_audio.py` validates preserved video/HDR metadata before publication.
   `macbook/bettertouchtool/btt.py` is the maintenance CLI; `btt_common.py/.js`
   share read-only inspection and backup helpers. `repair_media_actions.py`
   defines the action-recovery wire contract consumed by its JXA worker.

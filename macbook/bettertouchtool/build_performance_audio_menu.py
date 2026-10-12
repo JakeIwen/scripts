@@ -47,13 +47,13 @@ def build():
         "BTTTriggerName": "Floating Menu: " + NAME, "BTTMenuName": NAME,
         "BTTMenuItems": [],
         "BTTMenuConfig": dropdown_menu_config(
-            "performance-audio", len(settings["presets"]) + 3, 340, base_menu_config(NAME)),
+            "performance-audio", len(settings["presets"]) + 4, 340, base_menu_config(NAME)),
     }
     # Position near the pointer rather than an unverified existing parent menu.
     menu["BTTMenuConfig"].update(BTTMenuPositioningType=1, BTTMenuPositionRelativeTo=7,
                                 BTTMenuAnchorMenu=0, BTTMenuAnchorRelation=0,
                                 BTTMenuFrameWidth=340,
-                                BTTMenuFrameHeight=44 * (len(settings["presets"]) + 3))
+                                BTTMenuFrameHeight=44 * (len(settings["presets"]) + 4))
     commands = []
     for name, preset in settings["presets"].items():
         command = shlex.join([python, str(engine), "process", "--preset", name,
@@ -61,6 +61,8 @@ def build():
                               "--background", "--notify", "--reveal"])
         commands.append((name, preset["label"], command))
     commands += [
+        ("custom", "Custom conversion…", shlex.join([python, str(resources / "conversion_editor.py"),
+            "--config", str(config), "--finder-selection", "--background"])),
         ("choose", "Choose files (default preset)", shlex.join([
             python, str(engine), "process", "--config", str(config), "--choose",
             "--background", "--notify", "--reveal"])),
