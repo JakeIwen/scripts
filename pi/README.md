@@ -35,7 +35,9 @@ normally live under `/home/pi/scripts/`.
 
 ## Project guides
 
-- [Visual Guides & A/C IR controller](projects/visual-guides/README.md)
+- [Visual Guides & A/C IR controller](https://github.com/JakeIwen/visual-gides)
+  — standalone source in `~/dev/visual-guides`; [Pi](http://vanpi.lan:8791/)
+  and [Mac](http://127.0.0.1:8792/) pages.
 
 ## Testing
 

@@ -25,14 +25,13 @@ compare it with this checkout. Deployed files may differ from the repository.
 
 - `pi/`: Raspberry Pi apps, backup, disk, service, deployment, and setup tooling;
   `pi/README.md` is the documentation index.
-- `pi/projects/visual-guides/`: standalone Visual Guides & Documentation on vanpi
-  port 8791. `ac_ir.py` owns the Frigidaire RG15D command contract, captured
-  timings and IR transport; `app.py` serves docs/API and routes CLI sends through
-  the same authenticated API. `hardware_setup.py` owns deliberate GPIO18 boot
-  overlay, TX-only udev alias and hardware-mode drop-in; default service mode is
-  preview only. `deploy.py` owns `/home/pi/visual-guides/` immutable releases and
-  the separate systemd unit. No A/C state is inferred from sends. Physical
-  FFRE08L3S15 acceptance is unverified; GPIO17 remains the alert-light owner.
+- Visual Guides is maintained separately in `~/dev/visual-guides`, public repo
+  `https://github.com/JakeIwen/visual-gides`. It serves Mac loopback port 8792
+  and Pi port 8791. Its own `deploy.py` owns `/home/pi/visual-guides/` releases
+  and `visual-guides.service`; never restore a copy under `pi/projects/`.
+  The dashboard's project catalog links to both hosts; preserve runtime-added
+  links. A/C commands and GPIO18 setup belong to that repo; GPIO17 remains the
+  alert-light owner here.
 - `vanrouter/`: reviewed OpenWrt persistence and backup-export artifacts.
 - `ubnt/`: directional wireless-device profiles and uplink scripts.
   `ubnt/persistent/scripts/wifi_manager.sh` owns initialization and command
