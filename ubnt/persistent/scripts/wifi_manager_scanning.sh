@@ -89,11 +89,10 @@ set_scan_list() {
     mv "$config_rewrite" "$config_path"
 }
 
-recent_frequency_for_profile() {
+scan_results_are_recent() {
     local frequency_scan_time=""
     local frequency_now=""
     local frequency_age=""
-    local frequency_hint=""
     [ -s "$SCAN_FILE" ] || return 1
     frequency_scan_time=$(sed -n '1p' "$SCAN_COMPLETED_FILE" 2>/dev/null)
     frequency_now=$(uptime_seconds)
@@ -101,7 +100,12 @@ recent_frequency_for_profile() {
         *[!0-9:]*|:*|*:) return 1 ;;
     esac
     frequency_age=$((frequency_now - frequency_scan_time))
-    [ "$frequency_age" -ge 0 ] && [ "$frequency_age" -le "$SCAN_MAX_AGE_SECONDS" ] || return 1
+    [ "$frequency_age" -ge 0 ] && [ "$frequency_age" -le "$SCAN_MAX_AGE_SECONDS" ]
+}
+
+recent_frequency_for_profile() {
+    local frequency_hint=""
+    scan_results_are_recent || return 1
     frequency_hint=$(scan_field_for_profile "$1" 4)
     case $frequency_hint in
         2412|2417|2422|2427|2432|2437|2442|2447|2452|2457|2462)
