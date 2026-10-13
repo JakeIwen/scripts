@@ -1,69 +1,46 @@
 #!/usr/bin/env python3
 """Add one Convert Video button to Media > Tools through BTT's supported API."""
-
-import argparse
-import json
-import os
-from pathlib import Path
-import shlex
-import subprocess
 import uuid
 
-from btt_common import MEDIA_TOOLS, ROOT
-from tools_menu_style import tools_button_config
+from btt_common import MEDIA_TOOLS
+from tools_menu_item import (
+    BUILD,
+    MEDIA,
+    TOOLS,
+    ToolsMenuItemSpec,
+    build_definition,
+    run_installer,
+)
 
-
-BUILD = ROOT / "macbook" / "build"
-MEDIA = "D9B0ED12-C4BE-4E74-B0DA-0CC3BE092289"
-TOOLS = "FC3F8235-F102-55C4-8432-B6ADFB0D9992"
 NAMESPACE = uuid.UUID("c7b9d660-1b80-487a-8d1a-296d01be5a1c")
+SPEC = ToolsMenuItemSpec(
+    description=__doc__,
+    namespace=NAMESPACE,
+    menu_name="Convert Video",
+    identifier="convert-video",
+    script_name="convert_video.py",
+    runtime_name="python-path.txt",
+    command_arguments=("--interactive", "--finder-selection", "--background", "--notify", "--reveal"),
+    missing_build_message="Build the updated Performance Audio.app containing convert_video.py first.",
+    missing_runtime_message="App Python runtime is missing.",
+    payload_name="Convert Video Tools.json",
+    generated_message="Generated: {payload}. Run with --apply to install the button.",
+    backup_prefix="btt-before-convert-video-",
+    conflict_message="Conflicting Convert Video item; no changes made.",
+    appearance_peer_uuid="554C41C9-C964-5875-B916-EF9D2DFB2004",
+)
 
 
 def uid(name):
-    return str(uuid.uuid5(NAMESPACE, name)).upper()
+    return SPEC.uid(name)
 
 
 def definition(media_tools=None):
-    media_tools = MEDIA_TOOLS if media_tools is None else Path(media_tools)
-    resources = media_tools / "build/Performance Audio.app/Contents/Resources"
-    engine = resources / "convert_video.py"
-    if not engine.is_file():
-        raise SystemExit("Build the updated Performance Audio.app containing convert_video.py first.")
-    python = (resources / "python-path.txt").read_text().strip()
-    config = tools_button_config("convert-video", "Convert Video")
-    item_id = uid("button")
-    return {"media_uuid": MEDIA, "tools_uuid": TOOLS, "item": {
-        "BTTUUID": item_id, "BTTTriggerType": 773,
-        "BTTTriggerClass": "BTTTriggerTypeFloatingMenu", "BTTEnabled": 1, "BTTEnabled2": 1,
-        "BTTMenuName": "Convert Video", "BTTMenuConfig": config,
-        "BTTMenuItemActions": [{
-            "BTTUUID": uid("action"), "BTTTriggerParentUUID": item_id,
-            "BTTTriggerClass": "BTTTriggerTypeFloatingMenu", "BTTEnabled": 1, "BTTOrder": 0,
-            "BTTPredefinedActionType": 206, "BTTPredefinedActionName": "Run Shell Script / Task",
-            "BTTShellTaskActionScript": shlex.join([python, str(engine), "--interactive", "--finder-selection",
-                                                   "--background", "--notify", "--reveal"]),
-            "BTTShellTaskActionConfig": "/bin/zsh:::-c:::-:::"}],
-    }}
+    return build_definition(SPEC, MEDIA_TOOLS if media_tools is None else media_tools)
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--apply", action="store_true")
-    mode.add_argument("--inspect", action="store_true")
-    args = parser.parse_args()
-    os.umask(0o077)
-    media_tools = MEDIA_TOOLS
-    payload_data = definition(media_tools)
-    BUILD.mkdir(exist_ok=True)
-    payload = BUILD / "Convert Video Tools.json"
-    payload.write_text(json.dumps(payload_data, indent=2) + "\n")
-    if not args.apply and not args.inspect:
-        print(f"Generated: {payload}. Run with --apply to install the button.")
-        return
-    result = subprocess.run(["/usr/bin/osascript", "-l", "JavaScript", str(Path(__file__).with_suffix(".js")),
-                             str(payload), str(BUILD), "inspect" if args.inspect else "apply"])
-    raise SystemExit(result.returncode)
+    run_installer(SPEC)
 
 
 if __name__ == "__main__":

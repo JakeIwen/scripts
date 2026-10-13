@@ -25,17 +25,18 @@ var BTTCommon = (function () {
         if (!value) throw new Error('Cannot read ' + path);
         return JSON.parse(ObjC.unwrap(value));
     }
-    function backup(snapshot, directory) {
+    function backup(snapshot, directory, errors) {
         const manager = $.NSFileManager.defaultManager;
+        errors = errors || {};
         if (!manager.createDirectoryAtPathWithIntermediateDirectoriesAttributesError(
             directory, false, $({NSFilePosixPermissions: 448}), null))
-            throw new Error('Cannot create private backup directory; no BTT changes made.');
+            throw new Error(errors.create || 'Cannot create private backup directory; no BTT changes made.');
         const path = directory + '/backup.json';
         if (!$(JSON.stringify(snapshot, null, 2)).writeToFileAtomicallyEncodingError(
             path, true, $.NSUTF8StringEncoding, null) ||
             !manager.setAttributesOfItemAtPathError($({NSFilePosixPermissions: 384}), path, null) ||
             JSON.stringify(readJSON(path)) !== JSON.stringify(snapshot))
-            throw new Error('Backup verification failed; no BTT changes made.');
+            throw new Error(errors.verify || 'Backup verification failed; no BTT changes made.');
         return path;
     }
     return {clone, canonical, fingerprint, readJSON, backup};

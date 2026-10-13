@@ -1,71 +1,49 @@
 #!/usr/bin/env python3
 """Add Tools > Rhythm Practice, backed up and verified through BTT's API."""
-import argparse
-import json
-import os
-from pathlib import Path
-import shlex
-import subprocess
 import uuid
 
-from btt_common import MEDIA_TOOLS, ROOT
-from tools_menu_style import tools_button_config
+from btt_common import MEDIA_TOOLS
+from tools_menu_item import (
+    BUILD,
+    MEDIA,
+    TOOLS,
+    ToolsMenuItemSpec,
+    build_definition,
+    run_installer,
+)
 
-BUILD = ROOT / "macbook" / "build"
-MEDIA = "D9B0ED12-C4BE-4E74-B0DA-0CC3BE092289"
-TOOLS = "FC3F8235-F102-55C4-8432-B6ADFB0D9992"
 NAMESPACE = uuid.UUID("0ad78a97-1d4a-47c2-a8db-edf8872c820e")
+SPEC = ToolsMenuItemSpec(
+    description=__doc__,
+    namespace=NAMESPACE,
+    menu_name="Rhythm Practice",
+    identifier="rhythm-practice",
+    script_name="rhythm_practice.py",
+    runtime_name="bpm-python-path.txt",
+    command_arguments=("--finder-selection", "--background", "--open", "--notify"),
+    missing_build_message="Build the updated Performance Audio.app first.",
+    missing_runtime_message=(
+        "Run /opt/homebrew/bin/python3 {media_tools}/scripts/setup_bpm_analysis.py first."
+    ),
+    payload_name="Rhythm Practice Tools.json",
+    generated_message="Generated: {payload}; run --apply to install the button.",
+    backup_prefix="btt-before-rhythm-practice-",
+    conflict_message="Conflicting Rhythm Practice item; no changes made.",
+    appearance_peer_uuid="554C41C9-C964-5875-B916-EF9D2DFB2004",
+)
 
 
-def uid(name): return str(uuid.uuid5(NAMESPACE, name)).upper()
+def uid(name):
+    return SPEC.uid(name)
 
 
 def definition(media_tools=None):
-    media_tools = MEDIA_TOOLS if media_tools is None else Path(media_tools)
-    resources = media_tools / "build/Performance Audio.app/Contents/Resources"
-    script = resources / "rhythm_practice.py"
-    runtime_file = resources / "bpm-python-path.txt"
-    if not script.is_file() or not runtime_file.is_file():
-        raise SystemExit("Build the updated Performance Audio.app first.")
-    python = runtime_file.read_text().strip()
-    if not Path(python).is_file():
-        raise SystemExit(f"Run /opt/homebrew/bin/python3 {media_tools / 'scripts/setup_bpm_analysis.py'} first.")
-    button = uid("button")
-    return {"media_uuid": MEDIA, "tools_uuid": TOOLS, "item": {
-        "BTTUUID": button, "BTTTriggerType": 773, "BTTTriggerClass": "BTTTriggerTypeFloatingMenu",
-        "BTTEnabled": 1, "BTTEnabled2": 1, "BTTMenuName": "Rhythm Practice",
-        "BTTMenuConfig": tools_button_config("rhythm-practice", "Rhythm Practice"),
-        "BTTMenuItemActions": [{"BTTUUID": uid("action"), "BTTTriggerParentUUID": button,
-            "BTTTriggerClass": "BTTTriggerTypeFloatingMenu", "BTTEnabled": 1, "BTTOrder": 0,
-            "BTTPredefinedActionType": 206, "BTTPredefinedActionName": "Run Shell Script / Task",
-            "BTTShellTaskActionScript": shlex.join([python, str(script), "--finder-selection",
-                                                   "--background", "--open", "--notify"]),
-            "BTTShellTaskActionConfig": "/bin/zsh:::-c:::-:::"}],
-    }}
+    return build_definition(SPEC, MEDIA_TOOLS if media_tools is None else media_tools)
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument("--apply", action="store_true")
-    group.add_argument("--inspect", action="store_true")
-    parser.add_argument("--refresh", action="store_true", help="recreate the visible Media menu after verification")
-    args = parser.parse_args()
-    if args.refresh and not args.apply:
-        parser.error("--refresh requires --apply")
-    os.umask(0o077)
-    media_tools = MEDIA_TOOLS
-    payload_data = definition(media_tools)
-    BUILD.mkdir(exist_ok=True)
-    payload = BUILD / "Rhythm Practice Tools.json"
-    payload.write_text(json.dumps(payload_data, indent=2) + "\n")
-    if not args.apply and not args.inspect:
-        print(f"Generated: {payload}; run --apply to install the button.")
-        return
-    result = subprocess.run(["/usr/bin/osascript", "-l", "JavaScript", str(Path(__file__).with_suffix(".js")),
-                             str(payload), str(BUILD), "inspect" if args.inspect else "apply",
-                             "refresh" if args.refresh else ""])
-    raise SystemExit(result.returncode)
+    run_installer(SPEC)
 
 
-if __name__ == "__main__": main()
+if __name__ == "__main__":
+    main()

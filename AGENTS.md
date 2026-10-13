@@ -52,6 +52,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   `--media-tools` CLI also supplies the thumbnail tool's FFmpeg fallback.
   `macbook/tests/btt_test_support.cjs` supplies temporary suite fixtures for
   installer tests, independent of either live checkout.
+  `tools_menu_item.py` and `install_tools_menu_item.js` own the shared definition
+  and guarded API worker for standard Media > Tools items; the feature-named
+  `install_*_menu.py` entry points remain compatibility wrappers.
   `macbook/bettertouchtool/btt.py` is the maintenance CLI; `btt_common.py/.js`
   share read-only inspection and backup helpers. `repair_media_actions.py`
   defines the action-recovery wire contract consumed by its JXA worker.

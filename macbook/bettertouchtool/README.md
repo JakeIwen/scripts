@@ -254,9 +254,12 @@ identities. Recreate venvs rather than moving them.
   warning state, private delivery and boot scheduling. `storage.py` shares private
   atomic file writes/locking. Legacy standalone helpers are called through their
   CLI instead of introducing import-path shims.
-- `install_*_menu.*`, `build_performance_audio_menu.py`, `tools_menu_style.py`:
-  app-specific installers for Audio, BPM, Rhythm, video conversion and metadata
-  stripping. Kept at their established paths for their build/install workflows.
+- `tools_menu_item.py` / `install_tools_menu_item.js`: shared definition and guarded
+  installer for the standard BPM, Rhythm and Convert Video entries under Media > Tools;
+  their established `install_*_menu.py` paths remain thin feature wrappers.
+- `install_performance_audio_menu.*`, `install_strip_metadata_menu.*`,
+  `install_custom_conversion.*`, `build_performance_audio_menu.py`, `tools_menu_style.py`:
+  installers and builders with distinct menu-tree or styling behavior.
 - `play_status.js`, `recent_notes_content_script.js`, `btt_widget_spotify.scpt`:
   content-script sources retained in place. Notes' current provider is
   `../scripts/notes_menu.py`; screenshots use `../scripts/capture_btt_menu.zsh`.
