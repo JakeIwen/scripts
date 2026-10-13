@@ -12,7 +12,7 @@ function createMediaToolsFixture() {
     const resources = path.join(root, 'build/Performance Audio.app/Contents/Resources');
     fs.mkdirSync(resources, {recursive: true});
     for (const name of ['performance_audio.py', 'convert_video.py', 'conversion_editor.py',
-                        'bpm_over_time.py', 'rhythm_practice.py']) {
+                        'bpm_over_time.py', 'rhythm_practice.py', 'interval_analysis.py']) {
         fs.writeFileSync(path.join(resources, name), '# fixture resource\n');
     }
     fs.writeFileSync(path.join(resources, 'python-path.txt'), '/usr/bin/python3\n');

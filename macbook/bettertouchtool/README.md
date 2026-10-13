@@ -202,8 +202,9 @@ play audio or discover speakers.
 
 ### Media suite checkout
 
-Performance Audio, Convert Video, Custom Conversion, BPM Over Time and Rhythm
-Practice live in `~/dev/mac-media-tools`. Their app, scientific Python runtime,
+Performance Audio, Convert Video, Custom Conversion, BPM Over Time, Rhythm
+Practice and Interval Analysis live in `~/dev/mac-media-tools`. Their app,
+scientific Python runtime,
 job data and reports are under that checkout's `build/`. The menu installers and
 builders stay here; generated presets and configuration backups still go to
 `~/dev/scripts/macbook/build/`.
@@ -255,8 +256,9 @@ identities. Recreate venvs rather than moving them.
   atomic file writes/locking. Legacy standalone helpers are called through their
   CLI instead of introducing import-path shims.
 - `tools_menu_item.py` / `install_tools_menu_item.js`: shared definition and guarded
-  installer for the standard BPM, Rhythm and Convert Video entries under Media > Tools;
-  their established `install_*_menu.py` paths remain thin feature wrappers.
+  installer for the standard BPM, Rhythm, Convert Video and Interval Analysis
+  entries under Media > Tools. Their `install_*_menu.py` paths remain thin feature
+  wrappers, including `install_interval_menu.py`.
 - `install_performance_audio_menu.*`, `install_strip_metadata_menu.*`,
   `install_custom_conversion.*`, `build_performance_audio_menu.py`, `tools_menu_style.py`:
   installers and builders with distinct menu-tree or styling behavior.

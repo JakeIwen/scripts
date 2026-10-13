@@ -19,6 +19,7 @@ const modules = {
     bpm: 'install_bpm_menu',
     convert: 'install_convert_video_menu',
     rhythm: 'install_rhythm_menu',
+    interval: 'install_interval_menu',
 };
 const payloads = Object.fromEntries(Object.entries(modules).map(([name, moduleName]) =>
     [name, generateMenuDefinition(fixture, moduleName)]));
@@ -161,6 +162,9 @@ test('feature wrappers preserve definitions, peers, and refresh flags', () => {
         ['rhythm', ['/usr/bin/python3', path.join(fixture.root,
             'build/Performance Audio.app/Contents/Resources/rhythm_practice.py'),
             '--finder-selection', '--background', '--open', '--notify']],
+        ['interval', ['/usr/bin/python3', path.join(fixture.root,
+            'build/Performance Audio.app/Contents/Resources/interval_analysis.py'),
+            '--background']],
     ];
     for (const [name, expected] of cases) {
         const command = payloads[name].item.BTTMenuItemActions[0].BTTShellTaskActionScript;
@@ -174,6 +178,7 @@ test('feature wrappers preserve definitions, peers, and refresh flags', () => {
     assert.equal(Object.hasOwn(specs.bpm, 'appearancePeerUUID'), false);
     assert.equal(specs.convert.appearancePeerUUID, bpmID);
     assert.equal(specs.rhythm.appearancePeerUUID, bpmID);
+    assert.equal(specs.interval.appearancePeerUUID, bpmID);
 });
 
 test('Convert Video requires its runtime file to name an executable', () => {
