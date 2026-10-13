@@ -123,7 +123,7 @@ ROOTFS_PATH_BUDGETS_MIB=(
   /home/pi/dev/obd-things/tmp:8192
   /var/lib/vanpi-monitor:1024
   /var/lib/van-telemetry:3072
-  /home/pi/.codex:4096
+  /home/pi/.codex:5120
   /var/cache/apt:1024
   /var/log:1536
 )
