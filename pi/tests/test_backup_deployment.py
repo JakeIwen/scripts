@@ -124,14 +124,15 @@ class BackupDeploymentTests(unittest.TestCase):
         shipped = [
             BACKUP_DIR / "rootfs_budget.sh",
             REPOSITORY_ROOT / "pi" / "scripts" / "rootfs_tidy.sh",
+            REPOSITORY_ROOT / "shared" / "sh" / "cleanup_codex_releases.py",
         ]
 
         self.assertIn('. "$backup_script_dir/rootfs_budget.sh"', watchdog)
         self.assertIn("ROOT_GROWTH_WARN_GIB_7D=4", config)
         self.assertIn("ROOTFS_PATH_BUDGETS_MIB=(", config)
-        self.assertIn('"$findmnt_command" -rn -o TARGET', tidy)
-        self.assertIn("target_device", tidy)
-        self.assertIn("--one-file-system", tidy)
+        # The shared cleanup lands beside rootfs_tidy.sh via the shared/sh copy.
+        self.assertIn("$script_dir/cleanup_codex_releases.py", tidy)
+        self.assertIn('cp -a "$shared_sh/." "$staged_scripts/"', sync)
         self.assertIn('"$repo_scripts/" "$staged_scripts/"', sync)
         for path in shipped:
             self.assertTrue(path.is_file(), path)

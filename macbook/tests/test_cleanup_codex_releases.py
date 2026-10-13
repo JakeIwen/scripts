@@ -1,18 +1,22 @@
 """Exercise release cleanup against disposable fixtures only."""
 
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 import importlib.util
 import io
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import tempfile
 import unittest
+import sys
 from unittest.mock import patch
 
 
-SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+SCRIPTS = Path(__file__).resolve().parents[2] / "shared" / "sh"
+# The suite runs on both hosts the script supports; fixtures use this host's target.
+TARGET = "aarch64-apple-darwin" if sys.platform == "darwin" else "aarch64-unknown-linux-musl"
 
 
 def load_script(name):
@@ -41,7 +45,7 @@ class CleanupTests(unittest.TestCase):
 
     def release(self, minor):
         version = f"0.{minor}.0"
-        name = version + "-aarch64-apple-darwin"
+        name = f"{version}-{TARGET}"
         path = self.root / name
         (path / "bin").mkdir(parents=True)
         binary = path / "bin/codex"
@@ -49,7 +53,7 @@ class CleanupTests(unittest.TestCase):
         binary.chmod(0o755)
         (path / "codex-package.json").write_text(json.dumps({
             "layoutVersion": 1, "version": version, "variant": "codex",
-            "target": "aarch64-apple-darwin", "entrypoint": "bin/codex",
+            "target": TARGET, "entrypoint": "bin/codex",
         }))
         return path
 
@@ -89,7 +93,7 @@ class CleanupTests(unittest.TestCase):
         outside.mkdir()
         (outside / "important").write_text("preserve")
         (self.versions[0] / "external").symlink_to(outside)
-        alias = self.root / "0.1.0-aarch64-apple-darwin"
+        alias = self.root / f"0.1.0-{TARGET}"
         alias.symlink_to(outside)
         unknown = self.root / "future-layout"
         unknown.mkdir()
@@ -162,6 +166,172 @@ class CleanupTests(unittest.TestCase):
             finally:
                 process.communicate(timeout=5)
         self.assertTrue(all(path.exists() for path in self.versions))
+
+
+class LinuxProbeTests(unittest.TestCase):
+    """Linux process and mount probes, against fake /proc trees on any host."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        base = Path(self.temp.name).resolve()
+        self.proc = base / "proc"
+        self.proc.mkdir()
+        self.root = base / "releases"
+        self.old = self.root / "0.1.0-aarch64-unknown-linux-musl"
+        self.new = self.root / "0.2.0-aarch64-unknown-linux-musl"
+
+    def process(self, pid, exe, maps="", cmdline=b"", threads=None):
+        """A fake /proc/<pid> whose task/<tid>/maps hold each thread's mappings."""
+        directory = self.proc / str(pid)
+        directory.mkdir()
+        if exe is not None:
+            (directory / "exe").symlink_to(exe)
+        (directory / "cmdline").write_bytes(cmdline)
+        for tid, task_maps in (threads or {pid: maps}).items():
+            (directory / "task" / str(tid)).mkdir(parents=True)
+            (directory / "task" / str(tid) / "maps").write_text(task_maps)
+        return directory
+
+    def test_release_names_match_only_this_platforms_target(self):
+        linux = cleaner.release_name("linux")
+        self.assertTrue(linux.fullmatch("0.161.0-aarch64-unknown-linux-musl"))
+        self.assertTrue(linux.fullmatch("0.161.0-x86_64-unknown-linux-gnu"))
+        self.assertFalse(linux.fullmatch("0.161.0-aarch64-apple-darwin"))
+        self.assertFalse(cleaner.release_name("darwin").fullmatch(
+            "0.161.0-aarch64-unknown-linux-musl"))
+
+    def test_executables_and_mappings_protect_their_releases(self):
+        self.process(10, self.old / "bin/codex")
+        self.process(11, "/usr/bin/bash",
+                     maps=f"7f00-7f01 r-xp 00000000 b3:02 42 {self.new}/codex-resources/lib.so\n")
+        self.process(12, "/usr/bin/bash", maps="7f00-7f01 r-xp 00000000 00:00 0 [vdso]\n")
+        (self.proc / "self").mkdir()
+        self.assertEqual(cleaner.linux_running_releases(self.root, self.proc),
+                         {self.old, self.new})
+
+    def test_exited_processes_are_skipped(self):
+        self.process(10, None)
+        self.process(11, self.old / "bin/codex")
+        self.assertEqual(cleaner.linux_running_releases(self.root, self.proc), {self.old})
+
+    def test_worker_threads_protect_a_release_after_the_leader_exits(self):
+        mapping = f"7f00-7f01 r-xp 00000000 b3:02 42 {self.new}/bin/codex\n"
+        self.process(40, None, threads={40: "", 41: mapping})
+        self.assertEqual(cleaner.linux_running_releases(self.root, self.proc), {self.new})
+
+    def test_an_uninspectable_process_refuses_unless_running_as_root(self):
+        original = os.readlink
+
+        def hidden(path):
+            if Path(path).parent.name == "20":
+                raise PermissionError(13, "Permission denied", str(path))
+            return original(path)
+
+        # A non-dumpable host may map a release without naming Codex anywhere.
+        self.process(20, "/usr/sbin/sshd", cmdline=b"sshd: pi@notty\0")
+        with patch.object(cleaner.os, "readlink", hidden):
+            with self.assertRaisesRegex(RuntimeError, "process 20.*--owner"):
+                cleaner.linux_running_releases(self.root, self.proc)
+
+    def test_root_reads_every_process_and_restores_the_owner_euid(self):
+        self.process(30, self.old / "bin/codex")
+        with patch.object(cleaner.os, "getuid", return_value=0), \
+                patch.object(cleaner.os, "geteuid", return_value=1000), \
+                patch.object(cleaner.os, "seteuid") as seteuid:
+            self.assertEqual(cleaner.linux_running_releases(self.root, self.proc), {self.old})
+        self.assertEqual([call.args for call in seteuid.call_args_list], [(0,), (1000,)])
+
+    def test_failing_to_drop_root_exits_before_any_further_work(self):
+        with patch.object(cleaner.os, "getuid", return_value=0), \
+                patch.object(cleaner.os, "geteuid", return_value=1000), \
+                patch.object(cleaner.os, "seteuid", side_effect=[None, PermissionError()]), \
+                patch.object(cleaner.os, "_exit", side_effect=SystemExit(70)) as exit_now, \
+                redirect_stderr(io.StringIO()) as stderr:
+            with self.assertRaises(SystemExit):
+                with cleaner.root_effective_uid():
+                    pass
+        exit_now.assert_called_once_with(70)
+        self.assertIn("could not drop root privileges", stderr.getvalue())
+
+    def test_empty_or_missing_process_table_refuses(self):
+        with self.assertRaises(RuntimeError):
+            cleaner.linux_running_releases(self.root, self.proc)
+        with self.assertRaises(RuntimeError):
+            cleaner.linux_running_releases(self.root, self.proc / "missing")
+
+    def test_mount_table_reveals_same_device_bind_mounts_with_escaped_names(self):
+        mountinfo = self.proc / "mountinfo"
+        release = self.root / "0.1.0 old"
+        line = "36 25 179:2 / {} rw,relatime shared:1 - ext4 /dev/root rw\n"
+        mountinfo.write_text(line.format("/") + line.format(
+            str(release).replace(" ", "\\040") + "/nested"))
+        with self.assertRaisesRegex(RuntimeError, "beneath release"):
+            cleaner.refuse_mounts_within(release, mountinfo)
+        cleaner.refuse_mounts_within(self.old, mountinfo)
+        # A sibling whose name only shares a prefix is not beneath the release.
+        cleaner.refuse_mounts_within(self.root / "0.1.0", mountinfo)
+
+    def test_unicode_whitespace_in_a_source_path_does_not_hide_the_mount_point(self):
+        mountinfo = self.proc / "mountinfo"
+        for space in ("\u00a0", "\u2003"):
+            mountinfo.write_bytes(
+                b"36 25 179:2 / / rw - ext4 /dev/root rw\n"
+                + f"37 36 179:2 /src{space}dir {self.old}/codex-resources rw - ext4 "
+                  "/dev/root rw\n".encode())
+            with self.assertRaisesRegex(RuntimeError, "beneath release"):
+                cleaner.refuse_mounts_within(self.old, mountinfo)
+
+    def test_unreadable_or_empty_mount_table_refuses(self):
+        with self.assertRaises(RuntimeError):
+            cleaner.refuse_mounts_within(self.old, self.proc / "missing")
+        (self.proc / "mountinfo").write_text("")
+        with self.assertRaises(RuntimeError):
+            cleaner.refuse_mounts_within(self.old, self.proc / "mountinfo")
+
+
+class RemoveTreeTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name).resolve()
+        self.tree = self.base / "release"
+        (self.tree / "a/b").mkdir(parents=True)
+        (self.tree / "a/b/file").write_text("x")
+        self.outside = self.base / "outside"
+        self.outside.mkdir()
+        (self.outside / "keep").write_text("preserve")
+        (self.tree / "a/link").symlink_to(self.outside)
+
+    def test_deletes_the_tree_without_following_symlinks(self):
+        cleaner.remove_tree(self.tree, self.tree.stat().st_dev)
+        self.assertFalse(self.tree.exists())
+        self.assertEqual((self.outside / "keep").read_text(), "preserve")
+
+    def test_another_filesystem_stops_deletion_before_removing_anything(self):
+        with self.assertRaisesRegex(RuntimeError, "cross-device"):
+            cleaner.remove_tree(self.tree, self.tree.stat().st_dev + 1)
+        self.assertTrue((self.tree / "a/b/file").exists())
+        self.assertTrue((self.tree / "a/link").is_symlink())
+
+    def test_a_foreign_ancestor_is_refused_before_its_subtree_is_touched(self):
+        # "a" reports another device while "a/b" (say, a bind back onto the
+        # release filesystem) does not; nothing under "a" may be removed.
+        foreign = (self.tree / "a").stat().st_ino
+        original = os.fstat
+
+        def fstat(descriptor):
+            info = original(descriptor)
+            if info.st_ino != foreign:
+                return info
+            fields = list(info)
+            fields[stat.ST_DEV] += 1
+            return os.stat_result(fields)
+
+        with patch.object(cleaner.os, "fstat", fstat):
+            with self.assertRaisesRegex(RuntimeError, "cross-device.*/a$"):
+                cleaner.remove_tree(self.tree, self.tree.stat().st_dev)
+        self.assertTrue((self.tree / "a/b/file").exists())
 
 
 if __name__ == "__main__":

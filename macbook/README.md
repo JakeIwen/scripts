@@ -83,12 +83,16 @@ notify = ["/Users/jacobr/dev/scripts/macbook/scripts/codex_ntfy_notify.py"]
 
 ## Codex release cleanup
 
-`scripts/cleanup_codex_releases.py` previews removal from the invoking macOS
-account's `~/.codex/packages/standalone/releases/`; `--apply` deletes. It keeps
-the three highest stable version numbers plus current/running releases, checks
-package manifests and paths, coordinates with the installer lock, and refuses
-mounts or uncertain process inspection. Unknown names, prereleases and symlinks
-are left alone; an unfamiliar manifest or current layout stops cleanup.
+`../shared/sh/cleanup_codex_releases.py` (also reachable at the old
+`scripts/cleanup_codex_releases.py` symlink, which the installed cron entry
+uses) previews removal from the invoking account's
+`~/.codex/packages/standalone/releases/`; `--apply` deletes. The Pi runs the same
+script from `rootfs_tidy.sh`. It keeps the three highest stable version numbers
+plus current/running releases, checks package manifests and paths, coordinates
+with the installer lock, and refuses mounts or uncertain process inspection.
+Unknown names, prereleases, other platforms' targets and symlinks are left alone;
+an unfamiliar manifest or current layout stops cleanup. On macOS, `lsof -w`
+suppresses the per-run warning an attached SMB share produces.
 
 The installed user cron job runs Sundays at 9:00 PM local time (`0 21 * * 0`)
 and calls the cleanup script directly with `--apply`. Inspect it with

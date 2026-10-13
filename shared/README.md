@@ -1,7 +1,8 @@
 # Shared code
 
 This directory is for code used on more than one host. `python/` is added to
-the MacBook's `PYTHONPATH`. Pi package releases preserve its package path.
+the MacBook's `PYTHONPATH`. The Pi's broad sync copies `sh/` executables flat into
+`/home/pi/scripts/`. Pi package releases preserve its package path.
 Pi shell utilities and the packaged video service include the current release's
 `shared/python` for standalone `sonos_tasks` imports; changes to that helper are
 part of the video's restart digest. `sns.sh` preserves inherited paths for the

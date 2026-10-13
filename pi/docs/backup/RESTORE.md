@@ -235,7 +235,7 @@ MiB so the 1.5GiB log budget is exact:
 | `/home/pi/dev/obd-things/tmp` | 8GiB |
 | `/var/lib/vanpi-monitor` | 1GiB |
 | `/var/lib/van-telemetry` | 3GiB |
-| `/home/pi/.codex` | 4GiB |
+| `/home/pi/.codex` | 5GiB |
 | `/var/cache/apt` | 1GiB |
 | `/var/log` | 1.5GiB |
 
@@ -249,26 +249,30 @@ per-card clone age if you want positive confirmation.
 
 ## Root filesystem tidy
 
-`/home/pi/scripts/rootfs_tidy.sh` is dry-run by default. It takes the Codex
-standalone `install.lock`, verifies `current` resolves to a direct child of
-`releases/`, and proposes removing every release except the current target and
-the newest other release by modification time:
+`/home/pi/scripts/rootfs_tidy.sh` is dry-run by default. Codex release retention
+is delegated to `cleanup_codex_releases.py` (from `shared/sh/`, copied beside it by
+the broad sync), the same script the MacBook runs weekly. Only a root run cleans
+Codex releases: it calls the script with `--owner pi`, which performs every file
+operation with `pi`'s effective IDs and resumes root only to read `/proc`:
 
 ```bash
 /home/pi/scripts/rootfs_tidy.sh
 sudo /home/pi/scripts/rootfs_tidy.sh --apply
 ```
 
-`--apply` validates every removal target again immediately before deletion,
-requires it to share the `releases/` filesystem, and refuses when a fresh
-absolute-path `findmnt` inventory fails, is unparseable, or reports a mount at
-or beneath the target. The final `rm -rf --one-file-system` is a second boundary
-against crossing onto another filesystem. The entire tidy also refuses when
-the lock is held, the lock/current path is unsafe, or release metadata cannot
-be read. It runs `apt-get clean` when already root or passwordless `sudo -n` is
-available; otherwise it prints a skip message. The following is a proposed
-root-crontab entry, not an installed schedule; Sunday 01:30 is outside the
-03:00–08:00 backup window:
+The cleanup keeps the three highest stable versions plus `current` and any
+release some process is executing or has mapped. Non-dumpable processes (sshd,
+ssh-agent, sd-pam, smbd) hide `/proc/<pid>/exe` and `maps` even from `pi`, so the
+probe needs root and refuses cleanup if any process cannot be inspected. It holds
+both the `flock` and `lockf` forms of the installer's `install.lock`, validates
+package manifests, ownership and devices, refuses any mount at or beneath a target
+per `/proc/self/mountinfo` (which also reveals same-device bind mounts), and
+deletes through directory descriptors that stop at any other filesystem, like
+`rm --one-file-system`. A held installer lock (exit 75) is reported as a skip; any
+other failure makes the tidy exit nonzero after it still cleans apt. `apt-get
+clean` runs when already root or passwordless `sudo -n` is available; otherwise it
+prints a skip message. The installed root-crontab entry runs Sunday 01:30, outside the 03:00–08:00 backup
+window:
 
 ```cron
 30 1 * * 0  "$scripts/rootfs_tidy.sh" --apply  >> "$cronlog/rootfs_tidy.log" 2>&1
