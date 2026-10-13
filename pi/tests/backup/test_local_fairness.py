@@ -229,6 +229,22 @@ class FairnessTests(PriorityFixture):
         self.assertIsNone(fairness.next_admission(turn['token'], fairness.LocalJob.EXFAT, self.config))
         self.assertEqual(fairness.status()['admission_remaining_seconds'], 270)
 
+    def test_exfat_failure_after_renewal_is_not_mislabeled_as_expired_admission(self):
+        def child(args, env):
+            if args[0].endswith('pi_backup.sh'):
+                result = self.child(args, env)
+                self.sleep(self.config.admission_seconds + 1)
+                return result
+            with mock.patch.dict(os.environ, env, clear=True):
+                self.assertTrue(priority.allows(fairness.LocalJob.EXFAT))
+            return mock.Mock(wait=mock.Mock(return_value=7))
+        self.config = fairness.FairnessConfig(admission_seconds=5)
+        self.assertEqual(self.window(popen=child).run(), 1)
+        row = fairness.status(now=self.now)
+        self.assertEqual(row['reason'], 'local attempt failed or deferred')
+        self.assertEqual(row['phase'], fairness.TurnPhase.BACKOFF)
+        self.assertTrue(any('failed (status 7)' in line for line in self.logs))
+
     def test_running_turn_cannot_admit_next_job_at_deadline(self):
         turn = self.reserve()
         self.assertTrue(fairness.admit(fairness.LocalJob.BORG, turn['token']))

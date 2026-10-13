@@ -11,7 +11,7 @@ python3 pi/tests/backup/test_time_machine_icloud.py
 python3 -m unittest pi.tests.backup.test_time_machine_staging
 python3 pi/tests/backup/test_icloud_status.py
 python3 pi/tests/backup/test_icloud_backup.py
-PYTHONPATH=pi/scripts/backup python3 -m unittest pi.tests.backup.test_backup_priority pi.tests.backup.test_local_fairness pi.tests.backup.test_protected_json pi.tests.backup.test_local_fairness_rollback pi.tests.backup.test_fairness_access pi.tests.backup.test_openwrt_schedule
+PYTHONPATH=pi/scripts/backup python3 -m unittest pi.tests.backup.test_backup_priority pi.tests.backup.test_local_fairness pi.tests.backup.test_protected_json pi.tests.backup.test_local_fairness_rollback pi.tests.backup.test_fairness_access pi.tests.backup.test_local_backup_deploy pi.tests.backup.test_openwrt_schedule
 PYTHONPATH=pi/scripts/backup python3 -m unittest pi.tests.backup.test_time_machine_pipeline
 PYTHONPATH=pi/scripts/backup python3 -m unittest pi.tests.backup.test_time_machine_downloads pi.tests.backup.test_icloud_uplink
 bash pi/tests/storage/test_samba_share_control.sh
@@ -33,7 +33,7 @@ COPYFILE_DISABLE=1 /usr/bin/tar --no-xattrs -cf - \
   pi/__init__.py pi/tests/__init__.py pi/backup_local_deploy.sh \
   pi/deploy_icloud_backup.sh pi/deploy_time_machine_icloud.sh \
   "${LOCAL_FAIRNESS_FILES[@]/#/pi/scripts/backup/}" \
-  pi/tests/backup/test_local_fairness.py pi/tests/backup/test_openwrt_schedule.py pi/tests/backup/test_protected_json.py \
+  pi/tests/backup/test_local_fairness.py pi/tests/backup/test_local_backup_deploy.py pi/tests/backup/test_openwrt_schedule.py pi/tests/backup/test_protected_json.py \
   pi/tests/backup/priority_fixtures.py \
   pi/tests/backup/test_local_fairness_rollback.py pi/tests/backup/test_fairness_access.py \
   pi/scripts/backup/backup_priority.py pi/scripts/backup/protected_json.py pi/scripts/backup/backup_priority_control.py \
@@ -77,7 +77,7 @@ verify_local_backup_payload pi/scripts/backup "${9}"
 /usr/bin/python3 -m unittest pi.tests.backup.test_time_machine_staging
 /usr/bin/python3 pi/tests/backup/test_icloud_status.py
 /usr/bin/python3 pi/tests/backup/test_icloud_backup.py
-PYTHONPATH=pi/scripts/backup /usr/bin/python3 -m unittest pi.tests.backup.test_backup_priority pi.tests.backup.test_local_fairness pi.tests.backup.test_protected_json pi.tests.backup.test_local_fairness_rollback pi.tests.backup.test_fairness_access pi.tests.backup.test_openwrt_schedule
+PYTHONPATH=pi/scripts/backup /usr/bin/python3 -m unittest pi.tests.backup.test_backup_priority pi.tests.backup.test_local_fairness pi.tests.backup.test_protected_json pi.tests.backup.test_local_fairness_rollback pi.tests.backup.test_fairness_access pi.tests.backup.test_local_backup_deploy pi.tests.backup.test_openwrt_schedule
 PYTHONPATH=pi/scripts/backup /usr/bin/python3 -m unittest pi.tests.backup.test_time_machine_pipeline
 PYTHONPATH=pi/scripts/backup /usr/bin/python3 -m unittest pi.tests.backup.test_time_machine_downloads pi.tests.backup.test_icloud_uplink
 bash pi/tests/storage/test_backup_job_lock.sh

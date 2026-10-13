@@ -130,8 +130,6 @@ class Window:
             success = self.local_jobs([fairness.LocalJob(k) for k in turn['jobs']], turn)
             if success:
                 reason = 'scheduled local backups succeeded'
-            elif not fairness.admission_open(turn):
-                reason = 'local admission window expired'
             return 0 if success else 1
         finally:
             fairness.finish(turn['token'], success, reason, now=self.clock())

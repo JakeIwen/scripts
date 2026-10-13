@@ -177,6 +177,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   the previously deployed commit when installing a newly committed change.
   `VANPI_BACKUP_PREVIOUS_CONF_SHA256` accepts an explicitly reviewed config hash
   when unrelated deployed settings differ from that commit.
+  The drift-checked cohort includes every fairness payload file and protected
+  reader; previous-tree absence permits only a missing or exact staged live file.
+  `pi/tests/backup/test_local_backup_deploy.py` exercises those shell contracts
+  against temporary source/live directories and a fixture Git repository.
   `local_fairness_rollback.py` only checks quiescence (`--check`) or archives
   `local-fairness.json` (`--archive`); it accepts no code source/destination paths.
   Each operation holds the supervisor gate (`local-supervisor.lock`), normal backup

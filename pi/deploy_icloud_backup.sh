@@ -6,7 +6,7 @@ target=${1:-pi@vanpi.lan}
 [[ $# -le 1 ]] || exit 2
 . "$repo/pi/backup_local_deploy.sh"
 local_previous=$(local_backup_previous_hashes "$repo")
-PYTHONPATH="$repo:$repo/pi/scripts/backup" python3 -m unittest pi.tests.backup.test_local_fairness pi.tests.backup.test_protected_json pi.tests.backup.test_local_fairness_rollback pi.tests.backup.test_fairness_access
+PYTHONPATH="$repo:$repo/pi/scripts/backup" python3 -m unittest pi.tests.backup.test_local_fairness pi.tests.backup.test_protected_json pi.tests.backup.test_local_fairness_rollback pi.tests.backup.test_fairness_access pi.tests.backup.test_local_backup_deploy
 python3 "$repo/pi/tests/backup/test_icloud_backup.py"
 python3 "$repo/pi/tests/backup/test_icloud_status.py"
 bash -n "$repo/pi/scripts/backup/icloud_backup.sh"
