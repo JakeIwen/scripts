@@ -277,3 +277,13 @@ window:
 ```cron
 30 1 * * 0  "$scripts/rootfs_tidy.sh" --apply  >> "$cronlog/rootfs_tidy.log" 2>&1
 ```
+
+Compute job history is pruned separately at Sunday 01:45 by van-compute's own
+`prune` subcommand, run as `pi`. Its retention rules (cited jobs kept, uncited
+`done` jobs after 60 days, `failed` after 31) live in the van-compute repository's
+`pi/docs/compute/VAN_COMPUTE.md`. Preview with
+`/home/pi/van_compute/scripts/van_compute.py prune`.
+
+```cron
+45 1 * * 0  su pi -c "/home/pi/van_compute/scripts/van_compute.py prune --apply" >> "$cronlog/van_compute_prune.log" 2>&1
+```
