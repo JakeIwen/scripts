@@ -43,7 +43,8 @@ compare it with this checkout. Deployed files may differ from the repository.
   (power-off roaming). Ship the entrypoint and every sibling together.
 - `macbook/`: macOS shell utilities, AppleScripts, and BetterTouchTool helpers.
   Performance Audio, Convert Video, Custom Conversion, BPM Over Time and Rhythm
-  Practice are maintained separately in `~/dev/mac-media-tools` (no remote yet).
+  Practice are maintained separately in `~/dev/mac-media-tools`
+  (public repo `https://github.com/JakeIwen/mac-media-tools`).
   That repository owns their scripts, shared Finder app, BPM runtime, jobs, custom
   presets and generation-keyed reports; do not restore them here. BTT menu
   installers remain under `macbook/bettertouchtool/` and use
@@ -313,7 +314,7 @@ by a restarting package service (that would deadlock deployment).
 ## Compute execution contracts
 
 `van_compute` lives in its own repository, `/Users/jacobr/dev/van-compute`
-(no remote yet); its `AGENTS.md` holds the compute contracts. This repository
+(public repo `https://github.com/JakeIwen/van-compute`); its `AGENTS.md` holds the compute contracts. This repository
 keeps only the consumer side: the dashboard imports `van_compute.metrics` from
 the separately installed `/home/pi/van_compute/current`, `pi/check_compute_provider.py`
 is the sync/package preflight against that installed provider, and
