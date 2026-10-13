@@ -1,8 +1,6 @@
 """Run with PYTHONPATH=pi/scripts/backup; no live services or disks are used."""
 import json
 import os
-from pathlib import Path
-import tempfile
 import unittest
 from unittest import mock
 
@@ -13,26 +11,7 @@ import icloud_backup as cloud
 import cloud_backup_control
 from time_machine_store import atomic_json, read_json
 
-GEN = 'tm-20260930T010203Z-12345678'
-
-
-class PriorityFixture(unittest.TestCase):
-    def setUp(self):
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        self.root = Path(tmp.name)
-        self.directory = self.root / 'priority'
-        self.jobs = {}
-        for mode, job in priority.JOBS.items():
-            directory = self.root / mode.value
-            directory.mkdir(mode=0o700)
-            cfg = self.root / (mode.value + '.json')
-            cfg.write_text('{"interval_days":7}')
-            self.jobs[mode] = priority.CloudJob(job.label, job.service, directory, cfg)
-            atomic_json(directory / 'state.json', {'pending': GEN, 'progress': {'upload_total_bytes': 100}})
-        for name, value in (('DIRECTORY', self.directory), ('JOBS', self.jobs)):
-            patch = mock.patch.object(priority, name, value)
-            patch.start(); self.addCleanup(patch.stop)
+from .priority_fixtures import GEN, PriorityFixture
 
 
 class PriorityTests(PriorityFixture):
@@ -72,8 +51,11 @@ class PriorityTests(PriorityFixture):
 
     def test_existing_switch_action_cannot_conflict_with_an_active_priority(self):
         priority.set_policy('time-machine', now=1000)
+        command = mock.Mock(side_effect=AssertionError('A conflicting switch must not run a service command'))
+        jobs = {job.service: job.directory for job in self.jobs.values()}
         with self.assertRaisesRegex(ValueError, 'Backup priority'):
-            cloud_backup_control.take_turn('vanpi-icloud-backup.service')
+            cloud_backup_control.take_turn('vanpi-icloud-backup.service', jobs=jobs, command=command)
+        command.assert_not_called()
 
     def test_priority_bypasses_only_daily_window_and_preserves_ignition_check(self):
         priority.set_policy('time-machine', now=1000)

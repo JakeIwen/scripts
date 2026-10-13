@@ -4,17 +4,24 @@ set -euo pipefail
 repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 target=${1:-pi@vanpi.lan}
 [[ $# -le 1 ]] || exit 2
+. "$repo/pi/backup_local_deploy.sh"
+local_previous=$(local_backup_previous_hashes "$repo")
+PYTHONPATH="$repo:$repo/pi/scripts/backup" python3 -m unittest pi.tests.backup.test_local_fairness pi.tests.backup.test_protected_json pi.tests.backup.test_local_fairness_rollback pi.tests.backup.test_fairness_access
 python3 "$repo/pi/tests/backup/test_icloud_backup.py"
 python3 "$repo/pi/tests/backup/test_icloud_status.py"
 bash -n "$repo/pi/scripts/backup/icloud_backup.sh"
-conf_hash=$(git -C "$repo" show HEAD:pi/scripts/backup/backup_conf.sh | shasum -a 256 | awk '{print $1}')
+conf_hash=$(local_backup_previous_conf_hash "$repo")
 stage=$(ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" /usr/bin/mktemp -d /tmp/vanpi-icloud.XXXXXX)
 [[ "$stage" =~ ^/tmp/vanpi-icloud\.[[:alnum:]]{6}$ ]] || exit 1
 scp -q "$repo/pi/scripts/backup/icloud_backup.py" \
+  "$repo/pi/backup_local_deploy.sh" \
+  "${LOCAL_FAIRNESS_FILES[@]/#/$repo/pi/scripts/backup/}" \
   "$repo/pi/scripts/backup/backup_priority.py" \
+  "$repo/pi/scripts/backup/protected_json.py" \
   "$repo/pi/scripts/backup/backup_priority_control.py" \
   "$repo/pi/scripts/backup/mac_capture_control.py" \
   "$repo/pi/scripts/backup/time_machine_store.py" \
+  "$repo/pi/scripts/backup/time_machine_staging.py" \
   "$repo/pi/scripts/backup/backup_conf.sh" \
   "$repo/pi/scripts/backup/icloud_progress.py" \
   "$repo/pi/scripts/backup/icloud_inventory.py" \
@@ -29,11 +36,12 @@ scp -q "$repo/pi/scripts/backup/icloud_backup.py" \
   "$repo/pi/services/vanpi-icloud-backup.timer" \
   "$repo/pi/services/vanpi-icloud-backup-resume.service" \
   "$repo/pi/services/vanpi-icloud-backup-resume.timer" "$target:$stage/"
-ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" /bin/bash -s -- "$stage" "$conf_hash" <<'REMOTE'
+ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" /bin/bash -s -- "$stage" "$conf_hash" "$local_previous" <<'REMOTE'
 set -euo pipefail
 stage=$1
 [[ "$stage" =~ ^/tmp/vanpi-icloud\.[[:alnum:]]{6}$ ]] || exit 1
 [[ -x /usr/local/bin/rclone ]]
+. "$stage/backup_local_deploy.sh"
 /usr/bin/python3 -m py_compile "$stage/icloud_backup.py" "$stage/icloud_uplink.py" "$stage/icloud_progress.py" "$stage/icloud_status.py" "$stage/cloud_backup_control.py" "$stage/icloud_backup_control.py"
 /bin/bash -n "$stage/icloud_backup.sh"
 /usr/bin/python3 -m json.tool "$stage/icloud-backup.json" >/dev/null
@@ -48,11 +56,12 @@ esac
    $(/usr/bin/stat -c '%U %G %a' /run/lock/vanpi_backup.lock) == 'root pi 660' ]] || exit 1
 exec 9</run/lock/vanpi_backup.lock
 /usr/bin/flock -n 9 || { echo 'Another backup is active; defer deployment.' >&2; exit 1; }
+verify_local_backup_payload "$stage" "$3"
 live_conf_hash=$(sha256sum /home/pi/scripts/backup/backup_conf.sh | awk '{print $1}')
 new_conf_hash=$(sha256sum "$stage/backup_conf.sh" | awk '{print $1}')
 [[ "$live_conf_hash" == "$2" || "$live_conf_hash" == "$new_conf_hash" ]] || { echo 'Live backup configuration differs; inspect before deploying.' >&2; exit 1; }
 /usr/bin/install -d -m 0700 "$stage/previous"
-for name in time_machine_store.py backup_priority.py mac_capture_control.py icloud_status.py cloud_backup_control.py backup_priority_control.py icloud_backup_control.py icloud_inventory.py icloud_progress.py icloud_backup.py icloud_uplink.py icloud_backup.sh backup_conf.sh ICLOUD_RESTORE.txt; do
+for name in "${LOCAL_FAIRNESS_FILES[@]}" time_machine_store.py time_machine_staging.py protected_json.py backup_priority.py mac_capture_control.py icloud_status.py cloud_backup_control.py backup_priority_control.py icloud_backup_control.py icloud_inventory.py icloud_progress.py icloud_backup.py icloud_uplink.py icloud_backup.sh backup_conf.sh ICLOUD_RESTORE.txt; do
   live=/home/pi/scripts/backup/$name
   [[ ! -e "$live" ]] || /usr/bin/cp -p "$live" "$stage/previous/$name"
   /usr/bin/sudo -n /usr/bin/install -o pi -g pi -m 0750 "$stage/$name" "$live.new"
@@ -88,4 +97,12 @@ done
 /usr/bin/sudo -n /usr/bin/systemctl enable --now vanpi-icloud-backup.timer vanpi-icloud-backup-resume.timer
 /usr/bin/systemctl list-timers --all vanpi-icloud-backup.timer --no-pager
 echo "Deployment rollback files: $stage/previous"
+echo 'Rollback is code-first manual restoration, then state-only archival (AGENTS.md).'
+echo "P=$stage/previous"
+echo 'L=/home/pi/scripts/backup'
+echo "R=$stage/local_fairness_rollback.py"
+echo 'sudo /usr/bin/python3 -B "$R" --check'
+echo 'Restore the reviewed previous code using install/mv under the normal backup lock.'
+echo 'Then release your lock and run: sudo /usr/bin/python3 -B "$R" --archive'
+echo 'Verify: sudo /usr/bin/python3 -B "$L/backup_priority_control.py" --status'
 REMOTE

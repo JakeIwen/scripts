@@ -11,12 +11,18 @@ import time
 from typing import TypedDict
 
 from time_machine_store import atomic_json, read_json
+from protected_json import MISSING, ProtectedStateAccessError, read_protected_json
 
 
 class PriorityMode(str, Enum):
     NORMAL = 'normal'
     PI = 'pi'
     TIME_MACHINE = 'time-machine'
+
+
+class ControlLock(str, Enum):
+    PRIORITY = 'control.lock'
+    LOCAL_WINDOW = 'local-supervisor.lock'
 
 
 MODE_VALUES = tuple(mode.value for mode in PriorityMode)
@@ -59,15 +65,19 @@ def private_directory(directory, create=False):
         s = directory.lstat()
     except FileNotFoundError:
         return False
-    if not stat.S_ISDIR(s.st_mode) or s.st_uid != os.geteuid() or s.st_mode & 0o077:
+    if s.st_uid != os.geteuid():
+        raise ProtectedStateAccessError('Backup priority storage failed its ownership checks.')
+    if not stat.S_ISDIR(s.st_mode) or s.st_mode & 0o077:
         raise ValueError('Backup priority storage failed its ownership checks.')
     return True
 
 
 @contextmanager
-def locked(directory):
+def locked(directory, *, name=ControlLock.PRIORITY):
+    if name not in tuple(ControlLock):
+        raise ValueError('Unknown backup control lock.')
     private_directory(directory, create=True)
-    fd = os.open(directory / 'control.lock', os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    fd = os.open(directory / name, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
         s = os.fstat(fd)
         if not stat.S_ISREG(s.st_mode) or s.st_uid != os.geteuid() or s.st_nlink != 1 or s.st_mode & 0o022:
@@ -81,15 +91,10 @@ def locked(directory):
 def read_record(directory):
     if not private_directory(directory):
         return None
-    path = directory / 'priority.json'
-    try:
-        s = path.lstat()
-    except FileNotFoundError:
+    row = read_protected_json(directory / 'priority.json',
+                              'Backup priority record failed its ownership checks.')
+    if row is MISSING:
         return None
-    if (not stat.S_ISREG(s.st_mode) or s.st_uid != os.geteuid() or s.st_nlink != 1
-            or s.st_mode & 0o077 or s.st_size > 65536):
-        raise ValueError('Backup priority record failed its ownership checks.')
-    row = read_json(path)
     if (not isinstance(row, dict) or type(row.get('version')) is not int or row['version'] != 1
             or row.get('mode') not in MODE_VALUES
             or not timestamp(row.get('requested_at')) or not timestamp(row.get('previous_success_at'))
@@ -130,15 +135,24 @@ def complete_job(kind, state, directory=None):
 
 
 def allows(kind, directory=None, jobs=None):
-    if kind not in ('disk', PriorityMode.PI, PriorityMode.TIME_MACHINE):
+    from local_fairness import LocalJob, TOKEN_ENV, admit
+    if kind not in ('disk', PriorityMode.PI, PriorityMode.TIME_MACHINE, *LocalJob):
         raise ValueError('Unknown backup job.')
     selected = policy(directory, jobs)
-    return selected == PriorityMode.NORMAL or kind == selected
+    if selected == PriorityMode.NORMAL or kind == selected:
+        return True
+    return kind in tuple(LocalJob) and admit(kind, os.environ.get(TOKEN_ENV), directory=directory, jobs=jobs)
 
 
-def selected_directory(directory):
-    selected = policy()
-    return selected != PriorityMode.NORMAL and JOBS[selected].directory == directory
+def job_kind(cloud_directory, jobs=None):
+    """Only registered cloud directories participate in global scheduling policy."""
+    jobs = JOBS if jobs is None else jobs
+    return next((kind for kind, job in jobs.items() if job.directory == cloud_directory), None)
+
+
+def selected_directory(cloud_directory, *, directory=None, jobs=None):
+    kind = job_kind(cloud_directory, jobs)
+    return kind is not None and policy(directory, jobs) == kind
 
 
 def eligibility(mode, jobs=None, now=None, borg_stamp=None):
@@ -190,5 +204,7 @@ def status(directory=None, jobs=None, now=None):
         entries.append({'kind': mode, 'label': job.label, 'eligible': eligible, 'reason': reason,
                         'last_success_at': state.get('last_success_at'),
                         'waiting': selected != PriorityMode.NORMAL and selected != mode})
+    from local_fairness import status as fairness_status
     return {'mode': selected, 'requested_at': record['requested_at'] if record else None,
-            'completed': bool(record and selected == PriorityMode.NORMAL), 'jobs': entries}
+            'completed': bool(record and selected == PriorityMode.NORMAL), 'jobs': entries,
+            'local_fairness': fairness_status(directory, now)}

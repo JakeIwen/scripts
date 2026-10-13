@@ -8,6 +8,7 @@ from werkzeug.datastructures import MultiDict
 from pi.apps.van_dashboard.http import reject_cross_origin_mutations
 from pi.apps.van_dashboard.routes import backup_priority as routes
 from pi.apps.van_dashboard.van_dashboard_backup_priority import BackupPriorityControl
+from pi.apps.van_dashboard.van_dashboard_common import SUDO
 
 
 class BackupPriorityRouteTests(unittest.TestCase):
@@ -25,6 +26,7 @@ class BackupPriorityRouteTests(unittest.TestCase):
         response = self.client.get('/api/backups/priority')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers['Cache-Control'], 'no-store')
+        self.assertEqual(self.command.call_args.args[0][:2], [SUDO, '-n'])
         for mode in ('normal', 'pi', 'time-machine'):
             self.command.reset_mock()
             self.assertEqual(self.client.post('/api/backups/priority', data={'mode':mode}).status_code, 200)

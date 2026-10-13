@@ -67,7 +67,7 @@ STAMP_DIR=/home/pi/backups/stamps
 SNAP_DIR=/home/pi/backups/snapshots
 BACKUP_PROGRESS_DIR="$STAMP_DIR/progress"
 
-# OpenWrt snapshot pulled from dendelion before each Borg archive. The router
+# OpenWrt exports run daily independently and refresh before Borg. The router
 # key is forced-command-only; the last valid local bundle is retained on error.
 OPENWRT_SNAPSHOT_DIR="$SNAP_DIR/openwrt"
 OPENWRT_SNAPSHOT_FILE="$OPENWRT_SNAPSHOT_DIR/dendelion-latest.tar.gz"
@@ -94,6 +94,10 @@ UBNT_BACKUP_MAX_BYTES=$((16 * 1024 * 1024))
 export NTFY_URL="${NTFY_BACKUP_URL:-}"
 NTFY_ON_SUCCESS=1      # 0 = only notify on failures/watchdog findings
 BORG_STALE_HOURS=48    # watchdog alerts past this
+# Only scheduled Borg/EXFAT may borrow a turn from an until-verified priority.
+LOCAL_BACKUP_FAIRNESS_HOURS=24
+LOCAL_BACKUP_FAIRNESS_ADMISSION_SECONDS=300
+LOCAL_BACKUP_FAIRNESS_BACKOFF_HOURS=6
 CLONE_STALE_FACTOR=2   # watchdog alerts when clone age > factor * interval
 MIN_FREE_GB=100        # watchdog alerts when bigboi free space drops below this
 # Default nominal capacity shared by the live boot card and bootable clone

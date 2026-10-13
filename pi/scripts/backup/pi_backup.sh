@@ -81,7 +81,7 @@ if [ -f "$IGNITION_FLAG" ]; then
   log "van is running, deferring (drives unmounted for vibration protection)"
   exit 0
 fi
-acquire_job_lock || { log "another backup/restore is active, exiting"; exit 0; }
+acquire_job_lock local-borg || { log "another backup/restore is active, exiting"; exit 0; }
 if ! backup_progress_begin borg mounting "Mounting and verifying backup disks"; then
   log "backup progress telemetry is unavailable"
 fi
@@ -245,6 +245,8 @@ bail_if_driving
 clone_summary=""
 now=$(date +%s)
 for entry in "${CLONE_TARGETS[@]}"; do
+  # A borrowed turn covers local recovery copies, never hotspare propagation.
+  [[ -z ${VANPI_LOCAL_FAIRNESS_TOKEN:-} ]] || { log "local fairness turn: clones deferred"; break; }
   label=${entry%%:*}; interval=${entry##*:}
   stamp="$STAMP_DIR/clone_$label"
   age_days=9999

@@ -8,6 +8,7 @@ from werkzeug.datastructures import MultiDict
 from pi.apps.van_dashboard.http import reject_cross_origin_mutations
 from pi.apps.van_dashboard.routes import backups
 from pi.apps.van_dashboard.van_dashboard_cloud_controls import CloudBackupControl
+from pi.apps.van_dashboard.van_dashboard_common import SUDO
 
 
 class CloudControlTests(unittest.TestCase):
@@ -28,6 +29,7 @@ class CloudControlTests(unittest.TestCase):
     def test_pause_and_resume_use_fixed_commands(self):
         response = self.client.post('/api/backups/time-machine-icloud/pause', data={'minutes': '240'})
         self.assertEqual(response.status_code, 202)
+        self.assertEqual(self.command.call_args.args[0][:2], [SUDO, '-n'])
         self.assertEqual(self.command.call_args.args[0][2:], [
             '/usr/bin/python3', '/home/pi/scripts/backup/time_machine_icloud_control.py', '--pause', '240'])
         response = self.client.post('/api/backups/time-machine-icloud/resume')

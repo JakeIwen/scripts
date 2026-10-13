@@ -28,7 +28,8 @@ spec.loader.exec_module(coordinator)
 GEN = 'tm-20260930T010203Z-12345678'
 
 
-def source_fixture(root):
+def source_fixture(root, *, now=None):
+    completed = dt.datetime.now(dt.timezone.utc) if now is None else dt.datetime.fromtimestamp(now, dt.timezone.utc)
     source = root / store.BUNDLE
     source.mkdir()
     (source / 'bands').mkdir(); (source / 'mapped').mkdir()
@@ -39,7 +40,7 @@ def source_fixture(root):
     (source / 'lock').write_bytes(b'never copy runtime lock')
     (source / 'Info.plist').write_bytes(plistlib.dumps({'band-size': 67108864, 'bundle-backingstore-version': 2}))
     (source / 'com.apple.TimeMachine.SnapshotHistory.plist').write_bytes(plistlib.dumps({
-        'Snapshots': [{'com.apple.backupd.SnapshotCompletionDate': dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)}]}))
+        'Snapshots': [{'com.apple.backupd.SnapshotCompletionDate': completed.replace(tzinfo=None)}]}))
     return source
 
 
@@ -66,6 +67,15 @@ class ControlTests(unittest.TestCase):
         self.assertTrue(control.admit_worker(self.directory, now=1001))
         self.assertIsNone(control.pause_deadline(self.directory))
         self.assertEqual(self.command.call_args.args[0][1], 'start')
+
+    def test_fixed_control_forwards_explicit_priority_namespace(self):
+        namespace = self.directory / 'priority'
+        jobs = {}
+        with mock.patch.object(control, 'control_backup', return_value={'ok': True}) as shared:
+            self.assertEqual(control.control('resume', directory=self.directory, now=1000,
+                command=self.command, priority_directory=namespace, jobs=jobs), {'ok': True})
+        shared.assert_called_once_with('resume', None, directory=self.directory, service=control.SERVICE,
+            now=1000, command=self.command, priority_directory=namespace, jobs=jobs)
 
     def test_expiry_starts_once_and_failed_start_is_retryable(self):
         control.control('pause', '1', self.directory, now=1000, command=self.command)
@@ -327,6 +337,11 @@ class CaptureGateTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory(); self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
         self.state_dir = self.root / 'state'; self.state_dir.mkdir()
+        # A custom cloud state directory must not consult unrelated host priority state.
+        unrelated_priority = self.root / 'unrelated-priority'; unrelated_priority.mkdir()
+        unrelated_priority.chmod(0o755)
+        priority_path = mock.patch.object(job.priority, 'DIRECTORY', unrelated_priority)
+        priority_path.start(); self.addCleanup(priority_path.stop)
         self.drain = self.root / 'gate'
         for name, value in (('STATE', self.state_dir), ('DRAIN', self.drain)):
             patch = mock.patch.object(job, name, value); patch.start(); self.addCleanup(patch.stop)

@@ -2,11 +2,30 @@
 # Pull and verify dendelion's forced-command backup stream. The last valid
 # snapshot is replaced atomically; any failure leaves it untouched.
 set -euo pipefail
-. /home/pi/scripts/backup/backup_conf.sh
-. /home/pi/scripts/backup/progress.sh
+. "${OPENWRT_BACKUP_CONF:-/home/pi/scripts/backup/backup_conf.sh}"
+. "${OPENWRT_BACKUP_PROGRESS:-/home/pi/scripts/backup/progress.sh}"
 
 log() { echo "[$(date '+%F %T')] openwrt backup: $*"; }
 fail() { log "ERROR: $1" >&2; exit 1; }
+
+daily=0
+case "$#:$*" in
+    0:) ;;
+    1:--daily) daily=1 ;;
+    *) echo "usage: ${0##*/} [--daily]" >&2; exit 2 ;;
+esac
+
+# Independent exports and Borg's refresh share only this export lock. Neither
+# touches backup disks; the old recovery bundle remains available until publish.
+umask 077
+/usr/bin/install -d -m 0700 "$OPENWRT_SNAPSHOT_DIR"
+exec 8<"$OPENWRT_SNAPSHOT_DIR"
+/usr/bin/flock -w 100 8 || { log "another router export is active, deferring"; exit 1; }
+if (( daily )) && [[ -f "$OPENWRT_BACKUP_STAMP" ]] &&
+    [[ $(/bin/date -r "$OPENWRT_BACKUP_STAMP" +%F) == $(/bin/date +%F) ]]; then
+    log "already succeeded today, nothing to do"
+    exit 0
+fi
 
 for required_file in "$OPENWRT_BACKUP_KEY" "$OPENWRT_BACKUP_KNOWN_HOSTS"; do
 	[ -r "$required_file" ] || fail "required SSH file is unreadable: $required_file"
@@ -16,8 +35,6 @@ for required_command in /usr/bin/ssh /usr/bin/timeout /usr/bin/tar \
 	[ -x "$required_command" ] || fail "required command is missing: $required_command"
 done
 
-umask 077
-/usr/bin/install -d -m 0700 "$OPENWRT_SNAPSHOT_DIR"
 incoming=$(/usr/bin/mktemp "$OPENWRT_SNAPSHOT_DIR/.dendelion.incoming.XXXXXX") \
 	|| fail "could not create incoming snapshot"
 verify_dir=$(/usr/bin/mktemp -d /tmp/openwrt-backup-verify.XXXXXX) \

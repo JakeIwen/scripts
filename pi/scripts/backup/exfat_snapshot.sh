@@ -529,7 +529,7 @@ main() {
     log "van is running, deferring EXFAT snapshot"
     return 0
   fi
-  acquire_job_lock || {
+  acquire_job_lock local-exfat || {
     log "another backup/restore is active, deferring EXFAT snapshot"
     return 0
   }

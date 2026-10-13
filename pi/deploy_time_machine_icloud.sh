@@ -5,11 +5,13 @@ repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 target=${1:-pi@vanpi.lan}
 [[ $# -le 1 && "$target" != -* && "$target" != *[[:space:]]* ]] || exit 2
 cd "$repo"
+. "$repo/pi/backup_local_deploy.sh"
+local_previous=$(local_backup_previous_hashes "$repo")
 python3 pi/tests/backup/test_time_machine_icloud.py
 python3 -m unittest pi.tests.backup.test_time_machine_staging
 python3 pi/tests/backup/test_icloud_status.py
 python3 pi/tests/backup/test_icloud_backup.py
-PYTHONPATH=pi/scripts/backup python3 -m unittest pi.tests.backup.test_backup_priority
+PYTHONPATH=pi/scripts/backup python3 -m unittest pi.tests.backup.test_backup_priority pi.tests.backup.test_local_fairness pi.tests.backup.test_protected_json pi.tests.backup.test_local_fairness_rollback pi.tests.backup.test_fairness_access pi.tests.backup.test_openwrt_schedule
 PYTHONPATH=pi/scripts/backup python3 -m unittest pi.tests.backup.test_time_machine_pipeline
 PYTHONPATH=pi/scripts/backup python3 -m unittest pi.tests.backup.test_time_machine_downloads pi.tests.backup.test_icloud_uplink
 bash pi/tests/storage/test_samba_share_control.sh
@@ -21,15 +23,20 @@ shared_hash=${VANPI_TM_PREVIOUS_CLOUD_SHA256:-$(git show HEAD:pi/scripts/backup/
 progress_hash=$(git show HEAD:pi/scripts/backup/icloud_progress.py | shasum -a 256 | awk '{print $1}')
 share_hash=$(git show HEAD:pi/scripts/samba_share_control.sh | shasum -a 256 | awk '{print $1}')
 gate_hash=$(shasum -a 256 pi/scripts/samba_require_mount.sh | awk '{print $1}')
-conf_hash=$(git show HEAD:pi/scripts/backup/backup_conf.sh | shasum -a 256 | awk '{print $1}')
+conf_hash=$(local_backup_previous_conf_hash "$repo")
 uplink_hash=$(git show HEAD:pi/scripts/backup/icloud_uplink.py | shasum -a 256 | awk '{print $1}')
 # For a second, still-uncommitted cutover, supply only the reviewed hash from
 # the previous deployment's staged source. Never blindly trust a live hash.
 old_status_hash=${VANPI_TM_PREVIOUS_STATUS_SHA256:-$(git show HEAD:pi/scripts/backup/icloud_status.py | shasum -a 256 | awk '{print $1}')}
 [[ "$old_status_hash" =~ ^[0-9a-f]{64}$ ]] || exit 1
 COPYFILE_DISABLE=1 /usr/bin/tar --no-xattrs -cf - \
-  pi/__init__.py pi/tests/__init__.py \
-  pi/scripts/backup/backup_priority.py pi/scripts/backup/backup_priority_control.py \
+  pi/__init__.py pi/tests/__init__.py pi/backup_local_deploy.sh \
+  pi/deploy_icloud_backup.sh pi/deploy_time_machine_icloud.sh \
+  "${LOCAL_FAIRNESS_FILES[@]/#/pi/scripts/backup/}" \
+  pi/tests/backup/test_local_fairness.py pi/tests/backup/test_openwrt_schedule.py pi/tests/backup/test_protected_json.py \
+  pi/tests/backup/priority_fixtures.py \
+  pi/tests/backup/test_local_fairness_rollback.py pi/tests/backup/test_fairness_access.py \
+  pi/scripts/backup/backup_priority.py pi/scripts/backup/protected_json.py pi/scripts/backup/backup_priority_control.py \
   pi/scripts/backup/mac_capture_control.py pi/scripts/backup/backup_conf.sh pi/scripts/backup/icloud_backup.sh \
   pi/tests/backup/test_backup_priority.py pi/tests/storage/test_backup_job_lock.sh \
   pi/scripts/backup/time_machine_icloud.py pi/scripts/backup/time_machine_icloud.sh \
@@ -54,21 +61,23 @@ COPYFILE_DISABLE=1 /usr/bin/tar --no-xattrs -cf - \
   pi/tests/lib.sh pi/tests/storage/test_samba_share_control.sh \
   pi/tests/backup/test_icloud_status.py pi/tests/backup/test_icloud_backup.py macbook/scripts/time_machine_offsite_coordinator.py \
   | ssh -o BatchMode=yes "$target" /bin/tar -xf - -C "$stage"
-ssh -o BatchMode=yes "$target" /bin/bash -s -- "$stage" "$shared_hash" "$gate_hash" "$old_status_hash" "$progress_hash" "$share_hash" "$conf_hash" "$uplink_hash" <<'REMOTE'
+ssh -o BatchMode=yes "$target" /bin/bash -s -- "$stage" "$shared_hash" "$gate_hash" "$old_status_hash" "$progress_hash" "$share_hash" "$conf_hash" "$uplink_hash" "$local_previous" <<'REMOTE'
 set -euo pipefail
 stage=$1
 [[ "$stage" =~ ^/tmp/vanpi-tm-icloud\.[[:alnum:]]{6}$ ]] || exit 1
 cd "$stage"
+. pi/backup_local_deploy.sh
 # Fence hourly starts and Mac-heartbeat starts while publishing the worker set.
 [[ ! -L /run/lock/vanpi_backup.lock && -f /run/lock/vanpi_backup.lock &&
    $(/usr/bin/stat -c '%U %G %a' /run/lock/vanpi_backup.lock) == 'root pi 660' ]] || exit 1
 exec 9</run/lock/vanpi_backup.lock
 /usr/bin/flock -n 9 || { echo 'Backup lock became busy; retry deployment later.' >&2; exit 1; }
+verify_local_backup_payload pi/scripts/backup "${9}"
 /usr/bin/python3 pi/tests/backup/test_time_machine_icloud.py
 /usr/bin/python3 -m unittest pi.tests.backup.test_time_machine_staging
 /usr/bin/python3 pi/tests/backup/test_icloud_status.py
 /usr/bin/python3 pi/tests/backup/test_icloud_backup.py
-PYTHONPATH=pi/scripts/backup /usr/bin/python3 -m unittest pi.tests.backup.test_backup_priority
+PYTHONPATH=pi/scripts/backup /usr/bin/python3 -m unittest pi.tests.backup.test_backup_priority pi.tests.backup.test_local_fairness pi.tests.backup.test_protected_json pi.tests.backup.test_local_fairness_rollback pi.tests.backup.test_fairness_access pi.tests.backup.test_openwrt_schedule
 PYTHONPATH=pi/scripts/backup /usr/bin/python3 -m unittest pi.tests.backup.test_time_machine_pipeline
 PYTHONPATH=pi/scripts/backup /usr/bin/python3 -m unittest pi.tests.backup.test_time_machine_downloads pi.tests.backup.test_icloud_uplink
 bash pi/tests/storage/test_backup_job_lock.sh
@@ -119,7 +128,7 @@ install_atomic() {
   sudo -n /usr/bin/mv -Tf "$temporary" "$target"
 }
 /usr/bin/install -d -m 0700 previous
-for name in time_machine_store.py backup_priority.py mac_capture_control.py icloud_status.py cloud_backup_control.py backup_priority_control.py icloud_inventory.py icloud_progress.py icloud_backup.py icloud_uplink.py icloud_backup_control.py time_machine_icloud_control.py time_machine_staging.py time_machine_verification.py time_machine_downloads.py time_machine_pipeline.py time_machine_icloud.py icloud_backup.sh time_machine_icloud.sh time_machine_icloud_status.py backup_conf.sh TIME_MACHINE_ICLOUD_RESTORE.txt; do
+for name in "${LOCAL_FAIRNESS_FILES[@]}" time_machine_store.py protected_json.py backup_priority.py mac_capture_control.py icloud_status.py cloud_backup_control.py backup_priority_control.py icloud_inventory.py icloud_progress.py icloud_backup.py icloud_uplink.py icloud_backup_control.py time_machine_icloud_control.py time_machine_staging.py time_machine_verification.py time_machine_downloads.py time_machine_pipeline.py time_machine_icloud.py icloud_backup.sh time_machine_icloud.sh time_machine_icloud_status.py backup_conf.sh TIME_MACHINE_ICLOUD_RESTORE.txt; do
   live=/home/pi/scripts/backup/$name
   [[ ! -e "$live" ]] || /usr/bin/cp -p "$live" previous/"$name"
   install_atomic pi/scripts/backup/"$name" "$live" 0750
@@ -138,4 +147,12 @@ sudo -n /usr/bin/python3 /home/pi/scripts/backup/time_machine_icloud.py --captur
 sudo -n /usr/bin/systemctl enable --now vanpi-time-machine-icloud.timer
 sudo -n /usr/bin/systemctl enable --now vanpi-time-machine-icloud-resume.timer vanpi-icloud-backup-resume.timer
 echo "Time Machine replication installed. Rollback files: $stage/previous"
+echo 'Rollback is code-first manual restoration, then state-only archival (AGENTS.md).'
+echo "P=$stage/previous"
+echo 'L=/home/pi/scripts/backup'
+echo "R=$stage/pi/scripts/backup/local_fairness_rollback.py"
+echo 'sudo /usr/bin/python3 -B "$R" --check'
+echo 'Restore the reviewed previous code using install/mv under the normal backup lock.'
+echo 'Then release your lock and run: sudo /usr/bin/python3 -B "$R" --archive'
+echo 'Verify: sudo /usr/bin/python3 -B "$L/backup_priority_control.py" --status'
 REMOTE

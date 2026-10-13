@@ -9,21 +9,50 @@ import time
 
 from icloud_status import INDEFINITE_PAUSE, number, pause_deadline, read_json, write_json
 import backup_priority as priority
+import local_fairness
+from protected_json import ProtectedStateAccessError
 
 MAX_PAUSE_MINUTES = 7 * 24 * 60
 CLOUD_JOBS = {job.service: job.directory for job in priority.JOBS.values()}
 
 
-def is_paused(directory, now=None):
+def is_paused(directory, now=None, *, priority_directory=None, jobs=None):
     deadline = pause_deadline(directory)
-    return deadline == INDEFINITE_PAUSE or (deadline is not None and deadline > (time.time() if now is None else now))
+    try:
+        held = local_fairness.cloud_held(directory, now, directory=priority_directory, jobs=jobs)
+    except (ProtectedStateAccessError, PermissionError):
+        # Unknown private fairness state cannot admit or resume a cloud worker.
+        # Owner integrity/schema errors remain strict; this is not a broad fallback.
+        held = True
+    return (held or deadline == INDEFINITE_PAUSE
+            or (deadline is not None and deadline > (time.time() if now is None else now)))
 
 
-def admit_worker(directory, now=None):
+def pause_for_local_turn(*, directory, service, command=subprocess.run, priority_directory=None, jobs=None):
+    """The durable fairness lease is independent of the user's pause.json."""
+    with (directory / 'control.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not local_fairness.cloud_held(directory, directory=priority_directory, jobs=jobs):
+            raise ValueError('No active local fairness reservation.')
+        request_service('stop', service, command)
+
+
+def resume_after_local_turn(*, directory, service, now=None, command=subprocess.run,
+                            priority_directory=None, jobs=None):
+    with (directory / 'control.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not is_paused(directory, now, priority_directory=priority_directory, jobs=jobs):
+            # Do not rewrite even an expired manual hold. Normal priority retries
+            # also recover a failed start or an interrupted window supervisor.
+            request_service('start', service, command)
+
+
+
+def admit_worker(directory, now=None, *, priority_directory=None, jobs=None):
     """Consume a queued resume only after the shell acquired the backup lock."""
     with (directory / 'control.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        if is_paused(directory, now):
+        if is_paused(directory, now, priority_directory=priority_directory, jobs=jobs):
             return False
         (directory / 'pause.json').unlink(missing_ok=True)
         return True
@@ -34,23 +63,26 @@ def request_service(operation, service, command):
             check=True, capture_output=True, text=True, timeout=10)
 
 
-def automatic_retry_due(directory, now):
+def automatic_retry_due(directory, now, *, priority_directory=None, jobs=None):
     state = read_json(directory / 'state.json', {})
-    for mode, job in priority.JOBS.items():
-        if job.directory == directory:
-            priority.complete_job(mode, state)
+    kind = priority.job_kind(directory, jobs)
+    if kind is not None:
+        priority.complete_job(kind, state, directory=priority_directory)
     retry_at = number(state.get('retry_at'))
     due = state.get('phase') == 'deferred' and retry_at is not None and retry_at <= now
-    selected = priority.selected_directory(directory) and state.get('phase') != 'authentication_required'
+    selected = (priority.selected_directory(directory, directory=priority_directory, jobs=jobs)
+                and state.get('phase') != 'authentication_required')
     return bool(due or (selected and now - state.get('last_attempt_at', 0) >= 300))
 
 
-def take_turn(service, *, jobs=CLOUD_JOBS, now=None, command=subprocess.run):
+def take_turn(service, *, jobs=CLOUD_JOBS, now=None, command=subprocess.run,
+              priority_directory=None, priority_jobs=None):
     """Pause the peer and queue this job, without touching the common backup lock."""
     if service not in jobs or set(jobs) != set(CLOUD_JOBS):
         raise ValueError('unsupported cloud backup selection')
-    selected = priority.policy()
-    if selected != priority.PriorityMode.NORMAL and priority.JOBS[selected].service != service:
+    registry = priority.JOBS if priority_jobs is None else priority_jobs
+    selected = priority.policy(priority_directory, registry)
+    if selected != priority.PriorityMode.NORMAL and registry[selected].service != service:
         raise ValueError('Change Backup priority before switching cloud jobs.')
     now = time.time() if now is None else now
     other = next(name for name in jobs if name != service)
@@ -67,7 +99,8 @@ def take_turn(service, *, jobs=CLOUD_JOBS, now=None, command=subprocess.run):
     return {'ok': True, 'changed': True}
 
 
-def control(action, minutes=None, *, directory, service, now=None, command=subprocess.run):
+def control(action, minutes=None, *, directory, service, now=None, command=subprocess.run,
+            priority_directory=None, jobs=None):
     if action not in ('pause', 'resume', 'resume-if-due'):
         raise ValueError('unsupported cloud backup control')
     if action == 'pause' and minutes != INDEFINITE_PAUSE:
@@ -92,12 +125,17 @@ def control(action, minutes=None, *, directory, service, now=None, command=subpr
             if action == 'resume-if-due':
                 if deadline == INDEFINITE_PAUSE or (deadline is not None and deadline > now):
                     return {'ok': True, 'changed': False}
-                if deadline is None and not automatic_retry_due(directory, now):
+                if is_paused(directory, now, priority_directory=priority_directory, jobs=jobs):
+                    return {'ok': True, 'changed': False}
+                if deadline is None and not automatic_retry_due(directory, now,
+                        priority_directory=priority_directory, jobs=jobs):
                     return {'ok': True, 'changed': False}
             # The worker consumes this only after acquiring the backup lock.
             # A busy Pi backup therefore leaves the resume queued for the timer.
             if action == 'resume':
                 write_json(directory / 'pause.json', {'paused_until': now})
+            if is_paused(directory, now, priority_directory=priority_directory, jobs=jobs):
+                return {'ok': True, 'changed': False}
             operation = 'start'
         request_service(operation, service, command)
         return {'ok': True, 'changed': True}
