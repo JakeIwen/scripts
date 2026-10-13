@@ -8,9 +8,9 @@ import sys
 
 GUIDANCE = (
     "Compute provider preflight failed; no sync changes were made. "
-    "In the owner's Terminal, run the reviewed checkout's "
-    "./macbook/scripts/install_van_compute_worker.zsh first, then retry sync. "
-    "See pi/docs/compute/VAN_COMPUTE.md."
+    "In the owner's Terminal, run the reviewed van-compute checkout's "
+    "macbook/scripts/install_van_compute_worker.zsh "
+    "first, then retry sync. See its pi/docs/compute/VAN_COMPUTE.md."
 )
 
 

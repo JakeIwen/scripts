@@ -53,11 +53,19 @@ class SyncWorkflowTests(unittest.TestCase):
 
     def test_compute_guard_stops_sync_before_any_mutation(self):
         definitions = SYNC_SCRIPT.read_text().split('source "$dsc/pi/sync_workflow.sh"')[0]
+        temporary = tempfile.TemporaryDirectory(prefix="sync-compute-checkout-")
+        self.addCleanup(temporary.cleanup)
+        checkout = Path(temporary.name)
+        installer = checkout / "macbook/scripts/install_van_compute_worker.zsh"
+        installer.parent.mkdir(parents=True)
+        installer.write_text("#!/bin/zsh\nexit 0\n", encoding="utf-8")
+        installer.chmod(0o700)
         for status in (0, 1):
             with self.subTest(status=status):
                 harness = definitions + f'''
 # Every external operation is a fake; only the actual preflight/workflow run.
 dsc={shlex.quote(str(REPOSITORY_ROOT.parent))}
+VAN_COMPUTE_CHECKOUT={shlex.quote(str(checkout))}
 ssh() {{
   if [[ "$*" == *'/usr/bin/python3 -B -'* ]]; then
     printf 'provider-check\\n'
@@ -79,7 +87,24 @@ run_sync_workflow
                     ['non-python-write', 'package-write', 'compute-write'] if status == 0 else []))
                 if status:
                     self.assertIn("owner's Terminal", result.stderr)
-                    self.assertIn('install_van_compute_worker.zsh', result.stderr)
+                    self.assertIn(str(installer), result.stderr)
+
+    def test_missing_compute_checkout_stops_before_provider_probe(self):
+        definitions = SYNC_SCRIPT.read_text().split('source "$dsc/pi/sync_workflow.sh"')[0]
+        with tempfile.TemporaryDirectory(prefix="sync-missing-compute-") as directory:
+            missing = Path(directory) / "absent"
+            harness = definitions + f'''
+VAN_COMPUTE_CHECKOUT={shlex.quote(str(missing))}
+ssh() {{ printf 'unexpected-provider-probe\\n'; }}
+sync_preflight
+'''
+            result = subprocess.run(
+                ['/bin/bash', '-c', harness], capture_output=True, text=True
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("missing its executable installer", result.stderr)
+        self.assertIn(str(missing), result.stderr)
 
     def _run_harness(self, failing_phase=None):
         with tempfile.TemporaryDirectory(prefix="sync-workflow-") as directory:

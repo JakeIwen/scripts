@@ -1,5 +1,6 @@
 #! /bin/bash
 dsc="/Users/jacobr/dev/scripts"
+VAN_COMPUTE_CHECKOUT="${VAN_COMPUTE_CHECKOUT:-/Users/jacobr/dev/van-compute}"
 repo_scripts="$dsc/pi/scripts"
 services="$dsc/pi/services"
 tmpfiles="$dsc/pi/tmpfiles.d"
@@ -13,11 +14,17 @@ pi_ip='pi@vanpi.lan'
 package_units=""
 
 sync_preflight() {
+  compute_installer="$VAN_COMPUTE_CHECKOUT/macbook/scripts/install_van_compute_worker.zsh"
+  if [[ ! -x "$compute_installer" ]]; then
+    echo "Van compute checkout is missing its executable installer: $compute_installer" >&2
+    return 1
+  fi
+
   # Refuse before staging or updating anything: the dashboard's new unit and
   # imports need the supervised, coupled compute cutover to have completed.
   if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$pi_ip" \
     /usr/bin/python3 -B - < "$dsc/pi/check_compute_provider.py"; then
-    echo "Compute provider preflight refused sync; run ./macbook/scripts/install_van_compute_worker.zsh from the owner's Terminal in the reviewed checkout first." >&2
+    echo "Compute provider preflight refused sync; run $VAN_COMPUTE_CHECKOUT/macbook/scripts/install_van_compute_worker.zsh from the owner's Terminal in the reviewed checkout first." >&2
     return 1
   fi
 
@@ -170,9 +177,13 @@ sync_compute() {
   # and health check, returning immediately when current. Keep it in the
   # foreground so this one-shot updater cannot report success before a required
   # compute upgrade has actually completed.
-  compute_installer="$dsc/macbook/scripts/install_van_compute_worker.zsh"
+  compute_installer="$VAN_COMPUTE_CHECKOUT/macbook/scripts/install_van_compute_worker.zsh"
+  if [[ ! -x "$compute_installer" ]]; then
+    echo "Van compute checkout is missing its executable installer: $compute_installer" >&2
+    return 1
+  fi
   if ! "$compute_installer" --if-needed; then
-    echo "conditional van_compute deployment failed" >&2
+    echo "conditional van_compute deployment failed from $VAN_COMPUTE_CHECKOUT" >&2
     return 1
   fi
 }

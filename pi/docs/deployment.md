@@ -24,7 +24,7 @@ Allowlisted inputs are immediate Python modules in:
 - the four units named in the installer's `SERVICES` table.
 
 There is no recursive transfer of `pi/`. Secrets, configs, tests, frontend builds,
-node_modules, caches, bytecode, system-monitor code and the root `van_compute/`
+node_modules, caches, bytecode, system-monitor code and the sibling `van_compute/`
 package are not inputs. Source symlinks are rejected. Python 3.11+ is required, including the
 existing BME280 venv (currently 3.11.2).
 
@@ -63,7 +63,7 @@ publish a release without restarting any service.
 | `pi/scripts/log_position.sh` | Calls the current release's VLC helper; installed by broad sync. |
 | `van-dashboard-preview.service` | Independent frontend/preview current release, not the staged package copy of `react_dashboard_preview.py`. Use its existing preview deployer. |
 | `system_event_monitor.py` and `system_monitor/`, other script services/cron/timers | Coherent broad-sync layout under `/home/pi/scripts`, not a package release. The shim retains the script/package switch for `main` and recorder `redact_log_message`; `system_monitor` internals use relative imports in both layouts. |
-| `van_compute` | Coupled independent Mac/Pi installer; no package copy. |
+| `van_compute` | Coupled independent Mac/Pi installer from `/Users/jacobr/dev/van-compute`; no package copy. |
 | historical `raspbian_setup.sh` and archived path-repair tools | Not package bootstrap or deployment paths. Do not use them to refresh the frozen flat directory. |
 
 `-P` removes the unsafe working-directory import entry. Each unit sets
@@ -123,25 +123,29 @@ on retry. Do not erase pending state to claim success; use the rollback below.
 
 ### Compute package prerequisite
 
-Before the first dashboard update containing the root-level compute package
-imports, deploy compute with its coupled installer. The dashboard unit now
-requires `/home/pi/van_compute/current/van_compute/metrics.py`; an old flat
+Before the first dashboard update containing compute package imports, deploy
+compute from the standalone sibling checkout. The dashboard unit requires
+`/home/pi/van_compute/current/van_compute/metrics.py`; an old flat
 compute installation does not satisfy that precheck. Follow
-[`compute/VAN_COMPUTE.md`](compute/VAN_COMPUTE.md) for the supervised compute-first
-cutover and rollback. Do not use broad sync to bootstrap this transition: its
-routine ordering still updates dashboard packages before compute.
+[`VAN_COMPUTE.md`](../../../van-compute/pi/docs/compute/VAN_COMPUTE.md) for the
+supervised compute-first cutover and rollback. Do not use broad sync to bootstrap
+this transition: its routine ordering still updates dashboard packages before
+compute.
 
 ### Broad sync and scoped video deployment
 
 `pi/sync_scripts.sh` remains pinned to `/Users/jacobr/dev/scripts`, the primary
-trusted checkout, because it publishes ignored private inputs. Its read-only
+trusted checkout, because it publishes ignored private inputs. Its compute phase
+uses `VAN_COMPUTE_CHECKOUT`, defaulting to the absolute sibling
+`/Users/jacobr/dev/van-compute`. Its read-only
 preflight requires `activated.json` and all four service-state markers before any
 upload. The block remains until the supervised service cutovers complete and
 returns after a rollback. Do not bypass it.
 
 After the preflight, sync waits for home files/hooks/secrets/Samba/tmpfiles/scripts
 and non-package units, then runs **only** `deploy_python.py --update`, then the
-conditional compute installer last. The package `SERVICES` table supplies the
+conditional compute installer from `VAN_COMPUTE_CHECKOUT` last. The package
+`SERVICES` table supplies the
 local `--list-units` exclusion list; generic service staging cannot install any
 of the four package units. The independent storage exclusion file continues to
 protect recorder/storage ownership. `update_services.sh` is otherwise unchanged.

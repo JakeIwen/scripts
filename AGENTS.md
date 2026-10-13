@@ -300,8 +300,8 @@ import a release (PYTHONPATH into `releases/` or `current`) must set
 `PYTHONDONTWRITEBYTECODE=1`: GC skips everything when any release tree differs
 from its manifest, so one stray `__pycache__` stops all pruning.
 
-Do not bundle the root-level `van_compute/` package: its coupled installer owns
-the separately imported metrics module. Only `deploy_python.py` owns dashboard backend code and
+Never bundle `van_compute` (now a separate repository): its coupled installer
+owns the separately imported metrics module. Only `deploy_python.py` owns dashboard backend code and
 its unit. The storage installer owns the independent frontend and storage drop-in,
 never the flat dashboard; historical manifests containing dashboard backend targets
 fail closed, including rollback. The legacy recorder installer refuses both
@@ -322,42 +322,16 @@ by a restarting package service (that would deadlock deployment).
 
 ## Compute execution contracts
 
-The root `van_compute/` package owns the protocol, queue, broker, Mac worker,
-metrics, typed runtime config and shared child/result engine. Host adapters keep
-Pi bwrap and Mac sandbox-exec boundaries distinct; staging, ownership, admission,
-telemetry and publication are intentionally host-specific. Preserve all 260
-compute golden files (258 protocol fixtures plus two child-environment fixtures)
-and the host drift decisions in `pi/docs/compute/VAN_COMPUTE.md`. First cutover
-must install compute before updating the dashboard package: its unit/imports
-require `/home/pi/van_compute/current/van_compute/metrics.py`. Broad sync's
-package-before-compute order is not a first-cutover workflow; its earliest
-preflight now checks the installed canonical metrics provider and refuses
-missing/unsafe providers or maintenance/upgrade-owner fences before any writes.
-Keep the compute installer in the owner's Terminal. Reused Pi releases are
-verified before drain, ignoring only runtime bytecode. Mac repair/`--rebuild`
-creates a new immutable `<deployment24>-<build_uuid32>` generation, never mutates
-retained releases, and skips pruning; legacy unsuffixed releases remain valid.
-
-The Mac `.py`/`.zsh` installer paths stay stable; implementation lives in
-`macbook/scripts/van_compute_installer/`. Its allowlisted modules travel with
-frozen installers, including recovery/rollback copies. `van_compute.engine`
-reexports shared child supervision from `engine_process.py`; host adapters still
-own staging and publication. Shared compute test fixtures live beside the suites
-in `pi/tests/compute/van_compute_test_fixtures.py` and deployment support modules.
-Failed Mac builds are disposable only when this invocation owns the generation
-and no installed/prior LaunchAgent reference protects it. Once Pi cutover starts,
-only the remote cutover script may remove its stage: local SSH interruption does
-not establish that the remote script stopped. Dashboard-selected package updates
-run the existing compute-provider preflight before transferring a package.
-
-The worker's host-wide retry gate applies only to transport outages, across all
-four control connections and all ten slots. Cooldowns cap at 30 seconds and the
-exclusive nonmutating recovery probe at 10 seconds, including connection setup;
-bulk transfers run outside that exclusive probe so heartbeats can progress.
-It never blindly replays an upload or finish; exact-slot lease recovery remains
-authoritative. Drain cancels new
-admission/waiting claims, not active jobs. Keep `limited_child.py` standalone and
-free of package imports or untrusted startup PYTHONPATH.
+`van_compute` lives in its own repository, `/Users/jacobr/dev/van-compute`
+(no remote yet); its `AGENTS.md` holds the compute contracts. This repository
+keeps only the consumer side: the dashboard imports `van_compute.metrics` from
+the separately installed `/home/pi/van_compute/current`, `pi/check_compute_provider.py`
+is the sync/package preflight against that installed provider, and
+`pi/sync_scripts.sh` runs the compute installer from `VAN_COMPUTE_CHECKOUT`
+(default `/Users/jacobr/dev/van-compute`). First cutover must still install
+compute before the dashboard package. Dashboard tests require the sibling
+checkout, verified by `pi/tests/dashboard/_van_compute_checkout.py`; they fail
+rather than skip without it.
 
 ## Deployment commits
 

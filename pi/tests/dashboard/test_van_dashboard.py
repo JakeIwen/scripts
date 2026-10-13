@@ -4612,7 +4612,7 @@ class DashboardRouteTests(unittest.TestCase):
             (rule.rule, tuple(sorted(rule.methods)))
             for rule in create_app().url_map.iter_rules()
         )
-        compute_package = REPOSITORY_ROOT / "van_compute"
+        compute_package = Path(compute_metrics.__file__).resolve().parent
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)
             release = target / "release"

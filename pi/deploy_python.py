@@ -681,7 +681,8 @@ def check_dashboard_compute_provider(target):
         raise RuntimeError(
             'Dashboard update refused: the canonical compute provider at '
             '/home/pi/van_compute/current/van_compute/metrics.py must be healthy '
-            'and unfenced. Run the coupled install_van_compute_worker.zsh from '
+            'and unfenced. Run the van-compute checkout\'s coupled '
+            'macbook/scripts/install_van_compute_worker.zsh from '
             "the owner's Terminal first; no package deployment was started."
         ) from error
 

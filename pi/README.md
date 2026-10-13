@@ -52,4 +52,5 @@ normally live under `/home/pi/scripts/`.
 
 ## Compute
 
-- [Van compute broker](docs/compute/VAN_COMPUTE.md)
+- [Van compute broker](../../van-compute/pi/docs/compute/VAN_COMPUTE.md) — standalone
+  sibling checkout at `/Users/jacobr/dev/van-compute`.

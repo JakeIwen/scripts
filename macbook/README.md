@@ -89,11 +89,9 @@ To return to Apple's scheduler, unload
 
 ## M4 compute worker for vanpi
 
-`scripts/van_compute_worker.py` is an outbound-only, allowlisted worker for expensive offline CAN
-analysis submitted by agents on vanpi. `scripts/install_van_compute_worker.zsh` deploys the matching
-Pi queue CLI and installs the user LaunchAgent. See
-[`VAN_COMPUTE.md`](../pi/docs/compute/VAN_COMPUTE.md)
-for the architecture, safety boundary, installation, and commands.
+The outbound-only worker for offline CAN analysis submitted by agents on vanpi,
+and its coupled installer, moved to the standalone repository
+`/Users/jacobr/dev/van-compute`. See its `pi/docs/compute/VAN_COMPUTE.md`.
 
 ## Codex ntfy notifications
 

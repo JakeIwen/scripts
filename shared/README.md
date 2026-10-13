@@ -9,7 +9,8 @@ frozen flat video's saved-unit rollback. No current deployer writes the retired
 `/home/pi/scripts/python-automation/` tree. The Mac wrapper remains unchanged. See
 [Pi deployment and rollback](../pi/docs/deployment.md).
 
-Compute-specific cross-host modules live under `pi/van_compute/scripts/`, not
-here. They are deployed atomically by the compute installer to
-`/home/pi/van_compute/scripts/`; the general Pi sync has no compute-specific
-exceptions or ownership.
+Compute-specific cross-host modules live in the standalone sibling checkout at
+`/Users/jacobr/dev/van-compute/`. They are deployed atomically by that checkout's
+compute installer to `/home/pi/van_compute/`; the general Pi sync invokes the
+coupled installer after package deployment and does not copy compute files through
+its generic staging paths.

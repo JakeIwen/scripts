@@ -25,14 +25,15 @@ If the venv already exists, skip creation and check Flask with:
 /tmp/scripts-venv/bin/python -c 'import importlib.metadata; print(importlib.metadata.version("Flask"))'
 ```
 
-Tests import the package, not a flattened sibling copy. `pi.tests` supplies the
-repository copy of `van_compute_metrics` under its separately installed runtime
-module name, without editing sys.path. That fixture is never a package-deployment
-input. For an interactive import outside the test harness, explicitly provide
-both source roots:
+Tests import dashboard code from the selected `scripts` checkout and `van_compute`
+from a separate checkout. `VAN_COMPUTE_CHECKOUT` defaults to the sibling
+`/Users/jacobr/dev/van-compute`; the dashboard suite skips with an explicit reason
+when that checkout is absent. For an interactive import outside the test harness,
+provide both repository roots:
 
 ```bash
-PYTHONPATH="$REPO:$REPO/pi/van_compute/scripts" PYTHONDONTWRITEBYTECODE=1 /tmp/scripts-venv/bin/python -P -c 'from pi.apps.van_dashboard import create_app; print(create_app().url_map)'
+COMPUTE="${VAN_COMPUTE_CHECKOUT:-/Users/jacobr/dev/van-compute}"
+PYTHONPATH="$REPO:$COMPUTE" PYTHONDONTWRITEBYTECODE=1 /tmp/scripts-venv/bin/python -P -c 'from pi.apps.van_dashboard import create_app; print(create_app().url_map)'
 ```
 
 The app factory does not start COP, connectivity or Starlink loops. It is **not**
