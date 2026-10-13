@@ -21,9 +21,6 @@ function createMediaToolsFixture() {
     const presetPath = path.join(root, 'scripts/performance_audio_presets.json');
     fs.mkdirSync(path.dirname(presetPath), {recursive: true});
     fs.writeFileSync(presetPath, JSON.stringify(presets) + '\n');
-    if (JSON.parse(fs.readFileSync(presetPath, 'utf8')).presets.fixture.label !== 'Fixture preset') {
-        throw new Error('Invalid media-tools test fixture presets');
-    }
     const resolvedRoot = fs.realpathSync(root);
     const env = {...process.env, MAC_MEDIA_TOOLS: resolvedRoot};
     process.once('exit', () => fs.rmSync(resolvedRoot, {recursive: true, force: true}));

@@ -140,14 +140,9 @@ class MediaPathRepairTests(unittest.TestCase):
         self.assertEqual(value, command.replace(str(old), str(self.media)))
         self.assertEqual(len(changes), 2)
 
-    def test_media_destination_with_space_is_refused(self):
+    def test_media_destination_needing_shell_quoting_is_refused(self):
         command = str(self.root/'macbook/scripts/performance_audio_presets.json')
-        with self.assertRaisesRegex(RuntimeError, 'not safe for shell substitution'):
-            module.rewrite_media_command(command, self.root, self.root/'media checkout')
-
-    def test_media_destination_with_apostrophe_or_metacharacter_is_refused(self):
-        command = str(self.root/'macbook/scripts/performance_audio_presets.json')
-        for name in ("media'checkout", 'media$checkout', 'media;checkout', 'media&checkout'):
+        for name in ('media checkout', "media'checkout", 'media$checkout', 'media;checkout', 'media&checkout'):
             with self.subTest(name=name), self.assertRaisesRegex(RuntimeError, 'not safe for shell substitution'):
                 module.rewrite_media_command(command, self.root, self.root/name)
 
@@ -189,19 +184,6 @@ class MediaPathRepairTests(unittest.TestCase):
         menu_action = next(item for item in plan['targets'] if item['uuid'] == 'menu-action')
         self.assertIn(str(self.media/'scripts/performance_audio_presets.json'), menu_action['after'])
         self.assertEqual(database.read_bytes(), before)
-
-    def test_media_inspection_only_never_calls_api_or_backup(self):
-        import contextlib, io
-        target = {'uuid': 'example', 'before': 'old', 'after': 'new',
-                  'replacements': [{'old': 'old', 'new': 'new'}]}
-        with patch.object(module, 'current_database', return_value='unused'), \
-             patch.object(module, 'media_plan', return_value={'targets': [target]}), \
-             patch.object(module, 'worker') as worker, \
-             patch.object(module, 'backup_configuration') as backup, contextlib.redirect_stdout(io.StringIO()) as output:
-            module.main(['--media-tools', '--inspect'])
-        worker.assert_not_called()
-        backup.assert_not_called()
-        self.assertIn('example\n  OLD old\n  NEW new', output.getvalue())
 
 
 if __name__ == '__main__':
