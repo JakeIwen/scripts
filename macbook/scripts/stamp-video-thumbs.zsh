@@ -580,8 +580,9 @@ if (( VERIFY_RENDERED && ! FORCE && ! REFRESH_EXISTING )); then
 fi
 build_helper
 FFMPEG=${commands[ffmpeg]:-}
-if [[ -z "$FFMPEG" ]]; then
-  bundled_ffmpeg="${SELF:h:h}/build/Performance Audio.app/Contents/Resources/bin/ffmpeg"
+if [[ -z "$FFMPEG" ]] && media_tools=$(/usr/bin/python3 -B \
+    "${SELF:h:h}/bettertouchtool/btt_common.py" --media-tools); then
+  bundled_ffmpeg="$media_tools/build/Performance Audio.app/Contents/Resources/bin/ffmpeg"
   [[ ! -x "$bundled_ffmpeg" ]] || FFMPEG="$bundled_ffmpeg"
 fi
 TMPD=$(mktemp -d)

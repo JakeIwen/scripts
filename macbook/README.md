@@ -9,30 +9,17 @@ This directory contains code executed locally on Jacob's MacBook:
 
 Code that is also deployed to another host belongs in `../shared/` instead.
 
-## BPM over time
+## Mac media suite
 
-For editable audio presets with reference values and explicit video preservation
-or SDR adjustments, see [Custom conversion](docs/CUSTOM_CONVERSION.md).
+Performance Audio, Convert Video, Custom Conversion, BPM Over Time and Rhythm
+Practice are maintained in `~/dev/mac-media-tools`. See the
+[media-suite README](../../mac-media-tools/README.md) for setup, workflows and tests.
 
-[`scripts/bpm_over_time.py`](scripts/bpm_over_time.py) estimates tempo in overlapping
-windows and graphs 60 samples across an audio/video file. **Tools → BPM Over Time**
-opens an offline report with hover details, ambiguity indicators, PNG/SVG graphs
-and CSV/JSON data. See [setup, interpretation, and tuning](docs/BPM_OVER_TIME.md).
-
-## Rhythm practice
-
-[`scripts/rhythm_practice.py`](scripts/rhythm_practice.py) creates an offline report
-with editable candidate attacks, a reference beat grid, early/late timing,
-repeated-position comparisons and looped playback. **Tools → Rhythm Practice**
-uses Finder selection or a picker. See [setup and practice workflow](docs/RHYTHM_PRACTICE.md).
-
-## Video conversion for sharing
-
-[`scripts/convert_video.py`](scripts/convert_video.py) makes MP4 copies at original
-resolution, 1080p, 720p, or 540p, preserving compatible AAC audio and copying video
-when possible. Resizing and HDR-to-SDR conversion use H.264. The **Tools → Convert
-Video** button combines the format/resolution choice in one flow. See
-[setup, quality behavior, and commands](docs/CONVERT_VIDEO.md).
+The shared Finder app, BPM environment, private jobs, presets and reports live in
+that checkout's `build/`. BetterTouchTool installers and maintenance stay in this
+repository under [`bettertouchtool/`](bettertouchtool/README.md). Their shared
+`MEDIA_TOOLS` resolver accepts `MAC_MEDIA_TOOLS` for another checkout location;
+generated BTT definitions and configuration backups remain in `macbook/build/`.
 
 ## Strip image metadata
 
@@ -40,21 +27,6 @@ Video** button combines the format/resolution choice in one flow. See
 and file picker, creating sibling `_stripped` copies without identifying source
 metadata. A BTT installer adds **Tools > Strip Metadata** to the main Media menu.
 See [setup, supported formats, and re-encoding behavior](docs/STRIP_IMAGE_METADATA.md).
-
-## iPhone performances and GarageBand
-
-[`scripts/performance_audio.py`](scripts/performance_audio.py) extracts audio to
-WAV and replaces a video's soundtrack with a GarageBand export, copying the video
-without re-encoding. It includes lossless MOV output, optional AAC/MP4 sharing
-copies, batch preparation, and automatic finishing when `edited.wav` is exported.
-Each project gets double-click commands; a small Finder app supports drag and drop.
-Its `process` command applies saved reverb, filtering/compression, and loudness
-normalization directly, without GarageBand. Editable presets and an importable
-BetterTouchTool floating menu provide automatic processing of Finder selections.
-Input level matching precedes compression; independent short ambience and longer
-reverb returns are mixed in parallel before final normalization.
-Each video gets a text/JSON report with level changes and measured compressor attenuation.
-See [setup and workflow](docs/PERFORMANCE_AUDIO.md).
 
 ## Guarded vanpi Time Machine scheduling
 

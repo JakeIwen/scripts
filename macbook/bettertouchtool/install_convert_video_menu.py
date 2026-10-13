@@ -9,10 +9,11 @@ import shlex
 import subprocess
 import uuid
 
+from btt_common import MEDIA_TOOLS, ROOT
 from tools_menu_style import tools_button_config
 
 
-ROOT = Path(__file__).resolve().parents[1]
+BUILD = ROOT / "macbook" / "build"
 MEDIA = "D9B0ED12-C4BE-4E74-B0DA-0CC3BE092289"
 TOOLS = "FC3F8235-F102-55C4-8432-B6ADFB0D9992"
 NAMESPACE = uuid.UUID("c7b9d660-1b80-487a-8d1a-296d01be5a1c")
@@ -22,8 +23,9 @@ def uid(name):
     return str(uuid.uuid5(NAMESPACE, name)).upper()
 
 
-def definition():
-    resources = ROOT / "build/Performance Audio.app/Contents/Resources"
+def definition(media_tools=None):
+    media_tools = MEDIA_TOOLS if media_tools is None else Path(media_tools)
+    resources = media_tools / "build/Performance Audio.app/Contents/Resources"
     engine = resources / "convert_video.py"
     if not engine.is_file():
         raise SystemExit("Build the updated Performance Audio.app containing convert_video.py first.")
@@ -51,15 +53,16 @@ def main():
     mode.add_argument("--inspect", action="store_true")
     args = parser.parse_args()
     os.umask(0o077)
-    build = ROOT / "build"
-    build.mkdir(exist_ok=True)
-    payload = build / "Convert Video Tools.json"
-    payload.write_text(json.dumps(definition(), indent=2) + "\n")
+    media_tools = MEDIA_TOOLS
+    payload_data = definition(media_tools)
+    BUILD.mkdir(exist_ok=True)
+    payload = BUILD / "Convert Video Tools.json"
+    payload.write_text(json.dumps(payload_data, indent=2) + "\n")
     if not args.apply and not args.inspect:
         print(f"Generated: {payload}. Run with --apply to install the button.")
         return
     result = subprocess.run(["/usr/bin/osascript", "-l", "JavaScript", str(Path(__file__).with_suffix(".js")),
-                             str(payload), str(build), "inspect" if args.inspect else "apply"])
+                             str(payload), str(BUILD), "inspect" if args.inspect else "apply"])
     raise SystemExit(result.returncode)
 
 

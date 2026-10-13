@@ -7,12 +7,12 @@ import shlex
 import sys
 import uuid
 
+from btt_common import MEDIA_TOOLS, ROOT
 from btt_touchbar_folder_to_floating_submenu import base_menu_config, rtf_label
 from create_floating_dropdown_from_submenu import dropdown_menu_config
 
 
-MACBOOK = Path(__file__).resolve().parents[1]
-BUILD = MACBOOK / "build"
+BUILD = ROOT / "macbook" / "build"
 NAME = "Performance Audio"
 NAMESPACE = uuid.UUID("dd3ba0bb-81d4-40c9-8626-a52b20c28a3f")
 
@@ -30,13 +30,15 @@ def shell_action(command, parent):
             "BTTShellTaskActionConfig": "/bin/zsh:::-c:::-:::"}
 
 
-def build():
-    resources = BUILD / "Performance Audio.app" / "Contents" / "Resources"
+def build(media_tools=None):
+    media_tools = MEDIA_TOOLS if media_tools is None else Path(media_tools)
+    media_build = media_tools / "build"
+    resources = media_build / "Performance Audio.app" / "Contents" / "Resources"
     engine = resources / "performance_audio.py"
     if not engine.is_file():
         raise SystemExit("Build Performance Audio.app first.")
     python = (resources / "python-path.txt").read_text().strip()
-    config = MACBOOK / "scripts" / "performance_audio_presets.json"
+    config = media_tools / "scripts" / "performance_audio_presets.json"
     settings = json.loads(config.read_text())
     menu_id = uid("menu")
     menu = {
@@ -67,7 +69,7 @@ def build():
             python, str(engine), "process", "--config", str(config), "--choose",
             "--background", "--notify", "--reveal"])),
         ("settings", "Edit effects presets", shlex.join(["/usr/bin/open", "-e", str(config)])),
-        ("logs", "Show processing logs", shlex.join(["/usr/bin/open", str(BUILD / "performance-audio-jobs")])),
+        ("logs", "Show processing logs", shlex.join(["/usr/bin/open", str(media_build / "performance-audio-jobs")])),
     ]
     for order, (name, label, command) in enumerate(commands):
         item_id = uid("item-" + name)
@@ -107,10 +109,11 @@ def build():
 
 
 def main():
+    media_tools = MEDIA_TOOLS
     BUILD.mkdir(exist_ok=True)
-    (BUILD / "performance-audio-jobs").mkdir(exist_ok=True)
     path = BUILD / "Performance Audio.bttpreset"
-    path.write_text(json.dumps(build(), indent=2) + "\n")
+    path.write_text(json.dumps(build(media_tools), indent=2) + "\n")
+    (media_tools / "build" / "performance-audio-jobs").mkdir(exist_ok=True)
     launcher = BUILD / "Performance Audio Menu.command"
     launcher.write_text('#!/bin/zsh\n/usr/bin/open "btt://trigger_named/?trigger_name=Performance%20Audio"\n')
     launcher.chmod(0o755)

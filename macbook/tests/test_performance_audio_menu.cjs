@@ -4,10 +4,27 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const {execFileSync} = require('node:child_process');
+const {createMediaToolsFixture, generateMenuDefinition, shellArguments} = require('./btt_test_support.cjs');
 const folder = path.join(__dirname, '../bettertouchtool');
-execFileSync('/usr/bin/python3', [path.join(folder, 'install_performance_audio_menu.py')]);
-const payload = JSON.parse(fs.readFileSync(path.join(__dirname, '../build/Performance Audio Tools.json')));
+const mediaToolsFixture = createMediaToolsFixture();
+const payload = generateMenuDefinition(mediaToolsFixture, 'install_performance_audio_menu', 'parent');
+const commandFor = identifier => shellArguments(payload.dropdown.BTTMenuItems.find(
+    item => item.BTTMenuConfig.BTTMenuElementIdentifier === identifier
+).BTTMenuItemActions[0].BTTShellTaskActionScript);
+const resources = path.join(mediaToolsFixture.root, 'build/Performance Audio.app/Contents/Resources');
+const config = path.join(mediaToolsFixture.root, 'scripts/performance_audio_presets.json');
+assert.deepEqual(commandFor('performance-fixture'), [
+    '/usr/bin/python3', path.join(resources, 'performance_audio.py'), 'process', '--preset', 'fixture',
+    '--config', config, '--finder-selection', '--background', '--notify', '--reveal',
+]);
+assert.deepEqual(commandFor('performance-custom'), [
+    '/usr/bin/python3', path.join(resources, 'conversion_editor.py'), '--config', config,
+    '--finder-selection', '--background',
+]);
+assert.deepEqual(commandFor('performance-settings'), ['/usr/bin/open', '-e', config]);
+assert.deepEqual(commandFor('performance-logs'), [
+    '/usr/bin/open', path.join(mediaToolsFixture.root, 'build/performance-audio-jobs'),
+]);
 const code = fs.readFileSync(path.join(folder, 'install_performance_audio_menu.js'), 'utf8');
 
 function setup({legacy = true, backup = true, badDropdown = false, badLauncher = false,

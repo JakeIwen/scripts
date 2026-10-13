@@ -200,6 +200,37 @@ result. Changing this launcher takes effect on the next button use without a
 BTT import or restart. Wrapper regression tests use a fake Sonos module and never
 play audio or discover speakers.
 
+### Media suite checkout
+
+Performance Audio, Convert Video, Custom Conversion, BPM Over Time and Rhythm
+Practice live in `~/dev/mac-media-tools`. Their app, scientific Python runtime,
+job data and reports are under that checkout's `build/`. The menu installers and
+builders stay here; generated presets and configuration backups still go to
+`~/dev/scripts/macbook/build/`.
+
+`btt_common.MEDIA_TOOLS` is the shared location resolver: `MAC_MEDIA_TOOLS` can
+override its default. Python installers pass that resolved path to their JXA
+workers; direct worker invocation must supply the matching suite-path argument.
+`btt_common.py --media-tools` prints the same path without contacting BTT, for
+shell consumers such as the video-thumbnail FFmpeg fallback.
+
+For the reviewed media checkout migration only, run the path updater directly
+from this repository root:
+
+```sh
+./macbook/bettertouchtool/repair_script_paths.py --media-tools --inspect
+./macbook/bettertouchtool/repair_script_paths.py --media-tools --apply
+```
+
+This mode prints each action's old/new command, verifies replacement paths, and
+uses the existing private backup/concurrency/API/disk checks. Unlike ordinary
+`repair paths`, it includes disabled legacy suite actions so re-enabling them
+cannot resurrect stale paths. It changes command fields only, never activation,
+layout or ordering; BTT backups, other apps and unrelated scripts are excluded.
+It does not rebuild the app, move data or promote a Guard checkpoint. Move data
+only after checking processes and job state; preserve custom presets and report
+identities. Recreate venvs rather than moving them.
+
 ### Sources
 
 - `btt.py`: maintained CLI; fixed argument-list dispatch, no shell interpolation.

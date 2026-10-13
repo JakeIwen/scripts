@@ -1,14 +1,19 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const path = require("node:path");
 const vm = require("node:vm");
-const code = fs.readFileSync(
-  require("node:path").join(
-    __dirname,
-    "../bettertouchtool/install_custom_conversion.js",
-  ),
-  "utf8",
-);
+const {createMediaToolsFixture, generateMenuDefinition, shellArguments} = require("./btt_test_support.cjs");
+const folder = path.join(__dirname, "../bettertouchtool");
+const mediaToolsFixture = createMediaToolsFixture();
+const generated = generateMenuDefinition(mediaToolsFixture, "install_custom_conversion");
+assert.deepEqual(shellArguments(generated.item.BTTMenuItemActions[0].BTTShellTaskActionScript), [
+  "/usr/bin/python3",
+  path.join(mediaToolsFixture.root, "build/Performance Audio.app/Contents/Resources/conversion_editor.py"),
+  "--config", path.join(mediaToolsFixture.root, "scripts/performance_audio_presets.json"),
+  "--finder-selection", "--background",
+]);
+const code = fs.readFileSync(path.join(folder, "install_custom_conversion.js"), "utf8");
 
 function fixture(options = {}) {
   const peer = {
@@ -41,26 +46,11 @@ function fixture(options = {}) {
     BTTTriggerType: 767,
     BTTMenuItems: [{ BTTUUID: "unrelated" }],
   };
-  const payload = {
-    parent: "parent",
-    media: "media",
-    item: {
-      BTTUUID: "custom",
-      BTTTriggerType: 773,
-      BTTMenuName: "Custom conversion…",
-      BTTMenuConfig: {
-        BTTMenuElementIdentifier: "performance-custom",
-        BTTMenuAttributedText: "{\\rtf1\\fs50 Custom conversion}",
-      },
-      BTTMenuItemActions: [
-        {
-          BTTPredefinedActionType: 206,
-          BTTShellTaskActionScript: "editor --background",
-          BTTShellTaskActionConfig: "shell",
-        },
-      ],
-    },
-  };
+  const payload = JSON.parse(JSON.stringify(generated));
+  payload.parent = "parent";
+  payload.media = "media";
+  payload.item.BTTUUID = "custom";
+  payload.item.BTTMenuItemActions[0].BTTTriggerParentUUID = "custom";
   let writes = 0,
     backup = false,
     resizeFailures = options.resizeFailures || 0;

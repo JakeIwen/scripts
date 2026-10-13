@@ -114,5 +114,95 @@ class PathRepairTests(unittest.TestCase):
             self.assertTrue(module.saved_report('unused',previous,plan)[1])
 
 
+class MediaPathRepairTests(unittest.TestCase):
+    database = PathRepairTests.database
+
+    def setUp(self):
+        PathRepairTests.setUp(self)
+        self.media = self.root/'media-checkout'
+        self.relative = 'build/Performance Audio.app/Contents/Resources/performance_audio.py'
+        for relative in (self.relative, 'scripts/performance_audio_presets.json', 'build/bpm-venv/bin/python'):
+            target = self.media/relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.touch()
+
+    def test_media_command_preserves_arguments_and_quoted_app_path(self):
+        old = self.root/'macbook'
+        command = f"/usr/bin/python3 '{old/self.relative}' process --config '{old/'scripts/performance_audio_presets.json'}' --choose"
+        value, changes = module.rewrite_media_command(command, self.root, self.media)
+        self.assertEqual(value, command.replace(str(old), str(self.media)))
+        self.assertEqual(len(changes), 2)
+
+    def test_media_command_preserves_unquoted_argument_boundaries(self):
+        old = self.root/'macbook'
+        command = f"{old/'build/bpm-venv/bin/python'} --config {old/'scripts/performance_audio_presets.json'}"
+        value, changes = module.rewrite_media_command(command, self.root, self.media)
+        self.assertEqual(value, command.replace(str(old), str(self.media)))
+        self.assertEqual(len(changes), 2)
+
+    def test_media_destination_with_space_is_refused(self):
+        command = str(self.root/'macbook/scripts/performance_audio_presets.json')
+        with self.assertRaisesRegex(RuntimeError, 'not safe for shell substitution'):
+            module.rewrite_media_command(command, self.root, self.root/'media checkout')
+
+    def test_media_destination_with_apostrophe_or_metacharacter_is_refused(self):
+        command = str(self.root/'macbook/scripts/performance_audio_presets.json')
+        for name in ("media'checkout", 'media$checkout', 'media;checkout', 'media&checkout'):
+            with self.subTest(name=name), self.assertRaisesRegex(RuntimeError, 'not safe for shell substitution'):
+                module.rewrite_media_command(command, self.root, self.root/name)
+
+    def test_media_tilde_path_is_rewritten(self):
+        old = '~/dev/scripts/macbook/scripts/performance_audio_presets.json'
+        value, changes = module.rewrite_media_command(old+' --check', self.root, self.media)
+        self.assertEqual(value, str(self.media/'scripts/performance_audio_presets.json')+' --check')
+        self.assertEqual(changes, [{'old': old, 'new': str(self.media/'scripts/performance_audio_presets.json'),
+                                    'occurrences': 1}])
+
+    def test_media_does_not_rewrite_btt_backups_other_apps_or_other_checkouts(self):
+        for relative in ('build/Strip Metadata.app', 'build/Performance Audio.bttpreset',
+                         'build/btt-before-audio.json', 'scripts/sns.sh'):
+            command = f"open '{self.root/'macbook'/relative}'"
+            self.assertEqual(module.rewrite_media_command(command, self.root, self.media), (command, []))
+        command = f"'/foreign{self.root}/macbook/{self.relative}'"
+        self.assertEqual(module.rewrite_media_command(command, self.root, self.media), (command, []))
+
+    def test_media_missing_or_parent_traversal_destination_refused(self):
+        for relative in ('build/Performance Audio.app/missing.py',
+                         'build/Performance Audio.app/../unrelated'):
+            with self.assertRaisesRegex(RuntimeError, 'missing or unsafe'):
+                module.rewrite_media_command(f"'{self.root/'macbook'/relative}'", self.root, self.media)
+
+    def test_media_plan_includes_disabled_copies_without_changing_activation(self):
+        database = self.database()
+        with sqlite3.connect(database) as connection:
+            for name, kind in [('ZORDER', 'INTEGER'), ('ZICONDATA3', 'BLOB'),
+                               ('ZACTIONDATA', 'TEXT'), ('ZADDITIONALACTIONSTRING', 'TEXT')]:
+                connection.execute(f'ALTER TABLE ZBTTBASEENTITY ADD COLUMN {name} {kind}')
+            connection.execute('UPDATE ZBTTBASEENTITY SET ZLAUNCHPATH=? WHERE Z_PK>=10',
+                               (f"python3 '{self.root/'macbook'/self.relative}' --help",))
+            connection.execute('UPDATE ZBTTBASEENTITY SET ZLAUNCHPATH=? WHERE Z_PK=10',
+                               ('python3 ~/dev/scripts/macbook/scripts/performance_audio_presets.json --help',))
+        before = database.read_bytes()
+        plan = module.media_plan(database, self.root, self.media)
+        self.assertEqual(len(plan['targets']), 6)
+        self.assertIn('disabled-action', [item['uuid'] for item in plan['targets']])
+        menu_action = next(item for item in plan['targets'] if item['uuid'] == 'menu-action')
+        self.assertIn(str(self.media/'scripts/performance_audio_presets.json'), menu_action['after'])
+        self.assertEqual(database.read_bytes(), before)
+
+    def test_media_inspection_only_never_calls_api_or_backup(self):
+        import contextlib, io
+        target = {'uuid': 'example', 'before': 'old', 'after': 'new',
+                  'replacements': [{'old': 'old', 'new': 'new'}]}
+        with patch.object(module, 'current_database', return_value='unused'), \
+             patch.object(module, 'media_plan', return_value={'targets': [target]}), \
+             patch.object(module, 'worker') as worker, \
+             patch.object(module, 'backup_configuration') as backup, contextlib.redirect_stdout(io.StringIO()) as output:
+            module.main(['--media-tools', '--inspect'])
+        worker.assert_not_called()
+        backup.assert_not_called()
+        self.assertIn('example\n  OLD old\n  NEW new', output.getvalue())
+
+
 if __name__ == '__main__':
     unittest.main()

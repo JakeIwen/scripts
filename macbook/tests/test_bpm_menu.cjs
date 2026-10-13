@@ -3,10 +3,15 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const {execFileSync} = require('node:child_process');
+const {createMediaToolsFixture, generateMenuDefinition, shellArguments} = require('./btt_test_support.cjs');
 const folder = path.join(__dirname, '../bettertouchtool');
-execFileSync('/usr/bin/python3', [path.join(folder, 'install_bpm_menu.py')]);
-const payload = JSON.parse(fs.readFileSync(path.join(__dirname, '../build/BPM Over Time Tools.json')));
+const mediaToolsFixture = createMediaToolsFixture();
+const payload = generateMenuDefinition(mediaToolsFixture, 'install_bpm_menu');
+assert.deepEqual(shellArguments(payload.item.BTTMenuItemActions[0].BTTShellTaskActionScript), [
+    '/usr/bin/python3',
+    path.join(mediaToolsFixture.root, 'build/Performance Audio.app/Contents/Resources/bpm_over_time.py'),
+    '--points', '60', '--finder-selection', '--background', '--open', '--notify',
+]);
 const code = fs.readFileSync(path.join(folder, 'install_bpm_menu.js'), 'utf8');
 
 function setup({backupFails = false, badReadback = false, race = false} = {}) {

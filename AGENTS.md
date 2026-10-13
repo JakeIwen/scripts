@@ -42,25 +42,15 @@ compare it with this checkout. Deployed files may differ from the repository.
   `provision` (new networks), `status` (status/dashboard output), and `starlink`
   (power-off roaming). Ship the entrypoint and every sibling together.
 - `macbook/`: macOS shell utilities, AppleScripts, and BetterTouchTool helpers.
-  `macbook/scripts/conversion_settings.py` owns custom media-conversion settings;
-  `conversion_jobs.py` reuses the audio/video engines and stores user presets.
-  `conversion_editor.py` serves a short-lived loopback editor for BTT-selected files,
-  with its HTML/CSS/JS siblings. It is not an always-on service. Dolby Vision audio
-  replacement uses MP4 with lossless ALAC unless AAC is explicitly selected;
-  `performance_audio.py` validates preserved video/HDR metadata before publication.
-  `media_selection.py` owns Finder/picker selection provenance; Performance Audio
-  and Convert Video's interactive paths both open the confirmation editor.
-  `media_task_control.py` owns the job-state wire contract and cancellation of an
-  owned process group; `conversion_worker.py` runs foreground batch jobs.
-  `conversion_storage.py` atomically publishes recipes/progress. Completed outputs
-  are recorded at the publisher boundary before cancellation can interrupt reporting.
-  `media_formats.py` owns container choices; `video_export.py` owns resize/remux
-  preservation, including decoded frame-timing validation and Dolby Vision profile
-  8 MP4 encoding. SDR conversion stays in `convert_video.py`.
-  `conversion_reports.py` stores audio measurements and conversion recipes under
-  ignored `macbook/build/conversion-reports/`, keyed by captured output generation.
-  Job manifests retain report generation IDs; the editor serves only authenticated,
-  indexed report requests, independent of whether the video still exists.
+  Performance Audio, Convert Video, Custom Conversion, BPM Over Time and Rhythm
+  Practice are maintained separately in `~/dev/mac-media-tools` (no remote yet).
+  That repository owns their scripts, shared Finder app, BPM runtime, jobs, custom
+  presets and generation-keyed reports; do not restore them here. BTT menu
+  installers remain under `macbook/bettertouchtool/` and use
+  `btt_common.MEDIA_TOOLS` (`MAC_MEDIA_TOOLS` override); its read-only
+  `--media-tools` CLI also supplies the thumbnail tool's FFmpeg fallback.
+  `macbook/tests/btt_test_support.cjs` supplies temporary suite fixtures for
+  installer tests, independent of either live checkout.
   `macbook/bettertouchtool/btt.py` is the maintenance CLI; `btt_common.py/.js`
   share read-only inspection and backup helpers. `repair_media_actions.py`
   defines the action-recovery wire contract consumed by its JXA worker.

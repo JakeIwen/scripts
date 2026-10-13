@@ -8,13 +8,14 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import sqlite3
 import subprocess
 import sys
 import tempfile
 import time
 
-from btt_common import ROOT, backup_configuration, connect, current_database, records
+from btt_common import MEDIA_TOOLS, ROOT, backup_configuration, connect, current_database, records
 
 WORKER = Path(__file__).with_suffix('.js')
 MOVED_SCRIPTS = (
@@ -28,6 +29,79 @@ MOVED_SCRIPTS = (
 )
 ACTION_FIELDS = {206: 'BTTShellTaskActionScript', 246: 'BTTTerminalCommand'}
 TOUCH_BAR_TYPES = {629, 630, 642}
+MEDIA_BUILD_ENTRIES = frozenset((
+    'Performance Audio.app', 'bpm-venv', 'performance-audio-jobs',
+    'video-conversion-jobs', 'conversion-editor-jobs', 'conversion-reports',
+    'custom-conversion', 'bpm-cache', 'bpm-analysis-jobs', 'rhythm-analysis-jobs',
+))
+MEDIA_SCRIPT_NAMES = frozenset((
+    'performance_audio.py', 'performance_audio_effects.py', 'performance_audio_presets.json',
+    'convert_video.py', 'conversion_editor.py', 'conversion_jobs.py', 'conversion_reports.py',
+    'conversion_settings.py', 'conversion_storage.py', 'conversion_worker.py',
+    'media_formats.py', 'media_selection.py', 'media_task_control.py', 'video_export.py',
+    'bpm_over_time.py', 'rhythm_practice.py', 'setup_bpm_analysis.py',
+    'build_performance_audio_app.py',
+))
+SHELL_SAFE_MEDIA_ROOT = re.compile(r'^[A-Za-z0-9_./+@-]+$')
+
+
+def rewrite_media_command(command, root=ROOT, media_tools=MEDIA_TOOLS):
+    """Move only reviewed suite paths; shell spelling and unrelated paths survive."""
+    media_tools = Path(media_tools)
+    if not SHELL_SAFE_MEDIA_ROOT.fullmatch(str(media_tools)):
+        raise RuntimeError('Media tools destination is not safe for shell substitution: '+str(media_tools))
+    old_roots = (root/'macbook', Path('~/dev/scripts/macbook'))
+    tokens = shlex.split(command)
+    mapped = {}
+    for token in dict.fromkeys(tokens):
+        relative = None
+        for old_root in old_roots:
+            try:
+                relative = Path(token).relative_to(old_root)
+                break
+            except ValueError:
+                pass
+        if relative is None:
+            continue
+        parts = relative.parts
+        allowed = (len(parts) >= 2 and parts[0] == 'build' and parts[1] in MEDIA_BUILD_ENTRIES)
+        allowed |= len(parts) == 2 and parts[0] == 'scripts' and parts[1] in MEDIA_SCRIPT_NAMES
+        if not allowed:
+            continue
+        destination = media_tools/relative
+        if '..' in parts or not destination.exists():
+            raise RuntimeError('Reviewed media replacement is missing or unsafe: '+str(destination))
+        mapped[token] = str(destination)
+    updated, replacements = command, []
+    for token, destination in mapped.items():
+        candidate, count = replace_path(updated, token, destination)
+        if not count:
+            raise RuntimeError('Cannot safely rewrite shell spelling for media path: '+token)
+        updated = candidate
+        replacements.append({'old': token, 'new': destination, 'occurrences': count})
+    if shlex.split(updated) != [mapped.get(token, token) for token in tokens]:
+        raise RuntimeError('Media path rewrite changed shell argument boundaries; no changes made.')
+    return updated, replacements
+
+
+def media_plan(database, root=ROOT, media_tools=MEDIA_TOOLS):
+    # Include disabled legacy copies so re-enabling them cannot restore stale paths.
+    # Their activation, parent, order and appearance fields remain untouched.
+    targets = []
+    old_roots = (str(root/'macbook'), '~/dev/scripts/macbook')
+    for uid, row in records(database).items():
+        command = row['ZLAUNCHPATH']
+        if not isinstance(command, str) or not any(prefix in command for prefix in old_roots):
+            continue
+        after, replacements = rewrite_media_command(command, root, media_tools)
+        if not replacements:
+            continue
+        if row['ZACTION'] not in ACTION_FIELDS:
+            raise RuntimeError('Unsupported media command action; no changes made: '+uid)
+        targets.append({'uuid': uid, 'action': row['ZACTION'],
+                        'field': ACTION_FIELDS[row['ZACTION']], 'before': command,
+                        'after': after, 'replacements': replacements})
+    return {'targets': sorted(targets, key=lambda t: t['uuid'])}
 
 
 def replace_path(command, old, new):
@@ -130,16 +204,22 @@ def main(argv=None):
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--inspect', action='store_true')
     mode.add_argument('--apply', action='store_true')
+    parser.add_argument('--media-tools', action='store_true',
+                        help='move reviewed media-suite paths, including disabled legacy copies')
     args = parser.parse_args(argv)
     database = current_database()
-    plan = build_plan(database)
-    print(str(len(plan['targets']))+' active actions with stale script paths.')
+    planner = media_plan if args.media_tools else build_plan
+    plan = planner(database)
+    scope = 'media-suite actions' if args.media_tools else 'active actions'
+    print(str(len(plan['targets']))+' '+scope+' with stale script paths.')
+    for target in plan['targets'] if args.media_tools else ():
+        print(target['uuid']+'\n  OLD '+target['before']+'\n  NEW '+target['after'])
     mappings = sorted({(x['old'], x['new']) for t in plan['targets'] for x in t['replacements']})
     for old, new in mappings:
         print(old+' -> '+new)
     if not plan['targets'] or not args.apply:
         if plan['targets']:
-            print('Inspection only. Layout, labels, ordering, disabled entries and Touch Bar records are not changed.')
+            print('Inspection only. Only reviewed command paths may change; activation, layout, labels and ordering are preserved.')
         return
     os.umask(0o077)
     before = records(database)
@@ -149,7 +229,7 @@ def main(argv=None):
         plan['snapshot'] = json.loads(worker('snapshot', path))
     backup = backup_configuration(database, plan, prefix='btt-paths-backup-', filename='plan.json')
     print('Verified pre-update configuration backup: '+str(backup.parent), flush=True)
-    if build_plan(database)['targets'] != plan['targets'] or records(database) != before:
+    if planner(database)['targets'] != plan['targets'] or records(database) != before:
         raise RuntimeError('Saved configuration changed during backup; no changes made.')
     print(worker('apply', backup), flush=True)
     deadline = time.monotonic()+5
@@ -164,7 +244,10 @@ def main(argv=None):
         if time.monotonic() >= deadline:
             print('API readback verified. BTT has not yet saved '+str(len(pending))+' command updates to disk.')
             print('Do not restart yet. Check saved state later with:')
-            print('/usr/bin/python3 -B '+str(ROOT/'macbook/bettertouchtool/btt.py')+' repair paths')
+            if args.media_tools:
+                print('/usr/bin/python3 -B '+str(Path(__file__))+' --media-tools --inspect')
+            else:
+                print('/usr/bin/python3 -B '+str(ROOT/'macbook/bettertouchtool/btt.py')+' repair paths')
             return
         time.sleep(.25)
 

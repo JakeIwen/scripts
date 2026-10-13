@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from contextlib import closing
 import json
+import os
 from pathlib import Path
 import plistlib
 import sqlite3
@@ -15,6 +16,9 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 MEDIA = "D9B0ED12-C4BE-4E74-B0DA-0CC3BE092289"
+MEDIA_TOOLS = Path(
+    os.environ.get("MAC_MEDIA_TOOLS") or "/Users/jacobr/dev/mac-media-tools"
+).expanduser().resolve()
 
 
 def current_database() -> Path:
@@ -142,3 +146,11 @@ def backup_configuration(database, snapshot, prefix='btt-config-backup-', filena
         source.close()
     (directory/'configuration.sqlite').chmod(0o600)
     return path
+
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(description='Read-only paths for BTT-adjacent tooling.')
+    parser.add_argument('--media-tools', action='store_true', required=True)
+    parser.parse_args()
+    print(MEDIA_TOOLS)

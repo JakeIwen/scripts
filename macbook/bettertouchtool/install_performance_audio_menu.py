@@ -9,19 +9,21 @@ from pathlib import Path
 import subprocess
 import sys
 
+from btt_common import MEDIA_TOOLS, ROOT
 from btt_touchbar_folder_to_floating_submenu import rtf_label
 from build_performance_audio_menu import build, uid
 from tools_menu_style import tools_button_config
 
 
-ROOT = Path(__file__).resolve().parents[1]
+BUILD = ROOT / "macbook" / "build"
 MAIN_MENU = "D9B0ED12-C4BE-4E74-B0DA-0CC3BE092289"
 # uuid5(install_strip_metadata_menu.NAMESPACE, "tools"); shared installer identity.
 TOOLS_MENU = "FC3F8235-F102-55C4-8432-B6ADFB0D9992"
 
 
-def definition(parent):
-    dropdown = copy.deepcopy(build()["BTTPresetContent"][0]["BTTTriggers"][0])
+def definition(parent, media_tools=None):
+    media_tools = MEDIA_TOOLS if media_tools is None else Path(media_tools)
+    dropdown = copy.deepcopy(build(media_tools)["BTTPresetContent"][0]["BTTTriggers"][0])
     dropdown_id = uid("tools-dropdown")
     launcher_id = uid("tools-dropdown-launcher")
     dropdown.update(BTTUUID=dropdown_id, BTTMenuName="Performance Audio Tools Presets",
@@ -80,17 +82,18 @@ def main():
     parser.add_argument("--parent-uuid", default=MAIN_MENU)
     args = parser.parse_args()
     os.umask(0o077)  # Live menu backups can contain private action payloads.
-    build_dir = ROOT / "build"
-    build_dir.mkdir(exist_ok=True)
-    (build_dir / "performance-audio-jobs").mkdir(exist_ok=True)
-    payload = build_dir / "Performance Audio Tools.json"
-    payload.write_text(json.dumps(definition(args.parent_uuid), indent=2) + "\n")
+    media_tools = MEDIA_TOOLS
+    menu = definition(args.parent_uuid, media_tools)
+    BUILD.mkdir(exist_ok=True)
+    payload = BUILD / "Performance Audio Tools.json"
+    payload.write_text(json.dumps(menu, indent=2) + "\n")
+    (media_tools / "build" / "performance-audio-jobs").mkdir(exist_ok=True)
     if not args.apply and not args.inspect:
         print(f"Generated {payload}; use --apply to install into Media > Tools.")
         return
     result = subprocess.run([
         "/usr/bin/osascript", "-l", "JavaScript",
-        str(Path(__file__).with_suffix(".js")), str(payload), str(build_dir),
+        str(Path(__file__).with_suffix(".js")), str(payload), str(BUILD),
         "inspect" if args.inspect else "apply"])
     if result.returncode:
         print("BTT command failed; see the specific error above. Do not use sudo.", file=sys.stderr)
