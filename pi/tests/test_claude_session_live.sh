@@ -7,8 +7,7 @@ test_dir=$(mktemp -d "${TMPDIR:-/tmp}/claude-live-test.XXXXXX")
 trap 'rm -rf -- "$test_dir"' EXIT
 export HOME="$test_dir/home"
 export PROMPT_COMMAND=
-mkdir -p "$HOME/.twilio" "$HOME/secrets"
-: > "$HOME/.twilio/twilio_creds.sh"
+mkdir -p "$HOME/secrets"
 : > "$HOME/secrets/.bash_variables"
 # shellcheck source=/dev/null
 . "$repo_bashrc" >/dev/null 2>&1

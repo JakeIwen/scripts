@@ -2,7 +2,7 @@
 # independent daily sanity check — alerts via ntfy when backups go stale,
 # clones age out, or the backup disk is missing/full. Runs separately from
 # pi_backup.sh so a dead backup job cannot fail silently (the old scheme
-# failed for 2+ weeks with only broken Twilio 401s to show for it).
+# failed for 2+ weeks with only failing SMS alerts to show for it).
 set -u
 . /home/pi/scripts/backup/backup_conf.sh
 backup_script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"

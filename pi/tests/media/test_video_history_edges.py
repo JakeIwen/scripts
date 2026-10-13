@@ -76,8 +76,6 @@ class PlaypFallbackTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        (self.root / ".twilio").mkdir()
-        (self.root / ".twilio" / "twilio_creds.sh").write_text("", encoding="utf-8")
         (self.root / "secrets").mkdir()
         (self.root / "secrets" / ".bash_variables").write_text("", encoding="utf-8")
         self.media = self.root / "random local clip with spaces.mkv"

@@ -966,7 +966,6 @@ if [ -f ~/canbus_funcs.sh ]; then . ~/canbus_funcs.sh; fi
 
 #### END CANBUS
 
-source ~/.twilio/twilio_creds.sh
 source ~/secrets/.bash_variables
 
 shopt -s histappend                      # append to history, don't overwrite it

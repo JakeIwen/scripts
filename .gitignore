@@ -16,7 +16,6 @@ id_dsa.pub
 id_dsa
 *.pem
 *.key
-.twilio/
 **/wireless
 vanrouter/etc
 !vanrouter/etc/

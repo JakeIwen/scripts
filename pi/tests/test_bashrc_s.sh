@@ -6,8 +6,7 @@ test_dir=$(mktemp -d "${TMPDIR:-/tmp}/bashrc-s-test.XXXXXX")
 trap 'rm -rf -- "$test_dir"' EXIT
 export HOME="$test_dir/home"
 export PROMPT_COMMAND=
-mkdir -p "$HOME/scripts/price_check" "$HOME/.twilio" "$HOME/secrets"
-: > "$HOME/.twilio/twilio_creds.sh"
+mkdir -p "$HOME/scripts/price_check" "$HOME/secrets"
 : > "$HOME/secrets/.bash_variables"
 
 printf '%s\n' \

@@ -5,7 +5,6 @@ repo_scripts="$dsc/pi/scripts"
 services="$dsc/pi/services"
 tmpfiles="$dsc/pi/tmpfiles.d"
 hooks="$dsc/pi/hooks"
-twilio="$dsc/pi/secrets/.twilio"
 configs="$dsc/pi/configs"
 secrets="$dsc/pi/secrets"
 shared_sh="$dsc/shared/sh"
@@ -122,7 +121,7 @@ sync_non_python() {
     "$pi_ip:/home/pi/" &
   home_pid=$!
 
-  scp $mux -r "$hooks" "$secrets" "$twilio" "$pi_ip:/home/pi/" &
+  scp $mux -r "$hooks" "$secrets" "$pi_ip:/home/pi/" &
   dirs_pid=$!
 
   # /etc/samba/smb.conf is root-owned; install it with sudo, and only when changed.
