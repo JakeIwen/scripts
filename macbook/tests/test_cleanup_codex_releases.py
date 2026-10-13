@@ -1,6 +1,7 @@
 """Exercise release cleanup against disposable fixtures only."""
 
 from contextlib import redirect_stderr, redirect_stdout
+import errno
 import importlib.util
 import io
 import json
@@ -253,6 +254,21 @@ class LinuxProbeTests(unittest.TestCase):
                     pass
         exit_now.assert_called_once_with(70)
         self.assertIn("could not drop root privileges", stderr.getvalue())
+
+    def test_failing_to_drop_root_exits_even_when_stderr_fails(self):
+        class FullStderr(io.StringIO):
+            def write(self, text):
+                raise OSError(errno.ENOSPC, "No space left on device")
+
+        with patch.object(cleaner.os, "getuid", return_value=0), \
+                patch.object(cleaner.os, "geteuid", return_value=1000), \
+                patch.object(cleaner.os, "seteuid", side_effect=[None, PermissionError()]), \
+                patch.object(cleaner.os, "_exit", side_effect=SystemExit(70)) as exit_now, \
+                redirect_stderr(FullStderr()):
+            with self.assertRaises(SystemExit):
+                with cleaner.root_effective_uid():
+                    pass
+        exit_now.assert_called_once_with(70)
 
     def test_empty_or_missing_process_table_refuses(self):
         with self.assertRaises(RuntimeError):

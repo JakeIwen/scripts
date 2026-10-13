@@ -161,9 +161,12 @@ def root_effective_uid():
         try:
             os.seteuid(owner)
         except BaseException:
-            # Never let lock cleanup or deletion continue with root's identity.
-            print("STOP: could not drop root privileges", file=sys.stderr, flush=True)
-            os._exit(70)
+            # Never let lock cleanup or deletion continue with root's identity,
+            # even when the diagnostic itself cannot be written.
+            try:
+                print("STOP: could not drop root privileges", file=sys.stderr, flush=True)
+            finally:
+                os._exit(70)
 
 
 def process_mapped_paths(process):
