@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run one configured incremental hotspare clone under the shared backup lock.
+# Run one configured incremental hotspare clone under its resource-specific job lock.
 # This wrapper is intentionally not an initializer: it accepts only labels
 # already present in CLONE_TARGETS and never accepts a block-device path.
 set -u
@@ -14,7 +14,7 @@ for entry in "${CLONE_TARGETS[@]}"; do
 done
 [ "$configured" = 1 ] || { echo "unknown hotspare target" >&2; exit 2; }
 
-acquire_job_lock || { echo "another backup or restore is active" >&2; exit 3; }
+acquire_backup_job clone || { echo "another hotspare clone, backup or restore is active" >&2; exit 3; }
 
 child=
 stop_clone() {

@@ -94,7 +94,7 @@ function PrioritySelection({ status, busy, run }: PriorityProps) {
       <p>
         {active
           ? `${active.label} has priority until this recovery point is verified.`
-          : 'Normal schedule: daily Pi Borg backups and EXFAT512 snapshots get their reserved window.'}
+          : 'Normal schedule: either cloud copy may use the upload slot; daily Pi Borg backups and EXFAT512 snapshots run alongside it.'}
       </p>
       {status.completed && (
         <p>The prioritized recovery point was verified. Normal priority is restored.</p>

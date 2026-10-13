@@ -152,32 +152,49 @@ unmounting — borg simply rolls back to its last checkpoint and the next parked
 retries. A restore aborted this way leaves the target card INCOMPLETE (you'll get a
 loud ntfy) — just re-run it when parked.
 
-Backup, clone, and restore jobs share `/run/lock/vanpi_backup.lock`. The
-`vanpi-backup.conf` systemd-tmpfiles rule creates this volatile lock at boot as
-`root:pi 0660`, allowing root-run jobs and pi-initiated lifecycle checks to use
-one root-owned inode even with `/run/lock` sticky-directory protections enabled.
-Lock acquisition fails closed if the file is missing, symlinked, or has different
-ownership or permissions. Status checks must open the existing lock read-only;
-do not use path-form `flock /run/lock/vanpi_backup.lock ...` as a probe because
-path-form flock may create a missing file under the caller's ownership.
+Backup jobs own resources explicitly (see [CONCURRENCY.md](CONCURRENCY.md)):
+each job holds an exclusive per-kind lock with its PID record, a shared lock per
+disk it uses, an exclusive `data-borg-repo` lock while the Borg repository is
+mutated or copied, and the two cloud workers share one exclusive upload slot. The
+registry lives in `/run/lock/vanpi-backup/` and is pre-created at boot by the
+`vanpi-backup.conf` systemd-tmpfiles rule as `root:pi 0660` files in a
+`root:pi 0770` directory. `/run/lock/vanpi_backup.lock` remains the legacy
+whole-system lock: migrated jobs hold it shared, while `restore_from_borg.sh`,
+`new_hotspare.sh` and the deployment fences hold it exclusively, so a restore
+still excludes every job and any running job still refuses a restore. Lock
+acquisition fails closed if a lock file or the directory is missing, symlinked,
+or has different ownership or permissions, and never creates lock files. Status
+checks must open the existing locks read-only; do not use path-form
+`flock /run/lock/... ...` as a probe because path-form flock may create a
+missing file under the caller's ownership.
 
-Verify or reconstruct the runtime lock configuration with:
+Verify or reconstruct the runtime lock registry with:
 
 ```bash
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/vanpi-backup.conf
-stat -c '%A %U:%G %n' /run/lock/vanpi_backup.lock
-# Expected: -rw-rw---- root:pi /run/lock/vanpi_backup.lock
+stat -c '%A %U:%G %n' /run/lock/vanpi_backup.lock /run/lock/vanpi-backup /run/lock/vanpi-backup/*.lock
+# Expected: -rw-rw---- root:pi for every lock file, drwxrwx--- root:pi for the directory
 ```
 
-The dashboard can request a graceful user stop only for an exact running
-`pi_backup.sh` or `exfat_snapshot.sh` lock holder. It sends no emergency kill
-and refuses restores, hotspare initialization, and unrelated lock holders. A
+Borg and the EXFAT snapshot run concurrently from `backup_window.sh`; the Pi and
+Mac cloud uploads may overlap both, but never each other. `umount_disks.sh`
+passes the labels it is about to unmount to `abort_backup.sh`, which
+stops only the jobs holding those disks and waits for each disk lock to drain,
+then claims those disks exclusively until the unmount and spindown finish;
+ignition's emergency mode kills remaining holders of those lock files only.
+
+The dashboard can request a graceful user stop only for the exact running
+`pi_backup.sh` or `exfat_snapshot.sh` recorded in that kind's job lock. It sends
+no emergency kill, never touches the other kind or the cloud workers, and
+refuses restores, hotspare initialization, and unrelated lock holders. A
 stopped Borg run is not stamped successful; an interrupted hotspare remains
 unstamped. A stopped EXFAT run retains its hidden partial snapshot for retry and
 performs its normal `hdd1tb` unmount/spindown cleanup before reporting stopped.
 
 For normal completion, `pi_backup.sh` unmounts `bigboi` only when that backup
-run mounted it. If `bigboi` was already mounted, the backup leaves it mounted.
+run mounted it and no other job (such as the Pi cloud upload) still holds the
+disk. If `bigboi` was already mounted or is still in use, the backup leaves it
+mounted.
 It delegates mounts to `mount_disks.sh`, so backup runs use the same exact-label,
 stale-source, underlay, and root-disk safeguards as policy reconciliation.
 Ignition handling and an explicit dashboard/user eject remain authoritative
@@ -188,15 +205,71 @@ resumed on retry and is never treated as a completed restore point.
 
 ## Watchdog
 
-`backup_watchdog.sh` (daily cron) sends ntfy alerts when: no successful Borg or
-EXFAT512 snapshot exists within 48h, the `hdd1tb` target is absent, no verified
-OpenWrt or UBNT snapshot exists or either is stale, a clone exceeds 2× its
-interval, a card was never cloned, bigboi is unmounted, or free space < 100GB.
-It also warns before root usage outgrows the bootable clone cards. Configure
-their nominal capacity from the Backups pane using the 32/64/128/256GB selector.
-The dashboard stores that validated selection in
+`backup_watchdog.sh` (daily root cron) sends ntfy alerts when: no successful Borg
+or EXFAT512 snapshot exists within 48h, the `hdd1tb` target is absent, no
+verified OpenWrt or UBNT snapshot exists or either is stale, a clone exceeds 2×
+its interval, a card was never cloned, bigboi is unmounted, or free space <
+100GB. It also warns before root usage outgrows the bootable clone cards.
+Configure their nominal capacity from the Backups pane using the
+32/64/128/256GB selector. The dashboard stores that validated selection in
 `/home/pi/backups/clone_card_nominal_gb`; `CLONE_CARD_NOMINAL_GB` in
 `backup_conf.sh` remains the default when no selection has been saved. The
 default 64GB setting produces a conservative 52GiB root-usage limit.
+
+`rootfs_budget.sh`, sourced by the watchdog, records one root-used sample per
+UTC day in `/home/pi/backups/stamps/rootfs_used_mib.history`. Replacement is
+atomic and the history retains at most 120 samples. The default growth warning
+is a seven-day rate above 4GiB (`ROOT_GROWTH_WARN_GIB_7D`), calculated from the
+newest sample at least seven days old and normalized when a daily run was
+missed. Each configured path is measured with a 300-second timeout, idle I/O
+priority, low CPU priority, and same-filesystem `du -x`. A timeout, failed
+measurement, absolute root limit, growth warning, or over-budget path is a
+watchdog problem. Every rootfs alert includes all successfully measured path
+sizes, largest first, plus explicit measurement failures.
+
+Edit the single `ROOTFS_PATH_BUDGETS_MIB` array in `backup_conf.sh`; values are
+MiB so the 1.5GiB log budget is exact:
+
+| Path | Default budget |
+| --- | ---: |
+| `/home/pi/dev/obd-things/tmp` | 8GiB |
+| `/var/lib/vanpi-monitor` | 1GiB |
+| `/var/lib/van-telemetry` | 3GiB |
+| `/home/pi/.codex` | 4GiB |
+| `/var/cache/apt` | 1GiB |
+| `/var/log` | 1.5GiB |
+
+The tracked watchdog entries are in root's crontab. Running as root lets the
+bounded `du` commands traverse both root-owned cache/log paths and Pi-owned
+state with restrictive modes; moving the watchdog to the `pi` crontab would
+turn unreadable paths into explicit measurement-failure alerts.
+
 Silence = healthy, but the nightly "vanpi backup OK" ping (min priority) includes
 per-card clone age if you want positive confirmation.
+
+## Root filesystem tidy
+
+`/home/pi/scripts/rootfs_tidy.sh` is dry-run by default. It takes the Codex
+standalone `install.lock`, verifies `current` resolves to a direct child of
+`releases/`, and proposes removing every release except the current target and
+the newest other release by modification time:
+
+```bash
+/home/pi/scripts/rootfs_tidy.sh
+sudo /home/pi/scripts/rootfs_tidy.sh --apply
+```
+
+`--apply` validates every removal target again immediately before deletion,
+requires it to share the `releases/` filesystem, and refuses when a fresh
+absolute-path `findmnt` inventory fails, is unparseable, or reports a mount at
+or beneath the target. The final `rm -rf --one-file-system` is a second boundary
+against crossing onto another filesystem. The entire tidy also refuses when
+the lock is held, the lock/current path is unsafe, or release metadata cannot
+be read. It runs `apt-get clean` when already root or passwordless `sudo -n` is
+available; otherwise it prints a skip message. The following is a proposed
+root-crontab entry, not an installed schedule; Sunday 01:30 is outside the
+03:00–08:00 backup window:
+
+```cron
+30 1 * * 0  "$scripts/rootfs_tidy.sh" --apply  >> "$cronlog/rootfs_tidy.log" 2>&1
+```

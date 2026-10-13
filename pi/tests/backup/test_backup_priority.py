@@ -19,7 +19,9 @@ class PriorityTests(PriorityFixture):
         priority.set_policy('time-machine', now=1000)
         self.assertTrue(priority.allows('time-machine'))
         self.assertFalse(priority.allows('pi'))
-        self.assertFalse(priority.allows('disk'))
+        self.assertFalse(priority.allows('pi-cloud'))
+        for kind in ('disk', 'borg', 'exfat', 'clone', 'local-borg', 'local-exfat'):
+            self.assertTrue(priority.allows(kind))
         path = self.jobs[priority.PriorityMode.TIME_MACHINE].directory / 'state.json'
         for state in ({'last_success_at': 999, 'last_generation': GEN},
                       {'last_success_at': 1001, 'last_generation': 'different'}):
@@ -32,6 +34,12 @@ class PriorityTests(PriorityFixture):
         priority.complete_job('time-machine', read_json(path))
         atomic_json(path, {'last_success_at': 2000, 'last_generation': 'a-later-recovery-point'})
         self.assertEqual(priority.policy(), 'normal')
+
+    def test_pi_cloud_kind_and_legacy_alias_share_selected_policy(self):
+        priority.set_policy('pi', now=1000)
+        self.assertTrue(priority.allows('pi'))
+        self.assertTrue(priority.allows('pi-cloud'))
+        self.assertFalse(priority.allows('time-machine'))
 
     def test_manual_holds_survive_switching_and_cancelling_priority(self):
         for job in self.jobs.values():
@@ -57,12 +65,10 @@ class PriorityTests(PriorityFixture):
             cloud_backup_control.take_turn('vanpi-icloud-backup.service', jobs=jobs, command=command)
         command.assert_not_called()
 
-    def test_priority_bypasses_only_daily_window_and_preserves_ignition_check(self):
+    def test_priority_preserves_ignition_check_and_only_blocks_other_cloud_job(self):
         priority.set_policy('time-machine', now=1000)
         cfg = {'priority_job': priority.PriorityMode.TIME_MACHINE}
-        with mock.patch.object(cloud, 'check_parked') as parked, \
-                mock.patch.object(cloud, 'local_backup_window', return_value=True), \
-                mock.patch.object(cloud, 'local_backups_complete', return_value=False):
+        with mock.patch.object(cloud, 'check_parked') as parked:
             cloud.check_work_allowed(cfg)
             parked.assert_called_once()
             with self.assertRaisesRegex(cloud.Deferred, 'selected Mac iCloud'):
@@ -72,8 +78,7 @@ class PriorityTests(PriorityFixture):
                 cloud.check_work_allowed(cfg)
             parked.side_effect = None
             priority.set_policy('normal')
-            with self.assertRaisesRegex(cloud.Deferred, 'local-backup window'):
-                cloud.check_work_allowed(cfg)
+            cloud.check_work_allowed(cfg)
 
     def test_current_copy_or_missing_prerequisite_cannot_reserve_priority(self):
         job = self.jobs[priority.PriorityMode.PI]
@@ -84,23 +89,34 @@ class PriorityTests(PriorityFixture):
         with self.assertRaisesRegex(ValueError, 'fresh Pi Borg'):
             priority.set_policy('pi', now=1000000, borg_stamp=self.root / 'missing')
 
-    def test_unknown_modes_and_unsafe_records_fail_closed(self):
+    def test_unknown_modes_and_unsafe_records_fail_closed_only_for_cloud_jobs(self):
         with self.assertRaises(ValueError):
             priority.set_policy('arbitrary')
+        with self.assertRaises(ValueError):
+            priority.allows('arbitrary')
         priority.set_policy('time-machine', now=1000)
         record = self.directory / 'priority.json'
-        record.chmod(0o666)
-        with self.assertRaises(ValueError): priority.allows('disk')
+
+        def assert_local_admitted_and_cloud_refused():
+            for kind in ('disk', 'borg', 'exfat', 'clone', 'local-borg', 'local-exfat'):
+                self.assertTrue(priority.allows(kind))
+            for kind in ('pi', 'pi-cloud', 'time-machine'):
+                with self.assertRaises((OSError, ValueError)):
+                    priority.allows(kind)
+
+        record.chmod(0o000)
+        assert_local_admitted_and_cloud_refused()
         record.chmod(0o600)
         record.write_text('{broken')
-        with self.assertRaises(ValueError): priority.allows('disk')
+        assert_local_admitted_and_cloud_refused()
         record.unlink(); record.symlink_to(self.root / 'elsewhere')
-        with self.assertRaises(ValueError): priority.allows('disk')
+        assert_local_admitted_and_cloud_refused()
 
     def test_initial_state_does_not_create_files_from_read_only_status(self):
         self.assertEqual(priority.policy(), 'normal')
         self.assertFalse(self.directory.exists())
-        priority.status(now=1000)
+        result = priority.status(now=1000)
+        self.assertNotIn('local_fairness', result)
         self.assertFalse(self.directory.exists())
 
 class CapturePermissionTests(PriorityFixture):

@@ -29,6 +29,7 @@ from .store import EventStore
 from .daemon import SystemEventMonitor
 from .crash import build_crash_report, capture_previous_boot, compare_crash_history
 from .report import build_report, list_events
+from .maintenance import compact_database
 
 
 def format_bytes(value):
@@ -39,6 +40,12 @@ def format_bytes(value):
         if abs(size) < 1024 or suffix == "TiB":
             return f"{size:.1f} {suffix}"
         size /= 1024
+
+
+def event_repeat_suffix(event):
+    if event.get("repeat_count", 1) <= 1:
+        return ""
+    return f" [{event['repeat_count']} events; last seen {iso_time(event['last_seen'])}]"
 
 
 def print_report(report):
@@ -75,7 +82,7 @@ def print_report(report):
     for event in report["events"][:25]:
         print(
             f"- {iso_time(event['timestamp'])} {event['severity'].upper()} "
-            f"{event['summary']}: {event['message']}"
+            f"{event['summary']}: {event['message']}{event_repeat_suffix(event)}"
         )
 
 
@@ -155,16 +162,36 @@ def build_parser():
     history_parser.add_argument("--limit", type=int, default=20)
     history_parser.add_argument("--full", action="store_true")
     history_parser.add_argument("--json", action="store_true")
+    compact_parser = subparsers.add_parser(
+        "compact", help="offline storm/snapshot compaction (dry run by default)"
+    )
+    compact_parser.add_argument("--apply", action="store_true", help="compact and VACUUM the database")
     return parser
+
+
+def compact_command(args):
+    try:
+        compact_database(args.database, apply=args.apply,
+                         progress=lambda message: print(message, flush=True))
+        return 0
+    except (OSError, sqlite3.Error, ValueError) as error:
+        print(f"system-event-monitor: compaction refused/failed: {error}", file=sys.stderr)
+        return 1
+
+
+def open_command_store(args):
+    writable = args.command_name in ("run", "boot-capture") or (
+        args.command_name == "crash-report" and args.save
+    )
+    return EventStore(args.database, read_only=not writable)
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
-    writable = args.command_name in ("run", "boot-capture") or (
-        args.command_name == "crash-report" and args.save
-    )
+    if args.command_name == "compact":
+        return compact_command(args)
     try:
-        store = EventStore(args.database, read_only=not writable)
+        store = open_command_store(args)
     except (OSError, sqlite3.Error) as error:
         print(f"system-event-monitor: could not open database: {error}", file=sys.stderr)
         return 1
@@ -246,7 +273,7 @@ def main(argv=None):
                 for event in events:
                     print(
                         f"{event['timestamp_iso']} {event['severity'].upper():8} "
-                        f"{event['category']}/{event['kind']} {event['message']}"
+                        f"{event['category']}/{event['kind']} {event['message']}{event_repeat_suffix(event)}"
                     )
             return 0
         return 2

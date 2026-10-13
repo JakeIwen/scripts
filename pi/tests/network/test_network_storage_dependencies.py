@@ -76,6 +76,25 @@ class MonitorPinChecks:
             self.assertEqual(Path(path).read_bytes(), contents)
         self.assertEqual(self.core.read_bytes(), b'old=True\n')
 
+    def test_v4_manifest_pins_allow_rollback_but_not_a_fresh_plan(self):
+        deploy.apply(self.plan, self.stage)
+        manifest = deploy.BACKUPS / self.plan['release'] / 'manifest.json'
+        historical = json.loads(manifest.read_text())
+        new_sources = {f'pi/scripts/system_monitor/{name}.py'
+                       for name in ('coalesce', 'locking', 'maintenance')}
+        new_paths = {destination for source, destination in deploy.dependencies.MONITOR_DEPENDENCIES.items()
+                     if source in new_sources}
+        historical['monitor_dependencies'] = {
+            path: digest for path, digest in historical['monitor_dependencies'].items()
+            if path not in new_paths
+        }
+        deploy.validate_plan(historical, historical=True)
+        with self.assertRaisesRegex(ValueError, 'dependency allowlist'):
+            deploy.validate_plan(historical)
+        manifest.write_text(json.dumps(historical))
+        deploy.rollback(self.plan['release'])
+        self.assertEqual(self.core.read_bytes(), b'old=True\n')
+
     def test_new_manifest_rollback_validates_allowlist_not_live_dependency_hash(self):
         deploy.apply(self.plan, self.stage)
         dependency = Path(next(iter(self.plan['monitor_dependencies'])))

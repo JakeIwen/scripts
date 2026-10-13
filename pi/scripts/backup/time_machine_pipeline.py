@@ -1,6 +1,6 @@
 """One supervised verifier follows completed immutable-object uploads.
 
-The verifier inherits the existing backup lock. It never writes worker state or
+The verifier inherits the Time Machine job lock. It never writes worker state or
 publishes a recovery point; the parent still performs the final inventory check.
 """
 from collections import deque
@@ -13,11 +13,11 @@ import signal
 import time
 from typing import TypedDict
 
+import backup_locks
 import icloud_backup as cloud
 from icloud_inventory import parse_inventory
 from icloud_progress import TransferActivity
 from time_machine_downloads import download_batch, VerificationMeter
-from time_machine_staging import JOB_LOCK, require_lock
 from time_machine_verification import ObjectVerifier
 
 
@@ -128,11 +128,11 @@ class Follower:
 
 
 def verification_worker(cfg, root, expected, rows, parent_pid, completed, updates, done,
-                        result_reader, result_writer, lock_fd, lock_path):
+                        result_reader, result_writer, lock_fd):
     result_reader.close()
     result: VerifierResult = {'kind': ResultKind.COMPLETE, 'message': '', 'errno': None}
     try:
-        require_lock(lock_fd, lock_path)
+        backup_locks.require_job_lock('time-machine', lock_fd)
         with suppress(PermissionError):
             os.nice(4)
         signal.signal(signal.SIGTERM, cloud.abort)
@@ -154,10 +154,11 @@ def verification_worker(cfg, root, expected, rows, parent_pid, completed, update
 
 
 class VerificationPipeline:
-    def __init__(self, cfg, root, expected, rows, *, lock_fd=9, lock_path=JOB_LOCK):
+    def __init__(self, cfg, root, expected, rows, *, lock_fd=None):
         if cloud.CHILD is not None:
             raise RuntimeError('start verification before launching the upload client')
-        require_lock(lock_fd, lock_path)
+        lock_fd = backup_locks.job_lock_fd() if lock_fd is None else lock_fd
+        backup_locks.require_job_lock('time-machine', lock_fd)
         self.cfg, self.expected = cfg, expected
         context = multiprocessing.get_context('fork')
         self.completed = context.Queue(maxsize=16)
@@ -168,7 +169,7 @@ class VerificationPipeline:
         self.latest, self.result = {}, None
         self.process = context.Process(target=verification_worker,
             args=(cfg, root, expected, rows, os.getpid(), self.completed, self.updates, self.done,
-                  self.reader, writer, lock_fd, lock_path), daemon=True)
+                  self.reader, writer, lock_fd), daemon=True)
         self.process.start()
         writer.close()
 

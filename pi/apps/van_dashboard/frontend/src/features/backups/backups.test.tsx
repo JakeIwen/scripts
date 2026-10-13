@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { fetchBackupStatus } from './api';
@@ -11,7 +11,7 @@ import {
   BACKUP_RUNNING_POLL_INTERVAL_MS,
   useBackupStatus,
 } from './hooks';
-import { backupStatusPayload, sampleBackupStatus } from './testFixtures';
+import { backupStatusPayload, sampleBackupStatus, sampleRunningICloudStatus } from './testFixtures';
 
 vi.mock('./api', () => ({ fetchBackupStatus: vi.fn() }));
 const fetchBackupStatusMock = vi.mocked(fetchBackupStatus);
@@ -135,7 +135,7 @@ describe('backups feature', () => {
     expect(fetchBackupStatusMock.mock.calls.length).toBe(afterRunningDetected + 1);
   });
 
-  it('renders operation-aware start, stop, and clone controls', () => {
+  it('disables another Run now while a dashboard backup operation is running', () => {
     const resource = backupResource(true);
     resource.data.checkedAt = Date.now() / 1000 - 3;
     const controls = controlMocks();
@@ -152,8 +152,11 @@ describe('backups feature', () => {
       'aria-valuenow',
       '42',
     );
-    expect(screen.getByRole('button', { name: 'Stop gracefully' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Run now' })).toBeDisabled();
+    const borgCard = screen.getByRole('heading', { name: 'Vanpi Borg' }).closest('article');
+    const exfatCard = screen.getByRole('heading', { name: 'EXFAT512 snapshot' }).closest('article');
+    if (!borgCard || !exfatCard) throw new Error('missing local backup cards');
+    expect(within(borgCard).getByRole('button', { name: 'Stop gracefully' })).toBeEnabled();
+    expect(within(exfatCard).getByRole('button', { name: 'Run now' })).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Refresh' })).not.toBeInTheDocument();
     expect(
       screen.getByLabelText('Updated 3s ago').closest('.bottom-sheet__subtitle'),
@@ -165,6 +168,42 @@ describe('backups feature', () => {
     for (const button of screen.getAllByRole('button', { name: 'Clone now' })) {
       expect(button).toBeDisabled();
     }
+  });
+
+  it('keeps Borg Run now enabled while scheduler jobs of other kinds are running', () => {
+    const data = sampleBackupStatus();
+    data.exfatSnapshot.running = true;
+    data.openwrt.running = true;
+    data.icloud = sampleRunningICloudStatus();
+    data.timeMachineIcloud = sampleRunningICloudStatus();
+    data.timeMachine.running = true;
+    const resource = {
+      ...backupResource(),
+      data,
+      refresh: vi.fn().mockResolvedValue(data),
+    };
+    render(<BackupsSheet open onClose={vi.fn()} resource={resource} controls={controlMocks()} />);
+
+    const borgCard = screen.getByRole('heading', { name: 'Vanpi Borg' }).closest('article');
+    if (!borgCard) throw new Error('missing Borg backup card');
+    expect(within(borgCard).getByRole('button', { name: 'Run now' })).toBeEnabled();
+  });
+
+  it('keeps clone available while local, OpenWrt, and cloud backups are running', () => {
+    const data = sampleBackupStatus();
+    data.borg.running = true;
+    data.exfatSnapshot.running = true;
+    data.openwrt.running = true;
+    data.icloud = sampleRunningICloudStatus();
+    data.timeMachineIcloud = sampleRunningICloudStatus();
+    const resource = {
+      ...backupResource(),
+      data,
+      refresh: vi.fn().mockResolvedValue(data),
+    };
+    render(<BackupsSheet open onClose={vi.fn()} resource={resource} controls={controlMocks()} />);
+
+    expect(screen.getByRole('button', { name: 'Clone now' })).toBeEnabled();
   });
 
   it('selects a persisted bootable clone-card capacity', () => {

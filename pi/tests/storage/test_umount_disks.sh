@@ -12,6 +12,7 @@ source "$repo_root/pi/tests/lib.sh"
 export UMOUNT_DISKS_LIBRARY_ONLY=1
 # shellcheck source=../../scripts/umount_disks.sh
 source "$script"
+hold_backup_disks_exclusive() { :; } # Never inspect the live lock registry.
 
 ud_findmnt_source_targets() { return 1; }
 reconcile_output=$(ud_reconcile_unmount_result hdd1tb /dev/sdz1 124 2>&1)
@@ -77,8 +78,10 @@ umount_disks_main --spindown --emergency movingparts >/dev/null 2>&1
 
 grep -Fq '"$samba_share_control" drain "${mounted_labels[@]}"' "$script" ||
   fail "disk shutdown does not block Samba reconnects before closure"
-grep -Fq 'abort_backup.sh "${abort_args[@]}"' "$script" ||
+grep -Fq 'abort_backup.sh "${abort_args[@]}" "${mounted_labels[@]}" ||' "$script" ||
   fail "disk shutdown does not pass emergency mode to backup termination"
+grep -Fq '! hold_backup_disks_exclusive "${mounted_labels[@]}"; then' "$script" ||
+  fail "disk shutdown does not retain exclusive disk ownership through unmount"
 grep -Fq 'ud_kill_torrent_client "$emergency"' "$script" ||
   fail "disk shutdown does not escalate the exact qBittorrent process"
 grep -Fq 'continuing with guarded unmount and exact holder eviction' "$script" ||
@@ -94,7 +97,7 @@ grep -Fq 'ud_sync_mount "$expected_mount"' "$script" ||
   fail "disk shutdown does not sync before normal unmount"
 grep -Fq 'ud_normal_unmount "$expected_mount"' "$script" ||
   fail "disk shutdown bypasses the bounded normal-unmount helper"
-grep -Fq '/usr/bin/fuser -k -KILL "$job_lock"' "$abort_script" ||
+grep -Fq '/usr/bin/fuser -k -KILL "$lock_path"' "$abort_script" ||
   fail "emergency backup shutdown does not target exact lock holders"
 
 if grep -Eq '/usr/bin/umount.*(--force|[[:space:]]-f|--lazy|[[:space:]]-l)' "$script"; then

@@ -45,8 +45,8 @@ class LocalBackupDeployTests(unittest.TestCase):
         return self.shell('verify_local_backup_payload "$1" "$2" "$3"',
                           str(self.source), previous, str(self.live))
 
-    def test_every_shipped_fairness_file_is_checked(self):
-        shipped = self.shell('printf "%s\\n" "${LOCAL_FAIRNESS_FILES[@]}"').stdout.splitlines()
+    def test_every_shipped_local_backup_file_is_checked(self):
+        shipped = self.shell('printf "%s\\n" "${LOCAL_BACKUP_FILES[@]}"').stdout.splitlines()
         self.assertTrue(set(shipped).issubset(self.names))
         self.assertIn('protected_json.py', self.names)
         self.assertEqual(self.verify().returncode, 0)
@@ -57,7 +57,7 @@ class LocalBackupDeployTests(unittest.TestCase):
                 (self.live / name).write_text('old\n')
 
     def test_first_install_idempotence_and_new_file_drift(self):
-        name = 'local_fairness.py'
+        name = 'backup_locks.py'
         self.previous[name] = 'absent'
         (self.live / name).unlink()
         self.assertEqual(self.verify().returncode, 0)
@@ -67,7 +67,7 @@ class LocalBackupDeployTests(unittest.TestCase):
         self.assertNotEqual(self.verify().returncode, 0)
 
     def test_required_missing_or_symlinked_file_refused(self):
-        name = 'local_fairness.py'
+        name = 'backup_locks.py'
         (self.live / name).unlink()
         self.assertNotEqual(self.verify().returncode, 0)
         self.previous[name] = 'absent'
@@ -89,11 +89,48 @@ class LocalBackupDeployTests(unittest.TestCase):
         result = self.shell('local_backup_previous_hashes "$1"', str(repo))
         self.assertEqual(result.returncode, 0, result.stderr)
         entries = dict(item.split(':') for item in result.stdout.rstrip(',').split(','))
-        self.assertEqual(entries['local_fairness.py'], 'absent')
+        self.assertEqual(entries['backup_locks.py'], 'absent')
         self.assertRegex(entries['backup_conf.sh'], '^[0-9a-f]{64}$')
         self.env['VANPI_BACKUP_PREVIOUS_REVISION'] = 'nonexistent-deployment-revision'
         self.assertNotEqual(self.shell('local_backup_previous_hashes "$1"',
                            str(repo)).returncode, 0)
+    def test_previous_tmpfiles_hash_uses_requested_fixture_revision(self):
+        repo = self.root / 'repo'
+        tmpfiles = repo / 'pi/tmpfiles.d/vanpi-backup.conf'
+        tmpfiles.parent.mkdir(parents=True)
+        tmpfiles.write_text('first registry\n')
+        subprocess.run(['git', 'init', '-q', str(repo)], check=True)
+        subprocess.run(['git', '-C', str(repo), 'add', '.'], check=True)
+        commit = ['git', '-C', str(repo), '-c', 'core.hooksPath=/dev/null',
+                  '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm']
+        subprocess.run([*commit, 'first'], check=True)
+        first = subprocess.run(['git', '-C', str(repo), 'rev-parse', 'HEAD'], check=True,
+                               capture_output=True, text=True).stdout.strip()
+        tmpfiles.write_text('second registry\n')
+        subprocess.run(['git', '-C', str(repo), 'add', '.'], check=True)
+        subprocess.run([*commit, 'second'], check=True)
+        self.env['VANPI_BACKUP_PREVIOUS_REVISION'] = first
+        result = self.shell('local_backup_previous_tmpfiles_hash "$1"', str(repo))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), hashlib.sha256(b'first registry\n').hexdigest())
+        self.env['VANPI_BACKUP_PREVIOUS_REVISION'] = 'missing-revision'
+        self.assertNotEqual(self.shell('local_backup_previous_tmpfiles_hash "$1"',
+                                      str(repo)).returncode, 0)
+
+    def test_tmpfiles_drift_accepts_previous_or_staged_content_only(self):
+        source = self.root / 'staged-tmpfiles'
+        live = self.root / 'live-tmpfiles'
+        source.write_text('new registry\n')
+        live.write_text('old registry\n')
+        previous = hashlib.sha256(b'old registry\n').hexdigest()
+        operation = 'verify_local_backup_tmpfiles "$1" "$2" "$3"'
+        self.assertEqual(self.shell(operation, str(source), previous, str(live)).returncode, 0)
+        live.write_bytes(source.read_bytes())
+        self.assertEqual(self.shell(operation, str(source), previous, str(live)).returncode, 0)
+        live.write_text('local edit\n')
+        refused = self.shell(operation, str(source), previous, str(live))
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn('Live tmpfiles registry differs; inspect before deploying.', refused.stderr)
 
 
 if __name__ == '__main__':

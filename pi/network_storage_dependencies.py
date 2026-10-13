@@ -25,7 +25,14 @@ def validate_pins(plan, *, historical=False):
     if historical and 'monitor_dependencies' not in plan:
         return
     pins = plan.get('monitor_dependencies')
-    if not isinstance(pins, dict) or set(pins) != set(MONITOR_DEPENDENCIES.values()):
+    allowed_sets = [set(MONITOR_DEPENDENCIES.values())]
+    if historical:
+        legacy_sources = {'pi/scripts/system_event_monitor.py'} | {
+            f'pi/scripts/system_monitor/{name}.py' for name in base.MONITOR_V4_MODULES
+        }
+        allowed_sets.append({destination for source, destination in MONITOR_DEPENDENCIES.items()
+                             if source in legacy_sources})
+    if not isinstance(pins, dict) or set(pins) not in allowed_sets:
         raise ValueError('manifest differs from system monitor dependency allowlist')
     if any(not isinstance(value, str) or not re.fullmatch(r'[0-9a-f]{64}', value)
            for value in pins.values()):

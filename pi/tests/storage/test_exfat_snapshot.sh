@@ -42,9 +42,13 @@ EXFAT_SNAPSHOT_KEEP_DAILY_DAYS=30
 EXFAT_SNAPSHOT_KEEP_WEEKLY_DAYS=84
 EXFAT_SNAPSHOT_KEEP_MONTHLY_DAYS=365
 EXFAT_SNAPSHOT_TELEMETRY_SECONDS=1
-acquire_job_lock() {
+acquire_backup_job() {
   exec 9>'$test_root/job.lock'
   /usr/bin/flock -n 9
+}
+release_backup_disk() {
+  /usr/bin/flock -u 9 || true
+  exec 9>&-
 }
 EOF
 
@@ -137,19 +141,33 @@ cp "$window_script" "$window_root/backup_window.sh"
 cat > "$window_root/pi_backup.sh" <<'EOF'
 #!/bin/bash
 printf 'pi:%s\n' "$*" >> "$TEST_WINDOW_CALLS"
-exit 7
+for ((attempt=0; attempt<100; attempt++)); do
+  if [[ -f "$TEST_WINDOW_CALLS.exfat" ]]; then
+    : > "$TEST_WINDOW_CALLS.concurrent"
+    exit 7
+  fi
+  /bin/sleep 0.02
+done
+exit 8
 EOF
 cat > "$window_root/exfat_snapshot.sh" <<'EOF'
 #!/bin/bash
 printf 'exfat:%s\n' "$*" >> "$TEST_WINDOW_CALLS"
+: > "$TEST_WINDOW_CALLS.exfat"
 EOF
 chmod +x "$window_root/"*.sh
 window_calls="$test_root/window.calls"
 TEST_WINDOW_CALLS="$window_calls" "$window_root/backup_window.sh" --force >/dev/null 2>&1
 window_status=$?
 [[ $window_status == 1 ]] || fail "window runner hid a child backup failure"
-[[ $(cat "$window_calls") == $'pi:--force\nexfat:--force' ]] ||
+[[ $(sort "$window_calls") == $'exfat:--force\npi:--force' ]] ||
   fail "window runner did not run and force both independently stamped jobs"
+[[ -f "$window_calls.concurrent" ]] || fail "window jobs did not run concurrently"
+rm "$window_calls" "$window_calls.concurrent" "$window_calls.exfat"
+TEST_WINDOW_CALLS="$window_calls" "$window_root/backup_window.sh" >/dev/null 2>&1
+[[ $? == 1 ]] || fail "ordinary window hid a child failure"
+[[ $(sort "$window_calls") == $'exfat:\npi:' ]] || fail "ordinary window changed child arguments"
+[[ -f "$window_calls.concurrent" ]] || fail "ordinary window jobs did not overlap"
 
 grep -Fq -- "--link-dest=\$previous_path" "$snapshot_script" ||
   fail "production snapshot script does not link against the previous snapshot"

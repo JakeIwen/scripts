@@ -1,20 +1,20 @@
-"""Collect unreachable local capture objects while the backup lock is held.
+"""Collect unreachable local capture objects while the Time Machine job lock is held.
 
 Candidates are validated SHA-256 files and abandoned capture temporary files
 inside the owned objects directory, inspected only with the worker lock held.
 Neither cloud objects, the live sparsebundle, nor archived images are touched.
 """
 from dataclasses import dataclass
-import fcntl
 import json
 import os
 from pathlib import Path
 import re
 import stat
 
+import backup_locks
 import time_machine_store as store
 
-JOB_LOCK = Path('/run/lock/vanpi_backup.lock')
+
 MAX_METADATA_BYTES = 64 * 1024**2
 CAPTURE_TEMP = re.compile(re.escape(store.CAPTURE_TEMP_PREFIX) + r'[a-z0-9_]{8}\Z')
 ROOT_FILES = {'OWNER.json', 'capture-index.json', 'pending.json', 'retiring.json',
@@ -42,14 +42,6 @@ class CleanupPlan:
                 'allocated_bytes': sum(row.allocated_bytes for row in self.candidates),
                 'temporary_objects': sum(bool(CAPTURE_TEMP.fullmatch(row.name)) for row in self.candidates),
                 'protected_objects': self.protected_count}
-
-
-def require_lock(fd, path):
-    actual, expected = os.fstat(fd), path.lstat()
-    if (not stat.S_ISREG(expected.st_mode) or not stat.S_ISREG(actual.st_mode)
-            or (actual.st_dev, actual.st_ino) != (expected.st_dev, expected.st_ino)):
-        raise RuntimeError('staging cleanup requires the existing backup lock descriptor')
-    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
 
 def directory_signature(path, owner=None):
@@ -183,8 +175,9 @@ def check_references(plan):
             raise RuntimeError('staging references changed; cleanup stopped')
 
 
-def plan_cleanup(root, check, *, lock_fd=9, lock_path=JOB_LOCK):
-    require_lock(lock_fd, lock_path)
+def plan_cleanup(root, check, *, lock_fd=None):
+    lock_fd = backup_locks.job_lock_fd() if lock_fd is None else lock_fd
+    backup_locks.require_job_lock('time-machine', lock_fd)
     check()
     refs, directories, metadata = reference_state(root)
     owner = root.lstat().st_uid
@@ -204,9 +197,10 @@ def plan_cleanup(root, check, *, lock_fd=9, lock_path=JOB_LOCK):
     return plan
 
 
-def apply_cleanup(plan, check, *, lock_fd=9, lock_path=JOB_LOCK):
-    require_lock(lock_fd, lock_path)
-    if plan_cleanup(plan.root, check, lock_fd=lock_fd, lock_path=lock_path) != plan:
+def apply_cleanup(plan, check, *, lock_fd=None):
+    lock_fd = backup_locks.job_lock_fd() if lock_fd is None else lock_fd
+    backup_locks.require_job_lock('time-machine', lock_fd)
+    if plan_cleanup(plan.root, check, lock_fd=lock_fd) != plan:
         raise RuntimeError('staging cleanup plan changed; inspect again')
     objects = plan.root / 'objects'
     fd = os.open(objects, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)

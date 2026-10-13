@@ -107,4 +107,4 @@ kill -TERM "$holder_pid"
 wait "$holder_pid" 2>/dev/null || true
 holder_pid=
 
-echo "PASS: pre-created shared backup lock safeguards"
+echo "PASS: pre-created legacy exclusive backup lock safeguards"

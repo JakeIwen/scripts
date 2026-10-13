@@ -16,6 +16,7 @@ import sys
 import tempfile
 import time
 import uuid
+import backup_locks
 import backup_priority
 from icloud_progress import TransferActivity
 
@@ -104,27 +105,14 @@ def pause_deadline(directory):
 
 
 def queued_backup_message(lock_file=Path('/run/lock/vanpi_backup.lock'), process_root=Path('/proc')):
-    owners = {
-        'icloud_backup.py': 'Pi iCloud backup',
-        'time_machine_icloud.py': 'Mac Time Machine iCloud backup',
-        'pi_backup.sh': 'local Pi backup',
-        'exfat_snapshot.sh': 'EXFAT512 snapshot',
-        'clone_to_sd.sh': 'hotspare clone',
-        'clone_now.sh': 'hotspare clone',
-    }
-    try:
-        pid = lock_file.read_text().strip()
-        if re.fullmatch(r'[1-9][0-9]{0,9}', pid):
-            proc = process_root / pid
-            # The PID record alone can be stale; require the live process's
-            # inherited backup-lock descriptor and an exact known entry point.
-            if (proc / 'fd/9').samefile(lock_file):
-                args = (proc / 'cmdline').read_bytes().split(b'\0')
-                for filename, label in owners.items():
-                    if ('/home/pi/scripts/backup/' + filename).encode() in args:
-                        return f'Resume queued: waiting for {label} to finish. Checks every minute.'
-    except (OSError, ValueError):
-        pass
+    jobs = backup_locks.active_jobs(process_root)
+    for kind in ('pi-cloud', 'time-machine'):
+        if kind in jobs:
+            return (f'Resume queued: waiting for {backup_locks.JOB_LABELS[kind]} to finish. '
+                    'Checks every minute.')
+    if backup_locks.legacy_exclusive_holder(process_root, lock_file) is not None:
+        return ('Resume queued: waiting for a restore or maintenance job to finish. '
+                'Checks every minute.')
     return 'Resume queued: another backup may be using the disks. Checks every minute.'
 
 

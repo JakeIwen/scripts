@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Weekly consistent, incremental Time Machine replication over guarded rclone.
 
-The shell owns fd 9's existing backup lock. Never copies a mounted Mac image,
-never uploads the mutable source, and never publishes before download checks.
+The shell owns the Time Machine job, disk and cloud-slot locks. Never copies a
+mounted Mac image, uploads the mutable source, or publishes before download checks.
 """
 from contextlib import contextmanager, suppress
 import datetime as dt
@@ -19,6 +19,7 @@ import tempfile
 import time
 import uuid
 
+import backup_locks
 import icloud_backup as cloud
 import icloud_status as history
 import time_machine_store as store
@@ -60,15 +61,16 @@ def config():
     return cfg
 
 
-def worker_alive(request):
+def worker_alive(request, process_root=Path('/proc')):
     pid = request.get('pid')
     if type(pid) is not int or pid <= 1:
         return False
     try:
-        proc = Path('/proc') / str(pid)
+        proc = process_root / str(pid)
         return (str(Path(__file__).resolve()).encode() in (proc / 'cmdline').read_bytes().split(b'\0')
                 and (proc / 'stat').read_text().rsplit(')', 1)[1].split()[19] == request.get('start_ticks')
-                and os.readlink(proc / 'fd' / '9') == '/run/lock/vanpi_backup.lock')
+                and backup_locks.process_holds(pid,
+                    backup_locks.lock_path(backup_locks.LockClass.JOB, 'time-machine'), process_root))
     except (OSError, IndexError):
         return False
 

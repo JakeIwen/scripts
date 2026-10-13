@@ -1,5 +1,5 @@
 import json
-import datetime as dt
+from contextlib import contextmanager
 import hashlib
 import fcntl
 import os
@@ -22,10 +22,7 @@ from icloud_progress import ProgressWatch, RcloneStats
 
 
 def test_config():
-    cfg = json.loads((PI/'configs'/'icloud-backup.json').read_text())
-    # Scheduling is tested separately; functional tests must work at any hour.
-    cfg['local_backup_window_start'] = cfg['local_backup_window_end'] = '00:00'
-    return cfg
+    return json.loads((PI/'configs'/'icloud-backup.json').read_text())
 
 
 def evidence():
@@ -125,7 +122,8 @@ class SnapshotTests(unittest.TestCase):
             subprocess.run(['/usr/bin/borg','init','--encryption=repokey-blake2',str(repo)],env=env,check=True,capture_output=True)
             subprocess.run(['/usr/bin/borg','create',str(repo)+'::fixture','fixture.txt'],cwd=root,env=env,check=True,capture_output=True)
             name='vanpi-20260920T010203Z-12345678'
-            with mock.patch.dict(os.environ,env,clear=True), mock.patch.object(backup,'check_parked'):
+            with mock.patch.dict(os.environ,env,clear=True), mock.patch.object(backup,'check_parked'), \
+                    mock.patch.object(backup.backup_locks, 'held'):
                 backup.make_snapshot(cfg,stage,repo,name)
             copied=stage/name/'payload'/'repository'
             self.assertFalse((copied/'lock.exclusive').exists())
@@ -141,7 +139,8 @@ class SnapshotTests(unittest.TestCase):
         cfg=test_config()
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); name='vanpi-20260920T010203Z-12345678'
-            with mock.patch.object(backup,'run',side_effect=[None,RuntimeError('check failed')]):
+            with mock.patch.object(backup,'run',side_effect=[None,RuntimeError('check failed')]), \
+                    mock.patch.object(backup.backup_locks, 'held'):
                 with self.assertRaises(RuntimeError):backup.make_snapshot(cfg,root,root/'source',name)
             self.assertFalse((root/name/'payload'/'manifest.json').exists())
 
@@ -154,13 +153,27 @@ class SnapshotTests(unittest.TestCase):
             def wait(self, timeout=None): self.returncode=-15; return -15
         child=Client()
         with mock.patch.object(backup,'guard',side_effect=[('192.168.6.103','wan'),backup.Deferred('Starlink')]), \
-             mock.patch.object(backup,'check_parked'), mock.patch.object(backup.subprocess,'Popen',return_value=child), \
+             mock.patch.object(backup,'check_parked'), \
+             mock.patch.object(backup.backup_locks, 'inherited_lock_fds', return_value=[9, 11, 12]), \
+             mock.patch.object(backup.subprocess,'Popen',return_value=child) as popen, \
              mock.patch.object(backup.time,'sleep'), mock.patch.object(backup.time,'monotonic',side_effect=[0,10]), \
              mock.patch.object(backup.os,'kill') as kill, mock.patch.object(backup.os,'killpg') as killpg:
             with self.assertRaises(backup.Deferred): backup.run([backup.RCLONE,'copy','source','dest'],cfg,network=True)
+            self.assertEqual(popen.call_args.kwargs['pass_fds'], (9, 11, 12))
             self.assertIn(mock.call(child.pid,signal.SIGSTOP),kill.call_args_list)
             self.assertIn(mock.call(child.pid,signal.SIGTERM),killpg.call_args_list)
             self.assertIsNone(backup.CHILD)
+
+    def test_network_worker_checks_cloud_slot_before_launching_client(self):
+        with mock.patch.object(backup.backup_locks, 'require_cloud_slot',
+                               side_effect=backup.Deferred('slot checked')) as require, \
+                mock.patch.object(backup, 'guard') as guard, \
+                mock.patch.object(backup.subprocess, 'Popen') as popen:
+            with self.assertRaisesRegex(backup.Deferred, 'slot checked'):
+                backup.run([backup.RCLONE, 'copy', 'source', 'dest'], test_config(), network=True)
+        require.assert_called_once_with()
+        guard.assert_not_called()
+        popen.assert_not_called()
 
     def test_snapshot_copy_is_locked_and_checked_before_manifest(self):
         cfg=test_config()
@@ -168,19 +181,44 @@ class SnapshotTests(unittest.TestCase):
             root=Path(tmp); repo=root/'source'; repo.mkdir()
             stage=root/'stage'; stage.mkdir()
             name='vanpi-20260920T010203Z-12345678'
+            locked = [False]
+            @contextmanager
+            def held(lock_class, name):
+                self.assertEqual((lock_class, name), (backup.backup_locks.LockClass.DATA, 'borg-repo'))
+                locked[0] = True
+                try:
+                    yield
+                finally:
+                    locked[0] = False
             def child(args,cfg,**kwargs):
                 dest=stage/name/'payload'/'repository'
                 if args[1]=='with-lock':
+                    self.assertTrue(locked[0])
                     self.assertIn('--exclude=/lock.exclusive',args)
                     self.assertIn('--exclude=/lock.roster',args)
                     (dest/'config').write_text('encrypted-key')
                     (dest/'data').mkdir(); (dest/'data'/'0').write_bytes(b'encrypted')
                 elif args[1]=='check':
+                    self.assertFalse(locked[0])
                     self.assertFalse((dest.parent/'manifest.json').exists())
-            with mock.patch.object(backup,'run',side_effect=child) as run, mock.patch.object(backup,'capture',return_value='borg 1.2.4'), mock.patch.object(backup,'check_work_allowed'):
+            with mock.patch.object(backup,'run',side_effect=child) as run, \
+                    mock.patch.object(backup.backup_locks, 'held', side_effect=held), \
+                    mock.patch.object(backup,'capture',return_value='borg 1.2.4'), \
+                    mock.patch.object(backup,'check_work_allowed'):
                 backup.make_snapshot(cfg,stage,repo,name)
                 self.assertEqual([c.args[0][1] for c in run.call_args_list],['with-lock','check'])
                 self.assertTrue((stage/name/'payload'/'manifest.json').is_file())
+
+    def test_snapshot_defers_when_borg_repository_data_lock_is_busy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); stage = root / 'stage'; stage.mkdir()
+            name = 'vanpi-20260920T010203Z-12345678'
+            with mock.patch.object(backup.backup_locks, 'held',
+                                   side_effect=backup.backup_locks.LockBusy('busy')), \
+                    mock.patch.object(backup, 'run') as run:
+                with self.assertRaisesRegex(backup.Deferred, 'Borg repository is busy'):
+                    backup.make_snapshot(test_config(), stage, root / 'source', name)
+            run.assert_not_called()
 
     def test_manifest_hashes_and_refuses_symlinks(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -226,6 +264,22 @@ class SnapshotTests(unittest.TestCase):
             for remote in ('icloud:', 'icloud:VanRecovery/../other', 'other:VanRecovery/vanpi/weekly'):
                 cfg['remote']=remote; p.write_text(json.dumps(cfg))
                 with self.assertRaises(ValueError): backup.load_config(p)
+
+
+    def test_last_user_unmount_leaves_bigboi_for_another_job(self):
+        mount = Path('/mnt/test-bigboi')
+        found = subprocess.CompletedProcess([], 0, '/dev/test\n', '')
+        with mock.patch.object(backup.subprocess, 'run', return_value=found) as run, \
+                mock.patch.object(backup, 'exact_mount'), \
+                mock.patch.object(backup.backup_locks, 'release_inherited') as release, \
+                mock.patch.object(backup.backup_locks, 'held',
+                    side_effect=backup.backup_locks.LockBusy('busy')), \
+                mock.patch('builtins.print') as output:
+            backup.unmount_if_unused(mount, 'bigboi')
+        release.assert_called_once_with(
+            backup.backup_locks.lock_path(backup.backup_locks.LockClass.DISK, 'bigboi'))
+        self.assertEqual(run.call_count, 1)
+        output.assert_called_once_with('leaving bigboi mounted for another backup job', flush=True)
 
 
 class ProgressTests(unittest.TestCase):
@@ -319,57 +373,6 @@ class ProgressTests(unittest.TestCase):
             result=backup.run([sys.executable,'-c','import sys; sys.stdout.buffer.write(bytes(range(256))*1024)'],cfg,stream_hash=True)
         self.assertEqual(result,{'bytes':len(value),'sha256':hashlib.sha256(value).hexdigest()})
 
-    def test_local_window_boundaries_and_wraparound(self):
-        cfg=test_config();cfg.update(local_backup_window_start='02:55',local_backup_window_end='09:00')
-        for hour,minute,expected in [(2,54,False),(2,55,True),(3,0,True),(8,59,True),(9,0,False),(23,59,False)]:
-            self.assertEqual(backup.local_backup_window(cfg,dt.datetime(2026,9,21,hour,minute)),expected)
-        cfg.update(local_backup_window_start='23:00',local_backup_window_end='01:00')
-        self.assertTrue(backup.local_backup_window(cfg,dt.datetime(2026,9,21,0,30)))
-        self.assertFalse(backup.local_backup_window(cfg,dt.datetime(2026,9,21,1,0)))
-        cfg['local_backup_window_end']='23:00'
-        self.assertFalse(backup.local_backup_window(cfg,dt.datetime(2026,9,21,23,30)))
-
-    def test_offsite_yields_before_accessing_disks_in_local_window(self):
-        cfg=test_config()
-        with tempfile.TemporaryDirectory() as tmp:
-            root=Path(tmp);(root/'authenticated.json').write_text('{}')
-            with mock.patch.object(backup,'STATE_DIR',root), mock.patch.object(backup,'credentials_ready',return_value=True), \
-                 mock.patch.object(backup,'check_parked'), mock.patch.object(backup,'local_backup_window',return_value=True), mock.patch.object(backup,'local_backups_complete',return_value=False), \
-                 mock.patch.object(backup,'guard') as guard, mock.patch.object(backup,'run') as run:
-                with self.assertRaisesRegex(backup.Deferred,'local-backup window'):backup.weekly(cfg,{})
-                guard.assert_not_called();run.assert_not_called()
-
-    def test_working_child_is_stopped_when_local_window_begins(self):
-        cfg=test_config()
-        class Client:
-            pid=987654
-            returncode=None
-            def poll(self):return self.returncode
-            def wait(self,timeout=None):self.returncode=-15;return -15
-        child=Client()
-        with mock.patch.object(backup,'check_parked'), mock.patch.object(backup,'local_backup_window',side_effect=[False,True]), mock.patch.object(backup,'local_backups_complete',return_value=False), \
-             mock.patch.object(backup.subprocess,'Popen',return_value=child), \
-             mock.patch.object(backup.time,'sleep'), mock.patch.object(backup.time,'monotonic',side_effect=[0,10]), \
-             mock.patch.object(backup.os,'killpg') as killpg:
-            with self.assertRaisesRegex(backup.Deferred,'local-backup window'):backup.run(['/usr/bin/borg','check','fixture'],cfg)
-            self.assertIn(mock.call(child.pid,signal.SIGTERM),killpg.call_args_list)
-
-    def test_local_priority_requires_both_today_stamps_and_resumes_early(self):
-        now=dt.datetime(2026,9,21,5,30)
-        with tempfile.TemporaryDirectory() as tmp:
-            a=Path(tmp)/'borg';b=Path(tmp)/'exfat';a.touch();b.touch()
-            today=dt.datetime(2026,9,21,5,10).timestamp()
-            yesterday=dt.datetime(2026,9,20,5,10).timestamp()
-            env={'VANPI_ICLOUD_BORG_STAMP':str(a),'VANPI_ICLOUD_EXFAT_STAMP':str(b)}
-            with mock.patch.dict(os.environ,env):
-                os.utime(a,(today,today));os.utime(b,(yesterday,yesterday))
-                self.assertFalse(backup.local_backups_complete(now))
-                os.utime(b,(today,today))
-                self.assertTrue(backup.local_backups_complete(now))
-                os.utime(b,(now.timestamp()+60,now.timestamp()+60))
-                self.assertFalse(backup.local_backups_complete(now))
-        with mock.patch.object(backup,'check_parked'),mock.patch.object(backup,'local_backup_window',return_value=True),mock.patch.object(backup,'local_backups_complete',return_value=True):
-            backup.check_work_allowed(test_config())
 
 
 class CheckpointTests(unittest.TestCase):

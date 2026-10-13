@@ -4,10 +4,11 @@
 # pi_backup.sh so a dead backup job cannot fail silently (the old scheme
 # failed for 2+ weeks with only failing SMS alerts to show for it).
 set -u
-. /home/pi/scripts/backup/backup_conf.sh
+. "${BACKUP_WATCHDOG_CONF:-/home/pi/scripts/backup/backup_conf.sh}"
 backup_script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-. "$backup_script_dir/../disk_policy.sh" || exit 1
-notify() { /home/pi/scripts/ntfy_send.sh "$@"; }
+. "${BACKUP_WATCHDOG_DISK_POLICY:-$backup_script_dir/../disk_policy.sh}" || exit 1
+. "$backup_script_dir/rootfs_budget.sh" || exit 1
+notify() { "${BACKUP_WATCHDOG_NOTIFY:-/home/pi/scripts/ntfy_send.sh}" "$@"; }
 
 problems=()
 status=""
@@ -94,11 +95,10 @@ for entry in "${CLONE_TARGETS[@]}"; do
   fi
 done
 
-# Warn before the system outgrows the configured bootable clone-card capacity.
-used_gib=$(( $(df -k --output=used / | tail -1) / 1024 / 1024 ))
-status+="rootfs: ${used_gib}GiB used. "
-[ "$used_gib" -le "$ROOT_USED_MAX_GB" ] \
-  || problems+=("rootfs uses ${used_gib}GiB (limit ${ROOT_USED_MAX_GB}GiB for configured ${CLONE_CARD_NOMINAL_GB}GB clone cards)")
+# Warn before growth or a budgeted path threatens the configured bootable
+# clone-card capacity. The sourced helper keeps daily history and bounded du
+# measurements out of this already broad watchdog.
+check_rootfs_budget "$now"
 
 # backup disk presence + free space
 src=$(findmnt -no SOURCE "$BACKUP_MNT" 2>/dev/null)

@@ -46,9 +46,12 @@ for name in ('__init__', 'collector', 'parsers', 'report', 'store'):
 
 # Importing the redaction shim also imports the CLI and its package dependencies.
 # These are checked prerequisites, never managed deployment targets.
+MONITOR_V4_MODULES = (
+    '__init__', 'cli', 'common', 'crash', 'daemon', 'journal', 'probes', 'report', 'rollups', 'store',
+)
 MONITOR_PACKAGE_DEPENDENCIES = {
     f'pi/scripts/system_monitor/{name}.py': f'/home/pi/scripts/system_monitor/{name}.py'
-    for name in ('__init__', 'cli', 'common', 'crash', 'daemon', 'journal', 'probes', 'report', 'rollups', 'store')
+    for name in (*MONITOR_V4_MODULES, 'coalesce', 'locking', 'maintenance')
 }
 
 

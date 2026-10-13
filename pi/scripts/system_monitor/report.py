@@ -9,6 +9,7 @@ from .rollups import metric_value
 
 
 def event_public(row, include_state=True):
+    row = dict(row)
     event = {
         "id": row["id"],
         "timestamp": row["timestamp"],
@@ -21,6 +22,10 @@ def event_public(row, include_state=True):
         "summary": row["summary"],
         "message": row["message"],
     }
+    if row.get("is_aggregate"):
+        event.update(repeat_count=row["repeat_count"], last_seen=row["last_seen"])
+    if row.get("state_event_id") is not None:
+        event["state_event_id"] = row["state_event_id"]
     if include_state:
         event["state"] = decode_row_json(row, "state_json")
     return event
@@ -241,11 +246,16 @@ def build_diagnosis(events, current):
             if abs(event["timestamp"] - episode["started_at"]) <= 15
         ]
         if nearby:
-            correlated.append({"started_at": episode["started_at"], "usb_events": len(nearby)})
-    uncorrelated = max(0, len(episodes) - len(correlated))
+            correlated.append({"started_at": episode["started_at"],
+                               "usb_events": represented_count(nearby)})
     return diagnosis_from_evidence(
-        current, episodes, correlated, len(usb_failures), len(usb_overcurrents), len(storage_errors)
+        current, episodes, correlated, represented_count(usb_failures),
+        len(usb_overcurrents), represented_count(storage_errors),
     )
+
+
+def represented_count(events):
+    return sum(event.get("repeat_count", 1) for event in events)
 
 
 def diagnosis_from_evidence(current, episodes, correlated, usb_failures, usb_overcurrents, storage_errors):

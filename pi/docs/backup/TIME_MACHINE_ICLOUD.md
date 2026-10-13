@@ -11,7 +11,8 @@ roughly twice that amount; a completed transfer is not yet a Mac restore test.
 
 1. The Pi requires a fresh heartbeat from the functioning Mac helper before
    requesting any capture gate; a missing/asleep helper leaves ordinary backups
-   enabled. It acquires the existing backup/ignition lock and verifies the exact
+   enabled. It holds its own job lock, the `mbp2tbkup` disk lock and the single
+   iCloud upload slot ([CONCURRENCY.md](CONCURRENCY.md)) and verifies the exact
    `mbp2tbkup` filesystem. The existing Samba preexec drain gate blocks NEW
    Time Machine connections; other shares are unaffected.
 2. A small Mac root LaunchDaemon checks every two minutes. Only on an explicit,
@@ -55,7 +56,7 @@ and [close-share operation](https://www.samba.org/samba/docs/current/man-html/sm
 
 ## Local staging space and first-copy recovery
 
-Before starting a new frozen capture, the lock-owning worker reclaims local
+Before starting a new frozen capture, the job-lock-owning worker reclaims local
 SHA-256 objects that are unreachable from the capture index, pending manifest,
 all local generation manifests, upload list and verification checkpoints. This
 also runs before the first verified cloud copy, so interrupted captures cannot
@@ -71,12 +72,12 @@ mutation, archive removal or reduction of the configured free-space reserve.
 A killed worker or storage interruption can leave an unpublished `.capture-`
 temporary file. Cleanup recognizes only the worker's exact temporary-name format,
 on the same filesystem, owned by the store owner, regular and singly linked,
-with mode 0400 or 0600. The common backup lock excludes a live writer. These
+with mode 0400 or 0600. The exclusive `time-machine` job lock excludes a live writer. These
 unreferenced temporaries can be recovered even before the first capture index
 exists; arbitrary writable objects still stop cleanup.
 
 The existing wrapper exposes `--staging-gc-plan` and `--staging-gc-apply`; both
-require its usual backup lock and disk/ignition guards. Plan prints candidate
+require its usual job and disk locks and the disk/ignition guards. Plan prints candidate
 count and allocated bytes without deleting objects. Apply makes a fresh plan;
 it does not trust an old candidate list. The worker records cleanup totals in
 its private state and journal.
@@ -86,7 +87,7 @@ disk I/O, missing-file, read-only-filesystem, helper-check/timeout and transfer
 stall failures schedule a retry in five minutes through the existing minute
 timer. Public status explains these failures without exposing private command
 output. The retry remains pending
-while another job owns the backup lock, and explicit timed/indefinite manual
+while the other cloud job holds the upload slot, and explicit timed/indefinite manual
 pauses always take precedence. Authentication, permission, full-disk and invalid
 staging metadata failures still require attention rather than rapid retries.
 
@@ -111,7 +112,7 @@ object in a listing never admits it to this background queue. Rclone v1.75.1 emi
 these [completion events after its copy/rename checks](https://github.com/rclone/rclone/blob/v1.75.1/fs/operations/copy.go#L331-L355).
 Unrecognized/missed events fall back to the exhaustive post-upload check.
 
-The verifier retains the same common backup lock, has its own guarded rclone
+The verifier inherits the same job lock and upload slot, has its own guarded rclone
 client and no-progress watchdog, and stops if its parent disappears. Parent
 shutdown stops both clients. Only the parent writes dashboard state; the child
 writes the existing `verified-objects.json` after a complete matching download.
@@ -171,10 +172,10 @@ All cloud commands reuse the existing Pi uploader's fail-closed route/SSID,
 ignition, HDD policy and no-progress guards. Starlink is excluded, including
 mixed policies; network-path changes interrupt the connection. This is the same
 polling guard, not a promise of zero in-flight bytes during a sudden route switch.
-The 02:55–09:00 local-backup priority window and common lock also apply. A waiting
-capture gives up the lock when local backups need the window.
+Local Borg and EXFAT backups run alongside this job; only the Pi iCloud upload
+competes with it, for the single upload slot.
 The **Backup priority** dialog can temporarily put this cloud job first until
-verification, including across that daily window. Only scheduling order changes;
+verification. Only scheduling order changes;
 the storage, ignition, network and source-consistency guards remain mandatory.
 
 The Backups pane tracks the Mac copy separately from Pi/Borg: local capture,
@@ -187,8 +188,8 @@ the complete source inventory is revalidated and the pending manifest is saved;
 rounded byte totals alone do not establish a finished frozen copy.
 Both iCloud cards show rclone's current upload rate while uploading; stale or
 inactive counters are never presented as a live speed. **Resume now** retries
-saved work through the normal safety checks. If another backup holds the common
-lock, the request stays queued and is retried each minute until admitted.
+saved work through the normal safety checks. If the other cloud job holds the upload
+slot, the request stays queued and is retried each minute until admitted.
 **Pause for** offers 15/30 minutes, 1/4/12/24 hours or seven days. It stops the
 worker gracefully, preserves saved work and records a durable deadline in
 `pause.json`, separately from worker state. The minute resume timer honors that

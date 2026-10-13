@@ -27,10 +27,16 @@ class PipelineTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory(); self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
         self.remote = self.root / 'remote'; self.remote.mkdir()
-        self.lock_path = self.root / 'backup.lock'; self.lock_path.touch()
+        self.lock_dir = self.root / 'locks'; self.lock_dir.mkdir()
+        self.lock_path = self.lock_dir / 'job-time-machine.lock'; self.lock_path.touch()
         self.lock = self.lock_path.open('r+')
         self.addCleanup(self.lock.close)
         fcntl.flock(self.lock, fcntl.LOCK_EX)
+        environment = mock.patch.dict(os.environ, {
+            'VANPI_BACKUP_LOCK_DIR': str(self.lock_dir),
+            'VANPI_BACKUP_JOB_LOCK_FD': str(self.lock.fileno()),
+        })
+        environment.start(); self.addCleanup(environment.stop)
         self.a, self.b = b'completed earlier', b'next uploaded chunk'
         self.da, self.db = (hashlib.sha256(value).hexdigest() for value in (self.a,self.b))
         self.expected = {k:{'sha256':k,'bytes':len(v)} for k,v in ((self.da,self.a),(self.db,self.b))}
@@ -60,8 +66,7 @@ class PipelineTests(unittest.TestCase):
                    mock.patch.object(cloud,'check_work_allowed')]
         for patch in patches:
             patch.start(); self.addCleanup(patch.stop)
-        return VerificationPipeline(self.cfg,self.root,self.expected,self.rows,
-                                    lock_fd=self.lock.fileno(),lock_path=self.lock_path)
+        return VerificationPipeline(self.cfg,self.root,self.expected,self.rows)
 
     def until(self, pipeline, condition):
         deadline = time.monotonic()+8

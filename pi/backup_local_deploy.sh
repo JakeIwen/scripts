@@ -1,11 +1,19 @@
 #!/bin/bash
 # Shared payload and drift checks for the two targeted cloud installers.
-LOCAL_FAIRNESS_FILES=(local_fairness.py local_fairness_window.py local_fairness_rollback.py backup_window.sh pi_backup.sh exfat_snapshot.sh openwrt_backup.sh)
-LOCAL_BACKUP_CHECKED=(backup_conf.sh backup_priority.py cloud_backup_control.py protected_json.py "${LOCAL_FAIRNESS_FILES[@]}")
+LOCAL_BACKUP_FILES=(backup_locks.sh backup_window.sh pi_backup.sh exfat_snapshot.sh openwrt_backup.sh abort_backup.sh clone_now.sh)
+LOCAL_BACKUP_CHECKED=(backup_conf.sh backup_priority.py cloud_backup_control.py protected_json.py backup_locks.py "${LOCAL_BACKUP_FILES[@]}")
 
 local_backup_previous_conf_hash() {
   local repo=$1 revision=${VANPI_BACKUP_PREVIOUS_REVISION:-HEAD} hash
   hash=${VANPI_BACKUP_PREVIOUS_CONF_SHA256:-$(git -C "$repo" show "$revision:pi/scripts/backup/backup_conf.sh" | shasum -a 256)}
+  hash=${hash%% *}
+  [[ "$hash" =~ ^[0-9a-f]{64}$ ]] || return 1
+  printf '%s\n' "$hash"
+}
+
+local_backup_previous_tmpfiles_hash() {
+  local repo=$1 revision=${VANPI_BACKUP_PREVIOUS_REVISION:-HEAD} hash
+  hash=$(git -C "$repo" show "$revision:pi/tmpfiles.d/vanpi-backup.conf" | shasum -a 256) || return 1
   hash=${hash%% *}
   [[ "$hash" =~ ^[0-9a-f]{64}$ ]] || return 1
   printf '%s\n' "$hash"
@@ -27,6 +35,25 @@ local_backup_previous_hashes() {
     fi
     printf '%s:%s,' "$name" "${hash%% *}"
   done
+}
+
+verify_local_backup_tmpfiles() {
+  local source=$1 previous=$2 live=${3:-/etc/tmpfiles.d/vanpi-backup.conf} actual staged
+  [[ "$previous" =~ ^[0-9a-f]{64}$ ]] || return 1
+  [[ -f "$source" && ! -L "$source" ]] || return 1
+  if [[ ! -e "$live" && ! -L "$live" ]]; then
+    return 0
+  fi
+  if [[ ! -f "$live" || -L "$live" ]]; then
+    echo 'Live tmpfiles registry differs; inspect before deploying.' >&2
+    return 1
+  fi
+  actual=$(sha256sum "$live"); actual=${actual%% *}
+  staged=$(sha256sum "$source"); staged=${staged%% *}
+  if [[ "$actual" != "$previous" && "$actual" != "$staged" ]]; then
+    echo 'Live tmpfiles registry differs; inspect before deploying.' >&2
+    return 1
+  fi
 }
 
 verify_local_backup_payload() {

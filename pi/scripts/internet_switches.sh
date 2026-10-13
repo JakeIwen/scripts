@@ -303,7 +303,7 @@ recover_stale_mounts_if_needed() {
   # Samba. Stop only consumers of the affected labels before attempting a
   # normal unmount. The recovery helper never uses force or lazy detach and
   # revalidates the source immediately before changing it.
-  "$ISW_ABORT_BACKUP" || {
+  "$ISW_ABORT_BACKUP" "${stale_labels[@]}" || {
     echo "ERROR: backup/restore did not stop; refusing stale-mount recovery" >&2
     return 1
   }

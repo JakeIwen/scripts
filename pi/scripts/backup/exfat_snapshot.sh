@@ -268,8 +268,8 @@ log_snapshot_smart() {
 
 release_job_lock() {
   (( job_locked )) || return 0
-  "$flock_command" -u 9 || true
-  exec 9>&-
+  # Keep the job identity until exit; disk-scoped abort must not stop our cleanup.
+  release_backup_disk hdd1tb
   job_locked=0
 }
 
@@ -529,7 +529,7 @@ main() {
     log "van is running, deferring EXFAT snapshot"
     return 0
   fi
-  acquire_job_lock local-exfat || {
+  acquire_backup_job exfat hdd1tb EXFAT512 || {
     log "another backup/restore is active, deferring EXFAT snapshot"
     return 0
   }

@@ -19,17 +19,19 @@ size. This design trades bandwidth for independent, verifiable recovery copies.
   in the Pi's local timezone. Work is due seven days after the last
   verified upload. Deferrals retry in subsequent windows; manual login also
   requests the first run immediately.
-- Ignition, HDD policy, and the existing shared backup job lock apply. There is
-  no total-duration cutoff: healthy transfers may continue beyond four hours.
+- Ignition, HDD policy, and the backup lock registry apply: the worker holds
+  the `bigboi` disk and the single iCloud upload slot for its whole run, and the
+  Borg repository lock only while copying the repository, so local Borg and
+  EXFAT backups run alongside an upload ([CONCURRENCY.md](CONCURRENCY.md)).
+  There is no total-duration cutoff: healthy transfers may continue beyond four hours.
   A configurable **15-minute no-progress watchdog** stops stalled commands.
   It uses rclone's actual bytes/check/list counters, streamed download bytes,
   or local Borg/rsync process-tree I/O. Elapsed-time/error messages do not count
   as transfer progress. Interactive login is exempt from this watchdog.
-- From **02:55 to 09:00**, an active offsite job stops gracefully and releases
-  the HDD/lock while either daily Borg or EXFAT backup lacks today's success
-  stamp. This gives the existing 03:00–08:00 local retry window priority.
-  The offsite timer can resume early once both local backups succeed, otherwise
-  it resumes after 09:00. No local backup/clone schedule is changed.
+- The upload no longer yields to the daily local-backup window: local jobs own
+  different resources. If Borg needs the repository while the worker is still
+  copying it, Borg waits up to `BORG_REPO_LOCK_WAIT_SECONDS`; if the worker
+  needs it while Borg runs, the worker defers to its next hourly timer.
 - When freezing a new generation, the latest Pi Borg success must be no more
   than 48 hours old. Resuming an already frozen generation does not require
   another Borg run merely because that source stamp has aged.
@@ -63,10 +65,10 @@ size. This design trades bandwidth for independent, verifiable recovery copies.
 ## Dashboard progress and history
 
 The Backups header's **Backup priority** gear opens a separate dialog. Normal
-schedule reserves the daily Pi Borg/EXFAT512 window. **Mac iCloud until verified**
-or **Pi iCloud until verified** gives that pending/due recovery point the shared
-backup slot across that window. An already-running disk job finishes safely;
-subsequent disk jobs and the other cloud wait for their next eligible start.
+schedule lets either cloud job take the upload slot. **Mac iCloud until verified**
+or **Pi iCloud until verified** reserves the single iCloud upload slot for that
+pending/due recovery point; the other cloud job waits for its next eligible start.
+Local Borg, EXFAT and clone jobs are never held back by this setting.
 The selected cloud is resumed, but the other jobs' manual pause records are not
 changed. The menu shows their backup freshness. A current cloud copy cannot
 reserve priority for an entire future week; a new Pi capture also requires a
@@ -78,7 +80,7 @@ The worker/minute timer latches completion so later generations cannot reactivat
 an old override. Choose **Normal schedule** to cancel it. Existing cloud switching
 refuses to conflict with the selected priority; change priority in the menu first.
 Ignition, storage policy, mount identity, network-path and Starlink checks still
-apply. This setting never force-releases the common backup lock.
+apply. This setting never force-releases any backup lock.
 
 The same dialog offers a separate, explicit **Stop current Mac backup for
 capture** action. It is available only with a fresh capable Mac coordinator and
@@ -93,7 +95,7 @@ The Backups tile and pane include **Pi offsite · iCloud**. Running means a live
 systemd worker exists; a saved `uploading` phase without that worker is reported
 as interrupted, not running. Paused attempts show their last saved progress and
 a safe explanation, plus the next timer check. A timer check is not a promised
-start time: the uplink, disk policy, shared lock and local-backup window still apply.
+start time: the uplink, disk policy and the upload slot still apply.
 
 Failed, interrupted and sign-in attempts have a clickable **details** link in
 both cloud cards and their histories. The popup shows the selected attempt's
@@ -109,14 +111,14 @@ Both cloud cards offer **Resume now** and **Pause for** (15/30 minutes,
 pausing Pi recovery does not pause Time Machine replication. Stops are graceful,
 and existing uploaded files and verification checkpoints are retained. Pending
 Pi generations continue after a long pause even when older than the weekly
-interval. Resume queues behind other backup work and checks each minute until
-the worker acquires the lock. The dashboard names a recognized lock holder.
+interval. Resume queues behind the other cloud job (or a restore) and checks each minute
+until the worker holds the upload slot. The dashboard names the recognized holder.
 
 **Run this instead** pauses the other cloud job indefinitely and queues the
 selected job. Both control records are locked before either changes; a concurrent
 control is rejected without partial intents. The peer receives a graceful stop
-before the selected service receives a start request. The existing backup lock
-is never deleted, replaced or forcibly unlocked, and local jobs are never stopped.
+before the selected service receives a start request. No backup lock
+is ever deleted, replaced or forcibly unlocked, and local jobs are never stopped.
 If stopping is delayed, the selected job remains queued for the minute timer.
 The other cloud job stays paused until explicitly resumed. `paused_until` is a
 timestamp for timed holds/queued resumes, or the literal `indefinite`; old readers
@@ -245,9 +247,8 @@ passphrase stored inside an encrypted backup cannot unlock that backup.
 
 Defaults live in `pi/configs/icloud-backup.json`. The active root-only file is
 `/etc/vanpi-icloud-backup.json`; deployment adds missing defaults while preserving
-existing settings. `no_progress_timeout_seconds` defaults to 900. The local
-priority window is set by `local_backup_window_start` and
-`local_backup_window_end`; equal values disable that window.
+existing settings. `no_progress_timeout_seconds` defaults to 900. The former
+`local_backup_window_*` settings are ignored.
 
 ```sh
 ssh pi@vanpi.lan 'sudo /bin/bash /home/pi/scripts/backup/icloud_backup.sh --preflight'

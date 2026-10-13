@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 from .test_time_machine_icloud import GEN, source_fixture, store
 import time_machine_staging as staging
@@ -19,11 +20,16 @@ class StagingCleanupTests(unittest.TestCase):
         store.atomic_json(self.root / 'OWNER.json', {'owner': store.OWNER})
         self.source = source_fixture(self.base)
         self.manifest = store.freeze(self.source, self.root, GEN, 72, 0, lambda: None, lambda *args: None)
-        self.lock_path = self.base / 'backup.lock'
+        self.lock_dir = self.base / 'locks'; self.lock_dir.mkdir()
+        self.lock_path = self.lock_dir / 'job-time-machine.lock'
         self.lock = self.lock_path.open('w+')
         self.addCleanup(self.lock.close)
         fcntl.flock(self.lock, fcntl.LOCK_EX)
-        self.lock_args = {'lock_fd': self.lock.fileno(), 'lock_path': self.lock_path}
+        environment = mock.patch.dict(os.environ, {
+            'VANPI_BACKUP_LOCK_DIR': str(self.lock_dir),
+            'VANPI_BACKUP_JOB_LOCK_FD': str(self.lock.fileno()),
+        })
+        environment.start(); self.addCleanup(environment.stop)
 
     def orphan(self, data=b'obsolete encrypted chunk'):
         path = self.root / 'objects' / hashlib.sha256(data).hexdigest()
@@ -31,10 +37,10 @@ class StagingCleanupTests(unittest.TestCase):
         return path
 
     def plan(self):
-        return staging.plan_cleanup(self.root, lambda: None, **self.lock_args)
+        return staging.plan_cleanup(self.root, lambda: None)
 
     def apply(self, plan, check=lambda: None):
-        return staging.apply_cleanup(plan, check, **self.lock_args)
+        return staging.apply_cleanup(plan, check)
 
     def test_dry_run_and_apply_preserve_all_live_and_archived_data(self):
         orphan = self.orphan()
@@ -181,7 +187,7 @@ class StagingCleanupTests(unittest.TestCase):
     def test_second_lock_descriptor_cannot_enter_while_worker_owns_lock(self):
         with self.lock_path.open('r') as other:
             with self.assertRaises(BlockingIOError):
-                staging.plan_cleanup(self.root, lambda: None, lock_fd=other.fileno(), lock_path=self.lock_path)
+                staging.plan_cleanup(self.root, lambda: None, lock_fd=other.fileno())
 
     def test_retries_reclaim_superseded_capture_chunks_before_success(self):
         (self.root / 'pending.json').unlink()

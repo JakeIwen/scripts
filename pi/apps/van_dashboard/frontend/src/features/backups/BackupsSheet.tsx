@@ -44,15 +44,9 @@ function EvidenceCard({
   const operationRunning = status.operation.status === 'running';
   const stopRunning = status.stop.status === 'running';
   const stopping = kind !== undefined && stopRunning && status.stop.kind === kind;
-  const anyBackupRunning =
-    status.borg.running ||
-    status.exfatSnapshot.running ||
-    status.openwrt.running ||
-    status.icloud?.running ||
-    status.timeMachineIcloud?.running;
   const actionDisabled = evidence.running
     ? controls.blocked || stopRunning
-    : controls.blocked || operationRunning || stopRunning || anyBackupRunning;
+    : controls.blocked || operationRunning || stopRunning;
   return (
     <article className={`backup-evidence ${evidence.stale ? 'backup-evidence--stale' : ''}`}>
       <header>
@@ -165,11 +159,6 @@ function HotspareCard({
           controls.blocked ||
           status.operation.status === 'running' ||
           status.stop.status === 'running' ||
-          status.borg.running ||
-          status.exfatSnapshot.running ||
-          status.openwrt.running ||
-          status.icloud?.running ||
-          status.timeMachineIcloud?.running ||
           !card.attached ||
           card.mounted
         }

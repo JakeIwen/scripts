@@ -20,7 +20,7 @@ mkdir -p "$stamp_dir"
 cat > "$fake_conf" <<EOF
 STAMP_DIR='$stamp_dir'
 IGNITION_FLAG='$ignition_flag'
-acquire_job_lock() { return 1; }
+acquire_backup_job() { return 1; }
 EOF
 cat > "$fake_policyctl" <<'HELPER'
 #!/bin/bash

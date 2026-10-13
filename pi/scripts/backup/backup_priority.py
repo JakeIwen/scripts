@@ -22,7 +22,6 @@ class PriorityMode(str, Enum):
 
 class ControlLock(str, Enum):
     PRIORITY = 'control.lock'
-    LOCAL_WINDOW = 'local-supervisor.lock'
 
 
 MODE_VALUES = tuple(mode.value for mode in PriorityMode)
@@ -135,13 +134,16 @@ def complete_job(kind, state, directory=None):
 
 
 def allows(kind, directory=None, jobs=None):
-    from local_fairness import LocalJob, TOKEN_ENV, admit
-    if kind not in ('disk', PriorityMode.PI, PriorityMode.TIME_MACHINE, *LocalJob):
+    accepted = ('disk', 'borg', 'exfat', 'clone', 'pi-cloud', 'time-machine',
+                'pi', 'local-borg', 'local-exfat')
+    if kind not in accepted:
         raise ValueError('Unknown backup job.')
-    selected = policy(directory, jobs)
-    if selected == PriorityMode.NORMAL or kind == selected:
+    cloud_mode = {'pi-cloud': PriorityMode.PI, 'pi': PriorityMode.PI,
+                  'time-machine': PriorityMode.TIME_MACHINE}.get(kind)
+    if cloud_mode is None:
         return True
-    return kind in tuple(LocalJob) and admit(kind, os.environ.get(TOKEN_ENV), directory=directory, jobs=jobs)
+    selected = policy(directory, jobs)
+    return selected == PriorityMode.NORMAL or selected == cloud_mode
 
 
 def job_kind(cloud_directory, jobs=None):
@@ -204,7 +206,5 @@ def status(directory=None, jobs=None, now=None):
         entries.append({'kind': mode, 'label': job.label, 'eligible': eligible, 'reason': reason,
                         'last_success_at': state.get('last_success_at'),
                         'waiting': selected != PriorityMode.NORMAL and selected != mode})
-    from local_fairness import status as fairness_status
     return {'mode': selected, 'requested_at': record['requested_at'] if record else None,
-            'completed': bool(record and selected == PriorityMode.NORMAL), 'jobs': entries,
-            'local_fairness': fairness_status(directory, now)}
+            'completed': bool(record and selected == PriorityMode.NORMAL), 'jobs': entries}

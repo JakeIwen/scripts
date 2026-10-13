@@ -3769,10 +3769,14 @@ class BackupManagerTests(unittest.TestCase):
             )
             self.assertFalse(manager.status()["time_machine"]["running"])
 
-    def test_clone_uses_fixed_root_wrapper_and_whitelisted_attached_label(self):
+    def test_clone_uses_fixed_wrapper_and_overlaps_other_backup_kinds(self):
         with tempfile.TemporaryDirectory() as tempdir:
             config, stamps, bundle = self.make_files(tempdir, tm_running=False)
             calls = []
+            for pid, tool in (("101", "/test/pi_backup.sh"), ("102", "/test/exfat_snapshot.sh")):
+                process = Path(tempdir, "proc", pid)
+                process.mkdir()
+                (process / "cmdline").write_bytes(b"/bin/bash\0" + os.fsencode(tool) + b"\0")
 
             def command(args, timeout):
                 calls.append((list(args), timeout))
@@ -3794,9 +3798,9 @@ class BackupManagerTests(unittest.TestCase):
                 wall_clock=lambda: self.NOW,
                 process_root=os.path.join(tempdir, "proc"),
             )
+            self.icloud_status.return_value = {"available": True, "running": True}
             manager.start_clone("hotspare-a")
             manager.thread.join(2)
-            self.assertFalse(manager.thread.is_alive())
             self.assertEqual(manager.operation["status"], "complete")
             clone_calls = [call for call in calls if call[0][0] == dashboard_common.SUDO]
             self.assertEqual(
@@ -3806,26 +3810,26 @@ class BackupManagerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "unknown hotspare"):
                 manager.start_clone("/dev/sda")
 
-    def test_clone_refuses_unattached_or_mounted_cards(self):
+    def test_clone_refuses_unattached_mounted_or_dashboard_operation(self):
         with tempfile.TemporaryDirectory() as tempdir:
             config, stamps, bundle = self.make_files(tempdir, tm_running=False)
-            for mounted, target, message in (
-                (False, "hotspare-b", "not attached"),
-                (True, "hotspare-a", "mounted partitions"),
+            for mounted, target, message, operation in (
+                (False, "hotspare-b", "not attached", False),
+                (True, "hotspare-a", "mounted partitions", False),
+                (False, "hotspare-a", "another dashboard clone is already running", True),
             ):
                 manager = dashboard_backups.BackupManager(
-                    config=config,
-                    stamp_dir=stamps,
+                    config=config, stamp_dir=stamps,
                     time_machine_bundle=bundle,
                     command=lambda args, timeout, mounted=mounted: SimpleNamespace(
-                        returncode=0,
-                        stdout=json.dumps(self.lsblk_payload(mounted=mounted)),
-                        stderr="",
+                        returncode=0, stdout=json.dumps(self.lsblk_payload(mounted=mounted)), stderr=""
                     ),
                     wall_clock=lambda: self.NOW,
                     process_root=os.path.join(tempdir, "proc"),
                 )
-                with self.subTest(target=target):
+                if operation:
+                    manager.operation.update({"status": "running", "kind": "borg"})
+                with self.subTest(target=target, operation=operation):
                     with self.assertRaisesRegex(dashboard_backups.BackupStatusError, message):
                         manager.start_clone(target)
 
@@ -3863,33 +3867,28 @@ class BackupManagerTests(unittest.TestCase):
                     self.assertEqual(manager.operation["status"], "error")
                     self.assertIn(message, manager.operation["error"])
 
-    def test_manual_backups_use_separate_fixed_force_commands_and_stamps(self):
+    def test_manual_backups_serialize_dashboard_operations_and_allow_scheduler_overlap(self):
         with tempfile.TemporaryDirectory() as tempdir:
             config, stamps, bundle = self.make_files(tempdir, tm_running=False)
+            process = Path(tempdir, "proc", "101")
+            process.mkdir()
             calls = []
+
+            def mark_running(tool):
+                (process / "cmdline").write_bytes(b"/bin/bash\0" + os.fsencode(tool) + b"\0")
 
             def command(args, timeout):
                 calls.append((list(args), timeout))
                 if args[0] == dashboard_common.LSBLK:
                     return SimpleNamespace(
-                        returncode=0,
-                        stdout=json.dumps(self.lsblk_payload()),
-                        stderr="",
+                        returncode=0, stdout=json.dumps(self.lsblk_payload()), stderr=""
                     )
-                stamp_name = (
-                    "borg_ok" if args[2] == "/test/pi_backup.sh" else "exfat512_ok"
-                )
-                stamp = os.path.join(stamps, stamp_name)
-                os.utime(stamp, (self.NOW + 1, self.NOW + 1))
-                return SimpleNamespace(
-                    returncode=0,
-                    stdout="backup complete",
-                    stderr="",
-                )
+                stamp_name = "borg_ok" if args[2] == "/test/pi_backup.sh" else "exfat512_ok"
+                os.utime(os.path.join(stamps, stamp_name), (self.NOW + 1, self.NOW + 1))
+                return SimpleNamespace(returncode=0, stdout="backup complete", stderr="")
 
             manager = dashboard_backups.BackupManager(
-                config=config,
-                stamp_dir=stamps,
+                config=config, stamp_dir=stamps,
                 borg_tool="/test/pi_backup.sh",
                 exfat_tool="/test/exfat_snapshot.sh",
                 time_machine_bundle=bundle,
@@ -3898,30 +3897,31 @@ class BackupManagerTests(unittest.TestCase):
                 wall_clock=lambda: self.NOW,
                 process_root=os.path.join(tempdir, "proc"),
             )
-            manager.start_borg_backup()
-            manager.thread.join(2)
-            self.assertFalse(manager.thread.is_alive())
-            self.assertEqual(manager.operation["status"], "complete")
-            self.assertEqual(manager.operation["kind"], "borg")
-            manager.start_exfat_backup()
-            manager.thread.join(2)
-            self.assertFalse(manager.thread.is_alive())
-            self.assertEqual(manager.operation["status"], "complete")
-            self.assertEqual(manager.operation["kind"], "exfat")
+            self.icloud_status.return_value = {"available": True, "running": True, "attention": False}
+            cases = (
+                ("borg", "Borg", manager.exfat_tool, manager.start_borg_backup),
+                ("exfat", "EXFAT512 snapshot", manager.borg_tool, manager.start_exfat_backup),
+            )
+            for kind, label, other_tool, starter in cases:
+                mark_running(other_tool)
+                starter()
+                manager.thread.join(2)
+                self.assertEqual(manager.operation["status"], "complete")
+                self.assertEqual(manager.operation["kind"], kind)
+                mark_running(manager.borg_tool if kind == "borg" else manager.exfat_tool)
+                with self.assertRaises(dashboard_backups.BackupStatusError) as raised:
+                    starter()
+                self.assertEqual(str(raised.exception), f"a {label} backup is already running")
+            manager.operation.update({"status": "running", "kind": "exfat"})
+            dashboard_running = "another dashboard backup operation is running"
+            with self.assertRaisesRegex(dashboard_backups.BackupStatusError, dashboard_running):
+                manager.start_borg_backup()
             backup_calls = [call for call in calls if call[0][0] == dashboard_common.SUDO]
             self.assertEqual(
                 backup_calls,
                 [
-                    ([dashboard_common.SUDO, "-n", "/test/pi_backup.sh", "--force"], 321),
-                    (
-                        [
-                            dashboard_common.SUDO,
-                            "-n",
-                            "/test/exfat_snapshot.sh",
-                            "--force",
-                        ],
-                        321,
-                    ),
+                    ([dashboard_common.SUDO, "-n", manager.borg_tool, "--force"], 321),
+                    ([dashboard_common.SUDO, "-n", manager.exfat_tool, "--force"], 321),
                 ],
             )
 
@@ -3974,12 +3974,12 @@ class BackupManagerTests(unittest.TestCase):
                     self.assertEqual(manager.operation["status"], "error")
                     self.assertIn(message, manager.operation["error"])
 
-    def test_clone_wrapper_uses_shared_lock_and_never_initializes_a_card(self):
+    def test_clone_wrapper_uses_per_kind_lock_and_never_initializes_a_card(self):
         repository = str(REPOSITORY_ROOT)
         path = os.path.join(repository, "pi", "scripts", "backup", "clone_now.sh")
         with open(path, encoding="utf-8") as handle:
             script = handle.read()
-        self.assertIn("acquire_job_lock", script)
+        self.assertIn("acquire_backup_job clone", script)
         self.assertIn('/home/pi/scripts/backup/clone_to_sd.sh "$label"', script)
         self.assertNotIn('clone_to_sd.sh --init', script)
 

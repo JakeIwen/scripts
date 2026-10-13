@@ -22,22 +22,17 @@ case "$#" in
     ;;
 esac
 
-# Only this scheduled entry point may reserve a local fairness turn. Manual
-# --force still uses ordinary priority admission and cannot borrow a turn.
-unset VANPI_LOCAL_FAIRNESS_TOKEN
-if (( ${#force_args[@]} == 0 )); then
-  . "${PI_BACKUP_CONF:-/home/pi/scripts/backup/backup_conf.sh}" || exit 1
-  exec /usr/bin/python3 "$script_dir/local_fairness_window.py" \
-    --borg-stamp "$STAMP_DIR/borg_ok" --exfat-stamp "$EXFAT_SNAPSHOT_STAMP" \
-    --stale-hours "$LOCAL_BACKUP_FAIRNESS_HOURS" \
-    --admission-seconds "$LOCAL_BACKUP_FAIRNESS_ADMISSION_SECONDS" \
-    --backoff-hours "$LOCAL_BACKUP_FAIRNESS_BACKOFF_HOURS"
-fi
-
 status=0
-for job in pi_backup.sh exfat_snapshot.sh; do
+jobs=(pi_backup.sh exfat_snapshot.sh)
+pids=()
+for job in "${jobs[@]}"; do
   echo "[$(/usr/bin/date '+%F %T')] starting $job"
-  "$script_dir/$job" "${force_args[@]}"
+  "$script_dir/$job" "${force_args[@]}" &
+  pids+=("$!")
+done
+for index in "${!jobs[@]}"; do
+  job=${jobs[$index]}
+  wait "${pids[$index]}"
   rc=$?
   if (( rc != 0 )); then
     echo "[$(/usr/bin/date '+%F %T')] $job failed (status $rc)" >&2

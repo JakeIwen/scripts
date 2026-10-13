@@ -81,7 +81,7 @@ if [ -f "$IGNITION_FLAG" ]; then
   log "van is running, deferring (drives unmounted for vibration protection)"
   exit 0
 fi
-acquire_job_lock local-borg || { log "another backup/restore is active, exiting"; exit 0; }
+acquire_backup_job borg bigboi movingparts || { log "another backup/restore is active, exiting"; exit 0; }
 if ! backup_progress_begin borg mounting "Mounting and verifying backup disks"; then
   log "backup progress telemetry is unavailable"
 fi
@@ -105,12 +105,17 @@ aborted() {
 stopped_by_user() {
   stop_active_child
   if [ "$backup_mounted_here" = 1 ]; then
-    if umount "$BACKUP_MNT"; then
-      backup_mounted_here=0
+    if release_backup_disk_if_unused bigboi; then
+      if umount "$BACKUP_MNT"; then
+        backup_mounted_here=0
+      else
+        log "WARNING: stopped backup could not unmount $BACKUP_MNT"
+        notify "vanpi backup stopped with cleanup warning" \
+          "$BACKUP_MNT remains mounted after the user-requested stop" high warning
+      fi
+      release_backup_disk bigboi
     else
-      log "WARNING: stopped backup could not unmount $BACKUP_MNT"
-      notify "vanpi backup stopped with cleanup warning" \
-        "$BACKUP_MNT remains mounted after the user-requested stop" high warning
+      log "leaving $BACKUP_MNT mounted for another backup job"
     fi
   fi
   log "stopped at user request; unfinished archive or clone was not marked current"
@@ -182,6 +187,7 @@ if ensure_mounted movingparts "$MEDIA_SRC"; then
 else
   notify "vanpi backup" "movingparts not available, media mirror skipped" high warning
 fi
+release_backup_disk movingparts
 
 bail_if_driving
 
@@ -224,6 +230,8 @@ for exclude in "${BORG_EXCLUDES[@]}"; do
 done
 log "borg create ::$archive"
 backup_progress_update archiving "Creating the Borg archive" || true
+acquire_backup_lock data borg-repo "$BORG_REPO_LOCK_WAIT_SECONDS" ||
+  fail "Borg repository is busy (a cloud repository copy is in progress)"
 run borg create --stats --compression zstd --one-file-system \
   "${borg_exclude_args[@]}" \
   "::$archive" / /boot/firmware
@@ -238,26 +246,30 @@ if [ "$(date +%-d)" = "$BORG_CHECK_DOM" ]; then
   backup_progress_update integrity "Checking Borg repository integrity" || true
   run borg check || fail "borg check found repository problems"
 fi
+release_backup_lock data borg-repo
 
 bail_if_driving
 
 # --- 5. bootable clones when due ---
 clone_summary=""
 now=$(date +%s)
-for entry in "${CLONE_TARGETS[@]}"; do
-  # A borrowed turn covers local recovery copies, never hotspare propagation.
-  [[ -z ${VANPI_LOCAL_FAIRNESS_TOKEN:-} ]] || { log "local fairness turn: clones deferred"; break; }
-  label=${entry%%:*}; interval=${entry##*:}
-  stamp="$STAMP_DIR/clone_$label"
-  age_days=9999
-  [ -f "$stamp" ] && age_days=$(( (now - $(stat -c %Y "$stamp")) / 86400 ))
-  if [ "$age_days" -ge "$interval" ]; then
-    log "clone to $label due (${age_days}d >= ${interval}d)"
-    backup_progress_update cloning "Refreshing bootable hotspare $label" || true
-    run /home/pi/scripts/backup/clone_to_sd.sh "$label" && age_days=0
-  fi
-  clone_summary+="$label: ${age_days}d old. "
-done
+if acquire_backup_lock job clone; then
+  for entry in "${CLONE_TARGETS[@]}"; do
+    label=${entry%%:*}; interval=${entry##*:}
+    stamp="$STAMP_DIR/clone_$label"
+    age_days=9999
+    [ -f "$stamp" ] && age_days=$(( (now - $(stat -c %Y "$stamp")) / 86400 ))
+    if [ "$age_days" -ge "$interval" ]; then
+      log "clone to $label due (${age_days}d >= ${interval}d)"
+      backup_progress_update cloning "Refreshing bootable hotspare $label" || true
+      run /home/pi/scripts/backup/clone_to_sd.sh "$label" && age_days=0
+    fi
+    clone_summary+="$label: ${age_days}d old. "
+  done
+  release_backup_lock job clone
+else
+  log "another hotspare clone is active; clones deferred"
+fi
 
 # --- 6. stamp + notify ---
 backup_progress_update finishing "Recording success and releasing the backup disk" || true
@@ -268,11 +280,16 @@ free_gb=$(( $(df -k --output=avail "$BACKUP_MNT" | tail -1) / 1024 / 1024 ))
   "only ${free_gb}GB free on $BACKUP_MNT (limit ${MIN_FREE_GB}GB)" high warning
 if [ "$UNMOUNT_AFTER" = 1 ]; then
   if [ "$backup_mounted_here" = 1 ]; then
-    if ! umount "$BACKUP_MNT"; then
-      log "WARNING: could not unmount $BACKUP_MNT (an open file or shell may be holding it)"
-      notify "vanpi backup" \
-        "backup succeeded, but $BACKUP_MNT could not be unmounted; check for an open file or shell before moving the van" \
-        high warning
+    if release_backup_disk_if_unused bigboi; then
+      if ! umount "$BACKUP_MNT"; then
+        log "WARNING: could not unmount $BACKUP_MNT (an open file or shell may be holding it)"
+        notify "vanpi backup" \
+          "backup succeeded, but $BACKUP_MNT could not be unmounted; check for an open file or shell before moving the van" \
+          high warning
+      fi
+      release_backup_disk bigboi
+    else
+      log "leaving $BACKUP_MNT mounted for another backup job"
     fi
   else
     log "leaving pre-existing $BACKUP_MNT mount in place"

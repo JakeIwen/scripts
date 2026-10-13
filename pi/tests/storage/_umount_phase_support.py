@@ -191,8 +191,10 @@ def _transform_source(source_text: str) -> str:
             1,
         ),
         (
-            '/usr/bin/sudo /home/pi/scripts/backup/abort_backup.sh "${abort_args[@]}"',
-            'ud_fake_abort_backup "${abort_args[@]}"',
+            'if ! /usr/bin/sudo /home/pi/scripts/backup/abort_backup.sh "${abort_args[@]}" "${mounted_labels[@]}" ||\n'
+            '       ! hold_backup_disks_exclusive "${mounted_labels[@]}"; then',
+            'if ! ud_fake_abort_backup "${abort_args[@]}" "${mounted_labels[@]}" ||\n'
+            '       ! hold_backup_disks_exclusive "${mounted_labels[@]}"; then',
             1,
         ),
         (
@@ -370,7 +372,24 @@ fake_samba_share_control() {
 }
 
 ud_fake_abort_backup() {
-  trace "abort-backup:${*:-normal}"
+  local label index mode=normal
+  local -a actual=("$@") expected=()
+  (( emergency )) && { expected=(--emergency); mode=--emergency; }
+  for label in "${mounted_labels[@]}"; do
+    expected+=("$label")
+  done
+  if (( ${#actual[@]} != ${#expected[@]} )); then
+    trace "invalid-abort-arguments:$*"
+    return 99
+  fi
+  for index in "${!expected[@]}"; do
+    if [[ "${actual[$index]}" != "${expected[$index]}" ]]; then
+      trace "invalid-abort-arguments:$*"
+      return 99
+    fi
+  done
+  # Verify the new scoped contract, then retain the frozen phase-order oracle.
+  trace "abort-backup:$mode"
   emit_output "$ABORT_OUTPUT"
   return "$ABORT_STATUS"
 }
@@ -585,6 +604,10 @@ def _run_scenario(source: Path, bash: Path, scenario: Scenario) -> dict[str, obj
             _transform_source(source_text), encoding="utf-8"
         )
         (harness / "disk_policy.sh").write_text(DISK_POLICY_STUB, encoding="utf-8")
+        (harness / "backup").mkdir()
+        (harness / "backup" / "backup_locks.sh").write_text(
+            "hold_backup_disks_exclusive() { :; }\n", encoding="utf-8"
+        )
         (harness / "scenario.sh").write_text(
             _scenario_config(scenario), encoding="utf-8"
         )
@@ -626,6 +649,10 @@ def _run_direct_phase(source: Path, bash: Path, phase: str) -> dict[str, object]
             source.read_text(encoding="utf-8"), encoding="utf-8"
         )
         (harness / "disk_policy.sh").write_text(DISK_POLICY_STUB, encoding="utf-8")
+        (harness / "backup").mkdir()
+        (harness / "backup" / "backup_locks.sh").write_text(
+            "hold_backup_disks_exclusive() { :; }\n", encoding="utf-8"
+        )
         driver = harness / "driver.sh"
         driver.write_text(DIRECT_PHASE_DRIVER, encoding="utf-8")
         driver.chmod(0o700)

@@ -1,5 +1,5 @@
 [Unit]
-Description=Retry weekly iCloud copy, yielding when local backups are due
+Description=Retry weekly iCloud copy when the cloud upload slot is free
 
 [Timer]
 OnCalendar=*-*-* *:17:00

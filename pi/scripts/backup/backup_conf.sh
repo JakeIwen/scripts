@@ -94,10 +94,9 @@ UBNT_BACKUP_MAX_BYTES=$((16 * 1024 * 1024))
 export NTFY_URL="${NTFY_BACKUP_URL:-}"
 NTFY_ON_SUCCESS=1      # 0 = only notify on failures/watchdog findings
 BORG_STALE_HOURS=48    # watchdog alerts past this
-# Only scheduled Borg/EXFAT may borrow a turn from an until-verified priority.
-LOCAL_BACKUP_FAIRNESS_HOURS=24
-LOCAL_BACKUP_FAIRNESS_ADMISSION_SECONDS=300
-LOCAL_BACKUP_FAIRNESS_BACKOFF_HOURS=6
+# Borg waits this long for the Pi cloud job's repository copy to finish before
+# giving up; the hourly window retries a run that times out.
+BORG_REPO_LOCK_WAIT_SECONDS=1800
 CLONE_STALE_FACTOR=2   # watchdog alerts when clone age > factor * interval
 MIN_FREE_GB=100        # watchdog alerts when bigboi free space drops below this
 # Default nominal capacity shared by the live boot card and bootable clone
@@ -114,6 +113,20 @@ if [[ -f "$CLONE_CARD_NOMINAL_GB_FILE" && ! -L "$CLONE_CARD_NOMINAL_GB_FILE" ]];
   unset configured_clone_card_nominal_gb
 fi
 ROOT_USED_MAX_GB=$((CLONE_CARD_NOMINAL_GB * 13 / 16))
+# Rootfs growth and path budgets used by backup_watchdog.sh. Budgets are MiB so
+# fractional-GiB limits stay exact; keep each entry in absolute-path:MiB form.
+ROOT_GROWTH_WARN_GIB_7D=4
+ROOTFS_HISTORY_FILE="$STAMP_DIR/rootfs_used_mib.history"
+ROOTFS_HISTORY_MAX_ENTRIES=120
+ROOTFS_DU_TIMEOUT_SECONDS=300
+ROOTFS_PATH_BUDGETS_MIB=(
+  /home/pi/dev/obd-things/tmp:8192
+  /var/lib/vanpi-monitor:1024
+  /var/lib/van-telemetry:3072
+  /home/pi/.codex:4096
+  /var/cache/apt:1024
+  /var/log:1536
+)
 UNMOUNT_AFTER=1        # when pi_backup mounted bigboi itself, unmount it afterward;
                        # preserve a mount that was already present when the job began
 
@@ -144,12 +157,14 @@ lock_disk() { # lock_disk sda — held for the remaining life of the calling scr
   flock -n 8 || { echo "another backup/restore is writing /dev/$1, aborting"; return 1; }
 }
 
-# Serialize local backup, clone, and restore operations. systemd-tmpfiles
+# Legacy whole-system lock. Migrated jobs hold it shared alongside their
+# resource locks (backup_locks.sh); restore, hotspare initialization and
+# deployment fences still hold it exclusively through acquire_job_lock, which
+# therefore excludes and is excluded by every running job. systemd-tmpfiles
 # pre-creates this file as root:pi 0660. Keeping a root-owned inode is
 # important because /run/lock is sticky and fs.protected_regular may otherwise
 # prevent a root abort helper from reopening a lock first created by pi.
-# The holder PID is recorded so abort_backup.sh (called by umount_disks.sh
-# before pulling mounts) can TERM the active job tree.
+# Exclusive holders record their PID so abort_backup.sh can TERM that tree.
 JOB_LOCK=${VANPI_BACKUP_JOB_LOCK:-/run/lock/vanpi_backup.lock}
 JOB_LOCK_OWNER=${VANPI_BACKUP_JOB_LOCK_OWNER:-root}
 JOB_LOCK_GROUP=${VANPI_BACKUP_JOB_LOCK_GROUP:-pi}
@@ -192,3 +207,7 @@ acquire_job_lock() {
   fi
   printf '%s\n' "$$" > "$JOB_LOCK"
 }
+
+# Resource-specific locks for migrated jobs (job identity, disks, data sets and
+# the single iCloud upload slot). See pi/docs/backup/CONCURRENCY.md.
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/backup_locks.sh"

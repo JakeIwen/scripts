@@ -60,17 +60,18 @@ class StatusTests(unittest.TestCase):
         self.assertFalse(result['attention'])
         self.assertEqual(result['next_due_at'], 990 + 7 * 86400)
 
-    def test_queued_message_names_verified_lock_owner_and_rejects_stale_pid(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            lock = root / 'backup.lock'; lock.write_text('123\n')
-            proc = root / 'proc/123'; (proc / 'fd').mkdir(parents=True)
-            (proc / 'cmdline').write_bytes(b'python3\0/home/pi/scripts/backup/icloud_backup.py\0--run\0')
-            self.assertNotIn('Pi iCloud', status.queued_backup_message(lock, root / 'proc'))
-            (proc / 'fd/9').symlink_to(lock)
-            self.assertIn('waiting for Pi iCloud backup to finish', status.queued_backup_message(lock, root / 'proc'))
-            (proc / 'cmdline').write_bytes(b'python3\0/private/unrelated.py\0')
-            self.assertNotIn('private', status.queued_backup_message(lock, root / 'proc'))
+    def test_queued_message_prioritizes_cloud_then_legacy_and_ignores_local_jobs(self):
+        with mock.patch.object(status.backup_locks, 'active_jobs', return_value={'borg': 10, 'pi-cloud': 11}), \
+                mock.patch.object(status.backup_locks, 'legacy_exclusive_holder', return_value=12):
+            self.assertIn('waiting for Pi iCloud backup to finish', status.queued_backup_message())
+        with mock.patch.object(status.backup_locks, 'active_jobs', return_value={'exfat': 10}), \
+                mock.patch.object(status.backup_locks, 'legacy_exclusive_holder', return_value=12):
+            self.assertIn('restore or maintenance job', status.queued_backup_message())
+        with mock.patch.object(status.backup_locks, 'active_jobs', return_value={'clone': 10}), \
+                mock.patch.object(status.backup_locks, 'legacy_exclusive_holder', return_value=None):
+            message = status.queued_backup_message()
+            self.assertEqual(message, 'Resume queued: another backup may be using the disks. Checks every minute.')
+            self.assertNotIn('hotspare', message)
 
     def test_manual_projection_preserves_upload_history_and_clears_only_on_expiry(self):
         original = self.build({'phase': 'deferred', 'pending': GEN})

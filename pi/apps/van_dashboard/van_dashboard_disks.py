@@ -204,6 +204,26 @@ class DiskManager:
             raise DiskCommandError(f"disk health for {label} has an invalid schema")
         return payload
 
+    @staticmethod
+    def _storage_event_rows(connection, since):
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(events)")}
+        if {"repeat_count", "last_seen", "state_event_id"} <= columns:
+            return connection.execute(
+                "SELECT e.timestamp, e.severity, e.message, e.repeat_count, "
+                "COALESCE(e.last_seen, e.timestamp) AS last_seen, "
+                "COALESCE(e.state_json, snapshot.state_json) AS state_json "
+                "FROM events e LEFT JOIN events snapshot ON snapshot.id=e.state_event_id "
+                "WHERE e.category='storage' AND e.timestamp >= ? "
+                "ORDER BY e.timestamp DESC LIMIT 2000", (since,),
+            ).fetchall()
+        # The dashboard may update before the collector migrates its DB.
+        return connection.execute(
+            "SELECT timestamp, severity, message, state_json, 1 AS repeat_count, "
+            "timestamp AS last_seen FROM events "
+            "WHERE category='storage' AND timestamp >= ? "
+            "ORDER BY timestamp DESC LIMIT 2000", (since,),
+        ).fetchall()
+
     def _storage_events(self, labels, since):
         mapped = {label: [] for label in labels}
         try:
@@ -212,16 +232,7 @@ class DiskManager:
             connection = sqlite3.connect(uri, uri=True, timeout=2)
             connection.row_factory = sqlite3.Row
             try:
-                rows = connection.execute(
-                    """
-                    SELECT timestamp, severity, message, state_json
-                    FROM events
-                    WHERE category = 'storage' AND timestamp >= ?
-                    ORDER BY timestamp DESC
-                    LIMIT 2000
-                    """,
-                    (since,),
-                ).fetchall()
+                rows = self._storage_event_rows(connection, since)
             finally:
                 connection.close()
         except (OSError, sqlite3.Error):
@@ -268,7 +279,8 @@ class DiskManager:
             for label in event_labels & wanted:
                 mapped[label].append(
                     {
-                        "timestamp": int(row["timestamp"]),
+                        "timestamp": int(row["last_seen"]),
+                        "repeat_count": row["repeat_count"],
                         "severity": row["severity"],
                         "message": message[:500],
                         "boot_id": event_boot_id,
@@ -460,10 +472,10 @@ class DiskManager:
                         "read_only": mount_health["read_only"],
                         "accessible": mount_health["accessible"],
                         "writable": mount_health["writable"],
-                        "recent_error_count": len(unresolved_events),
-                        "current_boot_error_count": len(current_boot_events),
-                        "previous_boot_error_count": len(previous_boot_events),
-                        "historical_error_count": len(events),
+                        "recent_error_count": sum(e["repeat_count"] for e in unresolved_events),
+                        "current_boot_error_count": sum(e["repeat_count"] for e in current_boot_events),
+                        "previous_boot_error_count": sum(e["repeat_count"] for e in previous_boot_events),
+                        "historical_error_count": sum(e["repeat_count"] for e in events),
                         "latest_error_at": events[0]["timestamp"] if events else None,
                         "latest_error": events[0]["message"] if events else None,
                         "current_error_at": (

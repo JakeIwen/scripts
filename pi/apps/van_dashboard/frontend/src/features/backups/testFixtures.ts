@@ -1,4 +1,5 @@
 import { decodeBackupStatusResponse } from './decoders';
+import type { AvailableICloudStatus } from './icloud';
 
 export function backupStatusPayload(running = false): Record<string, unknown> {
   const progress = running
@@ -86,6 +87,38 @@ export function backupStatusPayload(running = false): Record<string, unknown> {
         error: null,
       },
     },
+  };
+}
+
+export function sampleRunningICloudStatus(): AvailableICloudStatus {
+  return {
+    available: true,
+    running: true,
+    phase: 'uploading',
+    message: 'Uploading backup data.',
+    lastWorkPhase: 'uploading',
+    generation: 'test-generation',
+    lastSuccessAt: null,
+    nextCheckAt: null,
+    nextDueAt: null,
+    updatedAt: 1_700_000_100,
+    progressStale: false,
+    attention: false,
+    intervalDays: 7,
+    keepGenerations: 8,
+    historyStartedAt: 1_700_000_000,
+    progress: {
+      uploadEstimatedBytes: 500,
+      uploadTotalBytes: 1_000,
+      commandBytes: 250,
+      verifiedBytes: null,
+      verificationTotalBytes: null,
+      verifiedFiles: null,
+      verificationTotalFiles: null,
+      currentFileBytes: null,
+    },
+    attempts: [],
+    verifiedGenerations: [],
   };
 }
 

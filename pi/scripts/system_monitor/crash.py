@@ -138,8 +138,8 @@ def _classify_previous_boot(ordered):
                 "summary": summary,
             }
             classified.append(enriched)
-            counts[category] += 1
-            counts[kind] += 1
+            counts[category] += item.get("repeat_count", 1)
+            counts[kind] += item.get("repeat_count", 1)
         elif any(pattern in item["message"].lower() for pattern in fatal_patterns):
             classified.append(
                 {
@@ -150,7 +150,7 @@ def _classify_previous_boot(ordered):
                     "summary": "Potential crash precursor",
                 }
             )
-            counts["fatal_log"] += 1
+            counts["fatal_log"] += item.get("repeat_count", 1)
     return ended_cleanly, classified, counts
 
 

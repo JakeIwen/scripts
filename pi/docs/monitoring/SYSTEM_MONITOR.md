@@ -47,28 +47,130 @@ and dashboard report each zone separately.
 At startup the daemon imports relevant messages from the current boot. Those
 older events are labeled as journal backfill because a full state snapshot was
 not available at their original event time. New events get live snapshots.
-Resource rollups are retained for 90 days; noteworthy events are retained. The
+Resource rollups are retained for 90 days; noteworthy event **counts** are retained.
+Event state snapshots expire after 30 days (`EVENT_STATE_RETENTION_DAYS`). Pruning
+never deletes noteworthy events: only explicit offline compaction replaces old
+storm rows with count-preserving aggregates. The
 48-hour detailed sample ring is bounded by insertion order rather than wall
 clock, because boot-time NTP correction can move a Pi's clock. It is written
 with SQLite's FULL synchronous mode so a committed sample is recoverable after
 abrupt power loss.
 
-The database is `/var/lib/vanpi-monitor/events.sqlite3`. The dashboard accesses
-it through bounded monitor commands instead of opening the database itself.
-Ordinary health reports are read-only. A user-requested crash analysis writes
+The database is `/var/lib/vanpi-monitor/events.sqlite3`. Health reports access
+it through bounded monitor commands; the disk tile has a separate read-only
+storage-history query. Ordinary health reports are read-only. A user-requested crash analysis writes
 only its redacted result back to the monitor database.
 
 Reports aggregate event counts and latest occurrences in SQLite using the
-covering `events_report_idx` index. Only the displayed events and undervoltage
-transitions are loaded into Python; USB correlations use indexed time windows.
-Counts and diagnoses still cover the full selected range, even during a USB
-error storm. Existing databases receive the index when the collector initializes;
-read-only report commands never migrate the schema.
+covering `events_report_v5_idx` index; the original `events_report_idx` remains
+for v4-compatible reads. Counts sum `repeat_count`, not the number of stored
+rows. Only displayed events and undervoltage transitions are loaded into Python;
+USB correlations use indexed time windows. Counts and diagnoses cover the full
+selected range, independent of the display limit. Existing databases receive
+schema v5 and its index when the collector initializes. Read-only event readers
+inspect available columns to choose their v4/v5 projections without migrating;
+lock and I/O errors remain errors, never a reason to substitute unweighted counts.
+
+### Journal storms and retention
+
+Live journal follow and current-boot backfill use the same ingestion path:
+
+- Only kernel journal **USB and storage** events are eligible. For each boot/kind,
+  retain the first **20 individual rows per 60 seconds of journal monotonic time**,
+  then one aggregate. Category/severity also partition the window to preserve
+  exact grouped counts.
+- Only the first row has a state snapshot. Following rows point to that row via
+  `state_event_id`; the aggregate retains a representative message, `repeat_count`
+  and `last_seen`. Event JSON adds aggregate fields without changing ordinary
+  single-event output. The disk-history reader resolves the snapshot reference.
+- The aggregate stores its last folded monotonic position, plus fingerprints at
+  that position for distinct messages sharing one timestamp. These commit with
+  the count. Replaying journalctl's ordered current-boot stream after a daemon
+  restart therefore does not count a folded record twice. This assumes ordered
+  journal ingestion, not arbitrary out-of-order imports.
+- Aggregates are attributed to their **first timestamp**. Total grouped counts
+  remain exact, but a time-range boundary or USB correlation window cutting a
+  storm bucket has minute-level granularity. An aggregate message is representative,
+  not an exhaustive list of affected devices; per-disk attribution is correspondingly
+  coarse.
+- Every other category, including power and thermal journal events, keeps one row
+  per event. The network flight recorder imports these append-only by event ID and
+  must not miss an in-place aggregate update. Firmware/sampler/service events also
+  remain individual. Eligible journal entries without a usable monotonic timestamp
+  fall back to a wall-time window.
+
+Snapshot expiry uses the collector-owned `events_state_expiry_idx` partial index
+on snapshot-bearing rows. Each batch removes its cleared rows from that index;
+routine pruning never walks all already-cleared historical event IDs.
+
+New databases use incremental auto-vacuum. After pruning, the collector requests
+up to 256 free pages back with `PRAGMA incremental_vacuum(256)`, bounding routine
+maintenance work. Existing non-auto-vacuum files need the offline command below;
+merely clearing snapshots does not shrink those files on disk.
+
+### Offline database compaction
+
+Use this for a database enlarged by a historical storm. Install the updated shim
+and complete `system_monitor/` package together through their existing ownership
+path **before** invoking this command; updating this checkout alone does not
+update the Pi. Do not use the frozen `python-automation/` tree. Keep a verified
+recovery copy if retaining every original message/snapshot is important: folding
+and snapshot expiry are intentionally lossy, although counts are preserved.
+
+Run these short commands **in a Pi shell as `pi`**, during a maintenance window.
+Do not run a simultaneous boot capture or `crash-report --save`.
+
+```bash
+sudo systemctl stop system-event-monitor.service
+/home/pi/scripts/system_event_monitor.py compact
+```
+
+The default is a dry run. It takes an exclusive SQLite write lock and a monitor
+writer lock, but does not migrate or change database contents. It prints candidate
+row/snapshot counts and estimated reclaimable bytes. A running new collector is
+refused even between its transactions. If the lock is busy, leave the database
+alone and identify the competing writer/reader; never remove the lock file.
+
+After reviewing the estimate, apply and then restart:
+
+```bash
+/home/pi/scripts/system_event_monitor.py compact --apply
+sudo systemctl start system-event-monitor.service
+sudo systemctl status --no-pager system-event-monitor.service
+/home/pi/scripts/system_event_monitor.py report --hours 24
+```
+
+Compaction keeps small metadata in a disk-backed plan, processes 500 rows per
+batch, checkpoints each batch and prints progress. It retains 20 examples and one
+aggregate per matching USB/storage bucket, leaves other categories' rows intact,
+clears redundant/expired snapshots, enables
+`auto_vacuum=INCREMENTAL`, and runs `VACUUM`. VACUUM itself may be slow on the SD
+card and has no granular progress output. The command checks free space on the
+DB filesystem before mutations and again just before VACUUM: it conservatively
+requires twice the estimated surviving size plus 64 MiB, accounting for temporary
+rebuild/WAL space. Estimates are not a guarantee of the final size; disk-full or
+I/O errors stop the command rather than bypassing SQLite safeguards.
+
+The v4 DB did **not** retain journal monotonic timestamps, so legacy rows can only
+be folded into wall-time 60-second buckets. Current-boot legacy fingerprints are
+kept as compact replay tombstones; historical boots get no per-event tombstones.
+Pruning drops those tombstones after `last_boot_id` changes. Compaction refuses
+an absent current-boot identity rather than silently discarding replay protection.
+Fresh recorder/storage installer checks pin every new monitor module; historical
+rollback manifests may still carry the explicit v4 module set (or pre-pin format).
+
+Successful batches survive interruption. If apply fails, its earlier folds may
+already be committed, but represented counts remain intact. Resolve the reported
+lock/space/I/O problem and rerun the same command; it is resumable. If postponing
+maintenance, restart the collector with the `systemctl start` command above.
+Do not restore only the database main file over a live WAL writer. To reverse the
+loss of individual messages/snapshots, stop the service and restore a matching
+verified offline backup rather than trying to expand aggregate rows.
 
 The dashboard shares report/history results between clients for 10 seconds and
 serializes generation. Failed reads have a two-second retry cooldown rather than
 serving an old report as fresh. Saving a crash analysis invalidates these caches.
-The command timeout remains 15 seconds. Raw events and their retention are unchanged.
+The command timeout remains 15 seconds; offline compaction is a separate operator command.
 
 `vanpi-usb-controller-watchdog.timer` separately checks once a minute for the
 current-boot kernel message that declares the Pi 4 VL805 xHCI controller dead.

@@ -53,6 +53,22 @@ class ControlTests(unittest.TestCase):
         patch = mock.patch.object(job.priority, 'DIRECTORY', self.directory / 'priority')
         patch.start(); self.addCleanup(patch.stop)
 
+    def test_worker_liveness_requires_time_machine_job_lock(self):
+        pid = 123
+        proc = self.directory / 'proc' / str(pid)
+        proc.mkdir(parents=True)
+        (proc / 'cmdline').write_bytes(
+            b'python3\0' + str(Path(job.__file__).resolve()).encode() + b'\0--run\0')
+        fields = ['S'] + ['0'] * 18 + ['456']
+        (proc / 'stat').write_text(f'{pid} (python) ' + ' '.join(fields))
+        request = {'pid': pid, 'start_ticks': '456'}
+        with mock.patch.object(job.backup_locks, 'process_holds', return_value=False) as holds:
+            self.assertFalse(job.worker_alive(request, self.directory / 'proc'))
+        expected = job.backup_locks.lock_path(job.backup_locks.LockClass.JOB, 'time-machine')
+        holds.assert_called_once_with(pid, expected, self.directory / 'proc')
+        with mock.patch.object(job.backup_locks, 'process_holds', return_value=True):
+            self.assertTrue(job.worker_alive(request, self.directory / 'proc'))
+
     def test_pause_survives_worker_state_writes_and_resume_uses_same_service(self):
         control.control('pause', '60', self.directory, now=1000, command=self.command)
         self.assertTrue(control.is_paused(self.directory, now=4599))

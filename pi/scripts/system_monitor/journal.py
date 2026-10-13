@@ -5,6 +5,7 @@ import re
 import subprocess
 
 from .common import event_fingerprint, iso_time
+from .coalesce import MONOTONIC_CLOCK, WALL_CLOCK
 
 
 def classify_kernel_message(message):
@@ -91,7 +92,15 @@ def parse_journal_record(record):
     category, kind, severity, summary = classification
     boot_id = record.get("_BOOT_ID")
     monotonic = record.get("__MONOTONIC_TIMESTAMP", "")
+    try:
+        position = int(monotonic)
+        clock = MONOTONIC_CLOCK
+    except (TypeError, ValueError):
+        position = int(record["__REALTIME_TIMESTAMP"])
+        clock = WALL_CLOCK
     return {
+        "journal_monotonic": position,
+        "journal_clock": clock,
         "timestamp": timestamp,
         "boot_id": boot_id,
         "category": category,

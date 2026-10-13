@@ -74,6 +74,19 @@ compare it with this checkout. Deployed files may differ from the repository.
   Starlink antenna operations against fresh radio state without replaying them.
   Frontend `features/ubnt/UbntOperationNotice.tsx` distinguishes pending
   confirmation from an actual failure; the CLI emits `confirmation_pending`.
+- `pi/scripts/system_monitor/coalesce.py` owns schema-v5 event columns, the
+  60-second USB/storage journal windows and replay watermarks. Other categories
+  remain append-only for the network recorder; preserve its `events_report_idx`.
+  `locking.py` coordinates
+  collector writers with exclusive offline maintenance; `maintenance.py` owns
+  the dry-run/apply compaction CLI, batched folding and space-checked VACUUM.
+  Retain only current-boot legacy fingerprint tombstones; ordinary pruning
+  expires 30-day snapshots through the collector-owned partial snapshot index
+  without deleting noteworthy events. Reports sum
+  represented counts through the covering index; aggregate ranges use their
+  first timestamp (minute granularity). The dashboard storage reader resolves
+  snapshot references; read-only event readers detect v4/v5 columns explicitly
+  and never turn lock or I/O errors into unweighted counts.
 - Network storage deployment test filesystem fixtures live in
   `pi/tests/network/_network_storage_support.py`.
 - `pi/tests/dashboard/_frontend_test_support.py` provides a temporary React
@@ -118,9 +131,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   changes worker state, and nested dialogs close independently.
 - Backup priority: `pi/scripts/backup/backup_priority.py` owns the cloud job
   registry and the protected until-verified override; `backup_priority_control.py`
-  is the fixed CLI. The shared lock serializes disk and cloud jobs; scheduled overdue local jobs
-  borrow a turn from the selected cloud through the fairness supervisor. Cloud guards skip only the daily scheduling window;
-  mount, ignition, uplink and manual-pause checks remain. Verification completion
+  is the fixed CLI. Priority only decides which cloud job may take the single
+  iCloud upload slot; local Borg/EXFAT and disk jobs are always admitted. Mount,
+  ignition, uplink and manual-pause checks remain. Verification completion
   is latched so a later generation cannot reactivate an old override.
   `mac_capture_control.py` issues expiring, one-use stop permission bound to a live
   capture nonce. The root Mac coordinator verifies the active destination before
@@ -130,65 +143,42 @@ compare it with this checkout. Deployed files may differ from the repository.
   owns its response contract. Both targeted cloud installers ship these modules
   and verify the shared backup configuration before updating it.
 - `pi/scripts/backup/protected_json.py` owns private control-record metadata
-  checks and bounded, no-follow descriptor reads for priority and local fairness;
-  each caller keeps its own schema validation and reuses the existing atomic writer.
+  checks and bounded, no-follow descriptor reads for priority state; each caller
+  keeps its own schema validation and reuses the existing atomic writer.
   Both targeted cloud installers ship it alongside `backup_priority.py`.
 - `pi/tests/backup/priority_fixtures.py` owns isolated priority/cloud-directory
-  fixtures without importing cloud workers; control and rollback regressions reuse it.
-- Scheduled local fairness: `pi/scripts/backup/local_fairness.py` owns the private
-  leased turn record beside priority state, its vocabulary and one-use Borg/EXFAT
-  admission. `local_fairness_window.py` supervises `backup_window.sh`'s scheduled
-  path, waiting for cloud service teardown (including its verifier) before ordinary
-  job admission. Defaults in `backup_conf.sh`: age strictly over 24 hours, 300-second
-  admission, six-hour failed/deferred-turn backoff. A 90-second renewable lease
-  recovers abandoned supervisors; it never limits an already-running Borg job.
-  Each job has a 300-second admission window; after the preceding child exits,
-  the supervisor grants the next unadmitted job a fresh bounded window once.
-  A long Borg run therefore cannot consume EXFAT's opportunity to start. Version 2
-  records bind lease/admission/backoff durations to the Linux boot id and elapsed
-  boot clock (`CLOCK_BOOTTIME` where available). Wall time reports deadlines and
-  ages success stamps, never extends a hold. Other-boot and legacy unscoped records
-  cannot hold the cloud; cross-boot backoff is bounded by its configured duration,
-  with invalid future backoff cleared and logged. Status reports elapsed-clock
-  remaining durations as well as wall timestamps. Impossible same-boot future-tick
-  grants are permanently retired under the control lock by admission/resume paths;
-  status stays read-only. With an unreadable boot identity, status reports unknown
-  clock/hold information instead of raising; active controls still fail closed, so
-  automatic lease recovery is unavailable until boot identity can be read again.
-  Cloud-job directories and priority storage are distinct namespaces. Controls pass
-  `priority_directory` separately; fairness operations pass their explicit `directory`
-  through every read/write. `backup_priority.job_kind()` checks the cloud registry
-  before consulting priority state, so unrelated/custom cloud directories retain
-  manual-pause semantics without probing host state. Non-owner/inaccessible priority
-  storage yields an unknown fairness-status projection and conservatively blocks
-  admission/resume via `is_paused()`. `ProtectedStateAccessError` distinguishes a
-  foreign namespace from owner-visible corruption: wrong record ownership/modes,
-  links and invalid schemas still raise, and a cloud-stop request still requires a
-  verified active reservation. Deployed workers/resume timers/cron run as root;
-  dashboard and Mac heartbeat entry points cross explicit sudo boundaries first.
-  `cloud_backup_control.py` honors this hold independently of `pause.json`; finishing
-  never clears manual holds, the selected generation, or until-verified priority.
-  The CLI's `--status` includes `local_fairness` without its private admission token.
-  Manual `--force`, clone and restore jobs get no exception; Borg skips nested clones
-  during its borrowed turn. Ship both fairness modules with the priority/control and
-  local shell entrypoints, not through the frozen Python automation directory.
+  fixtures without importing cloud workers; priority regressions reuse it.
+- Backup concurrency: `pi/scripts/backup/backup_locks.sh` (sourced by
+  `backup_conf.sh`) and `backup_locks.py` own the resource lock registry in
+  `/run/lock/vanpi-backup/`, pre-created by `pi/tmpfiles.d/vanpi-backup.conf`;
+  `pi/docs/backup/CONCURRENCY.md` is the conflict matrix. Each job holds an
+  exclusive `job-<kind>` lock (fd 10, PID record), shared `disk-<label>` locks
+  for the disks it uses, `data-borg-repo` while mutating or copying the Borg
+  repository, and the cloud workers hold the exclusive `cloud-upload` slot for
+  their whole run (taken by the shell wrapper before `exec`, so a busy slot exits
+  before any attempt is recorded). Migrated jobs hold the legacy
+  `/run/lock/vanpi_backup.lock` shared on fd 9; `restore_from_borg.sh`,
+  `new_hotspare.sh` and the deployment fences keep `acquire_job_lock` exclusive,
+  so legacy consumers exclude and are excluded by every job. Never create lock
+  files at runtime, never probe with path-form `flock`, and never drain a disk
+  that the caller is not about to unmount: `umount_disks.sh` passes the
+  labels it unmounts to `abort_backup.sh`, which TERMs only job parents holding those disks
+  (and any legacy exclusive holder), waits for each disk lock, and in emergency
+  mode kills remaining holders of those lock files only. `--user borg|exfat`
+  targets that kind's job lock. A job that mounted a disk unmounts it only when
+  `release_backup_disk_if_unused` proves no other holder. `backup_window.sh`
+  starts Borg and EXFAT concurrently. The former local-fairness lease, supervisor
+  and rollback helper are retired; a stale `local-fairness.json` is ignored.
   `pi/backup_local_deploy.sh` shares the local payload and reviewed-source hash
   checks for both targeted cloud installers; `VANPI_BACKUP_PREVIOUS_REVISION` names
   the previously deployed commit when installing a newly committed change.
   `VANPI_BACKUP_PREVIOUS_CONF_SHA256` accepts an explicitly reviewed config hash
-  when unrelated deployed settings differ from that commit.
-  The drift-checked cohort includes every fairness payload file and protected
-  reader; previous-tree absence permits only a missing or exact staged live file.
+  when unrelated deployed settings differ from that commit. Previous-tree absence
+  permits only a missing or exact staged live file.
   `pi/tests/backup/test_local_backup_deploy.py` exercises those shell contracts
   against temporary source/live directories and a fixture Git repository.
-  `local_fairness_rollback.py` only checks quiescence (`--check`) or archives
-  `local-fairness.json` (`--archive`); it accepts no code source/destination paths.
-  Each operation holds the supervisor gate (`local-supervisor.lock`), normal backup
-  lock and priority control lock. It reuses `cloud_stopped()` for both registered
-  cloud services, including their ControlPID/ExecStopPost lifetime, and checks local
-  and cloud lifecycle processes. It never copies code, invokes a restore command,
-  signals workers or changes holds, priority, generations or checkpoints. Restore
-  the old code manually first, then archive state with the frozen staged helper.
+  Real-process lock regressions live in `pi/tests/storage/test_backup_locks.sh`
+  and `pi/tests/backup/test_backup_locks.py`.
 - `pi/scripts/backup/icloud_inventory.py` owns cloud object fingerprint parsing
   and size-based upload estimates, re-exported by the shared cloud worker.
 - `pi/scripts/backup/time_machine_pipeline.py` supervises a single verifier
@@ -432,6 +422,8 @@ The active design is represented by:
   daily cron retries use `--daily`, and Borg can also refresh before archiving.
   A directory flock serializes exports without taking the cloud/disk backup lock.
 - `pi/scripts/backup/backup_watchdog.sh`: freshness and health monitoring.
+- `pi/scripts/backup/rootfs_budget.sh`: bounded rootfs path budgets and daily growth history for the watchdog.
+- `pi/scripts/rootfs_tidy.sh`: lock-aware Codex release pruning and optional apt-cache cleanup.
 - `pi/scripts/backup/abort_backup.sh`: coordinated termination before unmounting.
 - `pi/scripts/backup/clone_to_sd.sh`: bootable spare-card cloning.
 - `pi/scripts/mount_disks.sh` and `pi/scripts/umount_disks.sh`: disk lifecycle.
@@ -446,61 +438,29 @@ Keep bootable spare generations staggered so a bad current configuration does
 not immediately propagate to every recovery card. Revalidate the live schedule,
 capacity limits, labels, and deployed versions before changing clone behavior.
 
-## Local fairness rollback
+## Backup concurrency rollback
 
-These standalone cloud installers keep and print `previous` copies; they have no
-separate code-rollback entry point. Use their existing install/mv procedure below,
-not the unrelated Python package installer and not a new root-run copier. Neither
-this procedure nor the archive helper stops jobs: first arrange quiescence using
-existing controls, preserving independent holds. Both cloud services (including
-ExecStopPost), local jobs and supervisors must stay quiescent during restoration.
-
-On the Pi, set `L=/home/pi/scripts/backup` and enter the exact saved directory with
-`printf 'Previous directory: '; read -r P`. Set the frozen helper path to
-`R=${P%/previous}/pi/scripts/backup/local_fairness_rollback.py` for a Time Machine
-stage, or `R=${P%/previous}/local_fairness_rollback.py` for a Pi cloud stage.
-
-1. Run `sudo /usr/bin/python3 -B "$R" --check`. Stop on any refusal. It checks both
-   registered cloud units' ActiveState/MainPID/ControlPID and process quiescence
-   under the normal nonblocking backup lock. It does not archive or restore code.
-2. Restore the reviewed old code **before** archiving state. Inspect the saved
-   snapshot's ownership, permissions and hashes; do not use untrusted or changing
-   inputs. Require canonical, non-symlink ancestors with
-   `test "$(/usr/bin/readlink -e -- "$P")" = "$P"` and
-   `test "$(/usr/bin/readlink -e -- "$L")" = "$L"`. Stop on any failure.
-   Validate the existing normal lock: set `B=/run/lock/vanpi_backup.lock`, run
-   `test ! -L "$B" && test -f "$B"`, then
-   `test "$(/usr/bin/stat -c '%U %G %a' "$B")" = 'root pi 660'`.
-   Open it with `exec 9<"$B"` and acquire it using `/usr/bin/flock -n 9`;
-   never continue if acquisition fails. Keep this shell and lock for all copies.
-
-   For each saved runtime file, set `N` to its basename (start with
-   `N=backup_conf.sh`), require `test -f "$P/$N" && test ! -L "$P/$N"`, then use
-   the same two primitives as the targeted installer:
-   `sudo /usr/bin/install -o pi -g pi -m 0750 "$P/$N" "$L/$N.new"`, followed by
-   `sudo /usr/bin/mv -Tf "$L/$N.new" "$L/$N"`.
-   Compare `/usr/bin/sha256sum "$P/$N" "$L/$N"` before moving to the next file.
-   The required cohort is `backup_conf.sh`, `backup_window.sh`,
-   `backup_priority.py`, `cloud_backup_control.py`, `pi_backup.sh`, and
-   `exfat_snapshot.sh`; also restore `local_fairness.py`,
-   `local_fairness_window.py`, and `protected_json.py` when their saved copies exist.
-   Do not copy units or runtime JSON and do not restore the rollback utility.
-   Release only this shell's descriptor with `exec 9<&-` after the complete cohort.
-3. Run `sudo /usr/bin/python3 -B "$R" --archive`. This frozen helper independently
-   rechecks quiescence, then moves only the fairness record byte-for-byte to a
-   unique private timestamped archive. Missing state is an idempotent no-op.
-   **The step-2 to step-3 gap intentionally fails closed:** old readers may reject
-   the still-present version-2 record. Keep services quiescent; do not clear holds
-   or try to run a backup to bypass that error. Restoring the full old cohort first
-   ensures it cannot recreate state incompatible with its own readers afterwards.
-4. Run `sudo /usr/bin/python3 -B "$L/backup_priority_control.py" --status` using
-   the restored live code. It must succeed and show the preserved priority.
-   Compatibility regressions also exercise the old `is_paused` and admission/read
-   paths against post-archive state. Preserve manual holds throughout.
-
-Keep the stage and archive. If any step fails, stop and inspect; do not claim a
-completed rollback or force a job to exit. Re-run the frozen check/archive helper
-only when quiescent. Never restore the archived record into an older reader.
+Both targeted cloud installers keep and print `previous/` copies; there is no
+separate code-rollback entry point. First arrange quiescence with the existing
+controls (pause both cloud jobs, let local jobs finish), preserving independent
+holds. Then, with `L=/home/pi/scripts/backup` and `P` set to the saved
+directory, validate `/run/lock/vanpi_backup.lock` (`root pi 660`, regular,
+not a symlink), open it with `exec 9<"$B"` and acquire it with
+`/usr/bin/flock -n 9`; an exclusive acquisition proves no migrated job is
+running. For each saved file use the installer's primitives,
+`sudo /usr/bin/install -o pi -g pi -m 0750 "$P/$N" "$L/$N.new"` then
+`sudo /usr/bin/mv -Tf "$L/$N.new" "$L/$N"`, comparing `sha256sum` before moving
+on. Restore the complete cohort (`backup_conf.sh`, `backup_locks.sh`,
+`backup_window.sh`, `pi_backup.sh`, `exfat_snapshot.sh`, `abort_backup.sh`,
+`clone_now.sh`, `backup_priority.py`, `cloud_backup_control.py`, both cloud
+wrappers and workers, `icloud_status.py`, `time_machine_staging.py`,
+`time_machine_pipeline.py`), plus `/home/pi/scripts/umount_disks.sh` and
+`internet_switches.sh` when their saved copies exist, and the previous
+`/etc/tmpfiles.d/vanpi-backup.conf`. Release fd 9 only after the complete
+cohort. The lock registry directory can stay; old code ignores it. A retired
+`local-fairness.json` remains readable by the old fairness code, which ends an
+abandoned turn by itself. Verify with
+`sudo /usr/bin/python3 -B "$L/backup_priority_control.py" --status`.
 
 ## System monitor reports
 

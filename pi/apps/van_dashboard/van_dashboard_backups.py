@@ -59,8 +59,9 @@ class BackupManager:
     /home/pi/scripts/backup/clone_to_sd.sh --init. Manual Borg requests invoke
     only the fixed pi_backup.sh or exfat_snapshot.sh --force paths, which retain
     each job's disk-policy, ignition, mount, lock, snapshot, and retention
-    safeguards. Stop requests invoke one fixed abort wrapper, which independently
-    verifies that the shared lock holder is the requested Borg or EXFAT parent.
+    safeguards while holding per-kind job locks. Stop requests invoke one fixed
+    abort wrapper, which targets only the requested kind's lock and independently
+    verifies its Borg or EXFAT parent.
     """
 
     CLONE_TARGET_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -628,12 +629,6 @@ class BackupManager:
         if target not in allowed:
             raise ValueError("unknown hotspare target")
         current = self.status()
-        if current.get("time_machine_icloud") and current["time_machine_icloud"].get("running"):
-            raise BackupStatusError("the Time Machine iCloud copy is using the shared backup lock")
-        if current.get("icloud") and current["icloud"].get("running"):
-            raise BackupStatusError("the iCloud backup is using the shared backup lock")
-        if current["borg"]["running"] or current["exfat_snapshot"]["running"]:
-            raise BackupStatusError("a scheduled backup is already running")
         card = next(item for item in current["hotswaps"] if item["label"] == target)
         if not card["attached"]:
             raise BackupStatusError(f"{target} is not attached")
@@ -662,15 +657,21 @@ class BackupManager:
 
     def _start_manual_backup(self, kind, tool, stamp_name):
         current = self.status()
-        if current.get("time_machine_icloud") and current["time_machine_icloud"].get("running"):
-            raise BackupStatusError("the Time Machine iCloud copy is using the shared backup lock")
-        if current.get("icloud") and current["icloud"].get("running"):
-            raise BackupStatusError("the iCloud backup is using the shared backup lock")
-        if current["borg"]["running"] or current["exfat_snapshot"]["running"]:
-            raise BackupStatusError("a scheduled backup is already running")
+        label = "Borg" if kind == "borg" else "EXFAT512 snapshot"
+        evidence = current["borg"] if kind == "borg" else current["exfat_snapshot"]
+        if evidence["running"]:
+            raise BackupStatusError(f"a {label} backup is already running")
+        if (
+            current["operation"]["status"] == "running"
+            or current["stop"]["status"] == "running"
+        ):
+            raise BackupStatusError("another dashboard backup operation is running")
         previous_at = self._stamp(os.path.join(self.stamp_dir, stamp_name))
         with self.lock:
-            if self.operation["status"] == "running":
+            if (
+                self.operation["status"] == "running"
+                or self.stop_operation["status"] == "running"
+            ):
                 raise BackupStatusError("another dashboard backup operation is running")
             started_at = int(self.wall_clock())
             self.operation = {
@@ -691,14 +692,10 @@ class BackupManager:
         return self.status()
 
     def start_borg_backup(self):
-        return self._start_manual_backup(
-            "borg", self.borg_tool, "borg_ok"
-        )
+        return self._start_manual_backup("borg", self.borg_tool, "borg_ok")
 
     def start_exfat_backup(self):
-        return self._start_manual_backup(
-            "exfat", self.exfat_tool, "exfat512_ok"
-        )
+        return self._start_manual_backup("exfat", self.exfat_tool, "exfat512_ok")
 
     def request_stop(self, kind):
         if kind not in ("borg", "exfat"):
@@ -767,7 +764,9 @@ class BackupManager:
         except OSError as exc:
             error = f"could not start clone: {exc}"
         with self.lock:
-            if self.operation.get("started_at") == started_at:
+            if (self.operation.get("kind"), self.operation.get("started_at")) == (
+                "clone", started_at
+            ):
                 self.operation.update(
                     {
                         "status": "error" if error else "complete",
@@ -780,9 +779,7 @@ class BackupManager:
     def _stamp_advanced(current, previous):
         return current is not None and (previous is None or current > previous)
 
-    def _run_manual_backup(
-        self, started_at, kind, tool, stamp_name, previous_at
-    ):
+    def _run_manual_backup(self, started_at, kind, tool, stamp_name, previous_at):
         label = "Borg" if kind == "borg" else "EXFAT512 snapshot"
         error = None
         stopped = False
@@ -817,7 +814,9 @@ class BackupManager:
         except (OSError, BackupStatusError) as exc:
             error = f"could not run backup: {exc}"
         with self.lock:
-            if self.operation.get("started_at") == started_at:
+            if (self.operation.get("kind"), self.operation.get("started_at")) == (
+                kind, started_at
+            ):
                 self.operation.update(
                     {
                         "status": "stopped" if stopped else "error" if error else "complete",

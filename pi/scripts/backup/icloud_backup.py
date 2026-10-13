@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Immutable, encrypted Borg recovery generations uploaded directly to iCloud.
 
-The shell entrypoint holds the existing backup lock on fd 9. Children inherit
-it so ignition's emergency abort can find the entire operation. The uploader
-never creates/prunes Borg archives in a copied repository.
+The shell entrypoint holds the Pi cloud job, bigboi disk and upload-slot locks.
+The worker asserts its inherited slot before network clients and takes the Borg
+repository data lock only while copying a consistent repository snapshot.
 """
 import configparser
 from contextlib import suppress
@@ -23,6 +23,7 @@ import termios
 import time
 import uuid
 
+import backup_locks
 from icloud_uplink import decide
 from icloud_inventory import remote_fingerprint, parse_inventory, upload_progress
 from icloud_progress import ProcessIO, ProgressWatch, RcloneStats, StreamDigest, TransferActivity
@@ -97,8 +98,6 @@ def read_json(path, default=None):
 def load_config(path=CONFIG):
     cfg = read_json(path)
     cfg.setdefault('no_progress_timeout_seconds', 900)
-    cfg.setdefault('local_backup_window_start', '02:55')
-    cfg.setdefault('local_backup_window_end', '09:00')
     if not re.fullmatch(r'icloud:[A-Za-z0-9_-]+/vanpi/weekly', cfg['remote']):
         raise ValueError('remote must be a dedicated icloud:<folder>/vanpi/weekly prefix')
     for k, low, high in [('interval_days', 1, 31), ('keep_generations', 2, 52),
@@ -106,9 +105,6 @@ def load_config(path=CONFIG):
                          ('minimum_free_gib', 1, 1000), ('no_progress_timeout_seconds', 30, 7200)]:
         if type(cfg[k]) is not int or not low <= cfg[k] <= high:
             raise ValueError('invalid setting: ' + k)
-    for key in ('local_backup_window_start', 'local_backup_window_end'):
-        if not re.fullmatch(r'(?:[01][0-9]|2[0-3]):[0-5][0-9]', cfg[key]):
-            raise ValueError('invalid setting: ' + key)
     if not re.fullmatch(r'[1-9][0-9]*[kM]', cfg['bandwidth_limit']):
         raise ValueError('invalid bandwidth_limit')
     if not cfg['blocked_ssids'] or not all(isinstance(x, str) and x for x in cfg['blocked_ssids']):
@@ -176,46 +172,11 @@ def check_parked():
         raise Deferred('HDD policy is off or unavailable')
 
 
-def local_backup_window(cfg, now=None):
-    now = dt.datetime.now() if now is None else now
-    def minutes(value):
-        hours, mins = map(int, value.split(':'))
-        return hours * 60 + mins
-    start = minutes(cfg.get('local_backup_window_start', '02:55'))
-    end = minutes(cfg.get('local_backup_window_end', '09:00'))
-    current = now.hour * 60 + now.minute
-    if start == end:
-        return False
-    return start <= current < end if start < end else current >= start or current < end
-
-
 def check_work_allowed(cfg):
     check_parked()
     selected = priority.policy() if cfg.get('priority_job') else priority.PriorityMode.NORMAL
-    if selected != priority.PriorityMode.NORMAL:
-        if selected != cfg['priority_job']:
-            raise Deferred('yielding to selected ' + priority.JOBS[selected].label + ' priority')
-        return
-    if local_backup_window(cfg) and not local_backups_complete():
-        raise Deferred('yielding the HDD and shared lock to the local-backup window')
-
-
-def local_backups_complete(now=None):
-    now = dt.datetime.now() if now is None else now
-    for key in ('VANPI_ICLOUD_BORG_STAMP', 'VANPI_ICLOUD_EXFAT_STAMP'):
-        value = os.environ.get(key)
-        if not value:
-            return False
-        path = Path(value)
-        try:
-            if path.is_symlink() or not path.is_file():
-                return False
-            completed = dt.datetime.fromtimestamp(path.stat().st_mtime)
-        except OSError:
-            return False
-        if completed > now or completed.date() != now.date():
-            return False
-    return True
+    if selected != priority.PriorityMode.NORMAL and selected != cfg['priority_job']:
+        raise Deferred('yielding to selected ' + priority.JOBS[selected].label + ' priority')
 
 
 def monitor_child(cfg, program, operation, proof, parked, network, interactive, progress,
@@ -256,6 +217,8 @@ def run(args, cfg, network=False, interactive=False, parked=True, stream_hash=Fa
     global CHILD, CHILD_INTERACTIVE
     program = args[0]
     operation = args[1] if len(args) > 1 else 'command'
+    if network and not interactive:
+        backup_locks.require_cloud_slot()
     if parked:
         check_work_allowed(cfg)
     if network and on_activity is not None:
@@ -276,12 +239,7 @@ def run(args, cfg, network=False, interactive=False, parked=True, stream_hash=Fa
                 '--contimeout', '20s', '--timeout', '60s'] + (
                 ['--stats', '0'] if interactive else
                 ['--stats', '5s', '--stats-log-level', 'NOTICE', '--use-json-log']) + args[1:]
-    inherited = ()
-    try:
-        os.fstat(9)
-        inherited = (9,)
-    except OSError:
-        pass
+    inherited = tuple(backup_locks.inherited_lock_fds())
     terminal = termios.tcgetattr(sys.stdin.fileno()) if interactive and sys.stdin.isatty() else None
     watch = ProgressWatch(cfg.get('no_progress_timeout_seconds', 900))
     stats, io = RcloneStats(on_completed), ProcessIO()
@@ -390,8 +348,13 @@ def make_snapshot(cfg, root, repo, name, state=None):
     # Deletion is limited to this unfinished, private staging repository;
     # it has never been uploaded until its manifest is atomically published.
     report = (lambda counters: record_progress(state, 'preparing')) if state is not None else None
-    run(['/usr/bin/borg', 'with-lock', str(repo), '/usr/bin/rsync', '-a', '--delete',
-         '--exclude=/lock.exclusive', '--exclude=/lock.roster', str(repo) + '/', str(dest) + '/'], cfg, progress=report)
+    try:
+        with backup_locks.held(backup_locks.LockClass.DATA, 'borg-repo'):
+            run(['/usr/bin/borg', 'with-lock', str(repo), '/usr/bin/rsync', '-a', '--delete',
+                 '--exclude=/lock.exclusive', '--exclude=/lock.roster', str(repo) + '/',
+                 str(dest) + '/'], cfg, progress=report)
+    except backup_locks.LockBusy:
+        raise Deferred('Borg repository is busy with a local backup; retrying later') from None
     run(['/usr/bin/borg', 'check', '--verify-data', str(dest)], cfg, progress=report)
     last_check = [0.0]
     def check():
@@ -564,6 +527,26 @@ def notify(state, title, message):
     state['last_notification_title'] = title
 
 
+def unmount_if_unused(mount, label):
+    # Ignition may already have removed the mount. Probe again and never unmount
+    # a replacement filesystem accidentally.
+    current = subprocess.run(['/usr/bin/findmnt', '-rn', '-M', str(mount), '-o', 'SOURCE'],
+                             capture_output=True, text=True)
+    if current.returncode == 1 and not current.stdout.strip() and not current.stderr.strip():
+        return
+    if current.returncode:
+        raise RuntimeError('cannot verify backup mount during cleanup')
+    exact_mount(mount, label)
+    disk_lock = backup_locks.lock_path(backup_locks.LockClass.DISK, 'bigboi')
+    backup_locks.release_inherited(disk_lock)
+    try:
+        with backup_locks.held(backup_locks.LockClass.DISK, 'bigboi'):
+            exact_mount(mount, label)
+            subprocess.run(['/usr/bin/umount', str(mount)], check=True)
+    except backup_locks.LockBusy:
+        print('leaving bigboi mounted for another backup job', flush=True)
+
+
 def weekly(cfg, state):
     if not state.get('pending') and time.time() - state.get('last_success_at', 0) < cfg['interval_days'] * 86400:
         return 'not due'
@@ -641,14 +624,7 @@ def weekly(cfg, state):
         return 'complete'
     finally:
         if mounted_here:
-            # Ignition may already have removed the mount. Probe again and
-            # never unmount a replacement filesystem accidentally.
-            current = subprocess.run(['/usr/bin/findmnt', '-rn', '-M', str(mount), '-o', 'SOURCE'], capture_output=True, text=True)
-            if current.returncode == 0:
-                exact_mount(mount, label)
-                subprocess.run(['/usr/bin/umount', str(mount)], check=True)
-            elif current.returncode != 1 or current.stdout.strip() or current.stderr.strip():
-                raise RuntimeError('cannot verify backup mount during cleanup')
+            unmount_if_unused(mount, label)
 
 
 def require_fresh_borg(cfg):
@@ -717,9 +693,7 @@ def main():
         if mode == '--preflight':
             result = {'credentials_ready': credentials_ready(cfg), 'remote': cfg['remote'],
                       'keep_generations': cfg['keep_generations'],
-                      'no_progress_timeout_seconds': cfg['no_progress_timeout_seconds'],
-                      'local_backup_window_active': local_backup_window(cfg),
-                      'yielding_to_local_backups': local_backup_window(cfg) and not local_backups_complete()}
+                      'no_progress_timeout_seconds': cfg['no_progress_timeout_seconds']}
             try:
                 result['bind_address'] = guard(cfg)[0]
                 result['uplink_allowed'] = True

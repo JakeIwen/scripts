@@ -36,6 +36,19 @@ class BackupDeploymentTests(unittest.TestCase):
             [["f", "/run/lock/vanpi_backup.lock", "0660", "root", "pi", "-"]],
         )
         self.assertEqual(stat.S_IMODE(int(lock_records[0][2], 8)), 0o660)
+        registry = "/run/lock/vanpi-backup"
+        self.assertIn(["d", registry, "0770", "root", "pi", "-"], records)
+        names = (
+            "job-borg", "job-exfat", "job-pi-cloud", "job-time-machine", "job-clone",
+            "disk-bigboi", "disk-hdd1tb", "disk-mbp2tbkup", "disk-movingparts", "disk-EXFAT512",
+            "data-borg-repo", "cloud-upload",
+        )
+        self.assertEqual(
+            sorted(record[1] for record in records if record[1].startswith(registry + "/")),
+            sorted(f"{registry}/{name}.lock" for name in names),
+        )
+        for name in names:
+            self.assertIn(["f", f"{registry}/{name}.lock", "0660", "root", "pi", "-"], records)
         self.assertIn("validate_job_lock_file", config)
         self.assertIn("JOB_LOCK_OWNER", config)
         self.assertIn("JOB_LOCK_GROUP", config)
@@ -45,7 +58,7 @@ class BackupDeploymentTests(unittest.TestCase):
             config.index('exec 9>>"$JOB_LOCK"'),
         )
         self.assertIn('exec {job_lock_fd}<"$job_lock"', abort)
-        self.assertIn('"$flock_command" -n "$job_lock_fd"', abort)
+        self.assertIn('"$flock_command" -n -s "$job_lock_fd"', abort)
         self.assertNotIn('flock -n "$job_lock"', abort)
         self.assertIn('tmpfiles="$dsc/pi/tmpfiles.d"', sync)
         self.assertIn('"$staged_tmpfiles"', sync)
@@ -58,6 +71,7 @@ class BackupDeploymentTests(unittest.TestCase):
     def test_clone_fit_warning_uses_configured_64gb_media_capacity(self):
         config_path = BACKUP_DIR / "backup_conf.sh"
         watchdog = (BACKUP_DIR / "backup_watchdog.sh").read_text(encoding="utf-8")
+        rootfs_budget = (BACKUP_DIR / "rootfs_budget.sh").read_text(encoding="utf-8")
         result = subprocess.run(
             [
                 "/bin/bash",
@@ -73,8 +87,8 @@ class BackupDeploymentTests(unittest.TestCase):
         )
 
         self.assertEqual(result.stdout, "64 52\n")
-        self.assertIn("${CLONE_CARD_NOMINAL_GB}GB clone cards", watchdog)
-        self.assertNotIn("32GB", watchdog)
+        self.assertIn("${CLONE_CARD_NOMINAL_GB}GB clone cards", rootfs_budget)
+        self.assertNotIn("32GB", watchdog + rootfs_budget)
 
         with tempfile.TemporaryDirectory() as tempdir:
             setting = Path(tempdir) / "clone_card_nominal_gb"
@@ -94,6 +108,35 @@ class BackupDeploymentTests(unittest.TestCase):
                 env={"CLONE_CARD_NOMINAL_GB_FILE": str(setting)},
             )
         self.assertEqual(configured.stdout, "128 104\n")
+
+    def test_rootfs_watchdog_and_tidy_scripts_ship_in_the_broad_script_sync(self):
+        watchdog = (BACKUP_DIR / "backup_watchdog.sh").read_text(encoding="utf-8")
+        config = (BACKUP_DIR / "backup_conf.sh").read_text(encoding="utf-8")
+        sync = (REPOSITORY_ROOT / "pi" / "sync_scripts.sh").read_text(
+            encoding="utf-8"
+        )
+        managed_excludes = (
+            REPOSITORY_ROOT / "pi" / "sync_storage_managed.exclude"
+        ).read_text(encoding="utf-8")
+        tidy = (
+            REPOSITORY_ROOT / "pi" / "scripts" / "rootfs_tidy.sh"
+        ).read_text(encoding="utf-8")
+        shipped = [
+            BACKUP_DIR / "rootfs_budget.sh",
+            REPOSITORY_ROOT / "pi" / "scripts" / "rootfs_tidy.sh",
+        ]
+
+        self.assertIn('. "$backup_script_dir/rootfs_budget.sh"', watchdog)
+        self.assertIn("ROOT_GROWTH_WARN_GIB_7D=4", config)
+        self.assertIn("ROOTFS_PATH_BUDGETS_MIB=(", config)
+        self.assertIn('"$findmnt_command" -rn -o TARGET', tidy)
+        self.assertIn("target_device", tidy)
+        self.assertIn("--one-file-system", tidy)
+        self.assertIn('"$repo_scripts/" "$staged_scripts/"', sync)
+        for path in shipped:
+            self.assertTrue(path.is_file(), path)
+            self.assertTrue(path.stat().st_mode & stat.S_IXUSR, path)
+            self.assertNotIn(f"/{path.name}", managed_excludes)
 
     def test_ubnt_snapshot_is_versioned_by_the_existing_borg_job(self):
         backup = (BACKUP_DIR / "pi_backup.sh").read_text(encoding="utf-8")
@@ -157,7 +200,7 @@ class BackupDeploymentTests(unittest.TestCase):
         media_mount = 'ensure_mounted movingparts "$MEDIA_SRC"'
         guarded_cleanup = (
             'if [ "$backup_mounted_here" = 1 ]; then\n'
-            '    if ! umount "$BACKUP_MNT"; then'
+            '    if release_backup_disk_if_unused bigboi; then'
         )
 
         self.assertIn("ENSURE_MOUNTED_DID_MOUNT=0", backup)
@@ -216,8 +259,11 @@ class BackupDeploymentTests(unittest.TestCase):
         self.assertIn("--user:borg", abort)
         self.assertIn("process_has_exact_argument", abort)
         self.assertIn("process_holds_job_lock", abort)
+        self.assertIn("signal_disk_holders", abort)
+        self.assertIn("stop_legacy_holder", abort)
+        self.assertIn('backup_lock_path job "$user_kind"', abort)
         self.assertIn('kill -USR1 "$pid"', abort)
-        self.assertIn('/usr/bin/fuser -k -KILL "$job_lock"', abort)
+        self.assertIn('/usr/bin/fuser -k -KILL "$lock_path"', abort)
         self.assertIn("trap stopped_by_user USR1", borg)
         self.assertIn("trap stopped_by_user USR1", exfat)
         self.assertIn("partial snapshot retained for retry", exfat)

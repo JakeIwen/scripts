@@ -10,11 +10,17 @@ from .common import (
     DEFAULT_RETENTION_DAYS,
     DEFAULT_SAMPLE_INTERVAL,
     DEFAULT_SAMPLE_RETENTION_HOURS,
+    EVENT_STATE_RETENTION_DAYS,
     event_fingerprint,
     json_dumps,
     normalize_boot_id,
     utc_timestamp,
 )
+from .coalesce import (
+    MONOTONIC_CLOCK, expired_state_batches, insert_journal_event, insert_row, migrate_events,
+    prune_legacy_fingerprints,
+)
+from .locking import writer_lock
 
 
 class EventStore:
@@ -22,6 +28,7 @@ class EventStore:
         self.path = path
         self.clock = clock
         self.read_only = read_only
+        self._writer_lock = None
         if read_only:
             uri_path = os.path.abspath(path).replace("?", "%3f").replace("#", "%23")
             self.connection = sqlite3.connect(
@@ -30,21 +37,39 @@ class EventStore:
         else:
             parent = os.path.dirname(path) or "."
             os.makedirs(parent, exist_ok=True)
-            self.connection = sqlite3.connect(path, timeout=10)
+            self._writer_lock = writer_lock(path)
+            self._writer_lock.__enter__()
+            try:
+                self.connection = sqlite3.connect(path, timeout=10)
+            except Exception:
+                self._writer_lock.__exit__(None, None, None)
+                raise
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA busy_timeout=5000")
+        try:
+            if not read_only:
+                self._configure_writer()
+            columns = {row[1] for row in self.connection.execute("PRAGMA table_info(events)")}
+            self._has_event_repeats = {"repeat_count", "last_seen"} <= columns
+        except Exception:
+            self.close()
+            raise
         if not read_only:
-            self.connection.execute("PRAGMA journal_mode=WAL")
-            # A flight-recorder sample that exists only in an unflushed page is
-            # little help after sudden power loss. FULL asks SQLite and the OS to
-            # flush every committed 5-second sample before reporting success.
-            self.connection.execute("PRAGMA synchronous=FULL")
-            self.connection.execute("PRAGMA wal_autocheckpoint=32")
-            self._create_schema()
             try:
                 os.chmod(path, 0o640)
             except OSError:
                 pass
+
+    def _configure_writer(self):
+        # New files can enable this before WAL initializes their first page.
+        # Existing files need the offline command's space check and VACUUM.
+        self.connection.execute("PRAGMA auto_vacuum=INCREMENTAL")
+        self.connection.execute("PRAGMA journal_mode=WAL")
+        # A flight-recorder sample must survive sudden power loss, not just a
+        # clean daemon exit: flush each committed sample before reporting success.
+        self.connection.execute("PRAGMA synchronous=FULL")
+        self.connection.execute("PRAGMA wal_autocheckpoint=32")
+        self._create_schema()
 
     def _create_schema(self):
         self.connection.executescript(
@@ -121,13 +146,18 @@ class EventStore:
             );
             CREATE INDEX IF NOT EXISTS pstore_boot_idx
                 ON pstore_records(previous_boot_id, id);
-            PRAGMA user_version=4;
             """
         )
+        migrate_events(self.connection)
         self.connection.commit()
 
     def close(self):
-        self.connection.close()
+        try:
+            self.connection.close()
+        finally:
+            if self._writer_lock is not None:
+                self._writer_lock.__exit__(None, None, None)
+                self._writer_lock = None
 
     def get_meta(self, key, default=None):
         row = self.connection.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
@@ -241,29 +271,22 @@ class EventStore:
         message,
         fingerprint,
         state=None,
+        journal_monotonic=None,
+        journal_clock=MONOTONIC_CLOCK,
     ):
-        cursor = self.connection.execute(
-            """
-            INSERT OR IGNORE INTO events(
-                timestamp, boot_id, category, kind, severity, source,
-                summary, message, fingerprint, state_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                float(timestamp),
-                boot_id,
-                category,
-                kind,
-                severity,
-                source,
-                summary,
-                message,
-                fingerprint,
-                json_dumps(state) if state is not None else None,
-            ),
+        event = dict(
+            timestamp=float(timestamp), boot_id=boot_id, category=category,
+            kind=kind, severity=severity, source=source, summary=summary,
+            message=message, fingerprint=fingerprint,
         )
-        self.connection.commit()
-        return cursor.rowcount == 1
+        # The watermark and represented count must commit together on a crash.
+        with self.connection:
+            self.connection.execute("BEGIN IMMEDIATE")
+            if journal_monotonic is not None:
+                return insert_journal_event(
+                    self.connection, event, state, journal_monotonic, journal_clock,
+                )
+            return insert_row(self.connection, event, state)
 
     def insert_rollup(self, rollup):
         self.connection.execute(
@@ -316,7 +339,15 @@ class EventStore:
             """,
             (max_samples - 1,),
         ).rowcount
+        for _changed in expired_state_batches(
+            self.connection, self.clock() - EVENT_STATE_RETENTION_DAYS * 86400,
+        ):
+            # Avoid a multi-gigabyte WAL when first pruning a legacy storm.
+            self.connection.commit()
+        prune_legacy_fingerprints(self.connection, self.get_meta("last_boot_id"))
         self.connection.commit()
+        if self.connection.execute("PRAGMA auto_vacuum").fetchone()[0] == 2:
+            self.connection.execute("PRAGMA incremental_vacuum(256)").fetchall()
         return deleted
 
     def save_crash_analysis(self, report):
@@ -396,26 +427,26 @@ class EventStore:
         ).fetchall()
 
     def grouped_event_counts(self, since):
+        count = "SUM(repeat_count)" if self._has_event_repeats else "COUNT(*)"
+        last_seen = "MAX(COALESCE(last_seen, timestamp))" if self._has_event_repeats else "MAX(timestamp)"
         return self.connection.execute(
-            """
-        SELECT kind, severity, category, COUNT(*) AS count, MAX(timestamp) AS last_seen
-        FROM events WHERE timestamp >= ? GROUP BY kind, severity, category
-        """, (since,),
+            f"SELECT kind, severity, category, {count} AS count, {last_seen} AS last_seen "
+            "FROM events WHERE timestamp >= ? GROUP BY kind, severity, category",
+            (since,),
         ).fetchall()
 
     def power_transition_rows(self, since):
         return self.connection.execute(
-            """
-        SELECT kind, timestamp, boot_id FROM events
-        WHERE kind IN ('undervoltage_started', 'undervoltage_cleared') AND timestamp >= ?
-        ORDER BY timestamp ASC
-        """, (since,),
+            "SELECT kind, timestamp, boot_id FROM events "
+            "WHERE kind IN ('undervoltage_started', 'undervoltage_cleared') AND timestamp >= ? "
+            "ORDER BY timestamp ASC", (since,),
         ).fetchall()
 
     def usb_count_between(self, start, end):
+        count = "COALESCE(SUM(repeat_count), 0)" if self._has_event_repeats else "COUNT(*)"
         return self.connection.execute(
-            """SELECT COUNT(*) FROM events
-               WHERE timestamp >= ? AND timestamp <= ? AND category = 'usb'""",
+            f"SELECT {count} FROM events "
+            "WHERE timestamp >= ? AND timestamp <= ? AND category = 'usb'",
             (start, end),
         ).fetchone()
 
