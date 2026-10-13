@@ -81,6 +81,11 @@ backup job; the capture handshake and share drain are unchanged.
   later. The spindown fence covers attached disks that are not mounted: a
   job that passed its ignition check holds its disk locks before it mounts,
   so the ignition path must stop it rather than let it spin the disk back up.
+  Because the fence can only stop lock holders, each local job re-checks the
+  ignition flag after taking its locks and before mounting anything (Borg
+  right after `acquire_backup_job`, EXFAT before and after its mount): a flag
+  raised before that check defers the job, and one raised after it finds the
+  job holding its disks, where the drain reaches it.
 - Timed waits (`acquire_backup_lock <class> <name> <seconds>`, used for the Borg
   repository) poll a non-blocking `flock` once a second so the job's USR1/TERM
   traps keep working while it waits.

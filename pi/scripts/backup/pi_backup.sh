@@ -82,6 +82,14 @@ if [ -f "$IGNITION_FLAG" ]; then
   exit 0
 fi
 acquire_backup_job borg bigboi movingparts || { log "another backup/restore is active, exiting"; exit 0; }
+# Re-check now that the disk locks are held and before anything is mounted:
+# the spindown fence drains only lock holders, so a flag raised before this
+# point was invisible to it, while one raised after it finds us holding the
+# disks and abort_backup.sh TERMs us.
+if [ -f "$IGNITION_FLAG" ]; then
+  log "van started before the backup disks were mounted, deferring"
+  exit 0
+fi
 if ! backup_progress_begin borg mounting "Mounting and verifying backup disks"; then
   log "backup progress telemetry is unavailable"
 fi

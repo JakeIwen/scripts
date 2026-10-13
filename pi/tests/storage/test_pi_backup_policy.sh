@@ -30,10 +30,23 @@ exit "${TEST_POLICY_STATUS:-0}"
 HELPER
 chmod +x "$fake_policyctl"
 
+# Records every mount request and refuses it, so a backup that reaches the
+# mount step is visible without touching a real disk.
+fake_mount_disks="$test_root/mount_disks"
+mount_calls="$test_root/mount-calls"
+cat > "$fake_mount_disks" <<'HELPER'
+#!/bin/bash
+printf '%s\n' "$*" >> "$TEST_MOUNT_CALLS"
+exit 1
+HELPER
+chmod +x "$fake_mount_disks"
+
 run_backup() {
   TEST_POLICY_CALLS="$policy_calls" \
-    PI_BACKUP_CONF="$fake_conf" \
+    TEST_MOUNT_CALLS="$mount_calls" \
+    PI_BACKUP_CONF="${TEST_BACKUP_CONF:-$fake_conf}" \
     PI_BACKUP_POLICYCTL="$fake_policyctl" \
+    PI_BACKUP_MOUNT_DISKS="$fake_mount_disks" \
     PI_BACKUP_PROGRESS_HELPER="$repo_root/pi/scripts/backup/progress.sh" \
     bash "$backup_script" "$@"
 }
@@ -80,6 +93,33 @@ output=$(TEST_POLICY_OUTPUT="0 1 0" run_backup --force 2>&1) ||
   fail "disabled policy during --force was treated as a backup failure"
 [[ "$output" == *"requested policy disables HDDs"* ]] ||
   fail "manual --force mounted despite disabled requested policy"
+
+# The spindown fence stops only jobs that already hold their disk locks, so a
+# flag raised between the pre-lock check and the locks must still defer the
+# job before it mounts anything.
+late_ignition_conf="$test_root/backup_conf_late_ignition.sh"
+cat > "$late_ignition_conf" <<EOF
+STAMP_DIR='$stamp_dir'
+SNAP_DIR='$test_root/snapshots'
+IGNITION_FLAG='$ignition_flag'
+BACKUP_DISK_LABEL=bigboi
+BACKUP_MNT='$test_root/mnt/bigboi'
+MEDIA_SRC='$test_root/mnt/movingparts'
+acquire_backup_job() { touch '$ignition_flag'; return 0; }
+EOF
+: > "$policy_calls"
+: > "$mount_calls"
+output=$(TEST_POLICY_OUTPUT="1 1 0" TEST_BACKUP_CONF="$late_ignition_conf" run_backup 2>&1)
+late_status=$?
+rm -f "$ignition_flag"
+[[ $late_status == 0 ]] ||
+  fail "ignition raised while locking was not deferred cleanly (status $late_status): $output"
+[[ "$output" == *"van started before the backup disks were mounted"* ]] ||
+  fail "post-lock ignition deferral was not clearly logged: $output"
+[[ ! -s "$mount_calls" ]] ||
+  fail "backup asked to mount a disk after the van started: $(cat "$mount_calls")"
+[[ ! -e "$stamp_dir/progress/borg.state" ]] ||
+  fail "post-lock ignition deferral started progress telemetry"
 
 run_backup --unknown >/dev/null 2>&1
 unknown_status=$?

@@ -166,7 +166,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   past its ignition check may hold only a disk lock while it is still mounting)
   to `abort_backup.sh`, which TERMs only job parents holding those disks
   (and any legacy exclusive holder), waits for each disk lock, and in emergency
-  mode kills remaining holders of those lock files only. `--user borg|exfat`
+  mode kills remaining holders of those lock files only. Local jobs re-check
+  the ignition flag after taking their locks and before mounting, since the
+  drain reaches only lock holders. `--user borg|exfat`
   targets that kind's job lock. A job that mounted a disk unmounts it only when
   `release_backup_disk_if_unused` proves no other holder. `backup_window.sh`
   starts Borg and EXFAT concurrently. The former local-fairness lease, supervisor
