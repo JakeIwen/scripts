@@ -272,6 +272,20 @@ class GuardDefinitionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "action order"):
             build_definitions(exports, snapshot, {PRESET: "Master"})
 
+    def test_layout_adaptive_shortcut_matches_only_its_own_placeholder(self):
+        def keyboard_with(exported):
+            snapshot, exports = fixture()
+            snapshot["records"]["keyboard"]["payload"]["launch_path"] = "autoAdapt"
+            for action in exports[0]["BTTMenuItems"][0]["BTTMenuItemActions"]:
+                if action["BTTUUID"] == "keyboard":
+                    action["BTTLayoutIndependentActionChar"] = exported
+            return exports, snapshot
+
+        build_definitions(*keyboard_with("no-name-keyboar"), {PRESET: "Master"})
+        for exported in ("no-name-shell00", "autoAdapt2", "17"):
+            with self.subTest(exported=exported), self.assertRaisesRegex(ValueError, "payload differs"):
+                build_definitions(*keyboard_with(exported), {PRESET: "Master"})
+
     def test_unknown_payload_mapping_or_missing_class_derivation_fails(self):
         snapshot, exports = fixture()
         snapshot["records"]["named"]["action_type"] = 386
