@@ -268,7 +268,8 @@ both the `flock` and `lockf` forms of the installer's `install.lock`, validates
 package manifests, ownership and devices, refuses any mount at or beneath a target
 per `/proc/self/mountinfo` (which also reveals same-device bind mounts), and
 deletes through directory descriptors that stop at any other filesystem, like
-`rm --one-file-system`. A held installer lock (exit 75) is reported as a skip; any
+`rm --one-file-system`. The remaining gap is a same-device bind mount created
+by root inside `~/.codex` after the final mountinfo check. A held installer lock (exit 75) is reported as a skip; any
 other failure makes the tidy exit nonzero after it still cleans apt. `apt-get
 clean` runs when already root or passwordless `sudo -n` is available; otherwise it
 prints a skip message. The installed root-crontab entry runs Sunday 01:30, outside the 03:00–08:00 backup
