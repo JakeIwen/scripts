@@ -15,6 +15,7 @@ from typing import Mapping, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SOURCE = REPO_ROOT / "pi" / "scripts" / "umount_disks.sh"
+FENCE = SOURCE.parent / "backup" / "umount_disks_fence.sh"
 GOLDEN = Path(__file__).with_name("fixtures") / "umount_disks_phases_golden.json"
 ORACLE_SHA256 = "be5f82d1b44097c47ec31332bf911eeb0d348680a0ae8eb28985ba7bc1d6cfe6"
 
@@ -191,13 +192,6 @@ def _transform_source(source_text: str) -> str:
             1,
         ),
         (
-            'if ! /usr/bin/sudo /home/pi/scripts/backup/abort_backup.sh "${abort_args[@]}" "${mounted_labels[@]}" ||\n'
-            '       ! hold_backup_disks_exclusive "${mounted_labels[@]}"; then',
-            'if ! ud_fake_abort_backup "${abort_args[@]}" "${mounted_labels[@]}" ||\n'
-            '       ! hold_backup_disks_exclusive "${mounted_labels[@]}"; then',
-            1,
-        ),
-        (
             '/usr/bin/sudo /usr/sbin/hd-idle -t "$parent_name"',
             'ud_fake_hd_idle "$parent_name"',
             1,
@@ -371,11 +365,24 @@ fake_samba_share_control() {
   esac
 }
 
-ud_fake_abort_backup() {
+hold_backup_disks_exclusive() {
+  local -a expected=("${mounted_labels[@]}")
+  (( spindown )) && expected=("${attached_labels[@]}")
+  if [[ "$*" != "${expected[*]}" ]]; then
+    trace "invalid-claim-arguments:$*"
+    return 99
+  fi
+  return 0
+}
+
+ud_abort_backup_jobs() {
   local label index mode=normal
-  local -a actual=("$@") expected=()
+  local -a actual=("$@") expected=() fenced=("${mounted_labels[@]}")
   (( emergency )) && { expected=(--emergency); mode=--emergency; }
-  for label in "${mounted_labels[@]}"; do
+  # hd-idle stops every attached disk, so --spindown fences all of them;
+  # otherwise only the disks being unmounted may be drained.
+  (( spindown )) && fenced=("${attached_labels[@]}")
+  for label in "${fenced[@]}"; do
     expected+=("$label")
   done
   if (( ${#actual[@]} != ${#expected[@]} )); then
@@ -551,6 +558,17 @@ case "$PHASE" in
     }
     samba_share_control=ud_direct_samba
     ;;
+  ud_fence_backup_jobs)
+    spindown=1
+    dry_run=0
+    emergency=0
+    attached_labels=(movingparts)
+    mounted_labels=()
+    ud_abort_backup_jobs() {
+      printf '%s\n' abort-backup >> "$SIDE_EFFECT_FILE"
+      return 1
+    }
+    ;;
   ud_spindown)
     spindown=1
     attached_labels=(movingparts)
@@ -608,6 +626,9 @@ def _run_scenario(source: Path, bash: Path, scenario: Scenario) -> dict[str, obj
         (harness / "backup" / "backup_locks.sh").write_text(
             "hold_backup_disks_exclusive() { :; }\n", encoding="utf-8"
         )
+        (harness / "backup" / "umount_disks_fence.sh").write_text(
+            FENCE.read_text(encoding="utf-8"), encoding="utf-8"
+        )
         (harness / "scenario.sh").write_text(
             _scenario_config(scenario), encoding="utf-8"
         )
@@ -652,6 +673,9 @@ def _run_direct_phase(source: Path, bash: Path, phase: str) -> dict[str, object]
         (harness / "backup").mkdir()
         (harness / "backup" / "backup_locks.sh").write_text(
             "hold_backup_disks_exclusive() { :; }\n", encoding="utf-8"
+        )
+        (harness / "backup" / "umount_disks_fence.sh").write_text(
+            FENCE.read_text(encoding="utf-8"), encoding="utf-8"
         )
         driver = harness / "driver.sh"
         driver.write_text(DIRECT_PHASE_DRIVER, encoding="utf-8")

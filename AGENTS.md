@@ -161,8 +161,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   `new_hotspare.sh` and the deployment fences keep `acquire_job_lock` exclusive,
   so legacy consumers exclude and are excluded by every job. Never create lock
   files at runtime, never probe with path-form `flock`, and never drain a disk
-  that the caller is not about to unmount: `umount_disks.sh` passes the
-  labels it unmounts to `abort_backup.sh`, which TERMs only job parents holding those disks
+  that the caller is not about to unmount or spin down: `umount_disks.sh` passes
+  the labels it unmounts (with `--spindown`, every attached HDD, since a job
+  past its ignition check may hold only a disk lock while it is still mounting)
+  to `abort_backup.sh`, which TERMs only job parents holding those disks
   (and any legacy exclusive holder), waits for each disk lock, and in emergency
   mode kills remaining holders of those lock files only. `--user borg|exfat`
   targets that kind's job lock. A job that mounted a disk unmounts it only when
@@ -428,6 +430,8 @@ The active design is represented by:
 - `pi/scripts/backup/abort_backup.sh`: coordinated termination before unmounting.
 - `pi/scripts/backup/clone_to_sd.sh`: bootable spare-card cloning.
 - `pi/scripts/mount_disks.sh` and `pi/scripts/umount_disks.sh`: disk lifecycle.
+  `pi/scripts/backup/umount_disks_fence.sh` (sourced by `umount_disks.sh`, shipped
+  with the backup payload) stops and claims backup jobs' disks before unmount or spindown.
 
 An older mount-directory cleanup implementation once treated a failed filesystem
 probe as proof that a mount was absent, then recursively deleted the live mount.
@@ -452,6 +456,7 @@ running. For each saved file use the installer's primitives,
 `sudo /usr/bin/install -o pi -g pi -m 0750 "$P/$N" "$L/$N.new"` then
 `sudo /usr/bin/mv -Tf "$L/$N.new" "$L/$N"`, comparing `sha256sum` before moving
 on. Restore the complete cohort (`backup_conf.sh`, `backup_locks.sh`,
+`umount_disks_fence.sh` (an older `umount_disks.sh` does not source it),
 `backup_window.sh`, `pi_backup.sh`, `exfat_snapshot.sh`, `abort_backup.sh`,
 `clone_now.sh`, `backup_priority.py`, `cloud_backup_control.py`, both cloud
 wrappers and workers, `icloud_status.py`, `time_machine_staging.py`,

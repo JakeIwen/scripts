@@ -7,6 +7,7 @@ if ! . "$script_dir/disk_policy.sh"; then
   return 1 2>/dev/null || exit 1
 fi
 . "$script_dir/backup/backup_locks.sh" || { return 1 2>/dev/null || exit 1; }
+. "$script_dir/backup/umount_disks_fence.sh" || { return 1 2>/dev/null || exit 1; }
 samba_share_control=${UMOUNT_DISKS_SAMBA_SHARE_CONTROL:-"$script_dir/samba_share_control.sh"}
 
 UD_DEVICE=
@@ -693,15 +694,11 @@ ud_unmount_all() {
       ud_notify_failures "$(( spindown && ! dry_run ))"
       return 1
     fi
+  fi
 
-    (( emergency )) && abort_args=(--emergency)
-    if ! /usr/bin/sudo /home/pi/scripts/backup/abort_backup.sh "${abort_args[@]}" "${mounted_labels[@]}" ||
-       ! hold_backup_disks_exclusive "${mounted_labels[@]}"; then
-      ud_record_failure "backup/restore did not stop; refusing to unmount HDDs"
-      ud_notify_failures "$(( spindown && ! dry_run ))"
-      return 1
-    fi
+  ud_fence_backup_jobs || return 1
 
+  if (( ${#mounted_labels[@]} )); then
     if (( needs_torrent_stop )) && ! ud_kill_torrent_client "$emergency"; then
       echo "WARNING: qbittorrent-nox stop could not be verified; continuing with guarded unmount and exact holder eviction" >&2
     fi

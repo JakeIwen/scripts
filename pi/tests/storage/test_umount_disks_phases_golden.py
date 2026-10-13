@@ -77,6 +77,11 @@ SCENARIOS: tuple[Scenario, ...] = (
         resolutions={"movingparts": (UNMOUNTED,)},
     ),
     Scenario(
+        "unmounted_without_spindown_untouched",
+        args=("movingparts",),
+        resolutions={"movingparts": (UNMOUNTED,)},
+    ),
+    Scenario(
         "preflight_discovery_failure",
         args=("movingparts",),
         resolutions={"movingparts": (discovery_error(),)},
@@ -253,6 +258,26 @@ SCENARIOS: tuple[Scenario, ...] = (
         resolutions={"movingparts": (UNMOUNTED, UNMOUNTED)},
     ),
     Scenario(
+        "spindown_unmounted_abort_failure",
+        args=("--spindown", "movingparts"),
+        resolutions={"movingparts": (UNMOUNTED,)},
+        abort_backup=Result(1, "abort refused"),
+    ),
+    Scenario(
+        "spindown_emergency_fences_unmounted_disk",
+        args=("--spindown", "--emergency"),
+        hdd_labels=("movingparts", "bigboi"),
+        resolutions={
+            "movingparts": (MOUNTED, UNMOUNTED),
+            "bigboi": (
+                attached(device="/dev/sdy1", parent="/dev/sdy"),
+                attached(device="/dev/sdy1", parent="/dev/sdy"),
+            ),
+        },
+        unmounts={"/mnt/movingparts": (Result(),)},
+        findmnt_sources={"/dev/sdz1": (Result(1),)},
+    ),
+    Scenario(
         "spindown_reresolve_absent",
         args=("--spindown", "movingparts"),
         resolutions={"movingparts": (UNMOUNTED, Resolution(status=1))},
@@ -358,7 +383,9 @@ SCENARIOS: tuple[Scenario, ...] = (
 
 
 class PhaseDirectInvocationTests(unittest.TestCase):
-    def _assert_phase_refused(self, phase: str) -> None:
+    def _assert_phase_refused(
+        self, phase: str, caller: str = "umount_disks_main"
+    ) -> None:
         bash = Path("/bin/bash")
         if not bash.is_file() or not os.access(bash, os.X_OK):
             self.skipTest("direct phase guard tests need executable /bin/bash")
@@ -367,7 +394,7 @@ class PhaseDirectInvocationTests(unittest.TestCase):
                 "returncode": 1,
                 "stdout": "",
                 "stderr": (
-                    f"ERROR: {phase} may only be called by umount_disks_main\n"
+                    f"ERROR: {phase} may only be called by {caller}\n"
                 ),
                 "side_effects": "",
             },
@@ -382,6 +409,9 @@ class PhaseDirectInvocationTests(unittest.TestCase):
 
     def test_spindown_refuses_direct_invocation(self) -> None:
         self._assert_phase_refused("ud_spindown")
+
+    def test_fence_refuses_direct_invocation(self) -> None:
+        self._assert_phase_refused("ud_fence_backup_jobs", "ud_unmount_all")
 
 
 class BashSelectionTests(unittest.TestCase):
@@ -460,9 +490,16 @@ class PhaseGoldenRegressionTests(unittest.TestCase):
         self.assertEqual(1, self.golden["schema"])
         self.assertEqual(len(SCENARIOS), self.golden["case_count"])
         self.assertEqual(expected_names, set(self.golden["cases"]))
-        self.assertEqual(50, len(SCENARIOS))
+        self.assertEqual(53, len(SCENARIOS))
         self.assertEqual(ORACLE_SHA256, self.golden["oracle"]["sha256"])
         self.assertEqual("pre-extraction umount_disks.sh", self.golden["oracle"]["name"])
+        # Deliberate behavior changes since the oracle are listed per case, so a
+        # regenerated case can never silently replace the frozen expectation.
+        amended = set()
+        for amendment in self.golden["amendments"]:
+            self.assertTrue(amendment["reason"])
+            amended.update(amendment["cases"])
+        self.assertLessEqual(amended, expected_names)
 
         remount_trace = self.golden["cases"]["spindown_remounted"]["trace"]
         self.assertIn("resolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\n", remount_trace)

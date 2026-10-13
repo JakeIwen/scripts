@@ -1,5 +1,28 @@
 {
-  "case_count": 50,
+  "amendments": [
+    {
+      "cases": [
+        "backup_abort_failure",
+        "hd_idle_nonzero_diagnostic",
+        "hd_idle_zero_with_diagnostic",
+        "spindown_duplicate_parent_once",
+        "spindown_emergency_fences_unmounted_disk",
+        "spindown_failure_continues_independent_disk",
+        "spindown_mapping_changed",
+        "spindown_other_partition_mounted",
+        "spindown_remounted",
+        "spindown_reresolve_absent",
+        "spindown_reresolve_vanished",
+        "spindown_state_write_failure",
+        "spindown_success",
+        "spindown_unmounted_abort_failure",
+        "unmounted_without_spindown_untouched"
+      ],
+      "date": "2026-10-13",
+      "reason": "--spindown drains and claims every attached HDD, not only the mounted ones, so a job that holds a disk lock while still mounting is stopped before hd-idle; the abort failure message now reads 'unmount or spin down'. Cases listed here were regenerated from the amended source and reviewed line by line against the oracle output."
+    }
+  ],
+  "case_count": 53,
   "cases": {
     "all_clean": {
       "returncode": 0,
@@ -33,9 +56,9 @@
     },
     "backup_abort_failure": {
       "returncode": 1,
-      "stderr": "ERROR: backup/restore did not stop; refusing to unmount HDDs\n",
+      "stderr": "ERROR: backup/restore did not stop; refusing to unmount or spin down HDDs\n",
       "stdout": "movingparts: /dev/sdz1 -> /mnt/movingparts; parent=/dev/sdz; action=unmount\nabort refused\n",
-      "trace": "resolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=/mnt/movingparts\nshare-name:movingparts\nsamba:drain:movingparts\nabort-backup:normal\nfailure:backup/restore did not stop; refusing to unmount HDDs\nnotify-failures:0\n"
+      "trace": "resolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=/mnt/movingparts\nshare-name:movingparts\nsamba:drain:movingparts\nabort-backup:normal\nfailure:backup/restore did not stop; refusing to unmount or spin down HDDs\nnotify-failures:0\n"
     },
     "clear_state_conflict": {
       "returncode": 2,
@@ -95,13 +118,13 @@
       "returncode": 1,
       "stderr": "ERROR: hd-idle failed for movingparts on /dev/sdz (status 1): device open failed\n",
       "stdout": "movingparts: /dev/sdz1 is unmounted; parent=/dev/sdz; action=spindown\nspinning down movingparts on /dev/sdz\nmounted USB/SCSI filesystems after disk operation:\n",
-      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nresolve:movingparts:2:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nparent-check:/dev/sdz:status=0\nhd-idle:/dev/sdz:status=1:output=device open failed\nfailure:hd-idle failed for movingparts on /dev/sdz (status 1): device open failed\nreport-mounts:status=0\nnotify-failures:1\n"
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nabort-backup:normal\nresolve:movingparts:2:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nparent-check:/dev/sdz:status=0\nhd-idle:/dev/sdz:status=1:output=device open failed\nfailure:hd-idle failed for movingparts on /dev/sdz (status 1): device open failed\nreport-mounts:status=0\nnotify-failures:1\n"
     },
     "hd_idle_zero_with_diagnostic": {
       "returncode": 1,
       "stderr": "ERROR: hd-idle failed for movingparts on /dev/sdz (status 0): unexpected diagnostic\n",
       "stdout": "movingparts: /dev/sdz1 is unmounted; parent=/dev/sdz; action=spindown\nspinning down movingparts on /dev/sdz\nmounted USB/SCSI filesystems after disk operation:\n",
-      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nresolve:movingparts:2:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nparent-check:/dev/sdz:status=0\nhd-idle:/dev/sdz:status=0:output=unexpected diagnostic\nfailure:hd-idle failed for movingparts on /dev/sdz (status 0): unexpected diagnostic\nreport-mounts:status=0\nnotify-failures:1\n"
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nabort-backup:normal\nresolve:movingparts:2:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nparent-check:/dev/sdz:status=0\nhd-idle:/dev/sdz:status=0:output=unexpected diagnostic\nfailure:hd-idle failed for movingparts on /dev/sdz (status 0): unexpected diagnostic\nreport-mounts:status=0\nnotify-failures:1\n"
     },
     "help_long": {
       "returncode": 0,
@@ -203,13 +226,19 @@
       "returncode": 0,
       "stderr": "",
       "stdout": "movingparts: /dev/sdz1 is unmounted; parent=/dev/sdz; action=spindown\nbigboi: /dev/sdz2 is unmounted; parent=/dev/sdz; action=spindown\nspinning down movingparts on /dev/sdz\nmounted USB/SCSI filesystems after disk operation:\n",
-      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nmarker-check:bigboi\nresolve:bigboi:1:status=0:device=/dev/sdz2:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nresolve:movingparts:2:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nparent-check:/dev/sdz:status=0\nhd-idle:/dev/sdz:status=0:output=none\nwrite-state:movingparts:/dev/sdz1:/dev/sdz:status=0\nresolve:bigboi:2:status=0:device=/dev/sdz2:parent=/dev/sdz:mounts=none\nreport-mounts:status=0\nnotify-recovery:1\n"
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nmarker-check:bigboi\nresolve:bigboi:1:status=0:device=/dev/sdz2:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nabort-backup:normal\nresolve:movingparts:2:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nparent-check:/dev/sdz:status=0\nhd-idle:/dev/sdz:status=0:output=none\nwrite-state:movingparts:/dev/sdz1:/dev/sdz:status=0\nresolve:bigboi:2:status=0:device=/dev/sdz2:parent=/dev/sdz:mounts=none\nreport-mounts:status=0\nnotify-recovery:1\n"
+    },
+    "spindown_emergency_fences_unmounted_disk": {
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "movingparts: /dev/sdz1 -> /mnt/movingparts; parent=/dev/sdz; action=unmount+spindown\nbigboi: /dev/sdy1 is unmounted; parent=/dev/sdy; action=spindown\nunmounting movingparts from /mnt/movingparts\nspinning down movingparts on /dev/sdz\nspinning down bigboi on /dev/sdy\nmounted USB/SCSI filesystems after disk operation:\n",
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=/mnt/movingparts\nmarker-check:bigboi\nresolve:bigboi:1:status=0:device=/dev/sdy1:parent=/dev/sdy:mounts=none\nhd-idle-available:1\nshare-name:movingparts\nsamba:drain:movingparts\nabort-backup:--emergency\nqbit-stop:1\nsamba:close:movingparts\nsync:/mnt/movingparts\nunmount:/mnt/movingparts:1:status=0\nfindmnt-source:/dev/sdz1:1:status=1:output=none\nresolve:movingparts:2:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nparent-check:/dev/sdz:status=0\nhd-idle:/dev/sdz:status=0:output=none\nwrite-state:movingparts:/dev/sdz1:/dev/sdz:status=0\nresolve:bigboi:2:status=0:device=/dev/sdy1:parent=/dev/sdy:mounts=none\nparent-check:/dev/sdy:status=0\nhd-idle:/dev/sdy:status=0:output=none\nwrite-state:bigboi:/dev/sdy1:/dev/sdy:status=0\nreport-mounts:status=0\nnotify-recovery:1\n"
     },
     "spindown_failure_continues_independent_disk": {
       "returncode": 1,
       "stderr": "ERROR: movingparts device mapping changed before spindown; refusing it\n",
       "stdout": "movingparts: /dev/sdz1 is unmounted; parent=/dev/sdz; action=spindown\nbigboi: /dev/sdy1 is unmounted; parent=/dev/sdy; action=spindown\nspinning down bigboi on /dev/sdy\nmounted USB/SCSI filesystems after disk operation:\n",
-      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nmarker-check:bigboi\nresolve:bigboi:1:status=0:device=/dev/sdy1:parent=/dev/sdy:mounts=none\nhd-idle-available:1\nresolve:movingparts:2:status=0:device=/dev/sdx1:parent=/dev/sdx:mounts=none\nfailure:movingparts device mapping changed before spindown; refusing it\nresolve:bigboi:2:status=0:device=/dev/sdy1:parent=/dev/sdy:mounts=none\nparent-check:/dev/sdy:status=0\nhd-idle:/dev/sdy:status=0:output=none\nwrite-state:bigboi:/dev/sdy1:/dev/sdy:status=0\nreport-mounts:status=0\nnotify-failures:1\n"
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nmarker-check:bigboi\nresolve:bigboi:1:status=0:device=/dev/sdy1:parent=/dev/sdy:mounts=none\nhd-idle-available:1\nabort-backup:normal\nresolve:movingparts:2:status=0:device=/dev/sdx1:parent=/dev/sdx:mounts=none\nfailure:movingparts device mapping changed before spindown; refusing it\nresolve:bigboi:2:status=0:device=/dev/sdy1:parent=/dev/sdy:mounts=none\nparent-check:/dev/sdy:status=0\nhd-idle:/dev/sdy:status=0:output=none\nwrite-state:bigboi:/dev/sdy1:/dev/sdy:status=0\nreport-mounts:status=0\nnotify-failures:1\n"
     },
     "spindown_hd_idle_unavailable": {
       "returncode": 1,
@@ -221,13 +250,13 @@
       "returncode": 1,
       "stderr": "ERROR: movingparts device mapping changed before spindown; refusing it\n",
       "stdout": "movingparts: /dev/sdz1 is unmounted; parent=/dev/sdz; action=spindown\nmounted USB/SCSI filesystems after disk operation:\n",
-      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nresolve:movingparts:2:status=0:device=/dev/sdy1:parent=/dev/sdy:mounts=none\nfailure:movingparts device mapping changed before spindown; refusing it\nreport-mounts:status=0\nnotify-failures:1\n"
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nabort-backup:normal\nresolve:movingparts:2:status=0:device=/dev/sdy1:parent=/dev/sdy:mounts=none\nfailure:movingparts device mapping changed before spindown; refusing it\nreport-mounts:status=0\nnotify-failures:1\n"
     },
     "spindown_other_partition_mounted": {
       "returncode": 1,
       "stderr": "ERROR: refusing to spin down /dev/sdz: /dev/sdz2 is still mounted at /mnt/other\n",
       "stdout": "movingparts: /dev/sdz1 is unmounted; parent=/dev/sdz; action=spindown\nmounted USB/SCSI filesystems after disk operation:\n",
-      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nresolve:movingparts:2:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nparent-check:/dev/sdz:status=1\nfailure:refusing to spin down /dev/sdz: /dev/sdz2 is still mounted at /mnt/other\nreport-mounts:status=0\nnotify-failures:1\n"
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nabort-backup:normal\nresolve:movingparts:2:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nparent-check:/dev/sdz:status=1\nfailure:refusing to spin down /dev/sdz: /dev/sdz2 is still mounted at /mnt/other\nreport-mounts:status=0\nnotify-failures:1\n"
     },
     "spindown_reject_non_hdd": {
       "returncode": 1,
@@ -239,19 +268,19 @@
       "returncode": 1,
       "stderr": "ERROR: movingparts was remounted at /mnt/movingparts before spindown\n",
       "stdout": "movingparts: /dev/sdz1 is unmounted; parent=/dev/sdz; action=spindown\nmounted USB/SCSI filesystems after disk operation:\n",
-      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nresolve:movingparts:2:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=/mnt/movingparts\nfailure:movingparts was remounted at /mnt/movingparts before spindown\nreport-mounts:status=0\nnotify-failures:1\n"
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nabort-backup:normal\nresolve:movingparts:2:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=/mnt/movingparts\nfailure:movingparts was remounted at /mnt/movingparts before spindown\nreport-mounts:status=0\nnotify-failures:1\n"
     },
     "spindown_reresolve_absent": {
       "returncode": 1,
       "stderr": "ERROR: movingparts disappeared before spindown\n",
       "stdout": "movingparts: /dev/sdz1 is unmounted; parent=/dev/sdz; action=spindown\nmounted USB/SCSI filesystems after disk operation:\n",
-      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nresolve:movingparts:2:status=1:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nfailure:movingparts disappeared before spindown\nreport-mounts:status=0\nnotify-failures:1\n"
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nabort-backup:normal\nresolve:movingparts:2:status=1:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nfailure:movingparts disappeared before spindown\nreport-mounts:status=0\nnotify-failures:1\n"
     },
     "spindown_reresolve_vanished": {
       "returncode": 1,
       "stderr": "ERROR: udev mapping points to vanished device /dev/vanished-test\n",
       "stdout": "movingparts: /dev/sdz1 is unmounted; parent=/dev/sdz; action=spindown\nmounted USB/SCSI filesystems after disk operation:\n",
-      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nresolve:movingparts:2:status=2:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nfailure:udev mapping points to vanished device /dev/vanished-test\nreport-mounts:status=0\nnotify-failures:1\n"
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nabort-backup:normal\nresolve:movingparts:2:status=2:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nfailure:udev mapping points to vanished device /dev/vanished-test\nreport-mounts:status=0\nnotify-failures:1\n"
     },
     "spindown_state_prepare_failure": {
       "returncode": 1,
@@ -263,13 +292,19 @@
       "returncode": 1,
       "stderr": "ERROR: cannot record spindown state\n",
       "stdout": "movingparts: /dev/sdz1 is unmounted; parent=/dev/sdz; action=spindown\nspinning down movingparts on /dev/sdz\nmounted USB/SCSI filesystems after disk operation:\n",
-      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nresolve:movingparts:2:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nparent-check:/dev/sdz:status=0\nhd-idle:/dev/sdz:status=0:output=none\nwrite-state:movingparts:/dev/sdz1:/dev/sdz:status=1\nfailure:cannot record spindown state\nreport-mounts:status=0\nnotify-failures:1\n"
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nabort-backup:normal\nresolve:movingparts:2:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nparent-check:/dev/sdz:status=0\nhd-idle:/dev/sdz:status=0:output=none\nwrite-state:movingparts:/dev/sdz1:/dev/sdz:status=1\nfailure:cannot record spindown state\nreport-mounts:status=0\nnotify-failures:1\n"
     },
     "spindown_success": {
       "returncode": 0,
       "stderr": "",
       "stdout": "movingparts: /dev/sdz1 is unmounted; parent=/dev/sdz; action=spindown\nspinning down movingparts on /dev/sdz\nmounted USB/SCSI filesystems after disk operation:\n",
-      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nresolve:movingparts:2:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nparent-check:/dev/sdz:status=0\nhd-idle:/dev/sdz:status=0:output=none\nwrite-state:movingparts:/dev/sdz1:/dev/sdz:status=0\nreport-mounts:status=0\nnotify-recovery:1\n"
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nabort-backup:normal\nresolve:movingparts:2:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nparent-check:/dev/sdz:status=0\nhd-idle:/dev/sdz:status=0:output=none\nwrite-state:movingparts:/dev/sdz1:/dev/sdz:status=0\nreport-mounts:status=0\nnotify-recovery:1\n"
+    },
+    "spindown_unmounted_abort_failure": {
+      "returncode": 1,
+      "stderr": "ERROR: backup/restore did not stop; refusing to unmount or spin down HDDs\n",
+      "stdout": "movingparts: /dev/sdz1 is unmounted; parent=/dev/sdz; action=spindown\nabort refused\n",
+      "trace": "prepare-state\nmarker-check:movingparts\nresolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nhd-idle-available:1\nabort-backup:normal\nfailure:backup/restore did not stop; refusing to unmount or spin down HDDs\nnotify-failures:1\n"
     },
     "unmount_failure_continues_independent_disk": {
       "returncode": 1,
@@ -300,6 +335,12 @@
       "stderr": "",
       "stdout": "bigboi: /dev/sdy1 -> /mnt/bigboi; parent=/dev/sdy; action=unmount\nunmounting bigboi from /mnt/bigboi\nmounted USB/SCSI filesystems after disk operation:\n",
       "trace": "resolve:bigboi:1:status=0:device=/dev/sdy1:parent=/dev/sdy:mounts=/mnt/bigboi\nshare-name:bigboi\nsamba:drain:bigboi\nabort-backup:normal\nsamba:close:bigboi\nsync:/mnt/bigboi\nunmount:/mnt/bigboi:1:status=0\nfindmnt-source:/dev/sdy1:1:status=1:output=none\nreport-mounts:status=0\nnotify-recovery:0\n"
+    },
+    "unmounted_without_spindown_untouched": {
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "movingparts: /dev/sdz1 is unmounted; parent=/dev/sdz; action=none\nmounted USB/SCSI filesystems after disk operation:\n",
+      "trace": "resolve:movingparts:1:status=0:device=/dev/sdz1:parent=/dev/sdz:mounts=none\nreport-mounts:status=0\nnotify-recovery:0\n"
     }
   },
   "oracle": {

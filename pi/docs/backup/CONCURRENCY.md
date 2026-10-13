@@ -64,19 +64,23 @@ backup job; the capture handshake and share drain are unchanged.
 ## Lifecycle, cancellation and recovery
 
 - `abort_backup.sh [--emergency] [LABEL ...]` (called by `umount_disks.sh` with
-  the labels it is about to unmount, and by stale-mount recovery with the
-  affected labels)
+  the labels it is about to unmount, or with `--spindown` every attached HDD
+  it will stop, and by stale-mount recovery with the affected labels)
   sends TERM to every job parent whose process holds that disk lock, plus any
   legacy exclusive holder, then waits for each disk lock to become free
   (exclusive `flock -w`). With `--emergency` (ignition) the wait is bounded and
   remaining holders of those lock files, including inherited children, receive
   KILL. Without labels, every registered disk is drained (the historical
   "stop everything" behavior for callers that cannot name labels).
-- After a successful drain `umount_disks.sh` claims every disk it is about to
-  unmount exclusively (`hold_backup_disks_exclusive`) and keeps those
-  descriptors until it exits, so no job can start using a disk between the
-  drain and the unmount or spindown. A job that starts meanwhile fails closed
-  ("<label> is being unmounted or drained") and its scheduler retries later.
+- After a successful drain `umount_disks.sh` (its sourced `umount_disks_fence.sh`)
+  claims every disk it is about to
+  unmount or spin down exclusively (`hold_backup_disks_exclusive`) and keeps
+  those descriptors until it exits, so no job can start using a disk between
+  the drain and the unmount or spindown. A job that starts meanwhile fails
+  closed ("<label> is being unmounted or drained") and its scheduler retries
+  later. The spindown fence covers attached disks that are not mounted: a
+  job that passed its ignition check holds its disk locks before it mounts,
+  so the ignition path must stop it rather than let it spin the disk back up.
 - Timed waits (`acquire_backup_lock <class> <name> <seconds>`, used for the Borg
   repository) poll a non-blocking `flock` once a second so the job's USR1/TERM
   traps keep working while it waits.

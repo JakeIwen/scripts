@@ -5,6 +5,7 @@ set -u
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 script="$repo_root/pi/scripts/umount_disks.sh"
 abort_script="$repo_root/pi/scripts/backup/abort_backup.sh"
+fence_script="$repo_root/pi/scripts/backup/umount_disks_fence.sh"
 
 # shellcheck source=../lib.sh
 source "$repo_root/pi/tests/lib.sh"
@@ -78,10 +79,14 @@ umount_disks_main --spindown --emergency movingparts >/dev/null 2>&1
 
 grep -Fq '"$samba_share_control" drain "${mounted_labels[@]}"' "$script" ||
   fail "disk shutdown does not block Samba reconnects before closure"
-grep -Fq 'abort_backup.sh "${abort_args[@]}" "${mounted_labels[@]}" ||' "$script" ||
+grep -Fq 'ud_fence_backup_jobs || return 1' "$script" ||
+  fail "disk shutdown does not fence backup jobs before closing shares"
+grep -Fq 'ud_abort_backup_jobs "${abort_args[@]}" "${fence_labels[@]}" ||' "$fence_script" ||
   fail "disk shutdown does not pass emergency mode to backup termination"
-grep -Fq '! hold_backup_disks_exclusive "${mounted_labels[@]}"; then' "$script" ||
+grep -Fq '! hold_backup_disks_exclusive "${fence_labels[@]}"; then' "$fence_script" ||
   fail "disk shutdown does not retain exclusive disk ownership through unmount"
+grep -Fq '/usr/bin/sudo /home/pi/scripts/backup/abort_backup.sh "$@"' "$fence_script" ||
+  fail "backup termination no longer runs the root abort helper"
 grep -Fq 'ud_kill_torrent_client "$emergency"' "$script" ||
   fail "disk shutdown does not escalate the exact qBittorrent process"
 grep -Fq 'continuing with guarded unmount and exact holder eviction' "$script" ||
@@ -238,5 +243,145 @@ ud_prepare_spindown_state_dir >/dev/null 2>&1 ||
   fail "pi caller could not create shared spindown state first"
 grep -Fq "mkdir:-m 2770 -- $state_dir" "$state_calls" ||
   fail "pi caller did not create a setgid shared state directory"
+
+# With --spindown, hd-idle stops every attached HDD, so a job that holds only a
+# disk lock (past its ignition check, still mounting) must be stopped and the
+# disk claimed before the physical spindown. Without --spindown an unmounted
+# disk is left untouched, so its job keeps running. Real processes: the
+# repository's abort_backup.sh and lock library against a private registry.
+if [[ -x /usr/bin/flock && -x /usr/sbin/hd-idle && -d /proc/self/fd ]]; then
+  lock_root=$(mktemp -d)
+  fence_job_pid=
+  fence_cleanup() {
+    if [[ -n "$fence_job_pid" ]] && kill -0 "$fence_job_pid" 2>/dev/null; then
+      kill -KILL "$fence_job_pid" 2>/dev/null || true
+      wait "$fence_job_pid" 2>/dev/null || true
+    fi
+    rm -f "$holder_calls"
+    rm -rf "$state_test_root" "$lock_root"
+  }
+  trap fence_cleanup EXIT
+
+  export VANPI_BACKUP_LOCK_DIR="$lock_root/registry"
+  export VANPI_BACKUP_JOB_LOCK="$lock_root/legacy.lock"
+  export VANPI_BACKUP_JOB_LOCK_OWNER=$(/usr/bin/id -un)
+  export VANPI_BACKUP_JOB_LOCK_GROUP=$(/usr/bin/id -gn)
+  export VANPI_BACKUP_JOB_LOCK_MODE=660 VANPI_BACKUP_LOCK_DIR_MODE=770
+  export VANPI_BACKUP_PRIORITY_TOOL="$lock_root/priority.py"
+  printf '%s\n' 'raise SystemExit(0)' > "$VANPI_BACKUP_PRIORITY_TOOL"
+  mkdir -m 0770 "$VANPI_BACKUP_LOCK_DIR"
+  : > "$VANPI_BACKUP_JOB_LOCK"
+  chmod 0660 "$VANPI_BACKUP_JOB_LOCK"
+  # Replace the earlier stub and the live registry defaults with the real
+  # claim against the private registry.
+  unset JOB_LOCK JOB_LOCK_OWNER JOB_LOCK_GROUP JOB_LOCK_MODE
+  source "$repo_root/pi/scripts/backup/backup_locks.sh"
+  for kind in "${BACKUP_JOB_KINDS[@]}"; do
+    : > "$(backup_lock_path job "$kind")"
+  done
+  for label in "${BACKUP_DISK_LABELS[@]}"; do
+    : > "$(backup_lock_path disk "$label")"
+  done
+  chmod 0660 "$BACKUP_LOCK_DIR"/*.lock
+
+  backup_conf="$repo_root/pi/scripts/backup/backup_conf.sh"
+  fence_job="$lock_root/pi_backup.sh"
+  fence_signal="$lock_root/signal"
+  fence_ready="$lock_root/ready"
+  spindown_calls="$lock_root/spindown"
+  cat > "$fence_job" <<'HOLDER'
+#!/bin/bash
+set -u
+source "$TEST_CONF"
+# Trap first: a drain may land between the lock record and the sleep loop.
+trap 'printf "TERM\n" > "$TEST_SIGNAL_FILE"; exit 143' TERM INT
+acquire_backup_job borg hdd1tb || exit 4
+: > "$TEST_READY_FILE"
+while :; do /bin/sleep 0.1; done
+HOLDER
+  chmod +x "$fence_job"
+  start_fence_job() {
+    local attempts
+    : > "$fence_signal"
+    : > "$spindown_calls"
+    rm -f "$fence_ready"
+    TEST_CONF="$backup_conf" TEST_SIGNAL_FILE="$fence_signal" \
+      TEST_READY_FILE="$fence_ready" "$fence_job" &
+    fence_job_pid=$!
+    for ((attempts = 0; attempts < 50; attempts++)); do
+      if [[ -e "$fence_ready" ]] &&
+         ! /usr/bin/flock -n "$BACKUP_LOCK_DIR/disk-hdd1tb.lock" true 2>/dev/null; then
+        return 0
+      fi
+      /bin/sleep 0.02
+    done
+    return 1
+  }
+  disk_lock_is_shareable() {
+    /usr/bin/flock -n -s "$BACKUP_LOCK_DIR/disk-hdd1tb.lock" true
+  }
+
+  # Never alert, probe udev or call hd-idle from a regression test. hdd1tb is
+  # attached and unmounted in both runs; only the fence decision differs.
+  ud_notify_failures() { :; }
+  ud_notify_recovery() { :; }
+  ud_prepare_spindown_state_dir() { return 0; }
+  ud_spindown_state_is_current() { return 1; }
+  ud_resolve_label() {
+    UD_DEVICE=/dev/sdz1
+    UD_PARENT=/dev/sdz
+    UD_MOUNTS=
+    DISK_POLICY_RESOLVE_REASON=
+    return 0
+  }
+  ud_spindown() {
+    # Ownership must already exist here: hd-idle runs next.
+    local state=claimed
+    (( spindown )) || return 0
+    disk_lock_is_shareable && state=shareable
+    printf '%s %s\n' "${attached_labels[*]}" "$state" > "$spindown_calls"
+  }
+  ud_abort_backup_jobs() {
+    ABORT_BACKUP_CONF="$backup_conf" "$abort_script" "$@"
+  }
+
+  start_fence_job || fail "could not start a Borg job holding the unmounted hdd1tb lock"
+  (
+    umount_disks_main --spindown hdd1tb > "$lock_root/spindown.out" 2>&1 || exit 1
+    # The claim must outlive the drain: hdd1tb stays exclusive until this
+    # lifecycle shell exits, so a retrying job cannot slip in before hd-idle.
+    if disk_lock_is_shareable; then
+      echo shareable > "$lock_root/claim"
+    else
+      echo claimed > "$lock_root/claim"
+    fi
+  ) || fail "spindown of an unmounted, job-held disk failed: $(cat "$lock_root/spindown.out")"
+  # Check the fence before waiting on the job: a missing fence must fail
+  # here, not hang on a job nothing stopped.
+  assert_eq "hdd1tb claimed" "$(< "$spindown_calls")" "hd-idle was reached without owning the disk"
+  assert_eq claimed "$(< "$lock_root/claim")" "spindown did not keep the disk claimed after the drain"
+  for ((attempts = 0; attempts < 100; attempts++)); do
+    kill -0 "$fence_job_pid" 2>/dev/null || break
+    /bin/sleep 0.1
+  done
+  kill -0 "$fence_job_pid" 2>/dev/null && fail "the drained job is still running after spindown"
+  wait "$fence_job_pid" 2>/dev/null || true
+  fence_job_pid=
+  assert_eq TERM "$(< "$fence_signal")" "spindown did not stop the job holding the unmounted disk"
+  disk_lock_is_shareable || fail "the lifecycle claim outlived its shell"
+
+  start_fence_job || fail "could not restart the Borg job for the unmount-only check"
+  ( umount_disks_main hdd1tb > "$lock_root/unmount.out" 2>&1 ) ||
+    fail "unmount of an idle, job-held disk failed: $(cat "$lock_root/unmount.out")"
+  kill -0 "$fence_job_pid" 2>/dev/null ||
+    fail "an unmount without --spindown stopped the job holding an unmounted disk"
+  [[ ! -s "$fence_signal" ]] || fail "an unmount without --spindown signaled the job"
+  [[ ! -s "$spindown_calls" ]] || fail "hd-idle was reached without --spindown"
+  kill -TERM "$fence_job_pid" 2>/dev/null || true
+  wait "$fence_job_pid" 2>/dev/null || true
+  fence_job_pid=
+else
+  echo "SKIP: spindown fence process tests need Linux flock, /proc and hd-idle"
+fi
 
 echo "PASS: guarded disk shutdown escalates consumers without force/lazy unmount"
