@@ -23,8 +23,7 @@ shared_hash=${VANPI_TM_PREVIOUS_CLOUD_SHA256:-$(git show HEAD:pi/scripts/backup/
 [[ "$shared_hash" =~ ^[0-9a-f]{64}$ ]] || exit 1
 progress_hash=$(git show HEAD:pi/scripts/backup/icloud_progress.py | shasum -a 256 | awk '{print $1}')
 share_hash=$(git show HEAD:pi/scripts/samba_share_control.sh | shasum -a 256 | awk '{print $1}')
-umount_hash=$(local_backup_previous_script_hash "$repo" umount_disks.sh)
-internet_hash=$(local_backup_previous_script_hash "$repo" internet_switches.sh)
+lifecycle_previous=$(local_backup_previous_lifecycle_hashes "$repo")
 gate_hash=$(shasum -a 256 pi/scripts/samba_require_mount.sh | awk '{print $1}')
 conf_hash=$(local_backup_previous_conf_hash "$repo")
 uplink_hash=$(git show HEAD:pi/scripts/backup/icloud_uplink.py | shasum -a 256 | awk '{print $1}')
@@ -35,36 +34,24 @@ old_status_hash=${VANPI_TM_PREVIOUS_STATUS_SHA256:-$(git show HEAD:pi/scripts/ba
 COPYFILE_DISABLE=1 /usr/bin/tar --no-xattrs -cf - \
   pi/__init__.py pi/tests/__init__.py pi/backup_local_deploy.sh \
   pi/deploy_icloud_backup.sh pi/deploy_time_machine_icloud.sh \
-  "${LOCAL_BACKUP_FILES[@]/#/pi/scripts/backup/}" \
-  pi/scripts/backup/backup_locks.py \
+  "${LOCAL_BACKUP_PAYLOAD[@]/#/pi/scripts/backup/}" \
+  "${LIFECYCLE_SCRIPTS[@]/#/pi/scripts/}" \
   pi/tests/backup/test_backup_locks.py pi/tests/backup/test_local_backup_deploy.py pi/tests/backup/test_openwrt_schedule.py pi/tests/backup/test_protected_json.py \
-  pi/tests/backup/priority_fixtures.py \
-  pi/scripts/backup/backup_priority.py pi/scripts/backup/protected_json.py pi/scripts/backup/backup_priority_control.py \
-  pi/scripts/backup/mac_capture_control.py pi/scripts/backup/backup_conf.sh pi/scripts/backup/icloud_backup.sh \
-  pi/tests/backup/test_backup_priority.py pi/tests/storage/test_backup_job_lock.sh pi/tests/storage/test_backup_locks.sh \
-  pi/scripts/backup/time_machine_icloud.py pi/scripts/backup/time_machine_icloud.sh \
-  pi/scripts/backup/time_machine_store.py pi/scripts/backup/TIME_MACHINE_ICLOUD_RESTORE.txt \
-  pi/scripts/backup/time_machine_staging.py pi/tests/backup/test_time_machine_staging.py \
-  pi/scripts/backup/time_machine_pipeline.py pi/scripts/backup/time_machine_verification.py \
-  pi/scripts/backup/time_machine_downloads.py \
-  pi/tests/backup/test_time_machine_downloads.py pi/tests/backup/test_icloud_uplink.py \
-  pi/tests/backup/test_time_machine_pipeline.py \
-  pi/scripts/backup/time_machine_icloud_status.py \
-  pi/scripts/backup/time_machine_icloud_control.py pi/scripts/backup/cloud_backup_control.py \
-  pi/scripts/backup/icloud_backup.py pi/scripts/backup/icloud_backup_control.py pi/scripts/backup/icloud_progress.py \
-  pi/scripts/backup/icloud_status.py pi/scripts/backup/icloud_uplink.py \
-  pi/scripts/backup/icloud_inventory.py \
-  pi/scripts/backup/ICLOUD_RESTORE.txt \
+  pi/tests/backup/priority_fixtures.py pi/tests/backup/test_backup_priority.py \
+  pi/tests/storage/test_backup_job_lock.sh pi/tests/storage/test_backup_locks.sh \
+  pi/tests/backup/test_time_machine_staging.py pi/tests/backup/test_time_machine_downloads.py pi/tests/backup/test_icloud_uplink.py \
+  pi/tests/backup/test_time_machine_pipeline.py pi/tests/backup/test_time_machine_icloud.py \
+  pi/tests/backup/test_icloud_status.py pi/tests/backup/test_icloud_backup.py \
   pi/scripts/connectivity_status.py pi/configs/icloud-backup.json pi/tmpfiles.d/vanpi-backup.conf \
   pi/configs/time-machine-icloud.json pi/services/vanpi-time-machine-icloud.service \
-  pi/services/vanpi-time-machine-icloud.timer pi/tests/backup/test_time_machine_icloud.py \
+  pi/services/vanpi-time-machine-icloud.timer \
   pi/services/vanpi-time-machine-icloud-resume.service pi/services/vanpi-time-machine-icloud-resume.timer \
   pi/services/vanpi-icloud-backup-resume.service pi/services/vanpi-icloud-backup-resume.timer \
-  pi/scripts/samba_share_control.sh pi/scripts/disk_policy.sh pi/scripts/umount_disks.sh pi/scripts/internet_switches.sh pi/scripts/remount.sh \
+  pi/scripts/samba_share_control.sh pi/scripts/disk_policy.sh pi/scripts/remount.sh \
   pi/tests/lib.sh pi/tests/storage/test_samba_share_control.sh \
-  pi/tests/backup/test_icloud_status.py pi/tests/backup/test_icloud_backup.py macbook/scripts/time_machine_offsite_coordinator.py \
+  macbook/scripts/time_machine_offsite_coordinator.py \
   | ssh -o BatchMode=yes "$target" /bin/tar -xf - -C "$stage"
-ssh -o BatchMode=yes "$target" /bin/bash -s -- "$stage" "$shared_hash" "$gate_hash" "$old_status_hash" "$progress_hash" "$share_hash" "$conf_hash" "$uplink_hash" "$umount_hash" "$internet_hash" "$tmpfiles_hash" "$local_previous" <<'REMOTE'
+ssh -o BatchMode=yes "$target" /bin/bash -s -- "$stage" "$shared_hash" "$gate_hash" "$old_status_hash" "$progress_hash" "$share_hash" "$conf_hash" "$uplink_hash" "$lifecycle_previous" "$tmpfiles_hash" "$local_previous" <<'REMOTE'
 set -euo pipefail
 stage=$1
 [[ "$stage" =~ ^/tmp/vanpi-tm-icloud\.[[:alnum:]]{6}$ ]] || exit 1
@@ -75,8 +62,9 @@ cd "$stage"
    $(/usr/bin/stat -c '%U %G %a' /run/lock/vanpi_backup.lock) == 'root pi 660' ]] || exit 1
 exec 9</run/lock/vanpi_backup.lock
 /usr/bin/flock -n 9 || { echo 'Backup lock became busy; retry deployment later.' >&2; exit 1; }
-verify_local_backup_payload pi/scripts/backup "${12}"
-verify_local_backup_tmpfiles pi/tmpfiles.d/vanpi-backup.conf "${11}"
+verify_local_backup_payload pi/scripts/backup "${11}"
+verify_local_backup_tmpfiles pi/tmpfiles.d/vanpi-backup.conf "${10}"
+verify_lifecycle_scripts pi/scripts "$9"
 /usr/bin/python3 pi/tests/backup/test_time_machine_icloud.py
 /usr/bin/python3 -m unittest pi.tests.backup.test_time_machine_staging
 /usr/bin/python3 pi/tests/backup/test_icloud_status.py
@@ -138,15 +126,14 @@ sudo -n /usr/bin/install -o root -g root -m 0644 pi/tmpfiles.d/vanpi-backup.conf
 sudo -n /usr/bin/systemd-tmpfiles --create /etc/tmpfiles.d/vanpi-backup.conf
 [[ -d /run/lock/vanpi-backup && ! -L /run/lock/vanpi-backup &&
    $(/usr/bin/stat -c '%U %G %a' /run/lock/vanpi-backup) == 'root pi 770' ]] || exit 1
-for name in "${LOCAL_BACKUP_FILES[@]}" backup_locks.py time_machine_store.py protected_json.py backup_priority.py mac_capture_control.py icloud_status.py cloud_backup_control.py backup_priority_control.py icloud_inventory.py icloud_progress.py icloud_backup.py icloud_uplink.py icloud_backup_control.py time_machine_icloud_control.py time_machine_staging.py time_machine_verification.py time_machine_downloads.py time_machine_pipeline.py time_machine_icloud.py icloud_backup.sh time_machine_icloud.sh time_machine_icloud_status.py backup_conf.sh TIME_MACHINE_ICLOUD_RESTORE.txt; do
+for name in "${LOCAL_BACKUP_PAYLOAD[@]}"; do
   live=/home/pi/scripts/backup/$name
   [[ ! -e "$live" ]] || /usr/bin/cp -p "$live" previous/"$name"
   install_atomic pi/scripts/backup/"$name" "$live" 0750
 done
 /usr/bin/cp -p /home/pi/scripts/samba_share_control.sh previous/samba_share_control.sh
 install_atomic pi/scripts/samba_share_control.sh /home/pi/scripts/samba_share_control.sh 0750
-install_lifecycle_script pi/scripts/umount_disks.sh /home/pi/scripts/umount_disks.sh "$9" "$PWD/previous"
-install_lifecycle_script pi/scripts/internet_switches.sh /home/pi/scripts/internet_switches.sh "${10}" "$PWD/previous"
+install_lifecycle_scripts pi/scripts "$9" "$PWD/previous"
 if [[ ! -e /etc/vanpi-time-machine-icloud.json ]]; then
   sudo -n /usr/bin/install -o root -g root -m 0600 pi/configs/time-machine-icloud.json /etc/vanpi-time-machine-icloud.json
 fi

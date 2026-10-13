@@ -7,8 +7,7 @@ target=${1:-pi@vanpi.lan}
 . "$repo/pi/backup_local_deploy.sh"
 local_previous=$(local_backup_previous_hashes "$repo")
 tmpfiles_hash=$(local_backup_previous_tmpfiles_hash "$repo")
-umount_hash=$(local_backup_previous_script_hash "$repo" umount_disks.sh)
-internet_hash=$(local_backup_previous_script_hash "$repo" internet_switches.sh)
+lifecycle_previous=$(local_backup_previous_lifecycle_hashes "$repo")
 worker_hash=${VANPI_TM_PREVIOUS_CLOUD_SHA256:-$(local_backup_previous_script_hash "$repo" backup/icloud_backup.py)}
 status_hash=${VANPI_TM_PREVIOUS_STATUS_SHA256:-$(local_backup_previous_script_hash "$repo" backup/icloud_status.py)}
 [[ "$worker_hash" =~ ^[0-9a-f]{64}$ && "$status_hash" =~ ^[0-9a-f]{64}$ ]] || exit 1
@@ -19,55 +18,27 @@ bash -n "$repo/pi/scripts/backup/icloud_backup.sh"
 conf_hash=$(local_backup_previous_conf_hash "$repo")
 stage=$(ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" /usr/bin/mktemp -d /tmp/vanpi-icloud.XXXXXX)
 [[ "$stage" =~ ^/tmp/vanpi-icloud\.[[:alnum:]]{6}$ ]] || exit 1
-scp -q "$repo/pi/scripts/backup/icloud_backup.py" \
-  "$repo/pi/backup_local_deploy.sh" \
-  "${LOCAL_BACKUP_FILES[@]/#/$repo/pi/scripts/backup/}" \
-  "$repo/pi/scripts/backup/backup_locks.py" \
-  "$repo/pi/scripts/backup/backup_priority.py" \
-  "$repo/pi/scripts/backup/protected_json.py" \
-  "$repo/pi/scripts/backup/backup_priority_control.py" \
-  "$repo/pi/scripts/backup/mac_capture_control.py" \
-  "$repo/pi/scripts/backup/time_machine_store.py" \
-  "$repo/pi/scripts/backup/time_machine_staging.py" \
-  "$repo/pi/scripts/backup/time_machine_icloud.py" \
-  "$repo/pi/scripts/backup/time_machine_icloud.sh" \
-  "$repo/pi/scripts/backup/time_machine_icloud_control.py" \
-  "$repo/pi/scripts/backup/time_machine_icloud_status.py" \
-  "$repo/pi/scripts/backup/time_machine_pipeline.py" \
-  "$repo/pi/scripts/backup/time_machine_verification.py" \
-  "$repo/pi/scripts/backup/time_machine_downloads.py" \
-  "$repo/pi/scripts/backup/TIME_MACHINE_ICLOUD_RESTORE.txt" \
-  "$repo/pi/scripts/backup/backup_conf.sh" \
-  "$repo/pi/scripts/backup/icloud_progress.py" \
-  "$repo/pi/scripts/backup/icloud_inventory.py" \
-  "$repo/pi/scripts/backup/icloud_status.py" \
-  "$repo/pi/scripts/backup/cloud_backup_control.py" \
-  "$repo/pi/scripts/backup/icloud_backup_control.py" \
-  "$repo/pi/scripts/backup/icloud_uplink.py" \
-  "$repo/pi/scripts/backup/icloud_backup.sh" \
-  "$repo/pi/scripts/backup/ICLOUD_RESTORE.txt" \
+scp -q "$repo/pi/backup_local_deploy.sh" \
+  "${LOCAL_BACKUP_PAYLOAD[@]/#/$repo/pi/scripts/backup/}" \
+  "${LIFECYCLE_SCRIPTS[@]/#/$repo/pi/scripts/}" \
   "$repo/pi/configs/icloud-backup.json" \
   "$repo/pi/tmpfiles.d/vanpi-backup.conf" \
-  "$repo/pi/scripts/umount_disks.sh" "$repo/pi/scripts/internet_switches.sh" \
   "$repo/pi/services/vanpi-icloud-backup.service" \
   "$repo/pi/services/vanpi-icloud-backup.timer" \
   "$repo/pi/services/vanpi-icloud-backup-resume.service" \
   "$repo/pi/services/vanpi-icloud-backup-resume.timer" "$target:$stage/"
-ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" /bin/bash -s -- "$stage" "$conf_hash" "$tmpfiles_hash" "$local_previous" "$umount_hash" "$internet_hash" "$worker_hash" "$status_hash" <<'REMOTE'
+ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" /bin/bash -s -- "$stage" "$conf_hash" "$tmpfiles_hash" "$local_previous" "$lifecycle_previous" "$worker_hash" "$status_hash" <<'REMOTE'
 set -euo pipefail
 stage=$1
 [[ "$stage" =~ ^/tmp/vanpi-icloud\.[[:alnum:]]{6}$ ]] || exit 1
 [[ -x /usr/local/bin/rclone ]]
 . "$stage/backup_local_deploy.sh"
-/usr/bin/python3 -m py_compile \
-  "$stage/backup_locks.py" "$stage/icloud_backup.py" "$stage/icloud_uplink.py" \
-  "$stage/icloud_progress.py" "$stage/icloud_status.py" "$stage/cloud_backup_control.py" \
-  "$stage/icloud_backup_control.py" "$stage/time_machine_store.py" \
-  "$stage/time_machine_staging.py" "$stage/time_machine_icloud.py" \
-  "$stage/time_machine_icloud_control.py" "$stage/time_machine_icloud_status.py" \
-  "$stage/time_machine_pipeline.py" "$stage/time_machine_verification.py" \
-  "$stage/time_machine_downloads.py"
-/bin/bash -n "$stage/icloud_backup.sh" "$stage/time_machine_icloud.sh"
+for name in "${LOCAL_BACKUP_PAYLOAD[@]}"; do
+  case "$name" in
+    *.py) /usr/bin/python3 -m py_compile "$stage/$name" ;;
+    *.sh) /bin/bash -n "$stage/$name" ;;
+  esac
+done
 /usr/bin/python3 -m json.tool "$stage/icloud-backup.json" >/dev/null
 /usr/bin/systemd-analyze verify "$stage/vanpi-icloud-backup.service" "$stage/vanpi-icloud-backup.timer" "$stage/vanpi-icloud-backup-resume.service" "$stage/vanpi-icloud-backup-resume.timer"
 # A running job must finish normally before updating its executable code. The
@@ -85,7 +56,8 @@ exec 9</run/lock/vanpi_backup.lock
 /usr/bin/flock -n 9 || { echo 'Another backup is active; defer deployment.' >&2; exit 1; }
 verify_local_backup_payload "$stage" "$4"
 verify_local_backup_tmpfiles "$stage/vanpi-backup.conf" "$3"
-for pair in "icloud_backup.py:$7" "icloud_status.py:$8"; do
+verify_lifecycle_scripts "$stage" "$5"
+for pair in "icloud_backup.py:$6" "icloud_status.py:$7"; do
   live_hash=$(sha256sum "/home/pi/scripts/backup/${pair%%:*}" | awk '{print $1}')
   new_hash=$(sha256sum "$stage/${pair%%:*}" | awk '{print $1}')
   [[ "$live_hash" == "${pair#*:}" || "$live_hash" == "$new_hash" ]] || { echo "Live code differs: ${pair%%:*}; inspect before deploying." >&2; exit 1; }
@@ -99,14 +71,13 @@ new_conf_hash=$(sha256sum "$stage/backup_conf.sh" | awk '{print $1}')
 /usr/bin/sudo -n /usr/bin/systemd-tmpfiles --create /etc/tmpfiles.d/vanpi-backup.conf
 [[ -d /run/lock/vanpi-backup && ! -L /run/lock/vanpi-backup &&
    $(/usr/bin/stat -c '%U %G %a' /run/lock/vanpi-backup) == 'root pi 770' ]] || exit 1
-for name in "${LOCAL_BACKUP_FILES[@]}" backup_locks.py time_machine_store.py time_machine_staging.py time_machine_icloud.py time_machine_icloud.sh time_machine_icloud_control.py time_machine_icloud_status.py time_machine_pipeline.py time_machine_verification.py time_machine_downloads.py protected_json.py backup_priority.py mac_capture_control.py icloud_status.py cloud_backup_control.py backup_priority_control.py icloud_backup_control.py icloud_inventory.py icloud_progress.py icloud_backup.py icloud_uplink.py icloud_backup.sh backup_conf.sh ICLOUD_RESTORE.txt TIME_MACHINE_ICLOUD_RESTORE.txt; do
+for name in "${LOCAL_BACKUP_PAYLOAD[@]}"; do
   live=/home/pi/scripts/backup/$name
   [[ ! -e "$live" ]] || /usr/bin/cp -p "$live" "$stage/previous/$name"
   /usr/bin/sudo -n /usr/bin/install -o pi -g pi -m 0750 "$stage/$name" "$live.new"
   /usr/bin/sudo -n /usr/bin/mv -Tf "$live.new" "$live"
 done
-install_lifecycle_script "$stage/umount_disks.sh" /home/pi/scripts/umount_disks.sh "$5" "$stage/previous"
-install_lifecycle_script "$stage/internet_switches.sh" /home/pi/scripts/internet_switches.sh "$6" "$stage/previous"
+install_lifecycle_scripts "$stage" "$5" "$stage/previous"
 if [[ ! -e /etc/vanpi-icloud-backup.json ]]; then
   /usr/bin/sudo -n /usr/bin/install -o root -g root -m 0600 "$stage/icloud-backup.json" /etc/vanpi-icloud-backup.json
 fi

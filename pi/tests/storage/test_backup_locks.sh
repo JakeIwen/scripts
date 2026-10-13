@@ -335,8 +335,31 @@ mv "$BACKUP_LOCK_DIR" "$test_root/saved-registry"
 /bin/bash -uc 'source "$1"; hold_backup_disks_exclusive bigboi hdd1tb' test "$TEST_LOCK_LIBRARY" ||
   fail "lifecycle refused a missing registry"
 [[ ! -e "$BACKUP_LOCK_DIR" ]] || fail "lifecycle recreated a missing registry"
+# Without a registry the claim and a legacy exclusive holder still exclude each
+# other, so a restore cannot slip in between the drain and the unmount.
+/bin/bash -uc '
+  source "$1"
+  hold_backup_disks_exclusive bigboi || exit 4
+  : > "$2"
+  trap "exit 0" TERM
+  while :; do /bin/sleep 0.1; done
+' test "$TEST_LOCK_LIBRARY" "$test_root/claim-no-registry.ready" &
+claim_pid=$!
+pids+=("$claim_pid")
+for ((attempt=0; attempt<300; attempt++)); do
+  [[ -e "$test_root/claim-no-registry.ready" ]] && break
+  /bin/sleep 0.05
+done
+[[ -e "$test_root/claim-no-registry.ready" ]] || fail "lifecycle claim without a registry did not start"
+if /bin/bash -c 'source "$1"; acquire_job_lock' test "$config" 2>/dev/null; then
+  fail "legacy exclusive lock was admitted during a lifecycle claim without a registry"
+fi
+stop_holder "$claim_pid"
 start_holder legacy-no-registry "$test_root/not-the-backup.sh" legacy
 legacy_pid=$started_pid
+if /bin/bash -uc 'source "$1"; hold_backup_disks_exclusive bigboi hdd1tb' test "$TEST_LOCK_LIBRARY" 2>/dev/null; then
+  fail "lifecycle claim without a registry ignored a legacy exclusive holder"
+fi
 run_abort
 wait "$legacy_pid" || fail "missing registry hid a legacy exclusive holder"
 assert_eq TERM "$(< "$test_root/legacy-no-registry.signal")" "legacy stop without registry"

@@ -102,8 +102,6 @@ hold_backup_disk() { # <label>: shared, non-blocking; fails while the disk is be
 hold_backup_disks_exclusive() { # <label ...>: lifecycle owns disks until this shell exits
   local label path fd
   local -a held_fds=()
-  # A missing registry cannot admit jobs. Unsafe registries still fail closed.
-  [[ -e "$BACKUP_LOCK_DIR" || -L "$BACKUP_LOCK_DIR" ]] || return 0
   # Restore and hotspare initialization never consult disk locks: they only
   # take the legacy lock exclusively. Holding it shared here keeps them out
   # between the drain and the unmount, exactly like a running job would.
@@ -121,6 +119,9 @@ hold_backup_disks_exclusive() { # <label ...>: lifecycle owns disks until this s
       return 1
     fi
   fi
+  # A missing registry cannot admit jobs, so the legacy hold above is the only
+  # exclusion left to keep. Unsafe registries still fail closed below.
+  [[ -e "$BACKUP_LOCK_DIR" || -L "$BACKUP_LOCK_DIR" ]] || return 0
   for label in "$@"; do
     if path=$(backup_lock_path disk "$label") &&
        [[ ! -L "$BACKUP_LOCK_DIR" && -d "$BACKUP_LOCK_DIR" ]] &&
