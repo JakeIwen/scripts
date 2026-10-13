@@ -23,8 +23,8 @@ shared_hash=${VANPI_TM_PREVIOUS_CLOUD_SHA256:-$(git show HEAD:pi/scripts/backup/
 [[ "$shared_hash" =~ ^[0-9a-f]{64}$ ]] || exit 1
 progress_hash=$(git show HEAD:pi/scripts/backup/icloud_progress.py | shasum -a 256 | awk '{print $1}')
 share_hash=$(git show HEAD:pi/scripts/samba_share_control.sh | shasum -a 256 | awk '{print $1}')
-umount_hash=$(git show HEAD:pi/scripts/umount_disks.sh | shasum -a 256 | awk '{print $1}')
-internet_hash=$(git show HEAD:pi/scripts/internet_switches.sh | shasum -a 256 | awk '{print $1}')
+umount_hash=$(local_backup_previous_script_hash "$repo" umount_disks.sh)
+internet_hash=$(local_backup_previous_script_hash "$repo" internet_switches.sh)
 gate_hash=$(shasum -a 256 pi/scripts/samba_require_mount.sh | awk '{print $1}')
 conf_hash=$(local_backup_previous_conf_hash "$repo")
 uplink_hash=$(git show HEAD:pi/scripts/backup/icloud_uplink.py | shasum -a 256 | awk '{print $1}')
@@ -98,18 +98,10 @@ verify_previous pi/scripts/backup/icloud_progress.py /home/pi/scripts/backup/icl
 verify_previous pi/scripts/samba_share_control.sh /home/pi/scripts/samba_share_control.sh "$6"
 verify_previous pi/scripts/backup/backup_conf.sh /home/pi/scripts/backup/backup_conf.sh "$7"
 verify_previous pi/scripts/backup/icloud_uplink.py /home/pi/scripts/backup/icloud_uplink.py "$8"
-verify_previous pi/scripts/umount_disks.sh /home/pi/scripts/umount_disks.sh "$9"
-verify_previous pi/scripts/internet_switches.sh /home/pi/scripts/internet_switches.sh "${10}"
 [[ $(sha256sum /home/pi/scripts/samba_require_mount.sh | awk '{print $1}') == "$3" ]] || { echo 'Samba mount gate differs; inspect before deploying.' >&2; exit 1; }
 live_status_hash=$(sha256sum /home/pi/scripts/backup/icloud_status.py | awk '{print $1}')
 new_status_hash=$(sha256sum pi/scripts/backup/icloud_status.py | awk '{print $1}')
 [[ "$live_status_hash" == "$4" || "$live_status_hash" == "$new_status_hash" ]] || { echo 'Shared status helper differs; inspect before deploying.' >&2; exit 1; }
-read -r umount_owner umount_group umount_mode <<< "$(/usr/bin/stat -c '%U %G %a' /home/pi/scripts/umount_disks.sh)"
-read -r internet_owner internet_group internet_mode <<< "$(/usr/bin/stat -c '%U %G %a' /home/pi/scripts/internet_switches.sh)"
-[[ "$umount_owner $umount_group" == 'pi pi' && "$internet_owner $internet_group" == 'pi pi' &&
-   "$umount_mode" =~ ^[0-7]{3,4}$ && "$internet_mode" =~ ^[0-7]{3,4}$ ]] || {
-  echo 'Disk lifecycle script ownership differs; inspect before deploying.' >&2; exit 1;
-}
 gate=$(sudo -n /usr/bin/testparm -s --section-name=mbp2tbkup --parameter-name=preexec 2>/dev/null)
 [[ "$gate" == '/home/pi/scripts/samba_require_mount.sh mbp2tbkup' ]] || exit 1
 close=$(sudo -n /usr/bin/testparm -s --section-name=mbp2tbkup --parameter-name='preexec close' 2>/dev/null)
@@ -153,10 +145,8 @@ for name in "${LOCAL_BACKUP_FILES[@]}" backup_locks.py time_machine_store.py pro
 done
 /usr/bin/cp -p /home/pi/scripts/samba_share_control.sh previous/samba_share_control.sh
 install_atomic pi/scripts/samba_share_control.sh /home/pi/scripts/samba_share_control.sh 0750
-/usr/bin/cp -p /home/pi/scripts/umount_disks.sh previous/umount_disks.sh
-install_atomic pi/scripts/umount_disks.sh /home/pi/scripts/umount_disks.sh "$umount_mode"
-/usr/bin/cp -p /home/pi/scripts/internet_switches.sh previous/internet_switches.sh
-install_atomic pi/scripts/internet_switches.sh /home/pi/scripts/internet_switches.sh "$internet_mode"
+install_lifecycle_script pi/scripts/umount_disks.sh /home/pi/scripts/umount_disks.sh "$9" "$PWD/previous"
+install_lifecycle_script pi/scripts/internet_switches.sh /home/pi/scripts/internet_switches.sh "${10}" "$PWD/previous"
 if [[ ! -e /etc/vanpi-time-machine-icloud.json ]]; then
   sudo -n /usr/bin/install -o root -g root -m 0600 pi/configs/time-machine-icloud.json /etc/vanpi-time-machine-icloud.json
 fi

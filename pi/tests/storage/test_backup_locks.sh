@@ -290,8 +290,35 @@ stop_holder "$borg_pid"
   release_backup_disk bigboi
 ' test "$config" || fail "unused disk was not held exclusively until release"
 
+/bin/bash -uc '
+  source "$1"
+  hold_backup_disks_exclusive bigboi || exit 4
+  : > "$2"
+  trap "exit 0" TERM
+  while :; do /bin/sleep 0.1; done
+' test "$TEST_LOCK_LIBRARY" "$test_root/claim.ready" &
+claim_pid=$!
+pids+=("$claim_pid")
+for ((attempt=0; attempt<300; attempt++)); do
+  [[ -e "$test_root/claim.ready" ]] && break
+  /bin/sleep 0.05
+done
+[[ -e "$test_root/claim.ready" ]] || fail "lifecycle claim holder did not start"
+if /bin/bash -c 'source "$1"; acquire_job_lock' test "$config" 2>/dev/null; then
+  fail "legacy exclusive lock was admitted during a lifecycle claim"
+fi
+stop_holder "$claim_pid"
+
 start_holder legacy "$test_root/not-the-backup.sh" legacy
 legacy_pid=$started_pid
+# A legacy exclusive holder (restore, hotspare init) blocks the lifecycle claim,
+# and an active lifecycle claim blocks a new legacy exclusive holder.
+if /bin/bash -uc 'source "$1"; hold_backup_disks_exclusive bigboi' test "$TEST_LOCK_LIBRARY" \
+    > "$test_root/claim.out" 2>&1; then
+  fail "lifecycle claim ignored a legacy exclusive holder"
+fi
+grep -Fq 'restore or maintenance job holds the backup lock' "$test_root/claim.out" ||
+  fail "lifecycle refusal did not name the legacy holder"
 if /bin/bash -c 'source "$1"; acquire_backup_job borg bigboi' test "$config" 2>/dev/null; then
   fail "migrated job overlapped legacy exclusive holder"
 fi

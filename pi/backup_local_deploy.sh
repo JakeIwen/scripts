@@ -1,7 +1,19 @@
 #!/bin/bash
 # Shared payload and drift checks for the two targeted cloud installers.
 LOCAL_BACKUP_FILES=(backup_locks.sh backup_window.sh pi_backup.sh exfat_snapshot.sh openwrt_backup.sh abort_backup.sh clone_now.sh)
-LOCAL_BACKUP_CHECKED=(backup_conf.sh backup_priority.py cloud_backup_control.py protected_json.py backup_locks.py "${LOCAL_BACKUP_FILES[@]}")
+# Cloud worker modules both installers publish. icloud_backup.py and
+# icloud_status.py keep their own reviewed-hash overrides in the installers.
+CLOUD_WORKER_FILES=(time_machine_icloud.py time_machine_icloud.sh time_machine_pipeline.py time_machine_staging.py
+  time_machine_store.py time_machine_verification.py time_machine_downloads.py time_machine_icloud_control.py
+  time_machine_icloud_status.py icloud_backup.sh icloud_progress.py icloud_inventory.py icloud_uplink.py
+  icloud_backup_control.py mac_capture_control.py backup_priority_control.py)
+LOCAL_BACKUP_CHECKED=(backup_conf.sh backup_priority.py cloud_backup_control.py protected_json.py backup_locks.py
+  "${LOCAL_BACKUP_FILES[@]}" "${CLOUD_WORKER_FILES[@]}")
+# Disk lifecycle callers of abort_backup.sh live outside the backup directory.
+LIFECYCLE_SCRIPTS=(umount_disks.sh internet_switches.sh)
+LOCAL_BACKUP_SUDO=${LOCAL_BACKUP_SUDO-/usr/bin/sudo -n}
+LOCAL_BACKUP_LIFECYCLE_OWNER=${LOCAL_BACKUP_LIFECYCLE_OWNER:-pi:pi}
+LOCAL_BACKUP_STAT=${LOCAL_BACKUP_STAT:-/usr/bin/stat}
 
 local_backup_previous_conf_hash() {
   local repo=$1 revision=${VANPI_BACKUP_PREVIOUS_REVISION:-HEAD} hash
@@ -73,4 +85,30 @@ verify_local_backup_payload() {
       return 1
     fi
   done
+}
+
+local_backup_previous_script_hash() { # <repo> <path-under-pi/scripts>
+  local repo=$1 name=$2 revision=${VANPI_BACKUP_PREVIOUS_REVISION:-HEAD} hash
+  hash=$(git -C "$repo" show "$revision:pi/scripts/$name" | shasum -a 256) || return 1
+  hash=${hash%% *}
+  [[ "$hash" =~ ^[0-9a-f]{64}$ ]] || return 1
+  printf '%s\n' "$hash"
+}
+
+install_lifecycle_script() { # <staged> <live> <previous-hash> <previous-dir>
+  # Drift-checked, atomic replacement that preserves the live owner and mode;
+  # both installers use it so a host never runs new jobs with an old caller.
+  local staged=$1 live=$2 previous=$3 previous_dir=$4 actual expected owner group mode extra
+  [[ "$previous" =~ ^[0-9a-f]{64}$ && -f "$staged" && ! -L "$staged" ]] || return 1
+  [[ -f "$live" && ! -L "$live" ]] || { echo "Disk lifecycle script is missing or unsafe: $live" >&2; return 1; }
+  actual=$(sha256sum "$live"); actual=${actual%% *}
+  expected=$(sha256sum "$staged"); expected=${expected%% *}
+  [[ "$actual" == "$previous" || "$actual" == "$expected" ]] ||
+    { echo "Live code differs: $live; inspect before deploying." >&2; return 1; }
+  read -r owner group mode extra <<< "$("$LOCAL_BACKUP_STAT" -c '%U %G %a' "$live")"
+  [[ "$owner:$group" == "$LOCAL_BACKUP_LIFECYCLE_OWNER" && "$mode" =~ ^[0-7]{3,4}$ && -z ${extra:-} ]] ||
+    { echo "Disk lifecycle script ownership differs: $live; inspect before deploying." >&2; return 1; }
+  /usr/bin/cp -p "$live" "$previous_dir/${live##*/}" || return 1
+  $LOCAL_BACKUP_SUDO /usr/bin/install -o "$owner" -g "$group" -m "$mode" "$staged" "$live.new" || return 1
+  $LOCAL_BACKUP_SUDO /usr/bin/mv -Tf "$live.new" "$live"
 }

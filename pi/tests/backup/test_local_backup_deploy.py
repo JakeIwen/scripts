@@ -132,6 +132,25 @@ class LocalBackupDeployTests(unittest.TestCase):
         self.assertNotEqual(refused.returncode, 0)
         self.assertIn('Live tmpfiles registry differs; inspect before deploying.', refused.stderr)
 
+    @unittest.skipUnless(subprocess.run(['/usr/bin/stat', '--version'], capture_output=True).returncode == 0,
+                         'lifecycle install needs GNU stat')
+    def test_lifecycle_script_install_checks_drift_and_preserves_mode(self):
+        live, staged, previous = self.root / 'umount_disks.sh', self.root / 'staged.sh', self.root / 'previous'
+        previous.mkdir()
+        live.write_text('old\n'); live.chmod(0o770); staged.write_text('new\n')
+        env = dict(self.env, LOCAL_BACKUP_SUDO='', LOCAL_BACKUP_LIFECYCLE_OWNER=self.shell('id -un; id -gn').stdout.replace('\n', ':', 1).strip())
+        digest = hashlib.sha256(b'old\n').hexdigest()
+        run = lambda: subprocess.run(['/bin/bash', '-c', 'set -euo pipefail; source "$1"; install_lifecycle_script "$2" "$3" "$4" "$5"',
+                                      'test', str(HELPER), str(staged), str(live), digest, str(previous)],
+                                     env=env, capture_output=True, text=True, timeout=10)
+        self.assertEqual(run().returncode, 0)
+        self.assertEqual(live.read_text(), 'new\n')
+        self.assertEqual(live.stat().st_mode & 0o777, 0o770)
+        self.assertEqual((previous / 'umount_disks.sh').read_text(), 'old\n')
+        self.assertEqual(run().returncode, 0, 'a staged-identical live file is idempotent')
+        live.write_text('local edit\n')
+        self.assertNotEqual(run().returncode, 0, 'drifted live lifecycle script must be refused')
+        self.assertEqual(live.read_text(), 'local edit\n')
 
 if __name__ == '__main__':
     unittest.main()
