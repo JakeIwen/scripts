@@ -26,7 +26,7 @@ compare it with this checkout. Deployed files may differ from the repository.
 - `pi/`: Raspberry Pi apps, backup, disk, service, deployment, and setup tooling;
   `pi/README.md` is the documentation index.
 - Visual Guides is maintained separately in `~/dev/visual-guides`, public repo
-  `https://github.com/JakeIwen/visual-gides`. It serves Mac loopback port 8792
+  `https://github.com/JakeIwen/visual-guides`. It serves Mac loopback port 8792
   and Pi port 8791. Its own `deploy.py` owns `/home/pi/visual-guides/` releases
   and `visual-guides.service`; never restore a copy under `pi/projects/`.
   The dashboard's project catalog links to both hosts; preserve runtime-added
