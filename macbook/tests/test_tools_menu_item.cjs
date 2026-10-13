@@ -13,6 +13,9 @@ const {
 
 const folder = path.join(__dirname, '../bettertouchtool');
 const fixture = createMediaToolsFixture();
+fs.writeFileSync(path.join(fixture.root,
+    'build/Performance Audio.app/Contents/Resources/temp_card_printer.py'),
+    '# fixture resource\n');
 const workerCode = fs.readFileSync(path.join(folder, 'install_tools_menu_item.js'), 'utf8');
 const commonCode = withCommon('');
 const modules = {
@@ -20,6 +23,7 @@ const modules = {
     convert: 'install_convert_video_menu',
     rhythm: 'install_rhythm_menu',
     interval: 'install_interval_menu',
+    card: 'install_card_printer_menu',
 };
 const payloads = Object.fromEntries(Object.entries(modules).map(([name, moduleName]) =>
     [name, generateMenuDefinition(fixture, moduleName)]));
@@ -165,6 +169,9 @@ test('feature wrappers preserve definitions, peers, and refresh flags', () => {
         ['interval', ['/usr/bin/python3', path.join(fixture.root,
             'build/Performance Audio.app/Contents/Resources/interval_analysis.py'),
             '--background']],
+        ['card', ['/usr/bin/python3', path.join(fixture.root,
+            'build/Performance Audio.app/Contents/Resources/temp_card_printer.py'),
+            '--finder']],
     ];
     for (const [name, expected] of cases) {
         const command = payloads[name].item.BTTMenuItemActions[0].BTTShellTaskActionScript;
@@ -179,6 +186,7 @@ test('feature wrappers preserve definitions, peers, and refresh flags', () => {
     assert.equal(specs.convert.appearancePeerUUID, bpmID);
     assert.equal(specs.rhythm.appearancePeerUUID, bpmID);
     assert.equal(specs.interval.appearancePeerUUID, bpmID);
+    assert.equal(specs.card.appearancePeerUUID, bpmID);
 });
 
 test('Convert Video requires its runtime file to name an executable', () => {
