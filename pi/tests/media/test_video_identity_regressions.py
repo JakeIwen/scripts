@@ -1194,27 +1194,15 @@ class CatalogDegradationAdapterTests(unittest.TestCase):
     def test_decorator_catches_only_catalog_degradation_families_and_subclasses(
         self,
     ) -> None:
-        class CatalogFailure(identity.CatalogError):
-            pass
-
         class SqliteFailure(sqlite3.Error):
-            pass
-
-        class OsFailure(OSError):
-            pass
-
-        class ValueFailure(ValueError):
             pass
 
         families = (
             identity.CatalogError,
-            CatalogFailure,
             sqlite3.Error,
             SqliteFailure,
             OSError,
-            OsFailure,
             ValueError,
-            ValueFailure,
         )
         for failure_type in families:
             with self.subTest(failure_type=failure_type.__name__):

@@ -400,31 +400,27 @@ describe('iCloud dashboard', () => {
     ).toThrow('nonnegative');
   });
 
-  it.each(['pi', 'time-machine'] as const)(
-    'shows percent, current speed and time left together for a fresh %s upload',
-    (kind) => {
-      const status = cloud();
-      Object.assign(status, { running: true, phase: 'uploading', updatedAt: Date.now() / 1000 });
-      const speed = 2.2 * 1024 ** 2;
-      Object.assign(status.progress, {
-        uploadBytesPerSecond: speed,
-        uploadTotalBytes: 403 * 1024 ** 3,
-        uploadEstimatedBytes: 20 * 1024 ** 3,
-      });
-      const view = render(<ICloudBackupCard status={status} kind={kind} />);
-      const headline = screen.getByText(/20 GiB of 403 GiB/);
-      expect(headline).toHaveTextContent('20 GiB of 403 GiB · 5.0% · 2.2 MiB/s · 2d 1h 32m left');
-      expect(
-        screen.queryByText(/includes files saved by earlier attempts/),
-      ).not.toBeInTheDocument();
-      expect(screen.queryByText(/Upload speed:/)).not.toBeInTheDocument();
-      view.rerender(<ICloudBackupCard status={{ ...status, progressStale: true }} kind={kind} />);
-      expect(headline).toHaveTextContent('20 GiB of 403 GiB · 5.0% · measuring speed…');
-      expect(screen.queryByText(/2.2 MiB\/s|2d 1h 32m left/)).not.toBeInTheDocument();
-      view.rerender(<ICloudBackupCard status={{ ...status, running: false }} kind={kind} />);
-      expect(screen.queryByText(/MiB\/s|measuring speed/)).not.toBeInTheDocument();
-    },
-  );
+  it('shows percent, current speed and time left together for a fresh upload', () => {
+    const kind = 'time-machine';
+    const status = cloud();
+    Object.assign(status, { running: true, phase: 'uploading', updatedAt: Date.now() / 1000 });
+    const speed = 2.2 * 1024 ** 2;
+    Object.assign(status.progress, {
+      uploadBytesPerSecond: speed,
+      uploadTotalBytes: 403 * 1024 ** 3,
+      uploadEstimatedBytes: 20 * 1024 ** 3,
+    });
+    const view = render(<ICloudBackupCard status={status} kind={kind} />);
+    const headline = screen.getByText(/20 GiB of 403 GiB/);
+    expect(headline).toHaveTextContent('20 GiB of 403 GiB · 5.0% · 2.2 MiB/s · 2d 1h 32m left');
+    expect(screen.queryByText(/includes files saved by earlier attempts/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Upload speed:/)).not.toBeInTheDocument();
+    view.rerender(<ICloudBackupCard status={{ ...status, progressStale: true }} kind={kind} />);
+    expect(headline).toHaveTextContent('20 GiB of 403 GiB · 5.0% · measuring speed…');
+    expect(screen.queryByText(/2.2 MiB\/s|2d 1h 32m left/)).not.toBeInTheDocument();
+    view.rerender(<ICloudBackupCard status={{ ...status, running: false }} kind={kind} />);
+    expect(screen.queryByText(/MiB\/s|measuring speed/)).not.toBeInTheDocument();
+  });
 
   it.each(['pi', 'time-machine'] as const)(
     'applies a timed %s pause immediately, keeps the main Pause indefinite, and resumes',

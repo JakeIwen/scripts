@@ -8,15 +8,16 @@ import sys
 import unittest
 from unittest.mock import patch
 
-from test_repair_rps import RPSPersistenceTests, DIRECTORY
+import test_repair_rps
 
+DIRECTORY=test_repair_rps.DIRECTORY
 sys.path.insert(0,str(DIRECTORY))
 spec=importlib.util.spec_from_file_location('install_menu_escape',DIRECTORY/'install_menu_escape.py')
 escape=importlib.util.module_from_spec(spec);spec.loader.exec_module(escape)
 sys.path.pop(0)
 
 
-class EscapeTests(RPSPersistenceTests):
+class EscapeTests(test_repair_rps.RPSDatabaseFixture, unittest.TestCase):
     def setUp(self):
         super().setUp()
         with sqlite3.connect(self.path) as c:

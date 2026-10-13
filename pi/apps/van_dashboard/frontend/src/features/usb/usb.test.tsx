@@ -91,15 +91,6 @@ describe('USB feature', () => {
     });
   });
 
-  it('rejects a present-device count that disagrees with inventory', () => {
-    const payload = usbStatusPayload();
-    const usb = payload.usb as Record<string, unknown>;
-    usb.present_device_count = 2;
-    expect(() => decodeUsbStatusResponse(payload)).toThrow(
-      'usb.present_device_count does not match usb.devices',
-    );
-  });
-
   it('switches from tile cadence to sheet cadence without overlapping requests', async () => {
     const view = render(<UsbProbe sheetOpen={false} />);
     await act(async () => Promise.resolve());

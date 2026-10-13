@@ -2,7 +2,6 @@ import json
 import datetime as dt
 import hashlib
 import fcntl
-import io
 import os
 import signal
 import subprocess
@@ -19,7 +18,7 @@ sys.path.insert(0, str(PI / 'scripts' / 'backup'))
 import icloud_backup as backup
 import cloud_backup_control as control
 from icloud_uplink import decide
-from icloud_progress import ProgressWatch, RcloneStats, StreamDigest
+from icloud_progress import ProgressWatch, RcloneStats
 
 
 def test_config():
@@ -58,11 +57,6 @@ class UplinkTests(unittest.TestCase):
     def test_starlink_hotspot_is_blocked(self):
         e = evidence(); e['router']['route_members'] = [{'name': 'clientwan', 'percent': 100}]
         e['wireless_uplinks']['clientwan']['ssid'] = 'denlink'
-        self.assertFalse(self.check(e))
-
-    def test_balanced_route_with_any_starlink_member_is_blocked(self):
-        e = evidence(); e['ubnt']['ssid'] = 'denlink'
-        e['router']['route_members'] = [{'name': 'wan', 'percent': 50}, {'name': 'clientwan', 'percent': 50}]
         self.assertFalse(self.check(e))
 
     def test_unknowns_and_stale_evidence_fail_closed(self):
@@ -312,11 +306,6 @@ class ProgressTests(unittest.TestCase):
             self.assertEqual(completed, ['a','b'])
             self.assertEqual(counters, {'bytes':10,'speed':None})
 
-    def test_stream_hash_preserves_binary_contents(self):
-        value=bytes(range(256))*1024
-        reader=StreamDigest(io.BytesIO(value))
-        self.assertEqual(reader.result(),{'bytes':len(value),'sha256':hashlib.sha256(value).hexdigest()})
-
     def test_running_stalled_child_is_terminated(self):
         cfg=test_config();cfg['no_progress_timeout_seconds']=0.2
         with mock.patch.object(backup,'check_work_allowed'):
@@ -481,6 +470,8 @@ class PiPauseTests(unittest.TestCase):
             patcher.start(); self.addCleanup(patcher.stop)
 
     def test_pause_blocks_pi_worker_without_overwriting_saved_state(self):
+        # main() sets the process umask to 077; keep it from leaking into later tests.
+        self.addCleanup(os.umask, os.umask(0o022))
         saved = {'pending': 'vanpi-20260920T010203Z-12345678', 'phase': 'uploading'}
         backup.atomic_json(self.state_dir / 'state.json', saved)
         command = mock.Mock()

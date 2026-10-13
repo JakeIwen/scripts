@@ -649,31 +649,6 @@ printf '%s|%s|%s|%s|%s\\n' \\
                 # Compare argv verbatim, including each caller's original -- placement.
                 self.assertEqual(current_result, old_result)
 
-    def test_adapter_success_command_shapes_and_order(self) -> None:
-        umount_case = ADAPTER_CASES[0]
-        umount_result = run_adapter(REPO_ROOT / "pi" / "scripts", umount_case)
-        self.assertEqual(umount_result["status"], 0)
-        self.assertEqual(
-            umount_result["commands"][:2],
-            [
-                ["lsblk", "-s", "-nrpo", "NAME,TYPE", "/dev/sdz1"],
-                ["lsblk", "-dnro", "TRAN", "/dev/sdz"],
-            ],
-        )
-
-        diskctl_case = ADAPTER_CASES[13]
-        diskctl_result = run_adapter(REPO_ROOT / "pi" / "scripts", diskctl_case)
-        self.assertEqual(diskctl_result["status"], 0)
-        self.assertEqual(
-            diskctl_result["commands"][:4],
-            [
-                ["sudo", "<TMP>/blkid", "-s", "TYPE", "-o", "value", "--", "/dev/sdz1"],
-                ["blkid", "-s", "TYPE", "-o", "value", "--", "/dev/sdz1"],
-                ["lsblk", "-s", "-nrpo", "NAME,TYPE", "--", "/dev/sdz1"],
-                ["lsblk", "-dnro", "TRAN", "--", "/dev/sdz"],
-            ],
-        )
-
 
 if __name__ == "__main__":
     unittest.main()

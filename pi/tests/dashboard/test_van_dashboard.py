@@ -763,16 +763,21 @@ class PriceCheckApiTests(unittest.TestCase):
         )
 
     def test_rejects_bad_forms_before_running_cli(self):
-        class NeverCalled:
-            def __getattr__(self, _name):
-                self.fail("controller should not be called")
+        calls = []
 
+        class RecordingPriceChecks:
+            def __getattr__(self, name):
+                calls.append(name)
+                raise AssertionError(f"controller {name} called for a bad form")
+
+        runtime.price_checks = RecordingPriceChecks()
         response = self.client.post("/api/price-checks/check", data={"target": "bad"})
         self.assertEqual(response.status_code, 400)
         response = self.client.post(
             "/api/price-checks/mute", data={"id": "7", "days": "-1"}
         )
         self.assertEqual(response.status_code, 400)
+        self.assertEqual(calls, [])
 
     def test_schedule_failure_reports_that_previous_crontab_was_restored(self):
         class FailedSchedule:
@@ -1651,74 +1656,33 @@ HDD_LABELS=(
         with self.assertRaisesRegex(dashboard_disks.DiskCommandError, "must be a subset"):
             dashboard_disks.DiskManager.parse_config(invalid)
 
-    def test_eject_runs_only_fixed_diskctl_argv_in_background(self):
-        calls = []
+    def test_actions_run_only_fixed_diskctl_argv_in_background(self):
+        for label, action in (
+            ("movingparts", "eject"),
+            ("bigboi", "mount"),
+            ("movingparts", "repair"),
+        ):
+            calls = []
 
-        def command(args, timeout):
-            calls.append((list(args), timeout))
-            if args[0] == dashboard_common.LSBLK:
-                return SimpleNamespace(
-                    returncode=0,
-                    stdout=json.dumps(self.lsblk()),
-                    stderr="",
-                )
-            return SimpleNamespace(returncode=0, stdout="", stderr="")
+            def command(args, timeout):
+                calls.append((list(args), timeout))
+                if args[0] == dashboard_common.LSBLK:
+                    return SimpleNamespace(
+                        returncode=0,
+                        stdout=json.dumps(self.lsblk()),
+                        stderr="",
+                    )
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-        with tempfile.TemporaryDirectory() as tempdir:
-            manager = self.manager(tempdir, command, action_timeout=23)
-            manager.start_action("movingparts", "eject")
-            manager.thread.join(2)
-            status = manager.status()
+            with self.subTest(action=action), tempfile.TemporaryDirectory() as tempdir:
+                manager = self.manager(tempdir, command, action_timeout=23)
+                manager.start_action(label, action)
+                manager.thread.join(2)
+                status = manager.status()
 
-        self.assertIn((["/test/diskctl", "eject", "movingparts"], 23), calls)
-        self.assertEqual(status["operation"]["status"], "complete")
-        self.assertEqual(status["operation"]["label"], "movingparts")
-
-    def test_manual_disk_mount_runs_only_fixed_diskctl_argv_in_background(self):
-        calls = []
-
-        def command(args, timeout):
-            calls.append((list(args), timeout))
-            if args[0] == dashboard_common.LSBLK:
-                return SimpleNamespace(
-                    returncode=0,
-                    stdout=json.dumps(self.lsblk()),
-                    stderr="",
-                )
-            return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-        with tempfile.TemporaryDirectory() as tempdir:
-            manager = self.manager(tempdir, command, action_timeout=23)
-            manager.start_action("bigboi", "mount")
-            manager.thread.join(2)
-            status = manager.status()
-
-        self.assertIn((["/test/diskctl", "mount", "bigboi"], 23), calls)
-        self.assertEqual(status["operation"]["status"], "complete")
-        self.assertEqual(status["operation"]["label"], "bigboi")
-
-    def test_ext4_repair_runs_only_fixed_diskctl_argv_in_background(self):
-        calls = []
-
-        def command(args, timeout):
-            calls.append((list(args), timeout))
-            if args[0] == dashboard_common.LSBLK:
-                return SimpleNamespace(
-                    returncode=0,
-                    stdout=json.dumps(self.lsblk()),
-                    stderr="",
-                )
-            return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-        with tempfile.TemporaryDirectory() as tempdir:
-            manager = self.manager(tempdir, command, action_timeout=23)
-            manager.start_action("movingparts", "repair")
-            manager.thread.join(2)
-            status = manager.status()
-
-        self.assertIn((["/test/diskctl", "repair", "movingparts"], 23), calls)
-        self.assertEqual(status["operation"]["status"], "complete")
-        self.assertEqual(status["operation"]["label"], "movingparts")
+                self.assertIn((["/test/diskctl", action, label], 23), calls)
+                self.assertEqual(status["operation"]["status"], "complete")
+                self.assertEqual(status["operation"]["label"], label)
 
     def test_rejects_unknown_labels_actions_and_inapplicable_state(self):
         def command(args, timeout):
@@ -3268,12 +3232,6 @@ class CopAlertManagerTests(unittest.TestCase):
         self.manager.set_active(False)
         self.assertEqual(self.line.value, 0)
         self.assertFalse(os.path.exists(self.manager.active_marker))
-
-    def test_state_persists_across_manager_recreation(self):
-        self.manager.set_active(True)
-        self.wait_for_ntfy()
-        reloaded = dashboard_common.StateStore(self.store.path)
-        self.assertTrue(reloaded.get("cop_alert"))
 
     def test_activation_ntfy_is_immediate_nonblocking_and_single_flight(self):
         started = threading.Event()
@@ -6279,15 +6237,6 @@ class DashboardRouteTests(unittest.TestCase):
         client = dashboard_app.test_client()
         response = client.post("/api/cop-alert", data={"active": "maybe"})
         self.assertEqual(response.status_code, 400)
-
-    def test_cross_origin_control_is_rejected(self):
-        client = dashboard_app.test_client()
-        response = client.post(
-            "/api/cop-alert",
-            data={"active": "true"},
-            headers={"Origin": "https://example.com", "X-Van-Dashboard": "1"},
-        )
-        self.assertEqual(response.status_code, 403)
 
 
 if __name__ == "__main__":

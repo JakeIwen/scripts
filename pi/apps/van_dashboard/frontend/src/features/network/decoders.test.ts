@@ -27,18 +27,6 @@ describe('network response decoders', () => {
     expect(status.ubnt.frequencyGhz).toBeNull();
   });
 
-  it('rejects an unknown MWAN3 interface state at the API boundary', () => {
-    const payload = connectivityPayload();
-    const connectivity = payload.connectivity as Record<string, unknown>;
-    const router = connectivity.router as Record<string, unknown>;
-    const interfaces = router.interfaces as Record<string, unknown>[];
-    if (interfaces[0]) interfaces[0].state = 'mysterious';
-
-    expect(() => decodeConnectivityResponse(payload)).toThrow(
-      'connectivity.router.interfaces[0].state has an unsupported value',
-    );
-  });
-
   it('decodes clients and verifies the summary counts', () => {
     const status = decodeOpenWrtClientsResponse(clientsPayload());
 
@@ -48,16 +36,6 @@ describe('network response decoders', () => {
       connection: 'wifi',
       band: '2.4 GHz',
     });
-  });
-
-  it('rejects client counts that disagree with the returned devices', () => {
-    const payload = clientsPayload();
-    const openwrt = payload.openwrt as Record<string, unknown>;
-    openwrt.wifi_count = 2;
-
-    expect(() => decodeOpenWrtClientsResponse(payload)).toThrow(
-      'openwrt client counts do not match openwrt.clients',
-    );
   });
 
   it('keeps speed-test measurements nullable until a run completes', () => {

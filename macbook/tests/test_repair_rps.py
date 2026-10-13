@@ -15,7 +15,9 @@ module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
 sys.path.pop(0)
 
 
-class RPSPersistenceTests(unittest.TestCase):
+class RPSDatabaseFixture:
+    """Temporary BTT database with the RPS media rows; shared with other BTT tests."""
+
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.root=Path(self.temp.name);(self.root/'tmp').mkdir()
@@ -45,6 +47,8 @@ class RPSPersistenceTests(unittest.TestCase):
                     ZGESTURETYPE=-1,ZACTION=248,ZORDER=0,ZLAUNCHPATH=module.NAME)
         values.update(overrides);self.insert(**values)
 
+
+class RPSPersistenceTests(RPSDatabaseFixture, unittest.TestCase):
     def test_missing_link_is_detected_but_inactive_obsolete_trigger_is_ignored(self):
         self.assertFalse(module.preflight(self.path))
 

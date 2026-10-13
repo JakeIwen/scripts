@@ -191,6 +191,8 @@ class StarlinkConnectionTests(unittest.TestCase):
             manager.thread.join(2)
         connect.assert_called_once()
         tool.assert_not_called()
+        self.assertEqual(manager.snapshot()["operation"]["status"], "complete")
+        self.assertFalse(manager.snapshot()["starlink_pending"])
 
     def test_power_off_waits_for_inflight_connect_before_releasing_denlink(self):
         manager = self.manager()
@@ -212,20 +214,6 @@ class StarlinkConnectionTests(unittest.TestCase):
             manager.starlink_thread.join(2)
             manager.thread.join(2)
         self.assertEqual([c.args[0] for c in tool.call_args_list], ["starlink-off"])
-
-    def test_queued_power_on_starts_after_existing_operation(self):
-        manager = self.manager()
-        manager.operation["status"] = "running"
-        manager.operation["kind"] = "scan"
-        with mock.patch.object(manager, "_connect_starlink", return_value={"wifi": self.wifi()}) as connect:
-            manager.starlink_power_changed("on")
-            with manager.lock:
-                manager.operation["status"] = "complete"
-            manager.starlink_thread.join(2)
-            manager.thread.join(2)
-        connect.assert_called_once()
-        self.assertEqual(manager.snapshot()["operation"]["status"], "complete")
-        self.assertFalse(manager.snapshot()["starlink_pending"])
 
     def test_success_clears_transient_status_error(self):
         manager = self.manager()

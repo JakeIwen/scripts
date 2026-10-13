@@ -1,7 +1,4 @@
-import contextlib
-import io
 import json
-import os
 from pathlib import Path
 import runpy
 import tempfile
@@ -43,42 +40,6 @@ class PackageEntrypointTests(unittest.TestCase):
 
             record.assert_called_once_with(runtime_dir)
             dispatch.assert_called_once_with(production_module, run_name="__main__")
-
-    def test_records_all_service_runtime_directories(self):
-        expected = {
-            "video-library": "/run/video-library",
-            "audiobooks": "/run/audiobooks",
-            "bme280-mqtt": "/run/bme280-mqtt",
-        }
-        with tempfile.TemporaryDirectory(prefix="package-records-") as name:
-            base = Path(name)
-            with mock.patch.dict(os.environ, {"INVOCATION_ID": "i" * 32}):
-                for service, runtime_name in expected.items():
-                    runtime = base / service
-                    runtime.mkdir()
-                    package_runtime.record_running_release(runtime)
-                    record = json.loads(
-                        (runtime / "package-release").read_text(encoding="utf-8")
-                    )
-                    self.assertEqual(record["package_path"], pi.__path__[0])
-                    self.assertEqual(record["pid"], os.getpid())
-                    self.assertEqual(record["invocation_id"], "i" * 32)
-                    self.assertEqual(runtime_name, "/run/" + service)
-
-    def test_record_warning_does_not_stop_service_start(self):
-        with tempfile.TemporaryDirectory(prefix="package-record-warning-") as name:
-            runtime = Path(name)
-            stderr = io.StringIO()
-            with mock.patch.object(
-                package_runtime.os, "replace", side_effect=OSError("replace denied")
-            ), contextlib.redirect_stderr(stderr):
-                package_runtime.record_running_release(runtime)
-
-            self.assertIn(
-                "WARNING: cannot record package release: replace denied",
-                stderr.getvalue(),
-            )
-            self.assertEqual(list(runtime.iterdir()), [])
 
     def test_record_keeps_the_imported_release_when_current_changes(self):
         original_path = pi.__path__

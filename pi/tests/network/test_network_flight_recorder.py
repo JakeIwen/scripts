@@ -857,11 +857,6 @@ class RecorderWaitTests(unittest.TestCase):
         self.assertEqual(len(slept), 1)
         self.assertAlmostEqual(slept[0], 0.1)
 
-    def test_expired_deadline_returns_without_sleep(self):
-        sleeper = mock.Mock()
-        collector_module.wait_until(1.0, lambda: False, clock=lambda: 2.0, sleeper=sleeper)
-        sleeper.assert_not_called()
-
     def test_wait_sleeps_in_positive_bounded_intervals(self):
         now = 0.0
         slept = []

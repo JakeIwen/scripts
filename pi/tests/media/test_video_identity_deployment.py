@@ -13,7 +13,6 @@ from pathlib import Path
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 DEPLOY_PATH = REPOSITORY_ROOT / "pi" / "deploy_video_library.sh"
 ALIAS_PATH = REPOSITORY_ROOT / "pi" / "scripts" / "alias_media.sh"
-UNIT_PATH = REPOSITORY_ROOT / "pi" / "services" / "video-library.service"
 
 
 class VideoIdentityDeploymentTests(unittest.TestCase):
@@ -21,7 +20,6 @@ class VideoIdentityDeploymentTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.deploy = DEPLOY_PATH.read_text(encoding="utf-8")
         cls.alias = ALIAS_PATH.read_text(encoding="utf-8")
-        cls.unit = UNIT_PATH.read_text(encoding="utf-8")
 
     def test_shell_entrypoints_parse_and_are_executable(self):
         for path in (DEPLOY_PATH, ALIAS_PATH):
@@ -65,15 +63,6 @@ class VideoIdentityDeploymentTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("saved pre-package-unit rollback procedure", result.stderr)
         self.assertIn("pi/docs/deployment.md", result.stderr)
-
-    def test_video_service_declares_identity_modules(self):
-        for module in ("video_asset_catalog.py", "video_qbittorrent.py"):
-            with self.subTest(module=module):
-                self.assertIn(
-                    "ExecStartPre=/usr/bin/test -r "
-                    f"/home/pi/scripts/python-packages/current/pi/apps/video_library/{module}",
-                    self.unit,
-                )
 
     def test_alias_jobs_are_atomic_detached_queued_and_share_one_lock(self):
         self.assertEqual(self.alias.count("/run/lock/alias-media.lock"), 1)

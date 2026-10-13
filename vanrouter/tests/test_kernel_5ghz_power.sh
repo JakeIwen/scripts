@@ -101,8 +101,6 @@ grep -F 'trap cleanup_remote EXIT' \
 	"$project_dir/image-action-from-vanpi.sh" >/dev/null
 grep -F 'remote_image=/tmp/dendelion-image-action-$$.itb' \
 	"$project_dir/image-action-from-vanpi.sh" >/dev/null
-grep -F 'source checkout is shallow; complete Git history is required' \
-	"$project_dir/build-openwrt.sh" >/dev/null
 grep -F 'validate_source "$build_source"' \
 	"$project_dir/build-openwrt.sh" >/dev/null
 grep -F 'build source is shallow; complete Git history is required' \

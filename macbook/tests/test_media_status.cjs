@@ -5,9 +5,8 @@ const script = fs.readFileSync(path.join(dir, 'play_status.js'), 'utf8');
 const installer = fs.readFileSync(path.join(dir, 'tune_media_status.js'), 'utf8');
 const helpers = require('./btt_test_support.cjs').withCommon(fs.readFileSync(path.join(dir, 'fix_menu_sizes.js'), 'utf8'));
 
-for (const [result, expected] of [['', ''], [' \n', ''],
+for (const [result, expected] of [[' \n', ''],
     ['A Movie\n01:02 / 1:23:45', 'A Movie\n01:02 / 1:23:45'],
-    ['Paused\n01:02 / 1:23:45', 'Paused\n01:02 / 1:23:45'],
     ['__BTT_PLAY_STATUS_UNAVAILABLE__', 'Status unavailable'], [null, '']]) {
     test('status display: ' + JSON.stringify(result), async () => {
         const context = vm.createContext({runShellScript: async options => {

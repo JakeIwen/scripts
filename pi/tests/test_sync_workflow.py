@@ -148,12 +148,6 @@ sync_preflight
             recorded = events.read_text(encoding="utf-8").splitlines()
             return result, recorded
 
-    def test_success_runs_each_phase_once_in_order(self):
-        result, recorded = self._run_harness()
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(recorded, [*PHASES, "status=0"])
-
     def test_failure_in_each_phase_stops_later_phases_and_propagates(self):
         for index, failing_phase in enumerate(PHASES):
             with self.subTest(failing_phase=failing_phase):

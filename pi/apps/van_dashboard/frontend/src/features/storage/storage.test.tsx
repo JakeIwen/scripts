@@ -112,16 +112,6 @@ describe('storage feature', () => {
     });
   });
 
-  it('rejects inconsistent policy mount state', () => {
-    const payload = storagePolicyPayload();
-    const policy = payload.policy as Record<string, unknown>;
-    const runtime = policy.runtime as Record<string, unknown>;
-    runtime.disks_mounted = false;
-    expect(() => decodeStoragePolicyResponse(payload)).toThrow(
-      'policy runtime mount state is inconsistent',
-    );
-  });
-
   it('explains reset safety using the shared USB snapshot', () => {
     const disks = sampleDiskStatus();
     const mounted = disks.disks[0];

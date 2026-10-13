@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -36,7 +37,8 @@ class RollbackFixture:
 
         self._write_command(
             "readlink",
-            """#!/tmp/scripts-venv/bin/python
+            # GNU readlink -e stand-in, run by whichever Python runs the tests.
+            f"""#!{sys.executable}
 import os
 import sys
 
