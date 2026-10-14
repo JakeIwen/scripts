@@ -46,8 +46,8 @@ acquire_backup_job() {
   exec 9>'$test_root/job.lock'
   /usr/bin/flock -n 9
 }
-release_backup_disk() {
-  /usr/bin/flock -u 9 || true
+release_backup_disk() { # idempotent like the real helper: cleanup releases twice
+  { true >&9; } 2>/dev/null || return 0
   exec 9>&-
 }
 EOF

@@ -98,7 +98,6 @@ complete_marker=.vanpi_snapshot_complete
 child=
 telemetry_child=
 backup_disk_active=0
-job_locked=0
 skip_exit_stop=0
 rsync_progress_file=
 
@@ -266,20 +265,12 @@ log_snapshot_smart() {
   return 0
 }
 
-release_job_lock() {
-  (( job_locked )) || return 0
-  # Keep the job identity until exit; disk-scoped abort must not stop our cleanup.
-  release_backup_disk hdd1tb
-  job_locked=0
-}
-
 stop_backup_disk() {
   local rc=0
-  (( backup_disk_active )) || {
-    release_job_lock
-    return 0
-  }
-  release_job_lock
+  # Release only the snapshot disk; the job identity and the source disk stay
+  # held until exit so a disk-scoped abort cannot stop our cleanup.
+  release_backup_disk hdd1tb
+  (( backup_disk_active )) || return 0
   exec 7>"$lifecycle_lock" || return 1
   if ! "$flock_command" -w 55 7; then
     log "could not acquire disk lifecycle lock to stop $EXFAT_SNAPSHOT_DISK_LABEL"
@@ -309,7 +300,7 @@ cleanup() {
       high warning || true
     (( rc == 0 )) && rc=1
   else
-    release_job_lock
+    release_backup_disk hdd1tb
   fi
   [[ -z "$rsync_progress_file" ]] || "$rm_command" -f -- "$rsync_progress_file"
   backup_progress_end
@@ -533,7 +524,6 @@ main() {
     log "another backup/restore is active, deferring EXFAT snapshot"
     return 0
   }
-  job_locked=1
   if backup_progress_begin exfat preparing "Verifying the EXFAT512 source"; then
     rsync_progress_file="$BACKUP_PROGRESS_DIR/exfat.rsync"
   else
