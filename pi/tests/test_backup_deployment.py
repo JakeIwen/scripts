@@ -53,10 +53,11 @@ class BackupDeploymentTests(unittest.TestCase):
         self.assertIn("JOB_LOCK_OWNER", config)
         self.assertIn("JOB_LOCK_GROUP", config)
         self.assertIn("JOB_LOCK_MODE", config)
-        self.assertLess(
-            config.index("validate_job_lock_file || return 1"),
-            config.index('exec 9>>"$JOB_LOCK"'),
-        )
+        # The sourced I/O sibling is part of the deployment contract; the
+        # real-process suites exercise its validation/open races and PID writes.
+        locks = (BACKUP_DIR / "backup_locks.sh").read_text(encoding="utf-8")
+        self.assertIn('/backup_lock_io.sh"', locks)
+        self.assertTrue((BACKUP_DIR / "backup_lock_io.sh").is_file())
         self.assertIn('exec {job_lock_fd}<"$job_lock"', abort)
         self.assertIn('"$flock_command" -n -s "$job_lock_fd"', abort)
         self.assertNotIn('flock -n "$job_lock"', abort)

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Shared payload and drift checks for the two targeted cloud installers.
-LOCAL_BACKUP_FILES=(backup_locks.sh umount_disks_fence.sh backup_window.sh pi_backup.sh exfat_snapshot.sh openwrt_backup.sh abort_backup.sh clone_now.sh)
+LOCAL_BACKUP_FILES=(backup_lock_io.sh backup_locks.sh umount_disks_fence.sh backup_window.sh pi_backup.sh exfat_snapshot.sh openwrt_backup.sh abort_backup.sh clone_now.sh)
 # Cloud worker modules both installers publish.
 CLOUD_WORKER_FILES=(time_machine_icloud.py time_machine_icloud.sh time_machine_pipeline.py time_machine_staging.py
   time_machine_store.py time_machine_verification.py time_machine_downloads.py time_machine_icloud_control.py

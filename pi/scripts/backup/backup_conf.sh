@@ -173,25 +173,29 @@ JOB_LOCK_STAT=${VANPI_BACKUP_JOB_LOCK_STAT:-/usr/bin/stat}
 JOB_LOCK_FLOCK=${VANPI_BACKUP_JOB_LOCK_FLOCK:-/usr/bin/flock}
 BACKUP_PRIORITY_TOOL=${VANPI_BACKUP_PRIORITY_TOOL:-/home/pi/scripts/backup/backup_priority_control.py}
 validate_job_lock_file() {
-  local metadata owner group mode extra
+  local metadata owner group mode inode extra
   if [[ -L "$JOB_LOCK" || ! -f "$JOB_LOCK" ]]; then
     echo "backup job lock is missing or unsafe: $JOB_LOCK" >&2
     return 1
   fi
-  metadata=$("$JOB_LOCK_STAT" -c '%U %G %a' -- "$JOB_LOCK" 2>&1) || {
+  metadata=$("$JOB_LOCK_STAT" -c '%U %G %a %d:%i' -- "$JOB_LOCK" 2>&1) || {
     echo "cannot inspect backup job lock $JOB_LOCK: $metadata" >&2
     return 1
   }
-  read -r owner group mode extra <<< "$metadata"
+  read -r owner group mode inode extra <<< "$metadata"
   if [[ "$owner" != "$JOB_LOCK_OWNER" || "$group" != "$JOB_LOCK_GROUP" ||
         "$mode" != "$JOB_LOCK_MODE" || -n ${extra:-} ]]; then
     echo "unsafe backup job lock metadata for $JOB_LOCK (owner=${owner:-unknown}, group=${group:-unknown}, mode=${mode:-unknown}; expected $JOB_LOCK_OWNER:$JOB_LOCK_GROUP $JOB_LOCK_MODE)" >&2
     return 1
   fi
+  [[ -z ${2:-} ]] || printf -v "$2" '%s' "$inode"
+  return 0
 }
 acquire_job_lock() {
-  validate_job_lock_file || return 1
-  exec 9>>"$JOB_LOCK"   # append-open: must not truncate a current holder's PID record
+  local fd
+  backup_lock_open fd "$JOB_LOCK" validate_job_lock_file || return 1
+  exec 9<&"$fd"
+  exec {fd}<&-
   "$JOB_LOCK_FLOCK" -n 9 || return 1
   if [[ -f "$BACKUP_PRIORITY_TOOL" ]]; then
     if ! /usr/bin/python3 "$BACKUP_PRIORITY_TOOL" --admit "${1:-disk}"; then
@@ -205,7 +209,7 @@ acquire_job_lock() {
     exec 9>&-
     return 1
   fi
-  printf '%s\n' "$$" > "$JOB_LOCK"
+  backup_lock_record_pid 9
 }
 
 # Resource-specific locks for migrated jobs (job identity, disks, data sets and

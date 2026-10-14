@@ -49,6 +49,95 @@ done
 : > "$(backup_lock_path cloud upload)"
 chmod 0660 "$BACKUP_LOCK_DIR"/*.lock
 
+# Pause the validator after its real stat, then change the directory entry from
+# another process before open. Same-metadata replacements must still fail.
+cat > "$test_root/race-stat" <<'STAT'
+#!/bin/bash
+snapshot=$(/usr/bin/stat "$@") || exit 1
+if [[ "$2" == '%U %G %a %d:%i' && "${!#}" == "$TEST_RACE_PATH" ]]; then
+  : > "$TEST_RACE_READY"
+  for ((attempt=0; attempt<500; attempt++)); do
+    [[ -e "$TEST_RACE_GO" ]] && { printf '%s\n' "$snapshot"; exit 0; }
+    /bin/sleep 0.01
+  done
+  exit 1
+fi
+printf '%s\n' "$snapshot"
+STAT
+chmod 0700 "$test_root/race-stat"
+
+race_open() { # <replace|remove|symlink> <path> <public acquisition> [arguments ...]
+  local change=$1 path=$2 attempt pid rc
+  shift 2
+  rm -f "$test_root/race-ready" "$test_root/race-go"
+  TEST_RACE_PATH="$path" TEST_RACE_READY="$test_root/race-ready" TEST_RACE_GO="$test_root/race-go" \
+    VANPI_BACKUP_JOB_LOCK_STAT="$test_root/race-stat" /bin/bash -uc '
+      source "$1"; shift; "$@"
+    ' test "$config" "$@" > "$test_root/race.log" 2>&1 &
+  pid=$!
+  pids+=("$pid")
+  for ((attempt=0; attempt<500; attempt++)); do
+    [[ -e "$test_root/race-ready" ]] && break
+    kill -0 "$pid" 2>/dev/null || break
+    /bin/sleep 0.01
+  done
+  [[ -e "$test_root/race-ready" ]] || { cat "$test_root/race.log"; fail "race validator did not reach $path"; }
+  mv "$path" "$path.saved"
+  case "$change" in
+    replace) printf 'replacement\n' > "$path"; chmod 0660 "$path" ;;
+    symlink) ln -s "$path.saved" "$path" ;;
+  esac
+  : > "$test_root/race-go"
+  wait "$pid"; rc=$?
+  [[ "$rc" != 0 ]] || fail "$* accepted $change during validation/open"
+  if [[ "$change" == remove ]]; then
+    [[ ! -e "$path" && ! -L "$path" ]] || fail "$* created a vanished lock"
+  elif [[ "$change" == replace ]]; then
+    assert_eq replacement "$(< "$path")" "$* changed the replacement"
+    exec {probe}<"$path"
+    /usr/bin/flock -n "$probe" || fail "$* left the replacement locked"
+    exec {probe}<&-
+  fi
+  rm -f "$path"
+  mv "$path.saved" "$path"
+}
+
+for change in replace remove symlink; do
+  race_open "$change" "$(backup_lock_path disk bigboi)" hold_backup_disk bigboi
+  race_open "$change" "$(backup_lock_path disk bigboi)" release_backup_disk_if_unused bigboi
+  race_open "$change" "$(backup_lock_path disk bigboi)" hold_backup_disks_exclusive bigboi
+  race_open "$change" "$(backup_lock_path data borg-repo)" acquire_backup_lock data borg-repo
+  race_open "$change" "$(backup_lock_path job borg)" acquire_backup_job borg bigboi
+  race_open "$change" "$JOB_LOCK" acquire_backup_job borg bigboi
+  race_open "$change" "$JOB_LOCK" hold_backup_disks_exclusive bigboi
+  race_open "$change" "$JOB_LOCK" acquire_job_lock
+done
+
+# Replace the pathname after flock but before the PID write. The record belongs
+# to the locked inode, and a replacement's contents must stay untouched.
+cat > "$test_root/pid-flock" <<'FLOCK'
+#!/bin/bash
+/usr/bin/flock "$@" || exit $?
+if [[ "${!#}" == "$TEST_PID_FD" ]]; then
+  mv "$TEST_PID_PATH" "$TEST_PID_PATH.saved"
+  printf 'replacement\n' > "$TEST_PID_PATH"
+  chmod 0660 "$TEST_PID_PATH"
+fi
+FLOCK
+chmod 0700 "$test_root/pid-flock"
+for kind in legacy borg; do
+  pid_fd=9; pid_path="$JOB_LOCK"; operation=(acquire_job_lock)
+  if [[ "$kind" == borg ]]; then
+    pid_fd=10; pid_path=$(backup_lock_path job borg); operation=(acquire_backup_job borg bigboi)
+  fi
+  TEST_PID_FD="$pid_fd" TEST_PID_PATH="$pid_path" VANPI_BACKUP_JOB_LOCK_FLOCK="$test_root/pid-flock" \
+    /bin/bash -uc 'source "$1"; shift; "$@"' test "$config" "${operation[@]}" || fail "pinned PID write failed"
+  assert_eq replacement "$(< "$pid_path")" "PID write followed replacement path"
+  [[ $(< "$pid_path.saved") =~ ^[1-9][0-9]*$ ]] || fail "locked inode did not receive PID"
+  rm "$pid_path"
+  mv "$pid_path.saved" "$pid_path"
+done
+
 export TEST_LOCK_LIBRARY="$repo_root/pi/scripts/backup/backup_locks.sh"
 export ABORT_BACKUP_CONF="$config"
 export ABORT_BACKUP_BORG_TOOL="$test_root/pi_backup.sh"

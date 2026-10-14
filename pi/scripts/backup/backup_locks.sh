@@ -31,6 +31,8 @@ BACKUP_JOB_KIND=
 declare -A BACKUP_DISK_LOCK_FD=()
 declare -A BACKUP_EXCLUSIVE_LOCK_FD=()
 
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/backup_lock_io.sh"
+
 backup_lock_known() {
   local item=$1 candidate
   shift
@@ -52,18 +54,20 @@ backup_lock_path() { # <job|disk|data|cloud> <name> -> prints the lock path
   printf '%s/%s-%s.lock\n' "$BACKUP_LOCK_DIR" "$class" "$name"
 }
 
-backup_lock_metadata_ok() { # <path> <expected-mode>
-  local path=$1 expected_mode=$2 metadata owner group mode extra
-  metadata=$("$JOB_LOCK_STAT" -c '%U %G %a' -- "$path" 2>&1) || {
+backup_lock_metadata_ok() { # <path> <expected-mode> [inode-variable]
+  local path=$1 expected_mode=$2 metadata owner group mode inode extra
+  metadata=$("$JOB_LOCK_STAT" -c '%U %G %a %d:%i' -- "$path" 2>&1) || {
     echo "cannot inspect backup lock $path: $metadata" >&2
     return 1
   }
-  read -r owner group mode extra <<< "$metadata"
+  read -r owner group mode inode extra <<< "$metadata"
   if [[ "$owner" != "$JOB_LOCK_OWNER" || "$group" != "$JOB_LOCK_GROUP" ||
         "$mode" != "$expected_mode" || -n ${extra:-} ]]; then
     echo "unsafe backup lock metadata for $path (owner=${owner:-unknown}, group=${group:-unknown}, mode=${mode:-unknown}; expected $JOB_LOCK_OWNER:$JOB_LOCK_GROUP $expected_mode)" >&2
     return 1
   fi
+  [[ -z ${3:-} ]] || printf -v "$3" '%s' "$inode"
+  return 0
 }
 
 backup_lock_validate() { # <path>: pre-created regular file inside the validated registry
@@ -77,7 +81,7 @@ backup_lock_validate() { # <path>: pre-created regular file inside the validated
     echo "backup lock is missing or unsafe: $path" >&2
     return 1
   fi
-  backup_lock_metadata_ok "$path" "$JOB_LOCK_MODE"
+  backup_lock_metadata_ok "$path" "$JOB_LOCK_MODE" "${2:-}"
 }
 
 hold_backup_disk() { # <label>: shared, non-blocking; fails while the disk is being drained
@@ -87,8 +91,7 @@ hold_backup_disk() { # <label>: shared, non-blocking; fails while the disk is be
     return 1
   }
   [[ -z ${BACKUP_DISK_LOCK_FD[$label]:-} ]] && {
-    backup_lock_validate "$path" || return 1
-    exec {fd}>>"$path" || return 1
+    backup_lock_open fd "$path" backup_lock_validate || return 1
     if ! "$JOB_LOCK_FLOCK" -n -s "$fd"; then
       echo "$label is being unmounted or drained; cannot use it now" >&2
       exec {fd}>&-
@@ -107,8 +110,7 @@ hold_backup_disks_exclusive() { # <label ...>: lifecycle owns disks until this s
   # between the drain and the unmount, exactly like a running job would.
   if [[ -e "$JOB_LOCK" || -L "$JOB_LOCK" ]]; then
     if [[ -L "$JOB_LOCK" || ! -f "$JOB_LOCK" ]] ||
-       ! backup_lock_metadata_ok "$JOB_LOCK" "$JOB_LOCK_MODE" ||
-       ! exec {fd}<"$JOB_LOCK"; then
+       ! backup_lock_open fd "$JOB_LOCK" backup_lock_metadata_ok "$JOB_LOCK_MODE"; then
       echo "backup job lock is unsafe; refusing to unmount" >&2
       return 1
     fi
@@ -128,7 +130,7 @@ hold_backup_disks_exclusive() { # <label ...>: lifecycle owns disks until this s
        backup_lock_metadata_ok "$BACKUP_LOCK_DIR" "$BACKUP_LOCK_DIR_MODE"; then
       # Missing inodes cannot admit jobs either; never recreate one here.
       [[ -e "$path" || -L "$path" ]] || continue
-      if backup_lock_validate "$path" && exec {fd}<"$path"; then
+      if backup_lock_open fd "$path" backup_lock_validate; then
         held_fds+=("$fd")
         "$JOB_LOCK_FLOCK" -n "$fd" && continue
       fi
@@ -162,8 +164,7 @@ release_backup_disk_if_unused() { # <label>: 0 when no other job holds the disk
   local label=$1 path fd
   release_backup_disk "$label"
   path=$(backup_lock_path disk "$label") || return 1
-  backup_lock_validate "$path" || return 1
-  exec {fd}>>"$path" || return 1
+  backup_lock_open fd "$path" backup_lock_validate || return 1
   if "$JOB_LOCK_FLOCK" -n "$fd"; then
     BACKUP_DISK_LOCK_FD[$label]=$fd
     return 0
@@ -180,8 +181,7 @@ acquire_backup_lock() { # <job|data|cloud> <name> [wait-seconds]: exclusive; non
   }
   [[ -z ${BACKUP_EXCLUSIVE_LOCK_FD[$key]:-} ]] || return 0
   [[ "$wait" =~ ^[0-9]+$ ]] || return 1
-  backup_lock_validate "$path" || return 1
-  exec {fd}>>"$path" || return 1
+  backup_lock_open fd "$path" backup_lock_validate || return 1
   if (( wait > 0 )); then
     deadline=$((SECONDS + wait))
     # Bash defers traps during foreground commands: bound each wait to a second.
@@ -234,21 +234,23 @@ acquire_backup_job() { # <kind> [disk-label ...]: legacy shared + exclusive job 
   # Order matters: the legacy lock first (an exclusive legacy holder excludes
   # everything), then the job identity, then priority admission for cloud
   # kinds, then each declared disk. Any failure releases what was acquired.
-  local kind=$1 path label
+  local kind=$1 path label fd
   shift
   path=$(backup_lock_path job "$kind") || {
     echo "unknown backup job kind: $kind" >&2
     return 1
   }
-  validate_job_lock_file || return 1
-  backup_lock_validate "$path" || return 1
-  exec 9>>"$JOB_LOCK" || return 1
+  backup_lock_open fd "$JOB_LOCK" validate_job_lock_file || return 1
+  exec 9<&"$fd"
+  exec {fd}<&-
   if ! "$JOB_LOCK_FLOCK" -n -s 9; then
     echo "an exclusive backup, restore or maintenance job is active" >&2
     exec 9>&-
     return 1
   fi
-  exec 10>>"$path" || { exec 9>&-; return 1; }
+  backup_lock_open fd "$path" backup_lock_validate || { exec 9>&-; return 1; }
+  exec 10<&"$fd"
+  [[ "$fd" == 10 ]] || exec {fd}<&-
   if ! "$JOB_LOCK_FLOCK" -n 10; then
     echo "another $kind backup job is active" >&2
     exec 10>&- 9>&-
@@ -269,7 +271,7 @@ acquire_backup_job() { # <kind> [disk-label ...]: legacy shared + exclusive job 
   for label in "$@"; do
     hold_backup_disk "$label" || { release_backup_job; return 1; }
   done
-  printf '%s\n' "$$" > "$path"
+  backup_lock_record_pid 10 || { release_backup_job; return 1; }
   BACKUP_JOB_KIND=$kind
   export VANPI_BACKUP_JOB_KIND="$kind" VANPI_BACKUP_JOB_LOCK_FD="$BACKUP_LOCK_FD_JOB" \
     VANPI_BACKUP_JOB_LOCK_PATH="$path" VANPI_BACKUP_LOCK_DIR="$BACKUP_LOCK_DIR"
