@@ -81,6 +81,7 @@ class DeploymentPlanTests(DeploymentTestCase):
             self.assertEqual(len(destinations), len(set(destinations)))
             self.assertEqual(self.shell('local_backup_sources "$1"', profile).stdout.splitlines(), sources)
             for dependency, consumer in [('backup_lock_io.sh', 'backup_locks.sh'),
+                    ('backup_lock_registry.sh', 'backup_locks.sh'),
                     ('backup_locks.sh', 'backup_conf.sh'), ('umount_disks_fence.sh', 'umount_disks.sh'),
                     ('stale_mount_recovery.sh', 'mount_disks.sh')]:
                 names = [Path(name).name for name in sources]

@@ -17,6 +17,13 @@ before anyone acts on them. `/run` is tmpfs, so a reboot recreates the registry
 empty. Acquisition fails closed when a lock file or the directory is missing,
 symlinked, or has unexpected ownership or mode.
 
+`backup_locks.py` owns the resource names and job labels. Run
+`python3 -m pi.generate_backup_lock_registry` after changing them; it renders
+the shell declarations in `backup_lock_registry.sh` and the tmpfiles list.
+Both targeted installers and broad sync run the read-only `--check` before
+staging; targeted installers repeat it on the transferred payload. Shell jobs
+source the generated declarations directly. Lock paths and modes are unchanged.
+
 | Lock | Mode | Holder | Meaning |
 | --- | --- | --- | --- |
 | `job-<kind>.lock` (`borg`, `exfat`, `pi-cloud`, `time-machine`, `clone`) | exclusive | the job parent; PID recorded | one instance per job kind; the stop/abort target |

@@ -5,6 +5,7 @@ repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 target=${1:-pi@vanpi.lan}
 [[ $# -le 1 && "$target" != -* && "$target" != *[[:space:]]* ]] || exit 2
 cd "$repo"
+python3 -m pi.generate_backup_lock_registry --check
 . "$repo/pi/backup_local_deploy.sh"
 local_previous=$(local_backup_previous_hashes "$repo" pi)
 payload=()
@@ -15,7 +16,8 @@ python3 "$repo/pi/tests/backup/test_icloud_status.py"
 bash -n "$repo/pi/scripts/backup/icloud_backup.sh"
 stage=$(ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" /usr/bin/mktemp -d /tmp/vanpi-icloud.XXXXXX)
 [[ "$stage" =~ ^/tmp/vanpi-icloud\.[[:alnum:]]{6}$ ]] || exit 1
-COPYFILE_DISABLE=1 /usr/bin/tar --no-xattrs -cf - pi/backup_local_deploy.sh "${payload[@]}" \
+COPYFILE_DISABLE=1 /usr/bin/tar --no-xattrs -cf - pi/backup_local_deploy.sh \
+  pi/__init__.py pi/generate_backup_lock_registry.py "${payload[@]}" \
   | ssh -o BatchMode=yes "$target" /bin/tar -xf - -C "$stage"
 ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" /bin/bash -s -- "$stage" "$local_previous" <<'REMOTE'
 set -euo pipefail
@@ -24,6 +26,7 @@ stage=$1
 [[ "$stage" =~ ^/tmp/vanpi-icloud\.[[:alnum:]]{6}$ ]] || exit 1
 [[ -x /usr/local/bin/rclone ]]
 cd "$stage"
+/usr/bin/python3 -m pi.generate_backup_lock_registry --check
 . pi/backup_local_deploy.sh
 while IFS= read -r source; do
   case "$source" in

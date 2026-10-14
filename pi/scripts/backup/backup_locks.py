@@ -1,6 +1,8 @@
 """Resource-specific backup lock registry for Python workers and status tools.
 
-Mirrors backup_locks.sh: pre-created lock files under /run/lock/vanpi-backup,
+Defines the vocabulary used by backup_locks.sh and systemd-tmpfiles; regenerate
+their declarations with python3 -m pi.generate_backup_lock_registry.
+Pre-created lock files under /run/lock/vanpi-backup,
 never created at runtime, validated before use. Shell entry points acquire the
 job, disk and cloud-slot descriptors and exec the worker, which inherits them;
 this module lets the worker assert those descriptors and lets read-only status
@@ -27,12 +29,14 @@ class LockClass(str, Enum):
 
 PI_CLOUD = 'pi-cloud'
 TIME_MACHINE = 'time-machine'
-JOB_KINDS = ('borg', 'exfat', PI_CLOUD, TIME_MACHINE, 'clone')
 DISK_LABELS = ('bigboi', 'hdd1tb', 'mbp2tbkup', 'movingparts', 'EXFAT512')
 DATA_NAMES = ('borg-repo',)
 CLOUD_SLOT = 'upload'
-JOB_LABELS = {'borg': 'local Pi backup', 'exfat': 'EXFAT512 snapshot', 'pi-cloud': 'Pi iCloud backup',
-              'time-machine': 'Mac Time Machine iCloud backup', 'clone': 'hotspare clone'}
+JOB_LABELS = {'borg': 'local Pi backup', 'exfat': 'EXFAT512 snapshot', PI_CLOUD: 'Pi iCloud backup',
+              TIME_MACHINE: 'Mac Time Machine iCloud backup', 'clone': 'hotspare clone'}
+JOB_KINDS = tuple(JOB_LABELS)
+LOCK_NAMES = {LockClass.JOB: JOB_KINDS, LockClass.DISK: DISK_LABELS,
+              LockClass.DATA: DATA_NAMES, LockClass.CLOUD: (CLOUD_SLOT,)}
 PID_RECORD = re.compile(r'[1-9][0-9]{0,9}')
 POLL_SECONDS = 0.5
 FALLBACK_FD_LIMIT = 1024
@@ -61,9 +65,7 @@ def cloud_slot_fd():
 
 def lock_path(lock_class, name):
     lock_class = LockClass(lock_class)
-    known = {LockClass.JOB: JOB_KINDS, LockClass.DISK: DISK_LABELS,
-             LockClass.DATA: DATA_NAMES, LockClass.CLOUD: (CLOUD_SLOT,)}[lock_class]
-    if name not in known:
+    if name not in LOCK_NAMES[lock_class]:
         raise ValueError(f'unknown backup lock: {lock_class.value}-{name}')
     return lock_dir() / f'{lock_class.value}-{name}.lock'
 

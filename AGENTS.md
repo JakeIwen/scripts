@@ -153,6 +153,10 @@ compare it with this checkout. Deployed files may differ from the repository.
 - Backup concurrency: `pi/scripts/backup/backup_locks.sh` (sourced by
   `backup_conf.sh`) and `backup_locks.py` own the resource lock registry in
   `/run/lock/vanpi-backup/`, pre-created by `pi/tmpfiles.d/vanpi-backup.conf`;
+  `backup_locks.py` defines the canonical names. The build-time
+  `pi/generate_backup_lock_registry.py` emits `backup_lock_registry.sh` and the
+  tmpfiles file; run `python3 -m pi.generate_backup_lock_registry` after changing
+  names. Both targeted installers and broad sync check for drift before staging.
   `backup_lock_io.sh` opens existing shell lock inodes, verifies their validated
   identities and writes PID records through the locked descriptor.
   `backup_admission.py` owns the validated cloud-run descriptor bundle and its

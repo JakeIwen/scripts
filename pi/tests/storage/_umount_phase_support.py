@@ -605,7 +605,8 @@ def _harness_environment(**updates: str) -> dict[str, str]:
 def _write_backup_libraries(harness: Path) -> None:
     backup = harness / "backup"
     backup.mkdir()
-    for name in ("backup_locks.sh", "backup_lock_io.sh", "backup_lifecycle.sh", FENCE.name):
+    for name in ("backup_locks.sh", "backup_lock_registry.sh", "backup_lock_io.sh",
+                 "backup_lifecycle.sh", FENCE.name):
         (backup / name).write_bytes((FENCE.parent / name).read_bytes())
     # Keep the real target validation, but never touch a live registry here.
     with (backup / "backup_locks.sh").open("a", encoding="utf-8") as output:

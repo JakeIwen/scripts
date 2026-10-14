@@ -5,6 +5,7 @@ repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 target=${1:-pi@vanpi.lan}
 [[ $# -le 1 && "$target" != -* && "$target" != *[[:space:]]* ]] || exit 2
 cd "$repo"
+python3 -m pi.generate_backup_lock_registry --check
 . "$repo/pi/backup_local_deploy.sh"
 local_previous=$(local_backup_previous_hashes "$repo" tm)
 payload=()
@@ -25,7 +26,7 @@ stage=$(ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" /usr/bin/mktemp -d /t
 [[ "$stage" =~ ^/tmp/vanpi-tm-icloud\.[[:alnum:]]{6}$ ]] || exit 1
 gate_hash=$(shasum -a 256 pi/scripts/samba_require_mount.sh | awk '{print $1}')
 COPYFILE_DISABLE=1 /usr/bin/tar --no-xattrs -cf - \
-  pi/__init__.py pi/tests/__init__.py pi/backup_local_deploy.sh \
+  pi/__init__.py pi/tests/__init__.py pi/backup_local_deploy.sh pi/generate_backup_lock_registry.py \
   pi/deploy_icloud_backup.sh pi/deploy_time_machine_icloud.sh \
   "${payload[@]}" \
   pi/tests/backup/test_backup_locks.py pi/tests/backup/test_local_backup_deploy.py pi/tests/backup/test_openwrt_schedule.py pi/tests/backup/test_protected_json.py \
@@ -46,6 +47,7 @@ export PYTHONDONTWRITEBYTECODE=1
 stage=$1
 [[ "$stage" =~ ^/tmp/vanpi-tm-icloud\.[[:alnum:]]{6}$ ]] || exit 1
 cd "$stage"
+/usr/bin/python3 -m pi.generate_backup_lock_registry --check
 . pi/backup_local_deploy.sh
 /usr/bin/python3 pi/tests/backup/test_time_machine_icloud.py
 /usr/bin/python3 -m unittest pi.tests.backup.test_time_machine_staging

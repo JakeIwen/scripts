@@ -13,6 +13,7 @@ pi_ip='pi@vanpi.lan'
 package_units=""
 
 sync_preflight() {
+  (cd "$dsc" && python3 -m pi.generate_backup_lock_registry --check) || return 1
   compute_installer="$VAN_COMPUTE_CHECKOUT/macbook/scripts/install_van_compute_worker.zsh"
   if [[ ! -x "$compute_installer" ]]; then
     echo "Van compute checkout is missing its executable installer: $compute_installer" >&2

@@ -22,11 +22,8 @@ BACKUP_LOCK_DIR=${VANPI_BACKUP_LOCK_DIR:-/run/lock/vanpi-backup}
 BACKUP_LOCK_DIR_MODE=${VANPI_BACKUP_LOCK_DIR_MODE:-770}
 BACKUP_LOCK_FD_LEGACY=9
 BACKUP_LOCK_FD_JOB=10
-BACKUP_JOB_KINDS=(borg exfat pi-cloud time-machine clone)
-# Every label disk_policy.sh manages, so lifecycle drains can name any of them.
-BACKUP_DISK_LABELS=(bigboi hdd1tb mbp2tbkup movingparts EXFAT512)
-BACKUP_DATA_NAMES=(borg-repo)
-BACKUP_CLOUD_SLOT=upload
+# Generated from backup_locks.py; includes every disk_policy.sh managed label.
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/backup_lock_registry.sh" || return 1
 BACKUP_JOB_KIND=
 declare -A BACKUP_DISK_LOCK_FD=()
 declare -A BACKUP_EXCLUSIVE_LOCK_FD=()

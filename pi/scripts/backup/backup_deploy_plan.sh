@@ -6,6 +6,7 @@
 # even then an existing file must equal the staged source. "required" forbids
 # first install. "replace" retains the installers' managed document/unit policy.
 BACKUP_DEPLOY_PLAN=(
+  'both|pi/scripts/backup/backup_lock_registry.sh|/home/pi/scripts/backup/backup_lock_registry.sh|revision|pi:pi|750|new'
   'both|pi/scripts/backup/backup_lock_io.sh|/home/pi/scripts/backup/backup_lock_io.sh|revision|pi:pi|750|new'
   'both|pi/scripts/backup/backup_locks.sh|/home/pi/scripts/backup/backup_locks.sh|revision|pi:pi|750|new'
   'both|pi/scripts/backup/backup_lifecycle.sh|/home/pi/scripts/backup/backup_lifecycle.sh|revision|pi:pi|750|new'
