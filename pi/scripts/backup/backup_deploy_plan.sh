@@ -14,6 +14,7 @@ BACKUP_DEPLOY_PLAN=(
   'both|pi/scripts/backup/backup_conf.sh|/home/pi/scripts/backup/backup_conf.sh|conf|pi:pi|750|new'
   'both|pi/scripts/backup/protected_json.py|/home/pi/scripts/backup/protected_json.py|revision|pi:pi|750|new'
   'both|pi/scripts/backup/backup_locks.py|/home/pi/scripts/backup/backup_locks.py|revision|pi:pi|750|new'
+  'both|pi/scripts/backup/backup_admission.py|/home/pi/scripts/backup/backup_admission.py|revision|pi:pi|750|new'
   'both|pi/scripts/backup/backup_priority.py|/home/pi/scripts/backup/backup_priority.py|revision|pi:pi|750|new'
   'both|pi/scripts/backup/cloud_backup_control.py|/home/pi/scripts/backup/cloud_backup_control.py|revision|pi:pi|750|new'
   'both|pi/scripts/backup/backup_window.sh|/home/pi/scripts/backup/backup_window.sh|revision|pi:pi|750|new'

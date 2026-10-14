@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from contextlib import nullcontext
 import datetime as dt
 import errno
 import hashlib
@@ -138,6 +139,7 @@ class ControlTests(unittest.TestCase):
         self.command.assert_not_called()
 
     def test_deferred_first_copy_records_bounded_automatic_retry(self):
+        self.enterContext(mock.patch.object(job.admission, 'admitted_run', return_value=nullcontext()))
         store.atomic_json(self.directory / 'state.json', {'pending': GEN})
         with mock.patch.object(job, 'STATE', self.directory), mock.patch.object(job, 'private_directory'), \
                 mock.patch.object(cloud, 'STATE_DIR', self.directory), \
@@ -152,6 +154,7 @@ class ControlTests(unittest.TestCase):
         self.assertLessEqual(state['retry_at'], time.time() + 300)
 
     def test_storage_interruption_schedules_retry_and_preserves_capture_cache(self):
+        self.enterContext(mock.patch.object(job.admission, 'admitted_run', return_value=nullcontext()))
         for failure in (OSError(errno.EIO, 'PRIVATE disk error'), FileNotFoundError(errno.ENOENT, 'PRIVATE'),
                         subprocess.CalledProcessError(1, ['/usr/bin/findmnt'], stderr='PRIVATE')):
             store.atomic_json(self.directory / 'state.json', {'pending': GEN, 'progress': {'capture_bytes': 500}})
@@ -169,6 +172,7 @@ class ControlTests(unittest.TestCase):
             self.assertNotIn('PRIVATE', job.history.reason(state))
 
     def test_worker_does_not_record_or_run_attempt_while_paused(self):
+        self.enterContext(mock.patch.object(job.admission, 'admitted_run', return_value=nullcontext()))
         control.control('pause', '60', self.directory, command=self.command)
         with mock.patch.object(job, 'STATE', self.directory), mock.patch.object(job, 'private_directory'), \
                 mock.patch.object(cloud, 'STATE_DIR', self.directory), \

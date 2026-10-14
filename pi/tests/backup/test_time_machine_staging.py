@@ -10,6 +10,7 @@ from .test_time_machine_icloud import GEN, source_fixture, store
 import time_machine_staging as staging
 
 
+@unittest.skipUnless(Path('/proc/self/fdinfo').is_dir(), 'held-lock assertion requires Linux fdinfo')
 class StagingCleanupTests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()

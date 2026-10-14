@@ -155,6 +155,11 @@ compare it with this checkout. Deployed files may differ from the repository.
   `/run/lock/vanpi-backup/`, pre-created by `pi/tmpfiles.d/vanpi-backup.conf`;
   `backup_lock_io.sh` opens existing shell lock inodes, verifies their validated
   identities and writes PID records through the locked descriptor.
+  `backup_admission.py` owns the validated cloud-run descriptor bundle and its
+  scoped client context. Both `--run` entries validate before persistent writes;
+  clients and the verifier carry that bundle, plus an explicitly checked Borg
+  data descriptor during the repository copy. `require_held` only asserts Linux
+  fdinfo evidence; it never acquires a missing hold.
   `backup_lifecycle.sh` validates the full target set, drains it and retains
   claims in the caller through mutation. Automatic stale recovery uses the
   same operation in one subshell; `stale_mount_recovery.sh` defines its original
@@ -194,8 +199,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   `pi/tests/backup/test_local_backup_deploy.py` exercises those shell contracts
   against temporary source/live directories and a fixture Git repository.
   Real-process lock regressions live in `pi/tests/storage/test_backup_locks.sh`
-  and `pi/tests/backup/test_backup_locks.py`. `backup_lock_fixtures.py` owns
-  their private pre-created registry fixture.
+  and `pi/tests/backup/test_backup_locks.py`. `backup_lock_fixtures.py` owns their
+  private registry/admission fixtures; `test_backup_admission.py` tests the
+  actual worker entry boundary and inherited client descriptors.
 - `pi/scripts/backup/icloud_inventory.py` owns cloud object fingerprint parsing
   and size-based upload estimates, re-exported by the shared cloud worker.
 - `pi/scripts/backup/time_machine_pipeline.py` supervises a single verifier

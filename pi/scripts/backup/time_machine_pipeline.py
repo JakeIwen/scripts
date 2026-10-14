@@ -14,6 +14,7 @@ import time
 from typing import TypedDict
 
 import backup_locks
+import backup_admission
 import icloud_backup as cloud
 from icloud_inventory import parse_inventory
 from icloud_progress import TransferActivity
@@ -128,16 +129,16 @@ class Follower:
 
 
 def verification_worker(cfg, root, expected, rows, parent_pid, completed, updates, done,
-                        result_reader, result_writer, lock_fd):
+                        result_reader, result_writer, admission):
     result_reader.close()
     result: VerifierResult = {'kind': ResultKind.COMPLETE, 'message': '', 'errno': None}
     try:
-        backup_locks.require_job_lock('time-machine', lock_fd)
         with suppress(PermissionError):
             os.nice(4)
         signal.signal(signal.SIGTERM, cloud.abort)
         signal.signal(signal.SIGINT, cloud.abort)
-        Follower(cfg, root, expected, rows, parent_pid, completed, updates, done).run()
+        with backup_admission.use(admission):
+            Follower(cfg, root, expected, rows, parent_pid, completed, updates, done).run()
     except cloud.AuthenticationRequired as exc:
         result.update(kind=ResultKind.AUTHENTICATION, message=str(exc))
     except cloud.Deferred as exc:
@@ -154,11 +155,11 @@ def verification_worker(cfg, root, expected, rows, parent_pid, completed, update
 
 
 class VerificationPipeline:
-    def __init__(self, cfg, root, expected, rows, *, lock_fd=None):
+    def __init__(self, cfg, root, expected, rows, *, admission):
         if cloud.CHILD is not None:
             raise RuntimeError('start verification before launching the upload client')
-        lock_fd = backup_locks.job_lock_fd() if lock_fd is None else lock_fd
-        backup_locks.require_job_lock('time-machine', lock_fd)
+        if admission.kind != backup_locks.TIME_MACHINE:
+            raise RuntimeError('verification requires Time Machine admission')
         self.cfg, self.expected = cfg, expected
         context = multiprocessing.get_context('fork')
         self.completed = context.Queue(maxsize=16)
@@ -169,7 +170,7 @@ class VerificationPipeline:
         self.latest, self.result = {}, None
         self.process = context.Process(target=verification_worker,
             args=(cfg, root, expected, rows, os.getpid(), self.completed, self.updates, self.done,
-                  self.reader, writer, lock_fd), daemon=True)
+                  self.reader, writer, admission), daemon=True)
         self.process.start()
         writer.close()
 
@@ -251,7 +252,7 @@ def upload_and_follow(cfg, root, expected, rows, files, state):
         verification_total_files=len(expected), current_file_bytes=0,
         verification_bytes_per_second=None, verification_idle_seconds=0,
         verification_waiting=False, **cloud.upload_progress(expected, rows, {}))
-    with VerificationPipeline(cfg, root, expected, rows) as pipeline:
+    with VerificationPipeline(cfg, root, expected, rows, admission=backup_admission.current()) as pipeline:
         def report(counters):
             cloud.record_progress(state, 'uploading', **cloud.upload_progress(expected, rows, counters),
                                   **pipeline.progress())

@@ -2,7 +2,7 @@
 """Immutable, encrypted Borg recovery generations uploaded directly to iCloud.
 
 The shell entrypoint holds the Pi cloud job, bigboi disk and upload-slot locks.
-The worker asserts its inherited slot before network clients and takes the Borg
+The worker validates its inherited admission before --run and takes the Borg
 repository data lock only while copying a consistent repository snapshot.
 """
 import configparser
@@ -24,6 +24,7 @@ import time
 import uuid
 
 import backup_locks
+import backup_admission as admission
 from icloud_uplink import decide
 from icloud_inventory import remote_fingerprint, parse_inventory, upload_progress
 from icloud_progress import ProcessIO, ProgressWatch, RcloneStats, StreamDigest, TransferActivity
@@ -212,13 +213,12 @@ def monitor_child(cfg, program, operation, proof, parked, network, interactive, 
 
 
 def run(args, cfg, network=False, interactive=False, parked=True, stream_hash=False, progress=None,
-        on_completed=None, on_activity=None):
+        on_completed=None, on_activity=None, account=False, repository_fd=None):
     """Guard every network command, including retries, checks and retention."""
     global CHILD, CHILD_INTERACTIVE
     program = args[0]
     operation = args[1] if len(args) > 1 else 'command'
-    if network and not interactive:
-        backup_locks.require_cloud_slot()
+    inherited = admission.client_fds(account=account, repository_fd=repository_fd)
     if parked:
         check_work_allowed(cfg)
     if network and on_activity is not None:
@@ -239,7 +239,6 @@ def run(args, cfg, network=False, interactive=False, parked=True, stream_hash=Fa
                 '--contimeout', '20s', '--timeout', '60s'] + (
                 ['--stats', '0'] if interactive else
                 ['--stats', '5s', '--stats-log-level', 'NOTICE', '--use-json-log']) + args[1:]
-    inherited = tuple(backup_locks.inherited_lock_fds())
     terminal = termios.tcgetattr(sys.stdin.fileno()) if interactive and sys.stdin.isatty() else None
     watch = ProgressWatch(cfg.get('no_progress_timeout_seconds', 900))
     stats, io = RcloneStats(on_completed), ProcessIO()
@@ -349,10 +348,10 @@ def make_snapshot(cfg, root, repo, name, state=None):
     # it has never been uploaded until its manifest is atomically published.
     report = (lambda counters: record_progress(state, 'preparing')) if state is not None else None
     try:
-        with backup_locks.held(backup_locks.LockClass.DATA, 'borg-repo'):
+        with backup_locks.held(backup_locks.LockClass.DATA, 'borg-repo') as repository_fd:
             run(['/usr/bin/borg', 'with-lock', str(repo), '/usr/bin/rsync', '-a', '--delete',
                  '--exclude=/lock.exclusive', '--exclude=/lock.roster', str(repo) + '/',
-                 str(dest) + '/'], cfg, progress=report)
+                 str(dest) + '/'], cfg, progress=report, repository_fd=repository_fd)
     except backup_locks.LockBusy:
         raise Deferred('Borg repository is busy with a local backup; retrying later') from None
     run(['/usr/bin/borg', 'check', '--verify-data', str(dest)], cfg, progress=report)
@@ -537,8 +536,7 @@ def unmount_if_unused(mount, label):
     if current.returncode:
         raise RuntimeError('cannot verify backup mount during cleanup')
     exact_mount(mount, label)
-    disk_lock = backup_locks.lock_path(backup_locks.LockClass.DISK, 'bigboi')
-    backup_locks.release_inherited(disk_lock)
+    admission.release_disk(label)
     try:
         with backup_locks.held(backup_locks.LockClass.DISK, 'bigboi'):
             exact_mount(mount, label)
@@ -646,7 +644,7 @@ def login(cfg):
     else:
         print('Configure the remote named icloud, type iclouddrive, service drive. Enter Apple credentials only at the private prompts. Save and quit the menu to continue.', flush=True)
         command = [RCLONE, 'config']
-    run(command, cfg, network=True, interactive=True, parked=False)
+    run(command, cfg, network=True, interactive=True, parked=False, account=True)
     verify_login(cfg)
 
 
@@ -660,10 +658,10 @@ def verify_login(cfg):
     local.write_text(token + '\n')
     remote = cfg['remote'] + '/_auth-check-' + token + '.txt'
     try:
-        run([RCLONE, 'copyto', str(local), remote], cfg, network=True, parked=False)
-        if run([RCLONE, 'cat', remote], cfg, network=True, parked=False) != token + '\n':
+        run([RCLONE, 'copyto', str(local), remote], cfg, network=True, parked=False, account=True)
+        if run([RCLONE, 'cat', remote], cfg, network=True, parked=False, account=True) != token + '\n':
             raise RuntimeError('iCloud upload/download canary mismatch')
-        run([RCLONE, 'deletefile', remote], cfg, network=True, parked=False)
+        run([RCLONE, 'deletefile', remote], cfg, network=True, parked=False, account=True)
     finally:
         local.unlink()
     atomic_json(STATE_DIR / 'authenticated.json', {'checked_at': time.time()})
@@ -749,6 +747,9 @@ def _main(mode):
 
 def main():
     mode = sys.argv[1] if len(sys.argv) == 2 else '--run'
+    if mode == '--run':
+        with admission.admitted_run(backup_locks.PI_CLOUD):
+            return _main(mode)
     return _main(mode)
 
 

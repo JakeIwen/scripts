@@ -20,6 +20,7 @@ import time
 import uuid
 
 import backup_locks
+import backup_admission as admission
 import icloud_backup as cloud
 import icloud_status as history
 import time_machine_store as store
@@ -268,8 +269,9 @@ def cleanup_staging(cfg, apply=False, state=None):
 
     if state is not None:
         cloud.record_progress(state, 'preparing', capture_cleaning=True, capture_waiting=False, capture_complete=False)
-    plan = staging.plan_cleanup(ROOT, check)
-    result = staging.apply_cleanup(plan, check) if apply else plan.summary()
+    lock_fd = admission.staging_job_fd()
+    plan = staging.plan_cleanup(ROOT, check, lock_fd=lock_fd)
+    result = staging.apply_cleanup(plan, check, lock_fd=lock_fd) if apply else plan.summary()
     if state is not None:
         state['last_staging_cleanup'] = {'at': time.time(), **result}
         cloud.record_progress(state, 'preparing', capture_cleaning=False)
@@ -565,6 +567,9 @@ def _main(args):
 
 def main():
     args = sys.argv[1:]
+    if args == ['--run']:
+        with admission.admitted_run(backup_locks.TIME_MACHINE):
+            return _main(args)
     return _main(args)
 
 

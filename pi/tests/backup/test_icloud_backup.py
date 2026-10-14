@@ -1,5 +1,5 @@
 import json
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import hashlib
 import fcntl
 import os
@@ -67,7 +67,14 @@ class UplinkTests(unittest.TestCase):
         self.assertFalse(self.check({}))
 
 
-class SnapshotTests(unittest.TestCase):
+class ClientMonitoringTests(unittest.TestCase):
+    def setUp(self):
+        # Client monitoring is independent of admission, which has real-process
+        # coverage in test_backup_admission.py.
+        self.enterContext(mock.patch.object(backup.admission, 'client_fds', return_value=()))
+
+
+class SnapshotTests(ClientMonitoringTests):
     def test_auth_errors_are_actionable_without_echoing_credentials(self):
         for text in ('trust token expired, please reauth', 'missing icloud trust token',
                      'Invalid Session Token', 'Missing PCS cookies from the request',
@@ -154,7 +161,7 @@ class SnapshotTests(unittest.TestCase):
         child=Client()
         with mock.patch.object(backup,'guard',side_effect=[('192.168.6.103','wan'),backup.Deferred('Starlink')]), \
              mock.patch.object(backup,'check_parked'), \
-             mock.patch.object(backup.backup_locks, 'inherited_lock_fds', return_value=[9, 11, 12]), \
+             mock.patch.object(backup.admission, 'client_fds', return_value=(9, 11, 12)), \
              mock.patch.object(backup.subprocess,'Popen',return_value=child) as popen, \
              mock.patch.object(backup.time,'sleep'), mock.patch.object(backup.time,'monotonic',side_effect=[0,10]), \
              mock.patch.object(backup.os,'kill') as kill, mock.patch.object(backup.os,'killpg') as killpg:
@@ -164,16 +171,22 @@ class SnapshotTests(unittest.TestCase):
             self.assertIn(mock.call(child.pid,signal.SIGTERM),killpg.call_args_list)
             self.assertIsNone(backup.CHILD)
 
-    def test_network_worker_checks_cloud_slot_before_launching_client(self):
-        with mock.patch.object(backup.backup_locks, 'require_cloud_slot',
-                               side_effect=backup.Deferred('slot checked')) as require, \
-                mock.patch.object(backup, 'guard') as guard, \
-                mock.patch.object(backup.subprocess, 'Popen') as popen:
-            with self.assertRaisesRegex(backup.Deferred, 'slot checked'):
-                backup.run([backup.RCLONE, 'copy', 'source', 'dest'], test_config(), network=True)
-        require.assert_called_once_with()
-        guard.assert_not_called()
-        popen.assert_not_called()
+    def test_run_entry_rejects_missing_admission_before_state_or_client(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary) / 'not-created'
+            environment = {key: value for key, value in os.environ.items() if not key.startswith('VANPI_BACKUP_')}
+            with mock.patch.dict(os.environ, environment, clear=True), \
+                    mock.patch.object(backup, 'STATE_DIR', state), \
+                    mock.patch.object(sys, 'argv', ['worker', '--run']), \
+                    mock.patch.object(backup, 'load_config') as config, \
+                    mock.patch.object(backup, 'admit_worker') as queued_resume, \
+                    mock.patch.object(backup.subprocess, 'Popen') as popen:
+                with self.assertRaisesRegex(RuntimeError, 'admission is missing'):
+                    backup.main()
+                self.assertFalse(state.exists())
+                config.assert_not_called()
+                queued_resume.assert_not_called()
+                popen.assert_not_called()
 
     def test_snapshot_copy_is_locked_and_checked_before_manifest(self):
         cfg=test_config()
@@ -271,18 +284,17 @@ class SnapshotTests(unittest.TestCase):
         found = subprocess.CompletedProcess([], 0, '/dev/test\n', '')
         with mock.patch.object(backup.subprocess, 'run', return_value=found) as run, \
                 mock.patch.object(backup, 'exact_mount'), \
-                mock.patch.object(backup.backup_locks, 'release_inherited') as release, \
+                mock.patch.object(backup.admission, 'release_disk') as release, \
                 mock.patch.object(backup.backup_locks, 'held',
                     side_effect=backup.backup_locks.LockBusy('busy')), \
                 mock.patch('builtins.print') as output:
             backup.unmount_if_unused(mount, 'bigboi')
-        release.assert_called_once_with(
-            backup.backup_locks.lock_path(backup.backup_locks.LockClass.DISK, 'bigboi'))
+        release.assert_called_once_with('bigboi')
         self.assertEqual(run.call_count, 1)
         output.assert_called_once_with('leaving bigboi mounted for another backup job', flush=True)
 
 
-class ProgressTests(unittest.TestCase):
+class ProgressTests(ClientMonitoringTests):
     def test_final_auth_error_survives_a_large_progress_log(self):
         cfg=test_config()
         class Client:
@@ -456,6 +468,7 @@ class CheckpointTests(unittest.TestCase):
 
 class PiPauseTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(mock.patch.object(backup.admission, 'admitted_run', return_value=nullcontext()))
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)

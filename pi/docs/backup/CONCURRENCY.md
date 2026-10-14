@@ -33,6 +33,31 @@ the descriptors; children of a shell job inherit them (so emergency termination
 can target the whole tree by lock file), while Python's `subprocess` children do
 not.
 
+Both Python `--run` entries validate admission before creating a state directory,
+consuming a queued resume, recording an attempt or launching a client.
+`backup_admission.py` captures `VANPI_BACKUP_JOB_KIND`, `VANPI_BACKUP_LOCK_DIR`,
+`VANPI_BACKUP_LEGACY_LOCK_FD`, `VANPI_BACKUP_JOB_LOCK_FD`,
+`VANPI_BACKUP_CLOUD_SLOT_FD` and the comma-separated `label=fd` records in
+`VANPI_BACKUP_DISK_LOCK_FDS`. Missing metadata, duplicate/wrong descriptors,
+unsafe registry metadata, the wrong disk set or absent/wrong lock modes refuse
+the run. Linux `/proc/self/fdinfo` proves the hold belongs to that open file
+description; `require_held` never acquires or upgrades a lock.
+
+The immutable bundle remains in a scoped worker context and is passed explicitly
+to the forked verifier. Clients use its cached descriptors and inode identities;
+they do not rediscover admission from environment variables or scan `/proc`.
+A temporary Borg repository descriptor is separately checked and passed during
+the repository copy. The context resets even when a run fails; any future
+client-launching thread must receive and bind the bundle explicitly. Priority,
+ignition and uplink guards still run at their existing repeat points.
+
+Pi `--preflight`, `--status`, `--login` and `--verify-login` are outside cloud-run
+admission; only login and its upload/download canary use the explicit account
+client scope. Mac `--capture-request`, `--mac-present`, `--mac-present-v2`,
+`--claim-capture-stop`, `--capture-ready`, `--release-capture`, `--status`,
+`--staging-gc-plan` and `--staging-gc-apply` also remain outside it. Staging GC
+still independently asserts its job hold before planning or deleting objects.
+
 ## Ownership per job
 
 | Job | Entry point | Legacy | Job lock | Disks (shared) | Data (exclusive) | Cloud slot |
@@ -96,8 +121,8 @@ backup job; the capture handshake and share drain are unchanged.
 - Timed waits (`acquire_backup_lock <class> <name> <seconds>`, used for the Borg
   repository) poll a non-blocking `flock` once a second so the job's USR1/TERM
   traps keep working while it waits.
-- Python workers pass every inherited lock descriptor to their clients
-  (`backup_locks.inherited_lock_fds()`), so an orphaned rclone or borg process
+- Python workers pass their admission bundle's descriptors (and any checked
+  repository-copy descriptor) to their clients, so an orphaned rclone or borg process
   still holds its job's disk, slot and repository locks and is found by the
   emergency kill-by-lock-file path.
 - `abort_backup.sh --user borg|exfat` reads the job lock's PID record, verifies

@@ -25,7 +25,9 @@ class LockClass(str, Enum):
     CLOUD = 'cloud'
 
 
-JOB_KINDS = ('borg', 'exfat', 'pi-cloud', 'time-machine', 'clone')
+PI_CLOUD = 'pi-cloud'
+TIME_MACHINE = 'time-machine'
+JOB_KINDS = ('borg', 'exfat', PI_CLOUD, TIME_MACHINE, 'clone')
 DISK_LABELS = ('bigboi', 'hdd1tb', 'mbp2tbkup', 'movingparts', 'EXFAT512')
 DATA_NAMES = ('borg-repo',)
 CLOUD_SLOT = 'upload'
@@ -139,18 +141,34 @@ def held(lock_class, name, *, exclusive=True, timeout=None):
         os.close(fd)
 
 
-def require_held(fd, path):
-    """Assert fd is this process's descriptor for path and holds it exclusively.
+def require_held(fd, path, *, exclusive=True):
+    """Assert this descriptor already holds the required flock; never acquire it.
 
-    Re-locking an open file description that already holds the exclusive lock is
-    idempotent; it fails only when the descriptor is wrong or the lock is held
-    elsewhere, so the worker cannot continue on a lost or foreign descriptor.
+    Linux fdinfo reports locks attached to this open file description, including
+    inherited holds. A probe on another fd could mistake somebody else's hold
+    for ours, and re-flocking this fd would silently admit an unlocked caller.
     """
     actual, expected = os.fstat(fd), path.lstat()
     if (not stat.S_ISREG(expected.st_mode) or not stat.S_ISREG(actual.st_mode)
             or (actual.st_dev, actual.st_ino) != (expected.st_dev, expected.st_ino)):
         raise RuntimeError(f'backup worker requires its inherited lock descriptor for {path.name}')
-    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    mode = 'WRITE' if exclusive else 'READ'
+    try:
+        records = Path(f'/proc/self/fdinfo/{fd}').read_text().splitlines()
+    except OSError as exc:
+        raise RuntimeError('backup lock ownership requires readable Linux fdinfo') from exc
+    for record in records:
+        fields = record.split()
+        if len(fields) != 9 or fields[:1] != ['lock:'] or fields[2:5] != ['FLOCK', 'ADVISORY', mode]:
+            continue
+        try:
+            major, minor, inode = fields[6].split(':')
+            identity = (int(major, 16), int(minor, 16), int(inode))
+        except ValueError:
+            continue
+        if identity == (os.major(actual.st_dev), os.minor(actual.st_dev), actual.st_ino):
+            return
+    raise LockBusy(f'backup descriptor {fd} does not hold {path.name} in {mode} mode')
 
 
 def require_job_lock(kind, fd=None):
@@ -158,10 +176,11 @@ def require_job_lock(kind, fd=None):
 
 
 def require_cloud_slot():
-    """Enforce the upload slot only inside a shell-admitted worker run."""
+    """Assert the exported upload slot, refusing absent admission metadata."""
     fd = cloud_slot_fd()
-    if fd is not None:
-        require_held(fd, lock_path(LockClass.CLOUD, CLOUD_SLOT))
+    if fd is None:
+        raise RuntimeError('backup worker requires its inherited cloud slot descriptor')
+    require_held(fd, lock_path(LockClass.CLOUD, CLOUD_SLOT))
 
 
 def _registered_lock_inodes():

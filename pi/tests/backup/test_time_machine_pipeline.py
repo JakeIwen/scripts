@@ -13,6 +13,8 @@ import unittest
 from unittest import mock
 
 import icloud_backup as cloud
+import backup_admission
+from .backup_lock_fixtures import temporary_registry
 from time_machine_pipeline import VerificationPipeline
 from time_machine_verification import ObjectVerifier
 from time_machine_store import atomic_json, read_json
@@ -22,21 +24,15 @@ def object_row(digest, data):
     return {'Path':digest,'IsDir':False,'Size':len(data),'ModTime':'stable','ID':digest}
 
 
+@unittest.skipUnless(sys.platform.startswith('linux'), 'admission proof requires Linux fdinfo')
 class PipelineTests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory(); self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
         self.remote = self.root / 'remote'; self.remote.mkdir()
-        self.lock_dir = self.root / 'locks'; self.lock_dir.mkdir()
-        self.lock_path = self.lock_dir / 'job-time-machine.lock'; self.lock_path.touch()
-        self.lock = self.lock_path.open('r+')
-        self.addCleanup(self.lock.close)
-        fcntl.flock(self.lock, fcntl.LOCK_EX)
-        environment = mock.patch.dict(os.environ, {
-            'VANPI_BACKUP_LOCK_DIR': str(self.lock_dir),
-            'VANPI_BACKUP_JOB_LOCK_FD': str(self.lock.fileno()),
-        })
-        environment.start(); self.addCleanup(environment.stop)
+        registry = self.enterContext(temporary_registry())
+        self.admission = self.enterContext(registry.admitted(cloud.backup_locks.TIME_MACHINE))
+        self.lock_path = self.admission.job.path
         self.a, self.b = b'completed earlier', b'next uploaded chunk'
         self.da, self.db = (hashlib.sha256(value).hexdigest() for value in (self.a,self.b))
         self.expected = {k:{'sha256':k,'bytes':len(v)} for k,v in ((self.da,self.a),(self.db,self.b))}
@@ -66,7 +62,7 @@ class PipelineTests(unittest.TestCase):
                    mock.patch.object(cloud,'check_work_allowed')]
         for patch in patches:
             patch.start(); self.addCleanup(patch.stop)
-        return VerificationPipeline(self.cfg,self.root,self.expected,self.rows)
+        return VerificationPipeline(self.cfg,self.root,self.expected,self.rows, admission=self.admission)
 
     def until(self, pipeline, condition):
         deadline = time.monotonic()+8
@@ -95,6 +91,15 @@ class PipelineTests(unittest.TestCase):
         proof = self.checkpoints()[self.da]
         self.assertEqual(proof['expected'],self.expected[self.da])
         self.assertEqual(proof['remote'],cloud.remote_fingerprint(self.rows[self.da]))
+
+    def test_verifier_uses_explicit_bundle_without_parent_context_or_environment(self):
+        with mock.patch.dict(os.environ, {'VANPI_BACKUP_JOB_LOCK_FD': 'invalid-after-admission',
+                                         'VANPI_BACKUP_LOCK_DIR': '/not-the-admitted-registry'}):
+            with self.assertRaisesRegex(RuntimeError, 'admission context'):
+                backup_admission.current()
+            with self.pipeline() as follower:
+                self.until(follower, lambda: self.da in self.checkpoints())
+                follower.finish(lambda _: None)
 
     def test_wrong_hash_is_not_checkpointed_and_is_reported_to_uploader(self):
         atomic_json(self.root/'verified-objects.json', {self.da:{'expected':self.expected[self.da],
@@ -135,7 +140,7 @@ class PipelineTests(unittest.TestCase):
     def test_verifier_retains_shared_lock_until_it_stops(self):
         with self.pipeline() as follower:
             self.until(follower,lambda:self.da in self.checkpoints())
-            self.lock.close()
+            os.close(self.admission.job.fd)
             with self.lock_path.open('r+') as contender:
                 with self.assertRaises(BlockingIOError): fcntl.flock(contender,fcntl.LOCK_EX|fcntl.LOCK_NB)
         with self.lock_path.open('r+') as contender:

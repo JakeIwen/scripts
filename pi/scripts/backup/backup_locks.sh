@@ -228,13 +228,14 @@ release_backup_job() { # releases every descriptor this job acquired, in reverse
   exec 9>&-
   BACKUP_JOB_KIND=
   unset VANPI_BACKUP_JOB_KIND VANPI_BACKUP_JOB_LOCK_FD VANPI_BACKUP_JOB_LOCK_PATH VANPI_BACKUP_CLOUD_SLOT_FD
+  unset VANPI_BACKUP_LEGACY_LOCK_FD VANPI_BACKUP_DISK_LOCK_FDS
 }
 
 acquire_backup_job() { # <kind> [disk-label ...]: legacy shared + exclusive job identity + disks
   # Order matters: the legacy lock first (an exclusive legacy holder excludes
   # everything), then the job identity, then priority admission for cloud
   # kinds, then each declared disk. Any failure releases what was acquired.
-  local kind=$1 path label fd
+  local kind=$1 path label fd disk_fds=
   shift
   path=$(backup_lock_path job "$kind") || {
     echo "unknown backup job kind: $kind" >&2
@@ -270,9 +271,11 @@ acquire_backup_job() { # <kind> [disk-label ...]: legacy shared + exclusive job 
   fi
   for label in "$@"; do
     hold_backup_disk "$label" || { release_backup_job; return 1; }
+    disk_fds+="${disk_fds:+,}$label=${BACKUP_DISK_LOCK_FD[$label]}"
   done
   backup_lock_record_pid 10 || { release_backup_job; return 1; }
   BACKUP_JOB_KIND=$kind
   export VANPI_BACKUP_JOB_KIND="$kind" VANPI_BACKUP_JOB_LOCK_FD="$BACKUP_LOCK_FD_JOB" \
-    VANPI_BACKUP_JOB_LOCK_PATH="$path" VANPI_BACKUP_LOCK_DIR="$BACKUP_LOCK_DIR"
+    VANPI_BACKUP_JOB_LOCK_PATH="$path" VANPI_BACKUP_LOCK_DIR="$BACKUP_LOCK_DIR" \
+    VANPI_BACKUP_LEGACY_LOCK_FD="$BACKUP_LOCK_FD_LEGACY" VANPI_BACKUP_DISK_LOCK_FDS="$disk_fds"
 }
