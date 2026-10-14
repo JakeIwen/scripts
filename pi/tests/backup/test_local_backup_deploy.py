@@ -86,6 +86,15 @@ class LocalBackupDeployTests(unittest.TestCase):
                 self.assertLess(remote.index('verify_lifecycle_scripts '), remote.index('/usr/bin/install -o'))
                 self.assertIn('install_lifecycle_scripts ', remote)
 
+    def test_installers_take_every_predecessor_hash_from_the_previous_revision(self):
+        # Both installers accept a live file that matches the previously deployed
+        # revision (VANPI_BACKUP_PREVIOUS_REVISION), never only HEAD.
+        for installer in INSTALLERS:
+            with self.subTest(installer=installer.name):
+                text = installer.read_text()
+                self.assertNotIn('git show HEAD:', text)
+                self.assertIn('local_backup_previous_script_hash "$repo"', text)
+
     def test_first_install_idempotence_and_new_file_drift(self):
         name = 'backup_locks.py'
         self.previous[name] = 'absent'

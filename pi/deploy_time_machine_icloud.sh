@@ -19,17 +19,19 @@ bash pi/tests/storage/test_samba_share_control.sh
 bash -n pi/scripts/backup/time_machine_icloud.sh
 stage=$(ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" /usr/bin/mktemp -d /tmp/vanpi-tm-icloud.XXXXXX)
 [[ "$stage" =~ ^/tmp/vanpi-tm-icloud\.[[:alnum:]]{6}$ ]] || exit 1
-shared_hash=${VANPI_TM_PREVIOUS_CLOUD_SHA256:-$(git show HEAD:pi/scripts/backup/icloud_backup.py | shasum -a 256 | awk '{print $1}')}
+# Predecessor hashes come from the previously deployed revision
+# (VANPI_BACKUP_PREVIOUS_REVISION, default HEAD) like the shared payload's.
+shared_hash=${VANPI_TM_PREVIOUS_CLOUD_SHA256:-$(local_backup_previous_script_hash "$repo" backup/icloud_backup.py)}
 [[ "$shared_hash" =~ ^[0-9a-f]{64}$ ]] || exit 1
-progress_hash=$(git show HEAD:pi/scripts/backup/icloud_progress.py | shasum -a 256 | awk '{print $1}')
-share_hash=$(git show HEAD:pi/scripts/samba_share_control.sh | shasum -a 256 | awk '{print $1}')
+progress_hash=$(local_backup_previous_script_hash "$repo" backup/icloud_progress.py) || exit 1
+share_hash=$(local_backup_previous_script_hash "$repo" samba_share_control.sh) || exit 1
 lifecycle_previous=$(local_backup_previous_lifecycle_hashes "$repo")
 gate_hash=$(shasum -a 256 pi/scripts/samba_require_mount.sh | awk '{print $1}')
 conf_hash=$(local_backup_previous_conf_hash "$repo")
-uplink_hash=$(git show HEAD:pi/scripts/backup/icloud_uplink.py | shasum -a 256 | awk '{print $1}')
+uplink_hash=$(local_backup_previous_script_hash "$repo" backup/icloud_uplink.py) || exit 1
 # For a second, still-uncommitted cutover, supply only the reviewed hash from
 # the previous deployment's staged source. Never blindly trust a live hash.
-old_status_hash=${VANPI_TM_PREVIOUS_STATUS_SHA256:-$(git show HEAD:pi/scripts/backup/icloud_status.py | shasum -a 256 | awk '{print $1}')}
+old_status_hash=${VANPI_TM_PREVIOUS_STATUS_SHA256:-$(local_backup_previous_script_hash "$repo" backup/icloud_status.py)}
 [[ "$old_status_hash" =~ ^[0-9a-f]{64}$ ]] || exit 1
 COPYFILE_DISABLE=1 /usr/bin/tar --no-xattrs -cf - \
   pi/__init__.py pi/tests/__init__.py pi/backup_local_deploy.sh \
