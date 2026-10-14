@@ -133,10 +133,9 @@ def held(lock_class, name, *, exclusive=True, timeout=None):
             raise LockBusy(f'{path.name} is busy') from exc
         yield fd
     finally:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-        except OSError:
-            pass
+        # Close without unlocking: an explicit LOCK_UN would also strip a child
+        # that inherited this descriptor, while the close ends the lock only
+        # with the last descriptor (the orphan guarantee in CONCURRENCY.md).
         os.close(fd)
 
 

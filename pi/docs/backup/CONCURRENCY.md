@@ -101,7 +101,10 @@ backup job; the capture handshake and share drain are unchanged.
   that disk; otherwise it leaves the mount for the remaining user.
 - A reboot empties the registry. A killed job frees its locks immediately; a
   surviving orphaned child keeps the disk lock held, so the drain fails closed
-  (or the emergency path kills it by lock file).
+  (or the emergency path kills it by lock file). For that reason every release
+  only closes the descriptor and never unlocks it explicitly: an explicit
+  unlock would strip the child too, while a close ends the lock only with the
+  last descriptor on that open file.
 - Deployment fences take the legacy lock exclusively and non-blocking, so they
   wait for complete quiescence of every job.
 

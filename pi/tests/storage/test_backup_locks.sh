@@ -275,6 +275,20 @@ fi
   ! release_backup_disk_if_unused bigboi
 ' test "$config" || fail "shared bigboi was declared unused"
 
+# A parent's release never strips a child that inherited the descriptor: the
+# disk stays owned (and is not "unused") until that child exits.
+/bin/bash -c '
+  source "$1"
+  acquire_backup_job time-machine mbp2tbkup || exit 1
+  /bin/sleep 30 & heir=$!
+  trap "kill -TERM $heir 2>/dev/null" EXIT
+  ! release_backup_disk_if_unused mbp2tbkup || exit 2
+  release_backup_disk mbp2tbkup
+  ! /usr/bin/flock -n "$BACKUP_LOCK_DIR/disk-mbp2tbkup.lock" true || exit 3
+  kill -TERM "$heir"; wait "$heir" 2>/dev/null
+  /usr/bin/flock -n "$BACKUP_LOCK_DIR/disk-mbp2tbkup.lock" true || exit 4
+' test "$config" || fail "a live child's inherited disk hold was dropped by the parent release"
+
 # Disk-scoped drain must never TERM the unrelated Borg parent.
 run_abort hdd1tb
 wait "$exfat_pid" || fail "EXFAT disk stop failed"

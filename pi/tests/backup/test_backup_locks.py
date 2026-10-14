@@ -149,6 +149,21 @@ class BackupLockTests(unittest.TestCase):
                 self.assertTrue(backup_locks.process_holds(
                     child.pid, backup_locks.lock_path(lock_class, name)))
 
+    def test_release_keeps_the_lock_while_an_inherited_descriptor_lives(self):
+        # The orphan guarantee: a child that inherited the descriptor keeps the
+        # lock after the parent releases, so an explicit unlock is never used.
+        lock = (backup_locks.LockClass.DISK, 'bigboi')
+        with backup_locks.held(*lock, exclusive=False) as fd:
+            child = subprocess.Popen(['/bin/cat'], stdin=subprocess.PIPE,
+                                     stdout=subprocess.DEVNULL, pass_fds=(fd,))
+            self.addCleanup(self.stop_holder, child)
+        with self.assertRaises(backup_locks.LockBusy):
+            with backup_locks.held(*lock):
+                pass
+        self.stop_holder(child)
+        with backup_locks.held(*lock):
+            pass
+
     def test_open_lock_rejects_symlinks_wrong_modes_and_missing_files(self):
         source = backup_locks.lock_path(backup_locks.LockClass.DATA, 'borg-repo')
         symlink = self.registry / 'data-link.lock'

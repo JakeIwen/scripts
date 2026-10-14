@@ -147,7 +147,9 @@ release_backup_disk() { # <label>: releases only this job's own hold
   local label=$1 fd
   fd=${BACKUP_DISK_LOCK_FD[$label]:-}
   [[ -n "$fd" ]] || return 0
-  "$JOB_LOCK_FLOCK" -u "$fd" 2>/dev/null || true
+  # Close, never unlock: an explicit unlock would also strip a child that
+  # inherited this descriptor, while the close ends the lock only with the
+  # last descriptor (the orphan guarantee in CONCURRENCY.md).
   exec {fd}>&-
   unset "BACKUP_DISK_LOCK_FD[$label]"
 }
@@ -208,7 +210,6 @@ release_backup_lock() { # <job|data|cloud> <name>
   local key="$1-$2" fd
   fd=${BACKUP_EXCLUSIVE_LOCK_FD[$key]:-}
   [[ -n "$fd" ]] || return 0
-  "$JOB_LOCK_FLOCK" -u "$fd" 2>/dev/null || true
   exec {fd}>&-
   unset "BACKUP_EXCLUSIVE_LOCK_FD[$key]"
   [[ "$1" == cloud ]] && unset VANPI_BACKUP_CLOUD_SLOT_FD
@@ -223,9 +224,7 @@ release_backup_job() { # releases every descriptor this job acquired, in reverse
   for label in "${!BACKUP_DISK_LOCK_FD[@]}"; do
     release_backup_disk "$label"
   done
-  "$JOB_LOCK_FLOCK" -u "$BACKUP_LOCK_FD_JOB" 2>/dev/null || true
   exec 10>&-
-  "$JOB_LOCK_FLOCK" -u "$BACKUP_LOCK_FD_LEGACY" 2>/dev/null || true
   exec 9>&-
   BACKUP_JOB_KIND=
   unset VANPI_BACKUP_JOB_KIND VANPI_BACKUP_JOB_LOCK_FD VANPI_BACKUP_JOB_LOCK_PATH VANPI_BACKUP_CLOUD_SLOT_FD
