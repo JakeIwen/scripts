@@ -153,8 +153,10 @@ priority, image-consistency and uplink checks still apply after manual resume.
   does not contact iCloud, inspect the router, mount disks or start jobs. The
   pane polls every 2.5 seconds while backups run, otherwise every 10 seconds;
   worker counters normally update every five seconds plus uplink-probe latency.
-- Manual local backup/clone starts are disabled while the iCloud worker owns
-  the shared backup workflow. No cloud start/abort controls are exposed here.
+- Local Borg and EXFAT jobs, and the dashboard's **Run now** and **Clone now**,
+  stay available while a cloud worker runs; only the Borg repository and the
+  single upload slot are exclusive (see `CONCURRENCY.md`). The cloud controls are
+  the **Resume now**, **Pause for**, priority and Mac-stop actions described above.
 
 Read the same safe status directly on the Pi:
 

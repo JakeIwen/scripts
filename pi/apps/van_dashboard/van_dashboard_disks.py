@@ -286,6 +286,10 @@ class DiskManager:
                         "boot_id": event_boot_id,
                     }
                 )
+        # Rows are selected by first occurrence but exposed by last, and the
+        # consumers read the first entry as the latest error.
+        for events in mapped.values():
+            events.sort(key=lambda event: event["timestamp"], reverse=True)
         return mapped, None
 
     def _current_boot_id(self):
