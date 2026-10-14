@@ -274,11 +274,25 @@ start_torrent_client() {
   fi
 }
 
+isw_close_stale_mount_consumers() { # <validated-label ...>
+  local label needs_torrent_stop=0
+  for label in "$@"; do
+    [[ "$label" == movingparts ]] && needs_torrent_stop=1
+  done
+  if (( needs_torrent_stop )) && ! kill_torrent_client; then
+    echo "ERROR: qBittorrent did not stop; refusing stale-mount recovery" >&2
+    return 1
+  fi
+  "$ISW_SAMBA_SHARE_CONTROL" close "$@" || {
+    echo "ERROR: affected Samba shares did not close; refusing stale-mount recovery" >&2
+    return 1
+  }
+}
+
 recover_stale_mounts_if_needed() (
   # A subshell bounds the retained claims to this recovery, while inheriting
   # the policy mutex. No later mount/start operation can inherit these claims.
-  local stale_mounts status label recovery_dir
-  local needs_torrent_stop=0
+  local stale_mounts status recovery_dir
 
   recovery_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
   . "$recovery_dir/disk_policy.sh" || return 1
@@ -298,9 +312,6 @@ recover_stale_mounts_if_needed() (
   printf '%s\n' "$stale_mounts"
 
   stale_mount_parse_records "$stale_mounts" || return 1
-  for label in "${STALE_RECOVERY_LABELS[@]}"; do
-    [[ "$label" == movingparts ]] && needs_torrent_stop=1
-  done
 
   # A disconnected filesystem may still be held by a backup, qBittorrent, or
   # Samba. Stop only consumers of the affected labels before attempting a
@@ -310,14 +321,7 @@ recover_stale_mounts_if_needed() (
     echo "ERROR: backup/restore did not stop; refusing stale-mount recovery" >&2
     return 1
   }
-  if (( needs_torrent_stop )) && ! kill_torrent_client; then
-    echo "ERROR: qBittorrent did not stop; refusing stale-mount recovery" >&2
-    return 1
-  fi
-  "$ISW_SAMBA_SHARE_CONTROL" close "${STALE_RECOVERY_LABELS[@]}" || {
-    echo "ERROR: affected Samba shares did not close; refusing stale-mount recovery" >&2
-    return 1
-  }
+  isw_close_stale_mount_consumers "${STALE_RECOVERY_LABELS[@]}" || return 1
   "$ISW_MOUNT_DISKS" --recover-stale "$stale_mounts"
 )
 
