@@ -1,15 +1,13 @@
 """Real advisory-lock regressions against an isolated pre-created registry."""
-import grp
 import os
 from pathlib import Path
-import pwd
 import subprocess
 import sys
-import tempfile
 import unittest
 from unittest import mock
 
 import backup_locks
+from .backup_lock_fixtures import temporary_registry
 
 
 BACKUP_DIR = Path(__file__).resolve().parents[2] / 'scripts' / 'backup'
@@ -17,37 +15,9 @@ BACKUP_DIR = Path(__file__).resolve().parents[2] / 'scripts' / 'backup'
 
 class BackupLockTests(unittest.TestCase):
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
-        self.registry = self.root / 'registry'
-        self.registry.mkdir(mode=0o770)
-        self.registry.chmod(0o770)
-        self.legacy = self.root / 'legacy.lock'
-        self.legacy.touch(mode=0o660)
-        self.legacy.chmod(0o660)
-        for lock_class, names in (
-                (backup_locks.LockClass.JOB, backup_locks.JOB_KINDS),
-                (backup_locks.LockClass.DISK, backup_locks.DISK_LABELS),
-                (backup_locks.LockClass.DATA, backup_locks.DATA_NAMES),
-                (backup_locks.LockClass.CLOUD, (backup_locks.CLOUD_SLOT,))):
-            for name in names:
-                path = self.registry / f'{lock_class.value}-{name}.lock'
-                path.touch(mode=0o660)
-                path.chmod(0o660)
-        owner = pwd.getpwuid(os.getuid()).pw_name
-        group = grp.getgrgid(os.getgid()).gr_name
-        self.environment = {
-            'VANPI_BACKUP_LOCK_DIR': str(self.registry),
-            'VANPI_BACKUP_JOB_LOCK': str(self.legacy),
-            'VANPI_BACKUP_JOB_LOCK_OWNER': owner,
-            'VANPI_BACKUP_JOB_LOCK_GROUP': group,
-            'VANPI_BACKUP_JOB_LOCK_MODE': '660',
-            'VANPI_BACKUP_LOCK_DIR_MODE': '770',
-        }
-        patch = mock.patch.dict(os.environ, self.environment)
-        patch.start()
-        self.addCleanup(patch.stop)
+        fixture = self.enterContext(temporary_registry())
+        self.root, self.registry, self.legacy = fixture.root, fixture.registry, fixture.legacy
+        self.environment = fixture.environment
 
     def child_env(self):
         environment = dict(os.environ)
