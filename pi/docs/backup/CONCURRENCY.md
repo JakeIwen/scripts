@@ -118,11 +118,15 @@ backup job; the capture handshake and share drain are unchanged.
   right after `acquire_backup_job`, EXFAT before and after its mount): a flag
   raised before that check defers the job, and one raised after it finds the
   job holding its disks, where the drain reaches it.
-- The fence and automatic stale-mount recovery share `backup_lifecycle_claim`:
+- The fence and both manual/automatic stale-mount recovery share `backup_lifecycle_claim`:
   validate every label before draining, then retain exclusive disk claims in
-  the caller through its mutations. Recovery keeps consumer shutdown and
-  `mount_disks.sh --recover-stale` inside one subshell, passing the original
-  label/target/source records. Recovery refuses added targets or changed
+  the caller through its mutations. `stale_mount_recovery.sh` owns one recovery
+  operation. Policy sources the mount library inside its bounded subshell and
+  supplies its consumer-shutdown callback; manual `mount_disks.sh --recover-stale`
+  uses the same operation, retaining normal busy-unmount refusal. Claims stay in
+  that shell through mutation; no caller-supplied ownership flag is trusted.
+  Original label/target/source records remain the permission boundary, including
+  an explicitly empty set. Recovery refuses added targets or changed
   sources before any unmount and rechecks each original source immediately
   before its ordinary unmount. The policy mutex remains held independently.
 - Timed waits (`acquire_backup_lock <class> <name> <seconds>`, used for the Borg

@@ -193,6 +193,10 @@ md_normal_unmount_stale_target() {
     /usr/bin/umount -- "$1"
 }
 
+md_abort_backup_jobs() {
+  /usr/bin/sudo "$md_script_dir/backup/abort_backup.sh" "$@"
+}
+
 md_prepare_stale_recovery() { # [original-records]; refuses expansion before any mutation
   local records index original_index found status
   if (( $# )); then records=$1
@@ -234,6 +238,8 @@ md_prepare_stale_recovery() { # [original-records]; refuses expansion before any
 }
 
 md_recover_stale_mounts() {
+  # Internal mutation phase: public callers enter through stale_mount_recover,
+  # which retains the exact disk claims until this phase and its children exit.
   local index
   local label
   local pth
@@ -564,7 +570,7 @@ mount_disks_main() {
     return $?
   elif (( $# >= 1 && $# <= 2 )) && [[ "$1" == --recover-stale ]]; then
     shift
-    md_recover_stale_mounts "$@"
+    stale_mount_recover md_abort_backup_jobs : "$@"
     return $?
   elif (( $# == 1 )) && [[ "$1" == --always ]]; then
     md_reconcile_labels "${ALWAYS_MOUNT_LABELS[@]}" || had_failure=1

@@ -15,6 +15,7 @@ cleanup() {
 trap cleanup EXIT
 
 export TEST_ROOT="$test_root" TEST_CONF="$repo_root/pi/scripts/backup/backup_conf.sh"
+export TEST_MOUNT_LIBRARY="$repo_root/pi/scripts/mount_disks.sh"
 export VANPI_BACKUP_LOCK_DIR="$test_root/registry" VANPI_BACKUP_JOB_LOCK="$test_root/legacy.lock"
 export VANPI_BACKUP_JOB_LOCK_OWNER=$(/usr/bin/id -un) VANPI_BACKUP_JOB_LOCK_GROUP=$(/usr/bin/id -gn)
 export VANPI_BACKUP_JOB_LOCK_MODE=660 VANPI_BACKUP_LOCK_DIR_MODE=770
@@ -66,18 +67,30 @@ fi
 SAMBA
 cat > "$test_root/mount" <<'MOUNT'
 #!/bin/bash
-records=$'EXFAT512\t/mnt/EXFAT512\t/dev/vanished-test'
-case "$1" in
-  --list-stale) printf '%s\n' "$records" ;;
-  --recover-stale)
-    [[ $# == 2 && "$2" == "$records" ]] || exit 2
-    # This independent job must still be excluded at the actual mutation seam.
-    /bin/bash -c 'source "$TEST_CONF"; acquire_backup_job exfat EXFAT512' && exit 3
-    echo mutation >> "$TEST_ROOT/trace"
-    [[ "$TEST_PHASE" != recovery-fails ]]
-    ;;
-  *) exit 4 ;;
-esac
+MOUNT_DISKS_LIBRARY_ONLY=1
+. "$TEST_MOUNT_LIBRARY" || return 1
+md_abort_backup_jobs() { "$TEST_ROOT/abort" "$@"; }
+md_find_exact_mount_source() {
+  [[ "$1" == /mnt/EXFAT512 && ! -e "$TEST_ROOT/unmounted" ]] || return 1
+  MD_MOUNT_SOURCE=/dev/vanished-test
+}
+md_mount_source_is_live() { return 1; }
+md_normal_unmount_stale_target() {
+  [[ "$1" == /mnt/EXFAT512 ]] || return 2
+  # This independent job must still be excluded at the actual mutation seam.
+  /bin/bash -c 'source "$TEST_CONF"; acquire_backup_job exfat EXFAT512' && return 3
+  if [[ "$TEST_PHASE" == after ]]; then
+    : > "$TEST_ROOT/ready"
+    for ((i=0; i<500; i++)); do
+      [[ -e "$TEST_ROOT/go" ]] && break
+      /bin/sleep 0.02
+    done
+    [[ -e "$TEST_ROOT/go" ]] || return 3
+  fi
+  echo mutation >> "$TEST_ROOT/trace"
+  [[ "$TEST_PHASE" != recovery-fails ]] || return 4
+  : > "$TEST_ROOT/unmounted"
+}
 MOUNT
 chmod 0700 "$test_root/job" "$test_root/abort" "$test_root/samba" "$test_root/mount"
 export ISW_MOUNT_DISKS="$test_root/mount" ISW_ABORT_BACKUP="$test_root/abort"
@@ -85,13 +98,20 @@ export ISW_SAMBA_SHARE_CONTROL="$test_root/samba"
 policy="$repo_root/pi/scripts/internet_switches.sh"
 
 recover() {
-  /bin/bash -uc 'source "$1"; recover_stale_mounts_if_needed' test "$policy" > "$test_root/recovery.log" 2>&1
+  if [[ "$entry" == manual ]]; then
+    /bin/bash -uc 'source "$1"; mount_disks_main --recover-stale' test "$test_root/mount"
+  else
+    /bin/bash -uc 'source "$1"; recover_stale_mounts_if_needed' test "$policy"
+  fi > "$test_root/recovery.log" 2>&1
 }
 job_can_start() {
   /bin/bash -uc 'source "$TEST_CONF"; acquire_backup_job exfat EXFAT512' >/dev/null 2>&1
 }
 
+for entry in manual automatic; do
 # A starter wins the drain-to-claim race: the lifecycle must fail before mutation.
+rm -f "$test_root/unmounted" "$test_root/ready" "$test_root/go" "$test_root/job-ready"
+: > "$test_root/trace"
 export TEST_PHASE=between
 if recover; then fail 'recovery ignored a job that started after drain'; fi
 [[ -e "$test_root/trace" ]] || { cat "$test_root/recovery.log"; fail "recovery never reached drain"; }
@@ -114,13 +134,30 @@ job_can_start && fail 'job entered before recovery mutation'
 /bin/bash -uc 'source "$TEST_CONF"; acquire_backup_job borg bigboi' || fail 'unrelated disk was excluded'
 : > "$test_root/go"
 wait "$recovery_pid" || { cat "$test_root/recovery.log"; fail 'claimed recovery failed'; }
-assert_eq $'drain\nconsumers\nmutation' "$(< "$test_root/trace")" 'recovery ownership order'
+expected=$'drain\nmutation'
+[[ "$entry" != automatic ]] || expected=$'drain\nconsumers\nmutation'
+assert_eq "$expected" "$(< "$test_root/trace")" "$entry recovery ownership order"
 job_can_start || fail 'successful recovery retained claims after exit'
 
 for TEST_PHASE in drain-fails consumers-fail recovery-fails; do
+  [[ "$entry" != manual || "$TEST_PHASE" != consumers-fail ]] || continue
   export TEST_PHASE
+  rm -f "$test_root/unmounted"
   : > "$test_root/trace"
   if recover; then fail "$TEST_PHASE was reported successful"; fi
   job_can_start || fail "$TEST_PHASE leaked a lifecycle claim"
+done
+done
+
+# Explicitly empty and malformed records grant no authority to rediscover or drain.
+for records in '' $'EXFAT512\t/mnt/wrong\t/dev/vanished-test' \
+    $'EXFAT512\t/mnt/EXFAT512\t/dev/different-original'; do
+  : > "$test_root/trace"
+  /bin/bash -uc 'source "$1"; mount_disks_main --recover-stale "$2"' test "$test_root/mount" "$records" > "$test_root/recovery.log" 2>&1
+  status=$?
+  if [[ -z "$records" ]]; then assert_eq 0 "$status" 'explicit empty recovery failed'
+  else (( status != 0 )) || fail 'malformed public recovery was accepted'
+  fi
+  [[ ! -s "$test_root/trace" ]] || fail 'empty/malformed records reached drain or mutation'
 done
 echo 'PASS: stale recovery retains exact disk ownership through mutation and releases on failure'

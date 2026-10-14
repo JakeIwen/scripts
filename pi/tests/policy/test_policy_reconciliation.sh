@@ -50,6 +50,21 @@ printf '%s\n' "$1" >> "$TEST_SLEEP_CALLS"
 HELPER
 cat > "$test_root/mount-disks" <<'HELPER'
 #!/bin/bash
+if [[ ${MOUNT_DISKS_LIBRARY_ONLY:-0} == 1 ]]; then
+  . "$TEST_MOUNT_LIBRARY" || return 1
+  md_list_stale_mounts() {
+    echo 'mount:--list-stale' >> "$TEST_STALE_RECOVERY_CALLS"
+    printf '%s' "${TEST_STALE_MOUNTS:-}"
+    return "${TEST_STALE_SCAN_STATUS:-0}"
+  }
+  md_recover_stale_mounts() {
+    echo 'mount:--recover-stale' >> "$TEST_STALE_RECOVERY_CALLS"
+    [[ $# == 1 && "$1" == "$TEST_STALE_MOUNTS" ]] || return 98
+    return "${TEST_STALE_RECOVERY_STATUS:-0}"
+  }
+  md_prepare_stale_recovery() { stale_mount_parse_records "$1"; }
+  return 0
+fi
 printf 'mount:%s\n' "${1:-default}" >> "$TEST_STALE_RECOVERY_CALLS"
 case "${1:-}" in
   --list-stale)
@@ -85,6 +100,7 @@ export ISW_PGREP="$test_root/pgrep"
 export ISW_PKILL="$test_root/pkill"
 export ISW_SLEEP="$test_root/sleep"
 export ISW_MOUNT_DISKS="$test_root/mount-disks"
+export TEST_MOUNT_LIBRARY="$repo_root/pi/scripts/mount_disks.sh"
 export ISW_ABORT_BACKUP="$test_root/abort-backup"
 export ISW_SAMBA_SHARE_CONTROL="$test_root/samba-share-control"
 export TEST_STARLINK_CALLS="$test_root/starlink-calls"

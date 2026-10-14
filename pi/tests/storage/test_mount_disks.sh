@@ -12,6 +12,11 @@ source "$repo_root/pi/tests/lib.sh"
 export MOUNT_DISKS_LIBRARY_ONLY=1
 # shellcheck source=../../scripts/mount_disks.sh
 source "$repo_root/pi/scripts/mount_disks.sh"
+# Filesystem unit cases never contact the live registry or abort real jobs.
+# Real retained ownership is exercised in test_stale_mount_ownership.sh.
+export VANPI_BACKUP_LOCK_DIR="$test_root/no-registry"
+export VANPI_BACKUP_JOB_LOCK="$test_root/no-legacy"
+md_abort_backup_jobs() { return 0; }
 
 # Exact-label discovery must use non-probing udev links and verify only the
 # selected target device. Regular files stand in for block devices on macOS.

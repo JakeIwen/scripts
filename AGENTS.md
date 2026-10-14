@@ -165,9 +165,12 @@ compare it with this checkout. Deployed files may differ from the repository.
   data descriptor during the repository copy. `require_held` only asserts Linux
   fdinfo evidence; it never acquires a missing hold.
   `backup_lifecycle.sh` validates the full target set, drains it and retains
-  claims in the caller through mutation. Automatic stale recovery uses the
-  same operation in one subshell; `stale_mount_recovery.sh` defines its original
-  label/target/source records. Refreshed discovery must not widen that set.
+  claims in the caller through mutation. `stale_mount_recovery.sh` owns the
+  common manual/automatic recovery operation and original label/target/source
+  records. Policy sources the mount library in its bounded subshell and supplies
+  its consumer callback; manual `--recover-stale` uses the same claim operation.
+  Refreshed discovery must not widen that set. Manual recovery still uses an
+  ordinary unmount and refuses busy consumers rather than force-closing them.
   `pi/docs/backup/CONCURRENCY.md` is the conflict matrix. Each job holds an
   exclusive `job-<kind>` lock (fd 10, PID record), shared `disk-<label>` locks
   for the disks it uses, `data-borg-repo` while mutating or copying the Borg

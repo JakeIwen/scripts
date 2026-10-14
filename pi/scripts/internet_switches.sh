@@ -292,15 +292,10 @@ isw_close_stale_mount_consumers() { # <validated-label ...>
 recover_stale_mounts_if_needed() (
   # A subshell bounds the retained claims to this recovery, while inheriting
   # the policy mutex. No later mount/start operation can inherit these claims.
-  local stale_mounts status recovery_dir
+  local stale_mounts status MOUNT_DISKS_LIBRARY_ONLY=1
+  . "$ISW_MOUNT_DISKS" || return 1
 
-  recovery_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  . "$recovery_dir/disk_policy.sh" || return 1
-  . "$recovery_dir/backup/backup_locks.sh" || return 1
-  . "$recovery_dir/backup/backup_lifecycle.sh" || return 1
-  . "$recovery_dir/backup/stale_mount_recovery.sh" || return 1
-
-  stale_mounts=$("$ISW_MOUNT_DISKS" --list-stale)
+  stale_mounts=$(md_list_stale_mounts)
   status=$?
   if (( status != 0 )); then
     echo "ERROR: cannot inspect managed targets for stale mounts (status $status)" >&2
@@ -311,18 +306,11 @@ recover_stale_mounts_if_needed() (
   echo "stale managed mounts detected:"
   printf '%s\n' "$stale_mounts"
 
-  stale_mount_parse_records "$stale_mounts" || return 1
-
   # A disconnected filesystem may still be held by a backup, qBittorrent, or
   # Samba. Stop only consumers of the affected labels before attempting a
   # normal unmount. The recovery helper never uses force or lazy detach and
   # revalidates the source immediately before changing it.
-  backup_lifecycle_claim "$ISW_ABORT_BACKUP" 0 "${STALE_RECOVERY_LABELS[@]}" || {
-    echo "ERROR: backup/restore did not stop; refusing stale-mount recovery" >&2
-    return 1
-  }
-  isw_close_stale_mount_consumers "${STALE_RECOVERY_LABELS[@]}" || return 1
-  "$ISW_MOUNT_DISKS" --recover-stale "$stale_mounts"
+  stale_mount_recover "$ISW_ABORT_BACKUP" isw_close_stale_mount_consumers "$stale_mounts"
 )
 
 mount_drives() {
