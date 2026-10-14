@@ -81,10 +81,16 @@ grep -Fq '"$samba_share_control" drain "${mounted_labels[@]}"' "$script" ||
   fail "disk shutdown does not block Samba reconnects before closure"
 grep -Fq 'ud_fence_backup_jobs || return 1' "$script" ||
   fail "disk shutdown does not fence backup jobs before closing shares"
-grep -Fq 'ud_abort_backup_jobs "${abort_args[@]}" "${fence_labels[@]}" ||' "$fence_script" ||
-  fail "disk shutdown does not pass emergency mode to backup termination"
-grep -Fq '! hold_backup_disks_exclusive "${fence_labels[@]}"; then' "$fence_script" ||
-  fail "disk shutdown does not retain exclusive disk ownership through unmount"
+(
+  observed_drain=
+  lifecycle_test_drain() { observed_drain="$*"; }
+  backup_lifecycle_claim lifecycle_test_drain 1 movingparts || exit 1
+  assert_eq '--emergency movingparts' "$observed_drain" 'emergency disk drain arguments'
+  observed_drain=
+  if backup_lifecycle_claim lifecycle_test_drain 0 movingparts unknown >/dev/null 2>&1; then exit 1; fi
+  assert_eq '' "$observed_drain" 'invalid target set must fail before draining any disk'
+) || fail 'shared lifecycle ownership did not validate and forward emergency targets'
+# Retained ownership is exercised by the real-process spindown fence below.
 grep -Fq '/usr/bin/sudo /home/pi/scripts/backup/abort_backup.sh "$@"' "$fence_script" ||
   fail "backup termination no longer runs the root abort helper"
 grep -Fq 'ud_kill_torrent_client "$emergency"' "$script" ||

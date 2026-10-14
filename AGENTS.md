@@ -155,6 +155,8 @@ compare it with this checkout. Deployed files may differ from the repository.
   `/run/lock/vanpi-backup/`, pre-created by `pi/tmpfiles.d/vanpi-backup.conf`;
   `backup_lock_io.sh` opens existing shell lock inodes, verifies their validated
   identities and writes PID records through the locked descriptor.
+  `backup_lifecycle.sh` validates the full target set, drains it and retains
+  claims in the caller through mutation.
   `pi/docs/backup/CONCURRENCY.md` is the conflict matrix. Each job holds an
   exclusive `job-<kind>` lock (fd 10, PID record), shared `disk-<label>` locks
   for the disks it uses, `data-borg-repo` while mutating or copying the Borg

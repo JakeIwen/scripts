@@ -602,6 +602,16 @@ def _harness_environment(**updates: str) -> dict[str, str]:
     return environment
 
 
+def _write_backup_libraries(harness: Path) -> None:
+    backup = harness / "backup"
+    backup.mkdir()
+    for name in ("backup_locks.sh", "backup_lock_io.sh", "backup_lifecycle.sh", FENCE.name):
+        (backup / name).write_bytes((FENCE.parent / name).read_bytes())
+    # Keep the real target validation, but never touch a live registry here.
+    with (backup / "backup_locks.sh").open("a", encoding="utf-8") as output:
+        output.write("\nhold_backup_disks_exclusive() { :; }\n")
+
+
 def _run_scenario(source: Path, bash: Path, scenario: Scenario) -> dict[str, object]:
     with tempfile.TemporaryDirectory(prefix="umount-phase-regression-") as temp_name:
         root = Path(temp_name)
@@ -622,13 +632,7 @@ def _run_scenario(source: Path, bash: Path, scenario: Scenario) -> dict[str, obj
             _transform_source(source_text), encoding="utf-8"
         )
         (harness / "disk_policy.sh").write_text(DISK_POLICY_STUB, encoding="utf-8")
-        (harness / "backup").mkdir()
-        (harness / "backup" / "backup_locks.sh").write_text(
-            "hold_backup_disks_exclusive() { :; }\n", encoding="utf-8"
-        )
-        (harness / "backup" / "umount_disks_fence.sh").write_text(
-            FENCE.read_text(encoding="utf-8"), encoding="utf-8"
-        )
+        _write_backup_libraries(harness)
         (harness / "scenario.sh").write_text(
             _scenario_config(scenario), encoding="utf-8"
         )
@@ -670,13 +674,7 @@ def _run_direct_phase(source: Path, bash: Path, phase: str) -> dict[str, object]
             source.read_text(encoding="utf-8"), encoding="utf-8"
         )
         (harness / "disk_policy.sh").write_text(DISK_POLICY_STUB, encoding="utf-8")
-        (harness / "backup").mkdir()
-        (harness / "backup" / "backup_locks.sh").write_text(
-            "hold_backup_disks_exclusive() { :; }\n", encoding="utf-8"
-        )
-        (harness / "backup" / "umount_disks_fence.sh").write_text(
-            FENCE.read_text(encoding="utf-8"), encoding="utf-8"
-        )
+        _write_backup_libraries(harness)
         driver = harness / "driver.sh"
         driver.write_text(DIRECT_PHASE_DRIVER, encoding="utf-8")
         driver.chmod(0o700)
