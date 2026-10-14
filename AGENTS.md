@@ -478,7 +478,8 @@ first publication. `transaction/published` records attempted destinations;
 `transaction/active-timers` records which timers were active before the fence.
 
 Ordinary failures automatically restore attempted replacements in reverse
-order while fd 9 still holds the exclusive legacy fence. Restoration checks
+order while fd 9 still holds the exclusive legacy fence. Cleanup ignores repeated
+INT/TERM/HUP until it ends, so a second stop cannot cut rollback short. It checks
 both content and owner/mode, removes only verified newly introduced files,
 and reloads restored systemd units before restarting any prior active timer.
 An incomplete restore/reload prints `ROLLBACK INCOMPLETE`, exits nonzero and

@@ -79,8 +79,11 @@ local_backup_commit() { # Call only after publication and platform checks succee
 }
 
 local_backup_exit() { # EXIT trap: rollback and timer restoration run with fd 9 still held.
+  # A repeated stop or terminal disconnect must not interrupt restoration and
+  # release the fence with a mixed cohort. Keep cleanup non-reentrant to exit.
+  trap '' INT TERM HUP
   local status=$1 timer cleanup_failed=0
-  trap - EXIT INT TERM HUP
+  trap - EXIT
   if [[ "$LOCAL_BACKUP_STATE" != committed ]]; then
     (( status != 0 )) || status=1
     if local_backup_rollback; then

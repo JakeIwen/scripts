@@ -169,6 +169,11 @@ if [[ "$command" == /usr/bin/mv ]]; then
     exit 0
   elif [[ "$source_path" == *.rollback.* ]]; then
     echo "rollback:$last" >> "$TEST_ROOT/events"
+    if [[ -n "${TEST_ROLLBACK_SIGNAL:-}" && ! -e "$TEST_ROOT/cleanup-signal" ]]; then
+      : > "$TEST_ROOT/cleanup-signal"
+      kill -"$TEST_ROLLBACK_SIGNAL" "$PPID"
+      /bin/sleep 0.05
+    fi
     [[ "${TEST_FAIL_ROLLBACK:-0}" != 1 ]] || exit 43
   fi
 fi
@@ -359,6 +364,28 @@ class DeploymentRollbackTests(DeploymentFixture):
             result = self.apply(fixture)
             self.assertNotEqual(result.returncode, 0)
             self.assert_restored(fixture)
+
+    def test_repeated_termination_cannot_interrupt_fenced_rollback(self):
+        for signal in ('TERM', 'HUP', 'INT'):
+            with self.subTest(signal=signal):
+                fixture = self.fixture()
+                self.env.update(TEST_FAIL_STEP='3', TEST_FAIL_WHEN='signal',
+                                TEST_ROLLBACK_SIGNAL=signal)
+                result = self.apply(fixture)
+                self.assertEqual(result.returncode, 143, result.stderr)
+                self.assertIn('previous cohort restored and verified', result.stderr)
+                self.assertTrue((fixture[0] / 'cleanup-signal').is_file())
+                self.assert_restored(fixture)
+
+    def test_repeated_termination_preserves_incomplete_rollback_result(self):
+        fixture = self.fixture()
+        self.env.update(TEST_FAIL_STEP='3', TEST_FAIL_WHEN='signal',
+                        TEST_ROLLBACK_SIGNAL='TERM', TEST_FAIL_ROLLBACK='1')
+        result = self.apply(fixture)
+        self.assertEqual(result.returncode, 70, result.stderr)
+        self.assertIn('ROLLBACK INCOMPLETE', result.stderr)
+        self.assertTrue((fixture[0] / 'cleanup-signal').is_file())
+        self.assertNotIn('systemctl:start ', (fixture[0] / 'events').read_text())
 
 
     def test_incomplete_restore_or_reload_never_restarts_timers(self):
