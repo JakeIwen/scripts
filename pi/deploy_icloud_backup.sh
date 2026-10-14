@@ -3,109 +3,49 @@
 set -euo pipefail
 repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 target=${1:-pi@vanpi.lan}
-[[ $# -le 1 ]] || exit 2
+[[ $# -le 1 && "$target" != -* && "$target" != *[[:space:]]* ]] || exit 2
+cd "$repo"
 . "$repo/pi/backup_local_deploy.sh"
-local_previous=$(local_backup_previous_hashes "$repo")
-tmpfiles_hash=$(local_backup_previous_tmpfiles_hash "$repo")
-lifecycle_previous=$(local_backup_previous_lifecycle_hashes "$repo")
-worker_hash=${VANPI_TM_PREVIOUS_CLOUD_SHA256:-$(local_backup_previous_script_hash "$repo" backup/icloud_backup.py)}
-status_hash=${VANPI_TM_PREVIOUS_STATUS_SHA256:-$(local_backup_previous_script_hash "$repo" backup/icloud_status.py)}
-[[ "$worker_hash" =~ ^[0-9a-f]{64}$ && "$status_hash" =~ ^[0-9a-f]{64}$ ]] || exit 1
-PYTHONPATH="$repo:$repo/pi/scripts/backup" python3 -m unittest pi.tests.backup.test_backup_locks pi.tests.backup.test_protected_json pi.tests.backup.test_local_backup_deploy
+local_previous=$(local_backup_previous_hashes "$repo" pi)
+payload=()
+while IFS= read -r source; do payload+=("$source"); done < <(local_backup_sources pi)
+PYTHONPATH="$repo:$repo/pi/scripts/backup" python3 -m unittest pi.tests.backup.test_backup_locks pi.tests.backup.test_protected_json pi.tests.backup.test_local_backup_deploy.DeploymentPlanTests pi.tests.backup.test_local_backup_deploy.DeploymentPreflightTests
 python3 "$repo/pi/tests/backup/test_icloud_backup.py"
 python3 "$repo/pi/tests/backup/test_icloud_status.py"
 bash -n "$repo/pi/scripts/backup/icloud_backup.sh"
-conf_hash=$(local_backup_previous_conf_hash "$repo")
 stage=$(ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" /usr/bin/mktemp -d /tmp/vanpi-icloud.XXXXXX)
 [[ "$stage" =~ ^/tmp/vanpi-icloud\.[[:alnum:]]{6}$ ]] || exit 1
-scp -q "$repo/pi/backup_local_deploy.sh" \
-  "${LOCAL_BACKUP_PAYLOAD[@]/#/$repo/pi/scripts/backup/}" \
-  "${LIFECYCLE_SCRIPTS[@]/#/$repo/pi/scripts/}" \
-  "$repo/pi/configs/icloud-backup.json" \
-  "$repo/pi/tmpfiles.d/vanpi-backup.conf" \
-  "$repo/pi/services/vanpi-icloud-backup.service" \
-  "$repo/pi/services/vanpi-icloud-backup.timer" \
-  "$repo/pi/services/vanpi-icloud-backup-resume.service" \
-  "$repo/pi/services/vanpi-icloud-backup-resume.timer" "$target:$stage/"
-ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" /bin/bash -s -- "$stage" "$conf_hash" "$tmpfiles_hash" "$local_previous" "$lifecycle_previous" "$worker_hash" "$status_hash" <<'REMOTE'
+COPYFILE_DISABLE=1 /usr/bin/tar --no-xattrs -cf - pi/backup_local_deploy.sh "${payload[@]}" \
+  | ssh -o BatchMode=yes "$target" /bin/tar -xf - -C "$stage"
+ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" /bin/bash -s -- "$stage" "$local_previous" <<'REMOTE'
 set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 stage=$1
 [[ "$stage" =~ ^/tmp/vanpi-icloud\.[[:alnum:]]{6}$ ]] || exit 1
 [[ -x /usr/local/bin/rclone ]]
-. "$stage/backup_local_deploy.sh"
-for name in "${LOCAL_BACKUP_PAYLOAD[@]}"; do
-  case "$name" in
-    *.py) /usr/bin/python3 -m py_compile "$stage/$name" ;;
-    *.sh) /bin/bash -n "$stage/$name" ;;
+cd "$stage"
+. pi/backup_local_deploy.sh
+while IFS= read -r source; do
+  case "$source" in
+    *.py) /usr/bin/python3 - "$source" <<'PY'
+import ast, sys
+from pathlib import Path
+ast.parse(Path(sys.argv[1]).read_text())
+PY
+      ;;
+    *.sh) /bin/bash -n "$source" ;;
   esac
-done
-/usr/bin/python3 -m json.tool "$stage/icloud-backup.json" >/dev/null
-/usr/bin/systemd-analyze verify "$stage/vanpi-icloud-backup.service" "$stage/vanpi-icloud-backup.timer" "$stage/vanpi-icloud-backup-resume.service" "$stage/vanpi-icloud-backup-resume.timer"
-# A running job must finish normally before updating its executable code. The
-# exclusive legacy-lock fence below also requires every cloud worker to stop.
-for unit in vanpi-icloud-backup.service vanpi-time-machine-icloud.service; do
-  service_state=$(/usr/bin/systemctl show "$unit" --property=ActiveState --value)
-  case "$service_state" in
-    inactive|failed) ;;
-    *) echo "Refusing to update active worker: $unit; the legacy-lock deployment fence requires both cloud workers to be inactive." >&2; exit 1 ;;
-  esac
-done
-[[ ! -L /run/lock/vanpi_backup.lock && -f /run/lock/vanpi_backup.lock &&
-   $(/usr/bin/stat -c '%U %G %a' /run/lock/vanpi_backup.lock) == 'root pi 660' ]] || exit 1
-exec 9</run/lock/vanpi_backup.lock
-/usr/bin/flock -n 9 || { echo 'Another backup is active; defer deployment.' >&2; exit 1; }
-verify_local_backup_payload "$stage" "$4"
-verify_local_backup_tmpfiles "$stage/vanpi-backup.conf" "$3"
-verify_lifecycle_scripts "$stage" "$5"
-for pair in "icloud_backup.py:$6" "icloud_status.py:$7"; do
-  live_hash=$(sha256sum "/home/pi/scripts/backup/${pair%%:*}" | awk '{print $1}')
-  new_hash=$(sha256sum "$stage/${pair%%:*}" | awk '{print $1}')
-  [[ "$live_hash" == "${pair#*:}" || "$live_hash" == "$new_hash" ]] || { echo "Live code differs: ${pair%%:*}; inspect before deploying." >&2; exit 1; }
-done
-live_conf_hash=$(sha256sum /home/pi/scripts/backup/backup_conf.sh | awk '{print $1}')
-new_conf_hash=$(sha256sum "$stage/backup_conf.sh" | awk '{print $1}')
-[[ "$live_conf_hash" == "$2" || "$live_conf_hash" == "$new_conf_hash" ]] || { echo 'Live backup configuration differs; inspect before deploying.' >&2; exit 1; }
-/usr/bin/install -d -m 0700 "$stage/previous"
-[[ ! -e /etc/tmpfiles.d/vanpi-backup.conf ]] || /usr/bin/cp -p /etc/tmpfiles.d/vanpi-backup.conf "$stage/previous/vanpi-backup.conf"
-/usr/bin/sudo -n /usr/bin/install -o root -g root -m 0644 "$stage/vanpi-backup.conf" /etc/tmpfiles.d/vanpi-backup.conf
+done < <(local_backup_sources pi)
+/usr/bin/python3 -m json.tool pi/configs/icloud-backup.json >/dev/null
+/usr/bin/systemd-analyze verify pi/services/vanpi-icloud-backup*.service pi/services/vanpi-icloud-backup*.timer
+local_backup_begin "$stage" pi "$2"
+local_backup_publish
 /usr/bin/sudo -n /usr/bin/systemd-tmpfiles --create /etc/tmpfiles.d/vanpi-backup.conf
 [[ -d /run/lock/vanpi-backup && ! -L /run/lock/vanpi-backup &&
    $(/usr/bin/stat -c '%U %G %a' /run/lock/vanpi-backup) == 'root pi 770' ]] || exit 1
-for name in "${LOCAL_BACKUP_PAYLOAD[@]}"; do
-  live=/home/pi/scripts/backup/$name
-  [[ ! -e "$live" ]] || /usr/bin/cp -p "$live" "$stage/previous/$name"
-  /usr/bin/sudo -n /usr/bin/install -o pi -g pi -m 0750 "$stage/$name" "$live.new"
-  /usr/bin/sudo -n /usr/bin/mv -Tf "$live.new" "$live"
-done
-install_lifecycle_scripts "$stage" "$5" "$stage/previous"
-if [[ ! -e /etc/vanpi-icloud-backup.json ]]; then
-  /usr/bin/sudo -n /usr/bin/install -o root -g root -m 0600 "$stage/icloud-backup.json" /etc/vanpi-icloud-backup.json
-fi
-# Add newly introduced defaults without overwriting any existing preference.
-/usr/bin/sudo -n /usr/bin/python3 - "$stage/icloud-backup.json" <<'PY'
-import json,os,stat,sys,tempfile
-from pathlib import Path
-p=Path('/etc/vanpi-icloud-backup.json');s=p.lstat()
-assert stat.S_ISREG(s.st_mode) and s.st_uid==0 and not s.st_mode&0o022
-old=p.read_bytes();current=json.loads(old);defaults=json.loads(Path(sys.argv[1]).read_text())
-updated=dict(defaults,**current)
-if updated != current:
-    fd,tmp=tempfile.mkstemp(prefix='.icloud-config-',dir=p.parent)
-    try:
-        with os.fdopen(fd,'w') as f:
-            json.dump(updated,f,indent=2);f.write('\n');f.flush();os.fsync(f.fileno())
-        assert p.read_bytes()==old,'Settings changed concurrently'
-        os.replace(tmp,p)
-    finally:
-        if os.path.exists(tmp):os.unlink(tmp)
-PY
-for name in vanpi-icloud-backup.service vanpi-icloud-backup.timer vanpi-icloud-backup-resume.service vanpi-icloud-backup-resume.timer; do
-  [[ ! -e /etc/systemd/system/$name ]] || /usr/bin/cp -p /etc/systemd/system/"$name" "$stage/previous/$name"
-  /usr/bin/sudo -n /usr/bin/install -o root -g root -m 0644 "$stage/$name" /etc/systemd/system/"$name"
-done
 /usr/bin/sudo -n /usr/bin/systemctl daemon-reload
 /usr/bin/sudo -n /bin/bash /home/pi/scripts/backup/icloud_backup.sh --preflight
+local_backup_commit
 /usr/bin/sudo -n /usr/bin/systemctl enable --now vanpi-icloud-backup.timer vanpi-icloud-backup-resume.timer
 /usr/bin/systemctl list-timers --all vanpi-icloud-backup.timer --no-pager
-echo "Rollback: restore every file from $stage/previous with the install/mv primitives under the exclusive legacy lock; the retired fairness record /var/lib/vanpi-backup-priority/local-fairness.json is ignored by the new code and remains valid for the old code."
 REMOTE

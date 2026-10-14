@@ -181,8 +181,12 @@ compare it with this checkout. Deployed files may differ from the repository.
   `release_backup_disk_if_unused` proves no other holder. `backup_window.sh`
   starts Borg and EXFAT concurrently. The former local-fairness lease, supervisor
   and rollback helper are retired; a stale `local-fairness.json` is ignored.
-  `pi/backup_local_deploy.sh` shares the local payload and reviewed-source hash
-  checks for both targeted cloud installers; `VANPI_BACKUP_PREVIOUS_REVISION` names
+  `pi/backup_local_deploy.sh` shares the remote contract for both targeted cloud
+  installers. `backup_deploy_plan.sh` is their fixed source/destination, review,
+  ownership, mode and first-install plan; `backup_deploy_transaction.sh` stages
+  the full cohort and private previous tree before publishing, then restores and
+  verifies attempted replacements under the fence on failure. Incomplete
+  restoration or unit reload leaves timers stopped. `VANPI_BACKUP_PREVIOUS_REVISION` names
   the previously deployed commit when installing a newly committed change.
   `VANPI_BACKUP_PREVIOUS_CONF_SHA256` accepts an explicitly reviewed config hash
   when unrelated deployed settings differ from that commit. Previous-tree absence
@@ -455,27 +459,44 @@ capacity limits, labels, and deployed versions before changing clone behavior.
 
 ## Backup concurrency rollback
 
-Both targeted cloud installers keep and print `previous/` copies; there is no
-separate code-rollback entry point. First arrange quiescence with the existing
-controls (pause both cloud jobs, let local jobs finish), preserving independent
-holds. Then, with `L=/home/pi/scripts/backup` and `P` set to the saved
-directory, validate `/run/lock/vanpi_backup.lock` (`root pi 660`, regular,
-not a symlink), open it with `exec 9<"$B"` and acquire it with
-`/usr/bin/flock -n 9`; an exclusive acquisition proves no migrated job is
-running. For each saved file use the installer's primitives,
-`sudo /usr/bin/install -o pi -g pi -m 0750 "$P/$N" "$L/$N.new"` then
-`sudo /usr/bin/mv -Tf "$L/$N.new" "$L/$N"`, comparing `sha256sum` before moving
-on. Restore the complete cohort (`backup_conf.sh`, `backup_locks.sh`,
-`umount_disks_fence.sh` (an older `umount_disks.sh` does not source it),
-`backup_window.sh`, `pi_backup.sh`, `exfat_snapshot.sh`, `abort_backup.sh`,
-`clone_now.sh`, `backup_priority.py`, `cloud_backup_control.py`, both cloud
-wrappers and workers, `icloud_status.py`, `time_machine_staging.py`,
-`time_machine_pipeline.py`), plus `/home/pi/scripts/umount_disks.sh` and
-`internet_switches.sh` when their saved copies exist, and the previous
-`/etc/tmpfiles.d/vanpi-backup.conf`. Release fd 9 only after the complete
-cohort. The lock registry directory can stay; old code ignores it. A retired
-`local-fairness.json` remains readable by the old fairness code, which ends an
-abandoned turn by itself. Verify with
+Both installers print a private `<stage>/previous` directory. Older flat
+`previous/` directories retain their saved install/mv recovery procedure.
+`previous/tree/`
+mirrors absolute destinations (for example `tree/home/pi/scripts/backup/` and
+`tree/etc/systemd/system/`). `previous/manifest` has one pipe-delimited record
+per plan entry: source, destination, old SHA-256 or `absent`, old owner:group,
+old mode, staged SHA-256, staged owner:group, staged mode, replace/keep action,
+and temporary path. All originals and replacements are prepared before the
+first publication. `transaction/published` records attempted destinations;
+`transaction/active-timers` records which timers were active before the fence.
+
+Ordinary failures automatically restore attempted replacements in reverse
+order while fd 9 still holds the exclusive legacy fence. Restoration checks
+both content and owner/mode, removes only verified newly introduced files,
+and reloads restored systemd units before restarting any prior active timer.
+An incomplete restore/reload prints `ROLLBACK INCOMPLETE`, exits nonzero and
+leaves timers stopped. The rollback directory is retained. Activation actions
+(including Time Machine capture requests) occur only after the cohort commits;
+their failure reports a committed cohort with incomplete activation.
+
+For a later manual rollback, first pause both cloud jobs with the existing
+controls, preserve independent holds and let local jobs finish. Inspect the
+saved manifest, private tree and current hashes before writing. Use the staged
+`pi/backup_local_deploy.sh` contract, not a newer installed helper, and source
+the staged `pi/scripts/backup/backup_locks.sh`. Validate and open the existing
+legacy inode with `backup_lock_open`, acquire its exclusive
+flock and stop the four cloud timers. Set `LOCAL_BACKUP_STAGE` to the saved
+stage, initialize `LOCAL_BACKUP_TEMPORARIES=()`, and load the reviewed manifest
+records into `LOCAL_BACKUP_PUBLISHED`. `local_backup_rollback` restores those
+records and reloads units; `local_backup_cleanup_temporaries` removes its
+staging files. Do not restart timers or release the fence before restoration
+is verified. Restore only the previously active timers, then resume the
+selected cloud job through its control entry point. There is no separate
+standalone rollback executable.
+
+Never remove or replace `/run/lock` inodes during recovery. The tmpfiles
+configuration is in the cohort; created registry inodes remain in place.
+With `L=/home/pi/scripts/backup`, verify with
 `sudo /usr/bin/python3 -B "$L/backup_priority_control.py" --status`.
 
 ## System monitor reports
