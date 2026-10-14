@@ -274,10 +274,17 @@ start_torrent_client() {
   fi
 }
 
-recover_stale_mounts_if_needed() {
-  local stale_mounts status label target source extra
+recover_stale_mounts_if_needed() (
+  # A subshell bounds the retained claims to this recovery, while inheriting
+  # the policy mutex. No later mount/start operation can inherit these claims.
+  local stale_mounts status label recovery_dir
   local needs_torrent_stop=0
-  local -a stale_labels=()
+
+  recovery_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  . "$recovery_dir/disk_policy.sh" || return 1
+  . "$recovery_dir/backup/backup_locks.sh" || return 1
+  . "$recovery_dir/backup/backup_lifecycle.sh" || return 1
+  . "$recovery_dir/backup/stale_mount_recovery.sh" || return 1
 
   stale_mounts=$("$ISW_MOUNT_DISKS" --list-stale)
   status=$?
@@ -290,20 +297,16 @@ recover_stale_mounts_if_needed() {
   echo "stale managed mounts detected:"
   printf '%s\n' "$stale_mounts"
 
-  while IFS=$'\t' read -r label target source extra; do
-    if [[ -z "$label" || -z "$target" || -z "$source" || -n ${extra:-} ]]; then
-      echo "ERROR: malformed stale-mount record; refusing recovery" >&2
-      return 1
-    fi
-    stale_labels+=("$label")
+  stale_mount_parse_records "$stale_mounts" || return 1
+  for label in "${STALE_RECOVERY_LABELS[@]}"; do
     [[ "$label" == movingparts ]] && needs_torrent_stop=1
-  done <<< "$stale_mounts"
+  done
 
   # A disconnected filesystem may still be held by a backup, qBittorrent, or
   # Samba. Stop only consumers of the affected labels before attempting a
   # normal unmount. The recovery helper never uses force or lazy detach and
   # revalidates the source immediately before changing it.
-  "$ISW_ABORT_BACKUP" "${stale_labels[@]}" || {
+  backup_lifecycle_claim "$ISW_ABORT_BACKUP" 0 "${STALE_RECOVERY_LABELS[@]}" || {
     echo "ERROR: backup/restore did not stop; refusing stale-mount recovery" >&2
     return 1
   }
@@ -311,12 +314,12 @@ recover_stale_mounts_if_needed() {
     echo "ERROR: qBittorrent did not stop; refusing stale-mount recovery" >&2
     return 1
   fi
-  "$ISW_SAMBA_SHARE_CONTROL" close "${stale_labels[@]}" || {
+  "$ISW_SAMBA_SHARE_CONTROL" close "${STALE_RECOVERY_LABELS[@]}" || {
     echo "ERROR: affected Samba shares did not close; refusing stale-mount recovery" >&2
     return 1
   }
-  "$ISW_MOUNT_DISKS" --recover-stale
-}
+  "$ISW_MOUNT_DISKS" --recover-stale "$stale_mounts"
+)
 
 mount_drives() {
   if [[ $(van_is_running) ]]; then

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Shared payload and drift checks for the two targeted cloud installers.
-LOCAL_BACKUP_FILES=(backup_lock_io.sh backup_locks.sh backup_lifecycle.sh umount_disks_fence.sh backup_window.sh pi_backup.sh exfat_snapshot.sh openwrt_backup.sh abort_backup.sh clone_now.sh)
+LOCAL_BACKUP_FILES=(backup_lock_io.sh backup_locks.sh backup_lifecycle.sh stale_mount_recovery.sh umount_disks_fence.sh backup_window.sh pi_backup.sh exfat_snapshot.sh openwrt_backup.sh abort_backup.sh clone_now.sh)
 # Cloud worker modules both installers publish.
 CLOUD_WORKER_FILES=(time_machine_icloud.py time_machine_icloud.sh time_machine_pipeline.py time_machine_staging.py
   time_machine_store.py time_machine_verification.py time_machine_downloads.py time_machine_icloud_control.py
@@ -16,7 +16,7 @@ LOCAL_BACKUP_OVERRIDDEN=(icloud_backup.py icloud_status.py)
 LOCAL_BACKUP_PAYLOAD=("${LOCAL_BACKUP_CHECKED[@]}" "${LOCAL_BACKUP_OVERRIDDEN[@]}"
   ICLOUD_RESTORE.txt TIME_MACHINE_ICLOUD_RESTORE.txt)
 # Disk lifecycle callers of abort_backup.sh live outside the backup directory.
-LIFECYCLE_SCRIPTS=(umount_disks.sh internet_switches.sh)
+LIFECYCLE_SCRIPTS=(mount_disks.sh umount_disks.sh internet_switches.sh)
 LOCAL_BACKUP_SUDO=${LOCAL_BACKUP_SUDO-/usr/bin/sudo -n}
 LOCAL_BACKUP_LIFECYCLE_OWNER=${LOCAL_BACKUP_LIFECYCLE_OWNER:-pi:pi}
 LOCAL_BACKUP_STAT=${LOCAL_BACKUP_STAT:-/usr/bin/stat}

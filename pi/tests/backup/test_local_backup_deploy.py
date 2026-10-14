@@ -192,7 +192,7 @@ class LocalBackupDeployTests(unittest.TestCase):
 
     def lifecycle_trees(self):
         names = self.array('LIFECYCLE_SCRIPTS')
-        self.assertEqual(names, ['umount_disks.sh', 'internet_switches.sh'])
+        self.assertEqual(names, ['mount_disks.sh', 'umount_disks.sh', 'internet_switches.sh'])
         staged, live, saved = self.root / 'staged', self.root / 'scripts', self.root / 'previous'
         staged.mkdir(); live.mkdir(); saved.mkdir()
         for name in names:

@@ -57,6 +57,7 @@ case "${1:-}" in
     exit "${TEST_STALE_SCAN_STATUS:-0}"
     ;;
   --recover-stale)
+    [[ $# == 2 && "$2" == "$TEST_STALE_MOUNTS" ]] || exit 98
     exit "${TEST_STALE_RECOVERY_STATUS:-0}"
     ;;
   *) exit 0 ;;
@@ -92,6 +93,10 @@ export TEST_PGREP_COUNT="$test_root/pgrep-count"
 export TEST_PKILL_CALLS="$test_root/pkill-calls"
 export TEST_SLEEP_CALLS="$test_root/sleep-calls"
 export TEST_STALE_RECOVERY_CALLS="$test_root/stale-recovery-calls"
+# No test may inspect or claim the live registry; dedicated real-process
+# lifecycle tests exercise retained ownership against their private registry.
+export VANPI_BACKUP_LOCK_DIR="$test_root/absent-registry"
+export VANPI_BACKUP_JOB_LOCK="$test_root/absent-legacy"
 
 # shellcheck source=../../scripts/internet_switches.sh
 source "$repo_root/pi/scripts/internet_switches.sh"

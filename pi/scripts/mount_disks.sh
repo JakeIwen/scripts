@@ -7,6 +7,7 @@ if ! . "$md_script_dir/disk_policy.sh"; then
   return 1 2>/dev/null || exit 1
 fi
 md_samba_share_control=${MOUNT_DISKS_SAMBA_SHARE_CONTROL:-"$md_script_dir/samba_share_control.sh"}
+. "$md_script_dir/backup/stale_mount_recovery.sh" || { return 1 2>/dev/null || exit 1; }
 
 # Set by md_resolve_label on success.
 MD_DEVICE=""
@@ -192,6 +193,46 @@ md_normal_unmount_stale_target() {
     /usr/bin/umount -- "$1"
 }
 
+md_prepare_stale_recovery() { # [original-records]; refuses expansion before any mutation
+  local records index original_index found status
+  if (( $# )); then records=$1
+  else records=$(md_list_stale_mounts) || return 1
+  fi
+  stale_mount_parse_records "$records" || return 1
+  local -a expected_labels=("${STALE_RECOVERY_LABELS[@]}")
+  local -a expected_sources=("${STALE_RECOVERY_SOURCES[@]}")
+  md_collect_stale_mounts || return 1
+  for index in "${!MD_STALE_LABELS[@]}"; do
+    found=0
+    for original_index in "${!expected_labels[@]}"; do
+      if [[ "${MD_STALE_LABELS[$index]}" == "${expected_labels[$original_index]}" &&
+            "${MD_STALE_SOURCES[$index]}" == "${expected_sources[$original_index]}" ]]; then
+        found=1
+        break
+      fi
+    done
+    if (( ! found )); then
+      echo "ERROR: stale-mount target set expanded or changed; refusing recovery" >&2
+      return 1
+    fi
+  done
+  # An original target that became live no longer appears in the stale list.
+  # Check all originals before mutating any; repeat at each actual unmount too.
+  for index in "${!expected_labels[@]}"; do
+    md_find_exact_mount_source "/mnt/${expected_labels[$index]}"
+    status=$?
+    (( status == 1 )) && continue
+    (( status == 0 )) || return 1
+    if [[ "$MD_MOUNT_SOURCE" != "${expected_sources[$index]}" ]] ||
+       md_mount_source_is_live "$MD_MOUNT_SOURCE"; then
+      echo "ERROR: stale-mount source changed or became live; refusing recovery" >&2
+      return 1
+    fi
+  done
+  MD_STALE_LABELS=("${expected_labels[@]}")
+  MD_STALE_SOURCES=("${expected_sources[@]}")
+}
+
 md_recover_stale_mounts() {
   local index
   local label
@@ -203,7 +244,7 @@ md_recover_stale_mounts() {
 
   # Finish discovery before changing any mount. A discovery error therefore
   # prevents partial cleanup across the managed target set.
-  md_collect_stale_mounts || return 1
+  md_prepare_stale_recovery "$@" || return 1
   if (( ${#MD_STALE_LABELS[@]} == 0 )); then
     echo "no stale managed mounts found"
     return 0
@@ -521,8 +562,9 @@ mount_disks_main() {
   if (( $# == 1 )) && [[ "$1" == --list-stale ]]; then
     md_list_stale_mounts
     return $?
-  elif (( $# == 1 )) && [[ "$1" == --recover-stale ]]; then
-    md_recover_stale_mounts
+  elif (( $# >= 1 && $# <= 2 )) && [[ "$1" == --recover-stale ]]; then
+    shift
+    md_recover_stale_mounts "$@"
     return $?
   elif (( $# == 1 )) && [[ "$1" == --always ]]; then
     md_reconcile_labels "${ALWAYS_MOUNT_LABELS[@]}" || had_failure=1

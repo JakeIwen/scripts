@@ -346,6 +346,30 @@ assert_eq "" "$(cat "$TEST_MOVING_SOURCE_FILE")" "stale recovery did not clear t
 assert_eq "/dev/live-test-device" "$(cat "$TEST_EXFAT_SOURCE_FILE")" \
   "stale recovery modified a live mount"
 
+# The public recovery entry receives the original discovery, never permission
+# to widen it. Refuse every changed target before the first unmount.
+original_records=$'movingparts\t/mnt/movingparts\t/dev/vanished-test-device'
+printf '%s\n' /dev/vanished-test-device > "$TEST_MOVING_SOURCE_FILE"
+printf '%s\n' /dev/another-vanished-device > "$TEST_EXFAT_SOURCE_FILE"
+: > "$TEST_UNMOUNT_CALLS_FILE"
+if mount_disks_main --recover-stale "$original_records" >/dev/null 2>&1; then
+  fail "recovery accepted a newly stale target outside its original set"
+fi
+[[ ! -s "$TEST_UNMOUNT_CALLS_FILE" ]] || fail "expanded set caused a partial unmount"
+printf '%s\n' /dev/live-test-device > "$TEST_EXFAT_SOURCE_FILE"
+for source in /dev/changed-source /dev/live-test-device; do
+  printf '%s\n' "$source" > "$TEST_MOVING_SOURCE_FILE"
+  if mount_disks_main --recover-stale "$original_records" >/dev/null 2>&1; then
+    fail "recovery accepted a changed original source"
+  fi
+  [[ ! -s "$TEST_UNMOUNT_CALLS_FILE" ]] || fail "changed source caused an unmount"
+done
+for malformed in $'movingparts\t/mnt/elsewhere\t/dev/old' $'unknown\t/mnt/unknown\t/dev/old'; do
+  if mount_disks_main --recover-stale "$malformed" >/dev/null 2>&1; then
+    fail "recovery accepted malformed original records"
+  fi
+done
+
 printf '%s\n' /dev/vanished-test-device > "$TEST_MOVING_SOURCE_FILE"
 md_normal_unmount_stale_target() { return 32; }
 if md_recover_stale_mounts >/dev/null 2>&1; then
