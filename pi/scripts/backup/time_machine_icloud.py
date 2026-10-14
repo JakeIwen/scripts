@@ -503,10 +503,9 @@ def failed_attempt(state, exc):
     return 0 if retryable else 1
 
 
-def main():
+def _main(args):
     os.umask(0o077)
     private_directory(STATE)
-    args = sys.argv[1:]
     if args == ['--capture-request']:
         print(json.dumps(capture_request())); return 0
     if args == ['--mac-present']:
@@ -562,6 +561,11 @@ def main():
         store.atomic_json(STATE / 'state.json', state)
         history.save_attempt(STATE, state, finished=True)
         priority.complete_job(priority.PriorityMode.TIME_MACHINE, state)
+
+
+def main():
+    args = sys.argv[1:]
+    return _main(args)
 
 
 if __name__ == '__main__':

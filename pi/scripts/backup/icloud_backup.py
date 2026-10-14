@@ -672,12 +672,11 @@ def verify_login(cfg):
     subprocess.run(['/usr/bin/systemctl', 'start', '--no-block', 'vanpi-icloud-backup.service'], check=True)
 
 
-def main():
+def _main(mode):
     os.umask(0o077)
     signal.signal(signal.SIGTERM, abort)
     signal.signal(signal.SIGINT, abort)
     cfg = load_config()
-    mode = sys.argv[1] if len(sys.argv) == 2 else '--run'
     STATE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
     if STATE_DIR.is_symlink() or STATE_DIR.stat().st_uid != 0:
         raise RuntimeError('unsafe state directory')
@@ -746,6 +745,11 @@ def main():
             atomic_json(STATE_DIR / 'state.json', state)
             save_attempt(STATE_DIR, state, finished=True)
             priority.complete_job(priority.PriorityMode.PI, state)
+
+
+def main():
+    mode = sys.argv[1] if len(sys.argv) == 2 else '--run'
+    return _main(mode)
 
 
 if __name__ == '__main__':

@@ -194,7 +194,8 @@ compare it with this checkout. Deployed files may differ from the repository.
   `pi/tests/backup/test_local_backup_deploy.py` exercises those shell contracts
   against temporary source/live directories and a fixture Git repository.
   Real-process lock regressions live in `pi/tests/storage/test_backup_locks.sh`
-  and `pi/tests/backup/test_backup_locks.py`.
+  and `pi/tests/backup/test_backup_locks.py`. `backup_lock_fixtures.py` owns
+  their private pre-created registry fixture.
 - `pi/scripts/backup/icloud_inventory.py` owns cloud object fingerprint parsing
   and size-based upload estimates, re-exported by the shared cloud worker.
 - `pi/scripts/backup/time_machine_pipeline.py` supervises a single verifier
