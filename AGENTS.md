@@ -91,6 +91,8 @@ compare it with this checkout. Deployed files may differ from the repository.
   `pi/tests/network/_network_storage_support.py`.
 - `pi/tests/dashboard/_frontend_test_support.py` provides a temporary React
   index response for route tests, independent of deployed frontend builds.
+  `_disk_manager_support.py` holds the DiskManager fixture (label policy, lsblk
+  tree, boot ids) shared by the disk tests and `test_disk_storage_events.py`.
 - Deferred video checkpoints are indexed once per identity-sync transaction by
   `pi/apps/video_library/deferred_positions.py`; preserve chronological replay,
   exact path matching and removal after successful resolution. Scan/query and
