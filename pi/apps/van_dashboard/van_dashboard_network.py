@@ -165,14 +165,12 @@ class ConnectivityMonitor:
             remaining = max(1.0, self.interval - (self.clock() - started))
             with self.condition:
                 if self._active_locked() and status.get("last_error") is None:
-                    # Active mode runs sequentially, but never faster than the
-                    # floor; an explicit refresh request still wakes it early.
-                    floor_left = self.active_floor - (self.clock() - started)
-                    if floor_left > 0:
-                        self.condition.wait_for(
-                            lambda: self.stop_event.is_set() or self.refresh_requested,
-                            timeout=floor_left,
-                        )
+                    # Sequential while active, but no faster than the floor; a
+                    # refresh request wakes it early. A spent floor returns at once.
+                    self.condition.wait_for(
+                        lambda: self.stop_event.is_set() or self.refresh_requested,
+                        timeout=self.active_floor - (self.clock() - started),
+                    )
                     continue
                 if self._active_locked():
                     self.condition.wait_for(
