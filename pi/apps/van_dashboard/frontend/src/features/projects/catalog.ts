@@ -33,6 +33,13 @@ function piLinks(port: number, path = '/'): ProjectLink[] {
 
 export const HOSTED_PROJECTS: HostedProject[] = [
   {
+    id: 'always-remote',
+    name: 'Always Remote',
+    host: 'Vanpi',
+    description: 'Remote session management on vanpi.',
+    links: piLinks(8777),
+  },
+  {
     id: 'health-calendar',
     name: 'Health Calendar',
     host: 'This Mac',
