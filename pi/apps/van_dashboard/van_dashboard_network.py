@@ -18,6 +18,7 @@ __all__ = [
 ]
 
 from .van_dashboard_common import (
+    CONNECTIVITY_ACTIVE_FLOOR,
     CONNECTIVITY_ACTIVE_LEASE,
     CONNECTIVITY_ACTIVE_RETRY_INTERVAL,
     CONNECTIVITY_INTERVAL,
@@ -46,9 +47,11 @@ class ConnectivityMonitor:
         command=run_command,
         clock=time.monotonic,
         wall_clock=time.time,
+        active_floor=CONNECTIVITY_ACTIVE_FLOOR,
     ):
         self.collector = collector
         self.interval = interval
+        self.active_floor = active_floor
         self.command = command
         self.clock = clock
         self.wall_clock = wall_clock
@@ -162,6 +165,14 @@ class ConnectivityMonitor:
             remaining = max(1.0, self.interval - (self.clock() - started))
             with self.condition:
                 if self._active_locked() and status.get("last_error") is None:
+                    # Active mode runs sequentially, but never faster than the
+                    # floor; an explicit refresh request still wakes it early.
+                    floor_left = self.active_floor - (self.clock() - started)
+                    if floor_left > 0:
+                        self.condition.wait_for(
+                            lambda: self.stop_event.is_set() or self.refresh_requested,
+                            timeout=floor_left,
+                        )
                     continue
                 if self._active_locked():
                     self.condition.wait_for(

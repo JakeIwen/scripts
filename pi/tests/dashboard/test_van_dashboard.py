@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from unittest import mock
 from email.message import Message
@@ -270,6 +271,7 @@ class ConnectivityMonitorTests(unittest.TestCase):
             collector="/test/connectivity",
             interval=60,
             command=command,
+            active_floor=0,
         )
         monitor.mark_active(lease=1)
         monitor.start()
@@ -283,6 +285,78 @@ class ConnectivityMonitorTests(unittest.TestCase):
             monitor.thread.join(1)
         self.assertGreaterEqual(len(calls), 2)
         self.assertFalse(monitor.thread.is_alive())
+
+    def test_active_collections_respect_the_floor_interval(self):
+        starts = []
+        third_collection = threading.Event()
+
+        def command(args, timeout):
+            starts.append(time.monotonic())
+            if len(starts) >= 3:
+                third_collection.set()
+            payload = {
+                "checked_at": 1_700_000_100 + len(starts),
+                "internet": {"online": True},
+                "router": {"reachable": True},
+                "ubnt": {"reachable": True},
+            }
+            return SimpleNamespace(returncode=0, stdout=json.dumps(payload), stderr="")
+
+        monitor = dashboard_network.ConnectivityMonitor(
+            collector="/test/connectivity",
+            interval=60,
+            command=command,
+            active_floor=0.2,
+        )
+        monitor.mark_active(lease=5)
+        monitor.start()
+        try:
+            self.assertTrue(third_collection.wait(3), "active collection did not repeat")
+        finally:
+            monitor.stop()
+            monitor.thread.join(1)
+        gaps = [later - earlier for earlier, later in zip(starts, starts[1:])]
+        self.assertTrue(gaps, "expected repeated collections")
+        for gap in gaps[:2]:
+            self.assertGreaterEqual(gap, 0.18)
+
+    def test_refresh_request_wakes_active_floor_wait(self):
+        starts = []
+        second_collection = threading.Event()
+
+        def command(args, timeout):
+            starts.append(time.monotonic())
+            if len(starts) >= 2:
+                second_collection.set()
+            payload = {
+                "checked_at": 1_700_000_100 + len(starts),
+                "internet": {"online": True},
+                "router": {"reachable": True},
+                "ubnt": {"reachable": True},
+            }
+            return SimpleNamespace(returncode=0, stdout=json.dumps(payload), stderr="")
+
+        monitor = dashboard_network.ConnectivityMonitor(
+            collector="/test/connectivity",
+            interval=60,
+            command=command,
+            active_floor=30,
+        )
+        monitor.mark_active(lease=60)
+        monitor.start()
+        try:
+            deadline = time.monotonic() + 2
+            while not starts and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(starts, "first active collection did not run")
+            monitor.request_refresh()
+            self.assertTrue(
+                second_collection.wait(2), "refresh request did not end the floor wait"
+            )
+        finally:
+            monitor.stop()
+            monitor.thread.join(1)
+        self.assertLess(starts[1] - starts[0], 2)
 
 
 class PriceCheckControllerTests(unittest.TestCase):

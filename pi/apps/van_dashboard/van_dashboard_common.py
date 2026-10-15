@@ -94,6 +94,12 @@ CONNECTIVITY_ACTIVE_LEASE = float(
 CONNECTIVITY_ACTIVE_RETRY_INTERVAL = float(
     os.environ.get("VAN_DASHBOARD_CONNECTIVITY_ACTIVE_RETRY_INTERVAL", "1")
 )
+# Minimum spacing between collector runs while a dashboard is visible. Each run
+# is an SSH login to the router, so back-to-back runs cost it a key exchange
+# every couple of seconds.
+CONNECTIVITY_ACTIVE_FLOOR = float(
+    os.environ.get("VAN_DASHBOARD_CONNECTIVITY_ACTIVE_FLOOR", "3")
+)
 OPENWRT_CLIENTS_TIMEOUT = float(
     os.environ.get("VAN_DASHBOARD_OPENWRT_CLIENTS_TIMEOUT", "15")
 )
