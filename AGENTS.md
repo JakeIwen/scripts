@@ -32,6 +32,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   The dashboard's project catalog links to both hosts; preserve runtime-added
   links. A/C commands and GPIO18 setup belong to that repo; GPIO17 remains the
   alert-light owner here.
+- `pi/projects/phone-drop/`: Phone Drop, the token-protected upload inbox for
+  the iPhone share sheet (`phone-drop.service`, port 8793). Its own `deploy.sh`
+  owns `/home/pi/phone-drop/`, the unit and the token; broad sync never ships it.
+  Uploads land in `~/Documents/agent-shared/from-phone/` under an 8 GiB quota.
 - `vanrouter/`: reviewed OpenWrt persistence and backup-export artifacts.
 - `ubnt/`: directional wireless-device profiles and uplink scripts.
   `ubnt/persistent/scripts/wifi_manager.sh` owns initialization and command

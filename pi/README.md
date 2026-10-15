@@ -38,6 +38,8 @@ normally live under `/home/pi/scripts/`.
 - [Visual Guides & A/C IR controller](https://github.com/JakeIwen/visual-guides)
   — standalone source in `~/dev/visual-guides`; [Pi](http://vanpi.lan:8791/)
   and [Mac](http://127.0.0.1:8792/) pages.
+- [Phone Drop](projects/phone-drop/README.md) — iPhone share-sheet uploads to
+  the shared agent folder on port 8793.
 
 ## Testing
 

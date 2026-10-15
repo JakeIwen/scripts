@@ -1,0 +1,31 @@
+[Unit]
+Description=Phone Drop: token-protected file inbox for the iPhone share sheet (port 8793)
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+UMask=0022
+WorkingDirectory=/home/pi/phone-drop
+ExecStart=/usr/bin/python3 -B /home/pi/phone-drop/phone_drop.py --bind 0.0.0.0 --port 8793 --inbox /home/pi/Documents/agent-shared/from-phone --token-file /home/pi/.config/phone-drop/token --quota-mib 8192 --min-free-mib 8192
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+MemoryMax=256M
+# The service can write only its inbox; everything else is read-only or hidden.
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/pi/Documents/agent-shared/from-phone
+PrivateTmp=true
+PrivateDevices=true
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
