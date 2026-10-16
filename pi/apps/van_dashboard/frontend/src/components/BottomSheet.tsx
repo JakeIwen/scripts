@@ -7,6 +7,7 @@ interface BottomSheetProps {
   description?: string;
   updatedAt?: number | null;
   headerActions?: React.ReactNode;
+  headerContent?: React.ReactNode;
   className?: string;
   onClose: () => void;
   children: React.ReactNode;
@@ -18,6 +19,7 @@ export function BottomSheet({
   description,
   updatedAt,
   headerActions,
+  headerContent,
   className = '',
   onClose,
   children,
@@ -62,6 +64,7 @@ export function BottomSheet({
           <h2 id={titleId}>{title}</h2>
           {description && updatedAt === undefined && <p>{description}</p>}
         </div>
+        {headerContent}
         <SheetActions title={title} onClose={onClose}>
           {headerActions}
         </SheetActions>
@@ -96,7 +99,7 @@ function SheetActions({
   );
 }
 
-function UpdatedAge({ timestamp, active }: { timestamp: number | null; active: boolean }) {
+export function UpdatedAge({ timestamp, active }: { timestamp: number | null; active: boolean }) {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     if (!active || timestamp === null) return;

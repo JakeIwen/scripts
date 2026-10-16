@@ -239,6 +239,7 @@ describe('Sonos views', () => {
     const controls = controlMocks();
     render(
       <SonosSheet
+        updatedAt={Date.now() - 2000}
         alarms={null}
         open
         onClose={vi.fn()}
@@ -295,6 +296,7 @@ describe('Sonos views', () => {
 
     render(
       <SonosSheet
+        updatedAt={Date.now() - 2000}
         alarms={null}
         open
         onClose={vi.fn()}

@@ -34,6 +34,7 @@ export function SonosFeature() {
           status={resource.data}
           error={resource.error}
           refreshing={resource.refreshing}
+          updatedAt={resource.lastUpdatedAt}
           progress={progress}
           onRefresh={resource.refresh}
           controls={controls}

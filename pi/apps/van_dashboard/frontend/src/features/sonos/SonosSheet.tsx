@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
 
-import { BottomSheet } from '../../components/BottomSheet';
+import { BottomSheet, UpdatedAge } from '../../components/BottomSheet';
 import type { SonosControls } from './controls';
-import { SonosTransportControls } from './SonosTransportControls';
+import { SonosPlayback } from './SonosPlayback';
 import type { SonosSpeaker, SonosStatus, SonosTrackProgress } from './types';
 import './sonos.css';
 
@@ -12,6 +12,7 @@ export interface SonosSheetProps {
   status: SonosStatus | null;
   error: Error | null;
   refreshing: boolean;
+  updatedAt: number | null;
   progress: SonosTrackProgress | null;
   onRefresh: () => Promise<SonosStatus | null>;
   controls: SonosControls;
@@ -123,6 +124,7 @@ export function SonosSheet({
   status,
   error,
   refreshing,
+  updatedAt,
   progress,
   onRefresh,
   controls,
@@ -132,106 +134,77 @@ export function SonosSheet({
     <BottomSheet
       open={open}
       title="Sonos"
-      description="Playback, speakers, and alarms."
       onClose={onClose}
+      className="sonos-sheet"
+      headerContent={
+        status && <SonosPlayback status={status} progress={progress} controls={controls} />
+      }
+      headerActions={
+        <>
+          <UpdatedAge timestamp={updatedAt === null ? null : updatedAt / 1000} active={open} />
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="Refresh status"
+            title="Refresh status"
+            disabled={refreshing || controls.running || !open}
+            onClick={() => void onRefresh()}
+          >
+            ↻
+          </button>
+        </>
+      }
     >
-      <div className="sonos-sheet__toolbar">
-        <aside className="sonos-control-panel" aria-live="polite">
-          <strong>{controls.running ? 'Applying Sonos control…' : 'Sonos controls'}</strong>
-          <span>
-            {controls.lastError ??
-              controls.lastMessage ??
-              'Every control is reconciled with an authoritative speaker refresh.'}
-          </span>
-        </aside>
-        <button
-          className="secondary-button"
-          type="button"
-          disabled={refreshing || controls.running || !open}
-          onClick={() => void onRefresh()}
-        >
-          {refreshing ? 'Refreshing…' : 'Refresh status'}
-        </button>
-      </div>
-
-      {open && alarms}
       {error && <p className="error-message">{error.message}</p>}
+      {controls.lastError && (
+        <p className="error-message" role="alert">
+          {controls.lastError}
+        </p>
+      )}
       {!status ? (
         <p className="sonos-sheet__empty">
           {error ? 'Sonos is unavailable.' : 'Finding speakers…'}
         </p>
       ) : (
-        <div className="section-stack">
-          <section className="panel-card sonos-now-playing">
-            <div className="sonos-now-playing__copy">
-              <span>Now playing</span>
-              <h3>{status.nowPlaying.title}</h3>
-              <p>
-                {status.nowPlaying.artist || status.coordinator}
-                {status.nowPlaying.album ? ` · ${status.nowPlaying.album}` : ''}
-              </p>
-              {progress && (
-                <>
-                  <div
-                    className="sonos-progress"
-                    role="progressbar"
-                    aria-valuemin={0}
-                    aria-valuemax={progress.durationSeconds}
-                    aria-valuenow={Math.round(progress.positionSeconds)}
-                    aria-valuetext={progress.label}
-                  >
-                    <span style={{ width: `${progress.percent}%` }} />
-                  </div>
-                  <small>{progress.label}</small>
-                </>
-              )}
-            </div>
-            <SonosTransportControls status={status} controls={controls} />
-          </section>
-
-          <section className="panel-card sonos-group">
-            <header>
-              <div>
-                <h3>Active group</h3>
-                <p>Coordinator · {status.coordinator}</p>
-              </div>
-              <button
-                className="sonos-mute-button"
-                type="button"
-                disabled={controls.running || status.group.muted === null}
-                aria-label={status.group.muted ? 'Unmute group' : 'Mute group'}
-                aria-pressed={status.group.muted === true}
-                onClick={() => void controls.setGroupMuted(!status.group.muted)}
-              >
-                {status.group.muted ? '🔇' : '🔊'}
-              </button>
-            </header>
-            <div className="sonos-group__volume">
-              <span>Group volume</span>
-              <VolumeEditor
-                label="Group"
-                value={status.group.volume}
-                disabled={controls.running}
-                onCommit={(volume) => void controls.setGroupVolume(volume)}
+        <section className="sonos-speakers" aria-labelledby="sonos-speakers-title">
+          <h3 id="sonos-speakers-title">Speakers</h3>
+          <div className="sonos-speaker-list">
+            <GroupVolume status={status} controls={controls} />
+            {status.speakers.map((speaker) => (
+              <SpeakerRow
+                speaker={speaker}
+                coordinator={status.coordinator}
+                controls={controls}
+                key={speaker.name}
               />
-            </div>
-          </section>
-
-          <section className="sonos-speakers" aria-labelledby="sonos-speakers-title">
-            <h3 id="sonos-speakers-title">Speakers</h3>
-            <div className="sonos-speaker-list">
-              {status.speakers.map((speaker) => (
-                <SpeakerRow
-                  speaker={speaker}
-                  coordinator={status.coordinator}
-                  controls={controls}
-                  key={speaker.name}
-                />
-              ))}
-            </div>
-          </section>
-        </div>
+            ))}
+          </div>
+        </section>
       )}
+      {open && alarms}
     </BottomSheet>
+  );
+}
+
+function GroupVolume({ status, controls }: { status: SonosStatus; controls: SonosControls }) {
+  return (
+    <div className="sonos-group" role="group" aria-label="Active speaker group">
+      <button
+        className="sonos-mute-button"
+        type="button"
+        disabled={controls.running || status.group.muted === null}
+        aria-label={status.group.muted ? 'Unmute group' : 'Mute group'}
+        aria-pressed={status.group.muted === true}
+        onClick={() => void controls.setGroupMuted(!status.group.muted)}
+      >
+        {status.group.muted ? '🔇' : '🔊'}
+      </button>
+      <VolumeEditor
+        label="Group"
+        value={status.group.volume}
+        disabled={controls.running}
+        onCommit={(volume) => void controls.setGroupVolume(volume)}
+      />
+    </div>
   );
 }

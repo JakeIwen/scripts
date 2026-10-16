@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 
 import type { SonosAlarmControls } from './alarmControls';
 import { AlarmEditor } from './AlarmEditor';
@@ -95,25 +95,33 @@ function AlarmDeleteConfirmation({
 
 export function SonosAlarms({ controls }: { controls: SonosAlarmControls }) {
   const { expanded, setExpanded } = controls;
+  const panelId = useId();
   return (
-    <div className="sonos-alarm-section">
-      <button
-        className="secondary-button"
-        type="button"
-        aria-expanded={expanded}
-        onClick={() => setExpanded(!expanded)}
-      >
-        {expanded ? 'Hide alarms' : 'Alarms'}
-      </button>
-      {expanded && <SonosAlarmPanel controls={controls} />}
-    </div>
+    <section className="sonos-alarm-section">
+      <h3>
+        <button
+          className="sonos-alarm-summary"
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={panelId}
+          onClick={() => setExpanded(!expanded)}
+        >
+          <span aria-hidden="true">{expanded ? '▾' : '▸'}</span>Alarms
+        </button>
+      </h3>
+      {expanded && (
+        <div id={panelId}>
+          <SonosAlarmPanel controls={controls} />
+        </div>
+      )}
+    </section>
   );
 }
 
 function SonosAlarmPanel({ controls }: { controls: SonosAlarmControls }) {
   const { resource, favorites, editing, setEditing, message, failure, busy, perform } = controls;
   return (
-    <section className="panel-card sonos-alarms" aria-labelledby="sonos-alarms-title">
+    <div className="sonos-alarms">
       <AlarmPanelHeader
         busy={busy}
         addDisabled={!resource.data?.rooms.length || !!resource.error || editing !== null}
@@ -162,7 +170,7 @@ function SonosAlarmPanel({ controls }: { controls: SonosAlarmControls }) {
           ))}
         </>
       )}
-    </section>
+    </div>
   );
 }
 
@@ -182,7 +190,6 @@ function AlarmPanelHeader({
   return (
     <>
       <header>
-        <h3 id="sonos-alarms-title">Alarms</h3>
         <div className="sonos-alarm-actions">
           <button className="secondary-button" type="button" disabled={busy} onClick={onRefresh}>
             Refresh alarms

@@ -83,8 +83,25 @@
   }
 }
 .sonos-alarm-section {
-  margin-bottom: 18px;
+  margin-top: 22px;
+  border-top: 1px solid var(--line);
 }
-.sonos-alarm-section > button {
-  margin-bottom: 10px;
+.sonos-alarm-section h3 {
+  margin: 0;
+}
+.sonos-alarm-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 18px 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.sonos-alarm-summary > span {
+  color: var(--muted);
 }

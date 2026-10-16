@@ -81,7 +81,7 @@ it.each(['confirmed', 'uncertain'])(
     fireEvent.click(screen.getByRole('button', { name: 'Save alarm' }));
     expect(postForm).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Hide alarms' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Alarms' }));
     fireEvent.click(screen.getByRole('button', { name: 'Alarms' }));
     expect(screen.getByRole('button', { name: 'Add alarm' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Close Sonos' }));
