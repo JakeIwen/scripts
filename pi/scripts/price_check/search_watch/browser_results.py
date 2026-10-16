@@ -9,7 +9,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from .browser_refresh import RefreshRequest, is_current_request, validate_request
 from .parsers import parse
-from .service import SearchWatchError, apply_search_results, validate_watch
+from .service import SearchNotificationError, apply_search_results, validate_watch
 
 
 LIMITS = json.loads(Path(__file__).with_name("browser_capture_limits.json").read_text())
@@ -73,8 +73,7 @@ def accept_browser_results(store, payload: object, *, notify_new=None) -> Browse
         watch = store.get_watch(submission["search_id"])
         try:
             apply_search_results(store, watch, results, notify_new=notify_new)
-        except SearchWatchError:
-            # Result storage already succeeded; only notification failure is raised
-            # by this shared success path. Storage errors must still propagate.
+        except SearchNotificationError:
+            # A failed alert must not restart an already completed recovery.
             notification_failed = True
     return {"ok": True, "result_count": len(results), "notification_failed": notification_failed}

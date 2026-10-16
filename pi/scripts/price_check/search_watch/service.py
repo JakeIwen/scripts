@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from .parsers import EbayGateError, EbayParseError, parse as parse_ebay
 from .store import SearchStore, SearchStoreError
-from .browser_refresh import clear_refresh, request_refresh
+from .browser_refresh import request_refresh
 
 
 CURL = "/usr/bin/curl"
@@ -37,6 +37,10 @@ LEGACY_HEADERS = (
 
 class SearchWatchError(RuntimeError):
     error_code = "search"
+
+
+class SearchNotificationError(SearchWatchError):
+    """Results were saved, but their new-listing notification failed."""
 
 
 class SearchCookieError(SearchWatchError):
@@ -223,7 +227,6 @@ def apply_search_results(
 ) -> dict:
     if record:
         updated, new_results = store.record_success(watch["id"], results)
-        clear_refresh(store, watch["id"])
     else:
         updated = {**watch, "result_count": len(results)}
         new_results = []
@@ -231,7 +234,7 @@ def apply_search_results(
         try:
             notify_new(updated, new_results)
         except Exception as error:
-            raise SearchWatchError(f"new-result notification failed: {error}") from error
+            raise SearchNotificationError(f"new-result notification failed: {error}") from error
     return {**updated, "new_results": new_results}
 
 

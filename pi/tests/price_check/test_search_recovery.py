@@ -144,11 +144,35 @@ class SearchRecoveryTests(unittest.TestCase):
 
     def test_browser_result_storage_failure_is_not_reported_as_success(self):
         payload = self.browser_page()
-        with mock.patch.object(self.store, "record_success", side_effect=SearchStoreError("storage failed")):
-            with self.assertRaises(SearchStoreError):
-                accept_browser_results(self.store, payload)
+        for error_type in (SearchStoreError, SearchWatchError):
+            with self.subTest(error_type=error_type.__name__), mock.patch.object(
+                self.store, "record_success", side_effect=error_type("result recording failed")
+            ):
+                with self.assertRaises(error_type):
+                    accept_browser_results(self.store, payload)
         self.assertEqual(self.store.get_watch(self.watch["id"])["last_status"], "never")
         self.assertIsNotNone(retry_status(self.store)["retry_after"])
+
+    def test_result_storage_and_recovery_completion_rollback_together(self):
+        payload = self.browser_page()
+        before = self.store.get_watch(self.watch["id"])
+        notify = mock.Mock()
+        self.store.connection.execute("""CREATE TRIGGER fail_recovery_completion
+            BEFORE DELETE ON search_browser_refresh
+            BEGIN SELECT RAISE(ABORT, 'injected completion failure'); END""")
+        with self.assertRaises(sqlite3.IntegrityError):
+            accept_browser_results(self.store, payload, notify_new=notify)
+        self.assertEqual(self.store.get_watch(self.watch["id"]), before)
+        self.assertEqual(self.store.connection.execute("SELECT COUNT(*) FROM search_checks").fetchone()[0], 0)
+        self.assertIsNotNone(retry_status(self.store)["retry_after"])
+        notify.assert_not_called()
+
+        self.store.connection.execute("DROP TRIGGER fail_recovery_completion")
+        result = accept_browser_results(self.store, payload, notify_new=notify)
+        self.assertEqual(result, {"ok": True, "result_count": 2, "notification_failed": False})
+        self.assertIsNone(retry_status(self.store)["retry_after"])
+        notify.assert_called_once()
+        self.assertEqual(len(notify.call_args.args[1]), 2)
 
     def test_results_bridge_accepts_browser_html_with_no_available_cookie_file(self):
         self.now[0] = int(time.time())

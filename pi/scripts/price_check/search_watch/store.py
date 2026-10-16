@@ -287,6 +287,10 @@ class SearchStore:
                 (watch_id, now, len(results), len(new_ids)),
             )
             self._prune_history(watch_id)
+            # Recovery completes with the results, never as a second commit.
+            self.connection.execute(
+                "DELETE FROM search_browser_refresh WHERE search_id=?", (watch_id,)
+            )
         new_rows = []
         for item_id in new_ids:
             row = self.connection.execute(
