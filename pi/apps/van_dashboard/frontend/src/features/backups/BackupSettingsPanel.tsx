@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { BottomSheet } from '../../components/BottomSheet';
 import { BackupPriorityControls } from './BackupPriorityControls';
-import { BackupPreferenceSections, PreferenceFooter } from './BackupPreferenceSections';
+import { BackupPreferenceSections } from './BackupPreferenceSections';
 import { useBackupPreferences, type PreferencesEditor } from './useBackupPreferences';
 import './settings.css';
 
@@ -12,6 +12,7 @@ interface PanelProps {
 
 export function BackupSettingsPanel(props: PanelProps) {
   const [open, setOpen] = useState(false);
+  const editor = useBackupPreferences(open, props.refresh);
   return (
     <>
       <button
@@ -23,7 +24,7 @@ export function BackupSettingsPanel(props: PanelProps) {
       >
         ⚙
       </button>
-      {open && <PreferencesDialog {...props} onClose={() => setOpen(false)} />}
+      {open && <PreferencesDialog {...props} editor={editor} onClose={() => setOpen(false)} />}
     </>
   );
 }
@@ -32,17 +33,18 @@ function PreferencesDialog({
   onClose,
   refresh,
   capacityControl,
-}: PanelProps & { onClose: () => void }) {
-  const editor = useBackupPreferences(refresh, onClose);
+  editor,
+}: PanelProps & { editor: PreferencesEditor; onClose: () => void }) {
   const [group, setGroup] = useState('pi-cloud');
   return (
     <BottomSheet
       open
       title="Backup settings"
       className="backup-settings-sheet"
-      onClose={editor.close}
+      onClose={onClose}
+      headerActions={editor.busy && <span role="status">Applying…</span>}
     >
-      <form onSubmit={(event) => void editor.save(event)} className="backup-settings-form">
+      <div className="backup-settings-form" aria-busy={editor.busy}>
         <div className="backup-settings-layout">
           <PreferenceNavigation editor={editor} group={group} select={setGroup} />
           <div className="backup-settings-content">
@@ -77,8 +79,7 @@ function PreferencesDialog({
             )}
           </div>
         </div>
-        <PreferenceFooter editor={editor} onClose={onClose} />
-      </form>
+      </div>
     </BottomSheet>
   );
 }
@@ -98,7 +99,6 @@ function PreferenceNavigation({
         <button
           key={item.id}
           type="button"
-          disabled={editor.busy}
           aria-pressed={group === item.id}
           title={
             editor.settings?.fields.some(
@@ -115,20 +115,11 @@ function PreferenceNavigation({
               (field) => field.group === item.id && Object.hasOwn(editor.fieldErrors, field.id),
             )
               ? '!'
-              : editor.settings?.fields.some(
-                    (field) => field.group === item.id && Object.hasOwn(editor.changes, field.id),
-                  )
-                ? '•'
-                : ''}
+              : ''}
           </span>
         </button>
       ))}
-      <button
-        type="button"
-        disabled={editor.busy}
-        aria-pressed={group === 'priority'}
-        onClick={() => select('priority')}
-      >
+      <button type="button" aria-pressed={group === 'priority'} onClick={() => select('priority')}>
         Priority &amp; capture
       </button>
     </nav>

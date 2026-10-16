@@ -1,7 +1,20 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { ToastProvider } from '../../components/ToastProvider';
+import type { ReactNode } from 'react';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render as testingRender,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { BackupPriorityControls } from './BackupPriorityControls';
 import { useSingleFlightAction } from '../../hooks/useSingleFlightAction';
+
+function render(ui: ReactNode) {
+  return testingRender(ui, { wrapper: ToastProvider });
+}
 
 function PriorityProbe({ refresh }: { refresh: () => Promise<unknown> }) {
   const action = useSingleFlightAction();

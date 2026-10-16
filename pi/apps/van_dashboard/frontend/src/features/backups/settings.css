@@ -214,27 +214,6 @@
   font-size: 0.75rem;
   white-space: nowrap;
 }
-.backup-settings-footer {
-  position: sticky;
-  bottom: 0;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  padding: 16px 22px;
-  border-top: 1px solid var(--line);
-  background: #19242d;
-  z-index: 2;
-}
-.backup-settings-footer > span {
-  margin-right: auto;
-  color: var(--muted);
-  font-size: 0.83rem;
-}
-.backup-settings-footer button {
-  padding: 10px 14px;
-  font-size: 0.9rem;
-}
 .backup-priority-choices {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -327,14 +306,6 @@
   }
   .backup-settings-content__header {
     flex-wrap: wrap;
-  }
-  .backup-settings-footer {
-    padding: 12px;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-  .backup-settings-footer > span {
-    flex-basis: 100%;
   }
   .backup-priority-choices {
     gap: 7px;

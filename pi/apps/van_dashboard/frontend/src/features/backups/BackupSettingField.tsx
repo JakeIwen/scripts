@@ -76,12 +76,14 @@ export function BackupSettingField({
   field,
   value,
   onChange,
+  onCommit,
   disabled,
   error,
 }: {
   field: Field;
   value: SettingDraftValue;
   onChange: (value: SettingDraftValue) => void;
+  onCommit: () => void;
   disabled: boolean;
   error?: string;
 }) {
@@ -138,6 +140,13 @@ export function BackupSettingField({
               value={typeof value === 'boolean' ? '' : value}
               disabled={disabled}
               required
+              onBlur={onCommit}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === 'Escape') {
+                  if (event.key === 'Enter') event.preventDefault();
+                  event.currentTarget.blur();
+                }
+              }}
               aria-invalid={!!error}
               title={error}
               onChange={(event) =>

@@ -274,8 +274,9 @@ and preserve unrelated local or deployed changes.
   the prior root crontab; the configured Pi-time window gates new starts only.
   Dashboard `backup_settings_control.py` / `routes/backup_settings.py` and
   `features/backups/BackupSettingsPanel.tsx` own the settings subpanel;
-  `useBackupPreferences.ts` owns its single-flight draft/save lifecycle and
-  `settingsDraft.ts` validates every category before preparing a write. Settings
+  `useBackupPreferences.ts` owns per-setting autosave above the dialog lifecycle:
+  switches/selectors save on selection, numbers on blur/Enter, with confirmed toasts.
+  `settingsDraft.ts` validates input before revision-checked writes. Settings
   conflicts cross the privileged CLI as `EX_TEMPFAIL` and map to HTTP 409;
   human error wording is never used to select the response status.
 - `pi/scripts/backup/cloud_backup_requests.py` owns durable `backup-now.json`

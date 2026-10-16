@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useToast } from '../../components/ToastProvider';
 import { usePollingResource } from '../../hooks/usePollingResource';
 import {
   fetchBackupPriority,
@@ -22,16 +23,15 @@ export function BackupPriorityControls({
   const resource = usePollingResource({ load: fetchBackupPriority, intervalMs: 5000 });
   const status = resource.data;
   const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const { showToast } = useToast();
   const failure = error ?? resource.error?.message;
   async function run(action: () => Promise<unknown>, success: string) {
     await runAction(async () => {
       setError(null);
-      setMessage(null);
       try {
         await action();
         await Promise.all([resource.refresh(), refresh()]);
-        setMessage(success);
+        showToast(success);
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : 'Could not change priority.');
       }
@@ -51,7 +51,6 @@ export function BackupPriorityControls({
           {failure}
         </p>
       )}
-      {message && <p role="status">{message}</p>}
       {status ? (
         <>
           <PriorityChoices status={status} busy={busy} run={run} />

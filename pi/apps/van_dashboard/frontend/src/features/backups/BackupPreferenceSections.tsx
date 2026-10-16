@@ -49,7 +49,12 @@ export function BackupPreferenceSections({
                   value={editor.draft[field.id] ?? ''}
                   disabled={editor.busy}
                   error={editor.fieldErrors[field.id]}
-                  onChange={(value) => editor.change(field.id, value)}
+                  onChange={(value) => {
+                    editor.change(field.id, value);
+                    if (field.kind === 'toggle' || field.kind === 'hour')
+                      void editor.commit(field.id, value);
+                  }}
+                  onCommit={() => void editor.commit(field.id)}
                 />
               ))}
           </div>
@@ -68,60 +73,5 @@ export function BackupPreferenceSections({
         </section>
       )}
     </>
-  );
-}
-
-export function PreferenceFooter({
-  editor,
-  onClose,
-}: {
-  editor: PreferencesEditor;
-  onClose: () => void;
-}) {
-  const invalid = Object.keys(editor.fieldErrors).length;
-  return (
-    <footer className="backup-settings-footer">
-      {editor.discard ? (
-        <>
-          <span>
-            Discard {editor.count} unsaved {editor.count === 1 ? 'change' : 'changes'}?
-          </span>
-          <button type="button" className="secondary-button" onClick={editor.keepEditing}>
-            Keep editing
-          </button>
-          <button type="button" className="primary-button" onClick={onClose}>
-            Discard &amp; close
-          </button>
-        </>
-      ) : (
-        <>
-          <span
-            role="status"
-            title={invalid ? Object.values(editor.fieldErrors).join('\n') : undefined}
-          >
-            {editor.busy
-              ? 'Applying…'
-              : invalid
-                ? `Check ${invalid} ${invalid === 1 ? 'value' : 'values'}`
-                : editor.count
-                  ? `${editor.count} unsaved ${editor.count === 1 ? 'change' : 'changes'}`
-                  : editor.saved
-                    ? 'Saved · applies to the next run'
-                    : 'Changes apply to the next run'}
-          </span>
-          <button
-            type="button"
-            className="secondary-button"
-            disabled={editor.busy || !editor.count}
-            onClick={editor.cancel}
-          >
-            Cancel changes
-          </button>
-          <button type="submit" className="primary-button" disabled={!editor.canSave}>
-            Save changes
-          </button>
-        </>
-      )}
-    </footer>
   );
 }

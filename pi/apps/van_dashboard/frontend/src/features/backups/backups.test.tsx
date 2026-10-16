@@ -1,4 +1,13 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { ToastProvider } from '../../components/ToastProvider';
+import type { ReactNode } from 'react';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render as testingRender,
+  screen,
+  within,
+} from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { fetchBackupStatus } from './api';
@@ -34,6 +43,10 @@ beforeAll(() => {
     };
   }
 });
+
+function render(ui: ReactNode) {
+  return testingRender(ui, { wrapper: ToastProvider });
+}
 
 function BackupProbe({ sheetOpen }: { sheetOpen: boolean }) {
   const resource = useBackupStatus(sheetOpen);
