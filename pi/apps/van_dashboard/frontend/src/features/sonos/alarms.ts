@@ -84,12 +84,19 @@ export async function saveAlarm(draft: AlarmDraft, alarm: SonosAlarm | null) {
   return decode(resultSchema, payload, 'Sonos alarm save');
 }
 
-export async function changeAlarm(alarm: SonosAlarm, enabled?: boolean) {
-  const action = enabled === undefined ? 'delete' : 'enabled';
-  const payload = await postForm(`/api/speakers/alarms/${action}`, {
+export async function setAlarmEnabled(alarm: SonosAlarm, enabled: boolean) {
+  const payload = await postForm('/api/speakers/alarms/enabled', {
     id: alarm.id,
     revision: alarm.revision,
-    ...(enabled === undefined ? {} : { enabled: enabled ? '1' : '0' }),
+    enabled: enabled ? '1' : '0',
+  });
+  return decode(resultSchema, payload, 'Sonos alarm change');
+}
+
+export async function deleteAlarm(alarm: SonosAlarm) {
+  const payload = await postForm('/api/speakers/alarms/delete', {
+    id: alarm.id,
+    revision: alarm.revision,
   });
   return decode(resultSchema, payload, 'Sonos alarm change');
 }

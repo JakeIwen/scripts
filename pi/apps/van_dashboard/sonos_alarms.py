@@ -178,12 +178,17 @@ class SonosAlarmController:
             raise AlarmConflict("Alarm changed elsewhere. Reopen it before making changes.")
         return alarm
 
-    def change(self, alarm_id, revision, enabled=None):
+    def set_enabled(self, alarm_id, revision, enabled):
+        if not isinstance(enabled, bool):
+            raise ValueError("enabled must be a boolean")
         with self.lock:
             zone = self.sonos.coordinator()
             alarm = self._existing(zone, alarm_id, revision)
-            if enabled is None:
-                zone.alarmClock.DestroyAlarm([("ID", alarm_id)])
-            else:
-                alarm = replace(alarm, enabled=enabled)
-                zone.alarmClock.UpdateAlarm([("ID", alarm_id)] + alarm.arguments())
+            alarm = replace(alarm, enabled=enabled)
+            zone.alarmClock.UpdateAlarm([("ID", alarm_id)] + alarm.arguments())
+
+    def delete(self, alarm_id, revision):
+        with self.lock:
+            zone = self.sonos.coordinator()
+            self._existing(zone, alarm_id, revision)
+            zone.alarmClock.DestroyAlarm([("ID", alarm_id)])

@@ -48,11 +48,11 @@ def mutate_alarm():
         elif action == "enabled":
             if set(fields) != {"enabled"} or fields["enabled"] not in ("0", "1"):
                 raise ValueError("enabled must be 0 or 1")
-            alarms.change(alarm_id, revision, fields["enabled"] == "1")
+            alarms.set_enabled(alarm_id, revision, fields["enabled"] == "1")
         else:
             if fields:
                 raise ValueError("unexpected alarm deletion fields")
-            alarms.change(alarm_id, revision)
+            alarms.delete(alarm_id, revision)
     except AlarmConflict as exc:
         return api_error(exc, 409)
     except KeyError as exc:

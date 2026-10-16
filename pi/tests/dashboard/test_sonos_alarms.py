@@ -137,6 +137,15 @@ class AlarmTests(unittest.TestCase):
         self.assertEqual(self.post("save", fields).status_code, 409)
         self.assertEqual(self.clock.writes, [])
 
+    def test_incomplete_enable_command_cannot_delete(self):
+        alarm = self.snapshot()["alarms"][0]
+        with self.assertRaises(TypeError):
+            self.controller.set_enabled(alarm["id"], alarm["revision"])
+        with self.assertRaises(ValueError):
+            self.controller.set_enabled(alarm["id"], alarm["revision"], None)
+        self.assertEqual(len(self.snapshot()["alarms"]), 1)
+        self.assertEqual(self.clock.writes, [])
+
     def test_uncertain_write_is_not_retried_and_refresh_reads_actual_state(self):
         fields = self.fields()
         self.clock.fail_after_write = True

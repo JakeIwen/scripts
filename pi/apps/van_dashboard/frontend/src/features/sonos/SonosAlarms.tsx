@@ -4,11 +4,12 @@ import { usePollingResource } from '../../hooks/usePollingResource';
 import { useSingleFlightAction } from '../../hooks/useSingleFlightAction';
 import { AlarmEditor } from './AlarmEditor';
 import {
-  changeAlarm,
+  deleteAlarm,
   fetchAlarmFavorites,
   fetchAlarms,
   repeatLabel,
   saveAlarm,
+  setAlarmEnabled,
   type SonosAlarm,
 } from './alarms';
 import './alarms.css';
@@ -17,12 +18,14 @@ function AlarmRow({
   alarm,
   busy,
   onEdit,
-  onChange,
+  onEnabled,
+  onDelete,
 }: {
   alarm: SonosAlarm;
   busy: boolean;
   onEdit: () => void;
-  onChange: (enabled?: boolean) => void;
+  onEnabled: (enabled: boolean) => void;
+  onDelete: () => void;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   return (
@@ -45,7 +48,7 @@ function AlarmRow({
           disabled={busy}
           aria-pressed={alarm.enabled}
           aria-label={`${alarm.enabled ? 'Disable' : 'Enable'} alarm at ${alarm.start_time.slice(0, 5)} on ${alarm.room_name}`}
-          onClick={() => onChange(!alarm.enabled)}
+          onClick={() => onEnabled(!alarm.enabled)}
         >
           {alarm.enabled ? 'Disable' : 'Enable'}
         </button>
@@ -62,29 +65,40 @@ function AlarmRow({
         </button>
       </div>
       {confirmDelete && (
-        <div className="sonos-alarm-confirm">
-          <span>
-            Delete the {alarm.start_time.slice(0, 5)} alarm on {alarm.room_name}?
-          </span>
-          <button
-            type="button"
-            className="danger-button"
-            disabled={busy}
-            onClick={() => onChange()}
-          >
-            Confirm delete
-          </button>
-          <button
-            type="button"
-            className="secondary-button"
-            disabled={busy}
-            onClick={() => setConfirmDelete(false)}
-          >
-            Cancel
-          </button>
-        </div>
+        <AlarmDeleteConfirmation
+          alarm={alarm}
+          busy={busy}
+          onDelete={onDelete}
+          onCancel={() => setConfirmDelete(false)}
+        />
       )}
     </article>
+  );
+}
+
+function AlarmDeleteConfirmation({
+  alarm,
+  busy,
+  onDelete,
+  onCancel,
+}: {
+  alarm: SonosAlarm;
+  busy: boolean;
+  onDelete: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="sonos-alarm-confirm">
+      <span>
+        Delete the {alarm.start_time.slice(0, 5)} alarm on {alarm.room_name}?
+      </span>
+      <button type="button" className="danger-button" disabled={busy} onClick={onDelete}>
+        Confirm delete
+      </button>
+      <button type="button" className="secondary-button" disabled={busy} onClick={onCancel}>
+        Cancel
+      </button>
+    </div>
   );
 }
 
@@ -183,7 +197,8 @@ function SonosAlarmPanel() {
               alarm={alarm}
               busy={busy || !!resource.error || editing !== undefined}
               onEdit={() => setEditing(alarm)}
-              onChange={(enabled) => void perform(() => changeAlarm(alarm, enabled))}
+              onEnabled={(enabled) => void perform(() => setAlarmEnabled(alarm, enabled))}
+              onDelete={() => void perform(() => deleteAlarm(alarm))}
             />
           ))}
         </>
