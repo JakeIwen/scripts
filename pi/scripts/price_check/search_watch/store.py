@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from .parsers import SearchResult
-from .browser_refresh import SCHEMA as REFRESH_SCHEMA
+from .browser_refresh import SCHEMA as REFRESH_SCHEMA, migrate_retry_state
 
 
 SCHEMA = """
@@ -83,6 +83,7 @@ class SearchStore:
         self.connection.execute("PRAGMA journal_mode=WAL")
         try:
             self.connection.executescript(SCHEMA)
+            migrate_retry_state(self.connection, int(self.clock()))
             self.connection.commit()
         except Exception:
             self.connection.rollback()

@@ -256,6 +256,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   `pi/scripts/price_check/search_watch/browser_headers.json`. Preserve full captured
   Chromium headers without adding legacy Firefox defaults. See
   `pi/docs/dashboard/PRICE_CHECK.md`.
+  Recovery retries silently at six-minute intervals, stops after 50 consecutive
+  failed attempts and sends one ntfy alert. A successful search resets the
+  durable count; preserve claim fencing and idempotent failure acknowledgements.
 
 Some ignored secret directories, wireless profiles, and device configurations
 may contain credentials or private network data. Never print or commit secrets,

@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 import subprocess
 import tempfile
+import time
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -60,43 +61,83 @@ def refresh(host: str) -> bool:
     request = remote(host, "claim")
     if request is None:
         return False
-    if not isinstance(request, dict) or set(request) != {"search_id", "request_id", "url"}:
+    if (not isinstance(request, dict)
+            or set(request) != {"search_id", "request_id", "url", "attempt"}
+            or type(request["attempt"]) is not int or request["attempt"] < 1):
         raise ValueError("invalid refresh request")
-    recheck = remote(host, "recheck", request)
-    if recheck.get("ok") is not True or type(recheck.get("renewal_needed")) is not bool:
-        raise ValueError("invalid browser refresh recheck response")
-    if not recheck["renewal_needed"]:
-        print("eBay renewal no longer needed; existing browser headers retained.", flush=True)
-        return False
     try:
-        browser = subprocess.run(
-            [NODE, str(Path(__file__).with_name("ebay_browser_headers.mjs")), request["url"]],
-            capture_output=True, text=True, timeout=120, check=True,
-        )
-    except subprocess.CalledProcessError as error:
-        reason = "anonymous browser capture failed"
-        detail = (error.stderr or "").strip()
-        if re.fullmatch(
-            r"eBay anonymous browser refresh failed at [A-Za-z0-9 (),.-]{1,180}; "
-            r"existing headers retained\.", detail
-        ):
-            reason = detail
-        raise RefreshFailure(reason) from error
-    headers = json.loads(browser.stdout)["headers"]
-    result = remote(host, "install", {**request, "headers": headers})
-    if not result.get("ok"):
-        raise ValueError("Pi rejected the browser headers")
-    # Broad sync publishes this ignored secret, so keep it in step with the Pi.
-    sync_local_headers(headers)
-    print("eBay browser headers renewed and validated on vanpi.", flush=True)
-    if result.get("check_failed"):
-        print("Headers renewed, but the follow-up result check or alert failed.", flush=True)
-    return True
+        recheck = remote(host, "recheck", request)
+        if recheck.get("ok") is not True or type(recheck.get("renewal_needed")) is not bool:
+            raise ValueError("invalid browser refresh recheck response")
+        if not recheck["renewal_needed"]:
+            print("eBay renewal no longer needed; existing browser headers retained.", flush=True)
+            return False
+        try:
+            browser = subprocess.run(
+                [NODE, str(Path(__file__).with_name("ebay_browser_headers.mjs")), request["url"]],
+                capture_output=True, text=True, timeout=120, check=True,
+            )
+        except subprocess.CalledProcessError as error:
+            reason = "anonymous browser capture failed"
+            detail = (error.stderr or "").strip()
+            if re.fullmatch(
+                r"eBay anonymous browser refresh failed at [A-Za-z0-9 (),.-]{1,180}; "
+                r"existing headers retained\.", detail
+            ):
+                reason = detail
+            raise RefreshFailure(reason) from error
+        headers = json.loads(browser.stdout)["headers"]
+        result = remote(host, "install", {**request, "headers": headers})
+        if not result.get("ok"):
+            raise ValueError("Pi rejected the browser headers")
+        # Broad sync publishes this ignored secret, so keep it in step with the Pi.
+        sync_local_headers(headers)
+        print("eBay browser headers renewed and validated on vanpi.", flush=True)
+        if result.get("check_failed"):
+            print("Headers renewed, but the follow-up result check or alert failed.", flush=True)
+        return True
+    except Exception:
+        try:
+            remote(host, "failed", request)
+        except Exception:
+            print("Deal Watch outcome acknowledgement deferred; the attempt lease will expire.", flush=True)
+        raise
+
+
+def run_worker(host: str, *, once=False, sleep=time.sleep) -> int:
+    while True:
+        failed = False
+        try:
+            refresh(host)
+        except RefreshFailure as error:
+            print(f"Deal Watch refresh deferred: {error}.", flush=True)
+            failed = True
+        except Exception as error:
+            # Exceptions can include captured secret payloads: report only the type.
+            print(f"Deal Watch refresh deferred ({type(error).__name__}).", flush=True)
+            failed = True
+        if once:
+            return int(failed)
+        try:
+            status = remote(host, "status")
+            if not isinstance(status, dict) or set(status) != {"retry_after"}:
+                raise ValueError("invalid retry status")
+            delay = status["retry_after"]
+            if delay is None:
+                return int(failed)
+            if type(delay) is not int or delay < 0:
+                raise ValueError("invalid retry delay")
+        except Exception as error:
+            print(f"Deal Watch retry scheduling deferred ({type(error).__name__}).", flush=True)
+            return 1
+        # Re-read Pi time after sleep/wake without bursting missed attempts.
+        sleep(max(1, min(delay, 60)))
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="pi@vanpi.lan")
+    parser.add_argument("--once", action="store_true", help="process at most one due attempt")
     args = parser.parse_args()
     state = ROOT / "tmp/deal-watch-refresh"
     state.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -105,16 +146,7 @@ def main() -> int:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return 0
-        try:
-            refresh(args.host)
-            return 0
-        except RefreshFailure as error:
-            print(f"Deal Watch refresh deferred: {error}; will retry.", flush=True)
-            return 1
-        except Exception as error:
-            # Exceptions can include captured secret payloads: report only the type.
-            print(f"Deal Watch refresh deferred ({type(error).__name__}); will retry.", flush=True)
-            return 1
+        return run_worker(args.host, once=args.once)
 
 
 if __name__ == "__main__":

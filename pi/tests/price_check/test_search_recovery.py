@@ -1,10 +1,17 @@
 import tempfile
+import sqlite3
+import json
+import os
+import subprocess
+import sys
+from contextlib import closing
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from pi.scripts.price_check.search_watch.browser_refresh import (
-    RETRY_SECONDS, claim_refresh, request_refresh,
+    MAX_FAILURES, RETRY_SECONDS, claim_refresh, notify_exhausted,
+    record_failure, request_refresh, retry_status,
 )
 from pi.scripts.price_check.search_watch.refresh_install import install_headers, recheck_headers
 from pi.scripts.price_check.search_watch.service import (
@@ -97,14 +104,155 @@ class SearchRecoveryTests(unittest.TestCase):
         self.now[0] += RETRY_SECONDS
         self.assertEqual(claim_refresh(self.store)["request_id"], first["request_id"])
 
-    def test_parser_error_and_dry_run_do_not_queue_refresh(self):
-        with self.assertRaises(SearchParserError):
-            check_watch(self.store, self.watch, fetcher=lambda _: "unknown markup")
+    def test_fifty_failures_stop_recovery_and_alert_once_even_after_restart(self):
+        request_refresh(self.store, self.watch)
+        alert = mock.Mock()
+        for attempt in range(1, MAX_FAILURES + 1):
+            request = claim_refresh(self.store)
+            self.assertEqual(request["attempt"], attempt)
+            notify_exhausted(self.store, alert)
+            alert.assert_not_called()
+            record_failure(self.store, request)
+            record_failure(self.store, request)
+            request_refresh(self.store, self.watch)
+            notify_exhausted(self.store, alert)
+            if attempt < MAX_FAILURES:
+                alert.assert_not_called()
+                self.assertEqual(retry_status(self.store)["retry_after"], RETRY_SECONDS)
+            self.assertIsNone(claim_refresh(self.store))
+            if attempt == 25:
+                self.store.close()
+                self.store = SearchStore(self.db, clock=lambda: self.now[0])
+            self.now[0] += RETRY_SECONDS
+        alert.assert_called_once()
+        self.assertEqual(alert.call_args.args[1], 50)
+        self.assertIsNone(retry_status(self.store)["retry_after"])
+        request_refresh(self.store, self.watch)
         self.assertIsNone(claim_refresh(self.store))
+        notify_exhausted(self.store, alert)
+        alert.assert_called_once()
+        self.check(notify=False)
+        request_refresh(self.store, self.watch)
+        self.assertEqual(claim_refresh(self.store)["attempt"], 1)
+
+    def test_expired_attempt_counts_once_and_fences_old_submissions(self):
+        first = self.request(with_headers=False)
+        self.now[0] += RETRY_SECONDS * 10
+        second = claim_refresh(self.store)
+        self.assertEqual(second["attempt"], 2)
+        record_failure(self.store, first)
+        with self.assertRaisesRegex(ValueError, "no longer current"):
+            install_headers(self.store, {**first, "headers": "User-Agent: new\nCookie: new=x\n"}, self.headers)
+        record_failure(self.store, second)
+        self.now[0] += RETRY_SECONDS
+        self.assertEqual(claim_refresh(self.store)["attempt"], 3)
+
+    def test_attempt_expiring_during_validation_cannot_replace_headers(self):
+        request = self.request()
+        original = self.headers.read_bytes()
+
+        def delayed_page(*_args, **_kwargs):
+            self.now[0] += RETRY_SECONDS
+            return EBAY_PAGE
+
+        with mock.patch("pi.scripts.price_check.search_watch.refresh_install.fetch_ebay", side_effect=delayed_page):
+            with self.assertRaisesRegex(ValueError, "existing headers preserved"):
+                install_headers(self.store, request, self.headers)
+        self.assertEqual(self.headers.read_bytes(), original)
+        self.assertEqual(list(self.root.glob(".ebay-refresh-*")), [])
+
+    def test_interval_is_measured_from_attempt_start(self):
+        request = self.request(with_headers=False)
+        self.now[0] += 80
+        record_failure(self.store, request)
+        self.assertEqual(retry_status(self.store)["retry_after"], RETRY_SECONDS - 80)
+        self.assertIsNone(claim_refresh(self.store))
+        self.now[0] += RETRY_SECONDS - 80
+        self.assertEqual(claim_refresh(self.store)["attempt"], 2)
+
+    def test_expired_fiftieth_attempt_alerts_and_retries_failed_notification_only(self):
+        request_refresh(self.store, self.watch)
+        for _ in range(MAX_FAILURES - 1):
+            record_failure(self.store, claim_refresh(self.store))
+            self.now[0] += RETRY_SECONDS
+        last = claim_refresh(self.store)
+        self.assertEqual(last["attempt"], MAX_FAILURES)
+        alert = mock.Mock(side_effect=[RuntimeError("offline"), None])
+        notify_exhausted(self.store, alert)
+        alert.assert_not_called()
+        self.now[0] += RETRY_SECONDS
+        self.assertIsNone(claim_refresh(self.store))
+        notify_exhausted(self.store, alert)
+        self.assertEqual(alert.call_count, 1)
+        self.assertEqual(retry_status(self.store)["retry_after"], RETRY_SECONDS)
+        notify_exhausted(self.store, alert)
+        self.assertEqual(alert.call_count, 1)
+        self.now[0] += RETRY_SECONDS
+        notify_exhausted(self.store, alert)
+        self.assertEqual(alert.call_count, 2)
+        self.assertIsNone(retry_status(self.store)["retry_after"])
+        self.assertIsNone(claim_refresh(self.store))
+
+    def test_explicit_restart_invalidates_old_attempt(self):
+        old = self.request(with_headers=False)
+        request_refresh(self.store, self.watch, restart=True)
+        new = claim_refresh(self.store)
+        self.assertNotEqual(new["request_id"], old["request_id"])
+        record_failure(self.store, old)
+        record_failure(self.store, new)
+        self.now[0] += RETRY_SECONDS
+        self.assertEqual(claim_refresh(self.store)["attempt"], 2)
+
+    def test_migrates_old_queue_without_inventing_failures(self):
+        self.store.close()
+        with closing(sqlite3.connect(self.db)) as connection, connection:
+            connection.execute("DROP TABLE search_browser_refresh")
+            connection.execute("""CREATE TABLE search_browser_refresh (
+                search_id INTEGER PRIMARY KEY REFERENCES search_watches(id) ON DELETE CASCADE,
+                request_id TEXT NOT NULL, requested_at INTEGER NOT NULL,
+                next_attempt_at INTEGER NOT NULL DEFAULT 0)""")
+            connection.execute("INSERT INTO search_browser_refresh VALUES (?, ?, ?, ?)",
+                               (self.watch["id"], "c" * 32, self.now[0], self.now[0] + 1800))
+        self.store = SearchStore(self.db, clock=lambda: self.now[0])
+        self.assertEqual(retry_status(self.store)["retry_after"], RETRY_SECONDS)
+        self.now[0] += RETRY_SECONDS
+        request = claim_refresh(self.store)
+        self.assertEqual((request["request_id"], request["attempt"]), ("c" * 32, 1))
+
+    def test_bridge_reports_fiftieth_failure_through_ntfy_only_once(self):
+        request_refresh(self.store, self.watch)
+        for _ in range(MAX_FAILURES - 1):
+            record_failure(self.store, claim_refresh(self.store))
+            self.now[0] += RETRY_SECONDS
+        last = claim_refresh(self.store)
+        sender = self.root / "ntfy-stub"
+        sender.write_text('#!/bin/sh\nprintf "%s\\n" "$1" >> "$ALERT_LOG"\n')
+        sender.chmod(0o700)
+        log = self.root / "alerts"
+        bridge = Path(__file__).parents[2] / "scripts/price_check/ebay_refresh.py"
+        env = {**os.environ, "NTFY_SEND_BIN": str(sender), "ALERT_LOG": str(log)}
+        for _ in range(2):
+            result = subprocess.run(
+                [sys.executable, str(bridge), "--db", str(self.db), "failed"],
+                input=json.dumps(last), capture_output=True, text=True, env=env, check=True,
+            )
+            self.assertTrue(json.loads(result.stdout)["ok"])
+        self.assertEqual(len(log.read_text().splitlines()), 1)
+        self.assertIn("50", log.read_text())
+        status = subprocess.run(
+            [sys.executable, str(bridge), "--db", str(self.db), "status"],
+            capture_output=True, text=True, env=env, check=True,
+        )
+        self.assertIsNone(json.loads(status.stdout)["retry_after"])
+
+    def test_parser_error_queues_a_recheck_but_dry_run_does_not(self):
         with self.assertRaises(SearchCookieError):
             check_watch(self.store, self.watch, record=False,
                         fetcher=lambda _: "<title>Pardon Our Interruption</title>")
         self.assertIsNone(claim_refresh(self.store))
+        with self.assertRaises(SearchParserError):
+            check_watch(self.store, self.watch, fetcher=lambda _: "unknown markup")
+        self.assertEqual(claim_refresh(self.store)["attempt"], 1)
 
     def test_successful_check_cancels_unneeded_refresh(self):
         self.request()

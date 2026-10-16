@@ -201,7 +201,7 @@ def check_watch(
         results = _fetch_and_parse(watch, fetcher)
     except SearchWatchError as error:
         failed_watch = store.record_error(watch["id"], str(error)) if record else watch
-        if record and isinstance(error, SearchCookieError):
+        if record:
             request_refresh(store, watch)
         if notify and notify_error:
             try:

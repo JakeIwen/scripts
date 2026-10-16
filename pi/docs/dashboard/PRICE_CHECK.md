@@ -28,26 +28,42 @@ Do not use a logged-in eBay session.
 
 ### Automatic renewal
 
-A rejected/gated check queues a durable request in `search_browser_refresh` in
+A failed eBay check queues a durable request in `search_browser_refresh` in
 the existing private database. The Mac's `com.jacobr.deal-watch-refresh`
 LaunchAgent polls over SSH to `vanpi.lan` every five minutes. It uses the existing
 clean headless browser MCP service at `http://localhost:8931/mcp`, with an
 isolated signed-out context and its own private anonymous browser state. It never
 launches a browser or accesses daily Chrome.
 The Mac must be awake and logged in, with the managed clean service available.
+The five-minute LaunchAgent discovers new work; once recovery starts, the worker
+stays running and follows the Pi's six-minute retry schedule.
 
 The browser opens the saved search and allows any automatic verification to
 finish. A bare 403 response starts eBay's anonymous verification flow explicitly.
 It waits for real listings, the completed page load, and session-cookie updates,
 then confirms the exact saved-search parameters and signed-out state. A CAPTCHA or persistent rejection
 leaves the request pending; the hook does not solve interactive challenges.
-Attempts are limited to one per thirty minutes, including crashes or network
-failures. Successful ordinary checks cancel obsolete requests automatically.
+Attempts start six minutes apart, up to 50 consecutive failures per search
+(about five hours for one pending search while both hosts are available).
+The queue shares this cadence across searches and rotates due searches rather
+than starting parallel browser renewals. A completed failure or expired attempt
+lease counts once; idle polls and missed intervals during sleep do not count.
+Attempt numbers fence late submissions and duplicate failure reports. Counts
+survive worker restarts. Successful ordinary checks cancel obsolete requests
+and reset the failure streak automatically.
 Each claimed attempt first checks the saved search with the existing headers on
 the Pi. If they work, normal results and notifications are recorded and renewal
 is cancelled without opening a browser or replacing either header file. Only
 another gated response starts browser renewal; network or parser failures defer
 the attempt. A 403 is a rejected request, not proof that the cookie expired.
+
+There are no immediate eBay failure ntfy alerts. Failure 50 sends one exhaustion
+alert and stops automatic recovery for that search. Delivery failures retry the
+alert without restarting browser attempts. Regular scheduled checks continue;
+a successful check clears the exhausted state, or the explicit bridge `request`
+command can restart recovery. Alerts for new listings and product-price alerts
+retain their existing behavior. Errors and the last good results remain visible
+in Deal Watch throughout recovery.
 
 Chromium's user agent, language and client hints use a consistent desktop profile.
 The hook retains the successful document request's allowed headers, with its
@@ -74,7 +90,7 @@ zsh macbook/scripts/install_deal_watch_refresh.zsh
 Run one pending renewal manually:
 
 ```bash
-python3 macbook/scripts/deal_watch_refresh.py
+python3 macbook/scripts/deal_watch_refresh.py --once
 ```
 
 Inspect `tmp/deal-watch-refresh/worker.log` for non-secret success/failure status,
@@ -82,10 +98,12 @@ including the failing browser phase or Pi exception class. The private,
 mode-0600 `tmp/deal-watch-refresh/browser-state.json` contains only this hook's
 anonymous session and must not be committed or printed.
 The Pi bridge is `pi/scripts/price_check/ebay_refresh.py`; `request <search-id>`
-queues a deliberate renewal, `claim` leases a pending request with the cooldown,
+starts or explicitly restarts recovery, `claim` leases a pending attempt,
 `recheck` tests whether that request still needs renewal using the existing
-headers, and `install` consumes the private JSON submission. All normal checks retain
-the existing schedule. Cookie renewal does not change ntfy delivery or retries.
+headers, `failed` acknowledges a failed attempt idempotently, `status` returns
+the next retry delay, and `install` consumes the private JSON submission.
+The bridge owns the retry counter and exhaustion notification. All normal checks
+retain the existing schedule.
 
 ### Manual fallback
 
@@ -111,13 +129,11 @@ the existing schedule. Cookie renewal does not change ntfy delivery or retries.
 
 The secret file is ignored by Git and deploys to
 `/home/pi/secrets/.ebay_headers`. The checker passes the file itself to curl;
-the cookie is not placed in the command arguments. Browser cookies expire, so
-a browser-verification, rejected request, redirect trap, access-denied page, or
-other clearly gated response sends an **update eBay browser cookie**
-notification through `NTFY_PRICE_URL`. Network/download failures send a
-**failed to load** notification. Unrecognized Amazon or eBay result markup is
-recorded for the Deal Watch UI without sending a notification. Every failure
-preserves the most recent successful price or query results.
+the cookie is not placed in the command arguments. Gated responses, download
+failures and unrecognized eBay markup enter the silent recovery cycle above.
+Only 50 consecutive failed recovery attempts produce an ntfy failure alert
+through `NTFY_PRICE_URL`. Unrecognized Amazon markup remains dashboard-only.
+Every failure preserves the most recent successful price or query results.
 
 ## Command line
 

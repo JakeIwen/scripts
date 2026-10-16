@@ -1,13 +1,19 @@
 import importlib.util
+import contextlib
+import io
 import json
 import os
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import unittest
 from decimal import Decimal
 from pathlib import Path
 from unittest import mock
+from types import SimpleNamespace
+
+from pi.tests.price_check.test_search_watch import EBAY_PAGE
 
 
 SCRIPT_DIR = Path(__file__).parents[2] / "scripts" / "price_check"
@@ -51,35 +57,50 @@ class SearchNotificationTests(unittest.TestCase):
     }
 
     @mock.patch.object(price_check, "send_ntfy")
-    def test_sends_actionable_titles_for_each_failure_class(self, send):
+    def test_cli_alerts_only_on_new_results_while_errors_queue_recovery(self, send):
         cases = (
-            (
-                price_check.SearchCookieError("request rejected"),
-                "update eBay browser cookie",
-                "cookie,warning",
-            ),
-            (
-                price_check.SearchLoadError("timed out"),
-                "eBay search failed to load",
-                "warning",
-            ),
+            (subprocess.CalledProcessError(22, ["curl"], stderr="curl: (22) The requested URL returned error: 403"), 1),
+            (subprocess.CalledProcessError(28, ["curl"], stderr="curl: (28) Operation timed out"), 1),
+            (SimpleNamespace(stdout="unknown markup"), 1),
+            (SimpleNamespace(stdout=EBAY_PAGE), 0),
         )
-        for error, title_fragment, tags in cases:
-            with self.subTest(error=type(error).__name__):
+        for response, expected in cases:
+            with self.subTest(response=response), tempfile.TemporaryDirectory() as directory:
                 send.reset_mock()
-                price_check.send_search_error(self.WATCH, error)
-                title, message, priority, actual_tags = send.call_args.args
-                self.assertIn(title_fragment, title)
-                self.assertIn(str(error), message)
-                self.assertEqual(priority, "high")
-                self.assertEqual(actual_tags, tags)
+                db = Path(directory) / "prices.sqlite3"
+                headers = Path(directory) / "headers"
+                headers.write_text("User-Agent: test\nCookie: anonymous=value\n")
+                headers.chmod(0o600)
+                with price_check.SearchStore(db) as store:
+                    store.add_watch("ebay", self.WATCH["url"], self.WATCH["display_title"])
+                args = [str(SCRIPT), "--db", str(db), "--json", "search-check", "all"]
+                with mock.patch.object(sys, "argv", args), \
+                     mock.patch.dict(os.environ, {"EBAY_HEADERS_FILE": str(headers)}), \
+                     mock.patch("subprocess.run", return_value=response,
+                                side_effect=response if isinstance(response, Exception) else None), \
+                     contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(price_check.main(), expected)
+                with price_check.SearchStore(db) as store:
+                    self.assertEqual(store.list_watches()[0]["last_status"], "error" if expected else "ok")
+                    queued = store.connection.execute(
+                        "SELECT failures FROM search_browser_refresh"
+                    ).fetchone()
+                    if expected:
+                        self.assertEqual(queued[0], 0)
+                        send.assert_not_called()
+                    else:
+                        self.assertIsNone(queued)
+                        send.assert_called_once()
+                        self.assertIn("2 new eBay results", send.call_args.args[0])
 
     @mock.patch.object(price_check, "send_ntfy")
-    def test_parser_markup_errors_are_dashboard_only(self, send):
-        price_check.send_search_error(
-            self.WATCH, price_check.SearchParserError("markup changed")
-        )
-        send.assert_not_called()
+    def test_exhaustion_alert_reports_recovery_limit(self, send):
+        price_check.send_search_exhausted(self.WATCH, 50)
+        title, message, priority, tags = send.call_args.args
+        self.assertIn("50", title)
+        self.assertIn("50 consecutive", message)
+        self.assertIn("paused", message)
+        self.assertEqual((priority, tags), ("high", "warning"))
 
 
 class PriceStoreTests(unittest.TestCase):
