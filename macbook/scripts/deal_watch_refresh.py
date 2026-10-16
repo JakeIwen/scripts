@@ -1,22 +1,21 @@
 #!/usr/bin/env python3
-"""Poll the Pi's refresh hook and renew headers through the managed clean browser."""
+"""Recover Pi saved searches using pages loaded in the managed clean browser."""
 
 from __future__ import annotations
 
 import argparse
 import fcntl
 import json
-import os
 import re
 from pathlib import Path
 import subprocess
-import tempfile
 import time
 
 
 ROOT = Path(__file__).resolve().parents[2]
 REMOTE = "/usr/bin/python3 /home/pi/scripts/price_check/ebay_refresh.py"
 NODE = "/Users/jacobr/.nvm/versions/node/v22.22.0/bin/node"
+LIMITS = json.loads((ROOT / "pi/scripts/price_check/search_watch/browser_capture_limits.json").read_text())
 
 
 class RefreshFailure(RuntimeError):
@@ -24,12 +23,15 @@ class RefreshFailure(RuntimeError):
 
 
 def remote(host: str, command: str, payload=None):
+    encoded = json.dumps(payload, ensure_ascii=False) if payload is not None else None
+    if encoded is not None and len(encoded.encode("utf-8")) > LIMITS["max_submission_bytes"]:
+        raise ValueError("browser submission is too large")
     try:
         result = subprocess.run(
             ["/usr/bin/ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
              "-o", "StrictHostKeyChecking=yes", host, f"{REMOTE} {command}"],
-            input=json.dumps(payload) if payload is not None else None,
-            text=True, capture_output=True, timeout=90, check=True,
+            input=encoded,
+            text=True, encoding="utf-8", capture_output=True, timeout=90, check=True,
         )
     except subprocess.CalledProcessError as error:
         reason = f"Pi {command} failed"
@@ -42,19 +44,6 @@ def remote(host: str, command: str, payload=None):
             pass
         raise RefreshFailure(reason) from error
     return json.loads(result.stdout)
-
-
-def sync_local_headers(headers: str) -> None:
-    destination = ROOT / "pi/secrets/.ebay_headers"
-    descriptor, temporary = tempfile.mkstemp(prefix=".ebay-refresh-", dir=destination.parent)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as target:
-            target.write(headers)
-            target.flush()
-            os.fsync(target.fileno())
-        os.replace(temporary, destination)
-    finally:
-        Path(temporary).unlink(missing_ok=True)
 
 
 def refresh(host: str) -> bool:
@@ -75,26 +64,29 @@ def refresh(host: str) -> bool:
         try:
             browser = subprocess.run(
                 [NODE, str(Path(__file__).with_name("ebay_browser_headers.mjs")), request["url"]],
-                capture_output=True, text=True, timeout=120, check=True,
+                capture_output=True, text=True, encoding="utf-8", timeout=120, check=True,
             )
         except subprocess.CalledProcessError as error:
             reason = "anonymous browser capture failed"
             detail = (error.stderr or "").strip()
             if re.fullmatch(
-                r"eBay anonymous browser refresh failed at [A-Za-z0-9 (),.-]{1,180}; "
-                r"existing headers retained\.", detail
+                r"eBay anonymous browser recovery failed at [A-Za-z0-9 (),.-]{1,180}; "
+                r"existing results retained\.", detail
             ):
                 reason = detail
             raise RefreshFailure(reason) from error
-        headers = json.loads(browser.stdout)["headers"]
-        result = remote(host, "install", {**request, "headers": headers})
-        if not result.get("ok"):
-            raise ValueError("Pi rejected the browser headers")
-        # Broad sync publishes this ignored secret, so keep it in step with the Pi.
-        sync_local_headers(headers)
-        print("eBay browser headers renewed and validated on vanpi.", flush=True)
-        if result.get("check_failed"):
-            print("Headers renewed, but the follow-up result check or alert failed.", flush=True)
+        page = json.loads(browser.stdout)
+        if (not isinstance(page, dict) or set(page) != {"final_url", "html"}
+                or not isinstance(page["final_url"], str) or not isinstance(page["html"], str)):
+            raise ValueError("invalid browser page response")
+        result = remote(host, "results", {**request, **page})
+        if (not isinstance(result, dict) or set(result) != {"ok", "result_count", "notification_failed"}
+                or result["ok"] is not True or type(result["result_count"]) is not int
+                or result["result_count"] < 0 or type(result["notification_failed"]) is not bool):
+            raise ValueError("Pi rejected the browser results")
+        print("Browser search results recorded on vanpi without another eBay request.", flush=True)
+        if result.get("notification_failed"):
+            print("Search results recovered, but the new-listing alert failed.", flush=True)
         return True
     except Exception:
         try:

@@ -246,15 +246,19 @@ compare it with this checkout. Deployed files may differ from the repository.
   existing normalized device-tree helpers in `van_dashboard_block_devices.py`.
   Root usage comes from mounted `lsblk` counters or a read-only, label-verified
   ext4 superblock probe. Never mount a spare merely to render its usage.
-- Deal Watch cookie renewal: `pi/scripts/price_check/search_watch/browser_refresh.py`
-  owns the durable request queue and request contract; `refresh_install.py`
-  validates submitted headers on the Pi before replacement. The bridge is
+- Deal Watch recovery: `pi/scripts/price_check/search_watch/browser_refresh.py`
+  owns the durable request queue and request contract. `browser_results.py` owns
+  the bounded HTML submission/receipt contract; `browser_capture_limits.json`
+  shares byte limits across hosts. Browser recovery records the captured page
+  through `service.apply_search_results` without another eBay request or cookie
+  replacement. `refresh_install.py` retains existing-header rechecks and the
+  legacy explicit header installer. The bridge is
   `pi/scripts/price_check/ebay_refresh.py`; the Mac polling worker and managed
   clean-browser client are `macbook/scripts/deal_watch_refresh.py` and
   `macbook/scripts/ebay_browser_headers.mjs`. Browser session/verification code is
-  `macbook/scripts/deal_watch_browser.mjs`; the shared header-name contract is
-  `pi/scripts/price_check/search_watch/browser_headers.json`. Preserve full captured
-  Chromium headers without adding legacy Firefox defaults. See
+  `macbook/scripts/deal_watch_browser.mjs`; its anonymous cookies stay on the Mac.
+  `pi/scripts/price_check/search_watch/browser_headers.json` remains the legacy
+  header allowlist. Preserve Chromium headers without Firefox defaults. See
   `pi/docs/dashboard/PRICE_CHECK.md`.
   Recovery retries silently at six-minute intervals, stops after 50 consecutive
   failed attempts and sends one ntfy alert. A successful search resets the

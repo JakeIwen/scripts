@@ -35,35 +35,33 @@ export async function createAnonymousPage(managedPage, options) {
   }
 }
 
-export async function readSavedSearch(page, url) {
+export async function readSavedSearch(page, url, maxHtmlBytes) {
   const responses = [];
-  let successfulRequest;
+  let documentStatus;
   page.on('response', response => {
     if (!response.request().isNavigationRequest() || response.request().frame() !== page.mainFrame()) return;
     responses.push(response.status());
-    if (response.status() === 200 && response.url().startsWith('https://www.ebay.com/sch/i.html?')) {
-      successfulRequest = response.request().allHeaders();
-    }
+    documentStatus = response.status();
   });
   let step = 'opening the saved search';
   try {
-    const first = await page.goto(url, {waitUntil: 'domcontentloaded', timeout: 20000});
+    const first = await page.goto(url, {waitUntil: 'commit', timeout: 20000});
     // A bare 403 never runs verification. Do not interrupt a challenge already running.
     if (first.status() === 403) {
       step = 'anonymous browser verification';
       await page.goto('https://www.ebay.com/splashui/challenge?ap=1&appName=orch&ru=' +
-        encodeURIComponent(url), {waitUntil: 'domcontentloaded', timeout: 20000});
+        encodeURIComponent(url), {waitUntil: 'commit', timeout: 20000});
     }
     step = 'waiting for listings';
-    await page.waitForFunction(() => location.pathname === '/sch/i.html' && (
+    await page.waitForFunction(() => document.readyState !== 'loading' && location.pathname === '/sch/i.html' && (
       document.querySelector('.srp-results, .srp-river-results, .srp-save-null-search') ||
       document.title === 'Error Page | eBay'
     ), null, {timeout: 45000});
     if (!await page.locator('.srp-results, .srp-river-results, .srp-save-null-search').count()) {
       throw new Error('Saved search was rejected');
     }
-    step = 'waiting for session cookies';
-    await page.waitForLoadState('load', {timeout: 15000});
+    step = 'waiting for rendered results';
+    // The parsed document is enough; image/ad completion is unrelated to results.
     await page.waitForTimeout(2000);
     const sameSearch = await page.evaluate(expected => {
       const actual = new URL(location.href), wanted = new URL(expected);
@@ -77,11 +75,16 @@ export async function readSavedSearch(page, url) {
     if (!/sign in/i.test(await page.locator('#gh').innerText({timeout: 5000}))) {
       throw new Error('Signed-out state not confirmed');
     }
-    const headers = {...await successfulRequest};
-    const cookies = await page.context().cookies(url);
-    headers.cookie = cookies.map(cookie => cookie.name + '=' + cookie.value).join('; ');
-    if (!headers?.cookie || !headers['user-agent']) throw new Error('Missing document headers');
-    return {requestHeaders: headers};
+    if (documentStatus !== 200) throw new Error('No successful document response');
+    step = 'capturing search results';
+    const html = await page.evaluate(limit => {
+      const document = window.document.documentElement.cloneNode(true);
+      document.querySelectorAll('script, style, noscript, iframe, template, meta, link, input[type="hidden"]').forEach(node => node.remove());
+      const html = document.outerHTML;
+      if (new TextEncoder().encode(html).byteLength > limit) throw new Error('Browser page is too large');
+      return html;
+    }, maxHtmlBytes);
+    return {final_url: page.url(), html};
   } catch {
     return {failedStep: step, responses: responses.slice(-8)};
   }
@@ -90,7 +93,7 @@ export async function readSavedSearch(page, url) {
 export async function captureAnonymousSession(managedPage, options) {
   const {context, page} = await createAnonymousPage(managedPage, options);
   try {
-    const result = await readSavedSearch(page, options.url);
+    const result = await readSavedSearch(page, options.url, options.maxHtmlBytes);
     if (!result.failedStep) await context.storageState({path: options.candidateState});
     return result;
   } finally {
@@ -107,15 +110,15 @@ export function browserScript(options) {
   }`;
 }
 
-export function serializeRequestHeaders(headers, schema) {
-  if (!headers || typeof headers !== 'object') throw new Error('Missing request headers');
-  const allowed = new Set([...schema.required, ...schema.optional]);
-  const entries = Object.entries(headers).filter(([name]) => allowed.has(name));
-  if (schema.required.some(name => !headers[name])) throw new Error('Missing required headers');
-  if (entries.some(([, value]) => typeof value !== 'string' || !value || /[\r\n\0]/.test(value))) {
-    throw new Error('Invalid request header');
+export function serializeBrowserPage(page, limits) {
+  if (!page || typeof page !== 'object' || Object.keys(page).sort().join(',') !== 'final_url,html') {
+    throw new Error('Invalid browser page');
   }
-  const text = entries.map(([name, value]) => `${name}: ${value}`).join('\n') + '\n';
-  if (Buffer.byteLength(text) > 65536) throw new Error('Request headers are too large');
+  if (typeof page.html !== 'string' || !page.html || Buffer.byteLength(page.html) > limits.max_html_bytes ||
+      typeof page.final_url !== 'string' || !page.final_url || page.final_url.length > limits.max_url_characters) {
+    throw new Error('Invalid browser page fields');
+  }
+  const text = JSON.stringify(page);
+  if (Buffer.byteLength(text) > limits.max_submission_bytes) throw new Error('Browser submission is too large');
   return text;
 }

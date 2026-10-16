@@ -23,6 +23,8 @@ class BrowserRefreshWorkerTests(unittest.TestCase):
         "attempt": 1,
     }
     NEEDS_RENEWAL = {"ok": True, "renewal_needed": True}
+    PAGE = {"final_url": REQUEST["url"], "html": '<ul class="srp-results">Example</ul>'}
+    RECEIPT = {"ok": True, "result_count": 2, "notification_failed": False}
 
     @mock.patch.object(worker, "remote", return_value=None)
     @mock.patch.object(worker.subprocess, "run")
@@ -36,41 +38,48 @@ class BrowserRefreshWorkerTests(unittest.TestCase):
         self.assertNotIn("private=value", " ".join(run.call_args.args[0]))
         self.assertIn("private=value", run.call_args.kwargs["input"])
 
-    def test_rejected_remote_install_does_not_replace_local_secret(self):
-        with mock.patch.object(worker, "remote", side_effect=[self.REQUEST, self.NEEDS_RENEWAL, {"ok": False}, {"ok": True}]), \
+    def test_rejected_browser_results_report_failure_without_replacing_headers(self):
+        with mock.patch.object(worker, "remote", side_effect=[self.REQUEST, self.NEEDS_RENEWAL, {"ok": False}, {"ok": True}]) as remote, \
              mock.patch.object(worker.subprocess, "run", return_value=SimpleNamespace(
-                 stdout=json.dumps({"headers": "Cookie: private=value"}))), \
-             mock.patch.object(worker, "sync_local_headers") as sync:
+                 stdout=json.dumps(self.PAGE))):
             with self.assertRaises(ValueError):
                 worker.refresh("pi@vanpi.lan")
-            sync.assert_not_called()
+        self.assertEqual(remote.call_args_list[-1].args, ("pi@vanpi.lan", "failed", self.REQUEST))
 
-    def test_success_updates_private_local_copy_without_logging_cookie(self):
+    def test_success_submits_browser_page_and_leaves_local_credentials_unchanged(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "pi/secrets").mkdir(parents=True)
+            headers = root / "pi/secrets/.ebay_headers"
+            headers.write_text("Cookie: private=value")
+            before = headers.read_bytes(), headers.stat().st_mtime_ns
             output = io.StringIO()
             with mock.patch.object(worker, "ROOT", root), \
-                 mock.patch.object(worker, "remote", side_effect=[self.REQUEST, self.NEEDS_RENEWAL, {"ok": True}]), \
+                 mock.patch.object(worker, "remote", side_effect=[self.REQUEST, self.NEEDS_RENEWAL, self.RECEIPT]) as remote, \
                  mock.patch.object(worker.subprocess, "run", return_value=SimpleNamespace(
-                     stdout=json.dumps({"headers": "Cookie: private=value"}))), \
-                 contextlib.redirect_stdout(output):
+                     stdout=json.dumps(self.PAGE))), contextlib.redirect_stdout(output):
                 self.assertTrue(worker.refresh("pi@vanpi.lan"))
-            destination = root / "pi/secrets/.ebay_headers"
-            self.assertEqual(destination.stat().st_mode & 0o777, 0o600)
-            self.assertIn("private=value", destination.read_text())
+            self.assertEqual(remote.call_args.args, ("pi@vanpi.lan", "results", {**self.REQUEST, **self.PAGE}))
+            self.assertEqual((headers.read_bytes(), headers.stat().st_mtime_ns), before)
             self.assertNotIn("private=value", output.getvalue())
+            self.assertNotIn(self.PAGE["html"], output.getvalue())
 
-    def test_successful_recheck_skips_browser_and_preserves_local_headers(self):
+    def test_successful_recheck_skips_browser_and_result_submission(self):
         with mock.patch.object(worker, "remote", side_effect=[
             self.REQUEST, {"ok": True, "renewal_needed": False},
         ]) as remote, mock.patch.object(worker.subprocess, "run") as run, \
-             mock.patch.object(worker, "sync_local_headers") as sync, \
              contextlib.redirect_stdout(io.StringIO()):
             self.assertFalse(worker.refresh("pi@vanpi.lan"))
         self.assertEqual(remote.call_args.args, ("pi@vanpi.lan", "recheck", self.REQUEST))
         run.assert_not_called()
-        sync.assert_not_called()
+
+    def test_browser_page_cannot_override_the_claim(self):
+        with mock.patch.object(worker, "remote", side_effect=[self.REQUEST, self.NEEDS_RENEWAL, {"ok": True}]) as remote, \
+             mock.patch.object(worker.subprocess, "run", return_value=SimpleNamespace(
+                 stdout=json.dumps({**self.PAGE, "search_id": 42}))):
+            with self.assertRaises(ValueError):
+                worker.refresh("pi@vanpi.lan")
+        self.assertEqual(remote.call_args.args, ("pi@vanpi.lan", "failed", self.REQUEST))
 
     def test_failed_or_invalid_recheck_does_not_start_browser(self):
         for response in ({"ok": False}, {"ok": True, "renewal_needed": "true"},

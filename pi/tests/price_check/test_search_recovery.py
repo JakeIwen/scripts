@@ -4,6 +4,8 @@ import json
 import os
 import subprocess
 import sys
+import io
+import time
 from contextlib import closing
 import unittest
 from pathlib import Path
@@ -17,7 +19,11 @@ from pi.scripts.price_check.search_watch.refresh_install import install_headers,
 from pi.scripts.price_check.search_watch.service import (
     SearchCookieError, SearchLoadError, SearchParserError, SearchWatchError, check_watch,
 )
-from pi.scripts.price_check.search_watch.store import SearchStore
+from pi.scripts.price_check.search_watch.store import SearchStore, SearchStoreError
+from pi.scripts.price_check.search_watch.browser_results import (
+    LIMITS, accept_browser_results, read_submission,
+)
+from pi.scripts.price_check.search_watch.parsers import EbayParseError, parse
 from pi.tests.price_check.test_search_watch import EBAY_PAGE
 
 
@@ -44,6 +50,123 @@ class SearchRecoveryTests(unittest.TestCase):
         request_refresh(self.store, self.watch)
         request = claim_refresh(self.store)
         return {**request, "headers": "User-Agent: new\nCookie: new=value\n"} if with_headers else request
+
+    def browser_page(self, html=EBAY_PAGE):
+        return {**self.request(with_headers=False), "final_url": self.watch["url"], "html": html}
+
+    def test_browser_page_recovers_results_without_any_http_request_or_cookie_write(self):
+        payload = self.browser_page()
+        before = self.headers.read_bytes(), self.headers.stat().st_mtime_ns
+        notify = mock.Mock()
+        with mock.patch("subprocess.run", side_effect=AssertionError("no HTTP client may run")):
+            result = accept_browser_results(self.store, payload, notify_new=notify)
+        self.assertEqual(result, {"ok": True, "result_count": 2, "notification_failed": False})
+        self.assertEqual(self.store.get_watch(self.watch["id"])["last_status"], "ok")
+        self.assertEqual(self.store.get_watch(self.watch["id"])["result_count"], 2)
+        self.assertIsNone(retry_status(self.store)["retry_after"])
+        notify.assert_called_once()
+        self.assertEqual((self.headers.read_bytes(), self.headers.stat().st_mtime_ns), before)
+        with self.assertRaisesRegex(ValueError, "no longer current"):
+            accept_browser_results(self.store, payload, notify_new=notify)
+        notify.assert_called_once()
+
+    def test_browser_page_uses_existing_dismissal_and_new_listing_rules(self):
+        self.check(notify=False)
+        self.store.dismiss_result(self.watch["id"], "123456789012")
+        payload = self.browser_page()
+        notify = mock.Mock()
+        accept_browser_results(self.store, payload, notify_new=notify)
+        watch = self.store.get_watch(self.watch["id"])
+        self.assertEqual((watch["result_count"], watch["hidden_current_count"]), (1, 1))
+        notify.assert_not_called()
+
+    def test_browser_page_failure_preserves_previous_results(self):
+        self.check(notify=False)
+        payload = self.browser_page()
+        before = self.store.get_watch(self.watch["id"])
+        for page in ("<title>Pardon Our Interruption</title>", "unknown result layout"):
+            with self.assertRaises(EbayParseError):
+                accept_browser_results(self.store, {**payload, "html": page})
+        self.assertEqual(self.store.get_watch(self.watch["id"]), before)
+
+    def test_browser_page_rejects_changed_query_host_or_claim(self):
+        payload = self.browser_page()
+        variants = (
+            {"final_url": "https://example.com/sch/i.html?_nkw=x"},
+            {"final_url": "https://www.ebay.com/sch/i.html?_nkw=other"},
+            {"final_url": "https://www.ebay.com/sch/i.html?_nkw=x&_udhi=20"},
+            {"final_url": "https://user@www.ebay.com/sch/i.html?_nkw=x"},
+            {"final_url": "https://www.ebay.com:444/sch/i.html?_nkw=x"},
+            {"request_id": "0" * 32}, {"attempt": 2}, {"headers": "Cookie: private=value"},
+        )
+        for changed in variants:
+            with self.subTest(changed=changed), self.assertRaises(ValueError):
+                accept_browser_results(self.store, {**payload, **changed})
+        self.assertEqual(self.store.get_watch(self.watch["id"])["last_status"], "never")
+
+    def test_browser_page_accepts_equivalent_url_encoding(self):
+        payload = self.browser_page()
+        result = accept_browser_results(self.store, {**payload,
+            "final_url": "https://www.ebay.com:443/sch/i.html?_nkw=%78"})
+        self.assertTrue(result["ok"])
+
+    def test_browser_page_bounds_are_measured_in_bytes(self):
+        payload = self.browser_page()
+        with mock.patch.dict(LIMITS, {"max_html_bytes": 3}), self.assertRaises(ValueError):
+            accept_browser_results(self.store, {**payload, "html": "éé"})
+        with mock.patch.dict(LIMITS, {"max_submission_bytes": 20}):
+            stream = io.BytesIO(b"x" * 100)
+            with self.assertRaisesRegex(ValueError, "too large"):
+                read_submission(stream)
+            self.assertEqual(stream.tell(), 21)
+        self.assertEqual(read_submission(io.BytesIO(b'{"html":"example"}')), {"html": "example"})
+
+    def test_browser_page_expiring_during_parse_cannot_update_results(self):
+        payload = self.browser_page()
+        parsed = parse(EBAY_PAGE)
+
+        def slow_parse(_html):
+            self.now[0] += RETRY_SECONDS
+            return parsed
+
+        with mock.patch("pi.scripts.price_check.search_watch.browser_results.parse", side_effect=slow_parse):
+            with self.assertRaisesRegex(ValueError, "expired during parsing"):
+                accept_browser_results(self.store, payload)
+        self.assertEqual(self.store.get_watch(self.watch["id"])["last_status"], "never")
+
+    def test_browser_result_storage_survives_notification_failure(self):
+        result = accept_browser_results(self.store, self.browser_page(),
+                                        notify_new=mock.Mock(side_effect=RuntimeError("ntfy offline")))
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["notification_failed"])
+        self.assertEqual(self.store.get_watch(self.watch["id"])["last_status"], "ok")
+        self.assertIsNone(retry_status(self.store)["retry_after"])
+
+    def test_browser_result_storage_failure_is_not_reported_as_success(self):
+        payload = self.browser_page()
+        with mock.patch.object(self.store, "record_success", side_effect=SearchStoreError("storage failed")):
+            with self.assertRaises(SearchStoreError):
+                accept_browser_results(self.store, payload)
+        self.assertEqual(self.store.get_watch(self.watch["id"])["last_status"], "never")
+        self.assertIsNotNone(retry_status(self.store)["retry_after"])
+
+    def test_results_bridge_accepts_browser_html_with_no_available_cookie_file(self):
+        self.now[0] = int(time.time())
+        payload = self.browser_page()
+        sender = self.root / "ntfy-stub"
+        sender.write_text('#!/bin/sh\nprintf "%s\\n" "$1" >> "$ALERT_LOG"\n')
+        sender.chmod(0o700)
+        log = self.root / "alerts"
+        bridge = Path(__file__).parents[2] / "scripts/price_check/ebay_refresh.py"
+        env = {**os.environ, "NTFY_SEND_BIN": str(sender), "ALERT_LOG": str(log),
+               "EBAY_HEADERS_FILE": str(self.root / "does-not-exist")}
+        result = subprocess.run(
+            [sys.executable, str(bridge), "--db", str(self.db), "results"],
+            input=json.dumps(payload), capture_output=True, text=True, env=env, check=True,
+        )
+        self.assertEqual(json.loads(result.stdout)["result_count"], 2)
+        self.assertEqual(len(log.read_text().splitlines()), 1)
+        self.assertIsNone(retry_status(self.store)["retry_after"])
 
     def test_recheck_recovers_results_and_cancels_renewal_without_replacing_headers(self):
         request = self.request(with_headers=False)
