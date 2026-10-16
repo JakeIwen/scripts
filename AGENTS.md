@@ -261,6 +261,9 @@ Some ignored secret directories, wireless profiles, and device configurations
 may contain credentials or private network data. Never print or commit secrets,
 and preserve unrelated local or deployed changes.
 
+- Dashboard backup configuration parsing lives in `pi/apps/van_dashboard/backup_configuration.py`;
+  `features/backups/CloneCardCapacity.tsx` owns the reusable card-capacity control.
+
 ## Vanpi connections
 
 When connected to the van's local network, prefer `vanpi.lan` for SSH and other

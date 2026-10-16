@@ -1,6 +1,7 @@
 import type { PollingState } from '../../hooks/usePollingResource';
 import { BottomSheet } from '../../components/BottomSheet';
 import { ICloudBackupCard } from './ICloudBackupCard';
+import { CloneCardCapacity } from './CloneCardCapacity';
 import { BackupPriorityMenu } from './BackupPriorityMenu';
 import { formatBytes, formatRelativeTime } from '../../utils/format';
 import type { BackupControls } from './controls';
@@ -12,7 +13,6 @@ import {
 } from './presentation';
 import type {
   BackupEvidence,
-  BackupSettings,
   BackupStatus,
   HotspareStatus,
   TimeMachineStatus,
@@ -192,40 +192,6 @@ function TimeMachineCard({ status }: { status: TimeMachineStatus }) {
         ))}
       </div>
     </article>
-  );
-}
-
-function CloneCardCapacity({
-  settings,
-  controls,
-}: {
-  settings: BackupSettings;
-  controls: BackupControls;
-}) {
-  return (
-    <div className="backup-capacity-control">
-      <label>
-        <span>Clone card size</span>
-        <select
-          aria-label="Bootable clone card capacity"
-          value={settings.cloneCardNominalGb}
-          disabled={controls.blocked}
-          onChange={(event) => {
-            const selected = settings.cloneCardNominalGbOptions.find(
-              (option) => String(option) === event.currentTarget.value,
-            );
-            if (selected !== undefined) void controls.setCloneCardNominalGb(selected);
-          }}
-        >
-          {settings.cloneCardNominalGbOptions.map((option) => (
-            <option value={option} key={option}>
-              {option} GB
-            </option>
-          ))}
-        </select>
-      </label>
-      <small>Warn above {settings.rootUsedMaxGib} GiB root usage</small>
-    </div>
   );
 }
 
