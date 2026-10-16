@@ -69,6 +69,11 @@ compare it with this checkout. Deployed files may differ from the repository.
   pointer automatically. Checkpoint integration fixtures live in
   `macbook/tests/btt_guard_fixtures.py`.
 - `shared/`: code imported or deployed on more than one host.
+- Dashboard Sonos alarms live in `pi/apps/van_dashboard/sonos_alarms.py`, with
+  HTTP routes in `routes/sonos_alarms.py` and React controls in `features/sonos/`.
+  `SonosAlarm` owns the device record; `alarms.ts` owns the validated UI contract.
+  Read fresh device state before mutations, preserve existing music metadata,
+  reject stale revisions, and never automatically retry an uncertain alarm write.
 - `pi/scripts/build_claude_code_proxy.sh` builds `claude-code-proxy` from source for
   Claude Code's Model Gateway (the release binary needs glibc 2.39). Never run the
   gateway's `setup` on the Pi; `pi/scripts/model_gateway_setup_guard.cjs`, preloaded

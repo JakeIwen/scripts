@@ -25,6 +25,7 @@ def create_app():
     from .routes.network import bp as network_bp
     from .routes.projects import bp as projects_bp
     from .routes.sonos import bp as sonos_bp
+    from .routes.sonos_alarms import bp as sonos_alarms_bp
     from .routes.storage import bp as storage_bp
     from .routes.system import bp as system_bp
     from .routes.telemetry import bp as telemetry_bp
@@ -49,6 +50,7 @@ def create_app():
         history_bp,
         integrations_bp,
         sonos_bp,
+        sonos_alarms_bp,
     ):
         app.register_blueprint(blueprint)
     return app

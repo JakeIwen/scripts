@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { BottomSheet } from '../../components/BottomSheet';
+import { SonosAlarms } from './SonosAlarms';
 import type { SonosControls } from './controls';
 import { SonosTransportControls } from './SonosTransportControls';
 import type { SonosSpeaker, SonosStatus, SonosTrackProgress } from './types';
@@ -130,7 +131,7 @@ export function SonosSheet({
     <BottomSheet
       open={open}
       title="Sonos"
-      description="Playback, active-group, volume, mute, grouping, and coordinator controls."
+      description="Playback, speakers, and alarms."
       onClose={onClose}
     >
       <div className="sonos-sheet__toolbar">
@@ -152,6 +153,7 @@ export function SonosSheet({
         </button>
       </div>
 
+      {open && <SonosAlarms />}
       {error && <p className="error-message">{error.message}</p>}
       {!status ? (
         <p className="sonos-sheet__empty">

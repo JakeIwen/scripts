@@ -19,6 +19,7 @@ from .van_dashboard_network import (
 )
 from .van_dashboard_projects import HostedProjectStore
 from .van_dashboard_sonos import SonosController
+from .sonos_alarms import SonosAlarmController
 from .van_dashboard_storage import StoragePolicyManager
 from .van_dashboard_system import (
     DashboardRestartController,
@@ -37,6 +38,7 @@ cop_can_wake = CopCanWakeStatusReader()
 # Retain the API field used by the React tile; there is only one relay owner.
 cop_led = cop_alert.light
 sonos = SonosController(state_store)
+sonos_alarms = SonosAlarmController(sonos)
 connectivity = ConnectivityMonitor()
 openwrt_clients = OpenWrtClientsController()
 ubnt_wifi = UbntWifiController(on_change=connectivity.request_refresh)

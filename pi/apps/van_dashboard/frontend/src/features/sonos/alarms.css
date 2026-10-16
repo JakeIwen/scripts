@@ -1,0 +1,90 @@
+.sonos-alarms > header,
+.sonos-alarm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.sonos-alarms > header {
+  justify-content: space-between;
+}
+.sonos-alarms > p,
+.sonos-alarm-row small {
+  color: var(--muted);
+}
+.sonos-alarm-row {
+  display: grid;
+  gap: 10px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+.sonos-alarm-row > div:first-child {
+  display: grid;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+.sonos-alarm-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.sonos-alarm-editor {
+  margin: 14px 0;
+}
+.sonos-alarm-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 0;
+  padding: 0;
+  margin: 12px 0;
+  gap: 14px;
+}
+.sonos-alarm-fields > label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.sonos-alarm-fields input,
+.sonos-alarm-fields select {
+  max-width: 100%;
+  min-width: 0;
+}
+.sonos-alarm-fields input:not([type='checkbox']):not([type='range']),
+.sonos-alarm-fields select {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: inherit;
+  font: inherit;
+  width: 100%;
+}
+.sonos-alarm-fields .sonos-alarm-check {
+  display: flex;
+  align-items: center;
+}
+.sonos-alarm-days {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  border: 0;
+  padding: 0;
+}
+.sonos-alarm-days label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+@media (max-width: 480px) {
+  .sonos-alarm-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.sonos-alarm-section {
+  margin-bottom: 18px;
+}
+.sonos-alarm-section > button {
+  margin-bottom: 10px;
+}
