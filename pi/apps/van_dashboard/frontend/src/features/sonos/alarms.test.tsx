@@ -99,7 +99,7 @@ describe('Sonos alarms', () => {
     await openAlarms();
     fireEvent.click(screen.getByRole('button', { name: 'Add alarm' }));
     expect(screen.getByLabelText('Sound')).toHaveValue('chime');
-    expect(screen.getByLabelText('Enabled')).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Enabled' })).not.toBeChecked();
     fireEvent.change(screen.getByLabelText('Sound'), { target: { value: 'favorite:FV:2/7' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save alarm' }));
     await waitFor(() =>
@@ -197,6 +197,35 @@ describe('Sonos alarms', () => {
       duration: '01:00',
       sound: 'favorite:FV:2/7',
     });
+  });
+
+  it('displays the speaker timezone beside the time picker', async () => {
+    vi.mocked(getJson).mockImplementation(async (url) =>
+      url.includes('alarm-favorites')
+        ? { ok: true, favorites: [] }
+        : { ...payload(), time_zone: 'MDT' },
+    );
+    await openAlarms();
+    fireEvent.click(screen.getByRole('button', { name: 'Add alarm' }));
+    expect(screen.getByLabelText('Time (MDT)')).toHaveValue('07:00:00');
+    expect(screen.getByText('MDT')).toBeInTheDocument();
+  });
+
+  it('filters the list by weekday and enabled state without device writes', async () => {
+    await openAlarms();
+    fireEvent.change(screen.getByLabelText('Includes day of week'), { target: { value: '0' } });
+    expect(screen.getByText('No alarms match these filters.')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Includes day of week'), { target: { value: '5' } });
+    expect(screen.getByText('07:45 · Front')).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Enabled' }), {
+      target: { value: 'true' },
+    });
+    expect(screen.getByText('No alarms match these filters.')).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Enabled' }), {
+      target: { value: 'false' },
+    });
+    expect(screen.getByText('07:45 · Front')).toBeInTheDocument();
+    expect(postForm).not.toHaveBeenCalled();
   });
 
   it('rejects invalid speaker responses', async () => {

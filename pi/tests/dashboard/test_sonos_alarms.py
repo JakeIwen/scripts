@@ -90,6 +90,13 @@ class AlarmTests(unittest.TestCase):
         response = self.client.get("/api/speakers/alarm-favorites")
         self.assertEqual(response.get_json()["favorites"], [{"id": "FV:2/7", "title": "Radio"}])
 
+    def test_snapshot_labels_speaker_timezone(self):
+        with patch.object(self.clock, "GetTimeNow", return_value={
+            "CurrentLocalTime": "2026-10-15 21:00:00", "CurrentUTCTime": "2026-10-16 03:00:00",
+            "CurrentTimeZone": "01a40b000102000003000202ffc4",
+        }):
+            self.assertEqual(self.snapshot()["time_zone"], "MDT")
+
     def test_edit_preserves_media_and_normalizes_time_and_days(self):
         before = dict(self.clock.records["10"])
         self.assertEqual(self.post("save", self.fields()).status_code, 200)

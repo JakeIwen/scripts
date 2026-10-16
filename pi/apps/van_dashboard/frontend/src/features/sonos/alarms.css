@@ -46,12 +46,14 @@
   min-width: 0;
 }
 .sonos-alarm-fields input,
-.sonos-alarm-fields select {
+.sonos-alarm-fields select,
+.sonos-alarm-filters select {
   max-width: 100%;
   min-width: 0;
 }
 .sonos-alarm-fields input:not([type='checkbox']):not([type='range']),
-.sonos-alarm-fields select {
+.sonos-alarm-fields select,
+.sonos-alarm-filters select {
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -104,4 +106,24 @@
 }
 .sonos-alarm-summary > span {
   color: var(--muted);
+}
+
+.sonos-alarm-time-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+.sonos-alarm-time-input > span {
+  color: var(--muted);
+}
+.sonos-alarm-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 16px 0;
+}
+.sonos-alarm-filters label {
+  display: grid;
+  gap: 6px;
 }

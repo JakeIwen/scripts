@@ -25,6 +25,7 @@ const alarmsSchema = object({
   alarms: v.array(alarmSchema),
   rooms: v.array(object({ id: text, name: text })),
   local_time: v.nullable(text),
+  time_zone: v.optional(v.nullable(text), null),
   play_modes: v.array(text),
 });
 const favoritesSchema = object({

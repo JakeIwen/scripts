@@ -127,13 +127,17 @@ function ScheduleFields({ draft, update, status }: FieldProps & Pick<Props, 'sta
     <>
       <label>
         Time
-        <input
-          type="time"
-          step="1"
-          required
-          value={draft.start_time}
-          onChange={(e) => update('start_time', e.target.value)}
-        />
+        <span className="sonos-alarm-time-input">
+          <input
+            type="time"
+            aria-label={status.time_zone ? `Time (${status.time_zone})` : 'Time'}
+            step="1"
+            required
+            value={draft.start_time}
+            onChange={(e) => update('start_time', e.target.value)}
+          />
+          {status.time_zone && <span>{status.time_zone}</span>}
+        </span>
       </label>
       <label>
         Speaker

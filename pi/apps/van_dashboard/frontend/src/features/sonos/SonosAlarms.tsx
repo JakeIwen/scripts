@@ -2,6 +2,8 @@ import { useId, useState } from 'react';
 
 import type { SonosAlarmControls } from './alarmControls';
 import { AlarmEditor } from './AlarmEditor';
+import { AlarmFilterControls } from './AlarmFilterControls';
+import { filterAlarms, type AlarmFilters } from './alarmFilters';
 import { deleteAlarm, repeatLabel, saveAlarm, setAlarmEnabled, type SonosAlarm } from './alarms';
 import './alarms.css';
 
@@ -120,6 +122,10 @@ export function SonosAlarms({ controls }: { controls: SonosAlarmControls }) {
 
 function SonosAlarmPanel({ controls }: { controls: SonosAlarmControls }) {
   const { resource, favorites, editing, setEditing, message, failure, busy, perform } = controls;
+  const [filters, setFilters] = useState<AlarmFilters>({ day: null, enabled: null });
+  const visibleAlarms = resource.data
+    ? filterAlarms(resource.data.alarms, filters, resource.data.local_time)
+    : [];
   return (
     <div className="sonos-alarms">
       <AlarmPanelHeader
@@ -157,8 +163,13 @@ function SonosAlarmPanel({ controls }: { controls: SonosAlarmControls }) {
               onSave={(draft) => void perform(() => saveAlarm(draft, editing.alarm))}
             />
           )}
-          {resource.data.alarms.length === 0 && <p>No Sonos alarms configured.</p>}
-          {resource.data.alarms.map((alarm) => (
+          <AlarmFilterControls filters={filters} onChange={setFilters} />
+          {resource.data.alarms.length === 0 ? (
+            <p>No Sonos alarms configured.</p>
+          ) : (
+            visibleAlarms.length === 0 && <p>No alarms match these filters.</p>
+          )}
+          {visibleAlarms.map((alarm) => (
             <AlarmRow
               key={`${alarm.id}:${alarm.revision}`}
               alarm={alarm}

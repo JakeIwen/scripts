@@ -8,6 +8,8 @@ import re
 import threading
 from xml.etree import ElementTree as ET
 
+from .sonos_clock import sonos_time_zone
+
 
 PLAY_MODES = ("NORMAL", "SHUFFLE_NOREPEAT", "SHUFFLE", "REPEAT_ALL",
               "REPEAT_ONE", "SHUFFLE_REPEAT_ONE")
@@ -135,14 +137,18 @@ class SonosAlarmController:
             zone = self.sonos.coordinator()
             rooms = {z.uid: name for name, z in self.sonos.get_zones().items()}
             alarms = self._read(zone)
+            time_zone = None
             try:
-                local_time = zone.alarmClock.GetTimeNow()["CurrentLocalTime"]
+                clock = zone.alarmClock.GetTimeNow()
+                local_time = clock["CurrentLocalTime"]
+                time_zone = sonos_time_zone(clock)
             except Exception:
                 local_time = None
             return {"ok": True, "alarms": [a.public(rooms) for a in
                     sorted(alarms.values(), key=lambda a: (a.start_time, a.id))],
                     "rooms": [{"id": uid, "name": name} for uid, name in rooms.items()],
-                    "local_time": local_time, "play_modes": list(PLAY_MODES)}
+                    "local_time": local_time, "time_zone": time_zone,
+                    "play_modes": list(PLAY_MODES)}
 
     def favorites(self):
         zone = self.sonos.coordinator()
