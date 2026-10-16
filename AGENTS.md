@@ -72,6 +72,8 @@ compare it with this checkout. Deployed files may differ from the repository.
 - Dashboard Sonos alarms live in `pi/apps/van_dashboard/sonos_alarms.py`, with
   HTTP routes in `routes/sonos_alarms.py` and React controls in `features/sonos/`.
   `SonosAlarm` owns the device record; `alarms.ts` owns the validated UI contract.
+  `alarmControls.ts` is owned by `SonosFeature`, so closing the sheet or collapsing
+  alarms cannot release an in-flight write. Delete and enable are explicit commands.
   Read fresh device state before mutations, preserve existing music metadata,
   reject stale revisions, and never automatically retry an uncertain alarm write.
 - `pi/scripts/build_claude_code_proxy.sh` builds `claude-code-proxy` from source for

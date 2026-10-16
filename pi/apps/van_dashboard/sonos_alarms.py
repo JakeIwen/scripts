@@ -18,6 +18,14 @@ class AlarmConflict(Exception):
     """The speaker's alarm changed since the form was opened."""
 
 
+class AlarmValidationError(ValueError):
+    """Input was rejected before any device mutation."""
+
+
+class AlarmNotFound(Exception):
+    """A fresh device read did not contain the requested alarm."""
+
+
 @dataclass(frozen=True)
 class SonosAlarm:
     id: str
@@ -75,37 +83,37 @@ def alarm_clock(value, label, allow_empty=False):
     if value == "" and allow_empty:
         return ""
     if not isinstance(value, str) or not re.fullmatch(r"\d{2}:\d{2}(:\d{2})?", value):
-        raise ValueError(f"{label} must be HH:MM or HH:MM:SS")
+        raise AlarmValidationError(f"{label} must be HH:MM or HH:MM:SS")
     try:
         return time.fromisoformat(value).isoformat()
     except ValueError as exc:
-        raise ValueError(f"{label} is not a valid time") from exc
+        raise AlarmValidationError(f"{label} is not a valid time") from exc
 
 
 def alarm_fields(fields):
     required = {"room", "start_time", "duration", "recurrence", "enabled", "volume",
                 "include_linked_zones", "play_mode", "sound"}
     if set(fields) != required:
-        raise ValueError("provide all alarm settings")
+        raise AlarmValidationError("provide all alarm settings")
     values = dict(fields)
     for name in ("enabled", "include_linked_zones"):
         if values[name] not in ("0", "1"):
-            raise ValueError(f"{name} must be 0 or 1")
+            raise AlarmValidationError(f"{name} must be 0 or 1")
         values[name] = values[name] == "1"
     if not re.fullmatch(r"\d{1,3}", values["volume"]) or not 0 <= int(values["volume"]) <= 100:
-        raise ValueError("volume must be from 0 to 100")
+        raise AlarmValidationError("volume must be from 0 to 100")
     values["volume"] = int(values["volume"])
     values["start_time"] = alarm_clock(values["start_time"], "Start time")
     values["duration"] = alarm_clock(values["duration"], "Duration", allow_empty=True)
     if values["duration"] == "00:00:00":
-        raise ValueError("duration must be positive or blank for no limit")
+        raise AlarmValidationError("duration must be positive or blank for no limit")
     recurrence = values["recurrence"]
     if recurrence not in ("ONCE", "DAILY", "WEEKDAYS", "WEEKENDS"):
         if not re.fullmatch(r"ON_[0-6]{1,7}", recurrence):
-            raise ValueError("choose a repeat schedule or at least one day")
+            raise AlarmValidationError("choose a repeat schedule or at least one day")
         values["recurrence"] = "ON_" + "".join(sorted(set(recurrence[3:])))
     if values["play_mode"] not in PLAY_MODES:
-        raise ValueError("unsupported play mode")
+        raise AlarmValidationError("unsupported play mode")
     return values
 
 
@@ -148,7 +156,7 @@ class SonosAlarmController:
             existing = self._existing(zone, alarm_id, revision) if alarm_id else None
             rooms = {z.uid for z in self.sonos.get_zones().values()}
             if values["room"] not in rooms:
-                raise ValueError("choose an available speaker")
+                raise AlarmValidationError("choose an available speaker")
             sound = values.pop("sound")
             uri, metadata = self._sound(sound, existing)
             alarm = SonosAlarm(id=alarm_id, program_uri=uri, program_metadata=metadata, **values)
@@ -168,19 +176,19 @@ class SonosAlarmController:
             favorite = self.favorites().get(sound.removeprefix("favorite:"))
             if favorite:
                 return favorite.resources[0].uri, favorite.resource_meta_data
-        raise ValueError("choose Sonos chime or an available favorite")
+        raise AlarmValidationError("choose Sonos chime or an available favorite")
 
     def _existing(self, zone, alarm_id, revision):
         alarm = self._read(zone).get(alarm_id)
         if alarm is None:
-            raise KeyError("alarm no longer exists; refresh alarms")
+            raise AlarmNotFound("alarm no longer exists; refresh alarms")
         if not revision or alarm.revision != revision:
             raise AlarmConflict("Alarm changed elsewhere. Reopen it before making changes.")
         return alarm
 
     def set_enabled(self, alarm_id, revision, enabled):
         if not isinstance(enabled, bool):
-            raise ValueError("enabled must be a boolean")
+            raise AlarmValidationError("enabled must be a boolean")
         with self.lock:
             zone = self.sonos.coordinator()
             alarm = self._existing(zone, alarm_id, revision)

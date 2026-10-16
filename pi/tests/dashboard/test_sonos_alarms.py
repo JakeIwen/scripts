@@ -163,6 +163,21 @@ class AlarmTests(unittest.TestCase):
                          headers={"Origin": "http://elsewhere", "X-Van-Dashboard": "1"}).status_code, 403)
         self.assertEqual(self.clock.writes, [])
 
+    def test_device_decoding_errors_are_uncertain_not_input_rejections(self):
+        for failure in (ValueError("private response failure"), KeyError("private field")):
+            fields = self.fields()
+            update = self.clock.UpdateAlarm
+
+            def write_then_fail(args):
+                update(args)
+                raise failure
+
+            with patch.object(self.clock, "UpdateAlarm", side_effect=write_then_fail):
+                response = self.post("save", fields)
+            self.assertEqual(response.status_code, 502)
+            self.assertNotIn("private", response.get_data(as_text=True))
+            self.assertEqual(self.snapshot()["alarms"][0]["volume"], 42)
+
     def test_concurrent_edits_only_accept_one_revision(self):
         fields = self.fields()
         alarm_id, revision = fields.pop("id"), fields.pop("revision")

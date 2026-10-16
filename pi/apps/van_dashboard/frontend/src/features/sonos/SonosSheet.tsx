@@ -1,7 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 import { BottomSheet } from '../../components/BottomSheet';
-import { SonosAlarms } from './SonosAlarms';
 import type { SonosControls } from './controls';
 import { SonosTransportControls } from './SonosTransportControls';
 import type { SonosSpeaker, SonosStatus, SonosTrackProgress } from './types';
@@ -16,6 +15,7 @@ export interface SonosSheetProps {
   progress: SonosTrackProgress | null;
   onRefresh: () => Promise<SonosStatus | null>;
   controls: SonosControls;
+  alarms: ReactNode;
 }
 
 function speakerDetail(speaker: SonosSpeaker, coordinator: string): string {
@@ -126,6 +126,7 @@ export function SonosSheet({
   progress,
   onRefresh,
   controls,
+  alarms,
 }: SonosSheetProps) {
   return (
     <BottomSheet
@@ -153,7 +154,7 @@ export function SonosSheet({
         </button>
       </div>
 
-      {open && <SonosAlarms />}
+      {open && alarms}
       {error && <p className="error-message">{error.message}</p>}
       {!status ? (
         <p className="sonos-sheet__empty">

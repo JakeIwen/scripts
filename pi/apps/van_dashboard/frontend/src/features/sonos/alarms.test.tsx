@@ -1,11 +1,16 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getJson, postForm } from '../../api/client';
+import { ApiRequestError, getJson, postForm } from '../../api/client';
+import { useSonosAlarmControls } from './alarmControls';
 import { fetchAlarms } from './alarms';
 import { SonosAlarms } from './SonosAlarms';
 
-vi.mock('../../api/client', () => ({ getJson: vi.fn(), postForm: vi.fn() }));
+vi.mock('../../api/client', async (original) => ({
+  ...(await original<typeof import('../../api/client')>()),
+  getJson: vi.fn(),
+  postForm: vi.fn(),
+}));
 
 function payload() {
   return {
@@ -43,8 +48,13 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+function AlarmHarness() {
+  const controls = useSonosAlarmControls(true);
+  return <SonosAlarms controls={controls} />;
+}
+
 async function openAlarms() {
-  render(<SonosAlarms />);
+  render(<AlarmHarness />);
   fireEvent.click(screen.getByRole('button', { name: 'Alarms' }));
   await screen.findByText('07:45 · Front');
   await waitFor(() => expect(screen.getByRole('button', { name: 'Add alarm' })).toBeEnabled());
@@ -52,7 +62,7 @@ async function openAlarms() {
 
 describe('Sonos alarms', () => {
   it('loads only when opened and displays repeat days and speaker clock', async () => {
-    render(<SonosAlarms />);
+    render(<AlarmHarness />);
     expect(getJson).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Alarms' }));
     await screen.findByText('Mon, Fri · Off');
@@ -165,6 +175,28 @@ describe('Sonos alarms', () => {
     expect(screen.getByRole('button', { name: 'Save alarm' })).toBeDisabled();
     fireEvent.click(screen.getByLabelText('Sun'));
     expect(screen.getByRole('button', { name: 'Save alarm' })).toBeEnabled();
+  });
+
+  it('preserves a rejected draft so validation can be corrected', async () => {
+    vi.mocked(postForm).mockRejectedValueOnce(
+      new ApiRequestError('Duration is not a valid time', 400, null),
+    );
+    await openAlarms();
+    fireEvent.click(screen.getByRole('button', { name: 'Add alarm' }));
+    fireEvent.change(screen.getByLabelText('Sound'), { target: { value: 'favorite:FV:2/7' } });
+    fireEvent.change(screen.getByLabelText(/Duration/), { target: { value: '99:99' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save alarm' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Duration is not a valid time');
+    expect(screen.getByLabelText(/Duration/)).toHaveValue('99:99');
+    expect(screen.getByLabelText('Sound')).toHaveValue('favorite:FV:2/7');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save alarm' })).toBeEnabled());
+    fireEvent.change(screen.getByLabelText(/Duration/), { target: { value: '01:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save alarm' }));
+    await waitFor(() => expect(postForm).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(postForm).mock.calls[1]?.[1]).toMatchObject({
+      duration: '01:00',
+      sound: 'favorite:FV:2/7',
+    });
   });
 
   it('rejects invalid speaker responses', async () => {

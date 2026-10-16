@@ -1,14 +1,17 @@
 import { useState } from 'react';
 
 import { useToast } from '../../components/ToastProvider';
+import { useSonosAlarmControls } from './alarmControls';
 import { useSonosControls } from './controls';
 import { useSonosStatus } from './hooks';
 import { useSonosTrackProgress } from './progress';
 import { SonosSheet } from './SonosSheet';
+import { SonosAlarms } from './SonosAlarms';
 import { SonosTile } from './SonosTile';
 
 export function SonosFeature() {
   const [sheetOpen, setSheetOpen] = useState(false);
+  const alarmControls = useSonosAlarmControls(sheetOpen);
   const resource = useSonosStatus();
   const { showToast } = useToast();
   const controls = useSonosControls(resource.refresh, showToast);
@@ -34,6 +37,7 @@ export function SonosFeature() {
           progress={progress}
           onRefresh={resource.refresh}
           controls={controls}
+          alarms={<SonosAlarms controls={alarmControls} />}
         />
       )}
     </>

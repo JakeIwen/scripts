@@ -1,17 +1,8 @@
 import { useState } from 'react';
 
-import { usePollingResource } from '../../hooks/usePollingResource';
-import { useSingleFlightAction } from '../../hooks/useSingleFlightAction';
+import type { SonosAlarmControls } from './alarmControls';
 import { AlarmEditor } from './AlarmEditor';
-import {
-  deleteAlarm,
-  fetchAlarmFavorites,
-  fetchAlarms,
-  repeatLabel,
-  saveAlarm,
-  setAlarmEnabled,
-  type SonosAlarm,
-} from './alarms';
+import { deleteAlarm, repeatLabel, saveAlarm, setAlarmEnabled, type SonosAlarm } from './alarms';
 import './alarms.css';
 
 function AlarmRow({
@@ -102,8 +93,8 @@ function AlarmDeleteConfirmation({
   );
 }
 
-export function SonosAlarms() {
-  const [expanded, setExpanded] = useState(false);
+export function SonosAlarms({ controls }: { controls: SonosAlarmControls }) {
+  const { expanded, setExpanded } = controls;
   return (
     <div className="sonos-alarm-section">
       <button
@@ -114,52 +105,20 @@ export function SonosAlarms() {
       >
         {expanded ? 'Hide alarms' : 'Alarms'}
       </button>
-      {expanded && <SonosAlarmPanel />}
+      {expanded && <SonosAlarmPanel controls={controls} />}
     </div>
   );
 }
 
-function useAlarmPanel() {
-  const { running, run } = useSingleFlightAction();
-  const resource = usePollingResource({ load: fetchAlarms, intervalMs: 60_000, enabled: !running });
-  const favorites = usePollingResource({ load: fetchAlarmFavorites, intervalMs: 300_000 });
-  const [editing, setEditing] = useState<SonosAlarm | null | undefined>(undefined);
-  const [message, setMessage] = useState('');
-  const [failure, setFailure] = useState(false);
-  const busy = running || resource.refreshing;
-
-  async function perform(action: () => Promise<{ message: string }>) {
-    await run(async () => {
-      setMessage('');
-      setFailure(false);
-      try {
-        const result = await action();
-        setMessage(result.message);
-        setEditing(undefined);
-      } catch (error) {
-        setFailure(true);
-        setMessage(error instanceof Error ? error.message : 'Alarm change failed');
-        // Close uncertain/stale drafts, so create cannot be accidentally replayed.
-        setEditing(undefined);
-      } finally {
-        await resource.refresh();
-      }
-    });
-  }
-
-  return { resource, favorites, editing, setEditing, message, failure, busy, perform };
-}
-
-function SonosAlarmPanel() {
-  const { resource, favorites, editing, setEditing, message, failure, busy, perform } =
-    useAlarmPanel();
+function SonosAlarmPanel({ controls }: { controls: SonosAlarmControls }) {
+  const { resource, favorites, editing, setEditing, message, failure, busy, perform } = controls;
   return (
     <section className="panel-card sonos-alarms" aria-labelledby="sonos-alarms-title">
       <AlarmPanelHeader
         busy={busy}
-        addDisabled={!resource.data?.rooms.length || !!resource.error || editing !== undefined}
+        addDisabled={!resource.data?.rooms.length || !!resource.error || editing !== null}
         localTime={resource.data?.local_time ?? null}
-        onAdd={() => setEditing(null)}
+        onAdd={() => setEditing({ alarm: null })}
         onRefresh={() => {
           void resource.refresh();
           void favorites.refresh();
@@ -179,15 +138,15 @@ function SonosAlarmPanel() {
       {favorites.error && <p>{favorites.error.message}</p>}
       {resource.data && (
         <>
-          {editing !== undefined && (
+          {editing !== null && (
             <AlarmEditor
-              key={editing?.id ?? 'new'}
-              alarm={editing}
+              key={editing.alarm?.id ?? 'new'}
+              alarm={editing.alarm}
               status={resource.data}
               favorites={favorites.data ?? []}
               busy={busy || !!resource.error}
-              onCancel={() => setEditing(undefined)}
-              onSave={(draft) => void perform(() => saveAlarm(draft, editing))}
+              onCancel={() => setEditing(null)}
+              onSave={(draft) => void perform(() => saveAlarm(draft, editing.alarm))}
             />
           )}
           {resource.data.alarms.length === 0 && <p>No Sonos alarms configured.</p>}
@@ -195,8 +154,8 @@ function SonosAlarmPanel() {
             <AlarmRow
               key={`${alarm.id}:${alarm.revision}`}
               alarm={alarm}
-              busy={busy || !!resource.error || editing !== undefined}
-              onEdit={() => setEditing(alarm)}
+              busy={busy || !!resource.error || editing !== null}
+              onEdit={() => setEditing({ alarm })}
               onEnabled={(enabled) => void perform(() => setAlarmEnabled(alarm, enabled))}
               onDelete={() => void perform(() => deleteAlarm(alarm))}
             />

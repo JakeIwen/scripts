@@ -3,7 +3,7 @@
 from flask import Blueprint, jsonify, request
 
 from ..http import api_error, runtime_proxy
-from ..sonos_alarms import AlarmConflict
+from ..sonos_alarms import AlarmConflict, AlarmNotFound, AlarmValidationError
 
 bp = Blueprint("sonos_alarms", __name__)
 alarms = runtime_proxy("sonos_alarms")
@@ -47,17 +47,17 @@ def mutate_alarm():
             alarm_id = alarms.save(fields, alarm_id, revision)
         elif action == "enabled":
             if set(fields) != {"enabled"} or fields["enabled"] not in ("0", "1"):
-                raise ValueError("enabled must be 0 or 1")
+                raise AlarmValidationError("enabled must be 0 or 1")
             alarms.set_enabled(alarm_id, revision, fields["enabled"] == "1")
         else:
             if fields:
-                raise ValueError("unexpected alarm deletion fields")
+                raise AlarmValidationError("unexpected alarm deletion fields")
             alarms.delete(alarm_id, revision)
     except AlarmConflict as exc:
         return api_error(exc, 409)
-    except KeyError as exc:
-        return api_error(exc.args[0], 404)
-    except ValueError as exc:
+    except AlarmNotFound as exc:
+        return api_error(exc, 404)
+    except AlarmValidationError as exc:
         return api_error(exc, 400)
     except Exception:
         # A timeout can follow a successful device write. Never auto-retry it.

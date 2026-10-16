@@ -239,6 +239,7 @@ describe('Sonos views', () => {
     const controls = controlMocks();
     render(
       <SonosSheet
+        alarms={null}
         open
         onClose={vi.fn()}
         status={status}
@@ -294,6 +295,7 @@ describe('Sonos views', () => {
 
     render(
       <SonosSheet
+        alarms={null}
         open
         onClose={vi.fn()}
         status={status}
