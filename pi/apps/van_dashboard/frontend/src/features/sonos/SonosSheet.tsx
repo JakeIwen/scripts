@@ -161,6 +161,7 @@ export function SonosSheet({
           {controls.lastError}
         </p>
       )}
+      {open && alarms}
       {!status ? (
         <p className="sonos-sheet__empty">
           {error ? 'Sonos is unavailable.' : 'Finding speakers…'}
@@ -181,7 +182,6 @@ export function SonosSheet({
           </div>
         </section>
       )}
-      {open && alarms}
     </BottomSheet>
   );
 }

@@ -83,8 +83,8 @@
   }
 }
 .sonos-alarm-section {
-  margin-top: 22px;
-  border-top: 1px solid var(--line);
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--line);
 }
 .sonos-alarm-section h3 {
   margin: 0;
@@ -94,7 +94,7 @@
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 18px 0;
+  padding: 0 0 16px;
   background: transparent;
   color: inherit;
   font: inherit;
