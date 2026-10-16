@@ -463,6 +463,8 @@ class VerificationTests(unittest.TestCase):
             self.assertFalse((local/'generations').exists())
 
     def test_loaded_config_enables_overlap_with_existing_bandwidth_limit(self):
+        preferences=mock.patch.object(job.backup_settings,'overrides',return_value={})
+        preferences.start(); self.addCleanup(preferences.stop)
         base=json.loads((REPO/'pi/configs/icloud-backup.json').read_text())
         specific=json.loads((REPO/'pi/configs/time-machine-icloud.json').read_text())
         with mock.patch.object(cloud,'load_config',return_value=base), mock.patch.object(store,'read_json',return_value=specific):

@@ -16,6 +16,7 @@ def create_app():
     from . import runtime  # noqa: F401
     from .routes.backups import bp as backups_bp
     from .routes.backup_priority import bp as backup_priority_bp
+    from .routes.backup_settings import bp as backup_settings_bp
     from .routes.common import bp as common_bp
     from .routes.cop import bp as cop_bp
     from .routes.disks import bp as disks_bp
@@ -47,6 +48,7 @@ def create_app():
         usb_bp,
         backups_bp,
         backup_priority_bp,
+        backup_settings_bp,
         history_bp,
         integrations_bp,
         sonos_bp,

@@ -1,7 +1,6 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { BackupPriorityMenu } from './BackupPriorityMenu';
-import { sampleBackupStatus } from './testFixtures';
+import { BackupPriorityControls } from './BackupPriorityControls';
 
 function fixture() {
   return {
@@ -56,29 +55,21 @@ describe('backup priority menu', () => {
     });
     vi.stubGlobal('fetch', fetch);
     render(
-      <BackupPriorityMenu
-        backups={sampleBackupStatus()}
+      <BackupPriorityControls
+        busy={false}
+        setBusy={vi.fn()}
         refresh={vi.fn().mockResolvedValue(null)}
       />,
     );
-    expect(fetch).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Backup priority' }));
-    const dialog = screen.getByRole('dialog', { name: 'Backup priority' });
-    const selection = await within(dialog).findByRole('combobox', { name: 'Priority' });
-    fireEvent.change(selection, { target: { value: 'time-machine' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Apply priority' }));
-    expect(
-      await within(dialog).findByText(
-        'Mac iCloud has priority until this recovery point is verified.',
-      ),
-    ).toBeVisible();
+    const button = await screen.findByRole('button', { name: /Mac first/ });
+    fireEvent.click(button);
+    await waitFor(() => expect(button).toHaveAttribute('aria-pressed', 'true'));
     expect(
       fetch.mock.calls.some(
         ([url, init]) =>
           url === '/api/backups/priority' && String(init?.body) === 'mode=time-machine',
       ),
     ).toBe(true);
-    expect(within(dialog).getByText('Disk backup freshness')).toBeVisible();
   });
 
   it('requests a Mac stop only after an explicit button press', async () => {
@@ -91,10 +82,15 @@ describe('backup priority menu', () => {
       async () => new Response(JSON.stringify({ ok: true, priority: fixture() }), { status: 200 }),
     );
     vi.stubGlobal('fetch', fetch);
-    render(<BackupPriorityMenu backups={null} refresh={vi.fn().mockResolvedValue(null)} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Backup priority' }));
+    render(
+      <BackupPriorityControls
+        busy={false}
+        setBusy={vi.fn()}
+        refresh={vi.fn().mockResolvedValue(null)}
+      />,
+    );
     const button = await screen.findByRole('button', {
-      name: 'Stop current Mac backup for capture',
+      name: 'Stop Mac backup for capture',
     });
     expect(fetch.mock.calls.every(([, init]) => init?.method !== 'POST')).toBe(true);
     fireEvent.click(button);
@@ -119,10 +115,9 @@ describe('backup priority menu', () => {
           async () => new Response(JSON.stringify({ ok: true, priority: status }), { status: 200 }),
         ),
       );
-      render(<BackupPriorityMenu backups={null} refresh={vi.fn()} />);
-      fireEvent.click(screen.getByRole('button', { name: 'Backup priority' }));
+      render(<BackupPriorityControls busy={false} setBusy={vi.fn()} refresh={vi.fn()} />);
       expect(
-        await screen.findByRole('button', { name: 'Stop current Mac backup for capture' }),
+        await screen.findByRole('button', { name: 'Stop Mac backup for capture' }),
       ).toBeDisabled();
     },
   );

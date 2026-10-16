@@ -9,6 +9,7 @@ import time
 
 from icloud_status import INDEFINITE_PAUSE, number, pause_deadline, read_json, write_json
 import backup_priority as priority
+import cloud_backup_requests
 
 MAX_PAUSE_MINUTES = 7 * 24 * 60
 CLOUD_JOBS = {job.service: job.directory for job in priority.JOBS.values()}
@@ -44,7 +45,8 @@ def automatic_retry_due(directory, now, *, priority_directory=None, jobs=None):
     due = state.get('phase') == 'deferred' and retry_at is not None and retry_at <= now
     selected = (priority.selected_directory(directory, directory=priority_directory, jobs=jobs)
                 and state.get('phase') != 'authentication_required')
-    return bool(due or (selected and now - state.get('last_attempt_at', 0) >= 300))
+    requested = cloud_backup_requests.pending(directory, state) and state.get('phase') != 'authentication_required'
+    return bool(due or ((selected or requested) and now - state.get('last_attempt_at', 0) >= 300))
 
 
 def take_turn(service, *, jobs=CLOUD_JOBS, now=None, command=subprocess.run,
@@ -73,7 +75,7 @@ def take_turn(service, *, jobs=CLOUD_JOBS, now=None, command=subprocess.run,
 
 def control(action, minutes=None, *, directory, service, now=None, command=subprocess.run,
             priority_directory=None, jobs=None):
-    if action not in ('pause', 'resume', 'resume-if-due'):
+    if action not in ('pause', 'resume', 'resume-if-due', 'backup-now'):
         raise ValueError('unsupported cloud backup control')
     if action == 'pause' and minutes != INDEFINITE_PAUSE:
         if not isinstance(minutes, str) or not minutes.isascii() or not minutes.isdecimal():
@@ -104,7 +106,9 @@ def control(action, minutes=None, *, directory, service, now=None, command=subpr
                     return {'ok': True, 'changed': False}
             # The worker consumes this only after acquiring the backup lock.
             # A busy Pi backup therefore leaves the resume queued for the timer.
-            if action == 'resume':
+            if action == 'backup-now':
+                cloud_backup_requests.request(directory, now)
+            if action in ('resume', 'backup-now'):
                 write_json(directory / 'pause.json', {'paused_until': now})
             if is_paused(directory, now):
                 return {'ok': True, 'changed': False}
@@ -117,10 +121,10 @@ def run_cli(directory, service):
     args = sys.argv[1:]
     if args == ['--take-turn']:
         result = take_turn(service)
-    elif args in (['--resume'], ['--resume-if-due']):
+    elif args in (['--resume'], ['--resume-if-due'], ['--backup-now']):
         result = control(args[0][2:], directory=directory, service=service)
     elif len(args) == 2 and args[0] == '--pause':
         result = control('pause', args[1], directory=directory, service=service)
     else:
-        raise ValueError('expected --pause MINUTES|indefinite, --resume, --resume-if-due or --take-turn')
+        raise ValueError('expected --pause MINUTES|indefinite, --resume, --resume-if-due, --backup-now or --take-turn')
     print(json.dumps(result))

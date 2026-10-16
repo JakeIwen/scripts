@@ -6,6 +6,8 @@
 [ -f /home/pi/secrets/.bash_variables ] && . /home/pi/secrets/.bash_variables
 
 # destinations
+BACKUP_WINDOW_START_HOUR=3
+BACKUP_WINDOW_END_HOUR=9
 BACKUP_DISK_LABEL=bigboi
 BACKUP_MNT=/mnt/bigboi
 export BORG_REPO="$BACKUP_MNT/borg/vanpi-encrypted"
@@ -215,3 +217,17 @@ acquire_job_lock() {
 # Resource-specific locks for migrated jobs (job identity, disks, data sets and
 # the single iCloud upload slot). See pi/docs/backup/CONCURRENCY.md.
 . "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/backup_locks.sh"
+
+# The fixed helper emits only known setting names and validated integers.
+if [[ -e /etc/vanpi-backup-settings.json || -L /etc/vanpi-backup-settings.json ]]; then
+  backup_preference_assignments=$(/usr/bin/python3 /home/pi/scripts/backup/backup_settings_control.py --shell) || return 1
+  while IFS='=' read -r backup_preference_name backup_preference_value; do
+    [[ -n "$backup_preference_name" ]] || continue
+    [[ "$backup_preference_name" =~ ^[A-Z][A-Z0-9_]*$ && "$backup_preference_value" =~ ^[0-9]+$ ]] || return 1
+    printf -v "$backup_preference_name" '%s' "$backup_preference_value"
+  done <<< "$backup_preference_assignments"
+  if [[ -n ${CLONE_INTERVAL_A:-} && -n ${CLONE_INTERVAL_B:-} ]]; then
+    CLONE_TARGETS=(hotspare-a:"$CLONE_INTERVAL_A" hotspare-b:"$CLONE_INTERVAL_B")
+  fi
+  unset backup_preference_assignments backup_preference_name backup_preference_value
+fi

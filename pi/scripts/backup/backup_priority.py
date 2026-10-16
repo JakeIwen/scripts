@@ -12,6 +12,7 @@ from typing import TypedDict
 
 from time_machine_store import atomic_json, read_json
 from protected_json import MISSING, ProtectedStateAccessError, read_protected_json
+import cloud_backup_requests
 
 
 class PriorityMode(str, Enum):
@@ -158,13 +159,15 @@ def selected_directory(cloud_directory, *, directory=None, jobs=None):
 
 
 def eligibility(mode, jobs=None, now=None, borg_stamp=None):
+    # The settings writer uses this module's lock; load it after registry setup.
+    from backup_settings import cloud_config
     jobs, now = jobs or JOBS, time.time() if now is None else now
     job = jobs[mode]
     if not job.config.is_file() or not job.directory.is_dir():
         return False, 'This cloud backup is not installed.'
     state = read_json(job.directory / 'state.json', {})
-    cfg = read_json(job.config, {})
-    if not state.get('pending') and now - (state.get('last_success_at') or 0) < cfg.get('interval_days', 7) * 86400:
+    cfg = cloud_config(read_json(job.config, {}), 'pi' if mode == PriorityMode.PI else 'mac', native_path=job.config)
+    if not cloud_backup_requests.due({'interval_days': cfg.get('interval_days', 7)}, state, job.directory, now):
         return False, 'This cloud backup is already current.'
     if mode == PriorityMode.PI and not state.get('progress', {}).get('upload_total_bytes'):
         try:

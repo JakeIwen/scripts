@@ -155,7 +155,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   capture nonce. The root Mac coordinator verifies the active destination before
   `tmutil stopbackup`, then a later poll must prove idle and non-force detach.
   Dashboard `van_dashboard_backup_priority.py` and `routes/backup_priority.py`
-  serve the gear-menu UI in `features/backups/BackupPriorityMenu.tsx`; `priority.ts`
+  serve controls in `features/backups/BackupPriorityControls.tsx`; `priority.ts`
   owns its response contract. Both targeted cloud installers ship these modules
   and verify the shared backup configuration before updating it.
 - `pi/scripts/backup/protected_json.py` owns private control-record metadata
@@ -261,6 +261,21 @@ Some ignored secret directories, wireless profiles, and device configurations
 may contain credentials or private network data. Never print or commit secrets,
 and preserve unrelated local or deployed changes.
 
+- Backup preferences: `pi/scripts/backup/backup_setting_fields.py` is the canonical
+  editable-field schema (bounds, units and tooltip text); `backup_settings.py` owns
+  revision-checked overrides in root-private `/etc/vanpi-backup-settings.json`.
+  `backup_settings_control.py` is the fixed CLI. Workers apply preferences at the
+  next run; native credentials and configuration remain separate. The shell helper
+  emits only fixed numeric setting names, never shell code. `backup_schedule.py`
+  migrates only the two owned cron entries to hourly `--scheduled` checks, retaining
+  the prior root crontab; the configured Pi-time window gates new starts only.
+  Dashboard `backup_settings_control.py` / `routes/backup_settings.py` and
+  `features/backups/BackupSettingsPanel.tsx` own the settings subpanel;
+  `useBackupPreferences.ts` owns its draft/save lifecycle.
+- `pi/scripts/backup/cloud_backup_requests.py` owns durable `backup-now.json`
+  requests. Back up now bypasses only the weekly cadence, coalesces repeated clicks,
+  resumes an unfinished generation and is satisfied by one new verified generation.
+  It never rewrites success history, relaxes admission or discards checkpoints.
 - Dashboard backup configuration parsing lives in `pi/apps/van_dashboard/backup_configuration.py`;
   `features/backups/CloneCardCapacity.tsx` owns the reusable card-capacity control.
 
@@ -466,7 +481,8 @@ The active design is represented by:
 
 - `pi/scripts/backup/pi_backup.sh`: backup orchestration.
 - `pi/scripts/backup/openwrt_backup.sh`: verified router exports; independent
-  daily cron retries use `--daily`, and Borg can also refresh before archiving.
+  hourly cron checks use `--scheduled` within the configured daily window;
+  Borg can also refresh before archiving.
   A directory flock serializes exports without taking the cloud/disk backup lock.
 - `pi/scripts/backup/backup_watchdog.sh`: freshness and health monitoring.
 - `pi/scripts/backup/rootfs_budget.sh`: bounded rootfs path budgets and daily growth history for the watchdog.

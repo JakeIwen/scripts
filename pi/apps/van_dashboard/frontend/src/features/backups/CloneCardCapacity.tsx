@@ -30,7 +30,14 @@ export function CloneCardCapacity({
           ))}
         </select>
       </label>
-      <small>Warn above {settings.rootUsedMaxGib} GiB root usage</small>
+      <small title="Root usage above this level may no longer fit safely on the configured cards.">
+        Root limit · {settings.rootUsedMaxGib} GiB
+      </small>
+      {controls.lastError && (
+        <p role="alert" className="error-message">
+          {controls.lastError}
+        </p>
+      )}
     </div>
   );
 }

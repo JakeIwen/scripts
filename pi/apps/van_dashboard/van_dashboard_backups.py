@@ -97,8 +97,10 @@ class BackupManager:
         process_root="/proc",
         icloud_tool="/home/pi/scripts/backup/icloud_status.py",
         time_machine_icloud_tool="/home/pi/scripts/backup/time_machine_icloud_status.py",
+        settings_read=None,
     ):
         self.config = config
+        self.settings_read = settings_read
         self.stamp_dir = stamp_dir
         self.clone_card_size_path = clone_card_size_path
         self.clone_tool = clone_tool
@@ -145,6 +147,11 @@ class BackupManager:
             configuration = self.parse_config(read_text_file(self.config))
         except OSError as exc:
             raise BackupStatusError(f"could not read backup configuration: {exc}") from exc
+        if self.settings_read is not None:
+            try:
+                configuration.update(self.settings_read())
+            except (ValueError, RuntimeError) as exc:
+                raise BackupStatusError('Backup settings are unavailable.') from exc
         nominal_gb = self._read_clone_card_nominal_gb(
             configuration["clone_card_nominal_gb"]
         )

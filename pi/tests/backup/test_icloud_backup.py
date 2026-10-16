@@ -266,7 +266,8 @@ class SnapshotTests(ClientMonitoringTests):
 
     def test_not_due_never_probes_network(self):
         cfg=test_config()
-        with mock.patch.object(backup,'guard') as guard:
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(backup,'STATE_DIR',Path(tmp)), \
+             mock.patch.object(backup,'guard') as guard:
             self.assertEqual(backup.weekly(cfg,{'last_success_at':time.time()}), 'not due')
             guard.assert_not_called()
 

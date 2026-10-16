@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import backup_settings
 
 from icloud_status import apply_manual_control, apply_priority_control, build_status, number, pause_deadline, read_json
 
@@ -31,7 +32,7 @@ def status():
         pass
     if deadline is None and retry_at is not None and next_check is not None:
         next_check = max(retry_at, next_check)
-    result = build_status(state, read_json(STATE / 'history.json', {}), read_json(CONFIG, {}),
+    result = build_status(state, read_json(STATE / 'history.json', {}), backup_settings.cloud_config(read_json(CONFIG, {}), 'mac'),
                           service, next_check, auth_error=AUTH_ERROR.exists())
     apply_manual_control(result, deadline)
     apply_priority_control(result, STATE)

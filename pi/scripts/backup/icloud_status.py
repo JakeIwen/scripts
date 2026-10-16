@@ -18,6 +18,8 @@ import time
 import uuid
 import backup_locks
 import backup_priority
+import cloud_backup_requests
+import backup_settings
 from icloud_progress import TransferActivity
 
 STATE_DIR = Path('/var/lib/vanpi-icloud-backup')
@@ -136,6 +138,9 @@ def apply_manual_control(result, deadline, now=None):
 
 
 def apply_priority_control(result, directory):
+    result['backup_now_pending'] = cloud_backup_requests.pending(directory)
+    if result['backup_now_pending'] and not result['running'] and result['phase'] in ('not due', 'complete'):
+        result.update(phase='deferred', message='Back up now queued; waiting for the next available cloud slot.')
     selected = backup_priority.policy()
     if (selected != backup_priority.PriorityMode.NORMAL and not result['running']
             and result['phase'] not in ('paused', 'not due', 'complete')
@@ -341,7 +346,7 @@ def dashboard_status():
     except (ValueError, OSError, subprocess.SubprocessError):
         pass
     result = build_status(read_json(STATE_DIR / 'state.json', {}),
-                        read_json(STATE_DIR / 'history.json', {}), read_json(CONFIG, {}),
+                        read_json(STATE_DIR / 'history.json', {}), backup_settings.cloud_config(read_json(CONFIG, {}), 'pi'),
                         service, next_check, auth_error=(STATE_DIR / 'authentication-error.json').exists())
     return apply_priority_control(apply_manual_control(result, deadline), STATE_DIR)
 

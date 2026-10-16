@@ -45,6 +45,40 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe('iCloud dashboard', () => {
+  it.each(['pi', 'time-machine'] as const)(
+    'requests a fresh cloud copy explicitly for %s',
+    async (kind) => {
+      const fetch = vi.fn(
+        async (_path: unknown, _init?: RequestInit) =>
+          new Response(JSON.stringify({ ok: true, message: 'Backup queued' }), { status: 202 }),
+      );
+      vi.stubGlobal('fetch', fetch);
+      const status = {
+        ...cloud(),
+        phase: 'not due' as const,
+        controlsAvailable: true,
+        lastSuccessAt: 1800000000,
+        verifiedGenerations: [{ generation, completedAt: 1800000000 }],
+      };
+      const view = render(
+        <ICloudBackupCard status={status} kind={kind} refresh={vi.fn().mockResolvedValue(null)} />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Back up now' }));
+      expect(await screen.findByRole('status')).toHaveTextContent('Backup queued');
+      expect(fetch.mock.calls[0]?.[0]).toBe(
+        `/api/backups/${kind === 'pi' ? 'icloud' : 'time-machine-icloud'}/backup-now`,
+      );
+      view.rerender(
+        <ICloudBackupCard
+          status={{ ...status, backupNowPending: true }}
+          kind={kind}
+          refresh={vi.fn().mockResolvedValue(null)}
+        />,
+      );
+      expect(screen.getByRole('button', { name: 'Resume now' })).toBeEnabled();
+      vi.unstubAllGlobals();
+    },
+  );
   it('shows verification catching up independently while uploading, and retains saved checks when paused', () => {
     const status = cloud();
     Object.assign(status, { running: true, phase: 'uploading', updatedAt: Date.now() / 1000 });
@@ -258,7 +292,10 @@ describe('iCloud dashboard', () => {
     const refresh = vi.fn().mockResolvedValue(null);
     const view = render(<ICloudBackupCard status={status} refresh={refresh} />);
     const resume = screen.getByRole('button', { name: 'Resume schedule' });
-    expect(resume).toHaveAttribute('title', expect.stringContaining('already verified'));
+    expect(resume).toHaveAttribute(
+      'title',
+      expect.stringContaining('without requesting a new copy'),
+    );
     expect(screen.getByText(/Last verified/)).toBeInTheDocument();
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
     fireEvent.click(resume);

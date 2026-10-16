@@ -125,3 +125,55 @@ export function sampleRunningICloudStatus(): AvailableICloudStatus {
 export function sampleBackupStatus(running = false) {
   return decodeBackupStatusResponse(backupStatusPayload(running));
 }
+
+export function backupPreferencesPayload() {
+  return {
+    ok: true,
+    settings: {
+      revision: 'revision-one',
+      timezone: 'MDT',
+      values: { 'pi.interval': 7, 'mac.keep': 2, 'alerts.success': true },
+      groups: [
+        { id: 'pi-cloud', label: 'Pi · iCloud' },
+        { id: 'mac-cloud', label: 'Mac · iCloud' },
+        { id: 'hotspares', label: 'Hotspares' },
+        { id: 'alerts', label: 'Alerts' },
+      ],
+      fields: [
+        {
+          id: 'pi.interval',
+          group: 'pi-cloud',
+          section: 'Schedule',
+          label: 'Every',
+          unit: 'days',
+          minimum: 1,
+          maximum: 31,
+          kind: 'number',
+          help: 'Time between successful cloud verifications.',
+        },
+        {
+          id: 'mac.keep',
+          group: 'mac-cloud',
+          section: 'Recovery points',
+          label: 'Keep',
+          unit: 'copies',
+          minimum: 2,
+          maximum: 8,
+          kind: 'number',
+          help: 'Older copies retire after the next verified copy.',
+        },
+        {
+          id: 'alerts.success',
+          group: 'alerts',
+          section: 'Notifications',
+          label: 'Successful disk backups',
+          unit: '',
+          minimum: 0,
+          maximum: 1,
+          kind: 'toggle',
+          help: 'Notify after local backup success.',
+        },
+      ],
+    },
+  };
+}

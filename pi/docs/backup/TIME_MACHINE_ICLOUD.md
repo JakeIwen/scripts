@@ -242,3 +242,28 @@ proof and all objects and never hard-links bands into the writable restored
 image. Then attach read-only on a Mac, enter the image password privately,
 verify APFS and restore a test file before relying on Migration Assistant.
 Keep that encryption password somewhere recoverable after losing all van devices.
+
+## Dashboard settings and on-demand copies
+
+The Backups gear opens **Backup settings**. Settings cover both cloud copies,
+Borg/EXFAT schedules and retention, hotspare refresh cadence, alerts and cloud
+priority. Inputs display units; help is available on hover, focus or tap. Save
+uses a revision check to prevent overwriting another dashboard's newer changes.
+Preferences live in `/etc/vanpi-backup-settings.json`, separately from credentials
+and native configuration, and take effect at the next run. Card capacity and
+priority use their existing immediate controls. Cloud safety checks remain fixed.
+
+**Back up now** queues a new recovery point without waiting for the weekly date.
+An unfinished generation resumes first. The durable request survives deferrals
+and reboot, repeated clicks coalesce, and one new verified generation satisfies
+it. This does not modify `last_success_at` or existing verification proofs. A
+queued copy retains **Resume now** for an immediate retry. Manual pauses on the
+selected job are removed by the explicit request; other jobs' holds stay intact.
+
+Local Borg/EXFAT checks run hourly at :00, and independent router exports at :10.
+The configurable Pi-time window gates these scheduled starts; existing work
+finishes normally, and manual force actions keep their existing semantics.
+The scoped installers preflight the two owned root-cron entries, then migrate
+only those entries after committing the worker cohort. A private `schedule-before-`
+crontab in `/var/lib/vanpi-backup-priority/` retains the previous table. Restore
+that reviewed table too if rolling back to workers without `--scheduled` support.

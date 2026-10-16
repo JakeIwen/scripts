@@ -24,7 +24,7 @@ export const ICLOUD_PHASES = [
   'paused',
 ] as const;
 export type ICloudPhase = (typeof ICLOUD_PHASES)[number];
-export type ICloudControlAction = 'pause' | 'resume' | 'take-turn';
+export type ICloudControlAction = 'pause' | 'resume' | 'take-turn' | 'backup-now';
 export type ICloudBackupKind = 'pi' | 'time-machine';
 export const INDEFINITE_PAUSE = 'indefinite';
 export const VERIFICATION_ACTIVITIES = [
@@ -68,6 +68,7 @@ export interface ICloudAttempt {
   verifiedAt: number | null;
 }
 export interface AvailableICloudStatus {
+  backupNowPending?: boolean;
   controlsAvailable?: boolean;
   manualPauseUntil?: number | null;
   manualPauseIndefinite?: boolean;
@@ -177,6 +178,10 @@ export function decodeICloud(value: unknown): ICloudStatus | null {
   if (!booleanValue(row.available, 'iCloud.available')) return { available: false, running: false };
   return {
     available: true,
+    backupNowPending:
+      row.backup_now_pending === undefined
+        ? false
+        : booleanValue(row.backup_now_pending, 'backup now pending'),
     controlsAvailable:
       row.controls_available === undefined
         ? false

@@ -22,15 +22,22 @@ export function iCloudShowsProgress(status: AvailableICloudStatus): boolean {
 
 export function iCloudResumePresentation(status: AvailableICloudStatus) {
   const paused = status.manualPauseUntil != null || status.manualPauseIndefinite;
+  if (status.backupNowPending && !status.running) {
+    return {
+      action: 'resume' as const,
+      label: paused ? 'Resume backup' : 'Resume now',
+      help: 'Retry the queued backup now. Saved work is retained; disk, network and priority checks still apply.',
+    };
+  }
   if (!status.running && hasVerifiedGeneration(status)) {
     return {
-      label: paused ? 'Resume schedule' : 'Check schedule',
-      help: paused
-        ? 'Remove the manual pause and re-enable scheduled backups. This copy is already verified; a new copy starts only when due.'
-        : 'Check whether the next scheduled backup is due. This copy is already verified.',
+      action: 'backup-now' as const,
+      label: 'Back up now',
+      help: 'Queue a new cloud recovery copy from the latest completed backup, without waiting for its scheduled date. Removes this backup’s manual pause. Disk, network and priority checks still apply.',
     };
   }
   return {
+    action: 'resume' as const,
     label: paused ? 'Resume backup' : 'Resume now',
     help: 'Resume retries unfinished work when the backup lock, disk, ignition and network checks allow it. If no work is pending, the weekly schedule applies.',
   };

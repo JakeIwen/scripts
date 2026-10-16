@@ -144,7 +144,9 @@ export function ICloudBackupCard({
       )}
       <dl className="backup-icloud__schedule">
         <div>
-          <dt>Next retry / eligibility check</dt>
+          <dt title="The scheduler checks for due or unfinished work at this time. A check may run without starting an upload.">
+            Next check
+          </dt>
           <dd>
             {status.running && status.nextCheckAt === null
               ? 'After the current attempt ends'
@@ -153,7 +155,9 @@ export function ICloudBackupCard({
         </div>
         {status.nextDueAt !== null && (
           <div>
-            <dt>Next weekly copy due</dt>
+            <dt title="A new cloud copy becomes due this long after the previous successful verification. Back up now can request one sooner.">
+              Next scheduled copy
+            </dt>
             <dd>{date(status.nextDueAt)}</dd>
           </div>
         )}
