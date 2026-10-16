@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fixed settings operations; accepts only bounded JSON on stdin for writes."""
+"""Bounded JSON writes; stale revisions use the standard EX_TEMPFAIL exit status."""
 import datetime as dt
 import json
 import os
@@ -36,6 +36,9 @@ def main(args=None):
 if __name__ == '__main__':
     try:
         sys.exit(main())
+    except settings.SettingsConflict as exc:
+        print(json.dumps({'ok': False, 'message': str(exc)}))
+        sys.exit(os.EX_TEMPFAIL)
     except ValueError as exc:
         print(json.dumps({'ok': False, 'message': str(exc)}))
         sys.exit(2)

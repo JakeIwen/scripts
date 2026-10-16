@@ -1,8 +1,13 @@
 """Allowlisted privileged settings requests; no shell evaluation or arbitrary paths."""
 import json
+import os
 import subprocess
 
 from .van_dashboard_common import SUDO, run_command
+
+
+class BackupSettingsConflict(ValueError):
+    """The privileged writer rejected a stale settings revision."""
 
 
 class BackupSettingsControl:
@@ -18,8 +23,9 @@ class BackupSettingsControl:
             result = self.command([SUDO, '-n', '/usr/bin/python3', self.HELPER, '--' + operation],
                                   timeout=15, input_text=None if payload is None else json.dumps(payload))
             data = json.loads(result.stdout)
-            if result.returncode == 2 and isinstance(data.get('message'), str):
-                raise ValueError(data['message'][:200])
+            if result.returncode in (2, os.EX_TEMPFAIL) and isinstance(data.get('message'), str):
+                error = BackupSettingsConflict if result.returncode == os.EX_TEMPFAIL else ValueError
+                raise error(data['message'][:200])
             if result.returncode or data.get('ok') is not True or not isinstance(data.get('settings'), dict):
                 raise RuntimeError('Backup settings are unavailable. Refresh and retry.')
             return data['settings']

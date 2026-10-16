@@ -1,4 +1,6 @@
 import json
+import io
+import os
 import subprocess
 import unittest
 from unittest import mock
@@ -10,6 +12,14 @@ from pi.apps.van_dashboard.backup_settings_control import BackupSettingsControl
 
 
 class SettingsRoutesTests(unittest.TestCase):
+    def test_chunked_body_is_bounded_without_content_length(self):
+        stream=io.BytesIO(json.dumps({'revision':'r','changes':{'x':'a'*20000}}).encode())
+        response=self.client.open('/api/backups/settings',method='POST',input_stream=stream,
+            content_type='application/json',environ_overrides={'CONTENT_LENGTH':'','wsgi.input_terminated':True})
+        self.assertEqual(response.status_code,400)
+        self.command.assert_not_called()
+        self.assertLessEqual(stream.tell(),16385)
+
     def setUp(self):
         self.command = mock.Mock(return_value=subprocess.CompletedProcess([],0,
             json.dumps({'ok':True,'settings':{'revision':'r','values':{}}}),''))
@@ -34,8 +44,8 @@ class SettingsRoutesTests(unittest.TestCase):
         self.command.assert_not_called()
 
     def test_conflicts_are_actionable_and_private_failures_are_not_exposed(self):
-        self.command.return_value=subprocess.CompletedProcess([],2,json.dumps({'ok':False,
-            'message':'Settings changed elsewhere. Reload before saving.'}),'')
+        self.command.return_value=subprocess.CompletedProcess([],os.EX_TEMPFAIL,json.dumps({'ok':False,
+            'message':'A newer settings revision is available.'}),'')
         self.assertEqual(self.client.post('/api/backups/settings',json={'revision':'r','changes':{}}).status_code,409)
         self.command.return_value=subprocess.CompletedProcess([],1,'PRIVATE','PRIVATE')
         response=self.client.get('/api/backups/settings')

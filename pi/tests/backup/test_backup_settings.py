@@ -1,5 +1,10 @@
 """User preferences preserve private config and apply through existing workers."""
 import json
+import io
+import os
+import runpy
+import sys
+from contextlib import redirect_stdout
 from pathlib import Path
 import re
 import subprocess
@@ -13,6 +18,16 @@ from backup_schedule import scheduled_crontab, migrate
 
 
 class SettingsTests(unittest.TestCase):
+    def test_cli_conflict_category_survives_a_different_human_message(self):
+        output=io.StringIO()
+        with mock.patch.object(settings,'save',side_effect=settings.SettingsConflict('New wording.')), \
+             mock.patch.object(sys,'argv',[cli.__file__,'--save']), \
+             mock.patch.object(sys,'stdin',io.StringIO('{"revision":"old","changes":{}}')), \
+             redirect_stdout(output), self.assertRaises(SystemExit) as exit:
+            runpy.run_path(cli.__file__,run_name='__main__')
+        self.assertEqual(exit.exception.code,os.EX_TEMPFAIL)
+        self.assertEqual(json.loads(output.getvalue())['message'],'New wording.')
+
     def setUp(self):
         temp = tempfile.TemporaryDirectory(); self.addCleanup(temp.cleanup)
         root = Path(temp.name)

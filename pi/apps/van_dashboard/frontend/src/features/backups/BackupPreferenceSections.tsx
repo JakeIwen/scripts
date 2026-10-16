@@ -48,6 +48,7 @@ export function BackupPreferenceSections({
                   field={field}
                   value={editor.draft[field.id] ?? ''}
                   disabled={editor.busy}
+                  error={editor.fieldErrors[field.id]}
                   onChange={(value) => editor.change(field.id, value)}
                 />
               ))}
@@ -77,6 +78,7 @@ export function PreferenceFooter({
   editor: PreferencesEditor;
   onClose: () => void;
 }) {
+  const invalid = Object.keys(editor.fieldErrors).length;
   return (
     <footer className="backup-settings-footer">
       {editor.discard ? (
@@ -93,14 +95,19 @@ export function PreferenceFooter({
         </>
       ) : (
         <>
-          <span role="status">
+          <span
+            role="status"
+            title={invalid ? Object.values(editor.fieldErrors).join('\n') : undefined}
+          >
             {editor.busy
               ? 'Applying…'
-              : editor.count
-                ? `${editor.count} unsaved ${editor.count === 1 ? 'change' : 'changes'}`
-                : editor.saved
-                  ? 'Saved · applies to the next run'
-                  : 'Changes apply to the next run'}
+              : invalid
+                ? `Check ${invalid} ${invalid === 1 ? 'value' : 'values'}`
+                : editor.count
+                  ? `${editor.count} unsaved ${editor.count === 1 ? 'change' : 'changes'}`
+                  : editor.saved
+                    ? 'Saved · applies to the next run'
+                    : 'Changes apply to the next run'}
           </span>
           <button
             type="button"

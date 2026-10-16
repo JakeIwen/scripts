@@ -25,6 +25,10 @@ class SettingsPaths:
 PATHS = SettingsPaths()
 
 
+class SettingsConflict(ValueError):
+    """An editor's revision no longer matches the current preferences."""
+
+
 def overrides(paths=PATHS):
     row = read_protected_json(paths.preferences, 'Backup settings failed their file safety checks.')
     if row is MISSING:
@@ -112,7 +116,7 @@ def save(payload, paths=PATHS):
     with priority.locked(paths.lock_directory):
         current = snapshot(paths)
         if payload['revision'] != current['revision']:
-            raise ValueError('Settings changed elsewhere. Reload before saving.')
+            raise SettingsConflict('Settings changed elsewhere. Reload before saving.')
         validate({**current['values'], **payload['changes']})
         atomic_json(paths.preferences, {'version': 1, 'values': {**overrides(paths), **payload['changes']}})
     return snapshot(paths)

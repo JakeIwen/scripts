@@ -1,15 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import {
-  fetchBackupPreferences,
-  saveBackupPreferences,
-  type BackupPreferences,
-  type SettingValue,
-} from './settings';
+import { useSingleFlightAction } from '../../hooks/useSingleFlightAction';
+import { fetchBackupPreferences, saveBackupPreferences, type BackupPreferences } from './settings';
+import { prepareSettingsDraft, type SettingsDraft, type SettingDraftValue } from './settingsDraft';
 
 interface PreferenceState {
   settings: BackupPreferences | null;
-  draft: Record<string, SettingValue | ''>;
-  busy: boolean;
+  draft: SettingsDraft;
   error: string | null;
   saved: boolean;
   discard: boolean;
@@ -17,7 +13,6 @@ interface PreferenceState {
 const initial: PreferenceState = {
   settings: null,
   draft: {},
-  busy: false,
   error: null,
   saved: false,
   discard: false,
@@ -25,19 +20,17 @@ const initial: PreferenceState = {
 
 export function useBackupPreferences(refresh: () => Promise<unknown>, onClose: () => void) {
   const [state, setState] = useState(initial);
+  const { running: busy, run: runAction } = useSingleFlightAction();
   const update = (patch: Partial<PreferenceState>) =>
     setState((current) => ({ ...current, ...patch }));
-  const accept = (settings: BackupPreferences) =>
-    update({ settings, draft: settings.values, error: null });
-  const changes = Object.fromEntries(
-    Object.entries(state.draft).filter(([key, value]) => state.settings?.values[key] !== value),
-  );
-  const count = Object.keys(changes).length;
-  const canSave = !!count && !state.busy && !Object.values(changes).includes('');
+  const accept = (settings: BackupPreferences, saved = false) =>
+    update({ settings, draft: settings.values, error: null, discard: false, saved });
+  const { changes, errors: fieldErrors, count } = prepareSettingsDraft(state.settings, state.draft);
+  const canSave = !!count && !busy && !Object.keys(fieldErrors).length;
   useEffect(() => {
     const abort = new AbortController();
     fetchBackupPreferences(abort.signal)
-      .then(accept)
+      .then((settings) => accept(settings))
       .catch((reason) => {
         if (!abort.signal.aborted)
           update({ error: reason instanceof Error ? reason.message : 'Settings unavailable.' });
@@ -47,56 +40,55 @@ export function useBackupPreferences(refresh: () => Promise<unknown>, onClose: (
   async function save(event: FormEvent) {
     event.preventDefault();
     if (!state.settings || !canSave) return;
-    update({ busy: true, error: null, saved: false });
-    try {
-      accept(
-        await saveBackupPreferences(
-          state.settings.revision,
-          changes as Record<string, SettingValue>,
-        ),
-      );
-      update({ saved: true });
-      await refresh();
-    } catch (reason) {
-      update({ error: reason instanceof Error ? reason.message : 'Settings could not be saved.' });
-    } finally {
-      update({ busy: false });
-    }
+    const revision = state.settings.revision;
+    await runAction(async () => {
+      update({ error: null, saved: false });
+      try {
+        accept(await saveBackupPreferences(revision, changes), true);
+        await refresh();
+      } catch (reason) {
+        update({
+          error: reason instanceof Error ? reason.message : 'Settings could not be saved.',
+        });
+      }
+    });
   }
   async function reload() {
-    update({ busy: true, error: null });
-    try {
-      accept(await fetchBackupPreferences());
-      update({ saved: false });
-    } catch (reason) {
-      update({ error: reason instanceof Error ? reason.message : 'Settings unavailable.' });
-    } finally {
-      update({ busy: false });
-    }
+    await runAction(async () => {
+      update({ error: null });
+      try {
+        accept(await fetchBackupPreferences());
+      } catch (reason) {
+        update({ error: reason instanceof Error ? reason.message : 'Settings unavailable.' });
+      }
+    });
   }
   function close() {
-    if (state.busy) return;
+    if (busy) return;
     if (count) update({ discard: true });
     else onClose();
   }
   return {
     ...state,
+    busy,
+    runAction,
+    fieldErrors,
     changes,
     count,
     canSave,
     save,
     reload,
     close,
-    setBusy: (busy: boolean) => update({ busy }),
     keepEditing: () => update({ discard: false }),
-    change: (key: string, value: SettingValue | '') =>
+    change: (key: string, value: SettingDraftValue) =>
       setState((current) => ({
         ...current,
         draft: { ...current.draft, [key]: value },
         saved: false,
         discard: false,
       })),
-    cancel: () => update({ draft: state.settings?.values ?? {}, saved: false, error: null }),
+    cancel: () =>
+      update({ draft: state.settings?.values ?? {}, saved: false, error: null, discard: false }),
   };
 }
 

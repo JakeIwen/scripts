@@ -65,7 +65,7 @@ function PreferencesDialog({
             {group === 'priority' ? (
               <BackupPriorityControls
                 busy={editor.busy}
-                setBusy={editor.setBusy}
+                runAction={editor.runAction}
                 refresh={refresh}
               />
             ) : (
@@ -100,15 +100,26 @@ function PreferenceNavigation({
           type="button"
           disabled={editor.busy}
           aria-pressed={group === item.id}
+          title={
+            editor.settings?.fields.some(
+              (field) => field.group === item.id && Object.hasOwn(editor.fieldErrors, field.id),
+            )
+              ? 'Check the highlighted values in this category.'
+              : undefined
+          }
           onClick={() => select(item.id)}
         >
           {item.label}
           <span aria-hidden="true">
             {editor.settings?.fields.some(
-              (field) => field.group === item.id && field.id in editor.changes,
+              (field) => field.group === item.id && Object.hasOwn(editor.fieldErrors, field.id),
             )
-              ? '•'
-              : ''}
+              ? '!'
+              : editor.settings?.fields.some(
+                    (field) => field.group === item.id && Object.hasOwn(editor.changes, field.id),
+                  )
+                ? '•'
+                : ''}
           </span>
         </button>
       ))}

@@ -1,6 +1,12 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { BackupPriorityControls } from './BackupPriorityControls';
+import { useSingleFlightAction } from '../../hooks/useSingleFlightAction';
+
+function PriorityProbe({ refresh }: { refresh: () => Promise<unknown> }) {
+  const action = useSingleFlightAction();
+  return <BackupPriorityControls busy={action.running} runAction={action.run} refresh={refresh} />;
+}
 
 function fixture() {
   return {
@@ -41,11 +47,44 @@ beforeAll(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
 describe('backup priority menu', () => {
+  it('refreshes capture readiness while the category stays open', async () => {
+    vi.useFakeTimers();
+    const status = fixture();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ ok: true, priority: status }))),
+    );
+    await act(async () => {
+      render(<PriorityProbe refresh={vi.fn().mockResolvedValue(null)} />);
+    });
+    const button = screen.getByRole('button', { name: 'Stop Mac backup for capture' });
+    expect(button).toBeEnabled();
+    status.capture.capture_complete = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(button).toBeDisabled();
+  });
+  it('does not label an unavailable source as an already current backup', async () => {
+    const status = fixture();
+    const pi = status.jobs[0];
+    if (!pi) throw new Error('Priority fixture is incomplete');
+    pi.reason = 'A fresh Pi Borg backup is needed.';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ ok: true, priority: status }))),
+    );
+    render(<PriorityProbe refresh={vi.fn().mockResolvedValue(null)} />);
+    const button = await screen.findByRole('button', { name: /Pi first/ });
+    expect(button).toHaveTextContent('Unavailable');
+    expect(button).toHaveAttribute('title', 'A fresh Pi Borg backup is needed.');
+  });
   it('loads in its own dialog and applies a one-time Mac priority', async () => {
     const status = fixture();
     const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
@@ -54,13 +93,7 @@ describe('backup priority menu', () => {
       return new Response(JSON.stringify({ ok: true, priority: status }), { status: 200 });
     });
     vi.stubGlobal('fetch', fetch);
-    render(
-      <BackupPriorityControls
-        busy={false}
-        setBusy={vi.fn()}
-        refresh={vi.fn().mockResolvedValue(null)}
-      />,
-    );
+    render(<PriorityProbe refresh={vi.fn().mockResolvedValue(null)} />);
     const button = await screen.findByRole('button', { name: /Mac first/ });
     fireEvent.click(button);
     await waitFor(() => expect(button).toHaveAttribute('aria-pressed', 'true'));
@@ -82,13 +115,7 @@ describe('backup priority menu', () => {
       async () => new Response(JSON.stringify({ ok: true, priority: fixture() }), { status: 200 }),
     );
     vi.stubGlobal('fetch', fetch);
-    render(
-      <BackupPriorityControls
-        busy={false}
-        setBusy={vi.fn()}
-        refresh={vi.fn().mockResolvedValue(null)}
-      />,
-    );
+    render(<PriorityProbe refresh={vi.fn().mockResolvedValue(null)} />);
     const button = await screen.findByRole('button', {
       name: 'Stop Mac backup for capture',
     });
@@ -115,7 +142,7 @@ describe('backup priority menu', () => {
           async () => new Response(JSON.stringify({ ok: true, priority: status }), { status: 200 }),
         ),
       );
-      render(<BackupPriorityControls busy={false} setBusy={vi.fn()} refresh={vi.fn()} />);
+      render(<PriorityProbe refresh={vi.fn().mockResolvedValue(null)} />);
       expect(
         await screen.findByRole('button', { name: 'Stop Mac backup for capture' }),
       ).toBeDisabled();

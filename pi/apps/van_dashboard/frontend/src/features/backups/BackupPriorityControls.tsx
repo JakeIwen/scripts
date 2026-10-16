@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { usePollingResource } from '../../hooks/usePollingResource';
 import {
   fetchBackupPriority,
   requestMacCapture,
@@ -7,42 +8,34 @@ import {
   type BackupPriorityStatus,
 } from './priority';
 import { SettingHelp } from './BackupSettingField';
+import type { PreferencesEditor } from './useBackupPreferences';
 
 export function BackupPriorityControls({
   busy,
-  setBusy,
+  runAction,
   refresh,
 }: {
   busy: boolean;
-  setBusy: (value: boolean) => void;
+  runAction: PreferencesEditor['runAction'];
   refresh: () => Promise<unknown>;
 }) {
-  const [status, setStatus] = useState<BackupPriorityStatus | null>(null);
+  const resource = usePollingResource({ load: fetchBackupPriority, intervalMs: 5000 });
+  const status = resource.data;
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  useEffect(() => {
-    const abort = new AbortController();
-    fetchBackupPriority(abort.signal)
-      .then(setStatus)
-      .catch((reason) => {
-        if (!abort.signal.aborted) setError(String(reason.message));
-      });
-    return () => abort.abort();
-  }, []);
+  const failure = error ?? resource.error?.message;
   async function run(action: () => Promise<unknown>, success: string) {
-    setBusy(true);
-    setError(null);
-    setMessage(null);
-    try {
-      await action();
-      setStatus(await fetchBackupPriority(new AbortController().signal));
-      await refresh();
-      setMessage(success);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Could not change priority.');
-    } finally {
-      setBusy(false);
-    }
+    await runAction(async () => {
+      setError(null);
+      setMessage(null);
+      try {
+        await action();
+        await Promise.all([resource.refresh(), refresh()]);
+        setMessage(success);
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : 'Could not change priority.');
+      }
+    });
   }
   return (
     <div className="backup-settings-priority">
@@ -53,19 +46,19 @@ export function BackupPriorityControls({
           and other disk backups can run alongside it. Other manual pauses remain unchanged.
         </SettingHelp>
       </div>
-      {error && (
+      {failure && (
         <p role="alert" className="error-message">
-          {error}
+          {failure}
         </p>
       )}
       {message && <p role="status">{message}</p>}
-      {!status ? (
-        <p role="status">Loading…</p>
-      ) : (
+      {status ? (
         <>
           <PriorityChoices status={status} busy={busy} run={run} />
           <CapturePriority status={status} busy={busy} run={run} />
         </>
+      ) : (
+        !failure && <p role="status">Loading…</p>
       )}
     </div>
   );
@@ -110,7 +103,7 @@ function PriorityChoices({ status, busy, run }: PriorityProps) {
               {option.mode === 'normal'
                 ? 'Automatic'
                 : unavailable
-                  ? 'Already current'
+                  ? 'Unavailable'
                   : 'Until verified'}
             </small>
           </button>

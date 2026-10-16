@@ -1,7 +1,32 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { BackupSettingsPanel } from './BackupSettingsPanel';
 import { backupPreferencesPayload } from './testFixtures';
+import { useBackupPreferences } from './useBackupPreferences';
+import { decodeBackupPreferences } from './settings';
+import { prepareSettingsDraft } from './settingsDraft';
+
+function BurstSaveProbe() {
+  const editor = useBackupPreferences(
+    async () => null,
+    () => {},
+  );
+  return editor.settings ? (
+    <>
+      <button onClick={() => editor.change('pi.interval', 3)}>Edit</button>
+      <button
+        onClick={(event) => {
+          void editor.save(event);
+          void editor.save(event);
+        }}
+      >
+        Submit twice
+      </button>
+    </>
+  ) : (
+    <span>Loading</span>
+  );
+}
 
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function () {
@@ -18,6 +43,66 @@ afterEach(() => {
 });
 
 describe('backup settings', () => {
+  it.each(['duplicate-field', 'duplicate-group', 'unknown-group', 'bad-bounds'] as const)(
+    'rejects incoherent server metadata: %s',
+    (kind) => {
+      const payload = backupPreferencesPayload();
+      const field = payload.settings.fields[0],
+        group = payload.settings.groups[0];
+      if (!field || !group) throw new Error('Settings fixture is incomplete');
+      if (kind === 'duplicate-field') payload.settings.fields.push({ ...field });
+      if (kind === 'duplicate-group') payload.settings.groups.push({ ...group });
+      if (kind === 'unknown-group') field.group = 'missing';
+      if (kind === 'bad-bounds') field.minimum = 50;
+      expect(() => decodeBackupPreferences(payload)).toThrow(TypeError);
+    },
+  );
+
+  it('prepares fractional transfer rates without a lossy payload cast', () => {
+    const payload = backupPreferencesPayload();
+    const field = payload.settings.fields[0];
+    if (!field) throw new Error('Settings fixture is incomplete');
+    Object.assign(field, { kind: 'bandwidth', unit: 'MiB/s', minimum: 0.125 });
+    const settings = decodeBackupPreferences(payload);
+    const valid = prepareSettingsDraft(settings, { ...settings.values, 'pi.interval': 0.9765625 });
+    expect(valid.errors).toEqual({});
+    expect(valid.changes).toEqual({ 'pi.interval': 0.9765625 });
+    const invalid = prepareSettingsDraft(settings, { ...settings.values, 'pi.interval': 0.2 });
+    expect(invalid.errors['pi.interval']).toContain('whole KiB/s');
+    expect(invalid.changes).toEqual({});
+  });
+  it('admits only one save before React has rendered the busy state', async () => {
+    const completions: (() => void)[] = [];
+    const fetch = vi.fn(async (_path: unknown, init?: RequestInit) =>
+      init?.method === 'POST'
+        ? new Promise<Response>((resolve) =>
+            completions.push(() =>
+              resolve(new Response(JSON.stringify(backupPreferencesPayload()))),
+            ),
+          )
+        : new Response(JSON.stringify(backupPreferencesPayload())),
+    );
+    vi.stubGlobal('fetch', fetch);
+    render(<BurstSaveProbe />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit twice' }));
+    await act(async () => {
+      completions.forEach((finish) => finish());
+    });
+    expect(fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+  });
+
+  it('keeps Save disabled for an invalid value after changing categories', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify(backupPreferencesPayload()))),
+    );
+    render(<BackupSettingsPanel refresh={vi.fn()} capacityControl={null} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Backup settings' }));
+    fireEvent.change(await screen.findByLabelText('Every'), { target: { value: '32' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Mac · iCloud' }));
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+  });
   it('keeps edits across categories and saves only changed values with their revision', async () => {
     const fixture = backupPreferencesPayload();
     const fetch = vi.fn(async (_path: unknown, init?: RequestInit) => {

@@ -1,6 +1,7 @@
 import { useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { BackupSettingField as Field, SettingValue } from './settings';
+import type { BackupSettingField as Field } from './settings';
+import type { SettingDraftValue } from './settingsDraft';
 
 export function SettingHelp({ label, children }: { label: string; children: string }) {
   const id = useId();
@@ -76,11 +77,13 @@ export function BackupSettingField({
   value,
   onChange,
   disabled,
+  error,
 }: {
   field: Field;
-  value: SettingValue | '';
-  onChange: (value: SettingValue | '') => void;
+  value: SettingDraftValue;
+  onChange: (value: SettingDraftValue) => void;
   disabled: boolean;
+  error?: string;
 }) {
   const id = useId();
   return (
@@ -111,9 +114,14 @@ export function BackupSettingField({
               id={id}
               value={Number(value)}
               disabled={disabled}
+              aria-invalid={!!error}
+              title={error}
               onChange={(event) => onChange(Number(event.target.value))}
             >
-              {Array.from({ length: 24 }, (_, hour) => (
+              {Array.from(
+                { length: field.maximum - field.minimum + 1 },
+                (_, index) => index + field.minimum,
+              ).map((hour) => (
                 <option key={hour} value={hour}>
                   {String(hour).padStart(2, '0')}:00
                 </option>
@@ -126,10 +134,12 @@ export function BackupSettingField({
               inputMode={field.kind === 'bandwidth' ? 'decimal' : 'numeric'}
               min={field.minimum}
               max={field.maximum}
-              step={field.kind === 'bandwidth' ? '0.125' : '1'}
+              step={field.kind === 'bandwidth' ? 'any' : '1'}
               value={typeof value === 'boolean' ? '' : value}
               disabled={disabled}
               required
+              aria-invalid={!!error}
+              title={error}
               onChange={(event) =>
                 onChange(event.target.value === '' ? '' : Number(event.target.value))
               }
