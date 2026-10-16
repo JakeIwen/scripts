@@ -432,13 +432,18 @@ rather than skip without it.
 
 ## Hosted project directory
 
-The title-menu defaults live in the React `features/projects/catalog.ts` file.
-User-added links are persisted separately under `hosted_projects` in the
-dashboard's existing StateStore JSON, shared by LAN and Tailscale clients.
-Preserve that runtime state during deployment. Links are HTTP/HTTPS only and
-are never fetched by the backend; preference is local, LAN, Tailscale, then web.
-The `projects` blueprint owns `/api/hosted-projects`; `runtime.hosted_projects`
-shares the existing state store and is initialized immediately after it.
+The Pi dashboard's StateStore key `hosted_projects` is the only source of the
+title-menu project list; there is no static React catalog. Contract, schema
+and reconciliation rules: `pi/docs/dashboard/HOSTED_PROJECTS.md`. The store
+lives in `van_dashboard_projects.py` (`runtime.hosted_projects`, initialized
+immediately after the state store), with report validation and shared
+vocabulary in `hosted_project_report.py` and the one-time seed in
+`hosted_project_seed.py`; the `projects` blueprint owns
+`/api/hosted-projects*`. `hosted_project_scan.py` is the stdlib-only scanner
+for all three hosts (Pi cron every 15 minutes, Mac LaunchAgent
+`com.jacobr.hosted-project-scan` hourly over `vanpi.lan` only). Preserve the
+runtime state during deployment. Links are HTTP/HTTPS only and are never
+fetched by the backend; preference is local, LAN, Tailscale, then web.
 
 ## Dashboard response schemas
 

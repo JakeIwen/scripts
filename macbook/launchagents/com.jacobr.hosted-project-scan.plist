@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.jacobr.hosted-project-scan</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/python3</string>
+        <string>-P</string>
+        <string>-m</string>
+        <string>pi.apps.van_dashboard.hosted_project_scan</string>
+        <string>--host</string>
+        <string>mac</string>
+        <string>--host</string>
+        <string>web</string>
+        <string>--post</string>
+        <string>http://vanpi.lan:8788</string>
+    </array>
+    <key>WorkingDirectory</key><string>/Users/jacobr/dev/scripts</string>
+    <key>RunAtLoad</key><true/>
+    <key>StartInterval</key><integer>3600</integer>
+    <key>ProcessType</key><string>Background</string>
+    <key>Umask</key><integer>63</integer>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key><string>/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>PYTHONDONTWRITEBYTECODE</key><string>1</string>
+        <key>PYTHONPATH</key><string>/Users/jacobr/dev/scripts</string>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/Users/jacobr/dev/scripts/tmp/hosted-project-scan/worker.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jacobr/dev/scripts/tmp/hosted-project-scan/worker.log</string>
+</dict>
+</plist>

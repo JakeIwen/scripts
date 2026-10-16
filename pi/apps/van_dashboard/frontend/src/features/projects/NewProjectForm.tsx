@@ -7,7 +7,7 @@ import {
   PROJECT_URL_FIELDS,
   type ProjectDraft,
 } from './api';
-import type { HostedProject } from './catalog';
+import type { HostedProject } from './schema';
 
 export function NewProjectForm({
   projects,

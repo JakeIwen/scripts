@@ -59,6 +59,14 @@ export function getJson(path: string, signal?: AbortSignal): Promise<unknown> {
   return requestJson(path, { signal });
 }
 
+export function postJson(path: string, value: unknown): Promise<unknown> {
+  return requestJson(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Van-Dashboard': '1' },
+    body: JSON.stringify(value),
+  });
+}
+
 export function postForm(
   path: string,
   values: Readonly<Record<string, FormValue>> = {},
