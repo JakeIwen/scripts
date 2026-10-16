@@ -212,6 +212,15 @@ def check_watch(
                 ) from notification_error
         raise
 
+    return apply_search_results(
+        store, watch, results, notify_new=notify_new, notify=notify, record=record,
+    )
+
+
+def apply_search_results(
+    store: SearchStore, watch: dict, results: list, *,
+    notify_new=None, notify: bool = True, record: bool = True,
+) -> dict:
     if record:
         updated, new_results = store.record_success(watch["id"], results)
         clear_refresh(store, watch["id"])
