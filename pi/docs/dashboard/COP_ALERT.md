@@ -73,6 +73,18 @@ router or UBNT calls cannot overlap or build up a queue. When the last page is
 hidden or closed and the lease expires, the worker returns to its 30-second
 cadence.
 
+The same router query also reads `/proc/uptime`, `/proc/net/dev` and
+`ubus network.interface.<name> status` for `wan`, `clientwan` and `lifiwan`.
+`router.wan_traffic` carries the cumulative receive/transmit byte counters of
+each up uplink's device, stamped with the router's uptime. The tile's "Now"
+row is the browser's difference between consecutive collector samples, summed
+over every up uplink, so it is the van's whole internet traffic whichever
+uplink mwan3 uses. The window is roughly 3 seconds while a dashboard is visible.
+A router reboot, a gap longer than 90 seconds, or a recreated uplink device
+skips one reading instead of showing a false rate. The counters are accurate
+only while firewall flow offloading stays disabled. Hardware-offloaded flows
+bypass the kernel's interface statistics.
+
 The page reads the cache once per second while visible, with browser caching
 disabled; these reads never run the collector in an HTTP request thread. A
 collector failure uses a one-second retry delay to avoid a tight failure loop.

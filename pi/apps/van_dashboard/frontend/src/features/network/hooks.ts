@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { usePollingResource, type PollingState } from '../../hooks/usePollingResource';
 import { fetchActiveConnectivity, fetchOpenWrtClients, fetchSpeedtestStatus } from './api';
-import type { ConnectivityStatus, OpenWrtClientStatus, SpeedtestStatus } from './types';
+import { measureWanThroughput, type WanThroughput } from './throughput';
+import type { ConnectivityStatus, OpenWrtClientStatus, SpeedtestStatus, WanTraffic } from './types';
 
 export const ACTIVE_CONNECTIVITY_INTERVAL_MS = 1_000;
 export const OPENWRT_CLIENT_INTERVAL_MS = 20_000;
@@ -40,6 +41,26 @@ export function useOpenWrtClients(sheetOpen: boolean): PollingState<OpenWrtClien
     intervalMs: OPENWRT_CLIENT_INTERVAL_MS,
     enabled: sheetOpen,
   });
+}
+
+/**
+ * Derive current internet throughput from successive collector samples. Polling
+ * repeats a sample until the collector runs again, so only a new router clock
+ * reading starts a new measurement window.
+ */
+export function useWanThroughput(traffic: WanTraffic | null | undefined): WanThroughput | null {
+  const previousRef = useRef<WanTraffic | null>(null);
+  const [throughput, setThroughput] = useState<WanThroughput | null>(null);
+
+  useEffect(() => {
+    if (!traffic) return;
+    const previous = previousRef.current;
+    if (previous?.uptimeSeconds === traffic.uptimeSeconds) return;
+    previousRef.current = traffic;
+    setThroughput(previous ? measureWanThroughput(previous, traffic) : null);
+  }, [traffic]);
+
+  return throughput;
 }
 
 export interface OpenWrtResources {

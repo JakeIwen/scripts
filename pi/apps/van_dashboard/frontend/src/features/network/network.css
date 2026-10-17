@@ -106,6 +106,24 @@
   white-space: nowrap;
 }
 
+.wan-throughput {
+  display: flex;
+  margin-top: 8px;
+  align-items: baseline;
+  gap: 7px;
+  overflow: hidden;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.wan-throughput-label {
+  color: var(--dim);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .mwan-list {
   display: flex;
   align-items: flex-start;
@@ -257,6 +275,10 @@
 
   .network-value {
     font-size: 13px;
+  }
+
+  .wan-throughput {
+    font-size: 11px;
   }
 
   .mwan-overview {

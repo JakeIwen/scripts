@@ -1,7 +1,7 @@
 import { useState } from 'react';
 
 import { useSpeedtestControl } from './controls';
-import { useOpenWrtResources } from './hooks';
+import { useOpenWrtResources, useWanThroughput } from './hooks';
 import { OpenWrtSheet } from './OpenWrtSheet';
 import { OpenWrtTile } from './OpenWrtTile';
 
@@ -9,6 +9,7 @@ export function OpenWrtFeature() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const { connectivity, speedtest, clients } = useOpenWrtResources(sheetOpen);
   const speedtestControl = useSpeedtestControl(speedtest);
+  const throughput = useWanThroughput(connectivity.data?.router.wanTraffic);
 
   return (
     <>
@@ -16,6 +17,7 @@ export function OpenWrtFeature() {
         connectivity={connectivity.data}
         connectivityError={connectivity.error}
         connectivityRefreshing={connectivity.refreshing}
+        throughput={throughput}
         speedtest={speedtest.data}
         speedtestError={speedtest.error}
         speedtestStarting={speedtestControl.busy}

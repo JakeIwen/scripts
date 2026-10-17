@@ -38,6 +38,17 @@ ccq=881
 target_ssid=real-network
 """
 
+WAN_TRAFFIC_SAMPLE = """__VAN_DASH_WAN_STATUS__=wan={"up":true,"l3_device":"wan","device":"wan"}
+__VAN_DASH_WAN_STATUS__=clientwan={"up":false,"pending":true,"device":"wl1-sta0","data":{}}
+__VAN_DASH_WAN_STATUS__=lifiwan=
+__VAN_DASH_UPTIME__=3833465.59 6611824.09
+__VAN_DASH_NETDEV__=Inter-|   Receive                                                |  Transmit
+__VAN_DASH_NETDEV__= face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+__VAN_DASH_NETDEV__=  eth0: 2052465901990 2231665400   11    0    0     0          0         0 2324592571462 2240242632    0    0    0     0       0          0
+__VAN_DASH_NETDEV__=   wan: 793589244303 795765444    0 830449    0     0          0         0 643849733304 705908855    0   53    0     0       0          0
+__VAN_DASH_NETDEV__=wl1-sta0:       0       0    0    0    0     0          0         0        0       0    0 35761    0     0       0          0
+"""
+
 MWAN_TRANSITION_SAMPLE = """Interface status:
  interface wan is online and tracking is active (online 07h:37m:37s, uptime 11h:02m:34s)
  interface clientwan is connecting and tracking is active (0)
@@ -122,6 +133,48 @@ class ConnectivityParserTests(unittest.TestCase):
         )
         self.assertEqual(connectivity.select_mode(interfaces), "wan")
 
+    def test_wan_traffic_reads_counters_of_up_uplinks_only(self):
+        self.assertEqual(
+            connectivity.parse_wan_traffic(WAN_TRAFFIC_SAMPLE),
+            {
+                "uptime_seconds": 3833465.59,
+                "uplinks": [
+                    {
+                        "name": "wan",
+                        "device": "wan",
+                        "rx_bytes": 793589244303,
+                        "tx_bytes": 643849733304,
+                    }
+                ],
+            },
+        )
+
+    def test_wan_traffic_counts_a_shared_device_once(self):
+        output = WAN_TRAFFIC_SAMPLE.replace(
+            '=clientwan={"up":false,"pending":true,"device":"wl1-sta0","data":{}}',
+            '=clientwan={"up":true,"device":"wan"}',
+        )
+        uplinks = connectivity.parse_wan_traffic(output)["uplinks"]
+        self.assertEqual([item["name"] for item in uplinks], ["wan"])
+
+    def test_wan_traffic_without_router_clock_or_counters_is_unknown(self):
+        without_uptime = WAN_TRAFFIC_SAMPLE.replace("__VAN_DASH_UPTIME__=", "")
+        without_counters = "\n".join(
+            line for line in WAN_TRAFFIC_SAMPLE.splitlines() if "NETDEV" not in line
+        )
+        for output in ("", MWAN_SAMPLE, without_uptime, without_counters):
+            with self.subTest(output=output[:40]):
+                self.assertIsNone(connectivity.parse_wan_traffic(output))
+
+    def test_wan_traffic_skips_malformed_or_unknown_devices(self):
+        for status in ("{not json", '["wan"]', '{"up":true,"l3_device":["wan"]}',
+                       '{"up":true,"l3_device":"missing0"}', '{"up":"true","device":"wan"}'):
+            with self.subTest(status=status):
+                output = WAN_TRAFFIC_SAMPLE.replace(
+                    '{"up":true,"l3_device":"wan","device":"wan"}', status
+                )
+                self.assertEqual(connectivity.parse_wan_traffic(output)["uplinks"], [])
+
     def test_configured_ssid_does_not_imply_association(self):
         status = connectivity.parse_ubnt_wireless(DISCONNECTED_UBNT)
         self.assertEqual(status["ssid"], "denlink")
@@ -158,7 +211,9 @@ class ConnectivityParserTests(unittest.TestCase):
         def command(args, timeout):
             calls.append(tuple(args))
             if args[-1] == connectivity.MWAN_STATUS_COMMAND:
-                return SimpleNamespace(returncode=0, stdout=MWAN_SAMPLE, stderr="")
+                return SimpleNamespace(
+                    returncode=0, stdout=MWAN_SAMPLE + WAN_TRAFFIC_SAMPLE, stderr=""
+                )
             if args[0] == connectivity.PING:
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
             return SimpleNamespace(returncode=0, stdout=DISCONNECTED_UBNT, stderr="")
@@ -170,6 +225,9 @@ class ConnectivityParserTests(unittest.TestCase):
         self.assertEqual(
             status["router"]["route_members"],
             [{"name": "clientwan", "percent": 100}],
+        )
+        self.assertEqual(
+            [item["name"] for item in status["router"]["wan_traffic"]["uplinks"]], ["wan"]
         )
         self.assertTrue(status["ubnt"]["reachable"])
         self.assertFalse(status["ubnt"]["connected"])

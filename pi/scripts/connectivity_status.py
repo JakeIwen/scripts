@@ -36,8 +36,21 @@ MWAN_STATUS_COMMAND = (
     "printf '__VAN_DASH_ROUTER_TIME__='; /bin/date +%s; "
     "for iface in wan clientwan lifiwan; do "
     "if [ -r /tmp/uplink-https/$iface ]; then "
-    "printf '__VAN_DASH_HTTPS__='; /bin/cat /tmp/uplink-https/$iface; fi; done; true"
+    "printf '__VAN_DASH_HTTPS__='; /bin/cat /tmp/uplink-https/$iface; fi; done; "
+    # Raw byte counters only; the dashboard turns consecutive samples into rates.
+    "for iface in wan clientwan lifiwan; do "
+    "printf '__VAN_DASH_WAN_STATUS__=%s=' $iface; "
+    "/bin/ubus -S call network.interface.$iface status 2>/dev/null || echo; done; "
+    "printf '__VAN_DASH_UPTIME__='; /bin/cat /proc/uptime; "
+    "/bin/sed 's/^/__VAN_DASH_NETDEV__=/' /proc/net/dev; true"
 )
+WAN_STATUS_LINE = re.compile(
+    r"^__VAN_DASH_WAN_STATUS__=(wan|clientwan|lifiwan)=(.*)$", re.MULTILINE
+)
+ROUTER_UPTIME_LINE = re.compile(
+    r"^__VAN_DASH_UPTIME__=(\d+(?:\.\d+)?)(?:\s|$)", re.MULTILINE
+)
+NETDEV_LINE = re.compile(r"^__VAN_DASH_NETDEV__=\s*([^:\s]+):(.*)$", re.MULTILINE)
 ROUTER_CLIENTS_COMMAND = r"""
 printf '__VAN_DASH_LEASES__\n'
 /bin/cat /tmp/dhcp.leases 2>/dev/null || true
@@ -210,6 +223,43 @@ def parse_mwan3_default_route(output):
             }
         )
     return policy, members
+
+
+def parse_wan_traffic(output):
+    """Return cumulative byte counters for each up mwan3 uplink.
+
+    Counters are paired with the router's uptime so rates are measured on the
+    router's clock, not across SSH latency. Uplinks sharing a device count once.
+    """
+    uptime = ROUTER_UPTIME_LINE.search(output)
+    if not uptime:
+        return None
+    counters = {}
+    for match in NETDEV_LINE.finditer(output):
+        fields = match.group(2).split()
+        # /proc/net/dev: receive bytes is field 0, transmit bytes is field 8.
+        if len(fields) >= 9 and fields[0].isdigit() and fields[8].isdigit():
+            counters[match.group(1)] = (int(fields[0]), int(fields[8]))
+    if not counters:
+        return None
+    uplinks = []
+    for match in WAN_STATUS_LINE.finditer(output):
+        try:
+            status = json.loads(match.group(2))
+        except ValueError:
+            continue
+        if not isinstance(status, dict) or status.get("up") is not True:
+            continue
+        device = status.get("l3_device") or status.get("device")
+        if not isinstance(device, str) or device not in counters:
+            continue
+        if any(item["device"] == device for item in uplinks):
+            continue
+        received, sent = counters[device]
+        uplinks.append(
+            {"name": match.group(1), "device": device, "rx_bytes": received, "tx_bytes": sent}
+        )
+    return {"uptime_seconds": float(uptime.group(1)), "uplinks": uplinks}
 
 
 def _valid_ipv4(value):
@@ -543,6 +593,7 @@ def collect_router(command):
         "interfaces": [],
         "default_policy": None,
         "route_members": [],
+        "wan_traffic": None,
         "error": None,
     }
     internet_online = None
@@ -565,6 +616,7 @@ def collect_router(command):
             router["default_policy"], router["route_members"] = (
                 parse_mwan3_default_route(result.stdout)
             )
+            router["wan_traffic"] = parse_wan_traffic(result.stdout)
             if router["interfaces"]:
                 internet_online = selected_route_health(router)
             else:

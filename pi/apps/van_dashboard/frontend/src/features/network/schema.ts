@@ -41,6 +41,31 @@ export const mwanInterfaceSchema = object({
 });
 export const mwanRouteMemberSchema = object({ name: text, percent: finiteNumber });
 
+const wanUplinkCountersSchema = v.pipe(
+  object({
+    name: text,
+    device: text,
+    rx_bytes: nonnegativeInteger,
+    tx_bytes: nonnegativeInteger,
+  }),
+  v.transform((row) => ({
+    name: row.name,
+    device: row.device,
+    rxBytes: row.rx_bytes,
+    txBytes: row.tx_bytes,
+  })),
+);
+const wanTrafficSchema = v.pipe(
+  object({
+    uptime_seconds: v.pipe(
+      finiteNumber,
+      v.check((value) => value >= 0, 'must not be negative'),
+    ),
+    uplinks: v.array(wanUplinkCountersSchema),
+  }),
+  v.transform((row) => ({ uptimeSeconds: row.uptime_seconds, uplinks: row.uplinks })),
+);
+
 const routerSchema = v.pipe(
   object({
     reachable: nullableBoolean,
@@ -49,12 +74,15 @@ const routerSchema = v.pipe(
     interfaces: v.array(mwanInterfaceSchema),
     default_policy: nullableString,
     route_members: v.array(mwanRouteMemberSchema),
+    // Absent from collectors that predate throughput; null when a sample had no counters.
+    wan_traffic: v.optional(v.nullable(wanTrafficSchema)),
     error: nullableString,
   }),
-  v.transform(({ default_policy, route_members, ...rest }) => ({
+  v.transform(({ default_policy, route_members, wan_traffic, ...rest }) => ({
     ...rest,
     defaultPolicy: default_policy,
     routeMembers: route_members,
+    ...(wan_traffic === undefined ? {} : { wanTraffic: wan_traffic }),
   })),
 );
 const internetSchema = object({ online: nullableBoolean, source: text });
@@ -253,6 +281,7 @@ export type MwanInterface = v.InferOutput<typeof mwanInterfaceSchema>;
 export type MwanInterfaceState = MwanInterface['state'];
 export type MwanRouteMember = v.InferOutput<typeof mwanRouteMemberSchema>;
 export type RouterConnectivity = v.InferOutput<typeof routerSchema>;
+export type WanTraffic = v.InferOutput<typeof wanTrafficSchema>;
 export type UbntLinkStatus = v.InferOutput<typeof ubntLinkSchema>;
 export type ConnectivityStatus = v.InferOutput<typeof connectivityResponseSchema>;
 export type OpenWrtClient = v.InferOutput<typeof openWrtClientSchema>;

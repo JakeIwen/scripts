@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { OpenWrtSheet } from './OpenWrtSheet';
 import { OpenWrtTile } from './OpenWrtTile';
 import { sampleClients, sampleConnectivity, sampleSpeedtest } from './testFixtures';
+import type { WanThroughput } from './throughput';
 
 beforeAll(() => {
   if (!HTMLDialogElement.prototype.showModal) {
@@ -107,6 +108,46 @@ describe('OpenWrt UI', () => {
     expect(footer?.children[0]).toHaveClass('openwrt-speedtest-button');
     expect(footer?.children[1]).toHaveClass('speed-results');
     expect(footer?.children[1]).toHaveAttribute('role', 'status');
+  });
+
+  it('shows current internet throughput under the route once two samples exist', () => {
+    const connectivity = sampleConnectivity();
+    const tile = (throughput: WanThroughput | null, status = connectivity) => (
+      <OpenWrtTile
+        connectivity={status}
+        connectivityError={null}
+        connectivityRefreshing={false}
+        throughput={throughput}
+        speedtest={null}
+        speedtestError={null}
+        speedtestStarting={false}
+        onStartSpeedtest={vi.fn().mockResolvedValue(undefined)}
+        onOpen={vi.fn()}
+      />
+    );
+    const view = render(tile(null));
+    // Collectors without counters leave the tile unchanged.
+    expect(screen.queryByLabelText('Current internet throughput')).not.toBeInTheDocument();
+
+    connectivity.router.wanTraffic = { uptimeSeconds: 100, uplinks: [] };
+    view.rerender(tile(null));
+    expect(screen.getByLabelText('Current internet throughput')).toHaveTextContent('NowMeasuring…');
+
+    const throughput = {
+      downloadBps: 4_200_000,
+      uploadBps: 640_000,
+      windowSeconds: 3,
+      uplinks: [{ name: 'wan', downloadBps: 4_200_000, uploadBps: 640_000 }],
+    };
+    view.rerender(tile(throughput));
+    const row = screen.getByLabelText('Current internet throughput');
+    expect(row.closest('.mwan-primary')).not.toBeNull();
+    expect(row).toHaveTextContent('↓ 4.2 Mbps · ↑ 640 kbps');
+    expect(row).toHaveAttribute('title', 'wan ↓ 4.2 Mbps ↑ 640 kbps\nAveraged over 3.0 s');
+
+    view.rerender(tile(throughput, { ...connectivity, stale: true }));
+    expect(screen.getByLabelText('Current internet throughput')).toHaveTextContent('Now—');
+    view.unmount();
   });
 
   it('renders connected clients and starts a speed test from the details sheet', () => {
