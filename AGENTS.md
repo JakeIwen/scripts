@@ -71,6 +71,8 @@ compare it with this checkout. Deployed files may differ from the repository.
   `repair_text_transforms.py/.js` owns the guarded text-transform installer;
   `text_selection.js` owns AX selection handling and `text_menu_paste.js` owns
   clipboard-preserving native Paste for editors with broken AX replacement.
+  `text_markers.js` preserves Firefox text-node positions during reselection;
+  never round-trip rich-editor selection endpoints through flat offsets.
   `signal_text_diagnostic.js` owns the temporary Signal diagnostic button's runner.
 - `shared/`: code imported or deployed on more than one host.
 - Dashboard Sonos alarms live in `pi/apps/van_dashboard/sonos_alarms.py`, with

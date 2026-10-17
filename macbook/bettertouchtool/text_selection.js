@@ -116,11 +116,17 @@ function selectionUI(directory) {
                 && before.text === after.text && after.writable;
         },
         write: function (selection, replacement) {
-            if (selectionNeedsMenuPaste(selectionApplicationBundle(application))) {
+            const bundle = selectionApplicationBundle(application);
+            if (selectionNeedsMenuPaste(bundle)) {
                 const paste = new Function(selectionReadSource(directory + '/text_menu_paste.js')
                     + '\nreturn pasteSelectionUsingMenu;')();
+                const markers = bundle === 'org.mozilla.firefox'
+                    ? new Function(selectionReadSource(directory + '/text_markers.js')
+                        + '\nreturn textMarkerSelection;')()(selection.element, selectionAttribute)
+                    : null;
                 paste(system, application, selection, replacement, {
-                    attribute:selectionAttribute, offsets:selectionOffsets, range:replacementSelectionRange
+                    attribute:selectionAttribute, offsets:selectionOffsets,
+                    range:replacementSelectionRange, markers
                 });
             } else {
                 writeSelection(system, selection, replacement);

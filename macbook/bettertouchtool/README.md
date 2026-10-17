@@ -245,8 +245,8 @@ identities. Recreate venvs rather than moving them.
   `runJXA`. It reads the focused control's selected text/range, checks that the
   selection is writable and unchanged. Native editors use `AXSelectedText`; Signal and Firefox
   delegates replacement to `text_menu_paste.js`. Unsupported controls or missing
-  selections stop with a notification. After replacement it selects the result at the original
-  position, using UTF-16 length for macOS text ranges. If the app refuses reselection,
+  selections stop with a notification. After replacement it selects the result using
+  native text markers in Firefox and UTF-16 ranges in other apps. If the app refuses reselection,
   the notification explicitly says the text was already transformed.
   Each button has a readable entry script supplying its transform name to the shared
   runtime, without a separate named trigger or shared mutable parameter variable.
@@ -283,6 +283,18 @@ identities. Recreate venvs rather than moving them.
   Temporary outcome diagnostics retain per-app results and the last error, so a
   successful Notes transform cannot erase evidence of a Firefox failure. App
   attribution uses AX keyboard focus; these private files contain no selected text.
+- `text_markers.js`: Firefox reselection keeps native text-node positions. A flat
+  offset can denote both the end of a paragraph and the start of the next one;
+  restoring that offset can include an invisible paragraph separator. The adapter
+  walks native character boundaries backward from the verified insertion caret
+  and selects the exact replacement, without searching for text elsewhere or
+  falling back to numeric selection writes. It checks focus, caret and text again
+  before selecting. Firefox selections spanning multiple text nodes are refused
+  before Paste: its flattened text can omit structural separators. This also limits
+  selections across some formatting spans until a lossless representation is available.
+  `tests/text_markers.test.cjs` models separate DOM paragraphs and AX text, reproduces
+  the old deletion, and verifies consecutive transforms, Unicode length changes,
+  repeated text, boundary refusals and selection movement during reselection.
 - `signal_text_diagnostic.js`: temporary Media > Tools > Signal Diagnostic button's
   target-app runner. It requests Signal activation and waits up to 30 seconds for a stable draft selection,
   optionally attempts the selected transform, then returns to BTT with a detailed

@@ -91,17 +91,54 @@ function waitForPastedText(system, application, element, expected, attribute) {
     throw new Error('The app did not confirm the transformed text; no retry was performed.');
 }
 
+function restorePastedSelection(system, application, selection, replacement, expected, helpers) {
+    const {attribute, markers} = helpers;
+    assertPasteFocus(system, application, selection.element, attribute);
+    let range;
+    if (markers) {
+        const caretRange = attribute(selection.element, 'AXSelectedTextRange');
+        const caret = helpers.offsets(caretRange);
+        const caretMarker = markers.read();
+        const original = helpers.offsets(selection.range);
+        if (caret.length !== 0 || caret.location !== original.location + replacement.length)
+            throw new Error('The editor did not confirm the insertion caret.');
+        range = markers.endingAt(caretMarker, replacement);
+        assertPasteFocus(system, application, selection.element, attribute);
+        if (!$.CFEqual(caretMarker, markers.read()) ||
+            !$.CFEqual(caretRange, attribute(selection.element, 'AXSelectedTextRange')) ||
+            ObjC.unwrap(attribute(selection.element, 'AXValue')) !== expected)
+            throw new Error('The selection or text changed before reselection.');
+        markers.select(range);
+    } else {
+        range = helpers.range(selection.range, replacement);
+        if ($.AXUIElementSetAttributeValue(selection.element, $('AXSelectedTextRange'), range) !== 0)
+            throw new Error('The app refused reselection.');
+    }
+    for (let attempt = 0; attempt < 10; attempt++) {
+        assertPasteFocus(system, application, selection.element, attribute);
+        const current = markers ? markers.read() : attribute(selection.element, 'AXSelectedTextRange');
+        if ($.CFEqual(range, current) &&
+            ObjC.unwrap(attribute(selection.element, 'AXSelectedText')) === replacement) return;
+        delay(0.05);
+    }
+    throw new Error('The app did not confirm reselection.');
+}
+
 function pasteSelectionUsingMenu(system, application, selection, replacement, helpers) {
     const attribute = helpers.attribute, offsets = helpers.offsets(selection.range);
     const original = ObjC.unwrap(attribute(selection.element, 'AXValue'));
     if (typeof original !== 'string' || original.slice(offsets.location, offsets.location + offsets.length) !== selection.text)
         throw new Error('Cannot verify the selected text range; nothing pasted.');
     const expected = original.slice(0, offsets.location) + replacement + original.slice(offsets.location + offsets.length);
-    const range = helpers.range(selection.range, replacement);
+    const markerRange = helpers.markers && helpers.markers.read();
+    if (markerRange) helpers.markers.validate(markerRange);
+    if (markerRange && helpers.markers.text(markerRange) !== selection.text)
+        throw new Error('The editor’s text-marker selection disagrees; nothing pasted.');
     const menu = findPasteMenuItem(application, attribute);
     withTemporaryClipboard($.NSPasteboard.generalPasteboard, replacement, ownsClipboard => {
         assertPasteFocus(system, application, selection.element, attribute);
         if (!$.CFEqual(selection.range, attribute(selection.element, 'AXSelectedTextRange')) ||
+            (markerRange && !$.CFEqual(markerRange, helpers.markers.read())) ||
             ObjC.unwrap(attribute(selection.element, 'AXSelectedText')) !== selection.text ||
             ObjC.unwrap(attribute(selection.element, 'AXValue')) !== original || !ownsClipboard())
             throw new Error('Selection or clipboard changed; nothing pasted.');
@@ -110,16 +147,7 @@ function pasteSelectionUsingMenu(system, application, selection, replacement, he
         waitForPastedText(system, application, selection.element, expected, attribute);
     });
     try {
-        assertPasteFocus(system, application, selection.element, attribute);
-        if ($.AXUIElementSetAttributeValue(selection.element, $('AXSelectedTextRange'), range) !== 0)
-            throw new Error('The app refused reselection.');
-        for (let attempt = 0; attempt < 10; attempt++) {
-            assertPasteFocus(system, application, selection.element, attribute);
-            if ($.CFEqual(range, attribute(selection.element, 'AXSelectedTextRange')) &&
-                ObjC.unwrap(attribute(selection.element, 'AXSelectedText')) === replacement) return;
-            delay(0.05);
-        }
-        throw new Error('The app did not confirm reselection.');
+        restorePastedSelection(system, application, selection, replacement, expected, helpers);
     } catch (error) {
         throw new Error('Text transformed, but selection could not be restored: ' + error.message);
     }
