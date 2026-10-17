@@ -71,8 +71,8 @@ FIELDS = cloud_fields('pi-cloud', 'pi', 8, 48) + cloud_fields('mac-cloud', 'mac'
     Setting('exfat.weekly', 'disk', 'EXFAT512 retention', 'Weekly through', 'days', 2, 730, 84, 'local', 'EXFAT_SNAPSHOT_KEEP_WEEKLY_DAYS', 'Keep weekly snapshots through this age, then thin them to the monthly tier.'),
     Setting('exfat.monthly', 'disk', 'EXFAT512 retention', 'Monthly through', 'days', 3, 3650, 365, 'local', 'EXFAT_SNAPSHOT_KEEP_MONTHLY_DAYS', 'Oldest age retained for EXFAT512 snapshots. Changes apply during the next successful snapshot’s cleanup.'),
     Setting('exfat.reserve', 'disk', 'EXFAT512 storage', 'Low disk-space warning', 'GiB', 1, 1000, 100, 'local', 'EXFAT_SNAPSHOT_MIN_FREE_GB', 'Warn when the EXFAT512 snapshot disk has less free space than this.'),
-    Setting('spare.a', 'hotspares', 'Refresh cadence', 'Hotspare A', 'days', 1, 365, 7, 'local', 'hotspare-a', 'Refresh this bootable spare when due during a successful Borg run. Existing disk-identity and capacity checks remain.'),
-    Setting('spare.b', 'hotspares', 'Refresh cadence', 'Hotspare B', 'days', 2, 730, 14, 'local', 'hotspare-b', 'Keep this spare on a longer cadence—at least twice A’s—to retain an older recovery generation.'),
+    Setting('spare.interval', 'hotspares', 'Rotation', 'Rotation interval', 'days', 1, 365, 7, 'local', 'CLONE_ROTATION_DAYS',
+            'Refresh only the older card after this interval since the last successful clone. Each card normally refreshes every two intervals. Missed runs do not accumulate: when backups resume, refresh one card, then wait a full interval. If either card is missing, mounted or cannot be identified safely, automatic rotation waits without substituting the other. Failed or interrupted clones retry the same card. Clone now is a manual override.'),
     Setting('alerts.success', 'alerts', 'Notifications', 'Successful disk backups', '', 0, 1, True, 'local', 'NTFY_ON_SUCCESS', 'Send success notifications for local disk backups as well as failure and watchdog alerts. Cloud verification confirmations remain enabled.', kind='toggle'),
     Setting('alerts.borg', 'alerts', 'Warn when older than', 'Pi Borg', 'hours', 12, 720, 48, 'local', 'BORG_STALE_HOURS', 'Age of the latest successful Borg backup before the watchdog warns.'),
     Setting('alerts.exfat', 'alerts', 'Warn when older than', 'EXFAT512', 'hours', 12, 720, 48, 'local', 'EXFAT_SNAPSHOT_STALE_HOURS', 'Age of the latest successful EXFAT512 snapshot before the watchdog warns.'),
@@ -100,7 +100,5 @@ def validate(values):
     if all(key in values for key in ('exfat.daily', 'exfat.weekly', 'exfat.monthly')):
         if not values['exfat.daily'] < values['exfat.weekly'] < values['exfat.monthly']:
             raise ValueError('EXFAT retention must increase from daily to weekly to monthly.')
-    if 'spare.a' in values and 'spare.b' in values and values['spare.b'] < 2 * values['spare.a']:
-        raise ValueError('Hotspare B must keep a cadence of at least twice Hotspare A.')
     if 'disk.start' in values and values.get('disk.end') == values['disk.start']:
         raise ValueError('Choose different start and end hours for the daily window.')

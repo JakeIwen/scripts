@@ -246,6 +246,17 @@ compare it with this checkout. Deployed files may differ from the repository.
   references. Cleanup runs before new captures; never delete the live image or
   archived backups. First-copy transient deferrals retry after five minutes,
   while explicit cloud pause settings retain priority.
+- Hotspare rotation: `pi/scripts/backup/hotspare_rotation.py` owns the two-card
+  planner and durable incomplete markers; `hotspare_rotation.sh` verifies both
+  labels before dispatch under the existing clone job lock. One older card is
+  refreshed per `CLONE_ROTATION_DAYS` (default 7), measured from the newest
+  successful clone; missed runs never produce a catch-up batch. Missing, ambiguous
+  or mounted peers defer automatic rotation. An interrupted clone retries that
+  same target, and no automatic write proceeds without a completed peer. Manual
+  Clone now remains an explicit override. The settings CLI projects the same
+  plan to the dashboard; per-card freshness uses twice the rotation interval.
+  `clone_to_sd.sh` marks incomplete before writes and clears it only after a
+  verified, flushed success stamp. Both cloud installers ship this whole cohort.
 - Bootable clone evidence is built in `van_dashboard_hotspares.py`, using the
   existing normalized device-tree helpers in `van_dashboard_block_devices.py`.
   Root usage comes from mounted `lsblk` counters or a read-only, label-verified

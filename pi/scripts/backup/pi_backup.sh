@@ -12,7 +12,7 @@ set -u
 backup_conf=${PI_BACKUP_CONF:-/home/pi/scripts/backup/backup_conf.sh}
 policyctl=${PI_BACKUP_POLICYCTL:-/home/pi/scripts/policyctl}
 mount_disks=${PI_BACKUP_MOUNT_DISKS:-/home/pi/scripts/mount_disks.sh}
-. "$backup_conf"
+. "$backup_conf" || exit 1
 progress_helper=${PI_BACKUP_PROGRESS_HELPER:-/home/pi/scripts/backup/progress.sh}
 . "$progress_helper"
 
@@ -260,20 +260,9 @@ bail_if_driving
 
 # --- 5. bootable clones when due ---
 clone_summary=""
-now=$(date +%s)
 if acquire_backup_lock job clone; then
-  for entry in "${CLONE_TARGETS[@]}"; do
-    label=${entry%%:*}; interval=${entry##*:}
-    stamp="$STAMP_DIR/clone_$label"
-    age_days=9999
-    [ -f "$stamp" ] && age_days=$(( (now - $(stat -c %Y "$stamp")) / 86400 ))
-    if [ "$age_days" -ge "$interval" ]; then
-      log "clone to $label due (${age_days}d >= ${interval}d)"
-      backup_progress_update cloning "Refreshing bootable hotspare $label" || true
-      run /home/pi/scripts/backup/clone_to_sd.sh "$label" && age_days=0
-    fi
-    clone_summary+="$label: ${age_days}d old. "
-  done
+  . "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/hotspare_rotation.sh" &&
+    run_hotspare_rotation || log 'hotspare rotation deferred; recovery copies retained'
   release_backup_lock job clone
 else
   log "another hotspare clone is active; clones deferred"

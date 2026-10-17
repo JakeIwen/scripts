@@ -3,7 +3,15 @@ import { createPortal } from 'react-dom';
 import type { BackupSettingField as Field } from './settings';
 import type { SettingDraftValue } from './settingsDraft';
 
-export function SettingHelp({ label, children }: { label: string; children: string }) {
+export function SettingHelp({
+  label,
+  children,
+  icon = '?',
+}: {
+  label: string;
+  children: string;
+  icon?: '?' | 'i';
+}) {
   const id = useId();
   const anchor = useRef<HTMLButtonElement>(null);
   const bubble = useRef<HTMLSpanElement>(null);
@@ -53,7 +61,7 @@ export function SettingHelp({ label, children }: { label: string; children: stri
           }
         }}
       >
-        ?
+        {icon}
       </button>
       {open &&
         createPortal(
@@ -94,7 +102,9 @@ export function BackupSettingField({
     >
       <div className="backup-setting-field__label">
         <label htmlFor={id}>{field.label}</label>
-        <SettingHelp label={field.label}>{field.help}</SettingHelp>
+        <SettingHelp label={field.label} icon={field.group === 'hotspares' ? 'i' : '?'}>
+          {field.help}
+        </SettingHelp>
       </div>
       {field.kind === 'toggle' ? (
         <button

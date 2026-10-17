@@ -4,7 +4,7 @@
 # pi_backup.sh so a dead backup job cannot fail silently (the old scheme
 # failed for 2+ weeks with only failing SMS alerts to show for it).
 set -u
-. "${BACKUP_WATCHDOG_CONF:-/home/pi/scripts/backup/backup_conf.sh}"
+. "${BACKUP_WATCHDOG_CONF:-/home/pi/scripts/backup/backup_conf.sh}" || exit 1
 backup_script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 . "${BACKUP_WATCHDOG_DISK_POLICY:-$backup_script_dir/../disk_policy.sh}" || exit 1
 . "$backup_script_dir/rootfs_budget.sh" || exit 1
@@ -83,6 +83,9 @@ for entry in "${CLONE_TARGETS[@]}"; do
   elif (( resolve_status != 1 )); then
     attached="unsafe label mapping"
     problems+=("cannot safely identify clone target '$label': $DISK_POLICY_RESOLVE_ERROR")
+  fi
+  if [[ -e "$STAMP_DIR/clone_$label.incomplete" || -L "$STAMP_DIR/clone_$label.incomplete" ]]; then
+    problems+=("$label clone is incomplete; the other recovery card is retained")
   fi
   if [ -f "$STAMP_DIR/clone_$label" ]; then
     age_d=$(( (now - $(stat -c %Y "$STAMP_DIR/clone_$label")) / 86400 ))

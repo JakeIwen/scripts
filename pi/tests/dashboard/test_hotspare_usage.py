@@ -34,6 +34,27 @@ class HotspareUsageTests(unittest.TestCase):
         self.command.side_effect = subprocess.TimeoutExpired('dumpe2fs', 2)
         self.assertIsNone(hotspare_used_bytes(self.row, 'hotspare-a', self.command, 8))
 
+    def test_rotation_reports_waiting_for_missing_peer_and_only_one_due_card(self):
+        configuration = {'targets': [{'label': label, 'interval_days':14}
+                                     for label in ('hotspare-a','hotspare-b')],
+                         'clone_stale_factor':2,
+                         'clone_rotation': {'target':'hotspare-b','next_at':900,
+                                            'message':None,'incomplete':[]}}
+        a = dict(self.row, path='/dev/sda2')
+        b = dict(self.row, label='hotspare-b', path='/dev/sdb2')
+        args = ('/unused', lambda _: 100, 1000, lambda _: [], self.command, 8)
+        missing = build_hotspares(configuration, [a], *args)
+        self.assertTrue(all(not card['due'] for card in missing))
+        self.assertEqual(missing[0]['rotation_message'], 'Rotation waiting for both cards')
+        present = build_hotspares(configuration, [a,b], *args)
+        self.assertEqual([card['label'] for card in present if card['due']], ['hotspare-b'])
+        configuration['clone_rotation']['next_at'] = 2000
+        self.assertTrue(all(not card['due'] for card in build_hotspares(configuration, [a,b], *args)))
+        configuration['clone_rotation']['incomplete'] = ['hotspare-b']
+        interrupted = build_hotspares(configuration, [a,b], *args)[1]
+        self.assertTrue(interrupted['stale'])
+        self.assertEqual(interrupted['rotation_message'], 'Incomplete · retry scheduled')
+
     def test_ambiguous_labels_are_never_probed(self):
         result = build_hotspares({'targets': [{'label': 'hotspare-a', 'interval_days': 7}],
                                  'clone_stale_factor': 2}, [self.row, dict(self.row)],

@@ -216,6 +216,31 @@ describe('backup settings', () => {
     expect(fetch.mock.calls.filter(([, init]) => init?.method !== 'POST')).toHaveLength(1);
   });
 
+  it('shows one rotation interval and an info tooltip covering missed runs and missing cards', async () => {
+    const fixture = backupPreferencesPayload();
+    const field = fixture.settings.fields[0];
+    if (!field) throw new Error('Settings fixture is incomplete');
+    Object.assign(field, {
+      group: 'hotspares',
+      label: 'Rotation interval',
+      help: 'Missed runs do not accumulate. If either card is missing, automatic rotation waits.',
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify(fixture))),
+    );
+    render(<BackupSettingsPanel refresh={vi.fn()} capacityControl={null} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Backup settings' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Hotspares' }));
+    expect(screen.getAllByRole('spinbutton')).toHaveLength(1);
+    expect(screen.getByLabelText('Rotation interval')).toHaveValue(7);
+    const info = screen.getByRole('button', { name: 'About Rotation interval' });
+    expect(info).toHaveTextContent('i');
+    fireEvent.focus(info);
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Missed runs do not accumulate');
+    expect(screen.getByRole('tooltip')).toHaveTextContent('either card is missing');
+  });
+
   it('puts explanation in a tooltip and closes without a discard prompt', async () => {
     mockSettings();
     await openPanel();

@@ -68,4 +68,23 @@ def build_hotspares(configuration, rows, stamp_dir, stamp, now, mountpoints, com
                 or age_seconds > interval_seconds * clone_factor,
             }
         )
+    rotation = configuration.get('clone_rotation')
+    if rotation is not None:
+        apply_rotation_status(hotswaps, rows, rotation, now)
     return hotswaps
+
+
+def apply_rotation_status(cards, rows, rotation, now):
+    available = all(card['attached'] and not card['mounted']
+                    and sum(row.get('label') == card['label'] for row in rows) == 1
+                    for card in cards)
+    for card in cards:
+        incomplete = card['label'] in rotation['incomplete']
+        card['stale'] = card['stale'] or incomplete
+        card['due'] = bool(available and rotation['target'] == card['label']
+                           and rotation['next_at'] is not None and rotation['next_at'] <= now)
+        card['rotation_message'] = (
+            'Rotation waiting for both cards' if not available else
+            rotation['message'] if rotation['target'] is None else
+            'Incomplete · retry scheduled' if incomplete else None
+        )

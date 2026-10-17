@@ -4,7 +4,7 @@
 #   /home/pi/scripts/backup/clone_to_sd.sh --init <label> <sdX>  first-time setup of a fresh card (DESTROYS its contents)
 # exit: 0 ok, 1 failed, 2 card not attached (quiet — watchdog handles staleness)
 set -u
-. /home/pi/scripts/backup/backup_conf.sh
+. /home/pi/scripts/backup/backup_conf.sh || exit 1
 backup_script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 . "$backup_script_dir/../disk_policy.sh" || exit 1
 notify() { /home/pi/scripts/ntfy_send.sh "$@"; }
@@ -80,6 +80,8 @@ run_clone_pipeline() {
   fi
   return "$pipeline_status"
 }
+# Once writes begin the old success stamp cannot certify this card's contents.
+/usr/bin/python3 "$backup_script_dir/hotspare_rotation.py" begin "$STAMP_DIR" "$label" || exit 1
 run_clone_pipeline &
 clone_pipeline_pid=$!
 wait "$clone_pipeline_pid"
@@ -103,7 +105,7 @@ if ! e2fsck -fn "/dev/${disk}2"; then
   exit 1
 fi
 # the label is how future runs find this card (device names re-enumerate constantly here)
-e2label "/dev/${disk}2" "$label"
+e2label "/dev/${disk}2" "$label" || exit 1
 took=$(( $(date +%s) - start ))
 
 # stamp the card itself so a card in hand tells you what's on it
@@ -115,7 +117,8 @@ if mount "/dev/${disk}1" /mnt/clone_boot 2>/dev/null; then
 fi
 
 mkdir -p "$STAMP_DIR"
-date '+%F %T' > "$STAMP_DIR/clone_$label"
+date '+%F %T' > "$STAMP_DIR/clone_$label" || exit 1
+/usr/bin/python3 "$backup_script_dir/hotspare_rotation.py" complete "$STAMP_DIR" "$label" || exit 1
 notify "vanpi clone OK" \
   "$label is bootable + current as of $(date '+%F %H:%M') (took $((took/60))m$((took%60))s)" \
   default floppy_disk

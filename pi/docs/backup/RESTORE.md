@@ -18,8 +18,8 @@ Backups (see [`backup_conf.sh`](../../scripts/backup/backup_conf.sh)):
   passphrase from `/root/.config/borg/vanpi-encrypted.passphrase`. Keep an
   independent password-manager copy of that passphrase and an exported Borg key
   off-device; a copy stored only inside the encrypted archive is not recoverable.
-- **hot-spare SD card(s)** — bootable clones via rpi-clone, staggered intervals per
-  `CLONE_TARGETS`. Each card's `/boot/firmware/CLONE_INFO.txt` says when it was cloned.
+- **hot-spare SD card(s)** — bootable clones via rpi-clone, alternating one card per
+  `CLONE_ROTATION_DAYS` (default 7 days). Each card normally refreshes every 14 days. Each card's `/boot/firmware/CLONE_INFO.txt` says when it was cloned.
 - **EXFAT512 safety snapshots** — directly browsable trees under
   `/mnt/hdd1tb/backups/EXFAT512_YYYY-MM-DD_HH-MM/`. Unchanged files are hard-linked
   to the previous completed snapshot, while deleted or changed source files remain
@@ -40,6 +40,32 @@ do not advertise Time Machine support. Existing SMB clients must reconnect
 after changing the module configuration; Apple's AAPL extensions are negotiated
 on the first share connection, so connecting first to a non-fruit share can
 still disable those extensions for that connection.
+
+### Hotspare rotation
+
+The dashboard's **Backup settings → Hotspares → Rotation interval** controls the
+minimum gap between successful automatic refreshes. The `i` tooltip explains
+missed-run and missing-card behavior. Changes save on blur or Enter.
+
+Rotation selects the older card and preserves its peer. After missed runs, only
+one card refreshes; the next waits a full interval from that success. Both cards
+must be safely identified and unmounted. A missing/ambiguous card holds rotation
+instead of causing the remaining card to be overwritten. A returning card does
+not trigger two back-to-back copies. Existing label and capacity checks still
+apply; no automatic initializer is run.
+
+An interrupted or failed write leaves `clone_<label>.incomplete` beside the
+success stamps. The scheduler retries that card, retaining the other generation;
+it does not trust an older success stamp as proof that a partial card is intact.
+With no recorded completed peer, automatic rotation stops for manual recovery.
+The dashboard reports the hold/incomplete state and the watchdog retains its
+freshness warnings. **Clone now** is an explicit manual override of rotation
+spacing and peer availability, while keeping its existing target safety checks.
+
+The normal per-card cadence and stale-warning basis are twice the rotation
+interval. Older saved A/B settings migrate to the A interval (or half B when only
+B was overridden), with other settings retained. No card or success timestamp is
+changed by this migration.
 
 ## Scenario 1 — SD card died, hot spare is attached
 

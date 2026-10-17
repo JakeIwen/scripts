@@ -35,6 +35,7 @@ export interface BackupEvidence {
 }
 
 export interface HotspareStatus {
+  rotationMessage?: string | null;
   label: string;
   intervalDays: number;
   attached: boolean;

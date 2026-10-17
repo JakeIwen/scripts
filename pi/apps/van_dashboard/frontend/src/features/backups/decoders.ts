@@ -140,6 +140,7 @@ function decodeHotspare(value: unknown, index: number): HotspareStatus {
   return {
     label: stringValue(object.label, `${label}.label`),
     intervalDays: nonnegativeInteger(object.interval_days, `${label}.interval_days`),
+    rotationMessage: nullableString(object.rotation_message ?? null, `${label}.rotation_message`),
     attached: booleanValue(object.attached, `${label}.attached`),
     device: nullableString(object.device, `${label}.device`),
     sizeBytes: nullableNumber(object.size_bytes, `${label}.size_bytes`),

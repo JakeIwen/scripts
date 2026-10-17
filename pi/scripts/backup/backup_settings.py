@@ -1,5 +1,5 @@
 """Validated preference overrides, separate from credentials and backup state."""
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import hashlib
 import json
 from pathlib import Path
@@ -11,6 +11,7 @@ from backup_setting_fields import BY_ID, FIELDS, GROUPS, validate
 from protected_json import MISSING, read_protected_json
 from time_machine_store import atomic_json, read_json
 import backup_priority as priority
+from hotspare_rotation import rotation_plan
 
 
 @dataclass(frozen=True)
@@ -36,8 +37,24 @@ def overrides(paths=PATHS):
     if (not isinstance(row, dict) or type(row.get('version')) is not int or row['version'] != 1
             or set(row) != {'version', 'values'}):
         raise ValueError('Invalid backup settings file.')
-    validate(row['values'])
-    return row['values']
+    values = migrate_spare_preferences(row['values'])
+    validate(values)
+    return values
+
+
+def migrate_spare_preferences(values):
+    if not isinstance(values, dict):
+        raise ValueError('Invalid backup settings values.')
+    values = dict(values)
+    for key, low, high in (('spare.a', 1, 365), ('spare.b', 2, 730)):
+        if key in values and (type(values[key]) is not int or not low <= values[key] <= high):
+            raise ValueError('Invalid legacy hotspare cadence.')
+    a, b = values.pop('spare.a', None), values.pop('spare.b', None)
+    if a is not None and b is not None and b < 2 * a:
+        raise ValueError('Invalid legacy hotspare cadence relationship.')
+    if a is not None or b is not None:
+        values.setdefault('spare.interval', a if a is not None else b // 2)
+    return values
 
 
 def cloud_config(cfg, source, paths=PATHS, *, native_path=None):
@@ -67,7 +84,8 @@ def local_values(text):
         for entry in shlex.split(targets[1]):
             label, _, interval = entry.rpartition(':')
             if label in ('hotspare-a', 'hotspare-b') and interval.isdecimal():
-                values[label] = int(interval)
+                if label == 'hotspare-a':
+                    values.setdefault('CLONE_ROTATION_DAYS', int(interval))
     return values
 
 
@@ -124,16 +142,14 @@ def save(payload, paths=PATHS):
 
 def shell_overrides(paths=PATHS):
     values = overrides(paths)
-    rows = [f'{BY_ID[key].key}={int(value)}' for key, value in values.items()
-            if BY_ID[key].source == 'local' and not key.startswith('spare.')]
-    if any(key.startswith('spare.') for key in values):
-        current = effective(paths)
-        rows.extend([f'CLONE_INTERVAL_A={current["spare.a"]}', f'CLONE_INTERVAL_B={current["spare.b"]}'])
-    return '\n'.join(rows)
+    return '\n'.join(f'{BY_ID[key].key}={int(value)}' for key, value in values.items()
+                     if BY_ID[key].source == 'local')
 
 
-def local_projection(values):
-    return {'targets': [{'label': 'hotspare-a', 'interval_days': values['spare.a']},
-                        {'label': 'hotspare-b', 'interval_days': values['spare.b']}],
+def local_projection(values, stamp_dir=Path('/home/pi/backups/stamps')):
+    interval = values['spare.interval']
+    labels = ('hotspare-a', 'hotspare-b')
+    return {'targets': [{'label': label, 'interval_days': interval * 2} for label in labels],
+            'clone_rotation': asdict(rotation_plan(stamp_dir, labels, interval)),
             'borg_stale_hours': values['alerts.borg'], 'exfat_snapshot_stale_hours': values['alerts.exfat'],
             'openwrt_backup_stale_hours': values['alerts.router'], 'clone_stale_factor': values['alerts.spare']}

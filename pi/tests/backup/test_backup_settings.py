@@ -60,7 +60,7 @@ class SettingsTests(unittest.TestCase):
 
     def test_invalid_values_and_retention_relationships_do_not_write(self):
         for changes in ({'pi.interval':True}, {'pi.interval':0}, {'unknown':3},
-                        {'mac.keep':1}, {'exfat.daily':90}, {'spare.a':10},
+                        {'mac.keep':1}, {'exfat.daily':90}, {'spare.interval':0},
                         {'disk.start':9}, {'alerts.success':1}, {'pi.bandwidth':'8M; id'}):
             with self.subTest(changes=changes), self.assertRaises(ValueError): self.save(changes)
             self.assertFalse(self.paths.preferences.exists())
@@ -93,14 +93,35 @@ class SettingsTests(unittest.TestCase):
         with self.assertRaises(ValueError): settings.snapshot(self.paths)
 
     def test_local_projection_and_shell_output_use_the_same_preferences(self):
-        saved = self.save({'borg.daily':8,'spare.a':10,'spare.b':21,'alerts.borg':72})
+        saved = self.save({'borg.daily':8,'spare.interval':10,'alerts.borg':72})
         shell = settings.shell_overrides(self.paths)
         self.assertIn('KEEP_DAILY=8', shell)
-        self.assertIn('CLONE_INTERVAL_B=21', shell)
+        self.assertIn('CLONE_ROTATION_DAYS=10', shell)
         self.assertTrue(all(re.fullmatch(r'[A-Z][A-Z0-9_]*=[0-9]+', line) for line in shell.splitlines()))
         projection = settings.local_projection(saved['values'])
         self.assertEqual(projection['borg_stale_hours'], 72)
-        self.assertEqual(projection['targets'][1]['interval_days'], 21)
+        self.assertEqual(projection['targets'][1]['interval_days'], 20)
+
+    def test_old_cadences_migrate_on_read_and_next_save_without_losing_other_settings(self):
+        self.paths.preferences.write_text(json.dumps({'version':1, 'values':
+            {'spare.a':10,'spare.b':21,'borg.daily':8}}))
+        self.paths.preferences.chmod(0o600)
+        current = settings.snapshot(self.paths)
+        self.assertEqual(current['values']['spare.interval'],10)
+        self.assertNotIn('spare.a',current['values'])
+        self.assertEqual(settings.local_projection(current['values'], self.paths.local.parent)['targets'],
+            [{'label':'hotspare-a','interval_days':20},{'label':'hotspare-b','interval_days':20}])
+        self.save({'alerts.borg':72})
+        stored=json.loads(self.paths.preferences.read_text())['values']
+        self.assertEqual(stored,{'spare.interval':10,'borg.daily':8,'alerts.borg':72})
+        self.assertNotIn('spare.b',stored)
+
+    def test_invalid_legacy_cadence_is_not_silently_discarded(self):
+        for old in ({'spare.a':None}, {'spare.a':True}, {'spare.b':0},
+                    {'spare.a':10,'spare.b':14}):
+            self.paths.preferences.write_text(json.dumps({'version':1,'values':old}))
+            self.paths.preferences.chmod(0o600)
+            with self.assertRaises(ValueError): settings.snapshot(self.paths)
 
     def test_window_handles_midnight_and_excludes_end_hour(self):
         for start, end, hour, expected in ((3,9,3,0),(3,9,9,3),(22,5,23,0),(22,5,4,0),(22,5,5,3)):

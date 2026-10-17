@@ -32,6 +32,11 @@ def parse_configuration(cls, text, error):
         value = re.search(rf"^\s*{re.escape(name)}=(\d+)\s*(?:#.*)?$", text, re.MULTILINE)
         return int(value.group(1)) if value else default
 
+    rotation_days = integer("CLONE_ROTATION_DAYS", 0)
+    if rotation_days:
+        for target in targets:
+            target["interval_days"] = rotation_days * 2
+
     clone_card_nominal_gb = integer("CLONE_CARD_NOMINAL_GB", 64)
     if clone_card_nominal_gb not in cls.CLONE_CARD_NOMINAL_GB_OPTIONS:
         raise error(

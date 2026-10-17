@@ -24,13 +24,14 @@ KEEP_WEEKLY=8
 KEEP_MONTHLY=12
 BORG_CHECK_DOM=1  # day of month for the integrity check (borg check)
 
-# bootable clone targets: "<ext4-label>:<interval-days>", staggered so hotspare-b
-# always holds an older known-good generation. Cards are found by ext4 label at
+# One card per rotation interval; retain the other recovery generation.
+# Target intervals describe each card’s normal full cycle. Cards are found by ext4 label at
 # runtime; init new ones with:
 # /home/pi/scripts/backup/clone_to_sd.sh --init <label> sdX
 # Later, replace exactly one card at a time with new_hotspare.sh; it infers the
 # missing configured label and validates the new card against the other reader.
-CLONE_TARGETS=(hotspare-a:7 hotspare-b:14)
+CLONE_ROTATION_DAYS=7
+CLONE_TARGETS=(hotspare-a:14 hotspare-b:14)
 CLONE_MAX_DISK_GB=500  # refuse to clone onto anything bigger (TB-drive footgun guard)
 # The two physical readers are different revisions. Replacement discovery accepts
 # only these USB VID:PID pairs and a card within this many GiB of the surviving
@@ -226,8 +227,11 @@ if [[ -e /etc/vanpi-backup-settings.json || -L /etc/vanpi-backup-settings.json ]
     [[ "$backup_preference_name" =~ ^[A-Z][A-Z0-9_]*$ && "$backup_preference_value" =~ ^[0-9]+$ ]] || return 1
     printf -v "$backup_preference_name" '%s' "$backup_preference_value"
   done <<< "$backup_preference_assignments"
-  if [[ -n ${CLONE_INTERVAL_A:-} && -n ${CLONE_INTERVAL_B:-} ]]; then
-    CLONE_TARGETS=(hotspare-a:"$CLONE_INTERVAL_A" hotspare-b:"$CLONE_INTERVAL_B")
-  fi
   unset backup_preference_assignments backup_preference_name backup_preference_value
 fi
+
+# Keep the watchdog's per-card freshness thresholds aligned with rotation.
+for clone_target_index in "${!CLONE_TARGETS[@]}"; do
+  CLONE_TARGETS[$clone_target_index]="${CLONE_TARGETS[$clone_target_index]%%:*}:$((2 * CLONE_ROTATION_DAYS))"
+done
+unset clone_target_index

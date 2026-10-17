@@ -116,9 +116,7 @@ function HotspareCard({
     ? 'Not attached'
     : card.mounted
       ? 'Mounted · unsafe to clone'
-      : card.due
-        ? 'Clone due'
-        : 'Current';
+      : (card.rotationMessage ?? (card.due ? 'Clone due' : 'Current'));
   return (
     <article className={`backup-hotspare ${card.stale ? 'backup-hotspare--stale' : ''}`}>
       <header>
@@ -127,7 +125,7 @@ function HotspareCard({
       </header>
       <dl>
         <div>
-          <dt>Cadence</dt>
+          <dt>Per-card cadence</dt>
           <dd>{card.intervalDays} days</dd>
         </div>
         <div>
