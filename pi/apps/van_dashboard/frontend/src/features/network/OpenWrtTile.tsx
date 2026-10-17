@@ -128,7 +128,7 @@ export function OpenWrtTile({
               aria-label="Current internet throughput"
               title={throughput.detail ?? undefined}
             >
-              <span className="wan-throughput-label">Now</span>
+              <span className="wan-throughput-label">Net</span>
               <span>{throughput.summary}</span>
             </span>
           )}

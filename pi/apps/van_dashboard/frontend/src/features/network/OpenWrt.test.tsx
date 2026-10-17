@@ -135,7 +135,7 @@ describe('OpenWrt UI', () => {
 
     connectivity.router.wanTraffic = { uptimeSeconds: 100, uplinks: [] };
     view.rerender(tile(null));
-    expect(screen.getByLabelText('Current internet throughput')).toHaveTextContent('NowMeasuring…');
+    expect(screen.getByLabelText('Current internet throughput')).toHaveTextContent('NetMeasuring…');
 
     const throughput = {
       downloadBps: 4_200_000,
@@ -150,7 +150,7 @@ describe('OpenWrt UI', () => {
     expect(row).toHaveAttribute('title', 'wan ↓ 4.2 Mbps · ↑ 640 kbps\nAveraged over 3.0 s');
 
     view.rerender(tile(throughput, { ...connectivity, stale: true }));
-    expect(screen.getByLabelText('Current internet throughput')).toHaveTextContent('Now—');
+    expect(screen.getByLabelText('Current internet throughput')).toHaveTextContent('Net—');
     view.unmount();
   });
 

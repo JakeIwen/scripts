@@ -76,7 +76,7 @@ cadence.
 The same router query also reads `/proc/uptime`, `/proc/net/dev` and
 `ubus network.interface.<name> status` for `wan`, `clientwan` and `lifiwan`.
 `router.wan_traffic` carries the cumulative receive/transmit byte counters of
-each up uplink's device, stamped with the router's uptime. The tile's "Now"
+each up uplink's device, stamped with the router's uptime. The tile's "Net"
 row is the browser's difference between consecutive collector samples, summed
 over every up uplink, so it is the van's whole internet traffic whichever
 uplink mwan3 uses. The window is roughly 3 seconds while a dashboard is visible.
