@@ -81,6 +81,13 @@ compare it with this checkout. Deployed files may differ from the repository.
   `sonos_clock.py` labels the speaker's reported clock zone, with UTC-offset fallback
   for unrecognized rules; never substitute the browser or Pi timezone.
   `alarmFilters.ts` owns weekday and enabled-state filtering, using the speaker clock for one-time alarms.
+- `shared/sh/llm_restore.py` (alias `llmrestore` on both hosts; Pi copy at
+  `/home/pi/scripts/`) reopens the Claude Code and Codex sessions open before a
+  reboot, skipping any already open or kept by llm-switchboard: iTerm tabs on
+  the Mac, tmux session `llmrestore` on the Pi. Its `--cron on|off` owns a
+  `managed llm-restore` block in the live user crontab (every-minute snapshot);
+  reinstalling a repo crontab file drops it. State and the generated restore
+  script live in `~/.local/state/llm-restore/`.
   `alarmControls.ts` is owned by `SonosFeature`, so closing the sheet or collapsing
   alarms cannot release an in-flight write. Delete and enable are explicit commands.
   Read fresh device state before mutations, preserve existing music metadata,
