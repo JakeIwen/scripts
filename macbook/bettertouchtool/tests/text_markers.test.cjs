@@ -31,14 +31,17 @@ function editorFixture({paragraphs = ['first', 'mIxEd tail'], start = 0, end = 5
     const rangeText = range => state.paragraphs.join('').slice(flatIndex(range.start),flatIndex(range.end));
     const offsets = () => ({location:flatIndex(state.selection.start),
         length:flatIndex(state.selection.end)-flatIndex(state.selection.start)});
+    let markerIdentity = 0;
     const attribute = (element,name) => {
         if (element === system) return name === 'AXFocusedApplication' ? app : editor;
         assert.equal(element,editor);
+        if (name === 'AXSelectedTextMarkerRange')
+            return {...state.selection, identity:++markerIdentity};
         return {AXValue:state.paragraphs.join(''), AXSelectedText:rangeText(state.selection),
-            AXSelectedTextRange:offsets(), AXSelectedTextMarkerRange:state.selection}[name];
+            AXSelectedTextRange:offsets()}[name];
     };
     const native = nativeEditor({state, editor, menu, equal, rangeText,
-        domIndex, domPoint, flatPoint, refuseMarkers});
+        domIndex, domPoint, flatPoint, flatIndex, refuseMarkers});
     const context=vm.createContext({$:native,Ref:()=>[],delay:()=>{},
         ObjC:{import() {},unwrap:v=>v,castRefToObject:v=>v}});
     for (const file of ['text_markers.js','text_menu_paste.js'])
@@ -57,7 +60,7 @@ function editorFixture({paragraphs = ['first', 'mIxEd tail'], start = 0, end = 5
 }
 
 function nativeEditor({state, editor, menu, equal, rangeText,
-    domIndex, domPoint, flatPoint, refuseMarkers}) {
+    domIndex, domPoint, flatPoint, flatIndex, refuseMarkers}) {
     const native = value => value;
     Object.assign(native, {
         CFEqual:equal, NSPasteboard:{generalPasteboard:{}},
@@ -70,6 +73,7 @@ function nativeEditor({state, editor, menu, equal, rangeText,
                 case 'AXStartTextMarkerForTextMarkerRange': result[0]=value.start; break;
                 case 'AXEndTextMarkerForTextMarkerRange': result[0]=value.end; break;
                 case 'AXUIElementForTextMarker': result[0]={node:point.node}; break;
+                case 'AXIndexForTextMarker': result[0]=flatIndex(point); break;
                 case 'AXStringForTextMarkerRange': result[0]=rangeText(value); break;
                 case 'AXTextMarkerRangeForUnorderedTextMarkers':
                     result[0]={start:value.values[0],end:value.values[1]}; break;
@@ -115,6 +119,20 @@ test('the old flat-offset round trip passes text checks while deleting a paragra
     assert.deepEqual(state.paragraphs,['first','MIXED tail']);
     run('mixed');
     assert.deepEqual(state.paragraphs,['firstmixed tail']);
+});
+
+test('independently allocated marker ranges compare by endpoint nodes and positions', () => {
+    const {helpers}=editorFixture();
+    const first=helpers.markers.read(), second=helpers.markers.read();
+    assert.notDeepEqual(first,second);
+    assert.equal(helpers.markers.same(first,second),true);
+});
+
+test('equal flat offsets on opposite sides of a paragraph are different marker positions', () => {
+    const {helpers}=editorFixture();
+    const range=helpers.markers.read();
+    const acrossBreak={...range,start:{node:0,offset:5}};
+    assert.equal(helpers.markers.same(range,acrossBreak),false);
 });
 
 test('native markers keep the paragraph intact across upper then lower without refocus', () => {

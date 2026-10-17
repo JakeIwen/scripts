@@ -1,14 +1,30 @@
 // Rich editors can give the end of one paragraph and the start of the next
 // the same flat offset. Keep native node positions when restoring a selection.
+function textMarkerParameter(element, name, value) {
+    const result = Ref();
+    const status = $.AXUIElementCopyParameterizedAttributeValue(element, $(name), value, result);
+    if (status !== 0) throw new Error('Cannot resolve text markers: ' + name + ' (' + status + ').');
+    const resolved = ObjC.castRefToObject(result[0]);
+    if (resolved === null || resolved === undefined)
+        throw new Error('The editor returned an invalid text marker.');
+    return resolved;
+}
+
 function textMarkerSelection(element, attribute) {
-    function parameter(name, value) {
-        const result = Ref();
-        const status = $.AXUIElementCopyParameterizedAttributeValue(element, $(name), value, result);
-        if (status !== 0) throw new Error('Cannot resolve text markers: ' + name + ' (' + status + ').');
-        const resolved = ObjC.castRefToObject(result[0]);
-        if (resolved === null || resolved === undefined)
-            throw new Error('The editor returned an invalid text marker.');
-        return resolved;
+    const parameter = (name, value) => textMarkerParameter(element, name, value);
+    function samePoint(first, second) {
+        const firstIndex = Number(ObjC.unwrap(parameter('AXIndexForTextMarker', first)));
+        const secondIndex = Number(ObjC.unwrap(parameter('AXIndexForTextMarker', second)));
+        if (![firstIndex, secondIndex].every(index => Number.isSafeInteger(index) && index >= 0))
+            throw new Error('The editor returned an invalid text-marker position.');
+        return firstIndex === secondIndex && $.CFEqual(
+            parameter('AXUIElementForTextMarker', first), parameter('AXUIElementForTextMarker', second));
+    }
+    function same(first, second) {
+        // AXTextMarkerRange objects do not compare by endpoints with CFEqual.
+        // An index alone is ambiguous at paragraph boundaries; require the node too.
+        return ['AXStartTextMarkerForTextMarkerRange', 'AXEndTextMarkerForTextMarkerRange']
+            .every(name => samePoint(parameter(name, first), parameter(name, second)));
     }
     function text(range) {
         return ObjC.unwrap(parameter('AXStringForTextMarkerRange', range));
@@ -47,7 +63,7 @@ function textMarkerSelection(element, attribute) {
             }
             if (typeof value !== 'string' || !replacement.endsWith(value)) break;
             const previous = parameter('AXPreviousTextMarkerForTextMarker', start);
-            if ($.CFEqual(previous, start)) break;
+            if (samePoint(previous, start)) break;
             start = previous;
         }
         throw new Error('The editor could not identify the inserted text’s native boundaries.');
@@ -55,6 +71,7 @@ function textMarkerSelection(element, attribute) {
     return {
         read: () => attribute(element, 'AXSelectedTextMarkerRange'),
         text,
+        same,
         validate,
         endingAt,
         select: function (range) {

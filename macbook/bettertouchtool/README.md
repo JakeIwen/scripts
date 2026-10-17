@@ -289,7 +289,9 @@ identities. Recreate venvs rather than moving them.
   walks native character boundaries backward from the verified insertion caret
   and selects the exact replacement, without searching for text elsewhere or
   falling back to numeric selection writes. It checks focus, caret and text again
-  before selecting. Firefox selections spanning multiple text nodes are refused
+  before selecting. Marker ranges are compared by both endpoint nodes and positions;
+  native `CFEqual` can return false for different range objects with identical endpoints.
+  Firefox selections spanning multiple text nodes are refused
   before Paste: its flattened text can omit structural separators. This also limits
   selections across some formatting spans until a lossless representation is available.
   `tests/text_markers.test.cjs` models separate DOM paragraphs and AX text, reproduces

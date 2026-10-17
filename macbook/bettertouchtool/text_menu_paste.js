@@ -104,7 +104,7 @@ function restorePastedSelection(system, application, selection, replacement, exp
             throw new Error('The editor did not confirm the insertion caret.');
         range = markers.endingAt(caretMarker, replacement);
         assertPasteFocus(system, application, selection.element, attribute);
-        if (!$.CFEqual(caretMarker, markers.read()) ||
+        if (!markers.same(caretMarker, markers.read()) ||
             !$.CFEqual(caretRange, attribute(selection.element, 'AXSelectedTextRange')) ||
             ObjC.unwrap(attribute(selection.element, 'AXValue')) !== expected)
             throw new Error('The selection or text changed before reselection.');
@@ -117,11 +117,13 @@ function restorePastedSelection(system, application, selection, replacement, exp
     for (let attempt = 0; attempt < 10; attempt++) {
         assertPasteFocus(system, application, selection.element, attribute);
         const current = markers ? markers.read() : attribute(selection.element, 'AXSelectedTextRange');
-        if ($.CFEqual(range, current) &&
+        if ((markers ? markers.same(range, current) : $.CFEqual(range, current)) &&
             ObjC.unwrap(attribute(selection.element, 'AXSelectedText')) === replacement) return;
         delay(0.05);
     }
-    throw new Error('The app did not confirm reselection.');
+    const actual = helpers.offsets(attribute(selection.element, 'AXSelectedTextRange'));
+    throw new Error('The app did not confirm reselection (selected ' + actual.length
+        + ' of ' + replacement.length + ' characters).');
 }
 
 function pasteSelectionUsingMenu(system, application, selection, replacement, helpers) {
@@ -138,7 +140,7 @@ function pasteSelectionUsingMenu(system, application, selection, replacement, he
     withTemporaryClipboard($.NSPasteboard.generalPasteboard, replacement, ownsClipboard => {
         assertPasteFocus(system, application, selection.element, attribute);
         if (!$.CFEqual(selection.range, attribute(selection.element, 'AXSelectedTextRange')) ||
-            (markerRange && !$.CFEqual(markerRange, helpers.markers.read())) ||
+            (markerRange && !helpers.markers.same(markerRange, helpers.markers.read())) ||
             ObjC.unwrap(attribute(selection.element, 'AXSelectedText')) !== selection.text ||
             ObjC.unwrap(attribute(selection.element, 'AXValue')) !== original || !ownsClipboard())
             throw new Error('Selection or clipboard changed; nothing pasted.');
