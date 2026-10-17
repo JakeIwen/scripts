@@ -101,16 +101,29 @@ class Plan(unittest.TestCase):
 
     def test_current_plus_previous_boot_without_duplicates_or_managed(self):
         plan, sources = lr.restore_plan("now", self.snaps(), [])
-        self.assertEqual([s.id for s in plan], [A, B])
+        self.assertEqual([i.session.id for i in plan], [A, B])
         self.assertEqual(sources, ["now", "prev"])
 
     def test_consumed_previous_boot_is_dropped(self):
         plan, sources = lr.restore_plan("now", self.snaps(), ["prev"])
-        self.assertEqual(([s.id for s in plan], sources), ([A], ["now"]))
+        self.assertEqual(([i.session.id for i in plan], sources), ([A], ["now"]))
 
     def test_first_run_after_reboot_uses_last_boot(self):
         plan, sources = lr.restore_plan("new", self.snaps(), [])
-        self.assertEqual(([s.id for s in plan], sources), ([A], ["now"]))
+        self.assertEqual(([i.session.id for i in plan], sources), ([A], ["now"]))
+
+    def test_entries_record_how_long_before_the_snapshot_they_closed(self):
+        snap = {"boot": "now", "taken_at": 5000.0, "sessions": [
+            session("claude", A, last_seen=5000.0), session("codex", B, last_seen=2600.0)]}
+        plan, _ = lr.restore_plan("now", [snap], [])
+        self.assertEqual([i.closed_for for i in plan], [0.0, 2400.0])
+        self.assertTrue(plan[0].describe().startswith("open at"))
+        self.assertTrue(plan[1].describe().startswith("closed 40m before the last snapshot"))
+
+    def test_window_flags_parse_to_minutes_within_retention(self):
+        self.assertEqual((lr._window(1)("45"), lr._window(60)("1.5"), lr._window(60)("24")), (45, 90, 1440))
+        with self.assertRaises(lr.argparse.ArgumentTypeError):
+            lr._window(60)("25")
 
     def test_older_snapshot_records_still_load(self):
         old = {**asdict(session("claude", A)), "pid": 123}
@@ -124,7 +137,7 @@ class RecentlyClosed(unittest.TestCase):
         self.assertEqual([(s.id, s.last_seen) for s in after], [(A, 1000.0), (B, 1000.0)])
 
     def test_closed_sessions_expire_after_the_window(self):
-        listed = lr.merge_seen([session("claude", A, last_seen=1000.0)], [], now=1000.0 + lr.RECENT_S)
+        listed = lr.merge_seen([session("claude", A, last_seen=1000.0)], [], now=1000.0 + lr.RETAIN_S)
         self.assertEqual(listed, [])
 
     def test_open_session_is_refreshed_with_its_current_command(self):
@@ -194,9 +207,8 @@ class State(unittest.TestCase):
         with lr.state_lock(wait=False) as again:
             self.assertTrue(again)
 
-    def test_emit_prints_sessions_to_open_and_reports_on_stderr(self):
-        plan = [session("claude", A), session("claude", B)]
-        stdin = "\n".join(json.dumps(lr.asdict(s)) for s in plan) + "\n"
+    def apply(self, items, opts, emit=True):
+        stdin = "\n".join(json.dumps(lr.asdict(i)) for i in items) + "\n"
         out, err = io.StringIO(), io.StringIO()
         with patch.object(lr, "live_sessions", return_value=([session("claude", A)], [])), \
                 patch.object(lr, "_session_exists", return_value=True), \
@@ -207,16 +219,29 @@ class State(unittest.TestCase):
                 patch.object(lr, "boot_id", return_value="now"), \
                 patch.object(lr, "open_terminals") as opened, \
                 patch("sys.stdin", io.StringIO(stdin)), patch("sys.stdout", out), patch("sys.stderr", err):
-            lr.apply("prev", dry_run=False, force=False, emit=True)
+            lr.apply("prev", opts, emit)
+        return out.getvalue(), err.getvalue(), opened
+
+    def test_minutes_window_limits_what_reopens(self):
+        items = [lr.PlanItem(session("claude", B), 20 * 60), lr.PlanItem(session("claude", C), 50 * 60)]
+        _, err, _ = self.apply(items, lr.RestoreOptions(dry_run=True))
+        self.assertEqual(err.count("would open"), 1)
+        self.assertIn("1 closed more than 30 minutes", err)
+        _, err, _ = self.apply(items, lr.RestoreOptions(dry_run=True, minutes=60))
+        self.assertEqual(err.count("would open"), 2)
+
+    def test_emit_prints_sessions_to_open_and_reports_on_stderr(self):
+        items = [lr.PlanItem(session("claude", A), 0.0), lr.PlanItem(session("claude", B), 0.0)]
+        out, err, opened = self.apply(items, lr.RestoreOptions())
         opened.assert_not_called()
-        self.assertEqual([lr.Session.from_json(json.loads(line)) for line in out.getvalue().splitlines()],
+        self.assertEqual([lr.Session.from_json(json.loads(line)) for line in out.splitlines()],
                          [session("claude", B)])
-        self.assertIn("already open", err.getvalue())
+        self.assertIn("already open", err)
         self.assertIn("claude:" + B, json.loads((self.root / "launched.json").read_text()))
         self.assertEqual(json.loads((self.root / "consumed.json").read_text()), ["prev"])
 
     def test_script_feeds_its_sessions_back_to_apply(self):
-        plan = [session("claude", A, title="it's \"quoted\""), session("codex", B)]
+        plan = [lr.PlanItem(session("claude", A, title="it's \"quoted\""), 0.0), lr.PlanItem(session("codex", B), 90.0)]
         lr.write_restore_script(plan, ["prev", "now"], ["codex pid 1: unknown"])
         script = self.root / "restore"
         self.assertTrue(os.access(script, os.X_OK))
@@ -224,7 +249,7 @@ class State(unittest.TestCase):
         fake.write_text(re.sub(r"^exec .*<<'SESSIONS'$", "exec /bin/cat <<'SESSIONS'",
                                script.read_text(), flags=re.M))
         out = subprocess.run(["/bin/sh", str(fake)], capture_output=True, text=True, check=True).stdout
-        self.assertEqual([lr.Session.from_json(json.loads(line)) for line in out.splitlines()], plan)
+        self.assertEqual([lr.PlanItem.from_json(json.loads(line)) for line in out.splitlines()], plan)
         self.assertIn("--apply prev,now", script.read_text())
 
 

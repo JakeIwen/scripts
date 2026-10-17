@@ -9,9 +9,10 @@ on macOS, a tmux session named `llmrestore` elsewhere) unless it is already
 open. On the Mac, `--pi` reopens the Pi's sessions instead, as iTerm tabs
 that SSH to the Pi: the Pi decides what to open, the Mac opens the tabs.
 
-A boot's snapshot keeps each session for 30 minutes after it was last seen
-open, so the terminals closing during shutdown (or by hand beforehand) don't
-empty it. The restore list is the current boot's snapshot plus the previous
+A boot's snapshot keeps each session for 24 hours after it was last seen
+open, and a restore reopens those open or closed within 30 minutes
+(`-m/--minutes` or `-H/--hours`) of the last snapshot, so the terminals
+closing during shutdown (or by hand beforehand) don't empty the list. The restore list is the current boot's snapshot plus the previous
 boot's last one. The previous boot's sessions are dropped from the list once a
 restore has run, so sessions closed on purpose afterwards stay closed.
 
@@ -59,10 +60,13 @@ KEEP_BOOTS = 5
 # A launched session normally registers within seconds; until then a second
 # run must not open it again.
 LAUNCH_GRACE_S = 120
-# A closed session stays on the restore list this long. Shutdown closes the
-# terminals before cron stops, and sessions are often closed by hand before a
-# reboot; without this, those snapshots would empty the list.
-RECENT_S = 30 * 60
+# A restore also reopens sessions closed this long before the last snapshot
+# (--minutes overrides it). Shutdown closes the terminals before cron stops,
+# and sessions are often closed by hand before a reboot; without this, those
+# snapshots would empty the list.
+DEFAULT_MINUTES = 30
+# Snapshots keep closed sessions this long, the furthest --minutes can reach.
+RETAIN_S = 24 * 3600
 ROLLOUT_RE = re.compile(r"rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$")
 IS_MAC = sys.platform == "darwin"
 CLAUDE, CODEX = "claude", "codex"
@@ -93,6 +97,36 @@ class Session:
         return f"{self.tool} {self.title or self.id}"
 
 
+@dataclass(frozen=True)
+class PlanItem:
+    """A restore-list entry: the session and how long before its boot's last
+    snapshot it was closed (0 if it was still open)."""
+
+    session: Session
+    closed_for: float
+
+    @classmethod
+    def from_json(cls, data: dict) -> PlanItem:
+        return cls(Session.from_json(data["session"]), data["closed_for"])
+
+    def describe(self) -> str:
+        if not self.closed_for:
+            return f"open at {_clock(self.session.last_seen)}"
+        return f"closed {self.closed_for / 60:.0f}m before the last snapshot, last seen {_clock(self.session.last_seen)}"
+
+
+@dataclass(frozen=True)
+class RestoreOptions:
+    dry_run: bool = False
+    force: bool = False
+    minutes: int = DEFAULT_MINUTES
+
+    def flags(self) -> list[str]:
+        """The same options as command-line flags, for the generated script."""
+        return ((["--dry-run"] if self.dry_run else []) + (["--force"] if self.force else [])
+                + ["--minutes", str(self.minutes)])
+
+
 @dataclass
 class Proc:
     pid: int
@@ -121,8 +155,8 @@ def _arity(arity: str, names: set) -> dict:
 
 
 # Claude Code options carried into the resume command. Every other option (the
-# original --resume/--continue/--session-id, worktree/cloud modes) and any
-# initial prompt are dropped, since the resume command names the session.
+# original --resume/--continue/--session-id, worktree/cloud modes) is dropped;
+# its value, read as a positional word, goes with the discarded initial prompt.
 CLAUDE_KEPT = {
     **_arity(VALUE, {
         "--permission-mode", "--model", "--settings", "--agent", "--agents", "--effort",
@@ -137,15 +171,6 @@ CLAUDE_KEPT = {
         "--dangerously-skip-permissions", "--allow-dangerously-skip-permissions", "--chrome",
         "--no-chrome", "--ide", "--verbose", "--strict-mcp-config", "--bare", "--safe-mode",
         "--restricted", "--brief", "--disable-slash-commands", "--ax-screen-reader"}),
-}
-CLAUDE_DROPPED = {
-    **_arity(VALUE, {
-        "--session-id", "-n", "--name", "--debug-file", "--input-format", "--output-format",
-        "--json-schema", "--max-budget-usd", "--permission-prompts", "--environment"}),
-    **_arity(MULTI, {"--file"}),
-    **_arity(OPTIONAL, {
-        "-r", "--resume", "-d", "--debug", "--from-pr", "--teleport", "--cloud", "-w",
-        "--worktree", "--prompt-suggestions"}),
 }
 # Codex keeps unknown options (they are boolean). The resume command runs in
 # the thread's folder and names the thread, so the dropped ones would conflict.
@@ -193,7 +218,7 @@ def split_options(argv: list[str], kept: dict, dropped: dict, keep_unknown: bool
 
 def claude_options(argv: list[str]) -> list[str]:
     """Options from a running claude's argv worth keeping on resume."""
-    return split_options(argv, CLAUDE_KEPT, CLAUDE_DROPPED, keep_unknown=False)[0]
+    return split_options(argv, CLAUDE_KEPT, {}, keep_unknown=False)[0]
 
 
 def codex_tui(proc: Proc) -> CodexTui | None:
@@ -332,14 +357,6 @@ def _codex_threads() -> dict[str, dict]:
     return {}
 
 
-def _rollout_cwd(path: str) -> str | None:
-    try:
-        with open(path) as f:
-            return json.loads(f.readline()).get("payload", {}).get("cwd")
-    except (OSError, ValueError):
-        return None
-
-
 def assign_codex_threads(tuis: list[CodexTui], held: dict[int, set], threads: dict[str, dict]) -> dict[int, str]:
     """Map each TUI pid to the thread it shows.
 
@@ -375,7 +392,7 @@ def assign_codex_threads(tuis: list[CodexTui], held: dict[int, set], threads: di
 
 
 def codex_sessions(procs: list[Proc]) -> tuple[list[Session], list[str]]:
-    tuis, held, rollouts = [], {}, {}
+    tuis, held = [], {}
     for p in procs:
         if _tool(p) != CODEX:
             continue
@@ -383,7 +400,6 @@ def codex_sessions(procs: list[Proc]) -> tuple[list[Session], list[str]]:
             m = ROLLOUT_RE.search(f)
             if m and f.startswith(str(CODEX_HOME / "sessions")):
                 held.setdefault(p.pid, set()).add(m.group(1))
-                rollouts[m.group(1)] = f
         tui = codex_tui(p)
         if tui:
             tuis.append(tui)
@@ -398,7 +414,7 @@ def codex_sessions(procs: list[Proc]) -> tuple[list[Session], list[str]]:
             warnings.append(f"codex pid {t.pid} in {t.cwd}: could not tell which session it shows")
             continue
         info = threads.get(tid, {})
-        cwd = info.get("cwd") or _rollout_cwd(rollouts.get(tid, "")) or t.cwd
+        cwd = info.get("cwd") or t.cwd
         found.append(Session(CODEX, tid, cwd, info.get("title") or "",
                              shell_command(cwd, [CODEX, *t.options, "resume", tid])))
     return found, warnings
@@ -454,8 +470,9 @@ def boot_snapshots() -> list[dict]:
     return sorted(snaps, key=lambda s: s["taken_at"], reverse=True)
 
 
-def restore_plan(current_boot: str, snapshots: list[dict], consumed: list[str]) -> tuple[list[Session], list[str]]:
-    """Sessions to restore and the boots they came from."""
+def restore_plan(current_boot: str, snapshots: list[dict], consumed: list[str]) -> tuple[list[PlanItem], list[str]]:
+    """Sessions to restore (any age; a restore filters by --minutes) and the
+    boots they came from."""
     sources = [s for s in snapshots if s["boot"] == current_boot][:1]
     earlier = [s for s in snapshots if s["boot"] != current_boot]
     if earlier and earlier[0]["boot"] not in consumed:
@@ -465,28 +482,28 @@ def restore_plan(current_boot: str, snapshots: list[dict], consumed: list[str]) 
         for s in snap["sessions"]:
             if s.key not in seen and not s.managed:
                 seen.add(s.key)
-                plan.append(s)
+                plan.append(PlanItem(s, snap["taken_at"] - s.last_seen))
     return plan, [s["boot"] for s in sources]
 
 
-def write_restore_script(plan: list[Session], sources: list[str], warnings: list[str]) -> None:
+def write_restore_script(plan: list[PlanItem], sources: list[str], warnings: list[str]) -> None:
     lines = [
         "#!/bin/sh",
         f"# Generated by {Path(__file__).resolve()} on {os.uname().nodename}, {time.strftime('%Y-%m-%d %H:%M:%S')}.",
-        "# Reopens these sessions (open, or closed under 30 minutes before the last",
-        "# snapshot); any that are already open are skipped. Flags: --dry-run shows",
-        "# what would happen, --force ignores the 2-minute guard against reopening",
-        "# a session that was just launched.",
+        f"# Reopens these sessions if open, or closed under -m/-H (default {DEFAULT_MINUTES} minutes)",
+        "# before the last snapshot; any that are already open are skipped. Flags:",
+        "# --dry-run shows what would happen, --force ignores the 2-minute guard",
+        "# against reopening a session that was just launched.",
     ]
-    lines += [f"#   {s.tool:6} {s.title or s.id}  (last seen {_clock(s.last_seen)})\n#     {s.command}"
-              for s in plan]
+    lines += [f"#   {i.session.tool:6} {i.session.title or i.session.id}  ({i.describe()})\n#     {i.session.command}"
+              for i in plan]
     lines += [f"# warning: {w}" for w in warnings]
     if not plan:
         lines.append("#   (no sessions recorded)")
     lines += [
         f"exec /usr/bin/python3 -I -B {shlex.quote(str(Path(__file__).resolve()))} "
         f"--apply {shlex.quote(','.join(sources) or '-')} \"$@\" <<'SESSIONS'",
-        *(json.dumps(asdict(s), sort_keys=True) for s in plan),
+        *(json.dumps(asdict(i), sort_keys=True) for i in plan),
         "SESSIONS",
         "",
     ]
@@ -494,8 +511,8 @@ def write_restore_script(plan: list[Session], sources: list[str], warnings: list
 
 
 def merge_seen(previous: list[Session], live: list[Session], now: float) -> list[Session]:
-    """This boot's restore list: open sessions plus those closed under RECENT_S ago."""
-    merged = {s.key: s for s in previous if now - s.last_seen < RECENT_S}
+    """This boot's sessions: open ones plus those closed under RETAIN_S ago."""
+    merged = {s.key: s for s in previous if now - s.last_seen < RETAIN_S}
     merged.update((s.key, replace(s, last_seen=now)) for s in live)
     return list(merged.values())
 
@@ -504,7 +521,7 @@ def _clock(t: float) -> str:
     return time.strftime("%Y-%m-%d %H:%M", time.localtime(t))
 
 
-def regenerate() -> list[Session]:
+def regenerate() -> list[PlanItem]:
     """Rewrite the restore script from the saved snapshots (lock held)."""
     current, snaps = boot_id(), boot_snapshots()
     plan, sources = restore_plan(current, snaps, _read_json(CONSUMED, []))
@@ -528,7 +545,9 @@ def snapshot(quiet: bool) -> int:
             old.unlink()
         plan = regenerate()
     if not quiet:
-        print(f"Recorded {len(live)} open session(s); {len(plan)} in {RESTORE_SCRIPT}")
+        recent = sum(i.closed_for <= DEFAULT_MINUTES * 60 for i in plan)
+        print(f"Recorded {len(live)} open session(s); {RESTORE_SCRIPT} lists {recent} to restore "
+              f"(+{len(plan) - recent} closed earlier, reachable with -m/-H)")
         for w in warnings:
             print(f"warning: {w}")
     return 0
@@ -607,25 +626,30 @@ def open_terminals(sessions: list[Session]) -> str:
     return f"Attach with: tmux attach -t {TMUX_SESSION}"
 
 
-def apply(sources: str, dry_run: bool, force: bool, emit: bool) -> int:
+def apply(sources: str, opts: RestoreOptions, emit: bool) -> int:
     """Reopen the sessions the generated restore script feeds on stdin.
 
     With `emit` (used by the Mac's --pi over SSH) the sessions to open are
     printed as JSON lines instead, and the report goes to stderr.
     """
-    plan = [Session.from_json(json.loads(line)) for line in sys.stdin if line.strip()]
+    items = [PlanItem.from_json(json.loads(line)) for line in sys.stdin if line.strip()]
     report = sys.stderr if emit else sys.stdout
+    in_window = {i.session.key: i for i in items if i.closed_for <= opts.minutes * 60}
+    plan = [i.session for i in in_window.values()]
     with state_lock():
         live, _ = live_sessions()
         now = time.time()
         launched = {k: t for k, t in _read_json(LAUNCHED, {}).items() if now - t < LAUNCH_GRACE_S}
-        todo, skipped = choose(plan, live, launched, force, now)
+        todo, skipped = choose(plan, live, launched, opts.force, now)
         for line in skipped:
             print(f"skip  {line}", file=report)
         for s in todo:
-            print(f"{'would open' if dry_run else 'open'}  {s.label}  (last seen {_clock(s.last_seen)})\n"
+            print(f"{'would open' if opts.dry_run else 'open'}  {s.label}  ({in_window[s.key].describe()})\n"
                   f"      {s.command}", file=report)
-        if dry_run:
+        if len(items) > len(plan):
+            print(f"({len(items) - len(plan)} closed more than {opts.minutes} minutes before the last snapshot; "
+                  f"widen with -m or -H)", file=report)
+        if opts.dry_run:
             return 0
         if todo:
             # Recorded first, so a launch that fails part-way can't be doubled
@@ -636,7 +660,7 @@ def apply(sources: str, dry_run: bool, force: bool, emit: bool) -> int:
             else:
                 print(open_terminals(todo))
         else:
-            print("Nothing to reopen." if plan else "No sessions recorded. Turn on recording with: llmrestore --cron on",
+            print("Nothing to reopen." if items else "No sessions recorded. Turn on recording with: llmrestore --cron on",
                   file=report)
         # The previous boot's list has been restored: drop it from later runs.
         consumed = _read_json(CONSUMED, [])
@@ -653,11 +677,11 @@ def pi_tab_command(command: str) -> str:
     return f"ssh -t {shlex.quote(PI_HOST)} {shlex.quote(remote)}"
 
 
-def restore_pi(dry_run: bool, force: bool) -> int:
+def restore_pi(opts: RestoreOptions) -> int:
     """Ask the Pi which of its sessions to reopen, then open them as iTerm tabs."""
     if not IS_MAC:
         raise SystemExit("--pi opens iTerm tabs on the Mac; on the Pi, run llmrestore without it")
-    flags = ["--emit"] + (["--dry-run"] if dry_run else []) + (["--force"] if force else [])
+    flags = ["--emit", *opts.flags()]
     # stderr (the Pi's report) passes straight through to this terminal.
     res = subprocess.run(["/usr/bin/ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", PI_HOST,
                           " ".join([PI_RESTORE_SCRIPT, *flags])], stdout=subprocess.PIPE, text=True)
@@ -670,12 +694,11 @@ def restore_pi(dry_run: bool, force: bool) -> int:
     return 0
 
 
-def run_restore(dry_run: bool, force: bool) -> int:
+def run_restore(opts: RestoreOptions) -> int:
     if not RESTORE_SCRIPT.exists():
         with state_lock():
             regenerate()
-    args = [str(RESTORE_SCRIPT)] + (["--dry-run"] if dry_run else []) + (["--force"] if force else [])
-    os.execv(str(RESTORE_SCRIPT), args)
+    os.execv(str(RESTORE_SCRIPT), [str(RESTORE_SCRIPT), *opts.flags()])
 
 
 # ---------------------------------------------------------------- cron
@@ -698,7 +721,7 @@ def cron_block() -> list[str]:
     ]
 
 
-def cron(state: str | None) -> int:
+def cron(state: str | None, minutes: int) -> int:
     lines = _crontab()
     if CRON_BEGIN in lines and CRON_END in lines:
         start, end = lines.index(CRON_BEGIN), lines.index(CRON_END)
@@ -719,13 +742,24 @@ def cron(state: str | None) -> int:
     if snaps:
         last = snaps[0]
         still_open = sum(s.last_seen == last["taken_at"] for s in last["sessions"])
-        print(f"Last snapshot: {_clock(last['taken_at'])}, {still_open} session(s) open, "
-              f"{len(last['sessions']) - still_open} closed in the {RECENT_S // 60} minutes before")
+        print(f"Last snapshot: {_clock(last['taken_at'])}, {still_open} session(s) open")
     plan, _ = restore_plan(boot_id(), snaps, _read_json(CONSUMED, []))
-    print(f"Restore list: {len(plan)} session(s) in {RESTORE_SCRIPT}")
+    recent = sum(i.closed_for <= minutes * 60 for i in plan)
+    print(f"Restore list: {recent} session(s) open or closed within {minutes} minutes of the last snapshot "
+          f"({len(plan) - recent} older, up to {RETAIN_S // 3600}h) in {RESTORE_SCRIPT}")
     if CRON_LOG.exists() and CRON_LOG.stat().st_size:
         print(f"Errors were logged to {CRON_LOG}")
     return 0
+
+
+def _window(minutes_per_unit: int):
+    """argparse type: a --minutes/--hours value, as whole minutes."""
+    def parse(text: str) -> int:
+        value = round(float(text) * minutes_per_unit)
+        if not 0 <= value <= RETAIN_S // 60:
+            raise argparse.ArgumentTypeError(f"must be within {RETAIN_S // 3600}h (how long snapshots keep closed sessions)")
+        return value
+    return parse
 
 
 def main() -> int:
@@ -736,19 +770,26 @@ def main() -> int:
     ap.add_argument("--quiet", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("-n", "--dry-run", action="store_true", help="show what a restore would open")
     ap.add_argument("--force", action="store_true", help="reopen sessions launched in the last 2 minutes")
+    window = ap.add_mutually_exclusive_group()
+    window.add_argument("-m", "--minutes", type=_window(1), default=DEFAULT_MINUTES,
+                        help=f"also reopen sessions closed up to this long before the last snapshot "
+                             f"(default {DEFAULT_MINUTES}, max {RETAIN_S // 60})")
+    window.add_argument("-H", "--hours", dest="minutes", type=_window(60), metavar="HOURS",
+                        help=f"the same, in hours (max {RETAIN_S // 3600})")
     ap.add_argument("--pi", action="store_true", help="on the Mac: reopen the Pi's sessions as iTerm tabs over SSH")
     ap.add_argument("--apply", metavar="BOOTS", help=argparse.SUPPRESS)  # used by the generated script
     ap.add_argument("--emit", action="store_true", help=argparse.SUPPRESS)  # used by --pi over SSH
     args = ap.parse_args()
     if args.cron:
-        return cron(None if args.cron == "status" else args.cron)
+        return cron(None if args.cron == "status" else args.cron, args.minutes)
     if args.snapshot:
         return snapshot(args.quiet)
+    opts = RestoreOptions(args.dry_run, args.force, args.minutes)
     if args.apply is not None:
-        return apply(args.apply, args.dry_run, args.force, args.emit)
+        return apply(args.apply, opts, args.emit)
     if args.pi:
-        return restore_pi(args.dry_run, args.force)
-    return run_restore(args.dry_run, args.force)
+        return restore_pi(opts)
+    return run_restore(opts)
 
 
 if __name__ == "__main__":
