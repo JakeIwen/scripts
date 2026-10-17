@@ -1,8 +1,12 @@
-// Rich editors can give the end of one paragraph and the start of the next
-// the same flat offset. Keep native node positions when restoring a selection.
-function textMarkerParameter(element, name, value) {
+// Firefox exposes editable text as native markers over separate text nodes.
+// Its flat AX offsets cannot tell the end of one paragraph from the start of
+// the next, so paragraph checks and reselection use the marker semantics of
+// accessible/mac/GeckoTextMarker.mm and accessible/base/TextLeafRange.cpp.
+function textMarkerParameter(element, name, value, options) {
     const result = Ref();
     const status = $.AXUIElementCopyParameterizedAttributeValue(element, $(name), value, result);
+    // Firefox answers a neighbor request at a document edge with no value.
+    if (options && options.optional && status === Number($.kAXErrorNoValue)) return null;
     if (status !== 0) throw new Error('Cannot resolve text markers: ' + name + ' (' + status + ').');
     const resolved = ObjC.castRefToObject(result[0]);
     if (resolved === null || resolved === undefined)
@@ -11,20 +15,35 @@ function textMarkerParameter(element, name, value) {
 }
 
 function textMarkerSelection(element, attribute) {
-    const parameter = (name, value) => textMarkerParameter(element, name, value);
-    function samePoint(first, second) {
-        const firstIndex = Number(ObjC.unwrap(parameter('AXIndexForTextMarker', first)));
-        const secondIndex = Number(ObjC.unwrap(parameter('AXIndexForTextMarker', second)));
-        if (![firstIndex, secondIndex].every(index => Number.isSafeInteger(index) && index >= 0))
+    const parameter = (name, value, options) => textMarkerParameter(element, name, value, options);
+    function index(marker) {
+        const value = Number(ObjC.unwrap(parameter('AXIndexForTextMarker', marker)));
+        if (!Number.isSafeInteger(value) || value < 0)
             throw new Error('The editor returned an invalid text-marker position.');
-        return firstIndex === secondIndex && $.CFEqual(
-            parameter('AXUIElementForTextMarker', first), parameter('AXUIElementForTextMarker', second));
+        return value;
+    }
+    function point(marker) {
+        // GeckoTextMarker::Leaf() reports the previous node for any offset-0
+        // marker, and the next character boundary of a node's trailing edge is
+        // the following node's first character at the same flat index. Together
+        // they tell apart the two markers that share an index at a node boundary.
+        const position = index(marker);
+        const next = parameter('AXNextTextMarkerForTextMarker', marker, {optional: true});
+        return {index: position, leaf: parameter('AXUIElementForTextMarker', marker),
+            trailing: next === null || index(next) === position};
+    }
+    function samePoint(first, second) {
+        const a = point(first), b = point(second);
+        return a.index === b.index && a.trailing === b.trailing && $.CFEqual(a.leaf, b.leaf);
+    }
+    function endpoints(range) {
+        return {start: parameter('AXStartTextMarkerForTextMarkerRange', range),
+            end: parameter('AXEndTextMarkerForTextMarkerRange', range)};
     }
     function same(first, second) {
         // AXTextMarkerRange objects do not compare by endpoints with CFEqual.
-        // An index alone is ambiguous at paragraph boundaries; require the node too.
-        return ['AXStartTextMarkerForTextMarkerRange', 'AXEndTextMarkerForTextMarkerRange']
-            .every(name => samePoint(parameter(name, first), parameter(name, second)));
+        const a = endpoints(first), b = endpoints(second);
+        return samePoint(a.start, b.start) && samePoint(a.end, b.end);
     }
     function text(range) {
         return ObjC.unwrap(parameter('AXStringForTextMarkerRange', range));
@@ -36,37 +55,30 @@ function textMarkerSelection(element, attribute) {
         return parameter('AXTextMarkerRangeForUnorderedTextMarkers', pair);
     }
     function validate(range) {
-        const start = parameter('AXStartTextMarkerForTextMarkerRange', range);
-        const end = parameter('AXEndTextMarkerForTextMarkerRange', range);
-        const first = parameter('AXUIElementForTextMarker', start);
-        const last = parameter('AXUIElementForTextMarker', end);
-        // Firefox's flattened AX text also omits structural separators between
-        // nodes. Until a lossless representation is available, do not replace a
-        // selection spanning them with text that could silently omit line breaks.
-        if (!$.CFEqual(first, last))
-            throw new Error('Selection crosses rich-text nodes; Firefox cannot verify their separators. Nothing pasted.');
+        // Firefox's flat text omits the break between paragraphs, so a selection
+        // whose endpoints lie in different paragraphs would be pasted back merged.
+        // Firefox resolves each endpoint's paragraph from its native node, which
+        // also covers an endpoint sitting on the far side of a paragraph break.
+        const {start, end} = endpoints(range);
+        const paragraph = marker => parameter('AXParagraphTextMarkerRangeForTextMarker', marker);
+        if (!same(paragraph(start), paragraph(end)))
+            throw new Error('The selection spans a paragraph break; select text within one paragraph. Nothing pasted.');
     }
     function endingAt(caret, replacement) {
+        // Each backward character step consumes exactly one UTF-16 unit, even
+        // across node boundaries, so stepping back the replacement's length
+        // reaches its first character without selecting a zero-width break.
         const end = parameter('AXEndTextMarkerForTextMarkerRange', caret);
+        const unresolved = () => new Error('The editor could not identify the inserted text’s native boundaries.');
         let start = end;
-        const deadline = Date.now() + 2000;
-        // Walk native character boundaries, not UTF-16 offsets or a search for
-        // matching text elsewhere. Stop at the nearest exact suffix so a zero-
-        // width paragraph boundary before the inserted text stays unselected.
-        for (let steps = 0; steps <= replacement.length; steps++) {
-            if (Date.now() > deadline) break;
-            const range = between(start, end);
-            const value = text(range);
-            if (value === replacement) {
-                validate(range);
-                return range;
-            }
-            if (typeof value !== 'string' || !replacement.endsWith(value)) break;
-            const previous = parameter('AXPreviousTextMarkerForTextMarker', start);
-            if (samePoint(previous, start)) break;
-            start = previous;
+        for (let step = 0; step < replacement.length; step++) {
+            start = parameter('AXPreviousTextMarkerForTextMarker', start, {optional: true});
+            if (start === null) throw unresolved();
         }
-        throw new Error('The editor could not identify the inserted text’s native boundaries.');
+        const range = between(start, end);
+        if (text(range) !== replacement) throw unresolved();
+        validate(range);
+        return range;
     }
     return {
         read: () => attribute(element, 'AXSelectedTextMarkerRange'),

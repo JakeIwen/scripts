@@ -286,17 +286,25 @@ identities. Recreate venvs rather than moving them.
 - `text_markers.js`: Firefox reselection keeps native text-node positions. A flat
   offset can denote both the end of a paragraph and the start of the next one;
   restoring that offset can include an invisible paragraph separator. The adapter
-  walks native character boundaries backward from the verified insertion caret
-  and selects the exact replacement, without searching for text elsewhere or
-  falling back to numeric selection writes. It checks focus, caret and text again
-  before selecting. Marker ranges are compared by both endpoint nodes and positions;
-  native `CFEqual` can return false for different range objects with identical endpoints.
-  Firefox selections spanning multiple text nodes are refused
-  before Paste: its flattened text can omit structural separators. This also limits
-  selections across some formatting spans until a lossless representation is available.
-  `tests/text_markers.test.cjs` models separate DOM paragraphs and AX text, reproduces
-  the old deletion, and verifies consecutive transforms, Unicode length changes,
-  repeated text, boundary refusals and selection movement during reselection.
+  steps native character boundaries backward from the verified insertion caret,
+  one UTF-16 unit per step, and selects the exact replacement without searching
+  for text elsewhere or falling back to numeric selection writes. It checks focus,
+  caret and text again before selecting. Marker positions are compared by flat
+  index, node and trailing edge: Firefox's `AXUIElementForTextMarker` reports the
+  previous node for any offset-0 marker (and a text field for its only node), so
+  node identity alone cannot distinguish the two sides of a boundary, while the
+  next character boundary of a trailing edge keeps the same flat index. Native
+  `CFEqual` can return false for different range objects with identical endpoints.
+  Before Paste, both selection endpoints must lie in the same native paragraph
+  (`AXParagraphTextMarkerRangeForTextMarker`); a selection that spans a paragraph
+  break, including one ending at the next paragraph's start, is refused because the
+  flattened text would be pasted back merged. Selections across formatting runs
+  within one paragraph, and whole-field selections in the URL bar, are allowed.
+  `tests/text_markers.test.cjs` models those Firefox semantics from its
+  accessibility sources, reproduces the refused paragraph-start selection and the
+  URL-bar select-all, and verifies consecutive transforms, Unicode length changes,
+  repeated text, document-end selections, boundary refusals and selection movement
+  during reselection.
 - `signal_text_diagnostic.js`: temporary Media > Tools > Signal Diagnostic button's
   target-app runner. It requests Signal activation and waits up to 30 seconds for a stable draft selection,
   optionally attempts the selected transform, then returns to BTT with a detailed
