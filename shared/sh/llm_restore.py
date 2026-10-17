@@ -4,8 +4,9 @@
 `--snapshot` records the interactive sessions open now, per boot, and rewrites
 an executable restore script (~/.local/state/llm-restore/restore) listing the
 command that resumes each one. Running the tool with no flags executes that
-script, which opens each session in a new terminal (iTerm tabs on macOS, a
-tmux session named `llmrestore` elsewhere) unless it is already open.
+script, which opens each session in a new terminal (tabs of one iTerm window
+on macOS, a tmux session named `llmrestore` elsewhere) unless it is already
+open.
 
 The restore list is the current boot's latest snapshot plus the previous
 boot's last one. The previous boot's sessions are dropped from the list once a
@@ -19,6 +20,8 @@ MacBook (/usr/bin/python3 3.9) and the Pi.
 from __future__ import annotations
 
 import argparse
+from contextlib import closing, contextmanager
+from dataclasses import asdict, dataclass, field, fields
 import fcntl
 import json
 import os
@@ -52,47 +55,97 @@ KEEP_BOOTS = 5
 LAUNCH_GRACE_S = 120
 ROLLOUT_RE = re.compile(r"rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$")
 IS_MAC = sys.platform == "darwin"
+CLAUDE, CODEX = "claude", "codex"
+
+
+@dataclass(frozen=True)
+class Session:
+    """One resumable session: the record in snapshots and the restore script."""
+
+    tool: str  # CLAUDE or CODEX
+    id: str
+    cwd: str
+    title: str
+    command: str  # shell line that resumes it from any shell
+    managed: str | None = None  # owner that relaunches it itself (llm-switchboard)
+
+    @classmethod
+    def from_json(cls, data: dict) -> Session:
+        return cls(**{f.name: data[f.name] for f in fields(cls) if f.name in data})
+
+    @property
+    def key(self) -> str:
+        return f"{self.tool}:{self.id}"
+
+    @property
+    def label(self) -> str:
+        return f"{self.tool} {self.title or self.id}"
+
+
+@dataclass
+class Proc:
+    pid: int
+    argv: list[str]
+    cwd: str | None = None
+    env: dict = field(default_factory=dict)  # Linux only; macOS hides it
+    files: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class CodexTui:
+    pid: int
+    cwd: str
+    options: list[str]
+    requested: str | None  # id named on `codex resume|fork <id>`
 
 
 # ---------------------------------------------------------------- arguments
 
-# Claude Code flags carried into the resume command. Anything else (the
-# original --resume/--continue/--session-id, worktree/cloud modes, an initial
-# prompt) is dropped, since the resume command supplies the session itself.
-CLAUDE_KEEP_VALUE = {
-    "--permission-mode", "--model", "--settings", "--agent", "--agents", "--effort",
-    "--fallback-model", "--setting-sources", "--append-system-prompt", "--system-prompt",
-    "--autocompact", "--permission-prompt-tool", "--system-prompt-snapshot", "--plugin-dir",
-    "--plugin-url", "--remote-control-session-name-prefix",
-}
-CLAUDE_KEEP_MULTI = {
-    "--add-dir", "--allowedTools", "--allowed-tools", "--disallowedTools",
-    "--disallowed-tools", "--tools", "--betas", "--mcp-config",
-}
-CLAUDE_KEEP_OPTIONAL = {"--remote-control"}
-CLAUDE_KEEP_FLAG = {
-    "--dangerously-skip-permissions", "--allow-dangerously-skip-permissions", "--chrome",
-    "--no-chrome", "--ide", "--verbose", "--strict-mcp-config", "--bare", "--safe-mode",
-    "--restricted", "--brief", "--disable-slash-commands", "--ax-screen-reader",
-}
-CLAUDE_DROP_VALUE = {
-    "--session-id", "-n", "--name", "--debug-file", "--input-format", "--output-format",
-    "--json-schema", "--max-budget-usd", "--permission-prompts", "--environment",
-}
-CLAUDE_DROP_MULTI = {"--file"}
-CLAUDE_DROP_OPTIONAL = {
-    "-r", "--resume", "-d", "--debug", "--from-pr", "--teleport", "--cloud", "-w",
-    "--worktree", "--prompt-suggestions",
-}
+# Option tables: flag -> how many following words it takes.
+FLAG, VALUE, MULTI, OPTIONAL = "flag", "value", "multi", "optional"
 
-CODEX_VALUE = {
+
+def _arity(arity: str, names: set) -> dict:
+    return dict.fromkeys(names, arity)
+
+
+# Claude Code options carried into the resume command. Every other option (the
+# original --resume/--continue/--session-id, worktree/cloud modes) and any
+# initial prompt are dropped, since the resume command names the session.
+CLAUDE_KEPT = {
+    **_arity(VALUE, {
+        "--permission-mode", "--model", "--settings", "--agent", "--agents", "--effort",
+        "--fallback-model", "--setting-sources", "--append-system-prompt", "--system-prompt",
+        "--autocompact", "--permission-prompt-tool", "--system-prompt-snapshot", "--plugin-dir",
+        "--plugin-url", "--remote-control-session-name-prefix"}),
+    **_arity(MULTI, {
+        "--add-dir", "--allowedTools", "--allowed-tools", "--disallowedTools",
+        "--disallowed-tools", "--tools", "--betas", "--mcp-config"}),
+    **_arity(OPTIONAL, {"--remote-control"}),
+    **_arity(FLAG, {
+        "--dangerously-skip-permissions", "--allow-dangerously-skip-permissions", "--chrome",
+        "--no-chrome", "--ide", "--verbose", "--strict-mcp-config", "--bare", "--safe-mode",
+        "--restricted", "--brief", "--disable-slash-commands", "--ax-screen-reader"}),
+}
+CLAUDE_DROPPED = {
+    **_arity(VALUE, {
+        "--session-id", "-n", "--name", "--debug-file", "--input-format", "--output-format",
+        "--json-schema", "--max-budget-usd", "--permission-prompts", "--environment"}),
+    **_arity(MULTI, {"--file"}),
+    **_arity(OPTIONAL, {
+        "-r", "--resume", "-d", "--debug", "--from-pr", "--teleport", "--cloud", "-w",
+        "--worktree", "--prompt-suggestions"}),
+}
+# Codex keeps unknown options (they are boolean). The resume command runs in
+# the thread's folder and names the thread, so the dropped ones would conflict.
+CODEX_KEPT = _arity(VALUE, {
     "-c", "--config", "--enable", "--disable", "--remote", "--remote-auth-token-env",
     "-m", "--model", "--local-provider", "-p", "--profile", "-s", "--sandbox",
-    "-a", "--ask-for-approval", "--add-dir", "-C", "--cd", "-i", "--image",
+    "-a", "--ask-for-approval", "--add-dir"})
+CODEX_DROPPED = {
+    **_arity(VALUE, {"-C", "--cd", "-i", "--image"}),
+    **_arity(FLAG, {"--worktree", "--last", "--all", "--include-non-interactive"}),
 }
-# The resume command runs from the thread's folder and names the thread, so
-# these would conflict with it.
-CODEX_DROP = {"-C", "--cd", "-i", "--image", "--worktree", "--last", "--all", "--include-non-interactive"}
 CODEX_SESSION_SUBCOMMANDS = {"resume", "fork"}
 CODEX_OTHER_SUBCOMMANDS = {
     "agents", "exec", "e", "review", "login", "logout", "mcp", "plugin", "app-server",
@@ -106,76 +159,39 @@ def _is_flag(token: str) -> bool:
     return token.startswith("-") and token != "-"
 
 
+def split_options(argv: list[str], kept: dict, dropped: dict, keep_unknown: bool) -> tuple[list[str], list[str]]:
+    """Split argv[1:] into the options worth keeping and the positional words."""
+    options, words, i = [], [], 1
+    while i < len(argv):
+        tok = argv[i]
+        i += 1
+        if not _is_flag(tok):
+            words.append(tok)
+            continue
+        name, attached, _ = tok.partition("=")
+        arity = FLAG if attached else kept.get(name) or dropped.get(name) or FLAG
+        limit = {FLAG: 0, VALUE: 1, OPTIONAL: 1, MULTI: len(argv)}[arity]
+        take = 0
+        while take < limit and i + take < len(argv) and (arity == VALUE or not _is_flag(argv[i + take])):
+            take += 1
+        if name in kept or (keep_unknown and name not in dropped):
+            options += argv[i - 1:i + take]
+        i += take
+    return options, words
+
+
 def claude_options(argv: list[str]) -> list[str]:
     """Options from a running claude's argv worth keeping on resume."""
-    kept, i = [], 1
-    while i < len(argv):
-        tok = argv[i]
-        i += 1
-        if not _is_flag(tok):
-            continue  # an initial prompt: never replay it
-        name, eq, _ = tok.partition("=")
-        if eq:
-            if name in CLAUDE_KEEP_VALUE | CLAUDE_KEEP_MULTI | CLAUDE_KEEP_OPTIONAL:
-                kept.append(tok)
-            continue
-        if tok in CLAUDE_KEEP_FLAG:
-            kept.append(tok)
-        elif tok in CLAUDE_KEEP_VALUE | CLAUDE_DROP_VALUE:
-            if tok in CLAUDE_KEEP_VALUE and i < len(argv):
-                kept += [tok, argv[i]]
-            i += 1
-        elif tok in CLAUDE_KEEP_MULTI | CLAUDE_DROP_MULTI:
-            values = []
-            while i < len(argv) and not _is_flag(argv[i]):
-                values.append(argv[i])
-                i += 1
-            if tok in CLAUDE_KEEP_MULTI:
-                kept += [tok, *values]
-        elif tok in CLAUDE_KEEP_OPTIONAL | CLAUDE_DROP_OPTIONAL:
-            value = []
-            if i < len(argv) and not _is_flag(argv[i]):
-                value = [argv[i]]
-                i += 1
-            if tok in CLAUDE_KEEP_OPTIONAL:
-                kept += [tok, *value]
-        # other flags (-c, --fork-session, --tmux, -p, ...) are dropped
-    return kept
+    return split_options(argv, CLAUDE_KEPT, CLAUDE_DROPPED, keep_unknown=False)[0]
 
 
-def codex_options(argv: list[str]) -> list[str] | None:
-    """Global options from a codex TUI's argv, or None if it isn't a TUI."""
-    kept, i, seen_command = [], 1, False
-    while i < len(argv):
-        tok = argv[i]
-        i += 1
-        if not _is_flag(tok):
-            if not seen_command:
-                seen_command = True
-                if tok in CODEX_OTHER_SUBCOMMANDS:
-                    return None
-            continue  # subcommand, session id or prompt
-        name, eq, _ = tok.partition("=")
-        if eq:
-            if name not in CODEX_DROP:
-                kept.append(tok)
-            continue
-        if tok in CODEX_VALUE:
-            if tok not in CODEX_DROP and i < len(argv):
-                kept += [tok, argv[i]]
-            i += 1
-        elif tok not in CODEX_DROP:
-            kept.append(tok)
-    return kept
-
-
-def codex_requested_id(argv: list[str]) -> str | None:
-    """The session id named on a `codex resume|fork <id>` command line."""
-    for i, tok in enumerate(argv[1:-1], 1):
-        if tok in CODEX_SESSION_SUBCOMMANDS:
-            nxt = argv[i + 1]
-            return None if _is_flag(nxt) else nxt
-    return None
+def codex_tui(proc: Proc) -> CodexTui | None:
+    """The interactive view of a codex process, or None for daemons and exec."""
+    options, words = split_options(proc.argv, CODEX_KEPT, CODEX_DROPPED, keep_unknown=True)
+    if (words and words[0] in CODEX_OTHER_SUBCOMMANDS) or not proc.cwd:
+        return None
+    requested = words[1] if len(words) > 1 and words[0] in CODEX_SESSION_SUBCOMMANDS else None
+    return CodexTui(proc.pid, proc.cwd, options, requested)
 
 
 def shell_command(cwd: str, words: list[str]) -> str:
@@ -207,58 +223,57 @@ def _mac_argv(pid: int) -> list[str] | None:
     return [a.decode(errors="replace") for a in rest.split(b"\0")[:argc]]
 
 
-def list_processes() -> list[dict]:
-    """claude/codex processes: pid, argv, cwd, env (Linux only), open files."""
+def _mac_processes() -> list[Proc]:
+    procs = {}
+    for line in _run(["/bin/ps", "-axo", "pid=,comm="]).stdout.splitlines():
+        pid, _, comm = line.strip().partition(" ")
+        if os.path.basename(comm.strip()) in (CLAUDE, CODEX):
+            argv = _mac_argv(int(pid))
+            if argv:
+                procs[int(pid)] = Proc(int(pid), argv)
+    if not procs:
+        return []
+    out = _run(["/usr/sbin/lsof", "-n", "-P", "-w", "-Fpfn", "-p", ",".join(map(str, procs))], check=False).stdout
+    proc = fd = None
+    for line in out.splitlines():
+        tag, val = line[:1], line[1:]
+        if tag == "p":
+            proc = procs.get(int(val))
+        elif tag == "f":
+            fd = val
+        elif tag == "n" and proc:
+            if fd == "cwd":
+                proc.cwd = val
+            else:
+                proc.files.append(val)
+    return list(procs.values())
+
+
+def _linux_processes() -> list[Proc]:
     procs = []
-    if IS_MAC:
-        out = _run(["/bin/ps", "-axo", "pid=,comm="]).stdout
-        for line in out.splitlines():
-            pid, _, comm = line.strip().partition(" ")
-            if os.path.basename(comm.strip()) in ("claude", "codex"):
-                argv = _mac_argv(int(pid))
-                if argv:
-                    procs.append({"pid": int(pid), "argv": argv, "env": {}, "cwd": None, "files": []})
-        if procs:
-            _mac_files(procs)
-        return procs
     for entry in Path("/proc").iterdir():
         if not entry.name.isdigit():
             continue
         try:
-            if (entry / "comm").read_text().strip() not in ("claude", "codex"):
+            if (entry / "comm").read_text().strip() not in (CLAUDE, CODEX):
                 continue
             argv = (entry / "cmdline").read_bytes().decode(errors="replace").split("\0")[:-1]
-            env = dict(
-                kv.split("=", 1) for kv in (entry / "environ").read_bytes().decode(errors="replace").split("\0") if "=" in kv
-            )
-            cwd = os.readlink(entry / "cwd")
-            files = []
+            environ = (entry / "environ").read_bytes().decode(errors="replace").split("\0")
+            proc = Proc(int(entry.name), argv, os.readlink(entry / "cwd"),
+                        dict(kv.split("=", 1) for kv in environ if "=" in kv))
             for fd in (entry / "fd").iterdir():
                 try:
-                    files.append(os.readlink(fd))
+                    proc.files.append(os.readlink(fd))
                 except OSError:
                     pass
         except OSError:
             continue  # exited, or not ours
-        procs.append({"pid": int(entry.name), "argv": argv, "env": env, "cwd": cwd, "files": files})
+        procs.append(proc)
     return procs
 
 
-def _mac_files(procs: list[dict]) -> None:
-    by_pid = {p["pid"]: p for p in procs}
-    out = _run(["/usr/sbin/lsof", "-n", "-P", "-w", "-Fpfn", "-p", ",".join(map(str, by_pid))], check=False).stdout
-    pid = fd = None
-    for line in out.splitlines():
-        tag, val = line[:1], line[1:]
-        if tag == "p":
-            pid = int(val)
-        elif tag == "f":
-            fd = val
-        elif tag == "n" and pid in by_pid:
-            if fd == "cwd":
-                by_pid[pid]["cwd"] = val
-            else:
-                by_pid[pid]["files"].append(val)
+def _tool(proc: Proc) -> str:
+    return os.path.basename(proc.argv[0])
 
 
 # ---------------------------------------------------------------- sessions
@@ -270,26 +285,22 @@ def _read_json(path: Path, default):
         return default
 
 
-def claude_sessions(procs: list[dict]) -> list[dict]:
+def claude_sessions(procs: list[Proc]) -> list[Session]:
     found = []
     for p in procs:
-        if os.path.basename(p["argv"][0]) != "claude":
+        if _tool(p) != CLAUDE:
             continue
-        meta = _read_json(CLAUDE_SESSIONS / f"{p['pid']}.json", {})
+        meta = _read_json(CLAUDE_SESSIONS / f"{p.pid}.json", {})
         if meta.get("kind") != "interactive" or meta.get("entrypoint", "cli") != "cli":
             continue  # print mode, SDK and IDE sessions restore themselves
-        sid, cwd = meta.get("sessionId"), meta.get("cwd") or p["cwd"]
+        sid, cwd = meta.get("sessionId"), meta.get("cwd") or p.cwd
         if not sid or not cwd:
             continue
-        found.append({
-            "tool": "claude",
-            "id": sid,
-            "cwd": cwd,
-            "title": meta.get("name") or "",
-            "pid": p["pid"],
-            "managed": "llm-switchboard" if p["env"].get(SWITCHBOARD_ENV) else None,
-            "command": shell_command(cwd, ["claude", *claude_options(p["argv"]), "--resume", sid]),
-        })
+        found.append(Session(
+            CLAUDE, sid, cwd, meta.get("name") or "",
+            shell_command(cwd, [CLAUDE, *claude_options(p.argv), "--resume", sid]),
+            "llm-switchboard" if p.env.get(SWITCHBOARD_ENV) else None,
+        ))
     return found
 
 
@@ -302,7 +313,7 @@ def _codex_threads() -> dict[str, dict]:
     # -shm file can't be created (sandboxed shells).
     for uri in (f"file:{dbs[-1]}?mode=ro", f"file:{dbs[-1]}?immutable=1"):
         try:
-            with sqlite3.connect(uri, uri=True, timeout=2) as db:
+            with closing(sqlite3.connect(uri, uri=True, timeout=2)) as db:
                 rows = db.execute("select id, cwd, coalesce(name, title, ''), updated_at from threads").fetchall()
             return {r[0]: {"cwd": r[1], "title": r[2], "updated": r[3] or 0} for r in rows}
         except sqlite3.Error:
@@ -318,7 +329,7 @@ def _rollout_cwd(path: str) -> str | None:
         return None
 
 
-def assign_codex_threads(tuis: list[dict], held: dict[int, set], threads: dict[str, dict]) -> dict[int, str]:
+def assign_codex_threads(tuis: list[CodexTui], held: dict[int, set], threads: dict[str, dict]) -> dict[int, str]:
     """Map each TUI pid to the thread it shows.
 
     An embedded TUI holds its own rollout open. A TUI attached to the shared
@@ -326,69 +337,64 @@ def assign_codex_threads(tuis: list[dict], held: dict[int, set], threads: dict[s
     id on its command line, then by folder, then (when exactly one of each is
     left) by elimination. The most recently updated thread wins a folder tie.
     """
-    tui_pids = {t["pid"] for t in tuis}
+    def recency(tid):
+        return threads.get(tid, {}).get("updated", 0)
+
+    tui_pids = {t.pid for t in tuis}
     result, pool = {}, set()
     for pid, ids in held.items():
         if pid in tui_pids and ids:
-            result[pid] = max(ids, key=lambda i: threads.get(i, {}).get("updated", 0))
+            result[pid] = max(ids, key=recency)
         elif pid not in tui_pids:
             pool |= ids
     pool -= set(result.values())
-    pending = [t for t in tuis if t["pid"] not in result]
-    for match in (
-        lambda t, tid: codex_requested_id(t["argv"]) == tid,
-        lambda t, tid: threads.get(tid, {}).get("cwd") == t["cwd"],
-    ):
+    pending = [t for t in tuis if t.pid not in result]
+    by_request = lambda t, tid: t.requested == tid  # noqa: E731
+    by_folder = lambda t, tid: threads.get(tid, {}).get("cwd") == t.cwd  # noqa: E731
+    for matches in (by_request, by_folder):
         for t in list(pending):
-            hits = sorted((tid for tid in pool if match(t, tid)), key=lambda i: -threads.get(i, {}).get("updated", 0))
+            hits = [tid for tid in pool if matches(t, tid)]
             if hits:
-                result[t["pid"]] = hits[0]
-                pool.discard(hits[0])
+                result[t.pid] = max(hits, key=recency)
+                pool.discard(result[t.pid])
                 pending.remove(t)
     if len(pending) == 1 and len(pool) == 1:
-        result[pending[0]["pid"]] = pool.pop()
+        result[pending[0].pid] = pool.pop()
     return result
 
 
-def codex_sessions(procs: list[dict]) -> tuple[list[dict], list[str]]:
+def codex_sessions(procs: list[Proc]) -> tuple[list[Session], list[str]]:
     tuis, held, rollouts = [], {}, {}
     for p in procs:
-        if os.path.basename(p["argv"][0]) != "codex":
+        if _tool(p) != CODEX:
             continue
-        for f in p["files"]:
+        for f in p.files:
             m = ROLLOUT_RE.search(f)
             if m and f.startswith(str(CODEX_HOME / "sessions")):
-                held.setdefault(p["pid"], set()).add(m.group(1))
+                held.setdefault(p.pid, set()).add(m.group(1))
                 rollouts[m.group(1)] = f
-        options = codex_options(p["argv"])
-        if options is not None and p["cwd"]:
-            tuis.append({**p, "options": options})
+        tui = codex_tui(p)
+        if tui:
+            tuis.append(tui)
     if not tuis:
         return [], []
     threads = _codex_threads()
     mapping = assign_codex_threads(tuis, held, threads)
     found, warnings = [], []
     for t in tuis:
-        tid = mapping.get(t["pid"])
+        tid = mapping.get(t.pid)
         if not tid:
-            warnings.append(f"codex pid {t['pid']} in {t['cwd']}: could not tell which session it shows")
+            warnings.append(f"codex pid {t.pid} in {t.cwd}: could not tell which session it shows")
             continue
         info = threads.get(tid, {})
-        cwd = info.get("cwd") or _rollout_cwd(rollouts.get(tid, "")) or t["cwd"]
-        found.append({
-            "tool": "codex",
-            "id": tid,
-            "cwd": cwd,
-            "title": info.get("title") or "",
-            "pid": t["pid"],
-            "managed": None,
-            "command": shell_command(cwd, ["codex", *t["options"], "resume", tid]),
-        })
+        cwd = info.get("cwd") or _rollout_cwd(rollouts.get(tid, "")) or t.cwd
+        found.append(Session(CODEX, tid, cwd, info.get("title") or "",
+                             shell_command(cwd, [CODEX, *t.options, "resume", tid])))
     return found, warnings
 
 
-def live_sessions() -> tuple[list[dict], list[str]]:
-    procs = list_processes()
+def live_sessions() -> tuple[list[Session], list[str]]:
+    procs = _mac_processes() if IS_MAC else _linux_processes()
     codex, warnings = codex_sessions(procs)
     return claude_sessions(procs) + codex, warnings
 
@@ -403,7 +409,6 @@ def boot_id() -> str:
 
 
 def _write_private(path: Path, text: str, mode: int = 0o600) -> None:
-    STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     tmp = path.with_name(f".{path.name}.{os.getpid()}")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
@@ -412,31 +417,33 @@ def _write_private(path: Path, text: str, mode: int = 0o600) -> None:
     os.replace(tmp, path)
 
 
-class StateLock:
-    def __init__(self, wait: bool = True):
-        self.wait = wait
-
-    def __enter__(self):
-        STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.fd = os.open(LOCK, os.O_RDWR | os.O_CREAT, 0o600)
+@contextmanager
+def state_lock(wait: bool = True):
+    """Serialize snapshots and restores; yields False if busy and not waiting."""
+    STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd = os.open(LOCK, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
         try:
-            fcntl.flock(self.fd, fcntl.LOCK_EX | (0 if self.wait else fcntl.LOCK_NB))
+            fcntl.flock(fd, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
         except BlockingIOError:
-            os.close(self.fd)
-            return None
-        return self
-
-    def __exit__(self, *exc):
-        os.close(self.fd)
+            yield False
+            return
+        yield True
+    finally:
+        os.close(fd)
 
 
 def boot_snapshots() -> list[dict]:
-    """Saved snapshots, newest first."""
-    snaps = [_read_json(p, None) for p in BOOTS.glob("*.json")]
-    return sorted((s for s in snaps if s), key=lambda s: s["taken_at"], reverse=True)
+    """Saved snapshots, newest first, with Session records."""
+    snaps = []
+    for path in BOOTS.glob("*.json"):
+        snap = _read_json(path, None)
+        if snap:
+            snaps.append({**snap, "sessions": [Session.from_json(s) for s in snap["sessions"]]})
+    return sorted(snaps, key=lambda s: s["taken_at"], reverse=True)
 
 
-def restore_plan(current_boot: str, snapshots: list[dict], consumed: list[str]) -> tuple[list[dict], list[str]]:
+def restore_plan(current_boot: str, snapshots: list[dict], consumed: list[str]) -> tuple[list[Session], list[str]]:
     """Sessions to restore and the boots they came from."""
     sources = [s for s in snapshots if s["boot"] == current_boot][:1]
     earlier = [s for s in snapshots if s["boot"] != current_boot]
@@ -445,55 +452,55 @@ def restore_plan(current_boot: str, snapshots: list[dict], consumed: list[str]) 
     plan, seen = [], set()
     for snap in sources:
         for s in snap["sessions"]:
-            key = (s["tool"], s["id"])
-            if key not in seen and not s.get("managed"):
-                seen.add(key)
+            if s.key not in seen and not s.managed:
+                seen.add(s.key)
                 plan.append(s)
     return plan, [s["boot"] for s in sources]
 
 
-def write_restore_script(plan: list[dict], sources: list[str], warnings: list[str]) -> None:
-    host = os.uname().nodename
+def write_restore_script(plan: list[Session], sources: list[str], warnings: list[str]) -> None:
     lines = [
         "#!/bin/sh",
-        f"# Generated by {Path(__file__).resolve()} on {host}, {time.strftime('%Y-%m-%d %H:%M:%S')}.",
+        f"# Generated by {Path(__file__).resolve()} on {os.uname().nodename}, {time.strftime('%Y-%m-%d %H:%M:%S')}.",
         "# Reopens these sessions; any that are already open are skipped. Flags:",
         "# --dry-run shows what would happen, --force ignores the 2-minute guard",
         "# against reopening a session that was just launched.",
     ]
-    lines += [f"#   {s['tool']:6} {s['title'] or s['id']}\n#     {s['command']}" for s in plan]
+    lines += [f"#   {s.tool:6} {s.title or s.id}\n#     {s.command}" for s in plan]
     lines += [f"# warning: {w}" for w in warnings]
     if not plan:
         lines.append("#   (no sessions recorded)")
     lines += [
         f"exec /usr/bin/python3 -I -B {shlex.quote(str(Path(__file__).resolve()))} "
         f"--apply {shlex.quote(','.join(sources) or '-')} \"$@\" <<'SESSIONS'",
-        *(json.dumps(s, sort_keys=True) for s in plan),
+        *(json.dumps(asdict(s), sort_keys=True) for s in plan),
         "SESSIONS",
         "",
     ]
     _write_private(RESTORE_SCRIPT, "\n".join(lines), 0o700)
 
 
-def regenerate(warnings: list[str] | None = None) -> list[dict]:
-    plan, sources = restore_plan(boot_id(), boot_snapshots(), _read_json(CONSUMED, []))
-    if warnings is None:
-        warnings = next((s.get("warnings", []) for s in boot_snapshots() if s["boot"] == boot_id()), [])
+def regenerate() -> list[Session]:
+    """Rewrite the restore script from the saved snapshots (lock held)."""
+    current, snaps = boot_id(), boot_snapshots()
+    plan, sources = restore_plan(current, snaps, _read_json(CONSUMED, []))
+    warnings = next((s.get("warnings", []) for s in snaps if s["boot"] == current), [])
     write_restore_script(plan, sources, warnings)
     return plan
 
 
 def snapshot(quiet: bool) -> int:
-    with StateLock(wait=False) as held:
-        if held is None:
+    with state_lock(wait=False) as locked:
+        if not locked:
             return 0  # a restore is running; the next minute catches up
         sessions, warnings = live_sessions()
         boot = boot_id()
-        _write_private(BOOTS / f"{boot}.json", json.dumps(
-            {"boot": boot, "taken_at": time.time(), "sessions": sessions, "warnings": warnings}, indent=1))
+        _write_private(BOOTS / f"{boot}.json", json.dumps({
+            "boot": boot, "taken_at": time.time(),
+            "sessions": [asdict(s) for s in sessions], "warnings": warnings}, indent=1))
         for old in sorted(BOOTS.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[KEEP_BOOTS:]:
             old.unlink()
-        plan = regenerate(warnings)
+        plan = regenerate()
     if not quiet:
         print(f"Recorded {len(sessions)} open session(s); {len(plan)} in {RESTORE_SCRIPT}")
         for w in warnings:
@@ -503,10 +510,10 @@ def snapshot(quiet: bool) -> int:
 
 # ---------------------------------------------------------------- restore
 
-def _session_exists(s: dict) -> bool:
-    if s["tool"] == "claude":
-        return any(CLAUDE_PROJECTS.glob(f"*/{s['id']}.jsonl"))
-    return any((CODEX_HOME / "sessions").glob(f"*/*/*/rollout-*-{s['id']}.jsonl"))
+def _session_exists(s: Session) -> bool:
+    if s.tool == CLAUDE:
+        return any(CLAUDE_PROJECTS.glob(f"*/{s.id}.jsonl"))
+    return any((CODEX_HOME / "sessions").glob(f"*/*/*/rollout-*-{s.id}.jsonl"))
 
 
 def _switchboard_kept() -> set:
@@ -514,21 +521,21 @@ def _switchboard_kept() -> set:
     return {sid for sid, e in entries.items() if isinstance(e, dict) and e.get("enabled")}
 
 
-def choose(plan: list[dict], live: list[dict], launched: dict, force: bool, now: float) -> tuple[list[dict], list[str]]:
+def choose(plan: list[Session], live: list[Session], launched: dict, force: bool,
+           now: float) -> tuple[list[Session], list[str]]:
     """Split the plan into sessions to open and reasons for skipping the rest."""
-    open_now = {(s["tool"], s["id"]) for s in live}
+    open_now = {s.key for s in live}
     kept = _switchboard_kept()
     todo, skipped = [], []
     for s in plan:
-        key, label = (s["tool"], s["id"]), f"{s['tool']} {s['title'] or s['id']}"
-        if key in open_now:
-            skipped.append(f"{label}: already open")
-        elif s["id"] in kept:
-            skipped.append(f"{label}: kept running by llm-switchboard")
-        elif not force and now - launched.get(f"{s['tool']}:{s['id']}", 0) < LAUNCH_GRACE_S:
-            skipped.append(f"{label}: launched under {LAUNCH_GRACE_S}s ago (--force to reopen)")
+        if s.key in open_now:
+            skipped.append(f"{s.label}: already open")
+        elif s.id in kept:
+            skipped.append(f"{s.label}: kept running by llm-switchboard")
+        elif not force and now - launched.get(s.key, 0) < LAUNCH_GRACE_S:
+            skipped.append(f"{s.label}: launched under {LAUNCH_GRACE_S}s ago (--force to reopen)")
         elif not _session_exists(s):
-            skipped.append(f"{label}: transcript not found")
+            skipped.append(f"{s.label}: transcript not found")
         else:
             todo.append(s)
     return todo, skipped
@@ -555,28 +562,25 @@ end run
 """
 
 
-def open_terminals(sessions: list[dict]) -> str:
-    """Start each session's command in its own terminal; returns a hint."""
+def open_terminals(sessions: list[Session]) -> str:
+    """Start each session's command in its own tab or window; returns a hint."""
     if IS_MAC:
-        _run(["/usr/bin/osascript", "-e", ITERM_SCRIPT, *(s["command"] for s in sessions)])
-        return "Opened in a new iTerm window."
-    have = _run(["tmux", "has-session", "-t", f"={TMUX_SESSION}"], check=False).returncode == 0
+        _run(["/usr/bin/osascript", "-e", ITERM_SCRIPT, *(s.command for s in sessions)])
+        return "Opened as tabs of a new iTerm window."
     for s in sessions:
-        name = (s["title"] or s["id"][:8])[:24]
-        if have:
-            cmd = ["tmux", "new-window", "-d", "-t", f"={TMUX_SESSION}:", "-n", name, "-c", s["cwd"], "-P", "-F", "#{pane_id}"]
-        else:
-            cmd = ["tmux", "new-session", "-d", "-s", TMUX_SESSION, "-n", name, "-c", s["cwd"], "-P", "-F", "#{pane_id}"]
-            have = True
-        pane = _run(cmd).stdout.strip()
-        _run(["tmux", "send-keys", "-t", pane, "-l", s["command"]])
+        exists = _run(["tmux", "has-session", "-t", f"={TMUX_SESSION}"], check=False).returncode == 0
+        where = ["new-window", "-d", "-t", f"={TMUX_SESSION}:"] if exists else ["new-session", "-d", "-s", TMUX_SESSION]
+        name = (s.title or s.id[:8])[:24]
+        pane = _run(["tmux", *where, "-n", name, "-c", s.cwd, "-P", "-F", "#{pane_id}"]).stdout.strip()
+        _run(["tmux", "send-keys", "-t", pane, "-l", s.command])
         _run(["tmux", "send-keys", "-t", pane, "Enter"])
     return f"Attach with: tmux attach -t {TMUX_SESSION}"
 
 
 def apply(sources: str, dry_run: bool, force: bool) -> int:
-    plan = [json.loads(line) for line in sys.stdin if line.strip()]
-    with StateLock():
+    """Reopen the sessions the generated restore script feeds on stdin."""
+    plan = [Session.from_json(json.loads(line)) for line in sys.stdin if line.strip()]
+    with state_lock():
         live, _ = live_sessions()
         now = time.time()
         launched = {k: t for k, t in _read_json(LAUNCHED, {}).items() if now - t < LAUNCH_GRACE_S}
@@ -584,22 +588,19 @@ def apply(sources: str, dry_run: bool, force: bool) -> int:
         for line in skipped:
             print(f"skip  {line}")
         for s in todo:
-            print(f"{'would open' if dry_run else 'open'}  {s['tool']} {s['title'] or s['id']}\n      {s['command']}")
+            print(f"{'would open' if dry_run else 'open'}  {s.label}\n      {s.command}")
         if dry_run:
             return 0
         if todo:
-            hint = open_terminals(todo)
-            launched.update({f"{s['tool']}:{s['id']}": now for s in todo})
-            print(hint)
-        elif not plan:
-            print("No sessions recorded. Turn on recording with: llmrestore --cron on")
+            # Recorded first, so a launch that fails part-way can't be doubled
+            # by an immediate rerun before its sessions register.
+            _write_private(LAUNCHED, json.dumps({**launched, **{s.key: now for s in todo}}))
+            print(open_terminals(todo))
         else:
-            print("Nothing to reopen.")
-        _write_private(LAUNCHED, json.dumps(launched))
+            print("Nothing to reopen." if plan else "No sessions recorded. Turn on recording with: llmrestore --cron on")
         # The previous boot's list has been restored: drop it from later runs.
-        current = boot_id()
         consumed = _read_json(CONSUMED, [])
-        consumed += [b for b in sources.split(",") if b not in ("-", current) and b not in consumed]
+        consumed += [b for b in sources.split(",") if b not in ("-", boot_id(), *consumed)]
         _write_private(CONSUMED, json.dumps(consumed[-20:]))
         regenerate()
     return 0
@@ -607,8 +608,8 @@ def apply(sources: str, dry_run: bool, force: bool) -> int:
 
 def run_restore(dry_run: bool, force: bool) -> int:
     if not RESTORE_SCRIPT.exists():
-        with StateLock():
-            regenerate([])
+        with state_lock():
+            regenerate()
     args = [str(RESTORE_SCRIPT)] + (["--dry-run"] if dry_run else []) + (["--force"] if force else [])
     os.execv(str(RESTORE_SCRIPT), args)
 
@@ -641,22 +642,20 @@ def cron(state: str | None) -> int:
     else:
         rest, installed = lines, []
     if state is not None:
-        new = rest + (cron_block() if state == "on" else [])
-        if new != lines:
-            STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
-            subprocess.run(["crontab", "-"], input="\n".join(new) + "\n", text=True, check=True)
         installed = cron_block() if state == "on" else []
-        if state == "on":
+        if rest + installed != lines:
+            STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
+            subprocess.run(["crontab", "-"], input="\n".join(rest + installed) + "\n", text=True, check=True)
+        if installed:
             snapshot(quiet=True)
     print(f"Snapshot cron: {'ON (every minute)' if installed else 'OFF'}")
     if installed and installed != cron_block():
         print("  (installed line differs from this script's; run --cron on to update it)")
     snaps = boot_snapshots()
     if snaps:
-        s = snaps[0]
-        print(f"Last snapshot: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(s['taken_at']))}, "
-              f"{len(s['sessions'])} session(s) open")
-    plan, sources = restore_plan(boot_id(), snaps, _read_json(CONSUMED, []))
+        print(f"Last snapshot: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(snaps[0]['taken_at']))}, "
+              f"{len(snaps[0]['sessions'])} session(s) open")
+    plan, _ = restore_plan(boot_id(), snaps, _read_json(CONSUMED, []))
     print(f"Restore list: {len(plan)} session(s) in {RESTORE_SCRIPT}")
     if CRON_LOG.exists() and CRON_LOG.stat().st_size:
         print(f"Errors were logged to {CRON_LOG}")
