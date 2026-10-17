@@ -38,7 +38,7 @@ def parser():
         if name == 'notes':
             command.add_argument('--labels-only', action='store_true')
     repair = commands.add_parser('repair', help='targeted recovery; persistence recovery restarts BTT')
-    repair.add_argument('target', choices=('rps', 'persistence', 'sizes', 'paths', 'actions', 'dependencies'))
+    repair.add_argument('target', choices=('rps', 'persistence', 'sizes', 'paths', 'actions', 'dependencies', 'text'))
     repair.add_argument('--apply', action='store_true')
     repair.add_argument('--with-escape', action='store_true', help='RPS repair only')
     repair.add_argument('--full-height-dropdowns', action='store_true', help='persistence repair only')
@@ -73,6 +73,8 @@ def command_for(args):
             raise ValueError('--with-escape is only valid for repair rps')
         if args.full_height_dropdowns and args.target != 'persistence':
             raise ValueError('--full-height-dropdowns is only valid for repair persistence')
+        if args.target == 'text':
+            return python('repair_text_transforms.py', *(['--apply'] if args.apply else ['--inspect']))
         if args.target == 'paths':
             return python('repair_script_paths.py', *(['--apply'] if args.apply else ['--inspect']))
         if args.target == 'actions':

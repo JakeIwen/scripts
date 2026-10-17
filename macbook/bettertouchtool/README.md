@@ -34,6 +34,7 @@ Apple Events access is sandboxed. `inspect` and `backup` need no Apple Events.
 | `repair paths` | Repair reviewed moved-script paths in active floating-menu actions and named triggers; `--apply` changes command fields only. |
 | `repair actions` | Recover empty Media buttons from prior exports; `--apply` backs up, adds individual actions, and **restarts BTT to verify persistence**. |
 | `repair dependencies` | Preview missing named dependencies; `--apply` copies unambiguous simple dependencies without enabling old presets, then verifies after restart. |
+| `repair text` | Preview selection-only text transforms; `--apply` uses BTT's local socket, backs up, disables the old copy/delay actions, and replaces the paste actions. |
 | `repair persistence` | Targeted speaker/Notes recovery; **restarts BTT when applied**. |
 | `restore-sizes BACKUP.json --apply` | Guarded restoration of a sizing repair's prior values only. |
 
@@ -235,6 +236,75 @@ identities. Recreate venvs rather than moving them.
 ### Sources
 
 - `btt.py`: maintained CLI; fixed argument-list dispatch, no shell interpolation.
+- `repair_text_transforms.py/.js`: guarded installer for the nine existing text
+  transform buttons. `btt_socket.js` calls BTT's bundled CLI through its local
+  socket, avoiding Apple Events for configuration changes. Enable Command Line /
+  Socket Server once in BTT's scripting settings and restart BTT before applying.
+  The socket is restricted to the owning user; no network webserver is needed.
+- `text_selection.js`: runtime Accessibility adapter, executed inside BTT via
+  `runJXA`. It reads the focused control's selected text/range, checks that the
+  selection is writable and unchanged. Native editors use `AXSelectedText`; Signal and Firefox
+  delegates replacement to `text_menu_paste.js`. Unsupported controls or missing
+  selections stop with a notification. After replacement it selects the result at the original
+  position, using UTF-16 length for macOS text ranges. If the app refuses reselection,
+  the notification explicitly says the text was already transformed.
+  Each button has a readable entry script supplying its transform name to the shared
+  runtime, without a separate named trigger or shared mutable parameter variable.
+  `BTTActionJSRunInSeparateContext` isolates each entry's execution so BTT cannot
+  reuse another button's same-named function from its shared JavaScript context.
+  Electron editors such as Signal expose their text controls only after accessibility
+  support is enabled. The handler requests the focused app's documented
+  `AXManualAccessibility` flag when available and disabled, then allows up to half a
+  second for its editor tree to appear. It aborts if the active app changes during
+  that wait. Native editors without the flag keep the immediate path. This uses
+  [Electron's accessibility interface](https://www.electronjs.org/docs/latest/tutorial/accessibility),
+  without copying text, sending shortcuts, or touching message-send controls.
+  Runtime source is loaded on each use, so subsequent source fixes do not need
+  another menu installation.
+- `text_menu_paste.js`: Signal/Firefox's replacement adapter uses the unique native Paste
+  menu item (Cmd-V equivalent) through Accessibility, never simulated keypresses.
+  It preserves every readable clipboard item/format, marks transformed text transient
+  and concealed, limits it to the current host, and restores the clipboard after
+  confirmed insertion. A newer user copy is preserved instead of overwritten.
+  Selection, focus and clipboard content are rechecked before the single paste;
+  the resulting draft must match the exact expected edit before success is reported.
+  It then restores the transformed selection. No Copy or message-send action runs.
+  `tests/menu_paste.test.cjs` covers restoration, concurrent copies, menu refusal,
+  unverified writes and asynchronous draft confirmation. With `BTT_LIVE_TESTS=1`,
+  it also exercises the real Cocoa bridge on a disposable named pasteboard; that
+  opt-in test never accesses the general clipboard or user text.
+  Firefox bypasses `AXSelectedText` because its
+  [setter](https://github.com/mozilla-firefox/firefox/blob/main/accessible/mac/mozTextAccessible.mm)
+  passes a selection length to `DeleteText`'s end-offset argument, which can delete
+  text outside the selection. The menu route checks the complete expected value and
+  retains the selection for consecutive transforms.
+- `signal_text_diagnostic.js`: temporary Media > Tools > Signal Diagnostic button's
+  target-app runner. It requests Signal activation and waits up to 30 seconds for a stable draft selection,
+  optionally attempts the selected transform, then returns to BTT with a detailed
+  Script Result. It uses live AX keyboard focus rather than cached workspace state;
+  switching to Signal manually also works. Its inline options control the timeout and inspect-only
+  mode. Reports include offsets, lengths and errors, never draft text, and are saved
+  privately to `.local/signal-diagnostic-last.json`. The returned Script Result
+  preserves the primary error even if returning focus or saving the report fails;
+  `reportSaved: false` means the visible Script Result must be copied instead.
+- `lib/text_transforms.js`: pure transform and selection-replacement policy.
+  Lower/upper case preserve whitespace; snake/kebab/camel run per line through
+  the existing `~/dev/case-anything/dist/cjs/index.cjs`. Base64 uses UTF-8; URI
+  conversion retains `encodeURI`/`decodeURI` semantics. Decode errors leave the
+  selection untouched. Replacement is plain text and app support/undo behavior
+  must be checked in the destination app. Tests are in
+  `tests/text_transforms.test.cjs` (`node --test` from this directory).
+  `tests/text_transform_cases.cjs` shares examples with the explicit live smoke:
+  `node tests/smoke_text_transforms.cjs --run`. That smoke creates temporary named
+  triggers, updates their stored actions, checks all nine transforms in alternating
+  order with synthetic text, then removes its triggers. It never edits user drafts
+  and is not part of automatic test discovery. Signal/Notes editing still needs
+  validation in the actual destination app.
+  Repair backups live privately under this directory's ignored `.local/`.
+  For existing Core JS actions, persist `BTTAppleScriptString` in
+  `BTTAdditionalActionData`. BTT's API exports that field as `BTTScriptString`,
+  but writing the exported name can leave the editor empty and the saved action
+  inert. Disk verification checks the executable field without alias normalization.
 - `btt_common.py` / `btt_common.js`: shared read-only database checks, private
   verified snapshots/exports, and canonical comparisons. Importing them never
   sends BTT actions, changes configuration, or restarts an app.

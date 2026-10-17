@@ -68,6 +68,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   owns private atomic state. Never promote audit output into the known-good
   pointer automatically. Checkpoint integration fixtures live in
   `macbook/tests/btt_guard_fixtures.py`.
+  `repair_text_transforms.py/.js` owns the guarded text-transform installer;
+  `text_selection.js` owns AX selection handling and `text_menu_paste.js` owns
+  clipboard-preserving native Paste for editors with broken AX replacement.
+  `signal_text_diagnostic.js` owns the temporary Signal diagnostic button's runner.
 - `shared/`: code imported or deployed on more than one host.
 - Dashboard Sonos alarms live in `pi/apps/van_dashboard/sonos_alarms.py`, with
   HTTP routes in `routes/sonos_alarms.py` and React controls in `features/sonos/`.
