@@ -88,13 +88,13 @@ const PROJECTS: HostedProject[] = [
   },
   {
     id: 'stale-project',
-    services: [],
-    name: 'Offline custom app',
-    description: 'No longer reported.',
-    host: PROJECT_HOST.CUSTOM,
-    links: [{ kind: PROJECT_LINK_KIND.WEB, label: 'Web', url: 'https://example.com/' }],
+    services: [{ key: 'pi:stale.service', live: false }],
+    name: 'Offline app',
+    description: 'No longer serves a page.',
+    host: PROJECT_HOST.PI,
+    links: [{ kind: PROJECT_LINK_KIND.LAN, label: 'LAN', url: 'http://vanpi.lan:19009/' }],
     status: PROJECT_STATUS.LISTED,
-    source: PROJECT_SOURCE.MANUAL,
+    source: PROJECT_SOURCE.SCANNED,
     live: false,
     first_seen: null,
     last_seen: null,
@@ -142,7 +142,7 @@ function mockUpdates() {
 }
 
 describe('ProjectDirectory', () => {
-  it('renders new, listed, hidden, mixed-link, and stale projects', async () => {
+  it('renders new, listed, hidden, and mixed-link projects but not offline ones', async () => {
     renderDirectory();
 
     expect(await screen.findByRole('heading', { name: 'New' })).toBeInTheDocument();
@@ -155,7 +155,7 @@ describe('ProjectDirectory', () => {
     expect(within(listedRow!).getByText('TS')).toBeInTheDocument();
     expect(screen.getByText('Vanpi')).toBeInTheDocument();
     expect(screen.getByText('lionfeather.dev')).toBeInTheDocument();
-    expect(screen.getByText('offline').closest('li')).toHaveClass('project-directory__row--stale');
+    expect(screen.queryByText('Offline app')).not.toBeInTheDocument();
   });
 
   it('keeps, hides, and unhides projects with full-list replacements', async () => {

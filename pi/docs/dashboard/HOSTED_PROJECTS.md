@@ -55,8 +55,9 @@ key, `hosted_projects_schema`, is the integer schema version (currently 3).
   entries stay in the store so a rescan never re-proposes them.
 - `source`: `scanned` or `manual` (form submissions and the one-time seed).
 - `live`: at least one of the entry's services was in the last report from
-  its host (always `true` for entries without services). `false` means stale;
-  the sheet dims the row instead of deleting it.
+  its host, which means it served a web page (see Scanners); always `true` for
+  entries without services. The sheet shows only live entries; the rest stay
+  in the store and reappear when they serve again.
 - `first_seen`, `last_seen`: scan timestamps (UTC ISO 8601, `Z` suffix);
   `null` for entries no scan has claimed. A report that changes nothing
   writes nothing, so `last_seen` is the last scan that changed the entry (a
@@ -195,6 +196,15 @@ python3 -P -m pi.apps.van_dashboard.hosted_project_scan --host mac --host web --
 0 when the post succeeded or `--print` ran, 1 when a scan failed, 2 when the
 dashboard refused or was unreachable. Each run logs one summary line.
 
+Every scanner reports only listeners that serve a web page: a plain `GET` of
+the candidate URL, following redirects as a browser would, must end in HTTP
+200 within 5 seconds (no proxy, `User-Agent: hosted-project-scan`). The scan
+host probes its own sockets at their bound address (`127.0.0.1` for a
+wildcard bind), so the probe reaches services bound only to the LAN or
+Tailscale address. Anything else (404, 403, a non-HTTP port, a timeout)
+leaves the listener out, and an entry already in the store goes stale.
+Entries without services (form entries, unclaimed seeds) are never probed.
+
 - **pi**: running systemd services (`systemctl list-units --type=service
   --state=running`), each unit's `MainPID`, `Description`, and listening TCP
   sockets from `ss -ltnpH` (`sudo -n ss` first so other users' services such
@@ -205,20 +215,23 @@ dashboard refused or was unreachable. Each run logs one summary line.
   200 characters. Links: `lan` `http://vanpi.lan:<port>/` and `ts`
   `http://<tailscale ip>:<port>/`, the IP from `tailscale ip -4` with
   `100.82.91.76` as the fallback. Multiple ports on one unit become one entry
-  using the lowest port bound to a wildcard address, else the lowest port
-  (Home Assistant also listens on 1400 and 40000 for integrations; its UI is
-  the wildcard 8123). The dashboard's own 8788 is a normal entry.
+  using the first port that serves a page, trying wildcard-bound ports
+  before interface-bound ones and lower ports first (Home Assistant also
+  listens on 1400 and 40000 for integrations; its UI is the wildcard 8123).
+  The dashboard's own 8788 is a normal entry.
 - **mac**: `com.jacobr.*` plists under `/Library/LaunchDaemons` and
   `~/Library/LaunchAgents`; `launchctl print system/<label>` or
   `gui/<uid>/<label>` for the PID; `lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>`
-  for ports. Jobs without a listening port are skipped. Name: label without
+  for ports, the lowest one that serves a page winning. Jobs without one are
+  skipped. Name: label without
   `com.jacobr.`, title case, hyphens to spaces. Description: the
   `description` field of `package.json` in the plist's `WorkingDirectory`
   when present, else empty. Links: `local` `http://127.0.0.1:<port>/`.
 - **web**: apps in `/Users/jacobr/dev/lionfeather-edge/edge.json`
   (`--edge-config` overrides). Name: app name, title case. Description: the
-  app's `note`, trimmed to 200. Links: `web` `https://<name>.lionfeather.dev/`.
-  `service_port`: the explicit port of the app's `service` URL, omitted when
+  app's `note`, trimmed to 200. Links: `web` `https://<name>.lionfeather.dev/`,
+  which is also the probed URL (an Access login page counts, since the
+  redirect chain ends in 200). `service_port`: the explicit port of the app's `service` URL, omitted when
   the URL has none.
 
 Scanning is deterministic and idempotent: the same machine state produces
@@ -243,6 +256,6 @@ the same report, and reposting a report changes nothing.
 `features/projects/` in the React frontend reads the store only; the static
 catalog is gone. The sheet shows three groups: New (keep, edit, hide),
 listed (edit, hide), and Hidden (collapsed, unhide). Rows carry the host
-label, the description as the link title, and stale rows are dimmed with an
-"offline" marker. Editing is inline: name and description, saved through the
+label and the description as the link title. Entries that are not live are
+left out of every group. Editing is inline: name and description, saved through the
 update endpoint. The "New Hosted Project" form still adds manual entries.

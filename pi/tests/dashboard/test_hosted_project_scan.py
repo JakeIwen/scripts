@@ -2,8 +2,11 @@ import io
 import json
 import os
 import plistlib
+import socket
 import tempfile
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import urllib.error
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
@@ -176,6 +179,84 @@ class WebParsingTests(unittest.TestCase):
         self.assertEqual(ports, {
             "web:bad-port": None, "web:critter": 4329, "web:default-port": None, "web:no-service": None,
         })
+
+
+class ProbeTests(unittest.TestCase):
+    def recording_probe(self, accepted):
+        asked = []
+
+        def probe(url):
+            asked.append(url)
+            return url in accepted
+        return probe, asked
+
+    def test_pi_unit_uses_its_first_port_serving_a_page_at_the_bound_address(self):
+        probe, asked = self.recording_probe({"http://127.0.0.1:9000/", "http://192.168.6.103:1400/"})
+        listeners = {item["key"]: item for item in scan.build_pi_listeners(
+            PI_UNITS, PI_SHOW, PI_SS, "100.82.91.76\n", probe,
+        )}
+        self.assertEqual(sorted(listeners), ["pi:home-assistant.service", "pi:multi-port.service"])
+        self.assertEqual(listeners["pi:home-assistant.service"]["links"][0]["url"], "http://vanpi.lan:1400/")
+        self.assertEqual(listeners["pi:multi-port.service"]["links"][0]["url"], "http://vanpi.lan:9000/")
+        self.assertEqual(asked, [
+            "http://127.0.0.1:8787/",
+            "http://127.0.0.1:8123/", "http://192.168.6.103:1400/",
+            "http://127.0.0.1:8000/", "http://127.0.0.1:9000/",
+        ])
+
+    def test_mac_job_without_a_page_is_skipped_and_probes_reach_its_bind_address(self):
+        jobs = [{"label": "com.jacobr.visual-guides", "domain": "system", "description": ""}]
+        lsof = "p777\nf19\nn*:8792\nf20\nn[::1]:8793\n"
+        probe, asked = self.recording_probe({"http://[::1]:8793/"})
+        listeners = scan.build_mac_listeners(jobs, {"com.jacobr.visual-guides": MAC_LAUNCHCTL}, {777: lsof}, probe)
+        self.assertEqual(asked, ["http://127.0.0.1:8792/", "http://[::1]:8793/"])
+        self.assertEqual(listeners[0]["links"], [{"kind": "local", "url": "http://127.0.0.1:8793/"}])
+        probe, _ = self.recording_probe(set())
+        self.assertEqual(scan.build_mac_listeners(
+            jobs, {"com.jacobr.visual-guides": MAC_LAUNCHCTL}, {777: lsof}, probe,
+        ), [])
+
+    def test_edge_app_without_a_page_is_skipped(self):
+        config = json.dumps({"apps": [{"name": "critter"}, {"name": "fieldwork"}]})
+        probe, asked = self.recording_probe({"https://fieldwork.lionfeather.dev/"})
+        listeners = scan.build_web_listeners(config, probe)
+        self.assertEqual([listener["key"] for listener in listeners], ["web:fieldwork"])
+        self.assertEqual(asked, ["https://critter.lionfeather.dev/", "https://fieldwork.lionfeather.dev/"])
+
+    def test_only_a_final_200_counts_as_a_web_page(self):
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                status, location = {
+                    "/page": (200, None), "/moved": (302, "/page"),
+                    "/missing": (404, None), "/forbidden": (403, None), "/empty": (204, None),
+                }[self.path]
+                self.send_response(status)
+                if location:
+                    self.send_header("Location", location)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.addCleanup(server.server_close)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.shutdown)
+        base = "http://127.0.0.1:{}".format(server.server_address[1])
+        results = {path: scan.serves_web_page(base + path, 2)
+                   for path in ("/page", "/moved", "/missing", "/forbidden", "/empty")}
+        self.assertEqual(results, {
+            "/page": True, "/moved": True, "/missing": False, "/forbidden": False, "/empty": False,
+        })
+        with socket.socket() as unused:
+            unused.bind(("127.0.0.1", 0))
+            closed_port = unused.getsockname()[1]
+        self.assertFalse(scan.serves_web_page("http://127.0.0.1:{}/".format(closed_port), 2))
+        self.assertEqual(scan.probe_host("0.0.0.0"), "127.0.0.1")
+        self.assertEqual(scan.probe_host("::"), "[::1]")
+        self.assertEqual(scan.probe_host("fe80::1%eth0"), "[fe80::1]")
 
 
 class ReportTests(unittest.TestCase):

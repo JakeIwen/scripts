@@ -2,6 +2,7 @@
 
 import argparse
 import glob
+import http.client
 import ipaddress
 import json
 import os
@@ -11,7 +12,7 @@ import re
 import subprocess
 import sys
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -21,6 +22,11 @@ DENIED_PI_PORTS = {22, 53, 139, 445, 1883, 5900}
 DEFAULT_EDGE_CONFIG = "/Users/jacobr/dev/lionfeather-edge/edge.json"
 DEFAULT_TAILSCALE_IP = "100.82.91.76"
 HOST_ORDER = ("pi", "mac", "web")
+PROBE_TIMEOUT = 5.0
+
+# Called with a candidate URL; True when it serves a web page. Builders take
+# None to skip probing, which keeps them pure for tests.
+Probe = Optional[Callable[[str], bool]]
 
 
 class ScanError(RuntimeError):
@@ -124,6 +130,27 @@ def _is_public_bind(address: str) -> bool:
     return not parsed.is_loopback
 
 
+def probe_host(address: str) -> str:
+    """Return the host part of a URL that reaches a socket bound to address."""
+    plain_address = address.split("%", 1)[0]
+    if plain_address in {"*", "0.0.0.0", ""}:
+        return "127.0.0.1"
+    if plain_address == "::":
+        return "[::1]"
+    return "[{}]".format(plain_address) if ":" in plain_address else plain_address
+
+
+def serves_web_page(url: str, timeout: float = PROBE_TIMEOUT) -> bool:
+    """Return whether a plain GET of url ends in HTTP 200, following redirects as a browser would."""
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    request = urllib.request.Request(url, headers={"User-Agent": "hosted-project-scan"})
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            return response.status == 200
+    except (urllib.error.URLError, OSError, ValueError, http.client.HTTPException):
+        return False
+
+
 def parse_tailscale_ip(output: str) -> str:
     for value in output.split():
         try:
@@ -138,6 +165,7 @@ def build_pi_listeners(
     show_output: str,
     ss_output: str,
     tailscale_output: str,
+    probe: Probe = None,
 ) -> List[Dict[str, Any]]:
     units = parse_systemctl_units(units_output)
     services = parse_systemctl_show(show_output)
@@ -154,15 +182,18 @@ def build_pi_listeners(
             and _is_public_bind(socket["address"])
             and socket["port"] not in DENIED_PI_PORTS
         ]
-        # Interface-specific callback sockets should not outrank a public wildcard listener.
-        wildcard_ports = {
-            socket["port"] for socket in service_sockets
-            if _is_wildcard_bind(socket["address"])
-        }
-        ports = wildcard_ports or {socket["port"] for socket in service_sockets}
-        if not ports:
+        # Interface-specific callback sockets should not outrank a public
+        # wildcard listener; the first candidate that serves a page wins.
+        candidates = sorted(
+            service_sockets,
+            key=lambda socket: (not _is_wildcard_bind(socket["address"]), socket["port"]),
+        )
+        port = next((
+            socket["port"] for socket in candidates
+            if probe is None or probe("http://{}:{}/".format(probe_host(socket["address"]), socket["port"]))
+        ), None)
+        if port is None:
             continue
-        port = min(ports)
         listeners.append({
             "key": "pi:" + unit,
             "host": "pi",
@@ -181,8 +212,8 @@ def parse_launchctl_pid(output: str) -> Optional[int]:
     return int(match.group(1)) if match else None
 
 
-def parse_lsof_ports(output: str) -> List[int]:
-    ports = set()
+def parse_lsof_sockets(output: str) -> List[Tuple[str, int]]:
+    sockets = set()
     for line in output.splitlines():
         candidate = line.strip()
         if candidate.startswith("n"):
@@ -192,8 +223,8 @@ def parse_lsof_ports(output: str) -> List[int]:
         else:
             endpoint = None
         if endpoint is not None and 0 < endpoint[1] <= 65535:
-            ports.add(endpoint[1])
-    return sorted(ports)
+            sockets.add(endpoint)
+    return sorted(sockets, key=lambda socket: (socket[1], socket[0]))
 
 
 def read_package_description(working_directory: Any) -> str:
@@ -242,6 +273,7 @@ def build_mac_listeners(
     jobs: Iterable[Mapping[str, Any]],
     launchctl_outputs: Mapping[str, str],
     lsof_outputs: Mapping[int, str],
+    probe: Probe = None,
 ) -> List[Dict[str, Any]]:
     listeners = []
     for job in sorted(jobs, key=lambda item: str(item["label"])):
@@ -249,10 +281,12 @@ def build_mac_listeners(
         pid = parse_launchctl_pid(launchctl_outputs.get(label, ""))
         if pid is None:
             continue
-        ports = parse_lsof_ports(lsof_outputs.get(pid, ""))
-        if not ports:
+        port = next((
+            port for address, port in parse_lsof_sockets(lsof_outputs.get(pid, ""))
+            if probe is None or probe("http://{}:{}/".format(probe_host(address), port))
+        ), None)
+        if port is None:
             continue
-        port = ports[0]
         listeners.append({
             "key": "mac:" + label,
             "host": "mac",
@@ -273,7 +307,7 @@ def edge_service_port(service: Any) -> Optional[int]:
         return None
 
 
-def build_web_listeners(config_output: str) -> List[Dict[str, Any]]:
+def build_web_listeners(config_output: str, probe: Probe = None) -> List[Dict[str, Any]]:
     try:
         config = json.loads(config_output)
     except (TypeError, ValueError) as exc:
@@ -286,12 +320,15 @@ def build_web_listeners(config_output: str) -> List[Dict[str, Any]]:
         if not isinstance(app, dict) or not isinstance(app.get("name"), str) or not app["name"].strip():
             raise ScanError("edge config contains an invalid app")
         app_name = clean_text(app["name"], 253)
+        url = "https://{}.lionfeather.dev/".format(app_name)
+        if probe is not None and not probe(url):
+            continue
         listener = {
             "key": "web:" + app_name,
             "host": "web",
             "name": title_name(app_name),
             "description": clean_text(app.get("note", ""), 200),
-            "links": [{"kind": "web", "url": "https://{}.lionfeather.dev/".format(app_name)}],
+            "links": [{"kind": "web", "url": url}],
         }
         # Edge apps keep the port they use on the Mac, so the dashboard can
         # file the public route under the Mac app's row.
@@ -320,6 +357,10 @@ def _require_success(result: subprocess.CompletedProcess, description: str) -> s
     return result.stdout
 
 
+def web_probe(timeout: float) -> Callable[[str], bool]:
+    return lambda url: serves_web_page(url, min(timeout, PROBE_TIMEOUT))
+
+
 def collect_pi(timeout: float) -> List[Dict[str, Any]]:
     unit_result = run_command(
         ["systemctl", "list-units", "--type=service", "--state=running", "--no-legend", "--plain"],
@@ -340,7 +381,7 @@ def collect_pi(timeout: float) -> List[Dict[str, Any]]:
     ss_output = _require_success(ss_result, "ss")
     tailscale_result = run_command(["tailscale", "ip", "-4"], timeout)
     tailscale_output = tailscale_result.stdout if tailscale_result.returncode == 0 else ""
-    return build_pi_listeners(units_output, show_output, ss_output, tailscale_output)
+    return build_pi_listeners(units_output, show_output, ss_output, tailscale_output, web_probe(timeout))
 
 
 def collect_mac(timeout: float) -> List[Dict[str, Any]]:
@@ -364,13 +405,13 @@ def collect_mac(timeout: float) -> List[Dict[str, Any]]:
         if lsof_result.returncode not in {0, 1}:
             _require_success(lsof_result, "lsof for {}".format(label))
         lsof_outputs[pid] = lsof_result.stdout
-    return build_mac_listeners(jobs, launchctl_outputs, lsof_outputs)
+    return build_mac_listeners(jobs, launchctl_outputs, lsof_outputs, web_probe(timeout))
 
 
-def collect_web(edge_config: str) -> List[Dict[str, Any]]:
+def collect_web(edge_config: str, timeout: float) -> List[Dict[str, Any]]:
     try:
         with open(edge_config, encoding="utf-8") as handle:
-            return build_web_listeners(handle.read())
+            return build_web_listeners(handle.read(), web_probe(timeout))
     except OSError as exc:
         raise ScanError("cannot read edge config: {}".format(exc)) from exc
 
@@ -412,7 +453,7 @@ def scan_hosts(hosts: Iterable[str], edge_config: str, timeout: float) -> List[D
             elif host == "mac":
                 listeners.extend(collect_mac(timeout))
             else:
-                listeners.extend(collect_web(edge_config))
+                listeners.extend(collect_web(edge_config, timeout))
         except (OSError, ValueError, subprocess.SubprocessError) as exc:
             raise ScanError("{} scan failed: {}".format(host, exc)) from exc
     return listeners

@@ -8,9 +8,12 @@ import './projects.css';
 export function ProjectDirectory({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { projects, loading, updating, error, updateProject, replaceProjects } =
     useHostedProjects(open);
-  const newProjects = projects.filter((project) => project.status === PROJECT_STATUS.NEW);
-  const listedProjects = projects.filter((project) => project.status === PROJECT_STATUS.LISTED);
-  const hiddenProjects = projects.filter((project) => project.status === PROJECT_STATUS.HIDDEN);
+  // Only projects whose last scan got a web page (HTTP 200) are shown; the
+  // store keeps the rest so they return when they serve again.
+  const shown = projects.filter((project) => project.live);
+  const newProjects = shown.filter((project) => project.status === PROJECT_STATUS.NEW);
+  const listedProjects = shown.filter((project) => project.status === PROJECT_STATUS.LISTED);
+  const hiddenProjects = shown.filter((project) => project.status === PROJECT_STATUS.HIDDEN);
   const rowProps = { disabled: loading || updating, onUpdate: updateProject };
 
   return (
@@ -35,7 +38,7 @@ export function ProjectDirectory({ open, onClose }: { open: boolean; onClose: ()
         </details>
       )}
       <p className="project-directory__legend">
-        LAN: van network · TS: Tailscale · This Mac: local apps · Dimmed: offline
+        LAN: van network · TS: Tailscale · This Mac: local apps
       </p>
       {error && (
         <p className="error-message" role="alert">
