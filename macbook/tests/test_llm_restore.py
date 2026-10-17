@@ -2,10 +2,12 @@
 
 from dataclasses import asdict
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -165,6 +167,16 @@ class Choose(unittest.TestCase):
         self.assertEqual(len(todo), 1)
 
 
+class PiTabs(unittest.TestCase):
+    def test_command_survives_local_and_remote_shell_parsing(self):
+        command = """cd -- '/home/pi/it'"'"'s' && command claude --settings '{"env":{"A":"b c"}}' --resume x"""
+        local = shlex.split(lr.pi_tab_command(command))
+        self.assertEqual(local[:3], ["ssh", "-t", lr.PI_HOST])
+        remote = shlex.split(local[3])
+        self.assertEqual(remote[:2], ["bash", "-lic"])
+        self.assertEqual(remote[2], command + "; exec bash -il")
+
+
 class State(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -181,6 +193,27 @@ class State(unittest.TestCase):
             self.assertEqual((outer, inner), (True, False))
         with lr.state_lock(wait=False) as again:
             self.assertTrue(again)
+
+    def test_emit_prints_sessions_to_open_and_reports_on_stderr(self):
+        plan = [session("claude", A), session("claude", B)]
+        stdin = "\n".join(json.dumps(lr.asdict(s)) for s in plan) + "\n"
+        out, err = io.StringIO(), io.StringIO()
+        with patch.object(lr, "live_sessions", return_value=([session("claude", A)], [])), \
+                patch.object(lr, "_session_exists", return_value=True), \
+                patch.object(lr, "_switchboard_kept", return_value=set()), \
+                patch.object(lr, "LAUNCHED", self.root / "launched.json"), \
+                patch.object(lr, "CONSUMED", self.root / "consumed.json"), \
+                patch.object(lr, "BOOTS", self.root / "boots"), \
+                patch.object(lr, "boot_id", return_value="now"), \
+                patch.object(lr, "open_terminals") as opened, \
+                patch("sys.stdin", io.StringIO(stdin)), patch("sys.stdout", out), patch("sys.stderr", err):
+            lr.apply("prev", dry_run=False, force=False, emit=True)
+        opened.assert_not_called()
+        self.assertEqual([lr.Session.from_json(json.loads(line)) for line in out.getvalue().splitlines()],
+                         [session("claude", B)])
+        self.assertIn("already open", err.getvalue())
+        self.assertIn("claude:" + B, json.loads((self.root / "launched.json").read_text()))
+        self.assertEqual(json.loads((self.root / "consumed.json").read_text()), ["prev"])
 
     def test_script_feeds_its_sessions_back_to_apply(self):
         plan = [session("claude", A, title="it's \"quoted\""), session("codex", B)]

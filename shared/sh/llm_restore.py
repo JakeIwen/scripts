@@ -6,7 +6,8 @@ an executable restore script (~/.local/state/llm-restore/restore) listing the
 command that resumes each one. Running the tool with no flags executes that
 script, which opens each session in a new terminal (tabs of one iTerm window
 on macOS, a tmux session named `llmrestore` elsewhere) unless it is already
-open.
+open. On the Mac, `--pi` reopens the Pi's sessions instead, as iTerm tabs
+that SSH to the Pi: the Pi decides what to open, the Mac opens the tabs.
 
 A boot's snapshot keeps each session for 30 minutes after it was last seen
 open, so the terminals closing during shutdown (or by hand beforehand) don't
@@ -49,6 +50,9 @@ CODEX_HOME = HOME / ".codex"
 SWITCHBOARD_SESSIONS = HOME / ".config/llm-switchboard/sessions.json"
 SWITCHBOARD_ENV = "LLM_SWITCHBOARD_SESSION"
 TMUX_SESSION = "llmrestore"
+# ssh's config picks the LAN address when the Pi answers there, else Tailscale.
+PI_HOST = os.environ.get("LLM_RESTORE_PI_HOST", "vanpi")
+PI_RESTORE_SCRIPT = "~/.local/state/llm-restore/restore"  # expanded by the Pi's shell
 CRON_BEGIN = "# BEGIN managed llm-restore"
 CRON_END = "# END managed llm-restore"
 KEEP_BOOTS = 5
@@ -584,11 +588,15 @@ end run
 """
 
 
+def open_iterm_tabs(commands: list[str]) -> str:
+    _run(["/usr/bin/osascript", "-e", ITERM_SCRIPT, *commands])
+    return "Opened as tabs of a new iTerm window."
+
+
 def open_terminals(sessions: list[Session]) -> str:
     """Start each session's command in its own tab or window; returns a hint."""
     if IS_MAC:
-        _run(["/usr/bin/osascript", "-e", ITERM_SCRIPT, *(s.command for s in sessions)])
-        return "Opened as tabs of a new iTerm window."
+        return open_iterm_tabs([s.command for s in sessions])
     for s in sessions:
         exists = _run(["tmux", "has-session", "-t", f"={TMUX_SESSION}"], check=False).returncode == 0
         where = ["new-window", "-d", "-t", f"={TMUX_SESSION}:"] if exists else ["new-session", "-d", "-s", TMUX_SESSION]
@@ -599,33 +607,66 @@ def open_terminals(sessions: list[Session]) -> str:
     return f"Attach with: tmux attach -t {TMUX_SESSION}"
 
 
-def apply(sources: str, dry_run: bool, force: bool) -> int:
-    """Reopen the sessions the generated restore script feeds on stdin."""
+def apply(sources: str, dry_run: bool, force: bool, emit: bool) -> int:
+    """Reopen the sessions the generated restore script feeds on stdin.
+
+    With `emit` (used by the Mac's --pi over SSH) the sessions to open are
+    printed as JSON lines instead, and the report goes to stderr.
+    """
     plan = [Session.from_json(json.loads(line)) for line in sys.stdin if line.strip()]
+    report = sys.stderr if emit else sys.stdout
     with state_lock():
         live, _ = live_sessions()
         now = time.time()
         launched = {k: t for k, t in _read_json(LAUNCHED, {}).items() if now - t < LAUNCH_GRACE_S}
         todo, skipped = choose(plan, live, launched, force, now)
         for line in skipped:
-            print(f"skip  {line}")
+            print(f"skip  {line}", file=report)
         for s in todo:
             print(f"{'would open' if dry_run else 'open'}  {s.label}  (last seen {_clock(s.last_seen)})\n"
-                  f"      {s.command}")
+                  f"      {s.command}", file=report)
         if dry_run:
             return 0
         if todo:
             # Recorded first, so a launch that fails part-way can't be doubled
             # by an immediate rerun before its sessions register.
             _write_private(LAUNCHED, json.dumps({**launched, **{s.key: now for s in todo}}))
-            print(open_terminals(todo))
+            if emit:
+                print("\n".join(json.dumps(asdict(s)) for s in todo))
+            else:
+                print(open_terminals(todo))
         else:
-            print("Nothing to reopen." if plan else "No sessions recorded. Turn on recording with: llmrestore --cron on")
+            print("Nothing to reopen." if plan else "No sessions recorded. Turn on recording with: llmrestore --cron on",
+                  file=report)
         # The previous boot's list has been restored: drop it from later runs.
         consumed = _read_json(CONSUMED, [])
         consumed += [b for b in sources.split(",") if b not in ("-", boot_id(), *consumed)]
         _write_private(CONSUMED, json.dumps(consumed[-20:]))
         regenerate()
+    return 0
+
+
+def pi_tab_command(command: str) -> str:
+    """Local shell line that runs a Pi session's command over SSH, leaving a
+    Pi shell open afterwards like the SSH tab it originally ran in."""
+    remote = f"bash -lic {shlex.quote(command + '; exec bash -il')}"
+    return f"ssh -t {shlex.quote(PI_HOST)} {shlex.quote(remote)}"
+
+
+def restore_pi(dry_run: bool, force: bool) -> int:
+    """Ask the Pi which of its sessions to reopen, then open them as iTerm tabs."""
+    if not IS_MAC:
+        raise SystemExit("--pi opens iTerm tabs on the Mac; on the Pi, run llmrestore without it")
+    flags = ["--emit"] + (["--dry-run"] if dry_run else []) + (["--force"] if force else [])
+    # stderr (the Pi's report) passes straight through to this terminal.
+    res = subprocess.run(["/usr/bin/ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", PI_HOST,
+                          " ".join([PI_RESTORE_SCRIPT, *flags])], stdout=subprocess.PIPE, text=True)
+    if res.returncode != 0:
+        print(f"Pi restore failed (ssh {PI_HOST} exited {res.returncode}); nothing opened", file=sys.stderr)
+        return res.returncode
+    sessions = [Session.from_json(json.loads(line)) for line in res.stdout.splitlines() if line.strip()]
+    if sessions:
+        print(open_iterm_tabs([pi_tab_command(s.command) for s in sessions]) + f" (ssh {PI_HOST})")
     return 0
 
 
@@ -695,14 +736,18 @@ def main() -> int:
     ap.add_argument("--quiet", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("-n", "--dry-run", action="store_true", help="show what a restore would open")
     ap.add_argument("--force", action="store_true", help="reopen sessions launched in the last 2 minutes")
+    ap.add_argument("--pi", action="store_true", help="on the Mac: reopen the Pi's sessions as iTerm tabs over SSH")
     ap.add_argument("--apply", metavar="BOOTS", help=argparse.SUPPRESS)  # used by the generated script
+    ap.add_argument("--emit", action="store_true", help=argparse.SUPPRESS)  # used by --pi over SSH
     args = ap.parse_args()
     if args.cron:
         return cron(None if args.cron == "status" else args.cron)
     if args.snapshot:
         return snapshot(args.quiet)
     if args.apply is not None:
-        return apply(args.apply, args.dry_run, args.force)
+        return apply(args.apply, args.dry_run, args.force, args.emit)
+    if args.pi:
+        return restore_pi(args.dry_run, args.force)
     return run_restore(args.dry_run, args.force)
 
 

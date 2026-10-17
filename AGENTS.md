@@ -84,7 +84,8 @@ compare it with this checkout. Deployed files may differ from the repository.
 - `shared/sh/llm_restore.py` (alias `llmrestore` on both hosts; Pi copy at
   `/home/pi/scripts/`) reopens the Claude Code and Codex sessions open before a
   reboot, skipping any already open or kept by llm-switchboard: iTerm tabs on
-  the Mac, tmux session `llmrestore` on the Pi. Its `--cron on|off` owns a
+  the Mac, tmux session `llmrestore` on the Pi; `--pi` on the Mac reopens the
+  Pi's as iTerm tabs over SSH (the Pi chooses them). Its `--cron on|off` owns a
   `managed llm-restore` block in the live user crontab (every-minute snapshot);
   reinstalling a repo crontab file drops it. State and the generated restore
   script live in `~/.local/state/llm-restore/`.
