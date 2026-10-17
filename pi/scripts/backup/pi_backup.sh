@@ -259,10 +259,10 @@ release_backup_lock data borg-repo
 bail_if_driving
 
 # --- 5. bootable clones when due ---
-clone_summary=""
+clone_summary="No scheduled hotspare refresh completed. "
 if acquire_backup_lock job clone; then
   . "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/hotspare_rotation.sh" &&
-    run_hotspare_rotation || log 'hotspare rotation deferred; recovery copies retained'
+    run_hotspare_rotation || log 'hotspare rotation not completed; see preceding status'
   release_backup_lock job clone
 else
   log "another hotspare clone is active; clones deferred"

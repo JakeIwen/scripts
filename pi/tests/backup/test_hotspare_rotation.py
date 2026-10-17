@@ -104,8 +104,18 @@ class RotationDispatchTests(RotationFixture):
 }''')
         self.fixture('LSBLK', '''#!/bin/bash
 [[ ${TEST_LSBLK_ERROR:-} != 1 ]] || exit 1
+if [[ $* == *NAME,MOUNTPOINTS* ]]; then
+  [[ ${TEST_PARTITION_SCAN_ERROR:-} != 1 ]] || exit 1
+  [[ ${TEST_EMPTY_PARTITION_SCAN:-} != 1 ]] || exit 0
+  echo "${@: -1}"
+  if [[ ${TEST_BOOT_MOUNTED:-} == "${@: -1}" ]]; then
+    echo "${@: -1}1 /mnt/boot"
+  fi
+  exit 0
+fi
 [[ ${TEST_SAME_DISK:-} != 1 ]] || { echo same-disk; exit; }
-echo "${@: -1}-disk"
+part=${@: -1}
+echo "${part##*/}-disk"
 ''')
         self.fixture('FINDMNT', '''#!/bin/bash
 [[ ${TEST_MOUNT_ERROR:-} != 1 ]] || exit 2
@@ -169,9 +179,11 @@ run_hotspare_rotation
     def test_discovery_errors_mounted_peer_and_duplicate_disk_all_refuse_writes(self):
         cases = [{'TEST_DISCOVERY_ERROR':'1'}, {'TEST_MOUNT_ERROR':'1'},
                  {'TEST_LSBLK_ERROR':'1'}, {'TEST_SAME_DISK':'1'},
-                 {'TEST_MOUNTED':'/dev/'+LABELS[0]}]
+                 {'TEST_MOUNTED':'/dev/'+LABELS[0]},
+                 {'TEST_BOOT_MOUNTED':'/dev/'+LABELS[0]+'-disk'},
+                 {'TEST_PARTITION_SCAN_ERROR':'1'}, {'TEST_EMPTY_PARTITION_SCAN':'1'}]
         for case in cases:
-            self.assertNotEqual(self.run_rotation(**case).returncode, 0)
+            self.assertNotEqual(self.run_rotation(**case).returncode, 0, case)
         self.assertEqual(self.calls(), [])
 
 

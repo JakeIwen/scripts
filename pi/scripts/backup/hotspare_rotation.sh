@@ -4,7 +4,7 @@ rotation_script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 . "${HOTSPARE_ROTATION_POLICY:-$rotation_script_dir/../disk_policy.sh}" || return 1
 
 hotspare_rotation_devices_ready() {
-  local label part disk mounted status previous_disk=
+  local label part disk mounted status rows device mountpoint previous_disk=
   for label in "$@"; do
     if ! disk_policy_resolve_exact_label "$label" label-only; then
       log "hotspare rotation waiting: cannot safely identify $label; keeping the other card"
@@ -19,6 +19,14 @@ hotspare_rotation_devices_ready() {
       log "hotspare rotation waiting: $label is mounted or mount discovery failed"
       return 1
     fi
+    rows=$("${HOTSPARE_ROTATION_LSBLK:-/usr/bin/lsblk}" -nrpo NAME,MOUNTPOINTS -- "/dev/$disk") || return 1
+    [[ -n "$rows" ]] || return 1
+    while read -r device mountpoint; do
+      if [[ -n "$mountpoint" ]]; then
+        log "hotspare rotation waiting: a partition of $label is mounted"
+        return 1
+      fi
+    done <<< "$rows"
     previous_disk=$disk
   done
 }
