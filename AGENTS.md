@@ -475,6 +475,20 @@ compute before the dashboard package. Dashboard tests require the sibling
 checkout, verified by `pi/tests/dashboard/_van_compute_checkout.py`; they fail
 rather than skip without it.
 
+## Repository test suite
+
+Run `.local/test-venv/bin/python run_tests.py` from the repository root before committing or reporting
+completion. It discovers tracked and unignored new tests, excludes deleted files,
+and runs isolated Python unittest modules per file, Node tests, shell tests,
+Claude mod tests and the dashboard's Vitest suite. It stops at the first failed command and exits nonzero; omitted
+remaining suites are not a pass. Missing interpreters/dependencies are errors.
+Tests needing specific OS features or hardware must state their skip reason.
+Set `BTT_LIVE_TESTS=1` to also enable BTT's opt-in native bridge tests.
+Use an interpreter with Flask and Werkzeug installed (this checkout has an isolated
+`.local/test-venv/bin/python`) and install the dashboard's npm dependencies first.
+`run_tests.py` owns the standalone-script import roots in `PYTHON_IMPORT_ROOTS`;
+extend that registry instead of adding per-test `sys.path` patches.
+
 ## Deployment commits
 
 - After a successful deployment from this repository, commit and push the
