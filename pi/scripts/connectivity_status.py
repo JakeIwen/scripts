@@ -534,8 +534,8 @@ def _failure_detail(result):
     return detail[-300:] if detail else "command failed"
 
 
-def collect_status(command=run_command, wall_clock=time.time):
-    checked_at = int(wall_clock())
+def collect_router(command):
+    """Return mwan3 route state and whether the selected route reaches the internet."""
     router = {
         "reachable": False,
         "mode": None,
@@ -571,7 +571,12 @@ def collect_status(command=run_command, wall_clock=time.time):
                 router["error"] = "mwan3 returned no interface state"
         else:
             router["error"] = _failure_detail(result)
+    return router, internet_online
 
+
+def collect_status(command=run_command, wall_clock=time.time):
+    checked_at = int(wall_clock())
+    router, internet_online = collect_router(command)
     ubnt = {
         "reachable": False,
         "connected": False,
