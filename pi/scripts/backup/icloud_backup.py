@@ -31,6 +31,8 @@ from icloud_progress import ProcessIO, ProgressWatch, RcloneStats, StreamDigest,
 from icloud_status import begin_attempt, save_attempt
 from cloud_backup_control import admit_worker
 import backup_priority as priority
+import cloud_backup_requests
+import backup_settings
 
 CONFIG = Path('/etc/vanpi-icloud-backup.json')
 STATE_DIR = Path('/var/lib/vanpi-icloud-backup')
@@ -96,8 +98,10 @@ def read_json(path, default=None):
         return json.load(f)
 
 
-def load_config(path=CONFIG):
+def load_config(path=CONFIG, apply_preferences=True):
     cfg = read_json(path)
+    if apply_preferences:
+        cfg = backup_settings.cloud_config(cfg, 'pi', native_path=path)
     cfg.setdefault('no_progress_timeout_seconds', 900)
     if not re.fullmatch(r'icloud:[A-Za-z0-9_-]+/vanpi/weekly', cfg['remote']):
         raise ValueError('remote must be a dedicated icloud:<folder>/vanpi/weekly prefix')
@@ -546,7 +550,7 @@ def unmount_if_unused(mount, label):
 
 
 def weekly(cfg, state):
-    if not state.get('pending') and time.time() - state.get('last_success_at', 0) < cfg['interval_days'] * 86400:
+    if not cloud_backup_requests.due(cfg, state, STATE_DIR):
         return 'not due'
     if not credentials_ready(cfg) or not (STATE_DIR / 'authenticated.json').is_file():
         raise Deferred('iCloud login is required; run icloud_backup.sh --login')
@@ -707,7 +711,7 @@ def _main(mode):
         if mode != '--run':
             raise ValueError('unsupported mode')
         cfg['priority_job'] = priority.PriorityMode.PI
-        due = state.get('pending') or time.time() - state.get('last_success_at', 0) >= cfg['interval_days'] * 86400
+        due = cloud_backup_requests.due(cfg, state, STATE_DIR)
         if due:
             begin_attempt(STATE_DIR, state)
         else:

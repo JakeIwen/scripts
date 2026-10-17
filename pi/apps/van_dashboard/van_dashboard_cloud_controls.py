@@ -19,7 +19,7 @@ class CloudBackupControl:
                     or not 1 <= int(minutes) <= 10080):
                 raise ValueError('pause duration must be between 1 minute and 7 days')
             args = ['--pause', str(int(minutes))]
-        elif action in ('resume', 'take-turn') and minutes is None:
+        elif action in ('resume', 'take-turn', 'backup-now') and minutes is None:
             args = ['--' + action]
         else:
             raise ValueError('unsupported cloud backup control')

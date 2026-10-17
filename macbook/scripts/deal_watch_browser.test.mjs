@@ -1,22 +1,21 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import {createAnonymousPage, readSavedSearch, serializeRequestHeaders} from './deal_watch_browser.mjs';
+import {createAnonymousPage, readSavedSearch, serializeBrowserPage} from './deal_watch_browser.mjs';
 
-const schema = JSON.parse(fs.readFileSync(new URL(
-  '../../pi/scripts/price_check/search_watch/browser_headers.json', import.meta.url), 'utf8'));
+const limits = JSON.parse(fs.readFileSync(new URL(
+  '../../pi/scripts/price_check/search_watch/browser_capture_limits.json', import.meta.url), 'utf8'));
 const url = 'https://www.ebay.com/sch/i.html?_nkw=example&_udlo=450';
-const headers = {'user-agent': 'Chromium', cookie: 'anonymous=private',
-  'sec-ch-ua': '"Chromium";v="151"', 'sec-fetch-site': 'same-origin'};
+const html = '<html><body><ul class="srp-results"><li>Result</li></ul></body></html>';
 
-function browserPage({initial = 403, signedOut = true, sameSearch = true, blocked = false, loadFailed = false} = {}) {
+function browserPage({initial = 403, signedOut = true, sameSearch = true, blocked = false, domNotReady = false} = {}) {
   const destinations = [];
   let listener;
   const frame = {};
   const document = {
     status: () => 200, url: () => url,
     request: () => ({isNavigationRequest: () => true, frame: () => frame,
-      allHeaders: async () => headers}),
+      allHeaders: async () => {throw new Error("Request credentials must not be exported");}}),
   };
   return {
     destinations, on: (_event, handler) => {listener = handler;}, mainFrame: () => frame,
@@ -25,53 +24,52 @@ function browserPage({initial = 403, signedOut = true, sameSearch = true, blocke
       if (!blocked && (initial !== 403 || destinations.length === 2)) listener(document);
       return {status: () => destinations.length === 1 ? initial : 200};
     },
-    waitForFunction: async () => {},
-    waitForLoadState: async () => {if (loadFailed) throw new Error('Page did not finish loading');},
+    waitForFunction: async () => {if (domNotReady) throw new Error('Document is still parsing');},
+    waitForLoadState: async () => {throw new Error('Unrelated resource loads must not block results');},
     waitForTimeout: async () => {},
-    context: () => ({cookies: async () => [{name: 'anonymous', value: 'fresh'}]}),
-    evaluate: async () => sameSearch,
+    context: () => ({cookies: async () => {throw new Error('Cookie export is forbidden');}}),
+    url: () => url,
+    evaluate: async (_code, argument) => typeof argument === 'number' ? html : sameSearch,
     locator: selector => ({count: async () => blocked ? 0 : 1,
       innerText: async () => selector === '#gh' && signedOut ? 'Hi! Sign in or register' : 'Hi Jacob!'}),
   };
 }
 
-test('a bare rejection enters verification and exports the successful document request', async () => {
+test('a bare rejection enters verification and exports the rendered page', async () => {
   const page = browserPage();
-  assert.deepEqual(await readSavedSearch(page, url), {requestHeaders: {...headers, cookie: 'anonymous=fresh'}});
+  assert.deepEqual(await readSavedSearch(page, url, limits.max_html_bytes), {final_url: url, html});
   assert.equal(page.destinations.length, 2);
   assert.equal(new URL(page.destinations[1]).searchParams.get('ru'), url);
 });
 
 test('an automatic challenge is allowed to finish without a second navigation', async () => {
   const page = browserPage({initial: 200});
-  assert.deepEqual(await readSavedSearch(page, url), {requestHeaders: {...headers, cookie: 'anonymous=fresh'}});
+  assert.deepEqual(await readSavedSearch(page, url, limits.max_html_bytes), {final_url: url, html});
   assert.deepEqual(page.destinations, [url]);
 });
 
-for (const settings of [{signedOut: false}, {sameSearch: false}, {blocked: true}, {loadFailed: true}]) {
-  test(`unsafe or unsuccessful results export no credentials: ${JSON.stringify(settings)}`, async () => {
-    const result = await readSavedSearch(browserPage(settings), url);
+for (const settings of [{signedOut: false}, {sameSearch: false}, {blocked: true}, {domNotReady: true}]) {
+  test(`unsafe or unsuccessful responses export no page: ${JSON.stringify(settings)}`, async () => {
+    const result = await readSavedSearch(browserPage(settings), url, limits.max_html_bytes);
     assert.ok(result.failedStep);
-    assert.equal(result.requestHeaders, undefined);
+    assert.equal(result.html, undefined);
     assert.ok(!JSON.stringify(result).includes('anonymous=private'));
   });
 }
 
-test('the header export preserves client hints and excludes pseudo-headers and authorization', () => {
-  const text = serializeRequestHeaders({...headers, ':authority': 'www.ebay.com',
-    authorization: 'Bearer should-not-export', host: 'www.ebay.com'}, schema);
-  assert.ok(text.includes('sec-ch-ua: "Chromium";v="151"\n'));
-  assert.ok(text.includes('sec-fetch-site: same-origin\n'));
-  assert.ok(!text.includes('Bearer'));
-  assert.ok(!text.includes(':authority'));
-  assert.ok(!text.includes('host:'));
+test('page export contains only the final URL and rendered HTML', () => {
+  const page = {final_url: url, html};
+  assert.deepEqual(JSON.parse(serializeBrowserPage(page, limits)), page);
+  assert.throws(() => serializeBrowserPage({...page, cookie: 'private=value'}, limits));
+  assert.throws(() => serializeBrowserPage({...page, search_id: 42}, limits));
 });
 
-test('malformed, incomplete, and oversized credentials are rejected', () => {
-  for (const bad of [{}, {...headers, cookie: 'value\r\nAuthorization: bad'},
-    {...headers, cookie: 'x'.repeat(65536)}, {...headers, 'sec-ch-ua': null}]) {
-    assert.throws(() => serializeRequestHeaders(bad, schema));
+test('page export rejects malformed, oversized and non-string data', () => {
+  for (const bad of [{}, {final_url: url, html: ''}, {final_url: url, html: []},
+    {final_url: null, html}, {final_url: url, html: 'é'.repeat(limits.max_html_bytes / 2 + 1)}]) {
+    assert.throws(() => serializeBrowserPage(bad, limits));
   }
+  assert.throws(() => serializeBrowserPage({final_url: url, html}, {...limits, max_submission_bytes: 10}));
 });
 
 test('the browser user agent and client hints use the same native Chromium version', async () => {

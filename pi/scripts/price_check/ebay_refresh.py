@@ -10,32 +10,49 @@ import os
 import sys
 from pathlib import Path
 
-from main import DEFAULT_DB, send_search_alert, send_search_error
+from main import DEFAULT_DB, send_search_alert, send_search_exhausted
 from search_watch import SearchStore, check_watch
-from search_watch.browser_refresh import claim_refresh, request_refresh
+from search_watch.browser_refresh import (
+    claim_refresh, notify_exhausted, record_failure, request_refresh, retry_status,
+)
 from search_watch.refresh_install import install_headers, recheck_headers
+from search_watch.browser_results import accept_browser_results, read_submission
 from search_watch.service import DEFAULT_EBAY_HEADERS
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", type=Path, default=DEFAULT_DB)
-    parser.add_argument("command", choices=("claim", "recheck", "install", "request"))
+    parser.add_argument("command", choices=("claim", "status", "failed", "recheck", "results", "install", "request"))
     parser.add_argument("search_id", type=int, nargs="?")
     args = parser.parse_args()
     try:
         with SearchStore(args.db) as store:
-            if args.command == "claim":
-                print(json.dumps(claim_refresh(store)))
+            if args.command == "status":
+                print(json.dumps(retry_status(store)))
                 return 0
             with args.db.with_suffix(".check.lock").open("a") as lock:
                 os.chmod(lock.name, 0o600)
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                if args.command == "claim":
+                    request = claim_refresh(store)
+                    notify_exhausted(store, send_search_exhausted)
+                    print(json.dumps(request))
+                    return 0
                 if args.command == "request":
-                    request_refresh(store, store.get_watch(args.search_id))
+                    request_refresh(store, store.get_watch(args.search_id), restart=True)
                     print(json.dumps({"ok": True}))
                     return 0
-                payload = json.loads(sys.stdin.read(70000))
+                payload = read_submission(sys.stdin.buffer) if args.command == "results" else json.loads(sys.stdin.read(70000))
+                if args.command == "results":
+                    receipt = accept_browser_results(store, payload, notify_new=send_search_alert)
+                    print(json.dumps(receipt))
+                    return 0
+                if args.command == "failed":
+                    record_failure(store, payload)
+                    notify_exhausted(store, send_search_exhausted)
+                    print(json.dumps({"ok": True}))
+                    return 0
                 if args.command == "recheck":
                     needed = recheck_headers(store, payload, notify_new=send_search_alert)
                     print(json.dumps({"ok": True, "renewal_needed": needed}))
@@ -46,7 +63,7 @@ def main() -> int:
                 try:
                     check_watch(
                         store, watch, fetcher=lambda _url: page,
-                        notify_new=send_search_alert, notify_error=send_search_error,
+                        notify_new=send_search_alert,
                     )
                     check_failed = False
                 except Exception:

@@ -1,4 +1,13 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { ToastProvider } from '../../components/ToastProvider';
+import type { ReactNode } from 'react';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render as testingRender,
+  screen,
+  within,
+} from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { fetchBackupStatus } from './api';
@@ -11,7 +20,12 @@ import {
   BACKUP_RUNNING_POLL_INTERVAL_MS,
   useBackupStatus,
 } from './hooks';
-import { backupStatusPayload, sampleBackupStatus, sampleRunningICloudStatus } from './testFixtures';
+import {
+  backupStatusPayload,
+  sampleBackupStatus,
+  sampleRunningICloudStatus,
+  backupPreferencesPayload,
+} from './testFixtures';
 
 vi.mock('./api', () => ({ fetchBackupStatus: vi.fn() }));
 const fetchBackupStatusMock = vi.mocked(fetchBackupStatus);
@@ -29,6 +43,10 @@ beforeAll(() => {
     };
   }
 });
+
+function render(ui: ReactNode) {
+  return testingRender(ui, { wrapper: ToastProvider });
+}
 
 function BackupProbe({ sheetOpen }: { sheetOpen: boolean }) {
   const resource = useBackupStatus(sheetOpen);
@@ -206,20 +224,28 @@ describe('backups feature', () => {
     expect(screen.getByRole('button', { name: 'Clone now' })).toBeEnabled();
   });
 
-  it('selects a persisted bootable clone-card capacity', () => {
+  it('selects a persisted bootable clone-card capacity inside settings', async () => {
+    vi.useRealTimers();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify(backupPreferencesPayload()))),
+    );
     const resource = backupResource();
     const controls = controlMocks();
     render(<BackupsSheet open onClose={vi.fn()} resource={resource} controls={controls} />);
 
+    fireEvent.click(screen.getByRole('button', { name: 'Backup settings' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Hotspares' }));
     const select = screen.getByRole('combobox', { name: 'Bootable clone card capacity' });
     expect(select).toHaveValue('64');
-    expect(screen.getByText('Warn above 52 GiB root usage')).toBeInTheDocument();
+    expect(screen.getByText('Root limit · 52 GiB')).toBeInTheDocument();
     expect(
       screen.getAllByRole('option').map((option) => (option as HTMLOptionElement).value),
     ).toEqual(['32', '64', '128', '256']);
 
     fireEvent.change(select, { target: { value: '128' } });
     expect(controls.setCloneCardNominalGb).toHaveBeenCalledWith(128);
+    vi.unstubAllGlobals();
   });
 
   it('shows an authoritative graceful-stop state and cleanup consequences', () => {

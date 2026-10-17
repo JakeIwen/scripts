@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from .parsers import SearchResult
-from .browser_refresh import SCHEMA as REFRESH_SCHEMA
+from .browser_refresh import SCHEMA as REFRESH_SCHEMA, migrate_retry_state
 
 
 SCHEMA = """
@@ -83,6 +83,7 @@ class SearchStore:
         self.connection.execute("PRAGMA journal_mode=WAL")
         try:
             self.connection.executescript(SCHEMA)
+            migrate_retry_state(self.connection, int(self.clock()))
             self.connection.commit()
         except Exception:
             self.connection.rollback()
@@ -286,6 +287,10 @@ class SearchStore:
                 (watch_id, now, len(results), len(new_ids)),
             )
             self._prune_history(watch_id)
+            # Recovery completes with the results, never as a second commit.
+            self.connection.execute(
+                "DELETE FROM search_browser_refresh WHERE search_id=?", (watch_id,)
+            )
         new_rows = []
         for item_id in new_ids:
             row = self.connection.execute(

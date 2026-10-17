@@ -1,17 +1,18 @@
+// Retain the installed entrypoint name; recovery now exports pages, not credentials.
 // Use the managed clean MCP service; never launch or attach a browser here.
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { browserScript, serializeRequestHeaders } from './deal_watch_browser.mjs';
+import { browserScript, serializeBrowserPage } from './deal_watch_browser.mjs';
 
 const requireBrowser = createRequire('/Users/jacobr/.local/share/codex-browser-tools/doctor.mjs');
 const { Client } = requireBrowser('@modelcontextprotocol/sdk/client/index.js');
 const { StreamableHTTPClientTransport } = requireBrowser('@modelcontextprotocol/sdk/client/streamableHttp.js');
 const endpoint = new URL('http://localhost:8931/mcp');
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const schema = JSON.parse(fs.readFileSync(path.join(root,
-  'pi/scripts/price_check/search_watch/browser_headers.json'), 'utf8'));
+const limits = JSON.parse(fs.readFileSync(path.join(root,
+  'pi/scripts/price_check/search_watch/browser_capture_limits.json'), 'utf8'));
 const url = new URL(process.argv[2]);
 if (url.origin !== 'https://www.ebay.com' || url.pathname !== '/sch/i.html' ||
     !url.searchParams.get('_nkw') || url.username || url.password) {
@@ -37,7 +38,8 @@ try {
   stage = 'loading the signed-out eBay search';
   const result = await client.callTool({name: 'browser_run_code_unsafe', arguments: {
     code: browserScript({url: url.href, metadataOrigin: endpoint.origin,
-      storageState: fs.existsSync(statePath) ? statePath : undefined, candidateState}),
+      storageState: fs.existsSync(statePath) ? statePath : undefined, candidateState,
+      maxHtmlBytes: limits.max_html_bytes}),
   }}, undefined, {timeout: 100000});
   if (result.isError) throw new Error('Anonymous browser did not complete the search');
   const text = result.content.filter(part => part.type === 'text').map(part => part.text).join('\n');
@@ -46,13 +48,13 @@ try {
     stage = payload.failedStep + ' (HTTP ' + payload.responses.join(', ') + ')';
     throw new Error('Browser did not reach a signed-out results page');
   }
-  stage = 'reading browser headers';
-  const headers = serializeRequestHeaders(payload?.requestHeaders, schema);
+  stage = 'exporting browser results';
+  const submission = serializeBrowserPage(payload, limits);
   fs.renameSync(candidateState, statePath);
   // The parent consumes stdout privately; never forward it to a log.
-  process.stdout.write(JSON.stringify({headers}));
+  process.stdout.write(submission);
 } catch {
-  console.error('eBay anonymous browser refresh failed at ' + stage + '; existing headers retained.');
+  console.error('eBay anonymous browser recovery failed at ' + stage + '; existing results retained.');
   process.exitCode = 1;
 } finally {
   try { await client.callTool({name: 'browser_close', arguments: {}}, undefined, {timeout: 5000}); } catch {}

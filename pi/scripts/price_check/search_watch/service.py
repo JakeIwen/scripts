@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from .parsers import EbayGateError, EbayParseError, parse as parse_ebay
 from .store import SearchStore, SearchStoreError
-from .browser_refresh import clear_refresh, request_refresh
+from .browser_refresh import request_refresh
 
 
 CURL = "/usr/bin/curl"
@@ -37,6 +37,10 @@ LEGACY_HEADERS = (
 
 class SearchWatchError(RuntimeError):
     error_code = "search"
+
+
+class SearchNotificationError(SearchWatchError):
+    """Results were saved, but their new-listing notification failed."""
 
 
 class SearchCookieError(SearchWatchError):
@@ -201,7 +205,7 @@ def check_watch(
         results = _fetch_and_parse(watch, fetcher)
     except SearchWatchError as error:
         failed_watch = store.record_error(watch["id"], str(error)) if record else watch
-        if record and isinstance(error, SearchCookieError):
+        if record:
             request_refresh(store, watch)
         if notify and notify_error:
             try:
@@ -212,9 +216,17 @@ def check_watch(
                 ) from notification_error
         raise
 
+    return apply_search_results(
+        store, watch, results, notify_new=notify_new, notify=notify, record=record,
+    )
+
+
+def apply_search_results(
+    store: SearchStore, watch: dict, results: list, *,
+    notify_new=None, notify: bool = True, record: bool = True,
+) -> dict:
     if record:
         updated, new_results = store.record_success(watch["id"], results)
-        clear_refresh(store, watch["id"])
     else:
         updated = {**watch, "result_count": len(results)}
         new_results = []
@@ -222,7 +234,7 @@ def check_watch(
         try:
             notify_new(updated, new_results)
         except Exception as error:
-            raise SearchWatchError(f"new-result notification failed: {error}") from error
+            raise SearchNotificationError(f"new-result notification failed: {error}") from error
     return {**updated, "new_results": new_results}
 
 

@@ -155,7 +155,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   capture nonce. The root Mac coordinator verifies the active destination before
   `tmutil stopbackup`, then a later poll must prove idle and non-force detach.
   Dashboard `van_dashboard_backup_priority.py` and `routes/backup_priority.py`
-  serve the gear-menu UI in `features/backups/BackupPriorityMenu.tsx`; `priority.ts`
+  serve controls in `features/backups/BackupPriorityControls.tsx`; `priority.ts`
   owns its response contract. Both targeted cloud installers ship these modules
   and verify the shared backup configuration before updating it.
 - `pi/scripts/backup/protected_json.py` owns private control-record metadata
@@ -246,21 +246,47 @@ compare it with this checkout. Deployed files may differ from the repository.
   existing normalized device-tree helpers in `van_dashboard_block_devices.py`.
   Root usage comes from mounted `lsblk` counters or a read-only, label-verified
   ext4 superblock probe. Never mount a spare merely to render its usage.
-- Deal Watch cookie renewal: `pi/scripts/price_check/search_watch/browser_refresh.py`
-  owns the durable request queue and request contract; `refresh_install.py`
-  validates submitted headers on the Pi before replacement. The bridge is
+- Deal Watch recovery: `pi/scripts/price_check/search_watch/browser_refresh.py`
+  owns the durable request queue and request contract. `browser_results.py` owns
+  the bounded HTML submission/receipt contract; `browser_capture_limits.json`
+  shares byte limits across hosts. Browser recovery records the captured page
+  through `service.apply_search_results` without another eBay request or cookie
+  replacement. `refresh_install.py` retains existing-header rechecks and the
+  legacy explicit header installer. The bridge is
   `pi/scripts/price_check/ebay_refresh.py`; the Mac polling worker and managed
   clean-browser client are `macbook/scripts/deal_watch_refresh.py` and
   `macbook/scripts/ebay_browser_headers.mjs`. Browser session/verification code is
-  `macbook/scripts/deal_watch_browser.mjs`; the shared header-name contract is
-  `pi/scripts/price_check/search_watch/browser_headers.json`. Preserve full captured
-  Chromium headers without adding legacy Firefox defaults. See
+  `macbook/scripts/deal_watch_browser.mjs`; its anonymous cookies stay on the Mac.
+  `pi/scripts/price_check/search_watch/browser_headers.json` remains the legacy
+  header allowlist. Preserve Chromium headers without Firefox defaults. See
   `pi/docs/dashboard/PRICE_CHECK.md`.
+  Recovery retries silently at six-minute intervals, stops after 50 consecutive
+  failed attempts and sends one ntfy alert. A successful search resets the
+  durable count; preserve claim fencing and idempotent failure acknowledgements.
 
 Some ignored secret directories, wireless profiles, and device configurations
 may contain credentials or private network data. Never print or commit secrets,
 and preserve unrelated local or deployed changes.
 
+- Backup preferences: `pi/scripts/backup/backup_setting_fields.py` is the canonical
+  editable-field schema (bounds, units and tooltip text); `backup_settings.py` owns
+  revision-checked overrides in root-private `/etc/vanpi-backup-settings.json`.
+  `backup_settings_control.py` is the fixed CLI. Workers apply preferences at the
+  next run; native credentials and configuration remain separate. The shell helper
+  emits only fixed numeric setting names, never shell code. `backup_schedule.py`
+  migrates only the two owned cron entries to hourly `--scheduled` checks, retaining
+  the prior root crontab; the configured Pi-time window gates new starts only.
+  Dashboard `backup_settings_control.py` / `routes/backup_settings.py` and
+  `features/backups/BackupSettingsPanel.tsx` own the settings subpanel;
+  `useBackupPreferences.ts` owns per-setting autosave above the dialog lifecycle:
+  switches/selectors save on selection, numbers on blur/Enter, with confirmed toasts.
+  `settingsDraft.ts` validates input before revision-checked writes. Settings
+  conflicts cross the privileged CLI as `EX_TEMPFAIL` and map to HTTP 409;
+  human error wording is never used to select the response status.
+- `pi/scripts/backup/cloud_backup_requests.py` owns durable `backup-now.json`
+  requests. Back up now bypasses only the weekly cadence, coalesces repeated clicks,
+  resumes an unfinished generation and is satisfied by one new verified generation.
+  It never rewrites success history, relaxes admission or discards checkpoints.
 - Dashboard backup configuration parsing lives in `pi/apps/van_dashboard/backup_configuration.py`;
   `features/backups/CloneCardCapacity.tsx` owns the reusable card-capacity control.
 
@@ -471,7 +497,8 @@ The active design is represented by:
 
 - `pi/scripts/backup/pi_backup.sh`: backup orchestration.
 - `pi/scripts/backup/openwrt_backup.sh`: verified router exports; independent
-  daily cron retries use `--daily`, and Borg can also refresh before archiving.
+  hourly cron checks use `--scheduled` within the configured daily window;
+  Borg can also refresh before archiving.
   A directory flock serializes exports without taking the cloud/disk backup lock.
 - `pi/scripts/backup/backup_watchdog.sh`: freshness and health monitoring.
 - `pi/scripts/backup/rootfs_budget.sh`: bounded rootfs path budgets and daily growth history for the watchdog.

@@ -64,10 +64,21 @@ export function ICloudBackupControls({
           disabled={disabled || (status.running && !manuallyPaused)}
           title={resume.help}
           aria-description={resume.help}
-          onClick={() => void perform('resume')}
+          onClick={() => void perform(resume.action)}
         >
           {running ? 'Applying…' : resume.label}
         </button>
+        {manuallyPaused && resume.action === 'backup-now' && (
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={disabled}
+            title="Remove the pause and return to the existing schedule without requesting a new copy."
+            onClick={() => void perform('resume')}
+          >
+            Resume schedule
+          </button>
+        )}
         <ICloudPauseSelector
           onPause={(minutes) => void perform('pause', minutes)}
           disabled={disabled}

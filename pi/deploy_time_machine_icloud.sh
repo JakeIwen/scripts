@@ -20,6 +20,7 @@ python3 pi/tests/backup/test_icloud_backup.py
 PYTHONPATH=pi/scripts/backup python3 -m unittest pi.tests.backup.test_backup_locks pi.tests.backup.test_backup_admission pi.tests.backup.test_backup_priority pi.tests.backup.test_protected_json pi.tests.backup.test_local_backup_deploy.DeploymentPlanTests pi.tests.backup.test_local_backup_deploy.DeploymentPreflightTests pi.tests.backup.test_openwrt_schedule
 PYTHONPATH=pi/scripts/backup python3 -m unittest pi.tests.backup.test_time_machine_pipeline
 PYTHONPATH=pi/scripts/backup python3 -m unittest pi.tests.backup.test_time_machine_downloads pi.tests.backup.test_icloud_uplink
+PYTHONPATH=pi/scripts/backup python3 -m unittest pi.tests.backup.test_backup_settings pi.tests.backup.test_cloud_backup_requests
 bash pi/tests/storage/test_samba_share_control.sh
 bash -n pi/scripts/backup/time_machine_icloud.sh
 stage=$(ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" /usr/bin/mktemp -d /tmp/vanpi-tm-icloud.XXXXXX)
@@ -29,7 +30,7 @@ COPYFILE_DISABLE=1 /usr/bin/tar --no-xattrs -cf - \
   pi/__init__.py pi/tests/__init__.py pi/backup_local_deploy.sh pi/generate_backup_lock_registry.py \
   pi/deploy_icloud_backup.sh pi/deploy_time_machine_icloud.sh \
   "${payload[@]}" \
-  pi/tests/backup/test_backup_locks.py pi/tests/backup/test_local_backup_deploy.py pi/tests/backup/test_openwrt_schedule.py pi/tests/backup/test_protected_json.py \
+  pi/tests/backup/test_backup_locks.py pi/tests/backup/test_backup_settings.py pi/tests/backup/test_cloud_backup_requests.py pi/tests/backup/test_local_backup_deploy.py pi/tests/backup/test_openwrt_schedule.py pi/tests/backup/test_protected_json.py \
   pi/tests/backup/backup_lock_fixtures.py pi/tests/backup/test_backup_admission.py \
   pi/tests/backup/priority_fixtures.py pi/tests/backup/test_backup_priority.py \
   pi/tests/storage/test_backup_job_lock.sh pi/tests/storage/test_backup_locks.sh \
@@ -58,6 +59,7 @@ cd "$stage"
 PYTHONPATH=pi/scripts/backup /usr/bin/python3 -m unittest pi.tests.backup.test_backup_locks pi.tests.backup.test_backup_admission pi.tests.backup.test_backup_priority pi.tests.backup.test_protected_json pi.tests.backup.test_local_backup_deploy.DeploymentPlanTests.test_single_allowlist_drives_transfer_and_dependency_order pi.tests.backup.test_local_backup_deploy.DeploymentPreflightTests.test_both_profiles_publish_complete_private_backup_and_preserve_settings pi.tests.backup.test_openwrt_schedule
 PYTHONPATH=pi/scripts/backup /usr/bin/python3 -m unittest pi.tests.backup.test_time_machine_pipeline
 PYTHONPATH=pi/scripts/backup /usr/bin/python3 -m unittest pi.tests.backup.test_time_machine_downloads pi.tests.backup.test_icloud_uplink
+PYTHONPATH=pi/scripts/backup /usr/bin/python3 -m unittest pi.tests.backup.test_backup_settings pi.tests.backup.test_cloud_backup_requests
 bash pi/tests/storage/test_backup_job_lock.sh
 bash pi/tests/storage/test_backup_locks.sh
 bash pi/tests/storage/test_samba_share_control.sh
@@ -67,6 +69,7 @@ gate=$(sudo -n /usr/bin/testparm -s --section-name=mbp2tbkup --parameter-name=pr
 close=$(sudo -n /usr/bin/testparm -s --section-name=mbp2tbkup --parameter-name='preexec close' 2>/dev/null)
 [[ "$close" == Yes || "$close" == yes ]] || exit 1
 /usr/bin/systemd-analyze verify pi/services/vanpi-*icloud*.service pi/services/vanpi-*icloud*.timer
+sudo -n /usr/bin/python3 pi/scripts/backup/backup_schedule.py --check
 local_backup_begin "$stage" tm "$3"
 local_backup_publish
 sudo -n /usr/bin/systemd-tmpfiles --create /etc/tmpfiles.d/vanpi-backup.conf
@@ -74,6 +77,7 @@ sudo -n /usr/bin/systemd-tmpfiles --create /etc/tmpfiles.d/vanpi-backup.conf
    $(/usr/bin/stat -c '%U %G %a' /run/lock/vanpi-backup) == 'root pi 770' ]] || exit 1
 sudo -n /usr/bin/systemctl daemon-reload
 local_backup_commit
+sudo -n /usr/bin/python3 /home/pi/scripts/backup/backup_schedule.py --apply
 sudo -n /usr/bin/python3 -B /home/pi/scripts/backup/time_machine_icloud.py --capture-request
 sudo -n /usr/bin/systemctl enable --now vanpi-time-machine-icloud.timer
 sudo -n /usr/bin/systemctl enable --now vanpi-time-machine-icloud-resume.timer vanpi-icloud-backup-resume.timer

@@ -173,6 +173,7 @@ def _cloud_action(action, controller, label):
     except RuntimeError as exc:
         return api_error(str(exc), 503)
     message = (f"Switch to {label} requested; the other iCloud backup is paused until resumed" if action == "take-turn" else
+               f"{label} backup queued" if action == "backup-now" else
                f"{label} pause requested" if action == "pause" else
                f"{label} resume requested; existing safety checks still apply")
     response = jsonify({"ok": True, "message": message})
@@ -209,3 +210,13 @@ def api_select_pi_cloud():
 @bp.route("/api/backups/time-machine-icloud/take-turn", methods=["POST"])
 def api_select_time_machine_cloud():
     return _cloud_action("take-turn", time_machine_cloud_control, "Time Machine iCloud")
+
+
+@bp.route("/api/backups/icloud/backup-now", methods=["POST"])
+def api_run_pi_cloud_now():
+    return _cloud_action("backup-now", pi_cloud_control, "Pi iCloud")
+
+
+@bp.route("/api/backups/time-machine-icloud/backup-now", methods=["POST"])
+def api_run_mac_cloud_now():
+    return _cloud_action("backup-now", time_machine_cloud_control, "Time Machine iCloud")

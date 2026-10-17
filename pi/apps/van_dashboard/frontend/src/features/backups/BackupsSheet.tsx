@@ -2,7 +2,7 @@ import type { PollingState } from '../../hooks/usePollingResource';
 import { BottomSheet } from '../../components/BottomSheet';
 import { ICloudBackupCard } from './ICloudBackupCard';
 import { CloneCardCapacity } from './CloneCardCapacity';
-import { BackupPriorityMenu } from './BackupPriorityMenu';
+import { BackupSettingsPanel } from './BackupSettingsPanel';
 import { formatBytes, formatRelativeTime } from '../../utils/format';
 import type { BackupControls } from './controls';
 import {
@@ -11,12 +11,7 @@ import {
   progressLabel,
   timeMachineLabel,
 } from './presentation';
-import type {
-  BackupEvidence,
-  BackupStatus,
-  HotspareStatus,
-  TimeMachineStatus,
-} from './types';
+import type { BackupEvidence, BackupStatus, HotspareStatus, TimeMachineStatus } from './types';
 import './backups.css';
 
 export interface BackupsSheetProps {
@@ -270,11 +265,6 @@ function HotsparesSection({
         <div className="backups-sheet__body">
           <div className="backups-sheet__heading">
             <p>Configured labels, cadence, attachment, and clone age.</p>
-            {status ? (
-              <CloneCardCapacity settings={status.settings} controls={controls} />
-            ) : (
-              <span>Loading capacity…</span>
-            )}
           </div>
           <div className="backup-hotspare-grid">
             {status?.hotswaps.length ? (
@@ -299,7 +289,14 @@ export function BackupsSheet({ open, onClose, resource, controls }: BackupsSheet
       title="Backups"
       description="Freshness, runtime progress, hotspares, and Time Machine evidence."
       updatedAt={status?.checkedAt ?? null}
-      headerActions={<BackupPriorityMenu backups={status} refresh={resource.refresh} />}
+      headerActions={
+        <BackupSettingsPanel
+          refresh={resource.refresh}
+          capacityControl={
+            status ? <CloneCardCapacity settings={status.settings} controls={controls} /> : null
+          }
+        />
+      }
       onClose={onClose}
     >
       {status && (status.stop.status !== 'idle' || status.operation.status !== 'idle') && (

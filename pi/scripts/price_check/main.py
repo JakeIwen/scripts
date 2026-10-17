@@ -17,9 +17,6 @@ from urllib.parse import urlparse
 from amazon_parser import AmazonParseError, Product, parse as parse_amazon
 from cron_schedule import CronScheduleError, CronScheduleManager
 from search_watch import (
-    SearchCookieError,
-    SearchLoadError,
-    SearchParserError,
     SearchStore,
     SearchStoreError,
     SearchWatchError,
@@ -133,31 +130,15 @@ def send_search_alert(watch: dict, results: list[dict]) -> None:
     send_ntfy(title, "\n".join(lines), "high", "mag")
 
 
-def send_search_error(watch: dict, error: Exception) -> None:
-    if isinstance(error, SearchParserError):
-        return
-    if isinstance(error, SearchCookieError):
-        title = f"{watch['display_title']}: update eBay browser cookie"
-        message = (
-            "eBay rejected or gated this saved-search request. An anonymous "
-            "browser refresh is queued for the Mac hook (Mac must be awake "
-            "and logged in). If it remains blocked, replace the signed-out "
-            "browser headers in /home/pi/secrets/.ebay_headers.\n"
-            f"{error}\n{watch['url']}"
-        )
-        tags = "cookie,warning"
-    elif isinstance(error, SearchLoadError):
-        title = f"{watch['display_title']}: eBay search failed to load"
-        message = (
-            "The search page could not be downloaded. The last successful "
-            f"results were preserved.\n{error}\n{watch['url']}"
-        )
-        tags = "warning"
-    else:
-        title = f"{watch['display_title']}: eBay search needs attention"
-        message = f"{error}\n{watch['url']}"
-        tags = "warning"
-    send_ntfy(title, message, "high", tags)
+def send_search_exhausted(watch: dict, failures: int) -> None:
+    title = f"{watch['display_title']}: eBay recovery failed {failures} times"
+    message = (
+        f"{failures} consecutive automatic recovery attempts failed. "
+        "Automatic recovery is paused for this search. The last successful "
+        "results were preserved. Regular scheduled checks continue, and a "
+        f"successful check resets recovery.\n{watch['url']}"
+    )
+    send_ntfy(title, message, "high", "warning")
 
 
 def check_item(
@@ -505,7 +486,6 @@ def main() -> int:
                     search_store,
                     searches,
                     notify_new=send_search_alert,
-                    notify_error=send_search_error,
                     notify=not args.dry_run
                     and not getattr(args, "no_notify", False),
                     record=not args.dry_run,

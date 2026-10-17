@@ -12,6 +12,12 @@ from pi.apps.van_dashboard.van_dashboard_common import SUDO
 
 
 class CloudControlTests(unittest.TestCase):
+    def test_backup_now_uses_fixed_helper_for_each_cloud(self):
+        for path, helper in (('icloud','icloud_backup_control.py'), ('time-machine-icloud','time_machine_icloud_control.py')):
+            response = self.client.post('/api/backups/'+path+'/backup-now')
+            self.assertEqual(response.status_code, 202)
+            self.assertEqual(self.command.call_args.args[0][-2:], ['/home/pi/scripts/backup/'+helper, '--backup-now'])
+
     def setUp(self):
         self.command = mock.Mock(return_value=subprocess.CompletedProcess([], 0))
         self.control = CloudBackupControl(command=self.command)

@@ -51,7 +51,12 @@ export function BottomSheet({
         event.stopPropagation();
         onClose();
       }}
-      onClose={onClose}
+      onClose={(event) => {
+        event.stopPropagation();
+        // A nested dialog closes independently. StrictMode may have reopened
+        // this dialog before a queued cleanup close event is delivered.
+        if (event.target === event.currentTarget && !event.currentTarget.open) onClose();
+      }}
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}

@@ -41,6 +41,7 @@ PY
 done < <(local_backup_sources pi)
 /usr/bin/python3 -m json.tool pi/configs/icloud-backup.json >/dev/null
 /usr/bin/systemd-analyze verify pi/services/vanpi-icloud-backup*.service pi/services/vanpi-icloud-backup*.timer
+sudo -n /usr/bin/python3 pi/scripts/backup/backup_schedule.py --check
 local_backup_begin "$stage" pi "$2"
 local_backup_publish
 /usr/bin/sudo -n /usr/bin/systemd-tmpfiles --create /etc/tmpfiles.d/vanpi-backup.conf
@@ -49,6 +50,7 @@ local_backup_publish
 /usr/bin/sudo -n /usr/bin/systemctl daemon-reload
 /usr/bin/sudo -n /bin/bash /home/pi/scripts/backup/icloud_backup.sh --preflight
 local_backup_commit
+sudo -n /usr/bin/python3 /home/pi/scripts/backup/backup_schedule.py --apply
 /usr/bin/sudo -n /usr/bin/systemctl enable --now vanpi-icloud-backup.timer vanpi-icloud-backup-resume.timer
 /usr/bin/systemctl list-timers --all vanpi-icloud-backup.timer --no-pager
 REMOTE

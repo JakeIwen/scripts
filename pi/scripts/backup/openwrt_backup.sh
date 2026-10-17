@@ -12,6 +12,13 @@ daily=0
 case "$#:$*" in
     0:) ;;
     1:--daily) daily=1 ;;
+    1:--scheduled)
+        daily=1
+        window_status=0
+        /usr/bin/python3 /home/pi/scripts/backup/backup_settings_control.py --window || window_status=$?
+        (( window_status != 3 )) || exit 0
+        (( window_status == 0 )) || exit "$window_status"
+        ;;
     *) echo "usage: ${0##*/} [--daily]" >&2; exit 2 ;;
 esac
 

@@ -22,6 +22,8 @@ import uuid
 import backup_locks
 import backup_admission as admission
 import icloud_backup as cloud
+import cloud_backup_requests
+import backup_settings
 import icloud_status as history
 import time_machine_store as store
 import time_machine_staging as staging
@@ -42,8 +44,9 @@ SERVICE = 'vanpi-time-machine-icloud.service'
 
 
 def config():
-    cfg = cloud.load_config()
+    cfg = cloud.load_config(apply_preferences=False)
     cfg.update(store.read_json(CONFIG))
+    cfg = backup_settings.cloud_config(cfg, 'mac')
     cfg['priority_job'] = priority.PriorityMode.TIME_MACHINE
     cfg.setdefault('smb_handle_drain_seconds', 90)
     cfg.setdefault('overlap_verification', True)
@@ -104,7 +107,7 @@ def mac_present(stop_for_capture=False):
     store.atomic_json(STATE / 'mac-coordinator.json', {'seen_at': now, 'stop_for_capture': stop_for_capture})
     state = store.read_json(STATE / 'state.json', {})
     cfg = config()
-    due = state.get('pending') or now - state.get('last_success_at', 0) >= cfg['interval_days'] * 86400
+    due = cloud_backup_requests.due(cfg, state, STATE, now)
     retry = now - state.get('last_attempt_at', 0) >= 3600 or state.get('last_error') == 'Mac capture coordinator unavailable'
     if due and retry and not is_paused(STATE):
         subprocess.run(['/usr/bin/systemctl', 'start', '--no-block', SERVICE], check=True, timeout=10)
@@ -446,7 +449,7 @@ def retention(cfg, current):
 
 
 def weekly(cfg, state):
-    if time.time() - state.get('last_success_at', 0) < cfg['interval_days'] * 86400 and not state.get('pending'):
+    if not cloud_backup_requests.due(cfg, state, STATE):
         return 'not due'
     if not cloud.credentials_ready(cfg) or not (AUTH / 'authenticated.json').is_file() or (AUTH / 'authentication-error.json').exists():
         raise cloud.Deferred('iCloud login is required; use the existing Pi login command')
@@ -536,7 +539,7 @@ def _main(args):
     state['kind'] = 'time-machine'
     signal.signal(signal.SIGTERM, cloud.abort)
     signal.signal(signal.SIGINT, cloud.abort)
-    due = state.get('pending') or time.time() - state.get('last_success_at', 0) >= cfg['interval_days'] * 86400
+    due = cloud_backup_requests.due(cfg, state, STATE)
     if due:
         history.begin_attempt(STATE, state)
     else:

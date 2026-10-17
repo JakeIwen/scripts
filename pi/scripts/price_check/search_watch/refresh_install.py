@@ -17,9 +17,7 @@ class RefreshSubmission(RefreshRequest):
 
 
 def validate_submission(payload: object) -> RefreshSubmission:
-    if not isinstance(payload, dict) or set(payload) != {
-        "search_id", "request_id", "url", "headers"
-    }:
+    if not isinstance(payload, dict) or set(payload) != set(RefreshRequest.__annotations__) | {"headers"}:
         raise ValueError("invalid browser refresh payload")
     validate_request({key: payload[key] for key in RefreshRequest.__annotations__})
     if not isinstance(payload["headers"], str) or not 0 < len(payload["headers"]) <= 65536:
@@ -61,6 +59,8 @@ def install_headers(store, payload: object, destination: Path) -> str:
         # A browser success on the Mac is insufficient: cookies may be IP-bound.
         page = fetch_ebay(request["url"], headers_path=candidate)
         parse(page)
+        if not is_current_request(store, request):
+            raise ValueError("browser refresh attempt expired during validation")
         os.replace(candidate, destination)
     except (OSError, SearchWatchError, ValueError) as error:
         # Do not put browser payloads, curl arguments or cookies in log messages.
