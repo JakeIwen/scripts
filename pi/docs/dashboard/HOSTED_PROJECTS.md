@@ -12,12 +12,12 @@ until Jacob keeps, edits, or hides them. No LLM is involved anywhere.
 
 Key `hosted_projects` in the dashboard `StateStore` JSON
 (`~/.van_dashboard_state.json` on the Pi) holds a list of entries. A second
-key, `hosted_projects_schema`, is the integer schema version (currently 2).
+key, `hosted_projects_schema`, is the integer schema version (currently 3).
 
 ```json
 {
   "id": "pi:audiobooks.service",
-  "key": "pi:audiobooks.service",
+  "services": [{"key": "pi:audiobooks.service", "live": true}],
   "name": "Audiobooks",
   "description": "Browse the audiobook library and play through Sonos.",
   "host": "pi",
@@ -34,13 +34,17 @@ key, `hosted_projects_schema`, is the integer schema version (currently 2).
 }
 ```
 
-- `id`: stable identifier. Scanned entries use their `key`; manual entries
-  use `custom-<uuid hex>`.
-- `key`: scanner identity, `<host>:<unit>`, or `null` for entries no scan has
-  claimed. Mac keys are launchd labels (`mac:com.jacobr.fieldwork`), Pi keys
-  are systemd unit names (`pi:audiobooks.service`), web keys are
-  lionfeather-edge app names (`web:critter`). Keys, never ports, decide
-  identity, so a port change never resurrects a hidden entry.
+- `id`: stable identifier. Entries a scan created use the key of the service
+  that created them; manual entries use `custom-<uuid hex>`.
+- `services`: the scanned services this entry stands for, each
+  `{"key": "<host>:<unit>", "live": bool}`, sorted by key; empty for entries
+  no scan has claimed. Mac keys are launchd labels (`mac:com.jacobr.fieldwork`),
+  Pi keys are systemd unit names (`pi:audiobooks.service`), web keys are
+  lionfeather-edge app names (`web:critter`). One app reached several ways
+  (two units on one port, a Mac app and its public route, copies on the Mac
+  and the Pi) is one entry with several services. A key belongs to at most
+  one entry and is never removed from it, so keys, never ports, decide
+  identity and a port change never resurrects a hidden entry.
 - `name`: 1–80 printable characters. `description`: 0–200 characters.
 - `host`: `mac`, `pi`, `web`, or `custom`. Display labels: This Mac, Vanpi,
   lionfeather.dev, Custom.
@@ -50,24 +54,32 @@ key, `hosted_projects_schema`, is the integer schema version (currently 2).
 - `status`: `new` (scanned, not yet reviewed), `listed`, or `hidden`. Hidden
   entries stay in the store so a rescan never re-proposes them.
 - `source`: `scanned` or `manual` (form submissions and the one-time seed).
-- `live`: the last report from the entry's host included it. `false` means
-  stale; the sheet dims the row instead of deleting it.
+- `live`: at least one of the entry's services was in the last report from
+  its host (always `true` for entries without services). `false` means stale;
+  the sheet dims the row instead of deleting it.
 - `first_seen`, `last_seen`: scan timestamps (UTC ISO 8601, `Z` suffix);
   `null` for entries no scan has claimed. A report that changes nothing
-  writes nothing, so `last_seen` is the last scan that changed the entry and
-  the state file is not rewritten every 15 minutes. `updated_at`: last manual edit or
-  creation.
+  writes nothing, so `last_seen` is the last scan that changed the entry (a
+  new service, a link, or a service coming back), not the last scan that saw
+  it, and the state file is not rewritten every 15 minutes. `updated_at`: last
+  manual edit or creation.
 
 ### Migration
 
 On first load with `hosted_projects_schema` absent or below 2 the store
 upgrades in place and saves: legacy form entries (`host: "Custom"`, no
 `status`) become `status: listed`, `source: manual`, `host: custom`,
-`key: null`, `live: true`; the former React catalog defaults are seeded as
-`source: manual`, `status: listed` entries with `key: null` (so the first
+no services, `live: true`; the former React catalog defaults are seeded as
+`source: manual`, `status: listed` entries with no services (so the first
 scan adopts them by port, see below) and deterministic ids
 (`seed-<former catalog id>`). Seeding skips names already present
 (case-insensitive).
+
+Schema 3 (from 2) replaces each entry's `key` with `services`: a key becomes
+one service carrying the entry's `live`, and `key: null` becomes an empty
+list. Duplicate rows created under schema 2 are folded by the next scans
+under rule 4 below, not by the migration, because only a scan knows a web
+app's upstream port.
 
 ## Scan reports
 
@@ -89,36 +101,62 @@ scan adopts them by port, see below) and deterministic ids
 }
 ```
 
-`hosts` names every host the report fully covers; a host listed with no
-listeners means everything scanned there is gone. Reconciliation, per
-listener, under the store lock:
+Web listeners may add `"service_port": 4317`, the explicit port in the edge
+app's `service` URL. Edge apps keep the port they use on the Mac, which is
+how a public route is tied to its Mac app.
 
-1. An entry with the same `key` exists: set `live: true`, `last_seen`, and
-   refresh its links (addresses are facts, names and descriptions are
-   Jacob's). Do not touch `name`, `description`, or `status`.
-2. Otherwise an entry with `key: null` has a link whose hostname and port
-   match one of the listener's links: adopt it (set `key`, set `host` to the
-   listener's host, `source` stays, `live: true`, `first_seen`/`last_seen`),
-   keep its name, description and status, refresh its links.
-3. Otherwise create the entry with `status: new`, `source: scanned`, the
-   listener's name and description, `id` = `key`. Creation never fails on a
-   name collision: a name that matches an existing entry case-insensitively
-   gets a host suffix (" (This Mac)", " (Vanpi)", " (lionfeather.dev)"),
-   then " 2", " 3" and so on. The form and the update endpoint still reject
-   collisions with HTTP 409.
+`hosts` names every host the report fully covers; a host listed with no
+listeners means everything scanned there is gone. Reconciliation runs under
+the store lock:
+
+1. **Group.** Listeners of one host that share an address (hostname and
+   port of any link) are one app: the telemetry dashboard runs one systemd
+   unit per bind address on port 8765. A group's primary listener is the one
+   with the shortest key. Web groups are reconciled after Mac and Pi groups.
+2. **Find the entry.** An entry holding any of the group's keys is the
+   group's entry. If none does, the first match below, preferring entries
+   Jacob has kept over unreviewed ones, among entries that hold no service of
+   the group's host:
+   1. an entry with a link at the same address as one of the group's links
+      (this is how seeded and form entries are adopted, and how the Mac copy
+      of Visual Guides joins the seeded row that already has its `local` link);
+   2. for web groups, an entry with a `local` link on the group's
+      `service_port` (Fieldwork, Electronics inventory);
+   3. an entry holding a key on another host with the same name: the key
+      after `<host>:`, without `com.jacobr.` or `.service`, so
+      `mac:com.jacobr.visual-guides` and `pi:visual-guides.service` match.
+3. **Create.** With no entry, create one with `status: new`, `source:
+   scanned`, the primary listener's name and description, and `id` = its key.
+   Creation never fails on a name collision: a name that matches an existing
+   entry case-insensitively gets a host suffix (" (This Mac)", " (Vanpi)",
+   " (lionfeather.dev)"), then " 2", " 3" and so on. The form and the update
+   endpoint still reject collisions with HTTP 409.
+4. **Fold.** An entry is foldable when a scan created it and Jacob has not
+   kept it (`source: scanned`, status `new` or `hidden`). When the group's
+   keys are spread over several entries, the first kept one is the target and
+   every foldable one is folded into it. When all of them are foldable, a
+   match from step 2 is the target if there is one. Folding moves the
+   services onto the target, adds link kinds the target lacks, and deletes
+   the folded entry. Two kept entries are never folded; each keeps its own
+   keys.
+5. **Claim.** Each listener's key is added to its entry if missing (an entry
+   with no services takes the listener's host; otherwise the host stays),
+   marked live, and the entry's links are refreshed. Name, description and
+   status are never touched: addresses are facts, names and descriptions are
+   Jacob's.
 
 Refreshing links merges by kind: links whose kind the listener reports are
-replaced, links of other kinds are kept. An entry seeded with both a Mac
-`local` link and Pi `lan`/`ts` links (Visual Guides) keeps its Mac link when
-the Pi scan adopts it. The Mac listener for the same app then has no key-less
-entry to adopt and appears as a separate new entry; hide it once.
+replaced when the address changed (an unchanged address keeps the stored URL,
+path and label), and links of other kinds are kept.
 
-Then every `scanned`-source entry whose host is in `hosts` and whose key was
-not reported gets `live: false`. Entries of hosts not in `hosts` are
-untouched. The response is `{"ok": true, "created": n, "adopted": n,
-"updated": n, "stale": n}`; `stale` counts only live-to-stale transitions.
-Report links may not repeat a kind. When `created > 0` the backend sends one ntfy
-message through `VAN_DASHBOARD_NTFY_SEND` (default
+Then every service whose host is in `hosts` and whose key was not reported
+gets `live: false`, and an entry is live while any of its services is.
+Entries of hosts not in `hosts` are untouched. The response is
+`{"ok": true, "created": n, "adopted": n, "merged": n, "updated": n,
+"stale": n}`: `adopted` counts keys added to an existing entry, `merged`
+counts entries folded away, and `stale` counts only entries going from live
+to stale. Report links may not repeat a kind. When `created > 0` the backend
+sends one ntfy message through `VAN_DASHBOARD_NTFY_SEND` (default
 `/home/pi/scripts/ntfy_send.sh`) titled "Van dashboard" with the new names,
 in a background thread so the request never waits on it; a failed send is
 logged and ignored.
@@ -180,6 +218,8 @@ dashboard refused or was unreachable. Each run logs one summary line.
 - **web**: apps in `/Users/jacobr/dev/lionfeather-edge/edge.json`
   (`--edge-config` overrides). Name: app name, title case. Description: the
   app's `note`, trimmed to 200. Links: `web` `https://<name>.lionfeather.dev/`.
+  `service_port`: the explicit port of the app's `service` URL, omitted when
+  the URL has none.
 
 Scanning is deterministic and idempotent: the same machine state produces
 the same report, and reposting a report changes nothing.

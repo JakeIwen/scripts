@@ -13,6 +13,7 @@ import sys
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
@@ -262,6 +263,16 @@ def build_mac_listeners(
     return listeners
 
 
+def edge_service_port(service: Any) -> Optional[int]:
+    """Return the explicit port an edge app forwards to, if its service URL names one."""
+    if not isinstance(service, str):
+        return None
+    try:
+        return urllib.parse.urlsplit(service).port
+    except ValueError:
+        return None
+
+
 def build_web_listeners(config_output: str) -> List[Dict[str, Any]]:
     try:
         config = json.loads(config_output)
@@ -275,13 +286,19 @@ def build_web_listeners(config_output: str) -> List[Dict[str, Any]]:
         if not isinstance(app, dict) or not isinstance(app.get("name"), str) or not app["name"].strip():
             raise ScanError("edge config contains an invalid app")
         app_name = clean_text(app["name"], 253)
-        listeners.append({
+        listener = {
             "key": "web:" + app_name,
             "host": "web",
             "name": title_name(app_name),
             "description": clean_text(app.get("note", ""), 200),
             "links": [{"kind": "web", "url": "https://{}.lionfeather.dev/".format(app_name)}],
-        })
+        }
+        # Edge apps keep the port they use on the Mac, so the dashboard can
+        # file the public route under the Mac app's row.
+        port = edge_service_port(app.get("service"))
+        if port is not None:
+            listener["service_port"] = port
+        listeners.append(listener)
     return sorted(listeners, key=lambda listener: listener["key"])
 
 

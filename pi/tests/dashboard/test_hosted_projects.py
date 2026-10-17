@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import subprocess
@@ -40,6 +41,22 @@ def listener(host=Host.PI, unit="example.service", name="Example", port=19001):
         "description": "Discovered description.",
         "links": [{"kind": kind, "url": f"http://{hostname}:{port}/"}],
     }
+
+
+def web_listener(app, port):
+    return {
+        "key": f"web:{app}", "host": Host.WEB, "name": app.title(), "description": "",
+        "links": [{"kind": LinkKind.WEB, "url": f"https://{app}.lionfeather.dev/"}],
+        "service_port": port,
+    }
+
+
+def keys(entry):
+    return [service["key"] for service in entry["services"]]
+
+
+def counts(created=0, adopted=0, merged=0, updated=0, stale=0):
+    return {"created": created, "adopted": adopted, "merged": merged, "updated": updated, "stale": stale}
 
 
 def report(*listeners, hosts=None, scanned_at=SCANNED_AT):
@@ -108,13 +125,13 @@ class HostedProjectMigrationTests(HostedProjectFixture):
             write.assert_not_called()
             migrated = store.update("custom-legacy", {"status": Status.HIDDEN})
             write.assert_called_once()
-        self.assertEqual(state.get("hosted_projects_schema"), 2)
+        self.assertEqual(state.get("hosted_projects_schema"), 3)
         self.assertEqual(len(migrated), len(self.initial) + 1)
         saved_legacy = next(entry for entry in migrated if entry["id"] == legacy["id"])
         for field in ("id", "name", "description", "links"):
             self.assertEqual(saved_legacy[field], legacy[field])
         for field, expected in {"host": Host.CUSTOM, "status": Status.HIDDEN,
-                                "source": Source.MANUAL, "key": None, "live": True,
+                                "source": Source.MANUAL, "services": [], "live": True,
                                 "first_seen": None, "last_seen": None}.items():
             self.assertEqual(saved_legacy[field], expected)
         self.assertRegex(saved_legacy["updated_at"], r"^\d{4}-\d{2}-\d{2}T.*Z$")
@@ -148,7 +165,7 @@ class HostedProjectMigrationTests(HostedProjectFixture):
             projects = HostedProjectStore(state)
             write.assert_not_called()
         self.assertEqual(len(projects.snapshot()), len(self.initial) + 1)
-        self.assertEqual(state.get("hosted_projects_schema"), 2)
+        self.assertEqual(state.get("hosted_projects_schema"), 3)
         self.assertEqual(Path(self.path).read_bytes(), before)
         missing = os.path.join(self.temp.name, "absent.json")
         HostedProjectStore(StateStore(missing))
@@ -168,7 +185,7 @@ class HostedProjectTests(HostedProjectFixture):
         self.assertEqual(entry["status"], Status.LISTED)
         self.assertEqual(entry["source"], Source.MANUAL)
         self.assertTrue(entry["live"])
-        self.assertIsNone(entry["key"])
+        self.assertEqual(entry["services"], [])
         self.assertIsNone(entry["first_seen"])
         self.assertIsNone(entry["last_seen"])
         self.assertTrue(entry["updated_at"].endswith("Z"))
@@ -218,12 +235,10 @@ class HostedProjectTests(HostedProjectFixture):
 class HostedProjectReportTests(HostedProjectFixture):
     def test_create_and_idempotent_repost_do_not_write_or_notify_again(self):
         payload = report(listener())
-        self.assertEqual(self.projects.apply_report(payload), {
-            "created": 1, "adopted": 0, "updated": 0, "stale": 0,
-        })
+        self.assertEqual(self.projects.apply_report(payload), counts(created=1))
         created = self.named("Example")
         self.assertEqual(created["id"], "pi:example.service")
-        self.assertEqual(created["key"], created["id"])
+        self.assertEqual(created["services"], [{"key": created["id"], "live": True}])
         self.assertEqual(created["status"], Status.NEW)
         self.assertEqual(created["source"], Source.SCANNED)
         self.assertEqual(created["first_seen"], SCANNED_AT)
@@ -231,9 +246,7 @@ class HostedProjectReportTests(HostedProjectFixture):
         self.assertEqual(created["links"][0]["label"], "LAN")
         before = self.projects.snapshot()
         with mock.patch(WRITER) as write:
-            self.assertEqual(self.projects.apply_report(payload), {
-                "created": 0, "adopted": 0, "updated": 0, "stale": 0,
-            })
+            self.assertEqual(self.projects.apply_report(payload), counts())
             write.assert_not_called()
         self.assertEqual(self.projects.snapshot(), before)
         self.notify.assert_called_once_with(["Example"])
@@ -254,8 +267,8 @@ class HostedProjectReportTests(HostedProjectFixture):
     def test_report_accepts_200_listeners_and_is_not_limited_by_form_capacity(self):
         items = [listener(unit=f"app-{i}.service", name=f"App {i}", port=19000 + i)
                  for i in range(200)]
-        counts = self.projects.apply_report(report(*items))
-        self.assertEqual(counts["created"], 200)
+        result = self.projects.apply_report(report(*items))
+        self.assertEqual(result["created"], 200)
         self.assertEqual(len(self.projects.snapshot()), len(self.initial) + 200)
         self.notify.assert_called_once()
 
@@ -269,9 +282,9 @@ class HostedProjectReportTests(HostedProjectFixture):
             ],
         })
         before = self.named("My name")
-        counts = self.projects.apply_report(report(listener(port=19002), scanned_at=LATER))
+        result = self.projects.apply_report(report(listener(port=19002), scanned_at=LATER))
         after = self.named("My name")
-        self.assertEqual(counts, {"created": 0, "adopted": 0, "updated": 1, "stale": 0})
+        self.assertEqual(result, counts(updated=1))
         for field in ("name", "description", "status", "updated_at", "first_seen"):
             self.assertEqual(after[field], before[field])
         self.assertEqual(after["last_seen"], LATER)
@@ -285,12 +298,12 @@ class HostedProjectReportTests(HostedProjectFixture):
         before = self.named("Fieldwork")
         item = listener(Host.MAC, "com.jacobr.fieldwork", "Scanner name", 4317)
         item["links"][0]["url"] += "new-path"
-        counts = self.projects.apply_report(report(item))
+        result = self.projects.apply_report(report(item))
         after = self.named("Fieldwork")
-        self.assertEqual(counts, {"created": 0, "adopted": 1, "updated": 0, "stale": 0})
+        self.assertEqual(result, counts(adopted=1))
         for field in ("id", "name", "description", "status", "source", "updated_at"):
             self.assertEqual(after[field], before[field])
-        self.assertEqual(after["key"], item["key"])
+        self.assertEqual(keys(after), [item["key"]])
         self.assertEqual(after["first_seen"], SCANNED_AT)
         self.assertEqual(after["last_seen"], SCANNED_AT)
         self.assertEqual(after["links"], before["links"])
@@ -301,19 +314,21 @@ class HostedProjectReportTests(HostedProjectFixture):
         item = listener(Host.PI, "van-dashboard.service", "Van Dashboard", 8788)
         self.assertEqual(self.projects.apply_report(report(item))["adopted"], 1)
         after = self.named("Network History")
-        self.assertEqual(after["key"], item["key"])
+        self.assertEqual(keys(after), [item["key"]])
         self.assertEqual(after["links"], before["links"])
         self.assertIn("#network-history", after["links"][0]["url"])
 
-    def test_visual_guides_keeps_local_link_and_second_host_gets_distinct_name(self):
+    def test_visual_guides_mac_and_pi_services_share_the_seeded_row(self):
         pi = listener(Host.PI, "visual-guides.service", "Visual Guides", 8791)
         mac = listener(Host.MAC, "com.jacobr.visual-guides", "Visual Guides", 8792)
         self.projects.apply_report(report(pi))
+        self.assertEqual(self.projects.apply_report(report(mac)), counts(adopted=1))
         seed = self.named("Visual Guides")
         self.assertEqual(seed["id"], "seed-visual-guides")
+        self.assertEqual(seed["host"], Host.PI)
+        self.assertEqual(keys(seed), [mac["key"], pi["key"]])
         self.assertEqual([link["kind"] for link in seed["links"]], ["local", "lan", "ts"])
-        self.assertEqual(self.projects.apply_report(report(mac))["created"], 1)
-        self.assertEqual(self.named("Visual Guides (This Mac)")["key"], mac["key"])
+        self.assertEqual(len(self.projects.snapshot()), len(self.initial))
 
     def test_cross_host_adoption_changes_host_and_preserves_hidden_status(self):
         self.projects.update("seed-visual-guides", {"status": Status.HIDDEN})
@@ -339,20 +354,20 @@ class HostedProjectReportTests(HostedProjectFixture):
 
     def test_stale_affects_claimed_entries_of_reported_hosts_only(self):
         pi = listener()
-        mac = listener(Host.MAC, "com.jacobr.example", "Mac example", 19002)
-        web = listener(Host.WEB, "example", "Web example", 19003)
+        mac = listener(Host.MAC, "com.jacobr.mac-example", "Mac example", 19002)
+        web = listener(Host.WEB, "web-example", "Web example", 19003)
         adopted = listener(Host.MAC, "com.jacobr.fieldwork", "Fieldwork", 4317)
         self.projects.apply_report(report(pi, mac, web, adopted))
         self.projects.update(pi["key"], {"status": Status.HIDDEN})
-        counts = self.projects.apply_report(report(hosts=[Host.PI], scanned_at=LATER))
-        self.assertEqual(counts, {"created": 0, "adopted": 0, "updated": 0, "stale": 1})
+        result = self.projects.apply_report(report(hosts=[Host.PI], scanned_at=LATER))
+        self.assertEqual(result, counts(stale=1))
         self.assertFalse(self.named("Example")["live"])
         self.assertEqual(self.named("Example")["last_seen"], SCANNED_AT)
         self.assertEqual(self.named("Example")["status"], Status.HIDDEN)
         self.assertTrue(self.named("Mac example")["live"])
         self.assertTrue(self.named("Web example")["live"])
-        counts = self.projects.apply_report(report(hosts=[Host.MAC], scanned_at=LATER))
-        self.assertEqual(counts["stale"], 2)
+        result = self.projects.apply_report(report(hosts=[Host.MAC], scanned_at=LATER))
+        self.assertEqual(result["stale"], 2)
         self.assertFalse(self.named("Mac example")["live"])
         self.assertFalse(self.named("Fieldwork")["live"])
         self.assertEqual(self.named("Fieldwork")["source"], Source.MANUAL)
@@ -387,6 +402,13 @@ class HostedProjectReportTests(HostedProjectFixture):
             item[field] = value
             invalid.append(report(item, hosts=[Host.PI]))
         invalid.append(report(*[listener(unit=f"{i}.service") for i in range(201)]))
+        for value in (True, 0, 65536, "4317", None):
+            item = web_listener("example", 4317)
+            item["service_port"] = value
+            invalid.append(report(item))
+        item = listener()
+        item["service_port"] = 4317
+        invalid.append(report(item))
         for payload in invalid:
             with self.subTest(payload=payload), self.assertRaises(ValueError):
                 self.projects.apply_report(payload)
@@ -425,10 +447,168 @@ class HostedProjectReportTests(HostedProjectFixture):
         self.run.side_effect = None
         self.run.return_value = mock.Mock(returncode=1)
         with self.assertLogs(project_module.__name__):
-            counts = self.projects.apply_report(report(listener()))
+            result = self.projects.apply_report(report(listener()))
             self.join_notifications()
-        self.assertEqual(counts["created"], 1)
+        self.assertEqual(result["created"], 1)
         self.assertEqual(self.named("Example")["status"], Status.NEW)
+
+
+def link(kind, url):
+    return {"kind": kind, "label": {"local": "This Mac", "lan": "LAN", "ts": "Tailscale", "web": "Web"}[kind],
+            "url": url}
+
+
+def v2_entry(entry_id, name, host, key, links, status=Status.LISTED, source=Source.MANUAL):
+    return {
+        "id": entry_id, "key": key, "name": name, "description": f"{name} description",
+        "host": host, "links": links, "status": status, "source": source, "live": True,
+        "first_seen": SCANNED_AT if key else None, "last_seen": SCANNED_AT if key else None,
+        "updated_at": SCANNED_AT,
+    }
+
+
+def pi_links(port):
+    return [link("lan", f"http://vanpi.lan:{port}/"), link("ts", f"http://100.82.91.76:{port}/")]
+
+
+class HostedProjectDuplicateTests(HostedProjectFixture):
+    def test_units_sharing_an_address_share_one_row_until_both_stop(self):
+        tailscale = listener(Host.PI, "van-telemetry-web-tailscale.service", "Tailscale unit", 8765)
+        lan = listener(Host.PI, "van-telemetry-web.service", "LAN unit", 8765)
+        self.assertEqual(self.projects.apply_report(report(tailscale, lan)), counts(adopted=2))
+        row = self.named("Vehicle Telemetry")
+        self.assertEqual(keys(row), [tailscale["key"], lan["key"]])
+        self.assertEqual(len(self.projects.snapshot()), len(self.initial))
+        self.projects.apply_report(report(lan, scanned_at=LATER))
+        row = self.named("Vehicle Telemetry")
+        self.assertTrue(row["live"])
+        self.assertEqual([service["live"] for service in row["services"]], [False, True])
+        self.assertEqual(self.projects.apply_report(report(hosts=[Host.PI]))["stale"], 1)
+        self.assertFalse(self.named("Vehicle Telemetry")["live"])
+
+    def test_new_units_sharing_an_address_create_one_row_named_for_the_shorter_unit(self):
+        tailscale = listener(unit="demo-tailscale.service", name="Demo Tailscale")
+        plain = listener(unit="demo.service", name="Demo")
+        self.assertEqual(self.projects.apply_report(report(tailscale, plain)), counts(created=1))
+        row = self.named("Demo")
+        self.assertEqual(row["id"], plain["key"])
+        self.assertEqual(keys(row), [tailscale["key"], plain["key"]])
+        self.notify.assert_called_once_with(["Demo"])
+
+    def test_web_route_joins_the_mac_app_on_its_upstream_port(self):
+        mac = listener(Host.MAC, "com.jacobr.gizmo", "Gizmo", 4400)
+        web = web_listener("gadget", 4400)
+        self.assertEqual(self.projects.apply_report(report(web, mac)), counts(created=1, adopted=1))
+        row = self.named("Gizmo")
+        self.assertEqual(keys(row), [mac["key"], web["key"]])
+        self.assertEqual([link["kind"] for link in row["links"]], ["local", "web"])
+        self.notify.assert_called_once_with(["Gizmo"])
+        before = self.projects.snapshot()
+        with mock.patch(WRITER) as write:
+            self.assertEqual(self.projects.apply_report(report(mac, web, scanned_at=LATER)), counts())
+            write.assert_not_called()
+        self.assertEqual(self.projects.snapshot(), before)
+
+    def test_same_name_on_mac_and_pi_shares_a_row(self):
+        pi = listener(Host.PI, "notes.service", "Notes", 19005)
+        mac = listener(Host.MAC, "com.jacobr.notes", "Notes", 4500)
+        self.projects.apply_report(report(pi))
+        self.assertEqual(self.projects.apply_report(report(mac)), counts(adopted=1))
+        self.assertEqual(keys(self.named("Notes")), [mac["key"], pi["key"]])
+
+    def test_unreviewed_duplicate_folds_in_but_a_kept_one_stays_separate(self):
+        web = web_listener("gadget", 4400)
+        mac = listener(Host.MAC, "com.jacobr.gizmo", "Gizmo", 4400)
+        for status in (None, Status.HIDDEN, Status.LISTED):
+            with self.subTest(status=status):
+                self.state.data["hosted_projects"] = copy.deepcopy(self.initial)
+                self.projects.apply_report(report(web))
+                if status:
+                    self.projects.update(web["key"], {"status": status})
+                self.projects.apply_report(report(mac, hosts=[Host.MAC]))
+                result = self.projects.apply_report(report(mac, web, scanned_at=LATER))
+                names = {entry["name"] for entry in self.projects.snapshot()}
+                if status == Status.LISTED:
+                    self.assertEqual(result, counts())
+                    self.assertTrue({"Gadget", "Gizmo"} <= names)
+                else:
+                    self.assertEqual(result, counts(merged=1))
+                    self.assertNotIn("Gadget", names)
+                    self.assertEqual(keys(self.named("Gizmo")), [mac["key"], web["key"]])
+
+    def test_schema_2_duplicates_fold_into_their_original_rows_on_the_next_scans(self):
+        legacy = [
+            v2_entry("seed-telemetry", "Vehicle Telemetry", Host.PI,
+                     "pi:van-telemetry-web-tailscale.service", pi_links(8765)),
+            v2_entry("pi:van-telemetry-web.service", "Van Telemetry Web", Host.PI,
+                     "pi:van-telemetry-web.service", pi_links(8765), Status.NEW, Source.SCANNED),
+            v2_entry("seed-visual-guides", "Visual Guides", Host.PI, "pi:visual-guides.service",
+                     [link("local", "http://127.0.0.1:8792/"), *pi_links(8791)]),
+            v2_entry("mac:com.jacobr.visual-guides", "Visual Guides (This Mac)", Host.MAC,
+                     "mac:com.jacobr.visual-guides", [link("local", "http://127.0.0.1:8792/")],
+                     Status.NEW, Source.SCANNED),
+            v2_entry("seed-fieldwork", "Fieldwork", Host.MAC, "mac:com.jacobr.fieldwork",
+                     [link("local", "http://127.0.0.1:4317/")]),
+            v2_entry("web:fieldwork", "Fieldwork (lionfeather.dev)", Host.WEB, "web:fieldwork",
+                     [link("web", "https://fieldwork.lionfeather.dev/")], Status.NEW, Source.SCANNED),
+            v2_entry("custom-inventory", "Electronics inventory", Host.MAC,
+                     "mac:com.jacobr.electronics-inventory", [link("local", "http://127.0.0.1:8767")]),
+            v2_entry("web:inventory", "Inventory", Host.WEB, "web:inventory",
+                     [link("web", "https://inventory.lionfeather.dev/")], Status.HIDDEN, Source.SCANNED),
+            v2_entry("web:critter", "Critter", Host.WEB, "web:critter",
+                     [link("web", "https://critter.lionfeather.dev/")], Status.NEW, Source.SCANNED),
+            v2_entry("seed-always-remote", "Always Remote", Host.PI, None, pi_links(8777)),
+        ]
+        Path(self.path).write_text(json.dumps({
+            "hosted_projects": legacy, "hosted_projects_schema": 2,
+        }), encoding="utf-8")
+        projects = HostedProjectStore(StateStore(self.path))
+        self.assertEqual(keys(projects.snapshot()[0]), [])  # Always Remote, unclaimed
+        pi_report = report(
+            listener(Host.PI, "van-telemetry-web-tailscale.service", "Tailscale", 8765),
+            listener(Host.PI, "van-telemetry-web.service", "Van Telemetry Web", 8765),
+            listener(Host.PI, "visual-guides.service", "Visual Guides", 8791),
+        )
+        self.assertEqual(projects.apply_report(pi_report), counts(merged=1))
+        mac_web_report = report(
+            listener(Host.MAC, "com.jacobr.electronics-inventory", "Electronics Inventory", 8767),
+            listener(Host.MAC, "com.jacobr.fieldwork", "Fieldwork", 4317),
+            listener(Host.MAC, "com.jacobr.visual-guides", "Visual Guides", 8792),
+            web_listener("critter", 4329), web_listener("fieldwork", 4317),
+            web_listener("inventory", 8767),
+        )
+        self.assertEqual(projects.apply_report(mac_web_report), counts(merged=3))
+        rows = {entry["name"]: entry for entry in projects.snapshot()}
+        self.assertEqual(sorted(rows), [
+            "Always Remote", "Critter", "Electronics inventory", "Fieldwork",
+            "Vehicle Telemetry", "Visual Guides",
+        ])
+        self.assertEqual(keys(rows["Vehicle Telemetry"]), [
+            "pi:van-telemetry-web-tailscale.service", "pi:van-telemetry-web.service",
+        ])
+        self.assertEqual(keys(rows["Visual Guides"]), [
+            "mac:com.jacobr.visual-guides", "pi:visual-guides.service",
+        ])
+        self.assertEqual(keys(rows["Fieldwork"]), ["mac:com.jacobr.fieldwork", "web:fieldwork"])
+        self.assertEqual(keys(rows["Electronics inventory"]), [
+            "mac:com.jacobr.electronics-inventory", "web:inventory",
+        ])
+        self.assertEqual([link["url"] for link in rows["Electronics inventory"]["links"]], [
+            "http://127.0.0.1:8767", "https://inventory.lionfeather.dev/",
+        ])
+        for name in ("Vehicle Telemetry", "Visual Guides", "Fieldwork", "Electronics inventory"):
+            original = next(entry for entry in legacy if entry["name"] == name)
+            for field in ("id", "description", "status", "source", "host"):
+                self.assertEqual(rows[name][field], original[field], (name, field))
+        self.assertEqual(rows["Critter"]["status"], Status.NEW)
+        self.assertTrue(all(entry["live"] for entry in rows.values()))
+        self.notify.assert_not_called()
+        before = projects.snapshot()
+        with mock.patch(WRITER) as write:
+            projects.apply_report({**pi_report, "scanned_at": LATER})
+            projects.apply_report({**mac_web_report, "scanned_at": LATER})
+            write.assert_not_called()
+        self.assertEqual(projects.snapshot(), before)
 
 
 class HostedProjectRouteTests(HostedProjectFixture):
@@ -521,7 +701,7 @@ class HostedProjectRouteTests(HostedProjectFixture):
     def test_scan_returns_counts_and_get_includes_new_hidden_and_listed(self):
         response = self.client.post(self.scan_url, json=report(listener()))
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json(), {"ok": True, "created": 1, "adopted": 0, "updated": 0, "stale": 0})
+        self.assertEqual(response.get_json(), {"ok": True, **counts(created=1)})
         self.client.post(self.update_url, json={"status": Status.HIDDEN})
         projects = self.client.get(self.url).get_json()["projects"]
         self.assertEqual({entry["status"] for entry in projects}, set(Status))

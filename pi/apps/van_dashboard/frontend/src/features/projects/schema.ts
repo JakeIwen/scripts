@@ -58,9 +58,11 @@ export const projectLinkSchema = object({
   url: safeProjectUrl,
 });
 
+const projectServiceSchema = object({ key: text, live: booleanValue });
+
 export const hostedProjectSchema = object({
   id: text,
-  key: nullableString,
+  services: v.array(projectServiceSchema),
   name: text,
   description: text,
   host: oneOf([PROJECT_HOST.MAC, PROJECT_HOST.PI, PROJECT_HOST.WEB, PROJECT_HOST.CUSTOM]),

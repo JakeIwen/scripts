@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 from enum import StrEnum
 import re
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 from urllib.parse import urlsplit
 
 
@@ -53,11 +53,19 @@ class ProjectListener(TypedDict):
     name: str
     description: str
     links: list[ProjectLink]
+    # Web listeners only: the port lionfeather-edge forwards to, which ties a
+    # public route to the Mac app serving the same port.
+    service_port: NotRequired[int]
+
+
+class ProjectService(TypedDict):
+    key: str
+    live: bool
 
 
 class HostedProject(TypedDict):
     id: str
-    key: str | None
+    services: list[ProjectService]
     host: str
     name: str
     description: str
@@ -79,6 +87,7 @@ class ScanReport(TypedDict):
 class ReportCounts(TypedDict):
     created: int
     adopted: int
+    merged: int
     updated: int
     stale: int
 
@@ -180,9 +189,16 @@ def validate_updates(fields) -> ProjectUpdates:
     return result
 
 
+def validate_service_port(value, host):
+    if host != Host.WEB or isinstance(value, bool) or not isinstance(value, int) or not 0 < value < 65536:
+        raise ValueError("service_port must be the upstream port of a web listener")
+    return value
+
+
 def validate_listener(listener, hosts) -> ProjectListener:
     required = {"key", "host", "name", "description", "links"}
-    if not isinstance(listener, dict) or set(listener) != required:
+    if (not isinstance(listener, dict) or not required <= set(listener)
+            or set(listener) - required - {"service_port"}):
         raise ValueError("Listener must contain key, host, name, description, and links")
     host, key = listener["host"], listener["key"]
     if not isinstance(host, str) or host not in hosts:
@@ -191,11 +207,14 @@ def validate_listener(listener, hosts) -> ProjectListener:
             or len(key) == len(host) + 1 or not key.isprintable()
             or any(c.isspace() for c in key)):
         raise ValueError("Listener key must be <host>:<unit>")
-    return {
+    result: ProjectListener = {
         "key": key, "host": host, "name": validate_name(listener["name"]),
         "description": validate_description(listener["description"]),
         "links": validate_links(listener["links"]),
     }
+    if "service_port" in listener:
+        result["service_port"] = validate_service_port(listener["service_port"], host)
+    return result
 
 
 def validate_report(report) -> ScanReport:
@@ -231,3 +250,7 @@ def link_addresses(links):
         port = parsed.port if parsed.port is not None else (443 if parsed.scheme == "https" else 80)
         addresses.add((parsed.hostname, port))
     return addresses
+
+
+def link_ports(links, kind):
+    return {port for link in links if link["kind"] == kind for _, port in link_addresses([link])}

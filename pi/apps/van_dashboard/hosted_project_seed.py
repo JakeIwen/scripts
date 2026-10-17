@@ -47,7 +47,7 @@ CATALOG = (
 def seed_projects(existing_names, timestamp) -> list[HostedProject]:
     return [
         {
-            "id": f"seed-{catalog_id}", "key": None, "name": name,
+            "id": f"seed-{catalog_id}", "services": [], "name": name,
             "host": host, "description": description,
             "links": [dict(link) for link in links],
             "status": Status.LISTED, "source": Source.MANUAL, "live": True,

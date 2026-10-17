@@ -10,7 +10,7 @@ import {
 
 const PROJECT = {
   id: 'pi:audiobooks.service',
-  key: 'pi:audiobooks.service',
+  services: [{ key: 'pi:audiobooks.service', live: true }],
   name: 'Audiobooks',
   description: 'Browse the audiobook library and play through Sonos.',
   host: PROJECT_HOST.PI,

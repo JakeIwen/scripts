@@ -22,7 +22,7 @@ vi.mock('./api', async (original) => ({
 const PROJECTS: HostedProject[] = [
   {
     id: 'new-project',
-    key: 'mac:com.jacobr.new-project',
+    services: [{ key: 'mac:com.jacobr.new-project', live: true }],
     name: 'Fresh scan',
     description: 'Waiting for review.',
     host: PROJECT_HOST.MAC,
@@ -42,7 +42,7 @@ const PROJECTS: HostedProject[] = [
   },
   {
     id: 'listed-project',
-    key: 'pi:listed.service',
+    services: [{ key: 'pi:listed.service', live: true }],
     name: 'Listed app',
     description: 'Available from every dashboard device.',
     host: PROJECT_HOST.PI,
@@ -68,7 +68,7 @@ const PROJECTS: HostedProject[] = [
   },
   {
     id: 'hidden-project',
-    key: 'web:hidden-project',
+    services: [{ key: 'web:hidden-project', live: true }],
     name: 'Hidden app',
     description: 'Intentionally hidden.',
     host: PROJECT_HOST.WEB,
@@ -88,7 +88,7 @@ const PROJECTS: HostedProject[] = [
   },
   {
     id: 'stale-project',
-    key: null,
+    services: [],
     name: 'Offline custom app',
     description: 'No longer reported.',
     host: PROJECT_HOST.CUSTOM,

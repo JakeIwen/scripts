@@ -164,6 +164,20 @@ class WebParsingTests(unittest.TestCase):
         })
 
 
+    def test_reports_the_explicit_upstream_port_of_each_edge_app(self):
+        config = json.dumps({"apps": [
+            {"name": "critter", "service": "http://127.0.0.1:4329"},
+            {"name": "default-port", "service": "http://127.0.0.1"},
+            {"name": "bad-port", "service": "http://127.0.0.1:99999"},
+            {"name": "no-service"},
+        ]})
+        ports = {listener["key"]: listener.get("service_port")
+                 for listener in scan.build_web_listeners(config)}
+        self.assertEqual(ports, {
+            "web:bad-port": None, "web:critter": 4329, "web:default-port": None, "web:no-service": None,
+        })
+
+
 class ReportTests(unittest.TestCase):
     def test_report_shape_matches_contract(self):
         listener = {
