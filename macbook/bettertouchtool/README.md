@@ -273,11 +273,16 @@ identities. Recreate venvs rather than moving them.
   unverified writes and asynchronous draft confirmation. With `BTT_LIVE_TESTS=1`,
   it also exercises the real Cocoa bridge on a disposable named pasteboard; that
   opt-in test never accesses the general clipboard or user text.
+  Command discovery inspects only immediate Cut/Copy/Paste siblings in a top-level
+  menu; it never descends into browser history, bookmarks or Services submenus.
   Firefox bypasses `AXSelectedText` because its
   [setter](https://github.com/mozilla-firefox/firefox/blob/main/accessible/mac/mozTextAccessible.mm)
   passes a selection length to `DeleteText`'s end-offset argument, which can delete
   text outside the selection. The menu route checks the complete expected value and
   retains the selection for consecutive transforms.
+  Temporary outcome diagnostics retain per-app results and the last error, so a
+  successful Notes transform cannot erase evidence of a Firefox failure. App
+  attribution uses AX keyboard focus; these private files contain no selected text.
 - `signal_text_diagnostic.js`: temporary Media > Tools > Signal Diagnostic button's
   target-app runner. It requests Signal activation and waits up to 30 seconds for a stable draft selection,
   optionally attempts the selected transform, then returns to BTT with a detailed

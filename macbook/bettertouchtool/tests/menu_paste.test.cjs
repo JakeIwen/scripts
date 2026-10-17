@@ -94,14 +94,19 @@ test('a successful-looking clipboard write cannot paste missing or stale text', 
 });
 
 function pasteFixture(refuse = false, {text = 'mixed suffix', location = 0, length = 5} = {}) {
-    const base = fixture(), system = {}, application = {}, editor = {}, menu = {}, paste = {};
+    const base = fixture(), system = {}, application = {}, editor = {}, bar = {}, group = {}, menu = {};
+    const cut = {}, copy = {}, paste = {};
     const state = {value:text,range:{location,length},pending:false,presses:0};
     const selectedText = () => state.value.slice(state.range.location,state.range.location+state.range.length);
     const attribute = (element,name) => {
         if (element === system) return name === 'AXFocusedApplication' ? application : editor;
-        if (element === application) return menu;
-        if (element === menu) return name === 'AXChildren' ? array([paste]) : 'AXMenu';
-        if (element === paste) return {AXRole:'AXMenuItem',AXMenuItemCmdChar:'v',AXMenuItemCmdModifiers:0,AXEnabled:true}[name] ?? null;
+        if (element === application) return bar;
+        if (element === bar) return array([group]);
+        if (element === group) return array([menu]);
+        if (element === menu) return name === 'AXChildren' ? array([cut,copy,paste]) : 'AXMenu';
+        if ([cut,copy,paste].includes(element)) return {AXRole:'AXMenuItem',
+            AXMenuItemCmdChar:element === cut ? 'x' : element === copy ? 'c' : 'v',
+            AXMenuItemCmdModifiers:0,AXEnabled:true}[name] ?? null;
         if (element === editor) return {AXValue:state.value,AXSelectedTextRange:state.range,
             AXSelectedText:selectedText()}[name];
         throw Error('Unexpected target');
@@ -126,6 +131,39 @@ function pasteFixture(refuse = false, {text = 'mixed suffix', location = 0, leng
     };
     return {...base,state,selectedText,run};
 }
+
+test('Paste lookup never enters large bookmark/history or nested Services menus', () => {
+    const {context} = fixture();
+    const app = {}, bar = {}, edit = {}, menu = {}, history = {}, nested = {};
+    const commands = ['x','c','v'].map(key => ({key}));
+    const attribute = (item,name) => {
+        assert.notEqual(item,history,'History must not be traversed after Edit is found');
+        if (item === app) return bar;
+        if (item === bar) return array([edit,history]);
+        if (item === edit) return array([menu]);
+        if (item === menu) return name === 'AXRole' ? 'AXMenu' : array([...commands,nested]);
+        if (item === nested) {
+            assert.notEqual(name,'AXChildren','Nested submenus must not be traversed');
+            return name === 'AXRole' ? 'AXMenuItem' : null;
+        }
+        return {AXRole:'AXMenuItem',AXMenuItemCmdChar:item.key,AXMenuItemCmdModifiers:0}[name] ?? null;
+    };
+    assert.equal(context.findPasteMenuItem(app,attribute),commands[2]);
+});
+
+test('an ambiguous Edit-menu Paste command is rejected', () => {
+    const {context} = fixture();
+    const app = {}, bar = {}, edit = {}, menu = {};
+    const commands = ['x','c','v','v'].map(key => ({key}));
+    const attribute = (item,name) => {
+        if (item === app) return bar;
+        if (item === bar) return array([edit]);
+        if (item === edit) return array([menu]);
+        if (item === menu) return name === 'AXRole' ? 'AXMenu' : array(commands);
+        return {AXRole:'AXMenuItem',AXMenuItemCmdChar:item.key,AXMenuItemCmdModifiers:0}[name] ?? null;
+    };
+    assert.throws(() => context.findPasteMenuItem(app,attribute),/unambiguous Paste/);
+});
 
 test('upper then lower preserves a URL and its middle selection without refocusing', () => {
     // Preserve the reported URL shape/offset without retaining a real conversation ID.

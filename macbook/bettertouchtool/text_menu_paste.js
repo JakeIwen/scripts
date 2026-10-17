@@ -45,22 +45,32 @@ function withTemporaryClipboard(board, text, action) {
 }
 
 function findPasteMenuItem(application, attribute) {
-    const queue = [attribute(application, 'AXMenuBar')], matches = [];
-    let visited = 0;
-    while (queue.length && visited++ < 500) {
-        const element = queue.shift();
-        const role = ObjC.unwrap(attribute(element, 'AXRole', {optional:true}));
-        if (role === 'AXMenuItem') {
-            const key = ObjC.unwrap(attribute(element, 'AXMenuItemCmdChar', {optional:true}));
-            const modifiers = attribute(element, 'AXMenuItemCmdModifiers', {optional:true});
-            if (typeof key === 'string' && key.toLowerCase() === 'v' && modifiers !== null
-                && Number(ObjC.unwrap(modifiers)) === 0) matches.push(element);
+    const bar = attribute(application, 'AXMenuBar');
+    const groups = attribute(bar, 'AXChildren');
+    for (let group = 0; group < Number(groups.count); group++) {
+        let items = attribute(groups.objectAtIndex(group), 'AXChildren', {optional:true});
+        if (items && Number(items.count) === 1 &&
+            ObjC.unwrap(attribute(items.objectAtIndex(0), 'AXRole', {optional:true})) === 'AXMenu')
+            items = attribute(items.objectAtIndex(0), 'AXChildren', {optional:true});
+        // Standard Edit commands are immediate siblings. Never traverse history,
+        // bookmarks or Services submenus, and do not depend on a localized title.
+        if (!items || Number(items.count) > 128) continue;
+        const commands = {x:[], c:[], v:[]};
+        for (let index = 0; index < Number(items.count); index++) {
+            const item = items.objectAtIndex(index);
+            if (ObjC.unwrap(attribute(item, 'AXRole', {optional:true})) !== 'AXMenuItem') continue;
+            const key = ObjC.unwrap(attribute(item, 'AXMenuItemCmdChar', {optional:true}));
+            const modifiers = attribute(item, 'AXMenuItemCmdModifiers', {optional:true});
+            if (typeof key === 'string' && Object.prototype.hasOwnProperty.call(commands, key.toLowerCase())
+                && modifiers !== null && Number(ObjC.unwrap(modifiers)) === 0)
+                commands[key.toLowerCase()].push(item);
         }
-        const children = attribute(element, 'AXChildren', {optional:true});
-        for (let i = 0; children && i < Number(children.count); i++) queue.push(children.objectAtIndex(i));
+        if (commands.x.length === 1 && commands.c.length === 1) {
+            if (commands.v.length !== 1) throw new Error('The Edit menu does not have one unambiguous Paste command.');
+            return commands.v[0];
+        }
     }
-    if (queue.length || matches.length !== 1) throw new Error('Cannot uniquely identify the app’s Paste menu command.');
-    return matches[0];
+    throw new Error('Cannot identify the app’s Cut/Copy/Paste menu commands.');
 }
 
 function assertPasteFocus(system, application, element, attribute) {

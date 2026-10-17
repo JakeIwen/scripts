@@ -338,6 +338,14 @@ test('temporary diagnostics are opt-in and exclude additional text fields', () =
         assert.equal(contents.includes(outcome.text), false);
         assert.deepEqual(Object.keys(report).sort(), ['app','kind','ok','result','time']);
         assert.equal(fs.statSync(output).mode & 0o777, 0o600);
+        const failure = source + '\nrecordTransformOutcome(' + JSON.stringify(options)
+            + ', {ok:false,error:"fixture error"});';
+        execFileSync('/usr/bin/osascript', ['-l', 'JavaScript', '-e', failure]);
+        execFileSync('/usr/bin/osascript', ['-l', 'JavaScript', '-e', script]);
+        const lastError = path.join(local, 'text-transform-last-error.json');
+        assert.equal(JSON.parse(fs.readFileSync(lastError,'utf8')).error,'fixture error');
+        assert.equal(JSON.parse(fs.readFileSync(output,'utf8')).result,'replaced');
+        assert.equal(fs.statSync(lastError).mode & 0o777, 0o600);
     } finally {
         fs.rmSync(fixture, {recursive:true});
     }

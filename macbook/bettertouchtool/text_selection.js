@@ -161,14 +161,25 @@ function recordTransformOutcome(options, outcome) {
     if (!$.NSFileManager.defaultManager.fileExistsAtPath(directory + 'record-text-transform')) return;
     // This opt-in diagnostic contains only status metadata, never selection/clipboard text.
     try {
-        ObjC.import('AppKit');
+        let app = null;
+        try {
+            const system = $.AXUIElementCreateSystemWide();
+            app = selectionApplicationBundle(selectionAttribute(system, 'AXFocusedApplication')) || null;
+        } catch (error) {
+            // Keep the failure report even when focus metadata is unavailable.
+        }
         const report = {time: new Date().toISOString(), kind: options.kind,
-            app: ObjC.unwrap($.NSWorkspace.sharedWorkspace.frontmostApplication.bundleIdentifier) || null,
+            app,
             ok: outcome.ok, result: outcome.ok ? outcome.result : undefined,
             error: outcome.ok ? undefined : outcome.error};
-        const path = directory + 'text-transform-last-result.json';
-        $(JSON.stringify(report)).writeToFileAtomicallyEncodingError(path, true, $.NSUTF8StringEncoding, null);
-        $.NSFileManager.defaultManager.setAttributesOfItemAtPathError($({NSFilePosixPermissions:384}), path, null);
+        const files = ['text-transform-last-result.json'];
+        if (app && /^[A-Za-z0-9_.-]+$/.test(app)) files.push('text-transform-' + app + '.json');
+        if (!outcome.ok) files.push('text-transform-last-error.json');
+        for (const file of files) {
+            const path = directory + file;
+            $(JSON.stringify(report)).writeToFileAtomicallyEncodingError(path, true, $.NSUTF8StringEncoding, null);
+            $.NSFileManager.defaultManager.setAttributesOfItemAtPathError($({NSFilePosixPermissions:384}), path, null);
+        }
     } catch (error) {
         // Diagnostic availability must not alter selection editing or its reported result.
     }
