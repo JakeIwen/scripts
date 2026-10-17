@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { usePollingResource, type PollingState } from '../../hooks/usePollingResource';
 import { fetchActiveConnectivity, fetchOpenWrtClients, fetchSpeedtestStatus } from './api';
@@ -49,18 +49,19 @@ export function useOpenWrtClients(sheetOpen: boolean): PollingState<OpenWrtClien
  * reading starts a new measurement window.
  */
 export function useWanThroughput(traffic: WanTraffic | null | undefined): WanThroughput | null {
-  const previousRef = useRef<WanTraffic | null>(null);
-  const [throughput, setThroughput] = useState<WanThroughput | null>(null);
+  const [latest, setLatest] = useState<{
+    sample: WanTraffic | null;
+    throughput: WanThroughput | null;
+  }>({ sample: null, throughput: null });
 
-  useEffect(() => {
-    if (!traffic) return;
-    const previous = previousRef.current;
-    if (previous?.uptimeSeconds === traffic.uptimeSeconds) return;
-    previousRef.current = traffic;
-    setThroughput(previous ? measureWanThroughput(previous, traffic) : null);
-  }, [traffic]);
-
-  return throughput;
+  // Derived from the previous render's sample, so it updates in the same render.
+  if (traffic && traffic.uptimeSeconds !== latest.sample?.uptimeSeconds) {
+    setLatest({
+      sample: traffic,
+      throughput: latest.sample ? measureWanThroughput(latest.sample, traffic) : null,
+    });
+  }
+  return latest.throughput;
 }
 
 export interface OpenWrtResources {

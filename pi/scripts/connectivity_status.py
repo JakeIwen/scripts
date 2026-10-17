@@ -34,18 +34,17 @@ MWAN_STATUS_COMMAND = (
     "/usr/sbin/mwan3 interfaces; "
     "/usr/sbin/mwan3 policies; "
     "printf '__VAN_DASH_ROUTER_TIME__='; /bin/date +%s; "
-    "for iface in wan clientwan lifiwan; do "
+    f"for iface in {' '.join(MWAN_PRIORITY)}; do "
     "if [ -r /tmp/uplink-https/$iface ]; then "
-    "printf '__VAN_DASH_HTTPS__='; /bin/cat /tmp/uplink-https/$iface; fi; done; "
+    "printf '__VAN_DASH_HTTPS__='; /bin/cat /tmp/uplink-https/$iface; fi; "
     # Raw byte counters only; the dashboard turns consecutive samples into rates.
-    "for iface in wan clientwan lifiwan; do "
     "printf '__VAN_DASH_WAN_STATUS__=%s=' $iface; "
     "/bin/ubus -S call network.interface.$iface status 2>/dev/null || echo; done; "
     "printf '__VAN_DASH_UPTIME__='; /bin/cat /proc/uptime; "
     "/bin/sed 's/^/__VAN_DASH_NETDEV__=/' /proc/net/dev; true"
 )
 WAN_STATUS_LINE = re.compile(
-    r"^__VAN_DASH_WAN_STATUS__=(wan|clientwan|lifiwan)=(.*)$", re.MULTILINE
+    rf"^__VAN_DASH_WAN_STATUS__=({'|'.join(MWAN_PRIORITY)})=(.*)$", re.MULTILINE
 )
 ROUTER_UPTIME_LINE = re.compile(
     r"^__VAN_DASH_UPTIME__=(\d+(?:\.\d+)?)(?:\s|$)", re.MULTILINE

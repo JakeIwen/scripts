@@ -2,14 +2,10 @@ import { renderHook } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { useWanThroughput } from './hooks';
+import { formatBitRate, presentWanThroughput } from './presentation';
 import { decodeConnectivityResponse } from './schema';
-import { connectivityPayload } from './testFixtures';
-import {
-  formatBitRate,
-  MAX_THROUGHPUT_WINDOW_SECONDS,
-  measureWanThroughput,
-  throughputSummary,
-} from './throughput';
+import { connectivityPayload, sampleConnectivity } from './testFixtures';
+import { MAX_THROUGHPUT_WINDOW_SECONDS, measureWanThroughput } from './throughput';
 import type { WanTraffic } from './types';
 
 function traffic(uptimeSeconds: number, ...uplinks: [string, string, number, number][]) {
@@ -39,7 +35,6 @@ describe('WAN throughput', () => {
         { name: 'clientwan', downloadBps: 1_000_000, uploadBps: 0 },
       ],
     });
-    expect(result && throughputSummary(result)).toBe('↓ 3.0 Mbps · ↑ 100 kbps');
   });
 
   it('has no reading across a reboot, a long gap, or only unbaselined links', () => {
@@ -69,6 +64,26 @@ describe('WAN throughput', () => {
       downloadBps: 0,
       uploadBps: 0,
       uplinks: [],
+    });
+  });
+
+  it('presents a hidden, unavailable, stale, measuring or measured row', () => {
+    const connectivity = sampleConnectivity();
+    const measured = measureWanThroughput(
+      traffic(100, ['wan', 'wan', 0, 0]),
+      traffic(102, ['wan', 'wan', 750_000, 25_000]),
+    );
+    expect(presentWanThroughput(null, measured)).toBeNull();
+    expect(presentWanThroughput(connectivity, measured)).toBeNull();
+
+    connectivity.router.wanTraffic = null;
+    expect(presentWanThroughput(connectivity, measured)).toEqual({ summary: '—', detail: null });
+    connectivity.router.wanTraffic = traffic(102);
+    expect(presentWanThroughput({ ...connectivity, stale: true }, measured)?.summary).toBe('—');
+    expect(presentWanThroughput(connectivity, null)?.summary).toBe('Measuring…');
+    expect(presentWanThroughput(connectivity, measured)).toEqual({
+      summary: '↓ 3.0 Mbps · ↑ 100 kbps',
+      detail: 'wan ↓ 3.0 Mbps · ↑ 100 kbps\nAveraged over 2.0 s',
     });
   });
 

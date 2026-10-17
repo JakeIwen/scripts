@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { OpenWrtSheet } from './OpenWrtSheet';
 import { OpenWrtTile } from './OpenWrtTile';
 import { sampleClients, sampleConnectivity, sampleSpeedtest } from './testFixtures';
+import { presentWanThroughput } from './presentation';
 import type { WanThroughput } from './throughput';
 
 beforeAll(() => {
@@ -34,6 +35,7 @@ describe('OpenWrt UI', () => {
         connectivity={connectivity}
         connectivityError={null}
         connectivityRefreshing={false}
+        throughput={null}
         speedtest={null}
         speedtestError={null}
         speedtestStarting={false}
@@ -58,6 +60,7 @@ describe('OpenWrt UI', () => {
         connectivity={sampleConnectivity()}
         connectivityError={null}
         connectivityRefreshing={false}
+        throughput={null}
         speedtest={sampleSpeedtest()}
         speedtestError={null}
         speedtestStarting={false}
@@ -82,6 +85,7 @@ describe('OpenWrt UI', () => {
         connectivity={sampleConnectivity()}
         connectivityError={null}
         connectivityRefreshing={false}
+        throughput={null}
         speedtest={sampleSpeedtest()}
         speedtestError={null}
         speedtestStarting={false}
@@ -117,7 +121,7 @@ describe('OpenWrt UI', () => {
         connectivity={status}
         connectivityError={null}
         connectivityRefreshing={false}
-        throughput={throughput}
+        throughput={presentWanThroughput(status, throughput)}
         speedtest={null}
         speedtestError={null}
         speedtestStarting={false}
@@ -143,7 +147,7 @@ describe('OpenWrt UI', () => {
     const row = screen.getByLabelText('Current internet throughput');
     expect(row.closest('.mwan-primary')).not.toBeNull();
     expect(row).toHaveTextContent('↓ 4.2 Mbps · ↑ 640 kbps');
-    expect(row).toHaveAttribute('title', 'wan ↓ 4.2 Mbps ↑ 640 kbps\nAveraged over 3.0 s');
+    expect(row).toHaveAttribute('title', 'wan ↓ 4.2 Mbps · ↑ 640 kbps\nAveraged over 3.0 s');
 
     view.rerender(tile(throughput, { ...connectivity, stale: true }));
     expect(screen.getByLabelText('Current internet throughput')).toHaveTextContent('Now—');

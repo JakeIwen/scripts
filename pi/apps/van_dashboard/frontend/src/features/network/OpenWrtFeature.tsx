@@ -4,12 +4,16 @@ import { useSpeedtestControl } from './controls';
 import { useOpenWrtResources, useWanThroughput } from './hooks';
 import { OpenWrtSheet } from './OpenWrtSheet';
 import { OpenWrtTile } from './OpenWrtTile';
+import { presentWanThroughput } from './presentation';
 
 export function OpenWrtFeature() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const { connectivity, speedtest, clients } = useOpenWrtResources(sheetOpen);
   const speedtestControl = useSpeedtestControl(speedtest);
-  const throughput = useWanThroughput(connectivity.data?.router.wanTraffic);
+  const throughput = presentWanThroughput(
+    connectivity.data,
+    useWanThroughput(connectivity.data?.router.wanTraffic),
+  );
 
   return (
     <>

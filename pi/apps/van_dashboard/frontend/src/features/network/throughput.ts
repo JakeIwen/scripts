@@ -31,9 +31,11 @@ export function measureWanThroughput(
     const before = previous.uplinks.find(
       (item) => item.name === uplink.name && item.device === uplink.device,
     );
-    const received = before ? uplink.rxBytes - before.rxBytes : -1;
-    const sent = before ? uplink.txBytes - before.txBytes : -1;
-    // A link that just came up, or whose device was recreated, has no baseline yet.
+    // A link that just came up has no baseline in this window.
+    if (!before) continue;
+    const received = uplink.rxBytes - before.rxBytes;
+    const sent = uplink.txBytes - before.txBytes;
+    // A recreated device restarts its counters from zero.
     if (received < 0 || sent < 0) continue;
     uplinks.push({
       name: uplink.name,
@@ -49,23 +51,4 @@ export function measureWanThroughput(
     windowSeconds,
     uplinks,
   };
-}
-
-/** Matches the speed test's Mbps so current use reads against measured capacity. */
-export function formatBitRate(bitsPerSecond: number): string {
-  if (bitsPerSecond < 999_500) return `${Math.round(bitsPerSecond / 1_000)} kbps`;
-  const mbps = bitsPerSecond / 1_000_000;
-  return `${mbps < 99.95 ? mbps.toFixed(1) : mbps.toFixed(0)} Mbps`;
-}
-
-export function throughputSummary(throughput: WanThroughput): string {
-  return `↓ ${formatBitRate(throughput.downloadBps)} · ↑ ${formatBitRate(throughput.uploadBps)}`;
-}
-
-export function throughputDetail(throughput: WanThroughput): string {
-  const uplinks = throughput.uplinks.map(
-    (item) =>
-      `${item.name} ↓ ${formatBitRate(item.downloadBps)} ↑ ${formatBitRate(item.uploadBps)}`,
-  );
-  return [...uplinks, `Averaged over ${throughput.windowSeconds.toFixed(1)} s`].join('\n');
 }

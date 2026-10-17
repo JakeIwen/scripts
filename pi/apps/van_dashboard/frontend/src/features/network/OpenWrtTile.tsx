@@ -1,5 +1,9 @@
-import { connectivityAge, mwanRouteLabel, presentSpeedtest } from './presentation';
-import { throughputDetail, throughputSummary, type WanThroughput } from './throughput';
+import {
+  connectivityAge,
+  mwanRouteLabel,
+  presentSpeedtest,
+  type WanThroughputPresentation,
+} from './presentation';
 import type { ConnectivityStatus, MwanInterface, SpeedtestStatus } from './types';
 import './network.css';
 
@@ -7,7 +11,7 @@ export interface OpenWrtTileProps {
   connectivity: ConnectivityStatus | null;
   connectivityError: Error | null;
   connectivityRefreshing: boolean;
-  throughput?: WanThroughput | null;
+  throughput: WanThroughputPresentation | null;
   speedtest: SpeedtestStatus | null;
   speedtestError: Error | null;
   speedtestStarting: boolean;
@@ -42,35 +46,6 @@ function TileMwanInterfaces({ interfaces }: { interfaces: readonly MwanInterface
   );
 }
 
-function TileThroughput({
-  connectivity,
-  throughput,
-}: {
-  connectivity: ConnectivityStatus | null;
-  throughput: WanThroughput | null;
-}) {
-  const traffic = connectivity?.router.wanTraffic;
-  // Collectors that predate counters send no field at all; keep the tile as it was.
-  if (!connectivity || traffic === undefined) return null;
-  const current = traffic !== null && !connectivity.stale ? throughput : null;
-  const value =
-    traffic === null || connectivity.stale
-      ? '—'
-      : current
-        ? throughputSummary(current)
-        : 'Measuring…';
-  return (
-    <span
-      className="wan-throughput"
-      aria-label="Current internet throughput"
-      title={current ? throughputDetail(current) : undefined}
-    >
-      <span className="wan-throughput-label">Now</span>
-      <span>{value}</span>
-    </span>
-  );
-}
-
 function completedAtTime(completedAt: number | null): string {
   if (completedAt === null) return '';
   return ` @ ${new Date(completedAt * 1_000).toLocaleTimeString([], {
@@ -97,7 +72,7 @@ export function OpenWrtTile({
   connectivity,
   connectivityError,
   connectivityRefreshing,
-  throughput = null,
+  throughput,
   speedtest,
   speedtestError,
   speedtestStarting,
@@ -147,7 +122,16 @@ export function OpenWrtTile({
             MWAN3 route
           </span>
           <strong className="network-value">{route}</strong>
-          <TileThroughput connectivity={connectivity} throughput={throughput} />
+          {throughput && (
+            <span
+              className="wan-throughput"
+              aria-label="Current internet throughput"
+              title={throughput.detail ?? undefined}
+            >
+              <span className="wan-throughput-label">Now</span>
+              <span>{throughput.summary}</span>
+            </span>
+          )}
         </div>
         <TileMwanInterfaces interfaces={connectivity?.router.interfaces ?? []} />
       </div>

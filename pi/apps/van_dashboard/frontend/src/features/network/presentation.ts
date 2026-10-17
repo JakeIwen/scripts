@@ -1,5 +1,6 @@
 import type { StatusTone } from '../../components/StatusPill';
 import { formatRelativeTime } from '../../utils/format';
+import type { WanThroughput } from './throughput';
 import type { ConnectivityStatus, RouterConnectivity, SpeedtestStatus } from './types';
 
 export function mwanRouteLabel(router: RouterConnectivity, internetOnline: boolean | null): string {
@@ -49,6 +50,40 @@ export function connectivityAge(connectivity: ConnectivityStatus | null): string
     return `${connectivity.stale ? 'Stale' : 'Updated'} · ${formatRelativeTime(connectivity.checkedAt)}`;
   }
   return connectivity.refreshing ? 'Checking…' : 'Waiting for MWAN3';
+}
+
+/** Matches the speed test's Mbps so current use reads against measured capacity. */
+export function formatBitRate(bitsPerSecond: number): string {
+  if (bitsPerSecond < 999_500) return `${Math.round(bitsPerSecond / 1_000)} kbps`;
+  const mbps = bitsPerSecond / 1_000_000;
+  return `${mbps < 99.95 ? mbps.toFixed(1) : mbps.toFixed(0)} Mbps`;
+}
+
+function bitRates(rates: { downloadBps: number; uploadBps: number }): string {
+  return `↓ ${formatBitRate(rates.downloadBps)} · ↑ ${formatBitRate(rates.uploadBps)}`;
+}
+
+export interface WanThroughputPresentation {
+  summary: string;
+  detail: string | null;
+}
+
+/** Null hides the row: collectors that predate router counters send no field. */
+export function presentWanThroughput(
+  connectivity: ConnectivityStatus | null,
+  throughput: WanThroughput | null,
+): WanThroughputPresentation | null {
+  const traffic = connectivity?.router.wanTraffic;
+  if (!connectivity || traffic === undefined) return null;
+  if (traffic === null || connectivity.stale) return { summary: '—', detail: null };
+  if (!throughput) return { summary: 'Measuring…', detail: null };
+  return {
+    summary: bitRates(throughput),
+    detail: [
+      ...throughput.uplinks.map((uplink) => `${uplink.name} ${bitRates(uplink)}`),
+      `Averaged over ${throughput.windowSeconds.toFixed(1)} s`,
+    ].join('\n'),
+  };
 }
 
 export interface SpeedtestPresentation {
