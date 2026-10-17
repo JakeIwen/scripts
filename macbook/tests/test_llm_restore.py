@@ -115,6 +115,22 @@ class Plan(unittest.TestCase):
         self.assertEqual(lr.Session.from_json(old), session("claude", A))
 
 
+class RecentlyClosed(unittest.TestCase):
+    def test_sessions_closed_at_shutdown_stay_listed(self):
+        before = lr.merge_seen([], [session("claude", A), session("codex", B)], now=1000.0)
+        after = lr.merge_seen(before, [], now=1060.0)  # every terminal closed
+        self.assertEqual([(s.id, s.last_seen) for s in after], [(A, 1000.0), (B, 1000.0)])
+
+    def test_closed_sessions_expire_after_the_window(self):
+        listed = lr.merge_seen([session("claude", A, last_seen=1000.0)], [], now=1000.0 + lr.RECENT_S)
+        self.assertEqual(listed, [])
+
+    def test_open_session_is_refreshed_with_its_current_command(self):
+        stale = session("claude", A, last_seen=1000.0)
+        fresh = lr.Session("claude", A, "/new", "renamed", "cmd new")
+        self.assertEqual(lr.merge_seen([stale], [fresh], now=1500.0), [lr.replace(fresh, last_seen=1500.0)])
+
+
 class Choose(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
