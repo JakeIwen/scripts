@@ -88,11 +88,11 @@ const PROJECTS: HostedProject[] = [
   },
   {
     id: 'stale-project',
-    services: [{ key: 'pi:stale.service', live: false }],
-    name: 'Offline app',
-    description: 'No longer serves a page.',
-    host: PROJECT_HOST.PI,
-    links: [{ kind: PROJECT_LINK_KIND.LAN, label: 'LAN', url: 'http://vanpi.lan:19009/' }],
+    services: [{ key: 'web:stale', live: false }],
+    name: 'Offline kept app',
+    description: 'Kept, but no longer serves a page.',
+    host: PROJECT_HOST.CUSTOM,
+    links: [{ kind: PROJECT_LINK_KIND.WEB, label: 'Web', url: 'https://example.com/' }],
     status: PROJECT_STATUS.LISTED,
     source: PROJECT_SOURCE.SCANNED,
     live: false,
@@ -100,6 +100,20 @@ const PROJECTS: HostedProject[] = [
     last_seen: null,
     updated_at: '2026-10-16T18:00:00Z',
   },
+  ...[PROJECT_STATUS.NEW, PROJECT_STATUS.HIDDEN].map((status) => ({
+    id: `stale-${status}`,
+    services: [{ key: `web:stale-${status}`, live: false }],
+    name: `Offline ${status} app`,
+    description: '',
+    host: PROJECT_HOST.CUSTOM,
+    links: [{ kind: PROJECT_LINK_KIND.WEB, label: 'Web', url: `https://${status}.example/` }],
+    status,
+    source: PROJECT_SOURCE.SCANNED,
+    live: false,
+    first_seen: null,
+    last_seen: null,
+    updated_at: '2026-10-16T18:00:00Z',
+  })),
 ];
 
 beforeAll(() => {
@@ -142,7 +156,7 @@ function mockUpdates() {
 }
 
 describe('ProjectDirectory', () => {
-  it('renders new, listed, hidden, and mixed-link projects but not offline ones', async () => {
+  it('renders projects, dims offline kept ones, and leaves out other offline ones', async () => {
     renderDirectory();
 
     expect(await screen.findByRole('heading', { name: 'New' })).toBeInTheDocument();
@@ -155,7 +169,11 @@ describe('ProjectDirectory', () => {
     expect(within(listedRow!).getByText('TS')).toBeInTheDocument();
     expect(screen.getByText('Vanpi')).toBeInTheDocument();
     expect(screen.getByText('lionfeather.dev')).toBeInTheDocument();
-    expect(screen.queryByText('Offline app')).not.toBeInTheDocument();
+    const offlineRow = screen.getByRole('link', { name: 'Offline kept app' }).closest('li');
+    expect(offlineRow).toHaveClass('project-directory__row--stale');
+    expect(within(offlineRow!).getByText('offline')).toBeInTheDocument();
+    expect(screen.queryByText('Offline new app')).not.toBeInTheDocument();
+    expect(screen.queryByText('Offline hidden app')).not.toBeInTheDocument();
   });
 
   it('keeps, hides, and unhides projects with full-list replacements', async () => {

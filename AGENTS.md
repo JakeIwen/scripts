@@ -467,7 +467,11 @@ vocabulary in `hosted_project_report.py` and the one-time seed in
 `hosted_project_seed.py`; the `projects` blueprint owns
 `/api/hosted-projects*`. `hosted_project_scan.py` is the stdlib-only scanner
 for all three hosts (Pi cron every 15 minutes, Mac LaunchAgent
-`com.jacobr.hosted-project-scan` hourly over `vanpi.lan` only). Preserve the
+`com.jacobr.hosted-project-scan` hourly over `vanpi.lan` only); scans report
+only listeners whose page answers HTTP 200. The Pi cron line is a managed
+block in both the live `pi` crontab and `pi/crontab_pi`, but the repo's
+crontab files lag the live ones in unrelated lines: run `pi/pull_crontabs.sh`
+and review the diff before any `pi/push_crontabs.sh`. Preserve the
 runtime state during deployment. Links are HTTP/HTTPS only and are never
 fetched by the backend; preference is local, LAN, Tailscale, then web.
 

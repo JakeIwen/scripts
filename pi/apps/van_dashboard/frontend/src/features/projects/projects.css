@@ -74,6 +74,10 @@
   background: var(--panel-raised);
 }
 
+.project-directory__row--stale {
+  opacity: 0.58;
+}
+
 .project-directory__identity {
   min-width: 0;
 }
@@ -108,6 +112,14 @@
   font-size: 9px;
   letter-spacing: 0.04em;
   text-transform: none;
+}
+
+.project-directory__offline {
+  color: var(--warning);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .project-directory__links {

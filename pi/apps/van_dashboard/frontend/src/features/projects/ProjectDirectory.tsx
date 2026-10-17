@@ -8,9 +8,12 @@ import './projects.css';
 export function ProjectDirectory({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { projects, loading, updating, error, updateProject, replaceProjects } =
     useHostedProjects(open);
-  // Only projects whose last scan got a web page (HTTP 200) are shown; the
-  // store keeps the rest so they return when they serve again.
-  const shown = projects.filter((project) => project.live);
+  // Scans report only listeners that serve a web page (HTTP 200). Unreviewed
+  // and hidden projects that stop serving drop out of view; kept projects stay
+  // visible, dimmed, so an outage is noticed rather than silently hidden.
+  const shown = projects.filter(
+    (project) => project.live || project.status === PROJECT_STATUS.LISTED,
+  );
   const newProjects = shown.filter((project) => project.status === PROJECT_STATUS.NEW);
   const listedProjects = shown.filter((project) => project.status === PROJECT_STATUS.LISTED);
   const hiddenProjects = shown.filter((project) => project.status === PROJECT_STATUS.HIDDEN);
@@ -38,7 +41,7 @@ export function ProjectDirectory({ open, onClose }: { open: boolean; onClose: ()
         </details>
       )}
       <p className="project-directory__legend">
-        LAN: van network · TS: Tailscale · This Mac: local apps
+        LAN: van network · TS: Tailscale · This Mac: local apps · Dimmed: offline
       </p>
       {error && (
         <p className="error-message" role="alert">

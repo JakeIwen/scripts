@@ -56,8 +56,8 @@ key, `hosted_projects_schema`, is the integer schema version (currently 3).
 - `source`: `scanned` or `manual` (form submissions and the one-time seed).
 - `live`: at least one of the entry's services was in the last report from
   its host, which means it served a web page (see Scanners); always `true` for
-  entries without services. The sheet shows only live entries; the rest stay
-  in the store and reappear when they serve again.
+  entries without services. The sheet leaves out `new` and `hidden` entries
+  that are not live and dims `listed` ones; all stay in the store.
 - `first_seen`, `last_seen`: scan timestamps (UTC ISO 8601, `Z` suffix);
   `null` for entries no scan has claimed. A report that changes nothing
   writes nothing, so `last_seen` is the last scan that changed the entry (a
@@ -257,5 +257,7 @@ the same report, and reposting a report changes nothing.
 catalog is gone. The sheet shows three groups: New (keep, edit, hide),
 listed (edit, hide), and Hidden (collapsed, unhide). Rows carry the host
 label and the description as the link title. Entries that are not live are
-left out of every group. Editing is inline: name and description, saved through the
+left out of New and Hidden, so only pages that answered 200 are proposed;
+listed entries that are not live stay in Listed, dimmed with an "offline"
+marker, so an outage of a kept project is visible. Editing is inline: name and description, saved through the
 update endpoint. The "New Hosted Project" form still adds manual entries.

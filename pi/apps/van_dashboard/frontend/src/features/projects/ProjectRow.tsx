@@ -36,8 +36,9 @@ export function ProjectRow({
   }
 
   const preferred = preferredProjectLink(project.links);
+  const rowClass = `project-directory__row${project.live ? '' : ' project-directory__row--stale'}`;
   return (
-    <li className="project-directory__row">
+    <li className={rowClass}>
       <div className="project-directory__identity">
         {preferred ? (
           <a
@@ -54,6 +55,7 @@ export function ProjectRow({
         )}
         <div className="project-directory__metadata">
           <span className="status-pill project-directory__host">{HOST_LABELS[project.host]}</span>
+          {!project.live && <span className="project-directory__offline">offline</span>}
         </div>
       </div>
       <ProjectLinks project={project} />
