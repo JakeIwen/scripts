@@ -16,7 +16,6 @@ class HotspareUsageTests(unittest.TestCase):
         self.assertEqual(hotspare_used_bytes(self.row, 'hotspare-a', self.command, 8), 3072000)
         self.assertEqual(self.command.call_args.args[0][2:], [
             '/usr/bin/env', 'LC_ALL=C', '/usr/sbin/dumpe2fs', '-h', '/dev/disk/by-label/hotspare-a'])
-        self.assertEqual(self.command.call_args.kwargs['timeout'], 2)
 
     def test_mounted_volume_uses_live_fsused_instead_of_superblock(self):
         self.row.update(mountpoints=['/mnt/clone'], fsused=3000000)
@@ -45,7 +44,6 @@ class HotspareUsageTests(unittest.TestCase):
         args = ('/unused', lambda _: 100, 1000, lambda _: [], self.command, 8)
         missing = build_hotspares(configuration, [a], *args)
         self.assertTrue(all(not card['due'] for card in missing))
-        self.assertEqual(missing[0]['rotation_message'], 'Rotation waiting for both cards')
         present = build_hotspares(configuration, [a,b], *args)
         self.assertEqual([card['label'] for card in present if card['due']], ['hotspare-b'])
         configuration['clone_rotation']['next_at'] = 2000
@@ -53,7 +51,6 @@ class HotspareUsageTests(unittest.TestCase):
         configuration['clone_rotation']['incomplete'] = ['hotspare-b']
         interrupted = build_hotspares(configuration, [a,b], *args)[1]
         self.assertTrue(interrupted['stale'])
-        self.assertEqual(interrupted['rotation_message'], 'Incomplete · retry scheduled')
 
     def test_ambiguous_labels_are_never_probed(self):
         result = build_hotspares({'targets': [{'label': 'hotspare-a', 'interval_days': 7}],

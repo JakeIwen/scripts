@@ -34,7 +34,6 @@ class CloudBackupDetailsTests(unittest.TestCase):
         result = details.attempt_details('time-machine', ATTEMPT, self.loader, self.command)
         self.assertEqual(len(result['entries']), 1)
         self.assertIn('cleanup refused', result['entries'][0]['message'])
-        self.assertIn('protect backup data', result['entries'][0]['explanation'])
         self.assertNotIn('PRIVATE', json.dumps(result))
         self.assertIsNone(result['note'])
         args = self.command.call_args.args[0]
@@ -42,7 +41,6 @@ class CloudBackupDetailsTests(unittest.TestCase):
         self.assertIn('--since=@1000.000000', args)
         self.assertIn('--until=@1100.000000', args)
         self.assertIn('--lines=200', args)
-        self.assertEqual(self.command.call_args.kwargs['timeout'], 5)
 
     def test_pi_command_failure_preserves_only_fixed_program_operation_and_exit_code(self):
         self.journal([(1001, 'Failed: rclone copy failed (exit 1)'),

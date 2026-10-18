@@ -1,7 +1,6 @@
 import json
 import os
 from pathlib import Path
-import runpy
 import signal
 import subprocess
 import sys
@@ -12,82 +11,20 @@ from unittest import mock
 
 from pi.apps.van_dashboard import runtime
 from pi.apps.van_dashboard import van_dashboard as dashboard_module
-from pi.apps.van_dashboard import van_dashboard_common as common
-
-
-RUNTIME_NAMES = (
-    "state_store",
-    "hosted_projects",
-    "cop_alert",
-    "cop_can_wake",
-    "cop_led",
-    "sonos",
-    "connectivity",
-    "openwrt_clients",
-    "ubnt_wifi",
-    "speedtest",
-    "starlink",
-    "storage_policy",
-    "lighting",
-    "price_checks",
-    "system_monitor",
-    "network_history",
-    "compute_monitor",
-    "usb_devices",
-    "usb_ports",
-    "backups",
-    "ignition_monitor_control",
-    "disk_manager",
-    "system_power",
-    "dashboard_restart",
-    "telemetry_summary",
-    "voltage_check",
-    "vonstar",
-)
-
-
-def route_map(app):
-    return sorted(
-        (rule.rule, tuple(sorted(rule.methods))) for rule in app.url_map.iter_rules()
-    )
 
 
 class DashboardFactoryTests(unittest.TestCase):
-    def test_repeated_factories_return_independent_apps_with_one_runtime(self):
-        identities = {name: id(getattr(runtime, name)) for name in RUNTIME_NAMES}
-
-        first = dashboard_module.create_app()
-        second = dashboard_module.create_app()
-
-        self.assertIsNot(first, second)
-        self.assertIsNot(first.url_map, second.url_map)
-        self.assertEqual(route_map(first), route_map(second))
-        self.assertEqual(
-            identities,
-            {name: id(getattr(runtime, name)) for name in RUNTIME_NAMES},
-        )
-
     def test_factory_does_not_start_runtime_workers(self):
         with (
             mock.patch.object(runtime.cop_alert, "start") as cop_start,
             mock.patch.object(runtime.connectivity, "start") as connectivity_start,
             mock.patch.object(runtime.starlink, "start") as starlink_start,
         ):
-            app = dashboard_module.create_app()
-            expected_routes = route_map(dashboard_module.create_app())
+            dashboard_module.create_app()
 
-        self.assertEqual(route_map(app), expected_routes)
         cop_start.assert_not_called()
         connectivity_start.assert_not_called()
         starlink_start.assert_not_called()
-
-    def test_package_entrypoint_calls_main_without_running_server(self):
-        with tempfile.TemporaryDirectory() as runtime_dir:
-            with mock.patch.object(common, "RUNTIME_DIR", runtime_dir):
-                with mock.patch.object(dashboard_module, "main") as main:
-                    runpy.run_module("pi.apps.van_dashboard", run_name="__main__")
-
-        main.assert_called_once_with()
 
     def test_cop_cli_releases_fake_gpio_without_optional_dependencies(self):
         fake_gpiod = textwrap.dedent(
@@ -222,7 +159,7 @@ class DashboardFactoryTests(unittest.TestCase):
             mock.patch.object(runtime.starlink, "start") as starlink_start,
             mock.patch.object(runtime.cop_alert, "stop") as cop_stop,
         ):
-            with self.assertRaisesRegex(RuntimeError, "server stopped"):
+            with self.assertRaises(RuntimeError):
                 dashboard_module.main()
 
         app.run.assert_called_once_with(

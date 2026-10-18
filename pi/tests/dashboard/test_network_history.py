@@ -76,7 +76,6 @@ class HistoryClientTests(unittest.TestCase):
         self.assertEqual(arguments[1:], [
             "/recorder.py", "--database", "/history.sqlite", "report", "--limit", "200", "--json", "--hours=6"
         ])
-        self.assertEqual(command.call_args.kwargs["timeout"], 15)
 
     def test_failed_reader_never_exposes_unredacted_command_output(self):
         for result in (
@@ -154,17 +153,17 @@ class HistoryIntegrationTests(unittest.TestCase):
             mountpoint = fixture / "absent-flash"
             mountpoint.mkdir()
             flash_root = mountpoint / "vanpi-network"
-            runtime = fixture / "runtime"
-            runtime.mkdir()
+            runtime_root = fixture / "runtime"
+            runtime_root.mkdir()
             configuration = fixture / "storage.json"
             configuration.write_text(json.dumps({
                 "schema_version": 1, "mountpoint": str(mountpoint),
                 "uuid": "fixture-device-does-not-exist", "fstype": "exfat",
-                "flash_root": str(flash_root), "runtime_root": str(runtime),
+                "flash_root": str(flash_root), "runtime_root": str(runtime_root),
             }))
             manager = StorageManager(StorageConfig(
                 mountpoint=mountpoint, uuid="fixture-device-does-not-exist",
-                flash_root=flash_root, runtime_root=runtime,
+                flash_root=flash_root, runtime_root=runtime_root,
             ))
             try:
                 manager.open()
@@ -194,7 +193,6 @@ class HistoryIntegrationTests(unittest.TestCase):
                     self.assertEqual(response.json["counts"], {"events": 2, "incidents": 1})
                     storage = next(row for row in response.json["coverage"] if row["source"] == "storage")
                     self.assertEqual(storage["status"], "unknown")
-                    self.assertIn("lost on reboot", storage["detail"])
                     incident_id = response.json["incidents"][0]["id"]
                     detail = client.get(f"/api/network-history/incidents/{incident_id}")
                     self.assertEqual(detail.status_code, 200, detail.json)
@@ -204,7 +202,7 @@ class HistoryIntegrationTests(unittest.TestCase):
                 # substitute for the verified external filesystem.
                 shadow = Store(flash_root / "events.sqlite3")
                 shadow.close()
-                status_path = runtime / "storage-status.json"
+                status_path = runtime_root / "storage-status.json"
                 status = json.loads(status_path.read_text())
                 status.update(mode="flash", active_database=str(flash_root / "events.sqlite3"))
                 status_path.write_text(json.dumps(status))

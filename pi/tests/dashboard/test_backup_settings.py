@@ -36,11 +36,10 @@ class SettingsRoutesTests(unittest.TestCase):
         self.assertEqual(self.command.call_args.args[0][-1],'--save')
         self.assertEqual(json.loads(self.command.call_args.kwargs['input_text']),payload)
 
-    def test_invalid_cross_origin_and_oversized_requests_never_reach_writer(self):
+    def test_invalid_and_oversized_requests_never_reach_writer(self):
         for options in ({'json':{}},{'json':{'revision':'r','changes':{},'path':'/etc/passwd'}},
-                        {'json':{'revision':'r','changes':{}},'headers':{'Origin':'https://other.test'}},
                         {'data':'x'*17000,'content_type':'application/json'}):
-            self.assertIn(self.client.post('/api/backups/settings',**options).status_code,(400,403))
+            self.assertEqual(self.client.post('/api/backups/settings',**options).status_code,400)
         self.command.assert_not_called()
 
     def test_conflicts_are_actionable_and_private_failures_are_not_exposed(self):

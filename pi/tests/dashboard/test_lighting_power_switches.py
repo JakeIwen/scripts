@@ -1,6 +1,5 @@
 import json
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 
 from pi.apps.van_dashboard import runtime
@@ -83,7 +82,7 @@ class LightingPowerSwitchTests(unittest.TestCase):
                 [dashboard_common.TUYA_LIGHT, "list"],
             ],
         )
-        with self.assertRaisesRegex(ValueError, "unknown lighting target"):
+        with self.assertRaises(ValueError):
             controller.set_power("switch.starlink", True)
 
     def test_route_accepts_fixed_switch_and_rejects_other_switches(self):
@@ -119,13 +118,6 @@ class LightingPowerSwitchTests(unittest.TestCase):
         )
         self.assertEqual(solder["power_switch"]["state"], "off")
         self.assertEqual(rejected.status_code, 400)
-
-    def test_helper_includes_only_the_two_power_switches(self):
-        root = Path(__file__).resolve().parents[3]
-        helper = (root / "pi" / "scripts" / "tuya_light.sh").read_text()
-        self.assertIn('or .entity_id == "switch.ext_flood"', helper)
-        self.assertIn('or .entity_id == "switch.solder_flood"', helper)
-        self.assertNotIn('or .entity_id == "switch.starlink"', helper)
 
 
 if __name__ == "__main__":

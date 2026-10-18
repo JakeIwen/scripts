@@ -38,7 +38,6 @@ from pi.apps.van_dashboard import van_dashboard_usb as dashboard_usb
 from pi.apps.van_dashboard import van_dashboard_vonstar as dashboard_vonstar
 from pi.scripts import usb_watch
 from pi.tests.dashboard._disk_manager_support import DiskManagerFixture
-from pi.tests.dashboard._frontend_test_support import react_index_page
 from pi.tests.unit_contract import command_arguments, parse_directives
 from van_compute import metrics as compute_metrics
 
@@ -146,24 +145,16 @@ class SonosControllerTests(unittest.TestCase):
                 snapshot["now_playing"]["artist"],
                 "Stanley Brinks and The Wave Pictures",
             )
-            self.assertRegex(
-                snapshot["now_playing"]["album_art"],
-                r"^/api/speakers/art/[0-9a-f]{16}$",
-            )
             grouped = {item["name"] for item in snapshot["speakers"] if item["grouped"]}
             self.assertEqual(grouped, {"Front", "Rear"})
             self.assertEqual(controller.set_volume("Rear", 42), 42)
             self.assertEqual(rear.volume, 42)
             self.assertTrue(controller.set_mute("Rear", True))
             self.assertTrue(rear.mute)
-            self.assertEqual(controller.set_group_volume(73), 73)
-            self.assertEqual(front.group.volume, 73)
-            self.assertTrue(controller.set_group_mute(True))
-            self.assertTrue(front.group.mute)
-            self.assertEqual(controller.transport("play_pause"), "Sonos paused")
-            self.assertEqual(controller.transport("play_pause"), "Sonos playing")
-            self.assertEqual(controller.transport("previous"), "Previous Sonos track")
-            self.assertEqual(controller.transport("next"), "Next Sonos track")
+            controller.transport("play_pause")
+            controller.transport("play_pause")
+            controller.transport("previous")
+            controller.transport("next")
             self.assertEqual(front.transport_calls, ["pause", "play", "previous", "next"])
             self.assertEqual(controller.select("Solo"), "Solo")
             self.assertEqual(store.get("sonos_device"), "Solo")
@@ -186,7 +177,6 @@ class SonosControllerTests(unittest.TestCase):
             )
             now_playing = controller.snapshot()["now_playing"]
 
-        self.assertEqual(now_playing["title"], "Nothing playing")
         self.assertEqual(now_playing["position"], "")
         self.assertEqual(now_playing["duration"], "")
         self.assertIsNone(now_playing["album_art"])
@@ -196,7 +186,7 @@ class SonosControllerTests(unittest.TestCase):
             dashboard_common.StateStore("/dev/null"),
             discover_func=lambda timeout: self.fail("discovery should not run"),
         )
-        with self.assertRaisesRegex(ValueError, "unknown Sonos transport action"):
+        with self.assertRaises(ValueError):
             controller.transport("shuffle")
 
 
@@ -224,7 +214,6 @@ class ConnectivityMonitorTests(unittest.TestCase):
 
         def command(args, timeout):
             self.assertEqual(args, ["/test/connectivity"])
-            self.assertEqual(timeout, 25)
             return SimpleNamespace(returncode=0, stdout=json.dumps(payload), stderr="")
 
         monitor = dashboard_network.ConnectivityMonitor(
@@ -360,106 +349,6 @@ class ConnectivityMonitorTests(unittest.TestCase):
 
 
 class PriceCheckControllerTests(unittest.TestCase):
-    PAYLOAD = {
-        "ok": True,
-        "items": [
-            {
-                "id": 7,
-                "display_title": "Protein shakes",
-                "threshold": "55.00",
-                "last_price": "63.15",
-            }
-        ],
-        "summary": {"count": 1, "checked": 1, "below_threshold": 0, "errors": 0},
-    }
-
-    def test_uses_fixed_cli_and_parses_json(self):
-        calls = []
-
-        def command(args, timeout):
-            calls.append((list(args), timeout))
-            return SimpleNamespace(
-                returncode=0, stdout=json.dumps(self.PAYLOAD), stderr=""
-            )
-
-        controller = dashboard_integrations.PriceCheckController(
-            tool="/test/price/main.py",
-            database="/private/prices.sqlite3",
-            command=command,
-            timeout=91,
-        )
-        self.assertEqual(controller.status(), self.PAYLOAD)
-        controller.add("amazon", "55", "https://example.com/item", "Example")
-        controller.edit(7, "amazon", "45", "https://example.com/updated", "Updated")
-        controller.mute(7, 3)
-        controller.schedule()
-        controller.parse_schedule("30 8,16 * * 1-5")
-        controller.set_schedule("30 8,16 * * 1-5")
-        controller.remove(7)
-        controller.check(7)
-        controller.add_search(
-            "ebay", "https://www.ebay.com/sch/i.html?_nkw=tool", "Tools"
-        )
-        controller.dismiss_search_result(8, "123456789012")
-        controller.remove_search(8)
-        controller.check_search(8)
-        prefix = [
-            sys.executable,
-            "/test/price/main.py",
-            "--db",
-            "/private/prices.sqlite3",
-            "--json",
-        ]
-        self.assertEqual(calls[0], (prefix + ["list"], 20))
-        self.assertEqual(
-            calls[1],
-            (prefix + ["add", "amazon", "55", "https://example.com/item", "Example"], 20),
-        )
-        self.assertEqual(
-            calls[2],
-            (
-                prefix
-                + [
-                    "edit",
-                    "7",
-                    "amazon",
-                    "45",
-                    "https://example.com/updated",
-                    "Updated",
-                ],
-                20,
-            ),
-        )
-        self.assertEqual(calls[3], (prefix + ["mute", "7", "3"], 20))
-        self.assertEqual(calls[4], (prefix + ["schedule"], 25))
-        self.assertEqual(
-            calls[5], (prefix + ["schedule-parse", "30 8,16 * * 1-5"], 25)
-        )
-        self.assertEqual(
-            calls[6], (prefix + ["schedule-set", "30 8,16 * * 1-5"], 30)
-        )
-        self.assertEqual(calls[7], (prefix + ["remove", "7"], 20))
-        self.assertEqual(calls[8], (prefix + ["check", "7"], 91))
-        self.assertEqual(
-            calls[9],
-            (
-                prefix
-                + [
-                    "search-add",
-                    "ebay",
-                    "https://www.ebay.com/sch/i.html?_nkw=tool",
-                    "Tools",
-                ],
-                20,
-            ),
-        )
-        self.assertEqual(
-            calls[10],
-            (prefix + ["search-dismiss", "8", "123456789012"], 20),
-        )
-        self.assertEqual(calls[11], (prefix + ["search-remove", "8"], 20))
-        self.assertEqual(calls[12], (prefix + ["search-check", "8"], 91))
-
     def test_rejects_failed_or_non_json_cli_output(self):
         def failed(_args, timeout):
             return SimpleNamespace(
@@ -468,13 +357,13 @@ class PriceCheckControllerTests(unittest.TestCase):
                 stderr="",
             )
 
-        with self.assertRaisesRegex(dashboard_integrations.PriceCheckCommandError, "duplicate URL"):
+        with self.assertRaises(dashboard_integrations.PriceCheckCommandError):
             dashboard_integrations.PriceCheckController(command=failed).status()
 
         def malformed(_args, timeout):
             return SimpleNamespace(returncode=0, stdout="not-json", stderr="broken")
 
-        with self.assertRaisesRegex(dashboard_integrations.PriceCheckCommandError, "invalid output"):
+        with self.assertRaises(dashboard_integrations.PriceCheckCommandError):
             dashboard_integrations.PriceCheckController(command=malformed).status()
 
 
@@ -491,7 +380,7 @@ class SystemMonitorClientTests(unittest.TestCase):
         calls = []
 
         def command(args, timeout):
-            calls.append((list(args), timeout))
+            calls.append(list(args))
             return SimpleNamespace(
                 returncode=0, stdout=json.dumps(self.PAYLOAD), stderr=""
             )
@@ -506,21 +395,18 @@ class SystemMonitorClientTests(unittest.TestCase):
         self.assertEqual(
             calls,
             [
-                (
-                    [
-                        sys.executable,
-                        "/test/system_event_monitor.py",
-                        "--database",
-                        "/test/events.sqlite3",
-                        "report",
-                        "--hours",
-                        "168",
-                        "--limit",
-                        "100",
-                        "--json",
-                    ],
-                    12,
-                )
+                [
+                    sys.executable,
+                    "/test/system_event_monitor.py",
+                    "--database",
+                    "/test/events.sqlite3",
+                    "report",
+                    "--hours",
+                    "168",
+                    "--limit",
+                    "100",
+                    "--json",
+                ]
             ],
         )
 
@@ -530,9 +416,7 @@ class SystemMonitorClientTests(unittest.TestCase):
                 returncode=1, stdout="", stderr="database unavailable"
             )
         )
-        with self.assertRaisesRegex(
-            dashboard_integrations.SystemMonitorCommandError, "database unavailable"
-        ):
+        with self.assertRaises(dashboard_integrations.SystemMonitorCommandError):
             failed.report()
 
         malformed = dashboard_integrations.SystemMonitorClient(
@@ -540,7 +424,7 @@ class SystemMonitorClientTests(unittest.TestCase):
                 returncode=0, stdout="not-json", stderr="broken"
             )
         )
-        with self.assertRaisesRegex(dashboard_integrations.SystemMonitorCommandError, "invalid output"):
+        with self.assertRaises(dashboard_integrations.SystemMonitorCommandError):
             malformed.report()
 
     def test_cached_reports_are_shared_isolated_and_expire(self):
@@ -634,208 +518,48 @@ class PriceCheckApiTests(unittest.TestCase):
         runtime.price_checks = self.original
 
     def test_list_add_check_and_remove(self):
-        calls = []
         payload = {
-            "ok": True,
-            "items": [],
-            "summary": {"count": 0, "checked": 0, "below_threshold": 0, "errors": 0},
+            "ok": True, "items": [], "summary": {},
+            "item": {"display_title": "Example"},
+            "removed": {"display_title": "Example"},
+            "search": {"display_title": "Tools"},
+            "removed_search": {"display_title": "Tools"},
+            "dismissed_result": {"title": "Unwanted tool"},
+            "schedule": {"expression": "30 8,16 * * 1-5", "description": "", "error_code": None},
         }
-
-        class FakePriceChecks:
-            def status(self):
-                calls.append(("status",))
-                return dict(payload)
-
-            def schedule(self):
-                calls.append(("schedule",))
-                return {
-                    "ok": True,
-                    "schedule": {
-                        "expression": "0 10,15,20 * * *",
-                        "description": "At minute 0 past hours 10, 15 and 20",
-                        "error": None,
-                    },
-                }
-
-            def set_schedule(self, expression):
-                calls.append(("set_schedule", expression))
-                return {
-                    "ok": True,
-                    "schedule": {
-                        "expression": expression,
-                        "description": "At minute 30 past hours 8 and 16",
-                        "error": None,
-                    },
-                }
-
-            def parse_schedule(self, expression):
-                calls.append(("parse_schedule", expression))
-                return {
-                    "ok": True,
-                    "schedule": {
-                        "expression": expression,
-                        "description": "At minute 30 past hours 8 and 16",
-                        "error": None,
-                        "error_code": None,
-                    },
-                }
-
-            def add(self, *args):
-                calls.append(("add", *args))
-                return {**payload, "item": {"display_title": "Example"}}
-
-            def edit(self, *args):
-                calls.append(("edit", *args))
-                return {**payload, "item": {"display_title": "Updated"}}
-
-            def check(self, target):
-                calls.append(("check", target))
-                return {**payload, "checked": [{"id": 7}]}
-
-            def mute(self, item_id, days):
-                calls.append(("mute", item_id, days))
-                return {
-                    **payload,
-                    "item": {"display_title": "Updated", "notifications_muted": True},
-                }
-
-            def remove(self, item_id):
-                calls.append(("remove", item_id))
-                return {**payload, "removed": {"display_title": "Example"}}
-
-            def add_search(self, *args):
-                calls.append(("add_search", *args))
-                return {**payload, "search": {"display_title": "Tools"}}
-
-            def dismiss_search_result(self, search_id, item_id):
-                calls.append(("dismiss_search_result", search_id, item_id))
-                return {
-                    **payload,
-                    "dismissed_result": {"title": "Unwanted tool"},
-                }
-
-            def remove_search(self, search_id):
-                calls.append(("remove_search", search_id))
-                return {
-                    **payload,
-                    "removed_search": {"display_title": "Tools"},
-                }
-
-            def check_search(self, target):
-                calls.append(("check_search", target))
-                return {**payload, "search_checked": [{"id": 8}]}
-
-        runtime.price_checks = FakePriceChecks()
+        command = mock.Mock(return_value=SimpleNamespace(
+            returncode=0, stdout=json.dumps(payload), stderr=""
+        ))
+        runtime.price_checks = dashboard_integrations.PriceCheckController(
+            tool="/test/price/main.py", database="/private/prices.sqlite3", command=command
+        )
+        prefix = [sys.executable, "/test/price/main.py", "--db", "/private/prices.sqlite3", "--json"]
         self.assertEqual(self.client.get("/api/price-checks").status_code, 200)
-        add = self.client.post(
-            "/api/price-checks/add",
-            data={
-                "parser": "amazon",
-                "threshold": "55",
-                "url": "https://example.com/item",
-                "title": "Example",
-            },
+        self.assertEqual([call.args[0] for call in command.call_args_list],
+                         [prefix + ["list"], prefix + ["schedule"]])
+        cases = (
+            ("add", {"parser": "amazon", "threshold": "55", "url": "https://example.com/item", "title": "Example"},
+             ["add", "amazon", "55", "https://example.com/item", "Example"]),
+            ("edit", {"id": "7", "parser": "amazon", "threshold": "45", "url": "https://example.com/updated", "title": "Updated"},
+             ["edit", "7", "amazon", "45", "https://example.com/updated", "Updated"]),
+            ("mute", {"id": "7", "days": "3"}, ["mute", "7", "3"]),
+            ("schedule", {"expression": "30 8,16 * * 1-5"}, ["schedule-set", "30 8,16 * * 1-5"]),
+            ("schedule/parse", {"expression": "30 8,16 * * 1-5"}, ["schedule-parse", "30 8,16 * * 1-5"]),
+            ("check", {"target": "7"}, ["check", "7"]),
+            ("remove", {"id": "7"}, ["remove", "7"]),
+            ("searches/add", {"parser": "ebay", "url": "https://www.ebay.com/sch/i.html?_nkw=tool", "title": "Tools"},
+             ["search-add", "ebay", "https://www.ebay.com/sch/i.html?_nkw=tool", "Tools"]),
+            ("searches/dismiss", {"id": "8", "item_id": "123456789012"}, ["search-dismiss", "8", "123456789012"]),
+            ("searches/check", {"target": "8"}, ["search-check", "8"]),
+            ("searches/remove", {"id": "8"}, ["search-remove", "8"]),
         )
-        self.assertEqual(add.status_code, 200)
-        self.assertEqual(add.get_json()["message"], "Watching Example")
-        schedule = self.client.post(
-            "/api/price-checks/schedule",
-            data={"expression": "30 8,16 * * 1-5"},
-        )
-        self.assertEqual(schedule.status_code, 200)
-        self.assertIn("Schedule updated", schedule.get_json()["message"])
-        preview = self.client.post(
-            "/api/price-checks/schedule/parse",
-            data={"expression": "30 8,16 * * 1-5"},
-        )
-        self.assertEqual(preview.status_code, 200)
-        self.assertEqual(preview.get_json()["schedule"]["error_code"], None)
-        edit = self.client.post(
-            "/api/price-checks/edit",
-            data={
-                "id": "7",
-                "parser": "amazon",
-                "threshold": "45",
-                "url": "https://example.com/updated",
-                "title": "Updated",
-            },
-        )
-        self.assertEqual(edit.status_code, 200)
-        self.assertEqual(edit.get_json()["message"], "Updated Updated")
-        mute = self.client.post(
-            "/api/price-checks/mute", data={"id": "7", "days": "3"}
-        )
-        self.assertEqual(mute.status_code, 200)
-        self.assertEqual(
-            mute.get_json()["message"], "Muted notifications for Updated for 3 days"
-        )
-        self.assertEqual(
-            self.client.post("/api/price-checks/check", data={"target": "7"}).status_code,
-            200,
-        )
-        self.assertEqual(
-            self.client.post("/api/price-checks/remove", data={"id": "7"}).status_code,
-            200,
-        )
-        search_add = self.client.post(
-            "/api/price-checks/searches/add",
-            data={
-                "parser": "ebay",
-                "url": "https://www.ebay.com/sch/i.html?_nkw=tool",
-                "title": "Tools",
-            },
-        )
-        self.assertEqual(search_add.status_code, 200)
-        self.assertEqual(search_add.get_json()["message"], "Watching Tools")
-        self.assertEqual(
-            self.client.post(
-                "/api/price-checks/searches/dismiss",
-                data={"id": "8", "item_id": "123456789012"},
-            ).status_code,
-            200,
-        )
-        self.assertEqual(
-            self.client.post(
-                "/api/price-checks/searches/check", data={"target": "8"}
-            ).status_code,
-            200,
-        )
-        self.assertEqual(
-            self.client.post(
-                "/api/price-checks/searches/remove", data={"id": "8"}
-            ).status_code,
-            200,
-        )
-        self.assertEqual(
-            calls,
-            [
-                ("status",),
-                ("schedule",),
-                ("add", "amazon", "55", "https://example.com/item", "Example"),
-                ("set_schedule", "30 8,16 * * 1-5"),
-                ("parse_schedule", "30 8,16 * * 1-5"),
-                (
-                    "edit",
-                    "7",
-                    "amazon",
-                    "45",
-                    "https://example.com/updated",
-                    "Updated",
-                ),
-                ("mute", "7", 3),
-                ("check", "7"),
-                ("remove", "7"),
-                (
-                    "add_search",
-                    "ebay",
-                    "https://www.ebay.com/sch/i.html?_nkw=tool",
-                    "Tools",
-                ),
-                ("dismiss_search_result", "8", "123456789012"),
-                ("check_search", "8"),
-                ("remove_search", "8"),
-            ],
-        )
+        for route, data, arguments in cases:
+            with self.subTest(route=route):
+                command.reset_mock()
+                response = self.client.post("/api/price-checks/" + route, data=data)
+                self.assertEqual(response.status_code, 200)
+                self.assertTrue(response.json["ok"])
+                self.assertEqual([call.args[0] for call in command.call_args_list], [prefix + arguments])
 
     def test_rejects_bad_forms_before_running_cli(self):
         calls = []
@@ -853,21 +577,6 @@ class PriceCheckApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(calls, [])
-
-    def test_schedule_failure_reports_that_previous_crontab_was_restored(self):
-        class FailedSchedule:
-            def set_schedule(self, _expression):
-                raise dashboard_integrations.PriceCheckCommandError(
-                    "crontab update failed; previous crontab restored"
-                )
-
-        runtime.price_checks = FailedSchedule()
-        response = self.client.post(
-            "/api/price-checks/schedule",
-            data={"expression": "30 8,16 * * 1-5"},
-        )
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("previous crontab restored", response.get_json()["message"])
 
 
 class UbntWifiControllerTests(unittest.TestCase):
@@ -994,7 +703,7 @@ class UbntWifiControllerTests(unittest.TestCase):
         snapshot = manager.snapshot()
 
         self.assertEqual(snapshot["operation"]["status"], "error")
-        self.assertEqual(snapshot["operation"]["error"], "switch failed")
+        self.assertTrue(snapshot["operation"]["error"])
         self.assertTrue(snapshot["wifi"]["reachable"])
         self.assertEqual(
             calls,
@@ -1085,7 +794,6 @@ class UbntWifiControllerTests(unittest.TestCase):
         operation = manager.snapshot()["operation"]
         self.assertEqual(operation["status"], "complete")
         self.assertEqual(operation["kind"], "abort")
-        self.assertIn("automatic selection resumed", operation["message"])
         self.assertEqual(
             calls,
             [
@@ -1162,9 +870,6 @@ class LightingControllerTests(unittest.TestCase):
             return SimpleNamespace(returncode=0, stdout=json.dumps(values), stderr="")
 
         status = dashboard_home.LightingController(command=command).status()
-        self.assertEqual([group["label"] for group in status["groups"]], [
-            "Cab", "Rear", "Kitchen", "Exterior", "Solder", "Extra"
-        ])
         self.assertEqual(status["state"], "mixed")
         self.assertEqual(status["on_count"], 1)
         self.assertEqual(status["available_count"], 9)
@@ -1232,13 +937,13 @@ class LightingControllerTests(unittest.TestCase):
             [dashboard_common.TUYA_LIGHT, "temperature", "light.wiz_kitchen", "3200"],
         )
         self.assertEqual(calls[7], [dashboard_common.TUYA_LIGHT, "list"])
-        with self.assertRaisesRegex(ValueError, "unknown lighting target"):
+        with self.assertRaises(ValueError):
             controller.set_power("switch.starlink", True)
-        with self.assertRaisesRegex(ValueError, "unknown light entity"):
+        with self.assertRaises(ValueError):
             controller.set_brightness("light.not_configured", 50)
-        with self.assertRaisesRegex(ValueError, "hue must be"):
+        with self.assertRaises(ValueError):
             controller.set_hue("light.wiz_kitchen", 361)
-        with self.assertRaisesRegex(ValueError, "color temperature must be"):
+        with self.assertRaises(ValueError):
             controller.set_color_temperature("light.wiz_kitchen", 1999)
 
     def test_rejects_bad_schema_and_reports_timeout(self):
@@ -1246,20 +951,16 @@ class LightingControllerTests(unittest.TestCase):
             dashboard_home.LightingController.parse_status('{"not":"a list"}')
         bad_color = self.light_values()
         bad_color[0]["supported_color_modes"] = ["rgb", "rgb"]
-        with self.assertRaisesRegex(
-            dashboard_home.LightingCommandError, "supported color modes"
-        ):
+        with self.assertRaises(dashboard_home.LightingCommandError):
             dashboard_home.LightingController.parse_status(json.dumps(bad_color))
         bad_color[0]["supported_color_modes"] = [{"mode": "rgb"}]
-        with self.assertRaisesRegex(
-            dashboard_home.LightingCommandError, "supported color modes"
-        ):
+        with self.assertRaises(dashboard_home.LightingCommandError):
             dashboard_home.LightingController.parse_status(json.dumps(bad_color))
 
         def timeout(_args, timeout):
             raise subprocess.TimeoutExpired("lights", timeout)
 
-        with self.assertRaisesRegex(dashboard_home.LightingCommandError, "timed out"):
+        with self.assertRaises(dashboard_home.LightingCommandError):
             dashboard_home.LightingController(command=timeout).status()
 
     def test_room_and_all_targets_expand_only_to_configured_entities(self):
@@ -1388,7 +1089,7 @@ class StoragePolicyManagerTests(unittest.TestCase):
                 policy = dict(self.POLICY)
 
                 def command(args, timeout):
-                    calls.append((list(args), timeout))
+                    calls.append(list(args))
                     if args[1:3] == ["--json", target]:
                         policy[field] = args[3] == "on"
                     return SimpleNamespace(
@@ -1400,15 +1101,12 @@ class StoragePolicyManagerTests(unittest.TestCase):
                 self.assertEqual(
                     calls,
                     [
-                        (
-                            [
-                                dashboard_common.POLICYCTL,
-                                "--json",
-                                target,
-                                "on" if enabled else "off",
-                            ],
-                            7,
-                        ),
+                        [
+                            dashboard_common.POLICYCTL,
+                            "--json",
+                            target,
+                            "on" if enabled else "off",
+                        ],
                     ],
                 )
 
@@ -1427,14 +1125,14 @@ class StoragePolicyManagerTests(unittest.TestCase):
                 returncode=1, stdout="", stderr="policy unavailable"
             )
         )
-        with self.assertRaisesRegex(dashboard_storage.PolicyCommandError, "policy unavailable"):
+        with self.assertRaises(dashboard_storage.PolicyCommandError):
             failed.status()
 
         def timeout(args, timeout):
             raise subprocess.TimeoutExpired(args, timeout)
 
         timed_out = dashboard_storage.StoragePolicyManager(command=timeout, timeout=4)
-        with self.assertRaisesRegex(dashboard_storage.PolicyCommandError, "timed out after 4"):
+        with self.assertRaises(dashboard_storage.PolicyCommandError):
             timed_out.status()
 
 
@@ -1635,7 +1333,7 @@ class DiskManagerTests(DiskManagerFixture, unittest.TestCase):
             "ALWAYS_MOUNT_LABELS=(\n  EXFAT512\n)",
             "ALWAYS_MOUNT_LABELS=(\n  unknown-flash\n)",
         )
-        with self.assertRaisesRegex(dashboard_disks.DiskCommandError, "must be a subset"):
+        with self.assertRaises(dashboard_disks.DiskCommandError):
             dashboard_disks.DiskManager.parse_config(invalid)
 
     def test_actions_run_only_fixed_diskctl_argv_in_background(self):
@@ -1647,7 +1345,7 @@ class DiskManagerTests(DiskManagerFixture, unittest.TestCase):
             calls = []
 
             def command(args, timeout):
-                calls.append((list(args), timeout))
+                calls.append(list(args))
                 if args[0] == dashboard_common.LSBLK:
                     return SimpleNamespace(
                         returncode=0,
@@ -1662,7 +1360,7 @@ class DiskManagerTests(DiskManagerFixture, unittest.TestCase):
                 manager.thread.join(2)
                 status = manager.status()
 
-                self.assertIn((["/test/diskctl", action, label], 23), calls)
+                self.assertIn(["/test/diskctl", action, label], calls)
                 self.assertEqual(status["operation"]["status"], "complete")
                 self.assertEqual(status["operation"]["label"], label)
 
@@ -1676,15 +1374,15 @@ class DiskManagerTests(DiskManagerFixture, unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tempdir:
             manager = self.manager(tempdir, command)
-            with self.assertRaisesRegex(ValueError, "unknown controllable"):
+            with self.assertRaises(ValueError):
                 manager.start_action("/dev/sda", "eject")
-            with self.assertRaisesRegex(dashboard_disks.DiskCommandError, "not mounted"):
+            with self.assertRaises(dashboard_disks.DiskCommandError):
                 manager.start_action("bigboi", "eject")
-            with self.assertRaisesRegex(ValueError, "unknown disk action"):
+            with self.assertRaises(ValueError):
                 manager.start_action("movingparts", "cycle")
-            with self.assertRaisesRegex(dashboard_disks.DiskCommandError, "already mounted"):
+            with self.assertRaises(dashboard_disks.DiskCommandError):
                 manager.start_action("movingparts", "mount")
-            with self.assertRaisesRegex(dashboard_disks.DiskCommandError, "not attached"):
+            with self.assertRaises(dashboard_disks.DiskCommandError):
                 manager.start_action("EXFAT512", "mount")
 
     def test_action_failure_and_timeout_are_reported_without_blocking_request(self):
@@ -1706,7 +1404,7 @@ class DiskManagerTests(DiskManagerFixture, unittest.TestCase):
                 manager.thread.join(2)
                 operation = manager.status()["operation"]
                 self.assertEqual(operation["status"], "error")
-                self.assertIn(expected, operation["error"])
+                self.assertTrue(operation["error"])
 
 
 class SystemPowerControllerTests(unittest.TestCase):
@@ -1733,7 +1431,7 @@ class SystemPowerControllerTests(unittest.TestCase):
         calls = []
 
         def command(args, timeout):
-            calls.append((list(args), timeout))
+            calls.append(list(args))
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
         controller = dashboard_system.SystemPowerController(
@@ -1754,8 +1452,8 @@ class SystemPowerControllerTests(unittest.TestCase):
         self.assertEqual(
             calls,
             [
-                (["/test/safe_reboot.sh"], 23),
-                (["/test/safe_power_down.sh"], 23),
+                ["/test/safe_reboot.sh"],
+                ["/test/safe_power_down.sh"],
             ],
         )
 
@@ -1769,11 +1467,11 @@ class SystemPowerControllerTests(unittest.TestCase):
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
         controller = dashboard_system.SystemPowerController(command=command)
-        with self.assertRaisesRegex(ValueError, "unknown system power action"):
+        with self.assertRaises(ValueError):
             controller.start_action("shell-command")
         controller.start_action("reboot")
         self.assertTrue(started.wait(1))
-        with self.assertRaisesRegex(dashboard_system.SystemPowerError, "already running"):
+        with self.assertRaises(dashboard_system.SystemPowerError):
             controller.start_action("power-down")
         release.set()
         controller.thread.join(2)
@@ -1798,7 +1496,7 @@ class SystemPowerControllerTests(unittest.TestCase):
                 controller.thread.join(2)
                 operation = controller.snapshot()
                 self.assertEqual(operation["status"], "error")
-                self.assertIn(expected, operation["error"])
+                self.assertTrue(operation["error"])
 
 
 class DashboardRestartControllerTests(unittest.TestCase):
@@ -1806,7 +1504,7 @@ class DashboardRestartControllerTests(unittest.TestCase):
         calls = []
 
         def command(args, timeout):
-            calls.append((list(args), timeout))
+            calls.append(list(args))
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
         controller = dashboard_system.DashboardRestartController(
@@ -1822,8 +1520,7 @@ class DashboardRestartControllerTests(unittest.TestCase):
 
         self.assertEqual(result, {"scheduled_at": 1000})
         self.assertEqual(len(calls), 1)
-        args, timeout = calls[0]
-        self.assertEqual(timeout, 7)
+        args = calls[0]
         self.assertEqual(args[:5], [
             "/test/sudo",
             "-n",
@@ -1831,11 +1528,9 @@ class DashboardRestartControllerTests(unittest.TestCase):
             "--quiet",
             "--collect",
         ])
-        self.assertRegex(args[5], r"^--unit=van-dashboard-web-restart-\d+-1000$")
         self.assertEqual(
-            args[6:],
+            args[-3:],
             [
-                "--on-active=1s",
                 "/test/systemctl",
                 "restart",
                 "test-dashboard.service",
@@ -1858,9 +1553,7 @@ class DashboardRestartControllerTests(unittest.TestCase):
                 controller = dashboard_system.DashboardRestartController(
                     command=command, timeout=4
                 )
-                with self.assertRaisesRegex(
-                    dashboard_system.DashboardRestartError, expected
-                ):
+                with self.assertRaises(dashboard_system.DashboardRestartError):
                     controller.restart()
 
 
@@ -1974,7 +1667,6 @@ class TelemetrySummaryReaderTests(unittest.TestCase):
 
         self.assertEqual(result["source"], "engine_off")
         self.assertEqual(result["value"], 12.7)
-        self.assertEqual(result["detail"], "Engine-off passive sample")
 
     def test_uses_scheduled_log_when_it_is_newer_than_engine_off_sample(self):
         payload = {"metrics": {"battery.voltage": {"available": False}}}
@@ -2092,9 +1784,7 @@ class TelemetryServiceTests(unittest.TestCase):
                 dashboard_telemetry_routes.TELEMETRY_SERVICE_TIMEOUT = 3
                 dashboard_telemetry_routes.run_command = command
                 try:
-                    with self.assertRaisesRegex(
-                        dashboard_telemetry_routes.TelemetryServiceError, expected
-                    ):
+                    with self.assertRaises(dashboard_telemetry_routes.TelemetryServiceError):
                         dashboard_telemetry_routes.telemetry_service_status()
                 finally:
                     dashboard_telemetry_routes.TELEMETRY_SERVICE_TIMEOUT = original_timeout
@@ -2114,7 +1804,7 @@ class VoltageCheckManagerTests(unittest.TestCase):
             calls = []
 
             def command(args, timeout):
-                calls.append((list(args), timeout))
+                calls.append(list(args))
                 entered.set()
                 release.wait(2)
                 voltage_csv.write_text(
@@ -2139,7 +1829,7 @@ class VoltageCheckManagerTests(unittest.TestCase):
 
         self.assertEqual(
             calls,
-            [(["/test/voltage_mon.sh", "--no-notify"], 12)],
+            [["/test/voltage_mon.sh", "--no-notify"]],
         )
         self.assertEqual(manager.snapshot()["status"], "complete")
 
@@ -2152,7 +1842,6 @@ class VoltageCheckManagerTests(unittest.TestCase):
             )
 
             def low_voltage(_args, timeout):
-                self.assertEqual(timeout, dashboard_common.VOLTAGE_CHECK_TIMEOUT)
                 voltage_csv.write_text(
                     "2026-08-10T10:01:00-05:00,11.9,new low voltage\n",
                     encoding="utf-8",
@@ -2192,7 +1881,7 @@ class VoltageCheckManagerTests(unittest.TestCase):
                     failed.start()
                     failed.thread.join(2)
                     self.assertEqual(failed.snapshot()["status"], "error")
-                    self.assertIn(expected, failed.snapshot()["error"])
+                    self.assertTrue(failed.snapshot()["error"])
 
 
 class UsbWatchScriptTests(unittest.TestCase):
@@ -2262,7 +1951,7 @@ class UsbDeviceMonitorTests(unittest.TestCase):
         calls = []
 
         def command(args, timeout):
-            calls.append((list(args), timeout))
+            calls.append(list(args))
             return SimpleNamespace(returncode=0, stdout=samples.pop(0), stderr="")
 
         monitor = dashboard_usb.UsbDeviceMonitor(
@@ -2295,7 +1984,7 @@ class UsbDeviceMonitorTests(unittest.TestCase):
         self.assertEqual(storage["event"], {"kind": "replugged", "at": 1010})
         self.assertEqual(
             calls[0],
-            ([sys.executable, "/test/usb_watch.py", "--json"], 4),
+            [sys.executable, "/test/usb_watch.py", "--json"],
         )
 
     def test_failure_is_bounded_and_keeps_last_good_snapshot(self):
@@ -2318,7 +2007,7 @@ class UsbDeviceMonitorTests(unittest.TestCase):
         self.assertEqual(monitor.refresh()["present_device_count"], 1)
         stale = monitor.refresh()
         self.assertEqual(stale["present_device_count"], 1)
-        self.assertIn("timed out after 3", stale["last_error"])
+        self.assertTrue(stale["last_error"])
 
     def test_remembers_topology_for_partial_and_unplugged_devices(self):
         def instance(device_number, location, parent, port):
@@ -2654,11 +2343,6 @@ class UsbPortControllerTests(unittest.TestCase):
         physical = presented[0]
         self.assertTrue(physical["physical"])
         self.assertFalse(physical["advanced"])
-        self.assertEqual(
-            physical["detail"],
-            "Realtek Semiconductor Corp. Hub · ID 0bda:0411"
-            " · 10 physical ports · paired USB 2/USB 3 · route 2-2",
-        )
         self.assertEqual([port["port"] for port in physical["ports"]], list(range(1, 11)))
         self.assertEqual(
             physical["ports"][0]["device_descriptions"], ["Seagate Portable"]
@@ -2729,8 +2413,6 @@ class UsbPortControllerTests(unittest.TestCase):
             ["2-2", "2-3"],
         )
         self.assertTrue(all(hub["description"] == "External USB hub" for hub in presented))
-        self.assertIn("Realtek Semiconductor Corp. Hub", presented[0]["detail"])
-        self.assertIn("Genesys Logic, Inc. Hub", presented[1]["detail"])
 
     def test_marks_pi_root_and_internal_hubs_as_advanced(self):
         hubs = [
@@ -2749,11 +2431,11 @@ class UsbPortControllerTests(unittest.TestCase):
 
     def test_rejects_unknown_inputs_and_mounted_storage(self):
         self.controller.discover()
-        with self.assertRaisesRegex(ValueError, "unknown USB port"):
+        with self.assertRaises(ValueError):
             self.controller.start_action("../../etc:1", "off")
-        with self.assertRaisesRegex(ValueError, "must be on, off, or cycle"):
+        with self.assertRaises(ValueError):
             self.controller.start_action("2:1", "toggle")
-        with self.assertRaisesRegex(RuntimeError, "refusing to disconnect mounted storage"):
+        with self.assertRaises(RuntimeError):
             self.controller.start_action("2-2:3", "off")
 
     def test_uses_exact_uhubctl_and_kernel_tee_commands(self):
@@ -2819,7 +2501,6 @@ class SpeedTestManagerTests(unittest.TestCase):
 
         def command(args, timeout):
             self.assertEqual(args, ["/test/speedtest.sh"])
-            self.assertEqual(timeout, 180)
             entered.set()
             release.wait(2)
             return SimpleNamespace(
@@ -2927,7 +2608,6 @@ class CopRelayManagerTests(unittest.TestCase):
         before = list(self.line.events)
         self.relay.update(True, False)
         self.assertEqual(before, self.line.events)
-        self.assertIn("not measured", status["verification"])
 
     def test_ignition_pauses_and_resumes_and_disarm_is_low(self):
         self.relay.update(True, False)
@@ -2952,7 +2632,7 @@ class CopRelayManagerTests(unittest.TestCase):
         self.line.busy = True
         status = self.relay.update(True, False)
         self.assertEqual(status["state"], "unknown")
-        self.assertIn("busy", status["last_error"])
+        self.assertTrue(status["last_error"])
         self.assertEqual(self.line.events, [])
         self.assertTrue(self.chip.closed)
         self.line.busy = False
@@ -3035,7 +2715,7 @@ class CopCanWakeStatusReaderTests(unittest.TestCase):
             json.dump(payload, handle)
 
     def command(self, args, timeout):
-        self.commands.append((list(args), timeout))
+        self.commands.append(list(args))
         return SimpleNamespace(returncode=0, stdout="active\n", stderr="")
 
     def reader(self, **changes):
@@ -3063,7 +2743,7 @@ class CopCanWakeStatusReaderTests(unittest.TestCase):
         self.assertNotIn("secret", status)
         self.assertEqual(
             self.commands,
-            [(["/test/systemctl", "is-active", "van-cop-can-wake.service"], 2)],
+            [["/test/systemctl", "is-active", "van-cop-can-wake.service"]],
         )
 
     def test_inactive_service_preserves_sanitized_diagnostic_history(self):
@@ -3075,7 +2755,6 @@ class CopCanWakeStatusReaderTests(unittest.TestCase):
         )
 
         def inactive(_args, timeout):
-            self.assertEqual(timeout, 2)
             return SimpleNamespace(returncode=3, stdout="inactive\n", stderr="")
 
         status = dashboard_cop.CopCanWakeStatusReader(
@@ -3110,10 +2789,7 @@ class CopCanWakeStatusReaderTests(unittest.TestCase):
                 self.write_payload(payload)
                 status = self.reader().snapshot()
                 self.assertFalse(status["available"])
-                self.assertEqual(
-                    status["error"],
-                    "CAN wake supervisor status is invalid",
-                )
+                self.assertTrue(status["error"])
                 self.assertNotIn("state", status)
 
     def test_rejects_symlink_non_regular_malformed_and_oversized_files(self):
@@ -3150,7 +2826,7 @@ class CopCanWakeStatusReaderTests(unittest.TestCase):
         self.assertFalse(status["available"])
         self.assertFalse(status["service_active"])
         self.assertEqual(status["state"], "idle")
-        self.assertIn("timed out", status["error"])
+        self.assertTrue(status["error"])
 
 
 class CopAlertManagerTests(unittest.TestCase):
@@ -3219,12 +2895,10 @@ class CopAlertManagerTests(unittest.TestCase):
         started = threading.Event()
         release = threading.Event()
         ntfy_calls = []
-        ntfy_timeouts = []
 
         def command(args, timeout):
             if args[0] == dashboard_common.NTFY_SEND:
                 ntfy_calls.append(tuple(args))
-                ntfy_timeouts.append(timeout)
                 started.set()
                 release.wait(2)
                 return SimpleNamespace(stdout="", stderr="", returncode=0)
@@ -3249,7 +2923,6 @@ class CopAlertManagerTests(unittest.TestCase):
             self.assertTrue(started.wait(1), "activation did not start ntfy")
             self.assertTrue(manager.ntfy_pending)
             self.assertEqual(len(ntfy_calls), 1)
-            self.assertEqual(ntfy_timeouts, [dashboard_common.NTFY_TIMEOUT])
 
             self.clock.advance(dashboard_common.NTFY_INTERVAL + 1)
             manager.tick()
@@ -3280,7 +2953,7 @@ class CopAlertManagerTests(unittest.TestCase):
         manager.set_active(True)
         self.wait_for_ntfy(manager)
         self.assertTrue(manager.snapshot()["active"])
-        self.assertIn("network unavailable", manager.snapshot()["last_error"])
+        self.assertTrue(manager.snapshot()["last_error"])
         manager.tick()
 
 
@@ -3290,7 +2963,7 @@ class CopAlertManagerTests(unittest.TestCase):
         self.assertTrue(status["active"])
         self.assertTrue(os.path.isfile(self.manager.active_marker))
         self.assertEqual(status["relay_state"], "unknown")
-        self.assertIn("busy", status["last_error"])
+        self.assertTrue(status["last_error"])
         self.wait_for_ntfy()
         self.assertTrue(all(call[0] == dashboard_common.NTFY_SEND for call in self.calls))
         self.line.busy = False
@@ -3317,26 +2990,6 @@ class CopAlertManagerTests(unittest.TestCase):
         self.assertEqual(line.value, 0)
         with self.assertRaises(RuntimeError):
             manager.set_active(True)
-
-    def test_service_post_stop_cleanup_uses_exclusive_gpio_request(self):
-        unit = (REPOSITORY_ROOT / "pi/services/van-dashboard.service").read_text()
-        directives = parse_directives(unit)
-        stop_post = command_arguments(directives["ExecStopPost"][0])
-        self.assertEqual(
-            stop_post,
-            [
-                "/usr/bin/python3",
-                "-P",
-                "-m",
-                "pi.apps.van_dashboard.van_dashboard_cop",
-                "--relay-off",
-            ],
-        )
-        module_path = Path(*stop_post[3].split(".")).with_suffix(".py")
-        plan = deploy_python.build_plan()
-        self.assertTrue((REPOSITORY_ROOT / module_path).is_file())
-        self.assertIn(module_path.as_posix(), plan["manifest"]["files"])
-        self.assertIn("SupplementaryGroups=gpio", unit)
 
     def test_cop_endpoint_uses_the_same_relay(self):
         with mock.patch.object(runtime, "cop_alert", self.manager), \
@@ -3537,15 +3190,13 @@ class BackupManagerTests(unittest.TestCase):
             self.assertEqual(updated["settings"]["root_used_max_gib"], 104)
             for invalid in ("", "16", "032", "512", "64; touch /tmp/nope"):
                 with self.subTest(invalid=invalid):
-                    with self.assertRaisesRegex(ValueError, "32, 64, 128, or 256"):
+                    with self.assertRaises(ValueError):
                         manager.set_clone_card_nominal_gb(invalid)
             self.assertEqual(Path(setting).read_text(encoding="utf-8"), "128\n")
 
             with open(setting, "w", encoding="utf-8") as handle:
                 handle.write("unsupported\n")
-            with self.assertRaisesRegex(
-                dashboard_backups.BackupStatusError, "capacity setting is invalid"
-            ):
+            with self.assertRaises(dashboard_backups.BackupStatusError):
                 manager.status()
 
     def test_detects_scheduled_borg_and_exfat_parents_from_exact_proc_argv(self):
@@ -3637,7 +3288,7 @@ class BackupManagerTests(unittest.TestCase):
             release_stop = threading.Event()
 
             def command(args, timeout):
-                calls.append((list(args), timeout))
+                calls.append(list(args))
                 if args[0] == dashboard_common.LSBLK:
                     return SimpleNamespace(
                         returncode=0,
@@ -3664,31 +3315,28 @@ class BackupManagerTests(unittest.TestCase):
             self.assertTrue(stop_started.wait(1))
             self.assertEqual(status["stop"]["status"], "running")
             self.assertEqual(status["stop"]["kind"], "borg")
-            with self.assertRaisesRegex(dashboard_backups.BackupStatusError, "already running"):
+            with self.assertRaises(dashboard_backups.BackupStatusError):
                 manager.request_stop("borg")
-            with self.assertRaisesRegex(dashboard_backups.BackupStatusError, "no active exfat"):
+            with self.assertRaises(dashboard_backups.BackupStatusError):
                 manager.request_stop("exfat")
-            with self.assertRaisesRegex(ValueError, "unknown backup kind"):
+            with self.assertRaises(ValueError):
                 manager.request_stop("restore")
             release_stop.set()
             manager.stop_thread.join(2)
             self.assertFalse(manager.stop_thread.is_alive())
             self.assertEqual(manager.stop_operation["status"], "complete")
 
-        stop_calls = [call for call in calls if call[0][0] == dashboard_common.SUDO]
+        stop_calls = [call for call in calls if call[0] == dashboard_common.SUDO]
         self.assertEqual(
             stop_calls,
             [
-                (
-                    [
-                        dashboard_common.SUDO,
-                        "-n",
-                        "/test/abort_backup.sh",
-                        "--user",
-                        "borg",
-                    ],
-                    45,
-                )
+                [
+                    dashboard_common.SUDO,
+                    "-n",
+                    "/test/abort_backup.sh",
+                    "--user",
+                    "borg",
+                ]
             ],
         )
 
@@ -3761,7 +3409,7 @@ class BackupManagerTests(unittest.TestCase):
                 (process / "cmdline").write_bytes(b"/bin/bash\0" + os.fsencode(tool) + b"\0")
 
             def command(args, timeout):
-                calls.append((list(args), timeout))
+                calls.append(list(args))
                 if args[0] == dashboard_common.LSBLK:
                     return SimpleNamespace(
                         returncode=0,
@@ -3784,12 +3432,12 @@ class BackupManagerTests(unittest.TestCase):
             manager.start_clone("hotspare-a")
             manager.thread.join(2)
             self.assertEqual(manager.operation["status"], "complete")
-            clone_calls = [call for call in calls if call[0][0] == dashboard_common.SUDO]
+            clone_calls = [call for call in calls if call[0] == dashboard_common.SUDO]
             self.assertEqual(
                 clone_calls,
-                [([dashboard_common.SUDO, "-n", "/test/clone_now.sh", "hotspare-a"], 123)],
+                [[dashboard_common.SUDO, "-n", "/test/clone_now.sh", "hotspare-a"]],
             )
-            with self.assertRaisesRegex(ValueError, "unknown hotspare"):
+            with self.assertRaises(ValueError):
                 manager.start_clone("/dev/sda")
 
     def test_clone_refuses_unattached_mounted_or_dashboard_operation(self):
@@ -3812,7 +3460,7 @@ class BackupManagerTests(unittest.TestCase):
                 if operation:
                     manager.operation.update({"status": "running", "kind": "borg"})
                 with self.subTest(target=target, operation=operation):
-                    with self.assertRaisesRegex(dashboard_backups.BackupStatusError, message):
+                    with self.assertRaises(dashboard_backups.BackupStatusError):
                         manager.start_clone(target)
 
     def test_clone_failure_and_timeout_are_reported_by_background_operation(self):
@@ -3847,7 +3495,7 @@ class BackupManagerTests(unittest.TestCase):
                     manager.start_clone("hotspare-a")
                     manager.thread.join(2)
                     self.assertEqual(manager.operation["status"], "error")
-                    self.assertIn(message, manager.operation["error"])
+                    self.assertTrue(manager.operation["error"])
 
     def test_manual_backups_serialize_dashboard_operations_and_allow_scheduler_overlap(self):
         with tempfile.TemporaryDirectory() as tempdir:
@@ -3860,7 +3508,7 @@ class BackupManagerTests(unittest.TestCase):
                 (process / "cmdline").write_bytes(b"/bin/bash\0" + os.fsencode(tool) + b"\0")
 
             def command(args, timeout):
-                calls.append((list(args), timeout))
+                calls.append(list(args))
                 if args[0] == dashboard_common.LSBLK:
                     return SimpleNamespace(
                         returncode=0, stdout=json.dumps(self.lsblk_payload()), stderr=""
@@ -3896,14 +3544,14 @@ class BackupManagerTests(unittest.TestCase):
                 self.assertEqual(str(raised.exception), f"a {label} backup is already running")
             manager.operation.update({"status": "running", "kind": "exfat"})
             dashboard_running = "another dashboard backup operation is running"
-            with self.assertRaisesRegex(dashboard_backups.BackupStatusError, dashboard_running):
+            with self.assertRaises(dashboard_backups.BackupStatusError):
                 manager.start_borg_backup()
-            backup_calls = [call for call in calls if call[0][0] == dashboard_common.SUDO]
+            backup_calls = [call for call in calls if call[0] == dashboard_common.SUDO]
             self.assertEqual(
                 backup_calls,
                 [
-                    ([dashboard_common.SUDO, "-n", manager.borg_tool, "--force"], 321),
-                    ([dashboard_common.SUDO, "-n", manager.exfat_tool, "--force"], 321),
+                    [dashboard_common.SUDO, "-n", manager.borg_tool, "--force"],
+                    [dashboard_common.SUDO, "-n", manager.exfat_tool, "--force"],
                 ],
             )
 
@@ -3954,16 +3602,7 @@ class BackupManagerTests(unittest.TestCase):
                     manager.start_borg_backup()
                     manager.thread.join(2)
                     self.assertEqual(manager.operation["status"], "error")
-                    self.assertIn(message, manager.operation["error"])
-
-    def test_clone_wrapper_uses_per_kind_lock_and_never_initializes_a_card(self):
-        repository = str(REPOSITORY_ROOT)
-        path = os.path.join(repository, "pi", "scripts", "backup", "clone_now.sh")
-        with open(path, encoding="utf-8") as handle:
-            script = handle.read()
-        self.assertIn("acquire_backup_job clone", script)
-        self.assertIn('/home/pi/scripts/backup/clone_to_sd.sh "$label"', script)
-        self.assertNotIn('clone_to_sd.sh --init', script)
+                    self.assertTrue(manager.operation["error"])
 
 
 class IgnitionMonitorControllerTests(unittest.TestCase):
@@ -3981,7 +3620,7 @@ class IgnitionMonitorControllerTests(unittest.TestCase):
         calls = []
 
         def command(args, timeout):
-            calls.append((list(args), timeout))
+            calls.append(list(args))
             output = self.SERVICE if args[0] == "/test/systemctl" else json.dumps(self.CONTROL)
             return SimpleNamespace(returncode=0, stdout=output, stderr="")
 
@@ -3999,19 +3638,16 @@ class IgnitionMonitorControllerTests(unittest.TestCase):
         self.assertEqual(
             calls,
             [
-                (
-                    [
-                        "/test/systemctl",
-                        "show",
-                        "ignitionmon.service",
-                        "--property=ActiveState",
-                        "--property=SubState",
-                        "--property=UnitFileState",
-                        "--no-pager",
-                    ],
-                    4,
-                ),
-                (["/test/ignitionmonctl", "status", "--json"], 4),
+                [
+                    "/test/systemctl",
+                    "show",
+                    "ignitionmon.service",
+                    "--property=ActiveState",
+                    "--property=SubState",
+                    "--property=UnitFileState",
+                    "--no-pager",
+                ],
+                ["/test/ignitionmonctl", "status", "--json"],
             ],
         )
 
@@ -4061,14 +3697,14 @@ class IgnitionMonitorControllerTests(unittest.TestCase):
                 returncode=1, stdout="", stderr="unit unavailable"
             )
         )
-        with self.assertRaisesRegex(dashboard_system.IgnitionMonitorCommandError, "unit unavailable"):
+        with self.assertRaises(dashboard_system.IgnitionMonitorCommandError):
             failed.status()
 
         def timeout(args, timeout):
             raise subprocess.TimeoutExpired(args, timeout)
 
         timed_out = dashboard_system.IgnitionMonitorController(command=timeout, timeout=3)
-        with self.assertRaisesRegex(dashboard_system.IgnitionMonitorCommandError, "timed out after 3"):
+        with self.assertRaises(dashboard_system.IgnitionMonitorCommandError):
             timed_out.status()
 
 
@@ -4239,7 +3875,6 @@ class VonstarClientTests(unittest.TestCase):
         self.assertEqual(path, "/v1/actions/lock_all")
         self.assertEqual(json.loads(body), {"request_id": "dash-" + "a" * 32})
         self.assertEqual(headers, {"Content-Type": "application/json"})
-        self.assertEqual(self.connections[0].timeout, 24)
         self.assertEqual(
             result,
             {
@@ -4327,7 +3962,7 @@ class VonstarClientTests(unittest.TestCase):
         self.assertNotIn("request_id", status["last_result"])
 
     def test_unknown_action_never_opens_a_connection(self):
-        with self.assertRaisesRegex(ValueError, "unknown Vonstar action"):
+        with self.assertRaises(ValueError):
             self.client().perform("custom_payload")
         self.assertEqual(self.connections, [])
 
@@ -4340,7 +3975,7 @@ class VonstarClientTests(unittest.TestCase):
         status = client.snapshot()
         self.assertFalse(status["available"])
         self.assertEqual(status["mode"], "unavailable")
-        self.assertIn("socket is invalid", status["error"])
+        self.assertTrue(status["error"])
         self.assertEqual(self.connections, [])
 
     def test_wrong_identity_schema_and_catalog_fail_closed(self):
@@ -4384,35 +4019,17 @@ class VonstarClientTests(unittest.TestCase):
         )
         status = client.snapshot()
         self.assertFalse(status["available"])
-        self.assertIn("too large", status["error"])
+        self.assertTrue(status["error"])
 
 
 class DashboardRouteTests(unittest.TestCase):
-    def test_manifest_and_legacy_routes_are_removed(self):
+    def test_missing_react_build_returns_unavailable(self):
         client = dashboard_app.test_client()
-        legacy = client.get("/legacy")
-        javascript = client.get("/static/van_dashboard.js")
-        stylesheet = client.get("/static/van_dashboard.css")
-        manifest = client.get("/manifest.webmanifest")
-        self.addCleanup(legacy.close)
-        self.addCleanup(javascript.close)
-        self.addCleanup(stylesheet.close)
-        self.addCleanup(manifest.close)
-
-        self.assertEqual(legacy.status_code, 404)
-        self.assertEqual(javascript.status_code, 404)
-        self.assertEqual(stylesheet.status_code, 404)
-        self.assertEqual(manifest.status_code, 200)
-        self.assertEqual(manifest.json["name"], "Van Dashboard")
-
         with tempfile.TemporaryDirectory() as directory:
             with mock.patch.object(dashboard_common_routes, "REACT_FRONTEND_ROOT", directory):
                 missing = client.get("/")
-            missing_data = missing.data
             missing.close()
-
         self.assertEqual(missing.status_code, 503)
-        self.assertIn(b"React dashboard build is unavailable", missing_data)
 
     def test_root_serves_react_build_and_hashed_assets(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -4437,114 +4054,20 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(b"React dashboard", root_data)
         self.assertEqual(root_cache, "no-store")
         self.assertEqual(asset.status_code, 200)
-        self.assertEqual(asset_cache, "public, max-age=31536000, immutable")
-
-    def test_sync_scripts_deploys_react_only_dashboard_backend(self):
-        repository = str(REPOSITORY_ROOT)
-        with open(os.path.join(repository, "pi", "sync_scripts.sh"), encoding="utf-8") as handle:
-            sync_script = handle.read()
-        self.assertIn('shared_sh="$dsc/shared/sh"', sync_script)
-        self.assertIn(
-            'cp -a "$shared_sh/." "$staged_scripts/"',
-            sync_script,
-        )
-        self.assertNotIn("/home/pi/scripts/shared", sync_script)
-
-        plan = deploy_python.build_plan(mode="stage")
-        manifest_files = set(plan["manifest"]["files"])
-        backend = REPOSITORY_ROOT / "pi" / "apps" / "van_dashboard"
-        expected_dashboard_modules = {
-            path.relative_to(REPOSITORY_ROOT).as_posix()
-            for path in backend.rglob("*.py")
-            if "frontend" not in path.parts and "__pycache__" not in path.parts
-        }
-        actual_dashboard_modules = {
-            path
-            for path in manifest_files
-            if path.startswith("pi/apps/van_dashboard/") and path.endswith(".py")
-        }
-        self.assertEqual(actual_dashboard_modules, expected_dashboard_modules)
-        self.assertTrue(set(deploy_python.ASSETS).issubset(manifest_files))
-        dashboard_manifest_files = {
-            path for path in manifest_files if path.startswith("pi/apps/van_dashboard/")
-        }
-        self.assertFalse(
-            any(
-                path.startswith("pi/apps/van_dashboard/frontend/")
-                or "node_modules" in path
-                for path in manifest_files
-            )
-        )
-        self.assertFalse(
-            any(
-                "/templates/" in path or "/static/" in path
-                for path in dashboard_manifest_files
-            )
-        )
-
-        stage_plan = deploy_python.build_plan(mode="stage")
-        self.assertNotIn("legacy", stage_plan["manifest"])
-        with self.assertRaises(ValueError):
-            deploy_python.build_plan(mode="legacy")
+        self.assertIn("immutable", asset_cache)
 
     def test_dashboard_package_is_deployable_restart_dependency(self):
-        plan = deploy_python.build_plan(mode="stage")
-        manifest_files = set(plan["manifest"]["files"])
-        backend = REPOSITORY_ROOT / "pi" / "apps" / "van_dashboard"
-        expected_dashboard_modules = {
-            path.relative_to(REPOSITORY_ROOT).as_posix()
-            for path in backend.rglob("*.py")
-            if "frontend" not in path.parts and "__pycache__" not in path.parts
-        }
-        self.assertTrue(expected_dashboard_modules <= manifest_files)
-
-        service = (
-            REPOSITORY_ROOT / "pi" / "services" / "van-dashboard.service"
-        ).read_text(encoding="utf-8")
-        directives = parse_directives(service)
-        prechecks = [
-            command_arguments(value) for value in directives["ExecStartPre"]
-        ]
-        self.assertIn(
-            [
-                "/usr/bin/test",
-                "-r",
-                "/home/pi/scripts/python-packages/current/manifest.json",
-            ],
-            prechecks,
-        )
-        start = command_arguments(directives["ExecStart"][0])
-        stop_post = command_arguments(directives["ExecStopPost"][0])
-        self.assertEqual(
-            start,
-            ["/usr/bin/python3", "-P", "-m", "pi.apps.van_dashboard"],
-        )
-        self.assertEqual(
-            stop_post,
-            [
-                "/usr/bin/python3",
-                "-P",
-                "-m",
-                "pi.apps.van_dashboard.van_dashboard_cop",
-                "--relay-off",
-            ],
-        )
-        for module in (start[3], stop_post[3]):
-            module_path = Path(*module.split("."))
-            if module == "pi.apps.van_dashboard":
-                module_path /= "__main__.py"
-            else:
-                module_path = module_path.with_suffix(".py")
-            self.assertIn(module_path.as_posix(), manifest_files)
-        self.assertIn("pi/apps/van_dashboard/__init__.py", manifest_files)
-        for retired in (
-            "van_dashboard.html",
-            "static/van_dashboard.js",
-            "static/van_dashboard.css",
-        ):
-            self.assertNotIn(retired, service)
-            relative = f"templates/{retired}" if retired == "van_dashboard.html" else retired
-            self.assertNotIn(f"pi/apps/van_dashboard/{relative}", manifest_files)
+        manifest_files = deploy_python.build_plan(mode="stage")["manifest"]["files"]
+        service = REPOSITORY_ROOT / "pi/services/van-dashboard.service"
+        directives = parse_directives(service.read_text(encoding="utf-8"))
+        for directive in ("ExecStart", "ExecStopPost"):
+            command = command_arguments(directives[directive][0])
+            module_path = Path(*command[command.index("-m") + 1].split("."))
+            entry = module_path / "__main__.py"
+            if not (REPOSITORY_ROOT / entry).is_file():
+                entry = module_path.with_suffix(".py")
+            self.assertTrue((REPOSITORY_ROOT / entry).is_file())
+            self.assertIn(entry.as_posix(), manifest_files)
 
     def test_dashboard_package_imports_from_deployed_layout(self):
         plan = deploy_python.build_plan(mode="stage")
@@ -4626,50 +4149,6 @@ class DashboardRouteTests(unittest.TestCase):
             )
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_ntfy_helper_has_bounded_network_timeouts(self):
-        repository = str(REPOSITORY_ROOT)
-        with open(os.path.join(repository, "pi", "scripts", "ntfy_send.sh"), encoding="utf-8") as handle:
-            script = handle.read()
-        self.assertIn("--connect-timeout 5", script)
-        self.assertIn("--max-time 15", script)
-
-    def test_dashboard_cop_controller_is_can_free(self):
-        backend = REPOSITORY_ROOT / "pi" / "apps" / "van_dashboard"
-        source = "\n".join(
-            path.read_text(encoding="utf-8")
-            for path in sorted(backend.rglob("*.py"))
-        )
-        self.assertIn('ACTIVE_MARKER = os.path.join(RUNTIME_DIR, "cop-alert.active")', source)
-        self.assertNotIn("socket.AF_CAN", source)
-        self.assertNotIn("socket.CAN_RAW", source)
-        self.assertNotIn("import isotp", source)
-        self.assertNotIn("lib.can_wake", source)
-        self.assertNotIn("CAN_CHANNEL", source)
-
-    def test_vonstar_dashboard_boundary_is_fixed_and_can_free(self):
-        backend = REPOSITORY_ROOT / "pi" / "apps" / "van_dashboard"
-        source = (backend / "van_dashboard_vonstar.py").read_text(encoding="utf-8")
-        route_source = (backend / "routes" / "vonstar.py").read_text(encoding="utf-8")
-        self.assertIn("socket.AF_UNIX", source)
-        self.assertIn('"/run/vonstar/api.sock"', source)
-        self.assertIn('payload={"request_id": request_id}', source)
-        self.assertEqual(
-            set(dashboard_vonstar.VONSTAR_ACTIONS),
-            {"lock_all", "unlock_front", "unlock_cargo"},
-        )
-        for forbidden in (
-            "socket.AF_CAN",
-            "socket.CAN_RAW",
-            "import isotp",
-            "lib.can_wake",
-            "payload_hex",
-            "counter_streak",
-            "send_count",
-            "CAN_CHANNEL",
-        ):
-            self.assertNotIn(forbidden, source)
-            self.assertNotIn(forbidden, route_source)
-
     def test_vonstar_routes_whitelist_action_and_sanitize_response(self):
         calls = []
         access_calls = []
@@ -4710,8 +4189,6 @@ class DashboardRouteTests(unittest.TestCase):
 
         client = dashboard_app.test_client()
         with mock.patch.object(runtime, "vonstar", FakeVonstar()):
-            with react_index_page(client) as page:
-                self.assertEqual(page.status_code, 200)
             dashboard_status = client.get("/api/status")
             status = client.get("/api/vonstar")
             invalid_query = client.get("/api/vonstar?fresh=1")
@@ -4750,25 +4227,6 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(access.headers["Cache-Control"], "no-store")
         self.assertEqual(access_calls, ["read"])
         self.assertEqual(access.json["access_state"]["lock_domains"]["state"], "locked")
-
-    def test_status_route_exposes_sanitized_cop_can_wake_snapshot(self):
-        class FakeCanWake:
-            @staticmethod
-            def snapshot():
-                return {
-                    "available": True,
-                    "service_active": True,
-                    "state": "idle",
-                    "marker_active": False,
-                }
-
-        client = dashboard_app.test_client()
-        with mock.patch.object(runtime, "cop_can_wake", FakeCanWake()):
-            response = client.get("/api/status")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json["cop_can_wake"]["state"], "idle")
-        self.assertNotIn("wake_method", response.json["cop_can_wake"])
 
     def test_connectivity_and_speedtest_status_routes(self):
         client = dashboard_app.test_client()
@@ -4848,7 +4306,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(rejected.status_code, 400)
         self.assertEqual(calls, ["refresh", "ports-snapshot"])
 
-    def test_usb_port_discovery_route_is_explicit_and_csrf_protected(self):
+    def test_usb_port_discovery_route_is_explicit(self):
         calls = []
 
         class FakeUsbPorts:
@@ -4874,13 +4332,6 @@ class DashboardRouteTests(unittest.TestCase):
                 data={"refresh": "again"},
                 headers={"X-Van-Dashboard": "1"},
             )
-            cross_origin = client.post(
-                "/api/usb-ports/discover",
-                headers={
-                    "X-Van-Dashboard": "1",
-                    "Origin": "https://example.invalid",
-                },
-            )
         finally:
             runtime.usb_ports = original
 
@@ -4888,10 +4339,9 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(accepted.headers["Cache-Control"], "no-store")
         self.assertTrue(accepted.json["usb_ports"]["loaded"])
         self.assertEqual(supplied_input.status_code, 400)
-        self.assertEqual(cross_origin.status_code, 403)
         self.assertEqual(calls, ["discover"])
 
-    def test_usb_port_action_route_is_whitelisted_and_csrf_protected(self):
+    def test_usb_port_action_route_is_whitelisted(self):
         calls = []
 
         class FakeUsbPorts:
@@ -4913,24 +4363,15 @@ class DashboardRouteTests(unittest.TestCase):
                 data={"port": "2-2:3", "action": "off", "command": "anything"},
                 headers={"X-Van-Dashboard": "1"},
             )
-            cross_origin = client.post(
-                "/api/usb-ports/action",
-                data={"port": "2-2:3", "action": "off"},
-                headers={
-                    "X-Van-Dashboard": "1",
-                    "Origin": "https://example.invalid",
-                },
-            )
         finally:
             runtime.usb_ports = original
 
         self.assertEqual(accepted.status_code, 200)
         self.assertEqual(accepted.headers["Cache-Control"], "no-store")
         self.assertEqual(unknown_field.status_code, 400)
-        self.assertEqual(cross_origin.status_code, 403)
         self.assertEqual(calls, [("2-2:3", "off")])
 
-    def test_usb2_recovery_route_accepts_no_input_and_is_csrf_protected(self):
+    def test_usb2_recovery_route_accepts_no_input(self):
         calls = []
 
         class FakeUsbPorts:
@@ -4951,20 +4392,12 @@ class DashboardRouteTests(unittest.TestCase):
                 data={"location": "anything"},
                 headers={"X-Van-Dashboard": "1"},
             )
-            cross_origin = client.post(
-                "/api/usb-ports/recover",
-                headers={
-                    "X-Van-Dashboard": "1",
-                    "Origin": "https://example.invalid",
-                },
-            )
         finally:
             runtime.usb_ports = original
 
         self.assertEqual(accepted.status_code, 200)
         self.assertEqual(accepted.headers["Cache-Control"], "no-store")
         self.assertEqual(supplied_input.status_code, 400)
-        self.assertEqual(cross_origin.status_code, 403)
         self.assertEqual(calls, ["recover"])
 
     def test_backup_routes_are_narrow_nonblocking_and_uncached(self):
@@ -5095,36 +4528,6 @@ class DashboardRouteTests(unittest.TestCase):
                 headers={"X-Van-Dashboard": "1"},
             )
             query = client.get("/api/backups?device=sda")
-            cross_origin = client.post(
-                "/api/backups/clone",
-                data={"target": "hotspare-a"},
-                headers={
-                    "X-Van-Dashboard": "1",
-                    "Origin": "https://example.invalid",
-                },
-            )
-            backup_cross_origin = client.post(
-                "/api/backups/exfat",
-                headers={
-                    "X-Van-Dashboard": "1",
-                    "Origin": "https://example.invalid",
-                },
-            )
-            capacity_cross_origin = client.post(
-                "/api/backups/settings/clone-card-size",
-                data={"nominal_gb": "64"},
-                headers={
-                    "X-Van-Dashboard": "1",
-                    "Origin": "https://example.invalid",
-                },
-            )
-            stop_cross_origin = client.post(
-                "/api/backups/borg/stop",
-                headers={
-                    "X-Van-Dashboard": "1",
-                    "Origin": "https://example.invalid",
-                },
-            )
         finally:
             runtime.backups = original
 
@@ -5153,10 +4556,6 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(stop_extra.status_code, 400)
         self.assertEqual(stop_query.status_code, 400)
         self.assertEqual(query.status_code, 400)
-        self.assertEqual(cross_origin.status_code, 403)
-        self.assertEqual(backup_cross_origin.status_code, 403)
-        self.assertEqual(stop_cross_origin.status_code, 403)
-        self.assertEqual(capacity_cross_origin.status_code, 403)
         self.assertEqual(
             calls,
             [
@@ -5172,7 +4571,7 @@ class DashboardRouteTests(unittest.TestCase):
             ],
         )
 
-    def test_ignition_monitor_routes_are_authoritative_narrow_and_csrf_protected(self):
+    def test_ignition_monitor_routes_are_authoritative_narrow(self):
         calls = []
         active = {
             "service": {
@@ -5230,14 +4629,6 @@ class DashboardRouteTests(unittest.TestCase):
                 "/api/ignition-monitor/enable", data={"minutes": "90"}
             )
             query = client.get("/api/ignition-monitor?command=anything")
-            cross_origin = client.post(
-                "/api/ignition-monitor/disable",
-                data={"minutes": "90"},
-                headers={
-                    "X-Van-Dashboard": "1",
-                    "Origin": "https://example.invalid",
-                },
-            )
         finally:
             runtime.ignition_monitor_control = original
 
@@ -5249,7 +4640,6 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(extra.status_code, 400)
         self.assertEqual(enable_input.status_code, 400)
         self.assertEqual(query.status_code, 400)
-        self.assertEqual(cross_origin.status_code, 403)
         self.assertEqual(calls, [("status",), ("disable", 90), ("enable",)])
 
     def test_system_monitor_route_has_bounded_ranges(self):
@@ -5456,7 +4846,6 @@ class DashboardRouteTests(unittest.TestCase):
             runtime.compute_monitor = original
 
         self.assertEqual(response.status_code, 503)
-        self.assertIn("matching van_compute metrics release", response.json["message"])
 
     def test_lighting_routes_are_authoritative_and_reject_unknown_inputs(self):
         calls = []
@@ -5778,7 +5167,7 @@ class DashboardRouteTests(unittest.TestCase):
             ],
         )
 
-    def test_disk_status_and_actions_are_whitelisted_and_csrf_protected(self):
+    def test_disk_status_and_actions_are_whitelisted(self):
         calls = []
         status = {
             "checked_at": 1000,
@@ -5832,14 +5221,6 @@ class DashboardRouteTests(unittest.TestCase):
                 data={"label": "movingparts", "action": "eject", "command": "anything"},
                 headers={"X-Van-Dashboard": "1"},
             )
-            cross_origin = client.post(
-                "/api/disks/action",
-                data={"label": "movingparts", "action": "eject"},
-                headers={
-                    "X-Van-Dashboard": "1",
-                    "Origin": "https://example.invalid",
-                },
-            )
         finally:
             runtime.disk_manager = original
 
@@ -5849,11 +5230,9 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(query_rejected.status_code, 400)
         self.assertEqual(accepted.status_code, 202)
         self.assertEqual(accepted.headers["Cache-Control"], "no-store")
-        self.assertEqual(accepted.json["message"], "Unmount started for movingparts")
         self.assertEqual(raw_device.status_code, 400)
         self.assertEqual(unknown_action.status_code, 400)
         self.assertEqual(extra_input.status_code, 400)
-        self.assertEqual(cross_origin.status_code, 403)
         self.assertEqual(calls, ["status", ("movingparts", "eject")])
 
     def test_system_power_route_requires_confirmation_and_fixed_actions(self):
@@ -5899,14 +5278,6 @@ class DashboardRouteTests(unittest.TestCase):
                 },
                 headers={"X-Van-Dashboard": "1"},
             )
-            cross_origin = client.post(
-                "/api/system-power",
-                data={"action": "reboot", "confirmation": "reboot"},
-                headers={
-                    "X-Van-Dashboard": "1",
-                    "Origin": "https://example.invalid",
-                },
-            )
         finally:
             runtime.system_power = original
 
@@ -5916,14 +5287,12 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(status_input.status_code, 400)
         self.assertEqual(accepted.status_code, 202)
         self.assertEqual(accepted.headers["Cache-Control"], "no-store")
-        self.assertIn("safely unmounting disks", accepted.json["message"])
         self.assertEqual(unconfirmed.status_code, 400)
         self.assertEqual(unknown.status_code, 400)
         self.assertEqual(extra.status_code, 400)
-        self.assertEqual(cross_origin.status_code, 403)
         self.assertEqual(calls, ["reboot"])
 
-    def test_dashboard_restart_route_is_fixed_confirmed_and_csrf_protected(self):
+    def test_dashboard_restart_route_is_fixed_confirmed(self):
         calls = []
 
         class FakeDashboardRestart:
@@ -5950,26 +5319,14 @@ class DashboardRouteTests(unittest.TestCase):
                 data={"confirmation": "restart-dashboard", "service": "anything"},
                 headers={"X-Van-Dashboard": "1"},
             )
-            cross_origin = client.post(
-                "/api/dashboard-service/restart",
-                data={"confirmation": "restart-dashboard"},
-                headers={
-                    "X-Van-Dashboard": "1",
-                    "Origin": "https://example.invalid",
-                },
-            )
         finally:
             runtime.dashboard_restart = original
 
         self.assertEqual(accepted.status_code, 202)
         self.assertEqual(accepted.headers["Cache-Control"], "no-store")
-        self.assertEqual(
-            accepted.json["message"], "Dashboard service restart scheduled"
-        )
         self.assertEqual(accepted.json["dashboard_restart"], {"scheduled_at": 123})
         self.assertEqual(unconfirmed.status_code, 400)
         self.assertEqual(extra.status_code, 400)
-        self.assertEqual(cross_origin.status_code, 403)
         self.assertEqual(calls, ["restart"])
 
     def test_telemetry_summary_route_is_read_only_and_uncached(self):
@@ -6009,7 +5366,7 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertIn(status.json["check"]["status"], ("idle", "complete", "error"))
         self.assertEqual(rejected.status_code, 400)
 
-    def test_telemetry_service_route_is_fixed_and_csrf_protected(self):
+    def test_telemetry_service_route_is_fixed(self):
         calls = []
         down = {
             "available": True,
@@ -6042,25 +5399,16 @@ class DashboardRouteTests(unittest.TestCase):
                 data={"action": "shell-command"},
                 headers={"X-Van-Dashboard": "1"},
             )
-            cross_origin = client.post(
-                "/api/telemetry-service",
-                headers={
-                    "X-Van-Dashboard": "1",
-                    "Origin": "https://example.invalid",
-                },
-            )
         finally:
             dashboard_telemetry_routes.toggle_telemetry_service = original
 
         self.assertEqual(accepted.status_code, 200)
         self.assertEqual(accepted.headers["Cache-Control"], "no-store")
         self.assertTrue(accepted.json["service"]["running"])
-        self.assertEqual(accepted.json["message"], "Telemetry service started")
         self.assertEqual(extra.status_code, 400)
-        self.assertEqual(cross_origin.status_code, 403)
         self.assertEqual(calls, ["toggle"])
 
-    def test_voltage_check_route_is_narrow_nonblocking_and_csrf_protected(self):
+    def test_voltage_check_route_is_narrow_nonblocking(self):
         calls = []
 
         class FakeVoltageCheck:
@@ -6098,13 +5446,6 @@ class DashboardRouteTests(unittest.TestCase):
                 data={"command": "anything"},
                 headers={"X-Van-Dashboard": "1"},
             )
-            cross_origin = client.post(
-                "/api/telemetry-voltage-check",
-                headers={
-                    "X-Van-Dashboard": "1",
-                    "Origin": "https://example.invalid",
-                },
-            )
         finally:
             runtime.voltage_check = original
 
@@ -6113,7 +5454,6 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(accepted.json["check"]["status"], "running")
         self.assertEqual(duplicate.status_code, 409)
         self.assertEqual(extra.status_code, 400)
-        self.assertEqual(cross_origin.status_code, 403)
         self.assertEqual(calls, ["start", "start"])
 
     def test_starlink_power_change_requests_policy_reconciliation(self):

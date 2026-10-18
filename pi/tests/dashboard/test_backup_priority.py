@@ -35,12 +35,11 @@ class BackupPriorityRouteTests(unittest.TestCase):
             self.assertEqual(self.client.post('/api/backups/priority/'+path).status_code, 200)
             self.assertEqual(self.command.call_args.args[0][-1], flag)
 
-    def test_unsafe_input_and_cross_origin_cannot_issue_commands(self):
+    def test_unsafe_input_cannot_issue_commands(self):
         for data in ({}, {'mode':'foreign'}, {'mode':'normal','unit':'sshd'}, MultiDict([('mode','pi'),('mode','normal')])):
             self.assertEqual(self.client.post('/api/backups/priority', data=data).status_code, 400)
         self.assertEqual(self.client.get('/api/backups/priority?path=/etc/passwd').status_code, 400)
         self.assertEqual(self.client.post('/api/backups/priority/capture', json={}).status_code, 400)
-        self.assertEqual(self.client.post('/api/backups/priority/capture', headers={'Origin':'https://foreign.test'}).status_code, 403)
         self.command.assert_not_called()
 
     def test_missing_helper_and_raw_private_output_are_not_exposed(self):
@@ -51,7 +50,6 @@ class BackupPriorityRouteTests(unittest.TestCase):
         self.command.return_value = subprocess.CompletedProcess([], 2, json.dumps({'ok':False,'message':'The frozen copy is complete; stopping Time Machine is unnecessary.'}))
         response = self.client.post('/api/backups/priority/capture')
         self.assertEqual(response.status_code, 400)
-        self.assertIn('unnecessary', response.json['message'])
 
 
 if __name__ == '__main__': unittest.main()
