@@ -207,6 +207,13 @@
   justify-content: flex-end;
 }
 
+.deal-watch-form__hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .deal-watch-schedule h3 {
   margin-bottom: 6px;
 }
@@ -387,6 +394,49 @@
 
 .deal-watch-card__empty {
   margin-top: 14px;
+}
+
+.deal-watch-haveno-card__facts {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.deal-watch-haveno-offers {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 15px 0 0;
+  list-style: none;
+}
+
+.deal-watch-haveno-offer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 5px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 11px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.deal-watch-haveno-offer__price {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.deal-watch-haveno-offer__price strong,
+.deal-watch-haveno-offer__price span,
+.deal-watch-haveno-offer small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.deal-watch-haveno-offer__price > span:not(.status-pill),
+.deal-watch-haveno-offer small {
+  color: var(--muted);
 }
 
 @media (max-width: 760px) {

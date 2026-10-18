@@ -3,7 +3,10 @@ import { KeyValueList } from '../../components/KeyValueList';
 import { StatusPill } from '../../components/StatusPill';
 import { Tile } from '../../components/Tile';
 import {
+  bestCurrentHavenoOffer,
   dealWatchTone,
+  havenoPercentLabel,
+  havenoPriceLabel,
   mostRecentCheckAt,
   mostRecentPricedListing,
   watchedCount,
@@ -28,14 +31,19 @@ function compactAge(timestamp: number | null): string {
   return seconds < 90 ? `${Math.round(seconds)}s ago` : `${Math.round(seconds / 60)}m ago`;
 }
 
+function countLabel(count: number, singular: string, plural = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
 export function DealWatchTile({ resource, onOpen }: DealWatchTileProps) {
   const status = resource.data;
   const tone = dealWatchTone(status, resource.error);
   const latestListing = status ? mostRecentPricedListing(status) : null;
+  const bestHaveno = status ? bestCurrentHavenoOffer(status) : null;
   const summary = status
     ? watchedCount(status) === 0
       ? 'Nothing watched'
-      : `${status.listingSummary.count} listings · ${status.searchSummary.count} queries · ${status.listingSummary.errors + status.searchSummary.errors} errors`
+      : `${countLabel(status.listingSummary.count, 'listing')} · ${countLabel(status.searchSummary.count, 'query', 'queries')} · ${status.havenoSummary.count} XMR · ${countLabel(status.listingSummary.errors + status.searchSummary.errors + status.havenoSummary.errors, 'error')}`
     : resource.error
       ? 'Price data unavailable'
       : 'Loading watched items…';
@@ -47,6 +55,16 @@ export function DealWatchTile({ resource, onOpen }: DealWatchTileProps) {
         : resource.error && !status
           ? 'Unavailable'
           : '—',
+    },
+    {
+      label: 'XMR',
+      value: bestHaveno
+        ? `${havenoPriceLabel(bestHaveno.bestPrice!, bestHaveno.currency)} · ${havenoPercentLabel(bestHaveno.bestVsMarketPct!)}`
+        : status?.havenoSummary.count
+          ? 'No offers'
+          : resource.error && !status
+            ? 'Unavailable'
+            : '—',
     },
     {
       label: 'Last check',

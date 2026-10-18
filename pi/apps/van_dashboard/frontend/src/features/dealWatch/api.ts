@@ -2,6 +2,7 @@ import { getJson, postForm } from '../../api/client';
 import { objectValue, stringValue } from '../../api/validation';
 import { decodeDealWatchSchedule, decodeDealWatchStatus } from './decoders';
 import type {
+  DealWatchHavenoDraft,
   DealWatchListingDraft,
   DealWatchMutationResult,
   DealWatchSchedule,
@@ -125,6 +126,66 @@ export async function checkDealWatchSearch(
     target: targetValue(target, 'search target'),
   });
   return mutationResult(payload, 'search check response');
+}
+
+function havenoFields(draft: DealWatchHavenoDraft): Record<string, string> {
+  return {
+    threshold_pct: draft.thresholdPct,
+    fee_pct: draft.feePct,
+    payment_method: draft.paymentMethod,
+    currency: draft.currency,
+    min_xmr: draft.minXmr,
+    max_xmr: draft.maxXmr,
+    title: draft.title,
+  };
+}
+
+export async function addDealWatchHavenoWatch(
+  draft: DealWatchHavenoDraft,
+): Promise<DealWatchMutationResult> {
+  const payload = await postForm('/api/price-checks/haveno/add', havenoFields(draft));
+  return mutationResult(payload, 'add Haveno watch response');
+}
+
+export async function editDealWatchHavenoWatch(
+  id: number,
+  draft: DealWatchHavenoDraft,
+): Promise<DealWatchMutationResult> {
+  const payload = await postForm('/api/price-checks/haveno/edit', {
+    id: positiveId(id, 'Haveno watch ID'),
+    ...havenoFields(draft),
+  });
+  return mutationResult(payload, 'edit Haveno watch response');
+}
+
+export async function removeDealWatchHavenoWatch(id: number): Promise<DealWatchMutationResult> {
+  const payload = await postForm('/api/price-checks/haveno/remove', {
+    id: positiveId(id, 'Haveno watch ID'),
+  });
+  return mutationResult(payload, 'remove Haveno watch response');
+}
+
+export async function setDealWatchHavenoMute(
+  id: number,
+  days: number,
+): Promise<DealWatchMutationResult> {
+  if (!Number.isSafeInteger(days) || days < 0) {
+    throw new TypeError('mute days must be a non-negative integer');
+  }
+  const payload = await postForm('/api/price-checks/haveno/mute', {
+    id: positiveId(id, 'Haveno watch ID'),
+    days: String(days),
+  });
+  return mutationResult(payload, 'Haveno mute response');
+}
+
+export async function checkDealWatchHaveno(
+  target: number | 'all',
+): Promise<DealWatchMutationResult> {
+  const payload = await postForm('/api/price-checks/haveno/check', {
+    target: targetValue(target, 'Haveno target'),
+  });
+  return mutationResult(payload, 'Haveno check response');
 }
 
 export async function previewDealWatchSchedule(

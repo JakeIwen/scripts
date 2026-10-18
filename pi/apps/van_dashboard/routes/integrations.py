@@ -198,6 +198,122 @@ def api_price_checks_add():
 
 
 
+@bp.route("/api/price-checks/haveno/add", methods=["POST"])
+def api_price_checks_haveno_add():
+    fields = (
+        "threshold_pct",
+        "fee_pct",
+        "payment_method",
+        "currency",
+        "min_xmr",
+        "max_xmr",
+        "title",
+    )
+    if not _exact_form(fields):
+        return api_error(
+            "Haveno watch requires threshold, fee, payment method, currency, min XMR, max XMR, and title",
+            400,
+        )
+    try:
+        payload = price_checks.add_haveno(*(request.form[field] for field in fields))
+    except PriceCheckCommandError as exc:
+        return api_error(f"could not add Haveno watch: {exc}", 400)
+    payload["message"] = f"Watching {payload['haveno_watch']['display_title']}"
+    return jsonify(payload)
+
+
+
+@bp.route("/api/price-checks/haveno/edit", methods=["POST"])
+def api_price_checks_haveno_edit():
+    fields = (
+        "id",
+        "threshold_pct",
+        "fee_pct",
+        "payment_method",
+        "currency",
+        "min_xmr",
+        "max_xmr",
+        "title",
+    )
+    if not _exact_form(fields) or not request.form["id"].isdigit():
+        return api_error(
+            "Haveno watch edit requires ID, threshold, fee, payment method, currency, min XMR, max XMR, and title",
+            400,
+        )
+    try:
+        payload = price_checks.edit_haveno(
+            *(request.form[field] for field in fields)
+        )
+    except PriceCheckCommandError as exc:
+        return api_error(f"could not edit Haveno watch: {exc}", 400)
+    payload["message"] = f"Updated {payload['haveno_watch']['display_title']}"
+    return jsonify(payload)
+
+
+
+@bp.route("/api/price-checks/haveno/remove", methods=["POST"])
+def api_price_checks_haveno_remove():
+    if not _exact_form(("id",)) or not request.form["id"].isdigit():
+        return api_error("Haveno watch removal requires an ID", 400)
+    try:
+        payload = price_checks.remove_haveno(request.form["id"])
+    except PriceCheckCommandError as exc:
+        return api_error(f"could not remove Haveno watch: {exc}", 400)
+    payload["message"] = (
+        f"Removed {payload['removed_haveno_watch']['display_title']}"
+    )
+    return jsonify(payload)
+
+
+
+@bp.route("/api/price-checks/haveno/mute", methods=["POST"])
+def api_price_checks_haveno_mute():
+    if (
+        not _exact_form(("id", "days"))
+        or not request.form["id"].isdigit()
+        or not request.form["days"].isdigit()
+    ):
+        return api_error(
+            "Haveno notification mute requires an ID and a non-negative number of days",
+            400,
+        )
+    days = int(request.form["days"])
+    try:
+        payload = price_checks.mute_haveno(request.form["id"], days)
+    except PriceCheckCommandError as exc:
+        return api_error(f"could not change Haveno notification mute: {exc}", 400)
+    watch = payload["haveno_watch"]
+    if days:
+        payload["message"] = (
+            f"Muted notifications for {watch['display_title']} for {days} "
+            f"{'day' if days == 1 else 'days'}"
+        )
+    else:
+        payload["message"] = f"Unmuted notifications for {watch['display_title']}"
+    return jsonify(payload)
+
+
+
+@bp.route("/api/price-checks/haveno/check", methods=["POST"])
+def api_price_checks_haveno_check():
+    if not _exact_form(("target",)):
+        return api_error("Haveno check requires a watch ID or all", 400)
+    target = request.form["target"]
+    if target != "all" and (not target.isdigit() or int(target) <= 0):
+        return api_error("Haveno target must be a positive watch ID or all", 400)
+    try:
+        payload = price_checks.check_haveno(target)
+    except PriceCheckCommandError as exc:
+        status = 409 if "already running" in str(exc) else 502
+        return api_error(f"could not check Haveno watches: {exc}", status)
+    count = len(payload.get("haveno_checked", ()))
+    payload["message"] = (
+        f"Checked {count} Haveno {'watch' if count == 1 else 'watches'}"
+    )
+    return jsonify(payload)
+
+
+
 @bp.route("/api/price-checks/remove", methods=["POST"])
 def api_price_checks_remove():
     if not _exact_form(("id",)) or not request.form["id"].isdigit():

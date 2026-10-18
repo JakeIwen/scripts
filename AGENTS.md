@@ -295,6 +295,13 @@ compare it with this checkout. Deployed files may differ from the repository.
   Recovery retries silently at six-minute intervals, stops after 50 consecutive
   failed attempts and sends one ntfy alert. A successful search resets the
   durable count; preserve claim fencing and idempotent failure acknowledgements.
+- Deal Watch Haveno XMR offers: `pi/scripts/price_check/haveno_watch/` (`source.py`
+  order book + reference price, `store.py` tables in the shared price-check DB,
+  `service.py` matching/ntfy, `cli.py` `haveno-*` subcommands and `.haveno.lock`).
+  Order book is haveno.markets level-2 `asks` (RetoSwap only); reference is the Haveno
+  pricenode with Kraken fallback, never the haveno.markets ticker. Each offer ID
+  notifies once per watch. Its own 10-minute `haveno-check` cron line sits beside the
+  price-check line. React: `DealWatchHavenoSection.tsx`, `havenoDecoders.ts`.
 
 Some ignored secret directories, wireless profiles, and device configurations
 may contain credentials or private network data. Never print or commit secrets,

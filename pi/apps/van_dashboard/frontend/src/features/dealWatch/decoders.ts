@@ -9,6 +9,7 @@ import {
   stringValue,
 } from '../../api/validation';
 import { decodeExternalHttpUrl } from './externalLinks';
+import { decodeDealWatchHaveno } from './havenoDecoders';
 import type {
   DealWatchCheckState,
   DealWatchListing,
@@ -401,6 +402,7 @@ export function decodeDealWatchStatus(payload: unknown): DealWatchStatus {
   const searches = arrayValue(response.searches, 'price checks.searches').map(decodeSavedSearch);
   const listingSummary = decodeListingSummary(response.summary);
   const searchSummary = decodeSearchSummary(response.search_summary);
+  const { havenoWatches, havenoSummary } = decodeDealWatchHaveno(response);
 
   if (new Set(listings.map((item) => item.id)).size !== listings.length) {
     throw new TypeError('price checks.items contains duplicate IDs');
@@ -434,6 +436,8 @@ export function decodeDealWatchStatus(payload: unknown): DealWatchStatus {
     listingSummary,
     searches,
     searchSummary,
+    havenoWatches,
+    havenoSummary,
     schedule: decodeDealWatchSchedule(response.schedule),
   };
 }

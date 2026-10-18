@@ -1,0 +1,45 @@
+{
+  "asks": [
+    {
+      "offer_id": "pkUSqG-ee3d449b-d904-4fa3-86bf-5e6bf2bd69a9-1100",
+      "offer_date": 1791999089558,
+      "amount": 10,
+      "price": 563.08,
+      "payment_method": "ZELLE",
+      "min_amount": 6
+    },
+    {
+      "offer_id": "3863904-d41621de-9db8-408b-a48d-0bd98476b1f0-180",
+      "offer_date": 1792037161252,
+      "amount": 2.001,
+      "price": 580.49,
+      "payment_method": "ZELLE",
+      "min_amount": 2.001
+    },
+    {
+      "offer_id": "APJVYUB-abb82211-3a05-4d5c-875f-af1741cf6825-180",
+      "offer_date": 1792306763304,
+      "amount": 7.271,
+      "price": 609.46,
+      "payment_method": "PAY_BY_MAIL",
+      "min_amount": 1.02
+    },
+    {
+      "offer_id": "pfvxlh-caf617c6-7160-47f9-b834-69625b07cb9c-180",
+      "offer_date": 1791218733991,
+      "amount": 0.2495,
+      "price": 621.12,
+      "payment_method": "ZELLE",
+      "min_amount": 0.2495
+    },
+    {
+      "offer_id": "BCYIHTE-44e76bf9-416e-431b-a65f-39b49173eecd-180",
+      "offer_date": 1792127502417,
+      "amount": 11.65,
+      "price": 667.56,
+      "payment_method": "ZELLE",
+      "min_amount": 1.01
+    }
+  ],
+  "bids": []
+}

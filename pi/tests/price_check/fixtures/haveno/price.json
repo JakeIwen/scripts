@@ -1,0 +1,18 @@
+{
+  "data": [
+    {
+      "baseCurrencyCode": "XMR",
+      "counterCurrencyCode": "EUR",
+      "price": 517.9,
+      "timestampMs": 1792322505195,
+      "provider": "KRAKEN"
+    },
+    {
+      "baseCurrencyCode": "XMR",
+      "counterCurrencyCode": "USD",
+      "price": 581.555,
+      "timestampMs": 1792322505195,
+      "provider": "KRAKEN"
+    }
+  ]
+}

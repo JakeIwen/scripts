@@ -16,6 +16,14 @@ from urllib.parse import urlparse
 
 from amazon_parser import AmazonParseError, Product, parse as parse_amazon
 from cron_schedule import CronScheduleError, CronScheduleManager
+from haveno_watch import (
+    HavenoStore,
+    HavenoStoreError,
+    HavenoWatchError,
+    handle_command as handle_haveno_command,
+    register_subcommands as register_haveno_subcommands,
+    run_combined_checks as run_combined_haveno_checks,
+)
 from search_watch import (
     SearchStore,
     SearchStoreError,
@@ -200,7 +208,9 @@ def summary(items: list[dict]) -> dict:
     }
 
 
-def response(store: PriceStore, search_store: SearchStore, **extra) -> dict:
+def response(
+    store: PriceStore, search_store: SearchStore, haveno_store: HavenoStore, **extra
+) -> dict:
     items = store.list_items()
     return {
         "ok": True,
@@ -208,6 +218,8 @@ def response(store: PriceStore, search_store: SearchStore, **extra) -> dict:
         "summary": summary(items),
         "searches": search_store.list_watches(),
         "search_summary": search_store.summary(),
+        "haveno_watches": haveno_store.list_watches(),
+        "haveno_summary": haveno_store.summary(),
         **extra,
     }
 
@@ -302,6 +314,7 @@ def build_parser() -> argparse.ArgumentParser:
     search_check.add_argument(
         "--no-notify", action="store_true", help="record results without notifying"
     )
+    register_haveno_subcommands(commands)
     migrate = commands.add_parser("migrate-tsv", help="import the old private TSV")
     migrate.add_argument("path", type=Path)
     return parser
@@ -320,6 +333,11 @@ def emit(args, payload: dict, message: str | None = None) -> None:
             print(
                 f"search:{watch['id']}\t{watch['display_title']}\t"
                 f"{watch['result_count']} results\t{watch['url']}"
+            )
+        for watch in payload["haveno_watches"]:
+            print(
+                f"haveno:{watch['id']}\t{watch['display_title']}\t"
+                f"{watch['match_count']} matches\t{watch['market_url']}"
             )
 
 
@@ -359,16 +377,20 @@ def main() -> int:
             )
             return 0
 
-        with PriceStore(args.db) as store, SearchStore(args.db) as search_store:
+        with (
+            PriceStore(args.db) as store,
+            SearchStore(args.db) as search_store,
+            HavenoStore(args.db) as haveno_store,
+        ):
             if command == "list":
-                emit(args, response(store, search_store))
+                emit(args, response(store, search_store, haveno_store))
                 return 0
             if command == "add":
                 values = validate_listing(args.parser, args.threshold, args.url, args.title)
                 item = store.add_item(*values)
                 emit(
                     args,
-                    response(store, search_store, item=item),
+                    response(store, search_store, haveno_store, item=item),
                     f"added price check: {item['display_title']}",
                 )
                 return 0
@@ -377,7 +399,7 @@ def main() -> int:
                 item = store.update_item(args.id, *values)
                 emit(
                     args,
-                    response(store, search_store, item=item),
+                    response(store, search_store, haveno_store, item=item),
                     f"updated price check: {item['display_title']}",
                 )
                 return 0
@@ -394,13 +416,13 @@ def main() -> int:
                         f"unmuted price-check notifications for "
                         f"{item['display_title']}"
                     )
-                emit(args, response(store, search_store, item=item), message)
+                emit(args, response(store, search_store, haveno_store, item=item), message)
                 return 0
             if command == "remove":
                 item = store.remove_item(args.match)
                 emit(
                     args,
-                    response(store, search_store, removed=item),
+                    response(store, search_store, haveno_store, removed=item),
                     f"removed price check: {item['display_title']}",
                 )
                 return 0
@@ -411,7 +433,7 @@ def main() -> int:
                 watch = search_store.add_watch(parser_name, url, title)
                 emit(
                     args,
-                    response(store, search_store, search=watch),
+                    response(store, search_store, haveno_store, search=watch),
                     f"added saved search: {watch['display_title']}",
                 )
                 return 0
@@ -419,7 +441,7 @@ def main() -> int:
                 watch = search_store.remove_watch(args.id)
                 emit(
                     args,
-                    response(store, search_store, removed_search=watch),
+                    response(store, search_store, haveno_store, removed_search=watch),
                     f"removed saved search: {watch['display_title']}",
                 )
                 return 0
@@ -432,17 +454,40 @@ def main() -> int:
                     response(
                         store,
                         search_store,
+                        haveno_store,
                         search=watch,
                         dismissed_result=dismissed,
                     ),
                     f"dismissed eBay result: {dismissed['title']}",
                 )
                 return 0
+            haveno_result = handle_haveno_command(
+                args,
+                haveno_store,
+                db_path=args.db,
+                fetcher=fetch,
+                notify_sender=send_ntfy,
+            )
+            if haveno_result is not None:
+                payload = response(
+                    store,
+                    search_store,
+                    haveno_store,
+                    **haveno_result.extra,
+                )
+                if haveno_result.message and haveno_result.status:
+                    payload["message"] = haveno_result.message
+                emit(
+                    args,
+                    payload,
+                    haveno_result.message if haveno_result.status == 0 else None,
+                )
+                return haveno_result.status
             if command == "migrate-tsv":
                 count = migrate_tsv(store, args.path)
                 emit(
                     args,
-                    response(store, search_store, migrated=count),
+                    response(store, search_store, haveno_store, migrated=count),
                     f"migrated {count} price checks",
                 )
                 return 0
@@ -490,21 +535,38 @@ def main() -> int:
                     and not getattr(args, "no_notify", False),
                     record=not args.dry_run,
                 )
-                all_errors = errors + search_errors
-                payload = response(
-                    store,
-                    search_store,
-                    checked=checked,
-                    search_checked=search_checked,
-                    check_errors=all_errors,
+
+            haveno_checked, haveno_errors, haveno_skipped = run_combined_haveno_checks(
+                args,
+                haveno_store,
+                command=command,
+                fetcher=fetch,
+                notify_sender=send_ntfy,
+            )
+            if haveno_skipped:
+                print(
+                    "price-check Haveno: another Haveno check is already running; skipped",
+                    file=sys.stderr,
                 )
-                if all_errors:
-                    payload["message"] = "; ".join(
-                        error["message"] for error in all_errors
-                    )
-                emit(args, payload)
-                return 1 if all_errors else 0
+            all_errors = errors + search_errors + haveno_errors
+            payload = response(
+                store,
+                search_store,
+                haveno_store,
+                checked=checked,
+                search_checked=search_checked,
+                haveno_checked=haveno_checked,
+                check_errors=all_errors,
+            )
+            if all_errors:
+                payload["message"] = "; ".join(
+                    error["message"] for error in all_errors
+                )
+            emit(args, payload)
+            return 1 if all_errors else 0
     except (
+        HavenoStoreError,
+        HavenoWatchError,
         OSError,
         CronScheduleError,
         PriceCheckError,

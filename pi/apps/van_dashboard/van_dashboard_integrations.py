@@ -32,6 +32,22 @@ class PriceCheckCommandError(RuntimeError):
     pass
 
 
+def _haveno_options(fee_pct, payment_method, currency, min_xmr, max_xmr, title):
+    """Omit blank fields so the CLI applies its defaults (edits replace them)."""
+    arguments = []
+    for option, value in (
+        ("--fee-pct", fee_pct),
+        ("--payment-method", payment_method),
+        ("--currency", currency),
+        ("--min-xmr", min_xmr),
+        ("--max-xmr", max_xmr),
+        ("--title", title),
+    ):
+        if value:
+            arguments.extend((option, value))
+    return arguments
+
+
 class PriceCheckController:
     """Use the price-check CLI as the sole database and validation boundary."""
 
@@ -114,6 +130,55 @@ class PriceCheckController:
 
     def check_search(self, target="all"):
         return self._run("search-check", target)
+
+    def add_haveno(
+        self,
+        threshold_pct,
+        fee_pct="",
+        payment_method="",
+        currency="",
+        min_xmr="",
+        max_xmr="",
+        title="",
+    ):
+        return self._run(
+            "haveno-add",
+            threshold_pct,
+            *_haveno_options(
+                fee_pct, payment_method, currency, min_xmr, max_xmr, title
+            ),
+            timeout=20,
+        )
+
+    def edit_haveno(
+        self,
+        watch_id,
+        threshold_pct,
+        fee_pct="",
+        payment_method="",
+        currency="",
+        min_xmr="",
+        max_xmr="",
+        title="",
+    ):
+        return self._run(
+            "haveno-edit",
+            watch_id,
+            threshold_pct,
+            *_haveno_options(
+                fee_pct, payment_method, currency, min_xmr, max_xmr, title
+            ),
+            timeout=20,
+        )
+
+    def remove_haveno(self, watch_id):
+        return self._run("haveno-remove", watch_id, timeout=20)
+
+    def mute_haveno(self, watch_id, days):
+        return self._run("haveno-mute", watch_id, days, timeout=20)
+
+    def check_haveno(self, target="all"):
+        return self._run("haveno-check", target)
 
 
 class SystemMonitorCommandError(RuntimeError):

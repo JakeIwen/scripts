@@ -4,18 +4,24 @@ import { useToast } from '../../components/ToastProvider';
 import type { PollingState } from '../../hooks/usePollingResource';
 import { useSingleFlightAction } from '../../hooks/useSingleFlightAction';
 import {
+  addDealWatchHavenoWatch,
   addDealWatchListing,
   addDealWatchSearch,
+  checkDealWatchHaveno,
   checkDealWatchListings,
   checkDealWatchSearch,
   dismissDealWatchSearchResult,
+  editDealWatchHavenoWatch,
   editDealWatchListing,
+  removeDealWatchHavenoWatch,
   removeDealWatchListing,
   removeDealWatchSearch,
   saveDealWatchSchedule,
+  setDealWatchHavenoMute,
   setDealWatchListingMute,
 } from './api';
 import type {
+  DealWatchHavenoDraft,
   DealWatchListingDraft,
   DealWatchMutationResult,
   DealWatchSearchDraft,
@@ -33,6 +39,11 @@ export interface DealWatchControls {
   removeSearch: (id: number) => Promise<boolean>;
   dismissSearchResult: (searchId: number, itemId: string) => Promise<boolean>;
   checkSearch: (target: number | 'all') => Promise<boolean>;
+  addHavenoWatch: (draft: DealWatchHavenoDraft) => Promise<boolean>;
+  editHavenoWatch: (id: number, draft: DealWatchHavenoDraft) => Promise<boolean>;
+  removeHavenoWatch: (id: number) => Promise<boolean>;
+  setHavenoMute: (id: number, days: number) => Promise<boolean>;
+  checkHaveno: (target: number | 'all') => Promise<boolean>;
   saveSchedule: (expression: string) => Promise<boolean>;
 }
 
@@ -88,6 +99,11 @@ export function useDealWatchControls(resource: PollingState<DealWatchStatus>): D
     dismissSearchResult: (searchId, itemId) =>
       execute(() => dismissDealWatchSearchResult(searchId, itemId)),
     checkSearch: (target) => execute(() => checkDealWatchSearch(target)),
+    addHavenoWatch: (draft) => execute(() => addDealWatchHavenoWatch(draft)),
+    editHavenoWatch: (id, draft) => execute(() => editDealWatchHavenoWatch(id, draft)),
+    removeHavenoWatch: (id) => execute(() => removeDealWatchHavenoWatch(id)),
+    setHavenoMute: (id, days) => execute(() => setDealWatchHavenoMute(id, days)),
+    checkHaveno: (target) => execute(() => checkDealWatchHaveno(target)),
     saveSchedule: (expression) => execute(() => saveDealWatchSchedule(expression)),
   };
 }

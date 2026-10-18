@@ -67,6 +67,59 @@ export interface DealWatchSearchSummary {
   errors: number;
 }
 
+export type DealWatchHavenoReferenceSource = 'haveno-pricenode' | 'kraken';
+
+export interface DealWatchHavenoOffer {
+  offerId: string;
+  price: string;
+  vsMarketPct: string;
+  effectivePct: string;
+  minXmr: string | null;
+  maxXmr: string | null;
+  offeredAt: number;
+  firstSeenAt: number;
+  lastSeenAt: number;
+  matches: boolean;
+  notifiedAt: number | null;
+}
+
+export interface DealWatchHavenoWatch {
+  id: number;
+  network: 'reto';
+  currency: string;
+  paymentMethod: string;
+  thresholdPct: string;
+  feePct: string;
+  minXmr: string | null;
+  maxXmr: string | null;
+  title: string | null;
+  displayTitle: string;
+  marketUrl: string;
+  createdAt: number;
+  updatedAt: number;
+  lastCheckedAt: number | null;
+  lastStatus: DealWatchCheckState;
+  lastError: string | null;
+  notifyMutedUntil: number | null;
+  notificationsMuted: boolean;
+  referencePrice: string | null;
+  referenceSource: DealWatchHavenoReferenceSource | null;
+  referenceAt: number | null;
+  bestPrice: string | null;
+  bestVsMarketPct: string | null;
+  bestVsMarket24hPct: string | null;
+  offerCount: number;
+  matchCount: number;
+  offers: DealWatchHavenoOffer[];
+}
+
+export interface DealWatchHavenoSummary {
+  count: number;
+  checked: number;
+  matching: number;
+  errors: number;
+}
+
 export type DealWatchScheduleErrorCode = 'parse' | 'rate_limit';
 
 export interface DealWatchSchedule {
@@ -81,6 +134,8 @@ export interface DealWatchStatus {
   listingSummary: DealWatchListingSummary;
   searches: DealWatchSavedSearch[];
   searchSummary: DealWatchSearchSummary;
+  havenoWatches: DealWatchHavenoWatch[];
+  havenoSummary: DealWatchHavenoSummary;
   schedule: DealWatchSchedule;
 }
 
@@ -94,6 +149,16 @@ export interface DealWatchListingDraft {
 export interface DealWatchSearchDraft {
   parser: 'ebay';
   url: string;
+  title: string;
+}
+
+export interface DealWatchHavenoDraft {
+  thresholdPct: string;
+  feePct: string;
+  paymentMethod: string;
+  currency: string;
+  minXmr: string;
+  maxXmr: string;
   title: string;
 }
 

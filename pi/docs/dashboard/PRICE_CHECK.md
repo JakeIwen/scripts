@@ -21,6 +21,35 @@ requests a fresh preview, and a changed crontab expression invalidates the
 cached description automatically.
 The dashboard's **Check all now** button does the same.
 
+## Haveno XMR offers
+
+Haveno watches read the public RetoSwap `XMR_{CURRENCY}` ask book from
+`haveno.markets` and compare each offer with the fresh XMR reference price from
+Haveno's price node. A stale or unavailable USD price falls back to the midpoint
+of Kraken's XMR/USD bid and ask; other currencies fail closed when the price node
+is unavailable. Only asks with the configured payment method and XMR size range
+are considered. The listed percentage is
+`100 × (offer price / reference price − 1)`, where positive means above market.
+The configured fee percentage is added to that figure, and a watch matches when
+the effective percentage is less than or equal to its signed threshold.
+
+Each matching offer ID is notified at most once for a watch, even if it disappears
+and later returns. Muted and `--no-notify` checks still record current matches
+without consuming that notification identity. A separate ten-minute cron entry
+uses `price_check.sqlite3.haveno.lock`, so Haveno polling does not wait for an
+eBay or product check; the combined default run skips Haveno without failing when
+that dedicated lock is already held.
+
+```bash
+s price_check haveno-add 1 --fee-pct 0.5 --payment-method ZELLE --currency USD --max-xmr 10
+s price_check haveno-add -2.5
+s price_check haveno-check all --no-notify
+s price_check haveno-check 1
+s price_check haveno-mute 1 7
+s price_check haveno-edit 1 -1 --fee-pct 0.5 --payment-method ZELLE --currency USD
+s price_check haveno-remove 1
+```
+
 ## eBay access and browser recovery
 
 eBay search downloads use anonymous browser headers, not an eBay API token.

@@ -56,6 +56,14 @@ describe('Deal Watch decoder', () => {
       imageUrl: '//i.ebayimg.com/images/g/example.jpg',
       dismissed: false,
     });
+    expect(status.havenoWatches[0]).toMatchObject({
+      displayTitle: 'XMR · Zelle · ≤-2.00% vs market (+0.50% fee)',
+      feePct: '0.50',
+      bestPrice: '566.32',
+      bestVsMarketPct: '-2.63',
+      matchCount: 1,
+    });
+    expect(status.havenoSummary).toEqual({ count: 1, checked: 1, matching: 1, errors: 0 });
     expect(status.schedule).toEqual({
       expression: '0 10,15,20 * * *',
       description: 'At minute 0 past hours 10, 15 and 20',
@@ -99,6 +107,11 @@ describe('Deal Watch views', () => {
       removeSearch: vi.fn().mockResolvedValue(true),
       dismissSearchResult: vi.fn().mockResolvedValue(true),
       checkSearch: vi.fn().mockResolvedValue(true),
+      addHavenoWatch: vi.fn().mockResolvedValue(true),
+      editHavenoWatch: vi.fn().mockResolvedValue(true),
+      removeHavenoWatch: vi.fn().mockResolvedValue(true),
+      setHavenoMute: vi.fn().mockResolvedValue(true),
+      checkHaveno: vi.fn().mockResolvedValue(true),
       saveSchedule: vi.fn().mockResolvedValue(true),
     };
   }
@@ -113,7 +126,7 @@ describe('Deal Watch views', () => {
     );
 
     const links = screen.getAllByRole('link');
-    expect(links).toHaveLength(4);
+    expect(links).toHaveLength(5);
     for (const link of links) {
       expect(link).toHaveAttribute('target', '_blank');
       expect(link).toHaveAttribute('rel', 'noopener noreferrer');

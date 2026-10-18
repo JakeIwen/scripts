@@ -1,20 +1,31 @@
 import type { StatusTone } from '../../components/StatusPill';
 import { formatRelativeTime } from '../../utils/format';
-import type { DealWatchListing, DealWatchSavedSearch, DealWatchStatus } from './types';
+import type {
+  DealWatchHavenoReferenceSource,
+  DealWatchHavenoWatch,
+  DealWatchListing,
+  DealWatchSavedSearch,
+  DealWatchStatus,
+} from './types';
 
 export function dealWatchTone(status: DealWatchStatus | null, _error: Error | null): StatusTone {
   if (!status) return 'neutral';
-  if (status.listingSummary.errors + status.searchSummary.errors > 0) return 'bad';
-  if (status.listingSummary.belowThreshold > 0) return 'good';
+  if (
+    status.listingSummary.errors + status.searchSummary.errors + status.havenoSummary.errors >
+    0
+  ) {
+    return 'bad';
+  }
+  if (status.listingSummary.belowThreshold > 0 || status.havenoSummary.matching > 0) return 'good';
   return 'neutral';
 }
 
 export function watchedCount(status: DealWatchStatus): number {
-  return status.listingSummary.count + status.searchSummary.count;
+  return status.listingSummary.count + status.searchSummary.count + status.havenoSummary.count;
 }
 
 export function mostRecentCheckAt(status: DealWatchStatus): number | null {
-  const timestamps = [...status.listings, ...status.searches]
+  const timestamps = [...status.listings, ...status.searches, ...status.havenoWatches]
     .map((item) => item.lastCheckedAt)
     .filter((timestamp): timestamp is number => timestamp !== null);
   return timestamps.length ? Math.max(...timestamps) : null;
@@ -28,6 +39,42 @@ export function mostRecentPricedListing(status: DealWatchStatus): DealWatchListi
     }
     return item.lastPriceCheckedAt > latest.lastPriceCheckedAt ? item : latest;
   }, null);
+}
+
+export function bestCurrentHavenoOffer(status: DealWatchStatus): DealWatchHavenoWatch | null {
+  return status.havenoWatches.reduce<DealWatchHavenoWatch | null>((best, watch) => {
+    if (watch.bestPrice === null || watch.bestVsMarketPct === null) return best;
+    if (best?.bestVsMarketPct === null || best?.bestVsMarketPct === undefined) return watch;
+    return Number(watch.bestVsMarketPct) < Number(best.bestVsMarketPct) ? watch : best;
+  }, null);
+}
+
+export function havenoPriceLabel(price: string, currency: string): string {
+  return currency === 'USD' ? `$${price}` : `${price} ${currency}`;
+}
+
+export function havenoPercentLabel(value: string): string {
+  const number = Number(value);
+  const magnitude = Math.abs(number).toFixed(2);
+  if (number > 0) return `+${magnitude}%`;
+  if (number < 0) return `−${magnitude}%`;
+  return '0.00%';
+}
+
+export function havenoReferenceSourceLabel(source: DealWatchHavenoReferenceSource | null): string {
+  if (source === 'haveno-pricenode') return 'Haveno pricenode';
+  if (source === 'kraken') return 'Kraken';
+  return '—';
+}
+
+export function havenoState(watch: DealWatchHavenoWatch): {
+  label: string;
+  tone: StatusTone;
+} {
+  if (watch.lastStatus === 'error') return { label: 'Error', tone: 'bad' };
+  if (watch.matchCount > 0) return { label: `${watch.matchCount} matching`, tone: 'good' };
+  if (watch.lastStatus === 'never') return { label: 'Not checked', tone: 'neutral' };
+  return { label: 'Checked', tone: 'neutral' };
 }
 
 export function listingState(item: DealWatchListing): {

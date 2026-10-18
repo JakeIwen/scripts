@@ -5,10 +5,12 @@ import { StatusPill } from '../../components/StatusPill';
 import { useToast } from '../../components/ToastProvider';
 import type { PollingState } from '../../hooks/usePollingResource';
 import type { DealWatchControls } from './controls';
+import { DealWatchHavenoSection } from './DealWatchHavenoSection';
 import { DealWatchListingForm } from './DealWatchListingForm';
 import { DealWatchScheduleForm } from './DealWatchScheduleForm';
 import { DealWatchSearchForm } from './DealWatchSearchForm';
-import { safeExternalHref } from './externalLinks';
+import { ExternalDealLink } from './ExternalDealLink';
+import { promptForMuteDays } from './mutePrompt';
 import { checkAge, formatUnixDateTime, listingState, searchState } from './presentation';
 import type {
   DealWatchListing,
@@ -23,22 +25,6 @@ export interface DealWatchSheetProps {
   onClose: () => void;
   resource: PollingState<DealWatchStatus>;
   controls: DealWatchControls;
-}
-
-interface ExternalDealLinkProps {
-  url: string;
-  children: React.ReactNode;
-  className?: string;
-}
-
-function ExternalDealLink({ url, children, className }: ExternalDealLinkProps) {
-  const href = safeExternalHref(url);
-  if (href === null) return <span className={className}>{children}</span>;
-  return (
-    <a className={className} href={href} target="_blank" rel="noopener noreferrer">
-      {children}
-    </a>
-  );
 }
 
 interface ListingCardProps {
@@ -212,24 +198,15 @@ export function DealWatchSheet({ open, onClose, resource, controls }: DealWatchS
       void controls.setListingMute(listing.id, 0);
       return;
     }
-    const answer = window.prompt(
-      `Mute notifications for ${listing.displayTitle} for how many days?`,
-      '7',
-    );
-    if (answer === null) return;
-    const days = Number(answer.trim());
-    if (!Number.isSafeInteger(days) || days < 1) {
-      showToast('Enter a whole number of days greater than zero', 'error');
-      return;
-    }
-    void controls.setListingMute(listing.id, days);
+    const days = promptForMuteDays(listing.displayTitle, showToast);
+    if (days !== null) void controls.setListingMute(listing.id, days);
   };
 
   return (
     <BottomSheet
       open={open}
       title="Deal Watch"
-      description="Watch individual listings or whole queries. Configuration and history stay on vanpi."
+      description="Watch listings, whole queries and Haveno XMR offers. Configuration and history stay on vanpi."
       onClose={onClose}
     >
       <div className="deal-watch-sheet__toolbar">
@@ -240,7 +217,9 @@ export function DealWatchSheet({ open, onClose, resource, controls }: DealWatchS
           <button
             type="button"
             disabled={
-              controls.busy || !status || status.listings.length + status.searches.length === 0
+              controls.busy ||
+              !status ||
+              status.listings.length + status.searches.length + status.havenoWatches.length === 0
             }
             onClick={() => void controls.checkListings('all')}
           >
@@ -347,6 +326,12 @@ export function DealWatchSheet({ open, onClose, resource, controls }: DealWatchS
             </div>
             <DealWatchSearchForm disabled={controls.busy} onSubmit={controls.addSearch} />
           </section>
+
+          <DealWatchHavenoSection
+            watches={status.havenoWatches}
+            disabled={controls.busy}
+            controls={controls}
+          />
         </div>
       )}
     </BottomSheet>

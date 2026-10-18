@@ -525,6 +525,10 @@ class PriceCheckApiTests(unittest.TestCase):
             "search": {"display_title": "Tools"},
             "removed_search": {"display_title": "Tools"},
             "dismissed_result": {"title": "Unwanted tool"},
+            "haveno_watch": {"display_title": "XMR · Zelle · ≤+1.00% vs market"},
+            "removed_haveno_watch": {"display_title": "XMR · Zelle · ≤+1.00% vs market"},
+            "haveno_checked": [1],
+            "check_errors": [],
             "schedule": {"expression": "30 8,16 * * 1-5", "description": "", "error_code": None},
         }
         command = mock.Mock(return_value=SimpleNamespace(
@@ -552,6 +556,59 @@ class PriceCheckApiTests(unittest.TestCase):
             ("searches/dismiss", {"id": "8", "item_id": "123456789012"}, ["search-dismiss", "8", "123456789012"]),
             ("searches/check", {"target": "8"}, ["search-check", "8"]),
             ("searches/remove", {"id": "8"}, ["search-remove", "8"]),
+            (
+                "haveno/add",
+                {
+                    "threshold_pct": "-2.50",
+                    "fee_pct": "0.50",
+                    "payment_method": "ZELLE",
+                    "currency": "USD",
+                    "min_xmr": "2",
+                    "max_xmr": "10",
+                    "title": "Cash offer",
+                },
+                [
+                    "haveno-add",
+                    "-2.50",
+                    "--fee-pct",
+                    "0.50",
+                    "--payment-method",
+                    "ZELLE",
+                    "--currency",
+                    "USD",
+                    "--min-xmr",
+                    "2",
+                    "--max-xmr",
+                    "10",
+                    "--title",
+                    "Cash offer",
+                ],
+            ),
+            (
+                "haveno/edit",
+                {
+                    "id": "7",
+                    "threshold_pct": "4.00",
+                    "fee_pct": "",
+                    "payment_method": "SEPA",
+                    "currency": "EUR",
+                    "min_xmr": "",
+                    "max_xmr": "",
+                    "title": "",
+                },
+                [
+                    "haveno-edit",
+                    "7",
+                    "4.00",
+                    "--payment-method",
+                    "SEPA",
+                    "--currency",
+                    "EUR",
+                ],
+            ),
+            ("haveno/remove", {"id": "7"}, ["haveno-remove", "7"]),
+            ("haveno/mute", {"id": "7", "days": "3"}, ["haveno-mute", "7", "3"]),
+            ("haveno/check", {"target": "7"}, ["haveno-check", "7"]),
         )
         for route, data, arguments in cases:
             with self.subTest(route=route):
@@ -560,6 +617,15 @@ class PriceCheckApiTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertTrue(response.json["ok"])
                 self.assertEqual([call.args[0] for call in command.call_args_list], [prefix + arguments])
+                expected_messages = {
+                    "haveno/add": "Watching XMR · Zelle · ≤+1.00% vs market",
+                    "haveno/edit": "Updated XMR · Zelle · ≤+1.00% vs market",
+                    "haveno/remove": "Removed XMR · Zelle · ≤+1.00% vs market",
+                    "haveno/mute": "Muted notifications for XMR · Zelle · ≤+1.00% vs market for 3 days",
+                    "haveno/check": "Checked 1 Haveno watch",
+                }
+                if route in expected_messages:
+                    self.assertEqual(response.json["message"], expected_messages[route])
 
     def test_rejects_bad_forms_before_running_cli(self):
         calls = []
@@ -577,6 +643,85 @@ class PriceCheckApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(calls, [])
+
+    def test_haveno_routes_reject_bad_forms_and_targets(self):
+        calls = []
+
+        class RecordingPriceChecks:
+            def __getattr__(self, name):
+                calls.append(name)
+                raise AssertionError(f"controller {name} called for a bad form")
+
+        runtime.price_checks = RecordingPriceChecks()
+        valid_add = {
+            "threshold_pct": "3",
+            "fee_pct": "0",
+            "payment_method": "ZELLE",
+            "currency": "USD",
+            "min_xmr": "",
+            "max_xmr": "",
+            "title": "",
+        }
+        valid_edit = {"id": "7", **valid_add}
+        invalid_forms = (
+            ("haveno/add", {**valid_add, "title": None}),
+            ("haveno/add", {**valid_add, "extra": "x"}),
+            ("haveno/add", {**valid_add, "fee_pct": None}),
+            ("haveno/edit", {**valid_edit, "title": None}),
+            ("haveno/edit", {**valid_edit, "extra": "x"}),
+            ("haveno/remove", {}),
+            ("haveno/remove", {"id": "7", "extra": "x"}),
+            ("haveno/mute", {"id": "7"}),
+            ("haveno/mute", {"id": "7", "days": "0", "extra": "x"}),
+            ("haveno/check", {}),
+            ("haveno/check", {"target": "all", "extra": "x"}),
+        )
+        for route, data in invalid_forms:
+            with self.subTest(route=route, data=data):
+                response = self.client.post("/api/price-checks/" + route, data=data)
+                self.assertEqual(response.status_code, 400)
+
+        invalid_values = (
+            ("haveno/edit", {**valid_edit, "id": "bad"}),
+            ("haveno/remove", {"id": "bad"}),
+            ("haveno/mute", {"id": "bad", "days": "1"}),
+            ("haveno/mute", {"id": "7", "days": "-1"}),
+            ("haveno/check", {"target": "0"}),
+            ("haveno/check", {"target": "-1"}),
+            ("haveno/check", {"target": "bad"}),
+        )
+        for route, data in invalid_values:
+            with self.subTest(route=route, data=data):
+                response = self.client.post("/api/price-checks/" + route, data=data)
+                self.assertEqual(response.status_code, 400)
+        self.assertEqual(calls, [])
+
+    def test_haveno_routes_report_controller_errors(self):
+        error = dashboard_integrations.PriceCheckCommandError("backend failed")
+        controller = mock.Mock()
+        runtime.price_checks = controller
+        routes = (
+            ("haveno/add", {"threshold_pct": "3", "fee_pct": "", "payment_method": "", "currency": "", "min_xmr": "", "max_xmr": "", "title": ""}, "add_haveno"),
+            ("haveno/edit", {"id": "7", "threshold_pct": "3", "fee_pct": "", "payment_method": "", "currency": "", "min_xmr": "", "max_xmr": "", "title": ""}, "edit_haveno"),
+            ("haveno/remove", {"id": "7"}, "remove_haveno"),
+            ("haveno/mute", {"id": "7", "days": "0"}, "mute_haveno"),
+        )
+        for route, data, method in routes:
+            with self.subTest(route=route):
+                getattr(controller, method).side_effect = error
+                response = self.client.post("/api/price-checks/" + route, data=data)
+                self.assertEqual(response.status_code, 400)
+                getattr(controller, method).assert_called_once()
+                getattr(controller, method).reset_mock()
+
+        controller.check_haveno.side_effect = error
+        response = self.client.post("/api/price-checks/haveno/check", data={"target": "all"})
+        self.assertEqual(response.status_code, 502)
+        controller.check_haveno.side_effect = dashboard_integrations.PriceCheckCommandError(
+            "another Haveno check is already running"
+        )
+        response = self.client.post("/api/price-checks/haveno/check", data={"target": "all"})
+        self.assertEqual(response.status_code, 409)
 
 
 class UbntWifiControllerTests(unittest.TestCase):
