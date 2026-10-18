@@ -60,6 +60,7 @@ BACKUP_DEPLOY_PLAN=(
   'both|pi/scripts/umount_disks.sh|/home/pi/scripts/umount_disks.sh|revision|pi:pi|preserve|required'
   'both|pi/scripts/internet_switches.sh|/home/pi/scripts/internet_switches.sh|revision|pi:pi|preserve|required'
   'both|pi/tmpfiles.d/vanpi-backup.conf|/etc/tmpfiles.d/vanpi-backup.conf|revision|root:root|644|optional'
+  'both|pi/tmpfiles.d/vanpi-samba-drain.conf|/etc/tmpfiles.d/vanpi-samba-drain.conf|revision|root:root|644|optional'
   'tm|pi/scripts/samba_share_control.sh|/home/pi/scripts/samba_share_control.sh|revision|pi:pi|750|required'
   'tm|pi/configs/time-machine-icloud.json|/etc/vanpi-time-machine-icloud.json|preserve|root:root|600|optional'
   'pi|pi/configs/icloud-backup.json|/etc/vanpi-icloud-backup.json|defaults|root:root|600|optional'

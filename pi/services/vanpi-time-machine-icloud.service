@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=oneshot
 User=root
 UMask=0077
+ExecStartPre=/usr/bin/systemd-tmpfiles --create /etc/tmpfiles.d/vanpi-samba-drain.conf
 ExecStart=/bin/bash /home/pi/scripts/backup/time_machine_icloud.sh --run
 ExecStopPost=/usr/bin/python3 /home/pi/scripts/backup/time_machine_icloud.py --release-capture
 Nice=15

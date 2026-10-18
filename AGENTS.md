@@ -151,6 +151,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   worker and Mac heartbeat all honor it. Dashboard mutations use
   `van_dashboard_cloud_controls.py`. Samba mount reconciliation clears only
   empty shutdown gates; nonempty capture gates are released by their owner.
+  `pi/tmpfiles.d/vanpi-samba-drain.conf` recreates the root-owned capture gate
+  directory at boot; the Mac worker also applies it in ExecStartPre. Setup must
+  preserve existing gate files. Both scoped installers ship and apply it.
   Indefinite holds use `paused_until: "indefinite"`. Switching clouds locks both
   control records, pauses the peer indefinitely, then queues the selected job;
   never delete or force-release the common backup lock or stop local backups.

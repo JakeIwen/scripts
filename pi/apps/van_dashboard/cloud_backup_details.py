@@ -26,6 +26,8 @@ KNOWN_REASONS = {
         'Cleanup found an unexpected or unsafe staging file and stopped to protect backup data.',
     'insufficient staging disk headroom':
         'The staging disk lacked the required free-space reserve.',
+    'unsafe Samba drain directory':
+        'The temporary directory used to block new Time Machine connections was missing or failed its safety checks. The worker stopped before capturing a new image.',
     'unsafe staging root': 'The staging directory failed its safety checks.',
     'archive directory is unsafe or absent': 'The archive directory was unavailable or failed its safety checks.',
     'ambiguous or unsafe backup mount': 'The backup filesystem mount could not be verified safely.',

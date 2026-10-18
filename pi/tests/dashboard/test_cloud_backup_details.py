@@ -51,6 +51,15 @@ class CloudBackupDetailsTests(unittest.TestCase):
         self.assertNotIn('PRIVATE', json.dumps(result))
         self.assertIn('--unit=vanpi-icloud-backup.service', self.command.call_args.args[0])
 
+    def test_missing_capture_runtime_directory_has_safe_actionable_details(self):
+        self.journal([(1001, 'Failed: unsafe Samba drain directory'),
+                      (1002, 'Failed: unsafe Samba drain directory token=PRIVATE')])
+        result = details.attempt_details('time-machine', ATTEMPT, self.loader, self.command)
+        self.assertEqual(len(result['entries']), 1)
+        self.assertIn('before capturing', result['entries'][0]['explanation'])
+        self.assertNotIn('PRIVATE', json.dumps(result))
+        self.assertIsNone(result['note'])
+
     def test_missing_unknown_and_unreadable_logs_are_explicit_and_keep_saved_attempt(self):
         for output in ('', json.dumps({'MESSAGE': 'Failed: PRIVATE', '__REALTIME_TIMESTAMP': '1001000000'}), '{broken'):
             self.command.return_value.stdout = output

@@ -10,7 +10,7 @@ python3 -m pi.generate_backup_lock_registry --check
 local_previous=$(local_backup_previous_hashes "$repo" pi)
 payload=()
 while IFS= read -r source; do payload+=("$source"); done < <(local_backup_sources pi)
-PYTHONPATH="$repo:$repo/pi/scripts/backup" python3 -m unittest pi.tests.backup.test_backup_locks pi.tests.backup.test_backup_admission pi.tests.backup.test_protected_json pi.tests.backup.test_local_backup_deploy.DeploymentPlanTests pi.tests.backup.test_local_backup_deploy.DeploymentPreflightTests pi.tests.backup.test_hotspare_rotation pi.tests.backup.test_backup_settings
+PYTHONPATH="$repo:$repo/pi/scripts/backup" python3 -m unittest pi.tests.backup.test_backup_locks pi.tests.backup.test_backup_admission pi.tests.backup.test_protected_json pi.tests.backup.test_local_backup_deploy.DeploymentPlanTests pi.tests.backup.test_local_backup_deploy.DeploymentPreflightTests pi.tests.backup.test_hotspare_rotation pi.tests.backup.test_backup_settings pi.tests.backup.test_time_machine_runtime
 python3 "$repo/pi/tests/backup/test_icloud_backup.py"
 python3 "$repo/pi/tests/backup/test_icloud_status.py"
 bash -n "$repo/pi/scripts/backup/icloud_backup.sh"
@@ -44,7 +44,7 @@ done < <(local_backup_sources pi)
 sudo -n /usr/bin/python3 pi/scripts/backup/backup_schedule.py --check
 local_backup_begin "$stage" pi "$2"
 local_backup_publish
-/usr/bin/sudo -n /usr/bin/systemd-tmpfiles --create /etc/tmpfiles.d/vanpi-backup.conf
+/usr/bin/sudo -n /usr/bin/systemd-tmpfiles --create /etc/tmpfiles.d/vanpi-backup.conf /etc/tmpfiles.d/vanpi-samba-drain.conf
 [[ -d /run/lock/vanpi-backup && ! -L /run/lock/vanpi-backup &&
    $(/usr/bin/stat -c '%U %G %a' /run/lock/vanpi-backup) == 'root pi 770' ]] || exit 1
 /usr/bin/sudo -n /usr/bin/systemctl daemon-reload
