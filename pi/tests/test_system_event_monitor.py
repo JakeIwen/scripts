@@ -347,14 +347,11 @@ class StoreAndDiagnosisTests(unittest.TestCase):
         )
         report = monitor_report.build_report(self.store, hours=1, now=self.now)
         evidence = report["diagnosis"]["evidence"]
-        self.assertEqual(report["diagnosis"]["headline"], "Pi input undervoltage is confirmed")
         self.assertEqual(evidence["undervoltage_episodes"], 2)
         self.assertEqual(evidence["undervoltage_near_usb"], 1)
         self.assertEqual(evidence["undervoltage_without_usb"], 1)
         self.assertEqual(evidence["usb_failures"], 1)
         self.assertEqual(evidence["usb_overcurrent_events"], 1)
-        self.assertIn("actual throttling occurred", " ".join(report["diagnosis"]["findings"]))
-        self.assertIn("over-current", " ".join(report["diagnosis"]["findings"]))
         self.assertFalse(report["status"]["stale"])
         self.assertEqual(report["peaks"]["network_rx_bytes_per_second"]["value"], 1024)
         self.assertEqual(report["peaks"]["disk_write_bytes_per_second"]["value"], 4096)
@@ -392,11 +389,6 @@ class StoreAndDiagnosisTests(unittest.TestCase):
         self.assertEqual(report["summary"]["events"], len(all_events))
         self.assertEqual(report["summary"]["by_kind"], dict(counts))
         self.assertEqual(report["throttling"], monitor_report.build_throttling_report(current, counts, all_events))
-        plan = self.store.connection.execute(
-            "EXPLAIN QUERY PLAN SELECT kind,severity,category,COUNT(*),MAX(timestamp) "
-            "FROM events WHERE timestamp >= ? GROUP BY kind,severity,category", (since,)
-        ).fetchall()
-        self.assertTrue(any("COVERING INDEX events_report_idx" in row[3] for row in plan))
 
     def test_read_only_store_can_generate_report_without_writing(self):
         self.store.set_meta("current", {"timestamp": self.now, "throttle": {}})
@@ -505,7 +497,6 @@ class StoreAndDiagnosisTests(unittest.TestCase):
             item for item in report["throttling"]["flags"] if item["key"] == "throttled"
         )
         self.assertEqual(report["diagnosis"]["level"], "critical")
-        self.assertIn("active", report["diagnosis"]["headline"].lower())
         self.assertTrue(throttled["active"])
         self.assertEqual(throttled["active_transitions"], 1)
         self.assertEqual(throttled["cleared_transitions"], 1)

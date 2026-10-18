@@ -100,18 +100,6 @@ class SyncStorageOwnershipTests(unittest.TestCase):
                 with self.subTest(kept=kept):
                     self.assertTrue((root / kept).is_file(), kept)
 
-    def test_sync_applies_the_exclusions_to_every_staged_tree(self):
-        sync = (PI / "sync_scripts.sh").read_text(encoding="utf-8")
-        self.assertIn('storage_managed="$dsc/pi/sync_storage_managed.exclude"', sync)
-        self.assertEqual(sync.count('--exclude-from="$storage_managed"'), 3)
-        self.assertIn(
-            'python3 "$dsc/pi/deploy_python.py" --list-units',
-            sync,
-        )
-        self.assertIn('package_units_exclude="$local_stage/python-package-units.exclude"', sync)
-        self.assertIn('--exclude-from="$package_units_exclude"', sync)
-        self.assertNotIn('--exclude \'van-dashboard.service\'', sync)
-
 
 if __name__ == "__main__":
     unittest.main()

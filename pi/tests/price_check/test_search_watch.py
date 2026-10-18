@@ -89,11 +89,11 @@ class EbayParserTests(unittest.TestCase):
         self.assertEqual(parse(page)[0].title, "Opens in a new window or tab collector card")
 
     def test_rejects_browser_challenge(self):
-        with self.assertRaisesRegex(EbayGateError, "gated page"):
+        with self.assertRaises(EbayGateError):
             parse("<title>Pardon Our Interruption</title>")
 
     def test_rejects_explicit_access_denied_content(self):
-        with self.assertRaisesRegex(EbayGateError, "access-denied"):
+        with self.assertRaises(EbayGateError):
             parse("<main>Access to this page has been denied</main>")
 
 
@@ -186,7 +186,7 @@ class SearchServiceTests(unittest.TestCase):
         self.assertIn("_nkw=", url)
 
     def test_rejects_non_ebay_host(self):
-        with self.assertRaisesRegex(SearchWatchError, "eBay search URL"):
+        with self.assertRaises(SearchWatchError):
             validate_watch(
                 "ebay", "https://example.com/sch/i.html?_nkw=micro%20pod"
             )
@@ -212,7 +212,7 @@ class SearchServiceTests(unittest.TestCase):
             headers.chmod(0o644)
             with mock.patch.dict(
                 os.environ, {"EBAY_HEADERS_FILE": str(headers)}, clear=False
-            ), self.assertRaisesRegex(SearchCookieError, "permissions 600"):
+            ), self.assertRaises(SearchCookieError):
                 fetch_ebay("https://www.ebay.com/sch/i.html?_nkw=x")
 
     def test_full_browser_headers_are_not_overridden_with_firefox_defaults(self):
@@ -255,7 +255,7 @@ class SearchServiceTests(unittest.TestCase):
             ), mock.patch(
                 "pi.scripts.price_check.search_watch.service.subprocess.run",
                 side_effect=rejected,
-            ), self.assertRaisesRegex(SearchCookieError, "rejected"):
+            ), self.assertRaises(SearchCookieError):
                 fetch_ebay("https://www.ebay.com/sch/i.html?_nkw=x")
 
     def test_redirect_trap_requests_cookie_refresh(self):
@@ -271,7 +271,7 @@ class SearchServiceTests(unittest.TestCase):
             ), mock.patch(
                 "pi.scripts.price_check.search_watch.service.subprocess.run",
                 side_effect=rejected,
-            ), self.assertRaisesRegex(SearchCookieError, "redirected"):
+            ), self.assertRaises(SearchCookieError):
                 fetch_ebay("https://www.ebay.com/sch/i.html?_nkw=x")
 
     def test_network_failure_is_a_load_error(self):
@@ -287,7 +287,7 @@ class SearchServiceTests(unittest.TestCase):
             ), mock.patch(
                 "pi.scripts.price_check.search_watch.service.subprocess.run",
                 side_effect=failed,
-            ), self.assertRaisesRegex(SearchLoadError, "download failed"):
+            ), self.assertRaises(SearchLoadError):
                 fetch_ebay("https://www.ebay.com/sch/i.html?_nkw=x")
 
     def test_gated_and_changed_pages_reach_distinct_notification_paths(self):

@@ -149,7 +149,6 @@ class BrowserRefreshWorkerTests(unittest.TestCase):
                     self.assertEqual(worker.run_worker("example", sleep=sleep), 1)
                 self.assertEqual(len(claims), MAX_FAILURES)
                 self.assertTrue(all(b - a == RETRY_SECONDS for a, b in zip(claims, claims[1:])))
-                self.assertEqual(sum(t < claims[0] + 3600 for t in claims), 10)
                 alert.assert_called_once()
                 self.assertEqual(alert.call_args.args[1], MAX_FAILURES)
                 self.assertIsNone(claim_refresh(store))

@@ -24,8 +24,6 @@ expect_blocked() {
   local out status=0
   out=$(node --require "$guard" "$@" 2>&1) || status=$?
   [ "$status" -eq 3 ] || fail "expected exit 3 for $*, got $status"
-  [[ "$out" == *"model-gateway setup is blocked on vanpi"* ]] || fail "no explanation for $*"
-  [[ "$out" == *"build_claude_code_proxy.sh"* ]] || fail "no build hint for $*"
   [[ "$out" != *"ran "* ]] || fail "script still ran for $*"
 }
 

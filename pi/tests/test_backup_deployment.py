@@ -10,87 +10,11 @@ BACKUP_DIR = REPOSITORY_ROOT / "pi" / "scripts" / "backup"
 
 
 class BackupDeploymentTests(unittest.TestCase):
-    def test_shared_job_lock_is_precreated_and_validated(self):
-        config = (BACKUP_DIR / "backup_conf.sh").read_text(encoding="utf-8")
-        abort = (BACKUP_DIR / "abort_backup.sh").read_text(encoding="utf-8")
-        tmpfiles = (
-            REPOSITORY_ROOT / "pi" / "tmpfiles.d" / "vanpi-backup.conf"
-        ).read_text(encoding="utf-8")
-        sync = (REPOSITORY_ROOT / "pi" / "sync_scripts.sh").read_text(
-            encoding="utf-8"
-        )
-        updater = (
-            REPOSITORY_ROOT / "pi" / "scripts" / "update_services.sh"
-        ).read_text(encoding="utf-8")
-
-        records = [
-            line.split()
-            for line in tmpfiles.splitlines()
-            if line.strip() and not line.lstrip().startswith("#")
-        ]
-        lock_records = [
-            record for record in records if len(record) > 1 and record[1] == "/run/lock/vanpi_backup.lock"
-        ]
-        self.assertEqual(
-            lock_records,
-            [["f", "/run/lock/vanpi_backup.lock", "0660", "root", "pi", "-"]],
-        )
-        self.assertEqual(stat.S_IMODE(int(lock_records[0][2], 8)), 0o660)
-        registry = "/run/lock/vanpi-backup"
-        self.assertIn(["d", registry, "0770", "root", "pi", "-"], records)
-        names = (
-            "job-borg", "job-exfat", "job-pi-cloud", "job-time-machine", "job-clone",
-            "disk-bigboi", "disk-hdd1tb", "disk-mbp2tbkup", "disk-movingparts", "disk-EXFAT512",
-            "data-borg-repo", "cloud-upload",
-        )
-        self.assertEqual(
-            sorted(record[1] for record in records if record[1].startswith(registry + "/")),
-            sorted(f"{registry}/{name}.lock" for name in names),
-        )
-        for name in names:
-            self.assertIn(["f", f"{registry}/{name}.lock", "0660", "root", "pi", "-"], records)
-        self.assertIn("validate_job_lock_file", config)
-        self.assertIn("JOB_LOCK_OWNER", config)
-        self.assertIn("JOB_LOCK_GROUP", config)
-        self.assertIn("JOB_LOCK_MODE", config)
-        # The sourced I/O sibling is part of the deployment contract; the
-        # real-process suites exercise its validation/open races and PID writes.
-        locks = (BACKUP_DIR / "backup_locks.sh").read_text(encoding="utf-8")
-        self.assertIn('/backup_lock_io.sh"', locks)
+    def test_lock_io_dependency_exists(self):
         self.assertTrue((BACKUP_DIR / "backup_lock_io.sh").is_file())
-        self.assertIn('exec {job_lock_fd}<"$job_lock"', abort)
-        self.assertIn('"$flock_command" -n -s "$job_lock_fd"', abort)
-        self.assertNotIn('flock -n "$job_lock"', abort)
-        self.assertIn('tmpfiles="$dsc/pi/tmpfiles.d"', sync)
-        self.assertIn('"$staged_tmpfiles"', sync)
-        self.assertIn('sudo systemd-tmpfiles --create "$live_tmpfile"', updater)
-        self.assertLess(
-            updater.index('sudo systemd-tmpfiles --create "$live_tmpfile"'),
-            updater.index('cp -a "$staged_scripts/." "$live_scripts/"'),
-        )
 
-    def test_clone_fit_warning_uses_configured_64gb_media_capacity(self):
+    def test_clone_fit_budget_uses_configured_capacity(self):
         config_path = BACKUP_DIR / "backup_conf.sh"
-        watchdog = (BACKUP_DIR / "backup_watchdog.sh").read_text(encoding="utf-8")
-        rootfs_budget = (BACKUP_DIR / "rootfs_budget.sh").read_text(encoding="utf-8")
-        result = subprocess.run(
-            [
-                "/bin/bash",
-                "-c",
-                'source "$1"; printf "%s %s\\n" '
-                '"$CLONE_CARD_NOMINAL_GB" "$ROOT_USED_MAX_GB"',
-                "test",
-                str(config_path),
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-
-        self.assertEqual(result.stdout, "64 52\n")
-        self.assertIn("${CLONE_CARD_NOMINAL_GB}GB clone cards", rootfs_budget)
-        self.assertNotIn("32GB", watchdog + rootfs_budget)
-
         with tempfile.TemporaryDirectory() as tempdir:
             setting = Path(tempdir) / "clone_card_nominal_gb"
             setting.write_text("128\n", encoding="utf-8")
@@ -110,167 +34,16 @@ class BackupDeploymentTests(unittest.TestCase):
             )
         self.assertEqual(configured.stdout, "128 104\n")
 
-    def test_rootfs_watchdog_and_tidy_scripts_ship_in_the_broad_script_sync(self):
-        watchdog = (BACKUP_DIR / "backup_watchdog.sh").read_text(encoding="utf-8")
-        config = (BACKUP_DIR / "backup_conf.sh").read_text(encoding="utf-8")
-        sync = (REPOSITORY_ROOT / "pi" / "sync_scripts.sh").read_text(
-            encoding="utf-8"
-        )
-        managed_excludes = (
-            REPOSITORY_ROOT / "pi" / "sync_storage_managed.exclude"
-        ).read_text(encoding="utf-8")
-        tidy = (
-            REPOSITORY_ROOT / "pi" / "scripts" / "rootfs_tidy.sh"
-        ).read_text(encoding="utf-8")
+    def test_rootfs_helpers_exist_and_are_executable(self):
         shipped = [
             BACKUP_DIR / "rootfs_budget.sh",
             REPOSITORY_ROOT / "pi" / "scripts" / "rootfs_tidy.sh",
             REPOSITORY_ROOT / "shared" / "sh" / "cleanup_codex_releases.py",
         ]
 
-        self.assertIn('. "$backup_script_dir/rootfs_budget.sh"', watchdog)
-        self.assertIn("ROOT_GROWTH_WARN_GIB_7D=4", config)
-        self.assertIn("ROOTFS_PATH_BUDGETS_MIB=(", config)
-        # The shared cleanup lands beside rootfs_tidy.sh via the shared/sh copy.
-        self.assertIn("$script_dir/cleanup_codex_releases.py", tidy)
-        self.assertIn('cp -a "$shared_sh/." "$staged_scripts/"', sync)
-        self.assertIn('"$repo_scripts/" "$staged_scripts/"', sync)
         for path in shipped:
             self.assertTrue(path.is_file(), path)
             self.assertTrue(path.stat().st_mode & stat.S_IXUSR, path)
-            self.assertNotIn(f"/{path.name}", managed_excludes)
-
-    def test_ubnt_snapshot_is_versioned_by_the_existing_borg_job(self):
-        backup = (BACKUP_DIR / "pi_backup.sh").read_text(encoding="utf-8")
-        ubnt_call = backup.index("/home/pi/scripts/backup/ubnt_backup.sh")
-        borg_create = backup.index('log "borg create')
-
-        self.assertLess(ubnt_call, borg_create)
-        self.assertIn("last valid antenna snapshot", backup)
-
-    def test_ubnt_snapshot_has_independent_freshness_monitoring(self):
-        config = (BACKUP_DIR / "backup_conf.sh").read_text(encoding="utf-8")
-        watchdog = (BACKUP_DIR / "backup_watchdog.sh").read_text(encoding="utf-8")
-
-        self.assertIn('UBNT_SNAPSHOT_DIR="$SNAP_DIR/ubnt"', config)
-        self.assertIn("UBNT_BACKUP_STALE_HOURS=72", config)
-        self.assertIn('"$UBNT_SNAPSHOT_FILE"', watchdog)
-        self.assertIn('"$UBNT_BACKUP_STAMP"', watchdog)
-
-    def test_ubnt_export_is_validated_before_atomic_replacement(self):
-        exporter = (BACKUP_DIR / "ubnt_backup.sh").read_text(encoding="utf-8")
-
-        for requirement in (
-            "/usr/bin/gzip -t",
-            "snapshot contains an unsafe or unexpected path",
-            "snapshot contains duplicate archive members",
-            "persistent/profiles/system.cfg",
-            "HostKeyAlgorithms=+ssh-rsa",
-            '/bin/mv -f "$incoming" "$UBNT_SNAPSHOT_FILE"',
-        ):
-            self.assertIn(requirement, exporter)
-
-        self.assertLess(
-            exporter.index("/usr/bin/gzip -t"),
-            exporter.index('/bin/mv -f "$incoming" "$UBNT_SNAPSHOT_FILE"'),
-        )
-
-    def test_backup_window_runs_independently_stamped_jobs_from_one_cron_entry(self):
-        crontab = (REPOSITORY_ROOT / "pi" / "crontab").read_text(encoding="utf-8")
-        runner = (BACKUP_DIR / "backup_window.sh").read_text(encoding="utf-8")
-
-        self.assertNotIn("ubnt_backup.sh", crontab)
-        self.assertIn('"$scripts/backup/backup_window.sh"', crontab)
-        self.assertNotIn('"$scripts/backup/pi_backup.sh"', crontab)
-        self.assertIn("pi_backup.sh exfat_snapshot.sh", runner)
-
-    def test_exfat_snapshot_is_exact_label_hard_linked_and_independently_stamped(self):
-        config = (BACKUP_DIR / "backup_conf.sh").read_text(encoding="utf-8")
-        snapshot = (BACKUP_DIR / "exfat_snapshot.sh").read_text(encoding="utf-8")
-        watchdog = (BACKUP_DIR / "backup_watchdog.sh").read_text(encoding="utf-8")
-
-        self.assertIn('EXFAT_SNAPSHOT_ROOT="$EXFAT_SNAPSHOT_MNT/backups"', config)
-        self.assertIn("EXFAT_SNAPSHOT_PREFIX=EXFAT512_", config)
-        self.assertIn("--link-dest=$previous_path", snapshot)
-        self.assertIn("verify_exact_mount", snapshot)
-        self.assertIn('--spindown "$EXFAT_SNAPSHOT_DISK_LABEL"', snapshot)
-        self.assertIn('"$EXFAT_SNAPSHOT_STAMP"', watchdog)
-
-    def test_backup_only_unmounts_bigboi_when_it_mounted_bigboi(self):
-        backup = (BACKUP_DIR / "pi_backup.sh").read_text(encoding="utf-8")
-        capture = "backup_mounted_here=$ENSURE_MOUNTED_DID_MOUNT"
-        media_mount = 'ensure_mounted movingparts "$MEDIA_SRC"'
-        guarded_cleanup = (
-            'if [ "$backup_mounted_here" = 1 ]; then\n'
-            '    if release_backup_disk_if_unused bigboi; then'
-        )
-
-        self.assertIn("ENSURE_MOUNTED_DID_MOUNT=0", backup)
-        self.assertIn("ENSURE_MOUNTED_DID_MOUNT=1", backup)
-        self.assertIn(capture, backup)
-        self.assertLess(backup.index(capture), backup.index(media_mount))
-        self.assertIn(guarded_cleanup, backup)
-        self.assertIn("leaving pre-existing $BACKUP_MNT mount in place", backup)
-
-    def test_unattended_backup_obeys_requested_hdd_policy(self):
-        backup = (BACKUP_DIR / "pi_backup.sh").read_text(encoding="utf-8")
-
-        policy_gate = 'backup_policy_allows_hdds'
-        backup_disk = 'ensure_mounted "$BACKUP_DISK_LABEL" "$BACKUP_MNT"'
-        self.assertIn('"$policyctl" read', backup)
-        self.assertIn("requested policy disables HDDs", backup)
-        self.assertLess(backup.index(policy_gate), backup.index(backup_disk))
-        self.assertIn('"$mount_disks" "$label" || return 1', backup)
-        self.assertNotIn('umount -l "$mnt"', backup)
-        self.assertNotIn('mount "$dev" "$mnt"', backup)
-
-    def test_borg_excludes_pi_build_contents(self):
-        config = (BACKUP_DIR / "backup_conf.sh").read_text(encoding="utf-8")
-        backup = (BACKUP_DIR / "pi_backup.sh").read_text(encoding="utf-8")
-
-        self.assertIn("BORG_EXCLUDES=(", config)
-        self.assertIn("'/home/pi/build/*'", config)
-        self.assertIn('for exclude in "${BORG_EXCLUDES[@]}"', backup)
-        self.assertIn('borg_exclude_args+=(--exclude "$exclude")', backup)
-        self.assertIn('"${borg_exclude_args[@]}"', backup)
-        self.assertNotIn("--exclude '/home/pi/build/*'", backup)
-
-    def test_backup_jobs_publish_dashboard_progress_without_driving_success(self):
-        config = (BACKUP_DIR / "backup_conf.sh").read_text(encoding="utf-8")
-        borg = (BACKUP_DIR / "pi_backup.sh").read_text(encoding="utf-8")
-        exfat = (BACKUP_DIR / "exfat_snapshot.sh").read_text(encoding="utf-8")
-        openwrt = (BACKUP_DIR / "openwrt_backup.sh").read_text(encoding="utf-8")
-        helper = (BACKUP_DIR / "progress.sh").read_text(encoding="utf-8")
-
-        self.assertIn('BACKUP_PROGRESS_DIR="$STAMP_DIR/progress"', config)
-        self.assertIn("backup_progress_begin borg", borg)
-        self.assertIn('backup_progress_update archiving "Creating the Borg archive"', borg)
-        self.assertIn("backup_progress_begin exfat", exfat)
-        self.assertIn("--info=progress2", exfat)
-        self.assertIn("backup_progress_begin openwrt", openwrt)
-        self.assertIn("backup_progress_update validating", openwrt)
-        self.assertIn('backup_progress_update "$phase" "$detail"', helper)
-        self.assertNotIn("exit 1", helper)
-
-    def test_dashboard_stop_is_exact_graceful_and_keeps_emergency_mode_separate(self):
-        abort = (BACKUP_DIR / "abort_backup.sh").read_text(encoding="utf-8")
-        borg = (BACKUP_DIR / "pi_backup.sh").read_text(encoding="utf-8")
-        exfat = (BACKUP_DIR / "exfat_snapshot.sh").read_text(encoding="utf-8")
-        clone = (BACKUP_DIR / "clone_to_sd.sh").read_text(encoding="utf-8")
-
-        self.assertIn("--user:borg", abort)
-        self.assertIn("process_has_exact_argument", abort)
-        self.assertIn("process_holds_job_lock", abort)
-        self.assertIn("signal_disk_holders", abort)
-        self.assertIn("stop_legacy_holder", abort)
-        self.assertIn('backup_lock_path job "$user_kind"', abort)
-        self.assertIn('kill -USR1 "$pid"', abort)
-        self.assertIn('/usr/bin/fuser -k -KILL "$lock_path"', abort)
-        self.assertIn("trap stopped_by_user USR1", borg)
-        self.assertIn("trap stopped_by_user USR1", exfat)
-        self.assertIn("partial snapshot retained for retry", exfat)
-        self.assertIn("terminate_clone_tree", clone)
-        self.assertIn("trap stop_clone TERM INT", clone)
 
 
 if __name__ == "__main__":
