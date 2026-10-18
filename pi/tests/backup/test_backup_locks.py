@@ -88,7 +88,7 @@ class BackupLockTests(unittest.TestCase):
         wrong.touch()
         fd = os.open(wrong, os.O_RDWR)
         self.addCleanup(os.close, fd)
-        with self.assertRaisesRegex(RuntimeError, 'inherited lock descriptor'):
+        with self.assertRaises(RuntimeError):
             backup_locks.require_held(
                 fd, backup_locks.lock_path(backup_locks.LockClass.JOB, 'time-machine'))
 

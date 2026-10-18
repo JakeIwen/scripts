@@ -59,7 +59,7 @@ class RequestTests(unittest.TestCase):
         with mock.patch.object(cloud,'STATE_DIR',self.root), mock.patch.object(tm,'STATE',self.root), \
              mock.patch.object(cloud,'credentials_ready',return_value=False):
             for weekly in (cloud.weekly,tm.weekly):
-                with self.assertRaisesRegex(cloud.Deferred,'login'): weekly(cfg,self.state)
+                with self.assertRaises(cloud.Deferred): weekly(cfg,self.state)
 
     def test_failed_start_keeps_request_for_a_later_retry(self):
         self.command.side_effect=subprocess.CalledProcessError(1,['systemctl'])

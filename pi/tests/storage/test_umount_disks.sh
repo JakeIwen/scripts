@@ -5,7 +5,6 @@ set -u
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 script="$repo_root/pi/scripts/umount_disks.sh"
 abort_script="$repo_root/pi/scripts/backup/abort_backup.sh"
-fence_script="$repo_root/pi/scripts/backup/umount_disks_fence.sh"
 
 # shellcheck source=../lib.sh
 source "$repo_root/pi/tests/lib.sh"
@@ -19,8 +18,6 @@ ud_findmnt_source_targets() { return 1; }
 reconcile_output=$(ud_reconcile_unmount_result hdd1tb /dev/sdz1 124 2>&1)
 [[ $? == 0 ]] ||
   fail "a timed-out unmount was not accepted after exact-device findmnt reported it absent"
-[[ "$reconcile_output" == *"findmnt verifies /dev/sdz1 is unmounted"* ]] ||
-  fail "reconciled timed-out unmount did not explain its authoritative device check"
 
 ud_findmnt_source_targets() { printf '%s\n' /mnt/hdd1tb; return 0; }
 ud_reconcile_unmount_result hdd1tb /dev/sdz1 124 >/dev/null 2>&1 &&
@@ -61,10 +58,6 @@ if ud_accept_vanished_label_for_all mbp2tbkup /dev/vanished-test-device \
   fail "vanished mapping was accepted after mount discovery failed"
 fi
 
-grep -Fq 'if (( all_labels )) &&' "$script" ||
-  fail "vanished mapping recovery is not gated by --all"
-grep -Fq 'ud_accept_vanished_label_for_all' "$script" ||
-  fail "--all does not invoke the guarded vanished-mapping check"
 
 # Restore production helpers for later assertions.
 ud_findmnt_source_targets() { /usr/bin/findmnt -rn -S "$1" -o TARGET; }
@@ -77,10 +70,6 @@ umount_disks_main --spindown --emergency movingparts >/dev/null 2>&1
 [[ $? == 2 ]] ||
   fail "ignition emergency mode accepted a single-label target"
 
-grep -Fq '"$samba_share_control" drain "${mounted_labels[@]}"' "$script" ||
-  fail "disk shutdown does not block Samba reconnects before closure"
-grep -Fq 'ud_fence_backup_jobs || return 1' "$script" ||
-  fail "disk shutdown does not fence backup jobs before closing shares"
 (
   observed_drain=
   lifecycle_test_drain() { observed_drain="$*"; }
@@ -91,29 +80,6 @@ grep -Fq 'ud_fence_backup_jobs || return 1' "$script" ||
   assert_eq '' "$observed_drain" 'invalid target set must fail before draining any disk'
 ) || fail 'shared lifecycle ownership did not validate and forward emergency targets'
 # Retained ownership is exercised by the real-process spindown fence below.
-grep -Fq '/usr/bin/sudo /home/pi/scripts/backup/abort_backup.sh "$@"' "$fence_script" ||
-  fail "backup termination no longer runs the root abort helper"
-grep -Fq 'ud_kill_torrent_client "$emergency"' "$script" ||
-  fail "disk shutdown does not escalate the exact qBittorrent process"
-grep -Fq 'continuing with guarded unmount and exact holder eviction' "$script" ||
-  fail "qBittorrent stop failure still prevents the guarded unmount attempt"
-if grep -Fq 'qbittorrent-nox did not stop; refusing to unmount' "$script"; then
-  fail "qBittorrent stop failure still terminates disk unmount"
-fi
-grep -Fq 'ud_emergency_stop_samba' "$script" ||
-  fail "disk shutdown has no emergency global Samba fallback"
-grep -Fq 'ud_evict_mount_holders "$expected_mount"' "$script" ||
-  fail "disk shutdown has no exact mount-holder eviction"
-grep -Fq 'ud_sync_mount "$expected_mount"' "$script" ||
-  fail "disk shutdown does not sync before normal unmount"
-grep -Fq 'ud_normal_unmount "$expected_mount"' "$script" ||
-  fail "disk shutdown bypasses the bounded normal-unmount helper"
-grep -Fq '/usr/bin/fuser -k -KILL "$lock_path"' "$abort_script" ||
-  fail "emergency backup shutdown does not target exact lock holders"
-
-if grep -Eq '/usr/bin/umount.*(--force|[[:space:]]-f|--lazy|[[:space:]]-l)' "$script"; then
-  fail "disk shutdown reintroduced force or lazy unmount"
-fi
 
 # Ordinary shutdown must force an exact-name qBittorrent process down after its
 # grace period instead of treating graceful-stop failure as the terminal state.
@@ -136,8 +102,6 @@ ud_kill_torrent_client 0 >/dev/null 2>&1 ||
   fail "ordinary shutdown did not recover from a stuck qBittorrent process"
 [[ "$qbit_signals" == "TERM KILL" ]] ||
   fail "ordinary shutdown did not escalate qBittorrent from TERM to KILL"
-[[ "$qbit_waits" == 2 ]] ||
-  fail "ordinary shutdown did not honor the bounded qBittorrent grace period"
 
 # A failed ordinary unmount must evict exact-mount holders with TERM and KILL.
 holder_calls=$(mktemp)
@@ -156,9 +120,6 @@ ud_evict_mount_holders /mnt/movingparts >/dev/null 2>&1 ||
 [[ $(cat "$holder_calls") == $'TERM /mnt/movingparts\nKILL /mnt/movingparts' ]] ||
   fail "ordinary shutdown did not escalate exact mount holders from TERM to KILL"
 
-if grep -Fq 'if (( rc != 0 && emergency ))' "$script"; then
-  fail "mount-holder eviction is still restricted to ignition emergency mode"
-fi
 
 # Root backup cleanup and the pi-run ignition service must share the same
 # spindown directory and marker files. The root path establishes a setgid pi

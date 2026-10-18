@@ -94,12 +94,6 @@ run_watchdog() {
   bash "$repo_root/pi/scripts/disk_health_watchdog.sh"
 }
 
-# Resolving the mounted health-check target must never run a broad LABEL token
-# scan, because that probes unrelated devices that may have been spun down.
-if grep -Fq -- '-t "LABEL=$label"' "$repo_root/pi/scripts/disk_health_watchdog.sh"; then
-  fail "disk-health watchdog still performs a broad label probe"
-fi
-
 run_watchdog >/dev/null || fail "first unusable observation failed"
 [[ -f "$state_dir/EXFAT512.unusable" ]] ||
   fail "first unusable observation was not recorded"

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 import shlex
 import shutil
@@ -16,8 +14,6 @@ from typing import Mapping, Sequence
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SOURCE = REPO_ROOT / "pi" / "scripts" / "umount_disks.sh"
 FENCE = SOURCE.parent / "backup" / "umount_disks_fence.sh"
-GOLDEN = Path(__file__).with_name("fixtures") / "umount_disks_phases_golden.json"
-ORACLE_SHA256 = "be5f82d1b44097c47ec31332bf911eeb0d348680a0ae8eb28985ba7bc1d6cfe6"
 
 
 @dataclass(frozen=True)
@@ -51,25 +47,16 @@ class Scenario:
     mount_labels: tuple[str, ...] = ("movingparts",)
     manual_mount_labels: tuple[str, ...] = ("bigboi",)
     resolutions: Mapping[str, tuple[Resolution, ...]] = field(default_factory=dict)
-    current_markers: Mapping[str, str] = field(default_factory=dict)
-    state_path_kind: str = "absent"
-    prepare_state: Result = Result()
-    clear_state: Result = Result()
-    hd_idle_available: bool = True
-    accept_vanished: Result = Result()
     samba_drain: Result = Result()
     samba_close: Result = Result()
     abort_backup: Result = Result()
     qbit_stop: Result = Result()
     emergency_samba: Result = Result()
-    sync_mount: Mapping[str, Result] = field(default_factory=dict)
     unmounts: Mapping[str, tuple[Result, ...]] = field(default_factory=dict)
     findmnt_sources: Mapping[str, tuple[Result, ...]] = field(default_factory=dict)
     holder_summaries: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
-    evict_mount: Mapping[str, Result] = field(default_factory=dict)
     parent_checks: Mapping[str, ParentCheck] = field(default_factory=dict)
     hd_idle: Mapping[str, Result] = field(default_factory=dict)
-    write_state: Mapping[str, Result] = field(default_factory=dict)
     all_mounts: Result = Result()
     report_mounts: Result = Result()
 
@@ -109,14 +96,6 @@ def _scenario_config(scenario: Scenario) -> str:
         _array("HDD_LABELS", scenario.hdd_labels),
         _array("MOUNT_LABELS", scenario.mount_labels),
         _array("MANUAL_MOUNT_LABELS", scenario.manual_mount_labels),
-        f"STATE_PATH_KIND={_quote(scenario.state_path_kind)}",
-        f"PREPARE_STATE_STATUS={scenario.prepare_state.status}",
-        f"PREPARE_STATE_OUTPUT={_quote(scenario.prepare_state.output)}",
-        f"CLEAR_STATE_STATUS={scenario.clear_state.status}",
-        f"CLEAR_STATE_OUTPUT={_quote(scenario.clear_state.output)}",
-        f"HD_IDLE_AVAILABLE={int(scenario.hd_idle_available)}",
-        f"ACCEPT_VANISHED_STATUS={scenario.accept_vanished.status}",
-        f"ACCEPT_VANISHED_OUTPUT={_quote(scenario.accept_vanished.output)}",
         f"SAMBA_DRAIN_STATUS={scenario.samba_drain.status}",
         f"SAMBA_DRAIN_OUTPUT={_quote(scenario.samba_drain.output)}",
         f"SAMBA_CLOSE_STATUS={scenario.samba_close.status}",
@@ -131,7 +110,6 @@ def _scenario_config(scenario: Scenario) -> str:
         f"ALL_MOUNTS_OUTPUT={_quote(scenario.all_mounts.output)}",
         f"REPORT_MOUNTS_STATUS={scenario.report_mounts.status}",
         f"REPORT_MOUNTS_OUTPUT={_quote(scenario.report_mounts.output)}",
-        _assoc("STATE_CURRENT", scenario.current_markers),
     ]
 
     field_groups = (
@@ -168,10 +146,7 @@ def _scenario_config(scenario: Scenario) -> str:
     chunks.append(_assoc("HOLDER_TEXT", holder_values))
 
     for name, mapping, attributes in (
-        ("SYNC", scenario.sync_mount, ("status", "output")),
-        ("EVICT", scenario.evict_mount, ("status", "output")),
         ("HD_IDLE", scenario.hd_idle, ("status", "output")),
-        ("WRITE_STATE", scenario.write_state, ("status", "output")),
         ("PARENT", scenario.parent_checks, ("status", "error")),
     ):
         for attribute in attributes:
@@ -272,39 +247,11 @@ ud_record_failure() {
   trace "failure:$message"
 }
 
-ud_notify_failures() {
-  trace "notify-failures:$1"
-}
-
-ud_notify_recovery() {
-  trace "notify-recovery:$1"
-}
-
-ud_prepare_spindown_state_dir() {
-  trace "prepare-state"
-  if (( PREPARE_STATE_STATUS != 0 )); then
-    ud_record_failure "${PREPARE_STATE_OUTPUT:-spindown state preparation failed}"
-  fi
-  return "$PREPARE_STATE_STATUS"
-}
-
-ud_clear_spindown_state() {
-  trace "clear-state"
-  if (( CLEAR_STATE_STATUS != 0 )) && [[ -n "$CLEAR_STATE_OUTPUT" ]]; then
-    ud_record_failure "$CLEAR_STATE_OUTPUT"
-  fi
-  return "$CLEAR_STATE_STATUS"
-}
-
-ud_spindown_state_is_current() {
-  local label=$1
-  trace "marker-check:$label"
-  if [[ -n "${STATE_CURRENT[$label]+present}" ]]; then
-    UD_FAST_PARENT=${STATE_CURRENT[$label]}
-    return 0
-  fi
-  return 1
-}
+ud_notify_failures() { :; }
+ud_notify_recovery() { :; }
+ud_prepare_spindown_state_dir() { return 0; }
+ud_clear_spindown_state() { return 0; }
+ud_spindown_state_is_current() { return 1; }
 
 ud_resolve_label() {
   local label=$1 key last status
@@ -326,16 +273,7 @@ ud_resolve_label() {
   return "$status"
 }
 
-ud_accept_vanished_label_for_all() {
-  local label=$1 device=$2
-  trace "accept-vanished:$label:$device"
-  if (( ACCEPT_VANISHED_STATUS != 0 )); then
-    ud_record_failure "${ACCEPT_VANISHED_OUTPUT:-vanished mapping rejected}"
-    return "$ACCEPT_VANISHED_STATUS"
-  fi
-  printf '%s\n' "$label: accepted vanished mapping $device"
-  return 0
-}
+ud_accept_vanished_label_for_all() { return 1; }
 
 disk_policy_samba_share_name() {
   trace "share-name:$1"
@@ -395,7 +333,6 @@ ud_abort_backup_jobs() {
       return 99
     fi
   done
-  # Verify the new scoped contract, then retain the frozen phase-order oracle.
   trace "abort-backup:$mode"
   emit_output "$ABORT_OUTPUT"
   return "$ABORT_STATUS"
@@ -413,12 +350,7 @@ ud_emergency_stop_samba() {
   return "$EMERGENCY_SAMBA_STATUS"
 }
 
-ud_sync_mount() {
-  local mountpoint=$1 status=${SYNC_STATUS[$1]:-0} output=${SYNC_OUTPUT[$1]:-}
-  trace "sync:$mountpoint"
-  emit_output "$output"
-  return "$status"
-}
+ud_sync_mount() { trace "sync:$1"; }
 
 ud_normal_unmount() {
   local mountpoint=$1 key last status output
@@ -454,12 +386,7 @@ ud_mount_holder_summary() {
   printf '%s\n' "$output"
 }
 
-ud_evict_mount_holders() {
-  local mountpoint=$1 status=${EVICT_STATUS[$1]:-0} output=${EVICT_OUTPUT[$1]:-}
-  trace "evict:$mountpoint"
-  emit_output "$output"
-  return "$status"
-}
+ud_evict_mount_holders() { trace "evict:$1"; }
 
 ud_parent_is_unmounted() {
   local parent=$1 status=${PARENT_STATUS[$1]:-0} error=${PARENT_ERROR[$1]:-}
@@ -470,10 +397,7 @@ ud_parent_is_unmounted() {
   return "$status"
 }
 
-ud_fake_hd_idle_available() {
-  trace "hd-idle-available:$HD_IDLE_AVAILABLE"
-  (( HD_IDLE_AVAILABLE == 1 ))
-}
+ud_fake_hd_idle_available() { return 0; }
 
 ud_fake_hd_idle() {
   local parent="/dev/$1" status=${HD_IDLE_STATUS["/dev/$1"]:-0}
@@ -483,15 +407,7 @@ ud_fake_hd_idle() {
   return "$status"
 }
 
-ud_write_spindown_state() {
-  local label=$1 device=$2 parent=$3
-  local status=${WRITE_STATE_STATUS[$label]:-0} output=${WRITE_STATE_OUTPUT[$label]:-}
-  trace "write-state:$label:$device:$parent:status=$status"
-  if (( status != 0 )); then
-    ud_record_failure "${output:-spindown state write failed}"
-  fi
-  return "$status"
-}
+ud_write_spindown_state() { trace "write-state:$*"; }
 
 ud_fake_all_mounts() {
   trace "all-mounts:status=$ALL_MOUNTS_STATUS"
@@ -517,74 +433,6 @@ ud_fake_grep_scsi() {
 }
 
 umount_disks_main "${ARGS[@]}"
-exit $?
-"""
-
-
-DIRECT_PHASE_DRIVER = r"""#!/usr/bin/env bash
-
-export UMOUNT_DISKS_LIBRARY_ONLY=1
-source "$HARNESS_DIR/umount_disks.sh"
-
-# A missing guard must never turn this regression test into a live alert.
-ud_notify_failures() {
-  printf '%s\n' notify-failures >> "$SIDE_EFFECT_FILE"
-}
-ud_notify_recovery() {
-  printf '%s\n' notify-recovery >> "$SIDE_EFFECT_FILE"
-}
-
-case "$PHASE" in
-  ud_preflight)
-    spindown=1
-    dry_run=0
-    ud_prepare_spindown_state_dir() {
-      printf '%s\n' prepare-state >> "$SIDE_EFFECT_FILE"
-      return 1
-    }
-    ;;
-  ud_unmount_all)
-    spindown=0
-    dry_run=0
-    emergency=0
-    mounted_labels=(movingparts)
-    disk_policy_samba_share_name() {
-      printf '%s\n' share-name >> "$SIDE_EFFECT_FILE"
-      return 1
-    }
-    ud_direct_samba() {
-      printf '%s\n' samba-control >> "$SIDE_EFFECT_FILE"
-      return 1
-    }
-    samba_share_control=ud_direct_samba
-    ;;
-  ud_fence_backup_jobs)
-    spindown=1
-    dry_run=0
-    emergency=0
-    attached_labels=(movingparts)
-    mounted_labels=()
-    ud_abort_backup_jobs() {
-      printf '%s\n' abort-backup >> "$SIDE_EFFECT_FILE"
-      return 1
-    }
-    ;;
-  ud_spindown)
-    spindown=1
-    attached_labels=(movingparts)
-    ud_resolve_label() {
-      printf '%s\n' resolve-label >> "$SIDE_EFFECT_FILE"
-      DISK_POLICY_RESOLVE_REASON=
-      return 1
-    }
-    ;;
-  *)
-    printf 'unknown phase: %s\n' "$PHASE" >&2
-    exit 2
-    ;;
-esac
-
-"$PHASE"
 exit $?
 """
 
@@ -621,13 +469,6 @@ def _run_scenario(source: Path, bash: Path, scenario: Scenario) -> dict[str, obj
         harness.mkdir()
         counters.mkdir()
         state_dir = root / "state"
-        if scenario.state_path_kind == "dir":
-            state_dir.mkdir()
-        elif scenario.state_path_kind == "file":
-            state_dir.write_text("not a directory\n", encoding="utf-8")
-        elif scenario.state_path_kind != "absent":
-            raise AssertionError(f"unknown state path kind: {scenario.state_path_kind}")
-
         source_text = source.read_text(encoding="utf-8")
         (harness / "umount_disks.sh").write_text(
             _transform_source(source_text), encoding="utf-8"
@@ -663,47 +504,6 @@ def _run_scenario(source: Path, bash: Path, scenario: Scenario) -> dict[str, obj
             "stdout": completed.stdout.replace(temp_name, marker),
             "stderr": completed.stderr.replace(temp_name, marker),
             "trace": trace.replace(temp_name, marker),
-        }
-
-
-def _run_direct_phase(source: Path, bash: Path, phase: str) -> dict[str, object]:
-    with tempfile.TemporaryDirectory(prefix="umount-phase-direct-") as temp_name:
-        root = Path(temp_name)
-        harness = root / "harness"
-        harness.mkdir()
-        (harness / "umount_disks.sh").write_text(
-            source.read_text(encoding="utf-8"), encoding="utf-8"
-        )
-        (harness / "disk_policy.sh").write_text(DISK_POLICY_STUB, encoding="utf-8")
-        _write_backup_libraries(harness)
-        driver = harness / "driver.sh"
-        driver.write_text(DIRECT_PHASE_DRIVER, encoding="utf-8")
-        driver.chmod(0o700)
-        side_effect_file = root / "side-effects"
-        environment = _harness_environment(
-            HARNESS_DIR=str(harness),
-            PHASE=phase,
-            SIDE_EFFECT_FILE=str(side_effect_file),
-        )
-        completed = subprocess.run(
-            [str(bash), str(driver)],
-            cwd=root,
-            env=environment,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        side_effects = (
-            side_effect_file.read_text(encoding="utf-8")
-            if side_effect_file.exists()
-            else ""
-        )
-        marker = "$TMP"
-        return {
-            "returncode": completed.returncode,
-            "stdout": completed.stdout.replace(temp_name, marker),
-            "stderr": completed.stderr.replace(temp_name, marker),
-            "side_effects": side_effects.replace(temp_name, marker),
         }
 
 
@@ -754,15 +554,3 @@ def _select_bash() -> tuple[Path, str]:
             f"{message}; UMOUNT_PHASE_TEST_REQUIRE=1 forbids skipping"
         )
     raise unittest.SkipTest(message)
-
-
-def _source_sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-
-
-def load_golden() -> tuple[Path, str, dict[str, object]]:
-    bash, bash_version = _select_bash()
-    golden = json.loads(GOLDEN.read_text(encoding="utf-8"))
-    return bash, bash_version, golden

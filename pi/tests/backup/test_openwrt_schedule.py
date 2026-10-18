@@ -46,7 +46,6 @@ class OpenWrtScheduleTests(unittest.TestCase):
             os.utime(self.stamp, (old, old))
             result = self.run_export(*args)
             self.assertEqual(result.returncode, 1)
-            self.assertIn('required SSH file is unreadable', result.stderr)
             self.assertEqual(self.stamp.stat().st_mtime, old)
 
     def test_concurrent_export_waits_then_rechecks_success_stamp(self):

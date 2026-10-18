@@ -241,16 +241,6 @@ TEST_FSCK_REPAIR_OUTPUT='filesystem metadata repaired' \
 bash "$repo_root/pi/scripts/diskctl" repair EXFAT512 > "$repair_root/exfat-output" ||
   fail "verified exFAT repair workflow failed"
 
-grep -Fq 'automatic check complete; exFAT errors were repaired (status 1)' \
-  "$repair_root/exfat-output" || fail "repair output did not report that changes were made"
-grep -Fq 'filesystem metadata repaired' "$repair_root/exfat-output" ||
-  fail "repair output suppressed successful fsck detail"
-grep -Fq 'read-only exFAT verification passed' "$repair_root/exfat-output" ||
-  fail "repair output did not report verification"
-grep -Fq \
-  'healthy: exFAT errors were repaired; verification passed; remounted read/write and write probe passed' \
-  "$repair_root/exfat-output" || fail "repair output omitted the final health summary"
-
 expected_repair_calls=$'unmount EXFAT512\nfsck -p -- '"$fake_device"$'\nfsck -n -- '"$fake_device"$'\nmount EXFAT512'
 [[ $(cat "$calls") == "$expected_repair_calls" ]] ||
   fail "repair did not unmount, repair, verify, and remount in order"

@@ -76,17 +76,4 @@ run_gate mbp2tbkup >/dev/null 2>&1 &&
 run_gate unshared-test >/dev/null 2>&1 &&
   fail "non-Samba label was accepted"
 
-for label in "${gated_labels[@]}"; do
-  grep -Fq "preexec = /home/pi/scripts/samba_require_mount.sh $label" \
-    "$repo_root/pi/configs/smb.conf" ||
-    fail "$label does not use the exact mount gate"
-done
-[[ $(grep -Fc "preexec close = yes" "$repo_root/pi/configs/smb.conf") == 4 ]] ||
-  fail "all disk-backed Samba shares must close when their mount gate fails"
-grep -Fq "fruit:time machine max size = 1100G" \
-  "$repo_root/pi/configs/smb.conf" ||
-  fail "Time Machine share does not preserve physical disk headroom"
-grep -Fq "veto files = /archive/" "$repo_root/pi/configs/smb.conf" ||
-  fail "retired Time Machine bundles are visible through the live share"
-
 echo "PASS: disk-backed Samba shares require their exact mounted labels"

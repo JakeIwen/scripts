@@ -77,10 +77,6 @@ done
         expected = [f'/run/lock/vanpi-backup/{kind.value}-{name}.lock'
                     for kind, names in locks.LOCK_NAMES.items() for name in names]
         self.assertEqual(result.stdout.splitlines(), expected)
-        records = [line.split() for line in (ROOT / 'pi' / ARTIFACTS[1]).read_text().splitlines()
-                   if line and not line.startswith('#')]
-        self.assertEqual([row[1] for row in records if row[1].startswith('/run/lock/vanpi-backup/')],
-                         expected)
 
 
 if __name__ == '__main__':

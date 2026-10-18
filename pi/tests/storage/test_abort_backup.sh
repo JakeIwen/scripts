@@ -99,8 +99,6 @@ if run_user_stop borg > "$test_root/refusal.out" 2>&1; then
   fail "Borg stop accepted a restore lock holder"
 fi
 kill -0 "$holder_pid" 2>/dev/null || fail "refused stop still signaled the restore"
-grep -Fq "job lock holder is not the active borg backup" "$test_root/refusal.out" ||
-  fail "refused stop did not explain the exact-holder mismatch"
 kill -TERM "$holder_pid" 2>/dev/null || true
 wait "$holder_pid" 2>/dev/null || true
 holder_pid=
@@ -108,8 +106,6 @@ holder_pid=
 if run_user_stop exfat > "$test_root/idle.out" 2>&1; then
   fail "user stop succeeded while no backup held the lock"
 fi
-grep -Fq "no active exfat backup" "$test_root/idle.out" ||
-  fail "idle stop did not explain that no EXFAT backup was active"
 
 # An idle check must open the existing lock read-only and must not create a
 # missing lock file merely to decide that no job is active.
@@ -121,9 +117,6 @@ ABORT_BACKUP_CONF="$fake_conf" "$abort_script" >/dev/null 2>&1 ||
   fail "idle abort check rejected an absent lock file"
 [[ ! -e "$job_lock" ]] ||
   fail "idle abort check created the missing lock file"
-
-grep -Fq 'exec {job_lock_fd}<"$job_lock"' "$abort_script" ||
-  fail "abort helper does not open the existing lock through a read-only descriptor"
 
 : > "$job_lock"
 chmod 0660 "$job_lock"

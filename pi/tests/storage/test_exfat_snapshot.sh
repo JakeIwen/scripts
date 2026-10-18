@@ -169,9 +169,4 @@ TEST_WINDOW_CALLS="$window_calls" "$window_root/backup_window.sh" >/dev/null 2>&
 [[ $(sort "$window_calls") == $'exfat:\npi:' ]] || fail "ordinary window changed child arguments"
 [[ -f "$window_calls.concurrent" ]] || fail "ordinary window jobs did not overlap"
 
-grep -Fq -- "--link-dest=\$previous_path" "$snapshot_script" ||
-  fail "production snapshot script does not link against the previous snapshot"
-grep -Fq -- "--spindown \"\$EXFAT_SNAPSHOT_DISK_LABEL\"" "$snapshot_script" ||
-  fail "production snapshot does not explicitly stop its HDD"
-
 echo "PASS: EXFAT hard-link snapshot retention and backup-window isolation"

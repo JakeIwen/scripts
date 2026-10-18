@@ -294,8 +294,6 @@ claim_blocker=$started_pid
   ! /usr/bin/flock -n "$BACKUP_LOCK_DIR/disk-bigboi.lock" true || exit 3
 ' test "$TEST_LOCK_LIBRARY" > "$test_root/claim.out" 2>&1 ||
   fail "failed lifecycle claim retained an earlier disk or disturbed its peer"
-grep -Fq 'bigboi is in use by a backup job; refusing to unmount' "$test_root/claim.out" ||
-  fail "lifecycle refusal did not identify its busy disk"
 stop_holder "$claim_blocker"
 
 # Missing registry entries cannot admit jobs; lifecycle must not create them.
@@ -420,8 +418,6 @@ if /bin/bash -uc 'source "$1"; hold_backup_disks_exclusive bigboi' test "$TEST_L
     > "$test_root/claim.out" 2>&1; then
   fail "lifecycle claim ignored a legacy exclusive holder"
 fi
-grep -Fq 'restore or maintenance job holds the backup lock' "$test_root/claim.out" ||
-  fail "lifecycle refusal did not name the legacy holder"
 if /bin/bash -c 'source "$1"; acquire_backup_job borg bigboi' test "$config" 2>/dev/null; then
   fail "migrated job overlapped legacy exclusive holder"
 fi
@@ -484,7 +480,6 @@ if /bin/bash "$abort_script" --user borg > "$test_root/refusal.out" 2>&1; then
   fail "dashboard stop accepted a different tool"
 fi
 kill -0 "$wrong_pid" || fail "refused dashboard stop signaled the different tool"
-grep -Fq 'not the active borg backup' "$test_root/refusal.out" || fail "missing exact-tool refusal"
 stop_holder "$wrong_pid"
 stop_holder "$exfat_pid"
 

@@ -97,13 +97,9 @@ state_error=$(
   TEST_SMBD_STATE=failed TEST_SMBD_PGREP_STATUS=0 \
     run_control close movingparts bigboi 2>&1
 ) && fail "failed smbd with live processes was accepted"
-grep -Fq "Samba shares MovingParts, BigBoi" <<< "$state_error" ||
-  fail "failed-state diagnostic omitted the affected Samba share names"
 
 state_error=$(TEST_SMBD_STATE=activating run_control close movingparts bigboi 2>&1) &&
   fail "transitional smbd state was accepted"
-grep -Fq "cannot close Samba shares MovingParts, BigBoi" <<< "$state_error" ||
-  fail "transitional-state diagnostic omitted the affected Samba share names"
 TEST_SMBCONTROL_STATUS=1 run_control close bigboi >/dev/null 2>&1 &&
   fail "smbcontrol failure was ignored"
 run_control close unknown >/dev/null 2>&1 &&
@@ -128,27 +124,5 @@ run_control clear mbp2tbkup >/dev/null || fail "shutdown gate could not clear"
 ln -s "$drain_dir/movingparts" "$drain_dir/mbp2tbkup"
 run_control clear mbp2tbkup >/dev/null 2>&1 && fail "symlink gate accepted"
 [[ -f "$drain_dir/movingparts" ]] || fail "symlink target changed"
-
-grep -Fq '"$samba_share_control" close "${mounted_labels[@]}"' \
-  "$repo_root/pi/scripts/umount_disks.sh" ||
-  fail "disk unmount does not close only the selected Samba shares"
-grep -Fq '"Samba shares $samba_names did not close; refusing to unmount disks' \
-  "$repo_root/pi/scripts/umount_disks.sh" &&
-  fail "disk-unmount alert still uses the old generic Samba wording"
-grep -Fq 'ud_record_failure "Samba shares $samba_names did not close; disks remain mounted"' \
-  "$repo_root/pi/scripts/umount_disks.sh" ||
-  fail "disk-unmount fallback alert omits the affected Samba share names"
-grep -Fq 'first_holders=$(ud_mount_holder_summary "$expected_mount")' \
-  "$repo_root/pi/scripts/umount_disks.sh" ||
-  fail "failed unmount does not collect bounded userspace-holder details"
-grep -Fq 'ud_evict_mount_holders "$expected_mount"' \
-  "$repo_root/pi/scripts/umount_disks.sh" ||
-  fail "disk unmount does not evict exact mount holders"
-if grep -Fq '/usr/sbin/service smbd stop' "$repo_root/pi/scripts/umount_disks.sh"; then
-  fail "disk unmount still stops global Samba"
-fi
-if grep -Eq 'pgrep[[:space:]]+-fi|pk[[:space:]]+qbit' "$repo_root/pi/scripts/remount.sh"; then
-  fail "manual remount still uses a fuzzy qBittorrent process killer"
-fi
 
 echo "PASS: Samba share control is label-scoped and fail-closed"

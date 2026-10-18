@@ -32,15 +32,16 @@ The bash shell tests under `pi/tests/storage/` source `pi/tests/lib.sh`
 for the shared `fail` and `assert_eq` helpers. Each test keeps its own
 `set -u`, temp dir, and trap.
 
-The frozen `umount_disks.sh` phase regression needs Bash 4 or newer. It checks
-`bash` on `PATH`, then `/opt/homebrew/bin/bash` and `/usr/local/bin/bash`; if no
-suitable interpreter is available, the golden cases skip by default. Set
-`UMOUNT_PHASE_TEST_REQUIRE=1` to make that condition fail the test run instead,
-or set `UMOUNT_PHASE_TEST_BASH` to an explicit interpreter path. For example:
+The `umount_disks.sh` phase scenarios in `storage/test_umount_disks_phases.py`
+need Bash 4 or newer. They check `bash` on `PATH`, then `/opt/homebrew/bin/bash`
+and `/usr/local/bin/bash`; if no suitable interpreter is available, they skip
+by default. Set `UMOUNT_PHASE_TEST_REQUIRE=1` to make that condition fail the
+test run instead, or set `UMOUNT_PHASE_TEST_BASH` to an explicit interpreter
+path. For example:
 
 ```bash
 UMOUNT_PHASE_TEST_REQUIRE=1 python3 -m unittest \
-  pi.tests.storage.test_umount_disks_phases_golden
+  pi.tests.storage.test_umount_disks_phases
 ```
 
 Dashboard tests require Flask. See

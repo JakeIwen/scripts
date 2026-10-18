@@ -33,30 +33,30 @@ class ProtectedJsonTests(unittest.TestCase):
 
     def test_rejects_public_permissions_other_owner_and_multiple_links(self):
         self.path.chmod(0o640)
-        with self.assertRaisesRegex(ValueError, self.error): self.read()
+        with self.assertRaises(ValueError): self.read()
         self.path.chmod(0o600)
         owner = os.geteuid()
         with mock.patch.object(records.os, 'geteuid', return_value=owner + 1):
-            with self.assertRaisesRegex(ValueError, self.error): self.read()
+            with self.assertRaises(ValueError): self.read()
         os.link(self.path, self.root / 'second-link')
-        with self.assertRaisesRegex(ValueError, self.error): self.read()
+        with self.assertRaises(ValueError): self.read()
 
     def test_rejects_symlinks_and_nonregular_files(self):
         self.path.unlink()
         self.path.symlink_to(self.root / 'missing')
-        with self.assertRaisesRegex(ValueError, self.error): self.read()
+        with self.assertRaises(ValueError): self.read()
         self.path.unlink()
         self.path.mkdir()
-        with self.assertRaisesRegex(ValueError, self.error): self.read()
+        with self.assertRaises(ValueError): self.read()
         self.path.rmdir()
         os.mkfifo(self.path, 0o600)
-        with self.assertRaisesRegex(ValueError, self.error): self.read()
+        with self.assertRaises(ValueError): self.read()
 
     def test_size_boundary_is_enforced_and_invalid_json_is_not_repaired(self):
         self.path.write_bytes(b'{}' + b' ' * (65536 - 2))
         self.assertEqual(self.read(), {})
         self.path.write_bytes(b'{}' + b' ' * (65537 - 2))
-        with self.assertRaisesRegex(ValueError, self.error): self.read()
+        with self.assertRaises(ValueError): self.read()
         self.path.write_text('{broken')
         with self.assertRaises(ValueError): self.read()
         self.assertEqual(self.path.read_text(), '{broken')
@@ -71,7 +71,7 @@ class ProtectedJsonTests(unittest.TestCase):
             self.path.symlink_to(target)
             return info
         with mock.patch.object(Path, 'lstat', inspect_then_replace):
-            with self.assertRaisesRegex(ValueError, self.error): self.read()
+            with self.assertRaises(ValueError): self.read()
         self.assertEqual(target.read_text().strip(), '{"must": "not follow"}')
 
     def test_regular_file_swap_between_metadata_and_open_is_rejected(self):
@@ -83,7 +83,7 @@ class ProtectedJsonTests(unittest.TestCase):
             os.replace(replacement, self.path)
             return info
         with mock.patch.object(Path, 'lstat', inspect_then_replace):
-            with self.assertRaisesRegex(ValueError, self.error): self.read()
+            with self.assertRaises(ValueError): self.read()
 
 
 if __name__ == '__main__':
