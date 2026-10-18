@@ -1,0 +1,13 @@
+# MacBook user crontab (jacobr). Install: crontab ~/dev/scripts/macbook/crontab
+# macbook/tests/test_crontab.py fails when a job names a repo file that has moved.
+scripts=/Users/jacobr/dev/scripts
+
+0 * * * *  $scripts/macbook/scripts/time_machine_exclude_node_modules.sh >> $scripts/log/time_machine_exclude_node_modules.log 2>&1
+0 * * * *  $scripts/macbook/bettertouchtool/btt_backup.zsh >> $scripts/log/btt_backup.log 2>&1
+0 15 * * * $scripts/macbook/bettertouchtool/btt_backup.zsh daily >> $scripts/log/btt_backup.log 2>&1
+0 15 * * 0 $scripts/macbook/bettertouchtool/btt_backup.zsh weekly >> $scripts/log/btt_backup.log 2>&1
+# Warns when deferred jobs wait on a checker (LaunchAgent com.jacobr.deferred-jobs) that stopped.
+17 12 * * * $scripts/macbook/scripts/deferred.zsh watchdog >> $scripts/log/deferred_watchdog.log 2>&1
+# BEGIN managed codex-release-cleanup
+0 21 * * 0 /usr/bin/python3 -I -B /Users/jacobr/dev/scripts/macbook/scripts/cleanup_codex_releases.py --apply > /Users/jacobr/.codex/codex-release-cleanup.log 2>&1
+# END managed codex-release-cleanup

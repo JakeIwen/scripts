@@ -74,6 +74,8 @@ compare it with this checkout. Deployed files may differ from the repository.
   `text_markers.js` preserves Firefox text-node positions during reselection;
   never round-trip rich-editor selection endpoints through flat offsets.
   `signal_text_diagnostic.js` owns the temporary Signal diagnostic button's runner.
+  `macbook/crontab` is the tracked user crontab; `macbook/tests/test_crontab.py`
+  checks that every repo script it runs exists and is executable.
   `macbook/scripts/deferred.zsh` owns one-off future jobs on the Mac (queue,
   hourly/login checker LaunchAgent `com.jacobr.deferred-jobs`, purge on success,
   `NTFY_WARNING_URL` on failure, daily cron watchdog); queue jobs with its `add`

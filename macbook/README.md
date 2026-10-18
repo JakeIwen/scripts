@@ -96,13 +96,31 @@ suppresses the per-run warning an attached SMB share produces.
 
 The installed user cron job runs Sundays at 9:00 PM local time (`0 21 * * 0`)
 and calls the cleanup script directly with `--apply`. Inspect it with
-`crontab -l`; use `crontab -e` to change or remove its managed block. The job
-references this checkout, so update its path if the checkout moves.
+`crontab -l`; change or remove its managed block in `macbook/crontab` (see
+User crontab below). The job references this checkout, so update its path if
+the checkout moves.
 `~/.codex/codex-release-cleanup.log` holds only the most recent scheduled run;
 inspect it for `STOP`/`SKIP` if space is not being reclaimed. The pre-install
 crontab backup is at `~/.codex/codex-release-crontab.previous`.
 Cron skips runs while the Mac is asleep/off and does not catch up on wake.
 Use the account normally, without sudo; HOME/CODEX_HOME overrides are ignored.
+
+## User crontab
+
+`macbook/crontab` is the whole MacBook user crontab, including the Codex block
+above. Edit it here and install it with `crontab ~/dev/scripts/macbook/crontab`;
+`macbook/tests/test_crontab.py` fails when a job names a repo script that has
+moved. Jobs append stdout and stderr to the ignored `log/` directory.
+
+- `time_machine_exclude_node_modules.sh` (hourly) sticky-excludes new
+  `node_modules` under `~/ais` and `~/dev` from Time Machine. Rerun it by hand
+  after a fresh `npm install` if the next backup must skip it.
+- `btt_backup.zsh` (hourly, daily 15:00, weekly Sunday 15:00) rotates whole
+  BetterTouchTool folder copies through `~/backups/BetterTouchTool/<tier>/btt1`–`btt9`.
+  Copies are APFS clones, and the folder is excluded from Time Machine. They
+  are taken while BTT runs; `btt.py guard` checkpoints are the consistent backup.
+- `deferred.zsh watchdog` (daily 12:17) warns when deferred jobs are waiting
+  and the checker below has not run for three hours.
 
 ## Deferred one-off jobs
 
