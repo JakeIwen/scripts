@@ -74,6 +74,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   `text_markers.js` preserves Firefox text-node positions during reselection;
   never round-trip rich-editor selection endpoints through flat offsets.
   `signal_text_diagnostic.js` owns the temporary Signal diagnostic button's runner.
+  `macbook/scripts/deferred.zsh` owns one-off future jobs on the Mac (queue,
+  hourly/login checker LaunchAgent `com.jacobr.deferred-jobs`, purge on success,
+  `NTFY_WARNING_URL` on failure, daily cron watchdog); queue jobs with its `add`
+  instead of writing a LaunchAgent per job. Usage is in `macbook/README.md`.
 - `shared/`: code imported or deployed on more than one host.
 - Dashboard Sonos alarms live in `pi/apps/van_dashboard/sonos_alarms.py`, with
   HTTP routes in `routes/sonos_alarms.py` and React controls in `features/sonos/`.

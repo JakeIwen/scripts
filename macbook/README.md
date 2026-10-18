@@ -104,6 +104,25 @@ crontab backup is at `~/.codex/codex-release-crontab.previous`.
 Cron skips runs while the Mac is asleep/off and does not catch up on wake.
 Use the account normally, without sudo; HOME/CODEX_HOME overrides are ignored.
 
+## Deferred one-off jobs
+
+`macbook/scripts/deferred.zsh` runs a script once on or after a due time, then
+deletes it. Queue one with
+`deferred.zsh add 2026-11-16 tor-unexclude ./undo.zsh "description"` (also
+`'YYYY-MM-DD HH:MM'`, `+30d`, `+12h`; `--file` copies extra material in, and
+`--attempts`/`--timeout` default to 3 and 900 s). See queued jobs with `list`,
+drop one with `cancel NAME`, and check the checker with `status`.
+
+Each job is a private directory under `~/.agent/deferred/jobs/`. The LaunchAgent
+`com.jacobr.deferred-jobs` (installed by `deferred.zsh install`) runs due jobs
+hourly and at login, with the job directory as the working directory and a
+minimal environment. Success deletes the directory; failure keeps it, records
+`last.log`, and sends a high-priority warning to `NTFY_WARNING_URL` without any
+job output. After the last attempt the job stays as `failed` until cancelled.
+Jobs must be safe to rerun, clean up anything outside their own directory, and
+detach any long-lived process they start, since launchd ends the checker's
+process group when it exits.
+
 ## BetterTouchTool maintenance
 
 Use the [BTT tooling index](bettertouchtool/README.md) for maintained commands,
