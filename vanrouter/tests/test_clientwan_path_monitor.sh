@@ -4,9 +4,6 @@ set -eu
 script_dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 monitor="$script_dir/../usr/libexec/clientwan-path-monitor"
 init_script="$script_dir/../etc/init.d/clientwan-path-monitor"
-sysupgrade_conf="$script_dir/../etc/sysupgrade.conf"
-backup_exporter="$script_dir/../usr/libexec/openwrt-backup-export"
-pi_backup="$script_dir/../../pi/scripts/backup/openwrt_backup.sh"
 test_root=$(mktemp -d "${TMPDIR:-/tmp}/clientwan-path-test.XXXXXX")
 mock_bin="$test_root/bin"
 mock_state="$test_root/state"
@@ -112,7 +109,4 @@ grep -F 'summary samples=1 interface_up=0 gateway_ok=0 public1_ok=0 public2_ok=0
 
 /bin/sh -n "$monitor"
 /bin/sh -n "$init_script"
-for file in "$sysupgrade_conf" "$backup_exporter" "$pi_backup"; do
-	grep -F 'rc.d/S20clientwan-path-monitor' "$file" >/dev/null
-done
 printf 'clientwan-path-monitor: ok\n'

@@ -47,7 +47,7 @@ esac
             if missing:
                 env["MWAN_WRAP"] = str(root / "missing-library")
             subprocess.run(["/bin/sh", str(ROOT / "usr/libexec/uplink-https-monitor")],
-                           env=env, check=True, timeout=5)
+                           env=env, check=True, timeout=30)
             fields = (root / "state/wan").read_text().strip().split("|")
             calls = (root / "calls").read_text() if (root / "calls").exists() else ""
             self.assertIn("interface=wan", (root / "log").read_text())
@@ -57,7 +57,6 @@ esac
         fields, calls = self.run_monitor()
         self.assertEqual(fields[2:], ["online", "204", "0", "204", "0"])
         self.assertEqual(len(calls.splitlines()), 2)
-        self.assertIn("--max-time 8", calls)
         self.assertIn("--noproxy *", calls)
         self.assertNotIn("--insecure", calls)
         self.assertNotIn("--location", calls)

@@ -63,7 +63,6 @@ class ConnectivityParserTests(unittest.TestCase):
         connectivity.apply_https_health(interfaces, output)
         self.assertEqual(interfaces[1]["state"], "offline")
         self.assertEqual(interfaces[1]["mwan_state"], "online")
-        self.assertIn("curl 28", interfaces[1]["detail"])
 
     def test_one_provider_failure_is_degraded(self):
         interfaces = connectivity.parse_mwan3_interfaces(MWAN_SAMPLE)

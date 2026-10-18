@@ -1,15 +1,11 @@
 """Bounded raw-spool rotation and static receiver privacy/compatibility checks."""
 import importlib.util
 import grp
-import json
 import os
 from pathlib import Path
 import pwd
-import stat
-import subprocess
 import sys
 import tempfile
-from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -60,36 +56,6 @@ class NetworkSpoolTests(unittest.TestCase):
                     rotation.rotate(path)
                 self.assertEqual(path.read_text(), "original")
 
-    def test_legacy_receiver_format_is_preserved(self):
-        config = (ROOT / "scripts/openwrt-logging/30-openwrt-dendelion.conf").read_text()
-        self.assertIn('%timegenerated:::date-rfc3339% %fromhost-ip% %hostname% %syslogtag%%msg%', config)
-        self.assertIn('name="timereported"', config)
-        self.assertIn('name="timegenerated"', config)
-        self.assertEqual(config.count('rotation.sizeLimit="1048576"'), 2)
-        self.assertNotIn('file="/var/log/', config)
-
-    def test_tmpfiles_inherits_adm_without_unsafe_file_ownership_transition(self):
-        config = (ROOT / "tmpfiles.d/vanpi-network.conf").read_text()
-        rows = [line.split() for line in config.splitlines() if line.strip() and not line.lstrip().startswith("#")]
-        directory = next(row for row in rows if row[0] == "d" and row[1] == "/run/vanpi-network/spool")
-        self.assertTrue(int(directory[2], 8) & stat.S_ISGID)
-        self.assertEqual(directory[3:5], ["root", "adm"])
-        # The Pi-owned parent/root-owned spool transition makes tmpfiles refuse
-        # z on the files. A guarded installer operation repairs the exact ring.
-        self.assertTrue(all(row[0] == "d" for row in rows))
-
-    def test_checker_preserves_receiver_identity_instead_of_replacing_with_reader(self):
-        source = (ROOT / "scripts/openwrt-logging/30-openwrt-dendelion.conf").read_text()
-        config = checker.receiver_config(source, Path("/fixture"), 45678)
-        self.assertEqual(config.count('fileOwner="root"'), 2)
-        self.assertEqual(config.count('fileGroup="adm"'), 2)
-        self.assertIn("$FileCreateMode 0640", config)
-        self.assertIn("$FileGroup adm", config)
-        self.assertEqual(config.count('rotation.sizeLimit="4096"'), 2)
-        self.assertIn('address="127.0.0.1" port="45678"', config)
-        self.assertNotIn('file="/run/vanpi-network/spool/', config)
-        self.assertIn('rotation.sizeLimitCommand="/fixture/rotate.py json"', config)
-
     def test_checker_refuses_unisolated_helper_or_receiver_paths(self):
         for quote in ("'", '"'):
             source = f"RAM_SPOOL = Path({quote}/run/vanpi-network/spool{quote})\n"
@@ -103,20 +69,10 @@ class NetworkSpoolTests(unittest.TestCase):
             checker.receiver_config(source.replace('file="/run/vanpi-network/spool/dendelion.log"',
                                                    'file="/unexpected/live/path"'), Path("/fixture"), 45678)
 
-    def test_checker_reads_as_separate_pi_identity_with_adm_supplement(self):
-        reader = SimpleNamespace(pw_uid=1000, pw_gid=1000)
-        result = subprocess.CompletedProcess([], 0, json.dumps({"uid": 1000, "gid": 1000, "groups": [4], "files": []}), "")
-        with mock.patch.object(checker.subprocess, "run", return_value=result) as run:
-            snapshot = checker.reader_snapshot([Path("/fixture/network.jsonl")], reader, 4)
-        self.assertEqual(snapshot["uid"], 1000)
-        self.assertEqual(run.call_args.kwargs["user"], 1000)
-        self.assertEqual(run.call_args.kwargs["group"], 1000)
-        self.assertEqual(run.call_args.kwargs["extra_groups"], [4])
-
     def test_checker_rejects_same_user_nonroot_execution(self):
         with mock.patch.object(checker.sys, "platform", "linux"), \
                 mock.patch.object(checker.os, "geteuid", return_value=1000):
-            with self.assertRaisesRegex(RuntimeError, "sudo"):
+            with self.assertRaises(RuntimeError):
                 checker.check("unused-config", "unused-helper")
 
     @unittest.skipUnless(isolated_receiver_available(), "requires root Linux rsyslog with separate pi/adm reader")

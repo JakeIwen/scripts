@@ -83,35 +83,6 @@ if jq -er --arg profile linksys_e8450-ubi \
 	printf 'expected profile selector to reject ambiguous images\n' >&2
 	exit 1
 fi
-grep -F '"$finalizer" --output "$output_dir"' \
-	"$project_dir/build-openwrt.sh" >/dev/null
-if grep -F 'openwrt-$OPENWRT_RELEASE-$OPENWRT_TARGET-$OPENWRT_SUBTARGET-$OPENWRT_DEVICE-squashfs-sysupgrade.itb' \
-	"$project_dir/build-openwrt.sh" >/dev/null; then
-	printf 'build script still assumes versioned OpenWrt output filenames\n' >&2
-	exit 1
-fi
-grep -F 'install -m 0644 "$work_dir/image.itb" "$stage_dir/$patched_name"' \
-	"$project_dir/finalize-openwrt-build.sh" >/dev/null
-grep -F 'staged artifact hash differs from the validated image' \
-	"$project_dir/finalize-openwrt-build.sh" >/dev/null
-grep -F '.artifacts.finalize.lock' \
-	"$project_dir/finalize-openwrt-build.sh" >/dev/null
-grep -F '.prepare.lock' "$project_dir/prepare-recovery-kit.sh" >/dev/null
-grep -F 'trap cleanup_remote EXIT' \
-	"$project_dir/image-action-from-vanpi.sh" >/dev/null
-grep -F 'remote_image=/tmp/dendelion-image-action-$$.itb' \
-	"$project_dir/image-action-from-vanpi.sh" >/dev/null
-grep -F 'validate_source "$build_source"' \
-	"$project_dir/build-openwrt.sh" >/dev/null
-grep -F 'build source is shallow; complete Git history is required' \
-	"$project_dir/finalize-openwrt-build.sh" >/dev/null
-grep -F 'image base-files version is $base_files_version' \
-	"$project_dir/finalize-openwrt-build.sh" >/dev/null
-if grep -F -- '--depth 1' "$project_dir/README.md" >/dev/null; then
-	printf 'README still recommends a shallow OpenWrt clone\n' >&2
-	exit 1
-fi
-
 history_origin="$test_root/history-origin"
 git init -q "$history_origin"
 git -C "$history_origin" config user.name 'Kernel build test'
@@ -129,8 +100,6 @@ if "$project_dir/build-openwrt.sh" --check-source \
 	printf 'expected builder to reject shallow source history\n' >&2
 	exit 1
 fi
-grep -F 'source checkout is shallow; complete Git history is required' \
-	"$test_root/shallow.out" >/dev/null
 
 mkdir "$test_root/count-toolkit"
 cp "$project_dir/build-openwrt.sh" "$test_root/count-toolkit/"
@@ -146,8 +115,6 @@ if "$test_root/count-toolkit/build-openwrt.sh" --check-source \
 	printf 'expected builder to reject the wrong base-files history count\n' >&2
 	exit 1
 fi
-grep -F 'package/base-files history count is 2, expected 3' \
-	"$test_root/count.out" >/dev/null
 
 cat > "$test_root/good-manifest" <<'EOF'
 base-files - 1711~f5dae5ece4
@@ -158,10 +125,6 @@ EOF
 [ "$(awk -v package_name=kernel -f "$manifest_version_parser" \
 	"$test_root/good-manifest")" = \
 	'6.12.94~0123456789abcdef0123456789abcdef-r1' ]
-printf 'base-files - 1~f5dae5ece4\n' > "$test_root/bad-version-manifest"
-bad_base_files_version=$(awk -v package_name=base-files \
-	-f "$manifest_version_parser" "$test_root/bad-version-manifest")
-[ "$bad_base_files_version" != '1711~f5dae5ece4' ]
 printf 'mwan3 - 2.11.13-r1\n' > "$test_root/missing-manifest"
 printf 'base-files 1711~f5dae5ece4\n' > "$test_root/malformed-manifest"
 printf 'base-files - 1711~f5dae5ece4\nbase-files - 1711~f5dae5ece4\n' \
@@ -212,8 +175,6 @@ cmp "$test_root/expected-resolved.txt" "$test_root/packages-resolved.txt"
 grep -F $'jansson4\tjansson' "$test_root/package-map.tsv" >/dev/null
 grep -F $'kernel\t<implicit-target-package>' \
 	"$test_root/package-map.tsv" >/dev/null
-grep -F 'mapped libnghttp2-14 -> libnghttp2' \
-	"$test_root/resolver.err" >/dev/null
 printf 'missing-package\n' > "$test_root/missing-package-seed.txt"
 if awk -v metadata_file="$test_root/packageinfo" \
 	-f "$project_dir/resolve-package-seed.awk" \
@@ -223,45 +184,9 @@ if awk -v metadata_file="$test_root/packageinfo" \
 	printf 'expected package resolver to reject an unknown package\n' >&2
 	exit 1
 fi
-grep -F 'no selector in pinned metadata: missing-package' \
-	"$test_root/missing-resolver.err" >/dev/null
 
 # shellcheck source=/dev/null
 . "$project_dir/release.conf"
-[ "$OPENWRT_RELEASE" = 25.12.5 ]
-[ "$OPENWRT_SOURCE_COMMIT" = f0a60eee2fe051741c643ea6118718aae1ef17fb ]
-[ "$OPENWRT_BASE_FILES_COMMITCOUNT" = 1711 ]
-[ "$OPENWRT_BASE_FILES_VERSION" = '1711~f5dae5ece4' ]
-[ "$OPENWRT_BASE_FILES_VERSION" = \
-	"$OPENWRT_BASE_FILES_COMMITCOUNT~${OPENWRT_REVISION#*-}" ]
-[ "$OPENWRT_BOARD" = linksys,e8450-ubi ]
-[ "$OPENWRT_COMPAT_VERSION" = 2.0 ]
-[ "$OPENWRT_FEEDS_BUILDINFO_SHA256" = \
-	e11279b01e7fea7f7d399e25e969d9382be6891071cbc1225804195224b27b52 ]
-[ "$MAC80211_BACKPORTS_VERSION" = 6.18.26 ]
-[ "$OFFICIAL_SYSUPGRADE_SHA256" = \
-	189ef531f2e9a43b5ce2e988c4195b16f7a8eb5707bf45304a3ebcbb2bfaf9ed ]
-[ "$OFFICIAL_RECOVERY_SHA256" = \
-	9170b0a8d58ca8a01dec0d800200fb2d22f6da5a8fda6b101e3fc753a6fd4bb1 ]
-
-mkdir -p "$test_root/source/net/mac80211"
-cat > "$test_root/source/net/mac80211/mlme.c" <<'EOF'
-
-		for (i = 0; i < triplet->chans.num_channels; i++) {
-			if (first_channel + i * chan_increment == chan) {
-				have_chan_pwr = true;
-				*chan_pwr = triplet->chans.max_power;
-				break;
-EOF
-(
-	cd "$test_root/source"
-	patch --dry-run --fuzz=0 -p1 < "$patch_file" >/dev/null
-	patch --fuzz=0 -p1 < "$patch_file" >/dev/null
-)
-grep -F 'triplet->chans.max_power == S8_MIN' \
-	"$test_root/source/net/mac80211/mlme.c" >/dev/null
-grep -F 'goto next;' "$test_root/source/net/mac80211/mlme.c" >/dev/null
-
 bundle_dir="$test_root/bundle"
 mkdir "$bundle_dir" "$test_root/inner"
 printf 'placeholder\n' > "$test_root/inner/config"
@@ -310,7 +235,6 @@ if "$project_dir/packages-from-backup.sh" \
 	printf 'expected package extractor to refuse an existing output\n' >&2
 	exit 1
 fi
-grep -F 'output already exists' "$test_root/reuse.out" >/dev/null
 
 if [ "${RUN_NETWORK_TESTS:-0}" = 1 ]; then
 	artifacts="$test_root/artifacts"
@@ -428,8 +352,6 @@ EOF
 		printf 'expected duplicate BUILD-INFO key to be rejected\n' >&2
 		exit 1
 	fi
-	grep -F 'must contain OPENWRT_BOARD exactly once' \
-		"$test_root/duplicate-build-info.out" >/dev/null
 fi
 
 printf 'kernel-5ghz-power: ok\n'

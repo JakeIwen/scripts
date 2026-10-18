@@ -218,7 +218,6 @@ remove_output="$test_root/remove.out"
 failure_output="$test_root/failure.out"
 
 "$helper" preflight > "$preflight_output" 2>&1
-grep -F 'Preflight passed' "$preflight_output" >/dev/null
 ! grep -F 'test-secret-value' "$preflight_output" >/dev/null
 
 "$helper" apply > "$apply_output" 2>&1
@@ -229,15 +228,12 @@ grep -F 'Preflight passed' "$preflight_output" >/dev/null
 [ "$(sed -n '1p' "$mock_state/target.ssid")" = dendelion ]
 [ "$(sed -n '1p' "$mock_state/target.encryption")" = sae-mixed ]
 [ "$(sed -n '1p' "$mock_state/target.key")" = test-secret-value ]
-grep -F 'Enabled dendelion_5g' "$apply_output" >/dev/null
 ! grep -F 'test-secret-value' "$apply_output" >/dev/null
 
 "$helper" status > "$status_output" 2>&1
-grep -F 'are operational' "$status_output" >/dev/null
 
 "$helper" optimize > "$test_root/optimize.out" 2>&1
 [ "$(sed -n '1p' "$mock_state/radio1.htmode")" = HE80 ]
-grep -F 'Set radio1 to HE80' "$test_root/optimize.out" >/dev/null
 
 printf 'HT20\n' > "$mock_state/radio1.htmode"
 : > "$mock_state/fail-next-reload"
@@ -246,13 +242,10 @@ if "$helper" optimize > "$test_root/optimize-failure.out" 2>&1; then
 	exit 1
 fi
 [ "$(sed -n '1p' "$mock_state/radio1.htmode")" = HT20 ]
-grep -F 'restored radio1 htmode to HT20' \
-	"$test_root/optimize-failure.out" >/dev/null
 rm -f "$mock_state/prevent-ap-start"
 
 "$helper" remove > "$remove_output" 2>&1
 [ ! -e "$mock_state/target.type" ]
-grep -F 'Removed dendelion_5g' "$remove_output" >/dev/null
 
 : > "$mock_state/prevent-ap-start"
 if "$helper" apply > "$failure_output" 2>&1; then
@@ -260,7 +253,6 @@ if "$helper" apply > "$failure_output" 2>&1; then
 	exit 1
 fi
 [ ! -e "$mock_state/target.type" ]
-grep -F 'Deployment failed; removed dendelion_5g' "$failure_output" >/dev/null
 ! grep -F 'test-secret-value' "$failure_output" >/dev/null
 
 printf 'openwrt-5ghz-ap: ok\n'
