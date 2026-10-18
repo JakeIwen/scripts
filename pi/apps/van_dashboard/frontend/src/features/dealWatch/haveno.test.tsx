@@ -198,7 +198,6 @@ describe('Haveno views', () => {
     expect(screen.getByText('+0.38% vs market')).toBeInTheDocument();
     expect(screen.getByText('+0.88% effective')).toBeInTheDocument();
     expect(screen.getByText('Match')).toBeInTheDocument();
-    expect(screen.getByText('+ means above the Haveno market price.')).toBeInTheDocument();
   });
 
   it('loads an existing watch into the form and submits the edit', async () => {
@@ -215,7 +214,7 @@ describe('Haveno views', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    const threshold = screen.getByLabelText('Alert when ≤ % vs market');
+    const threshold = screen.getByLabelText('Max % above market');
     expect(threshold).toHaveValue(-2);
     expect(screen.getByLabelText('Fee %')).toHaveValue(0.5);
     fireEvent.change(threshold, { target: { value: '-4.25' } });
@@ -242,7 +241,7 @@ describe('Haveno views', () => {
       </ToastProvider>,
     );
 
-    fireEvent.change(screen.getByLabelText('Alert when ≤ % vs market'), {
+    fireEvent.change(screen.getByLabelText('Max % above market'), {
       target: { value: '-1.25' },
     });
     fireEvent.change(screen.getByLabelText('Fee %'), { target: { value: '' } });

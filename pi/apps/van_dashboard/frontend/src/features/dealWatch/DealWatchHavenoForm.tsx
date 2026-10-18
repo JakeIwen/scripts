@@ -37,7 +37,7 @@ function HavenoMarketFields({
   return (
     <>
       <label htmlFor={thresholdId}>
-        <span>Alert when ≤ % vs market</span>
+        <span>Max % above market</span>
         <input
           id={thresholdId}
           type="number"
@@ -210,7 +210,6 @@ export function DealWatchHavenoForm({
         <HavenoMarketFields draft={draft} disabled={disabled} update={update} />
         <HavenoOptionalFields draft={draft} disabled={disabled} update={update} />
       </div>
-      <p className="deal-watch-form__hint">+ means above the Haveno market price.</p>
       <div className="deal-watch-form__actions">
         {editing && (
           <button type="button" className="secondary-button" disabled={disabled} onClick={onCancel}>

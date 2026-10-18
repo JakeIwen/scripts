@@ -207,13 +207,6 @@
   justify-content: flex-end;
 }
 
-.deal-watch-form__hint {
-  margin: 0;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.4;
-}
-
 .deal-watch-schedule h3 {
   margin-bottom: 6px;
 }
