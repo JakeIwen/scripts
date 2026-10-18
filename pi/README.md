@@ -22,7 +22,7 @@ normally live under `/home/pi/scripts/`.
 
 - [React dashboard frontend](docs/dashboard/REACT_DASHBOARD.md)
 - [Hosted projects directory and scanners](docs/dashboard/HOSTED_PROJECTS.md)
-- [Dashboard and COP ALERT](docs/dashboard/COP_ALERT.md)
+- [Dashboard and COP ALERT](docs/dashboard/VAN_DASHBOARD.md)
 - [Movies & TV library](docs/media/VIDEO_LIBRARY.md)
 - [Dashboard testing](docs/dashboard/DASHBOARD_TESTING.md)
 - [vOnStar dashboard controls](docs/dashboard/VONSTAR.md)
