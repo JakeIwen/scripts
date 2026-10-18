@@ -2,6 +2,18 @@
 
 set -u
 
+# The backup lock library needs associative arrays (bash 4+); macOS ships 3.2.
+# Prefer a newer bash when one is installed, otherwise skip with the reason.
+if (( BASH_VERSINFO[0] < 4 )); then
+  for candidate in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+    if [[ -x "$candidate" ]] && "$candidate" -c '(( BASH_VERSINFO[0] >= 4 ))'; then
+      exec "$candidate" "${BASH_SOURCE[0]}" "$@"
+    fi
+  done
+  echo "SKIP: test_policy_reconciliation.sh needs bash 4+ (associative arrays); this is bash $BASH_VERSION" >&2
+  exit 0
+fi
+
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
