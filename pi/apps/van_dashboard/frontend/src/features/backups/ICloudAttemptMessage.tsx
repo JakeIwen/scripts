@@ -13,6 +13,7 @@ interface AttemptMessageProps {
 
 export function ICloudAttemptMessage({ message, phase, kind, id = 'latest' }: AttemptMessageProps) {
   const [open, setOpen] = useState(false);
+  if (phase === 'not due') return null;
   const hasDetails = ['error', 'authentication_required', 'interrupted'].includes(phase);
   const summary = message.startsWith('Attempt failed;') ? 'Attempt failed;' : message;
   return (

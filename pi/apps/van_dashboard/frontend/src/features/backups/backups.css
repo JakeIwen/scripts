@@ -389,7 +389,6 @@
   margin: 1rem 0;
 }
 .backup-icloud__progress small,
-.backup-icloud__note,
 .backup-icloud__history p,
 .backup-icloud__history small {
   color: var(--text-muted, #9bafba);
