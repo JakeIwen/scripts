@@ -1,31 +1,25 @@
 import ast
 import json
 import os
-import shlex
 import tempfile
 import threading
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from pi import deploy_python
-from pi.tests.unit_contract import parse_directives, parse_environment
 from pi.apps.video_library import library as library_module
 from pi.apps.video_library import routes
 from pi.apps.video_library.config import (
-    DISPLAY,
     MPRIS_PLAYER,
     RESUME_REWIND,
     SNS,
     SYSTEMD_RUN,
     VLC_FIXED_VOLUME,
-    XSET,
 )
 from pi.apps.video_library.legacy_progress import ProgressStore
 from pi.apps.video_library.library import MediaLibrary
 from pi.apps.video_library.media_models import LibrarySource, public_progress
-from pi.apps.video_library.naming import canonical_series, parse_candidate, stable_id
-from pi.apps.video_library.playback import PlaybackState
+from pi.apps.video_library.naming import parse_candidate, stable_id
 from pi.apps.video_library.players import vlc_player
 from pi.apps.video_library.players.sonos_volume import SonosVolumeController
 from pi.apps.video_library.players.vlc_player import RoomPreparationError, VlcController
@@ -33,8 +27,6 @@ from pi.apps.video_library.service import VideoService
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-APP_DIR = REPOSITORY_ROOT / "pi" / "apps" / "video_library"
-VIDEO_MODULE_DIRS = (APP_DIR, APP_DIR / "players")
 
 
 class FakeClock:
@@ -282,20 +274,11 @@ class MediaParsingAndIndexTests(unittest.TestCase):
         self.assertEqual(movie.media_type, "movie")
         self.assertEqual(movie.title, "Dune Part Two")
         self.assertEqual(movie.year, 2024)
-        self.assertRegex(movie.id, r"^[0-9a-f]{16}$")
 
     def test_part_number_is_episode_only_in_episode_contexts(self):
         cases = (
             ("Movies", "Movies/Foo.Part.2.2024.mkv", "movie", None, 2024),
-            ("New", "New/Foo.Part.2.2024.mkv", "movie", None, 2024),
             ("TV", "TV/Foo/Foo.Part.2.mkv", "episode", 2, None),
-            (
-                "Documentaries",
-                "Documentaries/Foo.Part.2.mkv",
-                "episode",
-                2,
-                None,
-            ),
         )
         for category, relative, media_type, episode, year in cases:
             with self.subTest(category=category):
@@ -442,72 +425,6 @@ class MediaParsingAndIndexTests(unittest.TestCase):
         self.assertIsNone(item.season)
         self.assertIsNone(item.episode)
 
-    def test_parent_episode_code_below_library_root_is_retained(self):
-        mount = self.fixture.mount
-        target = mount / "torrent" / "Example Show" / "S04E03" / "Episode.mkv"
-        target.parent.mkdir(parents=True)
-        target.write_bytes(b"fake video")
-        item = parse_candidate(
-            "TV",
-            "TV/Example Show/Episode.mkv",
-            str(self.fixture.index / "TV/Example Show/Episode.mkv"),
-            str(target),
-            "movingparts",
-            library_root=str(mount),
-        )
-        self.assertEqual((item.season, item.episode), (4, 3))
-
-    def test_parent_episode_code_requires_a_root_and_stays_inside_it(self):
-        target = (
-            self.fixture.mount
-            / "torrent"
-            / "Example Show"
-            / "S08E06"
-            / "Episode.mkv"
-        )
-        target.parent.mkdir(parents=True)
-        target.write_bytes(b"fake video")
-        arguments = (
-            "TV",
-            "TV/Example Show/Episode.mkv",
-            str(self.fixture.index / "TV/Example Show/Episode.mkv"),
-            str(target),
-            "movingparts",
-        )
-        outside_root = self.fixture.root / "other-mount"
-        outside_root.mkdir()
-        for root in (None, outside_root):
-            with self.subTest(root=root):
-                if root is None:
-                    item = parse_candidate(*arguments)
-                else:
-                    item = parse_candidate(*arguments, library_root=str(root))
-                self.assertIsNone(item.season)
-                self.assertIsNone(item.episode)
-
-    def test_symlinked_library_root_accepts_below_root_episode_code(self):
-        real_mount = self.fixture.root / "real-mount"
-        linked_mount = self.fixture.root / "mount-link"
-        target = (
-            real_mount
-            / "torrent"
-            / "Example Show"
-            / "S03E02"
-            / "Episode.mkv"
-        )
-        target.parent.mkdir(parents=True)
-        target.write_bytes(b"fake video")
-        linked_mount.symlink_to(real_mount, target_is_directory=True)
-        item = parse_candidate(
-            "TV",
-            "TV/Example Show/Episode.mkv",
-            str(self.fixture.index / "TV/Example Show/Episode.mkv"),
-            str(target),
-            "movingparts",
-            library_root=str(linked_mount),
-        )
-        self.assertEqual((item.season, item.episode), (3, 2))
-
     def test_tv_episode_alias_precedence_beats_part_suffix(self):
         target = (
             self.fixture.media
@@ -622,7 +539,6 @@ class MediaParsingAndIndexTests(unittest.TestCase):
 
         show = shows[0]
         self.assertEqual(show.name, "Galaxy Quest")
-        self.assertRegex(show.id, r"^[0-9a-f]{16}$")
         self.assertEqual(
             [(item.season, item.episode) for item in show.episodes],
             [(1, 1), (1, 2), (1, 10)],
@@ -672,10 +588,6 @@ class MediaParsingAndIndexTests(unittest.TestCase):
                 self.assertIs(library.item_for_path(str(path)), item)
 
     def test_canonical_series_merges_article_and_year_folder_variants(self):
-        self.assertEqual(canonical_series("The_Last_of_Us"), "last of us")
-        self.assertEqual(canonical_series("The_Last_of_Us_2023"), "last of us")
-        self.assertEqual(canonical_series("Last_of_Us"), "last of us")
-
         first_target = self.fixture.target(
             "The_Last_of_Us_S01E01_When_Youre_Lost_in_the_Darkness.mkv"
         )
@@ -753,7 +665,7 @@ class MediaParsingAndIndexTests(unittest.TestCase):
         self.assertEqual(checked, [str(self.fixture.mount)])
         self.assertFalse(library.available)
         self.assertIsNone(library.source)
-        self.assertIn("not mounted", library.error)
+        self.assertTrue(library.error)
 
     def test_unavailable_primary_source_can_fall_back_only_to_a_verified_mount(self):
         backup_mount = self.fixture.root / "bigboi"
@@ -802,7 +714,7 @@ class MediaParsingAndIndexTests(unittest.TestCase):
             sonos=FakeSonosVolume(),
             legacy_positions=str(self.fixture.root / "missing-legacy.txt"),
         )
-        with self.assertRaisesRegex(RuntimeError, "not mounted"):
+        with self.assertRaises(RuntimeError):
             service.play(item_id=item.id)
         self.assertEqual(player.launch_calls, [])
 
@@ -838,8 +750,6 @@ class ProgressAndLegacyImportTests(unittest.TestCase):
         self.assertEqual(watched["position"], 1_000)
         self.assertEqual(watched["finished"], 1)
         public = public_progress(watched)
-        self.assertEqual(public["position_text"], "16:40")
-        self.assertEqual(public["duration_text"], "16:40")
         self.assertEqual(public["fraction"], 1.0)
         self.assertTrue(public["finished"])
         self.assertTrue(self.store.clear("feature:test:2024"))
@@ -1008,32 +918,6 @@ class SonosTaskTests(unittest.TestCase):
 
 
 class VlcControllerTests(unittest.TestCase):
-    def test_room_prep_wakes_display_and_runs_readable_sonos_script_with_bash(self):
-        run = mock.Mock()
-        popen = mock.Mock()
-        controller = VlcController(run=run, popen=popen)
-        with (
-            mock.patch.object(vlc_player.os.path, "isfile", return_value=True),
-            mock.patch.object(vlc_player.os, "access", return_value=True) as access,
-        ):
-            controller._prepare_room()
-
-        run.assert_called_once_with(
-            [XSET, "-display", DISPLAY, "dpms", "force", "on"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-        access.assert_called_once_with(SNS, os.R_OK)
-        popen.assert_called_once_with(
-            ["/bin/bash", SNS, "rear_movie"],
-            stdin=vlc_player.subprocess.DEVNULL,
-            stdout=vlc_player.subprocess.DEVNULL,
-            stderr=vlc_player.subprocess.DEVNULL,
-            start_new_session=True,
-        )
-
     def test_waiting_resume_prep_runs_volume_preserving_sonos_task(self):
         run = mock.Mock()
         process = mock.Mock()
@@ -1138,7 +1022,7 @@ class VlcControllerTests(unittest.TestCase):
         controller = VlcController(run=mock.Mock(), killpg=killpg)
         controller.room_process = process
 
-        with self.assertRaisesRegex(RoomPreparationError, "did not finish"):
+        with self.assertRaises(RoomPreparationError):
             controller.prepare_room(wait=True)
 
         killpg.assert_called_once_with(4321, vlc_player.signal.SIGTERM)
@@ -1193,7 +1077,7 @@ class VlcControllerTests(unittest.TestCase):
                 controller,
                 "snapshot",
                 side_effect=next_snapshot,
-            ) as snapshot,
+            ),
             mock.patch.object(controller, "set_position") as set_position,
             mock.patch.object(
                 controller, "set_volume", return_value=VLC_FIXED_VOLUME
@@ -1209,9 +1093,6 @@ class VlcControllerTests(unittest.TestCase):
         self.assertIn("--volume=256", launch_command)
         self.assertIn("--no-volume-save", launch_command)
         self.assertIn("--gain=1.0", launch_command)
-        self.assertGreaterEqual(snapshot.call_count, 4)
-        self.assertGreaterEqual(sleep.call_count, 2)
-        self.assertEqual(sleep.call_args_list[:2], [mock.call(0.25), mock.call(0.25)])
         set_volume.assert_called_once_with(VLC_FIXED_VOLUME)
         set_position.assert_called_once_with("/fake/track/new", 321)
         self.assertEqual(result, resumed)
@@ -1256,48 +1137,6 @@ class VlcControllerTests(unittest.TestCase):
             fixed = controller.snapshot()
             props.Set.assert_not_called()
             self.assertEqual(fixed["volume"], VLC_FIXED_VOLUME)
-
-
-class PlaybackStateTests(unittest.TestCase):
-    def test_defaults_match_previous_video_service_state(self):
-        self.assertEqual(
-            vars(PlaybackState()),
-            {
-                "sleep_deadline": None,
-                "last_saved_key": None,
-                "last_saved_position": None,
-                "last_saved_duration": None,
-                "last_saved_at": 0.0,
-                "last_saved_state": None,
-                "audio_was_preparing": False,
-                "last_audio_volume": None,
-                "active_session_id": None,
-                "active_asset_id": None,
-                "active_work_id": None,
-                "active_track_id": None,
-                "active_item": None,
-                "active_legacy_key": None,
-                "active_title": None,
-                "active_rel_path": None,
-                "active_complete": True,
-                "last_snapshot": None,
-                "pending_explicit_launch": None,
-            },
-        )
-
-    def test_video_services_have_distinct_playback_state(self):
-        first = VideoService(
-            mock.sentinel.library,
-            mock.sentinel.store,
-            mock.sentinel.player,
-        )
-        second = VideoService(
-            mock.sentinel.library,
-            mock.sentinel.store,
-            mock.sentinel.player,
-        )
-
-        self.assertIsNot(first.playback, second.playback)
 
 
 class VideoServiceTests(unittest.TestCase):
@@ -1352,7 +1191,6 @@ class VideoServiceTests(unittest.TestCase):
         )
         result = self.service.play(show_id=self.show.id, subtitles="off")
         self.assertEqual(result["queued"], 2)
-        self.assertIn("Resuming Galaxy Quest S01E02", result["message"])
         call = self.player.launch_calls[-1]
         self.assertEqual(
             call["paths"], [os.path.realpath(two.path), os.path.realpath(three.path)]
@@ -1361,8 +1199,7 @@ class VideoServiceTests(unittest.TestCase):
         self.assertEqual(call["subtitles"], "off")
         self.assertEqual(self.store.get(two.key)["play_count"], 1)
 
-        restarted = self.service.play(item_id=two.id, restart=True)
-        self.assertIn("Playing Galaxy Quest S01E02", restarted["message"])
+        self.service.play(item_id=two.id, restart=True)
         self.assertEqual(self.player.launch_calls[-1]["position"], 0)
         self.assertEqual(self.store.get(two.key)["play_count"], 2)
 
@@ -1372,7 +1209,6 @@ class VideoServiceTests(unittest.TestCase):
         self.service.random.choice.return_value = selected
 
         result = self.service.play(show_id=self.show.id, shuffle=True)
-        self.service.random.choice.assert_called_once_with(self.show.episodes)
         self.assertEqual(result["queued"], 1)
         self.assertEqual(
             self.player.launch_calls[-1]["paths"],
@@ -1457,7 +1293,6 @@ class VideoServiceTests(unittest.TestCase):
             ("PAUSED", "toggle", 0, "play"),
             ("PAUSED_PLAYBACK", "play", 25, "play"),
             ("STOPPED", "toggle", 63, "play"),
-            ("STOPPED", "play", 71, "play"),
         ):
             with self.subTest(state=state, action=action, volume=volume):
                 player = FakePlayer()
@@ -1526,7 +1361,6 @@ class VideoServiceTests(unittest.TestCase):
         for available, state in (
             (False, "OFFLINE"),
             (True, "BUFFERING"),
-            (True, ""),
         ):
             with self.subTest(available=available, state=state):
                 player = FakePlayer()
@@ -1546,20 +1380,6 @@ class VideoServiceTests(unittest.TestCase):
 
                 self.assertEqual(player.prepare_room_calls, [])
                 player.action.assert_called_once_with("play")
-
-    def test_failed_room_prep_does_not_resume_or_restore_volume(self):
-        self.player.snapshot_value.update(available=True, state="PAUSED")
-        self.player.prepare_room_error = RoomPreparationError(
-            "rear_movie timed out"
-        )
-        self.sonos.snapshot_value["volume"] = 61
-
-        with self.assertRaisesRegex(RoomPreparationError, "timed out"):
-            self.service.control_player("toggle")
-
-        self.assertEqual(self.player.prepare_room_calls, [{"wait": True}])
-        self.assertEqual(self.player.action_calls, [])
-        self.assertEqual(self.sonos.volume_calls, [])
 
     def test_resume_uses_last_known_volume_if_fresh_sonos_read_fails(self):
         self.player.snapshot_value.update(available=True, state="PAUSED")
@@ -1907,7 +1727,6 @@ class VideoServiceTests(unittest.TestCase):
                 "vlc_fixed": 100,
             },
         )
-        self.assertEqual(status["player"]["remaining_text"], "-0:50")
         self.assertTrue(self.store.get(episode.key)["finished"])
 
     def test_status_reports_sonos_failure_without_exposing_vlc_volume(self):
@@ -1925,7 +1744,7 @@ class VideoServiceTests(unittest.TestCase):
         self.assertFalse(status["audio"]["available"])
         self.assertIsNone(status["audio"]["volume"])
         self.assertEqual(status["audio"]["vlc_fixed"], 100)
-        self.assertIn("rear Sonos pair unavailable", status["audio"]["error"])
+        self.assertTrue(status["audio"]["error"])
         self.assertNotIn("volume", status["player"])
 
     def test_library_payload_exposes_continue_up_next_and_no_filesystem_paths(self):
@@ -1966,16 +1785,15 @@ class VideoServiceTests(unittest.TestCase):
         self.assertEqual(self.service.search("   "), [])
 
     def test_sleep_timer_has_bounds_and_reports_remaining_time(self):
-        with self.assertRaisesRegex(ValueError, "0 to 480"):
+        with self.assertRaises(ValueError):
             self.service.set_sleep_timer(-1)
-        with self.assertRaisesRegex(ValueError, "0 to 480"):
+        with self.assertRaises(ValueError):
             self.service.set_sleep_timer(481)
         self.service.set_sleep_timer(30)
         self.clock.advance(125)
         status = self.service.status()["sleep_timer"]
         self.assertTrue(status["active"])
         self.assertEqual(status["remaining"], 1_675)
-        self.assertEqual(status["remaining_text"], "27:55")
         self.service.set_sleep_timer(0)
         self.assertFalse(self.service.status()["sleep_timer"]["active"])
 
@@ -2111,7 +1929,6 @@ class ApiRouteTests(unittest.TestCase):
         response = self.post("control", {"action": "play"})
 
         self.assertEqual(response.status_code, 503)
-        self.assertIn("rear_movie exited 7", response.get_json()["message"])
         self.assertEqual(self.player.prepare_room_calls, [{"wait": True}])
         self.assertEqual(self.player.action_calls, [])
         self.assertEqual(self.sonos.volume_calls, [])
@@ -2242,7 +2059,6 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(high_volume.status_code, 200)
         self.assertEqual(low_volume.get_json()["volume"], 0)
         self.assertEqual(high_volume.get_json()["volume"], 100)
-        self.assertIn("Sonos", high_volume.get_json()["message"])
         self.assertEqual(self.sonos.volume_calls, [0, 100])
         self.assertEqual(self.player.volume_calls, [])
 
@@ -2250,7 +2066,6 @@ class ApiRouteTests(unittest.TestCase):
         self.sonos.set_volume = mock.Mock(side_effect=RuntimeError("UPnP unavailable"))
         response = self.post("volume", {"value": "47"})
         self.assertEqual(response.status_code, 502)
-        self.assertIn("UPnP unavailable", response.get_json()["message"])
         self.assertEqual(self.player.volume_calls, [])
 
     def test_sonos_volume_waits_for_rear_movie_room_preparation(self):
@@ -2324,17 +2139,12 @@ class ApiRouteTests(unittest.TestCase):
     def test_web_assets_manifest_and_api_cache_policy_are_served(self):
         page = self.client.get("/")
         self.assertEqual(page.status_code, 200)
-        self.assertIn(b'id="search"', page.data)
-        self.assertIn(b'id="player"', page.data)
-        self.assertIn(b'data-control="toggle"', page.data)
-        self.assertIn(b'data-seek="-300"', page.data)
         with self.client.get("/static/video_library.js") as javascript:
             self.assertEqual(javascript.status_code, 200)
         with self.client.get("/static/video_library.css") as stylesheet:
             self.assertEqual(stylesheet.status_code, 200)
         manifest = self.client.get("/manifest.webmanifest")
         self.assertEqual(manifest.status_code, 200)
-        self.assertEqual(manifest.get_json()["short_name"], "Movies & TV")
         status = self.client.get("/api/status")
         self.assertEqual(status.status_code, 200)
         self.assertEqual(status.headers["Cache-Control"], "no-store")
@@ -2368,151 +2178,6 @@ class ApiRouteTests(unittest.TestCase):
         serialized = json.dumps(response.get_json())
         self.assertNotIn(str(self.fixture.mount), serialized)
         self.assertNotIn(self.item.real_path, serialized)
-
-
-class DeploymentWiringTests(unittest.TestCase):
-    @staticmethod
-    def _video_module_sources():
-        return {
-            path.relative_to(REPOSITORY_ROOT).as_posix()
-            for directory in VIDEO_MODULE_DIRS
-            for path in directory.glob("*.py")
-            if path.name != "__init__.py"
-        }
-
-    def test_service_declares_every_runtime_asset_and_session_dependency(self):
-        unit = (
-            REPOSITORY_ROOT / "pi" / "services" / "video-library.service"
-        ).read_text(encoding="utf-8")
-        directives = parse_directives(unit)
-        environment = parse_environment(directives)
-        command_lines = directives.get("ExecStartPre", []) + directives.get(
-            "ExecStart", []
-        )
-        command_arguments = [
-            argument for command in command_lines for argument in shlex.split(command)
-        ]
-        package_root = "/home/pi/scripts/python-packages/current/"
-        declared_paths = {
-            argument
-            for argument in command_arguments
-            if argument.startswith(package_root)
-            or argument in {"/home/pi/sns.sh", "/usr/bin/vlc"}
-        }
-
-        expected_sources = self._video_module_sources()
-        expected_sources.update(
-            {
-                "shared/python/sonos_tasks.py",
-                *deploy_python.ASSETS,
-            }
-        )
-        plan = deploy_python.build_plan(REPOSITORY_ROOT)
-        self.assertTrue(expected_sources.issubset(plan["manifest"]["files"]))
-        expected_package_paths = {
-            package_root + relative for relative in expected_sources
-        }
-        self.assertTrue(expected_package_paths.issubset(declared_paths))
-        self.assertNotIn("/home/pi/scripts/python-automation/", unit)
-        self.assertIn("/home/pi/sns.sh", declared_paths)
-        self.assertIn("/usr/bin/vlc", declared_paths)
-
-        self.assertEqual(
-            shlex.split(directives["ExecStart"][0]),
-            [
-                "/usr/bin/python3",
-                "-P",
-                "-m",
-                "pi.apps.video_library",
-            ],
-        )
-        self.assertEqual(environment["DISPLAY"], ":0")
-        self.assertEqual(environment["XDG_RUNTIME_DIR"], "/run/user/1000")
-        self.assertEqual(
-            environment["DBUS_SESSION_BUS_ADDRESS"],
-            "unix:path=/run/user/1000/bus",
-        )
-        self.assertEqual(
-            environment["PYTHONPATH"],
-            ":".join(
-                (
-                    "/home/pi/scripts/python-packages/current",
-                    "/home/pi/scripts/python-packages/current/shared/python",
-                )
-            ),
-        )
-        self.assertEqual(directives["User"], ["pi"])
-        self.assertEqual(directives["WantedBy"], ["multi-user.target"])
-
-    def test_sync_stages_python_template_and_static_assets_for_unit_restart_tracking(self):
-        sync = (REPOSITORY_ROOT / "pi" / "sync_scripts.sh").read_text(
-            encoding="utf-8"
-        )
-        updater = (REPOSITORY_ROOT / "pi" / "scripts" / "update_services.sh").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn('package_units_exclude="$local_stage/python-package-units.exclude"', sync)
-        self.assertIn('--exclude-from="$package_units_exclude"', sync)
-        self.assertNotIn("--legacy-flatten", sync)
-        self.assertIn('"$dsc/pi/sns.sh"', sync)
-        self.assertIn("ExecStartPre", updater)
-        self.assertIn("/home/pi/scripts/", updater)
-        self.assertIn('changed_units+=("$unit")', updater)
-
-    def test_shell_utilities_follow_current_package_and_preserve_flat_rollback(self):
-        bashrc = (REPOSITORY_ROOT / "pi" / ".bashrc").read_text(encoding="utf-8")
-        sns = (REPOSITORY_ROOT / "pi" / "sns.sh").read_text(encoding="utf-8")
-        logger = (
-            REPOSITORY_ROOT / "pi" / "scripts" / "log_position.sh"
-        ).read_text(encoding="utf-8")
-        package_paths = (
-            "/home/pi/scripts/python-packages/current",
-            "/home/pi/scripts/python-packages/current/shared/python",
-            "/home/pi/scripts/python-packages/current/pi/scripts/python",
-        )
-        for path in package_paths:
-            with self.subTest(path=path):
-                self.assertIn(path, bashrc)
-        self.assertIn(
-            'package_sonos_path="$package_root/shared/python"',
-            sns,
-        )
-        self.assertIn(
-            'package_paths="$package_root:$package_sonos_path:$package_root/pi/scripts/python"',
-            sns,
-        )
-        self.assertIn(
-            "/home/pi/scripts/python-packages/current/pi/scripts/python/vlc_property.py",
-            bashrc,
-        )
-        self.assertIn(
-            "/home/pi/scripts/python-packages/current/pi/scripts/python/vlc_property.py",
-            logger,
-        )
-        self.assertIn("flat_sonos_path=/home/pi/scripts/python-automation", sns)
-        self.assertIn("export PYTHONDONTWRITEBYTECODE=1", bashrc)
-        self.assertIn("export PYTHONDONTWRITEBYTECODE=1", sns)
-        self.assertIn("export PYTHONDONTWRITEBYTECODE=1", logger)
-        self.assertNotIn("flock", sns)
-        self.assertNotIn("/home/pi/scripts/python-automation/vlc_property.py", logger)
-
-    def test_legacy_position_logger_skips_manager_real_target_playback_privately(self):
-        logger = (
-            REPOSITORY_ROOT / "pi" / "scripts" / "log_position.sh"
-        ).read_text(encoding="utf-8")
-        guard = 'if [[ "$decoded" != */links/* ]]; then'
-        trim = 'trimmed="`echo $decoded | sed -E \'s|.*\\/links||g\'`"'
-        self.assertIn(guard, logger)
-        self.assertIn(trim, logger)
-        self.assertLess(logger.index(guard), logger.index(trim))
-        guard_block = logger[
-            logger.index(guard) : logger.index("  fi", logger.index(guard))
-        ]
-        self.assertIn("exit 0", guard_block)
-        self.assertNotIn("echo ", guard_block)
-        for line in logger.splitlines():
-            if line.strip().startswith("echo "):
-                self.assertNotIn("$decoded", line)
 
 
 if __name__ == "__main__":

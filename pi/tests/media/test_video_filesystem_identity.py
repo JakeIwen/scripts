@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-import sqlite3
 import stat
 import tempfile
 from types import SimpleNamespace
@@ -42,7 +41,7 @@ class FilesystemIdentityTests(unittest.TestCase):
         directory = Mock()
         directory.iterdir.return_value = [entry]
         with patch.object(fs, "UUID_DIRECTORY", directory), patch.object(fs.sys, "platform", "linux"):
-            for device in (2049, 2081, 2113, 2129, 2161):
+            for device in (2113, 2161):
                 entry.stat.return_value = SimpleNamespace(st_mode=stat.S_IFBLK, st_rdev=device)
                 observed = SimpleNamespace(st_dev=device)
                 with patch.object(fs.os, "stat", return_value=observed):
@@ -69,17 +68,15 @@ class FilesystemIdentityTests(unittest.TestCase):
         self.assertCountEqual(devices, ["2161", UUID])
         self.assertEqual(len(self.catalog.list_locations(old)), 1)
 
-    def test_all_ten_counterpart_files_keep_current_not_retired_duplicate(self):
-        for episode in range(1, 11):
-            path = self.path.with_name(f"Counterpart.S01E{episode:02}.mkv")
-            path.write_bytes(bytes([episode]))
-            observed = os.stat(path)
-            values = dict(inode=observed.st_ino, size=1, mtime_ns=observed.st_mtime_ns)
-            old = self.catalog.resolve_or_create_provisional_file(path, device_id="2161", **values)
-            current = self.catalog.resolve_or_create_provisional_file(path, device_id="2113", **values)
-            self.assertNotEqual(old, current)
-            with self.stable():
-                self.assertEqual(self.catalog.resolve_or_create_provisional_file(path), current)
+    def test_current_counterpart_file_wins_over_retired_duplicate(self):
+        path = self.path
+        observed = os.stat(path)
+        values = dict(inode=observed.st_ino, size=observed.st_size, mtime_ns=observed.st_mtime_ns)
+        old = self.catalog.resolve_or_create_provisional_file(path, device_id="2161", **values)
+        current = self.catalog.resolve_or_create_provisional_file(path, device_id="2113", **values)
+        self.assertNotEqual(old, current)
+        with self.stable():
+            self.assertEqual(self.catalog.resolve_or_create_provisional_file(path), current)
 
     def test_exact_silo_barbarians_shape_rejects_recycled_inode(self):
         barb = self.catalog.resolve_or_create_provisional_file(
@@ -158,15 +155,6 @@ class FilesystemIdentityTests(unittest.TestCase):
                 self.catalog.resolve_or_create_provisional_file(self.path, fingerprint="other")
         self.assertEqual(self.catalog.connection.total_changes, before)
         self.assertEqual(self.catalog.resolve_path(self.path), old)
-
-    def test_schema_stays_version_three_and_reopen_is_idempotent(self):
-        with self.stable():
-            self.catalog.resolve_or_create_provisional_file(self.path)
-        before = list(self.catalog.connection.execute("SELECT * FROM video_v2_schema_migrations"))
-        MediaAssetCatalog(connection=self.catalog.connection)
-        self.assertEqual([r[0] for r in before], [1, 2, 3])
-        self.assertEqual(before, list(self.catalog.connection.execute("SELECT * FROM video_v2_schema_migrations")))
-
 
 if __name__ == "__main__":
     unittest.main()

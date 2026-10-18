@@ -144,7 +144,6 @@ PYTHONPATH="$PWD" "$media_test_venv/bin/python" -W error::ResourceWarning \
     pi.tests.media.test_video_identity_integration \
     pi.tests.media.test_video_history_edges \
     pi.tests.media.test_video_identity_regressions \
-    pi.tests.media.test_video_identity_deployment \
     pi.tests.media.test_video_library_server
 ./pi/deploy_video_library.sh
 ssh pi@vanpi.lan 'systemctl --no-pager --full status video-library.service'

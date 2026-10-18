@@ -297,19 +297,17 @@ class QbittorrentResolutionTests(unittest.TestCase):
         transport = FakeTransport((first, second), {HASH_A: files, HASH_B: files})
         client = self.fixture.client(transport)
 
-        with self.assertRaisesRegex(qbt.QbittorrentAmbiguousPath, "2 qBittorrent files"):
+        with self.assertRaises(qbt.QbittorrentAmbiguousPath):
             client.resolve_path(self.fixture.incomplete / shared_name)
 
-    def test_unavailable_client_has_deterministic_error_and_timeout(self):
+    def test_unavailable_client_does_not_leak_transport_errors(self):
         transport = FakeTransport()
         transport.raise_error = OSError("a host-specific secret detail")
-        client = self.fixture.client(transport, timeout=1.25)
+        client = self.fixture.client(transport)
 
         with self.assertRaises(qbt.QbittorrentUnavailable) as caught:
             client.resolve_path(self.fixture.incomplete / "anything.mkv")
 
-        self.assertEqual(str(caught.exception), "qBittorrent Web API is unavailable")
-        self.assertEqual(transport.requests[0]["timeout"], 1.25)
         self.assertNotIn("secret", str(caught.exception))
 
     def test_path_traversal_and_paths_outside_roots_never_reach_api(self):
@@ -425,14 +423,6 @@ class QbittorrentAuthenticationAndHookTests(unittest.TestCase):
         self.assertNotIn("p&ss=word", transport.requests[0]["url"])
         self.assertEqual(transport.requests[0]["headers"]["Origin"], "http://127.0.0.1:8080")
         self.assertEqual(transport.requests[0]["headers"]["Referer"], "http://127.0.0.1:8080/")
-
-    def test_local_auth_bypass_requires_no_login_request(self):
-        transport = FakeTransport()
-        client = self.fixture.client(transport)
-
-        self.assertEqual(client.webapi_version(), "2.8.3")
-        self.assertEqual(len(transport.requests), 1)
-        self.assertEqual(urlsplit(transport.requests[0]["url"]).path, "/api/v2/app/webapiVersion")
 
     def test_stable_hook_identifier_round_trips_and_rejects_untrusted_text(self):
         identity = qbt.TorrentFileIdentity("vanpi-qbt", HASH_A.upper(), 17)

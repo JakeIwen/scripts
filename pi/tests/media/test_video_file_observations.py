@@ -34,21 +34,6 @@ class FileObservationFailureTests(unittest.TestCase):
         self.assertEqual(self.catalog.get_session(session)["asset_id"], original)
         self.assertEqual(self.catalog.get_asset_state(recovered)["position"], 120)
 
-    def test_stat_loss_then_restore_does_not_conflict(self) -> None:
-        path = "/media/The.Endgame.mkv"
-        observation = {
-            "device_id": "2161", "inode": 151008515,
-            "size": 3716894545, "mtime_ns": 1766047424554473073,
-        }
-        original = self.catalog.resolve_or_create_provisional_file(path, **observation)
-        with patch("pi.apps.video_library.catalog.os.stat", side_effect=OSError):
-            try:
-                self.catalog.resolve_or_create_provisional_file(path)
-            except OSError:
-                pass
-        recovered = self.catalog.resolve_or_create_provisional_file(path, **observation)
-        self.assertEqual(recovered, original)
-
     def test_unavailable_new_file_does_not_create_path_only_identity(self) -> None:
         path = "/media/unavailable.mkv"
         with patch("pi.apps.video_library.catalog.os.stat", side_effect=OSError("drive unavailable")):

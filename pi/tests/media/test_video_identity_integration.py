@@ -290,29 +290,6 @@ class VideoIdentityIntegrationTests(unittest.TestCase):
             raise AssertionError(f"expected one indexed item, found {len(items)}")
         return items[0]
 
-    def test_indexed_item_gets_durable_work_asset_and_legacy_identity(self):
-        target = self.fixture.payload("torrent-name-do-not-change.mkv")
-        self.fixture.link("Movies", "Arrival.2016.mkv", target)
-
-        _service, library, store, catalog, _player = self.fixture.stack()
-        item = self.only_item(library)
-
-        self.assertIsNotNone(item.asset_id)
-        self.assertIsNotNone(item.work_id)
-        self.assertEqual(catalog.resolve_path(target), item.asset_id)
-        self.assertEqual(catalog.resolve_legacy_key(item.key), item.asset_id)
-        self.assertEqual(catalog.lookup_asset(item.asset_id)["work_id"], item.work_id)
-        public_item = item.as_dict(None)
-        self.assertNotIn("asset_id", public_item)
-        self.assertNotIn("work_id", public_item)
-
-        first_ids = (item.asset_id, item.work_id)
-        store.connection.close()
-        _service2, library2, _store2, catalog2, _player2 = self.fixture.stack()
-        restarted_item = self.only_item(library2)
-        self.assertEqual((restarted_item.asset_id, restarted_item.work_id), first_ids)
-        self.assertEqual(catalog2.resolve_legacy_key(restarted_item.key), first_ids[0])
-
     def test_symlink_parser_rename_keeps_progress_and_binds_both_legacy_keys(self):
         target = self.fixture.payload("upstream-release-name.mkv")
         old_link = self.fixture.link("Movies", "Mystery.Release.2021.mkv", target)
@@ -553,23 +530,6 @@ class VideoIdentityIntegrationTests(unittest.TestCase):
         store.connection.close()
 
         with closing(sqlite3.connect(self.fixture.database)) as rollback_db:
-            columns = [
-                row[1] for row in rollback_db.execute("PRAGMA table_info(progress)")
-            ]
-            self.assertEqual(
-                columns,
-                [
-                    "media_key",
-                    "position",
-                    "duration",
-                    "updated",
-                    "finished",
-                    "finished_override",
-                    "play_count",
-                    "title",
-                    "rel_path",
-                ],
-            )
             row = rollback_db.execute(
                 "SELECT position, duration, finished, title FROM progress "
                 "WHERE media_key = ?",

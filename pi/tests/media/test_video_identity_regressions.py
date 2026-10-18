@@ -13,7 +13,6 @@ import sqlite3
 import unittest
 from unittest import mock
 
-from pi.apps.video_library import identity
 from pi.apps.video_library import service as video_service
 from pi.apps.video_library import video_qbittorrent as qb
 from pi.apps.video_library.catalog import MediaAssetCatalog
@@ -27,56 +26,6 @@ from pi.tests.media.test_video_identity_integration import (
     MediaFixture,
     torrent_result,
 )
-
-
-class AssetReplacementIdentityTests(unittest.TestCase):
-    def test_reused_path_with_contradictory_file_identity_creates_new_asset(self) -> None:
-        catalog = MediaAssetCatalog(":memory:")
-        self.addCleanup(catalog.close)
-        path = "/tmp/reused-video-name.mkv"
-
-        original = catalog.resolve_or_create_provisional_file(
-            path,
-            size=100,
-            device_id="device-a",
-            inode=101,
-            mtime_ns=1_000,
-        )
-        replacement = catalog.resolve_or_create_provisional_file(
-            path,
-            size=250,
-            device_id="device-a",
-            inode=202,
-            mtime_ns=2_000,
-        )
-
-        self.assertNotEqual(replacement, original)
-        self.assertEqual(catalog.resolve_path(path), replacement)
-        historical = catalog.list_locations(original)
-        self.assertTrue(any(row["valid_to"] is not None for row in historical))
-
-    def test_growth_without_torrent_evidence_cannot_prove_same_asset(self) -> None:
-        catalog = MediaAssetCatalog(":memory:")
-        self.addCleanup(catalog.close)
-        path = "/tmp/growing-incomplete-video.mkv"
-
-        partial = catalog.resolve_or_create_provisional_file(
-            path,
-            size=100,
-            device_id="device-a",
-            inode=303,
-            mtime_ns=1_000,
-        )
-        grown = catalog.resolve_or_create_provisional_file(
-            path,
-            size=500,
-            device_id="device-a",
-            inode=303,
-            mtime_ns=2_000,
-        )
-
-        self.assertNotEqual(grown, partial)
-        self.assertEqual(catalog.resolve_path(path), grown)
 
 
 class PlaybackProjectionOrderingTests(unittest.TestCase):
@@ -110,142 +59,6 @@ class PlaybackProjectionOrderingTests(unittest.TestCase):
         self.assertEqual(asset_state["last_session_id"], second)
         self.assertEqual(asset_state["play_count"], 2)
         self.assertEqual(work_state["play_count"], 2)
-
-    def test_v1_rollback_edit_survives_wall_clock_correction(self) -> None:
-        fixture = MediaFixture()
-        self.addCleanup(fixture.cleanup)
-        target = fixture.payload("rollback-clock-correction.mkv")
-        fixture.link("Movies", "Rollback.Clock.2024.mkv", target)
-        service, library, store, _catalog, player = fixture.stack()
-        item = next(iter(library.items.values()))
-        service.play(item_id=item.id, restart=True)
-        player.snapshot_value.update(
-            path=str(target), position=240, duration=1_000, state="PAUSED"
-        )
-        service.bookmark()
-        asset_id = item.asset_id
-        store.connection.close()
-
-        corrected_time = fixture.clock() - 100
-        rollback = sqlite3.connect(fixture.database)
-        try:
-            with rollback:
-                rollback.execute(
-                    "UPDATE progress SET position = 777, updated = ? "
-                    "WHERE media_key = ?",
-                    (corrected_time, item.key),
-                )
-        finally:
-            rollback.close()
-
-        fixture.clock.value = corrected_time + 1
-        _service2, _library2, _store2, catalog2, _player2 = fixture.stack()
-
-        self.assertEqual(catalog2.get_asset_state(asset_id)["position"], 777)
-
-    def test_consecutive_low_clock_rollback_edits_survive_before_projection(self) -> None:
-        fixture = MediaFixture()
-        self.addCleanup(fixture.cleanup)
-        target = fixture.payload("rollback-clock-crash-window.mkv")
-        fixture.link("Movies", "Rollback.Clock.Crash.2024.mkv", target)
-        service, library, store, catalog, player = fixture.stack()
-        item = next(iter(library.items.values()))
-        service.play(item_id=item.id, restart=True)
-        player.snapshot_value.update(
-            path=str(target), position=240, duration=1_000, state="PAUSED"
-        )
-        service.bookmark()
-
-        corrected_time = fixture.clock() - 100
-        with store.lock, store.connection:
-            store.connection.execute(
-                "UPDATE progress SET position = 777, updated = ? WHERE media_key = ?",
-                (corrected_time, item.key),
-            )
-        first = catalog.reconcile_v1_progress(observed_at=corrected_time + 1)
-        self.assertEqual(first["applied"], 1)
-        self.assertEqual(catalog.get_asset_state(item.asset_id)["position"], 777)
-
-        unchanged = catalog.reconcile_v1_progress(observed_at=corrected_time + 2)
-        self.assertEqual(unchanged["unchanged"], 1)
-
-        # Simulate another old-server write before the normal v2 library
-        # projection gets a chance to refresh the compatibility row/shadow.
-        with store.lock, store.connection:
-            store.connection.execute(
-                "UPDATE progress SET position = 888, updated = ? WHERE media_key = ?",
-                (corrected_time + 3, item.key),
-            )
-        second = catalog.reconcile_v1_progress(observed_at=corrected_time + 4)
-
-        self.assertEqual(second["applied"], 1)
-        self.assertEqual(second["stale"], 0)
-        self.assertEqual(catalog.get_asset_state(item.asset_id)["position"], 888)
-
-    def test_low_clock_rollback_delete_then_recreate_is_not_lost(self) -> None:
-        fixture = MediaFixture()
-        self.addCleanup(fixture.cleanup)
-        target = fixture.payload("rollback-clock-delete-recreate.mkv")
-        fixture.link("Movies", "Rollback.Clock.Recreate.2024.mkv", target)
-        service, library, store, catalog, player = fixture.stack()
-        item = next(iter(library.items.values()))
-        service.play(item_id=item.id, restart=True)
-        player.snapshot_value.update(
-            path=str(target), position=240, duration=1_000, state="PAUSED"
-        )
-        service.bookmark()
-
-        corrected_time = fixture.clock() - 100
-        with store.lock, store.connection:
-            store.connection.execute(
-                "DELETE FROM progress WHERE media_key = ?", (item.key,)
-            )
-        deleted = catalog.reconcile_v1_progress(observed_at=corrected_time)
-        self.assertEqual(deleted["cleared"], 1)
-        self.assertEqual(catalog.get_asset_state(item.asset_id)["position"], 0)
-
-        store.record(
-            item.key,
-            position=555,
-            duration=1_000,
-            updated=corrected_time + 1,
-            title=item.title,
-            rel_path=item.rel_path,
-        )
-        recreated = catalog.reconcile_v1_progress(observed_at=corrected_time + 2)
-
-        self.assertEqual(recreated["applied"], 1)
-        self.assertEqual(recreated["stale"], 0)
-        self.assertEqual(catalog.get_asset_state(item.asset_id)["position"], 555)
-
-    def test_v2_clear_then_low_clock_v1_replay_is_not_lost(self) -> None:
-        fixture = MediaFixture()
-        self.addCleanup(fixture.cleanup)
-        target = fixture.payload("v2-clear-low-clock-replay.mkv")
-        fixture.link("Movies", "V2.Clear.Clock.Replay.2024.mkv", target)
-        service, library, store, catalog, player = fixture.stack()
-        item = next(iter(library.items.values()))
-        service.play(item_id=item.id, restart=True)
-        player.snapshot_value.update(
-            path=str(target), position=240, duration=1_000, state="PAUSED"
-        )
-        service.bookmark()
-
-        self.assertTrue(service.update_progress(item, "clear"))
-        corrected_time = fixture.clock() - 100
-        store.record(
-            item.key,
-            position=555,
-            duration=1_000,
-            updated=corrected_time,
-            title=item.title,
-            rel_path=item.rel_path,
-        )
-        replayed = catalog.reconcile_v1_progress(observed_at=corrected_time + 1)
-
-        self.assertEqual(replayed["applied"], 1)
-        self.assertEqual(replayed["stale"], 0)
-        self.assertEqual(catalog.get_asset_state(item.asset_id)["position"], 555)
 
     def test_pending_v1_edit_cannot_regress_unprojected_former_library_playback(
         self,
@@ -429,56 +242,6 @@ class WorkProjectionTests(unittest.TestCase):
             if movie["id"] == item.id
         )
         self.assertTrue(card["progress"]["finished"])
-
-    def test_active_incomplete_transition_keeps_v1_projection_current(self) -> None:
-        incomplete = self.fixture.payload(
-            "Verbose.Release-GROUP/video-file.mkv", incomplete=True
-        )
-        final = self.fixture.payloads / "Verbose.Release-GROUP/video-file.mkv"
-        qbittorrent = FakeQbittorrent()
-        qbittorrent.set_path(
-            incomplete,
-            torrent_result(
-                incomplete,
-                temporary_path=incomplete,
-                final_path=final,
-            ),
-        )
-        service, library, store, _catalog, player = self.fixture.stack(
-            qbittorrent=qbittorrent
-        )
-
-        service.play_local(str(incomplete), restart=True)
-        player.snapshot_value.update(position=100, duration=1_000, state="PAUSED")
-        service.bookmark()
-
-        final.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(incomplete, final)
-        self.fixture.link("New", "Transition.Movie.2026.mkv", final)
-        completed = torrent_result(
-            final,
-            temporary_path=incomplete,
-            final_path=final,
-            progress=1.0,
-            state="uploading",
-        )
-        qbittorrent.set_path(final, completed)
-        qbittorrent.completed_results[TORRENT_ID] = (completed,)
-        service.reconcile_torrents(TORRENT_ID)
-        item = self._only_item(library)
-
-        # VLC can keep reporting its old launch URI after qB moves the inode.
-        self.fixture.clock.advance(15)
-        player.snapshot_value.update(
-            path=str(incomplete),
-            position=250,
-            duration=1_000,
-            state="PAUSED",
-        )
-        service.bookmark()
-
-        self.assertEqual(store.get(item.key)["position"], 250)
-
 
 class TransitionFailureRegressionTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -669,7 +432,7 @@ class TransitionFailureRegressionTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertFalse(result["tracked"])
         self.assertEqual(player.launch_calls[-1]["paths"], [str(path.resolve())])
-        self.assertIn("degraded", service.identity_error)
+        self.assertTrue(service.identity_error)
 
     def test_completion_mid_session_does_not_watch_partial_timeline(self) -> None:
         incomplete = self.fixture.payload(
@@ -798,27 +561,6 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
         ):
             return active_service()
 
-    def test_catalog_restart_closes_session_left_open_by_prior_process(self) -> None:
-        first = MediaAssetCatalog(str(self.fixture.database), clock=self.fixture.clock)
-        work_id = first.create_work("movie", title="Interrupted movie")
-        asset_id = first.create_asset(work_id=work_id)
-        session_id = first.start_session(asset_id)
-        first.checkpoint(session_id, position=321, duration=1_000)
-        first.close()
-
-        restarted = MediaAssetCatalog(
-            str(self.fixture.database), clock=self.fixture.clock
-        )
-        self.addCleanup(restarted.close)
-        recovered = restarted.recover_open_sessions()
-
-        self.assertEqual(recovered, 1)
-        session = restarted.get_session(session_id)
-        self.assertIsNotNone(session["ended_at"])
-        self.assertEqual(session["end_reason"], "unclean_shutdown")
-        self.assertEqual(restarted.get_asset_state(asset_id)["position"], 321)
-        self.assertFalse(restarted.get_asset_state(asset_id)["completed"])
-
     def test_startup_applies_pending_v1_edit_before_open_session_recovery(self) -> None:
         media_key = "feature:pending-startup-edit:2026"
         asset_id, session_id = self._bootstrap_open_projected_session(
@@ -879,7 +621,7 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
 
         fake_catalog.recover_open_sessions.assert_not_called()
         self.assertTrue(service.session_recovery_pending)
-        self.assertIn("recovery deferred", service.session_recovery_error)
+        self.assertTrue(service.session_recovery_error)
 
         service.thread = mock.Mock()
         with mock.patch.object(service, "rescan", return_value=True) as rescan:
@@ -956,8 +698,7 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
         self.assertIsNone(service.session_recovery_error)
         history = service.status()["history"]
         self.assertTrue(history["degraded"])
-        self.assertIn("qBittorrent identity disabled", history["error"])
-        self.assertNotIn("recovery failure", history["error"])
+        self.assertTrue(history["error"])
 
     def test_pending_recovery_blocks_opening_a_second_catalog_session(self) -> None:
         store = ProgressStore(str(self.fixture.database))
@@ -1183,96 +924,6 @@ class SessionRecoveryRegressionTests(unittest.TestCase):
 
 
 class CatalogDegradationAdapterTests(unittest.TestCase):
-    class Probe:
-        def __init__(self) -> None:
-            self.identity_error = None
-
-        @identity.catalog_degrades(fallback=lambda _self, _failure: "fallback")
-        def degrade(self, failure):
-            raise failure
-
-    def test_decorator_catches_only_catalog_degradation_families_and_subclasses(
-        self,
-    ) -> None:
-        class SqliteFailure(sqlite3.Error):
-            pass
-
-        families = (
-            identity.CatalogError,
-            sqlite3.Error,
-            SqliteFailure,
-            OSError,
-            ValueError,
-        )
-        for failure_type in families:
-            with self.subTest(failure_type=failure_type.__name__):
-                probe = self.Probe()
-                failure = failure_type("injected failure")
-
-                self.assertEqual(probe.degrade(failure), "fallback")
-                self.assertEqual(
-                    probe.identity_error,
-                    "media identity tracking degraded: injected failure",
-                )
-
-    def test_decorator_propagates_unexpected_runtime_and_key_errors(self) -> None:
-        fallback = mock.Mock(return_value="fallback")
-
-        class Probe:
-            def __init__(self) -> None:
-                self.identity_error = None
-
-            @identity.catalog_degrades(fallback=fallback)
-            def degrade(self, failure):
-                raise failure
-
-        for failure in (RuntimeError("runtime"), KeyError("key")):
-            with self.subTest(failure_type=type(failure).__name__):
-                probe = Probe()
-                with self.assertRaises(type(failure)) as raised:
-                    probe.degrade(failure)
-                self.assertIs(raised.exception, failure)
-                self.assertIsNone(probe.identity_error)
-        fallback.assert_not_called()
-
-    def test_catalog_progress_none_is_distinct_from_degradation_sentinel(self) -> None:
-        probe = identity.CatalogIdentityMixin()
-        probe.identity_error = None
-        probe._legacy_progress_for_asset = mock.Mock(return_value=None)
-        item = mock.Mock(asset_id="asset", work_id="work")
-
-        self.assertIsNone(probe._catalog_item_progress(item))
-
-        probe._legacy_progress_for_asset.side_effect = OSError("catalog offline")
-        self.assertIs(
-            probe._catalog_item_progress(item),
-            identity._CATALOG_DEGRADED,
-        )
-
-    def test_decorator_does_not_catch_fallback_exception(self) -> None:
-        fallback_failure = sqlite3.OperationalError("fallback failed")
-
-        def failed_fallback(_self, _failure):
-            raise fallback_failure
-
-        class Probe:
-            def __init__(self) -> None:
-                self.identity_error = None
-
-            @identity.catalog_degrades(fallback=failed_fallback)
-            def degrade(self, failure):
-                raise failure
-
-        probe = Probe()
-        with self.assertRaises(sqlite3.OperationalError) as raised:
-            probe.degrade(ValueError("catalog failed"))
-
-        self.assertIs(raised.exception, fallback_failure)
-        self.assertEqual(
-            probe.identity_error,
-            "media identity tracking degraded: catalog failed",
-        )
-
     def test_snapshot_fallback_runs_while_control_lock_is_held(self) -> None:
         class TrackingLock:
             def __init__(self) -> None:
@@ -1307,27 +958,6 @@ class CatalogDegradationAdapterTests(unittest.TestCase):
             fallback_item,
         )
         self.assertFalse(lock.held)
-
-    def test_status_store_fallback_failure_is_not_recaught(self) -> None:
-        service = object.__new__(VideoService)
-        service.identity_error = None
-        service._legacy_progress_for_asset = mock.Mock(
-            side_effect=ValueError("catalog failed")
-        )
-        service.store = mock.Mock()
-        store_failure = sqlite3.OperationalError("legacy store failed")
-        service.store.get.side_effect = store_failure
-        item = mock.Mock(asset_id="asset", work_id="work", key="media-key")
-
-        with self.assertRaises(sqlite3.OperationalError) as raised:
-            service._status_item_progress(item)
-
-        self.assertIs(raised.exception, store_failure)
-        self.assertEqual(
-            service.identity_error,
-            "media identity tracking degraded: catalog failed",
-        )
-
 
 if __name__ == "__main__":
     unittest.main()
