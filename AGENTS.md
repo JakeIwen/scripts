@@ -117,9 +117,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   and never turn lock or I/O errors into unweighted counts.
 - Network storage deployment test filesystem fixtures live in
   `pi/tests/network/_network_storage_support.py`.
-- `pi/tests/dashboard/_frontend_test_support.py` provides a temporary React
-  index response for route tests, independent of deployed frontend builds.
-  `_disk_manager_support.py` holds the DiskManager fixture (label policy, lsblk
+- `pi/tests/dashboard/_disk_manager_support.py` holds the DiskManager fixture (label policy, lsblk
   tree, boot ids) shared by the disk tests and `test_disk_storage_events.py`.
 - Deferred video checkpoints are indexed once per identity-sync transaction by
   `pi/apps/video_library/deferred_positions.py`; preserve chronological replay,
@@ -520,18 +518,11 @@ fetched by the backend; preference is local, LAN, Tailscale, then web.
 
 The React frontend's USB, network and storage response schemas live in each
 feature's `schema.ts`, with shared primitives and the only Valibot parsing
-boundary in `pi/apps/van_dashboard/frontend/src/api/schema.ts`. Preserve
-fail-fast `TypeError` wording and check order; error messages reach tiles and
-toasts. Response types are inferred from schemas, while UI-only computed types
-remain presentation types. Other features retain their decoders where staged
-schemas add no real savings.
+boundary in `pi/apps/van_dashboard/frontend/src/api/schema.ts`. Decoding fails
+fast with a `TypeError`. Response types are inferred from schemas, while UI-only
+computed types remain presentation types. Other features retain their decoders
+where staged schemas add no real savings.
 
-`pi/apps/van_dashboard/frontend/src/test/parity.ts` generates fixture/path
-mutations. Its compact oracles retain a corpus-name hash, interned rejection
-messages and canonical output fingerprints. Prove old/new strict parity, freeze
-OLD results and commit before deleting a decoder. Final parity tests read those
-files without a snapshot-update write path; never silently regenerate them from
-the replacement.
 The production boundary is `Response.json()`; sparse JS arrays, accessors and
 Proxies are outside that wire contract. Native arrays do not preserve hole
 semantics from the old `.map()` decoders.
