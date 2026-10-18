@@ -17,7 +17,6 @@ from pi.tests.price_check.test_search_watch import EBAY_PAGE
 
 SCRIPT_DIR = Path(__file__).parents[2] / "scripts" / "price_check"
 SCRIPT = SCRIPT_DIR / "main.py"
-sys.path.insert(0, str(SCRIPT_DIR))
 SPEC = importlib.util.spec_from_file_location("price_check", SCRIPT)
 price_check = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader

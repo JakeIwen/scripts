@@ -13,6 +13,7 @@ PYTHON_IMPORT_ROOTS = {
     'macbook/bettertouchtool/tests': 'macbook/bettertouchtool',
     'pi/tests': 'pi',
     'pi/tests/backup': 'pi/scripts/backup',
+    'pi/tests/price_check': 'pi/scripts/price_check',
     'pi/projects/phone-drop': 'pi/projects/phone-drop',
 }
 
