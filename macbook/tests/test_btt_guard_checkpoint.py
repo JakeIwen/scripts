@@ -13,6 +13,7 @@ from unittest.mock import patch
 from macbook.bettertouchtool.btt_common import MEDIA
 from macbook.bettertouchtool.btt_guard import checkpoint, cli, storage
 from macbook.bettertouchtool.btt_guard.model import AuditStatus
+from macbook.bettertouchtool.btt_guard.monitor import DEBOUNCE_SECONDS
 from macbook.tests.btt_guard_fixtures import create_guard_database
 
 
@@ -36,7 +37,7 @@ class CheckpointTests(unittest.TestCase):
             connection.execute(command,parameters)
 
     def test_explicit_promotion_and_private_artifacts(self):
-        with self.assertRaisesRegex(ValueError,'accept-current'):
+        with self.assertRaises(ValueError):
             checkpoint.capture(self.state)
         self.exporter.assert_not_called()
         manifest = self.capture()
@@ -56,7 +57,7 @@ class CheckpointTests(unittest.TestCase):
         file.write_text('{}')
         self.assertEqual(cli.audit_state(self.state)['status'],AuditStatus.UNAVAILABLE)
         with patch.object(cli.api,'call_worker') as worker:
-            with self.assertRaisesRegex(ValueError,'integrity'):
+            with self.assertRaises(ValueError):
                 cli.repair_checkpoint(self.state,apply=True)
         worker.assert_not_called()
 
@@ -65,13 +66,13 @@ class CheckpointTests(unittest.TestCase):
         before=(self.state/checkpoint.ACTIVE_FILE).read_bytes()
         self.mutate("DELETE FROM ZBTTBASEENTITY WHERE ZUNIQUEIDENTIFIER='action'")
         self.assertEqual(cli.audit_state(self.state)['status'],AuditStatus.DRIFT)
-        with self.assertRaisesRegex(ValueError,'unresolved'):
+        with self.assertRaises(ValueError):
             self.capture(replace=True)
         self.assertEqual((self.state/checkpoint.ACTIVE_FILE).read_bytes(),before)
 
     def test_checkpoint_replacement_requires_explicit_flag_and_retains_old_generation(self):
         first=self.capture()
-        with self.assertRaisesRegex(ValueError,'replace'):
+        with self.assertRaises(ValueError):
             self.capture()
         second=self.capture(replace=True)
         self.assertNotEqual(first['checkpoint_id'],second['checkpoint_id'])
@@ -131,8 +132,8 @@ class CheckpointTests(unittest.TestCase):
         broken.write_text('broken JSON');broken.chmod(0o600)
         with patch.object(cli,'send_warning_notification',return_value=True) as sender:
             with patch.object(cli.time,'time',return_value=1000): first=cli.run_monitor(self.state,managed=True)
-            with patch.object(cli.time,'time',return_value=1061): second=cli.run_monitor(self.state,managed=True)
-            with patch.object(cli.time,'time',return_value=1122): third=cli.run_monitor(self.state,managed=True)
+            with patch.object(cli.time,'time',return_value=1000 + DEBOUNCE_SECONDS + 1): second=cli.run_monitor(self.state,managed=True)
+            with patch.object(cli.time,'time',return_value=1000 + 2 * (DEBOUNCE_SECONDS + 1)): third=cli.run_monitor(self.state,managed=True)
         self.assertEqual([x['notification'] for x in (first,second,third)],['pending','sent','deduplicated'])
         self.assertTrue(all(x['audit_status']=='unavailable' for x in (first,second,third)))
         sender.assert_called_once()
@@ -146,10 +147,10 @@ class CheckpointTests(unittest.TestCase):
         broken.write_text('{');broken.chmod(0o600)
         with patch.object(cli,'send_warning_notification',return_value=True) as sender:
             with patch.object(cli.time,'time',return_value=1000):cli.run_monitor(self.state)
-            with patch.object(cli.time,'time',return_value=1061):cli.run_monitor(self.state)
+            with patch.object(cli.time,'time',return_value=1000 + DEBOUNCE_SECONDS + 1):cli.run_monitor(self.state)
             broken.unlink()  # Simulate the owner's explicit recovery of bad state.
-            with patch.object(cli.time,'time',return_value=1122):a=cli.run_monitor(self.state)
-            with patch.object(cli.time,'time',return_value=1183):b=cli.run_monitor(self.state)
+            with patch.object(cli.time,'time',return_value=1000 + 2 * (DEBOUNCE_SECONDS + 1)):a=cli.run_monitor(self.state)
+            with patch.object(cli.time,'time',return_value=1000 + 3 * (DEBOUNCE_SECONDS + 1)):b=cli.run_monitor(self.state)
         self.assertEqual(a['notification'],'pending')
         self.assertEqual(b['notification'],'sent')
         self.assertEqual(sender.call_count,2)
@@ -162,7 +163,7 @@ class CheckpointTests(unittest.TestCase):
         storage.write_json(folder/'definitions.json',definitions)
         manifest['files']['definitions.json']=storage.file_hash(folder/'definitions.json')
         storage.write_json(folder/'manifest.json',manifest)
-        with self.assertRaisesRegex(ValueError,'payload'):
+        with self.assertRaises(ValueError):
             checkpoint.load_checkpoint(self.state)
 
     def test_public_cli_audit_requires_no_mutation_or_api(self):

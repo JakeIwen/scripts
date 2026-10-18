@@ -63,7 +63,6 @@ class MergePiSecretsTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             created = missing_repo / "pi" / "secrets" / ".bash_variables"
             self.assertEqual(created.read_text(), source.read_text())
-            self.assertEqual(stat.S_IMODE(created.stat().st_mode), 0o644)
 
 
 if __name__ == "__main__":

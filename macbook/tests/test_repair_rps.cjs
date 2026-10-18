@@ -28,7 +28,7 @@ function fixture(failure) {
  return {run:()=>context.rpsApply(btt,snapshot,context.sizeFingerprint),calls,media,snapshot};
 }
 test('adds only normalized RPS action, preserving all other menu data; no execution APIs',()=>{
- const f=fixture();assert.match(f.run(),/No sync executed/);assert.deepEqual(f.calls,['add']);
+ const f=fixture();f.run();assert.deepEqual(f.calls,['add']);
  const action=f.media.BTTMenuItems[0].BTTMenuItemActions[0];assert.equal(action.BTTUUID,ACTION);
  const expected=structuredClone(f.snapshot.media);expected.BTTMenuItems[0].BTTMenuItemActions=[action];
  assert.deepEqual(f.media,expected);

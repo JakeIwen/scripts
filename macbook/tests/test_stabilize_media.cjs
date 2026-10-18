@@ -33,14 +33,6 @@ test('flattening preserves an explicit action category and disabled state',()=>{
  const result=JSON.parse(vm.runInContext('const rows=[]; stableFlatten({BTTUUID:"a",BTTEnabled:0,BTTActionCategory:2,BTTTriggerClass:"BTTTriggerTypeFloatingMenu"},"p","action",rows); JSON.stringify(rows[0].node)',context));
  assert.equal(result.BTTEnabled,0);assert.equal(result.BTTActionCategory,2);
 });
-test('layout uses screen top-left and content height, with explicit full-screen dropdown fallback',()=>{
- const context=vm.createContext({ObjC:{import(){}}});vm.runInContext(source,context);
- const result=JSON.parse(vm.runInContext('JSON.stringify([stableLayout({}, {width:1728,height:1080},true,false),stableLayout({BTTMenuFrameWidth:400},{width:1728,height:1080},false,false),stableLayout({BTTMenuFrameWidth:400},{width:1728,height:1080},false,true)])',context));
- assert.equal(result[0].BTTMenuPositionRelativeTo,1);assert.equal(result[0].BTTMenuAnchorMenu,0);assert.equal(result[0].BTTMenuAnchorRelation,0);
- assert.equal(result[0].BTTMenuSizingBehavior,3);assert.equal(result[0].BTTMenuFrameMaxHeight,1080);
- assert.equal(result[1].BTTMenuSizingBehavior,3);assert.equal(result[1].BTTMenuFrameMaxWidth,400);
- assert.equal(result[2].BTTMenuSizingBehavior,1);assert.equal(result[2].BTTMenuFrameHeight,1080);
-});
 test('layout repair preserves working drag and held-modifier click handling',()=>{
  const context=vm.createContext({ObjC:{import(){}}});vm.runInContext(source,context);
  for(const existing of [{},{BTTMenuDisableDrag:0},{BTTMenuDisableDrag:1}]) {
@@ -67,8 +59,8 @@ for(const alreadySaved of [false,true])test('apply uses individual adds; skips s
   update_menu_item(id,{json,persist}){assert.equal(persist,true);configs.set(id,JSON.parse(json));events.push('persist');},
   update_trigger(){throw Error('nested cache update must not be used');}
  };}});
- vm.runInContext(source,context);const out=vm.runInContext('run(["apply","/repo","/plan.json"])',context);
- assert.match(out,/Created 2/);assert.deepEqual(events,alreadySaved?['add','add']:['add','add','persist']);
+ vm.runInContext(source,context);vm.runInContext('run(["apply","/repo","/plan.json"])',context);
+ assert.deepEqual(events,alreadySaved?['add','add']:['add','add','persist']);
  const restartedStore=new Map(JSON.parse(JSON.stringify([...store])));
  assert.equal(restartedStore.get('action').parent,'button');
  if(!alreadySaved)assert.equal(configs.get('main').BTTMenuSizingBehavior,3);

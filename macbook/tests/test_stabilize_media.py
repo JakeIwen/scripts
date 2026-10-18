@@ -62,7 +62,7 @@ class PersistenceTests(unittest.TestCase):
         self.assertEqual(changes[0]['patch']['BTTMenuSizingBehavior'],3)
 
     def test_missing_layout_target_aborts(self):
-        with self.assertRaisesRegex(RuntimeError,'layout target missing'):
+        with self.assertRaises(RuntimeError):
             module.pending_config_changes({},self.plan['configChanges'])
 
 

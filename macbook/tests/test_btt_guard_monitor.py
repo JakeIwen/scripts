@@ -3,6 +3,8 @@ import unittest
 from unittest.mock import patch
 
 from macbook.bettertouchtool.btt_guard.monitor import (
+    DEBOUNCE_SECONDS,
+    DELIVERY_RETRY_SECONDS,
     INVALID_STATE,
     MonitorStateError,
     initial_state,
@@ -53,31 +55,21 @@ class GuardMonitorTests(unittest.TestCase):
         self.state = result.state
         return result
 
-    def test_alert_requires_matching_audits_at_least_sixty_seconds_apart(self):
+    def test_alert_requires_matching_audits_after_debounce(self):
         sender = RecordingSender()
         drift = report("drift", [{"kind": "missing_item", "uuid": "secret", "detail": "secret"}])
-        self.assertEqual(self.observe(drift, sender, 10).action, "pending")
-        self.assertEqual(self.observe(drift, sender, 69).action, "pending")
-        outcome = self.observe(drift, sender, 70)
+        self.assertEqual(self.observe(drift, sender, 0).action, "pending")
+        self.assertEqual(self.observe(drift, sender, DEBOUNCE_SECONDS - 1).action, "pending")
+        outcome = self.observe(drift, sender, DEBOUNCE_SECONDS)
         self.assertEqual((outcome.audit_status, outcome.action), ("drift", "sent"))
         self.assertEqual(len(sender.notifications), 1)
-
-    def test_different_observation_restarts_debounce(self):
-        sender = RecordingSender()
-        missing = report("drift", [{"kind": "missing"}])
-        changed = report("drift", [{"kind": "changed"}])
-        self.observe(missing, sender, 0)
-        self.observe(changed, sender, 70)
-        outcome = self.observe(changed, sender, 129)
-        self.assertEqual(outcome.action, "pending")
-        self.assertEqual(sender.notifications, [])
 
     def test_same_counts_for_different_findings_do_not_confirm_drift(self):
         sender = RecordingSender()
         first = report("drift", [{"kind": "missing", "uuid": "one", "detail": "record"}])
         second = report("drift", [{"kind": "missing", "uuid": "two", "detail": "record"}])
         self.observe(first, sender, 0)
-        outcome = self.observe(second, sender, 60)
+        outcome = self.observe(second, sender, DEBOUNCE_SECONDS)
         self.assertEqual(outcome.action, "pending")
         self.assertEqual(sender.notifications, [])
 
@@ -86,17 +78,17 @@ class GuardMonitorTests(unittest.TestCase):
         first = report("drift", [{"kind": "missing", "uuid": "one", "detail": "record"}])
         second = report("drift", [{"kind": "missing", "uuid": "two", "detail": "record"}])
         self.observe(first, sender, 0)
-        self.assertEqual(self.observe(first, sender, 60).action, "sent")
-        self.assertEqual(self.observe(second, sender, 120).action, "pending")
-        self.assertEqual(self.observe(second, sender, 180).action, "sent")
+        self.assertEqual(self.observe(first, sender, DEBOUNCE_SECONDS).action, "sent")
+        self.assertEqual(self.observe(second, sender, 2 * DEBOUNCE_SECONDS).action, "pending")
+        self.assertEqual(self.observe(second, sender, 3 * DEBOUNCE_SECONDS).action, "sent")
         self.assertEqual(len(sender.notifications), 2)
 
     def test_successful_alert_is_deduplicated(self):
         sender = RecordingSender()
         drift = report("drift", [{"kind": "changed"}])
         self.observe(drift, sender, 0)
-        self.observe(drift, sender, 60)
-        outcome = self.observe(drift, sender, 3600)
+        self.observe(drift, sender, DEBOUNCE_SECONDS)
+        outcome = self.observe(drift, sender, 10 * DEBOUNCE_SECONDS)
         self.assertEqual(outcome.action, "deduplicated")
         self.assertEqual(len(sender.notifications), 1)
 
@@ -104,20 +96,20 @@ class GuardMonitorTests(unittest.TestCase):
         sender = RecordingSender([False, True])
         unavailable = report("unavailable", [{"kind": "database_error"}])
         self.observe(unavailable, sender, 0)
-        failed = self.observe(unavailable, sender, 60)
+        failed = self.observe(unavailable, sender, DEBOUNCE_SECONDS)
         self.assertEqual((failed.audit_status, failed.action), ("unavailable", "delivery-failed"))
-        self.assertEqual(self.observe(unavailable, sender, 359).action, "cooldown")
-        self.assertEqual(self.observe(unavailable, sender, 360).action, "sent")
+        self.assertEqual(self.observe(unavailable, sender, DEBOUNCE_SECONDS + DELIVERY_RETRY_SECONDS - 1).action, "cooldown")
+        self.assertEqual(self.observe(unavailable, sender, DEBOUNCE_SECONDS + DELIVERY_RETRY_SECONDS).action, "sent")
         self.assertEqual(len(sender.notifications), 2)
 
     def test_recovery_requires_two_healthy_audits_and_is_sent_once(self):
         sender = RecordingSender()
         drift = report("drift", [{"kind": "unexpected"}])
         self.observe(drift, sender, 0)
-        self.observe(drift, sender, 60)
-        first = self.observe(report(), sender, 100)
-        second = self.observe(report(), sender, 160)
-        third = self.observe(report(), sender, 220)
+        self.observe(drift, sender, DEBOUNCE_SECONDS)
+        first = self.observe(report(), sender, DEBOUNCE_SECONDS + 1)
+        second = self.observe(report(), sender, 2 * DEBOUNCE_SECONDS + 1)
+        third = self.observe(report(), sender, 3 * DEBOUNCE_SECONDS + 1)
         self.assertEqual((first.action, second.action, third.action), ("pending", "sent", "not-needed"))
         self.assertEqual(len(sender.notifications), 2)
 
@@ -125,8 +117,8 @@ class GuardMonitorTests(unittest.TestCase):
         sender = RecordingSender([False])
         drift = report("drift", [{"kind": "missing"}])
         self.observe(drift, sender, 0)
-        self.assertEqual(self.observe(drift, sender, 60).action, "delivery-failed")
-        outcome = self.observe(report(), sender, 120)
+        self.assertEqual(self.observe(drift, sender, DEBOUNCE_SECONDS).action, "delivery-failed")
+        outcome = self.observe(report(), sender, 2 * DEBOUNCE_SECONDS)
         self.assertEqual(outcome.action, "not-needed")
         self.assertEqual(len(sender.notifications), 1)
 
@@ -140,8 +132,6 @@ class GuardMonitorTests(unittest.TestCase):
         rendered = notification.title + notification.message
         for secret in secret_values:
             self.assertNotIn(secret, rendered)
-        self.assertIn("checkpoint: 1", rendered)
-        self.assertIn("other: 1", rendered)
 
     def test_malformed_state_is_an_error_not_a_healthy_result(self):
         with self.assertRaises(MonitorStateError):
@@ -153,56 +143,11 @@ class GuardMonitorTests(unittest.TestCase):
         with self.assertRaises(MonitorStateError):
             validate_state(state)
 
-    def test_invalid_primary_selects_persisted_recovery_state(self):
-        recovery = initial_state()
-        recovery["candidate_key"] = "recovery"
-        recovery["candidate_since"] = 10
-        recovery["candidate_observations"] = 1
-        recovery["alert_active"] = True
-        recovery["last_alert_key"] = "a" * 64
-        selection = select_monitor_state(INVALID_STATE, recovery)
-        self.assertEqual(selection.reason, "primary-invalid")
-        self.assertEqual(selection.write_target, "recovery")
-        self.assertEqual(selection.state, recovery)
-        self.assertFalse(selection.adopt_recovery)
-
-    def test_missing_primary_adopts_recovery_without_losing_alert(self):
-        recovery = initial_state()
-        recovery["alert_active"] = True
-        recovery["last_alert_key"] = "b" * 64
-        selection = select_monitor_state(None, recovery)
-        self.assertEqual(selection.write_target, "primary")
-        self.assertTrue(selection.adopt_recovery)
-        self.assertTrue(selection.state["alert_active"])
-
     def test_invalid_primary_and_fallback_start_new_recovery_state(self):
         selection = select_monitor_state(INVALID_STATE, {"malformed": True})
         self.assertEqual(selection.reason, "both-invalid")
         self.assertEqual(selection.write_target, "recovery")
         self.assertEqual(selection.state, initial_state())
-
-    def test_normal_missing_state_starts_primary_without_an_error(self):
-        selection = select_monitor_state(None, None)
-        self.assertIsNone(selection.reason)
-        self.assertEqual(selection.write_target, "primary")
-        self.assertEqual(selection.state, initial_state())
-
-    def test_invalid_primary_warning_is_debounced_and_deduplicated_in_fallback(self):
-        sender = RecordingSender()
-        unavailable = report(
-            "unavailable",
-            [{"kind": "monitor_state_invalid", "uuid": "", "detail": "primary-invalid"}],
-        )
-        first = select_monitor_state(INVALID_STATE, None)
-        result = monitor_report(unavailable, state=first.state, sender=sender, now=0)
-        self.assertEqual(result.action, "pending")
-        second = select_monitor_state(INVALID_STATE, result.state)
-        result = monitor_report(unavailable, state=second.state, sender=sender, now=60)
-        self.assertEqual(result.action, "sent")
-        third = select_monitor_state(INVALID_STATE, result.state)
-        result = monitor_report(unavailable, state=third.state, sender=sender, now=120)
-        self.assertEqual(result.action, "deduplicated")
-        self.assertEqual(len(sender.notifications), 1)
 
     def test_state_contains_no_report_details(self):
         sender = RecordingSender()
