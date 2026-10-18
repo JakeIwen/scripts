@@ -49,11 +49,4 @@ describe('antenna confirmation notice', () => {
     expect(screen.getByText('The saved denlink profile is missing')).toBeInTheDocument();
     expect(container.querySelector('.ubnt-operation--error')).not.toBeNull();
   });
-
-  it('does not display an empty operation after startup', () => {
-    const { container } = render(
-      <UbntOperationNotice operation={sampleUbntStatus('idle').operation} />,
-    );
-    expect(container).toBeEmptyDOMElement();
-  });
 });

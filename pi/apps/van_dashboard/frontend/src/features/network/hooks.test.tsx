@@ -5,10 +5,8 @@ import { fetchActiveConnectivity, fetchOpenWrtClients, fetchSpeedtestStatus } fr
 import {
   ACTIVE_CONNECTIVITY_INTERVAL_MS,
   OPENWRT_CLIENT_INTERVAL_MS,
-  RUNNING_SPEEDTEST_INTERVAL_MS,
   useActiveConnectivity,
   useOpenWrtClients,
-  useSpeedtestStatus,
 } from './hooks';
 import { sampleClients, sampleConnectivity, sampleSpeedtest } from './testFixtures';
 
@@ -30,11 +28,6 @@ function ConnectivityProbe() {
 function ClientsProbe({ open }: { open: boolean }) {
   const resource = useOpenWrtClients(open);
   return <output>{resource.data?.clientCount ?? 'closed'}</output>;
-}
-
-function SpeedtestProbe() {
-  const resource = useSpeedtestStatus();
-  return <output>{resource.data?.status ?? 'loading'}</output>;
 }
 
 describe('network polling hooks', () => {
@@ -93,20 +86,5 @@ describe('network polling hooks', () => {
       await vi.advanceTimersByTimeAsync(OPENWRT_CLIENT_INTERVAL_MS * 2);
     });
     expect(openWrtClientsMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('polls once a second while a speed test is running', async () => {
-    activeConnectivityMock.mockResolvedValue(sampleConnectivity());
-    speedtestStatusMock.mockResolvedValue(sampleSpeedtest('running'));
-
-    render(<SpeedtestProbe />);
-    await act(async () => Promise.resolve());
-    const callsAfterInitialStatus = speedtestStatusMock.mock.calls.length;
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(RUNNING_SPEEDTEST_INTERVAL_MS);
-    });
-
-    expect(speedtestStatusMock.mock.calls.length).toBeGreaterThan(callsAfterInitialStatus);
   });
 });

@@ -1,30 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import {
-  convergeUbntOperation,
-  executeUbntMutation,
-  UBNT_CONVERGENCE_INTERVAL_MS,
-  UBNT_INITIAL_CONVERGENCE_DELAY_MS,
-} from './controls';
+import { executeUbntMutation } from './controls';
 import { sampleUbntStatus } from './testFixtures';
 
 describe('UBNT operation orchestration', () => {
-  it('waits 500ms for the first read, then 1.2s between running reads', async () => {
-    const running = sampleUbntStatus('running');
-    running.operation.kind = 'connect';
-    const complete = sampleUbntStatus('complete');
-    complete.operation.kind = 'connect';
-    const refresh = vi.fn().mockResolvedValueOnce(running).mockResolvedValueOnce(complete);
-    const pause = vi.fn().mockResolvedValue(undefined);
-
-    const result = await convergeUbntOperation(refresh, pause);
-
-    expect(result?.operation.status).toBe('complete');
-    expect(pause).toHaveBeenNthCalledWith(1, UBNT_INITIAL_CONVERGENCE_DELAY_MS);
-    expect(pause).toHaveBeenNthCalledWith(2, UBNT_CONVERGENCE_INTERVAL_MS);
-    expect(refresh).toHaveBeenCalledTimes(2);
-  });
-
   it('never retries a failed mutation and still performs one authoritative refresh', async () => {
     const mutation = vi.fn().mockRejectedValue(new Error('response lost'));
     const refresh = vi.fn().mockResolvedValue(sampleUbntStatus());

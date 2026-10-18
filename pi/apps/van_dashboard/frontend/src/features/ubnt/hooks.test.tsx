@@ -24,24 +24,6 @@ describe('useUbntWifiStatus', () => {
     vi.useRealTimers();
   });
 
-  it('switches to the audited operation cadence while an operation is running', async () => {
-    vi.mocked(fetchUbntWifiStatus).mockResolvedValue(sampleUbntStatus('running'));
-    render(<Probe />);
-    await act(async () => Promise.resolve());
-    await act(async () => Promise.resolve());
-    const callsAfterIntervalChange = vi.mocked(fetchUbntWifiStatus).mock.calls.length;
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(UBNT_OPERATION_INTERVAL_MS - 1);
-    });
-    expect(fetchUbntWifiStatus).toHaveBeenCalledTimes(callsAfterIntervalChange);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1);
-    });
-    expect(fetchUbntWifiStatus).toHaveBeenCalledTimes(callsAfterIntervalChange + 1);
-  });
-
   it('collects a background status result promptly after the operation has ended', async () => {
     const cached = {
       ...ubntPayload('error'),

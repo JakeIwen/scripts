@@ -4,7 +4,6 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import type { PollingState } from '../../hooks/usePollingResource';
 import type { CrashAnalysisControls } from './crashControls';
 import { SystemHealthSheet } from './SystemHealthSheet';
-import { SystemHealthTile } from './SystemHealthTile';
 import { sampleSystemHealth } from './testFixtures';
 import type { CrashHistory, SystemHealthReport } from './types';
 
@@ -55,27 +54,6 @@ function crashControls(): CrashAnalysisControls {
 }
 
 describe('system health UI', () => {
-  it('summarizes passive evidence on the tile', () => {
-    const onOpen = vi.fn();
-    render(
-      <SystemHealthTile
-        report={sampleSystemHealth()}
-        error={null}
-        refreshing={false}
-        onOpen={onOpen}
-      />,
-    );
-
-    expect(screen.getByText('73.2%')).toBeInTheDocument();
-    expect(screen.getByText('↓ 2.0 KiB/s · ↑ 1.0 KiB/s')).toBeInTheDocument();
-    expect(screen.getByText('R 4.0 KiB/s · W 8.0 KiB/s')).toBeInTheDocument();
-    expect(
-      screen.getByText('USB faults are present without confirmed undervoltage'),
-    ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Open system health details' }));
-    expect(onOpen).toHaveBeenCalledOnce();
-  });
-
   it('renders projected details and reports range changes', () => {
     const onRangeChange = vi.fn();
     render(

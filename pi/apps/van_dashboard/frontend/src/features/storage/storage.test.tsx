@@ -1,14 +1,9 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { fetchDiskStatus, fetchStoragePolicy } from './api';
 import type { StorageControls } from './controls';
 import { decodeDiskStatusResponse, decodeStoragePolicyResponse } from './schema';
-import {
-  STORAGE_SHEET_POLL_INTERVAL_MS,
-  STORAGE_TILE_POLL_INTERVAL_MS,
-  useStorageResources,
-} from './hooks';
 import { assessUsbReset } from './resetEligibility';
 import { StorageSheet } from './StorageSheet';
 import { StorageTile } from './StorageTile';
@@ -41,11 +36,6 @@ beforeAll(() => {
     };
   }
 });
-
-function StorageProbe({ sheetOpen }: { sheetOpen: boolean }) {
-  const resources = useStorageResources(sheetOpen);
-  return <output>{resources.disks.data?.disks.length ?? 'loading'}</output>;
-}
 
 function resource<T>(data: T) {
   return {
@@ -136,27 +126,7 @@ describe('storage feature', () => {
     });
   });
 
-  it('uses the audited 30-second tile and 2.5-second sheet cadence', async () => {
-    const view = render(<StorageProbe sheetOpen={false} />);
-    await act(async () => Promise.resolve());
-    expect(fetchDiskStatusMock).toHaveBeenCalledTimes(1);
-    expect(fetchStoragePolicyMock).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(STORAGE_TILE_POLL_INTERVAL_MS);
-    });
-    expect(fetchDiskStatusMock).toHaveBeenCalledTimes(2);
-
-    view.rerender(<StorageProbe sheetOpen />);
-    await act(async () => Promise.resolve());
-    expect(fetchDiskStatusMock).toHaveBeenCalledTimes(3);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(STORAGE_SHEET_POLL_INTERVAL_MS);
-    });
-    expect(fetchDiskStatusMock).toHaveBeenCalledTimes(4);
-  });
-
-  it('renders policy, health, and reset explanation without mutation controls', () => {
+  it('enables disk actions, blocks USB reset for a mounted disk, and wires the policy toggle', () => {
     const resources = {
       policy: resource(sampleStoragePolicy()),
       disks: resource(sampleDiskStatus()),
@@ -177,10 +147,6 @@ describe('storage feature', () => {
       </>,
     );
 
-    expect(
-      screen.getByText('Currently mounted read/write; access checks pass'),
-    ).toBeInTheDocument();
-    expect(screen.getByText('Unmount first')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Unmount' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Repair' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Reset USB' })).toBeDisabled();

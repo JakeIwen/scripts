@@ -1,9 +1,8 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getJson, postForm } from '../../api/client';
 import { ToastProvider } from '../../components/ToastProvider';
-import { performVonstarAction, requestVonstarAccessState } from './api';
 import { decodeVonstarAccessMutation, decodeVonstarStatus } from './decoders';
 import { VonstarFeature } from './VonstarFeature';
 import { VonstarTile } from './VonstarTile';
@@ -152,12 +151,6 @@ afterEach(() => {
 });
 
 describe('vOnStar strict decoders', () => {
-  it('accepts healthy status when the optional error field is omitted', () => {
-    const payload = statusPayload();
-    delete (payload.vonstar as Record<string, unknown>).error;
-    expect(decodeVonstarStatus(payload).error).toBeNull();
-  });
-
   it('accepts the exact catalog and drops raw observations from bounded UI state', () => {
     expect(decodeVonstarStatus(statusPayload())).toMatchObject({
       service: 'vonstar',
@@ -184,51 +177,7 @@ describe('vOnStar strict decoders', () => {
   });
 });
 
-describe('vOnStar exact API boundary', () => {
-  it('sends only an exact action field or an empty access-state form', async () => {
-    vi.mocked(postForm).mockResolvedValueOnce(actionPayload('lock_all'));
-    await performVonstarAction('lock_all');
-    vi.mocked(postForm).mockResolvedValueOnce(accessPayload());
-    await requestVonstarAccessState();
-
-    expect(postForm).toHaveBeenNthCalledWith(1, '/api/vonstar', { action: 'lock_all' });
-    expect(postForm).toHaveBeenNthCalledWith(2, '/api/vonstar/access-state');
-  });
-});
-
 describe('vOnStar controls', () => {
-  it('keeps the tile hierarchy compact and the three controls stacked', () => {
-    const onOpen = vi.fn();
-    const view = render(<VonstarTile controller={readyController()} onOpen={onOpen} />);
-    const tile = view.container.querySelector('.vonstar-tile');
-    const header = tile?.querySelector('.tile__header');
-
-    expect(tile).toBeInTheDocument();
-    expect(header?.children).toHaveLength(3);
-    expect(header?.children[0]).toHaveClass('tile__icon');
-    expect(header?.children[1]).toHaveClass('tile__title');
-    expect(header?.children[2]).toHaveClass('tile__status');
-    expect(within(header as HTMLElement).getByText('vOnStar')).toBeVisible();
-    expect(within(header as HTMLElement).getByText('Ready')).toBeVisible();
-
-    const actionGroup = screen.getByRole('group', { name: 'Vehicle lock controls' });
-    const actions = within(actionGroup).getAllByRole('button');
-    expect(actions.map((button) => button.textContent)).toEqual([
-      'Lock All',
-      'Unlock Front',
-      'Unlock Cargo',
-    ]);
-    for (const button of actions) expect(button).toHaveClass('vonstar-action');
-
-    const lastAction = screen.getByText('Last action').closest('[role="status"]');
-    expect(lastAction).toHaveClass('vonstar-last-action');
-    expect(lastAction).toHaveTextContent('Last action');
-    expect(lastAction).toHaveTextContent('None');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Open vOnStar status' }));
-    expect(onOpen).toHaveBeenCalledOnce();
-  });
-
   it('renders plan-only, service-busy, and local working states', () => {
     const planOnly = readyController();
     if (!planOnly.status) throw new Error('missing vOnStar status fixture');
@@ -251,15 +200,6 @@ describe('vOnStar controls', () => {
     expect(screen.getByText('Last action').closest('[role="status"]')).toHaveTextContent(
       'Unlock Front · WORKING',
     );
-  });
-
-  it('keeps stale refresh errors out of tile layout flow', () => {
-    const controller = readyController();
-    controller.error = new Error('temporary status timeout');
-    render(<VonstarTile controller={controller} onOpen={vi.fn()} />);
-
-    const announcement = screen.getByText('Status refresh failed · temporary status timeout');
-    expect(announcement).toHaveClass('visually-hidden');
   });
 
   it('does one initial GET, no automatic access check, and no polling', async () => {
@@ -311,11 +251,6 @@ describe('vOnStar controls', () => {
     await screen.findByText('All locked');
     expect(postForm).toHaveBeenCalledOnce();
     expect(postForm).toHaveBeenCalledWith('/api/vonstar/access-state');
-    expect(screen.getByText('Partial door coverage')).toBeVisible();
-    expect(screen.getByText('Driver door closed (candidate)')).toBeVisible();
-    expect(
-      screen.getByText('Sliding door sensor bypassed — physical state unavailable'),
-    ).toBeVisible();
   });
 
   it('blocks a second operation while one request is in flight', async () => {

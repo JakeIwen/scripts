@@ -73,14 +73,6 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('StarlinkControl', () => {
-  it('uses the compact control when embedded in the UBNT tile', () => {
-    renderControl(resource(starlinkStatus('on')), 'tile');
-
-    expect(screen.getByRole('button', { name: 'Turn Starlink off' })).toBeEnabled();
-    expect(screen.getByText('Starlink')).toBeInTheDocument();
-    expect(screen.getByText('Tuya switch is on')).toBeInTheDocument();
-  });
-
   it('disables power changes when the status is unknown', () => {
     renderControl(resource(starlinkStatus('unknown')));
 

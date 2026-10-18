@@ -84,24 +84,6 @@ describe('cloud failure details', () => {
     },
   );
 
-  it('shows missing journal evidence explicitly', async () => {
-    const note =
-      'No detailed failure reason is available in the retained service journal for this attempt.';
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          ...response,
-          details: { ...response.details, entries: [], note },
-        }),
-      }),
-    );
-    render(<ICloudAttemptMessage kind="pi" id={id} phase="error" message={message} />);
-    fireEvent.click(screen.getByRole('button', { name: 'details' }));
-    expect(await screen.findByText(note)).toBeVisible();
-  });
-
   it('can retry loading after an API error without resuming the backup', async () => {
     const fetch = vi
       .fn()

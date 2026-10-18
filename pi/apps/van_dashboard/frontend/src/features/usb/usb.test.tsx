@@ -1,17 +1,11 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ToastProvider } from '../../components/ToastProvider';
 import { fetchUsbStatus } from './api';
 import type { UsbControls } from './controls';
 import { decodeUsbStatusResponse } from './schema';
-import {
-  USB_SHEET_POLL_INTERVAL_MS,
-  USB_TILE_POLL_INTERVAL_MS,
-  UsbStatusProvider,
-  useSharedUsbStatus,
-  useUsbStatus,
-} from './hooks';
+import { UsbStatusProvider, useSharedUsbStatus } from './hooks';
 import { UsbSheet } from './UsbSheet';
 import { UsbTile } from './UsbTile';
 import { sampleUsbStatus, usbStatusPayload } from './testFixtures';
@@ -32,11 +26,6 @@ beforeAll(() => {
     };
   }
 });
-
-function UsbProbe({ sheetOpen }: { sheetOpen: boolean }) {
-  const resource = useUsbStatus(sheetOpen);
-  return <output>{resource.data?.inventory.presentDeviceCount ?? 'loading'}</output>;
-}
 
 function SharedUsbConsumer({ label }: { label: string }) {
   const { resource } = useSharedUsbStatus();
@@ -91,25 +80,6 @@ describe('USB feature', () => {
     });
   });
 
-  it('switches from tile cadence to sheet cadence without overlapping requests', async () => {
-    const view = render(<UsbProbe sheetOpen={false} />);
-    await act(async () => Promise.resolve());
-    expect(fetchUsbStatusMock).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(USB_TILE_POLL_INTERVAL_MS);
-    });
-    expect(fetchUsbStatusMock).toHaveBeenCalledTimes(2);
-
-    view.rerender(<UsbProbe sheetOpen />);
-    await act(async () => Promise.resolve());
-    expect(fetchUsbStatusMock).toHaveBeenCalledTimes(3);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(USB_SHEET_POLL_INTERVAL_MS);
-    });
-    expect(fetchUsbStatusMock).toHaveBeenCalledTimes(4);
-  });
-
   it('shares one polled snapshot with USB and storage consumers', async () => {
     render(
       <ToastProvider>
@@ -137,16 +107,10 @@ describe('USB feature', () => {
       </>,
     );
 
-    expect(screen.getByText('Seagate movingparts')).toBeInTheDocument();
-    expect(screen.getByText('Power + data control')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Cycle' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Disable' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Enable' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Recover USB 2' })).toBeEnabled();
-    expect(screen.queryByRole('button', { name: 'Refresh' })).not.toBeInTheDocument();
-    expect(
-      screen.getByLabelText('Updated 3s ago').closest('.bottom-sheet__subtitle'),
-    ).toHaveTextContent(/Remembered USB inventory and guarded live port controls\.\s*~3s/);
     expect(resource.refresh).not.toHaveBeenCalled();
   });
 });

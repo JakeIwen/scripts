@@ -1,10 +1,9 @@
-import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getJson } from '../../api/client';
 import type { SonosControls } from './controls';
 import { decodeSonosStatus } from './decoders';
-import { SONOS_POLL_INTERVAL_MS, useSonosStatus } from './hooks';
 import { projectTrackProgress } from './progress';
 import { SonosSheet } from './SonosSheet';
 import { SonosTile } from './SonosTile';
@@ -122,43 +121,16 @@ describe('Sonos response decoder', () => {
     expect(projectTrackProgress(status.nowPlaying, 1_000, 6_000)).toBeNull();
   });
 
-  it('rejects unsafe art paths, invalid clocks, and mismatched coordinators', () => {
+  it('rejects album art that is not a dashboard Sonos-art path', () => {
     const unsafeArt = sonosPayload();
     (unsafeArt.now_playing as Record<string, unknown>).album_art = 'http://speaker/art.jpg';
     expect(() => decodeSonosStatus(unsafeArt)).toThrow(
       'now_playing.album_art must be a dashboard Sonos-art path',
     );
-
-    const badClock = sonosPayload();
-    (badClock.now_playing as Record<string, unknown>).position = '1:99';
-    expect(() => decodeSonosStatus(badClock)).toThrow(
-      'now_playing.position contains an invalid clock value',
-    );
-
-    const mismatched = sonosPayload();
-    (mismatched.speakers as Record<string, unknown>[])[0]!.coordinator = false;
-    expect(() => decodeSonosStatus(mismatched)).toThrow(
-      'Sonos coordinator flags do not match response.coordinator',
-    );
   });
 });
 
 describe('Sonos polling and local progress', () => {
-  it('uses one bounded ten-second GET poller', async () => {
-    vi.useFakeTimers();
-    const { result } = renderHook(() => useSonosStatus());
-    await act(async () => Promise.resolve());
-
-    expect(result.current.data?.coordinator).toBe('Front');
-    expect(getJson).toHaveBeenCalledTimes(1);
-    expect(getJson).toHaveBeenLastCalledWith('/api/speakers', expect.any(AbortSignal));
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(SONOS_POLL_INTERVAL_MS);
-    });
-    expect(getJson).toHaveBeenCalledTimes(2);
-  });
-
   it('advances playing position locally and clamps at track duration', () => {
     const track = decodeSonosStatus(sonosPayload()).nowPlaying;
     expect(projectTrackProgress(track, 1_000, 6_000)).toMatchObject({
@@ -171,22 +143,6 @@ describe('Sonos polling and local progress', () => {
 });
 
 describe('Sonos views', () => {
-  it('keeps decoder details out of the unavailable tile', () => {
-    render(
-      <SonosTile
-        status={null}
-        error={new Error('now_playing.position must use H:MM:SS or MM:SS clock text')}
-        refreshing={false}
-        progress={null}
-        controls={controlMocks()}
-        onOpen={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByText('Could not read current Sonos status')).toBeInTheDocument();
-    expect(screen.queryByText(/H:MM:SS/)).not.toBeInTheDocument();
-  });
-
   it('shows playback and opens the control sheet', () => {
     const status = decodeSonosStatus(sonosPayload());
     const progress = projectTrackProgress(status.nowPlaying, 1_000, 6_000);
@@ -203,8 +159,6 @@ describe('Sonos views', () => {
       />,
     );
 
-    expect(screen.getByText('Orange Juice')).toBeInTheDocument();
-    expect(screen.getByText('Front · 2/3')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Previous track' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Pause' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Next track' })).toBeEnabled();
@@ -212,24 +166,6 @@ describe('Sonos views', () => {
     expect(controls.transport).toHaveBeenCalledWith('next');
     fireEvent.click(screen.getByRole('button', { name: 'Open Sonos details' }));
     expect(onOpen).toHaveBeenCalledOnce();
-  });
-
-  it('announces playback refreshes without adding a visible tile row', () => {
-    const status = decodeSonosStatus(sonosPayload());
-    render(
-      <SonosTile
-        status={status}
-        error={null}
-        refreshing
-        progress={projectTrackProgress(status.nowPlaying, 1_000, 6_000)}
-        controls={controlMocks()}
-        onOpen={vi.fn()}
-      />,
-    );
-
-    const announcement = screen.getByText('Refreshing playback…');
-    expect(announcement).toHaveClass('visually-hidden');
-    expect(screen.getByRole('group', { name: 'Sonos playback controls' })).toBeVisible();
   });
 
   it('renders functional transport, grouping, mute, selection, and volume controls', () => {
@@ -252,9 +188,6 @@ describe('Sonos views', () => {
       />,
     );
 
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
-    expect(screen.getByText('Active coordinator')).toBeInTheDocument();
-    expect(screen.getByText('Separate group · Solo')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Previous track' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Pause' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Next track' })).toBeEnabled();

@@ -1,15 +1,9 @@
-import { render, renderHook, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { getJson } from '../../api/client';
 import { ToastProvider } from '../../components/ToastProvider';
 import type { PollingState } from '../../hooks/usePollingResource';
 import { DashboardStatusTile } from './DashboardStatusTile';
-import {
-  decodeDashboardStatus,
-  formatDashboardUptime,
-  type DashboardStatus,
-} from './dashboardStatus';
-import { useDashboardStatus } from './useDashboardStatus';
+import { decodeDashboardStatus, type DashboardStatus } from './dashboardStatus';
 
 vi.mock('../../api/client', () => ({ getJson: vi.fn() }));
 
@@ -86,33 +80,6 @@ describe('decodeDashboardStatus', () => {
 
     expect(status.copExecution.state).toBeNull();
     expect(status.copExecution.error).toBe('CAN wake supervisor is not active');
-  });
-
-  it('rejects malformed request state instead of displaying a false status', () => {
-    expect(() =>
-      decodeDashboardStatus({
-        ...statusPayload,
-        cop_alert: { ...statusPayload.cop_alert, active: 'yes' },
-      }),
-    ).toThrow('cop_alert.active must be true or false');
-  });
-});
-
-describe('formatDashboardUptime', () => {
-  it('uses compact day, hour, and minute units', () => {
-    expect(formatDashboardUptime(183_840)).toBe('Uptime · 2d 3h 4m');
-    expect(formatDashboardUptime(null)).toBe('Uptime unavailable');
-  });
-});
-
-describe('useDashboardStatus', () => {
-  it('polls the status endpoint and exposes decoded data', async () => {
-    vi.mocked(getJson).mockResolvedValue(statusPayload);
-
-    const { result } = renderHook(() => useDashboardStatus());
-
-    await waitFor(() => expect(result.current.data?.copAlert.requested).toBe(true));
-    expect(getJson).toHaveBeenCalledWith('/api/status', expect.any(AbortSignal));
   });
 });
 

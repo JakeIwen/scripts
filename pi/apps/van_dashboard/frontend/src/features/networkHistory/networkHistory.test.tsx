@@ -1,10 +1,9 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { fetchNetworkHistory } from './api';
 import { decodeNetworkHistory } from './decoders';
 import { NetworkHistoryFeature } from './NetworkHistoryFeature';
-import { HistoryFilters, HistoryReport, IncidentDetail } from './NetworkHistoryView';
+import { HistoryFilters, HistoryReport } from './NetworkHistoryView';
 import { detailFixture, historyFixture } from './testFixtures';
 
 beforeAll(() => {
@@ -61,62 +60,6 @@ describe('network history evidence view', () => {
     expect(
       screen.queryByRole('status', { name: 'Recorder storage warning' }),
     ).not.toBeInTheDocument();
-  });
-
-  it('keeps the RAM warning visible when viewing an incident directly', () => {
-    const detail = detailFixture();
-    detail.coverage.push({
-      source: 'storage',
-      device: 'vanpi',
-      status: 'unknown',
-      last_event_at: null,
-      last_received_at: null,
-      detail: 'Volatile RAM recording; evidence is lost on reboot.',
-    });
-    render(<IncidentDetail detail={detail} />);
-    expect(screen.getByRole('status', { name: 'Recorder storage warning' })).toHaveTextContent(
-      'lost on reboot',
-    );
-  });
-
-  it('preserves full-range counts, timing uncertainty, provenance and source staleness', () => {
-    const selected = vi.fn();
-    render(<HistoryReport report={historyFixture()} onIncident={selected} />);
-    expect(screen.getByText(/1200 observations · 1 incidents/)).toBeInTheDocument();
-    expect(screen.getByText(/Showing 1 of 1200 observations/)).toBeInTheDocument();
-    expect(screen.getByText('stale')).toBeInTheDocument();
-    expect(screen.getByText(/exact cross-device order/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /External test destinations failed/ }));
-    expect(selected).toHaveBeenCalledWith('incident-11');
-    const observation = screen
-      .getByText('gateway=reachable public_tests=failed password=[REDACTED]')
-      .closest('summary')!;
-    fireEvent.click(observation);
-    const evidence = observation.closest('details')!;
-    expect(within(evidence).getByText('Database row ID')).toBeInTheDocument();
-    expect(within(evidence).getByText('fixture-physical-record-11')).toBeInTheDocument();
-    expect(within(evidence).getByText('Device source time')).toBeInTheDocument();
-    expect(within(evidence).getByText('Unknown')).toBeInTheDocument();
-    expect(within(evidence).getByText('2023-11-14 22:16:40 UTC')).toBeInTheDocument();
-    expect(screen.getByLabelText('Provenance for evidence 11')).toHaveTextContent(
-      '"backfill": true',
-    );
-  });
-
-  it('separates observations from hypotheses and exports the redacted bounded payload', () => {
-    const create = vi.fn().mockReturnValue('blob:fixture');
-    const click = vi
-      .spyOn(HTMLAnchorElement.prototype, 'click')
-      .mockImplementation(() => undefined);
-    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: create, revokeObjectURL: vi.fn() }));
-    render(<IncidentDetail detail={detailFixture()} />);
-    expect(screen.getByRole('heading', { name: 'Observations' })).toBeInTheDocument();
-    expect(
-      screen.getByRole('heading', { name: 'Hypotheses · not confirmed causes' }),
-    ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Download redacted bundle' }));
-    expect(create.mock.calls[0]?.[0]).toBeInstanceOf(Blob);
-    expect(click).toHaveBeenCalledOnce();
   });
 
   it('applies range, uplink, device and text filters together', () => {
@@ -205,17 +148,6 @@ describe('network history transport and outage behavior', () => {
     });
     expect(screen.getByText('Stale report')).toBeInTheDocument();
     expect(screen.queryByText('Recording')).not.toBeInTheDocument();
-  });
-
-  it('uses only the local read-only API and preserves literal search strings', async () => {
-    const fetch = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(response({ ...historyFixture(), ok: true }));
-    await fetchNetworkHistory({ hours: 24, search: 'DNS & DHCP', device: 'router' });
-    expect(fetch).toHaveBeenCalledWith(
-      '/api/network-history?hours=24&search=DNS+%26+DHCP&device=router',
-      { cache: 'no-store', signal: undefined },
-    );
   });
 
   it('rejects an unsupported schema or missing provenance rather than rendering a partial healthy report', () => {

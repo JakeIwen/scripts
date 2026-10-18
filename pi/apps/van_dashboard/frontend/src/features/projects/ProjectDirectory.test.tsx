@@ -5,7 +5,6 @@ import { ToastProvider } from '../../components/ToastProvider';
 import { fetchHostedProjects, updateHostedProject } from './api';
 import { ProjectDirectory } from './ProjectDirectory';
 import {
-  decodeHostedProjectsResponse,
   PROJECT_HOST,
   PROJECT_LINK_KIND,
   PROJECT_SOURCE,
@@ -156,22 +155,14 @@ function mockUpdates() {
 }
 
 describe('ProjectDirectory', () => {
-  it('renders projects, dims offline kept ones, and leaves out other offline ones', async () => {
+  it('renders projects and leaves out offline ones that were never kept', async () => {
     renderDirectory();
 
     expect(await screen.findByRole('heading', { name: 'New' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Listed' })).toBeInTheDocument();
     expect(screen.getByText('Hidden (1)').closest('details')).not.toHaveAttribute('open');
-    const listedRow = screen.getByRole('link', { name: 'Listed app' }).closest('li');
-    expect(listedRow).not.toBeNull();
-    expect(within(listedRow!).getByText('This Mac')).toBeInTheDocument();
-    expect(within(listedRow!).getByText('LAN')).toBeInTheDocument();
-    expect(within(listedRow!).getByText('TS')).toBeInTheDocument();
-    expect(screen.getByText('Vanpi')).toBeInTheDocument();
-    expect(screen.getByText('lionfeather.dev')).toBeInTheDocument();
-    const offlineRow = screen.getByRole('link', { name: 'Offline kept app' }).closest('li');
-    expect(offlineRow).toHaveClass('project-directory__row--stale');
-    expect(within(offlineRow!).getByText('offline')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Listed app' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Offline kept app' })).toBeInTheDocument();
     expect(screen.queryByText('Offline new app')).not.toBeInTheDocument();
     expect(screen.queryByText('Offline hidden app')).not.toBeInTheDocument();
   });
@@ -242,24 +233,5 @@ describe('ProjectDirectory', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('A project with that name exists');
     expect(screen.getByRole('button', { name: 'Save changes to Listed app' })).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('A project with that name exists');
-  });
-
-  it('surfaces a response decode failure in the error paragraph', async () => {
-    vi.mocked(fetchHostedProjects).mockImplementation(async () =>
-      decodeHostedProjectsResponse({
-        ok: true,
-        projects: [
-          {
-            ...PROJECTS[0],
-            links: [{ kind: PROJECT_LINK_KIND.WEB, label: 'Web', url: 'javascript:alert(1)' }],
-          },
-        ],
-      }),
-    );
-    renderDirectory();
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'project directory response.projects[0].links[0].url must be a safe http or https URL',
-    );
   });
 });

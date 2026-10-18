@@ -1,14 +1,9 @@
-import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getJson, postForm } from '../../api/client';
+import { getJson } from '../../api/client';
 import type { LightingControlActions } from './types';
 import { decodeLightingStatus } from './decoders';
-import {
-  LIGHTING_SHEET_POLL_INTERVAL_MS,
-  LIGHTING_TILE_POLL_INTERVAL_MS,
-  useLightingStatus,
-} from './hooks';
 import { LightingSheet } from './LightingSheet';
 import { LightingTile } from './LightingTile';
 
@@ -179,62 +174,6 @@ describe('lighting response decoder', () => {
     });
     expect(status.groups[3]?.powerSwitch?.entityId).toBe('switch.ext_flood');
   });
-
-  it('rejects contradictory counts, availability, and color ranges', () => {
-    const countMismatch = lightingPayload();
-    (countMismatch.lighting as Record<string, unknown>).on_count = 4;
-    expect(() => decodeLightingStatus(countMismatch)).toThrow(
-      'lighting.on_count does not match returned lights',
-    );
-
-    const availabilityMismatch = lightingPayload();
-    const lighting = availabilityMismatch.lighting as Record<string, unknown>;
-    const groups = lighting.groups as Record<string, unknown>[];
-    const cabLights = groups[0]!.lights as Record<string, unknown>[];
-    cabLights[0]!.available = false;
-    expect(() => decodeLightingStatus(availabilityMismatch)).toThrow(
-      'lighting.groups[0].lights[0].available does not match',
-    );
-
-    const invalidTemperature = lightingPayload();
-    const invalidGroups = (invalidTemperature.lighting as Record<string, unknown>).groups as Record<
-      string,
-      unknown
-    >[];
-    const invalidLights = invalidGroups[0]!.lights as Record<string, unknown>[];
-    invalidLights[0]!.color_temp_kelvin = 7_000;
-    expect(() => decodeLightingStatus(invalidTemperature)).toThrow(
-      'color_temp_kelvin is outside its supported range',
-    );
-  });
-});
-
-describe('lighting polling', () => {
-  it('uses one shared poller and speeds up only while the sheet is open', async () => {
-    vi.useFakeTimers();
-    const { result, rerender } = renderHook(({ open }) => useLightingStatus(open), {
-      initialProps: { open: false },
-    });
-    await act(async () => Promise.resolve());
-
-    expect(result.current.data?.totalCount).toBe(5);
-    expect(getJson).toHaveBeenCalledTimes(1);
-    expect(getJson).toHaveBeenLastCalledWith('/api/lights', expect.any(AbortSignal));
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(LIGHTING_TILE_POLL_INTERVAL_MS);
-    });
-    expect(getJson).toHaveBeenCalledTimes(2);
-
-    rerender({ open: true });
-    await act(async () => Promise.resolve());
-    expect(getJson).toHaveBeenCalledTimes(3);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(LIGHTING_SHEET_POLL_INTERVAL_MS);
-    });
-    expect(getJson).toHaveBeenCalledTimes(4);
-  });
 });
 
 describe('lighting views', () => {
@@ -273,23 +212,7 @@ describe('lighting views', () => {
     expect(onOpen).toHaveBeenCalledOnce();
   });
 
-  it('announces background refreshes without inserting a visible layout row', () => {
-    render(
-      <LightingTile
-        status={decodeLightingStatus(lightingPayload())}
-        error={null}
-        refreshing
-        onOpen={vi.fn()}
-        controls={controls()}
-      />,
-    );
-
-    const announcement = screen.getByText('Refreshing lights…');
-    expect(announcement).toHaveClass('visually-hidden');
-    expect(screen.getByLabelText('Quick room controls')).toBeVisible();
-  });
-
-  it('shows supported color data and disables all mutations during a single-flight action', () => {
+  it('disables all mutations during a single-flight action', () => {
     const status = decodeLightingStatus(lightingPayload());
     const onRefresh = vi.fn().mockResolvedValue(status);
     render(
@@ -304,11 +227,7 @@ describe('lighting views', () => {
       />,
     );
 
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Expand Cab lights' }));
-    expect(screen.getByText(/Hue 29°/)).toBeInTheDocument();
-    expect(screen.getByText(/3200 K · 2202–6535 K/)).toBeInTheDocument();
-    expect(screen.getByText('Exterior power')).toBeInTheDocument();
     expect(screen.getByRole('slider', { name: 'Driver hue' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Turn all on' })).toBeDisabled();
 

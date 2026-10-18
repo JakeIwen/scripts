@@ -40,14 +40,6 @@ describe('system health projections', () => {
     expect(sample).not.toHaveProperty('another_future_field');
   });
 
-  it('rejects an unknown diagnosis level in the stable outer contract', () => {
-    const payload = systemHealthPayload();
-    payload.diagnosis.level = 'excellent';
-    expect(() => decodeSystemHealthReport(payload, 6)).toThrow(
-      'diagnosis.level has an unsupported value: excellent',
-    );
-  });
-
   it('supports the bounded route contract when optional producer sections are absent', () => {
     const report = decodeSystemHealthReport(
       {

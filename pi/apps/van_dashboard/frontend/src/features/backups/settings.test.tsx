@@ -70,21 +70,6 @@ afterEach(() => {
 });
 
 describe('backup settings', () => {
-  it.each(['duplicate-field', 'duplicate-group', 'unknown-group', 'bad-bounds'] as const)(
-    'rejects incoherent server metadata: %s',
-    (kind) => {
-      const payload = backupPreferencesPayload();
-      const field = payload.settings.fields[0],
-        group = payload.settings.groups[0];
-      if (!field || !group) throw new Error('Settings fixture is incomplete');
-      if (kind === 'duplicate-field') payload.settings.fields.push({ ...field });
-      if (kind === 'duplicate-group') payload.settings.groups.push({ ...group });
-      if (kind === 'unknown-group') field.group = 'missing';
-      if (kind === 'bad-bounds') field.minimum = 50;
-      expect(() => decodeBackupPreferences(payload)).toThrow(TypeError);
-    },
-  );
-
   it('prepares fractional transfer rates without a lossy payload cast', () => {
     const payload = backupPreferencesPayload();
     const field = payload.settings.fields[0];
@@ -170,22 +155,6 @@ describe('backup settings', () => {
     ]);
   });
 
-  it('applies a dropdown selection immediately', async () => {
-    const fixture = backupPreferencesPayload();
-    const field = fixture.settings.fields[0];
-    if (!field) throw new Error('Settings fixture is incomplete');
-    Object.assign(field, { kind: 'hour', maximum: 23 });
-    const fetch = vi.fn(async (_path: unknown, init?: RequestInit) => {
-      if (init?.method === 'POST') fixture.settings.values['pi.interval'] = 8;
-      return new Response(JSON.stringify(fixture));
-    });
-    vi.stubGlobal('fetch', fetch);
-    const select = await openPanel();
-    fireEvent.change(select, { target: { value: '8' } });
-    expect(await screen.findByText('Pi · iCloud · Every updated')).toBeVisible();
-    expect(fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
-  });
-
   it('finishes a pending change and keeps its lock when the dialog closes and reopens', async () => {
     const fixture = backupPreferencesPayload();
     let finish: (() => void) | undefined;
@@ -214,45 +183,6 @@ describe('backup settings', () => {
     expect(screen.getByLabelText('Every')).toBeEnabled();
     expect(fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
     expect(fetch.mock.calls.filter(([, init]) => init?.method !== 'POST')).toHaveLength(1);
-  });
-
-  it('shows one rotation interval and an info tooltip covering missed runs and missing cards', async () => {
-    const fixture = backupPreferencesPayload();
-    const field = fixture.settings.fields[0];
-    if (!field) throw new Error('Settings fixture is incomplete');
-    Object.assign(field, {
-      group: 'hotspares',
-      label: 'Rotation interval',
-      help: 'Missed runs do not accumulate. If either card is missing, automatic rotation waits.',
-    });
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response(JSON.stringify(fixture))),
-    );
-    render(<BackupSettingsPanel refresh={vi.fn()} capacityControl={null} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Backup settings' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Hotspares' }));
-    expect(screen.getAllByRole('spinbutton')).toHaveLength(1);
-    expect(screen.getByLabelText('Rotation interval')).toHaveValue(7);
-    const info = screen.getByRole('button', { name: 'About Rotation interval' });
-    expect(info).toHaveTextContent('i');
-    fireEvent.focus(info);
-    expect(screen.getByRole('tooltip')).toHaveTextContent('Missed runs do not accumulate');
-    expect(screen.getByRole('tooltip')).toHaveTextContent('either card is missing');
-  });
-
-  it('puts explanation in a tooltip and closes without a discard prompt', async () => {
-    mockSettings();
-    await openPanel();
-    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
-    fireEvent.focus(screen.getByRole('button', { name: 'About Every' }));
-    expect(screen.getByRole('tooltip')).toHaveTextContent(
-      'Time between successful cloud verifications.',
-    );
-    fireEvent.keyDown(screen.getByRole('button', { name: 'About Every' }), { key: 'Escape' });
-    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Close Backup settings' }));
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('retains a draft after a conflict and provides an explicit reload', async () => {

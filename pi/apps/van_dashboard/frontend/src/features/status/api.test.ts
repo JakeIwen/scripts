@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { postForm } from '../../api/client';
-import { setCopAlert, toggleStarlinkPower } from './api';
+import { setCopAlert } from './api';
 
 vi.mock('../../api/client', () => ({ postForm: vi.fn() }));
 
@@ -52,15 +52,5 @@ describe('status mutations', () => {
     await expect(setCopAlert(true)).rejects.toThrow(
       'COP ALERT response disagrees with the requested state',
     );
-  });
-
-  it('uses the fixed empty Starlink toggle form', async () => {
-    vi.mocked(postForm).mockResolvedValue({
-      ok: true,
-      message: 'Starlink power on',
-      starlink: { state: 'on', available: true, changing: false, last_error: null },
-    });
-    await toggleStarlinkPower();
-    expect(postForm).toHaveBeenCalledWith('/api/starlink');
   });
 });

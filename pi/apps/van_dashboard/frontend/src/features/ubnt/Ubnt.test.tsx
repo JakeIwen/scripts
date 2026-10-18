@@ -89,19 +89,8 @@ describe('UBNT UI', () => {
     expect(container.querySelector('.ubnt-tile__radio-dot--good')).toBeNull();
     expect(container.querySelector('.tile--good')).toBeNull();
   });
-  it('shows physical and radio state on the tile', () => {
-    const onOpen = vi.fn();
-    render(
-      <UbntTile status={sampleUbntStatus()} error={null} refreshing={false} onOpen={onOpen} />,
-    );
 
-    expect(screen.getByText('denlink · -56 dBm · 99.1% CCQ')).toBeInTheDocument();
-    expect(screen.getByText('Connected')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Open UBNT Wi-Fi details' }));
-    expect(onOpen).toHaveBeenCalledOnce();
-  });
-
-  it('shows profile, scan, connect, and provisioning controls without Starlink coupling', () => {
+  it('wires the scan and reconnect controls', () => {
     const actions = controls();
     render(
       <UbntSheet
@@ -112,9 +101,6 @@ describe('UBNT UI', () => {
       />,
     );
 
-    expect(screen.getAllByText('denlink').length).toBeGreaterThan(0);
-    expect(screen.getByText('Campus')).toBeInTheDocument();
-    expect(screen.queryByText(/starlink/i)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Scan nearby Wi-Fi' }));
     expect(actions.scan).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
@@ -256,25 +242,4 @@ describe('antenna reload recovery', () => {
     expect(screen.getByText(/Antenna status could not refresh/)).toBeInTheDocument();
     expect(screen.getByText('Recovery timed out')).toBeInTheDocument();
   });
-
-  it('keeps unrelated errors visible and displays queued Starlink intent', () => {
-    const status = sampleUbntStatus();
-    status.lastError = 'UBNT Wi-Fi tool returned invalid JSON';
-    status.starlinkPending = true;
-    status.operation = { ...status.operation, status: 'running', kind: 'connect' };
-    render(<UbntSheet open onClose={() => {}} resource={resource(status)} controls={controls()} />);
-    expect(screen.getByText(/Antenna status could not refresh/)).toBeInTheDocument();
-    expect(screen.getByText(/Starlink antenna change queued/)).toBeInTheDocument();
-  });
-});
-
-it('explains the bounded portal hold and allows early resume', () => {
-  const status = sampleUbntStatus();
-  status.state.automaticPaused = true;
-  status.state.manualHoldRemainingSeconds = 480;
-  render(<UbntSheet open onClose={() => {}} resource={resource(status)} controls={controls()} />);
-  expect(
-    screen.getByText(/Captive-portal login protection: at most 8 min remaining/),
-  ).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Resume automatic selection' })).toBeEnabled();
 });

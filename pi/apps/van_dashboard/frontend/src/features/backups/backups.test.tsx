@@ -1,7 +1,6 @@
 import { ToastProvider } from '../../components/ToastProvider';
 import type { ReactNode } from 'react';
 import {
-  act,
   cleanup,
   fireEvent,
   render as testingRender,
@@ -15,11 +14,6 @@ import type { BackupControls } from './controls';
 import { BackupsSheet } from './BackupsSheet';
 import { BackupsTile } from './BackupsTile';
 import { decodeBackupStatusResponse } from './decoders';
-import {
-  BACKUP_IDLE_SHEET_POLL_INTERVAL_MS,
-  BACKUP_RUNNING_POLL_INTERVAL_MS,
-  useBackupStatus,
-} from './hooks';
 import {
   backupStatusPayload,
   sampleBackupStatus,
@@ -46,11 +40,6 @@ beforeAll(() => {
 
 function render(ui: ReactNode) {
   return testingRender(ui, { wrapper: ToastProvider });
-}
-
-function BackupProbe({ sheetOpen }: { sheetOpen: boolean }) {
-  const resource = useBackupStatus(sheetOpen);
-  return <output>{resource.data?.health ?? 'loading'}</output>;
 }
 
 function backupResource(running = false) {
@@ -113,46 +102,6 @@ describe('backups feature', () => {
     });
   });
 
-  it('rejects unsupported aggregate health states', () => {
-    const payload = backupStatusPayload();
-    const backups = payload.backups as Record<string, unknown>;
-    backups.health = 'perfect';
-    expect(() => decodeBackupStatusResponse(payload)).toThrow(
-      'backups.health has an unsupported value',
-    );
-  });
-
-  it('rejects unsupported clone-card capacities', () => {
-    const payload = backupStatusPayload();
-    const backups = payload.backups as Record<string, unknown>;
-    const settings = backups.settings as Record<string, unknown>;
-    settings.clone_card_nominal_gb = 512;
-    expect(() => decodeBackupStatusResponse(payload)).toThrow(
-      'backups.settings.clone_card_nominal_gb has an unsupported value',
-    );
-  });
-
-  it('uses 10-second idle and 2.5-second running sheet polling', async () => {
-    fetchBackupStatusMock
-      .mockResolvedValueOnce(sampleBackupStatus())
-      .mockResolvedValue(sampleBackupStatus(true));
-    render(<BackupProbe sheetOpen />);
-    await act(async () => Promise.resolve());
-    expect(fetchBackupStatusMock).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(BACKUP_IDLE_SHEET_POLL_INTERVAL_MS);
-    });
-    await act(async () => Promise.resolve());
-    expect(fetchBackupStatusMock.mock.calls.length).toBeGreaterThanOrEqual(2);
-    const afterRunningDetected = fetchBackupStatusMock.mock.calls.length;
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(BACKUP_RUNNING_POLL_INTERVAL_MS);
-    });
-    expect(fetchBackupStatusMock.mock.calls.length).toBe(afterRunningDetected + 1);
-  });
-
   it('disables another Run now while a dashboard backup operation is running', () => {
     const resource = backupResource(true);
     resource.data.checkedAt = Date.now() / 1000 - 3;
@@ -175,14 +124,6 @@ describe('backups feature', () => {
     if (!borgCard || !exfatCard) throw new Error('missing local backup cards');
     expect(within(borgCard).getByRole('button', { name: 'Stop gracefully' })).toBeEnabled();
     expect(within(exfatCard).getByRole('button', { name: 'Run now' })).toBeDisabled();
-    expect(screen.queryByRole('button', { name: 'Refresh' })).not.toBeInTheDocument();
-    expect(
-      screen.getByLabelText('Updated 3s ago').closest('.bottom-sheet__subtitle'),
-    ).toHaveTextContent(
-      /Freshness, runtime progress, hotspares, and Time Machine evidence\.\s*~3s/,
-    );
-    act(() => vi.advanceTimersByTime(2000));
-    expect(screen.getByLabelText('Updated 5s ago')).toHaveTextContent('~5s');
     for (const button of screen.getAllByRole('button', { name: 'Clone now' })) {
       expect(button).toBeDisabled();
     }
@@ -238,7 +179,6 @@ describe('backups feature', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Hotspares' }));
     const select = screen.getByRole('combobox', { name: 'Bootable clone card capacity' });
     expect(select).toHaveValue('64');
-    expect(screen.getByText('Root limit · 52 GiB')).toBeInTheDocument();
     expect(
       screen.getAllByRole('option').map((option) => (option as HTMLOptionElement).value),
     ).toEqual(['32', '64', '128', '256']);

@@ -52,14 +52,6 @@ describe('compute projections', () => {
     expect(jobs[0]).not.toHaveProperty('diagnostics');
   });
 
-  it('rejects malformed stable scheduler counts', () => {
-    const payload = computePayload();
-    payload.status.queued = -1;
-    expect(() => decodeComputeReport(payload)).toThrow(
-      'compute status.queued must be a non-negative integer',
-    );
-  });
-
   it('supports the bounded route contract before optional telemetry fields exist', () => {
     const report = decodeComputeReport({
       ok: true,

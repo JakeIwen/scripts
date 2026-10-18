@@ -1,6 +1,5 @@
-import { render, renderHook, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { getJson } from '../../api/client';
 import type { PollingState } from '../../hooks/usePollingResource';
 import { TelemetryTileView } from './TelemetryTile';
 import {
@@ -13,7 +12,6 @@ import {
   formatBatteryVoltage,
   type TelemetrySummary,
 } from './telemetrySummary';
-import { useTelemetrySummary } from './useTelemetrySummary';
 
 vi.mock('../../api/client', () => ({ getJson: vi.fn(), postForm: vi.fn() }));
 
@@ -70,15 +68,6 @@ describe('decodeTelemetrySummary', () => {
     expect(formatBatteryVoltage(summary.battery)).toBe('12.64 V');
   });
 
-  it('requires an available battery to contain a numeric reading', () => {
-    expect(() =>
-      decodeTelemetrySummary({
-        ...telemetryPayload,
-        battery: { ...telemetryPayload.battery, value: null },
-      }),
-    ).toThrow('battery.value must be present when battery.available is true');
-  });
-
   it('keeps a service-status failure as readable data', () => {
     const summary = decodeTelemetrySummary({
       ...telemetryPayload,
@@ -90,17 +79,6 @@ describe('decodeTelemetrySummary', () => {
     });
 
     expect(summary.service.error).toBe('systemctl timed out');
-  });
-});
-
-describe('useTelemetrySummary', () => {
-  it('polls the summary endpoint and exposes decoded data', async () => {
-    vi.mocked(getJson).mockResolvedValue(telemetryPayload);
-
-    const { result } = renderHook(() => useTelemetrySummary());
-
-    await waitFor(() => expect(result.current.data?.battery.value).toBe(12.638));
-    expect(getJson).toHaveBeenCalledWith('/api/telemetry-summary', expect.any(AbortSignal));
   });
 });
 

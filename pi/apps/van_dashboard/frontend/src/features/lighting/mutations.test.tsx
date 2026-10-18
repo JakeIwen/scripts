@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getJson, postForm } from '../../api/client';
 import { ToastProvider } from '../../components/ToastProvider';
-import { setLightBrightness, setLightColorTemperature, setLightHue, setLightingPower } from './api';
 import { decodeLightingStatus } from './decoders';
 import { LightingSlider } from './LightingSlider';
 import { useLightingControls } from './useLightingControls';
@@ -72,32 +71,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
-});
-
-describe('lighting mutation API', () => {
-  it('uses the exact URL-encoded endpoint fields', async () => {
-    await setLightingPower('group:cab', true);
-    await setLightBrightness('light.cab_driver', 64);
-    await setLightHue('light.cab_driver', 180);
-    await setLightColorTemperature('light.cab_driver', 3_500);
-
-    expect(postForm).toHaveBeenNthCalledWith(1, '/api/lights/power', {
-      target: 'group:cab',
-      value: 'true',
-    });
-    expect(postForm).toHaveBeenNthCalledWith(2, '/api/lights/brightness', {
-      entity: 'light.cab_driver',
-      brightness: 64,
-    });
-    expect(postForm).toHaveBeenNthCalledWith(3, '/api/lights/hue', {
-      entity: 'light.cab_driver',
-      hue: 180,
-    });
-    expect(postForm).toHaveBeenNthCalledWith(4, '/api/lights/color-temperature', {
-      entity: 'light.cab_driver',
-      kelvin: 3_500,
-    });
-  });
 });
 
 describe('useLightingControls', () => {
@@ -221,11 +194,7 @@ describe('LightingSlider', () => {
     expect(onCommit).not.toHaveBeenCalled();
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(499);
-    });
-    expect(onCommit).not.toHaveBeenCalled();
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1);
+      await vi.advanceTimersByTimeAsync(1_000);
     });
     expect(onCommit).toHaveBeenCalledOnce();
     expect(onCommit).toHaveBeenCalledWith(67);

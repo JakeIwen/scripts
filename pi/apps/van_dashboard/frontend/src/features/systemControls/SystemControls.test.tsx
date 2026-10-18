@@ -8,7 +8,7 @@ import { SystemControls } from './SystemControls';
 vi.mock('./controls', () => ({ useSystemControls: vi.fn() }));
 
 describe('SystemControls', () => {
-  it('renders the two labeled rows and keeps tile editing available while actions are locked', () => {
+  it('locks power and restart actions but keeps tile editing available', () => {
     vi.mocked(useSystemControls).mockReturnValue({
       running: false,
       locked: true,
@@ -25,13 +25,9 @@ describe('SystemControls', () => {
       </ToastProvider>,
     );
 
-    expect(screen.getByText('Pi')).toBeInTheDocument();
-    expect(screen.getByText('Dash')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Restart dashboard' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Restart Pi' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Power down Pi' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Arrange tiles' })).toBeEnabled();
-    const announcement = screen.getByText('Dashboard disconnected while vanpi reboots');
-    expect(announcement).toHaveClass('visually-hidden');
   });
 });

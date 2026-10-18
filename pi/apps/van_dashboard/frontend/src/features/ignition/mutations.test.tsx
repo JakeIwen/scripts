@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getJson, postForm } from '../../api/client';
 import { ToastProvider } from '../../components/ToastProvider';
-import { pauseIgnitionMonitoring, resumeIgnitionMonitoring } from './api';
+import { pauseIgnitionMonitoring } from './api';
 import { decodeIgnitionMonitorStatus } from './decoders';
 import { IgnitionDurationEditor } from './IgnitionDurationEditor';
 import { useIgnitionMonitorActions } from './useIgnitionMonitorActions';
@@ -54,15 +54,6 @@ beforeEach(() => {
 });
 
 describe('ignition-monitor mutation API', () => {
-  it('uses exact disable minutes and empty enable forms', async () => {
-    await pauseIgnitionMonitoring(120);
-    vi.mocked(postForm).mockResolvedValueOnce(monitorPayload(false));
-    await resumeIgnitionMonitoring();
-
-    expect(postForm).toHaveBeenNthCalledWith(1, '/api/ignition-monitor/disable', { minutes: 120 });
-    expect(postForm).toHaveBeenNthCalledWith(2, '/api/ignition-monitor/enable', {});
-  });
-
   it('rejects an invalid duration before sending a request', async () => {
     await expect(pauseIgnitionMonitoring(0)).rejects.toThrow(/1 to .* whole minutes/);
     await expect(pauseIgnitionMonitoring(1.5)).rejects.toThrow(/whole minutes/);

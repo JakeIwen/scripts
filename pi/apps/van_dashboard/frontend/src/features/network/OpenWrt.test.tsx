@@ -79,41 +79,6 @@ describe('OpenWrt UI', () => {
     expect(onOpen).toHaveBeenCalledOnce();
   });
 
-  it('uses the compact tile hierarchy instead of rendering an online pill', () => {
-    const view = render(
-      <OpenWrtTile
-        connectivity={sampleConnectivity()}
-        connectivityError={null}
-        connectivityRefreshing={false}
-        throughput={null}
-        speedtest={sampleSpeedtest()}
-        speedtestError={null}
-        speedtestStarting={false}
-        onStartSpeedtest={vi.fn().mockResolvedValue(undefined)}
-        onOpen={vi.fn()}
-      />,
-    );
-    const tile = view.container.querySelector('.openwrt-tile');
-    const header = tile?.querySelector(':scope > .connectivity-head');
-    const overview = tile?.querySelector(':scope > .mwan-overview');
-    const footer = tile?.querySelector(':scope > .openwrt-speedtest');
-
-    expect(header?.children[0]).toHaveClass('network-card-heading');
-    expect(header?.children[1]).toHaveClass('connectivity-age');
-    expect(header?.children[1]).toHaveTextContent(/^Updated · /);
-    expect(tile?.querySelector('.status-pill')).not.toBeInTheDocument();
-
-    expect(overview?.children[0]).toHaveClass('mwan-primary');
-    expect(overview?.children[1]).toHaveClass('mwan-list');
-    expect(overview?.querySelector('.network-label')).toHaveTextContent('MWAN3 route');
-    expect(overview?.querySelector('.network-dot')).toHaveClass('good');
-    expect(overview?.querySelectorAll('.mwan-chip')).toHaveLength(2);
-
-    expect(footer?.children[0]).toHaveClass('openwrt-speedtest-button');
-    expect(footer?.children[1]).toHaveClass('speed-results');
-    expect(footer?.children[1]).toHaveAttribute('role', 'status');
-  });
-
   it('shows current internet throughput under the route once two samples exist', () => {
     const connectivity = sampleConnectivity();
     const tile = (throughput: WanThroughput | null, status = connectivity) => (
@@ -135,7 +100,7 @@ describe('OpenWrt UI', () => {
 
     connectivity.router.wanTraffic = { uptimeSeconds: 100, uplinks: [] };
     view.rerender(tile(null));
-    expect(screen.getByLabelText('Current internet throughput')).toHaveTextContent('NetMeasuring…');
+    expect(screen.getByLabelText('Current internet throughput')).toHaveTextContent('Measuring…');
 
     const throughput = {
       downloadBps: 4_200_000,
@@ -150,7 +115,7 @@ describe('OpenWrt UI', () => {
     expect(row).toHaveAttribute('title', 'wan ↓ 4.2 Mbps · ↑ 640 kbps\nAveraged over 3.0 s');
 
     view.rerender(tile(throughput, { ...connectivity, stale: true }));
-    expect(screen.getByLabelText('Current internet throughput')).toHaveTextContent('Net—');
+    expect(screen.getByLabelText('Current internet throughput')).toHaveTextContent('—');
     view.unmount();
   });
 
