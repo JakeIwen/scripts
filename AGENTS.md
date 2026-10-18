@@ -507,7 +507,9 @@ vocabulary in `hosted_project_report.py` and the one-time seed in
 `/api/hosted-projects*`. `hosted_project_scan.py` is the stdlib-only scanner
 for all three hosts (Pi cron every 15 minutes, Mac LaunchAgent
 `com.jacobr.hosted-project-scan` hourly over `vanpi.lan` only); scans report
-only listeners whose page answers HTTP 200. The Pi cron line is a managed
+only listeners whose page answers HTTP 200, and Pi links follow each unit's
+bind address (the Pi scan covers lingering `systemctl --user` units too, so
+LLM Switchboard, bound to Tailscale only, gets no LAN link). The Pi cron line is a managed
 block in both the live `pi` crontab and `pi/crontab_pi`, but the repo's
 crontab files lag the live ones in unrelated lines: run `pi/pull_crontabs.sh`
 and review the diff before any `pi/push_crontabs.sh`. Preserve the

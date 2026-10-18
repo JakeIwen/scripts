@@ -38,6 +38,12 @@ LINK_LABELS = {
 }
 HOST_LABELS = {Host.MAC: "This Mac", Host.PI: "Vanpi", Host.WEB: "lionfeather.dev", Host.CUSTOM: "Custom"}
 SCAN_HOSTS = frozenset({Host.MAC, Host.PI, Host.WEB})
+# The link kinds each host's scan reports; a row's links of these kinds are the scan's to set.
+HOST_LINK_KINDS = {
+    Host.MAC: frozenset({LinkKind.LOCAL}),
+    Host.PI: frozenset({LinkKind.LAN, LinkKind.TS}),
+    Host.WEB: frozenset({LinkKind.WEB}),
+}
 REVIEW_STATUSES = frozenset({Status.LISTED, Status.HIDDEN})
 
 
@@ -212,6 +218,9 @@ def validate_listener(listener, hosts) -> ProjectListener:
         "description": validate_description(listener["description"]),
         "links": validate_links(listener["links"]),
     }
+    kinds = {link["kind"] for link in result["links"]}
+    if not kinds or not kinds <= HOST_LINK_KINDS[host]:
+        raise ValueError("Listener links must be the link kinds its host reports")
     if "service_port" in listener:
         result["service_port"] = validate_service_port(listener["service_port"], host)
     return result

@@ -111,9 +111,10 @@ listeners means everything scanned there is gone. Reconciliation runs under
 the store lock:
 
 1. **Group.** Listeners of one host that share an address (hostname and
-   port of any link) are one app: the telemetry dashboard runs one systemd
-   unit per bind address on port 8765. A group's primary listener is the one
-   with the shortest key. Web groups are reconciled after Mac and Pi groups.
+   port of any link), or a port on their `lan` or `ts` links (both reach the
+   Pi itself), are one app: the telemetry dashboard runs one systemd unit per
+   bind address on port 8765, one reporting only `lan` and the other only
+   `ts`. A group's primary listener is the one with the shortest key. Web groups are reconciled after Mac and Pi groups.
 2. **Find the entry.** An entry holding any of the group's keys is the
    group's entry. If none does, the first match below, preferring entries
    Jacob has kept over unreviewed ones, among entries that hold no service of
@@ -149,6 +150,18 @@ the store lock:
 Refreshing links merges by kind: links whose kind the listener reports are
 replaced when the address changed (an unchanged address keeps the stored URL,
 path and label), and links of other kinds are kept.
+
+After every group is claimed, the scan settles the link kinds it owns. Each
+host owns the kinds its listeners report: `pi` owns `lan` and `ts`, `mac`
+owns `local`, `web` owns `web`. For an entry with services reported in this
+scan, a link of a kind those services' hosts own but none of them reported is
+removed (counted in `updated`). So LLM Switchboard, bound only to the
+Tailscale address, loses its seeded `lan` link. When only the telemetry
+dashboard's LAN unit runs, the entry shows only `lan` until the Tailscale unit
+returns. Kinds no reported host owns, such as the `web` link Jacob gave
+LionFeather Dev Page, are kept. An entry none of whose services was reported
+keeps its links, so an offline entry still shows where it lived. A listener's
+links must be of its host's kinds, at least one, or the report is rejected.
 
 Then every service whose host is in `hosts` and whose key was not reported
 gets `live: false`, and an entry is live while any of its services is.
@@ -206,15 +219,26 @@ leaves the listener out, and an entry already in the store goes stale.
 Entries without services (form entries, unclaimed seeds) are never probed.
 
 - **pi**: running systemd services (`systemctl list-units --type=service
-  --state=running`), each unit's `MainPID`, `Description`, and listening TCP
+  --state=running`), then the same for the scanning user's own manager
+  (`systemctl --user`, with `XDG_RUNTIME_DIR` set to `/run/user/<uid>`
+  because cron leaves it unset; skipped when that directory does not exist).
+  The user units are lingering apps such as `llm-switchboard.service`, and
+  their keys look like system ones (`pi:llm-switchboard.service`). Then each
+  unit's `MainPID`, `Description`, and listening TCP
   sockets from `ss -ltnpH` (`sudo -n ss` first so other users' services such
   as Home Assistant resolve; fall back without sudo). A unit counts when it
   owns a socket bound to a non-loopback address on a port outside
   {22, 53, 139, 445, 1883, 5900}. Name: unit name without `.service`, title
   case, hyphens to spaces. Description: the unit `Description`, trimmed to
-  200 characters. Links: `lan` `http://vanpi.lan:<port>/` and `ts`
-  `http://<tailscale ip>:<port>/`, the IP from `tailscale ip -4` with
-  `100.82.91.76` as the fallback. Multiple ports on one unit become one entry
+  200 characters. Links follow the addresses the unit's sockets on the chosen
+  port are bound to: `lan` `http://vanpi.lan:<port>/` for a wildcard or any
+  non-Tailscale address, `ts` `http://<tailscale ip>:<port>/` for a wildcard
+  or a Tailscale address (100.64.0.0/10, fd7a:115c:a1e0::/48, or the IP from
+  `tailscale ip -4`, with `100.82.91.76` as the fallback). An app bound only
+  to the Tailscale address therefore gets no LAN link, and one bound only to
+  the LAN address gets no Tailscale link. A firewall rule or an app that
+  refuses LAN clients itself is not detected; the Pi's firewall has only
+  Tailscale's own rules. Multiple ports on one unit become one entry
   using the first port that serves a page, trying wildcard-bound ports
   before interface-bound ones and lower ports first (Home Assistant also
   listens on 1400 and 40000 for integrations; its UI is the wildcard 8123).

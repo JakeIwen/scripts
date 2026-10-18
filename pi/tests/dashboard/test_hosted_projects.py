@@ -30,16 +30,20 @@ LATER = "2026-10-16T18:30:00Z"
 WRITER = "pi.apps.van_dashboard.van_dashboard_common.atomic_json_write"
 
 
-def listener(host=Host.PI, unit="example.service", name="Example", port=19001):
-    kind, hostname = {
-        Host.PI: (LinkKind.LAN, "vanpi.lan"),
-        Host.MAC: (LinkKind.LOCAL, "127.0.0.1"),
-        Host.WEB: (LinkKind.WEB, "example.com"),
-    }[host]
+def listener(host=Host.PI, unit="example.service", name="Example", port=19001, kinds=None):
+    # A Pi unit bound to the wildcard address reports both networks, as the scanner does.
+    hostnames = {
+        LinkKind.LAN: "vanpi.lan", LinkKind.TS: "100.82.91.76",
+        LinkKind.LOCAL: "127.0.0.1", LinkKind.WEB: "example.com",
+    }
+    if kinds is None:
+        kinds = {
+            Host.PI: (LinkKind.LAN, LinkKind.TS), Host.MAC: (LinkKind.LOCAL,), Host.WEB: (LinkKind.WEB,),
+        }[host]
     return {
         "key": f"{host}:{unit}", "host": host, "name": name,
         "description": "Discovered description.",
-        "links": [{"kind": kind, "url": f"http://{hostname}:{port}/"}],
+        "links": [{"kind": kind, "url": f"http://{hostnames[kind]}:{port}/"} for kind in kinds],
     }
 
 
@@ -256,7 +260,7 @@ class HostedProjectReportTests(HostedProjectFixture):
 
     def test_reordered_report_links_are_idempotent(self):
         item = listener()
-        item["links"].insert(0, {"kind": "ts", "url": "http://100.82.91.76:19001/"})
+        item["links"].reverse()
         self.projects.apply_report(report(item))
         before = self.projects.snapshot()
         with mock.patch(WRITER) as write:
@@ -282,7 +286,8 @@ class HostedProjectReportTests(HostedProjectFixture):
             ],
         })
         before = self.named("My name")
-        result = self.projects.apply_report(report(listener(port=19002), scanned_at=LATER))
+        result = self.projects.apply_report(
+            report(listener(port=19002, kinds=(LinkKind.LAN,)), scanned_at=LATER))
         after = self.named("My name")
         self.assertEqual(result, counts(updated=1))
         for field in ("name", "description", "status", "updated_at", "first_seen"):
@@ -392,7 +397,8 @@ class HostedProjectReportTests(HostedProjectFixture):
     def test_rejects_invalid_report_fields_without_state_change(self):
         invalid = [None, [], {}, {**report(), "extra": True}, report(hosts=["custom"]),
                    report(hosts=[{}]), report(hosts=["pi", "pi"]), report(listener(), hosts=["mac"]),
-                   report(listener(), listener())]
+                   report(listener(), listener()), report(listener(kinds=(LinkKind.WEB,))),
+                   report(listener(kinds=()))]
         for value in (None, 123, "bad", "2026-02-30T00:00:00Z", "2026-10-16T18:15:00+00:00"):
             invalid.append(report(scanned_at=value))
         for field, value in (("key", []), ("key", "mac:wrong"), ("key", "pi:"), ("host", {}),
@@ -472,28 +478,43 @@ def pi_links(port):
 
 
 class HostedProjectDuplicateTests(HostedProjectFixture):
-    def test_units_sharing_an_address_share_one_row_until_both_stop(self):
-        tailscale = listener(Host.PI, "van-telemetry-web-tailscale.service", "Tailscale unit", 8765)
-        lan = listener(Host.PI, "van-telemetry-web.service", "LAN unit", 8765)
+    def test_units_bound_to_one_network_each_share_one_row_until_both_stop(self):
+        tailscale = listener(Host.PI, "van-telemetry-web-tailscale.service", "Tailscale unit", 8765,
+                             kinds=(LinkKind.TS,))
+        lan = listener(Host.PI, "van-telemetry-web.service", "LAN unit", 8765, kinds=(LinkKind.LAN,))
         self.assertEqual(self.projects.apply_report(report(tailscale, lan)), counts(adopted=2))
         row = self.named("Vehicle Telemetry")
         self.assertEqual(keys(row), [tailscale["key"], lan["key"]])
+        self.assertEqual([link["kind"] for link in row["links"]], ["lan", "ts"])
         self.assertEqual(len(self.projects.snapshot()), len(self.initial))
         self.projects.apply_report(report(lan, scanned_at=LATER))
         row = self.named("Vehicle Telemetry")
         self.assertTrue(row["live"])
         self.assertEqual([service["live"] for service in row["services"]], [False, True])
+        self.assertEqual([link["kind"] for link in row["links"]], ["lan"])
         self.assertEqual(self.projects.apply_report(report(hosts=[Host.PI]))["stale"], 1)
         self.assertFalse(self.named("Vehicle Telemetry")["live"])
 
-    def test_new_units_sharing_an_address_create_one_row_named_for_the_shorter_unit(self):
-        tailscale = listener(unit="demo-tailscale.service", name="Demo Tailscale")
-        plain = listener(unit="demo.service", name="Demo")
+    def test_new_units_sharing_a_port_create_one_row_named_for_the_shorter_unit(self):
+        tailscale = listener(unit="demo-tailscale.service", name="Demo Tailscale", kinds=(LinkKind.TS,))
+        plain = listener(unit="demo.service", name="Demo", kinds=(LinkKind.LAN,))
         self.assertEqual(self.projects.apply_report(report(tailscale, plain)), counts(created=1))
         row = self.named("Demo")
         self.assertEqual(row["id"], plain["key"])
         self.assertEqual(keys(row), [tailscale["key"], plain["key"]])
+        self.assertEqual([link["kind"] for link in row["links"]], ["lan", "ts"])
         self.notify.assert_called_once_with(["Demo"])
+
+    def test_a_tailscale_only_unit_takes_the_lan_link_off_its_row(self):
+        switchboard = listener(unit="llm-switchboard.service", name="Llm Switchboard", port=8777,
+                               kinds=(LinkKind.TS,))
+        self.assertEqual(self.projects.apply_report(report(switchboard)), counts(adopted=1, updated=1))
+        row = self.named("Always Remote")
+        self.assertEqual(keys(row), [switchboard["key"]])
+        self.assertEqual(row["links"], [link("ts", "http://100.82.91.76:8777/")])
+        with mock.patch(WRITER) as write:
+            self.assertEqual(self.projects.apply_report(report(switchboard, scanned_at=LATER)), counts())
+            write.assert_not_called()
 
     def test_web_route_joins_the_mac_app_on_its_upstream_port(self):
         mac = listener(Host.MAC, "com.jacobr.gizmo", "Gizmo", 4400)

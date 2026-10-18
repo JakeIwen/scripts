@@ -7,9 +7,9 @@ import threading
 import uuid
 
 from .hosted_project_report import (
-    HOST_LABELS, LINK_LABELS, Host, HostedProject, LinkKind, ReportCounts, Source, Status,
-    link_addresses, link_ports, utc_timestamp, validate_project_fields, validate_report,
-    validate_updates,
+    HOST_LABELS, HOST_LINK_KINDS, LINK_LABELS, Host, HostedProject, LinkKind, ReportCounts,
+    Source, Status, link_addresses, link_ports, utc_timestamp, validate_project_fields,
+    validate_report, validate_updates,
 )
 from .hosted_project_seed import seed_projects
 from .van_dashboard_common import NTFY_SEND, run_command
@@ -121,17 +121,27 @@ def unique_scanned_name(projects, name, host):
         number += 1
 
 
+def pi_ports(links):
+    # LAN and Tailscale links of a Pi listener both reach the Pi itself, so a
+    # port number on either names one socket whichever network it is bound to.
+    return link_ports(links, LinkKind.LAN) | link_ports(links, LinkKind.TS)
+
+
 def listener_groups(listeners):
-    # Listeners of one host that share an address are one app: the telemetry
-    # dashboard runs one systemd unit per bind address on the same port.
+    # Listeners of one host that share an address or a Pi port are one app: the
+    # telemetry dashboard runs one systemd unit per bind address on the same
+    # port, so one unit reports only a LAN link and the other only Tailscale.
     groups = []
     for listener in listeners:
         addresses = link_addresses(listener["links"])
-        group = {"host": listener["host"], "addresses": addresses, "listeners": [listener]}
-        for other in [other for other in groups
-                      if other["host"] == listener["host"] and other["addresses"] & addresses]:
+        ports = pi_ports(listener["links"])
+        group = {"host": listener["host"], "addresses": addresses, "ports": ports,
+                 "listeners": [listener]}
+        for other in [other for other in groups if other["host"] == listener["host"]
+                      and (other["addresses"] & addresses or other["ports"] & ports)]:
             groups.remove(other)
             group["addresses"] |= other["addresses"]
+            group["ports"] |= other["ports"]
             group["listeners"] += other["listeners"]
         groups.append(group)
     ordered = [sorted(group["listeners"], key=lambda item: (len(item["key"]), item["key"]))
@@ -240,6 +250,26 @@ def reconcile_group(projects, group, scanned_at, timestamp, counts):
     return created["name"] if created else None
 
 
+def drop_unreported_links(projects, listeners, scanned_at):
+    """Remove links of a kind a row's reported services own but no longer report.
+
+    claim_listener keeps every kind a listener leaves out, so this is what takes
+    the LAN link off an app that binds only the Tailscale address.
+    """
+    by_key = {listener["key"]: listener for listener in listeners}
+    changed = 0
+    for project in projects:
+        reported = [by_key[key] for key in project_keys(project) if key in by_key]
+        owned = set().union(*(HOST_LINK_KINDS[listener["host"]] for listener in reported))
+        unreported = owned - {link["kind"] for listener in reported for link in listener["links"]}
+        links = [link for link in project["links"] if link["kind"] not in unreported]
+        if links != project["links"]:
+            project["links"] = links
+            project["last_seen"] = scanned_at
+            changed += 1
+    return changed
+
+
 def mark_stale(projects, hosts, reported):
     stale = 0
     for project in projects:
@@ -336,6 +366,8 @@ class HostedProjectStore:
                 reconcile_group(projects, group, report["scanned_at"], timestamp, counts)
                 for group in listener_groups(report["listeners"])
             ]
+            counts["updated"] += drop_unreported_links(
+                projects, report["listeners"], report["scanned_at"])
             reported = {listener["key"] for listener in report["listeners"]}
             counts["stale"] = mark_stale(projects, report["hosts"], reported)
             self._save(projects)

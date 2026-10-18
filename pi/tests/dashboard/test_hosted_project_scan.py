@@ -55,6 +55,21 @@ LISTEN 0 128 192.168.6.103:1400 0.0.0.0:* users:((\"hass\",pid=1221,fd=28))
 LISTEN 0 128 0.0.0.0:8123 0.0.0.0:* users:((\"hass\",pid=1221,fd=11))
 """
 
+TWO_UNITS = """\
+switchboard.service                 loaded active running LLM Switchboard
+lan-only.service                    loaded active running LAN only
+"""
+
+TWO_UNITS_SHOW = """\
+MainPID=10
+Id=switchboard.service
+Description=LLM Switchboard
+
+MainPID=11
+Id=lan-only.service
+Description=LAN only
+"""
+
 MAC_LAUNCHCTL = """\
 system/com.jacobr.visual-guides = {
     active count = 1
@@ -107,6 +122,45 @@ class PiParsingTests(unittest.TestCase):
             audiobook["links"][1]["url"],
             "http://{}:8787/".format(scan.DEFAULT_TAILSCALE_IP),
         )
+
+
+    def test_links_follow_the_network_each_socket_is_bound_to(self):
+        ss = (
+            "LISTEN 0 5 100.82.91.76:8777 0.0.0.0:* users:((\"python3\",pid=10,fd=4))\n"
+            "LISTEN 0 5 127.0.0.1:8777 0.0.0.0:* users:((\"python3\",pid=10,fd=5))\n"
+            "LISTEN 0 5 192.168.6.103:8765 0.0.0.0:* users:((\"python3\",pid=11,fd=3))\n"
+        )
+        listeners = scan.build_pi_listeners(TWO_UNITS, TWO_UNITS_SHOW, ss, "100.82.91.76\n")
+        self.assertEqual({item["key"]: item["links"] for item in listeners}, {
+            "pi:switchboard.service": [{"kind": "ts", "url": "http://100.82.91.76:8777/"}],
+            "pi:lan-only.service": [{"kind": "lan", "url": "http://vanpi.lan:8765/"}],
+        })
+
+    def test_collect_pi_includes_running_user_units(self):
+        user_env = {"XDG_RUNTIME_DIR": "/run/user/1000"}
+        outputs = {
+            "systemctl list-units": PI_UNITS,
+            "systemctl show": PI_SHOW,
+            "systemctl --user list-units": TWO_UNITS,
+            "systemctl --user show": TWO_UNITS_SHOW,
+            "sudo -n ss": PI_SS + "LISTEN 0 5 100.82.91.76:8777 0.0.0.0:* users:((\"python3\",pid=10,fd=4))\n",
+            "tailscale ip": "100.82.91.76\n",
+        }
+        envs = {}
+
+        def run(arguments, timeout, env=None):
+            command = next(prefix for prefix in outputs if " ".join(arguments).startswith(prefix))
+            envs[command] = env
+            return mock.Mock(returncode=0, stdout=outputs[command], stderr="")
+
+        with mock.patch.object(scan, "run_command", side_effect=run), \
+                mock.patch.object(scan, "user_manager_env", return_value=user_env), \
+                mock.patch.object(scan, "web_probe", return_value=lambda url: True):
+            keys = [item["key"] for item in scan.collect_pi(5)]
+        self.assertIn("pi:switchboard.service", keys)
+        self.assertIn("pi:audiobooks.service", keys)
+        self.assertEqual(envs["systemctl --user show"], user_env)
+        self.assertIsNone(envs["systemctl show"])
 
 
 class MacParsingTests(unittest.TestCase):

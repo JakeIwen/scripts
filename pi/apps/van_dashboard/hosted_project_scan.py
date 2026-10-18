@@ -21,6 +21,10 @@ import urllib.request
 DENIED_PI_PORTS = {22, 53, 139, 445, 1883, 5900}
 DEFAULT_EDGE_CONFIG = "/Users/jacobr/dev/lionfeather-edge/edge.json"
 DEFAULT_TAILSCALE_IP = "100.82.91.76"
+TAILSCALE_NETWORKS = (
+    ipaddress.ip_network("100.64.0.0/10"),
+    ipaddress.ip_network("fd7a:115c:a1e0::/48"),
+)
 HOST_ORDER = ("pi", "mac", "web")
 PROBE_TIMEOUT = 5.0
 
@@ -130,6 +134,36 @@ def _is_public_bind(address: str) -> bool:
     return not parsed.is_loopback
 
 
+def _is_tailscale_bind(address: str, tailscale_ip: str) -> bool:
+    plain_address = address.split("%", 1)[0]
+    if plain_address == tailscale_ip:
+        return True
+    try:
+        parsed = ipaddress.ip_address(plain_address)
+    except ValueError:
+        return False
+    return any(
+        parsed in network for network in TAILSCALE_NETWORKS if network.version == parsed.version
+    )
+
+
+def pi_links(addresses: Iterable[str], port: int, tailscale_ip: str) -> List[Dict[str, str]]:
+    """Links that reach a Pi port bound to addresses: a wildcard is both networks,
+    a Tailscale address only Tailscale, any other address only the LAN."""
+    lan = ts = False
+    for address in addresses:
+        wildcard = _is_wildcard_bind(address)
+        tailscale = _is_tailscale_bind(address, tailscale_ip)
+        lan = lan or wildcard or not tailscale
+        ts = ts or wildcard or tailscale
+    links = []
+    if lan:
+        links.append({"kind": "lan", "url": "http://vanpi.lan:{}/".format(port)})
+    if ts:
+        links.append({"kind": "ts", "url": "http://{}:{}/".format(tailscale_ip, port)})
+    return links
+
+
 def probe_host(address: str) -> str:
     """Return the host part of a URL that reaches a socket bound to address."""
     plain_address = address.split("%", 1)[0]
@@ -194,15 +228,13 @@ def build_pi_listeners(
         ), None)
         if port is None:
             continue
+        addresses = [socket["address"] for socket in service_sockets if socket["port"] == port]
         listeners.append({
             "key": "pi:" + unit,
             "host": "pi",
             "name": title_name(unit[:-8]),
             "description": service["description"],
-            "links": [
-                {"kind": "lan", "url": "http://vanpi.lan:{}/".format(port)},
-                {"kind": "ts", "url": "http://{}:{}/".format(tailscale_ip, port)},
-            ],
+            "links": pi_links(addresses, port, tailscale_ip),
         })
     return sorted(listeners, key=lambda listener: listener["key"])
 
@@ -339,7 +371,9 @@ def build_web_listeners(config_output: str, probe: Probe = None) -> List[Dict[st
     return sorted(listeners, key=lambda listener: listener["key"])
 
 
-def run_command(arguments: Sequence[str], timeout: float) -> subprocess.CompletedProcess:
+def run_command(
+    arguments: Sequence[str], timeout: float, env: Optional[Mapping[str, str]] = None,
+) -> subprocess.CompletedProcess:
     return subprocess.run(
         list(arguments),
         stdout=subprocess.PIPE,
@@ -347,6 +381,7 @@ def run_command(arguments: Sequence[str], timeout: float) -> subprocess.Complete
         text=True,
         timeout=timeout,
         check=False,
+        env=env,
     )
 
 
@@ -361,20 +396,47 @@ def web_probe(timeout: float) -> Callable[[str], bool]:
     return lambda url: serves_web_page(url, min(timeout, PROBE_TIMEOUT))
 
 
-def collect_pi(timeout: float) -> List[Dict[str, Any]]:
+def list_running_services(
+    systemctl: List[str], timeout: float, env: Optional[Mapping[str, str]] = None,
+) -> Tuple[str, str]:
+    """Return systemctl's list-units and show outputs for running services."""
+    command = " ".join(systemctl)
     unit_result = run_command(
-        ["systemctl", "list-units", "--type=service", "--state=running", "--no-legend", "--plain"],
-        timeout,
+        systemctl + ["list-units", "--type=service", "--state=running", "--no-legend", "--plain"],
+        timeout, env,
     )
-    units_output = _require_success(unit_result, "systemctl list-units")
+    units_output = _require_success(unit_result, command + " list-units")
     units = parse_systemctl_units(units_output)
     if not units:
-        return []
+        return "", ""
     show_result = run_command(
-        ["systemctl", "show", "--property=Id", "--property=MainPID", "--property=Description"] + units,
-        timeout,
+        systemctl + ["show", "--property=Id", "--property=MainPID", "--property=Description"] + units,
+        timeout, env,
     )
-    show_output = _require_success(show_result, "systemctl show")
+    return units_output, _require_success(show_result, command + " show")
+
+
+def user_manager_env() -> Optional[Dict[str, str]]:
+    """Environment that reaches this user's systemd manager, or None when none runs.
+
+    Cron leaves XDG_RUNTIME_DIR unset, and systemctl --user needs it to find the bus.
+    """
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR") or "/run/user/{}".format(os.getuid())
+    if not os.path.isdir(runtime_dir):
+        return None
+    return dict(os.environ, XDG_RUNTIME_DIR=runtime_dir)
+
+
+def collect_pi(timeout: float) -> List[Dict[str, Any]]:
+    units_output, show_output = list_running_services(["systemctl"], timeout)
+    user_env = user_manager_env()
+    if user_env is not None:
+        # Lingering user units (LLM Switchboard) host apps as well as system ones.
+        user_units, user_show = list_running_services(["systemctl", "--user"], timeout, user_env)
+        units_output += user_units
+        show_output += "\n\n" + user_show
+    if not parse_systemctl_units(units_output):
+        return []
     ss_result = run_command(["sudo", "-n", "ss", "-ltnpH"], timeout)
     if ss_result.returncode != 0:
         ss_result = run_command(["ss", "-ltnpH"], timeout)
