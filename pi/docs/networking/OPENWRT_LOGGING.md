@@ -26,6 +26,13 @@ existing router probes, hostapd/wpa_supplicant, netifd, mwan3, kernel, and
 resolver failures. Ordinary DNS questions/answers and SSH login chatter are
 excluded from this stream. The classic text format remains unchanged.
 
+Both streams drop hostapd's `handle_probe_req: send failed` lines. hostapd
+logs one for every probe it cannot answer while the shared-radio 5 GHz AP is
+enabled but not beaconing ([OpenWrt #21494](https://github.com/openwrt/openwrt/issues/21494)),
+which reached about 70% of `network.jsonl`. The router's own ring keeps them,
+so `ssh root@192.168.6.1 'logread | grep -c "send failed"'` still shows
+whether the 5 GHz AP has stopped beaconing.
+
 Each JSON line contains `schema_version` (string `"1"`), `received_at`,
 `reported_at`, `protocol_version`, `source_ip`, `hostname`, `tag`, and `message`.
 `received_at` is the Pi rsyslog receipt time. `reported_at` is rsyslog's parsed
