@@ -1,3 +1,4 @@
+export ITERM_ENABLE_SHELL_INTEGRATION_WITH_TMUX=1
 #! /bin/bash
 shopt -s expand_aliases # run aliased commands inline with ssh ...@.... 
 shopt -s dotglob # match all items in directory except . and ..
@@ -81,16 +82,40 @@ alias corefreq='cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq; vcgen
 ### LLM UTILS ###
 alias codexcfg='vi ~/.codex/config.toml'
 
+# Permissions come from config.toml's default workspace-git-network profile:
+# -c, --profile, and --strict-config all force embedded mode (no shared
+# background server). Validate config edits with `codex --strict-config`.
 codexp() {
   command codex \
-    --strict-config \
     --ask-for-approval never \
-    --config 'default_permissions="workspace-git-network"' \
-    --config 'permissions.workspace-git-network={extends=":workspace",filesystem={":workspace_roots"={".git"="write"},"~/.config/firebase"="write","~/.config/configstore"="write","~/.npm"="write","~/.config/gcloud"="write"},network={enabled=true}}' \
     "$@"
 }
 
 alias codexpr='codexp resume'
+
+# Restricted sessions, as plain `codex` was before codexp's permissions moved
+# into config.toml's default profile: --sandbox workspace-write (Codex's
+# built-in workspace sandbox, network off) keeps the shared background server,
+# where -c would not. An explicit sandbox choice, or a non-session
+# subcommand, passes through untouched; `command codex` skips the wrapper.
+codex() {
+  local arg
+  for arg in "$@"; do
+    case $arg in
+      -s|--sandbox|--sandbox=*|--dangerously-bypass-approvals-and-sandbox)
+        command codex "$@"
+        return ;;
+    esac
+  done
+  case ${1-} in
+    exec|e|resume|fork)
+      command codex "$1" --sandbox workspace-write "${@:2}" ;;
+    review|login|logout|mcp|plugin|app-server|remote-control|app|completion|update|doctor|sandbox|debug|apply|a|queue|archive|delete|migrate-rollouts|unarchive|cloud|exec-server|features|help|agents)
+      command codex "$@" ;;
+    *)
+      command codex --sandbox workspace-write "$@" ;;
+  esac
+}
 alias codexpcan='codexpr --sandbox danger-full-access --add-dir /mnt/EXFAT512/obd-things --add-dir /dev/bus/usb'
 codexsearch() { /home/pi/scripts/codexsearch.sh "$@"; }
 claudesearch() { /home/pi/scripts/claudesearch.sh "$@"; }
@@ -105,6 +130,8 @@ alias llmrestore='/usr/bin/python3 -I -B /home/pi/scripts/llm_restore.py'
 claude() { env -u DISPLAY claude "$@"; }
 
 alias claudep='claude --permission-mode bypassPermissions'
+# Fresh config-maintenance session; ~/config/CLAUDE.md is its only memory.
+claudecfg() { (cd ~/config && claude --permission-mode bypassPermissions "$@"); }
 clauderm() {
     if [ -z "$1" ] || [ -z "$2" ]; then
         echo "usage: clauderm <project-folder> <conversation-id>" >&2
@@ -207,10 +234,11 @@ als() { alias $1; fndef $1; }
 tf() { tail ${2:-'-50'} $1; tail -f $1; }       # tail -f with more recent lines 
 snh() { nohup bash -c $1 & tail -f ./nohup.out; }
 
-s() { # run a named .sh/.py script or a named directory's main.sh/main.py
-  local name candidate f
+S_REPOS=("$HOME/dev/obd-things") # repos whose tracked tools/ and projects/ .py scripts s finds by name
+s() { # run a named ~/scripts .sh/.py (or a directory's main.sh/main.py), else a script from S_REPOS
+  local name candidate f root hits pythonpath
   if [ "$#" -lt 1 ]; then
-    echo "usage: s <script-name> [args...]" >&2
+    echo "usage: s <script-name|dir/script-name> [args...]" >&2
     return 2
   fi
   name=$1
@@ -228,13 +256,45 @@ s() { # run a named .sh/.py script or a named directory's main.sh/main.py
   [ -n "$f" ] || f=$(find "$HOME/scripts" -mindepth 2 -type f \
     \( -name "$name.sh" -o -name "$name.py" \
        -o -path "*/$name/main.sh" -o -path "*/$name/main.py" \) \
+    -not -path '*/site-packages/*' -not -path '*/node_modules/*' \
     -print -quit)
-  [ -z "$f" ] && {
-    echo "s: no $name script found in ~/scripts" >&2
-    return 1
-  }
-  case "$f" in *.py) python3 "$f" "$@";; *) "$f" "$@";; esac
+  if [ -n "$f" ]; then
+    case "$f" in *.py) python3 "$f" "$@";; *) "$f" "$@";; esac
+    return
+  fi
+  # Repo scripts run by path with every S_REPOS root importable, so they work from any
+  # directory with or without their own sys.path bootstrap, wherever they move in the repo.
+  pythonpath=$(IFS=:; echo "${S_REPOS[*]}")${PYTHONPATH:+:$PYTHONPATH}
+  for root in "${S_REPOS[@]}"; do
+    hits=$(_s_repo_scripts "$root" | awk -v n="${name%.py}.py" \
+      '$0 == n || substr($0, length($0) - length(n)) == "/" n')
+    [ -n "$hits" ] || continue
+    if [ "$(printf '%s\n' "$hits" | wc -l)" -gt 1 ]; then
+      echo "s: $name matches several scripts in $root; add a directory (s dir/$name):" >&2
+      printf '  %s\n' $hits >&2
+      return 2
+    fi
+    PYTHONPATH=$pythonpath python3 "$root/$hits" "$@"
+    return
+  done
+  echo "s: no $name script found in ~/scripts or ${S_REPOS[*]}" >&2
+  return 1
 }
+_s_repo_scripts() { # tracked tools/ and projects/ .py scripts of repo $1, repo-relative
+  git -C "$1" ls-files -- 'tools/*.py' 'projects/*.py' 2>/dev/null |
+    grep -vE '(^|/)(tests|dashboard)/|(^|/)__init__\.py$'
+}
+_s_complete() { # complete the script name; later arguments fall back to filenames (-o default)
+  local root
+  [ "$COMP_CWORD" -eq 1 ] || return
+  COMPREPLY=($(compgen -W "$(
+    find "$HOME/scripts" -type f \( -name '*.sh' -o -name '*.py' \) \
+      -not -path '*/site-packages/*' -not -path '*/node_modules/*' -not -path '*/.git/*' 2>/dev/null |
+      awk -F/ '$NF ~ /^main\.(sh|py)$/ { print $(NF-1); next } { sub(/\.(sh|py)$/, "", $NF); print $NF }'
+    for root in "${S_REPOS[@]}"; do _s_repo_scripts "$root" | sed -E 's#.*/##; s/\.py$//'; done
+  )" -- "${COMP_WORDS[1]}"))
+}
+complete -o default -F _s_complete s
 add_pricecheck() { # add_pricecheck <parser> <threshold> <URL> [title]
   if [ "$#" -lt 3 ] || [ "$#" -gt 4 ]; then
     echo "usage: add_pricecheck <parser> <threshold> <URL> [title]" >&2
@@ -817,6 +877,22 @@ alias rpiplay='wake_display; nohup /home/pi/RPiPlay/build/rpiplay -r 180 &'
 
 alias ngear="ssh root@OpenWrt"
 alias ubnt="ssh -i ~/.ssh/id_rsa ubnt@192.168.8.20"
+
+# How this ssh session reached the Pi: LAN (192.168.6.x) or Tailscale (100.x,
+# which may ride the metered uplink when the client is off the van LAN).
+sshroute() {
+  local srv; srv=$(cut -d' ' -f3 <<<"${SSH_CONNECTION:-}")
+  case $srv in
+    192.168.6.*) echo "session via LAN ($srv)" ;;
+    100.*) echo "session via Tailscale ($srv)" ;;
+    "") echo "not an ssh session" ;;
+    *) echo "session via $srv" ;;
+  esac
+}
+tspath() { # Tailscale's path to a peer (default m4mac): direct 192.168.6.x = LAN; a public IP or relay = metered uplink
+  tailscale status | grep -w "${1:-m4mac}" | sed 's/, tx.*//'
+}
+[[ $- == *i* && $(sshroute) == *Tailscale* ]] && echo "vanpi: connected over Tailscale (metered uplink?)"
 
 ### PYTHON ###
 # use py venv to run basically anything
