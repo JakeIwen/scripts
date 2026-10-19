@@ -30,13 +30,17 @@ wake_grace=${DEFERRED_WAKE_GRACE:-1800}   # launchd catches up shortly after wak
 stamp_format=%Y-%m-%dT%H:%M
 default_attempts=3
 default_timeout=900
+lock_wait=${DEFERRED_LOCK_WAIT:-10}
 # Every job record defines exactly these keys; `state` is pending or failed.
 job_keys=(name due description created origin attempts max_attempts timeout state)
 typeset -A job          # the record load_job last read
+typeset run_job_status=0
 
 usage() {
   print -u2 -- "usage: ${script:t} add [--attempts N] [--timeout SECONDS] [--file PATH]... DUE NAME SCRIPT [DESCRIPTION]
-       ${script:t} list | status | cancel JOB | run-due | watchdog | install | uninstall
+       ${script:t} list [--json]
+       ${script:t} cancel JOB | retry JOB | run-now JOB | reschedule JOB DUE
+       ${script:t} status | run-due | watchdog | install | uninstall
 DUE is YYYY-MM-DD, 'YYYY-MM-DD HH:MM' (local time), +Nd or +Nh."
   exit 2
 }
@@ -85,6 +89,20 @@ private_path() {  # ours, not a symlink, not writable by group or others
 ensure_root() {
   /bin/mkdir -p -m 700 -- $root $jobs_dir $flagged_dir
   private_path $root && private_path $jobs_dir || die "$root must be private to $USERNAME"
+}
+
+acquire_job_lock() {  # WAIT: hold the checker lock until this process exits
+  local wait=$1
+  ensure_root
+  : >> $root/lock
+  zsystem flock -t $wait $root/lock 2>/dev/null
+}
+
+acquire_mutation_lock() {
+  acquire_job_lock $lock_wait || {
+    print -u2 -- "${script:t}: the checker is running jobs; try again shortly"
+    exit 75
+  }
 }
 
 alert() {  # TITLE MESSAGE: high priority; the sender's reason, never the URL, goes to the log
@@ -138,7 +156,106 @@ cmd_add() {
   agent_loaded || print -u2 -- "warning: $label is not loaded, so nothing will run it; run: ${script:t} install"
 }
 
+emit_json_field() { print -rn -- "$1"$'\0'; }
+
+emit_list_json_records() {
+  local loaded=0 stale=0 has_last_run=0 last_run= dir
+  agent_loaded && loaded=1
+  checker_stale && stale=1
+  if [[ -f $heartbeat ]]; then has_last_run=1; last_run=$(<$heartbeat); fi
+  emit_json_field H
+  emit_json_field $loaded
+  emit_json_field $has_last_run
+  emit_json_field "$last_run"
+  emit_json_field $stale
+  emit_json_field "$jobs_dir"
+  for dir in $jobs_dir/*(N/); do
+    if ! job_runnable $dir; then
+      emit_json_field I
+      emit_json_field "${dir:t}"
+      continue
+    fi
+    emit_json_field V
+    emit_json_field "${dir:t}"
+    emit_json_field "$job[name]"
+    emit_json_field "$job[due]"
+    emit_json_field "$job[state]"
+    emit_json_field "$job[attempts]"
+    emit_json_field "$job[max_attempts]"
+    emit_json_field "$job[timeout]"
+    emit_json_field "$job[description]"
+    emit_json_field "$job[created]"
+    emit_json_field "$job[origin]"
+    emit_json_field "$dir/last.log"
+  done
+}
+
+print_list_json() {
+  emit_list_json_records | /usr/bin/python3 -I -B -c '
+import json
+import pathlib
+import sys
+
+
+def tail_log(path):
+    try:
+        data = pathlib.Path(path).read_bytes()
+    except FileNotFoundError:
+        return None
+    lines = data.splitlines(keepends=True)[-64:]
+    return b"".join(lines)[-8192:].decode("utf-8", errors="replace")
+
+
+fields = iter(part.decode("utf-8", errors="replace")
+              for part in sys.stdin.buffer.read().split(b"\0")[:-1])
+if next(fields) != "H":
+    raise SystemExit("invalid deferred list stream")
+loaded = next(fields) == "1"
+has_last_run = next(fields) == "1"
+last_run = next(fields)
+stale = next(fields) == "1"
+result = {
+    "checker": {
+        "agent_loaded": loaded,
+        "last_run": last_run if has_last_run else None,
+        "stale": stale,
+    },
+    "jobs_dir": next(fields),
+    "jobs": [],
+}
+for kind in fields:
+    job_id = next(fields)
+    if kind == "I":
+        result["jobs"].append({"id": job_id, "valid": False})
+        continue
+    if kind != "V":
+        raise SystemExit("invalid deferred job stream")
+    result["jobs"].append({
+        "id": job_id,
+        "valid": True,
+        "name": next(fields),
+        "due": next(fields),
+        "state": next(fields),
+        "attempts": int(next(fields)),
+        "max_attempts": int(next(fields)),
+        "timeout": int(next(fields)),
+        "description": next(fields),
+        "created": next(fields),
+        "origin": next(fields),
+        "last_log": tail_log(next(fields)),
+    })
+json.dump(result, sys.stdout, ensure_ascii=False)
+sys.stdout.write("\n")
+'
+}
+
 cmd_list() {
+  (( $# <= 1 )) || usage
+  if (( $# == 1 )); then
+    [[ $1 == --json ]] || usage
+    print_list_json
+    return
+  fi
   local dir
   checker_summary
   for dir in $jobs_dir/*(N/); do
@@ -148,14 +265,61 @@ cmd_list() {
   done
 }
 
-cmd_cancel() {
-  (( $# == 1 )) || usage
+resolve_job() {  # JOB: set REPLY to the one exact id or exact name match
   valid_name $1 || die "no job named $1"
   local -a matches=($jobs_dir/$1(N/) $jobs_dir/<->-<->-<->-$1(N/))
   (( ${#matches} == 1 )) || die "no single job matches $1"
-  /bin/rm -rf -- $matches[1]
-  log_line "cancelled ${matches[1]:t}"
-  print -r -- "cancelled ${matches[1]:t}"
+  REPLY=$matches[1]
+}
+
+cmd_cancel() {
+  (( $# == 1 )) || usage
+  acquire_mutation_lock
+  resolve_job $1
+  local dir=$REPLY
+  /bin/rm -rf -- $dir
+  log_line "cancelled ${dir:t}"
+  print -r -- "cancelled ${dir:t}"
+}
+
+require_runnable_job() {  # DIR: load it or fail with a user-facing error
+  job_runnable $1 || die "job ${1:t} is not runnable (invalid record or permissions)"
+}
+
+cmd_retry() {
+  (( $# == 1 )) || usage
+  acquire_mutation_lock
+  resolve_job $1
+  local dir=$REPLY
+  require_runnable_job $dir
+  [[ $job[state] != pending ]] || die "job ${dir:t} is already pending"
+  [[ $job[state] == failed ]] || die "job ${dir:t} has invalid state: $job[state]"
+  job[state]=pending
+  job[attempts]=0
+  save_job $dir
+  log_line "retrying ${dir:t} at the next check"
+  print -r -- "retrying ${dir:t} at the next check"
+}
+
+cmd_reschedule() {
+  (( $# == 2 )) || usage
+  local due
+  due=$(normalize_due $2) || die "invalid due time: $2"
+  acquire_mutation_lock
+  resolve_job $1
+  local dir=$REPLY new_dir
+  require_runnable_job $dir
+  new_dir=$jobs_dir/${due%%T*}-$job[name]
+  [[ $new_dir == $dir || ! -e $new_dir ]] || die "job ${new_dir:t} already exists"
+  job[due]=$due
+  if [[ $job[state] == failed ]]; then
+    job[state]=pending
+    job[attempts]=0
+  fi
+  save_job $dir
+  if [[ $new_dir != $dir ]]; then /bin/mv -- $dir $new_dir; fi
+  log_line "rescheduled ${dir:t} as ${new_dir:t} due $due"
+  print -r -- "${new_dir:t}"
 }
 
 execute_job() {  # DIR TIMEOUT: one attempt; returns the job's exit status
@@ -174,32 +338,66 @@ execute_job() {  # DIR TIMEOUT: one attempt; returns the job's exit status
   return $rc
 }
 
-run_job() {  # DIR, already loaded into $job: run it, purge it on success, warn on failure
-  local dir=$1 rc=0
+run_job() {  # DIR MODE: one scheduled/manual attempt; purge success, warn only scheduled
+  local dir=$1 mode=${2:-scheduled} rc=0
+  run_job_status=0
   job[attempts]=$(( job[attempts] + 1 ))
   save_job $dir  # recorded first, so a crash mid-run still counts
   execute_job $dir $job[timeout] || rc=$?
-  local tries="attempt $job[attempts]/$job[max_attempts]"
+  run_job_status=$rc
+  local tries="attempt $job[attempts]/$job[max_attempts]" prefix=
+  [[ $mode == manual ]] && prefix="manual "
   if (( rc == 0 )); then
     [[ ${dir:h} == $jobs_dir && -n ${dir:t} ]] || die "refusing to delete $dir"
     /bin/rm -rf -- $dir
-    log_line "done ${dir:t} ($tries)"
+    log_line "${prefix}done ${dir:t} ($tries)"
     return 0
   fi
-  log_line "failed ${dir:t} exit $rc ($tries); output in $dir/last.log"
+  log_line "${prefix}failed ${dir:t} exit $rc ($tries); output in $dir/last.log"
   if (( job[attempts] >= job[max_attempts] )); then
     job[state]=failed
     save_job $dir
-    alert "Deferred job gave up: ${dir:t}" \
-      "Exit $rc on $tries; it will not retry. Job kept at $dir (see last.log)."
-  else
+    if [[ $mode == scheduled ]]; then
+      alert "Deferred job gave up: ${dir:t}" \
+        "Exit $rc on $tries; it will not retry. Job kept at $dir (see last.log); review it in Mac Panel (macpanel)."
+    fi
+  elif [[ $mode == scheduled ]]; then
     alert "Deferred job failed: ${dir:t}" \
-      "Exit $rc on $tries; retrying at the next hourly check. Output: $dir/last.log"
+      "Exit $rc on $tries; retrying at the next hourly check. Review $dir/last.log in Mac Panel (macpanel)."
   fi
 }
 
-job_runnable() {  # DIR: private folder, executable run, complete record (now in $job)
-  private_path $1 && private_path $1/job && private_path $1/run && [[ -x $1/run ]] && load_job $1
+job_record_valid() {  # DIR: validate fields that later become paths, numbers or states
+  local dir=$1
+  valid_name "$job[name]" || return 1
+  [[ $job[state] == (pending|failed) ]] || return 1
+  [[ $job[attempts] == <-> && $job[max_attempts] == <1-> && $job[timeout] == <1-> ]] || return 1
+  [[ $job[due] == <->-<->-<->T<->:<-> ]] || return 1
+  normalize_due "$job[due]" >/dev/null || return 1
+  [[ $job[created] == <->-<->-<->T<->:<-> ]] || return 1
+  normalize_due "$job[created]" >/dev/null || return 1
+  [[ ${dir:t} == ${job[due]%%T*}-$job[name] ]]
+}
+
+job_runnable() {  # DIR: private folder, executable run, valid complete record (now in $job)
+  private_path $1 && private_path $1/job && private_path $1/run && [[ -x $1/run ]] &&
+    load_job $1 && job_record_valid $1
+}
+
+cmd_run_now() {
+  (( $# == 1 )) || usage
+  acquire_mutation_lock
+  resolve_job $1
+  local dir=$REPLY id=${REPLY:t}
+  require_runnable_job $dir
+  [[ $job[state] == (pending|failed) ]] || die "job $id has invalid state: $job[state]"
+  run_job $dir manual
+  if (( run_job_status == 0 )); then
+    print -r -- "done $id"
+    return 0
+  fi
+  print -r -- "failed $id exit $run_job_status; output in $dir/last.log"
+  exit 3
 }
 
 flag_invalid() {  # DIR: warn once per invalid folder; the marker clears once it is valid or gone
@@ -207,14 +405,12 @@ flag_invalid() {  # DIR: warn once per invalid folder; the marker clears once it
   log_line "skipped ${1:t}: not a valid private job directory"
   [[ ! -e $marker ]] || return 0
   alert "Deferred job not run: ${1:t}" \
-    "Its directory, job record or run file is missing, incomplete, not executable, a symlink, or writable by others. Fix or remove $1."
+    "Its directory, job record or run file is invalid. Fix or remove it in Mac Panel (macpanel): $1"
   : > $marker
 }
 
 cmd_run_due() {
-  ensure_root
-  : >> $root/lock
-  zsystem flock -t 0 $root/lock 2>/dev/null || exit 0  # another check is already running
+  acquire_job_lock 0 || return 0  # another check is already running
   local now dir marker
   now=$(strftime $stamp_format $EPOCHSECONDS)
   strftime '%F %T' $EPOCHSECONDS > $heartbeat
@@ -244,7 +440,7 @@ cmd_watchdog() {
   (( EPOCHSECONDS - $(awake_since) >= wake_grace )) || return 0
   checker_stale || return 0
   alert "Deferred jobs checker stopped" \
-    "$label: $(checker_summary); ${#queued} job(s) are waiting. Check: ${script:t} status"
+    "$label: $(checker_summary); ${#queued} job(s) are waiting. Check Mac Panel or: ${script:t} status"
 }
 
 cmd_status() {  # exits nonzero unless the agent is loaded and has checked recently
@@ -280,9 +476,12 @@ cmd_uninstall() {  # removes only the registration; queued jobs stay
 verb=$1; shift
 case $verb in
   add) cmd_add "$@" ;;
-  list) cmd_list ;;
+  list) cmd_list "$@" ;;
   status) cmd_status ;;
   cancel) cmd_cancel "$@" ;;
+  retry) cmd_retry "$@" ;;
+  run-now) cmd_run_now "$@" ;;
+  reschedule) cmd_reschedule "$@" ;;
   run-due) cmd_run_due ;;
   watchdog) cmd_watchdog ;;
   install) cmd_install ;;

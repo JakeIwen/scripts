@@ -4,9 +4,11 @@ Each test drives macbook/scripts/deferred.zsh against a temporary job root and
 a loopback stand-in for the ntfy warning topic; launchd is never touched.
 """
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
 import os
 from pathlib import Path
 import plistlib
+import signal
 import stat
 import subprocess
 import tempfile
@@ -52,6 +54,7 @@ class DeferredJobTests(unittest.TestCase):
             "DEFERRED_SECRETS": str(secrets),
             "DEFERRED_LABEL": "com.jacobr.deferred-jobs-test",
             "DEFERRED_WAKE_GRACE": "0",
+            "DEFERRED_LOCK_WAIT": "0.1",
         }
 
     def deferred(self, *args, check=True):
@@ -73,6 +76,30 @@ class DeferredJobTests(unittest.TestCase):
 
     def meta(self, job):
         return dict(line.split("=", 1) for line in (job / "job").read_text().splitlines())
+
+    def hold_checker_lock(self):
+        lock = self.root / "lock"
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        holder = subprocess.Popen(
+            [
+                "/bin/zsh", "-c",
+                'zmodload zsh/system; : >> "$1"; zsystem flock "$1"; '
+                'print -r -- ready; sleep 30',
+                "lock-holder", str(lock),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+
+        def stop_holder():
+            os.killpg(holder.pid, signal.SIGTERM)
+            holder.communicate(timeout=5)
+
+        self.addCleanup(stop_holder)
+        self.assertEqual(holder.stdout.readline().strip(), "ready")
+        return holder
 
     def test_due_job_runs_once_in_its_directory_and_is_purged(self):
         marker = self.tmp / "ran"
@@ -106,7 +133,12 @@ class DeferredJobTests(unittest.TestCase):
         self.assertEqual(titles, ["Deferred job failed: 2020-01-01-broken",
                                   "Deferred job gave up: 2020-01-01-broken"])
         self.assertEqual({priority for _, priority, _ in WarningTopic.received}, {"high"})
-        self.assertNotIn("oops", "".join(body for _, _, body in WarningTopic.received))
+        bodies = [body for _, _, body in WarningTopic.received]
+        self.assertNotIn("oops", "".join(bodies))
+        self.assertTrue(all("Mac Panel (macpanel)" in body for body in bodies))
+        self.assertTrue(bodies[-1].rstrip().endswith(
+            f"Job kept at {job} (see last.log); review it in Mac Panel (macpanel)."
+        ))
 
     def test_job_writable_by_others_is_not_run(self):
         marker = self.tmp / "ran"
@@ -116,6 +148,7 @@ class DeferredJobTests(unittest.TestCase):
         self.assertFalse(marker.exists())
         self.assertTrue(job.exists())
         self.assertEqual(WarningTopic.received[0][0], "Deferred job not run: 2020-01-01-unsafe")
+        self.assertIn("Mac Panel (macpanel)", WarningTopic.received[0][2])
 
     def test_incomplete_record_warns_once_and_runs_after_repair(self):
         marker = self.tmp / "ran"
@@ -157,6 +190,151 @@ class DeferredJobTests(unittest.TestCase):
         self.deferred("cancel", "material")
         self.assertFalse(job.exists())
 
+    def test_list_json_reports_valid_invalid_and_logs_without_losing_text(self):
+        description = 'quote " backslash \\ tab\t café $(touch never)'
+        script = self.script("exit 0", "json-job.zsh")
+        pending = Path(self.deferred(
+            "add", "2099-01-02", "encoded", str(script), description,
+        ).stdout.strip())
+        failed = self.add(
+            "2020-01-01", "json-failed", "print -r -- 'failure output'; exit 4",
+            "--attempts", "1",
+        )
+        self.deferred("run-due")
+        invalid = self.root / "jobs" / "2099-01-03-invalid"
+        invalid.mkdir(mode=0o700)
+
+        payload = json.loads(self.deferred("list", "--json").stdout)
+        self.assertEqual(set(payload), {"checker", "jobs_dir", "jobs"})
+        self.assertEqual(set(payload["checker"]), {"agent_loaded", "last_run", "stale"})
+        self.assertIsInstance(payload["checker"]["agent_loaded"], bool)
+        self.assertIsInstance(payload["checker"]["stale"], bool)
+        self.assertIsInstance(payload["checker"]["last_run"], (str, type(None)))
+        self.assertEqual(payload["jobs_dir"], str(self.root / "jobs"))
+        jobs = {record["id"]: record for record in payload["jobs"]}
+        encoded = jobs[pending.name]
+        self.assertTrue(encoded["valid"])
+        self.assertEqual(encoded["description"], description)
+        self.assertIsNone(encoded["last_log"])
+        self.assertEqual(encoded["state"], "pending")
+        for key in ("attempts", "max_attempts", "timeout"):
+            self.assertIsInstance(encoded[key], int)
+        self.assertEqual(jobs[failed.name]["last_log"], "failure output\n")
+        self.assertEqual(jobs[invalid.name], {"id": invalid.name, "valid": False})
+
+    def test_retry_resets_failed_job_and_refuses_pending_job(self):
+        job = self.add("2020-01-01", "retryable", "exit 9", "--attempts", "1")
+        self.deferred("run-due")
+        result = self.deferred("retry", "retryable")
+        self.assertEqual(result.stdout.strip(), f"retrying {job.name} at the next check")
+        self.assertEqual(self.meta(job)["due"], "2020-01-01T00:00")
+        self.assertEqual(self.meta(job)["state"], "pending")
+        self.assertEqual(self.meta(job)["attempts"], "0")
+        refused = self.deferred("retry", job.name, check=False)
+        self.assertEqual(refused.returncode, 1)
+        self.assertIn("already pending", refused.stderr)
+
+    def test_run_now_success_purges_job(self):
+        marker = self.tmp / "manual-success"
+        job = self.add("2099-01-01", "manual-success", f"touch {marker}")
+        result = self.deferred("run-now", "manual-success")
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), f"done {job.name}")
+        self.assertTrue(marker.exists())
+        self.assertFalse(job.exists())
+        self.assertIn(f"manual done {job.name}", (self.root / "deferred.log").read_text())
+
+    def test_run_now_failure_records_attempts_without_alerting(self):
+        job = self.add(
+            "2099-01-01", "manual-failure", "print manual-oops; exit 7",
+            "--attempts", "2",
+        )
+        first = self.deferred("run-now", job.name, check=False)
+        self.assertEqual(first.returncode, 3)
+        self.assertIn(f"failed {job.name} exit 7", first.stdout)
+        self.assertEqual(self.meta(job)["attempts"], "1")
+        self.assertEqual(self.meta(job)["state"], "pending")
+        self.assertEqual((job / "last.log").read_text().strip(), "manual-oops")
+        self.assertEqual(WarningTopic.received, [])
+
+        self.assertEqual(self.deferred("run-now", job.name, check=False).returncode, 3)
+        self.assertEqual(self.meta(job)["state"], "failed")
+        self.assertEqual(self.deferred("run-now", job.name, check=False).returncode, 3)
+        self.assertEqual(self.meta(job)["state"], "failed")
+        self.assertEqual(self.meta(job)["attempts"], "3")
+        self.assertEqual(WarningTopic.received, [])
+        self.assertIn(f"manual failed {job.name}", (self.root / "deferred.log").read_text())
+
+    def test_run_now_refuses_invalid_job(self):
+        job = self.add("2099-01-01", "manual-invalid", "exit 0")
+        (job / "run").chmod(0o722)
+        result = self.deferred("run-now", job.name, check=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("not runnable", result.stderr)
+        self.assertTrue(job.exists())
+
+    def test_mutations_refuse_invalid_job_but_cancel_removes_it(self):
+        job = self.add("2099-01-01", "invalid-mutations", "exit 0")
+        (job / "job").write_text("name=invalid-mutations\n")
+        for command in (
+            ("retry", job.name),
+            ("run-now", job.name),
+            ("reschedule", job.name, "2099-02-02"),
+        ):
+            with self.subTest(command=command[0]):
+                result = self.deferred(*command, check=False)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("not runnable", result.stderr)
+                self.assertTrue(job.exists())
+        self.deferred("cancel", job.name)
+        self.assertFalse(job.exists())
+
+    def test_reschedule_renames_and_resets_failed_jobs(self):
+        job = self.add("2020-01-01", "move-me", "exit 8", "--attempts", "1")
+        self.deferred("run-due")
+        result = self.deferred("reschedule", job.name, "2099-02-03 04:05")
+        moved = self.root / "jobs" / result.stdout.strip()
+        self.assertEqual(moved.name, "2099-02-03-move-me")
+        self.assertFalse(job.exists())
+        self.assertEqual(self.meta(moved)["due"], "2099-02-03T04:05")
+        self.assertEqual(self.meta(moved)["state"], "pending")
+        self.assertEqual(self.meta(moved)["attempts"], "0")
+
+    def test_reschedule_refuses_collision_and_bad_due(self):
+        first = self.add("2099-03-01", "collision", "exit 0")
+        second = self.add("2099-04-01", "collision", "exit 0")
+        collision = self.deferred(
+            "reschedule", first.name, "2099-04-01 12:00", check=False,
+        )
+        self.assertEqual(collision.returncode, 1)
+        self.assertIn("already exists", collision.stderr)
+        self.assertTrue(first.exists())
+        self.assertTrue(second.exists())
+        self.assertEqual(self.meta(first)["due"], "2099-03-01T00:00")
+        bad_due = self.deferred("reschedule", first.name, "not-a-date", check=False)
+        self.assertEqual(bad_due.returncode, 1)
+        self.assertIn("invalid due time", bad_due.stderr)
+        self.assertEqual(self.meta(first)["due"], "2099-03-01T00:00")
+
+    def test_mutations_exit_75_while_checker_lock_is_held(self):
+        job = self.add("2099-01-01", "locked", "exit 0")
+        record = (job / "job").read_text()
+        self.hold_checker_lock()
+        commands = [
+            ("retry", job.name),
+            ("run-now", job.name),
+            ("reschedule", job.name, "2099-02-02"),
+            ("cancel", job.name),
+        ]
+        for command in commands:
+            with self.subTest(command=command[0]):
+                result = self.deferred(*command, check=False)
+                self.assertEqual(result.returncode, 75)
+                self.assertIn("the checker is running jobs; try again shortly", result.stderr)
+                self.assertTrue(job.exists())
+                self.assertEqual((job / "job").read_text(), record)
+                self.assertFalse((job / "last.log").exists())
+
     def test_add_rejects_bad_input(self):
         good = str(self.script("exit 0"))
         for due, name in [("2026-02-30", "x"), ("tomorrow", "x"), ("2026-11-16", "Bad_Name"),
@@ -176,6 +354,7 @@ class DeferredJobTests(unittest.TestCase):
         self.add("+1d", "waiting", "exit 0")
         self.deferred("watchdog")
         self.assertEqual(WarningTopic.received[0][0], "Deferred jobs checker stopped")
+        self.assertIn("Check Mac Panel or: deferred.zsh status", WarningTopic.received[0][2])
         self.deferred("run-due")
         WarningTopic.received.clear()
         self.deferred("watchdog")
