@@ -99,6 +99,11 @@ llmsearch() { /home/pi/scripts/llmsearch.sh "$@"; }
 # --cron on|off toggles the every-minute snapshot, --dry-run previews.
 alias llmrestore='/usr/bin/python3 -I -B /home/pi/scripts/llm_restore.py'
 
+# Claude Code opens previews and links with xdg-open, which the DISPLAY=:0
+# export below sends to the Pi's own desktop (it launched Firefox there).
+# Every claude* helper here goes through this; `command claude` skips it.
+claude() { env -u DISPLAY claude "$@"; }
+
 alias claudep='claude --permission-mode bypassPermissions'
 clauderm() {
     if [ -z "$1" ] || [ -z "$2" ]; then
