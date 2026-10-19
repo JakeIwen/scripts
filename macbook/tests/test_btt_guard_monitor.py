@@ -15,7 +15,6 @@ from macbook.bettertouchtool.btt_guard.monitor import (
 from macbook.bettertouchtool.btt_guard.model import AuditStatus
 from macbook.bettertouchtool.btt_guard.notify import (
     GuardNotification,
-    _warning_url,
     alert_notification,
     finding_counts,
     send_warning_notification,
@@ -158,32 +157,13 @@ class GuardMonitorTests(unittest.TestCase):
         self.assertNotIn("detail-secret", rendered)
         self.assertEqual(result.state["candidate_observations"], 1)
 
-    @patch("macbook.bettertouchtool.btt_guard.notify.subprocess.run")
-    def test_warning_url_is_sourced_without_exposing_it_in_arguments(self, run):
-        run.return_value.returncode = 0
-        run.return_value.stdout = "https://warning.invalid/private-topic"
-        self.assertEqual(_warning_url(), "https://warning.invalid/private-topic")
-        command = run.call_args.args[0]
-        self.assertNotIn("https://warning.invalid/private-topic", command)
-        self.assertEqual(command[:4], ["/bin/bash", "--noprofile", "--norc", "-c"])
-        self.assertEqual(run.call_args.kwargs["stderr"], -3)
-
-    @patch("macbook.bettertouchtool.btt_guard.notify.urllib.request.build_opener")
-    @patch(
-        "macbook.bettertouchtool.btt_guard.notify._warning_url",
-        return_value="https://warning.invalid/private-topic",
-    )
-    def test_sender_posts_redacted_payload_to_warning_topic(self, warning_url, build_opener):
-        response = build_opener.return_value.open.return_value.__enter__.return_value
-        response.status = 200
+    @patch("macbook.bettertouchtool.btt_guard.notify.send_warning", return_value=None)
+    def test_sender_hands_the_redacted_notification_to_the_warning_topic(self, send):
         notification = GuardNotification("generic title", "generic message", "high")
         self.assertTrue(send_warning_notification(notification))
-        request = build_opener.return_value.open.call_args.args[0]
-        self.assertEqual(request.method, "POST")
-        self.assertEqual(request.data, b"generic message")
-        self.assertEqual(request.get_header("Title"), "generic title")
-        self.assertEqual(request.get_header("Priority"), "high")
-        warning_url.assert_called_once_with()
+        send.assert_called_once_with("generic title", "generic message", "high")
+        send.return_value = "delivery failed (URLError)"
+        self.assertFalse(send_warning_notification(notification))
 
 
 if __name__ == "__main__":

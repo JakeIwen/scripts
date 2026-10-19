@@ -137,11 +137,12 @@ Each job is a private directory under `~/.agent/deferred/jobs/`. The LaunchAgent
 `com.jacobr.deferred-jobs` (installed by `deferred.zsh install`) runs due jobs
 hourly and at login, with the job directory as the working directory and a
 minimal environment. Success deletes the directory; failure keeps it, records
-`last.log`, and sends a high-priority warning to `NTFY_WARNING_URL` without any
-job output. After the last attempt the job stays as `failed` until cancelled.
-Jobs must be safe to rerun, clean up anything outside their own directory, and
-detach any long-lived process they start, since launchd ends the checker's
-process group when it exits.
+`last.log`, and sends a high-priority warning to `NTFY_WARNING_URL` (through
+`scripts/ntfy_warning.py`, shared with BTT Guard) without any job output. After
+the last attempt the job stays as `failed` until cancelled. Jobs must be safe
+to rerun, clean up anything outside their own directory, and detach any
+long-lived process they start, since launchd ends the checker's process group
+when it exits.
 
 ## iTerm font size per display
 

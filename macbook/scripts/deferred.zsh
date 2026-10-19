@@ -22,6 +22,7 @@ heartbeat=$root/last-check
 label=${DEFERRED_LABEL:-com.jacobr.deferred-jobs}
 plist_source=$repo/macbook/launchagents/com.jacobr.deferred-jobs.plist
 plist_target=$HOME/Library/LaunchAgents/$label.plist
+notifier=$repo/macbook/scripts/ntfy_warning.py
 secrets=${DEFERRED_SECRETS:-$repo/pi/secrets/.bash_variables}
 job_path=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin
 stale_after=10800       # watchdog: checker silent this long (s) means it stopped
@@ -86,21 +87,9 @@ ensure_root() {
   private_path $root && private_path $jobs_dir || die "$root must be private to $USERNAME"
 }
 
-warning_url() {  # sourced in bash like btt_guard/notify.py, so the URL never lands in argv
-  local url
-  url=$(/bin/bash --noprofile --norc -c \
-    'set +x; source "$1" >/dev/null 2>&1 || exit; printf "%s" "${NTFY_WARNING_URL-}"' \
-    _ $secrets 2>/dev/null) || return 1
-  [[ $url == http(|s)://?* && $url != *[[:space:]\"\\]* ]] || return 1
-  print -r -- $url
-}
-
-alert() {  # TITLE MESSAGE
-  local url
-  if ! url=$(warning_url); then log_line "warning undelivered (no NTFY_WARNING_URL): $1"; return 0; fi
-  print -r -- $2 | /usr/bin/curl -fsS -m 20 --noproxy '*' -o /dev/null \
-    -K <(print -r -- "url = \"$url\"") -H "Title: $1" -H 'Priority: high' -H 'Tags: warning' \
-    --data-binary @- 2>>$log || log_line "warning undelivered: $1"
+alert() {  # TITLE MESSAGE: high priority; the sender's reason, never the URL, goes to the log
+  print -r -- $2 | /usr/bin/python3 -I -B $notifier --secrets $secrets --title $1 2>>$log ||
+    log_line "warning undelivered: $1"
 }
 
 agent_loaded() { /bin/launchctl print gui/$UID/$label >/dev/null 2>&1 }

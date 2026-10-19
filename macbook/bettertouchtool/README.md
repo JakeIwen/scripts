@@ -134,7 +134,8 @@ it installed merely because preparation or a foreground monitor pass succeeded.
 `service stop/start/uninstall` controls only this matching registration; state
 and checkpoints are retained. Uninstall before moving the checkout.
 
-Warnings use `NTFY_WARNING_URL` sourced privately from `pi/secrets/.bash_variables`.
+Warnings go through `macbook/scripts/ntfy_warning.py`, which sources
+`NTFY_WARNING_URL` privately from `pi/secrets/.bash_variables`.
 The URL is never placed in process arguments, logs, plists or checkpoints.
 Two identical unhealthy checks at least 60 seconds apart produce an alert;
 successful alerts are deduplicated, failed deliveries retry after five minutes,

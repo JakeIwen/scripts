@@ -80,6 +80,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   hourly/login checker LaunchAgent `com.jacobr.deferred-jobs`, purge on success,
   `NTFY_WARNING_URL` on failure, daily cron watchdog); queue jobs with its `add`
   instead of writing a LaunchAgent per job. Usage is in `macbook/README.md`.
+  `macbook/scripts/ntfy_warning.py` is the one sender for `NTFY_WARNING_URL`
+  warnings (sourced privately from `pi/secrets/.bash_variables`, never in argv
+  or logs): btt_guard imports `send_warning`, deferred.zsh runs it with the
+  message on stdin. Reuse it rather than reading the URL again.
 - `shared/`: code imported or deployed on more than one host.
 - `shared/sh/session_search_header.sh` formats the shared activity-age/name header
   and quoted directory/resume command for `claudesearch.sh` and `codexsearch.sh`.
