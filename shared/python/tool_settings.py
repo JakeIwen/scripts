@@ -21,7 +21,7 @@ _TOOL_NAME = re.compile(r"[a-z0-9][a-z0-9-]*\Z")
 _SETTING_NAME = re.compile(r"[a-z][a-z0-9_]*\Z")
 _DECLARATION_FIELDS = frozenset(("tool", "title", "description", "settings"))
 _SETTING_FIELDS = frozenset(
-    ("name", "type", "default", "description", "minimum", "maximum", "choices", "unit", "step")
+    ("name", "type", "default", "description", "minimum", "maximum", "choices", "unit", "step", "label")
 )
 _REQUIRED_SETTING_FIELDS = frozenset(("name", "type", "default", "description"))
 
@@ -45,6 +45,8 @@ class Setting:
     choices: Optional[Tuple[str, ...]] = None
     unit: Optional[str] = None
     step: Optional[float] = None
+    # Human wording for forms; the name stays the key tools read.
+    label: Optional[str] = None
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -57,6 +59,7 @@ class Setting:
             "choices": list(self.choices) if self.choices is not None else None,
             "unit": self.unit,
             "step": self.step,
+            "label": self.label,
         }
 
 
@@ -232,6 +235,9 @@ def _setting_from_data(path: Path, index: int, data: Any) -> Setting:
     unit = data.get("unit")
     if unit is not None and not isinstance(unit, str):
         raise _problem(path, "{}.unit must be a string".format(prefix))
+    label = data.get("label")
+    if label is not None and (not isinstance(label, str) or not label.strip()):
+        raise _problem(path, "{}.label must be a non-empty string".format(prefix))
     raw_choices = data.get("choices")
     choices = None
     if setting_type == "choice":
@@ -245,13 +251,13 @@ def _setting_from_data(path: Path, index: int, data: Any) -> Setting:
         raise _problem(path, "{}.choices is only valid for choice settings".format(prefix))
 
     setting = Setting(name, setting_type, data["default"], description,
-                      minimum, maximum, choices, unit, step)
+                      minimum, maximum, choices, unit, step, label)
     normalized, error = _normalize_value(setting, setting.default)
     if error is not None:
         raise _problem(path, "{}.default is invalid: {}".format(prefix, error))
     if normalized != setting.default or type(normalized) is not type(setting.default):
         setting = Setting(name, setting_type, normalized, description,
-                          minimum, maximum, choices, unit, step)
+                          minimum, maximum, choices, unit, step, label)
     return setting
 
 
@@ -421,7 +427,14 @@ class Reloader:
         signature = _file_signature(self._path)
         if signature == self._signature:
             return ReloadResult(dict(self._values), False, self._error)
-        state = read_state(self.tool)
+        try:
+            state = read_state(self.tool)
+        except SettingsError as error:
+            # A declaration this process cannot read (mid-edit, or newer than the loaded
+            # module) must not stop a long-running tool; keep the values it already has.
+            self._signature = signature
+            self._error = str(error)
+            return ReloadResult(dict(self._values), False, self._error)
         self._signature = signature
         if state.error is not None:
             self._error = state.error

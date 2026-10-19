@@ -8,7 +8,8 @@ A declaration is a JSON object with `tool`, `title`, `description`, and an order
 `settings` array. Every setting has `name`, `type`, `default`, and `description`.
 Supported types are `integer`, `number`, `boolean`, and `choice`. Numeric settings
 may have `minimum` and `maximum`; choice settings have a non-empty `choices` list.
-`step` and `unit` are optional UI hints, and `step` does not constrain validation.
+`label` (form wording; `name` stays the stored key), `step` and `unit` are optional
+UI hints, and `step` does not constrain validation.
 
 Tools read effective values with `tool_settings.load("<tool>")`; long-running tools
 use `tool_settings.Reloader` to pick up edits. The panel uses the same module to

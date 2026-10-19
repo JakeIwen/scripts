@@ -25,8 +25,8 @@ def sample_declaration():
         "title": "Sample tool",
         "description": "Settings used by the tests.",
         "settings": [
-            {"name": "count", "type": "integer", "default": 2, "minimum": 1,
-             "maximum": 10, "description": "Item count."},
+            {"name": "count", "label": "Item count", "type": "integer", "default": 2,
+             "minimum": 1, "maximum": 10, "description": "Item count."},
             {"name": "ratio", "type": "number", "default": 1.5, "minimum": 0,
              "maximum": 5, "step": 0.25, "unit": "x", "description": "Scale."},
             {"name": "enabled", "type": "boolean", "default": False,
@@ -69,8 +69,10 @@ class ToolSettingsTests(unittest.TestCase):
         self.assertIsInstance(serialized["settings"], list)
         self.assertEqual(set(serialized["settings"][0]), {
             "name", "type", "default", "description", "minimum", "maximum",
-            "choices", "unit", "step",
+            "choices", "unit", "step", "label",
         })
+        self.assertEqual(declaration.settings[0].label, "Item count")
+        self.assertIsNone(declaration.settings[1].label)
 
     def test_declaration_rejects_schema_problems_and_names_the_file(self):
         cases = []
@@ -92,6 +94,9 @@ class ToolSettingsTests(unittest.TestCase):
         reversed_range = sample_declaration()
         reversed_range["settings"][0]["minimum"] = 11
         cases.append((reversed_range, "minimum must not exceed maximum"))
+        blank_label = sample_declaration()
+        blank_label["settings"][0]["label"] = " "
+        cases.append((blank_label, "label must be a non-empty string"))
         for declaration, expected in cases:
             with self.subTest(expected=expected):
                 self.write_declaration(declaration)
@@ -193,6 +198,18 @@ class ToolSettingsTests(unittest.TestCase):
         self.assertTrue(deleted.changed)
         self.assertEqual(deleted.values["count"], 2)
         self.assertIsNone(deleted.error)
+
+    def test_reloader_keeps_values_when_the_declaration_becomes_unreadable(self):
+        tool_settings.save("sample", {"count": 5})
+        reloader = tool_settings.Reloader("sample")
+        broken = sample_declaration()
+        broken["settings"][0]["surprise"] = True
+        self.write_declaration(broken)
+        tool_settings.values_path("sample").write_text('{"count": 6}', encoding="utf-8")
+        result = reloader.poll()
+        self.assertFalse(result.changed)
+        self.assertEqual(result.values["count"], 5)
+        self.assertIn("unknown fields surprise", result.error)
 
     def test_real_iterm_declaration_loads(self):
         with mock.patch.dict(os.environ, {"JACOBR_SETTINGS_DIR": str(REAL_DECLARATIONS)}):
