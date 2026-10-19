@@ -368,6 +368,12 @@ def assign_codex_threads(tuis: list[CodexTui], held: dict[int, set], threads: di
     def recency(tid):
         return threads.get(tid, {}).get("updated", 0)
 
+    def by_request(t, tid):
+        return t.requested == tid
+
+    def by_folder(t, tid):
+        return threads.get(tid, {}).get("cwd") == t.cwd
+
     tui_pids = {t.pid for t in tuis}
     result, pool = {}, set()
     for pid, ids in held.items():
@@ -377,8 +383,6 @@ def assign_codex_threads(tuis: list[CodexTui], held: dict[int, set], threads: di
             pool |= ids
     pool -= set(result.values())
     pending = [t for t in tuis if t.pid not in result]
-    by_request = lambda t, tid: t.requested == tid  # noqa: E731
-    by_folder = lambda t, tid: threads.get(tid, {}).get("cwd") == t.cwd  # noqa: E731
     for matches in (by_request, by_folder):
         for t in list(pending):
             hits = [tid for tid in pool if matches(t, tid)]
