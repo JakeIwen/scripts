@@ -23,6 +23,18 @@ successful recovery rounds bring it back. This avoids withdrawing the only
 usable default route and flushing connection tracking for very short cellular
 or hotspot interruptions.
 
+Every uplink's `flush_conntrack` list is `ifdown` and `disconnected` only.
+mwan3's flush empties the whole `nf_conntrack` table, not one interface's
+entries, so a flush on `ifup`/`connected` cut every live connection on the
+surviving link each time a flapping link returned (2026-10-14: 11 of 29 flushes,
+including the one that broke a Claude API response at 19:02 MDT). Flushing on
+the down events is kept so connections pinned to a dead link are re-marked.
+Change it with `uci del_list`/`add_list` on `mwan3.<iface>.flush_conntrack` and
+`uci commit mwan3`; the `15-mwan3` hotplug script reloads the config on every
+link event, so no mwan3 restart is needed. The router keeps the previous file
+as `/etc/config/mwan3.pre-flush-trim-20261015T100056Z`. The live config itself
+is not tracked here (`vanrouter/etc/config/*` is ignored).
+
 Inspect the current router-side log and durable vanpi history with:
 
 ```sh
