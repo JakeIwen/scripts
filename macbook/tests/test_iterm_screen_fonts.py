@@ -1,12 +1,19 @@
-"""Display matching, settle/resize decisions and config validation for the iTerm font follower."""
+"""Display matching, settle decisions, and shared settings for the iTerm font follower."""
 import importlib.util
 import json
+import os
 from pathlib import Path
+import plistlib
 import sys
 import tempfile
 import unittest
+from unittest import mock
+
+import tool_settings
 
 SOURCE = Path(__file__).resolve().parents[1] / "scripts/iterm_screen_fonts.py"
+PLIST = Path(__file__).resolve().parents[1] / "launchagents/com.jacobr.iterm-screen-fonts.plist"
+DECLARATIONS = Path(__file__).resolve().parents[2] / "shared/settings"
 SPEC = importlib.util.spec_from_file_location("iterm_screen_fonts", SOURCE)
 fonts = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = fonts  # dataclasses resolve annotations through sys.modules
@@ -76,28 +83,48 @@ class WindowTrackerTests(unittest.TestCase):
         self.assertEqual(self.observe(fonts.EXTERNAL, {"a"}), (fonts.EXTERNAL, {"a"}))
 
 
-class FontAndConfigTests(unittest.TestCase):
+class FontAndSettingsTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.path = Path(self.temp.name) / "sizes.json"
+        self.config = Path(self.temp.name) / "config"
+        self.environment = mock.patch.dict(os.environ, {
+            "JACOBR_SETTINGS_DIR": str(DECLARATIONS),
+            "JACOBR_CONFIG_DIR": str(self.config),
+        })
+        self.environment.start()
+        self.addCleanup(self.environment.stop)
 
     def test_font_size_changes_and_name_stays(self):
         self.assertEqual(fonts.font_with_size("Monaco 12", 15), "Monaco 15")
         self.assertEqual(fonts.font_with_size("JetBrainsMonoNF-Regular 13", 12.5), "JetBrainsMonoNF-Regular 12.5")
 
-    def test_missing_config_uses_defaults_and_a_partial_one_overrides(self):
-        self.assertEqual(fonts.load_sizes(self.path), fonts.DEFAULT_SIZES)
-        self.path.write_text(json.dumps({fonts.EXTERNAL: 18}))
-        sizes = fonts.load_sizes(self.path)
-        self.assertEqual(sizes[fonts.EXTERNAL], 18)
-        self.assertEqual(sizes[fonts.BUILT_IN], fonts.DEFAULT_SIZES[fonts.BUILT_IN])
+    def test_missing_values_file_uses_declared_defaults(self):
+        settings = tool_settings.load(fonts.TOOL)
+        sizes, poll_seconds, settle_polls = fonts.follower_settings(settings)
+        self.assertEqual(sizes, {fonts.BUILT_IN: 13, fonts.EXTERNAL: 15})
+        self.assertEqual(poll_seconds, 1.0)
+        self.assertEqual(settle_polls, 2)
 
-    def test_bad_config_is_rejected(self):
-        for bad in ({"externall": 15}, {fonts.EXTERNAL: True}, {fonts.EXTERNAL: 500}, [15]):
-            self.path.write_text(json.dumps(bad))
-            with self.subTest(bad=bad), self.assertRaises(ValueError):
-                fonts.load_sizes(self.path)
+    def test_bad_values_file_is_rejected_at_the_shared_boundary(self):
+        self.config.mkdir()
+        path = self.config / "iterm-screen-fonts.json"
+        for bad in ({"externall": 15}, {fonts.EXTERNAL: True},
+                    {fonts.EXTERNAL: 500}, [15]):
+            path.write_text(json.dumps(bad), encoding="utf-8")
+            with self.subTest(bad=bad), self.assertRaises(tool_settings.SettingsError):
+                tool_settings.load(fonts.TOOL)
+
+    def test_declaration_keys_are_exactly_the_follower_settings(self):
+        declaration = tool_settings.load_declaration(fonts.TOOL)
+        self.assertEqual(tuple(setting.name for setting in declaration.settings),
+                         fonts.FOLLOWER_SETTING_NAMES)
+
+    def test_launchagent_puts_shared_python_on_pythonpath(self):
+        with PLIST.open("rb") as source:
+            plist = plistlib.load(source)
+        self.assertEqual(plist["EnvironmentVariables"]["PYTHONPATH"],
+                         str(Path(__file__).resolve().parents[2] / "shared/python"))
 
 
 if __name__ == "__main__":

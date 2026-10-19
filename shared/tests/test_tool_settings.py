@@ -1,0 +1,222 @@
+"""Behavior tests for shared tool declarations and private value storage."""
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import stat
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest import mock
+
+import tool_settings
+
+
+ROOT = Path(__file__).resolve().parents[2]
+SCRIPT = ROOT / "shared/python/tool_settings.py"
+REAL_DECLARATIONS = ROOT / "shared/settings"
+
+
+def sample_declaration():
+    return {
+        "tool": "sample",
+        "title": "Sample tool",
+        "description": "Settings used by the tests.",
+        "settings": [
+            {"name": "count", "type": "integer", "default": 2, "minimum": 1,
+             "maximum": 10, "description": "Item count."},
+            {"name": "ratio", "type": "number", "default": 1.5, "minimum": 0,
+             "maximum": 5, "step": 0.25, "unit": "x", "description": "Scale."},
+            {"name": "enabled", "type": "boolean", "default": False,
+             "description": "Whether it is enabled."},
+            {"name": "mode", "type": "choice", "default": "fast",
+             "choices": ["fast", "slow"], "description": "Operating mode."},
+        ],
+    }
+
+
+class ToolSettingsTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.declarations = self.root / "declarations"
+        self.config = self.root / "config"
+        self.declarations.mkdir()
+        self.declaration_path = self.declarations / "sample.json"
+        self.write_declaration(sample_declaration())
+        self.environment = mock.patch.dict(os.environ, {
+            "JACOBR_SETTINGS_DIR": str(self.declarations),
+            "JACOBR_CONFIG_DIR": str(self.config),
+        })
+        self.environment.start()
+        self.addCleanup(self.environment.stop)
+
+    def write_declaration(self, declaration):
+        self.declaration_path.write_text(json.dumps(declaration), encoding="utf-8")
+
+    def test_declaration_loads_in_order_and_serializes_all_fields(self):
+        declaration = tool_settings.load_declaration("sample")
+        self.assertEqual(tool_settings.declaration_tools(), ["sample"])
+        self.assertEqual([setting.name for setting in declaration.settings],
+                         ["count", "ratio", "enabled", "mode"])
+        self.assertEqual(declaration.defaults(), {
+            "count": 2, "ratio": 1.5, "enabled": False, "mode": "fast",
+        })
+        serialized = declaration.as_dict()
+        self.assertIsInstance(serialized["settings"], list)
+        self.assertEqual(set(serialized["settings"][0]), {
+            "name", "type", "default", "description", "minimum", "maximum",
+            "choices", "unit", "step",
+        })
+
+    def test_declaration_rejects_schema_problems_and_names_the_file(self):
+        cases = []
+        mismatched = sample_declaration()
+        mismatched["tool"] = "other"
+        cases.append((mismatched, "tool must equal file stem"))
+        unknown_type = sample_declaration()
+        unknown_type["settings"][0]["type"] = "decimal"
+        cases.append((unknown_type, "type must be one of"))
+        duplicate = sample_declaration()
+        duplicate["settings"][1]["name"] = "count"
+        cases.append((duplicate, "duplicate setting names count"))
+        bad_default = sample_declaration()
+        bad_default["settings"][0]["default"] = False
+        cases.append((bad_default, "default is invalid"))
+        no_choices = sample_declaration()
+        no_choices["settings"][3]["choices"] = []
+        cases.append((no_choices, "choices must be a non-empty list"))
+        reversed_range = sample_declaration()
+        reversed_range["settings"][0]["minimum"] = 11
+        cases.append((reversed_range, "minimum must not exceed maximum"))
+        for declaration, expected in cases:
+            with self.subTest(expected=expected):
+                self.write_declaration(declaration)
+                with self.assertRaisesRegex(tool_settings.SettingsError, expected) as caught:
+                    tool_settings.load_declaration("sample")
+                self.assertIn(str(self.declaration_path), str(caught.exception))
+
+    def test_validation_rejects_unknown_wrong_bool_number_and_range(self):
+        declaration = tool_settings.load_declaration("sample")
+        with self.assertRaises(tool_settings.SettingsError) as caught:
+            tool_settings.validate(declaration, {
+                "mystery": 1,
+                "enabled": "yes",
+                "ratio": True,
+                "count": 0,
+            })
+        message = str(caught.exception)
+        self.assertIn("unknown settings mystery", message)
+        self.assertIn("allowed settings: count, ratio, enabled, mode", message)
+        self.assertIn("enabled must be a boolean", message)
+        self.assertIn("ratio must be a number", message)
+        self.assertIn("count must be between 1 and 10 (got 0)", message)
+        self.assertEqual(message.count("; "), 3)
+
+    def test_validation_normalizes_integral_integer_and_rejects_fraction(self):
+        declaration = tool_settings.load_declaration("sample")
+        self.assertEqual(tool_settings.validate(declaration, {"count": 3.0}), {"count": 3})
+        with self.assertRaisesRegex(tool_settings.SettingsError, "must be an integer"):
+            tool_settings.validate(declaration, {"count": 3.5})
+        with self.assertRaisesRegex(tool_settings.SettingsError, "JSON object"):
+            tool_settings.validate(declaration, [1, 2])
+
+    def test_missing_values_file_returns_defaults(self):
+        state = tool_settings.read_state("sample")
+        self.assertEqual(state.values, tool_settings.load_declaration("sample").defaults())
+        self.assertEqual(state.overrides, {})
+        self.assertEqual(state.revision, "missing")
+        self.assertIsNone(state.error)
+
+    def test_save_is_atomic_private_and_stores_only_non_defaults(self):
+        self.config.mkdir(mode=0o755)
+        with mock.patch.object(tool_settings.os, "replace", wraps=os.replace) as replace:
+            state = tool_settings.save("sample", {"count": 4, "ratio": 1.5})
+        path = tool_settings.values_path("sample")
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"count": 4})
+        self.assertEqual(state.values["count"], 4)
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(self.config.stat().st_mode), 0o700)
+        replace.assert_called_once()
+        source, destination = replace.call_args.args
+        self.assertEqual(Path(source).parent, path.parent)
+        self.assertEqual(Path(destination), path)
+        self.assertEqual(list(self.config.glob(".sample.json.*")), [])
+
+    def test_partial_updates_merge_and_setting_default_removes_override(self):
+        tool_settings.save("sample", {"count": 4, "mode": "slow"})
+        state = tool_settings.save("sample", {"ratio": 2.5})
+        self.assertEqual(state.overrides, {"count": 4, "ratio": 2.5, "mode": "slow"})
+        state = tool_settings.save("sample", {"count": 2})
+        self.assertEqual(state.overrides, {"ratio": 2.5, "mode": "slow"})
+
+    def test_stale_revision_raises_conflict(self):
+        first = tool_settings.save("sample", {"count": 3})
+        tool_settings.save("sample", {"count": 4}, expected_revision=first.revision)
+        with self.assertRaises(tool_settings.SettingsConflict):
+            tool_settings.save("sample", {"count": 5}, expected_revision=first.revision)
+
+    def test_invalid_file_is_reported_while_load_raises(self):
+        self.config.mkdir()
+        path = tool_settings.values_path("sample")
+        path.write_text('{"count": 99, "other": true}', encoding="utf-8")
+        state = tool_settings.read_state("sample")
+        self.assertEqual(state.values, tool_settings.load_declaration("sample").defaults())
+        self.assertEqual(state.overrides, {})
+        self.assertIn("unknown settings other", state.error)
+        self.assertIn("count must be between 1 and 10", state.error)
+        self.assertNotEqual(state.revision, "missing")
+        with self.assertRaises(tool_settings.SettingsError):
+            tool_settings.load("sample")
+
+    def test_reloader_detects_changes_and_keeps_last_good_values(self):
+        reloader = tool_settings.Reloader("sample")
+        self.assertFalse(reloader.poll().changed)
+        tool_settings.save("sample", {"count": 5})
+        changed = reloader.poll()
+        self.assertTrue(changed.changed)
+        self.assertEqual(changed.values["count"], 5)
+        self.assertIsNone(changed.error)
+
+        path = tool_settings.values_path("sample")
+        path.write_text('{"count": 50}', encoding="utf-8")
+        invalid = reloader.poll()
+        self.assertFalse(invalid.changed)
+        self.assertEqual(invalid.values["count"], 5)
+        self.assertIn("count must be between 1 and 10", invalid.error)
+
+        path.unlink()
+        deleted = reloader.poll()
+        self.assertTrue(deleted.changed)
+        self.assertEqual(deleted.values["count"], 2)
+        self.assertIsNone(deleted.error)
+
+    def test_real_iterm_declaration_loads(self):
+        with mock.patch.dict(os.environ, {"JACOBR_SETTINGS_DIR": str(REAL_DECLARATIONS)}):
+            declaration = tool_settings.load_declaration("iterm-screen-fonts")
+        self.assertEqual([setting.name for setting in declaration.settings],
+                         ["built_in", "external", "poll_seconds", "settle_polls"])
+        self.assertEqual(declaration.defaults()["external"], 15)
+
+    def test_cli_set_and_show_round_trip(self):
+        environment = dict(os.environ)
+        set_result = subprocess.run(
+            [sys.executable, "-B", str(SCRIPT), "set", "sample",
+             "count=4", "ratio=2.5", "enabled=true", "mode=slow"],
+            check=True, capture_output=True, text=True, env=environment)
+        self.assertEqual(json.loads(set_result.stdout)["values"]["mode"], "slow")
+        show_result = subprocess.run(
+            [sys.executable, "-B", str(SCRIPT), "show", "sample"],
+            check=True, capture_output=True, text=True, env=environment)
+        shown = json.loads(show_result.stdout)
+        self.assertEqual(shown["values"], {
+            "count": 4, "ratio": 2.5, "enabled": True, "mode": "slow",
+        })
+        self.assertEqual(shown["overrides"], shown["values"])
+
+
+if __name__ == "__main__":
+    unittest.main()

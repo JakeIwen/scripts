@@ -14,11 +14,13 @@ readonly domain=gui/$(/usr/bin/id -u)
 
 /usr/bin/plutil -lint "$source_plist"
 /bin/test -f "$repo/macbook/scripts/iterm_screen_fonts.py"
+/bin/test -f "$repo/shared/python/tool_settings.py"
 if ! "$venv/bin/python" -c 'import iterm2' 2>/dev/null; then
     /bin/rm -rf "$venv"
     /opt/homebrew/bin/python3 -m venv "$venv"
     "$venv/bin/pip" install --disable-pip-version-check -q "iterm2==$iterm2_version"
 fi
+PYTHONPATH="$repo/shared/python" "$venv/bin/python" -c 'import iterm2, tool_settings'
 /bin/mkdir -p -m 700 "$repo/tmp/iterm-screen-fonts"
 if ! /usr/bin/cmp -s "$source_plist" "$installed_plist"; then
     /bin/launchctl bootout "$domain/$label" 2>/dev/null || true

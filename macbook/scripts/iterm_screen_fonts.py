@@ -2,13 +2,13 @@
 """Match each iTerm2 window's font size to the display it sits on.
 
 Runs as the LaunchAgent com.jacobr.iterm-screen-fonts from its own venv
-(install_iterm_screen_fonts.zsh builds it). Once a second it reads window
-frames over iTerm2's Python API. When a window settles on another display, or
-gains a tab or pane, those sessions get that display's font size. A manual
+(install_iterm_screen_fonts.zsh builds it). It reads window frames over iTerm2's
+Python API at the configured interval. When a window settles on another display,
+or gains a tab or pane, those sessions get that display's font size. A manual
 Cmd+/Cmd- change sticks until the window moves again.
 
-Sizes default to DEFAULT_SIZES; ~/.config/iterm-screen-fonts.json overrides
-them, e.g. {"built_in": 13, "external": 15}, and is re-read when it changes.
+Settings are declared in shared/settings/iterm-screen-fonts.json and saved in
+~/.config/jacobr/iterm-screen-fonts.json. Valid edits are applied while running.
 
   iterm_screen_fonts.py          follow windows (what the LaunchAgent runs)
   iterm_screen_fonts.py --list   print each window's display and fonts
@@ -18,21 +18,18 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 import json
-from pathlib import Path
 import subprocess
 import sys
 import time
 
+import tool_settings
+
+TOOL = "iterm-screen-fonts"
 BUILT_IN = "built_in"
 EXTERNAL = "external"
 DISPLAY_KINDS = (BUILT_IN, EXTERNAL)
-DEFAULT_SIZES = {BUILT_IN: 13, EXTERNAL: 15}
-CONFIG_PATH = Path.home() / ".config" / "iterm-screen-fonts.json"
+FOLLOWER_SETTING_NAMES = (BUILT_IN, EXTERNAL, "poll_seconds", "settle_polls")
 ITERM_BUNDLE_ID = "com.googlecode.iterm2"
-POLL_SECONDS = 1.0
-# A window must report the same display on this many consecutive polls before
-# its fonts change, so dragging across the boundary doesn't flip them mid-move.
-SETTLE_POLLS = 2
 SCREEN_REFRESH_SECONDS = 15.0
 # A poll that hangs means iTerm went away without closing the socket cleanly.
 POLL_TIMEOUT_SECONDS = 20.0
@@ -96,21 +93,10 @@ def display_kind_for(frame: tuple[float, float, float, float], screens: list[Scr
     return best.kind if best else None
 
 
-def load_sizes(path: Path = CONFIG_PATH) -> dict[str, float]:
-    """Defaults merged with the optional config file, validated as a trust boundary."""
-    sizes: dict[str, float] = dict(DEFAULT_SIZES)
-    if not path.exists():
-        return sizes
-    data = json.loads(path.read_text())
-    if not isinstance(data, dict):
-        raise ValueError(f"{path}: expected a JSON object")
-    for key, value in data.items():
-        if key not in DISPLAY_KINDS:
-            raise ValueError(f"{path}: unknown key {key!r}; use {', '.join(DISPLAY_KINDS)}")
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 4 <= value <= 72:
-            raise ValueError(f"{path}: {key} must be a font size between 4 and 72")
-        sizes[key] = value
-    return sizes
+def follower_settings(values: dict[str, object]) -> tuple[dict[str, float], float, int]:
+    """Project the shared settings record into the values used by the follower."""
+    sizes = {kind: values[kind] for kind in DISPLAY_KINDS}
+    return sizes, values["poll_seconds"], values["settle_polls"]
 
 
 def font_with_size(font: str, size: float) -> str:
@@ -130,7 +116,9 @@ class _WindowState:
 class WindowTracker:
     """Decides which sessions need a font change, given one observation per poll."""
 
-    def __init__(self, settle_polls: int = SETTLE_POLLS):
+    # Requiring consecutive observations keeps a boundary crossing from changing
+    # fonts while the user is still dragging the window.
+    def __init__(self, settle_polls: int = 2):
         self.settle_polls = settle_polls
         self._windows: dict[str, _WindowState] = {}
 
@@ -219,25 +207,37 @@ async def follow(connection) -> None:
     import iterm2
 
     app = await iterm2.async_get_app(connection)
-    tracker = WindowTracker()
-    sizes = load_sizes()
-    config_mtime = CONFIG_PATH.stat().st_mtime if CONFIG_PATH.exists() else None
+    reloader = tool_settings.Reloader(TOOL)
+    settings = reloader.poll().values
+    sizes, poll_seconds, settle_polls = follower_settings(settings)
+    tracker = WindowTracker(settle_polls)
+    ignored_error = None
     screens, screens_read = read_screens(), time.monotonic()
     log(f"following windows; sizes {sizes}; screens {[(s.name, s.kind) for s in screens]}")
     while True:
-        mtime = CONFIG_PATH.stat().st_mtime if CONFIG_PATH.exists() else None
-        if mtime != config_mtime:
-            config_mtime = mtime
-            try:
-                sizes = load_sizes()
-                tracker.reset()  # re-apply everywhere with the new sizes
-                log(f"config reloaded; sizes {sizes}")
-            except ValueError as error:
-                log(f"config ignored, keeping {sizes}: {error}")
+        reloaded = reloader.poll()
+        if reloaded.error is not None:
+            if reloaded.error != ignored_error:
+                log(f"settings ignored, keeping {settings}: {reloaded.error}")
+            ignored_error = reloaded.error
+        elif reloaded.changed:
+            ignored_error = None
+            new_sizes, new_poll_seconds, new_settle_polls = follower_settings(reloaded.values)
+            if new_sizes != sizes or new_settle_polls != settle_polls:
+                tracker.settle_polls = new_settle_polls
+                tracker.reset()
+            settings = reloaded.values
+            sizes = new_sizes
+            poll_seconds = new_poll_seconds
+            settle_polls = new_settle_polls
+            log(f"settings reloaded; sizes {sizes}; poll_seconds {poll_seconds:g}; "
+                f"settle_polls {settle_polls}")
+        else:
+            ignored_error = None
         if time.monotonic() - screens_read > SCREEN_REFRESH_SECONDS:
             screens, screens_read = read_screens(), time.monotonic()
         await asyncio.wait_for(_poll_once(app, tracker, screens, sizes), POLL_TIMEOUT_SECONDS)
-        await asyncio.sleep(POLL_SECONDS)
+        await asyncio.sleep(poll_seconds)
 
 
 async def list_windows(connection) -> None:
@@ -265,7 +265,7 @@ def main(argv: list[str]) -> int:
     if argv:
         print(__doc__, file=sys.stderr)
         return 2
-    load_sizes()  # fail at startup, not mid-run, on a bad config
+    tool_settings.load(TOOL)  # fail at startup, not mid-run, on bad saved settings
     while not iterm_is_running():
         time.sleep(WAIT_FOR_ITERM_SECONDS)
     try:
