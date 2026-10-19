@@ -141,6 +141,27 @@ Jobs must be safe to rerun, clean up anything outside their own directory, and
 detach any long-lived process they start, since launchd ends the checker's
 process group when it exits.
 
+## iTerm font size per display
+
+`scripts/iterm_screen_fonts.py` gives every session in an iTerm2 window the
+font size for the display the window sits on, so dragging a window between the
+laptop and the external monitor resizes the text in all its tabs without
+resizing the window. Manual Cmd+/Cmd- changes stick until the window moves.
+It runs as the LaunchAgent `com.jacobr.iterm-screen-fonts` from its own venv
+(`~/.local/share/iterm-screen-fonts/venv`), talks to iTerm2's Python API, and
+idles while iTerm2 is closed.
+
+- Install or update: `zsh macbook/scripts/install_iterm_screen_fonts.zsh`. The
+  first run asks macOS to let `python3.13` control iTerm2; allow it.
+- Sizes: defaults in the script, overridden by
+  `~/.config/iterm-screen-fonts.json`, e.g. `{"built_in": 13, "external": 15}`.
+  Edits apply within a second, to every window.
+- See what it sees: `~/.local/share/iterm-screen-fonts/venv/bin/python
+  macbook/scripts/iterm_screen_fonts.py --list`.
+- Log: `tmp/iterm-screen-fonts/agent.log`.
+- Remove: `launchctl bootout gui/$(id -u)/com.jacobr.iterm-screen-fonts` and
+  delete `~/Library/LaunchAgents/com.jacobr.iterm-screen-fonts.plist`.
+
 ## BetterTouchTool maintenance
 
 Use the [BTT tooling index](bettertouchtool/README.md) for maintained commands,
