@@ -24,12 +24,15 @@ import unicodedata
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import TYPE_CHECKING, Callable, IO, List, Optional
 from urllib.parse import unquote
 
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 from werkzeug.serving import WSGIRequestHandler, make_server
 from werkzeug.wrappers import Request, Response
+
+if TYPE_CHECKING:
+    from _typeshed import ReadableBuffer
 
 LOG = logging.getLogger("phone_drop")
 
@@ -77,8 +80,8 @@ class BudgetedFile(io.FileIO):
         self.path = path
         self._budget = budget
 
-    def write(self, data) -> int:  # type: ignore[override]
-        self._budget.consume(len(data))
+    def write(self, data: ReadableBuffer, /) -> int:
+        self._budget.consume(len(memoryview(data)))
         return super().write(data)
 
 
@@ -91,6 +94,29 @@ class ByteBudget:
         if count > self.remaining:
             raise UploadRefused(self._refusal)
         self.remaining -= count
+
+
+PartialFileFactory = Callable[..., BudgetedFile]
+
+
+class PhoneDropRequest(Request):
+    """Request with a typed, per-instance multipart file stream factory."""
+
+    file_stream_factory: Optional[PartialFileFactory] = None
+
+    def _get_file_stream(
+        self,
+        total_content_length: Optional[int],
+        content_type: Optional[str],
+        filename: Optional[str] = None,
+        content_length: Optional[int] = None,
+    ) -> IO[bytes]:
+        factory = self.file_stream_factory
+        if factory is None:
+            return super()._get_file_stream(
+                total_content_length, content_type, filename, content_length
+            )
+        return factory(total_content_length, content_type, filename, content_length)
 
 
 def format_bytes(count: int) -> str:
@@ -177,7 +203,7 @@ class PhoneDrop:
         self._upload_lock = threading.Lock()
 
     def __call__(self, environ, start_response):
-        request = Request(environ)
+        request = PhoneDropRequest(environ)
         try:
             response = self._dispatch(request)
         except HTTPException as error:
@@ -190,7 +216,7 @@ class PhoneDrop:
             response = _text("Upload failed on the Pi; see journalctl -u phone-drop.", 500)
         return response(environ, start_response)
 
-    def _dispatch(self, request: Request) -> Response:
+    def _dispatch(self, request: PhoneDropRequest) -> Response:
         if request.path == "/health" and request.method in ("GET", "HEAD"):
             return Response('{"ok": true}\n', mimetype="application/json")
         if request.path != "/upload":
@@ -234,7 +260,7 @@ class PhoneDrop:
             raise UploadRefused(refusal)
         return ByteBudget(remaining, refusal)
 
-    def _receive(self, request: Request) -> Response:
+    def _receive(self, request: PhoneDropRequest) -> Response:
         budget = self._budget(request.content_length)
         self.partial_dir.mkdir(mode=0o700, exist_ok=True)
         partials: List[BudgetedFile] = []
@@ -271,9 +297,11 @@ class PhoneDrop:
                     pass
         return _text(_summary(saved), 200)
 
-    def _multipart_uploads(self, request: Request, open_partial):
+    def _multipart_uploads(
+        self, request: PhoneDropRequest, open_partial: PartialFileFactory
+    ):
         # Werkzeug calls this factory once per file part as the part begins.
-        request._get_file_stream = open_partial  # type: ignore[method-assign]
+        request.file_stream_factory = open_partial
         request.max_form_memory_size = MAX_FORM_FIELD_BYTES
         request.max_form_parts = MAX_FORM_PARTS
         uploads = []
@@ -286,7 +314,7 @@ class PhoneDrop:
             uploads.append((handle, storage.filename, storage.content_type))
         return uploads
 
-    def _raw_upload(self, request: Request, open_partial):
+    def _raw_upload(self, request: Request, open_partial: PartialFileFactory):
         raw_name = request.headers.get("X-Filename") or request.args.get("name")
         handle = open_partial()
         stream = request.stream
