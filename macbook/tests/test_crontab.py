@@ -6,7 +6,9 @@ import os
 from pathlib import Path
 import shlex
 from string import Template
+import tempfile
 import unittest
+from unittest.mock import patch
 
 REPO=Path(__file__).resolve().parents[2]
 CRONTAB=REPO/'macbook'/'crontab'
@@ -18,11 +20,14 @@ def jobs():
     env,commands={},[]
     for line in CRONTAB.read_text().splitlines():
         line=line.strip()
-        if not line or line.startswith('#'): continue
+        if line.startswith('#off '): line=line[len('#off '):].lstrip()
+        elif not line or line.startswith('#'): continue
+        if not line: continue
         first=line.split(None,1)[0]
         if '=' in first and not first[0].isdigit() and first[0] not in '*@':
             name,value=line.split('=',1);env[name.strip()]=value.strip().strip('"\'');continue
-        commands.append(Template(line.split(None,5)[5]).safe_substitute(env))
+        command=line.split(None,1)[1] if line.startswith('@') else line.split(None,5)[5]
+        commands.append(Template(command).safe_substitute(env))
     return commands
 
 
@@ -40,6 +45,13 @@ def repo_paths(command):
 class CrontabTests(unittest.TestCase):
     def test_crontab_has_jobs(self):
         self.assertGreater(len(jobs()),0)
+
+    def test_paused_jobs_are_still_parsed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture=Path(directory)/'crontab'
+            fixture.write_text('#off 0 2 * * * /Users/jacobr/dev/scripts/macbook/paused.sh\n')
+            with patch(f'{__name__}.CRONTAB',fixture):
+                self.assertEqual(jobs(),['/Users/jacobr/dev/scripts/macbook/paused.sh'])
 
     def test_every_repo_path_exists(self):
         for command in jobs():

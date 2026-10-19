@@ -113,10 +113,36 @@ Use the account normally, without sudo; HOME/CODEX_HOME overrides are ignored.
 
 ## User crontab
 
-`macbook/crontab` is the whole MacBook user crontab, including the Codex block
-above. Edit it here and install it with `crontab ~/dev/scripts/macbook/crontab`;
-`macbook/tests/test_crontab.py` fails when a job names a repo script that has
-moved. Jobs append stdout and stderr to the ignored `log/` directory.
+`macbook/crontab` is the whole MacBook user crontab. Manage it from the repository
+root with the stdlib-only sync CLI:
+
+```sh
+/usr/bin/python3 -B macbook/scripts/crontab_sync.py status
+/usr/bin/python3 -B macbook/scripts/crontab_sync.py pause JOB --revision REVISION
+/usr/bin/python3 -B macbook/scripts/crontab_sync.py resume JOB --revision REVISION
+/usr/bin/python3 -B macbook/scripts/crontab_sync.py install --revision REVISION
+```
+
+`status` prints each stable job ID and the current SHA-256 revision; `status
+--json` supplies the Mac Panel. Pause prefixes the exact tracked job line with
+`#off `, Resume removes that prefix, and both then install the whole tracked file.
+The marker stays in Git so a later install preserves the pause. Each edit refuses
+a stale revision. Install, Pause and Resume also refuse when the live crontab has
+any nonblank line missing from the tracked file; the missing lines are printed
+instead of being discarded. The previous live crontab is backed up privately in
+`~/.local/state/crontab-sync/`, with the newest 20 retained.
+
+The llm-restore block has its own durable switch and cannot be paused through this
+CLI; use `llmrestore --cron off` or `llmrestore --cron on`. The
+codex-release-cleanup block is owned by `macbook/crontab` and can be paused by job
+ID. Successful edits remain uncommitted, and both the CLI status and Mac Panel
+report that state until another session commits the file.
+
+Exit status is 0 for success, 2 for usage, 75 for a revision conflict or busy
+lock, 3 for an unsafe install or a managed, unknown or ambiguous job refusal, and
+1 for another error. `macbook/tests/test_crontab.py` checks active and `#off `
+jobs so a paused job cannot silently retain a moved repo script. Jobs append
+stdout and stderr to the ignored `log/` directory.
 
 - `time_machine_exclude_node_modules.sh` (hourly) sticky-excludes new
   `node_modules` under `~/ais` and `~/dev` from Time Machine. Rerun it by hand
