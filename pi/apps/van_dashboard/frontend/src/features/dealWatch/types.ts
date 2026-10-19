@@ -120,6 +120,52 @@ export interface DealWatchHavenoSummary {
   errors: number;
 }
 
+export const HAVENO_ACTIVITY_OUTCOMES = ['taken', 'withdrawn', 'pending'] as const;
+export type DealWatchHavenoActivityOutcome = (typeof HAVENO_ACTIVITY_OUTCOMES)[number];
+
+export const HAVENO_ACTIVITY_CONFIDENCES = ['high', 'low'] as const;
+export type DealWatchHavenoActivityConfidence = (typeof HAVENO_ACTIVITY_CONFIDENCES)[number];
+
+export interface DealWatchHavenoActivityWindow {
+  days: 7 | 30;
+  listed: number;
+  taken: number;
+  takenHigh: number;
+  withdrawn: number;
+  pending: number;
+  takenXmr: string;
+  medianHoursToTake: string | null;
+  marketTrades: number;
+  marketTradesXmr: string;
+}
+
+export interface DealWatchHavenoActivityOffer {
+  offerId: string;
+  price: string;
+  minXmr: string;
+  maxXmr: string;
+  offeredAt: number;
+  firstSeenAt: number;
+  goneAt: number;
+  outcome: DealWatchHavenoActivityOutcome;
+  confidence: DealWatchHavenoActivityConfidence | null;
+  tradePrice: string | null;
+  tradeXmr: string | null;
+  tradeAt: number | null;
+}
+
+export interface DealWatchHavenoActivity {
+  network: 'reto';
+  currency: 'USD';
+  paymentMethod: 'ZELLE';
+  trackingSince: number | null;
+  lastSnapshotAt: number | null;
+  lastError: string | null;
+  currentOffers: number;
+  windows: [DealWatchHavenoActivityWindow, DealWatchHavenoActivityWindow];
+  recent: DealWatchHavenoActivityOffer[];
+}
+
 export type DealWatchScheduleErrorCode = 'parse' | 'rate_limit';
 
 export interface DealWatchSchedule {
@@ -136,6 +182,7 @@ export interface DealWatchStatus {
   searchSummary: DealWatchSearchSummary;
   havenoWatches: DealWatchHavenoWatch[];
   havenoSummary: DealWatchHavenoSummary;
+  havenoActivity: DealWatchHavenoActivity | null;
   schedule: DealWatchSchedule;
 }
 

@@ -1,0 +1,26 @@
+[
+  {
+    "currency": "USD",
+    "price": 580.50,
+    "date": 1792322445000,
+    "paymentMethod": "ZELLE",
+    "base_vol": 1161.5805,
+    "rel_vol": 2.001
+  },
+  {
+    "currency": "USD",
+    "price": 582.00,
+    "date": 1792322200000,
+    "paymentMethod": "ZELLE",
+    "base_vol": 436.50,
+    "rel_vol": 0.75
+  },
+  {
+    "currency": "USD",
+    "price": 579.00,
+    "date": 1792322100000,
+    "paymentMethod": "ACH",
+    "base_vol": 579.00,
+    "rel_vol": 1
+  }
+]

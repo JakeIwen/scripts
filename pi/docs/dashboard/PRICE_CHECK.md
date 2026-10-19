@@ -40,6 +40,23 @@ uses `price_check.sqlite3.haveno.lock`, so Haveno polling does not wait for an
 eBay or product check; the combined default run skips Haveno without failing when
 that dedicated lock is already held.
 
+### Zelle offer activity
+
+Every recorded all-watch check also snapshots every RetoSwap USD ask and the
+public completed-trades feed, even when no Haveno watch is configured. When an
+offer vanishes, Deal Watch looks for one unclaimed trade with the same payment
+method, a compatible XMR amount, a price within three percent, and a timestamp
+near the disappearance. A unique fixed-size match is marked high confidence;
+other matches remain low confidence, and an unmatched offer becomes withdrawn
+after two hours. Returned offers are tracked again. The dashboard summarizes
+Zelle-only 7-day and 30-day activity while retaining all payment methods for
+future use; resolved offers and unlinked trades are pruned after 120 days.
+
+This is inference, not an exchange-provided relationship: public trades have no
+offer IDs or direction, and an offer that appears and disappears between the
+roughly ten-minute snapshots is not observed. Trade-feed failures preserve the
+last offer snapshot and appear as the activity error without failing watch checks.
+
 ```bash
 s price_check haveno-add 1 --fee-pct 0.5 --payment-method ZELLE --currency USD --max-xmr 10
 s price_check haveno-add -2.5

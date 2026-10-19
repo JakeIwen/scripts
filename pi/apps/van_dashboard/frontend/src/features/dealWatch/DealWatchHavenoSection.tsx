@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { StatusPill } from '../../components/StatusPill';
 import { useToast } from '../../components/ToastProvider';
 import type { DealWatchControls } from './controls';
+import { DealWatchHavenoActivity } from './DealWatchHavenoActivity';
 import { DealWatchHavenoForm } from './DealWatchHavenoForm';
 import { ExternalDealLink } from './ExternalDealLink';
 import { promptForMuteDays } from './mutePrompt';
@@ -14,10 +15,15 @@ import {
   havenoReferenceSourceLabel,
   havenoState,
 } from './presentation';
-import type { DealWatchHavenoOffer, DealWatchHavenoWatch } from './types';
+import type {
+  DealWatchHavenoActivity as DealWatchHavenoActivityData,
+  DealWatchHavenoOffer,
+  DealWatchHavenoWatch,
+} from './types';
 
 export interface DealWatchHavenoSectionProps {
   watches: DealWatchHavenoWatch[];
+  activity: DealWatchHavenoActivityData | null;
   disabled: boolean;
   controls: DealWatchControls;
 }
@@ -173,6 +179,7 @@ function HavenoCard({ watch, disabled, onEdit, onCheck, onMute, onRemove }: Have
 
 export function DealWatchHavenoSection({
   watches,
+  activity,
   disabled,
   controls,
 }: DealWatchHavenoSectionProps) {
@@ -235,6 +242,7 @@ export function DealWatchHavenoSection({
           return saved;
         }}
       />
+      <DealWatchHavenoActivity activity={activity} />
     </section>
   );
 }

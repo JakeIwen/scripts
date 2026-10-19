@@ -329,6 +329,7 @@ export function DealWatchSheet({ open, onClose, resource, controls }: DealWatchS
 
           <DealWatchHavenoSection
             watches={status.havenoWatches}
+            activity={status.havenoActivity}
             disabled={controls.busy}
             controls={controls}
           />

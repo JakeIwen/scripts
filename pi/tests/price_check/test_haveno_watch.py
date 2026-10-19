@@ -25,6 +25,7 @@ from pi.scripts.price_check.haveno_watch.source import (
     DEPTH_URL,
     KRAKEN_URL,
     PRICE_URL,
+    TRADES_URL,
     HavenoMarket,
     HavenoSourceError,
     fetch_market,
@@ -56,6 +57,8 @@ def fixture_fetch(url: str) -> str:
         return fixture("kraken.json")
     if url == DEPTH_URL.format("USD", "reto"):
         return fixture("depth.json")
+    if url == TRADES_URL.format("USD", "reto"):
+        return fixture("trades.json")
     raise AssertionError(f"unexpected URL {url}")
 
 

@@ -432,6 +432,175 @@
   color: var(--muted);
 }
 
+.deal-watch-activity {
+  min-width: 0;
+  padding: 15px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-medium);
+  background: var(--panel-soft);
+}
+
+.deal-watch-activity__summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  list-style: none;
+  cursor: pointer;
+}
+
+.deal-watch-activity__summary::-webkit-details-marker {
+  display: none;
+}
+
+.deal-watch-activity__summary:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+.deal-watch-activity__summary h4 {
+  min-width: 0;
+  margin: 0;
+  font-size: 17px;
+}
+
+.deal-watch-activity__summary > span:last-child,
+.deal-watch-activity__chevron,
+.deal-watch-activity__note,
+.deal-watch-activity__recent > p,
+.deal-watch-activity-offer small,
+.deal-watch-activity-offer__heading span {
+  color: var(--muted);
+}
+
+.deal-watch-activity__summary > span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  text-align: right;
+}
+
+.deal-watch-activity[open] > summary .deal-watch-activity__chevron {
+  transform: rotate(90deg);
+}
+
+.deal-watch-activity__body {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding-top: 14px;
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.deal-watch-activity__metadata,
+.deal-watch-activity-window dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.deal-watch-activity__metadata {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.deal-watch-activity__metadata > div,
+.deal-watch-activity-window dl > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.deal-watch-activity__metadata dt,
+.deal-watch-activity-window dt {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.deal-watch-activity__metadata dd,
+.deal-watch-activity-window dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.deal-watch-activity__windows {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.deal-watch-activity-window {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+  background: rgb(10 17 22 / 36%);
+}
+
+.deal-watch-activity-window h5,
+.deal-watch-activity__recent h5 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+
+.deal-watch-activity-window dl {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.deal-watch-activity__recent ul {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.deal-watch-activity-offer {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+}
+
+.deal-watch-activity-offer__heading {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.deal-watch-activity-offer__heading > div {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 5px 8px;
+}
+
+.deal-watch-activity-offer__heading strong,
+.deal-watch-activity-offer__heading span,
+.deal-watch-activity-offer small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.deal-watch-activity__recent > p,
+.deal-watch-activity__note {
+  margin: 0;
+}
+
+.deal-watch-activity__note {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 @media (max-width: 760px) {
   .tile.deal-watch-tile {
     min-height: 150px;
@@ -498,5 +667,28 @@
 
   .deal-watch-form__wide {
     grid-column: auto;
+  }
+
+  .deal-watch-activity {
+    padding: 14px;
+  }
+
+  .deal-watch-activity__summary {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .deal-watch-activity__summary > span:last-child {
+    grid-column: 2;
+    text-align: left;
+  }
+
+  .deal-watch-activity__metadata,
+  .deal-watch-activity__windows {
+    grid-template-columns: 1fr;
+  }
+
+  .deal-watch-activity-offer__heading {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

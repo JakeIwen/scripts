@@ -298,10 +298,13 @@ compare it with this checkout. Deployed files may differ from the repository.
 - Deal Watch Haveno XMR offers: `pi/scripts/price_check/haveno_watch/` (`source.py`
   order book + reference price, `store.py` tables in the shared price-check DB,
   `service.py` matching/ntfy, `cli.py` `haveno-*` subcommands and `.haveno.lock`).
+  `activity.py` runs market snapshots and classification; `activity_store.py` owns
+  the inferred-offer activity tables and summaries.
   Order book is haveno.markets level-2 `asks` (RetoSwap only); reference is the Haveno
   pricenode with Kraken fallback, never the haveno.markets ticker. Each offer ID
   notifies once per watch. Its own 10-minute `haveno-check` cron line sits beside the
-  price-check line. React: `DealWatchHavenoSection.tsx`, `havenoDecoders.ts`.
+  price-check line. React: `DealWatchHavenoSection.tsx`, `havenoDecoders.ts`;
+  activity subsection `DealWatchHavenoActivity.tsx`, `havenoActivityDecoders.ts`.
 
 Some ignored secret directories, wireless profiles, and device configurations
 may contain credentials or private network data. Never print or commit secrets,

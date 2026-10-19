@@ -183,6 +183,7 @@ describe('Haveno views', () => {
       <ToastProvider>
         <DealWatchHavenoSection
           watches={status.havenoWatches}
+          activity={status.havenoActivity}
           disabled={false}
           controls={controls()}
         />
@@ -207,6 +208,7 @@ describe('Haveno views', () => {
       <ToastProvider>
         <DealWatchHavenoSection
           watches={status.havenoWatches}
+          activity={status.havenoActivity}
           disabled={false}
           controls={actions}
         />
@@ -237,7 +239,7 @@ describe('Haveno views', () => {
     const actions = controls();
     render(
       <ToastProvider>
-        <DealWatchHavenoSection watches={[]} disabled={false} controls={actions} />
+        <DealWatchHavenoSection watches={[]} activity={null} disabled={false} controls={actions} />
       </ToastProvider>,
     );
 

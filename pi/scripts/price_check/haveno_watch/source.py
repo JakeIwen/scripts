@@ -12,6 +12,7 @@ from decimal import Decimal, InvalidOperation
 PRICE_URL = "https://price.haveno.network/getAllMarketPrices"
 KRAKEN_URL = "https://api.kraken.com/0/public/Ticker?pair=XXMRZUSD"
 DEPTH_URL = "https://haveno.markets/api/v1/depth/XMR_{}?level=2&network={}"
+TRADES_URL = "https://haveno.markets/api/v1/trades/XMR_{}?limit=200&network={}"
 MAX_PRICE_AGE_SECONDS = 15 * 60
 
 
@@ -27,6 +28,16 @@ class HavenoOffer:
     min_xmr: Decimal
     price: Decimal
     payment_method: str
+
+
+@dataclass(frozen=True)
+class HavenoTrade:
+    currency: str
+    date_ms: int
+    payment_method: str
+    price: Decimal
+    xmr: Decimal
+    usd_amount: Decimal
 
 
 @dataclass(frozen=True)
@@ -148,6 +159,38 @@ def fetch_order_book(fetcher, currency: str, network: str = "reto") -> tuple[Hav
     if len({offer.offer_id for offer in offers}) != len(offers):
         raise HavenoSourceError("Haveno order book contains duplicate offer IDs")
     return offers
+
+
+def _trade(entry, position: int, currency: str) -> HavenoTrade:
+    if not isinstance(entry, dict):
+        raise HavenoSourceError(f"Haveno trade {position} is not an object")
+    trade_currency = entry.get("currency")
+    payment_method = entry.get("paymentMethod")
+    if trade_currency != currency:
+        raise HavenoSourceError(f"Haveno trade {position} has an invalid currency")
+    if not isinstance(payment_method, str) or not payment_method:
+        raise HavenoSourceError(f"Haveno trade {position} has an invalid paymentMethod")
+    date_ms = _decimal(entry.get("date"), f"Haveno trade {position} date")
+    if date_ms != date_ms.to_integral_value():
+        raise HavenoSourceError(f"Haveno trade {position} date must be whole milliseconds")
+    return HavenoTrade(
+        currency=trade_currency,
+        date_ms=int(date_ms),
+        payment_method=payment_method,
+        price=_decimal(entry.get("price"), f"Haveno trade {position} price"),
+        xmr=_decimal(entry.get("rel_vol"), f"Haveno trade {position} rel_vol"),
+        usd_amount=_decimal(entry.get("base_vol"), f"Haveno trade {position} base_vol"),
+    )
+
+
+def fetch_trades(
+    fetcher, currency: str, network: str = "reto"
+) -> tuple[HavenoTrade, ...]:
+    url = TRADES_URL.format(currency, network)
+    document = _loads(_download(fetcher, url, "Haveno trades"), "Haveno trades")
+    if not isinstance(document, list):
+        raise HavenoSourceError("Haveno trades response is not a list")
+    return tuple(_trade(entry, position, currency) for position, entry in enumerate(document, 1))
 
 
 def fetch_market(fetcher, currency: str, network: str = "reto", *, now: float | None = None) -> HavenoMarket:

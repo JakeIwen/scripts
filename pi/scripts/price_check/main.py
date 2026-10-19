@@ -20,6 +20,7 @@ from haveno_watch import (
     HavenoStore,
     HavenoStoreError,
     HavenoWatchError,
+    activity_summary,
     handle_command as handle_haveno_command,
     register_subcommands as register_haveno_subcommands,
     run_combined_checks as run_combined_haveno_checks,
@@ -220,6 +221,9 @@ def response(
         "search_summary": search_store.summary(),
         "haveno_watches": haveno_store.list_watches(),
         "haveno_summary": haveno_store.summary(),
+        "haveno_activity": activity_summary(
+            haveno_store.connection, clock=haveno_store.clock
+        ),
         **extra,
     }
 
@@ -341,6 +345,233 @@ def emit(args, payload: dict, message: str | None = None) -> None:
             )
 
 
+def handle_schedule_command(args, command: str, manager: CronScheduleManager) -> int | None:
+    if command == "schedule":
+        schedule = manager.status()
+        emit(
+            args,
+            {"ok": True, "schedule": schedule},
+            f"{schedule['expression']} — "
+            f"{schedule['description'] or schedule['error']}",
+        )
+        return 0
+    if command == "schedule-parse":
+        schedule = manager.preview(args.expression)
+        emit(args, {"ok": True, "schedule": schedule})
+        return 0
+    if command == "schedule-set":
+        lock_path = args.db.with_suffix(".schedule.lock")
+        lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(lock_path.parent, 0o700)
+        with lock_path.open("a", encoding="utf-8") as lock:
+            os.chmod(lock_path, 0o600)
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            schedule = manager.update(args.expression)
+        emit(
+            args,
+            {"ok": True, "schedule": schedule},
+            f"updated price-check schedule: {schedule['expression']} — "
+            f"{schedule['description']}",
+        )
+        return 0
+    return None
+
+
+def handle_price_command(args, command: str, store, search_store, haveno_store) -> int | None:
+    if command == "list":
+        emit(args, response(store, search_store, haveno_store))
+        return 0
+    if command == "add":
+        values = validate_listing(args.parser, args.threshold, args.url, args.title)
+        item = store.add_item(*values)
+        emit(
+            args,
+            response(store, search_store, haveno_store, item=item),
+            f"added price check: {item['display_title']}",
+        )
+        return 0
+    if command == "edit":
+        values = validate_listing(args.parser, args.threshold, args.url, args.title)
+        item = store.update_item(args.id, *values)
+        emit(
+            args,
+            response(store, search_store, haveno_store, item=item),
+            f"updated price check: {item['display_title']}",
+        )
+        return 0
+    if command == "mute":
+        item = store.set_notification_mute(args.id, args.days)
+        if args.days:
+            message = (
+                f"muted price-check notifications for "
+                f"{item['display_title']} for {args.days} "
+                f"{'day' if args.days == 1 else 'days'}"
+            )
+        else:
+            message = (
+                f"unmuted price-check notifications for "
+                f"{item['display_title']}"
+            )
+        emit(args, response(store, search_store, haveno_store, item=item), message)
+        return 0
+    if command == "remove":
+        item = store.remove_item(args.match)
+        emit(
+            args,
+            response(store, search_store, haveno_store, removed=item),
+            f"removed price check: {item['display_title']}",
+        )
+        return 0
+    return None
+
+
+def handle_search_command(args, command: str, store, search_store, haveno_store) -> int | None:
+    if command == "search-add":
+        parser_name, url, title = validate_watch(args.parser, args.url, args.title)
+        watch = search_store.add_watch(parser_name, url, title)
+        emit(
+            args,
+            response(store, search_store, haveno_store, search=watch),
+            f"added saved search: {watch['display_title']}",
+        )
+        return 0
+    if command == "search-remove":
+        watch = search_store.remove_watch(args.id)
+        emit(
+            args,
+            response(store, search_store, haveno_store, removed_search=watch),
+            f"removed saved search: {watch['display_title']}",
+        )
+        return 0
+    if command == "search-dismiss":
+        watch, dismissed = search_store.dismiss_result(args.id, args.item_id)
+        emit(
+            args,
+            response(
+                store,
+                search_store,
+                haveno_store,
+                search=watch,
+                dismissed_result=dismissed,
+            ),
+            f"dismissed eBay result: {dismissed['title']}",
+        )
+        return 0
+    return None
+
+
+def handle_store_command(args, command: str, store, search_store, haveno_store) -> int | None:
+    result = handle_price_command(args, command, store, search_store, haveno_store)
+    if result is not None:
+        return result
+    result = handle_search_command(args, command, store, search_store, haveno_store)
+    if result is not None:
+        return result
+    haveno_result = handle_haveno_command(
+        args,
+        haveno_store,
+        db_path=args.db,
+        fetcher=fetch,
+        notify_sender=send_ntfy,
+    )
+    if haveno_result is not None:
+        payload = response(
+            store,
+            search_store,
+            haveno_store,
+            **haveno_result.extra,
+        )
+        if haveno_result.message and haveno_result.status:
+            payload["message"] = haveno_result.message
+        emit(
+            args,
+            payload,
+            haveno_result.message if haveno_result.status == 0 else None,
+        )
+        return haveno_result.status
+    if command == "migrate-tsv":
+        count = migrate_tsv(store, args.path)
+        emit(
+            args,
+            response(store, search_store, haveno_store, migrated=count),
+            f"migrated {count} price checks",
+        )
+        return 0
+    return None
+
+
+def run_checks(args, command: str, store, search_store, haveno_store) -> int:
+    lock_path = args.db.with_suffix(".check.lock")
+    lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with lock_path.open("a", encoding="utf-8") as lock:
+        os.chmod(lock_path, 0o600)
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise PriceCheckError("another price check is already running") from error
+        if command == "check" and args.target != "all":
+            try:
+                items = [store.get_item(int(args.target))]
+            except ValueError as error:
+                raise PriceCheckError("check target must be an item ID or 'all'") from error
+        else:
+            items = [] if command == "search-check" else store.list_items()
+        if command == "search-check" and args.target != "all":
+            try:
+                searches = [search_store.get_watch(int(args.target))]
+            except ValueError as error:
+                raise PriceCheckError(
+                    "search-check target must be a search ID or 'all'"
+                ) from error
+        else:
+            searches = (
+                search_store.list_watches()
+                if command in {"run", "check", "search-check"}
+                and (command != "check" or args.target == "all")
+                else []
+            )
+        checked, errors = check_items(
+            store,
+            items,
+            notify=not args.dry_run,
+            record=not args.dry_run,
+        )
+        search_checked, search_errors = check_watches(
+            search_store,
+            searches,
+            notify_new=send_search_alert,
+            notify=not args.dry_run and not getattr(args, "no_notify", False),
+            record=not args.dry_run,
+        )
+
+    haveno_checked, haveno_errors, haveno_skipped = run_combined_haveno_checks(
+        args,
+        haveno_store,
+        command=command,
+        fetcher=fetch,
+        notify_sender=send_ntfy,
+    )
+    if haveno_skipped:
+        print(
+            "price-check Haveno: another Haveno check is already running; skipped",
+            file=sys.stderr,
+        )
+    all_errors = errors + search_errors + haveno_errors
+    payload = response(
+        store,
+        search_store,
+        haveno_store,
+        checked=checked,
+        search_checked=search_checked,
+        haveno_checked=haveno_checked,
+        check_errors=all_errors,
+    )
+    if all_errors:
+        payload["message"] = "; ".join(error["message"] for error in all_errors)
+    emit(args, payload)
+    return 1 if all_errors else 0
+
+
 def main() -> int:
     args = build_parser().parse_args()
     command = args.command or "run"
@@ -348,222 +579,21 @@ def main() -> int:
         schedule_manager = CronScheduleManager(
             cache_path=args.db.with_suffix(".schedule-description.json")
         )
-        if command == "schedule":
-            schedule = schedule_manager.status()
-            emit(
-                args,
-                {"ok": True, "schedule": schedule},
-                f"{schedule['expression']} — "
-                f"{schedule['description'] or schedule['error']}",
-            )
-            return 0
-        if command == "schedule-parse":
-            schedule = schedule_manager.preview(args.expression)
-            emit(args, {"ok": True, "schedule": schedule})
-            return 0
-        if command == "schedule-set":
-            lock_path = args.db.with_suffix(".schedule.lock")
-            lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            os.chmod(lock_path.parent, 0o700)
-            with lock_path.open("a", encoding="utf-8") as lock:
-                os.chmod(lock_path, 0o600)
-                fcntl.flock(lock, fcntl.LOCK_EX)
-                schedule = schedule_manager.update(args.expression)
-            emit(
-                args,
-                {"ok": True, "schedule": schedule},
-                f"updated price-check schedule: {schedule['expression']} — "
-                f"{schedule['description']}",
-            )
-            return 0
+        status = handle_schedule_command(args, command, schedule_manager)
+        if status is not None:
+            return status
 
         with (
             PriceStore(args.db) as store,
             SearchStore(args.db) as search_store,
             HavenoStore(args.db) as haveno_store,
         ):
-            if command == "list":
-                emit(args, response(store, search_store, haveno_store))
-                return 0
-            if command == "add":
-                values = validate_listing(args.parser, args.threshold, args.url, args.title)
-                item = store.add_item(*values)
-                emit(
-                    args,
-                    response(store, search_store, haveno_store, item=item),
-                    f"added price check: {item['display_title']}",
-                )
-                return 0
-            if command == "edit":
-                values = validate_listing(args.parser, args.threshold, args.url, args.title)
-                item = store.update_item(args.id, *values)
-                emit(
-                    args,
-                    response(store, search_store, haveno_store, item=item),
-                    f"updated price check: {item['display_title']}",
-                )
-                return 0
-            if command == "mute":
-                item = store.set_notification_mute(args.id, args.days)
-                if args.days:
-                    message = (
-                        f"muted price-check notifications for "
-                        f"{item['display_title']} for {args.days} "
-                        f"{'day' if args.days == 1 else 'days'}"
-                    )
-                else:
-                    message = (
-                        f"unmuted price-check notifications for "
-                        f"{item['display_title']}"
-                    )
-                emit(args, response(store, search_store, haveno_store, item=item), message)
-                return 0
-            if command == "remove":
-                item = store.remove_item(args.match)
-                emit(
-                    args,
-                    response(store, search_store, haveno_store, removed=item),
-                    f"removed price check: {item['display_title']}",
-                )
-                return 0
-            if command == "search-add":
-                parser_name, url, title = validate_watch(
-                    args.parser, args.url, args.title
-                )
-                watch = search_store.add_watch(parser_name, url, title)
-                emit(
-                    args,
-                    response(store, search_store, haveno_store, search=watch),
-                    f"added saved search: {watch['display_title']}",
-                )
-                return 0
-            if command == "search-remove":
-                watch = search_store.remove_watch(args.id)
-                emit(
-                    args,
-                    response(store, search_store, haveno_store, removed_search=watch),
-                    f"removed saved search: {watch['display_title']}",
-                )
-                return 0
-            if command == "search-dismiss":
-                watch, dismissed = search_store.dismiss_result(
-                    args.id, args.item_id
-                )
-                emit(
-                    args,
-                    response(
-                        store,
-                        search_store,
-                        haveno_store,
-                        search=watch,
-                        dismissed_result=dismissed,
-                    ),
-                    f"dismissed eBay result: {dismissed['title']}",
-                )
-                return 0
-            haveno_result = handle_haveno_command(
-                args,
-                haveno_store,
-                db_path=args.db,
-                fetcher=fetch,
-                notify_sender=send_ntfy,
+            status = handle_store_command(
+                args, command, store, search_store, haveno_store
             )
-            if haveno_result is not None:
-                payload = response(
-                    store,
-                    search_store,
-                    haveno_store,
-                    **haveno_result.extra,
-                )
-                if haveno_result.message and haveno_result.status:
-                    payload["message"] = haveno_result.message
-                emit(
-                    args,
-                    payload,
-                    haveno_result.message if haveno_result.status == 0 else None,
-                )
-                return haveno_result.status
-            if command == "migrate-tsv":
-                count = migrate_tsv(store, args.path)
-                emit(
-                    args,
-                    response(store, search_store, haveno_store, migrated=count),
-                    f"migrated {count} price checks",
-                )
-                return 0
-
-            lock_path = args.db.with_suffix(".check.lock")
-            lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            with lock_path.open("a", encoding="utf-8") as lock:
-                os.chmod(lock_path, 0o600)
-                try:
-                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except BlockingIOError as error:
-                    raise PriceCheckError("another price check is already running") from error
-                if command == "check" and args.target != "all":
-                    try:
-                        items = [store.get_item(int(args.target))]
-                    except ValueError as error:
-                        raise PriceCheckError("check target must be an item ID or 'all'") from error
-                else:
-                    items = [] if command == "search-check" else store.list_items()
-                if command == "search-check" and args.target != "all":
-                    try:
-                        searches = [search_store.get_watch(int(args.target))]
-                    except ValueError as error:
-                        raise PriceCheckError(
-                            "search-check target must be a search ID or 'all'"
-                        ) from error
-                else:
-                    searches = (
-                        search_store.list_watches()
-                        if command in {"run", "check", "search-check"}
-                        and (command != "check" or args.target == "all")
-                        else []
-                    )
-                checked, errors = check_items(
-                    store,
-                    items,
-                    notify=not args.dry_run,
-                    record=not args.dry_run,
-                )
-                search_checked, search_errors = check_watches(
-                    search_store,
-                    searches,
-                    notify_new=send_search_alert,
-                    notify=not args.dry_run
-                    and not getattr(args, "no_notify", False),
-                    record=not args.dry_run,
-                )
-
-            haveno_checked, haveno_errors, haveno_skipped = run_combined_haveno_checks(
-                args,
-                haveno_store,
-                command=command,
-                fetcher=fetch,
-                notify_sender=send_ntfy,
-            )
-            if haveno_skipped:
-                print(
-                    "price-check Haveno: another Haveno check is already running; skipped",
-                    file=sys.stderr,
-                )
-            all_errors = errors + search_errors + haveno_errors
-            payload = response(
-                store,
-                search_store,
-                haveno_store,
-                checked=checked,
-                search_checked=search_checked,
-                haveno_checked=haveno_checked,
-                check_errors=all_errors,
-            )
-            if all_errors:
-                payload["message"] = "; ".join(
-                    error["message"] for error in all_errors
-                )
-            emit(args, payload)
-            return 1 if all_errors else 0
+            if status is not None:
+                return status
+            return run_checks(args, command, store, search_store, haveno_store)
     except (
         HavenoStoreError,
         HavenoWatchError,

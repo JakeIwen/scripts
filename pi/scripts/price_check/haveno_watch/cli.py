@@ -7,6 +7,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from .activity import run_activity_snapshot
 from .service import HavenoWatchError, check_watches, validate_watch
 from .store import HavenoStore
 
@@ -121,6 +122,7 @@ def handle_command(
         notify=not args.dry_run and not args.no_notify,
         record=not args.dry_run,
         skip_locked=False,
+        track_activity=args.target == "all",
     )
     message = "; ".join(error["message"] for error in errors) or None
     return CommandResult(
@@ -154,6 +156,7 @@ def run_locked_checks(
     notify: bool,
     record: bool,
     skip_locked: bool,
+    track_activity: bool = False,
 ) -> tuple[list[dict], list[dict], bool]:
     lock_path = db_path.with_suffix(".haveno.lock")
     lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -174,6 +177,8 @@ def run_locked_checks(
             notify=notify,
             record=record,
         )
+        if track_activity and record:
+            run_activity_snapshot(store.connection, fetcher=fetcher, clock=store.clock)
     return checked, errors, False
 
 
@@ -196,4 +201,5 @@ def run_combined_checks(
         notify=not args.dry_run,
         record=not args.dry_run,
         skip_locked=True,
+        track_activity=True,
     )

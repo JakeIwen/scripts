@@ -20,6 +20,7 @@ export {
 export { executeDealWatchMutation, useDealWatchControls } from './controls';
 export type { DealWatchControls } from './controls';
 export { decodeDealWatchSchedule, decodeDealWatchStatus } from './decoders';
+export { decodeDealWatchHavenoActivity } from './havenoActivityDecoders';
 export { decodeDealWatchHaveno } from './havenoDecoders';
 export { DealWatchFeature } from './DealWatchFeature';
 export { DealWatchSheet, type DealWatchSheetProps } from './DealWatchSheet';
@@ -28,6 +29,11 @@ export { safeExternalHref } from './externalLinks';
 export { DEAL_WATCH_POLL_INTERVAL_MS, useDealWatchStatus } from './hooks';
 export type {
   DealWatchCheckState,
+  DealWatchHavenoActivity,
+  DealWatchHavenoActivityConfidence,
+  DealWatchHavenoActivityOffer,
+  DealWatchHavenoActivityOutcome,
+  DealWatchHavenoActivityWindow,
   DealWatchHavenoDraft,
   DealWatchHavenoOffer,
   DealWatchHavenoReferenceSource,
