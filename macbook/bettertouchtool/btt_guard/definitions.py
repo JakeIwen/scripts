@@ -60,6 +60,7 @@ LAUNCH_PATH_FIELDS = {
     -1: "BTTLayoutIndependentActionChar",
     264: "BTTLayoutIndependentActionChar",
     129: "BTTDelayNextActionBy",
+    281: "BTTGenericActionConfig",
 }
 TOP_LEVEL_TEXT_FIELDS = {
     "BTTMenuName",
@@ -226,6 +227,17 @@ def _decoded_action_data(value: object, uuid: str) -> object:
     return value
 
 
+def _with_saved_script_key(wanted: object, actual: object) -> object:
+    # BTT's export renames a saved BTTAppleScriptString to BTTScriptString;
+    # update_trigger and the editor still use the saved key (see repair_text_transforms.js).
+    if (isinstance(wanted, dict) and isinstance(actual, dict)
+            and "BTTAppleScriptString" in wanted and "BTTScriptString" not in wanted
+            and "BTTScriptString" in actual and "BTTAppleScriptString" not in actual):
+        actual = dict(actual)
+        actual["BTTAppleScriptString"] = actual.pop("BTTScriptString")
+    return actual
+
+
 def _payload_field(key: str, expected: dict[str, Any], uuid: str) -> str:
     action_type = int(expected["action_type"])
     if key == "launch_path":
@@ -256,7 +268,7 @@ def _validate_payload(expected: dict[str, Any], node: dict[str, Any], uuid: str)
             raise ValueError(f"Runtime payload is missing {field}: {uuid}")
         actual = node[field]
         if key == "action_data":
-            actual = _decoded_action_data(actual, uuid)
+            actual = _with_saved_script_key(wanted, _decoded_action_data(actual, uuid))
         # BTT saves layout-adaptive shortcuts as "autoAdapt" but exports them
         # with a placeholder derived from the action's own UUID.
         if key == "launch_path" and wanted == "autoAdapt" and actual == f"no-name-{uuid[:7]}":

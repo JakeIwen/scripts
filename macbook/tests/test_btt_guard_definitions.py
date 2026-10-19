@@ -1,5 +1,6 @@
 """Strict runtime-definition capture tests for BTT Guard checkpoints."""
 from copy import deepcopy
+import json
 import unittest
 
 from macbook.bettertouchtool.btt_guard.definitions import (
@@ -271,6 +272,51 @@ class GuardDefinitionTests(unittest.TestCase):
         exports[0]["BTTMenuItems"][0]["BTTMenuItemActions"][0]["BTTOrder"] = 200
         with self.assertRaises(ValueError):
             build_definitions(exports, snapshot, {PRESET: "Master"})
+
+    def test_exported_script_key_alias_matches_only_the_same_script(self):
+        def shell_with(saved, exported):
+            snapshot, exports = fixture()
+            snapshot["records"]["shell"]["payload"]["action_data"] = saved
+            exports[0]["BTTMenuItems"][0]["BTTMenuItemActions"][0][
+                "BTTAdditionalActionData"
+            ] = json.dumps(exported)
+            return exports, snapshot
+
+        script = "async function replaceSelectedText() {}"
+        build_definitions(
+            *shell_with({"BTTAppleScriptString": script}, {"BTTScriptString": script}),
+            {PRESET: "Master"},
+        )
+        for exported in (
+            {"BTTScriptString": "changed"},
+            {"BTTScriptString": script, "BTTAppleScriptString": script},
+        ):
+            with self.subTest(exported=exported), self.assertRaises(ValueError):
+                build_definitions(
+                    *shell_with({"BTTAppleScriptString": script}, exported),
+                    {PRESET: "Master"},
+                )
+        with self.assertRaises(ValueError):
+            build_definitions(
+                *shell_with({"BTTScriptString": script}, {"BTTAppleScriptString": script}),
+                {PRESET: "Master"},
+            )
+
+    def test_javascript_launch_path_matches_generic_action_config(self):
+        def javascript_with(exported):
+            snapshot, exports = fixture()
+            snapshot["records"]["shell"].update(
+                action_type=281, payload={"launch_path": "async function run() {}"}
+            )
+            action = exports[0]["BTTMenuItems"][0]["BTTMenuItemActions"][0]
+            for key in ("BTTShellTaskActionScript", "BTTShellTaskActionConfig", "BTTAdditionalActionData"):
+                del action[key]
+            action.update(BTTPredefinedActionType=281, BTTGenericActionConfig=exported)
+            return exports, snapshot
+
+        build_definitions(*javascript_with("async function run() {}"), {PRESET: "Master"})
+        with self.assertRaises(ValueError):
+            build_definitions(*javascript_with("changed"), {PRESET: "Master"})
 
     def test_layout_adaptive_shortcut_matches_only_its_own_placeholder(self):
         def keyboard_with(exported):
