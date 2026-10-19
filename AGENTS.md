@@ -65,8 +65,13 @@ compare it with this checkout. Deployed files may differ from the repository.
   `macbook/bettertouchtool/btt_guard/` owns explicit known-good checkpoints,
   read-only integrity audits, approved restoration, ntfy warnings and periodic
   launchd control. Its `model.py` owns shared contracts/statuses; `storage.py`
-  owns private atomic state. Never promote audit output into the known-good
-  pointer automatically. Checkpoint integration fixtures live in
+  owns private atomic state. Never promote audit output during ordinary audits
+  or Guard repairs. The one exception is `btt_guard/installer_checkpoint.py`:
+  a wired installer's `--apply` may advance an existing checkpoint only after a
+  healthy pre-write baseline, saved-state verification, an unchanged checkpoint
+  id and a final audit whose findings are confined to the UUIDs it wrote; zero
+  writes, unavailable state, foreign findings or a failed capture never promote.
+  Wired installers expose `--no-checkpoint`. Checkpoint integration fixtures live in
   `macbook/tests/btt_guard_fixtures.py`. `btt.py guard last-audit` prints the
   saved audit report read-only (`{"status": "none"}` when there is none).
   `repair_text_transforms.py/.js` owns the guarded text-transform installer;
@@ -76,7 +81,11 @@ compare it with this checkout. Deployed files may differ from the repository.
   never round-trip rich-editor selection endpoints through flat offsets.
   `signal_text_diagnostic.js` owns the temporary Signal diagnostic button's runner.
   `macbook/crontab` is the tracked user crontab; `macbook/tests/test_crontab.py`
-  checks that every repo script it runs exists and is executable.
+  checks that every repo script it runs (paused `#off ` jobs included) exists and
+  is executable. `macbook/scripts/crontab_sync.py` owns its parsing, stable job
+  ids, `#off ` pauses, revision-checked writes, drift-safe install (refused while
+  the live crontab has lines the file lacks) and private live backups in
+  `~/.local/state/crontab-sync/`; llm-restore keeps its own switch.
   `macbook/scripts/deferred.zsh` owns one-off future jobs on the Mac (queue,
   hourly/login checker LaunchAgent `com.jacobr.deferred-jobs`, purge on success,
   `NTFY_WARNING_URL` on failure, daily cron watchdog); queue jobs with its `add`
@@ -94,8 +103,19 @@ compare it with this checkout. Deployed files may differ from the repository.
   `panel_contracts.py`, request guards (Host allowlist, per-instance token,
   Origin + JSON on POST) in `request_guard.py`, the only subprocess boundary in
   `cli_runner.py`, display redaction in `log_redaction.py`. It changes tools only
-  through their own CLIs or `tool_settings`; crontab and ntfy config are
-  read-only there, BTT repair is never exposed, and it never reads pi/secrets.
+  through their own CLIs or `tool_settings` (crontab edits go through
+  `crontab_sync.py`); ntfy config is read-only there, BTT repair is never
+  exposed, and it never reads pi/secrets.
+  Its page is ES modules in `static/` with no build step: `app.mjs` (section
+  registry, nav, polling, collapse/theme state, panel health), `panel_sections.mjs`
+  (`refresh`/`action` and the dirty check polls obey), `panel_api.mjs` (the only
+  `fetch`), `panel_dom.mjs` (DOM helpers, armed buttons, notices, times, focus
+  keys), `relative_time.mjs`, `status_cell.mjs` (`Level` vocabulary) and one
+  `section_<name>.mjs` per section. `server.py` serves any lower-case `.mjs`/`.css`
+  in `static/`; `tests/test_static_page.py` checks each module parses and its
+  imports resolve. Service log tails load on demand from
+  `GET /api/services/logs/<label>`, and `/healthz` reports `source_changed` so the
+  page offers a restart after Python edits.
   Usage: `macbook/mac_panel/README.md`.
   `macbook/scripts/ntfy_warning.py` is the one sender for `NTFY_WARNING_URL`
   warnings (sourced privately from `pi/secrets/.bash_variables`, never in argv
@@ -108,7 +128,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   the only reader/validator/writer, used by both the tool and the Mac Panel.
   Values live in `~/.config/jacobr/<tool>.json` (mode 600, atomic, only
   non-default values, revision-checked); long-running tools reload them with
-  `tool_settings.Reloader`. LaunchAgents need `PYTHONPATH=.../shared/python` in
+  `tool_settings.Reloader`, which keeps the last good values when the values or
+  declaration file can't be read. A setting may carry an optional `label` (form
+  wording; `name` stays the key). LaunchAgents need `PYTHONPATH=.../shared/python` in
   their plist. First user: the iTerm font follower (`iterm-screen-fonts`).
 - `shared/sh/session_search_header.sh` formats the shared activity-age/name header
   and quoted directory/resume command for `claudesearch.sh` and `codexsearch.sh`.
