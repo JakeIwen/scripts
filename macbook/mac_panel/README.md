@@ -46,23 +46,85 @@ login at boot.
   token; do not paste it into reports). It is written only after a successful bind
   and removed by its owning instance on exit.
 
+Python edits take effect only after a restart; the page's header says "Panel code
+changed since it started" (from `/healthz` `source_changed`) and offers the same
+confirmed restart as the services table. Static files are read per request.
+
 ## Sections and owners
 
 | Section | Reads and commands |
 | --- | --- |
-| Settings | `shared/python/tool_settings.py` loads declarations from `shared/settings/` and revision-checked values from `~/.config/jacobr/`. The generated controls save through that module; reset sends declared defaults. |
-| Deferred jobs | `/bin/zsh macbook/scripts/deferred.zsh list --json`; `cancel`, `retry`, `reschedule`, and `run-now` remain owned by that CLI. Run-now returns an asynchronous task receipt. Receipts are bounded and reset when the panel restarts; the job CLI retains durable job state. |
-| Background services | `/bin/launchctl list` plus user `com.jacobr.*` plists; installed system daemons use `launchctl print system/<label>`. Log tails are bounded and redacted. Confirmed user-agent restarts use `launchctl kickstart -k gui/<uid>/<label>`; system daemons are status-only. |
-| User crontab | `/usr/bin/crontab -l`, compared with `macbook/crontab`. Shows schedules, managed ownership and redirected log modification times, not proof that a job succeeded. |
+| Deferred jobs | `/bin/zsh macbook/scripts/deferred.zsh list --json`; `cancel`, `retry`, `reschedule`, and `run-now` remain owned by that CLI. Run-now returns an asynchronous task receipt with start and finish times, shown in the job's row. Receipts are bounded and reset when the panel restarts; the job CLI retains durable job state. |
+| Background services | `/bin/launchctl list` plus user `com.jacobr.*` plists; installed system daemons use `launchctl print system/<label>` and keep its stderr as the row's reason when it fails. The inventory carries only each log's path, stream and modification time; `GET /api/services/logs/<label>` returns the bounded, redacted tails for one service when its disclosure is open. `/dev/null` streams are not listed. Confirmed user-agent restarts use `launchctl kickstart -k gui/<uid>/<label>`; system daemons are status-only. |
+| User crontab | `/usr/bin/python3 -B macbook/scripts/crontab_sync.py status --json` reads the tracked and live crontabs. Per-job pause/resume and confirmed installation use the same CLI with the displayed revision; redirected log modification times are status hints, not proof that a job succeeded. The adapter derives each job's `program` (script name and arguments, without paths, redirections or interpreter flags) for the table. |
 | llm-restore | `/usr/bin/python3 -I -B shared/sh/llm_restore.py --cron --json`; on/off adds `on` or `off` after `--cron`. This CLI owns its managed crontab block. |
-| BTT guard | `/usr/bin/python3 -B macbook/bettertouchtool/btt.py guard`: `checkpoint --list`, `last-audit`, `service status`, `inspect`, `audit`. Explicit known-good acceptance uses `checkpoint --accept-current`, adding `--replace` only after a fresh active-checkpoint check. Repair is Terminal-only. |
+| BTT guard | `/usr/bin/python3 -B macbook/bettertouchtool/btt.py guard`: `checkpoint --list`, `audit` (a fresh read-only audit on every section load), `service status`, `inspect`. Explicit known-good acceptance uses `checkpoint --accept-current`, adding `--replace` only after a fresh active-checkpoint check. Repair is Terminal-only. |
 | ntfy alerts | Reads only routing metadata from `~/.claude/settings.json` hooks and `~/.codex/config.toml` notify. Deferred and guard warnings use `macbook/scripts/ntfy_warning.py`; the destination value is never read or displayed. A confirmed test uses `guard notify-test --send`. |
+| Settings | `shared/python/tool_settings.py` loads declarations from `shared/settings/` and revision-checked values from `~/.config/jacobr/`. The generated controls save through that module; reset sends declared defaults. A declaration's optional `label` is the form wording; the name stays the key. |
 
 CLI paths above are relative to `/Users/jacobr/dev/scripts` for reference; the
-server always invokes fixed absolute argv without a shell. Services and deferred
-jobs refresh about every 15 seconds. Other sections refresh on demand and after
-actions. Errors stay local to their section. Crontab editing and ntfy configuration
-editing are not built yet; those remain owner-managed files.
+server always invokes fixed absolute argv without a shell. Errors stay local to
+their section. ntfy configuration remains owner-managed rather than panel-editable.
+
+### Refresh behaviour
+
+Deferred jobs and Background services poll every 15 seconds; every section has
+its own Refresh button and "updated N s ago" line, and "Refresh all" refreshes
+the rest. A poll (and "Refresh all") skips a section while it has unsaved edits,
+an open editor, an armed confirmation or a focused field, and says so in that
+line; nothing a reader typed is replaced by a render. Every 15 seconds the page
+also reads `/healthz`: it reports an unreachable panel in the header, renews the
+token and refreshes after a panel restart, and offers a restart when the Python
+on disk is newer than the running process. Action results show in the section's
+notice with a timestamp; successes clear after 20 seconds, errors stay.
+
+Two-click buttons (restart, run now, cancel job, pause/resume/install crontab,
+checkpoint, test alert, reset to defaults) arm on the first click and disarm on
+Escape, blur or after 8 seconds. Reschedule opens an inline editor whose Apply
+is enabled only once the time differs.
+
+The nav is sticky and carries each section's one-line summary and state dot;
+sections collapse from their heading. Collapsed sections and the theme choice
+(system, light, dark) are kept in the browser's `localStorage` only.
+
+### Crontab actions
+
+The Crontab section displays jobs from the whole tracked `macbook/crontab`,
+including jobs paused with the exact `#off ` prefix. Pause and Resume submit the
+revision that the page displayed, edit the tracked file atomically and install it
+only when no live crontab lines would be lost; their confirmation names how many
+repo-only lines that install also brings live. The llm-restore block has no row
+actions because `llmrestore --cron off` and `llmrestore --cron on` own that switch;
+its rows link to the llm-restore section. The codex-release-cleanup block remains
+editable here.
+
+**Install macbook/crontab** appears only while the live crontab differs from the
+tracked file and is disabled, with the reason, while live-only lines make
+installation unsafe; the page lists those lines and shows
+`macbook/crontab has uncommitted changes` until another session commits the edit.
+The CLI exits 0 on success, 2 for usage, 75 for a revision conflict or busy lock,
+3 for a refused unsafe/managed/unknown/ambiguous operation, and 1 for another
+error. The adapter maps both 75 and 3 to HTTP 409; invalid request bodies are HTTP
+400 and unexpected tool failures are HTTP 502.
+
+## Page
+
+`static/` is served as ES modules with no build step; `server.py` serves
+`index.html` at `/` and any `[a-z][a-z0-9_]*.mjs|.css` file that exists there.
+
+- `app.mjs`: section registry (id, title, renderer, auto-refresh), nav and
+  section construction, polling, collapse and theme state, panel health.
+- `panel_sections.mjs`: `refresh` (GET, keeps disclosure and focus state) and
+  `action` (POST, notice, then refresh), plus the dirty check polls obey.
+- `panel_api.mjs`: the only `fetch`; token header, JSON bodies, token renewal.
+- `panel_dom.mjs`: elements, tables (each cell labelled for the narrow layout),
+  armed buttons, notices, `time` nodes, key/value lists, focus keys.
+- `relative_time.mjs`: pure time parsing and wording, tested under Node.
+- `status_cell.mjs`: the `Level` vocabulary, status lines, tags and `worst`.
+- `section_<name>.mjs`: one renderer per section returning `{node, summary, level}`.
+
+`tests/test_static_page.py` parses every module with Node and checks that each
+import names a served file.
 
 ## Security
 
@@ -70,7 +132,8 @@ The server binds only `127.0.0.1:8769`. Host headers must be exactly
 `127.0.0.1:8769` or `localhost:8769`; every API request requires the per-instance
 page token. Every POST additionally requires a matching Origin, JSON content type
 and a body no larger than 64 KiB. `/healthz` is token-free but still Host-checked.
-There are no CORS headers; a restrictive CSP disallows framing and inline scripts.
+There are no CORS headers; a restrictive CSP disallows framing and inline scripts
+and styles (the page uses module scripts, classes and CSS `attr()` only).
 
 Child tools receive a minimal environment and timeouts. Logs and displayed
 configuration are redacted, with all HTTP(S) URLs hidden because arbitrary ntfy

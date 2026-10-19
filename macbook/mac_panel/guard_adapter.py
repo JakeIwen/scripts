@@ -32,12 +32,14 @@ def decode_audit(value):
 
 
 class GuardAdapter:
-    def __init__(self, runner):
-        self.runner, self.lock = runner, threading.Lock()
+    def __init__(self, runner, read_wait=5):
+        # A page load can overlap a previous load's read; wait that out instead of showing 409.
+        self.runner, self.lock, self.read_wait = runner, threading.Lock(), read_wait
 
     @contextmanager
-    def busy(self):
-        if not self.lock.acquire(blocking=False):
+    def busy(self, wait=0):
+        acquired = self.lock.acquire(timeout=wait) if wait else self.lock.acquire(blocking=False)
+        if not acquired:
             raise ApiError(409, 'The BTT guard section is busy; try again shortly')
         try:
             yield
@@ -60,9 +62,11 @@ class GuardAdapter:
         return value
 
     def read(self) -> GuardPayload:
-        with self.busy():
+        with self.busy(self.read_wait):
             checkpoints = self.checkpoints()
-            audit = decode_audit(self.call('last-audit'))
+            # A fresh read-only audit (about 0.2 s): the monitor's saved report goes stale
+            # whenever the optional monitor is not installed.
+            audit = decode_audit(self.call('audit'))
             service = self.call('service', 'status')
             object_fields(service, ('installed', 'supervised', 'job', 'heartbeat', 'audit_status'), status=502)
             field(service, 'installed', bool)

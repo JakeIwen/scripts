@@ -1,123 +1,191 @@
-"""Read-only crontab parser, ownership attribution and tracked-file drift."""
-from collections import Counter
-import os
+"""Crontab display plus guarded actions delegated to crontab_sync.py."""
+import json
 from pathlib import Path
 import re
 import shlex
 
-from cli_runner import checked
+from cli_runner import checked, json_result
 from cron_schedule import describe_schedule
-from log_redaction import safe_display_path
-from panel_contracts import CronJob, CrontabPayload, OwnerKind
-from panel_paths import HOME, ROOT
+from log_redaction import redact, safe_display_path
+from panel_contracts import ApiError, CronJob, CrontabPayload, OwnerKind, Reply
+from panel_paths import ROOT
+from wire_validation import confirm, field, object_fields
 
-ASSIGNMENT = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$')
-VARIABLE = re.compile(r'\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))')
-BEGIN = re.compile(r'^# BEGIN managed (.+)$')
-END = re.compile(r'^# END managed (.+)$')
-MANAGED_OWNERS = {'llm-restore': 'shared/sh/llm_restore.py --cron',
-                  'codex-release-cleanup': 'macbook/crontab'}
-
-
-def normalized_lines(text):
-    return [line.rstrip() for line in text.splitlines() if line.strip()]
-
-
-def drift(live, repo):
-    a, b = Counter(normalized_lines(live)), Counter(normalized_lines(repo))
-    return list((a - b).elements()), list((b - a).elements())
+REVISION = re.compile(r'^[0-9a-f]{64}$')
+JOB_ID = re.compile(r'^[0-9a-f]{12}$')
+ACTIONS = frozenset(('pause', 'resume', 'install'))
+SYNC = ('/usr/bin/python3', '-B', str(ROOT / 'macbook/scripts/crontab_sync.py'))
+# Tokens shlex emits for the shell punctuation the summary drops.
+COMMAND_SEPARATORS = frozenset(('&&', '||', ';'))
+REDIRECTIONS = frozenset(('>', '>>', '<', '>&', '&>', '<<'))
+INTERPRETERS = frozenset(('python3', 'python', 'zsh', 'bash', 'sh', 'env'))
+ASSIGNMENT = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*=')
 
 
-def expand_path(value, variables, home):
-    value = VARIABLE.sub(lambda m: variables.get(m[1] or m[2], m[0]), value)
-    if value == '~' or value.startswith('~/'):
-        value = str(home) + value[1:]
+def command_words(command):
+    """Words of the command that does the work: the last `&&`/`;` step, before any pipe."""
+    lexer = shlex.shlex(command, posix=True, punctuation_chars='><&|;')
+    lexer.whitespace_split = True
+    steps, current = [], []
+    for token in lexer:
+        if token in COMMAND_SEPARATORS:
+            steps.append(current)
+            current = []
+        else:
+            current.append(token)
+    steps.append(current)
+    words = next((step for step in reversed(steps) if step), [])
+    return words[:words.index('|')] if '|' in words else words
+
+
+def without_redirections(words):
+    kept, skip = [], False
+    for index, word in enumerate(words):
+        following = words[index + 1] if index + 1 < len(words) else None
+        if skip:
+            skip = False
+        elif word in REDIRECTIONS:
+            skip = True
+        elif not (word.isdecimal() and following in REDIRECTIONS):
+            kept.append(word)
+    return kept
+
+
+def program_summary(command):
+    """`btt_backup.zsh daily` for a cron line, instead of its paths, logs and interpreter flags."""
+    try:
+        words = without_redirections(command_words(command))
+    except ValueError:
+        return command
+    while words and ASSIGNMENT.match(words[0]):
+        words.pop(0)
+    if words and words[0].rsplit('/', 1)[-1] in INTERPRETERS:
+        words.pop(0)
+        while words and words[0].startswith('-'):
+            words.pop(0)
+    if not words:
+        return command
+    return ' '.join([words[0].rsplit('/', 1)[-1], *words[1:]])
+
+
+def validate_status(value):
+    required = ('revision', 'uncommitted', 'jobs', 'live_only', 'repo_only', 'installable')
+    object_fields(value, required, status=502)
+    if not REVISION.fullmatch(field(value, 'revision', str)):
+        raise ApiError(502, 'Invalid crontab revision')
+    field(value, 'uncommitted', bool)
+    field(value, 'installable', bool)
+    for name in ('live_only', 'repo_only'):
+        lines = field(value, name, list)
+        if not all(isinstance(line, str) for line in lines):
+            raise ApiError(502, f'Invalid {name} field')
+    for job in field(value, 'jobs', list):
+        validate_status_job(job)
+    if value['installable'] != (not value['live_only']):
+        raise ApiError(502, 'Inconsistent crontab installable state')
     return value
 
 
-def redirected_log(command, variables, home):
+def validate_status_job(job):
+    required = ('id', 'schedule_fields', 'command', 'paused', 'managed_block',
+                'managed_switch', 'description', 'log_path')
+    object_fields(job, required, status=502)
+    if not JOB_ID.fullmatch(field(job, 'id', str)):
+        raise ApiError(502, 'Invalid crontab job id')
+    schedule = field(job, 'schedule_fields', list)
+    if len(schedule) not in (1, 5) or not all(isinstance(item, str) and item for item in schedule):
+        raise ApiError(502, 'Invalid crontab schedule fields')
+    field(job, 'command', str)
+    field(job, 'paused', bool)
+    block = field(job, 'managed_block', str, nullable=True)
+    switch = field(job, 'managed_switch', str, nullable=True)
+    field(job, 'description', str)
+    field(job, 'log_path', str, nullable=True)
+    if switch is not None and block is None:
+        raise ApiError(502, 'Managed switch has no block owner')
+
+
+def display_log(path):
+    if path is None:
+        return None, None
+    target = Path(path)
+    if not target.is_absolute() or not safe_display_path(target):
+        return None, None
     try:
-        lexer = shlex.shlex(command, posix=True, punctuation_chars='><&|;')
-        lexer.whitespace_split = True
-        tokens = list(lexer)
-        for i, token in enumerate(tokens[:-1]):
-            if token not in ('>', '>>'):
-                continue
-            value = expand_path(tokens[i + 1], variables, home)
-            if '$' in value or value == '/dev/null':
-                continue
-            path = Path(value)
-            if not path.is_absolute() or not safe_display_path(path):
-                continue
-            try:
-                modified = path.stat().st_mtime
-            except OSError:
-                modified = None
-            return str(path), modified
-    except ValueError:
-        pass
-    return None, None
+        modified = target.stat().st_mtime
+    except OSError:
+        modified = None
+    return str(target), modified
 
 
-def cron_job(line, comment, block, tracked, variables, home) -> CronJob | None:
-    parsed = line.lstrip()
-    parts = parsed.split(None, 1 if parsed.startswith('@') else 5)
-    if len(parts) != (2 if parsed.startswith('@') else 6):
-        return None
-    expression, command = ' '.join(parts[:-1]), parts[-1]
+def display_job(job):
+    expression = ' '.join(job['schedule_fields'])
+    block, switch = job['managed_block'], job['managed_switch']
     if block:
         owner_kind = OwnerKind.MANAGED
-        owner = f'{block} — {MANAGED_OWNERS.get(block, "managed block")}'
+        owner = f'{block} — {switch or "macbook/crontab"}'
     else:
-        owner_kind = OwnerKind.TRACKED if line.rstrip() in tracked else OwnerKind.LIVE
-        owner = 'macbook/crontab' if owner_kind == OwnerKind.TRACKED else 'live only'
-    log_path, modified = redirected_log(command, variables, home)
-    return CronJob(expression=expression, schedule=describe_schedule(expression), command=command,
-                   description=comment, owner_kind=owner_kind, owner=owner,
-                   log_path=log_path, log_modified=modified)
+        owner_kind, owner = OwnerKind.TRACKED, 'macbook/crontab'
+    log_path, log_modified = display_log(job['log_path'])
+    return CronJob(id=job['id'], expression=expression,
+                   schedule=describe_schedule(expression), command=job['command'],
+                   program=program_summary(job['command']),
+                   description=job['description'], owner_kind=owner_kind, owner=owner,
+                   log_path=log_path, log_modified=log_modified, paused=job['paused'],
+                   managed_block=block, managed_switch=switch)
 
 
-def parse_crontab(live, repo, home=HOME) -> CrontabPayload:
-    variables = {'HOME': str(home)}
-    tracked = set(normalized_lines(repo))
-    jobs, comment, block = [], '', None
-    for original in live.splitlines():
-        line = original.strip()
-        if match := BEGIN.fullmatch(line):
-            block, comment = match[1], ''
-        elif END.fullmatch(line):
-            block, comment = None, ''
-        elif line.startswith('#'):
-            comment = line[1:].strip()
-        elif not line:
-            comment = ''
-        elif match := ASSIGNMENT.fullmatch(line):
-            raw = match[2]
-            if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ('"', "'"):
-                raw = raw[1:-1]
-            variables[match[1]] = expand_path(raw, variables, home)
-            comment = ''
-        else:
-            job = cron_job(original.rstrip(), comment, block, tracked, variables, home)
-            if job:
-                jobs.append(job)
-            comment = ''
-    live_only, repo_only = drift(live, repo)
-    in_sync = normalized_lines(live) == normalized_lines(repo)
-    return CrontabPayload(jobs=jobs, in_sync=in_sync,
-                          order_changed=not in_sync and not live_only and not repo_only,
-                          live_only=live_only, repo_only=repo_only)
+def cli_error(result):
+    try:
+        value = json.loads(result.stdout)
+    except (TypeError, ValueError):
+        value = None
+    if isinstance(value, dict) and isinstance(value.get('error'), str):
+        message = value['error']
+        live_only = value.get('live_only')
+        if isinstance(live_only, list) and all(isinstance(line, str) for line in live_only):
+            message += '\nLive-only lines:\n' + '\n'.join(live_only)
+        return redact(message)
+    return redact((result.stderr or result.stdout).strip()) or f'Tool exited {result.returncode}'
 
 
 class CrontabAdapter:
-    def __init__(self, runner, tracked=None, home=HOME):
-        self.runner, self.home = runner, home
-        self.tracked = tracked if tracked is not None else ROOT / 'macbook/crontab'
+    def __init__(self, runner):
+        self.runner = runner
 
     def read(self):
-        result = self.runner.run(('/usr/bin/crontab', '-l'))
-        if result.returncode == 1 and 'no crontab for' in result.stderr.lower():
-            live = ''
+        value = validate_status(json_result(self.runner.run((*SYNC, 'status', '--json'))))
+        live_only, repo_only = value['live_only'], value['repo_only']
+        return CrontabPayload(
+            revision=value['revision'], uncommitted=value['uncommitted'],
+            jobs=[display_job(job) for job in value['jobs']],
+            in_sync=not live_only and not repo_only, order_changed=False,
+            live_only=live_only, repo_only=repo_only, installable=value['installable'])
+
+    def mutate(self, body):
+        object_fields(body, ('action', 'revision'), ('job', 'confirmed'))
+        action = field(body, 'action', str, status=400)
+        revision_value = field(body, 'revision', str, status=400)
+        if action not in ACTIONS:
+            raise ApiError(400, 'Unsupported crontab action')
+        if not REVISION.fullmatch(revision_value):
+            raise ApiError(400, 'Invalid crontab revision')
+        argv = (*SYNC, action)
+        if action == 'install':
+            confirm(body)
         else:
-            live = checked(result).stdout
-        return parse_crontab(live, self.tracked.read_text(), self.home)
+            job = field(body, 'job', str, status=400)
+            if not JOB_ID.fullmatch(job):
+                raise ApiError(400, 'Invalid crontab job id')
+            argv += (job,)
+        result = self.runner.run((*argv, '--revision', revision_value, '--json'))
+        if result.returncode in (3, 75):
+            raise ApiError(409, cli_error(result))
+        checked(result)
+        value = json_result(result)
+        object_fields(value, ('message', 'revision', 'uncommitted'), status=502)
+        field(value, 'message', str)
+        if not REVISION.fullmatch(field(value, 'revision', str)):
+            raise ApiError(502, 'Invalid crontab revision')
+        field(value, 'uncommitted', bool)
+        return Reply(value)

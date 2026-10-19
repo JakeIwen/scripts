@@ -52,7 +52,10 @@ class DeferredTests(unittest.TestCase):
             response = adapter.mutate({'action': 'run-now', 'id': 'test-job'})
             self.assertEqual(response.status, 202)
             self.assertTrue(entered.wait(1))
-            self.assertEqual(adapter.tasks.get(response.body['id'])['state'], TaskState.RUNNING)
+            running = adapter.tasks.get(response.body['id'])
+            self.assertEqual(running['state'], TaskState.RUNNING)
+            self.assertIsInstance(running['started_at'], float)
+            self.assertIsNone(running['finished_at'])
             with self.assertRaises(ApiError) as raised:
                 adapter.mutate({'action': 'run-now', 'id': 'test-job'})
             self.assertEqual(raised.exception.status, 409)
@@ -65,6 +68,7 @@ class DeferredTests(unittest.TestCase):
                 time.sleep(.01)
             self.assertEqual(result['state'], TaskState.DONE)
             self.assertEqual(result['exit_status'], 0)
+            self.assertGreaterEqual(result['finished_at'], result['started_at'])
         finally:
             release.set()
             adapter.tasks.close()

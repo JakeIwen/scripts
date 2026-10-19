@@ -4,11 +4,26 @@ import tempfile
 import unittest
 
 from cli_runner import CommandResult
-from panel_contracts import ApiError, ServiceKind
+from panel_contracts import ApiError, LogStream, ServiceKind
+from panel_routes import PanelRoutes
 from panel_test_support import FakeRunner
 from services_adapter import ServicesAdapter, parse_list, parse_print
 
 LIST = 'PID\tStatus\tLabel\n20\t0\tcom.jacobr.running\n-\t3\tcom.jacobr.idle\n10\t0\tcom.apple.other\n'
+MISSING = 'Could not find service "com.jacobr.daemon" in domain for system'
+
+
+def fixture(root):
+    agents, daemons = root / 'agents', root / 'daemons'
+    agents.mkdir()
+    daemons.mkdir()
+    log = root / 'output.log'
+    log.write_text('ordinary\ntoken=topsecret\n')
+    (agents / 'com.jacobr.unloaded.plist').write_bytes(plistlib.dumps({
+        'Label': 'com.jacobr.unloaded', 'StandardOutPath': str(log), 'StandardErrorPath': str(log)}))
+    (daemons / 'com.jacobr.daemon.plist').write_bytes(plistlib.dumps({
+        'Label': 'com.jacobr.daemon', 'StandardOutPath': str(log), 'StandardErrorPath': '/dev/null'}))
+    return agents, daemons
 
 
 class ServicesTests(unittest.TestCase):
@@ -20,26 +35,47 @@ class ServicesTests(unittest.TestCase):
         with self.assertRaises(ApiError):
             parse_list('bad 0 com.jacobr.bad')
 
-    def test_union_unloaded_plists_logs_and_status_only_daemons(self):
+    def test_inventory_carries_log_metadata_without_tails(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            agents, daemons = root / 'agents', root / 'daemons'
-            agents.mkdir(); daemons.mkdir()
-            log = root / 'output.log'
-            log.write_text('ordinary\ntoken=topsecret\n')
-            for parent, label in ((agents, 'com.jacobr.unloaded'), (daemons, 'com.jacobr.daemon')):
-                (parent / f'{label}.plist').write_bytes(plistlib.dumps({'Label': label,
-                    'StandardOutPath': str(log), 'StandardErrorPath': str(log)}))
-            runner = FakeRunner([CommandResult(0, LIST), CommandResult(1, stderr='not permitted')])
+            agents, daemons = fixture(Path(directory))
+            runner = FakeRunner([CommandResult(0, LIST), CommandResult(1, stderr=MISSING)])
             rows = ServicesAdapter(runner, agents, daemons, uid=501).read()['services']
             self.assertEqual(len(rows), 4)
             unloaded = next(row for row in rows if row['label'].endswith('unloaded'))
             self.assertFalse(unloaded['loaded'])
             self.assertEqual(len(unloaded['logs']), 1)
-            self.assertNotIn('topsecret', unloaded['logs'][0]['text'])
+            self.assertEqual(set(unloaded['logs'][0]), {'path', 'stream', 'modified', 'error'})
+            self.assertEqual(unloaded['logs'][0]['stream'], LogStream.STDOUT)
+            self.assertIsInstance(unloaded['logs'][0]['modified'], float)
             daemon = next(row for row in rows if row['kind'] == ServiceKind.DAEMON)
             self.assertEqual(daemon['state'], 'unknown')
             self.assertIsNone(daemon['loaded'])
+            self.assertIn('Could not find service', daemon['error'])
+            self.assertEqual([log['stream'] for log in daemon['logs']], [LogStream.STDOUT])
+
+    def test_log_tails_are_fetched_per_label_and_redacted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            agents, daemons = fixture(Path(directory))
+            runner = FakeRunner([])
+            adapter = ServicesAdapter(runner, agents, daemons, uid=501)
+            payload = adapter.logs('com.jacobr.unloaded')
+            self.assertEqual(payload['label'], 'com.jacobr.unloaded')
+            self.assertEqual(len(payload['logs']), 1)
+            self.assertIn('ordinary', payload['logs'][0]['text'])
+            self.assertNotIn('topsecret', payload['logs'][0]['text'])
+            self.assertEqual(adapter.logs('com.jacobr.daemon')['logs'][0]['stream'], LogStream.STDOUT)
+            self.assertEqual(runner.calls, [])
+            for label, status in (('com.jacobr.missing', 404), ('../etc/passwd', 400), ('com.apple.other', 400)):
+                with self.assertRaises(ApiError) as raised:
+                    adapter.logs(label)
+                self.assertEqual(raised.exception.status, status)
+            routes = PanelRoutes(runner=runner)
+            try:
+                routes.services.agents, routes.services.daemons = agents, daemons
+                reply = routes.dispatch('GET', '/api/services/logs/com.jacobr.unloaded')
+                self.assertEqual(reply.body['label'], 'com.jacobr.unloaded')
+            finally:
+                routes.close()
 
     def test_restart_rechecks_inventory_and_rejects_system_or_unknown(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -36,6 +36,11 @@ class ServiceKind(str, Enum):
     DAEMON = 'daemon'
 
 
+class LogStream(str, Enum):
+    STDOUT = 'stdout'
+    STDERR = 'stderr'
+
+
 class ApiError(Exception):
     def __init__(self, status: int, message: str):
         super().__init__(message)
@@ -54,6 +59,8 @@ class TaskRecord(TypedDict):
     state: str
     exit_status: int | None
     message: str
+    started_at: float
+    finished_at: float | None
 
 
 class SettingsPayload(TypedDict):
@@ -67,11 +74,17 @@ class DeferredPayload(TypedDict):
     tasks: list[TaskRecord]
 
 
-class LogRecord(TypedDict):
+class ServiceLogMeta(TypedDict):
+    """A declared log without its text; the inventory ships this every poll."""
     path: str
-    text: str
+    stream: str
     modified: float | None
     error: str | None
+
+
+class LogRecord(ServiceLogMeta):
+    """A bounded, redacted tail, fetched only for a service the page has open."""
+    text: str
 
 
 class ServiceRecord(TypedDict):
@@ -82,7 +95,7 @@ class ServiceRecord(TypedDict):
     pid: int | None
     last_exit: int | None
     plist: str | None
-    logs: list[LogRecord]
+    logs: list[ServiceLogMeta]
     error: str | None
 
 
@@ -90,23 +103,36 @@ class ServicesPayload(TypedDict):
     services: list[ServiceRecord]
 
 
+class ServiceLogsPayload(TypedDict):
+    label: str
+    logs: list[LogRecord]
+
+
 class CronJob(TypedDict):
+    id: str
     expression: str
     schedule: str
     command: str
+    program: str
     description: str
     owner_kind: str
     owner: str
     log_path: str | None
     log_modified: float | None
+    paused: bool
+    managed_block: str | None
+    managed_switch: str | None
 
 
 class CrontabPayload(TypedDict):
+    revision: str
+    uncommitted: bool
     jobs: list[CronJob]
     in_sync: bool
     order_changed: bool
     live_only: list[str]
     repo_only: list[str]
+    installable: bool
 
 
 class RestorePayload(TypedDict):
@@ -150,3 +176,4 @@ class Health(TypedDict):
     pid: int
     instance: str
     started_at: float
+    source_changed: bool

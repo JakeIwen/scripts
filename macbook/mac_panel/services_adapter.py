@@ -5,12 +5,16 @@ import plistlib
 import re
 
 from cli_runner import checked
-from log_redaction import log_tail, safe_display_path
-from panel_contracts import ApiError, ServiceKind, ServiceRecord, ServicesPayload
+from log_redaction import log_stat, log_tail, redact, safe_display_path
+from panel_contracts import (ApiError, LogStream, ServiceKind, ServiceLogsPayload, ServiceRecord,
+                             ServicesPayload)
 from panel_paths import HOME
 from wire_validation import confirm, field, object_fields
 
 LABEL_PATTERN = re.compile(r'^com\.jacobr\.[A-Za-z0-9_.-]+$')
+LOG_KEYS = (('StandardOutPath', LogStream.STDOUT), ('StandardErrorPath', LogStream.STDERR))
+# A plist pointing a stream at /dev/null has chosen to keep no log; the page should not list one.
+UNUSED_LOG = '/dev/null'
 
 
 def parse_list(text):
@@ -35,7 +39,8 @@ def parse_print(text):
             'pid': number('pid'), 'last_exit': number('last exit code')}
 
 
-def plist_details(path, label):
+def plist_logs(path, label):
+    """The (stream, path) pairs an owned plist declares, or the reason it cannot be trusted."""
     if path is None:
         return [], None
     try:
@@ -46,13 +51,13 @@ def plist_details(path, label):
             raise ValueError('Plist label does not match its filename')
         logs = []
         seen = set()
-        for key in ('StandardOutPath', 'StandardErrorPath'):
+        for key, stream in LOG_KEYS:
             value = config.get(key)
             if value is not None and not isinstance(value, str):
                 raise ValueError(f'Invalid {key}')
-            if value and value not in seen:
+            if value and value != UNUSED_LOG and value not in seen:
                 seen.add(value)
-                logs.append(log_tail(value))
+                logs.append((stream, value))
         return logs, None
     except (OSError, ValueError, plistlib.InvalidFileException) as exc:
         return [], str(exc)
@@ -65,11 +70,13 @@ class ServicesAdapter:
         self.daemons = daemons if daemons is not None else Path('/Library/LaunchDaemons')
         self.uid = os.getuid() if uid is None else uid
 
+    def owned_plists(self, directory):
+        return {p.stem: p for p in sorted(directory.glob('com.jacobr.*.plist'))
+                if LABEL_PATTERN.fullmatch(p.stem)}
+
     def discover_agents(self):
         listed = parse_list(checked(self.runner.run(('/bin/launchctl', 'list'))).stdout)
-        plists = {p.stem: p for p in self.agents.glob('com.jacobr.*.plist')
-                  if LABEL_PATTERN.fullmatch(p.stem)}
-        return listed, plists
+        return listed, self.owned_plists(self.agents)
 
     def read(self) -> ServicesPayload:
         listed, plists = self.discover_agents()
@@ -81,20 +88,33 @@ class ServicesAdapter:
                                  state='running' if job and job['pid'] else 'not running',
                                  pid=job['pid'] if job else None,
                                  last_exit=job['last_exit'] if job else None))
-        for path in sorted(self.daemons.glob('com.jacobr.*.plist')):
-            if not LABEL_PATTERN.fullmatch(path.stem):
+        for label, path in self.owned_plists(self.daemons).items():
+            result = self.runner.run(('/bin/launchctl', 'print', f'system/{label}'))
+            if result.returncode == 0:
+                rows.append(self.row(label, ServiceKind.DAEMON, path, loaded=True, **parse_print(result.stdout)))
                 continue
-            result = self.runner.run(('/bin/launchctl', 'print', f'system/{path.stem}'))
-            values = parse_print(result.stdout) if result.returncode == 0 else {
-                'state': 'unknown', 'pid': None, 'last_exit': None}
-            rows.append(self.row(path.stem, ServiceKind.DAEMON, path,
-                                 loaded=True if result.returncode == 0 else None, **values))
+            # launchctl says why on stderr ("Could not find service … in domain for system").
+            reason = redact((result.stderr or result.stdout).strip()) or f'launchctl exited {result.returncode}'
+            rows.append(self.row(label, ServiceKind.DAEMON, path, reason, loaded=None,
+                                 state='unknown', pid=None, last_exit=None))
         return {'services': rows}
 
-    def row(self, label, kind, path, **values) -> ServiceRecord:
-        logs, error = plist_details(path, label)
+    def row(self, label, kind, path, reason=None, **values) -> ServiceRecord:
+        declared, error = plist_logs(path, label)
         return ServiceRecord(label=label, kind=kind, plist=str(path) if path else None,
-                             logs=logs, error=error, **values)
+                             logs=[log_stat(value, stream) for stream, value in declared],
+                             error=error or reason, **values)
+
+    def logs(self, label) -> ServiceLogsPayload:
+        if not LABEL_PATTERN.fullmatch(label):
+            raise ApiError(400, 'Invalid service label')
+        path = self.owned_plists(self.agents).get(label) or self.owned_plists(self.daemons).get(label)
+        if path is None:
+            raise ApiError(404, 'No owned plist declares logs for this service')
+        declared, error = plist_logs(path, label)
+        if error:
+            raise ApiError(502, redact(error))
+        return {'label': label, 'logs': [log_tail(value, stream) for stream, value in declared]}
 
     def restart(self, body):
         object_fields(body, ('label', 'confirmed'))

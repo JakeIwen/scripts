@@ -1,12 +1,37 @@
+import json
 from pathlib import Path
 import tempfile
 import unittest
 
 from cron_schedule import describe_schedule
-from crontab_adapter import CrontabAdapter, parse_crontab
+from crontab_adapter import CrontabAdapter, SYNC, program_summary
 from cli_runner import CommandResult
-from panel_contracts import ApiError, OwnerKind
-from panel_test_support import FakeRunner
+from panel_contracts import ApiError
+from panel_routes import PanelRoutes
+from panel_test_support import FakeRunner, auth, json_command, request, running_server
+
+REVISION = 'a' * 64
+JOB_ID = 'abcdef123456'
+
+
+def status_payload(log_path=None):
+    return {
+        'revision': REVISION,
+        'uncommitted': True,
+        'jobs': [{
+            'id': JOB_ID,
+            'schedule_fields': ['0', '3', '*', '*', '*'],
+            'command': 'cleanup',
+            'paused': False,
+            'managed_block': 'codex-release-cleanup',
+            'managed_switch': None,
+            'description': 'Tracked cleanup',
+            'log_path': log_path,
+        }],
+        'live_only': [],
+        'repo_only': ['0 3 * * * cleanup'],
+        'installable': True,
+    }
 
 
 class CrontabTests(unittest.TestCase):
@@ -23,48 +48,95 @@ class CrontabTests(unittest.TestCase):
             with self.subTest(raw=raw):
                 self.assertEqual(describe_schedule(raw), expected)
 
-    def test_ownership_drift_and_expanded_log_paths(self):
+    def test_program_summary_names_the_script_without_paths_logs_or_flags(self):
+        cases = {
+            '$scripts/macbook/bettertouchtool/btt_backup.zsh daily >> $scripts/log/btt_backup.log 2>&1': 'btt_backup.zsh daily',
+            '/bin/mkdir -p -m 700 /Users/x/.local/state/llm-restore && /usr/bin/python3 -I -B '
+            '/Users/x/dev/scripts/shared/sh/llm_restore.py --snapshot --scheduled >> /Users/x/cron.log 2>&1':
+                'llm_restore.py --snapshot --scheduled',
+            '/usr/bin/python3 -I -B /Users/x/cleanup_codex_releases.py --apply > /Users/x/cleanup.log 2>&1':
+                'cleanup_codex_releases.py --apply',
+            'FOO=bar /usr/bin/env zsh -c "echo hi" | tee /tmp/out': 'zsh -c echo hi',
+            'cleanup': 'cleanup',
+            '"unterminated': '"unterminated',
+            '> /dev/null': '> /dev/null',
+        }
+        for command, expected in cases.items():
+            with self.subTest(command=command):
+                self.assertEqual(program_summary(command), expected)
+
+    def test_adapter_reads_validated_cli_status(self):
         with tempfile.TemporaryDirectory() as directory:
-            home = Path(directory)
-            log = home / 'status.log'
-            log.write_text('test')
-            tracked = f'scripts={home}\n# Tracked cleanup\n0 3 * * * cleanup >> "$scripts/status.log" 2>&1\n'
-            live = tracked + '\n# BEGIN managed llm-restore\n# Snapshot\n* * * * * snapshot > ${HOME}/status.log\n# END managed llm-restore\n# Local job\n@hourly extra >> ~/status.log\n'
-            value = parse_crontab(live, tracked, home)
-            self.assertFalse(value['in_sync'])
-            self.assertEqual(value['repo_only'], [])
-            self.assertEqual(value['jobs'][0]['owner_kind'], OwnerKind.TRACKED)
-            self.assertEqual(value['jobs'][0]['description'], 'Tracked cleanup')
-            self.assertEqual(value['jobs'][1]['owner_kind'], OwnerKind.MANAGED)
-            self.assertIn('shared/sh/llm_restore.py --cron', value['jobs'][1]['owner'])
-            self.assertEqual(value['jobs'][2]['owner_kind'], OwnerKind.LIVE)
-            for job in value['jobs']:
-                self.assertEqual(job['log_path'], str(log))
-                self.assertIsInstance(job['log_modified'], float)
-            self.assertTrue(parse_crontab(tracked + '\n  \n', tracked.rstrip() + '  \n', home)['in_sync'])
+            log = Path(directory) / 'job.log'
+            log.write_text('fixture')
+            runner = FakeRunner([json_command(status_payload(str(log)))])
+            value = CrontabAdapter(runner).read()
+            self.assertEqual(runner.calls, [((*SYNC, 'status', '--json'), 30)])
+            self.assertEqual(value['revision'], REVISION)
+            self.assertTrue(value['uncommitted'])
+            self.assertTrue(value['installable'])
+            self.assertEqual(value['jobs'][0]['id'], JOB_ID)
+            self.assertEqual(value['jobs'][0]['owner'], 'codex-release-cleanup — macbook/crontab')
+            self.assertEqual(value['jobs'][0]['program'], 'cleanup')
+            self.assertEqual(value['jobs'][0]['log_path'], str(log))
+            self.assertIsInstance(value['jobs'][0]['log_modified'], float)
+            secret = status_payload('/x/pi/secrets/private')
+            hidden = CrontabAdapter(FakeRunner([json_command(secret)])).read()
+            self.assertIsNone(hidden['jobs'][0]['log_path'])
 
-    def test_reordered_assignments_are_drift_not_in_sync(self):
-        value = parse_crontab('NAME=first\nNAME=second\n', 'NAME=second\nNAME=first\n')
-        self.assertFalse(value['in_sync'])
-        self.assertTrue(value['order_changed'])
-        self.assertEqual(value['live_only'], [])
-        self.assertEqual(value['repo_only'], [])
-        job = parse_crontab('  @hourly job\n', '')['jobs'][0]
-        self.assertEqual(job['schedule'], 'Hourly at :00')
-
-    def test_unresolved_or_secret_paths_are_not_inspected(self):
-        live = '* * * * * job >> $UNKNOWN/out.log\n* * * * * job > /x/pi/secrets/private\n'
-        self.assertEqual([j['log_path'] for j in parse_crontab(live, '')['jobs']], [None, None])
-
-    def test_cli_no_crontab_is_empty_but_other_errors_fail(self):
-        with tempfile.TemporaryDirectory() as directory:
-            tracked = Path(directory) / 'crontab'
-            tracked.write_text('')
-            runner = FakeRunner([CommandResult(1, stderr='crontab: no crontab for fixture')])
-            self.assertEqual(CrontabAdapter(runner, tracked).read()['jobs'], [])
-            runner = FakeRunner([CommandResult(1, stderr='permission denied')])
+    def test_adapter_maps_conflicts_and_validates_mutations(self):
+        runner = FakeRunner([
+            CommandResult(75, json.dumps({'error': 'revision changed'})),
+            CommandResult(3, json.dumps({'error': 'Install refused', 'live_only': ['private job']})),
+            json_command({'message': 'Job resumed', 'revision': 'b' * 64, 'uncommitted': True}),
+        ])
+        adapter = CrontabAdapter(runner)
+        with self.assertRaises(ApiError) as raised:
+            adapter.mutate({'action': 'pause', 'job': JOB_ID, 'revision': REVISION})
+        self.assertEqual(raised.exception.status, 409)
+        self.assertIn('revision changed', str(raised.exception))
+        with self.assertRaises(ApiError) as raised:
+            adapter.mutate({'action': 'install', 'revision': REVISION, 'confirmed': True})
+        self.assertEqual(raised.exception.status, 409)
+        self.assertIn('private job', str(raised.exception))
+        reply = adapter.mutate({'action': 'resume', 'job': JOB_ID, 'revision': REVISION})
+        self.assertEqual(reply.body['message'], 'Job resumed')
+        self.assertEqual(runner.calls[-1][0], (*SYNC, 'resume', JOB_ID, '--revision', REVISION, '--json'))
+        for body in ({'action': 'install', 'revision': REVISION},
+                     {'action': 'pause', 'job': '../bad', 'revision': REVISION},
+                     {'action': 'delete', 'revision': REVISION}):
             with self.assertRaises(ApiError):
-                CrontabAdapter(runner, tracked).read()
+                adapter.mutate(body)
+
+    def test_crontab_route_dispatches_to_adapter(self):
+        runner = FakeRunner([json_command({'message': 'Installed macbook/crontab',
+                                           'revision': REVISION, 'uncommitted': False})])
+        routes = PanelRoutes(runner=runner)
+        try:
+            reply = routes.dispatch('POST', '/api/crontab', {
+                'action': 'install', 'revision': REVISION, 'confirmed': True})
+            self.assertEqual(reply.body['message'], 'Installed macbook/crontab')
+            self.assertEqual(runner.calls[0][0], (*SYNC, 'install', '--revision', REVISION, '--json'))
+        finally:
+            routes.close()
+
+    def test_crontab_http_conflict_is_409(self):
+        runner = FakeRunner([CommandResult(3, json.dumps({'error': 'Unsafe install'}))])
+        routes = PanelRoutes(runner=runner)
+        try:
+            with running_server(routes) as server:
+                body = json.dumps({'action': 'install', 'revision': REVISION, 'confirmed': True})
+                status, _, raw = request(server, '/api/crontab', 'POST', body, auth(server, True))
+                self.assertEqual(status, 409)
+                self.assertEqual(json.loads(raw)['error'], 'Unsafe install')
+        finally:
+            routes.close()
+
+    def test_invalid_cli_payload_fails_closed(self):
+        value = status_payload()
+        value['jobs'][0]['schedule_fields'] = ['invalid', 'count']
+        with self.assertRaises(ApiError):
+            CrontabAdapter(FakeRunner([json_command(value)])).read()
 
 
 if __name__ == '__main__':

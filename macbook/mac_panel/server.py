@@ -3,6 +3,8 @@ import html
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+from pathlib import Path
+import re
 import signal
 import threading
 import traceback
@@ -14,13 +16,35 @@ from panel_contracts import ApiError, Health
 from panel_paths import DIRECTORY, PORT, RECORD
 from request_guard import SECURITY_HEADERS, guard_request, read_body
 
-STATIC = {'/': ('index.html', 'text/html; charset=utf-8'),
-          '/app.js': ('app.js', 'text/javascript; charset=utf-8'),
-          '/style.css': ('style.css', 'text/css; charset=utf-8')}
+# The page is ES modules served straight from static/; only plain lower-case names qualify.
+STATIC_NAME = re.compile(r'^[a-z][a-z0-9_]*\.(mjs|css)$')
+CONTENT_TYPES = {'.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8'}
+PAGE = ('index.html', 'text/html; charset=utf-8')
+
+
+def static_file(path):
+    """(file name, content type) for a page asset request, or None for anything else."""
+    if path == '/':
+        return PAGE
+    name = path[1:]
+    if STATIC_NAME.fullmatch(name) and (DIRECTORY / 'static' / name).is_file():
+        return name, CONTENT_TYPES[Path(name).suffix]
+    return None
+
+
+def source_changed(started_at):
+    """Python edited after this process started serves stale routes until a restart."""
+    try:
+        return any(path.stat().st_mtime > started_at for path in DIRECTORY.glob('*.py'))
+    except OSError:
+        return False
 
 
 class PanelServer(ThreadingHTTPServer):
     daemon_threads = True
+    # The page loads about fifteen ES modules at once over HTTP/1.0 (one connection
+    # each); the default backlog of 5 makes the browser see connection resets.
+    request_queue_size = 64
 
     def __init__(self, routes, record=None, port=PORT):
         self.routes = routes
@@ -29,7 +53,8 @@ class PanelServer(ThreadingHTTPServer):
 
     def health(self) -> Health:
         return Health(ok=True, pid=self.record['pid'], instance=self.record['instance'],
-                      started_at=self.record['started_at'])
+                      started_at=self.record['started_at'],
+                      source_changed=source_changed(self.record['started_at']))
 
     def graceful_stop(self):
         threading.Thread(target=self.shutdown, daemon=True).start()
@@ -65,10 +90,10 @@ class PanelHandler(BaseHTTPRequestHandler):
             body = read_body(self.rfile, size) if method == 'POST' else None
             if method == 'GET' and path == '/healthz':
                 self.send_json(200, self.server.health())
-            elif method == 'GET' and path in STATIC:
-                name, content_type = STATIC[path]
+            elif method == 'GET' and (asset := static_file(path)):
+                name, content_type = asset
                 data = (DIRECTORY / 'static' / name).read_text()
-                if name == 'index.html':
+                if name == PAGE[0]:
                     data = data.replace('__PANEL_TOKEN__', html.escape(self.server.record['token'], quote=True))
                 self.send_payload(200, data.encode(), content_type)
             elif method == 'POST' and path == '/api/stop':

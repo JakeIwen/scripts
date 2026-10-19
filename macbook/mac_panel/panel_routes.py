@@ -15,10 +15,11 @@ class PanelRoutes:
         runner = runner or CliRunner()
         self.deferred = DeferredAdapter(runner)
         self.guard = GuardAdapter(runner)
+        self.services = ServicesAdapter(runner)
         self.adapters = {
             Section.SETTINGS: SettingsAdapter(settings),
             Section.DEFERRED: self.deferred,
-            Section.SERVICES: ServicesAdapter(runner),
+            Section.SERVICES: self.services,
             Section.CRONTAB: CrontabAdapter(runner),
             Section.RESTORE: RestoreAdapter(runner),
             Section.GUARD: self.guard,
@@ -28,6 +29,7 @@ class PanelRoutes:
         self.writes = {
             '/api/settings': self.adapters[Section.SETTINGS].save,
             '/api/deferred': self.deferred.mutate,
+            '/api/crontab': self.adapters[Section.CRONTAB].mutate,
             '/api/services/restart': self.adapters[Section.SERVICES].restart,
             '/api/llm-restore': self.adapters[Section.RESTORE].toggle,
             '/api/guard': self.guard.action,
@@ -42,6 +44,8 @@ class PanelRoutes:
     def dispatch(self, method, path, body=None):
         if method == 'GET' and path.startswith('/api/tasks/'):
             return Reply(self.deferred.tasks.get(path.removeprefix('/api/tasks/')))
+        if method == 'GET' and path.startswith('/api/services/logs/'):
+            return Reply(self.services.logs(path.removeprefix('/api/services/logs/')))
         routes = self.reads if method == 'GET' else self.writes
         if path not in routes:
             raise ApiError(404, 'Route not found')

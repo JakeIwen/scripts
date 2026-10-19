@@ -2,6 +2,7 @@
 from concurrent.futures import ThreadPoolExecutor
 import secrets
 import threading
+import time
 
 from log_redaction import redact
 from panel_contracts import ApiError, TaskRecord, TaskState
@@ -24,7 +25,8 @@ class BackgroundTasks:
                 oldest = next(k for k, r in self.records.items() if r['state'] != TaskState.RUNNING)
                 del self.records[oldest]
             task = TaskRecord(id=secrets.token_hex(16), job=job, state=TaskState.RUNNING,
-                              exit_status=None, message='Running')
+                              exit_status=None, message='Running', started_at=time.time(),
+                              finished_at=None)
             self.records[task['id']] = task
             self.executor.submit(self.finish, task['id'], operation)
             return dict(task)
@@ -41,7 +43,8 @@ class BackgroundTasks:
         except Exception as exc:
             message, state = str(exc), TaskState.FAILED
         with self.lock:
-            self.records[task_id].update(state=state, exit_status=code, message=redact(message))
+            self.records[task_id].update(state=state, exit_status=code, message=redact(message),
+                                         finished_at=time.time())
 
     def get(self, task_id):
         with self.lock:

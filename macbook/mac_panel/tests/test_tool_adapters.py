@@ -58,11 +58,14 @@ class GuardTests(unittest.TestCase):
         audit = {'status': 'drift', 'checkpoint_id': 'cp-one', 'checked_at': 1780000000.0,
                  'btt_version': '5', 'findings': [{'kind': 'missing', 'uuid': 'x', 'detail': 'Missing'}]}
         service = {'installed': False, 'supervised': False, 'job': {}, 'heartbeat': {}, 'audit_status': None}
-        runner = FakeRunner([json_command([]), json_command({'status': 'none'}), json_command(service, 2),
+        runner = FakeRunner([json_command([]), json_command(audit, 2), json_command(service, 2),
                              json_command(audit, 2), json_command({'btt_version': '5', 'records': 2,
                                                                 'findings': audit['findings']}, 2)])
-        adapter = GuardAdapter(runner)
-        self.assertFalse(adapter.read()['service']['supervised'])
+        adapter = GuardAdapter(runner, read_wait=0.01)
+        payload = adapter.read()
+        self.assertFalse(payload['service']['supervised'])
+        self.assertEqual(payload['audit']['status'], 'drift')
+        self.assertIn('audit', runner.calls[1][0])
         self.assertEqual(adapter.action({'action': 'audit'})['status'], 'drift')
         self.assertEqual(len(adapter.action({'action': 'inspect'})['findings']), 1)
         with adapter.busy():
