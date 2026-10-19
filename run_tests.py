@@ -9,12 +9,16 @@ import sys
 
 ROOT = Path(__file__).resolve().parent
 FRONTEND = Path('pi/apps/van_dashboard/frontend')
+# Test-file prefix -> import roots its tests need, in search order.
 PYTHON_IMPORT_ROOTS = {
-    'macbook/bettertouchtool/tests': 'macbook/bettertouchtool',
-    'pi/tests': 'pi',
-    'pi/tests/backup': 'pi/scripts/backup',
-    'pi/tests/price_check': 'pi/scripts/price_check',
-    'pi/projects/phone-drop': 'pi/projects/phone-drop',
+    'macbook/bettertouchtool/tests': ('macbook/bettertouchtool',),
+    'macbook/mac_panel/tests': ('macbook/mac_panel', 'shared/python'),
+    'macbook/tests': ('shared/python', 'macbook/bettertouchtool'),
+    'pi/tests': ('pi',),
+    'pi/tests/backup': ('pi/scripts/backup',),
+    'pi/tests/price_check': ('pi/scripts/price_check',),
+    'pi/projects/phone-drop': ('pi/projects/phone-drop',),
+    'shared/tests': ('shared/python',),
 }
 
 
@@ -73,8 +77,8 @@ def main():
         # Standalone scripts have their own import roots; keep this contract in
         # one runner instead of adding sys.path workarounds to individual tests.
         environment = dict(os.environ)
-        roots = [str(ROOT)] + [str(ROOT / directory) for prefix, directory in PYTHON_IMPORT_ROOTS.items()
-                              if name.startswith(prefix + '/')]
+        roots = [str(ROOT)] + [str(ROOT / directory) for prefix, directories in PYTHON_IMPORT_ROOTS.items()
+                              if name.startswith(prefix + '/') for directory in directories]
         environment['PYTHONPATH'] = os.pathsep.join(roots + [environment.get('PYTHONPATH', '')])
         result = subprocess.run(command, cwd=directory, env=environment)
         if result.returncode:
