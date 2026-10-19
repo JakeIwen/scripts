@@ -160,6 +160,12 @@ compare it with this checkout. Deployed files may differ from the repository.
   resumable parent, names open sessions' terminal location and prints resume
   commands for closed sessions. It uses `llm_restore.py --list --json` for Codex
   open-session detection and degrades to unknown when that listing fails.
+- `shared/sh/plus_commands.py` prints Jacob's + commands: the first sentence of
+  each bullet in the global instructions' "+ commands" section. With `--hook`
+  it is the UserPromptSubmit hook (Claude and Codex, Mac and Pi) that answers a
+  bare `+cmd` without a model turn and passes every other prompt through.
+  `uncommitted_owners.py` and `plus_commands.py` sit flat in `/home/pi/scripts/`
+  on the Pi, next to `llm_restore.py`.
 - Dashboard Sonos alarms live in `pi/apps/van_dashboard/sonos_alarms.py`, with
   HTTP routes in `routes/sonos_alarms.py` and React controls in `features/sonos/`.
   `SonosAlarm` owns the device record; `alarms.ts` owns the validated UI contract.
