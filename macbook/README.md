@@ -107,8 +107,10 @@ Use the account normally, without sudo; HOME/CODEX_HOME overrides are ignored.
 
 ## User crontab
 
-`macbook/crontab` is the whole MacBook user crontab, including the Codex block
-above. Edit it here and install it with `crontab ~/dev/scripts/macbook/crontab`;
+`macbook/crontab` is the MacBook user crontab, including the Codex block above.
+Edit it here and install it with `crontab ~/dev/scripts/macbook/crontab`, then
+run `llmrestore --cron on`: `shared/sh/llm_restore.py` keeps its own managed
+block only in the live crontab, and reinstalling this file drops it.
 `macbook/tests/test_crontab.py` fails when a job names a repo script that has
 moved. Jobs append stdout and stderr to the ignored `log/` directory.
 
