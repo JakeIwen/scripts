@@ -1,6 +1,6 @@
 {
   "name": "clean-output",
-  "version": "0.1.0",
-  "description": "/clean shows the last reply with tool calls and results stripped, in a pane (Esc closes, c copies)",
+  "version": "0.2.0",
+  "description": "/clean shows the last reply with tool calls and results stripped, in a pane (Esc closes, c copies); /clean turns lists each turn's ending since your last prompt",
   "types": "./types/index.d.ts"
 }

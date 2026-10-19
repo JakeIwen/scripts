@@ -1,25 +1,41 @@
 import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
-import type { CleanView } from '../types'
+import type { CleanView, PromptRecord } from '../types'
 import { cleanTurn, parseArgs } from './clean'
+import { promptHead, turnEndings } from './turn-endings'
 
 const PANE = 'clean'
 const EMPTY: CleanView = { text: '', label: '' }
+const NO_PROMPTS: PromptRecord[] = []
+const MAX_PROMPTS = 200
 const view = atom({ plugin: 'clean-output', key: 'view' } as const, EMPTY)
+const prompts = atom({ plugin: 'clean-output', key: 'prompts' } as const, NO_PROMPTS)
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'clean',
-      description: 'Show the last reply without tool calls. Args: N (replies back), copy, tools',
+      description: 'Show the last reply without tool calls. Args: N (replies back), turns, copy, tools',
     })
+    return next(e)
+  })
+
+  // Remember where each prompt came from, so `/clean turns` can tell the
+  // person's own prompts from worker messages, notices and wake-ups.
+  on('prompt.submit', async ($, e, next) => {
+    if (!e.command) {
+      const record: PromptRecord = { head: promptHead(e.text), kind: e.origin.kind }
+      // A failed record only weakens `/clean turns`; it must never hold up the prompt.
+      await update($, prompts, list => [...list, record].slice(-MAX_PROMPTS)).catch(() => undefined)
+    }
     return next(e)
   })
 
   on('command.run', { command: 'clean' }, async ($, e) => {
     const opts = parseArgs(e.args)
-    const cleaned = cleanTurn(await $.session.messages(), opts)
+    const messages = await $.session.messages()
+    const cleaned = opts.turns ? turnEndings(messages, await read($, prompts), opts) : cleanTurn(messages, opts)
     if (cleaned === undefined) return { text: 'clean: no reply found yet.' }
     if (opts.copy) {
       const copied = await $.ui.copy({ text: cleaned.text })

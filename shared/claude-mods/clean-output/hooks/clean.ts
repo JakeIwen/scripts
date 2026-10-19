@@ -10,6 +10,8 @@ export type CleanOptions = {
   copy: boolean
   /** Keep one-line tool summaries instead of dropping tool calls. */
   tools: boolean
+  /** Show each turn's ending since the last typed prompt (turn-endings.ts). */
+  turns: boolean
 }
 
 export type Part =
@@ -48,11 +50,12 @@ export const FILTERS: Filter[] = [
 ]
 
 export function parseArgs(args: string): CleanOptions {
-  const opts: CleanOptions = { back: 1, copy: false, tools: false }
+  const opts: CleanOptions = { back: 1, copy: false, tools: false, turns: false }
   for (const word of args.trim().split(/\s+/).filter(Boolean)) {
     if (/^\d+$/.test(word)) opts.back = Math.max(1, Number(word))
     else if (word === 'copy') opts.copy = true
     else if (word === 'tools') opts.tools = true
+    else if (word === 'turns') opts.turns = true
   }
   return opts
 }
