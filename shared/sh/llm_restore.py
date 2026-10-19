@@ -16,10 +16,14 @@ closing during shutdown (or by hand beforehand) don't empty the list. The restor
 boot's last one. The previous boot's sessions are dropped from the list once a
 restore has run, so sessions closed on purpose afterwards stay closed.
 
-`--cron on|off` installs or removes a crontab block that snapshots every
-minute; `--cron` alone prints the status. Standard library only; runs on the
+A managed crontab block snapshots every minute; it is tracked in
+macbook/crontab and pi/crontab_pi, so reinstalling either keeps it.
+`--cron off|on` pauses and resumes it, and reinstalls the block if a crontab
+lost it; `--cron` alone prints the status. Standard library only; runs on the
 MacBook (/usr/bin/python3 3.9) and the Pi.
 """
+# codeshape: allow-size one file because the Pi runs it with `python3 -I` from
+# ~/scripts, where a sibling module isn't importable; Jacob approved up to 1000 lines.
 
 from __future__ import annotations
 
@@ -45,6 +49,9 @@ CONSUMED = STATE / "consumed.json"
 LAUNCHED = STATE / "launched.json"
 LOCK = STATE / "lock"
 CRON_LOG = STATE / "cron.log"
+# --cron off pauses the crontab line rather than deleting it: the line is also
+# in the tracked crontabs, so reinstalling one must not flip the switch.
+CRON_OFF = STATE / "cron-off"
 CLAUDE_SESSIONS = HOME / ".claude/sessions"
 CLAUDE_PROJECTS = HOME / ".claude/projects"
 CODEX_HOME = HOME / ".codex"
@@ -716,11 +723,17 @@ def _crontab() -> list[str]:
     return res.stdout.splitlines()
 
 
-def cron_block() -> list[str]:
-    me = shlex.quote(str(Path(__file__).resolve()))
+def cron_block(tool: str = str(Path(__file__).resolve()), log: str = str(CRON_LOG)) -> list[str]:
+    """The managed block, also copied verbatim into macbook/crontab and pi/crontab_pi.
+
+    It creates the state directory itself: on a fresh install the log redirect
+    would otherwise fail before the tool ever ran.
+    """
+    state = shlex.quote(str(Path(log).parent))
     return [
         CRON_BEGIN,
-        f"* * * * * /usr/bin/python3 -I -B {me} --snapshot --quiet >> {shlex.quote(str(CRON_LOG))} 2>&1",
+        f"* * * * * /bin/mkdir -p -m 700 {state} && "
+        f"/usr/bin/python3 -I -B {shlex.quote(tool)} --snapshot --scheduled >> {shlex.quote(log)} 2>&1",
         CRON_END,
     ]
 
@@ -728,20 +741,22 @@ def cron_block() -> list[str]:
 def cron(state: str | None, minutes: int) -> int:
     lines = _crontab()
     if CRON_BEGIN in lines and CRON_END in lines:
-        start, end = lines.index(CRON_BEGIN), lines.index(CRON_END)
-        rest, installed = lines[:start] + lines[end + 1:], lines[start:end + 1]
+        start, end = lines.index(CRON_BEGIN), lines.index(CRON_END) + 1
     else:
-        rest, installed = lines, []
-    if state is not None:
-        installed = cron_block() if state == "on" else []
-        if rest + installed != lines:
-            STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
-            subprocess.run(["crontab", "-"], input="\n".join(rest + installed) + "\n", text=True, check=True)
-        if installed:
-            snapshot(quiet=True)
-    print(f"Snapshot cron: {'ON (every minute)' if installed else 'OFF'}")
-    if installed and installed != cron_block():
-        print("  (installed line differs from this script's; run --cron on to update it)")
+        start = end = len(lines)
+    installed = lines[start:end]
+    if state == "off":
+        _write_private(CRON_OFF, "")
+    elif state == "on":
+        if installed != cron_block():
+            installed = cron_block()  # in place, so the live file keeps the tracked order
+            subprocess.run(["crontab", "-"], input="\n".join(lines[:start] + installed + lines[end:]) + "\n",
+                           text=True, check=True)
+        CRON_OFF.unlink(missing_ok=True)
+        snapshot(quiet=True)
+    print(f"Snapshot cron: {'OFF (paused; --cron on resumes it)' if CRON_OFF.exists() else 'ON (every minute)'}")
+    if installed != cron_block():
+        print(f"  (the crontab's llm-restore line is {'out of date' if installed else 'missing'}; --cron on fixes it)")
     snaps = boot_snapshots()
     if snaps:
         last = snaps[0]
@@ -771,7 +786,7 @@ def main() -> int:
     ap.add_argument("--cron", nargs="?", const="status", choices=["on", "off", "status"],
                     help="turn the every-minute snapshot on/off; alone, print its status")
     ap.add_argument("--snapshot", action="store_true", help="record the sessions open now")
-    ap.add_argument("--quiet", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--scheduled", action="store_true", help=argparse.SUPPRESS)  # the crontab line
     ap.add_argument("-n", "--dry-run", action="store_true", help="show what a restore would open")
     ap.add_argument("--force", action="store_true", help="reopen sessions launched in the last 2 minutes")
     window = ap.add_mutually_exclusive_group()
@@ -787,7 +802,9 @@ def main() -> int:
     if args.cron:
         return cron(None if args.cron == "status" else args.cron, args.minutes)
     if args.snapshot:
-        return snapshot(args.quiet)
+        if args.scheduled and CRON_OFF.exists():
+            return 0
+        return snapshot(quiet=args.scheduled)
     opts = RestoreOptions(args.dry_run, args.force, args.minutes)
     if args.apply is not None:
         return apply(args.apply, opts, args.emit)

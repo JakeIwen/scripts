@@ -190,6 +190,21 @@ class PiTabs(unittest.TestCase):
         self.assertEqual(remote[2], command + "; exec bash -il")
 
 
+class TrackedCrontabs(unittest.TestCase):
+    """Reinstalling a repo crontab must keep the line --cron on would write."""
+    HOSTS = {"macbook/crontab": ("/Users/jacobr/dev/scripts/shared/sh/llm_restore.py", "/Users/jacobr"),
+             "pi/crontab_pi": ("/home/pi/scripts/llm_restore.py", "/home/pi")}
+
+    def test_each_tracked_crontab_carries_the_current_block(self):
+        for name, (tool, home) in self.HOSTS.items():
+            block = lr.cron_block(tool, f"{home}/.local/state/llm-restore/cron.log")
+            lines = (SCRIPT.parents[2] / name).read_text().splitlines()
+            with self.subTest(crontab=name):
+                self.assertIn(block[0], lines)
+                start = lines.index(block[0])
+                self.assertEqual(lines[start:start + len(block)], block)
+
+
 class State(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -206,6 +221,55 @@ class State(unittest.TestCase):
             self.assertEqual((outer, inner), (True, False))
         with lr.state_lock(wait=False) as again:
             self.assertTrue(again)
+
+    def cron(self, state, crontab):
+        written, out = [], io.StringIO()
+        with patch.object(lr, "CRON_OFF", self.root / "cron-off"), \
+                patch.object(lr, "CRON_LOG", self.root / "cron.log"), \
+                patch.object(lr, "BOOTS", self.root / "boots"), \
+                patch.object(lr, "CONSUMED", self.root / "consumed.json"), \
+                patch.object(lr, "boot_id", return_value="now"), \
+                patch.object(lr, "_crontab", return_value=crontab), \
+                patch.object(lr.subprocess, "run", side_effect=lambda cmd, input, **_: written.append(input.splitlines())), \
+                patch.object(lr, "snapshot") as snap, patch("sys.stdout", out):
+            lr.cron(state, 30)
+        return written, out.getvalue(), snap
+
+    def test_cron_off_pauses_without_editing_the_crontab(self):
+        written, out, snap = self.cron("off", ["a", *lr.cron_block(), "b"])
+        self.assertEqual(written, [])
+        snap.assert_not_called()
+        self.assertTrue((self.root / "cron-off").exists())
+        self.assertIn("OFF (paused", out)
+        self.assertNotIn("--cron on fixes it", out)
+
+    def test_cron_on_resumes_and_rewrites_an_old_block_in_place(self):
+        (self.root / "cron-off").touch()
+        written, out, snap = self.cron("on", ["a", lr.CRON_BEGIN, "old line", lr.CRON_END, "b"])
+        self.assertEqual(written, [["a", *lr.cron_block(), "b"]])
+        snap.assert_called_once()
+        self.assertFalse((self.root / "cron-off").exists())
+        self.assertIn("ON (every minute)", out)
+
+    def test_status_reports_a_missing_line_and_on_adds_it(self):
+        written, out, _ = self.cron(None, ["a"])
+        self.assertEqual(written, [])
+        self.assertIn("line is missing; --cron on fixes it", out)
+        written, _, _ = self.cron("on", ["a"])
+        self.assertEqual(written, [["a", *lr.cron_block()]])
+
+    def test_only_the_scheduled_snapshot_skips_while_paused(self):
+        def run(*argv):
+            with patch.object(sys, "argv", ["llm_restore.py", "--snapshot", *argv]):
+                lr.main()
+        with patch.object(lr, "CRON_OFF", self.root / "cron-off"), patch.object(lr, "snapshot", return_value=0) as snap:
+            run("--scheduled")
+            snap.assert_called_once_with(quiet=True)
+            (self.root / "cron-off").touch()
+            run("--scheduled")
+            snap.assert_called_once()
+            run()
+            snap.assert_called_with(quiet=False)
 
     def apply(self, items, opts, emit=True):
         stdin = "\n".join(json.dumps(lr.asdict(i)) for i in items) + "\n"

@@ -10,3 +10,7 @@ BASH_ENV=/home/pi/secrets/.bash_variables
 # BEGIN managed hosted-project-scan (pi/docs/dashboard/HOSTED_PROJECTS.md)
 */15 * * * * cd /home/pi && PYTHONPATH=/home/pi/scripts/python-packages/current PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -P -m pi.apps.van_dashboard.hosted_project_scan --host pi --post http://127.0.0.1:8788 >> /home/pi/log/hosted_project_scan.log 2>&1
 # END managed hosted-project-scan
+# Snapshots open Claude/Codex sessions for llmrestore; `llmrestore --cron off` pauses it.
+# BEGIN managed llm-restore
+* * * * * /bin/mkdir -p -m 700 /home/pi/.local/state/llm-restore && /usr/bin/python3 -I -B /home/pi/scripts/llm_restore.py --snapshot --scheduled >> /home/pi/.local/state/llm-restore/cron.log 2>&1
+# END managed llm-restore

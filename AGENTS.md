@@ -101,10 +101,11 @@ compare it with this checkout. Deployed files may differ from the repository.
   `/home/pi/scripts/`) reopens the Claude Code and Codex sessions open before a
   reboot, skipping any already open or kept by llm-switchboard: iTerm tabs on
   the Mac, tmux session `llmrestore` on the Pi; `--pi` on the Mac reopens the
-  Pi's as iTerm tabs over SSH (the Pi chooses them). Its `--cron on|off` owns a
-  `managed llm-restore` block in the live user crontab (every-minute snapshot);
-  reinstalling a repo crontab file drops it. State and the generated restore
-  script live in `~/.local/state/llm-restore/`.
+  Pi's as iTerm tabs over SSH (the Pi chooses them). Its every-minute snapshot
+  is a `managed llm-restore` block tracked in `macbook/crontab` and
+  `pi/crontab_pi` (its test keeps both equal to `cron_block()`); `--cron off|on`
+  pauses and resumes it with a flag file instead of editing the crontab. State
+  and the generated restore script live in `~/.local/state/llm-restore/`.
 - Dashboard Sonos alarms live in `pi/apps/van_dashboard/sonos_alarms.py`, with
   HTTP routes in `routes/sonos_alarms.py` and React controls in `features/sonos/`.
   `SonosAlarm` owns the device record; `alarms.ts` owns the validated UI contract.

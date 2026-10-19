@@ -107,10 +107,8 @@ Use the account normally, without sudo; HOME/CODEX_HOME overrides are ignored.
 
 ## User crontab
 
-`macbook/crontab` is the MacBook user crontab, including the Codex block above.
-Edit it here and install it with `crontab ~/dev/scripts/macbook/crontab`, then
-run `llmrestore --cron on`: `shared/sh/llm_restore.py` keeps its own managed
-block only in the live crontab, and reinstalling this file drops it.
+`macbook/crontab` is the whole MacBook user crontab, including the Codex block
+above. Edit it here and install it with `crontab ~/dev/scripts/macbook/crontab`;
 `macbook/tests/test_crontab.py` fails when a job names a repo script that has
 moved. Jobs append stdout and stderr to the ignored `log/` directory.
 
@@ -123,6 +121,10 @@ moved. Jobs append stdout and stderr to the ignored `log/` directory.
   are taken while BTT runs; `btt.py guard` checkpoints are the consistent backup.
 - `deferred.zsh watchdog` (daily 12:17) warns when deferred jobs are waiting
   and the checker below has not run for three hours.
+- `shared/sh/llm_restore.py --snapshot --scheduled` (every minute) records the
+  open Claude Code and Codex sessions for `llmrestore`, logging errors to
+  `~/.local/state/llm-restore/cron.log`. `llmrestore --cron off` pauses it with
+  a flag file, so reinstalling this crontab never turns it back on or off.
 
 ## Deferred one-off jobs
 
