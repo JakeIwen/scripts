@@ -329,7 +329,8 @@ def _read_json(path: Path, default):
         return default
 
 
-def claude_sessions(procs: list[Proc]) -> list[Session]:
+def _located_claude_sessions(procs: list[Proc]) -> list[tuple[Session, int]]:
+    """Claude sessions paired with the process that displays each one."""
     found = []
     for p in procs:
         if _tool(p) != CLAUDE:
@@ -340,12 +341,16 @@ def claude_sessions(procs: list[Proc]) -> list[Session]:
         sid, cwd = meta.get("sessionId"), meta.get("cwd") or p.cwd
         if not sid or not cwd:
             continue
-        found.append(Session(
+        found.append((Session(
             CLAUDE, sid, cwd, meta.get("name") or "",
             shell_command(cwd, [CLAUDE, *claude_options(p.argv), "--resume", sid]),
             "llm-switchboard" if p.env.get(SWITCHBOARD_ENV) else None,
-        ))
+        ), p.pid))
     return found
+
+
+def claude_sessions(procs: list[Proc]) -> list[Session]:
+    return [session for session, _ in _located_claude_sessions(procs)]
 
 
 def _codex_threads() -> dict[str, dict]:
@@ -403,7 +408,8 @@ def assign_codex_threads(tuis: list[CodexTui], held: dict[int, set], threads: di
     return result
 
 
-def codex_sessions(procs: list[Proc]) -> tuple[list[Session], list[str]]:
+def _located_codex_sessions(procs: list[Proc]) -> tuple[list[tuple[Session, int]], list[str]]:
+    """Codex sessions paired with the TUI process that displays each one."""
     tuis, held = [], {}
     for p in procs:
         if _tool(p) != CODEX:
@@ -427,15 +433,42 @@ def codex_sessions(procs: list[Proc]) -> tuple[list[Session], list[str]]:
             continue
         info = threads.get(tid, {})
         cwd = info.get("cwd") or t.cwd
-        found.append(Session(CODEX, tid, cwd, info.get("title") or "",
-                             shell_command(cwd, [CODEX, *t.options, "resume", tid])))
+        found.append((Session(CODEX, tid, cwd, info.get("title") or "",
+                              shell_command(cwd, [CODEX, *t.options, "resume", tid])), t.pid))
     return found, warnings
 
 
-def live_sessions() -> tuple[list[Session], list[str]]:
+def codex_sessions(procs: list[Proc]) -> tuple[list[Session], list[str]]:
+    located, warnings = _located_codex_sessions(procs)
+    return [session for session, _ in located], warnings
+
+
+def located_live_sessions() -> tuple[list[tuple[Session, int]], list[str]]:
+    """Open resumable sessions and their TUI pids."""
     procs = _mac_processes() if IS_MAC else _linux_processes()
-    codex, warnings = codex_sessions(procs)
-    return claude_sessions(procs) + codex, warnings
+    codex, warnings = _located_codex_sessions(procs)
+    return _located_claude_sessions(procs) + codex, warnings
+
+
+def live_sessions() -> tuple[list[Session], list[str]]:
+    located, warnings = located_live_sessions()
+    return [session for session, _ in located], warnings
+
+
+def list_open_sessions(json_output: bool) -> int:
+    """Print a read-only view of sessions detected by the restore logic."""
+    located, warnings = located_live_sessions()
+    records = [{"tool": s.tool, "id": s.id, "cwd": s.cwd, "title": s.title, "pid": pid}
+               for s, pid in located]
+    if json_output:
+        print(json.dumps({"sessions": records, "warnings": warnings}, sort_keys=True))
+    else:
+        for record in records:
+            print(f"{record['pid']:>6} {record['tool']:6} {record['id']}  "
+                  f"{record['title'] or record['cwd']}")
+        for warning in warnings:
+            print(f"warning: {warning}", file=sys.stderr)
+    return 0
 
 
 # ---------------------------------------------------------------- state
@@ -808,7 +841,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--cron", nargs="?", const="status", choices=["on", "off", "status"],
                     help="turn the every-minute snapshot on/off; alone, print its status")
-    ap.add_argument("--json", action="store_true", help="with --cron, print one machine-readable status object")
+    ap.add_argument("--list", action="store_true", help="list the sessions detected as open, without changing state")
+    ap.add_argument("--json", action="store_true", help="with --cron or --list, print machine-readable JSON")
     ap.add_argument("--snapshot", action="store_true", help="record the sessions open now")
     ap.add_argument("--scheduled", action="store_true", help=argparse.SUPPRESS)  # the crontab line
     ap.add_argument("-n", "--dry-run", action="store_true", help="show what a restore would open")
@@ -823,8 +857,12 @@ def main() -> int:
     ap.add_argument("--apply", metavar="BOOTS", help=argparse.SUPPRESS)  # used by the generated script
     ap.add_argument("--emit", action="store_true", help=argparse.SUPPRESS)  # used by --pi over SSH
     args = ap.parse_args()
-    if args.json and not args.cron:
-        ap.error("--json requires --cron")
+    if args.json and not (args.cron or args.list):
+        ap.error("--json requires --cron or --list")
+    if args.list and (args.cron or args.snapshot or args.pi or args.apply is not None):
+        ap.error("--list cannot be combined with restore, snapshot, --pi, or --cron")
+    if args.list:
+        return list_open_sessions(args.json)
     if args.cron:
         return cron(None if args.cron == "status" else args.cron, args.minutes, args.json)
     if args.snapshot:

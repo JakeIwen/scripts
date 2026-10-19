@@ -152,8 +152,14 @@ compare it with this checkout. Deployed files may differ from the repository.
   is a `managed llm-restore` block tracked in `macbook/crontab` and
   `pi/crontab_pi` (its test keeps both equal to `cron_block()`); `--cron off|on`
   pauses and resumes it with a flag file instead of editing the crontab;
-  `--cron [on|off] --json` prints one status object for the Mac Panel. State
-  and the generated restore script live in `~/.local/state/llm-restore/`.
+  `--cron [on|off] --json` prints one status object for the Mac Panel, while
+  read-only `--list --json` exposes the currently detected sessions and TUI pids.
+  State and the generated restore script live in `~/.local/state/llm-restore/`.
+- `shared/sh/uncommitted_owners.py` implements `+id`: it attributes dirty Git
+  paths to recent Claude Code and Codex tool calls, rolls subagents up to their
+  resumable parent, names open sessions' terminal location and prints resume
+  commands for closed sessions. It uses `llm_restore.py --list --json` for Codex
+  open-session detection and degrades to unknown when that listing fails.
 - Dashboard Sonos alarms live in `pi/apps/van_dashboard/sonos_alarms.py`, with
   HTTP routes in `routes/sonos_alarms.py` and React controls in `features/sonos/`.
   `SonosAlarm` owns the device record; `alarms.ts` owns the validated UI contract.

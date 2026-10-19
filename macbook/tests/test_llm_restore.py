@@ -190,6 +190,23 @@ class PiTabs(unittest.TestCase):
         self.assertEqual(remote[2], command + "; exec bash -il")
 
 
+class OpenListing(unittest.TestCase):
+    def test_json_lists_detected_sessions_with_their_pids(self):
+        detected = [(session("claude", A, title="one"), 123),
+                    (session("codex", B, title="two"), 456)]
+        output = io.StringIO()
+        with patch.object(lr, "located_live_sessions", return_value=(detected, ["warning"])), \
+                patch("sys.stdout", output):
+            self.assertEqual(lr.list_open_sessions(json_output=True), 0)
+        self.assertEqual(json.loads(output.getvalue()), {
+            "sessions": [
+                {"tool": "claude", "id": A, "cwd": "/w", "title": "one", "pid": 123},
+                {"tool": "codex", "id": B, "cwd": "/w", "title": "two", "pid": 456},
+            ],
+            "warnings": ["warning"],
+        })
+
+
 class TrackedCrontabs(unittest.TestCase):
     """Reinstalling a repo crontab must keep the line --cron on would write."""
     HOSTS = {"macbook/crontab": ("/Users/jacobr/dev/scripts/shared/sh/llm_restore.py", "/Users/jacobr"),
