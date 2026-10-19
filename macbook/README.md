@@ -1,5 +1,11 @@
 # MacBook tooling
 
+**Mac Panel:** <http://127.0.0.1:8769/> (`macpanel` in a shell, or the BTT
+menu-bar item) shows and configures the background tools below: tool settings,
+deferred jobs, LaunchAgents, the user crontab, the llm-restore snapshot, BTT
+Guard and ntfy alerts. Code, install and service commands:
+[`mac_panel/README.md`](mac_panel/README.md).
+
 This directory contains code executed locally on Jacob's MacBook:
 
 - `scripts/`: shell and Python utilities.
@@ -132,19 +138,30 @@ moved. Jobs append stdout and stderr to the ignored `log/` directory.
 deletes it. Queue one with
 `deferred.zsh add 2026-11-16 tor-unexclude ./undo.zsh "description"` (also
 `'YYYY-MM-DD HH:MM'`, `+30d`, `+12h`; `--file` copies extra material in, and
-`--attempts`/`--timeout` default to 3 and 900 s). See queued jobs with `list`,
-drop one with `cancel NAME`, and check the checker with `status`.
+`--attempts`/`--timeout` default to 3 and 900 s). `list` shows the human-readable
+queue, while `list --json` supplies Mac Panel's machine-readable checker and job
+state. Commands that take `JOB` accept either its exact name or directory id.
+
+Use `cancel JOB` to remove a job, `retry JOB` to reset a failed job for the next
+hourly check, and `reschedule JOB DUE` to change its due time (including to a
+past time for the next check). `run-now JOB` makes one immediate attempt through
+the same environment, timeout, accounting, log and success-purge path as the
+checker. It sends no failure alert because its caller receives the status and
+can inspect `last.log`; it exits 0 after success, 3 after a completed failed
+attempt, 75 when the checker lock is busy, 1 for another error and 2 for usage.
 
 Each job is a private directory under `~/.agent/deferred/jobs/`. The LaunchAgent
 `com.jacobr.deferred-jobs` (installed by `deferred.zsh install`) runs due jobs
 hourly and at login, with the job directory as the working directory and a
-minimal environment. Success deletes the directory; failure keeps it, records
-`last.log`, and sends a high-priority warning to `NTFY_WARNING_URL` (through
-`scripts/ntfy_warning.py`, shared with BTT Guard) without any job output. After
-the last attempt the job stays as `failed` until cancelled. Jobs must be safe
-to rerun, clean up anything outside their own directory, and detach any
-long-lived process they start, since launchd ends the checker's process group
-when it exits.
+minimal environment. The checker, `cancel`, `retry`, `run-now` and `reschedule`
+share one lock, so mutations wait up to ten seconds rather than racing a job;
+a still-busy lock exits 75. Success deletes the directory; failure keeps it,
+records `last.log`, and sends a high-priority warning to `NTFY_WARNING_URL`
+(through `scripts/ntfy_warning.py`, shared with BTT Guard) without any job
+output. After the last scheduled attempt the job stays as `failed` until retried,
+rescheduled or cancelled. Jobs must be safe to rerun, clean up anything outside
+their own directory, and detach any long-lived process they start, since launchd
+ends the checker's process group when it exits.
 
 ## iTerm font size per display
 
@@ -158,9 +175,12 @@ idles while iTerm2 is closed.
 
 - Install or update: `zsh macbook/scripts/install_iterm_screen_fonts.zsh`. The
   first run asks macOS to let `python3.13` control iTerm2; allow it.
-- Sizes: defaults in the script, overridden by
-  `~/.config/iterm-screen-fonts.json`, e.g. `{"built_in": 13, "external": 15}`.
-  Edits apply within a second, to every window.
+- Sizes and timing are saved in
+  `~/.config/jacobr/iterm-screen-fonts.json`; their defaults and validation are
+  declared in `shared/settings/iterm-screen-fonts.json`. Edit them in the Mac
+  Panel's Settings section or, from the repository root, run
+  `/usr/bin/python3 shared/python/tool_settings.py set iterm-screen-fonts external=16`.
+  Valid changes apply within a second, to every window.
 - See what it sees: `~/.local/share/iterm-screen-fonts/venv/bin/python
   macbook/scripts/iterm_screen_fonts.py --list`.
 - Log: `tmp/iterm-screen-fonts/agent.log`.

@@ -353,6 +353,29 @@ identities. Recreate venvs rather than moving them.
   warning state, private delivery and boot scheduling. `storage.py` shares private
   atomic file writes/locking. Legacy standalone helpers are called through their
   CLI instead of introducing import-path shims.
+- `install_mac_panel_menu.py/.js`: guarded installer for a standalone Mac Panel
+  menu-bar icon (SF Symbol `slider.horizontal.3`, icon only) and All Apps keyboard
+  shortcut (installed as `ctrl+opt+cmd+P`), both using BTT's built-in Open URL
+  action for `http://127.0.0.1:8769/`. BTT saves each trigger's notes as its
+  description (`ZDESC`) and ignores a button name on menu-bar items. Preview is the
+  default; from the repo root:
+
+  ```sh
+  /usr/bin/python3 -B macbook/bettertouchtool/install_mac_panel_menu.py
+  /usr/bin/python3 -B macbook/bettertouchtool/install_mac_panel_menu.py --apply
+  ```
+
+  Selects the first free `ctrl+opt+cmd+P`, `ctrl+opt+cmd+M`, or `ctrl+opt+cmd+K`
+  (including disabled/inactive saved shortcuts when checking conflicts). Fixed
+  UUIDs update in place; ambiguous markers, foreign scopes, children and conditions
+  are refused. Applying takes a private SQLite/plan backup, checks for concurrent
+  edits, updates only these two top-level Master triggers, then verifies runtime
+  and saved configuration. No restart, browser launch or action execution occurs.
+  Uses the existing local socket (`btt_socket.js`), not Apple Events; read-only
+  preview works from an agent shell when BTT's Command Line / Socket Server is
+  enabled. Apply is always explicit. These independent triggers are outside Guard's
+  protected Media graph, so they neither need nor update its checkpoint. Existing
+  Guard drift must be reviewed separately; do not accept it just to add Panel.
 - `tools_menu_item.py` / `install_tools_menu_item.js`: shared definition and guarded
   installer for the standard BPM, Rhythm, Convert Video, Interval Analysis and Temp
   Card Printer entries under Media > Tools. Their `install_*_menu.py` paths remain

@@ -67,7 +67,8 @@ compare it with this checkout. Deployed files may differ from the repository.
   launchd control. Its `model.py` owns shared contracts/statuses; `storage.py`
   owns private atomic state. Never promote audit output into the known-good
   pointer automatically. Checkpoint integration fixtures live in
-  `macbook/tests/btt_guard_fixtures.py`.
+  `macbook/tests/btt_guard_fixtures.py`. `btt.py guard last-audit` prints the
+  saved audit report read-only (`{"status": "none"}` when there is none).
   `repair_text_transforms.py/.js` owns the guarded text-transform installer;
   `text_selection.js` owns AX selection handling and `text_menu_paste.js` owns
   clipboard-preserving native Paste for editors with broken AX replacement.
@@ -80,11 +81,35 @@ compare it with this checkout. Deployed files may differ from the repository.
   hourly/login checker LaunchAgent `com.jacobr.deferred-jobs`, purge on success,
   `NTFY_WARNING_URL` on failure, daily cron watchdog); queue jobs with its `add`
   instead of writing a LaunchAgent per job. Usage is in `macbook/README.md`.
+  Its `list --json`, `retry`, `run-now` and `reschedule` serve the Mac Panel;
+  every mutation (and `cancel`) takes the checker's own flock and exits 75 when
+  it is busy, and `run-now` never sends a failure alert.
+  `macbook/mac_panel/` is the Mac Panel, `http://127.0.0.1:8769/` (port 8769;
+  `macpanel` alias in `~/.zshrc`; BTT menu-bar icon and ctrl+opt+cmd+P from
+  `bettertouchtool/install_mac_panel_menu.py`): a stdlib server run by the login
+  LaunchAgent `com.jacobr.mac-panel` (gui domain, venv
+  `~/.local/share/mac-panel/venv`; `install.zsh`, controller `panel_service.py`
+  with prepare/install/status/start/stop/restart/verify/uninstall; runtime files
+  in ignored `tmp/mac-panel/`). One adapter module per section, wire records in
+  `panel_contracts.py`, request guards (Host allowlist, per-instance token,
+  Origin + JSON on POST) in `request_guard.py`, the only subprocess boundary in
+  `cli_runner.py`, display redaction in `log_redaction.py`. It changes tools only
+  through their own CLIs or `tool_settings`; crontab and ntfy config are
+  read-only there, BTT repair is never exposed, and it never reads pi/secrets.
+  Usage: `macbook/mac_panel/README.md`.
   `macbook/scripts/ntfy_warning.py` is the one sender for `NTFY_WARNING_URL`
   warnings (sourced privately from `pi/secrets/.bash_variables`, never in argv
   or logs): btt_guard imports `send_warning`, deferred.zsh runs it with the
   message on stdin. Reuse it rather than reading the URL again.
 - `shared/`: code imported or deployed on more than one host.
+- Tool settings: each configurable tool declares its settings once in
+  `shared/settings/<tool>.json` (name, type, range, default, description);
+  `shared/python/tool_settings.py` (stdlib, runs on `/usr/bin/python3` 3.9) is
+  the only reader/validator/writer, used by both the tool and the Mac Panel.
+  Values live in `~/.config/jacobr/<tool>.json` (mode 600, atomic, only
+  non-default values, revision-checked); long-running tools reload them with
+  `tool_settings.Reloader`. LaunchAgents need `PYTHONPATH=.../shared/python` in
+  their plist. First user: the iTerm font follower (`iterm-screen-fonts`).
 - `shared/sh/session_search_header.sh` formats the shared activity-age/name header
   and quoted directory/resume command for `claudesearch.sh` and `codexsearch.sh`.
   It also provides `-h`/`--help`, parses `-g`/`--group`, and groups matches per transcript, retaining
@@ -104,7 +129,8 @@ compare it with this checkout. Deployed files may differ from the repository.
   Pi's as iTerm tabs over SSH (the Pi chooses them). Its every-minute snapshot
   is a `managed llm-restore` block tracked in `macbook/crontab` and
   `pi/crontab_pi` (its test keeps both equal to `cron_block()`); `--cron off|on`
-  pauses and resumes it with a flag file instead of editing the crontab. State
+  pauses and resumes it with a flag file instead of editing the crontab;
+  `--cron [on|off] --json` prints one status object for the Mac Panel. State
   and the generated restore script live in `~/.local/state/llm-restore/`.
 - Dashboard Sonos alarms live in `pi/apps/van_dashboard/sonos_alarms.py`, with
   HTTP routes in `routes/sonos_alarms.py` and React controls in `features/sonos/`.
