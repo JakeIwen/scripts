@@ -22,7 +22,10 @@ btt_backup() {
   esac
   rm -rf -- "$btt_oldest_backup_path"
   mkdir -p "$btt_oldest_backup_path"
-  cp -a "$btt_app_path/." "$btt_oldest_backup_path/"
+  # -c clones on APFS: a slot costs only the blocks BTT changes afterwards
+  cp -ac "$btt_app_path/." "$btt_oldest_backup_path/"
+  # cp -a stamps the slot with the BTT folder's mtime; rotation needs copy time
+  touch "$btt_oldest_backup_path"
   echo "done. ls -lah of $btt_bkdir:"
   ls -lah "$btt_bkdir"
 }
