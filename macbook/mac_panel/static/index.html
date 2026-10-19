@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="panel-token" content="__PANEL_TOKEN__">
+<title>Mac Panel</title>
+<link rel="stylesheet" href="/style.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<header><h1>Mac Panel</h1><button id="refresh" type="button">Refresh all</button><span id="connection" role="status"></span></header>
+<nav aria-label="Sections">
+<a href="#settings">Settings</a><a href="#deferred">Deferred jobs</a>
+<a href="#services">Background services</a><a href="#crontab">User crontab</a>
+<a href="#llm-restore">llm-restore</a><a href="#guard">BTT guard</a><a href="#ntfy">ntfy alerts</a>
+</nav>
+<main>
+<section id="settings"><h2>Settings</h2><p class="notice" role="status"></p><div class="content">Loading…</div></section>
+<section id="deferred"><h2>Deferred jobs</h2><p class="notice" role="status"></p><div class="content">Loading…</div></section>
+<section id="services"><h2>Background services</h2><p class="notice" role="status"></p><div class="content">Loading…</div></section>
+<section id="crontab"><h2>User crontab</h2><p class="notice" role="status"></p><div class="content">Loading…</div></section>
+<section id="llm-restore"><h2>llm-restore snapshot</h2><p class="notice" role="status"></p><div class="content">Loading…</div></section>
+<section id="guard"><h2>BetterTouchTool guard</h2><p class="notice" role="status"></p><div class="content">Loading…</div></section>
+<section id="ntfy"><h2>ntfy alerts</h2><p class="notice" role="status"></p><div class="content">Loading…</div></section>
+</main>
+</body>
+</html>
