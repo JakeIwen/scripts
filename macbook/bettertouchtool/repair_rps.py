@@ -13,6 +13,7 @@ import sys
 import time
 
 from btt_common import ROOT, MEDIA, connect, current_database, records, check_entity, backup_configuration
+from btt_guard.installer_checkpoint import before_install, after_install
 
 BUTTON = '103D7824-47C1-4B1B-9106-71E4997BCB58'
 ACTION = '525212E9-F6F3-4CF0-A9F7-86C1A52EEB30'
@@ -75,15 +76,17 @@ def worker(mode, argument=''):
 
 
 
-def repair(inspect=False):
+def repair(inspect=False, no_checkpoint=False):
     os.umask(0o077)
     database = current_database()
     installed = preflight(database)
     if inspect:
         print(json.dumps({'rps_link_saved': installed, 'sync_script': COMMAND, 'will_execute_sync': False}))
         return
+    baseline = before_install(no_checkpoint=no_checkpoint)
     if installed:
         print('RPS link is already saved correctly. No changes or sync performed.')
+        after_install(baseline, [], 'repair_rps', wrote=False)
         return
     if not Path(COMMAND).is_file():
         raise RuntimeError('Sync script is missing; no changes made.')
@@ -92,6 +95,7 @@ def repair(inspect=False):
     print('Verified BTT configuration snapshot: '+str(backup.parent), flush=True)
     if preflight(database):
         print('RPS was repaired while preparing the backup; no changes or sync performed.')
+        after_install(baseline, [], 'repair_rps', wrote=False)
         return
     try:
         print(worker('apply', backup), flush=True)
@@ -103,14 +107,16 @@ def repair(inspect=False):
     except (RuntimeError, subprocess.SubprocessError) as error:
         raise RuntimeError(str(error)+'\nBackup: '+str(backup.parent)) from error
     print('Verified saved RPS -> Sync RPi Scripts link. No deployment or BTT restart performed.')
+    after_install(baseline, [ACTION], 'repair_rps', wrote=True)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--inspect', action='store_true', help='read-only saved-configuration check')
     parser.add_argument('--with-escape', action='store_true', help='also install visible-dropdown-only Escape dismissal')
+    parser.add_argument('--no-checkpoint', action='store_true', help='do not advance BTT Guard after RPS verification')
     args = parser.parse_args()
-    repair(args.inspect)
+    repair(args.inspect, args.no_checkpoint)
     if args.with_escape:
         from install_menu_escape import install
         install(args.inspect)

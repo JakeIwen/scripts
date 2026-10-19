@@ -12,6 +12,7 @@ import sys
 import time
 
 from btt_common import backup_configuration, connect, current_database, records
+from btt_guard.installer_checkpoint import before_install, after_install, parse_edit_receipt
 
 DIRECTORY = Path(__file__).resolve().parent
 TEXT_MENU = 'F08B0C3E-B629-441B-BFAE-3E1E43F390AA'
@@ -55,6 +56,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--apply', action='store_true')
     parser.add_argument('--inspect', action='store_true')
+    parser.add_argument('--no-checkpoint', action='store_true', help='do not advance BTT Guard after verification')
     args = parser.parse_args(argv)
     if args.apply and args.inspect:
         parser.error('--apply and --inspect are mutually exclusive')
@@ -74,20 +76,24 @@ def main(argv=None):
         print('Preview: replace clipboard-paste actions with Accessibility selection transforms; disable copy/delay.')
         return 0
     plan = json.loads(worker('plan'))
+    baseline = before_install(no_checkpoint=args.no_checkpoint)
     if all(edit['matches'] for edit in plan['edits']) and not saved_errors(database, plan):
         print('All nine transforms already installed and saved.')
+        after_install(baseline, [], 'repair_text_transforms', wrote=False)
         return 0
     parent = DIRECTORY / '.local/text-transform-backups'
     parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     path = backup_configuration(database, plan, prefix='selection-', directory_root=parent)
     print('Verified private configuration backup: ' + str(path), flush=True)
-    print(worker('apply', path), flush=True)
+    receipt = parse_edit_receipt(worker('apply', path))
+    print(receipt['message'], flush=True)
     deadline = time.monotonic() + 45
     while saved_errors(database, plan):
         if time.monotonic() >= deadline:
             raise RuntimeError('Runtime updated; disk save is pending. Re-run --apply to verify, without restarting BTT.')
         time.sleep(1)
     print('Verified saved action scripts and disabled copy/delay actions. No text selections were modified by installation.')
+    after_install(baseline, receipt['touched_uuids'], 'repair_text_transforms', wrote=receipt['wrote'])
     return 0
 
 

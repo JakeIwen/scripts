@@ -6,6 +6,7 @@ import tempfile
 import time
 
 from ..btt_common import ROOT
+from .model import ExportUnavailableError
 from .storage import write_json
 
 
@@ -22,7 +23,7 @@ def call_worker(name, document, mode=None):
     if result.returncode:
         # Native errors can include payload fragments; keep them off normal logs
         # and notifications. The private pre-operation backup remains available.
-        raise RuntimeError('BTT API request failed. Use the owning user’s Terminal; no result was verified.')
+        raise ExportUnavailableError('BTT API request failed. Use the owning user’s Terminal; no result was verified.')
     return result.stdout.strip()
 
 

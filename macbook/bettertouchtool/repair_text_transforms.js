@@ -148,7 +148,9 @@ function textApply(api, common, snapshot, directory, library) {
     }
     for (const edit of replacements) update(edit, edit.patch);
     textVerify(api, common, plan);
-    return 'Verified nine selection-only transforms; menu appearance preserved.';
+    // InstallerEditReceipt is defined in btt_guard/model.py.
+    return JSON.stringify({message: 'Verified nine selection-only transforms; menu appearance preserved.',
+        wrote: pending.length > 0, touched_uuids: pending.map(edit => edit.before.BTTUUID)});
 }
 
 function run(argv) {

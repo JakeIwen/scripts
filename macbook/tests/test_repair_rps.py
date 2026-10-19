@@ -80,10 +80,15 @@ class RPSPersistenceTests(RPSDatabaseFixture, unittest.TestCase):
         self.assertFalse(module.preflight(path.parent/'configuration.sqlite'))
 
     def test_backup_failure_prevents_apply(self):
+        baseline={'test':'baseline'}
         with patch('sys.argv',['repair_rps.py']),patch.object(module,'current_database',return_value=self.path), \
+             patch.object(module,'before_install',return_value=baseline) as before, \
+             patch.object(module,'after_install') as after, \
              patch.object(module,'worker',return_value='{"media":{},"sync":{}}') as worker, \
              patch.object(module,'backup_configuration',side_effect=RuntimeError('backup failure')):
             with self.assertRaises(RuntimeError):module.main()
+        before.assert_called_once_with(no_checkpoint=False)
+        after.assert_not_called()
         worker.assert_called_once_with('snapshot')
 
 

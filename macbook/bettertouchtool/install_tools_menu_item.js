@@ -165,6 +165,18 @@ function verifyChange(btt, payload, before, previous, desired, spec, common, bac
         common.fingerprint(actual.BTTMenuItemActions) !== common.fingerprint(previous.BTTMenuItemActions)) {
         throw new Error('Action changed during appearance repair. Backup: ' + backupPath);
     }
+    return actual;
+}
+// ToolsInstallerReceipt in btt_guard/model.py is consumed only by the Python launcher.
+function installerReceipt(message, actual, parent, touched) {
+    const entities = [{uuid: actual.BTTUUID, parent, node: actual}];
+    for (const action of actual.BTTMenuItemActions || []) {
+        entities.push({uuid: action.BTTUUID, parent: actual.BTTUUID,
+            node: Object.assign({}, action, {BTTTriggerType: -1})});
+    }
+    return JSON.stringify({message, wrote: touched.length > 0, touched_uuids: [...new Set(touched)],
+        saved_plan: {entities, configChanges: [{uuid: actual.BTTUUID, patch: actual.BTTMenuConfig}],
+            media: {BTTMenuItems: []}}});
 }
 function refreshMedia(btt, id) {
     btt.trigger_action(JSON.stringify({BTTPredefinedActionType: 387, BTTAdditionalActionData: {
@@ -179,6 +191,7 @@ function run(argv) {
     const payload = common.readJSON(argv[0]);
     const spec = JSON.parse(argv[4]);
     const refreshRequested = argv[5] === 'refresh';
+    const receiptRequested = argv[6] === 'receipt';
     const desired = payload.item;
     const btt = Application('/Applications/BetterTouchTool.app');
     const before = readMenus(btt, payload);
@@ -188,14 +201,22 @@ function run(argv) {
     if (argv[3] === 'inspect') return inspectResult(before.tools, previous, desired, spec, common);
     if (itemMatches(previous, desired, spec, common)) {
         if (refreshRequested) refreshMedia(btt, payload.media_uuid);
-        return 'Already configured: ' + spec.menuPath + '.' +
+        const message = 'Already configured: ' + spec.menuPath + '.' +
             (refreshRequested ? ' Media menu refreshed; open Tools again.' : '');
+        return receiptRequested ? installerReceipt(message, previous, before.tools.BTTUUID, []) : message;
+    }
+    const touched = [desired.BTTUUID];
+    if (!previous || !actionMatches(previous, desired, spec)) {
+        for (const item of [previous, desired]) {
+            for (const action of (item && item.BTTMenuItemActions) || []) touched.push(action.BTTUUID);
+        }
     }
     const backupPath = backup(common, before.media, argv[2], spec.backupPrefix);
     verifyBackupRace(btt, payload, before, common);
     applyChange(btt, before.tools, previous, desired, spec);
-    verifyChange(btt, payload, before, previous, desired, spec, common, backupPath);
+    const actual = verifyChange(btt, payload, before, previous, desired, spec, common, backupPath);
     if (refreshRequested) refreshMedia(btt, payload.media_uuid);
-    return 'Verified configuration: ' + spec.menuPath + '. Backup: ' + backupPath +
+    const message = 'Verified configuration: ' + spec.menuPath + '. Backup: ' + backupPath +
         (refreshRequested ? ' Media menu refreshed; open Tools again.' : '');
+    return receiptRequested ? installerReceipt(message, actual, before.tools.BTTUUID, touched) : message;
 }

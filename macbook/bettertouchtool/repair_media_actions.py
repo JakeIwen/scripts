@@ -17,6 +17,7 @@ from typing import Any, Optional, TypedDict
 from uuid import NAMESPACE_URL, uuid5
 
 from btt_common import ROOT, MEDIA, backup_configuration, connect, current_database
+from btt_guard.installer_checkpoint import before_install, after_install
 from repair_script_paths import replace_path, rewrite_command
 from restore_media import descendants, entity_error, flatten, restore_records
 from stabilize_media import restart_btt
@@ -304,6 +305,7 @@ def main(argv=None):
     parser.add_argument('--database', type=Path, help='offline SQLite inspection only')
     parser.add_argument('--dependencies-only', action='store_true',
                         help='repair only missing named triggers referenced by active Media actions')
+    parser.add_argument('--no-checkpoint', action='store_true', help='do not advance BTT Guard after verification')
     args = parser.parse_args(argv)
     if args.database and args.apply:
         parser.error('--database is read-only; cannot combine with --apply')
@@ -315,15 +317,20 @@ def main(argv=None):
                       'named_triggers_to_restore': [e['node']['BTTTriggerName'] for e in plan['entities'] if not e['parent']],
                       'named_trigger_orders': [e['node']['BTTOrder'] for e in plan['entities'] if not e['parent']],
                       'buttons': plan['buttons']}
+    baseline = before_install(no_checkpoint=args.no_checkpoint) if args.apply else None
     if args.apply and plan['entities']:
         print('Recovering '+str(summary['action_records'])+' action assignments and '+
               str(len(summary['named_triggers_to_restore']))+' named trigger(s).', flush=True)
         apply_plan(database, plan)
+        touched = [entity['uuid'] for entity in plan['entities'] if not plan['snapshot'].get(entity['uuid'])]
+        after_install(baseline, touched, 'repair_media_actions', wrote=bool(touched))
     elif not plan['entities']:
         if args.dependencies_only:
             print('All enabled Media named-trigger dependencies resolve. No changes made.')
         else:
             print('No enabled Media buttons without saved actions were found. No changes made.')
+        if args.apply:
+            after_install(baseline, [], 'repair_media_actions', wrote=False)
     else:
         print(json.dumps(summary, ensure_ascii=False, indent=2))
 

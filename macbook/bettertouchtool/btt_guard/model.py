@@ -11,6 +11,39 @@ class AuditStatus(str, Enum):
     UNAVAILABLE = 'unavailable'
 
 
+class InstallerCheckpointOperation(str, Enum):
+    BEFORE = 'before'
+    AFTER = 'after'
+
+
+class InstallerCheckpointStatus(str, Enum):
+    TAKEN = 'taken'
+    SKIPPED = 'skipped'
+    FAILED = 'failed'
+
+
+class InstallerCheckpointReason(str, Enum):
+    OPT_OUT = 'opt_out'
+    NO_WRITES = 'no_writes'
+    NO_CHECKPOINT = 'no_checkpoint'
+    BASELINE_DRIFT = 'baseline_drift'
+    BASELINE_UNAVAILABLE = 'baseline_unavailable'
+    BASELINE_FAILED = 'baseline_failed'
+    CHECKPOINT_CHANGED = 'checkpoint_changed'
+    FOREIGN_FINDINGS = 'foreign_findings'
+    AUDIT_UNAVAILABLE = 'audit_unavailable'
+    AUDIT_FAILED = 'audit_failed'
+    INVALID_EDITS = 'invalid_edits'
+    SAVED_UNVERIFIED = 'saved_unverified'
+    CAPTURE_FAILED = 'capture_failed'
+    EXPORT_UNAVAILABLE = 'export_unavailable'
+    HELPER_FAILED = 'helper_failed'
+
+
+class ExportUnavailableError(RuntimeError):
+    """The owning user's BTT Apple Events export could not be read."""
+
+
 class FindingKind(str, Enum):
     MISSING = 'missing'
     REPARENTED = 'reparented'
@@ -77,6 +110,39 @@ class AuditReport(TypedDict):
     checked_at: float
     btt_version: Optional[str]
     findings: list[Finding]
+
+
+class InstallerBaseline(TypedDict):
+    state_dir: str
+    audit: Optional[AuditReport]
+    reason: Optional[str]
+
+
+class InstallerCheckpointRequest(TypedDict, total=False):
+    """Fixed package-bridge request; AFTER requires all fields."""
+    operation: str
+    baseline: InstallerBaseline
+    touched_uuids: list[str]
+    installer_name: str
+    wrote: bool
+
+
+class InstallerCheckpointResult(TypedDict):
+    status: str
+    reason: Optional[str]
+    checkpoint_id: Optional[str]
+
+
+class InstallerEditReceipt(TypedDict):
+    """Verified worker mutations, returned by the guarded native installers."""
+    message: str
+    wrote: bool
+    touched_uuids: list[str]
+
+
+class ToolsInstallerReceipt(InstallerEditReceipt):
+    """install_tools_menu_item.js output; saved_plan uses btt_common.disk_errors."""
+    saved_plan: dict[str, Any]
 
 
 class CheckpointManifest(TypedDict):

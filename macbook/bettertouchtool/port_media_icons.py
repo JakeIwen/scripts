@@ -15,6 +15,7 @@ import tempfile
 import time
 
 from btt_common import ROOT, MEDIA, connect, current_database, records, disk_errors, backup_configuration
+from btt_guard.installer_checkpoint import before_install, after_install
 
 WORKER = Path(__file__).with_suffix('.js')
 STATUS_BUTTON = 'BDFEAEF1-6961-4B05-9A62-E70C54332C4C'
@@ -170,6 +171,7 @@ def worker(mode, path=''):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--inspect', action='store_true')
+    parser.add_argument('--no-checkpoint', action='store_true', help='do not advance BTT Guard after verification')
     style = parser.add_mutually_exclusive_group()
     style.add_argument('--main-style', action='store_true',
                         help='black main-bar text plus original Sonos join/unjoin and volume icons')
@@ -184,8 +186,10 @@ def main():
         print(json.dumps({'appearance_changes': len(changes), 'buttons': [c['label'] for c in changes],
                           'actions_changed': False}, indent=2))
         return
+    baseline = before_install(no_checkpoint=args.no_checkpoint)
     if not changes:
         print('Requested main-menu appearance is already configured.')
+        after_install(baseline, [], 'port_media_icons', wrote=False)
         return
     media = json.loads(worker('snapshot'))
     plan = {'media': media, 'changes': changes, 'entities': [], 'presetPath': preset_path(database),
@@ -206,6 +210,7 @@ def main():
     except (RuntimeError, subprocess.SubprocessError) as error:
         raise RuntimeError(str(error)+'\nBackup: '+str(path.parent)) from error
     print('Verified saved appearance. Actions, button sizes/order, status script and menu layout are unchanged. No restart needed.')
+    after_install(baseline, [change['uuid'] for change in changes], 'port_media_icons', wrote=True)
 
 
 if __name__ == '__main__':

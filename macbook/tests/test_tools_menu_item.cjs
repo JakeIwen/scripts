@@ -125,8 +125,9 @@ function setupFeature(name = 'bpm', options = {}) {
     const context = vm.createContext({$, ObjC: {import() {}, unwrap: value => value}, Application: () => btt});
     vm.runInContext(workerCode, context);
     return {
-        run: (mode = 'apply', refresh = false) => context.run([
+        run: (mode = 'apply', refresh = false, receipt = false) => context.run([
             'payload', 'common', '/build', mode, JSON.stringify(spec), refresh ? 'refresh' : '',
+            receipt ? 'receipt' : '',
         ]),
         ...menu, payload, spec,
         submittedAdds: state.submittedAdds,
@@ -258,6 +259,28 @@ test('shared appearance repair preserves actions and position', () => {
     assert.equal(item.BTTMenuConfig.BTTMenuItemVisibleWhileInactive, 1);
     assert.equal(JSON.stringify(item.BTTMenuItemActions), actions);
     assert.equal(item.BTTOrder, 8);
+});
+
+test('checkpoint receipt includes exactly added, rewritten, or appearance-only records', () => {
+    const environment = setupFeature();
+    const button = environment.payload.item.BTTUUID;
+    const action = environment.payload.item.BTTMenuItemActions[0].BTTUUID;
+    const added = JSON.parse(environment.run('apply', false, true));
+    assert.equal(added.wrote, true);
+    assert.deepEqual(added.touched_uuids, [button, action]);
+    assert.equal(added.saved_plan.entities[1].node.BTTTriggerType, -1);
+    assert.equal(added.saved_plan.entities[0].parent, environment.tools.BTTUUID);
+    const noop = JSON.parse(environment.run('apply', false, true));
+    assert.equal(noop.wrote, false);
+    assert.deepEqual(noop.touched_uuids, []);
+    installedItem(environment).BTTMenuConfig.BTTMenuItemVisibleWhileInactive = 0;
+    const appearance = JSON.parse(environment.run('apply', false, true));
+    assert.deepEqual(appearance.touched_uuids, [button]);
+    const oldAction = installedItem(environment).BTTMenuItemActions[0];
+    oldAction.BTTUUID = 'old-action';
+    oldAction.BTTShellTaskActionScript = 'stale';
+    const rewritten = JSON.parse(environment.run('apply', false, true));
+    assert.deepEqual(rewritten.touched_uuids, [button, 'old-action', action]);
 });
 
 test('shared refresh releases and reopens only Media on an otherwise no-op apply', () => {

@@ -8,10 +8,12 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
+import time
 from typing import Optional
 import uuid
 
-from btt_common import MEDIA_TOOLS, ROOT
+from btt_common import MEDIA_TOOLS, ROOT, connect, current_database, disk_errors
+from btt_guard.installer_checkpoint import before_install, after_install, parse_edit_receipt
 from tools_menu_style import tools_button_config
 
 BUILD = ROOT / "macbook" / "build"
@@ -81,9 +83,32 @@ def _parser(spec: ToolsMenuItemSpec) -> argparse.ArgumentParser:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--apply", action="store_true")
     mode.add_argument("--inspect", action="store_true")
+    parser.add_argument('--no-checkpoint', action='store_true', help='do not advance BTT Guard after verification')
     parser.add_argument("--refresh", action="store_true",
                         help="recreate the visible Media menu after verification")
     return parser
+
+
+def verify_saved_item(plan):
+    """API readback is not proof of persistence; check the saved button and action."""
+    if not isinstance(plan, dict) or not isinstance(plan.get('entities'), list) or not plan['entities']:
+        raise ValueError('Missing saved-state verification plan; no checkpoint requested.')
+    database = current_database()
+    deadline = time.monotonic() + 45
+    while True:
+        errors = disk_errors(database, plan)
+        connection = connect(database)
+        try:
+            enabled = dict(connection.execute('SELECT ZUNIQUEIDENTIFIER,ZENABLEDNEW FROM ZBTTBASEENTITY'))
+        finally:
+            connection.close()
+        errors.extend(entity['uuid'] for entity in plan['entities']
+                      if entity['uuid'] not in enabled or enabled[entity['uuid']] == 0)
+        if not errors:
+            return
+        if time.monotonic() >= deadline:
+            raise RuntimeError('Runtime updated; disk save is pending. No checkpoint taken. Re-run --apply to verify.')
+        time.sleep(1)
 
 
 def run_installer(spec: ToolsMenuItemSpec) -> None:
@@ -103,9 +128,19 @@ def run_installer(spec: ToolsMenuItemSpec) -> None:
     directory = Path(__file__).resolve().parent
     worker = directory / "install_tools_menu_item.js"
     common = directory / "btt_common.js"
+    baseline = before_install(no_checkpoint=args.no_checkpoint) if args.apply else None
     result = subprocess.run([
         "/usr/bin/osascript", "-l", "JavaScript", str(worker), str(payload), str(common),
         str(BUILD), "inspect" if args.inspect else "apply", json.dumps(spec.worker_options()),
-        "refresh" if refresh else "",
-    ])
+        "refresh" if refresh else "", "receipt" if args.apply else "",
+    ], capture_output=args.apply, text=args.apply)
+    if args.apply:
+        if result.returncode:
+            print(result.stderr.strip() or 'BTT Tools installer failed; no checkpoint requested.')
+        else:
+            receipt = parse_edit_receipt(result.stdout)
+            print(receipt['message'])
+            if receipt['wrote']:
+                verify_saved_item(receipt['saved_plan'])
+            after_install(baseline, receipt['touched_uuids'], spec.identifier, wrote=receipt['wrote'])
     raise SystemExit(result.returncode)

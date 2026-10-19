@@ -113,7 +113,10 @@ function installerFixture() {
 test('installer updates nine flows and explicit reapplication preserves configuration', () => {
     const {context: c, api, writes, menu} = installerFixture();
     const plan = c.textPlan(api, c.BTTCommon, '/repo', '/cases.cjs', 'source');
-    c.textApply(api, c.BTTCommon, plan, '/repo', '/cases.cjs');
+    const receipt = JSON.parse(c.textApply(api, c.BTTCommon, plan, '/repo', '/cases.cjs'));
+    assert.equal(receipt.wrote, true);
+    assert.equal(receipt.touched_uuids.length, 27);
+    assert.deepEqual(new Set(receipt.touched_uuids), new Set(writes.map(write => write.uuid)));
     assert.equal(writes.length, 36);
     assert.ok(writes.slice(0,9).every(w => w.patch.BTTEnabled === 0));
     for (const item of menu.BTTMenuItems) {
@@ -122,7 +125,9 @@ test('installer updates nine flows and explicit reapplication preserves configur
         assert.equal(active[0].BTTPredefinedActionType, 281);
     }
     const next = c.textPlan(api, c.BTTCommon, '/repo', '/cases.cjs', 'source');
-    c.textApply(api, c.BTTCommon, next, '/repo', '/cases.cjs');
+    const rewritten = JSON.parse(c.textApply(api, c.BTTCommon, next, '/repo', '/cases.cjs'));
+    assert.equal(rewritten.touched_uuids.length, 9);
+    assert.ok(rewritten.touched_uuids.every(id => id.endsWith('-2')));
     assert.equal(writes.length, 54);
     assert.ok(c.textPlan(api, c.BTTCommon, '/repo', '/cases.cjs').edits.every(e => e.matches));
 });

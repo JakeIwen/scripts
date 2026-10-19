@@ -14,6 +14,7 @@ import time
 WORKER = Path(__file__).with_suffix('.js')
 from btt_common import (ROOT, MEDIA, current_database, connect, records, check_entity, disk_errors,
                         pending_config_changes, backup_configuration)
+from btt_guard.installer_checkpoint import before_install, after_install
 
 
 def worker(mode, argument, timeout=60):
@@ -54,6 +55,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--inspect', action='store_true')
     parser.add_argument('--full-height-dropdowns', action='store_true', help='fallback to usable screen-height dropdowns')
+    parser.add_argument('--no-checkpoint', action='store_true', help='do not advance BTT Guard after verification')
     args = parser.parse_args()
     os.umask(0o077)
     database = current_database()
@@ -74,6 +76,10 @@ def main():
         print(json.dumps({'missing_records':len(plan['create']),'screen':plan['screen'],
                           'layout_updates':len(plan['applyConfigChanges'])},indent=2))
         return
+    baseline = before_install(no_checkpoint=args.no_checkpoint)
+    touched_uuids = list(dict.fromkeys(
+        [entity['uuid'] for entity in plan['create']] +
+        [change['uuid'] for change in plan['applyConfigChanges']]))
     plan_path = backup_configuration(database, plan, prefix='btt-persistent-backup-', filename='plan.json')
     directory = plan_path.parent
     print('Verified BTT configuration snapshot: '+str(directory),flush=True)
@@ -94,6 +100,7 @@ def main():
     print(worker('verify',plan_path),flush=True)
     print('Media is anchored at the screen top-left. Heights use '+
           ('content sizing (dropdown fallback: screen height).' if args.full_height_dropdowns else 'content sizing.'))
+    after_install(baseline, touched_uuids, 'stabilize_media', wrote=bool(touched_uuids))
 
 
 if __name__=='__main__':

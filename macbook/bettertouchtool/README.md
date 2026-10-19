@@ -89,9 +89,54 @@ user's Terminal because their runtime export uses BTT's Apple Events API.
 ./macbook/bettertouchtool/btt.py guard repair --apply
 ```
 
-Checkpoint promotion is explicit; replacing one also requires `--replace`.
+Manual checkpoint promotion is explicit; replacing one also requires `--replace`.
+There is one narrow exception: wired guarded installers finish their own apply by
+checkpointing their verified edits. They first record a read-only audit and the
+active checkpoint **before any BTT writes**. Only an initially healthy Guard with
+an existing checkpoint is eligible. After the installer's saved-state verification,
+they re-audit under `guard.lock`: the checkpoint must be unchanged, Guard must be
+healthy or drifting, and every finding's UUID must belong to that installer's
+actual edits. Capture still validates runtime exports against saved state. Pure
+additions also get protected, even though their audit stays healthy; zero writes
+never advance the checkpoint. `--no-checkpoint` disables this final step without
+changing the installer's backup, edits or verification.
+
+The final output is `BTT Guard checkpoint taken (...)`, `skipped (...)` with a
+reason (for example, Guard had drift before the run or findings belong to another
+edit), or `failed (...)` with a reason. Checkpoint failure never fails an already
+verified apply. Apple Events export failure specifically asks for the owner's
+Terminal. Every skip/failure also prints this manual command, to run only after
+reviewing the menu and any unrelated drift:
+
+```sh
+/usr/bin/python3 -B ~/dev/scripts/macbook/bettertouchtool/btt.py guard checkpoint --accept-current --replace
+```
+
+The wired paths are:
+
+- `repair_text_transforms.py` and the shared Tools installer (`tools_menu_item.py`
+  / `install_tools_menu_item.js`), covering the BPM, Rhythm, Convert Video,
+  Interval Analysis and Temp Card Printer wrappers. Tools workers return their
+  exact written UUIDs; the launcher verifies saved button/action state before capture.
+- `port_media_icons.py` (all three style scopes), `repair_media_actions.py`
+  (actions and dependencies), `repair_script_paths.py` (ordinary and media-suite
+  modes), `restore_media.py`, `stabilize_media.py`, and `repair_rps.py`.
+- `btt.py style`, `restore-media`, and the corresponding `repair` commands forward
+  `--no-checkpoint`; the installer owns the baseline, so dispatch never captures twice.
+
+Path repairs whose disk saves are still pending print a checkpoint skip, not a
+successful checkpoint. Initial drift still needs explicit owner review: these
+installers do not retroactively bless earlier repairs or unrelated damage.
+
+Not wired: Custom Conversion, Performance Audio, Strip Metadata, Notes, sizing
+repair/restore and playback-status tuning currently verify API readback, not a
+complete saved-state contract with an edit receipt. Their existing behavior is
+unchanged. `build_performance_audio_menu.py` only generates files. The Escape
+shortcut and Mac Panel triggers are outside the captured Media/dependency graph;
+Guard's own `repair --apply` restores the checkpoint and never replaces it.
+
 The active pointer never advances during ordinary audits, BTT upgrades, failed
-captures, or repairs. Prior generations are retained without automatic pruning.
+captures, or Guard's own repairs. Prior generations are retained without automatic pruning.
 Each generation contains a consistent SQLite backup, validated runtime exports,
 flat recovery definitions, and self-contained copies of managed preset images.
 Files are private and checksummed under ignored `.local/btt-guard/`. Runtime and
@@ -230,9 +275,10 @@ uses the existing private backup/concurrency/API/disk checks. Unlike ordinary
 `repair paths`, it includes disabled legacy suite actions so re-enabling them
 cannot resurrect stale paths. It changes command fields only, never activation,
 layout or ordering; BTT backups, other apps and unrelated scripts are excluded.
-It does not rebuild the app, move data or promote a Guard checkpoint. Move data
-only after checking processes and job state; preserve custom presets and report
-identities. Recreate venvs rather than moving them.
+It does not rebuild the app or move data. After saved verification it uses the same
+narrow installer-checkpoint gate described above (`--no-checkpoint` opts out).
+Move data only after checking processes and job state; preserve custom presets
+and report identities. Recreate venvs rather than moving them.
 
 ### Sources
 
@@ -351,8 +397,10 @@ identities. Recreate venvs rather than moving them.
   `checkpoint.py` validate immutable recovery material, `repair.py`/`worker.js`
   implement approved restoration, and `monitor.py`/`notify.py`/`service.py` own
   warning state, private delivery and boot scheduling. `storage.py` shares private
-  atomic file writes/locking. Legacy standalone helpers are called through their
-  CLI instead of introducing import-path shims.
+  atomic file writes/locking. `installer_checkpoint.py` owns the healthy-baseline,
+  unchanged-checkpoint and touched-UUID gates plus the nonfatal installer result;
+  its fixed subprocess bridge lets standalone installers use the package without
+  import-path shims. Guard's own repair does not use this promotion path.
 - `install_mac_panel_menu.py/.js`: guarded installer for a standalone Mac Panel
   menu-bar icon (SF Symbol `slider.horizontal.3`, icon only) and All Apps keyboard
   shortcut (installed as `ctrl+opt+cmd+P`), both using BTT's built-in Open URL

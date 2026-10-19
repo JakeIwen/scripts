@@ -42,6 +42,9 @@ def parser():
     repair.add_argument('--apply', action='store_true')
     repair.add_argument('--with-escape', action='store_true', help='RPS repair only')
     repair.add_argument('--full-height-dropdowns', action='store_true', help='persistence repair only')
+    for command in (media_restore, style, repair):
+        command.add_argument('--no-checkpoint', action='store_true',
+                             help='disable automatic BTT Guard checkpointing in supported installers')
     restore = commands.add_parser('restore-sizes', help='restore only sizes from a verified sizing backup')
     restore.add_argument('backup', type=Path)
     restore.add_argument('--apply', action='store_true', required=True)
@@ -50,7 +53,9 @@ def parser():
 
 def command_for(args):
     """Return a fixed executable/argument list; never shell-interpolate user input."""
-    def python(name, *extra): return [sys.executable, '-B', str(DIRECTORY/name), *extra]
+    def python(name, *extra):
+        checkpoint = ['--no-checkpoint'] if getattr(args, 'no_checkpoint', False) else []
+        return [sys.executable, '-B', str(DIRECTORY/name), *extra, *checkpoint]
     def jxa(name, *extra): return ['/usr/bin/osascript', '-l', 'JavaScript', str(DIRECTORY/name), *extra]
     inspect = [] if args.apply else ['--inspect']
     if args.command == 'restore-media':

@@ -38,6 +38,17 @@ class MaintenanceTests(unittest.TestCase):
         self.assertIn('--dependencies-only',command)
         self.assertEqual(command[-1],'--apply')
 
+    def test_checkpoint_optout_reaches_each_wired_dispatch_path(self):
+        for command in [['style', 'main'], ['style', 'transport'], ['style', 'status'],
+                        ['restore-media'], ['repair', 'rps'], ['repair', 'persistence'],
+                        ['repair', 'text'], ['repair', 'paths'], ['repair', 'actions'],
+                        ['repair', 'dependencies']]:
+            with self.subTest(command=command), patch.object(module.subprocess, 'run') as runner, \
+                    contextlib.redirect_stdout(io.StringIO()):
+                runner.return_value.returncode = 0
+                self.assertEqual(module.main([*command, '--apply', '--no-checkpoint']), 0)
+                self.assertEqual(runner.call_args.args[0][-1], '--no-checkpoint')
+
     def test_guard_uses_package_entry_without_import_path_shims(self):
         with patch.object(module.subprocess,'run') as runner:
             runner.return_value.returncode=0

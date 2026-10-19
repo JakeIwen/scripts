@@ -16,6 +16,7 @@ import time
 
 from btt_common import (ROOT, MEDIA, backup_configuration, check_entity, connect,
                         current_database, records)
+from btt_guard.installer_checkpoint import before_install, after_install
 
 WORKER = Path(__file__).with_suffix('.js')
 COLLECTIONS = ('BTTMenuItems', 'BTTMenuItemActions', 'BTTAdditionalActions')
@@ -229,6 +230,7 @@ def main(argv=None):
     parser.add_argument('--source', type=Path, help='appearance backup.json (defaults to newest)')
     parser.add_argument('--apply', action='store_true')
     parser.add_argument('--resume', action='store_true', help='resume an exact disabled partial recovery; never overwrite it')
+    parser.add_argument('--no-checkpoint', action='store_true', help='do not advance BTT Guard after verification')
     args = parser.parse_args(argv)
     plan = build_plan(args.source or latest_source())
     database = current_database()
@@ -248,6 +250,7 @@ def main(argv=None):
         path = Path(directory)/'plan.json'
         path.write_text(json.dumps(plan), encoding='utf-8')
         worker('preflight', path)
+    baseline = before_install(no_checkpoint=args.no_checkpoint)
     backup = backup_configuration(database, plan, prefix='btt-media-restore-backup-', filename='plan.json')
     print('Verified pre-restore configuration backup: '+str(backup.parent), flush=True)
     if preflight(database, plan, resume=args.resume)[0] != before:
@@ -265,6 +268,10 @@ def main(argv=None):
                            '\nNo automatic deletion or full-database rollback was attempted.') from error
     print('Restored and verified saved Media tree. Hold Ctrl+Option+Command to display it.')
     print('No actions executed, other menus replaced, or BTT restart performed.')
+    already_saved = set(plan.get('already_saved', []))
+    touched_uuids = [MEDIA] + [entity['uuid'] for entity in plan['entities']
+                               if entity['uuid'] != MEDIA and entity['uuid'] not in already_saved]
+    after_install(baseline, touched_uuids, 'restore_media', wrote=True)
 
 
 if __name__ == '__main__':

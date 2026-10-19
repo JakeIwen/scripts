@@ -16,6 +16,8 @@ import tempfile
 import time
 
 from btt_common import MEDIA_TOOLS, ROOT, backup_configuration, connect, current_database, records
+from btt_guard.installer_checkpoint import before_install, after_install, skip_checkpoint
+from btt_guard.model import InstallerCheckpointReason
 
 WORKER = Path(__file__).with_suffix('.js')
 MOVED_SCRIPTS = (
@@ -204,6 +206,7 @@ def main(argv=None):
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--inspect', action='store_true')
     mode.add_argument('--apply', action='store_true')
+    parser.add_argument('--no-checkpoint', action='store_true', help='do not advance BTT Guard after verification')
     parser.add_argument('--media-tools', action='store_true',
                         help='move reviewed media-suite paths, including disabled legacy copies')
     args = parser.parse_args(argv)
@@ -217,7 +220,10 @@ def main(argv=None):
     mappings = sorted({(x['old'], x['new']) for t in plan['targets'] for x in t['replacements']})
     for old, new in mappings:
         print(old+' -> '+new)
+    baseline = before_install(no_checkpoint=args.no_checkpoint) if args.apply else None
     if not plan['targets'] or not args.apply:
+        if args.apply:
+            after_install(baseline, [], 'repair_script_paths', wrote=False)
         if plan['targets']:
             print('Inspection only. Only reviewed command paths may change; activation, layout, labels and ordering are preserved.')
         return
@@ -227,6 +233,9 @@ def main(argv=None):
         path = Path(directory)/'plan.json'
         path.write_text(json.dumps(plan), encoding='utf-8')
         plan['snapshot'] = json.loads(worker('snapshot', path))
+    runtime_before = {entry['uuid']: entry['trigger'] for entry in plan['snapshot']}
+    touched = [target['uuid'] for target in plan['targets']
+               if runtime_before[target['uuid']][target['field']] != target['after']]
     backup = backup_configuration(database, plan, prefix='btt-paths-backup-', filename='plan.json')
     print('Verified pre-update configuration backup: '+str(backup.parent), flush=True)
     if planner(database)['targets'] != plan['targets'] or records(database) != before:
@@ -240,6 +249,7 @@ def main(argv=None):
                                '\n'.join(unexpected[:8])+'\nBackup: '+str(backup.parent))
         if not pending:
             print('Verified saved command paths; all other saved records unchanged. No buttons executed or restart performed.')
+            after_install(baseline, touched, 'repair_script_paths', wrote=bool(touched))
             return
         if time.monotonic() >= deadline:
             print('API readback verified. BTT has not yet saved '+str(len(pending))+' command updates to disk.')
@@ -248,6 +258,7 @@ def main(argv=None):
                 print('/usr/bin/python3 -B '+str(Path(__file__))+' --media-tools --inspect')
             else:
                 print('/usr/bin/python3 -B '+str(ROOT/'macbook/bettertouchtool/btt.py')+' repair paths')
+            skip_checkpoint('repair_script_paths', InstallerCheckpointReason.SAVED_UNVERIFIED)
             return
         time.sleep(.25)
 
