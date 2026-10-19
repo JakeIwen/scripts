@@ -543,8 +543,8 @@ class HavenoCliTests(unittest.TestCase):
 
     def test_crontab_keeps_one_exact_managed_price_entry(self):
         crontab = (ROOT / "pi" / "crontab_pi").read_text(encoding="utf-8")
-        _, expression = CronScheduleManager()._find_entry(crontab)
-        self.assertEqual(expression, "0 10,15,20 * * *")
+        # Raises unless exactly one entry exists; its times belong to the dashboard's schedule editor.
+        CronScheduleManager()._find_entry(crontab)
         self.assertIn("main.py haveno-check 2>&1", crontab)
 
 
