@@ -133,7 +133,6 @@ function havenoFields(draft: DealWatchHavenoDraft): Record<string, string> {
     threshold_pct: draft.thresholdPct,
     fee_pct: draft.feePct,
     payment_method: draft.paymentMethod,
-    currency: draft.currency,
     min_xmr: draft.minXmr,
     max_xmr: draft.maxXmr,
     title: draft.title,

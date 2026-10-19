@@ -203,7 +203,6 @@ export interface DealWatchHavenoDraft {
   thresholdPct: string;
   feePct: string;
   paymentMethod: string;
-  currency: string;
   minXmr: string;
   maxXmr: string;
   title: string;

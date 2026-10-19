@@ -15,7 +15,6 @@ const EMPTY_DRAFT: DealWatchHavenoDraft = {
   thresholdPct: '',
   feePct: '0',
   paymentMethod: 'ZELLE',
-  currency: 'USD',
   minXmr: '',
   maxXmr: '',
   title: '',
@@ -33,7 +32,6 @@ function HavenoMarketFields({
   const thresholdId = useId();
   const feeId = useId();
   const paymentId = useId();
-  const currencyId = useId();
   return (
     <>
       <label htmlFor={thresholdId}>
@@ -78,20 +76,6 @@ function HavenoMarketFields({
           disabled={disabled}
           required
           onChange={(event) => update('paymentMethod', event.target.value.toUpperCase())}
-        />
-      </label>
-      <label htmlFor={currencyId}>
-        <span>Currency</span>
-        <input
-          id={currencyId}
-          type="text"
-          pattern="[A-Z]{3}"
-          maxLength={3}
-          autoComplete="off"
-          value={draft.currency}
-          disabled={disabled}
-          required
-          onChange={(event) => update('currency', event.target.value.toUpperCase())}
         />
       </label>
     </>
@@ -176,7 +160,6 @@ export function DealWatchHavenoForm({
             thresholdPct: editing.thresholdPct,
             feePct: editing.feePct,
             paymentMethod: editing.paymentMethod,
-            currency: editing.currency,
             minXmr: editing.minXmr ?? '',
             maxXmr: editing.maxXmr ?? '',
             title: editing.title ?? '',
@@ -195,7 +178,6 @@ export function DealWatchHavenoForm({
       thresholdPct: draft.thresholdPct.trim(),
       feePct: draft.feePct.trim() || '0',
       paymentMethod: draft.paymentMethod.trim().toUpperCase(),
-      currency: draft.currency.trim().toUpperCase(),
       minXmr: draft.minXmr.trim(),
       maxXmr: draft.maxXmr.trim(),
       title: draft.title.trim(),

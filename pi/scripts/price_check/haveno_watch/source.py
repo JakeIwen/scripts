@@ -14,6 +14,9 @@ KRAKEN_URL = "https://api.kraken.com/0/public/Ticker?pair=XXMRZUSD"
 DEPTH_URL = "https://haveno.markets/api/v1/depth/XMR_{}?level=2&network={}"
 TRADES_URL = "https://haveno.markets/api/v1/trades/XMR_{}?limit=200&network={}"
 MAX_PRICE_AGE_SECONDS = 15 * 60
+# Haveno is only watched on RetoSwap's USD market.
+NETWORK = "reto"
+CURRENCY = "USD"
 
 
 class HavenoSourceError(RuntimeError):

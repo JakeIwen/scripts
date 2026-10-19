@@ -182,7 +182,6 @@ class HavenoValidationAndMatchingTests(unittest.TestCase):
             (("3",), {"fee_pct": "20.01"}),
             (("3",), {"fee_pct": "0.001"}),
             (("3",), {"payment_method": "zelle"}),
-            (("3",), {"currency": "US"}),
             (("3",), {"min_xmr": "2", "max_xmr": "1"}),
             (("3",), {"min_xmr": "0.0000000000001"}),
             (("3",), {"title": "bad\ntitle"}),
@@ -348,7 +347,7 @@ class HavenoStoreAndServiceTests(unittest.TestCase):
         self.assertEqual(failed["offer_count"], 4)
         self.assertEqual(failed["reference_price"], "581.56")
 
-    def test_market_data_is_fetched_once_per_currency(self):
+    def test_market_data_is_fetched_once_per_run(self):
         watches = [self.add(), self.add(threshold="4")]
         calls = []
 

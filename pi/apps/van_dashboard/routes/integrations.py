@@ -204,14 +204,13 @@ def api_price_checks_haveno_add():
         "threshold_pct",
         "fee_pct",
         "payment_method",
-        "currency",
         "min_xmr",
         "max_xmr",
         "title",
     )
     if not _exact_form(fields):
         return api_error(
-            "Haveno watch requires threshold, fee, payment method, currency, min XMR, max XMR, and title",
+            "Haveno watch requires threshold, fee, payment method, min XMR, max XMR, and title",
             400,
         )
     try:
@@ -230,14 +229,13 @@ def api_price_checks_haveno_edit():
         "threshold_pct",
         "fee_pct",
         "payment_method",
-        "currency",
         "min_xmr",
         "max_xmr",
         "title",
     )
     if not _exact_form(fields) or not request.form["id"].isdigit():
         return api_error(
-            "Haveno watch edit requires ID, threshold, fee, payment method, currency, min XMR, max XMR, and title",
+            "Haveno watch edit requires ID, threshold, fee, payment method, min XMR, max XMR, and title",
             400,
         )
     try:

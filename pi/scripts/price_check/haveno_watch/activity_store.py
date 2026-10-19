@@ -6,12 +6,10 @@ import sqlite3
 import time
 from decimal import Decimal, InvalidOperation
 
-from .source import HavenoOffer, HavenoTrade
+from .source import CURRENCY, NETWORK, HavenoOffer, HavenoTrade
 from .store import decimal_text, price_text
 
 
-NETWORK = "reto"
-CURRENCY = "USD"
 PAYMENT_METHOD = "ZELLE"
 WINDOW_DAYS = (7, 30)
 MATCH_XMR_TOLERANCE = Decimal("0.0001")

@@ -7,12 +7,11 @@ import sys
 import time
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
-from .source import HavenoMarket, HavenoSourceError, fetch_market
+from .source import CURRENCY, NETWORK, HavenoMarket, HavenoSourceError, fetch_market
 from .store import HavenoStore, HavenoStoreError, decimal_text, percent_text, price_text, method_title
 
 
 PAYMENT_METHOD = re.compile(r"^[A-Z][A-Z0-9_]{1,39}$")
-CURRENCY = re.compile(r"^[A-Z]{3}$")
 
 
 class HavenoWatchError(RuntimeError):
@@ -56,7 +55,6 @@ def validate_watch(
     *,
     fee_pct: str = "0",
     payment_method: str = "ZELLE",
-    currency: str = "USD",
     min_xmr: str | None = None,
     max_xmr: str | None = None,
     title: str = "",
@@ -84,15 +82,13 @@ def validate_watch(
         raise HavenoWatchError("minimum XMR cannot exceed maximum XMR")
     if not PAYMENT_METHOD.fullmatch(payment_method):
         raise HavenoWatchError("payment method must be 2-40 uppercase letters, digits, or underscores")
-    if not CURRENCY.fullmatch(currency):
-        raise HavenoWatchError("currency must be exactly three uppercase letters")
     if any(character in title for character in ("\t", "\r", "\n")):
         raise HavenoWatchError("title cannot contain tabs or newlines")
     if len(title) > 160:
         raise HavenoWatchError("title must be 160 characters or fewer")
     return {
-        "network": "reto",
-        "currency": currency,
+        "network": NETWORK,
+        "currency": CURRENCY,
         "payment_method": payment_method,
         "threshold_pct": percent_text(threshold),
         "fee_pct": percent_text(fee),
@@ -157,9 +153,8 @@ def _age_text(offered_at: int, now: int) -> str:
 def notification(watch: dict, offers: list[dict], *, now: int) -> tuple[str, str]:
     best = offers[0]
     vs_market = _signed_short_percent(best["vs_market_pct"])
-    currency_prefix = "$" if watch["currency"] == "USD" else f"{watch['currency']} "
     title = (
-        f"XMR {vs_market}% · {currency_prefix}{best['price']} "
+        f"XMR {vs_market}% · ${best['price']} "
         f"{method_title(watch['payment_method'])} ({len(offers)} new)"
     )
     lines = []
@@ -172,8 +167,8 @@ def notification(watch: dict, offers: list[dict], *, now: int) -> tuple[str, str
             else f"{offer['min_xmr']}–{offer['max_xmr']}"
         )
         line = (
-            f"{currency_prefix}{offer['price']} ({offer_vs_market}% vs "
-            f"{currency_prefix}{watch['reference_price']}) · {xmr_range} XMR · "
+            f"${offer['price']} ({offer_vs_market}% vs "
+            f"${watch['reference_price']}) · {xmr_range} XMR · "
             f"listed {_age_text(offer['offered_at'], now)} ago"
         )
         if include_fee:
