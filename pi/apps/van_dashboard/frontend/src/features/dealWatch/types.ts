@@ -90,8 +90,8 @@ export interface DealWatchHavenoWatch {
   paymentMethod: string;
   thresholdPct: string;
   feePct: string;
-  minXmr: string | null;
-  maxXmr: string | null;
+  minUsd: string | null;
+  maxUsd: string | null;
   title: string | null;
   displayTitle: string;
   marketUrl: string;
@@ -203,8 +203,8 @@ export interface DealWatchHavenoDraft {
   thresholdPct: string;
   feePct: string;
   paymentMethod: string;
-  minXmr: string;
-  maxXmr: string;
+  minUsd: string;
+  maxUsd: string;
   title: string;
 }
 

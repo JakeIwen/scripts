@@ -17,8 +17,8 @@ CREATE TABLE IF NOT EXISTS haveno_watches (
     payment_method TEXT NOT NULL,
     threshold_pct TEXT NOT NULL,
     fee_pct TEXT NOT NULL,
-    min_xmr TEXT,
-    max_xmr TEXT,
+    min_usd TEXT,
+    max_usd TEXT,
     title TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS haveno_watches (
 CREATE UNIQUE INDEX IF NOT EXISTS haveno_watches_configuration
     ON haveno_watches(
         network, currency, payment_method, threshold_pct, fee_pct,
-        IFNULL(min_xmr, ''), IFNULL(max_xmr, '')
+        IFNULL(min_usd, ''), IFNULL(max_usd, '')
     );
 CREATE TABLE IF NOT EXISTS haveno_offers (
     watch_id INTEGER NOT NULL
@@ -113,6 +113,21 @@ def default_display_title(row: sqlite3.Row) -> str:
     )
 
 
+def _migrate_size_filters(connection: sqlite3.Connection) -> None:
+    """Replace the original XMR size filters with USD ones."""
+    columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(haveno_watches)")
+    }
+    if "min_xmr" not in columns:
+        return
+    with connection:
+        connection.execute("DROP INDEX IF EXISTS haveno_watches_configuration")
+        connection.execute("ALTER TABLE haveno_watches RENAME COLUMN min_xmr TO min_usd")
+        connection.execute("ALTER TABLE haveno_watches RENAME COLUMN max_xmr TO max_usd")
+        # An XMR amount has no fixed USD equivalent, so old size filters are cleared.
+        connection.execute("UPDATE haveno_watches SET min_usd=NULL, max_usd=NULL")
+
+
 class HavenoStore:
     def __init__(self, path: Path, *, clock=time.time):
         self.path = Path(path)
@@ -127,6 +142,7 @@ class HavenoStore:
         self.connection.execute("PRAGMA foreign_keys=ON")
         self.connection.execute("PRAGMA busy_timeout=15000")
         self.connection.execute("PRAGMA journal_mode=WAL")
+        _migrate_size_filters(self.connection)
         self.connection.executescript(SCHEMA)
         self.connection.commit()
         os.chmod(self.path, 0o600)
@@ -209,8 +225,8 @@ class HavenoStore:
             "payment_method": row["payment_method"],
             "threshold_pct": row["threshold_pct"],
             "fee_pct": row["fee_pct"],
-            "min_xmr": row["min_xmr"],
-            "max_xmr": row["max_xmr"],
+            "min_usd": row["min_usd"],
+            "max_usd": row["max_usd"],
             "title": row["title"],
             "display_title": row["title"] or default_display_title(row),
             "market_url": f"https://haveno.markets/market/{row['currency']}",
@@ -254,8 +270,8 @@ class HavenoStore:
             configuration["payment_method"],
             configuration["threshold_pct"],
             configuration["fee_pct"],
-            configuration["min_xmr"],
-            configuration["max_xmr"],
+            configuration["min_usd"],
+            configuration["max_usd"],
             configuration["title"],
         )
 
@@ -266,7 +282,7 @@ class HavenoStore:
                 """
                 INSERT INTO haveno_watches
                     (network, currency, payment_method, threshold_pct, fee_pct,
-                     min_xmr, max_xmr, title, created_at, updated_at)
+                     min_usd, max_usd, title, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (*self._values(configuration), now, now),
@@ -291,8 +307,8 @@ class HavenoStore:
                 "payment_method",
                 "threshold_pct",
                 "fee_pct",
-                "min_xmr",
-                "max_xmr",
+                "min_usd",
+                "max_usd",
             )
         )
         now = int(self.clock())
@@ -302,7 +318,7 @@ class HavenoStore:
                     """
                     UPDATE haveno_watches
                     SET network=?, currency=?, payment_method=?, threshold_pct=?,
-                        fee_pct=?, min_xmr=?, max_xmr=?, title=?, updated_at=?
+                        fee_pct=?, min_usd=?, max_usd=?, title=?, updated_at=?
                     WHERE id=?
                     """,
                     (*values, now, watch_id),

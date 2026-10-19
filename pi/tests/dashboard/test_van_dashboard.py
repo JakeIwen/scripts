@@ -562,8 +562,8 @@ class PriceCheckApiTests(unittest.TestCase):
                     "threshold_pct": "-2.50",
                     "fee_pct": "0.50",
                     "payment_method": "ZELLE",
-                    "min_xmr": "2",
-                    "max_xmr": "10",
+                    "min_usd": "2",
+                    "max_usd": "10",
                     "title": "Cash offer",
                 },
                 [
@@ -573,9 +573,9 @@ class PriceCheckApiTests(unittest.TestCase):
                     "0.50",
                     "--payment-method",
                     "ZELLE",
-                    "--min-xmr",
+                    "--min-usd",
                     "2",
-                    "--max-xmr",
+                    "--max-usd",
                     "10",
                     "--title",
                     "Cash offer",
@@ -588,8 +588,8 @@ class PriceCheckApiTests(unittest.TestCase):
                     "threshold_pct": "4.00",
                     "fee_pct": "",
                     "payment_method": "SEPA",
-                    "min_xmr": "",
-                    "max_xmr": "",
+                    "min_usd": "",
+                    "max_usd": "",
                     "title": "",
                 },
                 [
@@ -651,8 +651,8 @@ class PriceCheckApiTests(unittest.TestCase):
             "threshold_pct": "3",
             "fee_pct": "0",
             "payment_method": "ZELLE",
-            "min_xmr": "",
-            "max_xmr": "",
+            "min_usd": "",
+            "max_usd": "",
             "title": "",
         }
         valid_edit = {"id": "7", **valid_add}
@@ -695,8 +695,8 @@ class PriceCheckApiTests(unittest.TestCase):
         controller = mock.Mock()
         runtime.price_checks = controller
         routes = (
-            ("haveno/add", {"threshold_pct": "3", "fee_pct": "", "payment_method": "", "min_xmr": "", "max_xmr": "", "title": ""}, "add_haveno"),
-            ("haveno/edit", {"id": "7", "threshold_pct": "3", "fee_pct": "", "payment_method": "", "min_xmr": "", "max_xmr": "", "title": ""}, "edit_haveno"),
+            ("haveno/add", {"threshold_pct": "3", "fee_pct": "", "payment_method": "", "min_usd": "", "max_usd": "", "title": ""}, "add_haveno"),
+            ("haveno/edit", {"id": "7", "threshold_pct": "3", "fee_pct": "", "payment_method": "", "min_usd": "", "max_usd": "", "title": ""}, "edit_haveno"),
             ("haveno/remove", {"id": "7"}, "remove_haveno"),
             ("haveno/mute", {"id": "7", "days": "0"}, "mute_haveno"),
         )

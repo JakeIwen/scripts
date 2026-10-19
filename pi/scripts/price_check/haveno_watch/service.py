@@ -55,8 +55,8 @@ def validate_watch(
     *,
     fee_pct: str = "0",
     payment_method: str = "ZELLE",
-    min_xmr: str | None = None,
-    max_xmr: str | None = None,
+    min_usd: str | None = None,
+    max_usd: str | None = None,
     title: str = "",
 ) -> dict:
     threshold = _parse_decimal(
@@ -76,10 +76,10 @@ def validate_watch(
         places=2,
     )
     assert threshold is not None and fee is not None
-    minimum = _parse_decimal(min_xmr, "minimum XMR", places=12)
-    maximum = _parse_decimal(max_xmr, "maximum XMR", places=12)
+    minimum = _parse_decimal(min_usd, "minimum USD", places=2)
+    maximum = _parse_decimal(max_usd, "maximum USD", places=2)
     if minimum is not None and maximum is not None and minimum > maximum:
-        raise HavenoWatchError("minimum XMR cannot exceed maximum XMR")
+        raise HavenoWatchError("minimum USD cannot exceed maximum USD")
     if not PAYMENT_METHOD.fullmatch(payment_method):
         raise HavenoWatchError("payment method must be 2-40 uppercase letters, digits, or underscores")
     if any(character in title for character in ("\t", "\r", "\n")):
@@ -92,24 +92,25 @@ def validate_watch(
         "payment_method": payment_method,
         "threshold_pct": percent_text(threshold),
         "fee_pct": percent_text(fee),
-        "min_xmr": decimal_text(minimum),
-        "max_xmr": decimal_text(maximum),
+        "min_usd": decimal_text(minimum),
+        "max_usd": decimal_text(maximum),
         "title": title.strip() or None,
     }
 
 
 def matching_offers(watch: dict, market: HavenoMarket) -> list[dict]:
-    minimum = Decimal(watch["min_xmr"]) if watch["min_xmr"] is not None else None
-    maximum = Decimal(watch["max_xmr"]) if watch["max_xmr"] is not None else None
+    minimum = Decimal(watch["min_usd"]) if watch["min_usd"] is not None else None
+    maximum = Decimal(watch["max_usd"]) if watch["max_usd"] is not None else None
     threshold = Decimal(watch["threshold_pct"])
     fee = Decimal(watch["fee_pct"])
     filtered = []
     for offer in market.offers:
         if offer.payment_method != watch["payment_method"]:
             continue
-        if minimum is not None and offer.max_xmr < minimum:
+        # Size filters compare the offer's dollar range at its listed price.
+        if minimum is not None and offer.max_xmr * offer.price < minimum:
             continue
-        if maximum is not None and offer.min_xmr > maximum:
+        if maximum is not None and offer.min_xmr * offer.price > maximum:
             continue
         # Match on the same two-decimal figure the dashboard and alert display.
         vs_market = (
@@ -150,6 +151,12 @@ def _age_text(offered_at: int, now: int) -> str:
     return f"{seconds // (24 * 60 * 60)}d"
 
 
+def _usd_range(offer: dict) -> str:
+    price = Decimal(offer["price"])
+    low, high = (f"${Decimal(offer[key]) * price:,.0f}" for key in ("min_xmr", "max_xmr"))
+    return low if low == high else f"{low}–{high}"
+
+
 def notification(watch: dict, offers: list[dict], *, now: int) -> tuple[str, str]:
     best = offers[0]
     vs_market = _signed_short_percent(best["vs_market_pct"])
@@ -161,14 +168,9 @@ def notification(watch: dict, offers: list[dict], *, now: int) -> tuple[str, str
     include_fee = Decimal(watch["fee_pct"]) > 0
     for offer in offers[:5]:
         offer_vs_market = _signed_short_percent(offer["vs_market_pct"])
-        xmr_range = (
-            offer["min_xmr"]
-            if offer["min_xmr"] == offer["max_xmr"]
-            else f"{offer['min_xmr']}–{offer['max_xmr']}"
-        )
         line = (
             f"${offer['price']} ({offer_vs_market}% vs "
-            f"${watch['reference_price']}) · {xmr_range} XMR · "
+            f"${watch['reference_price']}) · {_usd_range(offer)} · "
             f"listed {_age_text(offer['offered_at'], now)} ago"
         )
         if include_fee:

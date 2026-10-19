@@ -19,8 +19,8 @@ const havenoDraft: DealWatchHavenoDraft = {
   thresholdPct: '-2.50',
   feePct: '0',
   paymentMethod: 'ZELLE',
-  minXmr: '',
-  maxXmr: '',
+  minUsd: '',
+  maxUsd: '',
   title: '',
 };
 
@@ -112,7 +112,7 @@ describe('Haveno decoder', () => {
       ['best_price', '566.3'],
       ['best_vs_market_pct', '+2.63'],
       ['fee_pct', '-0.01'],
-      ['max_xmr', '10.0'],
+      ['max_usd', '10.0'],
       ['reference_at', 1_725_100_300.5],
       ['reference_source', 'coinbase'],
       ['market_url', 'javascript:alert(1)'],
@@ -127,27 +127,27 @@ describe('Haveno decoder', () => {
 });
 
 describe('Haveno API', () => {
-  it('posts exactly the seven add fields, including a negative threshold', async () => {
+  it('posts exactly the six add fields, including a negative threshold', async () => {
     await addDealWatchHavenoWatch(havenoDraft);
     expect(postForm).toHaveBeenCalledWith('/api/price-checks/haveno/add', {
       threshold_pct: '-2.50',
       fee_pct: '0',
       payment_method: 'ZELLE',
-      min_xmr: '',
-      max_xmr: '',
+      min_usd: '',
+      max_usd: '',
       title: '',
     });
   });
 
-  it('posts the ID plus the same seven fields for edits', async () => {
+  it('posts the ID plus the same six fields for edits', async () => {
     await editDealWatchHavenoWatch(21, havenoDraft);
     expect(postForm).toHaveBeenCalledWith('/api/price-checks/haveno/edit', {
       id: '21',
       threshold_pct: '-2.50',
       fee_pct: '0',
       payment_method: 'ZELLE',
-      min_xmr: '',
-      max_xmr: '',
+      min_usd: '',
+      max_usd: '',
       title: '',
     });
   });
@@ -196,6 +196,7 @@ describe('Haveno views', () => {
     expect(screen.getByText('+0.38% vs market')).toBeInTheDocument();
     expect(screen.getByText('+0.88% effective')).toBeInTheDocument();
     expect(screen.getByText('Match')).toBeInTheDocument();
+    expect(screen.getByText(/^\$3,398–\$5,663 \(6–10 XMR\) · Listed/)).toBeInTheDocument();
   });
 
   it('loads an existing watch into the form and submits the edit', async () => {
@@ -224,8 +225,8 @@ describe('Haveno views', () => {
         thresholdPct: '-4.25',
         feePct: '0.50',
         paymentMethod: 'ZELLE',
-        minXmr: '',
-        maxXmr: '10',
+        minUsd: '',
+        maxUsd: '5000',
         title: '',
       }),
     );
@@ -250,8 +251,8 @@ describe('Haveno views', () => {
         thresholdPct: '-1.25',
         feePct: '0',
         paymentMethod: 'ZELLE',
-        minXmr: '',
-        maxXmr: '',
+        minUsd: '',
+        maxUsd: '',
         title: '',
       }),
     );

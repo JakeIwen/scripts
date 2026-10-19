@@ -133,8 +133,8 @@ function havenoFields(draft: DealWatchHavenoDraft): Record<string, string> {
     threshold_pct: draft.thresholdPct,
     fee_pct: draft.feePct,
     payment_method: draft.paymentMethod,
-    min_xmr: draft.minXmr,
-    max_xmr: draft.maxXmr,
+    min_usd: draft.minUsd,
+    max_usd: draft.maxUsd,
     title: draft.title,
   };
 }

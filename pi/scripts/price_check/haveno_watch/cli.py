@@ -32,8 +32,8 @@ def _watch_options(parser) -> None:
     parser.add_argument("threshold_pct")
     parser.add_argument("--fee-pct", default="0")
     parser.add_argument("--payment-method", default="ZELLE")
-    parser.add_argument("--min-xmr")
-    parser.add_argument("--max-xmr")
+    parser.add_argument("--min-usd")
+    parser.add_argument("--max-usd")
     parser.add_argument("--title", default="")
 
 
@@ -62,8 +62,8 @@ def _configuration(args) -> dict:
         args.threshold_pct,
         fee_pct=args.fee_pct,
         payment_method=args.payment_method,
-        min_xmr=args.min_xmr,
-        max_xmr=args.max_xmr,
+        min_usd=args.min_usd,
+        max_usd=args.max_usd,
         title=args.title,
     )
 

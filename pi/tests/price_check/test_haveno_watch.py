@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 import os
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -30,7 +31,7 @@ from pi.scripts.price_check.haveno_watch.source import (
     HavenoSourceError,
     fetch_market,
 )
-from pi.scripts.price_check.haveno_watch.store import HavenoStore
+from pi.scripts.price_check.haveno_watch.store import HavenoStore, HavenoStoreError
 
 
 ROOT = Path(__file__).parents[3]
@@ -157,17 +158,18 @@ class HavenoValidationAndMatchingTests(unittest.TestCase):
         self.assertEqual(result["vs_market_pct"], Decimal("0.00"))
         self.assertTrue(result["matches"])
 
-    def test_size_filters_use_max_for_minimum_and_min_for_maximum(self):
-        base = validate_watch("3", min_xmr="3", max_xmr="8")
+    def test_usd_size_filters_use_max_for_minimum_and_min_for_maximum(self):
+        # Zelle offers span $3,378-$5,631, $1,162, $155 and $674-$7,777.
+        base = validate_watch("3", min_usd="1000", max_usd="3000")
         offers = matching_offers(base, market())
-        self.assertEqual([offer["max_xmr"] for offer in offers], [Decimal("10"), Decimal("11.65")])
+        self.assertEqual([offer["max_xmr"] for offer in offers], [Decimal("2.001"), Decimal("11.65")])
 
-        too_small = validate_watch("3", min_xmr="10.1")
+        too_small = validate_watch("3", min_usd="6000")
         self.assertEqual(
             [offer["max_xmr"] for offer in matching_offers(too_small, market())],
             [Decimal("11.65")],
         )
-        too_large_minimum = validate_watch("3", max_xmr="5")
+        too_large_minimum = validate_watch("3", max_usd="3000")
         self.assertNotIn(
             Decimal("10"),
             [offer["max_xmr"] for offer in matching_offers(too_large_minimum, market())],
@@ -182,8 +184,8 @@ class HavenoValidationAndMatchingTests(unittest.TestCase):
             (("3",), {"fee_pct": "20.01"}),
             (("3",), {"fee_pct": "0.001"}),
             (("3",), {"payment_method": "zelle"}),
-            (("3",), {"min_xmr": "2", "max_xmr": "1"}),
-            (("3",), {"min_xmr": "0.0000000000001"}),
+            (("3",), {"min_usd": "2", "max_usd": "1"}),
+            (("3",), {"min_usd": "0.001"}),
             (("3",), {"title": "bad\ntitle"}),
         )
         for arguments, keywords in invalid:
@@ -212,21 +214,67 @@ class HavenoStoreAndServiceTests(unittest.TestCase):
     def add(self, threshold="3", **options):
         return self.store.add_watch(validate_watch(threshold, **options))
 
+    def test_xmr_size_filters_migrate_to_cleared_usd_filters(self):
+        self.store.close()
+        connection = sqlite3.connect(self.db)
+        with connection:
+            connection.executescript(
+                """
+                DROP TABLE haveno_offers;
+                DROP TABLE haveno_checks;
+                DROP TABLE haveno_watches;
+                CREATE TABLE haveno_watches (
+                    id INTEGER PRIMARY KEY,
+                    network TEXT NOT NULL DEFAULT 'reto',
+                    currency TEXT NOT NULL,
+                    payment_method TEXT NOT NULL,
+                    threshold_pct TEXT NOT NULL,
+                    fee_pct TEXT NOT NULL,
+                    min_xmr TEXT,
+                    max_xmr TEXT,
+                    title TEXT,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    last_checked_at INTEGER,
+                    last_status TEXT NOT NULL DEFAULT 'never',
+                    last_error TEXT,
+                    notify_muted_until INTEGER
+                );
+                CREATE UNIQUE INDEX haveno_watches_configuration ON haveno_watches(
+                    network, currency, payment_method, threshold_pct, fee_pct,
+                    IFNULL(min_xmr, ''), IFNULL(max_xmr, '')
+                );
+                INSERT INTO haveno_watches
+                    (currency, payment_method, threshold_pct, fee_pct, min_xmr,
+                     max_xmr, created_at, updated_at)
+                VALUES ('USD', 'ZELLE', '1.00', '0.00', '1', '3', 1, 1);
+                """
+            )
+        connection.close()
+
+        self.store = HavenoStore(self.db, clock=lambda: NOW)
+        [watch] = self.store.list_watches()
+        self.assertIsNone(watch["min_usd"])
+        self.assertIsNone(watch["max_usd"])
+        with self.assertRaises(HavenoStoreError):
+            self.add("1")
+        self.assertEqual(self.add("1", max_usd="1500")["max_usd"], "1500")
+
     def test_private_database_duplicate_and_json_shape(self):
-        watch = self.add(max_xmr="10.000")
+        watch = self.add(max_usd="10000.00")
         self.assertEqual(self.db.parent.stat().st_mode & 0o777, 0o700)
         self.assertEqual(self.db.stat().st_mode & 0o777, 0o600)
         self.assertEqual(watch["threshold_pct"], "3.00")
         self.assertEqual(watch["fee_pct"], "0.00")
-        self.assertEqual(watch["max_xmr"], "10")
+        self.assertEqual(watch["max_usd"], "10000")
         self.assertEqual(watch["display_title"], "XMR · Zelle · ≤+3.00% vs market")
         self.assertIsNone(watch["reference_price"])
         with self.assertRaisesRegex(Exception, "already configured"):
-            self.add(max_xmr="10")
+            self.add(max_usd="10000")
 
     def test_default_display_title_formats_sign_and_fee(self):
         negative = self.add(threshold="-2", fee_pct="0.5")
-        zero = self.add(threshold="0", max_xmr="9")
+        zero = self.add(threshold="0", max_usd="9000")
         self.assertEqual(
             negative["display_title"],
             "XMR · Zelle · ≤-2.00% vs market (+0.50% fee)",
@@ -248,7 +296,7 @@ class HavenoStoreAndServiceTests(unittest.TestCase):
         self.assertEqual(len(notifications), 1)
         self.assertIn("XMR -3.18% · $563.08 Zelle (2 new)", notifications[0][0])
         self.assertIn(
-            "$563.08 (-3.18% vs $581.56) · 6–10 XMR",
+            "$563.08 (-3.18% vs $581.56) · $3,378–$5,631",
             notifications[0][1],
         )
         self.assertIn("· -2.68% with fee", notifications[0][1])
@@ -301,7 +349,7 @@ class HavenoStoreAndServiceTests(unittest.TestCase):
         )
         self.assertEqual(len(sent), 1)
 
-        second = self.add(threshold="3", max_xmr="9")
+        second = self.add(threshold="3", max_usd="9000")
         check_watch(self.store, second, market(), notify=False, notify_sender=lambda *args: sent.append(args))
         self.assertEqual(len(sent), 1)
         check_watch(
@@ -425,7 +473,7 @@ class HavenoCliTests(unittest.TestCase):
         return status, json.loads(stdout.getvalue()), stderr.getvalue()
 
     def test_add_list_check_and_remove_json_contract(self):
-        status, payload, _ = self.run_cli("haveno-add", "3", "--max-xmr", "10")
+        status, payload, _ = self.run_cli("haveno-add", "3", "--max-usd", "10000")
         self.assertEqual(status, 0)
         self.assertIn("haveno_watch", payload)
         self.assertEqual(payload["haveno_summary"]["count"], 1)
@@ -436,7 +484,7 @@ class HavenoCliTests(unittest.TestCase):
         watch = payload["haveno_watches"][0]
         expected = {
             "id", "network", "currency", "payment_method", "threshold_pct",
-            "fee_pct", "min_xmr", "max_xmr", "title", "display_title", "market_url",
+            "fee_pct", "min_usd", "max_usd", "title", "display_title", "market_url",
             "created_at", "updated_at", "last_checked_at", "last_status",
             "last_error", "notify_muted_until", "notifications_muted",
             "reference_price", "reference_source", "reference_at", "best_price",

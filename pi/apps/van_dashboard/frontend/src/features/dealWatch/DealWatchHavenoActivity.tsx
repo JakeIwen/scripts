@@ -1,6 +1,6 @@
 import { StatusPill, type StatusTone } from '../../components/StatusPill';
 import { formatDuration } from '../../utils/format';
-import { checkAge, formatUnixDateTime, havenoPriceLabel } from './presentation';
+import { checkAge, formatUnixDateTime, havenoPriceLabel, havenoSizeLabel } from './presentation';
 import type {
   DealWatchHavenoActivity,
   DealWatchHavenoActivityOffer,
@@ -11,12 +11,6 @@ function summaryFigure(activity: DealWatchHavenoActivity): string {
   if (activity.trackingSince === null) return 'Not collected yet';
   const week = activity.windows[0];
   return `${week.taken} taken · ${week.withdrawn} withdrawn (7d)`;
-}
-
-function xmrRange(offer: DealWatchHavenoActivityOffer): string {
-  return offer.minXmr === offer.maxXmr
-    ? `${offer.minXmr} XMR`
-    : `${offer.minXmr}–${offer.maxXmr} XMR`;
 }
 
 function outcomePresentation(offer: DealWatchHavenoActivityOffer): {
@@ -82,7 +76,7 @@ function RecentOffer({
       <div className="deal-watch-activity-offer__heading">
         <div>
           <strong>{havenoPriceLabel(offer.price, currency)}</strong>
-          <span>{xmrRange(offer)}</span>
+          <span>{havenoSizeLabel(offer.minXmr, offer.maxXmr, offer.price)}</span>
         </div>
         <StatusPill tone={outcome.tone} dot={false}>
           {outcome.label}

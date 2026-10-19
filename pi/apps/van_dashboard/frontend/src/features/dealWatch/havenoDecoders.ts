@@ -24,6 +24,7 @@ const REFERENCE_SOURCES = [
 const PRICE_PATTERN = /^\d+\.\d{2}$/;
 const PCT_PATTERN = /^-?\d+\.\d{2}$/;
 const XMR_PATTERN = /^(?:0\.\d{0,11}[1-9]|[1-9]\d*(?:\.\d{0,11}[1-9])?)$/;
+const USD_PATTERN = /^(?:0\.\d?[1-9]|[1-9]\d*(?:\.\d?[1-9])?)$/;
 
 function oneOf<T extends string>(value: unknown, choices: readonly T[], label: string): T {
   const text = stringValue(value, label);
@@ -98,6 +99,10 @@ function xmrString(value: unknown, label: string): string {
 
 function nullableXmrString(value: unknown, label: string): string | null {
   return value === null ? null : xmrString(value, label);
+}
+
+function nullableUsdString(value: unknown, label: string): string | null {
+  return value === null ? null : decimalString(value, USD_PATTERN, label);
 }
 
 function decodeOffer(value: unknown, index: number, parentLabel: string): DealWatchHavenoOffer {
@@ -203,10 +208,10 @@ function decodeWatch(value: unknown, index: number): DealWatchHavenoWatch {
   if (Number(feePct) < 0 || Number(feePct) > 20) {
     throw new TypeError(`${label}.fee_pct must be between 0 and 20`);
   }
-  const minXmr = nullableXmrString(item.min_xmr, `${label}.min_xmr`);
-  const maxXmr = nullableXmrString(item.max_xmr, `${label}.max_xmr`);
-  if (minXmr !== null && maxXmr !== null && Number(minXmr) > Number(maxXmr)) {
-    throw new TypeError(`${label}.min_xmr must not exceed max_xmr`);
+  const minUsd = nullableUsdString(item.min_usd, `${label}.min_usd`);
+  const maxUsd = nullableUsdString(item.max_usd, `${label}.max_usd`);
+  if (minUsd !== null && maxUsd !== null && Number(minUsd) > Number(maxUsd)) {
+    throw new TypeError(`${label}.min_usd must not exceed max_usd`);
   }
   const title = nullableNonemptyString(item.title, `${label}.title`);
   if (title !== null && (title.length > 160 || /[\t\r\n]/.test(title))) {
@@ -223,8 +228,8 @@ function decodeWatch(value: unknown, index: number): DealWatchHavenoWatch {
     ),
     thresholdPct,
     feePct,
-    minXmr,
-    maxXmr,
+    minUsd,
+    maxUsd,
     title,
     displayTitle: nonemptyString(item.display_title, `${label}.display_title`),
     marketUrl: decodeExternalHttpUrl(item.market_url, `${label}.market_url`),

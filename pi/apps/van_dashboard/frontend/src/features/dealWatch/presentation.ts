@@ -53,6 +53,16 @@ export function havenoPriceLabel(price: string, currency: string): string {
   return currency === 'USD' ? `$${price}` : `${price} ${currency}`;
 }
 
+function havenoDollars(xmr: string, price: string): string {
+  return `$${Math.round(Number(xmr) * Number(price)).toLocaleString('en-US')}`;
+}
+
+/** Offer size in dollars at its listed price, with the XMR amounts alongside. */
+export function havenoSizeLabel(minXmr: string, maxXmr: string, price: string): string {
+  if (minXmr === maxXmr) return `${havenoDollars(minXmr, price)} (${minXmr} XMR)`;
+  return `${havenoDollars(minXmr, price)}–${havenoDollars(maxXmr, price)} (${minXmr}–${maxXmr} XMR)`;
+}
+
 export function havenoPercentLabel(value: string): string {
   const number = Number(value);
   const magnitude = Math.abs(number).toFixed(2);

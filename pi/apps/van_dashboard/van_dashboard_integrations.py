@@ -32,14 +32,14 @@ class PriceCheckCommandError(RuntimeError):
     pass
 
 
-def _haveno_options(fee_pct, payment_method, min_xmr, max_xmr, title):
+def _haveno_options(fee_pct, payment_method, min_usd, max_usd, title):
     """Omit blank fields so the CLI applies its defaults (edits replace them)."""
     arguments = []
     for option, value in (
         ("--fee-pct", fee_pct),
         ("--payment-method", payment_method),
-        ("--min-xmr", min_xmr),
-        ("--max-xmr", max_xmr),
+        ("--min-usd", min_usd),
+        ("--max-usd", max_usd),
         ("--title", title),
     ):
         if value:
@@ -135,15 +135,15 @@ class PriceCheckController:
         threshold_pct,
         fee_pct="",
         payment_method="",
-        min_xmr="",
-        max_xmr="",
+        min_usd="",
+        max_usd="",
         title="",
     ):
         return self._run(
             "haveno-add",
             threshold_pct,
             *_haveno_options(
-                fee_pct, payment_method, min_xmr, max_xmr, title
+                fee_pct, payment_method, min_usd, max_usd, title
             ),
             timeout=20,
         )
@@ -154,8 +154,8 @@ class PriceCheckController:
         threshold_pct,
         fee_pct="",
         payment_method="",
-        min_xmr="",
-        max_xmr="",
+        min_usd="",
+        max_usd="",
         title="",
     ):
         return self._run(
@@ -163,7 +163,7 @@ class PriceCheckController:
             watch_id,
             threshold_pct,
             *_haveno_options(
-                fee_pct, payment_method, min_xmr, max_xmr, title
+                fee_pct, payment_method, min_usd, max_usd, title
             ),
             timeout=20,
         )

@@ -15,8 +15,8 @@ const EMPTY_DRAFT: DealWatchHavenoDraft = {
   thresholdPct: '',
   feePct: '0',
   paymentMethod: 'ZELLE',
-  minXmr: '',
-  maxXmr: '',
+  minUsd: '',
+  maxUsd: '',
   title: '',
 };
 
@@ -98,32 +98,32 @@ function HavenoOptionalFields({
     <>
       <label htmlFor={minId}>
         <span>
-          Minimum XMR <small>optional</small>
+          Min USD per trade <small>optional</small>
         </span>
         <input
           id={minId}
           type="number"
-          min="0.000000000001"
-          step="any"
+          min="0.01"
+          step="0.01"
           inputMode="decimal"
-          value={draft.minXmr}
+          value={draft.minUsd}
           disabled={disabled}
-          onChange={(event) => update('minXmr', event.target.value)}
+          onChange={(event) => update('minUsd', event.target.value)}
         />
       </label>
       <label htmlFor={maxId}>
         <span>
-          Maximum XMR <small>optional</small>
+          Max USD per trade <small>optional</small>
         </span>
         <input
           id={maxId}
           type="number"
-          min="0.000000000001"
-          step="any"
+          min="0.01"
+          step="0.01"
           inputMode="decimal"
-          value={draft.maxXmr}
+          value={draft.maxUsd}
           disabled={disabled}
-          onChange={(event) => update('maxXmr', event.target.value)}
+          onChange={(event) => update('maxUsd', event.target.value)}
         />
       </label>
       <label htmlFor={titleId}>
@@ -160,8 +160,8 @@ export function DealWatchHavenoForm({
             thresholdPct: editing.thresholdPct,
             feePct: editing.feePct,
             paymentMethod: editing.paymentMethod,
-            minXmr: editing.minXmr ?? '',
-            maxXmr: editing.maxXmr ?? '',
+            minUsd: editing.minUsd ?? '',
+            maxUsd: editing.maxUsd ?? '',
             title: editing.title ?? '',
           }
         : EMPTY_DRAFT,
@@ -178,8 +178,8 @@ export function DealWatchHavenoForm({
       thresholdPct: draft.thresholdPct.trim(),
       feePct: draft.feePct.trim() || '0',
       paymentMethod: draft.paymentMethod.trim().toUpperCase(),
-      minXmr: draft.minXmr.trim(),
-      maxXmr: draft.maxXmr.trim(),
+      minUsd: draft.minUsd.trim(),
+      maxUsd: draft.maxUsd.trim(),
       title: draft.title.trim(),
     });
     if (saved && editing === null) setDraft(EMPTY_DRAFT);

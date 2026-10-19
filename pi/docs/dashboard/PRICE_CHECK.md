@@ -26,8 +26,10 @@ The dashboard's **Check all now** button does the same.
 Haveno watches read the public RetoSwap `XMR_USD` ask book (USD only) from
 `haveno.markets` and compare each offer with the fresh XMR reference price from
 Haveno's price node. A stale or unavailable price falls back to the midpoint
-of Kraken's XMR/USD bid and ask. Only asks with the configured payment method and XMR size range
-are considered. The listed percentage is
+of Kraken's XMR/USD bid and ask. Only asks with the configured payment method are
+considered; optional `--min-usd`/`--max-usd` limits (for example a Zelle sending
+limit) skip offers whose largest trade is below the minimum or whose smallest trade
+is above the maximum, both valued at the offer's listed price. The listed percentage is
 `100 × (offer price / reference price − 1)`, where positive means above market.
 The configured fee percentage is added to that figure, and a watch matches when
 the effective percentage is less than or equal to its signed threshold.
@@ -57,7 +59,7 @@ roughly ten-minute snapshots is not observed. Trade-feed failures preserve the
 last offer snapshot and appear as the activity error without failing watch checks.
 
 ```bash
-s price_check haveno-add 1 --fee-pct 0.5 --payment-method ZELLE --max-xmr 10
+s price_check haveno-add 1 --fee-pct 0.5 --payment-method ZELLE --max-usd 2000
 s price_check haveno-add -2.5
 s price_check haveno-check all --no-notify
 s price_check haveno-check 1

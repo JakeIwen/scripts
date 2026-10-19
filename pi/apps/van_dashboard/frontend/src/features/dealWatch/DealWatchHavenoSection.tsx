@@ -13,6 +13,7 @@ import {
   havenoPercentLabel,
   havenoPriceLabel as priceLabel,
   havenoReferenceSourceLabel,
+  havenoSizeLabel,
   havenoState,
 } from './presentation';
 import type {
@@ -28,13 +29,11 @@ export interface DealWatchHavenoSectionProps {
   controls: DealWatchControls;
 }
 
-function xmrRange(offer: DealWatchHavenoOffer): string {
+function sizeLabel(offer: DealWatchHavenoOffer): string {
   if (offer.minXmr === null && offer.maxXmr === null) return 'XMR amount unavailable';
   if (offer.minXmr === null) return `Up to ${offer.maxXmr} XMR`;
   if (offer.maxXmr === null) return `From ${offer.minXmr} XMR`;
-  return offer.minXmr === offer.maxXmr
-    ? `${offer.minXmr} XMR`
-    : `${offer.minXmr}–${offer.maxXmr} XMR`;
+  return havenoSizeLabel(offer.minXmr, offer.maxXmr, offer.price);
 }
 
 function HavenoOfferRow({
@@ -59,7 +58,7 @@ function HavenoOfferRow({
         )}
       </div>
       <small>
-        {xmrRange(offer)} · Listed {checkAge(offer.offeredAt)}
+        {sizeLabel(offer)} · Listed {checkAge(offer.offeredAt)}
       </small>
     </li>
   );
