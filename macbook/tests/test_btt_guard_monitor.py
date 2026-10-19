@@ -129,6 +129,7 @@ class GuardMonitorTests(unittest.TestCase):
         ]
         notification = alert_notification(AuditStatus.DRIFT, finding_counts(findings))
         rendered = notification.title + notification.message
+        self.assertIn("in Mac Panel (macpanel).", notification.message)
         for secret in secret_values:
             self.assertNotIn(secret, rendered)
 

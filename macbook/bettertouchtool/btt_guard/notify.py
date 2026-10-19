@@ -80,7 +80,7 @@ def alert_notification(
         lead = "The read-only configuration audit could not verify the configuration."
     else:
         raise ValueError(f"Cannot build an alert for audit status {status!r}")
-    message = f"{lead} {_count_summary(counts)} Review the local private audit report."
+    message = f"{lead} {_count_summary(counts)} Review the private audit report in Mac Panel (macpanel)."
     return GuardNotification(title=title, message=message, priority="high")
 
 

@@ -19,8 +19,9 @@ restore has run, so sessions closed on purpose afterwards stay closed.
 A managed crontab block snapshots every minute; it is tracked in
 macbook/crontab and pi/crontab_pi, so reinstalling either keeps it.
 `--cron off|on` pauses and resumes it, and reinstalls the block if a crontab
-lost it; `--cron` alone prints the status. Standard library only; runs on the
-MacBook (/usr/bin/python3 3.9) and the Pi.
+lost it; `--cron` alone prints the status. Add `--json` to `--cron` for one
+machine-readable status object. Standard library only; runs on the MacBook
+(/usr/bin/python3 3.9) and the Pi.
 """
 # codeshape: allow-size one file because the Pi runs it with `python3 -I` from
 # ~/scripts, where a sibling module isn't importable; Jacob approved up to 1000 lines.
@@ -738,7 +739,27 @@ def cron_block(tool: str = str(Path(__file__).resolve()), log: str = str(CRON_LO
     ]
 
 
-def cron(state: str | None, minutes: int) -> int:
+def _latest_snapshot(snapshots: list[dict]) -> tuple[dict | None, int | None]:
+    """Return the newest snapshot and its count of sessions open then."""
+    if not snapshots:
+        return None, None
+    latest = snapshots[0]
+    sessions_open = sum(s.last_seen == latest["taken_at"] for s in latest["sessions"])
+    return latest, sessions_open
+
+
+def _cron_status(installed: list[str], snapshots: list[dict]) -> dict:
+    latest, sessions_open = _latest_snapshot(snapshots)
+    return {
+        "enabled": not CRON_OFF.exists(),
+        "installed": bool(installed),
+        "up_to_date": installed == cron_block(),
+        "last_snapshot": latest["taken_at"] if latest else None,
+        "sessions_open": sessions_open,
+    }
+
+
+def cron(state: str | None, minutes: int, json_output: bool = False) -> int:
     lines = _crontab()
     if CRON_BEGIN in lines and CRON_END in lines:
         start, end = lines.index(CRON_BEGIN), lines.index(CRON_END) + 1
@@ -754,14 +775,16 @@ def cron(state: str | None, minutes: int) -> int:
                            text=True, check=True)
         CRON_OFF.unlink(missing_ok=True)
         snapshot(quiet=True)
+    snaps = boot_snapshots()
+    if json_output:
+        print(json.dumps(_cron_status(installed, snaps)))
+        return 0
     print(f"Snapshot cron: {'OFF (paused; --cron on resumes it)' if CRON_OFF.exists() else 'ON (every minute)'}")
     if installed != cron_block():
         print(f"  (the crontab's llm-restore line is {'out of date' if installed else 'missing'}; --cron on fixes it)")
-    snaps = boot_snapshots()
-    if snaps:
-        last = snaps[0]
-        still_open = sum(s.last_seen == last["taken_at"] for s in last["sessions"])
-        print(f"Last snapshot: {_clock(last['taken_at'])}, {still_open} session(s) open")
+    last, sessions_open = _latest_snapshot(snaps)
+    if last:
+        print(f"Last snapshot: {_clock(last['taken_at'])}, {sessions_open} session(s) open")
     plan, _ = restore_plan(boot_id(), snaps, _read_json(CONSUMED, []))
     recent = sum(i.closed_for <= minutes * 60 for i in plan)
     print(f"Restore list: {recent} session(s) open or closed within {minutes} minutes of the last snapshot "
@@ -785,6 +808,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--cron", nargs="?", const="status", choices=["on", "off", "status"],
                     help="turn the every-minute snapshot on/off; alone, print its status")
+    ap.add_argument("--json", action="store_true", help="with --cron, print one machine-readable status object")
     ap.add_argument("--snapshot", action="store_true", help="record the sessions open now")
     ap.add_argument("--scheduled", action="store_true", help=argparse.SUPPRESS)  # the crontab line
     ap.add_argument("-n", "--dry-run", action="store_true", help="show what a restore would open")
@@ -799,8 +823,10 @@ def main() -> int:
     ap.add_argument("--apply", metavar="BOOTS", help=argparse.SUPPRESS)  # used by the generated script
     ap.add_argument("--emit", action="store_true", help=argparse.SUPPRESS)  # used by --pi over SSH
     args = ap.parse_args()
+    if args.json and not args.cron:
+        ap.error("--json requires --cron")
     if args.cron:
-        return cron(None if args.cron == "status" else args.cron, args.minutes)
+        return cron(None if args.cron == "status" else args.cron, args.minutes, args.json)
     if args.snapshot:
         if args.scheduled and CRON_OFF.exists():
             return 0

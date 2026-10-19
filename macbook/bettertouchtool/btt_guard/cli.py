@@ -107,6 +107,17 @@ def _archive_recovery_state(path):
     path.rename(directory/('monitor-state-'+str(uuid4())+'.json'))
 
 
+def last_audit(state_dir):
+    """Read the saved audit report without creating or locking guard state."""
+    try:
+        return load_json(Path(state_dir)/'last-audit.json'), 0
+    except FileNotFoundError:
+        return {'status': 'none'}, 0
+    except (OSError, ValueError, TypeError) as error:
+        detail = str(error).strip() or type(error).__name__
+        return {'status': 'unreadable', 'detail': detail[:120]}, 2
+
+
 def run_monitor(state_dir, *, notify=True, managed=False):
     state = private_dir(state_dir)
     with state_lock(state):
@@ -145,6 +156,7 @@ def parser():
     checkpoint.add_argument('--list', action='store_true')
     audit = commands.add_parser('audit', help='read-only saved-state check')
     audit.add_argument('--checkpoint-id')
+    commands.add_parser('last-audit', help='print the last saved audit report')
     repair = commands.add_parser('repair', help='preview missing/detached-record repair; --apply requires owner Terminal')
     repair.add_argument('--checkpoint-id')
     repair.add_argument('--apply', action='store_true')
@@ -182,6 +194,8 @@ def main(argv=None):
     elif args.command == 'audit':
         output = audit_state(args.state_dir, args.checkpoint_id)
         code = 0 if output['status'] == AuditStatus.HEALTHY else 2
+    elif args.command == 'last-audit':
+        output, code = last_audit(args.state_dir)
     elif args.command == 'repair':
         with state_lock(args.state_dir):
             output = repair_checkpoint(args.state_dir, apply=args.apply, checkpoint_id=args.checkpoint_id)

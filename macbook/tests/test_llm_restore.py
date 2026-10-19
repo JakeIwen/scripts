@@ -258,6 +258,47 @@ class State(unittest.TestCase):
         written, _, _ = self.cron("on", ["a"])
         self.assertEqual(written, [["a", *lr.cron_block()]])
 
+    def cron_json(self, state, crontab, snapshots=None):
+        written, out = [], io.StringIO()
+        with patch.object(lr, "CRON_OFF", self.root / "cron-off"), \
+                patch.object(lr, "CRON_LOG", self.root / "cron.log"), \
+                patch.object(lr, "_crontab", return_value=crontab), \
+                patch.object(lr, "boot_snapshots", return_value=snapshots or []), \
+                patch.object(lr.subprocess, "run", side_effect=lambda cmd, input, **_: written.append(input.splitlines())), \
+                patch.object(lr, "snapshot"), patch("sys.stdout", out):
+            lr.cron(state, 30, json_output=True)
+        return written, json.loads(out.getvalue())
+
+    def test_json_status_reports_snapshot_and_pause_state(self):
+        snap = {"taken_at": 123.5, "sessions": [
+            session("claude", A, last_seen=123.5), session("codex", B, last_seen=100.0)]}
+        _, status = self.cron_json(None, ["a", *lr.cron_block()], [snap])
+        self.assertEqual(status, {"enabled": True, "installed": True, "up_to_date": True,
+                                  "last_snapshot": 123.5, "sessions_open": 1})
+        (self.root / "cron-off").touch()
+        _, paused = self.cron_json(None, ["a", *lr.cron_block()], [snap])
+        self.assertFalse(paused["enabled"])
+        self.assertEqual(paused["sessions_open"], 1)
+        _, empty = self.cron_json(None, ["a"], [])
+        self.assertEqual(empty["last_snapshot"], None)
+        self.assertEqual(empty["sessions_open"], None)
+
+    def test_json_on_and_off_print_the_resulting_state(self):
+        (self.root / "cron-off").touch()
+        written, on = self.cron_json("on", ["a", lr.CRON_BEGIN, "old", lr.CRON_END, "b"])
+        self.assertEqual(written, [["a", *lr.cron_block(), "b"]])
+        self.assertEqual(on, {"enabled": True, "installed": True, "up_to_date": True,
+                              "last_snapshot": None, "sessions_open": None})
+        written, off = self.cron_json("off", ["a", *lr.cron_block(), "b"])
+        self.assertEqual(written, [])
+        self.assertFalse(off["enabled"])
+
+    def test_json_without_cron_is_rejected(self):
+        with patch.object(sys, "argv", ["llm_restore.py", "--json"]):
+            with self.assertRaises(SystemExit) as raised:
+                lr.main()
+        self.assertEqual(raised.exception.code, 2)
+
     def test_only_the_scheduled_snapshot_skips_while_paused(self):
         def run(*argv):
             with patch.object(sys, "argv", ["llm_restore.py", "--snapshot", *argv]):
