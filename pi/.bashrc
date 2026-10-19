@@ -94,6 +94,7 @@ alias codexpr='codexp resume'
 alias codexpcan='codexpr --sandbox danger-full-access --add-dir /mnt/EXFAT512/obd-things --add-dir /dev/bus/usb'
 codexsearch() { /home/pi/scripts/codexsearch.sh "$@"; }
 claudesearch() { /home/pi/scripts/claudesearch.sh "$@"; }
+llmsearch() { /home/pi/scripts/llmsearch.sh "$@"; }
 # Reopen the Claude/Codex sessions open before a reboot (skips open ones);
 # --cron on|off toggles the every-minute snapshot, --dry-run previews.
 alias llmrestore='/usr/bin/python3 -I -B /home/pi/scripts/llm_restore.py'

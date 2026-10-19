@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 
-# Search Claude Code JSONL sessions and print a readable block for every
-# matching conversation event.
+# Search Claude Code conversation events, optionally grouping matches by session.
 
 set -u
 
-usage() {
-    echo "usage: claudesearch <term>" >&2
-}
+source "$(dirname "${BASH_SOURCE[0]}")/session_search_header.sh"
 
-if [ "$#" -eq 0 ] || [ -z "$*" ]; then
-    usage
+if ! session_search_parse_args "$@"; then
+    session_search_usage claudesearch >&2
     exit 2
+fi
+if [ "$session_search_help" = true ]; then
+    session_search_usage claudesearch
+    exit 0
 fi
 
 for claudesearch_dependency in grep jq; do
@@ -21,7 +22,7 @@ for claudesearch_dependency in grep jq; do
     fi
 done
 
-claudesearch_query=$*
+claudesearch_query=$session_search_query
 claudesearch_root=${CLAUDESEARCH_ROOT:-${CLAUDE_CONFIG_DIR:-"$HOME/.claude"}}
 claudesearch_projects="$claudesearch_root/projects"
 
@@ -101,12 +102,17 @@ while IFS= read -r claudesearch_file; do
         [ -n "$claudesearch_name" ] || claudesearch_name=/
     fi
     [ -n "$claudesearch_name" ] || claudesearch_name=unknown
+    claudesearch_header=$(session_search_header \
+        "$claudesearch_name" "$claudesearch_file")
+    claudesearch_resume=$(session_search_resume_command \
+        "$claudesearch_cwd" claudepr "$claudesearch_id")
 
     # Search only conversation text: prompts, replies, thinking, tool inputs and
     # results, and queued prompts/notifications. Injected context (CLAUDE.md,
     # skill text, reminders) and per-event metadata such as cwd would otherwise
     # match nearly every session.
-    jq -Rr --join-output --arg query "$claudesearch_query" '
+    jq -Rr --join-output -L "$(dirname "${BASH_SOURCE[0]}")" --arg query "$claudesearch_query" '
+        include "session_search_records";
         def content_strings:
             if type == "string" then .
             elif type == "array" then .[] | content_strings
@@ -130,12 +136,9 @@ while IFS= read -r claudesearch_file; do
         [searchable_strings | strings |
          select(ascii_downcase | contains($query | ascii_downcase))] as $matches |
         select($matches | length > 0) |
-        $matches[0], "\u0000"
+        session_search_match_output($matches[0])
     ' "$claudesearch_file" 2>/dev/null |
-    while IFS= read -r -d '' claudesearch_text; do
-        claudesearch_context=$(printf '%s\n' "$claudesearch_text" | excerpt)
-        [ -n "$claudesearch_context" ] || continue
-        printf '%s\n%s\n%s\n\n' \
-            "$claudesearch_name" "$claudesearch_id" "$claudesearch_context"
-    done
+    session_search_print_matches \
+        "$claudesearch_header" "$claudesearch_resume" "$session_search_group" \
+        claude "$claudesearch_cwd" "$claudesearch_file"
 done

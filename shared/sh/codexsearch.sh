@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 
-# Search Codex JSONL sessions and print a readable block for every matching event.
+# Search Codex JSONL events, optionally grouping matches by session.
 
 set -u
 
-usage() {
-    echo "usage: codexsearch <term>" >&2
-}
+source "$(dirname "${BASH_SOURCE[0]}")/session_search_header.sh"
 
-if [ "$#" -eq 0 ] || [ -z "$*" ]; then
-    usage
+if ! session_search_parse_args "$@"; then
+    session_search_usage codexsearch >&2
     exit 2
+fi
+if [ "$session_search_help" = true ]; then
+    session_search_usage codexsearch
+    exit 0
 fi
 
 for codexsearch_dependency in grep jq; do
@@ -20,7 +22,7 @@ for codexsearch_dependency in grep jq; do
     fi
 done
 
-codexsearch_query=$*
+codexsearch_query=$session_search_query
 codexsearch_root=${CODEXSEARCH_ROOT:-"$HOME/.codex"}
 codexsearch_sessions="$codexsearch_root/sessions"
 codexsearch_index="$codexsearch_root/session_index.jsonl"
@@ -88,19 +90,21 @@ while IFS= read -r codexsearch_file; do
         [ -n "$codexsearch_name" ] || codexsearch_name=/
     fi
     [ -n "$codexsearch_name" ] || codexsearch_name=unknown
+    codexsearch_header=$(session_search_header \
+        "$codexsearch_name" "$codexsearch_file")
+    codexsearch_resume=$(session_search_resume_command \
+        "$codexsearch_cwd" codexpr "$codexsearch_id")
 
-    jq -r --arg query "$codexsearch_query" '
+    jq -r -L "$(dirname "${BASH_SOURCE[0]}")" --arg query "$codexsearch_query" '
+        include "session_search_records";
         def matching_strings:
             [.. | strings |
              select(ascii_downcase | contains($query | ascii_downcase))];
         matching_strings as $matches |
         select($matches | length > 0) |
-        $matches[0], "\u0000"
+        session_search_match_output($matches[0])
     ' --join-output "$codexsearch_file" 2>/dev/null |
-    while IFS= read -r -d '' codexsearch_text; do
-        codexsearch_context=$(printf '%s\n' "$codexsearch_text" | excerpt)
-        [ -n "$codexsearch_context" ] || continue
-        printf '%s\n%s\n%s\n\n' \
-            "$codexsearch_name" "$codexsearch_id" "$codexsearch_context"
-    done
+    session_search_print_matches \
+        "$codexsearch_header" "$codexsearch_resume" "$session_search_group" \
+        codex "$codexsearch_cwd" "$codexsearch_file"
 done

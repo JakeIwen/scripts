@@ -81,6 +81,18 @@ compare it with this checkout. Deployed files may differ from the repository.
   `NTFY_WARNING_URL` on failure, daily cron watchdog); queue jobs with its `add`
   instead of writing a LaunchAgent per job. Usage is in `macbook/README.md`.
 - `shared/`: code imported or deployed on more than one host.
+- `shared/sh/session_search_header.sh` formats the shared activity-age/name header
+  and quoted directory/resume command for `claudesearch.sh` and `codexsearch.sh`.
+  It also provides `-h`/`--help`, parses `-g`/`--group`, and groups matches per transcript, retaining
+  the last matching excerpt in append order. `--` ends option parsing.
+  Age uses transcript modification time; ship the helper and
+  `shared/sh/session_search_records.jq` with the search scripts. The jq module owns
+  their internal match/summary records and directory/tool aggregation for
+  `shared/sh/llmsearch.sh`. Its `-g` totals matches across sessions and resumes
+  the session with the latest matching event (mtime fallback without timestamps).
+  The Pi runs these five search files from `/home/pi/scripts/`; `pi/.bashrc`
+  defines all three commands. For targeted updates, ship the complete set and
+  patch only the command definitions in the live `.bashrc`, preserving local changes.
 - Dashboard Sonos alarms live in `pi/apps/van_dashboard/sonos_alarms.py`, with
   HTTP routes in `routes/sonos_alarms.py` and React controls in `features/sonos/`.
   `SonosAlarm` owns the device record; `alarms.ts` owns the validated UI contract.
