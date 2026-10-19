@@ -93,12 +93,6 @@ compare it with this checkout. Deployed files may differ from the repository.
   The Pi runs these five search files from `/home/pi/scripts/`; `pi/.bashrc`
   defines all three commands. For targeted updates, ship the complete set and
   patch only the command definitions in the live `.bashrc`, preserving local changes.
-- Dashboard Sonos alarms live in `pi/apps/van_dashboard/sonos_alarms.py`, with
-  HTTP routes in `routes/sonos_alarms.py` and React controls in `features/sonos/`.
-  `SonosAlarm` owns the device record; `alarms.ts` owns the validated UI contract.
-  `sonos_clock.py` labels the speaker's reported clock zone, with UTC-offset fallback
-  for unrecognized rules; never substitute the browser or Pi timezone.
-  `alarmFilters.ts` owns weekday and enabled-state filtering, using the speaker clock for one-time alarms.
 - `shared/sh/llm_restore.py` (alias `llmrestore` on both hosts; Pi copy at
   `/home/pi/scripts/`) reopens the Claude Code and Codex sessions open before a
   reboot, skipping any already open or kept by llm-switchboard: iTerm tabs on
@@ -107,6 +101,12 @@ compare it with this checkout. Deployed files may differ from the repository.
   `managed llm-restore` block in the live user crontab (every-minute snapshot);
   reinstalling a repo crontab file drops it. State and the generated restore
   script live in `~/.local/state/llm-restore/`.
+- Dashboard Sonos alarms live in `pi/apps/van_dashboard/sonos_alarms.py`, with
+  HTTP routes in `routes/sonos_alarms.py` and React controls in `features/sonos/`.
+  `SonosAlarm` owns the device record; `alarms.ts` owns the validated UI contract.
+  `sonos_clock.py` labels the speaker's reported clock zone, with UTC-offset fallback
+  for unrecognized rules; never substitute the browser or Pi timezone.
+  `alarmFilters.ts` owns weekday and enabled-state filtering, using the speaker clock for one-time alarms.
   `alarmControls.ts` is owned by `SonosFeature`, so closing the sheet or collapsing
   alarms cannot release an in-flight write. Delete and enable are explicit commands.
   Read fresh device state before mutations, preserve existing music metadata,
