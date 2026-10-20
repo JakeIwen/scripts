@@ -118,7 +118,7 @@ class FullStorageUpdateTests(unittest.TestCase):
         self.marker = self.backend[-1]
         self.database = self.flash / 'events.sqlite3'; self.database.write_bytes(b'live history')
         self.backup = self.root / 'backup.conf'; self.backup.write_text("BORG_EXCLUDES=(\n  '/keep'\n)\n")
-        self.frontend = create_frontend(self.root, 'existing preview server')
+        self.frontend = create_frontend(self.root)
         self.states = {name: dict(active=True, enabled='enabled') for name in deploy.SERVICES}
         self.calls = []
         self.fail_once = False

@@ -5,10 +5,8 @@ dashboard. It is deliberately a client-side application: Flask on port `8788`
 remains the only backend and the only process that owns device or service
 controls.
 
-Flask serves the production build on port `8788`. The same build is also served
-on port `8790` by `react_dashboard_preview.py` as a canary; that small server
-proxies `/api/*` to Flask and does not import controllers or create another copy
-of runtime state.
+Flask serves the production build on port `8788` from the atomic release
+directory described in [REACT_DASHBOARD.md](../../../docs/dashboard/REACT_DASHBOARD.md).
 
 ## Local commands
 
@@ -92,14 +90,6 @@ visible label rather than by CSS selector.
 The existing tile IDs and `van-dashboard.tile-order.v1` localStorage key are a
 compatibility contract. Reusing them preserves the user's saved arrangement.
 
-## Canary safety boundary
-
-`react_dashboard_preview.py` proxies GET and HEAD requests and only the exact
-method/path pairs listed in `ALLOWED_MUTATIONS`. Every current React control is
-listed individually after review of its disabled states, confirmation,
-single-flight behavior, ambiguous-failure refresh, convergence, and tests.
-There is no wildcard or method-wide mutation switch.
-
 ## Build and deploy
 
 The Pi never runs Node or Vite. Build and deploy from this clone with:
@@ -108,8 +98,8 @@ The Pi never runs Node or Vite. Build and deploy from this clone with:
 ./pi/deploy_van_dashboard_preview.sh
 ```
 
-Rollback swaps the atomic release symlinks used by production and canary, then
-restarts the canary server:
+Rollback swaps the atomic `current` and `previous` release symlinks that Flask
+serves from:
 
 ```bash
 ./pi/deploy_van_dashboard_preview.sh --rollback

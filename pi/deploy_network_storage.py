@@ -42,7 +42,7 @@ BACKUP_CONF = Path('/home/pi/scripts/backup/backup_conf.sh')
 OLD_DB = Path('/var/lib/vanpi-network/events.sqlite3')
 OLD_LOGS = Path('/var/log/openwrt')
 RUN_ROOT = Path('/run')
-SERVICES = ('network-flight-recorder', 'rsyslog', 'van-dashboard', 'van-dashboard-preview')
+SERVICES = ('network-flight-recorder', 'rsyslog', 'van-dashboard')
 TARGETS = {
     'pi/scripts/network_flight_recorder.py':'/home/pi/scripts/network_flight_recorder.py',
     'pi/services/network-flight-recorder.service':'/etc/systemd/system/network-flight-recorder.service',
@@ -290,7 +290,7 @@ def validate_plan(plan, *, historical=False):
         return
     for row in plan['frontend_files']:
         path=Path(row['relative'])
-        if path.is_absolute() or '..' in path.parts or str(path) in ('BUILD_ID','react_dashboard_preview.py'):
+        if path.is_absolute() or '..' in path.parts or str(path)=='BUILD_ID':
             raise ValueError('unsafe frontend artifact')
     if not any(row['relative']=='index.html' for row in plan['frontend_files']):
         raise ValueError('frontend build missing index')
@@ -550,7 +550,7 @@ def restore_code(plan, root):
         else:
             base.atomic_link(value,base.FRONTEND/name)
     base.systemctl('daemon-reload')
-    for name in ('rsyslog','network-flight-recorder','van-dashboard','van-dashboard-preview'):
+    for name in ('rsyslog','network-flight-recorder','van-dashboard'):
         base.systemctl('restart' if plan['services_before'][name]['active'] else 'stop',name)
 
 
@@ -645,7 +645,6 @@ def apply(plan, stage):
         for index,row in enumerate(plan['frontend_files']):
             target=frontend/row['relative'];target.parent.mkdir(parents=True,exist_ok=True)
             shutil.copyfile(stage/f'frontend-{index}',target)
-        shutil.copyfile(base.FRONTEND/plan['frontend_before']['current']/'react_dashboard_preview.py',frontend/'react_dashboard_preview.py')
         (frontend/'BUILD_ID').write_text(plan['release']+'\n')
         for path in [frontend,*frontend.rglob('*')]:path.chmod(0o755 if path.is_dir() else 0o644)
         plan['installed_tree_sha256']=base.tree_digest(frontend)
@@ -657,8 +656,6 @@ def apply(plan, stage):
         base.systemctl('restart','network-flight-recorder')
         if plan['services_before']['van-dashboard']['active']:
             base.systemctl('restart','van-dashboard')
-        if plan['services_before']['van-dashboard-preview']['active']:
-            base.systemctl('restart','van-dashboard-preview')
         readiness_started = time.time()
         for _ in range(45):
             if all(base.service_state(name)['active'] for name in ('rsyslog','network-flight-recorder')):

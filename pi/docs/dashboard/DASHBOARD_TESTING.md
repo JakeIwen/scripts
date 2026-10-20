@@ -74,13 +74,6 @@ npm test -- --run
 npm run build
 ```
 
-The preview Python tests use a fake upstream, not vanpi:
-
-```bash
-cd "$REPO"
-PYTHONDONTWRITEBYTECODE=1 /tmp/scripts-venv/bin/python -m unittest pi.tests.dashboard.test_van_dashboard_preview
-```
-
 ## On-Pi staging
 
 Use the [package runbook](../deployment.md), not ad-hoc copying of a subset of

@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Scoped deployment for the React dashboard preview.  This helper deliberately
-# derives its source checkout, stages only preview files, and never invokes the
-# repository-wide sync (which is tied to the primary trusted checkout).
+# Scoped deployment of the React dashboard release that van-dashboard.service
+# serves on :8788.  The release directory keeps its historical "preview" name.
+# This helper deliberately derives its source checkout, stages only the built
+# frontend, and never invokes the repository-wide sync (which is tied to the
+# primary trusted checkout).
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 repo_root="$(cd -- "$script_dir/.." && pwd -P)"
 frontend_dir="$repo_root/pi/apps/van_dashboard/frontend"
-preview_server="$repo_root/pi/apps/van_dashboard/react_dashboard_preview.py"
-service_unit="$repo_root/pi/services/van-dashboard-preview.service"
 target="${VAN_DASHBOARD_PREVIEW_TARGET:-pi@vanpi.lan}"
 mode=deploy
 
@@ -100,12 +100,10 @@ esac
   echo "previous preview release is missing: $previous_target" >&2
   exit 1
 }
-for required in index.html react_dashboard_preview.py; do
-  [[ -r "$live_root/$previous_target/$required" ]] || {
-    echo "previous preview release lacks $required: $previous_target" >&2
-    exit 1
-  }
-done
+[[ -r "$live_root/$previous_target/index.html" ]] || {
+  echo "previous preview release lacks index.html: $previous_target" >&2
+  exit 1
+}
 
 replace_link() {
   link_target=$1
@@ -115,18 +113,15 @@ replace_link() {
   /usr/bin/mv -Tf "$temporary_link" "$link_path"
 }
 
-# Each replacement is atomic.  The running server has already resolved its
-# old release, so it remains coherent until systemd restarts it below.
+# Each replacement is atomic.  Flask resolves the current link on every
+# request, so :8788 serves the restored release without a restart.
 replace_link "$previous_target" "$current_link"
 replace_link "$current_target" "$previous_link"
-sudo /usr/bin/systemctl restart van-dashboard-preview.service
 ROLLBACK
 else
   for required in \
     "$frontend_dir/package.json" \
-    "$frontend_dir/package-lock.json" \
-    "$preview_server" \
-    "$service_unit"; do
+    "$frontend_dir/package-lock.json"; do
     [[ -r "$required" ]] || {
       echo "required preview deployment file is missing: $required" >&2
       exit 1
@@ -134,7 +129,7 @@ else
   done
 
   command -v npm >/dev/null 2>&1 || {
-    echo "npm is required to build the dashboard preview on this Mac" >&2
+    echo "npm is required to build the dashboard frontend on this Mac" >&2
     exit 1
   }
 
@@ -158,8 +153,6 @@ else
   dirty_suffix=""
   if [[ -n "$(git -C "$repo_root" status --porcelain -- \
       pi/apps/van_dashboard/frontend \
-      pi/apps/van_dashboard/react_dashboard_preview.py \
-      pi/services/van-dashboard-preview.service \
       pi/deploy_van_dashboard_preview.sh)" ]]; then
     dirty_suffix="-dirty"
   fi
@@ -171,8 +164,6 @@ else
 
   mkdir -p "$local_stage/release"
   cp -a "$dist_dir/." "$local_stage/release/"
-  cp "$preview_server" "$local_stage/release/react_dashboard_preview.py"
-  cp "$service_unit" "$local_stage/van-dashboard-preview.service"
   printf '%s\n' "$release_id" > "$local_stage/release/BUILD_ID"
 
   remote_stage="$(
@@ -186,7 +177,6 @@ else
 
   scp "${ssh_options[@]}" -r \
     "$local_stage/release" \
-    "$local_stage/van-dashboard-preview.service" \
     "$target:$remote_stage/"
 
   ssh "${ssh_options[@]}" "$target" bash -s -- \
@@ -221,10 +211,6 @@ trap cleanup EXIT
 
 [[ -r "$stage/release/index.html" ]] || {
   echo "staged preview release lacks index.html" >&2
-  exit 1
-}
-[[ -r "$stage/release/react_dashboard_preview.py" ]] || {
-  echo "staged preview release lacks its server" >&2
   exit 1
 }
 [[ ! -e "$release" && ! -e "$incoming" ]] || {
@@ -267,36 +253,33 @@ if current_target=$(/usr/bin/readlink "$live_root/current" 2>/dev/null); then
 fi
 
 replace_link "releases/$release_id" "$live_root/current"
-sudo /usr/bin/install -m 0644 \
-  "$stage/van-dashboard-preview.service" \
-  /etc/systemd/system/van-dashboard-preview.service
-sudo /usr/bin/systemctl daemon-reload
-sudo /usr/bin/systemctl enable van-dashboard-preview.service
-sudo /usr/bin/systemctl restart van-dashboard-preview.service
 INSTALL
 fi
 
 ssh "${ssh_options[@]}" "$target" bash -s <<'HEALTH'
 set -eu
-/usr/bin/systemctl --no-pager --full is-active van-dashboard-preview.service
+/usr/bin/systemctl --no-pager --full is-active van-dashboard.service
 
+# The dashboard must serve the release that current now names, byte for byte,
+# and its API must answer.
+current_index=/home/pi/scripts/van-dashboard-preview/current/index.html
 attempt=1
 while [[ "$attempt" -le 30 ]]; do
-  preview_ok=false
+  index_ok=false
   backend_ok=false
   if /usr/bin/curl -fsS --connect-timeout 1 --max-time 2 \
-      http://127.0.0.1:8790/healthz >/dev/null; then
-    preview_ok=true
+      http://127.0.0.1:8788/ | /usr/bin/cmp -s - "$current_index"; then
+    index_ok=true
   fi
   if /usr/bin/curl -fsS --connect-timeout 1 --max-time 5 \
-      http://127.0.0.1:8790/api/status >/dev/null; then
+      http://127.0.0.1:8788/api/status >/dev/null; then
     backend_ok=true
   fi
-  if [[ "$preview_ok" == true && "$backend_ok" == true ]]; then
+  if [[ "$index_ok" == true && "$backend_ok" == true ]]; then
     exit 0
   fi
   if [[ "$attempt" -eq 30 ]]; then
-    echo "dashboard preview did not become healthy after 30 attempts" >&2
+    echo "dashboard did not serve the current release after 30 attempts" >&2
     exit 1
   fi
   attempt=$((attempt + 1))
@@ -304,4 +287,4 @@ while [[ "$attempt" -le 30 ]]; do
 done
 HEALTH
 
-echo "Dashboard preview $mode completed on $target"
+echo "Dashboard frontend $mode completed on $target"

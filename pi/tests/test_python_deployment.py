@@ -24,7 +24,6 @@ FIXTURE_MODULES = {
         "__main__.py",
         "van_dashboard.py",
         "van_dashboard_projects.py",
-        "react_dashboard_preview.py",
     ),
     "pi/apps/van_dashboard/routes": ("__init__.py", "common.py", "projects.py"),
     "pi/apps/video_library": ("__main__.py", "video_library_server.py"),

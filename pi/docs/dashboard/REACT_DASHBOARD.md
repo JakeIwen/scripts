@@ -2,28 +2,24 @@
 
 [Backend architecture](ARCHITECTURE.md) · [Dashboard testing](DASHBOARD_TESTING.md)
 
-React is the sole van-dashboard frontend. Both listeners use one atomic build:
+React is the sole van-dashboard frontend. `van-dashboard.service` on port 8788
+serves it from an atomic release directory:
 
 ```text
-8788  van-dashboard.service          React UI and authoritative Flask API
-8790  van-dashboard-preview.service  React canary and narrow API proxy
+/home/pi/scripts/van-dashboard-preview/
+  releases/<release-id>/   index.html, assets/, BUILD_ID
+  current -> releases/<release-id>
+  previous -> releases/<prior-release-id>
 ```
+
+The directory keeps the name of the retired port-8790 preview service, which
+first served these releases. The dashboard unit's `VAN_DASHBOARD_FRONTEND_ROOT`
+and `ExecStartPre` name `current`, so the dashboard cannot start without it.
 
 The Flask process on port 8788 is the only dashboard manager and controller
 owner. It serves the React entry point at `/`, hashed Vite assets at `/assets/`,
 and all authoritative `/api/*` routes. If the React build is missing, `/`
 returns HTTP 503 rather than substituting another control surface.
-
-The port-8790 canary owns no dashboard managers, runtime directory, device
-access, or CAN access. It serves the same React build and proxies browser API
-requests to the backend on loopback. The proxy preserves the original `Host`,
-`Origin`, `Referer`, and `X-Van-Dashboard` headers so the production same-origin
-and CSRF checks remain authoritative.
-
-Mutating canary requests use the exact method-and-path allowlist in
-`react_dashboard_preview.py`; there is no wildcard or method-wide enable
-switch. Every entry corresponds to a reviewed React control with explicit
-confirmation, single-flight behavior, and authoritative reconciliation.
 
 ## Deployment
 
@@ -34,24 +30,21 @@ From the active reviewed checkout:
 ```
 
 The helper runs `npm ci`, typechecks, builds on the Mac, transfers only the
-versioned React release and canary service unit, switches an atomic `current`
-symlink, and checks both `/healthz` and the proxied `/api/status` endpoint. The
-production Flask service reads that same `current` release, so the atomic switch
-updates both ports without introducing a second backend.
+versioned React release, and switches the atomic `current` symlink. Flask
+resolves `current` on every request, so the switch needs no restart. The helper
+then checks that port 8788 serves the new `index.html` byte for byte and that
+`/api/status` answers. It needs no sudo on the Pi.
 
-Rollback swaps the shared `current` and `previous` release symlinks:
+Rollback swaps the `current` and `previous` release symlinks and runs the same
+check:
 
 ```bash
 ./pi/deploy_van_dashboard_preview.sh --rollback
 ```
 
-Emergency canary disable leaves the production React dashboard on 8788 intact:
-
-```bash
-ssh pi@vanpi.lan \
-  'sudo systemctl disable --now van-dashboard-preview.service'
-```
+The network-storage installer also publishes a release into this directory
+when it ships a frontend build; see the
+[flight recorder runbook](../networking/NETWORK_FLIGHT_RECORDER.md).
 
 Build output is not committed. Human-editable React source, the dependency
-lockfile, proxy, service unit, deployment helper, and tests are the reviewed
-artifacts.
+lockfile, the deployment helper, and tests are the reviewed artifacts.

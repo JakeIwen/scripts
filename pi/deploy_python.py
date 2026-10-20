@@ -103,8 +103,7 @@ def build_plan(repo=ROOT, mode='stage', selected=None):
     dependencies = {}
     for unit, spec in SERVICES.items():
         paths = {p: sha for p, sha in files.items()
-                 if (p.startswith(f"pi/apps/{spec['app']}/") and
-                     not p.endswith('/react_dashboard_preview.py')) or
+                 if p.startswith(f"pi/apps/{spec['app']}/") or
                  p in ('pi/__init__.py', 'pi/apps/__init__.py', 'pi/package_runtime.py', *spec['extra'])}
         dependencies[unit] = digest(encoded(paths))
     manifest = {'schema': 1, 'provenance': provenance(repo), 'files': files,

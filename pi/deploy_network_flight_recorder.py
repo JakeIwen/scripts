@@ -31,7 +31,7 @@ DEPLOY_ROOT = Path('/var/lib/vanpi-network-deploy/releases')
 FRONTEND = Path('/home/pi/scripts/van-dashboard-preview')
 STORAGE_CONFIG = Path('/etc/vanpi-network-storage.json')
 PACKAGE_ACTIVATION = Path('/home/pi/scripts/python-packages/activated.json')
-SERVICES = ('network-flight-recorder', 'van-dashboard', 'rsyslog', 'van-dashboard-preview')
+SERVICES = ('network-flight-recorder', 'van-dashboard', 'rsyslog')
 TARGETS = {
     'pi/scripts/network_flight_recorder.py': '/home/pi/scripts/network_flight_recorder.py',
     'pi/apps/van_dashboard/van_dashboard_history.py': '/home/pi/scripts/python-automation/van_dashboard_history.py',
@@ -151,7 +151,7 @@ def validate_plan(plan, *, require_monitor_package_dependencies=True):
         raise ValueError('manifest differs from managed target allowlist')
     for entry in plan['frontend_files']:
         path = Path(entry['relative'])
-        if path.is_absolute() or '..' in path.parts or str(path) in ('BUILD_ID', 'react_dashboard_preview.py'):
+        if path.is_absolute() or '..' in path.parts or str(path) == 'BUILD_ID':
             raise ValueError('unsafe frontend artifact path')
     if not any(entry['relative'] == 'index.html' for entry in plan['frontend_files']):
         raise ValueError('frontend index is missing')
@@ -189,8 +189,6 @@ def inspect_remote(plan):
     if current is None:
         raise ValueError('existing dashboard frontend release required')
     plan['frontend_before']['tree_sha256'] = tree_digest(FRONTEND / current)
-    if not (FRONTEND / current / 'react_dashboard_preview.py').is_file():
-        raise ValueError('current preview release lacks existing server')
     plan['services_before'] = {name: service_state(name) for name in SERVICES}
     return plan
 
@@ -277,7 +275,7 @@ def restore_services(plan):
     if previous in ('enabled', 'enabled-runtime'):
         args = ['enable'] + (['--runtime'] if previous == 'enabled-runtime' else [])
         systemctl(*args, 'network-flight-recorder')
-    for name in ('rsyslog', 'van-dashboard', 'van-dashboard-preview', 'network-flight-recorder'):
+    for name in ('rsyslog', 'van-dashboard', 'network-flight-recorder'):
         if plan['services_before'][name]['active']:
             systemctl('restart', name)
         else:
@@ -382,7 +380,6 @@ def apply_remote(plan, stage):
             atomic_file(unpacked / 'files' / str(index), entry['destination'], metadata)
         command(['/usr/sbin/rsyslogd', '-N1'])
         shutil.copytree(unpacked / 'frontend', new_frontend)
-        shutil.copyfile(FRONTEND / plan['frontend_before']['current'] / 'react_dashboard_preview.py', new_frontend / 'react_dashboard_preview.py')
         (new_frontend / 'BUILD_ID').write_text(plan['release'] + '\n')
         for item in [new_frontend, *new_frontend.rglob('*')]:
             item.chmod(0o755 if item.is_dir() else 0o644)
@@ -394,9 +391,8 @@ def apply_remote(plan, stage):
         systemctl('restart', 'rsyslog')
         systemctl('enable', 'network-flight-recorder')
         systemctl('restart', 'network-flight-recorder')
-        for name in ('van-dashboard', 'van-dashboard-preview'):
-            if plan['services_before'][name]['active']:
-                systemctl('restart', name)
+        if plan['services_before']['van-dashboard']['active']:
+            systemctl('restart', 'van-dashboard')
         for _ in range(30):
             active = all(service_state(name)['active'] for name in ('network-flight-recorder', 'rsyslog', 'van-dashboard'))
             if active:
