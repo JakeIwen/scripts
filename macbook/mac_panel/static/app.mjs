@@ -1,7 +1,7 @@
-// Page entry: builds the nav and sections from one registry, polls, and watches the panel's own health.
+// Page entry: builds the tabs and sections from one registry, polls, and watches the panel's own health.
 import {health, renewToken} from './panel_api.mjs';
 import {button, node, refreshTimes} from './panel_dom.mjs';
-import {editingReason, markPaused, refresh, register, sections} from './panel_sections.mjs';
+import {editingReason, loadedAge, markPaused, refresh, register, sections} from './panel_sections.mjs';
 import {absoluteText} from './relative_time.mjs';
 import * as crontab from './section_crontab.mjs';
 import * as deferred from './section_deferred.mjs';
@@ -23,7 +23,7 @@ const SECTIONS = [
 ];
 const POLL_MS = 15000;
 const TIME_TICK_MS = 5000;
-const STORAGE = {collapsed: 'mac-panel.collapsed', theme: 'mac-panel.theme'};
+const STORAGE = {tab: 'mac-panel.tab', theme: 'mac-panel.theme'};
 
 // Per-viewer conveniences only; the page renders the same without them.
 const stored = {
@@ -38,46 +38,69 @@ const stored = {
   },
 };
 
-function setCollapsed(section, collapsed) {
-  section.classList.toggle('collapsed', collapsed);
-  section.querySelector('.toggle').setAttribute('aria-expanded', String(!collapsed));
-  const list = new Set(stored.get(STORAGE.collapsed, []));
-  if (collapsed) list.add(section.id);
-  else list.delete(section.id);
-  stored.set(STORAGE.collapsed, [...list]);
-}
+const tabOf = id => document.getElementById(`tab-${id}`);
+const knownId = id => SECTIONS.some(entry => entry.id === id) ? id : null;
 
-function buildNav(nav) {
+// The hash names the open tab, so links such as crontab's "#llm-restore" and bookmarks open the right one.
+function selectTab(id) {
   SECTIONS.forEach(entry => {
-    const link = node('a');
-    link.href = `#${entry.id}`;
-    link.append(node('span', null, 'dot level-idle'), entry.title, node('span', '', 'summary'));
-    link.addEventListener('click', () => {
-      const section = document.getElementById(entry.id);
-      if (section.classList.contains('collapsed')) setCollapsed(section, false);
-    });
-    nav.append(link);
+    const selected = entry.id === id;
+    tabOf(entry.id).setAttribute('aria-selected', String(selected));
+    tabOf(entry.id).tabIndex = selected ? 0 : -1;
+    document.getElementById(entry.id).hidden = !selected;
   });
+  stored.set(STORAGE.tab, id);
+  if (location.hash !== `#${id}`) history.replaceState(null, '', `#${id}`);
 }
 
-function buildSection(entry, collapsed) {
+// Sections without auto-refresh reload when opened after a poll interval, so an old tab is never shown as current.
+function openTab(id) {
+  if (tabOf(id).getAttribute('aria-selected') === 'true') return;
+  selectTab(id);
+  scrollTo({top: 0});
+  const entry = SECTIONS.find(item => item.id === id);
+  if (!entry.auto && loadedAge(id) > POLL_MS) refreshIfIdle(entry);
+}
+
+const TAB_KEYS = {ArrowRight: 1, ArrowLeft: -1, Home: -Infinity, End: Infinity};
+
+function moveTab(event) {
+  const step = TAB_KEYS[event.key];
+  if (step === undefined) return;
+  event.preventDefault();
+  const current = SECTIONS.findIndex(entry => tabOf(entry.id) === document.activeElement);
+  const index = Number.isFinite(step) ? (current + step + SECTIONS.length) % SECTIONS.length
+    : step < 0 ? 0 : SECTIONS.length - 1;
+  openTab(SECTIONS[index].id);
+  tabOf(SECTIONS[index].id).focus();
+}
+
+function buildTabs(list) {
+  SECTIONS.forEach(entry => {
+    const tab = node('button', null, 'tab');
+    tab.type = 'button';
+    tab.id = `tab-${entry.id}`;
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-controls', entry.id);
+    tab.append(node('span', null, 'dot level-idle'), entry.title);
+    tab.addEventListener('click', () => openTab(entry.id));
+    list.append(tab);
+  });
+  list.addEventListener('keydown', moveTab);
+}
+
+function buildSection(entry) {
   const section = node('section');
   section.id = entry.id;
-  section.classList.toggle('collapsed', collapsed);
+  section.hidden = true;
+  section.setAttribute('role', 'tabpanel');
+  section.setAttribute('aria-labelledby', `tab-${entry.id}`);
   const head = node('div', null, 'section-head');
-  const heading = node('h2');
-  const toggle = node('button', entry.title, 'toggle');
-  toggle.type = 'button';
-  toggle.setAttribute('aria-expanded', String(!collapsed));
-  toggle.setAttribute('aria-controls', `${entry.id}-body`);
-  toggle.addEventListener('click', () => setCollapsed(section, !section.classList.contains('collapsed')));
-  heading.append(toggle);
-  head.append(heading, node('span', '', 'meta'),
+  head.append(node('span', '', 'meta'),
     button('Refresh', () => refresh(entry.id), {className: 'refresh-one', title: `Refresh ${entry.title}`}));
   const status = node('p', '', 'notice');
   status.setAttribute('role', 'status');
   const body = node('div', null, 'body');
-  body.id = `${entry.id}-body`;
   const content = node('div', null, 'content');
   content.append(node('p', 'Loading…', 'loading'));
   body.append(content);
@@ -154,40 +177,18 @@ function tick() {
   sections().filter(entry => entry.auto).forEach(refreshIfIdle);
 }
 
-// Underline the nav link of the section whose heading last scrolled under the sticky header.
-function trackCurrentSection() {
-  const links = [...document.querySelectorAll('nav a')];
-  let scheduled = false;
-  const update = () => {
-    scheduled = false;
-    const limit = document.querySelector('header').offsetHeight + 24;
-    let current = null;
-    sections().forEach(entry => {
-      if (document.getElementById(entry.id).getBoundingClientRect().top <= limit) current = entry.id;
-    });
-    links.forEach(link => {
-      if (link.getAttribute('href') === `#${current}`) link.setAttribute('aria-current', 'true');
-      else link.removeAttribute('aria-current');
-    });
-  };
-  addEventListener('scroll', () => {
-    if (!scheduled) {
-      scheduled = true;
-      requestAnimationFrame(update);
-    }
-  }, {passive: true});
-  update();
-}
-
-const collapsedIds = new Set(stored.get(STORAGE.collapsed, []));
 register(SECTIONS);
-buildNav(document.querySelector('nav'));
+buildTabs(document.querySelector('[role="tablist"]'));
 const main = document.querySelector('main');
-SECTIONS.forEach(entry => main.append(buildSection(entry, collapsedIds.has(entry.id))));
+SECTIONS.forEach(entry => main.append(buildSection(entry)));
+selectTab(knownId(location.hash.slice(1)) ?? knownId(stored.get(STORAGE.tab, null)) ?? SECTIONS[0].id);
+addEventListener('hashchange', () => {
+  const id = knownId(location.hash.slice(1));
+  if (id) openTab(id);
+});
 setupTheme(document.getElementById('theme'));
 document.getElementById('refresh').addEventListener('click', refreshAll);
 refreshAll();
 checkHealth();
-trackCurrentSection();
 setInterval(tick, POLL_MS);
 setInterval(() => refreshTimes(), TIME_TICK_MS);

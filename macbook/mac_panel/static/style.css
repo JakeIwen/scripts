@@ -13,22 +13,17 @@ h1 { font-size: 20px; font-weight: 600; margin: 0; }
 #connection:empty { display: none; }
 #connection.warn { color: var(--warn); }
 #connection.error { color: var(--error); }
-nav { display: flex; flex-wrap: wrap; gap: 2px 16px; padding: 6px 0 7px; font-size: 13px; }
-nav a { color: var(--ink); text-decoration: none; padding: 2px 0; border-bottom: 2px solid transparent; white-space: nowrap; }
-nav a:hover { border-bottom-color: var(--line); }
-nav a[aria-current] { border-bottom-color: var(--link); }
-nav .summary { color: var(--muted); }
+/* The negative margin lets the selected tab's underline sit on the header's bottom border. */
+.tabs { display: flex; flex-wrap: wrap; gap: 0 4px; margin: 6px 0 -1px; }
+button.tab { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--ink); padding: 6px 10px; white-space: nowrap; }
+button.tab:hover:not(:disabled) { border-bottom-color: var(--line); }
+button.tab[aria-selected="true"], button.tab[aria-selected="true"]:hover:not(:disabled) { border-bottom-color: var(--link); background: var(--surface); }
 a { color: var(--link); }
-section { background: var(--surface); border: 1px solid var(--line); border-radius: 5px; margin: 14px 0; padding: 10px 14px 14px; scroll-margin-top: 96px; min-width: 0; }
-.section-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; }
-h2 { font-size: 17px; margin: 0; }
-h2 .toggle { all: unset; cursor: pointer; font: inherit; outline: revert; }
-h2 .toggle::before { content: "▾"; display: inline-block; width: 1em; color: var(--muted); font-size: 12px; }
-section.collapsed h2 .toggle::before { content: "▸"; }
-.meta { color: var(--muted); font-size: 12px; margin-left: auto; }
+section { background: var(--surface); border: 1px solid var(--line); border-radius: 5px; margin: 14px 0; padding: 10px 14px 14px; min-width: 0; }
+.section-head { display: flex; align-items: baseline; justify-content: flex-end; flex-wrap: wrap; gap: 6px 12px; }
+.meta { color: var(--muted); font-size: 12px; }
 .meta.paused { color: var(--warn); }
 .section-head button.refresh-one { font-size: 12px; padding: 1px 7px; }
-section.collapsed .body, section.collapsed .notice { display: none; }
 h3 { font-size: 15px; margin: 4px 0 8px; }
 p { margin: 7px 0; }
 .notice { margin: 6px 0; font-size: 13px; }
@@ -92,7 +87,7 @@ code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap:
 .loading, .load-failed { color: var(--muted); }
 @media (max-width: 650px) {
   section { padding: 8px 10px 10px; }
-  nav .summary { display: none; }
+  button.tab { padding: 6px 7px; }
   .setting { grid-template-columns: 1fr; }
   /* Narrow: each row becomes a card and every cell carries its column name. */
   thead { display: none; }

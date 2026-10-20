@@ -66,8 +66,9 @@ function actionsBlock(active) {
   const controls = node('div', null, 'actions');
   controls.append(button('Inspect (read-only)', () => runGuard('inspect'), {key: 'inspect'}),
     button('Audit (read-only)', () => runGuard('audit'), {key: 'audit'}));
-  controls.append(button('Accept current configuration as known-good', () => runGuard('checkpoint', {confirmed: true, replaces: active}),
-    {confirm: active ? `Confirm: replace ${active}` : 'Confirm: create the first checkpoint', key: 'checkpoint'}));
+  controls.append(button('Take checkpoint', () => runGuard('checkpoint', {confirmed: true, replaces: active}),
+    {confirm: active ? `Confirm: replace ${active}` : 'Confirm: create the first checkpoint', key: 'checkpoint',
+      title: 'Accept the current BTT configuration as known-good'}));
   root.append(controls);
   root.append(node('p', 'Accept only after checking the BTT menu yourself. Repair is available only from the owner’s Terminal.', 'muted small'));
   return root;

@@ -83,9 +83,15 @@ checkpoint, test alert, reset to defaults) arm on the first click and disarm on
 Escape, blur or after 8 seconds. Reschedule opens an inline editor whose Apply
 is enabled only once the time differs.
 
-The nav is sticky and carries each section's one-line summary and state dot;
-sections collapse from their heading. Collapsed sections and the theme choice
-(system, light, dark) are kept in the browser's `localStorage` only.
+Each section is a tab in the sticky header. A tab shows its state dot (green
+fine, yellow needs attention, red failing, grey idle, hollow unknown) and its
+one-line summary as the hover tooltip; the arrow keys, Home and End move
+between tabs. The URL hash names the open tab, so `#services` opens that tab
+and in-page links such as crontab's llm-restore link switch tabs. Every section
+loads at startup and the polled ones refresh whether or not their tab is open,
+so the dots stay current; a section without auto-refresh reloads when its tab
+opens more than 15 seconds after its last load. The open tab and the theme choice (system, light, dark)
+are kept in the browser's `localStorage` only.
 
 ### Crontab actions
 
@@ -112,8 +118,8 @@ error. The adapter maps both 75 and 3 to HTTP 409; invalid request bodies are HT
 `static/` is served as ES modules with no build step; `server.py` serves
 `index.html` at `/` and any `[a-z][a-z0-9_]*.mjs|.css` file that exists there.
 
-- `app.mjs`: section registry (id, title, renderer, auto-refresh), nav and
-  section construction, polling, collapse and theme state, panel health.
+- `app.mjs`: section registry (id, title, renderer, auto-refresh), tab and
+  section construction, polling, open-tab and theme state, panel health.
 - `panel_sections.mjs`: `refresh` (GET, keeps disclosure and focus state) and
   `action` (POST, notice, then refresh), plus the dirty check polls obey.
 - `panel_api.mjs`: the only `fetch`; token header, JSON bodies, token renewal.

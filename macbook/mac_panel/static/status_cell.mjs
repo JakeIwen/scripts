@@ -1,4 +1,4 @@
-// One vocabulary for "how is this thing doing", shared by every section and the nav dots.
+// One vocabulary for "how is this thing doing", shared by every section and the tab dots.
 import {node} from './panel_dom.mjs';
 
 export const Level = Object.freeze({OK: 'ok', IDLE: 'idle', UNKNOWN: 'unknown', WARN: 'warn', ERROR: 'error'});

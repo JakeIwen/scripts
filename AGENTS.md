@@ -107,7 +107,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   `crontab_sync.py`); ntfy config is read-only there, BTT repair is never
   exposed, and it never reads pi/secrets.
   Its page is ES modules in `static/` with no build step: `app.mjs` (section
-  registry, nav, polling, collapse/theme state, panel health), `panel_sections.mjs`
+  registry, tabs, polling, open-tab/theme state, panel health), `panel_sections.mjs`
   (`refresh`/`action` and the dirty check polls obey), `panel_api.mjs` (the only
   `fetch`), `panel_dom.mjs` (DOM helpers, armed buttons, notices, times, focus
   keys), `relative_time.mjs`, `status_cell.mjs` (`Level` vocabulary) and one

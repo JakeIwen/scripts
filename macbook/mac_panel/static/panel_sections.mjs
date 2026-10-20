@@ -6,6 +6,7 @@ import {Level} from './status_cell.mjs';
 const registry = new Map();
 const busy = new Set();
 const failedLoads = new Set();
+const loadedAt = new Map();
 
 export function register(list) {
   list.forEach(entry => registry.set(entry.id, entry));
@@ -31,11 +32,12 @@ export function editingReason(id) {
   return null;
 }
 
+// The tab shows only the state dot; the one-line summary is its hover tooltip.
 function setSummary(id, summary, level) {
-  const link = document.querySelector(`nav a[href="#${CSS.escape(id)}"]`);
-  if (!link) return;
-  link.querySelector('.dot').className = `dot level-${level}`;
-  link.querySelector('.summary').textContent = summary ? ` · ${summary}` : '';
+  const tab = document.querySelector(`[role="tab"][aria-controls="${CSS.escape(id)}"]`);
+  if (!tab) return;
+  tab.querySelector('.dot').className = `dot level-${level}`;
+  tab.title = summary || '';
 }
 
 function setMeta(id, className, ...parts) {
@@ -49,8 +51,14 @@ export function markPaused(id, reason) {
   setMeta(id, 'paused', `auto-refresh paused: ${reason}`);
 }
 
+// Milliseconds since the section last loaded, so a tab opened later can tell whether it is stale.
+export function loadedAge(id) {
+  return loadedAt.has(id) ? Date.now() - loadedAt.get(id) : Infinity;
+}
+
 function markUpdated(id) {
   const entry = registry.get(id);
+  loadedAt.set(id, Date.now());
   setMeta(id, '', 'updated ', timeNode(Date.now() / 1000), entry?.auto ? ' · auto' : '');
 }
 
