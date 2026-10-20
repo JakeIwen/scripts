@@ -138,7 +138,11 @@ Guard's own `repair --apply` restores the checkpoint and never replaces it.
 
 The active pointer never advances during ordinary audits, BTT upgrades, failed
 captures, or Guard's own repairs; only those two exceptions and an explicit
-checkpoint move it. Prior generations are retained without automatic pruning.
+checkpoint move it. Prior generations are kept for 90 days: once a week the
+scheduled monitor deletes inactive checkpoints and `rejected-captures/` entries
+older than that (`btt_guard/retention.py`). The active checkpoint is never pruned,
+however old, and nothing is pruned while the active pointer is unreadable.
+`guard prune` previews what is due; `guard prune --apply` deletes it now.
 Each generation contains a consistent SQLite backup, validated runtime exports,
 flat recovery definitions, and self-contained copies of managed preset images.
 Files are private and checksummed under ignored `.local/btt-guard/`. Runtime and
@@ -216,7 +220,8 @@ acceptance may show a macOS prompt asking to let python3 control BetterTouchTool
 allow it, or that edit is alerted instead. Manual `monitor` passes never accept.
 `guard acceptance` prints the pending and last accepted/refused change read-only;
 state is in `.local/btt-guard/edit-acceptance.json`. Earlier checkpoints stay on
-disk (`guard checkpoint --list`), each with its full SQLite backup and BTT export.
+disk for 90 days (`guard checkpoint --list`), each with its full SQLite backup and
+BTT export.
 
 `guard service status` distinguishes job supervision from `audit_status`; a
 running monitor reporting unavailable is not proof that the menu is healthy.

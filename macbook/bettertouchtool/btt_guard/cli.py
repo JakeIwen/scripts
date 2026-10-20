@@ -1,8 +1,9 @@
-"""Explicit checkpoint/repair commands and the scheduled monitor (audits, alerts
-and edit acceptance)."""
+"""Explicit checkpoint/repair commands and the scheduled monitor (audits, alerts,
+edit acceptance and weekly history pruning)."""
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 from copy import deepcopy
 import json
 import os
@@ -13,7 +14,7 @@ import time
 from uuid import uuid4
 
 from ..btt_common import ROOT, backup_configuration, current_database
-from . import api, edit_acceptance
+from . import api, edit_acceptance, retention
 from .audit import compare
 from .checkpoint import ACTIVE_FILE, DEFAULT_STATE, capture, load_checkpoint, preset_names
 from .database import read_snapshot
@@ -140,12 +141,13 @@ def run_monitor(state_dir, *, notify=True, managed=False):
             notification = 'deferred'
         else:
             notification = _notify(report, selection, notify, primary, fallback)
+        pruned = retention.prune_if_due(state, time.time()) if managed else None
         health: MonitorHealth = dict(schema_version=SCHEMA_VERSION, run_id=str(uuid4()), pid=os.getpid(),
             uid=os.getuid(), root=str(ROOT), completed_at=time.time(), audit_status=report['status'])
         write_json(state/('monitor-health.json' if managed else 'manual-audit-health.json'), health)
         return {'audit_status': report['status'], 'findings': len(report['findings']),
                 'notification': notification, 'acceptance': acceptance.value if acceptance else None,
-                'run_id': health['run_id']}
+                'pruned': pruned['entries'] if pruned else None, 'run_id': health['run_id']}
 
 
 def _notify(report, selection, notify, primary, fallback):
@@ -174,6 +176,8 @@ def parser():
     audit.add_argument('--checkpoint-id')
     commands.add_parser('last-audit', help='print the last saved audit report')
     commands.add_parser('acceptance', help="print the scheduled monitor's edit-acceptance state")
+    prune = commands.add_parser('prune', help='preview history older than 90 days; --apply deletes it')
+    prune.add_argument('--apply', action='store_true')
     repair = commands.add_parser('repair', help='preview missing/detached-record repair; --apply requires owner Terminal')
     repair.add_argument('--checkpoint-id')
     repair.add_argument('--apply', action='store_true')
@@ -216,6 +220,10 @@ def main(argv=None):
     elif args.command == 'acceptance':
         output = edit_acceptance.status(args.state_dir)
         code = 2 if output['state'] == 'unreadable' else 0
+    elif args.command == 'prune':
+        # Previewing deletes nothing, so only --apply needs guard.lock.
+        with state_lock(args.state_dir) if args.apply else nullcontext():
+            output = retention.prune(args.state_dir, time.time(), apply=args.apply)
     elif args.command == 'repair':
         with state_lock(args.state_dir):
             output = repair_checkpoint(args.state_dir, apply=args.apply, checkpoint_id=args.checkpoint_id)

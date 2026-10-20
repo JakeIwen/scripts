@@ -209,6 +209,13 @@ class AcceptanceStatus(TypedDict):
     last_refused: Optional[AcceptanceEvent]
 
 
+class PruneResult(TypedDict):
+    """`guard prune` output: `entries` are `checkpoints/<id>` or `rejected-captures/<id>`."""
+    applied: bool
+    retention_days: int
+    entries: list
+
+
 class CheckpointManifest(TypedDict):
     schema_version: int
     checkpoint_id: str

@@ -79,7 +79,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   BTT relaunch or update, unavailable audits and captures that refuse or fail are
   alerted, never accepted or retried. Manual `monitor` passes never accept.
   `guard acceptance` prints its state read-only for the Mac Panel.
-  Checkpoint integration fixtures live in
+  `btt_guard/retention.py` keeps history 90 days: the scheduled monitor prunes
+  inactive checkpoints and rejected captures older than that once a week, never the
+  active checkpoint (`guard prune` previews, `--apply` deletes). Checkpoint integration fixtures live in
   `macbook/tests/btt_guard_fixtures.py`. `btt.py guard last-audit` prints the
   saved audit report read-only (`{"status": "none"}` when there is none).
   `repair_text_transforms.py/.js` owns the guarded text-transform installer;
