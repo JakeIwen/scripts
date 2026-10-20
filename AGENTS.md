@@ -141,6 +141,12 @@ compare it with this checkout. Deployed files may differ from the repository.
   their internal match/summary records and directory/tool aggregation for
   `shared/sh/llmsearch.sh`. Its `-g` totals matches across sessions and resumes
   the session with the latest matching event (mtime fallback without timestamps).
+  `llmsearch` asks LLM Switchboard's transcript index first (`llm-switchboard
+  search --json`, Pi only), labels its results with the same helpers and groups
+  them with the same jq function. `--grep`, a non-default session root, records
+  mode, a missing command or exit 3 (no finished index build, asked twice) grep
+  instead. The llm-switchboard repo's `tests/test_search_oracle.py` runs these
+  scripts in records mode, so keep that format and those grep triggers.
   The Pi runs these five search files from `/home/pi/scripts/`; `pi/.bashrc`
   defines all three commands. For targeted updates, ship the complete set and
   patch only the command definitions in the live `.bashrc`, preserving local changes.

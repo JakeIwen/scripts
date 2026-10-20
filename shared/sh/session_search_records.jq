@@ -36,3 +36,27 @@ def session_search_group(records; session):
 
 def session_search_group_directories:
     session_search_group(inputs; .resume) | session_search_record_text;
+
+# Like the grep scripts, name an untitled session after its directory.
+def session_search_index_name:
+    if .title != "" and .title != "(untitled)" then .title
+    elif .cwd == "" then "unknown"
+    else .cwd | sub("/$"; "") | split("/") | (last // "") | if . == "" then "/" else . end
+    end;
+
+# `llm-switchboard search --json` results, newest match first, as records.
+def session_search_index_record:
+    ((.mtime // 0) | floor) as $modified |
+    {provider: .tool, cwd, id, name: session_search_index_name, mtime, modified: $modified,
+     matched_at: (.matched_at // $modified | floor), count, context: .excerpt};
+
+# NUL-terminated fields for the shell to label and print: tool, cwd, id, name,
+# mtime (empty when unknown), count and excerpt. Sessions come oldest first,
+# as grep mode prints them, or grouped like grep mode's -g.
+def session_search_index_fields($group):
+    [inputs | session_search_index_record] |
+    if $group then session_search_group(.[]; .id) else reverse[] end |
+    [.provider, .cwd, .id, .name, (if .mtime == null then "" else .modified end),
+     .count, .context] |
+    # NUL ends each field, so no field may contain one.
+    map(tostring | gsub("\u0000"; "") + "\u0000") | add;

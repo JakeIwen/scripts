@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import tempfile
 import time
@@ -10,6 +11,10 @@ import unittest
 
 
 SCRIPTS = Path(__file__).resolve().parents[1] / 'sh'
+# Any of these points the search away from the sessions the index covers.
+GREP_ONLY_ENVIRONMENT = ('CLAUDESEARCH_ROOT', 'CODEXSEARCH_ROOT', 'CLAUDE_CONFIG_DIR',
+                         'SESSION_SEARCH_RECORDS')
+NOT_BUILT_NOTE = 'llmsearch: the transcript index is not built yet, so searching with grep (slow)\n'
 
 
 class SessionFixtureTestCase(unittest.TestCase):
@@ -170,7 +175,7 @@ class SessionSearchTests(SessionFixtureTestCase):
         for flag in ('-h', '--help'):
             result = self.search('llm', flag)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn('Usage: llmsearch [flags] [--] <term>', result.stdout)
+            self.assertIn('Usage: llmsearch [flags] [--] <query>', result.stdout)
             self.assertIn('Group by directory and tool', result.stdout)
         result = self.search('llm', '-g', 'needle')
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -184,6 +189,175 @@ class SessionSearchTests(SessionFixtureTestCase):
         (self.root / 'claude').rename(self.root / 'claude-unused')
         self.assertEqual(self.search('llm', 'needle').returncode, 1)
         self.assertEqual(self.search('llm', '--help').returncode, 0)
+
+
+class IndexSearchTests(SessionFixtureTestCase):
+    """llmsearch asks LLM Switchboard's index first, through a stand-in on PATH."""
+
+    def fake_switchboard(self, results=(), code=0, message=''):
+        folder = self.root / 'bin'
+        folder.mkdir(exist_ok=True)
+        answer = folder / 'answer.jsonl'
+        answer.write_text(''.join(json.dumps(result) + '\n' for result in results))
+        calls = shlex.quote(str(folder / 'calls'))
+        script = folder / 'llm-switchboard'
+        script.write_text('#!/bin/sh\n'
+                          f'printf "[%s]" "$@" >> {calls}\n'
+                          f'echo >> {calls}\n'
+                          f'cat {shlex.quote(str(answer))}\n'
+                          + (f'echo {shlex.quote(message)} >&2\n' if message else '')
+                          + f'exit {code}\n')
+        script.chmod(0o755)
+
+    def switchboard_calls(self):
+        calls = self.root / 'bin/calls'
+        return calls.read_text().splitlines() if calls.exists() else []
+
+    def llmsearch(self, *args, **environment):
+        """Run llmsearch as Jacob does, on the default session folders."""
+        for tool in ('claude', 'codex'):
+            link = self.home / ('.' + tool)
+            if not link.is_symlink():
+                link.symlink_to(self.root / tool)
+        # Leave out any real llm-switchboard, so only the stand-in can answer.
+        path = [str(self.root / 'bin')] + [
+            folder for folder in os.environ['PATH'].split(os.pathsep)
+            if folder and not (Path(folder) / 'llm-switchboard').exists()]
+        variables = {name: value for name, value in os.environ.items()
+                     if name not in GREP_ONLY_ENVIRONMENT}
+        variables.update(HOME=str(self.home), PATH=os.pathsep.join(path), **environment)
+        return subprocess.run([str(SCRIPTS / 'llmsearch.sh'), *args], env=variables,
+                              capture_output=True, text=True, timeout=60)
+
+    def index_result(self, tool, session_id, title, count, excerpt, hours_ago, cwd=None,
+               matched_hours_ago=None):
+        cwd = str(self.home / 'dev/my project') if cwd is None else cwd
+        now = time.time()
+        matched = hours_ago if matched_hours_ago is None else matched_hours_ago
+        return {'tool': tool, 'id': session_id, 'short_id': session_id[:8], 'title': title,
+                'cwd': cwd, 'project': cwd, 'mtime': now - hours_ago * 3600 - 30.5,
+                'count': count, 'matched_at': now - matched * 3600 - 30.5,
+                'excerpt': excerpt, 'resume_cmd': '', 'host': '', 'title_only': False}
+
+    def assert_grep_results(self, result):
+        self.assertEqual(result.returncode, 0, result.stderr)
+        blocks = result.stdout.strip().split('\n\n')
+        self.assertEqual(len(blocks), 6)
+        self.assertEqual(sum('&& claudepr ' in block for block in blocks), 3)
+        self.assertEqual(sum('&& codexpr ' in block for block in blocks), 3)
+
+    def test_index_prints_one_block_per_session_oldest_first(self):
+        ageless = self.index_result('claude', 'ageless', '(untitled)', 1, 'ageless needle', 0, cwd='')
+        ageless.update(mtime=None, matched_at=None)
+        self.fake_switchboard([
+            self.index_result('codex', 'second', 'Second', 1, '…another needle', 1),
+            self.index_result('claude', 'first', 'First\tline', 2, 'new needle needle…', 3),
+            self.index_result('claude', 'untitled', '(untitled)', 1, 'loose needle', 26,
+                        cwd='/tmp/elsewhere/'),
+            ageless,
+        ])
+        result = self.llmsearch('needle')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, '')
+        self.assertEqual(result.stdout,
+                         '1 matches | unknown age | unknown\nclaudepr ageless\nageless needle\n\n'
+                         '1 matches | 1 day ago | elsewhere\n'
+                         'cd /tmp/elsewhere/ && claudepr untitled\nloose needle\n\n'
+                         '2 matches | 3 hours ago | First line\n'
+                         "cd ~/'dev/my project' && claudepr first\nnew needle needle…\n\n"
+                         '1 matches | 1 hour ago | Second\n'
+                         "cd ~/'dev/my project' && codexpr second\n…another needle\n\n")
+        self.assertEqual(self.switchboard_calls(), ['[search][--json][--limit][200][--][needle]'])
+
+    def test_index_query_keeps_its_syntax_and_quotes_text_after_double_dash(self):
+        self.fake_switchboard()
+        result = self.llmsearch('-g', 'pcan', '-usb', 'dir:obd', '--', 'say "hi"', '-g')
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, '', ''))
+        self.assertEqual(self.switchboard_calls(),
+                         ['[search][--json][--limit][200][--][pcan -usb dir:obd "say  hi  -g"]'])
+
+    def test_index_groups_by_directory_and_tool_using_latest_match(self):
+        self.fake_switchboard([
+            self.index_result('claude', 'first', 'First', 2, 'latest needle', 1),
+            self.index_result('codex', 'other', 'Other', 1, 'other needle', 2),
+            # A newer transcript must not beat a more recent match.
+            self.index_result('claude', 'second', 'Second', 3, 'older needle', 0.5,
+                        matched_hours_ago=4),
+            self.index_result('claude', 'elsewhere', 'Elsewhere', 1, 'separate needle', 5,
+                        cwd='/tmp/elsewhere'),
+        ])
+        for flag in ('-g', '--group'):
+            with self.subTest(flag=flag):
+                result = self.llmsearch(flag, 'needle')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout,
+                                 '1 matches | 5 hours ago | Elsewhere\n'
+                                 'cd /tmp/elsewhere && claudepr elsewhere\nseparate needle\n\n'
+                                 '5 matches | 1 hour ago | First\n'
+                                 "cd ~/'dev/my project' && claudepr first\nlatest needle\n\n"
+                                 '1 matches | 2 hours ago | Other\n'
+                                 "cd ~/'dev/my project' && codexpr other\nother needle\n\n")
+
+    def test_unbuilt_index_falls_back_to_grep_after_asking_twice(self):
+        self.fake_switchboard(code=3, message="search: the transcript index isn't built yet")
+        result = self.llmsearch('needle')
+        self.assert_grep_results(result)
+        self.assertEqual(result.stderr, NOT_BUILT_NOTE)
+        self.assertEqual(self.switchboard_calls(),
+                         ['[search][--json][--limit][200][--][needle]'] * 2)
+
+    def test_missing_switchboard_falls_back_to_grep_quietly(self):
+        result = self.llmsearch('needle')
+        self.assert_grep_results(result)
+        self.assertEqual(result.stderr, '')
+
+    def test_grep_flag_forces_grep(self):
+        self.fake_switchboard([self.index_result('claude', 'indexed', 'Indexed', 1, 'needle', 1)])
+        for args in [('--grep', 'needle'), ('needle', '--grep')]:
+            with self.subTest(args=args):
+                self.assert_grep_results(self.llmsearch(*args))
+                self.assertEqual(self.switchboard_calls(), [])
+        result = self.llmsearch('-g', '--grep', 'needle')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(result.stdout.strip().split('\n\n')), 2)
+        self.assertEqual(self.switchboard_calls(), [])
+
+    def test_grep_flag_after_double_dash_is_search_text(self):
+        self.fake_switchboard()
+        self.assertEqual(self.llmsearch('--', '--grep').returncode, 0)
+        self.assertEqual(self.switchboard_calls(),
+                         ['[search][--json][--limit][200][--]["--grep"]'])
+
+    def test_other_session_roots_and_records_mode_force_grep(self):
+        self.fake_switchboard([self.index_result('claude', 'indexed', 'Indexed', 1, 'needle', 1)])
+        for name, value in [('CLAUDESEARCH_ROOT', self.root / 'claude'),
+                            ('CODEXSEARCH_ROOT', self.root / 'codex'),
+                            ('CLAUDE_CONFIG_DIR', self.root / 'claude'),
+                            ('SESSION_SEARCH_RECORDS', '1')]:
+            with self.subTest(name=name):
+                result = self.llmsearch('needle', **{name: str(value)})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('needle', result.stdout)
+                self.assertNotIn('indexed', result.stdout)
+                self.assertEqual(self.switchboard_calls(), [])
+
+    def test_index_errors_are_reported_without_grep(self):
+        for code, message in [(2, 'search: add a word or phrase that is not excluded'),
+                              (1, 'search: the index is unreadable')]:
+            with self.subTest(code=code):
+                self.fake_switchboard(code=code, message=message)
+                result = self.llmsearch('-needle')
+                self.assertEqual((result.returncode, result.stdout, result.stderr),
+                                 (code, '', message + '\n'))
+        self.assertEqual(len(self.switchboard_calls()), 2)
+
+    def test_help_describes_the_index_and_grep(self):
+        result = self.llmsearch('--help')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for text in ("Search the Pi's transcript index", '--grep', '"a phrase"',
+                     'tool:claude|codex', 'after:YYYY-MM-DD'):
+            self.assertIn(text, result.stdout)
+        self.assertEqual(self.switchboard_calls(), [])
 
 
 if __name__ == '__main__':

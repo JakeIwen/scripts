@@ -1,17 +1,13 @@
 #!/usr/bin/env bash
 
 session_search_usage() {
-    local grouping='Show one result per session, with the match count and latest excerpt.'
-    if [ "$1" = llmsearch ]; then
-        grouping='Group by directory and tool, with total matches and the latest hit.'
-    fi
     cat <<EOF
 Usage: $1 [flags] [--] <term>
 
 Search session events for a literal, case-insensitive term.
 
 Flags:
-  -g, --group  $grouping
+  -g, --group  Show one result per session, with the match count and latest excerpt.
   -h, --help   Show this help and exit.
   --          Treat all remaining arguments as search text.
 EOF
@@ -21,20 +17,36 @@ session_search_modified() {
     stat -c %Y -- "$1" 2>/dev/null || stat -f %m -- "$1" 2>/dev/null
 }
 
+# A caller that offers --grep sets session_search_grep=false before parsing;
+# for the others it is search text. The query is also kept split at --, into
+# session_search_words before it and session_search_literal after it.
 session_search_parse_args() {
     session_search_group=false
     session_search_help=false
     session_search_query=""
+    session_search_words=""
+    session_search_literal=""
     local literal=false arg
     for arg in "$@"; do
         if [ "$literal" = false ]; then
             case "$arg" in
                 -g|--group) session_search_group=true; continue ;;
                 -h|--help) session_search_help=true; continue ;;
+                --grep)
+                    if [ -n "${session_search_grep+set}" ]; then
+                        session_search_grep=true
+                        continue
+                    fi
+                    ;;
                 --) literal=true; continue ;;
             esac
         fi
         session_search_query="${session_search_query:+$session_search_query }$arg"
+        if [ "$literal" = true ]; then
+            session_search_literal="${session_search_literal:+$session_search_literal }$arg"
+        else
+            session_search_words="${session_search_words:+$session_search_words }$arg"
+        fi
     done
     [ "$session_search_help" = true ] || [ -n "$session_search_query" ]
 }
