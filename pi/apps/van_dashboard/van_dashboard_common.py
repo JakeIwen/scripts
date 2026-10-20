@@ -23,7 +23,7 @@ from urllib.request import Request, urlopen
 PORT = int(os.environ.get("VAN_DASHBOARD_PORT", "8788"))
 REACT_FRONTEND_ROOT = os.environ.get(
     "VAN_DASHBOARD_FRONTEND_ROOT",
-    "/home/pi/scripts/van-dashboard-preview/current",
+    "/home/pi/scripts/van-dashboard-frontend/current",
 )
 TELEMETRY_SNAPSHOT_URL = os.environ.get(
     "VAN_DASHBOARD_TELEMETRY_SNAPSHOT_URL",

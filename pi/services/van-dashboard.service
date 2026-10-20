@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 ExecStartPre=/usr/bin/test -r /home/pi/van_compute/current/van_compute/metrics.py
-ExecStartPre=/usr/bin/test -r /home/pi/scripts/van-dashboard-preview/current/index.html
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/van-dashboard-frontend/current/index.html
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/manifest.json
 ExecStartPre=/usr/bin/test -x /home/pi/scripts/safe_reboot.sh
 ExecStartPre=/usr/bin/test -x /home/pi/scripts/safe_power_down.sh
@@ -19,7 +19,7 @@ SupplementaryGroups=gpio
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PYTHONPATH=/home/pi/scripts/python-packages/current:/home/pi/van_compute/current
-Environment=VAN_DASHBOARD_FRONTEND_ROOT=/home/pi/scripts/van-dashboard-preview/current
+Environment=VAN_DASHBOARD_FRONTEND_ROOT=/home/pi/scripts/van-dashboard-frontend/current
 # Native Time Machine creation selected this name during the 64 MiB migration.
 Environment=VAN_DASHBOARD_TIME_MACHINE_BUNDLE=/mnt/mbp2tbkup/m4mac0.sparsebundle
 RuntimeDirectory=van-dashboard

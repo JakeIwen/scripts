@@ -2,15 +2,14 @@
 set -euo pipefail
 
 # Scoped deployment of the React dashboard release that van-dashboard.service
-# serves on :8788.  The release directory keeps its historical "preview" name.
-# This helper deliberately derives its source checkout, stages only the built
-# frontend, and never invokes the repository-wide sync (which is tied to the
-# primary trusted checkout).
+# serves on :8788.  This helper deliberately derives its source checkout,
+# stages only the built frontend, and never invokes the repository-wide sync
+# (which is tied to the primary trusted checkout).
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 repo_root="$(cd -- "$script_dir/.." && pwd -P)"
 frontend_dir="$repo_root/pi/apps/van_dashboard/frontend"
-target="${VAN_DASHBOARD_PREVIEW_TARGET:-pi@vanpi.lan}"
+target="${VAN_DASHBOARD_FRONTEND_TARGET:-pi@vanpi.lan}"
 mode=deploy
 
 usage() {
@@ -43,12 +42,12 @@ while (( $# )); do
 done
 
 [[ "$target" != -* && "$target" != *[[:space:]]* ]] || {
-  echo "refusing unsafe preview deployment target: $target" >&2
+  echo "refusing unsafe frontend deployment target: $target" >&2
   exit 2
 }
 
-local_stage="$(mktemp -d "${TMPDIR:-/tmp}/van-dashboard-preview.XXXXXX")"
-local_mux_dir="$(mktemp -d /tmp/van-dashboard-preview-ssh.XXXXXX)"
+local_stage="$(mktemp -d "${TMPDIR:-/tmp}/van-dashboard-frontend.XXXXXX")"
+local_mux_dir="$(mktemp -d /tmp/van-dashboard-frontend-ssh.XXXXXX)"
 remote_stage=""
 ssh_options=(
   -o ControlMaster=auto
@@ -57,7 +56,7 @@ ssh_options=(
 )
 
 cleanup() {
-  if [[ "$remote_stage" =~ ^/tmp/van-dashboard-preview\.[[:alnum:]]+$ ]]; then
+  if [[ "$remote_stage" =~ ^/tmp/van-dashboard-frontend\.[[:alnum:]]+$ ]]; then
     ssh "${ssh_options[@]}" "$target" \
       "rm -rf -- '$remote_stage'" >/dev/null 2>&1 || true
   fi
@@ -71,37 +70,37 @@ if [[ "$mode" == rollback ]]; then
   ssh "${ssh_options[@]}" "$target" bash -s <<'ROLLBACK'
 set -eu
 
-live_root=/home/pi/scripts/van-dashboard-preview
+live_root=/home/pi/scripts/van-dashboard-frontend
 current_link=$live_root/current
 previous_link=$live_root/previous
 
 current_target=$(/usr/bin/readlink "$current_link") || {
-  echo "preview current release is not installed" >&2
+  echo "frontend current release is not installed" >&2
   exit 1
 }
 previous_target=$(/usr/bin/readlink "$previous_link") || {
-  echo "preview previous release is not available" >&2
+  echo "frontend previous release is not available" >&2
   exit 1
 }
 
 case "$current_target" in
   releases/*) ;;
-  *) echo "refusing unexpected current preview target: $current_target" >&2; exit 1 ;;
+  *) echo "refusing unexpected current frontend target: $current_target" >&2; exit 1 ;;
 esac
 case "$previous_target" in
   releases/*) ;;
-  *) echo "refusing unexpected previous preview target: $previous_target" >&2; exit 1 ;;
+  *) echo "refusing unexpected previous frontend target: $previous_target" >&2; exit 1 ;;
 esac
 [[ -d "$live_root/$current_target" ]] || {
-  echo "current preview release is missing: $current_target" >&2
+  echo "current frontend release is missing: $current_target" >&2
   exit 1
 }
 [[ -d "$live_root/$previous_target" ]] || {
-  echo "previous preview release is missing: $previous_target" >&2
+  echo "previous frontend release is missing: $previous_target" >&2
   exit 1
 }
 [[ -r "$live_root/$previous_target/index.html" ]] || {
-  echo "previous preview release lacks index.html: $previous_target" >&2
+  echo "previous frontend release lacks index.html: $previous_target" >&2
   exit 1
 }
 
@@ -123,7 +122,7 @@ else
     "$frontend_dir/package.json" \
     "$frontend_dir/package-lock.json"; do
     [[ -r "$required" ]] || {
-      echo "required preview deployment file is missing: $required" >&2
+      echo "required frontend deployment file is missing: $required" >&2
       exit 1
     }
   done
@@ -135,9 +134,9 @@ else
 
   (
     cd "$frontend_dir"
-    # Set VAN_DASHBOARD_PREVIEW_SKIP_NPM_CI=1 for quick repeat deployments
+    # Set VAN_DASHBOARD_FRONTEND_SKIP_NPM_CI=1 for quick repeat deployments
     # only when node_modules is already known to match package-lock.json.
-    if [[ "${VAN_DASHBOARD_PREVIEW_SKIP_NPM_CI:-0}" != 1 ]]; then
+    if [[ "${VAN_DASHBOARD_FRONTEND_SKIP_NPM_CI:-0}" != 1 ]]; then
       npm ci
     fi
     npm run build
@@ -153,12 +152,12 @@ else
   dirty_suffix=""
   if [[ -n "$(git -C "$repo_root" status --porcelain -- \
       pi/apps/van_dashboard/frontend \
-      pi/deploy_van_dashboard_preview.sh)" ]]; then
+      pi/deploy_van_dashboard_frontend.sh)" ]]; then
     dirty_suffix="-dirty"
   fi
   release_id="$(date -u +%Y%m%dT%H%M%SZ)-${git_revision}${dirty_suffix}-$$"
   [[ "$release_id" =~ ^[[:alnum:]._-]+$ ]] || {
-    echo "generated unsafe preview release identifier: $release_id" >&2
+    echo "generated unsafe frontend release identifier: $release_id" >&2
     exit 1
   }
 
@@ -168,10 +167,10 @@ else
 
   remote_stage="$(
     ssh "${ssh_options[@]}" "$target" \
-      'mktemp -d /tmp/van-dashboard-preview.XXXXXX'
+      'mktemp -d /tmp/van-dashboard-frontend.XXXXXX'
   )"
-  [[ "$remote_stage" =~ ^/tmp/van-dashboard-preview\.[[:alnum:]]+$ ]] || {
-    echo "unexpected remote preview staging path: $remote_stage" >&2
+  [[ "$remote_stage" =~ ^/tmp/van-dashboard-frontend\.[[:alnum:]]+$ ]] || {
+    echo "unexpected remote frontend staging path: $remote_stage" >&2
     exit 1
   }
 
@@ -186,17 +185,17 @@ set -eu
 stage=$1
 release_id=$2
 case "$stage" in
-  /tmp/van-dashboard-preview.[A-Za-z0-9]*) ;;
-  *) echo "refusing unsafe preview staging path: $stage" >&2; exit 1 ;;
+  /tmp/van-dashboard-frontend.[A-Za-z0-9]*) ;;
+  *) echo "refusing unsafe frontend staging path: $stage" >&2; exit 1 ;;
 esac
 case "$release_id" in
   *[!A-Za-z0-9._-]* | "")
-    echo "refusing unsafe preview release identifier: $release_id" >&2
+    echo "refusing unsafe frontend release identifier: $release_id" >&2
     exit 1
     ;;
 esac
 
-live_root=/home/pi/scripts/van-dashboard-preview
+live_root=/home/pi/scripts/van-dashboard-frontend
 releases=$live_root/releases
 incoming=$releases/.incoming-$release_id
 release=$releases/$release_id
@@ -210,11 +209,11 @@ cleanup() {
 trap cleanup EXIT
 
 [[ -r "$stage/release/index.html" ]] || {
-  echo "staged preview release lacks index.html" >&2
+  echo "staged frontend release lacks index.html" >&2
   exit 1
 }
 [[ ! -e "$release" && ! -e "$incoming" ]] || {
-  echo "preview release already exists: $release_id" >&2
+  echo "frontend release already exists: $release_id" >&2
   exit 1
 }
 
@@ -233,20 +232,20 @@ replace_link() {
 }
 
 if [[ -e "$live_root/current" && ! -L "$live_root/current" ]]; then
-  echo "refusing to replace non-symlink preview current path" >&2
+  echo "refusing to replace non-symlink frontend current path" >&2
   exit 1
 fi
 if current_target=$(/usr/bin/readlink "$live_root/current" 2>/dev/null); then
   case "$current_target" in
     releases/*)
       [[ -d "$live_root/$current_target" ]] || {
-        echo "current preview release is missing: $current_target" >&2
+        echo "current frontend release is missing: $current_target" >&2
         exit 1
       }
       replace_link "$current_target" "$live_root/previous"
       ;;
     *)
-      echo "refusing unexpected current preview target: $current_target" >&2
+      echo "refusing unexpected current frontend target: $current_target" >&2
       exit 1
       ;;
   esac
@@ -262,7 +261,7 @@ set -eu
 
 # The dashboard must serve the release that current now names, byte for byte,
 # and its API must answer.
-current_index=/home/pi/scripts/van-dashboard-preview/current/index.html
+current_index=/home/pi/scripts/van-dashboard-frontend/current/index.html
 attempt=1
 while [[ "$attempt" -le 30 ]]; do
   index_ok=false

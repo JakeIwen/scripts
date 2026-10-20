@@ -28,7 +28,7 @@ import uuid
 
 REPO = Path(__file__).resolve().parents[1]
 DEPLOY_ROOT = Path('/var/lib/vanpi-network-deploy/releases')
-FRONTEND = Path('/home/pi/scripts/van-dashboard-preview')
+FRONTEND = Path('/home/pi/scripts/van-dashboard-frontend')
 STORAGE_CONFIG = Path('/etc/vanpi-network-storage.json')
 PACKAGE_ACTIVATION = Path('/home/pi/scripts/python-packages/activated.json')
 SERVICES = ('network-flight-recorder', 'van-dashboard', 'rsyslog')

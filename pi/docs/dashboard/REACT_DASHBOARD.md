@@ -6,15 +6,14 @@ React is the sole van-dashboard frontend. `van-dashboard.service` on port 8788
 serves it from an atomic release directory:
 
 ```text
-/home/pi/scripts/van-dashboard-preview/
+/home/pi/scripts/van-dashboard-frontend/
   releases/<release-id>/   index.html, assets/, BUILD_ID
   current -> releases/<release-id>
   previous -> releases/<prior-release-id>
 ```
 
-The directory keeps the name of the retired port-8790 preview service, which
-first served these releases. The dashboard unit's `VAN_DASHBOARD_FRONTEND_ROOT`
-and `ExecStartPre` name `current`, so the dashboard cannot start without it.
+The dashboard unit's `VAN_DASHBOARD_FRONTEND_ROOT` and `ExecStartPre` name
+`current`, so the dashboard cannot start without it.
 
 The Flask process on port 8788 is the only dashboard manager and controller
 owner. It serves the React entry point at `/`, hashed Vite assets at `/assets/`,
@@ -26,7 +25,7 @@ returns HTTP 503 rather than substituting another control surface.
 From the active reviewed checkout:
 
 ```bash
-./pi/deploy_van_dashboard_preview.sh
+./pi/deploy_van_dashboard_frontend.sh
 ```
 
 The helper runs `npm ci`, typechecks, builds on the Mac, transfers only the
@@ -39,7 +38,7 @@ Rollback swaps the `current` and `previous` release symlinks and runs the same
 check:
 
 ```bash
-./pi/deploy_van_dashboard_preview.sh --rollback
+./pi/deploy_van_dashboard_frontend.sh --rollback
 ```
 
 The network-storage installer also publishes a release into this directory

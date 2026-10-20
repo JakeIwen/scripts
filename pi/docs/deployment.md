@@ -61,7 +61,7 @@ publish a release without restarting any service.
 | `pi/.bashrc` | Package-root/utility PYTHONPATH and current-release `ipinfo`, VLC and Sonos helper paths; installed by broad sync. |
 | `pi/sns.sh` | Sonos wrapper; preserves an inherited import path (including the saved flat video unit on rollback) and supplies package utility paths for clean interactive use. No Sonos command semantics change. |
 | `pi/scripts/log_position.sh` | Calls the current release's VLC helper; installed by broad sync. |
-| React frontend release | Not in the package. `/home/pi/scripts/van-dashboard-preview/current`, published by `pi/deploy_van_dashboard_preview.sh` and served by `van-dashboard.service`. |
+| React frontend release | Not in the package. `/home/pi/scripts/van-dashboard-frontend/current`, published by `pi/deploy_van_dashboard_frontend.sh` and served by `van-dashboard.service`. |
 | `system_event_monitor.py` and `system_monitor/`, other script services/cron/timers | Coherent broad-sync layout under `/home/pi/scripts`, not a package release. The shim retains the script/package switch for `main` and recorder `redact_log_message`; `system_monitor` internals use relative imports in both layouts. |
 | `van_compute` | Coupled independent Mac/Pi installer from `/Users/jacobr/dev/van-compute`; no package copy. |
 | historical `raspbian_setup.sh` and archived path-repair tools | Not package bootstrap or deployment paths. Do not use them to refresh the frozen flat directory. |

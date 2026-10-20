@@ -95,14 +95,14 @@ compatibility contract. Reusing them preserves the user's saved arrangement.
 The Pi never runs Node or Vite. Build and deploy from this clone with:
 
 ```bash
-./pi/deploy_van_dashboard_preview.sh
+./pi/deploy_van_dashboard_frontend.sh
 ```
 
 Rollback swaps the atomic `current` and `previous` release symlinks that Flask
 serves from:
 
 ```bash
-./pi/deploy_van_dashboard_preview.sh --rollback
+./pi/deploy_van_dashboard_frontend.sh --rollback
 ```
 
 Do not use `pi/sync_scripts.sh` from a copied checkout; it is intentionally tied
