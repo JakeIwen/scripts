@@ -1,12 +1,12 @@
-"""Safe launchd lifecycle for the finite, periodic BTT Guard audit job.
+"""Per-user LaunchAgent lifecycle for the periodic BTT Guard audit job.
 
 Unlike the repository's persistent web services, this job intentionally has no
-KeepAlive process, HTTP health endpoint, or stable PID.  launchd runs one audit
-at a time and ``monitor-health.json`` records successful job completion.
+KeepAlive process, HTTP health endpoint, or stable PID. launchd runs one audit
+at a time in the GUI login session, where checkpoint exports can use Apple
+Events, and ``monitor-health.json`` records successful job completion.
 """
 from __future__ import annotations
 
-import grp
 import math
 import os
 from pathlib import Path
@@ -15,7 +15,6 @@ import pwd
 import re
 import stat
 import subprocess
-import sys
 import time
 import uuid
 from typing import Any
@@ -25,8 +24,10 @@ from .storage import load_json, private_dir, write_bytes
 
 
 LABEL = "com.jacobr.btt-guard"
-TARGET = f"system/{LABEL}"
-INSTALLED = Path("/Library/LaunchDaemons") / f"{LABEL}.plist"
+UID = os.getuid()
+DOMAIN = f"gui/{UID}"
+TARGET = f"{DOMAIN}/{LABEL}"
+INSTALLED = Path(pwd.getpwuid(UID).pw_dir) / "Library" / "LaunchAgents" / f"{LABEL}.plist"
 PYTHON = "/usr/bin/python3"
 INTERVAL_SECONDS = 60
 HEARTBEAT_FRESHNESS_SECONDS = 3 * INTERVAL_SECONDS
@@ -45,7 +46,7 @@ def _owner() -> tuple[int, str]:
     uid = os.getuid()
     if uid == 0:
         raise ServiceError(
-            "Run the BTT Guard controller as the normal owner; do not sudo Python."
+            "Run the BTT Guard controller as the normal owner, never as root."
         )
     username = pwd.getpwuid(uid).pw_name
     if not username or username == "root":
@@ -65,13 +66,13 @@ def _paths(state_dir: Path, root: Path) -> tuple[Path, Path]:
 
 
 def service_configuration(state_dir: Path, root: Path) -> dict[str, Any]:
-    """Return the complete one-shot launchd configuration."""
+    """Return the complete one-shot LaunchAgent configuration."""
     uid, username = _owner()
-    del uid
+    home = pwd.getpwuid(uid).pw_dir
     state_dir, root = _paths(state_dir, root)
     return {
         "Label": LABEL,
-        "UserName": username,
+        "LimitLoadToSessionType": "Aqua",
         "ProgramArguments": [
             PYTHON,
             "-B",
@@ -84,7 +85,7 @@ def service_configuration(state_dir: Path, root: Path) -> dict[str, Any]:
         ],
         "WorkingDirectory": str(root),
         "EnvironmentVariables": {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
-                                 "HOME": pwd.getpwuid(os.getuid()).pw_dir,
+                                 "HOME": home,
                                  "USER": username, "LOGNAME": username},
         "RunAtLoad": True,
         "StartInterval": INTERVAL_SECONDS,
@@ -97,12 +98,8 @@ def service_configuration(state_dir: Path, root: Path) -> dict[str, Any]:
     }
 
 
-def _run(arguments: list[str], *, privileged: bool = False) -> str:
-    command = arguments
-    if privileged:
-        sudo_flags = [] if sys.stdin.isatty() else ["-n"]
-        command = ["/usr/bin/sudo", *sudo_flags, *arguments]
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
+def _run(arguments: list[str]) -> str:
+    result = subprocess.run(arguments, capture_output=True, text=True, check=False)
     if result.returncode:
         detail = (result.stderr or result.stdout).strip() or f"exit {result.returncode}"
         raise ServiceError(f"{Path(arguments[0]).name} failed: {detail}")
@@ -146,24 +143,20 @@ def _prepare(state_dir: Path, root: Path) -> dict[str, Any]:
     }
 
 
-def _wheel_gid() -> int:
-    try:
-        return grp.getgrnam("wheel").gr_gid
-    except KeyError:
-        return 0
-
-
 def _read_installed(state_dir: Path, root: Path) -> dict[str, Any] | None:
     if not INSTALLED.exists() and not INSTALLED.is_symlink():
         return None
+    uid, _ = _owner()
     info = INSTALLED.lstat()
     mode = stat.S_IMODE(info.st_mode)
     if stat.S_ISLNK(info.st_mode):
         raise ServiceError("Refusing a symlinked installed service plist.")
     if not stat.S_ISREG(info.st_mode):
         raise ServiceError("Installed service plist is not a regular file.")
-    if info.st_uid != 0 or info.st_gid != _wheel_gid() or mode != 0o644:
-        raise ServiceError("Installed service plist must be root:wheel mode 0644.")
+    if info.st_uid != uid or mode != 0o644:
+        raise ServiceError(
+            "Installed service plist must belong to the invoking user and be mode 0644."
+        )
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = os.open(INSTALLED, flags)
@@ -196,9 +189,18 @@ def _job() -> dict[str, Any]:
 
 
 def _enabled() -> bool:
-    text = _run(["/bin/launchctl", "print-disabled", "system"])
-    line = next((line for line in text.splitlines() if f'"{LABEL}"' in line), None)
-    return line is None or re.search(r"=>\s*(?:true|disabled)\s*$", line) is None
+    text = _run(["/bin/launchctl", "print-disabled", DOMAIN])
+    match = re.search(
+        rf'^\s*"{re.escape(LABEL)}"\s*=>\s*(\w+)\s*$', text, re.M
+    )
+    if match is None:
+        return True
+    value = match.group(1)
+    if value in ("false", "enabled"):
+        return True
+    if value in ("true", "disabled"):
+        return False
+    raise ServiceError("Cannot interpret the BTT Guard launchd enabled state.")
 
 
 def _validate_heartbeat(value: object, root: Path) -> dict[str, Any]:
@@ -292,55 +294,54 @@ def _install(state_dir: Path, root: Path) -> dict[str, Any]:
         raise ServiceError(
             "Refusing to replace a loaded service without its matching installed plist."
         )
+    try:
+        INSTALLED.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise ServiceError("Cannot create the user LaunchAgents directory.") from exc
     _run(
         [
             "/usr/bin/install",
-            "-o",
-            "root",
-            "-g",
-            "wheel",
             "-m",
             "644",
             prepared["payload"],
             str(INSTALLED),
-        ],
-        privileged=True,
+        ]
     )
     _require_installed(state_dir, root)
-    _run(["/bin/launchctl", "enable", TARGET], privileged=True)
+    _run(["/bin/launchctl", "enable", TARGET])
     if was_loaded:
-        _run(["/bin/launchctl", "bootout", TARGET], privileged=True)
-    _run(["/bin/launchctl", "bootstrap", "system", str(INSTALLED)], privileged=True)
+        _run(["/bin/launchctl", "bootout", TARGET])
+    _run(["/bin/launchctl", "bootstrap", DOMAIN, str(INSTALLED)])
     return {"action": "install", "installed": True, "service": TARGET}
 
 
 def _start(state_dir: Path, root: Path) -> dict[str, Any]:
     _require_installed(state_dir, root)
     job = _job()
-    _run(["/bin/launchctl", "enable", TARGET], privileged=True)
+    _run(["/bin/launchctl", "enable", TARGET])
     if job["loaded"]:
-        _run(["/bin/launchctl", "kickstart", TARGET], privileged=True)
+        _run(["/bin/launchctl", "kickstart", TARGET])
     else:
-        _run(["/bin/launchctl", "bootstrap", "system", str(INSTALLED)], privileged=True)
+        _run(["/bin/launchctl", "bootstrap", DOMAIN, str(INSTALLED)])
     return {"action": "start", "started": True, "service": TARGET}
 
 
 def _stop(state_dir: Path, root: Path) -> dict[str, Any]:
     _require_installed(state_dir, root)
     job = _job()
-    _run(["/bin/launchctl", "disable", TARGET], privileged=True)
+    _run(["/bin/launchctl", "disable", TARGET])
     if job["loaded"]:
-        _run(["/bin/launchctl", "bootout", TARGET], privileged=True)
+        _run(["/bin/launchctl", "bootout", TARGET])
     return {"action": "stop", "stopped": True, "service": TARGET}
 
 
 def _uninstall(state_dir: Path, root: Path) -> dict[str, Any]:
     _require_installed(state_dir, root)
     job = _job()
-    _run(["/bin/launchctl", "disable", TARGET], privileged=True)
+    _run(["/bin/launchctl", "disable", TARGET])
     if job["loaded"]:
-        _run(["/bin/launchctl", "bootout", TARGET], privileged=True)
-    _run(["/bin/rm", "--", str(INSTALLED)], privileged=True)
+        _run(["/bin/launchctl", "bootout", TARGET])
+    _run(["/bin/rm", "--", str(INSTALLED)])
     return {
         "action": "uninstall",
         "registration_removed": True,
@@ -372,7 +373,7 @@ def _verify(state_dir: Path, root: Path) -> dict[str, Any]:
     before = _heartbeat(state_dir, root)
     started_at = time.time()
     deadline = time.monotonic() + VERIFY_TIMEOUT_SECONDS
-    _run(["/bin/launchctl", "kickstart", TARGET], privileged=True)
+    _run(["/bin/launchctl", "kickstart", TARGET])
     while time.monotonic() < deadline:
         after = _heartbeat(state_dir, root)
         if _is_new_heartbeat(before, after, started_at):

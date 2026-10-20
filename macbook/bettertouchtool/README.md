@@ -167,17 +167,22 @@ files remain outside this configuration monitor's guarantee.
 ./macbook/bettertouchtool/btt.py guard service install
 ./macbook/bettertouchtool/btt.py guard service verify
 ./macbook/bettertouchtool/btt.py guard service status
+./macbook/bettertouchtool/btt.py guard service stop
+./macbook/bettertouchtool/btt.py guard service start
+./macbook/bettertouchtool/btt.py guard service uninstall
 ```
 
-The optional boot-time `com.jacobr.btt-guard` LaunchDaemon runs as the owning user
-once per minute, with absolute interpreter/workspace paths and private logs.
+The optional per-user `com.jacobr.btt-guard` LaunchAgent runs once per minute in
+the GUI login session, which checkpoint export needs for Apple Events access to
+BetterTouchTool. It uses absolute interpreter/workspace paths and private logs.
 This is a finite scheduled check, not a continuously running web app: it uses
-`StartInterval`, not KeepAlive or an HTTP server. `prepare` only writes/lints the
-plist. `install` uses sudo only for the plist/launchctl operations. `verify`
-requires a fresh completion heartbeat from the real registered job. Do not call
-it installed merely because preparation or a foreground monitor pass succeeded.
-`service stop/start/uninstall` controls only this matching registration; state
-and checkpoints are retained. Uninstall before moving the checkout.
+`StartInterval`, not KeepAlive or an HTTP server. `prepare` only writes and lints
+the plist. `install` writes the user's LaunchAgent and registers it without
+sudo. `verify` requires a fresh completion heartbeat from the real registered
+job. Do not call it installed merely because preparation or a foreground monitor
+pass succeeded. `service stop/start/uninstall` controls only this matching
+registration; state and checkpoints are retained. Uninstall before moving the
+checkout.
 
 Warnings go through `macbook/scripts/ntfy_warning.py`, which sources
 `NTFY_WARNING_URL` privately from `pi/secrets/.bash_variables`.
