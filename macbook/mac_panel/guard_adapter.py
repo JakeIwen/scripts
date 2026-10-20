@@ -9,6 +9,7 @@ from wire_validation import confirm, field, object_fields
 
 ACTIONS = frozenset(('inspect', 'audit', 'checkpoint', 'notify-test'))
 AUDIT_STATES = frozenset(('healthy', 'drift', 'unavailable', 'none', 'unreadable'))
+ACCEPTANCE_STATES = frozenset(('none', 'ok', 'unreadable'))
 
 
 def decode_findings(value):
@@ -28,6 +29,25 @@ def decode_audit(value):
         field(value, 'checked_at', float)
         field(value, 'btt_version', str, nullable=True)
         decode_findings(value)
+    return value
+
+
+def decode_acceptance(value):
+    object_fields(value, ('state', 'settle_seconds', 'pending_since', 'accepts_at',
+                          'last_accepted', 'last_refused'), status=502)
+    if field(value, 'state', str) not in ACCEPTANCE_STATES:
+        raise ApiError(502, 'Invalid guard acceptance state')
+    field(value, 'settle_seconds', int)
+    field(value, 'pending_since', float, nullable=True)
+    field(value, 'accepts_at', float, nullable=True)
+    for key in ('last_accepted', 'last_refused'):
+        event = field(value, key, dict, nullable=True)
+        if event is not None:
+            object_fields(event, ('at', 'checkpoint_id', 'reason', 'findings'), status=502)
+            field(event, 'at', float)
+            field(event, 'checkpoint_id', str, nullable=True)
+            field(event, 'reason', str, nullable=True)
+            field(event, 'findings', int)
     return value
 
 
@@ -74,7 +94,8 @@ class GuardAdapter:
             field(service, 'job', dict)
             field(service, 'heartbeat', dict)
             field(service, 'audit_status', str, nullable=True)
-            return {'checkpoints': checkpoints, 'audit': audit, 'service': service}
+            acceptance = decode_acceptance(self.call('acceptance'))
+            return {'checkpoints': checkpoints, 'audit': audit, 'service': service, 'acceptance': acceptance}
 
     def action(self, body):
         object_fields(body, ('action',), ('confirmed', 'replaces'))

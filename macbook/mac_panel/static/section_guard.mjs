@@ -5,6 +5,11 @@ import {Level, status, worst} from './status_cell.mjs';
 
 const SECTION = 'guard';
 const AUDIT_LEVELS = {healthy: Level.OK, drift: Level.ERROR, unavailable: Level.WARN, unreadable: Level.WARN, none: Level.WARN};
+const REFUSAL_TEXT = {
+  capture_refused: 'Guard would not call that menu known-good (broken or incomplete)',
+  export_unavailable: 'BTT export was unavailable (Apple Events permission?)',
+  capture_failed: 'the checkpoint capture failed',
+};
 // The last inspect/audit/checkpoint result outlives polls so its findings stay readable.
 let lastResult = null;
 
@@ -18,14 +23,44 @@ function monitorStatus(service) {
   return {level: Level.OK, node: status(Level.OK, 'monitor supervised', detail)};
 }
 
-function auditStatus(audit) {
-  const level = AUDIT_LEVELS[audit.status] ?? Level.UNKNOWN;
+// Drift the monitor is about to accept as an edit is expected, so it is yellow, not red.
+function auditStatus(audit, pending) {
+  const level = pending && audit.status === 'drift' ? Level.WARN : AUDIT_LEVELS[audit.status] ?? Level.UNKNOWN;
   const findings = Array.isArray(audit.findings) ? audit.findings.length : 0;
   const detail = node('span');
   detail.append(`${findings} finding${findings === 1 ? '' : 's'}`);
   if (audit.checked_at) detail.append(' · checked ', timeNode(audit.checked_at));
   if (audit.btt_version) detail.append(` · BTT ${audit.btt_version}`);
   return {level, node: status(level, `audit ${audit.status}`, detail)};
+}
+
+function eventDetail(event, ...parts) {
+  const detail = node('span');
+  detail.append(...parts, ' · ', timeNode(event.at));
+  return detail;
+}
+
+// The scheduled monitor accepts changes made while the same BTT process kept running;
+// `pending` means the current drift is such an edit, waiting out its settle period.
+function acceptanceStatus(acceptance, service) {
+  if (!service.installed) return {level: Level.IDLE, node: status(Level.IDLE, 'off', 'needs the monitor')};
+  if (acceptance.state === 'unreadable') return {level: Level.WARN, node: status(Level.WARN, 'state unreadable', 'edits will be alerted')};
+  if (acceptance.pending_since) {
+    const detail = node('span');
+    detail.append('accepts ', timeNode(acceptance.accepts_at), ' if nothing else changes and BTT keeps running');
+    return {level: Level.WARN, node: status(Level.WARN, 'edit pending', detail), pending: true};
+  }
+  const accepted = acceptance.last_accepted;
+  const refused = acceptance.last_refused;
+  if (refused && (!accepted || refused.at > accepted.at)) {
+    return {level: Level.WARN, node: status(Level.WARN, 'last edit not accepted',
+      eventDetail(refused, REFUSAL_TEXT[refused.reason] ?? refused.reason))};
+  }
+  if (accepted) {
+    return {level: Level.OK, node: status(Level.OK, 'on',
+      eventDetail(accepted, `last accepted ${accepted.findings} change${accepted.findings === 1 ? '' : 's'}`))};
+  }
+  return {level: Level.OK, node: status(Level.OK, 'on', 'nothing accepted yet')};
 }
 
 function findingsList(findings) {
@@ -78,14 +113,17 @@ export function render(data) {
   const root = node('div');
   const active = data.checkpoints.find(checkpoint => checkpoint.active)?.checkpoint_id ?? null;
   const monitor = monitorStatus(data.service);
-  const audit = auditStatus(data.audit);
+  const acceptance = acceptanceStatus(data.acceptance, data.service);
+  const audit = auditStatus(data.audit, acceptance.pending);
   const checkpoint = active ? `${active} (${data.checkpoints.length} stored)` : `none (${data.checkpoints.length} stored)`;
-  root.append(keyValues([['Monitor', monitor.node], ['Audit', audit.node],
+  root.append(keyValues([['Monitor', monitor.node], ['Audit', audit.node], ['Auto-accept', acceptance.node],
     ['Known-good checkpoint', status(active ? Level.OK : Level.WARN, checkpoint)]]));
   if (Array.isArray(data.audit.findings) && data.audit.findings.length) root.append(findingsList(data.audit.findings));
-  root.append(details('Raw status', JSON.stringify({audit: data.audit, monitor: data.service, checkpoints: data.checkpoints}, null, 2), 'guard-raw'));
+  root.append(details('Raw status', JSON.stringify({audit: data.audit, monitor: data.service,
+    acceptance: data.acceptance, checkpoints: data.checkpoints}, null, 2), 'guard-raw'));
   root.append(actionsBlock(active));
   if (lastResult) root.append(lastResultBlock());
-  const summary = `${monitor.node.querySelector('.text').textContent} · audit ${data.audit.status}`;
-  return {node: root, summary, level: worst([monitor.level, audit.level, active ? Level.OK : Level.WARN])};
+  const summary = `${monitor.node.querySelector('.text').textContent} · audit ${data.audit.status}` +
+    (acceptance.pending && data.audit.status === 'drift' ? ' (edit pending auto-accept)' : '');
+  return {node: root, summary, level: worst([monitor.level, audit.level, acceptance.level, active ? Level.OK : Level.WARN])};
 }

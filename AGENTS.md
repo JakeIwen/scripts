@@ -66,12 +66,20 @@ compare it with this checkout. Deployed files may differ from the repository.
   read-only integrity audits, approved restoration, ntfy warnings and periodic
   launchd control. Its `model.py` owns shared contracts/statuses; `storage.py`
   owns private atomic state. Never promote audit output during ordinary audits
-  or Guard repairs. The one exception is `btt_guard/installer_checkpoint.py`:
+  or Guard repairs. There are two narrow exceptions. `btt_guard/installer_checkpoint.py`:
   a wired installer's `--apply` may advance an existing checkpoint only after a
   healthy pre-write baseline, saved-state verification, an unchanged checkpoint
   id and a final audit whose findings are confined to the UUIDs it wrote; zero
   writes, unavailable state, foreign findings or a failed capture never promote.
-  Wired installers expose `--no-checkpoint`. Checkpoint integration fixtures live in
+  Wired installers expose `--no-checkpoint`. `btt_guard/edit_acceptance.py` (Jacob's
+  choice): the scheduled monitor (`monitor --managed`, a gui-domain LaunchAgent
+  because capture needs Apple Events) accepts drift that appeared while the same
+  BTT process (pid + start time), version and checkpoint stayed in place since the
+  last healthy scheduled audit, once it is unchanged for 10 minutes; drift after a
+  BTT relaunch or update, unavailable audits and captures that refuse or fail are
+  alerted, never accepted or retried. Manual `monitor` passes never accept.
+  `guard acceptance` prints its state read-only for the Mac Panel.
+  Checkpoint integration fixtures live in
   `macbook/tests/btt_guard_fixtures.py`. `btt.py guard last-audit` prints the
   saved audit report read-only (`{"status": "none"}` when there is none).
   `repair_text_transforms.py/.js` owns the guarded text-transform installer;

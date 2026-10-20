@@ -90,7 +90,8 @@ user's Terminal because their runtime export uses BTT's Apple Events API.
 ```
 
 Manual checkpoint promotion is explicit; replacing one also requires `--replace`.
-There is one narrow exception: wired guarded installers finish their own apply by
+There are two narrow exceptions: the scheduled monitor's edit acceptance (below,
+under the service) and wired guarded installers, which finish their own apply by
 checkpointing their verified edits. They first record a read-only audit and the
 active checkpoint **before any BTT writes**. Only an initially healthy Guard with
 an existing checkpoint is eligible. After the installer's saved-state verification,
@@ -136,7 +137,8 @@ shortcut and Mac Panel triggers are outside the captured Media/dependency graph;
 Guard's own `repair --apply` restores the checkpoint and never replaces it.
 
 The active pointer never advances during ordinary audits, BTT upgrades, failed
-captures, or Guard's own repairs. Prior generations are retained without automatic pruning.
+captures, or Guard's own repairs; only those two exceptions and an explicit
+checkpoint move it. Prior generations are retained without automatic pruning.
 Each generation contains a consistent SQLite backup, validated runtime exports,
 flat recovery definitions, and self-contained copies of managed preset images.
 Files are private and checksummed under ignored `.local/btt-guard/`. Runtime and
@@ -195,6 +197,26 @@ is the private detailed report; a failed delivery does not erase the warning.
 Malformed monitor state stays preserved while a separate recovery-state file
 maintains bounded warnings and unavailable heartbeats. `guard notify-test --send`
 sends one clearly labelled test; `guard monitor --no-notify` runs a local pass.
+
+#### Edits made while BTT runs are accepted automatically
+
+The scheduled monitor (`monitor --managed`, the LaunchAgent above) remembers the
+BTT session of its last healthy audit: the main process id with its start time,
+the BTT version and the active checkpoint. Drift that appears while that same
+session is still running is treated as an edit (yours, an agent's or an
+installer's). It shows as "edit pending" in the Mac Panel, sends no alert, and
+once it has been unchanged for 10 minutes the monitor captures it as the new
+known-good checkpoint. A further edit restarts the 10 minutes. Drift that first
+appears after BTT relaunched or changed version (an update, a crash, a
+launch-time sync), an unavailable audit, or drift with no recorded session goes
+to the ntfy alert above and is never accepted. Capture keeps its own refusals
+(empty active buttons, unresolved dependencies, disabled roots); a refused or
+failed capture is alerted and not retried for the same drift. The first
+acceptance may show a macOS prompt asking to let python3 control BetterTouchTool;
+allow it, or that edit is alerted instead. Manual `monitor` passes never accept.
+`guard acceptance` prints the pending and last accepted/refused change read-only;
+state is in `.local/btt-guard/edit-acceptance.json`. Earlier checkpoints stay on
+disk (`guard checkpoint --list`), each with its full SQLite backup and BTT export.
 
 `guard service status` distinguishes job supervision from `audit_status`; a
 running monitor reporting unavailable is not proof that the menu is healthy.

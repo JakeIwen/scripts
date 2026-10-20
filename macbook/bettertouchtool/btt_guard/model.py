@@ -44,6 +44,27 @@ class ExportUnavailableError(RuntimeError):
     """The owning user's BTT Apple Events export could not be read."""
 
 
+class EditAcceptanceAction(str, Enum):
+    """The scheduled monitor's decision about drift made inside a running BTT."""
+    NOT_NEEDED = 'not_needed'
+    SETTLING = 'settling'
+    ACCEPTED = 'accepted'
+    REFUSED = 'refused'
+    INELIGIBLE = 'ineligible'
+
+
+class EditAcceptanceReason(str, Enum):
+    CAPTURE_REFUSED = 'capture_refused'
+    EXPORT_UNAVAILABLE = 'export_unavailable'
+    CAPTURE_FAILED = 'capture_failed'
+
+
+class AcceptanceStateKind(str, Enum):
+    NONE = 'none'
+    OK = 'ok'
+    UNREADABLE = 'unreadable'
+
+
 class FindingKind(str, Enum):
     MISSING = 'missing'
     REPARENTED = 'reparented'
@@ -143,6 +164,49 @@ class InstallerEditReceipt(TypedDict):
 class ToolsInstallerReceipt(InstallerEditReceipt):
     """install_tools_menu_item.js output; saved_plan uses btt_common.disk_errors."""
     saved_plan: dict[str, Any]
+
+
+class BttProcess(TypedDict):
+    pid: int
+    started: str
+
+
+class AcceptanceBaseline(TypedDict):
+    """The BTT session seen at the last healthy scheduled audit."""
+    checkpoint_id: str
+    btt_version: Optional[str]
+    process: BttProcess
+
+
+class AcceptanceCandidate(TypedDict):
+    key: str
+    since: float
+
+
+class AcceptanceEvent(TypedDict):
+    at: float
+    checkpoint_id: Optional[str]
+    reason: Optional[str]
+    findings: int
+
+
+class EditAcceptanceState(TypedDict):
+    version: int
+    baseline: Optional[AcceptanceBaseline]
+    candidate: Optional[AcceptanceCandidate]
+    refused_key: Optional[str]
+    last_accepted: Optional[AcceptanceEvent]
+    last_refused: Optional[AcceptanceEvent]
+
+
+class AcceptanceStatus(TypedDict):
+    """Read-only `guard acceptance` output for the Mac Panel."""
+    state: str
+    settle_seconds: int
+    pending_since: Optional[float]
+    accepts_at: Optional[float]
+    last_accepted: Optional[AcceptanceEvent]
+    last_refused: Optional[AcceptanceEvent]
 
 
 class CheckpointManifest(TypedDict):

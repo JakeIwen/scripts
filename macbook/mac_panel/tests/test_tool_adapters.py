@@ -58,20 +58,36 @@ class GuardTests(unittest.TestCase):
         audit = {'status': 'drift', 'checkpoint_id': 'cp-one', 'checked_at': 1780000000.0,
                  'btt_version': '5', 'findings': [{'kind': 'missing', 'uuid': 'x', 'detail': 'Missing'}]}
         service = {'installed': False, 'supervised': False, 'job': {}, 'heartbeat': {}, 'audit_status': None}
+        acceptance = {'state': 'ok', 'settle_seconds': 600, 'pending_since': 1780000000.0,
+                      'accepts_at': 1780000600.0, 'last_accepted': None,
+                      'last_refused': {'at': 1779990000, 'checkpoint_id': None, 'reason': 'capture_refused',
+                                       'findings': 2}}
         runner = FakeRunner([json_command([]), json_command(audit, 2), json_command(service, 2),
+                             json_command(acceptance),
                              json_command(audit, 2), json_command({'btt_version': '5', 'records': 2,
                                                                 'findings': audit['findings']}, 2)])
         adapter = GuardAdapter(runner, read_wait=0.01)
         payload = adapter.read()
         self.assertFalse(payload['service']['supervised'])
         self.assertEqual(payload['audit']['status'], 'drift')
+        self.assertEqual(payload['acceptance']['accepts_at'], 1780000600.0)
         self.assertIn('audit', runner.calls[1][0])
+        self.assertEqual(runner.calls[3][0][-1], 'acceptance')
         self.assertEqual(adapter.action({'action': 'audit'})['status'], 'drift')
         self.assertEqual(len(adapter.action({'action': 'inspect'})['findings']), 1)
         with adapter.busy():
             with self.assertRaises(ApiError) as raised:
                 adapter.read()
             self.assertEqual(raised.exception.status, 409)
+
+    def test_malformed_acceptance_is_rejected(self):
+        service = {'installed': True, 'supervised': True, 'job': {}, 'heartbeat': {}, 'audit_status': 'healthy'}
+        audit = {'status': 'healthy', 'checkpoint_id': 'cp-one', 'checked_at': 1.0, 'btt_version': '5', 'findings': []}
+        for broken in ({'state': 'ok'}, {'state': 'odd', 'settle_seconds': 600, 'pending_since': None,
+                                         'accepts_at': None, 'last_accepted': None, 'last_refused': None}):
+            runner = FakeRunner([json_command([]), json_command(audit), json_command(service), json_command(broken)])
+            with self.assertRaises(ApiError):
+                GuardAdapter(runner, read_wait=0.01).read()
 
 
 if __name__ == '__main__':

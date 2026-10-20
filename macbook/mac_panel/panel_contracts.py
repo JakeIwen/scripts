@@ -149,6 +149,8 @@ class GuardPayload(TypedDict):
     checkpoints: list[dict]
     audit: dict
     service: dict
+    # `guard acceptance`: the scheduled monitor's pending and last automatic acceptances.
+    acceptance: dict
 
 
 class AlertRecord(TypedDict):

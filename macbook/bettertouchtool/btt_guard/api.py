@@ -1,4 +1,5 @@
-"""Owner-session BTT API boundary. The unattended monitor never imports/calls it."""
+"""Owner-session BTT API boundary. The unattended monitor reaches it only through
+edit_acceptance's checkpoint capture, which is why that monitor runs in the login session."""
 import json
 from pathlib import Path
 import subprocess
