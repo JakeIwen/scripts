@@ -1,22 +1,18 @@
-// Pure transcript cleaning: no engine access, so it ports to a file-based
-// reader (Codex rollouts) unchanged. `cleanTurn` takes the session's messages
-// and returns the chosen reply as markdown with tool calls removed.
+// Pure reply cleaning: no engine access, so it ports to a file-based reader
+// (Codex rollouts) unchanged. A reply becomes a list of parts, and FILTERS
+// turn that list into the text the pane shows. exchanges.ts and
+// turn-endings.ts choose which replies to clean.
 import type { SessionMessage } from 'claude-code'
 
-export type CleanOptions = {
-  /** Which reply, counted back from the newest: 1 = the last one. */
-  back: number
-  /** Copy to the clipboard instead of opening the pane. */
-  copy: boolean
-  /** Keep one-line tool summaries instead of dropping tool calls. */
-  tools: boolean
-  /** Show each turn's ending since the last typed prompt (turn-endings.ts). */
-  turns: boolean
-}
+import type { CleanOptions } from '../types'
+
+export type { CleanOptions } from '../types'
 
 export type Part =
   | { kind: 'text'; text: string }
   | { kind: 'tool'; text: string; tool: string }
+  /** One dim line marking a worker message, notice or wake-up inside an exchange. */
+  | { kind: 'divider'; text: string }
 
 /**
  * One filter over the reply's parts. Add a new one by appending to FILTERS:
@@ -47,36 +43,25 @@ export const FILTERS: Filter[] = [
     name: 'drop-empty',
     apply: parts => parts.filter(p => p.text !== ''),
   },
+  {
+    // A run of dividers with nothing between them keeps only its last; a
+    // divider with nothing after it is dropped.
+    name: 'collapse-dividers',
+    apply: parts =>
+      parts.filter((p, i) => p.kind !== 'divider' || (i + 1 < parts.length && parts[i + 1]?.kind !== 'divider')),
+  },
 ]
 
 export function parseArgs(args: string): CleanOptions {
-  const opts: CleanOptions = { back: 1, copy: false, tools: false, turns: false }
+  const opts: CleanOptions = { count: 'all', copy: false, markdown: false, tools: false, turns: false }
   for (const word of args.trim().split(/\s+/).filter(Boolean)) {
-    if (/^\d+$/.test(word)) opts.back = Math.max(1, Number(word))
+    if (/^\d+$/.test(word)) opts.count = Math.max(1, Number(word))
     else if (word === 'copy') opts.copy = true
+    else if (word === 'md') opts.markdown = true
     else if (word === 'tools') opts.tools = true
     else if (word === 'turns') opts.turns = true
   }
   return opts
-}
-
-/** A user message the person wrote (or a command row), not a tool-result carrier. */
-const isPrompt = (m: SessionMessage): boolean =>
-  m.role === 'user' && !(m.toolResults && m.toolResults.length > 0)
-
-/** Groups assistant messages into replies, one group per user prompt. */
-export function replies(messages: readonly SessionMessage[]): SessionMessage[][] {
-  const out: SessionMessage[][] = []
-  let current: SessionMessage[] = []
-  for (const m of messages) {
-    if (m.role === 'assistant') current.push(m)
-    else if (isPrompt(m)) {
-      if (current.length > 0) out.push(current)
-      current = []
-    }
-  }
-  if (current.length > 0) out.push(current)
-  return out
 }
 
 const oneLine = (value: unknown, max = 100): string => {
@@ -99,24 +84,9 @@ const summarizeTool = (use: SessionMessage['toolUses'][number]): string => {
 export function partsOf(reply: readonly SessionMessage[]): Part[] {
   const parts: Part[] = []
   for (const m of reply) {
+    if (m.role !== 'assistant') continue
     if (m.text) parts.push({ kind: 'text', text: m.text })
     for (const use of m.toolUses) parts.push({ kind: 'tool', tool: use.tool, text: summarizeTool(use) })
   }
   return parts
-}
-
-export type Cleaned = { text: string; label: string }
-
-export function cleanTurn(
-  messages: readonly SessionMessage[],
-  opts: CleanOptions,
-  filters: readonly Filter[] = FILTERS,
-): Cleaned | undefined {
-  const all = replies(messages)
-  const reply = all[all.length - opts.back]
-  if (reply === undefined) return undefined
-  const parts = filters.reduce((acc, f) => f.apply(acc, opts), partsOf(reply))
-  const text = parts.map(p => p.text).join('\n\n')
-  const label = opts.back === 1 ? `last reply` : `reply ${opts.back} back`
-  return { text, label: `${label} (${all.length} in session)` }
 }

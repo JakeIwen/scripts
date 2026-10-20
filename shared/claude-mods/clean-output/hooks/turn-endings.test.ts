@@ -1,25 +1,13 @@
 import { test, expect } from 'claude-code/testing'
-import type { SessionMessage } from 'claude-code'
 
 import { parseArgs } from './clean'
-import { promptHead, promptKind, turnEndings } from './turn-endings'
-
-const user = (text: string): SessionMessage => ({ role: 'user', text, toolUses: [] })
-const toolResult = (): SessionMessage => ({
-  role: 'user',
-  text: '',
-  toolUses: [],
-  toolResults: [{ tool_use_id: 't1', text: 'out', isError: false }],
-})
-const assistant = (text: string, command?: string): SessionMessage => ({
-  role: 'assistant',
-  text,
-  toolUses: command ? [{ tool_use_id: 't1', tool: 'Bash', input: { command } }] : [],
-})
+import { promptHead, promptKind } from './prompt-kinds'
+import { assistant, toolResult, user } from './test-messages'
+import { turnEndings } from './turn-endings'
 
 const WAKE = 'Check on the storage worker; if done, run the full check.'
 
-const session: SessionMessage[] = [
+const session = [
   user('old question'),
   assistant('Old answer.'),
   user('fix these 10 things +sa'),
@@ -36,17 +24,23 @@ const session: SessionMessage[] = [
   assistant('Nothing new. Waiting on you: say deploy.'),
 ]
 
+const records = [
+  { head: promptHead('fix these 10 things +sa'), kind: 'composer' },
+  { head: promptHead(WAKE), kind: 'scheduled-trigger' },
+]
+
 test('lists each turn ending since the last typed prompt, labelled by what started it', () => {
-  const records = [{ head: promptHead(WAKE), kind: 'scheduled-trigger' }]
-  const out = turnEndings(session, records, parseArgs('turns'))
-  expect(out?.label).toBe('turn endings since your last prompt (4)')
-  const text = out?.text ?? ''
-  expect(text.includes('Old answer.')).toBe(false)
-  expect(text.includes('Launching workers.')).toBe(false)
-  expect(text.includes('### Turn 1 of 4 · after your prompt\n\nThree workers are running.')).toBe(true)
-  expect(text.includes('after a worker message\n\nThe editor worker is halfway.')).toBe(true)
-  expect(text.includes('after a background task finishing\n\nAll 10 items are done.')).toBe(true)
-  expect(text.includes('### Turn 4 of 4 · after a scheduled wake-up')).toBe(true)
+  const view = turnEndings(session, records, parseArgs('turns'))
+  expect(view?.label).toBe('turn endings since your last prompt (4)')
+  const bands = view?.sections.map(s => s.prompt) ?? []
+  expect(bands).toEqual([
+    'Turn 1 of 4 · after your prompt\nfix these 10 things +sa',
+    'Turn 2 of 4 · after a worker message',
+    'Turn 3 of 4 · after a background task finishing',
+    'Turn 4 of 4 · after a scheduled wake-up',
+  ])
+  expect(view?.sections[0]?.reply).toBe('Three workers are running.')
+  expect(view?.sections[2]?.reply.startsWith('All 10 items are done.')).toBe(true)
 })
 
 test('without a record, an unmarked wake-up counts as a typed prompt', () => {
@@ -54,15 +48,12 @@ test('without a record, an unmarked wake-up counts as a typed prompt', () => {
   expect(turnEndings(session, [], parseArgs('turns'))?.label).toBe('turn endings since your last prompt (1)')
 })
 
-test('a recorded slash command never becomes the last typed prompt', () => {
+test('a slash command never becomes the last typed prompt', () => {
   const withCommand = [...session, user('<command-name>/clean</command-name>')]
-  const records = [{ head: promptHead(WAKE), kind: 'scheduled-trigger' }]
-  expect(turnEndings(withCommand, records, parseArgs('turns'))?.label).toBe(
-    'turn endings since your last prompt (4)',
-  )
+  expect(turnEndings(withCommand, records, parseArgs('turns'))?.label).toBe('turn endings since your last prompt (4)')
 })
 
 test('a compaction summary is not mistaken for a typed prompt', () => {
-  const summary = user('This session is being continued from a previous conversation that ran out of context.')
-  expect(promptKind(summary.text, [])).toBe('compaction')
+  const summary = 'This session is being continued from a previous conversation that ran out of context.'
+  expect(promptKind(summary, [])).toBe('compaction')
 })
