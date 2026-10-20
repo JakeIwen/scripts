@@ -252,6 +252,18 @@ if current_target=$(/usr/bin/readlink "$live_root/current" 2>/dev/null); then
 fi
 
 replace_link "releases/$release_id" "$live_root/current"
+
+# Keep only current and previous (the --rollback target).  An older build is
+# redeployed from its Git commit instead.
+keep_current=$(/usr/bin/readlink "$live_root/current")
+keep_previous=$(/usr/bin/readlink "$live_root/previous" 2>/dev/null || true)
+for path in "$releases"/*; do
+  [[ -d "$path" && ! -L "$path" ]] || continue
+  name=${path##*/}
+  if [[ "releases/$name" != "$keep_current" && "releases/$name" != "$keep_previous" ]]; then
+    rm -rf -- "$path"
+  fi
+done
 INSTALL
 fi
 

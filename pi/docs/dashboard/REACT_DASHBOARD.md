@@ -41,6 +41,11 @@ check:
 ./pi/deploy_van_dashboard_frontend.sh --rollback
 ```
 
+Each deploy keeps only the `current` and `previous` releases and deletes the
+rest. To go back further, check out the older commit (a `git worktree` works)
+and run the helper from there; it builds and publishes that state as a new
+release.
+
 The network-storage installer also publishes a release into this directory
 when it ships a frontend build; see the
 [flight recorder runbook](../networking/NETWORK_FLIGHT_RECORDER.md).
