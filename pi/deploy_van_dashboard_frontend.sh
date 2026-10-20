@@ -261,7 +261,7 @@ for path in "$releases"/*; do
   [[ -d "$path" && ! -L "$path" ]] || continue
   name=${path##*/}
   if [[ "releases/$name" != "$keep_current" && "releases/$name" != "$keep_previous" ]]; then
-    rm -rf -- "$path"
+    rm -rf -- "$path" || echo "warning: could not delete old release $name" >&2
   fi
 done
 INSTALL

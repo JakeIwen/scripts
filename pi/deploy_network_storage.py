@@ -646,7 +646,10 @@ def apply(plan, stage):
             target=frontend/row['relative'];target.parent.mkdir(parents=True,exist_ok=True)
             shutil.copyfile(stage/f'frontend-{index}',target)
         (frontend/'BUILD_ID').write_text(plan['release']+'\n')
-        for path in [frontend,*frontend.rglob('*')]:path.chmod(0o755 if path.is_dir() else 0o644)
+        for path in [frontend,*frontend.rglob('*')]:
+            path.chmod(0o755 if path.is_dir() else 0o644)
+            # The frontend deployer runs as pi and deletes old releases.
+            os.chown(path,pi.pw_uid,pi.pw_gid,follow_symlinks=False)
         plan['installed_tree_sha256']=base.tree_digest(frontend)
         (root/'manifest.json').write_text(json.dumps(plan,indent=2)+'\n')
         base.atomic_link(plan['frontend_before']['current'],base.FRONTEND/'previous')

@@ -175,6 +175,10 @@ class FullStorageUpdateTests(unittest.TestCase):
         self.assertTrue(result['ok'])
         self.assertEqual(self.dropin.read_bytes(), b'new=True\n')
         self.assertEqual((self.frontend / 'current/index.html').read_bytes(), b'new frontend')
+        release = self.frontend / 'releases' / self.plan['release']
+        owned_by_pi = {Path(call.args[0]) for call in deploy.os.chown.call_args_list
+                       if call.args[1:3] == (os.getuid(), os.getgid())}
+        self.assertLessEqual({release, release / 'index.html', release / 'BUILD_ID'}, owned_by_pi)
         self.assert_backend_untouched()
         self.database.write_bytes(b'history collected since deployment')
         deploy.rollback(self.plan['release'])
