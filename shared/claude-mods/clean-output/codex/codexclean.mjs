@@ -174,13 +174,19 @@ export function terminalText(view, meta, columns) {
 
 const escapeHtml = text => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
-/** The view as a page body for agent_art.py: each prompt quoted above its reply. */
+/**
+ * Each prompt on its own band, as the terminal and the Claude pane shade the
+ * person's messages. `--line` is the template's border tone, set for light
+ * and dark; `--panel` would read as a code block.
+ */
+const PAGE_STYLE =
+  '<style>.prompt { background: var(--line); padding: 8px 12px; border-radius: 6px; margin: 1.6rem 0 0.8rem; white-space: pre-wrap; overflow-wrap: anywhere; }</style>'
+
+/** The view as a page body for agent_art.py: each prompt on a band above its reply. */
 export function pageHtml(view, meta) {
   const head = `<p><code>${escapeHtml(meta?.cwd ?? '')}</code> · session <code>${escapeHtml(meta?.id ?? '')}</code> · ${escapeHtml(view.label)}</p>`
-  const sections = view.sections.map(
-    s => `<blockquote><p>${escapeHtml(s.prompt).replace(/\n/g, '<br>')}</p></blockquote>\n${markdownToHtml(s.reply)}`,
-  )
-  return [head, ...sections].join('\n<hr>\n')
+  const sections = view.sections.map(s => `<div class="prompt">${escapeHtml(s.prompt)}</div>\n${markdownToHtml(s.reply)}`)
+  return [PAGE_STYLE, head, ...sections].join('\n')
 }
 
 function readPages() {
