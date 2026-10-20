@@ -12,7 +12,9 @@ import unittest
 SCRIPTS = Path(__file__).resolve().parents[1] / 'sh'
 
 
-class SessionSearchTests(unittest.TestCase):
+class SessionFixtureTestCase(unittest.TestCase):
+    """Claude and Codex session stores under a temporary root."""
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
@@ -48,6 +50,8 @@ class SessionSearchTests(unittest.TestCase):
         os.utime(path, (modified, modified))
         return path
 
+
+class SessionSearchTests(SessionFixtureTestCase):
     def search(self, tool, *args):
         environment = dict(os.environ, HOME=str(self.home))
         for provider in ('claude', 'codex'):

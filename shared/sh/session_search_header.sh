@@ -41,13 +41,20 @@ session_search_parse_args() {
 
 # Use modification time: searching a transcript must not reset its activity age.
 session_search_header() {
-    local name=$1 file=$2
-    local modified elapsed count unit age
-    modified=$(session_search_modified "$file") || modified=""
+    local modified
+    modified=$(session_search_modified "$2") || modified=""
+    session_search_header_at "$1" "$modified"
+}
+
+# Takes the activity time in epoch seconds. Under bash 5 it forks nothing, so
+# llmsearch can label hundreds of index results quickly on the Pi.
+session_search_header_at() {
+    local name=$1 modified=$2
+    local elapsed count unit age line
     case "$modified" in
         ''|*[!0-9]*) age="unknown age" ;;
         *)
-            elapsed=$(( $(date +%s) - modified ))
+            elapsed=$(( ${EPOCHSECONDS:-$(date +%s)} - modified ))
             [ "$elapsed" -ge 0 ] || elapsed=0
             if [ "$elapsed" -lt 86400 ]; then
                 count=$((elapsed / 3600))
@@ -60,9 +67,8 @@ session_search_header() {
             age="$count $unit ago"
             ;;
     esac
-    printf '%s | %s' "$age" "$name" |
-        tr '\n\r\t' '   '
-    printf '\n'
+    line="$age | $name"
+    printf '%s\n' "${line//[$'\n\r\t']/ }"
 }
 
 session_search_quote_word() {

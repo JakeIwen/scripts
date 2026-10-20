@@ -12,20 +12,27 @@ def session_search_record($provider; $cwd; $modified; $header; $resume; $context
         count: .count, header: $header, resume: $resume, context: $context
     };
 
-def session_search_group_directories:
-    reduce inputs as $record ({};
+def session_search_record_text:
+    "\(.count) matches | \(.header)\n\(.resume)\n\(.context)\n";
+
+# Groups records by tool and directory, in print order: each group is its
+# latest record with the group's total count. `session` tells sessions apart.
+def session_search_group(records; session):
+    reduce records as $record ({};
         # Without a cwd, keep sessions separate instead of inventing a directory.
         ([$record.provider, $record.cwd,
-          (if $record.cwd == "" then $record.resume else "" end)] | tojson) as $key |
+          (if $record.cwd == "" then $record | session else "" end)] | tojson) as $key |
         .[$key] as $previous |
         if $previous == null then .[$key] = $record
         else
             ($previous.count + $record.count) as $count |
-            (if [$record.matched_at, $record.modified, $record.resume] >
-                [$previous.matched_at, $previous.modified, $previous.resume]
+            (if [$record.matched_at, $record.modified, ($record | session)] >
+                [$previous.matched_at, $previous.modified, ($previous | session)]
              then $record else $previous end) as $latest |
             .[$key] = ($latest + {count: $count})
         end) |
     [.[]] | group_by(.cwd) | sort_by(map(.modified) | max) | .[] |
-    sort_by(.provider)[] |
-    "\(.count) matches | \(.header)\n\(.resume)\n\(.context)\n";
+    sort_by(.provider)[];
+
+def session_search_group_directories:
+    session_search_group(inputs; .resume) | session_search_record_text;
