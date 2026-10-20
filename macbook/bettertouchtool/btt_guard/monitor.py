@@ -203,7 +203,7 @@ def _validated_report(
     return status, cast(Sequence[Finding], findings)
 
 
-def _report_key(report: AuditReport, status: AuditStatus, findings: Sequence[Finding]) -> str:
+def report_key(report: AuditReport, status: AuditStatus, findings: Sequence[Finding]) -> str:
     stable_findings = sorted((item["kind"], item["uuid"], item["detail"]) for item in findings)
     identity = [status, report.get("checkpoint_id"), report.get("btt_version"), stable_findings]
     return hashlib.sha256(json.dumps(identity, separators=(",", ":")).encode()).hexdigest()
@@ -265,7 +265,7 @@ def monitor_report(
             return MonitorResult(current, status, "pending", "recovery")
         return _deliver(current, status, recovery_notification(), "recovery", sender, now)
 
-    incident_key = _report_key(report, status, findings)
+    incident_key = report_key(report, status, findings)
     if current["last_alert_key"] == incident_key:
         _clear_candidate(current)
         return MonitorResult(current, status, "deduplicated", "alert")

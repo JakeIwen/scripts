@@ -129,20 +129,25 @@ def run_monitor(state_dir, *, notify=True, managed=False):
             report['findings'].append({'kind': FindingKind.MONITOR_STATE_INVALID.value,
                                        'uuid': '', 'detail': 'notification state needs review'})
         write_json(state/'last-audit.json', report)
-        sender = send_warning_notification if notify else lambda _: False
-        result = monitor_report(report, state=selection.state, sender=sender, now=time.time())
-        if notify:
-            destination = primary if selection.write_target == 'primary' else fallback
-            if destination == fallback and selection.reason in ('both-invalid', 'recovery-invalid'):
-                _archive_recovery_state(fallback)
-            write_json(destination, result.state)
-            if selection.adopt_recovery:
-                _archive_recovery_state(fallback)
+        notification = _notify(report, selection, notify, primary, fallback)
         health: MonitorHealth = dict(schema_version=SCHEMA_VERSION, run_id=str(uuid4()), pid=os.getpid(),
             uid=os.getuid(), root=str(ROOT), completed_at=time.time(), audit_status=report['status'])
         write_json(state/('monitor-health.json' if managed else 'manual-audit-health.json'), health)
         return {'audit_status': report['status'], 'findings': len(report['findings']),
-                'notification': result.action if notify else 'suppressed', 'run_id': health['run_id']}
+                'notification': notification, 'run_id': health['run_id']}
+
+
+def _notify(report, selection, notify, primary, fallback):
+    sender = send_warning_notification if notify else lambda _: False
+    result = monitor_report(report, state=selection.state, sender=sender, now=time.time())
+    if notify:
+        destination = primary if selection.write_target == 'primary' else fallback
+        if destination == fallback and selection.reason in ('both-invalid', 'recovery-invalid'):
+            _archive_recovery_state(fallback)
+        write_json(destination, result.state)
+        if selection.adopt_recovery:
+            _archive_recovery_state(fallback)
+    return result.action if notify else 'suppressed'
 
 
 def parser():
