@@ -54,8 +54,8 @@ The pane text is also mouse-selectable like any other terminal text.
 filter is `{ name, apply(parts, opts) }` over `Part` values
 (`{ kind: 'text' | 'tool' | 'divider', text }`). Append one to the array; the
 pane picks it up on the next `/reload-plugins`. The files under `hooks/` have
-no engine dependency except `register.tsx`, so the same code can read a Codex
-rollout once a loader for that format exists:
+no engine dependency except `register.tsx`, so `codexclean` (below) reuses
+them for Codex sessions:
 
 - `clean.ts`: options, parts and filters.
 - `prompt-kinds.ts`: where each prompt row came from (typed, slash command,
@@ -66,6 +66,43 @@ rollout once a loader for that format exists:
   where the pane opens, and the status line.
 - `markdown.ts`: reply markdown as plain text (copies) or an HTML fragment
   (codexclean's page).
+- `codex-rollout.ts`: a Codex session file as rows and prompt records.
+
+## codexclean (Codex)
+
+The same view for a Codex session, as a shell command on the Mac and the Pi:
+
+    codexclean [N] [turns] [tools] [md] [copy | open | watch | print] [--session <id|file>]
+
+It reads `~/.codex/sessions/**/rollout-*.jsonl`: the `--session` id or file,
+else the session it runs in (`$CODEX_THREAD_ID`, set for Codex's `!`
+commands), else the newest session started in the current folder. Codex logs
+each typed prompt and each turn's trigger, so grouping needs no guessing: a
+goal continuation or compaction is one divider line, and a `!command` is left
+out. Files from before Codex logged items (about 2026-09) read from their
+message events.
+
+- No mode prints to the terminal, paged with `less` (opening at the end)
+  when longer than a screen, each prompt on a shaded band.
+- `copy` copies the plain text (`md` for markdown) and prints one line.
+- `open` saves the view as a page in `~/.agent/artifacts/` with
+  `agent_art.py`, one page per session rewritten each time, and opens it on
+  the Mac; the Pi prints the page's path under the Mac's mount.
+- `watch` redraws the newest exchange (or the last N) as Codex writes it.
+  Run it in its own pane: `codexclean watch --session <id>`.
+- Inside Codex, a `!command`'s output is recorded as a user message, so it
+  joins the model's context. A bare `!codexclean` therefore saves and opens
+  the page and prints one line; `!codexclean print` prints anyway, and
+  `!codexclean watch` prints the split-pane command with this session's id.
+
+`codex/build.mjs` strips the TypeScript types from the modules above
+(Node >= 22.13) and lays them out with `codex/codexclean.mjs` as plain ES
+modules, which run on Node 20 (the Pi's). `zsh codex/deploy.zsh` builds and
+installs that on the Pi, then the Mac: `~/.local/share/codexclean/` and a
+launcher at `~/.local/bin/codexclean`. The installed copies don't follow the
+checkout: re-run it after editing any of those modules. `codex/codexclean.test.mjs`
+(`node --test`) builds into a temp folder and runs the CLI against a
+synthetic Codex home.
 
 ## Load it
 

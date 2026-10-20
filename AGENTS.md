@@ -166,6 +166,14 @@ compare it with this checkout. Deployed files may differ from the repository.
   bare `+cmd` without a model turn and passes every other prompt through.
   `uncommitted_owners.py` and `plus_commands.py` sit flat in `/home/pi/scripts/`
   on the Pi, next to `llm_restore.py`.
+- `shared/claude-mods/clean-output/` is the Claude Code mod behind `/clean`
+  (usage in its README). Its engine-free modules (`hooks/*.ts` except
+  `register.tsx`) also make `codexclean`, the same view of a Codex session:
+  `codex/build.mjs` strips their types (Node >= 22.13) into plain modules that
+  run on the Pi's Node 20, and `zsh codex/deploy.zsh` installs them on the Pi,
+  then the Mac, in `~/.local/share/codexclean/` with a launcher at
+  `~/.local/bin/codexclean`. The installed copies don't follow the checkout:
+  re-run the deploy after editing any of those modules.
 - Dashboard Sonos alarms live in `pi/apps/van_dashboard/sonos_alarms.py`, with
   HTTP routes in `routes/sonos_alarms.py` and React controls in `features/sonos/`.
   `SonosAlarm` owns the device record; `alarms.ts` owns the validated UI contract.
