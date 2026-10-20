@@ -15,8 +15,12 @@ function exitWords(code) {
   return `last exit ${code}`;
 }
 
+// launchd lists the job as disabled, as the local-service `stop` verb leaves it: off on purpose.
+const isDisabled = service => service.loaded === false && service.disabled;
+
 export function serviceState(service) {
   if (service.loaded === null) return {level: Level.UNKNOWN, text: 'unknown', detail: service.error || 'launchd gave no status'};
+  if (isDisabled(service)) return {level: Level.IDLE, text: 'disabled', detail: 'launchd will not start it until it is enabled'};
   if (service.loaded === false) return {level: Level.WARN, text: 'not loaded', detail: exitWords(service.last_exit)};
   if (service.pid) return {level: Level.OK, text: `running · pid ${service.pid}`, detail: exitWords(service.last_exit)};
   const failed = service.last_exit !== null && service.last_exit !== 0;
@@ -94,21 +98,25 @@ function serviceRow(service) {
 }
 
 export function render(data) {
-  const counts = {running: 0, idle: 0, attention: 0};
+  const counts = {running: 0, idle: 0, disabled: 0, attention: 0};
   const levels = [];
   const rows = data.services.map(service => {
     const {state, cells} = serviceRow(service);
     levels.push(state.level);
     if (state.level === Level.OK) counts.running += 1;
+    else if (isDisabled(service)) counts.disabled += 1;
     else if (state.level === Level.IDLE) counts.idle += 1;
     else counts.attention += 1;
     return cells;
   });
   const root = node('div');
-  const attention = counts.attention ? `${counts.attention} need attention` : '';
-  const line = [`${counts.running} running`, `${counts.idle} idle`, attention].filter(Boolean).join(' · ');
+  const attention = counts.attention ? `${counts.attention} ${counts.attention === 1 ? 'needs' : 'need'} attention` : '';
+  const disabled = counts.disabled ? `${counts.disabled} disabled` : '';
+  const line = [`${counts.running} running`, `${counts.idle} idle`, disabled, attention].filter(Boolean).join(' · ');
   root.append(node('p', line, 'summary-line'), table(['Service', 'State', 'Logs', 'Action'], rows));
-  // The nav has room for the count that matters, not the whole breakdown.
+  // The tab tooltip has room for the count that matters, not the whole breakdown.
   const summary = [`${counts.running} running`, attention].filter(Boolean).join(' · ');
-  return {node: root, summary, level: worst(levels)};
+  // Anything needing attention marks the tab at least yellow, even a service whose state is unknown;
+  // idle and disabled services are normal, so otherwise the tab is green.
+  return {node: root, summary, level: counts.attention ? worst([...levels, Level.WARN]) : Level.OK};
 }

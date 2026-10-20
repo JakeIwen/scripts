@@ -91,6 +91,8 @@ class ServiceRecord(TypedDict):
     label: str
     kind: str
     loaded: bool | None
+    # True only for an unloaded job that launchd lists as disabled (stopped on purpose).
+    disabled: bool
     state: str
     pid: int | None
     last_exit: int | None

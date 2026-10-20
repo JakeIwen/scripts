@@ -11,6 +11,7 @@ from services_adapter import ServicesAdapter, parse_list, parse_print
 
 LIST = 'PID\tStatus\tLabel\n20\t0\tcom.jacobr.running\n-\t3\tcom.jacobr.idle\n10\t0\tcom.apple.other\n'
 MISSING = 'Could not find service "com.jacobr.daemon" in domain for system'
+NONE_DISABLED = 'disabled services = {\n}\n'
 
 
 def fixture(root):
@@ -38,20 +39,40 @@ class ServicesTests(unittest.TestCase):
     def test_inventory_carries_log_metadata_without_tails(self):
         with tempfile.TemporaryDirectory() as directory:
             agents, daemons = fixture(Path(directory))
-            runner = FakeRunner([CommandResult(0, LIST), CommandResult(1, stderr=MISSING)])
+            runner = FakeRunner([CommandResult(0, LIST), CommandResult(1, stderr=MISSING),
+                                 CommandResult(0, 'disabled services = {\n\t"com.jacobr.unloaded" => disabled\n}\n'),
+                                 CommandResult(0, 'disabled services = {\n\t"com.jacobr.daemon" => enabled\n}\n')])
             rows = ServicesAdapter(runner, agents, daemons, uid=501).read()['services']
             self.assertEqual(len(rows), 4)
+            self.assertEqual([call[0][1:] for call in runner.calls[2:]],
+                             [('print-disabled', 'gui/501'), ('print-disabled', 'system')])
             unloaded = next(row for row in rows if row['label'].endswith('unloaded'))
             self.assertFalse(unloaded['loaded'])
+            self.assertTrue(unloaded['disabled'])
+            self.assertFalse(next(row for row in rows if row['label'].endswith('idle'))['disabled'])
             self.assertEqual(len(unloaded['logs']), 1)
             self.assertEqual(set(unloaded['logs'][0]), {'path', 'stream', 'modified', 'error'})
             self.assertEqual(unloaded['logs'][0]['stream'], LogStream.STDOUT)
             self.assertIsInstance(unloaded['logs'][0]['modified'], float)
             daemon = next(row for row in rows if row['kind'] == ServiceKind.DAEMON)
+            self.assertEqual(daemon['state'], 'not loaded')
+            self.assertIs(daemon['loaded'], False)
+            self.assertFalse(daemon['disabled'])
+            self.assertIsNone(daemon['error'])
+            self.assertEqual([log['stream'] for log in daemon['logs']], [LogStream.STDOUT])
+
+    def test_daemon_print_failures_other_than_missing_stay_unknown(self):
+        with tempfile.TemporaryDirectory() as directory:
+            agents, daemons = fixture(Path(directory))
+            runner = FakeRunner([CommandResult(0, LIST), CommandResult(5, stderr='Operation not permitted'),
+                                 CommandResult(1, stderr='print-disabled failed')])
+            rows = ServicesAdapter(runner, agents, daemons, uid=501).read()['services']
+            # An unreadable disabled list keeps the unloaded agent's plain warning.
+            self.assertFalse(next(row for row in rows if row['label'].endswith('unloaded'))['disabled'])
+            daemon = next(row for row in rows if row['kind'] == ServiceKind.DAEMON)
             self.assertEqual(daemon['state'], 'unknown')
             self.assertIsNone(daemon['loaded'])
-            self.assertIn('Could not find service', daemon['error'])
-            self.assertEqual([log['stream'] for log in daemon['logs']], [LogStream.STDOUT])
+            self.assertIn('Operation not permitted', daemon['error'])
 
     def test_log_tails_are_fetched_per_label_and_redacted(self):
         with tempfile.TemporaryDirectory() as directory:

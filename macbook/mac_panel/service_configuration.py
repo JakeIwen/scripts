@@ -35,8 +35,8 @@ def assert_plist_identity(path, root=ROOT, uid=None):
         raise RuntimeError('Installed plist belongs to another checkout or user')
 
 
-def parse_enabled(text):
-    match = re.search(r'^\s*"' + re.escape(LABEL) + r'"\s*=>\s*(\w+)\s*$', text, re.M)
+def parse_enabled(text, label=LABEL):
+    match = re.search(r'^\s*"' + re.escape(label) + r'"\s*=>\s*(\w+)\s*$', text, re.M)
     if match is None:
         if 'disabled services = {' not in text:
             raise RuntimeError('Unrecognized launchctl print-disabled output')

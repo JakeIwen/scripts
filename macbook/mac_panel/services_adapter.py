@@ -9,12 +9,15 @@ from log_redaction import log_stat, log_tail, redact, safe_display_path
 from panel_contracts import (ApiError, LogStream, ServiceKind, ServiceLogsPayload, ServiceRecord,
                              ServicesPayload)
 from panel_paths import HOME
+from service_configuration import parse_enabled
 from wire_validation import confirm, field, object_fields
 
 LABEL_PATTERN = re.compile(r'^com\.jacobr\.[A-Za-z0-9_.-]+$')
 LOG_KEYS = (('StandardOutPath', LogStream.STDOUT), ('StandardErrorPath', LogStream.STDERR))
 # A plist pointing a stream at /dev/null has chosen to keep no log; the page should not list one.
 UNUSED_LOG = '/dev/null'
+# launchctl print's answer for a daemon plist that is installed but not bootstrapped (or booted out).
+NOT_LOADED = 'Could not find service'
 
 
 def parse_list(text):
@@ -93,17 +96,39 @@ class ServicesAdapter:
             if result.returncode == 0:
                 rows.append(self.row(label, ServiceKind.DAEMON, path, loaded=True, **parse_print(result.stdout)))
                 continue
-            # launchctl says why on stderr ("Could not find service … in domain for system").
-            reason = redact((result.stderr or result.stdout).strip()) or f'launchctl exited {result.returncode}'
+            # launchctl says why on stderr; any other failure leaves the state unknown.
+            detail = (result.stderr or result.stdout).strip()
+            if NOT_LOADED in detail:
+                rows.append(self.row(label, ServiceKind.DAEMON, path, loaded=False,
+                                     state='not loaded', pid=None, last_exit=None))
+                continue
+            reason = redact(detail) or f'launchctl exited {result.returncode}'
             rows.append(self.row(label, ServiceKind.DAEMON, path, reason, loaded=None,
                                  state='unknown', pid=None, last_exit=None))
+        self.mark_disabled(rows)
         return {'services': rows}
+
+    def mark_disabled(self, rows):
+        # The local-service `stop` verb disables a job so KeepAlive cannot undo it: a choice, not a fault.
+        domains = {ServiceKind.AGENT: f'gui/{self.uid}', ServiceKind.DAEMON: 'system'}
+        listings = {}
+        for row in rows:
+            if row['loaded'] is not False:
+                continue
+            if row['kind'] not in listings:
+                result = self.runner.run(('/bin/launchctl', 'print-disabled', domains[row['kind']]))
+                listings[row['kind']] = result.stdout if result.returncode == 0 else ''
+            try:
+                row['disabled'] = not parse_enabled(listings[row['kind']], row['label'])
+            except RuntimeError:
+                # Unreadable output leaves the plain "not loaded" warning in place.
+                row['disabled'] = False
 
     def row(self, label, kind, path, reason=None, **values) -> ServiceRecord:
         declared, error = plist_logs(path, label)
         return ServiceRecord(label=label, kind=kind, plist=str(path) if path else None,
                              logs=[log_stat(value, stream) for stream, value in declared],
-                             error=error or reason, **values)
+                             error=error or reason, disabled=False, **values)
 
     def logs(self, label) -> ServiceLogsPayload:
         if not LABEL_PATTERN.fullmatch(label):
