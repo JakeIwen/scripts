@@ -130,7 +130,8 @@ class CheckpointTests(unittest.TestCase):
         self.capture()
         broken=self.state/'monitor-state.json'
         broken.write_text('broken JSON');broken.chmod(0o600)
-        with patch.object(cli,'send_warning_notification',return_value=True) as sender:
+        with patch.object(cli,'send_warning_notification',return_value=True) as sender, \
+                patch.object(cli.edit_acceptance, 'running_btt', return_value=None):
             with patch.object(cli.time,'time',return_value=1000): first=cli.run_monitor(self.state,managed=True)
             with patch.object(cli.time,'time',return_value=1000 + DEBOUNCE_SECONDS + 1): second=cli.run_monitor(self.state,managed=True)
             with patch.object(cli.time,'time',return_value=1000 + 2 * (DEBOUNCE_SECONDS + 1)): third=cli.run_monitor(self.state,managed=True)

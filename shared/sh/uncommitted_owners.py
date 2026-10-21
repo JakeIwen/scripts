@@ -645,7 +645,7 @@ def _tty(pid: int) -> str | None:
     try:
         text = _run(["/bin/ps", "-o", "tty=", "-p", str(pid)]).stdout.strip()
         return text if text and text != "??" else None
-    except ToolError:
+    except (ToolError, OSError):
         return None
 
 
