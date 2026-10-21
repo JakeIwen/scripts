@@ -39,7 +39,7 @@ test('Control route runs only known actions from the same origin', async t => {
   const actions = [];
   const server = await createStatusServer({ snapshot: () => ({ ok: true }),
     pairing: { snapshot: () => ({}), refresh: () => true },
-    control: async action => { actions.push(action); return true; },
+    control: async (action, fields) => { actions.push([action, fields]); return true; },
   });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -52,7 +52,13 @@ test('Control route runs only known actions from the same origin', async t => {
   assert.equal((await post('{"action":"reboot"}')).status, 400);
   assert.equal((await post('not json')).status, 400);
   assert.equal((await post('{"action":"stop"}', 'https://evil.example')).status, 403);
-  assert.deepEqual(actions, ['pause']);
+  assert.equal((await post('{"action":"seek","offset":-20}')).status, 200);
+  assert.equal((await post('{"action":"seek","position":95.5}')).status, 200);
+  for (const bad of ['{"action":"seek"}', '{"action":"seek","position":-1}',
+    '{"action":"seek","position":10,"offset":5}', '{"action":"seek","offset":"20"}']) {
+    assert.equal((await post(bad)).status, 400, bad);
+  }
+  assert.deepEqual(actions, [['pause', {}], ['seek', { offset: -20 }], ['seek', { position: 95.5 }]]);
 });
 
 test('Status serves code locally, keeps health code-free and rejects cross-origin refresh', async t => {

@@ -433,6 +433,7 @@ rm_match_lines() {
 }
 
 kill_media() {
+  vantv_active && vantv_ctl stop > /dev/null
   log_position
   pk chrom omxplayer vlc
   sleep 2
@@ -772,9 +773,36 @@ playf() {
   done
 }
 
+### VAN TV ### (youtube-cast.service, port 8795 — http://vanpi.lan:8795)
+# While a cast is loaded, the transport commands the Mac's BTT media buttons send
+# over ssh (vlcmd, pp, play_status, kill_media) drive Van TV instead of VLC.
+VANTVAPI="http://localhost:8795/api"
+vantv_status() { curl -s -m 1 "$VANTVAPI/status" 2>/dev/null; }
+vantv_active() {
+  [[ $(vantv_status | jq -r '.player // empty' 2>/dev/null) =~ ^(LOADING|PLAYING|PAUSED)$ ]]
+}
+vantv_ctl() { # vantv_ctl <pause|resume|toggle|stop|next|previous|seek> [json fields, e.g. '"offset":-20']
+  curl -sS -m 10 -X POST -H 'Content-Type: application/json' \
+    -d "{\"action\":\"$1\"${2:+,$2}}" "$VANTVAPI/control"
+  echo
+}
+vantv_vlcmd() { # MPRIS-style vlcmd arguments, as the BTT buttons send them
+  case "$1" in
+    PlayPause) vantv_ctl toggle ;;
+    Play) vantv_ctl resume ;;
+    Pause) vantv_ctl pause ;;
+    Next) vantv_ctl next ;;
+    Previous) vantv_ctl previous ;;
+    Stop) vantv_ctl stop ;;
+    Seek) vantv_ctl seek "\"offset\":$(( ${2#int64:} / 1000000 ))" ;;
+    *) echo "Van TV has no $1" >&2; return 1 ;;
+  esac
+}
+
 vlcmd() {
   cmd=$1
   param=$2
+  if vantv_active; then vantv_vlcmd "$cmd" "$param"; return $?; fi
   case "$cmd" in
     PlayPause) video_action="toggle" ;;
     Play) video_action="play" ;;
@@ -832,7 +860,12 @@ vid() { # vid <fuzzy title> | -p play/pause | -b/-f 20s | -B/-F 5m | -n/-N next/
 }
 
 play_status() {
-  if [[ `pgrep vlc` ]]; then
+  local cast
+  cast=$(vantv_status)
+  if [[ $(jq -r '.player // empty' <<< "$cast" 2>/dev/null) =~ ^(LOADING|PLAYING|PAUSED)$ ]]; then
+    jq -rj 'def clock: floor | "\(./3600 | floor):\(. % 3600 / 60 | floor | tostring | if length < 2 then "0" + . else . end):\(. % 60 | tostring | if length < 2 then "0" + . else . end)";
+      "\(.video.title // "Van TV") \n\(.position | clock) / \(.duration | clock)"' <<< "$cast"
+  elif [[ `pgrep vlc` ]]; then
     keys="multi|REQ|WEBRip|Hi10p|ETRG|YTM\.AM|SKGTV|CaLLiOpeD|CtrlHD|Will1869|10\.?Bit|DTS|DL|SDC|Atmos|hdtv|EVO|WiKi|HMAX|IMAX|MA|VhsRip|HDRip|BDRip|iNTERNAL|True\.HD|1080p|1080i|720p|XviD|HDR10|HD|AC3|AAC|REPACK|5\.1|2\.0|REMUX|PRiCK|AVC|HC|AMZN|HEVC|Blu(R|r)ay|(BR|web)(Rip)?|NF|DDP?(5\.1|2\.0)?|(x|h|X|H)\.?26[4-5]|\d+mb|\d+kbps"
     groups="d3g|CiNEFiLE|CTR|PRoDJi|regret|deef|POIASD|Cinefeel|NTG|NTb|monkee|YELLOWBiRD|Atmos|EPSiLON|cielos|ION10|MeGusta|METCON|x0r|xlf|S8RHiNO|NTG|btx|strife|DD|DBS|TEPES|pawel2006"
     delims="\.|\+|\-"

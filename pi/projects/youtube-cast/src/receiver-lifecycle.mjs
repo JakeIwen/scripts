@@ -4,6 +4,7 @@ import { config } from './config.mjs';
 import { PairingCodes } from './pairing-codes.mjs';
 import { listenStatus } from './status-server.mjs';
 import { PlayerStatus } from './mpv-player.mjs';
+import { createPlayerControls } from './player-controls.mjs';
 
 export async function runReceiver({ receiver, player, store, log = console }) {
   const instance = randomUUID();
@@ -47,16 +48,14 @@ export async function runReceiver({ receiver, player, store, log = console }) {
   try {
     await store.initialize();
     await player.initialize();
-    // Stop also clears the queue: the library replays a cast only when its
-    // current video changes, so recasting the stopped video would do nothing.
-    const controls = { pause: () => player.pause(), resume: () => player.resume(),
-      stop: async () => { await player.reset(); return true; } };
+    const controls = createPlayerControls(player);
     const cast = async (videoId, position) => {
       if (receiver.status !== Constants.STATUSES.RUNNING) throw new Error('Receiver not running');
       void player.play({ id: videoId, client: Constants.CLIENTS.YT }, position)
         .catch(() => log.warn('Direct cast failed'));
     };
-    closeStatus = await listenStatus({ snapshot, pairing, cast, control: action => controls[action]() });
+    closeStatus = await listenStatus({ snapshot, pairing, cast,
+      control: (action, fields) => controls[action](fields) });
     const startup = setTimeout(() => { log.error('Receiver startup timeout'); void stop(1); }, 60_000);
     try { await receiver.start(); } finally { clearTimeout(startup); }
     if (!stopping) pairing.start();

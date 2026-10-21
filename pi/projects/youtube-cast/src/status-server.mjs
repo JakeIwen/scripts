@@ -2,9 +2,8 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { config } from './config.mjs';
 import { isVideoId } from './video-id.mjs';
+import { CONTROL_ACTIONS, seekArguments } from './player-controls.mjs';
 
-// Remote controls for senders without their own (vantv, the Firefox extension).
-export const CONTROL_ACTIONS = Object.freeze(['pause', 'resume', 'stop']);
 const MAX_POST_BODY = 256;
 // Web pages can't forge these origins, and a JSON body already forces a CORS
 // preflight this server never answers; the status page itself is same-origin.
@@ -76,9 +75,12 @@ async function readJsonBody(request) {
 
 async function handleControl(request, { control }) {
   try {
-    const { action } = await readJsonBody(request);
+    const body = await readJsonBody(request);
+    const { action } = body;
     if (!CONTROL_ACTIONS.includes(action)) return [400, { error: 'Unknown action' }];
-    return [200, { action, done: Boolean(await control(action)) }];
+    const fields = action === 'seek' ? seekArguments(body) : {};
+    if (!fields) return [400, { error: 'Seek needs one of position (>= 0) or offset' }];
+    return [200, { action, done: Boolean(await control(action, fields)) }];
   } catch (error) {
     return error instanceof RangeError ? [413, { error: error.message }] : [400, { error: 'Invalid control request' }];
   }

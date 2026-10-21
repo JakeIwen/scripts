@@ -51,6 +51,13 @@ toolbar popup. Both talk to the status server directly over the LAN
 (`/api/cast`, `/api/control`, `/api/status`); no YouTube pairing is involved.
 Chrome's own cast button is Google Cast only, so it never lists Van TV.
 
+## Mac BTT media buttons
+
+The BTT Media menu runs Pi shell commands over ssh (`vlcmd Seek int64:±N`, `pp`,
+`vlcmd Next/Previous`, `kill_media`, `play_status`). `pi/.bashrc` routes them to
+Van TV through `/api/control` while a cast is loaded (player LOADING, PLAYING or
+PAUSED), and to VLC otherwise, so the BTT configuration needs no change.
+
 ## Pair the phone
 
 ### Phone on dendelion
@@ -81,8 +88,11 @@ is permanent. Do not delete the private state directory to update the app.
 - Status page: `http://vanpi.lan:8795/`; JSON health: `/health`; page data: `/api/status`.
   `POST /api/cast` (JSON `{"videoId", "position"}`) starts a video at once and
   answers 202 while it loads; `POST /api/control` (JSON `{"action":
-  "pause"|"resume"|"stop"}`) drives playback, and stop also clears the queue so
-  the same video can be recast. A POST needs `Content-Type: application/json`
+  "pause"|"resume"|"toggle"|"stop"|"next"|"previous"}`, or `{"action": "seek"}`
+  with exactly one of an absolute `position` or a relative `offset` in seconds,
+  clamped to the video) drives playback. Stop also clears the queue so the same
+  video can be recast; with nothing queued, Next does nothing and Previous
+  restarts the video. A POST needs `Content-Type: application/json`
   and an `Origin` that is absent, `null`, an extension's, or the server's own:
   web pages can't forge those, and the JSON type forces a CORS preflight the
   server never answers.
