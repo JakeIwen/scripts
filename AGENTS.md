@@ -21,6 +21,23 @@ Treat repository configuration and historical notes as hints, not proof of live
 state. Before changing a live device, inspect its current configuration and
 compare it with this checkout. Deployed files may differ from the repository.
 
+## Contracts
+
+| Path | Caller | Owner |
+|---|---|---|
+| `macbook/scripts/display_cab_dimmer.py` | `com.jacobr.display-cab-dimmer` LaunchAgent and Mac Panel automation | `macbook/scripts/cab_dimmer/` plus the stable entry script |
+| `macbook/scripts/deferred.zsh` | `com.jacobr.deferred-jobs` LaunchAgent and Mac Panel | the script and `shared/automations/` declaration |
+| `pi.apps.van_dashboard` | `van-dashboard.service` and `pi/deploy_python.py` | `pi/apps/van_dashboard/` |
+| `pi.apps.video_library` | `video-library.service` and `pi/deploy_python.py` | `pi/apps/video_library/` |
+| `pi.apps.audiobooks` | `audiobooks.service` and `pi/deploy_python.py` | `pi/apps/audiobooks/` |
+| `pi.apps.bme280` | `bme280-mqtt.service` and `pi/deploy_python.py` | `pi/apps/bme280/` |
+| `pi/scripts/system_event_monitor.py` | system-event-monitor, crash-capture and network-recorder consumers | `pi/scripts/system_monitor/` plus the stable shim |
+| `pi/scripts/backup/` | backup units, timers, cron and scoped deployers | the feature folder and `pi/backup_local_deploy.sh` |
+| `shared/sh/` | Mac/Pi aliases, cron and targeted flat Pi deployment | feature-named scripts in the documented compatibility folder |
+| `pi/projects/phone-drop/` | `phone-drop.service` and its scoped deployer | the project folder |
+| `pi/projects/youtube-cast/` | `youtube-cast.service` and its scoped deployer | the project folder |
+| `ubnt/persistent/scripts/` | airOS boot hooks and `ubnt/scp_to_device.sh` | the complete Wi-Fi-manager cohort |
+
 ## Repository map
 
 - `pi/`: Raspberry Pi apps, backup, disk, service, deployment, and setup tooling;
