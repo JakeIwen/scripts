@@ -49,7 +49,8 @@ MODULE_DIRS = (
 )
 INITIALIZERS = ('pi/__init__.py', 'pi/apps/__init__.py',
                 'pi/scripts/__init__.py', 'shared/__init__.py', 'pi/package_runtime.py')
-ASSETS = ('pi/apps/video_library/templates/video_library.html',
+ASSETS = ('pi/apps/audiobooks/templates/audiobooks.html',
+          'pi/apps/video_library/templates/video_library.html',
           'pi/apps/video_library/static/video_library.js',
           'pi/apps/video_library/static/video_library.css')
 

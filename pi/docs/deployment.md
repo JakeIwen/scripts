@@ -19,7 +19,7 @@ Allowlisted inputs are immediate Python modules in:
 - `pi/scripts/python` and `shared/python`;
 - explicit `pi`, `pi/apps`, `pi/scripts`, and `shared` initializers plus
   `pi/package_runtime.py`;
-- video `templates/video_library.html` and
+- audiobook `templates/audiobooks.html`, video `templates/video_library.html` and
   `static/{video_library.js,video_library.css}`;
 - the four units named in the installer's `SERVICES` table.
 

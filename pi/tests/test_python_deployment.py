@@ -407,6 +407,7 @@ class PythonDeploymentTests(unittest.TestCase):
             "shared/__init__.py": {"video-library.service"},
             "shared/python/__init__.py": {"video-library.service"},
             "pi/apps/audiobooks/audiobook_server.py": {"audiobooks.service"},
+            "pi/apps/audiobooks/templates/audiobooks.html": {"audiobooks.service"},
             "pi/apps/bme280/bme280_mqtt.py": {"bme280-mqtt.service"},
             "pi/package_runtime.py": set(deployment.SERVICES),
             "pi/__init__.py": set(deployment.SERVICES),

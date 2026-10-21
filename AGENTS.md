@@ -44,7 +44,8 @@ compare it with this checkout. Deployed files may differ from the repository.
   `pi/README.md` is the documentation index.
 - `pi/apps/audiobooks/catalog.py` owns audiobook records, filesystem discovery
   helpers and fuzzy matching rules; `audiobook_server.py` retains state, Sonos,
-  routes, polling and the stable service entry behavior.
+  routes, polling and the stable service entry behavior. The exact root page is
+  packaged from `pi/apps/audiobooks/templates/audiobooks.html`.
 - Visual Guides is maintained separately in `~/dev/visual-guides`, public repo
   `https://github.com/JakeIwen/visual-guides`. It serves Mac loopback port 8792
   and Pi port 8791. Its own `deploy.py` owns `/home/pi/visual-guides/` releases
