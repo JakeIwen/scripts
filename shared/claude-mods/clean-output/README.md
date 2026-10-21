@@ -41,6 +41,13 @@ while the pane holds the keyboard.
   earlier.
 - Words combine in any order: `/clean 3 tools copy md`.
 
+Compaction doesn't hide earlier exchanges: when the conversation compacts,
+the mod saves the rows it ran over (text and one-line tool inputs, no tool
+output) to `~/.claude/clean-output/history/<session id>/`, one file per
+compaction, and `/clean` shows them before the live transcript, so a resumed
+session keeps them too. Compactions from before the mod saved them, and a
+subagent's own, are not covered.
+
 The mod records each prompt's origin as it is submitted, so grouping is exact
 from the time it loaded. Older prompts fall back to text markers (task
 notifications, worker messages, slash commands, compaction summaries); a
@@ -54,7 +61,7 @@ The pane text is also mouse-selectable like any other terminal text.
 filter is `{ name, apply(parts, opts) }` over `Part` values
 (`{ kind: 'text' | 'tool' | 'divider', text }`). Append one to the array; the
 pane picks it up on the next `/reload-plugins`. The files under `hooks/` have
-no engine dependency except `register.tsx`, so `codexclean` (below) reuses
+no engine dependency except `register.tsx` and `history-store.ts`, so `codexclean` (below) reuses
 them for Codex sessions:
 
 - `clean.ts`: options, parts and filters.
@@ -62,6 +69,9 @@ them for Codex sessions:
   worker message, notice, wake-up), shared by both views.
 - `exchanges.ts`: the exchange view (`/clean`, `/clean N`).
 - `turn-endings.ts`: the `turns` view.
+- `compaction-history.ts`: the rows a compaction ran over, slimmed, and the
+  session stitched back together around each summary
+  (`history-store.ts`, engine-side, saves and loads them).
 - `clean-view.ts`: the pane's sections, the copy text, the drawing budget,
   where the pane opens, and the status line.
 - `markdown.ts`: reply markdown as plain text (copies) or an HTML fragment

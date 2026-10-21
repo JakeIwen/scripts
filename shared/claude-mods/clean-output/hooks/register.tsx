@@ -6,7 +6,9 @@ import type { SessionMessage } from 'claude-code'
 import type { CleanView, PromptRecord } from '../types'
 import { parseArgs, type CleanOptions } from './clean'
 import { NO_WINDOW, drawable, lastTurnKey, newestTarget, sectionKey, viewText, windowLine } from './clean-view'
+import { withHistory } from './compaction-history'
 import { cleanExchanges } from './exchanges'
+import { loadHistory, saveCompaction } from './history-store'
 import { TYPED_KINDS, promptHead } from './prompt-kinds'
 import { turnEndings } from './turn-endings'
 
@@ -46,6 +48,13 @@ const buildView = (
   opts: CleanOptions,
 ): CleanView | undefined => (opts.turns ? turnEndings(messages, records, opts) : cleanExchanges(messages, records, opts))
 
+/** The view over the whole session, the rows earlier compactions replaced included. */
+async function sessionView($: EngineInterface, opts: CleanOptions): Promise<CleanView | undefined> {
+  const history = await loadHistory($).catch(() => [])
+  const { messages, records } = withHistory(history, await $.session.messages(), await read($, prompts))
+  return buildView(messages, records, opts)
+}
+
 /**
  * Typing a prompt hands the keyboard to the composer, and while the turn runs
  * Esc there interrupts it. Taking the keys back lets Esc close an open pane
@@ -62,7 +71,7 @@ async function refocusPane($: EngineInterface): Promise<void> {
 async function refreshPane($: EngineInterface): Promise<void> {
   const opts = await read($, paneOptions)
   if (opts === null || !(await $.ui.panes()).some(p => p.id === PANE)) return
-  const view = buildView(await $.session.messages(), await read($, prompts), opts)
+  const view = await sessionView($, opts)
   if (view === undefined || JSON.stringify(view) === JSON.stringify(await read($, pane))) return
   await update($, pane, () => view)
   await revealNewest($, newestTarget(view))
@@ -93,10 +102,21 @@ function onCommand(on: On): void {
     return submitted
   })
 
+  // The summary replaces the rows before it in `$.session.messages()`; keep
+  // them so the views still show those exchanges. A subagent's own
+  // compaction and one computed ahead of time leave the main transcript alone.
+  on('session.compact', async ($, e, next) => {
+    const done = await next(e)
+    if (done.skip === undefined && e.agentId === undefined && e.trigger !== 'precompute') {
+      // A failed save loses those exchanges from the views; the compaction stands.
+      await saveCompaction($, e.messages, done.messages, await read($, prompts)).catch(() => undefined)
+    }
+    return done
+  })
+
   on('command.run', { command: 'clean' }, async ($, e) => {
     const opts = parseArgs(e.args)
-    const messages = await $.session.messages()
-    const view = buildView(messages, await read($, prompts), opts)
+    const view = await sessionView($, opts)
     if (view === undefined) return { text: 'clean: no reply found yet.' }
     if (opts.copy) {
       const copied = await $.ui.copy({ text: viewText(view, opts) })
