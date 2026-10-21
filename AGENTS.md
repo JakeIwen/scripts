@@ -521,8 +521,11 @@ repository.
 
 Its main contents are:
 
-- `bringup.sh`: PCAN/SocketCAN setup for C-CAN (500 kbit/s) and B-CAN
-  (125 kbit/s), passive/listen-only by default; transmit mode is explicit.
+- Hardware: two USBCANFD adapters (the serial-resolved dual-USBCANFD
+  installation) on C-CAN (500 kbit/s), B-CAN (125 kbit/s) and CAN CH
+  (500 kbit/s), listen-only by default. `canN` names are not stable
+  identities; its README's "Current dual-USBCANFD operation" is the source.
+  The earlier PCAN-USB and `bringup.sh` are historical.
 - `lib/`: reusable CAN interface/bus detection and wake helpers, ISO-TP/UDS
   request handling, and the ECU/module-address registry.
 - `tools/`: generic UDS requests and DID/routine discovery, CAN field finding,
