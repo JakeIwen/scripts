@@ -41,7 +41,7 @@ run_codex_cleanup() {
     echo "Codex releases: skipped (run as root to inspect every process)"
     return
   fi
-  "$python_command" -I -B "$codex_cleanup" --owner "$codex_user" "$mode" || status=$?
+  "$python_command" -I -B "$codex_cleanup" --owner "$codex_user" --package all "$mode" || status=$?
   case $status in
     0) ;;
     75) echo "Codex releases: skipped (installer lock held)" ;;

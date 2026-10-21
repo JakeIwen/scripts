@@ -46,7 +46,7 @@ run_tidy() {
     bash "$tidy" "$@"
 }
 
-cleanup_call="python3 -I -B /fixture/cleanup_codex_releases.py --owner pi"
+cleanup_call="python3 -I -B /fixture/cleanup_codex_releases.py --owner pi --package all"
 
 run_tidy > "$test_root/out" 2>&1 || fail "root dry-run failed"
 grep -Fxq "$cleanup_call --dry-run" "$log" ||

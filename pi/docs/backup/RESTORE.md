@@ -278,16 +278,19 @@ per-card clone age if you want positive confirmation.
 `/home/pi/scripts/rootfs_tidy.sh` is dry-run by default. Codex release retention
 is delegated to `cleanup_codex_releases.py` (from `shared/sh/`, copied beside it by
 the broad sync), the same script the MacBook runs weekly. Only a root run cleans
-Codex releases: it calls the script with `--owner pi`, which performs every file
-operation with `pi`'s effective IDs and resumes root only to read `/proc`:
+Codex releases: it calls the script with `--owner pi --package all`, which checks
+the standalone and app-server-daemon package trees independently, performs every
+file operation with `pi`'s effective IDs and resumes root only to read `/proc`:
 
 ```bash
 /home/pi/scripts/rootfs_tidy.sh
 sudo /home/pi/scripts/rootfs_tidy.sh --apply
 ```
 
-The cleanup keeps the three highest stable versions plus `current` and any
-release some process is executing or has mapped. Non-dumpable processes (sshd,
+In each package tree, cleanup keeps the three highest stable versions plus
+`current` and any release some process is executing or has mapped. An absent
+package is optional; an incomplete or unsafe tree fails. A busy or invalid tree
+does not block checking its peer. Non-dumpable processes (sshd,
 ssh-agent, sd-pam, smbd) hide `/proc/<pid>/exe` and `maps` even from `pi`, so the
 probe needs root and refuses cleanup if any process cannot be inspected. It holds
 both the `flock` and `lockf` forms of the installer's `install.lock`, validates

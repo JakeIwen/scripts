@@ -7,6 +7,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -30,12 +31,14 @@ def load_script(name):
 cleaner = load_script("cleanup_codex_releases")
 
 
-class CleanupTests(unittest.TestCase):
+class CleanupFixture:
+    package = "standalone"
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.home = Path(self.temp.name).resolve()
-        self.root = self.home / ".codex/packages/standalone/releases"
+        self.root = self.home / ".codex/packages" / self.package / "releases"
         self.root.mkdir(parents=True)
         (self.root.parent / "install.lock").touch()
         self.versions = [self.release(n) for n in (7, 8, 9, 10, 11)]
@@ -44,10 +47,10 @@ class CleanupTests(unittest.TestCase):
         active.start()
         self.addCleanup(active.stop)
 
-    def release(self, minor):
+    def release(self, minor, root=None):
         version = f"0.{minor}.0"
         name = f"{version}-{TARGET}"
-        path = self.root / name
+        path = (root or self.root) / name
         (path / "bin").mkdir(parents=True)
         binary = path / "bin/codex"
         binary.write_text("fixture binary")
@@ -60,9 +63,11 @@ class CleanupTests(unittest.TestCase):
 
     def run_cleanup(self, apply=False):
         with redirect_stdout(io.StringIO()) as output:
-            cleaner.cleanup(self.home, apply=apply)
+            cleaner.cleanup(self.home, apply=apply, package=self.package)
         return output.getvalue()
 
+
+class CleanupTests(CleanupFixture, unittest.TestCase):
     def test_preview_never_deletes(self):
         self.assertIn("Would delete 2 directories", self.run_cleanup())
         self.assertTrue(all(path.exists() for path in self.versions))
@@ -167,6 +172,94 @@ class CleanupTests(unittest.TestCase):
             finally:
                 process.communicate(timeout=5)
         self.assertTrue(all(path.exists() for path in self.versions))
+
+
+class DaemonCleanupTests(CleanupTests):
+    """The entire deletion/lock/protection contract also holds for the daemon."""
+    package = "app-server-daemon"
+
+    @unittest.skipUnless(sys.platform == "linux" and os.getuid() == 0,
+                         "Native /proc protection check requires Linux root to inspect every process.")
+    def test_executing_daemon_release_survives_until_its_process_exits(self):
+        binary = self.versions[0] / "bin/codex"
+        shutil.copyfile("/bin/sleep", binary)
+        process = subprocess.Popen([str(binary), "60"])
+        try:
+            with patch.object(cleaner, "running_releases", cleaner.linux_running_releases):
+                self.run_cleanup(apply=True)
+                self.assertTrue(self.versions[0].exists())
+                self.assertFalse(self.versions[1].exists())
+                self.assertIsNone(process.poll())
+        finally:
+            process.terminate()
+            process.wait(timeout=5)
+        with patch.object(cleaner, "running_releases", cleaner.linux_running_releases):
+            self.run_cleanup(apply=True)
+        self.assertEqual(set(self.root.iterdir()), set(self.versions[-3:]))
+
+
+class PackageSelectionTests(CleanupFixture, unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        self.daemon = self.home / ".codex/packages/app-server-daemon/releases"
+        self.daemon.mkdir(parents=True)
+        (self.daemon.parent / "install.lock").touch()
+        self.daemon_versions = [self.release(n, self.daemon) for n in (1, 2, 3, 4, 5)]
+        (self.daemon.parent / "current").symlink_to(self.daemon_versions[-1])
+
+    def selected(self, package="all", apply=True):
+        with redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()):
+            result = cleaner.cleanup_packages(self.home, package=package, apply=apply)
+        return result, output.getvalue()
+
+    def test_default_call_leaves_daemon_untouched(self):
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(cleaner.cleanup_packages(self.home, apply=True), 0)
+        self.assertEqual(set(self.root.iterdir()), set(self.versions[-3:]))
+        self.assertTrue(all(p.exists() for p in self.daemon_versions))
+
+    def test_daemon_only_leaves_standalone_untouched(self):
+        self.assertEqual(self.selected("app-server-daemon")[0], 0)
+        self.assertTrue(all(p.exists() for p in self.versions))
+        self.assertEqual(set(self.daemon.iterdir()), set(self.daemon_versions[-3:]))
+
+    def test_all_preview_and_apply_keep_three_in_each_tree(self):
+        self.assertEqual(self.selected(apply=False)[0], 0)
+        self.assertTrue(all(p.exists() for p in self.versions + self.daemon_versions))
+        self.assertEqual(self.selected()[0], 0)
+        self.assertEqual(set(self.root.iterdir()), set(self.versions[-3:]))
+        self.assertEqual(set(self.daemon.iterdir()), set(self.daemon_versions[-3:]))
+
+    def test_busy_standalone_does_not_block_daemon(self):
+        lock = self.root.parent / "install.lock.d"
+        lock.mkdir()
+        self.assertEqual(self.selected()[0], 75)
+        self.assertTrue(lock.is_dir())
+        self.assertTrue(all(p.exists() for p in self.versions))
+        self.assertEqual(set(self.daemon.iterdir()), set(self.daemon_versions[-3:]))
+
+    def test_invalid_package_does_not_hide_peer_lock_or_error(self):
+        (self.versions[0] / "codex-package.json").write_text("{}")
+        (self.daemon.parent / "install.lock.d").mkdir()
+        self.assertEqual(self.selected()[0], 1)
+        self.assertTrue(all(p.exists() for p in self.versions + self.daemon_versions))
+
+    def test_missing_optional_package_is_skipped_but_partial_layout_fails(self):
+        moved = self.daemon.parent.with_name("saved-daemon")
+        self.daemon.parent.rename(moved)
+        status, output = self.selected()
+        self.assertEqual(status, 0)
+        self.assertIn("SKIP app-server-daemon: package is not installed.", output)
+        self.daemon.parent.mkdir()
+        self.assertEqual(self.selected()[0], 1)
+
+    def test_unknown_package_and_symlinked_daemon_fail_without_deleting_it(self):
+        self.assertEqual(self.selected("../elsewhere")[0], 1)
+        moved = self.daemon.parent.with_name("saved-daemon")
+        self.daemon.parent.rename(moved)
+        self.daemon.parent.symlink_to(moved)
+        self.assertEqual(self.selected()[0], 1)
+        self.assertTrue(all((moved / "releases" / p.name).exists() for p in self.daemon_versions))
 
 
 class LinuxProbeTests(unittest.TestCase):

@@ -708,8 +708,8 @@ The active design is represented by:
   A directory flock serializes exports without taking the cloud/disk backup lock.
 - `pi/scripts/backup/backup_watchdog.sh`: freshness and health monitoring.
 - `pi/scripts/backup/rootfs_budget.sh`: bounded rootfs path budgets and daily growth history for the watchdog.
-- `pi/scripts/rootfs_tidy.sh`: weekly apt-cache cleanup that runs the shared Codex release retention as root with `--owner pi`.
-- `shared/sh/cleanup_codex_releases.py`: Codex standalone release retention for both the MacBook (weekly user cron via the `macbook/scripts/` symlink) and vanpi; keeps three versions plus current/running releases.
+- `pi/scripts/rootfs_tidy.sh`: weekly apt-cache cleanup that runs the shared Codex release retention as root with `--owner pi --package all`.
+- `shared/sh/cleanup_codex_releases.py`: Codex release retention for both the MacBook (weekly user cron via the `macbook/scripts/` symlink) and vanpi. Defaults to standalone; `--package all` checks standalone and app-server-daemon independently, each keeping three versions plus current/running releases under its own installer lock. An absent package is optional in an all-packages sweep; unsafe or incomplete installed trees fail.
 - `pi/scripts/backup/abort_backup.sh`: coordinated termination before unmounting.
 - `pi/scripts/backup/clone_to_sd.sh`: bootable spare-card cloning.
 - `pi/scripts/mount_disks.sh` and `pi/scripts/umount_disks.sh`: disk lifecycle.

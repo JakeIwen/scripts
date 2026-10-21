@@ -104,7 +104,12 @@ notify = ["/Users/jacobr/dev/scripts/macbook/scripts/codex_ntfy_notify.py"]
 `scripts/cleanup_codex_releases.py` symlink, which the installed cron entry
 uses) previews removal from the invoking account's
 `~/.codex/packages/standalone/releases/`; `--apply` deletes. The Pi runs the same
-script from `rootfs_tidy.sh`. It keeps the three highest stable version numbers
+script from `rootfs_tidy.sh` with `--package all` to include its separate
+`app-server-daemon` tree. The Mac's existing job remains standalone-only;
+`--package app-server-daemon` explicitly selects just the daemon. An absent
+package is skipped in an `all` sweep; an incomplete or unsafe installed tree
+fails. A busy or invalid tree does not prevent checking the other tree.
+Each tree keeps the three highest stable version numbers
 plus current/running releases, checks package manifests and paths, coordinates
 with the installer lock, and refuses mounts or uncertain process inspection.
 Unknown names, prereleases, other platforms' targets and symlinks are left alone;

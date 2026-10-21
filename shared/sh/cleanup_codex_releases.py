@@ -1,11 +1,12 @@
 #!/usr/bin/python3
-"""Preview old Codex standalone releases; --apply deletes eligible directories.
+"""Preview old Codex releases; --apply deletes eligible directories.
 
 Keep the three highest stable version numbers, plus current/running releases.
 Unknown names, preview versions, and unfamiliar package layouts are never deleted.
-Only the invoking account's ~/.codex/packages/standalone/releases is supported,
-on macOS (the MacBook) and Linux (vanpi). On Linux, root may pass --owner: every
-file operation then runs with that account's effective IDs, and root privilege is
+Only the invoking account's ~/.codex/packages/{standalone,app-server-daemon}
+release trees are supported. Standalone is the default; --package all checks both.
+Supported on macOS (the MacBook) and Linux (vanpi). Root may pass --owner on Linux:
+every file operation runs with that account's effective IDs, and root privilege is
 resumed only to read /proc for processes that hide it from their own account.
 """
 
@@ -25,6 +26,9 @@ import time
 
 
 KEEP = 3
+PACKAGES = ("standalone", "app-server-daemon")
+DEFAULT_PACKAGE = PACKAGES[0]
+ALL_PACKAGES = "all"
 # Only this host's own package target is recognized; anything else is left alone.
 RELEASE_TARGETS = {
     "darwin": r"[A-Za-z0-9_]+-apple-darwin",
@@ -47,9 +51,11 @@ def check_owned(path, directory=False):
     return info
 
 
-def release_root(home):
+def release_root(home, package=DEFAULT_PACKAGE):
+    if package not in PACKAGES:
+        raise ValueError(f"Unsupported package: {package}")
     path = home.resolve(strict=True)
-    for component in (".codex", "packages", "standalone", "releases"):
+    for component in (".codex", "packages", package, "releases"):
         path = path / component
         check_owned(path, directory=True)
         if path.is_mount():
@@ -121,7 +127,7 @@ def recognized_releases(root):
 def current_release(root):
     link = root.parent / "current"
     if not link.is_symlink() or link.lstat().st_uid != os.geteuid():
-        raise RuntimeError("Expected an owned standalone/current symlink")
+        raise RuntimeError("Expected an owned package current symlink")
     target = link.resolve(strict=True)
     if target.parent != root or not target.is_dir():
         raise RuntimeError("Current release is not a direct child of releases")
@@ -324,8 +330,8 @@ def remove_tree(path, device):
     os.rmdir(path)
 
 
-def cleanup(home, apply=False):
-    root = release_root(home)
+def cleanup(home, apply=False, package=DEFAULT_PACKAGE):
+    root = release_root(home, package)
     root_info = root.stat()
     if not ({os.open, os.unlink, os.rmdir} <= os.supports_dir_fd
             and os.scandir in os.supports_fd):
@@ -346,7 +352,7 @@ def cleanup(home, apply=False):
         count = 0
         total = 0
         for path, identity, size in planned:
-            if (release_root(home) != root
+            if (release_root(home, package) != root
                     or not os.path.samestat(root_info, root.lstat())
                     or not os.path.samestat(identity, path.lstat())):
                 raise RuntimeError("Release directory changed during cleanup")
@@ -361,6 +367,31 @@ def cleanup(home, apply=False):
             total += size
         action = "Deleted" if apply else "Would delete"
         print(f"{action} {count} directories, about {total / 1024**3:.2f} GiB allocated.")
+
+
+def cleanup_packages(home, package=DEFAULT_PACKAGE, apply=False):
+    """Each package owns its lock; an unavailable package cannot block its peer."""
+    packages = PACKAGES if package == ALL_PACKAGES else (package,)
+    result = 0
+    for selected in packages:
+        print(f"Package: {selected}", flush=True)
+        try:
+            cleanup(home, apply=apply, package=selected)
+        except (BlockingIOError, FileExistsError):
+            print(f"SKIP {selected}: installer or cleanup holds the lock; try again later.")
+            if result == 0:
+                result = 75
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+            # A package never installed is optional in an all-packages sweep.
+            # Missing parents, release trees, manifests and dangling links fail.
+            absent = home.resolve() / ".codex" / "packages" / selected
+            if (package == ALL_PACKAGES and isinstance(error, FileNotFoundError)
+                    and error.filename == str(absent)):
+                print(f"SKIP {selected}: package is not installed.")
+                continue
+            print(f"STOP {selected}: {error}", file=sys.stderr)
+            result = 1
+    return result
 
 
 def become_owner(name):
@@ -381,6 +412,8 @@ def main():
     mode.add_argument("--dry-run", action="store_true", help="Preview only (the default)")
     parser.add_argument("--owner", metavar="ACCOUNT",
                         help="Linux, as root: clean this account's releases")
+    parser.add_argument("--package", choices=(*PACKAGES, ALL_PACKAGES), default=DEFAULT_PACKAGE,
+                        help="Package tree to prune (default: standalone; all checks both)")
     args = parser.parse_args()
     if sys.platform not in RELEASE_TARGETS:
         parser.error(f"Unsupported platform: {sys.platform}")
@@ -397,15 +430,7 @@ def main():
         # Ignore HOME/CODEX_HOME overrides so cron cannot redirect this deletion.
         home = Path(pwd.getpwuid(os.getuid()).pw_dir)
     print(datetime.now().astimezone().isoformat(timespec="seconds"), flush=True)
-    try:
-        cleanup(home, apply=args.apply)
-    except (BlockingIOError, FileExistsError):
-        print("SKIP: another installer or cleanup holds the lock; try again later.")
-        return 75
-    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
-        print(f"STOP: {error}", file=sys.stderr)
-        return 1
-    return 0
+    return cleanup_packages(home, package=args.package, apply=args.apply)
 
 
 if __name__ == "__main__":
