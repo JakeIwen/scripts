@@ -449,6 +449,14 @@ def control_device():
         return zmap[devname].group.coordinator
     return get_device()
 
+
+def control_device_response():
+    """Return the selected coordinator or the API's established unavailable response."""
+    try:
+        return control_device(), None
+    except RuntimeError as error:
+        return None, (jsonify({"ok": False, "message": str(error)}), 503)
+
 def speaker_snapshot(force=False):
     zmap = get_zones(force=force)
     if not zmap:
@@ -542,7 +550,9 @@ def api_speaker_volume():
 
 @app.route("/api/toggle", methods=["GET", "POST"])
 def api_toggle():
-    dev = control_device()
+    dev, error = control_device_response()
+    if error:
+        return error
     t = dev.get_current_transport_info()["current_transport_state"]
     if t == "PLAYING":
         bookmark_now()
@@ -556,7 +566,9 @@ def api_toggle():
 @app.route("/api/pause", methods=["GET", "POST"])
 def api_pause():
     bookmark_now()
-    dev = control_device()
+    dev, error = control_device_response()
+    if error:
+        return error
     try:
         dev.pause()
     except Exception:
@@ -566,7 +578,9 @@ def api_pause():
 @app.route("/api/skip", methods=["GET", "POST"])
 def api_skip():
     delta = int(request.values.get("s", "-30"))
-    dev = control_device()
+    dev, error = control_device_response()
+    if error:
+        return error
     pos = hms_to_secs(dev.get_current_track_info().get("position")) or 0
     dev.seek(secs_to_hms(pos + delta))
     bookmark_now()
@@ -575,7 +589,9 @@ def api_skip():
 @app.route("/api/chapter", methods=["GET", "POST"])
 def api_chapter():
     d = int(request.values.get("d", "1"))
-    dev = control_device()
+    dev, error = control_device_response()
+    if error:
+        return error
     bid, idx = parse_our_uri(dev.get_current_track_info().get("uri"))
     if bid is None:
         return jsonify({"ok": False, "message": "not playing an audiobook"}), 409
@@ -590,7 +606,9 @@ def api_chapter():
 
 @app.route("/api/volume", methods=["GET", "POST"])
 def api_volume():
-    dev = control_device()
+    dev, error = control_device_response()
+    if error:
+        return error
     setval = request.values.get("set")
     delta = int(request.values.get("d", "0"))
     for member in dev.group.members:
