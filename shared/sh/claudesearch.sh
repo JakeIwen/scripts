@@ -2,7 +2,7 @@
 
 # Search Claude Code conversation events, optionally grouping matches by session.
 
-set -u
+set -u -o pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/session_search_header.sh"
 
@@ -15,7 +15,7 @@ if [ "$session_search_help" = true ]; then
     exit 0
 fi
 
-for claudesearch_dependency in grep jq; do
+for claudesearch_dependency in grep jq python3; do
     if ! command -v "$claudesearch_dependency" >/dev/null 2>&1; then
         echo "claudesearch: required command not found: $claudesearch_dependency" >&2
         exit 127
@@ -68,14 +68,8 @@ excerpt() {
     '
 }
 
-# Sessions are projects/<project>/<session-id>.jsonl. Subagent transcripts live
-# deeper under projects/<project>/<session-id>/ and are skipped; their prompts
-# and final reports already appear in the parent session. grep finds candidate
-# files quickly and ls orders them oldest to newest by last activity.
-find "$claudesearch_projects" -mindepth 2 -maxdepth 2 -type f -name '*.jsonl' \
-    -exec grep -Il -i -F --null -- "$claudesearch_query" {} + 2>/dev/null |
-xargs -0 -r ls -1tr -- 2>/dev/null |
-while IFS= read -r claudesearch_file; do
+session_search_files claude "$claudesearch_root" |
+while IFS= read -r -d '' claudesearch_provider && IFS= read -r -d '' claudesearch_file; do
     claudesearch_id=$(basename "$claudesearch_file" .jsonl)
 
     # Lines are parsed individually so a partially written line in an active

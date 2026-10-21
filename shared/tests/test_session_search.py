@@ -57,10 +57,11 @@ class SessionFixtureTestCase(unittest.TestCase):
 
 
 class SessionSearchTests(SessionFixtureTestCase):
-    def search(self, tool, *args):
+    def search(self, tool, *args, **overrides):
         environment = dict(os.environ, HOME=str(self.home))
         for provider in ('claude', 'codex'):
             environment[provider.upper() + 'SEARCH_ROOT'] = str(self.root / provider)
+        environment.update(overrides)
         # The Pi can spend over ten seconds starting jq processes under load.
         return subprocess.run([str(SCRIPTS / (tool + 'search.sh')), *args],
                               env=environment, capture_output=True, text=True, timeout=60)
@@ -88,6 +89,62 @@ class SessionSearchTests(SessionFixtureTestCase):
                 self.assertTrue(all(block.startswith('3 hours ago | ') for block in blocks))
                 self.assertCountEqual([block.splitlines()[-1] for block in blocks],
                                       ['old needle', 'new needle needle', 'another needle'])
+
+    def test_newest_activity_order_interleaves_tools_and_reverses_excerpts(self):
+        expected = []
+        for hours, (tool, session) in enumerate([
+                ('codex', 'first'), ('claude', 'first'),
+                ('codex', 'second'), ('claude', 'second')], 1):
+            path = self.write_session(tool, session, ['older needle', 'newer needle'])
+            modified = time.time() - hours * 3600 - 30
+            os.utime(path, (modified, modified))
+            expected.extend([(tool, session, text) for text in ('newer needle', 'older needle')])
+        for tool in ('claude', 'codex', 'llm'):
+            with self.subTest(tool=tool):
+                result = self.search(tool, 'needle')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                blocks = result.stdout.strip().split('\n\n')
+                wanted = [item for item in expected if tool == 'llm' or item[0] == tool]
+                self.assertEqual(len(blocks), len(wanted))
+                for block, (provider, session, context) in zip(blocks, wanted):
+                    self.assertIn(f'{provider}pr {session}\n', block)
+                    self.assertEqual(block.splitlines()[-1], context)
+        for tool in ('claude', 'codex'):
+            result = self.search(tool, '-g', 'needle')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual([block.splitlines()[0].split(' | ')[-1]
+                              for block in result.stdout.strip().split('\n\n')],
+                             ['first', 'second'])
+
+    def test_records_keep_latest_match_and_counts_without_display_controls(self):
+        for tool in ('claude', 'codex'):
+            self.write_session(tool, 'first', ['older needle', 'newer needle'],
+                               timestamps=['2026-10-18T10:00:00Z', '2026-10-18T12:00:00Z'])
+        result = self.search('llm', 'needle', SESSION_SEARCH_RECORDS='1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        records = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual(len(records), 4)
+        for record in records:
+            if record['resume'].endswith(' first'):
+                self.assertEqual(record['count'], 2)
+                self.assertEqual(record['context'], 'newer needle')
+                self.assertEqual(record['matched_at'], 1792324800)
+
+    def test_grouped_llm_directories_are_newest_first(self):
+        recent = self.write_session('codex', 'recent', ['recent needle'], cwd='/tmp/recent')
+        modified = time.time() - 3600 - 30
+        os.utime(recent, (modified, modified))
+        result = self.search('llm', '-g', 'needle')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(result.stdout.startswith('1 matches | 1 hour ago | recent\n'))
+        self.assertNotIn('\x1b', result.stdout)
+
+    def test_inherited_file_override_does_not_replace_session_enumeration(self):
+        for tool, count in [('claude', 3), ('codex', 3), ('llm', 6)]:
+            with self.subTest(tool=tool):
+                result = self.search(tool, 'needle', SESSION_SEARCH_FILE='/missing/transcript')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(len(result.stdout.strip().split('\n\n')), count)
 
     def test_empty_results_missing_query_and_literal_flag(self):
         for tool in ('claude', 'codex'):
@@ -246,7 +303,7 @@ class IndexSearchTests(SessionFixtureTestCase):
         self.assertEqual(sum('&& claudepr ' in block for block in blocks), 3)
         self.assertEqual(sum('&& codexpr ' in block for block in blocks), 3)
 
-    def test_index_prints_one_block_per_session_oldest_first(self):
+    def test_index_prints_one_block_per_session_newest_first(self):
         ageless = self.index_result('claude', 'ageless', '(untitled)', 1, 'ageless needle', 0, cwd='')
         ageless.update(mtime=None, matched_at=None)
         self.fake_switchboard([
@@ -260,13 +317,13 @@ class IndexSearchTests(SessionFixtureTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, '')
         self.assertEqual(result.stdout,
-                         '1 matches | unknown age | unknown\nclaudepr ageless\nageless needle\n\n'
-                         '1 matches | 1 day ago | elsewhere\n'
-                         'cd /tmp/elsewhere/ && claudepr untitled\nloose needle\n\n'
+                         '1 matches | 1 hour ago | Second\n'
+                         "cd ~/'dev/my project' && codexpr second\n…another needle\n\n"
                          '2 matches | 3 hours ago | First line\n'
                          "cd ~/'dev/my project' && claudepr first\nnew needle needle…\n\n"
-                         '1 matches | 1 hour ago | Second\n'
-                         "cd ~/'dev/my project' && codexpr second\n…another needle\n\n")
+                         '1 matches | 1 day ago | elsewhere\n'
+                         'cd /tmp/elsewhere/ && claudepr untitled\nloose needle\n\n'
+                         '1 matches | unknown age | unknown\nclaudepr ageless\nageless needle\n\n')
         self.assertEqual(self.switchboard_calls(), ['[search][--json][--limit][200][--][needle]'])
 
     def test_index_query_keeps_its_syntax_and_quotes_text_after_double_dash(self):
@@ -291,12 +348,12 @@ class IndexSearchTests(SessionFixtureTestCase):
                 result = self.llmsearch(flag, 'needle')
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout,
-                                 '1 matches | 5 hours ago | Elsewhere\n'
-                                 'cd /tmp/elsewhere && claudepr elsewhere\nseparate needle\n\n'
                                  '5 matches | 1 hour ago | First\n'
                                  "cd ~/'dev/my project' && claudepr first\nlatest needle\n\n"
                                  '1 matches | 2 hours ago | Other\n'
-                                 "cd ~/'dev/my project' && codexpr other\nother needle\n\n")
+                                 "cd ~/'dev/my project' && codexpr other\nother needle\n\n"
+                                 '1 matches | 5 hours ago | Elsewhere\n'
+                                 'cd /tmp/elsewhere && claudepr elsewhere\nseparate needle\n\n')
 
     def test_unbuilt_index_falls_back_to_grep_after_asking_twice(self):
         self.fake_switchboard(code=3, message="search: the transcript index isn't built yet")

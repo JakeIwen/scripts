@@ -2,7 +2,7 @@
 
 # Search Codex JSONL events, optionally grouping matches by session.
 
-set -u
+set -u -o pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/session_search_header.sh"
 
@@ -15,7 +15,7 @@ if [ "$session_search_help" = true ]; then
     exit 0
 fi
 
-for codexsearch_dependency in grep jq; do
+for codexsearch_dependency in grep jq python3; do
     if ! command -v "$codexsearch_dependency" >/dev/null 2>&1; then
         echo "codexsearch: required command not found: $codexsearch_dependency" >&2
         exit 127
@@ -62,10 +62,8 @@ excerpt() {
     '
 }
 
-# grep identifies matching JSONL files quickly. jq then limits output to the
-# individual JSON events and human-readable string values containing the term.
-grep -RIl -i -F -- "$codexsearch_query" "$codexsearch_sessions" 2>/dev/null |
-while IFS= read -r codexsearch_file; do
+session_search_files codex "$codexsearch_root" |
+while IFS= read -r -d '' codexsearch_provider && IFS= read -r -d '' codexsearch_file; do
     codexsearch_meta=$(jq -c 'select(.type == "session_meta") | .payload' \
         "$codexsearch_file" 2>/dev/null | sed -n '1p')
     codexsearch_id=$(printf '%s\n' "$codexsearch_meta" |

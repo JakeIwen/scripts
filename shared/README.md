@@ -15,3 +15,18 @@ Compute-specific cross-host modules live in the standalone sibling checkout at
 compute installer to `/home/pi/van_compute/`; the general Pi sync invokes the
 coupled installer after package deployment and does not copy compute files through
 its generic staging paths.
+
+## Session search
+
+`claudesearch`, `codexsearch`, and `llmsearch` search newest sessions first.
+Ungrouped transcript searches show each session's newest matching excerpt first;
+`llmsearch` interleaves both tools by session activity. Indexed results retain
+the index's newest-match ordering.
+
+`-g` groups Claude/Codex results per session; `llmsearch -g` combines sessions by
+directory and tool. During a grep scan, terminal listings update as sessions are
+found and counts accumulate. The final listing is complete; redirected or piped
+output contains only that final listing, without terminal control sequences.
+
+The scripts require Bash, grep, jq, and Python 3.9 or newer. Keep all seven
+`sh/*search*` files together when deploying them to `/home/pi/scripts/`.

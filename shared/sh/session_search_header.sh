@@ -5,6 +5,7 @@ session_search_usage() {
 Usage: $1 [flags] [--] <term>
 
 Search session events for a literal, case-insensitive term.
+Sessions and their matching excerpts are shown newest first.
 
 Flags:
   -g, --group  Show one result per session, with the match count and latest excerpt.
@@ -15,6 +16,28 @@ EOF
 
 session_search_modified() {
     stat -c %Y -- "$1" 2>/dev/null || stat -f %m -- "$1" 2>/dev/null
+}
+
+# List by activity before reading transcript contents, so recent hits can be
+# displayed while older sessions are still being searched. Arguments are
+# provider/root pairs; NULs preserve paths containing whitespace or newlines.
+session_search_files() {
+    local provider file
+    # Only llmsearch's explicitly tagged child dispatch selects a single file.
+    if [ "$#" -eq 2 ] && [ "${SESSION_SEARCH_FILE_PROVIDER:-}" = "$1" ] &&
+        [ -n "${SESSION_SEARCH_FILE:-}" ]; then
+        if [ -f "$SESSION_SEARCH_FILE" ] && [ ! -L "$SESSION_SEARCH_FILE" ]; then
+            printf '%s\0%s\0' "$1" "$SESSION_SEARCH_FILE"
+        fi
+        return 0
+    fi
+    python3 "$(dirname "${BASH_SOURCE[0]}")/session_search_paths.py" "$@" |
+    while IFS= read -r -d '' provider && IFS= read -r -d '' file; do
+        if [ -f "$file" ] && [ ! -L "$file" ] &&
+            grep -qiF -- "$session_search_query" "$file" 2>/dev/null; then
+            printf '%s\0%s\0' "$provider" "$file"
+        fi
+    done
 }
 
 # A caller that offers --grep sets session_search_grep=false before parsing;
@@ -120,7 +143,8 @@ session_search_print_matches() {
         session_search_collect_record "$header" "$resume" "$4" "$5" "$6"
         return
     fi
-    local text context latest="" count=0
+    local text context latest="" count=0 index
+    local contexts=()
     while IFS= read -r -d '' text; do
         context=$(printf '%s\n' "$text" | excerpt)
         [ -n "$context" ] || continue
@@ -128,11 +152,15 @@ session_search_print_matches() {
         if [ "$grouped" = true ]; then
             latest=$context
         else
-            printf '%s\n%s\n%s\n\n' "$header" "$resume" "$context"
+            contexts[${#contexts[@]}]=$context
         fi
     done
     if [ "$grouped" = true ] && [ "$count" -gt 0 ]; then
         printf '%s matches | %s\n%s\n%s\n\n' "$count" "$header" "$resume" "$latest"
+    else
+        for ((index=${#contexts[@]} - 1; index >= 0; index--)); do
+            printf '%s\n%s\n%s\n\n' "$header" "$resume" "${contexts[index]}"
+        done
     fi
 }
 

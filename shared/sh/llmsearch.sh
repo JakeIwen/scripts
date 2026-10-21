@@ -14,7 +14,8 @@ Usage: llmsearch [flags] [--] <query>
 
 Search the Pi's transcript index: your prompts and the visible replies of its
 Claude Code and Codex sessions. Where there is no index (the Mac, or the Pi
-before its first build), search everything with grep instead.
+before its first build), search everything with grep instead. Results are shown
+newest first; grouped grep results update live when output goes to a terminal.
 
 Index queries:
   All words must be in one message, as whole words. Case and accents are
@@ -46,26 +47,29 @@ llmsearch_claude=${CLAUDESEARCH_ROOT:-${CLAUDE_CONFIG_DIR:-"$HOME/.claude"}}
 llmsearch_codex=${CODEXSEARCH_ROOT:-"$HOME/.codex"}
 
 llmsearch_sources() {
-    local result=0
-    if [ -d "$llmsearch_claude/projects" ]; then
-        "$llmsearch_scripts/claudesearch.sh" -- "$session_search_query" || result=$?
-    fi
-    if [ -d "$llmsearch_codex/sessions" ]; then
-        "$llmsearch_scripts/codexsearch.sh" -- "$session_search_query" || result=$?
-    fi
-    return "$result"
+    session_search_files claude "$llmsearch_claude" codex "$llmsearch_codex" |
+    while IFS= read -r -d '' provider && IFS= read -r -d '' file; do
+        SESSION_SEARCH_FILE="$file" SESSION_SEARCH_FILE_PROVIDER="$provider" \
+            "$llmsearch_scripts/${provider}search.sh" \
+            -- "$session_search_query" || return $?
+    done
 }
 
 llmsearch_grep() {
+    local dependency
+    for dependency in grep jq python3; do
+        if ! command -v "$dependency" >/dev/null 2>&1; then
+            echo "llmsearch: required command not found: $dependency" >&2
+            return 127
+        fi
+    done
     if [ ! -d "$llmsearch_claude/projects" ] && [ ! -d "$llmsearch_codex/sessions" ]; then
         echo 'llmsearch: no Claude or Codex session directories found' >&2
         return 1
     fi
     if [ "$session_search_group" = true ]; then
         SESSION_SEARCH_RECORDS=1 llmsearch_sources |
-            jq -nr -L "$llmsearch_scripts" '
-                include "session_search_records"; session_search_group_directories
-            '
+            python3 "$llmsearch_scripts/session_search_display.py" --group
     else
         llmsearch_sources
     fi

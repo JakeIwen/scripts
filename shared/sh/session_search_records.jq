@@ -31,8 +31,8 @@ def session_search_group(records; session):
              then $record else $previous end) as $latest |
             .[$key] = ($latest + {count: $count})
         end) |
-    [.[]] | group_by(.cwd) | sort_by(map(.modified) | max) | .[] |
-    sort_by(.provider)[];
+    [.[]] | group_by(.cwd) | sort_by(-(map(.modified) | max), .[0].cwd) | .[] |
+    sort_by(-.modified, .provider)[];
 
 def session_search_group_directories:
     session_search_group(inputs; .resume) | session_search_record_text;
@@ -51,11 +51,11 @@ def session_search_index_record:
      matched_at: (.matched_at // $modified | floor), count, context: .excerpt};
 
 # NUL-terminated fields for the shell to label and print: tool, cwd, id, name,
-# mtime (empty when unknown), count and excerpt. Sessions come oldest first,
-# as grep mode prints them, or grouped like grep mode's -g.
+# mtime (empty when unknown), count and excerpt. Keep the index's newest-match
+# order, or group newest first like grep mode's -g.
 def session_search_index_fields($group):
     [inputs | session_search_index_record] |
-    if $group then session_search_group(.[]; .id) else reverse[] end |
+    if $group then session_search_group(.[]; .id) else .[] end |
     [.provider, .cwd, .id, .name, (if .mtime == null then "" else .modified end),
      .count, .context] |
     # NUL ends each field, so no field may contain one.
