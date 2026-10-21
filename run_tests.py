@@ -13,7 +13,7 @@ FRONTEND = Path('pi/apps/van_dashboard/frontend')
 PYTHON_IMPORT_ROOTS = {
     'macbook/bettertouchtool/tests': ('macbook/bettertouchtool',),
     'macbook/mac_panel/tests': ('macbook/mac_panel', 'shared/python'),
-    'macbook/tests': ('shared/python', 'macbook/bettertouchtool'),
+    'macbook/tests': ('shared/python', 'macbook/scripts', 'macbook/bettertouchtool'),
     'pi/tests': ('pi',),
     'pi/tests/backup': ('pi/scripts/backup',),
     'pi/tests/price_check': ('pi/scripts/price_check',),

@@ -246,6 +246,10 @@ the screen name, so a Q24h-10 that is mirroring another display still counts as
 connected and switching mirroring off is not a plug-in. A cable or dock that
 drops both monitors for longer than the settle time does count.
 
+The stable script remains the LaunchAgent and automation entry. Its pure display
+records and plug-in decisions live in `scripts/cab_dimmer/model.py`, private
+atomic state in `state_store.py`, and lazy CoreGraphics access in `displays.py`.
+
 - Install or update: `zsh /Users/jacobr/dev/scripts/macbook/scripts/install_display_cab_dimmer.zsh`.
 - Try it manually from the repo root: `PYTHONPATH=shared/python
   ~/.local/share/display-cab-dimmer/venv/bin/python

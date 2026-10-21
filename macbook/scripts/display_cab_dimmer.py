@@ -16,251 +16,35 @@ Activity is recorded in ~/.local/state/display-cab-dimmer/state.json.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import Enum
-import fcntl
 import json
 import os
 from pathlib import Path
-import re
 import sys
-import tempfile
 import time
 from urllib import parse, request
 
 import tool_automation
 import tool_settings
+from cab_dimmer.displays import online_displays
+from cab_dimmer.model import (
+    DimOutcome, DimResult, DisplayInfo, MIRROR_NAME, MONITOR_NAME, PlugTracker, RunTrigger,
+    display_name_matches, matching_monitor_names, matching_snapshot,
+)
+from cab_dimmer.state_store import STATE_DIR_ENV, read_state, update_state
 
 TOOL = "display-cab-dimmer"
-MONITOR_NAME = "Q24h-10"
-# The Q24h-10's EDID identity. Matching on it rather than the screen name keeps
-# a monitor that is hardware-mirroring another display (macOS leaves mirrors out
-# of NSScreen) counted as connected, so turning mirroring off is not a plug-in.
-MONITOR_VENDOR = 12462
-MONITOR_MODEL = 26280
-MIRROR_NAME = "mirror"
 DASHBOARD_URL = "http://vanpi.lan:8788"
 DASHBOARD_URL_ENV = "DISPLAY_CAB_DIMMER_DASHBOARD_URL"
-STATE_DIR_ENV = "DISPLAY_CAB_DIMMER_STATE_DIR"
 CAB_GROUP = "cab"
 HTTP_TIMEOUT_SECONDS = 8.0
 FALLBACK_POLL_SECONDS = 20.0
 RUN_LOOP_SECONDS = 1.0
-WAKE_SETTLE_SECONDS = 5.0
 BEGIN_CONFIGURATION_FLAG = 1
-STATE_VERSION = 1
-_DISPLAY_NUMBER_SUFFIX = re.compile(r" \(\d+\)$")
-DisplayKey = tuple[int, int, int]
 STATUS_OK, STATUS_IDLE, STATUS_UNKNOWN, STATUS_WARN, _STATUS_ERROR = tool_automation.STATUS_LEVELS
-
-
-class DimOutcome(str, Enum):
-    DIMMED = "dimmed"
-    NOTHING_TO_DO = "nothing-to-do"
-    DISABLED = "disabled"
-    FAILED = "failed"
-
-
-class RunTrigger(str, Enum):
-    PLUG_IN = "plug-in"
-    MANUAL = "manual"
-
-
-@dataclass(frozen=True)
-class DimResult:
-    outcome: DimOutcome
-    changed: int
-    detail: str
-
-
-@dataclass(frozen=True)
-class DisplayInfo:
-    display_id: int
-    name: str
-    built_in: bool
-    vendor: int
-    model: int
-    unit: int
-    serial: int = 0
-
-    @property
-    def key(self) -> DisplayKey:
-        return (self.vendor, self.model, self.unit)
-
-    @property
-    def matches_target(self) -> bool:
-        return not self.built_in and (self.vendor, self.model) == (MONITOR_VENDOR, MONITOR_MODEL)
-
-    @property
-    def label(self) -> str:
-        """The screen name, or the monitor's name for a mirror NSScreen does not list."""
-        return self.name if display_name_matches(self.name) else f"{MONITOR_NAME} ({self.name})"
-
-
-def display_name_matches(name: str) -> bool:
-    """macOS adds a numeric suffix to the names of identical displays."""
-    return _DISPLAY_NUMBER_SUFFIX.sub("", name) == MONITOR_NAME
-
-
-def matching_snapshot(displays: list[DisplayInfo]) -> frozenset[DisplayKey]:
-    return frozenset(display.key for display in displays if display.matches_target)
-
-
-def matching_monitor_names(displays: list[DisplayInfo]) -> list[str]:
-    return sorted(display.label for display in displays if display.matches_target)
-
-
-class PlugTracker:
-    """Decide whether a settled matching-display snapshot is a plug-in event."""
-
-    def __init__(self, initial_snapshot: frozenset[DisplayKey]):
-        self._baseline = frozenset(initial_snapshot)
-        self._deadline: float | None = None
-        self._asleep = False
-
-    @property
-    def asleep(self) -> bool:
-        return self._asleep
-
-    def schedule(self, now: float, settle_seconds: float) -> None:
-        if self._asleep:
-            return
-        candidate = now + settle_seconds
-        self._deadline = candidate if self._deadline is None else max(self._deadline, candidate)
-
-    def will_sleep(self) -> None:
-        self._asleep = True
-        self._deadline = None
-
-    def did_wake(self, now: float, settle_seconds: float) -> None:
-        self._asleep = False
-        self.schedule(now, max(settle_seconds, WAKE_SETTLE_SECONDS))
-
-    def due(self, now: float) -> bool:
-        return not self._asleep and self._deadline is not None and now >= self._deadline
-
-    def evaluate(
-        self,
-        snapshot: frozenset[DisplayKey],
-        now: float,
-        *,
-        fallback: bool = False,
-    ) -> bool:
-        """Return true once for any newly present targets after settling."""
-        if self._asleep:
-            return False
-        if self._deadline is not None:
-            if now < self._deadline:
-                return False
-            self._deadline = None
-        elif not fallback:
-            return False
-        current = frozenset(snapshot)
-        plugged_in = bool(current - self._baseline)
-        self._baseline = current
-        return plugged_in
-
-    def abandon_pending_check(self) -> None:
-        self._deadline = None
 
 
 def log(message: str) -> None:
     print(time.strftime("%Y-%m-%d %H:%M:%S"), message, flush=True)
-
-
-def _state_directory(state_dir: Path | str | None = None) -> Path:
-    if state_dir is not None:
-        return Path(state_dir).expanduser()
-    configured = os.environ.get(STATE_DIR_ENV)
-    if configured:
-        return Path(configured).expanduser()
-    return Path.home() / ".local" / "state" / TOOL
-
-
-def _state_path(state_dir: Path | str | None = None) -> Path:
-    return _state_directory(state_dir) / "state.json"
-
-
-def read_state(state_dir: Path | str | None = None) -> dict:
-    """Return recorded state, treating a missing or corrupt record as empty."""
-    try:
-        value = json.loads(_state_path(state_dir).read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, ValueError):
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
-def _atomic_write_state(path: Path, state: dict) -> None:
-    descriptor, temporary_name = tempfile.mkstemp(prefix="." + path.name + ".", dir=str(path.parent))
-    try:
-        os.fchmod(descriptor, 0o600)
-        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
-            descriptor = -1
-            json.dump(state, output, sort_keys=True, allow_nan=False)
-            output.write("\n")
-            output.flush()
-            os.fsync(output.fileno())
-        os.replace(temporary_name, path)
-        os.chmod(path, 0o600)
-        directory = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
-    finally:
-        if descriptor >= 0:
-            os.close(descriptor)
-        try:
-            os.unlink(temporary_name)
-        except FileNotFoundError:
-            pass
-
-
-def update_state(changes: dict, state_dir: Path | str | None = None) -> bool:
-    """Merge fields under the state lock; state failures never stop the agent."""
-    try:
-        directory = _state_directory(state_dir)
-        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-        os.chmod(directory, 0o700)
-        lock_path = directory / "state.lock"
-        with lock_path.open("a+b") as lock:
-            os.fchmod(lock.fileno(), 0o600)
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-            state = read_state(directory)
-            state.update(changes)
-            state["version"] = STATE_VERSION
-            _atomic_write_state(directory / "state.json", state)
-        return True
-    except Exception as error:
-        log(f"state update skipped: {type(error).__name__}: {error}")
-        return False
-
-
-def online_displays() -> list[DisplayInfo]:
-    """Read online displays without importing PyObjC until macOS glue is used."""
-    import Quartz
-    from AppKit import NSScreen
-
-    error, display_ids, _count = Quartz.CGGetOnlineDisplayList(16, None, None)
-    if error != 0:
-        raise RuntimeError(f"CGGetOnlineDisplayList failed with error {error}")
-    names = {
-        int(screen.deviceDescription()["NSScreenNumber"]): str(screen.localizedName())
-        for screen in NSScreen.screens()
-    }
-    return [
-        DisplayInfo(
-            int(display_id),
-            names.get(int(display_id))
-            or (MIRROR_NAME if Quartz.CGDisplayIsInMirrorSet(display_id) else "unnamed"),
-            bool(Quartz.CGDisplayIsBuiltin(display_id)),
-            int(Quartz.CGDisplayVendorNumber(display_id)),
-            int(Quartz.CGDisplayModelNumber(display_id)),
-            int(Quartz.CGDisplayUnitNumber(display_id)),
-            int(Quartz.CGDisplaySerialNumber(display_id)),
-        )
-        for display_id in display_ids
-    ]
 
 
 def list_displays() -> None:
