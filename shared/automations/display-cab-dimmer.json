@@ -1,0 +1,11 @@
+{
+  "tool": "display-cab-dimmer",
+  "title": "Cab dimmer",
+  "description": "Dims the cab Wiz lights that are on to the configured brightness when a Q24h-10 monitor is plugged into the MacBook.",
+  "service": "com.jacobr.display-cab-dimmer",
+  "settings": "display-cab-dimmer",
+  "status": {"argv": ["/usr/bin/env", "PYTHONPATH={repo}/shared/python", "{home}/.local/share/display-cab-dimmer/venv/bin/python", "-B", "{repo}/macbook/scripts/display_cab_dimmer.py", "--status", "--json"], "timeout": 15},
+  "actions": [
+    {"name": "dim-now", "label": "Dim now", "description": "Dim the cab lights that are on now, even when the agent is disabled.", "argv": ["/usr/bin/env", "PYTHONPATH={repo}/shared/python", "{home}/.local/share/display-cab-dimmer/venv/bin/python", "-B", "{repo}/macbook/scripts/display_cab_dimmer.py", "--dim-now"], "timeout": 60, "confirm": true}
+  ]
+}

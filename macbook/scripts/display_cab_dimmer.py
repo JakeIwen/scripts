@@ -7,36 +7,70 @@ a fallback. The starting display set is only a baseline and never dims lights.
 
 Settings are declared in shared/settings/display-cab-dimmer.json and saved in
 ~/.config/jacobr/display-cab-dimmer.json. Valid edits are applied while running.
+Activity is recorded in ~/.local/state/display-cab-dimmer/state.json.
 
-  display_cab_dimmer.py             watch for a monitor plug-in
-  display_cab_dimmer.py --list      print online displays and target matches
-  display_cab_dimmer.py --dim-now   dim the currently lit cab lights once
+  display_cab_dimmer.py                    watch for a monitor plug-in
+  display_cab_dimmer.py --list             print online displays and target matches
+  display_cab_dimmer.py --dim-now          dim the currently lit cab lights once
+  display_cab_dimmer.py --status [--json]  print recorded automation status
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
+import fcntl
 import json
 import os
+from pathlib import Path
 import re
 import sys
+import tempfile
 import time
-from typing import Callable
 from urllib import parse, request
 
+import tool_automation
 import tool_settings
 
 TOOL = "display-cab-dimmer"
 MONITOR_NAME = "Q24h-10"
+# The Q24h-10's EDID identity. Matching on it rather than the screen name keeps
+# a monitor that is hardware-mirroring another display (macOS leaves mirrors out
+# of NSScreen) counted as connected, so turning mirroring off is not a plug-in.
+MONITOR_VENDOR = 12462
+MONITOR_MODEL = 26280
+MIRROR_NAME = "mirror"
 DASHBOARD_URL = "http://vanpi.lan:8788"
 DASHBOARD_URL_ENV = "DISPLAY_CAB_DIMMER_DASHBOARD_URL"
+STATE_DIR_ENV = "DISPLAY_CAB_DIMMER_STATE_DIR"
 CAB_GROUP = "cab"
 HTTP_TIMEOUT_SECONDS = 8.0
 FALLBACK_POLL_SECONDS = 20.0
 RUN_LOOP_SECONDS = 1.0
 WAKE_SETTLE_SECONDS = 5.0
 BEGIN_CONFIGURATION_FLAG = 1
+STATE_VERSION = 1
 _DISPLAY_NUMBER_SUFFIX = re.compile(r" \(\d+\)$")
 DisplayKey = tuple[int, int, int]
+STATUS_OK, STATUS_IDLE, STATUS_UNKNOWN, STATUS_WARN, _STATUS_ERROR = tool_automation.STATUS_LEVELS
+
+
+class DimOutcome(str, Enum):
+    DIMMED = "dimmed"
+    NOTHING_TO_DO = "nothing-to-do"
+    DISABLED = "disabled"
+    FAILED = "failed"
+
+
+class RunTrigger(str, Enum):
+    PLUG_IN = "plug-in"
+    MANUAL = "manual"
+
+
+@dataclass(frozen=True)
+class DimResult:
+    outcome: DimOutcome
+    changed: int
+    detail: str
 
 
 @dataclass(frozen=True)
@@ -55,16 +89,25 @@ class DisplayInfo:
 
     @property
     def matches_target(self) -> bool:
-        return not self.built_in and display_name_matches(self.name)
+        return not self.built_in and (self.vendor, self.model) == (MONITOR_VENDOR, MONITOR_MODEL)
+
+    @property
+    def label(self) -> str:
+        """The screen name, or the monitor's name for a mirror NSScreen does not list."""
+        return self.name if display_name_matches(self.name) else f"{MONITOR_NAME} ({self.name})"
 
 
 def display_name_matches(name: str) -> bool:
-    """macOS adds a numeric suffix when identical displays are connected."""
+    """macOS adds a numeric suffix to the names of identical displays."""
     return _DISPLAY_NUMBER_SUFFIX.sub("", name) == MONITOR_NAME
 
 
 def matching_snapshot(displays: list[DisplayInfo]) -> frozenset[DisplayKey]:
     return frozenset(display.key for display in displays if display.matches_target)
+
+
+def matching_monitor_names(displays: list[DisplayInfo]) -> list[str]:
+    return sorted(display.label for display in displays if display.matches_target)
 
 
 class PlugTracker:
@@ -74,6 +117,10 @@ class PlugTracker:
         self._baseline = frozenset(initial_snapshot)
         self._deadline: float | None = None
         self._asleep = False
+
+    @property
+    def asleep(self) -> bool:
+        return self._asleep
 
     def schedule(self, now: float, settle_seconds: float) -> None:
         if self._asleep:
@@ -121,6 +168,74 @@ def log(message: str) -> None:
     print(time.strftime("%Y-%m-%d %H:%M:%S"), message, flush=True)
 
 
+def _state_directory(state_dir: Path | str | None = None) -> Path:
+    if state_dir is not None:
+        return Path(state_dir).expanduser()
+    configured = os.environ.get(STATE_DIR_ENV)
+    if configured:
+        return Path(configured).expanduser()
+    return Path.home() / ".local" / "state" / TOOL
+
+
+def _state_path(state_dir: Path | str | None = None) -> Path:
+    return _state_directory(state_dir) / "state.json"
+
+
+def read_state(state_dir: Path | str | None = None) -> dict:
+    """Return recorded state, treating a missing or corrupt record as empty."""
+    try:
+        value = json.loads(_state_path(state_dir).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _atomic_write_state(path: Path, state: dict) -> None:
+    descriptor, temporary_name = tempfile.mkstemp(prefix="." + path.name + ".", dir=str(path.parent))
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            descriptor = -1
+            json.dump(state, output, sort_keys=True, allow_nan=False)
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary_name, path)
+        os.chmod(path, 0o600)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        try:
+            os.unlink(temporary_name)
+        except FileNotFoundError:
+            pass
+
+
+def update_state(changes: dict, state_dir: Path | str | None = None) -> bool:
+    """Merge fields under the state lock; state failures never stop the agent."""
+    try:
+        directory = _state_directory(state_dir)
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(directory, 0o700)
+        lock_path = directory / "state.lock"
+        with lock_path.open("a+b") as lock:
+            os.fchmod(lock.fileno(), 0o600)
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            state = read_state(directory)
+            state.update(changes)
+            state["version"] = STATE_VERSION
+            _atomic_write_state(directory / "state.json", state)
+        return True
+    except Exception as error:
+        log(f"state update skipped: {type(error).__name__}: {error}")
+        return False
+
+
 def online_displays() -> list[DisplayInfo]:
     """Read online displays without importing PyObjC until macOS glue is used."""
     import Quartz
@@ -136,7 +251,8 @@ def online_displays() -> list[DisplayInfo]:
     return [
         DisplayInfo(
             int(display_id),
-            names.get(int(display_id), "<unknown>"),
+            names.get(int(display_id))
+            or (MIRROR_NAME if Quartz.CGDisplayIsInMirrorSet(display_id) else "unnamed"),
             bool(Quartz.CGDisplayIsBuiltin(display_id)),
             int(Quartz.CGDisplayVendorNumber(display_id)),
             int(Quartz.CGDisplayModelNumber(display_id)),
@@ -191,12 +307,16 @@ def _cab_lights(payload: dict) -> list[dict]:
     raise DashboardError("cab light group is unavailable")
 
 
+def _one_line_error(error: Exception) -> str:
+    return " ".join(f"{type(error).__name__}: {error}".split())
+
+
 def dim_cab_lights(
     brightness: int,
     *,
     dashboard_url: str | None = None,
     timeout: float = HTTP_TIMEOUT_SECONDS,
-) -> int:
+) -> DimResult:
     """Dim currently lit cab lights once, logging and swallowing every failure."""
     base_url = dashboard_url or os.environ.get(DASHBOARD_URL_ENV, DASHBOARD_URL)
     changed = 0
@@ -219,10 +339,168 @@ def dim_cab_lights(
             )
             changed += 1
             log(f"{entity_id}: brightness set to {brightness}%")
-        log(f"cab dimming complete: changed {changed} light(s) to {brightness}%")
+        detail = f"changed {changed} light(s) to {brightness}%"
+        log(f"cab dimming complete: {detail}")
+        outcome = DimOutcome.DIMMED if changed else DimOutcome.NOTHING_TO_DO
+        return DimResult(outcome, changed, detail)
     except Exception as error:
-        log(f"cab dimming skipped: {type(error).__name__}: {error}")
-    return changed
+        detail = _one_line_error(error)
+        log(f"cab dimming skipped: {detail}")
+        return DimResult(DimOutcome.FAILED, changed, detail)
+
+
+def _last_run(trigger: RunTrigger, at: float, result: DimResult) -> dict:
+    return {
+        "trigger": trigger.value,
+        "at": at,
+        "outcome": result.outcome.value,
+        "changed": result.changed,
+        "detail": result.detail,
+    }
+
+
+def handle_plug_in(
+    settings: dict,
+    *,
+    dashboard_url: str | None = None,
+    timeout: float = HTTP_TIMEOUT_SECONDS,
+    state_dir: Path | str | None = None,
+    now: float | None = None,
+) -> DimResult:
+    """Apply the enabled decision and record one detected plug-in."""
+    at = time.time() if now is None else now
+    if settings["enabled"]:
+        result = dim_cab_lights(
+            int(settings["brightness"]), dashboard_url=dashboard_url, timeout=timeout
+        )
+    else:
+        result = DimResult(DimOutcome.DISABLED, 0, "disabled; lights left unchanged")
+        log("cab dimming skipped: disabled")
+    update_state(
+        {"last_plug_in": at, "last_run": _last_run(RunTrigger.PLUG_IN, at, result)},
+        state_dir,
+    )
+    return result
+
+
+def run_manual(
+    settings: dict,
+    *,
+    dashboard_url: str | None = None,
+    timeout: float = HTTP_TIMEOUT_SECONDS,
+    state_dir: Path | str | None = None,
+    now: float | None = None,
+) -> DimResult:
+    at = time.time() if now is None else now
+    result = dim_cab_lights(
+        int(settings["brightness"]), dashboard_url=dashboard_url, timeout=timeout
+    )
+    update_state({"last_run": _last_run(RunTrigger.MANUAL, at, result)}, state_dir)
+    return result
+
+
+def _pid_is_alive(value) -> bool:
+    if type(value) is not int or value <= 0:
+        return False
+    try:
+        os.kill(value, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _epoch(value) -> float | None:
+    if type(value) in (int, float) and value >= 0:
+        return float(value)
+    return None
+
+
+def _count(amount: int, noun: str) -> str:
+    return f"{amount} {noun}" if amount == 1 else f"{amount} {noun}s"
+
+
+def _last_run_value(last_run) -> tuple[str, float | None, str | None]:
+    if not isinstance(last_run, dict):
+        return "Never", None, None
+    try:
+        outcome = DimOutcome(last_run.get("outcome"))
+        trigger = RunTrigger(last_run.get("trigger"))
+    except ValueError:
+        return "Unknown", _epoch(last_run.get("at")), STATUS_WARN
+    changed = last_run.get("changed")
+    changed = changed if type(changed) is int and changed >= 0 else 0
+    suffix = f"({trigger.value})"
+    if outcome is DimOutcome.DIMMED:
+        value = f"Dimmed {_count(changed, 'light')} {suffix}"
+    elif outcome is DimOutcome.NOTHING_TO_DO:
+        value = f"Nothing to dim {suffix}"
+    elif outcome is DimOutcome.DISABLED:
+        value = f"Skipped, disabled {suffix}"
+    else:
+        detail = str(last_run.get("detail") or "unknown error")
+        value = f"Failed: {detail[:450]} {suffix}"
+    level = STATUS_WARN if outcome is DimOutcome.FAILED else None
+    return value, _epoch(last_run.get("at")), level
+
+
+def automation_status(
+    settings: dict | None = None,
+    *,
+    state_dir: Path | str | None = None,
+) -> dict:
+    """Build status without importing macOS frameworks or contacting the dashboard."""
+    values = tool_settings.load(TOOL) if settings is None else settings
+    state = read_state(state_dir)
+    agent = state.get("agent") if isinstance(state.get("agent"), dict) else {}
+    pid = agent.get("pid")
+    running = _pid_is_alive(pid)
+    monitors = state.get("monitors")
+    if not isinstance(monitors, list) or not all(isinstance(item, str) for item in monitors):
+        monitors = []
+    if not state:
+        level, summary = STATUS_UNKNOWN, "No activity recorded yet"
+    elif not running:
+        level, summary = STATUS_WARN, "Agent is not running"
+    elif not values["enabled"]:
+        level = STATUS_IDLE
+        summary = "Disabled; plug-ins are recorded but the lights are left alone"
+    else:
+        level, summary = STATUS_OK, f"Watching {_count(len(monitors), 'monitor')}"
+    last_run_value, last_run_at, last_run_level = _last_run_value(state.get("last_run"))
+    last_plug_in = _epoch(state.get("last_plug_in"))
+    fields = [
+        tool_automation.status_field("Enabled", "Yes" if values["enabled"] else "No"),
+        tool_automation.status_field("Brightness", f"{int(values['brightness'])}%"),
+        tool_automation.status_field(
+            "Monitors", ", ".join(monitors) if monitors else "None", _epoch(state.get("monitors_at"))
+        ),
+        tool_automation.status_field("Last plug-in", time=last_plug_in)
+        if last_plug_in is not None
+        else tool_automation.status_field("Last plug-in", "Never"),
+        tool_automation.status_field("Last run", last_run_value, last_run_at, last_run_level),
+        tool_automation.status_field(
+            "Agent", f"Running, pid {pid}" if running else "Not running", _epoch(agent.get("started_at"))
+        ),
+    ]
+    return tool_automation.status_record(level, summary, fields)
+
+
+def print_status(record: dict, *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(record, separators=(",", ":"), allow_nan=False))
+        return
+    print(f"{record['summary']} [{record['level']}]")
+    for field in record["fields"]:
+        value = field["value"] or ""
+        if field["time"] is not None:
+            rendered_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(field["time"]))
+            value = f"{value} ({rendered_time})" if value else rendered_time
+        suffix = f" [{field['level']}]" if field["level"] is not None else ""
+        print(f"{field['label']}: {value}{suffix}")
 
 
 def _reload_settings(reloader, settings: dict, ignored_error: str | None) -> tuple[dict, str | None]:
@@ -232,8 +510,9 @@ def _reload_settings(reloader, settings: dict, ignored_error: str | None) -> tup
             log(f"settings ignored, keeping {settings}: {result.error}")
         return settings, result.error
     if result.changed:
+        enabled = "on" if result.values["enabled"] else "off"
         log(
-            f"settings reloaded; brightness {result.values['brightness']}%; "
+            f"settings reloaded; enabled {enabled}; brightness {result.values['brightness']}%; "
             f"settle_seconds {result.values['settle_seconds']:g}"
         )
     return result.values, None
@@ -246,9 +525,19 @@ def watch() -> None:
 
     reloader = tool_settings.Reloader(TOOL)
     settings = reloader.poll().values
-    initial_snapshot = matching_snapshot(online_displays())
+    initial_displays = online_displays()
+    initial_snapshot = matching_snapshot(initial_displays)
+    monitors = matching_monitor_names(initial_displays)
     tracker = PlugTracker(initial_snapshot)
     runtime = {"settle_seconds": float(settings["settle_seconds"])}
+    started_at = time.time()
+    update_state(
+        {
+            "agent": {"pid": os.getpid(), "started_at": started_at},
+            "monitors": monitors,
+            "monitors_at": started_at,
+        }
+    )
 
     def reconfigured(_display, flags, _info):
         if int(flags) & BEGIN_CONFIGURATION_FLAG:
@@ -289,14 +578,22 @@ def watch() -> None:
                 continue
             if fallback:
                 next_poll = now + FALLBACK_POLL_SECONDS
+            if tracker.asleep:
+                continue
             try:
-                snapshot = matching_snapshot(online_displays())
+                displays = online_displays()
+                snapshot = matching_snapshot(displays)
+                current_monitors = matching_monitor_names(displays)
             except Exception as error:
                 tracker.abandon_pending_check()
                 log(f"display check skipped: {type(error).__name__}: {error}")
                 continue
-            if tracker.evaluate(snapshot, now, fallback=fallback):
-                dim_cab_lights(int(settings["brightness"]))
+            plugged_in = tracker.evaluate(snapshot, now, fallback=fallback)
+            if current_monitors != monitors:
+                monitors = current_monitors
+                update_state({"monitors": monitors, "monitors_at": time.time()})
+            if plugged_in:
+                handle_plug_in(settings)
     finally:
         Quartz.CGDisplayRemoveReconfigurationCallback(reconfigured, None)
         notifications.removeObserver_(observer)
@@ -307,8 +604,10 @@ def main(argv: list[str]) -> int:
         list_displays()
         return 0
     if argv == ["--dim-now"]:
-        settings = tool_settings.load(TOOL)
-        dim_cab_lights(int(settings["brightness"]))
+        result = run_manual(tool_settings.load(TOOL))
+        return 1 if result.outcome is DimOutcome.FAILED else 0
+    if argv in (["--status"], ["--status", "--json"]):
+        print_status(automation_status(), as_json=argv[-1] == "--json")
         return 0
     if argv:
         print(__doc__, file=sys.stderr)

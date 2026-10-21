@@ -3,6 +3,7 @@
   "title": "Dim cab lights when the monitor is plugged in",
   "description": "Brightness the cab Wiz lights that are on get once, when a Q24h-10 monitor is plugged into the MacBook (LaunchAgent com.jacobr.display-cab-dimmer).",
   "settings": [
+    {"name": "enabled", "label": "Enabled", "type": "boolean", "default": true, "description": "Dim the cab lights when the monitor is plugged in. When off, plug-ins are still recorded but the lights are left alone."},
     {"name": "brightness", "label": "Cab brightness", "type": "integer", "minimum": 1, "maximum": 100, "default": 40, "unit": "%", "description": "Brightness applied to each cab light that is on when the monitor appears."},
     {"name": "settle_seconds", "label": "Settle time", "type": "number", "minimum": 0.5, "maximum": 30, "step": 0.5, "default": 3, "unit": "s", "description": "How long the display list must stay unchanged before it is compared with the previous one."}
   ]
