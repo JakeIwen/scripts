@@ -124,7 +124,7 @@ class FontAndSettingsTests(unittest.TestCase):
         with PLIST.open("rb") as source:
             plist = plistlib.load(source)
         self.assertEqual(plist["EnvironmentVariables"]["PYTHONPATH"],
-                         str(Path(__file__).resolve().parents[2] / "shared/python"))
+                         str(Path(plist["WorkingDirectory"]) / "shared/python"))
 
 
 if __name__ == "__main__":
