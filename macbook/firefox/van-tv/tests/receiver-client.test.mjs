@@ -11,9 +11,16 @@ test('background HTTP round trip sends JSON casts and controls without cookies o
   assert.equal(status.pairing, undefined);
   assert.deepEqual(await receiver.cast(videoId, 12.5), { videoId, position: 12.5 });
   assert.deepEqual(await receiver.control('pause'), { action: 'pause', done: true });
+  assert.deepEqual(await receiver.control('toggle'), { action: 'toggle', done: true });
+  assert.deepEqual(await receiver.control('seek', { position: 27 }), { action: 'seek', done: true });
+  assert.deepEqual(await receiver.control('seek', { offset: -20 }), { action: 'seek', done: true });
   const posts = fixture.requests.filter(request => request.method === 'POST');
   assert.deepEqual(posts.map(request => [request.path, request.body]), [
-    ['/api/cast', { videoId, position: 12.5 }], ['/api/control', { action: 'pause' }],
+    ['/api/cast', { videoId, position: 12.5 }],
+    ['/api/control', { action: 'pause' }],
+    ['/api/control', { action: 'toggle' }],
+    ['/api/control', { action: 'seek', position: 27 }],
+    ['/api/control', { action: 'seek', offset: -20 }],
   ]);
   for (const request of posts) {
     assert.equal(request.headers['content-type'], 'application/json');
@@ -48,7 +55,21 @@ test('invalid IDs, positions and actions fail before any network request', async
   for (const [id, position] of [['bad', 0], [videoId, -1], [videoId, Infinity], [videoId, '12']]) {
     await assert.rejects(receiver.cast(id, position), /Invalid YouTube/);
   }
-  await assert.rejects(receiver.control('seek'), /Unknown playback action/);
+  await assert.rejects(receiver.control('rewind'), /Unknown playback action/);
+  assert.equal(fixture.requests.length, 0);
+});
+
+test('invalid seek fields fail before any network request', async t => {
+  const fixture = await startReceiver(t);
+  const receiver = createReceiverClient({ baseUrls: [fixture.url] });
+  const invalidFields = [
+    undefined, null, [], {}, { position: 0, offset: 0 }, { position: -1 },
+    { position: Infinity }, { position: '12' }, { position: undefined },
+    { offset: Infinity }, { offset: '-20' }, { offset: undefined },
+  ];
+  for (const fields of invalidFields) {
+    await assert.rejects(receiver.control('seek', fields), /Invalid seek fields/);
+  }
   assert.equal(fixture.requests.length, 0);
 });
 

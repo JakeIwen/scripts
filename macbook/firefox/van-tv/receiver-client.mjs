@@ -19,6 +19,20 @@ export function decodeStatus(value) {
   return { ok, player, video, position, duration };
 }
 
+function controlBody(action, fields) {
+  if (!actions.includes(action)) throw new Error('Unknown playback action');
+  if (action !== config.control.seek) return { action };
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) {
+    throw new Error('Invalid seek fields');
+  }
+  const hasPosition = Object.hasOwn(fields, 'position');
+  const hasOffset = Object.hasOwn(fields, 'offset');
+  const validPosition = hasPosition && isPosition(fields.position);
+  const validOffset = hasOffset && typeof fields.offset === 'number' && Number.isFinite(fields.offset);
+  if (hasPosition === hasOffset || !validPosition && !validOffset) throw new Error('Invalid seek fields');
+  return hasPosition ? { action, position: fields.position } : { action, offset: fields.offset };
+}
+
 async function requestJson(fetcher, url, options, timeoutMs) {
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), timeoutMs);
@@ -77,9 +91,9 @@ export function createReceiverClient({ fetcher = globalThis.fetch,
     return result;
   }
 
-  async function control(action) {
-    if (!actions.includes(action)) throw new Error('Unknown playback action');
-    const result = await post('/api/control', { action });
+  async function control(action, fields = {}) {
+    const body = controlBody(action, fields);
+    const result = await post('/api/control', body);
     if (result?.action !== action || typeof result.done !== 'boolean') {
       throw new Error('Invalid Van TV control response; check playback before retrying');
     }

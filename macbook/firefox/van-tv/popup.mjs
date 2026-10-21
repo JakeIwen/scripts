@@ -1,15 +1,36 @@
 import './config.js';
-import { popupState } from './popup-state.mjs';
+import { createScrubState, formatTime, popupState, transitionScrub } from './popup-state.mjs';
 
 const config = globalThis.VAN_TV_CONFIG;
-const element = Object.fromEntries(['state', 'video', 'time', 'notice', 'cast-tab', 'pause', 'resume', 'stop']
-  .map(id => [id, document.getElementById(id)]));
-const controls = Object.values(config.control);
+const ids = [
+  'state', 'video', 'elapsed', 'duration', 'scrub', 'notice', 'cast-tab',
+  'previous', 'back-five', 'back-twenty', 'toggle', 'forward-twenty',
+  'forward-five', 'next', 'stop',
+];
+const element = Object.fromEntries(ids.map(id => [id, document.getElementById(id)]));
+const transportControls = [
+  { button: element.previous, action: config.control.previous },
+  { button: element['back-five'], action: config.control.seek,
+    fields: { offset: config.skipOffsets.backwardFiveMinutes } },
+  { button: element['back-twenty'], action: config.control.seek,
+    fields: { offset: config.skipOffsets.backwardTwentySeconds } },
+  { button: element.toggle, action: config.control.toggle },
+  { button: element['forward-twenty'], action: config.control.seek,
+    fields: { offset: config.skipOffsets.forwardTwentySeconds } },
+  { button: element['forward-five'], action: config.control.seek,
+    fields: { offset: config.skipOffsets.forwardFiveMinutes } },
+  { button: element.next, action: config.control.next },
+  { button: element.stop, action: config.control.stop },
+];
+
 let latestStatus;
+let scrub = createScrubState();
 let busy = false;
 let polling = false;
 let tabAvailable = false;
-let timer;
+let pollTimer;
+let progressTimer;
+let progressTime = performance.now();
 let closed = false;
 
 async function send(type, fields = {}) {
@@ -18,32 +39,61 @@ async function send(type, fields = {}) {
   return response.data;
 }
 
-function updateButtons() {
-  const actions = latestStatus ? popupState(latestStatus).actions : [];
-  for (const action of controls) element[action].disabled = busy || !actions.includes(action);
+function renderPlayback() {
+  const duration = latestStatus?.duration ?? 0;
+  if (!scrub.dragging) {
+    element.scrub.max = String(duration);
+    element.scrub.value = String(scrub.position);
+  }
+  element.elapsed.textContent = formatTime(scrub.position);
+  element.duration.textContent = latestStatus ? formatTime(duration) : '—';
+}
+
+function updateControls() {
+  const view = latestStatus ? popupState(latestStatus) : null;
+  for (const item of transportControls) {
+    item.button.disabled = busy || !view?.actions.includes(item.action);
+  }
+  const toggleLabel = view?.toggleLabel ?? 'Play';
+  element.toggle.textContent = toggleLabel === 'Pause' ? '⏸' : '▶';
+  element.toggle.title = toggleLabel;
+  element.toggle.setAttribute('aria-label', toggleLabel);
+  if (!scrub.dragging) element.scrub.disabled = busy || !view?.scrubEnabled;
   element['cast-tab'].disabled = busy || !tabAvailable;
+}
+
+function renderStatus() {
+  if (latestStatus) {
+    const view = popupState(latestStatus);
+    element.state.textContent = view.state;
+    element.video.textContent = view.title;
+  } else {
+    element.state.textContent = 'Van TV unreachable';
+    element.video.textContent = '';
+  }
+  renderPlayback();
+  updateControls();
 }
 
 async function refreshStatus() {
   try {
-    latestStatus = await send(config.message.status);
-    const view = popupState(latestStatus);
-    element.state.textContent = view.state;
-    element.video.textContent = view.title;
-    element.time.textContent = view.time;
+    const status = await send(config.message.status);
+    scrub = transitionScrub(scrub, {
+      type: 'poll', position: status.position, duration: status.duration,
+    }).state;
+    latestStatus = status;
   } catch {
     latestStatus = null;
-    element.state.textContent = 'Van TV unreachable';
-    element.video.textContent = '';
-    element.time.textContent = '';
+    if (!scrub.dragging) scrub = createScrubState();
   }
-  updateButtons();
+  progressTime = performance.now();
+  renderStatus();
 }
 
 async function refreshTab() {
   try { tabAvailable = Boolean(await send(config.message.tabVideo)); }
   catch { tabAvailable = false; }
-  updateButtons();
+  updateControls();
 }
 
 async function poll() {
@@ -52,7 +102,7 @@ async function poll() {
   try { await Promise.all([refreshStatus(), refreshTab()]); }
   finally {
     polling = false;
-    if (!closed) timer = setTimeout(poll, config.pollIntervalMs);
+    if (!closed) pollTimer = setTimeout(poll, config.pollIntervalMs);
   }
 }
 
@@ -60,20 +110,59 @@ async function perform(type, fields, success) {
   if (busy) return;
   busy = true;
   element.notice.textContent = '';
-  updateButtons();
+  updateControls();
   try {
     const data = await send(type, fields);
     element.notice.textContent = data.done === false ? 'No playback change' : success;
     await refreshStatus();
   } catch (error) { element.notice.textContent = error.message; }
-  finally { busy = false; updateButtons(); }
+  finally { busy = false; updateControls(); }
 }
 
-for (const action of controls) {
-  element[action].addEventListener('click', () => void perform(config.message.control, { action }, ''));
+function updateProgress() {
+  const now = performance.now();
+  const seconds = (now - progressTime) / 1000;
+  progressTime = now;
+  if (!latestStatus?.ok || latestStatus.player !== config.player.playing) return;
+  scrub = transitionScrub(scrub, {
+    type: 'advance', seconds, duration: latestStatus.duration,
+  }).state;
+  renderPlayback();
 }
-element['cast-tab'].addEventListener('click', () => void perform(config.message.castTab, {}, 'Cast accepted'));
-window.addEventListener('pagehide', () => { closed = true; clearTimeout(timer); });
+
+for (const item of transportControls) {
+  item.button.addEventListener('click', () => void perform(config.message.control,
+    { action: item.action, ...(item.fields ?? {}) }, ''));
+}
+
+element.scrub.addEventListener('input', event => {
+  scrub = transitionScrub(scrub, {
+    type: 'input', position: Number(event.currentTarget.value),
+    duration: latestStatus?.duration,
+  }).state;
+  renderPlayback();
+});
+
+element.scrub.addEventListener('change', event => {
+  const result = transitionScrub(scrub, {
+    type: 'change', position: Number(event.currentTarget.value),
+    duration: latestStatus?.duration,
+  });
+  scrub = result.state;
+  if (latestStatus) latestStatus = { ...latestStatus, position: scrub.position };
+  progressTime = performance.now();
+  renderStatus();
+  void perform(config.message.control, { action: config.control.seek, ...result.seek }, '');
+});
+
+element['cast-tab'].addEventListener('click', () => void perform(
+  config.message.castTab, {}, 'Cast accepted'));
+window.addEventListener('pagehide', () => {
+  closed = true;
+  clearTimeout(pollTimer);
+  clearInterval(progressTimer);
+});
 void browser.browserAction.setBadgeText({ text: '' });
 void browser.browserAction.setTitle({ title: 'Van TV' });
+progressTimer = setInterval(updateProgress, config.progressIntervalMs);
 void poll();

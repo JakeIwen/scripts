@@ -48,11 +48,15 @@ then reload the YouTube tab. **Inspect** opens its background console.
 - Right-click a YouTube video link → **Cast to Van TV**. A link's `t=` start
   time is honoured. On a watch page, right-click the page's
   background for the same menu item, casting the current tab's position.
-- The toolbar popup shows receiver state, title and elapsed/total time, polls
-  about every two seconds while open, and offers **Pause**, **Resume**, **Stop**
-  and **Cast this tab**. The cast control works for watch, short-link, shorts,
-  live and embed URLs. Where a content script is unavailable it uses the URL's
-  start time (`t=`, `start=`, or `#t=`), and cannot pause that page itself.
+- The toolbar popup shows receiver state and title, polls about every two
+  seconds while open, and advances the displayed playhead locally between
+  successful polls while playback is running. Its scrubber shows elapsed and
+  total time, supports mouse/touch dragging and keyboard arrows, and sends one
+  absolute seek when the value is committed. The transport row offers previous,
+  −5 minutes, −20 seconds, play/pause, +20 seconds, +5 minutes, next and stop.
+  **Cast this tab** still works for watch, short-link, shorts, live and embed
+  URLs. Where a content script is unavailable it uses the URL's start time
+  (`t=`, `start=`, or `#t=`), and cannot pause that page itself.
 - **Alt+Shift+V** (Option+Shift+V on the Mac) casts the active YouTube tab.
   Change it at `about:addons` → gear menu → **Manage Extension Shortcuts**.
   A failed shortcut/context-menu cast puts `!` on the toolbar button; hover for
@@ -68,7 +72,8 @@ performs HTTP: primary `http://vanpi.lan:8795`, with the LAN IP
 
 - `GET /api/status` supplies state. Failed reads may try the other address.
 - `POST /api/cast` sends `{ videoId, position }`.
-- `POST /api/control` sends `{ action }` for pause, resume or stop.
+- `POST /api/control` sends pause, resume, toggle, stop, previous, next, an
+  absolute seek position, or a relative seek offset.
 
 Both POSTs use `Content-Type: application/json`. Before a write, a read selects
 a reachable address; an ambiguous POST failure is **not retried** on the other
@@ -132,10 +137,17 @@ Test in Developer Edition on the van LAN:
 3. Right-click a different `watch`, `youtu.be`, and `shorts` link, including one
    with `t=90`, which should start at 90 s. Use the watch-page background menu
    separately and confirm that it uses the live playhead.
-4. Open the popup: verify title/time updates, Pause, Resume, Stop, recasting the
-   same video after Stop, and Cast this tab. Check a normal non-YouTube tab has
-   Cast this tab disabled. Try `/shorts/`, `/live/`, `/embed/` and a timestamped
-   URL when no content script is present; the latter should use its URL time.
+4. Open the popup while the Pi is playing: verify the scrubber and elapsed time
+   advance smoothly between polls, then pause and confirm they stop. Drag the
+   thumb for longer than one poll interval; it must stay under the pointer, then
+   seek once on release and resume tracking the receiver. Focus the range and
+   use arrow keys to seek. Check previous, −5m, −20s, play/pause, +20s, +5m,
+   next and stop, including boundary clamping near the beginning and end. The
+   scrubber should disable with no video or a zero duration; hour-long media
+   should use `h:mm:ss`. Recast the same video after Stop and try Cast this tab.
+   Check a normal non-YouTube tab has Cast this tab disabled. Try `/shorts/`,
+   `/live/`, `/embed/` and a timestamped URL when no content script is present;
+   the latter should use its URL time.
 5. Try Option+Shift+V and reassign it in Manage Extension Shortcuts. Confirm
    the active tab, not a different open YouTube tab, is cast.
 6. Disconnect the Mac from the van LAN, open the popup and try the player

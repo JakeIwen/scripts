@@ -11,13 +11,23 @@
   <h1>Van TV</h1>
   <p id="state" role="status">Connecting…</p>
   <p id="video"></p>
-  <p id="time"></p>
-  <div class="controls" aria-label="Receiver controls">
-    <button id="pause" type="button" disabled>Pause</button>
-    <button id="resume" type="button" disabled>Resume</button>
-    <button id="stop" type="button" disabled>Stop</button>
+  <div class="scrubber">
+    <span id="elapsed">—</span>
+    <input id="scrub" type="range" min="0" max="0" step="1"
+      value="0" aria-label="Playback position" disabled>
+    <span id="duration">—</span>
   </div>
-  <button id="cast-tab" type="button" disabled>Cast this tab</button>
+  <div class="transport" aria-label="Receiver controls">
+    <button id="previous" type="button" title="Previous" aria-label="Previous" disabled>⏮</button>
+    <button id="back-five" type="button" title="Back 5 minutes" aria-label="Back 5 minutes" disabled>−5m</button>
+    <button id="back-twenty" type="button" title="Back 20 seconds" aria-label="Back 20 seconds" disabled>−20s</button>
+    <button id="toggle" type="button" title="Play" aria-label="Play" disabled>▶</button>
+    <button id="forward-twenty" type="button" title="Forward 20 seconds" aria-label="Forward 20 seconds" disabled>+20s</button>
+    <button id="forward-five" type="button" title="Forward 5 minutes" aria-label="Forward 5 minutes" disabled>+5m</button>
+    <button id="next" type="button" title="Next" aria-label="Next" disabled>⏭</button>
+    <button id="stop" type="button" title="Stop" aria-label="Stop" disabled>■</button>
+  </div>
+  <button id="cast-tab" type="button" title="Cast this tab" disabled>Cast this tab</button>
   <p id="notice" role="status"></p>
   <script type="module" src="popup.mjs"></script>
 </body>

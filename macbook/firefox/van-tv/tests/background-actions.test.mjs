@@ -88,6 +88,24 @@ test('failed casts never send a pause acknowledgement', async t => {
   assert.equal(browser.messages.some(message => message.type === config.message.castAccepted), false);
 });
 
+test('popup control messages pass absolute and relative seek fields through', async t => {
+  const fixture = await startReceiver(t);
+  const browser = browserFixture();
+  const receiver = createReceiverClient({ baseUrls: [fixture.url] });
+  const handle = createMessageHandler(browser.browserApi, receiver);
+  assert.deepEqual(await handle({
+    type: config.message.control, action: config.control.seek, position: 71,
+  }, {}), { ok: true, data: { action: config.control.seek, done: true } });
+  assert.deepEqual(await handle({
+    type: config.message.control, action: config.control.seek, offset: -20,
+  }, {}), { ok: true, data: { action: config.control.seek, done: true } });
+  assert.deepEqual(fixture.requests.filter(request => request.method === 'POST')
+    .map(request => request.body), [
+    { action: config.control.seek, position: 71 },
+    { action: config.control.seek, offset: -20 },
+  ]);
+});
+
 test('unknown messages and content-script receiver controls have no side effects', async t => {
   const fixture = await startReceiver(t);
   const browser = browserFixture();
@@ -95,6 +113,8 @@ test('unknown messages and content-script receiver controls have no side effects
   const handle = createMessageHandler(browser.browserApi, receiver);
   assert.equal(handle({ type: 'toString' }, {}), undefined);
   assert.equal(handle({ type: config.message.control, action: 'stop' }, { tab }), undefined);
+  assert.equal(handle({ type: config.message.control,
+    action: config.control.seek, position: 20 }, { tab }), undefined);
   assert.equal(handle({ type: config.message.status }, { tab }), undefined);
   assert.equal(fixture.requests.length, 0);
   assert.deepEqual(await handle({ type: config.message.cast, videoId, position: 9 }, { tab }), {

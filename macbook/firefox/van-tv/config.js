@@ -4,6 +4,7 @@ globalThis.VAN_TV_CONFIG = Object.freeze({
   receiverUrls: Object.freeze(['http://vanpi.lan:8795', 'http://192.168.6.103:8795']),
   requestTimeoutMs: 3000,
   pollIntervalMs: 2000,
+  progressIntervalMs: 250,
   feedbackDurationMs: 3500,
   youtube: Object.freeze({
     hosts: Object.freeze(['www.youtube.com', 'youtube.com', 'm.youtube.com']),
@@ -22,6 +23,13 @@ globalThis.VAN_TV_CONFIG = Object.freeze({
     idle: 'IDLE', loading: 'LOADING', playing: 'PLAYING',
     paused: 'PAUSED', stopped: 'STOPPED',
   }),
-  control: Object.freeze({ pause: 'pause', resume: 'resume', stop: 'stop' }),
+  control: Object.freeze({
+    pause: 'pause', resume: 'resume', toggle: 'toggle', stop: 'stop',
+    next: 'next', previous: 'previous', seek: 'seek',
+  }),
+  skipOffsets: Object.freeze({
+    backwardFiveMinutes: -300, backwardTwentySeconds: -20,
+    forwardTwentySeconds: 20, forwardFiveMinutes: 300,
+  }),
   command: 'cast-active-tab',
 });

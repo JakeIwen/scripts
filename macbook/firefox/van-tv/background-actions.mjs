@@ -5,10 +5,17 @@ import { parseYouTubeVideo, youtubeMenuPatterns } from './youtube-video.mjs';
 const config = globalThis.VAN_TV_CONFIG;
 const menu = Object.freeze({ link: 'cast-link', page: 'cast-page' });
 
+function controlFields(message) {
+  const fields = {};
+  if (Object.hasOwn(message, 'position')) fields.position = message.position;
+  if (Object.hasOwn(message, 'offset')) fields.offset = message.offset;
+  return fields;
+}
+
 export function createMessageHandler(browserApi, receiver) {
   const routes = {
     [config.message.status]: () => receiver.status(),
-    [config.message.control]: message => receiver.control(message.action),
+    [config.message.control]: message => receiver.control(message.action, controlFields(message)),
     [config.message.cast]: message => receiver.cast(message.videoId, message.position),
     [config.message.tabVideo]: async () => tabVideo(browserApi, await activeTab(browserApi)),
     [config.message.castTab]: async () => castTab(browserApi, receiver, await activeTab(browserApi)),

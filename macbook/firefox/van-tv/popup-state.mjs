@@ -1,12 +1,16 @@
 import './config.js';
 
 const { player, control } = globalThis.VAN_TV_CONFIG;
+const playbackActions = Object.freeze([
+  control.previous, control.seek, control.toggle, control.next, control.stop,
+]);
+const loadingActions = Object.freeze([control.stop]);
 const availableActions = Object.freeze({
-  [player.idle]: [],
-  [player.loading]: [control.stop],
-  [player.playing]: [control.pause, control.stop],
-  [player.paused]: [control.resume, control.stop],
-  [player.stopped]: [],
+  [player.idle]: Object.freeze([]),
+  [player.loading]: loadingActions,
+  [player.playing]: playbackActions,
+  [player.paused]: playbackActions,
+  [player.stopped]: Object.freeze([]),
 });
 
 export function formatTime(value) {
@@ -18,11 +22,56 @@ export function formatTime(value) {
   return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${remainder}` : `${minutes}:${remainder}`;
 }
 
+function boundedPosition(value, duration) {
+  const position = Number.isFinite(value) && value >= 0 ? value : 0;
+  return Number.isFinite(duration) && duration >= 0 ? Math.min(position, duration) : position;
+}
+
+export function createScrubState(position = 0, duration = Infinity) {
+  return { dragging: false, position: boundedPosition(position, duration) };
+}
+
+export function transitionScrub(state, event) {
+  if (event.type === 'poll') {
+    if (state.dragging) return { state, seek: null };
+    return { state: createScrubState(event.position, event.duration), seek: null };
+  }
+  if (event.type === 'input') {
+    return {
+      state: { dragging: true, position: boundedPosition(event.position, event.duration) },
+      seek: null,
+    };
+  }
+  if (event.type === 'change') {
+    const position = boundedPosition(event.position, event.duration);
+    return { state: { dragging: false, position }, seek: { position } };
+  }
+  if (event.type === 'advance') {
+    if (state.dragging || !Number.isFinite(event.seconds) || event.seconds <= 0) {
+      return { state, seek: null };
+    }
+    return {
+      state: { dragging: false,
+        position: boundedPosition(state.position + event.seconds, event.duration) },
+      seek: null,
+    };
+  }
+  throw new Error('Unknown scrub transition');
+}
+
 export function popupState(status) {
+  const actions = status.ok ? (availableActions[status.player] ?? []) : [];
+  const elapsed = formatTime(status.position);
+  const total = formatTime(status.duration);
   return {
     state: status.ok ? status.player : 'Receiver not running',
     title: status.video?.title || (status.video ? status.video.id : 'No video'),
-    time: `${formatTime(status.position)} / ${formatTime(status.duration)}`,
-    actions: status.ok ? (availableActions[status.player] ?? []) : [],
+    elapsed,
+    total,
+    time: `${elapsed} / ${total}`,
+    actions,
+    scrubEnabled: Boolean(status.ok && status.video && status.duration > 0
+      && actions.includes(control.seek)),
+    toggleLabel: status.player === player.playing ? 'Pause' : 'Play',
   };
 }
