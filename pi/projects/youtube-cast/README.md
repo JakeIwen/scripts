@@ -33,11 +33,9 @@ If needed, install OS dependencies in a normal Pi terminal:
 sudo apt-get install mpv python3-venv python3-pip x11-xserver-utils dbus-bin
 ```
 
-Before first deployment, merge the Pi playback measurements into the explicitly
-marked **PLAYER TUNING BLOCK** in `src/config.mjs`: `playback.args` (including
-hwdec and audio-device), `playback.format`, `playback.ytdlp` and
-`playback.ytdlpOptions`. The checked-in H.264 ≤1080p/auto-audio values are
-placeholders, not a claim of verified Pi performance. `mpvArguments()` in that
+The **PLAYER TUNING BLOCK** in `src/config.mjs` holds the values measured on the
+Pi 4 (hwdec, video output, format selector, audio device, yt-dlp options);
+re-measure before changing them. `mpvArguments()` in that
 same file is the only argv builder. It uses mpv 0.35's `loadfile` options syntax.
 
 ## Cast from the Mac
@@ -167,6 +165,13 @@ bookmark checkpoint as the HTTP route.
 
 `xset -display :0 dpms force on` wakes the screen each video. On the first video
 of a cast session, `/home/pi/sns.sh rear_movie` switches rear Sonos to optical.
+
+Audio path: the Pi's HDMI output runs through a hardware splitter box that
+extracts the audio to optical, into the Sonos soundbar; `rear_movie` puts the
+soundbar on its optical input and groups vonRear with it. So mpv plays to ALSA
+HDMI 0 (`hdmi:CARD=vc4hdmi0,DEV=0`) directly: PipeWire shows only a null sink
+because the display chain reports no audio sink, and nothing on the Pi mixes or
+routes the sound. Volume is the Sonos's.
 It runs in its own process group, with an 18-second timeout and bounded kill;
 failures are logged and playback continues. Stopping/disconnecting closes mpv
 and its resolver children so the desktop returns. Other senders may stay

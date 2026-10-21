@@ -233,6 +233,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   then the Mac, in `~/.local/share/codexclean/` with a launcher at
   `~/.local/bin/codexclean`. The installed copies don't follow the checkout:
   re-run the deploy after editing any of those modules.
+- Pi video audio is hardwired: HDMI-A-1 → splitter box (HDMI to the monitor,
+  audio to optical) → Sonos soundbar's optical input. `sns.sh rear_movie`
+  switches the soundbar to optical and groups vonRear with it; VLC and Van TV's
+  mpv play to ALSA HDMI 0, and PipeWire's null sink is expected, not a fault.
 - Dashboard Sonos alarms live in `pi/apps/van_dashboard/sonos_alarms.py`, with
   HTTP routes in `routes/sonos_alarms.py` and React controls in `features/sonos/`.
   `SonosAlarm` owns the device record; `alarms.ts` owns the validated UI contract.

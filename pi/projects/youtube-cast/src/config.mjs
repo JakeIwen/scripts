@@ -31,8 +31,9 @@ export const config = Object.freeze({
 
 // PLAYER TUNING BLOCK: measured on the Pi 4 (2026-10-21). xv beat gpu on dropped
 // frames, and 60 fps or 1080p30 can't be presented smoothly, so the selector
-// steps down to H.264 720p30 or 480p. PipeWire exposes only a null sink, so
-// audio goes straight to ALSA HDMI 0, which carries it to the rear Sonos optical.
+// steps down to H.264 720p30 or 480p. HDMI audio reaches the Sonos soundbar
+// through a hardware HDMI-to-optical splitter; PipeWire exposes only a null sink
+// there, so mpv writes to ALSA HDMI 0 directly.
 // yt-dlp needs Node >= 22 or Deno for YouTube's JS challenges; the venv ships Deno.
 export const playback = Object.freeze({
   mpv: '/usr/bin/mpv',
