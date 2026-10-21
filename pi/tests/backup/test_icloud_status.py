@@ -54,7 +54,13 @@ class StatusTests(unittest.TestCase):
         self.assertIsNone(result['last_success_at'])
 
     def test_auth_attention_and_completed_freshness(self):
-        self.assertEqual(self.build(auth_error=True)['phase'], 'authentication_required')
+        auth = self.build({'phase': 'not due', 'last_success_at': 990,
+                           'last_error': 'PRIVATE cookie=SECRET'}, auth_error=True)
+        self.assertEqual(auth['phase'], 'authentication_required')
+        self.assertTrue(auth['attention'])
+        self.assertIn(status.ICLOUD_LOGIN_COMMAND, auth['message'])
+        self.assertNotIn('PRIVATE', json.dumps(auth))
+        self.assertNotIn('SECRET', json.dumps(auth))
         result = self.build({'phase': 'not due', 'last_success_at': 990})
         self.assertFalse(result['attention'])
         self.assertEqual(result['next_due_at'], 990 + 7 * 86400)

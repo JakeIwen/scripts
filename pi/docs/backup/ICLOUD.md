@@ -266,6 +266,11 @@ cleared when a new attempt begins. Login/transfer problems notify through the
 existing backup ntfy mechanism. Consecutive notices with the same title are
 limited to once per day; a previous failure does not suppress the later
 verified-success notice.
+Recognized expired-session responses, including Apple's `Invalid global session`,
+raise a shared sign-in warning on both cloud cards. The ntfy login notice and
+dashboard warning include the exact Mac Terminal SSH command for renewing the
+login privately. The authentication gate prevents further cloud requests until
+the login helper's canary succeeds; local backups continue normally.
 `last_success_at` requires verified remote data, not just a queued upload.
 
 Restore only a generation with a valid `_COMPLETE.json`. Download its entire

@@ -24,6 +24,11 @@ from icloud_progress import TransferActivity
 
 STATE_DIR = Path('/var/lib/vanpi-icloud-backup')
 CONFIG = Path('/etc/vanpi-icloud-backup.json')
+ICLOUD_LOGIN_COMMAND = "ssh -t vanpi 'sudo bash /home/pi/scripts/backup/icloud_backup.sh --login'"
+ICLOUD_LOGIN_MESSAGE = ('iCloud sign-in needs attention. Run this in your Mac Terminal:\n'
+                        + ICLOUD_LOGIN_COMMAND
+                        + '\nEnter your Apple credentials and approve 2FA privately. '
+                          'The helper checks the login and queues the Pi cloud backup.')
 INDEFINITE_PAUSE = 'indefinite'
 TRANSFER_STALL_SECONDS = 120
 PHASES = {'checking', 'preparing', 'uploading', 'verifying', 'publishing',
@@ -184,7 +189,7 @@ def reason(state):
     if 'mac clean detach' in value or 'image handles remain' in value:
         return 'Waiting for a clean Mac image detach; check the capture coordinator.'
     if state.get('phase') == 'authentication_required' or 'login' in value or 'authentication' in value:
-        return 'iCloud sign-in needs attention.'
+        return ICLOUD_LOGIN_MESSAGE
     if 'local-backup window' in value:
         return 'Waiting for the daily local backups.'
     if value.startswith('yielding to selected '):

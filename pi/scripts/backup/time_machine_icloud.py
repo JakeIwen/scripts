@@ -553,7 +553,7 @@ def _main(args):
         state.update(phase='authentication_required', last_error=str(exc))
         # Share the login canary/authentication gate with the Pi job.
         store.atomic_json(AUTH / 'authentication-error.json', {'failed_at': time.time(), 'reason': str(exc)})
-        cloud.notify(state, 'Mac Time Machine iCloud login needed', 'Renew the existing Pi iCloud login privately.')
+        cloud.notify(state, 'Mac Time Machine iCloud login needed', history.ICLOUD_LOGIN_MESSAGE)
         return 1
     except cloud.Deferred as exc:
         state.update(phase='deferred', last_error=str(exc))

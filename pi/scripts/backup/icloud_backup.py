@@ -28,7 +28,7 @@ import backup_admission as admission
 from icloud_uplink import decide
 from icloud_inventory import remote_fingerprint, parse_inventory, upload_progress
 from icloud_progress import ProcessIO, ProgressWatch, RcloneStats, StreamDigest, TransferActivity
-from icloud_status import begin_attempt, save_attempt
+from icloud_status import ICLOUD_LOGIN_MESSAGE, begin_attempt, save_attempt
 from cloud_backup_control import admit_worker
 import backup_priority as priority
 import cloud_backup_requests
@@ -58,7 +58,7 @@ def command_failure(program, operation, returncode, stderr):
     if base == 'rclone':
         if any(message in text for message in (
                 'trust token expired', 'missing icloud trust token',
-                'invalid session token')):
+                'invalid session token', 'invalid global session')):
             return AuthenticationRequired(
                 'iCloud rejected the saved web session. If login just succeeded, '
                 'check iCloud.com for pending account terms or web-data approval '
@@ -728,13 +728,13 @@ def _main(mode):
         state.update(phase='authentication_required', last_attempt_at=time.time(), last_error=message)
         print('Authentication required: ' + message, file=sys.stderr, flush=True)
         if mode == '--run':
-            notify(state, 'vanpi iCloud login needed', message)
+            notify(state, 'vanpi iCloud login needed', ICLOUD_LOGIN_MESSAGE)
         return 1
     except Deferred as exc:
         state.update(phase='deferred', last_attempt_at=time.time(), last_error=str(exc))
         print('Deferred: ' + str(exc), flush=True)
         if 'login' in str(exc):
-            notify(state, 'vanpi iCloud login needed', 'Run the documented iCloud login command. No weekly cloud copy is current yet.')
+            notify(state, 'vanpi iCloud login needed', ICLOUD_LOGIN_MESSAGE)
         return 0
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         message = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else type(exc).__name__

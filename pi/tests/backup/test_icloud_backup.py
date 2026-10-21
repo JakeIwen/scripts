@@ -77,7 +77,8 @@ class ClientMonitoringTests(unittest.TestCase):
 class SnapshotTests(ClientMonitoringTests):
     def test_auth_errors_are_actionable_without_echoing_credentials(self):
         for text in ('trust token expired, please reauth', 'missing icloud trust token',
-                     'Invalid Session Token', 'Missing PCS cookies from the request',
+                     'Invalid Session Token', 'HTTP error 421: {"reason":"Invalid global session","error":2}',
+                     'Missing PCS cookies from the request',
                      'authSRPComplete: sign in failed: 401'):
             failure = backup.command_failure('/usr/local/bin/rclone','copyto',1,
                 text + ' password=PRIVATE cookie=SECRET https://private.invalid/?token=TOKEN')
@@ -88,6 +89,8 @@ class SnapshotTests(ClientMonitoringTests):
     def test_unknown_errors_do_not_echo_server_bodies(self):
         failure=backup.command_failure('/usr/local/bin/rclone','copyto',1,'private account and token')
         self.assertNotIn('private account and token', str(failure))
+        self.assertNotIsInstance(backup.command_failure('/usr/local/bin/rclone', 'lsjson', 1,
+                                 'HTTP error 421: unrelated routing failure'), backup.AuthenticationRequired)
 
     def test_cloud_canary_failure_never_marks_authenticated_or_starts_job(self):
         cfg=test_config()
@@ -284,7 +287,7 @@ class ProgressTests(ClientMonitoringTests):
             returncode=1
             def poll(self):return 1
         def spawn(*args,**kwargs):
-            kwargs['stderr'].write('x'*70000+'\ntrust token expired, please reauth\n')
+            kwargs['stderr'].write('x'*70000+'\n{"reason":"Invalid global session","error":2}\n')
             kwargs['stderr'].flush()
             return Client()
         with mock.patch.object(backup,'guard',return_value=('127.0.0.1','test')),mock.patch.object(backup,'check_work_allowed'),mock.patch.object(backup.subprocess,'Popen',side_effect=spawn):
