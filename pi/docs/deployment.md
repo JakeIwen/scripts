@@ -64,6 +64,7 @@ publish a release without restarting any service.
 | React frontend release | Not in the package. `/home/pi/scripts/van-dashboard-frontend/current`, published by `pi/deploy_van_dashboard_frontend.sh` and served by `van-dashboard.service`. |
 | `system_event_monitor.py` and `system_monitor/`, other script services/cron/timers | Coherent broad-sync layout under `/home/pi/scripts`, not a package release. The shim retains the script/package switch for `main` and recorder `redact_log_message`; `system_monitor` internals use relative imports in both layouts. |
 | `van_compute` | Coupled independent Mac/Pi installer from `/Users/jacobr/dev/van-compute`; no package copy. |
+| `youtube-cast.service` | Not a Python package release or broad-sync input. `pi/projects/youtube-cast/deploy.sh` owns `/home/pi/youtube-cast/`; YouTube DIAL port 8794, LAN/loopback status and TV-code page port 8795. |
 | historical `raspbian_setup.sh` and archived path-repair tools | Not package bootstrap or deployment paths. Do not use them to refresh the frozen flat directory. |
 
 `-P` removes the unsafe working-directory import entry. Each unit sets

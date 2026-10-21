@@ -1,0 +1,46 @@
+[Unit]
+Description=Van TV YouTube cast receiver
+Wants=network-online.target
+After=network-online.target display-manager.service
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/youtube-cast/current
+ExecStart=/usr/bin/node /home/pi/youtube-cast/current/src/index.mjs
+# The venv stays off PATH: sns.sh needs the system python3 (it has soco);
+# yt-dlp and Deno are called by absolute path.
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=HOME=/home/pi
+Environment=DISPLAY=:0
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=XDG_CACHE_HOME=/run/youtube-cast/cache
+Environment=TMPDIR=/run/youtube-cast
+RuntimeDirectory=youtube-cast
+RuntimeDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+KillMode=control-group
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/pi/.local/state/youtube-cast /run/youtube-cast
+# X11 uses /tmp/.X11-unix; ALSA/DRM and the user's D-Bus must remain accessible.
+PrivateTmp=false
+PrivateDevices=false
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

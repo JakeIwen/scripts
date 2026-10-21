@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Van TV</title><link rel="stylesheet" href="/status.css"><script type="module" src="/status.mjs"></script></head>
+<body><main><h1>Van TV</h1><dl><dt>Receiver</dt><dd id="receiver">Connecting…</dd>
+<dt>Player</dt><dd id="player">—</dd><dt>Video</dt><dd id="video">None</dd>
+<dt>Position</dt><dd id="position">—</dd><dt>Connected senders</dt><dd id="senders">0</dd></dl>
+<p><button type="button" data-action="pause">Pause</button> <button type="button" data-action="resume">Resume</button>
+<button type="button" data-action="stop">Stop</button></p>
+<h2>Link with TV code</h2><p id="code" aria-live="polite">Requesting code…</p>
+<button id="refresh" type="button">Get a fresh code</button><p id="message" role="status"></p>
+<p>YouTube app → Settings → Watch on TV → Enter TV code.</p>
+<p>Pair once, then choose Van TV from Cast. This also works when your phone is the hotspot.</p>
+</main></body></html>
