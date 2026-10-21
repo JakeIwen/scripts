@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { usePaneLink } from '../../dashboard/paneLinks';
+import { useEffect } from 'react';
 
 import { useToast } from '../../components/ToastProvider';
 import { useSharedUsbStatus } from '../usb/hooks';
@@ -8,7 +9,7 @@ import { StorageSheet } from './StorageSheet';
 import { StorageTile } from './StorageTile';
 
 export function StorageFeature() {
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = usePaneLink('storage');
   const resources = useStorageResources(sheetOpen);
   const { showToast } = useToast();
   const controls = useStorageControls(resources.policy.refresh, resources.disks.refresh, showToast);

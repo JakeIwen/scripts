@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { usePaneLink } from '../../dashboard/paneLinks';
 
 import { useVonstarController } from './hooks';
 import { VonstarSheet } from './VonstarSheet';
 import { VonstarTile } from './VonstarTile';
 
 export function VonstarFeature() {
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = usePaneLink('vonstar');
   const controller = useVonstarController();
   return (
     <>

@@ -1,3 +1,4 @@
+import { usePaneLink } from '../../dashboard/paneLinks';
 import { useCallback, useEffect, useState } from 'react';
 
 import { useIgnitionCountdown } from './countdown';
@@ -8,7 +9,7 @@ import type { IgnitionMonitorStatus } from './types';
 import { useIgnitionMonitorActions } from './useIgnitionMonitorActions';
 
 export function IgnitionFeature() {
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = usePaneLink('ignition-monitor');
   const [authoritativeStatus, setAuthoritativeStatus] = useState<IgnitionMonitorStatus | null>(
     null,
   );

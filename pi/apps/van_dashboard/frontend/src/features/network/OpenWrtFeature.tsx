@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { usePaneLink } from '../../dashboard/paneLinks';
 
 import { useSpeedtestControl } from './controls';
 import { useOpenWrtResources, useWanThroughput } from './hooks';
@@ -7,7 +7,7 @@ import { OpenWrtTile } from './OpenWrtTile';
 import { presentWanThroughput } from './presentation';
 
 export function OpenWrtFeature() {
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = usePaneLink('openwrt-card');
   const { connectivity, speedtest, clients } = useOpenWrtResources(sheetOpen);
   const speedtestControl = useSpeedtestControl(speedtest);
   const throughput = presentWanThroughput(

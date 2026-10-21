@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { usePaneLink } from '../../dashboard/paneLinks';
 
 import { useToast } from '../../components/ToastProvider';
 import { useSonosAlarmControls } from './alarmControls';
@@ -10,7 +10,7 @@ import { SonosAlarms } from './SonosAlarms';
 import { SonosTile } from './SonosTile';
 
 export function SonosFeature() {
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = usePaneLink('sonos-card');
   const alarmControls = useSonosAlarmControls(sheetOpen);
   const resource = useSonosStatus();
   const { showToast } = useToast();

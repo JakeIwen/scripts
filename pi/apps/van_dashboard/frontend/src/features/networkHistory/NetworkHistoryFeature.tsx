@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { usePaneLink, writePaneHash } from '../../dashboard/paneLinks';
 import { BottomSheet } from '../../components/BottomSheet';
 import { StatusPill } from '../../components/StatusPill';
 import { Tile } from '../../components/Tile';
@@ -33,16 +34,14 @@ function readLink(): { open: boolean; query: HistoryQuery; incident: string | nu
 }
 
 function writeLink(open: boolean, query: HistoryQuery, incident: string | null) {
-  const url = new URL(window.location.href);
   const parameters = new URLSearchParams(historyQueryString(query));
   if (incident) parameters.set('incident', incident);
-  url.hash = open ? `network-history?${parameters}` : '';
-  window.history.replaceState(null, '', url);
+  writePaneHash(open ? `network-history?${parameters}` : '', true);
 }
 
 export function NetworkHistoryFeature() {
   const [initial] = useState(readLink);
-  const [open, setOpen] = useState(initial.open);
+  const [open, setOpen] = usePaneLink('network-history');
   const [query, setQuery] = useState<HistoryQuery>(initial.query);
   const [selected, setSelected] = useState<string | null>(initial.incident);
   const [detail, setDetail] = useState<NetworkIncidentDetail | null>(null);
@@ -89,7 +88,6 @@ export function NetworkHistoryFeature() {
   useEffect(() => {
     const update = () => {
       const next = readLink();
-      setOpen(next.open);
       setQuery(next.query);
       setSelected(next.incident);
     };
@@ -131,7 +129,6 @@ export function NetworkHistoryFeature() {
 
   const close = () => {
     setOpen(false);
-    writeLink(false, query, selected);
   };
   const selectIncident = (id: string) => {
     setSelected(id);

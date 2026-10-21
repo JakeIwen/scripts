@@ -180,6 +180,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   warnings (sourced privately from `pi/secrets/.bash_variables`, never in argv
   or logs): btt_guard imports `send_warning`, deferred.zsh runs it with the
   message on stdin. Reuse it rather than reading the URL again.
+- Dashboard pane URLs use existing tile ids as fragments (for example
+  `/#backups`, `/#sonos-card`, `/#usb-devices`). Frontend
+  `dashboard/paneLinks.ts` owns public pane ids and URL/history state;
+  feature owners use `usePaneLink`. Network History retains its fragment query filters.
 - `shared/`: code imported or deployed on more than one host.
 - Tool settings: each configurable tool declares its settings once in
   `shared/settings/<tool>.json` (name, type, range, default, description);

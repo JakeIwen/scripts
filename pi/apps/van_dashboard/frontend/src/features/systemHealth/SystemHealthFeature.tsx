@@ -1,3 +1,4 @@
+import { usePaneLink } from '../../dashboard/paneLinks';
 import { useState } from 'react';
 
 import { useToast } from '../../components/ToastProvider';
@@ -9,7 +10,7 @@ import { SystemHealthTile } from './SystemHealthTile';
 import type { SystemHealthRange } from './types';
 
 export function SystemHealthFeature() {
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = usePaneLink('system-monitor');
   const [rangeHours, setRangeHours] = useState<SystemHealthRange>(6);
   const resource = useSystemHealthReport(rangeHours, sheetOpen);
   const history = useCrashHistory(sheetOpen);

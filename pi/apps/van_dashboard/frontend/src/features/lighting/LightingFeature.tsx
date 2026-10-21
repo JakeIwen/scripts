@@ -1,3 +1,4 @@
+import { usePaneLink } from '../../dashboard/paneLinks';
 import { useCallback, useEffect, useState } from 'react';
 
 import { useLightingStatus } from './hooks';
@@ -7,7 +8,7 @@ import type { LightingStatus } from './types';
 import { useLightingControls } from './useLightingControls';
 
 export function LightingFeature() {
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = usePaneLink('lighting-card');
   const [authoritativeStatus, setAuthoritativeStatus] = useState<LightingStatus | null>(null);
   const controls = useLightingControls({
     status: authoritativeStatus,

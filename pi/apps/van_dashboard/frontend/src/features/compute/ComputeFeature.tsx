@@ -1,3 +1,4 @@
+import { usePaneLink } from '../../dashboard/paneLinks';
 import { useState } from 'react';
 
 import { useComputeReport } from './hooks';
@@ -6,7 +7,7 @@ import { ComputeTile } from './ComputeTile';
 import type { ComputeRange } from './types';
 
 export function ComputeFeature() {
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = usePaneLink('compute-worker');
   const [rangeHours, setRangeHours] = useState<ComputeRange>(168);
   const resource = useComputeReport(rangeHours, sheetOpen);
 

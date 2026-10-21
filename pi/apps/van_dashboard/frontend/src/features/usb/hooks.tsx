@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { usePaneLink } from '../../dashboard/paneLinks';
+import { createContext, useContext, useEffect, useMemo } from 'react';
 
 import { useToast } from '../../components/ToastProvider';
 import { usePollingResource, type PollingState } from '../../hooks/usePollingResource';
@@ -30,7 +31,7 @@ const UsbStatusContext = createContext<UsbStatusContextValue | null>(null);
  * The provider also owns the one detail-polling flag, avoiding duplicate GETs.
  */
 export function UsbStatusProvider({ children }: { children: React.ReactNode }) {
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = usePaneLink('usb-devices');
   const resource = useUsbStatus(sheetOpen);
   const { showToast } = useToast();
   const controls = useUsbControls(resource.refresh, showToast);

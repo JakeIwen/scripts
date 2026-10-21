@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { usePaneLink } from '../../dashboard/paneLinks';
+import { useEffect } from 'react';
 
 import { useToast } from '../../components/ToastProvider';
 import { BackupsSheet } from './BackupsSheet';
@@ -7,7 +8,7 @@ import { useBackupControls } from './controls';
 import { useBackupStatus } from './hooks';
 
 export function BackupsFeature() {
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = usePaneLink('backups');
   const resource = useBackupStatus(sheetOpen);
   const { showToast } = useToast();
   const controls = useBackupControls(resource.refresh, showToast);

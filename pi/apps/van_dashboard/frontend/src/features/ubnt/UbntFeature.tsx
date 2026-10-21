@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { usePaneLink } from '../../dashboard/paneLinks';
 
 import { useUbntControls } from './controls';
 import { useUbntWifiStatus } from './hooks';
@@ -12,7 +12,7 @@ export interface UbntFeatureProps {
 }
 
 export function UbntFeature({ onConnectivityChanged, dashboardStatus }: UbntFeatureProps = {}) {
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = usePaneLink('ubnt-wifi');
   const resource = useUbntWifiStatus();
   const controls = useUbntControls(resource, onConnectivityChanged);
 
