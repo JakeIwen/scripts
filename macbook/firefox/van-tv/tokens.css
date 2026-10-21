@@ -1,0 +1,21 @@
+:root {
+  --van-tv-background: #fff;
+  --van-tv-text: #202124;
+  --van-tv-muted: #61656b;
+  --van-tv-border: #c7cbd0;
+  --van-tv-control: #f1f3f5;
+  --van-tv-success: #61dca3;
+  --van-tv-error: #ff9292;
+  --van-tv-focus: #0876c9;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --van-tv-background: #24262a;
+    --van-tv-text: #f0f1f2;
+    --van-tv-muted: #b9bdc4;
+    --van-tv-border: #646a73;
+    --van-tv-control: #34373d;
+    --van-tv-focus: #8bc9ff;
+  }
+}

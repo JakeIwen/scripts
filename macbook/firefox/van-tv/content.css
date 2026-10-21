@@ -1,0 +1,5 @@
+.van-tv-button svg { width: 36px; height: 100%; fill: currentColor; }
+.van-tv-button.van-tv-success { color: var(--van-tv-success); }
+.van-tv-button.van-tv-error { color: var(--van-tv-error); }
+.van-tv-button:disabled { opacity: .6; }
+.van-tv-button:focus-visible { outline: 2px solid currentColor; outline-offset: -3px; }
