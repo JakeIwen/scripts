@@ -45,7 +45,7 @@ class DisplayCabDimmerArchitectureTests(unittest.TestCase):
                             for argv in commands))
         entry = ENTRY.read_text(encoding="utf-8")
         for owner in ("cab_dimmer.model", "cab_dimmer.state_store", "cab_dimmer.displays",
-                      "cab_dimmer.dashboard", "cab_dimmer.runtime"):
+                      "cab_dimmer.dashboard", "cab_dimmer.runtime", "cab_dimmer.status"):
             self.assertIn(owner, entry)
 
 

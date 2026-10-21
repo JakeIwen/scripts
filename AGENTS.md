@@ -198,7 +198,8 @@ compare it with this checkout. Deployed files may differ from the repository.
   `macbook/scripts/cab_dimmer/model.py` owns display records and plug-in rules,
   `state_store.py` owns locked private state, and `displays.py` owns lazy
   CoreGraphics enumeration so status-only commands do not import macOS bindings.
-  `dashboard.py` is the HTTP adapter and `runtime.py` owns callback/poll ordering.
+  `dashboard.py` is the HTTP adapter, `runtime.py` owns callback/poll ordering,
+  and `status.py` renders the read-only automation contract.
 - Automations: `shared/python/tool_automation.py` (stdlib, 3.9) is the one
   definition of a panel automation: the `shared/automations/<tool>.json`
   declaration (title, optional service label and settings tool, a status

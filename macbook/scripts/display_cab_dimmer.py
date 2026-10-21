@@ -16,13 +16,10 @@ Activity is recorded in ~/.local/state/display-cab-dimmer/state.json.
 """
 from __future__ import annotations
 
-import json
-import os
 from pathlib import Path
 import sys
 import time
 
-import tool_automation
 import tool_settings
 from cab_dimmer.displays import online_displays
 from cab_dimmer.dashboard import (
@@ -35,9 +32,9 @@ from cab_dimmer.model import (
 )
 from cab_dimmer.state_store import STATE_DIR_ENV, read_state, update_state
 from cab_dimmer.runtime import watch as watch_runtime
+from cab_dimmer.status import automation_status, print_status
 
 TOOL = "display-cab-dimmer"
-STATUS_OK, STATUS_IDLE, STATUS_UNKNOWN, STATUS_WARN, _STATUS_ERROR = tool_automation.STATUS_LEVELS
 
 
 def log(message: str) -> None:
@@ -113,110 +110,6 @@ def run_manual(
     )
     update_state({"last_run": _last_run(RunTrigger.MANUAL, at, result)}, state_dir)
     return result
-
-
-def _pid_is_alive(value) -> bool:
-    if type(value) is not int or value <= 0:
-        return False
-    try:
-        os.kill(value, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        return False
-    return True
-
-
-def _epoch(value) -> float | None:
-    if type(value) in (int, float) and value >= 0:
-        return float(value)
-    return None
-
-
-def _count(amount: int, noun: str) -> str:
-    return f"{amount} {noun}" if amount == 1 else f"{amount} {noun}s"
-
-
-def _last_run_value(last_run) -> tuple[str, float | None, str | None]:
-    if not isinstance(last_run, dict):
-        return "Never", None, None
-    try:
-        outcome = DimOutcome(last_run.get("outcome"))
-        trigger = RunTrigger(last_run.get("trigger"))
-    except ValueError:
-        return "Unknown", _epoch(last_run.get("at")), STATUS_WARN
-    changed = last_run.get("changed")
-    changed = changed if type(changed) is int and changed >= 0 else 0
-    suffix = f"({trigger.value})"
-    if outcome is DimOutcome.DIMMED:
-        value = f"Dimmed {_count(changed, 'light')} {suffix}"
-    elif outcome is DimOutcome.NOTHING_TO_DO:
-        value = f"Nothing to dim {suffix}"
-    elif outcome is DimOutcome.DISABLED:
-        value = f"Skipped, disabled {suffix}"
-    else:
-        detail = str(last_run.get("detail") or "unknown error")
-        value = f"Failed: {detail[:450]} {suffix}"
-    level = STATUS_WARN if outcome is DimOutcome.FAILED else None
-    return value, _epoch(last_run.get("at")), level
-
-
-def automation_status(
-    settings: dict | None = None,
-    *,
-    state_dir: Path | str | None = None,
-) -> dict:
-    """Build status without importing macOS frameworks or contacting the dashboard."""
-    values = tool_settings.load(TOOL) if settings is None else settings
-    state = read_state(state_dir)
-    agent = state.get("agent") if isinstance(state.get("agent"), dict) else {}
-    pid = agent.get("pid")
-    running = _pid_is_alive(pid)
-    monitors = state.get("monitors")
-    if not isinstance(monitors, list) or not all(isinstance(item, str) for item in monitors):
-        monitors = []
-    if not state:
-        level, summary = STATUS_UNKNOWN, "No activity recorded yet"
-    elif not running:
-        level, summary = STATUS_WARN, "Agent is not running"
-    elif not values["enabled"]:
-        level = STATUS_IDLE
-        summary = "Disabled; plug-ins are recorded but the lights are left alone"
-    else:
-        level, summary = STATUS_OK, f"Watching {_count(len(monitors), 'monitor')}"
-    last_run_value, last_run_at, last_run_level = _last_run_value(state.get("last_run"))
-    last_plug_in = _epoch(state.get("last_plug_in"))
-    fields = [
-        tool_automation.status_field("Enabled", "Yes" if values["enabled"] else "No"),
-        tool_automation.status_field("Brightness", f"{int(values['brightness'])}%"),
-        tool_automation.status_field(
-            "Monitors", ", ".join(monitors) if monitors else "None", _epoch(state.get("monitors_at"))
-        ),
-        tool_automation.status_field("Last plug-in", time=last_plug_in)
-        if last_plug_in is not None
-        else tool_automation.status_field("Last plug-in", "Never"),
-        tool_automation.status_field("Last run", last_run_value, last_run_at, last_run_level),
-        tool_automation.status_field(
-            "Agent", f"Running, pid {pid}" if running else "Not running", _epoch(agent.get("started_at"))
-        ),
-    ]
-    return tool_automation.status_record(level, summary, fields)
-
-
-def print_status(record: dict, *, as_json: bool) -> None:
-    if as_json:
-        print(json.dumps(record, separators=(",", ":"), allow_nan=False))
-        return
-    print(f"{record['summary']} [{record['level']}]")
-    for field in record["fields"]:
-        value = field["value"] or ""
-        if field["time"] is not None:
-            rendered_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(field["time"]))
-            value = f"{value} ({rendered_time})" if value else rendered_time
-        suffix = f" [{field['level']}]" if field["level"] is not None else ""
-        print(f"{field['label']}: {value}{suffix}")
 
 
 def watch() -> None:
