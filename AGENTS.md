@@ -141,7 +141,11 @@ compare it with this checkout. Deployed files may differ from the repository.
   `tool_settings.Reloader`, which keeps the last good values when the values or
   declaration file can't be read. A setting may carry an optional `label` (form
   wording; `name` stays the key). LaunchAgents need `PYTHONPATH=.../shared/python` in
-  their plist. First user: the iTerm font follower (`iterm-screen-fonts`).
+  their plist. First user: the iTerm font follower (`iterm-screen-fonts`). The
+  display cab dimmer (`macbook/scripts/display_cab_dimmer.py`, LaunchAgent
+  `com.jacobr.display-cab-dimmer`) dims only cab Wiz lights that are on through
+  the dashboard API and never alerts; its settings are declaration-driven like
+  `iterm-screen-fonts`.
 - `shared/sh/session_search_header.sh` formats the shared activity-age/name header
   and quoted directory/resume command for `claudesearch.sh` and `codexsearch.sh`.
   It also provides `-h`/`--help`, parses `-g`/`--group`, and groups matches per transcript, retaining

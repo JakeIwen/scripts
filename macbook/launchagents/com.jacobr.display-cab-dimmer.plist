@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.jacobr.display-cab-dimmer</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/jacobr/.local/share/display-cab-dimmer/venv/bin/python</string>
+        <string>/Users/jacobr/dev/scripts/macbook/scripts/display_cab_dimmer.py</string>
+    </array>
+    <key>WorkingDirectory</key><string>/Users/jacobr/dev/scripts</string>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><true/>
+    <key>ThrottleInterval</key><integer>10</integer>
+    <key>ExitTimeOut</key><integer>20</integer>
+    <!-- Standard, not Background: Background's timer coalescing would delay the
+         settle check after a plug-in. -->
+    <key>ProcessType</key><string>Standard</string>
+    <key>Umask</key><integer>63</integer>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key><string>/usr/bin:/bin</string>
+        <key>PYTHONPATH</key><string>/Users/jacobr/dev/scripts/shared/python</string>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/Users/jacobr/dev/scripts/tmp/display-cab-dimmer/agent.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jacobr/dev/scripts/tmp/display-cab-dimmer/agent.log</string>
+</dict>
+</plist>

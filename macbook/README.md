@@ -213,6 +213,33 @@ idles while iTerm2 is closed.
 - Remove: `launchctl bootout gui/$(id -u)/com.jacobr.iterm-screen-fonts` and
   delete `~/Library/LaunchAgents/com.jacobr.iterm-screen-fonts.plist`.
 
+## Dim cab lights when the monitor is plugged in
+
+`scripts/display_cab_dimmer.py` watches for the external Lenovo Q24h-10 monitor
+and dims the van's cab Wiz lights to 40% once, only for cab lights that are
+already on, through the Pi dashboard API at `http://vanpi.lan:8788` (`GET
+/api/lights` and `POST /api/lights/brightness`). It runs as the LaunchAgent
+`com.jacobr.display-cab-dimmer`, uses
+CoreGraphics display change notifications with a 20-second fallback poll, and
+waits for the display list to settle before comparing it with the last settled
+set. Sleep and wake do not count as a plug-in: the baseline is frozen while
+asleep, but a monitor plugged in during sleep does fire. Turning the monitor off
+and on counts as a plug-in when macOS drops the display.
+
+- Install or update: `zsh /Users/jacobr/dev/scripts/macbook/scripts/install_display_cab_dimmer.zsh`.
+- Try it manually from the repo root: `PYTHONPATH=shared/python
+  ~/.local/share/display-cab-dimmer/venv/bin/python
+  macbook/scripts/display_cab_dimmer.py --list`, `--dim-now`, or, without a
+  flag, watch for display changes.
+- Settings are saved in `~/.config/jacobr/display-cab-dimmer.json`; their
+  defaults and validation are declared in
+  `shared/settings/display-cab-dimmer.json`. Edit them in the Mac Panel's
+  Settings section.
+- Log: `tmp/display-cab-dimmer/agent.log`. Away from the van LAN,
+  `vanpi.lan` does not resolve; an unreachable dashboard or unavailable light
+  is logged and the agent waits.
+- Stop it: `launchctl bootout gui/$(id -u)/com.jacobr.display-cab-dimmer`.
+
 ## BetterTouchTool maintenance
 
 Use the [BTT tooling index](bettertouchtool/README.md) for maintained commands,
