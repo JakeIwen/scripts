@@ -115,7 +115,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   `cli_runner.py`, display redaction in `log_redaction.py`. It changes tools only
   through their own CLIs or `tool_settings` (crontab edits go through
   `crontab_sync.py`); ntfy config is read-only there, BTT repair is never
-  exposed, and it never reads pi/secrets.
+  exposed, and it never reads pi/secrets. Its Automations section
+  (`automations_adapter.py`) needs no per-tool panel code: it lists
+  `shared/automations/<tool>.json` declarations, runs each one's status command
+  and the declared actions (synchronous, confirmed when declared) by fixed argv.
   Its page is ES modules in `static/` with no build step: `app.mjs` (section
   registry, tabs, polling, open-tab/theme state, panel health), `panel_sections.mjs`
   (`refresh`/`action` and the dirty check polls obey), `panel_api.mjs` (the only
@@ -144,8 +147,16 @@ compare it with this checkout. Deployed files may differ from the repository.
   their plist. First user: the iTerm font follower (`iterm-screen-fonts`). The
   display cab dimmer (`macbook/scripts/display_cab_dimmer.py`, LaunchAgent
   `com.jacobr.display-cab-dimmer`) dims only cab Wiz lights that are on through
-  the dashboard API and never alerts; its settings are declaration-driven like
-  `iterm-screen-fonts`.
+  the dashboard API and never alerts; its settings (including `enabled`) are
+  declaration-driven like `iterm-screen-fonts`, and it is the first automation.
+- Automations: `shared/python/tool_automation.py` (stdlib, 3.9) is the one
+  definition of a panel automation: the `shared/automations/<tool>.json`
+  declaration (title, optional service label and settings tool, a status
+  command and actions as argv with `{repo}`/`{home}` placeholders and
+  timeouts of at most 120 s) and the status record a tool's status command
+  prints (`status_record`; levels mirror `status_cell.mjs`'s `Level`). The
+  panel only reads declarations and relays actions; each tool keeps its own
+  durable state (the dimmer's is `~/.local/state/display-cab-dimmer/`).
 - `shared/sh/session_search_header.sh` formats the shared activity-age/name header
   and quoted directory/resume command for `claudesearch.sh` and `codexsearch.sh`.
   It also provides `-h`/`--help`, parses `-g`/`--group`, and groups matches per transcript, retaining

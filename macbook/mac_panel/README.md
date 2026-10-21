@@ -61,6 +61,12 @@ confirmed restart as the services table. Static files are read per request.
 | BTT guard | `/usr/bin/python3 -B macbook/bettertouchtool/btt.py guard`: `checkpoint --list`, `audit` (a fresh read-only audit on every section load), `service status`, `acceptance` (the scheduled monitor's pending and last automatic edit acceptance, shown as Auto-accept; drift pending acceptance shows yellow, not red), `inspect`. Explicit known-good acceptance uses `checkpoint --accept-current`, adding `--replace` only after a fresh active-checkpoint check. Repair is Terminal-only. |
 | ntfy alerts | Reads only routing metadata from `~/.claude/settings.json` hooks and `~/.codex/config.toml` notify. Deferred and guard warnings use `macbook/scripts/ntfy_warning.py`; the destination value is never read or displayed. A confirmed test uses `guard notify-test --send`. |
 | Settings | `shared/python/tool_settings.py` loads declarations from `shared/settings/` and revision-checked values from `~/.config/jacobr/`. The generated controls save through that module; reset sends declared defaults. A declaration's optional `label` is the form wording; the name stays the key. |
+| Automations | `shared/python/tool_automation.py` loads declarations from `shared/automations/`. Each status command prints one validated `tool_automation.status_record`; declared actions run synchronously through the tool's fixed absolute argv and timeout, with confirmation when the declaration requires it. A declaration or status failure remains an error on that automation without taking down the section. |
+
+A new automation joins the panel by adding its declaration under
+`shared/automations/` and a status command that prints a
+`tool_automation.status_record`. The automation tool remains the owner of its
+durable state and every mutation the declaration exposes.
 
 CLI paths above are relative to `/Users/jacobr/dev/scripts` for reference; the
 server always invokes fixed absolute argv without a shell. Errors stay local to

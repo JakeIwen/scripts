@@ -1,4 +1,5 @@
 """Explicit route table; adapters own each tool's CLI contract."""
+from automations_adapter import AutomationsAdapter
 from cli_runner import CliRunner
 from crontab_adapter import CrontabAdapter
 from deferred_adapter import DeferredAdapter
@@ -13,11 +14,13 @@ from settings_adapter import SettingsAdapter
 class PanelRoutes:
     def __init__(self, runner=None, settings=None):
         runner = runner or CliRunner()
+        self.automations = AutomationsAdapter(runner)
         self.deferred = DeferredAdapter(runner)
         self.guard = GuardAdapter(runner)
         self.services = ServicesAdapter(runner)
         self.adapters = {
             Section.SETTINGS: SettingsAdapter(settings),
+            Section.AUTOMATIONS: self.automations,
             Section.DEFERRED: self.deferred,
             Section.SERVICES: self.services,
             Section.CRONTAB: CrontabAdapter(runner),
@@ -28,6 +31,7 @@ class PanelRoutes:
         self.reads = {f'/api/{name.value}': adapter.read for name, adapter in self.adapters.items()}
         self.writes = {
             '/api/settings': self.adapters[Section.SETTINGS].save,
+            '/api/automations': self.automations.action,
             '/api/deferred': self.deferred.mutate,
             '/api/crontab': self.adapters[Section.CRONTAB].mutate,
             '/api/services/restart': self.adapters[Section.SERVICES].restart,

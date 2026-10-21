@@ -6,6 +6,7 @@ from typing import Any, TypedDict
 
 class Section(str, Enum):
     SETTINGS = 'settings'
+    AUTOMATIONS = 'automations'
     DEFERRED = 'deferred'
     SERVICES = 'services'
     CRONTAB = 'crontab'
@@ -65,6 +66,41 @@ class TaskRecord(TypedDict):
 
 class SettingsPayload(TypedDict):
     tools: list[dict]
+
+
+class AutomationActionRecord(TypedDict):
+    name: str
+    label: str
+    description: str
+    confirm: bool
+
+
+class AutomationStatusField(TypedDict):
+    label: str
+    value: str | None
+    time: float | None
+    level: str | None
+
+
+class AutomationStatusRecord(TypedDict):
+    level: str
+    summary: str
+    fields: list[AutomationStatusField]
+
+
+class AutomationRecord(TypedDict):
+    tool: str
+    title: str
+    description: str
+    service: str | None
+    settings: str | None
+    actions: list[AutomationActionRecord]
+    status: AutomationStatusRecord | None
+    error: str | None
+
+
+class AutomationsPayload(TypedDict):
+    automations: list[AutomationRecord]
 
 
 class DeferredPayload(TypedDict):
