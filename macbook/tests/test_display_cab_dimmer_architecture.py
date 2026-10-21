@@ -44,7 +44,8 @@ class DisplayCabDimmerArchitectureTests(unittest.TestCase):
         self.assertTrue(all("{repo}/macbook/scripts/display_cab_dimmer.py" in argv
                             for argv in commands))
         entry = ENTRY.read_text(encoding="utf-8")
-        for owner in ("cab_dimmer.model", "cab_dimmer.state_store", "cab_dimmer.displays"):
+        for owner in ("cab_dimmer.model", "cab_dimmer.state_store", "cab_dimmer.displays",
+                      "cab_dimmer.dashboard", "cab_dimmer.runtime"):
             self.assertIn(owner, entry)
 
 

@@ -21,25 +21,22 @@ import os
 from pathlib import Path
 import sys
 import time
-from urllib import parse, request
 
 import tool_automation
 import tool_settings
 from cab_dimmer.displays import online_displays
+from cab_dimmer.dashboard import (
+    DASHBOARD_URL, DASHBOARD_URL_ENV, HTTP_TIMEOUT_SECONDS, DashboardError,
+    dim_cab_lights as _dim_cab_lights,
+)
 from cab_dimmer.model import (
     DimOutcome, DimResult, DisplayInfo, MIRROR_NAME, MONITOR_NAME, PlugTracker, RunTrigger,
     display_name_matches, matching_monitor_names, matching_snapshot,
 )
 from cab_dimmer.state_store import STATE_DIR_ENV, read_state, update_state
+from cab_dimmer.runtime import watch as watch_runtime
 
 TOOL = "display-cab-dimmer"
-DASHBOARD_URL = "http://vanpi.lan:8788"
-DASHBOARD_URL_ENV = "DISPLAY_CAB_DIMMER_DASHBOARD_URL"
-CAB_GROUP = "cab"
-HTTP_TIMEOUT_SECONDS = 8.0
-FALLBACK_POLL_SECONDS = 20.0
-RUN_LOOP_SECONDS = 1.0
-BEGIN_CONFIGURATION_FLAG = 1
 STATUS_OK, STATUS_IDLE, STATUS_UNKNOWN, STATUS_WARN, _STATUS_ERROR = tool_automation.STATUS_LEVELS
 
 
@@ -58,79 +55,14 @@ def list_displays() -> None:
         )
 
 
-class DashboardError(RuntimeError):
-    """The dashboard returned data that cannot confirm a completed operation."""
-
-
-def _dashboard_json(url: str, *, data: bytes | None = None, timeout: float) -> dict:
-    headers = {"Content-Type": "application/x-www-form-urlencoded"} if data is not None else {}
-    operation = request.Request(url, data=data, headers=headers)
-    with request.urlopen(operation, timeout=timeout) as response:
-        if response.status != 200:
-            raise DashboardError(f"HTTP {response.status}")
-        payload = json.loads(response.read().decode("utf-8"))
-    if not isinstance(payload, dict) or payload.get("ok") is not True:
-        detail = payload.get("error", "invalid response") if isinstance(payload, dict) else "invalid response"
-        raise DashboardError(str(detail))
-    return payload
-
-
-def _cab_lights(payload: dict) -> list[dict]:
-    try:
-        groups = payload["lighting"]["groups"]
-    except (KeyError, TypeError) as error:
-        raise DashboardError("lights response has no groups") from error
-    if not isinstance(groups, list):
-        raise DashboardError("lights response groups are invalid")
-    for group in groups:
-        if isinstance(group, dict) and group.get("id") == CAB_GROUP:
-            lights = group.get("lights")
-            if not isinstance(lights, list):
-                raise DashboardError("cab lights response is invalid")
-            return lights
-    raise DashboardError("cab light group is unavailable")
-
-
-def _one_line_error(error: Exception) -> str:
-    return " ".join(f"{type(error).__name__}: {error}".split())
-
-
 def dim_cab_lights(
     brightness: int,
     *,
     dashboard_url: str | None = None,
     timeout: float = HTTP_TIMEOUT_SECONDS,
 ) -> DimResult:
-    """Dim currently lit cab lights once, logging and swallowing every failure."""
-    base_url = dashboard_url or os.environ.get(DASHBOARD_URL_ENV, DASHBOARD_URL)
-    changed = 0
-    try:
-        payload = _dashboard_json(f"{base_url.rstrip('/')}/api/lights", timeout=timeout)
-        lights = _cab_lights(payload)
-        for light in lights:
-            if not isinstance(light, dict) or light.get("state") != "on":
-                continue
-            if light.get("brightness") == brightness:
-                continue
-            entity_id = light.get("entity_id")
-            if not isinstance(entity_id, str) or not entity_id:
-                raise DashboardError("cab light has no entity id")
-            body = parse.urlencode({"entity": entity_id, "brightness": brightness}).encode("ascii")
-            _dashboard_json(
-                f"{base_url.rstrip('/')}/api/lights/brightness",
-                data=body,
-                timeout=timeout,
-            )
-            changed += 1
-            log(f"{entity_id}: brightness set to {brightness}%")
-        detail = f"changed {changed} light(s) to {brightness}%"
-        log(f"cab dimming complete: {detail}")
-        outcome = DimOutcome.DIMMED if changed else DimOutcome.NOTHING_TO_DO
-        return DimResult(outcome, changed, detail)
-    except Exception as error:
-        detail = _one_line_error(error)
-        log(f"cab dimming skipped: {detail}")
-        return DimResult(DimOutcome.FAILED, changed, detail)
+    return _dim_cab_lights(brightness, dashboard_url=dashboard_url,
+                           timeout=timeout, logger=log)
 
 
 def _last_run(trigger: RunTrigger, at: float, result: DimResult) -> dict:
@@ -287,100 +219,12 @@ def print_status(record: dict, *, as_json: bool) -> None:
         print(f"{field['label']}: {value}{suffix}")
 
 
-def _reload_settings(reloader, settings: dict, ignored_error: str | None) -> tuple[dict, str | None]:
-    result = reloader.poll()
-    if result.error is not None:
-        if result.error != ignored_error:
-            log(f"settings ignored, keeping {settings}: {result.error}")
-        return settings, result.error
-    if result.changed:
-        enabled = "on" if result.values["enabled"] else "off"
-        log(
-            f"settings reloaded; enabled {enabled}; brightness {result.values['brightness']}%; "
-            f"settle_seconds {result.values['settle_seconds']:g}"
-        )
-    return result.values, None
-
-
 def watch() -> None:
-    import Quartz
-    from AppKit import NSWorkspace
-    from Foundation import NSObject
-
-    reloader = tool_settings.Reloader(TOOL)
-    settings = reloader.poll().values
-    initial_displays = online_displays()
-    initial_snapshot = matching_snapshot(initial_displays)
-    monitors = matching_monitor_names(initial_displays)
-    tracker = PlugTracker(initial_snapshot)
-    runtime = {"settle_seconds": float(settings["settle_seconds"])}
-    started_at = time.time()
-    update_state(
-        {
-            "agent": {"pid": os.getpid(), "started_at": started_at},
-            "monitors": monitors,
-            "monitors_at": started_at,
-        }
-    )
-
-    def reconfigured(_display, flags, _info):
-        if int(flags) & BEGIN_CONFIGURATION_FLAG:
-            return
-        tracker.schedule(time.monotonic(), runtime["settle_seconds"])
-
-    class WorkspaceObserver(NSObject):
-        def sleep_(self, _notification):
-            tracker.will_sleep()
-
-        def wake_(self, _notification):
-            tracker.did_wake(time.monotonic(), runtime["settle_seconds"])
-
-    observer = WorkspaceObserver.alloc().init()
-    notifications = NSWorkspace.sharedWorkspace().notificationCenter()
-    notifications.addObserver_selector_name_object_(
-        observer, "sleep:", "NSWorkspaceWillSleepNotification", None
-    )
-    notifications.addObserver_selector_name_object_(
-        observer, "wake:", "NSWorkspaceDidWakeNotification", None
-    )
-    callback_error = Quartz.CGDisplayRegisterReconfigurationCallback(reconfigured, None)
-    if callback_error != 0:
-        notifications.removeObserver_(observer)
-        raise RuntimeError(f"display callback registration failed with error {callback_error}")
-
-    ignored_error = None
-    next_poll = time.monotonic() + FALLBACK_POLL_SECONDS
-    log(f"watching for {MONITOR_NAME}; baseline has {len(initial_snapshot)} matching display(s)")
-    try:
-        while True:
-            Quartz.CFRunLoopRunInMode(Quartz.kCFRunLoopDefaultMode, RUN_LOOP_SECONDS, True)
-            settings, ignored_error = _reload_settings(reloader, settings, ignored_error)
-            runtime["settle_seconds"] = float(settings["settle_seconds"])
-            now = time.monotonic()
-            fallback = now >= next_poll
-            if not tracker.due(now) and not fallback:
-                continue
-            if fallback:
-                next_poll = now + FALLBACK_POLL_SECONDS
-            if tracker.asleep:
-                continue
-            try:
-                displays = online_displays()
-                snapshot = matching_snapshot(displays)
-                current_monitors = matching_monitor_names(displays)
-            except Exception as error:
-                tracker.abandon_pending_check()
-                log(f"display check skipped: {type(error).__name__}: {error}")
-                continue
-            plugged_in = tracker.evaluate(snapshot, now, fallback=fallback)
-            if current_monitors != monitors:
-                monitors = current_monitors
-                update_state({"monitors": monitors, "monitors_at": time.time()})
-            if plugged_in:
-                handle_plug_in(settings)
-    finally:
-        Quartz.CGDisplayRemoveReconfigurationCallback(reconfigured, None)
-        notifications.removeObserver_(observer)
+    watch_runtime(online_displays=online_displays,
+                  matching_snapshot=matching_snapshot,
+                  matching_monitor_names=matching_monitor_names,
+                  update_state=update_state, handle_plug_in=handle_plug_in,
+                  logger=log)
 
 
 def main(argv: list[str]) -> int:

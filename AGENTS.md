@@ -42,6 +42,9 @@ compare it with this checkout. Deployed files may differ from the repository.
 
 - `pi/`: Raspberry Pi apps, backup, disk, service, deployment, and setup tooling;
   `pi/README.md` is the documentation index.
+- `pi/apps/audiobooks/catalog.py` owns audiobook records, filesystem discovery
+  helpers and fuzzy matching rules; `audiobook_server.py` retains state, Sonos,
+  routes, polling and the stable service entry behavior.
 - Visual Guides is maintained separately in `~/dev/visual-guides`, public repo
   `https://github.com/JakeIwen/visual-guides`. It serves Mac loopback port 8792
   and Pi port 8791. Its own `deploy.py` owns `/home/pi/visual-guides/` releases
@@ -191,10 +194,11 @@ compare it with this checkout. Deployed files may differ from the repository.
   `com.jacobr.display-cab-dimmer`) dims only cab Wiz lights that are on through
   the dashboard API and never alerts; its settings (including `enabled`) are
   declaration-driven like `iterm-screen-fonts`, and it is the first automation.
-  The stable script owns CLI/watch/dashboard orchestration;
+  The stable script owns CLI/status wiring;
   `macbook/scripts/cab_dimmer/model.py` owns display records and plug-in rules,
   `state_store.py` owns locked private state, and `displays.py` owns lazy
   CoreGraphics enumeration so status-only commands do not import macOS bindings.
+  `dashboard.py` is the HTTP adapter and `runtime.py` owns callback/poll ordering.
 - Automations: `shared/python/tool_automation.py` (stdlib, 3.9) is the one
   definition of a panel automation: the `shared/automations/<tool>.json`
   declaration (title, optional service label and settings tool, a status

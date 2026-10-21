@@ -18,3 +18,6 @@ guards; the separately deployed system monitor is not converted here.
   rollback-compatible legacy projection; `video_qbittorrent.py` resolves the
   same payload across incomplete and final paths. The dashboard links to the
   manager using the current LAN or Tailscale host.
+- `audiobooks/audiobook_server.py` owns the Flask/Sonos runtime served by
+  `audiobooks.service` on port `8787`; `audiobooks/catalog.py` owns its book
+  records, filesystem discovery helpers and fuzzy matching rules.

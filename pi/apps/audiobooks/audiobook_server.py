@@ -13,13 +13,12 @@ import re
 import socket
 import threading
 import time
-from difflib import SequenceMatcher
-from hashlib import sha1
 from urllib.parse import quote, unquote
 
 from flask import Flask, abort, jsonify, request, send_file
 from soco import SoCo
 from soco.discovery import discover
+from .catalog import AUDIO_EXTS, DISC_RE, Book, audio_files, match_score, natural_key, norm_tokens
 
 LIBRARY = "/mnt/EXFAT512/Audiobooks_Radio"
 STATE_PATH = os.path.expanduser("~/.audiobook_state.json")
@@ -30,63 +29,20 @@ POLL_SECS = 10              # progress poller interval
 RESCAN_SECS = 3600          # background library rescan interval
 MIN_MATCH_SCORE = 0.52
 
-AUDIO_EXTS = {".mp3", ".m4a", ".m4b", ".aac", ".flac", ".ogg", ".wav", ".aiff"}
 MIME = {
     ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".m4b": "audio/mp4",
     ".aac": "audio/aac", ".flac": "audio/flac", ".ogg": "audio/ogg",
     ".wav": "audio/wav", ".aiff": "audio/aiff",
 }
-# subdirs that are just media splits, not standalone titles
-DISC_RE = re.compile(r"^(dis[ck]|cd|dvd|part|pt|side|session)[\s._-]*\d+$", re.I)
 URI_RE = re.compile(r"/audio/([0-9a-f]{12})/(\d+)\.")
 
 app = Flask(__name__)
 
 # ---------------------------------------------------------------- library ---
 
-NUMWORDS = {
-    "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
-    "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
-    "eleven": "11", "twelve": "12", "i": "1", "ii": "2", "iii": "3", "iv": "4",
-}
-
-def norm_tokens(text):
-    text = text.lower().replace("&", " and ")
-    text = re.sub(r"[’']", "", text)
-    tokens = re.sub(r"[^a-z0-9]+", " ", text).split()
-    return [NUMWORDS.get(t, t) for t in tokens]
-
-def natural_key(s):
-    return [int(p) if p.isdigit() else p.lower() for p in re.split(r"(\d+)", s)]
-
-class Book:
-    def __init__(self, rel, tracks):
-        self.rel = rel                      # path relative to LIBRARY, or filename
-        self.bid = sha1(rel.encode()).hexdigest()[:12]
-        self.tracks = tracks                # abs paths, playback order
-        self.name = re.sub(r"\.[^.]+$", "", rel.replace("/", " - "))
-        self.tokens = norm_tokens(self.name)
-
-    def as_dict(self, progress=None):
-        d = {"id": self.bid, "name": self.name, "rel": self.rel,
-             "tracks": len(self.tracks)}
-        if progress:
-            d["progress"] = progress
-        return d
-
 books = {}          # bid -> Book
 books_lock = threading.Lock()
 last_scan = 0.0
-
-def audio_files(dirpath):
-    found = []
-    for root, dirs, files in os.walk(dirpath):
-        dirs.sort(key=natural_key)
-        dirs[:] = [d for d in dirs if not d.startswith(".")]
-        for f in sorted(files, key=natural_key):
-            if not f.startswith(".") and os.path.splitext(f)[1].lower() in AUDIO_EXTS:
-                found.append(os.path.join(root, f))
-    return found
 
 def scan_library():
     global books, last_scan
@@ -130,26 +86,6 @@ def maybe_rescan():
         scan_library()
 
 # ------------------------------------------------------------ fuzzy match ---
-
-def token_sim(q, c):
-    if q == c:
-        return 1.0
-    if len(q) >= 3 and (c.startswith(q) or q.startswith(c)):
-        return 0.92
-    return SequenceMatcher(None, q, c).ratio()
-
-def match_score(query_tokens, cand_tokens):
-    if not query_tokens or not cand_tokens:
-        return 0.0
-    best = [max(token_sim(q, c) for c in cand_tokens) for q in query_tokens]
-    mean_best = sum(best) / len(best)
-    matched_cands = set()
-    for q in query_tokens:
-        for c in cand_tokens:
-            if token_sim(q, c) >= 0.8:
-                matched_cands.add(c)
-    coverage = len(matched_cands) / len(cand_tokens)
-    return 0.8 * mean_best + 0.2 * coverage
 
 def search_books(query, limit=8):
     qtok = norm_tokens(query)
