@@ -132,6 +132,16 @@ export function OpenWrtTile({
               <span>{throughput.summary}</span>
             </span>
           )}
+          {throughput?.local != null && (
+            <span
+              className="wan-throughput"
+              aria-label="Current local network traffic"
+              title="Traffic between devices in the van, switched through the router"
+            >
+              <span className="wan-throughput-label">Local</span>
+              <span>{throughput.local}</span>
+            </span>
+          )}
         </div>
         <TileMwanInterfaces interfaces={connectivity?.router.interfaces ?? []} />
       </div>

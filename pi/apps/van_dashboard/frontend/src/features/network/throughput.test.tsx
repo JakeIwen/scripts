@@ -2,7 +2,7 @@ import { renderHook } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { useWanThroughput } from './hooks';
-import { formatBitRate, presentWanThroughput } from './presentation';
+import { formatByteRate, presentWanThroughput } from './presentation';
 import { decodeConnectivityResponse } from './schema';
 import { connectivityPayload, sampleConnectivity } from './testFixtures';
 import { MAX_THROUGHPUT_WINDOW_SECONDS, measureWanThroughput } from './throughput';
@@ -17,7 +17,12 @@ function traffic(uptimeSeconds: number, ...uplinks: [string, string, number, num
       rxBytes,
       txBytes,
     })),
+    lan: null,
   } satisfies WanTraffic;
+}
+
+function withLan(sample: WanTraffic, portsRxBytes: number, bridgeRxBytes: number): WanTraffic {
+  return { ...sample, lan: { portsRxBytes, bridgeRxBytes } };
 }
 
 describe('WAN throughput', () => {
@@ -27,14 +32,24 @@ describe('WAN throughput', () => {
       traffic(102, ['wan', 'wan', 501_000, 27_000], ['clientwan', 'wl1-sta0', 250_000, 0]),
     );
     expect(result).toEqual({
-      downloadBps: 3_000_000,
-      uploadBps: 100_000,
+      downloadBytesPerSecond: 375_000,
+      uploadBytesPerSecond: 12_500,
       windowSeconds: 2,
       uplinks: [
-        { name: 'wan', downloadBps: 2_000_000, uploadBps: 100_000 },
-        { name: 'clientwan', downloadBps: 1_000_000, uploadBps: 0 },
+        { name: 'wan', downloadBytesPerSecond: 250_000, uploadBytesPerSecond: 12_500 },
+        { name: 'clientwan', downloadBytesPerSecond: 125_000, uploadBytesPerSecond: 0 },
       ],
+      localBytesPerSecond: null,
     });
+  });
+
+  it('measures local traffic as bridge-port receives the router did not take up', () => {
+    const before = withLan(traffic(100, ['wan', 'wan', 0, 0]), 10_000, 4_000);
+    const after = withLan(traffic(102, ['wan', 'wan', 0, 0]), 1_010_000, 404_000);
+    expect(measureWanThroughput(before, after)?.localBytesPerSecond).toBe(300_000);
+    // A restarted access point resets its counter: no local reading for that window.
+    const reset = withLan(traffic(102, ['wan', 'wan', 0, 0]), 5_000, 404_000);
+    expect(measureWanThroughput(before, reset)?.localBytesPerSecond).toBeNull();
   });
 
   it('has no reading across a reboot, a long gap, or only unbaselined links', () => {
@@ -56,13 +71,13 @@ describe('WAN throughput', () => {
       traffic(101, ['wan', 'wan', 125, 0], ['clientwan', 'wl1-sta0', 10, 10]),
     );
     expect(result?.uplinks.map((item) => item.name)).toEqual(['wan']);
-    expect(result?.downloadBps).toBe(1_000);
+    expect(result?.downloadBytesPerSecond).toBe(125);
   });
 
   it('reports zero when no uplink is up', () => {
     expect(measureWanThroughput(traffic(100), traffic(103))).toMatchObject({
-      downloadBps: 0,
-      uploadBps: 0,
+      downloadBytesPerSecond: 0,
+      uploadBytesPerSecond: 0,
       uplinks: [],
     });
   });
@@ -77,22 +92,28 @@ describe('WAN throughput', () => {
     expect(presentWanThroughput(connectivity, measured)).toBeNull();
 
     connectivity.router.wanTraffic = null;
-    expect(presentWanThroughput(connectivity, measured)).toEqual({ summary: '—', detail: null });
+    expect(presentWanThroughput(connectivity, measured)).toEqual({
+      summary: '—',
+      detail: null,
+      local: null,
+    });
     connectivity.router.wanTraffic = traffic(102);
     expect(presentWanThroughput({ ...connectivity, stale: true }, measured)?.summary).toBe('—');
     expect(presentWanThroughput(connectivity, null)?.summary).toBe('Measuring…');
     expect(presentWanThroughput(connectivity, measured)).toEqual({
-      summary: '↓ 3.0 Mbps · ↑ 100 kbps',
-      detail: 'wan ↓ 3.0 Mbps · ↑ 100 kbps\nAveraged over 2.0 s',
+      summary: '↓ 375 kB/s · ↑ 13 kB/s',
+      detail: 'wan ↓ 375 kB/s · ↑ 13 kB/s\nAveraged over 2.0 s',
+      local: null,
     });
+    connectivity.router.wanTraffic = withLan(traffic(102), 0, 0);
+    expect(
+      presentWanThroughput(connectivity, { ...measured!, localBytesPerSecond: 2_500_000 })?.local,
+    ).toBe('2.5 MB/s');
   });
 
-  it('formats bit rates like the speed test', () => {
-    expect(formatBitRate(0)).toBe('0 kbps');
-    expect(formatBitRate(999_499)).toBe('999 kbps');
-    expect(formatBitRate(999_500)).toBe('1.0 Mbps');
-    expect(formatBitRate(42_460_000)).toBe('42.5 Mbps');
-    expect(formatBitRate(250_000_000)).toBe('250 Mbps');
+  it('formats byte rates in kB/s below one megabyte and MB/s above', () => {
+    expect(formatByteRate(999_499)).toBe('999 kB/s');
+    expect(formatByteRate(1_540_000)).toBe('1.5 MB/s');
   });
 
   it('measures only when the collector produces a new router sample', () => {
@@ -107,13 +128,13 @@ describe('WAN throughput', () => {
     expect(result.current).toBeNull();
 
     rerender({ sample: traffic(103, ['wan', 'wan', 375_000, 0]) });
-    expect(result.current?.downloadBps).toBe(1_000_000);
+    expect(result.current?.downloadBytesPerSecond).toBe(125_000);
     rerender({ sample: traffic(103, ['wan', 'wan', 375_000, 0]) });
     expect(result.current?.windowSeconds).toBe(3);
 
     rerender({ sample: null });
     rerender({ sample: traffic(106, ['wan', 'wan', 375_000, 750]) });
-    expect(result.current).toMatchObject({ downloadBps: 0, uploadBps: 2_000 });
+    expect(result.current).toMatchObject({ downloadBytesPerSecond: 0, uploadBytesPerSecond: 250 });
   });
 
   it('decodes router counters and rejects negative byte counts', () => {
@@ -127,6 +148,16 @@ describe('WAN throughput', () => {
     expect(decodeConnectivityResponse(payload).router.wanTraffic).toEqual(
       traffic(3_833_465.59, ['wan', 'wan', 793_589_244_303, 6]),
     );
+
+    router.wan_traffic = {
+      uptime_seconds: 1,
+      uplinks: [],
+      lan: { ports_rx_bytes: 9, bridge_rx_bytes: 4 },
+    };
+    expect(decodeConnectivityResponse(payload).router.wanTraffic?.lan).toEqual({
+      portsRxBytes: 9,
+      bridgeRxBytes: 4,
+    });
 
     router.wan_traffic = null;
     expect(decodeConnectivityResponse(payload).router.wanTraffic).toBeNull();

@@ -41,6 +41,8 @@ MWAN_STATUS_COMMAND = (
     "printf '__VAN_DASH_WAN_STATUS__=%s=' $iface; "
     "/bin/ubus -S call network.interface.$iface status 2>/dev/null || echo; done; "
     "printf '__VAN_DASH_UPTIME__='; /bin/cat /proc/uptime; "
+    # LAN bridge members, for traffic switched between van devices.
+    "printf '__VAN_DASH_BRIDGE_PORTS__=%s\\n' \"$(echo /sys/class/net/br-lan/brif/*)\"; "
     "/bin/sed 's/^/__VAN_DASH_NETDEV__=/' /proc/net/dev; true"
 )
 WAN_STATUS_LINE = re.compile(
@@ -49,6 +51,8 @@ WAN_STATUS_LINE = re.compile(
 ROUTER_UPTIME_LINE = re.compile(
     r"^__VAN_DASH_UPTIME__=(\d+(?:\.\d+)?)(?:\s|$)", re.MULTILINE
 )
+BRIDGE_PORTS_LINE = re.compile(r"^__VAN_DASH_BRIDGE_PORTS__=(.*)$", re.MULTILINE)
+LAN_BRIDGE = "br-lan"
 NETDEV_LINE = re.compile(r"^__VAN_DASH_NETDEV__=\s*([^:\s]+):(.*)$", re.MULTILINE)
 ROUTER_CLIENTS_COMMAND = r"""
 printf '__VAN_DASH_LEASES__\n'
@@ -258,7 +262,32 @@ def parse_wan_traffic(output):
         uplinks.append(
             {"name": match.group(1), "device": device, "rx_bytes": received, "tx_bytes": sent}
         )
-    return {"uptime_seconds": float(uptime.group(1)), "uplinks": uplinks}
+    return {
+        "uptime_seconds": float(uptime.group(1)),
+        "uplinks": uplinks,
+        "lan": _lan_counters(output, counters),
+    }
+
+
+def _lan_counters(output, counters):
+    """Receive counters for local traffic through the LAN bridge.
+
+    A frame between two van devices enters one bridge port and leaves another
+    without reaching the router's own stack; anything routed to the internet or
+    addressed to the router also crosses ``br-lan``. So local traffic is what the
+    ports received minus what the bridge passed up.
+    """
+    ports_line = BRIDGE_PORTS_LINE.search(output)
+    if not ports_line or LAN_BRIDGE not in counters:
+        return None
+    ports = [path.rsplit("/", 1)[-1] for path in ports_line.group(1).split()]
+    ports = [port for port in ports if port in counters]
+    if not ports:
+        return None
+    return {
+        "ports_rx_bytes": sum(counters[port][0] for port in ports),
+        "bridge_rx_bytes": counters[LAN_BRIDGE][0],
+    }
 
 
 def _valid_ipv4(value):

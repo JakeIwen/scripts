@@ -55,6 +55,10 @@ const wanUplinkCountersSchema = v.pipe(
     txBytes: row.tx_bytes,
   })),
 );
+const lanCountersSchema = v.pipe(
+  object({ ports_rx_bytes: nonnegativeInteger, bridge_rx_bytes: nonnegativeInteger }),
+  v.transform((row) => ({ portsRxBytes: row.ports_rx_bytes, bridgeRxBytes: row.bridge_rx_bytes })),
+);
 const wanTrafficSchema = v.pipe(
   object({
     uptime_seconds: v.pipe(
@@ -62,8 +66,14 @@ const wanTrafficSchema = v.pipe(
       v.check((value) => value >= 0, 'must not be negative'),
     ),
     uplinks: v.array(wanUplinkCountersSchema),
+    // Absent from collectors that predate LAN counters; null when the bridge was unreadable.
+    lan: v.optional(v.nullable(lanCountersSchema)),
   }),
-  v.transform((row) => ({ uptimeSeconds: row.uptime_seconds, uplinks: row.uplinks })),
+  v.transform((row) => ({
+    uptimeSeconds: row.uptime_seconds,
+    uplinks: row.uplinks,
+    lan: row.lan ?? null,
+  })),
 );
 
 const routerSchema = v.pipe(

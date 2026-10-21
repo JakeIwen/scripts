@@ -117,7 +117,13 @@
   white-space: nowrap;
 }
 
+.wan-throughput + .wan-throughput {
+  margin-top: 3px;
+}
+
 .wan-throughput-label {
+  /* Wide enough for LOCAL, so the NET and LOCAL values line up. */
+  min-width: 4.2em;
   color: var(--dim);
   font-size: 10px;
   letter-spacing: 0.04em;

@@ -52,20 +52,25 @@ export function connectivityAge(connectivity: ConnectivityStatus | null): string
   return connectivity.refreshing ? 'Checking…' : 'Waiting for MWAN3';
 }
 
-/** Matches the speed test's Mbps so current use reads against measured capacity. */
-export function formatBitRate(bitsPerSecond: number): string {
-  if (bitsPerSecond < 999_500) return `${Math.round(bitsPerSecond / 1_000)} kbps`;
-  const mbps = bitsPerSecond / 1_000_000;
-  return `${mbps < 99.95 ? mbps.toFixed(1) : mbps.toFixed(0)} Mbps`;
+/** Decimal units, matching how file sizes and transfer progress read elsewhere. */
+export function formatByteRate(bytesPerSecond: number): string {
+  if (bytesPerSecond < 999_500) return `${Math.round(bytesPerSecond / 1_000)} kB/s`;
+  const megabytes = bytesPerSecond / 1_000_000;
+  return `${megabytes < 99.95 ? megabytes.toFixed(1) : megabytes.toFixed(0)} MB/s`;
 }
 
-function bitRates(rates: { downloadBps: number; uploadBps: number }): string {
-  return `↓ ${formatBitRate(rates.downloadBps)} · ↑ ${formatBitRate(rates.uploadBps)}`;
+function byteRates(rates: {
+  downloadBytesPerSecond: number;
+  uploadBytesPerSecond: number;
+}): string {
+  return `↓ ${formatByteRate(rates.downloadBytesPerSecond)} · ↑ ${formatByteRate(rates.uploadBytesPerSecond)}`;
 }
 
 export interface WanThroughputPresentation {
   summary: string;
   detail: string | null;
+  /** Null hides the LOCAL row: the collector sent no LAN counters. */
+  local: string | null;
 }
 
 /** Null hides the row: collectors that predate router counters send no field. */
@@ -75,12 +80,18 @@ export function presentWanThroughput(
 ): WanThroughputPresentation | null {
   const traffic = connectivity?.router.wanTraffic;
   if (!connectivity || traffic === undefined) return null;
-  if (traffic === null || connectivity.stale) return { summary: '—', detail: null };
-  if (!throughput) return { summary: 'Measuring…', detail: null };
+  if (traffic === null) return { summary: '—', detail: null, local: null };
+  const hasLan = traffic.lan !== null;
+  if (connectivity.stale) return { summary: '—', detail: null, local: hasLan ? '—' : null };
+  if (!throughput) {
+    return { summary: 'Measuring…', detail: null, local: hasLan ? 'Measuring…' : null };
+  }
+  const local = throughput.localBytesPerSecond;
   return {
-    summary: bitRates(throughput),
+    local: hasLan ? (local === null ? 'Measuring…' : formatByteRate(local)) : null,
+    summary: byteRates(throughput),
     detail: [
-      ...throughput.uplinks.map((uplink) => `${uplink.name} ${bitRates(uplink)}`),
+      ...throughput.uplinks.map((uplink) => `${uplink.name} ${byteRates(uplink)}`),
       `Averaged over ${throughput.windowSeconds.toFixed(1)} s`,
     ].join('\n'),
   };

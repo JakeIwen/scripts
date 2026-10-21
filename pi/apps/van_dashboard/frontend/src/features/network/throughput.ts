@@ -6,15 +6,17 @@ export const MAX_THROUGHPUT_WINDOW_SECONDS = 90;
 
 export interface UplinkThroughput {
   name: string;
-  downloadBps: number;
-  uploadBps: number;
+  downloadBytesPerSecond: number;
+  uploadBytesPerSecond: number;
 }
 
 export interface WanThroughput {
-  downloadBps: number;
-  uploadBps: number;
+  downloadBytesPerSecond: number;
+  uploadBytesPerSecond: number;
   windowSeconds: number;
   uplinks: UplinkThroughput[];
+  /** Traffic switched between van devices; null without LAN counters in both samples. */
+  localBytesPerSecond: number | null;
 }
 
 /** Internet throughput between two router counter samples, summed over all up uplinks. */
@@ -39,16 +41,31 @@ export function measureWanThroughput(
     if (received < 0 || sent < 0) continue;
     uplinks.push({
       name: uplink.name,
-      downloadBps: (received * 8) / windowSeconds,
-      uploadBps: (sent * 8) / windowSeconds,
+      downloadBytesPerSecond: received / windowSeconds,
+      uploadBytesPerSecond: sent / windowSeconds,
     });
   }
   if (current.uplinks.length > 0 && uplinks.length === 0) return null;
 
   return {
-    downloadBps: uplinks.reduce((total, item) => total + item.downloadBps, 0),
-    uploadBps: uplinks.reduce((total, item) => total + item.uploadBps, 0),
+    downloadBytesPerSecond: uplinks.reduce((total, item) => total + item.downloadBytesPerSecond, 0),
+    uploadBytesPerSecond: uplinks.reduce((total, item) => total + item.uploadBytesPerSecond, 0),
     windowSeconds,
     uplinks,
+    localBytesPerSecond: measureLocalTraffic(previous, current, windowSeconds),
   };
+}
+
+function measureLocalTraffic(
+  previous: WanTraffic,
+  current: WanTraffic,
+  windowSeconds: number,
+): number | null {
+  if (!previous.lan || !current.lan) return null;
+  const received = current.lan.portsRxBytes - previous.lan.portsRxBytes;
+  const passedUp = current.lan.bridgeRxBytes - previous.lan.bridgeRxBytes;
+  // A restarted access point or port restarts its counters from zero.
+  if (received < 0 || passedUp < 0) return null;
+  // Broadcasts are both switched and passed up, so a quiet LAN can dip below zero.
+  return Math.max(0, received - passedUp) / windowSeconds;
 }

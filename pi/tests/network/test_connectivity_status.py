@@ -42,11 +42,15 @@ WAN_TRAFFIC_SAMPLE = """__VAN_DASH_WAN_STATUS__=wan={"up":true,"l3_device":"wan"
 __VAN_DASH_WAN_STATUS__=clientwan={"up":false,"pending":true,"device":"wl1-sta0","data":{}}
 __VAN_DASH_WAN_STATUS__=lifiwan=
 __VAN_DASH_UPTIME__=3833465.59 6611824.09
+__VAN_DASH_BRIDGE_PORTS__=/sys/class/net/br-lan/brif/lan2 /sys/class/net/br-lan/brif/wl1-ap0 /sys/class/net/br-lan/brif/lan4
 __VAN_DASH_NETDEV__=Inter-|   Receive                                                |  Transmit
 __VAN_DASH_NETDEV__= face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
 __VAN_DASH_NETDEV__=  eth0: 2052465901990 2231665400   11    0    0     0          0         0 2324592571462 2240242632    0    0    0     0       0          0
 __VAN_DASH_NETDEV__=   wan: 793589244303 795765444    0 830449    0     0          0         0 643849733304 705908855    0   53    0     0       0          0
 __VAN_DASH_NETDEV__=wl1-sta0:       0       0    0    0    0     0          0         0        0       0    0 35761    0     0       0          0
+__VAN_DASH_NETDEV__=br-lan:    5000       0    0    0    0     0          0         0      900       0    0    0    0     0       0          0
+__VAN_DASH_NETDEV__=  lan2:    7000       0    0    0    0     0          0         0      100       0    0    0    0     0       0          0
+__VAN_DASH_NETDEV__=wl1-ap0:   1500       0    0    0    0     0          0         0      200       0    0    0    0     0       0          0
 """
 
 MWAN_TRANSITION_SAMPLE = """Interface status:
@@ -145,8 +149,12 @@ class ConnectivityParserTests(unittest.TestCase):
                         "tx_bytes": 643849733304,
                     }
                 ],
+                # lan4 is a bridge port with no counters; it is skipped.
+                "lan": {"ports_rx_bytes": 8500, "bridge_rx_bytes": 5000},
             },
         )
+        without_bridge = WAN_TRAFFIC_SAMPLE.replace("__VAN_DASH_BRIDGE_PORTS__=", "")
+        self.assertIsNone(connectivity.parse_wan_traffic(without_bridge)["lan"])
 
     def test_wan_traffic_counts_a_shared_device_once(self):
         output = WAN_TRAFFIC_SAMPLE.replace(

@@ -98,21 +98,27 @@ describe('OpenWrt UI', () => {
     // Collectors without counters leave the tile unchanged.
     expect(screen.queryByLabelText('Current internet throughput')).not.toBeInTheDocument();
 
-    connectivity.router.wanTraffic = { uptimeSeconds: 100, uplinks: [] };
+    connectivity.router.wanTraffic = {
+      uptimeSeconds: 100,
+      uplinks: [],
+      lan: { portsRxBytes: 0, bridgeRxBytes: 0 },
+    };
     view.rerender(tile(null));
     expect(screen.getByLabelText('Current internet throughput')).toHaveTextContent('Measuring…');
 
     const throughput = {
-      downloadBps: 4_200_000,
-      uploadBps: 640_000,
+      downloadBytesPerSecond: 4_200_000,
+      uploadBytesPerSecond: 640_000,
       windowSeconds: 3,
-      uplinks: [{ name: 'wan', downloadBps: 4_200_000, uploadBps: 640_000 }],
+      uplinks: [{ name: 'wan', downloadBytesPerSecond: 4_200_000, uploadBytesPerSecond: 640_000 }],
+      localBytesPerSecond: 1_500_000,
     };
     view.rerender(tile(throughput));
     const row = screen.getByLabelText('Current internet throughput');
     expect(row.closest('.mwan-primary')).not.toBeNull();
-    expect(row).toHaveTextContent('↓ 4.2 Mbps · ↑ 640 kbps');
-    expect(row).toHaveAttribute('title', 'wan ↓ 4.2 Mbps · ↑ 640 kbps\nAveraged over 3.0 s');
+    expect(row).toHaveTextContent('↓ 4.2 MB/s · ↑ 640 kB/s');
+    expect(row).toHaveAttribute('title', 'wan ↓ 4.2 MB/s · ↑ 640 kB/s\nAveraged over 3.0 s');
+    expect(screen.getByLabelText('Current local network traffic')).toHaveTextContent('1.5 MB/s');
 
     view.rerender(tile(throughput, { ...connectivity, stale: true }));
     expect(screen.getByLabelText('Current internet throughput')).toHaveTextContent('—');
