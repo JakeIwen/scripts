@@ -7,7 +7,7 @@ import { OpenWrtTile } from './OpenWrtTile';
 import { presentWanThroughput } from './presentation';
 
 export function OpenWrtFeature() {
-  const [sheetOpen, setSheetOpen] = usePaneLink('openwrt-card');
+  const [sheetOpen, setSheetOpen] = usePaneLink('openwrt');
   const { connectivity, speedtest, clients } = useOpenWrtResources(sheetOpen);
   const speedtestControl = useSpeedtestControl(speedtest);
   const throughput = presentWanThroughput(

@@ -10,7 +10,7 @@ import { SonosAlarms } from './SonosAlarms';
 import { SonosTile } from './SonosTile';
 
 export function SonosFeature() {
-  const [sheetOpen, setSheetOpen] = usePaneLink('sonos-card');
+  const [sheetOpen, setSheetOpen] = usePaneLink('sonos');
   const alarmControls = useSonosAlarmControls(sheetOpen);
   const resource = useSonosStatus();
   const { showToast } = useToast();

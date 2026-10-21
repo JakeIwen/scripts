@@ -1,9 +1,9 @@
 import { useCallback, useSyncExternalStore } from 'react';
 
-/** Stable public fragments match the dashboard's existing tile identifiers. */
+/** Stable public fragments for expandable dashboard panes. */
 export const paneIds = [
   'vonstar',
-  'sonos-card',
+  'sonos',
   'storage',
   'system-monitor',
   'compute-worker',
@@ -11,10 +11,10 @@ export const paneIds = [
   'backups',
   'ignition-monitor',
   'price-checks',
-  'lighting-card',
+  'lighting',
   'ubnt-wifi',
   'network-history',
-  'openwrt-card',
+  'openwrt',
 ] as const;
 
 type PaneId = (typeof paneIds)[number];

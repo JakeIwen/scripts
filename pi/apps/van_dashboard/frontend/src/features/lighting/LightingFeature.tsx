@@ -8,7 +8,7 @@ import type { LightingStatus } from './types';
 import { useLightingControls } from './useLightingControls';
 
 export function LightingFeature() {
-  const [sheetOpen, setSheetOpen] = usePaneLink('lighting-card');
+  const [sheetOpen, setSheetOpen] = usePaneLink('lighting');
   const [authoritativeStatus, setAuthoritativeStatus] = useState<LightingStatus | null>(null);
   const controls = useLightingControls({
     status: authoritativeStatus,
