@@ -68,6 +68,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   `provision` (new networks), `status` (status/dashboard output), and `starlink`
   (power-off roaming). Ship the entrypoint and every sibling together.
 - `macbook/`: macOS shell utilities, AppleScripts, and BetterTouchTool helpers.
+  `macbook/scripts/shimg.zsh` is called by `~/.zshrc`'s `shimg` alias;
+  it saves clipboard PNGs into the mounted Pi `agent-shared` folder, with
+  an optional filename (default `screenshot.png`).
   Performance Audio, Convert Video, Custom Conversion, BPM Over Time, Rhythm
   Practice and Interval Analysis are maintained separately in `~/dev/mac-media-tools`
   (public repo `https://github.com/JakeIwen/mac-media-tools`).
