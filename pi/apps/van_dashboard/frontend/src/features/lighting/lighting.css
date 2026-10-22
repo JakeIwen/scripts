@@ -63,7 +63,7 @@
 
 .lighting-quick-room {
   display: grid;
-  grid-template-columns: minmax(67px, auto) minmax(42px, 1fr);
+  grid-template-columns: max-content minmax(42px, 1fr);
   align-items: center;
   min-width: 0;
   gap: 6px;
@@ -71,8 +71,7 @@
 }
 
 .lighting-quick-room__power {
-  display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) auto;
+  display: flex;
   min-height: 27px;
   align-items: center;
   min-width: 0;
