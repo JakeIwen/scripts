@@ -12,8 +12,6 @@ from flask import Flask, jsonify, render_template, request
 
 from .catalog import CatalogConflict
 from .media_models import seconds_text
-from .players.sonos_volume import AudioPreparingError
-from .players.vlc_player import RoomPreparationError
 from .service import active_service
 from .video_qbittorrent import QbittorrentError
 
@@ -187,8 +185,6 @@ def api_control():
         return api_error("unknown control action", 400)
     try:
         return jsonify(active_service().control_player(action))
-    except RoomPreparationError as exc:
-        return api_error(f"rear movie audio setup failed: {exc}", 503)
     except Exception as exc:
         return api_error(f"VLC control failed: {exc}", 502)
 
@@ -267,8 +263,6 @@ def api_volume():
                 "message": f"{audio['device']} Sonos volume {audio['volume']}%",
             }
         )
-    except AudioPreparingError as exc:
-        return api_error(exc, 409)
     except Exception as exc:
         return api_error(f"Sonos volume failed: {exc}", 502)
 

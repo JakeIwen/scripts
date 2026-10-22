@@ -9,10 +9,6 @@ from typing import Any, Callable, Iterable
 from ..config import REAR_SONOS_UIDS, SONOS_DISCOVERY_TTL
 
 
-class AudioPreparingError(RuntimeError):
-    """Raised when rear-room setup would overwrite a Sonos volume change."""
-
-
 class SonosVolumeController:
     """Read and set only the physical rear stereo zone used for movie audio."""
 

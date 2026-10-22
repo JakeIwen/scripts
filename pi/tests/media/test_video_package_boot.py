@@ -63,9 +63,6 @@ class SafeVlc:
             "duration": 0.0,
         }
 
-    def room_preparing(self):
-        return False
-
 
 class SafeSonos:
     def snapshot(self):

@@ -44,10 +44,11 @@ class DeploymentApiWiringTests(unittest.TestCase):
         self.assertIsNotNone(videoapi, "VIDEOAPI assignment not found")
         vlcmd = self._extract_bash_function(bashrc, "vlcmd")
         vid = self._extract_bash_function(bashrc, "vid")
-        return videoapi, vlcmd, vid
+        pp = next(line for line in bashrc.splitlines() if line.startswith("alias pp="))
+        return videoapi, vlcmd, vid, pp
 
     @staticmethod
-    def _run_bashrc_video_helpers(videoapi, vlcmd, vid):
+    def _run_bashrc_video_helpers(videoapi, vlcmd, vid, pp):
         with tempfile.TemporaryDirectory() as tempdir:
             root = Path(tempdir)
             fake_curl = root / "curl"
@@ -59,6 +60,9 @@ class DeploymentApiWiringTests(unittest.TestCase):
             script = "\n".join(
                 (
                     "set -e",
+                    "shopt -s expand_aliases",
+                    pp,
+                    "vantv_active() { return 1; }",
                     videoapi,
                     vlcmd,
                     vid,
@@ -74,6 +78,7 @@ class DeploymentApiWiringTests(unittest.TestCase):
                     "vlcmd PlayPause",
                     'VIDEOAPI="http://localhost:8789/api"',
                     "vid -p",
+                    "pp",
                 )
             )
             env = {
@@ -100,25 +105,43 @@ class DeploymentApiWiringTests(unittest.TestCase):
 
     def _assert_default_video_action_calls(self, calls):
         expected_actions = ("toggle", "play", "pause", "next", "previous", "stop")
-        self.assertEqual(len(calls), len(expected_actions) + 2)
+        self.assertEqual(len(calls), len(expected_actions) + 3)
         for call, action in zip(calls[: len(expected_actions)], expected_actions):
             self.assertIn(b"POST", call)
             self.assertIn(b"http://localhost:8789/api/control", call)
             self.assertIn(f"action={action}".encode(), call)
 
     def _assert_override_and_vid_calls(self, calls):
-        self.assertIn(b"http://override.example/api/control", calls[-2])
+        self.assertIn(b"http://override.example/api/control", calls[-3])
         self.assertIn(b"http://localhost:8789/api/control", calls[-1])
-        for call in calls[-2:]:
+        for call in calls[-3:]:
             self.assertIn(b"POST", call)
             self.assertIn(b"action=toggle", call)
 
     def test_bashrc_video_helpers_use_the_video_api(self):
-        videoapi, vlcmd, vid = self._load_bashrc_video_helpers()
-        completed = self._run_bashrc_video_helpers(videoapi, vlcmd, vid)
+        videoapi, vlcmd, vid, pp = self._load_bashrc_video_helpers()
+        completed = self._run_bashrc_video_helpers(videoapi, vlcmd, vid, pp)
         calls = self._curl_calls(completed)
         self._assert_default_video_action_calls(calls)
         self._assert_override_and_vid_calls(calls)
+
+    def test_btt_vantv_routes_do_not_call_vlc_or_schedule_shell_repairs(self):
+        source = (REPOSITORY_ROOT / "pi" / ".bashrc").read_text()
+        _videoapi, vlcmd, _vid, pp = self._load_bashrc_video_helpers()
+        script = "\n".join((
+            "set -e; shopt -s expand_aliases", pp, vlcmd,
+            self._extract_bash_function(source, "vantv_vlcmd"),
+            "vantv_active() { return 0; }",
+            'vantv_ctl() { printf "%s\\n" "$1"; }',
+            "curl() { return 97; }; wake_display() { return 98; }",
+            "pp", "vlcmd Play", "vlcmd PlayPause",
+        ))
+        result = subprocess.run(
+            ["/bin/bash", "-c", script], env={"PATH": "/usr/bin:/bin"},
+            capture_output=True, text=True, check=True, timeout=5,
+        )
+        self.assertEqual(result.stdout.splitlines(), ["toggle", "resume", "toggle"])
+        self.assertEqual(result.stderr, "")
 
 
 if __name__ == "__main__":

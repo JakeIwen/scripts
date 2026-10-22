@@ -21,6 +21,12 @@ esac
 
 task=$1
 
+if [[ "$task" == ensure_rear_movie ]]; then
+  # A healthy check changes nothing, including ALSA. exec lets the caller's
+  # timeout stop Python itself instead of leaving an orphaned repair behind.
+  exec python3 -c 'from sonos_tasks import ensure_rear_movie; ensure_rear_movie()'
+fi
+
 case "$#" in
   "1")
     args="";;

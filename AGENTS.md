@@ -271,6 +271,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   audio to optical) → Sonos soundbar's optical input. `sns.sh rear_movie`
   switches the soundbar to optical and groups vonRear with it; VLC and Van TV's
   mpv play to ALSA HDMI 0, and PipeWire's null sink is expected, not a fault.
+  `shared/python/sonos_tasks.py` owns `ensure_rear_movie` (read/repair, preserving
+  rear volume); `pi/apps/video_library/players/sonos_check.py` owns the delayed,
+  bounded, coalesced check after VLC starts/resumes. `pi/scripts/rear_movie_check.sh`
+  serves direct `.bashrc` VLC starts; `vlcmd`/`pp` use the manager's API instead.
 - Dashboard Sonos alarms live in `pi/apps/van_dashboard/sonos_alarms.py`, with
   HTTP routes in `routes/sonos_alarms.py` and React controls in `features/sonos/`.
   `SonosAlarm` owns the device record; `alarms.ts` owns the validated UI contract.

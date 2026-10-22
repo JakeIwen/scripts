@@ -1,4 +1,3 @@
-import ast
 import json
 import os
 import tempfile
@@ -12,7 +11,6 @@ from pi.apps.video_library import routes
 from pi.apps.video_library.config import (
     MPRIS_PLAYER,
     RESUME_REWIND,
-    SNS,
     SYSTEMD_RUN,
     VLC_FIXED_VOLUME,
 )
@@ -20,9 +18,8 @@ from pi.apps.video_library.legacy_progress import ProgressStore
 from pi.apps.video_library.library import MediaLibrary
 from pi.apps.video_library.media_models import LibrarySource, public_progress
 from pi.apps.video_library.naming import parse_candidate, stable_id
-from pi.apps.video_library.players import vlc_player
 from pi.apps.video_library.players.sonos_volume import SonosVolumeController
-from pi.apps.video_library.players.vlc_player import RoomPreparationError, VlcController
+from pi.apps.video_library.players.vlc_player import VlcController
 from pi.apps.video_library.service import VideoService
 
 
@@ -56,9 +53,6 @@ class FakePlayer:
         self.position_calls = []
         self.volume_calls = []
         self.rate_calls = []
-        self.prepare_room_calls = []
-        self.prepare_room_error = None
-        self.prepare_room_callback = None
         self.quit_calls = 0
         self.fullscreen = False
 
@@ -113,12 +107,6 @@ class FakePlayer:
         self.rate_calls.append(float(value))
         return max(0.5, min(2.0, float(value)))
 
-    def prepare_room(self, *, wait=False):
-        self.prepare_room_calls.append({"wait": bool(wait)})
-        if self.prepare_room_callback is not None:
-            self.prepare_room_callback()
-        if self.prepare_room_error is not None:
-            raise self.prepare_room_error
 
     def toggle_fullscreen(self):
         self.fullscreen = not self.fullscreen
@@ -877,157 +865,8 @@ class SonosVolumeControllerTests(unittest.TestCase):
         self.assertEqual(right.volume, 47)
 
 
-class SonosTaskTests(unittest.TestCase):
-    def test_rear_movie_resume_preserves_current_volume_including_zero(self):
-        source_path = REPOSITORY_ROOT / "shared" / "python" / "sonos_tasks.py"
-        tree = ast.parse(source_path.read_text(encoding="utf-8"))
-        function = next(
-            node
-            for node in tree.body
-            if isinstance(node, ast.FunctionDef) and node.name == "rear_movie_resume"
-        )
-        module = ast.fix_missing_locations(ast.Module(body=[function], type_ignores=[]))
-
-        for current_volume in (0, 25):
-            with self.subTest(current_volume=current_volume):
-                device = mock.Mock(volume=current_volume)
-                calls = []
-
-                def get_rear_stereo_master():
-                    calls.append(("get",))
-                    return device
-
-                def audio_source_device(selected, source, volume):
-                    calls.append(("audio", selected, source, volume))
-                    selected.volume = 47
-                    return selected
-
-                namespace = {
-                    "get_rear_stereo_master": get_rear_stereo_master,
-                    "audio_source_device": audio_source_device,
-                }
-                exec(compile(module, str(source_path), "exec"), namespace)
-
-                result = namespace["rear_movie_resume"]()
-
-                self.assertIs(result, device)
-                self.assertEqual(
-                    calls,
-                    [("get",), ("audio", device, "optical", current_volume)],
-                )
-
-
 class VlcControllerTests(unittest.TestCase):
-    def test_waiting_resume_prep_runs_volume_preserving_sonos_task(self):
-        run = mock.Mock()
-        process = mock.Mock()
-        process.poll.return_value = None
-        process.wait.return_value = 0
-        popen = mock.Mock(return_value=process)
-        controller = VlcController(run=run, popen=popen)
 
-        with (
-            mock.patch.object(vlc_player.os.path, "isfile", return_value=True),
-            mock.patch.object(vlc_player.os, "access", return_value=True),
-        ):
-            controller.prepare_room(wait=True)
-
-        popen.assert_called_once_with(
-            ["/bin/bash", SNS, "rear_movie_resume"],
-            stdin=vlc_player.subprocess.DEVNULL,
-            stdout=vlc_player.subprocess.DEVNULL,
-            stderr=vlc_player.subprocess.DEVNULL,
-            start_new_session=True,
-        )
-        process.wait.assert_called_once()
-        self.assertIsNone(controller.room_process)
-
-    def test_room_prep_reuses_running_sonos_topology_job(self):
-        run = mock.Mock()
-        running = mock.Mock()
-        running.poll.return_value = None
-        replacement = mock.Mock()
-        replacement.poll.return_value = None
-        popen = mock.Mock(side_effect=(running, replacement))
-        controller = VlcController(run=run, popen=popen)
-
-        with (
-            mock.patch.object(vlc_player.os.path, "isfile", return_value=True),
-            mock.patch.object(vlc_player.os, "access", return_value=True),
-        ):
-            controller._prepare_room()
-            controller._prepare_room()
-            self.assertIs(controller.room_process, running)
-            self.assertEqual(popen.call_count, 1)
-
-            running.poll.return_value = 0
-            controller._prepare_room()
-
-        self.assertEqual(popen.call_count, 2)
-        self.assertIs(controller.room_process, replacement)
-
-    def test_waiting_room_prep_reuses_running_job_and_requires_success(self):
-        run = mock.Mock()
-        popen = mock.Mock()
-        running = mock.Mock()
-        running.poll.return_value = None
-        running.wait.return_value = 0
-        controller = VlcController(run=run, popen=popen)
-        controller.room_process = running
-
-        controller.prepare_room(wait=True)
-
-        popen.assert_not_called()
-        running.wait.assert_called_once()
-        timeout = running.wait.call_args.kwargs.get("timeout")
-        self.assertIsInstance(timeout, (int, float))
-        self.assertGreater(timeout, 0)
-        self.assertIsNone(controller.room_process)
-
-    def test_waiting_room_prep_reports_timeout_nonzero_and_missing_setup(self):
-        outcomes = (
-            vlc_player.subprocess.TimeoutExpired(cmd="rear_movie", timeout=1),
-            9,
-        )
-        for outcome in outcomes:
-            with self.subTest(outcome=outcome):
-                process = mock.Mock()
-                process.poll.return_value = None
-                if isinstance(outcome, BaseException):
-                    process.wait.side_effect = outcome
-                else:
-                    process.wait.return_value = outcome
-                controller = VlcController(run=mock.Mock())
-                controller.room_process = process
-
-                with self.assertRaises(RoomPreparationError):
-                    controller.prepare_room(wait=True)
-                self.assertIsNone(controller.room_process)
-                if isinstance(outcome, BaseException):
-                    self.assertTrue(process.terminate.called or process.kill.called)
-
-        controller = VlcController(run=mock.Mock())
-        with mock.patch.object(vlc_player.os.path, "isfile", return_value=False):
-            with self.assertRaises(RoomPreparationError):
-                controller.prepare_room(wait=True)
-
-    def test_waiting_room_prep_timeout_terminates_process_group_and_clears_owner(self):
-        process = mock.Mock(pid=4321)
-        process.poll.return_value = None
-        process.wait.side_effect = (
-            vlc_player.subprocess.TimeoutExpired(cmd="rear_movie_resume", timeout=1),
-            0,
-        )
-        killpg = mock.Mock()
-        controller = VlcController(run=mock.Mock(), killpg=killpg)
-        controller.room_process = process
-
-        with self.assertRaises(RoomPreparationError):
-            controller.prepare_room(wait=True)
-
-        killpg.assert_called_once_with(4321, vlc_player.signal.SIGTERM)
-        self.assertEqual(process.wait.call_count, 2)
-        self.assertIsNone(controller.room_process)
 
     def test_launch_waits_for_first_track_before_setting_resume_position(self):
         first_path = "/mnt/movingparts/torrent/My Movie.mkv"
@@ -1071,7 +910,8 @@ class VlcControllerTests(unittest.TestCase):
 
         with (
             mock.patch.object(controller, "_stop_existing"),
-            mock.patch.object(controller, "_prepare_room"),
+            mock.patch.object(controller, "_wake_display"),
+            mock.patch.object(controller.audio_check, "schedule"),
             mock.patch.object(controller, "_subtitle_index", return_value=None),
             mock.patch.object(
                 controller,
@@ -1215,7 +1055,7 @@ class VideoServiceTests(unittest.TestCase):
             [os.path.realpath(selected.path)],
         )
 
-    def test_sonos_volume_serializes_with_play_room_preparation(self):
+    def test_sonos_volume_serializes_with_player_launch(self):
         launch_entered = threading.Event()
         allow_launch = threading.Event()
         volume_attempted_lock = threading.Event()
@@ -1288,74 +1128,6 @@ class VideoServiceTests(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertEqual(self.sonos.volume_calls, [39])
 
-    def test_resume_controls_wait_for_room_prep_and_preserve_sonos_volume(self):
-        for state, action, volume, expected_action in (
-            ("PAUSED", "toggle", 0, "play"),
-            ("PAUSED_PLAYBACK", "play", 25, "play"),
-            ("STOPPED", "toggle", 63, "play"),
-        ):
-            with self.subTest(state=state, action=action, volume=volume):
-                player = FakePlayer()
-                player.snapshot_value.update(available=True, state=state)
-                sonos = FakeSonosVolume(volume=volume)
-                service = VideoService(
-                    self.library,
-                    self.store,
-                    player,
-                    sonos=sonos,
-                    legacy_positions=str(self.fixture.root / "missing-legacy.txt"),
-                    clock=self.clock,
-                )
-                events = []
-                player.prepare_room_callback = lambda: events.append("prepare")
-                original_action = player.action
-                original_set_volume = sonos.set_volume
-
-                def record_action(name):
-                    events.append(f"action:{name}")
-                    original_action(name)
-
-                def record_volume(value):
-                    events.append(f"volume:{value}")
-                    return original_set_volume(value)
-
-                player.action = record_action
-                sonos.set_volume = record_volume
-
-                result = service.control_player(action)
-
-                self.assertTrue(result["ok"])
-                self.assertEqual(player.prepare_room_calls, [{"wait": True}])
-                self.assertEqual(sonos.volume_calls, [volume])
-                self.assertEqual(player.action_calls, [expected_action])
-                self.assertEqual(
-                    events,
-                    ["prepare", f"volume:{volume}", f"action:{expected_action}"],
-                )
-
-    def test_pause_and_redundant_play_do_not_run_room_prep(self):
-        for state, action in (
-            ("PLAYING", "toggle"),
-            ("PLAYING", "play"),
-            ("PLAYING", "pause"),
-            ("PAUSED", "pause"),
-        ):
-            with self.subTest(state=state, action=action):
-                player = FakePlayer()
-                player.snapshot_value.update(available=True, state=state)
-                service = VideoService(
-                    self.library,
-                    self.store,
-                    player,
-                    sonos=FakeSonosVolume(volume=63),
-                    legacy_positions=str(self.fixture.root / "missing-legacy.txt"),
-                    clock=self.clock,
-                )
-
-                service.control_player(action)
-
-                self.assertEqual(player.prepare_room_calls, [])
-                self.assertEqual(player.action_calls, [action])
 
     def test_offline_or_unknown_player_state_does_not_start_sonos_work(self):
         for available, state in (
@@ -1378,140 +1150,22 @@ class VideoServiceTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "VLC unavailable"):
                     service.control_player("play")
 
-                self.assertEqual(player.prepare_room_calls, [])
                 player.action.assert_called_once_with("play")
 
-    def test_resume_uses_last_known_volume_if_fresh_sonos_read_fails(self):
-        self.player.snapshot_value.update(available=True, state="PAUSED")
-        self.sonos.snapshot_value["volume"] = 58
-        self.assertEqual(self.service.audio_status()["volume"], 58)
-        restored = dict(self.sonos.snapshot_value)
-        self.sonos.snapshot = mock.Mock(
-            side_effect=(RuntimeError("transient discovery failure"), restored)
-        )
-
-        self.service.control_player("play")
-
-        self.assertEqual(self.player.prepare_room_calls, [{"wait": True}])
-        self.assertEqual(self.sonos.volume_calls, [58])
-        self.assertEqual(self.player.action_calls, ["play"])
-
-    def test_user_volume_change_waits_for_resume_and_wins_after_restore(self):
-        prep_entered = threading.Event()
-        allow_prep = threading.Event()
-        volume_attempted_lock = threading.Event()
-        volume_finished = threading.Event()
-        errors = []
-        events = []
-
-        class BlockingPlayer(FakePlayer):
-            def prepare_room(self, *, wait=False):
-                self.prepare_room_calls.append({"wait": bool(wait)})
-                events.append("prepare")
-                prep_entered.set()
-                if not allow_prep.wait(2):
-                    raise RuntimeError("test timed out waiting to release room prep")
-
-            def action(self, name):
-                events.append(f"action:{name}")
-                super().action(name)
-
-        class ObservedRLock:
-            def __init__(self):
-                self.lock = threading.RLock()
-
-            def __enter__(self):
-                if threading.current_thread().name == "resume-volume-test":
-                    volume_attempted_lock.set()
-                self.lock.acquire()
-                return self
-
-            def __exit__(self, exc_type, exc_value, traceback):
-                self.lock.release()
-                return False
-
-        player = BlockingPlayer()
-        player.snapshot_value.update(available=True, state="PAUSED")
-        sonos = FakeSonosVolume(volume=61)
-        original_set_volume = sonos.set_volume
-
-        def record_volume(value):
-            events.append(f"volume:{value}")
-            return original_set_volume(value)
-
-        sonos.set_volume = record_volume
-        service = VideoService(
-            self.library,
-            self.store,
-            player,
-            sonos=sonos,
-            legacy_positions=str(self.fixture.root / "missing-legacy.txt"),
-            clock=self.clock,
-        )
-        service.control_lock = ObservedRLock()
-
-        def resume():
-            try:
-                service.control_player("play")
-            except Exception as exc:
-                errors.append(exc)
-
-        def set_volume():
-            try:
-                service.set_audio_volume(39)
-            except Exception as exc:
-                errors.append(exc)
-            finally:
-                volume_finished.set()
-
-        resume_thread = threading.Thread(
-            target=resume, name="video-resume-test", daemon=True
-        )
-        volume_thread = threading.Thread(
-            target=set_volume, name="resume-volume-test", daemon=True
-        )
-        resume_thread.start()
-        try:
-            self.assertTrue(prep_entered.wait(1), "resume never entered room prep")
-            volume_thread.start()
-            self.assertTrue(
-                volume_attempted_lock.wait(1),
-                "volume change did not attempt to acquire the playback lock",
-            )
-            self.assertFalse(volume_finished.is_set())
-            self.assertEqual(sonos.volume_calls, [])
-        finally:
-            allow_prep.set()
-            resume_thread.join(2)
-            if volume_thread.ident is not None:
-                volume_thread.join(2)
-
-        self.assertFalse(resume_thread.is_alive())
-        self.assertFalse(volume_thread.is_alive())
-        self.assertEqual(errors, [])
-        self.assertEqual(sonos.volume_calls, [61, 39])
-        self.assertEqual(sonos.snapshot_value["volume"], 39)
-        self.assertEqual(
-            events,
-            ["prepare", "volume:61", "action:play", "volume:39"],
-        )
 
     def test_sleep_timer_expiry_waits_for_blocked_resume_then_pauses(self):
-        prep_entered = threading.Event()
-        allow_prep = threading.Event()
+        resume_entered = threading.Event()
+        allow_resume = threading.Event()
         expiry_attempted_lock = threading.Event()
         errors = []
         events = []
 
         class BlockingPlayer(FakePlayer):
-            def prepare_room(self, *, wait=False):
-                self.prepare_room_calls.append({"wait": bool(wait)})
-                events.append("prepare")
-                prep_entered.set()
-                if not allow_prep.wait(2):
-                    raise RuntimeError("test timed out waiting to release room prep")
-
             def action(self, name):
+                if name == "play":
+                    resume_entered.set()
+                    if not allow_resume.wait(2):
+                        raise RuntimeError("test timed out waiting to release VLC resume")
                 events.append(f"action:{name}")
                 super().action(name)
 
@@ -1573,7 +1227,7 @@ class VideoServiceTests(unittest.TestCase):
         )
         resume_thread.start()
         try:
-            self.assertTrue(prep_entered.wait(1), "resume never entered room prep")
+            self.assertTrue(resume_entered.wait(1), "resume never reached VLC")
             expiry_thread.start()
             self.assertTrue(
                 expiry_attempted_lock.wait(1),
@@ -1582,7 +1236,7 @@ class VideoServiceTests(unittest.TestCase):
             self.assertNotIn("pause", player.action_calls)
             self.assertIsNotNone(service.playback.sleep_deadline)
         finally:
-            allow_prep.set()
+            allow_resume.set()
             resume_thread.join(2)
             if expiry_thread.ident is not None:
                 expiry_thread.join(2)
@@ -1594,7 +1248,7 @@ class VideoServiceTests(unittest.TestCase):
         self.assertIsNone(service.playback.sleep_deadline)
         self.assertEqual(
             events,
-            ["prepare", "volume:61", "action:play", "action:pause"],
+            ["action:play", "action:pause"],
         )
 
     def test_manual_progress_override_survives_polling_until_explicit_play(self):
@@ -1920,18 +1574,6 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(cli_style.status_code, 200)
         self.assertEqual(self.player.action_calls, ["toggle", "pause"])
 
-    def test_control_route_fails_closed_when_room_setup_fails(self):
-        self.player.snapshot_value.update(available=True, state="PAUSED")
-        self.player.prepare_room_error = RoomPreparationError(
-            "rear_movie exited 7"
-        )
-
-        response = self.post("control", {"action": "play"})
-
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(self.player.prepare_room_calls, [{"wait": True}])
-        self.assertEqual(self.player.action_calls, [])
-        self.assertEqual(self.sonos.volume_calls, [])
 
     def test_control_action_allowlist_bookmarks_navigation_and_quits_on_stop(self):
         invalid = self.post("control", {"action": "Quit; rm -rf /"})
@@ -2068,36 +1710,6 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 502)
         self.assertEqual(self.player.volume_calls, [])
 
-    def test_sonos_volume_waits_for_rear_movie_room_preparation(self):
-        process = mock.Mock()
-        process.poll.return_value = None
-        player = VlcController()
-        player.room_process = process
-        self.service.player = player
-
-        preparing = self.service.audio_status()
-        blocked = self.post("volume", {"value": "51"})
-        self.assertEqual(
-            preparing,
-            {
-                "available": False,
-                "preparing": True,
-                "device": None,
-                "volume": None,
-                "muted": None,
-                "vlc_fixed": 100,
-                "error": None,
-            },
-        )
-        self.assertEqual(blocked.status_code, 409)
-        self.assertEqual(self.sonos.volume_calls, [])
-
-        process.poll.return_value = 0
-        accepted = self.post("volume", {"value": "51"})
-        self.assertEqual(accepted.status_code, 200)
-        self.assertEqual(accepted.get_json()["volume"], 51)
-        self.assertEqual(self.sonos.volume_calls, [51])
-        self.assertEqual(self.sonos.invalidate_calls, 1)
 
     def test_rate_rejects_nonfinite_and_out_of_range_values(self):
         for value in ("", "nan", "inf", "0.49", "2.01"):

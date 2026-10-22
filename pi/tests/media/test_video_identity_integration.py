@@ -97,9 +97,6 @@ class FakePlayer:
     def action(self, action: str) -> None:
         self.action_calls.append(action)
 
-    def prepare_room(self, *, wait: bool = False) -> None:
-        del wait
-
     def quit(self) -> None:
         self.quit_calls += 1
 

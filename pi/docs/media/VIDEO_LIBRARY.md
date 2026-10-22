@@ -81,22 +81,40 @@ historical catalog state; do not replay an old repair against new observations.
 
 Playback uses the existing Pi GUI and MPRIS session bus. VLC is launched as a
 transient user service, so restarting the web manager does not stop a video in
-progress. A launch wakes the display, requests the existing `rear_movie` Sonos
-optical setup, selects English audio and the preferred non-forced English
-subtitle track, and uses `v4l2-request` hardware decoding. VLC output is pinned
-at 100%; listening level is controlled only on the physical rear Sonos stereo
-zone. The resolver requires both known rear speakers and exactly one visible
-stereo master, so it cannot accidentally change the front/party group.
-The slider stays unavailable while `rear_movie` is still preparing, because
-that setup applies its calibrated starting volume of 47%. Subtitles can be
-disabled for the next launch.
+progress. A launch wakes the display, selects English audio and the preferred
+non-forced English subtitle track, and uses `v4l2-request` hardware decoding.
+VLC output is pinned at 100%; listening level is controlled only on the physical
+rear Sonos stereo zone. The resolver requires both known rear speakers and
+exactly one visible stereo master, so it cannot accidentally change the
+front/party group. Subtitles can be disabled for the next launch.
 
-Every paused-to-playing transition through the manager re-runs `rear_movie`
-and waits for it to finish before VLC continues. The current or last-known rear
-Sonos volume is then restored, so reasserting the optical topology does not
-silently replace a chosen listening level with 47%. The legacy `vlcmd
-PlayPause` and `pp` helpers used by BetterTouchTool route through this same
-control path. If room setup fails or times out, VLC remains paused.
+Launches and paused/stopped-to-playing transitions start VLC without waiting
+for Sonos. About 1.5 seconds later a background job runs `sns.sh
+ensure_rear_movie`: optical autoplay can undo the group only after audio starts
+flowing, so preparing the room before playback is too early. Pending triggers
+are coalesced to the latest resume; checks never overlap, and an intervening
+pause/stop cancels a pending check. A trigger during a running check retains
+one delayed follow-up. Failures are logged to the service journal, never fail
+playback, and time out after 45 seconds (the existing
+`VAN_VIDEO_ROOM_PREPARE_TIMEOUT` override is retained). Volume controls remain
+available during the check.
+
+The check does nothing when vonMid is on TV/optical and playing, the visible
+rear stereo master is grouped under vonMid, vonMid is muted, and the rear
+master is unmuted. Otherwise it restores the movie arrangement while keeping
+the rear master's current volume, including zero. It prints one `ok` or
+`repaired` line, listing what was wrong when it repairs. A missing/split rear
+pair or unreadable state fails without guessing. `rear_movie` still applies
+its manual 47% default; `rear_movie_resume` and the manual BTT button are unchanged.
+
+The legacy `vlcmd Play`, `vlcmd PlayPause`, and `pp` BTT helpers already route
+through the manager's control API and therefore get the same delayed check,
+without a duplicate shell-side job. Their Van TV routes stay on the receiver's
+HTTP API; that receiver owns its checks. Direct legacy `run_vlc` starts instead
+background `~/scripts/rear_movie_check.sh` after launching VLC: it sleeps 1.5
+seconds, coalesces jobs with a per-user `flock`, bounds the command with
+`timeout`, and logs failures with `logger`. `prep_for_media` still stops old
+players and wakes the screen, but no longer runs Sonos before playback.
 
 The web player includes the controls represented in the BetterTouchTool Media
 strip: previous/next, play/pause, stop, ±20 seconds, and ±5 minutes. It also has
@@ -128,57 +146,39 @@ playp "random local clip.mkv" # tracked when possible; never torrent-only
 
 ## Deployment and checks
 
-From this isolated development clone on the Mac:
+From the primary Mac checkout, run the whole offline suite and use the package
+release owner (the old `deploy_video_library.sh` now refuses all deployment and
+rollback operations):
 
 ```bash
-cd /Users/jacobr/dev/scripts_2
-media_test_tmp="${TMPDIR:-/tmp}"
-media_test_tmp="${media_test_tmp%/}"
-media_test_venv="$(mktemp -d "$media_test_tmp/van-video-venv.XXXXXX")"
-python3 -m venv "$media_test_venv"
-"$media_test_venv/bin/python" -m pip install Flask
-PYTHONPATH="$PWD" "$media_test_venv/bin/python" -W error::ResourceWarning \
-  -m unittest \
-    pi.tests.media.test_video_asset_catalog \
-    pi.tests.media.test_video_qbittorrent \
-    pi.tests.media.test_video_identity_integration \
-    pi.tests.media.test_video_history_edges \
-    pi.tests.media.test_video_identity_regressions \
-    pi.tests.media.test_video_library_server
-./pi/deploy_video_library.sh
+cd /Users/jacobr/dev/scripts
+.local/test-venv/bin/python run_tests.py
+python3 pi/deploy_python.py --dry-run --update --service video-library.service
+python3 pi/deploy_python.py --update --service video-library.service
 ssh pi@vanpi.lan 'systemctl --no-pager --full status video-library.service'
 ssh pi@vanpi.lan 'curl -fsS http://localhost:8789/api/status | python3 -m json.tool'
 ```
 
-The temporary test environment can then be removed without touching the
-checkout:
+See [deployment](../deployment.md) for activation prerequisites, release records,
+scoped update behavior and saved-unit rollback. `--service` selects unit actions,
+not release contents: utility code and the shared current link also advance.
+Never write to the frozen `/home/pi/scripts/python-automation/` rollback tree.
 
-```bash
-case "$media_test_venv" in
-  "$media_test_tmp"/van-video-venv.*) find "$media_test_venv" -depth -delete ;;
-  *) echo "refusing unexpected venv path: $media_test_venv" >&2 ;;
-esac
-```
+For the delayed-audio change, compare and back up the live shell files first.
+Ship `pi/sns.sh` to `/home/pi/sns.sh` before the package update: its ensure-only
+branch avoids ALSA writes and execs Python so a timeout cannot orphan a repair.
+After the package update, ship `pi/scripts/rear_movie_check.sh` to
+`/home/pi/scripts/rear_movie_check.sh` and apply only the reviewed media-function
+changes from `pi/.bashrc` to `/home/pi/.bashrc`, preserving unrelated live edits.
+New SSH shells pick up the functions; already-open interactive shells need to
+source `~/.bashrc`. Broad `pi/sync_scripts.sh` owns these same shell files but
+also ships private inputs and unrelated services; it is not needed for this
+scoped update.
 
-See [dashboard testing](../dashboard/DASHBOARD_TESTING.md) for the equivalent
-isolated-vanpi workflow. Both applications import Flask during their tests.
-
-Do not run the repository-wide `pi/sync_scripts.sh` from this secondary clone;
-it also owns ignored secrets and unrelated services. The scoped deployer stages
-only the media service and creates an immutable, checked
-`progress.pre-v2.sqlite3` snapshot before first installation.
-
-Rollback does not restore or delete the live database. It reinstalls the exact
-pre-v2 server, unit, shell controls, web assets, and Sonos helper from the
-pinned baseline; that server ignores all `video_v2_` tables and immediately
-reads the continuously maintained legacy rows. The safer alias builder remains
-installed because its loopback notification is inert against v1, while the old
-copy could delete seeded RAR payloads:
-
-```bash
-cd /Users/jacobr/dev/scripts_2
-./pi/deploy_video_library.sh --rollback
-```
-
-After time on the old server, redeploying v2 imports changed legacy rows and
-treats rows explicitly deleted by the old server as clear-history tombstones.
+After deployment, check a launch and a pause/resume through both the web UI and
+BTT: video should continue immediately and the rear speakers should recover
+after the delayed check without a volume reset. Repeat while the arrangement
+is already correct and check that no regrouping occurs. Inspect failures with
+`journalctl -u video-library.service -n 80 --no-pager`; direct legacy starts log
+under the `rear-movie` tag. These hardware checks are separate from the offline
+fake-SoCo, fake-MPRIS and temporary-shell test suite.

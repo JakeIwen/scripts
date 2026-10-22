@@ -2,7 +2,8 @@ from random import choice
 from soco.discovery import by_name, any_soco, discover
 from soco.exceptions import SoCoUPnPException
 from soco.music_library import MusicLibrary
-from contextlib import suppress
+from contextlib import redirect_stdout, suppress
+from io import StringIO
 from time import monotonic, sleep
 from xml.etree import ElementTree
 import os
@@ -24,7 +25,7 @@ STEREO_PAIR_RETRYABLE_ERRORS = {"402", "1034"}
 def filter_vis_devices():
     return [x for x in all_devices if x.is_visible] 
 
-all_devices = discover(5, True)
+all_devices = discover(5, True) or set()
 vis_devices = filter_vis_devices()
 
 #  abstractions
@@ -71,6 +72,42 @@ def rear_movie(vol=47):
 def rear_movie_resume():
     device = get_rear_stereo_master()
     return audio_source_device(device, 'optical', int(device.volume))
+def ensure_rear_movie():
+    """Leave a healthy optical group alone; repair without resetting rear volume."""
+    mid = next((device for device in all_devices if device.player_name == 'vonMid'), None)
+    if mid is None:
+        raise RuntimeError('rear movie: vonMid was not discovered')
+    # A caller may reuse this module; do not trust an earlier topology snapshot.
+    mid.zone_group_state.clear_cache()
+    rear = get_rear_stereo_master(all_devices)
+    problems = rear_movie_problems(mid, rear)
+    if not problems:
+        print('rear movie: ok')
+        return rear
+    volume = int(rear.volume)
+    # The manual task's progress output is noisy; the check has one result line.
+    with redirect_stdout(StringIO()):
+        audio_source_device(rear, 'optical', volume)
+    print('rear movie: repaired (' + '; '.join(problems) + ')')
+    return rear
+
+
+def rear_movie_problems(mid, rear):
+    problems = []
+    if not mid.is_playing_tv:
+        problems.append('vonMid is not on TV/optical')
+    if mid.get_current_transport_info()['current_transport_state'] != 'PLAYING':
+        problems.append('vonMid is not playing')
+    group = rear.group
+    if group is None or group.coordinator.uid != mid.uid:
+        problems.append('rear master is not grouped with vonMid')
+    if not mid.mute:
+        problems.append('vonMid is unmuted')
+    if rear.mute:
+        problems.append('rear master is muted')
+    return problems
+
+
 def rear_normal():
     return make_stereo_pair_by_uid(
         REAR_PHYSICAL_LEFT_UID,
@@ -237,9 +274,15 @@ def wait_for_stereo_pair(left_uid, right_uid, timeout):
         "Timed out waiting for Sonos stereo pair: " + desired_map
     )
 
-def get_rear_stereo_master():
+def get_rear_stereo_master(devices=None):
     rear_uids = (REAR_PHYSICAL_LEFT_UID, REAR_PHYSICAL_RIGHT_UID)
-    speakers = wait_for_speakers(rear_uids, STEREO_PAIR_TIMEOUT)
+    speakers = (
+        wait_for_speakers(rear_uids, STEREO_PAIR_TIMEOUT)
+        if devices is None
+        else {device.uid: device for device in devices if device.uid in rear_uids}
+    )
+    if len(speakers) != 2:
+        raise RuntimeError('rear movie: both physical rear speakers were not discovered')
     visible = [speaker for speaker in speakers.values() if speaker.is_visible]
     if len(visible) != 1:
         raise RuntimeError(

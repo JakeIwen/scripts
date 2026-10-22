@@ -346,15 +346,15 @@ function updatePlayer(payload) {
   $("volume").disabled = !audio.available;
   $("rate").disabled = !player.available || !player.can_control;
   $("fullscreen").disabled = !player.available || !player.can_fullscreen;
-  $("volume-source").textContent = audio.preparing ? "Prep…" : (audio.muted ? "Muted" : "Sonos");
+  $("volume-source").textContent = audio.muted ? "Muted" : "Sonos";
   $("volume-source").title = audio.available
     ? (audio.device || "Rear Sonos") + " · VLC fixed at " + audio.vlc_fixed + "%"
-    : (audio.error || (audio.preparing ? "Preparing rear movie audio" : "Rear Sonos unavailable"));
+    : (audio.error || "Rear Sonos unavailable");
   if (document.activeElement !== $("volume") && Number.isFinite(audio.volume)) {
     $("volume").value = Math.round(audio.volume);
     $("volume-value").textContent = Math.round(audio.volume) + "%";
   } else if (!audio.available && document.activeElement !== $("volume")) {
-    $("volume-value").textContent = audio.preparing ? "…" : "—";
+    $("volume-value").textContent = "—";
   }
   if (document.activeElement !== $("rate") && Number.isFinite(player.rate)) {
     const option = Array.from($("rate").options).find((candidate) =>

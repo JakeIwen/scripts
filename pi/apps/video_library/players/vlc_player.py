@@ -6,7 +6,6 @@ import importlib
 import json
 import math
 import os
-import signal
 import subprocess
 import threading
 import time
@@ -24,16 +23,16 @@ from ..config import (
     MPRIS_ROOT,
     PKILL,
     PLAYER_UNIT,
-    ROOM_PREPARE_TIMEOUT,
     RUNTIME_DIR,
     SESSION_BUS,
-    SNS,
     SYSTEMCTL,
     SYSTEMD_RUN,
     VLC,
     VLC_FIXED_VOLUME,
     XSET,
 )
+
+from .sonos_check import RearMovieCheck
 
 
 def native(value: Any) -> Any:
@@ -52,28 +51,22 @@ def native(value: Any) -> Any:
             return str(value)
 
 
-class RoomPreparationError(RuntimeError):
-    """Raised when rear_movie cannot be completed before playback resumes."""
-
-
 class VlcController:
     def __init__(
         self,
         *,
         dbus_module: Any = None,
         run: Callable[..., Any] = subprocess.run,
-        popen: Callable[..., Any] = subprocess.Popen,
-        killpg: Callable[[int, int], None] = os.killpg,
+        audio_check: RearMovieCheck | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ):
         self._dbus_module = dbus_module
         self.run = run
-        self.popen = popen
-        self.killpg = killpg
         self.sleep = sleep
         self.lock = threading.RLock()
-        self.room_lock = threading.RLock()
-        self.room_process: Any = None
+        self.audio_check = audio_check or RearMovieCheck(
+            is_playing=lambda: self.snapshot().get("state") == "PLAYING", run=run,
+        )
 
     def _dbus(self):
         if self._dbus_module is None:
@@ -150,8 +143,17 @@ class VlcController:
         if name not in methods:
             raise ValueError(f"unknown player action '{name}'")
         with self.lock:
-            _module, _props, player, _root = self._interfaces()
+            _module, props, player, _root = self._interfaces()
+            resumes = False
+            if name in ("play", "toggle"):
+                state = str(props.Get(MPRIS_PLAYER, "PlaybackStatus")).upper()
+                resumes = state in ("PAUSED", "PAUSED_PLAYBACK", "STOPPED")
             getattr(player, methods[name])()
+            if resumes:
+                self.audio_check.schedule()
+                self._wake_display()
+            elif name in ("pause", "stop", "toggle"):
+                self.audio_check.cancel()
 
     def seek(self, seconds: float) -> None:
         with self.lock:
@@ -203,6 +205,7 @@ class VlcController:
         return value
 
     def quit(self) -> None:
+        self.audio_check.cancel()
         try:
             _module, _props, _player, root = self._interfaces()
             root.Quit()
@@ -227,100 +230,8 @@ class VlcController:
         self._command([SYSTEMCTL, "--user", "stop", PLAYER_UNIT], timeout=5)
         self._command([SYSTEMCTL, "--user", "reset-failed", PLAYER_UNIT], timeout=5)
 
-    def _prepare_room(self, task: str = "rear_movie") -> Any:
-        if task not in ("rear_movie", "rear_movie_resume"):
-            raise ValueError("unknown rear-room preparation task")
+    def _wake_display(self) -> None:
         self._command([XSET, "-display", DISPLAY, "dpms", "force", "on"], timeout=5)
-        with self.room_lock:
-            process = self.room_process
-            if process is not None:
-                try:
-                    if process.poll() is None:
-                        return process
-                except Exception:
-                    pass
-                self.room_process = None
-            if os.path.isfile(SNS) and os.access(SNS, os.R_OK):
-                self.room_process = self.popen(
-                    ["/bin/bash", SNS, task],
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    start_new_session=True,
-                )
-            return self.room_process
-
-    def _terminate_room_process(self, process: Any) -> None:
-        try:
-            pid = int(process.pid)
-        except (AttributeError, TypeError, ValueError):
-            pid = None
-        if pid is not None:
-            try:
-                self.killpg(pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-        else:
-            try:
-                process.terminate()
-            except Exception:
-                pass
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            if pid is not None:
-                try:
-                    self.killpg(pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-            else:
-                try:
-                    process.kill()
-                except Exception:
-                    pass
-            try:
-                process.wait(timeout=5)
-            except Exception:
-                pass
-        except Exception:
-            pass
-        with self.room_lock:
-            if self.room_process is process:
-                self.room_process = None
-
-    def prepare_room(self, *, wait: bool = False) -> None:
-        process = self._prepare_room("rear_movie_resume")
-        if process is None:
-            raise RoomPreparationError("rear_movie setup script is unavailable")
-        if not wait:
-            return
-        try:
-            returncode = process.wait(timeout=ROOM_PREPARE_TIMEOUT)
-        except subprocess.TimeoutExpired as exc:
-            self._terminate_room_process(process)
-            raise RoomPreparationError(
-                f"rear_movie did not finish within {ROOM_PREPARE_TIMEOUT:g} seconds"
-            ) from exc
-        with self.room_lock:
-            if self.room_process is process:
-                self.room_process = None
-        if returncode:
-            raise RoomPreparationError(
-                f"rear_movie exited with status {returncode}"
-            )
-
-    def room_preparing(self) -> bool:
-        with self.room_lock:
-            process = self.room_process
-            if process is None:
-                return False
-            try:
-                if process.poll() is None:
-                    return True
-            except Exception:
-                pass
-            self.room_process = None
-            return False
 
     def _subtitle_index(self, path: str) -> int | None:
         media_path = os.path.realpath(path)
@@ -339,6 +250,24 @@ class VlcController:
             return None
         return None
 
+    def _wait_for_track(self, expected_path: str, deadline: float) -> dict[str, Any]:
+        snapshot: dict[str, Any] = {}
+        while time.monotonic() < deadline:
+            snapshot = self.snapshot()
+            current_path = snapshot.get("path")
+            requested_track_ready = bool(
+                snapshot.get("available")
+                and snapshot.get("track_id") is not None
+                and current_path
+                and os.path.realpath(str(current_path)) == expected_path
+            )
+            if requested_track_ready:
+                return snapshot
+            self.sleep(0.25)
+        if not snapshot.get("available"):
+            raise RuntimeError("VLC did not appear on the session bus")
+        raise RuntimeError("VLC did not load the requested video")
+
     def launch(self, paths: list[str], *, position: float = 0, subtitles: str = "auto") -> dict[str, Any]:
         if not paths:
             raise ValueError("no media paths supplied")
@@ -346,7 +275,7 @@ class VlcController:
             raise ValueError("subtitles must be auto or off")
         with self.lock:
             self._stop_existing()
-            self._prepare_room()
+            self._wake_display()
             command = [
                 VLC,
                 "--control=dbus",
@@ -384,23 +313,8 @@ class VlcController:
 
             deadline = time.monotonic() + 12
             expected_path = os.path.realpath(paths[0])
-            snapshot: dict[str, Any] = {}
-            while time.monotonic() < deadline:
-                snapshot = self.snapshot()
-                current_path = snapshot.get("path")
-                requested_track_ready = bool(
-                    snapshot.get("available")
-                    and snapshot.get("track_id") is not None
-                    and current_path
-                    and os.path.realpath(str(current_path)) == expected_path
-                )
-                if requested_track_ready:
-                    break
-                self.sleep(0.25)
-            else:
-                if not snapshot.get("available"):
-                    raise RuntimeError("VLC did not appear on the session bus")
-                raise RuntimeError("VLC did not load the requested video")
+            snapshot = self._wait_for_track(expected_path, deadline)
+            self.audio_check.schedule()
 
             self.set_volume(VLC_FIXED_VOLUME)
             snapshot["volume"] = VLC_FIXED_VOLUME

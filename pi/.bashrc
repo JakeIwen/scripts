@@ -639,7 +639,6 @@ increment_global() {
 prep_for_media() {
   kill_media > /dev/null
   wake_display
-  bash ~/sns.sh rear_movie &
 }
 
 run_vlc() {
@@ -682,6 +681,8 @@ run_vlc() {
   fi
 
   
+  bash "$HOME/scripts/rear_movie_check.sh" </dev/null >/dev/null 2>&1 &
+
   vlcnice -12 # give process priority to VLC
   vlc_jump_to_position "$pth"
 }
@@ -794,6 +795,8 @@ vlcmd() {
     *) video_action="" ;;
   esac
   if [[ -n "$video_action" ]]; then
+    # The manager schedules the delayed Sonos check after Play/PlayPause resumes
+    # VLC (including pp). Do not race it with a second shell-side repair.
     curl -sS -X POST "${VIDEOAPI:-http://localhost:8789/api}/control" \
       --data-urlencode "action=$video_action"
     return $?

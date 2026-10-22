@@ -50,10 +50,11 @@ REAR_SONOS_UIDS = tuple(
     if value.strip()
 )
 SONOS_DISCOVERY_TTL = float(os.environ.get("VAN_VIDEO_SONOS_DISCOVERY_TTL", "10"))
-ROOM_PREPARE_TIMEOUT = float(
+SONOS_CHECK_DELAY = 1.5
+SONOS_CHECK_TIMEOUT = float(
     os.environ.get("VAN_VIDEO_ROOM_PREPARE_TIMEOUT", "45")
 )
-if not math.isfinite(ROOM_PREPARE_TIMEOUT) or ROOM_PREPARE_TIMEOUT <= 0:
+if not math.isfinite(SONOS_CHECK_TIMEOUT) or SONOS_CHECK_TIMEOUT <= 0:
     raise ValueError("VAN_VIDEO_ROOM_PREPARE_TIMEOUT must be positive")
 
 DISPLAY = os.environ.get("VAN_VIDEO_DISPLAY", ":0")

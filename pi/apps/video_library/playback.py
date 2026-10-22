@@ -12,8 +12,6 @@ from .catalog import CatalogError
 from .config import RESUME_REWIND, VLC_FIXED_VOLUME, WATCHED_FRACTION
 from .media_models import MediaItem, seconds_text
 from .naming import clean_name
-from .players.sonos_volume import AudioPreparingError
-from .players.vlc_player import RoomPreparationError
 
 
 @dataclass
@@ -24,8 +22,6 @@ class PlaybackState:
     last_saved_duration: float | None = None
     last_saved_at: float = 0.0
     last_saved_state: str | None = None
-    audio_was_preparing: bool = False
-    last_audio_volume: int | None = None
     active_session_id: str | None = None
     active_asset_id: str | None = None
     active_work_id: str | None = None
@@ -404,41 +400,19 @@ class PlaybackMixin:
             "error": self.last_error,
         }
 
-    def room_preparing(self) -> bool:
-        check = getattr(self.player, "room_preparing", None)
-        return bool(check and check())
-
     def audio_status(self, *, vlc_volume_error: str | None = None) -> dict[str, Any]:
         fixed_percent = round(VLC_FIXED_VOLUME * 100)
-        if self.room_preparing():
-            self.playback.audio_was_preparing = True
-            return {
-                "available": False,
-                "preparing": True,
-                "device": None,
-                "volume": None,
-                "muted": None,
-                "vlc_fixed": fixed_percent,
-                "error": vlc_volume_error,
-            }
         if self.sonos is None:
             return {
                 "available": False,
-                "preparing": False,
                 "device": None,
                 "volume": None,
                 "muted": None,
                 "vlc_fixed": fixed_percent,
                 "error": vlc_volume_error or "Sonos volume control is unavailable",
             }
-        if self.playback.audio_was_preparing:
-            invalidate = getattr(self.sonos, "invalidate", None)
-            if invalidate is not None:
-                invalidate()
-            self.playback.audio_was_preparing = False
         try:
             value = dict(self.sonos.snapshot())
-            self._remember_audio_volume(value)
             value["vlc_fixed"] = fixed_percent
             if vlc_volume_error:
                 existing_error = value.get("error")
@@ -449,59 +423,12 @@ class PlaybackMixin:
         except Exception as exc:
             return {
                 "available": False,
-                "preparing": False,
                 "device": None,
                 "volume": None,
                 "muted": None,
                 "vlc_fixed": fixed_percent,
                 "error": vlc_volume_error or str(exc),
             }
-
-    def _remember_audio_volume(self, audio: dict[str, Any]) -> int | None:
-        if audio.get("available"):
-            try:
-                volume = int(audio.get("volume"))
-            except (TypeError, ValueError):
-                volume = -1
-            if 0 <= volume <= 100:
-                self.playback.last_audio_volume = volume
-        return self.playback.last_audio_volume
-
-    def _prepare_audio_for_resume(self) -> None:
-        desired_volume = self.playback.last_audio_volume
-        if self.sonos is not None:
-            try:
-                desired_volume = self._remember_audio_volume(
-                    dict(self.sonos.snapshot())
-                )
-            except Exception:
-                pass
-
-        prepare = getattr(self.player, "prepare_room", None)
-        if not callable(prepare):
-            raise RoomPreparationError("rear_movie preparation is unavailable")
-
-        self.playback.audio_was_preparing = True
-        prepare(wait=True)
-
-        if self.sonos is not None:
-            invalidate = getattr(self.sonos, "invalidate", None)
-            if invalidate is not None:
-                invalidate()
-            try:
-                if desired_volume is not None:
-                    self.sonos.set_volume(desired_volume)
-                audio = dict(self.sonos.snapshot())
-            except Exception as exc:
-                raise RoomPreparationError(
-                    f"could not restore rear Sonos volume: {exc}"
-                ) from exc
-            if not audio.get("available"):
-                raise RoomPreparationError(
-                    audio.get("error") or "rear Sonos validation failed"
-                )
-            self._remember_audio_volume(audio)
-        self.playback.audio_was_preparing = False
 
     def control_player(self, action: str) -> dict[str, Any]:
         if action not in ("toggle", "play", "pause", "next", "previous", "stop"):
@@ -516,14 +443,6 @@ class PlaybackMixin:
             )
             if action in ("next", "previous", "stop"):
                 self.bookmark()
-            if resumes_playback:
-                try:
-                    self._prepare_audio_for_resume()
-                except Exception as exc:
-                    self.last_error = str(exc)
-                    if isinstance(exc, RoomPreparationError):
-                        raise
-                    raise RoomPreparationError(str(exc)) from exc
             self.player.action("play" if resumes_playback else action)
             if action == "stop":
                 self.player.quit()
@@ -534,7 +453,7 @@ class PlaybackMixin:
             return {
                 "ok": True,
                 "message": (
-                    "rear movie audio ready · playing"
+                    "playing"
                     if resumes_playback
                     else action.replace("toggle", "play / pause")
                 ),
@@ -542,22 +461,13 @@ class PlaybackMixin:
 
     def set_audio_volume(self, volume: int) -> dict[str, Any]:
         with self.control_lock:
-            if self.room_preparing():
-                self.playback.audio_was_preparing = True
-                raise AudioPreparingError("rear movie audio is still preparing")
             if self.sonos is None:
                 raise RuntimeError("Sonos volume control is unavailable")
-            if self.playback.audio_was_preparing:
-                invalidate = getattr(self.sonos, "invalidate", None)
-                if invalidate is not None:
-                    invalidate()
-                self.playback.audio_was_preparing = False
             actual = int(self.sonos.set_volume(volume))
             value = dict(self.sonos.snapshot())
             if not value.get("available"):
                 raise RuntimeError(value.get("error") or "rear Sonos volume is unavailable")
             value["volume"] = actual
-            self.playback.last_audio_volume = actual
             return value
 
     def bookmark(self) -> None:
@@ -595,7 +505,6 @@ class PlaybackMixin:
                 invalidate = getattr(self.sonos, "invalidate", None)
                 if invalidate is not None:
                     invalidate()
-                self.playback.audio_was_preparing = True
             asset_id, work_id, complete = self._resolve_asset_for_path(
                 paths[0], item=item
             )
@@ -681,7 +590,6 @@ class PlaybackMixin:
                 invalidate = getattr(self.sonos, "invalidate", None)
                 if invalidate is not None:
                     invalidate()
-                self.playback.audio_was_preparing = True
             snapshot = self.player.launch(
                 [real_path], position=position, subtitles=subtitles
             )
