@@ -94,12 +94,19 @@ is permanent. Do not delete the private state directory to update the app.
   and an `Origin` that is absent, `null`, an extension's, or the server's own:
   web pages can't forge those, and the JSON type forces a CORS preflight the
   server never answers.
+  `{"action":"audio_delay","delay":-0.12}` sets an absolute A/V offset;
+  use exactly one of `delay` or relative `offset`, both finite seconds.
+  Values clamp to −1…+1 second and round to 0.01 second; positive delays audio.
+  Changes apply live, persist while idle and survive restarts. `/api/status`
+  always includes `audioDelay` in seconds. The status page's Sound earlier/later
+  buttons adjust it by 50 ms; Reset restores 0 ms.
   Health contains no pairing code, token or screen identity.
 - `src/config.mjs` is the single definition of ports, LAN address, paths,
   playback options and SponsorBlock categories.
 - Private state: `/home/pi/.local/state/youtube-cast/`, mode 700; JSON files 600.
   `app.pid.json`, `mdxContext.cl.json` (YouTube), `mdxContext.m.json` (Music) belong to the
-  upstream `DataStore` API. `settings.json` preserves receiver volume/mute.
+  upstream `DataStore` API. `settings.json` preserves receiver volume/mute and
+  `audioDelay` (seconds, default 0) together.
   Pairings are held by YouTube against the persisted screen ID, not a separate
   local list of phone credentials. Corrupt local identity files fail closed.
 - Runtime mpv sockets and cache: `/run/youtube-cast/` (systemd-owned lifecycle).

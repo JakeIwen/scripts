@@ -31,8 +31,9 @@ generated BTT definitions and configuration backups remain in `macbook/build/`.
 
 `vantv <youtube-url>` casts to the Pi's ad-free receiver over the LAN; alone it
 casts the front Chrome/Safari YouTube tab, then a clipboard link.
-`vantv pause|resume|stop|status` controls playback. In Firefox, the extension
-in [`firefox/van-tv/`](firefox/van-tv/README.md) adds a Van TV button to the
+`vantv pause|resume|stop|status` controls playback, and `vantv delay [+ms|-ms|ms]`
+shows, nudges or sets the saved lip-sync offset (`-50` when voices trail lips).
+In Firefox, the extension in [`firefox/van-tv/`](firefox/van-tv/README.md) adds a Van TV button to the
 player, a context-menu entry on video links, a toolbar popup and Alt+Shift+V;
 build it with `zsh macbook/firefox/van-tv/build.zsh` and install the XPI as its
 README describes. Receiver details:

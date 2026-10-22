@@ -6,6 +6,9 @@ main { max-width: 620px; margin: auto; overflow-wrap: anywhere; }
 h1 { font-size: 1.6rem; margin: 0 0 24px; } h2 { font-size: 1.15rem; margin-top: 32px; }
 dl { display: grid; grid-template-columns: minmax(90px, 1fr) 2fr; gap: 12px; }
 dt { color: var(--muted); } dd { margin: 0; }
+.audio-delay-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.audio-delay-row > span { color: var(--muted); }
+#audio-delay { color: var(--foreground); font-variant-numeric: tabular-nums; }
 #code { font: 600 clamp(20px,6vw,32px)/1.5 monospace; letter-spacing: .04em; }
 button { font: inherit; padding: 10px 16px; min-height: 44px; border: 1px solid var(--border); border-radius: 6px; color: var(--foreground); background: var(--control); cursor: pointer; }
 button:disabled { opacity: .6; cursor: wait; } p { color: var(--muted); }

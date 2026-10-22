@@ -4,6 +4,11 @@
 <body><main><h1>Van TV</h1><dl><dt>Receiver</dt><dd id="receiver">Connecting…</dd>
 <dt>Player</dt><dd id="player">—</dd><dt>Video</dt><dd id="video">None</dd>
 <dt>Position</dt><dd id="position">—</dd><dt>Connected senders</dt><dd id="senders">0</dd></dl>
+<div class="audio-delay-row" role="group" aria-label="A/V offset">
+<span>A/V offset: <output id="audio-delay">0 ms</output></span>
+<button type="button" data-action="audio_delay" data-offset="-0.05" title="If voices come after lips move, press Sound earlier (−50 ms).">Sound earlier</button>
+<button type="button" data-action="audio_delay" data-offset="0.05" title="If voices come before lips move, press Sound later (+50 ms).">Sound later</button>
+<button type="button" data-action="audio_delay" data-delay="0" title="Reset the A/V offset to 0 ms.">Reset</button></div>
 <p><button type="button" data-action="pause">Pause</button> <button type="button" data-action="resume">Resume</button>
 <button type="button" data-action="stop">Stop</button></p>
 <h2>Link with TV code</h2><p id="code" aria-live="polite">Requesting code…</p>

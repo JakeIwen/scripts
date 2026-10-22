@@ -9,12 +9,30 @@ VAN_TV=${VAN_TV:-http://vanpi.lan:8795}
 usage() {
   print -u2 'usage: vantv [youtube-url]   cast a link (default: front Chrome/Safari YouTube tab, then clipboard)'
   print -u2 '       vantv pause|resume|stop|status'
+  print -u2 '       vantv delay [+ms|-ms|ms]   show, nudge or set the audio offset (+ plays sound later)'
   exit 2
 }
 
 post() {
   curl -fsS -m 10 -X POST -H 'Content-Type: application/json' -d "$2" "$VAN_TV/api/$1"
   print
+}
+
+# Prints the receiver's saved audio offset in ms, e.g. "+120 ms".
+show_delay() {
+  local state
+  state=$(curl -fsS -m 10 "$VAN_TV/api/status")
+  [[ $state =~ '"audioDelay": *(-?[0-9.eE+-]+)' ]] || { print -u2 'Van TV did not report an audio offset.'; exit 1 }
+  printf 'Audio offset: %+.0f ms\n' $(( $match[1] * 1000 ))
+}
+
+# A signed value nudges the offset; an unsigned one sets it.
+set_delay() {
+  [[ $1 =~ '^([+-]?)([0-9]+)$' ]] || usage
+  local seconds=$(printf '%.3f' $(( $1 / 1000.0 )))
+  if [[ -n $match[1] ]]; then post control "{\"action\":\"audio_delay\",\"offset\":$seconds}" >/dev/null
+  else post control "{\"action\":\"audio_delay\",\"delay\":$seconds}" >/dev/null
+  fi
 }
 
 is_youtube() { [[ $1 =~ '^https://(((www|m|music)\.)?youtube\.com|youtu\.be)/' ]] }
@@ -52,6 +70,7 @@ case ${1:-} in
   -h|--help) usage ;;
   pause|resume|stop) post control "{\"action\":\"$1\"}"; exit ;;
   status) curl -fsS -m 10 "$VAN_TV/api/status"; print; exit ;;
+  delay) [[ -n ${2:-} ]] && set_delay $2; show_delay; exit ;;
 esac
 url=${1:-$(front_tab_url)}
 is_youtube "$url" || usage

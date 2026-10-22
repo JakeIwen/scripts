@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { get } from 'node:http';
 import { createStatusServer } from '../src/status-server.mjs';
+import { createPlayerControls } from '../src/player-controls.mjs';
+import { playerFixture, VIDEO } from './player-fixture.mjs';
 
 test('Cast route accepts extension and header-less senders, validates ids, reports readiness', async t => {
   const casts = [];
@@ -59,6 +61,50 @@ test('Control route runs only known actions from the same origin', async t => {
     assert.equal((await post(bad)).status, 400, bad);
   }
   assert.deepEqual(actions, [['pause', {}], ['seek', { offset: -20 }], ['seek', { position: 95.5 }]]);
+});
+
+test('Audio delay HTTP controls validate finite seconds and expose the current setting in status', async t => {
+  const { player, instances } = playerFixture();
+  t.after(() => player.endSession());
+  const controls = createPlayerControls(player);
+  const server = await createStatusServer({ snapshot: () => ({ ok: true, audioDelay: player.audioDelay }),
+    pairing: { snapshot: () => ({}) }, control: (action, fields) => controls[action](fields),
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const post = body => fetch(`${base}/api/control`, { method: 'POST',
+    headers: { 'Content-Type': 'application/json' }, body });
+  const status = async () => (await fetch(`${base}/api/status`)).json();
+  assert.equal((await status()).audioDelay, 0);
+  for (const [fields, expected] of [[{ delay: 0.126 }, 0.13], [{ offset: -0.05 }, 0.08],
+    [{ delay: 3 }, 1], [{ offset: -5 }, -1], [{ delay: 0 }, 0]]) {
+    const response = await post(JSON.stringify({ action: 'audio_delay', ...fields }));
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { action: 'audio_delay', done: true });
+    assert.equal((await status()).audioDelay, expected);
+  }
+  for (const fields of [{}, { delay: 0, offset: 0 }, { delay: null }, { offset: null },
+    { delay: '0.12' }, { offset: '0.05' }, { delay: false }, { offset: [] }, { delay: {} },
+    { position: 0 }, { delay: 0, offset: null }]) {
+    const response = await post(JSON.stringify({ action: 'audio_delay', ...fields }));
+    assert.equal(response.status, 400, JSON.stringify(fields));
+    assert.match((await response.json()).error, /exactly one.*delay or offset.*finite/);
+  }
+  for (const field of ['delay', 'offset']) {
+    const response = await post(`{"action":"audio_delay","${field}":1e999}`);
+    assert.equal(response.status, 400);
+  }
+  assert.equal((await post('{"action":"audio_delay","delay":NaN}')).status, 400);
+  assert.equal((await post(JSON.stringify({ action: 'audio_delay', delay: 0, padding: 'x'.repeat(256) }))).status, 413);
+  assert.equal((await status()).audioDelay, 0);
+  assert.equal(instances.length, 0);
+  await player.play(VIDEO);
+  assert.equal((await post('{"action":"audio_delay","offset":0.05}')).status, 200);
+  assert.equal((await status()).audioDelay, 0.05);
+  assert.equal(instances[0].properties.get('audio-delay'), 0.05);
+  assert.equal((await (await fetch(`${base}/health`)).json()).audioDelay, 0.05);
 });
 
 test('Status serves code locally, keeps health code-free and rejects cross-origin refresh', async t => {

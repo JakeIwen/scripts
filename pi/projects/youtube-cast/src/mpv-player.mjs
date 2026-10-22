@@ -7,12 +7,18 @@ import { isVideoId } from './video-id.mjs';
 
 export const PlayerStatus = Constants.PLAYER_STATUSES;
 
+function normalizeAudioDelay(delay) {
+  if (!Number.isFinite(delay)) return 0;
+  return Math.round(Math.max(-1, Math.min(1, delay)) * 100) / 100 || 0;
+}
+
 export class MpvPlayer extends Player {
   constructor({ createMpv = () => new MpvProcess(), room = new RoomPreparation(),
     handoff = stopVideoLibrary, segments = fetchSegments, store, log = console } = {}) {
     super();
     Object.assign(this, { createMpv, room, handoff, segments, store, log });
     this.volume = { level: 70, muted: false };
+    this.audioDelay = 0;
     this.position = 0;
     this.duration = 0;
     this.video = null;
@@ -22,6 +28,7 @@ export class MpvPlayer extends Player {
 
   async initialize() {
     const settings = await this.store?.get('settings');
+    this.audioDelay = normalizeAudioDelay(settings?.audioDelay);
     if (Number.isFinite(settings?.volume?.level) && typeof settings.volume.muted === 'boolean') {
       this.volume = { level: Math.min(100, Math.max(0, settings.volume.level)), muted: settings.volume.muted };
     }
@@ -76,6 +83,7 @@ export class MpvPlayer extends Player {
         await mpv.command(['observe_property', index + 1, property]);
       }
       await this.applyVolume();
+      await mpv.command(['set_property', 'audio-delay', this.audioDelay]);
       await mpv.load(video.id, position, signal);
       signal.throwIfAborted();
       return true;
@@ -129,9 +137,23 @@ export class MpvPlayer extends Player {
     this.volume = { level: Math.max(0, Math.min(100, volume.level)), muted: volume.muted };
     try {
       if (this.mpv) await this.applyVolume();
-      await this.store?.set('settings', { volume: this.volume });
+      await this.saveSettings();
       return true;
     } catch { this.log.warn('Volume update failed'); return false; }
+  }
+
+  async saveSettings() {
+    await this.store?.set('settings', { volume: this.volume, audioDelay: this.audioDelay });
+  }
+
+  async setAudioDelay(delay) {
+    if (!Number.isFinite(delay)) return false;
+    this.audioDelay = normalizeAudioDelay(delay);
+    try {
+      await this.saveSettings();
+      if (this.mpv) await this.mpv.command(['set_property', 'audio-delay', this.audioDelay]);
+      return true;
+    } catch { this.log.warn('Audio delay update failed'); return false; }
   }
 
   async doGetVolume() { return { ...this.volume }; }

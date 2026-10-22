@@ -16,7 +16,7 @@ export async function runReceiver({ receiver, player, store, log = console }) {
     ok: !stopping && receiver.status === Constants.STATUSES.RUNNING,
     name: config.name, pid: process.pid, instance, receiver: receiver.status,
     player: Object.keys(PlayerStatus).find(key => PlayerStatus[key] === player.status) || 'UNKNOWN',
-    video: player.video, position: player.position, duration: player.duration,
+    video: player.video, position: player.position, duration: player.duration, audioDelay: player.audioDelay,
     senders: receiver.getConnectedSenders().length,
   });
   const stop = (code = 0) => {

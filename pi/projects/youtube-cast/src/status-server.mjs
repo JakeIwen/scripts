@@ -2,13 +2,17 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { config } from './config.mjs';
 import { isVideoId } from './video-id.mjs';
-import { CONTROL_ACTIONS, seekArguments } from './player-controls.mjs';
+import { CONTROL_ACTIONS, seekArguments, audioDelayArguments } from './player-controls.mjs';
 
 const MAX_POST_BODY = 256;
 // Web pages can't forge these origins, and a JSON body already forces a CORS
 // preflight this server never answers; the status page itself is same-origin.
 const EXTENSION_ORIGINS = ['moz-extension://', 'chrome-extension://'];
 const POST_ROUTES = ['/api/pairing', '/api/control', '/api/cast'];
+const controlArguments = {
+  seek: { parse: seekArguments, error: 'Seek needs one of position (>= 0) or offset' },
+  audio_delay: { parse: audioDelayArguments, error: 'Audio delay needs exactly one of delay or offset (finite seconds)' },
+};
 
 const assets = {
   '/': ['index.html', 'text/html; charset=utf-8'],
@@ -78,8 +82,9 @@ async function handleControl(request, { control }) {
     const body = await readJsonBody(request);
     const { action } = body;
     if (!CONTROL_ACTIONS.includes(action)) return [400, { error: 'Unknown action' }];
-    const fields = action === 'seek' ? seekArguments(body) : {};
-    if (!fields) return [400, { error: 'Seek needs one of position (>= 0) or offset' }];
+    const argumentsSpec = controlArguments[action];
+    const fields = argumentsSpec ? argumentsSpec.parse(body) : {};
+    if (!fields) return [400, { error: argumentsSpec.error }];
     return [200, { action, done: Boolean(await control(action, fields)) }];
   } catch (error) {
     return error instanceof RangeError ? [413, { error: error.message }] : [400, { error: 'Invalid control request' }];

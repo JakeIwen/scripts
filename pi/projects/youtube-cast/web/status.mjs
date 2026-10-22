@@ -11,6 +11,8 @@ async function update() {
     element('video').textContent = data.video?.title || 'None';
     element('position').textContent = `${Math.floor(data.position)} / ${Math.floor(data.duration)} seconds`;
     element('senders').textContent = String(data.senders);
+    const delayMs = Math.round(data.audioDelay * 1000);
+    element('audio-delay').textContent = `${delayMs > 0 ? '+' : ''}${delayMs} ms`;
     element('code').textContent = data.pairing.code || (data.pairing.error ? 'Unavailable' : 'Requesting code…');
     element('message').textContent = data.pairing.error || '';
     refresh.disabled = data.pairing.requesting;
@@ -33,11 +35,18 @@ refresh.addEventListener('click', async () => {
 for (const button of document.querySelectorAll('button[data-action]')) {
   button.addEventListener('click', async () => {
     try {
+      const body = { action: button.dataset.action };
+      for (const field of ['delay', 'offset']) {
+        if (button.dataset[field] !== undefined) body[field] = Number(button.dataset[field]);
+      }
       const response = await fetch('/api/control', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: button.dataset.action }) });
+        body: JSON.stringify(body) });
       if (!response.ok) throw new Error('Control failed');
       await update();
-    } catch { element('message').textContent = `Cannot ${button.dataset.action} playback`; }
+    } catch {
+      element('message').textContent = button.dataset.action === 'audio_delay'
+        ? 'Cannot adjust the A/V offset' : `Cannot ${button.dataset.action} playback`;
+    }
   });
 }
 await update();

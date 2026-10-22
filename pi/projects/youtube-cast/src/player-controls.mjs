@@ -3,7 +3,7 @@ import { PlayerStatus } from './mpv-player.mjs';
 
 // Every action senders without a lounge session can send (the vantv command,
 // the Firefox popup, the Pi's vlcmd/pp shell functions behind the BTT buttons).
-export const CONTROL_ACTIONS = Object.freeze(['pause', 'resume', 'toggle', 'stop', 'next', 'previous', 'seek']);
+export const CONTROL_ACTIONS = Object.freeze(['pause', 'resume', 'toggle', 'stop', 'next', 'previous', 'seek', 'audio_delay']);
 
 // Returns `seek` arguments from a request body, or null when they are invalid:
 // exactly one of an absolute `position` (>= 0) or a relative `offset`.
@@ -11,6 +11,13 @@ export function seekArguments({ position, offset }) {
   const hasPosition = position !== undefined;
   if (hasPosition === (offset !== undefined)) return null;
   if (hasPosition) return Number.isFinite(position) && position >= 0 ? { position } : null;
+  return Number.isFinite(offset) ? { offset } : null;
+}
+
+export function audioDelayArguments({ delay, offset }) {
+  const hasDelay = delay !== undefined;
+  if (hasDelay === (offset !== undefined)) return null;
+  if (hasDelay) return Number.isFinite(delay) ? { delay } : null;
   return Number.isFinite(offset) ? { offset } : null;
 }
 
@@ -41,5 +48,6 @@ export function createPlayerControls(player) {
       const target = position ?? player.position + offset;
       return player.seek(Math.max(0, Math.min(end, target)));
     },
+    audio_delay: ({ delay, offset }) => player.setAudioDelay(delay ?? player.audioDelay + offset),
   };
 }

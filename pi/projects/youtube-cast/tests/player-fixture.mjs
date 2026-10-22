@@ -7,10 +7,17 @@ export const SECOND = { id: '0123456789a', client: Constants.CLIENTS.YT, context
 export const quiet = { warn() {}, error() {} };
 
 export class FakeMpv extends EventEmitter {
-  constructor() { super(); this.commands = []; this.closed = false; }
+  constructor() { super(); this.commands = []; this.properties = new Map(); this.closed = false; }
   async start(signal) { signal.throwIfAborted(); }
-  async command(command) { this.commands.push(command); }
-  async load(id, position, signal) { signal.throwIfAborted(); this.loaded = { id, position }; }
+  async command(command) {
+    this.commands.push(command);
+    if (command[0] === 'set_property') this.properties.set(command[1], command[2]);
+  }
+  async load(id, position, signal) {
+    signal.throwIfAborted();
+    this.loaded = { id, position };
+    this.propertiesAtLoad = new Map(this.properties);
+  }
   async close() { this.closed = true; this.emit('disconnect'); }
   property(name, data) { this.emit('event', { event: 'property-change', name, data }); }
 }
