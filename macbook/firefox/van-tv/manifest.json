@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Van TV",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Cast YouTube videos to the Van TV receiver on the van LAN.",
   "browser_specific_settings": {
     "gecko": { "id": "van-tv@lionfeather.dev", "strict_min_version": "102.0" }

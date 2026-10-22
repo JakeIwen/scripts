@@ -52,8 +52,11 @@ then reload the YouTube tab. **Inspect** opens its background console.
   seconds while open, and advances the displayed playhead locally between
   successful polls while playback is running. Its scrubber shows elapsed and
   total time, supports mouse/touch dragging and keyboard arrows, and sends one
-  absolute seek when the value is committed. The transport row offers previous,
-  −5 minutes, −20 seconds, play/pause, +20 seconds, +5 minutes, next and stop.
+  absolute seek when the value is committed. Click the total time to switch to
+  remaining time. The main icon row centers play/pause between 20-second skip
+  buttons and previous/next. The secondary row offers restart from the beginning,
+  five-minute skips and stop casting. Icons have hover labels and keyboard focus
+  indicators; the popup follows the system's light or dark appearance.
   **Cast this tab** still works for watch, short-link, shorts, live and embed
   URLs. Where a content script is unavailable it uses the URL's start time
   (`t=`, `start=`, or `#t=`), and cannot pause that page itself.
@@ -142,8 +145,9 @@ Test in Developer Edition on the van LAN:
    thumb for longer than one poll interval; it must stay under the pointer, then
    seek once on release and resume tracking the receiver. Focus the range and
    use arrow keys to seek. Check previous, −5m, −20s, play/pause, +20s, +5m,
-   next and stop, including boundary clamping near the beginning and end. The
-   scrubber should disable with no video or a zero duration; hour-long media
+   next and stop, including boundary clamping near the beginning and end. Verify
+   Restart video seeks to zero and clicking the total time toggles remaining time.
+   The scrubber should disable with no video or a zero duration; hour-long media
    should use `h:mm:ss`. Recast the same video after Stop and try Cast this tab.
    Check a normal non-YouTube tab has Cast this tab disabled. Try `/shorts/`,
    `/live/`, `/embed/` and a timestamped URL when no content script is present;

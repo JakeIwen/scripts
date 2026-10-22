@@ -15,7 +15,7 @@ test('XPI builds without dependencies and contains a self-contained manifest pay
   const manifest = JSON.parse(execFileSync('/usr/bin/unzip', ['-p', output, 'manifest.json'], { encoding: 'utf8' }));
   assert.deepEqual(manifest, JSON.parse(await readFile(`${root}manifest.json`, 'utf8')));
   assert.equal(manifest.manifest_version, 2);
-  assert.equal(manifest.version, '1.1.0');
+  assert.equal(manifest.version, '1.2.0');
   assert.equal(manifest.browser_specific_settings.gecko.id, 'van-tv@lionfeather.dev');
   const hosts = config.receiverUrls.map(url => `http://${new URL(url).hostname}/*`);
   assert.deepEqual(manifest.permissions, ['contextMenus', 'tabs', ...hosts]);

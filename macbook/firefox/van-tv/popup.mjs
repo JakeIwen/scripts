@@ -5,7 +5,7 @@ const config = globalThis.VAN_TV_CONFIG;
 const ids = [
   'state', 'video', 'elapsed', 'duration', 'scrub', 'notice', 'cast-tab',
   'previous', 'back-five', 'back-twenty', 'toggle', 'forward-twenty',
-  'forward-five', 'next', 'stop',
+  'forward-five', 'next', 'stop', 'restart', 'play-icon', 'pause-icon',
 ];
 const element = Object.fromEntries(ids.map(id => [id, document.getElementById(id)]));
 const transportControls = [
@@ -21,6 +21,7 @@ const transportControls = [
     fields: { offset: config.skipOffsets.forwardFiveMinutes } },
   { button: element.next, action: config.control.next },
   { button: element.stop, action: config.control.stop },
+  { button: element.restart, action: config.control.seek, fields: { position: 0 } },
 ];
 
 let latestStatus;
@@ -32,6 +33,7 @@ let pollTimer;
 let progressTimer;
 let progressTime = performance.now();
 let closed = false;
+let showRemaining = false;
 
 async function send(type, fields = {}) {
   const response = await browser.runtime.sendMessage({ type, ...fields });
@@ -46,7 +48,10 @@ function renderPlayback() {
     element.scrub.value = String(scrub.position);
   }
   element.elapsed.textContent = formatTime(scrub.position);
-  element.duration.textContent = latestStatus ? formatTime(duration) : '—';
+  element.duration.textContent = latestStatus
+    ? (showRemaining ? `−${formatTime(Math.max(0, duration - scrub.position))}` : formatTime(duration))
+    : '—';
+  element.scrub.setAttribute('aria-valuetext', `${formatTime(scrub.position)} of ${formatTime(duration)}`);
 }
 
 function updateControls() {
@@ -55,17 +60,20 @@ function updateControls() {
     item.button.disabled = busy || !view?.actions.includes(item.action);
   }
   const toggleLabel = view?.toggleLabel ?? 'Play';
-  element.toggle.textContent = toggleLabel === 'Pause' ? '⏸' : '▶';
+  element['play-icon'].toggleAttribute('hidden', toggleLabel === 'Pause');
+  element['pause-icon'].toggleAttribute('hidden', toggleLabel !== 'Pause');
   element.toggle.title = toggleLabel;
   element.toggle.setAttribute('aria-label', toggleLabel);
   if (!scrub.dragging) element.scrub.disabled = busy || !view?.scrubEnabled;
   element['cast-tab'].disabled = busy || !tabAvailable;
+  element.duration.disabled = !view?.scrubEnabled;
 }
 
 function renderStatus() {
   if (latestStatus) {
     const view = popupState(latestStatus);
-    element.state.textContent = view.state;
+    element.state.textContent = view.state === latestStatus.player
+      ? view.state[0] + view.state.slice(1).toLowerCase() : view.state;
     element.video.textContent = view.title;
   } else {
     element.state.textContent = 'Van TV unreachable';
@@ -157,6 +165,14 @@ element.scrub.addEventListener('change', event => {
 
 element['cast-tab'].addEventListener('click', () => void perform(
   config.message.castTab, {}, 'Cast accepted'));
+element.duration.addEventListener('click', () => {
+  showRemaining = !showRemaining;
+  const label = showRemaining ? 'Show total time' : 'Show remaining time';
+  element.duration.title = label;
+  element.duration.setAttribute('aria-label', label);
+  element.duration.setAttribute('aria-pressed', String(showRemaining));
+  renderPlayback();
+});
 window.addEventListener('pagehide', () => {
   closed = true;
   clearTimeout(pollTimer);
