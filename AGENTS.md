@@ -228,6 +228,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   and quoted directory/resume command for `claudesearch.sh` and `codexsearch.sh`.
   It also provides `-h`/`--help`, parses `-g`/`--group`, and groups matches per transcript, retaining
   the last matching excerpt in append order. `--` ends option parsing.
+  All three search commands accept `-t`/`--title` for literal, case-insensitive
+  matching of saved titles only (one hit per session, no directory fallback);
+  title mode reads the session stores directly, bypassing the transcript index.
   Age uses transcript modification time; ship the helper and
   `shared/sh/session_search_records.jq` with the search scripts. The jq module owns
   their internal match/summary records and directory/tool aggregation for

@@ -66,6 +66,71 @@ class SessionSearchTests(SessionFixtureTestCase):
         return subprocess.run([str(SCRIPTS / (tool + 'search.sh')), *args],
                               env=environment, capture_output=True, text=True, timeout=60)
 
+    def test_title_search_matches_saved_titles_without_body_hits(self):
+        for tool in ('claude', 'codex'):
+            self.write_session(tool, 'title Needle', ['unrelated body'])
+        for tool in ('claude', 'codex', 'llm'):
+            for flag in ('-t', '--title'):
+                with self.subTest(tool=tool, flag=flag):
+                    result = self.search(tool, flag, 'NEEDLE')
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    blocks = result.stdout.strip().split('\n\n')
+                    self.assertEqual(len(blocks), 2 if tool == 'llm' else 1)
+                    self.assertTrue(all(block.endswith('title Needle') for block in blocks))
+                    self.assertNotIn('unrelated body', result.stdout)
+                    self.assertNotIn('pr first', result.stdout)
+                    self.assertEqual(self.search(tool, flag, 'absent').stdout, '')
+                    self.assertEqual(self.search(tool, flag).returncode, 2)
+
+    def test_title_search_uses_current_title_and_excludes_directory_fallback(self):
+        claude = self.write_session('claude', 'stale', ['body needle'])
+        with claude.open('a') as stream:
+            stream.write(json.dumps({'type': 'custom-title', 'customTitle': 'Current'}) + '\n')
+            stream.write(json.dumps({'type': 'ai-title', 'aiTitle': 'Ignored'}) + '\n')
+        self.write_session('codex', 'stale', ['body needle'])
+        with (self.root / 'codex/session_index.jsonl').open('a') as stream:
+            stream.write(json.dumps({'id': 'stale', 'thread_name': 'Current'}) + '\n')
+        for tool in ('claude', 'codex'):
+            self.write_session(tool, 'untitled', ['body needle'], cwd='/tmp/fallback')
+        untitled = self.root / 'claude/projects/project/untitled.jsonl'
+        untitled.write_text(untitled.read_text().split('\n', 1)[1])
+        index = self.root / 'codex/session_index.jsonl'
+        index.write_text(''.join(line + '\n' for line in index.read_text().splitlines()
+                                 if json.loads(line)['id'] != 'untitled'))
+        for tool in ('claude', 'codex', 'llm'):
+            with self.subTest(tool=tool):
+                for query in ('stale', 'Ignored', 'fallback'):
+                    self.assertEqual(self.search(tool, '-t', query).stdout, '')
+                result = self.search(tool, '-t', 'current')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('Current', result.stdout)
+
+    def test_title_search_grouping_records_and_literal_flags(self):
+        for tool in ('claude', 'codex'):
+            for session in ('title --title older', 'title --title newer'):
+                path = self.write_session(tool, session, ['body'])
+                hours = 1 if session.endswith('newer') else 2
+                modified = time.time() - hours * 3600 - 30
+                os.utime(path, (modified, modified))
+        for tool in ('claude', 'codex', 'llm'):
+            result = self.search(tool, '-g', '-t', '--', '--title')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            blocks = result.stdout.strip().split('\n\n')
+            self.assertEqual(len(blocks), 2)
+            self.assertTrue(all(block.startswith('2 matches | 1 hour ago') if tool == 'llm'
+                                else block.startswith('1 matches | ') for block in blocks))
+            records = self.search(tool, '--title', '--', '--title', SESSION_SEARCH_RECORDS='1')
+            self.assertEqual(records.returncode, 0, records.stderr)
+            decoded = [json.loads(line) for line in records.stdout.splitlines()]
+            self.assertEqual(len(decoded), 4 if tool == 'llm' else 2)
+            self.assertTrue(all(record['count'] == 1 for record in decoded))
+            self.assertTrue(all(record['context'].startswith('title --title') for record in decoded))
+            self.write_session('claude' if tool == 'llm' else tool,
+                               'literal-title-flag', ['body --title'])
+            literal = self.search(tool, '--', '--title')
+            self.assertEqual(literal.returncode, 0, literal.stderr)
+            self.assertIn('body --title', literal.stdout)
+
     def test_group_counts_events_and_keeps_latest_matching_excerpt(self):
         for tool, command in [('claude', 'claudepr'), ('codex', 'codexpr')]:
             for args in [('-g', 'needle'), ('--group', 'needle'), ('needle', '-g')]:
@@ -169,6 +234,7 @@ class SessionSearchTests(SessionFixtureTestCase):
                     self.assertIn(f'Usage: {tool}search [flags] [--] <term>', result.stdout)
                     self.assertIn('-g, --group', result.stdout)
                     self.assertIn('-h, --help', result.stdout)
+                    self.assertIn('-t, --title', result.stdout)
                     self.assertIn('Treat all remaining arguments as search text.', result.stdout)
 
     def test_help_flags_can_be_searched_literally(self):
@@ -367,6 +433,17 @@ class IndexSearchTests(SessionFixtureTestCase):
         result = self.llmsearch('needle')
         self.assert_grep_results(result)
         self.assertEqual(result.stderr, '')
+
+    def test_title_search_bypasses_message_index(self):
+        self.fake_switchboard(code=1, message='must not query the message index')
+        for args in [('-t', 'FIRST'), ('--title', 'FIRST'), ('--grep', '-t', 'FIRST')]:
+            with self.subTest(args=args):
+                result = self.llmsearch(*args)
+                self.assertEqual((result.returncode, result.stderr), (0, ''))
+                blocks = result.stdout.strip().split('\n\n')
+                self.assertEqual(len(blocks), 2)
+                self.assertTrue(all(block.endswith('first') for block in blocks))
+                self.assertEqual(self.switchboard_calls(), [])
 
     def test_grep_flag_forces_grep(self):
         self.fake_switchboard([self.index_result('claude', 'indexed', 'Indexed', 1, 'needle', 1)])

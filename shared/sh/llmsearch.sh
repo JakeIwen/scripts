@@ -25,6 +25,8 @@ Index queries:
            after:YYYY-MM-DD  before:YYYY-MM-DD
 
 Flags:
+  -t, --title  Search saved session titles only (literal, case-insensitive).
+               Uses the session stores directly, without the transcript index.
   -g, --group  Group by directory and tool, with total matches and the latest hit.
   --grep       Search everything, slowly, including thinking and tool calls and
                output, for a literal, case-insensitive term.
@@ -47,11 +49,13 @@ llmsearch_claude=${CLAUDESEARCH_ROOT:-${CLAUDE_CONFIG_DIR:-"$HOME/.claude"}}
 llmsearch_codex=${CODEXSEARCH_ROOT:-"$HOME/.codex"}
 
 llmsearch_sources() {
+    local title_flag=""
+    [ "$session_search_title" = false ] || title_flag=--title
     session_search_files claude "$llmsearch_claude" codex "$llmsearch_codex" |
     while IFS= read -r -d '' provider && IFS= read -r -d '' file; do
         SESSION_SEARCH_FILE="$file" SESSION_SEARCH_FILE_PROVIDER="$provider" \
             "$llmsearch_scripts/${provider}search.sh" \
-            -- "$session_search_query" || return $?
+            ${title_flag:+"$title_flag"} -- "$session_search_query" || return $?
     done
 }
 
@@ -79,6 +83,7 @@ llmsearch_grep() {
 # the grep scripts' own format; llm-switchboard's oracle test relies on both.
 llmsearch_index_applies() {
     [ "$session_search_grep" = false ] &&
+        [ "$session_search_title" = false ] &&
         [ -z "${CLAUDESEARCH_ROOT:-}${CODEXSEARCH_ROOT:-}${CLAUDE_CONFIG_DIR:-}" ] &&
         [ "${SESSION_SEARCH_RECORDS:-}" != 1 ] &&
         command -v llm-switchboard >/dev/null 2>&1

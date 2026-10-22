@@ -82,6 +82,7 @@ while IFS= read -r -d '' codexsearch_provider && IFS= read -r -d '' codexsearch_
             'select(.id == $id) | .thread_name // empty' \
             "$codexsearch_index" 2>/dev/null | tail -n 1)
     fi
+    codexsearch_title=$codexsearch_name
     if [ -z "$codexsearch_name" ] && [ -n "$codexsearch_cwd" ]; then
         codexsearch_name=${codexsearch_cwd%/}
         codexsearch_name=${codexsearch_name##*/}
@@ -92,6 +93,14 @@ while IFS= read -r -d '' codexsearch_provider && IFS= read -r -d '' codexsearch_
         "$codexsearch_name" "$codexsearch_file")
     codexsearch_resume=$(session_search_resume_command \
         "$codexsearch_cwd" codexpr "$codexsearch_id")
+
+    if [ "$session_search_title" = true ]; then
+        session_search_title_match "$codexsearch_title" |
+            session_search_print_matches \
+                "$codexsearch_header" "$codexsearch_resume" "$session_search_group" \
+                codex "$codexsearch_cwd" "$codexsearch_file"
+        continue
+    fi
 
     jq -r -L "$(dirname "${BASH_SOURCE[0]}")" --arg query "$codexsearch_query" '
         include "session_search_records";

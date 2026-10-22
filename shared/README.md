@@ -28,5 +28,10 @@ directory and tool. During a grep scan, terminal listings update as sessions are
 found and counts accumulate. The final listing is complete; redirected or piped
 output contains only that final listing, without terminal control sequences.
 
+`-t` / `--title` searches only saved session titles for a literal,
+case-insensitive term, for example `llmsearch -t "backup"`. It returns one hit
+per session and works with `-g`. Title searches read the session stores directly
+without using the transcript index; untitled sessions do not match.
+
 The scripts require Bash, grep, jq, and Python 3.9 or newer. Keep all seven
 `sh/*search*` files together when deploying them to `/home/pi/scripts/`.

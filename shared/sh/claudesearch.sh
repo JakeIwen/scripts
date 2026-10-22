@@ -90,6 +90,7 @@ while IFS= read -r -d '' claudesearch_provider && IFS= read -r -d '' claudesearc
         (.cwd // ""), (.custom // .ai // "" | gsub("[[:space:]]+"; " "))
     ' "$claudesearch_file" 2>/dev/null)
 
+    claudesearch_title=$claudesearch_name
     if [ -z "$claudesearch_name" ] && [ -n "$claudesearch_cwd" ]; then
         claudesearch_name=${claudesearch_cwd%/}
         claudesearch_name=${claudesearch_name##*/}
@@ -100,6 +101,14 @@ while IFS= read -r -d '' claudesearch_provider && IFS= read -r -d '' claudesearc
         "$claudesearch_name" "$claudesearch_file")
     claudesearch_resume=$(session_search_resume_command \
         "$claudesearch_cwd" claudepr "$claudesearch_id")
+
+    if [ "$session_search_title" = true ]; then
+        session_search_title_match "$claudesearch_title" |
+            session_search_print_matches \
+                "$claudesearch_header" "$claudesearch_resume" "$session_search_group" \
+                claude "$claudesearch_cwd" "$claudesearch_file"
+        continue
+    fi
 
     # Search only conversation text: prompts, replies, thinking, tool inputs and
     # results, and queued prompts/notifications. Injected context (CLAUDE.md,

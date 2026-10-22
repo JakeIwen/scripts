@@ -8,6 +8,7 @@ Search session events for a literal, case-insensitive term.
 Sessions and their matching excerpts are shown newest first.
 
 Flags:
+  -t, --title  Search saved session titles only (literal, case-insensitive).
   -g, --group  Show one result per session, with the match count and latest excerpt.
   -h, --help   Show this help and exit.
   --          Treat all remaining arguments as search text.
@@ -34,7 +35,8 @@ session_search_files() {
     python3 "$(dirname "${BASH_SOURCE[0]}")/session_search_paths.py" "$@" |
     while IFS= read -r -d '' provider && IFS= read -r -d '' file; do
         if [ -f "$file" ] && [ ! -L "$file" ] &&
-            grep -qiF -- "$session_search_query" "$file" 2>/dev/null; then
+            { [ "$session_search_title" = true ] ||
+              grep -qiF -- "$session_search_query" "$file" 2>/dev/null; }; then
             printf '%s\0%s\0' "$provider" "$file"
         fi
     done
@@ -45,6 +47,7 @@ session_search_files() {
 # session_search_words before it and session_search_literal after it.
 session_search_parse_args() {
     session_search_group=false
+    session_search_title=false
     session_search_help=false
     session_search_query=""
     session_search_words=""
@@ -53,6 +56,7 @@ session_search_parse_args() {
     for arg in "$@"; do
         if [ "$literal" = false ]; then
             case "$arg" in
+                -t|--title) session_search_title=true; continue ;;
                 -g|--group) session_search_group=true; continue ;;
                 -h|--help) session_search_help=true; continue ;;
                 --grep)
@@ -178,5 +182,16 @@ session_search_collect_record() {
         --arg header "$header" --arg resume "$resume" --arg context "$context" '
         include "session_search_records";
         session_search_record($provider; $cwd; $modified; $header; $resume; $context)
+    '
+}
+
+# Feed one saved title through the same display/records contract as event hits.
+# Callers pass the real title before their directory-name fallback is applied.
+session_search_title_match() {
+    jq -nj -L "$(dirname "${BASH_SOURCE[0]}")" \
+        --arg title "$1" --arg query "$session_search_query" '
+        include "session_search_records";
+        select($title != "" and ($title | ascii_downcase | contains($query | ascii_downcase))) |
+        session_search_match_output($title)
     '
 }
