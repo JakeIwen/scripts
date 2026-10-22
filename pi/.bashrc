@@ -4,14 +4,8 @@ shopt -s expand_aliases # run aliased commands inline with ssh ...@....
 shopt -s dotglob # match all items in directory except . and ..
 # codeshape: allow-size the Pi's single interactive shell profile, deployed as one file to ~/.bashrc; splitting it is a separate refactor
 
-# Block Model Gateway's `setup` on this Pi; it would replace the locally built
-# claude-code-proxy (see pi/docs/compute/CLAUDE_MODEL_GATEWAY.md). Exported only
-# when the file exists: a missing --require target would stop every node process.
-gateway_guard=/home/pi/scripts/model_gateway_setup_guard.cjs
-if [ -f "$gateway_guard" ] && [[ " ${NODE_OPTIONS:-} " != *" --require $gateway_guard "* ]]; then
-  export NODE_OPTIONS="--require $gateway_guard${NODE_OPTIONS:+ $NODE_OPTIONS}"
-fi
-unset gateway_guard
+# Host-local agent settings kept outside this repo.
+if [ -f "$HOME/config/pi/agent.bashrc" ]; then . "$HOME/config/pi/agent.bashrc"; fi
 
 alias sudo='sudo '
 alias vi='/usr/bin/vim.tiny'
@@ -130,7 +124,7 @@ alias llmrestore='/usr/bin/python3 -I -B /home/pi/scripts/llm_restore.py'
 claude() { env -u DISPLAY claude "$@"; }
 
 alias claudep='claude --permission-mode bypassPermissions'
-# Fresh config-maintenance session; ~/config/CLAUDE.md is its only memory.
+# Fresh config-maintenance session; ~/config/AGENTS.md is its only memory.
 claudecfg() { (cd ~/config && claude --permission-mode bypassPermissions "$@"); }
 clauderm() {
     if [ -z "$1" ] || [ -z "$2" ]; then
@@ -148,19 +142,6 @@ clauder() {
 
 claudepr() {
     claude --permission-mode bypassPermissions --resume "$@"
-}
-
-# Same as claudep / claudepr, but this one session talks to Anthropic directly
-# instead of through Model Gateway, so /remote-control is available. No GPT/Grok
-# models in that session; everything else keeps the gateway. The Mac passes the
-# same settings as ~/.claude/no-gateway.json; inline JSON avoids deploying a file.
-claude_no_gateway='{"env":{"ANTHROPIC_BASE_URL":"https://api.anthropic.com"}}'
-claudepd() {
-    claude --permission-mode bypassPermissions --settings "$claude_no_gateway" "$@"
-}
-
-claudeprd() {
-    claude --permission-mode bypassPermissions --settings "$claude_no_gateway" --resume "$@"
 }
 
 # Prints the pid of a running claude that has session $1 open. Returns 0 when

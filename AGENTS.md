@@ -292,11 +292,6 @@ compare it with this checkout. Deployed files may differ from the repository.
   alarms cannot release an in-flight write. Delete and enable are explicit commands.
   Read fresh device state before mutations, preserve existing music metadata,
   reject stale revisions, and never automatically retry an uncertain alarm write.
-- `pi/scripts/build_claude_code_proxy.sh` builds `claude-code-proxy` from source for
-  Claude Code's Model Gateway (the release binary needs glibc 2.39). Never run the
-  gateway's `setup` on the Pi; `pi/scripts/model_gateway_setup_guard.cjs`, preloaded
-  via `NODE_OPTIONS` in `pi/.bashrc`, blocks it. See
-  `pi/docs/compute/CLAUDE_MODEL_GATEWAY.md`.
 - `pi/apps/van_dashboard/van_dashboard_ubnt_recovery.py` reconciles uncertain
   Starlink antenna operations against fresh radio state without replaying them.
   Frontend `features/ubnt/UbntOperationNotice.tsx` distinguishes pending
