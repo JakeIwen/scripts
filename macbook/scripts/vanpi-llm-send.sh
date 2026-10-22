@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -eq 0 ]]; then
-  echo "Usage: vanpi-send <file> [file2 ...]"
+  echo "Usage: llmsend <file> [file2 ...]"
   exit 1
 fi
 
