@@ -9,6 +9,9 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     sourcemap: true,
+    // Keep component names and stack traces readable on the local dashboard.
+    minify: false,
+    cssMinify: true,
   },
   server: {
     port: 5173,

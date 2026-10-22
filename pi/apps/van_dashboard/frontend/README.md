@@ -8,6 +8,10 @@ controls.
 Flask serves the production build on port `8788` from the atomic release
 directory described in [REACT_DASHBOARD.md](../../../docs/dashboard/REACT_DASHBOARD.md).
 
+Production builds leave JavaScript unminified so React DevTools component names
+and stack traces stay readable. React still uses its production runtime, and
+CSS remains minified.
+
 ## Local commands
 
 Run these from this directory:
