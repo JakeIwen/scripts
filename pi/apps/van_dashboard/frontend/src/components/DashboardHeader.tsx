@@ -1,5 +1,4 @@
-import { useState } from 'react';
-
+import { usePaneLink } from '../dashboard/paneLinks';
 import { ProjectDirectory } from '../features/projects/ProjectDirectory';
 
 interface DashboardHeaderProps {
@@ -8,7 +7,7 @@ interface DashboardHeaderProps {
 }
 
 export function DashboardHeader({ uptime, systemControls }: DashboardHeaderProps) {
-  const [projectsOpen, setProjectsOpen] = useState(false);
+  const [projectsOpen, setProjectsOpen] = usePaneLink('hosted');
   return (
     <>
       <header className="dashboard-header">
@@ -23,7 +22,7 @@ export function DashboardHeader({ uptime, systemControls }: DashboardHeaderProps
               aria-label="Van Dashboard — open hosted projects"
               onClick={() => setProjectsOpen(true)}
             >
-              Van Dashboard<span aria-hidden="true">▾</span>
+              Van Dashboard
             </button>
           </h1>
         </div>

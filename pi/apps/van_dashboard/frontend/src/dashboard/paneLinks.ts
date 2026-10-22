@@ -2,6 +2,7 @@ import { useCallback, useSyncExternalStore } from 'react';
 
 /** Stable public fragments for expandable dashboard panes. */
 export const paneIds = [
+  'hosted',
   'vonstar',
   'sonos',
   'storage',
