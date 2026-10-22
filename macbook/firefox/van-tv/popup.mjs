@@ -6,6 +6,7 @@ const ids = [
   'state', 'video', 'elapsed', 'duration', 'scrub', 'notice', 'cast-tab',
   'previous', 'back-five', 'back-twenty', 'toggle', 'forward-twenty',
   'forward-five', 'next', 'stop', 'restart', 'play-icon', 'pause-icon',
+  'sound-earlier', 'sound-later', 'reset-delay', 'audio-delay-value',
 ];
 const element = Object.fromEntries(ids.map(id => [id, document.getElementById(id)]));
 const transportControls = [
@@ -22,6 +23,11 @@ const transportControls = [
   { button: element.next, action: config.control.next },
   { button: element.stop, action: config.control.stop },
   { button: element.restart, action: config.control.seek, fields: { position: 0 } },
+];
+const audioDelayControls = [
+  { button: element['sound-earlier'], fields: { offset: -config.audioDelayStep } },
+  { button: element['sound-later'], fields: { offset: config.audioDelayStep } },
+  { button: element['reset-delay'], fields: { delay: 0 } },
 ];
 
 let latestStatus;
@@ -65,6 +71,9 @@ function updateControls() {
   element.toggle.title = toggleLabel;
   element.toggle.setAttribute('aria-label', toggleLabel);
   if (!scrub.dragging) element.scrub.disabled = busy || !view?.scrubEnabled;
+  for (const { button } of audioDelayControls) button.disabled = busy || !view?.audioDelayEnabled;
+  if (latestStatus?.audioDelay === 0) element['reset-delay'].disabled = true;
+  element['audio-delay-value'].textContent = view?.audioDelayLabel ?? '—';
   element['cast-tab'].disabled = busy || !tabAvailable;
   element.duration.disabled = !view?.scrubEnabled;
 }
@@ -141,6 +150,11 @@ function updateProgress() {
 for (const item of transportControls) {
   item.button.addEventListener('click', () => void perform(config.message.control,
     { action: item.action, ...(item.fields ?? {}) }, ''));
+}
+
+for (const item of audioDelayControls) {
+  item.button.addEventListener('click', () => void perform(config.message.control,
+    { action: config.control.audioDelay, ...item.fields }, ''));
 }
 
 element.scrub.addEventListener('input', event => {

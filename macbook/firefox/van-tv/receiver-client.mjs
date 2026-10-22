@@ -4,9 +4,10 @@ import { isPosition, isVideoId } from './youtube-video.mjs';
 const config = globalThis.VAN_TV_CONFIG;
 const states = Object.values(config.player);
 const actions = Object.values(config.control);
+const isFiniteNumber = value => typeof value === 'number' && Number.isFinite(value);
 
 /** @typedef {{ok: boolean, player: string, video: {id: string, title: string}|null,
- * position: number, duration: number}} ReceiverStatus */
+ * position: number, duration: number, audioDelay: number|null}} ReceiverStatus */
 
 export function decodeStatus(value) {
   if (!value || typeof value.ok !== 'boolean' || !states.includes(value.player)
@@ -16,21 +17,28 @@ export function decodeStatus(value) {
     throw new Error('Invalid Van TV status response');
   }
   const { ok, player, video, position, duration } = value;
-  return { ok, player, video, position, duration };
+  // A receiver older than the A/V offset setting omits it; its controls stay off.
+  const audioDelay = isFiniteNumber(value.audioDelay) ? value.audioDelay : null;
+  return { ok, player, video, position, duration, audioDelay };
 }
+
+// Each action with fields takes exactly one absolute field or a relative offset.
+const actionFields = Object.freeze({
+  [config.control.seek]: { absolute: 'position', valid: isPosition, error: 'Invalid seek fields' },
+  [config.control.audioDelay]: { absolute: 'delay', valid: isFiniteNumber, error: 'Invalid audio delay fields' },
+});
 
 function controlBody(action, fields) {
   if (!actions.includes(action)) throw new Error('Unknown playback action');
-  if (action !== config.control.seek) return { action };
-  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) {
-    throw new Error('Invalid seek fields');
-  }
-  const hasPosition = Object.hasOwn(fields, 'position');
+  const spec = actionFields[action];
+  if (!spec) return { action };
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) throw new Error(spec.error);
+  const hasAbsolute = Object.hasOwn(fields, spec.absolute);
   const hasOffset = Object.hasOwn(fields, 'offset');
-  const validPosition = hasPosition && isPosition(fields.position);
-  const validOffset = hasOffset && typeof fields.offset === 'number' && Number.isFinite(fields.offset);
-  if (hasPosition === hasOffset || !validPosition && !validOffset) throw new Error('Invalid seek fields');
-  return hasPosition ? { action, position: fields.position } : { action, offset: fields.offset };
+  const validAbsolute = hasAbsolute && spec.valid(fields[spec.absolute]);
+  const validOffset = hasOffset && isFiniteNumber(fields.offset);
+  if (hasAbsolute === hasOffset || !validAbsolute && !validOffset) throw new Error(spec.error);
+  return hasAbsolute ? { action, [spec.absolute]: fields[spec.absolute] } : { action, offset: fields.offset };
 }
 
 async function requestJson(fetcher, url, options, timeoutMs) {

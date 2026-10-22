@@ -28,6 +28,26 @@ test('background HTTP round trip sends JSON casts and controls without cookies o
   }
 });
 
+test('A/V offset controls send one absolute delay or relative offset', async t => {
+  const fixture = await startReceiver(t);
+  const receiver = createReceiverClient({ baseUrls: [fixture.url] });
+  assert.deepEqual(await receiver.control('audio_delay', { offset: -0.05 }), { action: 'audio_delay', done: true });
+  assert.deepEqual(await receiver.control('audio_delay', { delay: 0 }), { action: 'audio_delay', done: true });
+  for (const fields of [{}, { delay: 0, offset: 0.05 }, { delay: '0' }, { offset: NaN }, { position: 3 }]) {
+    await assert.rejects(receiver.control('audio_delay', fields), /Invalid audio delay fields/);
+  }
+  assert.deepEqual(fixture.requests.filter(request => request.method === 'POST').map(request => request.body), [
+    { action: 'audio_delay', offset: -0.05 },
+    { action: 'audio_delay', delay: 0 },
+  ]);
+});
+
+test('status keeps a reported A/V offset and marks an older receiver as lacking one', () => {
+  assert.equal(decodeStatus({ ...defaultStatus, audioDelay: -0.12 }).audioDelay, -0.12);
+  assert.equal(decodeStatus(defaultStatus).audioDelay, null);
+  assert.equal(decodeStatus({ ...defaultStatus, audioDelay: 'loud' }).audioDelay, null);
+});
+
 test('unreachable primary falls back on a read and performs exactly one cast', async t => {
   const fixture = await startReceiver(t);
   const receiver = createReceiverClient({ baseUrls: ['http://127.0.0.1:1', fixture.url] });

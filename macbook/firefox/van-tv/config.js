@@ -25,8 +25,10 @@ globalThis.VAN_TV_CONFIG = Object.freeze({
   }),
   control: Object.freeze({
     pause: 'pause', resume: 'resume', toggle: 'toggle', stop: 'stop',
-    next: 'next', previous: 'previous', seek: 'seek',
+    next: 'next', previous: 'previous', seek: 'seek', audioDelay: 'audio_delay',
   }),
+  // Seconds per lip-sync nudge; positive plays sound later.
+  audioDelayStep: 0.05,
   skipOffsets: Object.freeze({
     backwardFiveMinutes: -300, backwardTwentySeconds: -20,
     forwardTwentySeconds: 20, forwardFiveMinutes: 300,

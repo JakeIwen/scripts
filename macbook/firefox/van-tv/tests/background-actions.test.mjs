@@ -88,7 +88,7 @@ test('failed casts never send a pause acknowledgement', async t => {
   assert.equal(browser.messages.some(message => message.type === config.message.castAccepted), false);
 });
 
-test('popup control messages pass absolute and relative seek fields through', async t => {
+test('popup control messages pass seek and A/V offset fields through', async t => {
   const fixture = await startReceiver(t);
   const browser = browserFixture();
   const receiver = createReceiverClient({ baseUrls: [fixture.url] });
@@ -99,10 +99,14 @@ test('popup control messages pass absolute and relative seek fields through', as
   assert.deepEqual(await handle({
     type: config.message.control, action: config.control.seek, offset: -20,
   }, {}), { ok: true, data: { action: config.control.seek, done: true } });
+  assert.deepEqual(await handle({
+    type: config.message.control, action: config.control.audioDelay, delay: 0.1,
+  }, {}), { ok: true, data: { action: config.control.audioDelay, done: true } });
   assert.deepEqual(fixture.requests.filter(request => request.method === 'POST')
     .map(request => request.body), [
     { action: config.control.seek, position: 71 },
     { action: config.control.seek, offset: -20 },
+    { action: config.control.audioDelay, delay: 0.1 },
   ]);
 });
 

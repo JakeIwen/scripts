@@ -59,6 +59,13 @@ export function transitionScrub(state, event) {
   throw new Error('Unknown scrub transition');
 }
 
+// Signed whole milliseconds, e.g. "+120 ms" or "0 ms".
+export function formatAudioDelay(seconds) {
+  if (!Number.isFinite(seconds)) return '—';
+  const ms = Math.round(seconds * 1000) || 0;
+  return `${ms > 0 ? '+' : ''}${ms} ms`;
+}
+
 export function popupState(status) {
   const actions = status.ok ? (availableActions[status.player] ?? []) : [];
   const elapsed = formatTime(status.position);
@@ -73,5 +80,8 @@ export function popupState(status) {
     scrubEnabled: Boolean(status.ok && status.video && status.duration > 0
       && actions.includes(control.seek)),
     toggleLabel: status.player === player.playing ? 'Pause' : 'Play',
+    // The offset is saved on the receiver, so it can be set before a cast too.
+    audioDelayEnabled: Boolean(status.ok && Number.isFinite(status.audioDelay)),
+    audioDelayLabel: formatAudioDelay(status.audioDelay),
   };
 }

@@ -7,8 +7,9 @@ const menu = Object.freeze({ link: 'cast-link', page: 'cast-page' });
 
 function controlFields(message) {
   const fields = {};
-  if (Object.hasOwn(message, 'position')) fields.position = message.position;
-  if (Object.hasOwn(message, 'offset')) fields.offset = message.offset;
+  for (const name of ['position', 'delay', 'offset']) {
+    if (Object.hasOwn(message, name)) fields[name] = message[name];
+  }
   return fields;
 }
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  createScrubState, formatTime, popupState, transitionScrub,
+  createScrubState, formatAudioDelay, formatTime, popupState, transitionScrub,
 } from '../popup-state.mjs';
 import { defaultStatus } from './receiver-fixture.mjs';
 
@@ -33,6 +33,18 @@ test('popup enables meaningful controls for every receiver state', () => {
     assert.equal(view.scrubEnabled, [player.playing, player.paused].includes(state));
     assert.equal(view.toggleLabel, state === player.playing ? 'Pause' : 'Play');
   }
+});
+
+test('A/V offset shows signed milliseconds and is adjustable whenever the receiver reports it', () => {
+  for (const [input, expected] of [[0, '0 ms'], [0.12, '+120 ms'], [-0.05, '-50 ms'],
+    [-0.0001, '0 ms'], [null, '—']]) assert.equal(formatAudioDelay(input), expected);
+  for (const state of Object.values(player)) {
+    const view = popupState({ ...defaultStatus, player: state, video: null, audioDelay: 0.1 });
+    assert.equal(view.audioDelayEnabled, true);
+    assert.equal(view.audioDelayLabel, '+100 ms');
+  }
+  assert.equal(popupState({ ...defaultStatus, audioDelay: null }).audioDelayEnabled, false);
+  assert.equal(popupState({ ...defaultStatus, ok: false, audioDelay: 0 }).audioDelayEnabled, false);
 });
 
 test('scrubbing also requires a video with a positive duration', () => {

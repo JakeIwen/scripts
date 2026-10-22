@@ -55,7 +55,9 @@ then reload the YouTube tab. **Inspect** opens its background console.
   absolute seek when the value is committed. Click the total time to switch to
   remaining time. The main icon row centers play/pause between 20-second skip
   buttons and previous/next. The secondary row offers restart from the beginning,
-  five-minute skips and stop casting. Icons have hover labels and keyboard focus
+  five-minute skips and stop casting. The **A/V offset** row nudges the
+  receiver's saved lip-sync offset 50 ms at a time (press − when voices come
+  after lips move) or resets it; it works before a cast too. Icons have hover labels and keyboard focus
   indicators; the popup follows the system's light or dark appearance.
   **Cast this tab** still works for watch, short-link, shorts, live and embed
   URLs. Where a content script is unavailable it uses the URL's start time
@@ -76,7 +78,8 @@ performs HTTP: primary `http://vanpi.lan:8795`, with the LAN IP
 - `GET /api/status` supplies state. Failed reads may try the other address.
 - `POST /api/cast` sends `{ videoId, position }`.
 - `POST /api/control` sends pause, resume, toggle, stop, previous, next, an
-  absolute seek position, or a relative seek offset.
+  absolute seek position, a relative seek offset, or `audio_delay` with an
+  absolute `delay` or relative `offset` in seconds.
 
 Both POSTs use `Content-Type: application/json`. Before a write, a read selects
 a reachable address; an ambiguous POST failure is **not retried** on the other
