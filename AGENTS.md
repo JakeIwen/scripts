@@ -36,7 +36,6 @@ compare it with this checkout. Deployed files may differ from the repository.
 | `pi/scripts/backup/` | backup units, timers, cron and scoped deployers | the feature folder and `pi/backup_local_deploy.sh` |
 | `shared/sh/` | Mac/Pi aliases, cron and targeted flat Pi deployment | feature-named scripts in the documented compatibility folder |
 | `pi/projects/phone-drop/` | `phone-drop.service` and its scoped deployer | the project folder |
-| `pi/projects/youtube-cast/` | `youtube-cast.service` and its scoped deployer | the project folder |
 | `ubnt/persistent/scripts/` | airOS boot hooks and `ubnt/scp_to_device.sh` | the complete Wi-Fi-manager cohort |
 
 ## Repository map
@@ -58,28 +57,15 @@ compare it with this checkout. Deployed files may differ from the repository.
   the iPhone share sheet (`phone-drop.service`, port 8793). Its own `deploy.sh`
   owns `/home/pi/phone-drop/`, the unit and the token; broad sync never ships it.
   Uploads land in `~/Documents/agent-shared/from-phone/` under an 8 GiB quota.
-- `pi/projects/youtube-cast/`: Van TV, the YouTube DIAL/Lounge receiver
-  (`youtube-cast.service`, DIAL port 8794, LAN/loopback status port 8795).
-  Its own `deploy.sh`/`controller.sh` own `/home/pi/youtube-cast/` and the unit;
-  broad sync never ships it. `src/config.mjs` owns player tuning and ports,
-  `mpv-ipc`/`mpv-process`/`mpv-player` own playback, `process-command` owns
-  bounded subprocess groups, `vlc-handoff` preserves library bookmarks, and
-  `private-data-store` preserves screen identity/settings in private state.
-  `stable-dial-uuid` pins the SSDP device UUID across restarts; `video-id`
-  is the one video-id check; `player-controls` owns the `/api/control`
-  actions. `pi/.bashrc`'s `vantv_*` functions route the BTT media buttons'
-  ssh commands (`vlcmd`, `pp`, `play_status`, `kill_media`) to Van TV while a
-  cast is loaded. Mac senders use the status server directly:
-  `macbook/scripts/vantv.zsh` (`vantv` alias) casts a link or the front
-  Chrome/Safari tab over `/api/cast` and controls playback over `/api/control`.
-- `macbook/firefox/van-tv/`: private unsigned Firefox Developer Edition
-  extension for Van TV. `config.js` owns receiver addresses and shared vocabulary;
-  `youtube-video.mjs` parses video URLs; `receiver-client.mjs` owns background-only
-  HTTP; `tab-casting.mjs` owns playhead handoff; `background-actions.mjs` wires
-  messages, menus and shortcuts. `content.js` owns the YouTube player button;
-  `popup.mjs`/`popup-state.mjs` own receiver controls. `build.zsh` packages the
-  dependency-free XPI into ignored `dist/`; `tests/*.test.mjs` run through the
-  repository suite.
+- Van TV (YouTube cast receiver `youtube-cast.service`, DIAL port 8794, LAN/loopback
+  status port 8795; its Firefox extension; the Mac `vantv` CLI) is maintained
+  separately in `~/dev/castit/youtube/` (public repo
+  `https://github.com/JakeIwen/castit`). Its `receiver/deploy.sh` owns
+  `/home/pi/youtube-cast/` and the unit; never restore a copy here. Install
+  addresses and integrations live in castit's ignored `youtube/local.json`.
+  `pi/.bashrc`'s `vantv_*` functions route the BTT media buttons' ssh commands
+  (`vlcmd`, `pp`, `play_status`, `kill_media`) to Van TV while a cast is loaded,
+  and `pi/crontab_pi` runs the installed controller's weekly `update-ytdlp`.
 - `vanrouter/`: reviewed OpenWrt persistence and backup-export artifacts.
 - `ubnt/`: directional wireless-device profiles and uplink scripts.
   `ubnt/persistent/scripts/wifi_manager.sh` owns initialization and command

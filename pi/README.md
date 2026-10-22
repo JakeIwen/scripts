@@ -37,8 +37,8 @@ normally live under `/home/pi/scripts/`.
   and [Mac](http://127.0.0.1:8792/) pages.
 - [Phone Drop](projects/phone-drop/README.md) — iPhone share-sheet uploads to
   the shared agent folder on port 8793.
-- [Van TV](projects/youtube-cast/README.md) — YouTube cast receiver, DIAL on
-  port 8794 and status/TV-code pairing page on LAN port 8795; its own deployer.
+- Van TV — YouTube cast receiver, DIAL on port 8794 and status/TV-code pairing
+  page on LAN port 8795; standalone source in `~/dev/castit/youtube/`.
 
 ## Testing
 
