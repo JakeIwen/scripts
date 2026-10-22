@@ -82,21 +82,13 @@ The outbound-only worker for offline CAN analysis submitted by agents on vanpi,
 and its coupled installer, moved to the standalone repository
 `/Users/jacobr/dev/van-compute`. See its `pi/docs/compute/VAN_COMPUTE.md`.
 
-## Codex ntfy notifications
+## Agent ntfy alerts
 
-`scripts/codex_ntfy_notify.py` is a macOS Codex external-notification hook. It
-uses the latest explicit `/rename` value from the Mac's Codex session index as
-the ntfy title, falling back to the current folder name when the conversation
-has not been renamed. The newest assistant response leads the notification body,
-followed by the working directory for context. The hook sends through vanpi's
-existing `ntfy_send.sh` over SSH, so notification credentials remain on vanpi.
-
-Enable it in the user-level `~/.codex/config.toml` (Codex ignores `notify` in
-project-level configuration):
-
-```toml
-notify = ["/Users/jacobr/dev/scripts/macbook/scripts/codex_ntfy_notify.py"]
-```
+`scripts/claude_ntfy_notify.py` is the Claude Code Notification hook in
+`~/.claude/settings.json`: it alerts when a session is blocked on a permission
+prompt or question. Agents also call its `--send <title> <message> <priority>`
+mode when Jacob asks to be notified. It sends through vanpi's `ntfy_send.sh`
+over SSH, so notification credentials remain on vanpi.
 
 ## Codex release cleanup
 

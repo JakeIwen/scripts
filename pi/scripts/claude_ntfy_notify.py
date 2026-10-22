@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Forward vanpi Claude Code notifications to Jacob's ntfy topic.
 
-Claude Code counterpart to codex_ntfy_notify.py. Wired as a Stop and
-Notification hook in ~/.claude/settings.json; reads the hook payload from
-stdin, then re-executes itself detached so delivery never delays the turn.
+Wired as the Notification hook in ~/.claude/settings.json: reads the hook
+payload from stdin, then re-executes itself detached so delivery never delays
+the session. `--send <title> <message> <priority>` sends one alert directly.
 """
 
 import json
@@ -18,43 +18,12 @@ MAX_MESSAGE_CHARS = 3500
 MAX_TITLE_CHARS = 200
 
 
-def last_assistant_message(transcript_path: str) -> str:
-    if not transcript_path or not Path(transcript_path).is_file():
-        return ""
-    text = ""
-    try:
-        with open(transcript_path, encoding="utf-8") as transcript:
-            for line in transcript:
-                try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if entry.get("type") != "assistant":
-                    continue
-                parts = [
-                    item.get("text", "")
-                    for item in entry.get("message", {}).get("content", [])
-                    if isinstance(item, dict) and item.get("type") == "text"
-                ]
-                candidate = "\n".join(part for part in parts if part).strip()
-                if candidate:
-                    text = candidate
-    except OSError:
-        return ""
-    return text
-
-
 def notification(event: dict) -> tuple[str, str, str]:
     cwd = event.get("cwd") or "unknown directory"
     project = Path(cwd).name or cwd
-    if event.get("hook_event_name") == "Notification":
-        title = f"{project}: attention"
-        body = (event.get("message") or "Claude needs attention").strip()
-        priority = "high"
-    else:
-        title = project
-        body = last_assistant_message(event.get("transcript_path", "")) or "Turn complete"
-        priority = "default"
+    title = f"{project}: attention"
+    body = (event.get("message") or "Claude needs attention").strip()
+    priority = "high"
     if len(title) > MAX_TITLE_CHARS:
         title = title[: MAX_TITLE_CHARS - 1].rstrip() + "…"
     message = f"{body}\n\n{cwd}"
@@ -94,7 +63,7 @@ def main() -> int:
         print(f"claude_ntfy_notify: invalid JSON: {exc}", file=sys.stderr)
         return 2
 
-    if event.get("hook_event_name") not in ("Stop", "Notification"):
+    if event.get("hook_event_name") != "Notification":
         return 0
 
     title, message, priority = notification(event)
