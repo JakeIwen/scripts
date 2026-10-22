@@ -44,8 +44,10 @@ function QuickRoomControl({
         onClick={() => runControl(controls.setPower(`group:${group.id}`, !enabled))}
       >
         <span className={`lighting-quick-room__dot is-${group.state}`} aria-hidden="true" />
-        <span className="lighting-quick-room__label">{group.label}</span>
-        <strong>{group.state === 'on' ? 'ON' : group.state === 'mixed' ? 'MIXED' : ''}</strong>
+        <span className="lighting-quick-room__label">
+          {group.id === 'kitchen' ? 'Kitch' : group.label}
+        </span>
+        {group.state === 'mixed' && <strong>MIXED</strong>}
       </button>
       <LightingSlider
         label={`${group.label} brightness`}
