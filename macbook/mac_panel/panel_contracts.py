@@ -5,6 +5,7 @@ from typing import Any, TypedDict
 
 
 class Section(str, Enum):
+    AMPHETAMINE = 'amphetamine'
     SETTINGS = 'settings'
     AUTOMATIONS = 'automations'
     DEFERRED = 'deferred'

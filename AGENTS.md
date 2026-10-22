@@ -26,6 +26,7 @@ compare it with this checkout. Deployed files may differ from the repository.
 | Path | Caller | Owner |
 |---|---|---|
 | `macbook/scripts/display_cab_dimmer.py` | `com.jacobr.display-cab-dimmer` LaunchAgent and Mac Panel automation | `macbook/scripts/cab_dimmer/` plus the stable entry script |
+| `macbook/scripts/amphetamine_control.py` | Mac Panel Amphetamine tab and Terminal | `macbook/scripts/amphetamine/` |
 | `macbook/scripts/deferred.zsh` | `com.jacobr.deferred-jobs` LaunchAgent and Mac Panel | the script and `shared/automations/` declaration |
 | `pi.apps.van_dashboard` | `van-dashboard.service` and `pi/deploy_python.py` | `pi/apps/van_dashboard/` |
 | `pi.apps.video_library` | `video-library.service` and `pi/deploy_python.py` | `pi/apps/video_library/` |
@@ -176,6 +177,16 @@ compare it with this checkout. Deployed files may differ from the repository.
   `GET /api/services/logs/<label>`, and `/healthz` reports `source_changed` so the
   page offers a restart after Python edits.
   Usage: `macbook/mac_panel/README.md`.
+  `amphetamine_adapter.py` and `static/section_amphetamine.mjs` expose native
+  auto-lock settings through `macbook/scripts/amphetamine_control.py`.
+  Its `amphetamine/` package owns the preference/session records (`model.py`),
+  macOS commands (`native.py`), revision checks and rollback (`control.py`),
+  and the CLI/caffeinate lifetime (`cli.py`). It runs on system Python 3.9.
+  Native Amphetamine preferences remain authoritative; no polling agent or
+  parallel settings file is installed. Changes preserve an indefinite open-lid
+  session, refuse special sessions, and back up preferences under
+  `~/.local/state/amphetamine-control/`. Enabling starts a keep-awake session;
+  disabling auto-lock leaves an existing keep-awake session running.
   `macbook/scripts/ntfy_warning.py` is the one sender for `NTFY_WARNING_URL`
   warnings (sourced privately from `pi/secrets/.bash_variables`, never in argv
   or logs): btt_guard imports `send_warning`, deferred.zsh runs it with the

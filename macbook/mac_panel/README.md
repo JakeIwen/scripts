@@ -62,11 +62,41 @@ confirmed restart as the services table. Static files are read per request.
 | ntfy alerts | Reads only routing metadata from `~/.claude/settings.json` hooks and `~/.codex/config.toml` notify. Deferred and guard warnings use `macbook/scripts/ntfy_warning.py`; the destination value is never read or displayed. A confirmed test uses `guard notify-test --send`. |
 | Settings | `shared/python/tool_settings.py` loads declarations from `shared/settings/` and revision-checked values from `~/.config/jacobr/`. The generated controls save through that module; reset sends declared defaults. A declaration's optional `label` is the form wording; the name stays the key. |
 | Automations | `shared/python/tool_automation.py` loads declarations from `shared/automations/`. Each status command prints one validated `tool_automation.status_record`; declared actions run synchronously through the tool's fixed absolute argv and timeout, with confirmation when the declaration requires it. A declaration or status failure remains an error on that automation without taking down the section. |
+| Amphetamine | `macbook/scripts/amphetamine_control.py status/configure` reads and updates Amphetamine's native automatic-lock settings. The checkbox and minutes field apply together. Enabling also allows the locked display to sleep and starts an indefinite keep-awake session. Disabling automatic lock preserves the current session. The battery cutoff is read-only. |
 
 A new automation joins the panel by adding its declaration under
 `shared/automations/` and a status command that prints a
 `tool_automation.status_record`. The automation tool remains the owner of its
 durable state and every mutation the declaration exposes.
+
+### Amphetamine
+
+Open `http://127.0.0.1:8769/#amphetamine`. Automatic lock operates only during
+an active Amphetamine session. The panel reads native preferences on refresh,
+so edits from Amphetamine's own preferences appear here too. Set the desired
+minutes (1–240), check or uncheck automatic lock, and Apply. The displayed
+session status distinguishes enabled locking from an active keep-awake session.
+
+Applying restarts Amphetamine under a temporary `caffeinate -i` assertion,
+which ends with the controller. It preserves an indefinite open-display
+session's display and screen-saver choices. Timed, trigger-based, app/date-based
+and closed-display sessions must be ended in Amphetamine first; the controller
+refuses to replace them. The low-battery cutoff and lid behavior are unchanged.
+Saved preferences are revision checked, backed up privately under
+`~/.local/state/amphetamine-control/`, and the three edited keys plus the session
+are restored on an apply failure. Native app control requires the Mac's login
+session; an unavailable Apple Events connection is reported instead of claiming
+the lock is active. This adds no service or background watcher.
+
+macOS privacy permissions apply separately to this login agent. The controller
+uses the panel's own Python interpreter so there is one Python identity to
+authorize. If macOS denies access to Amphetamine's container, its Python process
+needs approval to read app data (Full Disk Access is the manual settings route).
+Apple Events also needs Automation permission to control Amphetamine. Granting
+Full Disk Access covers other scripts using that interpreter; it is not limited
+to this tab. These permissions require user action in System Settings and are
+never granted, reset or bypassed by the controller. An unreadable preference file
+is an error, never a report that automatic locking or the battery cutoff is off.
 
 CLI paths above are relative to `/Users/jacobr/dev/scripts` for reference; the
 server always invokes fixed absolute argv without a shell. Errors stay local to

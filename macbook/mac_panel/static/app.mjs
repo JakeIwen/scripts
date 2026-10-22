@@ -3,6 +3,7 @@ import {health, renewToken} from './panel_api.mjs';
 import {button, node, refreshTimes} from './panel_dom.mjs';
 import {editingReason, loadedAge, markPaused, refresh, register, sections} from './panel_sections.mjs';
 import {absoluteText} from './relative_time.mjs';
+import * as amphetamine from './section_amphetamine.mjs';
 import * as automations from './section_automations.mjs';
 import * as crontab from './section_crontab.mjs';
 import * as deferred from './section_deferred.mjs';
@@ -17,6 +18,7 @@ const SECTIONS = [
   {id: 'deferred', title: 'Deferred jobs', render: deferred.render, auto: true},
   {id: 'services', title: 'Background services', render: services.render, auto: true},
   {id: 'automations', title: 'Automations', render: automations.render, auto: true},
+  {id: 'amphetamine', title: 'Amphetamine', render: amphetamine.render, auto: false},
   {id: 'crontab', title: 'User crontab', render: crontab.render, auto: false},
   {id: 'llm-restore', title: 'llm-restore', render: restore.render, auto: false},
   {id: 'guard', title: 'BTT guard', render: guard.render, auto: false},
