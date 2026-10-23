@@ -28,8 +28,8 @@ class SonosEnvironmentTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.bin = Path(self.temporary.name) / "bin"
         self.bin.mkdir()
-        (self.bin / "amixer").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        # sns.sh invokes python3 -c; expose only the resulting environment.
+        (self.bin / "amixer").write_text("#!/bin/sh\necho unexpected mixer >&2\nexit 99\n", encoding="utf-8")
+        # Capture the launcher boundary without importing SoCo or accessing hardware.
         (self.bin / "python3").write_text(
             "#!/bin/sh\nprintf '%s|%s\\n' \"$PYTHONPATH\" \"$PYTHONDONTWRITEBYTECODE\"\n",
             encoding="utf-8",
@@ -49,6 +49,7 @@ class SonosEnvironmentTests(unittest.TestCase):
             env=environment,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stderr, "")
         path, bytecode = result.stdout.splitlines()[-1].split("|", 1)
         self.assertEqual(bytecode, "1")
         return path
@@ -61,7 +62,7 @@ class SonosEnvironmentTests(unittest.TestCase):
         self.assertEqual(self.run_wrapper(inherited), inherited)
 
     def test_frozen_flat_video_environment_is_preserved_for_rollback(self):
-        self.assertEqual(self.run_wrapper(FLAT_PATH), FLAT_PATH)
+        self.assertEqual(self.run_wrapper(FLAT_PATH), f"{FLAT_PATH}:{PACKAGE_ROOT}/shared/python")
 
     def test_arbitrary_video_environment_is_preserved_before_package_fallback(self):
         inherited = "/custom/video"

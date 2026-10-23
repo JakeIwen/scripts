@@ -7,7 +7,7 @@ Pi shell utilities and the packaged video service include the current release's
 `shared/python` for standalone `sonos_tasks` imports; changes to that helper are
 part of the video's restart digest. `sns.sh` preserves inherited paths for the
 frozen flat video's saved-unit rollback. No current deployer writes the retired
-`/home/pi/scripts/python-automation/` tree. The Mac wrapper remains unchanged. See
+`/home/pi/scripts/python-automation/` tree. See
 [Pi deployment and rollback](../pi/docs/deployment.md).
 
 Compute-specific cross-host modules live in the standalone sibling checkout at
@@ -35,3 +35,39 @@ without using the transcript index; untitled sessions do not match.
 
 The scripts require Bash, grep, jq, and Python 3.9 or newer. Keep all seven
 `sh/*search*` files together when deploying them to `/home/pi/scripts/`.
+
+## Sonos CLI (`sns`)
+
+The Mac alias and BTT call `macbook/scripts/sns.sh`. It runs the existing
+`~/py3env/bin/python` directly, not PATH's Python and not a Pi-failure fallback.
+`SNS_PYTHON` can explicitly select another SoCo environment. The Pi wrapper
+uses its `python3` and the package release's shared CLI. Neither wrapper builds
+Python source from arguments, retries failed operations, or changes ALSA volume.
+
+- `sns pink_noise` and `sns pink noise` select the same command (also brown).
+- `sns --help` lists commands without importing SoCo.
+- `sns --check pink noise` validates the command without discovering speakers.
+- `sns --doctor` shows the actual interpreter, SoCo version and module path.
+- `sns --devices` discovers speakers and prints their identities; read only.
+- `sns --pi <command>` explicitly uses SSH's `vanpi` auto-route. Arguments are
+  quoted for the remote shell; the Mac's interactive `rpi` alias is not used.
+- `sns --local <command>` explicitly selects the Mac (the default).
+
+The existing Mac venv is isolated (`include-system-site-packages = false`) and
+was verified with Python 3.13.2 and SoCo 0.30.10; Pi uses Python 3.11.2 and SoCo
+0.30.4. Shared dispatch/tasks support Python 3.9+. To provision a missing Mac
+venv, use `python3 -m venv ~/py3env`, then
+`~/py3env/bin/python -m pip install 'soco==0.30.10'`.
+Check dependencies with `~/py3env/bin/python -m pip check`; runtime commands
+never install packages. A Python upgrade that invalidates this venv requires
+recreating it with that interpreter, not switching silently to system Python.
+
+Tests use temporary modules or stateful fixture speakers. They never access
+real Sonos devices. Live verification is limited to diagnostics and reading
+favorites; actual playback is intentionally not part of automated validation.
+
+The package deployer automatically includes `sonos_cli.py`. Install the package
+release before the updated Pi wrapper, since general commands need the new CLI.
+The existing `ensure_rear_movie` entry remains compatible with pinned video and
+frozen rollback releases. Changes to `sonos_tasks.py` affect video's restart
+digest; follow `pi/docs/deployment.md` for the scoped package update.

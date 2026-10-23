@@ -20,6 +20,9 @@ class Group:
         self.coordinator = coordinator
         self.members = set(members)
 
+    def __iter__(self):
+        return iter(self.members)
+
     @property
     def mute(self):
         return all(member.mute for member in self.members)
@@ -73,6 +76,18 @@ class Speaker:
         self.events.append(('play', self.uid))
         self.state = 'PLAYING'
 
+    def clear_queue(self):
+        self.queue = []
+        self.events.append(('clear_queue', self.uid))
+
+    def add_to_queue(self, item):
+        self.queue.append(item)
+        self.events.append(('queue', self.uid, item))
+
+    def play_from_queue(self, index):
+        self.events.append(('play_from_queue', self.uid, index))
+        self.state = 'PLAYING'
+
     def unjoin(self):
         self.events.append(('unjoin', self.uid))
         self.group.members.discard(self)
@@ -119,6 +134,7 @@ class SonosMovieTests(unittest.TestCase):
             self.tasks = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(self.tasks)
         self.discover = discovery.discover
+        self.discover.assert_not_called()
 
     def ensure(self):
         output = io.StringIO()
@@ -127,6 +143,41 @@ class SonosMovieTests(unittest.TestCase):
         self.assertIs(result, self.rear)
         self.assertEqual(len(output.getvalue().splitlines()), 1)
         return output.getvalue().strip()
+
+    def test_noise_uses_playable_reference_and_preserves_repeat_contract(self):
+        item = object()
+        favorite = types.SimpleNamespace(title='Pink Noise', reference=item)
+        self.tasks.MusicLibrary = lambda device: types.SimpleNamespace(
+            get_sonos_favorites=lambda: [favorite])
+        # Run the actual CLI and task against stateful, in-memory speakers.
+        from sonos_cli import main
+        with mock.patch.dict(sys.modules, {'sonos_tasks': self.tasks}):
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(main(['pink', 'noise']), 0)
+        self.assertEqual(self.mid.queue, [item])
+        self.assertEqual(self.mid.play_mode, 'REPEAT_ONE')
+        self.assertTrue(self.mid.cross_fade)
+        self.assertIn(('play_from_queue', self.mid.uid, 0), self.events)
+        for speaker in self.devices:
+            self.assertEqual(speaker.volume, 35)
+            self.assertFalse(speaker.mute)
+
+    def test_missing_favorite_never_changes_groups_volume_or_queues(self):
+        self.tasks.MusicLibrary = lambda device: types.SimpleNamespace(
+            get_sonos_favorites=lambda: [])
+        for task in (self.tasks.pink_noise, self.tasks.random_album):
+            with redirect_stdout(io.StringIO()):
+                with self.assertRaisesRegex(RuntimeError, 'No Sonos favorite matches'):
+                    task()
+            self.assertEqual(self.events, [])
+
+    def test_check_and_argument_errors_do_not_discover_or_write(self):
+        from sonos_cli import main
+        with mock.patch.dict(sys.modules, {'sonos_tasks': self.tasks}):
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(main(['--check', 'pink', 'noise']), 0)
+        self.discover.assert_not_called()
+        self.assertEqual(self.events, [])
 
     def test_healthy_check_reads_once_without_mutations_or_discovery_waits(self):
         self.assertEqual(self.ensure(), 'rear movie: ok')
@@ -198,7 +249,7 @@ class SonosMovieTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'one stereo pair'):
             self.tasks.ensure_rear_movie()
         self.assertEqual(self.events, [])
-        self.discover.assert_called_once()
+        self.discover.assert_not_called()
 
     def test_unreadable_state_is_not_evidence_of_a_broken_group(self):
         self.mid.get_current_transport_info = mock.Mock(side_effect=OSError('offline'))

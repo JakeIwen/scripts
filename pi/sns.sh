@@ -21,28 +21,16 @@ esac
 
 task=$1
 
-if [[ "$task" == ensure_rear_movie ]]; then
+if [[ "$task" == ensure_rear_movie && "$#" == 1 ]]; then
   # A healthy check changes nothing, including ALSA. exec lets the caller's
   # timeout stop Python itself instead of leaving an orphaned repair behind.
   exec python3 -c 'from sonos_tasks import ensure_rear_movie; ensure_rear_movie()'
 fi
 
-case "$#" in
-  "1")
-    args="";;
-  "2")
-    args="'$2'";; 
-  "3")
-    args="'$2', '$3'";;
-  "4")
-    args="'$2', '$3', '$4'";;
+# The CLI is shipped in package releases. Keep a pinned/rollback task module
+# first, adding current only when it is needed to find the CLI itself.
+case ":${PYTHONPATH:-}:" in
+  *":$package_sonos_path:"*) ;;
+  *) export PYTHONPATH="$PYTHONPATH:$package_sonos_path" ;;
 esac
-
-py_cmd="from sonos_tasks import $task; $task($args)"
-
-echo "setting system volume to 90%"
-amixer cset numid=1 90%
-
-echo  "running python3: $py_cmd"
-python3 -c "$py_cmd"
-
+exec python3 -m sonos_cli "$@"

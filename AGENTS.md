@@ -34,6 +34,8 @@ compare it with this checkout. Deployed files may differ from the repository.
 | `pi.apps.bme280` | `bme280-mqtt.service` and `pi/deploy_python.py` | `pi/apps/bme280/` |
 | `pi/scripts/system_event_monitor.py` | system-event-monitor, crash-capture and network-recorder consumers | `pi/scripts/system_monitor/` plus the stable shim |
 | `pi/scripts/backup/` | backup units, timers, cron and scoped deployers | the feature folder and `pi/backup_local_deploy.sh` |
+| `macbook/scripts/sns.sh` | Mac shell alias and BetterTouchTool | `shared/python/sonos_cli.py` and `sonos_tasks.py` |
+| `pi/sns.sh` | Pi shell alias and video audio checks (`/home/pi/sns.sh`) | shared Sonos CLI and tasks; package release imports |
 | `shared/sh/` | Mac/Pi aliases, cron and targeted flat Pi deployment | feature-named scripts in the documented compatibility folder |
 | `pi/projects/phone-drop/` | `phone-drop.service` and its scoped deployer | the project folder |
 | `ubnt/persistent/scripts/` | airOS boot hooks and `ubnt/scp_to_device.sh` | the complete Wi-Fi-manager cohort |
@@ -182,6 +184,16 @@ compare it with this checkout. Deployed files may differ from the repository.
   `dashboard/paneLinks.ts` owns public pane ids and URL/history state;
   feature owners use `usePaneLink`. Network History retains its fragment query filters.
 - `shared/`: code imported or deployed on more than one host.
+- Sonos: `shared/python/sonos_cli.py` owns validated argv dispatch, noise phrase
+  aliases and read-only diagnostics; `sonos_tasks.py` owns operations and lazy
+  discovery. Mac `macbook/scripts/sns.sh` executes `~/py3env/bin/python` directly
+  (`SNS_PYTHON` override), independent of shell activation; `--pi` explicitly
+  uses SSH and never retries a failed local operation. Pi `pi/sns.sh` preserves
+  pinned/rollback task imports and the exec-only `ensure_rear_movie` path; it
+  never changes ALSA volume. Shared CLI supports Python 3.9+; verified runtimes
+  are Mac venv 3.13.2/SoCo 0.30.10 and Pi 3.11.2/SoCo 0.30.4. Tests use fixture
+  speakers only, never live discovery/playback/configuration. See
+  `shared/README.md` for diagnostics and setup.
 - Tool settings: each configurable tool declares its settings once in
   `shared/settings/<tool>.json` (name, type, range, default, description);
   `shared/python/tool_settings.py` (stdlib, runs on `/usr/bin/python3` 3.9) is

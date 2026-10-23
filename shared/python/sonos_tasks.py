@@ -13,20 +13,19 @@ REAR_PHYSICAL_RIGHT_UID = "RINCON_7828CA20F1DA01400"
 STEREO_PAIR_TIMEOUT = 30
 STEREO_PAIR_RETRYABLE_ERRORS = {"402", "1034"}
 
-# to make sonos_tasks globally importable
-# run:
-# import site
-# site.getusersitepackages()
-# 
-# create file in site-packages directory o-.py:
-# import sys
-# sys.path.extend(['/path/to/this/ditectory'])
+# Discovery is deferred so importing tasks and validating CLI arguments stay offline.
+all_devices = None
+
+
+def get_all_devices():
+    global all_devices
+    if all_devices is None:
+        all_devices = discover(5, True) or set()
+    return all_devices
+
 
 def filter_vis_devices():
-    return [x for x in all_devices if x.is_visible] 
-
-all_devices = discover(5, True) or set()
-vis_devices = filter_vis_devices()
+    return [device for device in get_all_devices() if device.is_visible]
 
 #  abstractions
 
@@ -74,12 +73,12 @@ def rear_movie_resume():
     return audio_source_device(device, 'optical', int(device.volume))
 def ensure_rear_movie():
     """Leave a healthy optical group alone; repair without resetting rear volume."""
-    mid = next((device for device in all_devices if device.player_name == 'vonMid'), None)
+    mid = next((device for device in get_all_devices() if device.player_name == 'vonMid'), None)
     if mid is None:
         raise RuntimeError('rear movie: vonMid was not discovered')
     # A caller may reuse this module; do not trust an earlier topology snapshot.
     mid.zone_group_state.clear_cache()
-    rear = get_rear_stereo_master(all_devices)
+    rear = get_rear_stereo_master(get_all_devices())
     problems = rear_movie_problems(mid, rear)
     if not problems:
         print('rear movie: ok')
@@ -306,31 +305,43 @@ def play(name=None):
     device.play()
     return device
 
-def pause(devices=vis_devices):
+def pause(devices=None):
+    devices = filter_vis_devices() if devices is None else devices
     [device.pause() for device in devices]
     
-def stop(devices=vis_devices):
+def stop(devices=None):
+    devices = filter_vis_devices() if devices is None else devices
     [device.stop() for device in devices]
 
-def mute(devices=vis_devices):
+def mute(devices=None):
+    devices = filter_vis_devices() if devices is None else devices
     for device in devices:
         device.mute = True
     
 def start_noise(keyterm, vol=35):
-    cooridnator = partymode(vol)
-    item = get_matching_faves(keyterm, cooridnator)[0]
+    device = get_preferred_device()
+    matches = get_matching_faves(keyterm, device)
+    if not matches:
+        raise RuntimeError('No Sonos favorite matches: ' + keyterm)
+    # Resolve playable metadata before changing groups, volume or queues.
+    item = matches[0].reference
+    coordinator = partymode(vol, device)
     print("noise to play:")
     print(item)
-    play_item(cooridnator, item, 'REPEAT_ONE')
-    crossfade_on(cooridnator)
-    return cooridnator
+    play_item(coordinator, item, 'REPEAT_ONE')
+    crossfade_on(coordinator)
+    return coordinator
 
 def play_from_faves(keyterm, group_all=True):
-    device = partymode() if group_all else get_preferred_device()
+    device = get_preferred_device()
     matches = get_matching_faves(keyterm, device)
     matches = [x for x in matches if 'Noise' not in x.title]
-    item = choice(matches) # choose random if multiple matches
-    play_item(device, item.reference, 'NORMAL')
+    if not matches:
+        raise RuntimeError('No Sonos favorite matches: ' + keyterm)
+    item = choice(matches).reference # choose random if multiple matches
+    if group_all:
+        device = partymode(device=device)
+    play_item(device, item, 'NORMAL')
     # import pdb; pdb.set_trace()
     
     return device
@@ -366,14 +377,15 @@ def remove_from_group(name):
 def partymode(vol=None, device=None):
     device = device or get_preferred_device()
     
-    if len(device.group.members) < len(all_devices):
+    if len(device.group.members) < len(get_all_devices()):
         device.partymode() 
     vol = vol or device.volume
     print(vol)
     [equal_vol(member, vol, False) for member in device.group]
     return device 
     
-def unjoin_all(devices=vis_devices):
+def unjoin_all(devices=None):
+    devices = filter_vis_devices() if devices is None else devices
     for device in devices:
         if device.group.coordinator.player_name == device.player_name:
             with suppress(Exception): device.stop()
@@ -382,7 +394,7 @@ def unjoin_all(devices=vis_devices):
             device.unjoin()
     return devices
     
-def standby_grouped(devices=all_devices, coord_name='vonFront'):
+def standby_grouped(devices=None, coord_name='vonFront'):
     # broken, kills vlc Rear_movie audio
     return True
     # for device in devices:
@@ -466,7 +478,8 @@ def direct(name): # only on macbook
 def get_spkr(name):
     return by_name(name) or by_name(name + '2')
 
-def get_playing_device(default_to_front=False, devices=vis_devices):
+def get_playing_device(default_to_front=False, devices=None):
+    devices = filter_vis_devices() if devices is None else devices
     # if the device is in a group, then it is the ONLY group ( <4 stereo-pairs )
     # otherwise return the active PLAYING or PAUSED device
     for device in devices:
@@ -488,7 +501,7 @@ def get_playing_device(default_to_front=False, devices=vis_devices):
     else:
         return None
 
-def get_preferred_device(devices=vis_devices):
+def get_preferred_device(devices=None):
     return get_playing_device(True, devices)
 
 def is_group_member(device):
@@ -500,7 +513,7 @@ def crossfade_on(device=None):
 def crossfade_off(device=None):
     (device or get_preferred_device()).cross_fade = False    
 def num_devices():
-    return len(all_devices)
+    return len(get_all_devices())
 
 # partymode()
 # rear_normal()
