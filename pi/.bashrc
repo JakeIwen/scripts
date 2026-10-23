@@ -42,6 +42,11 @@ VANTVAPI="http://localhost:8795/api"
 BOOKAPI="http://localhost:8787/api"
 VIDEOAPI="http://localhost:8789/api"
 
+### SHELL TRICKS ###
+# Small helper set from the scripts repo (shared/sh, pi/scripts); `tricks`
+# explains each one. Loaded before any alias here so none expands inside them.
+if [ -f "$HOME/scripts/shell_tricks.bash" ]; then . "$HOME/scripts/shell_tricks.bash"; fi
+
 ### CORE ALIASES ###
 alias sudo='sudo '
 alias vi='/usr/bin/vim.tiny'

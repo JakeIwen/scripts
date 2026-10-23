@@ -271,6 +271,15 @@ compare it with this checkout. Deployed files may differ from the repository.
   bare `+cmd` without a model turn and passes every other prompt through.
   `uncommitted_owners.py` and `plus_commands.py` sit flat in `/home/pi/scripts/`
   on the Pi, next to `llm_restore.py`.
+- Shell tricks, Jacob's small interactive helper set (13 per host, at most 16):
+  `shared/sh/shell_tricks_common.sh` (tools both hosts share, plus `tricks`),
+  host files `macbook/scripts/shell_tricks.zsh` and `pi/scripts/shell_tricks.bash`,
+  and their one help doc `shared/sh/shell_tricks.md` (a `## name` section per
+  tool with `Hosts:`, `Summary:`, `Usage:`; `tricks [NAME|-l]` prints it). The
+  Mac's `~/.zshrc` (tracked in the private `~/config` as `mac/zshrc`) and
+  `pi/.bashrc` source the host file before any alias. The Pi runs all three flat
+  from `/home/pi/scripts/`: ship them together. `shared/tests/test_shell_tricks.py`
+  keeps tools and doc in step; behavior cases live in `shared/tests/shell_tricks_cases.sh`.
 - `shared/sh/destructive_command_guard.py`: PreToolUse hook for Claude/Codex on Mac/Pi
   (Python 3.9+, flat `/home/pi/scripts/` on Pi); blocks protected-path recursive rm,
   forced pushes, and Mac-only destructive find/disk commands, with chain-local cd tracking.
