@@ -6,7 +6,9 @@ from contextlib import redirect_stdout, suppress
 from io import StringIO
 from time import monotonic, sleep
 from xml.etree import ElementTree
-import os
+from pathlib import Path
+import subprocess
+import sys
 
 REAR_PHYSICAL_LEFT_UID = "RINCON_7828CA20F21A01400"
 REAR_PHYSICAL_RIGHT_UID = "RINCON_7828CA20F1DA01400"
@@ -296,7 +298,7 @@ def adjust_volume(speaker, direction, val=8):
     if speaker == 'all':
         [adjust(group, direction, val) for group in any_soco().all_groups]
     elif speaker == 'preferred':
-        adjust(get_playing_device(), direction, val)
+        adjust(get_preferred_device(), direction, val)
     else:
         adjust(get_spkr(speaker), direction, val)
 
@@ -379,7 +381,7 @@ def partymode(vol=None, device=None):
     
     if len(device.group.members) < len(get_all_devices()):
         device.partymode() 
-    vol = vol or device.volume
+    vol = device.volume if vol is None else vol
     print(vol)
     [equal_vol(member, vol, False) for member in device.group]
     return device 
@@ -395,23 +397,8 @@ def unjoin_all(devices=None):
     return devices
     
 def standby_grouped(devices=None, coord_name='vonFront'):
-    # broken, kills vlc Rear_movie audio
-    return True
-    # for device in devices:
-    #     if not device.is_visible:
-    #         continue
-    #     t_state = device.get_current_transport_info()['current_transport_state']
-    #     print("tstate:")
-    #     print(t_state)
-    #     if t_state not in ['PAUSED_PLAYBACK', 'STOPPED']:
-    #         return print("in use, no action taken")
-    # 
-    # device = next((x for x in devices if x.player_name == coord_name), None)
-    # if len(device.group.members) == len(devices):
-    #     return print("already grouped")
-    # 
-    # print("not in use, grouping")
-    # return partymode(None, device)
+    raise RuntimeError('standby_grouped is disabled because it interrupts movie audio')
+
 
 def test():
     cooridnator = partymode(9)
@@ -472,11 +459,18 @@ def get_matching_faves(keyterm, device=None):
     return [x for x in faves if keyterm in x.title]
 
 def direct(name): # only on macbook
-    cmd = "osascript /Users/jacobr/dev/scripts/macbook/applescript/sonosAudio.scpt " + name
-    os.system(cmd)
+    if sys.platform != 'darwin':
+        raise RuntimeError('direct is a Mac-only audio routing command')
+    script = Path(__file__).resolve().parents[2] / 'macbook/applescript/sonosAudio.scpt'
+    if not script.is_file():
+        raise RuntimeError('Missing Mac audio routing script: ' + str(script))
+    subprocess.run(['/usr/bin/osascript', str(script), name], check=True)
 
 def get_spkr(name):
-    return by_name(name) or by_name(name + '2')
+    device = by_name(name) or by_name(name + '2')
+    if device is None:
+        raise RuntimeError('Sonos speaker not found: ' + name)
+    return device
 
 def get_playing_device(default_to_front=False, devices=None):
     devices = filter_vis_devices() if devices is None else devices
@@ -502,7 +496,10 @@ def get_playing_device(default_to_front=False, devices=None):
         return None
 
 def get_preferred_device(devices=None):
-    return get_playing_device(True, devices)
+    device = get_playing_device(True, devices)
+    if device is None:
+        raise RuntimeError('No preferred Sonos speaker found; run sns --devices')
+    return device
 
 def is_group_member(device):
     base_num = 2 if "vonRear" in device.player_name else 1

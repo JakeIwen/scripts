@@ -119,6 +119,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   active checkpoint (`guard prune` previews, `--apply` deletes). Checkpoint integration fixtures live in
   `macbook/tests/btt_guard_fixtures.py`. `btt.py guard last-audit` prints the
   saved audit report read-only (`{"status": "none"}` when there is none).
+  `sonos_commands.py` supplies the reviewed Sonos caller plan to
+  `repair_script_paths.py --sonos`: normalize paths/shell invocation, validate all
+  arguments offline and preserve explicit remote intent and named-trigger links.
+  It reuses the existing guarded field updater and saved-state verification.
   `repair_text_transforms.py/.js` owns the guarded text-transform installer;
   `text_selection.js` owns AX selection handling and `text_menu_paste.js` owns
   clipboard-preserving native Paste for editors with broken AX replacement.
@@ -184,8 +188,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   `dashboard/paneLinks.ts` owns public pane ids and URL/history state;
   feature owners use `usePaneLink`. Network History retains its fragment query filters.
 - `shared/`: code imported or deployed on more than one host.
-- Sonos: `shared/python/sonos_cli.py` owns validated argv dispatch, noise phrase
-  aliases and read-only diagnostics; `sonos_tasks.py` owns operations and lazy
+- Sonos: `shared/python/sonos_cli.py` owns validated argv dispatch
+  and read-only diagnostics; `sonos_cli_commands.py` owns command argument types,
+  ranges and CLI-only signatures; `sonos_tasks.py` owns operations and lazy
   discovery. Mac `macbook/scripts/sns.sh` executes `~/py3env/bin/python` directly
   (`SNS_PYTHON` override), independent of shell activation; `--pi` explicitly
   uses SSH and never retries a failed local operation. Pi `pi/sns.sh` preserves

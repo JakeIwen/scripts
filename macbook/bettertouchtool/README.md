@@ -279,6 +279,15 @@ result. Changing this launcher takes effect on the next button use without a
 BTT import or restart. Wrapper regression tests use a fake Sonos module and never
 play audio or discover speakers.
 
+`repair_script_paths.py --sonos --inspect` audits saved Sonos commands, including
+inactive legacy copies. `--sonos --apply` uses the existing guarded field updater
+and configuration backup to replace old launcher paths, source-style invocation,
+reviewed spelling errors and obsolete command names. It validates each unique
+argument list with `sns --check`; it never executes a Sonos operation. Named-trigger
+references such as `sns group down` keep their names; their actual shell targets
+are repaired. Explicit SSH actions keep `--pi` intent. Run the apply command from
+Terminal if Apple Events are unavailable in an agent shell.
+
 ### Media suite checkout
 
 Performance Audio, Convert Video, Custom Conversion, BPM Over Time, Rhythm

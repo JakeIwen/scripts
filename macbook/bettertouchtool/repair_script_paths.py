@@ -18,6 +18,7 @@ import time
 from btt_common import MEDIA_TOOLS, ROOT, backup_configuration, connect, current_database, records
 from btt_guard.installer_checkpoint import before_install, after_install, skip_checkpoint
 from btt_guard.model import InstallerCheckpointReason
+from sonos_commands import sonos_plan
 
 WORKER = Path(__file__).with_suffix('.js')
 MOVED_SCRIPTS = (
@@ -207,13 +208,17 @@ def main(argv=None):
     mode.add_argument('--inspect', action='store_true')
     mode.add_argument('--apply', action='store_true')
     parser.add_argument('--no-checkpoint', action='store_true', help='do not advance BTT Guard after verification')
-    parser.add_argument('--media-tools', action='store_true',
+    scope_mode = parser.add_mutually_exclusive_group()
+    scope_mode.add_argument('--sonos', action='store_true',
+                            help='normalize Sonos launchers and reviewed argument typos')
+    scope_mode.add_argument('--media-tools', action='store_true',
                         help='move reviewed media-suite paths, including disabled legacy copies')
     args = parser.parse_args(argv)
     database = current_database()
-    planner = media_plan if args.media_tools else build_plan
+    planner = (lambda database: sonos_plan(database, ACTION_FIELDS)) if args.sonos else (
+        media_plan if args.media_tools else build_plan)
     plan = planner(database)
-    scope = 'media-suite actions' if args.media_tools else 'active actions'
+    scope = 'Sonos actions' if args.sonos else ('media-suite actions' if args.media_tools else 'active actions')
     print(str(len(plan['targets']))+' '+scope+' with stale script paths.')
     for target in plan['targets'] if args.media_tools else ():
         print(target['uuid']+'\n  OLD '+target['before']+'\n  NEW '+target['after'])
@@ -254,7 +259,9 @@ def main(argv=None):
         if time.monotonic() >= deadline:
             print('API readback verified. BTT has not yet saved '+str(len(pending))+' command updates to disk.')
             print('Do not restart yet. Check saved state later with:')
-            if args.media_tools:
+            if args.sonos:
+                print('/usr/bin/python3 -B '+str(Path(__file__))+' --sonos --inspect')
+            elif args.media_tools:
                 print('/usr/bin/python3 -B '+str(Path(__file__))+' --media-tools --inspect')
             else:
                 print('/usr/bin/python3 -B '+str(ROOT/'macbook/bettertouchtool/btt.py')+' repair paths')

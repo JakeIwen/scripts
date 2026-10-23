@@ -153,7 +153,7 @@ class SonosMovieTests(unittest.TestCase):
         from sonos_cli import main
         with mock.patch.dict(sys.modules, {'sonos_tasks': self.tasks}):
             with redirect_stdout(io.StringIO()):
-                self.assertEqual(main(['pink', 'noise']), 0)
+                self.assertEqual(main(['pink_noise']), 0)
         self.assertEqual(self.mid.queue, [item])
         self.assertEqual(self.mid.play_mode, 'REPEAT_ONE')
         self.assertTrue(self.mid.cross_fade)
@@ -175,8 +175,43 @@ class SonosMovieTests(unittest.TestCase):
         from sonos_cli import main
         with mock.patch.dict(sys.modules, {'sonos_tasks': self.tasks}):
             with redirect_stdout(io.StringIO()):
-                self.assertEqual(main(['--check', 'pink', 'noise']), 0)
+                self.assertEqual(main(['--check', 'pink_noise']), 0)
         self.discover.assert_not_called()
+        self.assertEqual(self.events, [])
+
+    def test_idle_volume_commands_choose_front_and_zero_volume_is_preserved(self):
+        self.mid.player_name = 'vonFront'
+        for speaker in self.devices:
+            speaker.state = 'STOPPED'
+            speaker.group = Group(speaker, [speaker])
+        with redirect_stdout(io.StringIO()):
+            self.tasks.vol_up(5)
+        self.assertEqual(self.mid.volume, 32)
+        with redirect_stdout(io.StringIO()):
+            self.tasks.partymode(0, self.mid)
+        self.assertTrue(all(speaker.volume == 0 for speaker in self.devices))
+
+    def test_missing_named_speaker_fails_before_audio_source_changes(self):
+        with self.assertRaisesRegex(RuntimeError, 'Sonos speaker not found'):
+            self.tasks.audio_source('missing speaker', 'optical')
+        self.assertEqual(self.events, [])
+
+    def test_direct_passes_literal_argv_and_propagates_process_failure(self):
+        name = 'vonFront; false'
+        with mock.patch.object(self.tasks.sys, 'platform', 'darwin'):
+            with mock.patch.object(self.tasks.Path, 'is_file', return_value=True):
+                with mock.patch.object(self.tasks.subprocess, 'run') as run:
+                    self.tasks.direct(name)
+                    args, kwargs = run.call_args
+                    self.assertEqual(args[0][0], '/usr/bin/osascript')
+                    self.assertEqual(args[0][-1], name)
+                    self.assertEqual(kwargs, {'check': True})
+                    run.side_effect = self.tasks.subprocess.CalledProcessError(1, 'osascript')
+                    with self.assertRaises(self.tasks.subprocess.CalledProcessError):
+                        self.tasks.direct(name)
+        with mock.patch.object(self.tasks.sys, 'platform', 'linux'):
+            with self.assertRaisesRegex(RuntimeError, 'Mac-only'):
+                self.tasks.direct('vonFront')
         self.assertEqual(self.events, [])
 
     def test_healthy_check_reads_once_without_mutations_or_discovery_waits(self):

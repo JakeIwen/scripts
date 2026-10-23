@@ -6,19 +6,7 @@ import inspect
 import json
 import sys
 
-
-COMMANDS = (
-    'brown_noise', 'pink_noise', 'discover_weekly', 'random_album', 'random_radio',
-    'group_vol_set', 'group_vol_up', 'group_vol_down', 'vol_up', 'vol_down',
-    'back_15', 'back_30', 'fwd_15', 'fwd_30', 'next_track', 'prev_track',
-    'rear_movie', 'rear_movie_resume', 'ensure_rear_movie', 'rear_normal',
-    'rear_inverted', 'play_soundbyte', 'make_stereo_pair', 'vol_eql_all',
-    'adjust_volume', 'play', 'pause', 'stop', 'mute', 'start_noise',
-    'play_from_faves', 'audio_source', 'scrub', 'add_to_main_group',
-    'remove_from_group', 'partymode', 'unjoin_all', 'standby_grouped',
-    'direct', 'crossfade_on', 'crossfade_off', 'num_devices',
-)
-PHRASES = {('pink', 'noise'): 'pink_noise', ('brown', 'noise'): 'brown_noise'}
+from sonos_cli_commands import COMMANDS
 
 
 def parse_args(argv=None):
@@ -37,10 +25,12 @@ def parse_args(argv=None):
         if args.task:
             parser.error('diagnostics do not take a task')
         return parser, args
-    if args.arguments and (args.task, args.arguments[0]) in PHRASES:
-        args.task = PHRASES[(args.task, args.arguments.pop(0))]
     if args.task not in COMMANDS:
-        parser.error('choose a command from --help (for example: pink_noise or pink noise)')
+        parser.error('choose a command from --help (for example: pink_noise)')
+    try:
+        args.arguments = COMMANDS[args.task].parse(args.arguments)
+    except ValueError as error:
+        parser.error(f'{args.task}: {error}')
     return parser, args
 
 

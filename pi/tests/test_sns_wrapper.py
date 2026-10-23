@@ -37,12 +37,12 @@ class SonosEnvironmentTests(unittest.TestCase):
         for command in ("amixer", "python3"):
             (self.bin / command).chmod(0o755)
 
-    def run_wrapper(self, pythonpath: str | None) -> str:
+    def run_wrapper(self, pythonpath: str | None, shell='/bin/bash') -> str:
         environment = {"PATH": str(self.bin)}
         if pythonpath is not None:
             environment["PYTHONPATH"] = pythonpath
         result = subprocess.run(
-            ["/bin/bash", str(SCRIPT), "pink_noise"],
+            [shell, str(SCRIPT), "pink_noise"],
             check=False,
             capture_output=True,
             text=True,
@@ -56,6 +56,9 @@ class SonosEnvironmentTests(unittest.TestCase):
 
     def test_empty_environment_uses_package_paths(self):
         self.assertEqual(self.run_wrapper(None), PACKAGE_PATHS)
+
+    def test_legacy_sh_callers_use_the_same_launch_contract(self):
+        self.assertEqual(self.run_wrapper(None, shell='/bin/sh'), PACKAGE_PATHS)
 
     def test_existing_package_sonos_path_is_preserved(self):
         inherited = f"{PACKAGE_ROOT}/shared/python:/custom/video"

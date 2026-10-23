@@ -10,7 +10,7 @@ case ":${PYTHONPATH:-}:" in
     ;;
   *)
     package_paths="$package_root:$package_sonos_path:$package_root/pi/scripts/python"
-    if [[ -n "${PYTHONPATH:-}" ]]; then
+    if [ -n "${PYTHONPATH:-}" ]; then
       PYTHONPATH="$PYTHONPATH:$package_paths"
     else
       PYTHONPATH="$package_paths"
@@ -21,7 +21,7 @@ esac
 
 task=$1
 
-if [[ "$task" == ensure_rear_movie && "$#" == 1 ]]; then
+if [ "$task" = ensure_rear_movie ] && [ "$#" -eq 1 ]; then
   # A healthy check changes nothing, including ALSA. exec lets the caller's
   # timeout stop Python itself instead of leaving an orphaned repair behind.
   exec python3 -c 'from sonos_tasks import ensure_rear_movie; ensure_rear_movie()'

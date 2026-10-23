@@ -21,11 +21,12 @@ class SonosWrapperTests(unittest.TestCase):
         shutil.copy2(SCRIPT, self.script)
         self.module = self.root/'shared/python/sonos_tasks.py'
         self.module.parent.mkdir(parents=True)
-        shutil.copy2(SCRIPT.parents[2]/'shared/python/sonos_cli.py', self.module.parent)
+        for name in ('sonos_cli.py', 'sonos_cli_commands.py'):
+            shutil.copy2(SCRIPT.parents[2]/'shared/python'/name, self.module.parent)
         self.module.write_text('''import json, sys
 def pink_noise():
     print(json.dumps({"task": "pink_noise", "module": __file__, "path": sys.path}))
-def audio_source(*args):
+def play_soundbyte(*args):
     print(json.dumps({"args": args}))
 def stop():
     raise RuntimeError("simulated Sonos failure")
@@ -59,12 +60,13 @@ def stop():
         self.assertLess(result['path'].index(str(self.module.parent)),result['path'].index(str(stale)))
 
     def test_existing_task_arguments_preserved(self):
-        result = self.result(self.run_wrapper('audio_source',"vonRear's $(false)",'left right; echo bad','40' ))
-        self.assertEqual(result['args'],["vonRear's $(false)",'left right; echo bad','40'])
+        result = self.result(self.run_wrapper('play_soundbyte',"vonRear's $(false)",'left right; echo bad'))
+        self.assertEqual(result['args'],["vonRear's $(false)",'left right; echo bad'])
 
-    def test_spaced_noise_alias(self):
-        result = self.result(self.run_wrapper('pink', 'noise'))
-        self.assertEqual(result['task'], 'pink_noise')
+    def test_spaced_noise_is_rejected_without_executing(self):
+        proc = self.run_wrapper('pink', 'noise')
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn('pink_noise', proc.stdout)
 
     def test_help_and_invalid_input_never_import_task_module(self):
         self.module.write_text('raise RuntimeError("unexpected task import")\n')

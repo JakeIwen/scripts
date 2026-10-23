@@ -44,9 +44,9 @@ The Mac alias and BTT call `macbook/scripts/sns.sh`. It runs the existing
 uses its `python3` and the package release's shared CLI. Neither wrapper builds
 Python source from arguments, retries failed operations, or changes ALSA volume.
 
-- `sns pink_noise` and `sns pink noise` select the same command (also brown).
+- Use `sns pink_noise` or `sns brown_noise`; task names require underscores.
 - `sns --help` lists commands without importing SoCo.
-- `sns --check pink noise` validates the command without discovering speakers.
+- `sns --check pink_noise` validates the command without discovering speakers.
 - `sns --doctor` shows the actual interpreter, SoCo version and module path.
 - `sns --devices` discovers speakers and prints their identities; read only.
 - `sns --pi <command>` explicitly uses SSH's `vanpi` auto-route. Arguments are
@@ -66,8 +66,17 @@ Tests use temporary modules or stateful fixture speakers. They never access
 real Sonos devices. Live verification is limited to diagnostics and reading
 favorites; actual playback is intentionally not part of automated validation.
 
-The package deployer automatically includes `sonos_cli.py`. Install the package
+The package deployer automatically includes `sonos_cli.py` and its
+`sonos_cli_commands.py` argument schema. Install the package
 release before the updated Pi wrapper, since general commands need the new CLI.
 The existing `ensure_rear_movie` entry remains compatible with pinned video and
 frozen rollback releases. Changes to `sonos_tasks.py` affect video's restart
 digest; follow `pi/docs/deployment.md` for the scoped package update.
+
+CLI validation covers argument counts, integer volume/increment values (0–100),
+source (`optical`/`line`), volume direction, and true boolean flags. For example,
+`play_from_faves Album false` preserves grouping. Python-only device objects are
+not CLI arguments; `pause`, `stop`, `mute`, `unjoin_all`, and crossfade commands
+accept no arguments. `partymode` accepts an optional volume, including zero.
+`standby_grouped` is retired because its old grouping behavior interrupts movie
+audio. `direct` is Mac-only and propagates AppleScript failure.
