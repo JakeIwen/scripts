@@ -19,9 +19,19 @@ export ITERM_ENABLE_SHELL_INTEGRATION_WITH_TMUX=1
 export DISPLAY=:0
 export HISTSIZE=1000000
 export HISTFILESIZE=10000000
-export PATH="$PATH:/home/pi/.local/bin"
-export PYTHONPATH="/home/pi/scripts/python-packages/current:/home/pi/scripts/python-packages/current/shared/python:/home/pi/scripts/python-packages/current/pi/scripts/python${PYTHONPATH:+:$PYTHONPATH}"
 export PYTHONDONTWRITEBYTECODE=1
+# PATH and PYTHONPATH are exported, so a nested shell (rbash, tmux, bash -c)
+# inherits them: add each entry only when it isn't there yet.
+case ":$PATH:" in
+  *:/home/pi/.local/bin:*) ;;
+  *) export PATH="$PATH:/home/pi/.local/bin" ;;
+esac
+pi_python_packages=/home/pi/scripts/python-packages/current
+case ":${PYTHONPATH:-}:" in
+  *:"$pi_python_packages":*) ;;
+  *) export PYTHONPATH="$pi_python_packages:$pi_python_packages/shared/python:$pi_python_packages/pi/scripts/python${PYTHONPATH:+:$PYTHONPATH}" ;;
+esac
+unset pi_python_packages
 source ~/secrets/.bash_variables
 
 # Media positions, and the APIs of the local media services: youtube-cast
@@ -177,7 +187,7 @@ nalias() {
 ### SCRIPTS ###
 S_REPOS=("$HOME/dev/obd-things") # repos whose tracked tools/ and projects/ .py scripts s finds by name
 s() { # run a named ~/scripts .sh/.py (or a directory's main.sh/main.py), else a script from S_REPOS
-  local name candidate f root hits pythonpath
+  local name candidate f= root hits pythonpath
   if [ "$#" -lt 1 ]; then
     echo "usage: s <script-name|dir/script-name> [args...]" >&2
     return 2
@@ -1070,6 +1080,9 @@ __git_prompt_update() {
   done < <(git status --porcelain=v1 2>/dev/null)
 }
 
-export PROMPT_COMMAND="history -a; history -c; history -r; $PROMPT_COMMAND"
-PROMPT_COMMAND="__git_prompt_update; ${PROMPT_COMMAND:-}"
+# PROMPT_COMMAND is exported, so a nested shell inherits it: prepend only once.
+case "${PROMPT_COMMAND:-}" in
+  *__git_prompt_update*) ;;
+  *) export PROMPT_COMMAND="__git_prompt_update; history -a; history -c; history -r; ${PROMPT_COMMAND:-}" ;;
+esac
 PS1='\[\e[38;5;81m\]\u\[\e[0m\]@\[\e[38;5;81m\]\h\[\e[0m\] \[\e[38;5;118m\]\w\[\e[0m\] ${__git_prompt_open}\[\e[38;5;81m\]${__git_prompt_branch}\[\e[38;5;166m\]${__git_prompt_deleted}\[\e[38;5;118m\]${__git_prompt_added}\[\e[38;5;161m\]${__git_prompt_modified}\[\e[38;5;135m\]${__git_prompt_untracked}\[\e[0m\]${__git_prompt_close}$ '
