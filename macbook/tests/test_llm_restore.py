@@ -363,7 +363,8 @@ class State(unittest.TestCase):
         self.assertEqual(json.loads((self.root / "consumed.json").read_text()), ["prev"])
 
     def test_script_feeds_its_sessions_back_to_apply(self):
-        plan = [lr.PlanItem(session("claude", A, title="it's \"quoted\""), 0.0), lr.PlanItem(session("codex", B), 90.0)]
+        plan = [lr.PlanItem(session("claude", A, title="it's \"quoted\""), 0.0),
+                lr.PlanItem(session("codex", B, title="Reply with:\nA [report](/x)\n"), 90.0)]
         lr.write_restore_script(plan, ["prev", "now"], ["codex pid 1: unknown"])
         script = self.root / "restore"
         self.assertTrue(os.access(script, os.X_OK))

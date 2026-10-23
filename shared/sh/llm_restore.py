@@ -92,6 +92,11 @@ class Session:
     managed: str | None = None  # owner that relaunches it itself (llm-switchboard)
     last_seen: float = 0.0  # time of the last snapshot that found it open
 
+    def __post_init__(self) -> None:
+        # A Codex title defaults to the first prompt, which can span lines; the
+        # restore script prints titles in `#` comments, where a second line runs.
+        object.__setattr__(self, "title", " ".join(self.title.split()))
+
     @classmethod
     def from_json(cls, data: dict) -> Session:
         return cls(**{f.name: data[f.name] for f in fields(cls) if f.name in data})
