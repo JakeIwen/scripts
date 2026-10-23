@@ -271,6 +271,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   bare `+cmd` without a model turn and passes every other prompt through.
   `uncommitted_owners.py` and `plus_commands.py` sit flat in `/home/pi/scripts/`
   on the Pi, next to `llm_restore.py`.
+- `shared/sh/destructive_command_guard.py`: PreToolUse hook for Claude/Codex on Mac/Pi
+  (Python 3.9+, flat `/home/pi/scripts/` on Pi); blocks protected-path recursive rm,
+  forced pushes, and Mac-only destructive find/disk commands, with chain-local cd tracking.
+  Fail-open; Jacob runs a deliberately blocked command himself with `! <command>` in Claude.
 - `shared/claude-mods/clean-output/` is the Claude Code mod behind `/clean`
   (usage in its README). Its engine-free modules (`hooks/*.ts` except
   `register.tsx`) also make `codexclean`, the same view of a Codex session:
