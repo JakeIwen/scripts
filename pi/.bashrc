@@ -80,7 +80,7 @@ alias codexcfg='vi ~/.codex/config.toml'
 # -c, --profile, and --strict-config all force embedded mode (no shared
 # background server). Validate config edits with `codex --strict-config`.
 codexp() {
-  command codex \
+  env -u DISPLAY codex \
     --ask-for-approval never \
     "$@"
 }
@@ -97,17 +97,17 @@ codex() {
   for arg in "$@"; do
     case $arg in
       -s|--sandbox|--sandbox=*|--dangerously-bypass-approvals-and-sandbox)
-        command codex "$@"
+        env -u DISPLAY codex "$@"
         return ;;
     esac
   done
   case ${1-} in
     exec|e|resume|fork)
-      command codex "$1" --sandbox workspace-write "${@:2}" ;;
+      env -u DISPLAY codex "$1" --sandbox workspace-write "${@:2}" ;;
     review|login|logout|mcp|plugin|app-server|remote-control|app|completion|update|doctor|sandbox|debug|apply|a|queue|archive|delete|migrate-rollouts|unarchive|cloud|exec-server|features|help|agents)
-      command codex "$@" ;;
+      env -u DISPLAY codex "$@" ;;
     *)
-      command codex --sandbox workspace-write "$@" ;;
+      env -u DISPLAY codex --sandbox workspace-write "$@" ;;
   esac
 }
 alias codexpcan='codexpr --sandbox danger-full-access --add-dir /mnt/EXFAT512/obd-things --add-dir /dev/bus/usb'
@@ -121,6 +121,8 @@ alias llmrestore='/usr/bin/python3 -I -B /home/pi/scripts/llm_restore.py'
 # Claude Code opens previews and links with xdg-open, which the DISPLAY=:0
 # export below sends to the Pi's own desktop (it launched Firefox there).
 # Every claude* helper here goes through this; `command claude` skips it.
+# The codex helpers above use `env -u DISPLAY codex` for the same reason
+# (Codex's login flow opened Firefox there too).
 claude() { env -u DISPLAY claude "$@"; }
 
 alias claudep='claude --permission-mode bypassPermissions'
