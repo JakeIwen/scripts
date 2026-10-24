@@ -87,6 +87,17 @@ alias py="python3"
 alias functions="cat ~/.bashrc | grep -E '^[[:space:]]*([[:alnum:]_]+[[:space:]]*\(\)|function[[:space:]]+[[:alnum:]_]+)'"
 fndef() { sed -n -e "/$1()/,/}$/ p" ~/.bashrc; } # print function definition
 als() { alias $1; fndef $1; }
+# create or update an alias, as on the Mac ($ nalias gpo 'git push origin'):
+# nalias.py commits the edit to pi/.bashrc on GitHub, then installs it here
+nalias() {
+  local before
+  before=$(/usr/bin/stat -c %i "$HOME/.bashrc") || return
+  /usr/bin/python3 "$HOME/scripts/nalias.py" "$@" || return
+  # reload only when nalias.py replaced the file (not on --dry-run or no-op)
+  [[ $(/usr/bin/stat -c %i "$HOME/.bashrc") != "$before" ]] || return 0
+  echo 'reloading shell'
+  exec bash
+}
 tf() { tail ${2:-'-50'} $1; tail -f $1; }       # tail -f with more recent lines 
 snh() { nohup bash -c $1 & tail -f ./nohup.out; }
 sx() { sudo "$(history | perl -pe 's/^\s+[0-9]+\**\s+//g' | tail -1)"; }

@@ -36,6 +36,7 @@ ssh() {{
     printf 'provider-check\\n'
     return {status}
   fi
+  [[ "$*" == *'git hash-object'* ]] && git -C "$dsc" hash-object pi/.bashrc
   return 0
 }}
 python3() {{ [[ "$*" == *--list-units* ]] && printf 'van-dashboard.service\\n'; return 0; }}
@@ -121,6 +122,53 @@ sync_preflight
                     recorded,
                     [*PHASES[: index + 1], f"status={FAILURE_STATUS}"],
                 )
+
+
+class PiBashrcGuardTests(unittest.TestCase):
+    """Broad sync must not install pi/.bashrc over a live copy it has never seen."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="sync-bashrc-guard-")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.checkout = self.root / "checkout"
+        (self.checkout / "pi").mkdir(parents=True)
+        self.git("init", "-q")
+        for version in ("one", "two"):
+            (self.checkout / "pi/.bashrc").write_text(f"alias v='{version}'\n")
+            self.git("add", "pi/.bashrc")
+            self.git("-c", "user.name=test", "-c", "user.email=test@example.test",
+                     "commit", "-q", "-m", version)
+        (self.checkout / "pi/.bashrc").write_text("alias v='uncommitted'\n")
+
+    def git(self, *arguments):
+        subprocess.run(["git", "-C", str(self.checkout), *arguments], check=True)
+
+    def guard(self, live_text, reachable=True):
+        live = self.root / "live-bashrc"
+        live.write_text(live_text)
+        definitions = SYNC_SCRIPT.read_text().split('source "$dsc/pi/sync_workflow.sh"')[0]
+        fake_ssh = f"git hash-object {shlex.quote(str(live))}" if reachable else "return 255"
+        harness = definitions + f"""
+dsc={shlex.quote(str(self.checkout))}
+ssh() {{ {fake_ssh}; }}
+check_pi_bashrc_known
+"""
+        return subprocess.run(["/bin/bash", "-c", harness], capture_output=True, text=True)
+
+    def test_any_version_this_checkout_has_seen_may_be_replaced(self):
+        for version in ("one", "two", "uncommitted"):
+            with self.subTest(version=version):
+                result = self.guard(f"alias v='{version}'\n")
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_unseen_or_unreadable_live_copy_refuses(self):
+        unseen = self.guard("alias v='from a pi nalias'\n")
+        self.assertEqual(unseen.returncode, 1)
+        self.assertIn("pull --ff-only", unseen.stderr)
+        unreachable = self.guard("alias v='one'\n", reachable=False)
+        self.assertEqual(unreachable.returncode, 1)
+        self.assertIn("couldn't read", unreachable.stderr)
 
 
 class ComputeProviderGuardTests(unittest.TestCase):

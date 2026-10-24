@@ -12,6 +12,26 @@ pi_ip='pi@vanpi.lan'
 # pi_ip='pi@100.82.91.76'
 package_units=""
 
+# nalias on the Pi commits ~/.bashrc edits straight to GitHub. Refuse to install
+# pi/.bashrc over a live copy that is no version this checkout has seen, so an
+# unpulled nalias commit (or an edit made on the Pi) is never silently reverted.
+check_pi_bashrc_known() {
+  local live
+  if ! live="$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$pi_ip" \
+    'git hash-object /home/pi/.bashrc')" || [[ -z "$live" ]]; then
+    echo "couldn't read the Pi's ~/.bashrc hash" >&2
+    return 1
+  fi
+  if ! { git -C "$dsc" hash-object pi/.bashrc &&
+    git -C "$dsc" log -m --format= --raw --no-abbrev -- pi/.bashrc |
+      awk '{print $4}'; } | grep -qx "$live"; then
+    echo "The Pi's ~/.bashrc is no version of pi/.bashrc in this checkout (an unpulled" \
+      "nalias commit, or an edit made on the Pi). Pull first (git -C $dsc pull --ff-only)," \
+      "or compare: ssh $pi_ip cat .bashrc | diff $dsc/pi/.bashrc -" >&2
+    return 1
+  fi
+}
+
 sync_preflight() {
   (cd "$dsc" && python3 -m pi.generate_backup_lock_registry --check) || return 1
   compute_installer="$VAN_COMPUTE_CHECKOUT/macbook/scripts/install_van_compute_worker.zsh"
@@ -27,6 +47,8 @@ sync_preflight() {
     echo "Compute provider preflight refused sync; run $VAN_COMPUTE_CHECKOUT/macbook/scripts/install_van_compute_worker.zsh from the owner's Terminal in the reviewed checkout first." >&2
     return 1
   fi
+
+  check_pi_bashrc_known || return 1
 
   if ! package_units="$(python3 "$dsc/pi/deploy_python.py" --list-units)" ||
     [[ -z "$package_units" ]]; then
