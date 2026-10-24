@@ -19,6 +19,59 @@ function pathSnapshot(btt, plan) {
     });
 }
 
+function pathEnabledPatch(original) {
+    const patch = {};
+    for (const key of ['BTTEnabled', 'BTTEnabled2']) {
+        if (Object.prototype.hasOwnProperty.call(original, key)) patch[key] = original[key];
+    }
+    return patch;
+}
+
+function pathExpected(plan, target) {
+    const matches = plan.snapshot.filter(entry => entry.uuid === target.uuid);
+    if (matches.length !== 1) throw new Error('Incomplete action backup: '+target.uuid);
+    return Object.assign({}, matches[0].trigger, {[target.field]: target.after});
+}
+
+function pathVerify(btt, plan, fingerprint) {
+    for (const target of plan.targets) {
+        const expected = pathExpected(plan, target), actual = pathGet(btt, target.uuid);
+        if (fingerprint(actual) !== fingerprint(expected)) {
+            const keys = [...new Set(Object.keys(expected).concat(Object.keys(actual)))];
+            const changed = keys.filter(key => fingerprint({[key]:actual[key]}) !==
+                fingerprint({[key]:expected[key]}));
+            throw new Error('Action readback differs beyond its path update: '+target.uuid+
+                ' (fields: '+changed.join(', ')+')');
+        }
+    }
+}
+
+function pathRestoreEnabled(btt, plan, fingerprint) {
+    const repairs = [], observed = [];
+    // Compare every target before writing. Only omission-induced 0 -> 1 drift
+    // is recoverable; custom edits and any other mismatch require review.
+    for (const target of plan.targets) {
+        const expected = pathExpected(plan, target), actual = pathGet(btt, target.uuid);
+        observed.push({uuid:target.uuid, trigger:actual});
+        const flags = pathEnabledPatch(expected), repaired = Object.assign({}, actual, flags);
+        if (fingerprint(repaired) !== fingerprint(expected))
+            throw new Error('Non-enablement drift; no changes made: '+target.uuid);
+        const changed = Object.keys(flags).filter(key => actual[key] !== flags[key]);
+        if (changed.some(key => Number(flags[key]) !== 0 || Number(actual[key]) !== 1))
+            throw new Error('Unexpected enabled state; no changes made: '+target.uuid);
+        if (changed.length) repairs.push({uuid:target.uuid, actual, flags});
+    }
+    // Recheck the full set before the first write, including unchanged targets.
+    for (const entry of observed) {
+        if (fingerprint(pathGet(btt, entry.uuid)) !== fingerprint(entry.trigger))
+            throw new Error('Action changed during recovery; no changes made: '+entry.uuid);
+    }
+    for (const repair of repairs)
+        btt.update_trigger(repair.uuid, {json:JSON.stringify(repair.flags)});
+    pathVerify(btt, plan, fingerprint);
+    return 'Restored '+repairs.length+' disabled states; all command edits verified. No actions executed.';
+}
+
 function pathApply(btt, plan, fingerprint) {
     if (plan.snapshot.length !== plan.targets.length) throw new Error('Incomplete action backup.');
     const originals = new Map(plan.snapshot.map(x => [x.uuid, x.trigger]));
@@ -32,15 +85,12 @@ function pathApply(btt, plan, fingerprint) {
     let count = 0;
     for (const target of plan.targets) {
         if (originals.get(target.uuid)[target.field] === target.after) continue;
-        btt.update_trigger(target.uuid, {json: JSON.stringify({[target.field]: target.after})});
+        // BTT can default an omitted enabled flag to 1 even for field-only updates.
+        const patch = Object.assign(pathEnabledPatch(originals.get(target.uuid)), {[target.field]: target.after});
+        btt.update_trigger(target.uuid, {json: JSON.stringify(patch)});
         count++;
     }
-    for (const target of plan.targets) {
-        const expected = Object.assign({}, originals.get(target.uuid), {[target.field]: target.after});
-        if (fingerprint(pathGet(btt, target.uuid)) !== fingerprint(expected)) {
-            throw new Error('Action readback differs beyond its path update: '+target.uuid);
-        }
-    }
+    pathVerify(btt, plan, fingerprint);
     return 'Updated '+count+' action command fields; verified runtime readback. No actions executed.';
 }
 
@@ -52,7 +102,9 @@ function run(argv) {
     }
     const btt = Application('/Applications/BetterTouchTool.app'), plan = JSON.parse(read(argv[2]));
     if (argv[0] === 'snapshot') return JSON.stringify(pathSnapshot(btt, plan));
-    if (argv[0] !== 'apply') throw new Error('Unknown path-repair mode.');
     const common = new Function(read(argv[1]+'/macbook/bettertouchtool/btt_common.js')+'\nreturn BTTCommon;')();
+    if (argv[0] === 'verify') { pathVerify(btt, plan, common.fingerprint); return 'All runtime command edits verified.'; }
+    if (argv[0] === 'restore-enabled') return pathRestoreEnabled(btt, plan, common.fingerprint);
+    if (argv[0] !== 'apply') throw new Error('Unknown path-repair mode.');
     return pathApply(btt, plan, common.fingerprint);
 }

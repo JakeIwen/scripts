@@ -56,3 +56,52 @@ test('unexpected update side effects are reported rather than ignored', () => {
     btt.update_trigger=(uuid,args)=>{update(uuid,args);records[uuid].BTTOrder=99;};
     assert.throws(()=>context.pathApply(btt,plan,context.BTTCommon.fingerprint));
 });
+
+test('command edits preserve disabled flags when BTT defaults omitted flags to enabled', () => {
+    const {btt,plan,records,calls} = fixture();
+    records.a.BTTEnabled2 = 0;
+    records.b.BTTEnabled = 1;
+    plan.snapshot = context.pathSnapshot(btt,plan);
+    const update = btt.update_trigger;
+    btt.update_trigger = (uuid,args) => {
+        const patch = JSON.parse(args.json);
+        if (uuid === 'a' && !Object.hasOwn(patch,'BTTEnabled2')) records.a.BTTEnabled2 = 1;
+        update(uuid,args);
+    };
+    context.pathApply(btt,plan,context.BTTCommon.fingerprint);
+    assert.equal(records.a.BTTEnabled2,0);
+    assert.equal(calls[0][1].BTTEnabled2,0);
+    assert.equal(calls[1][1].BTTEnabled,1);
+});
+
+test('recovery only restores disabled flags and never replays command edits', () => {
+    const {btt,plan,records,calls} = fixture();
+    records.a.BTTEnabled2 = 0;
+    plan.snapshot = context.pathSnapshot(btt,plan);
+    records.a.BTTEnabled2 = 1;
+    records.a.BTTShellTaskActionScript = plan.targets[0].after;
+    records.b.BTTTerminalCommand = plan.targets[1].after;
+    context.pathRestoreEnabled(btt,plan,context.BTTCommon.fingerprint);
+    assert.deepEqual(calls,[['a',{BTTEnabled2:0}]]);
+    assert.equal(records.a.BTTShellTaskActionScript,plan.targets[0].after);
+    context.pathRestoreEnabled(btt,plan,context.BTTCommon.fingerprint);
+    assert.equal(calls.length,1);
+});
+
+test('recovery rejects unrelated drift before any write, even on the last target', () => {
+    const {btt,plan,records,calls} = fixture();
+    records.a.BTTEnabled2=0;
+    plan.snapshot=context.pathSnapshot(btt,plan);
+    records.a.BTTEnabled2=1;
+    records.a.BTTShellTaskActionScript=plan.targets[0].after;
+    records.b.BTTTerminalCommand=plan.targets[1].after;
+    records.b.BTTOrder=99;
+    assert.throws(()=>context.pathRestoreEnabled(btt,plan,context.BTTCommon.fingerprint), /Non-enablement/);
+    assert.equal(calls.length,0);
+});
+
+test('readback names changed fields without dumping command or icon contents', () => {
+    const {btt,plan,records}=fixture();
+    records.a.BTTOrder=99;
+    assert.throws(()=>context.pathVerify(btt,plan,context.BTTCommon.fingerprint), /fields: .*BTTOrder/);
+});

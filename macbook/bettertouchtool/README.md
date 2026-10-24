@@ -288,6 +288,15 @@ references such as `sns group down` keep their names; their actual shell targets
 are repaired. Explicit SSH actions keep `--pi` intent. Run the apply command from
 Terminal if Apple Events are unavailable in an agent shell.
 
+The updater explicitly preserves `BTTEnabled`/`BTTEnabled2`: BTT can otherwise
+re-enable disabled Touch Bar buttons during a command-only patch. Saved-state
+verification includes `ZENABLEDNEW`. If an older repair stopped after applying
+commands because it re-enabled a disabled button, inspect the original private
+backup with `restore_path_enabled.py <backup>/plan.json`. Its `--apply` restores
+only accidental disabled-to-enabled drift, checks the full runtime snapshot,
+then checks saved commands and enabled states. It refuses other drift and never
+replays Sonos commands or promotes a BTT Guard checkpoint.
+
 ### Media suite checkout
 
 Performance Audio, Convert Video, Custom Conversion, BPM Over Time, Rhythm

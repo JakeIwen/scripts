@@ -21,11 +21,11 @@ class PersistenceTests(unittest.TestCase):
             c.executescript('''CREATE TABLE ZBTTBASEENTITY (
               Z_PK INTEGER,ZUNIQUEIDENTIFIER TEXT,ZPARENT INTEGER,ZBELONGSTOPRESET2 INTEGER,
               ZGESTURETYPE INTEGER,ZACTION INTEGER,ZORDER INTEGER,ZICONDATA3 BLOB,
-              ZACTIONDATA BLOB,ZLAUNCHPATH TEXT,ZADDITIONALACTIONSTRING TEXT);
+              ZACTIONDATA BLOB,ZLAUNCHPATH TEXT,ZADDITIONALACTIONSTRING TEXT,ZENABLEDNEW INTEGER);
             ''')
-            c.execute('INSERT INTO ZBTTBASEENTITY VALUES (1,?,NULL,42,767,366,0,?,NULL,NULL,NULL)',
+            c.execute('INSERT INTO ZBTTBASEENTITY VALUES (1,?,NULL,42,767,366,0,?,NULL,NULL,NULL,1)',
                       (module.MEDIA,b'\x01{"BTTMenuSizingBehavior":3}'))
-            c.execute("INSERT INTO ZBTTBASEENTITY VALUES (2,'button',1,42,773,366,0,NULL,NULL,NULL,NULL)")
+            c.execute("INSERT INTO ZBTTBASEENTITY VALUES (2,'button',1,42,773,366,0,NULL,NULL,NULL,NULL,1)")
         self.entity={'uuid':'action','parent':'button','node':{'BTTUUID':'action','BTTTriggerType':-1,
                       'BTTOrder':0,'BTTPredefinedActionType':386,'BTTAdditionalActionData':{'BTTMenuActionMenuID':'popup'}}}
         self.plan={'entities':[self.entity],'configChanges':[{'uuid':module.MEDIA,'patch':{'BTTMenuSizingBehavior':3}}],
@@ -36,13 +36,13 @@ class PersistenceTests(unittest.TestCase):
 
     def test_saved_record_with_correct_parent_preset_and_payload_passes(self):
         with sqlite3.connect(self.path) as c:
-            c.execute("INSERT INTO ZBTTBASEENTITY VALUES (3,'action',2,42,-1,386,0,NULL,?,NULL,NULL)",
+            c.execute("INSERT INTO ZBTTBASEENTITY VALUES (3,'action',2,42,-1,386,0,NULL,?,NULL,NULL,1)",
                       (b'{"BTTMenuActionMenuID":"popup"}',))
         self.assertEqual(module.disk_errors(self.path,self.plan),[])
 
     def test_unattached_or_wrong_preset_action_is_rejected(self):
         with sqlite3.connect(self.path) as c:
-            c.execute("INSERT INTO ZBTTBASEENTITY VALUES (3,'action',NULL,NULL,-1,386,0,NULL,?,NULL,NULL)",
+            c.execute("INSERT INTO ZBTTBASEENTITY VALUES (3,'action',NULL,NULL,-1,386,0,NULL,?,NULL,NULL,1)",
                       (b'{"BTTMenuActionMenuID":"popup"}',))
         self.assertTrue(module.disk_errors(self.path,self.plan))
 
