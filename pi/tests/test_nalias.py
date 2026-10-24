@@ -144,6 +144,17 @@ class NaliasTests(unittest.TestCase):
         self.assertEqual((self.rc.read_text(), self.remote.read_text()), (BASE, BASE))
         self.assertEqual(self.puts(), [])
 
+    def test_pi_shell_ends_up_with_the_committing_nalias(self):
+        """A second, older nalias later in pi/.bashrc would silently shadow it."""
+        (self.home / "secrets").mkdir()
+        (self.home / "secrets/.bash_variables").touch()
+        environment = dict(os.environ, HOME=str(self.home), PROMPT_COMMAND="")
+        result = subprocess.run(
+            ["/bin/bash", "-c", '. "$1" && declare -f nalias', "_", str(REPOSITORY_ROOT / ".bashrc")],
+            env=environment, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('"$HOME/scripts/nalias.py"', result.stdout)
+
     def test_invalid_names_and_commands_are_refused_before_github(self):
         for arguments in (("a/b", "ls"), ("a=b", "ls"), ("", "ls"), ("ok", ""), ("ok", "ls\nrm x")):
             with self.subTest(arguments=arguments):
