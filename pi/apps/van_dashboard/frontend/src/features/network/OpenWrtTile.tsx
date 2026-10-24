@@ -122,16 +122,6 @@ export function OpenWrtTile({
             MWAN3 route
           </span>
           <strong className="network-value">{route}</strong>
-          {throughput && (
-            <span
-              className="wan-throughput"
-              aria-label="Current internet throughput"
-              title={throughput.detail ?? undefined}
-            >
-              <span className="wan-throughput-label">Net</span>
-              <span>{throughput.summary}</span>
-            </span>
-          )}
           {throughput?.local != null && (
             <span
               className="wan-throughput"
@@ -140,6 +130,16 @@ export function OpenWrtTile({
             >
               <span className="wan-throughput-label">Local</span>
               <span>{throughput.local}</span>
+            </span>
+          )}
+          {throughput && (
+            <span
+              className="wan-throughput"
+              aria-label="Current internet throughput"
+              title={throughput.detail ?? undefined}
+            >
+              <span className="wan-throughput-label">Net</span>
+              <span>{throughput.summary}</span>
             </span>
           )}
         </div>
