@@ -23,24 +23,45 @@ successful recovery rounds bring it back. This avoids withdrawing the only
 usable default route and flushing connection tracking for very short cellular
 or hotspot interruptions.
 
-Every uplink's `flush_conntrack` list is `ifdown` and `disconnected` only.
-mwan3's flush empties the whole `nf_conntrack` table, not one interface's
-entries, so a flush on `ifup`/`connected` cut every live connection on the
-surviving link each time a flapping link returned (2026-10-14: 11 of 29 flushes,
-including the one that broke a Claude API response at 19:02 MDT). Flushing on
-the down events is kept so connections pinned to a dead link are re-marked.
-Change it with `uci del_list`/`add_list` on `mwan3.<iface>.flush_conntrack` and
-`uci commit mwan3`; the `15-mwan3` hotplug script reloads the config on every
-link event, so no mwan3 restart is needed. The router keeps the previous file
-as `/etc/config/mwan3.pre-flush-trim-20261015T100056Z`. The live config itself
-is not tracked here (`vanrouter/etc/config/*` is ignored).
-
 Inspect the current router-side log and durable vanpi history with:
 
 ```sh
 ssh root@192.168.6.1 'logread -e clientwan-path'
 ssh pi@vanpi.lan "sudo grep 'clientwan-path' /var/log/openwrt/dendelion.log | tail -n 30"
 ```
+
+## Connection-tracking cleanup
+
+mwan3's built-in `flush_conntrack` empties the whole connection-tracking table,
+including sessions on healthy uplinks. All three uplinks' lists are therefore
+empty. `/etc/mwan3.user` instead handles only `disconnected`: after rechecking
+that mwan3 still excludes the interface (`offline`), it writes the failed
+uplink's validated IPv4 address to OpenWrt's selective conntrack cleanup API.
+It skips missing addresses and addresses shared with another interface, so it
+does not delete a healthy uplink's sessions. `ifdown` is left to the kernel's
+masquerade notifier, which cleans up when the address or device disappears.
+No uplink has IPv6; the hook handles IPv4 only.
+
+The address match also deletes the router's own sessions from that IP and LAN
+sessions to that uplink's subnet, such as SSH to the UBNT at `192.168.8.20`.
+Those TCP sessions usually survive anyway: `nf_conntrack_tcp_loose=1` lets the
+router pick them back up if the LAN side sends next. If the far side sends
+first, the router resets them.
+
+Inspect cleanup and skip records with `logread -e mwan3-conntrack` on the router.
+Deploy from the repository root, with the three `flush_conntrack` lists empty:
+
+```sh
+scp -O vanrouter/etc/mwan3.user root@192.168.6.1:/etc/mwan3.user
+ssh root@192.168.6.1 'chmod 755 /etc/mwan3.user'
+```
+
+To roll back, restore the matching router backups
+`/etc/mwan3.user.pre-selective-ct-*` to `/etc/mwan3.user` and
+`/etc/config/mwan3.pre-selective-ct-*` to `/etc/config/mwan3`, and keep the hook
+executable (`chmod 755 /etc/mwan3.user`). The `15-mwan3` hotplug script reloads
+configuration on each link event; no mwan3 restart is needed. Live UCI config
+is not tracked here (`vanrouter/etc/config/*` is ignored).
 
 ## HTTPS uplink health
 
@@ -140,5 +161,6 @@ An alternate SSH target can be supplied as the second argument.
 ```sh
 ./vanrouter/tests/test_openwrt_5ghz_ap.sh
 ./vanrouter/tests/test_clientwan_path_monitor.sh
+./vanrouter/tests/test_mwan3_user.sh
 ./vanrouter/tests/test_kernel_5ghz_power.sh
 ```

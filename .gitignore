@@ -25,6 +25,7 @@ vanrouter/etc/init.d/*
 !vanrouter/etc/init.d/clientwan-path-monitor
 !vanrouter/etc/init.d/uplink-https-monitor
 !vanrouter/etc/sysupgrade.conf
+!vanrouter/etc/mwan3.user
 vanrouter/build/
 macbook/build/
 .local/btt-guard/

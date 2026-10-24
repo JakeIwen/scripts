@@ -1,0 +1,84 @@
+#!/bin/sh
+
+# mwan3's built-in flush is global; delete only the failed uplink's entries.
+# Leave ifdown cleanup to the kernel's masquerade notifier. IPv4 only: none of
+# the van's uplinks has IPv6.
+set -u
+: "${PATH:=/usr/sbin:/usr/bin:/sbin:/bin}"
+
+log() {
+	logger -t mwan3-conntrack "$1" 2>/dev/null || true
+}
+
+[ "${ACTION:-}" = disconnected ] || exit 0
+case ${INTERFACE:-} in
+	''|*[!A-Za-z0-9_]*)
+		log 'error invalid-interface'
+		exit 1
+		;;
+esac
+
+# Test-only filesystem prefix; mwan3's env -i leaves this unset in production.
+root=${MWAN3_USER_ROOT:-}
+state=$(cat "$root/var/run/mwan3/iface_state/$INTERFACE" 2>/dev/null)
+if [ "$state" != offline ]; then
+	log "skip interface=$INTERFACE reason=not-offline"
+	exit 0
+fi
+
+status=$(ubus call "network.interface.$INTERFACE" status 2>/dev/null) || {
+	log "error interface=$INTERFACE reason=ubus-failed"
+	exit 1
+}
+# jsonfilter exits nonzero when there is no match, the usual state after the
+# link went down; that is the no-address skip below, not an error.
+address=$(printf '%s\n' "$status" | jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null) || address=
+if [ -z "$address" ]; then
+	log "skip interface=$INTERFACE reason=no-ipv4"
+	exit 0
+fi
+case $address in
+	*[!0-9.]*)
+		log "error interface=$INTERFACE reason=invalid-ipv4"
+		exit 1
+		;;
+esac
+if ! printf '%s\n' "$address" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
+	log "error interface=$INTERFACE reason=invalid-ipv4"
+	exit 1
+fi
+
+addresses=$(ip -4 -o addr show 2>/dev/null) || {
+	log "error interface=$INTERFACE reason=ip-failed"
+	exit 1
+}
+address_count=$(printf '%s\n' "$addresses" | awk -v address="$address" '
+	$3 == "inet" {
+		split($4, parts, "/")
+		if (parts[1] == address) count++
+	}
+	END { print count + 0 }
+') || {
+	log "error interface=$INTERFACE reason=address-count-failed"
+	exit 1
+}
+if [ "$address_count" -gt 1 ]; then
+	log "skip interface=$INTERFACE address=$address reason=shared-ipv4"
+	exit 0
+fi
+
+count_file="$root/proc/sys/net/netfilter/nf_conntrack_count"
+before=$(cat "$count_file" 2>/dev/null) || {
+	log "error interface=$INTERFACE reason=count-before-failed"
+	exit 1
+}
+# Never pass an empty, malformed or multi-line value to this global-flush API.
+if ! { printf '%s\n' "$address" > "$root/proc/net/nf_conntrack"; } 2>/dev/null; then
+	log "error interface=$INTERFACE address=$address reason=write-failed"
+	exit 1
+fi
+after=$(cat "$count_file" 2>/dev/null) || {
+	log "error interface=$INTERFACE address=$address reason=count-after-failed"
+	exit 1
+}
+log "cleanup interface=$INTERFACE address=$address before=$before after=$after"
