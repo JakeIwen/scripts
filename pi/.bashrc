@@ -1,60 +1,58 @@
 #! /bin/bash
 # codeshape: allow-size the Pi's single interactive shell profile, deployed as one file to ~/.bashrc; splitting it is a separate refactor
-# Sections run top to bottom in dependency order. Bash expands an alias when a
-# function body is read, not when it runs, so every alias a function uses is
-# defined in an earlier section (grep, hist, psgrep, sns). Functions may
-# call functions and read variables from anywhere: those resolve at run time.
-
-shopt -s expand_aliases # run aliased commands inline with ssh ...@.... 
-### SHELL TRICKS ###
+# COMMANDS are definitions and nonsecret defaults, safe for a noninteractive
+# Codex BASH_ENV. Functions resolve other functions and variables at run time.
+# Below the boundary: normal shell setup, exports, secrets and command shadows.
+# SSH commands still load the full profile; only noninteractive Codex stops.
+### COMMANDS: SHELL TRICKS ###
 # Small helper set from the scripts repo (shared/sh, pi/scripts); `tricks`
 # explains each one. Loaded before any alias here so none expands inside them.
 if [ -f "$HOME/scripts/shell_tricks.bash" ]; then . "$HOME/scripts/shell_tricks.bash"; fi
 
-### CORE ALIASES ###
-alias sudo='sudo '
-alias vi='/usr/bin/vim.tiny'
-alias l='ls -lah'
-alias lla='ls -ltu'
-alias ..="cd .."
-alias ...="cd ../.."
-alias ....="cd ../../.."
-alias .....="cd ../../../.."
-alias ch7="sudo chmod -R 777" # usage: $ ch7 .
-alias chme="sudo chown -R $(whoami)" # usage: $ chme .
-alias bashp='vi ~/.bashrc'
-alias rbash='exec bash'
+# Media positions, and the APIs of the local media services: youtube-cast
+# (Van TV), audiobooks and video-library.
+POSPATH="$HOME/vlc-positions.txt"
+VLCQTPATH="$HOME/.config/vlc/vlc-qt-interface.conf"
+VANTVAPI="http://localhost:8795/api"
+BOOKAPI="http://localhost:8787/api"
+VIDEOAPI="http://localhost:8789/api"
+
+S_REPOS=("$HOME/dev/obd-things") # repos whose tracked tools/ and projects/ .py scripts s finds by name
+### CORE COMMANDS ###
+l() { command ls -lah "$@"; }
+lla() { command ls -ltu "$@"; }
+..() { builtin cd .. "$@"; }
+...() { builtin cd ../.. "$@"; }
+....() { builtin cd ../../.. "$@"; }
+.....() { builtin cd ../../../.. "$@"; }
+ch7() { command sudo chmod -R 777 "$@"; } # usage: $ ch7 .
+chme() { command sudo chown -R $(whoami) "$@"; } # usage: $ chme .
+bashp() { command /usr/bin/vim.tiny ~/.bashrc "$@"; }
 
 ### GREP & HISTORY ###
-alias grep='grep --color=auto'
-alias grepi='grep -i --color=auto'
-alias g='grep'
-alias egrep='egrep --color=auto'
-alias fgrep="find . \( -type d -o -type f \) -iname"
-alias psgrep='ps -aef | grep'
-alias agrep="alias | grep" # search aliases
-alias hist="history | perl -pe 's/^\s+[0-9]+\**\s+//g'"
-rgrep() { grep -rni "$1" "${2:-.}" ; }                    # recursively search, fallback to pwd "."
-hgrep() { hist | grep "$@" | grep -v 'hgrep' | uniq -u; } # howto: pass all args to a subfunction
-hgrepn() { history | grep "$@" | grep -v 'hgrep'; } # howto: pass all args to a subxnction
-hdel() { history -d $1 && history -w; }
+grepi() { command grep -i --color=auto "$@"; }
+g() { command grep --color=auto "$@"; }
+psgrep() { command ps -aef | command grep --color=auto "$@"; }
+agrep() { { alias; declare -f; } | command grep --color=auto "$@"; } # search aliases and function definitions
+hist() { history | command perl -pe 's/^\s+[0-9]+\**\s+//g' "$@"; }
+hgrep() { hist | command grep --color=auto "$@" | command grep --color=auto -v 'hgrep' | uniq -u; } # howto: pass all args to a subfunction
+hgrepn() { history | command grep --color=auto "$@" | command grep --color=auto -v 'hgrep'; } # howto: pass all args to a subxnction
 
 ### PYTHON ###
 # use py venv to run basically anything
 pyv() { source /home/pi/pyvenv/bin/activate; python "$@"; deactivate; }
 pipv() { source /home/pi/pyvenv/bin/activate; pip "$@"; deactivate; }
 pipa() { source /home/pi/pyvenv/bin/activate; }
-alias pip3="python3 -m pip"
-alias py="python3"
+py() { command python3 "$@"; }
 
 ### SHELL UTILITIES ###
-alias functions="cat ~/.bashrc | grep -E '^[[:space:]]*([[:alnum:]_]+[[:space:]]*\(\)|function[[:space:]]+[[:alnum:]_]+)'"
-fndef() { sed -n -e "/$1()/,/}$/ p" ~/.bashrc; } # print function definition
-als() { alias $1; fndef $1; }
+functions() { command cat ~/.bashrc | command grep --color=auto -E '^[[:space:]]*([[:alnum:]_]+[[:space:]]*\(\)|function[[:space:]]+[[:alnum:]_]+)' "$@"; }
+fndef() { declare -f -- "$@"; } # print function definition
+als() { type -- "$@"; }
 tf() { tail ${2:-'-50'} $1; tail -f $1; }       # tail -f with more recent lines 
 snh() { nohup bash -c $1 & tail -f ./nohup.out; }
 sx() { sudo "$(history | perl -pe 's/^\s+[0-9]+\**\s+//g' | tail -1)"; }
-incl() { val="$1"; shift; printf '%s\0' "${@}" | grep -F -x -z "$val"; }
+incl() { val="$1"; shift; printf '%s\0' "${@}" | command grep --color=auto -F -x -z "$val"; }
 escape_chars() { echo $1 | perl -ne 'chomp;print "\Q$_\E\n"'; }
 uridecode() { : "${*//+/ }"; echo -e "${_//%/\\x}"; } 
 trim_last_line() { sed -i '$ d' $1; } # filepath
@@ -71,13 +69,13 @@ rm_match_lines() {
   term="$1"
   file="$2"
   cp "$file" "$file.bak"
-  cat "$file.bak" | grep -via "$term" > "$file"
+  cat "$file.bak" | command grep --color=auto -via "$term" > "$file"
   cat "$file"
 }
 rm_lines() {
   pattern="$1"
   file="$2"
-  grep -Pav "$pattern" "$2" > tmpfile && mv tmpfile "$2" && rm tmpfile
+  command grep --color=auto -Pav "$pattern" "$2" > tmpfile && mv tmpfile "$2" && rm tmpfile
 }
 # rec_find_rpl_in_files find_pattern repl_string
 rec_find_rpl_in_files() { find . -exec sed -i '' "s|$1|$2|g" {} \;; }
@@ -192,7 +190,7 @@ s() { # run a named ~/scripts .sh/.py (or a directory's main.sh/main.py), else a
 }
 _s_repo_scripts() { # tracked tools/ and projects/ .py scripts of repo $1, repo-relative
   git -C "$1" ls-files -- 'tools/*.py' 'projects/*.py' 2>/dev/null |
-    grep -vE '(^|/)(tests|dashboard)/|(^|/)__init__\.py$'
+    command grep --color=auto -vE '(^|/)(tests|dashboard)/|(^|/)__init__\.py$'
 }
 _s_complete() { # complete the script name; later arguments fall back to filenames (-o default)
   local root
@@ -224,13 +222,13 @@ rm_pricecheck() { # rm_pricecheck <title-or-URL>
 }
 
 ### GIT ###
-alias gpo="git push origin"
-alias gckm="git checkout master"
-alias gac="git add .; git commit -m"
-alias gp="git pull"
-alias grao="git remote add origin"
-alias gc='git clone'
-alias gck='git checkout'
+gpo() { command git push origin "$@"; }
+gckm() { command git checkout master "$@"; }
+gac() { command git add .; command git commit -m "$@"; }
+gp() { command git pull "$@"; }
+grao() { command git remote add origin "$@"; }
+gc() { command git clone "$@"; }
+gck() { command git checkout "$@"; }
 git_branch() {
   git symbolic-ref --quiet --short HEAD 2>/dev/null ||
     git rev-parse --quiet --short HEAD 2>/dev/null
@@ -260,34 +258,34 @@ cpull() {
 }
 
 ### SYSTEM ### (Pi hardware, display, power)
-alias rb='/home/pi/scripts/safe_reboot.sh'
-alias pd='/home/pi/scripts/safe_power_down.sh'
-alias bootedit='sudo vi /boot/config.txt'
-alias bootconf='sudo cat /boot/config.txt'
-alias dirsize='sudo du -hsc .[^.]* *'
-alias disku='df -h'
-alias gtop="sudo /opt/vc/bin/vcdbg reloc stats"
-alias corefreq='cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq; vcgencmd measure_volts'
-alias gpu_mem='vcgencmd get_mem gpu'
-alias gpu_mem_fix="vcgencmd cache_flush && sudo vcdbg reloc"
-alias gpu_stat="sudo vcdbg reloc"   
-alias wake_display='xset dpms force on'
-alias slp='xset s activate'
+rb() { /home/pi/scripts/safe_reboot.sh "$@"; }
+pd() { /home/pi/scripts/safe_power_down.sh "$@"; }
+bootedit() { command sudo /usr/bin/vim.tiny /boot/config.txt "$@"; }
+bootconf() { command sudo cat /boot/config.txt "$@"; }
+dirsize() { command sudo du -hsc .[^.]* * "$@"; }
+disku() { command df -h "$@"; }
+gtop() { command sudo /opt/vc/bin/vcdbg reloc stats "$@"; }
+corefreq() { command cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq; command vcgencmd measure_volts "$@"; }
+gpu_mem() { command vcgencmd get_mem gpu "$@"; }
+gpu_mem_fix() { command vcgencmd cache_flush && command sudo vcdbg reloc "$@"; }
+gpu_stat() { command sudo vcdbg reloc "$@"; }
+wake_display() { command xset dpms force on "$@"; }
+slp() { command xset s activate "$@"; }
 keepon() { while psgrep vlc && sleep 300; do xset dpms force on; done; }
 sysvol() { sudo amixer cset numid=1 ${1:-"90"}%; }
 svc() { sudo systemctl $2 $1.service; } # svc home-assistant start
-set_date() { sudo date -s "$(wget -qSO- --max-redirect=0 google.com 2>&1 | grep Date: | cut -d' ' -f5-8)Z"; }
-alias speed="~/scripts/speedtest.sh"
+set_date() { sudo date -s "$(wget -qSO- --max-redirect=0 google.com 2>&1 | command grep --color=auto Date: | cut -d' ' -f5-8)Z"; }
+speed() { ~/scripts/speedtest.sh "$@"; }
 
 ### CRON & BACKUPS ###
-alias rscr="sudo systemctl restart cron.service"
-alias ct="sudo crontab -e"
-alias killcron="sudo pkill -f cron"
-alias cronlog="cd /var/log/cron"
-alias bkuplog='cat /var/log/cron/pi_backup.log'
-alias bkuplast="bkuplog | grep 'backup complete'"
-alias logdir="cd /var/log/cron"
-alias iswl="tf /var/log/cron/internet_switches.log"
+rscr() { command sudo systemctl restart cron.service "$@"; }
+ct() { command sudo crontab -e "$@"; }
+killcron() { command sudo pkill -f cron "$@"; }
+cronlog() { builtin cd /var/log/cron "$@"; }
+bkuplog() { command cat /var/log/cron/pi_backup.log "$@"; }
+bkuplast() { bkuplog | command grep --color=auto 'backup complete' "$@"; }
+logdir() { builtin cd /var/log/cron "$@"; }
+iswl() { tf /var/log/cron/internet_switches.log "$@"; }
 cronp() { /home/pi/scripts/parse_cron.sh "$@"; }
 bkupnow() { sudo /home/pi/scripts/backup/backup_window.sh --force; } # run every daily backup now
 sparesync() { # refresh a hot spare from the live system: sparesync a | sparesync b
@@ -308,8 +306,8 @@ startcron() {
 }
 
 ### PROCESSES & PORTS ###
-alias active_ssh_sessions="sudo netstat -tnpa | grep 'ESTABLISHED.*sshd'"
-alias num_ssh="active_ssh_sessions | wc -l"
+active_ssh_sessions() { command sudo netstat -tnpa | command grep --color=auto 'ESTABLISHED.*sshd' "$@"; }
+num_ssh() { active_ssh_sessions | command wc -l "$@"; }
 pk() { # kill process by name match - append flag '-9' for SIGTERM
   search_terms=$*
   k9="${@: -1}" # remove k9 arg
@@ -336,17 +334,17 @@ killport() {
 }
 inuse() {
   port=`if [[ "$#" = "1" ]]; then echo "$1"; else echo '[0-9][0-9][0-9][0-9][0-9]? '; fi`
-  sudo lsof -P -n | grep -E ":$port"
+  sudo lsof -P -n | command grep --color=auto -E ":$port"
   echo "port $port"
 }
 
 ### NETWORK & SSH ###
-alias ngear="ssh root@OpenWrt"
-alias ubnt="ssh -i ~/.ssh/id_rsa ubnt@192.168.8.20"
-alias rball='ubnt reboot & ngear reboot; rb'
-alias ifaces="ssh root@OpenWrt mwan3 interfaces | grep 'is online'"
-ifonline() { ssh root@OpenWrt mwan3 interfaces | grep "$1 is online"; }
-alias init_rsa="ssh-copy-id -i ~/.ssh/id_rsa.pub" # init_rsa user@device
+ngear() { command ssh root@OpenWrt "$@"; }
+ubnt() { command ssh -i ~/.ssh/id_rsa ubnt@192.168.8.20 "$@"; }
+rball() { ubnt reboot & ngear reboot; rb "$@"; }
+ifaces() { command ssh root@OpenWrt mwan3 interfaces | command grep --color=auto 'is online' "$@"; }
+ifonline() { ssh root@OpenWrt mwan3 interfaces | command grep --color=auto "$1 is online"; }
+init_rsa() { command ssh-copy-id -i ~/.ssh/id_rsa.pub "$@"; } # init_rsa user@device
 ssh_copy_id_dropbear() {
   if [ "$#" -ne 1 ]; then echo "Example: ${0} root@192.168.1.1" && exit 1; fi
   cat /home/pi/.ssh/id_rsa.pub | ssh ${1} "cat >> /etc/dropbear/authorized_keys && chmod 0600 /etc/dropbear/authorized_keys && chmod 0700 /etc/dropbear"
@@ -363,22 +361,22 @@ sshroute() {
   esac
 }
 tspath() { # Tailscale's path to a peer (default m4mac): direct 192.168.6.x = LAN; a public IP or relay = metered uplink
-  tailscale status | grep -w "${1:-m4mac}" | sed 's/, tx.*//'
+  tailscale status | command grep --color=auto -w "${1:-m4mac}" | sed 's/, tx.*//'
 }
-alias ipinfo="py /home/pi/scripts/python-packages/current/pi/scripts/python/ip_info.py"
+ipinfo() { py /home/pi/scripts/python-packages/current/pi/scripts/python/ip_info.py "$@"; }
 
 ### VAN STATE ### (storage/torrent policy, ignition)
 # Requested storage/torrent policy. policyctl writes atomically and requests
 # reconciliation; the dashboard uses the same command.
-alias policyctl='$HOME/scripts/policyctl'
-alias mconf='$HOME/scripts/policyctl status'
-alias nodisk='$HOME/scripts/policyctl disks off --wait'
-alias nodiskx='$HOME/scripts/policyctl disks on'
-alias mdisk=nodiskx
-alias notor='$HOME/scripts/policyctl torrents off'
-alias notorx='$HOME/scripts/policyctl torrents on'
-alias startor='$HOME/scripts/policyctl starlink-torrents on'
-alias startorx='$HOME/scripts/policyctl starlink-torrents off'
+policyctl() { $HOME/scripts/policyctl "$@"; }
+mconf() { $HOME/scripts/policyctl status "$@"; }
+nodisk() { $HOME/scripts/policyctl disks off --wait "$@"; }
+nodiskx() { $HOME/scripts/policyctl disks on "$@"; }
+mdisk() { nodiskx "$@"; }
+notor() { $HOME/scripts/policyctl torrents off "$@"; }
+notorx() { $HOME/scripts/policyctl torrents on "$@"; }
+startor() { $HOME/scripts/policyctl starlink-torrents on "$@"; }
+startorx() { $HOME/scripts/policyctl starlink-torrents off "$@"; }
 
 # status hooks
 ignitmonoff() { "$HOME/scripts/ignitionmonctl" disable "$@"; }
@@ -391,10 +389,10 @@ ignitionmonconf() { ignitmonconf "$@"; }
 van_is_running() { if test -f /home/pi/hooks/ignition_is_on; then echo "yes"; else echo "no"; fi; }
 
 ### DISKS & MOUNTS ###
-alias mounts='grep "dev/sd" /proc/mounts'
-alias blklbl='ls -1 /dev/disk/by-label'
-alias blk="sudo blkid | grep 'dev/sd'"
-alias drives="sudo lsblk -o NAME,FSTYPE,SIZE,MOUNTPOINT,LABEL"
+mounts() { command grep --color=auto "dev/sd" /proc/mounts "$@"; }
+blklbl() { command ls -1 /dev/disk/by-label "$@"; }
+blk() { command sudo blkid | command grep --color=auto 'dev/sd' "$@"; }
+drives() { command sudo lsblk -o NAME,FSTYPE,SIZE,MOUNTPOINT,LABEL "$@"; }
 md() { . /home/pi/scripts/mount_disks.sh "$@"; }
 remount() {
   . /home/pi/scripts/umount_disks.sh "$@"
@@ -416,8 +414,8 @@ print_vfat_uuid() {
 set_vfat_uuid() {
   UUID=$1 # 1234-ABCF  hex only
   BLKID=$2 # /dev/sdc1
-  valid=`echo "$UUID" | grep -P "^\d{4}\-[A-F]{4}$"`
-  vfat=`blkid $BLKID | grep 'TYPE="vfat"'`
+  valid=`echo "$UUID" | command grep --color=auto -P "^\d{4}\-[A-F]{4}$"`
+  vfat=`blkid $BLKID | command grep --color=auto 'TYPE="vfat"'`
   
   echo "Current UUID: $(print_vfat_uuid $BLKID)"
     
@@ -428,13 +426,13 @@ set_vfat_uuid() {
     echo "Updated UUID: $(print_vfat_uuid $BLKID)"
   else
     [ -z "$valid" ] && echo "New UUID '$UUID' does not match '1234-ABCD' form"
-    [ -z "$vfat" ] && echo "'`blkid $BLKID | grep -o 'TYPE="[^"]*"'`' is not a vfat partition"
+    [ -z "$vfat" ] && echo "'`blkid $BLKID | command grep --color=auto -o 'TYPE="[^"]*"'`' is not a vfat partition"
   fi
 }
 fsprop() { 
   prop=$1 #  LABEL UUID TYPE PARTUUID PARTLABEL
   sterm=$2
-  match="$(blkln "$sterm" | grep -Po "(?<= $prop=\")[^\"]*")"
+  match="$(blkln "$sterm" | command grep --color=auto -Po "(?<= $prop=\")[^\"]*")"
   if [ -n "$sterm" ] && [ "$(echo "$match" | wc -l)" -gt 1 ]; then
     echo "multiple matches tosearch"
     echo "prop $prop"
@@ -446,7 +444,7 @@ fsprop() {
 
 blkln() { 
   sterm=$1
-  match="$(/sbin/blkid | grep "$sterm")"
+  match="$(/sbin/blkid | command grep --color=auto "$sterm")"
   echo "$match"
 }
 sync_comps() {
@@ -474,20 +472,20 @@ sync_dirpath() {
 }
 
 ### AUDIO & SONOS ###
-alias sns='bash ~/sns.sh'
+sns() { command bash ~/sns.sh "$@"; }
 sns_list() {
   fpath="$HOME/scripts/python-packages/current/shared/python/sonos_tasks.py"
   while read f; do       
-    helpers=`echo $f | grep '# helpers'`
+    helpers=`echo $f | command grep --color=auto '# helpers'`
     if [[ $helpers ]]; then break; fi
-    echo $f | grep '^def' | sed "s|^def\s||g"
+    echo $f | command grep --color=auto '^def' | sed "s|^def\s||g"
   done < $fpath
 }
 airupnp() {
   [[ "$1" == "disable" ]] && cmd=stop || cmd=start
   sudo systemctl $cmd airupnp.service
 }
-alias rpiplay='wake_display; nohup /home/pi/RPiPlay/build/rpiplay -r 180 &'
+rpiplay() { wake_display; command nohup /home/pi/RPiPlay/build/rpiplay -r 180 "$@" & }
 rhp() {
   if [[ `ps ax` == *"rpiplay"* ]]
   then sudo pkill -f rpiplay
@@ -496,19 +494,19 @@ rhp() {
 }
 
 ### MEDIA LIBRARY ###
-alias movies='cd /mnt/movingparts/links/Movies && ls | sed "s|\.| |g" | sed "s| ...$||g"'
-alias docu='cd /mnt/movingparts/links/Documentaries && ls | sed "s|\.| |g" | sed "s| ...$||g"'
-alias torrent='cd /mnt/movingparts/torrent; ls;'
-alias new='cd /mnt/movingparts/links/New; ls;'
-alias links='cd /mnt/movingparts/links; ls;'
-alias mp='cd /mnt/movingparts/'
-alias bb='cd /mnt/bigboi/'
-alias mnt='cd /mnt'
-alias tor='cd /mnt/movingparts/torrent/'
-alias inc='cd /mnt/movingparts/torrent/incomplete; ls -lah'
-alias backup_home='cd /mnt/bigboi/pi_backup_git/pi_backup/home/pi'
-alias am="~/scripts/alias_media.sh"
-alias an="~/scripts/alias_media.sh new"
+movies() { builtin cd /mnt/movingparts/links/Movies && command ls | command sed "s|\.| |g" | command sed "s| ...$||g" "$@"; }
+docu() { builtin cd /mnt/movingparts/links/Documentaries && command ls | command sed "s|\.| |g" | command sed "s| ...$||g" "$@"; }
+torrent() { builtin cd /mnt/movingparts/torrent; ls "$@"; }
+new() { builtin cd /mnt/movingparts/links/New; ls "$@"; }
+links() { builtin cd /mnt/movingparts/links; ls "$@"; }
+mp() { builtin cd /mnt/movingparts/ "$@"; }
+bb() { builtin cd /mnt/bigboi/ "$@"; }
+mnt() { builtin cd /mnt "$@"; }
+tor() { builtin cd /mnt/movingparts/torrent/ "$@"; }
+inc() { builtin cd /mnt/movingparts/torrent/incomplete; command ls -lah "$@"; }
+backup_home() { builtin cd /mnt/bigboi/pi_backup_git/pi_backup/home/pi "$@"; }
+am() { ~/scripts/alias_media.sh "$@"; }
+an() { ~/scripts/alias_media.sh new "$@"; }
 avail_drive_path() {
   bb_links='/mnt/bigboi/mp_backup'
   mp_links='/mnt/movingparts'
@@ -521,32 +519,32 @@ media_all() {
 
 media_docs_movies() {
   base="$(avail_drive_path)/links"
-  find "$base/Movies" "$base/Documentaries" | grep -Ev  '/Movies$|/Documentaries$'
+  find "$base/Movies" "$base/Documentaries" | command grep --color=auto -Ev  '/Movies$|/Documentaries$'
 }
 media_by_name() { find "$(avail_drive_path)/links" -type l -ipath "*$1*" -print0 | sort -z; }
 fgp() { find /mnt/movingparts/links \( -type l \) -iname "*$1*"; }
 tv() { cd /mnt/movingparts/links/TV || cd /mnt/bigboi/links/TV; ls; }
 
 ### VLC PLAYBACK ###
-vlcr() { grep -ia "$1" "$POSPATH" | tail -10; }
+vlcr() { command grep --color=auto -ia "$1" "$POSPATH" | tail -10; }
 vlc_nosubs() { increment_global vlc_sub_track -1 2; resume ; }
 vlc_subs_off() { echo '-1' > /home/pi/.vlc_sub_track; resume; }
 vlcnice() { sudo renice ${1:-"12"} `pgrep vlc`; }
-lastpos() { grep -Pai "$1" "$POSPATH"; }
+lastpos() { command grep --color=auto -Pai "$1" "$POSPATH"; }
 log_position() { /home/pi/scripts/log_position.sh; }
 
 get_last_position() {
   if [ -n "$1" ]; then
     # parse the big integer from the line after the filepath
-    grep -Poai "(?<=$1 )\d{4,}" "$POSPATH"
+    command grep --color=auto -Poai "(?<=$1 )\d{4,}" "$POSPATH"
   else
     echo 0
   fi
 }
 resume() {
-  if [ $# -eq 1 ] && [ -z "$( echo "$1" | grep -Po '^-')" ]; then
+  if [ $# -eq 1 ] && [ -z "$( echo "$1" | command grep --color=auto -Po '^-')" ]; then
     # if first arg is not a switch ie starts with '-'
-    pth=`grep -ia "$1" $POSPATH | tail -1 | cut -d' ' -f1`
+    pth=`command grep --color=auto -ia "$1" $POSPATH | tail -1 | cut -d' ' -f1`
     shift
   else
     pth=`tail -1 "$POSPATH" | cut -d' ' -f1` 
@@ -616,14 +614,14 @@ play() {
   pth=$1
   # gpu_mem_fix > /dev/null
   # decoded=`uridecode "$pth"`=[]
-  dir=`echo "$pth" | grep -Po '.*(New|TV|Movies|Documentaries)'`
+  dir=`echo "$pth" | command grep --color=auto -Po '.*(New|TV|Movies|Documentaries)'`
   filename=`basename "$pth"` # TODO if DIR do ELSE play mkv
   if [ -z $dir ]; then
     unset epnum  
     unset name  
   else
     epnum=`parse_episode_num $pth`
-    name="$(echo "$filename" | grep -Poi ".*(?=[_\.]S\d\d.*$)" | sed -E 's|[\\\.]|_|g' )"
+    name="$(echo "$filename" | command grep --color=auto -Poi ".*(?=[_\.]S\d\d.*$)" | sed -E 's|[\\\.]|_|g' )"
   fi
   
   shift
@@ -671,7 +669,7 @@ run_vlc() {
     decoded=`uridecode $pth`
   elif [ -n "$filepaths" ]; then
     decoded=`uridecode $filepaths`
-    pth="$(echo $filepaths | grep -Po '^\S+')"
+    pth="$(echo $filepaths | command grep --color=auto -Po '^\S+')"
   else
     echo "no path or filepaths provided"
     return 0
@@ -719,12 +717,12 @@ parse_episode_num() {
   pth=$1
   epp=$2
   cleanln=`basename "$(echo $pth | tail -1)" | perl -pe 's|\_?\d{4}\_?||g'`
-  season=`echo $cleanln | grep -Po '(?<=(S|s))\d\d' | head -1`
-  epp=`echo $cleanln | grep -Po '(?<=(E|e))\d\d' | tail -1`
+  season=`echo $cleanln | command grep --color=auto -Po '(?<=(S|s))\d\d' | head -1`
+  epp=`echo $cleanln | command grep --color=auto -Po '(?<=(E|e))\d\d' | tail -1`
   if [[ "$epp" && "$season" ]] ; then
     echo "${season}${epp}" | perl -pe 's|^0||g' # parsed numbers
   else
-    echo $cleanln | perl -pe 's|\_?\d{4,}\_?||g' | grep '\d\d\d'
+    echo $cleanln | perl -pe 's|\_?\d{4,}\_?||g' | command grep --color=auto '\d\d\d'
   fi
 }
 playf() {
@@ -732,16 +730,16 @@ playf() {
 
   if [ "$2" = "-l" ]; then # list files
     echo "available files"
-    media_all | grep -i "$name"
+    media_all | command grep --color=auto -i "$name"
     return 0
   elif [ "$2" = "-s" ]; then # start
     ep=101
   elif [ "$2" = "-r" ]; then
-    filepaths=`media_all | grep -i "$name" | shuf`
+    filepaths=`media_all | command grep --color=auto -i "$name" | shuf`
     run_vlc
     return 0
   elif [ -z "$2" ]; then # movie
-    filepaths=`media_docs_movies | grep -i "$name" | sort`
+    filepaths=`media_docs_movies | command grep --color=auto -i "$name" | sort`
     run_vlc
     return 0
   fi
@@ -754,7 +752,7 @@ playf() {
   if [ ${#match_arr[@]} -eq 0 ]; then echo "No matches found" && return 1; fi
   # match ep
   for idx in "${!match_arr[@]}"; do
-    dirplusname="$(echo ${match_arr[$idx]} | grep -Po '[^\/]+\/[^\/]+$')"
+    dirplusname="$(echo ${match_arr[$idx]} | command grep --color=auto -Po '[^\/]+\/[^\/]+$')"
     ep_from_path=$(parse_episode_num $dirplusname $ep)
     if [[ "${ep_from_path,,}" == *"${ep,,}"* ]]; then # case-insensitive match
       filepaths="${match_arr[*]:$idx}" # slice to the end of the array
@@ -846,7 +844,7 @@ vlcmd() {
   wake_display
   dbus-send --type=method_call --dest=org.mpris.MediaPlayer2.vlc /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.$cmd $param
 }
-alias pp="vlcmd PlayPause"
+pp() { vlcmd PlayPause "$@"; }
 play_status() {
   local cast
   cast=$(vantv_status)
@@ -874,11 +872,10 @@ play_status() {
 ### LLM TOOLS ###
 # Claude Code opens previews and links with xdg-open, which the DISPLAY=:0
 # export in ENVIRONMENT sends to the Pi's own desktop (it launched Firefox there).
-# Every claude* helper here goes through this; `command claude` skips it.
+# Claude helpers explicitly clear DISPLAY; `command claude` skips that guard.
 # The codex helpers below use `env -u DISPLAY codex` for the same reason
 # (Codex's login flow opened Firefox there too).
-claude() { env -u DISPLAY claude "$@"; }
-alias codexcfg='vi ~/.codex/config.toml'
+codexcfg() { command /usr/bin/vim.tiny ~/.codex/config.toml "$@"; }
 
 # Permissions come from config.toml's default workspace-git-network profile:
 # -c, --profile, and --strict-config all force embedded mode (no shared
@@ -889,32 +886,9 @@ codexp() {
     "$@"
 }
 
-alias codexpr='codexp resume'
+codexpr() { codexp resume "$@"; }
 
-# Restricted sessions, as plain `codex` was before codexp's permissions moved
-# into config.toml's default profile: --sandbox workspace-write (Codex's
-# built-in workspace sandbox, network off) keeps the shared background server,
-# where -c would not. An explicit sandbox choice, or a non-session
-# subcommand, passes through untouched; `command codex` skips the wrapper.
-codex() {
-  local arg
-  for arg in "$@"; do
-    case $arg in
-      -s|--sandbox|--sandbox=*|--dangerously-bypass-approvals-and-sandbox)
-        env -u DISPLAY codex "$@"
-        return ;;
-    esac
-  done
-  case ${1-} in
-    exec|e|resume|fork)
-      env -u DISPLAY codex "$1" --sandbox workspace-write "${@:2}" ;;
-    review|login|logout|mcp|plugin|app-server|remote-control|app|completion|update|doctor|sandbox|debug|apply|a|queue|archive|delete|migrate-rollouts|unarchive|cloud|exec-server|features|help|agents)
-      env -u DISPLAY codex "$@" ;;
-    *)
-      env -u DISPLAY codex --sandbox workspace-write "$@" ;;
-  esac
-}
-alias codexpcan='codexpr --sandbox danger-full-access --add-dir /mnt/EXFAT512/obd-things --add-dir /dev/bus/usb'
+codexpcan() { codexpr --sandbox danger-full-access --add-dir /mnt/EXFAT512/obd-things --add-dir /dev/bus/usb "$@"; }
 
 # codexpm <ME> [prompt]: M = a astra, s sol, l luna; E = l low, m medium,
 # h high, x xhigh, M max, U ultra. `codexpm am "fix it"` = astra at medium effort.
@@ -934,7 +908,7 @@ codexpm() {
   codexp -m "$m" -c "model_reasoning_effort=\"$e\"" "$@"
 }
 
-alias claudep='claude --permission-mode bypassPermissions'
+claudep() { env -u DISPLAY claude --permission-mode bypassPermissions "$@"; }
 # claudepm <ME> [prompt]: M = a astra, s sol, l luna, f fable, o opus,
 # n sonnet, h haiku; E = l low, m medium, h high, x xhigh, M max.
 # Mirrors the Mac's ~/.zshrc.
@@ -951,10 +925,10 @@ claudepm() {
     *) echo "claudepm: effort '${spec:1:1}' not l|m|h|x|M" >&2; return 2 ;;
   esac
   shift
-  claude --permission-mode bypassPermissions --model "$m" --effort "$e" "$@"
+  env -u DISPLAY claude --permission-mode bypassPermissions --model "$m" --effort "$e" "$@"
 }
 # Fresh config-maintenance session; ~/config/AGENTS.md is its only memory.
-claudecfg() { (cd ~/config && claude --permission-mode bypassPermissions "$@"); }
+claudecfg() { (cd ~/config && env -u DISPLAY claude --permission-mode bypassPermissions "$@"); }
 clauderm() {
     if [ -z "$1" ] || [ -z "$2" ]; then
         echo "usage: clauderm <project-folder> <conversation-id>" >&2
@@ -966,11 +940,11 @@ clauderm() {
 # Ctrl+R rename, Ctrl+B branch). A session ID as the first arg resumes directly.
 # Mirrors the Mac's ~/.zshrc functions.
 clauder() {
-    claude --resume "$@"
+    env -u DISPLAY claude --resume "$@"
 }
 
 claudepr() {
-    claude --permission-mode bypassPermissions --resume "$@"
+    env -u DISPLAY claude --permission-mode bypassPermissions --resume "$@"
 }
 
 # Prints the pid of a running claude that has session $1 open. Returns 0 when
@@ -979,7 +953,7 @@ claudepr() {
 _claude_session_live_pid() {
     local registry="$HOME/.claude/sessions" files status f pid
     [ -d "$registry" ] && [ -r "$registry" ] && [ -x "$registry" ] || return 2
-    files=$(grep -rlF --include='*.json' -- "$1" "$registry")
+    files=$(command grep --color=auto -rlF --include='*.json' -- "$1" "$registry")
     status=$?
     [ "$status" -gt 1 ] && return 2
     for f in $files; do
@@ -1035,17 +1009,52 @@ claudesearch() { /home/pi/scripts/claudesearch.sh "$@"; }
 llmsearch() { /home/pi/scripts/llmsearch.sh "$@"; }
 # Reopen the Claude/Codex sessions open before a reboot (skips open ones);
 # --cron on|off toggles the every-minute snapshot, --dry-run previews.
-alias llmrestore='/usr/bin/python3 -I -B /home/pi/scripts/llm_restore.py'
+llmrestore() { /usr/bin/python3 -I -B /home/pi/scripts/llm_restore.py "$@"; }
 
 ### CANBUS ###
-alias obd="cd ~/dev/obd-things; ls -lah"
+obd() { builtin cd ~/dev/obd-things; command ls -lah "$@"; }
 
-### SHELL BASE ###
+# Codex command shells need helpers, not secrets, DISPLAY or command shadows.
+[[ -n ${CODEX_THREAD_ID-} && $- != *i* ]] && return
+shopt -s expand_aliases # preserve inline aliases in noninteractive ssh commands
+alias sudo='sudo ' # parse-time expansion of the next word; sudo cannot run functions
+vi() { /usr/bin/vim.tiny "$@"; }
+rbash() { exec bash "$@"; }
+grep() { command grep --color=auto "$@"; }
+egrep() { command egrep --color=auto "$@"; }
+fgrep() { command find . \( -type d -o -type f \) -iname "$@"; }
+pip3() { command python3 -m pip "$@"; }
+rgrep() { grep -rni "$1" "${2:-.}" ; }                    # recursively search, fallback to pwd "."
+hdel() { history -d $1 && history -w; }
+claude() { env -u DISPLAY claude "$@"; }
+# Restricted sessions, as plain `codex` was before codexp's permissions moved
+# into config.toml's default profile: --sandbox workspace-write (Codex's
+# built-in workspace sandbox, network off) keeps the shared background server,
+# where -c would not. An explicit sandbox choice, or a non-session
+# subcommand, passes through untouched; `command codex` skips the wrapper.
+codex() {
+  local arg
+  for arg in "$@"; do
+    case $arg in
+      -s|--sandbox|--sandbox=*|--dangerously-bypass-approvals-and-sandbox)
+        env -u DISPLAY codex "$@"
+        return ;;
+    esac
+  done
+  case ${1-} in
+    exec|e|resume|fork)
+      env -u DISPLAY codex "$1" --sandbox workspace-write "${@:2}" ;;
+    review|login|logout|mcp|plugin|app-server|remote-control|app|completion|update|doctor|sandbox|debug|apply|a|queue|archive|delete|migrate-rollouts|unarchive|cloud|exec-server|features|help|agents)
+      env -u DISPLAY codex "$@" ;;
+    *)
+      env -u DISPLAY codex --sandbox workspace-write "$@" ;;
+  esac
+}
 shopt -s dotglob # match all items in directory except . and ..
 shopt -s histappend                      # append to history, don't overwrite it
-# Debian's stock interactive defaults (history control, completion) load
-# before everything else so the rest of this file can override them; the file
-# returns early when the shell isn't interactive.
+# Debian's stock interactive defaults supply history control and completion.
+# This file returns early when the shell isn't interactive.
+# Command definitions above do not depend on those interactive settings.
 if [ -f ~/.bash_defaults ]; then . ~/.bash_defaults; fi
 
 ### ENVIRONMENT ###
@@ -1068,15 +1077,7 @@ esac
 unset pi_python_packages
 source ~/secrets/.bash_variables
 
-# Media positions, and the APIs of the local media services: youtube-cast
-# (Van TV), audiobooks and video-library.
-export POSPATH="$HOME/vlc-positions.txt"
-export VLCQTPATH="$HOME/.config/vlc/vlc-qt-interface.conf"
-VANTVAPI="http://localhost:8795/api"
-BOOKAPI="http://localhost:8787/api"
-VIDEOAPI="http://localhost:8789/api"
-
-S_REPOS=("$HOME/dev/obd-things") # repos whose tracked tools/ and projects/ .py scripts s finds by name
+export POSPATH VLCQTPATH
 complete -o default -F _s_complete s
 [[ $- == *i* && $(sshroute) == *Tailscale* ]] && echo "vanpi: connected over Tailscale (metered uplink?)"
 # Host-local agent settings kept outside this repo.

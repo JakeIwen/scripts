@@ -44,7 +44,7 @@ class DeploymentApiWiringTests(unittest.TestCase):
         self.assertIsNotNone(videoapi, "VIDEOAPI assignment not found")
         vlcmd = self._extract_bash_function(bashrc, "vlcmd")
         vid = self._extract_bash_function(bashrc, "vid")
-        pp = next(line for line in bashrc.splitlines() if line.startswith("alias pp="))
+        pp = next(line for line in bashrc.splitlines() if line.startswith("pp() {"))
         return videoapi, vlcmd, vid, pp
 
     @staticmethod
