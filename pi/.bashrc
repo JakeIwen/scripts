@@ -135,7 +135,7 @@ rm_sm_dirs() { # remove small dirs by size `rm_sm_dirs 1.1G .`
 nalias() {
   local before
   before=$(/usr/bin/stat -c %i "$HOME/.bashrc") || return
-  /usr/bin/python3 "$HOME/scripts/nalias.py" "$@" || return
+  /usr/bin/python3 "$HOME/scripts/nfn.py" "$@" || return
   # reload only when nalias.py replaced the file (not on --dry-run or no-op)
   [[ $(/usr/bin/stat -c %i "$HOME/.bashrc") != "$before" ]] || return 0
   echo 'reloading shell'

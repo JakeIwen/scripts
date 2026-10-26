@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = REPOSITORY_ROOT / "scripts/nalias.py"
+SCRIPT = REPOSITORY_ROOT / "scripts/nfn.py"
 HEADER = "### NALIAS ### (added by nalias; defined last, so no function above expands them)"
 BASE = "### CORE ###\nalias gs='git status'\nls_all() { ls -a; }\n"
 
@@ -153,7 +153,7 @@ class NaliasTests(unittest.TestCase):
             ["/bin/bash", "-c", '. "$1" && declare -f nalias', "_", str(REPOSITORY_ROOT / ".bashrc")],
             env=environment, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('"$HOME/scripts/nalias.py"', result.stdout)
+        self.assertIn('"$HOME/scripts/nfn.py"', result.stdout)
 
     def test_invalid_names_and_commands_are_refused_before_github(self):
         for arguments in (("a/b", "ls"), ("a=b", "ls"), ("", "ls"), ("ok", ""), ("ok", "ls\nrm x")):

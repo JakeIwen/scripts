@@ -312,7 +312,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   `pi/.bashrc` source the host file before any alias. The Pi runs all three flat
   from `/home/pi/scripts/`: ship them together. `shared/tests/test_shell_tricks.py`
   keeps tools and doc in step; behavior cases live in `shared/tests/shell_tricks_cases.sh`.
-- `pi/scripts/nalias.py` is the Pi's `nalias` (the `pi/.bashrc` function wraps it and
+- `pi/scripts/nfn.py` is the Pi's `nalias` (the `pi/.bashrc` function wraps it and
   reloads the shell, like the Mac's zshrc one). It commits the alias edit to
   `pi/.bashrc` on GitHub master with `gh api` (contents-API compare-and-swap on the
   blob SHA), then installs it as `/home/pi/.bashrc`; when the live file and GitHub
