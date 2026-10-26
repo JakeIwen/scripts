@@ -37,6 +37,7 @@ compare it with this checkout. Deployed files may differ from the repository.
 | `macbook/scripts/sns.sh` | Mac shell alias and BetterTouchTool | `shared/python/sonos_cli.py` and `sonos_tasks.py` |
 | `pi/sns.sh` | Pi shell alias and video audio checks (`/home/pi/sns.sh`) | shared Sonos CLI and tasks; package release imports |
 | `shared/sh/` | Mac/Pi aliases, cron and targeted flat Pi deployment | feature-named scripts in the documented compatibility folder |
+| `shared/codex_autocontinue/run` | interactive `codexp` shell launcher | `shared/codex_autocontinue/` |
 | `pi/projects/phone-drop/` | `phone-drop.service` and its scoped deployer | the project folder |
 | `ubnt/persistent/scripts/` | airOS boot hooks and `ubnt/scp_to_device.sh` | the complete Wi-Fi-manager cohort |
 
@@ -193,6 +194,24 @@ compare it with this checkout. Deployed files may differ from the repository.
   `dashboard/paneLinks.ts` owns public pane ids and URL/history state;
   feature owners use `usePaneLink`. Network History retains its fragment query filters.
 - `shared/`: code imported or deployed on more than one host.
+- `shared/codex_autocontinue/`: stdlib Python 3.9+ transparent PTY wrapper for
+  interactive Codex capacity errors. Stable launch: `shared/codex_autocontinue/run
+  -- <command> <args>`; it preserves cwd and child environment, and non-TTY stdin
+  uses direct exec. `pty_proxy.py` owns forwarding, `terminal_session.py` the tty,
+  signals/window size/title stack, `detector.py` streamed turn detection, and
+  `retry_state.py` cancellation/attempt/time ceilings. Edit the small delay formula
+  in `backoff.py`; defaults live only in `shared/settings/codex-autocontinue.json`,
+  with `tool_settings.Reloader` reading private overrides. Only a successful turn
+  resets the streak (Codex's done OSC or inline Worked-for line), never partial
+  output or elapsed time. `fake_server.py` is the loopback Responses fixture;
+  `shared/codex_autocontinue/run --demo` runs a real TUI with short delays and an
+  isolated temporary home/provider in embedded mode (no account, daemon download,
+  or real Codex home). Tests under the feature include real-TUI PTY integration;
+  only those tests skip if Codex is absent. No Pi deployment is wired here yet.
+  `run` starts Python through `~/.local/state/codex-autocontinue/codex-retry`
+  (a symlink) so iTerm tabs read `(codex-retry)`; never name it `codex`, which
+  `llm_restore.py` would count as a TUI. The Codex child sits on the wrapper's
+  pty, so `uncommitted_owners.py` finds its tab through ancestor ttys.
 - Sonos: `shared/python/sonos_cli.py` owns validated argv dispatch
   and read-only diagnostics; `sonos_cli_commands.py` owns command argument types,
   ranges and CLI-only signatures; `sonos_tasks.py` owns operations and lazy
