@@ -208,6 +208,21 @@ class UncommittedOwners(unittest.TestCase):
         self.assertEqual((satellite.pid, satellite.location),
                          (101, "Set up Mac satellite | jacobr (codex)"))
 
+    def test_wrapped_codex_tui_is_located_through_its_wrapper_tty(self):
+        archive = uo.SessionOwner("codex", CODEX_ID, title="Archive resolved conversations")
+        open_codex = {CODEX_ID: {"id": CODEX_ID, "pid": 101, "title": archive.title}}
+        # codex 101 runs on the wrapper's own pty; wrapper 50 sits on the iTerm tab's tty.
+        with patch.object(uo, "_claude_open", return_value={}), \
+                patch.object(uo, "_codex_open", return_value=(open_codex, True)), \
+                patch.object(uo, "_tty", side_effect={101: "ttys9", 50: "ttys1"}.get), \
+                patch.object(uo, "_parent", side_effect={101: 50, 50: 40}.get), \
+                patch.object(uo, "_iterm_locations", return_value={
+                    "ttys1": "Archive resolved conversations | jacobr (codex-retry)"}), \
+                patch.object(uo.sys, "platform", "darwin"):
+            uo.enrich_open_state([archive])
+        self.assertEqual((archive.pid, archive.location),
+                         (101, "Archive resolved conversations | jacobr (codex-retry)"))
+
     def test_text_lists_open_before_closed_then_unattributed(self):
         output = self.run_tool().stdout
         self.assertLess(output.index("Open sessions"), output.index("Closed sessions"))

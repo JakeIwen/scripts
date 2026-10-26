@@ -649,6 +649,29 @@ def _tty(pid: int) -> str | None:
         return None
 
 
+def _parent(pid: int) -> int | None:
+    try:
+        text = _run(["/bin/ps", "-o", "ppid=", "-p", str(pid)]).stdout.strip()
+        return int(text) if text.isdigit() and int(text) > 1 else None
+    except (ToolError, OSError):
+        return None
+
+
+def _terminal_location(pid: int, tty: str | None, locations: dict[str, str]) -> str | None:
+    """The tab that shows pid; a PTY wrapper (codex_autocontinue) gives the TUI its
+    own tty, so the tab belongs to an ancestor's tty."""
+    current, current_tty = pid, tty
+    for _ in range(4):
+        location = locations.get((current_tty or "").removeprefix("/dev/"))
+        if location:
+            return location
+        current = _parent(current)
+        if current is None:
+            break
+        current_tty = _tty(current)
+    return tty
+
+
 def _iterm_locations() -> dict[str, str]:
     script = '''set resultText to ""
 tell application "iTerm2"
@@ -718,8 +741,7 @@ def enrich_open_state(owners: list[SessionOwner]) -> None:
     records = [*claude.values(), *codex.values()]
     ttys = {int(record["pid"]): _tty(int(record["pid"])) for record in records}
     locations = _iterm_locations() if sys.platform == "darwin" else _tmux_locations()
-    pid_locations = {pid: locations.get((tty or "").removeprefix("/dev/")) or tty
-                     for pid, tty in ttys.items()}
+    pid_locations = {pid: _terminal_location(pid, tty, locations) for pid, tty in ttys.items()}
     _reassign_codex_pids(codex, pid_locations)
     for owner in owners:
         record = claude.get(owner.session_id) if owner.tool == "claude" else codex.get(owner.session_id)
