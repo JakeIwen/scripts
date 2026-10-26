@@ -303,6 +303,14 @@ compare it with this checkout. Deployed files may differ from the repository.
   bare `+cmd` without a model turn and passes every other prompt through.
   `uncommitted_owners.py` and `plus_commands.py` sit flat in `/home/pi/scripts/`
   on the Pi, next to `llm_restore.py`.
+- `shared/sh/known_terms.py` keeps `~/.claude/KNOWN-TERMS.md`, the terms Jacob
+  already knows, which the global "Teaching as you go" rule leaves out of
+  **Terms** blocks. With `--hook` it is a SessionStart and UserPromptSubmit
+  hook (Claude and Codex, Mac and Pi): `+known <terms>` records terms without
+  a model turn, and every session gets the list as hook context, then only
+  the terms added since (per-session state in `~/.claude/known-terms-seen/`).
+  The Mac merges both machines' copies over `vanpi.lan` on each change; the
+  Pi copy sits flat in `/home/pi/scripts/`.
 - Shell tricks, Jacob's small interactive helper set (13 per host, at most 16):
   `shared/sh/shell_tricks_common.sh` (tools both hosts share, plus `tricks`),
   host files `macbook/scripts/shell_tricks.zsh` and `pi/scripts/shell_tricks.bash`,
@@ -825,7 +833,7 @@ The active design is represented by:
 - `pi/scripts/backup/rootfs_budget.sh`: bounded rootfs path budgets and daily growth history for the watchdog.
 - `pi/scripts/rootfs_tidy.sh`: weekly apt-cache cleanup that runs the shared Codex release retention as root with `--owner pi --package all`.
 - `shared/sh/cleanup_codex_releases.py`: Codex release retention for both the MacBook (weekly user cron via the `macbook/scripts/` symlink) and vanpi. Defaults to standalone; `--package all` checks standalone and app-server-daemon independently, each keeping three versions plus current/running releases under its own installer lock. An absent package is optional in an all-packages sweep; unsafe or incomplete installed trees fail.
-- `shared/sh/codex_update.py`: weekly `codex update` on both hosts (cron every 6 h in `macbook/crontab` and `pi/crontab_pi`; Pi copy flat at `/home/pi/scripts/codex_update.py`, which the Mac calls over `vanpi.lan`). It defers while a selected mwan3 uplink is Starlink or unverifiable, judged from `backup/icloud_uplink.py`'s evidence (its own Starlink-only rule, not the iCloud admission `decide`); the Mac asks the Pi only when its gateway is the van router. It runs the installer with `~/.local/bin` on PATH so it never edits a shell profile. `shared/automations/codex-update.json` is its Mac Panel card, showing both hosts. Both hosts' `~/.codex/config.toml` set `check_for_update_on_startup = false`, so the TUI never prompts.
+- `shared/sh/codex_update.py`: weekly `codex update` on both hosts (cron every 6 h in `macbook/crontab` and `pi/crontab_pi`; Pi copy flat at `/home/pi/scripts/codex_update.py`, which the Mac calls over `vanpi.lan`). It defers while a selected mwan3 uplink is Starlink or unverifiable, judged from `backup/icloud_uplink.py`'s evidence (its own Starlink-only rule, not the iCloud admission `decide`). That evidence flags each SSID with `pi/scripts/connectivity_status.py`'s `is_starlink_ssid` (an exact match on `STARLINK_SSID`, `denlink`), the one definition of "this is the van's Starlink" that iCloud admission also uses; the Mac asks the Pi only when its gateway is the van router. It runs the installer with `~/.local/bin` on PATH so it never edits a shell profile. `shared/automations/codex-update.json` is its Mac Panel card, showing both hosts. Both hosts' `~/.codex/config.toml` set `check_for_update_on_startup = false`, so the TUI never prompts.
 - `pi/scripts/backup/abort_backup.sh`: coordinated termination before unmounting.
 - `pi/scripts/backup/clone_to_sd.sh`: bootable spare-card cloning.
 - `pi/scripts/mount_disks.sh` and `pi/scripts/umount_disks.sh`: disk lifecycle.

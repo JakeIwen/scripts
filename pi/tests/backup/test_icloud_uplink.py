@@ -35,14 +35,15 @@ class CollectorTests(unittest.TestCase):
 
     def test_unused_antenna_is_not_queried(self):
         evidence, calls = self.collect([('clientwan', 100)], fail_antenna=True)
-        self.assertTrue(decide(evidence, ['denlink'], now=1000)[0])
+        self.assertTrue(decide(evidence, now=1000)[0])
         self.assertEqual(len(calls), 2)
 
     def test_every_selected_antenna_is_checked_and_starlink_blocked(self):
         for members in ([('wan', 100)], [('wan', 50), ('clientwan', 50)]):
-            for ssid, allowed in [('SafeWifi', True), ('denlink', False), ('Starlink Mini', False)]:
+            for ssid, allowed in [('SafeWifi', True), ('denlink', False), ('Starlink Mini', True)]:
                 evidence, calls = self.collect(members, ssid)
-                self.assertEqual(decide(evidence, ['denlink'], now=1000)[0], allowed)
+                self.assertEqual(decide(evidence, now=1000)[0], allowed)
+                self.assertEqual(evidence['ubnt']['starlink'], not allowed)
                 self.assertEqual(len(calls), 3)
 
     def test_selected_antenna_failure_is_not_ignored(self):

@@ -18,9 +18,11 @@ SPEC.loader.exec_module(codex_update)
 NOW = 1_800_000_000.0
 
 
-def evidence(members, ubnt_ssid='Campground', wireless=None):
+def evidence(members, ubnt_starlink=False, wireless=None):
+    ssid = 'denlink' if ubnt_starlink else 'Campground'
     return {'checked_at': NOW, 'router': {'route_members': members},
-            'ubnt': {'connected': True, 'ssid': ubnt_ssid}, 'wireless_uplinks': wireless or {}}
+            'ubnt': {'connected': True, 'ssid': ssid, 'starlink': ubnt_starlink},
+            'wireless_uplinks': wireless or {}}
 
 
 class FakeMachine:
@@ -77,17 +79,19 @@ class CodexUpdateTest(unittest.TestCase):
         return json.loads((self.root / 'state/state.json').read_text())
 
     def test_pi_defers_while_the_antenna_is_on_starlink(self):
-        machine = FakeMachine(evidence([{'name': 'wan', 'percent': 100}], ubnt_ssid='denlink'))
+        machine = FakeMachine(evidence([{'name': 'wan', 'percent': 100}], ubnt_starlink=True))
         code, output = self.main(['run'], self.host(machine))
         self.assertEqual((code, machine.updated()), (0, False))
         self.assertIn('deferred: wan is on Starlink', output)
         self.assertEqual(self.state()['outcome'], 'deferred')
 
-    def test_only_the_exact_denlink_ssid_counts_as_starlink(self):
-        for ssid in ('Starlink', 'DenLink', 'denlink-guest'):
-            machine = FakeMachine(evidence([{'name': 'wan', 'percent': 100}], ubnt_ssid=ssid))
-            self.main(['run', '--force'], self.host(machine))
-            self.assertTrue(machine.updated(), ssid)
+    def test_evidence_without_the_starlink_judgment_defers(self):
+        stale = evidence([{'name': 'wan', 'percent': 100}])
+        del stale['ubnt']['starlink']
+        machine = FakeMachine(stale)
+        self.main(['run', '--force'], self.host(machine))
+        self.assertFalse(machine.updated())
+        self.assertEqual(self.state()['reason'], 'wan has no verified SSID')
 
     def test_any_selected_starlink_member_defers_even_when_balanced(self):
         machine = FakeMachine(evidence([{'name': 'wan', 'percent': 50}, {'name': 'starwan', 'percent': 50}]))
@@ -102,7 +106,7 @@ class CodexUpdateTest(unittest.TestCase):
 
     def test_updates_then_waits_a_week(self):
         machine = FakeMachine(evidence([{'name': 'clientwan', 'percent': 100}],
-                                       wireless={'clientwan': {'up': True, 'ssid': 'lion_fone'}}))
+                                       wireless={'clientwan': {'up': True, 'ssid': 'lion_fone', 'starlink': False}}))
         code, output = self.main(['run'], self.host(machine))
         self.assertEqual(code, 0)
         self.assertIn('updated: 0.163.0 -> 0.164.0', output)
@@ -117,7 +121,7 @@ class CodexUpdateTest(unittest.TestCase):
     def test_force_skips_the_wait_but_not_the_uplink_check(self):
         good = FakeMachine(evidence([{'name': 'wan', 'percent': 100}]))
         self.main(['run'], self.host(good))
-        starlink = FakeMachine(evidence([{'name': 'wan', 'percent': 100}], ubnt_ssid='denlink'))
+        starlink = FakeMachine(evidence([{'name': 'wan', 'percent': 100}], ubnt_starlink=True))
         self.main(['run', '--force'], self.host(starlink, now=NOW + 60))
         self.assertFalse(starlink.updated())
         self.assertEqual(self.state()['last_success'], NOW)

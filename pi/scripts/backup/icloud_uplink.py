@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import connectivity_status
 
 
-def decide(evidence, blocked_ssids, now=None):
+def decide(evidence, now=None):
     now = time.time() if now is None else now
     try:
         if not 0 <= now - evidence['checked_at'] <= 30:
@@ -33,7 +33,6 @@ def decide(evidence, blocked_ssids, now=None):
             return False, 'invalid route weights'
         if not members or abs(sum(m['percent'] for m in members) - 100) > 0.01:
             return False, 'no complete default-route evidence'
-        blocked = {s.casefold() for s in blocked_ssids}
         for member in members:
             if member['percent'] <= 0:
                 continue
@@ -52,7 +51,7 @@ def decide(evidence, blocked_ssids, now=None):
                 ssid = radio.get('ssid')
             if not isinstance(ssid, str) or not ssid.strip():
                 return False, 'selected uplink has no verified SSID'
-            if ssid.casefold() in blocked or 'starlink' in ssid.casefold():
+            if connectivity_status.is_starlink_ssid(ssid):
                 return False, 'Starlink is a selected uplink'
         return True, 'all selected uplinks are non-Starlink'
     except (KeyError, TypeError, ValueError, AttributeError):
@@ -115,8 +114,11 @@ def collect(command=connectivity_status.run_command, wall_clock=time.time):
             rules.append(line[5:])
         elif line.startswith(('UP ', 'SSID ')):
             kind, name, value = line.split(' ', 2)
-            uplinks.setdefault(name, {})['up' if kind == 'UP' else 'ssid'] = (
-                value == 'true' if kind == 'UP' else value)
+            uplink = uplinks.setdefault(name, {})
+            if kind == 'UP':
+                uplink['up'] = value == 'true'
+            else:
+                uplink.update(ssid=value, starlink=connectivity_status.is_starlink_ssid(value))
     evidence['rule_names'] = sorted(rules)
     evidence['wireless_uplinks'] = uplinks
     if any(m['name'] == 'wan' and m['percent'] > 0 for m in members):
@@ -124,8 +126,9 @@ def collect(command=connectivity_status.run_command, wall_clock=time.time):
             connectivity_status.UBNT_TARGET, connectivity_status.UBNT_IDENTITY)
             + ['/sbin/iwconfig ath0'], timeout=8)
         association.check_returncode()
-        evidence['ubnt'] = {'reachable': True,
-                           **connectivity_status.parse_ubnt_wireless(association.stdout)}
+        radio = connectivity_status.parse_ubnt_wireless(association.stdout)
+        evidence['ubnt'] = {'reachable': True, **radio,
+                            'starlink': connectivity_status.is_starlink_ssid(radio['ssid'])}
     return evidence
 
 

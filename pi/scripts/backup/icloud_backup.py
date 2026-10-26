@@ -112,8 +112,6 @@ def load_config(path=CONFIG, apply_preferences=True):
             raise ValueError('invalid setting: ' + k)
     if not re.fullmatch(r'[1-9][0-9]*[kM]', cfg['bandwidth_limit']):
         raise ValueError('invalid bandwidth_limit')
-    if not cfg['blocked_ssids'] or not all(isinstance(x, str) and x for x in cfg['blocked_ssids']):
-        raise ValueError('invalid blocked_ssids')
     return cfg
 
 
@@ -156,7 +154,7 @@ def guard(cfg):
     try:
         evidence = json.loads(capture(['/usr/sbin/runuser', '-u', 'pi', '--',
                                        '/usr/bin/python3', str(helper)], timeout=35))
-        allowed, reason = decide(evidence, cfg['blocked_ssids'])
+        allowed, reason = decide(evidence)
     except (OSError, ValueError, subprocess.SubprocessError):
         allowed, reason, evidence = False, 'cannot verify current uplinks', {}
     if not allowed:

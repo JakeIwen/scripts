@@ -26,6 +26,9 @@ UBNT_IDENTITY = os.path.expanduser(
 )
 SSH = os.environ.get("CONNECTIVITY_SSH", "/usr/bin/ssh")
 PING = os.environ.get("CONNECTIVITY_PING", "/usr/bin/ping")
+# The van's own Starlink router broadcasts this SSID. It is the only test for
+# "this uplink is Starlink"; other networks named Starlink are someone else's.
+STARLINK_SSID = "denlink"
 
 MWAN_PRIORITY = ("clientwan", "lifiwan", "wan")
 MWAN_STATUS_COMMAND = (
@@ -86,6 +89,10 @@ WIRELESS_INTERFACE = re.compile(r"^[a-zA-Z0-9_.:-]{1,50}$")
 RADIO_NAME = re.compile(r"^radio\d+$")
 RADIO_BANDS = {"2g": "2.4 GHz", "5g": "5 GHz", "6g": "6 GHz"}
 ACTIVE_NEIGHBOR_STATES = {"REACHABLE", "DELAY", "PROBE", "PERMANENT"}
+
+
+def is_starlink_ssid(ssid):
+    return ssid == STARLINK_SSID
 
 
 def run_command(args, timeout=8):

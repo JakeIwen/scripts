@@ -168,14 +168,16 @@ sudo /usr/bin/python3 /home/pi/scripts/backup/icloud_status.py
 
 The job inspects the router's selected IPv4 policy and every selected member.
 For the antenna path it reads the actual UBNT association. For wireless client
-uplinks it reads the router's actual station SSID. `denlink` and any SSID
-containing `starlink` are blocked. A mixed policy containing Starlink is also
+uplinks it reads the router's actual station SSID. Only the van's own Starlink
+SSID blocks, matched exactly by `connectivity_status.is_starlink_ssid`
+(`STARLINK_SSID`, now `denlink`); other networks named Starlink are allowed. A mixed policy containing Starlink is also
 blocked; a non-Starlink selected hotspot is allowed even if a standby antenna
 is associated with Starlink.
 
 Unknown/stale evidence, unknown policy members, additional source routing rules,
 unexpected Pi gateways/interfaces, and VPN exit routes defer the job. Rename the
-Starlink SSID only after updating `blocked_ssids` in the configuration.
+Starlink SSID only after updating `STARLINK_SSID` in `pi/scripts/connectivity_status.py`
+and deploying it; the Codex update job reads the same judgment from the uplink evidence.
 
 Each rclone operation binds to the verified Pi IPv4 address and ignores proxy
 environment overrides. The route is checked before every cloud operation and

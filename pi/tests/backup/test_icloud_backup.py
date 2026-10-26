@@ -35,15 +35,16 @@ def evidence():
 
 class UplinkTests(unittest.TestCase):
     def check(self, value):
-        return decide(value, ['denlink'], now=1000)[0]
+        return decide(value, now=1000)[0]
 
     def test_allows_antenna_on_non_starlink(self):
         self.assertTrue(self.check(evidence()))
 
-    def test_denlink_and_starlink_names_block(self):
-        for ssid in ('denlink', 'DENLINK', 'Starlink', 'My Starlink Mini'):
+    def test_only_the_vans_own_starlink_ssid_blocks(self):
+        for ssid, allowed in [('denlink', False), ('DENLINK', True), ('Starlink', True),
+                              ('My Starlink Mini', True), ('denlink-guest', True)]:
             e = evidence(); e['ubnt']['ssid'] = ssid
-            self.assertFalse(self.check(e))
+            self.assertEqual(self.check(e), allowed, ssid)
 
     def test_hotspot_allowed_even_when_standby_antenna_is_starlink(self):
         e = evidence(); e['ubnt']['ssid'] = 'denlink'

@@ -33,8 +33,6 @@ VAN_ROUTER = '192.168.6.1'
 PI_HOST = 'vanpi.lan'
 PI_SCRIPT = '/home/pi/scripts/codex_update.py'
 PI_UPLINK_EVIDENCE = '/home/pi/scripts/backup/icloud_uplink.py'
-# The Starlink router's SSID, matched exactly.
-STARLINK_SSID = 'denlink'
 # mwan3 members that are Wi-Fi station uplinks; any other selected member
 # (starwan, or one added later) is treated as possibly Starlink.
 STATION_UPLINKS = ('wan', 'clientwan', 'lifiwan')
@@ -83,10 +81,12 @@ def starlink_reason(evidence):
                 radio = evidence['ubnt']
                 ssid = radio.get('ssid') if radio.get('connected') else None
             else:
-                ssid = evidence['wireless_uplinks'].get(name, {}).get('ssid')
-            if not isinstance(ssid, str) or not ssid.strip():
+                radio = evidence['wireless_uplinks'].get(name, {})
+                ssid = radio.get('ssid')
+            # The evidence script judges the SSID (connectivity_status.is_starlink_ssid).
+            if not isinstance(ssid, str) or not ssid.strip() or not isinstance(radio.get('starlink'), bool):
                 return f'{name} has no verified SSID'
-            if ssid == STARLINK_SSID:
+            if radio['starlink']:
                 return f'{name} is on Starlink'
         return None
     except (KeyError, TypeError, AttributeError):
