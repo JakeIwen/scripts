@@ -33,9 +33,8 @@ VAN_ROUTER = '192.168.6.1'
 PI_HOST = 'vanpi.lan'
 PI_SCRIPT = '/home/pi/scripts/codex_update.py'
 PI_UPLINK_EVIDENCE = '/home/pi/scripts/backup/icloud_uplink.py'
-# The Starlink router's SSID; the same list as pi/configs/icloud-backup.json's
-# blocked_ssids (its root-only live copy is unreadable here). A test keeps them equal.
-STARLINK_SSIDS = ('denlink', 'Starlink')
+# The Starlink router's SSID, matched exactly.
+STARLINK_SSID = 'denlink'
 # mwan3 members that are Wi-Fi station uplinks; any other selected member
 # (starwan, or one added later) is treated as possibly Starlink.
 STATION_UPLINKS = ('wan', 'clientwan', 'lifiwan')
@@ -76,7 +75,6 @@ def starlink_reason(evidence):
         members = [m for m in evidence['router']['route_members'] if m['percent'] > 0]
         if not members:
             return 'no default-route evidence'
-        blocked = {name.casefold() for name in STARLINK_SSIDS}
         for member in members:
             name = member['name']
             if name not in STATION_UPLINKS:
@@ -88,7 +86,7 @@ def starlink_reason(evidence):
                 ssid = evidence['wireless_uplinks'].get(name, {}).get('ssid')
             if not isinstance(ssid, str) or not ssid.strip():
                 return f'{name} has no verified SSID'
-            if ssid.casefold() in blocked or 'starlink' in ssid.casefold():
+            if ssid == STARLINK_SSID:
                 return f'{name} is on Starlink'
         return None
     except (KeyError, TypeError, AttributeError):

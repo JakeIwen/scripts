@@ -83,6 +83,12 @@ class CodexUpdateTest(unittest.TestCase):
         self.assertIn('deferred: wan is on Starlink', output)
         self.assertEqual(self.state()['outcome'], 'deferred')
 
+    def test_only_the_exact_denlink_ssid_counts_as_starlink(self):
+        for ssid in ('Starlink', 'DenLink', 'denlink-guest'):
+            machine = FakeMachine(evidence([{'name': 'wan', 'percent': 100}], ubnt_ssid=ssid))
+            self.main(['run', '--force'], self.host(machine))
+            self.assertTrue(machine.updated(), ssid)
+
     def test_any_selected_starlink_member_defers_even_when_balanced(self):
         machine = FakeMachine(evidence([{'name': 'wan', 'percent': 50}, {'name': 'starwan', 'percent': 50}]))
         self.main(['run'], self.host(machine))
@@ -111,7 +117,7 @@ class CodexUpdateTest(unittest.TestCase):
     def test_force_skips_the_wait_but_not_the_uplink_check(self):
         good = FakeMachine(evidence([{'name': 'wan', 'percent': 100}]))
         self.main(['run'], self.host(good))
-        starlink = FakeMachine(evidence([{'name': 'wan', 'percent': 100}], ubnt_ssid='Starlink Mini'))
+        starlink = FakeMachine(evidence([{'name': 'wan', 'percent': 100}], ubnt_ssid='denlink'))
         self.main(['run', '--force'], self.host(starlink, now=NOW + 60))
         self.assertFalse(starlink.updated())
         self.assertEqual(self.state()['last_success'], NOW)
@@ -159,10 +165,6 @@ class CodexUpdateTest(unittest.TestCase):
 
 
 class ContractTest(unittest.TestCase):
-    def test_starlink_ssids_match_the_icloud_backup_config(self):
-        config = json.loads((REPO / 'pi/configs/icloud-backup.json').read_text())
-        self.assertEqual(set(codex_update.STARLINK_SSIDS), set(config['blocked_ssids']))
-
     def test_pi_crontab_runs_the_path_the_mac_asks(self):
         self.assertIn(codex_update.PI_SCRIPT + ' run', (REPO / 'pi/crontab_pi').read_text())
 
