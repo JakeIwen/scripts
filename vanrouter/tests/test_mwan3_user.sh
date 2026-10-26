@@ -158,7 +158,8 @@ reset_case
 printf '37\n' > "$test_root/next-count"
 run_hook disconnected clientwan
 expect_result 0 'cleanup interface=clientwan address=172.20.10.2 before=42 after=37'
-printf '172.20.10.2\n' > "$test_root/expected-conntrack"
+# No trailing newline: on the router a lone "\n" write is a global flush.
+printf '172.20.10.2' > "$test_root/expected-conntrack"
 cmp "$test_root/expected-conntrack" "$conntrack"
 printf 'ubus\njsonfilter\nip\ncount\ncount\n' > "$test_root/expected-calls"
 cmp "$test_root/expected-calls" "$test_root/calls"

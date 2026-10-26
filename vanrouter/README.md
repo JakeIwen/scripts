@@ -42,6 +42,13 @@ does not delete a healthy uplink's sessions. `ifdown` is left to the kernel's
 masquerade notifier, which cleans up when the address or device disappears.
 No uplink has IPv6; the hook handles IPv4 only.
 
+The kernel's proc handler treats every write(2) that lacks a `.` or `:` as a
+flush of the whole table, including a newline arriving on its own. Write the
+address in one write with no newline: `echo addr > /proc/net/nf_conntrack`
+happens to be safe with BusyBox, but `printf '%s\n'` is not, because musl's
+`writev` reaches the proc file as two writes. Test any change to the write in
+an isolated network namespace on the router, never against the live table.
+
 The address match also deletes the router's own sessions from that IP and LAN
 sessions to that uplink's subnet, such as SSH to the UBNT at `192.168.8.20`.
 Those TCP sessions usually survive anyway: `nf_conntrack_tcp_loose=1` lets the

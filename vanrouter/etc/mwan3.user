@@ -72,8 +72,11 @@ before=$(cat "$count_file" 2>/dev/null) || {
 	log "error interface=$INTERFACE reason=count-before-failed"
 	exit 1
 }
-# Never pass an empty, malformed or multi-line value to this global-flush API.
-if ! { printf '%s\n' "$address" > "$root/proc/net/nf_conntrack"; } 2>/dev/null; then
+# The kernel treats every write(2) without a '.' or ':' as flush-all, and a
+# writev is applied as one write per segment: musl's line-buffered printf sent
+# "addr\n" as "addr" then "\n" and emptied the table. So send the address with
+# no newline, through one atomic pipe write that dd reads once and writes once.
+if ! printf '%s' "$address" | dd of="$root/proc/net/nf_conntrack" bs=64 count=1 2>/dev/null; then
 	log "error interface=$INTERFACE address=$address reason=write-failed"
 	exit 1
 fi
