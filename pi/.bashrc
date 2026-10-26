@@ -5,43 +5,7 @@
 # defined in an earlier section (grep, hist, psgrep, sns). Functions may
 # call functions and read variables from anywhere: those resolve at run time.
 
-### SHELL BASE ###
 shopt -s expand_aliases # run aliased commands inline with ssh ...@.... 
-shopt -s dotglob # match all items in directory except . and ..
-shopt -s histappend                      # append to history, don't overwrite it
-# Debian's stock interactive defaults (history control, completion) load
-# before everything else so the rest of this file can override them; the file
-# returns early when the shell isn't interactive.
-if [ -f ~/.bash_defaults ]; then . ~/.bash_defaults; fi
-
-### ENVIRONMENT ###
-export ITERM_ENABLE_SHELL_INTEGRATION_WITH_TMUX=1
-export DISPLAY=:0
-export HISTSIZE=1000000
-export HISTFILESIZE=10000000
-export PYTHONDONTWRITEBYTECODE=1
-# PATH and PYTHONPATH are exported, so a nested shell (rbash, tmux, bash -c)
-# inherits them: add each entry only when it isn't there yet.
-case ":$PATH:" in
-  *:/home/pi/.local/bin:*) ;;
-  *) export PATH="$PATH:/home/pi/.local/bin" ;;
-esac
-pi_python_packages=/home/pi/scripts/python-packages/current
-case ":${PYTHONPATH:-}:" in
-  *:"$pi_python_packages":*) ;;
-  *) export PYTHONPATH="$pi_python_packages:$pi_python_packages/shared/python:$pi_python_packages/pi/scripts/python${PYTHONPATH:+:$PYTHONPATH}" ;;
-esac
-unset pi_python_packages
-source ~/secrets/.bash_variables
-
-# Media positions, and the APIs of the local media services: youtube-cast
-# (Van TV), audiobooks and video-library.
-export POSPATH="$HOME/vlc-positions.txt"
-export VLCQTPATH="$HOME/.config/vlc/vlc-qt-interface.conf"
-VANTVAPI="http://localhost:8795/api"
-BOOKAPI="http://localhost:8787/api"
-VIDEOAPI="http://localhost:8789/api"
-
 ### SHELL TRICKS ###
 # Small helper set from the scripts repo (shared/sh, pi/scripts); `tricks`
 # explains each one. Loaded before any alias here so none expands inside them.
@@ -181,7 +145,6 @@ nalias() {
 }
 
 ### SCRIPTS ###
-S_REPOS=("$HOME/dev/obd-things") # repos whose tracked tools/ and projects/ .py scripts s finds by name
 s() { # run a named ~/scripts .sh/.py (or a directory's main.sh/main.py), else a script from S_REPOS
   local name candidate f= root hits pythonpath
   if [ "$#" -lt 1 ]; then
@@ -241,7 +204,6 @@ _s_complete() { # complete the script name; later arguments fall back to filenam
     for root in "${S_REPOS[@]}"; do _s_repo_scripts "$root" | sed -E 's#.*/##; s/\.py$//'; done
   )" -- "${COMP_WORDS[1]}"))
 }
-complete -o default -F _s_complete s
 add_pricecheck() { # add_pricecheck <parser> <threshold> <URL> [title]
   if [ "$#" -lt 3 ] || [ "$#" -gt 4 ]; then
     echo "usage: add_pricecheck <parser> <threshold> <URL> [title]" >&2
@@ -403,7 +365,6 @@ sshroute() {
 tspath() { # Tailscale's path to a peer (default m4mac): direct 192.168.6.x = LAN; a public IP or relay = metered uplink
   tailscale status | grep -w "${1:-m4mac}" | sed 's/, tx.*//'
 }
-[[ $- == *i* && $(sshroute) == *Tailscale* ]] && echo "vanpi: connected over Tailscale (metered uplink?)"
 alias ipinfo="py /home/pi/scripts/python-packages/current/pi/scripts/python/ip_info.py"
 
 ### VAN STATE ### (storage/torrent policy, ignition)
@@ -1069,8 +1030,6 @@ claudeclean() {
         read -r -p 'Press Enter to continue...' < /dev/tty
     done
 }
-# Host-local agent settings kept outside this repo.
-if [ -f "$HOME/config/pi/agent.bashrc" ]; then . "$HOME/config/pi/agent.bashrc"; fi
 codexsearch() { /home/pi/scripts/codexsearch.sh "$@"; }
 claudesearch() { /home/pi/scripts/claudesearch.sh "$@"; }
 llmsearch() { /home/pi/scripts/llmsearch.sh "$@"; }
@@ -1080,8 +1039,49 @@ alias llmrestore='/usr/bin/python3 -I -B /home/pi/scripts/llm_restore.py'
 
 ### CANBUS ###
 alias obd="cd ~/dev/obd-things; ls -lah"
-if [ -f ~/canbus_funcs.sh ]; then . ~/canbus_funcs.sh; fi
 
+### SHELL BASE ###
+shopt -s dotglob # match all items in directory except . and ..
+shopt -s histappend                      # append to history, don't overwrite it
+# Debian's stock interactive defaults (history control, completion) load
+# before everything else so the rest of this file can override them; the file
+# returns early when the shell isn't interactive.
+if [ -f ~/.bash_defaults ]; then . ~/.bash_defaults; fi
+
+### ENVIRONMENT ###
+export ITERM_ENABLE_SHELL_INTEGRATION_WITH_TMUX=1
+export DISPLAY=:0
+export HISTSIZE=1000000
+export HISTFILESIZE=10000000
+export PYTHONDONTWRITEBYTECODE=1
+# PATH and PYTHONPATH are exported, so a nested shell (rbash, tmux, bash -c)
+# inherits them: add each entry only when it isn't there yet.
+case ":$PATH:" in
+  *:/home/pi/.local/bin:*) ;;
+  *) export PATH="$PATH:/home/pi/.local/bin" ;;
+esac
+pi_python_packages=/home/pi/scripts/python-packages/current
+case ":${PYTHONPATH:-}:" in
+  *:"$pi_python_packages":*) ;;
+  *) export PYTHONPATH="$pi_python_packages:$pi_python_packages/shared/python:$pi_python_packages/pi/scripts/python${PYTHONPATH:+:$PYTHONPATH}" ;;
+esac
+unset pi_python_packages
+source ~/secrets/.bash_variables
+
+# Media positions, and the APIs of the local media services: youtube-cast
+# (Van TV), audiobooks and video-library.
+export POSPATH="$HOME/vlc-positions.txt"
+export VLCQTPATH="$HOME/.config/vlc/vlc-qt-interface.conf"
+VANTVAPI="http://localhost:8795/api"
+BOOKAPI="http://localhost:8787/api"
+VIDEOAPI="http://localhost:8789/api"
+
+S_REPOS=("$HOME/dev/obd-things") # repos whose tracked tools/ and projects/ .py scripts s finds by name
+complete -o default -F _s_complete s
+[[ $- == *i* && $(sshroute) == *Tailscale* ]] && echo "vanpi: connected over Tailscale (metered uplink?)"
+# Host-local agent settings kept outside this repo.
+if [ -f "$HOME/config/pi/agent.bashrc" ]; then . "$HOME/config/pi/agent.bashrc"; fi
+if [ -f ~/canbus_funcs.sh ]; then . ~/canbus_funcs.sh; fi
 ### PROMPT ###
 # Match the Mac's skwp Zsh prompt: branch plus one colored circle for each
 # kind of working-tree change (deleted, added, modified, then untracked).
