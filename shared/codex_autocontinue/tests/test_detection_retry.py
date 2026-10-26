@@ -98,17 +98,18 @@ class DetectorTests(unittest.TestCase):
 
 
 class RetryTests(unittest.TestCase):
-    def test_exponential_formula_cap_and_positive_jitter(self):
-        values = settings(base_seconds=10, factor=2, max_seconds=70, jitter=0)
-        self.assertEqual([delay(i, values, random.Random(1)) for i in range(1, 6)],
-                         [10, 20, 40, 70, 70])
+    def test_linear_formula_with_symmetric_jitter(self):
+        values = settings(jitter=0)
+        self.assertEqual([delay(i, values, random.Random(1)) for i in range(1, 13)],
+                         [30 * i for i in range(1, 13)])
         values["jitter"] = 0.2
-        for attempt in range(1, 10):
-            nominal = min(70, 10 * 2 ** (attempt - 1))
-            for seed in range(20):
-                actual = delay(attempt, values, random.Random(seed))
-                self.assertGreaterEqual(actual, nominal)
-                self.assertLessEqual(actual, nominal * 1.2)
+        samples = [delay(attempt, values, random.Random(seed))
+                   for attempt in range(1, 13) for seed in range(50)]
+        for index, actual in enumerate(samples):
+            nominal = 30 * (index // 50 + 1)
+            self.assertGreaterEqual(actual, nominal * 0.8)
+            self.assertLessEqual(actual, nominal * 1.2)
+        self.assertTrue(any(actual < 30 * (index // 50 + 1) for index, actual in enumerate(samples)))
         with self.assertRaises(ValueError):
             delay(0, values, random.Random())
 
@@ -116,7 +117,7 @@ class RetryTests(unittest.TestCase):
         state = RetryState()
         values = settings(base_seconds=2, jitter=0, submit_pause_seconds=0.2)
         state.capacity_error(10, values, random.Random())
-        self.assertEqual(state.title(10, values), "codex: retry 1/5 in 2s")
+        self.assertEqual(state.title(10, values), "codex: retry 1/12 in 2s")
         self.assertEqual(state.tick(11.9, values), b"")
         self.assertEqual(state.tick(12, values), b"continue")
         self.assertEqual(state.tick(12.19, values), b"")
@@ -134,11 +135,10 @@ class RetryTests(unittest.TestCase):
             state.cancel()
             self.assertEqual(state.tick(100, values), b"")
             self.assertEqual(state.attempts, 0)
-            self.assertEqual(state.streak_started, 0)
 
     def test_only_completed_turn_resets_streak_and_attempt_budget(self):
         state = RetryState()
-        values = settings(base_seconds=1, jitter=0, max_attempts=2)
+        values = settings(base_seconds=1, step_seconds=0, jitter=0, max_attempts=2)
         for now in (0, 5):
             state.capacity_error(now, values, random.Random())
             self.assertEqual(state.tick(now + 3, values), b"continue")
@@ -156,18 +156,6 @@ class RetryTests(unittest.TestCase):
         self.assertEqual(state.attempts, 0)
         self.assertFalse(state.gave_up)
         self.assertEqual(state.tick(10002, values), b"continue")
-
-    def test_wall_clock_ceiling_stops_waiting_or_new_retry(self):
-        values = settings(base_seconds=90, jitter=0, streak_max_minutes=1)
-        state = RetryState()
-        state.capacity_error(0, values, random.Random())
-        self.assertEqual(state.tick(60, values), b"")
-        self.assertTrue(state.gave_up)
-        self.assertTrue(state.bell_pending)
-        state.cancel()
-        state.capacity_error(70, values, random.Random())
-        self.assertTrue(state.gave_up)
-        self.assertIsNone(state.due)
 
     def test_disabled_or_overlay_cancels_wait(self):
         for disabled, alternate in ((True, False), (False, True)):

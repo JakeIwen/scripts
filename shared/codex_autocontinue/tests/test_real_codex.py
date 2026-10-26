@@ -17,8 +17,8 @@ class RealCodexTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         server = ResponsesServer(scenario, failures=failures).start()
         self.addCleanup(server.stop)
-        values = {"enabled": True, "base_seconds": 0.15, "max_seconds": 0.15,
-                  "factor": 1, "jitter": 0, "submit_pause_seconds": 0.2}
+        values = {"enabled": True, "base_seconds": 0.15, "step_seconds": 0,
+                  "jitter": 0, "submit_pause_seconds": 0.2}
         values.update(overrides)
         fixture = create_environment(temporary.name, server.base_url, values)
         driver = PTYDriver([str(LAUNCHER), "--"] + fixture.command(CODEX),
@@ -80,7 +80,7 @@ class RealCodexTests(unittest.TestCase):
         self.assertEqual(driver.process.returncode, 0)
 
     def test_a_real_keystroke_cancels_the_retry(self):
-        server, driver = self.session(base_seconds=1, max_seconds=1)
+        server, driver = self.session(base_seconds=1)
         driver.submit("Wait for me to take over")
         driver.until(lambda: b"codex: retry" in driver.output)
         driver.send(b"x")

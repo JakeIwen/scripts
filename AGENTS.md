@@ -202,7 +202,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   -- <command> <args>`; it preserves cwd and child environment, and non-TTY stdin
   uses direct exec. `pty_proxy.py` owns forwarding, `terminal_session.py` the tty,
   signals/window size/title stack, `detector.py` streamed turn detection, and
-  `retry_state.py` cancellation/attempt/time ceilings. Edit the small delay formula
+  `retry_state.py` cancellation and the attempt limit. Edit the delay formula (linear)
   in `backoff.py`; defaults live only in `shared/settings/codex-autocontinue.json`,
   with `tool_settings.Reloader` reading private overrides. Only a successful turn
   resets the streak (Codex's done OSC or inline Worked-for line), never partial

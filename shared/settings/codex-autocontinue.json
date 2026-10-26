@@ -5,11 +5,9 @@
   "settings": [
     {"name": "enabled", "type": "boolean", "default": true, "description": "Automatically submit continue after a capacity error."},
     {"name": "base_seconds", "type": "number", "default": 30, "minimum": 0.01, "maximum": 86400, "unit": "seconds", "description": "Delay before the first retry."},
-    {"name": "factor", "type": "number", "default": 2, "minimum": 1, "maximum": 10, "description": "Multiply the delay by this for each consecutive retry."},
-    {"name": "max_seconds", "type": "number", "default": 300, "minimum": 0.01, "maximum": 86400, "unit": "seconds", "description": "Hard upper bound on the exponential delay before positive jitter."},
-    {"name": "jitter", "type": "number", "default": 0.2, "minimum": 0, "maximum": 1, "description": "Additional random fractional delay; never shortens the exponential delay."},
-    {"name": "max_attempts", "type": "integer", "default": 5, "minimum": 0, "maximum": 100, "description": "Maximum automatically submitted retries per streak; zero only rings the bell."},
-    {"name": "streak_max_minutes", "type": "number", "default": 15, "minimum": 0.01, "maximum": 1440, "unit": "minutes", "description": "Wall-clock ceiling from the first capacity error. Only a completed successful turn resets the streak."},
+    {"name": "step_seconds", "type": "number", "default": 30, "minimum": 0, "maximum": 86400, "unit": "seconds", "description": "Added to the delay for each consecutive retry (30, 60, 90 ... with the defaults)."},
+    {"name": "jitter", "type": "number", "default": 0.2, "minimum": 0, "maximum": 0.9, "description": "Random fraction added to or taken from each delay (0.2 = plus or minus 20%)."},
+    {"name": "max_attempts", "type": "integer", "default": 12, "minimum": 0, "maximum": 100, "description": "Maximum automatically submitted retries per streak; zero only rings the bell."},
     {"name": "submit_pause_seconds", "type": "number", "default": 0.2, "minimum": 0.1, "maximum": 5, "unit": "seconds", "description": "Pause between typing continue and pressing Enter, so Codex does not mistake Enter for a pasted newline."}
   ]
 }

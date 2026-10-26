@@ -30,8 +30,8 @@ def main(argv=None):
         server = ResponsesServer(args.scenario, args.failures, log_path=log_path).start()
         try:
             fixture = create_environment(temporary, server.base_url, {
-                "enabled": True, "base_seconds": 2, "factor": 2,
-                "max_seconds": 8, "jitter": 0, "max_attempts": 3})
+                "enabled": True, "base_seconds": 2, "step_seconds": 2,
+                "jitter": 0, "max_attempts": 3})
             print("Offline provider: {}\nRequest log: {}\n"
                   "Type a prompt; Ctrl+C twice exits. No real Codex home or account is used."
                   .format(server.base_url, log_path), flush=True)
