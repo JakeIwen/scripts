@@ -1,0 +1,7 @@
+{
+  "tool": "codex-update",
+  "title": "Codex CLI update",
+  "description": "Runs codex update once a week on the MacBook and vanpi (cron checks every 6 hours) and defers while Starlink carries the van's traffic.",
+  "status": {"argv": ["/usr/bin/env", "PYTHONPATH={repo}/shared/python", "/usr/bin/python3", "-B", "{repo}/shared/sh/codex_update.py", "status", "--automation"], "timeout": 20},
+  "actions": []
+}

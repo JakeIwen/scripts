@@ -10,6 +10,8 @@ BASH_ENV=/home/pi/secrets/.bash_variables
 */10 * * * * /usr/bin/python3 /home/pi/scripts/price_check/main.py haveno-check 2>&1 | /usr/bin/logger -t price-check
 # Van TV: YouTube breaks old yt-dlp releases; refresh it (and Deno) weekly
 0 6 * * 0 /bin/bash /home/pi/youtube-cast/current/controller.sh update-ytdlp 2>&1 | /usr/bin/logger -t youtube-cast
+# Runs `codex update` once a week; checks every 6 h and defers while Starlink carries the van's traffic.
+47 */6 * * * /usr/bin/python3 -I -B /home/pi/scripts/codex_update.py run >> /home/pi/log/codex_update.log 2>&1
 # BEGIN managed hosted-project-scan (pi/docs/dashboard/HOSTED_PROJECTS.md)
 */15 * * * * cd /home/pi && PYTHONPATH=/home/pi/scripts/python-packages/current PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -P -m pi.apps.van_dashboard.hosted_project_scan --host pi --post http://127.0.0.1:8788 >> /home/pi/log/hosted_project_scan.log 2>&1
 # END managed hosted-project-scan
