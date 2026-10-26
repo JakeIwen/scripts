@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Create or update an alias in the Pi's ~/.bashrc and in the scripts repo.
+"""Create or update a function in the Pi's ~/.bashrc and in the scripts repo.
 
 The Mac's broad sync installs the scripts repo's pi/.bashrc over ~/.bashrc, so
-an alias added only here would be lost on the next sync. This commits the same
+a function added only here would be lost on the next sync. This commits the same
 edit to pi/.bashrc on GitHub first, through a compare-and-swap on the file's
 blob SHA, and installs it only once that commit exists. Anything that leaves
 the two copies in doubt aborts before either one changes.
 
-Usage: nalias NAME COMMAND        (the .bashrc function reloads the shell)
-       nalias.py --dry-run NAME COMMAND
+Usage: nfn NAME COMMAND        (the .bashrc function reloads the shell)
+       nfn.py --dry-run NAME COMMAND
 """
 
 import argparse
@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -25,7 +26,9 @@ from pathlib import Path
 REPO = "JakeIwen/scripts"
 REPO_PATH = "pi/.bashrc"
 BRANCH = "master"
-SECTION_HEADER = "### NALIAS ### (added by nalias; defined last, so no function above expands them)"
+SECTION_HEADER = "### NFN ### (added by nfn)"
+BOUNDARY_COMMENT = "# Codex command shells need helpers, not secrets, DISPLAY or command shadows."
+BOUNDARY_GUARD = '[[ -n ${CODEX_THREAD_ID-} && $- != *i* ]] && return'
 NAME_PATTERN = re.compile(r"[A-Za-z0-9_.][A-Za-z0-9_.:+-]*")
 GH_TIMEOUT_SECONDS = 30
 BASH = "/bin/bash"
@@ -75,34 +78,143 @@ def commit_file(old_sha, data, message, branch=BRANCH):
     return response.get("content", {}).get("sha"), response.get("commit", {})
 
 
-def quote(command):
-    return "'" + command.replace("'", "'\\''") + "'"
+def clean_shell_environment():
+    # BASH_ENV and exported functions must not influence command classification.
+    return {"PATH": os.environ.get("PATH", os.defpath)}
 
 
-def with_alias(text, name, command):
-    """Return the new rc text and what was done, as the Mac's nalias reports it."""
-    new_line = f"alias {name}={quote(command)}"
+def command_kind(name):
+    result = subprocess.run(
+        [BASH, "--norc", "--noprofile", "-c", 'type -t -- "$1"', "_", name],
+        env=clean_shell_environment(), capture_output=True, text=True)
+    if result.returncode not in (0, 1):
+        raise Abort(f"couldn't classify {name}: {result.stderr.strip()}")
+    return result.stdout.strip()
+
+
+def function_line(name, command, kind):
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        first = lexer.get_token()
+    except ValueError as error:
+        raise Abort(f"invalid command: {error}")
+    if first == name:
+        command = ("builtin " if kind == "builtin" else "command ") + command
+    return f'{name}() {{ {command} "$@"; }}'
+
+
+def boundary_index(lines):
+    matches = [index for index, line in enumerate(lines) if line == BOUNDARY_COMMENT]
+    if len(matches) != 1 or lines[matches[0] + 1:matches[0] + 2] != [BOUNDARY_GUARD]:
+        raise Abort("couldn't find the unique Codex boundary; edit the file by hand")
+    return matches[0]
+
+
+def existing_definition(lines, name):
+    escaped = re.escape(name)
+    declaration = re.compile(
+        rf"^\s*(?:{escaped}\s*\(\s*\)|function\s+{escaped}(?:\s|\(|$)|alias\s+{escaped}=)")
+    existing = [index for index, line in enumerate(lines) if declaration.match(line)]
+    if not existing:
+        return None
+    if len(existing) != 1:
+        raise Abort(f"more than one definition of {name}; edit the file by hand")
+    index = existing[0]
+    single_line = re.fullmatch(rf"{escaped}\(\)\s*\{{.*\}}\s*(?:#.*)?", lines[index])
+    if not single_line:
+        raise Abort(f"{name} isn't a single-line NAME() {{ ... }} function; edit the file by hand")
+    check_syntax((lines[index] + "\n").encode())
+    # A single line may contain several definitions or trailing commands. Only
+    # replace it when its first complete function consumes the whole line.
+    for closing in re.finditer(r"\}", lines[index]):
+        tail = lines[index][closing.end():]
+        if not tail.strip():
+            break
+        prefix = lines[index][:closing.end()] + "\n"
+        result = subprocess.run([BASH, "--norc", "--noprofile", "-n"], input=prefix,
+                                capture_output=True, text=True, env=clean_shell_environment())
+        if result.returncode == 0:
+            if tail.lstrip().startswith("#"):
+                break
+            raise Abort(f"{name} shares its line with other definitions or commands; edit the file by hand")
+    return index
+
+
+def shadow_block_end(lines, boundary):
+    starts = [index for index in range(boundary + 2, len(lines))
+              if lines[index].startswith("alias sudo='sudo '")]
+    if len(starts) != 1:
+        raise Abort("couldn't find the shadowing-function block; edit the file by hand")
+    index = end = starts[0] + 1
+    while index < len(lines):
+        if not lines[index].strip() or lines[index].lstrip().startswith("#"):
+            index += 1
+            continue
+        if not re.match(r"^[A-Za-z0-9_.:+-]+\(\)\s*\{", lines[index]):
+            break
+        start = index
+        # Let Bash find the closing brace: braces in quoted strings or nested
+        # compound commands are not reliable textual delimiters.
+        while index < len(lines):
+            index += 1
+            result = subprocess.run(
+                [BASH, "--norc", "--noprofile", "-n"],
+                input="\n".join(lines[start:index]) + "\n", capture_output=True,
+                text=True, env=clean_shell_environment())
+            if result.returncode == 0:
+                end = index
+                break
+        else:
+            raise Abort("the shadowing-function block doesn't parse; edit the file by hand")
+    return end
+
+
+def insert_function(lines, new_line, shadowing):
+    boundary = boundary_index(lines)
+    if shadowing:
+        lines.insert(shadow_block_end(lines, boundary), new_line)
+        return
+    headers = [index for index, line in enumerate(lines) if line == SECTION_HEADER]
+    if len(headers) > 1 or (headers and headers[0] >= boundary):
+        raise Abort("the NFN section is ambiguous; edit the file by hand")
+    if not headers:
+        if boundary and lines[boundary - 1].strip():
+            lines.insert(boundary, "")
+            boundary += 1
+        lines.insert(boundary, SECTION_HEADER)
+        boundary += 1
+    lines.insert(boundary, new_line)
+
+
+def with_function(text, name, command):
+    kind = command_kind(name)
+    shadowing = kind in ("builtin", "keyword", "file")
+    new_line = function_line(name, command, kind)
     lines = text.split("\n")
-    existing = [index for index, line in enumerate(lines) if line.startswith(f"alias {name}=")]
-    if existing:
-        report = [f"found alias, replaced: {lines[index]}" for index in existing]
-        for index in existing:
-            lines[index] = new_line
-        return "\n".join(lines), report + [f"with: {new_line}"]
-    # Appended aliases stay at the end of the file, after every function, so
-    # none of them expands inside a function body read earlier.
-    headers = [line.rstrip() for line in lines if line.startswith("### ")]
-    tail = "" if not text or text.endswith("\n") else "\n"
-    if not headers or headers[-1] != SECTION_HEADER:
-        tail += f"\n{SECTION_HEADER}\n"
-    return text + tail + new_line + "\n", [f"appending to rc: {new_line}"]
+    boundary = boundary_index(lines)
+    existing = existing_definition(lines, name)
+    side = "below" if shadowing else "above"
+    report = [f"placement: {side} the Codex boundary"]
+    if existing is not None:
+        old_line = lines[existing]
+        report += [f"found function, replaced: {old_line}", f"with: {new_line}"]
+        if (existing > boundary) == shadowing:
+            lines[existing] = new_line
+            return "\n".join(lines), report, new_line
+        del lines[existing]
+    else:
+        report += [f"appending to rc: {new_line}"]
+    insert_function(lines, new_line, shadowing)
+    return "\n".join(lines), report, new_line
 
 
 def check_syntax(data):
-    with tempfile.NamedTemporaryFile(prefix="nalias-", suffix=".bashrc") as candidate:
+    with tempfile.NamedTemporaryFile(prefix="nfn-", suffix=".bashrc") as candidate:
         candidate.write(data)
         candidate.flush()
-        result = subprocess.run([BASH, "-n", candidate.name], capture_output=True, text=True)
+        result = subprocess.run([BASH, "-n", candidate.name], capture_output=True, text=True,
+                                env=clean_shell_environment())
     if result.returncode:
         raise Abort(f"the edited file doesn't parse: {result.stderr.strip()}")
 
@@ -116,8 +228,8 @@ def read_live(path):
 def install(path, expected, data):
     """Replace path with data atomically, unless it changed since it was read."""
     if path.read_bytes() != expected:
-        raise RuntimeError(f"{path} changed while nalias ran")
-    descriptor, temporary = tempfile.mkstemp(prefix=".bashrc.nalias-", dir=path.parent)
+        raise RuntimeError(f"{path} changed while nfn ran")
+    descriptor, temporary = tempfile.mkstemp(prefix=".bashrc.nfn-", dir=path.parent)
     try:
         with os.fdopen(descriptor, "wb") as handle:
             handle.write(data)
@@ -132,7 +244,7 @@ def install(path, expected, data):
 
 def parse_arguments(argv):
     parser = argparse.ArgumentParser(
-        prog="nalias", description="Create or update an alias in ~/.bashrc and in "
+        prog="nfn", description="Create or update a function in ~/.bashrc and in "
         f"{REPO_PATH} on GitHub ({REPO}, public).")
     parser.add_argument("--dry-run", action="store_true",
                         help="check both copies and show the edit, changing nothing")
@@ -140,7 +252,7 @@ def parse_arguments(argv):
     parser.add_argument("command")
     arguments = parser.parse_args(argv)
     if not NAME_PATTERN.fullmatch(arguments.name):
-        parser.error(f"not an alias name: {arguments.name!r}")
+        parser.error(f"not a function name: {arguments.name!r}")
     if not arguments.command or "\n" in arguments.command or "\0" in arguments.command:
         parser.error("the command must be one non-empty line")
     return arguments
@@ -150,12 +262,12 @@ def run(arguments):
     live_path = Path.home() / ".bashrc"
     live = read_live(live_path)
     try:
-        text, report = with_alias(live.decode(), arguments.name, arguments.command)
+        text, report, new_line = with_function(live.decode(), arguments.name, arguments.command)
     except UnicodeDecodeError:
         raise Abort(f"{live_path} isn't UTF-8")
     data = text.encode()
     if data == live:
-        print(f"alias {arguments.name} is already {quote(arguments.command)}; nothing changed")
+        print("nothing changed")
         return 0
     check_syntax(data)
     base = remote_sha()
@@ -166,17 +278,17 @@ def run(arguments):
         print("\n".join(report))
         print(f"dry run: ~/.bashrc matches {REPO} {BRANCH}; would commit the edit there")
         return 0
-    message = f"Pi bashrc: nalias {arguments.name}\n\nalias {arguments.name}={quote(arguments.command)}\n"
+    message = f"Pi bashrc: nfn {arguments.name}\n\n{new_line}\n"
     committed_sha, commit = commit_file(base, data, message)
     location = commit.get("html_url") or commit.get("sha", "")
     if committed_sha != blob_sha(data):
-        print(f"nalias: GitHub stored different bytes than sent ({location}); "
+        print(f"nfn: GitHub stored different bytes than sent ({location}); "
               f"~/.bashrc was left as it was. {COMPARE_HINT}", file=sys.stderr)
         return 2
     try:
         install(live_path, live, data)
     except (OSError, RuntimeError) as error:
-        print(f"nalias: committed {location}, but couldn't install it: {error}. "
+        print(f"nfn: committed {location}, but couldn't install it: {error}. "
               f"~/.bashrc is now behind GitHub; {COMPARE_HINT}", file=sys.stderr)
         return 2
     print("\n".join(report))
@@ -189,7 +301,7 @@ def main(argv=None):
     try:
         return run(arguments)
     except Abort as reason:
-        print(f"nalias aborted, nothing changed: {reason}", file=sys.stderr)
+        print(f"nfn aborted, nothing changed: {reason}", file=sys.stderr)
         return 1
 
 

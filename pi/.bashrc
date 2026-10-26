@@ -130,13 +130,13 @@ rm_sm_dirs() { # remove small dirs by size `rm_sm_dirs 1.1G .`
     fi
   done
 }
-# create or update an alias, as on the Mac ($ nalias gpo 'git push origin'):
-# nalias.py commits the edit to pi/.bashrc on GitHub, then installs it here
-nalias() {
+nalias() { echo '`nalias` replaced with `nfn`'; }
+# nfn.py commits the function edit to pi/.bashrc on GitHub, then installs it here.
+nfn() {
   local before
   before=$(/usr/bin/stat -c %i "$HOME/.bashrc") || return
   /usr/bin/python3 "$HOME/scripts/nfn.py" "$@" || return
-  # reload only when nalias.py replaced the file (not on --dry-run or no-op)
+  # reload only when nfn.py replaced the file (not on --dry-run or no-op)
   [[ $(/usr/bin/stat -c %i "$HOME/.bashrc") != "$before" ]] || return 0
   echo 'reloading shell'
   exec bash
@@ -880,8 +880,20 @@ codexcfg() { command /usr/bin/vim.tiny ~/.codex/config.toml "$@"; }
 # Permissions come from config.toml's default workspace-git-network profile:
 # -c, --profile, and --strict-config all force embedded mode (no shared
 # background server). Validate config edits with `codex --strict-config`.
+# The TUI runs under the capacity-retry wrapper (scripts repo
+# shared/codex_autocontinue, installed by its deploy_pi.zsh), which types
+# `continue` with backoff after "Selected model is at capacity"; plain codex
+# when it isn't installed.
+_codex_tui() {
+  local wrap=~/.local/share/codex-autocontinue/shared/codex_autocontinue/run
+  if [[ -x $wrap ]]; then
+    env -u DISPLAY "$wrap" -- codex "$@"
+  else
+    env -u DISPLAY codex "$@"
+  fi
+}
 codexp() {
-  env -u DISPLAY codex \
+  _codex_tui \
     --ask-for-approval never \
     "$@"
 }

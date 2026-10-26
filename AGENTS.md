@@ -312,14 +312,21 @@ compare it with this checkout. Deployed files may differ from the repository.
   `pi/.bashrc` source the host file before any alias. The Pi runs all three flat
   from `/home/pi/scripts/`: ship them together. `shared/tests/test_shell_tricks.py`
   keeps tools and doc in step; behavior cases live in `shared/tests/shell_tricks_cases.sh`.
-- `pi/scripts/nfn.py` is the Pi's `nalias` (the `pi/.bashrc` function wraps it and
-  reloads the shell, like the Mac's zshrc one). It commits the alias edit to
-  `pi/.bashrc` on GitHub master with `gh api` (contents-API compare-and-swap on the
-  blob SHA), then installs it as `/home/pi/.bashrc`; when the live file and GitHub
-  differ, or GitHub refuses, it aborts with both unchanged. The Mac checkout is then
-  behind: `pi/sync_scripts.sh`'s `check_pi_bashrc_known` refuses to overwrite a live
+- `pi/scripts/nfn.py` is the Pi's `nfn NAME 'COMMAND'`: it writes a forwarding
+  function, using `builtin` or `command` for a leading self-call. The `pi/.bashrc`
+  wrapper reloads only when the rc inode changed; `nalias` is a migration stub.
+  A clean Bash classifies names: command, builtin and keyword shadows go at the
+  end of the shadowing-function block below the Codex boundary; other functions
+  go in `### NFN ### (added by nfn)` immediately above it. One single-line
+  definition is replaced or moved; aliases, multiline and duplicate definitions
+  require a hand edit. Placement and parsing intentionally duplicate the Mac's
+  private `~/config/mac/nfn.py` implementation.
+  It commits the function edit to `pi/.bashrc` on GitHub master with `gh api`
+  (contents-API compare-and-swap on the blob SHA), then installs it as
+  `/home/pi/.bashrc`; when the live file and GitHub differ, or GitHub refuses,
+  it aborts with both unchanged. The Mac checkout is then behind:
+  `pi/sync_scripts.sh`'s `check_pi_bashrc_known` refuses to overwrite a live
   `.bashrc` that is no version of `pi/.bashrc` in the checkout, so pull first.
-  `nalias` still writes aliases, which land below the Codex boundary (next bullet).
 - `pi/.bashrc` has a Codex boundary: `[[ -n ${CODEX_THREAD_ID-} && $- != *i* ]]
   && return`. Above it are commands, all functions; below are exports, secrets,
   `DISPLAY`, completion, prompt and shadowing functions (`grep`, `vi`, `pip3`).

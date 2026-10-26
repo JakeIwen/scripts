@@ -163,7 +163,7 @@ check_pi_bashrc_known
                 self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_unseen_or_unreadable_live_copy_refuses(self):
-        unseen = self.guard("alias v='from a pi nalias'\n")
+        unseen = self.guard("alias v='from a pi nfn'\n")
         self.assertEqual(unseen.returncode, 1)
         self.assertIn("pull --ff-only", unseen.stderr)
         unreachable = self.guard("alias v='one'\n", reachable=False)

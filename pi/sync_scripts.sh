@@ -12,9 +12,9 @@ pi_ip='pi@vanpi.lan'
 # pi_ip='pi@100.82.91.76'
 package_units=""
 
-# nalias on the Pi commits ~/.bashrc edits straight to GitHub. Refuse to install
+# nfn on the Pi commits ~/.bashrc edits straight to GitHub. Refuse to install
 # pi/.bashrc over a live copy that is no version this checkout has seen, so an
-# unpulled nalias commit (or an edit made on the Pi) is never silently reverted.
+# unpulled nfn commit (or an edit made on the Pi) is never silently reverted.
 check_pi_bashrc_known() {
   local live
   if ! live="$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$pi_ip" \
@@ -26,7 +26,7 @@ check_pi_bashrc_known() {
     git -C "$dsc" log -m --format= --raw --no-abbrev -- pi/.bashrc |
       awk '{print $4}'; } | grep -qx "$live"; then
     echo "The Pi's ~/.bashrc is no version of pi/.bashrc in this checkout (an unpulled" \
-      "nalias commit, or an edit made on the Pi). Pull first (git -C $dsc pull --ff-only)," \
+      "nfn commit, or an edit made on the Pi). Pull first (git -C $dsc pull --ff-only)," \
       "or compare: ssh $pi_ip cat .bashrc | diff $dsc/pi/.bashrc -" >&2
     return 1
   fi
