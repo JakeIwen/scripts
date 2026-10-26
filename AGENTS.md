@@ -319,6 +319,17 @@ compare it with this checkout. Deployed files may differ from the repository.
   differ, or GitHub refuses, it aborts with both unchanged. The Mac checkout is then
   behind: `pi/sync_scripts.sh`'s `check_pi_bashrc_known` refuses to overwrite a live
   `.bashrc` that is no version of `pi/.bashrc` in the checkout, so pull first.
+  `nalias` still writes aliases, which land below the Codex boundary (next bullet).
+- `pi/.bashrc` has a Codex boundary: `[[ -n ${CODEX_THREAD_ID-} && $- != *i* ]]
+  && return`. Above it are commands, all functions; below are exports, secrets,
+  `DISPLAY`, completion, prompt and shadowing functions (`grep`, `vi`, `pip3`).
+  Only Codex shells stop there. Codex runs `bash -c` with no rc, and the Pi's
+  `~/.codex/config.toml` sets `BASH_ENV=/home/pi/.bashrc` through
+  `shell_environment_policy`. Interactive and ssh shells still load the whole
+  file, so `ssh vanpi <command>` works. Write functions, not aliases (the one
+  alias left is `sudo='sudo '`; `sudo <function>` can't work), and put a name
+  that shadows a command or builtin below the line.
+  `pi/tests/test_bashrc_codex.sh` loads the file in Codex mode and checks it.
 - `shared/sh/destructive_command_guard.py`: PreToolUse hook for Claude/Codex on Mac/Pi
   (Python 3.9+, flat `/home/pi/scripts/` on Pi); blocks protected-path recursive rm,
   forced pushes, and Mac-only destructive find/disk commands, with chain-local cd tracking.
