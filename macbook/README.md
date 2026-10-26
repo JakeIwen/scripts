@@ -262,6 +262,21 @@ Read-only Mac Panel/CLI status rendering lives in `status.py`.
   does not raise the automation's overall status.
 - Stop it: `launchctl bootout gui/$(id -u)/com.jacobr.display-cab-dimmer`.
 
+## Firefox ads and telemetry off
+
+`scripts/firefox_quiet_prefs.py` writes a managed block into `user.js` in every
+Firefox profile that has been run (release and Developer Edition). It turns off
+Firefox Suggest (sponsored, Mozilla and online lookups), sponsored new-tab
+shortcuts and stories, recommended stories, extension/feature recommendations,
+studies, and telemetry uploads. Firefox applies `user.js` at each startup, so
+restart it after running; a setting changed in the UI reverts at the next start.
+
+```sh
+macbook/scripts/firefox_quiet_prefs.py [--dry-run | --remove]
+```
+
+Run it again after creating a new profile.
+
 ## BetterTouchTool maintenance
 
 Use the [BTT tooling index](bettertouchtool/README.md) for maintained commands,

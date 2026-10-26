@@ -189,6 +189,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   warnings (sourced privately from `pi/secrets/.bash_variables`, never in argv
   or logs): btt_guard imports `send_warning`, deferred.zsh runs it with the
   message on stdin. Reuse it rather than reading the URL again.
+  `macbook/scripts/firefox_quiet_prefs.py` owns the managed block of ad,
+  recommendation, study and telemetry prefs in every active Firefox profile's
+  `user.js` (release and Developer Edition); change prefs in its `PREFS` table.
 - Dashboard pane URLs use public pane ids as fragments (for example
   `/#backups`, `/#sonos`, `/#usb-devices`). Frontend
   `dashboard/paneLinks.ts` owns public pane ids and URL/history state;
