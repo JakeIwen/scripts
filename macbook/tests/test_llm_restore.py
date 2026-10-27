@@ -68,6 +68,32 @@ class CodexTui(unittest.TestCase):
                          f"cd -- '/a b' && command codex resume {A}")
 
 
+class Launcher(unittest.TestCase):
+    """Restored sessions start the way the shell's claudep/codexp start them."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.run_path = Path(tmp.name) / "run"
+        self.run_path.write_text("#!/bin/sh\n")
+
+    def launchers(self, is_mac, executable=True):
+        self.run_path.chmod(0o755 if executable else 0o644)
+        with patch.object(lr, "IS_MAC", is_mac), patch.object(lr, "CODEX_RETRY", self.run_path):
+            return lr.launcher(lr.CLAUDE), lr.launcher(lr.CODEX)
+
+    def test_mac_codex_runs_under_the_retry_wrapper(self):
+        self.assertEqual(self.launchers(True), ([], [str(self.run_path), "--"]))
+
+    def test_pi_unsets_display_for_both_and_wraps_codex(self):
+        env = ["env", "-u", "DISPLAY"]
+        self.assertEqual(self.launchers(False), (env, [*env, str(self.run_path), "--"]))
+
+    def test_plain_codex_without_an_installed_wrapper(self):
+        self.assertEqual(self.launchers(True, executable=False), ([], []))
+        self.assertEqual(self.launchers(False, executable=False)[1], ["env", "-u", "DISPLAY"])
+
+
 class CodexAssignment(unittest.TestCase):
     threads = {A: {"cwd": "/one", "updated": 3}, B: {"cwd": "/two", "updated": 2}, C: {"cwd": "/two", "updated": 1}}
 

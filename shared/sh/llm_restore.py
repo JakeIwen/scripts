@@ -78,6 +78,10 @@ RETAIN_S = 24 * 3600
 ROLLOUT_RE = re.compile(r"rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$")
 IS_MAC = sys.platform == "darwin"
 CLAUDE, CODEX = "claude", "codex"
+# The capacity-retry wrapper that the shell's _codex_tui runs Codex under: the
+# Mac runs this checkout's copy, the Pi its deploy_pi.zsh install.
+CODEX_RETRY = (Path(__file__).resolve().parents[1] / "codex_autocontinue/run" if IS_MAC
+               else HOME / ".local/share/codex-autocontinue/shared/codex_autocontinue/run")
 
 
 @dataclass(frozen=True)
@@ -243,6 +247,17 @@ def codex_tui(proc: Proc) -> CodexTui | None:
     return CodexTui(proc.pid, proc.cwd, options, requested)
 
 
+def launcher(tool: str) -> list[str]:
+    """What the shell's claudep/codexp put in front of the program, since the
+    resume command skips shell functions: the Pi unsets DISPLAY (Claude's
+    previews would open on the Pi's desktop) and Codex runs under the
+    capacity-retry wrapper when it is installed."""
+    prefix = [] if IS_MAC else ["env", "-u", "DISPLAY"]
+    if tool == CODEX and os.access(CODEX_RETRY, os.X_OK):
+        return [*prefix, str(CODEX_RETRY), "--"]
+    return prefix
+
+
 def shell_command(cwd: str, words: list[str]) -> str:
     # `command` bypasses shell wrappers (the zsh `codex` function adds a sandbox).
     return f"cd -- {shlex.quote(cwd)} && command " + " ".join(shlex.quote(w) for w in words)
@@ -348,7 +363,7 @@ def _located_claude_sessions(procs: list[Proc]) -> list[tuple[Session, int]]:
             continue
         found.append((Session(
             CLAUDE, sid, cwd, meta.get("name") or "",
-            shell_command(cwd, [CLAUDE, *claude_options(p.argv), "--resume", sid]),
+            shell_command(cwd, [*launcher(CLAUDE), CLAUDE, *claude_options(p.argv), "--resume", sid]),
             "llm-switchboard" if p.env.get(SWITCHBOARD_ENV) else None,
         ), p.pid))
     return found
@@ -439,7 +454,7 @@ def _located_codex_sessions(procs: list[Proc]) -> tuple[list[tuple[Session, int]
         info = threads.get(tid, {})
         cwd = info.get("cwd") or t.cwd
         found.append((Session(CODEX, tid, cwd, info.get("title") or "",
-                              shell_command(cwd, [CODEX, *t.options, "resume", tid])), t.pid))
+                              shell_command(cwd, [*launcher(CODEX), CODEX, *t.options, "resume", tid])), t.pid))
     return found, warnings
 
 

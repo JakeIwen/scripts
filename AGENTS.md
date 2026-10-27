@@ -311,6 +311,8 @@ compare it with this checkout. Deployed files may differ from the repository.
   pauses and resumes it with a flag file instead of editing the crontab;
   `--cron [on|off] --json` prints one status object for the Mac Panel, while
   read-only `--list --json` exposes the currently detected sessions and TUI pids.
+  Resume commands start as `codexp`/`claudep` would: Codex under the
+  `codex_autocontinue` wrapper when installed, and `env -u DISPLAY` on the Pi.
   State and the generated restore script live in `~/.local/state/llm-restore/`.
 - `shared/sh/uncommitted_owners.py` implements `+id`: it attributes dirty Git
   paths to recent Claude Code and Codex tool calls, rolls subagents up to their
