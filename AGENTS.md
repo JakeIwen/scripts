@@ -336,6 +336,16 @@ compare it with this checkout. Deployed files may differ from the repository.
 - `shared/sh/peer_copy.py` owns bounded, noninteractive SSH reads and atomic
   writes of home-relative text files for known terms and the glossary. It sits
   flat in `/home/pi/scripts/`; ship it before either importing script.
+- `shared/sh/glossary.py` keeps taught definitions in `~/.agent/glossary/terms.jsonl`
+  (stdlib, Python 3.9+). Its Claude/Codex Stop hook records **Terms** blocks;
+  UserPromptSubmit `+terms [search]` merges the copies over `vanpi.lan`, renders
+  `~/.agent/glossary/glossary.html` and blocks with the local page URL. CLI:
+  `list` (default), `remove <terms>`, `render`, `sync`; `--peer ''` stays local.
+  `glossary_page.py` renders the offline search/flashcards page and known badges
+  from `known_terms.py`'s list. On the Pi all four files sit flat in
+  `/home/pi/scripts/`: ship `peer_copy.py` first, then `known_terms.py`,
+  `glossary_page.py` and `glossary.py` together. Pi page URLs use the Mac's
+  `/Volumes/pihome` mount. Local read/replace transactions use `terms.jsonl.lock`.
 - Shell tricks, Jacob's small interactive helper set (13 per host, at most 16):
   `shared/sh/shell_tricks_common.sh` (tools both hosts share, plus `tricks`),
   host files `macbook/scripts/shell_tricks.zsh` and `pi/scripts/shell_tricks.bash`,
