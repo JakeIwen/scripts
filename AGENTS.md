@@ -293,7 +293,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   grep records and redraws `llmsearch -g` on a terminal; pipes get one final plain
   listing. Directory groups and their provider entries are newest first.
   `llmsearch` asks LLM Switchboard's transcript index first (`llm-switchboard
-  search --json`, Pi only), labels its results with the same helpers and groups
+  search --json`, on whichever machine runs it), labels its results with the same helpers and groups
   them with the same jq function. `--grep`, a non-default session root, records
   mode, a missing command or exit 3 (no finished index build, asked twice) grep
   instead. The llm-switchboard repo's `tests/test_search_oracle.py` runs these

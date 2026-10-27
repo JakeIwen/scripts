@@ -12,10 +12,11 @@ llmsearch_usage() {
     cat <<'EOF'
 Usage: llmsearch [flags] [--] <query>
 
-Search the Pi's transcript index: your prompts and the visible replies of its
-Claude Code and Codex sessions. Where there is no index (the Mac, or the Pi
-before its first build), search everything with grep instead. Results are shown
-newest first; grouped grep results update live when output goes to a terminal.
+Search this machine's transcript index (LLM Switchboard's, on the Mac or the
+Pi): your prompts and the visible replies of its Claude Code and Codex sessions.
+Where there is no index (no llm-switchboard command, or before its first build),
+search everything with grep instead. Results are shown newest first; grouped
+grep results update live when output goes to a terminal.
 
 Index queries:
   All words must be in one message, as whole words. Case and accents are

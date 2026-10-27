@@ -488,7 +488,7 @@ class IndexSearchTests(SessionFixtureTestCase):
     def test_help_describes_the_index_and_grep(self):
         result = self.llmsearch('--help')
         self.assertEqual(result.returncode, 0, result.stderr)
-        for text in ("Search the Pi's transcript index", '--grep', '"a phrase"',
+        for text in ("Search this machine's transcript index", '--grep', '"a phrase"',
                      'tool:claude|codex', 'after:YYYY-MM-DD'):
             self.assertIn(text, result.stdout)
         self.assertEqual(self.switchboard_calls(), [])
