@@ -10,9 +10,11 @@ class TerminalTokens:
         self.state = "text"
         self.sequence = ""
         self.string_kind = "ignored"
+        self.characters_seen = 0
 
     def feed(self, data):
         for char in self.decoder.decode(data):
+            self.characters_seen += 1
             if self.state == "text":
                 if char == "\x1b":
                     self.state = "escape"

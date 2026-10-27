@@ -41,8 +41,8 @@ class RetryState:
         self.gave_up = False
         self.bell_pending = False
 
-    def tick(self, now, settings, alternate_screen=False):
-        if not settings["enabled"] or alternate_screen:
+    def tick(self, now, settings):
+        if not settings["enabled"]:
             self.cancel()
             return b""
         pending = self.due is not None or self.enter_due is not None

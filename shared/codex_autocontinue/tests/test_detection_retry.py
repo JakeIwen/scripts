@@ -7,11 +7,17 @@ from unittest.mock import patch
 
 from shared.python import tool_settings
 from shared.codex_autocontinue.backoff import delay
-from shared.codex_autocontinue.detector import CapacityDetector, SubmissionDetector
+from shared.codex_autocontinue.detector import (
+    ERROR_WINDOW_CHARACTERS, CapacityDetector, SubmissionDetector,
+)
 from shared.codex_autocontinue.retry_state import RetryState
 
 
 ERROR = "■ Selected model is at capacity. Please try a different model.".encode("utf-8")
+
+
+def state_osc(state):
+    return ("\x1b]7501;state={}:app=codex\x1b\\".format(state)).encode("ascii")
 
 
 def settings(**overrides):
@@ -68,18 +74,81 @@ class DetectorTests(unittest.TestCase):
             self.assertEqual(detector.feed(start + ERROR + end).capacity_errors, 0)
             self.assertEqual(detector.feed(ERROR).capacity_errors, 1)
 
-    def test_success_requires_completion_not_placeholder_or_partial_output(self):
+    def test_state_gated_fragmented_error_at_every_chunk_boundary_in_both_modes(self):
+        fragmented = b"\x1b[31m" + b"\x1b[15;11H".join(ERROR.split()) + b"\x1b[0m"
+        for screen in (b"", b"\x1b[?1049h"):
+            data = screen + state_osc("working") + state_osc("error") + fragmented
+            for split in range(len(data) + 1):
+                detector = CapacityDetector()
+                count = detector.feed(data[:split]).capacity_errors
+                self.assertEqual(count + detector.feed(data[split:]).capacity_errors, 1, split)
+            detector = CapacityDetector()
+            self.assertEqual(sum(detector.feed(bytes([byte])).capacity_errors for byte in data), 1)
+
+    def test_state_gated_redraws_never_trigger_without_a_fresh_error_signal(self):
+        for screen in (b"", b"\x1b[?1049h"):
+            detector = CapacityDetector()
+            detector.feed(screen + state_osc("working"))
+            self.assertEqual(detector.feed(ERROR).capacity_errors, 0)
+            self.assertEqual(detector.feed(state_osc("error") + ERROR).capacity_errors, 1)
+            self.assertEqual(detector.feed(b"\r" + ERROR).capacity_errors, 0)
+            detector.new_turn()
+            redraw = (b"\x1b[?1049h\x1b[2J" + ERROR
+                      + b"\x1b[?1049l\x1b[1;1H" + ERROR)
+            self.assertEqual(detector.feed(redraw).capacity_errors, 0)
+            self.assertEqual(detector.feed(state_osc("error") + ERROR).capacity_errors, 1)
+
+    def test_next_state_or_bounded_output_expires_the_error_window(self):
+        for ending in (state_osc("idle"), state_osc("working"), state_osc("unknown"),
+                       b"x" * ERROR_WINDOW_CHARACTERS,
+                       b"\x1b[2;1H" * ERROR_WINDOW_CHARACTERS,
+                       b"\x1b7" * ERROR_WINDOW_CHARACTERS,
+                       b"\x1b]0;" + b"x" * ERROR_WINDOW_CHARACTERS + b"\a"):
+            detector = CapacityDetector()
+            detector.feed(state_osc("error"))
+            self.assertEqual(detector.feed(ending + ERROR).capacity_errors, 0)
+            self.assertEqual(detector.feed(state_osc("error") + ERROR).capacity_errors, 1)
+
+    def test_state_gate_does_not_accept_other_errors_or_osc_contents(self):
         detector = CapacityDetector()
-        for data in (b"Ask Codex to do anything", b"\r\nPartial assistant output",
-                     b"\x1b]7501;state=error:app=codex\x1b\\"):
-            self.assertEqual(detector.feed(data).completed_turns, 0)
-        done = b"\x1b]7501;state=done:app=codex\x1b\\"
-        self.assertEqual(sum(detector.feed(bytes([byte])).completed_turns for byte in done), 1)
-        self.assertEqual(detector.feed(b"\r\n  Worked for <1s").completed_turns, 0)
+        data = (state_osc("error") + b"Authentication failed."
+                + b"\x1b]0;" + ERROR + b"\a" + b"\x1bP" + ERROR + b"\x1b\\"
+                + state_osc("idle") + ERROR)
+        self.assertEqual(detector.feed(data).capacity_errors, 0)
+
+    def test_user_activity_and_submitted_quotes_remain_suppressed_with_state_signals(self):
+        detector = CapacityDetector()
+        detector.feed(b"\x1b[?1049h" + state_osc("working") + state_osc("error"))
+        detector.user_activity()
+        self.assertEqual(detector.feed(ERROR).capacity_errors, 0)
+        self.assertEqual(detector.feed(state_osc("error") + ERROR).capacity_errors, 0)
         detector.new_turn()
-        self.assertEqual(detector.feed(b"\r\n  Worked for 1m 3s").completed_turns, 1)
-        detector.new_turn()
-        self.assertEqual(detector.feed(b"\x1b[?1049h" + done).completed_turns, 0)
+        self.assertEqual(detector.feed(state_osc("error") + ERROR).capacity_errors, 1)
+
+    def test_success_requires_done_signal_in_both_modes_once_signals_are_seen(self):
+        for screen in (b"", b"\x1b[?1049h"):
+            detector = CapacityDetector()
+            for data in (screen + state_osc("working"), b"Ask Codex to do anything",
+                         b"\r\nPartial assistant output", state_osc("error")):
+                self.assertEqual(detector.feed(data).completed_turns, 0)
+            done = state_osc("done")
+            self.assertEqual(sum(detector.feed(bytes([byte])).completed_turns for byte in done), 1)
+            self.assertEqual(detector.feed(done).completed_turns, 0)
+            detector.new_turn()
+            self.assertEqual(detector.feed(b"\r\n  Worked for 1m 3s").completed_turns, 0)
+            self.assertEqual(detector.feed(done).completed_turns, 1)
+
+    def test_no_state_signal_keeps_inline_completion_fallback(self):
+        for line in (b"Worked for <1s", b"  Worked for 1m 3s"):
+            detector = CapacityDetector()
+            self.assertEqual(detector.feed(b"Partial assistant output").completed_turns, 0)
+            self.assertEqual(detector.feed(b"\r\n" + line).completed_turns, 1)
+            self.assertEqual(detector.feed(b"\r\n" + line).completed_turns, 0)
+
+    def test_other_apps_state_signals_do_not_disable_inline_fallback(self):
+        detector = CapacityDetector()
+        detector.feed(b"\x1b]7501;state=working:app=other\a")
+        self.assertEqual(detector.feed(ERROR).capacity_errors, 1)
 
     def test_submit_ignores_bracketed_paste_newlines_and_cursor_reply(self):
         detector = SubmissionDetector()
@@ -157,14 +226,13 @@ class RetryTests(unittest.TestCase):
         self.assertFalse(state.gave_up)
         self.assertEqual(state.tick(10002, values), b"continue")
 
-    def test_disabled_or_overlay_cancels_wait(self):
-        for disabled, alternate in ((True, False), (False, True)):
-            values = settings(base_seconds=1, jitter=0)
-            state = RetryState()
-            state.capacity_error(0, values, random.Random())
-            values["enabled"] = not disabled
-            self.assertEqual(state.tick(20, values, alternate), b"")
-            self.assertIsNone(state.due)
+    def test_disabled_setting_cancels_wait(self):
+        values = settings(base_seconds=1, jitter=0)
+        state = RetryState()
+        state.capacity_error(0, values, random.Random())
+        values["enabled"] = False
+        self.assertEqual(state.tick(20, values), b"")
+        self.assertIsNone(state.due)
 
     def test_reloader_uses_values_file_without_global_test_overrides(self):
         with tempfile.TemporaryDirectory() as directory:

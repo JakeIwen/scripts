@@ -11,10 +11,12 @@ class DemoEnvironment:
     project: Path
     environ: dict
 
-    def command(self, codex):
+    def command(self, codex, *, alternate_screen=False):
         # -c forces embedded mode: no managed-daemon download or orphan after the demo.
-        return [codex, "-c", 'model_provider="mock"', "--no-alt-screen",
-                "--ask-for-approval", "never"]
+        command = [codex, "-c", 'model_provider="mock"', "--ask-for-approval", "never"]
+        if not alternate_screen:
+            command.append("--no-alt-screen")
+        return command
 
 
 def create_environment(directory, base_url, overrides):

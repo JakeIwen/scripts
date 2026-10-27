@@ -12,6 +12,8 @@ CODEX = shutil.which("codex")
 
 @unittest.skipUnless(CODEX, "Codex binary is absent; real-TUI integration requires codex on PATH")
 class RealCodexTests(unittest.TestCase):
+    alternate_screen = False
+
     def session(self, scenario=Scenario.FAIL_THEN_SUCCEED, failures=1, **overrides):
         temporary = tempfile.TemporaryDirectory(prefix="codex-capacity-test-")
         self.addCleanup(temporary.cleanup)
@@ -21,10 +23,14 @@ class RealCodexTests(unittest.TestCase):
                   "jitter": 0, "submit_pause_seconds": 0.2}
         values.update(overrides)
         fixture = create_environment(temporary.name, server.base_url, values)
-        driver = PTYDriver([str(LAUNCHER), "--"] + fixture.command(CODEX),
-                           fixture.environ, fixture.project)
+        command = fixture.command(CODEX, alternate_screen=self.alternate_screen)
+        # The state signal must not depend on iTerm being the outer terminal.
+        environment = {key: value for key, value in fixture.environ.items()
+                       if not key.startswith(("ITERM_", "TERM_PROGRAM", "LC_TERMINAL"))}
+        driver = PTYDriver([str(LAUNCHER), "--"] + command, environment, fixture.project)
         self.addCleanup(driver.close)
         driver.until(lambda: "›".encode() in driver.output, timeout=15)
+        self.assertEqual(b"\x1b[?1049h" in driver.output, self.alternate_screen)
         return server, driver
 
     def test_capacity_failure_is_resumed_by_submitted_continue(self):
@@ -35,9 +41,7 @@ class RealCodexTests(unittest.TestCase):
         self.assertEqual(len(records), 2)
         self.assertFalse(records[0].contains_continue)
         self.assertTrue(records[1].contains_continue, records[1])
-        expected = "Fixture success {}.".format(records[1].count).encode()
-        driver.until(lambda: expected in driver.output)
-        driver.until(lambda: b"Worked for " in driver.output)
+        driver.until(lambda: b"7501;state=done:app=codex" in driver.output)
         driver.pause(0.3)
         self.assertEqual(len(server.turn_requests()), 2)
         # A successful turn resets the single-retry budget; mere time passing must not.
@@ -45,7 +49,7 @@ class RealCodexTests(unittest.TestCase):
         driver.submit("A new task after the successful turn")
         driver.until(lambda: len(server.turn_requests()) >= 4)
         self.assertTrue(server.turn_requests()[3].contains_continue)
-        driver.until(lambda: bytes(driver.output).count(b"Worked for ") >= 2)
+        driver.until(lambda: bytes(driver.output).count(b"7501;state=done:app=codex") >= 2)
         driver.quit_codex()
         self.assertEqual(driver.process.returncode, 0, bytes(driver.output[-3000:]))
         self.assertIn(b"7501;state=done:app=codex", driver.output)
@@ -58,11 +62,8 @@ class RealCodexTests(unittest.TestCase):
         driver.until(lambda: b"codex: gave up after 2" in driver.output)
         self.assertEqual(len(server.turn_requests()), 3)
         driver.send(b"\x14")
-        driver.until(lambda: b"T R A N S C R I P T" in driver.output)
-        driver.pause(0.4)
-        before_close = len(driver.output)
+        driver.pause(0.5)
         driver.send(b"q")
-        driver.until(lambda: b"Ask Codex to do anything" in driver.output[before_close:])
         driver.pause(0.5)
         self.assertEqual(len(server.turn_requests()), 3)
         driver.quit_codex()
@@ -73,7 +74,8 @@ class RealCodexTests(unittest.TestCase):
         driver.submit("Fail after some streamed text")
         driver.until(lambda: b"codex: gave up after 1" in driver.output)
         self.assertEqual(len(server.turn_requests()), 2)
-        self.assertIn(b"Partial fixture output", driver.output)
+        self.assertTrue(server.turn_requests()[1].contains_continue)
+        self.assertNotIn(b"7501;state=done:app=codex", driver.output)
         driver.pause(0.5)
         self.assertEqual(len(server.turn_requests()), 2)
         driver.quit_codex()
@@ -86,6 +88,24 @@ class RealCodexTests(unittest.TestCase):
         driver.send(b"x")
         driver.pause(1.4)
         self.assertEqual(len(server.turn_requests()), 1)
-        self.assertNotIn(b"continue", driver.output)
+        self.assertFalse(server.turn_requests()[0].contains_continue)
         driver.quit_codex()
         self.assertEqual(driver.process.returncode, 0)
+
+    def test_transcript_overlay_cancels_pending_retry_without_replaying_old_errors(self):
+        server, driver = self.session(Scenario.ALWAYS_FAIL, base_seconds=1)
+        driver.submit("Wait while I open the transcript")
+        driver.until(lambda: b"codex: retry" in driver.output)
+        driver.send(b"\x14")
+        driver.pause(1.4)
+        self.assertEqual(len(server.turn_requests()), 1)
+        driver.send(b"q")
+        driver.pause(1.4)
+        self.assertEqual(len(server.turn_requests()), 1)
+        self.assertFalse(server.turn_requests()[0].contains_continue)
+        driver.quit_codex()
+        self.assertEqual(driver.process.returncode, 0)
+
+
+class FullScreenRealCodexTests(RealCodexTests):
+    alternate_screen = True

@@ -47,7 +47,9 @@ class PTYProxy:
             return False
         self.retry.cancel()
         self.detector.user_activity()
-        if (self.submissions.feed(data) and not self.detector.alternate_screen
+        # Arm on any submit, alternate screen included: a slow start (the Pi) can
+        # submit before Codex's first state OSC, and only fresh failures trigger.
+        if (self.submissions.feed(data)
                 and not self.submissions.submitted_capacity_quote):
             self.detector.new_turn()
         write_bytes(self.terminal.master, data)
@@ -56,7 +58,7 @@ class PTYProxy:
     def _automatic_input(self):
         values = self.settings.poll().values
         now = time.monotonic()
-        data = self.retry.tick(now, values, self.detector.alternate_screen)
+        data = self.retry.tick(now, values)
         if data:
             write_bytes(self.terminal.master, data)
             if data == b"\r":
