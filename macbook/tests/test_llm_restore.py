@@ -201,6 +201,14 @@ class Choose(unittest.TestCase):
                             {"claude:" + B: 995.0}, True, 1000.0)
         self.assertEqual([s.id for s in todo], [B])
 
+    def test_limit_takes_the_most_recently_closed_and_skips_open_ones(self):
+        missing = "0000000d-0000-0000-0000-000000000000"
+        plan = [session("claude", s, last_seen=t) for s, t in ((B, 10.0), (missing, 40.0), (A, 50.0), (C, 30.0))]
+        with patch.object(lr, "_switchboard_kept", return_value=set()):
+            todo, skipped = lr.choose(plan, [session("claude", A)], {}, False, 1000.0, limit=1)
+        self.assertEqual([s.id for s in todo], [C])
+        self.assertEqual([line.split(": ", 1)[1] for line in skipped], ["already open", "transcript not found"])
+
     def test_open_session_of_other_tool_does_not_block(self):
         todo, _ = lr.choose([session("claude", A)], [session("codex", A)], {}, False, 1000.0)
         self.assertEqual(len(todo), 1)
@@ -377,6 +385,27 @@ class State(unittest.TestCase):
         self.assertIn("1 closed more than 30 minutes", err)
         _, err, _ = self.apply(items, lr.RestoreOptions(dry_run=True, minutes=60))
         self.assertEqual(err.count("would open"), 2)
+
+    def test_last_ignores_the_window_opens_each_session_once_and_keeps_the_old_boot(self):
+        b_old, b_new = session("claude", B, last_seen=100.0), session("claude", B, last_seen=900.0)
+        items = [lr.PlanItem(session("claude", A, last_seen=1000.0), 0.0), lr.PlanItem(b_new, 100 * 60),
+                 lr.PlanItem(b_old, 900 * 60), lr.PlanItem(session("claude", C, last_seen=50.0), 950 * 60)]
+        out, err, _ = self.apply(items, lr.RestoreOptions(last=2))
+        self.assertEqual([lr.Session.from_json(json.loads(line)).id for line in out.splitlines()], [B, C])
+        self.assertIn("already open", err)
+        self.assertNotIn("widen with", err)
+        self.assertFalse((self.root / "consumed.json").exists())
+        out, _, _ = self.apply(items, lr.RestoreOptions(last=2))
+        self.assertEqual(out, "")  # just launched: a rerun doesn't open them twice
+
+    def test_last_is_its_own_window_flag(self):
+        self.assertEqual(lr.RestoreOptions(last=3).flags(), ["--last", "3"])
+        for bad in ("0", "-1", "x"):
+            with self.assertRaises(lr.argparse.ArgumentTypeError):
+                lr._count(bad)
+        with patch.object(sys, "argv", ["llm_restore.py", "--last", "2", "-H", "1"]), \
+                patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit):
+            lr.main()
 
     def test_emit_prints_sessions_to_open_and_reports_on_stderr(self):
         items = [lr.PlanItem(session("claude", A), 0.0), lr.PlanItem(session("claude", B), 0.0)]
