@@ -10,6 +10,8 @@ scripts=/Users/jacobr/dev/scripts
 17 12 * * * $scripts/macbook/scripts/deferred.zsh watchdog >> $scripts/log/deferred_watchdog.log 2>&1
 # Runs `codex update` once a week; checks every 6 h and defers while Starlink carries the van's traffic.
 41 */6 * * * /usr/bin/python3 -I -B $scripts/shared/sh/codex_update.py run >> $scripts/log/codex_update.log 2>&1
+# Retires the capacity wrapper only after an offline installed-Codex retry probe succeeds.
+23 4 * * 2 $scripts/shared/codex_autocontinue/retirement-check >> $scripts/log/codex_autocontinue_retirement.log 2>&1
 # BEGIN managed codex-release-cleanup
 0 21 * * 0 /usr/bin/python3 -I -B /Users/jacobr/dev/scripts/macbook/scripts/cleanup_codex_releases.py --apply > /Users/jacobr/.codex/codex-release-cleanup.log 2>&1
 # END managed codex-release-cleanup

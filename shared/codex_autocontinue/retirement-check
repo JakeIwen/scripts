@@ -1,0 +1,8 @@
+#!/bin/sh
+# Checkout launch boundary: isolated stdlib imports, independent of cron's cwd/PATH.
+root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd) || exit 1
+exec /usr/bin/python3 -I -c '
+import runpy, sys
+sys.path.insert(0, sys.argv.pop(1))
+runpy.run_module("shared.codex_autocontinue.retirement_check", run_name="__main__")
+' "$root" "$@"

@@ -37,7 +37,8 @@ compare it with this checkout. Deployed files may differ from the repository.
 | `macbook/scripts/sns.sh` | Mac shell alias and BetterTouchTool | `shared/python/sonos_cli.py` and `sonos_tasks.py` |
 | `pi/sns.sh` | Pi shell alias and video audio checks (`/home/pi/sns.sh`) | shared Sonos CLI and tasks; package release imports |
 | `shared/sh/` | Mac/Pi aliases, cron and targeted flat Pi deployment | feature-named scripts in the documented compatibility folder |
-| `shared/codex_autocontinue/run` | interactive `codexp` shell launcher | `shared/codex_autocontinue/` |
+| `shared/codex_autocontinue/run` | Mac `~/.zshrc` `_codex_tui`; Pi copy at `~/.local/share/codex-autocontinue/` via `pi/.bashrc` | `shared/codex_autocontinue/` and its `deploy_pi.zsh` |
+| `shared/codex_autocontinue/retirement-check` | weekly `macbook/crontab` job | `shared/codex_autocontinue/` |
 | `pi/projects/phone-drop/` | `phone-drop.service` and its scoped deployer | the project folder |
 | `ubnt/persistent/scripts/` | airOS boot hooks and `ubnt/scp_to_device.sh` | the complete Wi-Fi-manager cohort |
 
