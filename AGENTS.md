@@ -197,24 +197,43 @@ compare it with this checkout. Deployed files may differ from the repository.
   `dashboard/paneLinks.ts` owns public pane ids and URL/history state;
   feature owners use `usePaneLink`. Network History retains its fragment query filters.
 - `shared/`: code imported or deployed on more than one host.
-- `shared/codex_autocontinue/`: stdlib Python 3.9+ transparent PTY wrapper for
-  interactive Codex capacity errors. Stable launch: `shared/codex_autocontinue/run
+- `shared/codex_autocontinue/`: stdlib Python 3.9+ transparent PTY wrapper that
+  types `continue` (with backoff) after an interactive Codex turn fails with
+  "Selected model is at capacity". Stable launch: `shared/codex_autocontinue/run
   -- <command> <args>`; it preserves cwd and child environment, and non-TTY stdin
   uses direct exec. `pty_proxy.py` owns forwarding, `terminal_session.py` the tty,
   signals/window size/title stack, `detector.py` streamed turn detection, and
   `retry_state.py` cancellation and the attempt limit. Edit the delay formula (linear)
   in `backoff.py`; defaults live only in `shared/settings/codex-autocontinue.json`,
-  with `tool_settings.Reloader` reading private overrides. Only a successful turn
-  resets the streak (Codex's done OSC or inline Worked-for line), never partial
-  output or elapsed time. `fake_server.py` is the loopback Responses fixture;
-  `shared/codex_autocontinue/run --demo` runs a real TUI with short delays and an
-  isolated temporary home/provider in embedded mode (no account, daemon download,
-  or real Codex home). Tests under the feature include real-TUI PTY integration;
-  only those tests skip if Codex is absent. No Pi deployment is wired here yet.
+  with `tool_settings.Reloader` reading private overrides. Detection keys on Codex's
+  own `OSC 7501;state=error|done` signal, which works inline (Mac, `--no-alt-screen`)
+  and full-screen (Pi), where the renderer splits text with cursor moves; only a
+  fresh `state=error` followed by the message triggers, so redraws never do. Sessions
+  without that OSC fall back to inline line matching (and the `Worked for` line for
+  completion). Only a completed turn resets the attempt count. `fake_server.py` is
+  the loopback Responses fixture; `run --demo` runs a real TUI with short delays and
+  an isolated temporary home/provider in embedded mode (no account, daemon
+  download, or real Codex home). Tests include real-TUI PTY integration in both
+  screen modes; only those skip if Codex is absent.
   `run` starts Python through `~/.local/state/codex-autocontinue/codex-retry`
   (a symlink) so iTerm tabs read `(codex-retry)`; never name it `codex`, which
   `llm_restore.py` would count as a TUI. The Codex child sits on the wrapper's
   pty, so `uncommitted_owners.py` finds its tab through ancestor ttys.
+  Pi: `zsh shared/codex_autocontinue/deploy_pi.zsh [--test]` installs the wrapper
+  (not the retirement check) over `vanpi.lan` into
+  `~/.local/share/codex-autocontinue/` with repo paths, keeping `.previous` for
+  rollback, and checks hashes; `pi/.bashrc`'s `_codex_tui` runs it. The Mac's
+  `~/.zshrc` (in `~/config`) runs the checkout's `run` directly.
+  `retirement-check` is the weekly Mac cron entry (`--dry-run` previews without
+  mutations). `retirement_probe.py` tests installed Codex against the loopback
+  Responses fixture with default retries and an isolated temporary HOME;
+  PR #31058 is informational only. `retirement_state.py` owns records/decisions,
+  `retirement_store.py` locked private atomic state, `retirement_actions.py`
+  Mac/Pi settings and phone adapters, and `retirement_check.py` orchestration.
+  State lives in `~/.local/state/codex-autocontinue/retirement.json`.
+  A successful native retry disables both wrappers; failed Pi writes retry
+  weekly. Notification claims precede delivery to prevent duplicates, so failed
+  delivery is logged rather than retried. Shell-launcher cleanup remains manual.
 - Sonos: `shared/python/sonos_cli.py` owns validated argv dispatch
   and read-only diagnostics; `sonos_cli_commands.py` owns command argument types,
   ranges and CLI-only signatures; `sonos_tasks.py` owns operations and lazy
