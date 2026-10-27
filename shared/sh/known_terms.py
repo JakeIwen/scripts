@@ -27,11 +27,12 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 import tempfile
 import time
 from pathlib import Path
+
+import peer_copy
 
 # Relative to the home directory on each machine.
 LIST_PATH = ".claude/KNOWN-TERMS.md"
@@ -40,7 +41,6 @@ SEEN_DIR = ".claude/known-terms-seen"
 DEFAULT_PEER = "pi@vanpi.lan" if sys.platform == "darwin" else ""
 TRIGGER = re.compile(r"^\+known(?:\s+(.*))?$", re.DOTALL)
 SEPARATORS = re.compile(r"[,;\n]")
-SSH_OPTIONS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=3"]
 # Imported into CLAUDE.md files would drop a leading `---`; keep the header plain.
 HEADER = """# Known terms
 
@@ -92,23 +92,12 @@ def write_local(path: Path, terms: list[str]) -> None:
 
 def read_peer(peer: str) -> list[str] | None:
     """The peer's list, [] when it has none yet, None when unreachable."""
-    command = f"cat {LIST_PATH} 2>/dev/null || true"
-    try:
-        result = subprocess.run(["ssh", *SSH_OPTIONS, peer, command],
-                                capture_output=True, text=True, timeout=8)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    return parse(result.stdout) if result.returncode == 0 else None
+    text = peer_copy.read_peer(peer, LIST_PATH)
+    return parse(text) if text is not None else None
 
 
 def write_peer(peer: str, terms: list[str]) -> bool:
-    command = f"mkdir -p {Path(LIST_PATH).parent} && cat > {LIST_PATH}.tmp && mv {LIST_PATH}.tmp {LIST_PATH}"
-    try:
-        result = subprocess.run(["ssh", *SSH_OPTIONS, peer, command], input=render(terms),
-                                capture_output=True, text=True, timeout=8)
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return result.returncode == 0
+    return peer_copy.write_peer(peer, LIST_PATH, render(terms))
 
 
 def change(path: Path, peer: str, added: list[str] = (), removed: list[str] = ()) -> tuple[list[str], str]:

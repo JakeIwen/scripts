@@ -332,7 +332,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   a model turn, and every session gets the list as hook context, then only
   the terms added since (per-session state in `~/.claude/known-terms-seen/`).
   The Mac merges both machines' copies over `vanpi.lan` on each change; the
-  Pi copy sits flat in `/home/pi/scripts/`.
+  Pi copy sits flat in `/home/pi/scripts/`; ship `peer_copy.py` first.
+- `shared/sh/peer_copy.py` owns bounded, noninteractive SSH reads and atomic
+  writes of home-relative text files for known terms and the glossary. It sits
+  flat in `/home/pi/scripts/`; ship it before either importing script.
 - Shell tricks, Jacob's small interactive helper set (13 per host, at most 16):
   `shared/sh/shell_tricks_common.sh` (tools both hosts share, plus `tricks`),
   host files `macbook/scripts/shell_tricks.zsh` and `pi/scripts/shell_tricks.bash`,
