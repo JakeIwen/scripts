@@ -27,8 +27,8 @@ the index's newest-match ordering.
 directory and tool. During a grep scan, terminal listings update as sessions are
 found and counts accumulate. The final listing is complete; redirected or piped
 output contains only that final listing, without terminal control sequences.
-Result headers are bold cyan on terminals. Set `NO_COLOR=1` to disable colour;
-pipes, files and JSON records are always plain.
+Result headers are soft orange (256-colour 215) on terminals. Set `NO_COLOR=1`
+to disable colour; pipes, files and JSON records are always plain.
 
 `-t` / `--title` searches only saved session titles for a literal,
 case-insensitive term, for example `llmsearch -t "backup"`. It returns one hit

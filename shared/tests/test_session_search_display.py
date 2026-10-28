@@ -17,7 +17,7 @@ DISPLAY = Path(__file__).parents[1] / "sh" / "session_search_display.py"
 
 
 def display_width(text):
-    text = text.replace("\x1b[1;36m", "").replace("\x1b[0m", "")
+    text = text.replace("\x1b[38;5;215m", "").replace("\x1b[0m", "")
     return sum(0 if unicodedata.combining(character) else
                2 if unicodedata.east_asian_width(character) in ("F", "W") else 1
                for character in text)

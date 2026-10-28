@@ -95,7 +95,7 @@ def sorted_records(records: Iterable[SearchRecord]) -> List[SearchRecord]:
 def header_color(output: TextIO) -> Tuple[str, str]:
     """Decide once at the final output boundary, never in a records producer."""
     enabled = output.isatty() and not os.environ.get("NO_COLOR") and os.environ.get("SESSION_SEARCH_RECORDS") != "1"
-    return ("\x1b[1;36m", "\x1b[0m") if enabled else ("", "")
+    return ("\x1b[38;5;215m", "\x1b[0m") if enabled else ("", "")
 
 
 def record_text(record: SearchRecord, color: Tuple[str, str] = ("", "")) -> str:

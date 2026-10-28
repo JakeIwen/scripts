@@ -163,7 +163,7 @@ session_search_resume_command() {
 session_search_color_start=""
 session_search_color_end=""
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${SESSION_SEARCH_RECORDS:-}" != 1 ]; then
-    session_search_color_start=$'\033[1;36m'
+    session_search_color_start=$'\033[38;5;215m'
     session_search_color_end=$'\033[0m'
 fi
 

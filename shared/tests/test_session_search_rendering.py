@@ -72,14 +72,14 @@ class SearchRenderingTests(fixtures.SessionFixtureTestCase):
                 plain = self.run_search(tool, *flags, query, index=index)
                 self.assertNotIn(b'\x1b', plain)
                 colored = self.run_search(tool, *flags, query, index=index, terminal=True)
-                self.assertIn(b'\x1b[1;36m', colored)
+                self.assertIn(b'\x1b[38;5;215m', colored)
                 self.assertRegex(colored, rb'3 hours ago \| (first|second)\x1b\[0m\n')
                 disabled = self.run_search(tool, *flags, query, index=index,
                                            terminal=True, NO_COLOR='1')
-                self.assertNotIn(b'\x1b[1;36m', disabled)
+                self.assertNotIn(b'\x1b[38;5;215m', disabled)
                 if not (tool == 'llm' and flags == ['-g'] and not index):
                     self.assertEqual(disabled, plain)
-                    self.assertEqual(colored.replace(b'\x1b[1;36m', b'').replace(b'\x1b[0m', b''), plain)
+                    self.assertEqual(colored.replace(b'\x1b[38;5;215m', b'').replace(b'\x1b[0m', b''), plain)
         records = self.run_search('llm', 'needle', terminal=True, SESSION_SEARCH_RECORDS='1')
         self.assertNotIn(b'\x1b', records)
         self.assertEqual(len([json.loads(line) for line in records.splitlines()]), 4)
