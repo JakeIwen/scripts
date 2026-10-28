@@ -31,7 +31,8 @@ def text(variable):
     }
 
 
-def workflow(name, actions, color, glyph, *, accepts_input=False):
+def workflow(name, actions, color, glyph, *, accepts_input=False,
+             workflow_types=None, input_content_item_classes=None, no_input_behavior=None):
     result = {
         "WFWorkflowName": name,
         "WFWorkflowClientVersion": spec.CLIENT_VERSION,
@@ -42,14 +43,19 @@ def workflow(name, actions, color, glyph, *, accepts_input=False):
             "WFWorkflowIconGlyphNumber": glyph,
         },
         "WFWorkflowImportQuestions": [],
-        "WFWorkflowTypes": [],
-        "WFWorkflowInputContentItemClasses": ["WFStringContentItem"] if accepts_input else [],
+        "WFWorkflowTypes": [] if workflow_types is None else workflow_types,
+        "WFWorkflowInputContentItemClasses": (
+            (["WFStringContentItem"] if accepts_input else [])
+            if input_content_item_classes is None else input_content_item_classes
+        ),
         "WFWorkflowHasShortcutInputVariables": accepts_input,
         "WFWorkflowHasOutputFallback": False,
         "WFWorkflowOutputContentItemClasses": [],
         "WFWorkflowActions": actions,
     }
-    if accepts_input:
+    if no_input_behavior is not None:
+        result["WFWorkflowNoInputBehavior"] = no_input_behavior
+    elif accepts_input:
         result["WFWorkflowNoInputBehavior"] = {
             "Name": "WFWorkflowNoInputBehaviorAskForInput",
             "Parameters": {"ItemClass": "WFStringContentItem"},

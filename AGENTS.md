@@ -28,6 +28,7 @@ compare it with this checkout. Deployed files may differ from the repository.
 | `macbook/scripts/display_cab_dimmer.py` | `com.jacobr.display-cab-dimmer` LaunchAgent and Mac Panel automation | `macbook/scripts/cab_dimmer/` plus the stable entry script |
 | `macbook/scripts/amphetamine_control.py` | Mac Panel Amphetamine tab and Terminal | `macbook/scripts/amphetamine/` |
 | `macbook/scripts/deferred.zsh` | `com.jacobr.deferred-jobs` LaunchAgent and Mac Panel | the script and `shared/automations/` declaration |
+| `macbook/scripts/llm_photo_inbox.py` | iPhone Shortcuts Run Script over SSH (raw photo on stdin) | standalone stdlib Python 3.9+; macOS `sips`, `ps`, `pgrep`, `osascript` and running iTerm2 |
 | `pi.apps.van_dashboard` | `van-dashboard.service` and `pi/deploy_python.py` | `pi/apps/van_dashboard/` |
 | `pi.apps.video_library` | `video-library.service` and `pi/deploy_python.py` | `pi/apps/video_library/` |
 | `pi.apps.audiobooks` | `audiobooks.service` and `pi/deploy_python.py` | `pi/apps/audiobooks/` |
@@ -80,7 +81,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   `connect` (link checks, reloads/recovery), `transitions` (GUI/manual holds),
   `provision` (new networks), `status` (status/dashboard output), and `starlink`
   (power-off roaming). Ship the entrypoint and every sibling together.
-- `macbook/shortcuts/`: stdlib Python 3.9+ Pi SSH-key Shortcut spec and builder; from the repo root run `/usr/bin/python3 -m macbook.shortcuts.build_shortcuts` (requires macOS `/usr/bin/shortcuts` signing); outputs are ignored under `macbook/build/shortcuts/`.
+- `macbook/shortcuts/`: stdlib Python 3.9+ SSH-key Shortcut specs and builders: Pi command shortcuts (`pi_shortcuts.py`, `workflows.py`) and the "To Mac LLM" photo share sheet (`mac_shortcuts.py`, `mac_workflows.py`); shared plist helpers live in `workflows.py`. From the repo root run `/usr/bin/python3 -m macbook.shortcuts.build_shortcuts` to build both sets (requires macOS `/usr/bin/shortcuts` signing); outputs are ignored under `macbook/build/shortcuts/`.
 - `macbook/`: macOS shell utilities, AppleScripts, and BetterTouchTool helpers.
   `macbook/scripts/shimg.zsh` is called by `~/.zshrc`'s `shimg` alias;
   it saves clipboard PNGs into the mounted Pi `agent-shared` folder, with

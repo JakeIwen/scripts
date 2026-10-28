@@ -193,7 +193,8 @@ class PiShortcutTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, "")
-        self.assertEqual(result.stdout.splitlines(), [str(path) for path in self.paths])
+        expected = self.paths + [self.directory.resolve() / "To Mac LLM.unsigned.shortcut"]
+        self.assertEqual(result.stdout.splitlines(), [str(path) for path in expected])
 
     def test_cli_help_and_invalid_argument(self):
         for arguments, expected in ((["--help"], 0), (["--unknown"], 2)):
@@ -213,7 +214,7 @@ class PiShortcutTests(unittest.TestCase):
                 result = main(["--output-dir", str(self.directory)])
         self.assertEqual(result, 1)
         self.assertEqual(stdout.getvalue(), "")
-        self.assertEqual(stderr.getvalue(), "Pi Shortcut signing failed: Signing failed\n")
+        self.assertEqual(stderr.getvalue(), "Shortcut signing failed: Signing failed\n")
 
 
 if __name__ == "__main__":

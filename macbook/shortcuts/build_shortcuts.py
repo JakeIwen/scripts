@@ -1,12 +1,18 @@
-"""Build binary Pi workflows and sign installable copies with macOS Shortcuts."""
+"""Build binary iOS workflows and sign installable copies with macOS Shortcuts."""
 import argparse
 from pathlib import Path
 import plistlib
 import subprocess
 import sys
 
+from .mac_workflows import create_workflow as create_mac_workflow
 from .pi_shortcuts import DEFAULT_OUTPUT_DIRECTORY
-from .workflows import create_workflows
+from .workflows import create_workflows as create_pi_workflows
+
+
+def create_workflows():
+    """Keep the Pi helper before its callers, then append the Mac share-sheet workflow."""
+    return create_pi_workflows() + [create_mac_workflow()]
 
 
 def build_shortcuts(output_directory, workflows=None, *, sign=True):
@@ -14,7 +20,7 @@ def build_shortcuts(output_directory, workflows=None, *, sign=True):
     directory = Path(output_directory).expanduser().resolve()
     directory.mkdir(parents=True, exist_ok=True)
     paths = []
-    for workflow in create_workflows() if workflows is None else workflows:
+    for workflow in create_pi_workflows() if workflows is None else workflows:
         name = workflow["WFWorkflowName"]
         unsigned = directory / (name + ".unsigned.shortcut")
         with unsigned.open("wb") as stream:
@@ -44,12 +50,12 @@ def main(argv=None):
     )
     options = parser.parse_args(argv)
     try:
-        paths = build_shortcuts(options.output_dir, sign=not options.no_sign)
+        paths = build_shortcuts(options.output_dir, create_workflows(), sign=not options.no_sign)
     except subprocess.CalledProcessError as error:
-        print("Pi Shortcut signing failed: " + (error.stderr or str(error)).strip(), file=sys.stderr)
+        print("Shortcut signing failed: " + (error.stderr or str(error)).strip(), file=sys.stderr)
         return 1
     except OSError as error:
-        print("Pi Shortcut build failed: " + str(error), file=sys.stderr)
+        print("Shortcut build failed: " + str(error), file=sys.stderr)
         return 1
     for path in paths:
         print(path)
