@@ -564,7 +564,7 @@ def write_restore_script(plan: list[PlanItem], sources: list[str], warnings: lis
         "# --dry-run shows what would happen, --force ignores the 2-minute guard",
         "# against reopening a session that was just launched.",
     ]
-    lines += [f"#   {i.session.tool:6} {i.session.title or i.session.id}  ({i.describe()})\n#     {i.session.command}"
+    lines += [f"#   {i.session.tool:6} {i.session.title or i.session.id}  ({i.describe()})\n#     {display_command(i.session.command)}"
               for i in plan]
     lines += [f"# warning: {w}" for w in warnings]
     if not plan:
@@ -622,11 +622,52 @@ def snapshot(quiet: bool) -> int:
     return 0
 
 
+def session_name(s: Session) -> str:
+    """The name Claude's /resume picker shows: the last /rename, else its own
+    latest title. A Codex label already carries the thread name, so ''."""
+    path = _claude_transcript(s.id) if s.tool == CLAUDE else None
+    try:
+        raw = path.read_bytes() if path else b""
+    except OSError:
+        return ""
+    names = {}
+    for line in raw.splitlines():
+        if b'-title"' not in line:
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        for kind, key in (("custom-title", "customTitle"), ("ai-title", "aiTitle")):
+            if isinstance(event, dict) and event.get("type") == kind and isinstance(event.get(key), str):
+                names[kind] = event[key]
+    return " ".join((names.get("custom-title") or names.get("ai-title") or "").split())
+
+
+def display_command(command: str) -> str:
+    """`command` as printed: a bypass-permissions Claude resume reads as
+    `claudepr <id> ...`, the shell function both hosts define for it (the Pi's
+    also unsets DISPLAY). The restore itself still runs `command`."""
+    cd, sep, run = command.partition(" && ")
+    words = shlex.split(run)
+    words = words[1:] if words[:1] == ["command"] else words
+    words = words[3:] if words[:3] == ["env", "-u", "DISPLAY"] else words
+    at = words.index("--resume") if "--resume" in words[:-1] else 0
+    if not at or words[:3] != [CLAUDE, "--permission-mode", "bypassPermissions"]:
+        return command
+    rest = [words[at + 1], *words[3:at], *words[at + 2:]]
+    return f"{cd}{sep}claudepr " + " ".join(shlex.quote(w) for w in rest)
+
+
 # ---------------------------------------------------------------- restore
+
+def _claude_transcript(sid: str) -> Path | None:
+    return next(CLAUDE_PROJECTS.glob(f"*/{sid}.jsonl"), None)
+
 
 def _session_exists(s: Session) -> bool:
     if s.tool == CLAUDE:
-        return any(CLAUDE_PROJECTS.glob(f"*/{s.id}.jsonl"))
+        return _claude_transcript(s.id) is not None
     return any((CODEX_HOME / "sessions").glob(f"*/*/*/rollout-*-{s.id}.jsonl"))
 
 
@@ -723,8 +764,10 @@ def apply(sources: str, opts: RestoreOptions, emit: bool) -> int:
         for line in skipped:
             print(f"skip  {line}", file=report)
         for s in todo:
-            print(f"{'would open' if opts.dry_run else 'open'}  {s.label}  ({in_window[s.key].describe()})\n"
-                  f"      {s.command}", file=report)
+            seen = f"last seen {_clock(s.last_seen)}"
+            name = session_name(s)
+            print(f"{'would open' if opts.dry_run else 'open'}  {s.label}  ({f'{name}, ' if name else ''}{seen})\n"
+                  f"      {display_command(s.command)}", file=report)
         if opts.last is None and len(items) > len(plan):
             print(f"({len(items) - len(plan)} closed more than {opts.minutes} minutes before the last snapshot; "
                   f"widen with -m or -H)", file=report)

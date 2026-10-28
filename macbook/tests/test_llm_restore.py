@@ -116,6 +116,30 @@ class CodexAssignment(unittest.TestCase):
         self.assertEqual(lr.assign_codex_threads([self.tui(1, "/moved")], {99: {A}}, self.threads), {1: A})
 
 
+class Display(unittest.TestCase):
+    def test_bypass_claude_resumes_print_as_claudepr(self):
+        mac = lr.shell_command("/w x", ["claude", "--permission-mode", "bypassPermissions", "--resume", A])
+        pi = lr.shell_command("/w", ["env", "-u", "DISPLAY", "claude", "--permission-mode", "bypassPermissions",
+                                     "--model", "opus", "--resume", A])
+        codex = lr.shell_command("/w", ["codex", "resume", A])
+        prompting = lr.shell_command("/w", ["claude", "--resume", A])
+        self.assertEqual([lr.display_command(c) for c in (mac, pi, codex, prompting)], [
+            f"cd -- '/w x' && claudepr {A}", f"cd -- /w && claudepr {A} --model opus", codex, prompting])
+
+    def test_claude_name_is_the_last_rename_else_its_latest_title(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(lr, "CLAUDE_PROJECTS", Path(tmp)):
+            (Path(tmp) / "-w").mkdir()
+            transcript = Path(tmp) / f"-w/{A}.jsonl"
+            events = [{"type": "ai-title", "aiTitle": "First"}, {"type": "ai-title", "aiTitle": "Fix\nthe  tabs"}]
+            transcript.write_text("".join(json.dumps(e) + "\n" for e in events))
+            self.assertEqual(lr.session_name(session("claude", A)), "Fix the tabs")
+            with transcript.open("a") as f:
+                f.write(json.dumps({"type": "custom-title", "customTitle": "Mine"}) + "\n")
+                f.write(json.dumps({"type": "ai-title", "aiTitle": "Later"}) + "\n")
+            self.assertEqual(lr.session_name(session("claude", A)), "Mine")
+            self.assertEqual((lr.session_name(session("claude", B)), lr.session_name(session("codex", A))), ("", ""))
+
+
 class Plan(unittest.TestCase):
     def snaps(self):
         return [
@@ -368,6 +392,7 @@ class State(unittest.TestCase):
         out, err = io.StringIO(), io.StringIO()
         with patch.object(lr, "live_sessions", return_value=([session("claude", A)], [])), \
                 patch.object(lr, "_session_exists", return_value=True), \
+                patch.object(lr, "CLAUDE_PROJECTS", self.root / "projects"), \
                 patch.object(lr, "_switchboard_kept", return_value=set()), \
                 patch.object(lr, "LAUNCHED", self.root / "launched.json"), \
                 patch.object(lr, "CONSUMED", self.root / "consumed.json"), \
@@ -377,6 +402,16 @@ class State(unittest.TestCase):
                 patch("sys.stdin", io.StringIO(stdin)), patch("sys.stdout", out), patch("sys.stderr", err):
             lr.apply("prev", opts, emit)
         return out.getvalue(), err.getvalue(), opened
+
+    def test_the_report_names_each_session_and_its_claudepr_command(self):
+        (self.root / "projects/-w").mkdir(parents=True)
+        (self.root / f"projects/-w/{B}.jsonl").write_text(json.dumps({"type": "ai-title", "aiTitle": "Tabs"}) + "\n")
+        resume = lr.shell_command("/w", ["claude", "--permission-mode", "bypassPermissions", "--resume", B])
+        item = lr.PlanItem(lr.Session("claude", B, "/w", "w-1", resume, last_seen=1000.0), 60.0)
+        out, err, _ = self.apply([item], lr.RestoreOptions(dry_run=True), emit=False)
+        self.assertIn(f"would open  claude w-1  (Tabs, last seen {lr._clock(1000.0)})\n"
+                      f"      cd -- /w && claudepr {B}\n", out)
+        self.assertNotIn("before the last snapshot", out)
 
     def test_minutes_window_limits_what_reopens(self):
         items = [lr.PlanItem(session("claude", B), 20 * 60), lr.PlanItem(session("claude", C), 50 * 60)]
