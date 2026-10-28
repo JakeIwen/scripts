@@ -9,11 +9,11 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from macbook.shortcuts.build_pi_shortcuts import build_shortcuts, main
+from macbook.shortcuts.build_shortcuts import build_shortcuts, main
 
 
 ROOT = Path(__file__).resolve().parents[2]
-MODULE = "macbook.shortcuts.build_pi_shortcuts"
+MODULE = "macbook.shortcuts.build_shortcuts"
 EXPECTED_COMMANDS = {
     "Brown Noise": "sh ~/sns.sh brown_noise",
     "Pink Noise": "sh ~/sns.sh pink_noise",
@@ -153,6 +153,18 @@ class PiShortcutTests(unittest.TestCase):
                         "WFSerializationType": "WFTextTokenAttachment",
                     }, run, "Shortcut Result")
         self.assertEqual(identifiers, {"C9BA39E0-8849-4AAC-AF2A-831A0BE408E7"})
+
+    def test_explicit_workflow_list_limits_build(self):
+        directory = self.directory / "selected"
+        paths = build_shortcuts(directory, [self.workflows["Pi"]], sign=False)
+        self.assertEqual([path.name for path in paths], ["Pi.unsigned.shortcut"])
+        self.assertEqual({path.resolve() for path in directory.iterdir()}, set(paths))
+        self.assertEqual(plistlib.loads(paths[0].read_bytes()), self.workflows["Pi"])
+
+    def test_explicit_empty_workflow_list_builds_nothing(self):
+        directory = self.directory / "empty"
+        self.assertEqual(build_shortcuts(directory, [], sign=False), [])
+        self.assertEqual(list(directory.iterdir()), [])
 
     def test_signing_uses_anyone_and_returns_signed_paths(self):
         def sign(command, **kwargs):

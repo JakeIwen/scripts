@@ -9,12 +9,12 @@ from .pi_shortcuts import DEFAULT_OUTPUT_DIRECTORY
 from .workflows import create_workflows
 
 
-def build_shortcuts(output_directory, *, sign=True):
+def build_shortcuts(output_directory, workflows=None, *, sign=True):
     """Write all workflows; unsigned builds are explicitly named as such."""
     directory = Path(output_directory).expanduser().resolve()
     directory.mkdir(parents=True, exist_ok=True)
     paths = []
-    for workflow in create_workflows():
+    for workflow in create_workflows() if workflows is None else workflows:
         name = workflow["WFWorkflowName"]
         unsigned = directory / (name + ".unsigned.shortcut")
         with unsigned.open("wb") as stream:

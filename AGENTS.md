@@ -80,7 +80,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   `connect` (link checks, reloads/recovery), `transitions` (GUI/manual holds),
   `provision` (new networks), `status` (status/dashboard output), and `starlink`
   (power-off roaming). Ship the entrypoint and every sibling together.
-- `macbook/shortcuts/`: stdlib Python 3.9+ Pi SSH-key Shortcut spec and builder; from the repo root run `/usr/bin/python3 -m macbook.shortcuts.build_pi_shortcuts` (requires macOS `/usr/bin/shortcuts` signing); outputs are ignored under `macbook/build/shortcuts/`.
+- `macbook/shortcuts/`: stdlib Python 3.9+ Pi SSH-key Shortcut spec and builder; from the repo root run `/usr/bin/python3 -m macbook.shortcuts.build_shortcuts` (requires macOS `/usr/bin/shortcuts` signing); outputs are ignored under `macbook/build/shortcuts/`.
 - `macbook/`: macOS shell utilities, AppleScripts, and BetterTouchTool helpers.
   `macbook/scripts/shimg.zsh` is called by `~/.zshrc`'s `shimg` alias;
   it saves clipboard PNGs into the mounted Pi `agent-shared` folder, with
