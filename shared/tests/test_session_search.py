@@ -66,6 +66,117 @@ class SessionSearchTests(SessionFixtureTestCase):
         return subprocess.run([str(SCRIPTS / (tool + 'search.sh')), *args],
                               env=environment, capture_output=True, text=True, timeout=60)
 
+    def test_context_counts_lines_within_one_message_and_overrides_each_side(self):
+        text = '\n'.join(['outside', 'before two', 'before one', 'TARGET',
+                          'after one', 'after two', 'outside again'])
+        cases = [(['-2'], 'before two\nbefore one\nTARGET\nafter one\nafter two'),
+                 (['-2', '-a', '1'], 'before two\nbefore one\nTARGET\nafter one'),
+                 (['-b1', '-a2'], 'before one\nTARGET\nafter one\nafter two'),
+                 (['-a2', '-b', '1', '-0'], 'TARGET'),
+                 (['-09', '-a', '0'], 'outside\nbefore two\nbefore one\nTARGET')]
+        for provider in ('claude', 'codex'):
+            self.write_session(provider, 'context', ['neighbour before', text, 'neighbour after'])
+        for tool in ('claude', 'codex', 'llm'):
+            for flags, expected in cases:
+                with self.subTest(tool=tool, flags=flags):
+                    result = self.search(tool, *flags, 'target')
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    blocks = result.stdout.rstrip('\n').split('\n\n')
+                    self.assertEqual(len(blocks), 2 if tool == 'llm' else 1)
+                    self.assertTrue(all(block.split('\n', 2)[2] == expected for block in blocks))
+
+    def test_context_merges_adjacent_windows_and_separates_gaps(self):
+        lines = ['line ' + str(index) for index in range(17)]
+        for index in (2, 5, 7, 14):
+            lines[index] = 'target ' + str(index)
+        expected = '\n'.join(lines[1:9]) + '\n--\n' + '\n'.join(lines[13:16])
+        for tool in ('claude', 'codex'):
+            self.write_session(tool, 'windows', ['\n'.join(lines)])
+            result = self.search(tool, '-1', 'target')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.split('\n', 2)[2], expected + '\n\n')
+
+    def test_multiline_context_survives_grouping_and_records(self):
+        expected = 'before\nTARGET\n\nafter'
+        for tool in ('claude', 'codex'):
+            self.write_session(tool, 'context', ['old target', expected + '\noutside'])
+        for tool in ('claude', 'codex', 'llm'):
+            with self.subTest(tool=tool):
+                grouped = self.search(tool, '-g', '-b1', '-a2', 'target')
+                self.assertEqual(grouped.returncode, 0, grouped.stderr)
+                self.assertEqual(grouped.stdout.count(expected + '\n\n'),
+                                 2 if tool == 'llm' else 1)
+                records = self.search(tool, '-1', '-a2', 'target', SESSION_SEARCH_RECORDS='1')
+                self.assertEqual(records.returncode, 0, records.stderr)
+                decoded = [json.loads(line) for line in records.stdout.splitlines()]
+                self.assertTrue(all(record['context'] == expected and record['count'] == 2
+                                    for record in decoded))
+
+    def test_context_keeps_selected_trailing_blank_lines(self):
+        expected = 'before\nTARGET\n\n'
+        for provider in ('claude', 'codex'):
+            self.write_session(provider, 'blank-tail', [expected])
+        for tool in ('claude', 'codex', 'llm'):
+            with self.subTest(tool=tool):
+                result = self.search(tool, '-2', 'target')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.count(expected + '\n\n'),
+                                 2 if tool == 'llm' else 1)
+                records = self.search(tool, '-2', 'target', SESSION_SEARCH_RECORDS='1')
+                self.assertEqual(records.returncode, 0, records.stderr)
+                self.assertTrue(all(json.loads(line)['context'] == expected
+                                    for line in records.stdout.splitlines()))
+
+    def test_context_truncates_long_lines_and_strips_only_trailing_cr(self):
+        text = 'x' * 350 + '\r\n' + 'p' * 450 + 'TARGET' + 's' * 450 + '\r\n  tail\t\r'
+        expected = 'x' * 300 + '...\n...' + 'p' * 100 + 'TARGET' + 's' * 194 + '...\n  tail\t'
+        for tool in ('claude', 'codex', 'llm'):
+            for provider in ('claude', 'codex'):
+                self.write_session(provider, 'long', [text])
+            result = self.search(tool, '-1', 'target')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.count(expected + '\n\n'), 2 if tool == 'llm' else 1)
+
+    def test_claude_context_does_not_split_utf8_at_either_edge(self):
+        text = '€' * 150 + 'TARGET' + '€' * 150
+        self.write_session('claude', 'unicode', [text])
+        result = self.search('claude', '-0', 'target')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.split('\n', 2)[2],
+                         '...' + '€' * 34 + 'TARGET' + '€' * 65 + '...\n\n')
+
+    def test_no_context_retains_the_original_flattened_excerpt(self):
+        text = 'p' * 70 + '\n  TARGET\t' + 's' * 90
+        expected = '...' + 'p' * 49 + ' TARGET ' + 's' * 49 + '...\n\n'
+        for tool in ('claude', 'codex'):
+            self.write_session(tool, 'plain', [text])
+        for tool in ('claude', 'codex', 'llm'):
+            result = self.search(tool, 'target')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.count(expected), 2 if tool == 'llm' else 1)
+
+    def test_context_flags_validate_counts_and_end_at_double_dash(self):
+        for tool in ('claude', 'codex', 'llm'):
+            for args in [('-a',), ('-b',), ('-a', 'x', 'target'), ('-b', '-1', 'target'),
+                         ('-a', '1.5', 'target'), ('-a2x', 'target')]:
+                with self.subTest(tool=tool, args=args):
+                    self.assertEqual(self.search(tool, *args).returncode, 2)
+            for provider in ('claude', 'codex'):
+                self.write_session(provider, 'literal-context', ['literal -2 -a x'])
+            literal = self.search(tool, '--', '-2', '-a', 'x')
+            self.assertEqual(literal.returncode, 0, literal.stderr)
+            self.assertIn('literal -2 -a x\n\n', literal.stdout)
+            self.assertEqual(self.search(tool, '-t', '-2', 'first').stdout,
+                             self.search(tool, '-t', 'first').stdout)
+
+    def test_context_without_a_matching_line_falls_back_to_original_excerpt(self):
+        for tool in ('claude', 'codex'):
+            self.write_session(tool, 'cross-line', ['before target\nafter end'])
+            plain = self.search(tool, 'target\nafter')
+            context = self.search(tool, '-1', 'target\nafter')
+            self.assertEqual(context.returncode, 0, context.stderr)
+            self.assertEqual(context.stdout, plain.stdout)
+
     def test_title_search_matches_saved_titles_without_body_hits(self):
         for tool in ('claude', 'codex'):
             self.write_session(tool, 'title Needle', ['unrelated body'])
@@ -368,6 +479,53 @@ class IndexSearchTests(SessionFixtureTestCase):
         self.assertEqual(len(blocks), 6)
         self.assertEqual(sum('&& claudepr ' in block for block in blocks), 3)
         self.assertEqual(sum('&& codexpr ' in block for block in blocks), 3)
+
+    def test_index_context_flags_are_forwarded_and_context_is_printed(self):
+        row = self.index_result('claude', 'context', 'Context', 1, 'original target', 1)
+        row['context'] = 'before\n…TARGET\nafter\n--\nTARGET again'
+        self.fake_switchboard([row])
+        for flags in (['-9', '-a', '2'], ['-b9', '-a2', '-g']):
+            with self.subTest(flags=flags):
+                result = self.llmsearch(*flags, 'target')
+                self.assertEqual((result.returncode, result.stderr), (0, ''))
+                self.assertTrue(result.stdout.endswith(row['context'] + '\n\n'))
+                self.assertNotIn(row['excerpt'], result.stdout)
+        self.assertEqual(self.switchboard_calls(),
+                         ['[search][--json][--limit][200][--before][9][--after][2][--][target]'] * 2)
+
+    def test_index_context_falls_back_to_excerpt_when_field_is_missing(self):
+        self.fake_switchboard([
+            self.index_result('codex', 'old-index', 'Old', 1, 'original target', 1)])
+        result = self.llmsearch('-0', 'target')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(result.stdout.endswith('original target\n\n'))
+
+    def test_index_rejecting_context_flags_falls_back_to_grep_once(self):
+        self.fake_switchboard(code=2, message='unrecognized arguments: --before --after')
+        for provider in ('claude', 'codex'):
+            self.write_session(provider, 'context', ['before\nTARGET\nafter'])
+        result = self.llmsearch('-1', 'target')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.count('before\nTARGET\nafter\n\n'), 2)
+        self.assertEqual(result.stderr,
+                         'llmsearch: the transcript index rejected context flags, '
+                         'so searching with grep (slow)\n')
+        self.assertEqual(self.switchboard_calls(),
+                         ['[search][--json][--limit][200][--before][1][--after][1][--][target]'])
+
+    def test_index_query_error_with_context_is_shown_not_grepped(self):
+        self.fake_switchboard(code=2, message='search: unknown filter')
+        result = self.llmsearch('-1', 'target')
+        self.assertEqual((result.returncode, result.stdout), (2, ''))
+        self.assertEqual(result.stderr, 'search: unknown filter\n')
+
+    def test_index_context_keeps_exit_three_retry_behavior(self):
+        self.fake_switchboard(code=3, message='not built')
+        result = self.llmsearch('-0', 'needle')
+        self.assert_grep_results(result)
+        self.assertEqual(result.stderr, NOT_BUILT_NOTE)
+        self.assertEqual(self.switchboard_calls(),
+                         ['[search][--json][--limit][200][--before][0][--after][0][--][needle]'] * 2)
 
     def test_index_prints_one_block_per_session_newest_first(self):
         ageless = self.index_result('claude', 'ageless', '(untitled)', 1, 'ageless needle', 0, cwd='')

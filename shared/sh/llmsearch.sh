@@ -31,6 +31,9 @@ Flags:
   -g, --group  Group by directory and tool, with total matches and the latest hit.
   --grep       Search everything, slowly, including thinking and tool calls and
                output, for a literal, case-insensitive term.
+  -N           Show N message lines before and after each match (e.g. -2).
+  -a N, -aN    Show N lines after; later context flags override each side.
+  -b N, -bN    Show N lines before (non-negative integers).
   -h, --help   Show this help and exit.
   --           Search the remaining arguments as one phrase.
 EOF
@@ -50,13 +53,16 @@ llmsearch_claude=${CLAUDESEARCH_ROOT:-${CLAUDE_CONFIG_DIR:-"$HOME/.claude"}}
 llmsearch_codex=${CODEXSEARCH_ROOT:-"$HOME/.codex"}
 
 llmsearch_sources() {
-    local title_flag=""
-    [ "$session_search_title" = false ] || title_flag=--title
+    local flags=()
+    [ "$session_search_title" = false ] || flags+=(--title)
+    if [ "$session_search_context_requested" = true ]; then
+        flags+=(-b "$session_search_before" -a "$session_search_after")
+    fi
     session_search_files claude "$llmsearch_claude" codex "$llmsearch_codex" |
     while IFS= read -r -d '' provider && IFS= read -r -d '' file; do
         SESSION_SEARCH_FILE="$file" SESSION_SEARCH_FILE_PROVIDER="$provider" \
             "$llmsearch_scripts/${provider}search.sh" \
-            ${title_flag:+"$title_flag"} -- "$session_search_query" || return $?
+            ${flags[@]+"${flags[@]}"} -- "$session_search_query" || return $?
     done
 }
 
@@ -118,12 +124,17 @@ llmsearch_print_index() {
 }
 
 llmsearch_ask_index() {
-    llm-switchboard search --json --limit 200 -- "$1"
+    local flags=()
+    if [ "$session_search_context_requested" = true ]; then
+        flags+=(--before "$session_search_before" --after "$session_search_after")
+    fi
+    llm-switchboard search --json --limit 200 ${flags[@]+"${flags[@]}"} -- "$1"
 }
 
-# Returns llm-switchboard's status: 3 means no index build has finished. The
-# index also answers 3 while its periodic update holds the database lock, so
-# ask once more before settling for grep.
+# Returns llm-switchboard's status: 3 means no index build has finished, and
+# 4 (ours) that it lacks the context flags. The index also answers 3 while its
+# periodic update holds the database lock, so ask once more before settling
+# for grep.
 llmsearch_index() {
     local query=$session_search_words quote='"' results status
     # Words before -- keep the index's syntax; the text after it is one phrase.
@@ -143,7 +154,15 @@ llmsearch_index() {
     case "$status" in
         0) [ -z "$results" ] || printf '%s\n' "$results" | llmsearch_print_index || return 1 ;;
         3) ;;
-        *) cat -- "$llmsearch_errors" >&2 ;;
+        *)
+            # An llm-switchboard older than --before/--after rejects them as
+            # usage errors; any other failure, a bad query included, is shown.
+            if [ "$status" -eq 2 ] && [ "$session_search_context_requested" = true ] &&
+                grep -q 'unrecognized arguments' -- "$llmsearch_errors"; then
+                return 4
+            fi
+            cat -- "$llmsearch_errors" >&2
+            ;;
     esac
     return "$status"
 }
@@ -151,7 +170,12 @@ llmsearch_index() {
 if llmsearch_index_applies; then
     llmsearch_index
     llmsearch_status=$?
-    [ "$llmsearch_status" -eq 3 ] || exit "$llmsearch_status"
-    echo 'llmsearch: the transcript index is not built yet, so searching with grep (slow)' >&2
+    case "$llmsearch_status" in
+        3) echo 'llmsearch: the transcript index is not built yet, so searching with grep (slow)' >&2 ;;
+        4)
+            echo 'llmsearch: the transcript index rejected context flags, so searching with grep (slow)' >&2
+            ;;
+        *) exit "$llmsearch_status" ;;
+    esac
 fi
 llmsearch_grep

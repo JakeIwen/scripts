@@ -48,7 +48,7 @@ def session_search_index_name:
 def session_search_index_record:
     ((.mtime // 0) | floor) as $modified |
     {provider: .tool, cwd, id, name: session_search_index_name, mtime, modified: $modified,
-     matched_at: (.matched_at // $modified | floor), count, context: .excerpt};
+     matched_at: (.matched_at // $modified | floor), count, context: (.context // .excerpt)};
 
 # NUL-terminated fields for the shell to label and print: tool, cwd, id, name,
 # mtime (empty when unknown), count and excerpt. Keep the index's newest-match

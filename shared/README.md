@@ -33,6 +33,14 @@ case-insensitive term, for example `llmsearch -t "backup"`. It returns one hit
 per session and works with `-g`. Title searches read the session stores directly
 without using the transcript index; untitled sessions do not match.
 
+`-N` (for example `-2`) shows N lines before and after each match within its
+message. `-a N` / `-aN` and `-b N` / `-bN` set after/before lines separately;
+later flags override each side. Counts are non-negative integers. Overlapping
+or adjacent windows merge; `--` separates gaps. Long lines are cropped to about
+300 characters around the match. Without context flags, excerpts are unchanged.
+Context flags do not affect title searches; flags after `--` are search text.
+An older index that rejects context flags falls back to grep with a notice.
+
 The scripts require Bash, grep, jq, and Python 3.9 or newer. Keep all seven
 `sh/*search*` files together when deploying them to `/home/pi/scripts/`.
 

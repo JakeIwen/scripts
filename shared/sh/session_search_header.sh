@@ -10,6 +10,9 @@ Sessions and their matching excerpts are shown newest first.
 Flags:
   -t, --title  Search saved session titles only (literal, case-insensitive).
   -g, --group  Show one result per session, with the match count and latest excerpt.
+  -N          Show N message lines before and after each match (e.g. -2).
+  -a N, -aN   Show N lines after; later context flags override each side.
+  -b N, -bN   Show N lines before (non-negative integers).
   -h, --help   Show this help and exit.
   --          Treat all remaining arguments as search text.
 EOF
@@ -52,10 +55,37 @@ session_search_parse_args() {
     session_search_query=""
     session_search_words=""
     session_search_literal=""
-    local literal=false arg
-    for arg in "$@"; do
+    session_search_before=0
+    session_search_after=0
+    session_search_context_requested=false
+    local literal=false arg side value
+    while [ "$#" -gt 0 ]; do
+        arg=$1
+        shift
         if [ "$literal" = false ]; then
             case "$arg" in
+                -a|-b|-a[0-9]*|-b[0-9]*|-[0-9]*)
+                    case "$arg" in
+                        -a|-b)
+                            side=$arg
+                            [ "$#" -gt 0 ] || return 2
+                            value=$1
+                            shift
+                            ;;
+                        -a*|-b*) side=${arg:0:2}; value=${arg:2} ;;
+                        *) side=both; value=${arg:1} ;;
+                    esac
+                    # Non-numeric -words remain index syntax/search text.
+                    case "$value" in
+                        ''|*[!0-9]*) [ "$side" = both ] || return 2 ;;
+                        *)
+                            session_search_context_requested=true
+                            [ "$side" = -a ] || session_search_before=$value
+                            [ "$side" = -b ] || session_search_after=$value
+                            continue
+                            ;;
+                    esac
+                    ;;
                 -t|--title) session_search_title=true; continue ;;
                 -g|--group) session_search_group=true; continue ;;
                 -h|--help) session_search_help=true; continue ;;
@@ -76,6 +106,70 @@ session_search_parse_args() {
         fi
     done
     [ "$session_search_help" = true ] || [ -n "$session_search_query" ]
+}
+
+# Context stays within one selected message; callers retain their original
+# excerpt as the fallback for queries spanning lines rather than matching one.
+session_search_context() {
+    local text context
+    IFS= read -r -d '' text || :
+    IFS= read -r -d '' context < <(printf '%s' "$text" |
+        SESSION_SEARCH_CONTEXT_QUERY="$session_search_query" awk \
+            -v before="$session_search_before" -v after="$session_search_after" \
+            -v widen="${1:-false}" '
+        function is_continuation(byte) {
+            return byte >= "\200" && byte < "\300"
+        }
+        function clipped(text, position,    first, last, result) {
+            if (length(text) <= 300) return text
+            first = position > 100 ? position - 100 : 1
+            last = first + 299
+            if (last > length(text)) last = length(text)
+            if (widen == "true") {
+                while (first > 1 && is_continuation(substr(text, first, 1))) first--
+                while (last < length(text) &&
+                    is_continuation(substr(text, last + 1, 1))) last++
+            }
+            result = substr(text, first, last - first + 1)
+            if (first > 1) result = "..." result
+            if (last < length(text)) result = result "..."
+            return result
+        }
+        function emit(first, last,    line) {
+            if (printed) print "--"
+            for (line = first; line <= last; line++)
+                print clipped(lines[line], positions[line])
+            printed = 1
+        }
+        BEGIN { query = tolower(ENVIRON["SESSION_SEARCH_CONTEXT_QUERY"]) }
+        {
+            sub(/\r$/, "")
+            lines[NR] = $0
+            positions[NR] = index(tolower($0), query)
+        }
+        END {
+            for (line = 1; line <= NR; line++) {
+                if (!positions[line]) continue
+                first = line - before
+                if (first < 1) first = 1
+                last = line + after
+                if (last > NR) last = NR
+                if (end && first > end + 1) {
+                    emit(start, end)
+                    start = 0
+                }
+                if (!start) start = first
+                end = last
+            }
+            if (!end) exit 1
+            emit(start, end)
+        }
+    ') || :
+    if [ -n "$context" ]; then
+        printf '%s' "$context"
+    else
+        printf '%s' "$text" | (session_search_context_requested=false; excerpt)
+    fi
 }
 
 # Use modification time: searching a transcript must not reset its activity age.
@@ -150,7 +244,13 @@ session_search_print_matches() {
     local text context latest="" count=0 index
     local contexts=()
     while IFS= read -r -d '' text; do
-        context=$(printf '%s\n' "$text" | excerpt)
+        if [ "$session_search_context_requested" = true ] && [ "$session_search_title" = false ]; then
+            # Command substitution would discard selected blank lines at the end.
+            IFS= read -r -d '' context < <(printf '%s\n' "$text" | excerpt) || :
+            context=${context%$'\n'}
+        else
+            context=$(printf '%s\n' "$text" | excerpt)
+        fi
         [ -n "$context" ] || continue
         count=$((count + 1))
         if [ "$grouped" = true ]; then
@@ -174,7 +274,12 @@ session_search_collect_record() {
     matches=$(jq -cn 'reduce inputs as $match ({count: 0};
         .count += 1 | .text = $match.text | .timestamp = $match.timestamp)') || return
     [ "$(printf '%s' "$matches" | jq -r .count)" -gt 0 ] || return 0
-    context=$(printf '%s' "$matches" | jq -r .text | excerpt)
+    if [ "$session_search_context_requested" = true ] && [ "$session_search_title" = false ]; then
+        IFS= read -r -d '' context < <(printf '%s' "$matches" | jq -r .text | excerpt) || :
+        context=${context%$'\n'}
+    else
+        context=$(printf '%s' "$matches" | jq -r .text | excerpt)
+    fi
     [ -n "$context" ] || return 0
     modified=$(session_search_modified "$file") || modified=0
     printf '%s' "$matches" | jq -c -L "$(dirname "${BASH_SOURCE[0]}")" \

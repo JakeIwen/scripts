@@ -33,6 +33,10 @@ if [ ! -d "$codexsearch_sessions" ]; then
 fi
 
 excerpt() {
+    if [ "$session_search_context_requested" = true ] && [ "$session_search_title" = false ]; then
+        session_search_context
+        return
+    fi
     awk -v query="$codexsearch_query" '
         BEGIN {
             text = ""

@@ -34,6 +34,10 @@ fi
 # awk works in bytes under the C locale, matching jq's ASCII-only case folding.
 # The excerpt window is widened so it never splits a multibyte UTF-8 character.
 excerpt() {
+    if [ "$session_search_context_requested" = true ] && [ "$session_search_title" = false ]; then
+        LC_ALL=C session_search_context true
+        return
+    fi
     LC_ALL=C awk -v query="$claudesearch_query" '
         function is_continuation(byte) {
             return byte >= "\200" && byte < "\300"
