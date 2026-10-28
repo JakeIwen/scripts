@@ -46,6 +46,7 @@ compare it with this checkout. Deployed files may differ from the repository.
 
 - `pi/`: Raspberry Pi apps, backup, disk, service, deployment, and setup tooling;
   `pi/README.md` is the documentation index.
+- `pi/scripts/rball.sh`: `s rball` reboots antenna, router, then the Pi through `safe_reboot.sh`; `--dry-run` checks uptime without rebooting.
 - `pi/apps/audiobooks/catalog.py` owns audiobook records, filesystem discovery
   helpers and fuzzy matching rules; `audiobook_server.py` retains state, Sonos,
   routes, polling and the stable service entry behavior. The exact root page is
