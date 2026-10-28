@@ -277,33 +277,33 @@ compare it with this checkout. Deployed files may differ from the repository.
   prints (`status_record`; levels mirror `status_cell.mjs`'s `Level`). The
   panel only reads declarations and relays actions; each tool keeps its own
   durable state (the dimmer's is `~/.local/state/display-cab-dimmer/`).
-- `shared/sh/session_search_header.sh` formats the shared activity-age/name header
-  and quoted directory/resume command for `claudesearch.sh` and `codexsearch.sh`.
-  It also provides `-h`/`--help`, parses `-g`/`--group`, and groups matches per transcript, retaining
-  the last matching excerpt in append order. `--` ends option parsing.
-  All three search commands accept `-t`/`--title` for literal, case-insensitive
-  matching of saved titles only (one hit per session, no directory fallback);
-  title mode reads the session stores directly, bypassing the transcript index.
-  Age uses transcript modification time; ship the helper and
-  `shared/sh/session_search_records.jq` with the search scripts. The jq module owns
-  their internal match/summary records and directory/tool aggregation for
-  `shared/sh/llmsearch.sh`. Its `-g` totals matches across sessions and resumes
-  the session with the latest matching event (mtime fallback without timestamps).
-  `shared/sh/session_search_paths.py` lists transcript paths by newest activity
-  before contents are searched, interleaving providers for `llmsearch`.
-  Ungrouped excerpts run newest first within each session. Both Python helpers
-  require Python 3.9+: `shared/sh/session_search_display.py` incrementally groups
-  grep records and redraws `llmsearch -g` on a terminal; pipes get one final plain
-  listing. Directory groups and their provider entries are newest first.
-  `llmsearch` asks LLM Switchboard's transcript index first (`llm-switchboard
-  search --json`, on whichever machine runs it), labels its results with the same helpers and groups
-  them with the same jq function. `--grep`, a non-default session root, records
-  mode, a missing command or exit 3 (no finished index build, asked twice) grep
-  instead. The llm-switchboard repo's `tests/test_search_oracle.py` runs these
-  scripts in records mode, so keep that format and those grep triggers.
-  The Pi runs these seven search files from `/home/pi/scripts/`; `pi/.bashrc`
-  defines all three commands. For targeted updates, ship the complete set and
-  patch only the command definitions in the live `.bashrc`, preserving local changes.
+- `shared/sh/session_search_header.sh` owns the search flags, shared shell launch
+  and index activity-age/resume formatting. `session_search_extract.py` owns
+  single-pass grep extraction, reads Codex titles once per search and emits the
+  `SearchRecord` contract from `session_search_display.py`. `session_search_excerpt.awk`
+  batches each file's original locale-sensitive excerpt/context windows; grep
+  starts no jq processes. Keep all nine search files together on the Pi under
+  `/home/pi/scripts/`; `pi/.bashrc` defines all three commands. Python helpers
+  require 3.9+ and shells support Bash 3.2. Targeted updates ship the complete set
+  and patch only those live `.bashrc` definitions, preserving local changes.
+  `session_search_paths.py` lists transcripts by newest activity before content
+  is searched, interleaving providers for `llmsearch`; excerpts within a session
+  are newest first too. `-g` groups provider searches per transcript and keeps
+  the last matching excerpt. `session_search_display.py` incrementally groups
+  `llmsearch -g` by directory/tool and redraws terminal output; pipes get the final
+  listing only. Groups and provider entries are newest first. Counts span
+  sessions, and the latest matching event selects the resume command (mtime
+  fallback without timestamps). Headers are bold cyan only on terminals with
+  no nonempty `NO_COLOR`; records and redirected output remain plain.
+  All three commands accept `-t`/`--title` for literal, case-insensitive saved
+  titles only, one hit per session with no directory fallback. `-N`, `-a N` and
+  `-b N` select context inside a matching message; `--` ends flag parsing.
+  `llmsearch` asks this machine's LLM Switchboard transcript index first
+  (`llm-switchboard search --json`); `session_search_records.jq` owns index
+  normalization/grouping. `--grep`, title mode, non-default roots, records mode,
+  a missing command or exit 3 (no finished index build, asked twice) use grep.
+  The llm-switchboard repo's `tests/test_search_oracle.py` consumes these scripts'
+  records mode, so preserve that format and the fallback triggers.
 - `shared/sh/llm_restore.py` (alias `llmrestore` on both hosts; Pi copy at
   `/home/pi/scripts/`) reopens the Claude Code and Codex sessions open before a
   reboot, skipping any already open or kept by llm-switchboard: iTerm tabs on

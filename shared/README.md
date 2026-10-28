@@ -27,6 +27,8 @@ the index's newest-match ordering.
 directory and tool. During a grep scan, terminal listings update as sessions are
 found and counts accumulate. The final listing is complete; redirected or piped
 output contains only that final listing, without terminal control sequences.
+Result headers are bold cyan on terminals. Set `NO_COLOR=1` to disable colour;
+pipes, files and JSON records are always plain.
 
 `-t` / `--title` searches only saved session titles for a literal,
 case-insensitive term, for example `llmsearch -t "backup"`. It returns one hit
@@ -41,8 +43,12 @@ or adjacent windows merge; `--` separates gaps. Long lines are cropped to about
 Context flags do not affect title searches; flags after `--` are search text.
 An older index that rejects context flags falls back to grep with a notice.
 
-The scripts require Bash, grep, jq, and Python 3.9 or newer. Keep all seven
-`sh/*search*` files together when deploying them to `/home/pi/scripts/`.
+The scripts require Bash, grep, awk, jq (index mode), and Python 3.9 or newer.
+Keep all nine `sh/*search*` files together when deploying them to
+`/home/pi/scripts/`, including `session_search_extract.py` and
+`session_search_excerpt.awk`. Grep mode parses each selected transcript once in
+one Python process; awk renders a whole file's excerpts in one batch, retaining
+each provider's original locale and UTF-8 window behavior.
 
 ## Sonos CLI (`sns`)
 

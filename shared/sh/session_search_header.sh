@@ -18,10 +18,6 @@ Flags:
 EOF
 }
 
-session_search_modified() {
-    stat -c %Y -- "$1" 2>/dev/null || stat -f %m -- "$1" 2>/dev/null
-}
-
 # List by activity before reading transcript contents, so recent hits can be
 # displayed while older sessions are still being searched. Arguments are
 # provider/root pairs; NULs preserve paths containing whitespace or newlines.
@@ -108,77 +104,6 @@ session_search_parse_args() {
     [ "$session_search_help" = true ] || [ -n "$session_search_query" ]
 }
 
-# Context stays within one selected message; callers retain their original
-# excerpt as the fallback for queries spanning lines rather than matching one.
-session_search_context() {
-    local text context
-    IFS= read -r -d '' text || :
-    IFS= read -r -d '' context < <(printf '%s' "$text" |
-        SESSION_SEARCH_CONTEXT_QUERY="$session_search_query" awk \
-            -v before="$session_search_before" -v after="$session_search_after" \
-            -v widen="${1:-false}" '
-        function is_continuation(byte) {
-            return byte >= "\200" && byte < "\300"
-        }
-        function clipped(text, position,    first, last, result) {
-            if (length(text) <= 300) return text
-            first = position > 100 ? position - 100 : 1
-            last = first + 299
-            if (last > length(text)) last = length(text)
-            if (widen == "true") {
-                while (first > 1 && is_continuation(substr(text, first, 1))) first--
-                while (last < length(text) &&
-                    is_continuation(substr(text, last + 1, 1))) last++
-            }
-            result = substr(text, first, last - first + 1)
-            if (first > 1) result = "..." result
-            if (last < length(text)) result = result "..."
-            return result
-        }
-        function emit(first, last,    line) {
-            if (printed) print "--"
-            for (line = first; line <= last; line++)
-                print clipped(lines[line], positions[line])
-            printed = 1
-        }
-        BEGIN { query = tolower(ENVIRON["SESSION_SEARCH_CONTEXT_QUERY"]) }
-        {
-            sub(/\r$/, "")
-            lines[NR] = $0
-            positions[NR] = index(tolower($0), query)
-        }
-        END {
-            for (line = 1; line <= NR; line++) {
-                if (!positions[line]) continue
-                first = line - before
-                if (first < 1) first = 1
-                last = line + after
-                if (last > NR) last = NR
-                if (end && first > end + 1) {
-                    emit(start, end)
-                    start = 0
-                }
-                if (!start) start = first
-                end = last
-            }
-            if (!end) exit 1
-            emit(start, end)
-        }
-    ') || :
-    if [ -n "$context" ]; then
-        printf '%s' "$context"
-    else
-        printf '%s' "$text" | (session_search_context_requested=false; excerpt)
-    fi
-}
-
-# Use modification time: searching a transcript must not reset its activity age.
-session_search_header() {
-    local modified
-    modified=$(session_search_modified "$2") || modified=""
-    session_search_header_at "$1" "$modified"
-}
-
 # Takes the activity time in epoch seconds. Under bash 5 it forks nothing, so
 # llmsearch can label hundreds of index results quickly on the Pi.
 session_search_header_at() {
@@ -200,8 +125,8 @@ session_search_header_at() {
             age="$count $unit ago"
             ;;
     esac
-    line="$age | $name"
-    printf '%s\n' "${line//[$'\n\r\t']/ }"
+    line="${3:-}$age | $name"
+    session_search_color_line "${line//[$'\n\r\t']/ }"
 }
 
 session_search_quote_word() {
@@ -234,69 +159,26 @@ session_search_resume_command() {
     printf '\n'
 }
 
-# Each NUL-delimited input is one matching event, in transcript append order.
-session_search_print_matches() {
-    local header=$1 resume=$2 grouped=$3
-    if [ "${SESSION_SEARCH_RECORDS:-}" = 1 ]; then
-        session_search_collect_record "$header" "$resume" "$4" "$5" "$6"
-        return
-    fi
-    local text context latest="" count=0 index
-    local contexts=()
-    while IFS= read -r -d '' text; do
-        if [ "$session_search_context_requested" = true ] && [ "$session_search_title" = false ]; then
-            # Command substitution would discard selected blank lines at the end.
-            IFS= read -r -d '' context < <(printf '%s\n' "$text" | excerpt) || :
-            context=${context%$'\n'}
-        else
-            context=$(printf '%s\n' "$text" | excerpt)
-        fi
-        [ -n "$context" ] || continue
-        count=$((count + 1))
-        if [ "$grouped" = true ]; then
-            latest=$context
-        else
-            contexts[${#contexts[@]}]=$context
-        fi
-    done
-    if [ "$grouped" = true ] && [ "$count" -gt 0 ]; then
-        printf '%s matches | %s\n%s\n%s\n\n' "$count" "$header" "$resume" "$latest"
-    else
-        for ((index=${#contexts[@]} - 1; index >= 0; index--)); do
-            printf '%s\n%s\n%s\n\n' "$header" "$resume" "${contexts[index]}"
-        done
-    fi
+# Decide at the output boundary, before pipelines make stdout ambiguous.
+session_search_color_start=""
+session_search_color_end=""
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${SESSION_SEARCH_RECORDS:-}" != 1 ]; then
+    session_search_color_start=$'\033[1;36m'
+    session_search_color_end=$'\033[0m'
+fi
+
+session_search_color_line() {
+    printf '%s%s%s\n' "$session_search_color_start" "$1" "$session_search_color_end"
 }
 
-session_search_collect_record() {
-    local header=$1 resume=$2 provider=$3 cwd=$4 file=$5
-    local matches context modified
-    matches=$(jq -cn 'reduce inputs as $match ({count: 0};
-        .count += 1 | .text = $match.text | .timestamp = $match.timestamp)') || return
-    [ "$(printf '%s' "$matches" | jq -r .count)" -gt 0 ] || return 0
-    if [ "$session_search_context_requested" = true ] && [ "$session_search_title" = false ]; then
-        IFS= read -r -d '' context < <(printf '%s' "$matches" | jq -r .text | excerpt) || :
-        context=${context%$'\n'}
-    else
-        context=$(printf '%s' "$matches" | jq -r .text | excerpt)
-    fi
-    [ -n "$context" ] || return 0
-    modified=$(session_search_modified "$file") || modified=0
-    printf '%s' "$matches" | jq -c -L "$(dirname "${BASH_SOURCE[0]}")" \
-        --arg provider "$provider" --arg cwd "$cwd" --argjson modified "$modified" \
-        --arg header "$header" --arg resume "$resume" --arg context "$context" '
-        include "session_search_records";
-        session_search_record($provider; $cwd; $modified; $header; $resume; $context)
-    '
-}
-
-# Feed one saved title through the same display/records contract as event hits.
-# Callers pass the real title before their directory-name fallback is applied.
-session_search_title_match() {
-    jq -nj -L "$(dirname "${BASH_SOURCE[0]}")" \
-        --arg title "$1" --arg query "$session_search_query" '
-        include "session_search_records";
-        select($title != "" and ($title | ascii_downcase | contains($query | ascii_downcase))) |
-        session_search_match_output($title)
-    '
+# One extractor serves the complete ordered stream, not one process per file.
+session_search_extract() {
+    local flags=()
+    [ "$session_search_group" = false ] || flags+=(--group)
+    [ "$session_search_title" = false ] || flags+=(--title)
+    [ "$session_search_context_requested" = false ] || flags+=(--context)
+    [ "${SESSION_SEARCH_RECORDS:-}" != 1 ] || flags+=(--records)
+    python3 "$(dirname "${BASH_SOURCE[0]}")/session_search_extract.py" \
+        ${flags[@]+"${flags[@]}"} --before "$session_search_before" --after "$session_search_after" \
+        --codex-root "${CODEXSEARCH_ROOT:-$HOME/.codex}" -- "$session_search_query"
 }

@@ -53,22 +53,13 @@ llmsearch_claude=${CLAUDESEARCH_ROOT:-${CLAUDE_CONFIG_DIR:-"$HOME/.claude"}}
 llmsearch_codex=${CODEXSEARCH_ROOT:-"$HOME/.codex"}
 
 llmsearch_sources() {
-    local flags=()
-    [ "$session_search_title" = false ] || flags+=(--title)
-    if [ "$session_search_context_requested" = true ]; then
-        flags+=(-b "$session_search_before" -a "$session_search_after")
-    fi
     session_search_files claude "$llmsearch_claude" codex "$llmsearch_codex" |
-    while IFS= read -r -d '' provider && IFS= read -r -d '' file; do
-        SESSION_SEARCH_FILE="$file" SESSION_SEARCH_FILE_PROVIDER="$provider" \
-            "$llmsearch_scripts/${provider}search.sh" \
-            ${flags[@]+"${flags[@]}"} -- "$session_search_query" || return $?
-    done
+        session_search_extract
 }
 
 llmsearch_grep() {
     local dependency
-    for dependency in grep jq python3; do
+    for dependency in grep awk python3; do
         if ! command -v "$dependency" >/dev/null 2>&1; then
             echo "llmsearch: required command not found: $dependency" >&2
             return 127
@@ -108,8 +99,7 @@ llmsearch_print_results() {
             codex) command=codexpr ;;
             *) continue ;;
         esac
-        printf '%s matches | ' "$count"
-        session_search_header_at "$name" "$modified"
+        session_search_header_at "$name" "$modified" "$count matches | "
         session_search_resume_command "$cwd" "$command" "$id"
         printf '%s\n\n' "$excerpt"
     done

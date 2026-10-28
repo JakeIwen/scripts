@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import os
 import shutil
 import signal
 import sys
@@ -91,14 +92,20 @@ def sorted_records(records: Iterable[SearchRecord]) -> List[SearchRecord]:
     return answer
 
 
-def record_text(record: SearchRecord) -> str:
-    return "{} matches | {}\n{}\n{}\n\n".format(
-        record.count, record.header, record.resume, record.context
+def header_color(output: TextIO) -> Tuple[str, str]:
+    """Decide once at the final output boundary, never in a records producer."""
+    enabled = output.isatty() and not os.environ.get("NO_COLOR") and os.environ.get("SESSION_SEARCH_RECORDS") != "1"
+    return ("\x1b[1;36m", "\x1b[0m") if enabled else ("", "")
+
+
+def record_text(record: SearchRecord, color: Tuple[str, str] = ("", "")) -> str:
+    return "{}{} matches | {}{}\n{}\n{}\n\n".format(
+        color[0], record.count, record.header, color[1], record.resume, record.context
     )
 
 
-def final_text(records: Iterable[SearchRecord]) -> str:
-    return "".join(record_text(record) for record in sorted_records(records))
+def final_text(records: Iterable[SearchRecord], color: Tuple[str, str] = ("", "")) -> str:
+    return "".join(record_text(record, color) for record in sorted_records(records))
 
 
 def character_width(character: str) -> int:
@@ -136,19 +143,23 @@ def terminal_line(text: str, width: int) -> str:
     return "".join(result).rstrip() + "…"
 
 
-def live_frame(records: Iterable[SearchRecord], seen: int) -> str:
+def live_frame(records: Iterable[SearchRecord], seen: int,
+               color: Tuple[str, str] = ("", "")) -> str:
     size = shutil.get_terminal_size(fallback=(80, 24))
     width = max(2, size.columns)
     available = max(1, size.lines - 1)
     lines = ["Searching… {} session{} found; counts may increase".format(
         seen, "" if seen == 1 else "s"
     )]
+    lines = [terminal_line(line, width) for line in lines]
     for record in sorted_records(records):
         block = record_text(record).rstrip("\n").splitlines() + [""]
         if len(lines) + len(block) > available:
             break
+        block = [terminal_line(line, width) for line in block]
+        block[0] = color[0] + block[0] + color[1]
         lines.extend(block)
-    return "\n".join(terminal_line(line, width) for line in lines) + "\n"
+    return "\n".join(lines) + "\n"
 
 
 class TerminalRenderer:
@@ -188,9 +199,10 @@ def parser() -> argparse.ArgumentParser:
 def run(source: TextIO, output: TextIO) -> int:
     groups: Dict[Tuple[str, str, str], SearchRecord] = {}
     renderer = TerminalRenderer(output) if output.isatty() else None
+    color = header_color(output)
     seen = 0
     if renderer:
-        renderer.update(live_frame(groups.values(), seen))
+        renderer.update(live_frame(groups.values(), seen, color))
     try:
         for number, line in enumerate(source, 1):
             if not line.strip():
@@ -200,12 +212,12 @@ def run(source: TextIO, output: TextIO) -> int:
             key = group_key(record)
             groups[key] = merge_record(groups[key], record) if key in groups else record
             if renderer:
-                renderer.update(live_frame(groups.values(), seen))
+                renderer.update(live_frame(groups.values(), seen, color))
     except (KeyboardInterrupt, ValueError):
         if renderer:
-            renderer.finish(final_text(groups.values()))
+            renderer.finish(final_text(groups.values(), color))
         raise
-    text = final_text(groups.values())
+    text = final_text(groups.values(), color)
     if renderer:
         renderer.finish(text)
     else:

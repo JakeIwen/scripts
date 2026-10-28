@@ -1,17 +1,3 @@
-# Internal records let llmsearch combine results without parsing shell commands.
-def session_search_match_output($text):
-    if env.SESSION_SEARCH_RECORDS == "1" then
-        ({text: $text, timestamp: (.timestamp // null)} | tojson), "\n"
-    else $text, "\u0000"
-    end;
-
-def session_search_record($provider; $cwd; $modified; $header; $resume; $context):
-    {
-        provider: $provider, cwd: $cwd, modified: $modified,
-        matched_at: ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601)? // $modified),
-        count: .count, header: $header, resume: $resume, context: $context
-    };
-
 def session_search_record_text:
     "\(.count) matches | \(.header)\n\(.resume)\n\(.context)\n";
 
