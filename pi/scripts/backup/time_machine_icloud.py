@@ -521,7 +521,7 @@ def failed_attempt(state, exc):
     if retryable:
         schedule_first_copy_retry(state, history.FAILURE_MESSAGES[code])
     print(('Retrying: ' if retryable else 'Failed: ') + history.FAILURE_MESSAGES.get(code, message)
-          + cloud.helper_timeout_detail(exc)
+          + cloud.failure_detail(exc)
           + (f' (errno {exc.errno})' if isinstance(exc, OSError) and exc.errno is not None else ''), flush=True)
     if not retryable:
         cloud.notify(state, 'Mac Time Machine iCloud copy needs attention',

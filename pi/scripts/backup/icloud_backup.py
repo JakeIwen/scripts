@@ -28,7 +28,8 @@ import backup_admission as admission
 from icloud_uplink import decide
 from icloud_inventory import remote_fingerprint, parse_inventory, upload_progress
 from icloud_progress import ProcessIO, ProgressWatch, RcloneStats, StreamDigest, TransferActivity
-from icloud_status import ICLOUD_LOGIN_MESSAGE, begin_attempt, save_attempt
+from icloud_status import (ICLOUD_LOGIN_MESSAGE, begin_attempt, command_failure_detail,
+                           failure_detail, save_attempt)
 from cloud_backup_control import admit_worker
 import backup_priority as priority
 import cloud_backup_requests
@@ -52,29 +53,33 @@ class AuthenticationRequired(RuntimeError):
 
 
 def command_failure(program, operation, returncode, stderr):
-    """Classify known failures without logging server bodies or credentials."""
+    """Keep public failure messages fixed and journal detail separately redacted."""
     base = Path(program).name
     text = stderr.casefold()
+    failure = None
     if base == 'rclone':
         if any(message in text for message in (
                 'trust token expired', 'missing icloud trust token',
                 'invalid session token', 'invalid global session')):
-            return AuthenticationRequired(
+            failure = AuthenticationRequired(
                 'iCloud rejected the saved web session. If login just succeeded, '
                 'check iCloud.com for pending account terms or web-data approval '
                 'before repeating 2FA; otherwise renew with icloud_backup.sh --login')
-        if 'missing pcs cookies' in text or 'requestpcs:' in text:
-            return AuthenticationRequired(
+        elif 'missing pcs cookies' in text or 'requestpcs:' in text:
+            failure = AuthenticationRequired(
                 'iCloud web-data access needs approval on a trusted Apple device; '
                 'run icloud_backup.sh --login')
-        if 'authsrpcomplete' in text or 'incorrect username or password' in text:
-            return AuthenticationRequired(
+        elif 'authsrpcomplete' in text or 'incorrect username or password' in text:
+            failure = AuthenticationRequired(
                 'Apple rejected the account sign-in before 2FA; check the regular '
                 'Apple password privately with icloud_backup.sh --login')
-    safe_operation = operation if operation in {
-        'config', 'copy', 'copyto', 'cat', 'deletefile', 'lsjson', 'check', 'purge',
-        'with-lock'} else 'command'
-    return RuntimeError(f'{base} {safe_operation} failed (exit {returncode})')
+    if failure is None:
+        safe_operation = operation if operation in {
+            'config', 'copy', 'copyto', 'cat', 'deletefile', 'lsjson', 'check', 'purge',
+            'with-lock'} else 'command'
+        failure = RuntimeError(f'{base} {safe_operation} failed (exit {returncode})')
+    failure.detail = command_failure_detail(stderr)
+    return failure
 
 
 def atomic_json(path, value):
@@ -680,13 +685,6 @@ def verify_login(cfg):
     subprocess.run(['/usr/bin/systemctl', 'start', '--no-block', 'vanpi-icloud-backup.service'], check=True)
 
 
-def helper_timeout_detail(exc):
-    if not isinstance(exc, subprocess.TimeoutExpired):
-        return ''
-    program = exc.cmd[0] if isinstance(exc.cmd, (list, tuple)) else exc.cmd.split()[0]
-    return f' ({Path(program).name} timed out after {exc.timeout}s)'
-
-
 def _main(mode):
     os.umask(0o077)
     signal.signal(signal.SIGTERM, abort)
@@ -752,7 +750,7 @@ def _main(mode):
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         message = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else type(exc).__name__
         state.update(phase='error', last_attempt_at=time.time(), last_error=message)
-        print('Failed: ' + message + helper_timeout_detail(exc), file=sys.stderr, flush=True)
+        print('Failed: ' + message + failure_detail(exc), file=sys.stderr, flush=True)
         notify(state, 'vanpi iCloud backup needs attention', 'The weekly copy did not complete. Check service status; an expired Apple login may need renewal.')
         return 1
     finally:

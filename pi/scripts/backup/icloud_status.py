@@ -61,6 +61,41 @@ FAILURE_MESSAGES = {
 RETRYABLE_FAILURES = frozenset(FAILURE_MESSAGES) - {BackupFailure.PERMISSION, BackupFailure.DISK_FULL}
 
 
+# Journal-only detail for a failed helper or rclone command. Public dashboard
+# text stays in FAILURE_MESSAGES; this never carries URLs or account strings.
+def command_failure_detail(stderr):
+    """Keep the last error rather than later stats, with private tokens removed."""
+    lines = [line for line in stderr.splitlines() if line.strip()]
+    fallback = None
+    for line in reversed(lines):
+        try:
+            record = json.loads(line)
+        except ValueError:
+            if fallback is None:
+                fallback = line
+            continue
+        if isinstance(record, dict) and record.get('level') == 'error':
+            detail = str(record.get('msg', ''))
+            if 'object' in record:
+                detail += ': ' + str(record['object'])
+            break
+    else:
+        detail = fallback if fallback is not None else (lines[-1] if lines else '')
+    # Strip hidden controls before redaction so they cannot split private tokens.
+    detail = ''.join(char for char in detail if char.isprintable() or char.isspace())
+    detail = re.sub(r'[A-Za-z][A-Za-z0-9+.-]*://\S+', '<url>', detail)
+    detail = re.sub(r'\S*@\S*', '<account>', detail)
+    return ' '.join(detail.split())[:160]
+
+
+def failure_detail(exc):
+    if isinstance(exc, subprocess.TimeoutExpired):
+        program = exc.cmd[0] if isinstance(exc.cmd, (list, tuple)) else exc.cmd.split()[0]
+        return f' ({Path(program).name} timed out after {exc.timeout}s)'
+    detail = getattr(exc, 'detail', '')
+    return f' ({detail})' if detail else ''
+
+
 def classify_failure(exc):
     if isinstance(exc, OSError):
         return {errno.EIO: BackupFailure.DISK_IO, errno.ENODEV: BackupFailure.DISK_UNAVAILABLE,

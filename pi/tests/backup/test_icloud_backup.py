@@ -112,9 +112,9 @@ class GuardRetryTests(unittest.TestCase):
 
     def test_timeout_detail_does_not_include_command_arguments(self):
         for command in (['/usr/bin/findmnt', '--PRIVATE'], '/usr/bin/findmnt --PRIVATE'):
-            self.assertEqual(backup.helper_timeout_detail(subprocess.TimeoutExpired(command, 20)),
+            self.assertEqual(backup.failure_detail(subprocess.TimeoutExpired(command, 20)),
                              ' (findmnt timed out after 20s)')
-        self.assertEqual(backup.helper_timeout_detail(RuntimeError('PRIVATE')), '')
+        self.assertEqual(backup.failure_detail(RuntimeError('PRIVATE')), '')
 
 
 class ClientMonitoringTests(unittest.TestCase):
@@ -135,6 +135,79 @@ class SnapshotTests(ClientMonitoringTests):
             self.assertIsInstance(failure,backup.AuthenticationRequired)
             for secret in ('PRIVATE','SECRET','private.invalid','TOKEN'):
                 self.assertNotIn(secret,str(failure))
+
+    def test_json_failure_detail_uses_last_error_before_trailing_stats(self):
+        tail = '\n'.join(json.dumps(record) for record in (
+            {'level': 'error', 'msg': 'Earlier error'},
+            {'level': 'error', 'msg': 'Failed to copy: 507 Insufficient Storage',
+             'object': 'chunk-0042'},
+            {'level': 'info', 'msg': 'Transferred: 100 MiB'},
+        ))
+        failure = backup.command_failure(backup.RCLONE, 'copy', 1, tail)
+        self.assertEqual(str(failure), 'rclone copy failed (exit 1)')
+        self.assertEqual(failure.detail, 'Failed to copy: 507 Insufficient Storage: chunk-0042')
+        self.assertEqual(backup.failure_detail(failure), ' (' + failure.detail + ')')
+
+    def test_failure_detail_redacts_urls_accounts_and_controls(self):
+        tail = json.dumps({'level': 'error', 'msg':
+                           'Copy \x00h\x1bttps://private.invalid/?token=SECRET\t'
+                           'failed for name@example.invalid\r\nretry',
+                           'object': 'sftp://private.invalid/chunk'})
+        failure = backup.command_failure(backup.RCLONE, 'copy', 1, tail)
+        self.assertEqual(failure.detail, 'Copy <url> failed for <account> retry: <url>')
+
+    def test_plain_failure_detail_uses_last_nonempty_line_and_is_bounded(self):
+        tail = 'Earlier error\n\n' + 'x' * 200 + '\n \t\n'
+        failure = backup.command_failure(backup.RCLONE, 'copy', 1, tail)
+        self.assertEqual(failure.detail, 'x' * 160)
+        mixed = 'Earlier error\nLast plain error\n' + json.dumps({'level': 'info', 'msg': 'Stats'})
+        self.assertEqual(backup.command_failure(backup.RCLONE, 'copy', 1, mixed).detail,
+                         'Last plain error')
+
+    def test_failure_detail_falls_back_to_json_line_or_empty(self):
+        tail = json.dumps({'level': 'info', 'msg': 'Stats'})
+        self.assertEqual(backup.command_failure(backup.RCLONE, 'copy', 1, tail).detail, tail)
+        for tail in ('', ' \t\n', '\x00\x1b'):
+            failure = backup.command_failure(backup.RCLONE, 'copy', 1, tail)
+            self.assertEqual(failure.detail, '')
+            self.assertEqual(backup.failure_detail(failure), '')
+
+    def test_authentication_failure_carries_redacted_detail(self):
+        for message in ('trust token expired', 'Missing PCS cookies', 'authSRPComplete failed'):
+            with self.subTest(message=message):
+                tail = json.dumps({'level': 'error', 'msg': message + ' name@example.invalid'})
+                failure = backup.command_failure(backup.RCLONE, 'copy', 1, tail)
+                self.assertIsInstance(failure, backup.AuthenticationRequired)
+                self.assertEqual(failure.detail, message + ' <account>')
+                self.assertNotIn('<account>', str(failure))
+
+    def test_pi_failure_journal_includes_detail_without_changing_saved_error(self):
+        failure = backup.command_failure(backup.RCLONE, 'copy', 1,
+            json.dumps({'level': 'error', 'msg': 'Failed to copy: 507 Insufficient Storage',
+                        'object': 'chunk-0042'}))
+        state = {}
+        directory = mock.MagicMock(spec=Path)
+        directory.is_symlink.return_value = False
+        directory.stat.return_value.st_uid = 0
+        with mock.patch.object(backup, 'STATE_DIR', directory), \
+                mock.patch.object(backup, 'load_config', return_value=test_config()), \
+                mock.patch.object(backup, 'admit_worker', return_value=True), \
+                mock.patch.object(backup, 'read_json', return_value=state), \
+                mock.patch.object(backup, 'atomic_json'), mock.patch.object(backup, 'save_attempt'), \
+                mock.patch.object(backup.cloud_backup_requests, 'due', return_value=False), \
+                mock.patch.object(backup.priority, 'complete_job'), \
+                mock.patch.object(backup, 'weekly', side_effect=failure), \
+                mock.patch.object(backup, 'notify'), mock.patch.object(backup.signal, 'signal'), \
+                mock.patch.object(backup.os, 'umask'), \
+                mock.patch.object(backup.admission, 'admitted_run', return_value=nullcontext()), \
+                mock.patch.object(sys, 'argv', ['worker', '--run']), \
+                mock.patch('builtins.print') as journal:
+            self.assertEqual(backup.main(), 1)
+        journal.assert_called_once_with(
+            'Failed: rclone copy failed (exit 1) '
+            '(Failed to copy: 507 Insufficient Storage: chunk-0042)', file=sys.stderr, flush=True)
+        self.assertEqual(state['last_error'], 'rclone copy failed (exit 1)')
+        self.assertNotIn(failure.detail, str(state))
 
     def test_unknown_errors_do_not_echo_server_bodies(self):
         failure=backup.command_failure('/usr/local/bin/rclone','copyto',1,'private account and token')

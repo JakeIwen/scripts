@@ -173,6 +173,20 @@ class ControlTests(unittest.TestCase):
         self.assertNotIn('PRIVATE', journal.call_args.args[0])
         notify.assert_not_called()
 
+    def test_failure_journal_includes_detail_without_changing_public_error(self):
+        state = {'pending': GEN}
+        failure = cloud.command_failure(cloud.RCLONE, 'copy', 1,
+            json.dumps({'level': 'error', 'msg': 'Failed to copy: 507 Insufficient Storage',
+                        'object': 'chunk-0042'}))
+        with mock.patch('builtins.print') as journal, mock.patch.object(cloud, 'notify') as notify:
+            self.assertEqual(job.failed_attempt(state, failure), 1)
+        journal.assert_called_once_with(
+            'Failed: rclone copy failed (exit 1) '
+            '(Failed to copy: 507 Insufficient Storage: chunk-0042)', flush=True)
+        self.assertEqual(state['last_error'], 'rclone copy failed (exit 1)')
+        self.assertNotIn(failure.detail, job.history.reason(state))
+        notify.assert_called_once()
+
     def test_worker_does_not_record_or_run_attempt_while_paused(self):
         self.enterContext(mock.patch.object(job.admission, 'admitted_run', return_value=nullcontext()))
         control.control('pause', '60', self.directory, command=self.command)
