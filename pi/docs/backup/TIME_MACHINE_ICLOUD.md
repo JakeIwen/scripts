@@ -47,9 +47,8 @@ roughly twice that amount; a completed transfer is not yet a Mac restore test.
    healthy network transfers. ExecStopPost releases this job's orphaned gate,
    and never removes another disk-shutdown job's marker.
 
-The sparsebundle remains intact, its encryption password is not read or stored,
-and the previously archived original Time Machine history is untouched. No
-filesystem conversion, block snapshot, forced disconnect of an attached image,
+The sparsebundle remains intact and its encryption password is not read or stored.
+No filesystem conversion, block snapshot, forced disconnect of an attached image,
 or global Samba restart is used. Samba documents its share-specific
 [preexec gate](https://www.samba.org/samba/docs/current/man-html/smb.conf.5.html#PREEXECCLOSE)
 and [close-share operation](https://www.samba.org/samba/docs/current/man-html/smbcontrol.1.html).

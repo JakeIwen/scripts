@@ -11,21 +11,23 @@ The Mac backs up through the `mbp2tbkup` SMB share. The current native image is
 - Virtual image size: **16 TB**; this does not reserve 16 TB on the HDD.
 - Encryption: enabled during Time Machine setup; the mounted image reports
   encrypted. Preserve its password somewhere recoverable after device loss.
-- SMB reported limit: **1,100 GiB** while the prior approximately 470 GiB
-  history is retained on the same 2 TB filesystem.
+- SMB reported limit: **1,100 GiB** on the 2 TB filesystem, which also holds
+  the frozen iCloud staging objects.
 
 `fruit:time machine max size` approximates usage as band count times band size
 for bundles in the share root. It does not account for the hidden archive or
 other files, and is not a filesystem-enforced quota. Leave physical headroom
-for those files. After a completed backup and restore test, the old archive may
-be retired with explicit authorization, then the limit can rise to `1500G`.
-Do not add unrelated data without reevaluating this allowance.
+for those files, including new or changed bands during the next cloud capture
+and its configured free-space reserve. Do not raise the limit or add unrelated
+data without reevaluating the combined live-image and staging allowance.
 
-The original history is retained at
-`archive/pre-64m-20260920/m4mac.previous-time-machine-image`. Samba's
-`veto files = /archive/` prevents clients from accessing the archive through
-this share. For recovery, make a copy available deliberately and restore its
-`.sparsebundle` suffix. Do not erase or modify the archived original.
+The September image formerly at
+`archive/pre-64m-20260920/m4mac.previous-time-machine-image` was deleted with
+Jacob's explicit authorization on October 28, 2026, reclaiming approximately
+469 GiB after cloud capture failed its free-space check. Its older history is
+no longer available. The current `m4mac0.sparsebundle`, frozen staging objects
+and verified cloud generations were preserved. Samba's `veto files = /archive/`
+continues to hide the staging area from clients of the Time Machine share.
 
 ## Establishing 64 MiB bands
 
