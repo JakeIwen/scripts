@@ -35,6 +35,7 @@ compare it with this checkout. Deployed files may differ from the repository.
 | `pi.apps.bme280` | `bme280-mqtt.service` and `pi/deploy_python.py` | `pi/apps/bme280/` |
 | `pi/scripts/system_event_monitor.py` | system-event-monitor, crash-capture and network-recorder consumers | `pi/scripts/system_monitor/` plus the stable shim |
 | `pi/scripts/backup/` | backup units, timers, cron and scoped deployers | the feature folder and `pi/backup_local_deploy.sh` |
+| `pi/scripts/alias_media.sh` | Pi `am`/`an` functions and qBittorrent's completion command (`alias_media.sh new`) | thin wrapper; `pi/apps/media_organizer/alias_main.py` in the package release |
 | `macbook/scripts/sns.sh` | Mac shell alias and BetterTouchTool | `shared/python/sonos_cli.py` and `sonos_tasks.py` |
 | `pi/sns.sh` | Pi shell alias and video audio checks (`/home/pi/sns.sh`) | shared Sonos CLI and tasks; package release imports |
 | `shared/sh/` | Mac/Pi aliases, cron and targeted flat Pi deployment | feature-named scripts in the documented compatibility folder |
@@ -72,6 +73,29 @@ compare it with this checkout. Deployed files may differ from the repository.
   `pi/.bashrc`'s `vantv_*` functions route the BTT media buttons' ssh commands
   (`vlcmd`, `pp`, `play_status`, `kill_media`) to Van TV while a cast is loaded,
   and `pi/crontab_pi` runs the installed controller's weekly `update-ytdlp`.
+- `pi/apps/media_organizer/`: the Movies & TV organizer (package release, Python
+  3.11, stdlib). `records.py` is the wire contract (the dashboard's
+  `features/mediaOrganizer/schema.ts` mirrors it), `config.py` the paths.
+  `scan.py` joins `torrent/New` to qBittorrent torrents; `classify.py` asks
+  Codex on the Pi (`codex exec` with an output schema, one batch call) with an
+  offline SxxEyy fallback; `plans.py` stores proposals and reviewer decisions
+  (a partial plan stays editable for its open rows); `apply.py`/`relocation.py`
+  move tracked payloads through qBittorrent set-location (never set-category),
+  rename untracked ones, mirror the rename into `/mnt/bigboi/mp_backup` (the
+  weekly rsync has no move detection) and journal each item write-ahead;
+  `undo.py` replays a run backwards only when every payload is still where the
+  journal left it. `cli.py` (`python3 -P -m pi.apps.media_organizer`) is the
+  one entry point for the dashboard, the shell and the completion hook
+  (`post-download`); all state lives in `~/.local/share/media-organizer/`.
+  Apply, undo and the link rebuild share `/run/lock/alias-media.lock`.
+  `alias_names.py`/`alias_links.py`/`alias_main.py` are the Python form of the
+  old `alias_media.sh` link builder (byte-identical cleaned names; the fixture
+  `pi/tests/media/alias_names_fixture.json` holds 222 real names);
+  `VAN_ALIAS_OUTPUT_ROOT` builds into a scratch root for comparisons.
+  Dashboard: `van_dashboard_media_organizer.py` runs the CLI (slow commands in
+  one background job), `routes/media_organizer.py` serves
+  `/api/media-organizer/*`, and `features/mediaOrganizer/` is the panel under
+  the Movies & TV tile.
 - `vanrouter/`: reviewed OpenWrt persistence and backup-export artifacts.
 - `ubnt/`: directional wireless-device profiles and uplink scripts.
   `ubnt/persistent/scripts/wifi_manager.sh` owns initialization and command

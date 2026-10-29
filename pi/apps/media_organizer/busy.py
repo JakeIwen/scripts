@@ -1,0 +1,46 @@
+"""Serialized organizer operations with a live-process status marker."""
+import os
+from contextlib import contextmanager
+from . import config
+from .locking import file_lock
+from .storage import now, read_json, write_json
+
+_depth = 0
+
+
+def current():
+    try:
+        data = read_json(config.STATE_DIR / 'busy.json')
+        pid = data['pid']
+        if type(pid) is not int or pid <= 0:
+            return None
+        os.kill(pid, 0)
+        return data
+    except (FileNotFoundError, ProcessLookupError, ValueError, KeyError):
+        return None
+    except PermissionError:
+        return data
+
+
+@contextmanager
+def operation(stage=None):
+    global _depth
+    if _depth:
+        _depth += 1
+        try:
+            yield
+        finally:
+            _depth -= 1
+        return
+    config.STATE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with file_lock(config.STATE_DIR / 'operation.lock'):
+        _depth = 1
+        try:
+            if stage is not None:
+                write_json(config.STATE_DIR / 'busy.json',
+                           {'stage': stage, 'started_at': now(), 'pid': os.getpid()})
+            yield
+        finally:
+            _depth = 0
+            if stage is not None:
+                (config.STATE_DIR / 'busy.json').unlink(missing_ok=True)

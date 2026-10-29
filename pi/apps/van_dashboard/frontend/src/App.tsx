@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { DashboardHeader } from './components/DashboardHeader';
 import { ServiceLinkTile } from './components/Tile';
 import { DashboardGrid, type DashboardTile } from './dashboard/DashboardGrid';
+import { MediaOrganizerFeature } from './features/mediaOrganizer/MediaOrganizerFeature';
 import { BackupsFeature } from './features/backups';
 import { ComputeFeature } from './features/compute';
 import { DealWatchFeature } from './features/dealWatch';
@@ -46,14 +47,7 @@ export function App() {
     },
     {
       id: 'video-library',
-      content: (
-        <ServiceLinkTile
-          icon="🎬"
-          title="Movies & TV"
-          detail="Browse, play, and continue movies and shows"
-          port={8789}
-        />
-      ),
+      content: <MediaOrganizerFeature />,
     },
     {
       id: 'telemetry',

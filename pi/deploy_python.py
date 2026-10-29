@@ -22,7 +22,10 @@ LIVE_ROOT = Path('/home/pi/scripts/python-packages')
 SERVICES = {
     'van-dashboard.service': {
         'app': 'van_dashboard', 'interpreter': '/usr/bin/python3',
-        'flat': 'van_dashboard.py', 'extra': (),
+        'flat': 'van_dashboard.py',
+        # The controller imports these records in-process, not through the CLI.
+        'extra': ('pi/apps/media_organizer/__init__.py',
+                  'pi/apps/media_organizer/config.py', 'pi/apps/media_organizer/records.py'),
     },
     'video-library.service': {
         'app': 'video_library', 'interpreter': '/usr/bin/python3',
@@ -43,7 +46,8 @@ RETAIN_NEWEST = 3
 GC_DELETE_LIMIT = 16
 # Only immediate Python modules in these reviewed directories are inputs.
 MODULE_DIRS = (
-    'pi/apps/audiobooks', 'pi/apps/bme280', 'pi/apps/van_dashboard',
+    'pi/apps/audiobooks', 'pi/apps/bme280', 'pi/apps/media_organizer',
+    'pi/apps/van_dashboard',
     'pi/apps/van_dashboard/routes', 'pi/apps/video_library',
     'pi/apps/video_library/players', 'pi/scripts/python', 'shared/python',
 )

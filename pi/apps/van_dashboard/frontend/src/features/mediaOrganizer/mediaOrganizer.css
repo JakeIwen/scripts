@@ -1,0 +1,138 @@
+.organizer-toolbar,
+.organizer-tile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+.organizer-toolbar {
+  margin-bottom: 1rem;
+}
+.organizer-toolbar button,
+.organizer-tile-actions button,
+.organizer-service-link {
+  min-height: 44px;
+}
+.organizer-service-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.55rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+  color: var(--text);
+  text-decoration: none;
+}
+.organizer-review {
+  width: 100%;
+}
+.organizer-review__head,
+.organizer-review__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1.2fr) minmax(0, 1.2fr) auto;
+  gap: 0.75rem;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.organizer-review__row > div {
+  min-width: 0;
+}
+.organizer-entry-name {
+  overflow-wrap: anywhere;
+}
+.organizer-review small {
+  display: block;
+  margin-top: 0.4rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.organizer-review__row--skipped {
+  color: var(--muted);
+}
+.organizer-review__skip {
+  grid-column: 2 / -1;
+}
+.organizer-destination {
+  display: grid;
+  align-content: start;
+  gap: 0.5rem;
+}
+.organizer-destination input,
+.organizer-destination select {
+  min-width: 0;
+  width: 100%;
+  min-height: 44px;
+}
+.organizer-accept {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  min-height: 44px;
+}
+.organizer-settings {
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+}
+.organizer-settings label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin: 0.75rem 0;
+}
+.organizer-settings input[type='number'] {
+  width: 6rem;
+  min-height: 44px;
+}
+.organizer-settings select {
+  min-height: 44px;
+}
+.organizer-run {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.organizer-run p {
+  margin: 0.4rem 0;
+}
+.organizer-history {
+  margin-top: 1.5rem;
+}
+@media (max-width: 600px) {
+  .organizer-review--responsive .organizer-review__head {
+    display: none;
+  }
+  .organizer-review--responsive .organizer-review__row {
+    grid-template-columns: minmax(0, 1fr);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-small);
+    padding: 0.85rem;
+    margin-bottom: 0.75rem;
+  }
+  .organizer-review--responsive .organizer-review__skip {
+    grid-column: auto;
+  }
+  .organizer-settings label {
+    flex-wrap: wrap;
+  }
+}
+
+.organizer-toolbar button,
+.organizer-tile-actions button {
+  padding: 9px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+  background: var(--panel-raised);
+}
+.organizer-destination input,
+.organizer-destination select,
+.organizer-settings input[type='number'],
+.organizer-settings select {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+  padding: 0.4rem;
+}

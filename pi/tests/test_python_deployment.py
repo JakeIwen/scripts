@@ -18,6 +18,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_SCRIPT = REPOSITORY_ROOT / "pi" / "deploy_python.py"
 
 FIXTURE_MODULES = {
+    "pi/apps/media_organizer": ("__init__.py", "__main__.py", "cli.py", "config.py", "records.py"),
     "pi/apps/audiobooks": ("__main__.py", "audiobook_server.py"),
     "pi/apps/bme280": ("__main__.py", "bme280_mqtt.py", "bme280_testread.py"),
     "pi/apps/van_dashboard": (
@@ -400,6 +401,9 @@ class PythonDeploymentTests(unittest.TestCase):
 
     def test_service_digests_cover_only_each_services_runtime_dependencies(self):
         cases = {
+            "pi/apps/media_organizer/records.py": {deployment.DASHBOARD},
+            "pi/apps/media_organizer/config.py": {deployment.DASHBOARD},
+            "pi/apps/media_organizer/cli.py": set(),
             "pi/apps/van_dashboard/routes/common.py": {deployment.DASHBOARD},
             "pi/apps/video_library/players/vlc_player.py": {"video-library.service"},
             "pi/apps/video_library/static/video_library.js": {"video-library.service"},

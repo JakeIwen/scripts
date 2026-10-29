@@ -23,6 +23,7 @@ def create_app():
     from .routes.history import bp as history_bp
     from .routes.home import bp as home_bp
     from .routes.integrations import bp as integrations_bp
+    from .routes.media_organizer import bp as media_organizer_bp
     from .routes.network import bp as network_bp
     from .routes.projects import bp as projects_bp
     from .routes.sonos import bp as sonos_bp
@@ -51,6 +52,7 @@ def create_app():
         backup_settings_bp,
         history_bp,
         integrations_bp,
+        media_organizer_bp,
         sonos_bp,
         sonos_alarms_bp,
     ):

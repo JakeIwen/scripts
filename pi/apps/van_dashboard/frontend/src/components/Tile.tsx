@@ -67,15 +67,35 @@ interface ServiceLinkTileProps {
   port: number;
 }
 
-export function ServiceLinkTile({ icon, title, detail, port }: ServiceLinkTileProps) {
+function serviceUrl(port: number) {
   const url = new URL(window.location.href);
   url.port = String(port);
   url.pathname = '/';
   url.search = '';
   url.hash = '';
 
+  return url.toString();
+}
+
+export function ServiceLink({
+  port,
+  children,
+  className = '',
+}: {
+  port: number;
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <a className="tile tile--button service-link-tile" href={url.toString()}>
+    <a className={`service-link-tile ${className}`} href={serviceUrl(port)}>
+      {children}
+    </a>
+  );
+}
+
+export function ServiceLinkTile({ icon, title, detail, port }: ServiceLinkTileProps) {
+  return (
+    <a className="tile tile--button service-link-tile" href={serviceUrl(port)}>
       <header className="tile__header">
         <span className="tile__icon" aria-hidden="true">
           {icon}

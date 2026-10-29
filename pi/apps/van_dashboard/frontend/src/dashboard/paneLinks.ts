@@ -10,6 +10,7 @@ export const paneIds = [
   'compute-worker',
   'usb-devices',
   'backups',
+  'media-organizer',
   'ignition-monitor',
   'price-checks',
   'lighting',
