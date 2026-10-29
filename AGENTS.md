@@ -288,16 +288,17 @@ compare it with this checkout. Deployed files may differ from the repository.
   and patch only those live `.bashrc` definitions, preserving local changes.
   `session_search_paths.py` lists transcripts by newest activity before content
   is searched, interleaving providers for `llmsearch`; excerpts within a session
-  are newest first too. `-g` groups provider searches per transcript and keeps
-  the last matching excerpt. `session_search_display.py` incrementally groups
-  `llmsearch -g` by directory/tool and redraws terminal output; pipes get the final
-  listing only. Groups and provider entries are newest first. Counts span
-  sessions, and the latest matching event selects the resume command (mtime
+  are newest first too. Grouping is the default (`-g`); `-s`/`--single` lists every
+  excerpt. Grouped provider searches give one result per transcript with the last
+  matching excerpt. `session_search_display.py` incrementally groups `llmsearch`
+  by directory/tool and redraws terminal output; pipes get the final listing only.
+  Records mode (`SESSION_SEARCH_RECORDS=1`) is never grouped. Groups and provider
+  entries are newest first. Counts span sessions, and the latest matching event selects the resume command (mtime
   fallback without timestamps). Headers are soft orange (256-colour 215) only
   on terminals with no nonempty `NO_COLOR`; records and redirected output
   remain plain.
-  All three commands accept `-t`/`--title` for literal, case-insensitive saved
-  titles only, one hit per session with no directory fallback. `-N`, `-a N` and
+  All three commands accept `-t`/`--title` (alias `-n`/`--name`) for literal,
+  case-insensitive saved titles only, one hit per session with no directory fallback. `-N`, `-a N` and
   `-b N` select context inside a matching message; `--` ends flag parsing.
   `llmsearch` asks this machine's LLM Switchboard transcript index first
   (`llm-switchboard search --json`); `session_search_records.jq` owns index

@@ -64,8 +64,8 @@ class SearchRenderingTests(fixtures.SessionFixtureTestCase):
     def test_color_is_terminal_only_in_plain_grouped_title_and_index_paths(self):
         self.fake_switchboard([self.index_result('claude', 'first', 'first', 2, 'needle', 3)])
         cases = [(tool, flags, False) for tool in ('claude', 'codex', 'llm')
-                 for flags in ([], ['-g'], ['-t'])]
-        cases += [('llm', flags, True) for flags in ([], ['-g'])]
+                 for flags in ([], ['-s'], ['-g'], ['-t'])]
+        cases += [('llm', flags, True) for flags in ([], ['-s'], ['-g'])]
         for tool, flags, index in cases:
             with self.subTest(tool=tool, flags=flags, index=index):
                 query = 'first' if '-t' in flags else 'needle'
@@ -77,7 +77,8 @@ class SearchRenderingTests(fixtures.SessionFixtureTestCase):
                 disabled = self.run_search(tool, *flags, query, index=index,
                                            terminal=True, NO_COLOR='1')
                 self.assertNotIn(b'\x1b[38;5;215m', disabled)
-                if not (tool == 'llm' and flags == ['-g'] and not index):
+                # Grouped llmsearch grep redraws live on a terminal.
+                if not (tool == 'llm' and '-s' not in flags and not index):
                     self.assertEqual(disabled, plain)
                     self.assertEqual(colored.replace(b'\x1b[38;5;215m', b'').replace(b'\x1b[0m', b''), plain)
         records = self.run_search('llm', 'needle', terminal=True, SESSION_SEARCH_RECORDS='1')
@@ -108,7 +109,7 @@ class SearchRenderingTests(fixtures.SessionFixtureTestCase):
             stream.write('{bad json}\n')
             stream.write(json.dumps({'type': 'user', 'message': {'content': 'target after malformed'}}))
             stream.write('\n{"partial":')
-        output = self.run_search('claude', 'target').decode()
+        output = self.run_search('claude', '-s', 'target').decode()
         contexts = [block.split('\n', 2)[2] for block in output.rstrip('\n').split('\n\n')]
         self.assertEqual(contexts, ['target after malformed', 'target queued', 'target result',
                                     'target input', 'target thought'])
@@ -125,7 +126,7 @@ class SearchRenderingTests(fixtures.SessionFixtureTestCase):
             stream.write(''.join(json.dumps(row) + '\n' for row in rows))
             stream.write('{broken}\n')
             stream.write(json.dumps({'text': 'target ignored after malformed'}) + '\n')
-        output = self.run_search('codex', 'target').decode()
+        output = self.run_search('codex', '-s', 'target').decode()
         contexts = [block.split('\n', 2)[2] for block in output.rstrip('\n').split('\n\n')]
         self.assertEqual(contexts, ['target type matches too', 'target first'])
         records = self.run_search('codex', 'target', SESSION_SEARCH_RECORDS='1')
@@ -145,7 +146,7 @@ class SearchRenderingTests(fixtures.SessionFixtureTestCase):
         expected = {'claude': ('...' + '€' * 17 + 'TARGET' + '€' * 17 + '...').encode(),
                     'codex': codex}
         for provider in ('claude', 'codex'):
-            output = self.run_search(provider, 'target', LC_ALL='en_US.UTF-8')
+            output = self.run_search(provider, '-s', 'target', LC_ALL='en_US.UTF-8')
             self.assertEqual(output.split(b'\n', 2)[2], expected[provider] + b'\n\n')
             record = json.loads(self.run_search(provider, 'target', LC_ALL='en_US.UTF-8',
                                                 SESSION_SEARCH_RECORDS='1'))
@@ -163,7 +164,7 @@ class SearchRenderingTests(fixtures.SessionFixtureTestCase):
         jq.write_text('#!/bin/sh\necho unexpected jq >&2\nexit 99\n')
         for executable in (awk, jq):
             executable.chmod(0o755)
-        output = self.run_search('llm', 'needle', PATH=str(folder) + os.pathsep + os.environ['PATH'])
+        output = self.run_search('llm', '-s', 'needle', PATH=str(folder) + os.pathsep + os.environ['PATH'])
         self.assertEqual(len(output.rstrip(b'\n').split(b'\n\n')), 6)
         self.assertEqual(log.read_text().splitlines(), ['start'] * 4)
 

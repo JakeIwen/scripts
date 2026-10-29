@@ -26,9 +26,12 @@ Index queries:
            after:YYYY-MM-DD  before:YYYY-MM-DD
 
 Flags:
-  -t, --title  Search saved session titles only (literal, case-insensitive).
+  -t, --title, -n, --name
+               Search saved session titles only (literal, case-insensitive).
                Uses the session stores directly, without the transcript index.
-  -g, --group  Group by directory and tool, with total matches and the latest hit.
+  -s, --single Show every matching session instead of grouping them.
+  -g, --group  Group by directory and tool, with total matches and the latest
+               hit (the default; undoes an earlier -s).
   --grep       Search everything, slowly, including thinking and tool calls and
                output, for a literal, case-insensitive term.
   -N           Show N message lines before and after each match (e.g. -2).
@@ -69,7 +72,9 @@ llmsearch_grep() {
         echo 'llmsearch: no Claude or Codex session directories found' >&2
         return 1
     fi
-    if [ "$session_search_group" = true ]; then
+    # Records are the machine format (llm-switchboard's oracle reads them), so
+    # they stay ungrouped now that grouping is the default.
+    if [ "$session_search_group" = true ] && [ "${SESSION_SEARCH_RECORDS:-}" != 1 ]; then
         SESSION_SEARCH_RECORDS=1 llmsearch_sources |
             python3 "$llmsearch_scripts/session_search_display.py" --group
     else

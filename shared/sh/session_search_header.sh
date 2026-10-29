@@ -8,13 +8,16 @@ Search session events for a literal, case-insensitive term.
 Sessions and their matching excerpts are shown newest first.
 
 Flags:
-  -t, --title  Search saved session titles only (literal, case-insensitive).
-  -g, --group  Show one result per session, with the match count and latest excerpt.
-  -N          Show N message lines before and after each match (e.g. -2).
-  -a N, -aN   Show N lines after; later context flags override each side.
-  -b N, -bN   Show N lines before (non-negative integers).
+  -t, --title, -n, --name
+               Search saved session titles only (literal, case-insensitive).
+  -s, --single Show every matching excerpt instead of one result per session.
+  -g, --group  One result per session, with the match count and latest
+               excerpt (the default; undoes an earlier -s).
+  -N           Show N message lines before and after each match (e.g. -2).
+  -a N, -aN    Show N lines after; later context flags override each side.
+  -b N, -bN    Show N lines before (non-negative integers).
   -h, --help   Show this help and exit.
-  --          Treat all remaining arguments as search text.
+  --           Treat all remaining arguments as search text.
 EOF
 }
 
@@ -45,7 +48,7 @@ session_search_files() {
 # for the others it is search text. The query is also kept split at --, into
 # session_search_words before it and session_search_literal after it.
 session_search_parse_args() {
-    session_search_group=false
+    session_search_group=true
     session_search_title=false
     session_search_help=false
     session_search_query=""
@@ -82,8 +85,9 @@ session_search_parse_args() {
                             ;;
                     esac
                     ;;
-                -t|--title) session_search_title=true; continue ;;
+                -t|--title|-n|--name) session_search_title=true; continue ;;
                 -g|--group) session_search_group=true; continue ;;
+                -s|--single) session_search_group=false; continue ;;
                 -h|--help) session_search_help=true; continue ;;
                 --grep)
                     if [ -n "${session_search_grep+set}" ]; then

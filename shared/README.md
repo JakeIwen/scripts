@@ -19,20 +19,22 @@ its generic staging paths.
 ## Session search
 
 `claudesearch`, `codexsearch`, and `llmsearch` search newest sessions first.
-Ungrouped transcript searches show each session's newest matching excerpt first;
-`llmsearch` interleaves both tools by session activity. Indexed results retain
-the index's newest-match ordering.
+Results are grouped by default: `claudesearch`/`codexsearch` show one result per
+session and `llmsearch` combines sessions by directory and tool, each with its
+match count and latest hit. `-s` / `--single` lists every match instead (each
+session's newest excerpt first; `llmsearch` interleaves both tools by session
+activity); a later `-g` / `--group` undoes it. Indexed results retain the
+index's newest-match ordering.
 
-`-g` groups Claude/Codex results per session; `llmsearch -g` combines sessions by
-directory and tool. During a grep scan, terminal listings update as sessions are
+During a grouped grep scan, terminal listings update as sessions are
 found and counts accumulate. The final listing is complete; redirected or piped
 output contains only that final listing, without terminal control sequences.
 Result headers are soft orange (256-colour 215) on terminals. Set `NO_COLOR=1`
 to disable colour; pipes, files and JSON records are always plain.
 
-`-t` / `--title` searches only saved session titles for a literal,
-case-insensitive term, for example `llmsearch -t "backup"`. It returns one hit
-per session and works with `-g`. Title searches read the session stores directly
+`-t` / `--title` (or `-n` / `--name`) searches only saved session titles for a
+literal, case-insensitive term, for example `llmsearch -n "backup"`. It returns
+one hit per session and is grouped like other searches. Title searches read the session stores directly
 without using the transcript index; untitled sessions do not match.
 
 `-N` (for example `-2`) shows N lines before and after each match within its
