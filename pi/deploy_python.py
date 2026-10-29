@@ -47,7 +47,7 @@ GC_DELETE_LIMIT = 16
 # Only immediate Python modules in these reviewed directories are inputs.
 MODULE_DIRS = (
     'pi/apps/audiobooks', 'pi/apps/bme280', 'pi/apps/media_organizer',
-    'pi/apps/van_dashboard',
+    'pi/apps/van_dashboard', 'pi/apps/iptorrents_watch',
     'pi/apps/van_dashboard/routes', 'pi/apps/video_library',
     'pi/apps/video_library/players', 'pi/scripts/python', 'shared/python',
 )

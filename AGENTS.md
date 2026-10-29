@@ -96,6 +96,26 @@ compare it with this checkout. Deployed files may differ from the repository.
   one background job), `routes/media_organizer.py` serves
   `/api/media-organizer/*`, and `features/mediaOrganizer/` is the panel under
   the Movies & TV tile.
+- `pi/apps/iptorrents_watch/`: the IPTorrents watcher (package release, stdlib).
+  `records.py` is the wire contract (mirrored by `features/iptWatch/schema.ts`),
+  `config.py` the paths. Login is the `uid`/`pass` cookies in
+  `~/.config/jacobr/iptorrents.json` (mode 600, seeded from Firefox; never
+  logged). `wantlist.py` derives wanted shows from the video library
+  (`/api/library` shows played within 90 days or up next, newest episode on
+  disk from `/api/shows/<id>`) plus manual entries; `parser.py` reads the
+  site's `#torrents` table and fails loudly on a redesign; `filters.py` keeps
+  1080p x264/H.264 TV releases newer than what is on disk and not already in
+  qBittorrent or `~/tfiles`; `check.py` searches one spaced request per show
+  with a 6-hour cache (Pi cron every 6 h, managed block in `pi/crontab_pi`);
+  `download.py` writes a validated `.torrent` to `/home/pi/tfiles` only on an
+  explicit `download <id>` (qBittorrent's watch folder takes it from there, and
+  the media organizer files it when it finishes). State in
+  `~/.local/share/iptorrents-watch/`. Dashboard: `van_dashboard_ipt_watch.py`,
+  `routes/ipt_watch.py` (`/api/ipt-watch/*`) and `features/iptWatch/`, the
+  "Watchlist" sheet beside the organizer under the Movies & TV tile.
+  `cli_jobs.py` (JSON CLI runner + one background job) and
+  `routes/cli_boundary.py` (bounded JSON input, CLI error mapping) are shared
+  by both controllers.
 - `vanrouter/`: reviewed OpenWrt persistence and backup-export artifacts.
 - `ubnt/`: directional wireless-device profiles and uplink scripts.
   `ubnt/persistent/scripts/wifi_manager.sh` owns initialization and command
