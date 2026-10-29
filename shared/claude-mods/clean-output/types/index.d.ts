@@ -36,6 +36,12 @@ export type PromptRecord = {
   kind: string
 }
 
+/**
+ * Where the view is drawn: a pane on the main screen, the band above the
+ * prompt in fullscreen, where a pane docks beside the transcript instead.
+ */
+export type CleanSite = 'pane' | 'band'
+
 /** The pane body's window over its content, as the last `ui.scroll` reported it. */
 export type PaneWindow = {
   offset: number
@@ -51,6 +57,7 @@ declare module 'claude-code' {
       options: CleanOptions | null
       prompts: PromptRecord[]
       window: PaneWindow
+      site: CleanSite
     }
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "clean-output",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "/clean shows the session's exchanges (prompt plus reply, tool calls stripped) in a live pane; N for the last N, turns, copy, tools",
   "types": "./types/index.d.ts"
 }

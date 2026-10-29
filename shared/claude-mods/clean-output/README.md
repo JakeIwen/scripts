@@ -17,6 +17,15 @@ says which rows show (`/clean: rows 95–131 of 145 · more above and below`),
 since the pane's own header scrolls away. ↑↓, PgUp/PgDn and Home/End scroll
 while the pane holds the keyboard.
 
+Under the fullscreen renderer (`/tui fullscreen`), Claude Code docks a pane
+beside the transcript from 110 columns, and a plugin can't place it
+otherwise. So in fullscreen `/clean` draws in the band above the prompt
+instead: full width, at most half the terminal's height, and the mouse wheel
+scrolls it while the pointer is over it (fullscreen reports the wheel; the
+classic renderer leaves it to the terminal's scrollback). `x: close`
+(clicked, or `x` once the band has the keys) closes it, `[-]` folds it, and
+the band's own `↑ n more · ↓ n more` row replaces the rows line.
+
 - An exchange is one of your prompts (or a slash command that got a reply)
   and everything the assistant wrote until your next one. Worker messages,
   background-task notices and scheduled wake-ups that land in between stay
