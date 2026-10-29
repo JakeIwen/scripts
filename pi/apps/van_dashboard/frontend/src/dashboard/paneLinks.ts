@@ -11,6 +11,7 @@ export const paneIds = [
   'usb-devices',
   'backups',
   'media-organizer',
+  'ipt-watch',
   'ignition-monitor',
   'price-checks',
   'lighting',

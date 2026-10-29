@@ -1,0 +1,75 @@
+.ipt-watch-toolbar,
+.ipt-watch-actions,
+.ipt-watch-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+.ipt-watch-section {
+  margin-top: 1.5rem;
+}
+.ipt-watch-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.ipt-watch-details {
+  min-width: 0;
+  flex: 1 1 260px;
+  overflow-wrap: anywhere;
+}
+.ipt-watch-details p {
+  margin: 0.4rem 0;
+  color: var(--muted);
+}
+.ipt-watch-badge {
+  display: inline-block;
+  padding: 0.15rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+  font-size: 0.8rem;
+}
+.ipt-watch-badges {
+  margin-top: 0.4rem;
+}
+.ipt-watch-sheet button,
+.ipt-watch-add input {
+  min-height: 44px;
+  padding: 0.55rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+  background: var(--panel-raised);
+}
+.ipt-watch-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: end;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+.ipt-watch-add label {
+  display: grid;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.ipt-watch-add label:first-child {
+  grid-column: 1 / -1;
+}
+.ipt-watch-add input {
+  min-width: 0;
+  width: 100%;
+  background: var(--panel);
+}
+@media (min-width: 700px) {
+  .ipt-watch-add {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+  }
+  .ipt-watch-add label:first-child {
+    grid-column: auto;
+  }
+}

@@ -3,6 +3,7 @@
 from van_compute.metrics import ComputeMetricsReader
 
 from .van_dashboard_media_organizer import MediaOrganizerController
+from .van_dashboard_ipt_watch import IptWatchController
 from .van_dashboard_backups import BackupManager
 from .van_dashboard_cloud_controls import CloudBackupControl
 from .van_dashboard_backup_priority import BackupPriorityControl
@@ -68,3 +69,5 @@ voltage_check = VoltageCheckManager()
 vonstar = VonstarClient()
 
 media_organizer = MediaOrganizerController()
+
+ipt_watch = IptWatchController()

@@ -1,24 +1,18 @@
 """Dashboard adapter for the organizer CLI; the CLI owns all media state."""
 
-import datetime
 import json
 import re
-import subprocess
 import sys
 import tempfile
-import threading
 
 from pi.apps.media_organizer.config import CATEGORIES, CATEGORY_MOVIES
 from pi.apps.media_organizer.records import CLASSIFIERS, JOB_APPLY, JOB_PROPOSE, JOB_UNDO, Settings
 from .van_dashboard_common import run_command
+from .cli_jobs import CliBusy, CliJobController
 
 
-class MediaOrganizerBusy(RuntimeError):
+class MediaOrganizerBusy(CliBusy):
     pass
-
-
-def _now():
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 def _identifier(value):
@@ -27,37 +21,10 @@ def _identifier(value):
     return value
 
 
-class MediaOrganizerController:
+class MediaOrganizerController(CliJobController):
     def __init__(self, cli=None, command=run_command, timeout=20, job_timeout=900):
-        self.cli = tuple(cli or (sys.executable, '-P', '-m', 'pi.apps.media_organizer'))
-        self.command = command
-        self.timeout = timeout
-        self.job_timeout = job_timeout
-        self._lock = threading.RLock()
-        self._job = None
-
-    def _run(self, *arguments, timeout=None):
-        try:
-            result = self.command([*self.cli, *arguments], timeout=timeout or self.timeout)
-        except subprocess.TimeoutExpired as exc:
-            raise RuntimeError('Media organizer command timed out; check status before retrying.') from exc
-        except OSError as exc:
-            raise RuntimeError('Could not start media organizer.') from exc
-        try:
-            payload = json.loads(result.stdout)
-        except (ValueError, TypeError) as exc:
-            raise RuntimeError('Media organizer returned invalid JSON.') from exc
-        if not isinstance(payload, dict):
-            raise RuntimeError('Media organizer returned an invalid record.')
-        if result.returncode or 'error' in payload and payload['error']:
-            raise RuntimeError(str(payload.get('error') or 'Media organizer command failed.'))
-        return payload
-
-    def status(self):
-        status = self._run('status')
-        with self._lock:
-            status['job'] = dict(self._job) if self._job else None
-        return status
+        super().__init__(cli or (sys.executable, '-P', '-m', 'pi.apps.media_organizer'),
+                         'Media organizer', command, timeout, job_timeout)
 
     def lookup(self, kind, record_id):
         if kind not in ('plan', 'run'):
@@ -86,20 +53,7 @@ class MediaOrganizerController:
             arguments.extend(('--classifier', classifier))
         with self._lock:
             self._ensure_idle()
-            self._job = dict(stage=stage, started_at=_now(), finished_at=None,
-                             ok=None, error=None, result_id=None)
-            job = dict(self._job)
-            threading.Thread(target=self._work, args=(arguments,), daemon=True).start()
-            return job
-
-    def _work(self, arguments):
-        try:
-            result = self._run(*arguments, timeout=self.job_timeout)
-            outcome = dict(ok=True, error=None, result_id=result.get('id'))
-        except Exception as exc:
-            outcome = dict(ok=False, error=str(exc), result_id=None)
-        with self._lock:
-            self._job.update(outcome, finished_at=_now())
+            return self._start_job(stage, arguments)
 
     def decide(self, plan_id, decisions):
         plan_id = _identifier(plan_id)
