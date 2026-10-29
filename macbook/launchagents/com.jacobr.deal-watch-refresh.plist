@@ -3,9 +3,14 @@
 <plist version="1.0">
 <dict>
     <key>Label</key><string>com.jacobr.deal-watch-refresh</string>
+    <!-- Apple's python3, not Homebrew's: Homebrew repoints
+         /opt/homebrew/bin/python3 on each Python install or upgrade, and macOS
+         then treats this job as a new background item and posts another
+         "python3" background-activity notice. The script is stdlib-only and
+         must stay Python 3.9 compatible. -->
     <key>ProgramArguments</key>
     <array>
-        <string>/opt/homebrew/bin/python3</string>
+        <string>/usr/bin/python3</string>
         <string>/Users/jacobr/dev/scripts/macbook/scripts/deal_watch_refresh.py</string>
     </array>
     <key>WorkingDirectory</key><string>/Users/jacobr/dev/scripts</string>

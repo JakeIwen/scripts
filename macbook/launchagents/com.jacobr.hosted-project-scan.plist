@@ -3,9 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>Label</key><string>com.jacobr.hosted-project-scan</string>
+    <!-- A versioned Homebrew Python, not /opt/homebrew/bin/python3: Homebrew
+         repoints that link on each Python install or upgrade, and macOS then
+         treats this job as a new background item and posts another "python3"
+         background-activity notice. Apple's python3 is too old for -P (3.11+). -->
     <key>ProgramArguments</key>
     <array>
-        <string>/opt/homebrew/bin/python3</string>
+        <string>/opt/homebrew/opt/python@3.13/bin/python3.13</string>
         <string>-P</string>
         <string>-m</string>
         <string>pi.apps.van_dashboard.hosted_project_scan</string>

@@ -196,6 +196,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   Its `list --json`, `retry`, `run-now` and `reschedule` serve the Mac Panel;
   every mutation (and `cancel`) takes the checker's own flock and exits 75 when
   it is busy, and `run-now` never sends a failure alert.
+  LaunchAgent plists name `/usr/bin/python3`, a versioned Homebrew interpreter
+  or a venv, never `/opt/homebrew/bin/python3`: Homebrew repoints that link on
+  each Python install, and macOS re-posts its background-activity notice for
+  every job using it (`macbook/tests/test_launchagent_interpreters.py`).
   `macbook/mac_panel/` is the Mac Panel, `http://127.0.0.1:8769/` (port 8769;
   `macpanel` alias in `~/.zshrc`; BTT menu-bar icon and ctrl+opt+cmd+P from
   `bettertouchtool/install_mac_panel_menu.py`): a stdlib server run by the login

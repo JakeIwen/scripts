@@ -8,14 +8,13 @@ readonly installed_plist=/Users/jacobr/Library/LaunchAgents/$label.plist
 readonly domain=gui/$(/usr/bin/id -u)
 
 /usr/bin/plutil -lint "$source_plist"
-/bin/test -x /opt/homebrew/bin/python3
+/bin/test -x /usr/bin/python3
 /bin/test -x /Users/jacobr/.nvm/versions/node/v22.22.0/bin/node
 /bin/test -f "$repo/macbook/scripts/deal_watch_refresh.py"
 /bin/test -f /Users/jacobr/.local/share/codex-browser-tools/doctor.mjs
 /bin/mkdir -p -m 700 "$repo/tmp/deal-watch-refresh"
-if [[ -e "$installed_plist" ]]; then
-    /usr/bin/cmp -s "$source_plist" "$installed_plist"
-else
+if ! /usr/bin/cmp -s "$source_plist" "$installed_plist"; then
+    /bin/launchctl bootout "$domain/$label" 2>/dev/null || true
     /usr/bin/install -m 644 "$source_plist" "$installed_plist"
 fi
 /bin/launchctl enable "$domain/$label"
