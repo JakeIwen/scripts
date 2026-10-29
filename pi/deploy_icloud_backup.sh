@@ -19,7 +19,8 @@ stage=$(ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" /usr/bin/mktemp -d /t
 COPYFILE_DISABLE=1 /usr/bin/tar --no-xattrs -cf - pi/backup_local_deploy.sh \
   pi/__init__.py pi/generate_backup_lock_registry.py "${payload[@]}" \
   | ssh -o BatchMode=yes "$target" /bin/tar -xf - -C "$stage"
-ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" /bin/bash -s -- "$stage" "$local_previous" <<'REMOTE'
+helper_hash=$(shasum -a 256 pi/scripts/connectivity_status.py | awk '{print $1}')
+ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" /bin/bash -s -- "$stage" "$local_previous" "$helper_hash" <<'REMOTE'
 set -euo pipefail
 export PYTHONDONTWRITEBYTECODE=1
 stage=$1
@@ -42,6 +43,9 @@ done < <(local_backup_sources pi)
 /usr/bin/python3 -m json.tool pi/configs/icloud-backup.json >/dev/null
 /usr/bin/systemd-analyze verify pi/services/vanpi-icloud-backup*.service pi/services/vanpi-icloud-backup*.timer
 sudo -n /usr/bin/python3 pi/scripts/backup/backup_schedule.py --check
+# icloud_uplink.py imports the flat connectivity helper that only the broad sync
+# publishes; a stale live copy breaks every cloud attempt's route check.
+[[ $(sha256sum /home/pi/scripts/connectivity_status.py | awk '{print $1}') == "$3" ]] || { echo 'connectivity_status.py on the Pi differs from the checkout; run pi/sync_scripts.sh first so icloud_uplink.py and its helper match.' >&2; exit 1; }
 local_backup_begin "$stage" pi "$2"
 local_backup_publish
 /usr/bin/sudo -n /usr/bin/systemd-tmpfiles --create /etc/tmpfiles.d/vanpi-backup.conf /etc/tmpfiles.d/vanpi-samba-drain.conf

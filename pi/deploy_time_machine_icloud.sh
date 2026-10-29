@@ -65,6 +65,9 @@ bash pi/tests/storage/test_backup_job_lock.sh
 bash pi/tests/storage/test_backup_locks.sh
 bash pi/tests/storage/test_samba_share_control.sh
 [[ $(sha256sum /home/pi/scripts/samba_require_mount.sh | awk '{print $1}') == "$2" ]] || { echo 'Samba mount gate differs; inspect before deploying.' >&2; exit 1; }
+# icloud_uplink.py imports the flat connectivity helper that only the broad sync
+# publishes; a stale live copy breaks every cloud attempt's route check.
+[[ $(sha256sum /home/pi/scripts/connectivity_status.py | awk '{print $1}') == $(sha256sum pi/scripts/connectivity_status.py | awk '{print $1}') ]] || { echo 'connectivity_status.py on the Pi differs from the checkout; run pi/sync_scripts.sh first so icloud_uplink.py and its helper match.' >&2; exit 1; }
 gate=$(sudo -n /usr/bin/testparm -s --section-name=mbp2tbkup --parameter-name=preexec 2>/dev/null)
 [[ "$gate" == '/home/pi/scripts/samba_require_mount.sh mbp2tbkup' ]] || exit 1
 close=$(sudo -n /usr/bin/testparm -s --section-name=mbp2tbkup --parameter-name='preexec close' 2>/dev/null)
