@@ -68,6 +68,55 @@ class UplinkTests(unittest.TestCase):
         self.assertFalse(self.check({}))
 
 
+class GuardRetryTests(unittest.TestCase):
+    def setUp(self):
+        self.sleep = self.enterContext(mock.patch.object(backup.time, 'sleep'))
+        self.enterContext(mock.patch.object(backup.time, 'time', return_value=1000))
+
+    def test_probe_failure_twice_then_success_keeps_the_permitted_proof(self):
+        with mock.patch.object(backup, 'capture', side_effect=[
+                subprocess.TimeoutExpired(['/usr/sbin/runuser'], 35),
+                ValueError('invalid probe JSON'), json.dumps(evidence())]) as probe:
+            source, signature = backup.guard(test_config())
+        self.assertEqual(source, '192.168.6.103')
+        self.assertIn('FriendsWifi', signature)
+        self.assertEqual(probe.call_count, 3)
+        self.assertTrue(all(call.kwargs['timeout'] == 35 for call in probe.call_args_list))
+        self.assertEqual(self.sleep.call_args_list, [mock.call(5), mock.call(5)])
+
+    def test_three_probe_errors_defer_with_the_last_reason(self):
+        with mock.patch.object(backup, 'capture', side_effect=[
+                json.dumps({}), OSError('probe unavailable'),
+                subprocess.TimeoutExpired(['/usr/sbin/runuser'], 35)]) as probe:
+            with self.assertRaisesRegex(backup.Deferred, '^cannot verify current uplinks$'):
+                backup.guard(test_config())
+        self.assertEqual(probe.call_count, 3)
+        self.assertEqual(self.sleep.call_args_list, [mock.call(5), mock.call(5)])
+
+    def test_disallowed_evidence_is_bounded_and_keeps_the_final_reason(self):
+        blocked = evidence(); blocked['ubnt']['ssid'] = 'denlink'
+        reason = decide(blocked, now=1000)[1]
+        with mock.patch.object(backup, 'capture', side_effect=[
+                json.dumps({}), json.dumps({}), json.dumps(blocked)]) as probe:
+            with self.assertRaises(backup.Deferred) as caught:
+                backup.guard(test_config())
+        self.assertEqual(str(caught.exception), reason)
+        self.assertEqual(probe.call_count, 3)
+        self.assertEqual(self.sleep.call_args_list, [mock.call(5), mock.call(5)])
+
+    def test_successful_first_probe_does_not_sleep(self):
+        with mock.patch.object(backup, 'capture', return_value=json.dumps(evidence())) as probe:
+            self.assertEqual(backup.guard(test_config())[0], '192.168.6.103')
+        probe.assert_called_once()
+        self.sleep.assert_not_called()
+
+    def test_timeout_detail_does_not_include_command_arguments(self):
+        for command in (['/usr/bin/findmnt', '--PRIVATE'], '/usr/bin/findmnt --PRIVATE'):
+            self.assertEqual(backup.helper_timeout_detail(subprocess.TimeoutExpired(command, 20)),
+                             ' (findmnt timed out after 20s)')
+        self.assertEqual(backup.helper_timeout_detail(RuntimeError('PRIVATE')), '')
+
+
 class ClientMonitoringTests(unittest.TestCase):
     def setUp(self):
         # Client monitoring is independent of admission, which has real-process
@@ -173,6 +222,22 @@ class SnapshotTests(ClientMonitoringTests):
             self.assertIn(mock.call(child.pid,signal.SIGSTOP),kill.call_args_list)
             self.assertIn(mock.call(child.pid,signal.SIGTERM),killpg.call_args_list)
             self.assertIsNone(backup.CHILD)
+
+    def test_changed_route_proof_is_not_retried(self):
+        child = mock.Mock(pid=987654, returncode=None)
+        child.poll.return_value = None
+        with mock.patch.object(backup, 'guard', side_effect=[('192.168.6.103', 'old'),
+                                                           ('192.168.6.103', 'new')]) as guard, \
+                mock.patch.object(backup, 'check_parked'), \
+                mock.patch.object(backup.subprocess, 'Popen', return_value=child), \
+                mock.patch.object(backup.time, 'sleep'), \
+                mock.patch.object(backup.time, 'monotonic', side_effect=[0, 10]), \
+                mock.patch.object(backup.os, 'kill') as kill, mock.patch.object(backup.os, 'killpg'):
+            with self.assertRaisesRegex(backup.Deferred, 'uplink or association changed during transfer'):
+                backup.run([backup.RCLONE, 'copy', 'source', 'dest'], test_config(), network=True)
+        self.assertEqual(guard.call_count, 2)
+        self.assertIn(mock.call(child.pid, signal.SIGSTOP), kill.call_args_list)
+        self.assertNotIn(mock.call(child.pid, signal.SIGCONT), kill.call_args_list)
 
     def test_snapshot_copy_is_locked_and_checked_before_manifest(self):
         cfg=test_config()

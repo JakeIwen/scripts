@@ -84,9 +84,12 @@ def capture_request():
     if (not request or request.get('expires_at', 0) <= time.time() or
             not worker_alive(request) or not DRAIN.is_file() or DRAIN.is_symlink() or
             DRAIN.read_text() != request.get('marker')):
-        return {'requested': False}
+        return {'requested': False, 'acknowledged': False}
+    ready = store.read_json(STATE / 'capture-ready.json', {})
     result = {'requested': True, 'generation': request['generation'],
-            'capture_id': request['capture_id'], 'expires_at': request['expires_at'], 'bundle': store.BUNDLE}
+            'capture_id': request['capture_id'], 'expires_at': request['expires_at'], 'bundle': store.BUNDLE,
+            'acknowledged': (ready.get('generation') == request['generation'] and
+                             ready.get('capture_id') == request['capture_id'])}
     result['stop_request'] = mac_capture_control.authorization(result, STATE)
     return result
 
@@ -138,11 +141,33 @@ def smb_state():
     return len(handles), len(trees)
 
 
+def check_exclusive_source(cfg, marker, sample=None, deadline=None):
+    # A refused SMB tree connect can appear briefly despite an intact preexec
+    # gate. Only zero-handle samples qualify for this bounded confirmation.
+    for attempt in range(3):
+        if attempt:
+            time.sleep(2)
+        cloud.check_work_allowed(cfg)
+        cloud.exact_mount(MOUNT, 'mbp2tbkup')
+        if deadline is not None and time.monotonic() >= deadline:
+            raise cloud.Deferred('capture window ended; normal Mac backups may resume')
+        if DRAIN.is_symlink() or not DRAIN.is_file() or DRAIN.read_text() != marker:
+            raise cloud.Deferred('Time Machine capture lost exclusive source access')
+        handles, trees = sample if attempt == 0 and sample is not None else smb_state()
+        if handles:
+            raise cloud.Deferred('Time Machine capture lost exclusive source access')
+        if not trees:
+            return
+    raise cloud.Deferred('Time Machine capture lost exclusive source access')
+
+
 def wait_image_handles(cfg, state, marker):
     """A clean Mac detach can precede the SMB client's deferred CLOSEs.
 
     Wait boundedly for ZERO image handles; never force-close them or interpret
-    a failed Samba probe as an empty result.
+    a failed Samba probe as an empty result. A tree connection without image
+    handles is the Mac's idle share mount: close-share removes it next, so
+    only handles are drained here.
     """
     deadline = time.monotonic() + cfg.get('smb_handle_drain_seconds', 90)
     while smb_state()[0]:
@@ -212,12 +237,7 @@ def quiesced(cfg, state):
         def check():
             if time.monotonic() < next_check[0]:
                 return
-            cloud.check_work_allowed(cfg)
-            cloud.exact_mount(MOUNT, 'mbp2tbkup')
-            if time.monotonic() >= deadline:
-                raise cloud.Deferred('capture window ended; normal Mac backups may resume')
-            if not DRAIN.is_file() or DRAIN.is_symlink() or DRAIN.read_text() != marker or smb_state() != (0, 0):
-                raise cloud.Deferred('Time Machine capture lost exclusive source access')
+            check_exclusive_source(cfg, marker, deadline=deadline)
             cloud.record_progress(state, 'preparing', capture_waiting=False)
             next_check[0] = time.monotonic() + cfg['guard_interval_seconds']
         check()
@@ -501,6 +521,7 @@ def failed_attempt(state, exc):
     if retryable:
         schedule_first_copy_retry(state, history.FAILURE_MESSAGES[code])
     print(('Retrying: ' if retryable else 'Failed: ') + history.FAILURE_MESSAGES.get(code, message)
+          + cloud.helper_timeout_detail(exc)
           + (f' (errno {exc.errno})' if isinstance(exc, OSError) and exc.errno is not None else ''), flush=True)
     if not retryable:
         cloud.notify(state, 'Mac Time Machine iCloud copy needs attention',

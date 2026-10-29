@@ -148,7 +148,12 @@ def verification_worker(cfg, root, expected, rows, parent_pid, completed, update
     except Exception as exc:
         result.update(kind=ResultKind.ERROR, message=str(exc) if isinstance(exc, (ValueError, RuntimeError)) else type(exc).__name__)
     finally:
-        cloud.stop_child()
+        # Shutdown must deliver its result even if the supervisor signals again
+        # while the rclone client is still being reaped.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        with suppress(cloud.Deferred):
+            cloud.stop_child()
         with suppress(BrokenPipeError, OSError):
             result_writer.send(result)
         result_writer.close()

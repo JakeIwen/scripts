@@ -2,6 +2,7 @@
 import fcntl
 import hashlib
 import json
+from contextlib import nullcontext
 import os
 from pathlib import Path
 import signal
@@ -15,6 +16,7 @@ from unittest import mock
 import icloud_backup as cloud
 import backup_admission
 from .backup_lock_fixtures import temporary_registry
+import time_machine_pipeline as pipeline
 from time_machine_pipeline import VerificationPipeline
 from time_machine_verification import ObjectVerifier
 from time_machine_store import atomic_json, read_json
@@ -22,6 +24,46 @@ from time_machine_store import atomic_json, read_json
 
 def object_row(digest, data):
     return {'Path':digest,'IsDir':False,'Size':len(data),'ModTime':'stable','ID':digest}
+
+
+class WorkerCleanupTests(unittest.TestCase):
+    def test_cleanup_ignores_late_signals_and_still_sends_its_result(self):
+        for failure in (None, cloud.Deferred('supervisor stopped')):
+            with self.subTest(failure=failure):
+                handlers = {}
+                def set_handler(signum, handler):
+                    handlers[signum] = handler
+                def cleanup():
+                    self.assertIs(handlers[signal.SIGTERM], signal.SIG_IGN)
+                    self.assertIs(handlers[signal.SIGINT], signal.SIG_IGN)
+                    if failure:
+                        raise failure
+                reader, writer = mock.Mock(), mock.Mock()
+                with mock.patch.object(pipeline.os, 'nice'), \
+                        mock.patch.object(pipeline.signal, 'signal', side_effect=set_handler), \
+                        mock.patch.object(pipeline.backup_admission, 'use', return_value=nullcontext()), \
+                        mock.patch.object(pipeline, 'Follower'), \
+                        mock.patch.object(cloud, 'stop_child', side_effect=cleanup) as stop:
+                    pipeline.verification_worker({}, Path('.'), {}, {}, 1,
+                                                 None, None, None, reader, writer, None)
+                stop.assert_called_once()
+                reader.close.assert_called_once()
+                writer.send.assert_called_once_with(
+                    {'kind': pipeline.ResultKind.COMPLETE, 'message': '', 'errno': None})
+                writer.close.assert_called_once()
+
+    def test_cleanup_preserves_the_result_of_a_deferred_follower(self):
+        reader, writer = mock.Mock(), mock.Mock()
+        with mock.patch.object(pipeline.os, 'nice'), mock.patch.object(pipeline.signal, 'signal'), \
+                mock.patch.object(pipeline.backup_admission, 'use', return_value=nullcontext()), \
+                mock.patch.object(pipeline, 'Follower') as follower, \
+                mock.patch.object(cloud, 'stop_child'):
+            follower.return_value.run.side_effect = cloud.Deferred('supervisor stopped')
+            pipeline.verification_worker({}, Path('.'), {}, {}, 1,
+                                         None, None, None, reader, writer, None)
+        writer.send.assert_called_once_with(
+            {'kind': pipeline.ResultKind.DEFERRED, 'message': 'supervisor stopped', 'errno': None})
+        writer.close.assert_called_once()
 
 
 @unittest.skipUnless(sys.platform.startswith('linux'), 'admission proof requires Linux fdinfo')

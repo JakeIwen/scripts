@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 import datetime as dt
 import errno
 import hashlib
@@ -160,6 +160,18 @@ class ControlTests(unittest.TestCase):
             self.assertGreater(state['retry_at'], time.time() + 295)
             self.assertEqual(state['progress']['capture_bytes'], 500)
             self.assertNotIn('PRIVATE', job.history.reason(state))
+
+    def test_helper_timeout_names_only_the_program_in_private_journal(self):
+        state = {'pending': GEN}
+        failure = subprocess.TimeoutExpired(['/usr/bin/smbstatus', '--PRIVATE'], 20)
+        with mock.patch('builtins.print') as journal, mock.patch.object(cloud, 'notify') as notify:
+            self.assertEqual(job.failed_attempt(state, failure), 0)
+        self.assertEqual(journal.call_args.args[0],
+                         'Retrying: ' + job.history.FAILURE_MESSAGES[job.history.BackupFailure.HELPER_TIMEOUT]
+                         + ' (smbstatus timed out after 20s)')
+        self.assertNotIn('smbstatus', job.history.reason(state))
+        self.assertNotIn('PRIVATE', journal.call_args.args[0])
+        notify.assert_not_called()
 
     def test_worker_does_not_record_or_run_attempt_while_paused(self):
         self.enterContext(mock.patch.object(job.admission, 'admitted_run', return_value=nullcontext()))
@@ -380,7 +392,7 @@ class CaptureGateTests(unittest.TestCase):
 
     def test_gate_released_on_copy_failure_after_clean_ack(self):
         if not Path('/proc/self/stat').exists(): self.skipTest('Linux process evidence')
-        with self.gate_context(), mock.patch.object(job.time, 'sleep', side_effect=self.ack_on_sleep), mock.patch.object(job, 'smb_state', side_effect=[(0, 1), (0, 0), (0, 0)]), mock.patch.object(cloud, 'capture') as command:
+        with self.gate_context(), mock.patch.object(job.time, 'sleep', side_effect=self.ack_on_sleep), mock.patch.object(job, 'smb_state', side_effect=[(0, 0), (0, 0), (0, 0)]), mock.patch.object(cloud, 'capture') as command:
             with self.assertRaises(RuntimeError):
                 with job.quiesced(self.cfg, self.state):
                     self.assertTrue(self.drain.exists())
@@ -399,11 +411,80 @@ class CaptureGateTests(unittest.TestCase):
 
     def test_deferred_smb_closes_are_allowed_to_drain_without_forcing(self):
         self.drain.write_text('our gate')
-        with mock.patch.object(job, 'smb_state', side_effect=[(5, 1), (2, 1), (0, 1)]), mock.patch.object(job.time, 'sleep') as sleep, mock.patch.object(cloud, 'capture') as command:
+        with mock.patch.object(job, 'smb_state', side_effect=[(5, 1), (2, 1), (0, 0)]), mock.patch.object(job.time, 'sleep') as sleep, mock.patch.object(cloud, 'capture') as command:
             job.wait_image_handles(self.cfg, self.state, 'our gate')
             self.assertEqual(sleep.call_count, 2)
             command.assert_not_called()
         self.assertTrue(self.drain.exists())
+
+    def test_handle_drain_leaves_idle_tree_connections_for_close_share(self):
+        # The Mac keeps the share mounted after detaching the image; close-share
+        # removes that tree connection, so the drain waits on handles alone.
+        self.drain.write_text('our gate')
+        with mock.patch.object(job, 'smb_state', side_effect=[(1, 1), (0, 1)]) as probe, \
+                mock.patch.object(job.time, 'sleep') as sleep:
+            job.wait_image_handles(self.cfg, self.state, 'our gate')
+        self.assertEqual(probe.call_count, 2)
+        sleep.assert_called_once_with(2)
+
+    @contextmanager
+    def capture_checks(self, samples):
+        real_read = Path.read_text
+        def read(path, *args, **kwargs):
+            if path == Path('/proc/self/stat'):
+                return '1 (python) ' + ' '.join(['0'] * 20)
+            return real_read(path, *args, **kwargs)
+        self.cfg['guard_interval_seconds'] = 0
+        with self.gate_context(), mock.patch.object(Path, 'read_text', read), \
+                mock.patch.object(job.time, 'sleep', side_effect=self.ack_on_sleep) as sleep, \
+                mock.patch.object(job, 'smb_state', side_effect=samples) as probe, \
+                mock.patch.object(cloud, 'capture'):
+            with job.quiesced(self.cfg, self.state) as check:
+                yield check, probe, sleep
+
+    def test_capture_continues_after_a_refused_tree_connection(self):
+        with self.capture_checks([(0, 0)] * 3 + [(0, 1), (0, 0), (0, 0)]) as (check, probe, sleep):
+            sleep.reset_mock()
+            check()
+            check()
+            self.assertTrue(self.drain.is_file())
+            self.assertEqual(probe.call_count, 6)
+            sleep.assert_called_once_with(2)
+        self.assertFalse(self.drain.exists())
+
+    def test_capture_rejects_persistent_trees_and_handles_immediately(self):
+        for samples, retries in (([(0, 1)] * 3, 2), ([(1, 1)], 0), ([(0, 1), (1, 0)], 1)):
+            with self.subTest(samples=samples):
+                with self.capture_checks([(0, 0)] * 3 + samples) as (check, probe, sleep):
+                    sleep.reset_mock()
+                    with self.assertRaisesRegex(cloud.Deferred, 'lost exclusive source access'):
+                        check()
+                    self.assertEqual(sleep.call_args_list, [mock.call(2)] * retries)
+                    self.assertEqual(probe.call_count, 3 + len(samples))
+                self.assertFalse(self.drain.exists())
+
+    def test_post_close_share_tree_is_not_debounced(self):
+        with self.assertRaisesRegex(cloud.Deferred, 'SMB share did not quiesce'):
+            with self.capture_checks([(0, 0), (0, 1)]):
+                self.fail('capture started before the share was closed')
+
+    def test_capture_request_reports_only_its_matching_acknowledgement(self):
+        self.drain.write_text('our gate')
+        request = {'generation': GEN, 'capture_id': 'a' * 32,
+                   'expires_at': time.time() + 60, 'marker': 'our gate'}
+        store.atomic_json(self.state_dir / 'capture.json', request)
+        with mock.patch.object(job, 'worker_alive', return_value=True):
+            self.assertFalse(job.capture_request()['acknowledged'])
+            for generation, capture_id, acknowledged in (
+                    ('tm-20260929T010203Z-12345678', 'a' * 32, False),
+                    (GEN, 'b' * 32, False), (GEN, 'a' * 32, True)):
+                store.atomic_json(self.state_dir / 'capture-ready.json',
+                                  {'generation': generation, 'capture_id': capture_id})
+                self.assertEqual(job.capture_request(), {
+                    'requested': True, 'generation': GEN, 'capture_id': 'a' * 32,
+                    'expires_at': request['expires_at'], 'bundle': store.BUNDLE,
+                    'acknowledged': acknowledged, 'stop_request': None})
+        self.assertEqual(job.capture_request(), {'requested': False, 'acknowledged': False})
 
     def test_handle_drain_fails_closed_if_probe_fails_or_gate_disappears(self):
         self.drain.write_text('our gate')
@@ -625,9 +706,10 @@ class CoordinatorTests(unittest.TestCase):
                    'expires_at': time.time()+60, 'bundle': store.BUNDLE}
         image = {'image-path': '/Volumes/.timemachine/VANPI.local/id/mbp2tbkup/' + store.BUNDLE,
                  'image-encrypted': True, 'system-entities': [{'dev-entry': '/dev/disk44'}]}
-        with mock.patch.object(coordinator, 'remote', side_effect=[{'ok':True}, request, {'accepted': True}]) as remote, mock.patch.object(coordinator, 'command', side_effect=[b'Running = 0;', plistlib.dumps({'images': [image]}), b'', plistlib.dumps({'images': []})]) as command:
+        with mock.patch.object(coordinator, 'remote', side_effect=[{'ok':True}, request, {'accepted': True}]) as remote, mock.patch.object(coordinator, 'command', side_effect=[b'Running = 0;', plistlib.dumps({'images': [image]}), b'', b'', plistlib.dumps({'images': []})]) as command:
             self.assertIn('cleanly detached', coordinator.coordinate({'user': 'test'}))
-            self.assertEqual(command.call_args_list[2].args[0], ['/usr/bin/hdiutil', 'detach', '/dev/disk44'])
+            self.assertEqual(command.call_args_list[2].args[0], ['/sbin/mount'])
+            self.assertEqual(command.call_args_list[3].args[0], ['/usr/bin/hdiutil', 'detach', '/dev/disk44'])
             self.assertEqual(remote.call_args.args, ('test', '--capture-ready', GEN, 'a'*32))
 
     def test_unreadable_mac_status_never_acknowledges_capture(self):

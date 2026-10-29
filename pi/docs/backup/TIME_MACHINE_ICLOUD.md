@@ -18,20 +18,31 @@ roughly twice that amount; a completed transfer is not yet a Mac restore test.
 2. A small Mac root LaunchDaemon checks every two minutes. Only on an explicit,
    current Pi capture request, it checks Time Machine is idle, identifies the
    matching encrypted image through `hdiutil info`, and detaches it WITHOUT
-   force. Normally active backups are left to finish. An explicit dashboard
+   force. It first unmounts leftover nested Time Machine snapshot mounts belonging
+   to that image, never its primary volume or another device; a busy detach gets
+   one fresh mount check and retry, always using non-forced `diskutil`/`hdiutil`.
+   Each poll logs one line with fixed failure-step labels, exit codes and bounded
+   local-tool reasons (including unmount dissenters), never SSH stderr or accounts.
+   Normally active backups are left to finish. An explicit dashboard
    capture-stop request can authorize one `tmutil stopbackup` after the coordinator
    verifies the active destination ID belongs to the configured Pi SMB share.
    That permission expires after 30 minutes and is consumed against the live
    capture nonce before the command. A later poll must establish idle state;
    busy/unknown images are never forced off. It acknowledges the exact
-   request nonce only after confirming the image is no longer attached.
+   request nonce only after confirming the image is no longer attached. Once the
+   Pi reports that nonce acknowledged, later polls keep sending heartbeats but do
+   not repeat image operations or acknowledgements while capture is in progress.
 3. After clean-detach acknowledgement, the Pi allows up to 90 seconds for
    deferred SMB file CLOSEs (`smb_handle_drain_seconds`, configurable). It still
    requires **zero image handles** and fails closed on probe/gate errors; it
    never forces live image handles closed. The dashboard shows this drain phase
    separately from waiting for the Mac. It then closes only the now-idle
    `mbp2tbkup` tree connections. It continuously checks the drain gate, mount,
-   Samba handles, ignition and local-backup priority during capture.
+   Samba handles, ignition and local-backup priority during capture. With zero
+   image handles and an intact gate, a momentary refused tree connection is
+   re-sampled up to three times, two seconds apart; persistent trees or any
+   reopened image handle stop capture. The initial post-close check still
+   requires zero handles and zero tree connections.
 4. Files are copied and hashed into root-private immutable objects under
    `/mnt/mbp2tbkup/archive/icloud-time-machine-v1`. They are NEVER hard-linked
    from the live image: Time Machine overwrites bands in place. Previously
@@ -129,8 +140,11 @@ Fresh network checks still stop each transfer every configured guard interval.
 The collector combines router routing/SSID inspection in one query and inspects
 the antenna association whenever that uplink is selected. It skips unrelated
 dashboard diagnostics and unused antenna probes, without caching route evidence
-or extending the permitted transfer interval. A changed or unverifiable route
-still stops the worker.
+or extending the permitted transfer interval. Failed or disallowed evidence is
+re-probed up to twice, five seconds apart, before deferring; the transfer stays
+paused throughout these bounded checks. A changed route still stops the worker
+immediately, and a route that remains unverifiable or disallowed stops it after
+the final probe.
 The read-only probes reuse SSH connections for up to 30 seconds idle through a
 validated, private `.vanpi-icloud-uplink` directory in the probe user's home.
 Every invocation executes fresh commands; no routing or association results are

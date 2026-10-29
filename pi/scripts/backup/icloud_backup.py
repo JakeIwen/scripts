@@ -149,16 +149,24 @@ def capture(args, timeout=20):
     return result.stdout
 
 
-def guard(cfg):
+def permitted_uplink_evidence():
     helper = Path(__file__).with_name('icloud_uplink.py')
-    try:
-        evidence = json.loads(capture(['/usr/sbin/runuser', '-u', 'pi', '--',
-                                       '/usr/bin/python3', str(helper)], timeout=35))
-        allowed, reason = decide(evidence)
-    except (OSError, ValueError, subprocess.SubprocessError):
-        allowed, reason, evidence = False, 'cannot verify current uplinks', {}
-    if not allowed:
-        raise Deferred(reason)
+    for attempt in range(3):
+        if attempt:
+            time.sleep(5)
+        try:
+            evidence = json.loads(capture(['/usr/sbin/runuser', '-u', 'pi', '--',
+                                           '/usr/bin/python3', str(helper)], timeout=35))
+            allowed, reason = decide(evidence)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            allowed, reason = False, 'cannot verify current uplinks'
+        if allowed:
+            return evidence
+    raise Deferred(reason)
+
+
+def guard(cfg):
+    evidence = permitted_uplink_evidence()
     selected = sorted((m['name'], m['percent']) for m in evidence['router']['route_members'] if m['percent'] > 0)
     identities = [(name, evidence['ubnt']['ssid'] if name == 'wan' else evidence['wireless_uplinks'][name]['ssid']) for name, weight in selected]
     # Restart connections on ANY path/association change. Existing conntrack
@@ -672,6 +680,13 @@ def verify_login(cfg):
     subprocess.run(['/usr/bin/systemctl', 'start', '--no-block', 'vanpi-icloud-backup.service'], check=True)
 
 
+def helper_timeout_detail(exc):
+    if not isinstance(exc, subprocess.TimeoutExpired):
+        return ''
+    program = exc.cmd[0] if isinstance(exc.cmd, (list, tuple)) else exc.cmd.split()[0]
+    return f' ({Path(program).name} timed out after {exc.timeout}s)'
+
+
 def _main(mode):
     os.umask(0o077)
     signal.signal(signal.SIGTERM, abort)
@@ -737,7 +752,7 @@ def _main(mode):
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         message = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else type(exc).__name__
         state.update(phase='error', last_attempt_at=time.time(), last_error=message)
-        print('Failed: ' + message, file=sys.stderr, flush=True)
+        print('Failed: ' + message + helper_timeout_detail(exc), file=sys.stderr, flush=True)
         notify(state, 'vanpi iCloud backup needs attention', 'The weekly copy did not complete. Check service status; an expired Apple login may need renewal.')
         return 1
     finally:
