@@ -1,0 +1,893 @@
+{
+  "provenance": "Original alias_media.sh cec0b3154a35ff174111fbeb10afcb2280dbc251f683c602f73f8f43d349ff18; captured 2026-10-29 on vanpi from all 3997 torrent file paths; cleaning statements sourced verbatim, never invoked builder or extraction.",
+  "names": [
+    [
+      "/mnt/movingparts/torrent/Documentaries/Becoming.Nobody.2019.1080p.AMZN.WEB-DL.DDP2.0.H.264-DBS/Becoming.Nobody.2019.1080p.AMZN.WEB-DL.DDP2.0.H.264-DBS.mkv",
+      "Becoming_Nobody_2019"
+    ],
+    [
+      "/mnt/movingparts/torrent/Documentaries/Chernobyl.Season.1.S01.1080p.BluRay.DTS.x264-POIASD/._Chernobyl.S01E03.1080p.BluRay.DTS.x264-POIASD.mkv",
+      "__Chernobyl_S01E03"
+    ],
+    [
+      "/mnt/movingparts/torrent/Documentaries/Dynasties.S01.1080p.BluRay.REMUX.AVC.Atmos-EPSiLON/Dynasties.S01E02.Emperor.1080i.BluRay.REMUX.AVC.Atmos-EPSiLON.mkv",
+      "Dynasties_S01E02_Emperor"
+    ],
+    [
+      "/mnt/movingparts/torrent/Documentaries/Frontline/Frontline.S38E23.United.States.of.Conspiracy.1080p.HEVC.x265-MeGusta/Frontline.S38E23.United.States.of.Conspiracy.1080p.HEVC.x265-MeGusta.mkv",
+      "Frontline_S38E23_United_States_of_Conspiracy"
+    ],
+    [
+      "/mnt/movingparts/torrent/Documentaries/Frontline/Frontline.S39E23.Leaving.Afghanistan.Indias.Rape.Scandal.1080p.HEVC.x265-MeGusta/Frontline.S39E23.Leaving.Afghanistan.Indias.Rape.Scandal.1080p.HEVC.x265-MeGusta.mkv",
+      "Frontline_S39E23_Leaving_Afghanistan_Indias_Rape_Scandal"
+    ],
+    [
+      "/mnt/movingparts/torrent/Documentaries/Frontline/Frontline.S40E02.Boeings.Fatal.Flaw.1080p.HEVC.x265-MeGusta/Frontline.S40E02.Boeings.Fatal.Flaw.1080p.HEVC.x265-MeGusta.mkv",
+      "Frontline_S40E02_Boeings_Fatal_Flaw"
+    ],
+    [
+      "/mnt/movingparts/torrent/Documentaries/Frontline/Frontline.S40E06.American.Reckoning.1080p.HEVC.x265-MeGusta/Frontline.S40E06.American.Reckoning.1080p.HEVC.x265-MeGusta.mkv",
+      "Frontline_S40E06_American_Reckoning"
+    ],
+    [
+      "/mnt/movingparts/torrent/Documentaries/Hamiltons Pharmacopeia/Hamiltons.Pharmacopeia.2016.S01.1080p.AMZN.WEB-DL.DDP2.0.H.264-Cinefeel/Hamiltons.Pharmacopeia.2016.S01E04.1080p.AMZN.WEB-DL.DDP2.0.H.264-Cinefeel.mkv",
+      "Hamiltons_Pharmacopeia_2016_S01E04"
+    ],
+    [
+      "/mnt/movingparts/torrent/Documentaries/Our.Planet.2019.S01.1080p.NF.WEB.DDP5.1.Atmos.x264-NTb/Our.Planet.2019.S01E08.Forests.1080p.NF.WEBRip.DDP5.1.x264-NTb.mkv",
+      "Our_Planet_2019_S01E08_Forests"
+    ],
+    [
+      "/mnt/movingparts/torrent/Documentaries/Secret Lives of Animals/The.Secret.Lives.of.Animals.S01.1080p.ATVP.WEB-DL.DDP5.1.Atmos.H.264-FLUX/The.Secret.Lives.of.Animals.S01E10.Growing.Old.1080p.ATVP.WEB-DL.DDP5.1.Atmos.H.264-FLUX.mkv",
+      "The_Secret_Lives_of_Animals_S01E10_Growing_Old_ATVP"
+    ],
+    [
+      "/mnt/movingparts/torrent/Documentaries/The.Devil.and.Daniel.Johnston.2005.720p.BluRay.x264-x0r.mkv",
+      "The_Devil_and_Daniel_Johnston_2005"
+    ],
+    [
+      "/mnt/movingparts/torrent/Documentaries/The.Social.Network.2010.BDRip.XviD.AC3-CaLLiOpeD/The.Social.Network.2010.BDRip.XviD.AC3-CaLLiOpeD-Subtitles.rar",
+      "The_Social_Network_2010_Subtitles"
+    ],
+    [
+      "/mnt/movingparts/torrent/Documentaries/The.Social.Network.2010.BDRip.XviD.AC3-CaLLiOpeD/The.Social.Network.2010.BDRip.XviD.AC3-CaLLiOpeD.Sample-01.avi",
+      "The_Social_Network_2010_Sample_01"
+    ],
+    [
+      "/mnt/movingparts/torrent/Documentaries/The.Social.Network.2010.BDRip.XviD.AC3-CaLLiOpeD/The.Social.Network.2010.BDRip.XviD.AC3-CaLLiOpeD.Sample-02.avi",
+      "The_Social_Network_2010_Sample_02"
+    ],
+    [
+      "/mnt/movingparts/torrent/Documentaries/The.Social.Network.2010.BDRip.XviD.AC3-CaLLiOpeD/The.Social.Network.2010.BDRip.XviD.AC3-CaLLiOpeD.Sample-03.avi",
+      "The_Social_Network_2010_Sample_03"
+    ],
+    [
+      "/mnt/movingparts/torrent/Documentaries/VICE.S05.1080p.AMZN.WEB-DL.DD+2.0.H.264-monkee/VICE.S05E03.When.the.Earth.Melts.&.The.Displaced.1080p.AMZN.WEB-DL.DD+2.0.H.264-monkee.mkv",
+      "VICE_S05E03_When_the_Earth_Melts_and_The_Displaced"
+    ],
+    [
+      "/mnt/movingparts/torrent/Documentaries/VICE.S05.1080p.AMZN.WEB-DL.DD+2.0.H.264-monkee/VICE.S05E09.Medical.Detente.&.Bananas.1080p.AMZN.WEB-DL.DD+2.0.H.264-monkee.mkv",
+      "VICE_S05E09_Medical_Detente_and_Bananas"
+    ],
+    [
+      "/mnt/movingparts/torrent/Documentaries/VICE.S05.1080p.AMZN.WEB-DL.DD+2.0.H.264-monkee/VICE.S05E10.Taliban.Resurgence.1080p.AMZN.WEB-DL.DD+2.0.H.264-monkee.mkv",
+      "VICE_S05E10_Taliban_Resurgence"
+    ],
+    [
+      "/mnt/movingparts/torrent/Documentaries/VICE.S05.1080p.AMZN.WEB-DL.DD+2.0.H.264-monkee/VICE.S05E17.Last.Line.of.Defense.&.El.Rostro.1080p.AMZN.WEB-DL.DD+2.0.H.264-monkee.mkv",
+      "VICE_S05E17_Last_Line_of_Defense_and_El_Rostro"
+    ],
+    [
+      "/mnt/movingparts/torrent/Documentaries/VICE.S05.1080p.AMZN.WEB-DL.DD+2.0.H.264-monkee/VICE.S05E23.Dawn.of.a.Dictator.1080p.AMZN.WEB-DL.DD+2.0.H.264-monkee.mkv",
+      "VICE_S05E23_Dawn_of_a_Dictator"
+    ],
+    [
+      "/mnt/movingparts/torrent/Movies/John Wick (2014) 1080p BluRay HDR10 10Bit DDP5.1 HEVC-d3g.mkv",
+      "John_Wick_2014"
+    ],
+    [
+      "/mnt/movingparts/torrent/Movies/The Last Kingdom Seven Kings Must Die 2023 1080p BluRay DD 5 1 x264-playHD/The Last Kingdom Seven Kings Must Die 2023 1080p BluRay DD 5 1 x264-playHD.mkv",
+      "The_Last_Kingdom_Seven_Kings_Must_Die_2023"
+    ],
+    [
+      "/mnt/movingparts/torrent/Movies/The Ultimate Quentin Tarantino Film And Soundtrack Collection 1080p H264 AC3 DD5.1 Will1869/Death Proof/Death.Proof.2007.1080p.Tarantino.mp4",
+      "Death_Proof_2007_Tarantino"
+    ],
+    [
+      "/mnt/movingparts/torrent/Movies/The Ultimate Quentin Tarantino Film And Soundtrack Collection 1080p H264 AC3 DD5.1 Will1869/Inglourious Basterds/Inglourious.Basterds.2009.1080p.Tarantino.mp4",
+      "Inglourious_Basterds_2009_Tarantino"
+    ],
+    [
+      "/mnt/movingparts/torrent/Movies/The Ultimate Quentin Tarantino Film And Soundtrack Collection 1080p H264 AC3 DD5.1 Will1869/Jackie Brown/Jackie.Brown.1997.1080p.Tarantino.mp4",
+      "Jackie_Brown_1997_Tarantino"
+    ],
+    [
+      "/mnt/movingparts/torrent/Movies/The Ultimate Quentin Tarantino Film And Soundtrack Collection 1080p H264 AC3 DD5.1 Will1869/My Best Friend's Birthday/My Best Friends Birthday 1987 Tarantino.mp4",
+      "My_Best_Friends_Birthday_1987_Tarantino"
+    ],
+    [
+      "/mnt/movingparts/torrent/Movies/The Ultimate Quentin Tarantino Film And Soundtrack Collection 1080p H264 AC3 DD5.1 Will1869/The Hateful Eight/The Hateful Eight 2015 Extended Version 1080p WEBRip H264.AC3.DD5.1.mp4",
+      "The_Hateful_Eight_2015_Extended_Version"
+    ],
+    [
+      "/mnt/movingparts/torrent/Movies/The.Imaginarium.Of.Doctor.Parnassus.2009.1080p.BluRay.x264-CiNEFiLE.mkv",
+      "The_Imaginarium_Of_Doctor_Parnassus_2009"
+    ],
+    [
+      "/mnt/movingparts/torrent/Movies/Wes Anderson Collection 1080p H264 AC3 DD5.1 Will1869/The.Darjeeling.Limited.2007.1080p.BluRay.H264.AC3.DD5.1.mp4",
+      "The_Darjeeling_Limited_2007"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/3 Body Problem S01 1080p WEBRip x265-KONTRAST/3.Body.Problem.S01E06.1080p.WEBRip.x265-KONTRAST.mp4",
+      "3_Body_Problem_S01E06"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/A Knight of the Seven Kingdoms S01E01 The Hedge Knight REPACK 1080p AMZN WEB-DL DDP5 1 Atmos H 264-FLUX/A Knight of the Seven Kingdoms S01E01 The Hedge Knight REPACK 1080p AMZN WEB-DL DDP5 1 Atmos H 264-FLUX.mkv",
+      "A_Knight_of_the_Seven_Kingdoms_S01E01_The_Hedge_Knight"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Arcane.S01.1080p.NF.WEB-DL.DDP5.1.H.264-FLUX/Arcane.S01E06.When.These.Walls.Come.Tumbling.Down.1080p.NF.WEB-DL.DDP5.1.H.264-FLUX.mkv",
+      "Arcane_S01E06_When_These_Walls_Come_Tumbling_Down"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Black Mirror S07 web hdr hevc-d3g/Black Mirror (2011) S07E01 Common People 1080p.WEBRip.HDR10.10Bit.DDP5.1.Atmos.HEVC-d3g.mkv",
+      "Black_Mirror_2011_S07E01_Common_People"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Black Mirror S07 web hdr hevc-d3g/Black Mirror (2011) S07E05 Eulogy 1080p.WEBRip.HDR10.10Bit.DDP5.1.Atmos.HEVC-d3g.mkv",
+      "Black_Mirror_2011_S07E05_Eulogy"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Black Mirror S07 web hdr hevc-d3g/Black Mirror (2011) S07E06 USS Callister Into Infinity 1080p.WEBRip.HDR10.10Bit.DDP5.1.Atmos.HEVC-d3g.mkv",
+      "Black_Mirror_2011_S07E06_USS_Callister_Into_Infinity"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Counterpart.S01.1080p.AMZN.WEB-DL.DD+5.1.H.264-SiGMA/Counterpart.S01E08.Love.the.Lie.1080p.AMZN.WEB-DL.DD+5.1.H264-SiGMA.mkv",
+      "Counterpart_S01E08_Love_the_Lie"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Fargo.S01.1080p.WEB-DL.DD5.1.H.264-BS/Fargo.S01E01.The.Crocodile's.Dilemma.1080p.WEB-DL.DD5.1.H.264-BS.mkv",
+      "Fargo_S01E01_The_Crocodiles_Dilemma"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Fargo.S01.1080p.WEB-DL.DD5.1.H.264-BS/Fargo.S01E03.A.Muddy.Road.1080p.WEB-DL.DD5.1.H.264-BS.mkv",
+      "Fargo_S01E03_A_Muddy_Road"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Fargo.S01.1080p.WEB-DL.DD5.1.H.264-BS/Fargo.S01E06.Buridan's.Ass.1080p.WEB-DL.DD5.1.H.264-BS.mkv",
+      "Fargo_S01E06_Buridans_Ass"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Fargo.S01.1080p.WEB-DL.DD5.1.H.264-BS/Fargo.S01E07.Who.Shaves.the.Barber.1080p.WEB-DL.DD5.1.H.264-BS.mkv",
+      "Fargo_S01E07_Who_Shaves_the_Barber"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Fargo.S01.1080p.WEB-DL.DD5.1.H.264-BS/Fargo.S01E09.A.Fox.a.Rabbit.and.a.Cabbage.1080p.WEB-DL.DD5.1.H.264-BS.mkv",
+      "Fargo_S01E09_A_Fox_a_Rabbit_and_a_Cabbage"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Fargo.S01.1080p.WEB-DL.DD5.1.H.264-BS/Fargo.S01E10.Morton's.Fork.1080p.WEB-DL.DD5.1.H.264-BS.mkv",
+      "Fargo_S01E10_Mortons_Fork"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Fargo.S02.1080p.WEBRip.DD5.1.x264-NTb/Fargo.S02E01.Waiting.For.Dutch.1080p.NF.WEBRip.DD5.1.x264-NTb.mkv",
+      "Fargo_S02E01_Waiting_For_Dutch"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Fargo.S02.1080p.WEBRip.DD5.1.x264-NTb/Fargo.S02E02.Before.The.Law.1080p.NF.WEBRip.DD5.1.x264-NTb.mkv",
+      "Fargo_S02E02_Before_The_Law"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Fargo.S02.1080p.WEBRip.DD5.1.x264-NTb/Fargo.S02E09.The.Castle.REPACK.1080p.NF.WEBRip.DD5.1.x264-NTb.mkv",
+      "Fargo_S02E09_The_Castle"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Gen.V.S02E01.REPACK.1080p.WEB.h264-ETHEL/Gen.V.S02E01.REPACK.1080p.WEB.h264-ETHEL.mkv",
+      "Gen_V_S02E01"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Gen.V.S02E02.1080p.WEB.h264-ETHEL/Gen.V.S02E02.1080p.WEB.h264-ETHEL.mkv",
+      "Gen_V_S02E02"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Gen.V.S02E05.1080p.WEB.h264-ETHEL/Gen.V.S02E05.1080p.WEB.h264-ETHEL.mkv",
+      "Gen_V_S02E05"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Inside Job S01-S02 WEBRip 1080p AAC5 1 x265-SiQ/Part 1/._Inside.Job.S01E01.Unpresidented.AAC5.1.1080p.WEBRip.x265-SiQ.mkv",
+      "__Inside_Job_S01E01_Unpresidented"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Inside Job S01-S02 WEBRip 1080p AAC5 1 x265-SiQ/Part 1/Inside.Job.S01E03.Blue.Bloods.AAC5.1.1080p.WEBRip.x265-SiQ.mkv",
+      "Inside_Job_S01E03_Blue_Bloods"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Inside Job S01-S02 WEBRip 1080p AAC5 1 x265-SiQ/Part 1/Inside.Job.S01E05.The.Brettfast.Club.AAC5.1.1080p.WEBRip.x265-SiQ.mkv",
+      "Inside_Job_S01E05_The_Brettfast_Club"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Inside Job S01-S02 WEBRip 1080p AAC5 1 x265-SiQ/Part 1/Inside.Job.S01E10.Inside.Reagan.AAC5.1.1080p.WEBRip.x265-SiQ.mkv",
+      "Inside_Job_S01E10_Inside_Reagan"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Inside Job S01-S02 WEBRip 1080p AAC5 1 x265-SiQ/Part 2/Inside.Job.S01E13.Reagan.&.Mychelle's.Hive.School.Reunion.AAC5.1.1080p.WEBRip.x265-SiQ.mkv",
+      "Inside_Job_S01E13_Reagan_and_Mychelles_Hive_School_Reunion"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Inside Job S01-S02 WEBRip 1080p AAC5 1 x265-SiQ/Part 2/Inside.Job.S01E18.Appleton.AAC5.1.1080p.WEBRip.x265-SiQ.mkv",
+      "Inside_Job_S01E18_Appleton"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/KAOS.S01.1080p.NF.WEB-DL.DDP5.1.Atmos.H.264-FLUX/KAOS.S01E05.Episode.5.1080p.NF.WEB-DL.DDP5.1.Atmos.H.264-FLUX.mkv",
+      "KAOS_S01E05_Episode_5"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Katla.S01.ICELANDIC.1080p.NF.WEB-DL.DDP5.1.x264-AGLET/Katla.S01E05.Northerly.Winds.1080p.NF.WEB-DL.DDP5.1.x264-AGLET.mkv",
+      "Katla_S01E05_Northerly_Winds"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Landman.S02E04.720p.WEB.h264-DiRT/Landman.S02E04.720p.WEB.h264-DiRT.mkv",
+      "Landman_S02E04"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Landman.S02E06.720p.WEB.h264-DiRT/Landman.S02E06.720p.WEB.h264-DiRT.mkv",
+      "Landman_S02E06"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Landman.S02E08.MULTI.1080p.WEB.H264-HiggsBoson/landman.s02e08.multi.1080p.web.h264-higgsboson.mkv",
+      "landman_s02e08"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Max Payne/Max Payne (2008).mkv",
+      "Max_Payne_2008"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Now You See Me Now You Dont 2025 1080p iT WEB-DL DDP5 1 H 264-WADU/Now You See Me Now You Dont 2025 1080p iT WEB-DL DDP5 1 H 264-WADU.mkv",
+      "Now_You_See_Me_Now_You_Dont_2025_iT"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Pantheon S01 1080p AMZN WEB-DL DD 5 1 H 264-Cinefeel/Pantheon.S01E07.We.Are.You.1080p.AMZN.WEB-DL.DD+5.1.H.264-Cinefeel.mkv",
+      "Pantheon_S01E07_We_Are_You"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Peacemaker.2022.S01.1080p.HMAX.WEB-DL.DD5.1.H.264-NTb/Peacemaker.2022.S01E03.Better.Goff.Dead.1080p.HMAX.WEB-DL.DD5.1.H.264-NTb.mkv",
+      "Peacemaker_2022_S01E03_Better_Goff_Dead"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Peacemaker.2022.S01.1080p.HMAX.WEB-DL.DD5.1.H.264-NTb/Peacemaker.2022.S01E07.Stop.Dragon.My.Heart.Around.1080p.HMAX.WEB-DL.DD5.1.x264-NTb.mkv",
+      "Peacemaker_2022_S01E07_Stop_Dragon_My_Heart_Around"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Peacemaker.2022.S01.1080p.HMAX.WEB-DL.DD5.1.H.264-NTb/Peacemaker.2022.S01E08.Its.Cow.or.Never.1080p.HMAX.WEB-DL.DD5.1.x264-NTb.mkv",
+      "Peacemaker_2022_S01E08_Its_Cow_or_Never"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Peaky Blinders S02 1080p BluRay x264-SHORTBREHD/Peaky.Blinders.S02E03.1080p.BluRay.x264-SHORTBREHD.mkv",
+      "Peaky_Blinders_S02E03"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Peaky.Blinders.S01.1080p.BluRay.x264-SHORTBREHD/peaky.blinders.s01e02.1080p.bluray.x264-shortbrehd.mkv",
+      "peaky_blinders_s01e02"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Planet.Earth.III.S01.1080p.AMZN.WEB-DL.DDP5.1.H.264-FLUX/Planet.Earth.III.S01E05.Forests.1080p.AMZN.WEB-DL.DDP5.1.H.264-FLUX.mkv",
+      "Planet_Earth_III_S01E05_Forests"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Reacher S03E01 Persuader 1080p AMZN WEB-DL DDP5 1 Atmos H 264-FLUX/Reacher S03E01 Persuader 1080p AMZN WEB-DL DDP5 1 Atmos H 264-FLUX.mkv",
+      "Reacher_S03E01_Persuader"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Rick and Morty S09E01 Theres Something About Morty 1080p AMZN WEB-DL DDP5 1 H 264-Kitsune/Rick and Morty S09E01 Theres Something About Morty 1080p AMZN WEB-DL DDP5 1 H 264-Kitsune.mkv",
+      "Rick_and_Morty_S09E01_Theres_Something_About_Morty"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Scavengers.Reign.S01E01.1080p.WEB.h264-EDITH/Scavengers.Reign.S01E01.1080p.WEB.h264-EDITH.mkv",
+      "Scavengers_Reign_S01E01"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Silicon Valley S01 1080p AMZN WEB-DL DDP5 1 H 264-Kitsune/Silicon.Valley.S01E01.Minimum.Viable.Product.1080p.AMZN.WEB-DL.DDP5.1.H.264-Kitsune.mkv",
+      "Silicon_Valley_S01E01_Minimum_Viable_Product"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Silicon Valley S02 1080p HMAX WEB-DL DD5 1 H 264-PHOENiX/Silicon.Valley.S02E06.Homicide.1080p.HMAX.WEB-DL.DD5.1.H.264-PHOENiX.mkv",
+      "Silicon_Valley_S02E06_Homicide"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Silicon Valley S03 1080p HMAX WEB-DL DD5 1 H 264-PHOENiX/Silicon.Valley.S03E05.The.Empty.Chair.1080p.HMAX.WEB-DL.DD5.1.H.264-PHOENiX.mkv",
+      "Silicon_Valley_S03E05_The_Empty_Chair"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Silo S03E01 1080p ATVP WEB-DL x264 EAC3 5 1 Atmos/Silo S03E01 1080p ATVP WEB-DL x264 EAC3 5 1 Atmos.mkv",
+      "Silo_S03E01_ATVP"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Silo S03E05 Memory 1080p ATVP WEB-DL DDP5 1 Atmos H 264-Kitsune/Silo S03E05 Memory 1080p ATVP WEB-DL DDP5 1 Atmos H 264-Kitsune.mkv",
+      "Silo_S03E05_Memory_ATVP"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Soundbreaking.S01.1080p.BluRay.REMUX.AVC.DTS-HD.MA.5.1-EPSiLON/Soundbreaking.S01E05.Four.on.the.Floor.1080p.BluRay.REMUX.AVC.DTS-HD.MA.5.1-EPSiLON.mkv",
+      "Soundbreaking_S01E05_Four_on_the_Floor_5_1"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/Stranger Things S05 Vol 1 1080p NF WEB-DL DDP5 1 Atmos HDR10  AV1-KRATOS/Stranger.Things.S05E03.Chapter.Three.The.Turnbow.Trap.1080p.NF.WEB-DL.DDP5.1.Atmos.HDR10+.AV1-KRATOS.mkv",
+      "Stranger_Things_S05E03_Chapter_Three_The_Turnbow_Trap_AV1_KRATOS"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/The Continental S01 web hevc-d3g/The.Continental.S01E02.Loyalty.to.the.Master.1080p.WEBRuo,DDP5.1.H265-d3g.mkv",
+      "The_Continental_S01E02_Loyalty_to_the_Master_WEBRuo"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/The Last Frontier 2025 S01E08 Lair Perdu 720p ATVP WEB-DL DDP5 1 Atmos H 264-FLUX/The Last Frontier 2025 S01E08 Lair Perdu 720p ATVP WEB-DL DDP5 1 Atmos H 264-FLUX.mkv",
+      "The_Last_Frontier_2025_S01E08_Lair_Perdu_ATVP"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/The Last Frontier 2025 S01E10 Everything Trying 1080p ATVP WEB-DL DDP5 1 H 264-NTb/The Last Frontier 2025 S01E10 Everything Trying 1080p ATVP WEB-DL DDP5 1 H 264-NTb.mkv",
+      "The_Last_Frontier_2025_S01E10_Everything_Trying_ATVP"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/The Pitt S02E01 7 00 A M 1080p HULU WEB-DL DDP5 1 Atmos H 264-FLUX/The Pitt S02E01 7 00 A M 1080p HULU WEB-DL DDP5 1 Atmos H 264-FLUX.mkv",
+      "The_Pitt_S02E01_7_00_A_M"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/The Pitt S02E05 11 00 A M 1080p AMZN WEB-DL DDP5 1 Atmos H 264-FLUX/The Pitt S02E05 11 00 A M 1080p AMZN WEB-DL DDP5 1 Atmos H 264-FLUX.mkv",
+      "The_Pitt_S02E05_11_00_A_M"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/The Pitt S02E06 12 00 P M 1080p AMZN WEB-DL DDP5 1 Atmos H 264-FLUX/The Pitt S02E06 12 00 P M 1080p AMZN WEB-DL DDP5 1 Atmos H 264-FLUX.mkv",
+      "The_Pitt_S02E06_12_00_P_M"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/The Wheel of Time - Season 1 reack web hevc-d3g/The Wheel of Time_S01E02_Shadow's Waiting 1080p AMZN WEB-DL DDP5.1 H265-d3g.mkv",
+      "The_Wheel_of_Time_S01E02_Shadows_Waiting"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/The Wheel of Time - Season 1 reack web hevc-d3g/The Wheel of Time_S01E06_The Flame of Tar Valon 1080p AMZN WEB-DL DDP5.1 H265-d3g.mkv",
+      "The_Wheel_of_Time_S01E06_The_Flame_of_Tar_Valon"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/The Wheel of Time - Season 1 reack web hevc-d3g/The Wheel of Time_S01E07_The Dark Along the Ways 1080p AMZN WEB-DL DDP5.1 H265-d3g.mkv",
+      "The_Wheel_of_Time_S01E07_The_Dark_Along_the_Ways"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/The.Boys.S05E01.REPACK.1080p.WEB.h264-ETHEL/The.Boys.S05E01.REPACK.1080p.WEB.h264-ETHEL.mkv",
+      "The_Boys_S05E01"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/The.Departed.2006.Bluray.1080p.DTS.x264-XtremE/Sample.mkv",
+      "Sample"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/The.Man.in.the.High.Castle.S01.RERiP.1080p.AMZN.WEBRip.DD5.1.x264-NTb/The.Man.in.the.High.Castle.S01E05.The.New.Normal.RERiP.1080p.AMZN.WEBRip.DD5.1.x264-NTb.mkv",
+      "The_Man_in_the_High_Castle_S01E05_The_New_Normal_RERiP"
+    ],
+    [
+      "/mnt/movingparts/torrent/New/The.Vietnam.War.2015.S01E01.1080p.HEVC.x265-MeGusta/The.Vietnam.War.2015.S01E01.1080p.HEVC.x265-MeGusta.mkv",
+      "The_Vietnam_War_2015_S01E01"
+    ],
+    [
+      "/mnt/movingparts/torrent/Performance/Bill Burr/Bill.Burr.Live.At.Red.Rocks.2022.1080p.WEB.h264-RUMOUR/bill.burr.live.at.red.rocks.2022.1080p.web.h264-rumour.rar",
+      "bill_burr_live_at_red_rocks_2022"
+    ],
+    [
+      "/mnt/movingparts/torrent/Performance/Bill Burr/Bill.Burr.Presents.Friends.Who.Kill.2022.1080p.WEB.h264-KOGi/bill.burr.presents.friends.who.kill.2022.1080p.web.h264-kogi.rar",
+      "bill_burr_presents_friends_who_kill_2022"
+    ],
+    [
+      "/mnt/movingparts/torrent/Software/EVC WinOLS 2.24.0.0/10298-ols_lange_RUS.rar",
+      "10298_ols_lange_RUS"
+    ],
+    [
+      "/mnt/movingparts/torrent/Software/EVC WinOLS 2.24.0.0/WinOLS/damos/Alfa 1.9JTDhex+dam+ols/Alfa 1.9JTD.rar",
+      "Alfa_1_9JTD"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/30 Rock/30.Rock.S01.720p.WEB-DL.DD5.1.AVC-CtrlHD/30 Rock S01E16 720p WEB-DL DD5.1 AVC-CtrlHD.mkv",
+      "30_Rock_S01E16"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Altered Carbon/Altered.Carbon.S01E10.The.Killers.1080p.NF.WEB-DL.DDP5.1.x264-NTb.mkv",
+      "Altered_Carbon_S01E10_The_Killers"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Banshee/Banshee S01 Bluray EAC3 5 1 1080p x265-SiQ/Banshee.S01E06.Wicks.EAC3.5.1.1080p.Bluray.x265-SiQ.mkv",
+      "Banshee_S01E06_Wicks_5_1"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Big Mouth/Big.Mouth.S02.1080p.WEB.x264-Scene/Big.Mouth.S02E06.1080p.WEB.X264-METCON.mkv",
+      "Big_Mouth_S02E06"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Big Mouth/Big.Mouth.S03/[REQ]Big.Mouth.S03E11.WEBRip.x264-ION10.mp4",
+      "REQBig_Mouth_S03E11"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Big Mouth/Big.Mouth.S04.1080p.NF.WEB-DL.DDP5.1.x264-NTb/Big.Mouth.S04E07.Four.Stories.About.Hand.Stuff.1080p.NF.WEB-DL.DDP5.1.x264-NTb.mkv",
+      "Big_Mouth_S04E07_Four_Stories_About_Hand_Stuff"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Big Mouth/Big.Mouth.S05/Big.Mouth.S05E01.1080p.HEVC.x265-MeGusta/Big.Mouth.S05E01.1080p.HEVC.x265-MeGusta.mkv",
+      "Big_Mouth_S05E01"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Black Mirror/Black Mirror S01-S02 1080p WEB-DL AAC 2.0 H.264-Mixed/Black.Mirror.S02.1080p.WEB-DL.AAC2.0.H.264-Coo7/Black.Mirror.S02E02.White.Bear.1080p.WEB-DL.AAC2.0.H.264-Coo7.mkv",
+      "Black_Mirror_S02E02_White_Bear"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Bobs Burgers/Bob's Burgers S04 Season 04 [1080p WEB-DL HEVC x265 10bit] [AAC 5.1] [MKV] - ImE/Bob's.Burgers.S04E17.The.Equestranauts.1080p.WEB-DL.x265.10bit.AAC.5.1-ImE.mkv",
+      "Bobs_Burgers_S04E17_The_Equestranauts"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Bobs Burgers/Bob's Burgers S05 Season 05 [1080p WEB-DL HEVC x265 10bit] [AAC 5.1] [MKV] - ImE/Bob's.Burgers.S05E03.Friends.with.Burger-fits.1080p.WEB-DL.x265.10bit.AAC.5.1-ImE.mkv",
+      "Bobs_Burgers_S05E03_Friends_with_Burger_fits"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Bobs Burgers/Bob's Burgers S05 Season 05 [1080p WEB-DL HEVC x265 10bit] [AAC 5.1] [MKV] - ImE/Bob's.Burgers.S05E09.Speakeasy.Rider.1080p.WEB-DL.x265.10bit.AAC.5.1-ImE.mkv",
+      "Bobs_Burgers_S05E09_Speakeasy_Rider"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Bobs Burgers/Bob's Burgers S06 Season 06 [1080p WEB-DL HEVC x265 10bit] [AAC 5.1] [MKV] - ImE/Bob's.Burgers.S06E04.Gayle.Makin'.Bob.Sled.1080p.WEB-DL.x265.10bit.AAC.5.1-ImE.mkv",
+      "Bobs_Burgers_S06E04_Gayle_Makin_Bob_Sled"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Bobs Burgers/Bob's Burgers S06 Season 06 [1080p WEB-DL HEVC x265 10bit] [AAC 5.1] [MKV] - ImE/Bob's.Burgers.S06E11.House.of.1000.Bounces.1080p.WEB-DL.x265.10bit.AAC.5.1-ImE.mkv",
+      "Bobs_Burgers_S06E11_House_of_1000_Bounces"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Bobs Burgers/Bobs Burgers - Season 1 dvdrip/01x12 - Lobsterfest.avi",
+      "01x12_Lobsterfest"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Brittania/Britannia S02 web hevc-d3g/britannia.s02e08.web.1080p.ac3.h265-d3g.mkv",
+      "britannia_s02e08"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Brittania/Britannia S03 web 10bit ddp hevc-d3g/Britannia.S03E02.1080p.WEBRip.10Bit.DDP5.1.H265-d3g.mkv",
+      "Britannia_S03E02"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Cowboy Bebop/Cowboy.Bebop.S01.Movie.720p-Hi10p.BluRay.AC35.1.x264-CTR/Cowboy.Bebop.S01E03.720p-Hi10p.BluRay.AC35.1.x264-CTR.[CD820DDB].mkv",
+      "Cowboy_Bebop_S01E03_AC35_1"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Cowboy Bebop/Cowboy.Bebop.S01.Movie.720p-Hi10p.BluRay.AC35.1.x264-CTR/Cowboy.Bebop.S01E16.720p-Hi10p.BluRay.AC35.1.x264-CTR.[8284F504].mkv",
+      "Cowboy_Bebop_S01E16_AC35_1"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Dirk Gentlys Holistic Detective Agency/Dirk.Gently's.Holistic.Detective.Agency.S01.1080p.NF.WEB-DL.DD+5.1.H.264-playWEB/._Dirk.Gently's.Holistic.Detective.Agency.S01E02.Lost.&.Found.1080p.NF.WEB-DL.DD+5.1.H.264-playWEB.mkv",
+      "__Dirk_Gentlys_Holistic_Detective_Agency_S01E02_Lost_and_Found"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Dirk Gentlys Holistic Detective Agency/Dirk.Gently's.Holistic.Detective.Agency.S02.1080p.NF.WEB-DL.DD+5.1.H.264-playWEB/._Dirk.Gently's.Holistic.Detective.Agency.S02E04.The.House.Within.the.House.1080p.NF.WEB-DL.DD+5.1.H.264-playWEB.mkv",
+      "__Dirk_Gentlys_Holistic_Detective_Agency_S02E04_The_House_Within_the_House"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Dirk Gentlys Holistic Detective Agency/Dirk.Gently's.Holistic.Detective.Agency.S02.1080p.NF.WEB-DL.DD+5.1.H.264-playWEB/Dirk.Gently's.Holistic.Detective.Agency.S02E05.Shapes.and.Colors.1080p.NF.WEB-DL.DD+5.1.H.264-playWEB.mkv",
+      "Dirk_Gentlys_Holistic_Detective_Agency_S02E05_Shapes_and_Colors"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Drive to Survive/._Formula.1.Drive.To.Survive.S03E06.The.Comeback.Kid.(709mb.1920x1080.2632kbps.h265..mkv",
+      "__Formula_1_Drive_To_Survive_S03E06_The_Comeback_Kid_1920x1080_h265_"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Drive to Survive/._Formula.1.Drive.To.Survive.S03E09.Man.On.Fire.(868mb.1920x1080.2320kbps.h265..mkv",
+      "__Formula_1_Drive_To_Survive_S03E09_Man_On_Fire_1920x1080_h265_"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Drive to Survive/Formula.1.Drive.to.Survive.S05E07.1080p.HEVC.x265-MeGusta.mkv",
+      "Formula_1_Drive_to_Survive_S05E07"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Drive to Survive/Formula.1.Drive.to.Survive.S06.1080p.NF.WEB-DL.DDP5.1.H.264-NTb/Formula.1.Drive.to.Survive.S06E06.Leap.of.Faith.1080p.NF.WEB-DL.DDP5.1.H.264-NTb.mkv",
+      "Formula_1_Drive_to_Survive_S06E06_Leap_of_Faith"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Dune Prophecy/Dune.Prophecy.S01E01.1080p.WEB.h264-ETHEL/Dune.Prophecy.S01E01.1080p.WEB.h264-ETHEL.mkv",
+      "Dune_Prophecy_S01E01"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Family Guy/Family Guy S08 - S10 [jlw]/Family Guy S08 [jlw]/Family Guy - S08E19 - The Splendid Source.mkv",
+      "Family_Guy_S08E19_The_Splendid_Source"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Family Guy/Family Guy S08 - S10 [jlw]/Family Guy S08 [jlw]/Family Guy - S08E21 - Partial Terms of Endearment.mkv",
+      "Family_Guy_S08E21_Partial_Terms_of_Endearment"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Family Guy/Family Guy S08 - S10 [jlw]/Family Guy S09 [jlw]/Family Guy - S09E09 - And I'm Joyce Kinney.mkv",
+      "Family_Guy_S09E09_And_Im_Joyce_Kinney"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Family Guy/Family Guy S08 - S10 [jlw]/Family Guy S10 [jlw]/Family Guy - S10E10 - Meg and Quagmire.mkv",
+      "Family_Guy_S10E10_Meg_and_Quagmire"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Family Guy/Family Guy S08 - S10 [jlw]/Family Guy S10 [jlw]/Family Guy - S10E17 - Forget-Me-Not.mkv",
+      "Family_Guy_S10E17_Forget_Me_Not"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Florida Man/Florida.Man.2023.S01E06.1080p.HEVC.x265-MeGusta.mkv",
+      "Florida_Man_2023_S01E06"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/For All Mankind/For.All.Mankind.S01E05.WEBRip.1080p.DD5.1.H265-d3g.mkv",
+      "For_All_Mankind_S01E05"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/For All Mankind/for.all.mankind.s01e07.WEBRip.1080p.DD5.1.H265-d3g.mkv",
+      "for_all_mankind_s01e07"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/For All Mankind/for.all.mankind.s03e08.1080p.web.h264-ggez.mkv",
+      "for_all_mankind_s03e08"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Foundation/foundation.s02e04.multi.1080p.web.h264-higgsboson.mkv",
+      "foundation_s02e04"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Foundation/foundation.s02e05.multi.1080p.web.h264-higgsboson.mkv",
+      "foundation_s02e05"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Futurama/Futurama Complete [x265] -SacReD/S02/Futurama - 2x02 - Mars University.mkv",
+      "Futurama_2x02_Mars_University"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Futurama/Futurama Complete [x265] -SacReD/S02/Futurama - 2x10 - Put Your Head on My Shoulder.mkv",
+      "Futurama_2x10_Put_Your_Head_on_My_Shoulder"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Futurama/Futurama Complete [x265] -SacReD/S03/Futurama - 3x07 - The Day the Earth Stood Stupid.mkv",
+      "Futurama_3x07_The_Day_the_Earth_Stood_Stupid"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Futurama/Futurama Complete [x265] -SacReD/S04/Futurama - 4x03 - Anthology of Interest (2).mkv",
+      "Futurama_4x03_Anthology_of_Interest_2"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Futurama/Futurama Complete [x265] -SacReD/S05/Futurama - 5x13 - Bend Her.mkv",
+      "Futurama_5x13_Bend_Her"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Futurama/Futurama Complete [x265] -SacReD/S06/Futurama - 6x14 - Neutopia.mkv",
+      "Futurama_6x14_Neutopia"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Futurama/Futurama Complete [x265] -SacReD/S06/Futurama - 6x19 - Yo Leela Leela.mkv",
+      "Futurama_6x19_Yo_Leela_Leela"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Futurama/Futurama Complete [x265] -SacReD/S07/Futurama - 7x15 - Fry and Leela's Big Fling.mkv",
+      "Futurama_7x15_Fry_and_Leelas_Big_Fling"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Futurama/Futurama Complete [x265] -SacReD/S07/Futurama - 7x18 - The Inhuman Torch.mkv",
+      "Futurama_7x18_The_Inhuman_Torch"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Halo/Halo.S01E01.1080p.HEVC.x265-MeGusta.mkv",
+      "Halo_S01E01"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Harvey Birdman/Harvey Birdman, Attorney at Law Complete Series and Specials 720p WEB-DL x264 AAC SNAKE/S01/E03-Shaggy Busted.mkv",
+      "E03_Shaggy_Busted"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Harvey Birdman/Harvey Birdman, Attorney at Law Complete Series and Specials 720p WEB-DL x264 AAC SNAKE/S02/E04-High Speed Buggy Chase.mkv",
+      "E04_High_Speed_Buggy_Chase"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Harvey Birdman/Harvey Birdman, Attorney at Law Complete Series and Specials 720p WEB-DL x264 AAC SNAKE/S03/E02-Harvey's Civvy.mkv",
+      "E02_Harveys_Civvy"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/His Dark Materials/His Dark Materials (2019) S01 (1080p AMZN WEB-DL H265 SDR DDP 5.1 English - HONE)/His Dark Materials (2019) S01E04 (1080p AMZN WEB-DL H265 SDR DDP 5.1 English - HONE).mkv",
+      "His_Dark_Materials_2019_S01E04"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Home Movies/Home Movies Season 1/Home Movies - 104 - Brendon Gets Rabies.avi",
+      "Home_Movies_104_Brendon_Gets_Rabies"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Home Movies/Home Movies Season 2/Home Movies - 204 - Business & Pleasure.avi",
+      "Home_Movies_204_Business_and_Pleasure"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Home Movies/Home Movies Season 3/Home Movies - 313 - Coffins And Cradles.avi",
+      "Home_Movies_313_Coffins_And_Cradles"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Home Movies/Home Movies Season 4/Home Movies - 402 - Bye, Bye Greasy.avi",
+      "Home_Movies_402_Bye_Bye_Greasy"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Last of Us/the.last.of.us.s01e03.1080p.web.h264-cakes.mkv",
+      "the_last_of_us_s01e03"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Leftovers/The Leftovers S03 Bluray EAC3 5 1 1080p x265-SiQ/The.Leftovers.S03E01.The.Book.of.Kevin.EAC3.5.1.1080p.Bluray.x265-SiQ.mkv",
+      "The_Leftovers_S03E01_The_Book_of_Kevin_5_1"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Leftovers/The.Leftovers.S01.1080p.WEB-DL.DD5.1.H.264-Coo7/The.Leftovers.S01E09.The.Garveys.at.Their.Best.1080p.WEB-DL.DD5.1.H.264-Coo7.mkv",
+      "The_Leftovers_S01E09_The_Garveys_at_Their_Best"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Legion/Legion S01 BR 10bit hevc-d3g/Legion.S01E06.Chapter.6.BluRay.10Bit.1080p.Dts.H265-d3g.mkv",
+      "Legion_S01E06_Chapter_6"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Legion/Legion S02 web hevc-d3g/Legion.S02E03.WEBRip.1080p.DD5.1.H265-d3g.mkv",
+      "Legion_S02E03"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Love Death And Robots/Love.Death.and.Robots.S03.1080p.NF.WEB-DL.DDP5.1.Atmos.x264-T4H/Love.Death.and.Robots.S03E03.the.Very.Pulse.of.the.Machine.1080p.NF.WEB-DL.DDP5.1.Atmos.x264-T4H.mkv",
+      "Love_Death_and_Robots_S03E03_the_Very_Pulse_of_the_Machine"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Magicians/The.Magicians.2015.S05E01.Do.Something.Crazy.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG/The.Magicians.2015.S05E01.Do.Something.Crazy.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG.mkv",
+      "The_Magicians_2015_S05E01_Do_Something_Crazy"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Magicians/The.Magicians.2015.S05E06.Oops.I.Did.It.Again.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG/._The.Magicians.2015.S05E06.Oops.I.Did.It.Again.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG.mkv",
+      "__The_Magicians_2015_S05E06_Oops_I_Did_It_Again"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Metalocalypse/Season 1/Metalocalypse.S01E02.Dethwater.mkv",
+      "Metalocalypse_S01E02_Dethwater"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Metalocalypse/Season 1/Metalocalypse.S01E03.Birthdayface.mkv",
+      "Metalocalypse_S01E03_Birthdayface"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Metalocalypse/Season 2/Metalocalypse.S02E13.Klokblocked.mkv",
+      "Metalocalypse_S02E13_Klokblocked"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Metalocalypse/Season 2/Metalocalypse.S02E17.Dethrecord.mkv",
+      "Metalocalypse_S02E17_Dethrecord"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Metalocalypse/Season 3/Metalocalypse.S03E08.Rehabklok.mkv",
+      "Metalocalypse_S03E08_Rehabklok"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Midnight Gospel/The.Midnight.Gospel.S01E03.1080p.HEVC.x265-MeGusta.mkv",
+      "The_Midnight_Gospel_S01E03"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Mr Robot/Mr.Robot.S04.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG/Mr.Robot.S04E13.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG.mkv",
+      "Mr_Robot_S04E13"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Patriot/Patriot  S02 amzn web hevc-d3g/Patriot S02E01 American Dimes 1080p AMZN WEB-DL DDP5.1 H265-d3g.mkv",
+      "Patriot_S02E01_American_Dimes"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Pluribus/Pluribus.S01E05.1080p.WEB.h264-ETHEL/Pluribus.S01E05.1080p.WEB.h264-ETHEL.mkv",
+      "Pluribus_S01E05"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Ragnarok/S02/S02E01 - Brothers in Arms.mkv",
+      "S02E01_Brothers_in_Arms"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Reacher/Reacher S01 web hevc-d3g/Reacher.S01E05.No.Apologies.1080p.WEBRip.10Bit.DDP5.1.H265-d3g.mkv",
+      "Reacher_S01E05_No_Apologies"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Rick and Morty/Rick and Morty S04/Rick.and.Morty.S04E04.Claw.and.Hoarder.Special.Ricktims.Morty.1080p.HEVC.x265-MeGusta/Rick.and.Morty.S04E04.Claw.and.Hoarder.Special.Ricktims.Morty.1080p.HEVC.x265-MeGusta.mkv",
+      "Rick_and_Morty_S04E04_Claw_and_Hoarder_Special_Ricktims_Morty"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Rick and Morty/Rick and Morty S05/Rick.and.Morty.S05E02.1080p.HEVC.x265-MeGusta/Rick.and.Morty.S05E02.1080p.HEVC.x265-MeGusta.mkv",
+      "Rick_and_Morty_S05E02"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Rick and Morty/Rick and Morty S06/rick.and.morty.s06e08.multi.1080p.web.x264-higgsboson.mkv",
+      "rick_and_morty_s06e08"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Rick and Morty/Rick and Morty S07/._Rick.and.Morty.S07E08.1080p.x265-ELiTE.mkv",
+      "__Rick_and_Morty_S07E08"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Rick and Morty/Rick and Morty Season 1 1080p/Rick and Morty S01E01 Pilot.mkv",
+      "Rick_and_Morty_S01E01_Pilot"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Rick and Morty/Rick.and.Morty.S03.720p.BluRay.x264-YELLOWBiRD [NO RAR]/Rick.and.Morty.S03E07.720p.BluRay.x264-YELLOWBiRD.mkv",
+      "Rick_and_Morty_S03E07"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Roadies/Roadies.S01.1080p.AMZN.WEBRip.DD5.1.x264-NTb/Roadies.S01E08.The.All-Night.Bus.Ride.1080p.AMZN.WEBRip.DD5.1.x264-NTb.mkv",
+      "Roadies_S01E08_The_All_Night_Bus_Ride"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/SAS Rogue Heroes/SAS.Rogue.Heroes.S01.1080p.HMAX.WEB-DL.DD5.1.H.264-SMURF/SAS.Rogue.Heroes.S01E03.Episode.3.1080p.HMAX.WEB-DL.DD5.1.H.264-SMURF.mkv",
+      "SAS_Rogue_Heroes_S01E03_Episode_3"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Samurai Champloo/Samurai Champloo 03 - Hellhounds For Hire, Part 1.mkv",
+      "Samurai_Champloo_03_Hellhounds_For_Hire_Part_1"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Samurai Champloo/Samurai Champloo 09 - Beatbox Bandits.mkv",
+      "Samurai_Champloo_09_Beatbox_Bandits"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/SeaLab 2021/SeaLab 2021/Season 2/213 - Return to Oblivion.avi",
+      "213_Return_to_Oblivion"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/SeaLab 2021/SeaLab 2021/Season 3/307 - Tornado Shanks.avi",
+      "307_Tornado_Shanks"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/SeaLab 2021/SeaLab 2021/Season 4/406 - Casinko.avi",
+      "406_Casinko"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Severance/Severance.S02E08.1080p.WEB.H264-SuccessfulCrab/severance.s02e08.1080p.web.h264-successfulcrab.mkv",
+      "severance_s02e08"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Silo/Silo S01 web hevc-d3g/Silo.S01E04.Truth.1080p.WEBRip.DDP5.1.Atmos.H265-d3g.mkv",
+      "Silo_S01E04_Truth"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Silo/Silo.S02E06.1080p.WEB.H264-SuccessfulCrab/silo.s02e06.1080p.web.h264-successfulcrab.mkv",
+      "silo_s02e06"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/South Park/South.Park.S23E03.SHOTS.UNCENSORED.1080p.WEB-DL.AAC2.0.H.264-LAZY.mkv",
+      "South_Park_S23E03_SHOTS"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/South Park/south.park.s08e07.multi.1080p.web.h264-cielos.mkv",
+      "south_park_s08e07"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Station Eleven/Station Eleven S01 web 10bit hevc-d3g/Station.Eleven.S01E01.Wheel.of.Fire.1080p.WEBRip.10Bit.DDP5.1.H265-d3g.mkv",
+      "Station_Eleven_S01E01_Wheel_of_Fire"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Station Eleven/Station Eleven S01 web 10bit hevc-d3g/Station.Eleven.S01E06.Survival.is.Insufficient.1080p.WEBRip.10Bit.DDP5.1.H265-d3g.mkv",
+      "Station_Eleven_S01E06_Survival_is_Insufficient"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Station Eleven/Station Eleven S01 web 10bit hevc-d3g/Station.Eleven.S01E07.Goodbye.My.Damaged.Home.1080p.WEBRip.10Bit.DDP5.1.H265-d3g.mkv",
+      "Station_Eleven_S01E07_Goodbye_My_Damaged_Home"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Station Eleven/Station Eleven S01 web 10bit hevc-d3g/Station.Eleven.S01E08.Whos.There.1080p.WEBRip.10Bit.DDP5.1.H265-d3g.mkv",
+      "Station_Eleven_S01E08_Whos_There"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Station Eleven/Station Eleven S01 web 10bit hevc-d3g/Station.Eleven.S01E10.Unbroken.Circle.1080p.WEBRip.10Bit.DDP5.1.H265-d3g.mkv",
+      "Station_Eleven_S01E10_Unbroken_Circle"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Stranger Things/Stranger.Things.S04.HDR.1080p.NF.WEB-DL.DDPA5.1.H.265-NTb/Stranger.Things.S04E07.Chapter.Seven.The.Massacre.at.Hawkins.Lab.1080p.NF.WEB-DL.DDP5.1.HDR.H.265-NTb.mkv",
+      "Stranger_Things_S04E07_Chapter_Seven_The_Massacre_at_Hawkins_Lab"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Superjail/Season 1/Superjail.S01E10.Cold-Blooded.720p.WEB-DL.AAC2.0.H264-T00NTiTAN5.mkv",
+      "Superjail_S01E10_Cold_Blooded"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Superjail/Season 2/Superjail.S02E01.Best.Friends.Forever.720p.WEB-DL.AAC2.0.H264-T00NTiTAN5.mkv",
+      "Superjail_S02E01_Best_Friends_Forever"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Superjail/Season 3/Superjail.S03E04.720p.HDTV.x264-EVOLVE.mkv",
+      "Superjail_S03E04"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/The Boys/The.Boys.2019.S01.1080p.AMZN.WEBRip.DDP5.1.x264-NTG/The.Boys.2019.S01E02.Cherry.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG.mkv",
+      "The_Boys_2019_S01E02_Cherry"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/The Expanse/The Expanse S06 web 10bit hevc-d3g/the.expanse.s06e05.1080p.WEBRip.DDP5.1.H265-d3g.mkv",
+      "the_expanse_s06e05"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/The Last Kingdom/The Last Kingdom S05 br 10bit dtw hevc-d3g/The.Last.Kingdom.S05E02.Episode.2.1080p.BluRay.10Bit.Dts-HDMa5.1.H265-d3g.mkv",
+      "The_Last_Kingdom_S05E02_Episode_2_HDMa5_1"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/The Magicians/The.Magicians.US.S05E12.1080p.WEB.H264-iNSiDiOUS/the.magicians.us.s05e12.1080p.web.h264-insidious.mkv",
+      "the_magicians_us_s05e12"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/The Pacific/The Pacific 2010 Part 2 BR 1080p Dts-HD Ma5.1 H265-d3g.mkv",
+      "The_Pacific_2010_Part_2_Ma5_1"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/The Simpsons/The Simpsons Season 07 - Complete/The Simpsons [7x12] Team Homer [r.avi",
+      "The_Simpsons_7x12_Team_Homer_r"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/The Simpsons/The Simpsons Season 07 - Complete/The Simpsons [7x24] Homerpalooza.avi",
+      "The_Simpsons_7x24_Homerpalooza"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/The Simpsons/The.Simpsons.S06E16.1080p.HEVC.x265-MeGusta/The.Simpsons.S06E16.1080p.HEVC.x265-MeGusta.mkv",
+      "The_Simpsons_S06E16"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/The Simpsons/The.Simpsons.S10E08.1080p.HEVC.x265-MeGusta/The.Simpsons.S10E08.1080p.HEVC.x265-MeGusta.mkv",
+      "The_Simpsons_S10E08"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/The Simpsons/The.Simpsons.S10E23.1080p.HEVC.x265-MeGusta/The.Simpsons.S10E23.1080p.HEVC.x265-MeGusta.mkv",
+      "The_Simpsons_S10E23"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/The Simpsons/The.Simpsons.S15E06.iNTERNAL.MULTi.1080p.WEB.H264-CiELOS/the.simpsons.s15e06.internal.multi.1080p.web.h264-cielos.mkv",
+      "the_simpsons_s15e06"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Umbrella Academy/The.Umbrella.Academy.S02E01.Right.Back.Where.We.Started.1080p.NF.WEB-DL.DDP5.1.x264-NTG.mkv",
+      "The_Umbrella_Academy_S02E01_Right_Back_Where_We_Started"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Umbrella Academy/The.Umbrella.Academy.S03E07.1080p.WEBRip.DDP5.1.H265-d3g.mkv",
+      "The_Umbrella_Academy_S03E07"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Umbrella Academy/The.Umbrella.Academy.S04E02.1080p.WEB.h264-ETHEL/The.Umbrella.Academy.S04E02.1080p.WEB.h264-ETHEL.mkv",
+      "The_Umbrella_Academy_S04E02"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Vikings Valhalla/Vikings Valhalla S01 Web 10bit hevc-d3g/Vikings.Valhalla.S01E04.The.Bridge.1080p.WEBRip.10Bit.DDP5.1.Atmos.H265-d3g.mkv",
+      "Vikings_Valhalla_S01E04_The_Bridge"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Watchmen/Watchmen S01 br 10bit ddp hevc-d3g/Watchmen.S01E03.She.Was.Killed.by.Space.Junk.1080p.BluRay.10Bit.DDP5.1.H265-d3g.mkv",
+      "Watchmen_S01E03_She_Was_Killed_by_Space_Junk"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Watchmen/Watchmen S01 br 10bit ddp hevc-d3g/Watchmen.S01E05.Little.Fear.of.Lightning.1080p.BluRay.10Bit.DDP5.1.H265-d3g.mkv",
+      "Watchmen_S01E05_Little_Fear_of_Lightning"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Westworld/Westworld.S03E08.Crisis.Theory.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb/Westworld.S03E08.Crisis.Theory.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb.mkv",
+      "Westworld_S03E08_Crisis_Theory"
+    ],
+    [
+      "/mnt/movingparts/torrent/TV/Yellowjackets/Yellowjackets.S01E05.Blood.Hive.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb.mkv",
+      "Yellowjackets_S01E05_Blood_Hive"
+    ],
+    [
+      "/mnt/movingparts/torrent/incomplete/Alien_ Earth S01 1080p DSNP WEB-DL DD  5 1 H 264-FLUX/Alien.Earth.S01E02.Mr.October.REPACK.1080p.DSNP.WEB-DL.DDP5.1.H.264-FLUX.mkv",
+      "Alien_Earth_S01E02_Mr_October_DSNP"
+    ],
+    [
+      "/mnt/movingparts/torrent/incomplete/Star.Wars.Andor.S01.1080p.DSNP.WEB-DL.DDP5.1.H.264-NTb/Star.Wars.Andor.S01E01.Kassa.1080p.DSNP.WEB-DL.DDP5.1.H.264-NTb.mkv",
+      "Star_Wars_Andor_S01E01_Kassa_DSNP"
+    ],
+    [
+      "/mnt/movingparts/torrent/incomplete/Star.Wars.Andor.S01.1080p.DSNP.WEB-DL.DDP5.1.H.264-NTb/Star.Wars.Andor.S01E03.Reckoning.1080p.DSNP.WEB-DL.DDP5.1.H.264-NTb.mkv",
+      "Star_Wars_Andor_S01E03_Reckoning_DSNP"
+    ],
+    [
+      "/mnt/movingparts/torrent/incomplete/Star.Wars.Andor.S01.1080p.DSNP.WEB-DL.DDP5.1.H.264-NTb/Star.Wars.Andor.S01E04.Aldhani.1080p.DSNP.WEB-DL.DDP5.1.H.264-NTb.mkv",
+      "Star_Wars_Andor_S01E04_Aldhani_DSNP"
+    ],
+    [
+      "/mnt/movingparts/torrent/incomplete/Star.Wars.Andor.S01.1080p.DSNP.WEB-DL.DDP5.1.H.264-NTb/Star.Wars.Andor.S01E05.The.Axe.Forgets.1080p.DSNP.WEB-DL.DDP5.1.H.264-NTb.mkv",
+      "Star_Wars_Andor_S01E05_The_Axe_Forgets_DSNP"
+    ],
+    [
+      "/mnt/movingparts/torrent/incomplete/Star.Wars.Andor.S01.1080p.DSNP.WEB-DL.DDP5.1.H.264-NTb/Star.Wars.Andor.S01E07.Announcement.1080p.DSNP.WEB-DL.DDP5.1.H.264-NTb.mkv",
+      "Star_Wars_Andor_S01E07_Announcement_DSNP"
+    ],
+    [
+      "/mnt/movingparts/torrent/Documentaries/Yellowstone/Yellowstone.S01.1080p.BluRay.x264-YELLOWBiRD [NO RAR]/a",
+      "a"
+    ]
+  ]
+}
