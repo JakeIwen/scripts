@@ -4,8 +4,11 @@ from .model import DisplayInfo, MIRROR_NAME
 
 def online_displays() -> list[DisplayInfo]:
     import Quartz
-    from AppKit import NSScreen
+    from AppKit import NSApplication, NSApplicationActivationPolicyProhibited, NSScreen
 
+    # Homebrew's framework Python runs inside Python.app, so touching AppKit
+    # registers the agent as a regular app with a Dock icon and no windows.
+    NSApplication.sharedApplication().setActivationPolicy_(NSApplicationActivationPolicyProhibited)
     error, display_ids, _count = Quartz.CGGetOnlineDisplayList(16, None, None)
     if error != 0:
         raise RuntimeError(f"CGGetOnlineDisplayList failed with error {error}")
