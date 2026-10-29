@@ -81,8 +81,13 @@ historical catalog state; do not replay an old repair against new observations.
 
 Playback uses the existing Pi GUI and MPRIS session bus. VLC is launched as a
 transient user service, so restarting the web manager does not stop a video in
-progress. A launch wakes the display, selects English audio and the preferred
-non-forced English subtitle track, and uses `v4l2-request` hardware decoding.
+progress. A launch wakes the display (`wlopm`, with `xset` as the X11 fallback; a failed
+wake never blocks playback), selects English audio and the preferred non-forced
+English subtitle track, and renders through Wayland (`QT_QPA_PLATFORM=wayland`,
+so VLC picks the `wl_dmabuf` output) with `--avcodec-hw=any` hardware decoding.
+That picks this VLC build's `drm_avcodec` (rpivid HEVC, 10-bit included); a
+module name VLC doesn't know silently falls back to software decoding, which
+cannot keep up with 1080p 10-bit HEVC on the Pi 4.
 VLC output is pinned at 100%; listening level is controlled only on the physical
 rear Sonos stereo zone. The resolver requires both known rear speakers and
 exactly one visible stereo master, so it cannot accidentally change the

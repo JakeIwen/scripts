@@ -215,6 +215,7 @@ class VideoPackageBootTests(unittest.TestCase):
             "VAN_VIDEO_VLC": str(target / "vlc"),
             "VAN_VIDEO_SYSTEMD_RUN": str(target / "systemd-run"),
             "VAN_VIDEO_SYSTEMCTL": str(target / "systemctl"),
+            "VAN_VIDEO_WLOPM": str(target / "wlopm"),
             "VAN_VIDEO_XSET": str(target / "xset"),
             "VAN_VIDEO_SONOS_SETUP": str(target / "sns.sh"),
             "VAN_VIDEO_MKVMERGE": str(target / "mkvmerge"),

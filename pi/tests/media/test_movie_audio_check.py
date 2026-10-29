@@ -8,7 +8,7 @@ from unittest import mock
 
 from pi.apps.video_library import routes
 from pi.apps.video_library.config import (
-    DBUS_PROPERTIES, MPRIS_PLAYER, MPRIS_ROOT, SNS, SYSTEMD_RUN, XSET,
+    DBUS_PROPERTIES, MPRIS_PLAYER, MPRIS_ROOT, SNS, SYSTEMD_RUN, WLOPM,
     SONOS_CHECK_DELAY, SONOS_CHECK_TIMEOUT,
 )
 from pi.apps.video_library.players.sonos_check import RearMovieCheck
@@ -124,7 +124,7 @@ class MovieAudioCheckTests(unittest.TestCase):
             self.mpris.available = True
             self.mpris.state = 'Playing'
             self.mpris.path = argv[-1]
-        elif argv[0] == XSET:
+        elif argv[0] == WLOPM:
             self.events.append('wake')
         return SimpleNamespace(returncode=0, stdout='', stderr='')
 

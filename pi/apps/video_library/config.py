@@ -58,6 +58,9 @@ if not math.isfinite(SONOS_CHECK_TIMEOUT) or SONOS_CHECK_TIMEOUT <= 0:
     raise ValueError("VAN_VIDEO_ROOM_PREPARE_TIMEOUT must be positive")
 
 DISPLAY = os.environ.get("VAN_VIDEO_DISPLAY", ":0")
+# The labwc session renders VLC natively; DISPLAY stays for the Xwayland fallback.
+WAYLAND_DISPLAY = os.environ.get("VAN_VIDEO_WAYLAND_DISPLAY", "wayland-0")
+QT_QPA_PLATFORM = os.environ.get("VAN_VIDEO_QT_QPA_PLATFORM", "wayland")
 RUNTIME_DIR = os.environ.get("VAN_VIDEO_XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
 SESSION_BUS = os.environ.get(
     "VAN_VIDEO_SESSION_BUS", f"unix:path={RUNTIME_DIR}/bus"
@@ -67,6 +70,7 @@ PLAYER_UNIT = os.environ.get("VAN_VIDEO_PLAYER_UNIT", "van-video-player.service"
 VLC = os.environ.get("VAN_VIDEO_VLC", "/usr/bin/vlc")
 SYSTEMD_RUN = os.environ.get("VAN_VIDEO_SYSTEMD_RUN", "/usr/bin/systemd-run")
 SYSTEMCTL = os.environ.get("VAN_VIDEO_SYSTEMCTL", "/usr/bin/systemctl")
+WLOPM = os.environ.get("VAN_VIDEO_WLOPM", "/usr/bin/wlopm")
 XSET = os.environ.get("VAN_VIDEO_XSET", "/usr/bin/xset")
 SNS = os.environ.get("VAN_VIDEO_SONOS_SETUP", "/home/pi/sns.sh")
 MKVMERGE = os.environ.get("VAN_VIDEO_MKVMERGE", "/usr/bin/mkvmerge")

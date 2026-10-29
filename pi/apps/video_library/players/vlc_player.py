@@ -23,12 +23,15 @@ from ..config import (
     MPRIS_ROOT,
     PKILL,
     PLAYER_UNIT,
+    QT_QPA_PLATFORM,
     RUNTIME_DIR,
     SESSION_BUS,
     SYSTEMCTL,
     SYSTEMD_RUN,
     VLC,
     VLC_FIXED_VOLUME,
+    WAYLAND_DISPLAY,
+    WLOPM,
     XSET,
 )
 
@@ -231,7 +234,22 @@ class VlcController:
         self._command([SYSTEMCTL, "--user", "reset-failed", PLAYER_UNIT], timeout=5)
 
     def _wake_display(self) -> None:
-        self._command([XSET, "-display", DISPLAY, "dpms", "force", "on"], timeout=5)
+        # labwc ignores xset (it reaches only Xwayland); xset still covers an X11 session.
+        # A display that stays asleep must never block playback.
+        wayland = dict(os.environ, WAYLAND_DISPLAY=WAYLAND_DISPLAY, XDG_RUNTIME_DIR=RUNTIME_DIR)
+        attempts = (
+            ([WLOPM, "--on", "*"], wayland),
+            ([XSET, "-display", DISPLAY, "dpms", "force", "on"], None),
+        )
+        for args, env in attempts:
+            try:
+                result = self.run(
+                    args, capture_output=True, text=True, timeout=5, check=False, env=env,
+                )
+            except (OSError, subprocess.SubprocessError):
+                continue
+            if not result.returncode:
+                return
 
     def _subtitle_index(self, path: str) -> int | None:
         media_path = os.path.realpath(path)
@@ -281,7 +299,9 @@ class VlcController:
                 "--control=dbus",
                 "--audio-language=eng,en",
                 "--sub-language=eng,en",
-                "--avcodec-hw=v4l2-request",
+                # "any" rather than a module name: an unmatched name silently
+                # software-decodes (this build's module is drm_avcodec).
+                "--avcodec-hw=any",
                 "--no-video-title-show",
                 f"--volume={round(VLC_FIXED_VOLUME * 256)}",
                 "--no-volume-save",
@@ -302,6 +322,8 @@ class VlcController:
                 "--quiet",
                 "--service-type=exec",
                 f"--setenv=DISPLAY={DISPLAY}",
+                f"--setenv=WAYLAND_DISPLAY={WAYLAND_DISPLAY}",
+                f"--setenv=QT_QPA_PLATFORM={QT_QPA_PLATFORM}",
                 f"--setenv=XDG_RUNTIME_DIR={RUNTIME_DIR}",
                 f"--setenv=DBUS_SESSION_BUS_ADDRESS={SESSION_BUS}",
                 *command,
