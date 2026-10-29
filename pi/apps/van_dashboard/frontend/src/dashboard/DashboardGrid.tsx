@@ -34,10 +34,17 @@ export function DashboardGrid({ tiles, editing }: DashboardGridProps) {
             data-tile-id={tileId}
             draggable={editing}
             key={tileId}
-            onDragStart={() => setDragging(tileId)}
+            onDragStart={(event) => {
+              // Firefox never starts an HTML5 drag whose dataTransfer is empty.
+              event.dataTransfer.setData('text/plain', tileId);
+              event.dataTransfer.effectAllowed = 'move';
+              setDragging(tileId);
+            }}
             onDragEnd={() => setDragging(null)}
             onDragOver={(event) => {
-              if (editing) event.preventDefault();
+              if (!editing) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = 'move';
             }}
             onDrop={(event) => {
               event.preventDefault();
