@@ -5,17 +5,16 @@ PATH="/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:/root/bin"
 
 0 0 * * *      su pi -c "$scripts/prune_logs.sh $cronlog 1000" >> "$cronlog/prune_cronlogs.log" 2>&1
 0 0 * * *      su pi -c "$scripts/prune_logs.sh $log 1000" >> "$cronlog/prune_logs.log" 2>&1
-0 * * * *  "$scripts/backup/backup_window.sh" --scheduled >> "$cronlog/pi_backup.log" 2>&1
-10 * * * * "$scripts/backup/openwrt_backup.sh" --scheduled >> "$cronlog/openwrt_backup.log" 2>&1
+0 * * * *  "$scripts/backup/backup_window.sh" --scheduled  >> "$cronlog/pi_backup.log" 2>&1
 0 10 * * *  "$scripts/backup/backup_watchdog.sh"  >> "$cronlog/backup_watchdog.log" 2>&1
 @reboot     sleep 90 && "$scripts/backup/backup_watchdog.sh"  >> "$cronlog/backup_watchdog.log" 2>&1
 30 1 * * 0  "$scripts/rootfs_tidy.sh" --apply  >> "$cronlog/rootfs_tidy.log" 2>&1
-45 1 * * 0  su pi -c "/home/pi/van_compute/scripts/van_compute.py prune --apply" >> "$cronlog/van_compute_prune.log" 2>&1
 * * * * *      su pi -c "$scripts/log_position.sh"  >> "$cronlog/log_position.sh.log" 2>&1
 */5 * * * *    su pi -c "$scripts/vlc_recent_files_update.sh"  >> "$cronlog/vlc_recent_files_update.log" 2>&1
 */5 * * * *    su pi -c "$scripts/keepalive.sh"  >> "$cronlog/keepalive.log" 2>&1
 # 30 9 * * *   su pi -c "$scripts/reboot.sh" >> "$cronlog/reboot.log" 2>&1
 # * * * * *    su pi -c "/home/pi/sns.sh standby_grouped" >> "$cronlog/sonos_standby_grouped.log" 2>&1
+# * * * * *    su pi -c "$scripts/log_zrate.sh"  >> "$cronlog/log_zrate.log" 2>&1
 0 * * * *     su pi -c "$scripts/streetlight.sh"  >> "$cronlog/streetlight.log" 2>&1
 
 
@@ -24,3 +23,5 @@ PATH="/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:/root/bin"
 # crontab self-backup (added 2026-07-08): guarded so a wiped crontab can never truncate a good backup
 15 0 * * *     mkdir -p /home/pi/backups && su pi -c "crontab -l" > /home/pi/backups/crontab.pi.new 2>/dev/null && mv /home/pi/backups/crontab.pi.new /home/pi/backups/crontab.pi && chown pi:pi /home/pi/backups/crontab.pi
 20 0 * * *     mkdir -p /home/pi/backups && crontab -l > /home/pi/backups/crontab.root.new 2>/dev/null && mv /home/pi/backups/crontab.root.new /home/pi/backups/crontab.root
+10 * * * * "$scripts/backup/openwrt_backup.sh" --scheduled >> "$cronlog/openwrt_backup.log" 2>&1
+45 1 * * 0  su pi -c "/home/pi/van_compute/scripts/van_compute.py prune --apply" >> "$cronlog/van_compute_prune.log" 2>&1

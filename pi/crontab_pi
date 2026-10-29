@@ -19,3 +19,7 @@ BASH_ENV=/home/pi/secrets/.bash_variables
 # BEGIN managed llm-restore
 * * * * * /bin/mkdir -p -m 700 /home/pi/.local/state/llm-restore && /usr/bin/python3 -I -B /home/pi/scripts/llm_restore.py --snapshot --scheduled >> /home/pi/.local/state/llm-restore/cron.log 2>&1
 # END managed llm-restore
+
+# BEGIN managed iptorrents-watch
+17 */6 * * * PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/pi/scripts/python-packages/current /usr/bin/python3 -P -m pi.apps.iptorrents_watch check >> /home/pi/log/iptorrents_watch.log 2>&1
+# END managed iptorrents-watch
