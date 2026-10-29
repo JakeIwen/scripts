@@ -55,6 +55,15 @@ scheduled wake-up from before the mod loaded counts as one of your prompts.
 
 The pane text is also mouse-selectable like any other terminal text.
 
+## Install
+
+Claude Code loads the mod from the folder named in `settings.json`
+`env.CLAUDE_CODE_PLUGIN_DIRS`: this checkout on the Mac. The Pi has no
+checkout, so `zsh deploy_pi.zsh` copies the tracked files there
+(`~/.local/share/claude-mods/clean-output/`) and runs the tests on the Pi's
+Claude Code; re-run it after any change. Open sessions pick up a new copy
+with `/reload-plugins`.
+
 ## Adding filters
 
 `hooks/clean.ts` runs each reply's parts through `FILTERS` in order. Each
