@@ -269,9 +269,10 @@ corefreq() { command cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq; 
 gpu_mem() { command vcgencmd get_mem gpu "$@"; }
 gpu_mem_fix() { command vcgencmd cache_flush && command sudo vcdbg reloc "$@"; }
 gpu_stat() { command sudo vcdbg reloc "$@"; }
-wake_display() { command xset dpms force on "$@"; }
-slp() { command xset s activate "$@"; }
-keepon() { while psgrep vlc && sleep 300; do xset dpms force on; done; }
+_wl_out() { WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-0} XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)} command wlopm "$1" '*' 2>/dev/null; }
+wake_display() { _wl_out --on || command xset dpms force on "$@"; }  # labwc: wlopm; X11 fallback
+slp() { _wl_out --off || command xset s activate "$@"; }
+keepon() { while psgrep vlc && sleep 300; do wake_display; done; }
 sysvol() { sudo amixer cset numid=1 ${1:-"90"}%; }
 svc() { sudo systemctl $2 $1.service; } # svc home-assistant start
 set_date() { sudo date -s "$(wget -qSO- --max-redirect=0 google.com 2>&1 | command grep --color=auto Date: | cut -d' ' -f5-8)Z"; }
