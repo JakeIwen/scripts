@@ -1,4 +1,5 @@
 """Persisted proposals and validated reviewer decisions."""
+import os
 from copy import deepcopy
 from . import config, records
 from . import classify, runs
@@ -55,8 +56,12 @@ def create_plan(settings, entries=None, existing_shows=None, client=None):
             proposal = proposals.get(entry.name) if not entry.skip_reason else None
             decision = records.Decision(proposal.category, proposal.show, True) if proposal else None
             target = target_path_for(decision, entry) if decision else None
+            # A destination that already exists (a duplicate download) fails
+            # closed at apply time; retrying it from every completion hook
+            # would only pile up failed runs, so it waits for a person.
+            conflict = bool(target) and os.path.lexists(target)
             plan.rows.append(records.PlanRow(entry, proposal, decision, target,
-                                             auto_eligible(proposal, settings)))
+                                             auto_eligible(proposal, settings) and not conflict))
         for previous in list_plans():
             if previous.status == records.PLAN_PROPOSED:
                 previous.status = records.PLAN_DISCARDED

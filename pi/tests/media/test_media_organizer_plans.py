@@ -46,3 +46,16 @@ class PlanTests(Fixture, unittest.TestCase):
                 plans.decide(plan, {name: {'category': 'Movies', 'show': None, 'accepted': True}})
         with self.assertRaises(ValueError):
             plans.load('../settings')
+
+
+class ConflictTests(Fixture, unittest.TestCase):
+    def test_existing_destination_is_never_auto_eligible(self):
+        from pi.apps.media_organizer import records
+        self.show()
+        self.payload('The.Example.S01E01')
+        (self.media / 'torrent/TV/The Example/The.Example.S01E01').mkdir(parents=True)
+        plan = plans.create_plan(records.Settings(classifier='offline'))
+        row = next(r for r in plan.rows if r.entry.name == 'The.Example.S01E01')
+        self.assertEqual(row.proposal.confidence, 0.9)
+        self.assertTrue(row.decision.accepted)
+        self.assertFalse(row.auto_eligible)
