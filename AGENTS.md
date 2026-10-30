@@ -194,6 +194,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   ids, `#off ` pauses, revision-checked writes, drift-safe install (refused while
   the live crontab has lines the file lacks) and private live backups in
   `~/.local/state/crontab-sync/`; llm-restore keeps its own switch.
+  `macbook/scripts/time_machine_exclusions.sh` (hourly cron) re-stamps Time
+  Machine's sticky exclusion on `node_modules` under `~/ais` and `~/dev` and on
+  its fixed list of reinstallable folders; add new exclusions to that list.
   `macbook/scripts/deferred.zsh` owns one-off future jobs on the Mac (queue,
   hourly/login checker LaunchAgent `com.jacobr.deferred-jobs`, purge on success,
   `NTFY_WARNING_URL` on failure, daily cron watchdog); queue jobs with its `add`
