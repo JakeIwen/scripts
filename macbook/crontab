@@ -2,7 +2,7 @@
 # macbook/tests/test_crontab.py fails when a job names a repo file that has moved.
 scripts=/Users/jacobr/dev/scripts
 
-0 * * * *  $scripts/macbook/scripts/time_machine_exclude_node_modules.sh >> $scripts/log/time_machine_exclude_node_modules.log 2>&1
+0 * * * *  $scripts/macbook/scripts/time_machine_exclusions.sh >> $scripts/log/time_machine_exclusions.log 2>&1
 0 * * * *  $scripts/macbook/bettertouchtool/btt_backup.zsh >> $scripts/log/btt_backup.log 2>&1
 0 15 * * * $scripts/macbook/bettertouchtool/btt_backup.zsh daily >> $scripts/log/btt_backup.log 2>&1
 0 15 * * 0 $scripts/macbook/bettertouchtool/btt_backup.zsh weekly >> $scripts/log/btt_backup.log 2>&1
