@@ -920,6 +920,10 @@ The production boundary is `Response.json()`; sparse JS arrays, accessors and
 Proxies are outside that wire contract. Native arrays do not preserve hole
 semantics from the old `.map()` decoders.
 
+Dashboard `frontend/src/components/TooltipButton.tsx` owns hover/focus/tap hints
+(including backup setting help), with viewport-clamped portals outside clipped
+tiles. Action buttons keep their normal click action.
+
 ## Backup and disk tooling
 
 The active design is represented by:

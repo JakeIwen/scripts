@@ -187,24 +187,6 @@
   font-size: 0.75rem;
   cursor: help;
 }
-.backup-setting-tooltip {
-  position: fixed;
-  width: min(270px, calc(100vw - 24px));
-  box-sizing: border-box;
-  padding: 12px 14px;
-  z-index: 20;
-  border: 1px solid #4c6875;
-  border-radius: 10px;
-  background: #0f1a22;
-  color: #e9f0f3;
-  box-shadow: 0 6px 26px #0007;
-  font-size: 0.85rem;
-  font-weight: 400;
-  line-height: 1.45;
-  text-transform: none;
-  letter-spacing: normal;
-  pointer-events: none;
-}
 .backup-settings-chip {
   display: inline-flex;
   padding: 4px 8px;
