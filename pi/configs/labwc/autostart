@@ -1,0 +1,1 @@
+swayidle -w timeout 600 '/home/pi/.config/labwc/blank-when-idle.sh off' resume '/home/pi/.config/labwc/blank-when-idle.sh on' &

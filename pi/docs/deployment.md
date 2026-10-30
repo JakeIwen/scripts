@@ -160,6 +160,21 @@ safe escape hatch. Use saved-unit rollback instead. Video database rollback and
 v1 migration recovery are separate from package rollback; neither this cutover
 nor its rollback restores, replaces or deletes a media database.
 
+## labwc idle blanking
+
+`pi/configs/labwc/autostart` and `pi/configs/labwc/blank-when-idle.sh` are the
+source copies for `/home/pi/.config/labwc/`. Like the other user home files,
+`pi/sync_scripts.sh` copies them rather than symlinking a Pi checkout. Its
+non-Python phase creates the directory and uses `scp -p` to preserve modes
+(`autostart` 0644, the hook 0755); it leaves `rc.xml` and other desktop settings
+alone. The labwc copy step does not restart labwc or swayidle or operate the
+display. Broad sync still performs its other documented deployments.
+
+The autostart runs swayidle with a 600-second timeout. VLC and Van TV's mpv
+use Xwayland without a Wayland idle inhibitor, so the hook watches their
+processes before blanking through wlopm. castit's receiver relies on the
+`pgrep -x mpv` check holding the screen on while its player exists; retain it.
+
 ## Orchestrator cutover checklist
 
 Run these commands **after merge**, from the primary Mac checkout. No commands in

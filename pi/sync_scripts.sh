@@ -76,6 +76,12 @@ sync_preflight() {
   done <<< "$package_units"
 }
 
+sync_labwc() {
+  ssh $mux "$pi_ip" 'mkdir -p /home/pi/.config/labwc' || return 1
+  scp $mux -p "$configs/labwc/autostart" "$configs/labwc/blank-when-idle.sh" \
+    "$pi_ip:/home/pi/.config/labwc/"
+}
+
 sync_non_python() {
   local_stage="$(mktemp -d "/tmp/vanpi-sync.XXXXXX")" || return 1
   staged_scripts="$local_stage/scripts"
@@ -121,6 +127,7 @@ sync_non_python() {
   # limit (~10 concurrent handshakes) can't randomly drop any of them
   mux="-o ControlMaster=auto -o ControlPath=$local_stage/ssh-%C -o ControlPersist=120"
   ssh $mux $pi_ip true || { echo "can't reach $pi_ip"; return 1; }
+  sync_labwc || return 1
 
   cp_services() {
     local remote_stage="/tmp/systemd-tmp.$$"

@@ -29,6 +29,7 @@ compare it with this checkout. Deployed files may differ from the repository.
 | `macbook/scripts/amphetamine_control.py` | Mac Panel Amphetamine tab and Terminal | `macbook/scripts/amphetamine/` |
 | `macbook/scripts/deferred.zsh` | `com.jacobr.deferred-jobs` LaunchAgent and Mac Panel | the script and `shared/automations/` declaration |
 | `macbook/scripts/llm_photo_inbox.py` | iPhone Shortcuts Run Script over SSH (raw photo on stdin) | standalone stdlib Python 3.9+; macOS `sips`, `ps`, `pgrep`, `osascript` and running iTerm2 |
+| `pi/configs/labwc/` | labwc/swayidle at `/home/pi/.config/labwc/`; castit's mpv lifetime contract | copied by `pi/sync_scripts.sh` |
 | `pi.apps.van_dashboard` | `van-dashboard.service` and `pi/deploy_python.py` | `pi/apps/van_dashboard/` |
 | `pi.apps.video_library` | `video-library.service` and `pi/deploy_python.py` | `pi/apps/video_library/` |
 | `pi.apps.audiobooks` | `audiobooks.service` and `pi/deploy_python.py` | `pi/apps/audiobooks/` |
@@ -73,6 +74,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   `pi/.bashrc`'s `vantv_*` functions route the BTT media buttons' ssh commands
   (`vlcmd`, `pp`, `play_status`, `kill_media`) to Van TV while a cast is loaded,
   and `pi/crontab_pi` runs the installed controller's weekly `update-ytdlp`.
+- `pi/configs/labwc/`: labwc's idle-blanking autostart and hook, copied to
+  `/home/pi/.config/labwc/` by `pi/sync_scripts.sh`. The hook keeps the screen
+  on while VLC or mpv exists; castit's receiver relies on the `pgrep -x mpv`
+  check. See `pi/docs/deployment.md#labwc-idle-blanking`.
 - `pi/apps/media_organizer/`: the Movies & TV organizer (package release, Python
   3.11, stdlib). `records.py` is the wire contract (the dashboard's
   `features/mediaOrganizer/schema.ts` mirrors it), `config.py` the paths.
