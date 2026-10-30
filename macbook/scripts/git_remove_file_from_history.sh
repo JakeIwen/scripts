@@ -1,3 +1,4 @@
+#!/bin/bash
 # usage:
 # run from repo root
 #  ./path_to_this_file/git_remove_file_from_history.sh ./file_to_purge.txt
