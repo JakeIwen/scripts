@@ -24,7 +24,7 @@ Backups (see [`backup_conf.sh`](../../scripts/backup/backup_conf.sh)):
   `/mnt/hdd1tb/backups/EXFAT512_YYYY-MM-DD_HH-MM/`. Unchanged files are hard-linked
   to the previous completed snapshot, while deleted or changed source files remain
   in retained older snapshots. Retention keeps daily snapshots for 30 days, one per
-  week through 84 days, and one per month through 365 days.
+  week through 84 days, and one per month through 365 days. The `van-tv/` directory is intentionally excluded from these snapshots.
 
 OpenWrt's persistent remote log is `/var/log/openwrt/dendelion.log`; restore its
 receiver with `sudo /home/pi/scripts/setup_openwrt_logging.sh`. See

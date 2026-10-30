@@ -93,6 +93,7 @@ for required in "$ps_command" "$sleep_command"; do
 done
 
 snapshot_suffix_re='[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}'
+snapshot_excludes=(--exclude='/van-tv/')
 partial_name=".${EXFAT_SNAPSHOT_PREFIX%_}.partial"
 complete_marker=.vanpi_snapshot_complete
 child=
@@ -593,6 +594,7 @@ main() {
 
   log "creating hard-link snapshot $final_name${previous_name:+ from $previous_name}"
   rsync_args=(
+    "${snapshot_excludes[@]}"
     -rt
     --delete-delay
     --stats

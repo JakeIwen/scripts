@@ -106,6 +106,37 @@ printf 'changed audiobook\n' > "$source_mnt/book.m4b"
 [[ $(stat -c %i "$test_root/changed/book.m4b") != "$previous_inode" ]] ||
   fail "changed file reused the earlier snapshot inode"
 
+# The real entry point uses the isolated mount fixture and actual rsync binary.
+mkdir -p "$source_mnt/van-tv/.cache" "$source_mnt/keep"
+printf 'video buffer\n' > "$source_mnt/van-tv/.cache/segment"
+printf 'retain this\n' > "$source_mnt/keep/file.txt"
+resolve_label() {
+  case "$1" in
+    EXFAT512) printf '%s\n' "$source_mnt" ;;
+    hdd1tb) printf '%s\n' "$target_mnt" ;;
+    *) return 1 ;;
+  esac
+}
+verify_exact_mount() { return 0; }
+ensure_backup_mount() { backup_disk_active=1; return 0; }
+snapshot_parent_device() { printf '%s\n' /dev/fakeblock; }
+log_snapshot_smart() { :; }
+stop_backup_disk() { backup_disk_active=0; return 0; }
+findmnt_command="$test_root/findmnt"
+cat > "$findmnt_command" <<EOF
+#!/bin/bash
+printf '%s\\n' '$source_mnt'
+EOF
+chmod +x "$findmnt_command"
+main || fail "snapshot main entry point failed"
+mapfile -t main_snapshots < <(list_completed_snapshots)
+[[ ${#main_snapshots[@]} == 1 ]] || fail "snapshot main did not publish one completed tree"
+main_snapshot="$snapshot_root/${main_snapshots[0]}"
+[[ ! -e "$main_snapshot/van-tv" ]] ||
+  fail "snapshot copied the excluded Van TV tree"
+[[ -f "$main_snapshot/keep/file.txt" ]] ||
+  fail "snapshot exclusion dropped unrelated source content"
+
 make_snapshot() {
   local age_days=$1 offset_minutes=$2 epoch name path
   epoch=$((EXFAT_SNAPSHOT_NOW - age_days * 86400 - offset_minutes * 60))
@@ -169,4 +200,4 @@ TEST_WINDOW_CALLS="$window_calls" "$window_root/backup_window.sh" >/dev/null 2>&
 [[ $(sort "$window_calls") == $'exfat:\npi:' ]] || fail "ordinary window changed child arguments"
 [[ -f "$window_calls.concurrent" ]] || fail "ordinary window jobs did not overlap"
 
-echo "PASS: EXFAT hard-link snapshot retention and backup-window isolation"
+echo "PASS: EXFAT van-tv exclusion, hard-link snapshot retention and backup-window isolation"
