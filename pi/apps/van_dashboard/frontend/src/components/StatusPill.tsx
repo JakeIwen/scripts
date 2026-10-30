@@ -6,7 +6,7 @@ interface StatusPillProps {
   dot?: boolean;
 }
 
-export function StatusPill({ children, tone = 'neutral', dot = true }: StatusPillProps) {
+export function StatusPill({ children, tone = 'neutral', dot = false }: StatusPillProps) {
   return (
     <span className={`status-pill status-pill--${tone}`}>
       {dot && <span className="status-pill__dot" aria-hidden="true" />}

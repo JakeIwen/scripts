@@ -39,7 +39,7 @@
   grid-template-columns: 24px minmax(0, 1fr);
   min-height: 24px;
   gap: 7px;
-  padding-right: 88px;
+  padding-right: var(--tile-status-space);
 }
 
 .ubnt-tile .tile__icon {
@@ -169,15 +169,6 @@
   white-space: nowrap;
 }
 
-.starlink-tile-control__dot {
-  width: 8px;
-  height: 8px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: #71818a;
-  box-shadow: 0 0 0 4px #71818a18;
-}
-
 .starlink-tile-control__detail {
   min-width: 0;
   grid-column: 1;
@@ -202,11 +193,6 @@
   color: #bcebd5;
 }
 
-.starlink-tile-control--on .starlink-tile-control__dot {
-  background: #62c899;
-  box-shadow: 0 0 0 4px #62c89918;
-}
-
 .starlink-tile-control--off,
 .starlink-tile-control--off .starlink-tile-control__state {
   border-color: #754743;
@@ -218,11 +204,6 @@
 
 .starlink-tile-control--off .starlink-tile-control__state {
   color: #f2b5b0;
-}
-
-.starlink-tile-control--off .starlink-tile-control__dot {
-  background: #ef7067;
-  box-shadow: 0 0 0 4px #ef706718;
 }
 
 .starlink-tile-control:disabled {
@@ -544,7 +525,7 @@
   .ubnt-tile .tile__header {
     grid-template-columns: 24px minmax(0, 1fr);
     min-height: 24px;
-    padding-right: 88px;
+    padding-right: var(--tile-status-space);
   }
 
   .ubnt-tile .tile__icon {

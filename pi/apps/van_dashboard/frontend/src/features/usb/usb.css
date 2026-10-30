@@ -27,7 +27,9 @@
 }
 
 .usb-tile__pill {
-  position: absolute;
+  position: var(--tile-status-position);
+  grid-column: var(--tile-status-column);
+  justify-self: start;
   top: 14px;
   right: 14px;
   padding: 4px 8px;
@@ -52,11 +54,12 @@
 }
 
 .usb-tile__heading {
-  display: flex;
+  display: grid;
+  grid-template-columns: 31px minmax(0, 1fr);
   width: 100%;
   align-items: center;
   gap: 10px;
-  padding-right: 88px;
+  padding-right: var(--tile-status-space);
 }
 
 .usb-tile__icon {

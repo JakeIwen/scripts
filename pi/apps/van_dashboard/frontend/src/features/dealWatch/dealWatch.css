@@ -24,7 +24,7 @@
   grid-template-columns: 34px minmax(0, 1fr);
   min-height: 34px;
   gap: 10px;
-  padding-right: 88px;
+  padding-right: var(--tile-status-space);
 }
 
 .deal-watch-tile .tile__icon {
@@ -611,7 +611,7 @@
   .deal-watch-tile .tile__header {
     grid-template-columns: 34px minmax(0, 1fr);
     min-height: 34px;
-    padding-right: 88px;
+    padding-right: var(--tile-status-space);
   }
 
   .deal-watch-tile .tile__icon {

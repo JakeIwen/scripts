@@ -131,6 +131,8 @@
 }
 
 .mwan-list {
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: flex-start;
   flex-direction: column;
@@ -144,6 +146,34 @@
   color: var(--dim);
   font-size: 9px;
   white-space: nowrap;
+  background: transparent;
+  cursor: help;
+}
+
+@container (max-width: 300px) {
+  .connectivity-head {
+    flex-wrap: wrap;
+  }
+
+  .mwan-overview {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    padding-bottom: 12px;
+  }
+
+  .mwan-list {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .wan-throughput {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+
+  .wan-throughput > span:last-child {
+    white-space: normal;
+  }
 }
 
 .mwan-chip.online {

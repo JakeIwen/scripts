@@ -94,12 +94,6 @@
   white-space: nowrap;
 }
 
-.lighting-quick-room__power strong {
-  color: var(--dim);
-  font-size: 7px;
-  letter-spacing: 0.05em;
-}
-
 .lighting-quick-room__dot {
   width: 8px;
   height: 8px;

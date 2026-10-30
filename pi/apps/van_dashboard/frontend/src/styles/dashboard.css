@@ -114,6 +114,7 @@
   position: relative;
   display: flex;
   min-width: 0;
+  container-type: inline-size;
 }
 
 .dashboard-grid__item > div:last-child,
@@ -163,6 +164,9 @@
 }
 
 .tile {
+  --tile-status-space: 88px;
+  --tile-status-position: absolute;
+  --tile-status-column: auto;
   position: relative;
   display: flex;
   width: 100%;
@@ -214,7 +218,7 @@
   align-items: center;
   gap: 10px;
   min-height: 31px;
-  padding-right: 88px;
+  padding-right: var(--tile-status-space);
 }
 
 .tile__icon {
@@ -233,9 +237,20 @@
 }
 
 .tile__status {
-  position: absolute;
+  position: var(--tile-status-position);
+  grid-column: var(--tile-status-column);
+  justify-self: start;
   top: 15px;
   right: 15px;
+}
+
+/* The legacy two-column phone layout leaves too little room for an overlaid chip. */
+@container (max-width: 260px) {
+  .tile {
+    --tile-status-space: 0px;
+    --tile-status-position: static;
+    --tile-status-column: 1 / -1;
+  }
 }
 
 .tile__summary {

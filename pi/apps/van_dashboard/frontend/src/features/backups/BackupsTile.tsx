@@ -96,7 +96,6 @@ export function BackupsTile({ resource, onOpen }: BackupsTileProps) {
       aria-label="Open backup details"
       aria-haspopup="dialog"
     >
-      <span className="backups-tile__pill">{tilePill(status)}</span>
       <span className="backups-tile__heading">
         <span className="backups-tile__icon" aria-hidden="true">
           🛟
@@ -104,6 +103,7 @@ export function BackupsTile({ resource, onOpen }: BackupsTileProps) {
         <span className="backups-tile__title" role="heading" aria-level={2}>
           Backups
         </span>
+        <span className="backups-tile__pill">{tilePill(status)}</span>
       </span>
       <span className="backups-tile__summary">
         {presentation

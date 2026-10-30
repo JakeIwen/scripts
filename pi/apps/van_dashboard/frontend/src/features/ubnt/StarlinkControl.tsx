@@ -86,7 +86,6 @@ export function StarlinkControl({ resource, variant = 'sheet' }: StarlinkControl
           <strong>Starlink</strong>
         </span>
         <span className="starlink-tile-control__state">
-          <span className="starlink-tile-control__dot" aria-hidden="true" />
           <span>{stateLabel(status, action.running)}</span>
         </span>
         <span className="starlink-tile-control__detail">{detail}</span>

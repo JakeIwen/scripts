@@ -922,7 +922,9 @@ semantics from the old `.map()` decoders.
 
 Dashboard `frontend/src/components/TooltipButton.tsx` owns hover/focus/tap hints
 (including backup setting help), with viewport-clamped portals outside clipped
-tiles. Action buttons keep their normal click action.
+tiles. Action buttons keep their normal click action. Grid items are inline-size
+containers: narrow cards move chips into the header flow through the shared
+`--tile-status-*` properties, preserving the two-column phone layout.
 
 ## Backup and disk tooling
 

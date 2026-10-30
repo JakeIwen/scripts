@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { OpenWrtSheet } from './OpenWrtSheet';
@@ -22,8 +23,10 @@ beforeAll(() => {
 });
 
 describe('OpenWrt UI', () => {
-  it('shows degraded HTTPS health and keeps the selected route visible', () => {
+  it('shows degraded HTTPS health and keeps the selected route visible', async () => {
+    const user = userEvent.setup();
     const connectivity = sampleConnectivity();
+    const onOpen = vi.fn();
     connectivity.router.interfaces[1] = {
       name: 'wan',
       state: 'degraded',
@@ -40,15 +43,22 @@ describe('OpenWrt UI', () => {
         speedtestError={null}
         speedtestStarting={false}
         onStartSpeedtest={vi.fn().mockResolvedValue(undefined)}
-        onOpen={vi.fn()}
+        onOpen={onOpen}
       />,
     );
-    expect(screen.getByText('wan · degraded')).toHaveClass('degraded');
-    expect(screen.getByText('wan · degraded')).toHaveAttribute(
-      'title',
-      expect.stringContaining('curl 28'),
-    );
-    expect(screen.getByText('clientwan')).toBeInTheDocument();
+    const chip = screen.getByRole('button', { name: 'wan status · degraded' });
+    expect(chip).toHaveClass('degraded');
+    expect(chip).toHaveTextContent(/^wan$/);
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    await user.click(chip);
+    expect(screen.getByRole('tooltip')).toHaveTextContent('wan · degraded');
+    expect(screen.getByRole('tooltip')).toHaveTextContent('curl 28');
+    expect(onOpen).not.toHaveBeenCalled();
+    fireEvent.mouseLeave(chip);
+    expect(screen.getByRole('tooltip')).toBeInTheDocument();
+    fireEvent.keyDown(chip, { key: 'Escape' });
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    expect(screen.getAllByText('clientwan').length).toBeGreaterThan(0);
     view.unmount();
   });
 

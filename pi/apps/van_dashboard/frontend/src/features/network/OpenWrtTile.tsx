@@ -1,3 +1,4 @@
+import { TooltipButton } from '../../components/TooltipButton';
 import {
   connectivityAge,
   mwanRouteLabel,
@@ -34,13 +35,14 @@ function TileMwanInterfaces({ interfaces }: { interfaces: readonly MwanInterface
   return (
     <div className="mwan-list" aria-label="MWAN3 interfaces">
       {interfaces.map((item) => (
-        <span
+        <TooltipButton
           className={`mwan-chip ${item.state}`}
           key={item.name}
-          title={item.detail ?? undefined}
+          aria-label={`${item.name} status · ${item.state}`}
+          tooltip={`${item.name} · ${item.state}${item.detail ? `\n${item.detail}` : ''}`}
         >
-          {item.name} · {item.state}
-        </span>
+          {item.name}
+        </TooltipButton>
       ))}
     </div>
   );

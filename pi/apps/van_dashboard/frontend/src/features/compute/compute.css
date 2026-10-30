@@ -31,7 +31,7 @@
   grid-template-columns: 31px minmax(0, 1fr);
   min-height: 31px;
   gap: 10px;
-  padding-right: 88px;
+  padding-right: var(--tile-status-space);
 }
 
 .compute-tile .tile__icon {
@@ -144,7 +144,7 @@
   .compute-tile .tile__header {
     grid-template-columns: 31px minmax(0, 1fr);
     min-height: 31px;
-    padding-right: 88px;
+    padding-right: var(--tile-status-space);
   }
 
   .compute-tile .tile__icon {

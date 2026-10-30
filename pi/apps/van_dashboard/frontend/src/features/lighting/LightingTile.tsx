@@ -1,5 +1,6 @@
 import { StatusPill } from '../../components/StatusPill';
 import { Tile, TileStatusAnnouncement } from '../../components/Tile';
+import { TooltipButton } from '../../components/TooltipButton';
 import { LightingSlider } from './LightingSlider';
 import {
   averageGroupBrightness,
@@ -35,20 +36,20 @@ function QuickRoomControl({
 
   return (
     <div className={`lighting-quick-room is-${group.state}`}>
-      <button
+      <TooltipButton
         type="button"
         className="lighting-quick-room__power"
         disabled={!available || controls.running}
         aria-pressed={group.state === 'mixed' ? 'mixed' : enabled}
         aria-label={`${group.label} power · ${lightingStateLabel(group.state)}`}
+        tooltip={`${group.label} · ${lightingStateLabel(group.state)}`}
         onClick={() => runControl(controls.setPower(`group:${group.id}`, !enabled))}
       >
         <span className={`lighting-quick-room__dot is-${group.state}`} aria-hidden="true" />
         <span className="lighting-quick-room__label">
           {group.id === 'kitchen' ? 'Kitch' : group.label}
         </span>
-        {group.state === 'mixed' && <strong>MIXED</strong>}
-      </button>
+      </TooltipButton>
       <LightingSlider
         label={`${group.label} brightness`}
         value={brightness}
@@ -96,16 +97,17 @@ export function LightingTile({ status, error, refreshing, onOpen, controls }: Li
       title="Lighting"
       summary={summary}
       status={
-        <button
+        <TooltipButton
           type="button"
           className={`status-pill status-pill--${lightingStateTone(status.state)} lighting-master-pill`}
           disabled={status.availableCount === 0 || controls.running}
           aria-pressed={status.state === 'mixed' ? 'mixed' : status.state === 'on'}
+          aria-label={`All lights power · ${lightingStateLabel(status.state)}`}
+          tooltip={`All lights · ${lightingStateLabel(status.state)}`}
           onClick={() => runControl(controls.setPower('all', status.state !== 'on'))}
         >
-          <span className="status-pill__dot" aria-hidden="true" />
-          {lightingStateLabel(status.state)}
-        </button>
+          All
+        </TooltipButton>
       }
       tone="neutral"
       className="lighting-tile"
