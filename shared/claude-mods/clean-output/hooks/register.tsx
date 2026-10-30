@@ -197,7 +197,12 @@ function onBand(on: On): void {
           close
         </ui.Button>
       )
-      return cleanTree(ui, await read($, pane), opts.markdown, $, close)
+      // The band has no frame: a blank row sets it off from the transcript above.
+      return (
+        <ui.Box flexDirection="column" marginTop={1}>
+          {cleanTree(ui, await read($, pane), opts.markdown, $, close)}
+        </ui.Box>
+      )
     }
     const line = windowLine(await read($, paneWindow))
     if (line === undefined) return next(e)
