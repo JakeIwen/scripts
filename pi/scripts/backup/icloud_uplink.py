@@ -122,11 +122,10 @@ def collect(command=connectivity_status.run_command, wall_clock=time.time):
     evidence['rule_names'] = sorted(rules)
     evidence['wireless_uplinks'] = uplinks
     if any(m['name'] == 'wan' and m['percent'] > 0 for m in members):
-        association = command(probe_ssh_args(
-            connectivity_status.UBNT_TARGET, connectivity_status.UBNT_IDENTITY)
-            + ['/sbin/iwconfig ath0'], timeout=8)
+        association, radio = connectivity_status.collect_ubnt_association(
+            command, probe_ssh_args(connectivity_status.UBNT_TARGET,
+                                    connectivity_status.UBNT_IDENTITY))
         association.check_returncode()
-        radio = connectivity_status.parse_ubnt_wireless(association.stdout)
         evidence['ubnt'] = {'reachable': True, **radio,
                             'starlink': connectivity_status.is_starlink_ssid(radio['ssid'])}
     return evidence

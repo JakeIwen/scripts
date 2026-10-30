@@ -357,7 +357,8 @@ def load(tool: str) -> Dict[str, Any]:
     return dict(state.values)
 
 
-def _write_overrides(path: Path, overrides: Dict[str, Any]) -> None:
+def write_private_json(path: Path, overrides: Dict[str, Any]) -> None:
+    """Atomically publish private JSON; the caller owns directory creation and locking."""
     descriptor, temporary_name = tempfile.mkstemp(prefix="." + path.name + ".", dir=str(path.parent))
     try:
         os.fchmod(descriptor, 0o600)
@@ -401,7 +402,7 @@ def save(tool: str, values: Any, expected_revision: Optional[str] = None) -> Set
         overrides = {setting.name: normalized[setting.name]
                      for setting in declaration.settings
                      if setting.name in normalized and normalized[setting.name] != defaults[setting.name]}
-        _write_overrides(path, overrides)
+        write_private_json(path, overrides)
         return _read_state(declaration, path)
 
 

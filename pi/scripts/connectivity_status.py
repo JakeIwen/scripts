@@ -599,6 +599,23 @@ def parse_ubnt_wireless(output):
     }
 
 
+UBNT_ASSOCIATION_COMMAND = "/sbin/iwconfig ath0"
+UBNT_STATUS_COMMAND = (
+    "/sbin/iwconfig ath0 2>&1; "
+    "/usr/bin/mca-status 2>/dev/null | "
+    "/bin/grep -E '^(essid|signal|noise|ccq|uptime)=' || true; "
+    "/usr/bin/awk -F= '/^wpasupplicant\\.profile\\.1\\.network\\.1\\.ssid=/"
+    "{print \"target_ssid=\" $2; exit}' /tmp/system.cfg"
+)
+
+
+def collect_ubnt_association(command, ssh_args, remote_status=UBNT_ASSOCIATION_COMMAND):
+    """Share parsing without changing either caller's probe or error contract."""
+    result = command(ssh_args + [remote_status], timeout=8)
+    radio = parse_ubnt_wireless(result.stdout) if result.returncode == 0 else {}
+    return result, radio
+
+
 def _ssh_args(target, identity=None):
     args = [
         SSH,
@@ -687,22 +704,15 @@ def collect_status(command=run_command, wall_clock=time.time):
             ubnt["error"] = "UBNT did not answer ping (check Ethernet cable/power)"
 
     if ubnt["reachable"]:
-        remote_status = (
-            "/sbin/iwconfig ath0 2>&1; "
-            "/usr/bin/mca-status 2>/dev/null | "
-            "/bin/grep -E '^(essid|signal|noise|ccq|uptime)=' || true; "
-            "/usr/bin/awk -F= '/^wpasupplicant\\.profile\\.1\\.network\\.1\\.ssid=/"
-            "{print \"target_ssid=\" $2; exit}' /tmp/system.cfg"
-        )
         try:
-            result = command(
-                _ssh_args(UBNT_TARGET, UBNT_IDENTITY) + [remote_status], timeout=8
+            result, radio = collect_ubnt_association(
+                command, _ssh_args(UBNT_TARGET, UBNT_IDENTITY), UBNT_STATUS_COMMAND
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             ubnt["error"] = f"UBNT status failed: {exc}"
         else:
             if result.returncode == 0:
-                ubnt.update(parse_ubnt_wireless(result.stdout))
+                ubnt.update(radio)
                 ubnt["error"] = None
             else:
                 ubnt["error"] = f"UBNT status failed: {_failure_detail(result)}"
