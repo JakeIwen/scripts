@@ -101,7 +101,7 @@ describe('WAN throughput', () => {
     expect(presentWanThroughput({ ...connectivity, stale: true }, measured)?.summary).toBe('—');
     expect(presentWanThroughput(connectivity, null)?.summary).toBe('Measuring…');
     expect(presentWanThroughput(connectivity, measured)).toEqual({
-      summary: '↓ 375 kB/s · ↑ 13 kB/s',
+      summary: '↓ 375 kB/s\n↑ 13 kB/s',
       detail: 'wan ↓ 375 kB/s · ↑ 13 kB/s\nAveraged over 2.0 s',
       local: null,
     });

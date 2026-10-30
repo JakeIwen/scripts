@@ -59,11 +59,11 @@ export function formatByteRate(bytesPerSecond: number): string {
   return `${megabytes < 99.95 ? megabytes.toFixed(1) : megabytes.toFixed(0)} MB/s`;
 }
 
-function byteRates(rates: {
-  downloadBytesPerSecond: number;
-  uploadBytesPerSecond: number;
-}): string {
-  return `↓ ${formatByteRate(rates.downloadBytesPerSecond)} · ↑ ${formatByteRate(rates.uploadBytesPerSecond)}`;
+function byteRates(
+  rates: { downloadBytesPerSecond: number; uploadBytesPerSecond: number },
+  separator = ' · ',
+): string {
+  return `↓ ${formatByteRate(rates.downloadBytesPerSecond)}${separator}↑ ${formatByteRate(rates.uploadBytesPerSecond)}`;
 }
 
 export interface WanThroughputPresentation {
@@ -89,7 +89,7 @@ export function presentWanThroughput(
   const local = throughput.localBytesPerSecond;
   return {
     local: hasLan ? (local === null ? 'Measuring…' : formatByteRate(local)) : null,
-    summary: byteRates(throughput),
+    summary: byteRates(throughput, '\n'),
     detail: [
       ...throughput.uplinks.map((uplink) => `${uplink.name} ${byteRates(uplink)}`),
       `Averaged over ${throughput.windowSeconds.toFixed(1)} s`,
@@ -105,7 +105,7 @@ export interface SpeedtestPresentation {
 
 export function presentSpeedtest(speedtest: SpeedtestStatus | null): SpeedtestPresentation {
   if (!speedtest || speedtest.status === 'idle') {
-    return { tone: 'neutral', title: 'Not run yet', detail: "Uses vanpi's current route" };
+    return { tone: 'neutral', title: 'Not run yet', detail: '' };
   }
   if (speedtest.status === 'running') {
     return { tone: 'warning', title: 'Testing current route…', detail: 'This can take a minute' };

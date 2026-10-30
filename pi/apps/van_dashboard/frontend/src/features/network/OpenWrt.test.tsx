@@ -126,7 +126,7 @@ describe('OpenWrt UI', () => {
     view.rerender(tile(throughput));
     const row = screen.getByLabelText('Current internet throughput');
     expect(row.closest('.mwan-primary')).not.toBeNull();
-    expect(row).toHaveTextContent('↓ 4.2 MB/s · ↑ 640 kB/s');
+    expect(row).toHaveTextContent('↓ 4.2 MB/s ↑ 640 kB/s');
     expect(row).toHaveAttribute('title', 'wan ↓ 4.2 MB/s · ↑ 640 kB/s\nAveraged over 3.0 s');
     expect(screen.getByLabelText('Current local network traffic')).toHaveTextContent('1.5 MB/s');
 

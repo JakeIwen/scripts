@@ -141,7 +141,7 @@ export function OpenWrtTile({
               title={throughput.detail ?? undefined}
             >
               <span className="wan-throughput-label">Net</span>
-              <span>{throughput.summary}</span>
+              <span className="wan-throughput-rates">{throughput.summary}</span>
             </span>
           )}
         </div>
@@ -170,7 +170,7 @@ export function OpenWrtTile({
           aria-live="polite"
         >
           <strong>{speedTitle}</strong>
-          <span>{speedDetail}</span>
+          {speedDetail && <span>{speedDetail}</span>}
         </span>
       </div>
     </article>

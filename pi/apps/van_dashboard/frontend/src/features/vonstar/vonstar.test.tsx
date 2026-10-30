@@ -220,7 +220,7 @@ describe('vOnStar controls', () => {
     vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
     vi.mocked(postForm).mockResolvedValue(actionPayload('lock_all'));
     renderFeature();
-    expect(await screen.findByText('Guarded three-action vehicle lock controls')).toBeVisible();
+    expect(await screen.findByText('Vehicle lock controls')).toBeVisible();
 
     const button = screen.getByRole('button', { name: 'Lock All' });
     fireEvent.click(button);
@@ -238,7 +238,7 @@ describe('vOnStar controls', () => {
   it('checks state only after confirmation and never calls access state on sheet open', async () => {
     vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
     renderFeature();
-    expect(await screen.findByText('Guarded three-action vehicle lock controls')).toBeVisible();
+    expect(await screen.findByText('Vehicle lock controls')).toBeVisible();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open vOnStar status' }));
     expect(postForm).not.toHaveBeenCalled();
@@ -263,7 +263,7 @@ describe('vOnStar controls', () => {
     );
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     renderFeature();
-    expect(await screen.findByText('Guarded three-action vehicle lock controls')).toBeVisible();
+    expect(await screen.findByText('Vehicle lock controls')).toBeVisible();
 
     fireEvent.click(screen.getByRole('button', { name: 'Unlock Front' }));
     fireEvent.click(screen.getByRole('button', { name: 'Unlock Cargo' }));

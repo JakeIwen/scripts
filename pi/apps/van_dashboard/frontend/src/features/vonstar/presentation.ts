@@ -42,7 +42,7 @@ export function describeVonstar(
   if (status.available && status.mode === 'execute') {
     return {
       label: 'Ready',
-      summary: 'Guarded three-action vehicle lock controls',
+      summary: 'Vehicle lock controls',
       tone: 'good',
     };
   }
