@@ -15,11 +15,7 @@ import {
   trueValue,
 } from '../../api/schema';
 
-export const storagePolicyFieldSchema = oneOf([
-  'disks_enabled',
-  'torrents_enabled',
-  'allow_starlink_torrents',
-]);
+export const storagePolicyFieldSchema = oneOf(['disks_enabled', 'torrents_enabled']);
 
 const deferred = v.optional(v.unknown());
 const versionOne = v.pipe(

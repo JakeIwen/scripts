@@ -97,16 +97,6 @@ function PolicySection({
           disabled={disabled}
           onToggle={() => void controls.setPolicy('torrents_enabled', !policy.torrentsEnabled)}
         />
-        <PolicyCard
-          label="Allow torrents on Starlink"
-          detail="Requires both HDDs and torrents enabled"
-          value={requestedPolicyState(policy, 'allowStarlinkTorrents')}
-          enabled={policy.allowStarlinkTorrents}
-          disabled={disabled}
-          onToggle={() =>
-            void controls.setPolicy('allow_starlink_torrents', !policy.allowStarlinkTorrents)
-          }
-        />
       </div>
     </>
   );

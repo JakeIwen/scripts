@@ -91,6 +91,7 @@ describe('storage feature', () => {
   it('strictly decodes policy runtime and disk health evidence', () => {
     const policy = decodeStoragePolicyResponse(storagePolicyPayload());
     const disks = decodeDiskStatusResponse(diskStatusPayload());
+    expect(policy.allowStarlinkTorrents).toBe(false);
     expect(policy.runtime).toMatchObject({
       disksMounted: true,
       qbittorrentRunning: true,
@@ -147,6 +148,10 @@ describe('storage feature', () => {
       </>,
     );
 
+    expect(
+      screen.queryByRole('button', { name: /Allow torrents on Starlink/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Torrents enabled' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Unmount' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Repair' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Reset USB' })).toBeDisabled();

@@ -31,13 +31,10 @@ export function storageSummary(policy: StoragePolicy | null): string {
 
 export function requestedPolicyState(
   policy: StoragePolicy,
-  field: keyof Pick<StoragePolicy, 'disksEnabled' | 'torrentsEnabled' | 'allowStarlinkTorrents'>,
+  field: keyof Pick<StoragePolicy, 'disksEnabled' | 'torrentsEnabled'>,
 ): string {
   if (!policy[field]) return 'Off';
   if (field === 'torrentsEnabled' && !policy.disksEnabled) return 'On · blocked';
-  if (field === 'allowStarlinkTorrents' && (!policy.disksEnabled || !policy.torrentsEnabled)) {
-    return 'On · blocked';
-  }
   return 'On';
 }
 
