@@ -459,9 +459,11 @@ do {
         before = Path(str(file) + "/..namedfork/rsrc").read_bytes()
         env, _, _ = self.install_generators()
         calls = self.install_stamping_stub(timeout=True)
-        r = subprocess.run(["/bin/zsh", str(self.script), "--force", "--timeout", "1", str(file)], env=env, capture_output=True, text=True, timeout=8)
-        self.assertEqual(r.returncode, 1)
+        # Allow generator/helper startup; the stamping stub hangs for 20 seconds.
+        r = subprocess.run(["/bin/zsh", str(self.script), "--force", "--timeout", "3", str(file)], env=env, capture_output=True, text=True, timeout=15)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("timed out", r.stdout)
+        self.assertTrue(calls.exists(), r.stdout + r.stderr)
         self.assertEqual(calls.read_text().splitlines(), [str(file)])
         self.assertEqual(Path(str(file) + "/..namedfork/rsrc").read_bytes(), before)
 
