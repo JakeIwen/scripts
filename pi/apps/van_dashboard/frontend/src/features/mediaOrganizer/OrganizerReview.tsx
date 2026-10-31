@@ -53,7 +53,9 @@ export function OrganizerReview({ organizer: o }: { organizer: Organizer }) {
           />
         </section>
       ) : (
-        !o.resource.error && <p>{status?.latest_plan ? 'Loading plan…' : copy.noPlan}</p>
+        // Until status arrives the sheet already says it is loading; claiming
+        // "no plan" then would be false.
+        !o.resource.error && status && <p>{status.latest_plan ? 'Loading plan…' : copy.noPlan}</p>
       )}
     </>
   );

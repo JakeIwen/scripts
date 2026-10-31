@@ -540,6 +540,23 @@ it('retries a failed plan read without requiring a new plan or a media mutation'
   expect(await screen.findByLabelText('Show for Silo.S01E01')).toHaveValue('Silo');
 });
 
+describe('organizer loading state', () => {
+  it('does not claim there is no plan while the status is still loading', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise<Response>(() => {})),
+    );
+    render(
+      <ToastProvider>
+        <MediaOrganizerFeature />
+      </ToastProvider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Media organizer' }));
+    expect(await screen.findByText('Loading organizer…', { selector: 'p' })).toBeInTheDocument();
+    expect(screen.queryByText(/No review plan yet/)).not.toBeInTheDocument();
+  });
+});
+
 describe('organizer review follow-up regressions', () => {
   it('releases a lost accepted job without replaying it after a backend restart', async () => {
     const { status, calls } = mockCliApi();
