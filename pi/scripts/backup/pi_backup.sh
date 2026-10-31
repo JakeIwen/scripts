@@ -201,8 +201,16 @@ if ensure_mounted movingparts "$MEDIA_SRC"; then
   # apply, undo or mirror-sync (pi/apps/media_organizer/config.py spells the
   # same path); interactive applies refuse while it is held, the completion
   # hook waits. Waiting only outlasts a move already under way.
-  media_mirror_lock=
-  if exec {media_mirror_lock}>>/run/lock/media-mirror.lock; then
+  # Open an existing lock read-only: pi usually created it, and the kernel's
+  # protected_regular refuses even root an O_CREAT open of another user's file
+  # in sticky /run/lock. flock needs no write access.
+  media_mirror_lock= media_mirror_lock_path=/run/lock/media-mirror.lock
+  if [[ -e $media_mirror_lock_path ]]; then
+    exec {media_mirror_lock}<"$media_mirror_lock_path"
+  else
+    exec {media_mirror_lock}>>"$media_mirror_lock_path"
+  fi
+  if [[ -n $media_mirror_lock ]]; then
     /usr/bin/flock -w 1800 -x "$media_mirror_lock" ||
       log "media organizer still moving after 30 min; syncing without excluding it"
   else
