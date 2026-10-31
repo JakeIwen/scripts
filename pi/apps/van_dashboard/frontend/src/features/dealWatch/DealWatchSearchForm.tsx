@@ -1,31 +1,44 @@
 import { useId, useState } from 'react';
 
-import type { DealWatchSearchDraft } from './types';
+import type { DealWatchSavedSearch, DealWatchSearchDraft } from './types';
 
 export interface DealWatchSearchFormProps {
   disabled: boolean;
+  editing?: DealWatchSavedSearch;
   onSubmit: (draft: DealWatchSearchDraft) => Promise<boolean>;
+  onCancel?: () => void;
 }
 
-export function DealWatchSearchForm({ disabled, onSubmit }: DealWatchSearchFormProps) {
+export function DealWatchSearchForm({
+  disabled,
+  editing,
+  onSubmit,
+  onCancel,
+}: DealWatchSearchFormProps) {
+  const headingId = useId();
   const parserId = useId();
   const urlId = useId();
   const titleId = useId();
-  const [url, setUrl] = useState('');
-  const [title, setTitle] = useState('');
+  // Each editor mounts for one search; polling must not replace an unsaved draft.
+  const [url, setUrl] = useState(editing?.url ?? '');
+  const [title, setTitle] = useState(editing?.title ?? '');
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const saved = await onSubmit({ parser: 'ebay', url: url.trim(), title: title.trim() });
-    if (saved) {
+    if (saved && !editing) {
       setUrl('');
       setTitle('');
     }
   };
 
   return (
-    <form className="deal-watch-form" onSubmit={(event) => void submit(event)}>
-      <h4>Add a query</h4>
+    <form
+      className="deal-watch-form"
+      aria-labelledby={headingId}
+      onSubmit={(event) => void submit(event)}
+    >
+      <h4 id={headingId}>{editing ? `Edit ${editing.displayTitle}` : 'Add a query'}</h4>
       <div className="deal-watch-form__grid">
         <label htmlFor={parserId}>
           <span>Parser</span>
@@ -43,6 +56,7 @@ export function DealWatchSearchForm({ disabled, onSubmit }: DealWatchSearchFormP
             maxLength={160}
             autoComplete="off"
             placeholder="Query name"
+            autoFocus={Boolean(editing)}
             value={title}
             disabled={disabled}
             onChange={(event) => setTitle(event.target.value)}
@@ -64,8 +78,13 @@ export function DealWatchSearchForm({ disabled, onSubmit }: DealWatchSearchFormP
         </label>
       </div>
       <div className="deal-watch-form__actions">
+        {editing && (
+          <button type="button" disabled={disabled} onClick={onCancel}>
+            Cancel
+          </button>
+        )}
         <button type="submit" disabled={disabled}>
-          Add query watch
+          {editing ? 'Save changes' : 'Add query watch'}
         </button>
       </div>
     </form>

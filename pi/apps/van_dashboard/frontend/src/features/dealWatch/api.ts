@@ -107,6 +107,19 @@ export async function removeDealWatchSearch(id: number): Promise<DealWatchMutati
   return mutationResult(payload, 'remove search response');
 }
 
+export async function editDealWatchSearch(
+  id: number,
+  draft: DealWatchSearchDraft,
+): Promise<DealWatchMutationResult> {
+  const payload = await postForm('/api/price-checks/searches/edit', {
+    id: positiveId(id, 'search ID'),
+    parser: draft.parser,
+    url: draft.url,
+    title: draft.title,
+  });
+  return mutationResult(payload, 'edit search response');
+}
+
 export async function dismissDealWatchSearchResult(
   searchId: number,
   itemId: string,

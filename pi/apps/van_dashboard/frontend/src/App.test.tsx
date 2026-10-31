@@ -43,6 +43,12 @@ describe('Van Dashboard React composition', () => {
 
     // A tile that throws while its data is loading takes the whole dashboard down.
     expect(screen.getAllByRole('heading').length).toBeGreaterThan(10);
+    expect(screen.getByRole('heading', { name: 'Movies & TV' })).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'Audiobooks' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Audiobooks' })).toHaveAttribute(
+      'href',
+      'http://localhost:8787/',
+    );
 
     view.unmount();
   });

@@ -204,7 +204,10 @@ def check_watch(
     try:
         results = _fetch_and_parse(watch, fetcher)
     except SearchWatchError as error:
-        failed_watch = store.record_error(watch["id"], str(error)) if record else watch
+        failed_watch = (
+            store.record_error(watch["id"], str(error), expected_url=watch["url"])
+            if record else watch
+        )
         if record:
             request_refresh(store, watch)
         if notify and notify_error:
@@ -226,7 +229,9 @@ def apply_search_results(
     notify_new=None, notify: bool = True, record: bool = True,
 ) -> dict:
     if record:
-        updated, new_results = store.record_success(watch["id"], results)
+        updated, new_results = store.record_success(
+            watch["id"], results, expected_url=watch["url"]
+        )
     else:
         updated = {**watch, "result_count": len(results)}
         new_results = []

@@ -958,6 +958,26 @@ The production boundary is `Response.json()`; sparse JS arrays, accessors and
 Proxies are outside that wire contract. Native arrays do not preserve hole
 semantics from the old `.map()` decoders.
 
+Dashboard `frontend/src/components/TooltipButton.tsx` owns hover/focus/tap hints
+(including backup setting help), with viewport-clamped portals outside clipped
+tiles. Action buttons keep their normal click action. Grid items are inline-size
+containers: narrow cards move chips into the header flow through the shared
+`--tile-status-*` properties, preserving the two-column phone layout.
+Dashboard status policy: a colored, labeled chip is the status marker; the tile
+surface/border stays neutral. Keep distinct measures (radio association,
+per-room power, backup rows) separate, and explain ambiguous status with
+hover/focus/tap hints. Clickable tiles use a separate opener so hint buttons
+never nest inside action buttons. `MovieIcon.tsx`/`UsbIcon.tsx` own the standard
+vector symbols; `backups/statusDetail.ts` explains CHECK from actual freshness,
+clone and cloud evidence. `lighting/LightingRange.tsx` owns the optional integer
+thumb label while the native range input keeps touch/keyboard interaction.
+`vonstar/VonstarActions.tsx` owns the compact guarded action group.
+`dealWatch/DealWatchSearchSection.tsx` owns saved-search cards and inline editing.
+`SearchStore.update_watch` preserves history/dismissals while clearing old-query
+current matches; `expected_url` guards in-flight check writes. Ship its flat
+price-check CLI/store/service cohort before the package endpoint and frontend.
+
+
 ## Backup and disk tooling
 
 The active design is represented by:

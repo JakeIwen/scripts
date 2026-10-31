@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { LightingRange } from './LightingRange';
 
 const SLIDER_DEBOUNCE_MS = 500;
 
@@ -10,6 +11,7 @@ interface LightingSliderProps {
   unit: string;
   disabled: boolean;
   displayValue?: string;
+  valueInThumb?: boolean;
   className?: string;
   onCommit: (value: number) => Promise<boolean>;
 }
@@ -27,6 +29,7 @@ export function LightingSlider({
   unit,
   disabled,
   displayValue,
+  valueInThumb = false,
   className = '',
   onCommit,
 }: LightingSliderProps) {
@@ -73,21 +76,24 @@ export function LightingSlider({
   };
 
   return (
-    <label className={`lighting-slider-control ${className}`.trim()}>
-      <span>{label}</span>
-      <input
-        type="range"
+    <label
+      className={`lighting-slider-control ${valueInThumb ? 'lighting-slider-control--thumb-value' : ''} ${className}`.trim()}
+    >
+      <span className="lighting-slider-control__label">{label}</span>
+      <LightingRange
         min={minimum}
         max={maximum}
         value={draft}
         disabled={disabled}
         aria-label={label}
+        aria-valuetext={displayValue ?? `${draft}${unit}`}
+        thumbValue={valueInThumb ? (displayValue ?? String(Math.round(draft))) : undefined}
         onInput={(event) => updateDraft(Number(event.currentTarget.value))}
         onPointerUp={(event) => void commit(Number(event.currentTarget.value))}
         onKeyUp={(event) => void commit(Number(event.currentTarget.value))}
         onBlur={(event) => void commit(Number(event.currentTarget.value))}
       />
-      <output>{displayValue ?? `${draft}${unit}`}</output>
+      {!valueInThumb && <output>{displayValue ?? `${draft}${unit}`}</output>}
     </label>
   );
 }

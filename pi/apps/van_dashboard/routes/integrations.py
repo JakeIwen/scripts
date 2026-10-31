@@ -457,6 +457,24 @@ def api_price_checks_searches_remove():
     return jsonify(payload)
 
 
+@bp.route("/api/price-checks/searches/edit", methods=["POST"])
+def api_price_checks_searches_edit():
+    if (
+        not _exact_form(("id", "parser", "url", "title"))
+        or not request.form["id"].isdigit()
+        or int(request.form["id"]) <= 0
+    ):
+        return api_error("saved-search editing requires a positive ID, parser, URL, and title", 400)
+    try:
+        payload = price_checks.edit_search(
+            request.form["id"], request.form["parser"], request.form["url"], request.form["title"]
+        )
+    except PriceCheckCommandError as exc:
+        return api_error(f"could not edit saved search: {exc}", 400)
+    payload["message"] = f"Updated {payload['search']['display_title']}"
+    return jsonify(payload)
+
+
 
 @bp.route("/api/price-checks/searches/dismiss", methods=["POST"])
 def api_price_checks_searches_dismiss():

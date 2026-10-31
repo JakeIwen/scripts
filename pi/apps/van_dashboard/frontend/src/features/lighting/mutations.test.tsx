@@ -1,4 +1,4 @@
-import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getJson, postForm } from '../../api/client';
@@ -70,6 +70,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
   vi.useRealTimers();
 });
 
@@ -182,6 +183,7 @@ describe('LightingSlider', () => {
         minimum={1}
         maximum={100}
         unit="%"
+        valueInThumb
         disabled={false}
         onCommit={onCommit}
       />,
@@ -190,7 +192,12 @@ describe('LightingSlider', () => {
     fireEvent.input(screen.getByRole('slider', { name: 'Cab brightness' }), {
       target: { value: '67' },
     });
-    expect(screen.getByText('67%')).toBeInTheDocument();
+    expect(screen.getByText('67')).toBeInTheDocument();
+    expect(screen.queryByText('67%')).not.toBeInTheDocument();
+    expect(screen.getByRole('slider', { name: 'Cab brightness' })).toHaveAttribute(
+      'aria-valuetext',
+      '67%',
+    );
     expect(onCommit).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -226,5 +233,29 @@ describe('LightingSlider', () => {
       await vi.advanceTimersByTimeAsync(500);
     });
     expect(onCommit).toHaveBeenCalledOnce();
+  });
+
+  it('restores the thumb value when a keyboard commit is rejected', async () => {
+    const onCommit = vi.fn().mockResolvedValue(false);
+    render(
+      <LightingSlider
+        label="Cab brightness"
+        value={40}
+        minimum={1}
+        maximum={100}
+        unit="%"
+        valueInThumb
+        disabled={false}
+        onCommit={onCommit}
+      />,
+    );
+    const slider = screen.getByRole('slider', { name: 'Cab brightness' });
+    fireEvent.input(slider, { target: { value: '95' } });
+    expect(screen.getByText('95')).toBeInTheDocument();
+    fireEvent.keyUp(slider, { key: 'ArrowRight' });
+    await act(async () => Promise.resolve());
+    expect(onCommit).toHaveBeenCalledWith(95);
+    expect(slider).toHaveValue('40');
+    expect(screen.getByText('40')).toBeInTheDocument();
   });
 });

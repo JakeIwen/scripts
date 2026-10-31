@@ -3,7 +3,6 @@ export const TILE_ORDER_STORAGE_KEY = 'van-dashboard.tile-order.v1';
 export const DEFAULT_TILE_ORDER = [
   'cop',
   'vonstar',
-  'books',
   'video-library',
   'telemetry',
   'sonos-card',

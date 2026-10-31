@@ -104,6 +104,7 @@ describe('Deal Watch views', () => {
       setListingMute: vi.fn().mockResolvedValue(true),
       checkListings: vi.fn().mockResolvedValue(true),
       addSearch: vi.fn().mockResolvedValue(true),
+      editSearch: vi.fn().mockResolvedValue(true),
       removeSearch: vi.fn().mockResolvedValue(true),
       dismissSearchResult: vi.fn().mockResolvedValue(true),
       checkSearch: vi.fn().mockResolvedValue(true),

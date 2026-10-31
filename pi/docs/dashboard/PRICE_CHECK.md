@@ -204,11 +204,18 @@ Saved-search operations are available through the reusable script entry point:
 
 ```bash
 s price_check search-add ebay 'https://www.ebay.com/sch/i.html?_nkw=…' 'Search title'
+s price_check search-edit 1 ebay 'https://www.ebay.com/sch/i.html?_nkw=…' 'New title'
 s price_check search-check all
 s price_check search-check 1 --no-notify
 s price_check search-dismiss 1 123456789012
 s price_check search-remove 1
 ```
+
+Saved-search cards have an **Edit** action for the title and eBay search URL
+(including its query/filter parameters). Edits keep the search ID, check history,
+dismissed listings and shared schedule. A changed URL clears the old query's
+current-result view and pending browser recovery; the next check supplies its
+new matches. In-flight responses from the old URL cannot overwrite the edit.
 
 Use `--no-notify` for the first saved-search check when the currently visible
 results should become the baseline without generating initial notifications.

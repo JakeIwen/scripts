@@ -205,9 +205,18 @@ describe('lighting views', () => {
 
     expect(screen.getByText('Cab')).toBeInTheDocument();
     expect(screen.getByText('Rear')).toBeInTheDocument();
+    expect(screen.queryByText('MIXED')).not.toBeInTheDocument();
+    const cab = screen.getByRole('button', { name: 'Cab power · Mixed' });
+    fireEvent.focus(cab);
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Cab · Mixed');
+    expect(actions.setPower).not.toHaveBeenCalled();
+    fireEvent.blur(cab);
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
     expect(screen.getByRole('slider', { name: 'Kitchen brightness' })).toHaveValue('72');
     fireEvent.click(screen.getByRole('button', { name: /^Cab power/ }));
     expect(actions.setPower).toHaveBeenCalledWith('group:cab', true);
+    fireEvent.click(screen.getByRole('button', { name: 'All lights power · Mixed' }));
+    expect(actions.setPower).toHaveBeenCalledWith('all', true);
     fireEvent.click(screen.getByRole('button', { name: 'Open lighting controls' }));
     expect(onOpen).toHaveBeenCalledOnce();
   });

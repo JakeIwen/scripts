@@ -94,7 +94,15 @@ export function ComputeTile({ report, error, refreshing, onOpen }: ComputeTilePr
             : 'Checking offloaded analysis…'
       }
       status={
-        <StatusPill tone={tone} dot={false}>
+        <StatusPill
+          tone={tone}
+          dot={false}
+          detail={
+            error?.message ??
+            `${report ? workerLabel(report) : 'Waiting for a worker heartbeat'}. Worker availability is separate from completed-job counts.`
+          }
+          label="Compute worker status"
+        >
           {computeStatusLabel(report, refreshing)}
         </StatusPill>
       }

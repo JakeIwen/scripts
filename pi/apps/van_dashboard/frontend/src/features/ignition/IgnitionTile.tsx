@@ -64,7 +64,12 @@ export function IgnitionTile({ status, error, remainingSeconds, onOpen }: Igniti
       title="Ignition Monitor"
       summary={presentation.summary}
       status={
-        <StatusPill tone={presentation.tone} dot={false}>
+        <StatusPill
+          tone={presentation.tone}
+          dot={false}
+          detail={`${presentation.summary}. This is the monitoring service state, not whether the engine is running.`}
+          label="Ignition monitoring status"
+        >
           {presentation.label}
         </StatusPill>
       }

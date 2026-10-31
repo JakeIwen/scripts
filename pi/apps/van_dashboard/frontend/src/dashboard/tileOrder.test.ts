@@ -7,12 +7,12 @@ describe('tile ordering', () => {
 
   it('keeps known unique IDs and appends newly available tiles', () => {
     const available = DEFAULT_TILE_ORDER.slice(0, 5);
-    expect(normalizeTileOrder(['telemetry', 'cop', 'cop', 'removed'], available)).toEqual([
+    expect(normalizeTileOrder(['telemetry', 'books', 'cop', 'cop', 'removed'], available)).toEqual([
       'telemetry',
       'cop',
       'vonstar',
-      'books',
       'video-library',
+      'sonos-card',
     ]);
   });
 

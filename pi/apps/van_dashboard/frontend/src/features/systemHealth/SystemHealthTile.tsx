@@ -82,7 +82,14 @@ export function SystemHealthTile({ report, error, refreshing, onOpen }: SystemHe
             : (report?.headline ?? 'Loading power and resource history…')
       }
       status={
-        <StatusPill tone={tone} dot={false}>
+        <StatusPill
+          tone={tone}
+          dot={false}
+          detail={
+            error?.message ?? report?.headline ?? 'Waiting for power, USB and resource history.'
+          }
+          label="System health status"
+        >
           {systemHealthStatusLabel(report, error, refreshing)}
         </StatusPill>
       }

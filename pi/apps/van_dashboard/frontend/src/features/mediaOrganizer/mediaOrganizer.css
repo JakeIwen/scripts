@@ -7,15 +7,12 @@
 .organizer-toolbar {
   margin-bottom: 1rem;
 }
-.organizer-toolbar button,
-.organizer-tile-actions button,
-.organizer-service-link {
+.organizer-toolbar button {
   min-height: 44px;
 }
 .organizer-service-link {
   display: inline-flex;
   align-items: center;
-  padding: 0.55rem 0.8rem;
   border: 1px solid var(--line);
   border-radius: var(--radius-small);
   color: var(--text);
@@ -120,12 +117,21 @@
   }
 }
 
-.organizer-toolbar button,
-.organizer-tile-actions button {
+.organizer-toolbar button {
   padding: 9px 14px;
   border: 1px solid var(--line);
   border-radius: var(--radius-small);
   background: var(--panel-raised);
+}
+
+.organizer-tile-actions button,
+.organizer-tile-actions .organizer-service-link {
+  min-height: 0;
+  padding: 0.1875rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+  background: var(--panel-raised);
+  line-height: 1.4;
 }
 .organizer-destination input,
 .organizer-destination select,

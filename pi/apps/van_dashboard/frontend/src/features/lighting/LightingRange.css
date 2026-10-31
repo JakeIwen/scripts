@@ -1,0 +1,80 @@
+.lighting-range {
+  --lighting-thumb-size: 28px;
+  --lighting-track-height: 4px;
+  position: relative;
+  display: block;
+  min-width: 0;
+  width: 100%;
+}
+
+.lighting-range input {
+  display: block;
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  height: 31px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.lighting-range input::-webkit-slider-runnable-track {
+  height: var(--lighting-track-height);
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.lighting-range input::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  width: var(--lighting-thumb-size);
+  height: var(--lighting-thumb-size);
+  margin-top: calc((var(--lighting-track-height) - var(--lighting-thumb-size)) / 2);
+  border: 2px solid var(--text);
+  border-radius: 50%;
+  background: var(--panel-raised);
+}
+
+.lighting-range input::-moz-range-track {
+  height: var(--lighting-track-height);
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.lighting-range input::-moz-range-thumb {
+  box-sizing: border-box;
+  width: var(--lighting-thumb-size);
+  height: var(--lighting-thumb-size);
+  border: 2px solid var(--text);
+  border-radius: 50%;
+  background: var(--panel-raised);
+}
+
+.lighting-range .lighting-range__value {
+  position: absolute;
+  top: 50%;
+  /* Match the native thumb's travel, which stops half a thumb from each edge. */
+  left: calc(var(--lighting-range-progress) * (100% - var(--lighting-thumb-size)));
+  display: grid;
+  width: var(--lighting-thumb-size);
+  height: var(--lighting-thumb-size);
+  place-items: center;
+  transform: translateY(-50%);
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1;
+  text-align: center;
+  pointer-events: none;
+}
+
+.lighting-range:has(input:disabled) {
+  opacity: 0.68;
+}
+
+.lighting-range input:disabled {
+  cursor: not-allowed;
+}

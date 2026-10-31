@@ -121,6 +121,9 @@ class PriceCheckController:
     def add_search(self, parser, url, title=""):
         return self._run("search-add", parser, url, title, timeout=20)
 
+    def edit_search(self, search_id, parser, url, title=""):
+        return self._run("search-edit", search_id, parser, url, title, timeout=20)
+
     def remove_search(self, search_id):
         return self._run("search-remove", search_id, timeout=20)
 

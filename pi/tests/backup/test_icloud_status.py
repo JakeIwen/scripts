@@ -150,6 +150,44 @@ class StatusTests(unittest.TestCase):
         result = status.build_status(state, history, {}, {'MainPID': '0'}, None, now=1000)
         self.assertEqual(result['attempts'][0]['phase'], 'interrupted')
 
+    def test_critical_and_fatal_rclone_records_are_extracted_like_errors(self):
+        for level in ('critical', 'fatal'):
+            tail = json.dumps({'level': level, 'msg': 'Failed to create file system for "icloud:x": is a directory'})
+            tail += '\n' + json.dumps({'level': 'info', 'msg': 'stats'})
+            self.assertEqual(status.command_failure_detail(tail),
+                             'Failed to create file system for "icloud:x": is a directory')
+
+    def test_connection_drops_are_retryable_interruptions_but_provider_errors_are_not(self):
+        def failure(exit_code, detail):
+            exc = RuntimeError(f'rclone command failed (exit {exit_code})')
+            exc.detail = detail
+            return exc
+        interrupted = status.BackupFailure.TRANSFER_INTERRUPTED
+        self.assertIn(interrupted, status.RETRYABLE_FAILURES)
+        self.assertEqual(status.classify_failure(failure(5, '')), interrupted)
+        for detail in ('Failed to copy: read tcp 10.0.0.2:4 -> 17.0.0.1:443: connection reset by peer: chunk',
+                       'Failed to hashsum: Get "<url>": dial tcp: i/o timeout', 'unexpected EOF',
+                       'HTTP error 503: Service Unavailable', 'Client.Timeout exceeded while awaiting headers'):
+            self.assertEqual(status.classify_failure(failure(1, detail)), interrupted, detail)
+        for detail in ('Failed to copy: 507 Insufficient Storage: chunk-0042', '', 'corrupted on transfer: sizes differ'):
+            self.assertIsNone(status.classify_failure(failure(1, detail)), detail)
+        self.assertIsNone(status.classify_failure(RuntimeError('ambiguous or unsafe backup mount')))
+        self.assertIsNone(status.classify_failure(backup.AuthenticationRequired('login needed (exit 5)')))
+        value = self.build({'phase': 'deferred', 'failure_code': interrupted, 'last_error': 'rclone command failed (exit 5)'})
+        self.assertEqual(value['message'], status.FAILURE_MESSAGES[interrupted])
+
+    def test_quick_retry_is_bounded_until_a_transfer_starts(self):
+        state = {'last_success_at': 100}
+        for attempt in range(status.QUICK_RETRY_LIMIT):
+            self.assertTrue(status.schedule_quick_retry(state, now=1000))
+            self.assertEqual(state['retry_at'], 1000 + status.QUICK_RETRY_SECONDS)
+            state['retry_at'] = None
+        self.assertFalse(status.schedule_quick_retry(state, now=1000))
+        self.assertIsNone(state['retry_at'])
+        status.transfer_started(state)
+        self.assertTrue(status.schedule_quick_retry(state, now=2000))
+        self.assertEqual(state['retry_at'], 2000 + status.QUICK_RETRY_SECONDS)
+
     def test_upload_estimate_includes_prior_objects_and_clamps_retries(self):
         expected = {'a': {'bytes': 100}, 'b': {'bytes': 200}}
         inventory = {'a': {'IsDir': False, 'Size': 100, 'ModTime': 'date'},

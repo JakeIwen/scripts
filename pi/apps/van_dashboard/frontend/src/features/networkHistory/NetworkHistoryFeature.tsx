@@ -143,7 +143,16 @@ export function NetworkHistoryFeature() {
         ariaLabel="Open network history"
         tone={stale || missingCoverage ? 'warning' : 'neutral'}
         status={
-          <StatusPill tone={stale || missingCoverage ? 'warning' : 'neutral'}>
+          <StatusPill
+            tone={stale || missingCoverage ? 'warning' : 'neutral'}
+            detail={
+              resource.error?.message ??
+              (missingCoverage
+                ? 'Some evidence sources are missing or stale. Open coverage details to see which sources need attention.'
+                : 'Network evidence is being recorded. This does not mean every uplink is online.')
+            }
+            label="Network recording status"
+          >
             {report || resource.error ? status : 'Loading'}
           </StatusPill>
         }

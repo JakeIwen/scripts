@@ -1,7 +1,6 @@
 import { useState } from 'react';
 
 import { DashboardHeader } from './components/DashboardHeader';
-import { ServiceLinkTile } from './components/Tile';
 import { DashboardGrid, type DashboardTile } from './dashboard/DashboardGrid';
 import { MediaOrganizerFeature } from './features/mediaOrganizer/MediaOrganizerFeature';
 import { BackupsFeature } from './features/backups';
@@ -33,17 +32,6 @@ export function App() {
     {
       id: 'vonstar',
       content: <VonstarFeature />,
-    },
-    {
-      id: 'books',
-      content: (
-        <ServiceLinkTile
-          icon="📖"
-          title="Audiobooks"
-          detail="Open the Sonos audiobook library"
-          port={8787}
-        />
-      ),
     },
     {
       id: 'video-library',

@@ -46,6 +46,7 @@ class BackupFailure(str, Enum):
     HELPER_TIMEOUT = 'helper_timeout'
     PREREQUISITE = 'prerequisite'
     TRANSFER_STALLED = 'transfer_stalled'
+    TRANSFER_INTERRUPTED = 'transfer_interrupted'
 
 
 FAILURE_MESSAGES = {
@@ -57,8 +58,44 @@ FAILURE_MESSAGES = {
     BackupFailure.HELPER_TIMEOUT: 'A backup prerequisite check timed out; it will retry.',
     BackupFailure.PREREQUISITE: 'A backup disk or prerequisite check failed; it will retry safely.',
     BackupFailure.TRANSFER_STALLED: 'The transfer stopped making progress; saved work will be reused on retry.',
+    BackupFailure.TRANSFER_INTERRUPTED: 'The internet connection dropped during the transfer; saved work will be reused on retry.',
 }
 RETRYABLE_FAILURES = frozenset(FAILURE_MESSAGES) - {BackupFailure.PERMISSION, BackupFailure.DISK_FULL}
+# A quick retry reuses checkpoints after a transient stop instead of waiting
+# for the hourly timer. It is bounded so a dead uplink or a missing disk falls
+# back to the hourly cadence after three attempts in a row.
+QUICK_RETRY_SECONDS = 300
+QUICK_RETRY_LIMIT = 3
+RCLONE_FAILURE = re.compile(r'rclone \S+ failed \(exit (\d+)\)\Z')
+# rclone exits 5 when its own retries ran out on a temporary error; other exit
+# codes carry the network cause only in the private detail text.
+INTERRUPTION = re.compile(
+    r"\b(?:connection reset|i/o timeout|timed out|timeout|no such host|network is unreachable|"
+    r"no route to host|tls handshake|eof|connection refused|broken pipe|dial tcp|server closed|"
+    r"name resolution|context deadline exceeded|http2|50[234]|429|couldn't connect|"
+    r"closed network connection)\b")
+
+
+def transfer_interrupted(exc):
+    match = RCLONE_FAILURE.fullmatch(str(exc))
+    if match is None:
+        return False
+    return match.group(1) == '5' or INTERRUPTION.search(str(getattr(exc, 'detail', '')).casefold()) is not None
+
+
+def schedule_quick_retry(state, now=None):
+    """Retry in five minutes, at most QUICK_RETRY_LIMIT times before transfer progress resets the count."""
+    used = state.get('quick_retries', 0)
+    if not isinstance(used, int) or used >= QUICK_RETRY_LIMIT:
+        return False
+    state['quick_retries'] = used + 1
+    state['retry_at'] = (time.time() if now is None else now) + QUICK_RETRY_SECONDS
+    return True
+
+
+def transfer_started(state):
+    """Checks passed and the transfer client started: interruptions may retry quickly again."""
+    state['quick_retries'] = 0
 
 
 # Journal-only detail for a failed helper or rclone command. Public dashboard
@@ -74,7 +111,7 @@ def command_failure_detail(stderr):
             if fallback is None:
                 fallback = line
             continue
-        if isinstance(record, dict) and record.get('level') == 'error':
+        if isinstance(record, dict) and record.get('level') in ('error', 'critical', 'fatal'):
             detail = str(record.get('msg', ''))
             if 'object' in record:
                 detail += ': ' + str(record['object'])
@@ -109,6 +146,8 @@ def classify_failure(exc):
         return BackupFailure.PREREQUISITE
     if isinstance(exc, RuntimeError) and 'made no progress' in str(exc):
         return BackupFailure.TRANSFER_STALLED
+    if isinstance(exc, RuntimeError) and transfer_interrupted(exc):
+        return BackupFailure.TRANSFER_INTERRUPTED
     return None
 COUNTERS = ('upload_estimated_bytes', 'upload_total_bytes', 'command_bytes',
             'verified_bytes', 'verification_total_bytes', 'verified_files',

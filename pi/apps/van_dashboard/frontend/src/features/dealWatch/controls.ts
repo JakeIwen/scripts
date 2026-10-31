@@ -13,6 +13,7 @@ import {
   dismissDealWatchSearchResult,
   editDealWatchHavenoWatch,
   editDealWatchListing,
+  editDealWatchSearch,
   removeDealWatchHavenoWatch,
   removeDealWatchListing,
   removeDealWatchSearch,
@@ -36,6 +37,7 @@ export interface DealWatchControls {
   setListingMute: (id: number, days: number) => Promise<boolean>;
   checkListings: (target: number | 'all') => Promise<boolean>;
   addSearch: (draft: DealWatchSearchDraft) => Promise<boolean>;
+  editSearch: (id: number, draft: DealWatchSearchDraft) => Promise<boolean>;
   removeSearch: (id: number) => Promise<boolean>;
   dismissSearchResult: (searchId: number, itemId: string) => Promise<boolean>;
   checkSearch: (target: number | 'all') => Promise<boolean>;
@@ -95,6 +97,7 @@ export function useDealWatchControls(resource: PollingState<DealWatchStatus>): D
     setListingMute: (id, days) => execute(() => setDealWatchListingMute(id, days)),
     checkListings: (target) => execute(() => checkDealWatchListings(target)),
     addSearch: (draft) => execute(() => addDealWatchSearch(draft)),
+    editSearch: (id, draft) => execute(() => editDealWatchSearch(id, draft)),
     removeSearch: (id) => execute(() => removeDealWatchSearch(id)),
     dismissSearchResult: (searchId, itemId) =>
       execute(() => dismissDealWatchSearchResult(searchId, itemId)),

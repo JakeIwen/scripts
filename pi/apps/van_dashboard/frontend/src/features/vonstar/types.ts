@@ -8,6 +8,7 @@ export type VonstarValidation = 'live_verified' | 'mapped_capture';
 
 export interface VonstarActionDefinition {
   label: string;
+  shortLabel: string;
   description: string;
   validation: VonstarValidation;
   validationNote: string;
@@ -16,18 +17,21 @@ export interface VonstarActionDefinition {
 export const VONSTAR_ACTIONS: Readonly<Record<VonstarActionName, VonstarActionDefinition>> = {
   lock_all: {
     label: 'Lock All',
+    shortLabel: 'Lock All',
     description: 'lock every door',
     validation: 'mapped_capture',
     validationNote: 'Lock All is capture-mapped but has not yet been independently replay-tested.',
   },
   unlock_front: {
     label: 'Unlock Front',
+    shortLabel: 'Front',
     description: 'unlock the front doors',
     validation: 'live_verified',
     validationNote: '',
   },
   unlock_cargo: {
     label: 'Unlock Cargo',
+    shortLabel: 'Cargo',
     description: 'unlock the cargo doors',
     validation: 'mapped_capture',
     validationNote:

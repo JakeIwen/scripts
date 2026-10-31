@@ -1,0 +1,21 @@
+.status-tooltip {
+  position: fixed;
+  width: max-content;
+  max-width: min(270px, calc(100vw - 24px));
+  box-sizing: border-box;
+  padding: 12px 14px;
+  z-index: 20;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  font-size: 0.85rem;
+  font-weight: 400;
+  line-height: 1.45;
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}

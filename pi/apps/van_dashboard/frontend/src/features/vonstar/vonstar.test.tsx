@@ -178,6 +178,22 @@ describe('vOnStar strict decoders', () => {
 });
 
 describe('vOnStar controls', () => {
+  it.each([
+    ['Front', 'unlock_front'],
+    ['Cargo', 'unlock_cargo'],
+  ] as const)('confirms the %s half before dispatching its unlock action', (label, action) => {
+    const controller = readyController();
+    vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+    render(<VonstarTile controller={controller} onOpen={vi.fn()} />);
+
+    const button = screen.getByRole('button', { name: `Unlock ${label}` });
+    expect(button).toHaveTextContent(new RegExp(`^${label}$`));
+    fireEvent.click(button);
+    expect(controller.perform).not.toHaveBeenCalled();
+    fireEvent.click(button);
+    expect(controller.perform).toHaveBeenCalledExactlyOnceWith(action);
+  });
+
   it('renders plan-only, service-busy, and local working states', () => {
     const planOnly = readyController();
     if (!planOnly.status) throw new Error('missing vOnStar status fixture');
@@ -220,7 +236,7 @@ describe('vOnStar controls', () => {
     vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
     vi.mocked(postForm).mockResolvedValue(actionPayload('lock_all'));
     renderFeature();
-    expect(await screen.findByText('Guarded three-action vehicle lock controls')).toBeVisible();
+    expect(await screen.findByText('Vehicle lock controls')).toBeVisible();
 
     const button = screen.getByRole('button', { name: 'Lock All' });
     fireEvent.click(button);
@@ -238,7 +254,7 @@ describe('vOnStar controls', () => {
   it('checks state only after confirmation and never calls access state on sheet open', async () => {
     vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
     renderFeature();
-    expect(await screen.findByText('Guarded three-action vehicle lock controls')).toBeVisible();
+    expect(await screen.findByText('Vehicle lock controls')).toBeVisible();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open vOnStar status' }));
     expect(postForm).not.toHaveBeenCalled();
@@ -263,7 +279,7 @@ describe('vOnStar controls', () => {
     );
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     renderFeature();
-    expect(await screen.findByText('Guarded three-action vehicle lock controls')).toBeVisible();
+    expect(await screen.findByText('Vehicle lock controls')).toBeVisible();
 
     fireEvent.click(screen.getByRole('button', { name: 'Unlock Front' }));
     fireEvent.click(screen.getByRole('button', { name: 'Unlock Cargo' }));

@@ -1,5 +1,6 @@
 import type { PollingState } from '../../hooks/usePollingResource';
 import type { UsbStatus } from './types';
+import { UsbIcon } from '../../components/UsbIcon';
 import './usb.css';
 
 export interface UsbTileProps {
@@ -50,14 +51,14 @@ export function UsbTile({ resource, onOpen }: UsbTileProps) {
       aria-label="Open USB device details"
       aria-haspopup="dialog"
     >
-      <span className="usb-tile__pill">{pillLabel(status)}</span>
       <span className="usb-tile__heading">
         <span className="usb-tile__icon" aria-hidden="true">
-          🔌
+          <UsbIcon />
         </span>
         <span className="usb-tile__title" role="heading" aria-level={2}>
           USB Devices
         </span>
+        <span className="usb-tile__pill">{pillLabel(status)}</span>
       </span>
       <span className="usb-tile__summary">{summaryLabel(status, !resource.error && !status)}</span>
       <span className="usb-tile__storage">

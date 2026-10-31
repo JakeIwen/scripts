@@ -54,7 +54,9 @@ export function UbntTile({ status, error, dashboardStatus, onOpen }: UbntTilePro
           UBNT Wi-Fi
         </h2>
         <div className="tile__status">
-          <StatusPill tone={tone}>{ubntStatusLabel(status, error)}</StatusPill>
+          <StatusPill tone={tone} detail={summary} label="UBNT connection status">
+            {ubntStatusLabel(status, error)}
+          </StatusPill>
         </div>
       </header>
       <div className="tile__summary">
