@@ -141,6 +141,54 @@ Cloud workers submit their freshly collected legacy probe envelope to
 release for a potentially multi-day flat cloud worker. The guarded workers still
 pause transfers during probes and restart on a changed routing signature.
 
+## Mac controller
+
+`macbook/metered/mac-metered` is the stable checkout launcher (system Python
+3.9). It mirrors status/config/is-metered/allows/ssid/mode/approve/revoke/exempt
+and adds `sync`, `tick`, and `low-data-mode on|off|restore`. Status and admission
+are read-only: no Wi-Fi probe, SSH, tick or sudo. Missing, corrupt, expired,
+future-dated or revision-mismatched state denies `allows` (exit 1) and counts
+as metered (exit 0). Mutation conflicts exit 75; invalid mutations exit 2.
+`status` and successful `sync` return `{config, policy, state, registry,
+pi_state, pending, sync, fresh, config_cached, low_data_mode}`; `config` is the
+local overlaid SharedConfig and `tick` returns HostState. The stored config file
+remains the exact authoritative Pi record. `ssid add` returns
+`{queued: AddSSID, pending_sync: true}`; policy mutations return HostPolicy.
+
+`com.jacobr.metered` is a GUI LaunchAgent (Location needs a login session),
+RunAtLoad plus every 60 seconds. From the checkout, install with
+`zsh macbook/metered/install.zsh install`; use `prepare`, `status`, `stop`,
+`start` or `uninstall` with the same script. No job is loaded by tests.
+State, authoritative config cache, Pi telemetry, sync metadata and pending
+operations live under `~/.local/state/metered/`; Mac permissions alone live
+in `~/.config/jacobr/metered.json`. Queueing an SSID add immediately invalidates
+cached admission; the next tick overlays it, without changing the Pi revision.
+Remove requires `--revision` and a live Pi acknowledgement after replay.
+Only confirmed gateway IP **and MAC** allow minute syncs; elsewhere attempts
+are at most once per 15 minutes (explicit `sync` bypasses this rate limit).
+
+Mac-local observations have a 75-second lease, bounded by mode/approval expiry.
+An inherited Pi verdict additionally expires at the Pi's `valid_until`
+and evidence deadline (30 seconds). Thus a 60-second Mac timer intentionally
+has closed-admission gaps on the van LAN; cached Pi evidence is never extended
+to hide the gap. `sync` refreshes decisions but never changes interface flags;
+`tick` is the enforcing command. The Mac Panel shows Pi state read-only with age.
+
+Low Data Mode defaults **OFF** (`shared/settings/metered-mac.json`, separate
+from HostPolicy). Run `zsh macbook/metered/install_low_data_mode_sudoers.zsh`
+yourself; it verifies the LAN, installs narrowly scoped sudoers, tests the
+Pi SMB Time Machine destination and restores the prior flag. A pass requires
+exit 0, idle Time Machine, a **new** latest completed backup and CONSTRAINED
+still set before restoration. Only then enable in the panel or run
+`macbook/metered/mac-metered low-data-mode on --confirm`.
+The adapter reads `ifconfig -v` (CONSTRAINED is an **extended** flag), never
+sets expensive, and relinquishes ownership on identity change or a sampling
+gap. The bit cannot identify an intervening native/user write: automatic
+clearing therefore remains disabled. After granting Low Data Mode permission,
+`low-data-mode restore --confirm` clears only a recorded flag on the same
+continuously observed network. Native/unowned flags stay untouched. Disabling
+control does not clear a flag. iCloud remains advisory, not independently held.
+
 ## Deployment sequence (not performed by the implementation task)
 
 First integrate the phase-two frontend removal of the old Starlink-only switch.

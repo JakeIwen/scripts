@@ -1,0 +1,5 @@
+#!/bin/sh
+# Permanent checkout launcher for the Mac Panel, shell and updater admission.
+set -eu
+cd "$(dirname "$0")/../.."
+exec /usr/bin/python3 -B -m macbook.metered "$@"
