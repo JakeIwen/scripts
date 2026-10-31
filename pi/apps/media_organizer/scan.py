@@ -49,14 +49,16 @@ def scan(client=None):
             confined(child, new_directory())
             stat = child.stat()
             size, kind = stat.st_size, 'dir' if child.is_dir() else 'file'
-            if not (child.is_dir() or child.is_file()) or child.name.startswith('.'):
+            if not (child.is_dir() or child.is_file()):
                 skip = records.SKIP_UNREADABLE
+            elif child.name.startswith('.'):
+                skip = records.SKIP_HIDDEN
             elif kind == 'file' and size <= config.MIN_MEDIA_BYTES:
                 skip = records.SKIP_NOT_MEDIA  # nohup.out and stray scripts are not for Movies
         except (OSError, ValueError):
             skip = records.SKIP_UNREADABLE
         if len(matches) > 1:
-            skip = records.SKIP_UNREADABLE
+            skip = records.SKIP_NESTED
         done = complete(torrent) if torrent else not matches
         if torrent:
             if torrent['state'] == 'moving':
@@ -64,7 +66,7 @@ def scan(client=None):
             elif not done:
                 skip = records.SKIP_INCOMPLETE
             elif Path(torrent['save_path']) != new_directory():
-                skip = records.SKIP_UNREADABLE
+                skip = records.SKIP_NESTED  # e.g. saved inside a folder named like a .torrent
         entries.append(records.ScanEntry(
             child.name, str(child), kind, size,
             torrent['hash'] if torrent else None, torrent['name'] if torrent else None,

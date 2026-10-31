@@ -13,6 +13,7 @@ class ScanTests(Fixture, unittest.TestCase):
         self.payload('Checking', state='checkingUP')
         self.payload('Loose', tracked=False)
         (self.new / 'nohup.out').write_text('log output')
+        (self.new / '._Movie.mkv').write_bytes(b'finder metadata')
         (self.new / 'link').symlink_to(self.root)
         entries, shows = scan.scan(self.client)
         rows = {e.name: e for e in entries}
@@ -24,9 +25,10 @@ class ScanTests(Fixture, unittest.TestCase):
         self.assertEqual(rows['link'].skip_reason, records.SKIP_UNREADABLE)
         self.assertFalse(rows['Loose'].tracked)
         self.assertEqual(rows['nohup.out'].skip_reason, records.SKIP_NOT_MEDIA)
+        self.assertEqual(rows['._Movie.mkv'].skip_reason, records.SKIP_HIDDEN)
         self.assertEqual(shows['TV'], ['The Example'])
         summary = status.status(self.client)
-        self.assertEqual((summary.new_count, summary.tracked_count, summary.incomplete_count), (7, 4, 2))
+        self.assertEqual((summary.new_count, summary.tracked_count, summary.incomplete_count), (8, 4, 2))
 
     def test_failure_does_not_turn_torrents_into_untracked(self):
         self.payload('Movie.2025')
@@ -38,11 +40,11 @@ class ScanTests(Fixture, unittest.TestCase):
         torrent = self.payload('Movie.2025')
         self.transport.torrents.append(dict(torrent, hash='f' * 40))
         entries, _ = scan.scan(self.client)
-        self.assertEqual(entries[0].skip_reason, records.SKIP_UNREADABLE)
+        self.assertEqual(entries[0].skip_reason, records.SKIP_NESTED)
         self.transport.torrents.pop()
         torrent['save_path'] = str(self.new / 'somewhere')
         entries, _ = scan.scan(self.client)
-        self.assertEqual(entries[0].skip_reason, records.SKIP_UNREADABLE)
+        self.assertEqual(entries[0].skip_reason, records.SKIP_NESTED)
 
     def test_missing_mount_fails_closed(self):
         with patch('pathlib.Path.is_mount', return_value=False):
@@ -58,4 +60,4 @@ class ScanTests(Fixture, unittest.TestCase):
         entries, _ = scan.scan(self.client)
         self.assertTrue(entries[0].tracked)
         self.assertEqual(entries[0].torrent_hash, torrent['hash'])
-        self.assertEqual(entries[0].skip_reason, records.SKIP_UNREADABLE)
+        self.assertEqual(entries[0].skip_reason, records.SKIP_NESTED)
