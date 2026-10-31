@@ -1452,6 +1452,7 @@ class DiskManagerTests(DiskManagerFixture, unittest.TestCase):
                     "read_only": False,
                     "accessible": True,
                     "writable": True,
+                    "space": None,
                     "error": None,
                 },
             ):

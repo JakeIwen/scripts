@@ -119,6 +119,10 @@ class DiskManager:
             "labels": observed,
         }
 
+    def labels(self):
+        """Every configured disk label, in the order status() reports them."""
+        return self._configuration()["labels"]
+
     def _configuration(self):
         try:
             return self.parse_config(read_text_file(self.config))
@@ -308,10 +312,12 @@ class DiskManager:
                 "read_only": None,
                 "accessible": None,
                 "writable": None,
+                "space": None,
                 "error": None,
             }
         try:
-            flags = os.statvfs(expected_mount).f_flag
+            stats = os.statvfs(expected_mount)
+            flags = stats.f_flag
             read_only = bool(flags & getattr(os, "ST_RDONLY", 1))
             accessible = os.access(expected_mount, os.R_OK | os.X_OK)
             writable = os.access(expected_mount, os.W_OK | os.X_OK)
@@ -320,6 +326,7 @@ class DiskManager:
                 "read_only": None,
                 "accessible": False,
                 "writable": False,
+                "space": None,
                 "error": f"Cannot inspect mounted filesystem: {exc}",
             }
         error = None
@@ -333,6 +340,12 @@ class DiskManager:
             "read_only": read_only,
             "accessible": accessible,
             "writable": writable,
+            "space": {
+                "total_bytes": stats.f_blocks * stats.f_frsize,
+                "used_bytes": (stats.f_blocks - stats.f_bfree) * stats.f_frsize,
+                # What the dashboard user can still write, as df reports it.
+                "available_bytes": stats.f_bavail * stats.f_frsize,
+            },
             "error": error,
         }
 
@@ -462,6 +475,7 @@ class DiskManager:
                     "device": root.get("path") if root is not None else None,
                     "size_bytes": root.get("size") if root is not None else None,
                     "filesystem": row.get("fstype") if row is not None else None,
+                    "space": mount_health["space"],
                     "expected_mount": expected_mount,
                     "hold_until": hold["until"],
                     "hold_remaining_seconds": hold["remaining_seconds"],

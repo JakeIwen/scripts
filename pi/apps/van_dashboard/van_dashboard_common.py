@@ -201,6 +201,10 @@ DISK_EJECT_HOLD_DIR = os.environ.get(
 DISK_HEALTH_STATE_DIR = os.environ.get(
     "VAN_DASHBOARD_DISK_HEALTH_STATE_DIR", "/var/lib/vanpi-disk-health"
 )
+# smart_watch.sh's per-disk reading log (pi/docs/monitoring/SMART.md).
+SMART_HISTORY_DIR = os.environ.get(
+    "VAN_DASHBOARD_SMART_HISTORY_DIR", "/var/lib/vanpi-smart-watch/history"
+)
 DISK_STATUS_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_DISK_STATUS_TIMEOUT", "10"))
 DISK_ACTION_TIMEOUT = float(os.environ.get("VAN_DASHBOARD_DISK_ACTION_TIMEOUT", "1800"))
 SAFE_REBOOT = os.environ.get(

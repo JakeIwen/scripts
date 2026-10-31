@@ -12,6 +12,7 @@ from .backup_settings_control import BackupSettingsControl
 from .van_dashboard_common import COMPUTE_ROOT, StateStore
 from .van_dashboard_cop import CopAlertManager, CopCanWakeStatusReader
 from .van_dashboard_disks import DiskManager
+from .van_dashboard_disk_stats import DiskStatsReader
 from .van_dashboard_history import NetworkHistoryClient
 from .van_dashboard_home import LightingController, TuyaSwitchManager
 from .van_dashboard_integrations import PriceCheckController, SystemMonitorClient
@@ -64,6 +65,7 @@ pi_cloud_control = CloudBackupControl('pi')
 backup_priority_control = BackupPriorityControl()
 ignition_monitor_control = IgnitionMonitorController()
 disk_manager = DiskManager()
+disk_stats = DiskStatsReader(system_monitor)
 system_power = SystemPowerController()
 dashboard_restart = DashboardRestartController()
 telemetry_summary = TelemetrySummaryReader()

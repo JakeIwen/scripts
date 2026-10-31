@@ -275,6 +275,12 @@ class SystemMonitorClient:
                 del self.read_cache[next(iter(self.read_cache))]
             return copy.deepcopy(payload)
 
+    def disk_io_latest(self):
+        return self._cached_read(["disk-io", "--latest"])
+
+    def disk_io_history(self, label, hours):
+        return self._cached_read(["disk-io", "--label", label, "--hours", str(int(hours))])
+
     def crash_history(self, limit=20):
         return self._cached_read(
             [

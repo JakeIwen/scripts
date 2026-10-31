@@ -4,10 +4,12 @@ from flask import Blueprint, jsonify, request
 
 from ..http import _exact_form, api_error, runtime_proxy
 from ..van_dashboard_disks import DiskCommandError
+from ..van_dashboard_integrations import SystemMonitorCommandError
 
 
 bp = Blueprint("disks", __name__)
 disk_manager = runtime_proxy("disk_manager")
+disk_stats = runtime_proxy("disk_stats")
 
 
 
@@ -23,6 +25,42 @@ def api_disks():
     response.headers["Cache-Control"] = "no-store"
     return response
 
+
+
+@bp.route("/api/disks/stats")
+def api_disk_stats():
+    if request.args:
+        return api_error("disk stats do not accept input", 400)
+    try:
+        stats = disk_stats.latest(disk_manager.labels())
+    except (DiskCommandError, SystemMonitorCommandError, OSError) as exc:
+        return api_error(f"disk stats unavailable: {exc}", 503)
+    response = jsonify({"ok": True, "disk_stats": stats})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@bp.route("/api/disks/history")
+def api_disk_history():
+    if set(request.args) != {"label", "hours"} or any(
+        len(request.args.getlist(name)) > 1 for name in request.args
+    ):
+        return api_error("disk history requires one label and hours", 400)
+    label = request.args["label"]
+    hours = request.args["hours"]
+    try:
+        if label not in disk_manager.labels():
+            return api_error("unknown disk label", 400)
+        if not hours.isdigit():
+            return api_error("hours must be a whole number", 400)
+        history = disk_stats.history(label, int(hours))
+    except ValueError as exc:
+        return api_error(str(exc), 400)
+    except (DiskCommandError, SystemMonitorCommandError, OSError) as exc:
+        return api_error(f"disk history unavailable: {exc}", 503)
+    response = jsonify({"ok": True, "disk_history": history})
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @bp.route("/api/disks/action", methods=["POST"])
