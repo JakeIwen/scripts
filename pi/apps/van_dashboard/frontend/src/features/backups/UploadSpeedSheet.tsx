@@ -211,8 +211,11 @@ function percent(value: number): string {
   return `${value >= 0 ? '+' : ''}${value.toFixed(0)}%`;
 }
 
-function StatGrid({ stats, extra }: { stats: SpeedStats; extra: [string, string, string?][] }) {
-  const rows: [string, string, string?][] = [
+/** One stat box: label, value and an optional tap/hover explanation. */
+type StatRow = [label: string, value: string, hint?: string];
+
+function StatGrid({ stats, extra }: { stats: SpeedStats; extra: StatRow[] }) {
+  const rows: StatRow[] = [
     ['Average', formatSpeed(stats.average), formatMegabits(stats.average)],
     ['Median', formatSpeed(stats.median), 'Half of all minutes were faster than this.'],
     ['Peak minute', formatSpeed(stats.peak), formatMegabits(stats.peak)],
@@ -251,7 +254,7 @@ function StatGrid({ stats, extra }: { stats: SpeedStats; extra: [string, string,
 function PeriodSummary({ runs, stats }: { runs: SpeedRun[]; stats: SpeedStats | null }) {
   if (!stats) return null;
   const trend = linearTrend(runAverages(runs));
-  const extra: [string, string, string?][] = [['Runs', String(runs.length)]];
+  const extra: StatRow[] = [['Runs', String(runs.length)]];
   if (trend)
     extra.push([
       'Trend',
@@ -276,9 +279,7 @@ function RunSummary({
   if (!stats) return null;
   const trend = linearTrend(run.samples);
   const attempt = attemptForRun(run, attempts, now);
-  const extra: [string, string, string?][] = [
-    ['Started', new Date(run.start * 1000).toLocaleString()],
-  ];
+  const extra: StatRow[] = [['Started', new Date(run.start * 1000).toLocaleString()]];
   if (overall && overall.average > 0)
     extra.push([
       'Vs 30 days',

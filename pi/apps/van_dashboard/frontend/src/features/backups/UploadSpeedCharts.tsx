@@ -8,6 +8,7 @@ import {
   runAverages,
   speedStats,
   trendAt,
+  type LinearTrend,
   type SpeedRun,
   type SpeedSample,
 } from './uploadSpeeds';
@@ -114,6 +115,82 @@ function clockLabel(at: number): string {
   return new Date(at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+function TrendLine({
+  chart,
+  trend,
+  start,
+  end,
+}: {
+  chart: Frame;
+  trend: LinearTrend | null;
+  start: number;
+  end: number;
+}) {
+  if (!trend) return null;
+  return (
+    <line
+      className="upload-chart__trend"
+      x1={chart.x(start)}
+      x2={chart.x(end)}
+      y1={chart.y(Math.max(0, trendAt(trend, start)))}
+      y2={chart.y(Math.max(0, trendAt(trend, end)))}
+    />
+  );
+}
+
+function RunBar({
+  chart,
+  run,
+  average,
+  selected,
+  onToggle,
+}: {
+  chart: Frame;
+  run: SpeedRun;
+  average: number;
+  selected: boolean;
+  onToggle: () => void;
+}) {
+  const left = chart.x(run.start);
+  const barWidth = Math.max(MIN_BAR_WIDTH, chart.x(run.end) - left);
+  const hitWidth = Math.max(MIN_HIT_WIDTH, barWidth);
+  const top = chart.y(average);
+  const label = `${dayLabel(run.start)} ${clockLabel(run.start)} · ${formatSpeed(average)} average`;
+  return (
+    <g
+      className={`upload-chart__run${selected ? ' upload-chart__run--selected' : ''}`}
+      role="button"
+      tabIndex={0}
+      aria-label={label}
+      aria-pressed={selected}
+      onClick={onToggle}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        onToggle();
+      }}
+    >
+      <title>{label}</title>
+      {/* A wider transparent target keeps one-minute runs tappable. */}
+      <rect
+        className="upload-chart__hit"
+        x={left + barWidth / 2 - hitWidth / 2}
+        y={MARGIN.top}
+        width={hitWidth}
+        height={HEIGHT - MARGIN.top - MARGIN.bottom}
+      />
+      <rect
+        className="upload-chart__bar"
+        x={left}
+        y={top}
+        width={barWidth}
+        height={Math.max(2, chart.y(0) - top)}
+        rx={2}
+      />
+    </g>
+  );
+}
+
 /** Every run in the 30-day window as a bar at its mean speed; selecting one focuses it. */
 export function RunOverviewChart({
   runs,
@@ -131,7 +208,6 @@ export function RunOverviewChart({
   const [ref, width] = useElementWidth();
   const averages = runAverages(runs);
   const chart = frame(width, start, end, Math.max(0, ...averages.map((point) => point.speed)));
-  const trend = linearTrend(averages);
   // Five date labels collide at phone width.
   const tickCount = width < 480 ? 3 : 5;
   const xTicks = Array.from({ length: tickCount }, (_, step) => {
@@ -147,57 +223,59 @@ export function RunOverviewChart({
         aria-label="Average upload speed of each run over 30 days"
       >
         <Axes chart={chart} xTicks={xTicks} />
-        {trend && (
-          <line
-            className="upload-chart__trend"
-            x1={chart.x(start)}
-            x2={chart.x(end)}
-            y1={chart.y(Math.max(0, trendAt(trend, start)))}
-            y2={chart.y(Math.max(0, trendAt(trend, end)))}
+        <TrendLine chart={chart} trend={linearTrend(averages)} start={start} end={end} />
+        {runs.map((run, index) => (
+          <RunBar
+            key={run.start}
+            chart={chart}
+            run={run}
+            average={averages[index]?.speed ?? 0}
+            selected={selected === index}
+            onToggle={() => onSelect(selected === index ? null : index)}
           />
-        )}
-        {runs.map((run, index) => {
-          const left = chart.x(run.start);
-          const barWidth = Math.max(MIN_BAR_WIDTH, chart.x(run.end) - left);
-          const hitWidth = Math.max(MIN_HIT_WIDTH, barWidth);
-          const average = averages[index]?.speed ?? 0;
-          const top = chart.y(average);
-          const label = `${dayLabel(run.start)} ${clockLabel(run.start)} · ${formatSpeed(average)} average`;
-          return (
-            <g
-              key={run.start}
-              className={`upload-chart__run${selected === index ? ' upload-chart__run--selected' : ''}`}
-              role="button"
-              tabIndex={0}
-              aria-label={label}
-              aria-pressed={selected === index}
-              onClick={() => onSelect(selected === index ? null : index)}
-              onKeyDown={(event) => {
-                if (event.key !== 'Enter' && event.key !== ' ') return;
-                event.preventDefault();
-                onSelect(selected === index ? null : index);
-              }}
-            >
-              <title>{label}</title>
-              <rect
-                className="upload-chart__hit"
-                x={left + barWidth / 2 - hitWidth / 2}
-                y={MARGIN.top}
-                width={hitWidth}
-                height={HEIGHT - MARGIN.top - MARGIN.bottom}
-              />
-              <rect
-                className="upload-chart__bar"
-                x={left}
-                y={top}
-                width={barWidth}
-                height={Math.max(2, chart.y(0) - top)}
-                rx={2}
-              />
-            </g>
-          );
-        })}
+        ))}
       </svg>
+    </div>
+  );
+}
+
+function nearestIndex(samples: SpeedSample[], chart: Frame, x: number): number {
+  let nearest = 0;
+  let distance = Infinity;
+  samples.forEach((sample, index) => {
+    const gap = Math.abs(chart.x(sample.at) - x);
+    if (gap < distance) [nearest, distance] = [index, gap];
+  });
+  return nearest;
+}
+
+function Crosshair({ chart, point }: { chart: Frame; point: SpeedSample }) {
+  return (
+    <g className="upload-chart__crosshair" aria-hidden="true">
+      <line x1={chart.x(point.at)} x2={chart.x(point.at)} y1={MARGIN.top} y2={chart.y(0)} />
+      <circle cx={chart.x(point.at)} cy={chart.y(point.speed)} r={4} />
+    </g>
+  );
+}
+
+function PointTooltip({
+  chart,
+  point,
+  smooth,
+}: {
+  chart: Frame;
+  point: SpeedSample;
+  smooth: number;
+}) {
+  return (
+    <div
+      className="upload-chart__tooltip"
+      role="status"
+      style={{ left: Math.min(Math.max(chart.x(point.at), 70), chart.width - 70) }}
+    >
+      <strong>{formatSpeed(point.speed)}</strong> · {formatMegabits(point.speed)}
+      <br />
+      {clockLabel(point.at)} · {ROLLING_SAMPLES}-min avg {formatSpeed(smooth)}
     </div>
   );
 }
@@ -214,18 +292,10 @@ export function RunDetailChart({ run }: { run: SpeedRun }) {
     at,
     label: clockLabel(at),
   }));
-  const point = hover === null ? null : samples[hover];
+  const point = hover === null ? undefined : samples[hover];
   const pick = (event: React.PointerEvent<SVGRectElement>) => {
     const bounds = event.currentTarget.ownerSVGElement?.getBoundingClientRect();
-    if (!bounds) return;
-    const x = event.clientX - bounds.left;
-    let nearest = 0;
-    let distance = Infinity;
-    samples.forEach((sample, index) => {
-      const gap = Math.abs(chart.x(sample.at) - x);
-      if (gap < distance) [nearest, distance] = [index, gap];
-    });
-    setHover(nearest);
+    if (bounds) setHover(nearestIndex(samples, chart, event.clientX - bounds.left));
   };
   return (
     <div ref={ref} className="upload-chart">
@@ -245,21 +315,8 @@ export function RunDetailChart({ run }: { run: SpeedRun }) {
         <Axes chart={chart} xTicks={xTicks} />
         <path className="upload-chart__raw" d={linePath(samples, chart)} />
         <path className="upload-chart__smooth" d={linePath(smooth, chart)} />
-        {trend && (
-          <line
-            className="upload-chart__trend"
-            x1={chart.x(run.start)}
-            x2={chart.x(run.end)}
-            y1={chart.y(Math.max(0, trendAt(trend, run.start)))}
-            y2={chart.y(Math.max(0, trendAt(trend, run.end)))}
-          />
-        )}
-        {point && (
-          <g className="upload-chart__crosshair" aria-hidden="true">
-            <line x1={chart.x(point.at)} x2={chart.x(point.at)} y1={MARGIN.top} y2={chart.y(0)} />
-            <circle cx={chart.x(point.at)} cy={chart.y(point.speed)} r={4} />
-          </g>
-        )}
+        <TrendLine chart={chart} trend={trend} start={run.start} end={run.end} />
+        {point && <Crosshair chart={chart} point={point} />}
         <rect
           className="upload-chart__overlay"
           x={MARGIN.left}
@@ -272,18 +329,7 @@ export function RunDetailChart({ run }: { run: SpeedRun }) {
         />
       </svg>
       {point && hover !== null && (
-        <div
-          className="upload-chart__tooltip"
-          role="status"
-          style={{
-            left: Math.min(Math.max(chart.x(point.at), 70), width - 70),
-          }}
-        >
-          <strong>{formatSpeed(point.speed)}</strong> · {formatMegabits(point.speed)}
-          <br />
-          {clockLabel(point.at)} · {ROLLING_SAMPLES}-min avg{' '}
-          {formatSpeed(smooth[hover]?.speed ?? point.speed)}
-        </div>
+        <PointTooltip chart={chart} point={point} smooth={smooth[hover]?.speed ?? point.speed} />
       )}
     </div>
   );
