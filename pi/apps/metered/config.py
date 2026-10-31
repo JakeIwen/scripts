@@ -16,6 +16,8 @@ TORRENT_PROCESS = 'qbittorrent-nox'
 TORRENT_API = 'http://127.0.0.1:8080'
 TORRENT_TIMEOUT = 3.0
 HOLD_TAG = 'metered-hold'
+# Stopping clears qBittorrent's force-start flag; this tag remembers it across a hold.
+FORCED_TAG = 'metered-hold-forced'
 
 
 @dataclass(frozen=True)

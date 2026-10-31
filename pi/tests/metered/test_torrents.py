@@ -8,7 +8,7 @@ import threading
 import unittest
 from urllib.parse import parse_qs
 
-from pi.apps.metered.config import HOLD_TAG, POLICYCTL
+from pi.apps.metered.config import FORCED_TAG, HOLD_TAG, POLICYCTL
 from pi.apps.metered.torrent_api import TorrentApi, reconcile_api
 from pi.apps.metered.torrents import TorrentHold
 from shared.metered.records import Actual
@@ -39,11 +39,14 @@ class TorrentTests(unittest.TestCase):
                         continue
                     tags = set(filter(None, row['tags'].split(',')))
                     if endpoint == 'addTags':
-                        tags.add(HOLD_TAG)
+                        tags.add(form['tags'][0])
                     elif endpoint == 'removeTags':
-                        tags.discard(HOLD_TAG)
+                        tags.discard(form['tags'][0])
+                    elif endpoint == 'setForceStart':
+                        row['force_start'] = form['value'][0] == 'true'
                     elif endpoint in ('pause', 'stop') and not case.ignore_pause:
                         row['state'] = 'pausedDL' if endpoint == 'pause' else 'stoppedDL'
+                        row['force_start'] = False
                     elif endpoint in ('resume', 'start'):
                         row['state'] = 'downloading'
                     row['tags'] = ','.join(sorted(tags))
@@ -69,6 +72,16 @@ class TorrentTests(unittest.TestCase):
         self.assertEqual(self.rows[0]['tags'], 'keep')
         self.assertEqual(self.rows[1]['tags'], 'manual')
         self.assertFalse(any(HOLD_TAG in row['tags'] for row in self.rows))
+
+    def test_force_started_torrents_keep_force_start_across_a_hold(self):
+        self.rows[0]['force_start'] = True
+        self.rows.append(dict(hash='c' * 40, state='uploading', tags='', force_start=False))
+        reconcile_api(self.api, False)
+        self.assertFalse(self.rows[0]['force_start'])
+        reconcile_api(self.api, True)
+        self.assertTrue(self.rows[0]['force_start'])
+        self.assertFalse(self.rows[2]['force_start'])
+        self.assertFalse(any(FORCED_TAG in row['tags'] or HOLD_TAG in row['tags'] for row in self.rows))
 
     def test_explicitly_unowned_hold_stays_manual_and_v5_uses_stop(self):
         self.version = 'v5.0.0'

@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 from pi.apps.video_library.video_qbittorrent import (
     QbittorrentError, UrllibTransport, validate_torrent_id,
 )
-from .config import HOLD_TAG, TORRENT_API, TORRENT_TIMEOUT
+from .config import FORCED_TAG, HOLD_TAG, TORRENT_API, TORRENT_TIMEOUT
 
 
 STOPPED_STATES = frozenset({'pausedDL', 'pausedUP', 'stoppedDL', 'stoppedUP', 'error', 'missingFiles'})
@@ -63,14 +63,22 @@ class TorrentApi:
             raise QbittorrentError('unsupported qBittorrent API version') from None
         self.request('torrents/' + endpoint, {'hashes': '|'.join(hashes)})
 
-    def tags(self, action, hashes):
+    def tags(self, action, hashes, tag=HOLD_TAG):
         if hashes:
             self.request('torrents/' + {'add': 'addTags', 'remove': 'removeTags'}[action],
-                         {'hashes': '|'.join(hashes), 'tags': HOLD_TAG})
+                         {'hashes': '|'.join(hashes), 'tags': tag})
+
+    def force_start(self, hashes):
+        if hashes:
+            self.request('torrents/setForceStart', {'hashes': '|'.join(hashes), 'value': 'true'})
+
+
+def has_tag(row, tag):
+    return tag in {value.strip() for value in row['tags'].split(',')}
 
 
 def tagged(row):
-    return HOLD_TAG in {value.strip() for value in row['tags'].split(',')}
+    return has_tag(row, HOLD_TAG)
 
 
 def reconcile_api(api, permitted):
@@ -78,15 +86,21 @@ def reconcile_api(api, permitted):
     if permitted:
         selected = [row['hash'] for row in rows if tagged(row) and row['state'] in STOPPED_STATES
                     and row['state'] not in ('error', 'missingFiles')]
+        forced = [row['hash'] for row in rows if row['hash'] in selected and has_tag(row, FORCED_TAG)]
         api.change('release', selected)
+        api.force_start(forced)
         refreshed = api.torrents() if selected else rows
         confirmed = [row['hash'] for row in refreshed if tagged(row) and row['state'] not in STOPPED_STATES]
         if set(selected) - set(confirmed):
             raise QbittorrentError('torrent resume is not confirmed')
+        api.tags('remove', [row['hash'] for row in refreshed if has_tag(row, FORCED_TAG)
+                            and (row['hash'] in confirmed or not tagged(row))], FORCED_TAG)
         api.tags('remove', confirmed)
         return refreshed
     selected = [row['hash'] for row in rows if row['state'] not in STOPPED_STATES]
     # Ownership precedes stopping so a crash does not strand an unowned hold.
+    api.tags('add', [row['hash'] for row in rows if row['hash'] in selected
+                     and row.get('force_start') is True], FORCED_TAG)
     api.tags('add', selected)
     api.change('hold', selected)
     refreshed = api.torrents() if selected else rows
