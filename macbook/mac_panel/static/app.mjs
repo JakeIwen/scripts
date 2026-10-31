@@ -8,6 +8,7 @@ import * as automations from './section_automations.mjs';
 import * as crontab from './section_crontab.mjs';
 import * as deferred from './section_deferred.mjs';
 import * as guard from './section_guard.mjs';
+import * as metered from './section_metered.mjs';
 import * as ntfy from './section_ntfy.mjs';
 import * as restore from './section_restore.mjs';
 import * as services from './section_services.mjs';
@@ -17,6 +18,7 @@ import * as settings from './section_settings.mjs';
 const SECTIONS = [
   {id: 'deferred', title: 'Deferred jobs', render: deferred.render, auto: true},
   {id: 'services', title: 'Background services', render: services.render, auto: true},
+  {id: 'metered', title: 'Metered', render: metered.render, auto: true},
   {id: 'automations', title: 'Automations', render: automations.render, auto: true},
   {id: 'amphetamine', title: 'Amphetamine', render: amphetamine.render, auto: false},
   {id: 'crontab', title: 'User crontab', render: crontab.render, auto: false},

@@ -1,0 +1,14 @@
+{
+  "tool": "metered-mac",
+  "title": "Mac Low Data Mode",
+  "description": "Interface control is opt-in after the LAN Time Machine test.",
+  "settings": [
+    {
+      "name": "enabled",
+      "label": "Control Low Data Mode",
+      "type": "boolean",
+      "default": false,
+      "description": "Enable only after install_low_data_mode_sudoers.zsh proves a LAN Time Machine backup with constrained set. Native flags are never automatically cleared; an owned flag needs an explicit Restore request."
+    }
+  ]
+}

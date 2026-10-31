@@ -25,6 +25,7 @@ compare it with this checkout. Deployed files may differ from the repository.
 
 | Path | Caller | Owner |
 |---|---|---|
+| `macbook/metered/mac-metered` | Mac shell, updater admission and Mac Panel | `macbook/metered/`; launchd uses its `-m macbook.metered tick` boundary |
 | `macbook/scripts/display_cab_dimmer.py` | `com.jacobr.display-cab-dimmer` LaunchAgent and Mac Panel automation | `macbook/scripts/cab_dimmer/` plus the stable entry script |
 | `macbook/scripts/amphetamine_control.py` | Mac Panel Amphetamine tab and Terminal | `macbook/scripts/amphetamine/` |
 | `macbook/scripts/deferred.zsh` | `com.jacobr.deferred-jobs` LaunchAgent and Mac Panel | the script and `shared/automations/` declaration |
@@ -155,6 +156,19 @@ compare it with this checkout. Deployed files may differ from the repository.
   `provision` (new networks), `status` (status/dashboard output), and `starlink`
   (power-off roaming). Ship the entrypoint and every sibling together.
 - `macbook/shortcuts/`: stdlib Python 3.9+ SSH-key Shortcut specs and builders: Pi command shortcuts (`pi_shortcuts.py`, `workflows.py`) and the "To Mac LLM" photo share sheet (`mac_shortcuts.py`, `mac_workflows.py`); shared plist helpers live in `workflows.py`. From the repo root run `/usr/bin/python3 -m macbook.shortcuts.build_shortcuts` to build both sets (requires macOS `/usr/bin/shortcuts` signing); outputs are ignored under `macbook/build/shortcuts/`.
+- `macbook/metered/`: Python 3.9+ Mac controller and stable `mac-metered` CLI;
+  `com.jacobr.metered` runs once per minute in the GUI login session, not as a
+  daemon. `wifi_helper/reader.py` reads fresh Location-authorized CoreWLAN
+  identities through its app; `network.py` reads gateway/ARP, `sync.py` owns
+  bounded SSH and the restricting-only offline queue, `decisions.py` leases
+  cached permissions, and `low_data_mode.py` owns constrained-flag records.
+  State/config cache is `~/.local/state/metered/`; host-local policy is
+  `~/.config/jacobr/metered.json`. `shared/settings/metered-mac.json` declares
+  the separate opt-in flag; `tool_settings` writes it. Native flag ownership
+  is not observable, so automatic clearing is disabled; explicit restore checks
+  the owned network generation. `mac_panel/metered_adapter.py` and
+  `static/section_metered.mjs` expose the CLI without bypassing request guards.
+  Install/test commands and lease limitations: `pi/docs/networking/METERED_CONNECTIONS.md`.
 - `macbook/`: macOS shell utilities, AppleScripts, and BetterTouchTool helpers.
   `macbook/scripts/shimg.zsh` is called by `~/.zshrc`'s `shimg` alias;
   it saves clipboard PNGs into the mounted Pi `agent-shared` folder, with

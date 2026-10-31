@@ -5,6 +5,7 @@ from cli_runner import CliRunner
 from crontab_adapter import CrontabAdapter
 from deferred_adapter import DeferredAdapter
 from guard_adapter import GuardAdapter
+from metered_adapter import MeteredAdapter
 from ntfy_adapter import NtfyAdapter
 from panel_contracts import ApiError, Reply, Section
 from restore_adapter import RestoreAdapter
@@ -20,6 +21,7 @@ class PanelRoutes:
         self.guard = GuardAdapter(runner)
         self.services = ServicesAdapter(runner)
         self.adapters = {
+            Section.METERED: MeteredAdapter(runner),
             Section.AMPHETAMINE: AmphetamineAdapter(runner),
             Section.SETTINGS: SettingsAdapter(settings),
             Section.AUTOMATIONS: self.automations,
@@ -32,6 +34,7 @@ class PanelRoutes:
         }
         self.reads = {f'/api/{name.value}': adapter.read for name, adapter in self.adapters.items()}
         self.writes = {
+            '/api/metered': self.adapters[Section.METERED].mutate,
             '/api/amphetamine': self.adapters[Section.AMPHETAMINE].save,
             '/api/settings': self.adapters[Section.SETTINGS].save,
             '/api/automations': self.automations.action,
