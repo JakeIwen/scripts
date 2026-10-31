@@ -33,6 +33,7 @@ export const SkipReason = {
   Incomplete: 'incomplete',
   Moving: 'moving',
   Unreadable: 'unreadable',
+  NotMedia: 'not-media',
 } as const;
 const category = oneOf(categories);
 const classifier = oneOf(classifiers);
@@ -149,6 +150,9 @@ export const statusSchema = object({
       stage: oneOf(Object.values(Stage)),
       started_at: text,
       pid: v.optional(nonnegativeInteger),
+      detail: v.optional(text),
+      done: v.optional(nonnegativeInteger),
+      total: v.optional(nonnegativeInteger),
     }),
   ),
   last_error: nullableString,

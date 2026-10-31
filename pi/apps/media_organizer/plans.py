@@ -3,7 +3,7 @@ import os
 from copy import deepcopy
 from . import config, records
 from . import classify, runs
-from .busy import operation
+from .busy import note, operation
 from .paths import component, destination, new_directory, confined
 from .scan import scan
 from .relocation import PENDING
@@ -48,7 +48,10 @@ def auto_eligible(proposal, settings):
 def create_plan(settings, entries=None, existing_shows=None, client=None):
     with operation(records.JOB_PROPOSE):
         if entries is None:
+            note(detail='scanning New')
             entries, existing_shows = scan(client)
+        candidates = sum(not entry.skip_reason for entry in entries)
+        note(detail=f'classifying {candidates} entries with {settings.classifier}')
         proposals, classifier, error = classify.propose(entries, existing_shows, settings)
         plan = records.Plan(new_id(), now(), records.PLAN_PROPOSED, classifier, existing_shows,
                             classifier_error=error)

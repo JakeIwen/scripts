@@ -194,8 +194,46 @@ describe('organizer feature API flow', () => {
       path: '/api/media-organizer/apply',
       body: { plan_id: 'plan-1', auto: false },
     });
-    expect(await screen.findByText('Running: apply', { selector: 'p' })).toBeInTheDocument();
+    expect(await screen.findByText('Applying…')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Scan & propose' })).toBeDisabled();
+  });
+  it('shows row-level progress for a running apply and its outcome once finished', async () => {
+    const { status } = mockCliApi();
+    status.busy = {
+      stage: 'apply',
+      started_at: '2026-10-29T08:00:00Z',
+      pid: 42,
+      detail: 'Silo.S01E01',
+      done: 3,
+      total: 8,
+    };
+    status.recent_runs = [{ ...sampleRun(), finished_at: null, moved_count: 2, failed_count: 1 }];
+    render(
+      <ToastProvider>
+        <MediaOrganizerFeature />
+      </ToastProvider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Media organizer' }));
+    const bar = await screen.findByRole('progressbar', { name: 'Applying progress' });
+    expect(bar).toHaveAttribute('value', '3');
+    expect(bar).toHaveAttribute('max', '8');
+    const panel = bar.parentElement;
+    expect(panel?.querySelector('p')).toHaveTextContent(/^Applying… Silo\.S01E01 · \d+ (h|min|s)/);
+    expect(panel?.querySelector(':scope > small')).toHaveTextContent('3 of 8 · 2 moved · 1 failed');
+    status.busy = null;
+    status.recent_runs = [{ ...sampleRun(), moved_count: 7, failed_count: 1 }];
+    status.job = {
+      stage: 'apply',
+      started_at: '2026-10-29T08:00:00Z',
+      finished_at: '2026-10-29T08:05:00Z',
+      ok: true,
+      error: null,
+      result_id: 'run-1',
+    };
+    // The sheet polls status every two seconds while open.
+    expect(
+      await screen.findByText('Apply finished: 7 moved · 1 failed', undefined, { timeout: 4000 }),
+    ).toBeInTheDocument();
   });
   it('blocks controls for external CLI jobs and saves settings per field', async () => {
     const { status, calls } = mockCliApi();

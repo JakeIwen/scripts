@@ -22,6 +22,20 @@ def current():
         return data
 
 
+def note(detail=None, done=None, total=None):
+    """Progress for status readers; a no-op outside this process's staged operation."""
+    path = config.STATE_DIR / 'busy.json'
+    try:
+        data = read_json(path)
+    except (FileNotFoundError, ValueError):
+        return
+    if data.get('pid') != os.getpid():
+        return
+    fields = {'detail': detail, 'done': done, 'total': total}
+    data.update({key: value for key, value in fields.items() if value is not None})
+    write_json(path, data)
+
+
 @contextmanager
 def operation(stage=None):
     global _depth

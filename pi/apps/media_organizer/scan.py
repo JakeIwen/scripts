@@ -51,6 +51,8 @@ def scan(client=None):
             size, kind = stat.st_size, 'dir' if child.is_dir() else 'file'
             if not (child.is_dir() or child.is_file()) or child.name.startswith('.'):
                 skip = records.SKIP_UNREADABLE
+            elif kind == 'file' and size < config.MIN_MEDIA_BYTES:
+                skip = records.SKIP_NOT_MEDIA  # nohup.out and stray scripts are not for Movies
         except (OSError, ValueError):
             skip = records.SKIP_UNREADABLE
         if len(matches) > 1:

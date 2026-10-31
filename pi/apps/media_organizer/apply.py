@@ -1,7 +1,7 @@
 """Serialized, journaled relocation of selected plan rows."""
 from pathlib import Path
 from . import records, plans, runs, link_rebuild
-from .busy import operation
+from .busy import note, operation
 from .locking import media_lock
 from .paths import require_media
 from .qbittorrent_client import Client
@@ -59,8 +59,10 @@ def apply_plan(plan, mode, settings, client=None):
             plan.status = records.PLAN_PARTIAL
             plan.run_ids.append(run.id)
             plans.save(plan)
-            for row in rows:
+            for index, row in enumerate(rows):
+                note(detail=row.entry.name, done=index, total=len(rows))
                 apply_row(row, run, settings, client or Client())
+            note(detail='finishing', done=len(rows), total=len(rows))
             moved = sum(item.status == records.ITEM_MOVED for item in run.items)
             pending = any(item.error and item.error.startswith(PENDING) for item in run.items)
             run.undoable = bool(moved or pending)

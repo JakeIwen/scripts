@@ -1,6 +1,6 @@
 """Reverse a run without guessing after another process changes its payloads."""
 from . import records, runs, link_rebuild
-from .busy import operation
+from .busy import note, operation
 from .locking import media_lock
 from .paths import require_media
 from .qbittorrent_client import Client
@@ -16,10 +16,11 @@ def undo_run(run, client=None):
             if not run.undoable or run.undone_at:
                 raise ValueError('run is not undoable')
             client = client or Client()
-            for item in reversed(run.items):
-                pending = (item.error or '').startswith(PENDING) or item.error == UNDO_PENDING
-                if item.status != records.ITEM_MOVED and not pending:
-                    continue
+            pending_items = [item for item in reversed(run.items)
+                             if item.status == records.ITEM_MOVED
+                             or (item.error or '').startswith(PENDING) or item.error == UNDO_PENDING]
+            for index, item in enumerate(pending_items):
+                note(detail=item.name, done=index, total=len(pending_items))
                 try:
                     recovering = item.error == UNDO_PENDING
                     verify_undo(item, client, recovering)
@@ -33,6 +34,7 @@ def undo_run(run, client=None):
                 except (OSError, ValueError, RuntimeError) as error:
                     item.status, item.error = records.ITEM_FAILED, str(error)
                 runs.save(run)
+            note(detail='finishing', done=len(pending_items), total=len(pending_items))
             run.undone_at, run.undoable = now(), False
             runs.save(run)
         run.alias_status = link_rebuild.schedule()

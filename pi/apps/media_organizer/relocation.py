@@ -18,8 +18,20 @@ def verify_source(row, client):
         raise ValueError('source or torrent ownership changed since proposal')
     if fresh.tracked:
         torrent = next(t for t in client.list_torrents() if t['hash'] == fresh.torrent_hash)
-        if Path(torrent['content_path']) != Path(fresh.path):
+        if not payload_root_is(torrent, Path(fresh.path)):
             raise ValueError('torrent payload root differs from the scanned entry')
+
+
+def payload_root_is(torrent, path):
+    """True when set-location moves exactly ``path``: the content root, or a
+    single-file torrent whose file sits inside that root folder."""
+    content, save_path = Path(torrent['content_path']), Path(torrent['save_path'])
+    if content == path:
+        return True
+    try:
+        return path.parent == save_path and content.relative_to(save_path).parts[0] == path.name
+    except ValueError:
+        return False
 
 
 def ensure_absent(path):
@@ -94,7 +106,7 @@ def verify_undo(item, client, recovering=False):
         torrent = next((t for t in torrents if t['hash'] == item.torrent_hash), None)
         expected = old if already else new
         if (not torrent or Path(torrent['save_path']) != expected.parent
-                or Path(torrent['content_path']) != expected
+                or not payload_root_is(torrent, expected)
                 or torrent['state'] == 'moving' or not complete(torrent)):
             raise ValueError('torrent location or state changed; refusing rollback')
     elif any(owns_path(t, old if already else new) for t in torrents):

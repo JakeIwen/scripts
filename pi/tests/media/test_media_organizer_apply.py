@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from pi.apps.media_organizer import plans, records, runs
+from pi.apps.media_organizer import busy, plans, records, runs
 from pi.apps.media_organizer.apply import apply_plan
 from pi.apps.media_organizer.undo import undo_run
 from pi.tests.media._media_organizer_support import Fixture
@@ -103,6 +103,34 @@ class ApplyTests(Fixture, unittest.TestCase):
         with patch('pi.apps.media_organizer.link_rebuild.schedule', side_effect=check_lock):
             run = apply_plan(plan, 'manual', preferences, self.client)
         self.assertEqual(run.alias_status, records.ALIAS_SCHEDULED)
+
+    def test_progress_note_tracks_rows_while_applying(self):
+        self.payload('A.Movie.2024')
+        self.payload('B.Movie.2024')
+        seen = []
+        from pi.apps.media_organizer import apply as apply_module
+        real = apply_module.move_payload
+        def spy(item, client):
+            seen.append(busy.current())
+            return real(item, client)
+        plan = plans.create_plan(self.preferences())
+        with patch.object(apply_module, 'move_payload', side_effect=spy):
+            apply_plan(plan, 'manual', self.preferences(), self.client)
+        self.assertEqual([(n['stage'], n['detail'], n['done'], n['total']) for n in seen],
+                         [('apply', 'A.Movie.2024', 0, 2), ('apply', 'B.Movie.2024', 1, 2)])
+        self.assertIsNone(busy.current())
+
+    def test_single_file_torrent_inside_its_folder_moves_the_folder(self):
+        torrent = self.payload('Max.Payne.2008')
+        torrent['content_path'] = str(self.new / 'Max.Payne.2008' / 'video.mkv')
+        plan = plans.create_plan(self.preferences())
+        run = apply_plan(plan, 'manual', self.preferences(), self.client)
+        self.assertEqual(run.items[0].status, records.ITEM_MOVED)
+        self.assertTrue((self.media / 'torrent/Movies/Max.Payne.2008/video.mkv').exists())
+        self.assertFalse((self.new / 'Max.Payne.2008').exists())
+        undone = undo_run(run, self.client)
+        self.assertEqual(undone.items[0].status, records.ITEM_REVERTED)
+        self.assertTrue((self.new / 'Max.Payne.2008/video.mkv').exists())
 
     def test_mirror_conflict_keeps_primary_undoable(self):
         self.payload('Movie.2024', mirror=True)

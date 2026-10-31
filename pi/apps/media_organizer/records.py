@@ -15,7 +15,8 @@ from .config import CATEGORIES, CATEGORY_MOVIES
 SKIP_INCOMPLETE = "incomplete"      # torrent still downloading or checking
 SKIP_MOVING = "moving"              # qBittorrent is relocating it right now
 SKIP_UNREADABLE = "unreadable"      # stat failed or path vanished mid-scan
-SKIP_REASONS = (SKIP_INCOMPLETE, SKIP_MOVING, SKIP_UNREADABLE)
+SKIP_NOT_MEDIA = "not-media"        # a loose file too small to be a video (logs, scripts)
+SKIP_REASONS = (SKIP_INCOMPLETE, SKIP_MOVING, SKIP_UNREADABLE, SKIP_NOT_MEDIA)
 
 CLASSIFIER_CODEX = "codex"
 CLASSIFIER_OFFLINE = "offline"
@@ -306,7 +307,8 @@ class Status:
     latest_plan: dict[str, Any] | None     # Plan.summary()
     recent_runs: list[dict[str, Any]]      # Run.summary(), newest first
     settings: dict[str, Any]
-    busy: dict[str, Any] | None            # {"stage": JOB_*, "started_at": iso} when a job runs
+    busy: dict[str, Any] | None            # {"stage": JOB_*, "started_at": iso, "pid": int} when a
+                                           # job runs, plus busy.note()'s detail/done/total progress
     last_error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:

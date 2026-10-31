@@ -12,6 +12,7 @@ class ScanTests(Fixture, unittest.TestCase):
         self.payload('Moving', state='moving')
         self.payload('Checking', state='checkingUP')
         self.payload('Loose', tracked=False)
+        (self.new / 'nohup.out').write_text('log output')
         (self.new / 'link').symlink_to(self.root)
         entries, shows = scan.scan(self.client)
         rows = {e.name: e for e in entries}
@@ -22,9 +23,10 @@ class ScanTests(Fixture, unittest.TestCase):
         self.assertEqual(rows['Moving'].skip_reason, records.SKIP_MOVING)
         self.assertEqual(rows['link'].skip_reason, records.SKIP_UNREADABLE)
         self.assertFalse(rows['Loose'].tracked)
+        self.assertEqual(rows['nohup.out'].skip_reason, records.SKIP_NOT_MEDIA)
         self.assertEqual(shows['TV'], ['The Example'])
         summary = status.status(self.client)
-        self.assertEqual((summary.new_count, summary.tracked_count, summary.incomplete_count), (6, 4, 2))
+        self.assertEqual((summary.new_count, summary.tracked_count, summary.incomplete_count), (7, 4, 2))
 
     def test_failure_does_not_turn_torrents_into_untracked(self):
         self.payload('Movie.2025')

@@ -38,9 +38,10 @@ class TorrentTransport:
         if torrent['hash'] in self.fail:
             return HttpResponse(500, b'failed')
         target = Path(form['location'][0])
-        old = Path(torrent['content_path'])
-        os.rename(old, target / old.name)
-        torrent.update(save_path=str(target), content_path=str(target / old.name))
+        relative = Path(torrent['content_path']).relative_to(torrent['save_path'])
+        root = relative.parts[0]
+        os.rename(Path(torrent['save_path']) / root, target / root)
+        torrent.update(save_path=str(target), content_path=str(target / relative))
         self.moves.append((torrent['hash'], str(target)))
         if torrent['hash'] in self.crash:
             raise KeyboardInterrupt('simulated process death after move')

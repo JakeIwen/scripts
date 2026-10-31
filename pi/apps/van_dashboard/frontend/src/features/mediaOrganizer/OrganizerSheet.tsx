@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { BottomSheet } from '../../components/BottomSheet';
+import { JobProgress } from './JobProgress';
 import { ReviewTable } from './ReviewTable';
 import { RunHistory } from './RunHistory';
 import { SettingsForm } from './SettingsForm';
@@ -34,7 +35,7 @@ export function OrganizerSheet({
         settingsOpen={settingsOpen}
         toggleSettings={() => setSettingsOpen(!settingsOpen)}
       />
-      {o.busyStage && <p role="status">Running: {o.busyStage}</p>}
+      {status && <JobProgress status={status} />}
       {dirty && (
         <p>
           Unsaved review edits. Apply selected saves these decisions before moving files.{' '}
