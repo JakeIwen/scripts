@@ -32,6 +32,9 @@ class PolicyctlTests(unittest.TestCase):
             encoding="utf-8",
         )
         self.pgrep.chmod(0o700)
+        # macOS checks a newly written executable on its first run (0.3-0.5 s, more
+        # under load); pay that here, not inside policyctl's 2 s pgrep timeout.
+        subprocess.run([str(self.pgrep), "-x", "qbittorrent-nox"], capture_output=True, check=False)
         self.environment = {
             **os.environ,
             "VANPI_POLICY_PATH": str(self.policy),
