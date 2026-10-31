@@ -187,6 +187,49 @@ class ControlTests(unittest.TestCase):
         self.assertNotIn(failure.detail, job.history.reason(state))
         notify.assert_called_once()
 
+    def test_dropped_connection_retries_in_five_minutes_without_an_alert(self):
+        state = {'pending': GEN, 'last_success_at': 100, 'work_phase': 'uploading'}
+        failure = RuntimeError('rclone command failed (exit 5)')
+        failure.detail = 'Failed to hashsum: dial tcp: i/o timeout: chunk-0042'
+        with mock.patch('builtins.print') as journal, mock.patch.object(cloud, 'notify') as notify:
+            self.assertEqual(job.failed_attempt(state, failure), 0)
+        journal.assert_called_once_with(
+            'Retrying: ' + job.history.FAILURE_MESSAGES[job.history.BackupFailure.TRANSFER_INTERRUPTED]
+            + ' (Failed to hashsum: dial tcp: i/o timeout: chunk-0042)', flush=True)
+        self.assertEqual(state['phase'], 'deferred')
+        self.assertGreater(state['retry_at'], time.time() + 295)
+        self.assertNotIn('chunk-0042', job.history.reason(state))
+        notify.assert_not_called()
+
+    def test_checking_phase_prerequisite_failure_retries_quickly_but_only_three_times(self):
+        state = {'pending': GEN, 'last_success_at': 100, 'work_phase': 'checking'}
+        failure = subprocess.CalledProcessError(1, ['/usr/bin/findmnt'], stderr='PRIVATE')
+        with mock.patch('builtins.print'), mock.patch.object(cloud, 'notify'):
+            for _ in range(job.history.QUICK_RETRY_LIMIT):
+                state['retry_at'] = None
+                self.assertEqual(job.failed_attempt(state, failure), 0)
+                self.assertGreater(state['retry_at'], time.time() + 295)
+            state['retry_at'] = None
+            self.assertEqual(job.failed_attempt(state, failure), 0)
+            self.assertIsNone(state['retry_at'])
+            state.update(work_phase='uploading', retry_at=None)
+            self.assertEqual(job.failed_attempt(state, RuntimeError('rclone copy failed (exit 1)')), 1)
+            self.assertIsNone(state['retry_at'])
+
+    def test_changed_uplink_during_transfer_retries_quickly(self):
+        self.enterContext(mock.patch.object(job.admission, 'admitted_run', return_value=nullcontext()))
+        store.atomic_json(self.directory / 'state.json', {'pending': GEN, 'last_success_at': 100})
+        with mock.patch.object(job, 'STATE', self.directory), mock.patch.object(job, 'private_directory'), \
+                mock.patch.object(cloud, 'STATE_DIR', self.directory), \
+                mock.patch.object(job, 'config', return_value={'interval_days': 7}), \
+                mock.patch.object(job.signal, 'signal'), \
+                mock.patch.object(sys, 'argv', ['worker', '--run']), \
+                mock.patch.object(job, 'weekly', side_effect=cloud.Deferred('uplink or association changed during transfer')):
+            self.assertEqual(job.main(), 0)
+        state = store.read_json(self.directory / 'state.json')
+        self.assertEqual(state['phase'], 'deferred')
+        self.assertGreater(state['retry_at'], time.time() + 295)
+
     def test_worker_does_not_record_or_run_attempt_while_paused(self):
         self.enterContext(mock.patch.object(job.admission, 'admitted_run', return_value=nullcontext()))
         control.control('pause', '60', self.directory, command=self.command)

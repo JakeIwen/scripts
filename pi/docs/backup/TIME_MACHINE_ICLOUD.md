@@ -95,7 +95,14 @@ its private state and journal.
 Before the first verified Mac cloud copy, temporary deferrals and recognized
 disk I/O, missing-file, read-only-filesystem, helper-check/timeout and transfer
 stall failures schedule a retry in five minutes through the existing minute
-timer. Public status explains these failures without exposing private command
+timer. After a verified copy exists, the same five-minute retry still applies
+to a dropped connection during the transfer (rclone exit 5, or a network error
+in its private detail), to a changed uplink during the transfer, and to a
+recognized failure in the checking phase before any transfer (for example the
+backup disk still remounting after a drive): at most three such quick retries
+in a row, reset once a transfer client starts, then the hourly timer resumes.
+The verifier child passes rclone's error text back to the parent's journal
+line. Public status explains these failures without exposing private command
 output. The retry remains pending
 while the other cloud job holds the upload slot, and explicit timed/indefinite manual
 pauses always take precedence. Authentication, permission, full-disk and invalid

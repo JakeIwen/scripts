@@ -335,6 +335,7 @@ def transfer(cfg, manifest, state):
     files = ROOT / 'upload-files.txt'
     # All entries are validated lowercase SHA-256 names, not caller paths.
     files.write_text(''.join(name + '\n' for name in sorted(expected)))
+    history.transfer_started(state)
     if cfg.get('overlap_verification'):
         upload_and_follow(cfg, ROOT, expected, rows, files, state)
     else:
@@ -520,6 +521,11 @@ def failed_attempt(state, exc):
     state.update(phase='deferred' if retryable else 'error', last_error=message, failure_code=code)
     if retryable:
         schedule_first_copy_retry(state, history.FAILURE_MESSAGES[code])
+        # A dropped connection, or a check that failed before any transfer (for
+        # example the backup disk still remounting after a drive), should not
+        # cost the hour until the next timer tick.
+        if code == history.BackupFailure.TRANSFER_INTERRUPTED or state.get('work_phase') == 'checking':
+            history.schedule_quick_retry(state)
     print(('Retrying: ' if retryable else 'Failed: ') + history.FAILURE_MESSAGES.get(code, message)
           + cloud.failure_detail(exc)
           + (f' (errno {exc.errno})' if isinstance(exc, OSError) and exc.errno is not None else ''), flush=True)
@@ -579,7 +585,10 @@ def _main(args):
     except cloud.Deferred as exc:
         state.update(phase='deferred', last_error=str(exc))
         schedule_first_copy_retry(state, str(exc))
-        print('Deferred: ' + str(exc), flush=True)
+        # The transfer guard's wording for a changed uplink lives in icloud_backup.
+        if 'changed during transfer' in str(exc):
+            history.schedule_quick_retry(state)
+        print('Deferred: ' + str(exc) + cloud.failure_detail(exc), flush=True)
         return 0
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         return failed_attempt(state, exc)

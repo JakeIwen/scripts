@@ -34,6 +34,7 @@ class VerifierResult(TypedDict):
     kind: str
     message: str
     errno: int | None
+    detail: str  # private journal text of a failed command; never public
 
 
 class Follower:
@@ -131,7 +132,7 @@ class Follower:
 def verification_worker(cfg, root, expected, rows, parent_pid, completed, updates, done,
                         result_reader, result_writer, admission):
     result_reader.close()
-    result: VerifierResult = {'kind': ResultKind.COMPLETE, 'message': '', 'errno': None}
+    result: VerifierResult = {'kind': ResultKind.COMPLETE, 'message': '', 'errno': None, 'detail': ''}
     try:
         with suppress(PermissionError):
             os.nice(4)
@@ -140,13 +141,14 @@ def verification_worker(cfg, root, expected, rows, parent_pid, completed, update
         with backup_admission.use(admission):
             Follower(cfg, root, expected, rows, parent_pid, completed, updates, done).run()
     except cloud.AuthenticationRequired as exc:
-        result.update(kind=ResultKind.AUTHENTICATION, message=str(exc))
+        result.update(kind=ResultKind.AUTHENTICATION, message=str(exc), detail=getattr(exc, 'detail', ''))
     except cloud.Deferred as exc:
         result.update(kind=ResultKind.DEFERRED, message=str(exc))
     except OSError as exc:
         result.update(kind=ResultKind.OS_ERROR, message=type(exc).__name__, errno=exc.errno)
     except Exception as exc:
-        result.update(kind=ResultKind.ERROR, message=str(exc) if isinstance(exc, (ValueError, RuntimeError)) else type(exc).__name__)
+        result.update(kind=ResultKind.ERROR, detail=getattr(exc, 'detail', ''),
+                      message=str(exc) if isinstance(exc, (ValueError, RuntimeError)) else type(exc).__name__)
     finally:
         # Shutdown must deliver its result even if the supervisor signals again
         # while the rclone client is still being reaped.
@@ -209,14 +211,20 @@ class VerificationPipeline:
         if self.result is not None:
             kind = self.result['kind']
             message = self.result['message']
-            if kind == ResultKind.AUTHENTICATION: raise cloud.AuthenticationRequired(message)
+            if kind == ResultKind.AUTHENTICATION: raise self.failure(cloud.AuthenticationRequired(message))
             if kind == ResultKind.DEFERRED: raise cloud.Deferred(message)
             if kind == ResultKind.OS_ERROR: raise OSError(self.result['errno'], 'background verification storage error')
-            if kind != ResultKind.COMPLETE: raise RuntimeError(message)
+            if kind != ResultKind.COMPLETE: raise self.failure(RuntimeError(message))
             if not self.done.is_set(): raise RuntimeError('background verification ended before upload finished')
         elif stopped:
             raise RuntimeError('background verification worker stopped unexpectedly')
         return {**self.latest, 'verification_copy_events': len(self.sent)}
+
+    def failure(self, exc):
+        # The worker's rclone error text crosses the process boundary with the
+        # result so the parent's journal line can name it; it stays private.
+        exc.detail = self.result.get('detail', '')
+        return exc
 
     def finish(self, report):
         self.done.set()

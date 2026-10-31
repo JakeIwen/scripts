@@ -49,7 +49,7 @@ class WorkerCleanupTests(unittest.TestCase):
                 stop.assert_called_once()
                 reader.close.assert_called_once()
                 writer.send.assert_called_once_with(
-                    {'kind': pipeline.ResultKind.COMPLETE, 'message': '', 'errno': None})
+                    {'kind': pipeline.ResultKind.COMPLETE, 'message': '', 'errno': None, 'detail': ''})
                 writer.close.assert_called_once()
 
     def test_cleanup_preserves_the_result_of_a_deferred_follower(self):
@@ -62,8 +62,31 @@ class WorkerCleanupTests(unittest.TestCase):
             pipeline.verification_worker({}, Path('.'), {}, {}, 1,
                                          None, None, None, reader, writer, None)
         writer.send.assert_called_once_with(
-            {'kind': pipeline.ResultKind.DEFERRED, 'message': 'supervisor stopped', 'errno': None})
+            {'kind': pipeline.ResultKind.DEFERRED, 'message': 'supervisor stopped', 'errno': None, 'detail': ''})
         writer.close.assert_called_once()
+
+    def test_rclone_error_detail_crosses_the_worker_boundary(self):
+        reader, writer = mock.Mock(), mock.Mock()
+        failure = cloud.command_failure(cloud.RCLONE, 'hashsum', 5,
+            json.dumps({'level': 'error', 'msg': 'Failed to hashsum: dial tcp: i/o timeout', 'object': 'chunk-1'}))
+        with mock.patch.object(pipeline.os, 'nice'), mock.patch.object(pipeline.signal, 'signal'), \
+                mock.patch.object(pipeline.backup_admission, 'use', return_value=nullcontext()), \
+                mock.patch.object(pipeline, 'Follower') as follower, \
+                mock.patch.object(cloud, 'stop_child'):
+            follower.return_value.run.side_effect = failure
+            pipeline.verification_worker({}, Path('.'), {}, {}, 1, None, None, None, reader, writer, None)
+        result = writer.send.call_args.args[0]
+        self.assertEqual(result, {'kind': pipeline.ResultKind.ERROR, 'message': 'rclone command failed (exit 5)',
+                                  'errno': None, 'detail': 'Failed to hashsum: dial tcp: i/o timeout: chunk-1'})
+        parent = object.__new__(VerificationPipeline)
+        parent.pending, parent.sent, parent.latest, parent.result = [], set(), {}, None
+        parent.updates = mock.Mock(**{'get_nowait.side_effect': pipeline.Empty})
+        parent.process = mock.Mock(exitcode=1)
+        parent.reader = mock.Mock(**{'poll.return_value': True, 'recv.return_value': result})
+        with self.assertRaises(RuntimeError) as raised:
+            parent.progress()
+        self.assertEqual(str(raised.exception), 'rclone command failed (exit 5)')
+        self.assertEqual(raised.exception.detail, 'Failed to hashsum: dial tcp: i/o timeout: chunk-1')
 
 
 @unittest.skipUnless(sys.platform.startswith('linux'), 'admission proof requires Linux fdinfo')
