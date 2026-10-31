@@ -1,11 +1,17 @@
+/* Keep the vehicle-control tile yellow across service states. */
 .vonstar-tile,
+.vonstar-tile.tile--neutral,
 .vonstar-tile.tile--good,
 .vonstar-tile.tile--warning,
 .vonstar-tile.tile--bad {
   min-height: 276.390625px;
   gap: 11px;
-  border-color: var(--line);
-  background: var(--tile-background);
+  border-color: #665b2d;
+  background: radial-gradient(circle at 90% 5%, rgb(242 201 76 / 14%), transparent 38%), #1d2429;
+}
+
+.vonstar-tile.tile--good {
+  border-color: #8b7937;
 }
 
 .vonstar-tile .status-pill {
