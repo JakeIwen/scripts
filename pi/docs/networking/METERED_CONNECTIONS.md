@@ -224,20 +224,36 @@ The third compact `policyctl read` column stays zero for existing backup readers
    `pi/scripts/policyctl`, and `pi/scripts/internet_switches.sh`.
    Preserve each live original before installing. Publish the CLI and connectivity
    collector first (mode 755 for executables; 644 for the sourced shell helper).
-4. Use the existing scoped backup deployers, in their documented guarded workflow:
-   `bash pi/deploy_icloud_backup.sh`, then `bash pi/deploy_time_machine_icloud.sh`.
-   Their prerequisite checks must see the new connectivity collector and package
-   CLI. Do not copy individual cloud workers around their owner deployers.
-5. Enable and start the independent reconciler:
+4. Before starting, verify the installed `/home/pi/scripts/backup/icloud_uplink.py`
+   emits the new evidence envelope, including `ipv6_defaults` and verified radio
+   identity fields. Package activation does not ship this flat cloud probe; an
+   older helper makes the new reconciler fail closed even on an unmetered uplink.
+   Stop if it is older: do not bypass the scoped cloud installers by copying an
+   individual worker/helper.
+   Enable and start the independent reconciler:
    `ssh vanpi.lan 'sudo systemctl enable --now vanpi-metered.service'`.
-   Verify `systemctl is-active`, fresh state and the observed torrent hold before
-   removing the old power-based gate. An unknown state must be held, not permitted.
-6. Install the staged `policyctl` and `internet_switches.sh` together, retaining
+   Verify `systemctl is-active`, fresh state, the verdict and per-consumer state
+   before removing the old power-based gate: denied torrents must be held;
+   verified unmetered torrents may remain permitted/running. An unknown state
+   must be held, not permitted. While the old gate remains, both gates only
+   restrict; confirm the graceful-stop fallback works with the live script, or
+   that it is not needed while torrents are permitted.
+5. Install the staged `policyctl` and `internet_switches.sh` together, retaining
    rollback copies. Run `/home/pi/scripts/policyctl --no-reconcile migrate`, then
    `/home/pi/scripts/policyctl reconcile` over SSH. Migration preserves disk and
    torrent switches, removes the old indefinite exemption, and never grants a new
    approval. Update only the reviewed `.bashrc` wrapper lines after comparing its
    live version; do not overwrite unrelated `nfn` additions.
+6. Use the existing scoped backup deployers, in their documented guarded workflow:
+   `bash pi/deploy_icloud_backup.sh`, then `bash pi/deploy_time_machine_icloud.sh`.
+   Their cohort includes `internet_switches.sh`, so deploy them only after the
+   reconciler is verified and the policy pair is migrated.
+   Their prerequisite checks must see the new connectivity collector and package
+   CLI; an exact staged live file satisfies the revision check. Use the documented
+   `VANPI_BACKUP_PREVIOUS_REVISION` for reviewed older live files. Do not copy
+   individual cloud workers around their owner deployers or interrupt an active
+   upload: wait for their existing fence and inactive-worker checks to admit
+   deployment. Preserve independent cloud pauses.
 7. Update the dashboard backend:
    `python3 pi/deploy_python.py --update --service van-dashboard.service`.
    Check `http://vanpi.lan:8788/api/metered`, the service journal, registry/state
