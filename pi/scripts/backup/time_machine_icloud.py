@@ -29,6 +29,7 @@ import time_machine_store as store
 import time_machine_staging as staging
 import backup_priority as priority
 import mac_capture_control
+import upload_speed_log
 from time_machine_pipeline import upload_and_follow
 from time_machine_verification import ObjectVerifier
 from time_machine_icloud_control import admit_worker, is_paused
@@ -559,6 +560,8 @@ def _main(args):
     if args != ['--run']:
         raise ValueError('unsupported operation')
     cloud.STATE_DIR = STATE
+    # The shell entry holds this job's lock, so no other writer is appending.
+    upload_speed_log.prune(upload_speed_log.log_path(STATE))
     if not admit_worker(STATE):
         return 0
     cfg = config()

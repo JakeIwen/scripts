@@ -5,6 +5,7 @@ from flask import Blueprint, jsonify, request
 from ..http import _exact_form, api_error, runtime_proxy
 from ..van_dashboard_backups import BackupStatusError
 from ..cloud_backup_details import attempt_details
+from ..cloud_upload_speeds import upload_speeds
 
 
 bp = Blueprint("backups", __name__)
@@ -29,6 +30,21 @@ def api_cloud_attempt_details(kind, attempt_id):
     response.headers["Cache-Control"] = "no-store"
     return response
 
+
+
+@bp.route("/api/backups/cloud/<kind>/upload-speeds")
+def api_cloud_upload_speeds(kind):
+    if request.args:
+        return api_error("upload speeds do not accept query parameters", 400)
+    try:
+        samples = upload_speeds(kind)
+    except ValueError as exc:
+        return api_error(str(exc), 400)
+    except RuntimeError:
+        return api_error("Upload speed history is unavailable.", 503)
+    response = jsonify({"ok": True, "samples": samples})
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @bp.route("/api/backups")

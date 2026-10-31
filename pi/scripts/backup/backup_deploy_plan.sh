@@ -45,6 +45,7 @@ BACKUP_DEPLOY_PLAN=(
   'both|pi/scripts/backup/time_machine_icloud_status.py|/home/pi/scripts/backup/time_machine_icloud_status.py|revision|pi:pi|750|new'
   'both|pi/scripts/backup/icloud_backup.sh|/home/pi/scripts/backup/icloud_backup.sh|revision|pi:pi|750|new'
   'both|pi/scripts/backup/icloud_progress.py|/home/pi/scripts/backup/icloud_progress.py|revision|pi:pi|750|new'
+  'both|pi/scripts/backup/upload_speed_log.py|/home/pi/scripts/backup/upload_speed_log.py|revision|pi:pi|750|new'
   'both|pi/scripts/backup/icloud_inventory.py|/home/pi/scripts/backup/icloud_inventory.py|revision|pi:pi|750|new'
   'both|pi/scripts/backup/icloud_uplink.py|/home/pi/scripts/backup/icloud_uplink.py|revision|pi:pi|750|new'
   'both|pi/scripts/backup/icloud_backup_control.py|/home/pi/scripts/backup/icloud_backup_control.py|revision|pi:pi|750|new'

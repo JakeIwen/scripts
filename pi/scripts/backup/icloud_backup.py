@@ -34,6 +34,7 @@ from cloud_backup_control import admit_worker
 import backup_priority as priority
 import cloud_backup_requests
 import backup_settings
+import upload_speed_log
 
 CONFIG = Path('/etc/vanpi-icloud-backup.json')
 STATE_DIR = Path('/var/lib/vanpi-icloud-backup')
@@ -42,6 +43,7 @@ GENERATION = re.compile(r'vanpi-\d{8}T\d{6}Z-[0-9a-f]{8}\Z')
 OWNER = 'vanpi-icloud-weekly-v1'
 CHILD = None
 CHILD_INTERACTIVE = False
+UPLOAD_SPEED = upload_speed_log.UploadSpeedSampler()
 
 
 class Deferred(Exception):
@@ -430,6 +432,8 @@ def record_progress(state, phase, **values):
                  last_error=None, progress_updated_at=time.time())
     if values:
         state.setdefault('progress', {}).update(values)
+    if phase == 'uploading' and 'command_bytes' in values:
+        UPLOAD_SPEED.observe(STATE_DIR, values['command_bytes'])
     atomic_json(STATE_DIR / 'state.json', state)
     if changed:
         save_attempt(STATE_DIR, state)
@@ -695,6 +699,9 @@ def _main(mode):
     STATE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
     if STATE_DIR.is_symlink() or STATE_DIR.stat().st_uid != 0:
         raise RuntimeError('unsafe state directory')
+    if mode == '--run':
+        # The shell entry holds this job's lock, so no other writer is appending.
+        upload_speed_log.prune(upload_speed_log.log_path(STATE_DIR))
     if mode == '--run' and not admit_worker(STATE_DIR):
         return 0
     state = read_json(STATE_DIR / 'state.json', {})

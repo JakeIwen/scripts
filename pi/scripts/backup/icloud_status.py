@@ -21,6 +21,7 @@ import backup_priority
 import cloud_backup_requests
 import backup_settings
 from icloud_progress import TransferActivity
+import upload_speed_log
 
 STATE_DIR = Path('/var/lib/vanpi-icloud-backup')
 CONFIG = Path('/etc/vanpi-icloud-backup.json')
@@ -430,8 +431,17 @@ def dashboard_status():
     return apply_priority_control(apply_manual_control(result, deadline), STATE_DIR)
 
 
+def upload_speeds(directory):
+    """The fixed 30-day speed log as [epoch, bytes/s] pairs for the dashboard graph."""
+    return {'samples': [list(row) for row in upload_speed_log.read_samples(
+        upload_speed_log.log_path(directory))]}
+
+
 if __name__ == '__main__':
     # This is deliberately not a general-purpose root file reader.
+    if sys.argv[1:] == ['--upload-speeds']:
+        print(json.dumps(upload_speeds(STATE_DIR)))
+        sys.exit(0)
     if len(sys.argv) != 1:
         sys.exit(2)
     try:

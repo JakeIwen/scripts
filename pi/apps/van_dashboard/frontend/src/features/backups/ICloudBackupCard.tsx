@@ -5,6 +5,7 @@ import { ICloudBackupControls } from './ICloudBackupControls';
 import { iCloudShowsProgress, iCloudUploadTimeLeft } from './cloudPresentation';
 import { ICloudAttemptMessage } from './ICloudAttemptMessage';
 import { ConcurrentVerification } from './ConcurrentVerification';
+import { UploadSpeedButton } from './UploadSpeedSheet';
 
 function ICloudUploadSpeed({ status }: { status: AvailableICloudStatus }) {
   if (!status.running || status.phase !== 'uploading') return null;
@@ -51,6 +52,12 @@ export function ICloudBackupCard({
       <p className="backup-icloud__description">
         {kind === 'time-machine' ? 'Encrypted Time Machine image' : 'Encrypted Borg recovery copy'}{' '}
         · every {status.intervalDays} days · keep {status.keepGenerations} verified copies.
+        <UploadSpeedButton
+          kind={kind}
+          title={title}
+          attempts={status.attempts}
+          running={status.running && status.phase === 'uploading'}
+        />
       </p>
       <ICloudAttemptMessage {...status} kind={kind} id={status.attempts[0]?.id} />
       {status.controlsAvailable && refresh && (

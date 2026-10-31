@@ -6,7 +6,8 @@ import subprocess
 import sys
 import backup_settings
 
-from icloud_status import apply_manual_control, apply_priority_control, build_status, number, pause_deadline, read_json
+from icloud_status import (apply_manual_control, apply_priority_control, build_status, number,
+                           pause_deadline, read_json, upload_speeds)
 
 STATE = Path('/var/lib/vanpi-time-machine-icloud')
 CONFIG = Path('/etc/vanpi-time-machine-icloud.json')
@@ -45,6 +46,9 @@ def status():
 
 
 if __name__ == '__main__':
+    if sys.argv[1:] == ['--upload-speeds']:
+        print(json.dumps(upload_speeds(STATE)))
+        sys.exit(0)
     if sys.argv[1:]:
         sys.exit(2)
     try:

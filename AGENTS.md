@@ -580,6 +580,16 @@ compare it with this checkout. Deployed files may differ from the repository.
   text stays private. `features/backups/ICloudAttemptMessage.tsx` owns the popup,
   with its response contract in `attemptDetails.ts`. Neither endpoint nor popup
   changes worker state, and nested dialogs close independently.
+- Cloud upload speeds: `pi/scripts/backup/upload_speed_log.py` owns each job's
+  `upload-speed.bin` in its state directory (one `<II` epoch/bytes-per-second
+  sample per uploading minute, from rclone byte deltas; 30-day retention, pruned
+  on every `--run` and hourly while appending). `icloud_backup.record_progress`
+  feeds it for both jobs; a failed write never stops an upload. The status
+  helpers' fixed `--upload-speeds` flag exports it, `cloud_upload_speeds.py`
+  serves `/api/backups/cloud/<kind>/upload-speeds`, and
+  `features/backups/UploadSpeedSheet.tsx` (charts in `UploadSpeedCharts.tsx`,
+  run/stat/trend math in `uploadSpeeds.ts`) is the graph sheet behind each iCloud
+  card's graph icon. Both cloud installers ship the module.
 - Backup priority: `pi/scripts/backup/backup_priority.py` owns the cloud job
   registry and the protected until-verified override; `backup_priority_control.py`
   is the fixed CLI. Priority only decides which cloud job may take the single
