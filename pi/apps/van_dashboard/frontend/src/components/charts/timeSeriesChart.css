@@ -1,0 +1,73 @@
+.time-chart {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+.time-chart svg {
+  display: block;
+  overflow: visible;
+}
+.time-chart__axes line {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.time-chart__axes text,
+.time-chart__limit text {
+  fill: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.time-chart__line {
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.time-chart__limit line {
+  stroke: var(--bad);
+  stroke-width: 1;
+  stroke-dasharray: 5 4;
+}
+.time-chart__crosshair line {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+.time-chart__crosshair circle {
+  stroke: var(--panel);
+  stroke-width: 2;
+}
+.time-chart__overlay {
+  fill: transparent;
+  touch-action: pan-y;
+}
+.time-chart__tooltip {
+  position: absolute;
+  top: 1.6rem;
+  transform: translateX(-50%);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 0.3rem 0.5rem;
+  background: var(--panel-raised);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.time-chart__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+  margin: 0 0 0.3rem;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.time-chart__legend li::before {
+  content: '';
+  display: inline-block;
+  vertical-align: middle;
+  width: 1rem;
+  margin-right: 0.35rem;
+  border-top: 2px solid var(--series-color);
+}

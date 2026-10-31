@@ -9,6 +9,7 @@ export function samplePlan(): Plan {
     existing_shows: { TV: ['Silo'], Documentaries: ['Planet Earth'] },
     run_ids: [],
     settled_rows: [],
+    moved_rows: [],
     rows: [
       {
         entry: {

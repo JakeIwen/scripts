@@ -1,13 +1,17 @@
 import { getJson, postForm } from '../../api/client';
 import {
+  decodeDiskHistoryResponse,
   decodeDiskMutation,
+  decodeDiskStatsResponse,
   decodeDiskStatusResponse,
   decodeStoragePolicyMutation,
   decodeStoragePolicyResponse,
 } from './schema';
 import type {
   DiskAction,
+  DiskHistory,
   DiskMutationResult,
+  DiskStats,
   DiskStatus,
   StoragePolicy,
   StoragePolicyField,
@@ -22,6 +26,19 @@ export async function fetchStoragePolicy(signal: AbortSignal): Promise<StoragePo
 export async function fetchDiskStatus(signal: AbortSignal): Promise<DiskStatus> {
   const payload = await getJson('/api/disks', signal);
   return decodeDiskStatusResponse(payload);
+}
+
+export async function fetchDiskStats(signal: AbortSignal): Promise<DiskStats> {
+  return decodeDiskStatsResponse(await getJson('/api/disks/stats', signal));
+}
+
+export async function fetchDiskHistory(
+  label: string,
+  hours: number,
+  signal: AbortSignal,
+): Promise<DiskHistory> {
+  const query = new URLSearchParams({ label, hours: String(hours) });
+  return decodeDiskHistoryResponse(await getJson(`/api/disks/history?${query}`, signal));
 }
 
 export async function updateStoragePolicy(

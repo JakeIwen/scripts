@@ -40,6 +40,10 @@ export function formatBytes(bytes: number | null | undefined): string {
   return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
 }
 
+export function formatSpeed(bytesPerSecond: number): string {
+  return `${formatBytes(bytesPerSecond)}/s`;
+}
+
 export function formatPercent(value: number | null | undefined, digits = 0): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return '—';
   return `${value.toFixed(digits)}%`;

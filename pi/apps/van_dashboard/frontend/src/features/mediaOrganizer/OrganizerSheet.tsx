@@ -1,10 +1,14 @@
 import { useState } from 'react';
 import { BottomSheet } from '../../components/BottomSheet';
+import { MediaAction } from '../../components/media/MediaAction';
 import { JobProgress } from './JobProgress';
-import { ReviewTable } from './ReviewTable';
 import { RunHistory } from './RunHistory';
 import { SettingsForm } from './SettingsForm';
-import { PlanState } from './schema';
+import { OrganizerReview } from './OrganizerReview';
+import { OrganizerNotices } from './OrganizerNotices';
+import { OrganizerError } from './OrganizerError';
+import { organizerCopy as copy } from './content';
+import { Stage } from './schema';
 import type { Organizer } from './useOrganizer';
 
 export function OrganizerSheet({
@@ -16,126 +20,69 @@ export function OrganizerSheet({
   onClose: () => void;
   organizer: Organizer;
 }) {
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [view, setView] = useState('Review');
   const status = o.resource.data;
-  const dirty = Object.keys(o.draft).length > 0;
-  const currentPlan = o.plan?.id === status?.latest_plan?.id ? o.plan : null;
-  const editable =
-    !!currentPlan &&
-    (currentPlan.status === PlanState.Proposed || currentPlan.status === PlanState.Partial);
   const blocked = o.blocked || !status?.media_mounted;
   return (
     <BottomSheet open={open} onClose={onClose} title="Media organizer" className="organizer-sheet">
-      <OrganizerToolbar
-        organizer={o}
-        blocked={blocked}
-        dirty={dirty}
-        editable={editable}
-        autoAvailable={!!currentPlan?.rows.some((row) => row.auto_eligible)}
-        settingsOpen={settingsOpen}
-        toggleSettings={() => setSettingsOpen(!settingsOpen)}
-      />
-      {status && <JobProgress status={status} />}
-      {dirty && (
-        <p>
-          Unsaved review edits. Apply selected saves these decisions before moving files.{' '}
-          <button type="button" disabled={o.blocked} onClick={() => o.clearDraft()}>
-            Discard edits
+      <nav className="media-navigation" aria-label="Organizer views">
+        {['Review', 'History', 'Settings'].map((label) => (
+          <button
+            key={label}
+            type="button"
+            className="secondary-button"
+            aria-pressed={view === label}
+            onClick={() => {
+              setView(label);
+              o.clearError();
+            }}
+          >
+            {label}
           </button>
-        </p>
+        ))}
+      </nav>
+      {status && (
+        <JobProgress
+          status={status}
+          pendingStage={o.busyStage}
+          showOutcome={
+            view === 'Review' || (view === 'History' && status.job?.stage !== Stage.Propose)
+          }
+        />
       )}
-      {(o.error || o.resource.error || status?.last_error || status?.job?.error) && (
-        <p className="error-message" role="alert">
-          {o.error ?? o.resource.error?.message ?? status?.job?.error ?? status?.last_error}
-        </p>
-      )}
-      {status && !status.media_mounted && (
-        <p className="error-message">Media drive is not mounted.</p>
-      )}
-      {status && !status.qbittorrent_available && (
-        <p>qBittorrent unavailable; tracked entries cannot be moved.</p>
-      )}
-      {status?.settings.mirror_rename && status.mirror_pending > 0 && (
-        <p>
-          {status.mirror_pending} backup {status.mirror_pending === 1 ? 'copy' : 'copies'} on bigboi
-          will be renamed to match before the next backup sync.
-        </p>
-      )}
-      {settingsOpen && status && (
-        <SettingsForm settings={status.settings} disabled={o.blocked} save={o.save} />
-      )}
-      {currentPlan ? (
-        <section>
-          <h3>Review plan</h3>
-          {currentPlan.classifier_error && (
-            <p className="error-message">{currentPlan.classifier_error}</p>
-          )}
-          <ReviewTable
-            plan={currentPlan}
-            draft={o.draft}
-            onChange={o.change}
-            disabled={blocked || !editable}
+      <OrganizerError organizer={o} />
+      {status && (
+        <div hidden={view !== 'Settings'}>
+          <SettingsForm
+            settings={status.settings}
+            disabled={o.blocked}
+            saving={o.actionLabel === 'Saving setting'}
+            save={o.save}
           />
-        </section>
-      ) : (
-        <p>{status?.latest_plan ? 'Loading plan…' : 'Scan & propose to create a review plan.'}</p>
+        </div>
       )}
-      <RunHistory
-        runs={status?.recent_runs ?? []}
-        disabled={blocked}
-        onUndo={(id) => void o.undo(id)}
-      />
+      {status && view !== 'Settings' && <OrganizerNotices organizer={o} />}
+      {view === 'Review' && <OrganizerReview organizer={o} />}
+      {view === 'History' && open && (
+        <>
+          <MediaAction
+            label={copy.links}
+            help={copy.linksHelp}
+            disabled={blocked}
+            onClick={() => void o.alias()}
+          >
+            {o.busyStage === Stage.Alias || o.actionLabel === copy.links
+              ? 'Rebuilding links…'
+              : copy.links}
+          </MediaAction>
+          <RunHistory
+            runs={status?.recent_runs ?? []}
+            disabled={blocked}
+            workingRunId={o.undoRunId}
+            onUndo={(id) => void o.undo(id)}
+          />
+        </>
+      )}
     </BottomSheet>
-  );
-}
-
-function OrganizerToolbar({
-  organizer: o,
-  blocked,
-  dirty,
-  editable,
-  autoAvailable,
-  settingsOpen,
-  toggleSettings,
-}: {
-  organizer: Organizer;
-  blocked: boolean;
-  dirty: boolean;
-  editable: boolean;
-  autoAvailable: boolean;
-  settingsOpen: boolean;
-  toggleSettings: () => void;
-}) {
-  return (
-    <div className="organizer-toolbar">
-      <button
-        type="button"
-        className="primary-button"
-        disabled={blocked || dirty}
-        onClick={() => void o.scan()}
-      >
-        Scan &amp; propose
-      </button>
-      <button
-        type="button"
-        disabled={blocked || dirty || !editable || !autoAvailable}
-        onClick={() => void o.applyAuto()}
-      >
-        Apply auto
-      </button>
-      <button
-        type="button"
-        disabled={blocked || !editable || !o.canApply}
-        onClick={() => void o.applySelected()}
-      >
-        Apply selected
-      </button>
-      <button type="button" disabled={blocked} onClick={() => void o.alias()}>
-        Rebuild links
-      </button>
-      <button type="button" aria-expanded={settingsOpen} onClick={toggleSettings}>
-        Settings
-      </button>
-    </div>
   );
 }

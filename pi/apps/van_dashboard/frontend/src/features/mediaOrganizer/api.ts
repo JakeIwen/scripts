@@ -4,6 +4,7 @@ import {
   aliasSchema,
   jobSchema,
   planSchema,
+  runSchema,
   settingsSchema,
   Stage,
   statusSchema,
@@ -25,3 +26,10 @@ export const startJob = async (
 ) => decode(jobSchema, await postJson(`${root}/${stage}`, payload), 'job');
 export const rebuildLinks = async () =>
   decode(aliasSchema, await postJson(`${root}/alias`, {}), 'alias');
+
+export const fetchRun = async (id: string, signal: AbortSignal) =>
+  decode(
+    runSchema,
+    await getJson(`${root}/runs/${encodeURIComponent(id)}`, signal),
+    'organizer run',
+  );

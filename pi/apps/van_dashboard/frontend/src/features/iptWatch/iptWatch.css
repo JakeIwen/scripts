@@ -6,8 +6,15 @@
   align-items: center;
   gap: 0.6rem;
 }
+.ipt-watch-toolbar {
+  margin-bottom: 1rem;
+}
+.ipt-watch-last-check {
+  color: var(--muted);
+  font-size: var(--media-control-font-size);
+}
 .ipt-watch-section {
-  margin-top: 1.5rem;
+  margin-top: 1rem;
 }
 .ipt-watch-row {
   display: flex;
@@ -23,27 +30,35 @@
   flex: 1 1 260px;
   overflow-wrap: anywhere;
 }
+.ipt-watch-details strong {
+  font-weight: 600;
+}
 .ipt-watch-details p {
   margin: 0.4rem 0;
   color: var(--muted);
+  font-size: var(--media-control-font-size);
+}
+.ipt-watch-details .error-message {
+  color: var(--bad);
 }
 .ipt-watch-badge {
   display: inline-block;
   padding: 0.15rem 0.4rem;
   border: 1px solid var(--line);
   border-radius: var(--radius-small);
-  font-size: 0.8rem;
+  font-size: var(--media-control-font-size);
 }
 .ipt-watch-badges {
   margin-top: 0.4rem;
 }
-.ipt-watch-sheet button,
-.ipt-watch-add input {
-  min-height: 44px;
-  padding: 0.55rem 0.8rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-small);
-  background: var(--panel-raised);
+.ipt-watch-sheet .secondary-button {
+  font-size: var(--media-control-font-size);
+}
+.ipt-watch-sheet progress {
+  display: block;
+  width: 100%;
+  accent-color: var(--accent);
+  margin: 0.5rem 0;
 }
 .ipt-watch-add {
   display: grid;
@@ -56,20 +71,25 @@
   display: grid;
   gap: 0.4rem;
   min-width: 0;
+  font-size: var(--media-control-font-size);
 }
-.ipt-watch-add label:first-child {
+.ipt-watch-add label:first-child,
+.ipt-watch-add__help,
+.ipt-watch-add .error-message {
   grid-column: 1 / -1;
+}
+.ipt-watch-add__help {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  color: var(--muted);
 }
 .ipt-watch-add input {
   min-width: 0;
   width: 100%;
+  min-height: 44px;
+  padding: 0.55rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
   background: var(--panel);
-}
-@media (min-width: 700px) {
-  .ipt-watch-add {
-    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) auto;
-  }
-  .ipt-watch-add label:first-child {
-    grid-column: auto;
-  }
 }

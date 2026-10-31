@@ -87,3 +87,7 @@ export interface WantRequest {
   season?: number;
   episode?: number;
 }
+export interface WatchPending {
+  action: CandidateOperation | WantlistAction | typeof JobStage.Check;
+  id?: string;
+}

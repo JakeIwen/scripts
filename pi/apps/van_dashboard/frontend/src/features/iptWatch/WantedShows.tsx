@@ -1,128 +1,91 @@
-import { useState } from 'react';
 import { formatRelativeTime } from '../../utils/format';
-import { Source, WantAction, type WantedShow, type WantRequest } from './schema';
+import { MediaHelp } from '../../components/media/MediaHelp';
+import { MediaAction } from '../../components/media/MediaAction';
+import { StatusPill } from '../../components/StatusPill';
+import { Source, WantAction, type WantedShow, type WantRequest, type WatchPending } from './schema';
+import { watchCopy as copy, sourceLabels, pendingLabels } from './content';
+import { AddShow } from './AddShow';
 
-export function WantedShows({
-  shows,
-  disabled,
-  change,
-}: {
+type Props = {
   shows: WantedShow[];
   disabled: boolean;
+  pending?: WatchPending | null;
   change: (payload: WantRequest) => Promise<boolean>;
-}) {
+};
+export function WantedShows({ shows, disabled, pending, change }: Props) {
   return (
     <section className="ipt-watch-section">
-      <h3>Wanted shows</h3>
-      {shows.length === 0 && <p>No wanted shows yet.</p>}
+      <div className="media-section-heading">
+        <h3>Wanted shows</h3>
+        <MediaHelp label="Wanted shows">{copy.wantedHelp}</MediaHelp>
+      </div>
+      {!shows.length && <p>No wanted shows yet.</p>}
       {shows.map((show) => (
-        <article className="ipt-watch-row" key={show.name}>
-          <div className="ipt-watch-details">
-            <strong>{show.name}</strong> <span className="ipt-watch-badge">{show.source}</span>
-            {show.paused && <span className="ipt-watch-badge">Paused</span>}
-            <p>
-              {haveText(show)} · Last watched {formatRelativeTime(show.last_watched)}
-            </p>
-          </div>
-          <div className="ipt-watch-actions">
-            <button
-              type="button"
-              disabled={disabled}
-              aria-label={`${show.paused ? 'Resume' : 'Pause'} ${show.name}`}
-              onClick={() =>
-                void change({
-                  action: show.paused ? WantAction.Resume : WantAction.Pause,
-                  name: show.name,
-                })
-              }
-            >
-              {show.paused ? 'Resume' : 'Pause'}
-            </button>
-            {show.source === Source.Manual && (
-              <button
-                type="button"
-                disabled={disabled}
-                aria-label={`Remove ${show.name}`}
-                onClick={() => void change({ action: WantAction.Remove, name: show.name })}
-              >
-                Remove
-              </button>
-            )}
-          </div>
-        </article>
+        <WantedShowRow
+          key={show.name}
+          show={show}
+          disabled={disabled}
+          pending={pending}
+          change={change}
+        />
       ))}
-      <AddShow disabled={disabled} add={change} />
+      <AddShow disabled={disabled} pending={pending?.action === WantAction.Add} add={change} />
     </section>
   );
 }
-function haveText(show: WantedShow) {
-  if (show.have_season === null) return 'On disk unknown';
-  return `have S${String(show.have_season).padStart(2, '0')}${show.have_episode === null ? '' : `E${String(show.have_episode).padStart(2, '0')}`}`;
-}
-function AddShow({
+function WantedShowRow({
+  show,
   disabled,
-  add,
-}: {
-  disabled: boolean;
-  add: (payload: WantRequest) => Promise<boolean>;
-}) {
-  const [name, setName] = useState('');
-  const [season, setSeason] = useState('');
-  const [episode, setEpisode] = useState('');
+  pending,
+  change,
+}: Omit<Props, 'shows'> & { show: WantedShow }) {
+  const pauseAction = show.paused ? WantAction.Resume : WantAction.Pause;
+  const pauseLabel = show.paused ? 'Resume' : 'Pause';
   return (
-    <form
-      className="ipt-watch-add"
-      onSubmit={async (event) => {
-        event.preventDefault();
-        if (!name.trim()) return;
-        const saved = await add({
-          action: WantAction.Add,
-          name: name.trim(),
-          ...(season !== '' ? { season: Number(season) } : {}),
-          ...(episode !== '' ? { episode: Number(episode) } : {}),
-        });
-        if (saved) {
-          setName('');
-          setSeason('');
-          setEpisode('');
-        }
-      }}
-    >
-      <label>
-        Show name
-        <input
-          required
-          value={name}
-          maxLength={250}
+    <article className="ipt-watch-row">
+      <div className="ipt-watch-details">
+        <strong>{show.name}</strong>{' '}
+        <StatusPill detail={show.source === Source.Library ? copy.libraryHelp : copy.manualHelp}>
+          {sourceLabels[show.source]}
+        </StatusPill>
+        {show.paused && (
+          <StatusPill tone="warning" detail={copy.pauseHelp}>
+            Paused
+          </StatusPill>
+        )}
+        <p>
+          {show.have_season === null
+            ? 'On disk unknown'
+            : `On disk: S${String(show.have_season).padStart(2, '0')}${show.have_episode === null ? ' (last episode unknown)' : `E${String(show.have_episode).padStart(2, '0')}`}`}
+          {show.last_watched !== null && ` · Last watched ${formatRelativeTime(show.last_watched)}`}
+        </p>
+      </div>
+      <div className="ipt-watch-actions">
+        <MediaAction
+          label={`${pauseLabel} ${show.name}`}
+          help={show.paused ? copy.resumeHelp : copy.pauseHelp}
           disabled={disabled}
-          onChange={(event) => setName(event.target.value)}
-        />
-      </label>
-      <label>
-        Season (optional)
-        <input
-          type="number"
-          min="0"
-          step="1"
-          value={season}
-          disabled={disabled}
-          onChange={(event) => setSeason(event.target.value)}
-        />
-      </label>
-      <label>
-        Episode (optional)
-        <input
-          type="number"
-          min="0"
-          step="1"
-          value={episode}
-          disabled={disabled}
-          onChange={(event) => setEpisode(event.target.value)}
-        />
-      </label>
-      <button type="submit" disabled={disabled || !name.trim()}>
-        Add show
-      </button>
-    </form>
+          aria-label={`${pauseLabel} ${show.name}`}
+          onClick={() => void change({ action: pauseAction, name: show.name })}
+        >
+          {pending?.id === show.name && pending.action === pauseAction
+            ? pendingLabels[pauseAction]
+            : pauseLabel}
+        </MediaAction>
+        {show.source === Source.Manual && (
+          <MediaAction
+            label={`Remove ${show.name}`}
+            help={copy.removeHelp}
+            disabled={disabled}
+            aria-label={`Remove ${show.name}`}
+            onClick={() => void change({ action: WantAction.Remove, name: show.name })}
+          >
+            {pending?.id === show.name && pending.action === WantAction.Remove
+              ? pendingLabels[WantAction.Remove]
+              : 'Remove'}
+          </MediaAction>
+        )}
+      </div>
+    </article>
   );
 }

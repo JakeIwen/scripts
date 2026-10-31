@@ -1,0 +1,142 @@
+.disk-stats {
+  margin-top: 14px;
+}
+
+.disk-stats__cells {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.disk-stats__cells > div {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+  background: var(--panel);
+}
+
+.disk-stats__cells dt,
+.disk-stats__note {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.disk-stats__cells dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.disk-stats__cells dd:not(.disk-stats__note) {
+  margin-top: 2px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.disk-stats__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.disk-stats__smart {
+  font-size: 13px;
+}
+
+.disk-stats__smart--good {
+  color: var(--good);
+}
+
+.disk-stats__smart--warning {
+  color: var(--warning);
+}
+
+.disk-stats__smart--bad {
+  color: var(--bad);
+}
+
+.disk-stats__history-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.disk-stats__history-button svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.disk-history__ranges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.8rem;
+}
+
+.disk-history__range {
+  min-height: 0;
+  padding: 0.3rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.disk-history__range[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--panel-raised);
+  color: var(--text);
+  font-weight: 650;
+}
+
+.disk-history__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+}
+
+.disk-history__stats div {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+  background: var(--panel-soft);
+}
+
+.disk-history__stats dt {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.disk-history__stats dd {
+  margin: 0.15rem 0 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.disk-history__heading {
+  margin: 1rem 0 0.3rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.disk-history__empty {
+  color: var(--muted);
+}
+
+@media (max-width: 700px) {
+  .disk-stats__cells {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

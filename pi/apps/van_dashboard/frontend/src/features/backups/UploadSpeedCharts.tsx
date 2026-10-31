@@ -1,7 +1,9 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useState } from 'react';
+import { clockLabel, dayLabel, niceMax } from '../../components/charts/axisLabels';
+import { useElementWidth } from '../../components/charts/useElementWidth';
+import { formatSpeed } from '../../utils/format';
 import {
   formatMegabits,
-  formatSpeed,
   linearTrend,
   rollingMean,
   ROLLING_SAMPLES,
@@ -15,37 +17,8 @@ import {
 
 const HEIGHT = 170;
 const MARGIN = { top: 10, right: 10, bottom: 24, left: 62 };
-const FALLBACK_WIDTH = 600;
 const MIN_BAR_WIDTH = 4;
 const MIN_HIT_WIDTH = 14;
-
-function useElementWidth() {
-  const ref = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(FALLBACK_WIDTH);
-  useLayoutEffect(() => {
-    const element = ref.current;
-    if (!element) return;
-    const measure = () => {
-      if (element.clientWidth > 0) setWidth(element.clientWidth);
-    };
-    measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-  return [ref, width] as const;
-}
-
-/** A round axis maximum in the binary units formatBytes prints, close above the data. */
-function niceMax(value: number): number {
-  if (value <= 0) return 1024;
-  const unit = 1024 ** Math.floor(Math.log(value) / Math.log(1024));
-  const scaled = value / unit;
-  const magnitude = 10 ** Math.floor(Math.log10(scaled));
-  const step = [1, 1.5, 2, 3, 4, 5, 6, 8, 10].find((factor) => factor * magnitude >= scaled) ?? 10;
-  return step * magnitude * unit;
-}
 
 interface Frame {
   width: number;
@@ -105,14 +78,6 @@ function linePath(points: SpeedSample[], chart: Frame): string {
         `${index ? 'L' : 'M'}${chart.x(point.at).toFixed(1)},${chart.y(point.speed).toFixed(1)}`,
     )
     .join('');
-}
-
-function dayLabel(at: number): string {
-  return new Date(at * 1000).toLocaleDateString([], { month: 'short', day: 'numeric' });
-}
-
-function clockLabel(at: number): string {
-  return new Date(at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 function TrendLine({

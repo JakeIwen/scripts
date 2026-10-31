@@ -3,6 +3,7 @@ import * as v from 'valibot';
 import {
   booleanValue,
   decode,
+  finiteNumber,
   nonnegativeInteger,
   nullableBoolean,
   nullableNumber,
@@ -10,6 +11,7 @@ import {
   nullableString,
   object,
   oneOf,
+  positiveInteger,
   stringArray,
   text,
   trueValue,
@@ -116,6 +118,22 @@ const diskHealthSchema = v.pipe(
   })),
 );
 
+const nonnegativeNumber = v.pipe(finiteNumber, v.minValue(0, 'must not be negative'));
+const integer = v.pipe(finiteNumber, v.integer('must be a whole number'));
+
+const diskSpaceSchema = v.pipe(
+  object({
+    total_bytes: nonnegativeInteger,
+    used_bytes: nonnegativeInteger,
+    available_bytes: nonnegativeInteger,
+  }),
+  v.transform((row) => ({
+    totalBytes: row.total_bytes,
+    usedBytes: row.used_bytes,
+    availableBytes: row.available_bytes,
+  })),
+);
+
 const managedDiskSchema = v.pipe(
   object({
     label: text,
@@ -129,6 +147,7 @@ const managedDiskSchema = v.pipe(
     device: nullableString,
     size_bytes: nullableNumber,
     filesystem: nullableString,
+    space: v.nullable(diskSpaceSchema),
     expected_mount: text,
     hold_until: nullableNumber,
     hold_remaining_seconds: nullableNumber,
@@ -147,6 +166,7 @@ const managedDiskSchema = v.pipe(
     device: row.device,
     sizeBytes: row.size_bytes,
     filesystem: row.filesystem,
+    space: row.space,
     expectedMount: row.expected_mount,
     holdUntil: row.hold_until,
     holdRemainingSeconds: row.hold_remaining_seconds,
@@ -193,6 +213,132 @@ export const diskStatusResponseSchema = v.pipe(
   v.transform((row) => decode(diskStatusSchema, row.disk_status, 'disk_status')),
 );
 
+// One minute of the system monitor's per-disk I/O log.
+const diskIoMinuteSchema = v.pipe(
+  object({
+    at: nonnegativeInteger,
+    read_bytes_per_second: nonnegativeNumber,
+    write_bytes_per_second: nonnegativeNumber,
+    busy_percent: nonnegativeNumber,
+  }),
+  v.transform((row) => ({
+    at: row.at,
+    readBytesPerSecond: row.read_bytes_per_second,
+    writeBytesPerSecond: row.write_bytes_per_second,
+    busyPercent: row.busy_percent,
+  })),
+);
+
+// One smart_watch.sh reading; a field the drive does not report is null.
+const smartReadingSchema = v.pipe(
+  object({
+    at: nonnegativeInteger,
+    passed: nullableBoolean,
+    reallocated_sectors: v.nullable(nonnegativeInteger),
+    pending_sectors: v.nullable(nonnegativeInteger),
+    uncorrectable_sectors: v.nullable(nonnegativeInteger),
+    temperature_c: v.nullable(integer),
+    power_on_hours: v.nullable(nonnegativeInteger),
+    power_cycles: v.nullable(nonnegativeInteger),
+  }),
+  v.transform((row) => ({
+    at: row.at,
+    passed: row.passed,
+    reallocatedSectors: row.reallocated_sectors,
+    pendingSectors: row.pending_sectors,
+    uncorrectableSectors: row.uncorrectable_sectors,
+    temperatureC: row.temperature_c,
+    powerOnHours: row.power_on_hours,
+    powerCycles: row.power_cycles,
+  })),
+);
+
+const diskStatsSchema = v.pipe(
+  object({
+    checked_at: nonnegativeInteger,
+    io_sample_seconds: positiveInteger,
+    disks: v.record(
+      text,
+      object({ io: v.nullable(diskIoMinuteSchema), smart: v.nullable(smartReadingSchema) }),
+    ),
+  }),
+  v.transform((row) => ({
+    checkedAt: row.checked_at,
+    ioSampleSeconds: row.io_sample_seconds,
+    disks: row.disks,
+  })),
+);
+
+const diskIoBucketSchema = v.pipe(
+  object({
+    start: nonnegativeInteger,
+    minutes: positiveInteger,
+    read_bytes: nonnegativeNumber,
+    write_bytes: nonnegativeNumber,
+    peak_read_bytes_per_second: nonnegativeNumber,
+    peak_write_bytes_per_second: nonnegativeNumber,
+    busy_percent: nonnegativeNumber,
+    peak_busy_percent: nonnegativeNumber,
+  }),
+  v.transform((row) => ({
+    start: row.start,
+    minutes: row.minutes,
+    readBytes: row.read_bytes,
+    writeBytes: row.write_bytes,
+    peakReadBytesPerSecond: row.peak_read_bytes_per_second,
+    peakWriteBytesPerSecond: row.peak_write_bytes_per_second,
+    busyPercent: row.busy_percent,
+    peakBusyPercent: row.peak_busy_percent,
+  })),
+);
+
+const temperatureBucketSchema = v.pipe(
+  object({
+    start: nonnegativeInteger,
+    readings: positiveInteger,
+    temperature_c: finiteNumber,
+    max_temperature_c: finiteNumber,
+  }),
+  v.transform((row) => ({
+    start: row.start,
+    readings: row.readings,
+    temperatureC: row.temperature_c,
+    maxTemperatureC: row.max_temperature_c,
+  })),
+);
+
+const diskHistorySchema = v.pipe(
+  object({
+    label: text,
+    since: nonnegativeInteger,
+    until: nonnegativeInteger,
+    bucket_seconds: positiveInteger,
+    io_sample_seconds: positiveInteger,
+    io: v.array(diskIoBucketSchema),
+    temperature: v.array(temperatureBucketSchema),
+    smart: v.nullable(smartReadingSchema),
+  }),
+  v.transform((row) => ({
+    label: row.label,
+    since: row.since,
+    until: row.until,
+    bucketSeconds: row.bucket_seconds,
+    ioSampleSeconds: row.io_sample_seconds,
+    io: row.io,
+    temperature: row.temperature,
+    smart: row.smart,
+  })),
+);
+
+export const diskStatsResponseSchema = v.pipe(
+  object({ ok: trueValue, disk_stats: deferred }),
+  v.transform((row) => decode(diskStatsSchema, row.disk_stats, 'disk_stats')),
+);
+export const diskHistoryResponseSchema = v.pipe(
+  object({ ok: trueValue, disk_history: deferred }),
+  v.transform((row) => decode(diskHistorySchema, row.disk_history, 'disk_history')),
+);
+
 export const storagePolicyMutationSchema = v.pipe(
   object({ ok: trueValue, message: text, policy: deferred }),
   v.transform((row) => ({
@@ -216,6 +362,12 @@ export function decodeStoragePolicyResponse(value: unknown): StoragePolicy {
 export function decodeDiskStatusResponse(value: unknown): DiskStatus {
   return decode(diskStatusResponseSchema, value, 'disk status response');
 }
+export function decodeDiskStatsResponse(value: unknown): DiskStats {
+  return decode(diskStatsResponseSchema, value, 'disk stats response');
+}
+export function decodeDiskHistoryResponse(value: unknown): DiskHistory {
+  return decode(diskHistoryResponseSchema, value, 'disk history response');
+}
 export function decodeStoragePolicyMutation(value: unknown): StoragePolicyMutationResult {
   return decode(storagePolicyMutationSchema, value, 'storage policy mutation response');
 }
@@ -238,3 +390,11 @@ export type DiskAction = NonNullable<v.InferOutput<typeof diskOperationSchema>['
 export type DiskOperation = v.InferOutput<typeof diskOperationSchema>;
 export type DiskStatus = v.InferOutput<typeof diskStatusSchema>;
 export type DiskMutationResult = v.InferOutput<typeof diskMutationSchema>;
+export type DiskSpace = v.InferOutput<typeof diskSpaceSchema>;
+export type DiskIoMinute = v.InferOutput<typeof diskIoMinuteSchema>;
+export type SmartReading = v.InferOutput<typeof smartReadingSchema>;
+export type DiskStats = v.InferOutput<typeof diskStatsSchema>;
+export type DiskStatsEntry = DiskStats['disks'][string];
+export type DiskIoBucket = v.InferOutput<typeof diskIoBucketSchema>;
+export type TemperatureBucket = v.InferOutput<typeof temperatureBucketSchema>;
+export type DiskHistory = v.InferOutput<typeof diskHistorySchema>;

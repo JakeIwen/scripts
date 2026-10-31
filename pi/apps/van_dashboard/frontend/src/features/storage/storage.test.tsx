@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { fetchDiskStatus, fetchStoragePolicy } from './api';
@@ -9,6 +9,7 @@ import { StorageSheet } from './StorageSheet';
 import { StorageTile } from './StorageTile';
 import {
   diskStatusPayload,
+  sampleDiskStats,
   sampleDiskStatus,
   sampleStoragePolicy,
   storagePolicyPayload,
@@ -85,6 +86,7 @@ describe('storage feature', () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.useRealTimers();
   });
 
@@ -131,6 +133,7 @@ describe('storage feature', () => {
     const resources = {
       policy: resource(sampleStoragePolicy()),
       disks: resource(sampleDiskStatus()),
+      stats: resource(sampleDiskStats()),
     };
     const controls = storageControls();
     const sharedUsbControls = usbControls();
@@ -157,5 +160,36 @@ describe('storage feature', () => {
     expect(screen.getByRole('button', { name: 'Reset USB' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'HDDs enabled' }));
     expect(controls.setPolicy).toHaveBeenCalledWith('disks_enabled', false);
+
+    // The fresh I/O minute, SMART reading and mounted space all reach the card.
+    expect(screen.getByText('3.0 MiB/s')).toBeInTheDocument();
+    expect(screen.getByText('512 KiB/s')).toBeInTheDocument();
+    expect(screen.getByText('43%')).toBeInTheDocument();
+    expect(screen.getByText('41 °C')).toBeInTheDocument();
+    expect(screen.getByText('1.2 TiB')).toBeInTheDocument();
+    expect(
+      screen.getByText('SMART passed · 32 reallocated sectors · 12,345 h powered on'),
+    ).toBeInTheDocument();
+  });
+
+  it('shows dashes once a disk stops reporting I/O', () => {
+    const stats = sampleDiskStats();
+    const resources = {
+      policy: resource(sampleStoragePolicy()),
+      disks: resource(sampleDiskStatus()),
+      stats: resource({ ...stats, checkedAt: stats.checkedAt + 600 }),
+    };
+    render(
+      <StorageSheet
+        open
+        onClose={vi.fn()}
+        resources={resources}
+        usbResource={resource(sampleUsbStatus())}
+        controls={storageControls()}
+        usbControls={usbControls()}
+      />,
+    );
+    expect(screen.getAllByText('no recent sample')).toHaveLength(3);
+    expect(screen.getByText('41 °C')).toBeInTheDocument();
   });
 });

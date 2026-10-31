@@ -1,11 +1,16 @@
+import { RunDetails } from './RunDetails';
 import type { RunSummary } from './schema';
+import { MediaAction } from '../../components/media/MediaAction';
+import { organizerCopy as copy, aliasLabels } from './content';
 export function RunHistory({
   runs,
   disabled,
+  workingRunId,
   onUndo,
 }: {
   runs: RunSummary[];
   disabled: boolean;
+  workingRunId?: string | null;
   onUndo: (id: string) => void;
 }) {
   return (
@@ -22,28 +27,29 @@ export function RunHistory({
                 {run.moved_count} moved · {run.failed_count} failed · {run.reverted_count} reverted
               </p>
               <small>
-                Links: {run.alias_status ?? 'Not scheduled'}
+                Links: {run.alias_status ? aliasLabels[run.alias_status] : 'Not scheduled'}
                 {run.undone_at ? ' · Undone' : ''}
               </small>
-              {run.error && <p className="error-message">{run.error}</p>}
+              {run.error && (
+                <p className="error-message">
+                  Run needs attention: {run.error}. View items for details before retrying.
+                </p>
+              )}
             </div>
             {run.undoable && !run.undone_at && (
-              <button
-                type="button"
+              <MediaAction
+                label="Undo"
+                help={copy.undoHelp}
                 className="danger-button"
                 disabled={disabled}
                 onClick={() => {
-                  if (
-                    window.confirm(
-                      'Undo this organizer run? Moved files and mirror copies will return to their previous locations.',
-                    )
-                  )
-                    onUndo(run.id);
+                  if (window.confirm(copy.undoConfirm)) onUndo(run.id);
                 }}
               >
-                Undo
-              </button>
+                {workingRunId === run.id ? 'Undoing…' : 'Undo'}
+              </MediaAction>
             )}
+            <RunDetails run={run} />
           </article>
         ))}
     </section>

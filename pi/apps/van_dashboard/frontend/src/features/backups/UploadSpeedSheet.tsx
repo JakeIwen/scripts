@@ -2,13 +2,12 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { BottomSheet } from '../../components/BottomSheet';
 import { TooltipButton } from '../../components/TooltipButton';
-import { formatBytes, formatDuration } from '../../utils/format';
+import { formatBytes, formatDuration, formatSpeed } from '../../utils/format';
 import { iCloudPhaseLabel, type ICloudAttempt, type ICloudBackupKind } from './icloud';
 import { RunDetailChart, RunOverviewChart } from './UploadSpeedCharts';
 import {
   attemptForRun,
   formatMegabits,
-  formatSpeed,
   linearTrend,
   loadUploadSpeeds,
   RETENTION_SECONDS,

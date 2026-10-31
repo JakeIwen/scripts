@@ -605,6 +605,15 @@ compare it with this checkout. Deployed files may differ from the repository.
   `features/backups/UploadSpeedSheet.tsx` (charts in `UploadSpeedCharts.tsx`,
   run/stat/trend math in `uploadSpeeds.ts`) is the graph sheet behind each iCloud
   card's graph icon. Both cloud installers ship the module.
+- Disk stats: the system monitor's `disk_history.py` keeps each disk label's
+  per-minute read/write/busy record for 30 days beside its database (read with
+  `system_event_monitor.py disk-io --latest` or `--label`), and `smart_watch.sh`
+  logs every SMART reading to `/var/lib/vanpi-smart-watch/history/<label>`.
+  `van_dashboard_disk_stats.py` joins both for `/api/disks/stats` and
+  `/api/disks/history` (mounted free space rides `/api/disks`);
+  `features/storage/DiskStatsStrip.tsx` and `DiskStatsSheet.tsx` show them on
+  each Disks & Torrents card. `frontend/src/components/charts/` holds the shared
+  chart pieces (`TimeSeriesChart`, `useElementWidth`, `axisLabels`).
 - Backup priority: `pi/scripts/backup/backup_priority.py` owns the cloud job
   registry and the protected until-verified override; `backup_priority_control.py`
   is the fixed CLI. Priority only decides which cloud job may take the single
@@ -988,6 +997,17 @@ The production boundary is `Response.json()`; sparse JS arrays, accessors and
 Proxies are outside that wire contract. Native arrays do not preserve hole
 semantics from the old `.map()` decoders.
 
+Dashboard `frontend/src/components/media/MediaHelp.tsx` and `MediaAction.tsx`
+share accessible hover/focus/tap hints with the organizer and Watchlist; action
+help remains reachable when an action is disabled. Feature help and reused messages
+live in each feature’s `content.ts`; one-off labels and messages remain beside their
+controls.
+`components/media/useAcceptedJob.ts` reconciles accepted jobs without replaying them;
+a missing job is confirmed with a new read before releasing its guard. The shared
+`usePollingResource.refresh({ fresh: true })` waits out any older poll before reading
+post-mutation state, keeping sequential polling while preventing stale unlocks.
+`frontend/src/test/deferred.ts` supplies controlled asynchronous response gates for
+overlapping GET/POST behavior tests.
 Dashboard `frontend/src/components/TooltipButton.tsx` owns hover/focus/tap hints
 (including backup setting help), with viewport-clamped portals outside clipped
 tiles. Action buttons keep their normal click action. Grid items are inline-size

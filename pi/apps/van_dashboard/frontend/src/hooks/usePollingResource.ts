@@ -6,7 +6,7 @@ export interface PollingState<T> {
   initialLoading: boolean;
   refreshing: boolean;
   lastUpdatedAt: number | null;
-  refresh: () => Promise<T | null>;
+  refresh: (options?: { fresh?: boolean }) => Promise<T | null>;
 }
 
 interface PollingOptions<T> {
@@ -33,40 +33,55 @@ export function usePollingResource<T>({
   const requestRef = useRef<Promise<T | null> | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(false);
+  // The newest refresh, so a queued fresh read never restarts a replaced loader.
+  const latestRefreshRef = useRef<((options?: { fresh?: boolean }) => Promise<T | null>) | null>(
+    null,
+  );
 
-  const refresh = useCallback((): Promise<T | null> => {
-    if (requestRef.current && !controllerRef.current?.signal.aborted) {
-      return requestRef.current;
-    }
-    requestRef.current = null;
+  const refresh = useCallback(
+    function read(options?: { fresh?: boolean }): Promise<T | null> {
+      if (requestRef.current && !controllerRef.current?.signal.aborted) {
+        // Mutations require a request begun after they completed, not an older poll.
+        return options?.fresh
+          ? requestRef.current.then(() =>
+              mountedRef.current ? (latestRefreshRef.current ?? read)() : null,
+            )
+          : requestRef.current;
+      }
+      requestRef.current = null;
 
-    const controller = new AbortController();
-    controllerRef.current = controller;
-    setRefreshing(true);
+      const controller = new AbortController();
+      controllerRef.current = controller;
+      setRefreshing(true);
 
-    const request = load(controller.signal)
-      .then((next) => {
-        if (!mountedRef.current) return null;
-        setData(next);
-        setError(null);
-        setLastUpdatedAt(Date.now());
-        return next;
-      })
-      .catch((reason: unknown) => {
-        if (!mountedRef.current || controller.signal.aborted) return null;
-        setError(reason instanceof Error ? reason : new Error(String(reason)));
-        return null;
-      })
-      .finally(() => {
-        if (requestRef.current !== request) return;
-        requestRef.current = null;
-        if (controllerRef.current === controller) controllerRef.current = null;
-        if (mountedRef.current) setRefreshing(false);
-      });
+      const request = load(controller.signal)
+        .then((next) => {
+          if (!mountedRef.current) return null;
+          setData(next);
+          setError(null);
+          setLastUpdatedAt(Date.now());
+          return next;
+        })
+        .catch((reason: unknown) => {
+          if (!mountedRef.current || controller.signal.aborted) return null;
+          setError(reason instanceof Error ? reason : new Error(String(reason)));
+          return null;
+        })
+        .finally(() => {
+          if (requestRef.current !== request) return;
+          requestRef.current = null;
+          if (controllerRef.current === controller) controllerRef.current = null;
+          if (mountedRef.current) setRefreshing(false);
+        });
 
-    requestRef.current = request;
-    return request;
-  }, [load]);
+      requestRef.current = request;
+      return request;
+    },
+    [load],
+  );
+  useEffect(() => {
+    latestRefreshRef.current = refresh;
+  }, [refresh]);
 
   useEffect(() => {
     mountedRef.current = true;

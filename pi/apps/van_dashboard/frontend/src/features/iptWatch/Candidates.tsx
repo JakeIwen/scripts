@@ -1,16 +1,25 @@
 import { useState } from 'react';
-import { formatBytes } from '../../utils/format';
-import { CandidateAction, CandidateState, type Candidate, type CandidateOperation } from './schema';
+import { MediaHelp } from '../../components/media/MediaHelp';
+import { watchCopy as copy } from './content';
+import { CandidateRow } from './CandidateRow';
+import {
+  CandidateState,
+  type Candidate,
+  type CandidateOperation,
+  type WatchPending,
+} from './schema';
 
 export function Candidates({
   candidates,
   disabled,
   writable,
+  pending,
   change,
 }: {
   candidates: Candidate[];
   disabled: boolean;
   writable: boolean;
+  pending?: WatchPending | null;
   change: (action: CandidateOperation, candidate: Candidate) => Promise<boolean>;
 }) {
   const [handled, setHandled] = useState(false);
@@ -18,12 +27,26 @@ export function Candidates({
   const old = candidates.filter((candidate) => candidate.status !== CandidateState.New);
   return (
     <section className="ipt-watch-section">
-      <h3>Candidates</h3>
-      {fresh.length === 0 && <p>No new candidates.</p>}
-      <CandidateGroups candidates={fresh} disabled={disabled} writable={writable} change={change} />
+      <div className="media-section-heading">
+        <h3>New releases</h3>
+        <MediaHelp label="Release filters">{copy.releasesHelp}</MediaHelp>
+      </div>
+      {fresh.length === 0 && <p>No new releases. Check now, or add a wanted show.</p>}
+      <CandidateGroups
+        candidates={fresh}
+        disabled={disabled}
+        writable={writable}
+        pending={pending}
+        change={change}
+      />
       {old.length > 0 && (
         <>
-          <button type="button" aria-expanded={handled} onClick={() => setHandled(!handled)}>
+          <button
+            type="button"
+            className="secondary-button"
+            aria-expanded={handled}
+            onClick={() => setHandled(!handled)}
+          >
             {handled ? 'Hide handled' : 'Show handled'} ({old.length})
           </button>
           {handled && (
@@ -31,6 +54,7 @@ export function Candidates({
               candidates={old}
               disabled={disabled}
               writable={writable}
+              pending={pending}
               change={change}
             />
           )}
@@ -43,11 +67,13 @@ function CandidateGroups({
   candidates,
   disabled,
   writable,
+  pending,
   change,
 }: {
   candidates: Candidate[];
   disabled: boolean;
   writable: boolean;
+  pending?: WatchPending | null;
   change: (action: CandidateOperation, candidate: Candidate) => Promise<boolean>;
 }) {
   const groups = new Map<string, Candidate[]>();
@@ -64,46 +90,14 @@ function CandidateGroups({
         <section key={show} aria-label={`${show} candidates`}>
           <h4>{show}</h4>
           {rows.map((candidate) => (
-            <article className="ipt-watch-row" key={candidate.torrent_id}>
-              <div className="ipt-watch-details">
-                <strong>{candidate.name}</strong>
-                <div className="ipt-watch-badges">
-                  {candidate.episode === null && (
-                    <span className="ipt-watch-badge">Season pack</span>
-                  )}
-                  {candidate.freeleech && <span className="ipt-watch-badge">Free-leech</span>}
-                  <span className="ipt-watch-badge">{candidate.category}</span>
-                  {candidate.status !== CandidateState.New && (
-                    <span className="ipt-watch-badge">{candidate.status}</span>
-                  )}
-                </div>
-                <p>
-                  {formatBytes(candidate.size_bytes)} · {candidate.seeders} seeders /{' '}
-                  {candidate.leechers} leechers · {candidate.age_text}
-                </p>
-                {candidate.error && <p className="error-message">{candidate.error}</p>}
-              </div>
-              {candidate.status === CandidateState.New && (
-                <div className="ipt-watch-actions">
-                  <button
-                    type="button"
-                    disabled={disabled || !writable}
-                    aria-label={`Download ${candidate.name}`}
-                    onClick={() => void change(CandidateAction.Download, candidate)}
-                  >
-                    Download
-                  </button>
-                  <button
-                    type="button"
-                    disabled={disabled}
-                    aria-label={`Dismiss ${candidate.name}`}
-                    onClick={() => void change(CandidateAction.Dismiss, candidate)}
-                  >
-                    Dismiss
-                  </button>
-                </div>
-              )}
-            </article>
+            <CandidateRow
+              key={candidate.torrent_id}
+              candidate={candidate}
+              disabled={disabled}
+              writable={writable}
+              pending={pending}
+              change={change}
+            />
           ))}
         </section>
       ))}

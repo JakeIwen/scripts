@@ -1,13 +1,6 @@
 import { Stage, type OrganizerStatus } from './schema';
 
-const stageLabels: Record<(typeof Stage)[keyof typeof Stage], string> = {
-  [Stage.Scan]: 'Scanning',
-  [Stage.Propose]: 'Proposing',
-  [Stage.Apply]: 'Applying',
-  [Stage.Undo]: 'Undoing',
-  [Stage.Alias]: 'Rebuilding links',
-  [Stage.Mirror]: 'Renaming backup copies',
-};
+import { stageLabels } from './content';
 
 function elapsedLabel(startedAt: string, now: number): string | null {
   const seconds = Math.round((now - Date.parse(startedAt)) / 1000);
@@ -22,13 +15,17 @@ function elapsedLabel(startedAt: string, now: number): string | null {
 export function JobProgress({
   status,
   now = Date.now(),
+  pendingStage,
+  showOutcome = true,
 }: {
   status: OrganizerStatus;
   now?: number;
+  pendingStage?: (typeof Stage)[keyof typeof Stage] | null;
+  showOutcome?: boolean;
 }) {
   const { busy, job } = status;
-  const stage = busy?.stage ?? (job && !job.finished_at ? job.stage : null);
-  if (!stage) return <FinishedJob status={status} />;
+  const stage = busy?.stage ?? (job && !job.finished_at ? job.stage : pendingStage);
+  if (!stage) return showOutcome ? <FinishedJob status={status} /> : null;
   const label = stageLabels[stage];
   const startedAt = busy?.started_at ?? job?.started_at;
   const elapsed = startedAt ? elapsedLabel(startedAt, now) : null;

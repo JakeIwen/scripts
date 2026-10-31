@@ -24,6 +24,8 @@
   --radius-large: 19px;
   --content-width: 1380px;
   --tile-min-height: 150px;
+  --media-control-gap: 0.375rem;
+  --media-control-font-size: 0.8125rem;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);

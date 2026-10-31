@@ -36,6 +36,8 @@ export const SkipReason = {
   Moving: 'moving',
   Unreadable: 'unreadable',
   NotMedia: 'not-media',
+  Hidden: 'hidden',
+  Nested: 'nested',
 } as const;
 const category = oneOf(categories);
 const classifier = oneOf(classifiers);
@@ -97,6 +99,7 @@ export const planSchema = object({
   run_ids: v.array(text),
   // Rows a run already moved or left unconfirmed; never edited or resubmitted.
   settled_rows: v.array(text),
+  moved_rows: v.array(text),
 });
 const runFields = {
   id: text,

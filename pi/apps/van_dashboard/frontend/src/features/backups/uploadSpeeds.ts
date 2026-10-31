@@ -1,6 +1,5 @@
 import { getJson } from '../../api/client';
 import { arrayValue, numberValue, objectValue } from '../../api/validation';
-import { formatBytes } from '../../utils/format';
 import type { ICloudAttempt, ICloudBackupKind } from './icloud';
 
 /** One per-minute sample from the Pi's 30-day log: epoch seconds, bytes per second. */
@@ -125,10 +124,6 @@ export function attemptForRun(run: SpeedRun, attempts: ICloudAttempt[], now: num
   return attempts.find(
     (attempt) => attempt.startedAt <= run.end && run.start <= (attempt.endedAt ?? now),
   );
-}
-
-export function formatSpeed(bytesPerSecond: number): string {
-  return `${formatBytes(bytesPerSecond)}/s`;
 }
 
 export function formatMegabits(bytesPerSecond: number): string {

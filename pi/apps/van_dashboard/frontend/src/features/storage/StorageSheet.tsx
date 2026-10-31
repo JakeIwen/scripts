@@ -4,10 +4,11 @@ import { formatBytes, formatRelativeTime } from '../../utils/format';
 import type { UsbControls } from '../usb/controls';
 import type { UsbStatus } from '../usb/types';
 import type { StorageControls } from './controls';
+import { DiskStatsStrip } from './DiskStatsStrip';
 import type { StorageResources } from './hooks';
 import { diskOperationLabel, diskStateLabel, diskTone, requestedPolicyState } from './presentation';
 import { assessUsbReset } from './resetEligibility';
-import type { DiskStatus, ManagedDisk, StoragePolicy } from './types';
+import type { DiskStats, DiskStatus, ManagedDisk, StoragePolicy } from './types';
 import './storage.css';
 
 export interface StorageSheetProps {
@@ -105,6 +106,7 @@ function PolicySection({
 function DiskCard({
   disk,
   status,
+  stats,
   policy,
   usb,
   controls,
@@ -112,6 +114,7 @@ function DiskCard({
 }: {
   disk: ManagedDisk;
   status: DiskStatus;
+  stats: DiskStats | null;
   policy: StoragePolicy | null;
   usb: UsbStatus | null;
   controls: StorageControls;
@@ -147,6 +150,7 @@ function DiskCard({
         </div>
         <span>{diskStateLabel(disk, status)}</span>
       </header>
+      <DiskStatsStrip disk={disk} stats={stats} />
       <dl>
         <div>
           <dt>Current observation</dt>
@@ -228,6 +232,7 @@ export function StorageSheet({
           onClick={() => {
             void resources.policy.refresh();
             void resources.disks.refresh();
+            void resources.stats.refresh();
           }}
         >
           {resources.policy.refreshing || resources.disks.refreshing ? 'Refreshing…' : 'Refresh'}
@@ -278,6 +283,7 @@ export function StorageSheet({
                 disk={disk}
                 key={disk.label}
                 status={disks}
+                stats={resources.stats.data}
                 policy={policy}
                 usb={usbResource.error ? null : usbResource.data}
                 controls={controls}
