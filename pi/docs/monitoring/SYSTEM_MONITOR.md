@@ -21,6 +21,14 @@ It does not reset USB devices or change power, clocks, services, or CAN state.
   rates, IOPS, and disk busy time. Detailed samples also retain Linux
   CPU/memory/I/O pressure, selected VM counters, and passive DRM/framebuffer
   state. Rollups retain the top process, interface, or disk at each peak.
+- Per-disk minute history for the dashboard's Disks & Torrents graphs:
+  `disk_history.py` averages each disk's five-second read/write rates and busy
+  time into one 14-byte record a minute per filesystem label, in
+  `/var/lib/vanpi-monitor/disk-io/<label>.bin`, kept 30 days (about 600 KB per
+  disk). A label several disks share (`bootfs` on every SD card) is skipped. The
+  dashboard reads it only through `system_event_monitor.py disk-io --latest` or
+  `disk-io --label <label> --hours <1-720>`, which buckets a range into at most
+  360 points.
 - Live CPU-frequency policies (current/minimum/maximum clock, related cores,
   and governor) are shown alongside the firmware throttle word. The dashboard
   separates flags active now, sticky flags seen since boot, and start/clear

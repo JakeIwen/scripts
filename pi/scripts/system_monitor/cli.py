@@ -15,6 +15,7 @@ import json
 import signal
 import sqlite3
 import sys
+import time
 
 from .common import (
     DEFAULT_DATABASE,
@@ -30,6 +31,7 @@ from .daemon import SystemEventMonitor
 from .crash import build_crash_report, capture_previous_boot, compare_crash_history
 from .report import build_report, list_events
 from .maintenance import compact_database
+from . import disk_history
 
 
 def format_bytes(value):
@@ -166,7 +168,29 @@ def build_parser():
         "compact", help="offline storm/snapshot compaction (dry run by default)"
     )
     compact_parser.add_argument("--apply", action="store_true", help="compact and VACUUM the database")
+    disk_parser = subparsers.add_parser(
+        "disk-io", help="per-disk minute I/O history as JSON (the dashboard's graph source)"
+    )
+    disk_scope = disk_parser.add_mutually_exclusive_group(required=True)
+    disk_scope.add_argument("--latest", action="store_true", help="the last minute of every disk")
+    disk_scope.add_argument("--label", help="bucketed history of one disk label")
+    disk_parser.add_argument("--hours", type=positive_float, default=24)
     return parser
+
+
+def disk_io_command(args):
+    directory = disk_history.history_directory(args.database)
+    now = time.time()
+    try:
+        if args.latest:
+            payload = disk_history.latest(directory, now)
+        else:
+            payload = disk_history.history(directory, args.label, args.hours, now)
+    except (OSError, ValueError) as error:
+        print(json.dumps({"ok": False, "message": f"disk history unavailable: {error}"}))
+        return 1
+    print(json.dumps(payload, separators=(",", ":")))
+    return 0
 
 
 def compact_command(args):
@@ -190,6 +214,8 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
     if args.command_name == "compact":
         return compact_command(args)
+    if args.command_name == "disk-io":
+        return disk_io_command(args)
     try:
         store = open_command_store(args)
     except (OSError, sqlite3.Error) as error:
@@ -202,6 +228,9 @@ def main(argv=None):
                 sample_interval=args.sample_interval,
                 rollup_interval=args.rollup_interval,
                 retention_days=args.retention_days,
+                disk_history=disk_history.DiskHistoryRecorder(
+                    disk_history.history_directory(args.database)
+                ),
             )
 
             def stop_monitor(_signum, _frame):

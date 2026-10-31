@@ -18,6 +18,7 @@ ExecStartPre=/usr/bin/test -r /home/pi/scripts/system_monitor/cli.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/system_monitor/coalesce.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/system_monitor/locking.py
 ExecStartPre=/usr/bin/test -r /home/pi/scripts/system_monitor/maintenance.py
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/system_monitor/disk_history.py
 ExecStart=/usr/bin/python3 /home/pi/scripts/system_event_monitor.py --database /var/lib/vanpi-monitor/events.sqlite3 run
 Restart=on-failure
 RestartSec=5

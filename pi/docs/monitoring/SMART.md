@@ -2,7 +2,7 @@
 
 [Pi documentation index](../../README.md)
 
-`vanpi-smart-watch.timer` runs `pi/scripts/smart_watch.sh` as root every 30
+`vanpi-smart-watch.timer` runs `pi/scripts/smart_watch.sh` as root every 10
 minutes. For each label in `HDD_LABELS` (`pi/scripts/disk_policy.sh`) that is
 attached and mounted, it takes the disk's shared backup lock, reads SMART once
 with `smartctl -j -n standby -d sat -H -A`, and compares the result with the
@@ -20,6 +20,22 @@ change:
 | Pending sectors (197) | the count is above zero and differs from the last run |
 | Offline-uncorrectable sectors (198) | the count is above zero and differs from the last run |
 | Temperature | it reaches 60C; it re-arms once the disk cools below 55C |
+
+## Reading log
+
+Every successful reading also appends one line to
+`/var/lib/vanpi-smart-watch/history/<label>` (world-readable; the dashboard's
+Disks & Torrents sheet graphs it):
+
+```text
+<epoch> <passed> <reallocated> <pending> <uncorrectable> <temp C> <power-on hours> <power cycles>
+```
+
+A value the drive does not report is `unknown`. Lines older than 30 days are
+trimmed once the oldest is a day past that. A gap in the log means the disk was
+unmounted or busy being unmounted: parked disks are never read.
+
+## Alert state
 
 State lives in `/var/lib/vanpi-smart-watch/<label>` as one line:
 `passed reallocated pending uncorrectable hot`. A failed delivery leaves the

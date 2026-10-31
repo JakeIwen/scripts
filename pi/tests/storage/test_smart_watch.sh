@@ -60,6 +60,7 @@ touch "$test_root/alerts" "$test_root/smartctl-calls"
 report() { # <passed> <reallocated> <pending> <uncorrectable> <temp> [smartctl rc]
   cat > "$test_root/report.json" <<JSON
 {"smart_status": {"passed": $1}, "temperature": {"current": $5},
+ "power_on_time": {"hours": 1234}, "power_cycle_count": 56,
  "ata_smart_attributes": {"table": [
    {"id": 5, "raw": {"value": $2}}, {"id": 197, "raw": {"value": $3}},
    {"id": 198, "raw": {"value": $4}}]}}
@@ -81,6 +82,17 @@ report true 32 0 0 44
 run_watch || fail "a healthy first run failed"
 assert_eq 0 "$(alert_count)" "an existing reallocated count is a silent baseline"
 assert_eq sda "$(cat "$test_root/smartctl-calls")" "only the mounted disk was queried"
+history="$test_root/state/history"
+[[ "$(cat "$history/alpha")" =~ ^[0-9]+\ true\ 32\ 0\ 0\ 44\ 1234\ 56$ ]] ||
+  fail "the reading was not logged for the graphs: $(cat "$history/alpha")"
+[[ ! -e "$history/beta" ]] || fail "a parked disk gained a history line"
+
+# A line older than the 30-day window is trimmed once it is a day past it.
+{ echo "1000 true 32 0 0 40 1000 50"; cat "$history/alpha"; } > "$history/alpha.new"
+mv "$history/alpha.new" "$history/alpha"
+run_watch
+assert_eq 2 "$(wc -l < "$history/alpha" | tr -d ' ')" "the old line was pruned and a new one added"
+grep -q '^1000 ' "$history/alpha" && fail "the 30-day-old reading was kept"
 
 report true 40 0 0 44
 run_watch

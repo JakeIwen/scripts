@@ -3,6 +3,7 @@
 # ntfy alert whenever a failure signal changes. A parked disk is never queried:
 # smartd's polling woke a spun-down disk behind the WD bridge on every check,
 # which would spin parked drives up while driving (docs/monitoring/SMART.md).
+# Each reading is also logged for the dashboard's disk graphs.
 set -u
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -14,12 +15,14 @@ lsblk=${SMART_WATCH_LSBLK:-/usr/bin/lsblk}
 jq=${SMART_WATCH_JQ:-/usr/bin/jq}
 notify=${SMART_WATCH_NOTIFY:-$script_dir/ntfy_send.sh}
 state_dir=${SMART_WATCH_STATE_DIR:-/var/lib/vanpi-smart-watch}
+history_dir=$state_dir/history
+history_days=30
 hot_c=60   # rated maximum operating temperature of these 2.5" drives
 cool_c=55  # re-arm the temperature alert once the disk cools below this
 
 . "$policy" || exit 1
 . "$locks" || exit 1
-mkdir -p -m 0755 -- "$state_dir" || exit 1
+mkdir -p -m 0755 -- "$state_dir" "$history_dir" || exit 1
 
 is_number() { [[ $1 =~ ^[0-9]+$ ]]; }
 
@@ -29,7 +32,7 @@ release_disk() { # <label>: drop the shared hold taken by hold_backup_disk
   unset "BACKUP_DISK_LOCK_FD[$1]"
 }
 
-read_smart() { # <label> <partition>: prints "passed realloc pending offline temp"
+read_smart() { # <label> <partition>: prints "passed realloc pending offline temp hours cycles"
   local label=$1 part=$2 disk report rc
   # Holding the disk lock shared keeps the policy from unmounting or spinning
   # the disk down mid-read; a lifecycle change in progress makes this skip.
@@ -43,8 +46,22 @@ read_smart() { # <label> <partition>: prints "passed realloc pending offline tem
   (( rc & 3 )) && return 2
   "$jq" -r '
     def attr($id): [.ata_smart_attributes.table[]? | select(.id == $id) | .raw.value][0];
-    [(.smart_status.passed), attr(5), attr(197), attr(198), (.temperature.current)]
+    [(.smart_status.passed), attr(5), attr(197), attr(198), (.temperature.current),
+     (.power_on_time.hours), (.power_cycle_count)]
     | map(if . == null then "unknown" else tostring end) | join(" ")' <<< "$report"
+}
+
+record_history() { # <label> <values>: append "epoch values", keeping 30 days
+  local file=$history_dir/$1 now first
+  printf -v now '%(%s)T' -1
+  # The graph is optional; a failed write must not stop the alerts.
+  printf '%s %s\n' "$now" "$2" >> "$file" 2>/dev/null || return 0
+  read -r first _ < "$file"
+  # Trim once the oldest line is a day past the window, not on every run.
+  if is_number "$first" && (( first < now - (history_days + 1) * 86400 )); then
+    awk -v cutoff=$(( now - history_days * 86400 )) '$1 >= cutoff' "$file" > "$file.tmp" &&
+      mv -f -- "$file.tmp" "$file"
+  fi
 }
 
 check_label() { # <label>: returns 1 only when an alert could not be delivered
@@ -66,8 +83,9 @@ check_label() { # <label>: returns 1 only when an alert could not be delivered
     echo "$label: in standby, being unmounted, or unreadable; skipped"
     return 0
   fi
-  read -r passed realloc pending offline temp <<< "$values"
+  read -r passed realloc pending offline temp _ <<< "$values"
   echo "$label: passed=$passed reallocated=$realloc pending=$pending uncorrectable=$offline temp=${temp}C"
+  record_history "$label" "$values"
 
   state_file=$state_dir/$label
   [[ -f $state_file ]] && read -r p_passed p_realloc p_pending p_offline p_hot < "$state_file"

@@ -49,9 +49,11 @@ for name in ('__init__', 'collector', 'parsers', 'report', 'store'):
 MONITOR_V4_MODULES = (
     '__init__', 'cli', 'common', 'crash', 'daemon', 'journal', 'probes', 'report', 'rollups', 'store',
 )
+# The complete package before per-disk history; manifests saved then pin exactly this.
+MONITOR_V5_MODULES = (*MONITOR_V4_MODULES, 'coalesce', 'locking', 'maintenance')
 MONITOR_PACKAGE_DEPENDENCIES = {
     f'pi/scripts/system_monitor/{name}.py': f'/home/pi/scripts/system_monitor/{name}.py'
-    for name in (*MONITOR_V4_MODULES, 'coalesce', 'locking', 'maintenance')
+    for name in (*MONITOR_V5_MODULES, 'disk_history')
 }
 
 
@@ -140,7 +142,10 @@ def validate_plan(plan, *, require_monitor_package_dependencies=True):
     dependencies = {}
     if require_monitor_package_dependencies or 'monitor_package_dependencies' in plan:
         dependencies = plan.get('monitor_package_dependencies')
-        if not isinstance(dependencies, dict) or set(dependencies) != set(MONITOR_PACKAGE_DEPENDENCIES.values()):
+        allowed = [set(MONITOR_PACKAGE_DEPENDENCIES.values())]
+        if not require_monitor_package_dependencies:
+            allowed.append({f'/home/pi/scripts/system_monitor/{name}.py' for name in MONITOR_V5_MODULES})
+        if not isinstance(dependencies, dict) or set(dependencies) not in allowed:
             raise ValueError('manifest differs from system monitor dependency allowlist')
     for value in [plan.get('monitor_dependency'), *dependencies.values()]:
         if not isinstance(value, str) or not re.fullmatch(r'[0-9a-f]{64}', value):

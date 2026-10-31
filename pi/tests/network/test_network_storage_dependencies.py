@@ -105,6 +105,14 @@ class PinSourceTests(unittest.TestCase):
         self.assertEqual(plan['monitor_dependencies'], expected)
         self.assertTrue(set(expected).isdisjoint(row['destination'] for row in plan['files']))
 
+    def test_saved_manifests_keep_their_older_complete_package_pins(self):
+        older = {'/home/pi/scripts/system_event_monitor.py'} | {
+            f'/home/pi/scripts/system_monitor/{name}.py' for name in deploy.base.MONITOR_V5_MODULES}
+        plan = {'monitor_dependencies': dict.fromkeys(older, '0' * 64)}
+        deploy.dependencies.validate_pins(plan, historical=True)
+        with self.assertRaises(ValueError):
+            deploy.dependencies.validate_pins(plan)
+
     def test_planning_refuses_missing_or_symlinked_dependency(self):
         import tempfile
         with tempfile.TemporaryDirectory() as directory:

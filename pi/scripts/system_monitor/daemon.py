@@ -31,6 +31,7 @@ class SystemEventMonitor:
         retention_days=DEFAULT_RETENTION_DAYS,
         clock=utc_timestamp,
         monotonic=time.monotonic,
+        disk_history=None,
     ):
         self.store = store
         self.sampler = sampler or ResourceSampler(clock=clock, monotonic=monotonic)
@@ -39,6 +40,7 @@ class SystemEventMonitor:
         self.clock = clock
         self.monotonic = monotonic
         self.rollup = RollupAccumulator(rollup_interval)
+        self.disk_history = disk_history
         self.stop_event = threading.Event()
         self.journal_queue = queue.Queue()
         self.journal_thread = None
@@ -343,6 +345,8 @@ class SystemEventMonitor:
         self.rollup.add(sample)
         if self.rollup.ready(sample["timestamp"]):
             self.store.insert_rollup(self.rollup.flush())
+        if self.disk_history is not None:
+            self.disk_history.observe(sample)
         return sample
 
     def initialize_boot(self):
@@ -386,5 +390,7 @@ class SystemEventMonitor:
         pending_rollup = self.rollup.flush()
         if pending_rollup:
             self.store.insert_rollup(pending_rollup)
+        if self.disk_history is not None:
+            self.disk_history.flush()
         if self.journal_thread:
             self.journal_thread.join(timeout=3)
