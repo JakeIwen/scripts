@@ -89,6 +89,20 @@ on mutations exit 75; other invalid mutations exit 2. Status, config, mutations,
 Admission refreshes stale evidence. `run` is the supervised loop; `tick` performs
 real enforcement once and must not be used as a read-only check.
 
+Run-time consumers: `pi.codex_update`, `pi.claude_update`, `mac.codex_update`,
+`mac.claude_update` (independent weekly adapters in `shared/sh/codex_update.py`)
+and `pi.ytdlp_update` (weekly controller cron) require host-local `allows` permission;
+missing, failing or timed-out permission commands defer. Every scheduled Claude
+check first atomically merges only `env.DISABLE_AUTOUPDATER="1"` into its existing
+regular `~/.claude/settings.json`, even when denied or not due; invalid JSON is
+left untouched and that adapter fails. CLI/state paths and six-hour cron entries
+remain stable; flat legacy Codex state retains its cadence. Marketplace updates
+remain unmanaged: `claude plugin marketplace update [name]` supports on-demand
+refresh, but the inspected CLI exposes no auto-update toggle. The supported
+`extraKnownMarketplaces.<name>.autoUpdate` setting and `known_marketplaces.json`
+flags are intentionally unchanged rather than silently broadening the settings
+merge beyond its owned environment key.
+
 `metered_shell.bash` provides `isMetered`, `meteredAllows`, and `vanpi-metered`.
 `startor [1h|4h|episode]` grants a temporary Pi torrent approval (default 1h);
 `startorx` revokes it. Neither changes the global torrent/disk switches.
