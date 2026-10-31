@@ -1,0 +1,12 @@
+[Unit]
+Description=Alert on SMART failure signals from mounted vanpi HDDs
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/home/pi/scripts/smart_watch.sh
+TimeoutStartSec=5min
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vanpi-smart-watch

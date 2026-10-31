@@ -17,6 +17,7 @@ normally live under `/home/pi/scripts/`.
 - [Storage and torrent policy](docs/policy/POLICY.md)
 - [Lifecycle policy TODO](docs/policy/TODO.md)
 - [System event monitor](docs/monitoring/SYSTEM_MONITOR.md)
+- [SMART disk alerts](docs/monitoring/SMART.md)
 
 ## Dashboard
 

@@ -78,6 +78,7 @@ still independently asserts its job hold before planning or deleting objects.
 | Restore | `restore_from_borg.sh` | exclusive | none | all (implied) | all (implied) | no |
 | Hotspare init | `new_hotspare.sh` | exclusive | none | all (implied) | all (implied) | no |
 | Deployment fence | both targeted cloud installers | exclusive, non-blocking | none | all | all | all |
+| SMART watch | `smart_watch.sh` | none | none | each mounted HDD for one `smartctl` read; busy means skip | none | no |
 
 ## Conflict matrix
 

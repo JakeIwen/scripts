@@ -1,0 +1,11 @@
+[Unit]
+Description=Read SMART from mounted vanpi HDDs every 30 minutes
+
+[Timer]
+OnBootSec=10min
+OnUnitInactiveSec=30min
+AccuracySec=1min
+Unit=vanpi-smart-watch.service
+
+[Install]
+WantedBy=timers.target
