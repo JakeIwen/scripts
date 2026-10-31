@@ -66,8 +66,17 @@ class TaskRecord(TypedDict):
     finished_at: float | None
 
 
+class SettingsToolRecord(TypedDict):
+    tool: str
+    # tool_settings' Declaration and SettingsState dicts; both None when the
+    # declaration can't be loaded, and error then says why.
+    declaration: dict | None
+    state: dict | None
+    error: str | None
+
+
 class SettingsPayload(TypedDict):
-    tools: list[dict]
+    tools: list[SettingsToolRecord]
 
 
 class AutomationActionRecord(TypedDict):

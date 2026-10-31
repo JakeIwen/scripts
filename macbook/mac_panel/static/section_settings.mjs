@@ -1,7 +1,7 @@
 // Settings forms generated from each tool's declaration; saves go through tool_settings on the server.
 import {button, isChanged, node} from './panel_dom.mjs';
 import {action, refresh} from './panel_sections.mjs';
-import {Level} from './status_cell.mjs';
+import {Level, status, worst} from './status_cell.mjs';
 
 const SECTION = 'settings';
 const CONFLICT = 409;
@@ -115,10 +115,26 @@ function toolForm(tool) {
   return form;
 }
 
+// A declaration the server could not load gets a card like a broken automation's: no form, just why.
+function errorCard(tool) {
+  const root = node('div', null, 'tool');
+  const line = node('p', null, 'summary-line');
+  line.append(status(Level.ERROR, 'unavailable'));
+  root.append(node('h3', tool.tool), line, node('p', tool.error, 'error'));
+  return root;
+}
+
+function rendered(tool) {
+  if (tool.error) return {root: errorCard(tool), level: Level.ERROR, summary: `${tool.tool}: unavailable`};
+  const level = tool.state.error ? Level.WARN : Level.IDLE;
+  return {root: toolForm(tool), level, summary: tool.declaration.title};
+}
+
 export function render(data) {
   const root = node('div');
-  data.tools.forEach(tool => root.append(toolForm(tool)));
-  if (!data.tools.length) root.append(node('p', 'No tools declare settings'));
-  const summary = data.tools.map(tool => tool.declaration.title).join(' · ') || 'none';
-  return {node: root, summary, level: data.tools.some(tool => tool.state.error) ? Level.WARN : Level.IDLE};
+  const tools = data.tools.map(rendered);
+  tools.forEach(tool => root.append(tool.root));
+  if (!tools.length) root.append(node('p', 'No tools declare settings'));
+  const summary = tools.map(tool => tool.summary).join(' · ') || 'none';
+  return {node: root, summary, level: tools.length ? worst(tools.map(tool => tool.level)) : Level.IDLE};
 }

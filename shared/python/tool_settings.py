@@ -154,7 +154,10 @@ def declaration_tools() -> List[str]:
     tools = set()
     for directory in (_declarations_dir(), _private_declarations_dir()):
         if directory.is_dir():
-            tools.update(path.stem for path in directory.glob("*.json") if path.is_file())
+            # Links are listed even when dangling: a broken declaration should surface as that
+            # tool's error (CLI list, panel card), not vanish while `show` still names it.
+            tools.update(path.stem for path in directory.glob("*.json")
+                         if path.is_file() or path.is_symlink())
     return sorted(tools)
 
 
@@ -162,7 +165,21 @@ def _problem(path: Path, message: str) -> SettingsError:
     return SettingsError("{}: {}".format(path, message))
 
 
+def _broken_link_target(path: Path) -> Optional[str]:
+    """The missing target of a dangling symlink at path, or None when path is not one."""
+    try:
+        if not path.is_symlink() or path.exists():
+            return None
+        return os.path.normpath(os.path.join(str(path.parent), os.readlink(str(path))))
+    except OSError:
+        return None
+
+
 def _json_object(path: Path) -> Dict[str, Any]:
+    target = _broken_link_target(path)
+    if target is not None:
+        # Reading would fail naming only the link; the missing target is what needs fixing.
+        raise _problem(path, "broken symlink: its target {} does not exist".format(target))
     try:
         raw = path.read_text(encoding="utf-8")
     except UnicodeDecodeError as error:

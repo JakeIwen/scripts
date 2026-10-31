@@ -285,13 +285,32 @@ class ToolSettingsTests(unittest.TestCase):
         self.assertIn(str(link), result.stderr)
         self.assertFalse((self.config / "sample.json").exists())
 
-    def test_dangling_private_link_is_unlisted_and_named_when_loaded(self):
+    def test_dangling_private_link_is_listed_and_names_link_and_target_when_loaded(self):
         link = self.private_declaration("outside")
-        (self.root / "elsewhere" / "outside.json").unlink()
-        self.assertEqual(tool_settings.declaration_tools(), ["sample"])
+        target = self.root / "elsewhere" / "outside.json"
+        target.unlink()
+        self.assertEqual(tool_settings.declaration_tools(), ["outside", "sample"])
+        self.assertEqual(self.run_cli("list").stdout.split(), ["outside", "sample"])
+        for attempt in (lambda: tool_settings.load_declaration("outside"),
+                        lambda: tool_settings.read_state("outside"),
+                        lambda: tool_settings.save("outside", {"count": 3})):
+            with self.assertRaises(tool_settings.SettingsError) as caught:
+                attempt()
+            self.assertIn(str(link), str(caught.exception))
+            self.assertIn("broken symlink", str(caught.exception))
+            self.assertIn(str(target), str(caught.exception))
+        result = self.run_cli("show", "outside", check=False)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(str(target), result.stderr)
+        self.assertFalse((self.config / "outside.json").exists())
+
+    def test_dangling_shared_link_is_listed_and_names_its_relative_target(self):
+        (self.declarations / "moved.json").symlink_to(Path("gone") / "moved.json")
+        self.assertEqual(tool_settings.declaration_tools(), ["moved", "sample"])
         with self.assertRaises(tool_settings.SettingsError) as caught:
-            tool_settings.load_declaration("outside")
-        self.assertIn(str(link), str(caught.exception))
+            tool_settings.load_declaration("moved")
+        self.assertIn(str(self.declarations / "moved.json"), str(caught.exception))
+        self.assertIn(str(self.declarations / "gone" / "moved.json"), str(caught.exception))
 
     def test_cli_set_and_show_round_trip(self):
         environment = dict(os.environ)

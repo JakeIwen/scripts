@@ -7,7 +7,9 @@ so defaults, validation bounds, labels, and help text stay in one place.
 Tools that live outside this repository declare their settings in
 `~/.config/jacobr/declarations/<tool>.json` instead (same format; usually a symlink
 into the tool's own checkout, which is followed). The tool list, CLI and panel merge
-both directories; a tool declared in both is an error until one copy is removed.
+both directories; a tool declared in both is an error until one copy is removed. A
+dangling link is still listed, and loading it names the link and its missing target;
+the panel shows any declaration it can't load as an error card for that tool alone.
 
 A declaration is a JSON object with `tool`, `title`, `description`, and an ordered
 `settings` array. Every setting has `name`, `type`, `default`, and `description`.

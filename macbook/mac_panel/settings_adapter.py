@@ -1,6 +1,10 @@
 """Declaration-driven settings; persistence belongs entirely to tool_settings."""
-from panel_contracts import ApiError, SettingsPayload
+from panel_contracts import ApiError, SettingsPayload, SettingsToolRecord
 from wire_validation import field, object_fields
+
+
+def _declaration_error(tool, error) -> SettingsToolRecord:
+    return SettingsToolRecord(tool=tool, declaration=None, state=None, error=str(error))
 
 
 class SettingsAdapter:
@@ -10,10 +14,19 @@ class SettingsAdapter:
             settings = tool_settings
         self.settings = settings
 
+    def _read_one(self, tool) -> SettingsToolRecord:
+        # One unreadable declaration (malformed, declared twice, a dangling link) becomes
+        # that tool's error card; the other forms stay usable.
+        try:
+            declaration = self.settings.load_declaration(tool)
+            state = self.settings.read_state(tool)
+        except self.settings.SettingsError as exc:
+            return _declaration_error(tool, exc)
+        return SettingsToolRecord(tool=tool, declaration=declaration.as_dict(),
+                                  state=state.as_dict(), error=None)
+
     def read(self) -> SettingsPayload:
-        return {'tools': [{'declaration': self.settings.load_declaration(tool).as_dict(),
-                           'state': self.settings.read_state(tool).as_dict()}
-                          for tool in self.settings.declaration_tools()]}
+        return SettingsPayload(tools=[self._read_one(tool) for tool in self.settings.declaration_tools()])
 
     def save(self, body):
         object_fields(body, ('tool', 'values', 'revision'))

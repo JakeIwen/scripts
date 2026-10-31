@@ -362,7 +362,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   `shared/settings/<tool>.json` (name, type, range, default, description), or,
   for tools that live outside this repository, in
   `~/.config/jacobr/declarations/<tool>.json` (often a symlink; a tool declared
-  in both places is an error);
+  in both places is an error; a dangling link is listed and its load error
+  names the missing target; the panel turns any unloadable declaration into an
+  error card for that tool alone);
   `shared/python/tool_settings.py` (stdlib, runs on `/usr/bin/python3` 3.9) is
   the only reader/validator/writer, used by both the tool and the Mac Panel.
   Values live in `~/.config/jacobr/<tool>.json` (mode 600, atomic, only
