@@ -47,7 +47,13 @@ JOB_PROPOSE = "propose"
 JOB_APPLY = "apply"
 JOB_UNDO = "undo"
 JOB_ALIAS = "alias"
-JOB_STAGES = (JOB_SCAN, JOB_PROPOSE, JOB_APPLY, JOB_UNDO, JOB_ALIAS)
+JOB_MIRROR = "mirror"              # replaying pending mirror renames (backup job)
+JOB_STAGES = (JOB_SCAN, JOB_PROPOSE, JOB_APPLY, JOB_UNDO, JOB_ALIAS, JOB_MIRROR)
+
+# What a moved (or reverted) item still owes the backup mirror.
+MIRROR_PENDING = "pending"         # drive was unmounted; mirror-sync renames it later
+MIRROR_SETTLED = "settled"         # renamed, nothing to rename, or left to rsync
+MIRROR_STATES = (MIRROR_PENDING, MIRROR_SETTLED)
 
 
 @dataclass
@@ -206,6 +212,7 @@ class RunItem:
     mirror_new: str | None
     status: str                    # one of ITEM_STATUSES
     error: str | None = None
+    mirror_state: str | None = None     # one of MIRROR_STATES; None in older journals
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -310,6 +317,7 @@ class Status:
     busy: dict[str, Any] | None            # {"stage": JOB_*, "started_at": iso, "pid": int} when a
                                            # job runs, plus busy.note()'s detail/done/total progress
     last_error: str | None = None
+    mirror_pending: int = 0                # journal items mirror-sync has yet to settle
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

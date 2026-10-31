@@ -56,6 +56,10 @@ def move_payload(item, client):
         os.rename(item.old_path, item.new_path)
 
 
+def mirror_available():
+    return config.MIRROR_MOUNT.is_mount() and config.MIRROR_ROOT.is_dir()
+
+
 def mirror_paths(old_payload, new_payload):
     old = config.MIRROR_ROOT / old_payload.relative_to(config.MEDIA_ROOT)
     new = config.MIRROR_ROOT / new_payload.relative_to(config.MEDIA_ROOT)
@@ -66,8 +70,12 @@ def mirror_paths(old_payload, new_payload):
 
 
 def mirror_move(item, run, old_payload, new_payload):
-    if not config.MIRROR_MOUNT.is_mount():
+    if not mirror_available():
+        # bigboi is mounted only during the backup window; the backup job runs
+        # mirror-sync before its rsync, which would otherwise recopy the title.
+        item.mirror_state = records.MIRROR_PENDING
         return
+    item.mirror_state = records.MIRROR_SETTLED
     old, new = mirror_paths(old_payload, new_payload)
     if not old.exists():
         return
@@ -131,9 +139,13 @@ def undo_payload(item, client, recovering=False):
 
 def undo_mirror(item, old_payload, new_payload):
     if item.mirror_old is None and item.mirror_new is None:
+        # The mirror never moved, so a still-pending forward rename is moot.
+        item.mirror_state = records.MIRROR_SETTLED
         return
-    if not config.MIRROR_MOUNT.is_mount():
-        raise ValueError('mirror is unavailable; mirror rollback not performed')
+    if not mirror_available():
+        item.mirror_state = records.MIRROR_PENDING  # mirror-sync reverses it later
+        return
+    item.mirror_state = records.MIRROR_SETTLED
     old, new = mirror_paths(old_payload, new_payload)
     if (item.mirror_old, item.mirror_new) != (str(old), str(new)):
         raise ValueError('invalid mirror journal paths')

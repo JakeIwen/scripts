@@ -188,6 +188,14 @@ backup_progress_update media "Synchronizing the media mirror" || true
 if ensure_mounted movingparts "$MEDIA_SRC"; then
   log "media mirror -> $MEDIA_DST"
   mkdir -p "$MEDIA_DST"
+  # The media organizer moves titles out of torrent/New while bigboi is
+  # usually unmounted; replay those renames on the mirror first, because
+  # rsync has no move detection and would delete and recopy every moved
+  # title. Best effort: a failure costs only that recopy. pi owns the journals.
+  run /usr/bin/timeout 900 /usr/sbin/runuser -u pi -- /usr/bin/env HOME=/home/pi \
+    PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/pi/scripts/python-packages/current \
+    /usr/bin/python3 -P -m pi.apps.media_organizer mirror-sync ||
+    log "media organizer mirror-sync exited $? (moved titles will be recopied)"
   # Mac SMB metadata lives in xattrs and ._ resource-fork files; preserve both.
   run rsync -aHX --delete-during --delete-excluded --exclude-from="$MEDIA_EXCLUDES" \
     "$MEDIA_SRC/" "$MEDIA_DST" \

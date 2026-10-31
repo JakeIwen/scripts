@@ -9,6 +9,7 @@ from . import records, plans, runs, settings, link_rebuild
 from .apply import apply_plan
 from .busy import operation
 from .hook import post_download
+from .mirror_sync import sync as mirror_sync
 from .scan import scan
 from .status import status
 from .undo import undo_run
@@ -25,7 +26,7 @@ class Parser(argparse.ArgumentParser):
 def parser():
     root = Parser(prog='media-organizer')
     commands = root.add_subparsers(dest='command', required=True)
-    for name in ('status', 'scan', 'plans', 'runs', 'post-download'):
+    for name in ('status', 'scan', 'plans', 'runs', 'post-download', 'mirror-sync'):
         commands.add_parser(name)
     commands.add_parser('propose').add_argument('--classifier', choices=records.CLASSIFIERS)
     for name in ('plan', 'run', 'undo'):
@@ -84,6 +85,7 @@ COMMANDS = {
     'settings': lambda args: (settings.update(args.assignments) if args.assignments
                               else settings.load()).to_dict(),
     'post-download': lambda args: post_download(settings.load()),
+    'mirror-sync': lambda args: mirror_sync(),
     'alias': alias_result,
 }
 

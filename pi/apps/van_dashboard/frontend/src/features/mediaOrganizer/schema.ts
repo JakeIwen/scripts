@@ -19,6 +19,7 @@ export const Stage = {
   Apply: 'apply',
   Undo: 'undo',
   Alias: 'alias',
+  Mirror: 'mirror',
 } as const;
 export const PlanState = {
   Proposed: 'proposed',
@@ -29,6 +30,7 @@ export const PlanState = {
 export const ItemState = { Moved: 'moved', Failed: 'failed', Reverted: 'reverted' } as const;
 export const RunMode = { Manual: 'manual', Auto: 'auto' } as const;
 export const AliasState = { Scheduled: 'scheduled', Skipped: 'skipped', Failed: 'failed' } as const;
+export const MirrorState = { Pending: 'pending', Settled: 'settled' } as const;
 export const SkipReason = {
   Incomplete: 'incomplete',
   Moving: 'moving',
@@ -125,6 +127,7 @@ export const runSchema = object({
       mirror_new: nullableString,
       status: oneOf(Object.values(ItemState)),
       error: nullableString,
+      mirror_state: v.nullable(oneOf(Object.values(MirrorState))),
     }),
   ),
 });
@@ -158,6 +161,7 @@ export const statusSchema = object({
     }),
   ),
   last_error: nullableString,
+  mirror_pending: nonnegativeInteger,
   job: v.nullable(jobSchema),
 });
 export const aliasSchema = object({ status: v.literal(AliasState.Scheduled) });

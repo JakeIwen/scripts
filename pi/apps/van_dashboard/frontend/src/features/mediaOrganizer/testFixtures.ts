@@ -85,6 +85,7 @@ export function sampleStatus(): OrganizerStatus {
     },
     busy: null,
     last_error: null,
+    mirror_pending: 0,
     job: null,
   };
 }

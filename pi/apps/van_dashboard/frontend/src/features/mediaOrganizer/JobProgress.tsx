@@ -6,6 +6,7 @@ const stageLabels: Record<(typeof Stage)[keyof typeof Stage], string> = {
   [Stage.Apply]: 'Applying',
   [Stage.Undo]: 'Undoing',
   [Stage.Alias]: 'Rebuilding links',
+  [Stage.Mirror]: 'Renaming backup copies',
 };
 
 function elapsedLabel(startedAt: string, now: number): string | null {

@@ -55,9 +55,10 @@ export function OrganizerSheet({
       {status && !status.qbittorrent_available && (
         <p>qBittorrent unavailable; tracked entries cannot be moved.</p>
       )}
-      {status?.settings.mirror_rename && !status.mirror_available && (
+      {status?.settings.mirror_rename && status.mirror_pending > 0 && (
         <p>
-          Mirror unavailable. Check the organizer result before assuming mirror copies were renamed.
+          {status.mirror_pending} backup {status.mirror_pending === 1 ? 'copy' : 'copies'} on bigboi
+          will be renamed to match before the next backup sync.
         </p>
       )}
       {settingsOpen && status && (

@@ -33,7 +33,9 @@ def apply_row(row, run, settings, client):
         return
     item.status, item.error = records.ITEM_MOVED, None
     runs.save(run)
-    if settings.mirror_rename:
+    if not settings.mirror_rename:
+        item.mirror_state = records.MIRROR_SETTLED
+    else:
         try:
             mirror_move(item, run, Path(row.entry.path), Path(target))
         except (OSError, ValueError, RuntimeError) as error:
