@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { BottomSheet } from '../../components/BottomSheet';
 import { niceMax } from '../../components/charts/axisLabels';
 import { TimeSeriesChart } from '../../components/charts/TimeSeriesChart';
+import { usePollingResource } from '../../hooks/usePollingResource';
 import {
   formatBytes,
   formatDuration,
@@ -14,10 +15,12 @@ import {
   DEFAULT_HISTORY_HOURS,
   DISK_HISTORY_REFRESH_MS,
   HISTORY_RANGES,
+  historyHours,
   historySeries,
   historySummary,
   SMART_INTERVAL_SECONDS,
   TEMPERATURE_LIMIT_C,
+  temperatureAxis,
   type HistoryHours,
   type HistorySummary,
 } from './diskStats';
@@ -34,28 +37,13 @@ function count(value: number | null): string {
 /** One disk's I/O, busy time and temperature over a chosen range, plus its last SMART reading. */
 export function DiskStatsSheet({ label, onClose }: { label: string; onClose: () => void }) {
   const [hours, setHours] = useState<HistoryHours>(DEFAULT_HISTORY_HOURS);
-  const [loaded, setLoaded] = useState<{ hours: number; history: DiskHistory } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [reload, setReload] = useState(0);
-  useEffect(() => {
-    const controller = new AbortController();
-    setError(null);
-    fetchDiskHistory(label, hours, controller.signal).then(
-      (history) => {
-        if (!controller.signal.aborted) setLoaded({ hours, history });
-      },
-      (failure: unknown) => {
-        if (!controller.signal.aborted)
-          setError(failure instanceof Error ? failure.message : 'Could not load disk history.');
-      },
-    );
-    const timer = window.setTimeout(() => setReload((value) => value + 1), DISK_HISTORY_REFRESH_MS);
-    return () => {
-      controller.abort();
-      window.clearTimeout(timer);
-    };
-  }, [label, hours, reload]);
-  const history = loaded?.hours === hours ? loaded.history : null;
+  // A new loader makes the hook abort the old range's request and poll the new one.
+  const load = useCallback(
+    (signal: AbortSignal) => fetchDiskHistory(label, hours, signal),
+    [label, hours],
+  );
+  const resource = usePollingResource({ load, intervalMs: DISK_HISTORY_REFRESH_MS });
+  const history = resource.data && historyHours(resource.data) === hours ? resource.data : null;
   return (
     <BottomSheet
       open
@@ -77,10 +65,10 @@ export function DiskStatsSheet({ label, onClose }: { label: string; onClose: () 
           </button>
         ))}
       </div>
-      {error && !history ? (
+      {resource.error && !history ? (
         <div role="alert">
-          <p>{error}</p>
-          <button type="button" className="button" onClick={() => setReload((value) => value + 1)}>
+          <p>{resource.error.message}</p>
+          <button type="button" className="button" onClick={() => void resource.refresh()}>
             Retry
           </button>
         </div>
@@ -149,11 +137,7 @@ function HistoryBody({ history }: { history: DiskHistory }) {
           series={[{ label: 'Temperature', color: 'var(--bad)', points: series.temperature }]}
           start={history.since}
           end={history.until}
-          yMin={Math.floor((summary.temperature.low - 5) / 5) * 5}
-          yMax={Math.max(
-            TEMPERATURE_LIMIT_C + 5,
-            Math.ceil((summary.temperature.high + 5) / 5) * 5,
-          )}
+          {...temperatureAxis(summary.temperature)}
           formatValue={celsius}
           // Missing one 10-minute reading still joins the line; an unmount does not.
           gapSeconds={Math.max(history.bucketSeconds, SMART_INTERVAL_SECONDS) * 2}

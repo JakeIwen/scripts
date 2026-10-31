@@ -17,6 +17,19 @@ export const HISTORY_RANGES = [
 export type HistoryHours = (typeof HISTORY_RANGES)[number]['hours'];
 export const DEFAULT_HISTORY_HOURS: HistoryHours = 24;
 
+/** The range a history response covers, which trails the selected range until it arrives. */
+export function historyHours(history: DiskHistory): number {
+  return Math.round((history.until - history.since) / 3600);
+}
+
+/** A y-range padded to whole 5 °C steps that always shows the alert limit. */
+export function temperatureAxis(temperature: { low: number; high: number }) {
+  return {
+    yMin: Math.floor((temperature.low - 5) / 5) * 5,
+    yMax: Math.max(TEMPERATURE_LIMIT_C + 5, Math.ceil((temperature.high + 5) / 5) * 5),
+  };
+}
+
 /** The last I/O minute, unless the disk has stopped reporting (detached). */
 export function currentIo(
   entry: DiskStatsEntry | undefined,
