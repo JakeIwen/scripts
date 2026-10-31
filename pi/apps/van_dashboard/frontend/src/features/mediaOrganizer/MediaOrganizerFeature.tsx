@@ -24,7 +24,7 @@ export function MediaOrganizerFeature() {
     <>
       <Tile
         icon={<MovieIcon />}
-        title="Movies & TV"
+        title="Movies, TV, Audiobooks"
         summary={`${summary}${newCandidates > 0 ? ` · ${newCandidates} new episodes on IPT` : ''}`}
       >
         <div className="organizer-tile-actions">
