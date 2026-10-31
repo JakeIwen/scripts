@@ -13,6 +13,12 @@
   cursor: pointer;
 }
 
+.tile.status-tile--active {
+  background: linear-gradient(145deg, #382320, #281a19);
+  border-color: #ef675a;
+  box-shadow: 0 10px 40px #ef503f25;
+}
+
 .status-tile__pill {
   position: absolute;
   z-index: 1;
@@ -27,12 +33,6 @@
   font-weight: 800;
   letter-spacing: 0.1em;
   line-height: 14px;
-}
-
-.status-tile--active .status-tile__pill {
-  border-color: #bf473d;
-  background: #8b2d27;
-  color: #fff1ef;
 }
 
 .status-tile__heading {

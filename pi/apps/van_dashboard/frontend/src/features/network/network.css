@@ -161,10 +161,36 @@
   }
 
   .wan-throughput {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 2px;
-    overflow: visible;
+    gap: 5px;
+  }
+
+  .wan-throughput-label {
+    min-width: 3.5em;
+  }
+}
+
+/* On phone cards, rates use the space below the stacked interface chips. */
+@container (max-width: 230px) {
+  .mwan-overview {
+    row-gap: 3px;
+  }
+
+  .mwan-primary {
+    display: contents;
+  }
+
+  .mwan-primary > .network-label,
+  .mwan-primary > .network-value {
+    grid-column: 1;
+  }
+
+  .mwan-primary > .wan-throughput {
+    grid-column: 1 / -1;
+  }
+
+  .mwan-list {
+    grid-column: 2;
+    grid-row: 1 / 3;
   }
 }
 

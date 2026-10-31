@@ -3,9 +3,21 @@
   gap: 0;
   border-color: #2b3d49;
   border-radius: 19px;
-  background: linear-gradient(145deg, #19232d, #151f28);
+  background: var(--tile-background);
   box-shadow: 0 8px 28px #050b102e;
   color: #eef5f8;
+}
+
+.deal-watch-tile.tile--good {
+  border-color: #438168;
+  background:
+    radial-gradient(circle at 88% 5%, #62c89924, transparent 38%),
+    linear-gradient(145deg, #1d2b2b, #172225);
+}
+
+.deal-watch-tile.tile--bad {
+  border-color: #754743;
+  background: var(--tile-background);
 }
 
 .deal-watch-tile .tile__header {

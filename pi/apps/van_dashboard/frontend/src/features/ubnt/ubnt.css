@@ -9,6 +9,25 @@
   cursor: default;
 }
 
+.ubnt-tile.tile--good {
+  border-color: #438168;
+  background:
+    radial-gradient(circle at 88% 5%, #62c89920, transparent 38%),
+    linear-gradient(145deg, #1d2b2b, #172225);
+}
+
+.ubnt-tile.tile--bad {
+  border-color: #754743;
+}
+
+.starlink-tile-control.starlink-tile-control--on {
+  background: #1e3b31cc;
+}
+
+.starlink-tile-control.starlink-tile-control--off {
+  background: #392624cc;
+}
+
 .ubnt-tile__open {
   position: absolute;
   z-index: 1;
@@ -62,18 +81,6 @@
   font-weight: 800;
   letter-spacing: 0.08em;
   line-height: 14px;
-}
-
-.ubnt-tile.tile--good .status-pill {
-  border-color: #39725b;
-  background: #10171dcc;
-  color: #bcebd5;
-}
-
-.ubnt-tile.tile--bad .status-pill {
-  border-color: #754743;
-  background: #10171dcc;
-  color: #f2b5b0;
 }
 
 .ubnt-tile .status-pill__dot,
@@ -167,22 +174,6 @@
   line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.starlink-tile-control--on .starlink-tile-control__state {
-  border-color: #39725b;
-}
-
-.starlink-tile-control--on .starlink-tile-control__state {
-  color: #bcebd5;
-}
-
-.starlink-tile-control--off .starlink-tile-control__state {
-  border-color: #754743;
-}
-
-.starlink-tile-control--off .starlink-tile-control__state {
-  color: #f2b5b0;
 }
 
 .starlink-tile-control:disabled {

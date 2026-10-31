@@ -967,8 +967,11 @@ Dashboard `frontend/src/components/TooltipButton.tsx` owns hover/focus/tap hints
 tiles. Action buttons keep their normal click action. Grid items are inline-size
 containers: narrow cards move chips into the header flow through the shared
 `--tile-status-*` properties, preserving the two-column phone layout.
-Dashboard status policy: a colored, labeled chip is the status marker; the tile
-surface/border stays neutral. Keep distinct measures (radio association,
+Dashboard status policy: the tile surface/border carries status color; header
+badges stay neutral and retain their labels and hover/focus/tap explanations.
+Backups deliberately keeps both its tile and badge colors (including the blue
+running state); its row highlights communicate individual backup states.
+Keep distinct measures (radio association,
 per-room power, backup rows) separate, and explain ambiguous status with
 hover/focus/tap hints. Clickable tiles use a separate opener so hint buttons
 never nest inside action buttons. `MovieIcon.tsx`/`UsbIcon.tsx` own the standard

@@ -5,7 +5,7 @@
   padding: 15px;
   border-color: #2b3d49;
   border-radius: 19px;
-  background: linear-gradient(145deg, #19232d, #151f28);
+  background: var(--tile-background);
   box-shadow: 0 8px 28px #050b102e;
   color: #eef5f8;
   line-height: 1.4;
@@ -27,18 +27,6 @@
   letter-spacing: 0.1em;
   line-height: 14px;
   cursor: pointer;
-}
-
-.telemetry-tile__service--good {
-  border-color: #39705a;
-  background: #29463acc;
-  color: #bfead5;
-}
-
-.telemetry-tile__service--bad {
-  border-color: #835047;
-  background: #402d2bcc;
-  color: #f3c0bb;
 }
 
 .telemetry-tile__service[aria-busy='true'] {

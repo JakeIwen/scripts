@@ -60,7 +60,7 @@ export function TelemetryTileView({ resource, controls }: TelemetryTileViewProps
 
   return (
     <section
-      className="tile telemetry-tile"
+      className={`tile telemetry-tile ${serviceAvailable ? (serviceRunning ? 'tile--good' : 'tile--bad') : 'tile--neutral'}`}
       aria-labelledby="telemetry-tile-title"
       title={resource.error?.message}
     >

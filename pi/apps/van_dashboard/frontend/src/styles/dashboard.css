@@ -123,6 +123,21 @@
   height: 100%;
 }
 
+.tile--good {
+  border-color: #3d765d;
+  --tile-background: linear-gradient(145deg, #1a3027, #15241e);
+}
+
+.tile--warning {
+  border-color: #745b34;
+  --tile-background: linear-gradient(145deg, #31291d, #211e18);
+}
+
+.tile--bad {
+  border-color: #844b45;
+  --tile-background: linear-gradient(145deg, #322321, #211a1a);
+}
+
 .dashboard-grid--editing .dashboard-grid__item {
   padding-top: 42px;
   border: 1px dashed #617784;
@@ -289,6 +304,13 @@ button.status-pill {
   cursor: help;
 }
 
+/* Main-card color carries status; the badge retains its label and disclosure. */
+.tile .tile__status .status-pill {
+  border-color: var(--line);
+  background: var(--panel-soft);
+  color: var(--muted);
+}
+
 .status-pill__dot {
   width: 9px;
   height: 9px;
@@ -303,7 +325,14 @@ button.status-pill {
   color: #c5f2d9;
 }
 
-.status-pill--good .status-pill__dot {
+.status-pill--good /* Main-card color carries status; the badge retains its label and disclosure. */
+.tile .tile__status .status-pill {
+  border-color: var(--line);
+  background: var(--panel-soft);
+  color: var(--muted);
+}
+
+.status-pill__dot {
   background: var(--good);
 }
 
@@ -313,7 +342,14 @@ button.status-pill {
   color: #ffe4b4;
 }
 
-.status-pill--warning .status-pill__dot {
+.status-pill--warning /* Main-card color carries status; the badge retains its label and disclosure. */
+.tile .tile__status .status-pill {
+  border-color: var(--line);
+  background: var(--panel-soft);
+  color: var(--muted);
+}
+
+.status-pill__dot {
   background: var(--warning);
 }
 
@@ -323,7 +359,14 @@ button.status-pill {
   color: #ffd0cb;
 }
 
-.status-pill--bad .status-pill__dot {
+.status-pill--bad /* Main-card color carries status; the badge retains its label and disclosure. */
+.tile .tile__status .status-pill {
+  border-color: var(--line);
+  background: var(--panel-soft);
+  color: var(--muted);
+}
+
+.status-pill__dot {
   background: var(--bad);
 }
 

@@ -110,7 +110,7 @@ export function LightingTile({ status, error, refreshing, onOpen, controls }: Li
           All
         </TooltipButton>
       }
-      tone="neutral"
+      tone={lightingStateTone(status.state)}
       className="lighting-tile"
     >
       <button
