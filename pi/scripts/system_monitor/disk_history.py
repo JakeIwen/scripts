@@ -1,10 +1,8 @@
 """Per-minute I/O history for each labelled disk, kept for 30 days.
 
 The collector averages its 5-second disk rates into one record a minute per
-filesystem label, in ``disk-io/<label>.bin`` beside the event database. A
-label shared by several disks (every SD card carries ``bootfs``) is skipped,
-since its samples could not be told apart. The dashboard reads the files only
-through the ``disk-io`` CLI command.
+filesystem label, in ``disk-io/<label>.bin`` beside the event database. The
+dashboard reads the files only through the ``disk-io`` CLI command.
 
 Each record is little-endian: the epoch second the minute ended, the mean read
 and write bytes per second over it (uint32 each) and the mean busy time in
@@ -33,6 +31,10 @@ UINT32_MAX = 2**32 - 1
 UINT16_MAX = 2**16 - 1
 # The dashboard's DiskManager.LABEL_RE: labels double as file names here.
 LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+# Every Raspberry Pi OS card names its boot partition bootfs, and the sampler's
+# labels come from /dev/disk/by-label, which links one name to whichever card
+# udev saw last, so a bootfs history would silently switch between cards.
+SHARED_LABELS = frozenset({"bootfs"})
 
 
 def history_directory(database):
@@ -49,18 +51,18 @@ def _finite(value):
     return isinstance(value, (int, float)) and math.isfinite(value) and value >= 0
 
 
-def unique_label_devices(sample):
-    """Map each label carried by exactly one disk to that disk's I/O entry."""
+def labelled_devices(sample):
+    """Map each disk label in a sample to that disk's I/O entry."""
     disk_io = sample.get("disk_io") if isinstance(sample, dict) else None
     devices = disk_io.get("devices") if isinstance(disk_io, dict) else None
-    owners = {}
+    labelled = {}
     for device in devices if isinstance(devices, list) else ():
         if not isinstance(device, dict):
             continue
-        for label in set(device.get("labels") or ()):
-            if isinstance(label, str) and LABEL_RE.fullmatch(label):
-                owners.setdefault(label, []).append(device)
-    return {label: found[0] for label, found in owners.items() if len(found) == 1}
+        for label in device.get("labels") or ():
+            if isinstance(label, str) and LABEL_RE.fullmatch(label) and label not in SHARED_LABELS:
+                labelled[label] = device
+    return labelled
 
 
 def _unpack(data):
@@ -131,7 +133,7 @@ class DiskHistoryRecorder:
         if self.period_start is None:
             self.period_start = at
         self.last_at = at
-        for label, device in unique_label_devices(sample).items():
+        for label, device in labelled_devices(sample).items():
             values = (
                 device.get("read_bytes_per_second"),
                 device.get("write_bytes_per_second"),

@@ -39,7 +39,7 @@ class DiskHistoryRecorderTests(unittest.TestCase):
             at += 5
         recorder.flush()
 
-    def test_minute_averages_per_unique_label(self):
+    def test_minute_averages_per_label(self):
         recorder = disk_history.DiskHistoryRecorder(self.directory)
         start = self.now - 60
         for offset, read in ((0, 100), (5, 300)):
@@ -47,7 +47,7 @@ class DiskHistoryRecorderTests(unittest.TestCase):
                 sample(
                     start + offset,
                     device("sdc", ["bigboi"], read, 50, 10),
-                    # Every SD card carries bootfs, so it belongs to no one disk.
+                    # Every SD card carries bootfs, so its history would mix cards.
                     device("mmcblk0", ["bootfs", "rootfs"], 0, 8, 1),
                     device("sdf", ["bootfs", "hotspare-b"], 0, 0, 0),
                     # A disk's first sample has no previous counters to rate against.

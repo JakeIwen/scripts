@@ -25,7 +25,8 @@ It does not reset USB devices or change power, clocks, services, or CAN state.
   `disk_history.py` averages each disk's five-second read/write rates and busy
   time into one 14-byte record a minute per filesystem label, in
   `/var/lib/vanpi-monitor/disk-io/<label>.bin`, kept 30 days (about 600 KB per
-  disk). A label several disks share (`bootfs` on every SD card) is skipped. The
+  disk). `bootfs` is skipped: every SD card carries it, and `/dev/disk/by-label`
+  links it to whichever card udev saw last. The
   dashboard reads it only through `system_event_monitor.py disk-io --latest` or
   `disk-io --label <label> --hours <1-720>`, which buckets a range into at most
   360 points.
