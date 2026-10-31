@@ -1,17 +1,11 @@
 """Completion hook: failures become JSON evidence, never torrent-hook exceptions."""
 from dataclasses import replace
-from . import config, records, plans, link_rebuild, runs
+from . import records, plans, link_rebuild, runs
+from .activity_log import log
 from .apply import apply_plan
 from .busy import operation
 from .locking import media_lock
 from .scan import scan
-from .storage import now
-
-
-def log(step):
-    config.LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with config.LOG_PATH.open('a', encoding='utf-8') as stream:
-        stream.write(f'{now()} {step}\n')
 
 
 def post_download(settings):
