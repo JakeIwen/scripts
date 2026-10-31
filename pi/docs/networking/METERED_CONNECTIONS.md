@@ -224,42 +224,48 @@ The third compact `policyctl read` column stays zero for existing backup readers
    `pi/scripts/policyctl`, and `pi/scripts/internet_switches.sh`.
    Preserve each live original before installing. Publish the CLI and connectivity
    collector first (mode 755 for executables; 644 for the sourced shell helper).
-4. Before starting, verify the installed `/home/pi/scripts/backup/icloud_uplink.py`
-   emits the new evidence envelope, including `ipv6_defaults` and verified radio
-   identity fields. Package activation does not ship this flat cloud probe; an
-   older helper makes the new reconciler fail closed even on an unmetered uplink.
-   Stop if it is older: do not bypass the scoped cloud installers by copying an
-   individual worker/helper.
-   Enable and start the independent reconciler:
-   `ssh vanpi.lan 'sudo systemctl enable --now vanpi-metered.service'`.
-   Verify `systemctl is-active`, fresh state, the verdict and per-consumer state
-   before removing the old power-based gate: denied torrents must be held;
-   verified unmetered torrents may remain permitted/running. An unknown state
-   must be held, not permitted. While the old gate remains, both gates only
-   restrict; confirm the graceful-stop fallback works with the live script, or
-   that it is not needed while torrents are permitted.
-5. Install the staged `policyctl` and `internet_switches.sh` together, retaining
-   rollback copies. Run `/home/pi/scripts/policyctl --no-reconcile migrate`, then
-   `/home/pi/scripts/policyctl reconcile` over SSH. Migration preserves disk and
-   torrent switches, removes the old indefinite exemption, and never grants a new
-   approval. Update only the reviewed `.bashrc` wrapper lines after comparing its
-   live version; do not overwrite unrelated `nfn` additions.
-6. Use the existing scoped backup deployers, in their documented guarded workflow:
+4. Keep the package unit inactive and retain a protective torrent-policy hold
+   during the first rollout; save the pre-deploy requested policy for restoration.
+   Use the scoped cloud deployers, in their documented guarded workflow:
    `bash pi/deploy_icloud_backup.sh`, then `bash pi/deploy_time_machine_icloud.sh`.
-   Their cohort includes `internet_switches.sh`, so deploy them only after the
-   reconciler is verified and the policy pair is migrated.
-   Their prerequisite checks must see the new connectivity collector and package
-   CLI; an exact staged live file satisfies the revision check. Use the documented
+   Their cohort includes both `internet_switches.sh` and the reconciler's flat
+   `/home/pi/scripts/backup/icloud_uplink.py` probe, so this is one rollout: neither
+   the probe nor the gate can be treated as an independent preparatory update.
+   An older probe lacks `ipv6_defaults` and verified radio-identity fields and
+   makes the new reconciler fail closed even on an unmetered uplink.
+   The deployers must see the new connectivity collector and package CLI; an exact
+   staged live file satisfies their revision check. Use the documented
    `VANPI_BACKUP_PREVIOUS_REVISION` for reviewed older live files. Do not copy
-   individual cloud workers around their owner deployers or interrupt an active
-   upload: wait for their existing fence and inactive-worker checks to admit
-   deployment. Preserve independent cloud pauses.
+   individual cloud workers/helpers around their owner deployers. Preserve
+   independent cloud pauses and resource locks. Never kill an active upload to
+   deploy: wait up to 30 minutes, checking sparsely, then stop and report if its
+   existing fence and inactive-worker checks still cannot admit deployment.
+5. Immediately install the staged `policyctl` and `internet_switches.sh` together,
+   retaining rollback copies. Run `/home/pi/scripts/policyctl --no-reconcile migrate`
+   over SSH, without requesting reconciliation yet. Migration preserves disk and
+   torrent switches, removes the old indefinite exemption, and never grants a new
+   approval.
+6. Enable and start the independent reconciler:
+   `ssh vanpi.lan 'sudo systemctl enable --now vanpi-metered.service'`.
+   Verify fresh state, the actual uplink verdict, every Pi consumer's permission
+   and several evaluations without tracebacks. Unknown must be held, not permitted.
+   Restore the saved requested torrent setting, including after a later failure
+   or rollback; when it was enabled, run `/home/pi/scripts/policyctl torrents on`
+   and let the policy service start qBittorrent. On a verified unmetered uplink,
+   require `pi.torrents` actual `running`, no remaining `metered-hold` tags and
+   cleared fallback ownership. Do not leave seeding stopped by a deployment hold.
 7. Update the dashboard backend:
-   `python3 pi/deploy_python.py --update --service van-dashboard.service`.
-   Check `http://vanpi.lan:8788/api/metered`, the service journal, registry/state
-   decoding and expired-approval behavior. Neither the backend nor the reconciler
-   requires a frontend build to start, but the old switch must not be presented as
-   a functioning permission control.
+   `python3 pi/deploy_python.py --update --service van-dashboard.service`, then
+   `bash pi/deploy_van_dashboard_frontend.sh`.
+   Check `http://vanpi.lan:8788/api/metered`, the service journal and registry/state
+   decoding, then open the OpenWrt sheet's Metered section in the browser. Neither
+   the backend nor reconciler requires a frontend build to start, but the old
+   switch must not be presented as a functioning permission control.
+8. Finish the narrow updater deployment, pull/review/push only the yt-dlp crontab
+   admission prefix, and update only the reviewed `.bashrc` wrapper lines after
+   comparing its live version; do not overwrite unrelated `nfn` additions. Deploy
+   castit through its own receiver deployer only while no cast is playing, then
+   verify the full installed CLI, dashboard, updater, cron and receiver cohort.
 
 For a later shared-library change, select **both** `vanpi-metered.service` and
 `van-dashboard.service` with the package updater. Both dependency digests include
