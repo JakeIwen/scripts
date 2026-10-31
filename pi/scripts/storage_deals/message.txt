@@ -1,0 +1,15 @@
+1. EXFAT512 replacement, the priority: a 1TB 2.5" SATA SSD plus a USB 3 UASP enclosure (about $12).
+Buy at or under $100 new (Samsung 870 EVO, WD Blue, Crucial MX500, Team Vulcan Z), or $80 used.
+Oct 30 prices: $120-130 budget brands, $310+ Samsung.
+
+2. Offsite backup at your friend's Synology (the Sep 2 plan): a 12-14TB CMR drive, seeded at home first.
+Buy at or under $300 for a new external 14TB (WD Elements Desktop WDBWLG0140HBK), or $220 WD recertified.
+A bare NAS drive (IronWolf ST14000VN0008) at or under $280 also works, plus a $55 OWC Mercury Elite Pro if his NAS has no free bay.
+Oct 30 prices: WD Elements Desktop 14TB $480-550; its low was $170 in Oct 2025.
+
+3. Only if movingparts starts showing bad sectors: a 5TB portable at or under $150 (Oct 30: $220).
+
+WD recertified 14TB: https://www.westerndigital.com/products/recertified/external-drives/wd-elements-desktop-usb-3-0-hdd-recertified?sku=RWDBWLG0140HBK-NESN
+14TB price history: https://camelcamelcamel.com/product/B07YD3G568
+SATA SSDs: https://www.amazon.com/s?k=1TB+2.5+inch+SATA+SSD
+Deals: https://slickdeals.net/newsearch.php?q=14tb+external
