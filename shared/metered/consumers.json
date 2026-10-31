@@ -7,7 +7,7 @@
   {"id":"pi.ytdlp_update","host":"pi","label":"yt-dlp and Deno updates","how":"run","note":"Weekly update-ytdlp cron checks vanpi-metered allows before running the controller."},
   {"id":"pi.castit_hd","host":"pi","label":"Van TV Auto above 720p","how":"run","note":"castit checks vanpi-metered allows when a video loads; held means Auto caps at 720p. Explicit quality choices are honored."},
   {"id":"pi.castit_saves","host":"pi","label":"Van TV background saves","how":"run","note":"castit checks before each background save; held saves stay pending and retry every 30 s."},
-  {"id":"mac.low_data_mode","host":"mac","label":"Low Data Mode","how":"unprotected","note":"Control defaults OFF until the LAN Time Machine test passes. When enabled, Wi-Fi is constrained while metered and cleared when permitted; native flags are preserved."},
+  {"id":"mac.low_data_mode","host":"mac","label":"Full-speed Wi-Fi (Low Data Mode off)","how":"unprotected","note":"Held means Low Data Mode is on: Wi-Fi is constrained while metered and cleared when permitted. Control defaults off until the LAN Time Machine test passes; native flags are preserved."},
   {"id":"mac.icloud","host":"mac","label":"Mac iCloud","how":"advisory","note":"Advisory through enabled Low Data Mode only; apps may ignore it. Approval cannot independently release iCloud while the interface remains constrained."},
   {"id":"mac.codex_update","host":"mac","label":"Codex updates","how":"run","note":"Weekly adapter checks mac-metered allows before downloading; unknown defers."},
   {"id":"mac.claude_update","host":"mac","label":"Claude updates","how":"run","note":"Weekly adapter checks mac-metered allows; each check disables the native updater. Marketplace auto-update remains unmanaged."},
