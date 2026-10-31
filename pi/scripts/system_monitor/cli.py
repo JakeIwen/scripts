@@ -189,7 +189,7 @@ def disk_io_command(args):
     except (OSError, ValueError) as error:
         print(json.dumps({"ok": False, "message": f"disk history unavailable: {error}"}))
         return 1
-    print(json.dumps(payload, separators=(",", ":")))
+    print(json.dumps({"ok": True, **payload}, separators=(",", ":")))
     return 0
 
 

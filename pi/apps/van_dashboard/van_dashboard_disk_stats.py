@@ -39,12 +39,16 @@ def _number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0
 
 
-def _checked_rows(rows, fields, what):
-    if not isinstance(rows, list) or not all(
-        isinstance(row, dict) and all(_number(row.get(field)) for field in fields) for row in rows
-    ):
+def _checked_row(row, fields, what):
+    if not isinstance(row, dict) or not all(_number(row.get(field)) for field in fields):
         raise SystemMonitorCommandError(f"system monitor returned invalid {what}")
-    return [{field: row[field] for field in fields} for row in rows]
+    return {field: row[field] for field in fields}
+
+
+def _checked_rows(rows, fields, what):
+    if not isinstance(rows, list):
+        raise SystemMonitorCommandError(f"system monitor returned invalid {what}")
+    return [_checked_row(row, fields, what) for row in rows]
 
 
 def parse_smart_line(line):
@@ -96,7 +100,7 @@ class DiskStatsReader:
             io = disks.get(label)
             readings = self._smart_readings(label)
             result[label] = {
-                "io": _checked_rows([io], IO_LATEST_FIELDS, "disk I/O")[0] if io is not None else None,
+                "io": None if io is None else _checked_row(io, IO_LATEST_FIELDS, "disk I/O"),
                 "smart": readings[-1] if readings else None,
             }
         return {

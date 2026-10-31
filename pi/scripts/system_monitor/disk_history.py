@@ -24,6 +24,9 @@ MAX_HOURS = RETENTION_SECONDS / 3600
 # Rewriting a month of records every minute would be wasteful; trim hourly
 # and let readers filter the rest.
 PRUNE_SLACK_SECONDS = 3600
+# Readers accept records up to a day ahead: a Pi without a clock can write
+# before NTP steps time back.
+CLOCK_SLACK_SECONDS = 86400
 # A graph wider than this many points adds nothing a phone can show.
 MAX_BUCKETS = 360
 BUSY_SCALE = 100
@@ -47,8 +50,33 @@ def history_path(directory, label):
     return os.path.join(directory, label + SUFFIX)
 
 
-def _finite(value):
+def _nonnegative(value):
     return isinstance(value, (int, float)) and math.isfinite(value) and value >= 0
+
+
+def _current(at, now):
+    return now - RETENTION_SECONDS <= at <= now + CLOCK_SLACK_SECONDS
+
+
+class _Rates:
+    """Running count, sums and peaks of read/write/busy samples."""
+
+    def __init__(self):
+        self.count = 0
+        self.read = self.write = self.busy = 0.0
+        self.peak_read = self.peak_write = self.peak_busy = 0.0
+
+    def add(self, read, write, busy):
+        self.count += 1
+        self.read += read
+        self.write += write
+        self.busy += busy
+        self.peak_read = max(self.peak_read, read)
+        self.peak_write = max(self.peak_write, write)
+        self.peak_busy = max(self.peak_busy, busy)
+
+    def means(self):
+        return self.read / self.count, self.write / self.count, self.busy / self.count
 
 
 def labelled_devices(sample):
@@ -116,19 +144,19 @@ class DiskHistoryRecorder:
         self.interval = interval
         self.period_start = None
         self.last_at = None
-        self.totals = {}
+        self.minute = {}
         self.reported_failure = False
 
     def observe(self, sample):
         """Add one sample, first closing the minute it falls outside; return records written."""
         at = sample.get("timestamp")
-        written = self.flush() if _finite(at) and self.ready(at) else 0
+        written = self.flush() if _nonnegative(at) and self.ready(at) else 0
         self.add(sample)
         return written
 
     def add(self, sample):
         at = sample.get("timestamp")
-        if not _finite(at):
+        if not _nonnegative(at):
             return
         if self.period_start is None:
             self.period_start = at
@@ -140,12 +168,8 @@ class DiskHistoryRecorder:
                 device.get("busy_percent"),
             )
             # The first sample after a disk appears has no previous counters.
-            if not all(_finite(value) for value in values):
-                continue
-            entry = self.totals.setdefault(label, [0.0, 0.0, 0.0, 0])
-            for index, value in enumerate(values):
-                entry[index] += value
-            entry[3] += 1
+            if all(_nonnegative(value) for value in values):
+                self.minute.setdefault(label, _Rates()).add(*values)
 
     def ready(self, now):
         # A backwards clock step (NTP after a cold boot) also closes the minute.
@@ -153,12 +177,12 @@ class DiskHistoryRecorder:
 
     def flush(self):
         """Append one record per disk seen this minute; return how many were written."""
-        totals, at = self.totals, self.last_at
-        self.totals, self.period_start, self.last_at = {}, None, None
+        minute, at = self.minute, self.last_at
+        self.minute, self.period_start, self.last_at = {}, None, None
         written = 0
-        for label, (read, write, busy, count) in sorted(totals.items()):
+        for label, rates in sorted(minute.items()):
             try:
-                append(self.directory, label, at, read / count, write / count, busy / count)
+                append(self.directory, label, at, *rates.means())
                 written += 1
             except OSError as error:
                 # The graph is optional; a lost minute must never stop the monitor.
@@ -175,8 +199,7 @@ def read_records(directory, label, now):
             data = handle.read()
     except FileNotFoundError:
         return []
-    cutoff = now - RETENTION_SECONDS
-    return sorted(row for row in _unpack(data) if cutoff <= row[0] <= now + 86400)
+    return sorted(row for row in _unpack(data) if _current(row[0], now))
 
 
 def bucket_seconds(span_seconds):
@@ -192,20 +215,10 @@ def history(directory, label, hours, now):
     size = bucket_seconds(span)
     buckets = {}
     for at, read, write, busy in read_records(directory, label, now):
-        if not since < at <= now:
-            continue
-        # Buckets align to the epoch so a refresh never shifts their edges.
-        start = int((at - 1) // size * size)
-        bucket = buckets.setdefault(start, [0, 0, 0, 0, 0, 0, 0])
-        bucket[0] += 1
-        bucket[1] += read * SAMPLE_SECONDS
-        bucket[2] += write * SAMPLE_SECONDS
-        bucket[3] = max(bucket[3], read)
-        bucket[4] = max(bucket[4], write)
-        bucket[5] += busy
-        bucket[6] = max(bucket[6], busy)
+        if since < at <= now:
+            # Buckets align to the epoch so a refresh never shifts their edges.
+            buckets.setdefault(int((at - 1) // size * size), _Rates()).add(read, write, busy)
     return {
-        "ok": True,
         "label": label,
         "since": int(since),
         "until": int(now),
@@ -214,17 +227,15 @@ def history(directory, label, hours, now):
         "buckets": [
             {
                 "start": start,
-                "minutes": minutes,
-                "read_bytes": read_bytes,
-                "write_bytes": write_bytes,
-                "peak_read_bytes_per_second": peak_read,
-                "peak_write_bytes_per_second": peak_write,
-                "busy_percent": round(busy_total / minutes / BUSY_SCALE, 2),
-                "peak_busy_percent": round(peak_busy / BUSY_SCALE, 2),
+                "minutes": rates.count,
+                "read_bytes": int(rates.read) * SAMPLE_SECONDS,
+                "write_bytes": int(rates.write) * SAMPLE_SECONDS,
+                "peak_read_bytes_per_second": int(rates.peak_read),
+                "peak_write_bytes_per_second": int(rates.peak_write),
+                "busy_percent": round(rates.means()[2] / BUSY_SCALE, 2),
+                "peak_busy_percent": round(rates.peak_busy / BUSY_SCALE, 2),
             }
-            for start, (
-                minutes, read_bytes, write_bytes, peak_read, peak_write, busy_total, peak_busy
-            ) in sorted(buckets.items())
+            for start, rates in sorted(buckets.items())
         ],
     }
 
@@ -247,7 +258,7 @@ def latest(directory, now):
                 tail = _unpack(handle.read(RECORD.size))
         except OSError:
             continue
-        if not tail or not now - RETENTION_SECONDS <= tail[0][0] <= now + 86400:
+        if not tail or not _current(tail[0][0], now):
             continue
         at, read, write, busy = tail[0]
         disks[label] = {
@@ -256,4 +267,4 @@ def latest(directory, now):
             "write_bytes_per_second": write,
             "busy_percent": round(busy / BUSY_SCALE, 2),
         }
-    return {"ok": True, "sample_seconds": SAMPLE_SECONDS, "disks": disks}
+    return {"sample_seconds": SAMPLE_SECONDS, "disks": disks}
