@@ -2,6 +2,8 @@ import type { PollingState } from '../../hooks/usePollingResource';
 import { lastSuccessLabel } from './presentation';
 import { iCloudTileLabel, iCloudTileTone } from './cloudPresentation';
 import type { BackupStatus } from './types';
+import { TooltipButton } from '../../components/TooltipButton';
+import { backupStatusDetail } from './statusDetail';
 import './backups.css';
 
 export interface BackupsTileProps {
@@ -89,13 +91,14 @@ export function BackupsTile({ resource, onOpen }: BackupsTileProps) {
   const presentation = status ? backupPresentation(status) : null;
 
   return (
-    <button
-      type="button"
-      className={`tile backups-tile backups-tile--${state}`}
-      onClick={onOpen}
-      aria-label="Open backup details"
-      aria-haspopup="dialog"
-    >
+    <article className={`tile backups-tile backups-tile--${state}`}>
+      <button
+        type="button"
+        className="tile__open"
+        onClick={onOpen}
+        aria-label="Open backup details"
+        aria-haspopup="dialog"
+      />
       <span className="backups-tile__heading">
         <span className="backups-tile__icon" aria-hidden="true">
           🛟
@@ -103,7 +106,13 @@ export function BackupsTile({ resource, onOpen }: BackupsTileProps) {
         <span className="backups-tile__title" role="heading" aria-level={2}>
           Backups
         </span>
-        <span className="backups-tile__pill">{tilePill(status)}</span>
+        <TooltipButton
+          className="backups-tile__pill"
+          tooltip={backupStatusDetail(status, resource.error)}
+          aria-label={`Backup status: ${tilePill(status)}`}
+        >
+          {tilePill(status)}
+        </TooltipButton>
       </span>
       <span className="backups-tile__summary">
         {presentation
@@ -146,6 +155,6 @@ export function BackupsTile({ resource, onOpen }: BackupsTileProps) {
           <span>{presentation?.timeMachine ?? 'Checking…'}</span>
         </span>
       </span>
-    </button>
+    </article>
   );
 }

@@ -82,6 +82,32 @@ describe('backups feature', () => {
     vi.useRealTimers();
   });
 
+  it('explains CHECK on tap without opening backup controls', () => {
+    const resource = backupResource();
+    const cloud = sampleRunningICloudStatus();
+    resource.data.timeMachineIcloud = {
+      ...cloud,
+      running: false,
+      phase: 'deferred',
+      attention: true,
+      message: 'Waiting for a permitted internet route.',
+    };
+    const onOpen = vi.fn();
+    render(<BackupsTile resource={resource} onOpen={onOpen} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Backup status: CHECK' }));
+    expect(screen.getByRole('tooltip')).toHaveTextContent('EXFAT512: last success');
+    expect(screen.getByRole('tooltip')).toHaveTextContent(
+      'Mac · iCloud: Waiting for a permitted internet route.',
+    );
+    expect(onOpen).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Backup status: CHECK' }), {
+      key: 'Escape',
+    });
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open backup details' }));
+    expect(onOpen).toHaveBeenCalledOnce();
+  });
+
   it('strictly decodes freshness, progress, hotspares, and Time Machine evidence', () => {
     const status = decodeBackupStatusResponse(backupStatusPayload(true));
     expect(status).toMatchObject({ health: 'running' });

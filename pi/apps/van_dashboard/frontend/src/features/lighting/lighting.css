@@ -228,12 +228,15 @@
 }
 
 .lighting-quick-room__slider {
-  grid-template-columns: minmax(0, 1fr) 30px;
   min-width: 0;
-  gap: 6px;
 }
 
-.lighting-quick-room__slider > span {
+.lighting-slider-control.lighting-slider-control--thumb-value {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+.lighting-quick-room__slider > .lighting-slider-control__label {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -244,13 +247,6 @@
 .lighting-quick-room__slider input {
   min-width: 0;
   margin: 0;
-}
-
-.lighting-quick-room__slider output {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  font-size: 8px;
 }
 
 .lighting-group-brightness {

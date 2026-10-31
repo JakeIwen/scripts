@@ -78,7 +78,7 @@ export function DealWatchTile({ resource, onOpen }: DealWatchTileProps) {
       title="Deal Watch"
       summary={summary}
       status={
-        <StatusPill tone={tone} dot={false}>
+        <StatusPill tone={tone} dot={false} detail={summary} label="Deal Watch status">
           {tileStatusLabel(status, resource.error)}
         </StatusPill>
       }

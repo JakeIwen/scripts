@@ -1,12 +1,8 @@
 import { StatusPill } from '../../components/StatusPill';
 import { Tile, TileStatusAnnouncement } from '../../components/Tile';
 import { actionConfirmation, attemptLabel, describeVonstar, resultAttempt } from './presentation';
-import {
-  VONSTAR_ACTION_NAMES,
-  VONSTAR_ACTIONS,
-  type VonstarActionName,
-  type VonstarController,
-} from './types';
+import { VonstarActions } from './VonstarActions';
+import type { VonstarActionName, VonstarController } from './types';
 import './vonstar.css';
 
 export function VonstarTile({
@@ -46,19 +42,7 @@ export function VonstarTile({
         aria-label="Open vOnStar status"
         onClick={onOpen}
       />
-      <div className="vonstar-actions" role="group" aria-label="Vehicle lock controls">
-        {VONSTAR_ACTION_NAMES.map((action) => (
-          <button
-            key={action}
-            className="vonstar-action"
-            type="button"
-            disabled={!controlsEnabled}
-            onClick={() => run(action)}
-          >
-            {VONSTAR_ACTIONS[action].label}
-          </button>
-        ))}
-      </div>
+      <VonstarActions disabled={!controlsEnabled} onAction={run} />
       <div className="vonstar-last-action" role="status" aria-live="polite">
         <span>Last action</span>
         <span>{attemptLabel(last)}</span>

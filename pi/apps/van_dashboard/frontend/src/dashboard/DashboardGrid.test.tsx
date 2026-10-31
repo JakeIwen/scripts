@@ -12,14 +12,14 @@ describe('DashboardGrid editing', () => {
         editing
         tiles={[
           { id: 'cop', content: <div>COP tile</div> },
-          { id: 'books', content: <div>Books tile</div> },
+          { id: 'video-library', content: <div>Media tile</div> },
         ]}
       />,
     );
 
     fireEvent.click(screen.getAllByText('Move later')[0]!.closest('button')!);
     expect(screen.getByText('cop moved later')).toBeInTheDocument();
-    expect(localStorage.getItem('van-dashboard.tile-order.v1')).toBe('["books","cop"]');
+    expect(localStorage.getItem('van-dashboard.tile-order.v1')).toBe('["video-library","cop"]');
   });
 
   it('reorders by mouse drag, filling dataTransfer so Firefox starts the drag', () => {
@@ -28,18 +28,18 @@ describe('DashboardGrid editing', () => {
         editing
         tiles={[
           { id: 'cop', content: <div>COP tile</div> },
-          { id: 'books', content: <div>Books tile</div> },
+          { id: 'video-library', content: <div>Media tile</div> },
         ]}
       />,
     );
     const tile = (id: string) => container.querySelector(`[data-tile-id="${id}"]`)!;
     const dataTransfer = { setData: vi.fn(), effectAllowed: 'all', dropEffect: 'none' };
 
-    fireEvent.dragStart(tile('books'), { dataTransfer });
+    fireEvent.dragStart(tile('video-library'), { dataTransfer });
     fireEvent.dragOver(tile('cop'), { dataTransfer });
     fireEvent.drop(tile('cop'), { dataTransfer });
 
-    expect(dataTransfer.setData).toHaveBeenCalledWith('text/plain', 'books');
-    expect(localStorage.getItem('van-dashboard.tile-order.v1')).toBe('["books","cop"]');
+    expect(dataTransfer.setData).toHaveBeenCalledWith('text/plain', 'video-library');
+    expect(localStorage.getItem('van-dashboard.tile-order.v1')).toBe('["video-library","cop"]');
   });
 });

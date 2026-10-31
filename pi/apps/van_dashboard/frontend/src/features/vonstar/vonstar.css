@@ -4,12 +4,8 @@
 .vonstar-tile.tile--bad {
   min-height: 276.390625px;
   gap: 11px;
-  border-color: #665b2d;
-  background: radial-gradient(circle at 90% 5%, rgb(242 201 76 / 14%), transparent 38%), #1d2429;
-}
-
-.vonstar-tile.tile--good {
-  border-color: #8b7937;
+  border-color: var(--line);
+  background: var(--tile-background);
 }
 
 .vonstar-tile .status-pill {
@@ -80,6 +76,35 @@
 .vonstar-action:disabled {
   cursor: default;
   opacity: 0.38;
+}
+
+.vonstar-unlock {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.vonstar-unlock legend {
+  margin-bottom: 4px;
+  padding: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.vonstar-unlock__buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.vonstar-unlock__buttons > .vonstar-action:first-child {
+  border-radius: 9px 0 0 9px;
+}
+
+.vonstar-unlock__buttons > .vonstar-action:last-child {
+  border-left: 0;
+  border-radius: 0 9px 9px 0;
 }
 
 .vonstar-last-action {

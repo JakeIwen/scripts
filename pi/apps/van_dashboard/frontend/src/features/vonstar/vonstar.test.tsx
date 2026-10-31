@@ -178,6 +178,22 @@ describe('vOnStar strict decoders', () => {
 });
 
 describe('vOnStar controls', () => {
+  it.each([
+    ['Front', 'unlock_front'],
+    ['Cargo', 'unlock_cargo'],
+  ] as const)('confirms the %s half before dispatching its unlock action', (label, action) => {
+    const controller = readyController();
+    vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+    render(<VonstarTile controller={controller} onOpen={vi.fn()} />);
+
+    const button = screen.getByRole('button', { name: `Unlock ${label}` });
+    expect(button).toHaveTextContent(new RegExp(`^${label}$`));
+    fireEvent.click(button);
+    expect(controller.perform).not.toHaveBeenCalled();
+    fireEvent.click(button);
+    expect(controller.perform).toHaveBeenCalledExactlyOnceWith(action);
+  });
+
   it('renders plan-only, service-busy, and local working states', () => {
     const planOnly = readyController();
     if (!planOnly.status) throw new Error('missing vOnStar status fixture');

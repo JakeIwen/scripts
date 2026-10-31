@@ -1,4 +1,5 @@
 import { Tile, ServiceLink } from '../../components/Tile';
+import { MovieIcon } from '../../components/MovieIcon';
 import { usePaneLink } from '../../dashboard/paneLinks';
 import { OrganizerSheet } from './OrganizerSheet';
 import { useOrganizer } from './useOrganizer';
@@ -22,7 +23,7 @@ export function MediaOrganizerFeature() {
   return (
     <>
       <Tile
-        icon=""
+        icon={<MovieIcon />}
         title="Movies & TV"
         summary={`${summary}${newCandidates > 0 ? ` · ${newCandidates} new episodes on IPT` : ''}`}
       >
@@ -36,6 +37,9 @@ export function MediaOrganizerFeature() {
           <button type="button" onClick={() => setWatchOpen(true)}>
             Watchlist
           </button>
+          <ServiceLink port={8787} className="organizer-service-link">
+            Audiobooks
+          </ServiceLink>
         </div>
         {organizer.busyStage && <small role="status">Running: {organizer.busyStage}</small>}
       </Tile>

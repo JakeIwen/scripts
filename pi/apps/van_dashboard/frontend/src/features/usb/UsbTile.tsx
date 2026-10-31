@@ -1,5 +1,6 @@
 import type { PollingState } from '../../hooks/usePollingResource';
 import type { UsbStatus } from './types';
+import { UsbIcon } from '../../components/UsbIcon';
 import './usb.css';
 
 export interface UsbTileProps {
@@ -52,7 +53,7 @@ export function UsbTile({ resource, onOpen }: UsbTileProps) {
     >
       <span className="usb-tile__heading">
         <span className="usb-tile__icon" aria-hidden="true">
-          🔌
+          <UsbIcon />
         </span>
         <span className="usb-tile__title" role="heading" aria-level={2}>
           USB Devices

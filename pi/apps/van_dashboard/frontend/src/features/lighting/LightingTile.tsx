@@ -56,6 +56,7 @@ function QuickRoomControl({
         minimum={1}
         maximum={100}
         unit="%"
+        valueInThumb
         disabled={!available || controls.running}
         displayValue={available ? undefined : '—'}
         className="lighting-quick-room__slider"

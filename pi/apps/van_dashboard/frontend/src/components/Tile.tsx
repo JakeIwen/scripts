@@ -1,7 +1,7 @@
 import type { StatusTone } from './StatusPill';
 
 interface TileProps {
-  icon: string;
+  icon: React.ReactNode;
   title: string;
   summary: React.ReactNode;
   children?: React.ReactNode;
@@ -42,15 +42,16 @@ export function Tile({
   const classes = `tile tile--${tone} ${className}`.trim();
   if (onClick) {
     return (
-      <button
-        className={`${classes} tile--button`}
-        type="button"
-        onClick={onClick}
-        aria-label={ariaLabel}
-        style={style}
-      >
+      <article className={`${classes} tile--button`} style={style}>
+        <button
+          type="button"
+          className="tile__open"
+          onClick={onClick}
+          aria-label={ariaLabel ?? title}
+          aria-haspopup="dialog"
+        />
         {content}
-      </button>
+      </article>
     );
   }
   return (

@@ -177,7 +177,7 @@
   padding: 15px;
   border: 1px solid var(--line);
   border-radius: var(--radius-large);
-  background: linear-gradient(145deg, var(--panel), #151f28);
+  background: var(--tile-background);
   box-shadow: 0 8px 28px #050b102e;
   color: var(--text);
   text-align: left;
@@ -197,19 +197,18 @@
   transform: translateY(-1px);
 }
 
-.tile--good {
-  border-color: #3d765d;
-  background: linear-gradient(145deg, #1a3027, #15241e);
+.tile__open {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
 }
 
-.tile--warning {
-  border-color: #745b34;
-  background: linear-gradient(145deg, #31291d, #211e18);
-}
-
-.tile--bad {
-  border-color: #844b45;
-  background: linear-gradient(145deg, #322321, #211a1a);
+.tile__open:focus-visible {
+  outline-offset: -4px;
 }
 
 .tile__header {
@@ -240,6 +239,7 @@
   position: var(--tile-status-position);
   grid-column: var(--tile-status-column);
   justify-self: start;
+  z-index: 2;
   top: 15px;
   right: 15px;
 }
@@ -283,6 +283,10 @@
   line-height: 14px;
   text-transform: uppercase;
   white-space: nowrap;
+}
+
+button.status-pill {
+  cursor: help;
 }
 
 .status-pill__dot {

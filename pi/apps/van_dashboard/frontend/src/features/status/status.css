@@ -4,35 +4,13 @@
   align-items: flex-start;
   gap: 0;
   padding: 15px;
-  border-color: #744238;
+  border-color: var(--line);
   border-radius: 19px;
-  background:
-    radial-gradient(circle at 92% 5%, #ef503f33, transparent 35%),
-    linear-gradient(145deg, #292124, #1c2026);
+  background: var(--tile-background);
   box-shadow: 0 8px 28px #050b102e;
   color: #eef5f8;
   line-height: 1.4;
   cursor: pointer;
-}
-
-.status-tile::after {
-  position: absolute;
-  height: 180px;
-  background: #ef503f;
-  content: '';
-  filter: blur(60px);
-  inset: auto -25% -80% 25%;
-  opacity: 0;
-  transition: opacity 0.25s;
-}
-
-.tile.status-tile--active {
-  border-color: #ef675a;
-  box-shadow: 0 10px 40px #ef503f25;
-}
-
-.status-tile--active::after {
-  opacity: 0.35;
 }
 
 .status-tile__pill {
@@ -79,10 +57,6 @@
   font-weight: 760;
   letter-spacing: -0.01em;
   line-height: 1.15;
-}
-
-.status-tile--active .status-tile__title {
-  color: #ffd7d2;
 }
 
 .status-tile__summary {
