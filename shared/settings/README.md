@@ -4,6 +4,11 @@ Each configurable background tool has one declaration in `<tool>.json`. The tool
 and Mac Panel both load that declaration through `shared/python/tool_settings.py`,
 so defaults, validation bounds, labels, and help text stay in one place.
 
+Tools that live outside this repository declare their settings in
+`~/.config/jacobr/declarations/<tool>.json` instead (same format; usually a symlink
+into the tool's own checkout, which is followed). The tool list, CLI and panel merge
+both directories; a tool declared in both is an error until one copy is removed.
+
 A declaration is a JSON object with `tool`, `title`, `description`, and an ordered
 `settings` array. Every setting has `name`, `type`, `default`, and `description`.
 Supported types are `integer`, `number`, `boolean`, and `choice`. Numeric settings

@@ -218,6 +218,81 @@ class ToolSettingsTests(unittest.TestCase):
                          ["built_in", "external", "poll_seconds", "settle_polls"])
         self.assertEqual(declaration.defaults()["external"], 15)
 
+    def private_declaration(self, tool, declaration=None):
+        """Declare a tool in the private directory through a symlink, as an installer would."""
+        declaration = declaration or dict(sample_declaration(), tool=tool)
+        source = self.root / "elsewhere" / (tool + ".json")
+        source.parent.mkdir(exist_ok=True)
+        source.write_text(json.dumps(declaration), encoding="utf-8")
+        link = self.config / "declarations" / (tool + ".json")
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(source)
+        return link
+
+    def run_cli(self, *arguments, check=True):
+        # -I -B as the panel and LaunchAgents run it: environment overrides still reach
+        # the module because it reads JACOBR_* itself, not PYTHON* variables.
+        return subprocess.run([sys.executable, "-I", "-B", str(SCRIPT), *arguments],
+                              check=check, capture_output=True, text=True, env=dict(os.environ))
+
+    def test_tool_list_merges_shared_and_private_declarations(self):
+        self.private_declaration("outside")
+        (self.config / "declarations" / "notes.txt").write_text("not a declaration", encoding="utf-8")
+        self.assertEqual(tool_settings.declaration_tools(), ["outside", "sample"])
+        self.assertEqual(self.run_cli("list").stdout.split(), ["outside", "sample"])
+
+    def test_missing_private_directory_lists_only_shared_tools(self):
+        self.assertFalse(self.config.exists())
+        self.assertEqual(tool_settings.declaration_tools(), ["sample"])
+        self.config.mkdir()
+        self.assertEqual(tool_settings.declaration_tools(), ["sample"])
+
+    def test_private_only_tool_loads_saves_and_reloads_through_a_symlink(self):
+        self.private_declaration("outside")
+        declaration = tool_settings.load_declaration("outside")
+        self.assertEqual(declaration.tool, "outside")
+        self.assertEqual(tool_settings.read_state("outside").values, declaration.defaults())
+        reloader = tool_settings.Reloader("outside")
+        state = tool_settings.save("outside", {"count": 7})
+        values = self.config / "outside.json"
+        self.assertEqual(state.path, str(values))
+        self.assertEqual(json.loads(values.read_text(encoding="utf-8")), {"count": 7})
+        self.assertEqual(tool_settings.load("outside")["count"], 7)
+        reloaded = reloader.poll()
+        self.assertTrue(reloaded.changed)
+        self.assertEqual(reloaded.values["count"], 7)
+
+    def test_cli_shows_and_sets_a_private_only_tool(self):
+        self.private_declaration("outside")
+        set_result = self.run_cli("set", "outside", "mode=slow", "enabled=true")
+        self.assertEqual(json.loads(set_result.stdout)["overrides"], {"enabled": True, "mode": "slow"})
+        shown = json.loads(self.run_cli("show", "outside").stdout)
+        self.assertEqual(shown["values"]["mode"], "slow")
+        self.assertEqual(shown["path"], str(self.config / "outside.json"))
+
+    def test_tool_declared_in_both_directories_is_an_error_naming_both(self):
+        link = self.private_declaration("sample")
+        self.assertEqual(tool_settings.declaration_tools(), ["sample"])
+        for attempt in (lambda: tool_settings.load_declaration("sample"),
+                        lambda: tool_settings.read_state("sample"),
+                        lambda: tool_settings.save("sample", {"count": 3})):
+            with self.assertRaises(tool_settings.SettingsError) as caught:
+                attempt()
+            self.assertIn(str(self.declaration_path), str(caught.exception))
+            self.assertIn(str(link), str(caught.exception))
+        result = self.run_cli("show", "sample", check=False)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(str(link), result.stderr)
+        self.assertFalse((self.config / "sample.json").exists())
+
+    def test_dangling_private_link_is_unlisted_and_named_when_loaded(self):
+        link = self.private_declaration("outside")
+        (self.root / "elsewhere" / "outside.json").unlink()
+        self.assertEqual(tool_settings.declaration_tools(), ["sample"])
+        with self.assertRaises(tool_settings.SettingsError) as caught:
+            tool_settings.load_declaration("outside")
+        self.assertIn(str(link), str(caught.exception))
+
     def test_cli_set_and_show_round_trip(self):
         environment = dict(os.environ)
         set_result = subprocess.run(

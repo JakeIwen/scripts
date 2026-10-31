@@ -123,19 +123,39 @@ def _values_dir() -> Path:
     return Path.home() / ".config" / "jacobr"
 
 
+def _private_declarations_dir() -> Path:
+    # Tools that live outside this repository declare their settings beside their saved
+    # values (often as a symlink into their own checkout), so they get a panel form without
+    # their declaration being committed here. It follows the values directory, so anything
+    # that isolates values (tests, demos) isolates these declarations too.
+    return _values_dir() / "declarations"
+
+
 def _valid_tool_name(tool: str) -> bool:
     return isinstance(tool, str) and _TOOL_NAME.fullmatch(tool) is not None
 
 
 def _declaration_path(tool: str) -> Path:
-    return _declarations_dir() / (tool + ".json")
+    shared = _declarations_dir() / (tool + ".json")
+    if not _valid_tool_name(tool):
+        return shared
+    private = _private_declarations_dir() / (tool + ".json")
+    # lexists, not is_file: a dangling link still claims the tool, so loading it names the
+    # broken link instead of reporting a missing file in the shared directory.
+    if not os.path.lexists(str(private)):
+        return shared
+    if os.path.lexists(str(shared)):
+        # Picking one would let the two copies drift with no sign of which one a form edits.
+        raise _problem(shared, "{} is also declared in {}; keep one declaration".format(tool, private))
+    return private
 
 
 def declaration_tools() -> List[str]:
-    directory = _declarations_dir()
-    if not directory.is_dir():
-        return []
-    return sorted(path.stem for path in directory.glob("*.json") if path.is_file())
+    tools = set()
+    for directory in (_declarations_dir(), _private_declarations_dir()):
+        if directory.is_dir():
+            tools.update(path.stem for path in directory.glob("*.json") if path.is_file())
+    return sorted(tools)
 
 
 def _problem(path: Path, message: str) -> SettingsError:

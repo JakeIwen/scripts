@@ -349,7 +349,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   speakers only, never live discovery/playback/configuration. See
   `shared/README.md` for diagnostics and setup.
 - Tool settings: each configurable tool declares its settings once in
-  `shared/settings/<tool>.json` (name, type, range, default, description);
+  `shared/settings/<tool>.json` (name, type, range, default, description), or,
+  for tools that live outside this repository, in
+  `~/.config/jacobr/declarations/<tool>.json` (often a symlink; a tool declared
+  in both places is an error);
   `shared/python/tool_settings.py` (stdlib, runs on `/usr/bin/python3` 3.9) is
   the only reader/validator/writer, used by both the tool and the Mac Panel.
   Values live in `~/.config/jacobr/<tool>.json` (mode 600, atomic, only
