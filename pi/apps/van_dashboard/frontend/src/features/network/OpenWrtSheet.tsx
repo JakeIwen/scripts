@@ -1,6 +1,7 @@
 import { BottomSheet } from '../../components/BottomSheet';
 import { formatBytes, formatRelativeTime } from '../../utils/format';
 import { MwanInterfaceList } from './MwanInterfaceList';
+import { MeteredSection } from './metered/MeteredSection';
 import {
   connectivityAge,
   connectivityTone,
@@ -149,6 +150,8 @@ export function OpenWrtSheet({
           <MwanInterfaceList interfaces={connectivity?.router.interfaces ?? []} />
         </section>
       </div>
+
+      <MeteredSection open={open} />
 
       <section className={`openwrt-speedtest-control openwrt-speed--${speed.tone}`}>
         <div>
