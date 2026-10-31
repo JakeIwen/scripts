@@ -5,6 +5,7 @@ repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 target=${1:-pi@vanpi.lan}
 [[ $# -le 1 && "$target" != -* && "$target" != *[[:space:]]* ]] || exit 2
 cd "$repo"
+export PYTHONPATH="$repo:$repo/pi/scripts/backup"
 python3 -m pi.generate_backup_lock_registry --check
 . "$repo/pi/backup_local_deploy.sh"
 local_previous=$(local_backup_previous_hashes "$repo" pi)
@@ -27,6 +28,9 @@ stage=$1
 [[ "$stage" =~ ^/tmp/vanpi-icloud\.[[:alnum:]]{6}$ ]] || exit 1
 [[ -x /usr/local/bin/rclone ]]
 cd "$stage"
+[[ -x /home/pi/scripts/vanpi-metered ]] || { echo 'Install the metering package and CLI before cloud workers.' >&2; exit 1; }
+/home/pi/scripts/vanpi-metered config --json >/dev/null
+printf '{}\n' | /home/pi/scripts/vanpi-metered admit pi.icloud_backup >/dev/null
 /usr/bin/python3 -m pi.generate_backup_lock_registry --check
 . pi/backup_local_deploy.sh
 while IFS= read -r source; do

@@ -1,6 +1,7 @@
 """Process-wide controller instances for the van dashboard."""
 
 from van_compute.metrics import ComputeMetricsReader
+from pi.apps.metered.controller import Controller as MeteredController
 
 from .van_dashboard_media_organizer import MediaOrganizerController
 from .van_dashboard_ipt_watch import IptWatchController
@@ -43,6 +44,7 @@ cop_led = cop_alert.light
 sonos = SonosController(state_store)
 sonos_alarms = SonosAlarmController(sonos)
 connectivity = ConnectivityMonitor()
+metered = MeteredController()
 openwrt_clients = OpenWrtClientsController()
 ubnt_wifi = UbntWifiController(on_change=connectivity.request_refresh)
 speedtest = SpeedTestManager()

@@ -13,6 +13,8 @@ FIXTURE_MODULES = {
     "pi/apps/van_dashboard/routes": ("__init__.py", "common.py", "projects.py"),
     "pi/apps/video_library": ("__main__.py", "video_library_server.py"),
     "pi/apps/video_library/players": ("vlc_player.py", "sonos_volume.py"),
+    "pi/apps/metered": ("__init__.py", "__main__.py", "controller.py"),
+    "shared/metered": ("__init__.py", "records.py", "rules.py"),
     "pi/scripts/python": ("ip_info.py", "vlc_property.py"),
-    "shared/python": ("__init__.py", "shared_tool.py", "sonos_tasks.py"),
+    "shared/python": ("__init__.py", "shared_tool.py", "sonos_tasks.py", "tool_settings.py"),
 }

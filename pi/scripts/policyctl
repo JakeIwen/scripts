@@ -30,20 +30,15 @@ LEGACY_MCONF = Path(os.environ.get("VANPI_POLICY_MCONF", "/home/pi/mconf"))
 LEGACY_MCONF_LAST = Path(
     os.environ.get("VANPI_POLICY_MCONF_LAST", "/home/pi/mconf_last")
 )
-LEGACY_STARCONF = Path(
-    os.environ.get("VANPI_POLICY_STARCONF", "/home/pi/starconf")
-)
-POLICY_VERSION = 1
+POLICY_VERSION = 2
 DEFAULT_RECONCILE_TIMEOUT_SECONDS = 120.0
 POLICY_FIELDS = (
     "disks_enabled",
     "torrents_enabled",
-    "allow_starlink_torrents",
 )
 TARGET_FIELDS = {
     "disks": "disks_enabled",
     "torrents": "torrents_enabled",
-    "starlink-torrents": "allow_starlink_torrents",
 }
 # Keep this list aligned with HDD_LABELS in disk_policy.sh. These are the
 # rotational disks controlled by the disks policy; unrelated flash media does
@@ -79,6 +74,11 @@ def policy_lock(exclusive):
 def validate_policy(value):
     if not isinstance(value, dict):
         raise PolicyError("policy must be a JSON object")
+    if type(value.get('version')) is int and value['version'] == 1 and set(value) == {'version', *POLICY_FIELDS, 'allow_starlink_torrents'}:
+        if type(value['allow_starlink_torrents']) is not bool:
+            raise PolicyError('legacy Starlink policy must be boolean')
+        value = {key: item for key, item in value.items() if key != 'allow_starlink_torrents'}
+        value['version'] = POLICY_VERSION
     expected = {"version", *POLICY_FIELDS}
     unknown = set(value) - expected
     missing = expected - set(value)
@@ -86,7 +86,7 @@ def validate_policy(value):
         raise PolicyError(f"unknown policy fields: {', '.join(sorted(unknown))}")
     if missing:
         raise PolicyError(f"missing policy fields: {', '.join(sorted(missing))}")
-    if value["version"] != POLICY_VERSION:
+    if type(value["version"]) is not int or value["version"] != POLICY_VERSION:
         raise PolicyError(f"unsupported policy version: {value['version']!r}")
     for field in POLICY_FIELDS:
         if type(value[field]) is not bool:
@@ -112,7 +112,7 @@ def read_policy():
 
 
 def atomic_write_policy(value):
-    validate_policy(value)
+    value = validate_policy(value)
     ensure_state_directory()
     temporary_name = None
     try:
@@ -165,24 +165,22 @@ def migrated_policy():
     requested = LEGACY_MCONF_LAST if LEGACY_MCONF_LAST.is_dir() else LEGACY_MCONF
     disks_enabled = not has_marker(requested, ("nodisk",))
     torrents_enabled = not has_marker(requested, ("notorrent", "notor"))
-    allow_starlink = has_marker(requested, ("startor",))
-    if not requested.is_dir() and LEGACY_STARCONF.is_dir():
-        # The older starconf convention allowed Starlink torrents when its
-        # `notor` marker was absent. An existing mconf/mconf_last uses the
-        # newer startor marker convention and takes precedence over starconf.
-        allow_starlink = not has_marker(LEGACY_STARCONF, ("notor",))
     return {
         "version": POLICY_VERSION,
         "disks_enabled": disks_enabled,
         "torrents_enabled": torrents_enabled,
-        "allow_starlink_torrents": allow_starlink,
     }
 
 
 def migrate_policy():
     with policy_lock(exclusive=True):
         if POLICY_PATH.exists():
-            return read_policy_unlocked(), False
+            original = json.loads(POLICY_PATH.read_text())
+            value = validate_policy(original)
+            changed = value != original
+            if changed:
+                atomic_write_policy(value)
+            return value, changed
         value = migrated_policy()
         atomic_write_policy(value)
         return value, True
@@ -282,7 +280,9 @@ def runtime_status(command=subprocess.run):
 
 
 def status_report(value, runtime=None):
-    report = dict(value)
+    # Preserve the old dashboard wire shape until its switch is removed;
+    # this compatibility value cannot grant a metering exemption.
+    report = dict(value, version=1, allow_starlink_torrents=False)
     report["runtime"] = runtime_status() if runtime is None else runtime
     return report
 
@@ -337,10 +337,6 @@ def print_status(value, as_json=False, runtime=None):
     rows = (
         ("HDDs", "enabled" if value["disks_enabled"] else "disabled"),
         ("Torrents", "enabled" if value["torrents_enabled"] else "disabled"),
-        (
-            "Starlink torrents",
-            "allowed" if value["allow_starlink_torrents"] else "blocked",
-        ),
     )
     for label, state in rows:
         print(f"  {label}: {state}")
@@ -402,7 +398,7 @@ def main(argv=None):
             print(
                 int(value["disks_enabled"]),
                 int(value["torrents_enabled"]),
-                int(value["allow_starlink_torrents"]),
+                0,  # Reserved compatibility column; metering approvals belong to vanpi-metered.
             )
         return 0
     elif args.command == "migrate":

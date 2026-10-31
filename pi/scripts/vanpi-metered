@@ -1,0 +1,7 @@
+#!/bin/sh
+# Stable shell/SSH entry; the immutable package release owns implementation.
+export VANPI_METERED_HOME=/home/pi
+export PYTHONPATH=/home/pi/scripts/python-packages/current
+export PYTHONDONTWRITEBYTECODE=1
+[ "$#" -gt 0 ] || set -- status
+exec /usr/bin/python3 -P -m pi.apps.metered "$@"

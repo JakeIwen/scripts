@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Read-only, fail-closed uplink evidence for the direct iCloud uploader."""
-import ipaddress
 import json
 import os
 from pathlib import Path
@@ -13,64 +12,35 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import connectivity_status
 
 
-def decide(evidence, now=None):
-    now = time.time() if now is None else now
+def decide(evidence, consumer_id='pi.icloud_backup', command=subprocess.run):
+    # Keep long-lived flat cloud workers outside immutable package releases.
+    # Only the short-lived admission CLI imports the shared metering policy.
     try:
-        if not 0 <= now - evidence['checked_at'] <= 30:
-            return False, 'stale uplink evidence'
-        route = evidence['local_route']
-        if route['gateway'] != '192.168.6.1' or route['dev'] not in ('eth0', 'wlan0'):
-            return False, 'unrecognized Pi route or VPN route'
-        if not ipaddress.ip_address(route['prefsrc']).is_private:
-            return False, 'unexpected Pi source address'
-        router = evidence['router']
-        if not router['reachable'] or router['default_policy'] not in ('balanced', 'wan_only', 'clientwan_only', 'lifiwan_only'):
-            return False, 'unverified router policy'
-        if evidence['rule_names'] != ['default_rule_v4']:
-            return False, 'source-specific routing rules need review'
-        members = router['route_members']
-        if any(type(m.get('percent')) not in (int, float) or not 0 <= m['percent'] <= 100 for m in members):
-            return False, 'invalid route weights'
-        if not members or abs(sum(m['percent'] for m in members) - 100) > 0.01:
-            return False, 'no complete default-route evidence'
-        for member in members:
-            if member['percent'] <= 0:
-                continue
-            name = member['name']
-            if name not in ('wan', 'clientwan', 'lifiwan'):
-                return False, 'unrecognized or Starlink uplink'
-            if name == 'wan':
-                radio = evidence['ubnt']
-                if not radio['reachable'] or not radio['connected']:
-                    return False, 'antenna association is unknown'
-                ssid = radio['ssid']
-            else:
-                radio = evidence['wireless_uplinks'].get(name, {})
-                if not radio.get('up'):
-                    return False, 'wireless uplink identity is unknown'
-                ssid = radio.get('ssid')
-            if not isinstance(ssid, str) or not ssid.strip():
-                return False, 'selected uplink has no verified SSID'
-            if connectivity_status.is_starlink_ssid(ssid):
-                return False, 'Starlink is a selected uplink'
-        return True, 'all selected uplinks are non-Starlink'
-    except (KeyError, TypeError, ValueError, AttributeError):
-        return False, 'incomplete uplink evidence'
+        result = command(['/home/pi/scripts/vanpi-metered', 'admit', consumer_id],
+                         input=json.dumps(evidence), capture_output=True, text=True, timeout=5)
+        payload = json.loads(result.stdout)
+        if (result.returncode or not isinstance(payload, dict)
+                or type(payload.get('allowed')) is not bool or not isinstance(payload.get('reason'), str)):
+            raise ValueError('invalid admission response')
+        return payload['allowed'], payload['reason']
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        return False, 'metering admission is unavailable'
 
 
 ROUTER_IDENTITIES = r'''
 set -e
 /sbin/uci -q show mwan3 | /bin/sed -n 's/^mwan3\.\([^.=]*\)=rule$/RULE \1/p'
-for iface in clientwan lifiwan; do
-    state=$(/bin/ubus call network.interface.$iface status)
-    up=$(printf '%s' "$state" | /usr/bin/jsonfilter -e '@.up')
+for iface in clientwan lifiwan starwan; do
+    state=$(/bin/ubus call network.interface.$iface status 2>/dev/null) || {
+        printf 'UP %s false\n' "$iface"; continue;
+    }
+    up=$(printf '%s' "$state" | /usr/bin/jsonfilter -e '@.up') || up=false
     printf 'UP %s %s\n' "$iface" "$up"
     if [ "$up" = true ]; then
-        dev=$(printf '%s' "$state" | /usr/bin/jsonfilter -e '@.l3_device')
-        case "$dev" in ''|*[!a-zA-Z0-9_.:-]*) exit 2;; esac
-        ssid=$(/bin/ubus call iwinfo info "{\"device\":\"$dev\"}" | /usr/bin/jsonfilter -e '@.ssid')
-        [ -n "$ssid" ]
-        printf 'SSID %s %s\n' "$iface" "$ssid"
+        dev=$(printf '%s' "$state" | /usr/bin/jsonfilter -e '@.l3_device') || continue
+        case "$dev" in ''|*[!a-zA-Z0-9_.:-]*) continue;; esac
+        info=$(/bin/ubus -S call iwinfo info "{\"device\":\"$dev\"}") || continue
+        printf 'RADIO %s %s\n' "$iface" "$info"
     fi
 done
 '''
@@ -103,6 +73,9 @@ def collect(command=connectivity_status.run_command, wall_clock=time.time):
     if len(routes) != 1:
         raise ValueError('ambiguous local route')
     evidence['local_route'] = routes[0]
+    ipv6 = command(['/usr/bin/ip', '-j', '-6', 'route', 'show', 'default'], timeout=5)
+    ipv6.check_returncode()
+    evidence['ipv6_defaults'] = json.loads(ipv6.stdout)
     query = command(probe_ssh_args(connectivity_status.ROUTER_TARGET)
                     + [ROUTER_ROUTES + '\n' + ROUTER_IDENTITIES], timeout=10)
     query.check_returncode()
@@ -112,21 +85,33 @@ def collect(command=connectivity_status.run_command, wall_clock=time.time):
     for line in query.stdout.splitlines():
         if line.startswith('RULE '):
             rules.append(line[5:])
-        elif line.startswith(('UP ', 'SSID ')):
+        elif line.startswith(('UP ', 'RADIO ')):
             kind, name, value = line.split(' ', 2)
             uplink = uplinks.setdefault(name, {})
             if kind == 'UP':
                 uplink['up'] = value == 'true'
             else:
-                uplink.update(ssid=value, starlink=connectivity_status.is_starlink_ssid(value))
+                radio = json.loads(value)
+                uplink.update({key: radio.get(key) for key in ('ssid', 'bssid', 'mode')})
+    for uplink in uplinks.values():
+        ssid = uplink.get('ssid')
+        bssid = uplink.get('bssid', '')
+        associated = (uplink.get('up') and uplink.get('mode') == 'Client'
+                      and isinstance(bssid, str) and isinstance(ssid, str)
+                      and connectivity_status.MAC_ADDRESS.fullmatch(bssid)
+                      and bssid.lower() not in ('00:00:00:00:00:00', 'ff:ff:ff:ff:ff:ff'))
+        uplink.update(ssid_configured=None, ssid_verified=ssid if associated else None,
+                      starlink=connectivity_status.is_starlink_ssid(ssid))
     evidence['rule_names'] = sorted(rules)
     evidence['wireless_uplinks'] = uplinks
     if any(m['name'] == 'wan' and m['percent'] > 0 for m in members):
         association, radio = connectivity_status.collect_ubnt_association(
             command, probe_ssh_args(connectivity_status.UBNT_TARGET,
-                                    connectivity_status.UBNT_IDENTITY))
+                                    connectivity_status.UBNT_IDENTITY),
+            connectivity_status.UBNT_STATUS_COMMAND)
         association.check_returncode()
         evidence['ubnt'] = {'reachable': True, **radio,
+                            **connectivity_status.verified_ubnt_identity(association.stdout),
                             'starlink': connectivity_status.is_starlink_ssid(radio['ssid'])}
     return evidence
 

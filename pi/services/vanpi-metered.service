@@ -1,0 +1,26 @@
+[Unit]
+Description=Reconcile metered-uplink permissions independently of the dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi
+Environment=HOME=/home/pi
+Environment=PYTHONPATH=/home/pi/scripts/python-packages/current
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+ExecStartPre=/usr/bin/test -r /home/pi/scripts/python-packages/current/manifest.json
+ExecStart=/usr/bin/python3 -P -m pi.apps.metered
+# Recover even a clean unexpected exit: running torrents need continued enforcement.
+Restart=always
+RestartSec=2
+TimeoutStopSec=45
+RuntimeDirectory=vanpi-metered
+RuntimeDirectoryMode=0700
+UMask=0077
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -5,6 +5,7 @@ repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 target=${1:-pi@vanpi.lan}
 [[ $# -le 1 && "$target" != -* && "$target" != *[[:space:]]* ]] || exit 2
 cd "$repo"
+export PYTHONPATH="$repo:$repo/pi/scripts/backup"
 python3 -m pi.generate_backup_lock_registry --check
 . "$repo/pi/backup_local_deploy.sh"
 local_previous=$(local_backup_previous_hashes "$repo" tm)
@@ -17,10 +18,10 @@ python3 pi/tests/backup/test_time_machine_icloud.py
 python3 -m unittest pi.tests.backup.test_time_machine_staging
 python3 pi/tests/backup/test_icloud_status.py
 python3 pi/tests/backup/test_icloud_backup.py
-PYTHONPATH=pi/scripts/backup python3 -m unittest pi.tests.backup.test_backup_locks pi.tests.backup.test_backup_admission pi.tests.backup.test_backup_priority pi.tests.backup.test_protected_json pi.tests.backup.test_local_backup_deploy.DeploymentPlanTests pi.tests.backup.test_local_backup_deploy.DeploymentPreflightTests pi.tests.backup.test_openwrt_schedule
-PYTHONPATH=pi/scripts/backup python3 -m unittest pi.tests.backup.test_time_machine_pipeline
-PYTHONPATH=pi/scripts/backup python3 -m unittest pi.tests.backup.test_time_machine_downloads pi.tests.backup.test_icloud_uplink
-PYTHONPATH=pi/scripts/backup python3 -m unittest pi.tests.backup.test_backup_settings pi.tests.backup.test_cloud_backup_requests pi.tests.backup.test_hotspare_rotation pi.tests.backup.test_time_machine_runtime
+PYTHONPATH="pi/scripts/backup:$PYTHONPATH" python3 -m unittest pi.tests.backup.test_backup_locks pi.tests.backup.test_backup_admission pi.tests.backup.test_backup_priority pi.tests.backup.test_protected_json pi.tests.backup.test_local_backup_deploy.DeploymentPlanTests pi.tests.backup.test_local_backup_deploy.DeploymentPreflightTests pi.tests.backup.test_openwrt_schedule
+PYTHONPATH="pi/scripts/backup:$PYTHONPATH" python3 -m unittest pi.tests.backup.test_time_machine_pipeline
+PYTHONPATH="pi/scripts/backup:$PYTHONPATH" python3 -m unittest pi.tests.backup.test_time_machine_downloads pi.tests.backup.test_icloud_uplink
+PYTHONPATH="pi/scripts/backup:$PYTHONPATH" python3 -m unittest pi.tests.backup.test_backup_settings pi.tests.backup.test_cloud_backup_requests pi.tests.backup.test_hotspare_rotation pi.tests.backup.test_time_machine_runtime
 bash pi/tests/storage/test_samba_share_control.sh
 bash -n pi/scripts/backup/time_machine_icloud.sh
 stage=$(ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" /usr/bin/mktemp -d /tmp/vanpi-tm-icloud.XXXXXX)
@@ -32,7 +33,7 @@ COPYFILE_DISABLE=1 /usr/bin/tar --no-xattrs -cf - \
   "${payload[@]}" \
   pi/tests/backup/test_backup_locks.py pi/tests/backup/test_backup_settings.py pi/tests/backup/test_cloud_backup_requests.py pi/tests/backup/test_hotspare_rotation.py pi/tests/backup/test_time_machine_runtime.py pi/tests/backup/test_local_backup_deploy.py pi/tests/backup/test_openwrt_schedule.py pi/tests/backup/test_protected_json.py \
   pi/tests/backup/backup_lock_fixtures.py pi/tests/backup/test_backup_admission.py \
-  pi/tests/backup/priority_fixtures.py pi/tests/backup/test_backup_priority.py \
+  pi/tests/backup/priority_fixtures.py pi/tests/backup/metered_fixtures.py pi/tests/backup/test_backup_priority.py \
   pi/tests/storage/test_backup_job_lock.sh pi/tests/storage/test_backup_locks.sh \
   pi/tests/backup/test_time_machine_staging.py pi/tests/backup/test_time_machine_downloads.py pi/tests/backup/test_icloud_uplink.py \
   pi/tests/backup/test_time_machine_pipeline.py pi/tests/backup/test_time_machine_icloud.py \
@@ -48,6 +49,10 @@ export PYTHONDONTWRITEBYTECODE=1
 stage=$1
 [[ "$stage" =~ ^/tmp/vanpi-tm-icloud\.[[:alnum:]]{6}$ ]] || exit 1
 cd "$stage"
+[[ -x /home/pi/scripts/vanpi-metered ]] || { echo 'Install the metering package and CLI before cloud workers.' >&2; exit 1; }
+/home/pi/scripts/vanpi-metered config --json >/dev/null
+printf '{}\n' | /home/pi/scripts/vanpi-metered admit pi.time_machine_cloud >/dev/null
+export PYTHONPATH="$stage:/home/pi/scripts/python-packages/current:$stage/pi/scripts/backup"
 /usr/bin/python3 -m pi.generate_backup_lock_registry --check
 . pi/backup_local_deploy.sh
 /usr/bin/python3 pi/tests/backup/test_time_machine_icloud.py
@@ -56,10 +61,10 @@ cd "$stage"
 /usr/bin/python3 pi/tests/backup/test_icloud_backup.py
 # Full fixture/failure coverage runs before deployment; repeat only the remote
 # transfer and complete-success smokes here to keep the upload pause bounded.
-PYTHONPATH=pi/scripts/backup /usr/bin/python3 -m unittest pi.tests.backup.test_backup_locks pi.tests.backup.test_backup_admission pi.tests.backup.test_backup_priority pi.tests.backup.test_protected_json pi.tests.backup.test_local_backup_deploy.DeploymentPlanTests.test_single_allowlist_drives_transfer_and_dependency_order pi.tests.backup.test_local_backup_deploy.DeploymentPreflightTests.test_both_profiles_publish_complete_private_backup_and_preserve_settings pi.tests.backup.test_openwrt_schedule
-PYTHONPATH=pi/scripts/backup /usr/bin/python3 -m unittest pi.tests.backup.test_time_machine_pipeline
-PYTHONPATH=pi/scripts/backup /usr/bin/python3 -m unittest pi.tests.backup.test_time_machine_downloads pi.tests.backup.test_icloud_uplink
-PYTHONPATH=pi/scripts/backup /usr/bin/python3 -m unittest pi.tests.backup.test_backup_settings pi.tests.backup.test_cloud_backup_requests pi.tests.backup.test_hotspare_rotation pi.tests.backup.test_time_machine_runtime
+PYTHONPATH="pi/scripts/backup:$PYTHONPATH" /usr/bin/python3 -m unittest pi.tests.backup.test_backup_locks pi.tests.backup.test_backup_admission pi.tests.backup.test_backup_priority pi.tests.backup.test_protected_json pi.tests.backup.test_local_backup_deploy.DeploymentPlanTests.test_single_allowlist_drives_transfer_and_dependency_order pi.tests.backup.test_local_backup_deploy.DeploymentPreflightTests.test_both_profiles_publish_complete_private_backup_and_preserve_settings pi.tests.backup.test_openwrt_schedule
+PYTHONPATH="pi/scripts/backup:$PYTHONPATH" /usr/bin/python3 -m unittest pi.tests.backup.test_time_machine_pipeline
+PYTHONPATH="pi/scripts/backup:$PYTHONPATH" /usr/bin/python3 -m unittest pi.tests.backup.test_time_machine_downloads pi.tests.backup.test_icloud_uplink
+PYTHONPATH="pi/scripts/backup:$PYTHONPATH" /usr/bin/python3 -m unittest pi.tests.backup.test_backup_settings pi.tests.backup.test_cloud_backup_requests pi.tests.backup.test_hotspare_rotation pi.tests.backup.test_time_machine_runtime
 sudo -n /usr/bin/python3 -m unittest pi.tests.backup.test_time_machine_runtime
 bash pi/tests/storage/test_backup_job_lock.sh
 bash pi/tests/storage/test_backup_locks.sh

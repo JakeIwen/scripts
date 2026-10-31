@@ -272,8 +272,8 @@ class PythonDeploymentTests(unittest.TestCase):
             "pi/apps/video_library/players/vlc_player.py": {"video-library.service"},
             "pi/apps/video_library/static/video_library.js": {"video-library.service"},
             "shared/python/sonos_tasks.py": {"video-library.service"},
-            "shared/__init__.py": {"video-library.service"},
-            "shared/python/__init__.py": {"video-library.service"},
+            "shared/__init__.py": {"video-library.service", deployment.DASHBOARD, "vanpi-metered.service"},
+            "shared/python/__init__.py": {"video-library.service", deployment.DASHBOARD, "vanpi-metered.service"},
             "pi/apps/audiobooks/audiobook_server.py": {"audiobooks.service"},
             "pi/apps/bme280/bme280_mqtt.py": {"bme280-mqtt.service"},
             "pi/package_runtime.py": set(deployment.SERVICES),
@@ -415,7 +415,10 @@ class PythonDeploymentTests(unittest.TestCase):
             self.assertEqual(set(services.units), set(deployment.SERVICES))
             for unit in deployment.SERVICES:
                 backup = root / "pre-package-units" / (unit + ".backup")
-                self.assertEqual((backup / unit).read_bytes(), flat_unit(unit))
+                if deployment.SERVICES[unit]['flat'] is not None:
+                    self.assertEqual((backup / unit).read_bytes(), flat_unit(unit))
+                else:
+                    self.assertFalse(backup.exists())
                 state = json.loads((root / "service-state" / (unit + ".json")).read_bytes())
                 self.assertEqual(state, {
                     "release": plan["release"],
@@ -536,7 +539,7 @@ class PythonDeploymentTests(unittest.TestCase):
             self.assertEqual(services.restart_calls, ["audiobooks.service"])
             services.restart_calls.clear()
             self._install(plan, repo, root, "activate", services=services,
-                          selected=["bme280-mqtt.service"])
+                          selected=["bme280-mqtt.service", "vanpi-metered.service"])
             self.assertEqual(services.restart_calls, [])
             self.assertFalse(any((root / "pending-restarts").glob("*.json")))
             self.assertEqual({p.name for p in (root / "service-state").glob("*.json")},

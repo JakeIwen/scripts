@@ -25,7 +25,9 @@ SERVICES = {
         'flat': 'van_dashboard.py',
         # The controller imports these records in-process, not through the CLI.
         'extra': ('pi/apps/media_organizer/__init__.py',
-                  'pi/apps/media_organizer/config.py', 'pi/apps/media_organizer/records.py'),
+                  'pi/apps/media_organizer/config.py', 'pi/apps/media_organizer/records.py',
+                  'shared/__init__.py', 'shared/python/__init__.py', 'shared/python/tool_settings.py'),
+        'extra_dirs': ('pi/apps/metered/', 'shared/metered/'),
     },
     'video-library.service': {
         'app': 'video_library', 'interpreter': '/usr/bin/python3',
@@ -40,6 +42,13 @@ SERVICES = {
         'app': 'bme280', 'interpreter': '/home/pi/pyvenv/bin/python',
         'flat': 'bme280_mqtt.py', 'extra': (),
     },
+    'vanpi-metered.service': {
+        'app': 'metered', 'interpreter': '/usr/bin/python3', 'flat': None,
+        'extra_dirs': ('shared/metered/',),
+        'extra': ('shared/__init__.py', 'shared/python/__init__.py', 'shared/python/tool_settings.py',
+                  'pi/apps/video_library/__init__.py', 'pi/apps/video_library/video_qbittorrent.py',
+                  'pi/apps/video_library/qbittorrent_availability.py'),
+    },
 }
 DASHBOARD = 'van-dashboard.service'
 RETAIN_NEWEST = 3
@@ -50,10 +59,12 @@ MODULE_DIRS = (
     'pi/apps/van_dashboard', 'pi/apps/iptorrents_watch',
     'pi/apps/van_dashboard/routes', 'pi/apps/video_library',
     'pi/apps/video_library/players', 'pi/scripts/python', 'shared/python',
+    'pi/apps/metered', 'shared/metered',
 )
 INITIALIZERS = ('pi/__init__.py', 'pi/apps/__init__.py',
                 'pi/scripts/__init__.py', 'shared/__init__.py', 'pi/package_runtime.py')
-ASSETS = ('pi/apps/audiobooks/templates/audiobooks.html',
+ASSETS = ('shared/metered/consumers.json',
+          'pi/apps/audiobooks/templates/audiobooks.html',
           'pi/apps/video_library/templates/video_library.html',
           'pi/apps/video_library/static/video_library.js',
           'pi/apps/video_library/static/video_library.css')
@@ -108,7 +119,7 @@ def build_plan(repo=ROOT, mode='stage', selected=None):
     dependencies = {}
     for unit, spec in SERVICES.items():
         paths = {p: sha for p, sha in files.items()
-                 if p.startswith(f"pi/apps/{spec['app']}/") or
+                 if p.startswith((f"pi/apps/{spec['app']}/", *spec.get('extra_dirs', ()))) or
                  p in ('pi/__init__.py', 'pi/apps/__init__.py', 'pi/package_runtime.py', *spec['extra'])}
         dependencies[unit] = digest(encoded(paths))
     manifest = {'schema': 1, 'provenance': provenance(repo), 'files': files,
@@ -410,6 +421,13 @@ class SystemServices:
             raise ValueError(f'refusing symlinked unit: {unit}')
         return path.read_bytes()
 
+    def require_absent(self, unit):
+        result = subprocess.run(['/usr/bin/systemctl', 'show', '-p', 'LoadState', '-p', 'FragmentPath',
+                                 '-p', 'DropInPaths', unit], text=True, capture_output=True, timeout=10)
+        values = dict(line.split('=', 1) for line in result.stdout.splitlines())
+        if values != {'LoadState': 'not-found', 'FragmentPath': '', 'DropInPaths': ''}:
+            raise ValueError(f'{unit}: another unit or override already exists')
+
     def dropins(self, unit):
         # Refuse vendor/runtime fragments or overrides we cannot save/restore
         # exactly. Do not silently deploy underneath a different effective unit.
@@ -500,6 +518,8 @@ def directives(raw):
 
 def recognized_unit(raw, unit, package):
     spec = SERVICES[unit]
+    if raw is None or (not package and spec['flat'] is None):
+        return False
     expected = (f"{spec['interpreter']} -P -m pi.apps.{spec['app']}" if package else
                 f"{spec['interpreter']} /home/pi/scripts/python-automation/{spec['flat']}")
     return [value for key, value in directives(raw) if key == 'ExecStart'] == [expected]
@@ -542,6 +562,19 @@ def read_state(path):
             not re.fullmatch('[0-9a-f]{64}', value.get('digest', ''))):
         raise ValueError(f'invalid service state: {path}')
     return value
+
+
+def unit_preflight(services, unit, mode, saved):
+    try:
+        live = services.read_unit(unit)
+    except FileNotFoundError:
+        if mode != 'activate' or saved is not None or SERVICES[unit]['flat'] is not None:
+            raise
+        services.require_absent(unit)
+        return None, False, False, {}
+    dropins = services.dropins(unit)
+    validate_dropins(unit, dropins)
+    return live, recognized_unit(live, unit, True), recognized_unit(live, unit, False), dropins
 
 
 def install_release(stream, root, mode, services=None, selected=None):
@@ -596,9 +629,7 @@ def install_release(stream, root, mode, services=None, selected=None):
             pending = read_state(pending_path)
             if pending is not None and not isinstance(pending.get('restart'), bool):
                 raise ValueError(f'invalid pending restart intent: {unit}')
-            live = services.read_unit(unit)
-            packaged = recognized_unit(live, unit, package=True)
-            flat = recognized_unit(live, unit, package=False)
+            live, packaged, flat, dropins = unit_preflight(services, unit, mode, saved)
             # Upgrade the pre-existing dashboard installer state without
             # demanding a second first-cutover backup of its package unit.
             old_dashboard = (unit == DASHBOARD and saved is None and old is not None and
@@ -625,12 +656,12 @@ def install_release(stream, root, mode, services=None, selected=None):
             old_backup = unit == DASHBOARD and (root / 'pre-package-units' / unit).is_file()
             if mode == 'update' and (saved is None or not packaged):
                 raise ValueError(f'{unit}: explicit --activate --service {unit} required')
-            if not flat and not packaged:
+            if live is not None and not flat and not packaged:
                 raise ValueError(f'{unit}: expected recognizable flat or package ExecStart')
-            if saved is None and packaged and not ((pending or old_pending) and (backup.exists() or old_backup)):
+            resumable = (((pending or old_pending) and (backup.exists() or old_backup)) or
+                         (pending and SERVICES[unit]['flat'] is None))
+            if saved is None and packaged and not resumable:
                 raise ValueError(f'{unit}: first activation requires the expected flat unit')
-            dropins = services.dropins(unit)
-            validate_dropins(unit, dropins)
             new = (release / f'pi/services/{unit}').read_bytes()
             if not recognized_unit(new, unit, package=True):
                 raise ValueError(f'{unit}: invalid packaged source unit')

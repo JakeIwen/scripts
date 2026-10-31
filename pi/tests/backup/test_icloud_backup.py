@@ -17,7 +17,7 @@ PI = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PI / 'scripts' / 'backup'))
 import icloud_backup as backup
 import cloud_backup_control as control
-from icloud_uplink import decide
+from pi.tests.backup.metered_fixtures import decide
 from icloud_progress import ProgressWatch, RcloneStats
 
 
@@ -28,9 +28,9 @@ def test_config():
 def evidence():
     return {'checked_at': 1000, 'local_route': {'gateway': '192.168.6.1', 'dev': 'eth0', 'prefsrc': '192.168.6.103'},
             'router': {'reachable': True, 'default_policy': 'balanced', 'route_members': [{'name': 'wan', 'percent': 100}]},
-            'rule_names': ['default_rule_v4'],
-            'ubnt': {'reachable': True, 'connected': True, 'ssid': 'FriendsWifi'},
-            'wireless_uplinks': {'clientwan': {'up': True, 'ssid': 'PhoneHotspot'}}}
+            'rule_names': ['default_rule_v4'], 'ipv6_defaults': [],
+            'ubnt': {'reachable': True, 'connected': True, 'ssid_verified': 'FriendsWifi'},
+            'wireless_uplinks': {'clientwan': {'up': True, 'ssid_verified': 'PhoneHotspot'}}}
 
 
 class UplinkTests(unittest.TestCase):
@@ -43,23 +43,23 @@ class UplinkTests(unittest.TestCase):
     def test_only_the_vans_own_starlink_ssid_blocks(self):
         for ssid, allowed in [('denlink', False), ('DENLINK', True), ('Starlink', True),
                               ('My Starlink Mini', True), ('denlink-guest', True)]:
-            e = evidence(); e['ubnt']['ssid'] = ssid
+            e = evidence(); e['ubnt']['ssid_verified'] = ssid
             self.assertEqual(self.check(e), allowed, ssid)
 
     def test_hotspot_allowed_even_when_standby_antenna_is_starlink(self):
-        e = evidence(); e['ubnt']['ssid'] = 'denlink'
+        e = evidence(); e['ubnt']['ssid_verified'] = 'denlink'
         e['router']['default_policy'] = 'clientwan_only'
         e['router']['route_members'] = [{'name': 'clientwan', 'percent': 100}]
         self.assertTrue(self.check(e))
 
     def test_starlink_hotspot_is_blocked(self):
         e = evidence(); e['router']['route_members'] = [{'name': 'clientwan', 'percent': 100}]
-        e['wireless_uplinks']['clientwan']['ssid'] = 'denlink'
+        e['wireless_uplinks']['clientwan']['ssid_verified'] = 'denlink'
         self.assertFalse(self.check(e))
 
     def test_unknowns_and_stale_evidence_fail_closed(self):
         for mutate in (lambda e:e.update(checked_at=900), lambda e:e.update(checked_at=1010),
-                       lambda e:e['ubnt'].update(connected=False), lambda e:e['ubnt'].update(ssid=None),
+                       lambda e:e['ubnt'].update(connected=False), lambda e:e['ubnt'].update(ssid_verified=None),
                        lambda e:e.update(rule_names=['default_rule_v4','custom_source_rule']),
                        lambda e:e['router'].update(route_members=[]), lambda e:e['router'].update(reachable=False),
                        lambda e:e['local_route'].update(dev='tailscale0'), lambda e:e['local_route'].update(gateway='10.0.0.1')):
@@ -72,6 +72,8 @@ class GuardRetryTests(unittest.TestCase):
     def setUp(self):
         self.sleep = self.enterContext(mock.patch.object(backup.time, 'sleep'))
         self.enterContext(mock.patch.object(backup.time, 'time', return_value=1000))
+        self.enterContext(mock.patch.object(backup, 'decide', side_effect=lambda value, consumer_id:
+            decide(value, now=1000, consumer_id=consumer_id)))
 
     def test_probe_failure_twice_then_success_keeps_the_permitted_proof(self):
         with mock.patch.object(backup, 'capture', side_effect=[
@@ -94,7 +96,7 @@ class GuardRetryTests(unittest.TestCase):
         self.assertEqual(self.sleep.call_args_list, [mock.call(5), mock.call(5)])
 
     def test_disallowed_evidence_is_bounded_and_keeps_the_final_reason(self):
-        blocked = evidence(); blocked['ubnt']['ssid'] = 'denlink'
+        blocked = evidence(); blocked['ubnt']['ssid_verified'] = 'denlink'
         reason = decide(blocked, now=1000)[1]
         with mock.patch.object(backup, 'capture', side_effect=[
                 json.dumps({}), json.dumps({}), json.dumps(blocked)]) as probe:

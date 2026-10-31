@@ -605,8 +605,22 @@ UBNT_STATUS_COMMAND = (
     "/usr/bin/mca-status 2>/dev/null | "
     "/bin/grep -E '^(essid|signal|noise|ccq|uptime)=' || true; "
     "/usr/bin/awk -F= '/^wpasupplicant\\.profile\\.1\\.network\\.1\\.ssid=/"
-    "{print \"target_ssid=\" $2; exit}' /tmp/system.cfg"
+    "{print \"target_ssid=\" substr($0, index($0, \"=\") + 1); exit}' /tmp/system.cfg"
 )
+
+
+def verified_ubnt_identity(output):
+    """A disagreeing profile label/target is unknown, not proof of either SSID."""
+    driver = re.search(r'ESSID:"([^"]*)"', output)
+    configured = re.search(r'^target_ssid=(.*)$', output, re.MULTILINE)
+    observed = driver.group(1) if driver else None
+    target = configured.group(1) if configured else None
+    radio = parse_ubnt_wireless(output)
+    access_point = radio['access_point'] or ''
+    connected = (radio['connected'] and MAC_ADDRESS.fullmatch(access_point)
+                 and access_point.lower() != 'ff:ff:ff:ff:ff:ff')
+    verified = observed if connected and observed and observed == target else None
+    return {'ssid_verified': verified, 'ssid_configured': target}
 
 
 def collect_ubnt_association(command, ssh_args, remote_status=UBNT_ASSOCIATION_COMMAND):

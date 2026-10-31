@@ -154,7 +154,7 @@ def capture(args, timeout=20):
     return result.stdout
 
 
-def permitted_uplink_evidence():
+def permitted_uplink_evidence(consumer_id='pi.icloud_backup'):
     helper = Path(__file__).with_name('icloud_uplink.py')
     for attempt in range(3):
         if attempt:
@@ -162,7 +162,7 @@ def permitted_uplink_evidence():
         try:
             evidence = json.loads(capture(['/usr/sbin/runuser', '-u', 'pi', '--',
                                            '/usr/bin/python3', str(helper)], timeout=35))
-            allowed, reason = decide(evidence)
+            allowed, reason = decide(evidence, consumer_id=consumer_id)
         except (OSError, ValueError, subprocess.SubprocessError):
             allowed, reason = False, 'cannot verify current uplinks'
         if allowed:
@@ -171,9 +171,11 @@ def permitted_uplink_evidence():
 
 
 def guard(cfg):
-    evidence = permitted_uplink_evidence()
+    consumers = {priority.PriorityMode.PI: 'pi.icloud_backup',
+                 priority.PriorityMode.TIME_MACHINE: 'pi.time_machine_cloud'}
+    evidence = permitted_uplink_evidence(consumers[cfg.get('priority_job', priority.PriorityMode.PI)])
     selected = sorted((m['name'], m['percent']) for m in evidence['router']['route_members'] if m['percent'] > 0)
-    identities = [(name, evidence['ubnt']['ssid'] if name == 'wan' else evidence['wireless_uplinks'][name]['ssid']) for name, weight in selected]
+    identities = [(name, evidence['ubnt']['ssid_verified'] if name == 'wan' else evidence['wireless_uplinks'][name]['ssid_verified']) for name, weight in selected]
     # Restart connections on ANY path/association change. Existing conntrack
     # flows can stay on the former uplink after mwan3 changes its default.
     signature = json.dumps([evidence['local_route']['dev'], evidence['local_route']['gateway'], selected, identities], sort_keys=True)

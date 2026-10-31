@@ -376,8 +376,7 @@ nodiskx() { $HOME/scripts/policyctl disks on "$@"; }
 mdisk() { nodiskx "$@"; }
 notor() { $HOME/scripts/policyctl torrents off "$@"; }
 notorx() { $HOME/scripts/policyctl torrents on "$@"; }
-startor() { $HOME/scripts/policyctl starlink-torrents on "$@"; }
-startorx() { $HOME/scripts/policyctl starlink-torrents off "$@"; }
+if [ -f "$HOME/scripts/metered_shell.bash" ]; then . "$HOME/scripts/metered_shell.bash"; fi
 
 # status hooks
 ignitmonoff() { "$HOME/scripts/ignitionmonctl" disable "$@"; }

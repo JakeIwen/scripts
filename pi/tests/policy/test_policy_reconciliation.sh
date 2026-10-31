@@ -258,16 +258,14 @@ assert_eq 0 "$STALE_RECOVERY_INVOKED" \
   "ignition shutdown must not wait for ordinary stale-mount recovery"
 rm "$ISW_IGNITION_FLAG"
 
-run_case "disabled disks" "0 1 1" off 0 "mount-always kill-all"
+run_case "disabled disks" "0 1 0" off 0 "mount-always kill-all"
 assert_eq 2 "$STALE_RECOVERY_INVOKED" \
   "disabled HDD policy must scan for stale mounts before and after shutdown"
-run_case "globally disabled torrents" "1 0 1" off 0 "mount-always mount kill-torrent"
-run_case "explicit Starlink permission" "1 1 1" unknown 1 "mount-always mount start-torrent"
-[[ ! -e "$TEST_STARLINK_CALLS" ]] ||
-  fail "explicit Starlink permission should not query Starlink power"
-run_case "Starlink blocked" "1 1 0" on 0 "mount-always mount kill-torrent"
+run_case "globally disabled torrents" "1 0 0" off 0 "mount-always mount kill-torrent"
+run_case "Starlink power does not own metering holds" "1 1 0" on 0 "mount-always mount start-torrent"
 run_case "non-Starlink torrenting" "1 1 0" off 0 "mount-always mount start-torrent"
-run_case "unknown Starlink fails closed" "1 1 0" unknown 1 "mount-always mount kill-torrent"
+run_case "missing power evidence does not override the reconciler" "1 1 0" unknown 1 "mount-always mount start-torrent"
+[[ ! -e "$TEST_STARLINK_CALLS" ]] || fail "storage reconciliation queried Starlink power"
 
 export TEST_COMPACT_POLICY="1 1 0"
 export TEST_STARLINK_STATE=off

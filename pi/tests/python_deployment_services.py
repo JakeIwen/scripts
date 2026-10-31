@@ -21,11 +21,11 @@ def flat_unit(unit, description="fixture flat unit"):
 
 
 class FakeSystemServices:
-    """An in-memory four-service manager for receiver-side tests."""
+    """An in-memory service manager for receiver-side transaction tests."""
 
     def __init__(self, units=None, active=None, restart_failures=None):
         self.units = {
-            unit: flat_unit(unit) for unit in deployment.SERVICES
+            unit: flat_unit(unit) for unit, spec in deployment.SERVICES.items() if spec['flat'] is not None
         }
         if isinstance(units, bytes):
             self.units[deployment.DASHBOARD] = units
@@ -59,7 +59,13 @@ class FakeSystemServices:
         }
 
     def read_unit(self, unit):
+        if unit not in self.units:
+            raise FileNotFoundError(unit)
         return self.units[unit]
+
+    def require_absent(self, unit):
+        if unit in self.units or self.dropins_by_unit[unit]:
+            raise ValueError('unit already exists')
 
     def dropins(self, unit):
         return dict(self.dropins_by_unit[unit])

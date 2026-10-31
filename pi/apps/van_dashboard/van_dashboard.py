@@ -26,6 +26,7 @@ def create_app():
     from .routes.media_organizer import bp as media_organizer_bp
     from .routes.ipt_watch import bp as ipt_watch_bp
     from .routes.network import bp as network_bp
+    from .routes.metered import bp as metered_bp
     from .routes.projects import bp as projects_bp
     from .routes.sonos import bp as sonos_bp
     from .routes.sonos_alarms import bp as sonos_alarms_bp
@@ -46,6 +47,7 @@ def create_app():
         disks_bp,
         system_bp,
         network_bp,
+        metered_bp,
         projects_bp,
         usb_bp,
         backups_bp,

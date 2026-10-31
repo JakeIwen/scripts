@@ -34,6 +34,8 @@ compare it with this checkout. Deployed files may differ from the repository.
 | `pi.apps.video_library` | `video-library.service` and `pi/deploy_python.py` | `pi/apps/video_library/` |
 | `pi.apps.audiobooks` | `audiobooks.service` and `pi/deploy_python.py` | `pi/apps/audiobooks/` |
 | `pi.apps.bme280` | `bme280-mqtt.service` and `pi/deploy_python.py` | `pi/apps/bme280/` |
+| `pi/scripts/vanpi-metered` | Pi shell, authenticated Mac SSH sync and cloud admission | `pi/apps/metered/` plus `shared/metered/` in the immutable package release |
+| `pi.apps.metered` | `vanpi-metered.service`, independently of the dashboard | `pi/apps/metered/`; unit/package owned by `pi/deploy_python.py` |
 | `pi/scripts/system_event_monitor.py` | system-event-monitor, crash-capture and network-recorder consumers | `pi/scripts/system_monitor/` plus the stable shim |
 | `pi/scripts/backup/` | backup units, timers, cron and scoped deployers | the feature folder and `pi/backup_local_deploy.sh` |
 | `pi/scripts/alias_media.sh` | Pi `am`/`an` functions and qBittorrent's completion command (`alias_media.sh new`) | thin wrapper; `pi/apps/media_organizer/alias_main.py` in the package release |
@@ -49,6 +51,28 @@ compare it with this checkout. Deployed files may differ from the repository.
 
 - `pi/`: Raspberry Pi apps, backup, disk, service, deployment, and setup tooling;
   `pi/README.md` is the documentation index.
+- `shared/metered/`: Python 3.9+ wire records, exact-SSID rules, consumer registry
+  and locked revision/receipt stores. `records.py` owns wire vocabulary;
+  `consumers.json` is the only consumer-id/host registry. `config.py` owns
+  first-run identities; logic never hardcodes an SSID. `store.py` reuses
+  `shared/python/tool_settings.write_private_json` and adds transaction locking
+  and directory durability. Offline sync only adds SSIDs; receipts are retained
+  rather than evicted, and exhausted capacity rejects new operations.
+- `pi/apps/metered/`: Python 3.11 Pi controller, independent 10-second reconciler,
+  CLI, strict cloud admission and qBittorrent hold adapters. `config.py` owns
+  paths/deadlines; `controller.py` owns serialized host episodes and HostState;
+  `torrent_api.py` reuses the video library's bounded HTTP transport;
+  `torrents.py` respects disk/ignition policy and falls back to the existing
+  graceful process stop. Remove `metered-hold` from a stopped torrent to keep
+  it manually stopped after network recovery. The flat `vanpi-metered` shell
+  entry imports the package release; `metered_shell.bash` supplies Pi aliases.
+  `connectivity_status.collect_ubnt_association` is shared by dashboard and cloud
+  probes; verified identity requires driver/target agreement and association.
+  Cloud workers call the short-lived `admit` CLI so their long runs do not pin
+  package releases. Pi approvals are host-local; the dashboard only displays
+  reported Mac state. `routes/metered.py` owns the JSON endpoints and retains
+  existing dashboard origin/header checks. Deployment and wire contract:
+  `pi/docs/networking/METERED_CONNECTIONS.md`.
 - `pi/scripts/rball.sh`: `s rball` reboots antenna, router, then the Pi through `safe_reboot.sh`; `--dry-run` checks uptime without rebooting.
 - `pi/apps/audiobooks/catalog.py` owns audiobook records, filesystem discovery
   helpers and fuzzy matching rules; `audiobook_server.py` retains state, Sonos,

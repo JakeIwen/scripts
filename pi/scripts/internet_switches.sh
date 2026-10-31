@@ -10,7 +10,7 @@ ISW_LOG_FILE=${ISW_LOG_FILE:-/var/log/cron/internet_switches.log}
 ISW_NTFY_SEND=${ISW_NTFY_SEND:-/home/pi/scripts/ntfy_send.sh}
 ISW_POLICYCTL=${ISW_POLICYCTL:-/home/pi/scripts/policyctl}
 ISW_IGNITION_FLAG=${ISW_IGNITION_FLAG:-/home/pi/hooks/ignition_is_on}
-ISW_TUYA_STATUS=${ISW_TUYA_STATUS:-/home/pi/scripts/tuya_status.sh}
+ISW_METERED=${ISW_METERED:-/home/pi/scripts/vanpi-metered}
 ISW_PGREP=${ISW_PGREP:-/usr/bin/pgrep}
 ISW_PKILL=${ISW_PKILL:-/usr/bin/pkill}
 ISW_SLEEP=${ISW_SLEEP:-/usr/bin/sleep}
@@ -21,7 +21,6 @@ ISW_ABORT_BACKUP=${ISW_ABORT_BACKUP:-/home/pi/scripts/backup/abort_backup.sh}
 ISW_SAMBA_SHARE_CONTROL=${ISW_SAMBA_SHARE_CONTROL:-/home/pi/scripts/samba_share_control.sh}
 POLICY_DISKS_ENABLED=""
 POLICY_TORRENTS_ENABLED=""
-POLICY_ALLOW_STARLINK_TORRENTS=""
 
 isw_prepare_canary_dir() {
   if [[ -L "$ISW_CANARY_DIR" || ( -e "$ISW_CANARY_DIR" && ! -d "$ISW_CANARY_DIR" ) ]]; then
@@ -174,47 +173,19 @@ ignition_is_on() {
 }
 
 load_requested_policy() {
-  local output status
+  local output status reserved
   output=$("$ISW_POLICYCTL" read 2>&1)
   status=$?
   if (( status != 0 )); then
     echo "ERROR: unable to read requested policy (status $status): $output" >&2
     return 1
   fi
-  read -r POLICY_DISKS_ENABLED POLICY_TORRENTS_ENABLED \
-    POLICY_ALLOW_STARLINK_TORRENTS <<< "$output"
+  read -r POLICY_DISKS_ENABLED POLICY_TORRENTS_ENABLED reserved <<< "$output"
   if [[ ! "$POLICY_DISKS_ENABLED" =~ ^[01]$ ||
-        ! "$POLICY_TORRENTS_ENABLED" =~ ^[01]$ ||
-        ! "$POLICY_ALLOW_STARLINK_TORRENTS" =~ ^[01]$ ]]; then
+        ! "$POLICY_TORRENTS_ENABLED" =~ ^[01]$ || "$reserved" != 0 ]]; then
     echo "ERROR: policyctl returned an invalid compact policy: $output" >&2
     return 1
   fi
-}
-
-starlink_blocks_torrents() {
-  local state status
-
-  # Explicit permission makes the Starlink state irrelevant. The global
-  # torrent switch is checked separately and still takes precedence.
-  [[ "$POLICY_ALLOW_STARLINK_TORRENTS" == 1 ]] && return 1
-
-  state=$("$ISW_TUYA_STATUS" starlink 2>&1)
-  status=$?
-  if (( status != 0 )); then
-    echo "WARNING: Starlink state is unavailable; blocking torrents: $state" >&2
-    return 0
-  fi
-  case "$state" in
-    off) return 1 ;;
-    on)
-      echo "Starlink is on and Starlink torrents are not allowed"
-      return 0
-      ;;
-    *)
-      echo "WARNING: unrecognized Starlink state '$state'; blocking torrents" >&2
-      return 0
-      ;;
-  esac
 }
 
 has_io_error() { ls -lah "$1" 2>&1 | grep -q 'Input/output error'; }
@@ -261,6 +232,12 @@ start_torrent_client() {
     "$ISW_PGREP" -x "$ISW_QBIT_PROCESS" >/dev/null 2>&1
     rc=$?
     if (( rc == 1 )); then
+      # The independent reconciler holds existing torrents; never launch a new
+      # client before its metering permission is known.
+      if ! "$ISW_METERED" allows pi.torrents; then
+        echo "metered policy prevents starting qBittorrent"
+        return 0
+      fi
       # Background only qbittorrent—not the surrounding conditional—and do
       # not let the long-lived client inherit fd 9 and hold our flock.
       /usr/bin/nohup "$ISW_QBIT_BINARY" 9>&- &
@@ -426,8 +403,6 @@ set_isw_options() {
     kill_torrent_client
   elif has_io_error '/mnt/movingparts'; then
     echo "movingparts has an I/O error; disabling torrents" >&2
-    kill_torrent_client
-  elif starlink_blocks_torrents; then
     kill_torrent_client
   else
     start_torrent_client
