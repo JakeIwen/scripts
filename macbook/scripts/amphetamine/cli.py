@@ -6,7 +6,7 @@ import subprocess
 import sys
 
 from .control import configure, read_status
-from .model import Conflict, ControlError, validate_change
+from .model import Conflict, ControlError, PermissionDenied, validate_change
 from .native import NativeApp
 
 
@@ -39,4 +39,7 @@ def main(argv=None):
         return 0
     except (ControlError, OSError) as exc:
         print(str(exc), file=sys.stderr)
-        return 3 if isinstance(exc, Conflict) else 1
+        if isinstance(exc, Conflict):
+            return 3
+        # The Mac Panel turns 4 into the exact binary macOS needs to trust.
+        return 4 if isinstance(exc, PermissionDenied) else 1

@@ -1,11 +1,14 @@
 """Amphetamine owns native settings; the panel relays validated CLI requests."""
 from cli_runner import json_result
+from log_redaction import redact
 from panel_contracts import ApiError
 from panel_paths import PYTHON, ROOT
 from wire_validation import field, object_fields
 
 
 COMMAND = (str(PYTHON), '-B', str(ROOT / 'macbook/scripts/amphetamine_control.py'))
+# amphetamine/cli.py exits 4 when macOS privacy settings refuse access.
+PERMISSION_DENIED = 4
 
 
 def payload(value):
@@ -26,12 +29,22 @@ def payload(value):
     return value
 
 
+def status_json(result):
+    if result.returncode == PERMISSION_DENIED:
+        # macOS attributes the panel's children to the binary launchd started, the
+        # venv symlink's target. Resolve it only to name it; commands still run PYTHON.
+        raise ApiError(502, f'{redact(result.stderr.strip())} For the Mac Panel that program is '
+                            f'{PYTHON.resolve()} (Cmd-Shift-G pastes the path into the file '
+                            'picker); restart the panel after granting it.')
+    return payload(json_result(result))
+
+
 class AmphetamineAdapter:
     def __init__(self, runner):
         self.runner = runner
 
     def read(self):
-        return payload(json_result(self.runner.run((*COMMAND, 'status'))))
+        return status_json(self.runner.run((*COMMAND, 'status')))
 
     def save(self, body):
         object_fields(body, ('enabled', 'minutes', 'revision'))
@@ -42,4 +55,4 @@ class AmphetamineAdapter:
                                   '--minutes', str(minutes), '--revision', revision), timeout=90)
         if result.returncode in (2, 3):
             raise ApiError(409 if result.returncode == 3 else 400, result.stderr.strip())
-        return payload(json_result(result))
+        return status_json(result)

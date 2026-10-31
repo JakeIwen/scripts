@@ -3,6 +3,7 @@ import json
 import unittest
 
 from cli_runner import CommandResult
+from panel_paths import PYTHON
 from panel_routes import PanelRoutes
 from panel_test_support import FakeRunner, auth, json_command, request, running_server
 
@@ -49,6 +50,23 @@ class AmphetamineHttpTests(unittest.TestCase):
             runner.results.append(json_command({**saved_state(), 'enabled': 'yes'}))
             code, _, _ = request(server, '/api/amphetamine', headers=auth(server))
             self.assertEqual(code, 502)
+
+    def test_privacy_denial_names_the_interpreter_macos_must_trust(self):
+        denied = CommandResult(4, stderr='Add the program running this command to System '
+                                         'Settings > Privacy & Security > Full Disk Access.\n')
+        runner = FakeRunner([denied, denied])
+        routes = PanelRoutes(runner=runner)
+        self.addCleanup(routes.close)
+        body = json.dumps({'enabled': True, 'minutes': 20, 'revision': 'a' * 64})
+        with running_server(routes) as server:
+            for method, data, headers in (('GET', None, auth(server)),
+                                          ('POST', body, auth(server, True))):
+                code, _, raw = request(server, '/api/amphetamine', method, data, headers)
+                self.assertEqual(code, 502)
+                error = json.loads(raw)['error']
+                self.assertIn('Full Disk Access', error)
+                self.assertIn(f'that program is {PYTHON.resolve()} ', error)
+                self.assertIn('restart the panel', error)
 
 
 if __name__ == '__main__':

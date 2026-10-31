@@ -1,6 +1,7 @@
 """Native preference round trips and controller behavior without locking the screen."""
 from copy import deepcopy
 from dataclasses import replace
+import os
 from pathlib import Path
 import subprocess
 import plistlib
@@ -10,8 +11,11 @@ import unittest
 
 from amphetamine.control import configure, exclusive, read_status
 from amphetamine.model import (DELAY, DISPLAY_SLEEP, ENABLED, Conflict, ControlError,
-                               Session, revision)
+                               PermissionDenied, Session, revision)
 from amphetamine.native import NativeApp
+
+ENTRY = Path(__file__).resolve().parents[1] / 'scripts/amphetamine_control.py'
+SANDBOX_EXEC = '/usr/bin/sandbox-exec'
 
 
 class FixtureApp:
@@ -181,6 +185,17 @@ class PreferencesFileTests(unittest.TestCase):
                 with self.assertRaises(ControlError):
                     app.read_preferences()
 
+    def test_file_mode_denial_is_not_reported_as_a_privacy_permission(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = NativeApp(directory)
+            path = app.domain.parent / (app.domain.name + '.plist')
+            path.parent.mkdir(parents=True)
+            path.write_bytes(plistlib.dumps({ENABLED: True}))
+            path.chmod(0)
+            with self.assertRaisesRegex(ControlError, 'Cannot read') as caught:
+                app.read_preferences()
+            self.assertNotIsInstance(caught.exception, PermissionDenied)
+
 
 @unittest.skipUnless(sys.platform == 'darwin', 'Native defaults integration requires macOS')
 class NativePreferencesTests(unittest.TestCase):
@@ -210,16 +225,51 @@ class NativePreferencesTests(unittest.TestCase):
 
 class CliTests(unittest.TestCase):
     def test_help_and_invalid_configuration_from_unrelated_directory(self):
-        entry = Path(__file__).resolve().parents[1] / 'scripts/amphetamine_control.py'
         with tempfile.TemporaryDirectory() as directory:
-            help_result = subprocess.run([sys.executable, str(entry), '--help'], cwd=directory,
+            help_result = subprocess.run([sys.executable, str(ENTRY), '--help'], cwd=directory,
                                          text=True, capture_output=True)
             self.assertEqual(help_result.returncode, 0, help_result.stderr)
-            result = subprocess.run([sys.executable, str(entry), 'configure', '--enabled', 'on',
+            result = subprocess.run([sys.executable, str(ENTRY), 'configure', '--enabled', 'on',
                                      '--minutes', '0', '--revision', '0' * 64], cwd=directory,
                                     text=True, capture_output=True)
             self.assertEqual(result.returncode, 2)
             self.assertIn('between 1 and 240', result.stderr)
+
+
+def deny_reads(directory):
+    # The same kernel refusal (EPERM) macOS gives a background process reading
+    # another app's container, so the real CLI can be run against it.
+    return '(version 1)(allow default)(deny file-read-data (subpath "{}"))'.format(directory)
+
+
+@unittest.skipUnless(os.path.exists(SANDBOX_EXEC), 'sandbox-exec ships only with macOS')
+class PrivacyDenialTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        # Seatbelt matches resolved paths; /var/folders is a symlink on macOS.
+        self.home = Path(os.path.realpath(temporary.name))
+        probe = self.home / 'probe'
+        probe.write_text('probe')
+        result = subprocess.run([SANDBOX_EXEC, '-p', deny_reads(probe), '/bin/cat', str(probe)],
+                                text=True, capture_output=True)
+        if result.returncode == 0 or str(probe) not in result.stderr:
+            self.skipTest('sandbox-exec cannot apply a profile inside an existing sandbox: '
+                          + result.stderr.strip())
+
+    def test_status_exits_4_with_settings_steps_when_macos_denies_the_container(self):
+        app = NativeApp(self.home)
+        path = app.domain.parent / (app.domain.name + '.plist')
+        path.parent.mkdir(parents=True)
+        path.write_bytes(plistlib.dumps({ENABLED: True, DELAY: 1200}))
+        result = subprocess.run(
+            [SANDBOX_EXEC, '-p', deny_reads(self.home / 'Library/Containers'),
+             sys.executable, '-B', str(ENTRY), 'status'],
+            cwd=str(self.home), env=dict(os.environ, HOME=str(self.home)),
+            text=True, capture_output=True, timeout=60)
+        self.assertEqual(result.returncode, 4, result.stderr)
+        self.assertEqual(result.stdout, '')
+        self.assertIn('Privacy & Security > Full Disk Access', result.stderr)
 
 
 if __name__ == '__main__':

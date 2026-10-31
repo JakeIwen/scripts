@@ -1,12 +1,13 @@
 """Bounded native commands; writes use defaults so cfprefsd sees each change."""
 from datetime import datetime
+import errno
 from pathlib import Path
 import os
 import plistlib
 import subprocess
 import uuid
 
-from .model import APP_PATH, DOMAIN, ControlError, Session
+from .model import APP_PATH, DOMAIN, ControlError, PermissionDenied, Session
 
 
 class NativeApp:
@@ -33,10 +34,17 @@ class NativeApp:
     def read_preferences(self):
         # A background defaults client can export an empty domain even while the
         # container plist exists. Read persisted values instead of inventing OFF.
+        raw = self.domain.parent / (self.domain.name + '.plist')
         try:
-            raw = self.domain.parent / (self.domain.name + '.plist')
             values = plistlib.loads(raw.read_bytes())
         except OSError as exc:
+            # EPERM (not EACCES) on another app's container is macOS privacy
+            # protection: background callers get no prompt, only this error.
+            if exc.errno == errno.EPERM:
+                raise PermissionDenied(
+                    "macOS privacy settings blocked reading Amphetamine's preferences. Add the "
+                    'program running this command to System Settings > Privacy & Security > '
+                    'Full Disk Access.') from exc
             raise ControlError('Cannot read Amphetamine preferences: {}'.format(exc)) from exc
         except (ValueError, plistlib.InvalidFileException) as exc:
             raise ControlError('Amphetamine preferences could not be read.') from exc

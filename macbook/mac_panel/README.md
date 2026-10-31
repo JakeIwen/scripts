@@ -91,7 +91,11 @@ the lock is active. This adds no service or background watcher.
 macOS privacy permissions apply separately to this login agent. The controller
 uses the panel's own Python interpreter so there is one Python identity to
 authorize. If macOS denies access to Amphetamine's container, its Python process
-needs approval to read app data (Full Disk Access is the manual settings route).
+needs approval to read app data (Full Disk Access is the manual settings route;
+a background agent gets no prompt). The controller then exits 4 and the section
+names the binary macOS checks: the venv interpreter's resolved Homebrew target,
+which changes with each Homebrew Python upgrade, so the grant must be repeated
+then. Restart the panel after granting it.
 Apple Events also needs Automation permission to control Amphetamine. Granting
 Full Disk Access covers other scripts using that interpreter; it is not limited
 to this tab. These permissions require user action in System Settings and are

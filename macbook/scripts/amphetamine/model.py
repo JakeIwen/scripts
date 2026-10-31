@@ -24,6 +24,10 @@ class Conflict(ControlError):
     """Refresh or finish the current session before trying again."""
 
 
+class PermissionDenied(ControlError):
+    """macOS privacy settings refused access; only the user can grant it."""
+
+
 @dataclass(frozen=True)
 class Session:
     running: bool = False
