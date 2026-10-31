@@ -246,6 +246,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   or a venv, never `/opt/homebrew/bin/python3`: Homebrew repoints that link on
   each Python install, and macOS re-posts its background-activity notice for
   every job using it (`macbook/tests/test_launchagent_interpreters.py`).
+  `macbook/launchagents/com.jacobr.dictation-key-f13.plist` remaps the F5
+  dictation key to F13 with `hidutil` at login; castit's Van TV extension binds
+  F13 to its sidebar toggle. Setting `UserKeyMapping` replaces the whole list,
+  so any other key remap joins that plist rather than getting its own agent.
   `macbook/mac_panel/` is the Mac Panel, `http://127.0.0.1:8769/` (port 8769;
   `macpanel` alias in `~/.zshrc`; BTT menu-bar icon and ctrl+opt+cmd+P from
   `bettertouchtool/install_mac_panel_menu.py`): a stdlib server run by the login

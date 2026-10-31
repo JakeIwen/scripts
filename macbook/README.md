@@ -215,6 +215,24 @@ idles while iTerm2 is closed.
 - Remove: `launchctl bootout gui/$(id -u)/com.jacobr.iterm-screen-fonts` and
   delete `~/Library/LaunchAgents/com.jacobr.iterm-screen-fonts.plist`.
 
+## F5 dictation key as F13
+
+`launchagents/com.jacobr.dictation-key-f13.plist` turns the microphone key on
+F5 into F13 with macOS's built-in `hidutil`, reapplied at each login because
+hidutil mappings don't survive logout or restart. Dictation still starts from
+the Globe key, and fn+F5 still sends F5. The Van TV Firefox extension (castit)
+binds F13 to showing and hiding its sidebar.
+
+- Install or update, from the repository root:
+  `cp macbook/launchagents/com.jacobr.dictation-key-f13.plist ~/Library/LaunchAgents/`,
+  `launchctl bootout gui/$(id -u)/com.jacobr.dictation-key-f13`, then
+  `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.jacobr.dictation-key-f13.plist`.
+- Check: `hidutil property --get UserKeyMapping` lists Src `51539607759`
+  (0xC000000CF) and Dst `30064771176` (0x700000068) on the keyboard services.
+- Remove: `launchctl bootout gui/$(id -u)/com.jacobr.dictation-key-f13`, delete
+  the plist from `~/Library/LaunchAgents/`, and run
+  `hidutil property --set '{"UserKeyMapping":[]}'`.
+
 ## Dim cab lights when the monitor is plugged in
 
 `scripts/display_cab_dimmer.py` watches for the external Lenovo Q24h-10 monitor
