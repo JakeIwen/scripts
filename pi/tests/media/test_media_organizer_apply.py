@@ -156,6 +156,7 @@ class PartialPlanTests(Fixture, unittest.TestCase):
         first = apply_plan(plan, records.RUN_AUTO, self.preferences(), self.client)
         self.assertEqual([item.name for item in first.items], ['The.Example.S01'])
         self.assertEqual(plans.load(plan.id).status, records.PLAN_PARTIAL)
+        self.assertEqual(plans.view(plans.load(plan.id))['settled_rows'], ['The.Example.S01'])
         with self.assertRaises(ValueError):
             plans.decide(plan, {'The.Example.S01': {'category': 'TV', 'show': 'Other', 'accepted': True}})
         edited = plans.decide(plan, {'Brand.New.S01E01': {'category': 'TV', 'show': 'Brand New', 'accepted': True}})

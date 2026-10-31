@@ -93,6 +93,8 @@ export const planSchema = object({
   existing_shows: v.record(category, v.array(text)),
   rows: v.array(rowSchema),
   run_ids: v.array(text),
+  // Rows a run already moved or left unconfirmed; never edited or resubmitted.
+  settled_rows: v.array(text),
 });
 const runFields = {
   id: text,

@@ -8,6 +8,7 @@ export function samplePlan(): Plan {
     classifier_error: null,
     existing_shows: { TV: ['Silo'], Documentaries: ['Planet Earth'] },
     run_ids: [],
+    settled_rows: [],
     rows: [
       {
         entry: {

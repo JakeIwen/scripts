@@ -45,6 +45,7 @@ export function ReviewTable({ plan, draft, disabled, onChange }: Props) {
           row={row}
           shows={plan.existing_shows}
           decision={draft[row.entry.name] ?? rowDecision(row)}
+          settled={plan.settled_rows.includes(row.entry.name)}
           disabled={disabled}
           onChange={onChange}
         />
@@ -58,15 +59,18 @@ function ReviewRow({
   row,
   shows,
   decision,
-  disabled,
+  settled,
+  disabled: listDisabled,
   onChange,
 }: {
   row: PlanRow;
   shows: Plan['existing_shows'];
   decision: Decision;
+  settled: boolean;
   disabled: boolean;
   onChange: Props['onChange'];
 }) {
+  const disabled = listDisabled || settled;
   const name = row.entry.name;
   const skipped = row.entry.skip_reason;
   const score = row.proposal?.confidence;
@@ -110,16 +114,22 @@ function ReviewRow({
             </small>
           </div>
           <div role="cell">
-            <label className="organizer-accept">
-              <input
-                type="checkbox"
-                aria-label={`Accept ${name}`}
-                checked={decision.accepted}
-                disabled={disabled}
-                onChange={(event) => change({ accepted: event.target.checked })}
-              />
-              <span>Accept</span>
-            </label>
+            {settled ? (
+              <StatusPill dot={false} tone="good">
+                Moved
+              </StatusPill>
+            ) : (
+              <label className="organizer-accept">
+                <input
+                  type="checkbox"
+                  aria-label={`Accept ${name}`}
+                  checked={decision.accepted}
+                  disabled={disabled}
+                  onChange={(event) => change({ accepted: event.target.checked })}
+                />
+                <span>Accept</span>
+              </label>
+            )}
           </div>
         </>
       )}

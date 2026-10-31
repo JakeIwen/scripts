@@ -86,6 +86,12 @@ def settled_names(plan):
         if (item.error or '').startswith(PENDING)}
 
 
+def view(plan):
+    """The plan as the review panel reads it: rows a run already moved (or left
+    unconfirmed) are listed so the panel neither edits nor resubmits them."""
+    return {**plan.to_dict(), 'settled_rows': sorted(settled_names(plan))}
+
+
 def status_after_run(plan):
     """Applied once every candidate row is confirmed moved; otherwise partial."""
     moved = moved_names(plan)

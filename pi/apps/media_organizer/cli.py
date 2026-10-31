@@ -58,7 +58,7 @@ def propose_result(args):
 def decide_result(args):
     payload = (args.decisions_file.read_text(encoding='utf-8')
                if args.decisions_file else args.decisions_json)
-    return plans.decide(plans.load(args.id), json.loads(payload)).to_dict()
+    return plans.view(plans.decide(plans.load(args.id), json.loads(payload)))
 
 
 def alias_result(args):
@@ -73,7 +73,7 @@ COMMANDS = {
     'scan': scan_result,
     'propose': propose_result,
     'plans': lambda args: {'plans': [plan.summary() for plan in plans.list_plans()]},
-    'plan': lambda args: plans.load(args.id).to_dict(),
+    'plan': lambda args: plans.view(plans.load(args.id)),
     'decide': decide_result,
     'apply': lambda args: apply_plan(plans.load(args.id),
                                     records.RUN_AUTO if args.auto else records.RUN_MANUAL,

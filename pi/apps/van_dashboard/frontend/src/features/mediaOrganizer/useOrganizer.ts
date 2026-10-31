@@ -43,12 +43,11 @@ export function useOrganizer(open: boolean) {
     });
     return result ?? false;
   }
+  const openRows = plan ? reviewableRows(plan) : [];
   async function applySelected() {
     if (!plan) return;
     const decisions: Decisions = Object.fromEntries(
-      plan.rows
-        .filter((row) => !row.entry.skip_reason)
-        .map((row) => [row.entry.name, draft[row.entry.name] ?? rowDecision(row)]),
+      openRows.map((row) => [row.entry.name, draft[row.entry.name] ?? rowDecision(row)]),
     );
     await perform(async () => {
       const saved = await api.decide(plan.id, decisions);
@@ -76,16 +75,18 @@ export function useOrganizer(open: boolean) {
     save: (changes: Partial<Settings>) =>
       perform(() => api.saveSetting(changes), 'Organizer setting saved'),
     canApply:
-      !!plan?.rows.some(
-        (row) => !row.entry.skip_reason && (draft[row.entry.name] ?? rowDecision(row)).accepted,
-      ) &&
-      !!plan?.rows.every((row) => {
+      openRows.some((row) => (draft[row.entry.name] ?? rowDecision(row)).accepted) &&
+      openRows.every((row) => {
         const d = draft[row.entry.name] ?? rowDecision(row);
-        return (
-          row.entry.skip_reason || !d.accepted || d.category === Category.Movies || !!d.show?.trim()
-        );
+        return !d.accepted || d.category === Category.Movies || !!d.show?.trim();
       }),
   };
+}
+
+/** Rows still open for review: not skipped and not already moved by a run. */
+export function reviewableRows(plan: Plan) {
+  const settled = new Set(plan.settled_rows);
+  return plan.rows.filter((row) => !row.entry.skip_reason && !settled.has(row.entry.name));
 }
 export type Organizer = ReturnType<typeof useOrganizer>;
 

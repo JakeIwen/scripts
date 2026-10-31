@@ -37,9 +37,8 @@ function ReviewProbe() {
   );
 }
 
-function mockCliApi() {
+function mockCliApi(plan = samplePlan()) {
   const status = sampleStatus();
-  const plan = samplePlan();
   const calls: { path: string; body: Record<string, unknown> }[] = [];
   const fetch = vi.fn(async (path: string, init?: RequestInit) => {
     const body = init?.body ? JSON.parse(String(init.body)) : {};
@@ -234,6 +233,35 @@ describe('organizer feature API flow', () => {
     expect(
       await screen.findByText('Apply finished: 7 moved · 1 failed', undefined, { timeout: 4000 }),
     ).toBeInTheDocument();
+  });
+  it('never resubmits rows a run already moved, and shows them as moved', async () => {
+    const plan = samplePlan();
+    const silo = plan.rows[0]!;
+    plan.rows.push({
+      ...silo,
+      entry: { ...silo.entry, name: 'Dune.2021', torrent_name: 'Dune.2021' },
+      proposal: { ...silo.proposal!, category: 'Movies', show: null, existing_show: false },
+      decision: { category: 'Movies', show: null, accepted: true },
+      target_path: '/media/torrent/Movies/Dune.2021',
+      auto_eligible: false,
+    });
+    plan.settled_rows = ['Silo.S01E01'];
+    const { calls } = mockCliApi(plan);
+    render(
+      <ToastProvider>
+        <MediaOrganizerFeature />
+      </ToastProvider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Media organizer' }));
+    expect(await screen.findByText('Moved')).toBeInTheDocument();
+    expect(screen.getByLabelText('Show for Silo.S01E01')).toBeDisabled();
+    expect(screen.queryByLabelText('Accept Silo.S01E01')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply selected' }));
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls[0]?.body).toEqual({
+      plan_id: 'plan-1',
+      decisions: { 'Dune.2021': { category: 'Movies', show: null, accepted: true } },
+    });
   });
   it('blocks controls for external CLI jobs and saves settings per field', async () => {
     const { status, calls } = mockCliApi();
