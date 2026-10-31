@@ -8,7 +8,7 @@ import os
 from . import records, runs, settings
 from .activity_log import log
 from .busy import note, operation
-from .locking import media_lock
+from .locking import backup_sync_excluded, media_lock
 from .paths import require_media
 from .relocation import mirror_available, mirror_paths, rollback_paths
 
@@ -68,7 +68,9 @@ def sync():
     if not settings.load().mirror_rename:
         return {'disabled': True, 'renamed': [], 'settled': 0, 'failed': []}
     with operation(records.JOB_MIRROR):
-        with media_lock():
+        # The backup runs this before taking its exclusive hold, so waiting here
+        # only outlasts an organizer move already under way.
+        with backup_sync_excluded(wait=True), media_lock():
             require_media()
             if not mirror_available():
                 raise ValueError('mirror drive is not mounted; mirror renames stay pending')

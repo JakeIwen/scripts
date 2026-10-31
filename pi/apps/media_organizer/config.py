@@ -39,6 +39,11 @@ LOG_PATH = Path(os.environ.get("VAN_MEDIA_ORGANIZER_LOG", "/home/pi/log/media_or
 # Shared with alias_media.sh: the hook and the organizer never move or link
 # at the same time.
 LOCK_PATH = Path(os.environ.get("VAN_ALIAS_MEDIA_LOCK", "/run/lock/alias-media.lock"))
+# pi_backup.sh holds this exclusively for its whole media rsync (same path is
+# spelled there); organizer moves hold it shared, so the two never overlap.
+MIRROR_LOCK_PATH = Path(os.environ.get("VAN_MEDIA_MIRROR_LOCK", "/run/lock/media-mirror.lock"))
+# The completion hook waits out a running backup sync; interactive applies refuse.
+MIRROR_LOCK_WAIT_SECONDS = float(os.environ.get("VAN_MEDIA_MIRROR_LOCK_WAIT", str(4 * 3600)))
 
 ALIAS_MEDIA_SCRIPT = Path(
     os.environ.get("VAN_ALIAS_MEDIA_SCRIPT", "/home/pi/scripts/alias_media.sh")

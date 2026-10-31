@@ -20,6 +20,21 @@ def verify_source(row, client):
         torrent = next(t for t in client.list_torrents() if t['hash'] == fresh.torrent_hash)
         if not payload_root_is(torrent, Path(fresh.path)):
             raise ValueError('torrent payload root differs from the scanned entry')
+        refuse_unowned_files(torrent, Path(fresh.path), client)
+
+
+def refuse_unowned_files(torrent, path, client):
+    """qBittorrent moves a torrent file by file and leaves anything else behind,
+    which would split the folder and block undo; refuse instead of guessing."""
+    if not path.is_dir():
+        return
+    save_path = Path(torrent['save_path'])
+    owned = {save_path / name for name in client.torrent_files(torrent['hash'])}
+    extra = sorted(p for p in path.rglob('*') if not p.is_dir() and p not in owned)
+    if extra:
+        raise ValueError('%d file(s) in this folder are not part of the torrent (e.g. %s); '
+                         'qBittorrent would leave them behind. Move or delete them, then '
+                         'apply again.' % (len(extra), extra[0].relative_to(path)))
 
 
 def payload_root_is(torrent, path):
@@ -75,17 +90,21 @@ def mirror_move(item, run, old_payload, new_payload):
         # mirror-sync before its rsync, which would otherwise recopy the title.
         item.mirror_state = records.MIRROR_PENDING
         return
-    item.mirror_state = records.MIRROR_SETTLED
     old, new = mirror_paths(old_payload, new_payload)
     if not old.exists():
+        item.mirror_state = records.MIRROR_SETTLED
         return
     if os.path.lexists(new):
+        item.mirror_state = records.MIRROR_SETTLED  # rsync drops the stale copy
         raise FileExistsError('mirror destination exists; mirror left unchanged')
     new.parent.mkdir(parents=True, exist_ok=True)
-    # Record intent before rename: undo can distinguish both sides after a crash.
+    # Record intent before rename: undo can distinguish both sides after a
+    # crash, and a rename that never happened stays pending for mirror-sync.
     item.mirror_old, item.mirror_new = str(old), str(new)
+    item.mirror_state = records.MIRROR_PENDING
     runs.save(run)
     os.rename(old, new)
+    item.mirror_state = records.MIRROR_SETTLED
 
 
 def rollback_paths(item):
@@ -145,13 +164,14 @@ def undo_mirror(item, old_payload, new_payload):
     if not mirror_available():
         item.mirror_state = records.MIRROR_PENDING  # mirror-sync reverses it later
         return
-    item.mirror_state = records.MIRROR_SETTLED
     old, new = mirror_paths(old_payload, new_payload)
     if (item.mirror_old, item.mirror_new) != (str(old), str(new)):
         raise ValueError('invalid mirror journal paths')
     if old.exists() and not os.path.lexists(new):
+        item.mirror_state = records.MIRROR_SETTLED
         return  # Intent was saved, but the mirror rename never happened.
     if os.path.lexists(old) or not new.exists():
         raise ValueError('mirror location changed; refusing rollback')
     old.parent.mkdir(parents=True, exist_ok=True)
     os.rename(new, old)
+    item.mirror_state = records.MIRROR_SETTLED

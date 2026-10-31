@@ -42,6 +42,7 @@ compare it with this checkout. Deployed files may differ from the repository.
 | `pi/scripts/smart_watch.sh` | `vanpi-smart-watch.timer`; alerts on the `NTFY_WARNING_URL` topic | the script; see `pi/docs/monitoring/SMART.md` |
 | `pi/scripts/alias_media.sh` | Pi `am`/`an` functions and qBittorrent's completion command (`alias_media.sh new`) | thin wrapper; `pi/apps/media_organizer/alias_main.py` in the package release |
 | `python3 -P -m pi.apps.media_organizer mirror-sync` | `pi/scripts/backup/pi_backup.sh`, as `pi`, right before the media rsync | `pi/apps/media_organizer/mirror_sync.py` in the package release |
+| `/run/lock/media-mirror.lock` | `pi_backup.sh` holds it exclusively for the whole media rsync | organizer moves hold it shared (`locking.backup_sync_excluded`; path in its `config.py`) |
 | `macbook/scripts/sns.sh` | Mac shell alias and BetterTouchTool | `shared/python/sonos_cli.py` and `sonos_tasks.py` |
 | `pi/sns.sh` | Pi shell alias and video audio checks (`/home/pi/sns.sh`) | shared Sonos CLI and tasks; package release imports |
 | `shared/sh/` | Mac/Pi aliases, cron and targeted flat Pi deployment | feature-named scripts in the documented compatibility folder |
@@ -118,7 +119,11 @@ compare it with this checkout. Deployed files may differ from the repository.
   bigboi is mounted only during the backup window, so a rename it misses is
   marked `mirror_state: pending` in the run journal and `mirror_sync.py`
   replays it when `pi_backup.sh` calls `mirror-sync` before its rsync (a miss
-  costs a full recopy of the title; a failed replay only that);
+  costs a full recopy of the title; a failed replay only that). No move
+  overlaps that rsync: the backup holds `/run/lock/media-mirror.lock`
+  exclusively, interactive apply/undo refuse and the completion hook waits.
+  A tracked folder holding files its torrent doesn't own (qBittorrent moves
+  file by file and would leave them, e.g. Finder `._` files) is refused;
   `undo.py` replays a run backwards only when every payload is still where the
   journal left it. `cli.py` (`python3 -P -m pi.apps.media_organizer`) is the
   one entry point for the dashboard, the shell and the completion hook

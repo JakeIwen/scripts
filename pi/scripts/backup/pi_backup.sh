@@ -196,10 +196,23 @@ if ensure_mounted movingparts "$MEDIA_SRC"; then
     PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/pi/scripts/python-packages/current \
     /usr/bin/python3 -P -m pi.apps.media_organizer mirror-sync ||
     log "media organizer mirror-sync exited $? (moved titles will be recopied)"
+  # No organizer move may overlap the sync: a title moved mid-rsync is deleted
+  # from the mirror or copied twice. The organizer holds this lock shared per
+  # apply, undo or mirror-sync (pi/apps/media_organizer/config.py spells the
+  # same path); interactive applies refuse while it is held, the completion
+  # hook waits. Waiting only outlasts a move already under way.
+  media_mirror_lock=
+  if exec {media_mirror_lock}>>/run/lock/media-mirror.lock; then
+    /usr/bin/flock -w 1800 -x "$media_mirror_lock" ||
+      log "media organizer still moving after 30 min; syncing without excluding it"
+  else
+    log "cannot open the media organizer lock; syncing without excluding it"
+  fi
   # Mac SMB metadata lives in xattrs and ._ resource-fork files; preserve both.
   run rsync -aHX --delete-during --delete-excluded --exclude-from="$MEDIA_EXCLUDES" \
     "$MEDIA_SRC/" "$MEDIA_DST" \
     || notify "vanpi backup" "media rsync exited $? (partial sync)" high warning
+  [ -n "$media_mirror_lock" ] && exec {media_mirror_lock}>&-
 else
   notify "vanpi backup" "movingparts not available, media mirror skipped" high warning
 fi

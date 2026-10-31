@@ -21,7 +21,8 @@ def post_download(settings):
             result['plan'] = plan.summary()
             log(f'propose plan={plan.id}')
             if settings.auto_apply and any(row.auto_eligible for row in plan.rows):
-                run = apply_plan(plan, records.RUN_AUTO, replace(settings, run_alias_after_apply=False))
+                run = apply_plan(plan, records.RUN_AUTO, replace(settings, run_alias_after_apply=False),
+                                 wait_for_backup=True)
                 result['run'] = run.summary()
                 result['plan'] = plans.load(plan.id).summary()
                 log(f'apply run={run.id}')

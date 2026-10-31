@@ -2,7 +2,7 @@
 from pathlib import Path
 from . import records, plans, runs, link_rebuild
 from .busy import note, operation
-from .locking import media_lock
+from .locking import backup_sync_excluded, media_lock
 from .paths import require_media
 from .qbittorrent_client import Client
 from .relocation import verify_source, ensure_absent, make_item, move_payload, mirror_move, PENDING
@@ -43,11 +43,12 @@ def apply_row(row, run, settings, client):
     runs.save(run)
 
 
-def apply_plan(plan, mode, settings, client=None):
+def apply_plan(plan, mode, settings, client=None, wait_for_backup=False):
     if mode not in records.RUN_MODES:
         raise ValueError('unknown apply mode')
     with operation(records.JOB_APPLY):
-        with media_lock():
+        with backup_sync_excluded(wait_for_backup, on_wait=lambda: note(
+                detail='waiting for the backup sync to finish')), media_lock():
             require_media()
             plan = plans.load(plan.id)
             rows = [row for row in plans.open_rows(plan) if row.decision and row.decision.accepted

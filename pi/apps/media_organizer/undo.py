@@ -1,7 +1,7 @@
 """Reverse a run without guessing after another process changes its payloads."""
 from . import records, runs, link_rebuild
 from .busy import note, operation
-from .locking import media_lock
+from .locking import backup_sync_excluded, media_lock
 from .paths import require_media
 from .qbittorrent_client import Client
 from .relocation import undo_payload, undo_mirror, verify_undo, PENDING, UNDO_PENDING
@@ -10,7 +10,7 @@ from .storage import now
 
 def undo_run(run, client=None):
     with operation(records.JOB_UNDO):
-        with media_lock():
+        with backup_sync_excluded(), media_lock():
             require_media()
             run = runs.load(run.id)
             if not run.undoable or run.undone_at:

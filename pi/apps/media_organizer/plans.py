@@ -89,7 +89,8 @@ def settled_names(plan):
 def view(plan):
     """The plan as the review panel reads it: rows a run already moved (or left
     unconfirmed) are listed so the panel neither edits nor resubmits them."""
-    return {**plan.to_dict(), 'settled_rows': sorted(settled_names(plan))}
+    return {**plan.to_dict(), 'settled_rows': sorted(settled_names(plan)),
+            'moved_rows': sorted(moved_names(plan))}
 
 
 def status_after_run(plan):

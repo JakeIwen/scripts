@@ -36,15 +36,34 @@ def note(detail=None, done=None, total=None):
     write_json(path, data)
 
 
+def _restage(stage):
+    """Show a nested stage (the completion hook's apply inside its propose);
+    returns the marker to restore afterwards, or None when nothing changed."""
+    path = config.STATE_DIR / 'busy.json'
+    if stage is None:
+        return None
+    try:
+        previous = read_json(path)
+    except (FileNotFoundError, ValueError):
+        return None
+    if previous.get('pid') != os.getpid() or previous.get('stage') == stage:
+        return None
+    write_json(path, {'stage': stage, 'started_at': now(), 'pid': os.getpid()})
+    return previous
+
+
 @contextmanager
 def operation(stage=None):
     global _depth
     if _depth:
         _depth += 1
+        previous = _restage(stage)
         try:
             yield
         finally:
             _depth -= 1
+            if previous is not None:
+                write_json(config.STATE_DIR / 'busy.json', previous)
         return
     config.STATE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
     with file_lock(config.STATE_DIR / 'operation.lock'):

@@ -59,6 +59,14 @@ class Client:
                 raise QbittorrentError('invalid qBittorrent progress')
         return data
 
+    def torrent_files(self, torrent_hash):
+        """Paths of the torrent's files, relative to its save path."""
+        data = json.loads(self._request('torrents/files?hash=' + validate_torrent_id(torrent_hash)))
+        if not isinstance(data, list) or not all(
+                isinstance(row, dict) and isinstance(row.get('name'), str) for row in data):
+            raise QbittorrentError('invalid qBittorrent file list')
+        return [row['name'] for row in data]
+
     def available(self):
         try:
             self.list_torrents()
