@@ -6,7 +6,8 @@ ISW_CANARY_DIR=${ISW_CANARY_DIR:-/run/lock/vanpi-internet-switches-canary}
 ISW_OWNER_FILE="$ISW_CANARY_DIR/owner"
 ISW_ALERT_FILE="$ISW_CANARY_DIR/alerted"
 ISW_ALERT_LOCK="$ISW_CANARY_DIR/alert.lock"
-ISW_LOG_FILE=${ISW_LOG_FILE:-/var/log/cron/internet_switches.log}
+ISW_JOURNALCTL=${ISW_JOURNALCTL:-/usr/bin/journalctl}
+ISW_POLICY_UNIT=${ISW_POLICY_UNIT:-vanpi-policy.service}
 ISW_NTFY_SEND=${ISW_NTFY_SEND:-/home/pi/scripts/ntfy_send.sh}
 ISW_POLICYCTL=${ISW_POLICYCTL:-/home/pi/scripts/policyctl}
 ISW_IGNITION_FLAG=${ISW_IGNITION_FLAG:-/home/pi/hooks/ignition_is_on}
@@ -56,7 +57,7 @@ isw_cleanup_owner() {
 }
 
 isw_process_snapshot() {
-  local owner_pid=$1 snapshot
+  local owner_pid=$1 snapshot=
 
   if [[ "$owner_pid" =~ ^[0-9]+$ ]] && kill -0 "$owner_pid" 2>/dev/null; then
     snapshot=$(/usr/bin/ps -eo pid=,ppid=,stat=,etimes=,wchan:24=,comm= 2>&1 |
@@ -75,9 +76,9 @@ isw_process_snapshot() {
   printf '%s\n' "${snapshot:-no relevant process snapshot available}"
 }
 
-isw_lock_diagnostics() {
-  local owner_pid=unknown owner_started=unknown now elapsed=unknown
-  local elapsed_display lock_snapshot process_snapshot log_tail diagnostics
+isw_lock_diagnostics() { # <headline>
+  local headline=$1 owner_pid=unknown owner_started=unknown now elapsed=unknown
+  local elapsed_display lock_snapshot snapshot_root process_snapshot log_tail diagnostics
 
   if [[ -f "$ISW_OWNER_FILE" ]]; then
     IFS=' ' read -r owner_pid owner_started < "$ISW_OWNER_FILE" || {
@@ -97,11 +98,20 @@ isw_lock_diagnostics() {
 
   lock_snapshot=$(/usr/bin/timeout 3 /usr/bin/lslocks -n \
     -o PID,COMMAND,TYPE,MODE,PATH 2>&1 | /usr/bin/grep -F "$ISW_LOCK_FILE" || true)
-  process_snapshot=$(isw_process_snapshot "$owner_pid")
-  log_tail=$(/usr/bin/timeout 3 /usr/bin/tail -n 16 -- "$ISW_LOG_FILE" 2>&1 || true)
+  # Only internet_switches records an owner; other lifecycle-lock holders
+  # (diskctl, system_power, exfat_snapshot, the metering reconciler) are found
+  # through the kernel's lock table instead.
+  snapshot_root=$owner_pid
+  if [[ ! "$snapshot_root" =~ ^[0-9]+$ ]]; then
+    snapshot_root=$(printf '%s\n' "$lock_snapshot" | /usr/bin/awk 'NR == 1 { print $1 }')
+  fi
+  process_snapshot=$(isw_process_snapshot "$snapshot_root")
+  # vanpi-policy.service runs every policy reconciliation and logs to the journal.
+  log_tail=$(/usr/bin/timeout 3 "$ISW_JOURNALCTL" -u "$ISW_POLICY_UNIT" \
+    -n 16 -o cat --no-pager 2>&1 || true)
 
   diagnostics=$(printf '%s\n' \
-    "internet_switches could not acquire its lifecycle lock after ${ISW_LOCK_WAIT_SECONDS}s." \
+    "$headline" \
     "Recorded holder PID: $owner_pid; lock age: $elapsed_display" \
     "" \
     "Lock snapshot (PID COMMAND TYPE MODE PATH):" \
@@ -131,7 +141,8 @@ isw_write_alert_marker() {
   fi
 }
 
-isw_notify_lock_timeout() {
+isw_notify_lock_timeout() { # [headline]
+  local headline=${1:-"internet_switches could not acquire its lifecycle lock after ${ISW_LOCK_WAIT_SECONDS}s."}
   local diagnostics rc=0
   isw_prepare_canary_dir || return 1
 
@@ -145,7 +156,7 @@ isw_notify_lock_timeout() {
   if [[ -f "$ISW_ALERT_FILE" ]]; then
     echo "internet_switches lock-timeout alert already sent; suppressing repeat"
   else
-    diagnostics=$(isw_lock_diagnostics)
+    diagnostics=$(isw_lock_diagnostics "$headline")
     if ! "$ISW_NTFY_SEND" \
         "vanpi internet_switches stalled" "$diagnostics" high warning; then
       rc=1

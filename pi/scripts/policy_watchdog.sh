@@ -28,22 +28,28 @@ if /usr/bin/flock -n 9; then
   exit 0
 fi
 
-now=$(/usr/bin/date +%s) || exit 1
+owner_pid=
 started=
 if [[ -f "$ISW_OWNER_FILE" ]]; then
   read -r owner_pid started < "$ISW_OWNER_FILE" || started=
 fi
-if [[ ! "${owner_pid:-}" =~ ^[0-9]+$ ]] ||
-   ! kill -0 "$owner_pid" 2>/dev/null ||
-   [[ ! "$started" =~ ^[0-9]+$ ]]; then
-  started=$(/usr/bin/stat -c %Y -- "$ISW_LOCK_FILE" 2>/dev/null) || {
-    echo "policy lock is held but its start time is unavailable" >&2
-    exit 1
-  }
+if [[ "$owner_pid" =~ ^[0-9]+$ ]] && kill -0 "$owner_pid" 2>/dev/null &&
+   [[ "$started" =~ ^[0-9]+$ ]]; then
+  now=$(/usr/bin/date +%s) || exit 1
+  age=$((now - started))
+  (( age >= POLICY_STALL_SECONDS )) || exit 0
+  held="${age}s"
+else
+  # Only internet_switches records an owner. diskctl, system_power,
+  # exfat_snapshot and the metering reconciler (briefly, every 10s tick) take
+  # the same lock without one, and the lock file's mtime is only the last
+  # write-open, not this holder's start. Measure the hold directly instead.
+  if /usr/bin/flock -w "$POLICY_STALL_SECONDS" 9; then
+    /usr/bin/flock -u 9 || true
+    exit 0
+  fi
+  held="at least ${POLICY_STALL_SECONDS}s"
 fi
 
-age=$((now - started))
-(( age >= POLICY_STALL_SECONDS )) || exit 0
-
-echo "policy reconciliation lock has been held for ${age}s"
-isw_notify_lock_timeout
+echo "policy reconciliation lock has been held for $held"
+isw_notify_lock_timeout "The vanpi lifecycle lock (shared by internet_switches, diskctl, system power, the EXFAT snapshot and metering) has been held for $held."
