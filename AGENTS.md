@@ -164,9 +164,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   cached permissions, and `low_data_mode.py` owns constrained-flag records.
   State/config cache is `~/.local/state/metered/`; host-local policy is
   `~/.config/jacobr/metered.json`. `shared/settings/metered-mac.json` declares
-  the separate opt-in flag; `tool_settings` writes it. Native flag ownership
-  is not observable, so automatic clearing is disabled; explicit restore checks
-  the owned network generation. `mac_panel/metered_adapter.py` and
+  the separate opt-in flag; `tool_settings` writes it. Low Data Mode clears
+  only a flag this job set and has seen stay set (ownership survives sleep and
+  network changes); flags set without its record are native and left alone. `mac_panel/metered_adapter.py` and
   `static/section_metered.mjs` expose the CLI without bypassing request guards.
   Install/test commands and lease limitations: `pi/docs/networking/METERED_CONNECTIONS.md`.
 - `macbook/`: macOS shell utilities, AppleScripts, and BetterTouchTool helpers.

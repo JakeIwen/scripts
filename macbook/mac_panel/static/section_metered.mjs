@@ -136,9 +136,7 @@ function lowData(data) {
   }), {confirm: enabled ? 'Confirm disable' : 'Time Machine test passed: enable', key: 'ldm-enable'});
   toggle.setAttribute('role', 'switch');
   toggle.setAttribute('aria-checked', String(enabled));
-  const restore = button('Restore owned flag', () => send({action: 'restore-low-data-mode', confirmed: true}),
-    {confirm: 'Confirm clear owned flag', disabled: !enabled, key: 'ldm-restore'});
-  root.append(toggle, restore, info('Enable only after the sudoers / LAN Time Machine test passes. Native flags are preserved. An approval does not automatically clear an owned flag: macOS does not identify its last writer. Restore only when you want that flag cleared on this same network.', 'ldm-info'));
+  root.append(toggle, info('Enable only after the sudoers / LAN Time Machine test passes. Wi-Fi is constrained while metered and cleared when unmetered or approved. A flag this control did not set (native per-network Low Data Mode) is left alone.', 'ldm-info'));
   if (data.low_data_mode.error) root.append(node('p', data.low_data_mode.error, 'error'));
   return root;
 }

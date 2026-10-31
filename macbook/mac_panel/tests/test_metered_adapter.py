@@ -46,8 +46,7 @@ class MeteredPanelTests(unittest.TestCase):
 
     def test_reject_unknown_fields_and_boolean_revision_before_execution(self):
         for body in ({'action': 'ssid-remove', 'ssid': 'Cafe', 'revision': True},
-                     {'action': 'sync', 'shell': 'whoami'},
-                     {'action': 'restore-low-data-mode', 'confirmed': False}):
+                     {'action': 'sync', 'shell': 'whoami'}):
             runner = FakeRunner()
             with self.assertRaises(ApiError) as error:
                 MeteredAdapter(runner).mutate(body)

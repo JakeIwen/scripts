@@ -198,7 +198,7 @@ class MacMeteredTests(unittest.TestCase):
         self.assertEqual(self.fixture.sudo_calls(), [])
         self.assertEqual(self.controller.state.load().consumers['mac.low_data_mode'].actual, Actual.MANUAL)
 
-    def test_reassert_owned_flag_then_explicit_restore(self):
+    def test_reassert_owned_flag_then_clear_when_permitted(self):
         self.enable()
         self.controller.tick()
         self.assertTrue(self.fixture.flag)
@@ -209,26 +209,24 @@ class MacMeteredTests(unittest.TestCase):
         self.assertEqual(len(self.fixture.sudo_calls()), 2)
         self.cli('approve', 'mac.low_data_mode', '1h')
         self.controller.tick()
-        self.assertTrue(self.fixture.flag, 'automatic clearing must remain disabled')
-        self.assertEqual(self.cli('low-data-mode', 'restore')[0], 2)
-        self.assertEqual(self.cli('low-data-mode', 'restore', '--confirm')[0], 0)
         self.assertFalse(self.fixture.flag)
         self.assertEqual(self.fixture.sudo_calls()[-1][-1], '-constrained')
+        self.assertEqual(self.controller.state.load().consumers['mac.low_data_mode'].actual, Actual.RUNNING)
 
-    def test_network_change_and_sleep_relinquish_ownership(self):
+    def test_ownership_survives_roaming_and_sleep(self):
         for transition in ('bssid', 'sleep'):
             with self.subTest(transition=transition):
                 self.fixture.flag = False
                 self.enable()
                 self.controller.tick()
+                self.assertTrue(self.fixture.flag)
                 self.cli('approve', 'mac.low_data_mode', '1h')
                 if transition == 'bssid':
                     self.fixture.bssid = 'aa:bb:cc:dd:ee:ff'
                 else:
                     self.fixture.advance(120)
-                self.controller.tick(restore=True)
-                self.assertTrue(self.fixture.flag)
-                self.assertEqual(self.controller.state.load().consumers['mac.low_data_mode'].actual, Actual.MANUAL)
+                self.controller.tick()
+                self.assertFalse(self.fixture.flag)
                 self.cli('revoke', 'mac.low_data_mode')
 
     def test_sudo_failure_is_unknown_not_claimed_held(self):
@@ -269,7 +267,7 @@ class MacMeteredTests(unittest.TestCase):
     def test_launchagent_paths_and_interval(self):
         plist = configuration(ROOT, Path(self.temp.name))
         self.assertEqual(plist['ProgramArguments'], ['/usr/bin/python3', '-B', '-m', 'macbook.metered', 'tick'])
-        self.assertEqual(plist['StartInterval'], 60)
+        self.assertEqual(plist['StartInterval'], 15)
         self.assertTrue(plist['RunAtLoad'])
         self.assertNotIn('KeepAlive', plist)
         self.assertEqual(plist['WorkingDirectory'], str(ROOT))

@@ -2,7 +2,8 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-INTERVAL = 60
+# Shorter than the Pi verdict lease (30 s) so inherited home state never lapses between ticks.
+INTERVAL = 15
 STATE_TTL = 75.0
 REMOTE_INTERVAL = 900.0
 SSH_TIMEOUT = 20.0

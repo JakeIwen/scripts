@@ -23,8 +23,9 @@ def constrained(text, interface):
 def identity(network):
     if not network.connected:
         return None
-    if network.ssid and network.bssid:
-        value = [network.ssid, network.bssid.lower(), network.gateway_mac]
+    # SSID + gateway, not BSSID: roaming between access points is the same network.
+    if network.ssid:
+        value = [network.ssid, network.gateway_mac]
     elif network.gateway and network.gateway_mac:
         value = [network.gateway, network.gateway_mac]
     else:
@@ -50,43 +51,40 @@ class LowDataMode:
             raise RuntimeError('Low Data Mode write was not confirmed; check scoped sudoers')
 
     def reconcile(self, permitted, network, enabled, now, restore=False):
+        """`restore` is accepted for the CLI's apply-now path; clearing is automatic."""
         if not enabled:
             return Actual.NA, 'Low Data Mode control disabled; Time Machine test required'
-        interface, key = network.interface, identity(network)
-        if not interface or not INTERFACE.fullmatch(interface) or key is None:
-            self.store.save_locked(Ownership())
-            return Actual.UNKNOWN, 'Wi-Fi network identity unavailable'
+        interface = network.interface
+        if not interface or not INTERFACE.fullmatch(interface):
+            return Actual.UNKNOWN, 'Wi-Fi interface unavailable'
         try:
-            return self._reconcile(permitted, interface, key, now, restore)
+            return self._reconcile(permitted, interface, identity(network), now)
         except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
             return Actual.UNKNOWN, str(error)
 
-    def _reconcile(self, permitted, interface, key, now, restore):
+    def _reconcile(self, permitted, interface, key, now):
         owner = self.store.load()
-        owned = (owner.interface == interface and owner.identity == key and
-                 0 <= now - owner.seen_at <= STATE_TTL)
         flag = self.flag(interface)
-        if not owned:
-            owner = Ownership()
-            self.store.save_locked(owner)
+        # Owned means this job set the bit and has not seen it clear since. Sleep
+        # gaps and network changes keep ownership: an orphaned bit would pin Low
+        # Data Mode on an unmetered network. Only a bit set without our record
+        # (native per-network Low Data Mode) is left alone.
+        owned = flag and owner.interface == interface and owner.set_at > 0
+        if not flag and owner.set_at > 0:
+            self.store.save_locked(Ownership())
         if not permitted:
             if not flag:
                 self.set_flag(interface, True)
-                owner = Ownership(interface, key, now, now)
-                owned = True
-            if owned:
-                self.store.save_locked(replace(owner, seen_at=now))
-            return Actual.HELD, 'Wi-Fi constrained' if owned else 'Native Low Data Mode preserved'
+                self.store.save_locked(Ownership(interface, key, now, now))
+            elif owned:
+                self.store.save_locked(replace(owner, identity=key, seen_at=now))
+            else:
+                return Actual.HELD, 'Native Low Data Mode preserved'
+            return Actual.HELD, 'Wi-Fi constrained'
         if not flag:
-            self.store.save_locked(Ownership())
             return Actual.RUNNING, 'Wi-Fi is not constrained'
         if not owned:
             return Actual.MANUAL, 'Native or unowned Low Data Mode preserved'
-        self.store.save_locked(replace(owner, seen_at=now))
-        # The bit has no writer identity. A native preference changed while it was
-        # set is indistinguishable, so automatic clearing cannot prove ownership.
-        if not restore:
-            return Actual.HELD, 'Approval granted; confirm Restore owned flag to clear Low Data Mode'
         self.set_flag(interface, False)
         self.store.save_locked(Ownership())
-        return Actual.RUNNING, 'Owned Wi-Fi flag restored by explicit request'
+        return Actual.RUNNING, 'Low Data Mode cleared'

@@ -45,7 +45,7 @@ class Controller:
         registry = list(consumers().values())
         if settings.values['enabled'] and settings.error is None:
             registry = [replace(row, how=Handling.TICK,
-                                note='Automatic constrain; owned flags require explicit restore')
+                                note='Constrains Wi-Fi while metered and clears its own flag when permitted')
                         if row.id == 'mac.low_data_mode' else row for row in registry]
         pi = self.cache.pi.load()
         return MacStatus(self.cache.overlay(), self.policy.load(), self.state.load(), registry,

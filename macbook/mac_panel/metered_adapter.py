@@ -58,11 +58,6 @@ def mutation_args(body):
         if field(body, 'confirmed', bool, status=400) is not True:
             raise ApiError(400, 'Explicit Low Data Mode confirmation is required')
         return ['low-data-mode', 'on' if enabled else 'off', '--revision', revision, '--confirm']
-    if action == 'restore-low-data-mode':
-        object_fields(body, ('action', 'confirmed'))
-        if field(body, 'confirmed', bool, status=400) is not True:
-            raise ApiError(400, 'Explicit flag restore confirmation is required')
-        return ['low-data-mode', 'restore', '--confirm']
     return policy_args(body)
 
 

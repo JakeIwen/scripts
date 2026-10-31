@@ -8,7 +8,7 @@
   </array>
   <key>WorkingDirectory</key><string>@REPO@</string>
   <key>RunAtLoad</key><true/>
-  <key>StartInterval</key><integer>60</integer>
+  <key>StartInterval</key><integer>15</integer>
   <key>ProcessType</key><string>Background</string>
   <key>ExitTimeOut</key><integer>20</integer>
   <key>Umask</key><integer>63</integer>

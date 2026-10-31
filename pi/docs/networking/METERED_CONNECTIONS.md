@@ -170,7 +170,7 @@ remains the exact authoritative Pi record. `ssid add` returns
 `{queued: AddSSID, pending_sync: true}`; policy mutations return HostPolicy.
 
 `com.jacobr.metered` is a GUI LaunchAgent (Location needs a login session),
-RunAtLoad plus every 60 seconds. From the checkout, install with
+RunAtLoad plus every 15 seconds. From the checkout, install with
 `zsh macbook/metered/install.zsh install`; use `prepare`, `status`, `stop`,
 `start` or `uninstall` with the same script. No job is loaded by tests.
 State, authoritative config cache, Pi telemetry, sync metadata and pending
@@ -183,9 +183,8 @@ are at most once per 15 minutes (explicit `sync` bypasses this rate limit).
 
 Mac-local observations have a 75-second lease, bounded by mode/approval expiry.
 An inherited Pi verdict additionally expires at the Pi's `valid_until`
-and evidence deadline (30 seconds). Thus a 60-second Mac timer intentionally
-has closed-admission gaps on the van LAN; cached Pi evidence is never extended
-to hide the gap. `sync` refreshes decisions but never changes interface flags;
+and evidence deadline (30 seconds); the 15-second Mac timer keeps a fresh copy,
+and cached Pi evidence is never extended past that deadline. `sync` refreshes decisions but never changes interface flags;
 `tick` is the enforcing command. The Mac Panel shows Pi state read-only with age.
 
 Low Data Mode defaults **OFF** (`shared/settings/metered-mac.json`, separate
@@ -196,11 +195,12 @@ exit 0, idle Time Machine, a **new** latest completed backup and CONSTRAINED
 still set before restoration. Only then enable in the panel or run
 `macbook/metered/mac-metered low-data-mode on --confirm`.
 The adapter reads `ifconfig -v` (CONSTRAINED is an **extended** flag), never
-sets expensive, and relinquishes ownership on identity change or a sampling
-gap. The bit cannot identify an intervening native/user write: automatic
-clearing therefore remains disabled. After granting Low Data Mode permission,
-`low-data-mode restore --confirm` clears only a recorded flag on the same
-continuously observed network. Native/unowned flags stay untouched. Disabling
+sets expensive, and clears automatically when permitted, but only a flag it set
+and has seen stay set since (ownership survives sleep, roaming and network
+changes, so an orphaned flag never pins an unmetered network). A flag set
+without its record is native per-network Low Data Mode and stays untouched; the
+bit cannot name its writer, so don't combine native Low Data Mode with this
+control on a network it manages. `low-data-mode restore` just applies now. Disabling
 control does not clear a flag. iCloud remains advisory, not independently held.
 
 ## Deployment sequence (not performed by the implementation task)
