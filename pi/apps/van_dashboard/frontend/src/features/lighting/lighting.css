@@ -138,7 +138,16 @@
 
 .lighting-group-card > header {
   position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 1.5fr) auto;
   min-height: 58px;
+}
+
+.lighting-group-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .lighting-group-expand {
@@ -249,12 +258,15 @@
   margin: 0;
 }
 
+/* Keep the room slider above the header's expand/collapse hit area. */
 .lighting-group-brightness {
-  margin: 14px 0;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: rgb(8 15 19 / 20%);
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+}
+
+.lighting-group-brightness .lighting-slider-control__label {
+  margin-bottom: 4px;
 }
 
 .lighting-overview span,
@@ -347,6 +359,15 @@
 }
 
 @media (max-width: 640px) {
+  .lighting-group-card > header {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .lighting-group-brightness {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
   .lighting-sheet__toolbar,
   .lighting-overview {
     align-items: stretch;

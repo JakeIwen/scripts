@@ -141,20 +141,31 @@ function LightingGroupCard({
           onClick={() => setExpanded((current) => !current)}
         />
         <div>
-          <h3>
+          <h3 className="lighting-group-heading">
             <span className="lighting-group-chevron" aria-hidden="true">
               {expanded ? '▾' : '▸'}
             </span>{' '}
             {group.label}
+            <StatusPill tone={lightingStateTone(group.state)}>
+              {lightingStateLabel(group.state)}
+            </StatusPill>
           </h3>
           <p>
             {group.lights.length} {group.lights.length === 1 ? 'light' : 'lights'}
             {brightness === null ? '' : ` · average ${brightness}%`}
           </p>
         </div>
-        <StatusPill tone={lightingStateTone(group.state)}>
-          {lightingStateLabel(group.state)}
-        </StatusPill>
+        <LightingSlider
+          label={`${group.label} room brightness`}
+          value={Math.max(1, brightness ?? 100)}
+          minimum={1}
+          maximum={100}
+          unit="%"
+          valueInThumb
+          disabled={!available || controls.running}
+          className="lighting-group-brightness"
+          onCommit={(value) => controls.setGroupBrightness(group.id, value)}
+        />
         <button
           type="button"
           className="lighting-group-power"
@@ -185,16 +196,6 @@ function LightingGroupCard({
             </button>
           </div>
         )}
-        <LightingSlider
-          label={`${group.label} room brightness`}
-          value={Math.max(1, brightness ?? 100)}
-          minimum={1}
-          maximum={100}
-          unit="%"
-          disabled={!available || controls.running}
-          className="lighting-group-brightness"
-          onCommit={(value) => controls.setGroupBrightness(group.id, value)}
-        />
         <div className="lighting-light-list">
           {group.lights.map((light) => (
             <LightRow light={light} controls={controls} key={light.entityId} />
