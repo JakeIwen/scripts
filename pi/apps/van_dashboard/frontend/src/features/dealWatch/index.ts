@@ -8,6 +8,7 @@ export {
   dismissDealWatchSearchResult,
   editDealWatchHavenoWatch,
   editDealWatchListing,
+  editDealWatchSearch,
   fetchDealWatchStatus,
   previewDealWatchSchedule,
   removeDealWatchHavenoWatch,

@@ -934,6 +934,10 @@ vector symbols; `backups/statusDetail.ts` explains CHECK from actual freshness,
 clone and cloud evidence. `lighting/LightingRange.tsx` owns the optional integer
 thumb label while the native range input keeps touch/keyboard interaction.
 `vonstar/VonstarActions.tsx` owns the compact guarded action group.
+`dealWatch/DealWatchSearchSection.tsx` owns saved-search cards and inline editing.
+`SearchStore.update_watch` preserves history/dismissals while clearing old-query
+current matches; `expected_url` guards in-flight check writes. Ship its flat
+price-check CLI/store/service cohort before the package endpoint and frontend.
 
 
 ## Backup and disk tooling

@@ -194,6 +194,34 @@ class SearchStore:
         self.connection.commit()
         return watch
 
+    def update_watch(self, watch_id: int, parser: str, url: str, title: str | None = None) -> dict:
+        try:
+            with self.connection:
+                self.connection.execute("BEGIN IMMEDIATE")
+                previous = self.get_watch(watch_id)
+                self.connection.execute(
+                    """UPDATE search_watches
+                       SET parser=?, url=?, normalized_url=?, title=?, updated_at=?
+                       WHERE id=?""",
+                    (parser, url, normalized_url(url), title or None, int(self.clock()), watch_id),
+                )
+                if previous["url"] != url or previous["parser"] != parser:
+                    # Keep identities/dismissals, but old-query matches are no longer current.
+                    self.connection.execute(
+                        "UPDATE search_results SET is_current=0 WHERE search_id=?", (watch_id,)
+                    )
+                    self.connection.execute(
+                        """UPDATE search_watches
+                           SET last_checked_at=NULL, last_status='never', last_error=NULL
+                           WHERE id=?""", (watch_id,)
+                    )
+                    self.connection.execute(
+                        "DELETE FROM search_browser_refresh WHERE search_id=?", (watch_id,)
+                    )
+        except sqlite3.IntegrityError as error:
+            raise SearchStoreError(f"search URL is already configured: {url}") from error
+        return self.get_watch(watch_id)
+
     def dismiss_result(self, watch_id: int, item_id: str) -> tuple[dict, dict]:
         now = int(self.clock())
         row = self.connection.execute(
@@ -221,7 +249,7 @@ class SearchStore:
         return self.get_watch(watch_id), dismissed
 
     def record_success(
-        self, watch_id: int, results: list[SearchResult]
+        self, watch_id: int, results: list[SearchResult], *, expected_url: str | None = None
     ) -> tuple[dict, list[dict]]:
         now = int(self.clock())
         known_ids = {
@@ -235,13 +263,13 @@ class SearchStore:
                 """
                 UPDATE search_watches
                 SET last_checked_at=?, last_status='ok', last_error=NULL, updated_at=?
-                WHERE id=?
+                WHERE id=? AND (? IS NULL OR url=?)
                 """,
-                (now, now, watch_id),
+                (now, now, watch_id, expected_url, expected_url),
             )
             if cursor.rowcount != 1:
                 raise SearchStoreError(
-                    f"search watch {watch_id} was removed during its check"
+                    f"search watch {watch_id} changed or was removed during its check"
                 )
             self.connection.execute(
                 "UPDATE search_results SET is_current=0 WHERE search_id=?",
@@ -300,7 +328,7 @@ class SearchStore:
             new_rows.append(self._public_result(row))
         return self.get_watch(watch_id), new_rows
 
-    def record_error(self, watch_id: int, error: str) -> dict:
+    def record_error(self, watch_id: int, error: str, *, expected_url: str | None = None) -> dict:
         now = int(self.clock())
         detail = error[-1000:]
         with self.connection:
@@ -308,13 +336,13 @@ class SearchStore:
                 """
                 UPDATE search_watches
                 SET last_checked_at=?, last_status='error', last_error=?, updated_at=?
-                WHERE id=?
+                WHERE id=? AND (? IS NULL OR url=?)
                 """,
-                (now, detail, now, watch_id),
+                (now, detail, now, watch_id, expected_url, expected_url),
             )
             if cursor.rowcount != 1:
                 raise SearchStoreError(
-                    f"search watch {watch_id} was removed during its check"
+                    f"search watch {watch_id} changed or was removed during its check"
                 )
             self.connection.execute(
                 """

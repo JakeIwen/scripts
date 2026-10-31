@@ -302,6 +302,11 @@ def build_parser() -> argparse.ArgumentParser:
     search_add.add_argument("parser")
     search_add.add_argument("url")
     search_add.add_argument("title", nargs="?", default="")
+    search_edit = commands.add_parser("search-edit", help="edit a saved search without losing history")
+    search_edit.add_argument("id", type=int)
+    search_edit.add_argument("parser")
+    search_edit.add_argument("url")
+    search_edit.add_argument("title", nargs="?", default="")
     search_remove = commands.add_parser(
         "search-remove", help="remove a saved search by ID"
     )
@@ -426,6 +431,15 @@ def handle_price_command(args, command: str, store, search_store, haveno_store) 
 
 
 def handle_search_command(args, command: str, store, search_store, haveno_store) -> int | None:
+    if command == "search-edit":
+        values = validate_watch(args.parser, args.url, args.title)
+        watch = search_store.update_watch(args.id, *values)
+        emit(
+            args,
+            response(store, search_store, haveno_store, search=watch),
+            f"updated saved search: {watch['display_title']}",
+        )
+        return 0
     if command == "search-add":
         parser_name, url, title = validate_watch(args.parser, args.url, args.title)
         watch = search_store.add_watch(parser_name, url, title)

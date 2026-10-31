@@ -8,16 +8,11 @@ import type { DealWatchControls } from './controls';
 import { DealWatchHavenoSection } from './DealWatchHavenoSection';
 import { DealWatchListingForm } from './DealWatchListingForm';
 import { DealWatchScheduleForm } from './DealWatchScheduleForm';
-import { DealWatchSearchForm } from './DealWatchSearchForm';
+import { DealWatchSearchSection } from './DealWatchSearchSection';
 import { ExternalDealLink } from './ExternalDealLink';
 import { promptForMuteDays } from './mutePrompt';
-import { checkAge, formatUnixDateTime, listingState, searchState } from './presentation';
-import type {
-  DealWatchListing,
-  DealWatchSavedSearch,
-  DealWatchSearchResult,
-  DealWatchStatus,
-} from './types';
+import { checkAge, formatUnixDateTime, listingState } from './presentation';
+import type { DealWatchListing, DealWatchStatus } from './types';
 import './dealWatch.css';
 
 export interface DealWatchSheetProps {
@@ -84,98 +79,6 @@ function ListingCard({ listing, disabled, onEdit, onCheck, onMute, onRemove }: L
           Remove
         </button>
       </div>
-    </article>
-  );
-}
-
-interface SearchResultRowProps {
-  result: DealWatchSearchResult;
-  disabled: boolean;
-  onDismiss: () => void;
-}
-
-function SearchResultRow({ result, disabled, onDismiss }: SearchResultRowProps) {
-  const details = [result.price, result.shipping].filter(
-    (detail): detail is string => detail !== null,
-  );
-  return (
-    <li className="deal-watch-result">
-      <div>
-        <ExternalDealLink url={result.url}>{result.title}</ExternalDealLink>
-        <small>{details.length ? details.join(' · ') : 'No price details returned'}</small>
-      </div>
-      <span>
-        <time dateTime={new Date(result.firstSeenAt * 1_000).toISOString()}>
-          First seen {checkAge(result.firstSeenAt)}
-        </time>
-        <button type="button" className="danger-button" disabled={disabled} onClick={onDismiss}>
-          Dismiss
-        </button>
-      </span>
-    </li>
-  );
-}
-
-interface SearchCardProps {
-  search: DealWatchSavedSearch;
-  disabled: boolean;
-  onCheck: () => void;
-  onRemove: () => void;
-  onDismiss: (result: DealWatchSearchResult) => void;
-}
-
-function SearchCard({ search, disabled, onCheck, onRemove, onDismiss }: SearchCardProps) {
-  const state = searchState(search);
-  return (
-    <article className={`deal-watch-card deal-watch-card--${state.tone}`}>
-      <header className="deal-watch-card__header">
-        <div>
-          <ExternalDealLink url={search.url}>{search.displayTitle}</ExternalDealLink>
-          <small>{search.parser} saved search</small>
-        </div>
-        <StatusPill tone={state.tone}>{state.label}</StatusPill>
-      </header>
-      <dl className="deal-watch-card__facts">
-        <div>
-          <dt>Last check</dt>
-          <dd>{checkAge(search.lastCheckedAt)}</dd>
-        </div>
-        <div>
-          <dt>Visible now</dt>
-          <dd>{search.resultCount}</dd>
-        </div>
-        <div>
-          <dt>Dismissed</dt>
-          <dd>{search.dismissedCount}</dd>
-        </div>
-        <div>
-          <dt>Known listings</dt>
-          <dd>{search.knownCount}</dd>
-        </div>
-      </dl>
-      {search.lastError && <p className="deal-watch-card__error">{search.lastError}</p>}
-      <div className="deal-watch-card__actions">
-        <button type="button" disabled={disabled} onClick={onCheck}>
-          Check
-        </button>
-        <button type="button" className="danger-button" disabled={disabled} onClick={onRemove}>
-          Remove
-        </button>
-      </div>
-      {search.results.length ? (
-        <ul className="deal-watch-results">
-          {search.results.map((result) => (
-            <SearchResultRow
-              result={result}
-              disabled={disabled}
-              onDismiss={() => onDismiss(result)}
-              key={result.itemId}
-            />
-          ))}
-        </ul>
-      ) : (
-        <p className="deal-watch-card__empty">No visible results.</p>
-      )}
     </article>
   );
 }
@@ -292,40 +195,7 @@ export function DealWatchSheet({ open, onClose, resource, controls }: DealWatchS
             />
           </section>
 
-          <section className="deal-watch-section" aria-labelledby="deal-watch-searches-title">
-            <header className="deal-watch-section__header">
-              <div>
-                <h3 id="deal-watch-searches-title">Saved searches</h3>
-                <p>Current, non-dismissed results from each watched query.</p>
-              </div>
-              <span>{status.searchSummary.count}</span>
-            </header>
-            <div className="deal-watch-card-list">
-              {status.searches.length ? (
-                status.searches.map((search) => (
-                  <SearchCard
-                    search={search}
-                    disabled={controls.busy}
-                    onCheck={() => void controls.checkSearch(search.id)}
-                    onRemove={() => {
-                      if (window.confirm(`Remove ${search.displayTitle}?`)) {
-                        void controls.removeSearch(search.id);
-                      }
-                    }}
-                    onDismiss={(result) => {
-                      if (window.confirm(`Permanently hide ${result.title}?`)) {
-                        void controls.dismissSearchResult(search.id, result.itemId);
-                      }
-                    }}
-                    key={search.id}
-                  />
-                ))
-              ) : (
-                <p className="deal-watch-section__empty">No saved searches configured.</p>
-              )}
-            </div>
-            <DealWatchSearchForm disabled={controls.busy} onSubmit={controls.addSearch} />
-          </section>
+          <DealWatchSearchSection searches={status.searches} controls={controls} />
 
           <DealWatchHavenoSection
             watches={status.havenoWatches}
