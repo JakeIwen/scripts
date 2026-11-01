@@ -239,12 +239,6 @@ compare it with this checkout. Deployed files may differ from the repository.
   clipboard-preserving native Paste for editors with broken AX replacement.
   `text_markers.js` preserves Firefox text-node positions during reselection;
   never round-trip rich-editor selection endpoints through flat offsets.
-  `install_text_editing_keys.py` (`btt.py text-keys`) owns the system-wide editing
-  keys (Cmd-X line cut, quote/bracket wrapping): conditional pass-through triggers
-  that fire only on a settable focused selection outside its `EXCLUDED_APPS`, with
-  `CONDITION_CASES` checked through `text_editing_conditions.js` before install.
-  BTT swallows a Cmd-X sent from its own Cmd-X trigger, so the line cut presses
-  Edit > Cut through Accessibility instead.
   `signal_text_diagnostic.js` owns the temporary Signal diagnostic button's runner.
   `macbook/crontab` is the tracked user crontab; `macbook/tests/test_crontab.py`
   checks that every repo script it runs (paused `#off ` jobs included) exists and
