@@ -65,13 +65,15 @@ describe('disk history sheet', () => {
     fetchDiskHistoryMock.mockResolvedValue(sampleDiskHistory());
     const disk = sampleDiskStatus().disks[0];
     if (!disk) throw new Error('missing disk fixture');
-    render(<DiskStatsStrip disk={disk} stats={sampleDiskStats()} />);
+    const { container } = render(<DiskStatsStrip disk={disk} stats={sampleDiskStats()} />);
 
     await act(async () => {
       fireEvent.click(
         screen.getByRole('button', { name: 'movingparts I/O and temperature history' }),
       );
     });
+    // The disk card's own term/definition layout must not reach the sheet's stat grid.
+    expect(container).not.toContainElement(screen.getByRole('dialog'));
     expect(fetchDiskHistoryMock).toHaveBeenLastCalledWith(
       'movingparts',
       24,

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { formatBytes, formatPercent, formatRelativeTime, formatSpeed } from '../../utils/format';
 import { currentIo, smartVerdict } from './diskStats';
 import { DiskStatsSheet } from './DiskStatsSheet';
@@ -61,7 +62,12 @@ export function DiskStatsStrip({ disk, stats }: { disk: ManagedDisk; stats: Disk
           History
         </button>
       </div>
-      {historyOpen && <DiskStatsSheet label={disk.label} onClose={() => setHistoryOpen(false)} />}
+      {/* Inside the card, the card's `dl > div` layout would squeeze the sheet's stat grid. */}
+      {historyOpen &&
+        createPortal(
+          <DiskStatsSheet label={disk.label} onClose={() => setHistoryOpen(false)} />,
+          document.body,
+        )}
     </div>
   );
 }
