@@ -45,6 +45,10 @@ function withTemporaryClipboard(board, text, action) {
 }
 
 function findPasteMenuItem(application, attribute) {
+    return findEditMenuItem(application, attribute, 'v');
+}
+
+function findEditMenuItem(application, attribute, key) {
     const bar = attribute(application, 'AXMenuBar');
     const groups = attribute(bar, 'AXChildren');
     for (let group = 0; group < Number(groups.count); group++) {
@@ -66,8 +70,9 @@ function findPasteMenuItem(application, attribute) {
                 commands[key.toLowerCase()].push(item);
         }
         if (commands.x.length === 1 && commands.c.length === 1) {
-            if (commands.v.length !== 1) throw new Error('The Edit menu does not have one unambiguous Paste command.');
-            return commands.v[0];
+            const name = {x:'Cut', c:'Copy', v:'Paste'}[key];
+            if (commands[key].length !== 1) throw new Error('The Edit menu does not have one unambiguous ' + name + ' command.');
+            return commands[key][0];
         }
     }
     throw new Error('Cannot identify the app’s Cut/Copy/Paste menu commands.');
