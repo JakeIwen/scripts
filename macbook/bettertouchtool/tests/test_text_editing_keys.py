@@ -97,6 +97,13 @@ class EmittedScriptTests(unittest.TestCase):
         self.assertEqual(outcome['calls'][-1], ['callBTT', 'display_notification',
                                                 {'title': 'Wrap stopped', '': 'fixture refusal'}])
 
+    def test_a_runtime_script_failure_is_reported_with_its_message(self):
+        failure = '{"OSAScriptErrorNumberKey":-2700,"NSLocalizedDescription":"Error: SyntaxError"}'
+        [outcome] = run_entries([self.entry(by_note('cuts the line'), failure)])
+        self.assertEqual(outcome['result'], 'Error: SyntaxError')
+        self.assertEqual(outcome['calls'][-1], ['callBTT', 'display_notification',
+                                                {'title': 'Cut line stopped', '': 'Error: SyntaxError'}])
+
     def test_cut_selects_the_line_with_keys_before_the_menu_cut(self):
         [outcome] = run_entries([self.entry(by_note('cuts the line'), '{"ok":true,"result":"cut line"}')])
         self.assertEqual(outcome['result'], 'cut line')

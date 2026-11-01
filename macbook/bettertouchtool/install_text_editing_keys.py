@@ -55,11 +55,13 @@ def stable_uuid(name):
 def _action(function, entry, options, title, before=''):
     """A Real-JS action running one runtime entry, which returns an {ok, result|error} outcome."""
     call = '\n%s(%s);' % (entry, json.dumps(options))
+    # A script that fails inside runJXA comes back as {NSLocalizedDescription} instead.
     script = (f'async function {function}() {{\n{before}'
               f'    const sources = await Promise.all({json.dumps(list(RUNTIME))}.map(path => readFile(path)));\n'
               f'    const result = JSON.parse(await runJXA(sources.join("\\n") + {json.dumps(call)}));\n'
-              f'    if (!result.ok) await callBTT("display_notification", {{title: {json.dumps(title)}, "": result.error}});\n'
-              f'    return result.ok ? result.result : result.error;\n}}')
+              f'    const error = result.error || result.NSLocalizedDescription;\n'
+              f'    if (!result.ok) await callBTT("display_notification", {{title: {json.dumps(title)}, "": error}});\n'
+              f'    return result.ok ? result.result : error;\n}}')
     # Separate contexts: all six wrap entries share one function name.
     return {'BTTScriptType': 3, 'BTTScriptLocation': 0, 'BTTAppleScriptUsePath': False,
             'BTTAppleScriptRunInBackground': True, 'BTTActionJSRunInSeparateContext': True,
