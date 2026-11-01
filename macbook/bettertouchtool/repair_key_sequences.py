@@ -35,6 +35,7 @@ PRESET = 'Master'
 GLOBAL = 'BT.G'
 TRASH = 'BT.D'
 SAVE_TIMEOUT = 60
+REQUIRED_ENTITIES = {'APP', 'Gesture', 'Key', 'Preset'}
 KEY_LISTS = {'down': 'BTTKeySequenceDownKeys', 'up': 'BTTKeySequenceUpKeys', 'mixed': 'BTTKeySequenceMixedKeys'}
 # Saved key-sequence columns and the export keys BTT reads them from.
 SEQUENCE_FIELDS = {'ZBETWEENTIME': 'BTTPauseBetween', 'ZDELETEAFTERWARDS': 'BTTCharactersToDeleteAfterwards',
@@ -107,6 +108,10 @@ def read_store(path):
     with closing(connect(path)) as connection:
         connection.execute('BEGIN')
         entities = dict(connection.execute('SELECT Z_NAME,Z_ENT FROM Z_PRIMARYKEY'))
+        missing = sorted(REQUIRED_ENTITIES - entities.keys())
+        if missing:
+            raise RuntimeError(f'Unsupported BTT store schema in {Path(path).name} (no {", ".join(missing)}); '
+                               'no changes made.')
         app, gesture = entities['APP'], entities['Gesture']
         rows = {row['Z_PK']: row for row in connection.execute('SELECT * FROM ZBTTBASEENTITY')}
         links = connection.execute(f'SELECT Z_{app}GESTURES,Z_{gesture}APPS_GESTURES FROM Z_{app}APPS_GESTURES').fetchall()
@@ -290,11 +295,13 @@ def restore(apply=False, source=None):
                                   prefix='btt-key-sequences-backup-')
     if read_store(database).uuids != current.uuids:
         raise RuntimeError('BTT changed during backup; no changes made. Backup: ' + str(backup.parent))
+    added = 0
     try:
         for wanted in definitions:
             if runtime_trigger(wanted['BTTUUID']) is not None:
                 raise RuntimeError(wanted['BTTUUID'] + ' already exists in BTT; stopped without retrying.')
             add_trigger(wanted)
+            added += 1
             if not runtime_matches(runtime_trigger(wanted['BTTUUID']), wanted):
                 raise RuntimeError(wanted['BTTUUID'] + ' runtime readback failed; stopped without retrying.')
         deadline = time.monotonic() + SAVE_TIMEOUT
@@ -303,20 +310,22 @@ def restore(apply=False, source=None):
                 raise RuntimeError('BTT has not saved the restored key sequences yet; no restart or retry attempted.')
             time.sleep(.5)
     except (RuntimeError, ValueError, OSError, sqlite3.Error, subprocess.SubprocessError) as error:
-        raise RuntimeError(f'{error} Backup: {backup.parent}') from error
+        # Adds already sent stay in BTT; once saved, the next preview no longer lists them.
+        raise RuntimeError(f'{error} Added {added} of {len(definitions)} before stopping. '
+                           f'Backup: {backup.parent}') from error
     return dict(result, mode='apply', changes_applied=True, saved_verified=True, backup=str(backup.parent))
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument('--apply', action='store_true', help='back up, add through BTT socket, verify the saved store')
+    mode.add_argument('--apply', action='store_true', help='back up, add through Apple Events, verify the saved store')
     mode.add_argument('--inspect', action='store_true', help='read-only preview (the default)')
     parser.add_argument('--source', type=Path, help='one older BTT store or snapshot; defaults to every older store')
     args = parser.parse_args()
     try:
         print(json.dumps(restore(apply=args.apply, source=args.source), ensure_ascii=False, indent=2))
-    except (RuntimeError, ValueError, OSError, sqlite3.Error, subprocess.SubprocessError, KeyError) as error:
+    except (RuntimeError, ValueError, OSError, sqlite3.Error, subprocess.SubprocessError) as error:
         parser.exit(1, str(error) + '\n')
 
 

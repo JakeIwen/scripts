@@ -164,6 +164,12 @@ class RestoreTests(unittest.TestCase):
         reopened.trigger('L3K', 'L3K')
         self.assertTrue(repair.saved(reopened.close(), wanted, before))
 
+    def test_unsupported_store_schema_is_refused_by_name(self):
+        store = self.store(748)
+        store.connection.execute("DELETE FROM Z_PRIMARYKEY WHERE Z_NAME = 'Preset'")
+        with self.assertRaisesRegex(RuntimeError, 'Unsupported BTT store schema .*no Preset'):
+            repair.read_store(store.close())
+
     def test_older_stores_are_newest_first_and_exclude_wal_files(self):
         for version in (640, 748, 885, 900):
             self.store(version).close()
