@@ -128,10 +128,10 @@ function pasteFixture(refuse = false, {text = 'mixed suffix', location = 0, leng
     };
     base.context.delay = () => { if (state.pending) { state.value = state.expected; state.pending = false; } };
     const helpers = {attribute, offsets:range => range,
-        range:(original,replacement) => ({location:original.location,length:replacement.length})};
-    const run = (replacement = 'MIXED') => {
+        range:(original,replacement,target) => ({location:original.location+target.offset,length:target.length})};
+    const run = (replacement = 'MIXED', selected) => {
         const selection = {element:editor,range:state.range,text:selectedText()};
-        base.context.pasteSelectionUsingMenu(system,application,selection,replacement,helpers);
+        base.context.pasteSelectionUsingMenu(system,application,selection,replacement,helpers,selected);
     };
     return {...base,state,selectedText,run};
 }
@@ -153,6 +153,20 @@ test('Paste lookup never enters large bookmark/history or nested Services menus'
         return {AXRole:'AXMenuItem',AXMenuItemCmdChar:item.key,AXMenuItemCmdModifiers:0}[name] ?? null;
     };
     assert.equal(context.findPasteMenuItem(app,attribute),commands[2]);
+});
+
+test('Cut is found in the same Edit-menu group as Paste', () => {
+    const {context} = fixture();
+    const app = {}, bar = {}, edit = {}, menu = {};
+    const commands = ['x','c','v'].map(key => ({key}));
+    const attribute = (item,name) => {
+        if (item === app) return bar;
+        if (item === bar) return array([edit]);
+        if (item === edit) return array([menu]);
+        if (item === menu) return name === 'AXRole' ? 'AXMenu' : array(commands);
+        return {AXRole:'AXMenuItem',AXMenuItemCmdChar:item.key,AXMenuItemCmdModifiers:0}[name] ?? null;
+    };
+    assert.equal(context.findEditMenuItem(app,attribute,'x'),commands[0]);
 });
 
 test('an ambiguous Edit-menu Paste command is rejected', () => {
@@ -194,6 +208,17 @@ test('native Paste runs once, waits for the draft update, restores clipboard and
     run();
     assert.equal(state.presses,1);
     assert.equal(state.value,'MIXED suffix');
+    assert.deepEqual(contents(),original);
+});
+
+test('wrapping through native Paste keeps the original text selected inside the pair', () => {
+    const {run,state,selectedText,contents} = pasteFixture(false,{text:'say hi now',location:4,length:2});
+    const original = contents();
+    run('"hi"',{offset:1,length:2});
+    assert.equal(state.value,'say "hi" now');
+    assert.deepEqual(state.range,{location:5,length:2});
+    assert.equal(selectedText(),'hi');
+    assert.equal(state.presses,1);
     assert.deepEqual(contents(),original);
 });
 

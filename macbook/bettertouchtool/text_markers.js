@@ -64,19 +64,24 @@ function textMarkerSelection(element, attribute) {
         if (!same(paragraph(start), paragraph(end)))
             throw new Error('The selection spans a paragraph break; select text within one paragraph. Nothing pasted.');
     }
-    function endingAt(caret, replacement) {
+    function endingAt(caret, replacement, selected) {
         // Each backward character step consumes exactly one UTF-16 unit, even
         // across node boundaries, so stepping back the replacement's length
         // reaches its first character without selecting a zero-width break.
-        const end = parameter('AXEndTextMarkerForTextMarkerRange', caret);
+        // `selected` picks the part of the replacement to select (default: all).
+        const target = selected || {offset: 0, length: replacement.length};
         const unresolved = () => new Error('The editor could not identify the inserted text’s native boundaries.');
-        let start = end;
-        for (let step = 0; step < replacement.length; step++) {
-            start = parameter('AXPreviousTextMarkerForTextMarker', start, {optional: true});
-            if (start === null) throw unresolved();
-        }
-        const range = between(start, end);
-        if (text(range) !== replacement) throw unresolved();
+        const back = (marker, steps) => {
+            for (let step = 0; step < steps; step++) {
+                marker = parameter('AXPreviousTextMarkerForTextMarker', marker, {optional: true});
+                if (marker === null) throw unresolved();
+            }
+            return marker;
+        };
+        const end = back(parameter('AXEndTextMarkerForTextMarkerRange', caret),
+            replacement.length - target.offset - target.length);
+        const range = between(back(end, target.length), end);
+        if (text(range) !== replacement.slice(target.offset, target.offset + target.length)) throw unresolved();
         validate(range);
         return range;
     }

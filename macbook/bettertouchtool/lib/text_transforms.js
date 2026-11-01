@@ -1,4 +1,4 @@
-// Selection-only transforms. Case conversion must preserve prose whitespace.
+// Selection-only transforms and wrapping. Case conversion must preserve prose whitespace.
 var TextTransforms = (function () {
     const kinds = ['lower', 'upper', 'snake', 'kebab', 'camel',
                    'base64-encode', 'base64-decode', 'uri-encode', 'uri-decode'];
@@ -36,6 +36,20 @@ var TextTransforms = (function () {
         ui.write(selection, result);
         return 'replaced';
     }
-    return {kinds, transform, replace};
+
+    // Typing an opening character over a selection surrounds it, as code
+    // editors do, and keeps the original text selected inside the pair.
+    const pairs = {"'": "'", '"': '"', '`': '`', '(': ')', '[': ']', '{': '}'};
+
+    function wrap(open, ui) {
+        if (!Object.prototype.hasOwnProperty.call(pairs, open)) throw new Error('Unknown wrapping character.');
+        const selection = ui.read();
+        if (!selection.text) throw new Error('Select editable text first.');
+        if (!selection.writable) throw new Error('This app does not support direct selection replacement.');
+        ui.write(selection, open + selection.text + pairs[open],
+            {offset: open.length, length: selection.text.length});
+        return 'wrapped';
+    }
+    return {kinds, transform, replace, pairs, wrap};
 })();
 if (typeof module !== 'undefined') module.exports = TextTransforms;

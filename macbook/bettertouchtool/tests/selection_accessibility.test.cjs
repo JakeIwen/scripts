@@ -107,3 +107,22 @@ test('AX communication failure is not treated as an unsupported attribute', () =
     assert.throws(() => context.selectionUI());
     assert.equal(writes.length, 0);
 });
+
+for (const [bundle, manual, expected, writeCount] of [
+    ['org.whispersystems.signal-desktop', false, 'enabled', 1],
+    ['org.whispersystems.signal-desktop', true, 'unchanged', 0],
+    ['com.apple.Notes', undefined, 'unchanged', 0],
+    ['com.microsoft.VSCode', false, 'excluded', 0]]) {
+    test('app switches prepare Electron text accessibility outside excluded editors: ' + bundle + ' ' + manual, () => {
+        const {context, writes} = accessibilityFixture({manual});
+        context.selectionApplicationBundle = () => bundle;
+        assert.equal(context.prepareFocusedAppText({excluded:['com.microsoft.VSCode']}), expected);
+        assert.equal(writes.length, writeCount);
+    });
+}
+
+test('a refused accessibility switch on app change is reported, never thrown', () => {
+    const {context} = accessibilityFixture({manual:false, refuseEnable:true});
+    context.selectionApplicationBundle = () => 'com.tinyspeck.slackmacgap';
+    assert.match(context.prepareFocusedAppText({excluded:[]}), /^skipped: /);
+});

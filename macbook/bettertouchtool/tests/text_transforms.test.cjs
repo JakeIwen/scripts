@@ -80,6 +80,26 @@ test('read-only selection never writes', () => {
     assert.deepEqual(writes, []);
 });
 
+for (const [open, close] of Object.entries(transforms.pairs)) {
+    test('typing ' + open + ' over a selection wraps it and keeps the original text selected', () => {
+        const writes = [];
+        const ui = {read: () => ({text: 'two words', writable: true}),
+            write: (selection, text, selected) => writes.push({text, selected})};
+        assert.equal(transforms.wrap(open, ui), 'wrapped');
+        assert.deepEqual(writes, [{text: open + 'two words' + close, selected: {offset: 1, length: 9}}]);
+    });
+}
+
+for (const [open, selection] of [['"', {text: '', writable: true}], ['(', {text: 'Hello', writable: false}],
+                                 ['<', {text: 'Hello', writable: true}]]) {
+    test('wrapping never writes without a writable selection and a known pair: ' + open, () => {
+        const writes = [];
+        const ui = {read: () => selection, write: () => writes.push('write')};
+        assert.throws(() => transforms.wrap(open, ui));
+        assert.deepEqual(writes, []);
+    });
+}
+
 test('unchanged output avoids an unnecessary edit', () => {
     const {ui, writes} = uiFixture('hello');
     assert.equal(transforms.replace('lower', ui, dependencies), 'unchanged');
@@ -277,6 +297,23 @@ test('native replacement ranges preserve the start and use the new UTF-16 length
     `;
     const result = execFileSync('/usr/bin/osascript', ['-l', 'JavaScript', '-e', script], {encoding:'utf8'});
     assert.deepEqual(JSON.parse(result), [2,5,0,1].map(length => ({location:7, length})));
+});
+
+test('native reselection can leave only the wrapped original text selected', () => {
+    const source = fs.readFileSync(path.join(directory, 'text_selection.js'), 'utf8');
+    const script = source + `
+        const buffer = selectionRangeBuffer();
+        const original = $.NSValue.valueWithRange($.NSMakeRange(7, 3));
+        original.getValueSize(buffer.data.mutableBytes, buffer.size);
+        const range = $.AXValueCreate($.kAXValueCFRangeType, buffer.data.bytes);
+        const inner = replacementSelectionRange(range, '"a😀"', {offset: 1, length: 3});
+        if (!$.AXValueGetValue(inner, $.kAXValueCFRangeType, buffer.data.mutableBytes))
+            throw new Error('Cannot read replacement range.');
+        const value = $.NSValue.valueWithBytesObjCType(buffer.data.bytes, buffer.encoding).rangeValue;
+        JSON.stringify({location: Number(value.location), length: Number(value.length)});
+    `;
+    const result = execFileSync('/usr/bin/osascript', ['-l', 'JavaScript', '-e', script], {encoding:'utf8'});
+    assert.deepEqual(JSON.parse(result), {location: 8, length: 3});
 });
 
 for (const scenario of ['selected', 'focus-changed', 'range-refused', 'focus-read-failed', 'range-read-failed']) {

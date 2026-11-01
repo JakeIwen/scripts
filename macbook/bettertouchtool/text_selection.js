@@ -57,17 +57,18 @@ function selectionOffsets(original) {
     return {location, length};
 }
 
-function replacementSelectionRange(original, replacement) {
+function replacementSelectionRange(original, replacement, selected) {
     const {location} = selectionOffsets(original);
     const buffer = selectionRangeBuffer();
+    const target = selected || {offset: 0, length: replacement.length};
     // JavaScript length and macOS text ranges both count UTF-16 code units.
-    const replacementRange = $.NSValue.valueWithRange($.NSMakeRange(location, replacement.length));
+    const replacementRange = $.NSValue.valueWithRange($.NSMakeRange(location + target.offset, target.length));
     replacementRange.getValueSize(buffer.data.mutableBytes, buffer.size);
     return ObjC.castRefToObject($.AXValueCreate($.kAXValueCFRangeType, buffer.data.bytes));
 }
 
-function writeSelection(system, selection, replacement) {
-    const range = replacementSelectionRange(selection.range, replacement);
+function writeSelection(system, selection, replacement, selected) {
+    const range = replacementSelectionRange(selection.range, replacement, selected);
     const status = $.AXUIElementSetAttributeValue(selection.element, $('AXSelectedText'), $(replacement));
     if (status !== 0) throw new Error('The app refused selection replacement (' + status + ').');
     try {
@@ -120,7 +121,8 @@ function selectionUI(directory) {
             return $.CFEqual(before.element, after.element) && $.CFEqual(before.range, after.range)
                 && before.text === after.text && after.writable;
         },
-        write: function (selection, replacement) {
+        // `selected` is the part of the replacement to leave selected; default all of it.
+        write: function (selection, replacement, selected) {
             const bundle = selectionApplicationBundle(application);
             if (selectionNeedsMenuPaste(bundle)) {
                 const paste = new Function(selectionReadSource(directory + '/text_menu_paste.js')
@@ -132,9 +134,9 @@ function selectionUI(directory) {
                 paste(system, application, selection, replacement, {
                     attribute:selectionAttribute, offsets:selectionOffsets,
                     range:replacementSelectionRange, markers
-                });
+                }, selected);
             } else {
-                writeSelection(system, selection, replacement);
+                writeSelection(system, selection, replacement, selected);
             }
         }
     };
@@ -146,9 +148,16 @@ function selectionReadSource(path) {
     return ObjC.unwrap(source);
 }
 
+function selectionTransforms(directory) {
+    return new Function(selectionReadSource(directory + '/lib/text_transforms.js') + '\nreturn TextTransforms;')();
+}
+
+function wrapSelection(open, directory) {
+    return selectionTransforms(directory).wrap(open, selectionUI(directory));
+}
+
 function transformSelection(kind, directory, caseLibrary) {
-    const transforms = new Function(selectionReadSource(directory + '/lib/text_transforms.js')
-        + '\nreturn TextTransforms;')();
+    const transforms = selectionTransforms(directory);
     const dependencies = {
         encodeBase64: function (text) {
             return ObjC.unwrap($(text).dataUsingEncoding($.NSUTF8StringEncoding).base64EncodedStringWithOptions(0));
@@ -196,14 +205,57 @@ function recordTransformOutcome(options, outcome) {
     }
 }
 
+function cutSelectedLine(directory) {
+    // BTT has just sent the paragraph-selection keys. Cut goes through the Edit
+    // menu: BTT swallows a Cmd-X sent from its own Cmd-X trigger.
+    if (!$.AXIsProcessTrusted()) throw new Error('BetterTouchTool needs Accessibility access.');
+    const system = $.AXUIElementCreateSystemWide();
+    const application = selectionAttribute(system, 'AXFocusedApplication');
+    const element = focusedSelectionElement(system, application, false);
+    let previous = null;
+    // Wait for the keys to land: cut only a nonempty selection read twice in a row.
+    for (let attempt = 0; attempt < 20; attempt++) {
+        const range = selectionOffsets(selectionAttribute(element, 'AXSelectedTextRange'));
+        if (range.length && previous && range.location === previous.location && range.length === previous.length) {
+            const cut = new Function(selectionReadSource(directory + '/text_menu_paste.js')
+                + '\nreturn findEditMenuItem;')()(application, selectionAttribute, 'x');
+            if (ObjC.unwrap(selectionAttribute(cut, 'AXEnabled')) !== true) throw new Error('The app’s Cut command is unavailable.');
+            if ($.AXUIElementPerformAction(cut, $('AXPress')) !== 0) throw new Error('The app refused its Cut command.');
+            return 'cut line';
+        }
+        previous = range;
+        delay(0.03);
+    }
+    // An empty last line has nothing to select; that is not an error.
+    if (!previous.length) return 'nothing to cut';
+    throw new Error('The line selection did not settle; nothing was cut.');
+}
+
 function runTextTransform(options) {
     let outcome;
     try {
-        const result = transformSelection(options.kind, options.directory, options.caseLibrary);
+        const result = options.kind === 'wrap' ? wrapSelection(options.open, options.directory)
+            : options.kind === 'cut-line' ? cutSelectedLine(options.directory)
+            : transformSelection(options.kind, options.directory, options.caseLibrary);
         outcome = {ok: true, result};
     } catch (error) {
         outcome = {ok: false, error: String(error.message || error)};
     }
     recordTransformOutcome(options, outcome);
     return JSON.stringify(outcome);
+}
+
+function prepareFocusedAppText(options) {
+    // The editing keys' trigger condition reads the focused selection before any
+    // script runs, so Electron apps must already expose their text tree by then.
+    try {
+        const system = $.AXUIElementCreateSystemWide();
+        const application = selectionAttribute(system, 'AXFocusedApplication', {optional: true});
+        if (!application) return 'no focused app';
+        if (options.excluded.includes(selectionApplicationBundle(application))) return 'excluded';
+        return enableManualAccessibility(application) ? 'enabled' : 'unchanged';
+    } catch (error) {
+        // App switches must never surface errors; the keys then simply pass through.
+        return 'skipped: ' + String(error.message || error);
+    }
 }

@@ -29,6 +29,7 @@ Apple Events access is sandboxed. `inspect` and `backup` need no Apple Events.
 | `status` | Playback-status output and compact row spacing. |
 | `notes` | Recent/Pinned Notes setup; `--labels-only --apply` limits edits to labels. |
 | `escape` | Escape dismissal while the three Media dropdowns are visible. |
+| `text-keys` | Editing keys outside code editors: Cmd-X with no selection cuts the line; `'` `"` `` ` `` `(` `[` `{` wrap a selection. `--apply` installs, `--disable` turns them off; see below. |
 | `repair rps` | Restore the missing sync-button link without running a deployment; optional `--with-escape`. |
 | `repair sizes` | Repair conflicting min/max dimensions without normalizing valid custom sizes. |
 | `repair paths` | Repair reviewed moved-script paths in active floating-menu actions and named triggers; `--apply` changes command fields only. |
@@ -275,6 +276,47 @@ and AQB were restored on 2026-10-31). The preview's `at_risk_trash_linked` lists
 current triggers in that state. Key sequences sit outside the Guard checkpoint, so
 Guard does not alert when one disappears.
 
+### Editing keys
+
+```sh
+/usr/bin/python3 -B ~/dev/scripts/macbook/bettertouchtool/btt.py text-keys
+/usr/bin/python3 -B ~/dev/scripts/macbook/bettertouchtool/btt.py text-keys --apply
+/usr/bin/python3 -B ~/dev/scripts/macbook/bettertouchtool/btt.py text-keys --disable
+```
+
+`install_text_editing_keys.py` adds seven global keyboard triggers and one
+"Active App Did Change" trigger to the active Master preset, under fixed UUIDs:
+
+- `'` `"` `` ` `` `(` `[` `{` typed over a selection wrap it and keep the original
+  text selected inside the pair, so a second key wraps again (`("word")`).
+- Cmd-X with no selection selects the caret's line and its line break with
+  Ctrl-A, Ctrl-Shift-E, Shift-Right, then presses the app's own Edit > Cut through
+  Accessibility. BTT swallows a Cmd-X sent from its own Cmd-X trigger, so the cut
+  never goes through the keyboard.
+
+Each keyboard trigger has an advanced condition and BTT's "If advanced conditions
+fail, let the shortcut pass through" option: the key behaves normally unless
+`focused_element_details` shows a settable `AXSelectedText` with a nonempty range
+(wrapping) or an empty one (Cmd-X), in an app outside `EXCLUDED_APPS` (code editors
+and terminals, plus `com.jetbrains.*`). Read-only text, web page text and apps with
+no text tree never match. Checking the condition adds about 20 ms to each of these
+keystrokes; keys typed quickly stay in order. The installer evaluates both
+conditions against `CONDITION_CASES` with Foundation's NSPredicate before any write.
+
+Wrapping reuses `text_selection.js` (Firefox and Signal replace through Paste, as
+for the text transforms). Electron apps build their text tree only on request, so
+the app-switch trigger calls `prepareFocusedAppText` to set `AXManualAccessibility`
+in the newly focused app. Firefox maps the paragraph keys to the visual line, so a
+soft-wrapped line in Firefox is cut one visual line at a time. Wrapping replaces
+the selection as plain text, which drops formatting in rich editors. Multiple
+cursors and "select next occurrence" are not possible: macOS text controls have a
+single insertion point.
+
+`--apply` backs up to `.local/text-editing-key-backups/`, creates any missing or
+changed trigger disabled, verifies the API readback and the saved store, then
+enables all of them and advances the Guard checkpoint. It refuses when another
+enabled shortcut in an active preset uses one of these keys.
+
 ### Stale script references
 
 ```sh
@@ -363,10 +405,16 @@ and report identities. Recreate venvs rather than moving them.
   socket, avoiding Apple Events for configuration changes. Enable Command Line /
   Socket Server once in BTT's scripting settings and restart BTT before applying.
   The socket is restricted to the owning user; no network webserver is needed.
+- `install_text_editing_keys.py`: the editing keys' guarded installer, also through
+  the socket CLI (see Editing keys). `text_editing_conditions.js` evaluates its
+  trigger conditions with NSPredicate for the installer and its tests.
 - `text_selection.js`: runtime Accessibility adapter, executed inside BTT via
   `runJXA`. It reads the focused control's selected text/range, checks that the
   selection is writable and unchanged. Native editors use `AXSelectedText`; Signal and Firefox
-  delegates replacement to `text_menu_paste.js`. Unsupported controls or missing
+  (every `org.mozilla.*` bundle, including Developer Edition) delegate replacement to
+  `text_menu_paste.js`. `write` can leave part of the replacement selected (wrapping
+  keeps the inner text selected). `cutSelectedLine` and `prepareFocusedAppText` serve
+  the editing keys. Unsupported controls or missing
   selections stop with a notification. After replacement it selects the result using
   native text markers in Firefox and UTF-16 ranges in other apps. If the app refuses reselection,
   the notification explicitly says the text was already transformed.
@@ -383,7 +431,9 @@ and report identities. Recreate venvs rather than moving them.
   without copying text, sending shortcuts, or touching message-send controls.
   Runtime source is loaded on each use, so subsequent source fixes do not need
   another menu installation.
-- `text_menu_paste.js`: Signal/Firefox's replacement adapter uses the unique native Paste
+- `text_menu_paste.js`: `findEditMenuItem` locates the Cut/Copy/Paste group (the
+  editing keys' Cmd-X presses its Cut).
+  Signal/Firefox's replacement adapter uses the unique native Paste
   menu item (Cmd-V equivalent) through Accessibility, never simulated keypresses.
   It preserves every readable clipboard item/format, marks transformed text transient
   and concealed, limits it to the current host, and restores the clipboard after
@@ -440,7 +490,8 @@ and report identities. Recreate venvs rather than moving them.
   Lower/upper case preserve whitespace; snake/kebab/camel run per line through
   the existing `~/dev/case-anything/dist/cjs/index.cjs`. Base64 uses UTF-8; URI
   conversion retains `encodeURI`/`decodeURI` semantics. Decode errors leave the
-  selection untouched. Replacement is plain text and app support/undo behavior
+  selection untouched. `wrap` surrounds a selection with one of `pairs`.
+  Replacement is plain text and app support/undo behavior
   must be checked in the destination app. Tests are in
   `tests/text_transforms.test.cjs` (`node --test` from this directory).
   `tests/text_transform_cases.cjs` shares examples with the explicit live smoke:

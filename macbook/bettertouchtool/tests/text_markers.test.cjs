@@ -59,10 +59,10 @@ function editorFixture({paragraphs = ['first', 'mIxEd tail'], blocks = paragraph
         try { state.clipboard=text; action(()=>true); } finally { state.clipboard=original; }
     };
     const helpers={attribute:(element,name)=>element===menu ? true : attribute(element,name),
-        offsets:r=>r, range:(r,text)=>({location:r.location,length:text.length}),
+        offsets:r=>r, range:(r,text,target)=>({location:r.location+target.offset,length:target.length}),
         markers:context.textMarkerSelection(editor,attribute)};
-    const run = replacement => context.pasteSelectionUsingMenu(system,app,
-        {element:editor,range:offsets(),text:rangeText(state.selection)},replacement,helpers);
+    const run = (replacement, selected) => context.pasteSelectionUsingMenu(system,app,
+        {element:editor,range:offsets(),text:rangeText(state.selection)},replacement,helpers,selected);
     const texts = () => state.leaves.filter(leaf => leaf.editor).map(leaf => leaf.text);
     return {state,run,rangeText,helpers,texts};
 }
@@ -183,6 +183,19 @@ test('length-changing Unicode transformations reselect only the inserted text', 
     assert.deepEqual(state.selection,{start:{node:1,offset:0},end:{node:1,offset:4}});
     run('ss😀');
     assert.deepEqual(texts(),['same','ss😀 same']);
+});
+
+test('wrapping at a paragraph start selects only the original text inside the pair', () => {
+    const {state,run,rangeText,texts}=editorFixture();
+    run('(mIxEd)',{offset:1,length:5});
+    assert.deepEqual(texts(),['first','(mIxEd) tail']);
+    assert.deepEqual(state.selection,{start:{node:1,offset:1},end:{node:1,offset:6}});
+    assert.equal(rangeText(state.selection),'mIxEd');
+    // A second opening character wraps the still-selected text again.
+    run('"mIxEd"',{offset:1,length:5});
+    assert.deepEqual(texts(),['first','("mIxEd") tail']);
+    assert.equal(rangeText(state.selection),'mIxEd');
+    assert.equal(state.clipboard,'unrelated');
 });
 
 test('a whole URL selected in the pruned URL bar transforms and stays selected', () => {
