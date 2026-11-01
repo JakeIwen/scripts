@@ -1,0 +1,5 @@
+{
+  "name": "term-highlight",
+  "version": "0.1.0",
+  "description": "Bolds the first mention of each term a reply's **Terms** block defines, wherever the reply uses it"
+}

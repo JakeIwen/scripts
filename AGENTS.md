@@ -532,6 +532,11 @@ compare it with this checkout. Deployed files may differ from the repository.
   then the Mac, in `~/.local/share/codexclean/` with a launcher at
   `~/.local/bin/codexclean`. The installed copies don't follow the checkout:
   re-run the deploy after editing any of those modules.
+- `shared/claude-mods/term-highlight/` is a Claude Code mod that bolds the first
+  mention of each term a reply's **Terms** block defines, by rewriting the
+  `AssistantMessage` markdown before the engine draws it (the stored reply is
+  unchanged). Mac only, loaded from the checkout through `settings.json`
+  `env.CLAUDE_CODE_PLUGIN_DIRS`; the Pi has no copy.
 - Pi video audio is hardwired: HDMI-A-1 → splitter box (HDMI to the monitor,
   audio to optical) → Sonos soundbar's optical input. `sns.sh rear_movie`
   switches the soundbar to optical and groups vonRear with it; VLC and Van TV's
