@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ChartAxes, HorizontalLine } from './ChartAxes';
 import { CHART_HEIGHT, CHART_MARGIN, makeFrame, type Frame } from './chartFrame';
-import { SeriesMarks, type ChartPoint, type ChartSeries } from './SeriesMarks';
+import { isReadable, SeriesMarks, type ChartPoint, type ChartSeries } from './SeriesMarks';
 import { useElementWidth } from './useElementWidth';
 import './timeChart.css';
 
@@ -75,11 +75,14 @@ function HoverTooltip({
   readouts: Readout[];
   formatValue: (value: number) => string;
 }) {
+  const x = frame.x(at);
   return (
     <div
       className="time-chart__tooltip"
       role="status"
-      style={{ left: Math.min(Math.max(frame.x(at), 80), frame.width - 80) }}
+      // Slide from left-aligned at the chart's left edge to right-aligned at its
+      // right edge, so a wide readout never hangs outside the chart.
+      style={{ left: x, transform: `translateX(-${(x / frame.width) * 100}%)` }}
     >
       {new Date(at * 1000).toLocaleString([], {
         month: 'short',
@@ -98,6 +101,22 @@ function HoverTooltip({
   );
 }
 
+function ChartLegend({ series }: { series: ChartSeries[] }) {
+  return (
+    <ul className="time-chart__legend">
+      {series.map((item) => (
+        <li
+          key={item.label}
+          className={item.variant && `time-chart__key--${item.variant}`}
+          style={{ '--series-color': item.color } as React.CSSProperties}
+        >
+          {item.label}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /**
  * Lines over a fixed time window with gaps where data stops, a shared hover
  * crosshair and an optional dashed limit. Pointer and touch both pick a time.
@@ -110,6 +129,7 @@ export function TimeSeriesChart({
   yMin = 0,
   yMax,
   formatValue,
+  formatReadout = formatValue,
   gapSeconds,
   limit,
 }: {
@@ -120,13 +140,15 @@ export function TimeSeriesChart({
   yMin?: number;
   yMax: number;
   formatValue: (value: number) => string;
+  /** The hover readout's value text, which has room for more than an axis label. */
+  formatReadout?: (value: number) => string;
   gapSeconds: number;
   limit?: { value: number; label: string };
 }) {
   const [ref, width] = useElementWidth();
   const [hoverAt, setHoverAt] = useState<number | null>(null);
   const frame = makeFrame(width, start, end, yMin, yMax);
-  const hover = hoverAt === null ? null : readHover(series, hoverAt, gapSeconds);
+  const hover = hoverAt === null ? null : readHover(series.filter(isReadable), hoverAt, gapSeconds);
   const pick = (event: React.PointerEvent<SVGRectElement>) => {
     const bounds = event.currentTarget.ownerSVGElement?.getBoundingClientRect();
     if (!bounds) return;
@@ -135,15 +157,7 @@ export function TimeSeriesChart({
   };
   return (
     <div ref={ref} className="time-chart">
-      {series.length > 1 && (
-        <ul className="time-chart__legend">
-          {series.map((item) => (
-            <li key={item.label} style={{ '--series-color': item.color } as React.CSSProperties}>
-              {item.label}
-            </li>
-          ))}
-        </ul>
-      )}
+      {series.length > 1 && <ChartLegend series={series} />}
       <svg width={width} height={CHART_HEIGHT} role="img" aria-label={ariaLabel}>
         <ChartAxes frame={frame} formatValue={formatValue} />
         {limit && limit.value <= yMax && (
@@ -172,7 +186,7 @@ export function TimeSeriesChart({
           frame={frame}
           at={hover.at}
           readouts={hover.readouts}
-          formatValue={formatValue}
+          formatValue={formatReadout}
         />
       )}
     </div>

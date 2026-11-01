@@ -137,6 +137,20 @@ describe('upload speed sheet', () => {
     expect(average()).toBe('3.0 MiB/s');
   });
 
+  it('reads the run’s speeds on hover but not its trend line', async () => {
+    open(minutes(NOW - 3600, [MIB, 2 * MIB, 3 * MIB, 4 * MIB]).map((s) => [s.at, s.speed]));
+    const detail = await screen.findByRole('img', { name: 'Upload speed during the selected run' });
+    const chart = detail.parentElement as HTMLElement;
+    expect(chart.querySelectorAll('.time-chart__series--reference path')).toHaveLength(1);
+    fireEvent.pointerMove(chart.querySelector('.time-chart__overlay') as Element, {
+      clientX: 600,
+    });
+    const readout = within(chart).getByRole('status').textContent;
+    expect(readout).toContain('Per minute 4.0 MiB/s · 33.6 Mbit/s');
+    expect(readout).toContain('10-minute average 2.5 MiB/s');
+    expect(readout).not.toContain('Trend');
+  });
+
   it('explains an empty month instead of drawing an empty chart', async () => {
     open([]);
     expect(await screen.findByText(/No uploads in the last 30 days/)).toBeTruthy();
