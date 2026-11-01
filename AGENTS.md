@@ -618,6 +618,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   per-minute read/write/busy record for 30 days beside its database (read with
   `system_event_monitor.py disk-io --latest` or `--label`), and `smart_watch.sh`
   logs every SMART reading to `/var/lib/vanpi-smart-watch/history/<label>`.
+  `disk_history.py` deliberately repeats `upload_speed_log.py`'s append, torn-tail
+  and hourly-trim code: the flat backup workers and the `system_monitor` package
+  share no import root on the Pi, so one module would need a `sys.path` edit.
   `van_dashboard_disk_stats.py` joins both for `/api/disks/stats` and
   `/api/disks/history` (mounted free space rides `/api/disks`);
   `features/storage/DiskStatsStrip.tsx` and `DiskStatsSheet.tsx` show them on
