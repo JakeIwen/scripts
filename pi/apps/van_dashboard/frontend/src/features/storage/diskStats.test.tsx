@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { segments } from '../../components/charts/TimeSeriesChart';
+import { segments } from '../../components/charts/SeriesMarks';
 import { fetchDiskHistory } from './api';
 import { historySeries, historySummary, smartVerdict } from './diskStats';
 import { DiskStatsStrip } from './DiskStatsStrip';

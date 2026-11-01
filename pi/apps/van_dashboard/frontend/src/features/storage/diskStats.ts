@@ -1,4 +1,4 @@
-import type { ChartPoint } from '../../components/charts/TimeSeriesChart';
+import type { ChartPoint } from '../../components/charts/SeriesMarks';
 import type { DiskHistory, DiskStatsEntry, SmartReading } from './types';
 
 export const DISK_STATS_POLL_INTERVAL_MS = 60_000;
