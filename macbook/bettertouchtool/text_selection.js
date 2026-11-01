@@ -88,10 +88,15 @@ function selectionApplicationBundle(application) {
     return ObjC.unwrap($.NSRunningApplication.runningApplicationWithProcessIdentifier(pid[0]).bundleIdentifier);
 }
 
+function selectionIsFirefox(bundle) {
+    // Release, Developer Edition and Nightly share Gecko's accessibility code.
+    return /^org\.mozilla\./.test(bundle || '');
+}
+
 function selectionNeedsMenuPaste(bundle) {
     // Firefox's AX setter passes a length to DeleteText's end-offset parameter.
     // Signal accepts the AX write without updating its rich editor.
-    return ['org.mozilla.firefox', 'org.whispersystems.signal-desktop'].includes(bundle);
+    return selectionIsFirefox(bundle) || bundle === 'org.whispersystems.signal-desktop';
 }
 
 function selectionUI(directory) {
@@ -120,7 +125,7 @@ function selectionUI(directory) {
             if (selectionNeedsMenuPaste(bundle)) {
                 const paste = new Function(selectionReadSource(directory + '/text_menu_paste.js')
                     + '\nreturn pasteSelectionUsingMenu;')();
-                const markers = bundle === 'org.mozilla.firefox'
+                const markers = selectionIsFirefox(bundle)
                     ? new Function(selectionReadSource(directory + '/text_markers.js')
                         + '\nreturn textMarkerSelection;')()(selection.element, selectionAttribute)
                     : null;

@@ -24,6 +24,12 @@ test('Firefox bypasses the faulty selected-text setter while Notes keeps native 
     assert.equal(context.selectionNeedsMenuPaste('org.mozilla.firefox'),true);
     assert.equal(context.selectionNeedsMenuPaste('org.whispersystems.signal-desktop'),true);
     assert.equal(context.selectionNeedsMenuPaste('com.apple.Notes'),false);
+    // Developer Edition and Nightly have the same faulty setter as release Firefox.
+    for (const bundle of ['org.mozilla.firefoxdeveloperedition', 'org.mozilla.nightly']) {
+        assert.equal(context.selectionNeedsMenuPaste(bundle),true);
+        assert.equal(context.selectionIsFirefox(bundle),true);
+    }
+    assert.equal(context.selectionIsFirefox('org.whispersystems.signal-desktop'),false);
 });
 
 for (const [kind, input, expected] of transformCases) {
