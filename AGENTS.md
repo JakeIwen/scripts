@@ -239,6 +239,12 @@ compare it with this checkout. Deployed files may differ from the repository.
   clipboard-preserving native Paste for editors with broken AX replacement.
   `text_markers.js` preserves Firefox text-node positions during reselection;
   never round-trip rich-editor selection endpoints through flat offsets.
+  `install_text_editing_keys.py` (`btt.py text-keys`) owns the system-wide editing
+  keys (Cmd-X line cut, quote/bracket wrapping): conditional pass-through triggers
+  that fire only on a settable focused selection outside its `EXCLUDED_APPS`, with
+  `CONDITION_CASES` checked through `text_editing_conditions.js` before install.
+  BTT swallows a Cmd-X sent from its own Cmd-X trigger, so the line cut presses
+  Edit > Cut through Accessibility instead.
   `signal_text_diagnostic.js` owns the temporary Signal diagnostic button's runner.
   `macbook/crontab` is the tracked user crontab; `macbook/tests/test_crontab.py`
   checks that every repo script it runs (paused `#off ` jobs included) exists and
@@ -616,7 +622,11 @@ compare it with this checkout. Deployed files may differ from the repository.
   `/api/disks/history` (mounted free space rides `/api/disks`);
   `features/storage/DiskStatsStrip.tsx` and `DiskStatsSheet.tsx` show them on
   each Disks & Torrents card. `frontend/src/components/charts/` holds the shared
-  chart pieces (`TimeSeriesChart`, `useElementWidth`, `axisLabels`).
+  chart pieces: `TimeSeriesChart` (lines with a hover readout) composes
+  `chartFrame.ts` (scales), `ChartAxes` and `SeriesMarks` (series with optional
+  `faint` and dashed, unread `reference` variants), which other charts such as
+  the upload-speed run bars build on directly; plus `useElementWidth` and
+  `axisLabels`.
 - Backup priority: `pi/scripts/backup/backup_priority.py` owns the cloud job
   registry and the protected until-verified override; `backup_priority_control.py`
   is the fixed CLI. Priority only decides which cloud job may take the single
@@ -900,6 +910,11 @@ units using the installer's `SERVICES` table via local `--list-units`. Use a
 chosen clone's checkout-relative package installer for scoped updates without
 private inputs; provenance records that clone. `--service` selects unit actions,
 not release contents: the shared current link and utility code still advance.
+
+`deploy_python.py` and `deploy_van_dashboard_frontend.sh` package their own
+checkout's working tree (release provenance records `dirty`). When another
+session has uncommitted changes here, deploy from a clean `git worktree add
+--detach <dir> <commit>` and run that copy's deployers, or its half-done work ships.
 
 GC under `.install.lock` protects current, previous, just-installed, newest three,
 and all four verified running releases. Each entrypoint records pinned
