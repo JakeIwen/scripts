@@ -460,8 +460,8 @@ class IndexSearchTests(SessionFixtureTestCase):
         calls = self.root / 'bin/calls'
         return calls.read_text().splitlines() if calls.exists() else []
 
-    def llmsearch(self, *args, **environment):
-        """Run llmsearch as Jacob does, on the default session folders."""
+    def index_environment(self, **environment):
+        """Jacob's environment, on the default session folders."""
         for tool in ('claude', 'codex'):
             link = self.home / ('.' + tool)
             if not link.is_symlink():
@@ -473,7 +473,12 @@ class IndexSearchTests(SessionFixtureTestCase):
         variables = {name: value for name, value in os.environ.items()
                      if name not in GREP_ONLY_ENVIRONMENT}
         variables.update(HOME=str(self.home), PATH=os.pathsep.join(path), **environment)
-        return subprocess.run([str(SCRIPTS / 'llmsearch.sh'), *args], env=variables,
+        return variables
+
+    def llmsearch(self, *args, **environment):
+        """Run llmsearch as Jacob does, on the default session folders."""
+        return subprocess.run([str(SCRIPTS / 'llmsearch.sh'), *args],
+                              env=self.index_environment(**environment),
                               capture_output=True, text=True, timeout=60)
 
     def index_result(self, tool, session_id, title, count, excerpt, hours_ago, cwd=None,

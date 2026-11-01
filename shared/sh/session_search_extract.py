@@ -229,13 +229,16 @@ def matched_time(timestamp: object, modified: int) -> int:
     return modified
 
 
+def session_name(session: Session, title: str) -> str:
+    name = title or (session.cwd or "").removesuffix("/").rsplit("/", 1)[-1]
+    return name or ("/" if session.cwd else "unknown")
+
+
 def print_session(session: Session, title: str, matches, args, color) -> None:
     if not matches:
         return
     modified = int(session.path.stat().st_mtime)
-    name = title or (session.cwd or "").removesuffix("/").rsplit("/", 1)[-1]
-    name = name or ("/" if session.cwd else "unknown")
-    label, resume = header(name, modified), resume_command(session)
+    label, resume = header(session_name(session, title), modified), resume_command(session)
     if args.records:
         context = excerpts(matches[-1:], session.provider, args)[0]
         # jq replaced invalid UTF-8 at the old record boundary; plain output
@@ -280,6 +283,12 @@ def input_paths():
                 provider = None
 
 
+def session_identifier(provider: str, path: Path) -> str:
+    identifier = re.sub(r"^.*-([\da-fA-F]{8}(?:-[\da-fA-F]{4}){3}-[\da-fA-F]{12})$",
+                        r"\1", path.stem) if provider == "codex" else path.stem
+    return identifier.rstrip("\n")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     for flag in ("group", "title", "context", "records"):
@@ -294,9 +303,7 @@ def main() -> int:
     titles = codex_titles(args.codex_root)
     color = ("", "") if args.records else header_color(sys.stdout)
     for provider, path in input_paths():
-        identifier = re.sub(r"^.*-([\da-fA-F]{8}(?:-[\da-fA-F]{4}){3}-[\da-fA-F]{12})$",
-                            r"\1", path.stem) if provider == "codex" else path.stem
-        session = Session(provider, path, identifier.rstrip("\n"))
+        session = Session(provider, path, session_identifier(provider, path))
         title, matches = extract(session, query, args.title, titles)
         print_session(session, title, matches, args, color)
     return 0
