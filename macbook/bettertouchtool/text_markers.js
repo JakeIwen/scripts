@@ -68,8 +68,7 @@ function textMarkerSelection(element, attribute) {
         // Each backward character step consumes exactly one UTF-16 unit, even
         // across node boundaries, so stepping back the replacement's length
         // reaches its first character without selecting a zero-width break.
-        // `selected` picks the part of the replacement to select (default: all).
-        const target = selected || {offset: 0, length: replacement.length};
+        // `selected` ({offset, length}) is the part of the replacement to select.
         const unresolved = () => new Error('The editor could not identify the inserted text’s native boundaries.');
         const back = (marker, steps) => {
             for (let step = 0; step < steps; step++) {
@@ -79,9 +78,9 @@ function textMarkerSelection(element, attribute) {
             return marker;
         };
         const end = back(parameter('AXEndTextMarkerForTextMarkerRange', caret),
-            replacement.length - target.offset - target.length);
-        const range = between(back(end, target.length), end);
-        if (text(range) !== replacement.slice(target.offset, target.offset + target.length)) throw unresolved();
+            replacement.length - selected.offset - selected.length);
+        const range = between(back(end, selected.length), end);
+        if (text(range) !== replacement.slice(selected.offset, selected.offset + selected.length)) throw unresolved();
         validate(range);
         return range;
     }

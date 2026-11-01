@@ -297,15 +297,17 @@ Guard does not alert when one disappears.
 Each keyboard trigger has an advanced condition and BTT's "If advanced conditions
 fail, let the shortcut pass through" option: the key behaves normally unless
 `focused_element_details` shows a settable `AXSelectedText` with a nonempty range
-(wrapping) or an empty one (Cmd-X), in an app outside `EXCLUDED_APPS` (code editors
+(wrapping) or an empty one (Cmd-X), in an app outside
+`text_editing_conditions.EXCLUDED_APPS` (code editors
 and terminals, plus `com.jetbrains.*`). Read-only text, web page text and apps with
 no text tree never match. Checking the condition adds about 20 ms to each of these
 keystrokes; keys typed quickly stay in order. The installer evaluates both
-conditions against `CONDITION_CASES` with Foundation's NSPredicate before any write.
+conditions against `text_editing_conditions.CASES` with Foundation's NSPredicate
+before any write.
 
 Wrapping reuses `text_selection.js` (Firefox and Signal replace through Paste, as
 for the text transforms). Electron apps build their text tree only on request, so
-the app-switch trigger calls `prepareFocusedAppText` to set `AXManualAccessibility`
+the app-switch trigger runs `runAppSwitch` to set `AXManualAccessibility`
 in the newly focused app. Firefox maps the paragraph keys to the visual line, so a
 soft-wrapped line in Firefox is cut one visual line at a time. Wrapping replaces
 the selection as plain text, which drops formatting in rich editors. Multiple
@@ -406,15 +408,17 @@ and report identities. Recreate venvs rather than moving them.
   Socket Server once in BTT's scripting settings and restart BTT before applying.
   The socket is restricted to the owning user; no network webserver is needed.
 - `install_text_editing_keys.py`: the editing keys' guarded installer, also through
-  the socket CLI (see Editing keys). `text_editing_conditions.js` evaluates its
-  trigger conditions with NSPredicate for the installer and its tests.
+  the socket CLI (see Editing keys). `text_editing_conditions.py` holds their trigger
+  conditions and truth table, evaluated with NSPredicate by `text_editing_conditions.js`.
+  `text_editing_keys.js` is their runtime (wrap, line cut, app-switch preparation),
+  loaded after `text_selection.js`; each trigger's action reads both files.
 - `text_selection.js`: runtime Accessibility adapter, executed inside BTT via
   `runJXA`. It reads the focused control's selected text/range, checks that the
   selection is writable and unchanged. Native editors use `AXSelectedText`; Signal and Firefox
   (every `org.mozilla.*` bundle, including Developer Edition) delegate replacement to
   `text_menu_paste.js`. `write` can leave part of the replacement selected (wrapping
-  keeps the inner text selected). `cutSelectedLine` and `prepareFocusedAppText` serve
-  the editing keys. Unsupported controls or missing
+  keeps the inner text selected). `runSelectionAction` gives every entry its
+  `{ok, result|error}` outcome and the opt-in diagnostics. Unsupported controls or missing
   selections stop with a notification. After replacement it selects the result using
   native text markers in Firefox and UTF-16 ranges in other apps. If the app refuses reselection,
   the notification explicitly says the text was already transformed.

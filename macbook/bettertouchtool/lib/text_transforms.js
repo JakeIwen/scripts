@@ -25,15 +25,20 @@ var TextTransforms = (function () {
         }
     }
 
-    function replace(kind, ui, dependencies) {
+    function editableSelection(ui) {
         const selection = ui.read();
         if (!selection.text) throw new Error('Select editable text first.');
         if (!selection.writable) throw new Error('This app does not support direct selection replacement.');
+        return selection;
+    }
+
+    function replace(kind, ui, dependencies) {
+        const selection = editableSelection(ui);
         const result = transform(kind, selection.text, dependencies);
         if (result === selection.text) return 'unchanged';
         // A failed decode or changed focus must never reach the write operation.
         if (!ui.same(selection, ui.read())) throw new Error('Selection changed; please try again.');
-        ui.write(selection, result);
+        ui.write(selection, result, {offset: 0, length: result.length});
         return 'replaced';
     }
 
@@ -43,9 +48,7 @@ var TextTransforms = (function () {
 
     function wrap(open, ui) {
         if (!Object.prototype.hasOwnProperty.call(pairs, open)) throw new Error('Unknown wrapping character.');
-        const selection = ui.read();
-        if (!selection.text) throw new Error('Select editable text first.');
-        if (!selection.writable) throw new Error('This app does not support direct selection replacement.');
+        const selection = editableSelection(ui);
         ui.write(selection, open + selection.text + pairs[open],
             {offset: open.length, length: selection.text.length});
         return 'wrapped';

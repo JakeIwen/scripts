@@ -59,9 +59,9 @@ function editorFixture({paragraphs = ['first', 'mIxEd tail'], blocks = paragraph
         try { state.clipboard=text; action(()=>true); } finally { state.clipboard=original; }
     };
     const helpers={attribute:(element,name)=>element===menu ? true : attribute(element,name),
-        offsets:r=>r, range:(r,text,target)=>({location:r.location+target.offset,length:target.length}),
+        offsets:r=>r, range:(r,selected)=>({location:r.location+selected.offset,length:selected.length}),
         markers:context.textMarkerSelection(editor,attribute)};
-    const run = (replacement, selected) => context.pasteSelectionUsingMenu(system,app,
+    const run = (replacement, selected = {offset:0,length:replacement.length}) => context.pasteSelectionUsingMenu(system,app,
         {element:editor,range:offsets(),text:rangeText(state.selection)},replacement,helpers,selected);
     const texts = () => state.leaves.filter(leaf => leaf.editor).map(leaf => leaf.text);
     return {state,run,rangeText,helpers,texts};
@@ -285,8 +285,8 @@ test('moving the selection while markers are resolved never overwrites the new s
     const {state,run,helpers}=editorFixture();
     const resolve=helpers.markers.endingAt;
     const moved={start:{node:0,offset:1},end:{node:0,offset:2}};
-    helpers.markers.endingAt=(caret,text)=>{
-        const range=resolve(caret,text);
+    helpers.markers.endingAt=(caret,text,selected)=>{
+        const range=resolve(caret,text,selected);
         state.selection=moved;
         return range;
     };

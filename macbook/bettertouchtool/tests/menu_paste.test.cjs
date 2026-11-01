@@ -128,8 +128,8 @@ function pasteFixture(refuse = false, {text = 'mixed suffix', location = 0, leng
     };
     base.context.delay = () => { if (state.pending) { state.value = state.expected; state.pending = false; } };
     const helpers = {attribute, offsets:range => range,
-        range:(original,replacement,target) => ({location:original.location+target.offset,length:target.length})};
-    const run = (replacement = 'MIXED', selected) => {
+        range:(original,selected) => ({location:original.location+selected.offset,length:selected.length})};
+    const run = (replacement = 'MIXED', selected = {offset:0,length:replacement.length}) => {
         const selection = {element:editor,range:state.range,text:selectedText()};
         base.context.pasteSelectionUsingMenu(system,application,selection,replacement,helpers,selected);
     };

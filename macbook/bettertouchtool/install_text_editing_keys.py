@@ -20,105 +20,46 @@ import uuid
 
 from btt_common import backup_configuration, connect, current_database, records
 from btt_guard.installer_checkpoint import after_install, before_install
+import text_editing_conditions as conditions
 
 DIRECTORY = Path(__file__).resolve().parent
 BTTCLI = '/Applications/BetterTouchTool.app/Contents/SharedSupport/bin/bttcli'
-CONDITIONS = DIRECTORY / 'text_editing_conditions.js'
 BACKUPS = DIRECTORY / '.local/text-editing-key-backups'
 NAMESPACE = uuid.UUID('5d0f6a3e-2b8c-4f71-9e2a-7c4b1d9e6f30')
 PASSTHROUGH = 'BTTKeyboardShortcutPerformDefaultOnAdvancedConditionMismatch'
 KEYBOARD, APP_CHANGED = 0, 779
 SHIFT, COMMAND = 1 << 17, 1 << 20
-
-# Code editors already wrap selections and cut lines; terminals treat keys as input.
-EXCLUDED_APPS = (
-    'com.microsoft.VSCode', 'com.microsoft.VSCodeInsiders', 'com.todesktop.230313mzl4w4u92',
-    'com.exafunction.windsurf', 'dev.zed.Zed', 'dev.zed.Zed-Preview', 'com.sublimetext.4',
-    'com.sublimetext.3', 'com.apple.dt.Xcode', 'com.barebones.bbedit', 'com.panic.Nova',
-    'com.coteditor.CotEditor', 'org.vim.MacVim', 'org.gnu.Emacs',
-    'com.apple.Terminal', 'com.googlecode.iterm2', 'com.mitchellh.ghostty', 'dev.warp.Warp-Stable',
-    'net.kovidgoyal.kitty', 'org.alacritty', 'com.github.wez.wezterm')
-EXCLUDED_PREFIXES = ('com.jetbrains.',)
+# The runtime: text_editing_keys.js builds on text_selection.js's AX helpers.
+RUNTIME = tuple(str(DIRECTORY / name) for name in ('text_selection.js', 'text_editing_keys.js'))
 
 WRAP_KEYS = (("'", 39, 0), ('"', 39, SHIFT), ('`', 50, 0), ('(', 25, SHIFT), ('[', 33, 0), ('{', 33, SHIFT))
 CUT_KEY = (7, COMMAND)
 # ctrl-A, ctrl-shift-E, shift-Right as BTT keycode lists: select the line and its break.
 CUT_LINE_SHORTCUTS = ('59,0', '59,56,14', '56,124')
 
-
-def selection_condition(length_pattern):
-    apps = ', '.join(json.dumps(app) for app in EXCLUDED_APPS)
-    prefixes = ' OR '.join('BTTActiveAppBundleIdentifier BEGINSWITH ' + json.dumps(p) for p in EXCLUDED_PREFIXES)
-    # BTT's focused-element dump marks settable attributes "(W)": read-only text
-    # (terminal output, web pages) and apps without a text tree never match.
-    details = ("focused_element_details MATCHES '(?s)(?=.*AXSelectedText [(]W[)]:  \").*"
-               "AXSelectedTextRange [(]W[)]:  \"pos=[0-9]+ len=" + length_pattern + "\".*'")
-    return 'NOT (BTTActiveAppBundleIdentifier IN {' + apps + '} OR ' + prefixes + ') AND ' + details
-
-
-WRAP_CONDITION = selection_condition('[1-9][0-9]*')
-CUT_CONDITION = selection_condition('0')
-
-
-def _focused(selected_text, selected_range):
-    return ('<AXApplication: "App">\n <AXWindow: "Window">\n  <AXTextArea>\n\nAttributes:\n'
-            '   AXFocused:  "1"\n   ' + selected_text + '\n   ' + selected_range +
-            '\n   AXRole:  "AXTextArea"\n   AXValue (W):  "alpha beta"\n')
-
-
-# (case, app, focused_element_details, wrap fires, cut fires); shapes copied from live dumps.
-CONDITION_CASES = (
-    ('selection', 'com.apple.TextEdit',
-     _focused('AXSelectedText (W):  "beta"', 'AXSelectedTextRange (W):  "pos=6 len=4"'), True, False),
-    ('caret', 'com.apple.TextEdit',
-     _focused('AXSelectedText (W):  ""', 'AXSelectedTextRange (W):  "pos=8 len=0"'), False, True),
-    ('selection starting with a quote', 'com.google.Chrome',
-     _focused('AXSelectedText (W):  ""hi""', 'AXSelectedTextRange (W):  "pos=3 len=4"'), True, False),
-    ('multi-line selection', 'org.mozilla.firefox',
-     _focused('AXSelectedText (W):  "a\nb"', 'AXSelectedTextRange (W):  "pos=0 len=13"'), True, False),
-    ('read-only text', 'com.apple.mail',
-     _focused('AXSelectedText:  ""', 'AXSelectedTextRange (W):  "pos=8 len=0"'), False, False),
-    ('no text tree yet', 'org.whispersystems.signal-desktop',
-     '<AXApplication: "Signal">\n <AXWindow: "Signal">\n\nAttributes:\n   AXRole:  "AXWindow"\n', False, False),
-    ('code editor selection', 'com.microsoft.VSCode',
-     _focused('AXSelectedText (W):  "beta"', 'AXSelectedTextRange (W):  "pos=6 len=4"'), False, False),
-    ('JetBrains caret', 'com.jetbrains.pycharm',
-     _focused('AXSelectedText (W):  ""', 'AXSelectedTextRange (W):  "pos=8 len=0"'), False, False),
-    ('terminal caret', 'com.googlecode.iterm2',
-     _focused('AXSelectedText (W):  ""', 'AXSelectedTextRange (W):  "pos=8 len=0"'), False, False),
-    ('nothing focused', '', '', False, False),
-)
+# Paragraph keys follow each app's own idea of a line (Firefox: the visual line);
+# shift-Right takes the line break so the line is removed rather than emptied.
+SELECT_LINE = """    for (const shortcut of %s) {
+        await trigger_action({json: JSON.stringify({BTTActionCategory: 0, BTTIsPureAction: true,
+            BTTPredefinedActionType: 264, BTTShortcutToSend: shortcut,
+            BTTAdditionalActionData: {BTTActionSendKeyboardShortcutIncludeCurrentModifiers: false}}),
+            wait_for_reply: true});
+    }
+""" % json.dumps(list(CUT_LINE_SHORTCUTS))
 
 
 def stable_uuid(name):
     return str(uuid.uuid5(NAMESPACE, name)).upper()
 
 
-def _runtime_script(function, call, notify=None, before=''):
-    """A Real-JS entry that runs one text_selection.js function in BTT's JXA engine."""
-    report = ('    if (!result.ok) await callBTT(\'display_notification\', {title: %s, \'\': result.error});\n'
-              '    return result.ok ? result.result : result.error;\n' % json.dumps(notify)
-              if notify else '    return result;\n')
-    parse = 'JSON.parse(%s)' if notify else '%s'
-    return ('async function %s() {\n%s'
-            '    const source = await readFile(%s);\n'
-            '    const result = %s;\n%s}') % (
-        function, before, json.dumps(str(DIRECTORY / 'text_selection.js')),
-        parse % ('await runJXA(source + %s)' % json.dumps('\n' + call + ';')), report)
-
-
-# Paragraph keys follow each app's own idea of a line (Firefox: the visual line);
-# shift-Right takes the line break so the line is removed rather than emptied.
-SELECT_LINE = '''    for (const shortcut of %s) {
-        await trigger_action({json: JSON.stringify({BTTActionCategory: 0, BTTIsPureAction: true,
-            BTTPredefinedActionType: 264, BTTShortcutToSend: shortcut,
-            BTTAdditionalActionData: {BTTActionSendKeyboardShortcutIncludeCurrentModifiers: false}}),
-            wait_for_reply: true});
-    }
-''' % json.dumps(list(CUT_LINE_SHORTCUTS))
-
-
-def _action(function, script):
+def _action(function, entry, options, title, before=''):
+    """A Real-JS action running one runtime entry, which returns an {ok, result|error} outcome."""
+    call = '\n%s(%s);' % (entry, json.dumps(options))
+    script = (f'async function {function}() {{\n{before}'
+              f'    const sources = await Promise.all({json.dumps(list(RUNTIME))}.map(path => readFile(path)));\n'
+              f'    const result = JSON.parse(await runJXA(sources.join("\\n") + {json.dumps(call)}));\n'
+              f'    if (!result.ok) await callBTT("display_notification", {{title: {json.dumps(title)}, "": result.error}});\n'
+              f'    return result.ok ? result.result : result.error;\n}}')
     # Separate contexts: all six wrap entries share one function name.
     return {'BTTScriptType': 3, 'BTTScriptLocation': 0, 'BTTAppleScriptUsePath': False,
             'BTTAppleScriptRunInBackground': True, 'BTTActionJSRunInSeparateContext': True,
@@ -139,47 +80,25 @@ def _keyboard(name, keycode, modifiers, condition, notes, action):
 
 def definitions():
     """Wire records sent to add_new_trigger; every trigger is created disabled."""
-    result = []
-    for char, keycode, modifiers in WRAP_KEYS:
-        options = {'kind': 'wrap', 'open': char, 'directory': str(DIRECTORY)}
-        script = _runtime_script('wrapSelectedText', 'runTextTransform(%s)' % json.dumps(options), 'Wrap stopped')
-        result.append(_keyboard('wrap ' + char, keycode, modifiers, WRAP_CONDITION,
-                                'Editing keys: wrap the selection in ' + char,
-                                _action('wrapSelectedText', script)))
-    options = {'kind': 'cut-line', 'directory': str(DIRECTORY)}
-    script = _runtime_script('cutCurrentLine', 'runTextTransform(%s)' % json.dumps(options), 'Cut line stopped',
-                             before=SELECT_LINE)
-    result.append(_keyboard('cut line', *CUT_KEY, CUT_CONDITION, 'Editing keys: Cmd-X with no selection cuts the line',
-                            _action('cutCurrentLine', script)))
-    prepare = _runtime_script('prepareTextAccessibility',
-                              'prepareFocusedAppText(%s)' % json.dumps({'excluded': list(EXCLUDED_APPS)}))
+    directory = str(DIRECTORY)
+    result = [_keyboard('wrap ' + char, keycode, modifiers, conditions.WRAP_CONDITION,
+                        'Editing keys: wrap the selection in ' + char,
+                        _action('wrapSelectedText', 'runEditingKey',
+                                {'kind': 'wrap', 'open': char, 'directory': directory}, 'Wrap stopped'))
+              for char, keycode, modifiers in WRAP_KEYS]
+    result.append(_keyboard('cut line', *CUT_KEY, conditions.CUT_CONDITION,
+                            'Editing keys: Cmd-X with no selection cuts the line',
+                            _action('cutCurrentLine', 'runEditingKey', {'kind': 'cut-line', 'directory': directory},
+                                    'Cut line stopped', before=SELECT_LINE)))
     result.append({'BTTUUID': stable_uuid('prepare text accessibility'), 'BTTTriggerType': APP_CHANGED,
                    'BTTTriggerClass': 'BTTTriggerTypeOtherTriggers', 'BTTAppBundleIdentifier': 'BT.G',
                    'BTTEnabled': 0, 'BTTEnabled2': 0, 'BTTActionCategory': 0,
                    'BTTGestureNotes': 'Editing keys: expose Electron text to Accessibility on app switch',
                    'BTTPredefinedActionType': 281,
-                   'BTTAdditionalActionData': _action('prepareTextAccessibility', prepare)})
+                   'BTTAdditionalActionData': _action('prepareTextAccessibility', 'runAppSwitch',
+                                                      {'excluded': list(conditions.EXCLUDED_APPS)},
+                                                      'Editing keys stopped')})
     return result
-
-
-def evaluate(predicate, cases):
-    result = subprocess.run(['/usr/bin/osascript', '-l', 'JavaScript', str(CONDITIONS),
-                             json.dumps({'predicate': predicate, 'cases': cases})],
-                            capture_output=True, text=True, timeout=30)
-    if result.returncode:
-        raise RuntimeError('Condition could not be evaluated: ' + (result.stderr.strip() or predicate))
-    return json.loads(result.stdout)
-
-
-def condition_errors():
-    variables = [{'BTTActiveAppBundleIdentifier': app, 'focused_element_details': details}
-                 for _, app, details, _, _ in CONDITION_CASES]
-    errors = []
-    for label, predicate, column in (('wrap', WRAP_CONDITION, 3), ('cut', CUT_CONDITION, 4)):
-        for case, actual in zip(CONDITION_CASES, evaluate(predicate, variables)['results']):
-            if actual != case[column]:
-                errors.append('%s condition %s on: %s' % (label, 'fires' if actual else 'misses', case[0]))
-    return errors
 
 
 def btt(command, **parameters):
@@ -220,7 +139,7 @@ def export_errors(wanted, actual):
         if not (actual.get(PASSTHROUGH) or (actual.get('BTTAdditionalDataJSON') or {}).get(PASSTHROUGH)):
             errors.append('pass-through')
         format_ = actual.get('BTTTriggerConditionsFormat') or actual.get('BTTTriggerConditionsFormatReadOnly')
-        if not format_ or evaluate(format_, [])['format'] != evaluate(wanted['BTTTriggerConditionsFormat'], [])['format']:
+        if not format_ or conditions.canonical(format_) != conditions.canonical(wanted['BTTTriggerConditionsFormat']):
             errors.append('condition')
     return errors
 
@@ -285,6 +204,7 @@ def set_enabled(plan, value):
     touched = []
     for wanted in plan:
         current = exported(wanted['BTTUUID'])
+        # Exports omit BTTEnabled when it is 1.
         if current is None or int(current.get('BTTEnabled', 1)) == value:
             continue
         btt('update_trigger', uuid=wanted['BTTUUID'], json=json.dumps({'BTTEnabled': value, 'BTTEnabled2': value}))
@@ -344,7 +264,8 @@ def inspect(database, plan):
         print('%-9s %s' % (state, wanted['BTTGestureNotes']))
     for uid in conflicts(database, plan):
         print('conflict  another enabled shortcut uses one of these keys: ' + uid)
-    print('Excluded apps: %d bundle ids plus %s*' % (len(EXCLUDED_APPS), ', '.join(EXCLUDED_PREFIXES)))
+    print('Excluded apps: %d bundle ids plus %s*' % (len(conditions.EXCLUDED_APPS),
+                                                     ', '.join(conditions.EXCLUDED_PREFIXES)))
 
 
 def main(argv=None):
@@ -360,7 +281,7 @@ def main(argv=None):
     if not (args.apply or args.disable):
         inspect(database, plan)
         return 0
-    errors = condition_errors()
+    errors = conditions.truth_table_errors()
     if errors:
         raise RuntimeError('Trigger conditions failed their truth table; no changes made:\n' + '\n'.join(errors))
     if args.apply and conflicts(database, plan):

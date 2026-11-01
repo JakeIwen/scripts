@@ -15,6 +15,7 @@ import unittest
 from unittest.mock import patch
 
 import install_text_editing_keys as keys
+import text_editing_conditions as conditions
 
 # Runs each emitted entry with BTT's Real-JS helpers stubbed and records the calls.
 HARNESS = r'''
@@ -51,7 +52,7 @@ def run_entries(entries):
 
 
 def call_options(source, function):
-    prefix = 'SOURCE\n' + function + '('
+    prefix = 'SOURCE\nSOURCE\n' + function + '('
     if not source.startswith(prefix) or not source.endswith(');'):
         raise AssertionError('unexpected runtime call: ' + source)
     return json.loads(source[len(prefix):-2])
@@ -60,13 +61,17 @@ def call_options(source, function):
 @unittest.skipUnless(sys.platform == 'darwin', 'NSPredicate evaluation needs macOS osascript')
 class ConditionTests(unittest.TestCase):
     def test_conditions_pass_their_truth_table_in_foundation(self):
-        self.assertEqual(keys.condition_errors(), [])
+        self.assertEqual(conditions.truth_table_errors(), [])
 
     def test_dropping_the_writable_check_is_caught_before_install(self):
-        loose = keys.CUT_CONDITION.replace('(?=.*AXSelectedText [(]W[)]:  ").*', '.*')
-        self.assertNotEqual(loose, keys.CUT_CONDITION)
-        with patch.object(keys, 'CUT_CONDITION', loose):
-            self.assertIn('cut condition fires on: read-only text', keys.condition_errors())
+        loose = conditions.CUT_CONDITION.replace('(?=.*AXSelectedText [(]W[)]:  ").*', '.*')
+        self.assertNotEqual(loose, conditions.CUT_CONDITION)
+        with patch.object(conditions, 'CUT_CONDITION', loose):
+            self.assertIn('cut condition fires on: read-only text', conditions.truth_table_errors())
+
+    def test_stored_conditions_compare_in_nspredicate_format(self):
+        reserialized = conditions.CUT_CONDITION.replace(' AND ', '  AND  ')
+        self.assertEqual(conditions.canonical(reserialized), conditions.canonical(conditions.CUT_CONDITION))
 
 
 @unittest.skipUnless(shutil.which('node'), 'emitted scripts are executed with Node')
@@ -81,9 +86,9 @@ class EmittedScriptTests(unittest.TestCase):
                                 for char in chars])
         for char, outcome in zip(chars, outcomes):
             self.assertEqual(outcome['result'], 'wrapped')
-            (read, path), (run, source) = outcome['calls']
-            self.assertEqual(path, str(keys.DIRECTORY / 'text_selection.js'))
-            self.assertEqual(call_options(source, 'runTextTransform'),
+            *reads, (_, source) = outcome['calls']
+            self.assertEqual(reads, [['readFile', path] for path in keys.RUNTIME])
+            self.assertEqual(call_options(source, 'runEditingKey'),
                              {'kind': 'wrap', 'open': char, 'directory': str(keys.DIRECTORY)})
 
     def test_a_refused_wrap_is_reported_as_a_notification(self):
@@ -97,14 +102,14 @@ class EmittedScriptTests(unittest.TestCase):
         self.assertEqual(outcome['result'], 'cut line')
         sent = [call[1:] for call in outcome['calls'][:3]]
         self.assertEqual(sent, [[shortcut, True] for shortcut in keys.CUT_LINE_SHORTCUTS])
-        self.assertEqual(call_options(outcome['calls'][-1][1], 'runTextTransform'),
+        self.assertEqual(call_options(outcome['calls'][-1][1], 'runEditingKey'),
                          {'kind': 'cut-line', 'directory': str(keys.DIRECTORY)})
 
     def test_app_switches_prepare_text_accessibility_outside_excluded_apps(self):
-        [outcome] = run_entries([self.entry(by_note('on app switch'), 'enabled')])
+        [outcome] = run_entries([self.entry(by_note('on app switch'), '{"ok":true,"result":"enabled"}')])
         self.assertEqual(outcome['result'], 'enabled')
-        self.assertEqual(call_options(outcome['calls'][-1][1], 'prepareFocusedAppText'),
-                         {'excluded': list(keys.EXCLUDED_APPS)})
+        self.assertEqual(call_options(outcome['calls'][-1][1], 'runAppSwitch'),
+                         {'excluded': list(conditions.EXCLUDED_APPS)})
 
 
 class FakeBTT:
@@ -143,11 +148,11 @@ class InstallFlowTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, directory)
         self.plan = keys.definitions()
         self.fake = FakeBTT()
-        for target, value in [('btt', self.fake), ('saved_errors', lambda *args: []),
-                              ('BACKUPS', directory),
-                              ('backup_configuration', lambda *args, **kw: directory / 'backup.json'),
-                              ('evaluate', lambda predicate, cases: {'format': predicate, 'results': []})]:
-            patcher = patch.object(keys, target, value)
+        for module, target, value in [(keys, 'btt', self.fake), (keys, 'saved_errors', lambda *args: []),
+                                      (keys, 'BACKUPS', directory),
+                                      (keys, 'backup_configuration', lambda *args, **kw: directory / 'backup.json'),
+                                      (conditions, 'canonical', lambda predicate: predicate)]:
+            patcher = patch.object(module, target, value)
             patcher.start()
             self.addCleanup(patcher.stop)
         patcher = patch('builtins.print')

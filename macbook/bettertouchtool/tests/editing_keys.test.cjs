@@ -19,7 +19,8 @@ function cutFixture(ranges) {
     });
     const context = vm.createContext({$:native, Ref:() => [], delay() {},
         ObjC:{import() {}, castRefToObject:x => x, unwrap:x => x}});
-    vm.runInContext(fs.readFileSync(path.join(__dirname, '../text_selection.js'), 'utf8'), context);
+    for (const file of ['text_selection.js', 'text_editing_keys.js'])
+        vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), context);
     context.selectionAttribute = (element, name) => {
         if (element === system) return name === 'AXFocusedApplication' ? application : field;
         if (element === field && name === 'AXRole') return 'AXTextArea';
@@ -54,4 +55,23 @@ test('a selection that never settles is refused without cutting', () => {
     assert.throws(() => context.cutSelectedLine('/fixture'), /did not settle/);
     assert.deepEqual(presses, []);
     assert.equal(reads(), 20);
+});
+
+test('editing keys dispatch by kind and report an unknown kind as a refusal', () => {
+    const {context, presses, cut} = cutFixture([{location:4, length:12}]);
+    context.recordTransformOutcome = () => {};
+    assert.deepEqual(JSON.parse(context.runEditingKey({kind:'cut-line', directory:'/fixture'})),
+        {ok:true, result:'cut line'});
+    assert.deepEqual(JSON.parse(context.runEditingKey({kind:'toString', directory:'/fixture'})),
+        {ok:false, error:'Unknown editing key.'});
+    assert.deepEqual(presses, [{element:cut, action:'AXPress'}]);
+});
+
+test('the runtime can load again into the same context, as BTT reuses one', () => {
+    const context = vm.createContext({ObjC:{import() {}}});
+    for (let run = 0; run < 2; run++) {
+        for (const file of ['text_selection.js', 'text_editing_keys.js'])
+            vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), context);
+    }
+    assert.equal(typeof context.runEditingKey, 'function');
 });

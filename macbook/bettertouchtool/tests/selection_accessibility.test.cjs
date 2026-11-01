@@ -52,7 +52,8 @@ function accessibilityFixture(options = {}) {
             if (options.switchApp) state.front = otherApplication;
         }
     });
-    vm.runInContext(fs.readFileSync(path.join(__dirname, '../text_selection.js'), 'utf8'), context);
+    for (const file of ['text_selection.js', 'text_editing_keys.js'])
+        vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), context);
     return {context, state, writes};
 }
 
@@ -116,7 +117,8 @@ for (const [bundle, manual, expected, writeCount] of [
     test('app switches prepare Electron text accessibility outside excluded editors: ' + bundle + ' ' + manual, () => {
         const {context, writes} = accessibilityFixture({manual});
         context.selectionApplicationBundle = () => bundle;
-        assert.equal(context.prepareFocusedAppText({excluded:['com.microsoft.VSCode']}), expected);
+        assert.deepEqual(JSON.parse(context.runAppSwitch({excluded:['com.microsoft.VSCode']})),
+            {ok:true, result:expected});
         assert.equal(writes.length, writeCount);
     });
 }
@@ -124,5 +126,7 @@ for (const [bundle, manual, expected, writeCount] of [
 test('a refused accessibility switch on app change is reported, never thrown', () => {
     const {context} = accessibilityFixture({manual:false, refuseEnable:true});
     context.selectionApplicationBundle = () => 'com.tinyspeck.slackmacgap';
-    assert.match(context.prepareFocusedAppText({excluded:[]}), /^skipped: /);
+    const outcome = JSON.parse(context.runAppSwitch({excluded:[]}));
+    assert.equal(outcome.ok, true);
+    assert.match(outcome.result, /^skipped: /);
 });
