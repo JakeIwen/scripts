@@ -124,7 +124,7 @@ class RestoreTests(unittest.TestCase):
     def test_definition_rebuilds_btt_export_shape(self):
         old = self.store(748)
         old.trigger('AQB', 'AQB', text='advantagequickbase', ZACTION=193)
-        trigger = repair.read_store(old.close())['triggers'][0]
+        trigger = repair.read_store(old.close()).triggers[0]
         node = repair.definition(trigger)
         self.assertEqual((node['BTTTriggerClass'], node['BTTAppBundleIdentifier'], node['BTTTriggerBelongsToPreset']),
                          ('BTTTriggerTypeKeySequence', 'BT.G', 'Master'))
@@ -138,7 +138,7 @@ class RestoreTests(unittest.TestCase):
     def test_readback_accepts_exports_that_omit_key_code_zero(self):
         old = self.store(748)
         old.trigger('AQB', 'AQB', ZACTION=193)
-        wanted = repair.definition(repair.read_store(old.close())['triggers'][0])
+        wanted = repair.definition(repair.read_store(old.close()).triggers[0])
         exported = json.loads(json.dumps(wanted))
         for keys in exported['BTTKeySequence'].values():
             if isinstance(keys, list):
@@ -152,11 +152,11 @@ class RestoreTests(unittest.TestCase):
     def test_saved_check_waits_for_btt_and_refuses_lost_records(self):
         old = self.store(748)
         old.trigger('L3K', 'L3K', apps=('BT.G', 'BT.D'))
-        wanted = repair.read_store(old.close())['triggers']
+        wanted = repair.read_store(old.close()).triggers
         current = self.store(885)
         current.trigger('RLF', 'RLF')
         path = current.close()
-        before = repair.read_store(path)['uuids']
+        before = repair.read_store(path).uuids
         self.assertFalse(repair.saved(path, wanted, before))
         with self.assertRaises(RuntimeError):
             repair.saved(path, wanted, before | {'GONE'})
