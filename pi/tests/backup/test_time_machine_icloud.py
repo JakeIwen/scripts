@@ -53,6 +53,10 @@ class ControlTests(unittest.TestCase):
         self.command = mock.Mock()
         patch = mock.patch.object(job.priority, 'DIRECTORY', self.directory / 'priority')
         patch.start(); self.addCleanup(patch.stop)
+        # Never read the host's real /etc/vanpi-backup-settings.json: on the Pi it
+        # is root-only, so a status read as pi fails its file safety check.
+        patch = mock.patch.object(job.backup_settings, 'overrides', return_value={})
+        patch.start(); self.addCleanup(patch.stop)
 
     def test_worker_liveness_requires_time_machine_job_lock(self):
         pid = 123
