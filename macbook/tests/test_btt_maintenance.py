@@ -17,7 +17,8 @@ sys.path.pop(0)
 class MaintenanceTests(unittest.TestCase):
     def test_every_change_command_defaults_to_inspection(self):
         for argv in [['style'],['style','transport'],['style','status'],['status'],['notes'],['notes','--labels-only'],
-                     ['escape'],['repair','rps'],['repair','rps','--with-escape'],['repair','sizes'],['repair','persistence'],['repair','paths'],['repair','actions'],['repair','dependencies']]:
+                     ['escape'],['repair','rps'],['repair','rps','--with-escape'],['repair','sizes'],['repair','persistence'],['repair','paths'],['repair','actions'],['repair','dependencies'],
+                     ['repair','key-sequences']]:
             with self.subTest(argv=argv):
                 command=module.command_for(module.parser().parse_args(argv))
                 self.assertIn('--inspect',command)
@@ -37,6 +38,11 @@ class MaintenanceTests(unittest.TestCase):
         command=module.command_for(module.parser().parse_args(['repair','dependencies','--apply']))
         self.assertIn('--dependencies-only',command)
         self.assertEqual(command[-1],'--apply')
+        command=module.command_for(module.parser().parse_args(['repair','key-sequences','--apply']))
+        self.assertEqual(command[-1],'--apply')
+        self.assertTrue(command[-2].endswith('repair_key_sequences.py'))
+        with self.assertRaises(ValueError):
+            module.command_for(module.parser().parse_args(['repair','key-sequences','--apply','--no-checkpoint']))
 
     def test_checkpoint_optout_reaches_each_wired_dispatch_path(self):
         for command in [['style', 'main'], ['style', 'transport'], ['style', 'status'],

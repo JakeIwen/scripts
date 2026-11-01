@@ -231,6 +231,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   `ZENABLEDNEW` so saved-state checks cover activation.
   `restore_path_enabled.py` recovers only 0-to-1 enabled drift against a path
   repair backup, preserving completed command edits and refusing other drift.
+  `repair_key_sequences.py` (`btt.py repair key-sequences`) restores Master key
+  sequences lost from the current store using BTT's older per-version stores, and
+  lists triggers linked to both Trash and Global, which a Trash purge deletes.
   `repair_text_transforms.py/.js` owns the guarded text-transform installer;
   `text_selection.js` owns AX selection handling and `text_menu_paste.js` owns
   clipboard-preserving native Paste for editors with broken AX replacement.

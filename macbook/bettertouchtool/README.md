@@ -36,6 +36,7 @@ Apple Events access is sandboxed. `inspect` and `backup` need no Apple Events.
 | `repair dependencies` | Preview missing named dependencies; `--apply` copies unambiguous simple dependencies without enabling old presets, then verifies after restart. |
 | `repair text` | Preview selection-only text transforms; `--apply` uses BTT's local socket, backs up, disables the old copy/delay actions, and replaces the paste actions. |
 | `repair persistence` | Targeted speaker/Notes recovery; **restarts BTT when applied**. |
+| `repair key-sequences` | Restore Master key sequences that an older per-version BTT store has and the current one lost; see below. |
 | `restore-sizes BACKUP.json --apply` | Guarded restoration of a sizing repair's prior values only. |
 
 For example, preview a style change, then apply it:
@@ -249,6 +250,30 @@ modified action chains or deleted buttons. An offline database/export can be
 inspected with `repair_media_actions.py --database ... --source ... --inspect`;
 an alternate database cannot be applied. API plan validation and read-only
 inspection tests do not contact speakers or send media commands.
+
+### Lost key sequences
+
+```sh
+/usr/bin/python3 -B ~/dev/scripts/macbook/bettertouchtool/btt.py repair key-sequences
+/usr/bin/python3 -B ~/dev/scripts/macbook/bettertouchtool/btt.py repair key-sequences --apply
+```
+
+BTT keeps one store per installed version (`btt_data_store.version_*` in its
+Application Support folder) and migrates the previous one on upgrade, so older
+stores remain a source. The preview lists each top-level Master key sequence whose
+typed keys no current trigger has, newest store first; of duplicates, the most
+recently used copy wins. Trash-only, app-scoped, disabled and multi-action triggers
+are listed for review instead. `--apply` backs up the current configuration, adds
+each trigger with its original UUID through Apple Events (BTT's socket drops large
+requests, such as a 94 KB paste), checks the runtime readback and waits for the
+saved store. Run `repair_key_sequences.py --source <store>` directly to use one
+store or a Guard checkpoint's `configuration.sqlite`.
+
+In the 6.826 era BTT emptied its Trash and deleted every trigger linked to Trash
+**and** Global, which a restore from Trash can leave behind (SHRG, L3K, JQQ, .PRY
+and AQB were restored on 2026-10-31). The preview's `at_risk_trash_linked` lists
+current triggers in that state. Key sequences sit outside the Guard checkpoint, so
+Guard does not alert when one disappears.
 
 ### Stale script references
 
