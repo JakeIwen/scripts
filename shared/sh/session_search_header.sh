@@ -6,13 +6,19 @@ Usage: $1 [flags] [--] <term>
 
 Search session events for a literal, case-insensitive term.
 Sessions and their matching excerpts are shown newest first.
+All arguments form that one term: $1 dim auto finds "dim auto" only.
 
 Flags:
   -t, --title, -n, --name
                Search saved session titles only (literal, case-insensitive).
-  -s, --single Show every matching excerpt instead of one result per session.
+  -s, --session
+               Look up sessions by id: the whole id or its start (a6ac05ee).
+  -f, --forks  Show each matching session's fork family instead: the session
+               it was forked or branched from and its own forks, as a tree.
+               Codex subagent threads are left out.
+  -e, --single Show every matching excerpt instead of one result per session.
   -g, --group  One result per session, with the match count and latest
-               excerpt (the default; undoes an earlier -s).
+               excerpt (the default; undoes an earlier -e).
   -N           Show N message lines before and after each match (e.g. -2).
   -a N, -aN    Show N lines after; later context flags override each side.
   -b N, -bN    Show N lines before (non-negative integers).
@@ -37,7 +43,7 @@ session_search_files() {
     python3 "$(dirname "${BASH_SOURCE[0]}")/session_search_paths.py" "$@" |
     while IFS= read -r -d '' provider && IFS= read -r -d '' file; do
         if [ -f "$file" ] && [ ! -L "$file" ] &&
-            { [ "$session_search_title" = true ] ||
+            { [ "$session_search_title" = true ] || [ "$session_search_session" = true ] ||
               grep -qiF -- "$session_search_query" "$file" 2>/dev/null; }; then
             printf '%s\0%s\0' "$provider" "$file"
         fi
@@ -50,6 +56,8 @@ session_search_files() {
 session_search_parse_args() {
     session_search_group=true
     session_search_title=false
+    session_search_session=false
+    session_search_forks=false
     session_search_help=false
     session_search_query=""
     session_search_words=""
@@ -86,8 +94,10 @@ session_search_parse_args() {
                     esac
                     ;;
                 -t|--title|-n|--name) session_search_title=true; continue ;;
+                -s|--session) session_search_session=true; continue ;;
+                -f|--forks) session_search_forks=true; continue ;;
                 -g|--group) session_search_group=true; continue ;;
-                -s|--single) session_search_group=false; continue ;;
+                -e|--single) session_search_group=false; continue ;;
                 -h|--help) session_search_help=true; continue ;;
                 --grep)
                     if [ -n "${session_search_grep+set}" ]; then
@@ -105,6 +115,8 @@ session_search_parse_args() {
             session_search_words="${session_search_words:+$session_search_words }$arg"
         fi
     done
+    # A title and an id can't both be what the term means.
+    [ "$session_search_title" = false ] || [ "$session_search_session" = false ] || return 2
     [ "$session_search_help" = true ] || [ -n "$session_search_query" ]
 }
 
@@ -180,9 +192,41 @@ session_search_extract() {
     local flags=()
     [ "$session_search_group" = false ] || flags+=(--group)
     [ "$session_search_title" = false ] || flags+=(--title)
+    [ "$session_search_session" = false ] || flags+=(--session)
+    [ "$session_search_forks" = false ] || flags+=(--ids)
     [ "$session_search_context_requested" = false ] || flags+=(--context)
     [ "${SESSION_SEARCH_RECORDS:-}" != 1 ] || flags+=(--records)
     python3 "$(dirname "${BASH_SOURCE[0]}")/session_search_extract.py" \
         ${flags[@]+"${flags[@]}"} --before "$session_search_before" --after "$session_search_after" \
         --codex-root "${CODEXSEARCH_ROOT:-$HOME/.codex}" -- "$session_search_query"
 }
+
+# Reads matching sessions as NUL-separated provider/id pairs and prints each
+# one's fork family; the arguments are the provider/root pairs to look in.
+session_search_fork_families() {
+    python3 "$(dirname "${BASH_SOURCE[0]}")/session_search_forks.py" "$@"
+}
+
+# Searches the given provider/root pairs; with -f, shows each matching
+# session's fork family instead of its matches.
+session_search_run() {
+    if [ "$session_search_forks" = true ]; then
+        session_search_files "$@" | session_search_extract | session_search_fork_families "$@"
+    else
+        session_search_files "$@" | session_search_extract
+    fi
+}
+
+# Ctrl+C: the Python helpers keep SIGINT's default action and exit quietly,
+# so one line here says the search stopped, in place of the echoed ^C.
+session_search_interrupted() {
+    local name=${0##*/}
+    if [ -t 2 ]; then
+        printf '\r\033[K' >&2
+    else
+        printf '\n' >&2
+    fi
+    printf '%s: aborted\n' "${name%.sh}" >&2
+    exit 130
+}
+trap session_search_interrupted INT

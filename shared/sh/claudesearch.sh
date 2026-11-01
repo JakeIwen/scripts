@@ -30,4 +30,4 @@ if [ ! -d "$claudesearch_projects" ]; then
     exit 1
 fi
 
-session_search_files claude "$claudesearch_root" | session_search_extract
+session_search_run claude "$claudesearch_root"

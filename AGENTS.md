@@ -407,14 +407,20 @@ compare it with this checkout. Deployed files may differ from the repository.
   single-pass grep extraction, reads Codex titles once per search and emits the
   `SearchRecord` contract from `session_search_display.py`. `session_search_excerpt.awk`
   batches each file's original locale-sensitive excerpt/context windows; grep
-  starts no jq processes. Keep all nine search files together on the Pi under
+  starts no jq processes. `session_search_forks.py` owns `-f`/`--forks`: it reads
+  matching provider/id pairs (`extract --ids`, or the index's ids) and prints each
+  one's fork tree from transcript heads (Claude `forkedFrom.sessionId` on copied
+  rows, Codex `forked_from_id` in the first `session_meta`; Codex subagent threads
+  are left out unless matched). Keep all ten search files together on the Pi under
   `/home/pi/scripts/`; `pi/.bashrc` defines all three commands. Python helpers
   require 3.9+ and shells support Bash 3.2. Targeted updates ship the complete set
   and patch only those live `.bashrc` definitions, preserving local changes.
   `session_search_paths.py` lists transcripts by newest activity before content
   is searched, interleaving providers for `llmsearch`; excerpts within a session
-  are newest first too. Grouping is the default (`-g`); `-s`/`--single` lists every
-  excerpt. Grouped provider searches give one result per transcript with the last
+  are newest first too. Grouping is the default (`-g`); `-e`/`--single` lists every
+  excerpt (`-s` is `--session`, an id-prefix lookup that, like `-t`, skips the
+  index). Ctrl+C: the Python helpers keep SIGINT's default action, and the header's
+  INT trap prints `<command>: aborted` and exits 130. Grouped provider searches give one result per transcript with the last
   matching excerpt. `session_search_display.py` incrementally groups `llmsearch`
   by directory/tool and redraws terminal output; pipes get the final listing only.
   Records mode (`SESSION_SEARCH_RECORDS=1`) is never grouped. Groups and provider

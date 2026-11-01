@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -180,7 +181,7 @@ def excerpts(matches, provider: str, args):
         environment["LC_ALL"] = "C"
     command = ["awk", "-v", "query=" + args.query,
                "-v", "widen=" + str(provider == "claude").lower(),
-               "-v", "requested=" + str(args.context and not args.title).lower(),
+               "-v", "requested=" + str(args.context and not (args.title or args.session)).lower(),
                "-v", "before=" + args.before, "-v", "after=" + args.after,
                "-f", str(EXCERPT_PROGRAM)]
     with subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -237,6 +238,10 @@ def session_name(session: Session, title: str) -> str:
 def print_session(session: Session, title: str, matches, args, color) -> None:
     if not matches:
         return
+    if args.ids:
+        sys.stdout.write(f"{session.provider}\0{session.identifier}\0")
+        sys.stdout.flush()
+        return
     modified = int(session.path.stat().st_mtime)
     label, resume = header(session_name(session, title), modified), resume_command(session)
     if args.records:
@@ -291,7 +296,9 @@ def session_identifier(provider: str, path: Path) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    for flag in ("group", "title", "context", "records"):
+    # --session matches ids by their start; --ids prints each matching
+    # session as a NUL-separated provider/id pair for the fork lookup.
+    for flag in ("group", "title", "session", "ids", "context", "records"):
         parser.add_argument("--" + flag, action="store_true")
     parser.add_argument("--before", default="0")
     parser.add_argument("--after", default="0")
@@ -303,11 +310,18 @@ def main() -> int:
     titles = codex_titles(args.codex_root)
     color = ("", "") if args.records else header_color(sys.stdout)
     for provider, path in input_paths():
-        session = Session(provider, path, session_identifier(provider, path))
-        title, matches = extract(session, query, args.title, titles)
+        identifier = session_identifier(provider, path)
+        if args.session and not identifier.casefold().startswith(args.query.casefold()):
+            continue
+        session = Session(provider, path, identifier)
+        title, matches = extract(session, query, args.title or args.session, titles)
+        if args.session:
+            matches = [Match(session.identifier.encode("utf-8"))]
         print_session(session, title, matches, args, color)
     return 0
 
 
 if __name__ == "__main__":
+    # Ctrl+C ends the search without a traceback; the calling script reports it.
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
     raise SystemExit(main())

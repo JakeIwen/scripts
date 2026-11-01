@@ -21,7 +21,7 @@ its generic staging paths.
 `claudesearch`, `codexsearch`, and `llmsearch` search newest sessions first.
 Results are grouped by default: `claudesearch`/`codexsearch` show one result per
 session and `llmsearch` combines sessions by directory and tool, each with its
-match count and latest hit. `-s` / `--single` lists every match instead (each
+match count and latest hit. `-e` / `--single` lists every match instead (each
 session's newest excerpt first; `llmsearch` interleaves both tools by session
 activity); a later `-g` / `--group` undoes it. Indexed results retain the
 index's newest-match ordering.
@@ -36,6 +36,17 @@ to disable colour; pipes, files and JSON records are always plain.
 literal, case-insensitive term, for example `llmsearch -n "backup"`. It returns
 one hit per session and is grouped like other searches. Title searches read the session stores directly
 without using the transcript index; untitled sessions do not match.
+
+`-s` / `--session` looks sessions up by id, the whole id or its start (for
+example `llmsearch -s a6ac05ee`), also straight from the session stores.
+
+`-f` / `--forks` shows each matching session's fork family instead of its
+matches: a tree from the oldest ancestor down through every fork and branch,
+with the matching sessions marked, or `no forks or branches`. It combines with
+any search, for example `llmsearch -n 'substring matching' -f`. Codex subagent
+threads are forks too, but they are left out unless they match.
+
+Ctrl+C stops any search with a one-line `aborted` message and exit status 130.
 
 `-N` (for example `-2`) shows N lines before and after each match within its
 message. `-a N` / `-aN` and `-b N` / `-bN` set after/before lines separately;

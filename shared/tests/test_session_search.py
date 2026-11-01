@@ -257,7 +257,7 @@ class SessionSearchTests(SessionFixtureTestCase):
 
     def test_single_keeps_every_matching_event(self):
         for tool in ('claude', 'codex'):
-            for flags in (('-s',), ('--single',), ('-g', '-s')):
+            for flags in (('-e',), ('--single',), ('-g', '-e')):
                 with self.subTest(tool=tool, flags=flags):
                     result = self.search(tool, *flags, 'needle')
                     self.assertEqual(result.returncode, 0, result.stderr)
@@ -275,7 +275,7 @@ class SessionSearchTests(SessionFixtureTestCase):
                 self.assertEqual(len(grouped.stdout.strip().split('\n\n')), 2)
                 self.assertRegex(grouped.stdout, r'^\d matches \| ')
                 self.assertEqual(self.search(tool, 'needle').stdout, grouped.stdout)
-                self.assertEqual(self.search(tool, '-s', '-g', 'needle').stdout, grouped.stdout)
+                self.assertEqual(self.search(tool, '-e', '-g', 'needle').stdout, grouped.stdout)
 
     def test_newest_activity_order_interleaves_tools_and_reverses_excerpts(self):
         expected = []
@@ -288,7 +288,7 @@ class SessionSearchTests(SessionFixtureTestCase):
             expected.extend([(tool, session, text) for text in ('newer needle', 'older needle')])
         for tool in ('claude', 'codex', 'llm'):
             with self.subTest(tool=tool):
-                result = self.search(tool, '-s', 'needle')
+                result = self.search(tool, '-e', 'needle')
                 self.assertEqual(result.returncode, 0, result.stderr)
                 blocks = result.stdout.strip().split('\n\n')
                 wanted = [item for item in expected if tool == 'llm' or item[0] == tool]
@@ -329,7 +329,7 @@ class SessionSearchTests(SessionFixtureTestCase):
     def test_inherited_file_override_does_not_replace_session_enumeration(self):
         for tool, count in [('claude', 3), ('codex', 3), ('llm', 6)]:
             with self.subTest(tool=tool):
-                result = self.search(tool, '-s', 'needle',
+                result = self.search(tool, '-e', 'needle',
                                      SESSION_SEARCH_FILE='/missing/transcript')
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(len(result.stdout.strip().split('\n\n')), count)
@@ -358,7 +358,9 @@ class SessionSearchTests(SessionFixtureTestCase):
                     self.assertIn('-g, --group', result.stdout)
                     self.assertIn('-h, --help', result.stdout)
                     self.assertIn('-t, --title, -n, --name', result.stdout)
-                    self.assertIn('-s, --single', result.stdout)
+                    self.assertIn('-e, --single', result.stdout)
+                    self.assertIn('-s, --session', result.stdout)
+                    self.assertIn('-f, --forks', result.stdout)
                     self.assertIn('Treat all remaining arguments as search text.', result.stdout)
 
     def test_help_flags_can_be_searched_literally(self):
@@ -366,13 +368,13 @@ class SessionSearchTests(SessionFixtureTestCase):
             self.write_session(tool, 'help-text', ['literal --help and -h option'])
             for flag in ('-h', '--help'):
                 with self.subTest(tool=tool, flag=flag):
-                    result = self.search(tool, '-s', '--', flag)
+                    result = self.search(tool, '-e', '--', flag)
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertTrue(result.stdout.startswith('3 hours ago | help-text\n'))
                     self.assertTrue(result.stdout.endswith('literal --help and -h option\n\n'))
 
     def test_llm_combines_all_hits_without_grouping(self):
-        result = self.search('llm', '-s', 'needle')
+        result = self.search('llm', '-e', 'needle')
         self.assertEqual(result.returncode, 0, result.stderr)
         blocks = result.stdout.strip().split('\n\n')
         self.assertEqual(len(blocks), 6)
@@ -539,7 +541,7 @@ class IndexSearchTests(SessionFixtureTestCase):
 
     def test_index_context_keeps_exit_three_retry_behavior(self):
         self.fake_switchboard(code=3, message='not built')
-        result = self.llmsearch('-s', '-0', 'needle')
+        result = self.llmsearch('-e', '-0', 'needle')
         self.assert_grep_results(result)
         self.assertEqual(result.stderr, NOT_BUILT_NOTE)
         self.assertEqual(self.switchboard_calls(),
@@ -555,7 +557,7 @@ class IndexSearchTests(SessionFixtureTestCase):
                         cwd='/tmp/elsewhere/'),
             ageless,
         ])
-        result = self.llmsearch('-s', 'needle')
+        result = self.llmsearch('-e', 'needle')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, '')
         self.assertEqual(result.stdout,
@@ -599,14 +601,14 @@ class IndexSearchTests(SessionFixtureTestCase):
 
     def test_unbuilt_index_falls_back_to_grep_after_asking_twice(self):
         self.fake_switchboard(code=3, message="search: the transcript index isn't built yet")
-        result = self.llmsearch('-s', 'needle')
+        result = self.llmsearch('-e', 'needle')
         self.assert_grep_results(result)
         self.assertEqual(result.stderr, NOT_BUILT_NOTE)
         self.assertEqual(self.switchboard_calls(),
                          ['[search][--json][--limit][200][--][needle]'] * 2)
 
     def test_missing_switchboard_falls_back_to_grep_quietly(self):
-        result = self.llmsearch('-s', 'needle')
+        result = self.llmsearch('-e', 'needle')
         self.assert_grep_results(result)
         self.assertEqual(result.stderr, '')
 
@@ -624,7 +626,7 @@ class IndexSearchTests(SessionFixtureTestCase):
 
     def test_grep_flag_forces_grep(self):
         self.fake_switchboard([self.index_result('claude', 'indexed', 'Indexed', 1, 'needle', 1)])
-        for args in [('-s', '--grep', 'needle'), ('needle', '--grep', '--single')]:
+        for args in [('-e', '--grep', 'needle'), ('needle', '--grep', '--single')]:
             with self.subTest(args=args):
                 self.assert_grep_results(self.llmsearch(*args))
                 self.assertEqual(self.switchboard_calls(), [])
@@ -666,7 +668,8 @@ class IndexSearchTests(SessionFixtureTestCase):
         result = self.llmsearch('--help')
         self.assertEqual(result.returncode, 0, result.stderr)
         for text in ("Search this machine's transcript index", '--grep', '"a phrase"',
-                     'tool:claude|codex', 'after:YYYY-MM-DD'):
+                     'tool:claude|codex', 'after:YYYY-MM-DD', 'There are no wildcards',
+                     """llmsearch '"dim mode" "auto mode"'""", '-s, --session', '-f, --forks'):
             self.assertIn(text, result.stdout)
         self.assertEqual(self.switchboard_calls(), [])
 

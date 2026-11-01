@@ -36,6 +36,11 @@ def session_search_index_record:
     {provider: .tool, cwd, id, name: session_search_index_name, mtime, modified: $modified,
      matched_at: (.matched_at // $modified | floor), count, context: (.context // .excerpt)};
 
+# Each local result's tool and id, NUL-terminated, for the fork lookup.
+def session_search_index_ids:
+    inputs | select((.host // "") == "") | [.tool, .id] |
+    map(tostring | gsub("\u0000"; "") + "\u0000") | add;
+
 # NUL-terminated fields for the shell to label and print: tool, cwd, id, name,
 # mtime (empty when unknown), count and excerpt. Keep the index's newest-match
 # order, or group newest first like grep mode's -g.

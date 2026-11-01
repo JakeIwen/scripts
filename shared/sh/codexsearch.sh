@@ -30,4 +30,4 @@ if [ ! -d "$codexsearch_sessions" ]; then
     exit 1
 fi
 
-session_search_files codex "$codexsearch_root" | session_search_extract
+session_search_run codex "$codexsearch_root"

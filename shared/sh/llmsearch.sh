@@ -19,19 +19,34 @@ search everything with grep instead. Results are shown newest first; grouped
 grep results update live when output goes to a terminal.
 
 Index queries:
-  All words must be in one message, as whole words. Case and accents are
-  ignored, and punctuation splits words: pcan finds pcan_view, not PCANView.
+  All words must be in one message, in any order, as whole words. Case and
+  accents are ignored, and punctuation splits words: pcan finds pcan_view, not
+  PCANView. There are no wildcards: dim* finds dim, not dimming.
   "a phrase" matches a phrase, and -word excludes a word.
   Filters: tool:claude|codex  dir:<part>  by:me|reply  age:<2d
            after:YYYY-MM-DD  before:YYYY-MM-DD
+  The shell strips quotes, so wrap a query with phrases in single quotes:
+    llmsearch '"dim mode" "auto mode"'   both phrases, in one message
+    llmsearch "dim mode" "auto mode"     just the words dim, mode and auto
+
+Substrings:
+  --grep finds one substring: llmsearch --grep dim auto finds "dim auto". For
+  separate substrings anywhere in one session, use rg on the transcripts:
+    rg -0li dim ~/.claude/projects ~/.codex/sessions | xargs -0 rg -li auto
 
 Flags:
   -t, --title, -n, --name
                Search saved session titles only (literal, case-insensitive).
                Uses the session stores directly, without the transcript index.
-  -s, --single Show every matching session instead of grouping them.
+  -s, --session
+               Look up sessions by id: the whole id or its start (a6ac05ee).
+               Uses the session stores directly, like -t.
+  -f, --forks  Show each matching session's fork family instead: the session
+               it was forked or branched from and its own forks, as a tree.
+               Codex subagent threads are left out.
+  -e, --single Show every matching session instead of grouping them.
   -g, --group  Group by directory and tool, with total matches and the latest
-               hit (the default; undoes an earlier -s).
+               hit (the default; undoes an earlier -e).
   --grep       Search everything, slowly, including thinking and tool calls and
                output, for a literal, case-insensitive term.
   -N           Show N message lines before and after each match (e.g. -2).
@@ -56,8 +71,7 @@ llmsearch_claude=${CLAUDESEARCH_ROOT:-${CLAUDE_CONFIG_DIR:-"$HOME/.claude"}}
 llmsearch_codex=${CODEXSEARCH_ROOT:-"$HOME/.codex"}
 
 llmsearch_sources() {
-    session_search_files claude "$llmsearch_claude" codex "$llmsearch_codex" |
-        session_search_extract
+    session_search_run claude "$llmsearch_claude" codex "$llmsearch_codex"
 }
 
 llmsearch_grep() {
@@ -74,7 +88,8 @@ llmsearch_grep() {
     fi
     # Records are the machine format (llm-switchboard's oracle reads them), so
     # they stay ungrouped now that grouping is the default.
-    if [ "$session_search_group" = true ] && [ "${SESSION_SEARCH_RECORDS:-}" != 1 ]; then
+    if [ "$session_search_group" = true ] && [ "${SESSION_SEARCH_RECORDS:-}" != 1 ] &&
+        [ "$session_search_forks" = false ]; then
         SESSION_SEARCH_RECORDS=1 llmsearch_sources |
             python3 "$llmsearch_scripts/session_search_display.py" --group
     else
@@ -87,6 +102,7 @@ llmsearch_grep() {
 llmsearch_index_applies() {
     [ "$session_search_grep" = false ] &&
         [ "$session_search_title" = false ] &&
+        [ "$session_search_session" = false ] &&
         [ -z "${CLAUDESEARCH_ROOT:-}${CODEXSEARCH_ROOT:-}${CLAUDE_CONFIG_DIR:-}" ] &&
         [ "${SESSION_SEARCH_RECORDS:-}" != 1 ] &&
         command -v llm-switchboard >/dev/null 2>&1
@@ -118,6 +134,12 @@ llmsearch_print_index() {
     ' | llmsearch_print_results
 }
 
+# -f: the matching sessions' fork families instead of their matches.
+llmsearch_print_forks() {
+    jq -nj -L "$llmsearch_scripts" 'include "session_search_records"; session_search_index_ids' |
+        session_search_fork_families claude "$llmsearch_claude" codex "$llmsearch_codex"
+}
+
 llmsearch_ask_index() {
     local flags=()
     if [ "$session_search_context_requested" = true ]; then
@@ -131,7 +153,7 @@ llmsearch_ask_index() {
 # periodic update holds the database lock, so ask once more before settling
 # for grep.
 llmsearch_index() {
-    local query=$session_search_words quote='"' results status
+    local query=$session_search_words quote='"' results status print
     # Words before -- keep the index's syntax; the text after it is one phrase.
     # A phrase can't hold a quote, and the index splits words at quotes anyway.
     if [ -n "$session_search_literal" ]; then
@@ -147,7 +169,11 @@ llmsearch_index() {
         status=$?
     fi
     case "$status" in
-        0) [ -z "$results" ] || printf '%s\n' "$results" | llmsearch_print_index || return 1 ;;
+        0)
+            print=llmsearch_print_index
+            [ "$session_search_forks" = false ] || print=llmsearch_print_forks
+            [ -z "$results" ] || printf '%s\n' "$results" | "$print" || return 1
+            ;;
         3) ;;
         *)
             # An llm-switchboard older than --before/--after rejects them as

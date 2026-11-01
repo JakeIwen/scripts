@@ -4,6 +4,7 @@
 import argparse
 import os
 from pathlib import Path
+import signal
 import stat
 import sys
 from typing import Iterable, List, Sequence, Tuple
@@ -113,4 +114,6 @@ def main(arguments: Sequence[str] = None) -> int:
 
 
 if __name__ == "__main__":
+    # Ctrl+C ends the search without a traceback; the calling script reports it.
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
     raise SystemExit(main())
