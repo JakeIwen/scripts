@@ -6,12 +6,8 @@ export interface ChartPoint {
   value: number;
 }
 
-/**
- * How a series is drawn when it isn't a plain line. `faint` puts raw readings
- * behind the series that summarize them; `reference` is a dashed guide, such as
- * a fitted trend, drawn unbroken through its points and never read on hover.
- */
-export type SeriesVariant = 'faint' | 'reference';
+/** How a series looks when it isn't a plain line: `faint` puts raw readings behind the series that summarize them. */
+export type SeriesVariant = 'faint' | 'dashed';
 
 export interface ChartSeries {
   label: string;
@@ -19,11 +15,6 @@ export interface ChartSeries {
   color: string;
   points: ChartPoint[];
   variant?: SeriesVariant;
-}
-
-/** Whether hover reads this series' values. */
-export function isReadable(series: ChartSeries): boolean {
-  return series.variant !== 'reference';
 }
 
 /** Split a series wherever consecutive points are further apart than `gapSeconds`. */
@@ -63,15 +54,11 @@ export function SeriesMarks({
   series: ChartSeries[];
   gapSeconds: number;
 }) {
-  return series.map((item) => {
-    // A reference is a guide, not readings, so the space between its points is no gap.
-    const runs = item.variant === 'reference' ? [item.points] : segments(item.points, gapSeconds);
-    return (
-      <g key={item.label} className={item.variant && `time-chart__series--${item.variant}`}>
-        {runs.map((run) => (
-          <RunMark key={run[0]?.at} frame={frame} run={run} color={item.color} />
-        ))}
-      </g>
-    );
-  });
+  return series.map((item) => (
+    <g key={item.label} className={item.variant && `time-chart__series--${item.variant}`}>
+      {segments(item.points, gapSeconds).map((run) => (
+        <RunMark key={run[0]?.at} frame={frame} run={run} color={item.color} />
+      ))}
+    </g>
+  ));
 }

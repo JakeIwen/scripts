@@ -27,7 +27,7 @@
 .time-chart__key--faint::before {
   opacity: 0.35;
 }
-.time-chart__series--reference .time-chart__line {
+.time-chart__series--dashed .time-chart__line {
   stroke-width: 1.5;
   stroke-dasharray: 5 4;
 }
@@ -78,6 +78,6 @@
   margin-right: 0.35rem;
   border-top: 2px solid var(--series-color);
 }
-.time-chart__key--reference::before {
+.time-chart__key--dashed::before {
   border-top-style: dashed;
 }

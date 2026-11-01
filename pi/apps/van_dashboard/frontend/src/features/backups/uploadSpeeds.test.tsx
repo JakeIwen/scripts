@@ -141,7 +141,7 @@ describe('upload speed sheet', () => {
     open(minutes(NOW - 3600, [MIB, 2 * MIB, 3 * MIB, 4 * MIB]).map((s) => [s.at, s.speed]));
     const detail = await screen.findByRole('img', { name: 'Upload speed during the selected run' });
     const chart = detail.parentElement as HTMLElement;
-    expect(chart.querySelectorAll('.time-chart__series--reference path')).toHaveLength(1);
+    expect(chart.querySelectorAll('.time-chart__series--dashed path')).toHaveLength(1);
     fireEvent.pointerMove(chart.querySelector('.time-chart__overlay') as Element, {
       clientX: 600,
     });

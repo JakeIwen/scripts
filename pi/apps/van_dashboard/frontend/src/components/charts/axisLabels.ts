@@ -1,6 +1,10 @@
-/** A round axis maximum in the binary units formatBytes prints, close above the data. */
-export function niceMax(value: number): number {
-  if (value <= 0) return 1024;
+// Room above the peak so the line never runs along the top gridline.
+const HEADROOM = 1.05;
+
+/** A round axis maximum in the binary units formatBytes prints, close above the peak. */
+export function niceMax(peak: number): number {
+  if (peak <= 0) return 1024;
+  const value = peak * HEADROOM;
   const unit = 1024 ** Math.floor(Math.log(value) / Math.log(1024));
   const scaled = value / unit;
   const magnitude = 10 ** Math.floor(Math.log10(scaled));

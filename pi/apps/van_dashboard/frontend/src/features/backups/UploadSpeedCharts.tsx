@@ -35,15 +35,11 @@ function chartPoints(samples: SpeedSample[]): ChartPoint[] {
   return samples.map(({ at, speed }) => ({ at, value: speed }));
 }
 
-function speedAxisMax(peak: number): number {
-  return niceMax(peak * 1.05);
-}
-
 function trendSeries(trend: LinearTrend, start: number, end: number): ChartSeries {
   return {
     label: 'Trend',
     color: 'var(--warning)',
-    variant: 'reference',
+    variant: 'dashed',
     points: [start, end].map((at) => ({ at, value: trendAt(trend, at) })),
   };
 }
@@ -118,7 +114,7 @@ export function RunOverviewChart({
   const [ref, width] = useElementWidth();
   const averages = runAverages(runs);
   const peak = Math.max(0, ...averages.map((point) => point.speed));
-  const frame = makeFrame(width, start, end, 0, speedAxisMax(peak));
+  const frame = makeFrame(width, start, end, 0, niceMax(peak));
   const trend = linearTrend(averages);
   return (
     <div ref={ref} className="time-chart">
@@ -130,7 +126,11 @@ export function RunOverviewChart({
       >
         <ChartAxes frame={frame} formatValue={formatSpeed} />
         {trend && (
-          <SeriesMarks frame={frame} series={[trendSeries(trend, start, end)]} gapSeconds={0} />
+          <SeriesMarks
+            frame={frame}
+            series={[trendSeries(trend, start, end)]}
+            gapSeconds={Infinity}
+          />
         )}
         {runs.map((run, index) => (
           <RunBar
@@ -164,14 +164,14 @@ export function RunDetailChart({ run }: { run: SpeedRun }) {
       points: chartPoints(rollingMean(samples)),
     },
   ];
-  if (trend) series.push(trendSeries(trend, run.start, run.end));
   return (
     <TimeSeriesChart
       ariaLabel="Upload speed during the selected run"
       series={series}
+      guides={trend ? [trendSeries(trend, run.start, run.end)] : []}
       start={run.start}
       end={run.end}
-      yMax={speedAxisMax(speedStats(samples)?.peak ?? 0)}
+      yMax={niceMax(speedStats(samples)?.peak ?? 0)}
       formatValue={formatSpeed}
       formatReadout={(speed) => `${formatSpeed(speed)} · ${formatMegabits(speed)}`}
       // Runs end at a longer pause, so the line never breaks inside one.

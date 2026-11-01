@@ -625,11 +625,11 @@ compare it with this checkout. Deployed files may differ from the repository.
   `/api/disks/history` (mounted free space rides `/api/disks`);
   `features/storage/DiskStatsStrip.tsx` and `DiskStatsSheet.tsx` show them on
   each Disks & Torrents card. `frontend/src/components/charts/` holds the shared
-  chart pieces: `TimeSeriesChart` (lines with a hover readout) composes
-  `chartFrame.ts` (scales), `ChartAxes` and `SeriesMarks` (series with optional
-  `faint` and dashed, unread `reference` variants), which other charts such as
-  the upload-speed run bars build on directly; plus `useElementWidth` and
-  `axisLabels`.
+  chart pieces: `TimeSeriesChart` (lines with a hover readout, plus unbroken,
+  unread `guides` such as a fitted trend) composes `chartFrame.ts` (scales),
+  `ChartAxes` and `SeriesMarks` (series drawn plain, `faint` or `dashed`), which
+  other charts such as the upload-speed run bars build on directly; plus
+  `useElementWidth` and `axisLabels` (`niceMax` adds the axis headroom).
 - Backup priority: `pi/scripts/backup/backup_priority.py` owns the cloud job
   registry and the protected until-verified override; `backup_priority_control.py`
   is the fixed CLI. Priority only decides which cloud job may take the single

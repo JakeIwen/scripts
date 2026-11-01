@@ -107,7 +107,7 @@ function HistoryBody({ history }: { history: DiskHistory }) {
           ]}
           start={history.since}
           end={history.until}
-          yMax={niceMax(peakRate * 1.05)}
+          yMax={niceMax(peakRate)}
           formatValue={formatSpeed}
           gapSeconds={ioGap}
         />

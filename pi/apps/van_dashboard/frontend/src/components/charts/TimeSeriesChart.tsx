@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ChartAxes, HorizontalLine } from './ChartAxes';
 import { CHART_HEIGHT, CHART_MARGIN, makeFrame, type Frame } from './chartFrame';
-import { isReadable, SeriesMarks, type ChartPoint, type ChartSeries } from './SeriesMarks';
+import { SeriesMarks, type ChartPoint, type ChartSeries } from './SeriesMarks';
 import { useElementWidth } from './useElementWidth';
 import './timeChart.css';
 
@@ -120,10 +120,12 @@ function ChartLegend({ series }: { series: ChartSeries[] }) {
 /**
  * Lines over a fixed time window with gaps where data stops, a shared hover
  * crosshair and an optional dashed limit. Pointer and touch both pick a time.
+ * Guides, such as a fitted trend, are drawn unbroken and never read on hover.
  */
 export function TimeSeriesChart({
   ariaLabel,
   series,
+  guides = [],
   start,
   end,
   yMin = 0,
@@ -135,6 +137,7 @@ export function TimeSeriesChart({
 }: {
   ariaLabel: string;
   series: ChartSeries[];
+  guides?: ChartSeries[];
   start: number;
   end: number;
   yMin?: number;
@@ -148,7 +151,8 @@ export function TimeSeriesChart({
   const [ref, width] = useElementWidth();
   const [hoverAt, setHoverAt] = useState<number | null>(null);
   const frame = makeFrame(width, start, end, yMin, yMax);
-  const hover = hoverAt === null ? null : readHover(series.filter(isReadable), hoverAt, gapSeconds);
+  const hover = hoverAt === null ? null : readHover(series, hoverAt, gapSeconds);
+  const legend = [...series, ...guides];
   const pick = (event: React.PointerEvent<SVGRectElement>) => {
     const bounds = event.currentTarget.ownerSVGElement?.getBoundingClientRect();
     if (!bounds) return;
@@ -157,7 +161,7 @@ export function TimeSeriesChart({
   };
   return (
     <div ref={ref} className="time-chart">
-      {series.length > 1 && <ChartLegend series={series} />}
+      {legend.length > 1 && <ChartLegend series={legend} />}
       <svg width={width} height={CHART_HEIGHT} role="img" aria-label={ariaLabel}>
         <ChartAxes frame={frame} formatValue={formatValue} />
         {limit && limit.value <= yMax && (
@@ -169,6 +173,7 @@ export function TimeSeriesChart({
           </g>
         )}
         <SeriesMarks frame={frame} series={series} gapSeconds={gapSeconds} />
+        <SeriesMarks frame={frame} series={guides} gapSeconds={Infinity} />
         {hover && <Crosshair frame={frame} at={hover.at} readouts={hover.readouts} />}
         <rect
           className="time-chart__overlay"
