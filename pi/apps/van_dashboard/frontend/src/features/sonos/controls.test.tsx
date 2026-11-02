@@ -3,17 +3,23 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   controlSonosTransport,
+  seekSonos,
   selectSonosCoordinator,
   setSonosGrouping,
   setSonosGroupMuted,
   setSonosGroupVolume,
   setSonosSpeakerMuted,
   setSonosSpeakerVolume,
+  startSonosLoop,
+  stopSonosLoop,
 } from './api';
 import { useSonosControls } from './controls';
 
 vi.mock('./api', () => ({
   controlSonosTransport: vi.fn(),
+  seekSonos: vi.fn(),
+  startSonosLoop: vi.fn(),
+  stopSonosLoop: vi.fn(),
   selectSonosCoordinator: vi.fn(),
   setSonosGrouping: vi.fn(),
   setSonosGroupMuted: vi.fn(),
@@ -101,5 +107,31 @@ describe('useSonosControls', () => {
     expect(groupingMock).toHaveBeenCalledWith('Solo', true);
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(result.current.lastMessage).toBe('Sonos updated');
+  });
+
+  it('sends skips and loop changes through the same refreshing single flight', async () => {
+    vi.mocked(seekSonos).mockResolvedValue({ message: 'Sonos at 1:33', positionSeconds: 93 });
+    vi.mocked(startSonosLoop).mockResolvedValue({
+      message: 'Looping 1:20–1:41',
+      loop: { active: true, startSeconds: 80, endSeconds: 101, title: 'Orange Juice' },
+    });
+    vi.mocked(stopSonosLoop).mockResolvedValue({
+      message: 'Loop stopped',
+      loop: { active: false, notice: null },
+    });
+    const refresh = vi.fn().mockResolvedValue(null);
+    const { result } = renderHook(() => useSonosControls(refresh));
+
+    await act(async () => {
+      await result.current.seek(10);
+      await result.current.startLoop(80, 101);
+      await result.current.stopLoop();
+    });
+
+    expect(seekSonos).toHaveBeenCalledWith(10);
+    expect(startSonosLoop).toHaveBeenCalledWith(80, 101);
+    expect(stopSonosLoop).toHaveBeenCalledOnce();
+    expect(refresh).toHaveBeenCalledTimes(3);
+    expect(result.current.lastMessage).toBe('Loop stopped');
   });
 });

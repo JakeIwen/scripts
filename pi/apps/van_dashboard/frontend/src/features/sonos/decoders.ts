@@ -3,10 +3,17 @@ import {
   booleanValue,
   nullableBoolean,
   nullableString,
+  numberValue,
   objectValue,
   stringValue,
 } from '../../api/validation';
-import type { SonosNowPlaying, SonosSpeaker, SonosStatus, SonosTransportState } from './types';
+import type {
+  SonosLoop,
+  SonosNowPlaying,
+  SonosSpeaker,
+  SonosStatus,
+  SonosTransportState,
+} from './types';
 
 const TRANSPORT_STATES = [
   'PLAYING',
@@ -84,6 +91,27 @@ function decodeNowPlaying(value: unknown): SonosNowPlaying {
   };
 }
 
+function wholeSeconds(value: unknown, label: string): number {
+  const seconds = numberValue(value, label);
+  if (!Number.isInteger(seconds) || seconds < 0) {
+    throw new TypeError(`${label} must be whole seconds`);
+  }
+  return seconds;
+}
+
+/** Decode the loop record; a backend older than the loop sends none. */
+export function decodeSonosLoop(value: unknown): SonosLoop {
+  if (value === undefined) return { active: false, notice: null };
+  const object = objectValue(value, 'loop');
+  if (!booleanValue(object.active, 'loop.active')) {
+    return { active: false, notice: nullableString(object.notice, 'loop.notice') };
+  }
+  const startSeconds = wholeSeconds(object.start, 'loop.start');
+  const endSeconds = wholeSeconds(object.end, 'loop.end');
+  if (endSeconds <= startSeconds) throw new TypeError('loop.end must come after loop.start');
+  return { active: true, startSeconds, endSeconds, title: stringValue(object.title, 'loop.title') };
+}
+
 function decodeSpeaker(value: unknown, index: number): SonosSpeaker {
   const label = `speakers[${index}]`;
   const object = objectValue(value, label);
@@ -135,5 +163,6 @@ export function decodeSonosStatus(payload: unknown): SonosStatus {
     },
     nowPlaying: decodeNowPlaying(response.now_playing),
     speakers,
+    loop: decodeSonosLoop(response.loop),
   };
 }

@@ -84,6 +84,9 @@ function controlMocks(overrides: Partial<SonosControls> = {}): SonosControls {
     lastMessage: null,
     lastError: null,
     transport: vi.fn().mockResolvedValue(result),
+    seek: vi.fn().mockResolvedValue(result),
+    startLoop: vi.fn().mockResolvedValue(result),
+    stopLoop: vi.fn().mockResolvedValue(result),
     selectCoordinator: vi.fn().mockResolvedValue(result),
     setGrouping: vi.fn().mockResolvedValue(result),
     setSpeakerVolume: vi.fn().mockResolvedValue(result),
@@ -119,6 +122,27 @@ describe('Sonos response decoder', () => {
     expect(status.nowPlaying.positionSeconds).toBeNull();
     expect(status.nowPlaying.durationSeconds).toBeNull();
     expect(projectTrackProgress(status.nowPlaying, 1_000, 6_000)).toBeNull();
+  });
+
+  it('decodes the loop record and treats a backend without one as no loop', () => {
+    expect(decodeSonosStatus(sonosPayload()).loop).toEqual({ active: false, notice: null });
+
+    const looping = sonosPayload();
+    looping.loop = { active: true, start: 80, end: 101, title: 'Orange Juice', notice: null };
+    expect(decodeSonosStatus(looping).loop).toEqual({
+      active: true,
+      startSeconds: 80,
+      endSeconds: 101,
+      title: 'Orange Juice',
+    });
+
+    const stopped = sonosPayload();
+    stopped.loop = { active: false, start: null, end: null, title: null, notice: 'Loop stopped' };
+    expect(decodeSonosStatus(stopped).loop).toEqual({ active: false, notice: 'Loop stopped' });
+
+    const backwards = sonosPayload();
+    backwards.loop = { active: true, start: 90, end: 80, title: '', notice: null };
+    expect(() => decodeSonosStatus(backwards)).toThrow('loop.end must come after loop.start');
   });
 
   it('rejects album art that is not a dashboard Sonos-art path', () => {

@@ -555,6 +555,13 @@ compare it with this checkout. Deployed files may differ from the repository.
   alarms cannot release an in-flight write. Delete and enable are explicit commands.
   Read fresh device state before mutations, preserve existing music metadata,
   reject stale revisions, and never automatically retry an uncertain alarm write.
+- Sonos skips and A-B loop: `SonosController.seek` moves the track by whole seconds
+  from a fresh device position (`/api/speakers/seek`). `sonos_loop.py` runs the loop
+  on the Pi, not the browser, so it survives a locked phone: one worker thread polls
+  the looping speaker (5 Hz near the end) and seeks back, and stops itself on a track
+  change (title/artist/duration; Spotify Connect keeps one URI), a failed seek or
+  repeated read failures. In memory only; `/api/speakers` carries its `loop` record.
+  Frontend: `loop.ts` (draft/validation), `SonosLoopPanel.tsx`, collapsed by default.
 - `pi/apps/van_dashboard/van_dashboard_ubnt_recovery.py` reconciles uncertain
   Starlink antenna operations against fresh radio state without replaying them.
   Frontend `features/ubnt/UbntOperationNotice.tsx` distinguishes pending

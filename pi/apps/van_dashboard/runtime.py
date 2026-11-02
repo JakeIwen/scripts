@@ -25,6 +25,7 @@ from .van_dashboard_network import (
 from .van_dashboard_projects import HostedProjectStore
 from .van_dashboard_sonos import SonosController
 from .sonos_alarms import SonosAlarmController
+from .sonos_loop import SonosLoop
 from .van_dashboard_storage import StoragePolicyManager
 from .van_dashboard_system import (
     DashboardRestartController,
@@ -44,6 +45,7 @@ cop_can_wake = CopCanWakeStatusReader()
 cop_led = cop_alert.light
 sonos = SonosController(state_store)
 sonos_alarms = SonosAlarmController(sonos)
+sonos_loop = SonosLoop(sonos)
 connectivity = ConnectivityMonitor()
 metered = MeteredController()
 openwrt_clients = OpenWrtClientsController()

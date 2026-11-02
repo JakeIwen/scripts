@@ -92,6 +92,7 @@
 }
 
 .sonos-progress {
+  position: relative;
   height: 6px;
   overflow: hidden;
   border-radius: 999px;
@@ -104,6 +105,20 @@
   border-radius: inherit;
   background: var(--accent);
   transition: width 0.8s linear;
+}
+
+.sonos-progress__loop {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgb(239 193 109 / 50%);
+  box-shadow:
+    inset 2px 0 var(--warning),
+    inset -2px 0 var(--warning);
+}
+
+.sonos-progress__loop.is-draft {
+  background: rgb(239 193 109 / 22%);
 }
 
 .sonos-tile .sonos-progress {
@@ -120,7 +135,7 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 24px;
+  gap: 12px 24px;
 }
 
 .sonos-sheet .bottom-sheet__actions {
@@ -162,6 +177,13 @@
   justify-content: center;
 }
 
+.sonos-now-playing__controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+
 .sonos-now-playing__copy {
   display: grid;
   min-width: 0;
@@ -186,7 +208,8 @@
   gap: 8px;
 }
 
-.sonos-transport button {
+.sonos-transport button,
+.sonos-loop-toggle {
   display: inline-flex;
   width: 42px;
   height: 42px;
@@ -202,12 +225,44 @@
 }
 
 .sonos-transport button:hover:not(:disabled),
+.sonos-loop-toggle:hover:not(:disabled),
 .sonos-mute-button:hover:not(:disabled) {
   border-color: var(--line-strong);
 }
 
 .sonos-transport button.sonos-transport__play {
   font-size: 21px;
+}
+
+.sonos-transport button.sonos-transport__skip {
+  font-size: 13px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+
+.sonos-loop-icon {
+  width: 1.15em;
+  height: 1.15em;
+  fill: currentColor;
+  vertical-align: -0.2em;
+}
+
+.sonos-loop-toggle {
+  font-size: 17px;
+}
+
+.sonos-loop-toggle[aria-expanded='true'] {
+  border-color: var(--line-strong);
+}
+
+.sonos-loop-toggle.is-active,
+.sonos-track-loop {
+  color: var(--warning);
+}
+
+.sonos-loop-toggle.is-active {
+  border-color: var(--warning);
+  background: var(--warning-background);
 }
 
 .sonos-transport--tile {
@@ -368,7 +423,12 @@
     gap: 4px;
   }
 
-  .sonos-sheet .sonos-transport button {
+  .sonos-sheet .sonos-now-playing__controls {
+    gap: 10px;
+  }
+
+  .sonos-sheet .sonos-transport button,
+  .sonos-sheet .sonos-loop-toggle {
     width: 34px;
     height: 34px;
   }

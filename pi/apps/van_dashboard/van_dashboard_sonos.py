@@ -3,7 +3,14 @@
 This module is imported as part of the van_dashboard package.
 """
 
-__all__ = ["SonosController"]
+__all__ = [
+    "SonosController",
+    "SonosNotSeekable",
+    "clock_label",
+    "seek_clock",
+    "seekable_track",
+    "track_seconds",
+]
 
 from .van_dashboard_common import (
     DEFAULT_SONOS_DEVICE,
@@ -16,6 +23,48 @@ from .van_dashboard_common import (
     urlopen,
     urlsplit,
 )
+
+
+class SonosNotSeekable(RuntimeError):
+    """The current Sonos source reports no track position and duration."""
+
+
+def track_seconds(value):
+    """Return whole seconds for SoCo H:MM:SS text, or None when absent."""
+    if not isinstance(value, str) or value in ("", "NOT_IMPLEMENTED"):
+        return None
+    parts = value.split(":")
+    if len(parts) not in (2, 3) or not all(part.isdigit() for part in parts):
+        return None
+    total = 0
+    for part in parts:
+        total = total * 60 + int(part)
+    return total
+
+
+def seek_clock(seconds):
+    """Format whole seconds as the H:MM:SS target SoCo's seek accepts."""
+    seconds = max(0, int(seconds))
+    return f"{seconds // 3600}:{seconds // 60 % 60:02d}:{seconds % 60:02d}"
+
+
+def clock_label(seconds):
+    """Format whole seconds the way the dashboard shows track time (M:SS)."""
+    minutes, remainder = divmod(max(0, int(seconds)), 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{remainder:02d}"
+    return f"{minutes}:{remainder:02d}"
+
+
+def seekable_track(speaker):
+    """Read the speaker's current track and its whole-second clock fields."""
+    track = speaker.get_current_track_info() or {}
+    position = track_seconds(track.get("position"))
+    duration = track_seconds(track.get("duration"))
+    if position is None or not duration:
+        raise SonosNotSeekable("the current Sonos source cannot seek")
+    return track, position, duration
 
 
 class SonosController:
@@ -246,3 +295,12 @@ class SonosController:
         if action == "next":
             coordinator.next()
             return "Next Sonos track"
+
+    def seek(self, offset):
+        """Move the current track by whole seconds from a fresh device position."""
+        coordinator = self.coordinator()
+        _track, position, duration = seekable_track(coordinator)
+        # Stop a second short of the end so a forward skip never ends the track.
+        target = max(0, min(duration - 1, position + int(offset)))
+        coordinator.seek(seek_clock(target))
+        return target

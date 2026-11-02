@@ -25,11 +25,17 @@ export interface SonosSpeaker {
   groupCoordinator: string;
 }
 
+/** The Pi-side A-B repeat; `notice` says why an automatic stop happened. */
+export type SonosLoop =
+  | { active: true; startSeconds: number; endSeconds: number; title: string }
+  | { active: false; notice: string | null };
+
 export interface SonosStatus {
   coordinator: string;
   group: SonosGroup;
   nowPlaying: SonosNowPlaying;
   speakers: SonosSpeaker[];
+  loop: SonosLoop;
 }
 
 export interface SonosTrackProgress {
@@ -47,6 +53,14 @@ export interface SonosMutationResult {
 
 export interface SonosSelectionResult extends SonosMutationResult {
   device: string;
+}
+
+export interface SonosSeekResult extends SonosMutationResult {
+  positionSeconds: number;
+}
+
+export interface SonosLoopResult extends SonosMutationResult {
+  loop: SonosLoop;
 }
 
 export interface SonosVolumeResult extends SonosMutationResult {

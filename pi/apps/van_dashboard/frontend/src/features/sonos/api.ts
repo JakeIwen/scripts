@@ -1,9 +1,11 @@
 import { getJson, postForm } from '../../api/client';
 import { booleanValue, numberValue, objectValue, stringValue } from '../../api/validation';
-import { decodeSonosStatus } from './decoders';
+import { decodeSonosLoop, decodeSonosStatus } from './decoders';
 import type {
+  SonosLoopResult,
   SonosMuteResult,
   SonosMutationResult,
+  SonosSeekResult,
   SonosSelectionResult,
   SonosStatus,
   SonosTransportAction,
@@ -121,4 +123,32 @@ export async function controlSonosTransport(
 ): Promise<SonosMutationResult> {
   const payload = await postForm('/api/speakers/transport', { action });
   return decodeMessage(payload, 'Sonos transport response');
+}
+
+export async function seekSonos(offsetSeconds: number): Promise<SonosSeekResult> {
+  const payload = await postForm('/api/speakers/seek', { offset: Math.trunc(offsetSeconds) });
+  const result = decodeMessage(payload, 'Sonos seek response');
+  const response = objectValue(payload, 'Sonos seek response');
+  return {
+    ...result,
+    positionSeconds: numberValue(response.position, 'Sonos seek response.position'),
+  };
+}
+
+function decodeLoopResult(payload: unknown, label: string): SonosLoopResult {
+  const result = decodeMessage(payload, label);
+  return { ...result, loop: decodeSonosLoop(objectValue(payload, label).loop) };
+}
+
+export async function startSonosLoop(
+  startSeconds: number,
+  endSeconds: number,
+): Promise<SonosLoopResult> {
+  const payload = await postForm('/api/speakers/loop', { start: startSeconds, end: endSeconds });
+  return decodeLoopResult(payload, 'Sonos loop response');
+}
+
+export async function stopSonosLoop(): Promise<SonosLoopResult> {
+  const payload = await postForm('/api/speakers/loop/stop');
+  return decodeLoopResult(payload, 'Sonos loop-stop response');
 }

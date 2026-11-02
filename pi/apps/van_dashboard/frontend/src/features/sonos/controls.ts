@@ -3,12 +3,15 @@ import { useCallback, useState } from 'react';
 import { useSingleFlightAction } from '../../hooks/useSingleFlightAction';
 import {
   controlSonosTransport,
+  seekSonos,
   selectSonosCoordinator,
   setSonosGrouping,
   setSonosGroupMuted,
   setSonosGroupVolume,
   setSonosSpeakerMuted,
   setSonosSpeakerVolume,
+  startSonosLoop,
+  stopSonosLoop,
 } from './api';
 import type { SonosMutationResult, SonosStatus, SonosTransportAction } from './types';
 
@@ -20,6 +23,9 @@ export interface SonosControls {
   lastMessage: string | null;
   lastError: string | null;
   transport: (action: SonosTransportAction) => Promise<SonosMutationResult | null>;
+  seek: (offsetSeconds: number) => Promise<SonosMutationResult | null>;
+  startLoop: (startSeconds: number, endSeconds: number) => Promise<SonosMutationResult | null>;
+  stopLoop: () => Promise<SonosMutationResult | null>;
   selectCoordinator: (name: string) => Promise<SonosMutationResult | null>;
   setGrouping: (name: string, grouped: boolean) => Promise<SonosMutationResult | null>;
   setSpeakerVolume: (name: string, volume: number) => Promise<SonosMutationResult | null>;
@@ -86,6 +92,16 @@ export function useSonosControls(
       perform(`transport:${action}`, () => controlSonosTransport(action)),
     [perform],
   );
+  const seek = useCallback(
+    (offsetSeconds: number) => perform(`seek:${offsetSeconds}`, () => seekSonos(offsetSeconds)),
+    [perform],
+  );
+  const startLoop = useCallback(
+    (startSeconds: number, endSeconds: number) =>
+      perform('loop:start', () => startSonosLoop(startSeconds, endSeconds)),
+    [perform],
+  );
+  const stopLoop = useCallback(() => perform('loop:stop', stopSonosLoop), [perform]);
   const selectCoordinator = useCallback(
     (name: string) => perform(`select:${name}`, () => selectSonosCoordinator(name)),
     [perform],
@@ -120,6 +136,9 @@ export function useSonosControls(
     lastMessage,
     lastError,
     transport,
+    seek,
+    startLoop,
+    stopLoop,
     selectCoordinator,
     setGrouping,
     setSpeakerVolume,
