@@ -16,6 +16,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 MEDIA = "D9B0ED12-C4BE-4E74-B0DA-0CC3BE092289"
+TRASH = "BT.D"  # the app scope of BTT's Trash
 MEDIA_TOOLS = Path(
     os.environ.get("MAC_MEDIA_TOOLS") or "/Users/jacobr/dev/mac-media-tools"
 ).expanduser().resolve()

@@ -10,7 +10,7 @@ import sqlite3
 import time
 from typing import Any
 
-from ..btt_common import MEDIA, connect, current_database
+from ..btt_common import MEDIA, TRASH, connect, current_database
 from .model import ConfigSnapshot, Finding, FindingKind, RecordState, SCHEMA_VERSION
 
 REQUIRED_COLUMNS = {
@@ -52,7 +52,6 @@ WATCHED_TRIGGER_TYPES = {
     679: 'text transformer', 767: 'floating menu', 779: 'active app changed',
 }
 NAMED_TRIGGER = 643
-TRASH = 'BT.D'
 
 
 def _json_blob(value: Any, field: str, uuid: str) -> Any:
@@ -256,8 +255,8 @@ def _unassigned_findings(effective_ids: set[int], rows: list[sqlite3.Row]) -> li
 
 def _watched_triggers(
     rows: list[sqlite3.Row], gesture_entity: int, app_scopes: dict[int, list[str]]
-) -> tuple[list[sqlite3.Row], set[int], list[Finding]]:
-    """Watched top-level triggers, every record beneath them, and their scope findings."""
+) -> tuple[list[sqlite3.Row], list[Finding]]:
+    """Watched top-level triggers and their scope findings."""
     active_presets = _active_presets(rows)
     watched: list[sqlite3.Row] = []
     findings: list[Finding] = []
@@ -269,8 +268,8 @@ def _watched_triggers(
         if not row['ZUNIQUEIDENTIFIER']:
             raise ValueError('A watched BTT trigger lacks a UUID.')
         scopes = app_scopes.get(row['Z_PK'], [])
-        # A trigger with no app scope never fires and BTT cannot recreate it;
-        # legacy unscoped named triggers still run when called.
+        # A trigger with no app scope never fires, and Guard's definitions refuse to
+        # restore one (_expected_app_scope); legacy unscoped named triggers still run.
         if not scopes and row['ZGESTURETYPE'] != NAMED_TRIGGER:
             continue
         if len(scopes) > 1:
@@ -279,15 +278,20 @@ def _watched_triggers(
             detail = 'linked to BTT Trash and an app scope' if TRASH in scopes else 'linked to several app scopes'
             findings.append(_finding(FindingKind.MULTIPLE_SCOPES, row['ZUNIQUEIDENTIFIER'], detail))
         watched.append(row)
+    return watched, findings
+
+
+def _descendants(starts: list[sqlite3.Row], rows: list[sqlite3.Row]) -> set[int]:
+    """Primary keys of `starts` and every record beneath them."""
     children = _children(rows)
     selected: set[int] = set()
-    stack = list(watched)
+    stack = list(starts)
     while stack:
         row = stack.pop()
         if row['Z_PK'] not in selected:
             selected.add(row['Z_PK'])
             stack.extend(children.get(row['Z_PK'], ()))
-    return watched, selected, findings
+    return selected
 
 
 def _runnable_action(row: sqlite3.Row) -> bool:
@@ -419,8 +423,8 @@ def read_snapshot(
             app_scopes = _app_scopes(connection, entities)
             selected, effective_ids, findings = _select_graph(requested_roots, rows, by_uuid)
             findings.extend(_unassigned_findings(effective_ids, rows))
-            watched, watched_ids, scope_findings = _watched_triggers(rows, entities['GESTURE'], app_scopes)
-            selected |= watched_ids
+            watched, scope_findings = _watched_triggers(rows, entities['GESTURE'], app_scopes)
+            selected |= _descendants(watched, rows)
             findings.extend(scope_findings)
             selected.update(by_uuid[uuid]['Z_PK'] for uuid in requested_ids if uuid in by_uuid)
             records = {row['ZUNIQUEIDENTIFIER']: _record(row, by_pk, action_ranks, app_scopes) for row in rows

@@ -26,14 +26,13 @@ import subprocess
 import tempfile
 import time
 
-from btt_common import backup_configuration, connect, current_database
+from btt_common import TRASH, backup_configuration, connect, current_database
 
 BTTCLI = Path('/Applications/BetterTouchTool.app/Contents/SharedSupport/bin/bttcli')
 STORE_NAME = re.compile(r'^btt_data_store\.version_(\d+)_(\d+)_build_(\d+)$')
 KEY_SEQUENCE = 624
 PRESET = 'Master'
 GLOBAL = 'BT.G'
-TRASH = 'BT.D'
 SAVE_TIMEOUT = 60
 REQUIRED_ENTITIES = {'APP', 'Gesture', 'Key', 'Preset'}
 KEY_LISTS = {'down': 'BTTKeySequenceDownKeys', 'up': 'BTTKeySequenceUpKeys', 'mixed': 'BTTKeySequenceMixedKeys'}
