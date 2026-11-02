@@ -484,6 +484,16 @@ compare it with this checkout. Deployed files may differ from the repository.
   `/home/pi/scripts/`: ship `peer_copy.py` first, then `known_terms.py`,
   `glossary_page.py` and `glossary.py` together. Pi page URLs use the Mac's
   `/Volumes/pihome` mount. Local read/replace transactions use `terms.jsonl.lock`.
+  A repeated session+term fills in a page link the first record lacked (the
+  long-reply guard's follow-up carries it), and merges keep the linked copy.
+- `shared/sh/long_reply_guard.py` is the Claude/Codex Stop hook (Mac and Pi)
+  behind the globals' "Long replies" rule: a reply Jacob reads in a terminal
+  that runs past 450 words or 50 estimated rows at 104 columns, fenced blocks
+  left out and with no `~/.agent/artifacts/` link, is blocked once with
+  instructions to move it to a page. Claude sessions count as attended through
+  `CLAUDE_CODE_SESSION_ATTENDED`; Codex through its rollout's `session_meta`
+  source (`cli`, not `exec` or a subagent). Stdlib; the Pi copy sits flat in
+  `/home/pi/scripts/`.
 - Shell tricks, Jacob's small interactive helper set (13 per host, at most 16):
   `shared/sh/shell_tricks_common.sh` (tools both hosts share, plus `tricks`),
   host files `macbook/scripts/shell_tricks.zsh` and `pi/scripts/shell_tricks.bash`,
