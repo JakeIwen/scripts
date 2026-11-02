@@ -126,7 +126,7 @@ describe('full-pane skips and loop', () => {
 
   it('shows a running loop, updates it only after an edit, and stops it', () => {
     const controls = controlMocks();
-    const running = status({ active: true, startSeconds: 80, endSeconds: 101, title: 'x' });
+    const running = status({ active: true, startSeconds: 80, endSeconds: 101 });
     render(<SonosPlayback status={running} progress={progress} controls={controls} />);
     expect(screen.getByText(/1:20–1:41/)).toHaveTextContent('Loop 1:20–1:41');
 

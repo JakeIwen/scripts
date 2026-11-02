@@ -121,7 +121,7 @@ class LoopTests(unittest.TestCase):
         self.assertEqual(self.speaker.seeks, [])
         self.assertEqual(
             self.loop.state(),
-            {"active": True, "start": 80, "end": 101, "title": "Night Bell - Arizona", "notice": None},
+            {"active": True, "start": 80, "end": 101, "notice": None},
         )
 
     def test_starting_outside_the_loop_jumps_to_its_start(self):

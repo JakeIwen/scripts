@@ -113,7 +113,7 @@ describe('useSonosControls', () => {
     vi.mocked(seekSonos).mockResolvedValue({ message: 'Sonos at 1:33', positionSeconds: 93 });
     vi.mocked(startSonosLoop).mockResolvedValue({
       message: 'Looping 1:20–1:41',
-      loop: { active: true, startSeconds: 80, endSeconds: 101, title: 'Orange Juice' },
+      loop: { active: true, startSeconds: 80, endSeconds: 101 },
     });
     vi.mocked(stopSonosLoop).mockResolvedValue({
       message: 'Loop stopped',

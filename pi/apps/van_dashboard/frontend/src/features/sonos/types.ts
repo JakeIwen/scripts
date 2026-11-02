@@ -27,7 +27,7 @@ export interface SonosSpeaker {
 
 /** The Pi-side A-B repeat; `notice` says why an automatic stop happened. */
 export type SonosLoop =
-  | { active: true; startSeconds: number; endSeconds: number; title: string }
+  | { active: true; startSeconds: number; endSeconds: number }
   | { active: false; notice: string | null };
 
 export interface SonosStatus {

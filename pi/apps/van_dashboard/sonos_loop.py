@@ -6,7 +6,7 @@ position and seeks back to the start once it reaches the end. State is held in
 memory only: a dashboard restart drops the loop.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import threading
 import time
 
@@ -36,13 +36,12 @@ class ActiveLoop:
     start: int
     end: int
     duration: int
-    title: str
     speaker: object
     identity: tuple
     # Worker-owned progress; only the single worker thread touches these.
     last_position: int = -1
     last_change_at: float = 0.0
-    seeked_at: float = field(default=float("-inf"))
+    seeked_at: float = float("-inf")
     failures: int = 0
 
     @property
@@ -66,14 +65,8 @@ class SonosLoop:
         with self.lock:
             loop, notice = self.active, self.notice
         if loop is None:
-            return {"active": False, "start": None, "end": None, "title": None, "notice": notice}
-        return {
-            "active": True,
-            "start": loop.start,
-            "end": loop.end,
-            "title": loop.title,
-            "notice": None,
-        }
+            return {"active": False, "start": None, "end": None, "notice": notice}
+        return {"active": True, "start": loop.start, "end": loop.end, "notice": None}
 
     def start(self, start, end):
         """Loop the current track between whole seconds; seeks in if outside."""
@@ -88,7 +81,6 @@ class SonosLoop:
             start=start,
             end=end,
             duration=duration,
-            title=track.get("title") or "",
             speaker=speaker,
             identity=track_identity(track),
             last_position=position,

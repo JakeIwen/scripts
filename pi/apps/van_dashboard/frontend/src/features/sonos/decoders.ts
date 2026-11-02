@@ -109,7 +109,7 @@ export function decodeSonosLoop(value: unknown): SonosLoop {
   const startSeconds = wholeSeconds(object.start, 'loop.start');
   const endSeconds = wholeSeconds(object.end, 'loop.end');
   if (endSeconds <= startSeconds) throw new TypeError('loop.end must come after loop.start');
-  return { active: true, startSeconds, endSeconds, title: stringValue(object.title, 'loop.title') };
+  return { active: true, startSeconds, endSeconds };
 }
 
 function decodeSpeaker(value: unknown, index: number): SonosSpeaker {

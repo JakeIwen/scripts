@@ -133,7 +133,6 @@ describe('Sonos response decoder', () => {
       active: true,
       startSeconds: 80,
       endSeconds: 101,
-      title: 'Orange Juice',
     });
 
     const stopped = sonosPayload();
