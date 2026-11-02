@@ -6,13 +6,13 @@ import {
   averageGroupBrightness,
   lightingStateLabel,
   lightingStateTone,
-  QUICK_LIGHT_SWITCH,
   QUICK_LIGHTING_GROUP_IDS,
+  QUICK_POWER_SWITCH,
 } from './presentation';
 import type {
   LightingControlActions,
   LightingGroup,
-  LightingLight,
+  LightingPowerSwitch,
   LightingStatus,
 } from './types';
 import './lighting.css';
@@ -72,27 +72,27 @@ function QuickRoomControl({
   );
 }
 
-function QuickLightSwitch({
-  light,
+function QuickPowerSwitch({
+  powerSwitch,
   controls,
 }: {
-  light: LightingLight;
+  powerSwitch: LightingPowerSwitch;
   controls: LightingControlActions;
 }) {
-  const enabled = light.state === 'on';
+  const enabled = powerSwitch.state === 'on';
 
   return (
     <TooltipButton
       type="button"
       className="lighting-quick-room__power lighting-quick-switch"
-      disabled={!light.available || controls.running}
+      disabled={!powerSwitch.available || controls.running}
       aria-pressed={enabled}
-      aria-label={`${QUICK_LIGHT_SWITCH.label} power · ${lightingStateLabel(light.state)}`}
-      tooltip={`${light.label} · ${lightingStateLabel(light.state)}`}
-      onClick={() => runControl(controls.setPower(light.entityId, !enabled))}
+      aria-label={`${QUICK_POWER_SWITCH.label} · ${lightingStateLabel(powerSwitch.state)}`}
+      tooltip={`${powerSwitch.label} · ${lightingStateLabel(powerSwitch.state)}`}
+      onClick={() => runControl(controls.setPower(powerSwitch.entityId, !enabled))}
     >
-      <span className={`lighting-quick-room__dot is-${light.state}`} aria-hidden="true" />
-      <span className="lighting-quick-room__label">{QUICK_LIGHT_SWITCH.label}</span>
+      <span className={`lighting-quick-room__dot is-${powerSwitch.state}`} aria-hidden="true" />
+      <span className="lighting-quick-room__label">{QUICK_POWER_SWITCH.label}</span>
     </TooltipButton>
   );
 }
@@ -123,8 +123,8 @@ export function LightingTile({ status, error, refreshing, onOpen, controls }: Li
     status.groups.find((group) => group.id === id),
   ).filter((group) => group !== undefined);
   const quickSwitch = status.groups
-    .flatMap((group) => group.lights)
-    .find((light) => light.entityId === QUICK_LIGHT_SWITCH.entityId);
+    .map((group) => group.powerSwitch)
+    .find((powerSwitch) => powerSwitch?.entityId === QUICK_POWER_SWITCH.entityId);
 
   return (
     <Tile
@@ -133,7 +133,7 @@ export function LightingTile({ status, error, refreshing, onOpen, controls }: Li
       summary={
         <>
           <span className="lighting-tile__counts">{summary}</span>
-          {quickSwitch && <QuickLightSwitch light={quickSwitch} controls={controls} />}
+          {quickSwitch && <QuickPowerSwitch powerSwitch={quickSwitch} controls={controls} />}
         </>
       }
       status={

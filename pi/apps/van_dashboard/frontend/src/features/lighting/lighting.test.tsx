@@ -221,23 +221,27 @@ describe('lighting views', () => {
     expect(onOpen).toHaveBeenCalledOnce();
   });
 
-  it('toggles the solder LED from the tile summary row', () => {
+  it('toggles solder power from the tile summary row while the LED is unpowered', () => {
     const payload = lightingPayload();
     const lighting = payload.lighting as Record<string, unknown>;
-    lighting.available_count = 6;
     lighting.total_count = 6;
     const groups = lighting.groups as unknown[];
     groups.push({
       id: 'solder',
       label: 'Solder',
-      state: 'off',
-      power_switch: null,
+      state: 'unknown',
+      power_switch: {
+        entity_id: 'switch.solder_flood',
+        label: 'Solder power',
+        state: 'off',
+        available: true,
+      },
       lights: [
         {
           entity_id: 'light.solder_led',
           label: 'Solder LED',
-          state: 'off',
-          available: true,
+          state: 'unavailable',
+          available: false,
           brightness: null,
           color_mode: null,
           supports_hue: false,
@@ -260,10 +264,11 @@ describe('lighting views', () => {
       />,
     );
 
-    const solder = screen.getByRole('button', { name: 'Solder SW power · Off' });
+    const solder = screen.getByRole('button', { name: 'Solder SW · Off' });
     expect(solder).toHaveAttribute('aria-pressed', 'false');
+    expect(solder).toBeEnabled();
     fireEvent.click(solder);
-    expect(actions.setPower).toHaveBeenCalledWith('light.solder_led', true);
+    expect(actions.setPower).toHaveBeenCalledWith('switch.solder_flood', true);
 
     rerender(
       <LightingTile
@@ -274,10 +279,10 @@ describe('lighting views', () => {
         controls={controls({ running: true })}
       />,
     );
-    expect(screen.getByRole('button', { name: 'Solder SW power · Off' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Solder SW · Off' })).toBeDisabled();
   });
 
-  it('omits the solder switch when the light is not configured', () => {
+  it('omits the solder switch when it is not configured', () => {
     render(
       <LightingTile
         status={decodeLightingStatus(lightingPayload())}

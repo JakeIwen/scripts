@@ -7,7 +7,7 @@ import type {
 } from './types';
 
 export const QUICK_LIGHTING_GROUP_IDS = ['cab', 'rear', 'kitchen'] as const;
-export const QUICK_LIGHT_SWITCH = { entityId: 'light.solder_led', label: 'Solder SW' } as const;
+export const QUICK_POWER_SWITCH = { entityId: 'switch.solder_flood', label: 'Solder SW' } as const;
 
 export function lightingStateLabel(state: LightingAggregateState | LightDeviceState): string {
   switch (state) {

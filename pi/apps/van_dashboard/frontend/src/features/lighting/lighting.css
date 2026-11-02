@@ -28,7 +28,7 @@
   justify-content: space-between;
   gap: 8px;
   margin-top: auto;
-  padding: 12px 12px 0 15px;
+  padding: 12px 12px 10px 15px;
 }
 
 .lighting-tile__counts {
@@ -38,13 +38,25 @@
   white-space: nowrap;
 }
 
-/* Sits above the tile's open-sheet hit area, like the room controls. */
+/* Sits above the tile's open-sheet hit area, like the room controls; sized
+   1.5x the room buttons. */
 .lighting-quick-room__power.lighting-quick-switch {
   position: relative;
   z-index: 3;
-  min-height: 22px;
+  min-height: 33px;
   flex-shrink: 0;
-  padding: 4px 7px;
+  gap: 8px;
+  padding: 6px 11px;
+  border-radius: 13px;
+}
+
+.lighting-quick-switch .lighting-quick-room__label {
+  font-size: 13.5px;
+}
+
+.lighting-quick-switch .lighting-quick-room__dot {
+  width: 12px;
+  height: 12px;
 }
 
 .lighting-tile > .tile__body {
