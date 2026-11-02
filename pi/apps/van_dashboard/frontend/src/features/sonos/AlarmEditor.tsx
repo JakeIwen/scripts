@@ -83,8 +83,10 @@ export function AlarmEditor({ alarm, status, favorites, busy, onSave, onCancel }
 
   // The editor opens above the list and disables every row, so an Edit
   // further down would otherwise just grey the list out with no editor in view.
+  // `start`, since on a phone the form is taller than the sheet and `nearest`
+  // would show only its bottom, hiding the time.
   useEffect(() => {
-    formRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+    formRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
   }, []);
 
   return (
