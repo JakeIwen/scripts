@@ -199,3 +199,24 @@ test('omitted trigger type is accepted only for compact pure actions',()=>{
     assert.throws(()=>context.repairCheckCreated(actual,operation,()=>parent,
         context.BTTCommon.fingerprint),/BTTTriggerType/);
 });
+
+test('a recreated action nested under a watched trigger leaves that trigger protected',()=>{
+    const plan={schema_version:1,checkpoint_id:'checkpoint',conflicts:[],operations:[{
+        uuid:'action',parent:'sequence',mode:'create',definition:{
+            BTTUUID:'action',BTTTriggerType:-1,BTTTriggerClass:'BTTTriggerTypeKeySequence',
+            BTTTriggerParentUUID:'sequence',BTTOrder:0,BTTPredefinedActionType:118,
+            BTTAdditionalActionData:{BTTActionTextToPaste:'text'},
+        },
+    }]};
+    const x=fixture(plan);
+    x.records.sequence={BTTUUID:'sequence',BTTTriggerType:624,BTTTriggerClass:'BTTTriggerTypeKeySequence'};
+    // Exports list a key sequence's or shortcut's actions under BTTActionsToExecute.
+    x.btt.add_new_trigger=(raw,args)=>{
+        const node=JSON.parse(raw);x.calls.push(['add',node,args]);x.records[node.BTTUUID]=clone(node);
+        (x.records[args.parent_uuid].BTTActionsToExecute ||= []).push(clone(node));
+    };
+    x.plan.runtime_snapshot=context.repairSnapshot(x.plan,x.get);
+    context.repairApply(x.btt,x.plan,x.get,x.fp);
+    assert.equal(x.calls.length,1);
+    assert.equal(x.calls[0][2].parent_uuid,'sequence');
+});

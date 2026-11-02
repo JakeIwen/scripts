@@ -77,6 +77,8 @@ class FindingKind(str, Enum):
     CONFIG_CHANGED = 'config_changed'
     DEPENDENCY_CHANGED = 'dependency_changed'
     UNASSIGNED = 'unassigned'
+    ADDED = 'added'  # a watched trigger the checkpoint lacks, so nothing protects it yet
+    MULTIPLE_SCOPES = 'multiple_scopes'
     CHECKPOINT_MISSING = 'checkpoint_missing'
     CHECKPOINT_INVALID = 'checkpoint_invalid'
     DATABASE_UNAVAILABLE = 'database_unavailable'
@@ -120,6 +122,9 @@ class ConfigSnapshot(TypedDict):
     btt_version: str
     database_name: str
     roots: list[str]
+    # Watched top-level triggers (database.WATCHED_TRIGGER_TYPES). Checkpoints taken
+    # before the watch lack it; only current snapshots are read for it.
+    watched: list[str]
     presets: dict[str, bool]
     records: dict[str, RecordState]
     findings: list[Finding]

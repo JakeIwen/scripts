@@ -102,6 +102,30 @@ class CheckpointTests(unittest.TestCase):
         self.assertTrue(result['conflicts'])
         worker.assert_not_called()
 
+    def test_repair_verifies_its_records_while_an_unrelated_watched_trigger_is_new(self):
+        self.capture()
+        self.mutate("DELETE FROM ZBTTBASEENTITY WHERE ZUNIQUEIDENTIFIER='action'")
+        def worker(name, plan, mode):
+            if mode == 'snapshot':
+                return json.dumps({'action': None, 'button': {'BTTUUID': 'button'}})
+            if mode == 'apply':
+                # BTT recreates the action while another edit adds a key sequence.
+                self.mutate("INSERT INTO ZBTTBASEENTITY (Z_PK,Z_ENT,ZUNIQUEIDENTIFIER,ZPARENT,ZBELONGSTOPRESET2,"
+                            "ZGESTURETYPE,ZENABLEDNEW,ZORDER,ZACTION,ZACTIONCATEGORY,ZSHORTCUT,ZLAUNCHPATH) "
+                            "VALUES (3,9,'action',2,100,-1,1,119,248,0,'-1','Sample Task')")
+                self.mutate("INSERT INTO ZBTTBASEENTITY (Z_PK,Z_ENT,ZUNIQUEIDENTIFIER,ZBELONGSTOPRESET2,"
+                            "ZGESTURETYPE,ZENABLEDNEW,ZACTION) VALUES (5,9,'new-sequence',100,624,1,118)")
+                self.mutate('INSERT INTO Z_2APPS_GESTURES VALUES (300,3),(300,5)')
+            return 'ok'
+        with patch.object(cli,'current_database',return_value=self.database), \
+                patch.object(cli.api,'call_worker',side_effect=worker), patch.object(cli.api,'restart_btt'), \
+                patch.object(cli.api,'wait_for_exports',side_effect=lambda _: deepcopy(self.exports)), \
+                contextlib.redirect_stdout(io.StringIO()):
+            result=cli.repair_checkpoint(self.state,apply=True)
+        self.assertTrue(result['verified_after_restart'])
+        self.assertEqual([(x['kind'],x['uuid']) for x in cli.audit_state(self.state)['findings']],
+                         [('added','new-sequence')])
+
     def test_whole_missing_menu_plan_preserves_existing_named_dependency(self):
         self.capture()
         self.mutate('DELETE FROM ZBTTBASEENTITY WHERE Z_PK IN (1,2,3)')

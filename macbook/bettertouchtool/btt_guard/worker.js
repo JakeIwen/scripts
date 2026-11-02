@@ -1,7 +1,7 @@
 // Generic BTT Guard runtime repair worker. Never executes configured actions.
 ObjC.import('Foundation');
 
-const REPAIR_COLLECTIONS = ['BTTMenuItems', 'BTTMenuItemActions', 'BTTAdditionalActions'];
+const REPAIR_COLLECTIONS = ['BTTMenuItems', 'BTTMenuItemActions', 'BTTAdditionalActions', 'BTTActionsToExecute'];
 const REPAIR_PAYLOAD_FIELDS = ['BTTAdditionalActionData', 'BTTNamedTriggerToTrigger',
     'BTTShellTaskActionScript', 'BTTShellTaskActionConfig', 'BTTTerminalCommand',
     'BTTShortcutToSend', 'BTTAppleScriptString', 'BTTTriggerName',
@@ -161,7 +161,7 @@ function repairCheckCreated(actual, operation, get, fingerprint) {
     if (actual.BTTTriggerType === undefined ? expectedType !== -1
         : Number(actual.BTTTriggerType) !== expectedType)
         throw new Error('Created record differs at BTTTriggerType: '+operation.uuid);
-    for (const [key, fallback] of [['BTTEnabled',1], ['BTTActionCategory',0], ['BTTOrder',0]]) {
+    for (const [key, fallback] of [['BTTEnabled',1], ['BTTEnabled2',1], ['BTTActionCategory',0], ['BTTOrder',0]]) {
         if (repairNumber(actual,key,fallback) !== repairNumber(definition,key,fallback))
             throw new Error('Created record differs at '+key+': '+operation.uuid);
     }

@@ -335,6 +335,39 @@ class GuardDefinitionTests(unittest.TestCase):
             with self.subTest(exported=exported), self.assertRaises(ValueError):
                 build_definitions(*keyboard_with(exported), {PRESET: "Master"})
 
+    def test_watched_triggers_flatten_action_sequences_and_read_their_enabled_flag(self):
+        def watched(shortcut_flags):
+            snapshot, exports = fixture()
+            snapshot["records"].update(
+                sequence=record("sequence", trigger_type=624),
+                **{"sequence-action": record(
+                    "sequence-action", parent="sequence", trigger_type=-1, action_type=59,
+                    payload={"launch_path": "http://localhost:3000", "additional_action_string": "Firefox"})},
+                shortcut=record("shortcut", trigger_type=0, action_type=-1,
+                                payload={"launch_path": "autoAdapt", "shortcut": "55,12"}),
+            )
+            snapshot["records"]["sequence"]["enabled"] = False
+            exports.append({
+                "BTTUUID": "sequence", "BTTTriggerType": 624, "BTTTriggerClass": "BTTTriggerTypeKeySequence",
+                "BTTEnabled2": 0, "BTTPredefinedActionType": 366,
+                "BTTActionsToExecute": [{"BTTUUID": "sequence-action", "BTTPredefinedActionType": 59,
+                                         "BTTOpenURL": "http://localhost:3000", "BTTOpenURLBrowser": "Firefox"}]})
+            # A trigger's own send-shortcut exports no action type.
+            exports.append({
+                "BTTUUID": "shortcut", "BTTTriggerType": 0, "BTTTriggerClass": "BTTTriggerTypeKeyboardShortcut",
+                "BTTGenericActionConfig": "autoAdapt", "BTTShortcutToSend": "55,12",
+                "BTTLayoutIndependentActionChar": "r", **shortcut_flags})
+            return exports, snapshot
+
+        # Outside floating menus BTTEnabled can be a stale 0; BTTEnabled2 mirrors the saved flag.
+        result = build_definitions(*watched({"BTTEnabled": 0}), {PRESET: "Master"})
+        self.assertNotIn("BTTActionsToExecute", result["sequence"])
+        self.assertEqual(result["sequence-action"]["BTTTriggerParentUUID"], "sequence")
+        self.assertEqual(result["sequence-action"]["BTTTriggerClass"], "BTTTriggerTypeKeySequence")
+        self.assertEqual(result["shortcut"]["BTTTriggerClass"], "BTTTriggerTypeKeyboardShortcut")
+        with self.assertRaisesRegex(ValueError, "enabled state differs"):
+            build_definitions(*watched({"BTTEnabled2": 0}), {PRESET: "Master"})
+
     def test_unknown_payload_mapping_or_missing_class_derivation_fails(self):
         snapshot, exports = fixture()
         snapshot["records"]["named"]["action_type"] = 386

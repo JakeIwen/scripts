@@ -36,6 +36,8 @@ SAFE_KIND_LABELS = {
     FindingKind.CONFIG_CHANGED: "configuration",
     FindingKind.DEPENDENCY_CHANGED: "dependency",
     FindingKind.UNASSIGNED: "unassigned",
+    FindingKind.ADDED: "added",
+    FindingKind.MULTIPLE_SCOPES: "scope",
     FindingKind.CHECKPOINT_MISSING: "checkpoint",
     FindingKind.CHECKPOINT_INVALID: "checkpoint",
     FindingKind.DATABASE_UNAVAILABLE: "database",

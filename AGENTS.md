@@ -203,7 +203,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   `macbook/bettertouchtool/btt_guard/` owns explicit known-good checkpoints,
   read-only integrity audits, approved restoration, ntfy warnings and periodic
   launchd control. Its `model.py` owns shared contracts/statuses; `storage.py`
-  owns private atomic state. Never promote audit output during ordinary audits
+  owns private atomic state. Besides the Media graph it watches every top-level
+  trigger of `database.WATCHED_TRIGGER_TYPES` in active presets (presence and state
+  only; a new one is `added` drift). Never promote audit output during ordinary audits
   or Guard repairs. There are two narrow exceptions. `btt_guard/installer_checkpoint.py`:
   a wired installer's `--apply` may advance an existing checkpoint only after a
   healthy pre-write baseline, saved-state verification, an unchanged checkpoint

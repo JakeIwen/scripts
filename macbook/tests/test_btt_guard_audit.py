@@ -340,6 +340,47 @@ class GuardDatabaseTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             read_snapshot(broken, ['root'])
 
+    def test_watches_top_level_triggers_of_listed_types_in_active_presets(self):
+        self.insert(1, 'root', ZBELONGSTOPRESET2=100, ZGESTURETYPE=767, app_scope=True)
+        self.insert(2, 'sequence', ZBELONGSTOPRESET2=100, ZGESTURETYPE=624, ZENABLEDNEW=0,
+                    app_scope=True)
+        self.insert(3, 'sequence-action', ZPARENT=2, ZBELONGSTOPRESET2=100, ZGESTURETYPE=-1,
+                    ZACTION=248, ZLAUNCHPATH='Missing Name Is Not Checked Here')
+        self.insert(4, 'touch-bar-button', ZBELONGSTOPRESET2=100, ZGESTURETYPE=629, app_scope=True)
+        self.insert(5, 'old-shortcut', ZBELONGSTOPRESET2=200, ZGESTURETYPE=0, app_scope=True)
+        self.insert(6, 'unscoped-sequence', ZBELONGSTOPRESET2=100, ZGESTURETYPE=624)
+        self.insert(7, 'unscoped-named', ZBELONGSTOPRESET2=100, ZGESTURETYPE=643)
+        snapshot = read_snapshot(self.path, ['root'])
+        self.assertEqual(snapshot['watched'], ['root', 'sequence', 'unscoped-named'])
+        self.assertEqual(set(snapshot['records']), {'root', 'sequence', 'sequence-action', 'unscoped-named'})
+        # Watched triggers are checked for presence and state; Media keeps the dependency checks.
+        self.assertEqual(snapshot['findings'], [])
+
+    def test_trigger_linked_to_trash_and_an_app_is_a_finding(self):
+        self.insert(1, 'root', ZBELONGSTOPRESET2=100, ZGESTURETYPE=767)
+        self.insert(2, 'sequence', ZBELONGSTOPRESET2=100, ZGESTURETYPE=624, app_scope=True)
+        with closing(sqlite3.connect(self.path)) as connection, connection:
+            connection.execute("INSERT INTO ZBTTBASEENTITY (Z_PK,Z_ENT,ZUNIQUEIDENTIFIER,ZBUNDLEIDENTIFIER) "
+                               "VALUES (301,2,'trash-uuid','BT.D')")
+            connection.execute('INSERT INTO Z_2APPS_GESTURES VALUES (301,2)')
+        self.assertEqual(read_snapshot(self.path, ['root'])['findings'], [{
+            'kind': FindingKind.MULTIPLE_SCOPES.value, 'uuid': 'sequence',
+            'detail': 'linked to BTT Trash and an app scope'}])
+
+    def test_new_watched_trigger_is_drift_and_a_lost_one_is_missing(self):
+        self.insert(1, 'root', ZBELONGSTOPRESET2=100, ZGESTURETYPE=767)
+        self.insert(2, 'old-sequence', ZBELONGSTOPRESET2=100, ZGESTURETYPE=624, app_scope=True)
+        expected = read_snapshot(self.path, ['root'])
+        with closing(sqlite3.connect(self.path)) as connection, connection:
+            connection.execute('DELETE FROM ZBTTBASEENTITY WHERE ZUNIQUEIDENTIFIER=?', ('old-sequence',))
+            connection.execute('DELETE FROM Z_2APPS_GESTURES WHERE Z_9APPS_GESTURES=2')
+        self.insert(3, 'new-sequence', ZBELONGSTOPRESET2=100, ZGESTURETYPE=624, app_scope=True)
+        current = read_snapshot(self.path, ['root'], include_ids=list(expected['records']))
+        self.assertEqual(compare(expected, current, 'checkpoint-watch')['findings'], [
+            {'kind': FindingKind.ADDED.value, 'uuid': 'new-sequence', 'detail': 'watched trigger not in checkpoint'},
+            {'kind': FindingKind.MISSING.value, 'uuid': 'old-sequence', 'detail': 'expected trigger missing'},
+        ])
+
     def test_missing_app_scope_relationship_schema_fails_closed(self):
         self.insert(1, 'root', ZBELONGSTOPRESET2=100, ZGESTURETYPE=767)
         with closing(sqlite3.connect(self.path)) as connection, connection:
@@ -356,7 +397,7 @@ class GuardAuditTests(unittest.TestCase):
                       payload={'launch_path': 'secret old command'},
                       config={'BTTMenuVisibility': 1}, app_scope=[])
         return dict(schema_version=1, captured_at=1.0, btt_version='6.826',
-                    database_name='fixture', roots=['root'], presets={'preset': True},
+                    database_name='fixture', roots=['root'], watched=[], presets={'preset': True},
                     records={'action': record}, findings=[])
 
     def test_compare_reports_fields_without_payload_values(self):

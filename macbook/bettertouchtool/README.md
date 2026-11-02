@@ -134,9 +134,10 @@ installers do not retroactively bless earlier repairs or unrelated damage.
 Not wired: Custom Conversion, Performance Audio, Strip Metadata, Notes, sizing
 repair/restore and playback-status tuning currently verify API readback, not a
 complete saved-state contract with an edit receipt. Their existing behavior is
-unchanged. `build_performance_audio_menu.py` only generates files. The Escape
-shortcut and Mac Panel triggers are outside the captured Media/dependency graph;
-Guard's own `repair --apply` restores the checkpoint and never replaces it.
+unchanged. `build_performance_audio_menu.py` only generates files. Their edits,
+like those of the unwired top-level installers (editing keys, Mac Panel), reach the
+checkpoint through edit acceptance below. Guard's own `repair --apply` restores the
+checkpoint and never replaces it.
 
 The active pointer never advances during ordinary audits, BTT upgrades, failed
 captures, or Guard's own repairs; only those two exceptions and an explicit
@@ -157,6 +158,19 @@ enabled flags, action sequence, scripts and operational menu settings. Pure labe
 font, color and main-item reorder changes do not trigger warnings. Named triggers
 and referenced floating dropdowns are included. Unreadable databases, unsupported
 schemas or invalid checkpoints are **unavailable**, never silently healthy.
+
+Beyond the Media graph, Guard watches every top-level keyboard shortcut, key
+sequence, named trigger, text transformer, menu-bar item, app-switch trigger and
+floating menu in each active preset, with their actions (`WATCHED_TRIGGER_TYPES`
+in `btt_guard/database.py`). A lost or changed one is drift like a lost menu button,
+and repair recreates it with its original UUID. Watched triggers are checked for
+presence and state only: the named-trigger and empty-button checks stay with
+Media, and a trigger's key binding (shortcut keys, typed sequence) is kept in the
+recovery definition but not compared. A watched trigger the checkpoint lacks is
+drift too (`added`), so edit acceptance protects a new trigger within 10 minutes; a
+watched trigger linked to BTT's Trash and an app is a `multiple_scopes` finding
+that blocks capture, since emptying the Trash deletes it. Touch Bar triggers (this
+Mac has none), trackpad gestures and triggers with no app scope are not watched.
 
 Repair is preview-only without `--apply`. It creates missing records individually
 and reattaches genuinely detached records; detached actions also regain their
@@ -273,8 +287,9 @@ store or a Guard checkpoint's `configuration.sqlite`.
 In the 6.826 era BTT emptied its Trash and deleted every trigger linked to Trash
 **and** Global, which a restore from Trash can leave behind (SHRG, L3K, JQQ, .PRY
 and AQB were restored on 2026-10-31). The preview's `at_risk_trash_linked` lists
-current triggers in that state. Key sequences sit outside the Guard checkpoint, so
-Guard does not alert when one disappears.
+current triggers in that state. Guard now watches top-level key sequences (above),
+so a lost one alerts and `guard repair --apply` recreates it from the checkpoint;
+this restore covers sequences lost before a checkpoint held them.
 
 ### Editing keys
 
@@ -551,9 +566,10 @@ and report identities. Recreate venvs rather than moving them.
   and saved configuration. No restart, browser launch or action execution occurs.
   Uses the existing local socket (`btt_socket.js`), not Apple Events; read-only
   preview works from an agent shell when BTT's Command Line / Socket Server is
-  enabled. Apply is always explicit. These independent triggers are outside Guard's
-  protected Media graph, so they neither need nor update its checkpoint. Existing
-  Guard drift must be reviewed separately; do not accept it just to add Panel.
+  enabled. Apply is always explicit. These top-level triggers are outside the Media
+  graph but watched by Guard; the installer does not checkpoint them itself, so edit
+  acceptance picks them up. Existing Guard drift must be reviewed separately; do not
+  accept it just to add Panel.
 - `tools_menu_item.py` / `install_tools_menu_item.js`: shared definition and guarded
   installer for the standard BPM, Rhythm, Convert Video, Interval Analysis and Temp
   Card Printer entries under Media > Tools. Their `install_*_menu.py` paths remain

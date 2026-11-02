@@ -80,9 +80,12 @@ def repair_checkpoint(state_dir, *, apply=False, checkpoint_id=None):
     api.restart_btt()
     report = audit_state(state_dir, manifest['checkpoint_id'])
     write_json(Path(state_dir)/'last-audit.json', report)
-    if report['status'] != AuditStatus.HEALTHY:
+    # A watched trigger added since the checkpoint is not the repair's to restore or verify.
+    unresolved = [item for item in report['findings'] if item['kind'] != FindingKind.ADDED.value]
+    if report['status'] == AuditStatus.UNAVAILABLE.value or unresolved:
         raise RuntimeError('Repair is not verified after restart. Review last-audit.json and the safety backup; no rollback performed.')
     after = current_for(expected)
+    after['records'] = {uuid: record for uuid, record in after['records'].items() if uuid in expected['records']}
     exports = api.wait_for_exports(after)
     rebuilt = build_definitions(exports, after, preset_names(current_database(), after['presets']))
     verify_created_appearance(definitions, rebuilt,
@@ -210,7 +213,7 @@ def main(argv=None):
     elif args.command == 'inspect':
         snapshot = read_snapshot()
         output = {'btt_version': snapshot['btt_version'], 'records': len(snapshot['records']),
-                  'findings': snapshot['findings']}
+                  'watched_triggers': len(snapshot['watched']), 'findings': snapshot['findings']}
         code = 2 if snapshot['findings'] else 0
     elif args.command == 'audit':
         output = audit_state(args.state_dir, args.checkpoint_id)

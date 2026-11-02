@@ -64,6 +64,8 @@ def _missing_detail(expected: ConfigSnapshot, uuid: str, record: RecordState) ->
         return 'expected root missing'
     if record['trigger_type'] == -1:
         return 'expected action missing'
+    if record['parent'] is None:
+        return 'expected trigger missing'
     return 'expected item missing'
 
 
@@ -72,11 +74,14 @@ def compare(
     current: ConfigSnapshot,
     checkpoint_id: str,
 ) -> AuditReport:
-    """Report expected-record drift without treating unrelated additions as damage."""
+    """Report expected-record drift. A new watched trigger is drift too, so edit
+    acceptance checkpoints it; other additions are not damage and are ignored."""
     findings: list[Finding] = [item for item in current['findings']
                                if not (item['kind'] == FindingKind.MISSING.value
                                        and item['uuid'] in expected['records'])]
     findings.extend(_preset_findings(expected, current))
+    findings.extend(_finding(FindingKind.ADDED, uuid, 'watched trigger not in checkpoint')
+                    for uuid in current['watched'] if uuid not in expected['records'])
     for uuid, expected_record in expected['records'].items():
         current_record = current['records'].get(uuid)
         if current_record is None:

@@ -42,6 +42,17 @@ OPERATIONAL_CONFIG_KEYS = {
     'BTTMenuVisibility', 'BTTMenuWindowLevel',
 }
 NO_ACTION_TYPES = {-1, 366}
+# Top-level triggers watched in every active preset beside the Media graph, so a
+# lost key sequence alerts like a lost menu button. Watched triggers are checked
+# for presence and state only; dependency and empty-button checks stay with Media.
+# Touch Bar types are left out (this Mac has none), and an unlisted type stays
+# unwatched rather than block every checkpoint on an export Guard never validated.
+WATCHED_TRIGGER_TYPES = {
+    0: 'keyboard shortcut', 624: 'key sequence', 643: 'named trigger', 674: 'menu bar item',
+    679: 'text transformer', 767: 'floating menu', 779: 'active app changed',
+}
+NAMED_TRIGGER = 643
+TRASH = 'BT.D'
 
 
 def _json_blob(value: Any, field: str, uuid: str) -> Any:
@@ -243,6 +254,42 @@ def _unassigned_findings(effective_ids: set[int], rows: list[sqlite3.Row]) -> li
     return findings
 
 
+def _watched_triggers(
+    rows: list[sqlite3.Row], gesture_entity: int, app_scopes: dict[int, list[str]]
+) -> tuple[list[sqlite3.Row], set[int], list[Finding]]:
+    """Watched top-level triggers, every record beneath them, and their scope findings."""
+    active_presets = _active_presets(rows)
+    watched: list[sqlite3.Row] = []
+    findings: list[Finding] = []
+    for row in rows:
+        if (row['Z_ENT'] != gesture_entity or row['ZPARENT'] is not None
+                or row['ZGESTURETYPE'] not in WATCHED_TRIGGER_TYPES
+                or row['ZBELONGSTOPRESET2'] not in active_presets):
+            continue
+        if not row['ZUNIQUEIDENTIFIER']:
+            raise ValueError('A watched BTT trigger lacks a UUID.')
+        scopes = app_scopes.get(row['Z_PK'], [])
+        # A trigger with no app scope never fires and BTT cannot recreate it;
+        # legacy unscoped named triggers still run when called.
+        if not scopes and row['ZGESTURETYPE'] != NAMED_TRIGGER:
+            continue
+        if len(scopes) > 1:
+            # Emptying BTT's Trash deletes a trigger linked to Trash and an app,
+            # which is how the 6.826-era key sequences were lost.
+            detail = 'linked to BTT Trash and an app scope' if TRASH in scopes else 'linked to several app scopes'
+            findings.append(_finding(FindingKind.MULTIPLE_SCOPES, row['ZUNIQUEIDENTIFIER'], detail))
+        watched.append(row)
+    children = _children(rows)
+    selected: set[int] = set()
+    stack = list(watched)
+    while stack:
+        row = stack.pop()
+        if row['Z_PK'] not in selected:
+            selected.add(row['Z_PK'])
+            stack.extend(children.get(row['Z_PK'], ()))
+    return watched, selected, findings
+
+
 def _runnable_action(row: sqlite3.Row) -> bool:
     action = int(row['ZACTION'] if row['ZACTION'] is not None else -1)
     if action not in NO_ACTION_TYPES:
@@ -354,7 +401,7 @@ def read_snapshot(
     include_ids: list[str] | None = None,
     include_preset_ids: list[str] | None = None,
 ) -> ConfigSnapshot:
-    """Capture graph roots plus exact expected IDs in one read-only transaction."""
+    """Capture graph roots, watched triggers and exact expected IDs in one read-only transaction."""
     path = Path(database) if database is not None else current_database()
     requested_roots = list(roots) if roots is not None else [MEDIA]
     requested_ids = set(include_ids or ())
@@ -372,6 +419,9 @@ def read_snapshot(
             app_scopes = _app_scopes(connection, entities)
             selected, effective_ids, findings = _select_graph(requested_roots, rows, by_uuid)
             findings.extend(_unassigned_findings(effective_ids, rows))
+            watched, watched_ids, scope_findings = _watched_triggers(rows, entities['GESTURE'], app_scopes)
+            selected |= watched_ids
+            findings.extend(scope_findings)
             selected.update(by_uuid[uuid]['Z_PK'] for uuid in requested_ids if uuid in by_uuid)
             records = {row['ZUNIQUEIDENTIFIER']: _record(row, by_pk, action_ranks, app_scopes) for row in rows
                        if row['Z_PK'] in selected}
@@ -387,6 +437,7 @@ def read_snapshot(
         btt_version=btt_version or _database_version(path),
         database_name=path.name,
         roots=requested_roots,
+        watched=sorted(row['ZUNIQUEIDENTIFIER'] for row in watched),
         presets=presets,
         records=dict(sorted(records.items())),
         findings=sorted(findings, key=lambda item: (item['kind'], item['uuid'], item['detail'])),

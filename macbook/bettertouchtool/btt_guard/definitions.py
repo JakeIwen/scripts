@@ -15,6 +15,7 @@ COLLECTIONS = {
     "BTTMenuItems": "item",
     "BTTMenuItemActions": "action",
     "BTTAdditionalActions": "action",
+    "BTTActionsToExecute": "action",  # how exports nest a watched trigger's action sequence
     "BTTMenuItemTriggers": "trigger",
 }
 VOLATILE_KEYS = {
@@ -51,6 +52,7 @@ PAYLOAD_FIELDS = {
     "BTTAdditionalActionData",
     "BTTShortcutToSend",
     "BTTShellTaskActionConfig",
+    "BTTOpenURL",
 }
 # Export field holding ZLAUNCHPATH, by saved action type. A send-shortcut action
 # (-1) saves "autoAdapt" there, as BTTGenericActionConfig exports it; its
@@ -63,6 +65,15 @@ LAUNCH_PATH_FIELDS = {
     264: "BTTLayoutIndependentActionChar",
     129: "BTTDelayNextActionBy",
     281: "BTTGenericActionConfig",
+    59: "BTTOpenURL",
+    250: "BTTActionItemsToPaste",
+}
+# Export field holding ZADDITIONALACTIONSTRING, by saved action type.
+ADDITIONAL_STRING_FIELDS = {
+    206: "BTTShellTaskActionConfig",
+    -1: "BTTGenericActionConfig2",
+    59: "BTTOpenURLBrowser",
+    250: "BTTActionPasteOptions",
 }
 TOP_LEVEL_TEXT_FIELDS = {
     "BTTMenuName",
@@ -197,7 +208,8 @@ def _validate_action_type(expected: dict[str, Any], node: dict[str, Any], uuid: 
     wanted = int(expected["action_type"])
     actual = _runtime_action_type(node, uuid)
     if wanted == -1 and _keyboard_payload(expected["payload"]):
-        valid = actual == 264
+        # Actions export a send-shortcut as 264; a trigger's own send-shortcut omits it.
+        valid = actual == 264 or (actual is None and expected["parent"] is None)
     elif wanted in (-1, 366):
         valid = actual in (None, -1, 366)
     else:
@@ -247,8 +259,8 @@ def _payload_field(key: str, expected: dict[str, Any], uuid: str) -> str:
         return "BTTShortcutToSend"
     if key == "gesture_config" and int(expected["trigger_type"]) == 643:
         return "BTTTriggerName"
-    if key == "additional_action_string" and action_type == 206:
-        return "BTTShellTaskActionConfig"
+    if key == "additional_action_string" and action_type in ADDITIONAL_STRING_FIELDS:
+        return ADDITIONAL_STRING_FIELDS[action_type]
     raise ValueError(f"Unsupported payload mapping {key} for BTT record {uuid}.")
 
 
@@ -276,11 +288,22 @@ def _validate_payload(expected: dict[str, Any], node: dict[str, Any], uuid: str)
             raise ValueError(f"Runtime payload has unexpected {field}: {uuid}")
 
 
+def _enabled_flag(records: dict[str, dict[str, Any]], uuid: str) -> str:
+    """The export flag that mirrors the saved one: floating menus keep it in BTTEnabled,
+    other triggers in BTTEnabled2 (their BTTEnabled can be a stale 0)."""
+    seen = {uuid}
+    while records[uuid]["parent"] in records and records[uuid]["parent"] not in seen:
+        uuid = records[uuid]["parent"]
+        seen.add(uuid)
+    return "BTTEnabled" if int(records[uuid]["trigger_type"]) in FLOATING_TYPES else "BTTEnabled2"
+
+
 def _validate_record(
     uuid: str,
     expected: dict[str, Any],
     node: dict[str, Any],
     observed_parent: str | None,
+    enabled_flag: str,
 ) -> None:
     wanted_parent = expected["parent"]
     declared_parent = node.get("BTTTriggerParentUUID")
@@ -291,7 +314,7 @@ def _validate_record(
     trigger_type = _as_int(node.get("BTTTriggerType"), "trigger type", uuid)
     if trigger_type != int(expected["trigger_type"]):
         raise ValueError(f"Runtime trigger type differs for BTT record {uuid}.")
-    enabled = _as_int(node.get("BTTEnabled", 1), "enabled state", uuid) != 0
+    enabled = _as_int(node.get(enabled_flag, 1), "enabled state", uuid) != 0
     if enabled != bool(expected["enabled"]):
         raise ValueError(f"Runtime enabled state differs for BTT record {uuid}.")
     category = _as_int(node.get("BTTActionCategory", 0), "action category", uuid)
@@ -471,7 +494,7 @@ def validate_definitions(
             raise ValueError(f"Definition UUID differs from its checkpoint key: {uuid}")
         if any(key in node for key in COLLECTIONS):
             raise ValueError(f"Checkpoint definition is not flat: {uuid}")
-        _validate_record(uuid, expected, node, expected.get("parent"))
+        _validate_record(uuid, expected, node, expected.get("parent"), _enabled_flag(records, uuid))
         order = _as_int(node.get("BTTOrder", 0), "order", uuid)
         if order != int(expected["order"]):
             raise ValueError(f"Definition order differs for BTT record {uuid}.")
@@ -561,12 +584,11 @@ def build_definitions(
         raise ValueError(f"BTT runtime export has {category} UUID: {uuid}")
     _fill_compact_action_types(nodes, roles, records)
     for uuid in top_ids:
-        expected = records[uuid]
-        if expected["parent"] is not None or int(expected["trigger_type"]) not in (643, 767):
+        if records[uuid]["parent"] is not None:
             raise ValueError(f"Unexpected top-level BTT export: {uuid}")
     for uuid, expected in records.items():
         _validate_app_scope(expected, nodes[uuid], uuid, require_explicit=False)
-        _validate_record(uuid, expected, nodes[uuid], observed_parents[uuid])
+        _validate_record(uuid, expected, nodes[uuid], observed_parents[uuid], _enabled_flag(records, uuid))
     _canonicalize_orders(nodes, records)
     _finalize(nodes, records, preset_names)
     result = {uuid: nodes[uuid] for uuid in records}
