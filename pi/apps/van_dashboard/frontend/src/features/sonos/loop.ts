@@ -57,6 +57,11 @@ export interface LoopRegion {
   draft: boolean;
 }
 
+/** The running loop's range, for bars that never show a draft (the tile). */
+export function activeLoopRegion(loop: SonosLoop): LoopRegion | null {
+  return loop.active ? { start: loop.startSeconds, end: loop.endSeconds, draft: false } : null;
+}
+
 /** The range to mark on the progress bar: the running loop, else a valid draft. */
 export function loopRegion(
   loop: SonosLoop,
@@ -65,7 +70,7 @@ export function loopRegion(
   durationSeconds: number | null,
 ): LoopRegion | null {
   if (!durationSeconds) return null;
-  if (loop.active) return { start: loop.startSeconds, end: loop.endSeconds, draft: false };
+  if (loop.active) return activeLoopRegion(loop);
   if (!editing || draft.start === null || draft.end === null) return null;
   if (loopProblem(draft.start, draft.end, durationSeconds)) return null;
   return { start: draft.start, end: draft.end, draft: true };

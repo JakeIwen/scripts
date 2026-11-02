@@ -1,6 +1,7 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { deferred } from '../../test/deferred';
 import type { SonosControls } from './controls';
 import { loopProblem, parseLoopTime } from './loop';
 import { SonosPlayback } from './SonosPlayback';
@@ -29,7 +30,6 @@ function status(loop: SonosLoop = { active: false, notice: null }): SonosStatus 
 const progress: SonosTrackProgress = {
   positionSeconds: 83.6,
   durationSeconds: 225,
-  percent: 37,
   label: '1:23 of 3:45',
 };
 
@@ -42,6 +42,7 @@ function controlMocks(overrides: Partial<SonosControls> = {}): SonosControls {
     lastError: null,
     transport: vi.fn().mockResolvedValue(result),
     seek: vi.fn().mockResolvedValue(result),
+    seekTo: vi.fn().mockResolvedValue(result),
     startLoop: vi.fn().mockResolvedValue(result),
     stopLoop: vi.fn().mockResolvedValue(result),
     selectCoordinator: vi.fn().mockResolvedValue(result),
@@ -86,6 +87,27 @@ describe('full-pane skips and loop', () => {
     rerender(<SonosPlayback status={status()} progress={null} controls={controls} />);
     expect(screen.getByRole('button', { name: 'Forward 10 seconds' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Loop' })).toBeDisabled();
+  });
+
+  it('scrubs to where the drag is released and shows that time until the seek lands', async () => {
+    const seek = deferred<{ message: string }>();
+    const controls = controlMocks({ seekTo: vi.fn().mockReturnValue(seek.promise) });
+    render(<SonosPlayback status={status()} progress={progress} controls={controls} />);
+    const slider = screen.getByRole('slider', { name: 'Track position' });
+    expect(slider).toHaveValue('83');
+    expect(slider).toHaveAttribute('aria-valuetext', '1:23 of 3:45');
+
+    fireEvent.change(slider, { target: { value: '150' } });
+    expect(controls.seekTo).toHaveBeenCalledWith(150);
+    expect(slider).toHaveValue('150');
+    expect(screen.getByText('2:30')).toBeInTheDocument();
+
+    await act(async () => {
+      seek.resolve({ message: 'Sonos at 2:30' });
+      await seek.promise;
+    });
+    expect(screen.queryByText('2:30')).not.toBeInTheDocument();
+    expect(slider).toHaveValue('83');
   });
 
   it('starts collapsed and loops the range marked with Now and the nudges', () => {

@@ -89,7 +89,11 @@ class SeekTests(unittest.TestCase):
         self.assertEqual(controller.seek(-100), 0)
         speaker.position = 220
         self.assertEqual(controller.seek(10), 224)
-        self.assertEqual(speaker.seeks, ["0:01:33", "0:00:00", "0:03:44"])
+        self.assertEqual(controller.seek(position=150), 150)
+        self.assertEqual(controller.seek(position=900), 224)
+        self.assertEqual(
+            speaker.seeks, ["0:01:33", "0:00:00", "0:03:44", "0:02:30", "0:03:44"]
+        )
 
     def test_refuses_sources_without_a_clock(self):
         speaker = ScriptedSpeaker()
@@ -236,6 +240,15 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(self.speaker.seeks, [])
         response = self.client.post("/api/speakers/seek", data={"offset": "-10"})
         self.assertEqual(response.get_json(), {"ok": True, "message": "Sonos at 1:13", "position": 73})
+
+    def test_seek_scrubs_to_an_absolute_position_and_needs_exactly_one_target(self):
+        for data in ({}, {"offset": "10", "position": "40"}, {"position": "-1"}):
+            response = self.client.post("/api/speakers/seek", data=data)
+            self.assertEqual(response.status_code, 400, data)
+        self.assertEqual(self.speaker.seeks, [])
+        response = self.client.post("/api/speakers/seek", data={"position": "150"})
+        self.assertEqual(response.get_json()["position"], 150)
+        self.assertEqual(self.speaker.seeks, ["0:02:30"])
 
     def test_seek_reports_an_unseekable_source_as_a_conflict(self):
         self.speaker.get_current_track_info = lambda: {"position": "", "duration": ""}

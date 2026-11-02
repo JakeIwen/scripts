@@ -221,6 +221,75 @@ describe('lighting views', () => {
     expect(onOpen).toHaveBeenCalledOnce();
   });
 
+  it('toggles the solder LED from the tile summary row', () => {
+    const payload = lightingPayload();
+    const lighting = payload.lighting as Record<string, unknown>;
+    lighting.available_count = 6;
+    lighting.total_count = 6;
+    const groups = lighting.groups as unknown[];
+    groups.push({
+      id: 'solder',
+      label: 'Solder',
+      state: 'off',
+      power_switch: null,
+      lights: [
+        {
+          entity_id: 'light.solder_led',
+          label: 'Solder LED',
+          state: 'off',
+          available: true,
+          brightness: null,
+          color_mode: null,
+          supports_hue: false,
+          hue: null,
+          supports_color_temperature: false,
+          color_temp_kelvin: null,
+          min_color_temp_kelvin: null,
+          max_color_temp_kelvin: null,
+        },
+      ],
+    });
+    const actions = controls();
+    const { rerender } = render(
+      <LightingTile
+        status={decodeLightingStatus(payload)}
+        error={null}
+        refreshing={false}
+        onOpen={vi.fn()}
+        controls={actions}
+      />,
+    );
+
+    const solder = screen.getByRole('button', { name: 'Solder SW power · Off' });
+    expect(solder).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(solder);
+    expect(actions.setPower).toHaveBeenCalledWith('light.solder_led', true);
+
+    rerender(
+      <LightingTile
+        status={decodeLightingStatus(payload)}
+        error={null}
+        refreshing={false}
+        onOpen={vi.fn()}
+        controls={controls({ running: true })}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Solder SW power · Off' })).toBeDisabled();
+  });
+
+  it('omits the solder switch when the light is not configured', () => {
+    render(
+      <LightingTile
+        status={decodeLightingStatus(lightingPayload())}
+        error={null}
+        refreshing={false}
+        onOpen={vi.fn()}
+        controls={controls()}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /^Solder SW/ })).not.toBeInTheDocument();
+  });
+
   it('disables all mutations during a single-flight action', () => {
     const status = decodeLightingStatus(lightingPayload());
     const onRefresh = vi.fn().mockResolvedValue(status);

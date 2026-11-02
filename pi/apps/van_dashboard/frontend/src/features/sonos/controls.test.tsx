@@ -124,14 +124,16 @@ describe('useSonosControls', () => {
 
     await act(async () => {
       await result.current.seek(10);
+      await result.current.seekTo(150);
       await result.current.startLoop(80, 101);
       await result.current.stopLoop();
     });
 
-    expect(seekSonos).toHaveBeenCalledWith(10);
+    expect(seekSonos).toHaveBeenCalledWith({ offset: 10 });
+    expect(seekSonos).toHaveBeenCalledWith({ position: 150 });
     expect(startSonosLoop).toHaveBeenCalledWith(80, 101);
     expect(stopSonosLoop).toHaveBeenCalledOnce();
-    expect(refresh).toHaveBeenCalledTimes(3);
+    expect(refresh).toHaveBeenCalledTimes(4);
     expect(result.current.lastMessage).toBe('Loop stopped');
   });
 });

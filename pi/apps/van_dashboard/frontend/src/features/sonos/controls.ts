@@ -24,6 +24,7 @@ export interface SonosControls {
   lastError: string | null;
   transport: (action: SonosTransportAction) => Promise<SonosMutationResult | null>;
   seek: (offsetSeconds: number) => Promise<SonosMutationResult | null>;
+  seekTo: (positionSeconds: number) => Promise<SonosMutationResult | null>;
   startLoop: (startSeconds: number, endSeconds: number) => Promise<SonosMutationResult | null>;
   stopLoop: () => Promise<SonosMutationResult | null>;
   selectCoordinator: (name: string) => Promise<SonosMutationResult | null>;
@@ -93,7 +94,12 @@ export function useSonosControls(
     [perform],
   );
   const seek = useCallback(
-    (offsetSeconds: number) => perform(`seek:${offsetSeconds}`, () => seekSonos(offsetSeconds)),
+    (offsetSeconds: number) =>
+      perform(`seek:${offsetSeconds}`, () => seekSonos({ offset: offsetSeconds })),
+    [perform],
+  );
+  const seekTo = useCallback(
+    (positionSeconds: number) => perform('seek:to', () => seekSonos({ position: positionSeconds })),
     [perform],
   );
   const startLoop = useCallback(
@@ -137,6 +143,7 @@ export function useSonosControls(
     lastError,
     transport,
     seek,
+    seekTo,
     startLoop,
     stopLoop,
     selectCoordinator,

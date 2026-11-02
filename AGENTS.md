@@ -555,8 +555,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   alarms cannot release an in-flight write. Delete and enable are explicit commands.
   Read fresh device state before mutations, preserve existing music metadata,
   reject stale revisions, and never automatically retry an uncertain alarm write.
-- Sonos skips and A-B loop: `SonosController.seek` moves the track by whole seconds
-  from a fresh device position (`/api/speakers/seek`). `sonos_loop.py` runs the loop
+- Sonos skips, scrubbing and A-B loop: `SonosController.seek` moves the track by whole
+  seconds, by `offset` from a fresh device position or to an absolute `position`
+  (`/api/speakers/seek`). `SonosSeekBar.tsx` is the scrubbable track bar on both the
+  tile and the pane; it seeks once, on release. `sonos_loop.py` runs the loop
   on the Pi, not the browser, so it survives a locked phone: one worker thread polls
   the looping speaker (5 Hz near the end) and seeks back, and stops itself on a track
   change (title/artist/duration; Spotify Connect keeps one URI), a failed seek or

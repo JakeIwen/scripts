@@ -85,6 +85,7 @@ function controlMocks(overrides: Partial<SonosControls> = {}): SonosControls {
     lastError: null,
     transport: vi.fn().mockResolvedValue(result),
     seek: vi.fn().mockResolvedValue(result),
+    seekTo: vi.fn().mockResolvedValue(result),
     startLoop: vi.fn().mockResolvedValue(result),
     stopLoop: vi.fn().mockResolvedValue(result),
     selectCoordinator: vi.fn().mockResolvedValue(result),
@@ -187,6 +188,11 @@ describe('Sonos views', () => {
     expect(screen.getByRole('button', { name: 'Next track' })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: 'Next track' }));
     expect(controls.transport).toHaveBeenCalledWith('next');
+    fireEvent.change(screen.getByRole('slider', { name: 'Track position' }), {
+      target: { value: '150' },
+    });
+    expect(controls.seekTo).toHaveBeenCalledWith(150);
+    expect(onOpen).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Open Sonos details' }));
     expect(onOpen).toHaveBeenCalledOnce();
   });

@@ -1,5 +1,7 @@
 import { Tile, TileStatusAnnouncement } from '../../components/Tile';
 import type { SonosControls } from './controls';
+import { activeLoopRegion } from './loop';
+import { SonosSeekBar } from './SonosSeekBar';
 import { SonosTransportControls } from './SonosTransportControls';
 import type { SonosStatus, SonosTrackProgress } from './types';
 import './sonos.css';
@@ -84,9 +86,11 @@ export function SonosTile({
       />
       <SonosTransportControls status={status} controls={controls} compact />
       {progress && (
-        <div className="sonos-progress" aria-label={`Track progress: ${progress.label}`}>
-          <span style={{ width: `${progress.percent}%` }} />
-        </div>
+        <SonosSeekBar
+          progress={progress}
+          onSeek={controls.seekTo}
+          loop={activeLoopRegion(status.loop)}
+        />
       )}
       <TileStatusAnnouncement>
         {refreshing ? 'Refreshing playback…' : error ? `Refresh failed · ${error.message}` : ''}

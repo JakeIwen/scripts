@@ -26,12 +26,10 @@ export function projectTrackProgress(
       ? Math.max(0, (now - sampledAt) / 1_000)
       : 0;
   const positionSeconds = Math.min(track.durationSeconds, sampledPosition + elapsed);
-  const percent = (positionSeconds / track.durationSeconds) * 100;
 
   return {
     positionSeconds,
     durationSeconds: track.durationSeconds,
-    percent,
     label: `${formatTrackClock(positionSeconds)} of ${formatTrackClock(track.durationSeconds)}`,
   };
 }

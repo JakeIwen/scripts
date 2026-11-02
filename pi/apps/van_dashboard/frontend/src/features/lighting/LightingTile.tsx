@@ -6,9 +6,15 @@ import {
   averageGroupBrightness,
   lightingStateLabel,
   lightingStateTone,
+  QUICK_LIGHT_SWITCH,
   QUICK_LIGHTING_GROUP_IDS,
 } from './presentation';
-import type { LightingControlActions, LightingGroup, LightingStatus } from './types';
+import type {
+  LightingControlActions,
+  LightingGroup,
+  LightingLight,
+  LightingStatus,
+} from './types';
 import './lighting.css';
 
 export interface LightingTileProps {
@@ -66,6 +72,31 @@ function QuickRoomControl({
   );
 }
 
+function QuickLightSwitch({
+  light,
+  controls,
+}: {
+  light: LightingLight;
+  controls: LightingControlActions;
+}) {
+  const enabled = light.state === 'on';
+
+  return (
+    <TooltipButton
+      type="button"
+      className="lighting-quick-room__power lighting-quick-switch"
+      disabled={!light.available || controls.running}
+      aria-pressed={enabled}
+      aria-label={`${QUICK_LIGHT_SWITCH.label} power · ${lightingStateLabel(light.state)}`}
+      tooltip={`${light.label} · ${lightingStateLabel(light.state)}`}
+      onClick={() => runControl(controls.setPower(light.entityId, !enabled))}
+    >
+      <span className={`lighting-quick-room__dot is-${light.state}`} aria-hidden="true" />
+      <span className="lighting-quick-room__label">{QUICK_LIGHT_SWITCH.label}</span>
+    </TooltipButton>
+  );
+}
+
 export function LightingTile({ status, error, refreshing, onOpen, controls }: LightingTileProps) {
   if (!status) {
     return (
@@ -91,12 +122,20 @@ export function LightingTile({ status, error, refreshing, onOpen, controls }: Li
   const quickGroups = QUICK_LIGHTING_GROUP_IDS.map((id) =>
     status.groups.find((group) => group.id === id),
   ).filter((group) => group !== undefined);
+  const quickSwitch = status.groups
+    .flatMap((group) => group.lights)
+    .find((light) => light.entityId === QUICK_LIGHT_SWITCH.entityId);
 
   return (
     <Tile
       icon="💡"
       title="Lighting"
-      summary={summary}
+      summary={
+        <>
+          <span className="lighting-tile__counts">{summary}</span>
+          {quickSwitch && <QuickLightSwitch light={quickSwitch} controls={controls} />}
+        </>
+      }
       status={
         <TooltipButton
           type="button"

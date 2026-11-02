@@ -296,11 +296,12 @@ class SonosController:
             coordinator.next()
             return "Next Sonos track"
 
-    def seek(self, offset):
-        """Move the current track by whole seconds from a fresh device position."""
+    def seek(self, offset=None, position=None):
+        """Seek by whole seconds: `offset` from a fresh device position, or to `position`."""
         coordinator = self.coordinator()
-        _track, position, duration = seekable_track(coordinator)
-        # Stop a second short of the end so a forward skip never ends the track.
-        target = max(0, min(duration - 1, position + int(offset)))
+        _track, current, duration = seekable_track(coordinator)
+        target = int(position) if position is not None else current + int(offset)
+        # Stop a second short of the end so a skip or scrub never ends the track.
+        target = max(0, min(duration - 1, target))
         coordinator.seek(seek_clock(target))
         return target

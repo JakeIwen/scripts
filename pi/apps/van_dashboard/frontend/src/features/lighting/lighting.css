@@ -21,10 +21,30 @@
 }
 
 .lighting-tile > .tile__summary {
+  display: flex;
   width: 100%;
   min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin-top: auto;
-  padding: 12px 15px 0;
+  padding: 12px 12px 0 15px;
+}
+
+.lighting-tile__counts {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Sits above the tile's open-sheet hit area, like the room controls. */
+.lighting-quick-room__power.lighting-quick-switch {
+  position: relative;
+  z-index: 3;
+  min-height: 22px;
+  flex-shrink: 0;
+  padding: 4px 7px;
 }
 
 .lighting-tile > .tile__body {

@@ -6,6 +6,7 @@ import type {
   SonosMuteResult,
   SonosMutationResult,
   SonosSeekResult,
+  SonosSeekTarget,
   SonosSelectionResult,
   SonosStatus,
   SonosTransportAction,
@@ -125,8 +126,13 @@ export async function controlSonosTransport(
   return decodeMessage(payload, 'Sonos transport response');
 }
 
-export async function seekSonos(offsetSeconds: number): Promise<SonosSeekResult> {
-  const payload = await postForm('/api/speakers/seek', { offset: Math.trunc(offsetSeconds) });
+export async function seekSonos(target: SonosSeekTarget): Promise<SonosSeekResult> {
+  const payload = await postForm(
+    '/api/speakers/seek',
+    'offset' in target
+      ? { offset: Math.trunc(target.offset) }
+      : { position: Math.trunc(target.position) },
+  );
   const result = decodeMessage(payload, 'Sonos seek response');
   const response = objectValue(payload, 'Sonos seek response');
   return {

@@ -33,16 +33,29 @@ def whole_seconds(name):
         raise ValueError(f"{name} must be whole seconds") from None
 
 
+def seek_target():
+    """Read exactly one of a relative `offset` (skips) or absolute `position` (scrubs)."""
+    if ("offset" in request.values) == ("position" in request.values):
+        raise ValueError("send either offset or position")
+    if "position" in request.values:
+        position = whole_seconds("position")
+        if position < 0:
+            raise ValueError("position must not be negative")
+        return {"position": position}
+    offset = whole_seconds("offset")
+    if not 0 < abs(offset) <= MAX_SEEK_OFFSET:
+        raise ValueError(f"offset must be 1 to {MAX_SEEK_OFFSET} seconds either way")
+    return {"offset": offset}
+
+
 @bp.route("/api/speakers/seek", methods=["POST"])
 def api_speaker_seek():
     try:
-        offset = whole_seconds("offset")
-        if not 0 < abs(offset) <= MAX_SEEK_OFFSET:
-            raise ValueError(f"offset must be 1 to {MAX_SEEK_OFFSET} seconds either way")
+        target = seek_target()
     except ValueError as exc:
         return api_error(exc, 400)
     try:
-        position = sonos.seek(offset)
+        position = sonos.seek(**target)
     except SonosNotSeekable as exc:
         return api_error(exc, 409)
     except Exception as exc:

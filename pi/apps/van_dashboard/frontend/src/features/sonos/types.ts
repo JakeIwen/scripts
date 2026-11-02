@@ -41,11 +41,13 @@ export interface SonosStatus {
 export interface SonosTrackProgress {
   positionSeconds: number;
   durationSeconds: number;
-  percent: number;
   label: string;
 }
 
 export type SonosTransportAction = 'play_pause' | 'previous' | 'next';
+
+/** A skip moves by `offset` seconds; a scrub jumps to `position`. */
+export type SonosSeekTarget = { offset: number } | { position: number };
 
 export interface SonosMutationResult {
   message: string;
