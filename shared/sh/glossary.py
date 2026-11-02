@@ -169,20 +169,26 @@ def record(path: Path, event: dict) -> None:
     if not definitions:
         return
     cwd = event.get("cwd") if isinstance(event.get("cwd"), str) else ""
-    link = FILE_URL.search(message)
+    found = FILE_URL.search(message)
+    link = found.group(0).rstrip(".,;") if found else None
     at = datetime.now().astimezone().isoformat()
     with locked(path):
         entries = read_store(path)
-        seen = {(entry["session"], entry["term"].casefold()) for entry in entries}
+        seen = {(entry["session"], entry["term"].casefold()): entry for entry in entries}
         for term, definition in definitions:
             key = (session, term.casefold())
             if key in seen:
+                # A reply long_reply_guard.py sent back to become a page is
+                # recorded first; its short follow-up carries the page link.
+                if link and not seen[key]["link"]:
+                    seen[key]["link"] = link
                 continue
             identity = json.dumps([session, term.casefold(), definition], ensure_ascii=False)
-            entries.append(Entry(id=hashlib.sha1(identity.encode("utf-8")).hexdigest(), term=term,
-                                 definition=definition, at=at, host=HOST, cwd=cwd, repo=repository(cwd),
-                                 session=session, link=link.group(0).rstrip(".,;") if link else None))
-            seen.add(key)
+            entry = Entry(id=hashlib.sha1(identity.encode("utf-8")).hexdigest(), term=term,
+                          definition=definition, at=at, host=HOST, cwd=cwd, repo=repository(cwd),
+                          session=session, link=link)
+            entries.append(entry)
+            seen[key] = entry
         write_text(path, serialize(entries))
 
 
@@ -193,8 +199,9 @@ def change(path: Path, peer: str, removed: list[str] = ()) -> tuple[list[Entry],
         drop = {term.casefold() for term in removed}
         merged = {}
         for entry in local + (parse_store(remote) if remote is not None else []):
-            if entry["term"].casefold() not in drop:
-                merged.setdefault(entry["id"], entry)
+            # Prefer the copy that gained a page link after the other was synced.
+            if entry["term"].casefold() not in drop and not (merged.get(entry["id"]) or {}).get("link"):
+                merged[entry["id"]] = entry
         entries = newest(list(merged.values()))
         text = serialize(entries)
         write_text(path, text)

@@ -165,6 +165,14 @@ Some other prose.
         self.assertEqual(len(self.entries()), 2)
         self.assertNotEqual(self.entries()[1]['id'], identity)
 
+    def test_follow_up_reply_fills_the_page_link_a_recorded_term_lacked(self):
+        # A long reply sent back by long_reply_guard.py, then its short follow-up.
+        self.stop('**Terms**\n- **Seam:** Boundary.')
+        self.stop('file:///tmp/reply.html\n**Terms**\n- **Seam:** Boundary.')
+        self.assertEqual([entry['link'] for entry in self.entries()], ['file:///tmp/reply.html'])
+        self.stop('file:///tmp/later.html\n**Terms**\n- **Seam:** Boundary.')
+        self.assertEqual([entry['link'] for entry in self.entries()], ['file:///tmp/reply.html'])
+
     def test_concurrent_stop_hooks_keep_every_session_and_deduplicate(self):
         def finish(number):
             return self.run_script('--hook', stdin=json.dumps({
@@ -280,6 +288,15 @@ Some other prose.
         self.assertEqual(self.entries(), self.entries(self.peer_file))
         self.assertEqual(self.run_script('sync', peer='pi').returncode, 0)
         self.assertEqual(len(self.entries()), 2)
+
+    def test_peer_merge_keeps_the_copy_that_gained_a_page_link(self):
+        bare = self.entry('Adapter', 'mac', host='mac')
+        linked = {**bare, 'link': 'file:///tmp/reply.html'}
+        self.write_entries(self.file, [bare])
+        self.write_entries(self.peer_file, [linked])
+        self.assertEqual(self.run_script('sync', peer='pi').returncode, 0)
+        self.assertEqual([entry['link'] for entry in self.entries()], ['file:///tmp/reply.html'])
+        self.assertEqual(self.entries(), self.entries(self.peer_file))
 
     def test_unreachable_peer_keeps_local_and_later_sync_carries_it(self):
         self.stop('**Terms**\n- **Memoization:** Cache prior calls.')
