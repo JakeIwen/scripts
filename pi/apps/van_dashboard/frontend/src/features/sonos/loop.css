@@ -72,19 +72,7 @@
   white-space: nowrap;
 }
 
-/* The sheet header is a grid; the panel takes the row under the player. */
-.sonos-sheet .sonos-loop {
-  grid-column: 2;
-  grid-row: 2;
-}
-
 @media (max-width: 640px) {
-  .sonos-sheet .sonos-loop {
-    grid-column: 1 / -1;
-    grid-row: 3;
-    width: 100%;
-  }
-
   .sonos-loop__endpoint button {
     min-width: 40px;
   }

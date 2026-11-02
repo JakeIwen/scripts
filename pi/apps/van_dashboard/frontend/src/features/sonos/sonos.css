@@ -150,6 +150,11 @@
   grid-row: 1;
 }
 
+.sonos-sheet .sonos-loop {
+  grid-column: 2;
+  grid-row: 2;
+}
+
 .sonos-sheet .bottom-sheet__actions > .bottom-sheet__updated {
   grid-column: 2;
   grid-row: 2;
@@ -417,6 +422,12 @@
   .sonos-sheet .sonos-now-playing {
     grid-column: 1 / -1;
     grid-row: 2;
+  }
+
+  .sonos-sheet .sonos-loop {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    width: 100%;
   }
 
   .sonos-sheet .sonos-transport {
