@@ -1,5 +1,6 @@
 #!/bin/zsh
-# Install or update the LaunchAgent that matches iTerm font sizes to displays.
+# Install or update the LaunchAgent that matches iTerm font sizes to displays,
+# and bind the keys that resize a whole window's tabs through it.
 # Rebuilds its venv when missing or broken (for example after Homebrew drops
 # the Python it was built from).
 set -eux -o pipefail
@@ -33,3 +34,4 @@ else
     /bin/launchctl bootstrap "$domain" "$installed_plist"
 fi
 /bin/launchctl print "$domain/$label" | /usr/bin/grep -E 'state =|pid =|last exit'
+PYTHONPATH="$repo/shared/python" "$venv/bin/python" "$repo/macbook/scripts/iterm_screen_fonts.py" --install-keys

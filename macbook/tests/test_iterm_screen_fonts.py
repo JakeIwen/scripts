@@ -83,6 +83,54 @@ class WindowTrackerTests(unittest.TestCase):
         self.assertEqual(self.observe(fonts.EXTERNAL, {"a"}), (fonts.EXTERNAL, {"a"}))
 
 
+class WindowFontKeyTests(unittest.TestCase):
+    SIZES = {fonts.BUILT_IN: 13, fonts.EXTERNAL: 15}
+
+    def setUp(self):
+        self.tracker = fonts.WindowTracker(settle_polls=1)
+        self.tracker.observe("w1", fonts.EXTERNAL, {"a"})
+
+    def test_a_size_picked_with_the_keys_goes_to_new_tabs(self):
+        self.tracker.hold("w1", 17)
+        self.assertEqual(self.tracker.observe("w1", fonts.EXTERNAL, {"a", "b"}), (fonts.EXTERNAL, {"b"}))
+        self.assertEqual(self.tracker.size_for("w1", fonts.EXTERNAL, self.SIZES), 17)
+
+    def test_moving_display_drops_the_picked_size(self):
+        self.tracker.hold("w1", 17)
+        self.assertEqual(self.tracker.observe("w1", fonts.BUILT_IN, {"a"}), (fonts.BUILT_IN, {"a"}))
+        self.assertEqual(self.tracker.size_for("w1", fonts.BUILT_IN, self.SIZES), 13)
+
+    def test_returning_to_the_display_size_clears_the_hold(self):
+        self.tracker.hold("w1", 17)
+        self.tracker.hold("w1", None)
+        self.assertEqual(self.tracker.size_for("w1", fonts.EXTERNAL, self.SIZES), 15)
+        self.assertEqual(self.tracker.applied_kind("w1"), fonts.EXTERNAL)
+        self.assertIsNone(self.tracker.applied_kind("unseen"))
+
+    def test_steps_stay_inside_the_declared_size_range(self):
+        with mock.patch.dict(os.environ, {"JACOBR_SETTINGS_DIR": str(DECLARATIONS)}):
+            bounds = fonts.font_size_bounds()
+        self.assertEqual(bounds, (4, 72))
+        self.assertEqual(fonts.stepped_size(fonts.font_size("Monaco 13"), 1, bounds), 14)
+        self.assertEqual(fonts.stepped_size(fonts.font_size("JetBrainsMonoNF-Regular 12.5"), -1, bounds), 11.5)
+        self.assertEqual(fonts.stepped_size(4, -1, bounds), 4)
+        self.assertEqual(fonts.stepped_size(72, 1, bounds), 72)
+
+    def test_installing_keys_keeps_other_bindings_and_removing_restores_them(self):
+        # Two of the bindings iTerm ships in its default global key map.
+        shipped = {"0xf72b-0x100000": {"Action": 4, "Text": ""}, "0x9-0x40000": {"Action": 32, "Text": ""}}
+        installed = fonts.with_window_font_keys(shipped)
+        self.assertEqual(installed["0x3d-0x100000"],
+                         {"Action": 60, "Text": "iterm_window_font_step(session_id: id, step: 1)"})
+        self.assertEqual(installed["0x2d-0x100000"]["Text"], "iterm_window_font_step(session_id: id, step: -1)")
+        self.assertEqual({k: v for k, v in installed.items() if k not in fonts.WINDOW_FONT_KEYS}, shipped)
+        self.assertEqual(fonts.without_window_font_keys(installed), shipped)
+
+    def test_removing_keys_spares_a_binding_rebound_by_hand(self):
+        mine = {"0x3d-0x100000": {"Action": 12, "Text": "="}}
+        self.assertEqual(fonts.without_window_font_keys(mine), mine)
+
+
 class FontAndSettingsTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

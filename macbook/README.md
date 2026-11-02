@@ -196,13 +196,19 @@ ends the checker's process group when it exits.
 `scripts/iterm_screen_fonts.py` gives every session in an iTerm2 window the
 font size for the display the window sits on, so dragging a window between the
 laptop and the external monitor resizes the text in all its tabs without
-resizing the window. Manual Cmd+/Cmd- changes stick until the window moves.
+resizing the window. Cmd+= (or Cmd++) and Cmd+- resize every tab and pane of
+the focused window rather than only the focused one, and Cmd+0 returns the
+window to its display's size; tabs opened later in that window get the chosen
+size too, until the window moves to the other display. Those keys are iTerm2
+global key bindings (Settings > Keys > Key Bindings) that invoke a function the
+follower registers, so while the follower is down they do nothing.
 It runs as the LaunchAgent `com.jacobr.iterm-screen-fonts` from its own venv
 (`~/.local/share/iterm-screen-fonts/venv`), talks to iTerm2's Python API, and
 idles while iTerm2 is closed.
 
 - Install or update: `zsh macbook/scripts/install_iterm_screen_fonts.zsh`. The
-  first run asks macOS to let `python3.13` control iTerm2; allow it.
+  first run asks macOS to let `python3.13` control iTerm2; allow it. It also
+  writes the key bindings (`iterm_screen_fonts.py --install-keys`).
 - Sizes and timing are saved in
   `~/.config/jacobr/iterm-screen-fonts.json`; their defaults and validation are
   declared in `shared/settings/iterm-screen-fonts.json`. Edit them in the Mac
@@ -212,7 +218,10 @@ idles while iTerm2 is closed.
 - See what it sees: `~/.local/share/iterm-screen-fonts/venv/bin/python
   macbook/scripts/iterm_screen_fonts.py --list`.
 - Log: `tmp/iterm-screen-fonts/agent.log`.
-- Remove: `launchctl bootout gui/$(id -u)/com.jacobr.iterm-screen-fonts` and
+- Remove: give the keys back to iTerm's View menu with
+  `~/.local/share/iterm-screen-fonts/venv/bin/python
+  macbook/scripts/iterm_screen_fonts.py --remove-keys`, then
+  `launchctl bootout gui/$(id -u)/com.jacobr.iterm-screen-fonts` and
   delete `~/Library/LaunchAgents/com.jacobr.iterm-screen-fonts.plist`.
 
 ## F5 dictation key as F13
