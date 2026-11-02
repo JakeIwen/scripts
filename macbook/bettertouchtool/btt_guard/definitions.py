@@ -47,17 +47,19 @@ PAYLOAD_FIELDS = {
     "BTTShellTaskActionScript",
     "BTTTerminalCommand",
     "BTTNamedTriggerToTrigger",
-    "BTTLayoutIndependentActionChar",
     "BTTDelayNextActionBy",
     "BTTAdditionalActionData",
     "BTTShortcutToSend",
     "BTTShellTaskActionConfig",
 }
+# Export field holding ZLAUNCHPATH, by saved action type. A send-shortcut action
+# (-1) saves "autoAdapt" there, as BTTGenericActionConfig exports it; its
+# BTTLayoutIndependentActionChar is derived from the shortcut ("no-name-<uuid>").
 LAUNCH_PATH_FIELDS = {
     206: "BTTShellTaskActionScript",
     246: "BTTTerminalCommand",
     248: "BTTNamedTriggerToTrigger",
-    -1: "BTTLayoutIndependentActionChar",
+    -1: "BTTGenericActionConfig",
     264: "BTTLayoutIndependentActionChar",
     129: "BTTDelayNextActionBy",
     281: "BTTGenericActionConfig",
@@ -263,10 +265,6 @@ def _validate_payload(expected: dict[str, Any], node: dict[str, Any], uuid: str)
         actual = node[field]
         if key == "action_data":
             actual = _with_saved_script_key(wanted, _decoded_action_data(actual, uuid))
-        # BTT saves layout-adaptive shortcuts as "autoAdapt" but exports them
-        # with a placeholder derived from the action's own UUID.
-        if key == "launch_path" and wanted == "autoAdapt" and actual == f"no-name-{uuid[:7]}":
-            continue
         equal = _numeric_equal(wanted, actual) if field == "BTTDelayNextActionBy" else _same_json(wanted, actual)
         if not equal:
             raise ValueError(f"Runtime payload differs at {field}: {uuid}")

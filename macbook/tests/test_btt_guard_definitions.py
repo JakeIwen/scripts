@@ -145,7 +145,8 @@ def runtime_exports():
                         "BTTOrder": 500,
                         "BTTActionCategory": 1,
                         "BTTPredefinedActionType": 264,
-                        "BTTLayoutIndependentActionChar": "17",
+                        "BTTGenericActionConfig": "17",
+                        "BTTLayoutIndependentActionChar": "no-name-keyboar",
                     },
                 ],
                 "BTTMenuItemTriggers": [
@@ -318,17 +319,19 @@ class GuardDefinitionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_definitions(*javascript_with("changed"), {PRESET: "Master"})
 
-    def test_layout_adaptive_shortcut_matches_only_its_own_placeholder(self):
+    def test_send_shortcut_launch_path_matches_generic_action_config(self):
+        # The saved "autoAdapt" exports as BTTGenericActionConfig; the layout-independent
+        # character beside it is a derived "no-name-<uuid>" placeholder and is not compared.
         def keyboard_with(exported):
             snapshot, exports = fixture()
             snapshot["records"]["keyboard"]["payload"]["launch_path"] = "autoAdapt"
             for action in exports[0]["BTTMenuItems"][0]["BTTMenuItemActions"]:
                 if action["BTTUUID"] == "keyboard":
-                    action["BTTLayoutIndependentActionChar"] = exported
+                    action["BTTGenericActionConfig"] = exported
             return exports, snapshot
 
-        build_definitions(*keyboard_with("no-name-keyboar"), {PRESET: "Master"})
-        for exported in ("no-name-shell00", "autoAdapt2", "17"):
+        build_definitions(*keyboard_with("autoAdapt"), {PRESET: "Master"})
+        for exported in ("no-name-keyboar", "autoAdapt2", "17"):
             with self.subTest(exported=exported), self.assertRaises(ValueError):
                 build_definitions(*keyboard_with(exported), {PRESET: "Master"})
 
