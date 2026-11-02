@@ -11,12 +11,12 @@ from .database import OPERATIONAL_CONFIG_KEYS
 from .model import ConfigSnapshot, SCHEMA_VERSION
 
 
-COLLECTIONS = (
-    "BTTMenuItems",
-    "BTTMenuItemActions",
-    "BTTAdditionalActions",
-    "BTTMenuItemTriggers",
-)
+COLLECTIONS = {
+    "BTTMenuItems": "item",
+    "BTTMenuItemActions": "action",
+    "BTTAdditionalActions": "action",
+    "BTTMenuItemTriggers": "trigger",
+}
 VOLATILE_KEYS = {
     "BTTLastUpdatedAt",
     "BTTLastChangeUUID",
@@ -108,16 +108,10 @@ def _flatten(
         if uuid in nodes:
             raise ValueError(f"Duplicate runtime BTT UUID: {uuid}")
         node = deepcopy(item)
-        for key in COLLECTIONS:
+        for key, child_role in COLLECTIONS.items():
             children = node.pop(key, [])
             if not isinstance(children, list):
                 raise ValueError(f"Runtime collection {key} is invalid for BTT record {uuid}.")
-            child_role = {
-                "BTTMenuItems": "item",
-                "BTTMenuItemActions": "action",
-                "BTTAdditionalActions": "action",
-                "BTTMenuItemTriggers": "trigger",
-            }[key]
             for child in children:
                 visit(child, uuid, child_role)
         for key in list(node):

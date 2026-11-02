@@ -171,13 +171,22 @@ def _menu_identifier(row: sqlite3.Row) -> Any:
     return decoded.get('BTTMenuElementIdentifier') if isinstance(decoded, dict) else None
 
 
-def _select_graph(
-    roots: list[str], rows: list[sqlite3.Row], by_uuid: dict[str, sqlite3.Row]
-) -> tuple[set[int], set[int], list[Finding]]:
+def _children(rows: list[sqlite3.Row]) -> dict[int, list[sqlite3.Row]]:
     children: dict[int, list[sqlite3.Row]] = {}
     for row in rows:
         children.setdefault(row['ZPARENT'], []).append(row)
-    active_presets = {row['Z_PK'] for row in rows if bool(row['ZACTIVATED'])}
+    return children
+
+
+def _active_presets(rows: list[sqlite3.Row]) -> set[int]:
+    return {row['Z_PK'] for row in rows if bool(row['ZACTIVATED'])}
+
+
+def _select_graph(
+    roots: list[str], rows: list[sqlite3.Row], by_uuid: dict[str, sqlite3.Row]
+) -> tuple[set[int], set[int], list[Finding]]:
+    children = _children(rows)
+    active_presets = _active_presets(rows)
     queue: deque[tuple[sqlite3.Row, bool]] = deque()
     findings: list[Finding] = []
     for uuid in roots:
@@ -274,7 +283,7 @@ def _relationship_entity(column: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def _app_relationship(connection: sqlite3.Connection) -> tuple[str, str, str]:
+def _entity_ids(connection: sqlite3.Connection) -> dict[str, int]:
     metadata_columns = {row['name'] for row in connection.execute('PRAGMA table_info(Z_PRIMARYKEY)')}
     if not {'Z_ENT', 'Z_NAME'} <= metadata_columns:
         raise ValueError('Unsupported BTT app-scope metadata schema.')
@@ -282,6 +291,10 @@ def _app_relationship(connection: sqlite3.Connection) -> tuple[str, str, str]:
                 for row in connection.execute('SELECT Z_ENT,Z_NAME FROM Z_PRIMARYKEY')}
     if 'APP' not in entities or 'GESTURE' not in entities:
         raise ValueError('Unsupported BTT app/gesture entity metadata.')
+    return entities
+
+
+def _app_relationship(connection: sqlite3.Connection, entities: dict[str, int]) -> tuple[str, str, str]:
     candidates = []
     for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'"):
         table = row['name']
@@ -298,8 +311,8 @@ def _app_relationship(connection: sqlite3.Connection) -> tuple[str, str, str]:
     return candidates[0]
 
 
-def _app_scopes(connection: sqlite3.Connection) -> dict[int, list[str]]:
-    table, app_column, trigger_column = _app_relationship(connection)
+def _app_scopes(connection: sqlite3.Connection, entities: dict[str, int]) -> dict[int, list[str]]:
+    table, app_column, trigger_column = _app_relationship(connection, entities)
     table_q, app_q, trigger_q = map(_quoted_identifier, (table, app_column, trigger_column))
     invalid = connection.execute(f'''SELECT COUNT(*) FROM {table_q} relationship
         LEFT JOIN ZBTTBASEENTITY app ON app.Z_PK=relationship.{app_q}
@@ -355,7 +368,8 @@ def read_snapshot(
             by_uuid = {row['ZUNIQUEIDENTIFIER']: row for row in rows if row['ZUNIQUEIDENTIFIER']}
             by_pk = {row['Z_PK']: row for row in rows}
             action_ranks = _action_ranks(rows)
-            app_scopes = _app_scopes(connection)
+            entities = _entity_ids(connection)
+            app_scopes = _app_scopes(connection, entities)
             selected, effective_ids, findings = _select_graph(requested_roots, rows, by_uuid)
             findings.extend(_unassigned_findings(effective_ids, rows))
             selected.update(by_uuid[uuid]['Z_PK'] for uuid in requested_ids if uuid in by_uuid)
