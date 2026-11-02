@@ -153,6 +153,20 @@ describe('Sonos alarms', () => {
     expect(postForm).toHaveBeenCalledTimes(1);
   });
 
+  it('scrolls the editor into view when it opens above the list', async () => {
+    // jsdom has no scrollIntoView.
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      await openAlarms();
+      fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+      const editor = screen.getByRole('heading', { name: 'Edit alarm' }).closest('form');
+      expect(scrollIntoView.mock.contexts).toEqual([editor]);
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView;
+    }
+  });
+
   it('keeps alarms editable when favorites are unavailable', async () => {
     vi.mocked(getJson).mockImplementation(async (url) => {
       if (url.includes('alarm-favorites')) throw new Error('Favorites unavailable');

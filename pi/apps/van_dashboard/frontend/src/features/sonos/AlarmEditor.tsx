@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   ALARM_DAYS,
@@ -79,8 +79,17 @@ export function AlarmEditor({ alarm, status, favorites, busy, onSave, onCancel }
   const [draft, setDraft] = useState(() => initialDraft(alarm, status.rooms[0]?.id ?? ''));
   const update = <K extends keyof AlarmDraft>(key: K, value: AlarmDraft[K]) =>
     setDraft((old) => ({ ...old, [key]: value }));
+  const formRef = useRef<HTMLFormElement>(null);
+
+  // The editor opens above the list and disables every row, so an Edit
+  // further down would otherwise just grey the list out with no editor in view.
+  useEffect(() => {
+    formRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+  }, []);
+
   return (
     <form
+      ref={formRef}
       className="panel-card sonos-alarm-editor"
       onSubmit={(e) => {
         e.preventDefault();
