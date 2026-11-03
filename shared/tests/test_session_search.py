@@ -441,7 +441,7 @@ class SessionSearchTests(SessionFixtureTestCase):
 
 
 class IndexSearchTests(SessionFixtureTestCase):
-    """llmsearch asks LLM Switchboard's index first, through a stand-in on PATH."""
+    """llmsearch can explicitly opt into a stand-in Switchboard index on PATH."""
 
     def fake_switchboard(self, results=(), code=0, message=''):
         folder = self.root / 'bin'
@@ -500,13 +500,100 @@ class IndexSearchTests(SessionFixtureTestCase):
         self.assertEqual(sum('&& claudepr ' in block for block in blocks), 3)
         self.assertEqual(sum('&& codexpr ' in block for block in blocks), 3)
 
+    def test_default_finds_literal_case_insensitive_substrings_with_an_index_available(self):
+        self.fake_switchboard(code=1, message='must not query the message index')
+        for provider in ('claude', 'codex'):
+            self.write_session(provider, 'substring', ['branch latest-model-launchers'])
+            self.write_session(provider, 'phrase', ['literal DIM AUTO [xy]', 'dim then auto xy'])
+        for args, expected in [(('LATEST-model-LAUNCHER',), 'branch latest-model-launchers'),
+                               (('dim', 'auto', '[xy]'), 'literal DIM AUTO [xy]')]:
+            with self.subTest(args=args):
+                result = self.llmsearch(*args)
+                self.assertEqual((result.returncode, result.stderr), (0, ''))
+                blocks = result.stdout.strip().split('\n\n')
+                self.assertEqual(len(blocks), 2)
+                self.assertTrue(all(block.endswith(expected) for block in blocks))
+                self.assertEqual(result.stdout, self.llmsearch('--grep', *args).stdout)
+        self.assertEqual(self.switchboard_calls(), [])
+
+    def test_default_includes_thinking_tool_calls_and_output_with_an_index_available(self):
+        self.fake_switchboard(code=1, message='must not query the message index')
+        events = {
+            'claude': [
+                {'type': 'assistant', 'message': {'content': [
+                    {'type': 'thinking', 'thinking': 'THINKING-marker'}]}},
+                {'type': 'assistant', 'message': {'content': [
+                    {'type': 'tool_use', 'input': {'command': 'COMMAND-marker'}}]}},
+                {'type': 'user', 'message': {'content': [
+                    {'type': 'tool_result', 'content': 'TOOL-output-marker'}]}},
+            ],
+            'codex': [
+                {'type': 'response_item', 'payload': {'type': 'reasoning', 'summary': [
+                    {'type': 'summary_text', 'text': 'THINKING-marker'}]}},
+                {'type': 'response_item', 'payload': {'type': 'function_call',
+                    'arguments': json.dumps({'cmd': 'COMMAND-marker'})}},
+                {'type': 'response_item', 'payload': {'type': 'function_call_output',
+                    'output': 'TOOL-output-marker'}},
+            ],
+        }
+        for provider, rows in events.items():
+            path = self.write_session(provider, 'hidden', ['visible body'])
+            with path.open('a') as stream:
+                stream.write(''.join(json.dumps(row) + '\n' for row in rows))
+        for query in ('thinking-marker', 'command-marker', 'tool-output-marker'):
+            with self.subTest(query=query):
+                result = self.llmsearch(query)
+                self.assertEqual((result.returncode, result.stderr), (0, ''))
+                self.assertEqual(len(result.stdout.strip().split('\n\n')), 2)
+                self.assertIn('claudepr hidden\n', result.stdout)
+                self.assertIn('codexpr hidden\n', result.stdout)
+                self.assertEqual(result.stdout.lower().count(query), 2)
+        self.assertEqual(self.switchboard_calls(), [])
+
+    def test_mode_flags_use_the_last_one(self):
+        self.fake_switchboard([
+            self.index_result('claude', 'indexed', 'Indexed', 1, 'indexed needle', 1)])
+        for flags in [('--index', '--grep'), ('--grep', '--index', '--grep')]:
+            with self.subTest(flags=flags):
+                self.assert_grep_results(self.llmsearch(*flags, '-e', 'needle'))
+                self.assertEqual(self.switchboard_calls(), [])
+        for count, flags in enumerate([('--grep', '--index'),
+                                       ('--index', '--grep', '--index')], 1):
+            with self.subTest(flags=flags):
+                result = self.llmsearch(*flags, 'needle')
+                self.assertEqual((result.returncode, result.stderr), (0, ''))
+                self.assertTrue(result.stdout.endswith('indexed needle\n\n'))
+                self.assertEqual(self.switchboard_calls(),
+                                 ['[search][--json][--limit][200][--][needle]'] * count)
+
+    def test_default_mode_flags_after_double_dash_are_literal_search_text(self):
+        self.fake_switchboard(code=1, message='must not query the message index')
+        for flag in ('--index', '--grep'):
+            with self.subTest(flag=flag):
+                self.write_session('claude', 'literal-mode', ['literal ' + flag + ' option'])
+                result = self.llmsearch('--', flag)
+                self.assertEqual((result.returncode, result.stderr), (0, ''))
+                self.assertTrue(result.stdout.endswith('literal ' + flag + ' option\n\n'))
+        self.assertEqual(self.switchboard_calls(), [])
+
+    def test_mode_flags_require_a_query_and_keep_context_validation(self):
+        self.fake_switchboard(code=1, message='must not query the message index')
+        for args in [(), ('--index',), ('--grep',), ('--index', '--grep'),
+                     ('--index', '-b'), ('--grep', '-a', 'bad', 'needle')]:
+            with self.subTest(args=args):
+                result = self.llmsearch(*args)
+                self.assertEqual((result.returncode, result.stdout), (2, ''))
+                self.assertIn('Usage: llmsearch', result.stderr)
+                self.assertIn('--index', result.stderr)
+        self.assertEqual(self.switchboard_calls(), [])
+
     def test_index_context_flags_are_forwarded_and_context_is_printed(self):
         row = self.index_result('claude', 'context', 'Context', 1, 'original target', 1)
         row['context'] = 'before\n…TARGET\nafter\n--\nTARGET again'
         self.fake_switchboard([row])
         for flags in (['-9', '-a', '2'], ['-b9', '-a2', '-g']):
             with self.subTest(flags=flags):
-                result = self.llmsearch(*flags, 'target')
+                result = self.llmsearch('--index', *flags, 'target')
                 self.assertEqual((result.returncode, result.stderr), (0, ''))
                 self.assertTrue(result.stdout.endswith(row['context'] + '\n\n'))
                 self.assertNotIn(row['excerpt'], result.stdout)
@@ -516,7 +603,7 @@ class IndexSearchTests(SessionFixtureTestCase):
     def test_index_context_falls_back_to_excerpt_when_field_is_missing(self):
         self.fake_switchboard([
             self.index_result('codex', 'old-index', 'Old', 1, 'original target', 1)])
-        result = self.llmsearch('-0', 'target')
+        result = self.llmsearch('--index', '-0', 'target')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(result.stdout.endswith('original target\n\n'))
 
@@ -524,7 +611,7 @@ class IndexSearchTests(SessionFixtureTestCase):
         self.fake_switchboard(code=2, message='unrecognized arguments: --before --after')
         for provider in ('claude', 'codex'):
             self.write_session(provider, 'context', ['before\nTARGET\nafter'])
-        result = self.llmsearch('-1', 'target')
+        result = self.llmsearch('--index', '-1', 'target')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.count('before\nTARGET\nafter\n\n'), 2)
         self.assertEqual(result.stderr,
@@ -535,13 +622,13 @@ class IndexSearchTests(SessionFixtureTestCase):
 
     def test_index_query_error_with_context_is_shown_not_grepped(self):
         self.fake_switchboard(code=2, message='search: unknown filter')
-        result = self.llmsearch('-1', 'target')
+        result = self.llmsearch('--index', '-1', 'target')
         self.assertEqual((result.returncode, result.stdout), (2, ''))
         self.assertEqual(result.stderr, 'search: unknown filter\n')
 
     def test_index_context_keeps_exit_three_retry_behavior(self):
         self.fake_switchboard(code=3, message='not built')
-        result = self.llmsearch('-e', '-0', 'needle')
+        result = self.llmsearch('--index', '-e', '-0', 'needle')
         self.assert_grep_results(result)
         self.assertEqual(result.stderr, NOT_BUILT_NOTE)
         self.assertEqual(self.switchboard_calls(),
@@ -557,7 +644,7 @@ class IndexSearchTests(SessionFixtureTestCase):
                         cwd='/tmp/elsewhere/'),
             ageless,
         ])
-        result = self.llmsearch('-e', 'needle')
+        result = self.llmsearch('--index', '-e', 'needle')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, '')
         self.assertEqual(result.stdout,
@@ -572,7 +659,7 @@ class IndexSearchTests(SessionFixtureTestCase):
 
     def test_index_query_keeps_its_syntax_and_quotes_text_after_double_dash(self):
         self.fake_switchboard()
-        result = self.llmsearch('-g', 'pcan', '-usb', 'dir:obd', '--', 'say "hi"', '-g')
+        result = self.llmsearch('--index', '-g', 'pcan', '-usb', 'dir:obd', '--', 'say "hi"', '-g')
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, '', ''))
         self.assertEqual(self.switchboard_calls(),
                          ['[search][--json][--limit][200][--][pcan -usb dir:obd "say  hi  -g"]'])
@@ -589,7 +676,7 @@ class IndexSearchTests(SessionFixtureTestCase):
         ])
         for flags in (('-g',), ('--group',), ()):
             with self.subTest(flags=flags):
-                result = self.llmsearch(*flags, 'needle')
+                result = self.llmsearch('--index', *flags, 'needle')
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout,
                                  '5 matches | 1 hour ago | First\n'
@@ -601,14 +688,14 @@ class IndexSearchTests(SessionFixtureTestCase):
 
     def test_unbuilt_index_falls_back_to_grep_after_asking_twice(self):
         self.fake_switchboard(code=3, message="search: the transcript index isn't built yet")
-        result = self.llmsearch('-e', 'needle')
+        result = self.llmsearch('--index', '-e', 'needle')
         self.assert_grep_results(result)
         self.assertEqual(result.stderr, NOT_BUILT_NOTE)
         self.assertEqual(self.switchboard_calls(),
                          ['[search][--json][--limit][200][--][needle]'] * 2)
 
     def test_missing_switchboard_falls_back_to_grep_quietly(self):
-        result = self.llmsearch('-e', 'needle')
+        result = self.llmsearch('--index', '-e', 'needle')
         self.assert_grep_results(result)
         self.assertEqual(result.stderr, '')
 
@@ -617,7 +704,7 @@ class IndexSearchTests(SessionFixtureTestCase):
         for args in [('-t', 'FIRST'), ('--title', 'FIRST'), ('-n', 'FIRST'), ('--name', 'FIRST'),
                      ('--grep', '-t', 'FIRST')]:
             with self.subTest(args=args):
-                result = self.llmsearch(*args)
+                result = self.llmsearch('--index', *args)
                 self.assertEqual((result.returncode, result.stderr), (0, ''))
                 blocks = result.stdout.strip().split('\n\n')
                 self.assertEqual(len(blocks), 2)
@@ -628,18 +715,20 @@ class IndexSearchTests(SessionFixtureTestCase):
         self.fake_switchboard([self.index_result('claude', 'indexed', 'Indexed', 1, 'needle', 1)])
         for args in [('-e', '--grep', 'needle'), ('needle', '--grep', '--single')]:
             with self.subTest(args=args):
-                self.assert_grep_results(self.llmsearch(*args))
+                self.assert_grep_results(self.llmsearch('--index', *args))
                 self.assertEqual(self.switchboard_calls(), [])
-        result = self.llmsearch('--grep', 'needle')
+        result = self.llmsearch('--index', '--grep', 'needle')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len(result.stdout.strip().split('\n\n')), 2)
         self.assertEqual(self.switchboard_calls(), [])
 
-    def test_grep_flag_after_double_dash_is_search_text(self):
+    def test_index_mode_flags_after_double_dash_are_search_text(self):
         self.fake_switchboard()
-        self.assertEqual(self.llmsearch('--', '--grep').returncode, 0)
+        for flag in ('--grep', '--index'):
+            self.assertEqual(self.llmsearch('--index', '--', flag).returncode, 0)
         self.assertEqual(self.switchboard_calls(),
-                         ['[search][--json][--limit][200][--]["--grep"]'])
+                         ['[search][--json][--limit][200][--]["--grep"]',
+                          '[search][--json][--limit][200][--]["--index"]'])
 
     def test_other_session_roots_and_records_mode_force_grep(self):
         self.fake_switchboard([self.index_result('claude', 'indexed', 'Indexed', 1, 'needle', 1)])
@@ -648,7 +737,7 @@ class IndexSearchTests(SessionFixtureTestCase):
                             ('CLAUDE_CONFIG_DIR', self.root / 'claude'),
                             ('SESSION_SEARCH_RECORDS', '1')]:
             with self.subTest(name=name):
-                result = self.llmsearch('needle', **{name: str(value)})
+                result = self.llmsearch('--index', 'needle', **{name: str(value)})
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn('needle', result.stdout)
                 self.assertNotIn('indexed', result.stdout)
@@ -659,18 +748,25 @@ class IndexSearchTests(SessionFixtureTestCase):
                               (1, 'search: the index is unreadable')]:
             with self.subTest(code=code):
                 self.fake_switchboard(code=code, message=message)
-                result = self.llmsearch('-needle')
+                result = self.llmsearch('--index', '-needle')
                 self.assertEqual((result.returncode, result.stdout, result.stderr),
                                  (code, '', message + '\n'))
         self.assertEqual(len(self.switchboard_calls()), 2)
 
-    def test_help_describes_the_index_and_grep(self):
-        result = self.llmsearch('--help')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        for text in ("Search this machine's transcript index", '--grep', '"a phrase"',
-                     'tool:claude|codex', 'after:YYYY-MM-DD', 'There are no wildcards',
-                     """llmsearch '"dim mode" "auto mode"'""", '-s, --session', '-f, --forks'):
-            self.assertIn(text, result.stdout)
+    def test_help_describes_default_grep_and_opt_in_index(self):
+        self.fake_switchboard(code=1, message='must not query the message index')
+        for args in [('--help',), ('--index', '--help'), ('--grep', '-h')]:
+            with self.subTest(args=args):
+                result = self.llmsearch(*args)
+                self.assertEqual((result.returncode, result.stderr), (0, ''))
+                for text in ('literal, case-insensitive\nsubstring',
+                             'including thinking, tool calls and output',
+                             'Use the default full substring scan', 'Index queries (--index only)',
+                             'The last --index or --grep flag wins', '"a phrase"',
+                             'tool:claude|codex', 'after:YYYY-MM-DD', 'There are no wildcards',
+                             """llmsearch --index '"dim mode" "auto mode"'""",
+                             '-s, --session', '-f, --forks'):
+                    self.assertIn(text, result.stdout)
         self.assertEqual(self.switchboard_calls(), [])
 
 

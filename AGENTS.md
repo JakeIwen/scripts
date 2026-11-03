@@ -465,12 +465,16 @@ compare it with this checkout. Deployed files may differ from the repository.
   All three commands accept `-t`/`--title` (alias `-n`/`--name`) for literal,
   case-insensitive saved titles only, one hit per session with no directory fallback. `-N`, `-a N` and
   `-b N` select context inside a matching message; `--` ends flag parsing.
-  `llmsearch` asks this machine's LLM Switchboard transcript index first
+  `llmsearch` defaults to the same literal, case-insensitive substring scan as
+  `claudesearch` and `codexsearch`, including thinking and tool output, so a
+  partial word does not silently lose matches. `--index` opts into this machine's
+  faster whole-word LLM Switchboard index of prompts and visible replies
   (`llm-switchboard search --json`); `session_search_records.jq` owns index
-  normalization/grouping. `--grep`, title mode, non-default roots, records mode,
-  a missing command or exit 3 (no finished index build, asked twice) use grep.
-  The llm-switchboard repo's `tests/test_search_oracle.py` consumes these scripts'
-  records mode, so preserve that format and the fallback triggers.
+  normalization/grouping. `--grep` restores the default; the last mode flag wins.
+  Title/session mode, non-default roots, records mode, a missing command or exit 3
+  (no finished index build, asked twice) still use grep. The llm-switchboard repo's
+  `tests/test_search_oracle.py` consumes these scripts' records mode, so preserve
+  that format and the fallback triggers.
 - `shared/sh/llm_restore.py` (alias `llmrestore` on both hosts; Pi copy at
   `/home/pi/scripts/`) reopens the Claude Code and Codex sessions open before a
   reboot, skipping any already open or kept by llm-switchboard: iTerm tabs on

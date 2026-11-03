@@ -65,7 +65,7 @@ class SearchRenderingTests(fixtures.SessionFixtureTestCase):
         self.fake_switchboard([self.index_result('claude', 'first', 'first', 2, 'needle', 3)])
         cases = [(tool, flags, False) for tool in ('claude', 'codex', 'llm')
                  for flags in ([], ['-e'], ['-g'], ['-t'])]
-        cases += [('llm', flags, True) for flags in ([], ['-e'], ['-g'])]
+        cases += [('llm', ['--index', *flags], True) for flags in ([], ['-e'], ['-g'])]
         for tool, flags, index in cases:
             with self.subTest(tool=tool, flags=flags, index=index):
                 query = 'first' if '-t' in flags else 'needle'

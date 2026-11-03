@@ -50,9 +50,9 @@ session_search_files() {
     done
 }
 
-# A caller that offers --grep sets session_search_grep=false before parsing;
-# for the others it is search text. The query is also kept split at --, into
-# session_search_words before it and session_search_literal after it.
+# A caller that offers --grep/--index sets session_search_grep to its default
+# before parsing; for the others these flags are search text. The query is also
+# kept split at --, into words before it and literal text after it.
 session_search_parse_args() {
     session_search_group=true
     session_search_title=false
@@ -99,9 +99,12 @@ session_search_parse_args() {
                 -g|--group) session_search_group=true; continue ;;
                 -e|--single) session_search_group=false; continue ;;
                 -h|--help) session_search_help=true; continue ;;
-                --grep)
+                --grep|--index)
                     if [ -n "${session_search_grep+set}" ]; then
-                        session_search_grep=true
+                        case "$arg" in
+                            --grep) session_search_grep=true ;;
+                            --index) session_search_grep=false ;;
+                        esac
                         continue
                     fi
                     ;;

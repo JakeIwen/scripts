@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-# Search LLM Switchboard's transcript index of prompts and replies when it can
-# answer, and otherwise grep every transcript with claudesearch and codexsearch.
+# Grep by default so substrings, thinking and tool output are not missed;
+# --index opts into Switchboard's faster whole-word index of prompts and replies.
 
 set -u -o pipefail
 
@@ -12,13 +12,15 @@ llmsearch_usage() {
     cat <<'EOF'
 Usage: llmsearch [flags] [--] <query>
 
-Search this machine's transcript index (LLM Switchboard's, on the Mac or the
-Pi): your prompts and the visible replies of its Claude Code and Codex sessions.
-Where there is no index (no llm-switchboard command, or before its first build),
-search everything with grep instead. Results are shown newest first; grouped
-grep results update live when output goes to a terminal.
+Search Claude Code and Codex session events for one literal, case-insensitive
+substring, including thinking, tool calls and output. All query arguments form
+one term: llmsearch dim auto finds "dim auto" only. Results are shown newest
+first; grouped grep results update live when output goes to a terminal.
 
-Index queries:
+Index queries (--index only):
+  Search this machine's transcript index (LLM Switchboard's, on the Mac or the
+  Pi): your prompts and visible replies only. If the command is missing or no
+  index build has finished, search everything with grep instead.
   All words must be in one message, in any order, as whole words. Case and
   accents are ignored, and punctuation splits words: pcan finds pcan_view, not
   PCANView. There are no wildcards: dim* finds dim, not dimming.
@@ -26,12 +28,11 @@ Index queries:
   Filters: tool:claude|codex  dir:<part>  by:me|reply  age:<2d
            after:YYYY-MM-DD  before:YYYY-MM-DD
   The shell strips quotes, so wrap a query with phrases in single quotes:
-    llmsearch '"dim mode" "auto mode"'   both phrases, in one message
-    llmsearch "dim mode" "auto mode"     just the words dim, mode and auto
+    llmsearch --index '"dim mode" "auto mode"'   both phrases, in one message
+    llmsearch --index "dim mode" "auto mode"     just the words dim, mode and auto
 
-Substrings:
-  --grep finds one substring: llmsearch --grep dim auto finds "dim auto". For
-  separate substrings anywhere in one session, use rg on the transcripts:
+Separate substrings:
+  For separate substrings anywhere in one session, use rg on the transcripts:
     rg -0li dim ~/.claude/projects ~/.codex/sessions | xargs -0 rg -li auto
 
 Flags:
@@ -44,11 +45,12 @@ Flags:
   -f, --forks  Show each matching session's fork family instead: the session
                it was forked or branched from and its own forks, as a tree.
                Codex subagent threads are left out.
-  -e, --single Show every matching session instead of grouping them.
+  -e, --single Show every matching excerpt instead of grouping them.
   -g, --group  Group by directory and tool, with total matches and the latest
                hit (the default; undoes an earlier -e).
-  --grep       Search everything, slowly, including thinking and tool calls and
-               output, for a literal, case-insensitive term.
+  --index      Use the fast whole-word index of prompts and visible replies.
+  --grep       Use the default full substring scan (undoes an earlier --index).
+               The last --index or --grep flag wins.
   -N           Show N message lines before and after each match (e.g. -2).
   -a N, -aN    Show N lines after; later context flags override each side.
   -b N, -bN    Show N lines before (non-negative integers).
@@ -57,7 +59,7 @@ Flags:
 EOF
 }
 
-session_search_grep=false
+session_search_grep=true
 if ! session_search_parse_args "$@"; then
     llmsearch_usage >&2
     exit 2
