@@ -16,6 +16,9 @@
 .ipt-watch-section {
   margin-top: 1rem;
 }
+.ipt-watch-group h4 {
+  margin-top: 1.25rem;
+}
 .ipt-watch-row {
   display: flex;
   flex-wrap: wrap;

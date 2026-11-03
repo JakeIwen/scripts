@@ -87,7 +87,7 @@ function CandidateGroups({
   return (
     <>
       {[...groups].map(([show, rows]) => (
-        <section key={show} aria-label={`${show} candidates`}>
+        <section key={show} className="ipt-watch-group" aria-label={`${show} candidates`}>
           <h4>{show}</h4>
           {rows.map((candidate) => (
             <CandidateRow
