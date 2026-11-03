@@ -150,9 +150,20 @@ same AP/STA recovery canary:
 ./vanrouter/deploy-5ghz-ap.sh --optimize
 ```
 
-Optimization changes only `radio1.htmode` to `HE80`. If the AP and client do
-not both recover, or the deployment shell disconnects, the helper restores the
-previous mode and reloads only `radio1`.
+Optimization changes `radio1.htmode` to `HE80` and sets
+`radio1.he_bss_color_enabled` to `0`. If the AP and client do not both recover,
+or the deployment shell disconnects, the helper restores both previous values
+and reloads only `radio1`.
+
+BSS coloring stays off because of a hostapd failure seen dozens of times since
+September 2026: a color change (CCA) that a hotspot disconnect cuts short leaves
+hostapd refusing every later beacon update (`Cannot set beacons during CCA
+period`). After the client reconnects, `ubus call hostapd.wl1-ap0 get_status`
+still reports `ENABLED`, but `iw dev wl1-ap0 info` shows no `ssid` and nothing
+can join 5 GHz until `radio1` reloads. On November 3, 2026 the live router got
+`he_bss_color_enabled=0` (backup `/etc/config/wireless.pre-bss-color-20261103`),
+and `get_status` now reports `bss_color: -1`. `macbook/scripts/pause_24g.zsh`
+checks the kernel's view of the AP before removing the Mac from 2.4 GHz.
 
 Inspect or deliberately remove the added section:
 

@@ -48,6 +48,10 @@ uci_get() {
 		wireless.radio0.band) printf '2g\n' ;;
 		wireless.radio1.band) printf '5g\n' ;;
 		wireless.radio1.htmode) radio1_htmode ;;
+		wireless.radio1.he_bss_color_enabled)
+			[ -f "$state/radio1.bss_color" ] || exit 1
+			sed -n '1p' "$state/radio1.bss_color"
+			;;
 		wireless.wifinet3) printf 'wifi-iface\n' ;;
 		wireless.wifinet3.mode) printf 'ap\n' ;;
 		wireless.wifinet3.device) printf 'radio0\n' ;;
@@ -94,6 +98,9 @@ case $tool in
 					wireless.radio1.htmode)
 						printf '%s\n' "$value" > "$state/radio1.htmode"
 						;;
+					wireless.radio1.he_bss_color_enabled)
+						printf '%s\n' "$value" > "$state/radio1.bss_color"
+						;;
 					*) exit 1 ;;
 				esac
 				;;
@@ -112,8 +119,13 @@ case $tool in
 				done
 				;;
 			delete)
-				[ "$1" = wireless.dendelion_5g ]
-				rm -f "$state"/target.*
+				case $1 in
+					wireless.dendelion_5g) rm -f "$state"/target.* ;;
+					wireless.radio1.he_bss_color_enabled)
+						rm -f "$state/radio1.bss_color"
+						;;
+					*) exit 1 ;;
+				esac
 				;;
 			commit)
 				[ "$1" = wireless ]
@@ -234,14 +246,17 @@ failure_output="$test_root/failure.out"
 
 "$helper" optimize > "$test_root/optimize.out" 2>&1
 [ "$(sed -n '1p' "$mock_state/radio1.htmode")" = HE80 ]
+[ "$(sed -n '1p' "$mock_state/radio1.bss_color")" = 0 ]
 
 printf 'HT20\n' > "$mock_state/radio1.htmode"
+rm -f "$mock_state/radio1.bss_color"
 : > "$mock_state/fail-next-reload"
 if "$helper" optimize > "$test_root/optimize-failure.out" 2>&1; then
 	printf 'expected failed HE80 canary to restore HT20\n' >&2
 	exit 1
 fi
 [ "$(sed -n '1p' "$mock_state/radio1.htmode")" = HT20 ]
+[ ! -e "$mock_state/radio1.bss_color" ]
 rm -f "$mock_state/prevent-ap-start"
 
 "$helper" remove > "$remove_output" 2>&1
