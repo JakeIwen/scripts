@@ -167,6 +167,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   `provision` (new networks), `status` (status/dashboard output), and `starlink`
   (power-off roaming). Ship the entrypoint and every sibling together.
 - `macbook/shortcuts/`: stdlib Python 3.9+ SSH-key Shortcut specs and builders: Pi command shortcuts (`pi_shortcuts.py`, `workflows.py`) and the "To Mac LLM" photo share sheet (`mac_shortcuts.py`, `mac_workflows.py`); shared plist helpers live in `workflows.py`. From the repo root run `/usr/bin/python3 -m macbook.shortcuts.build_shortcuts` to build both sets (requires macOS `/usr/bin/shortcuts` signing); outputs are ignored under `macbook/build/shortcuts/`.
+- `macbook/scripts/van_dashboard_http.py` is the Mac's one JSON client for the Pi
+  dashboard API (`DASHBOARD_URL`, ok-checked GET and form POST); the cab dimmer and
+  `van_lighting.py` use it.
 - `macbook/metered/`: Python 3.9+ Mac controller and stable `mac-metered` CLI;
   `com.jacobr.metered` runs once per minute in the GUI login session, not as a
   daemon. `wifi_helper/reader.py` reads fresh Location-authorized CoreWLAN

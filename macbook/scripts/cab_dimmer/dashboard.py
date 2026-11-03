@@ -1,31 +1,14 @@
 """Dashboard HTTP adapter for cab-light dimming."""
-import json
 import os
-from urllib import parse, request
+from urllib import parse
+
+from van_dashboard_http import DASHBOARD_URL, DashboardError, dashboard_json
 
 from .model import DimOutcome, DimResult
 
-DASHBOARD_URL = "http://vanpi.lan:8788"
 DASHBOARD_URL_ENV = "DISPLAY_CAB_DIMMER_DASHBOARD_URL"
 CAB_GROUP = "cab"
 HTTP_TIMEOUT_SECONDS = 8.0
-
-
-class DashboardError(RuntimeError):
-    """The dashboard returned data that cannot confirm a completed operation."""
-
-
-def _dashboard_json(url: str, *, data: bytes | None = None, timeout: float) -> dict:
-    headers = {"Content-Type": "application/x-www-form-urlencoded"} if data is not None else {}
-    operation = request.Request(url, data=data, headers=headers)
-    with request.urlopen(operation, timeout=timeout) as response:
-        if response.status != 200:
-            raise DashboardError(f"HTTP {response.status}")
-        payload = json.loads(response.read().decode("utf-8"))
-    if not isinstance(payload, dict) or payload.get("ok") is not True:
-        detail = payload.get("error", "invalid response") if isinstance(payload, dict) else "invalid response"
-        raise DashboardError(str(detail))
-    return payload
 
 
 def _cab_lights(payload: dict) -> list[dict]:
@@ -49,7 +32,7 @@ def dim_cab_lights(brightness: int, *, dashboard_url: str | None = None,
     base_url = dashboard_url or os.environ.get(DASHBOARD_URL_ENV, DASHBOARD_URL)
     changed = 0
     try:
-        lights = _cab_lights(_dashboard_json(f"{base_url.rstrip('/')}/api/lights", timeout=timeout))
+        lights = _cab_lights(dashboard_json(f"{base_url.rstrip('/')}/api/lights", timeout=timeout))
         for light in lights:
             if not isinstance(light, dict) or light.get("state") != "on" or light.get("brightness") == brightness:
                 continue
@@ -57,7 +40,7 @@ def dim_cab_lights(brightness: int, *, dashboard_url: str | None = None,
             if not isinstance(entity_id, str) or not entity_id:
                 raise DashboardError("cab light has no entity id")
             body = parse.urlencode({"entity": entity_id, "brightness": brightness}).encode("ascii")
-            _dashboard_json(f"{base_url.rstrip('/')}/api/lights/brightness", data=body, timeout=timeout)
+            dashboard_json(f"{base_url.rstrip('/')}/api/lights/brightness", data=body, timeout=timeout)
             changed += 1
             logger(f"{entity_id}: brightness set to {brightness}%")
         detail = f"changed {changed} light(s) to {brightness}%"
