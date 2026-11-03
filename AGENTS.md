@@ -190,12 +190,15 @@ compare it with this checkout. Deployed files may differ from the repository.
   `static/section_metered.mjs` expose the CLI without bypassing request guards.
   Install/test commands and lease limitations: `pi/docs/networking/METERED_CONNECTIONS.md`.
 - `macbook/`: macOS shell utilities, AppleScripts, and BetterTouchTool helpers.
-  `macbook/scripts/shimg.zsh` is called by `~/.zshrc`'s `shimg` alias;
-  it saves clipboard PNGs into the Pi `agent-shared` folder, with an
-  optional filename (default `screenshot.png`). When pihome isn't mounted
-  it mounts it quietly (AppleScript `mount volume`) and opens the folder in
-  Finder, which focuses a window already showing it; it never touches the
-  clipboard.
+  `macbook/scripts/shimg.zsh` is called by `~/.zshrc`'s `shimg` function;
+  it saves clipboard PNGs into the Pi `agent-shared` folder under
+  lowercase-hyphen names and never touches the clipboard. By default it
+  drops `screenshot-pending-N.png` and a detached job renames it from a
+  Haiku or GPT-6 Luna glance (order from the lean in the usage budget's
+  `report.txt`; `screenshot-N` if both fail); `-f` names it `screenshot-N`
+  at once; a given name replaces its file. When pihome isn't mounted it
+  mounts it quietly (AppleScript `mount volume`) and opens the folder in
+  Finder, which focuses a window already showing it.
   Performance Audio, Convert Video, Custom Conversion, BPM Over Time, Rhythm
   Practice and Interval Analysis are maintained separately in `~/dev/mac-media-tools`
   (public repo `https://github.com/JakeIwen/mac-media-tools`).
