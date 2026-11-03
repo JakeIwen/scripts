@@ -192,4 +192,21 @@ describe('storage feature', () => {
     expect(screen.getAllByText('no recent sample')).toHaveLength(3);
     expect(screen.getByText('41 °C')).toBeInTheDocument();
   });
+
+  it('says the disks are loading rather than missing before the first response', () => {
+    const pending = { ...resource(null), initialLoading: true, lastUpdatedAt: null };
+    render(
+      <StorageSheet
+        open
+        onClose={vi.fn()}
+        resources={{ policy: pending, disks: pending, stats: pending }}
+        usbResource={pending}
+        controls={storageControls()}
+        usbControls={usbControls()}
+      />,
+    );
+    expect(screen.getAllByText('Loading disks…')).toHaveLength(2);
+    expect(screen.queryByText('No disk data')).not.toBeInTheDocument();
+    expect(screen.queryByText(/No configured disk labels/)).not.toBeInTheDocument();
+  });
 });

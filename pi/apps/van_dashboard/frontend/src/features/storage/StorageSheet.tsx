@@ -224,7 +224,7 @@ export function StorageSheet({
       onClose={onClose}
     >
       <header className="storage-sheet__summary">
-        <span>{diskOperationLabel(disks)}</span>
+        <span>{resources.disks.initialLoading ? 'Loading disks…' : diskOperationLabel(disks)}</span>
         <button
           className="secondary-button"
           type="button"
@@ -279,7 +279,9 @@ export function StorageSheet({
           <span>{usbResource.error ? 'USB status unavailable' : 'Shared USB status'}</span>
         </div>
         <div className="storage-disk-list">
-          {disks?.disks.length ? (
+          {resources.disks.initialLoading ? (
+            <p className="storage-empty">Loading disks…</p>
+          ) : disks?.disks.length ? (
             disks.disks.map((disk) => (
               <DiskCard
                 disk={disk}

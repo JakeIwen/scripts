@@ -20,10 +20,9 @@ export function DiskStatsStrip({
   const entry = stats?.disks[disk.label];
   const io = stats ? currentIo(entry, stats.checkedAt, stats.ioSampleSeconds) : null;
   // Until the first stats response, the absence notes below would be guesses.
-  const pending = loading && stats === null;
   const ioNote = io
     ? 'last minute'
-    : pending
+    : loading
       ? 'loading…'
       : disk.attached
         ? 'no recent sample'
@@ -38,7 +37,7 @@ export function DiskStatsStrip({
     [
       'Temp',
       smart?.temperatureC != null ? `${smart.temperatureC} °C` : '—',
-      smart ? formatRelativeTime(smart.at) : pending ? 'loading…' : 'no SMART reading',
+      smart ? formatRelativeTime(smart.at) : loading ? 'loading…' : 'no SMART reading',
     ],
     [
       'Free',
