@@ -18,7 +18,7 @@ class MaintenanceTests(unittest.TestCase):
     def test_every_change_command_defaults_to_inspection(self):
         for argv in [['style'],['style','transport'],['style','status'],['status'],['notes'],['notes','--labels-only'],
                      ['escape'],['repair','rps'],['repair','rps','--with-escape'],['repair','sizes'],['repair','persistence'],['repair','paths'],['repair','actions'],['repair','dependencies'],
-                     ['repair','key-sequences'],['text-keys']]:
+                     ['repair','key-sequences'],['text-keys'],['finder-paste']]:
             with self.subTest(argv=argv):
                 command=module.command_for(module.parser().parse_args(argv))
                 self.assertIn('--inspect',command)
@@ -43,18 +43,19 @@ class MaintenanceTests(unittest.TestCase):
         self.assertTrue(command[-2].endswith('repair_key_sequences.py'))
         with self.assertRaises(ValueError):
             module.command_for(module.parser().parse_args(['repair','key-sequences','--apply','--no-checkpoint']))
-        for mode in ['--apply','--disable']:
-            command=module.command_for(module.parser().parse_args(['text-keys',mode]))
-            self.assertEqual(command[-1],mode)
-            self.assertTrue(command[-2].endswith('install_text_editing_keys.py'))
-        with contextlib.redirect_stderr(io.StringIO()),self.assertRaises(SystemExit):
-            module.parser().parse_args(['text-keys','--apply','--disable'])
+        for name,script in [('text-keys','install_text_editing_keys.py'),('finder-paste','install_finder_paste.py')]:
+            for mode in ['--apply','--disable']:
+                command=module.command_for(module.parser().parse_args([name,mode]))
+                self.assertEqual(command[-1],mode)
+                self.assertTrue(command[-2].endswith(script))
+            with contextlib.redirect_stderr(io.StringIO()),self.assertRaises(SystemExit):
+                module.parser().parse_args([name,'--apply','--disable'])
 
     def test_checkpoint_optout_reaches_each_wired_dispatch_path(self):
         for command in [['style', 'main'], ['style', 'transport'], ['style', 'status'],
                         ['restore-media'], ['repair', 'rps'], ['repair', 'persistence'],
                         ['repair', 'text'], ['repair', 'paths'], ['repair', 'actions'],
-                        ['repair', 'dependencies'], ['text-keys']]:
+                        ['repair', 'dependencies'], ['text-keys'], ['finder-paste']]:
             with self.subTest(command=command), patch.object(module.subprocess, 'run') as runner, \
                     contextlib.redirect_stdout(io.StringIO()):
                 runner.return_value.returncode = 0

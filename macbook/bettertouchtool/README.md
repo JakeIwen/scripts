@@ -30,6 +30,7 @@ Apple Events access is sandboxed. `inspect` and `backup` need no Apple Events.
 | `notes` | Recent/Pinned Notes setup; `--labels-only --apply` limits edits to labels. |
 | `escape` | Escape dismissal while the three Media dropdowns are visible. |
 | `text-keys` | Editing keys outside code editors: Cmd-X with no selection cuts the line; `'` `"` `` ` `` `(` `[` `{` wrap a selection. `--apply` installs, `--disable` turns them off; see below. |
+| `finder-paste` | Cmd-V in Finder saves a clipboard image (a ctrl-cmd-shift-4 screenshot) as a PNG in the current folder; copied files and text paste as before. `--apply` installs, `--disable` turns it off; see below. |
 | `repair rps` | Restore the missing sync-button link without running a deployment; optional `--with-escape`. |
 | `repair sizes` | Repair conflicting min/max dimensions without normalizing valid custom sizes. |
 | `repair paths` | Repair reviewed moved-script paths in active floating-menu actions and named triggers; `--apply` changes command fields only. |
@@ -333,6 +334,56 @@ single insertion point.
 changed trigger disabled, verifies the API readback and the saved store, then
 enables all of them and advances the Guard checkpoint. It refuses when another
 enabled shortcut in an active preset uses one of these keys.
+
+### Finder paste
+
+```sh
+/usr/bin/python3 -B ~/dev/scripts/macbook/bettertouchtool/btt.py finder-paste
+/usr/bin/python3 -B ~/dev/scripts/macbook/bettertouchtool/btt.py finder-paste --apply
+/usr/bin/python3 -B ~/dev/scripts/macbook/bettertouchtool/btt.py finder-paste --disable
+```
+
+Finder's own Paste handles only copied files, so a screenshot taken to the clipboard
+(ctrl-cmd-shift-4) pastes nowhere. `install_finder_paste.py` adds one global Cmd-V
+keyboard trigger to the active Master preset, under the fixed UUID
+`EDA649C3-026B-4402-9BF9-CE339233EFB2`. Its runtime, `finder_paste.js`, looks at the
+pasteboard in this order and never writes it:
+
+- File URLs: Finder's own Edit > Paste. Files come first because Finder also puts a
+  copied file's icon on the pasteboard as TIFF.
+- An image: saved as `Screenshot YYYY-MM-DD at HH.MM.SS.png` (local time; ` 2`, ` 3`
+  and so on when the name is taken) in Finder's insertion location, the folder New
+  Folder would use (the Desktop when no window is open), then selected. A Recents or
+  search window has no such folder, so there it stops with a notification, as New
+  Folder is unavailable there. A `public.png`
+  is written byte for byte; anything else NSImage reads (TIFF, JPEG, HEIC, PDF) is
+  converted. The file is written under a hidden name and renamed, never over an
+  existing file. In a Get Info window, where a pasted image sets a custom icon, and
+  on any text focus the condition missed, Edit > Paste is pressed instead.
+- Anything else: Edit > Paste, which does nothing when Finder has nothing to paste.
+
+Paste is pressed through Accessibility, as the editing keys press Cut: sending Cmd-V
+from the Cmd-V trigger would be swallowed the way Cmd-X was. The trigger's advanced
+condition (`finder_paste_condition.CONDITION`), with BTT's pass-through option, hands
+Cmd-V straight to the app unless Finder is frontmost, and to Finder when
+`focused_element_details` shows a settable `AXSelectedText`: rename fields, the
+search field, Go to Folder and Get Info's text fields. The trigger is global because
+BTT 6.990's socket `add_new_trigger` filed it under Global despite its
+`BTTAppBundleIdentifier` (the Apple Events form has no app parameter either); the
+Finder check comes first in the condition. BTT has no condition variable for the
+pasteboard's types (its Clipboard variables only report the clipboard manager, and
+`clipboard_content` is text), so every Cmd-V on a non-text focus in Finder runs the
+script, which sorts files, images and text itself.
+
+`--apply` backs up to `.local/finder-paste-backups/`, checks the condition against
+`finder_paste_condition.CASES` with NSPredicate, creates the trigger disabled,
+verifies the API readback and the saved store, then enables it and advances the
+Guard checkpoint. It refuses when another enabled shortcut in an active preset, in
+any app, uses Cmd-V. The install flow is `trigger_install.py`, shared with the
+editing keys. `tests/test_finder_paste.py` runs the runtime against a named
+pasteboard and a temporary folder (with `BTT_LIVE_TESTS=1`, also inside BTT);
+`tests/finder_paste.test.cjs` checks its Finder decisions with Accessibility and
+Finder scripting stubbed.
 
 ### Stale script references
 

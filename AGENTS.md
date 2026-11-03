@@ -270,6 +270,13 @@ compare it with this checkout. Deployed files may differ from the repository.
   is their runtime on top of `text_selection.js`.
   BTT swallows a Cmd-X sent from its own Cmd-X trigger, so the line cut presses
   Edit > Cut through Accessibility instead.
+  `install_finder_paste.py` (`btt.py finder-paste`) owns Cmd-V in Finder: one global
+  conditional pass-through trigger (Finder frontmost, no settable text focus) whose
+  runtime `finder_paste.js` presses Finder's Edit > Paste for files and text and
+  saves a clipboard image as a PNG in Finder's insertion location;
+  `finder_paste_condition.py` owns its condition and truth table. BTT's
+  `add_new_trigger` files new triggers under Global whatever their
+  `BTTAppBundleIdentifier`, so the condition does the app scoping.
   `trigger_install.py` owns the shared guarded install of fixed-UUID top-level
   triggers (create disabled, verify readback and saved store, enable; a failure
   leaves them disabled). `tests/btt_socket_fake.py` is the in-memory BTT socket for

@@ -42,13 +42,18 @@ def parser():
     text_keys_mode = text_keys.add_mutually_exclusive_group()
     text_keys_mode.add_argument('--apply', action='store_true')
     text_keys_mode.add_argument('--disable', action='store_true', help='turn the editing keys off, keeping them saved')
+    finder_paste = commands.add_parser('finder-paste', help='inspect/install Cmd-V in Finder: save a clipboard '
+                                       'image as a PNG, paste files and text as before')
+    finder_paste_mode = finder_paste.add_mutually_exclusive_group()
+    finder_paste_mode.add_argument('--apply', action='store_true')
+    finder_paste_mode.add_argument('--disable', action='store_true', help='turn the Finder paste key off, keeping it saved')
     repair = commands.add_parser('repair', help='targeted recovery; persistence recovery restarts BTT')
     repair.add_argument('target', choices=('rps', 'persistence', 'sizes', 'paths', 'actions', 'dependencies', 'text',
                                            'key-sequences'))
     repair.add_argument('--apply', action='store_true')
     repair.add_argument('--with-escape', action='store_true', help='RPS repair only')
     repair.add_argument('--full-height-dropdowns', action='store_true', help='persistence repair only')
-    for command in (media_restore, style, repair, text_keys):
+    for command in (media_restore, style, repair, text_keys, finder_paste):
         command.add_argument('--no-checkpoint', action='store_true',
                              help='disable automatic BTT Guard checkpointing in supported installers')
     restore = commands.add_parser('restore-sizes', help='restore only sizes from a verified sizing backup')
@@ -79,6 +84,8 @@ def command_for(args):
         return python('install_menu_escape.py', *inspect)
     if args.command == 'text-keys':
         return python('install_text_editing_keys.py', '--disable' if args.disable else '--apply' if args.apply else '--inspect')
+    if args.command == 'finder-paste':
+        return python('install_finder_paste.py', '--disable' if args.disable else '--apply' if args.apply else '--inspect')
     if args.command == 'restore-sizes':
         return jxa('fix_menu_sizes.js', '--restore', str(args.backup.expanduser().resolve()))
     if args.command == 'repair':
