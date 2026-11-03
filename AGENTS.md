@@ -29,7 +29,7 @@ compare it with this checkout. Deployed files may differ from the repository.
 | `macbook/scripts/display_cab_dimmer.py` | `com.jacobr.display-cab-dimmer` LaunchAgent and Mac Panel automation | `macbook/scripts/cab_dimmer/` plus the stable entry script |
 | `macbook/scripts/amphetamine_control.py` | Mac Panel Amphetamine tab and Terminal | `macbook/scripts/amphetamine/` |
 | `macbook/scripts/deferred.zsh` | `com.jacobr.deferred-jobs` LaunchAgent and Mac Panel | the script and `shared/automations/` declaration |
-| `macbook/scripts/van_lighting.py` | BTT Media > Lighting "Solder SW" button (`toggle switch.solder_flood`) | the script; `macbook/bettertouchtool/install_lighting_menu.py` installs the button |
+| `macbook/scripts/van_lighting.py` | BTT Media > Lighting: Solder SW (`toggle switch.solder_flood`) and the Lighting Colour web view (`lights`, `set`, JSON) | the script; `macbook/bettertouchtool/install_lighting_menu.py` installs both callers |
 | `macbook/scripts/llm_photo_inbox.py` | iPhone Shortcuts Run Script over SSH (raw photo on stdin) | standalone stdlib Python 3.9+; macOS `sips`, `ps`, `pgrep`, `osascript` and running iTerm2 |
 | `pi/configs/labwc/` | labwc/swayidle at `/home/pi/.config/labwc/`; castit's mpv lifetime contract | copied by `pi/sync_scripts.sh` |
 | `pi.apps.van_dashboard` | `van-dashboard.service` and `pi/deploy_python.py` | `pi/apps/van_dashboard/` |
@@ -171,11 +171,15 @@ compare it with this checkout. Deployed files may differ from the repository.
 - `macbook/scripts/van_dashboard_http.py` is the Mac's one JSON client for the Pi
   dashboard API (`DASHBOARD_URL`, ok-checked GET and form POST); the cab dimmer and
   `van_lighting.py` use it.
-- `macbook/scripts/van_lighting.py toggle <entity>` flips a dashboard light or power
-  switch (state from `/api/lights`, write through `/api/lights/power`) and shows a
-  failure as a macOS notification. BTT's Media > Lighting submenu (💡, last on the
-  bar's second row) runs it from its Solder SW button, installed by
-  `macbook/bettertouchtool/install_lighting_menu.py/.js` (inspect by default, `--apply`).
+- `macbook/scripts/van_lighting.py` drives dashboard lights: `toggle <entity>` flips a
+  light or power switch (state from `/api/lights`, write through `/api/lights/power`;
+  failures also show a macOS notification), and `lights`/`set` print JSON for the
+  colour control. BTT's Media > Lighting submenu (💡, last on the bar's second row)
+  holds Solder SW and 🎨, which shows the top-level "Lighting Colour" dropdown: a Web
+  View built from `macbook/bettertouchtool/lighting_control/` (reusable
+  `LightControl.mount`, iro.js wheel, runs `van_lighting.py` through BTT's
+  `runShellScript`; see its README). `install_lighting_menu.py/.js` beside it installs
+  all of it (inspect by default, `--apply`).
 - `macbook/metered/`: Python 3.9+ Mac controller and stable `mac-metered` CLI;
   `com.jacobr.metered` runs once per minute in the GUI login session, not as a
   daemon. `wifi_helper/reader.py` reads fresh Location-authorized CoreWLAN
@@ -512,6 +516,15 @@ compare it with this checkout. Deployed files may differ from the repository.
   `CLAUDE_CODE_SESSION_ATTENDED`; Codex through its rollout's `session_meta`
   source (`cli`, not `exec` or a subagent). Stdlib; the Pi copy sits flat in
   `/home/pi/scripts/`.
+- `shared/sh/reply_links.py` implements `+links`: with `--hook` it is the
+  UserPromptSubmit hook (Claude and Codex, Mac and Pi) that answers a bare
+  `+links` without a model turn, listing each `file://` page and hosted
+  claude.ai Artifact link from the session's own replies (Claude assistant
+  rows outside sidechains, Codex assistant response items, and older Codex
+  `[label](/path.html)` page links) once, oldest first, with time and page
+  `<title>`; given a transcript path it prints the same list for any
+  session. Pi URLs use the Mac's `/Volumes/pihome` mount. Stdlib; the Pi copy
+  sits flat in `/home/pi/scripts/`.
 - Shell tricks, Jacob's small interactive helper set (13 per host, at most 16):
   `shared/sh/shell_tricks_common.sh` (tools both hosts share, plus `tricks`),
   host files `macbook/scripts/shell_tricks.zsh` and `pi/scripts/shell_tricks.bash`,
