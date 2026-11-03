@@ -198,7 +198,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   and guarded API worker for standard Media > Tools items; the feature-named
   `install_*_menu.py` entry points remain compatibility wrappers.
   `macbook/bettertouchtool/btt.py` is the maintenance CLI; `btt_common.py/.js`
-  share read-only inspection and backup helpers. `repair_media_actions.py`
+  share read-only inspection and backup helpers; `btt_socket.py/.js` call BTT's
+  CLI over its local socket (reuse them instead of another `bttcli` wrapper).
+  `repair_media_actions.py`
   defines the action-recovery wire contract consumed by its JXA worker.
   `macbook/bettertouchtool/btt_guard/` owns explicit known-good checkpoints,
   read-only integrity audits, approved restoration, ntfy warnings and periodic

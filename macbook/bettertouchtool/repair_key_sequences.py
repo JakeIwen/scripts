@@ -27,8 +27,8 @@ import tempfile
 import time
 
 from btt_common import TRASH, backup_configuration, connect, current_database
+from btt_socket import exported_trigger
 
-BTTCLI = Path('/Applications/BetterTouchTool.app/Contents/SharedSupport/bin/bttcli')
 STORE_NAME = re.compile(r'^btt_data_store\.version_(\d+)_(\d+)_build_(\d+)$')
 KEY_SEQUENCE = 624
 PRESET = 'Master'
@@ -226,15 +226,6 @@ def summary(plan, current, sources):
             'transport': 'Apple Events adds, local-socket reads', 'restarts_btt': False}
 
 
-def bttcli(command, **parameters):
-    result = subprocess.run([str(BTTCLI), command, *(f'{key}={value}' for key, value in parameters.items())],
-                            capture_output=True, text=True, timeout=30)
-    if result.returncode:
-        # Trigger payloads can hold private text; never echo the response.
-        raise RuntimeError(f'BTT socket command {command} failed; no success confirmed.')
-    return result.stdout
-
-
 def add_trigger(definition):
     """BTT's socket drops large requests (a 94 KB paste exits on SIGPIPE), so adds use Apple Events."""
     with tempfile.TemporaryDirectory(prefix='btt-key-sequence-') as directory:
@@ -244,13 +235,6 @@ def add_trigger(definition):
                                 capture_output=True, text=True, timeout=60)
     if result.returncode:
         raise RuntimeError('BTT Apple Events add failed; run --apply from your own Terminal. No success confirmed.')
-
-
-def runtime_trigger(uuid):
-    value = json.loads(bttcli('get_trigger', uuid=uuid) or '{}')
-    if not isinstance(value, dict):
-        raise RuntimeError('Invalid BTT runtime response; no success confirmed.')
-    return value or None
 
 
 def runtime_matches(actual, wanted):
@@ -297,11 +281,11 @@ def restore(apply=False, source=None):
     added = 0
     try:
         for wanted in definitions:
-            if runtime_trigger(wanted['BTTUUID']) is not None:
+            if exported_trigger(wanted['BTTUUID']) is not None:
                 raise RuntimeError(wanted['BTTUUID'] + ' already exists in BTT; stopped without retrying.')
             add_trigger(wanted)
             added += 1
-            if not runtime_matches(runtime_trigger(wanted['BTTUUID']), wanted):
+            if not runtime_matches(exported_trigger(wanted['BTTUUID']), wanted):
                 raise RuntimeError(wanted['BTTUUID'] + ' runtime readback failed; stopped without retrying.')
         deadline = time.monotonic() + SAVE_TIMEOUT
         while not saved(database, plan['restore'], current.uuids):

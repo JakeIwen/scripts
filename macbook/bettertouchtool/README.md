@@ -418,8 +418,9 @@ and report identities. Recreate venvs rather than moving them.
 
 - `btt.py`: maintained CLI; fixed argument-list dispatch, no shell interpolation.
 - `repair_text_transforms.py/.js`: guarded installer for the nine existing text
-  transform buttons. `btt_socket.js` calls BTT's bundled CLI through its local
-  socket, avoiding Apple Events for configuration changes. Enable Command Line /
+  transform buttons. `btt_socket.js` (and `btt_socket.py` for the Python installers)
+  calls BTT's bundled CLI through its local socket, avoiding Apple Events for
+  configuration changes. Enable Command Line /
   Socket Server once in BTT's scripting settings and restart BTT before applying.
   The socket is restricted to the owning user; no network webserver is needed.
 - `install_text_editing_keys.py`: the editing keys' guarded installer, also through

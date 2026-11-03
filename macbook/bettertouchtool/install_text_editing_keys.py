@@ -20,10 +20,10 @@ import uuid
 
 from btt_common import backup_configuration, connect, current_database, records
 from btt_guard.installer_checkpoint import after_install, before_install
+import btt_socket
 import text_editing_conditions as conditions
 
 DIRECTORY = Path(__file__).resolve().parent
-BTTCLI = '/Applications/BetterTouchTool.app/Contents/SharedSupport/bin/bttcli'
 BACKUPS = DIRECTORY / '.local/text-editing-key-backups'
 NAMESPACE = uuid.UUID('5d0f6a3e-2b8c-4f71-9e2a-7c4b1d9e6f30')
 PASSTHROUGH = 'BTTKeyboardShortcutPerformDefaultOnAdvancedConditionMismatch'
@@ -101,23 +101,6 @@ def definitions():
                                                       {'excluded': list(conditions.EXCLUDED_APPS)},
                                                       'Editing keys stopped')})
     return result
-
-
-def btt(command, **parameters):
-    result = subprocess.run([BTTCLI, command, *('%s=%s' % item for item in parameters.items())],
-                            capture_output=True, text=True, timeout=15)
-    if result.returncode:
-        raise RuntimeError('BTT socket command failed: ' + command)
-    return result.stdout.strip()
-
-
-def exported(uid):
-    value = json.loads(btt('get_trigger', uuid=uid) or '{}')
-    hits = [x for x in (value if isinstance(value, list) else [value])
-            if isinstance(x, dict) and x.get('BTTUUID') == uid]
-    if len(hits) > 1:
-        raise RuntimeError('Cannot uniquely export editing key ' + uid)
-    return hits[0] if hits else None
 
 
 def _action_data(value):
@@ -205,12 +188,13 @@ def set_enabled(plan, value):
     """Flip only the enable flags; returns the UUIDs written."""
     touched = []
     for wanted in plan:
-        current = exported(wanted['BTTUUID'])
+        current = btt_socket.exported_trigger(wanted['BTTUUID'])
         # Exports omit BTTEnabled when it is 1.
         if current is None or int(current.get('BTTEnabled', 1)) == value:
             continue
-        btt('update_trigger', uuid=wanted['BTTUUID'], json=json.dumps({'BTTEnabled': value, 'BTTEnabled2': value}))
-        current = exported(wanted['BTTUUID'])
+        btt_socket.call('update_trigger', uuid=wanted['BTTUUID'],
+                        json=json.dumps({'BTTEnabled': value, 'BTTEnabled2': value}))
+        current = btt_socket.exported_trigger(wanted['BTTUUID'])
         if current is None or int(current.get('BTTEnabled', 1)) != value:
             raise RuntimeError('BTT did not apply the enable flag to ' + wanted['BTTUUID'])
         touched.append(wanted['BTTUUID'])
@@ -219,7 +203,7 @@ def set_enabled(plan, value):
 
 def install(database, plan):
     """Create or recreate disabled, verify runtime and disk, then enable; returns written UUIDs."""
-    current = {d['BTTUUID']: exported(d['BTTUUID']) for d in plan}
+    current = {d['BTTUUID']: btt_socket.exported_trigger(d['BTTUUID']) for d in plan}
     stale = [d for d in plan if current[d['BTTUUID']] is not None and export_errors(d, current[d['BTTUUID']])]
     missing = [d for d in plan if current[d['BTTUUID']] is None]
     if not stale and not missing and not saved_errors(database, plan, 1):
@@ -231,21 +215,21 @@ def install(database, plan):
     try:
         for wanted in stale:
             # Only this installer's own UUIDs are ever deleted, and only to rewrite them.
-            btt('delete_trigger', uuid=wanted['BTTUUID'])
-            if exported(wanted['BTTUUID']) is not None:
+            btt_socket.call('delete_trigger', uuid=wanted['BTTUUID'])
+            if btt_socket.exported_trigger(wanted['BTTUUID']) is not None:
                 raise RuntimeError('BTT did not remove the outdated editing key ' + wanted['BTTUUID'])
         for wanted in stale + missing:
-            btt('add_new_trigger', json=json.dumps(wanted))
+            btt_socket.call('add_new_trigger', json=json.dumps(wanted))
             touched.append(wanted['BTTUUID'])
         for wanted in plan:
-            actual = exported(wanted['BTTUUID'])
+            actual = btt_socket.exported_trigger(wanted['BTTUUID'])
             errors = export_errors(wanted, actual) if actual else ['not created']
             if errors:
                 raise RuntimeError('Editing key readback failed (%s): %s' % (wanted['BTTGestureNotes'], ', '.join(errors)))
         wait_saved(database, plan, None)
         touched += set_enabled(plan, 1)
         for wanted in plan:
-            if export_errors(wanted, exported(wanted['BTTUUID'])):
+            if export_errors(wanted, btt_socket.exported_trigger(wanted['BTTUUID'])):
                 raise RuntimeError('Enabling changed an editing key: ' + wanted['BTTGestureNotes'])
         wait_saved(database, plan, 1)
     except (RuntimeError, subprocess.SubprocessError, ValueError) as error:

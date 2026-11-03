@@ -14,6 +14,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import btt_socket
 import install_text_editing_keys as keys
 import text_editing_conditions as conditions
 
@@ -155,7 +156,7 @@ class InstallFlowTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, directory)
         self.plan = keys.definitions()
         self.fake = FakeBTT()
-        for module, target, value in [(keys, 'btt', self.fake), (keys, 'saved_errors', lambda *args: []),
+        for module, target, value in [(btt_socket, 'call', self.fake), (keys, 'saved_errors', lambda *args: []),
                                       (keys, 'BACKUPS', directory),
                                       (keys, 'backup_configuration', lambda *args, **kw: directory / 'backup.json'),
                                       (conditions, 'canonical', lambda predicate: predicate)]:
