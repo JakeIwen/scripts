@@ -571,6 +571,19 @@ and report identities. Recreate venvs rather than moving them.
   graph but watched by Guard; the installer does not checkpoint them itself, so edit
   acceptance picks them up. Existing Guard drift must be reviewed separately; do not
   accept it just to add Panel.
+- `install_lighting_menu.py/.js`: guarded installer for Media > Lighting, a 💡 submenu
+  appended to the Media bar holding `<<` and a two-line Solder SW button (the Screen
+  Cap button's label form) that runs `macbook/scripts/van_lighting.py toggle
+  switch.solder_flood`. Preview is the default; `--apply` backs up the Media export,
+  writes only its own UUIDs, verifies runtime and saved records (including the action's
+  Master preset link), then checkpoints Guard; `--refresh` redraws the bar. Existing
+  items are restyled with `update_menu_item` and their actions replaced one at a time:
+  a full `update_trigger` saves the new actions without their preset link, and a rerun
+  repairs any such action. A hand reorder or extra items added to the submenu survive.
+
+  ```sh
+  /usr/bin/python3 -B macbook/bettertouchtool/install_lighting_menu.py --apply --refresh
+  ```
 - `tools_menu_item.py` / `install_tools_menu_item.js`: shared definition and guarded
   installer for the standard BPM, Rhythm, Convert Video, Interval Analysis and Temp
   Card Printer entries under Media > Tools. Their `install_*_menu.py` paths remain

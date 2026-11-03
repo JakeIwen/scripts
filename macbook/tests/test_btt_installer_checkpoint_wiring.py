@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import patch
 
 import install_bpm_menu
+import install_lighting_menu as lighting
 import repair_text_transforms as text
 import repair_script_paths as paths
 import tools_menu_item as tools
@@ -157,6 +158,56 @@ class ToolsCheckpointWiringTests(unittest.TestCase):
     def test_inspection_never_runs_guard(self):
         events, _, before, after = self.run_install(['--inspect'])
         self.assertEqual(events, ['worker'])
+        before.assert_not_called()
+        after.assert_not_called()
+
+
+class LightingCheckpointWiringTests(unittest.TestCase):
+    def run_install(self, argv, *, wrote=True, worker_fails=False, saved_fails=False):
+        events = []
+        receipt = dict(message='verified lighting', wrote=wrote,
+                       touched_uuids=['submenu', 'button'] if wrote else [], saved_plan={'fixture': True})
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
+            stack.enter_context(patch.object(lighting, 'BUILD', Path(directory)/'build'))
+            stack.enter_context(patch.object(lighting, 'unlinked_actions', return_value=[]))
+            def worker(payload, mode, refresh):
+                events.append(mode)
+                return SimpleNamespace(returncode=1 if worker_fails else 0, stderr='failed',
+                                       stdout=json.dumps(receipt))
+            stack.enter_context(patch.object(lighting, 'worker', side_effect=worker))
+            before = stack.enter_context(patch.object(lighting, 'before_install',
+                side_effect=lambda **kw: events.append('baseline') or {'fixture': True}))
+            after = stack.enter_context(patch.object(lighting, 'after_install',
+                side_effect=lambda *a, **kw: events.append('checkpoint')))
+            def saved(plan):
+                events.append('saved')
+                if saved_fails:
+                    raise RuntimeError('saved verification failed')
+            stack.enter_context(patch.object(lighting, 'verify_saved_item', side_effect=saved))
+            stack.enter_context(redirect_stdout(io.StringIO()))
+            if saved_fails:
+                with self.assertRaisesRegex(RuntimeError, 'saved verification failed'):
+                    lighting.main(argv)
+            else:
+                self.assertEqual(lighting.main(argv), int(worker_fails))
+        return events, before, after
+
+    def test_apply_accepts_the_written_uuids_after_saved_verification(self):
+        events, before, after = self.run_install(['--apply'])
+        self.assertEqual(events, ['baseline', 'apply', 'saved', 'checkpoint'])
+        before.assert_called_once_with(no_checkpoint=False)
+        after.assert_called_once_with({'fixture': True}, ['submenu', 'button'], 'install_lighting_menu',
+                                      wrote=True)
+
+    def test_noop_failures_and_preview(self):
+        events, _, after = self.run_install(['--apply', '--no-checkpoint'], wrote=False)
+        self.assertEqual(events, ['baseline', 'apply', 'checkpoint'])
+        self.assertFalse(after.call_args.kwargs['wrote'])
+        for kwargs in ({'worker_fails': True}, {'saved_fails': True}):
+            _, _, after = self.run_install(['--apply'], **kwargs)
+            after.assert_not_called()
+        events, before, after = self.run_install([])
+        self.assertEqual(events, ['inspect'])
         before.assert_not_called()
         after.assert_not_called()
 
