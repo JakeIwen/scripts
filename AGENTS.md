@@ -51,6 +51,7 @@ compare it with this checkout. Deployed files may differ from the repository.
 | `shared/codex_autocontinue/retirement-check` | weekly `macbook/crontab` job | `shared/codex_autocontinue/` |
 | `pi/projects/phone-drop/` | `phone-drop.service` and its scoped deployer | the project folder |
 | `ubnt/persistent/scripts/` | airOS boot hooks and `ubnt/scp_to_device.sh` | the complete Wi-Fi-manager cohort |
+| `/volume1/vanpi-offsite/receiver` | DSM Task Scheduler `python3 -B -m receiver boot` from the private install root | `synology/offsite/`; explicit install, no systemd assumption |
 
 ## Repository map
 
@@ -1144,14 +1145,29 @@ The active design is represented by:
 - `shared/sh/codex_update.py`: keyed Codex/Claude weekly update adapters on both hosts, with independent cadence/results in `~/.local/state/codex-update/state.json` (legacy flat Codex state is preserved). The filename and six-hour cron lines in `macbook/crontab` and `pi/crontab_pi` stay stable; the Pi copy remains `/home/pi/scripts/codex_update.py`. Downloads require bounded host-local `allows pi.<tool>_update` via `/home/pi/scripts/vanpi-metered`, or `allows mac.<tool>_update` via `/Users/jacobr/dev/scripts/macbook/metered/mac-metered`; missing/failing/timed-out permission defers as `metered or unknown`, and `--force` skips only cadence. Every scheduled Claude check first atomically merges only `env.DISABLE_AUTOUPDATER="1"` into the existing regular `~/.claude/settings.json`, even when denied/not due; invalid JSON is refused. Both native CLIs run from `~/.local/bin` with it on PATH. Marketplace auto-update is unchanged: on-demand refresh exists but the inspected CLI has no auto-update toggle. The standalone `-I` flat copy keeps its atomic JSON writer local because checkout helpers are outside its import/deploy contract. `shared/automations/codex-update.json` shows both tools on both hosts, with bounded status SSH over `vanpi.lan`. Both hosts' `~/.codex/config.toml` set `check_for_update_on_startup = false`, so the TUI never prompts.
 - `pi/scripts/backup/abort_backup.sh`: coordinated termination before unmounting.
 - `pi/scripts/backup/clone_to_sd.sh`: bootable spare-card cloning.
-- `pi/scripts/backup/offsite_backup.sh`: encrypted restic drives for the offsite
-  copy on a friend's Synology (v1: a local USB target, filled on the Pi, then carried
-  to the NAS). It holds the exclusive legacy lock like `restore_from_borg.sh`;
-  `offsite_config.py` owns sources, excludes and wire records, `offsite_repository.py`
-  verifies mounts and repository IDs, `offsite_prepare.py` guards erasure,
-  `offsite_samba.py` owns the Time Machine capture gate, `offsite_run.py` writes
-  private status and `offsite_mounts.sh` reuses the label helpers. `install_restic.sh`
-  pins restic 0.19.1. Runbook: `pi/docs/backup/OFFSITE.md`.
+- `pi/scripts/backup/offsite_backup.sh`: encrypted restic offsite drives, seeded
+  locally then served by a friend's Synology over Tailscale. It holds the exclusive
+  legacy lock like `restore_from_borg.sh`; `offsite_config.py` owns sources, excludes
+  and canonical marker/transport/receipt records (NAS Python 3.9+, Pi runtime 3.11+).
+  `offsite_repository.py` verifies local mounts/IDs; `offsite_prepare.py` guards
+  erasure; `offsite_samba.py` owns the Time Machine capture gate; `offsite_run.py`
+  writes status/processed-versus-packed byte metrics; `offsite_mounts.sh` reuses
+  label helpers. `offsite_remote.py` owns known-ID REST auth and fresh
+  `pi.offsite_backup` metered/Tailscale admission for uploads and readback.
+  `offsite_receipts.py` commits/read-verifies encrypted completion receipts instead
+  of deleting snapshot tags on append-only targets, and owns check/restore evidence.
+  `install_restic.sh` pins restic 0.19.1. No schedule or automatic retry is installed.
+  Runbooks: `pi/docs/backup/OFFSITE.md` and `OFFSITE_NAS.md` beside it.
+- `synology/offsite/`: native DSM receiver and explicit installer. `mounts.py`
+  selects exact mounted, marked USB filesystems; `runtime.py` pins the repository
+  directory descriptor, reaps the owned server before switching, and binds auth
+  to the active repo ID so stale clients cannot write into a replacement drive.
+  `control.py` owns persistent stop and singleton lifecycle; DSM boot/watchdog tasks
+  call installed `receiver boot`. `binaries.py` pins rest-server 0.14.0; `install.py`
+  copies the canonical offsite config and protected reader beside the receiver.
+  Only a separate transport secret goes to the NAS, never the encryption password.
+  The small NAS durable JSON writer is intentionally host-local: importing the Pi
+  writer would cross the independently installed runtime boundary.
 - `pi/scripts/mount_disks.sh` and `pi/scripts/umount_disks.sh`: disk lifecycle.
   `pi/scripts/backup/umount_disks_fence.sh` (sourced by `umount_disks.sh`, shipped
   with the backup payload) stops and claims backup jobs' disks before unmount or spindown.

@@ -43,6 +43,8 @@ BACKUP_DEPLOY_PLAN=(
   'both|pi/scripts/backup/offsite_repository.py|/home/pi/scripts/backup/offsite_repository.py|revision|pi:pi|750|new'
   'both|pi/scripts/backup/offsite_prepare.py|/home/pi/scripts/backup/offsite_prepare.py|revision|pi:pi|750|new'
   'both|pi/scripts/backup/offsite_samba.py|/home/pi/scripts/backup/offsite_samba.py|revision|pi:pi|750|new'
+  'both|pi/scripts/backup/offsite_remote.py|/home/pi/scripts/backup/offsite_remote.py|revision|pi:pi|750|new'
+  'both|pi/scripts/backup/offsite_receipts.py|/home/pi/scripts/backup/offsite_receipts.py|revision|pi:pi|750|new'
   'both|pi/scripts/backup/offsite_run.py|/home/pi/scripts/backup/offsite_run.py|revision|pi:pi|750|new'
   'both|pi/scripts/backup/offsite_mounts.sh|/home/pi/scripts/backup/offsite_mounts.sh|revision|pi:pi|750|new'
   'both|pi/scripts/backup/offsite_backup.py|/home/pi/scripts/backup/offsite_backup.py|revision|pi:pi|750|new'

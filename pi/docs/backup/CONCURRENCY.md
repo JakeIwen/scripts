@@ -75,6 +75,7 @@ still independently asserts its job hold before planning or deleting objects.
 | Mac cloud | `time_machine_icloud.sh --run` | shared | `time-machine` | `mbp2tbkup` whole run | capture gate (unchanged Samba drain handshake) | yes, whole run |
 | Mac staging GC | `time_machine_icloud.sh --staging-gc-*` | shared | `time-machine` | `mbp2tbkup` | none | no |
 | Hotspare clone | `clone_now.sh` | shared | `clone` | none (cards use the existing per-device `lock_disk`) | none | no |
+| Offsite seed / remote backup / check / restore-test | `offsite_backup.sh` | exclusive, whole command | none | all (implied) | all (implied; unchanged Time Machine Samba gate) | no second hold; legacy exclusive already excludes every cloud worker |
 | Restore | `restore_from_borg.sh` | exclusive | none | all (implied) | all (implied) | no |
 | Hotspare init | `new_hotspare.sh` | exclusive | none | all (implied) | all (implied) | no |
 | Deployment fence | both targeted cloud installers | exclusive, non-blocking | none | all | all | all |

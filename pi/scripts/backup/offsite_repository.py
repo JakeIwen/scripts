@@ -13,7 +13,7 @@ import time
 
 import backup_locks
 from offsite_config import GUARD_SECONDS, LABEL_PATTERN, MARKER, REPO_ID_PATTERN
-from offsite_config import REPO_PATH, SCHEMA, STOP_SECONDS, RepositoryRecords
+from offsite_config import REPO_PATH, SCHEMA, STOP_SECONDS, RepositoryRecords, validate_marker
 from time_machine_store import atomic_json
 
 
@@ -44,7 +44,7 @@ class Commands:
             raise Interrupted('Ignition is on; rerun when parked to resume')
 
     def run(self, name, *args, timeout=60, input_text=None, line=None,
-            guard=None, cleanup=False):
+            guard=None, cleanup=False, rest_auth=None):
         if not cleanup:
             self.allowed()
         argv = [self.cfg.commands[name], *map(str, args)]
@@ -52,6 +52,17 @@ class Commands:
         if name == 'restic':
             environment = {key: value for key, value in environment.items() if not key.startswith('RESTIC_')}
             environment['RESTIC_PROGRESS_FPS'] = '0.2'
+        if rest_auth is not None:
+            if name != 'restic' or len(rest_auth) != 2:
+                raise ValueError('REST authentication is only allowed for restic')
+            environment.update(RESTIC_REST_USERNAME=rest_auth[0], RESTIC_REST_PASSWORD=rest_auth[1])
+            environment = {key: value for key, value in environment.items()
+                           if key.lower() not in ('http_proxy', 'https_proxy', 'all_proxy')}
+        def safe_line(text):
+            return text.replace(rest_auth[1], '[redacted]') if rest_auth else text
+        original_line = line
+        if line:
+            line = lambda text: original_line(safe_line(text))
         with subprocess.Popen(argv, stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=environment,
                               pass_fds=(self.cfg.lock_fd,), start_new_session=True) as child:
@@ -59,7 +70,7 @@ class Commands:
                 if input_text is not None:
                     child.stdin.write(input_text.encode())
                     child.stdin.close()
-                output = self._read(child, timeout, line, guard, cleanup)
+                output = safe_line(self._read(child, timeout, line, guard, cleanup))
                 try:
                     rc = child.wait(timeout=STOP_SECONDS)
                 except subprocess.TimeoutExpired as exc:
@@ -184,16 +195,6 @@ def records(cfg, optional=False) -> RepositoryRecords:
     for label, marker in value['repos'].items():
         validate_marker(marker, label)
     return value
-
-
-def validate_marker(marker, label):
-    if (not isinstance(marker, dict) or type(marker.get('schema')) is not int or marker['schema'] != SCHEMA or
-            marker.get('label') != label or not re.fullmatch(LABEL_PATTERN, label) or
-            marker.get('repo_path') != REPO_PATH or
-            not re.fullmatch(REPO_ID_PATTERN, str(marker.get('repo_id', ''))) or
-            type(marker.get('priority')) is not int or not 0 <= marker['priority'] <= 2147483647 or
-            not isinstance(marker.get('created'), str) or not marker['created']):
-        raise RuntimeError('Invalid offsite marker')
 
 
 class LocalRepository:

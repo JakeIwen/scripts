@@ -26,6 +26,15 @@ def parser(cfg):
     check = sub.add_parser('check', help='check a known local repository')
     check.add_argument('--label', required=True)
     check.add_argument('--read-data-subset', help='restic subset such as 5%%, 1/10, or 10G')
+    for command in (backup, check):
+        command.add_argument('--remote', action='store_true', help='use the registered NAS REST target over Tailscale')
+    receipts = sub.add_parser('receipts', help='list validated encrypted remote completion receipts')
+    receipts.add_argument('--label', required=True)
+    restore = sub.add_parser('restore-test', help='restore one remote path using a completion receipt and verify bytes')
+    restore.add_argument('--label', required=True)
+    restore.add_argument('--receipt', required=True)
+    restore.add_argument('--path', required=True)
+    restore.add_argument('--target', required=True, help='absolute path to a separate empty directory')
     sub.add_parser('status', help='print the current/last run as JSON; does not take the backup lock')
     return root
 
@@ -41,7 +50,11 @@ def main(argv=None, *, config=None):
             return 0
         admit(cfg)
         commands = Commands(cfg)
-        repo = LocalRepository(cfg, commands, args.label)
+        if getattr(args, 'remote', False) or args.command in ('receipts', 'restore-test'):
+            from offsite_remote import RemoteRepository
+            repo = RemoteRepository(cfg, commands, args.label)
+        else:
+            repo = LocalRepository(cfg, commands, args.label)
         with commands.signals():
             commands.allowed()
             if args.command == 'prepare-disk':
@@ -53,6 +66,12 @@ def main(argv=None, *, config=None):
                 if subset and not re.fullmatch(r'(?:[1-9][0-9]*/[1-9][0-9]*|(?:[0-9]+(?:\.[0-9]+)?)(?:%|[kKMGT]))', subset):
                     raise ValueError('Invalid --read-data-subset; use a percentage, n/t, or size')
                 print(repo.check(subset), end='', flush=True)
+            elif args.command == 'receipts':
+                from offsite_receipts import list_receipts
+                print(json.dumps(list_receipts(repo), sort_keys=True))
+            elif args.command == 'restore-test':
+                from offsite_receipts import restore_test
+                print(restore_test(repo, args.receipt, args.path, args.target), end='', flush=True)
         return 0
     except (OSError, ValueError, RuntimeError, KeyError) as exc:
         print(f'offsite: {exc}', file=sys.stderr, flush=True)

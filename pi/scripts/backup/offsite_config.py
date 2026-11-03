@@ -1,9 +1,38 @@
-"""Local offsite configuration and wire vocabulary (Pi Python 3.11+)."""
+"""Offsite sources and shared protocol vocabulary (NAS 3.9+, Pi runtime 3.11+)."""
+from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import TypedDict
 import os
+import re
+import ipaddress
+
+
+def validate_transport(value, extra_fields=()):
+    if (not isinstance(value, dict) or set(value) != {'schema', 'address', 'port', 'transport_password', *extra_fields}
+            or type(value.get('schema')) is not int or value['schema'] != SCHEMA):
+        raise ValueError('Missing or invalid offsite transport configuration')
+    if not isinstance(value['address'], str):
+        raise ValueError('Offsite endpoint must be a literal Tailscale IPv4 address')
+    address = ipaddress.IPv4Address(value['address'])
+    if address not in ipaddress.IPv4Network('100.64.0.0/10'):
+        raise ValueError('Offsite endpoint must be a literal Tailscale IPv4 address')
+    if type(value['port']) is not int or not 1024 <= value['port'] <= 65535:
+        raise ValueError('Invalid offsite receiver port')
+    if not isinstance(value['transport_password'], str) or not re.fullmatch(r'[A-Za-z0-9_-]{43,128}', value['transport_password']):
+        raise ValueError('Transport password must be a separate random URL-safe secret (at least 32 random bytes)')
+    return value
+
+
+def validate_marker(marker, label):
+    if (not isinstance(marker, dict) or type(marker.get('schema')) is not int or marker['schema'] != SCHEMA or
+            not isinstance(label, str) or marker.get('label') != label or not re.fullmatch(LABEL_PATTERN, label) or
+            marker.get('repo_path') != REPO_PATH or not isinstance(marker.get('repo_id'), str) or
+            not re.fullmatch(REPO_ID_PATTERN, marker['repo_id']) or
+            type(marker.get('priority')) is not int or not 0 <= marker['priority'] <= 2147483647 or
+            not isinstance(marker.get('created'), str) or not marker['created']):
+        raise RuntimeError('Invalid offsite marker')
 
 
 MARKER = '.vanpi-offsite'
@@ -11,9 +40,13 @@ REPO_PATH = 'vanpi-restic'
 SCHEMA = 1
 HOST = 'vanpi'
 INCOMPLETE_TAG = 'offsite-incomplete'
+RECEIPT_TAG = 'offsite-receipt-v1'
+RECEIPT_FILE = 'offsite-completion.json'
+REMOTE_CONSUMER = 'pi.offsite_backup'
+REMOTE_CONFIG = 'remote.json'
 LABEL_PATTERN = r'[A-Za-z0-9][A-Za-z0-9._-]{0,15}'
 REPO_ID_PATTERN = r'[0-9a-f]{64}'
-PRIORITY_EXAMPLES = {'3tb': 10, '14tb': 20}
+PRIORITY_EXAMPLES = {'5tb': 10, '14tb': 20}
 GUARD_SECONDS = 5
 STOP_SECONDS = 15
 # Restic patterns are absolute, unlike rsync's source-root-anchored patterns.
@@ -56,6 +89,27 @@ class SourceOutcome(TypedDict, total=False):
     result: Result
     cause: str
     snapshot: str
+    receipt: str
+    logical_bytes_processed: int
+    newly_added_packed_bytes: int | None
+    duration_seconds: float
+
+
+class CompletionReceipt(TypedDict):
+    schema: int
+    repo_id: str
+    source: str
+    snapshot: str
+    completed: float
+    logical_bytes_processed: int | None
+    newly_added_packed_bytes: int | None
+
+
+class TransportConfig(TypedDict):
+    schema: int
+    address: str
+    port: int
+    transport_password: str
 
 
 class StatusRecord(TypedDict, total=False):
@@ -77,6 +131,9 @@ class StatusRecord(TypedDict, total=False):
     cause: str
     cleanup_errors: list[str]
     notification_error: str
+    duration_seconds: float
+    target_kind: str
+    progress_measure: str
 
 
 @dataclass(frozen=True)

@@ -33,6 +33,8 @@ with context:
 
 
 class OffsiteFixture:
+    command_timeout = 30
+
     def __init__(self):
         self.stack = ExitStack()
         self.registry = self.stack.enter_context(temporary_registry())
@@ -93,7 +95,16 @@ class OffsiteFixture:
 
     def run(self, *args):
         process = self.start(*args)
-        out, err = process.communicate(timeout=30)
+        try:
+            out, err = process.communicate(timeout=self.command_timeout)
+        except BaseException:
+            process.terminate()
+            try:
+                process.communicate(timeout=45)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate()
+            raise
         return subprocess.CompletedProcess(process.args, process.returncode, out, err)
 
     def prepare(self):

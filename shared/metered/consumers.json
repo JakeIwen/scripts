@@ -1,5 +1,6 @@
 [
   {"id":"pi.torrents","host":"pi","label":"Torrents","how":"tick","note":"Metering holds do not override disk, ignition or manual torrent policy."},
+  {"id":"pi.offsite_backup","host":"pi","label":"Offsite NAS backup and readback","how":"guard","note":"On demand only; fresh admission throughout backup, checks and restore tests. No metered approval or exemption is installed by default."},
   {"id":"pi.icloud_backup","host":"pi","label":"Pi iCloud backup","how":"guard","note":"Fresh transport and storage admission still apply."},
   {"id":"pi.time_machine_cloud","host":"pi","label":"Time Machine cloud copy","how":"guard","note":"This does not control LAN Time Machine backups."},
   {"id":"pi.codex_update","host":"pi","label":"Codex updates","how":"run","note":"Weekly adapter checks vanpi-metered allows before downloading; unknown defers."},

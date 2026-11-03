@@ -17,6 +17,7 @@ class Backup:
         self.owned_mounts = []
         self.target_owned = False
         self.target_verified = False
+        self.remote = getattr(repo, 'remote', False)
         self.state: StatusRecord = {'schema': SCHEMA, 'pid': os.getpid(), 'label': repo.label,
                       'result': Result.RUNNING, 'source': None, 'bytes_done': 0,
                       'bytes_total': None, 'percent': None, 'rate': None, 'eta': None,
@@ -76,26 +77,38 @@ class Backup:
             if self.errors or not self.summary or not re.fullmatch(r'[0-9a-f]{8,64}', self.summary.get('snapshot_id', '')):
                 raise RuntimeError('Restic did not report a complete error-free snapshot')
         snapshot = self.summary['snapshot_id']
-        # A changed image or interrupted run never acquires a completed tag state.
-        tagged = self.repo.restic('tag', '--json', '--remove', INCOMPLETE_TAG, snapshot)
-        changes = [json.loads(line) for line in tagged.splitlines() if line.strip()]
-        changes = [row for row in changes if row.get('message_type') == 'changed']
-        if (len(changes) != 1 or changes[0].get('old_snapshot_id') != snapshot or
-                not re.fullmatch(r'[0-9a-f]{64}', changes[0].get('new_snapshot_id', ''))):
-            raise RuntimeError('Cannot identify the completed snapshot after tagging')
-        snapshot = changes[0]['new_snapshot_id']
+        completion = {}
+        if self.remote:
+            from offsite_receipts import complete
+            completion = complete(self.repo, name, snapshot, self.summary)
+            snapshot = completion['snapshot']
+        else:
+            # Local v1 can rewrite tags; append-only remote repositories cannot.
+            tagged = self.repo.restic('tag', '--json', '--remove', INCOMPLETE_TAG, snapshot)
+            changes = [json.loads(line) for line in tagged.splitlines() if line.strip()]
+            changes = [row for row in changes if row.get('message_type') == 'changed']
+            if (len(changes) != 1 or changes[0].get('old_snapshot_id') != snapshot or
+                    not re.fullmatch(r'[0-9a-f]{64}', changes[0].get('new_snapshot_id', ''))):
+                raise RuntimeError('Cannot identify the completed snapshot after tagging')
+            snapshot = changes[0]['new_snapshot_id']
         total = self.summary.get('total_bytes_processed', self.state['bytes_done'])
         self.state.update(percent=100, eta=0, rate=None, bytes_done=total, bytes_total=total)
-        return {'result': Result.OK, 'snapshot': snapshot}
+        return {'result': Result.OK, 'snapshot': snapshot, **completion,
+                'logical_bytes_processed': total,
+                'newly_added_packed_bytes': self.summary.get('data_added_packed')}
 
     def run_sources(self):
         for name, source in self.sources.items():
+            started = time.time()
             try:
                 outcome = self.snapshot(name, source)
-            except Interrupted:
+            except Interrupted as exc:
+                self.state['sources'][name] = {'result': Result.INTERRUPTED, 'cause': str(exc),
+                                               'duration_seconds': time.time() - started}
                 raise
             except (OSError, ValueError, RuntimeError) as exc:
                 outcome = {'result': Result.FAILED, 'cause': str(exc)}
+            outcome['duration_seconds'] = time.time() - started
             self.state['sources'][name] = outcome
             self.state['last_result'] = outcome
             self.save()
@@ -151,6 +164,9 @@ class Backup:
         finally:
             self.cleanup()
             self.state.update(finished=time.time(), rate=None, eta=None)
+            self.state['duration_seconds'] = self.state['finished'] - self.state['started']
+            self.state['target_kind'] = 'remote' if self.remote else 'local'
+            self.state['progress_measure'] = 'logical source bytes, not network throughput'
             self.notify()
             self.save()
         print(json.dumps(self.state, sort_keys=True), flush=True)

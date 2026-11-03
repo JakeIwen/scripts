@@ -1,10 +1,13 @@
-# Offsite USB backups
+# Offsite backups
 
 Seed an encrypted restic repository on a borrowed USB HDD while it is attached to
-vanpi, then move it to a friend's Synology. This v1 only accepts a local labeled
-filesystem. There is no NAS watcher, remote `rest:` target, automatic schedule,
-retention/prune, or automatic retry. A 3 TB drive can be priority 10; a later
-14 TB drive priority 20. Capacity figures are nominal, not a fit guarantee.
+vanpi, then move it to a friend's Synology. Local v1 remains independent of the NAS.
+On-demand v2 adds a native append-only receiver and a Tailscale-only `rest:` target;
+see [NAS setup and remote operation](OFFSITE_NAS.md). No automatic schedule,
+retention/prune, or automatic retry is installed. The actual loaner is the **5 TB
+FORT-MPLS-5TB**, priority 10; the later 14 TB drive uses priority 20. Capacity figures
+are nominal, not a fit guarantee. Do not deploy while a local seed is running.
+The preparation examples below are for a new drive, not the already-seeded loaner.
 
 ## Install
 
@@ -47,7 +50,7 @@ size and partition layout, then exits nonzero **without erasing anything**.
 ```sh
 sudo /home/pi/scripts/backup/offsite_backup.sh prepare-disk \
   --device /dev/disk/by-id/usb-REPLACE_WITH_EXACT_DISK_ID \
-  --label offsite-3tb --priority 10
+  --label FORT-MPLS-5TB --priority 10
 ```
 
 Only after reviewing that layout, supply the exact serial it printed:
@@ -55,20 +58,28 @@ Only after reviewing that layout, supply the exact serial it printed:
 ```sh
 sudo /home/pi/scripts/backup/offsite_backup.sh prepare-disk \
   --device /dev/disk/by-id/usb-REPLACE_WITH_EXACT_DISK_ID \
-  --label offsite-3tb --priority 10 --erase-confirm REPLACE_WITH_EXACT_SERIAL
+  --label FORT-MPLS-5TB --priority 10 --erase-confirm REPLACE_WITH_EXACT_SERIAL
 ```
 
 This destroys that disk's existing contents. It refuses mounted partitions,
-swap, root/boot devices, duplicate/empty serials, non-USB disks, disk-policy or
-hotspare labels, known offsite labels, reused labels and ambiguous discovery.
-Existing mount-directory contents are never removed. The new label must be
-1–16 ASCII letters/digits/dot/underscore/hyphen, starting with a letter or digit.
+swap, root/boot devices, duplicate/empty serials, non-USB disks, non-offsite policy
+or hotspare labels, already registered offsite labels, reused labels and ambiguous
+discovery. Existing mount-directory contents are never removed. The new label must
+be 1–16 ASCII letters/digits/dot/underscore/hyphen, starting with a letter or digit.
+
+Before preparing a new label, deploy its explicit entries in disk policy
+`OFFSITE_LABELS`, `MANUAL_MOUNT_LABELS` and `HDD_LABELS`, `policyctl`'s managed
+labels, and `backup_locks.py`'s disk registry. Regenerate the shell registry and
+tmpfiles configuration with `python3 -m pi.generate_backup_lock_registry`, then
+use the owning deployment paths. These are safety prerequisites, not auto-discovery:
+without them the label is refused or the ignition drain cannot claim its disk.
+`FORT-MPLS-5TB` already has these entries; a future 14 TB label does not yet.
 
 It creates one GPT Linux partition and ext4 with zero reserved percentage,
 explicitly excluding `orphan_file` and `metadata_csum_seed`. Remaining features
 are Debian defaults. Actual compatibility with this friend's NAS must still be
-tested: Synology model/kernel support can vary. It mounts `/mnt/offsite-3tb`,
-initializes `/mnt/offsite-3tb/vanpi-restic`, then writes the marker and private
+tested: Synology model/kernel support can vary. It mounts `/mnt/FORT-MPLS-5TB`,
+initializes `/mnt/FORT-MPLS-5TB/vanpi-restic`, then writes the marker and private
 registration. A failed preparation is **not** a registered usable backup; inspect
 its journal/error and disk layout before any repeat erasure. Preparation leaves
 the verified mount available for the seed run.
@@ -126,7 +137,7 @@ On the Pi:
 ```sh
 sudo systemd-run --unit=vanpi-offsite --collect --service-type=exec \
   --property=KillMode=mixed --property=TimeoutStopSec=120 \
-  /home/pi/scripts/backup/offsite_backup.sh backup --label offsite-3tb
+  /home/pi/scripts/backup/offsite_backup.sh backup --label FORT-MPLS-5TB
 ```
 
 `KillMode=mixed` sends TERM to the Python owner first, allowing it to stop/reap
@@ -175,18 +186,21 @@ cross-filesystem application transaction. Stop editing important source files
 while seeding. Restic's unreadable/changed-file errors are failures, not success.
 
 Every source gets its own snapshot with `--host vanpi`, its source tag,
-`--one-file-system` and `--no-cache`. Restic starts it with `offsite-incomplete`;
-that tag is removed only after restic succeeds and consistency checks pass.
-Interrupted/rejected snapshots, if published by restic, retain the incomplete
-tag and are **not recovery points**. No automatic deletion or retention runs.
+`--one-file-system` and `--no-cache`. Restic starts it with `offsite-incomplete`.
+Local v1 removes that tag only after restic succeeds and consistency checks pass;
+remote v2 retains it and publishes a separate encrypted completion receipt instead
+([receipt rules](OFFSITE_NAS.md#completion-and-recovery)). Interrupted/rejected snapshots
+without completion evidence are **not recovery points**. No automatic retention runs.
 No restic cache fills the Pi rootfs; in-memory index cost still depends on repo size.
 
 All source mounts are verified against the exact expected label/source, including
 nested source paths. A mount created by this run is released through the existing
 backup disk helper. Pre-existing source mounts stay mounted. A target mounted by
 the backup run is unmounted at exit; on SIGTERM even a pre-existing verified offsite
-target is unmounted. The offsite disk is not added to automatic HDD policy or
-spindown lists; unplug it only after a verified ordinary unmount.
+target is unmounted. Offsite drives are manually mounted, like bigboi, and
+explicitly included in HDD ignition unmount/spindown policy and the disk lock
+registry. `FORT-MPLS-5TB` is already configured this way. Unplug only after a
+verified ordinary unmount; never rely on the absence of an active backup alone.
 
 ## Check and hand over
 
@@ -194,9 +208,9 @@ A seed is not verified merely because its snapshots finished. Run the structural
 check, then a data sample (or cycle disjoint subsets to cover the whole repository):
 
 ```sh
-sudo /home/pi/scripts/backup/offsite_backup.sh check --label offsite-3tb
+sudo /home/pi/scripts/backup/offsite_backup.sh check --label FORT-MPLS-5TB
 sudo /home/pi/scripts/backup/offsite_backup.sh check \
-  --label offsite-3tb --read-data-subset 5%
+  --label FORT-MPLS-5TB --read-data-subset 5%
 ```
 
 `1/10` through `10/10` cover every pack once across ten checks; `5%` is a random
@@ -208,9 +222,9 @@ Perform a small restore test to a separate destination before relying on the dri
 Before unplugging, verify the mount and unmount it if still mounted:
 
 ```sh
-findmnt -M /mnt/offsite-3tb -o SOURCE,TARGET,FSTYPE
-sudo umount /mnt/offsite-3tb
-findmnt -M /mnt/offsite-3tb
+findmnt -M /mnt/FORT-MPLS-5TB -o SOURCE,TARGET,FSTYPE
+sudo umount /mnt/FORT-MPLS-5TB
+findmnt -M /mnt/FORT-MPLS-5TB
 ```
 
 The last `findmnt` should exit 1 with no output. Any other error is not proof of
@@ -218,16 +232,15 @@ unmount. Do not use force/lazy unmount or recursive removal to work around a bus
 disk. The marker is `.vanpi-offsite` at the filesystem root:
 
 ```json
-{"schema":1,"label":"offsite-3tb","repo_id":"<64 hex characters>","repo_path":"vanpi-restic","priority":10,"created":"<UTC timestamp>"}
+{"schema":1,"label":"FORT-MPLS-5TB","repo_id":"<64 hex characters>","repo_path":"vanpi-restic","priority":10,"created":"<UTC timestamp>"}
 ```
 
-It has no password. A future NAS watcher may use the highest-priority marked disk;
-this tool does not implement that watcher or configure the NAS. The Pi's root-only
+It has no password. The [NAS watcher](OFFSITE_NAS.md) chooses the unique
+highest-priority mounted marked drive. The Pi's root-only
 `/var/lib/vanpi-offsite/repos.json` binds labels to these exact marker records and
-restic IDs. Backup/check refuse mismatches and never call `restic init`. Preserve
-this state with the password during Pi recovery; do not hand-edit records merely
-to silence an unknown-repository refusal. The local-repository adapter is the
-extension point for a separately reviewed remote backend in v2.
+restic IDs. Local and remote backup/check refuse mismatches and never call
+`restic init`. Preserve this state with the password during Pi recovery; do not
+hand-edit records merely to silence an unknown-repository refusal.
 
 A normal failure or TERM clears only this process's populated Samba gate. SIGKILL
 or power loss cannot run cleanup (reboot clears `/run`). If a gate remains without
