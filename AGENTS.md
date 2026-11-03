@@ -622,6 +622,16 @@ compare it with this checkout. Deployed files may differ from the repository.
   `/effort` (which also saves the level as that model's default). The mod API
   has no effort setter, and `$.command.run` refuses calls from inside a hook,
   so it runs on the next tick. Mac only, loaded like term-highlight.
+- `shared/claude-mods/agent-label/` is a Claude Code mod that puts the model
+  and effort an agent runs at in front of its Agent call's description
+  (`[sonnet 5.5 · high] Read the logs`), which the agent list under the prompt
+  shows. The list keeps the description from spawn time, so the label is
+  worked out at the call: the call's `model`/`effort`, then the agent file's
+  frontmatter, then the parent's latest request (a 2.1.314 probe showed
+  built-ins such as Explore inherit both). The agent's first request is then
+  checked against the label, and a toast says when they differ. Aliases are
+  shown by the id they last resolved to (kept in `$.store`). Mac only, loaded
+  like term-highlight.
 - Pi video audio is hardwired: HDMI-A-1 → splitter box (HDMI to the monitor,
   audio to optical) → Sonos soundbar's optical input. `sns.sh rear_movie`
   switches the soundbar to optical and groups vonRear with it; VLC and Van TV's
