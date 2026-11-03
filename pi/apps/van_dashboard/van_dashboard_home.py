@@ -333,6 +333,7 @@ class LightingController:
                 brightness = value["brightness"]
                 supported_modes = set(value.get("supported_color_modes") or ())
                 supports_hue = bool(supported_modes & LIGHT_HUE_MODES)
+                hs_color = value.get("hs_color") if supports_hue else None
                 supports_color_temp = "color_temp" in supported_modes
                 min_color_temp = value.get("min_color_temp_kelvin")
                 max_color_temp = value.get("max_color_temp_kelvin")
@@ -349,11 +350,8 @@ class LightingController:
                     ),
                     "color_mode": value.get("color_mode"),
                     "supports_hue": supports_hue,
-                    "hue": (
-                        round(float(value["hs_color"][0]), 1)
-                        if supports_hue and value.get("hs_color") is not None
-                        else None
-                    ),
+                    "hue": round(float(hs_color[0]), 1) if hs_color is not None else None,
+                    "saturation": round(float(hs_color[1]), 1) if hs_color is not None else None,
                     "supports_color_temperature": supports_color_temp,
                     "color_temp_kelvin": value.get("color_temp_kelvin"),
                     "min_color_temp_kelvin": min_color_temp,
@@ -451,14 +449,16 @@ class LightingController:
             )
             return self.status()
 
-    def set_hue(self, entity, hue):
+    def set_hue(self, entity, hue, saturation=100):
         if entity not in self.entities:
             raise ValueError("unknown light entity")
         if type(hue) is not int or not 0 <= hue <= 360:
             raise ValueError("hue must be from 0 to 360")
+        if type(saturation) is not int or not 0 <= saturation <= 100:
+            raise ValueError("saturation must be from 0 to 100")
         with self.operation_lock:
             self._run(
-                [TUYA_LIGHT, "hue", entity, str(hue)],
+                [TUYA_LIGHT, "hue", entity, str(hue), str(saturation)],
                 expect_status=False,
             )
             return self.status()

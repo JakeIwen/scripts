@@ -10,6 +10,7 @@ export interface LightingLight {
   colorMode: string | null;
   supportsHue: boolean;
   hue: number | null;
+  saturation: number | null;
   supportsColorTemperature: boolean;
   colorTemperatureKelvin: number | null;
   minimumColorTemperatureKelvin: number | null;

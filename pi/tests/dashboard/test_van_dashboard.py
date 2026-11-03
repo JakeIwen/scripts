@@ -1037,7 +1037,7 @@ class LightingControllerTests(unittest.TestCase):
             elif args[:3] == [dashboard_common.TUYA_LIGHT, "hue", "light.wiz_kitchen"]:
                 values[4]["state"] = "on"
                 values[4]["color_mode"] = "rgbww"
-                values[4]["hs_color"] = [int(args[3]), 100]
+                values[4]["hs_color"] = [int(args[3]), int(args[4])]
                 values[4]["color_temp_kelvin"] = None
             elif args[:3] == [
                 dashboard_common.TUYA_LIGHT,
@@ -1069,7 +1069,7 @@ class LightingControllerTests(unittest.TestCase):
         self.assertEqual(calls[1], [dashboard_common.TUYA_LIGHT, "list"])
         self.assertEqual(calls[2], [dashboard_common.TUYA_LIGHT, "set", "light.wiz_kitchen", "102"])
         self.assertEqual(calls[3], [dashboard_common.TUYA_LIGHT, "list"])
-        self.assertEqual(calls[4], [dashboard_common.TUYA_LIGHT, "hue", "light.wiz_kitchen", "210"])
+        self.assertEqual(calls[4], [dashboard_common.TUYA_LIGHT, "hue", "light.wiz_kitchen", "210", "100"])
         self.assertEqual(calls[5], [dashboard_common.TUYA_LIGHT, "list"])
         self.assertEqual(
             calls[6],
@@ -5013,8 +5013,8 @@ class DashboardRouteTests(unittest.TestCase):
                 calls.append(("brightness", entity, brightness))
                 return {**status, "state": "on", "on_count": 1}
 
-            def set_hue(self, entity, hue):
-                calls.append(("hue", entity, hue))
+            def set_hue(self, entity, hue, saturation=100):
+                calls.append(("hue", entity, hue, saturation))
                 return {**status, "state": "on", "on_count": 1}
 
             def set_color_temperature(self, entity, kelvin):
@@ -5094,7 +5094,7 @@ class DashboardRouteTests(unittest.TestCase):
                 ("status",),
                 ("power", "all", True),
                 ("brightness", "light.wiz_kitchen", 42),
-                ("hue", "light.wiz_kitchen", 225),
+                ("hue", "light.wiz_kitchen", 225, 100),
                 ("temperature", "light.wiz_kitchen", 3200),
             ],
         )

@@ -110,8 +110,11 @@ def api_lights_brightness():
 
 @bp.route("/api/lights/hue", methods=["POST"])
 def api_lights_hue():
-    if not _exact_form(("entity", "hue")):
-        return api_error("light hue requires entity and hue", 400)
+    if not (
+        _exact_form(("entity", "hue"))
+        or _exact_form(("entity", "hue", "saturation"))
+    ):
+        return api_error("light hue requires entity, hue and optional saturation", 400)
     entity = request.form["entity"]
     if entity not in lighting.entities:
         return api_error("unknown light entity", 400)
@@ -122,13 +125,22 @@ def api_lights_hue():
     if not 0 <= hue <= 360:
         return api_error("hue must be from 0 to 360", 400)
     try:
-        status = lighting.set_hue(entity, hue)
+        saturation = int(request.form.get("saturation", "100"))
+    except (TypeError, ValueError):
+        return api_error("saturation must be from 0 to 100", 400)
+    if not 0 <= saturation <= 100:
+        return api_error("saturation must be from 0 to 100", 400)
+    try:
+        status = lighting.set_hue(entity, hue, saturation)
     except LightingCommandError as exc:
         return api_error(f"could not set light hue: {exc}", 502)
+    message = f"Hue set to {hue}°"
+    if "saturation" in request.form:
+        message += f", saturation {saturation}%"
     return jsonify(
         {
             "ok": True,
-            "message": f"Hue set to {hue}°",
+            "message": message,
             "lighting": status,
         }
     )

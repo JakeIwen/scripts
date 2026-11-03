@@ -33,6 +33,7 @@ function lightingPayload(): Record<string, unknown> {
               color_mode: 'rgbww',
               supports_hue: true,
               hue: 28.5,
+              saturation: 75.4,
               supports_color_temperature: true,
               color_temp_kelvin: 3_200,
               min_color_temp_kelvin: 2_202,
@@ -47,6 +48,7 @@ function lightingPayload(): Record<string, unknown> {
               color_mode: null,
               supports_hue: true,
               hue: null,
+              saturation: null,
               supports_color_temperature: true,
               color_temp_kelvin: null,
               min_color_temp_kelvin: 2_202,
@@ -169,10 +171,23 @@ describe('lighting response decoder', () => {
       brightness: 50,
       supportsHue: true,
       hue: 28.5,
+      saturation: 75.4,
       supportsColorTemperature: true,
       colorTemperatureKelvin: 3_200,
     });
+    expect(status.groups[0]?.lights[1]?.saturation).toBeNull();
+    expect(status.groups[1]?.lights[0]?.saturation).toBeNull();
     expect(status.groups[3]?.powerSwitch?.entityId).toBe('switch.ext_flood');
+  });
+
+  it.each([-1, 101, '75', false])('rejects invalid saturation %j', (saturation) => {
+    const payload = lightingPayload();
+    const lighting = payload.lighting as Record<string, unknown>;
+    const groups = lighting.groups as Record<string, unknown>[];
+    const lights = groups[0]!.lights as Record<string, unknown>[];
+    lights[0]!.saturation = saturation;
+
+    expect(() => decodeLightingStatus(payload)).toThrow(/saturation/);
   });
 });
 

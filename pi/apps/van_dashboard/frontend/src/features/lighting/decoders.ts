@@ -174,6 +174,7 @@ function decodeLight(value: unknown, groupIndex: number, lightIndex: number): Li
     colorMode: colorMode(object.color_mode, `${label}.color_mode`),
     supportsHue,
     hue,
+    saturation: nullableNumberInRange(object.saturation ?? null, 0, 100, `${label}.saturation`),
     supportsColorTemperature,
     colorTemperatureKelvin,
     minimumColorTemperatureKelvin,

@@ -8,7 +8,7 @@ token_file=${TUYA_TOKEN_FILE:-/home/pi/secrets/localtuya_token}
 
 if [[ "$action" != "list" && "$action" != "status" && "$action" != "set" && \
       "$action" != "hue" && "$action" != "temperature" ]]; then
-  echo "usage: tuya_light.sh list | status <light.entity> | set <light.entity> <brightness> [color_temp_kelvin] | hue <light.entity> <degrees> | temperature <light.entity> <kelvin>" >&2
+  echo "usage: tuya_light.sh list | status <light.entity> | set <light.entity> <brightness> [color_temp_kelvin] | hue <light.entity> <degrees> [saturation] | temperature <light.entity> <kelvin>" >&2
   exit 2
 fi
 if [[ "$action" != "list" && ! "$entity" =~ ^light\.[a-z0-9_]+$ ]]; then
@@ -77,10 +77,16 @@ if [[ "$action" == "hue" ]]; then
     echo "hue must be from 0 to 360" >&2
     exit 2
   fi
+  saturation=${4-100}
+  if [[ ! "$saturation" =~ ^[0-9]+$ ]] || (( saturation < 0 || saturation > 100 )); then
+    echo "saturation must be from 0 to 100" >&2
+    exit 2
+  fi
   payload=$(/usr/bin/jq -cn \
     --arg entity_id "$entity" \
     --argjson hue "$action_value" \
-    '{entity_id: $entity_id, hs_color: [$hue, 100]}')
+    --argjson saturation "$saturation" \
+    '{entity_id: $entity_id, hs_color: [$hue, $saturation]}')
 elif [[ "$action" == "temperature" ]]; then
   if [[ ! "$action_value" =~ ^[0-9]+$ ]] || (( action_value < 2000 || action_value > 7000 )); then
     echo "color temperature must be from 2000 to 7000 kelvin" >&2
@@ -120,7 +126,7 @@ if ! /usr/bin/curl -fsS --max-time 15 -X POST \
 fi
 
 if [[ "$action" == "hue" ]]; then
-  printf '{"hue":%s}\n' "$action_value"
+  printf '{"hue":%s,"saturation":%s}\n' "$action_value" "$saturation"
 elif [[ "$action" == "temperature" ]]; then
   printf '{"color_temp_kelvin":%s}\n' "$action_value"
 elif [[ -n "$color_temp_kelvin" ]]; then
