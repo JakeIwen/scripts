@@ -6,6 +6,7 @@ if [[ ${1:-} == --help ]]; then
   print 'Usage: shimg [filename.png]'
   print 'Save the clipboard image to the Pi agent-shared folder (default: screenshot.png).'
   print 'A missing .png suffix is added. An existing file is replaced.'
+  print 'An unmounted pihome share is mounted and its folder shown in Finder.'
   exit 0
 fi
 if (( $# > 1 )) || [[ ${1-screenshot} == '' || ${1:-} == */* ]]; then
@@ -16,9 +17,15 @@ fi
 filename=${1:-screenshot.png}
 [[ $filename == *.[pP][nN][gG] ]] || filename+=.png
 share=/Volumes/pihome/Documents/agent-shared
+share_url=smb://pi@VANPI._smb._tcp.local/pihome
 if [[ ! -d $share ]]; then
-  print -u2 "Pi share unavailable: $share. Mount pihome first."
-  exit 1
+  # Mount quietly, then show the folder; open focuses a Finder window already on it.
+  /usr/bin/osascript -e "mount volume \"$share_url\"" >/dev/null 2>&1 || true
+  if [[ ! -d $share ]]; then
+    print -u2 "Pi share unavailable: $share. Mounting pihome failed (van LAN only)."
+    exit 1
+  fi
+  /usr/bin/open "$share"
 fi
 if [[ -d $share/$filename ]]; then
   print -u2 "Destination is a directory: $share/$filename"
