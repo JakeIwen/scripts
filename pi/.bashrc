@@ -892,53 +892,31 @@ _codex_tui() {
     env -u DISPLAY codex "$@"
   fi
 }
-codexp() {
-  _codex_tui \
-    --ask-for-approval never \
-    "$@"
+# -x before `--` drops the sandbox and approvals; no default model/effort.
+# Load at invocation so an absent optional config checkout cannot break startup.
+_model_launcher() {
+  local module="$HOME/config/shared/model-selection/launchers.sh"
+  if [[ ! -r $module ]]; then
+    printf '%s\n' "model launcher: missing $module; install config/shared/model-selection before using this launcher" >&2
+    return 2
+  fi
+  source "$module" || return
+  "$@"
 }
+_model_codex_launch() { _codex_tui "$@"; }
+codexp() { _model_launcher _model_codexp "$@"; }
 
 codexpr() { codexp resume "$@"; }
 
 codexpcan() { codexpr --sandbox danger-full-access --add-dir /mnt/EXFAT512/obd-things --add-dir /dev/bus/usb "$@"; }
 
-# codexpm <ME> [prompt]: M = a astra, s sol, l luna; E = l low, m medium,
-# h high, x xhigh, M max, U ultra. `codexpm am "fix it"` = astra at medium effort.
-# Mirrors the Mac's ~/.zshrc.
-codexpm() {
-  local spec=${1-} m e
-  [[ ${#spec} -eq 2 ]] || { echo "usage: codexpm <model><effort> [prompt]  (a|s|l)(l|m|h|x|M|U)" >&2; return 2; }
-  case ${spec:0:1} in
-    a) m=gpt-6-astra ;; s) m=gpt-6.1-sol ;; l) m=gpt-5.6-luna ;;
-    *) echo "codexpm: model '${spec:0:1}' not a|s|l" >&2; return 2 ;;
-  esac
-  case ${spec:1:1} in
-    l) e=low ;; m) e=medium ;; h) e=high ;; x) e=xhigh ;; M) e=max ;; U) e=ultra ;;
-    *) echo "codexpm: effort '${spec:1:1}' not l|m|h|x|M|U" >&2; return 2 ;;
-  esac
-  shift
-  codexp -m "$m" -c "model_reasoning_effort=\"$e\"" "$@"
-}
+# M = newest locally listed GPT family initial (g = plain); E = l/m/h/x/M/U.
+codexpm() { _model_launcher _model_pm codex "$@"; }
 
 claudep() { env -u DISPLAY claude --permission-mode bypassPermissions "$@"; }
-# claudepm <ME> [prompt]: M = a astra, s sol, l luna, f fable, o opus,
-# n sonnet, h haiku; E = l low, m medium, h high, x xhigh, M max.
-# Mirrors the Mac's ~/.zshrc.
-claudepm() {
-  local spec=${1-} m e
-  [[ ${#spec} -eq 2 ]] || { echo "usage: claudepm <model><effort> [prompt]  (a|s|l|f|o|n|h)(l|m|h|x|M)" >&2; return 2; }
-  case ${spec:0:1} in
-    a) m='claude-gpt-6-astra[1m]' ;; s) m='claude-gpt-6.1-sol[1m]' ;; l) m='claude-gpt-5.6-luna[1m]' ;;
-    f) m=fable ;; o) m=opus ;; n) m=sonnet ;; h) m=haiku ;;
-    *) echo "claudepm: model '${spec:0:1}' not a|s|l|f|o|n|h" >&2; return 2 ;;
-  esac
-  case ${spec:1:1} in
-    l) e=low ;; m) e=medium ;; h) e=high ;; x) e=xhigh ;; M) e=max ;;
-    *) echo "claudepm: effort '${spec:1:1}' not l|m|h|x|M" >&2; return 2 ;;
-  esac
-  shift
-  env -u DISPLAY claude --permission-mode bypassPermissions --model "$m" --effort "$e" "$@"
-}
+# GPT initials as above; f/o/n/h retain native Claude; E = l/m/h/x/M.
+_model_claude_launch() { env -u DISPLAY claude --permission-mode bypassPermissions "$@"; }
+claudepm() { _model_launcher _model_pm claude "$@"; }
 # Fresh config-maintenance session; ~/config/AGENTS.md is its only memory.
 claudecfg() { (cd ~/config && env -u DISPLAY claude --permission-mode bypassPermissions "$@"); }
 clauderm() {

@@ -71,6 +71,21 @@ if ! /usr/sbin/iw dev wl0-ap0 station get "$client_mac" >/dev/null 2>&1; then
   exit 1
 fi
 
+# hostapd can report the 5 GHz AP as ENABLED while the kernel sends no beacons
+# (a stuck BSS color change did this), so check the kernel's view: an AP that
+# is not broadcasting has no ssid line. Banning the client then strands it.
+ap_ssid() {
+  /usr/sbin/iw dev "$1" info 2>/dev/null \
+    | /usr/bin/awk '$1 == "ssid" { sub(/^[[:space:]]*ssid /, ""); print; exit }'
+}
+ssid_24=$(ap_ssid wl0-ap0)
+ssid_5=$(ap_ssid wl1-ap0)
+if [ -z "$ssid_5" ] || [ "$ssid_5" != "$ssid_24" ]; then
+  printf 'The 5 GHz AP is not broadcasting %s; left %s on 2.4 GHz\n' \
+    "${ssid_24:-dendelion}" "$client_name" >&2
+  exit 1
+fi
+
 /bin/ubus call hostapd.wl0-ap0 del_client \
   "{\"addr\":\"$client_mac\",\"reason\":5,\"deauth\":true,\"ban_time\":$ban_ms}" \
   >/dev/null

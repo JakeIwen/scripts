@@ -26,6 +26,7 @@ import {
   type LinearTrend,
   type SpeedRun,
   type SpeedSample,
+  UPLOAD_WORDS,
 } from './uploadSpeeds';
 
 const MIN_BAR_WIDTH = 4;
@@ -104,12 +105,14 @@ export function RunOverviewChart({
   end,
   selected,
   onSelect,
+  noun = UPLOAD_WORDS.noun,
 }: {
   runs: SpeedRun[];
   start: number;
   end: number;
   selected: number | null;
   onSelect: (index: number | null) => void;
+  noun?: string;
 }) {
   const [ref, width] = useElementWidth();
   const averages = runAverages(runs);
@@ -122,7 +125,7 @@ export function RunOverviewChart({
         width={width}
         height={CHART_HEIGHT}
         role="img"
-        aria-label="Average upload speed of each run over 30 days"
+        aria-label={`Average ${noun} of each run over 30 days`}
       >
         <ChartAxes frame={frame} formatValue={formatSpeed} />
         {trend && (
@@ -148,7 +151,13 @@ export function RunOverviewChart({
 }
 
 /** Minute-by-minute speed for one run, its rolling mean and its least-squares trend. */
-export function RunDetailChart({ run }: { run: SpeedRun }) {
+export function RunDetailChart({
+  run,
+  noun = UPLOAD_WORDS.noun,
+}: {
+  run: SpeedRun;
+  noun?: string;
+}) {
   const { samples } = run;
   const trend = linearTrend(samples);
   const series: ChartSeries[] = [
@@ -166,7 +175,7 @@ export function RunDetailChart({ run }: { run: SpeedRun }) {
   ];
   return (
     <TimeSeriesChart
-      ariaLabel="Upload speed during the selected run"
+      ariaLabel={`${noun.charAt(0).toUpperCase()}${noun.slice(1)} during the selected run`}
       series={series}
       guides={trend ? [trendSeries(trend, run.start, run.end)] : []}
       start={run.start}

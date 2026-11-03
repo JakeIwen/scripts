@@ -34,14 +34,36 @@ export const RUN_GAP_SECONDS = 5 * 60;
 export const RETENTION_SECONDS = 30 * 86_400;
 export const ROLLING_SAMPLES = 10;
 
-export async function loadUploadSpeeds(
-  kind: ICloudBackupKind,
-  signal: AbortSignal,
-): Promise<SpeedSample[]> {
-  const response = objectValue(
-    await getJson(`/api/backups/cloud/${kind}/upload-speeds`, signal),
-    'upload speed response',
-  );
+/** What a history sheet calls its measure, so iCloud uploads and offsite processing share it. */
+export interface RateHistoryWords {
+  sheetTitle: string;
+  buttonLabel: string;
+  /** Lower-case noun for chart labels, e.g. "upload speed". */
+  noun: string;
+  activeLabel: string;
+  totalLabel: string;
+  totalHint: string;
+  emptyText: string;
+}
+
+export const UPLOAD_WORDS: RateHistoryWords = {
+  sheetTitle: 'Upload speeds',
+  buttonLabel: 'Upload speed graph',
+  noun: 'upload speed',
+  activeLabel: 'Uploading',
+  totalLabel: 'Sent',
+  totalHint: 'Estimated from the per-minute averages; includes retried bytes.',
+  emptyText:
+    'No uploads in the last 30 days. The Pi records one average speed per minute while an upload runs and drops samples after 30 days.',
+};
+
+export function loadUploadSpeeds(kind: ICloudBackupKind, signal: AbortSignal) {
+  return loadRateSamples(`/api/backups/cloud/${kind}/upload-speeds`, signal);
+}
+
+/** Decode a `{samples: [[epoch, bytes_per_second], ...]}` history response. */
+export async function loadRateSamples(path: string, signal: AbortSignal): Promise<SpeedSample[]> {
+  const response = objectValue(await getJson(path, signal), 'upload speed response');
   return arrayValue(response.samples, 'upload speed samples').map((value) => {
     const row = arrayValue(value, 'upload speed sample');
     if (row.length !== 2) throw new TypeError('upload speed sample must be a pair');

@@ -49,7 +49,7 @@ class SessionLookupTests(LookupTestCase):
         for tool, count in [('claude', 1), ('codex', 1), ('llm', 2)]:
             for args in [('-s', 'FIR'), ('--session', 'first'), ('fir', '-s')]:
                 with self.subTest(tool=tool, args=args):
-                    result = (self.llmsearch(*args) if tool == 'llm'
+                    result = (self.llmsearch('--index', *args) if tool == 'llm'
                               else self.search(tool, *args))
                     self.assertEqual((result.returncode, result.stderr), (0, ''))
                     blocks = result.stdout.strip().split('\n\n')
@@ -130,7 +130,7 @@ class ForkFamilyTests(LookupTestCase):
         self.fake_switchboard([
             self.index_result('claude', 'fork-b', 'fork-b', 1, 'forked needle', 2),
             dict(self.index_result('claude', 'second', 'second', 1, 'needle', 3), host='pi')])
-        result = self.llmsearch('needle', '-f')
+        result = self.llmsearch('--index', 'needle', '-f')
         self.assertEqual((result.returncode, result.stderr), (0, ''))
         self.assertTrue(result.stdout.startswith('3 hours ago | first\n'))
         self.assertIn('└─ 2 hours ago | fork-b (match)\n', result.stdout)
@@ -146,7 +146,7 @@ class InterruptTests(LookupTestCase):
         switchboard = folder / 'llm-switchboard'
         switchboard.write_text(f'#!/bin/sh\ntouch {started}\nexec sleep 30\n')
         switchboard.chmod(0o755)
-        with subprocess.Popen([str(fixtures.SCRIPTS / 'llmsearch.sh'), 'needle'],
+        with subprocess.Popen([str(fixtures.SCRIPTS / 'llmsearch.sh'), '--index', 'needle'],
                               env=self.index_environment(), start_new_session=True,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                               text=True) as process:

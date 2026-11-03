@@ -27,6 +27,10 @@ target_radio=radio1
 source_network=lan
 client_network=clientwan
 target_htmode=HE80
+# Wi-Fi 6 BSS coloring stays off on the shared radio: a color change cut short
+# when the hotspot drops leaves hostapd refusing every later beacon update, so
+# the 5 GHz AP stays silent after the client reconnects.
+target_bss_color=0
 
 log() {
 	"$LOGGER" -t "$tag" "$1" 2>/dev/null || true
@@ -234,6 +238,12 @@ rollback_radio_mode() {
 	trap - 0 HUP INT TERM
 	if [ "${radio_rollback_pending:-no}" = yes ]; then
 		"$UCI" set "wireless.$target_radio.htmode=$previous_htmode"
+		if [ -n "$previous_bss_color" ]; then
+			"$UCI" set "wireless.$target_radio.he_bss_color_enabled=$previous_bss_color"
+		else
+			"$UCI" -q delete "wireless.$target_radio.he_bss_color_enabled" \
+				|| true
+		fi
 		"$UCI" commit wireless
 		"$WIFI" reload "$target_radio" >/dev/null 2>&1 || true
 		log "restored $target_radio htmode to $previous_htmode"
@@ -286,8 +296,10 @@ optimize_radio() {
 		|| fail "wl1 does not advertise HE AP support"
 
 	previous_htmode=$(uci_get "wireless.$target_radio.htmode")
-	if [ "$previous_htmode" = "$target_htmode" ]; then
-		printf '%s\n' "$target_radio already uses $target_htmode."
+	previous_bss_color=$(uci_get "wireless.$target_radio.he_bss_color_enabled" || true)
+	if [ "$previous_htmode" = "$target_htmode" ] \
+		&& [ "$previous_bss_color" = "$target_bss_color" ]; then
+		printf '%s\n' "$target_radio already uses $target_htmode with BSS coloring off."
 		return 0
 	fi
 
@@ -295,18 +307,21 @@ optimize_radio() {
 	trap rollback_radio_mode 0 HUP INT TERM
 
 	"$UCI" set "wireless.$target_radio.htmode=$target_htmode"
+	"$UCI" set "wireless.$target_radio.he_bss_color_enabled=$target_bss_color"
 	"$UCI" commit wireless
 	"$WIFI" reload "$target_radio"
 	wait_for_target_ap \
 		|| fail "$target_ap and $client_sta did not recover with $target_htmode"
 	[ "$(uci_get "wireless.$target_radio.htmode")" = "$target_htmode" ] \
 		|| fail "$target_radio did not retain $target_htmode"
+	[ "$(uci_get "wireless.$target_radio.he_bss_color_enabled")" = "$target_bss_color" ] \
+		|| fail "$target_radio did not retain BSS coloring off"
 
 	radio_rollback_pending=no
 	trap - 0 HUP INT TERM
-	log "set $target_radio htmode to $target_htmode"
+	log "set $target_radio htmode to $target_htmode with BSS coloring off"
 	printf '%s\n' \
-		"Set $target_radio to $target_htmode; $target_ap and $client_sta recovered."
+		"Set $target_radio to $target_htmode with BSS coloring off; $target_ap and $client_sta recovered."
 }
 
 remove_config() {

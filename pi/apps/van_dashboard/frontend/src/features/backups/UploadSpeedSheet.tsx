@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { BottomSheet } from '../../components/BottomSheet';
 import { TooltipButton } from '../../components/TooltipButton';
@@ -11,10 +11,12 @@ import {
   linearTrend,
   loadUploadSpeeds,
   RETENTION_SECONDS,
+  UPLOAD_WORDS,
   runAverages,
   speedStats,
   splitRuns,
   trendAt,
+  type RateHistoryWords,
   type SpeedRun,
   type SpeedSample,
   type SpeedStats,
@@ -34,13 +36,42 @@ export function UploadSpeedButton({
   attempts: ICloudAttempt[];
   running: boolean;
 }) {
+  const load = useCallback((signal: AbortSignal) => loadUploadSpeeds(kind, signal), [kind]);
+  return (
+    <RateHistoryButton
+      words={UPLOAD_WORDS}
+      load={load}
+      title={title}
+      attempts={attempts}
+      running={running}
+    />
+  );
+}
+
+/** A graph button opening the 30-day rate history of whatever `load` reads. */
+export function RateHistoryButton({
+  words,
+  load,
+  title,
+  attempts = [],
+  running,
+  className = 'upload-speed-button',
+}: {
+  words: RateHistoryWords;
+  /** Must be stable (memoized): a new function reloads the sheet. */
+  load: (signal: AbortSignal) => Promise<SpeedSample[]>;
+  title: string;
+  attempts?: ICloudAttempt[];
+  running: boolean;
+  className?: string;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <>
       <button
         type="button"
-        className="upload-speed-button"
-        aria-label="Upload speed graph"
+        className={className}
+        aria-label={words.buttonLabel}
         onClick={() => setOpen(true)}
       >
         <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
@@ -52,7 +83,8 @@ export function UploadSpeedButton({
       {open &&
         createPortal(
           <UploadSpeedSheet
-            kind={kind}
+            words={words}
+            load={load}
             title={title}
             attempts={attempts}
             running={running}
@@ -68,13 +100,15 @@ export function UploadSpeedButton({
 type Focus = number | 'all' | null;
 
 function UploadSpeedSheet({
-  kind,
+  words,
+  load,
   title,
   attempts,
   running,
   onClose,
 }: {
-  kind: ICloudBackupKind;
+  words: RateHistoryWords;
+  load: (signal: AbortSignal) => Promise<SpeedSample[]>;
   title: string;
   attempts: ICloudAttempt[];
   running: boolean;
@@ -87,13 +121,15 @@ function UploadSpeedSheet({
   useEffect(() => {
     const controller = new AbortController();
     setError(null);
-    loadUploadSpeeds(kind, controller.signal).then(
+    load(controller.signal).then(
       (value) => {
         if (!controller.signal.aborted) setSamples(value);
       },
       (failure: unknown) => {
         if (!controller.signal.aborted)
-          setError(failure instanceof Error ? failure.message : 'Could not load upload speeds.');
+          setError(
+            failure instanceof Error ? failure.message : `Could not load ${words.noun} history.`,
+          );
       },
     );
     const timer = running
@@ -103,11 +139,11 @@ function UploadSpeedSheet({
       controller.abort();
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [kind, reload, running]);
+  }, [load, words.noun, reload, running]);
   return (
     <BottomSheet
       open
-      title="Upload speeds"
+      title={words.sheetTitle}
       description={`${title} · last 30 days`}
       className="upload-speed-sheet"
       onClose={onClose}
@@ -120,25 +156,30 @@ function UploadSpeedSheet({
           </button>
         </div>
       ) : samples === null ? (
-        <p role="status">Loading upload speeds…</p>
+        <p role="status">Loading {words.sheetTitle.toLowerCase()}…</p>
       ) : samples.length === 0 ? (
-        <p>
-          No uploads in the last 30 days. The Pi records one average speed per minute while an
-          upload runs and drops samples after 30 days.
-        </p>
+        <p>{words.emptyText}</p>
       ) : (
-        <SpeedHistory samples={samples} attempts={attempts} focus={focus} onFocus={setFocus} />
+        <SpeedHistory
+          words={words}
+          samples={samples}
+          attempts={attempts}
+          focus={focus}
+          onFocus={setFocus}
+        />
       )}
     </BottomSheet>
   );
 }
 
 function SpeedHistory({
+  words,
   samples,
   attempts,
   focus,
   onFocus,
 }: {
+  words: RateHistoryWords;
   samples: SpeedSample[];
   attempts: ICloudAttempt[];
   focus: Focus;
@@ -175,12 +216,13 @@ function SpeedHistory({
         </button>
       </div>
       {run ? (
-        <RunSummary run={run} overall={overall} attempts={attempts} now={now} />
+        <RunSummary words={words} run={run} overall={overall} attempts={attempts} now={now} />
       ) : (
-        <PeriodSummary runs={runs} stats={overall} />
+        <PeriodSummary words={words} runs={runs} stats={overall} />
       )}
       <h3 className="upload-speed__heading">Runs · average speed</h3>
       <RunOverviewChart
+        noun={words.noun}
         runs={runs}
         start={now - RETENTION_SECONDS}
         end={now}
@@ -192,7 +234,7 @@ function SpeedHistory({
       {run && (
         <>
           <h3 className="upload-speed__heading">Selected run · minute by minute</h3>
-          <RunDetailChart run={run} />
+          <RunDetailChart run={run} noun={words.noun} />
         </>
       )}
       <RunTable
@@ -213,17 +255,21 @@ function percent(value: number): string {
 /** One stat box: label, value and an optional tap/hover explanation. */
 type StatRow = [label: string, value: string, hint?: string];
 
-function StatGrid({ stats, extra }: { stats: SpeedStats; extra: StatRow[] }) {
+function StatGrid({
+  words,
+  stats,
+  extra,
+}: {
+  words: RateHistoryWords;
+  stats: SpeedStats;
+  extra: StatRow[];
+}) {
   const rows: StatRow[] = [
     ['Average', formatSpeed(stats.average), formatMegabits(stats.average)],
     ['Median', formatSpeed(stats.median), 'Half of all minutes were faster than this.'],
     ['Peak minute', formatSpeed(stats.peak), formatMegabits(stats.peak)],
-    ['Uploading', formatDuration(stats.uploadingSeconds), 'Minutes with a recorded sample.'],
-    [
-      'Sent',
-      `≈ ${formatBytes(stats.sentBytes)}`,
-      'Estimated from the per-minute averages; includes retried bytes.',
-    ],
+    [words.activeLabel, formatDuration(stats.uploadingSeconds), 'Minutes with a recorded sample.'],
+    [words.totalLabel, `≈ ${formatBytes(stats.sentBytes)}`, words.totalHint],
     ...extra,
   ];
   return (
@@ -250,7 +296,15 @@ function StatGrid({ stats, extra }: { stats: SpeedStats; extra: StatRow[] }) {
   );
 }
 
-function PeriodSummary({ runs, stats }: { runs: SpeedRun[]; stats: SpeedStats | null }) {
+function PeriodSummary({
+  words,
+  runs,
+  stats,
+}: {
+  words: RateHistoryWords;
+  runs: SpeedRun[];
+  stats: SpeedStats | null;
+}) {
   if (!stats) return null;
   const trend = linearTrend(runAverages(runs));
   const extra: StatRow[] = [['Runs', String(runs.length)]];
@@ -260,15 +314,17 @@ function PeriodSummary({ runs, stats }: { runs: SpeedRun[]; stats: SpeedStats | 
       `${percent(((trend.slope * 7 * 86_400) / stats.average) * 100)} / week`,
       'Least-squares fit through each run’s average speed.',
     ]);
-  return <StatGrid stats={stats} extra={extra} />;
+  return <StatGrid words={words} stats={stats} extra={extra} />;
 }
 
 function RunSummary({
+  words,
   run,
   overall,
   attempts,
   now,
 }: {
+  words: RateHistoryWords;
   run: SpeedRun;
   overall: SpeedStats | null;
   attempts: ICloudAttempt[];
@@ -292,7 +348,7 @@ function RunSummary({
       'Change in the least-squares fit from the run’s first minute to its last.',
     ]);
   if (attempt) extra.push(['Attempt result', iCloudPhaseLabel(attempt.phase)]);
-  return <StatGrid stats={stats} extra={extra} />;
+  return <StatGrid words={words} stats={stats} extra={extra} />;
 }
 
 function RunTable({

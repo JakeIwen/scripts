@@ -12,6 +12,9 @@ from pathlib import Path
 import subprocess
 import sys
 
+# The shared title CLI is deployed beside this standalone hook.
+SESSION_TITLE_SCRIPT = Path(__file__).with_name("claude_session_title.py")
+
 
 NTFY_SEND = "/home/pi/scripts/ntfy_send.sh"
 MAX_MESSAGE_CHARS = 3500
@@ -26,6 +29,17 @@ def notification(event: dict) -> tuple[str, str, str]:
     priority = "high"
     if len(title) > MAX_TITLE_CHARS:
         title = title[: MAX_TITLE_CHARS - 1].rstrip() + "…"
+    # Lead with the conversation name so phone previews show which session asked.
+    try:
+        name = subprocess.run(
+            [sys.executable, "-I", str(SESSION_TITLE_SCRIPT)],
+            input=json.dumps(event), capture_output=True, text=True,
+            check=True, timeout=5,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        name = ""
+    if name:
+        body = f"{name}: {body}"
     message = f"{body}\n\n{cwd}"
     if len(message) > MAX_MESSAGE_CHARS:
         message = message[: MAX_MESSAGE_CHARS - 1].rstrip() + "…"

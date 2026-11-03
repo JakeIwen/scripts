@@ -24,10 +24,12 @@ function finderFixture({types = ['public.png'], editable = false, frontWindow = 
     });
     const windows = frontWindow ? [{class:() => frontWindow}] : [];
     const application = {
-        insertionLocation:{url() {
+        // Live JXA: the property is a specifier, so .insertionLocation.url() fails with -1728
+        // ("Can't get object"); only insertionLocation().url() reads the folder.
+        insertionLocation: Object.assign(() => ({url() {
             if (insertion === null) throw new Error('Can’t get object.');
             return insertion;
-        }},
+        }}), {}),
         desktop:{url:() => 'file:///Users/me/Desktop/'},
         windows,
         select(item) { selected.push(item); }

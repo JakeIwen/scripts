@@ -2,6 +2,7 @@ import type { PollingState } from '../../hooks/usePollingResource';
 import { BottomSheet } from '../../components/BottomSheet';
 import { ICloudBackupCard } from './ICloudBackupCard';
 import { CloneCardCapacity } from './CloneCardCapacity';
+import { OffsiteSection } from './OffsiteSection';
 import { BackupSettingsPanel } from './BackupSettingsPanel';
 import { formatBytes, formatRelativeTime } from '../../utils/format';
 import type { BackupControls } from './controls';
@@ -330,6 +331,8 @@ export function BackupsSheet({ open, onClose, resource, controls }: BackupsSheet
       )}
 
       <HotsparesSection status={status} controls={controls} />
+
+      <OffsiteSection open={open} />
     </BottomSheet>
   );
 }

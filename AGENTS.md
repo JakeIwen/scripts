@@ -466,12 +466,16 @@ compare it with this checkout. Deployed files may differ from the repository.
   All three commands accept `-t`/`--title` (alias `-n`/`--name`) for literal,
   case-insensitive saved titles only, one hit per session with no directory fallback. `-N`, `-a N` and
   `-b N` select context inside a matching message; `--` ends flag parsing.
-  `llmsearch` asks this machine's LLM Switchboard transcript index first
+  `llmsearch` defaults to the same literal, case-insensitive substring scan as
+  `claudesearch` and `codexsearch`, including thinking and tool output, so a
+  partial word does not silently lose matches. `--index` opts into this machine's
+  faster whole-word LLM Switchboard index of prompts and visible replies
   (`llm-switchboard search --json`); `session_search_records.jq` owns index
-  normalization/grouping. `--grep`, title mode, non-default roots, records mode,
-  a missing command or exit 3 (no finished index build, asked twice) use grep.
-  The llm-switchboard repo's `tests/test_search_oracle.py` consumes these scripts'
-  records mode, so preserve that format and the fallback triggers.
+  normalization/grouping. `--grep` restores the default; the last mode flag wins.
+  Title/session mode, non-default roots, records mode, a missing command or exit 3
+  (no finished index build, asked twice) still use grep. The llm-switchboard repo's
+  `tests/test_search_oracle.py` consumes these scripts' records mode, so preserve
+  that format and the fallback triggers.
 - `shared/sh/llm_restore.py` (alias `llmrestore` on both hosts; Pi copy at
   `/home/pi/scripts/`) reopens the Claude Code and Codex sessions open before a
   reboot, skipping any already open or kept by llm-switchboard: iTerm tabs on
@@ -491,6 +495,15 @@ compare it with this checkout. Deployed files may differ from the repository.
   the `SendMessage` name from `~/.claude/sessions/<pid>.json`) and prints resume
   commands for closed sessions. It uses `llm_restore.py --list --json` for Codex
   open-session detection and degrades to unknown when that listing fails.
+- `shared/sh/claude_session_title.py` (stdlib, Python 3.9+) reads a hook payload
+  on stdin and prints the conversation name: latest custom title, agent name,
+  then generated title, scanning at most 16 MiB backwards. The Mac/Pi
+  `claude_ntfy_notify.py` hooks call this CLI (no shared import root) and lead
+  the notification body with the name, capped at 60 characters for previews;
+  failed/missing metadata keeps the original alert. `--send` is unchanged.
+  Deploy the helper first, then `pi/scripts/claude_ntfy_notify.py`, both flat
+  in `/home/pi/scripts/`; Mac hooks run directly from the checkout. Tests:
+  `shared/tests/test_claude_ntfy_titles.py` includes the Pi's deployed layout.
 - `shared/sh/plus_commands.py` prints Jacob's + commands: the first sentence of
   each bullet in the global instructions' "+ commands" section. With `--hook`
   it is the UserPromptSubmit hook (Claude and Codex, Mac and Pi) that answers a
@@ -561,6 +574,13 @@ compare it with this checkout. Deployed files may differ from the repository.
   it aborts with both unchanged. The Mac checkout is then behind:
   `pi/sync_scripts.sh`'s `check_pi_bashrc_known` refuses to overwrite a live
   `.bashrc` that is no version of `pi/.bashrc` in the checkout, so pull first.
+- Pi `codexp`/`codexpr` accept `-x` to disable approvals and the sandbox;
+  `codexpm` accepts it before or after the model/effort pair. The `codexpm` and
+  `claudepm` model shortcuts resolve the newest locally listed version by family
+  initial (`g` means plain GPT). Shared implementation is owned by the private
+  config checkout at `~/config/shared/model-selection/`, loaded on invocation;
+  install that folder before deploying `pi/.bashrc`. Missing files fail only
+  these launchers, not shell startup; this repo's tests need no private checkout.
 - `pi/.bashrc` has a Codex boundary: `[[ -n ${CODEX_THREAD_ID-} && $- != *i* ]]
   && return`. Above it are commands, all functions; below are exports, secrets,
   `DISPLAY`, completion, prompt and shadowing functions (`grep`, `vi`, `pip3`).
@@ -707,6 +727,24 @@ compare it with this checkout. Deployed files may differ from the repository.
   `ChartAxes` and `SeriesMarks` (series drawn plain, `faint` or `dashed`), which
   other charts such as the upload-speed run bars build on directly; plus
   `useElementWidth` and `axisLabels` (`niceMax` adds the axis headroom).
+- Offsite NAS panel: `pi/apps/van_dashboard/van_dashboard_offsite.py` reads
+  `offsite_backup.sh dashboard` and `rates <source>` through `sudo -n` (state is
+  root-private), validates every field at that boundary and passes through only
+  contract fields. A script without `dashboard` (v1: only `status`, argparse exit 2)
+  falls back to `status` with `supported: {history: false}`; `rates` then answers
+  `supported: false` with no samples. `target_drive` adds usage only for a local
+  target whose label `DiskManager.labels()` knows and that is already mounted at
+  `/mnt/<label>` (never mounts). Routes `/api/backups/offsite` and
+  `/api/backups/offsite/<source>/rates` live in `routes/backups.py`. Frontend:
+  `features/backups/offsite.ts` (types mirroring the wire result vocabulary,
+  decoder, fetchers), `offsiteContent.ts` (display copy; source names and run
+  order), `offsitePresentation.ts` (chip and per-source view model, preferring
+  history over the current run's `sources`), `OffsiteSection.tsx` (collapsed
+  section, polls via `useOffsiteStatus` only while the sheet is open),
+  `OffsiteStatusCard.tsx`, `OffsiteSourceCard.tsx`, `OffsiteRow.tsx`. Rate graphs
+  reuse `UploadSpeedSheet`'s `RateHistoryButton`; the drive I/O button reuses
+  storage's `DiskStatsSheet`. Nothing keys off a drive label: label and
+  `target_kind` come from the status record.
 - Backup priority: `pi/scripts/backup/backup_priority.py` owns the cloud job
   registry and the protected until-verified override; `backup_priority_control.py`
   is the fixed CLI. Priority only decides which cloud job may take the single
