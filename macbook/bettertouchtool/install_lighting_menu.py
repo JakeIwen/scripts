@@ -45,8 +45,7 @@ TWO_LINE_RTF = ("{\\rtf1\\ansi\\ansicpg1252\\cocoartf2869\n\\cocoatextscaling0\\
 
 def tooltip(config: dict, text: str) -> dict:
     # BTTMenuItemShowIdentifierAsTooltip=2 shows BTTMenuElementTooltip, as on the Sonos join button.
-    config.update(BTTMenuElementTooltip=text, BTTMenuItemShowIdentifierAsTooltip=2)
-    return config
+    return dict(config, BTTMenuElementTooltip=text, BTTMenuItemShowIdentifierAsTooltip=2)
 
 
 def definition() -> dict:
@@ -74,11 +73,12 @@ def definition() -> dict:
     return {"media_uuid": MEDIA, "submenu": submenu, "children": [back, solder]}
 
 
-def unlinked_actions() -> list[str]:
+def unlinked_actions(payload: dict) -> list[str]:
     """Saved actions on this installer's buttons that lack the Media preset link."""
+    owners = {child["BTTUUID"] for child in payload["children"] if child.get("BTTMenuItemActions")}
     saved = records(current_database())
     preset = saved[MEDIA]["ZBELONGSTOPRESET2"]
-    return sorted(key for key, record in saved.items() if record["parent"] == SOLDER
+    return sorted(key for key, record in saved.items() if record["parent"] in owners
                   and record["ZGESTURETYPE"] == -1 and record["ZBELONGSTOPRESET2"] != preset)
 
 
@@ -101,7 +101,8 @@ def main(argv: list[str] | None = None) -> int:
     os.umask(0o077)
     BUILD.mkdir(exist_ok=True)
     payload = BUILD / "lighting_menu.json"
-    payload.write_text(json.dumps(dict(definition(), unlinked_actions=unlinked_actions()),
+    wanted = definition()
+    payload.write_text(json.dumps(dict(wanted, unlinked_actions=unlinked_actions(wanted)),
                                   ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if not args.apply:
         result = worker(payload, "inspect", False)

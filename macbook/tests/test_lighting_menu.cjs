@@ -53,6 +53,7 @@ function setup(options = {}) {
             return JSON.stringify([media]);
         },
         add_new_trigger(json, {parent_uuid}) {
+            if (options.addFails) throw Error('BTT refused the trigger');
             const item = JSON.parse(json);
             const parent = find(parent_uuid);
             if (item.BTTTriggerType === -1) {
@@ -148,7 +149,7 @@ test('rerun keeps a hand reorder and foreign submenu items while repairing a sta
     environment.find(SOLDER).BTTOrder = 3;
     environment.find(SOLDER).BTTMenuItemActions[0].BTTShellTaskActionScript = 'old command';
     const inspected = JSON.parse(environment.run('inspect'));
-    assert.deepEqual(inspected.pending.map(step => [step.uuid, step.change]), [[SOLDER, 'update']]);
+    assert.deepEqual(inspected.pending.map(step => [step.uuid, step.change]), [[SOLDER, 'actions']]);
     const repaired = JSON.parse(environment.run());
     assert.deepEqual(environment.state.writes.slice(3), [
         ['add action', 'saved-action-2', SOLDER], ['delete', 'saved-action-1']]);
@@ -180,8 +181,13 @@ test('a restyle of the submenu changes only its config', () => {
     assert.equal(environment.find(SUBMENU).BTTMenuItems.length, 2);
 });
 
-test('refuses without writing when Lighting is taken, moved or changes during backup', () => {
+test('refuses without writing when Lighting is taken, moved, disabled or changes during backup', () => {
+    const installed = setup();
+    installed.run();
+    const disabled = clone(installed.find(SUBMENU));
+    disabled.BTTMenuItems[1].BTTEnabled = 0;
     const cases = [
+        [{prepare: media => media.BTTMenuItems.push(disabled)}, /is disabled or has another type/],
         [{prepare: media => media.BTTMenuItems.push({BTTUUID: 'other', BTTTriggerType: 774,
             BTTMenuConfig: {BTTMenuElementIdentifier: 'Lighting'}})}, /already named Lighting/],
         [{prepare: media => media.BTTMenuItems[1].BTTMenuItems.push({BTTUUID: SOLDER})}, /moved elsewhere/],
@@ -197,4 +203,9 @@ test('refuses without writing when Lighting is taken, moved or changes during ba
 test('a readback that lost the action fails verification', () => {
     const environment = setup({dropActions: true});
     assert.throws(() => environment.run(), /verification failed. Backup: \/build\/btt-lighting-menu-backup-test/);
+});
+
+test('a BTT error during the writes names the backup', () => {
+    const environment = setup({addFails: true});
+    assert.throws(() => environment.run(), /^Error: BTT refused the trigger Backup: \/build\/btt-lighting-menu-backup-test/);
 });

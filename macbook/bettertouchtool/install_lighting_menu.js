@@ -1,7 +1,7 @@
 // Guarded installer for Media > Lighting (the 💡 submenu); writes only its own UUIDs.
 ObjC.import('Foundation');
 
-// enabled, pick and refreshMedia repeat install_tools_menu_item.js's private helpers.
+// loadCommon, enabled, pick and refreshMedia repeat install_tools_menu_item.js's private helpers.
 function loadCommon(path) {
     const source = $.NSString.stringWithContentsOfFileEncodingError(path, $.NSUTF8StringEncoding, null);
     if (!source) throw new Error('Cannot read ' + path);
@@ -24,140 +24,128 @@ function readMedia(btt, id) {
     }
     return media;
 }
-function parentsOf(media, id) {
-    const parents = [];
+// Every node under Media by UUID, with its parent and how often the UUID occurs.
+function locate(media) {
+    const index = new Map();
     (function walk(node) {
         for (const child of node.BTTMenuItems || []) {
-            if (child.BTTUUID === id) parents.push(node.BTTUUID);
+            const seen = index.get(child.BTTUUID);
+            index.set(child.BTTUUID, {node: child, parent: node.BTTUUID, count: seen ? seen.count + 1 : 1});
             walk(child);
         }
     })(media);
-    return parents;
+    return index;
 }
 const CONFIG_KEYS = ['BTTMenuElementIdentifier', 'BTTMenuElementTooltip', 'BTTMenuItemText', 'BTTMenuItemMinWidth',
     'BTTMenuItemMaxWidth', 'BTTMenuItemMinHeight', 'BTTMenuItemMaxHeight'];
 function fontSize(config) {
-    return (String((config || {}).BTTMenuAttributedText || '').match(/\\fs(\d+)/) || [])[1];
+    return (String(config.BTTMenuAttributedText || '').match(/\\fs(\d+)/) || [])[1];
 }
-// BTT may give a new action its own UUID, so actions match by what they run.
-function actionMatches(actual, wanted) {
-    return actual && enabled(actual) &&
-        Number(actual.BTTPredefinedActionType) === wanted.BTTPredefinedActionType &&
-        actual.BTTShellTaskActionScript === wanted.BTTShellTaskActionScript &&
-        actual.BTTShellTaskActionConfig === wanted.BTTShellTaskActionConfig;
-}
-function styleMatches(actual, desired, common) {
-    if (!actual || !enabled(actual) || Number(actual.BTTTriggerType) !== desired.BTTTriggerType ||
-        actual.BTTMenuName !== desired.BTTMenuName || Number(actual.BTTOrder || 0) !== desired.BTTOrder) {
-        return false;
-    }
+function configMatches(actual, desired, common) {
     const config = actual.BTTMenuConfig || {};
     return CONFIG_KEYS.every(key => common.fingerprint(config[key]) === common.fingerprint(desired.BTTMenuConfig[key])) &&
         fontSize(config) === fontSize(desired.BTTMenuConfig);
 }
-// unlinked lists saved actions the launcher found without the Master preset link.
-function actionsMatch(actual, desired, unlinked) {
-    const actions = (actual && actual.BTTMenuItemActions) || [];
+// BTT may give a new action its own UUID, so actions match by what they run.
+function actionsMatch(actual, desired) {
+    const actions = actual.BTTMenuItemActions || [];
     const wanted = desired.BTTMenuItemActions || [];
-    return actions.length === wanted.length && !actions.some(action => unlinked.includes(action.BTTUUID)) &&
-        wanted.every((action, index) => actionMatches(actions[index], action));
+    return actions.length === wanted.length && wanted.every((action, index) => enabled(actions[index]) &&
+        Number(actions[index].BTTPredefinedActionType) === action.BTTPredefinedActionType &&
+        actions[index].BTTShellTaskActionScript === action.BTTShellTaskActionScript &&
+        actions[index].BTTShellTaskActionConfig === action.BTTShellTaskActionConfig);
 }
-function nodeMatches(actual, desired, common, unlinked) {
-    return styleMatches(actual, desired, common) && actionsMatch(actual, desired, unlinked);
+// The whole saved shape, checked after writing.
+function savedAs(index, desired, common) {
+    const found = index.get(desired.BTTUUID);
+    return Boolean(found) && found.count === 1 && found.parent === desired.BTTTriggerParentUUID &&
+        enabled(found.node) && Number(found.node.BTTTriggerType) === desired.BTTTriggerType &&
+        found.node.BTTMenuName === desired.BTTMenuName && Number(found.node.BTTOrder || 0) === desired.BTTOrder &&
+        configMatches(found.node, desired, common) && actionsMatch(found.node, desired);
 }
-// Each entry keeps its saved position once installed, so a hand reorder in BTT survives a rerun.
+// One step per owned item, the submenu first. Items that were moved, retyped or disabled
+// are refused here, so a step only ever adds an item or repairs its label or actions.
+// Installed items keep their saved position, so a hand reorder in BTT survives a rerun.
 function plan(media, payload, common) {
-    const id = payload.submenu.BTTUUID;
-    const owned = [id, ...payload.children.map(child => child.BTTUUID)];
+    const submenuID = payload.submenu.BTTUUID;
     const identifier = payload.submenu.BTTMenuConfig.BTTMenuElementIdentifier;
-    if (media.BTTMenuItems.some(item => item.BTTUUID !== id &&
+    if (media.BTTMenuItems.some(item => item.BTTUUID !== submenuID &&
         (item.BTTMenuConfig || {}).BTTMenuElementIdentifier === identifier)) {
         throw new Error('Another Media item is already named ' + identifier + '; no changes made.');
     }
-    const expected = {[id]: media.BTTUUID};
-    payload.children.forEach(child => { expected[child.BTTUUID] = id; });
-    for (const uuid of owned) {
-        const parents = parentsOf(media, uuid);
-        if (parents.length > 1 || (parents.length && parents[0] !== expected[uuid])) {
-            throw new Error('Lighting item ' + uuid + ' was moved elsewhere in Media; no changes made.');
+    const index = locate(media);
+    const unlinked = payload.unlinked_actions || [];
+    const nextOrder = Math.max(-1, ...media.BTTMenuItems.map(item => Number(item.BTTOrder || 0))) + 1;
+    const wanted = [Object.assign({}, payload.submenu, {BTTOrder: nextOrder, BTTTriggerParentUUID: media.BTTUUID}),
+        ...payload.children.map(child => Object.assign({}, child, {BTTTriggerParentUUID: submenuID}))];
+    return wanted.map(desired => {
+        const node = common.clone(desired);
+        const found = index.get(node.BTTUUID);
+        if (!found) return {node, add: true};
+        const previous = found.node;
+        if (found.count > 1 || found.parent !== node.BTTTriggerParentUUID) {
+            throw new Error('Lighting item ' + node.BTTUUID + ' was moved elsewhere in Media; no changes made.');
         }
-    }
-    const previous = pick(media.BTTMenuItems, id);
-    if (previous && (Number(previous.BTTTriggerType) !== 774 || !Array.isArray(previous.BTTMenuItems))) {
-        throw new Error('Lighting UUID holds an unreadable or non-submenu item; no changes made.');
-    }
-    const submenu = common.clone(payload.submenu);
-    submenu.BTTOrder = previous ? Number(previous.BTTOrder || 0) :
-        Math.max(-1, ...media.BTTMenuItems.map(item => Number(item.BTTOrder || 0))) + 1;
-    const children = payload.children.map(child => {
-        const existing = previous && pick(previous.BTTMenuItems, child.BTTUUID);
-        if (existing && Number(existing.BTTTriggerType) !== child.BTTTriggerType) {
-            throw new Error('Lighting item ' + child.BTTUUID + ' has a foreign type; no changes made.');
+        if (Number(previous.BTTTriggerType) !== node.BTTTriggerType || !enabled(previous)) {
+            throw new Error('Lighting item ' + node.BTTUUID + ' is disabled or has another type; ' +
+                'enable or delete it in BTT. No changes made.');
         }
-        const node = Object.assign(common.clone(child), {BTTTriggerParentUUID: id});
-        if (existing) node.BTTOrder = Number(existing.BTTOrder || 0);
-        return {node, previous: existing};
+        node.BTTOrder = Number(previous.BTTOrder || 0);
+        return {node, previous, config: !configMatches(previous, node, common),
+            actions: !actionsMatch(previous, node) ||
+                (previous.BTTMenuItemActions || []).some(action => unlinked.includes(action.BTTUUID))};
     });
-    submenu.BTTTriggerParentUUID = media.BTTUUID;
-    return {submenu: {node: submenu, previous}, children, owned};
 }
-function pending(steps, common, unlinked) {
-    return [steps.submenu, ...steps.children].filter(step => !nodeMatches(step.previous, step.node, common, unlinked));
-}
-// A full update_trigger saves an item's new actions without their preset link (and could
-// reimport a submenu's children), so existing items are restyled in place and their
-// actions replaced individually.
-function write(btt, step, common, unlinked) {
+// A full update_trigger saves an item's new actions without their preset link, so an
+// installed item is restyled with update_menu_item and its actions replaced one by one.
+function write(btt, step) {
     const id = step.node.BTTUUID;
-    if (!step.previous) {
-        btt.add_new_trigger(JSON.stringify(step.node), {parent_uuid: step.node.BTTTriggerParentUUID});
-        return;
-    }
-    if (!styleMatches(step.previous, step.node, common)) {
-        btt.update_menu_item(id, {json: JSON.stringify(step.node.BTTMenuConfig), persist: true});
-    }
-    if (!actionsMatch(step.previous, step.node, unlinked)) {
+    if (step.add) btt.add_new_trigger(JSON.stringify(step.node), {parent_uuid: step.node.BTTTriggerParentUUID});
+    if (step.config) btt.update_menu_item(id, {json: JSON.stringify(step.node.BTTMenuConfig), persist: true});
+    if (step.actions) {
         for (const action of step.node.BTTMenuItemActions || []) {
             btt.add_new_trigger(JSON.stringify(Object.assign({}, action, {BTTTriggerType: -1})), {parent_uuid: id});
         }
         for (const action of step.previous.BTTMenuItemActions || []) btt.delete_trigger(action.BTTUUID);
     }
 }
+// Everything in Media this installer doesn't own: other top-level items, and items added by
+// hand to the submenu (steps[0]).
 function foreign(media, steps) {
-    const id = steps.submenu.node.BTTUUID;
-    const submenu = pick(media.BTTMenuItems, id);
-    return {media: media.BTTMenuItems.filter(item => item.BTTUUID !== id),
-        submenu: ((submenu && submenu.BTTMenuItems) || []).filter(item => !steps.owned.includes(item.BTTUUID))};
+    const submenuID = steps[0].node.BTTUUID;
+    const owned = steps.map(step => step.node.BTTUUID);
+    const submenu = pick(media.BTTMenuItems, submenuID);
+    return {media: media.BTTMenuItems.filter(item => item.BTTUUID !== submenuID),
+        submenu: ((submenu && submenu.BTTMenuItems) || []).filter(item => !owned.includes(item.BTTUUID))};
 }
-function verify(btt, before, steps, common, unlinked, backupPath) {
+function verify(btt, before, steps, common, backupPath) {
     const after = readMedia(btt, before.BTTUUID);
-    const submenu = pick(after.BTTMenuItems, steps.submenu.node.BTTUUID);
-    if (!nodeMatches(submenu, steps.submenu.node, common, unlinked) || steps.children.some(step =>
-        !nodeMatches(pick(submenu.BTTMenuItems, step.node.BTTUUID), step.node, common, unlinked))) {
+    const index = locate(after);
+    if (!steps.every(step => savedAs(index, step.node, common))) {
         throw new Error('Lighting menu verification failed. Backup: ' + backupPath);
     }
     if (common.fingerprint(foreign(after, steps)) !== common.fingerprint(foreign(before, steps))) {
         throw new Error('Unexpected change outside the Lighting items. Backup: ' + backupPath);
     }
-    return after;
+    return index;
 }
-// The receipt's saved_plan is checked by btt_common.disk_errors before Guard accepts the edits.
-function receipt(message, media, steps, touched) {
-    const submenu = pick(media.BTTMenuItems, steps.submenu.node.BTTUUID);
+// saved_plan is checked by btt_common.disk_errors before Guard accepts the edits;
+// touched_uuids lists every record this run wrote, old and new actions included.
+function receipt(message, index, steps, written) {
+    const actionsOf = node => (node && node.BTTMenuItemActions) || [];
     const entities = [];
-    if (submenu) {
-        entities.push({uuid: submenu.BTTUUID, parent: media.BTTUUID,
-            node: Object.assign({}, submenu, {BTTMenuItems: undefined})});
-        for (const step of steps.children) {
-            const child = pick(submenu.BTTMenuItems, step.node.BTTUUID);
-            if (!child) continue;
-            entities.push({uuid: child.BTTUUID, parent: submenu.BTTUUID, node: child});
-            for (const action of child.BTTMenuItemActions || []) {
-                entities.push({uuid: action.BTTUUID, parent: child.BTTUUID,
-                    node: Object.assign({}, action, {BTTTriggerType: -1})});
-            }
+    for (const step of steps) {
+        const found = index.get(step.node.BTTUUID);
+        if (!found) continue;
+        entities.push({uuid: step.node.BTTUUID, parent: found.parent,
+            node: Object.assign({}, found.node, {BTTMenuItems: undefined})});
+        for (const action of actionsOf(found.node)) {
+            entities.push({uuid: action.BTTUUID, parent: step.node.BTTUUID,
+                node: Object.assign({}, action, {BTTTriggerType: -1})});
         }
     }
+    const touched = written.flatMap(step => [step.node.BTTUUID, ...(step.add || step.actions ?
+        [...actionsOf(step.previous), ...actionsOf(index.get(step.node.BTTUUID).node)].map(action => action.BTTUUID) : [])]);
     return JSON.stringify({message, wrote: touched.length > 0, touched_uuids: [...new Set(touched)],
         saved_plan: {entities, configChanges: [], media: {BTTMenuItems: []}}});
 }
@@ -169,6 +157,9 @@ function refreshMedia(btt, id) {
     btt.trigger_action(JSON.stringify({BTTPredefinedActionType: 386,
         BTTAdditionalActionData: {BTTMenuActionMenuID: id}}));
 }
+function describe(step) {
+    return step.add ? 'add' : [step.config && 'label', step.actions && 'actions'].filter(Boolean).join('+');
+}
 function run(argv) {
     const [payloadPath, commonPath, backupDirectory, mode, refreshFlag] = argv;
     if (!['inspect', 'apply'].includes(mode)) throw new Error('Explicit inspect/apply mode required.');
@@ -177,40 +168,34 @@ function run(argv) {
     const btt = Application('/Applications/BetterTouchTool.app');
     const before = readMedia(btt, payload.media_uuid);
     const steps = plan(before, payload, common);
-    const unlinked = payload.unlinked_actions || [];
-    const todo = pending(steps, common, unlinked);
+    const todo = steps.filter(step => step.add || step.config || step.actions);
     if (mode === 'inspect') {
-        return JSON.stringify({mode, installed: todo.length === 0, order: steps.submenu.node.BTTOrder,
+        return JSON.stringify({mode, installed: !todo.length, order: steps[0].node.BTTOrder,
             pending: todo.map(step => ({uuid: step.node.BTTUUID, name: step.node.BTTMenuName,
-                change: step.previous ? 'update' : 'add'}))}, null, 2);
+                change: describe(step)}))}, null, 2);
     }
-    const refresh = refreshFlag === 'refresh';
-    if (!todo.length) {
-        if (refresh) refreshMedia(btt, before.BTTUUID);
-        return receipt('Already configured: Media > Lighting.', before, steps, []);
-    }
-    const backupPath = common.backup({media: before}, backupDirectory + '/btt-lighting-menu-backup-' +
-        ObjC.unwrap($.NSUUID.UUID.UUIDString), {
-        create: 'Cannot create private backup; no changes made.',
-        verify: 'Backup verification failed; no changes made.',
-    });
-    if (common.fingerprint(readMedia(btt, before.BTTUUID)) !== common.fingerprint(before)) {
-        throw new Error('Media changed during backup; no changes made.');
-    }
-    for (const step of todo) write(btt, step, common, unlinked);
-    const after = verify(btt, before, steps, common, unlinked, backupPath);
-    const submenu = pick(after.BTTMenuItems, steps.submenu.node.BTTUUID);
-    const touched = [];
-    for (const step of todo) {
-        touched.push(step.node.BTTUUID);
-        // A replaced action list makes both the old and the saved action UUIDs edits.
-        if (Number(step.node.BTTTriggerType) !== 774) {
-            for (const item of [step.previous, pick(submenu.BTTMenuItems, step.node.BTTUUID)]) {
-                for (const action of (item && item.BTTMenuItemActions) || []) touched.push(action.BTTUUID);
-            }
+    let index = locate(before);
+    let message = 'Already configured: Media > Lighting.';
+    if (todo.length) {
+        const backupPath = common.backup({media: before}, backupDirectory + '/btt-lighting-menu-backup-' +
+            ObjC.unwrap($.NSUUID.UUID.UUIDString), {
+            create: 'Cannot create private backup; no changes made.',
+            verify: 'Backup verification failed; no changes made.',
+        });
+        if (common.fingerprint(readMedia(btt, before.BTTUUID)) !== common.fingerprint(before)) {
+            throw new Error('Media changed during backup; no changes made.');
         }
+        try {
+            for (const step of todo) write(btt, step);
+        } catch (error) {
+            throw new Error(error.message + ' Backup: ' + backupPath);
+        }
+        index = verify(btt, before, steps, common, backupPath);
+        message = 'Verified configuration: Media > Lighting. Backup: ' + backupPath;
     }
-    if (refresh) refreshMedia(btt, before.BTTUUID);
-    return receipt('Verified configuration: Media > Lighting. Backup: ' + backupPath +
-        (refresh ? ' Media menu refreshed.' : ''), after, steps, touched);
+    if (refreshFlag === 'refresh') {
+        refreshMedia(btt, before.BTTUUID);
+        message += ' Media menu refreshed.';
+    }
+    return receipt(message, index, steps, todo);
 }
