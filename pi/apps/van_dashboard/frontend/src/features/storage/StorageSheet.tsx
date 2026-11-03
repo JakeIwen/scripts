@@ -107,6 +107,7 @@ function DiskCard({
   disk,
   status,
   stats,
+  statsLoading,
   policy,
   usb,
   controls,
@@ -115,6 +116,7 @@ function DiskCard({
   disk: ManagedDisk;
   status: DiskStatus;
   stats: DiskStats | null;
+  statsLoading: boolean;
   policy: StoragePolicy | null;
   usb: UsbStatus | null;
   controls: StorageControls;
@@ -150,7 +152,7 @@ function DiskCard({
         </div>
         <span>{diskStateLabel(disk, status)}</span>
       </header>
-      <DiskStatsStrip disk={disk} stats={stats} />
+      <DiskStatsStrip disk={disk} stats={stats} loading={statsLoading} />
       <dl>
         <div>
           <dt>Current observation</dt>
@@ -284,6 +286,7 @@ export function StorageSheet({
                 key={disk.label}
                 status={disks}
                 stats={resources.stats.data}
+                statsLoading={resources.stats.initialLoading}
                 policy={policy}
                 usb={usbResource.error ? null : usbResource.data}
                 controls={controls}

@@ -7,11 +7,27 @@ import type { DiskStats, ManagedDisk } from './types';
 import './diskStats.css';
 
 /** The disk card's live I/O, temperature, space and SMART line, with its history sheet. */
-export function DiskStatsStrip({ disk, stats }: { disk: ManagedDisk; stats: DiskStats | null }) {
+export function DiskStatsStrip({
+  disk,
+  stats,
+  loading,
+}: {
+  disk: ManagedDisk;
+  stats: DiskStats | null;
+  loading: boolean;
+}) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const entry = stats?.disks[disk.label];
   const io = stats ? currentIo(entry, stats.checkedAt, stats.ioSampleSeconds) : null;
-  const ioNote = io ? 'last minute' : disk.attached ? 'no recent sample' : 'not attached';
+  // Until the first stats response, the absence notes below would be guesses.
+  const pending = loading && stats === null;
+  const ioNote = io
+    ? 'last minute'
+    : pending
+      ? 'loading…'
+      : disk.attached
+        ? 'no recent sample'
+        : 'not attached';
   const smart = entry?.smart ?? null;
   const verdict = smart ? smartVerdict(smart) : null;
   const space = disk.space;
@@ -22,7 +38,7 @@ export function DiskStatsStrip({ disk, stats }: { disk: ManagedDisk; stats: Disk
     [
       'Temp',
       smart?.temperatureC != null ? `${smart.temperatureC} °C` : '—',
-      smart ? formatRelativeTime(smart.at) : 'no SMART reading',
+      smart ? formatRelativeTime(smart.at) : pending ? 'loading…' : 'no SMART reading',
     ],
     [
       'Free',

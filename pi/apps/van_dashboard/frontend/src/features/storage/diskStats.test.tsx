@@ -60,12 +60,28 @@ describe('disk history math', () => {
   });
 });
 
+describe('disk stats strip', () => {
+  it('says the stats are loading until the first response, then what is missing', () => {
+    const disk = sampleDiskStatus().disks[0];
+    if (!disk) throw new Error('missing disk fixture');
+    const { rerender } = render(<DiskStatsStrip disk={disk} stats={null} loading />);
+    expect(screen.getAllByText('loading…')).toHaveLength(4);
+    expect(screen.queryByText('no recent sample')).not.toBeInTheDocument();
+
+    rerender(<DiskStatsStrip disk={disk} stats={null} loading={false} />);
+    expect(screen.queryByText('loading…')).not.toBeInTheDocument();
+    expect(screen.getByText('no SMART reading')).toBeInTheDocument();
+  });
+});
+
 describe('disk history sheet', () => {
   it('loads the chosen range and draws I/O, busy and temperature', async () => {
     fetchDiskHistoryMock.mockResolvedValue(sampleDiskHistory());
     const disk = sampleDiskStatus().disks[0];
     if (!disk) throw new Error('missing disk fixture');
-    const { container } = render(<DiskStatsStrip disk={disk} stats={sampleDiskStats()} />);
+    const { container } = render(
+      <DiskStatsStrip disk={disk} stats={sampleDiskStats()} loading={false} />,
+    );
 
     await act(async () => {
       fireEvent.click(
@@ -105,7 +121,7 @@ describe('disk history sheet', () => {
     });
     const disk = sampleDiskStatus().disks[0];
     if (!disk) throw new Error('missing disk fixture');
-    render(<DiskStatsStrip disk={disk} stats={null} />);
+    render(<DiskStatsStrip disk={disk} stats={null} loading={false} />);
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /history/i }));
     });
