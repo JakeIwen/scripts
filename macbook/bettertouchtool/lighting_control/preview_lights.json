@@ -1,0 +1,6 @@
+[
+  {"entity_id":"light.preview_dresser","label":"Dresser","group_label":"Living","state":"on","available":true,"brightness":72,"hue":28,"saturation":85,"color_mode":"hs","color_temp_kelvin":3000,"min_color_temp_kelvin":2200,"max_color_temp_kelvin":6500,"supports_hue":true,"supports_color_temperature":true},
+  {"entity_id":"light.preview_desk","label":"Desk","group_label":"Living","state":"on","available":true,"brightness":60,"hue":205,"saturation":70,"color_mode":"hs","color_temp_kelvin":3500,"min_color_temp_kelvin":2700,"max_color_temp_kelvin":6000,"supports_hue":true,"supports_color_temperature":true},
+  {"entity_id":"light.preview_bed","label":"Bed","group_label":"Bedroom","state":"off","available":true,"brightness":35,"hue":285,"saturation":null,"color_mode":"color_temp","color_temp_kelvin":2700,"min_color_temp_kelvin":2000,"max_color_temp_kelvin":7000,"supports_hue":true,"supports_color_temperature":true},
+  {"entity_id":"light.preview_cab","label":"Cab","group_label":"Cab","state":"unavailable","available":false,"brightness":null,"hue":null,"saturation":null,"color_mode":null,"color_temp_kelvin":null,"min_color_temp_kelvin":2000,"max_color_temp_kelvin":7000,"supports_hue":true,"supports_color_temperature":true}
+]

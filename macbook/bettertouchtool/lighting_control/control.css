@@ -1,0 +1,43 @@
+:root {
+  color-scheme: dark;
+  --surface: rgba(24, 26, 31, .94);
+  --text: #f2f3f5;
+  --muted: #a5aab6;
+  --chip: #333740;
+  --selected: #b8cfff;
+  --line: #626977;
+  --error: #ffb5b5;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: transparent; color: var(--text); font: 12px -apple-system, BlinkMacSystemFont, sans-serif; }
+button, input { font: inherit; }
+button { border: 1px solid transparent; border-radius: 7px; padding: 4px 9px; background: var(--chip); color: var(--text); cursor: pointer; }
+button:disabled { opacity: .38; cursor: default; }
+button[aria-pressed="true"] { border-color: var(--selected); background: #3a465d; }
+:focus-visible { outline: 2px solid var(--selected); outline-offset: 2px; }
+.light-control { height: 100vh; min-height: 350px; padding: 8px; display: grid; grid-template-rows: minmax(36px, 76px) 28px minmax(194px, 1fr) 39px 27px; gap: 4px; background: var(--surface); overflow: hidden; }
+.light-groups { overflow-y: auto; scrollbar-width: thin; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 4px; padding: 2px; }
+.light-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.group-label { color: var(--muted); font-size: 10px; margin-right: 1px; }
+.light-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 7px; font-size: 11px; max-width: 260px; }
+.light-chip > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swatch { width: 9px; height: 9px; border: 1px solid #ffffff55; border-radius: 50%; flex: 0 0 auto; }
+.swatch.off { opacity: .45; }
+.light-toolbar { display: flex; gap: 4px; }
+.light-toolbar > button { min-width: 61px; }
+.light-toolbar .power-button { margin-left: auto; }
+.picker-area { display: grid; place-items: center; min-height: 194px; }
+.picker-panel { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.picker-panel[hidden] { display: none; }
+.picker-input { border-radius: 10px; touch-action: none; }
+.picker-input.disabled { opacity: .35; pointer-events: none; }
+.kelvin-value { color: var(--muted); font-variant-numeric: tabular-nums; }
+.brightness-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 3px; }
+.brightness-row output { color: var(--muted); font-variant-numeric: tabular-nums; }
+.brightness-row input { grid-column: 1 / -1; width: 100%; margin: 0; accent-color: var(--selected); cursor: pointer; }
+.light-status { color: var(--muted); font-size: 11px; line-height: 13px; overflow-y: auto; overflow-wrap: anywhere; }
+.light-status.error { color: var(--error); }
+@media (max-width: 250px) {
+  .light-control { padding: 5px; }
+  .light-chip { max-width: 210px; }
+}
