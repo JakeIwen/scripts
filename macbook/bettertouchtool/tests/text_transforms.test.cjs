@@ -205,6 +205,36 @@ test('each transform gets an isolated BTT context and older shared contexts are 
         assert.equal(JSON.parse(item.BTTMenuItemActions[2].BTTAdditionalActionData).BTTActionJSRunInSeparateContext, true);
 });
 
+test('scripts that reported runtime failures as undefined are recognized and upgraded', () => {
+    const {context: c, api, menu} = installerFixture();
+    c.textApply(api, c.BTTCommon, c.textPlan(api, c.BTTCommon, '/repo', '/cases.cjs'), '/repo', '/cases.cjs');
+    const current = vm.runInContext('TEXT_FAILURE_REPORT', c), previous = vm.runInContext('TEXT_FAILURE_REPORT_UNTIL_2026_11', c);
+    for (const item of menu.BTTMenuItems) {
+        const action = item.BTTMenuItemActions[2];
+        const data = JSON.parse(action.BTTAdditionalActionData);
+        data.BTTAppleScriptString = data.BTTAppleScriptString.replace(current, previous);
+        action.BTTAdditionalActionData = JSON.stringify(data);
+    }
+    const plan = c.textPlan(api, c.BTTCommon, '/repo', '/cases.cjs');
+    assert.equal(plan.edits.filter(e => !e.matches).length, 9);
+    c.textApply(api, c.BTTCommon, plan, '/repo', '/cases.cjs');
+    for (const item of menu.BTTMenuItems)
+        assert.ok(JSON.parse(item.BTTMenuItemActions[2].BTTAdditionalActionData).BTTAppleScriptString.includes(current));
+});
+
+test('a runtime script failure reaches the notification with its message', async () => {
+    const {context: c} = installerFixture();
+    const notices = [];
+    const runtime = vm.createContext({
+        readFile: async () => 'SOURCE',
+        runJXA: async () => JSON.stringify({OSAScriptErrorNumberKey: -2700, NSLocalizedDescription: 'Error: SyntaxError'}),
+        callBTT: async (command, args) => { notices.push({command, text: args['']}); }
+    });
+    vm.runInContext(c.textActionData('upper', '/repo', '/cases.cjs').BTTAppleScriptString, runtime);
+    assert.equal(await runtime.replaceSelectedText(), 'Error: SyntaxError');
+    assert.deepEqual(notices, [{command: 'display_notification', text: 'Error: SyntaxError'}]);
+});
+
 test('installer rejects a saved plan with an out-of-scope edit', () => {
     const {context: c, api, writes} = installerFixture();
     const plan = c.textPlan(api, c.BTTCommon, '/repo', '/cases.cjs');

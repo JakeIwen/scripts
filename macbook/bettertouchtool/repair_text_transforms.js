@@ -18,6 +18,25 @@ const TEXT_ITEMS = [
  * @typedef {{version:number, menu:Object, edits:TextEdit[]}} TextRepairPlan
  */
 
+// A script that fails inside runJXA comes back as {NSLocalizedDescription}, not
+// an outcome; report that message rather than an empty notification.
+const TEXT_FAILURE_REPORT = `    const error = result.error || result.NSLocalizedDescription;
+    if (!result.ok) {
+        await callBTT('display_notification', {
+            title: 'Text transform stopped',
+            '': error
+        });
+    }
+    return result.ok ? result.result : error;`;
+// Installed until 2026-11; upgraded in place like the shared-context version.
+const TEXT_FAILURE_REPORT_UNTIL_2026_11 = `    if (!result.ok) {
+        await callBTT('display_notification', {
+            title: 'Text transform stopped',
+            '': result.error
+        });
+    }
+    return result.ok ? result.result : result.error;`;
+
 function textActionData(kind, directory, library) {
     return {
         BTTScriptType: 3, BTTAppleScriptUsePath: false, BTTScriptLocation: 0,
@@ -35,13 +54,7 @@ function textActionData(kind, directory, library) {
     const invocation = '\\nrunTextTransform(' + JSON.stringify(options) + ');';
     const result = JSON.parse(await runJXA(source + invocation));
 
-    if (!result.ok) {
-        await callBTT('display_notification', {
-            title: 'Text transform stopped',
-            '': result.error
-        });
-    }
-    return result.ok ? result.result : result.error;
+${TEXT_FAILURE_REPORT}
 }`
     };
 }
@@ -84,8 +97,12 @@ function textPlan(api, common, directory, library) {
         const data = textActionData(kind, directory, library);
         const before = actions.map(a => textGet(api, a.BTTUUID));
         const pasteData = textExportedData(before[2].BTTAdditionalActionData);
-        // Upgrade the prior shared-context version; all other script fields must match.
+        // Upgrade the prior shared-context and failure-report versions; all other
+        // script fields must match.
         const managedData = Object.assign({BTTActionJSRunInSeparateContext: true}, pasteData);
+        if (typeof managedData.BTTAppleScriptString === 'string')
+            managedData.BTTAppleScriptString = managedData.BTTAppleScriptString
+                .replace(TEXT_FAILURE_REPORT_UNTIL_2026_11, TEXT_FAILURE_REPORT);
         const managed = Number(before[2].BTTPredefinedActionType) === 281
             && common.fingerprint(managedData) === common.fingerprint(data);
         const prefix = [264, -1].includes(Number(before[0].BTTPredefinedActionType))
