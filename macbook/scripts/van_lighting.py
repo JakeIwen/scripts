@@ -104,7 +104,10 @@ def _changes(args: argparse.Namespace) -> list[tuple[str, str, dict]]:
 
 def set_lights(entities: list[str], changes: list[tuple[str, str, dict]], *, base_url: str,
                timeout: float) -> dict:
-    """Send every change to each light; each reply carries the status after it."""
+    """Send every change to each light; each reply carries the status after it.
+
+    changes is never empty: main refuses a set with nothing to change.
+    """
     base_url = base_url.rstrip("/")
     for entity in entities:
         for path, key, fields in changes:

@@ -169,7 +169,8 @@ class LightingCheckpointWiringTests(unittest.TestCase):
                        touched_uuids=['submenu', 'button'] if wrote else [], saved_plan={'fixture': True})
         with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
             stack.enter_context(patch.object(lighting, 'BUILD', Path(directory)/'build'))
-            stack.enter_context(patch.object(lighting, 'unlinked_actions', return_value=[]))
+            stack.enter_context(patch.object(lighting, 'saved_facts',
+                return_value={'unlinked_actions': [], 'menu_order': 4}))
             def worker(payload, mode, refresh):
                 events.append(mode)
                 return SimpleNamespace(returncode=1 if worker_fails else 0, stderr='failed',

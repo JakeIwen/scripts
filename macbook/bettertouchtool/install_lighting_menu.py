@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Preview or install Media > Lighting: a 💡 submenu holding the Solder SW toggle.
+"""Preview or install Media > Lighting: a 💡 submenu with Solder SW and a 🎨 colour panel.
 
-Inspects by default. --apply backs up the Media export, adds or repairs only this
-installer's UUIDs through BTT's scripting API, verifies the runtime and saved
-records, then lets BTT Guard accept exactly those edits.
+The submenu holds a blind Solder SW toggle and a 🎨 button that opens the
+"Lighting Colour" dropdown, a top-level floating menu whose web view is the
+colour control built from lighting_control/. Inspects by default. --apply backs up
+the Media export, adds or repairs only this installer's UUIDs through BTT's
+scripting API, verifies the runtime and saved records, then lets BTT Guard accept
+exactly those edits.
 """
 from __future__ import annotations
 
@@ -18,6 +21,7 @@ import uuid
 from btt_common import MEDIA, ROOT, current_database, records
 from btt_guard.installer_checkpoint import after_install, before_install, parse_edit_receipt
 from btt_touchbar_folder_to_floating_submenu import base_menu_config, base_menu_item_config
+from lighting_control.page import build_page
 from tools_menu_item import BUILD, verify_saved_item
 
 DIRECTORY = Path(__file__).resolve().parent
@@ -32,7 +36,18 @@ def uid(name: str) -> str:
     return str(uuid.uuid5(NAMESPACE, name)).upper()
 
 
-SUBMENU, BACK, SOLDER = (uid(name) for name in ("submenu", "back", "solder"))
+SUBMENU, BACK, SOLDER, COLOUR, PANEL, PANEL_VIEW = (uid(name) for name in (
+    "submenu", "back", "solder", "colour", "colour-menu", "colour-view"))
+PANEL_IDENTIFIER = "media-lighting-colour-dropdown"
+PANEL_WIDTH, PANEL_HEIGHT = 300, 380
+# The WiZ bulbs the colour panel controls, grouped by the dashboard's rooms.
+PANEL_LIGHTS = (
+    {"entity_id": "light.wiz_front_driver", "label": "Driver", "group_label": "Cab"},
+    {"entity_id": "light.wiz_front_passenger", "label": "Passenger", "group_label": "Cab"},
+    {"entity_id": "light.wiz_dresser", "label": "Dresser", "group_label": "Rear"},
+    {"entity_id": "light.wiz_werkbench", "label": "Werkbench", "group_label": "Rear"},
+    {"entity_id": "light.wiz_kitchen", "label": "Kitchen", "group_label": "Kitchen"},
+)
 
 
 # The Media bar's Screen Cap and Notes buttons: 14pt Helvetica broken by a line separator.
@@ -48,38 +63,92 @@ def tooltip(config: dict, text: str) -> dict:
     return dict(config, BTTMenuElementTooltip=text, BTTMenuItemShowIdentifierAsTooltip=2)
 
 
+def _shell_action(parent: str, command: str) -> dict:
+    return {"BTTTriggerParentUUID": parent, "BTTTriggerClass": FLOATING, "BTTEnabled": 1, "BTTOrder": 0,
+            "BTTPredefinedActionType": 206, "BTTPredefinedActionName": "Run Shell Script / Task",
+            "BTTShellTaskActionScript": command, "BTTShellTaskActionConfig": "/bin/zsh:::-c:::-:::"}
+
+
+def _show_menu_action(parent: str, menu: str, identifier: str) -> dict:
+    # The Notes launchers' form: show a hidden dropdown below the button that was clicked.
+    return {"BTTTriggerParentUUID": parent, "BTTTriggerClass": FLOATING, "BTTEnabled": 1, "BTTOrder": 0,
+            "BTTPredefinedActionType": 386, "BTTPredefinedActionName": "Show Floating Menu",
+            "BTTAdditionalActionData": {"BTTMenuActionMenuID": menu, "BTTMenuActionMenuName": identifier,
+                                        "BTTMenuActionRestorePosition": True,
+                                        "BTTMenuActionActivateKeyboardFocus": 0}}
+
+
+def _panel() -> list[dict]:
+    """The hidden "Lighting Colour" dropdown (top level, like the Notes dropdowns) and its web view."""
+    common = {"BTTTriggerClass": FLOATING, "BTTEnabled": 1, "BTTEnabled2": 1}
+    size = {"BTTMenuItemMinWidth": PANEL_WIDTH, "BTTMenuItemMaxWidth": PANEL_WIDTH,
+            "BTTMenuItemMinHeight": PANEL_HEIGHT, "BTTMenuItemMaxHeight": PANEL_HEIGHT}
+    menu = dict(common, BTTUUID=PANEL, BTTTriggerType=767, BTTTriggerParentUUID=None,
+                BTTAppBundleIdentifier="BT.G", BTTMenuName=PANEL_IDENTIFIER, BTTMenuConfig={
+                    "BTTMenuElementIdentifier": PANEL_IDENTIFIER,
+                    "BTTMenuLayoutDirection": 6, "BTTMenuSizingBehavior": 3,
+                    "BTTMenuFrameWidth": PANEL_WIDTH, "BTTMenuFrameHeight": PANEL_HEIGHT,
+                    "BTTMenuHorizontalSpacing": 0, "BTTMenuVerticalSpacing": 0,
+                    "BTTMenuPositioningType": 1, "BTTMenuPositionRelativeTo": 7,
+                    "BTTMenuAnchorMenu": 0, "BTTMenuAnchorRelation": 0, "BTTMenuOffsetX": 0, "BTTMenuOffsetY": -4,
+                    # Hidden until the 🎨 button shows it; slider drags must not close it.
+                    "BTTMenuVisibility": 1, "BTTMenuCloseOnOutsideClick": 1, "BTTMenuCloseAfterAction": 0,
+                    "BTTMenuCloseOnMoveMouseAway": 0, "BTTMenuWindowResizable": 0, "BTTMenuWindowLevel": 3,
+                    "BTTMenuOpacityActive": 1, "BTTMenuOpacityInactive": 1, "BTTMenuDisableDrag": 1,
+                    "BTTMenuKeepCached": 0, "BTTMenuModifierKeys": 0, "BTTMenuModifierMode": -1,
+                    "BTTMenuItemBackgroundType": 4, "BTTMenuItemBackgroundColor": "50, 50, 60, 245",
+                    "BTTMenuItemBackgroundColorDark": "50, 50, 60, 245",
+                    "BTTMenuItemVisibleWhileActive": 1, "BTTMenuItemVisibleWhileInactive": 1, **size})
+    # BTTMenuItemWebViewPlain=0 keeps BTT's script bridge (runShellScript) in the page.
+    view = dict(common, BTTUUID=PANEL_VIEW, BTTTriggerType=778, BTTTriggerParentUUID=PANEL, BTTOrder=0,
+                BTTMenuName="lighting-colour-control", BTTMenuConfig={
+                    "BTTMenuElementIdentifier": "lighting-colour-control",
+                    "BTTMenuItemText": build_page(list(PANEL_LIGHTS), str(TOGGLE)),
+                    "BTTMenuItemWebViewPlain": 0, "BTTMenuItemBackgroundType": 4,
+                    "BTTMenuItemVisibleWhileActive": 1, "BTTMenuItemVisibleWhileInactive": 1, **size})
+    return [menu, view]
+
+
 def definition() -> dict:
+    """Every owned item in install order, each naming its parent (None: a top-level menu).
+
+    Items without a BTTOrder (the submenu and the dropdown) are appended when first added:
+    the submenu after the Media bar's last item, the dropdown at saved_facts' menu_order.
+    """
     # BTT renames each item after its element identifier, so names repeat the identifiers;
-    # it also assigns the action's UUID itself.
+    # it also assigns new actions their UUIDs itself.
     if not os.access(TOGGLE, os.X_OK):
         raise SystemExit(f"{TOGGLE} is missing or not executable; no changes made.")
-    command = shlex.join(["/usr/bin/python3", "-B", str(TOGGLE), "toggle", SOLDER_SWITCH])
+    toggle = shlex.join(["/usr/bin/python3", "-B", str(TOGGLE), "toggle", SOLDER_SWITCH])
     common = {"BTTTriggerClass": FLOATING, "BTTEnabled": 1, "BTTEnabled2": 1}
     bulb = dict(base_menu_config("Lighting", "💡"), BTTMenuItemMinWidth=40, BTTMenuItemMaxWidth=40)
-    submenu = dict(common, BTTUUID=SUBMENU, BTTTriggerType=774, BTTMenuName="Lighting",
-                   BTTMenuConfig=tooltip(bulb, "Lighting"))
-    back = dict(common, BTTUUID=BACK, BTTTriggerType=777, BTTOrder=0, BTTMenuName="Go Back",
-                BTTMenuConfig=base_menu_item_config("Go Back", label_text="<<"))
+    submenu = dict(common, BTTUUID=SUBMENU, BTTTriggerType=774, BTTTriggerParentUUID=MEDIA,
+                   BTTMenuName="Lighting", BTTMenuConfig=tooltip(bulb, "Lighting"))
+    back = dict(common, BTTUUID=BACK, BTTTriggerType=777, BTTTriggerParentUUID=SUBMENU, BTTOrder=0,
+                BTTMenuName="Go Back", BTTMenuConfig=base_menu_item_config("Go Back", label_text="<<"))
     label = dict(base_menu_item_config("Solder SW"), BTTMenuAttributedText=TWO_LINE_RTF % ("Solder", "SW"),
                  BTTMenuItemText="Solder\nSW", BTTMenuItemMinWidth=54, BTTMenuItemMaxWidth=78)
-    solder = dict(common, BTTUUID=SOLDER, BTTTriggerType=773, BTTOrder=1, BTTMenuName="Solder SW",
-                  BTTMenuConfig=tooltip(label, "Toggle solder power"),
-                  BTTMenuItemActions=[{
-                      "BTTTriggerParentUUID": SOLDER, "BTTTriggerClass": FLOATING,
-                      "BTTEnabled": 1, "BTTOrder": 0, "BTTPredefinedActionType": 206,
-                      "BTTPredefinedActionName": "Run Shell Script / Task",
-                      "BTTShellTaskActionScript": command,
-                      "BTTShellTaskActionConfig": "/bin/zsh:::-c:::-:::"}])
-    return {"media_uuid": MEDIA, "submenu": submenu, "children": [back, solder]}
+    solder = dict(common, BTTUUID=SOLDER, BTTTriggerType=773, BTTTriggerParentUUID=SUBMENU, BTTOrder=1,
+                  BTTMenuName="Solder SW", BTTMenuConfig=tooltip(label, "Toggle solder power"),
+                  BTTMenuItemActions=[_shell_action(SOLDER, toggle)])
+    palette = dict(base_menu_item_config("Colour", "🎨"), BTTMenuItemMinWidth=40, BTTMenuItemMaxWidth=40)
+    colour = dict(common, BTTUUID=COLOUR, BTTTriggerType=773, BTTTriggerParentUUID=SUBMENU, BTTOrder=2,
+                  BTTMenuName="Colour", BTTMenuConfig=tooltip(palette, "Light colours"),
+                  BTTMenuItemActions=[_show_menu_action(COLOUR, PANEL, PANEL_IDENTIFIER)])
+    return {"media_uuid": MEDIA, "items": [submenu, back, solder, colour, *_panel()]}
 
 
-def unlinked_actions(payload: dict) -> list[str]:
-    """Saved actions on this installer's buttons that lack the Media preset link."""
-    owners = {child["BTTUUID"] for child in payload["children"] if child.get("BTTMenuItemActions")}
+def saved_facts(items: list[dict]) -> dict:
+    """From BTT's saved store: actions on this installer's buttons that lack the Media
+    preset link, and the next free position among the preset's top-level floating menus."""
     saved = records(current_database())
     preset = saved[MEDIA]["ZBELONGSTOPRESET2"]
-    return sorted(key for key, record in saved.items() if record["parent"] in owners
-                  and record["ZGESTURETYPE"] == -1 and record["ZBELONGSTOPRESET2"] != preset)
+    owners = {item["BTTUUID"] for item in items if item.get("BTTMenuItemActions")}
+    unlinked = sorted(key for key, record in saved.items() if record["parent"] in owners
+                      and record["ZGESTURETYPE"] == -1 and record["ZBELONGSTOPRESET2"] != preset)
+    menus = [record["ZORDER"] or 0 for record in saved.values() if record["parent"] is None
+             and record["ZGESTURETYPE"] == 767 and record["ZBELONGSTOPRESET2"] == preset]
+    return {"unlinked_actions": unlinked, "menu_order": 1 + max(menus, default=-1)}
 
 
 def worker(payload: Path, mode: str, refresh: bool) -> subprocess.CompletedProcess:
@@ -102,7 +171,7 @@ def main(argv: list[str] | None = None) -> int:
     BUILD.mkdir(exist_ok=True)
     payload = BUILD / "lighting_menu.json"
     wanted = definition()
-    payload.write_text(json.dumps(dict(wanted, unlinked_actions=unlinked_actions(wanted)),
+    payload.write_text(json.dumps(dict(wanted, **saved_facts(wanted["items"])),
                                   ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if not args.apply:
         result = worker(payload, "inspect", False)

@@ -572,14 +572,23 @@ and report identities. Recreate venvs rather than moving them.
   acceptance picks them up. Existing Guard drift must be reviewed separately; do not
   accept it just to add Panel.
 - `install_lighting_menu.py/.js`: guarded installer for Media > Lighting, a 💡 submenu
-  appended to the Media bar holding `<<` and a two-line Solder SW button (the Screen
-  Cap button's label form) that runs `macbook/scripts/van_lighting.py toggle
-  switch.solder_flood`. Preview is the default; `--apply` backs up the Media export,
-  writes only its own UUIDs, verifies runtime and saved records (including the action's
-  Master preset link), then checkpoints Guard; `--refresh` redraws the bar. Existing
-  items are restyled with `update_menu_item` and their actions replaced one at a time:
-  a full `update_trigger` saves the new actions without their preset link, and a rerun
-  repairs any such action. A hand reorder or extra items added to the submenu survive.
+  appended to the Media bar holding `<<`, a two-line Solder SW button (the Screen Cap
+  button's label form) that runs `macbook/scripts/van_lighting.py toggle
+  switch.solder_flood`, and 🎨, which shows the hidden top-level "Lighting Colour"
+  dropdown (positioned like the Notes dropdowns). Its one Web View item (type 778,
+  `BTTMenuItemWebViewPlain` 0 so BTT's script bridge stays) is the page
+  `lighting_control/page.py` builds for the WiZ bulbs; the page runs `van_lighting.py
+  lights`/`set` through `runShellScript` and never calls the dashboard directly.
+  The launcher owns the structure (a flat list of items, each naming its parent, `null`
+  for a top-level menu); the worker indexes the Media tree and the owned dropdown once
+  per read. Preview is the default; `--apply` backs up the trees, writes only its own
+  UUIDs, verifies runtime and saved records (including each action's Master preset link),
+  then checkpoints Guard; `--refresh` redraws the bar. Moved, retyped or disabled items
+  are refused. Existing items are restyled with `update_menu_item` and their actions
+  replaced one at a time: a full `update_trigger` saves new actions without their preset
+  link, and a rerun repairs any such action. Re-run `--apply` after editing
+  `lighting_control/`: the page is stored inline in BTT. Hand reorders and items added by
+  hand to the submenu or dropdown survive.
 
   ```sh
   /usr/bin/python3 -B macbook/bettertouchtool/install_lighting_menu.py --apply --refresh
