@@ -86,7 +86,7 @@ function finderInsertionFolder() {
     const finder = Application('Finder');
     let path = '';
     try {
-        path = finderFolderPath(finder.insertionLocation.url());
+        path = finderFolderPath(finder.insertionLocation().url());
     } catch (error) {
         // Handled below.
     }
