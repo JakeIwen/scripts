@@ -169,6 +169,37 @@ normal Mac schedule:
 sudo tmutil enable
 ```
 
+### Dashboard data
+
+```sh
+sudo /home/pi/scripts/backup/offsite_backup.sh dashboard
+sudo /home/pi/scripts/backup/offsite_backup.sh rates exfat512
+```
+
+Both commands require root and print one sorted-key JSON line. They are read-only:
+no backup lock, ignition check, mount, network access or state writes. `status`
+retains its existing output. `dashboard` returns `{schema: 1, status, history,
+evidence: {check, restore_test}}`; status is the unchanged status object, history
+is empty when absent, and missing evidence is null. Evidence passes through all
+fields from `remote-check.json` and `remote-restore-test.json`.
+
+The root-private `/var/lib/vanpi-offsite/history.json` retains each label/source's
+`latest` terminal outcome and `last_ok` (null until success). Entries include the
+source outcome, `finished` epoch and `target_kind` (`local` or `remote`), preserving
+previous sources across separate units and previous drive labels. Updates use the
+existing exclusive job lock and durable atomic writer. An unreadable or malformed
+history is left untouched; status records `history_error`, and backups continue.
+The dashboard command reports that read error rather than pretending history is empty.
+
+`rates <source>` accepts `exfat512`, `movingparts`, `borg` or `time-machine` and
+returns `{schema: 1, source, samples: [[epoch_seconds, bytes_per_second], ...]}`.
+Each source has a private `rates/<source>.bin` under the same state directory,
+using `upload_speed_log.py`'s little-endian `<II` format and 30-day retention.
+Samples average logical source bytes processed per second over a minute, **not
+network or disk throughput**. A new sampler starts for each source because restic's
+counter resets; missing files return empty samples. History and rate failures
+never stop a backup. A killed process cannot publish a terminal history entry.
+
 ## Sources and consistency
 
 | Tag | Paths | Treatment |

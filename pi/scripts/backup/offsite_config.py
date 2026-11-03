@@ -71,6 +71,11 @@ class Result(str, Enum):
     NOT_RUN = 'not-run'
 
 
+class TargetKind(str, Enum):
+    LOCAL = 'local'
+    REMOTE = 'remote'
+
+
 class MarkerRecord(TypedDict):
     schema: int
     label: str
@@ -93,6 +98,19 @@ class SourceOutcome(TypedDict, total=False):
     logical_bytes_processed: int
     newly_added_packed_bytes: int | None
     duration_seconds: float
+
+
+class HistoryEntry(SourceOutcome):
+    finished: float
+    target_kind: TargetKind
+
+
+class SourceHistory(TypedDict):
+    latest: HistoryEntry
+    last_ok: HistoryEntry | None
+
+
+HistoryRecord = dict[str, dict[str, SourceHistory]]
 
 
 class CompletionReceipt(TypedDict):
@@ -132,8 +150,9 @@ class StatusRecord(TypedDict, total=False):
     cleanup_errors: list[str]
     notification_error: str
     duration_seconds: float
-    target_kind: str
+    target_kind: TargetKind
     progress_measure: str
+    history_error: str
 
 
 @dataclass(frozen=True)

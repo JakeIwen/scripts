@@ -18,6 +18,7 @@ import json, os, sys
 from pathlib import Path
 from unittest.mock import patch
 from contextlib import nullcontext
+from types import SimpleNamespace
 from offsite_config import Config
 from offsite_backup import main
 v=json.loads(Path(os.environ['OFFSITE_CONFIG']).read_text())
@@ -27,8 +28,16 @@ cfg=Config(**v)
 # Darwin has no /proc fdinfo. All command/record behavior remains real; the
 # Linux-only test separately exercises the unchanged kernel admission check.
 context=patch('backup_locks.require_held') if sys.platform != 'linux' else nullcontext()
+fixture=json.loads(Path(os.environ['OFFSITE_FIXTURE']).read_text())
+clock=nullcontext()
+if 'sample_times' in fixture:
+    ticks=iter(fixture['sample_times'])
+    clock=patch('upload_speed_log.time', SimpleNamespace(time=lambda: next(ticks)))
+history_write=(patch('offsite_dashboard.durable_json', side_effect=OSError('fixture history write failed'))
+               if fixture.get('history_write_failure') else nullcontext())
 with context:
-    raise SystemExit(main(sys.argv[1:], config=cfg))
+    with clock, history_write:
+        raise SystemExit(main(sys.argv[1:], config=cfg))
 '''
 
 
@@ -89,8 +98,9 @@ class OffsiteFixture:
         self.state = json.loads(self.fixture.read_text())
 
     def start(self, *args):
+        descriptors = () if args[0] in ('status', 'dashboard', 'rates') else (self.fd,)
         return subprocess.Popen([sys.executable, '-B', '-c', BOOTSTRAP, *args], cwd=self.root,
-                                env=self.env, pass_fds=(self.fd,), text=True,
+                                env=self.env, pass_fds=descriptors, text=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     def run(self, *args):

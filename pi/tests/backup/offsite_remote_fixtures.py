@@ -60,6 +60,7 @@ class LoopbackRepository(RemoteRepository):
 '''
             code = code.replace('with context:', setup + "\nwith context, patch('offsite_remote.RemoteRepository',LoopbackRepository):")
         environment = {**self.env, 'OFFSITE_LOOPBACK': self.loopback or ''}
+        descriptors = () if args[0] in ('status', 'dashboard', 'rates') else (self.fd,)
         return subprocess.Popen([sys.executable, '-B', '-c', code, *args], cwd=self.root,
-                                env=environment, pass_fds=(self.fd,), text=True,
+                                env=environment, pass_fds=descriptors, text=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)

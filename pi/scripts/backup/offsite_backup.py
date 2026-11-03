@@ -2,12 +2,14 @@
 """Seed and verify encrypted local offsite drives. Run via offsite_backup.sh."""
 import argparse
 import json
+import os
 import re
 import sys
 
-from offsite_config import Config, Result
+from offsite_config import Config
+from offsite_dashboard import dashboard, rates, status
 from offsite_prepare import prepare
-from offsite_repository import Commands, Interrupted, LocalRepository, admit, read_record
+from offsite_repository import Commands, Interrupted, LocalRepository, admit
 from offsite_run import Backup
 
 
@@ -36,6 +38,9 @@ def parser(cfg):
     restore.add_argument('--path', required=True)
     restore.add_argument('--target', required=True, help='absolute path to a separate empty directory')
     sub.add_parser('status', help='print the current/last run as JSON; does not take the backup lock')
+    sub.add_parser('dashboard', help='print status, per-source history and verification evidence; read-only')
+    rate = sub.add_parser('rates', help='print per-minute logical processing rates; read-only')
+    rate.add_argument('source', choices=tuple(cfg.sources()))
     return root
 
 
@@ -43,9 +48,11 @@ def main(argv=None, *, config=None):
     try:
         cfg = config or Config.from_environment()
         args = parser(cfg).parse_args(argv)
-        if args.command == 'status':
-            path = cfg.state / 'status.json'
-            value = read_record(path) if path.exists() or path.is_symlink() else {'result': Result.NOT_RUN}
+        if args.command in ('status', 'dashboard', 'rates'):
+            if args.command != 'status' and os.geteuid() != cfg.owner:
+                raise RuntimeError('Run offsite_backup.sh as root')
+            value = (rates(cfg, args.source) if args.command == 'rates' else
+                     dashboard(cfg) if args.command == 'dashboard' else status(cfg))
             print(json.dumps(value, sort_keys=True))
             return 0
         admit(cfg)

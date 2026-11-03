@@ -97,9 +97,23 @@ def restic(state, args):
         print('created restic repository')
     elif 'cat' in args:
         print(json.dumps({'id': state.get('repo_id', 'a' * 64)}))
+    elif 'backup' in args and '--stdin' in args:
+        receipt = Path(state['mount_root']).parent / 'receipt.json'
+        receipt.write_text(sys.stdin.read())
+        print(json.dumps({'message_type': 'summary', 'snapshot_id': 'd' * 64}))
+    elif 'snapshots' in args:
+        source = Path(state['mount_root']).parent.joinpath('snapshot-source').read_text()
+        is_receipt = args[-1] == 'd' * 64
+        print(json.dumps([{'id': ('d' if is_receipt else 'b') * 64, 'hostname': 'vanpi',
+                           'tags': ['offsite-receipt-v1'] if is_receipt else [source, 'offsite-incomplete']}]))
+    elif 'dump' in args:
+        print(Path(state['mount_root']).parent.joinpath('receipt.json').read_text())
     elif 'backup' in args:
-        print(json.dumps({'message_type': 'status', 'bytes_done': 25, 'total_bytes': 100,
-                          'seconds_elapsed': 5}), flush=True)
+        Path(state['mount_root']).parent.joinpath('snapshot-source').write_text(args[args.index('--tag') + 1])
+        events = state.get('progress_events', [{'message_type': 'status', 'bytes_done': 25,
+                                              'total_bytes': 100, 'seconds_elapsed': 5}])
+        for event in events:
+            print(json.dumps(event), flush=True)
         Path(state['mount_root']).parent.joinpath('backup-started').touch()
         if state.get('hang'):
             while True:

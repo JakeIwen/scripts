@@ -1156,6 +1156,10 @@ The active design is represented by:
   `pi.offsite_backup` metered/Tailscale admission for uploads and readback.
   `offsite_receipts.py` commits/read-verifies encrypted completion receipts instead
   of deleting snapshot tags on append-only targets, and owns check/restore evidence.
+  `offsite_dashboard.py` owns durable per-label/source `history.json` (`latest` and
+  `last_ok`) and read-only `dashboard`/`rates <source>` exports. Logical per-source
+  rates reuse `upload_speed_log.py` in private `rates/<source>.bin`; history/rate
+  failures never abort backups, and malformed history is retained with a status error.
   `install_restic.sh` pins restic 0.19.1. No schedule or automatic retry is installed.
   Runbooks: `pi/docs/backup/OFFSITE.md` and `OFFSITE_NAS.md` beside it.
 - `synology/offsite/`: native DSM receiver and explicit installer. `mounts.py`

@@ -5,7 +5,8 @@ import os
 import re
 import time
 
-from offsite_config import HOST, INCOMPLETE_TAG, Result, SCHEMA, StatusRecord
+from offsite_config import HOST, INCOMPLETE_TAG, Result, SCHEMA, StatusRecord, TargetKind
+from offsite_dashboard import rate_sampler, record_outcome
 from offsite_repository import Interrupted, durable_json, private_directory
 from offsite_samba import quiesced
 
@@ -28,6 +29,13 @@ class Backup:
         self.state['updated'] = time.time()
         durable_json(self.cfg.state / 'status.json', self.state)
 
+    def record_history(self, name, outcome):
+        try:
+            record_outcome(self.cfg, self.repo.label, name, outcome,
+                           TargetKind.REMOTE if self.remote else TargetKind.LOCAL)
+        except (OSError, ValueError, RuntimeError) as exc:
+            self.state['history_error'] = str(exc)
+
     def progress(self, text):
         try:
             event = json.loads(text)
@@ -44,6 +52,8 @@ class Backup:
             self.state.update(bytes_done=done, bytes_total=total,
                               percent=min(99.9, 100 * done / total) if total else None,
                               rate=rate, eta=max(0, total - done) / rate if total and rate else None)
+            if self.sampler is not None:
+                self.sampler.observe(self.cfg.state, done)
             self.save()
         elif kind == 'error':
             self.errors.append(event)
@@ -51,6 +61,7 @@ class Backup:
 
     def snapshot(self, name, source):
         self.summary, self.errors = None, []
+        self.sampler = rate_sampler(self.cfg, name)
         self.state.update(source=name, bytes_done=0, bytes_total=None, percent=None, rate=None, eta=None)
         self.save()
         self.repo.mount_source(source.label, on_mount=self.owned_mounts.append)
@@ -105,12 +116,14 @@ class Backup:
             except Interrupted as exc:
                 self.state['sources'][name] = {'result': Result.INTERRUPTED, 'cause': str(exc),
                                                'duration_seconds': time.time() - started}
+                self.record_history(name, self.state['sources'][name])
                 raise
             except (OSError, ValueError, RuntimeError) as exc:
                 outcome = {'result': Result.FAILED, 'cause': str(exc)}
             outcome['duration_seconds'] = time.time() - started
             self.state['sources'][name] = outcome
             self.state['last_result'] = outcome
+            self.record_history(name, outcome)
             self.save()
         self.state['result'] = (Result.OK if all(row['result'] == Result.OK for row in
                                                self.state['sources'].values()) else Result.FAILED)
@@ -161,11 +174,12 @@ class Backup:
             name = self.state['source']
             if name and self.state['sources'][name]['result'] == Result.NOT_RUN:
                 self.state['sources'][name] = outcome
+                self.record_history(name, outcome)
         finally:
             self.cleanup()
             self.state.update(finished=time.time(), rate=None, eta=None)
             self.state['duration_seconds'] = self.state['finished'] - self.state['started']
-            self.state['target_kind'] = 'remote' if self.remote else 'local'
+            self.state['target_kind'] = TargetKind.REMOTE if self.remote else TargetKind.LOCAL
             self.state['progress_measure'] = 'logical source bytes, not network throughput'
             self.notify()
             self.save()

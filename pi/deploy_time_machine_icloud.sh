@@ -22,6 +22,7 @@ PYTHONPATH="pi/scripts/backup:$PYTHONPATH" python3 -m unittest pi.tests.backup.t
 PYTHONPATH="pi/scripts/backup:$PYTHONPATH" python3 -m unittest pi.tests.backup.test_time_machine_pipeline
 PYTHONPATH="pi/scripts/backup:$PYTHONPATH" python3 -m unittest pi.tests.backup.test_time_machine_downloads pi.tests.backup.test_icloud_uplink
 PYTHONPATH="pi/scripts/backup:$PYTHONPATH" python3 -m unittest pi.tests.backup.test_backup_settings pi.tests.backup.test_cloud_backup_requests pi.tests.backup.test_hotspare_rotation pi.tests.backup.test_time_machine_runtime
+python3 -m unittest pi.tests.backup.test_offsite_dashboard pi.tests.backup.test_upload_speed_log
 bash pi/tests/storage/test_samba_share_control.sh
 bash -n pi/scripts/backup/time_machine_icloud.sh
 stage=$(ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" /usr/bin/mktemp -d /tmp/vanpi-tm-icloud.XXXXXX)

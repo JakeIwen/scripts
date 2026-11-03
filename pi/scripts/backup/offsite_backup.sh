@@ -2,11 +2,16 @@
 # Stable maintenance entry: exec preserves the PID record and exclusive fd 9.
 set -eu
 umask 077
+case "${1:-}" in
+  dashboard|rates)
+    (( EUID == 0 )) || { printf '%s\n' 'Run offsite_backup.sh with sudo.' >&2; exit 1; }
+    ;;
+esac
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 . "$here/backup_conf.sh"
 export OFFSITE_IGNITION_FLAG="$IGNITION_FLAG"
 case "${1:-}" in
-  status|-h|--help) ;;
+  status|dashboard|rates|-h|--help) ;;
   prepare-disk|backup|check|receipts|restore-test)
     (( EUID == 0 )) || { printf '%s\n' 'Run offsite_backup.sh with sudo.' >&2; exit 1; }
     acquire_job_lock || { printf '%s\n' 'Another backup or maintenance job is active.' >&2; exit 1; }

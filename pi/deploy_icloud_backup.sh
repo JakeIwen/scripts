@@ -12,6 +12,7 @@ local_previous=$(local_backup_previous_hashes "$repo" pi)
 payload=()
 while IFS= read -r source; do payload+=("$source"); done < <(local_backup_sources pi)
 PYTHONPATH="$repo:$repo/pi/scripts/backup" python3 -m unittest pi.tests.backup.test_backup_locks pi.tests.backup.test_backup_admission pi.tests.backup.test_protected_json pi.tests.backup.test_local_backup_deploy.DeploymentPlanTests pi.tests.backup.test_local_backup_deploy.DeploymentPreflightTests pi.tests.backup.test_hotspare_rotation pi.tests.backup.test_backup_settings pi.tests.backup.test_time_machine_runtime
+python3 -m unittest pi.tests.backup.test_offsite_dashboard pi.tests.backup.test_upload_speed_log
 python3 "$repo/pi/tests/backup/test_icloud_backup.py"
 python3 "$repo/pi/tests/backup/test_icloud_status.py"
 bash -n "$repo/pi/scripts/backup/icloud_backup.sh"

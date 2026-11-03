@@ -81,7 +81,8 @@ def append(path, at, bytes_per_second):
 class UploadSpeedSampler:
     """Turn cumulative per-command byte counters into one sample a minute."""
 
-    def __init__(self, interval=SAMPLE_SECONDS):
+    def __init__(self, interval=SAMPLE_SECONDS, *, path=None):
+        self.path = path
         self.interval = interval
         self.last = None
         self.started = None
@@ -108,6 +109,6 @@ class UploadSpeedSampler:
             speed = self.sent / self.seconds
             self.started, self.sent, self.seconds = None, 0, 0.0
             try:
-                append(log_path(directory), now, speed)
+                append(log_path(directory) if self.path is None else self.path, now, speed)
             except OSError:
                 pass  # The graph is optional; a lost sample must never stop an upload.
