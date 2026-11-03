@@ -223,6 +223,28 @@ class UncommittedOwners(unittest.TestCase):
         self.assertEqual((archive.pid, archive.location),
                          (101, "Archive resolved conversations | jacobr (codex-retry)"))
 
+    def test_open_claude_session_shows_the_name_peers_message_it_by(self):
+        sessions = self.home / ".claude" / "sessions"
+        sessions.mkdir(parents=True)
+        (sessions / f"{os.getpid()}.json").write_text(json.dumps(
+            {"pid": os.getpid(), "sessionId": CLAUDE_ID, "name": "repo-4c", "status": "idle"}))
+        result = json.loads(self.run_tool("--json").stdout)
+        owners = {item["session_id"]: item for item in result["sessions"]}
+        self.assertEqual(owners[CLAUDE_ID]["address"], "repo-4c")
+        self.assertIsNone(owners[CODEX_ID]["address"])
+        self.assertIn("| message: repo-4c", self.run_tool().stdout)
+
+    def test_parked_claude_session_is_messaged_by_its_job_name(self):
+        sessions, job = self.home / ".claude" / "sessions", self.home / ".claude" / "jobs" / "f016b31f"
+        sessions.mkdir(parents=True)
+        job.mkdir(parents=True)
+        (sessions / f"{os.getpid()}.json").write_text(json.dumps(
+            {"pid": os.getpid(), "sessionId": CLAUDE_ID, "name": "repo-4c", "parkedJobId": "f016b31f"}))
+        (job / "state.json").write_text(json.dumps({"name": "Theme manager"}))
+        result = json.loads(self.run_tool("--json").stdout)
+        owners = {item["session_id"]: item for item in result["sessions"]}
+        self.assertEqual(owners[CLAUDE_ID]["address"], "Theme manager")
+
     def test_text_lists_open_before_closed_then_unattributed(self):
         output = self.run_tool().stdout
         self.assertLess(output.index("Open sessions"), output.index("Closed sessions"))

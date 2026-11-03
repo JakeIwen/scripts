@@ -456,7 +456,8 @@ compare it with this checkout. Deployed files may differ from the repository.
   State and the generated restore script live in `~/.local/state/llm-restore/`.
 - `shared/sh/uncommitted_owners.py` implements `+id`: it attributes dirty Git
   paths to recent Claude Code and Codex tool calls, rolls subagents up to their
-  resumable parent, names open sessions' terminal location and prints resume
+  resumable parent, names open sessions' terminal location (and, for Claude,
+  the `SendMessage` name from `~/.claude/sessions/<pid>.json`) and prints resume
   commands for closed sessions. It uses `llm_restore.py --list --json` for Codex
   open-session detection and degrades to unknown when that listing fails.
 - `shared/sh/plus_commands.py` prints Jacob's + commands: the first sentence of

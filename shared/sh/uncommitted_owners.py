@@ -70,6 +70,8 @@ class SessionOwner:
     pid: int | None = None
     status: str | None = None
     location: str | None = None
+    # The name other Claude sessions on this machine message it by (SendMessage).
+    address: str | None = None
     resume_command: str = ""
 
 
@@ -614,6 +616,17 @@ def _pid_alive(pid: int) -> bool:
         return False
 
 
+def _parked_name(job_id) -> str:
+    """A session parked as a background job is listed to peers under the job's name."""
+    if not isinstance(job_id, str) or not job_id.isalnum():
+        return ""
+    try:
+        name = json.loads((CLAUDE_HOME / "jobs" / job_id / "state.json").read_text()).get("name")
+    except (OSError, ValueError, AttributeError):
+        return ""
+    return name if isinstance(name, str) else ""
+
+
 def _claude_open() -> dict[str, dict]:
     found = {}
     for path in (CLAUDE_HOME / "sessions").glob("*.json"):
@@ -624,7 +637,8 @@ def _claude_open() -> dict[str, dict]:
             continue
         session_id = data.get("sessionId")
         if session_id and _pid_alive(pid):
-            found[session_id] = {"pid": pid, "status": data.get("status"), "name": data.get("name") or ""}
+            name = _parked_name(data.get("parkedJobId")) or data.get("name") or ""
+            found[session_id] = {"pid": pid, "status": data.get("status"), "name": name}
     return found
 
 
@@ -750,6 +764,8 @@ def enrich_open_state(owners: list[SessionOwner]) -> None:
             owner.pid = int(record["pid"])
             owner.status = record.get("status") or "open"
             owner.location = pid_locations.get(owner.pid)
+            if owner.tool == "claude":
+                owner.address = record.get("name") or None
             if not owner.title:
                 owner.title = record.get("name") or record.get("title") or ""
 
@@ -790,7 +806,8 @@ def print_text(repo: Path, owners: list[SessionOwner], unattributed: list[DirtyF
             print(f"  id {owner.session_id} | cwd {owner.cwd} | last {_clock(owner.last_event)}")
             if state is True:
                 where = f" | {owner.location}" if owner.location else ""
-                print(f"  {owner.status or 'open'} | pid {owner.pid}{where}")
+                address = f" | message: {owner.address}" if owner.address else ""
+                print(f"  {owner.status or 'open'} | pid {owner.pid}{where}{address}")
             elif owner.resume_command:
                 label = "resume if closed" if state is None else "resume"
                 print(f"  {label}: {owner.resume_command}")
