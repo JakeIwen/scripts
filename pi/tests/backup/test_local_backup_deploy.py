@@ -83,7 +83,15 @@ class DeploymentPlanTests(DeploymentTestCase):
             for dependency, consumer in [('backup_lock_io.sh', 'backup_locks.sh'),
                     ('backup_lock_registry.sh', 'backup_locks.sh'),
                     ('backup_locks.sh', 'backup_conf.sh'), ('umount_disks_fence.sh', 'umount_disks.sh'),
-                    ('stale_mount_recovery.sh', 'mount_disks.sh')]:
+                    ('stale_mount_recovery.sh', 'mount_disks.sh'),
+                    ('time_machine_store.py', 'offsite_repository.py'),
+                    ('offsite_config.py', 'offsite_repository.py'),
+                    ('offsite_repository.py', 'offsite_run.py'),
+                    ('offsite_samba.py', 'offsite_run.py'),
+                    ('offsite_prepare.py', 'offsite_backup.py'),
+                    ('offsite_run.py', 'offsite_backup.py'),
+                    ('offsite_mounts.sh', 'offsite_backup.sh'),
+                    ('offsite_backup.py', 'offsite_backup.sh')]:
                 names = [Path(name).name for name in sources]
                 self.assertLess(names.index(dependency), names.index(consumer))
             for source in sources:
