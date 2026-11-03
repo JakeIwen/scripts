@@ -6,12 +6,15 @@ from ..http import _exact_form, api_error, runtime_proxy
 from ..van_dashboard_backups import BackupStatusError
 from ..cloud_backup_details import attempt_details
 from ..cloud_upload_speeds import upload_speeds
+from ..van_dashboard_disks import DiskCommandError
+from ..van_dashboard_offsite import OffsiteError, offsite_rates, read_offsite, target_drive
 
 
 bp = Blueprint("backups", __name__)
 backups = runtime_proxy("backups")
 time_machine_cloud_control = runtime_proxy("time_machine_cloud_control")
 pi_cloud_control = runtime_proxy("pi_cloud_control")
+disk_manager = runtime_proxy("disk_manager")
 
 
 @bp.route("/api/backups/cloud/<kind>/attempts/<attempt_id>")
@@ -45,6 +48,43 @@ def api_cloud_upload_speeds(kind):
     response = jsonify({"ok": True, "samples": samples})
     response.headers["Cache-Control"] = "no-store"
     return response
+
+
+def _no_store(payload):
+    response = jsonify(payload)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@bp.route("/api/backups/offsite")
+def api_offsite():
+    if request.args:
+        return api_error("offsite status does not accept query parameters", 400)
+    try:
+        offsite = read_offsite()
+    except OffsiteError:
+        return api_error("Offsite backup status is unavailable.", 503)
+    status = offsite["status"]
+    drive = None
+    if status["target_kind"] == "local":
+        try:
+            drive = target_drive(status.get("label"), disk_manager.labels())
+        except DiskCommandError:
+            drive = None
+    return _no_store({"ok": True, **offsite, "target_drive": drive})
+
+
+@bp.route("/api/backups/offsite/<source>/rates")
+def api_offsite_rates(source):
+    if request.args:
+        return api_error("offsite rates do not accept query parameters", 400)
+    try:
+        rates = offsite_rates(source)
+    except ValueError as exc:
+        return api_error(str(exc), 400)
+    except OffsiteError:
+        return api_error("Offsite rate history is unavailable.", 503)
+    return _no_store({"ok": True, **rates})
 
 
 @bp.route("/api/backups")

@@ -726,6 +726,24 @@ compare it with this checkout. Deployed files may differ from the repository.
   `ChartAxes` and `SeriesMarks` (series drawn plain, `faint` or `dashed`), which
   other charts such as the upload-speed run bars build on directly; plus
   `useElementWidth` and `axisLabels` (`niceMax` adds the axis headroom).
+- Offsite NAS panel: `pi/apps/van_dashboard/van_dashboard_offsite.py` reads
+  `offsite_backup.sh dashboard` and `rates <source>` through `sudo -n` (state is
+  root-private), validates every field at that boundary and passes through only
+  contract fields. A script without `dashboard` (v1: only `status`, argparse exit 2)
+  falls back to `status` with `supported: {history: false}`; `rates` then answers
+  `supported: false` with no samples. `target_drive` adds usage only for a local
+  target whose label `DiskManager.labels()` knows and that is already mounted at
+  `/mnt/<label>` (never mounts). Routes `/api/backups/offsite` and
+  `/api/backups/offsite/<source>/rates` live in `routes/backups.py`. Frontend:
+  `features/backups/offsite.ts` (types mirroring the wire result vocabulary,
+  decoder, fetchers), `offsiteContent.ts` (display copy; source names and run
+  order), `offsitePresentation.ts` (chip and per-source view model, preferring
+  history over the current run's `sources`), `OffsiteSection.tsx` (collapsed
+  section, polls via `useOffsiteStatus` only while the sheet is open),
+  `OffsiteStatusCard.tsx`, `OffsiteSourceCard.tsx`, `OffsiteRow.tsx`. Rate graphs
+  reuse `UploadSpeedSheet`'s `RateHistoryButton`; the drive I/O button reuses
+  storage's `DiskStatsSheet`. Nothing keys off a drive label: label and
+  `target_kind` come from the status record.
 - Backup priority: `pi/scripts/backup/backup_priority.py` owns the cloud job
   registry and the protected until-verified override; `backup_priority_control.py`
   is the fixed CLI. Priority only decides which cloud job may take the single

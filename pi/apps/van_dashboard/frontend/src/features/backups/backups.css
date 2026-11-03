@@ -504,3 +504,145 @@
 .backups-tile .backups-tile__status-line--stalled > span:last-child {
   color: inherit;
 }
+
+/* Offsite NAS section: one status card, then a grid of per-source cards. */
+.backup-offsite__chip {
+  align-self: flex-start;
+  padding: 0.3rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.backup-offsite__chip--running {
+  background: var(--panel-raised);
+  color: var(--accent);
+}
+
+.backup-offsite__chip--ok {
+  background: var(--good-background);
+  color: var(--good);
+}
+
+.backup-offsite__chip--failed {
+  background: var(--bad-background);
+  color: var(--bad);
+}
+
+.backup-offsite-main,
+.backup-offsite-source {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-medium);
+  background: var(--panel-soft);
+}
+
+.backup-offsite-main {
+  margin-top: 15px;
+}
+
+.backup-offsite-main + .backup-evidence-grid {
+  margin-top: 10px;
+}
+
+.backup-offsite-main.backup-offsite-source--ok,
+.backup-offsite-source.backup-offsite-source--ok {
+  border-color: var(--good);
+}
+
+.backup-offsite-main.backup-offsite-source--failed,
+.backup-offsite-source.backup-offsite-source--failed {
+  border-color: var(--bad);
+}
+
+.backup-offsite-main.backup-offsite-source--running,
+.backup-offsite-source.backup-offsite-source--running {
+  border-color: var(--accent);
+}
+
+.backup-offsite-main header,
+.backup-offsite-source header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.backup-offsite__state {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-align: right;
+  text-transform: uppercase;
+}
+
+.backup-offsite-main p,
+.backup-offsite-source__contents {
+  margin-top: 8px;
+}
+
+.backup-offsite-source__contents,
+.backup-offsite-main small,
+.backup-offsite-source small,
+.backup-offsite-main dt,
+.backup-offsite-source dt {
+  color: var(--muted);
+}
+
+.backup-offsite-main small,
+.backup-offsite-source small {
+  display: block;
+  margin-top: 6px;
+}
+
+.backup-offsite__cause {
+  color: var(--bad);
+  overflow-wrap: anywhere;
+}
+
+.backup-offsite-main dl,
+.backup-offsite-source dl {
+  display: grid;
+  gap: 6px;
+  margin: 13px 0 0;
+}
+
+.backup-offsite-main dl > div,
+.backup-offsite-source dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.backup-offsite-main dd,
+.backup-offsite-source dd {
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.backup-offsite__info {
+  min-width: 24px;
+  min-height: 24px;
+  margin-left: 6px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.backup-offsite-main .secondary-button {
+  margin-top: 14px;
+}
+
+.backup-offsite-source__footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
