@@ -612,6 +612,11 @@ compare it with this checkout. Deployed files may differ from the repository.
   `AssistantMessage` markdown before the engine draws it (the stored reply is
   unchanged). Mac only, loaded from the checkout through `settings.json`
   `env.CLAUDE_CODE_PLUGIN_DIRS`; the Pi has no copy.
+- `shared/claude-mods/effort-shortcut/` is a Claude Code mod that adds
+  `/e l|m|h|x|M`, `claudepm`'s effort letters, forwarding to the built-in
+  `/effort` (which also saves the level as that model's default). The mod API
+  has no effort setter, and `$.command.run` refuses calls from inside a hook,
+  so it runs on the next tick. Mac only, loaded like term-highlight.
 - Pi video audio is hardwired: HDMI-A-1 → splitter box (HDMI to the monitor,
   audio to optical) → Sonos soundbar's optical input. `sns.sh rear_movie`
   switches the soundbar to optical and groups vonRear with it; VLC and Van TV's

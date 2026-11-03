@@ -1,0 +1,5 @@
+{
+  "name": "effort-shortcut",
+  "version": "0.1.0",
+  "description": "/e l|m|h|x|M sets the session's effort, the same letters as claudepm"
+}
