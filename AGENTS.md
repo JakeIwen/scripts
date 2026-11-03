@@ -494,6 +494,15 @@ compare it with this checkout. Deployed files may differ from the repository.
   the `SendMessage` name from `~/.claude/sessions/<pid>.json`) and prints resume
   commands for closed sessions. It uses `llm_restore.py --list --json` for Codex
   open-session detection and degrades to unknown when that listing fails.
+- `shared/sh/claude_session_title.py` (stdlib, Python 3.9+) reads a hook payload
+  on stdin and prints the conversation name: latest custom title, agent name,
+  then generated title, scanning at most 16 MiB backwards. The Mac/Pi
+  `claude_ntfy_notify.py` hooks call this CLI (no shared import root) and lead
+  the notification body with the name, capped at 60 characters for previews;
+  failed/missing metadata keeps the original alert. `--send` is unchanged.
+  Deploy the helper first, then `pi/scripts/claude_ntfy_notify.py`, both flat
+  in `/home/pi/scripts/`; Mac hooks run directly from the checkout. Tests:
+  `shared/tests/test_claude_ntfy_titles.py` includes the Pi's deployed layout.
 - `shared/sh/plus_commands.py` prints Jacob's + commands: the first sentence of
   each bullet in the global instructions' "+ commands" section. With `--hook`
   it is the UserPromptSubmit hook (Claude and Codex, Mac and Pi) that answers a

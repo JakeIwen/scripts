@@ -14,6 +14,9 @@ import shlex
 import subprocess
 import sys
 
+# These hooks run by path, not as an installed package; use the shared CLI.
+SESSION_TITLE_SCRIPT = Path(__file__).resolve().parents[2] / "shared/sh/claude_session_title.py"
+
 
 SSH = "/usr/bin/ssh"
 SSH_HOSTS = (
@@ -34,6 +37,17 @@ def notification(event: dict) -> tuple[str, str, str]:
     priority = "high"
     if len(title) > MAX_TITLE_CHARS:
         title = title[: MAX_TITLE_CHARS - 1].rstrip() + "…"
+    # Lead with the conversation name so phone previews show which session asked.
+    try:
+        name = subprocess.run(
+            [sys.executable, "-I", str(SESSION_TITLE_SCRIPT)],
+            input=json.dumps(event), capture_output=True, text=True,
+            check=True, timeout=5,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        name = ""
+    if name:
+        body = f"{name}: {body}"
     message = f"{body}\n\n{cwd}"
     if len(message) > MAX_MESSAGE_CHARS:
         message = message[: MAX_MESSAGE_CHARS - 1].rstrip() + "…"
