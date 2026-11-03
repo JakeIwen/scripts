@@ -118,84 +118,89 @@ export function ComputeSheet({
           )}
         </section>
 
-        <section className="panel-card">
-          <header className="compute-section-heading">
-            <div>
-              <h3>Eligible work left on Pi</h3>
-              <p>Recorded broker fallbacks and manually identified eligible work.</p>
-            </div>
-            <strong>{report?.eligibleLocalWork.events ?? 0} recorded</strong>
-          </header>
-          <div className="compute-local-reasons">
-            {report?.eligibleLocalWork.reasons.length ? (
-              report.eligibleLocalWork.reasons.map((reason) => (
-                <span key={reason.reason}>
-                  <strong>{reason.events}</strong>
-                  {localReasonLabel(reason.reason)}
-                </span>
-              ))
-            ) : (
-              <p className="compute-sheet__empty">No eligible local work recorded.</p>
-            )}
-          </div>
-        </section>
+        {/* Until the first report arrives, its empty states would claim there is no work. */}
+        {report && (
+          <>
+            <section className="panel-card">
+              <header className="compute-section-heading">
+                <div>
+                  <h3>Eligible work left on Pi</h3>
+                  <p>Recorded broker fallbacks and manually identified eligible work.</p>
+                </div>
+                <strong>{report.eligibleLocalWork.events} recorded</strong>
+              </header>
+              <div className="compute-local-reasons">
+                {report.eligibleLocalWork.reasons.length ? (
+                  report.eligibleLocalWork.reasons.map((reason) => (
+                    <span key={reason.reason}>
+                      <strong>{reason.events}</strong>
+                      {localReasonLabel(reason.reason)}
+                    </span>
+                  ))
+                ) : (
+                  <p className="compute-sheet__empty">No eligible local work recorded.</p>
+                )}
+              </div>
+            </section>
 
-        <section className="panel-card">
-          <header className="compute-section-heading">
-            <div>
-              <h3>Work by task</h3>
-              <p>Completed offloaded jobs in the selected range.</p>
-            </div>
-          </header>
-          <div className="compute-task-list">
-            {report?.tasks.length ? (
-              report.tasks.map((task) => (
-                <button
-                  type="button"
-                  className="compute-task-filter"
-                  aria-pressed={explorer.selectedTask === task.task}
-                  onClick={() => explorer.toggleTask(task.task)}
-                  key={task.task}
-                >
-                  <span>
-                    <strong>{task.task}</strong>
-                    <small>
-                      {task.jobs} jobs · {task.succeeded} succeeded · {task.failed} failed
-                    </small>
-                  </span>
-                  <span>
-                    {formatComputeDuration(task.cpuSeconds)} CPU
-                    <small>
-                      {formatBytes(task.peakResidentBytes)} peak · {formatBytes(task.inputBytes)}{' '}
-                      input
-                    </small>
-                  </span>
-                </button>
-              ))
-            ) : (
-              <p className="compute-sheet__empty">No completed task totals in this range.</p>
-            )}
-          </div>
-        </section>
+            <section className="panel-card">
+              <header className="compute-section-heading">
+                <div>
+                  <h3>Work by task</h3>
+                  <p>Completed offloaded jobs in the selected range.</p>
+                </div>
+              </header>
+              <div className="compute-task-list">
+                {report.tasks.length ? (
+                  report.tasks.map((task) => (
+                    <button
+                      type="button"
+                      className="compute-task-filter"
+                      aria-pressed={explorer.selectedTask === task.task}
+                      onClick={() => explorer.toggleTask(task.task)}
+                      key={task.task}
+                    >
+                      <span>
+                        <strong>{task.task}</strong>
+                        <small>
+                          {task.jobs} jobs · {task.succeeded} succeeded · {task.failed} failed
+                        </small>
+                      </span>
+                      <span>
+                        {formatComputeDuration(task.cpuSeconds)} CPU
+                        <small>
+                          {formatBytes(task.peakResidentBytes)} peak ·{' '}
+                          {formatBytes(task.inputBytes)} input
+                        </small>
+                      </span>
+                    </button>
+                  ))
+                ) : (
+                  <p className="compute-sheet__empty">No completed task totals in this range.</p>
+                )}
+              </div>
+            </section>
 
-        <section className="panel-card">
-          <header className="compute-section-heading">
-            <div>
-              <h3>Recent queue and offloaded jobs</h3>
-              <p>Read-only outcome and resource summary; retained output is not loaded here.</p>
-            </div>
-            <strong>{explorer.jobs.length} shown</strong>
-          </header>
-          {explorer.selectedTask && (
-            <p className="compute-filter-status">
-              {explorer.taskLoading
-                ? 'Loading older matches…'
-                : `Filtered to ${explorer.selectedTask}`}
-              {explorer.taskError ? ` · ${explorer.taskError}` : ''}
-            </p>
-          )}
-          <ComputeJobList explorer={explorer} />
-        </section>
+            <section className="panel-card">
+              <header className="compute-section-heading">
+                <div>
+                  <h3>Recent queue and offloaded jobs</h3>
+                  <p>Read-only outcome and resource summary; retained output is not loaded here.</p>
+                </div>
+                <strong>{explorer.jobs.length} shown</strong>
+              </header>
+              {explorer.selectedTask && (
+                <p className="compute-filter-status">
+                  {explorer.taskLoading
+                    ? 'Loading older matches…'
+                    : `Filtered to ${explorer.selectedTask}`}
+                  {explorer.taskError ? ` · ${explorer.taskError}` : ''}
+                </p>
+              )}
+              <ComputeJobList explorer={explorer} />
+            </section>
+          </>
+        )}
 
         {report?.measurementNote && (
           <p className="compute-measurement-note">{report.measurementNote}</p>

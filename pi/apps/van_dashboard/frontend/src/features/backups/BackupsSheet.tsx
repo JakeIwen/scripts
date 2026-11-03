@@ -265,7 +265,9 @@ function HotsparesSection({
             <p>Configured labels, cadence, attachment, and clone age.</p>
           </div>
           <div className="backup-hotspare-grid">
-            {status?.hotswaps.length ? (
+            {status === null ? (
+              <p className="backups-empty">Loading hotspares…</p>
+            ) : status.hotswaps.length ? (
               status.hotswaps.map((card) => (
                 <HotspareCard card={card} status={status} controls={controls} key={card.label} />
               ))
