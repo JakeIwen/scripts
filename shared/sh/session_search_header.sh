@@ -133,7 +133,10 @@ session_search_header_at() {
         *)
             elapsed=$(( ${EPOCHSECONDS:-$(date +%s)} - modified ))
             [ "$elapsed" -ge 0 ] || elapsed=0
-            if [ "$elapsed" -lt 86400 ]; then
+            if [ "$elapsed" -lt 3600 ]; then
+                count=$((elapsed / 60))
+                unit=minute
+            elif [ "$elapsed" -lt 86400 ]; then
                 count=$((elapsed / 3600))
                 unit=hour
             else

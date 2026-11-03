@@ -87,7 +87,7 @@ class ForkFamilyTests(LookupTestCase):
                          f'{PROJECT}claudepr first\n'
                          '├─ 1 hour ago | fork-a\n'
                          f'│  {PROJECT}claudepr fork-a\n'
-                         '│  └─ 0 hours ago | fork-a1 (match)\n'
+                         '│  └─ 30 minutes ago | fork-a1 (match)\n'
                          f'│     {PROJECT}claudepr fork-a1\n'
                          '└─ 2 hours ago | fork-b\n'
                          f'   {PROJECT}claudepr fork-b\n\n')

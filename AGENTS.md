@@ -446,7 +446,12 @@ compare it with this checkout. Deployed files may differ from the repository.
   matching provider/id pairs (`extract --ids`, or the index's ids) and prints each
   one's fork tree from transcript heads (Claude `forkedFrom.sessionId` on copied
   rows, Codex `forked_from_id` in the first `session_meta`; Codex subagent threads
-  are left out unless matched). Keep all ten search files together on the Pi under
+  are left out unless matched). `llmsearch`, `claudesearch` and `codexsearch`
+  share these files: a change requested for `llmsearch` applies to the other
+  two too unless it is about cross-provider merging or the index, and goes in
+  the shared helpers (activity ages exist twice, in `session_search_header_at`
+  and `session_search_extract.py`'s `header`; keep them in step), not a
+  per-command branch. Keep all ten search files together on the Pi under
   `/home/pi/scripts/`; `pi/.bashrc` defines all three commands. Python helpers
   require 3.9+ and shells support Bash 3.2. Targeted updates ship the complete set
   and patch only those live `.bashrc` definitions, preserving local changes.
