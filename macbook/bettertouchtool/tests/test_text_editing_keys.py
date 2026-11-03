@@ -17,6 +17,8 @@ from unittest.mock import patch
 import btt_socket
 import install_text_editing_keys as keys
 import text_editing_conditions as conditions
+import trigger_install as triggers
+from macbook.bettertouchtool.tests.btt_socket_fake import FakeBTT
 
 # Runs each emitted entry with BTT's Real-JS helpers stubbed and records the calls.
 HARNESS = r'''
@@ -120,45 +122,15 @@ class EmittedScriptTests(unittest.TestCase):
                          {'excluded': list(conditions.EXCLUDED_APPS)})
 
 
-class FakeBTT:
-    """Socket fake with the API's export shape: aliased script key, read-only condition."""
-    def __init__(self, export_hook=None):
-        self.triggers, self.writes, self.export_hook = {}, [], export_hook
-
-    def __call__(self, command, **parameters):
-        if command == 'get_trigger':
-            found = self.triggers.get(parameters['uuid'])
-            return json.dumps([found] if found else {})
-        if command == 'add_new_trigger':
-            wanted = json.loads(parameters['json'])
-            exported = dict(wanted)
-            exported['BTTTriggerConditionsFormatReadOnly'] = exported.pop('BTTTriggerConditionsFormat', None)
-            exported.pop(keys.PASSTHROUGH, None)
-            data = dict(exported['BTTAdditionalActionData'])
-            data['BTTScriptString'] = data.pop('BTTAppleScriptString')
-            exported['BTTAdditionalActionData'] = data
-            if self.export_hook:
-                self.export_hook(exported)
-            self.triggers[wanted['BTTUUID']] = exported
-            self.writes.append(('add', wanted['BTTUUID'], wanted['BTTEnabled']))
-        elif command == 'update_trigger':
-            self.triggers[parameters['uuid']].update(json.loads(parameters['json']))
-            self.writes.append(('update', parameters['uuid'], json.loads(parameters['json'])['BTTEnabled']))
-        elif command == 'delete_trigger':
-            del self.triggers[parameters['uuid']]
-            self.writes.append(('delete', parameters['uuid'], None))
-        return ''
-
-
 class InstallFlowTests(unittest.TestCase):
     def setUp(self):
         directory = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, directory)
         self.plan = keys.definitions()
         self.fake = FakeBTT()
-        for module, target, value in [(btt_socket, 'call', self.fake), (keys, 'saved_errors', lambda *args: []),
+        for module, target, value in [(btt_socket, 'call', self.fake), (triggers, 'saved_errors', lambda *args: []),
                                       (keys, 'BACKUPS', directory),
-                                      (keys, 'backup_configuration', lambda *args, **kw: directory / 'backup.json'),
+                                      (triggers, 'backup_configuration', lambda *args, **kw: directory / 'backup.json'),
                                       (conditions, 'canonical', lambda predicate: predicate)]:
             patcher = patch.object(module, target, value)
             patcher.start()
@@ -198,7 +170,7 @@ class InstallFlowTests(unittest.TestCase):
         first = self.plan[0]['BTTUUID']
         self.fake.triggers[first]['BTTEnabled'] = 0
         self.fake.writes.clear()
-        touched = keys.set_enabled(self.plan, 0)
+        touched = triggers.set_enabled(self.plan, 0)
         self.assertEqual(touched, [d['BTTUUID'] for d in self.plan[1:]])
         self.assertTrue(all(t['BTTEnabled'] == 0 for t in self.fake.triggers.values()))
 
@@ -218,8 +190,8 @@ class SavedStateTests(unittest.TestCase):
             connection.execute("INSERT INTO ZBTTBASEENTITY (Z_PK,ZUNIQUEIDENTIFIER,ZACTIVATED) VALUES (1,'preset',2)")
             connection.execute("INSERT INTO ZBTTBASEENTITY (Z_PK,ZUNIQUEIDENTIFIER,ZACTIVATED) VALUES (2,'off',0)")
             for index, wanted in enumerate(self.plan, start=10):
-                keyboard = wanted['BTTTriggerType'] == keys.KEYBOARD
-                config = {keys.PASSTHROUGH: True} if keyboard else {}
+                keyboard = wanted['BTTTriggerType'] == triggers.KEYBOARD
+                config = {triggers.PASSTHROUGH: True} if keyboard else {}
                 connection.execute('''INSERT INTO ZBTTBASEENTITY (Z_PK,ZUNIQUEIDENTIFIER,ZBELONGSTOPRESET2,
                     ZGESTURETYPE,ZACTION,ZENABLEDNEW,ZICONDATA3,ZACTIONDATA,ZKEYCODE,ZMODIFIERKEYS,ZTRIGGERONDOWN,
                     ZISENABLED,ZCONDITIONS) VALUES (?,?,1,?,281,1,?,?,?,?,?,1,?)''',
@@ -232,8 +204,8 @@ class SavedStateTests(unittest.TestCase):
             connection.execute(sql, parameters)
 
     def test_a_complete_enabled_save_verifies(self):
-        self.assertEqual(keys.saved_errors(self.database, self.plan, 1), [])
-        self.assertEqual(keys.saved_errors(self.database, self.plan, None), [])
+        self.assertEqual(triggers.saved_errors(self.database, self.plan, 1), [])
+        self.assertEqual(triggers.saved_errors(self.database, self.plan, None), [])
 
     def test_each_unsaved_property_blocks_verification(self):
         cut = by_note('cuts the line')['BTTUUID']
@@ -245,15 +217,15 @@ class SavedStateTests(unittest.TestCase):
             with self.subTest(expected=expected):
                 self.setUp()
                 self.update(sql, cut)
-                [error] = keys.saved_errors(self.database, self.plan, 1)
+                [error] = triggers.saved_errors(self.database, self.plan, 1)
                 self.assertIn(expected, error)
 
     def test_only_other_enabled_shortcuts_on_these_keys_in_active_presets_conflict(self):
         for index, preset, enabled, keycode in [(90, 1, 1, 7), (91, 2, 1, 7), (92, 1, 0, 7), (93, 1, 1, 8)]:
             self.update('''INSERT INTO ZBTTBASEENTITY (Z_PK,ZUNIQUEIDENTIFIER,ZBELONGSTOPRESET2,ZGESTURETYPE,
                 ZKEYCODE,ZMODIFIERKEYS,ZISENABLED,ZENABLEDNEW) VALUES (?,?,?,0,?,?,?,?)''',
-                        index, 'other-%d' % index, preset, keycode, keys.COMMAND, enabled, enabled)
-        self.assertEqual(keys.conflicts(self.database, self.plan), ['other-90'])
+                        index, 'other-%d' % index, preset, keycode, triggers.COMMAND, enabled, enabled)
+        self.assertEqual(triggers.conflicts(self.database, self.plan), ['other-90'])
 
 
 if __name__ == '__main__':

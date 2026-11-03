@@ -270,6 +270,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   is their runtime on top of `text_selection.js`.
   BTT swallows a Cmd-X sent from its own Cmd-X trigger, so the line cut presses
   Edit > Cut through Accessibility instead.
+  `trigger_install.py` owns the shared guarded install of fixed-UUID top-level
+  triggers (create disabled, verify readback and saved store, enable; a failure
+  leaves them disabled). `tests/btt_socket_fake.py` is the in-memory BTT socket for
+  installer tests.
   `signal_text_diagnostic.js` owns the temporary Signal diagnostic button's runner.
   `macbook/crontab` is the tracked user crontab; `macbook/tests/test_crontab.py`
   checks that every repo script it runs (paused `#off ` jobs included) exists and
