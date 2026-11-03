@@ -1105,6 +1105,14 @@ The active design is represented by:
 - `shared/sh/codex_update.py`: keyed Codex/Claude weekly update adapters on both hosts, with independent cadence/results in `~/.local/state/codex-update/state.json` (legacy flat Codex state is preserved). The filename and six-hour cron lines in `macbook/crontab` and `pi/crontab_pi` stay stable; the Pi copy remains `/home/pi/scripts/codex_update.py`. Downloads require bounded host-local `allows pi.<tool>_update` via `/home/pi/scripts/vanpi-metered`, or `allows mac.<tool>_update` via `/Users/jacobr/dev/scripts/macbook/metered/mac-metered`; missing/failing/timed-out permission defers as `metered or unknown`, and `--force` skips only cadence. Every scheduled Claude check first atomically merges only `env.DISABLE_AUTOUPDATER="1"` into the existing regular `~/.claude/settings.json`, even when denied/not due; invalid JSON is refused. Both native CLIs run from `~/.local/bin` with it on PATH. Marketplace auto-update is unchanged: on-demand refresh exists but the inspected CLI has no auto-update toggle. The standalone `-I` flat copy keeps its atomic JSON writer local because checkout helpers are outside its import/deploy contract. `shared/automations/codex-update.json` shows both tools on both hosts, with bounded status SSH over `vanpi.lan`. Both hosts' `~/.codex/config.toml` set `check_for_update_on_startup = false`, so the TUI never prompts.
 - `pi/scripts/backup/abort_backup.sh`: coordinated termination before unmounting.
 - `pi/scripts/backup/clone_to_sd.sh`: bootable spare-card cloning.
+- `pi/scripts/backup/offsite_backup.sh`: encrypted restic drives for the offsite
+  copy on a friend's Synology (v1: a local USB target, filled on the Pi, then carried
+  to the NAS). It holds the exclusive legacy lock like `restore_from_borg.sh`;
+  `offsite_config.py` owns sources, excludes and wire records, `offsite_repository.py`
+  verifies mounts and repository IDs, `offsite_prepare.py` guards erasure,
+  `offsite_samba.py` owns the Time Machine capture gate, `offsite_run.py` writes
+  private status and `offsite_mounts.sh` reuses the label helpers. `install_restic.sh`
+  pins restic 0.19.1. Runbook: `pi/docs/backup/OFFSITE.md`.
 - `pi/scripts/mount_disks.sh` and `pi/scripts/umount_disks.sh`: disk lifecycle.
   `pi/scripts/backup/umount_disks_fence.sh` (sourced by `umount_disks.sh`, shipped
   with the backup payload) stops and claims backup jobs' disks before unmount or spindown.
