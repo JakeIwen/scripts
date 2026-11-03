@@ -54,8 +54,8 @@ def findmnt(state, args):
 
 
 def mounts(state, args):
-    if args[0] == 'policy':
-        print('\n'.join(state['policy']))
+    if args[0] in ('policy', 'offsite'):
+        print('\n'.join(state[args[0]]))
         return
     label = args[1]
     rows = [row for row in all_rows(state) if row.get('label') == label]

@@ -77,7 +77,8 @@ class OffsiteFixture:
                 'mountpoints': [None], 'maj:min': '8:16', 'children': []}
         boot = {'name': str(root), 'type': 'disk', 'serial': 'ROOT', 'mountpoints': ['/']}
         return {'disks': [boot, disk], 'mounts': {'/': str(root)}, 'mount_root': str(self.cfg.mount_root),
-                'policy': ['bigboi', 'movingparts', 'EXFAT512', 'mbp2tbkup', 'hdd1tb', 'hotspare-a', 'hotspare-b']}
+                'policy': ['bigboi', 'movingparts', 'EXFAT512', 'mbp2tbkup', 'hdd1tb', 'hotspare-a', 'hotspare-b'],
+                'offsite': [self.label]}
 
     def save(self):
         self.fixture.write_text(json.dumps(self.state))

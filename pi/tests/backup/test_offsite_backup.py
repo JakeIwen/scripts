@@ -69,6 +69,11 @@ class OffsiteTests(unittest.TestCase):
         self.f.save()
         self.assert_no_erase(self.f.prepare(), 'shared by multiple')
 
+    def test_label_outside_offsite_policy_refused(self):
+        self.f.state['offsite'] = ['offsite-14tb']
+        self.f.save()
+        self.assert_no_erase(self.f.prepare(), 'OFFSITE_LABELS')
+
     def test_existing_label_refused(self):
         self.f.state['disks'][0]['label'] = self.f.label
         self.f.save()

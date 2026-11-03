@@ -21,6 +21,15 @@ ALWAYS_MOUNT_LABELS=(
 MANUAL_MOUNT_LABELS=(
   bigboi
   hdd1tb
+  FORT-MPLS-5TB
+)
+
+# Offsite restic drives (pi/docs/backup/OFFSITE.md): filled on the Pi, then
+# carried to the friend's Synology. They also appear in the manual and HDD
+# lists so they mount, drain and spin down like the other backup disks;
+# offsite_backup.sh prepare-disk may create only these labels.
+OFFSITE_LABELS=(
+  FORT-MPLS-5TB
 )
 
 # Filesystem labels for rotational USB disks that must be unmounted and
@@ -31,6 +40,7 @@ HDD_LABELS=(
   bigboi
   mbp2tbkup
   hdd1tb
+  FORT-MPLS-5TB
 )
 
 # Static Samba share names for disk-backed exports.  Keep this mapping aligned

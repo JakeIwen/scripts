@@ -29,7 +29,7 @@ class LockClass(str, Enum):
 
 PI_CLOUD = 'pi-cloud'
 TIME_MACHINE = 'time-machine'
-DISK_LABELS = ('bigboi', 'hdd1tb', 'mbp2tbkup', 'movingparts', 'EXFAT512')
+DISK_LABELS = ('bigboi', 'hdd1tb', 'mbp2tbkup', 'movingparts', 'EXFAT512', 'FORT-MPLS-5TB')
 DATA_NAMES = ('borg-repo',)
 CLOUD_SLOT = 'upload'
 JOB_LABELS = {'borg': 'local Pi backup', 'exfat': 'EXFAT512 snapshot', PI_CLOUD: 'Pi iCloud backup',

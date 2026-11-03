@@ -15,9 +15,16 @@ verify() {
 
 case "${1:-}" in
   policy)
+    # Every policy label except the offsite drives, which prepare-disk may create.
     (( $# == 1 )) || exit 2
-    printf '%s\n' "${MOUNT_LABELS[@]}" "${MANUAL_MOUNT_LABELS[@]}" "${HDD_LABELS[@]}"
-    for target in "${CLONE_TARGETS[@]}"; do printf '%s\n' "${target%%:*}"; done
+    {
+      printf '%s\n' "${MOUNT_LABELS[@]}" "${MANUAL_MOUNT_LABELS[@]}" "${HDD_LABELS[@]}"
+      for target in "${CLONE_TARGETS[@]}"; do printf '%s\n' "${target%%:*}"; done
+    } | /usr/bin/grep -vxF -f <(printf '%s\n' "${OFFSITE_LABELS[@]}")
+    ;;
+  offsite)
+    (( $# == 1 )) || exit 2
+    printf '%s\n' "${OFFSITE_LABELS[@]}"
     ;;
   resolve)
     (( $# == 2 )) || exit 2

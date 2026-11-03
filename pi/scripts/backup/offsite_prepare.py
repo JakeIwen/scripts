@@ -61,6 +61,9 @@ def inspect_disk(repo, device, serial, show=False):
         raise RuntimeError('Serial is shared by multiple disks; refusing ambiguous USB identity')
     if disk.get('tran') != 'usb' or disk.get('ro') not in (False, 0):
         raise RuntimeError('Target must be a writable USB disk')
+    offsite = commands.run('mounts', 'offsite').split()
+    if repo.label not in offsite:
+        raise RuntimeError('Label is not an offsite drive in disk_policy.sh OFFSITE_LABELS')
     policy = protected_labels(commands) | set(records(cfg, optional=True)['repos'])
     if repo.label in policy:
         raise RuntimeError('Requested label is protected by disk policy or known repositories')
