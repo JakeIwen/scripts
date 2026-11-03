@@ -67,7 +67,8 @@ export function OffsiteSourceCard({
       <p className="backup-offsite-source__contents">{contents}</p>
       {view.live && <OffsiteProgress run={run} title={name} />}
       {outcome?.cause && <p className="backup-offsite__cause">{outcome.cause}</p>}
-      {outcome && outcome.result !== 'running' && (
+      {/* v1 status lists queued and running sources as not-run; they have no results yet. */}
+      {outcome && outcome.result !== 'running' && outcome.result !== 'not-run' && (
         <dl>
           <Row label="Processed" hint={OFFSITE_HINTS.logical}>
             {formatBytes(outcome.logicalBytesProcessed)}
