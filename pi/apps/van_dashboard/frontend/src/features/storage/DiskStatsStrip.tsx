@@ -62,7 +62,7 @@ export function DiskStatsStrip({ disk, stats }: { disk: ManagedDisk; stats: Disk
           History
         </button>
       </div>
-      {/* Inside the card, the card's `dl > div` layout would squeeze the sheet's stat grid. */}
+      {/* On body, as the upload-speed sheet is, so card rules such as `.storage-disk header` never reach the modal. */}
       {historyOpen &&
         createPortal(
           <DiskStatsSheet label={disk.label} onClose={() => setHistoryOpen(false)} />,

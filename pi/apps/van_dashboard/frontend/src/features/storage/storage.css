@@ -180,19 +180,19 @@
   text-transform: uppercase;
 }
 
-.storage-disk dl {
+.storage-disk > dl {
   display: grid;
   gap: 6px;
   margin: 14px 0 0;
 }
 
-.storage-disk dl > div {
+.storage-disk > dl > div {
   display: grid;
   grid-template-columns: minmax(120px, 0.7fr) minmax(0, 1.3fr);
   gap: 12px;
 }
 
-.storage-disk dd {
+.storage-disk > dl dd {
   overflow-wrap: anywhere;
   text-align: right;
 }
@@ -247,11 +247,17 @@
     align-items: flex-start;
   }
 
-  .storage-disk dl > div {
-    grid-template-columns: 1fr;
+  .storage-disk > dl {
+    gap: 10px;
   }
 
-  .storage-disk dd {
+  /* Stacked, each label sits nearer its own value than the previous one. */
+  .storage-disk > dl > div {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .storage-disk > dl dd {
     text-align: left;
   }
 }
