@@ -18,7 +18,7 @@ import sys
 import time
 import uuid
 
-from btt_common import backup_configuration, connect, current_database, records
+from btt_common import active_triggers, backup_configuration, connect, current_database, records
 from btt_guard.installer_checkpoint import after_install, before_install
 import btt_socket
 import text_editing_conditions as conditions
@@ -164,13 +164,8 @@ def saved_errors(database, plan, enabled):
 def conflicts(database, plan):
     ours = {d['BTTUUID'] for d in plan}
     keys = {(d['BTTShortcutKeyCode'], d['BTTShortcutModifierKeys']) for d in plan if d['BTTTriggerType'] == KEYBOARD}
-    with closing(connect(database)) as connection:
-        rows = connection.execute('''SELECT t.ZUNIQUEIDENTIFIER, t.ZKEYCODE, COALESCE(t.ZMODIFIERKEYS,0) AS mods
-            FROM ZBTTBASEENTITY t JOIN ZBTTBASEENTITY p ON t.ZBELONGSTOPRESET2=p.Z_PK
-            WHERE t.ZGESTURETYPE=0 AND p.ZACTIVATED<>0
-              AND COALESCE(t.ZISENABLED,1)<>0 AND COALESCE(t.ZENABLEDNEW,1)<>0''').fetchall()
-    return sorted(row['ZUNIQUEIDENTIFIER'] for row in rows
-                  if row['ZUNIQUEIDENTIFIER'] not in ours and (row['ZKEYCODE'], row['mods']) in keys)
+    return sorted(row['ZUNIQUEIDENTIFIER'] for row in active_triggers(database, KEYBOARD)
+                  if row['ZUNIQUEIDENTIFIER'] not in ours and (row['ZKEYCODE'], row['ZMODIFIERKEYS'] or 0) in keys)
 
 
 def wait_saved(database, plan, enabled):

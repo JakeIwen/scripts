@@ -61,6 +61,15 @@ def records(path):
         connection.close()
 
 
+def active_triggers(path, gesture_type):
+    """Saved triggers of one type that BTT can fire: enabled, in an activated preset."""
+    with closing(connect(path)) as connection:
+        return [dict(row) for row in connection.execute('''SELECT t.* FROM ZBTTBASEENTITY t
+            JOIN ZBTTBASEENTITY p ON t.ZBELONGSTOPRESET2=p.Z_PK
+            WHERE t.ZGESTURETYPE=? AND p.ZACTIVATED<>0
+              AND COALESCE(t.ZISENABLED,1)<>0 AND COALESCE(t.ZENABLEDNEW,1)<>0''', (gesture_type,))]
+
+
 def check_entity(record, entity, preset):
     node = entity['node']
     if record['parent'] != entity['parent'] or record['ZGESTURETYPE'] != int(node['BTTTriggerType']):

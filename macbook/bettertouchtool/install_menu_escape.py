@@ -11,7 +11,7 @@ import subprocess
 import time
 import uuid
 
-from btt_common import ROOT, MEDIA, connect, current_database, records, backup_configuration
+from btt_common import ROOT, MEDIA, active_triggers, connect, current_database, records, backup_configuration
 
 SHORTCUT = str(uuid.uuid5(uuid.UUID('bd9b2717-342e-482e-b7a4-9abdc4177937'), 'media-dropdown-escape')).upper()
 MENUS = [
@@ -61,14 +61,9 @@ def preflight(database):
         if not row or row['ZGESTURETYPE'] != 767 or row['parent'] is not None or \
                 row['ZBELONGSTOPRESET2'] != preset or row['config'].get('BTTMenuElementIdentifier') != name:
             raise RuntimeError('Expected Media dropdown changed: '+name+'; no Escape changes made.')
-    with closing(connect(database)) as connection:
-        conflicts = list(connection.execute('''SELECT t.ZUNIQUEIDENTIFIER FROM ZBTTBASEENTITY t
-            JOIN ZBTTBASEENTITY p ON t.ZBELONGSTOPRESET2=p.Z_PK
-            WHERE t.ZGESTURETYPE=0 AND t.ZKEYCODE=53 AND COALESCE(t.ZMODIFIERKEYS,0)=0
-              AND t.ZUNIQUEIDENTIFIER<>? AND p.ZACTIVATED<>0
-              AND COALESCE(t.ZISENABLED,1)<>0 AND COALESCE(t.ZENABLEDNEW,1)<>0''', (SHORTCUT,)))
-        if conflicts:
-            raise RuntimeError('An existing plain-Escape shortcut needs review; no Escape changes made.')
+    if any(row['ZKEYCODE'] == 53 and not row['ZMODIFIERKEYS'] and row['ZUNIQUEIDENTIFIER'] != SHORTCUT
+           for row in active_triggers(database, 0)):
+        raise RuntimeError('An existing plain-Escape shortcut needs review; no Escape changes made.')
     existing = saved.get(SHORTCUT)
     order = existing['ZORDER'] if existing else max(
         [r['ZORDER'] or 0 for r in saved.values() if r['ZBELONGSTOPRESET2'] == preset and r['ZGESTURETYPE'] == 0]+[-1])+1

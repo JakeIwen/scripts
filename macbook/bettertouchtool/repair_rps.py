@@ -12,7 +12,7 @@ import subprocess
 import sys
 import time
 
-from btt_common import ROOT, MEDIA, connect, current_database, records, check_entity, backup_configuration
+from btt_common import ROOT, MEDIA, active_triggers, connect, current_database, records, check_entity, backup_configuration
 from btt_guard.installer_checkpoint import before_install, after_install
 
 BUTTON = '103D7824-47C1-4B1B-9106-71E4997BCB58'
@@ -37,13 +37,10 @@ def preflight(database):
     if not sync or sync['ZBELONGSTOPRESET2'] != preset or sync['ZGESTURETYPE'] != 643 or \
             sync['ZACTION'] != 206 or sync['ZLAUNCHPATH'] != COMMAND:
         raise RuntimeError('Current sync trigger no longer points to the expected script; no changes made.')
+    named = [row['ZUNIQUEIDENTIFIER'] for row in active_triggers(database, 643) if row['ZGESTURECONFIG'] == NAME]
+    if named != [SYNC]:
+        raise RuntimeError('Sync named-trigger resolution is disabled or ambiguous; no changes made.')
     with closing(connect(database)) as connection:
-        eligible = list(connection.execute('''SELECT t.ZUNIQUEIDENTIFIER
-            FROM ZBTTBASEENTITY t JOIN ZBTTBASEENTITY p ON t.ZBELONGSTOPRESET2=p.Z_PK
-            WHERE t.ZGESTURETYPE=643 AND t.ZGESTURECONFIG=? AND p.ZACTIVATED<>0
-              AND COALESCE(t.ZISENABLED,1)<>0 AND COALESCE(t.ZENABLEDNEW,1)<>0''', (NAME,)))
-        if [r[0] for r in eligible] != [SYNC]:
-            raise RuntimeError('Sync named-trigger resolution is disabled or ambiguous; no changes made.')
         disabled = connection.execute('''SELECT count(*) FROM ZBTTBASEENTITY
             WHERE ZUNIQUEIDENTIFIER IN (?,?) AND (ZISENABLED=0 OR ZENABLEDNEW=0)''',
             (MEDIA, BUTTON)).fetchone()[0]
