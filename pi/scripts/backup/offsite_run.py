@@ -126,7 +126,7 @@ class Backup:
             lines.append(self.state['cause'])
         try:
             self.commands.run('notify', 'vanpi offsite ' + self.state['result'], '\n'.join(lines),
-                              'min' if self.state['result'] == Result.OK else 'high', cleanup=True)
+                              'default' if self.state['result'] == Result.OK else 'high', cleanup=True)
         except (OSError, RuntimeError) as exc:
             self.state['notification_error'] = str(exc)
             print('Notification failed: ' + str(exc), flush=True)
