@@ -227,11 +227,14 @@ def tree_fingerprint(selection=()):
         # These change resolution or opt-in behavior without changing source files.
         for item in (sys.version, sys.executable, sys.platform, sys.prefix,
                      *(os.environ.get(key, '') for key in
-                       ('BTT_LIVE_TESTS', 'PATH', 'PYTHONPATH'))):
+                       ('BTT_LIVE_TESTS', 'PATH', 'PYTHONPATH',
+                        'OFFSITE_RESTIC', 'OFFSITE_REST_SERVER'))):
             hash_value(digest, item)
         if sys.prefix != sys.base_prefix and Path(sys.prefix) != ROOT / '.local/test-venv':
             hash_path(digest, Path(sys.prefix))
-        for executable in (sys.executable, 'node', 'claude', 'bash', 'zsh'):
+        for executable in (sys.executable, 'node', 'claude', 'bash', 'zsh',
+                           *(os.environ[key] for key in ('OFFSITE_RESTIC', 'OFFSITE_REST_SERVER')
+                             if os.environ.get(key))):
             resolved = shutil.which(executable)
             hash_value(digest, (executable, resolved))
             if resolved:
