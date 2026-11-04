@@ -42,12 +42,11 @@ BACKUP_CONF = Path('/home/pi/scripts/backup/backup_conf.sh')
 OLD_DB = Path('/var/lib/vanpi-network/events.sqlite3')
 OLD_LOGS = Path('/var/log/openwrt')
 RUN_ROOT = Path('/run')
-SERVICES = ('network-flight-recorder', 'rsyslog', 'van-dashboard')
+SERVICES = ('network-flight-recorder', 'rsyslog')
 TARGETS = {
     'pi/scripts/network_flight_recorder.py':'/home/pi/scripts/network_flight_recorder.py',
     'pi/services/network-flight-recorder.service':'/etc/systemd/system/network-flight-recorder.service',
     'pi/services/rsyslog-vanpi-network.conf':'/etc/systemd/system/rsyslog.service.d/vanpi-network.conf',
-    'pi/services/van-dashboard-network-storage.conf':'/etc/systemd/system/van-dashboard.service.d/network-storage.conf',
     'pi/tmpfiles.d/vanpi-network.conf':'/etc/tmpfiles.d/vanpi-network.conf',
     'pi/services/network-flight-recorder-storage.json':str(CONFIG),
     'pi/scripts/openwrt-logging/30-openwrt-dendelion.conf':'/etc/rsyslog.d/30-openwrt-dendelion.conf',
@@ -270,30 +269,26 @@ def validate_plan(plan, *, historical=False):
         raise ValueError('invalid storage deployment manifest')
     if not isinstance(plan.get('recorder_only', False), bool):
         raise ValueError('invalid recorder-only mode')
-    # Backend ownership moved to deploy_python.py. Reject historical manifests
-    # intact, even before activation: silently dropping a row would turn an exact
-    # rollback into a partial one and could misalign numbered before-* snapshots.
-    for row in plan['files']:
-        destination = Path(row['destination'])
-        if (destination.is_relative_to('/home/pi/scripts/python-automation')
-                or destination == Path('/etc/systemd/system/van-dashboard.service')):
-            raise ValueError('storage manifest includes retired dashboard backend targets; '
-                             'refusing check/apply/rollback; use a fresh storage plan and '
-                             'deploy_python.py for the dashboard')
+    # The van-dashboard repo deploys the dashboard: its backend, unit, storage
+    # drop-in and React releases. Reject historical manifests carrying any of
+    # them intact, even before activation: silently dropping a row would turn an
+    # exact rollback into a partial one and could misalign numbered before-* snapshots.
+    retired = any(
+        Path(row['destination']).is_relative_to('/home/pi/scripts/python-automation')
+        or Path(row['destination']) in (
+            Path('/etc/systemd/system/van-dashboard.service'),
+            Path('/etc/systemd/system/van-dashboard.service.d/network-storage.conf'))
+        for row in plan['files'])
+    if retired or plan.get('frontend_files', []) != []:
+        raise ValueError('storage manifest includes retired dashboard targets; refusing '
+                         'check/apply/rollback; use a fresh storage plan (the van-dashboard '
+                         'repo, ~/dev/van-dashboard, deploys the dashboard)')
     dependencies.validate_pins(plan, historical=historical)
     targets = RECORDER_TARGETS if plan.get('recorder_only') else TARGETS
     if {(r['source'],r['destination']) for r in plan['files']} != set(targets.items()) or len(plan['files']) != len(targets):
         raise ValueError('unexpected managed storage targets')
-    if plan.get('recorder_only'):
-        if plan.get('frontend_files') != [] or plan.get('migration') not in (None, False):
-            raise ValueError('recorder-only plans cannot deploy frontend or migrate storage')
-        return
-    for row in plan['frontend_files']:
-        path=Path(row['relative'])
-        if path.is_absolute() or '..' in path.parts or str(path)=='BUILD_ID':
-            raise ValueError('unsafe frontend artifact')
-    if not any(row['relative']=='index.html' for row in plan['frontend_files']):
-        raise ValueError('frontend build missing index')
+    if plan.get('recorder_only') and plan.get('migration') not in (None, False):
+        raise ValueError('recorder-only plans cannot migrate storage')
 
 
 def known_hashes():
@@ -329,10 +324,6 @@ def inspect(plan):
     # A missing config after a successful migration is a repair/update, never
     # permission to replace the flash database with the frozen SD copy.
     plan['migration'] = not CONFIG.exists() and not old
-    plan['frontend_before']={name:base.link_info(base.FRONTEND/name) for name in ('current','previous')}
-    if plan['frontend_before']['current'] is None:
-        raise ValueError('existing frontend release required')
-    plan['frontend_before']['tree_sha256']=base.tree_digest(base.FRONTEND/plan['frontend_before']['current'])
     plan['services_before'] = {name:base.service_state(name) for name in SERVICES}
     plan['backup_conf_before'] = base.regular_info(BACKUP_CONF)
     if plan['backup_conf_before'] is None:
@@ -361,12 +352,6 @@ def verify(plan):
         raise ValueError('backup configuration changed after check')
     if {name:base.service_state(name) for name in SERVICES} != plan['services_before']:
         raise ValueError('service state changed after check')
-    before=plan['frontend_before']
-    for name in ('current','previous'):
-        if base.link_info(base.FRONTEND/name)!=before[name]:
-            raise ValueError('frontend changed after check')
-    if base.tree_digest(base.FRONTEND/before['current'])!=before['tree_sha256']:
-        raise ValueError('frontend contents changed after check')
 
 
 def inspect_recorder(plan):
@@ -543,14 +528,8 @@ def restore_code(plan, root):
         else:
             base.atomic_file(root/f'before-{index}',target,row['before'])
     base.atomic_file(root/'backup-conf-before',BACKUP_CONF,plan['backup_conf_before'])
-    for name in ('current','previous'):
-        value=plan['frontend_before'][name]
-        if value is None:
-            if (base.FRONTEND/name).is_symlink():(base.FRONTEND/name).unlink()
-        else:
-            base.atomic_link(value,base.FRONTEND/name)
     base.systemctl('daemon-reload')
-    for name in ('rsyslog','network-flight-recorder','van-dashboard'):
+    for name in ('rsyslog','network-flight-recorder'):
         base.systemctl('restart' if plan['services_before'][name]['active'] else 'stop',name)
 
 
@@ -596,9 +575,6 @@ def apply(plan, stage):
             raise ValueError('staged checksum mismatch')
         if row['source'].endswith('.py'):
             compile(source.read_text(),row['source'],'exec')
-    for index,row in enumerate(plan['frontend_files']):
-        if base.digest(stage/f'frontend-{index}')!=row['sha256']:
-            raise ValueError('frontend staged checksum mismatch')
     if plan.get('recorder_only'):
         return apply_recorder(plan, stage)
     receiver = next(i for i,r in enumerate(plan['files']) if r['destination'].endswith('30-openwrt-dendelion.conf'))
@@ -640,34 +616,22 @@ def apply(plan, stage):
         repair_spool_permissions(plan['config'])
         base.command(['/usr/sbin/rsyslogd','-N1'])
         base.command(['/usr/sbin/logrotate','--debug','/etc/logrotate.d/openwrt-dendelion'])
-        frontend=base.FRONTEND/'releases'/plan['release']
-        frontend.mkdir(mode=0o755)
-        for index,row in enumerate(plan['frontend_files']):
-            target=frontend/row['relative'];target.parent.mkdir(parents=True,exist_ok=True)
-            shutil.copyfile(stage/f'frontend-{index}',target)
-        (frontend/'BUILD_ID').write_text(plan['release']+'\n')
-        for path in [frontend,*frontend.rglob('*')]:
-            path.chmod(0o755 if path.is_dir() else 0o644)
-            # The frontend deployer runs as pi and deletes old releases.
-            os.chown(path,pi.pw_uid,pi.pw_gid,follow_symlinks=False)
-        plan['installed_tree_sha256']=base.tree_digest(frontend)
-        (root/'manifest.json').write_text(json.dumps(plan,indent=2)+'\n')
-        base.atomic_link(plan['frontend_before']['current'],base.FRONTEND/'previous')
-        base.atomic_link('releases/'+plan['release'],base.FRONTEND/'current')
         base.systemctl('daemon-reload')
         base.systemctl('restart','rsyslog')
         base.systemctl('restart','network-flight-recorder')
-        if plan['services_before']['van-dashboard']['active']:
-            base.systemctl('restart','van-dashboard')
         readiness_started = time.time()
         for _ in range(45):
             if all(base.service_state(name)['active'] for name in ('rsyslog','network-flight-recorder')):
+                # The dashboard's history endpoint is the cross-repo consumer
+                # contract. It runs the recorder CLI per request, so it needs no
+                # restart, but it caches a success for 10 s; the direct CLI
+                # report proves the new code reads the new storage.
                 result = base.command(['/usr/bin/curl','-fsS','--max-time','4','http://127.0.0.1:8788/api/network-history?hours=1'],False)
                 status_path=Path(plan['config']['runtime_root'])/'storage-status.json'
                 if result.returncode==0 and json.loads(result.stdout).get('ok') is True and status_path.is_file():
                     status=json.loads(status_path.read_text())
                     if (status.get('mode')=='flash' and status.get('active_database')==str(Path(plan['config']['flash_root'])/'events.sqlite3')
-                            and status.get('checked_at',0)>=readiness_started):
+                            and status.get('checked_at',0)>=readiness_started and recorder_report_ready(10)):
                         flash.guard()
                         break
             time.sleep(1)
@@ -707,8 +671,6 @@ def rollback(release):
                     evidence='preserved in place', live_spool_permissions='preserved')
     if base.regular_info(BACKUP_CONF)['sha256']!=plan['backup_conf_sha256']:
         raise ValueError('backup configuration changed since deployment; refusing rollback')
-    if base.link_info(base.FRONTEND/'current')!='releases/'+release or base.tree_digest(base.FRONTEND/'releases'/release)!=plan['installed_tree_sha256']:
-        raise ValueError('frontend changed since deployment; refusing rollback')
     flash = FlashRoot(plan['config'])
     try:
         base.systemctl('stop','network-flight-recorder')
@@ -772,14 +734,8 @@ def make_plan(target, recorder_only=False):
             raise ValueError('missing regular deployment source: '+source)
         head=subprocess.run(['git','-C',str(REPO),'show','HEAD:'+source],capture_output=True)
         rows.append(dict(source=source,destination=destination,sha256=base.digest(path),head_sha256=base.sha(head.stdout) if head.returncode==0 else None))
-    frontend=[]
-    if not recorder_only:
-        dist=REPO/'pi/apps/van_dashboard/frontend/dist'
-        for path in sorted(dist.rglob('*')):
-            if path.is_symlink():raise ValueError('symlinked frontend artifact')
-            if path.is_file():frontend.append(dict(relative=str(path.relative_to(dist)),sha256=base.digest(path)))
     return dict(schema_version=1,target=target,release='network-storage-'+time.strftime('%Y%m%dT%H%M%SZ',time.gmtime())+'-'+uuid.uuid4().hex[:8],
-                files=rows, frontend_files=frontend, recorder_only=recorder_only,
+                files=rows, recorder_only=recorder_only,
                 monitor_dependencies=dependencies.make_pins(REPO),
                 config=None if recorder_only else json.loads((REPO/'pi/services/network-flight-recorder-storage.json').read_text()))
 
@@ -813,7 +769,7 @@ def main():
             raise ValueError('plan mode mismatch; use --recorder-only for a recorder-only plan')
         current=make_plan(args.target,args.recorder_only)
         dependencies.verify_local_pins(plan, current)
-        if (plan['target']!=args.target or (not args.recorder_only and plan['config']!=current['config']) or plan['frontend_files']!=current['frontend_files'] or
+        if (plan['target']!=args.target or (not args.recorder_only and plan['config']!=current['config']) or
                 [{k:v for k,v in r.items() if k!='before'} for r in plan['files']]!=current['files']):
             raise ValueError('local sources or target changed; create a fresh checked plan')
         stage=base.command(['ssh','-o','BatchMode=yes',args.target,'mktemp -d /tmp/network-storage-stage.XXXXXXXX']).stdout.strip()
@@ -822,8 +778,6 @@ def main():
         with tempfile.TemporaryDirectory(prefix='network-storage-payload-') as temporary:
             for index,row in enumerate(plan['files']):
                 shutil.copyfile(REPO/row['source'],Path(temporary)/str(index))
-            for index,row in enumerate(plan['frontend_files']):
-                shutil.copyfile(REPO/'pi/apps/van_dashboard/frontend/dist'/row['relative'],Path(temporary)/f'frontend-{index}')
             subprocess.run(['scp','-q',*[str(path) for path in sorted(Path(temporary).iterdir())],args.target+':'+stage+'/'],check=True)
         print(json.dumps(remote(args.target,'apply',dict(plan=plan,stage=stage)),indent=2))
     else:
