@@ -5,14 +5,10 @@ The browser apps below share the service and deployment tooling in this reposito
 
 ## Van Dashboard
 
-Vehicle and dashcam controls, Sonos, lighting, backup health, USB devices, compute
-jobs, deal tracking and network history in one dashboard. Network and media labels
-in this capture are anonymized; controls were not operated for the screenshot.
-
-![Van Dashboard overview with vehicle, media, storage, compute and network tiles](docs/screenshots/van-dashboard.png)
-
-[Dashboard documentation](pi/docs/dashboard/VAN_DASHBOARD.md) ·
-[React frontend](pi/docs/dashboard/REACT_DASHBOARD.md)
+The van's dashboard (vehicle, Sonos, lighting, backups, USB, compute, deals and
+network history on port 8788) lives in its own repository:
+[van-dashboard](https://github.com/JakeIwen/van-dashboard) (not yet published).
+It runs on the Pi package release and helper scripts this repository deploys.
 
 ## Movies & TV
 

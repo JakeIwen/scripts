@@ -32,7 +32,7 @@ compare it with this checkout. Deployed files may differ from the repository.
 | `macbook/scripts/van_lighting.py` | BTT Media > Lighting: Solder SW (`toggle switch.solder_flood`) and the Lighting Colour web view (`lights`, `set`, JSON) | the script; `macbook/bettertouchtool/install_lighting_menu.py` installs both callers |
 | `macbook/scripts/llm_photo_inbox.py` | iPhone Shortcuts Run Script over SSH (raw photo on stdin) | standalone stdlib Python 3.9+; macOS `sips`, `ps`, `pgrep`, `osascript` and running iTerm2 |
 | `pi/configs/labwc/` | labwc/swayidle at `/home/pi/.config/labwc/`; castit's mpv lifetime contract | copied by `pi/sync_scripts.sh` |
-| `pi.apps.van_dashboard` | `van-dashboard.service` and `pi/deploy_python.py` | `pi/apps/van_dashboard/` |
+| `pi.apps.metered`, `shared.metered`, `pi.package_runtime`, `pi.apps.media_organizer.{config,records}` in the package release, and the `-m pi.apps.media_organizer` / `-m pi.apps.iptorrents_watch` CLIs | `van-dashboard.service`, deployed from `~/dev/van-dashboard` | `pi/deploy_python.py` `MODULE_DIRS`; `pi/tests/test_python_deployment_consumers.py` pins them (see [Van dashboard](#van-dashboard-separate-repo)) |
 | `pi.apps.video_library` | `video-library.service` and `pi/deploy_python.py` | `pi/apps/video_library/` |
 | `pi.apps.audiobooks` | `audiobooks.service` and `pi/deploy_python.py` | `pi/apps/audiobooks/` |
 | `pi.apps.bme280` | `bme280-mqtt.service` and `pi/deploy_python.py` | `pi/apps/bme280/` |
@@ -76,8 +76,8 @@ compare it with this checkout. Deployed files may differ from the repository.
   probes; verified identity requires driver/target agreement and association.
   Cloud workers call the short-lived `admit` CLI so their long runs do not pin
   package releases. Pi approvals are host-local; the dashboard only displays
-  reported Mac state. `routes/metered.py` owns the JSON endpoints and retains
-  existing dashboard origin/header checks. Deployment and wire contract:
+  reported Mac state; its `routes/metered.py` (van-dashboard repo) owns the JSON
+  endpoints behind the dashboard's origin/header checks. Deployment and wire contract:
   `pi/docs/networking/METERED_CONNECTIONS.md`.
 - `pi/scripts/rball.sh`: `s rball` reboots antenna, router, then the Pi through `safe_reboot.sh`; `--dry-run` checks uptime without rebooting.
 - `pi/apps/audiobooks/catalog.py` owns audiobook records, filesystem discovery
@@ -109,8 +109,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   on while VLC or mpv exists; castit's receiver relies on the `pgrep -x mpv`
   check. See `pi/docs/deployment.md#labwc-idle-blanking`.
 - `pi/apps/media_organizer/`: the Movies & TV organizer (package release, Python
-  3.11, stdlib). `records.py` is the wire contract (the dashboard's
-  `features/mediaOrganizer/schema.ts` mirrors it), `config.py` the paths.
+  3.11, stdlib). `records.py` is the wire contract (the van-dashboard repo's
+  `features/mediaOrganizer/schema.ts` mirrors it and its backend imports
+  `records`/`config`), `config.py` the paths.
   `scan.py` joins `torrent/New` to qBittorrent torrents; `classify.py` asks
   Codex on the Pi (`codex exec` with an output schema, one batch call) with an
   offline SxxEyy fallback; `plans.py` stores proposals and reviewer decisions
@@ -135,10 +136,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   old `alias_media.sh` link builder (byte-identical cleaned names; the fixture
   `pi/tests/media/alias_names_fixture.json` holds 222 real names);
   `VAN_ALIAS_OUTPUT_ROOT` builds into a scratch root for comparisons.
-  Dashboard: `van_dashboard_media_organizer.py` runs the CLI (slow commands in
-  one background job), `routes/media_organizer.py` serves
-  `/api/media-organizer/*`, and `features/mediaOrganizer/` is the panel under
-  the Movies & TV tile.
+  The dashboard's Movies & TV panel runs this CLI (van-dashboard repo).
 - `pi/apps/iptorrents_watch/`: the IPTorrents watcher (package release, stdlib).
   `records.py` is the wire contract (mirrored by `features/iptWatch/schema.ts`),
   `config.py` the paths. Login is the `uid`/`pass` cookies in
@@ -153,12 +151,8 @@ compare it with this checkout. Deployed files may differ from the repository.
   `download.py` writes a validated `.torrent` to `/home/pi/tfiles` only on an
   explicit `download <id>` (qBittorrent's watch folder takes it from there, and
   the media organizer files it when it finishes). State in
-  `~/.local/share/iptorrents-watch/`. Dashboard: `van_dashboard_ipt_watch.py`,
-  `routes/ipt_watch.py` (`/api/ipt-watch/*`) and `features/iptWatch/`, the
-  "Watchlist" sheet beside the organizer under the Movies & TV tile.
-  `cli_jobs.py` (JSON CLI runner + one background job) and
-  `routes/cli_boundary.py` (bounded JSON input, CLI error mapping) are shared
-  by both controllers.
+  `~/.local/share/iptorrents-watch/`. The dashboard's "Watchlist" sheet under
+  the Movies & TV tile runs this CLI (van-dashboard repo).
 - `vanrouter/`: reviewed OpenWrt persistence and backup-export artifacts.
 - `ubnt/`: directional wireless-device profiles and uplink scripts.
   `ubnt/persistent/scripts/wifi_manager.sh` owns initialization and command
@@ -351,10 +345,6 @@ compare it with this checkout. Deployed files may differ from the repository.
   `macbook/scripts/firefox_quiet_prefs.py` owns the managed block of ad,
   recommendation, study and telemetry prefs in every active Firefox profile's
   `user.js` (release and Developer Edition); change prefs in its `PREFS` table.
-- Dashboard pane URLs use public pane ids as fragments (for example
-  `/#backups`, `/#sonos`, `/#usb-devices`). Frontend
-  `dashboard/paneLinks.ts` owns public pane ids and URL/history state;
-  feature owners use `usePaneLink`. Network History retains its fragment query filters.
 - `shared/`: code imported or deployed on more than one host.
 - `shared/codex_autocontinue/`: stdlib Python 3.9+ transparent PTY wrapper that
   types `continue` (with backoff) after an interactive Codex turn fails with
@@ -656,29 +646,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   rear volume); `pi/apps/video_library/players/sonos_check.py` owns the delayed,
   bounded, coalesced check after VLC starts/resumes. `pi/scripts/rear_movie_check.sh`
   serves direct `.bashrc` VLC starts; `vlcmd`/`pp` use the manager's API instead.
-- Dashboard Sonos alarms live in `pi/apps/van_dashboard/sonos_alarms.py`, with
-  HTTP routes in `routes/sonos_alarms.py` and React controls in `features/sonos/`.
-  `SonosAlarm` owns the device record; `alarms.ts` owns the validated UI contract.
-  `sonos_clock.py` labels the speaker's reported clock zone, with UTC-offset fallback
-  for unrecognized rules; never substitute the browser or Pi timezone.
-  `alarmFilters.ts` owns weekday and enabled-state filtering, using the speaker clock for one-time alarms.
-  `alarmControls.ts` is owned by `SonosFeature`, so closing the sheet or collapsing
-  alarms cannot release an in-flight write. Delete and enable are explicit commands.
-  Read fresh device state before mutations, preserve existing music metadata,
-  reject stale revisions, and never automatically retry an uncertain alarm write.
-- Sonos skips, scrubbing and A-B loop: `SonosController.seek` moves the track by whole
-  seconds, by `offset` from a fresh device position or to an absolute `position`
-  (`/api/speakers/seek`). `SonosSeekBar.tsx` is the scrubbable track bar on both the
-  tile and the pane; it seeks once, on release. `sonos_loop.py` runs the loop
-  on the Pi, not the browser, so it survives a locked phone: one worker thread polls
-  the looping speaker (5 Hz near the end) and seeks back, and stops itself on a track
-  change (title/artist/duration; Spotify Connect keeps one URI), a failed seek or
-  repeated read failures. In memory only; `/api/speakers` carries its `loop` record.
-  Frontend: `loop.ts` (draft/validation), `SonosLoopPanel.tsx`, collapsed by default.
-- `pi/apps/van_dashboard/van_dashboard_ubnt_recovery.py` reconciles uncertain
-  Starlink antenna operations against fresh radio state without replaying them.
-  Frontend `features/ubnt/UbntOperationNotice.tsx` distinguishes pending
-  confirmation from an actual failure; the CLI emits `confirmation_pending`.
+- `pi/scripts/ubnt_wifi.py` reports an uncertain Starlink antenna operation as
+  `confirmation_pending` rather than a failure; the dashboard reconciles it
+  against fresh radio state without replaying it.
 - `pi/scripts/system_monitor/coalesce.py` owns schema-v5 event columns, the
   60-second USB/storage journal windows and replay watermarks. Other categories
   remain append-only for the network recorder; preserve its `events_report_idx`.
@@ -689,13 +659,11 @@ compare it with this checkout. Deployed files may differ from the repository.
   expires 30-day snapshots through the collector-owned partial snapshot index
   without deleting noteworthy events. Reports sum
   represented counts through the covering index; aggregate ranges use their
-  first timestamp (minute granularity). The dashboard storage reader resolves
-  snapshot references; read-only event readers detect v4/v5 columns explicitly
+  first timestamp (minute granularity). The dashboard's storage reader (van-dashboard
+  repo) resolves snapshot references; read-only event readers detect v4/v5 columns explicitly
   and never turn lock or I/O errors into unweighted counts.
 - Network storage deployment test filesystem fixtures live in
   `pi/tests/network/_network_storage_support.py`.
-- `pi/tests/dashboard/_disk_manager_support.py` holds the DiskManager fixture (label policy, lsblk
-  tree, boot ids) shared by the disk tests and `test_disk_storage_events.py`.
 - Deferred video checkpoints are indexed once per identity-sync transaction by
   `pi/apps/video_library/deferred_positions.py`; preserve chronological replay,
   exact path matching and removal after successful resolution. Scan/query and
@@ -719,8 +687,7 @@ compare it with this checkout. Deployed files may differ from the repository.
 - Cloud holds: `pi/scripts/backup/cloud_backup_control.py` shares admission and
   durable `pause.json` controls. `icloud_backup_control.py` and
   `time_machine_icloud_control.py` are fixed Pi/Mac entry points; their separate minute resume timers,
-  worker and Mac heartbeat all honor it. Dashboard mutations use
-  `van_dashboard_cloud_controls.py`. Samba mount reconciliation clears only
+  worker and Mac heartbeat all honor it. Samba mount reconciliation clears only
   empty shutdown gates; nonempty capture gates are released by their owner.
   `pi/tmpfiles.d/vanpi-samba-drain.conf` recreates the root-owned capture gate
   directory at boot; the Mac worker also applies it in ExecStartPre. Setup must
@@ -728,25 +695,13 @@ compare it with this checkout. Deployed files may differ from the repository.
   Indefinite holds use `paused_until: "indefinite"`. Switching clouds locks both
   control records, pauses the peer indefinitely, then queues the selected job;
   never delete or force-release the common backup lock or stop local backups.
-  Frontend cloud labels/estimates live in `features/backups/cloudPresentation.ts`;
-  `ICloudPauseSelector.tsx` owns the shared pause split button: the main action
-  pauses indefinitely, while choosing a duration applies a timed pause immediately.
-- Cloud failure popups: `pi/apps/van_dashboard/cloud_backup_details.py` reads
-  bounded journal evidence for a retained Pi/Mac attempt selected by server-owned
-  history. Only recognized worker diagnoses are exposed; raw journal/provider
-  text stays private. `features/backups/ICloudAttemptMessage.tsx` owns the popup,
-  with its response contract in `attemptDetails.ts`. Neither endpoint nor popup
-  changes worker state, and nested dialogs close independently.
 - Cloud upload speeds: `pi/scripts/backup/upload_speed_log.py` owns each job's
   `upload-speed.bin` in its state directory (one `<II` epoch/bytes-per-second
   sample per uploading minute, from rclone byte deltas; 30-day retention, pruned
   on every `--run` and hourly while appending). `icloud_backup.record_progress`
   feeds it for both jobs; a failed write never stops an upload. The status
-  helpers' fixed `--upload-speeds` flag exports it, `cloud_upload_speeds.py`
-  serves `/api/backups/cloud/<kind>/upload-speeds`, and
-  `features/backups/UploadSpeedSheet.tsx` (charts in `UploadSpeedCharts.tsx`,
-  run/stat/trend math in `uploadSpeeds.ts`) is the graph sheet behind each iCloud
-  card's graph icon. Both cloud installers ship the module.
+  helpers' fixed `--upload-speeds` flag exports it for the dashboard's
+  `/api/backups/cloud/<kind>/upload-speeds` graphs. Both cloud installers ship the module.
 - Disk stats: the system monitor's `disk_history.py` keeps each disk label's
   per-minute read/write/busy record for 30 days beside its database (read with
   `system_event_monitor.py disk-io --latest` or `--label`), and `smart_watch.sh`
@@ -754,33 +709,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   `disk_history.py` deliberately repeats `upload_speed_log.py`'s append, torn-tail
   and hourly-trim code: the flat backup workers and the `system_monitor` package
   share no import root on the Pi, so one module would need a `sys.path` edit.
-  `van_dashboard_disk_stats.py` joins both for `/api/disks/stats` and
-  `/api/disks/history` (mounted free space rides `/api/disks`);
-  `features/storage/DiskStatsStrip.tsx` and `DiskStatsSheet.tsx` show them on
-  each Disks & Torrents card. `frontend/src/components/charts/` holds the shared
-  chart pieces: `TimeSeriesChart` (lines with a hover readout, plus unbroken,
-  unread `guides` such as a fitted trend) composes `chartFrame.ts` (scales),
-  `ChartAxes` and `SeriesMarks` (series drawn plain, `faint` or `dashed`), which
-  other charts such as the upload-speed run bars build on directly; plus
-  `useElementWidth` and `axisLabels` (`niceMax` adds the axis headroom).
-- Offsite NAS panel: `pi/apps/van_dashboard/van_dashboard_offsite.py` reads
-  `offsite_backup.sh dashboard` and `rates <source>` through `sudo -n` (state is
-  root-private), validates every field at that boundary and passes through only
-  contract fields. A script without `dashboard` (v1: only `status`, argparse exit 2)
-  falls back to `status` with `supported: {history: false}`; `rates` then answers
-  `supported: false` with no samples. `target_drive` adds usage only for a local
-  target whose label `DiskManager.labels()` knows and that is already mounted at
-  `/mnt/<label>` (never mounts). Routes `/api/backups/offsite` and
-  `/api/backups/offsite/<source>/rates` live in `routes/backups.py`. Frontend:
-  `features/backups/offsite.ts` (types mirroring the wire result vocabulary,
-  decoder, fetchers), `offsiteContent.ts` (display copy; source names and run
-  order), `offsitePresentation.ts` (chip and per-source view model, preferring
-  history over the current run's `sources`), `OffsiteSection.tsx` (collapsed
-  section, polls via `useOffsiteStatus` only while the sheet is open),
-  `OffsiteStatusCard.tsx`, `OffsiteSourceCard.tsx`, `OffsiteRow.tsx`. Rate graphs
-  reuse `UploadSpeedSheet`'s `RateHistoryButton`; the drive I/O button reuses
-  storage's `DiskStatsSheet`. Nothing keys off a drive label: label and
-  `target_kind` come from the status record.
+  The dashboard joins both for its `/api/disks/stats` and `/api/disks/history` graphs.
 - Backup priority: `pi/scripts/backup/backup_priority.py` owns the cloud job
   registry and the protected until-verified override; `backup_priority_control.py`
   is the fixed CLI. Priority only decides which cloud job may take the single
@@ -790,9 +719,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   `mac_capture_control.py` issues expiring, one-use stop permission bound to a live
   capture nonce. The root Mac coordinator verifies the active destination before
   `tmutil stopbackup`, then a later poll must prove idle and non-force detach.
-  Dashboard `van_dashboard_backup_priority.py` and `routes/backup_priority.py`
-  serve controls in `features/backups/BackupPriorityControls.tsx`; `priority.ts`
-  owns its response contract. Both targeted cloud installers ship these modules
+  Both targeted cloud installers ship these modules
   and verify the shared backup configuration before updating it.
 - `pi/scripts/backup/protected_json.py` owns private control-record metadata
   checks and bounded, no-follow descriptor reads for priority state; each caller
@@ -889,10 +816,6 @@ compare it with this checkout. Deployed files may differ from the repository.
   plan to the dashboard; per-card freshness uses twice the rotation interval.
   `clone_to_sd.sh` marks incomplete before writes and clears it only after a
   verified, flushed success stamp. Both cloud installers ship this whole cohort.
-- Bootable clone evidence is built in `van_dashboard_hotspares.py`, using the
-  existing normalized device-tree helpers in `van_dashboard_block_devices.py`.
-  Root usage comes from mounted `lsblk` counters or a read-only, label-verified
-  ext4 superblock probe. Never mount a spare merely to render its usage.
 - Deal Watch recovery: `pi/scripts/price_check/search_watch/browser_refresh.py`
   owns the durable request queue and request contract. `browser_results.py` owns
   the bounded HTML submission/receipt contract; `browser_capture_limits.json`
@@ -910,6 +833,10 @@ compare it with this checkout. Deployed files may differ from the repository.
   Recovery retries silently at six-minute intervals, stops after 50 consecutive
   failed attempts and sends one ntfy alert. A successful search resets the
   durable count; preserve claim fencing and idempotent failure acknowledgements.
+  `search_watch/store.py`'s `SearchStore.update_watch` preserves history and
+  dismissals while clearing old-query current matches; `expected_url` guards
+  in-flight check writes. Ship the flat price-check CLI/store/service cohort
+  before a dashboard release that calls it.
 - Deal Watch Haveno XMR offers: `pi/scripts/price_check/haveno_watch/` (`source.py`
   order book + reference price, `store.py` tables in the shared price-check DB,
   `service.py` matching/ntfy, `cli.py` `haveno-*` subcommands and `.haveno.lock`).
@@ -918,8 +845,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   Order book is haveno.markets level-2 `asks` (RetoSwap only); reference is the Haveno
   pricenode with Kraken fallback, never the haveno.markets ticker. Each offer ID
   notifies once per watch. Its own 10-minute `haveno-check` cron line sits beside the
-  price-check line. React: `DealWatchHavenoSection.tsx`, `havenoDecoders.ts`;
-  activity subsection `DealWatchHavenoActivity.tsx`, `havenoActivityDecoders.ts`.
+  price-check line.
 
 Some ignored secret directories, wireless profiles, and device configurations
 may contain credentials or private network data. Never print or commit secrets,
@@ -933,19 +859,12 @@ and preserve unrelated local or deployed changes.
   emits only fixed numeric setting names, never shell code. `backup_schedule.py`
   migrates only the two owned cron entries to hourly `--scheduled` checks, retaining
   the prior root crontab; the configured Pi-time window gates new starts only.
-  Dashboard `backup_settings_control.py` / `routes/backup_settings.py` and
-  `features/backups/BackupSettingsPanel.tsx` own the settings subpanel;
-  `useBackupPreferences.ts` owns per-setting autosave above the dialog lifecycle:
-  switches/selectors save on selection, numbers on blur/Enter, with confirmed toasts.
-  `settingsDraft.ts` validates input before revision-checked writes. Settings
-  conflicts cross the privileged CLI as `EX_TEMPFAIL` and map to HTTP 409;
-  human error wording is never used to select the response status.
+  Settings conflicts cross the privileged CLI as `EX_TEMPFAIL` (the dashboard
+  maps them to HTTP 409); never select a status from human error wording.
 - `pi/scripts/backup/cloud_backup_requests.py` owns durable `backup-now.json`
   requests. Back up now bypasses only the weekly cadence, coalesces repeated clicks,
   resumes an unfinished generation and is satisfied by one new verified generation.
   It never rewrites success history, relaxes admission or discards checkpoints.
-- Dashboard backup configuration parsing lives in `pi/apps/van_dashboard/backup_configuration.py`;
-  `features/backups/CloneCardCapacity.tsx` owns the reusable card-capacity control.
 
 ## Vanpi connections
 
@@ -1045,33 +964,39 @@ the interface, and retain the CAN-transmission safeguards below.
 
 ## Pi Python package deployment
 
-Dashboard, video-library, audiobooks and BME280 use allowlisted immutable
-package releases owned by `pi/deploy_python.py`. First cutover of each service
-requires `--activate --service <unit>`; routine `--update` refuses unactivated or
-flat-restored services. Backups under `pre-package-units/<unit>.backup/` are
-write-once; preserve the earlier dashboard backup too. Per-service state and
-pending restart intent survive partial installs and failed reloads/restarts.
-See `pi/docs/deployment.md` for exact supervised cutover and saved-unit rollback.
+Video-library, audiobooks, BME280 and the metered controller use allowlisted
+immutable package releases owned by `pi/deploy_python.py`; the van dashboard
+imports from them too (see [Van dashboard](#van-dashboard-separate-repo)).
+First cutover of each service requires `--activate --service <unit>`; routine
+`--update` refuses unactivated or flat-restored services. Backups under
+`pre-package-units/<unit>.backup/` are write-once. Per-service state and pending
+restart intent survive partial installs and failed reloads/restarts; every
+completed unit also rewrites `activated.json`, broad sync's host gate. The
+dashboard's scripts-era `pre-package-units/van-dashboard.service*` backups and
+`service-state/van-dashboard.service.json` stay on the Pi as evidence; nothing
+here reads them. See `pi/docs/deployment.md` for exact supervised cutover and saved-unit rollback.
 The entire `/home/pi/scripts/python-automation/` directory is frozen: never write
 or delete it. `--legacy-flatten` and the old video deployer (including v1 rollback)
 now refuse; do not bypass them with an older deployer.
 
 Routine `pi/sync_scripts.sh` stays pinned to `/Users/jacobr/dev/scripts` because
 it publishes ignored private inputs. Its preflight requires host activation and
-all four service-state markers. It installs non-Python dependencies first,
+every package unit's service-state marker. It installs non-Python dependencies first,
 package updates next, compute last. Generic unit staging excludes all package
 units using the installer's `SERVICES` table via local `--list-units`. Use a
 chosen clone's checkout-relative package installer for scoped updates without
 private inputs; provenance records that clone. `--service` selects unit actions,
 not release contents: the shared current link and utility code still advance.
 
-`deploy_python.py` and `deploy_van_dashboard_frontend.sh` package their own
-checkout's working tree (release provenance records `dirty`). When another
-session has uncommitted changes here, deploy from a clean `git worktree add
---detach <dir> <commit>` and run that copy's deployers, or its half-done work ships.
+`deploy_python.py` packages its own checkout's working tree (release
+provenance records `dirty`). When another session has uncommitted changes here,
+deploy from a clean `git worktree add --detach <dir> <commit>` and run that
+copy's deployers, or its half-done work ships.
 
 GC under `.install.lock` protects current, previous, just-installed, newest three,
-and all four verified running releases. Each entrypoint records pinned
+and the verified running release of every package unit and of each
+`EXTERNAL_CONSUMERS` unit (another repo's service that imports this release:
+`van-dashboard.service`). Each entrypoint records pinned
 `pi.__path__`, PID and INVOCATION_ID in `/run/<service-name>/package-release`.
 Missing/stale active records or ambiguous service state retain everything,
 including during partial flat cutover/rollback. Record-write failure only warns.
@@ -1082,16 +1007,15 @@ import a release (PYTHONPATH into `releases/` or `current`) must set
 `PYTHONDONTWRITEBYTECODE=1`: GC skips everything when any release tree differs
 from its manifest, so one stray `__pycache__` stops all pruning.
 
-Never bundle `van_compute` (now a separate repository): its coupled installer
-owns the separately imported metrics module. Only `deploy_python.py` owns dashboard backend code and
-its unit. The storage installer owns the independent frontend and storage drop-in,
-never the flat dashboard; historical manifests containing dashboard backend targets
-fail closed, including rollback. The legacy recorder installer refuses both
-storage-managed and package-activated hosts. Ship compatible recorder changes first
-with the storage installer's recorder-only workflow, then package backend updates;
-see the network installer boundary in the runbook. Blueprints
-live under `pi/apps/van_dashboard/routes/`; mutable process controllers live in
-`runtime.py`, and the relay-off controller CLI remains independent of Flask.
+Never bundle `van_compute` (a separate repository with its own coupled
+installer). The storage installer owns recorder, storage and logging files and
+no dashboard file: historical storage manifests containing any dashboard target
+(flat backend, unit, storage drop-in or React release) fail closed, including
+rollback. The original recorder installer is retired; `deploy_network_flight_recorder.py`
+refuses every action and keeps only the helpers the storage installer embeds.
+Ship compatible recorder changes first with the storage installer's
+recorder-only workflow, then the dashboard release that needs them; see the
+network installer boundary in the runbook.
 
 The video allowlist explicitly includes `players/` as a namespace subpackage;
 video imports are package-only. Sysmon's shim/package still deploy coherently
@@ -1105,28 +1029,25 @@ by a restarting package service (that would deadlock deployment).
 ## Compute execution contracts
 
 `van_compute` lives in its own repository, `/Users/jacobr/dev/van-compute`
-(public repo `https://github.com/JakeIwen/van-compute`); its `AGENTS.md` holds the compute contracts. This repository
-keeps only the consumer side: the dashboard imports `van_compute.metrics` from
-the separately installed `/home/pi/van_compute/current`, `pi/check_compute_provider.py`
-is the sync/package preflight against that installed provider, and
-`pi/sync_scripts.sh` runs the compute installer from `VAN_COMPUTE_CHECKOUT`
-(default `/Users/jacobr/dev/van-compute`). First cutover must still install
-compute before the dashboard package. Dashboard tests require the sibling
-checkout, verified by `pi/tests/dashboard/_van_compute_checkout.py`; they fail
-rather than skip without it.
+(public repo `https://github.com/JakeIwen/van-compute`); its `AGENTS.md` holds the
+compute contracts. Nothing here imports it: the van dashboard reads
+`van_compute.metrics` from `/home/pi/van_compute/current` and runs its own
+compute-provider preflight. `pi/sync_scripts.sh` still runs the compute installer
+from `VAN_COMPUTE_CHECKOUT` (default `/Users/jacobr/dev/van-compute`) as its last
+phase, and its preflight refuses before any upload when that installer is missing.
 
 ## Repository test suite
 
 Run `.local/test-venv/bin/python run_tests.py` from the repository root before committing or reporting
 completion. It discovers tracked and unignored new tests, excludes deleted files,
-and runs isolated Python unittest modules per file, Node tests, shell tests,
-Claude mod tests and the dashboard's Vitest suite. Missing interpreters/dependencies
+and runs isolated Python unittest modules per file, Node tests, shell tests and
+Claude mod tests. Missing interpreters/dependencies
 are errors; executable availability is checked before suite commands start.
 Tests needing specific OS features or hardware must state their skip reason.
 Shell tests run under macOS `/bin/bash` 3.2, where `set -e` ignores a failing `[[ ]]` or `(( ))`, so assertions must fail explicitly (`[[ ... ]] || fail ...`).
 Set `BTT_LIVE_TESTS=1` to also enable BTT's opt-in native bridge tests.
 Use an interpreter with Flask and Werkzeug installed (this checkout has an isolated
-`.local/test-venv/bin/python`) and install the dashboard's npm dependencies first.
+`.local/test-venv/bin/python`).
 `run_tests.py` owns the standalone-script import roots in `PYTHON_IMPORT_ROOTS`;
 extend that registry instead of adding per-test `sys.path` patches.
 
@@ -1145,11 +1066,9 @@ extend that registry instead of adding per-test `sys.path` patches.
 - Pass cache: the checkout-specific sha256 covers fresh bytes and file
   metadata for tracked/unignored inputs (never trusting Git's stat cache),
   symlink targets, submodule contents, `.local/test-venv`, the active venv,
-  and `node_modules` beside package manifests. Vite's temporary configs and
-  Vitest's result cache are excluded as generated output. It also covers
-  the interpreter/platform, resolved tool binaries, `PATH`, `PYTHONPATH`,
-  `BTT_LIVE_TESTS`, and the resolved van-compute checkout's HEAD and bytes
-  (including untracked files). `.claude/worktrees/` belongs to other runners
+  and `node_modules` beside package manifests. It also covers the
+  interpreter/platform, resolved tool binaries, `PATH`, `PYTHONPATH` and
+  `BTT_LIVE_TESTS`. `.claude/worktrees/` belongs to other runners
   and is excluded from both discovery and fingerprints.
   A pass within 6 hours prints `PASS: all N suite commands completed
   (cached: ...)` and exits 0; `--force` reruns and revokes the earlier pass
@@ -1172,73 +1091,48 @@ extend that registry instead of adding per-test `sys.path` patches.
   deployed repository changes once validation passes. Keep unrelated worktree
   changes unstaged and out of that commit.
 
-## Hosted project directory
+## Van dashboard (separate repo)
 
-The Pi dashboard's StateStore key `hosted_projects` is the only source of the
-title-menu project list; there is no static React catalog. Contract, schema
-and reconciliation rules: `pi/docs/dashboard/HOSTED_PROJECTS.md`. The store
-lives in `van_dashboard_projects.py` (`runtime.hosted_projects`, initialized
-immediately after the state store), with report validation and shared
-vocabulary in `hosted_project_report.py` and the one-time seed in
-`hosted_project_seed.py`; the `projects` blueprint owns
-`/api/hosted-projects*`. `hosted_project_scan.py` is the stdlib-only scanner
-for all three hosts (Pi cron every 15 minutes, Mac LaunchAgent
-`com.jacobr.hosted-project-scan` hourly over `vanpi.lan` only); scans report
-only listeners whose page answers HTTP 200, and Pi links follow each unit's
-bind address (the Pi scan covers lingering `systemctl --user` units too, so
-LLM Switchboard, bound to Tailscale only, gets no LAN link). The Pi cron line is a managed
-block in both the live `pi` crontab and `pi/crontab_pi`, but the repo's
-crontab files lag the live ones in unrelated lines: run `pi/pull_crontabs.sh`
-and review the diff before any `pi/push_crontabs.sh`. Preserve the
-runtime state during deployment. Links are HTTP/HTTPS only and are never
-fetched by the backend; preference is local, LAN, Tailscale, then web.
+The van dashboard (`van-dashboard.service` on port 8788: Flask backend and React
+frontend) lives in `~/dev/van-dashboard`, local only for now; its `AGENTS.md`
+has the layout, tests and deploy. Its `scripts/deploy.py` publishes backend
+releases to `/home/pi/van_dashboard/releases/` and frontend releases to
+`/home/pi/van_dashboard/frontend/releases/`, installs the unit and its
+`van-dashboard.service.d/network-storage.conf` drop-in, restarts, health-checks
+and rolls back. Nothing here deploys, restarts or rolls it back. Its unit runs
+`/usr/bin/python3 -P -m van_dashboard` with
+`PYTHONPATH=/home/pi/van_dashboard/current:/home/pi/scripts/python-packages/current:/home/pi/van_compute/current`,
+so it runs on code this repo ships. Keep this contract (that repo's `AGENTS.md`
+mirrors it):
 
-## Dashboard response schemas
-
-The React frontend's USB, network and storage response schemas live in each
-feature's `schema.ts`, with shared primitives and the only Valibot parsing
-boundary in `pi/apps/van_dashboard/frontend/src/api/schema.ts`. Decoding fails
-fast with a `TypeError`. Response types are inferred from schemas, while UI-only
-computed types remain presentation types. Other features retain their decoders
-where staged schemas add no real savings.
-
-The production boundary is `Response.json()`; sparse JS arrays, accessors and
-Proxies are outside that wire contract. Native arrays do not preserve hole
-semantics from the old `.map()` decoders.
-
-Dashboard `frontend/src/components/media/MediaHelp.tsx` and `MediaAction.tsx`
-share accessible hover/focus/tap hints with the organizer and Watchlist; action
-help remains reachable when an action is disabled. Feature help and reused messages
-live in each feature’s `content.ts`; one-off labels and messages remain beside their
-controls.
-`components/media/useAcceptedJob.ts` reconciles accepted jobs without replaying them;
-a missing job is confirmed with a new read before releasing its guard. The shared
-`usePollingResource.refresh({ fresh: true })` waits out any older poll before reading
-post-mutation state, keeping sequential polling while preventing stale unlocks.
-`frontend/src/test/deferred.ts` supplies controlled asynchronous response gates for
-overlapping GET/POST behavior tests.
-Dashboard `frontend/src/components/TooltipButton.tsx` owns hover/focus/tap hints
-(including backup setting help), with viewport-clamped portals outside clipped
-tiles. Action buttons keep their normal click action. Grid items are inline-size
-containers: narrow cards move chips into the header flow through the shared
-`--tile-status-*` properties, preserving the two-column phone layout.
-Dashboard status policy: the tile surface/border carries status color; header
-badges stay neutral and retain their labels and hover/focus/tap explanations.
-Backups deliberately keeps both its tile and badge colors (including the blue
-running state); its row highlights communicate individual backup states.
-Keep distinct measures (radio association,
-per-room power, backup rows) separate, and explain ambiguous status with
-hover/focus/tap hints. Clickable tiles use a separate opener so hint buttons
-never nest inside action buttons. `MovieIcon.tsx`/`UsbIcon.tsx` own the standard
-vector symbols; `backups/statusDetail.ts` explains CHECK from actual freshness,
-clone and cloud evidence. `lighting/LightingRange.tsx` owns the optional integer
-thumb label while the native range input keeps touch/keyboard interaction.
-`vonstar/VonstarActions.tsx` owns the compact guarded action group.
-`dealWatch/DealWatchSearchSection.tsx` owns saved-search cards and inline editing.
-`SearchStore.update_watch` preserves history/dismissals while clearing old-query
-current matches; `expected_url` guards in-flight check writes. Ship its flat
-price-check CLI/store/service cohort before the package endpoint and frontend.
-
+- Package modules: `pi.apps.metered` (controller, policy_requests),
+  `shared.metered` (records, store), `shared.python.tool_settings`,
+  `pi.package_runtime` and `pi.apps.media_organizer.{config,records}` stay in
+  the package release, as do the `python3 -P -m pi.apps.media_organizer` and
+  `-m pi.apps.iptorrents_watch` CLIs it runs.
+  `pi/tests/test_python_deployment_consumers.py` stages the real release and
+  imports each one.
+- Helper scripts keep their `/home/pi/scripts/...` paths: backup, cloud, disk,
+  network, power, Tuya, ntfy, price check and system monitor tools named in its
+  `van_dashboard_common.py` and controllers; its unit's `ExecStartPre` checks
+  `safe_reboot.sh` and `safe_power_down.sh`. The JSON they print for it
+  (`offsite_backup.sh dashboard`, the cloud status helpers' `--upload-speeds`,
+  `system_event_monitor.py disk-io`, `network_flight_recorder.py report`, the
+  media organizer and IPTorrents records) are wire contracts.
+- Its `__main__` writes `/run/van-dashboard/package-release` naming the scripts
+  release it imported. `deploy_python.py` lists the unit in `EXTERNAL_CONSUMERS`,
+  so release GC keeps that release while the dashboard runs.
+- A scripts deploy that changes those modules does not restart the dashboard: it
+  keeps the release it pinned at start. Restart it afterwards
+  (`ssh pi@vanpi.lan sudo systemctl restart van-dashboard`) or redeploy it.
+- Its HTTP API on `:8788` is a contract here too: `macbook/scripts/van_dashboard_http.py`
+  (lighting, cab dimmer), the video library's dashboard link and the storage
+  installer's readiness check (`/api/network-history`).
+- `pi/crontab_pi`'s managed `hosted-project-scan` block runs
+  `-m van_dashboard.hosted_project_scan` from `/home/pi/van_dashboard/current`
+  (that repo's `docs/HOSTED_PROJECTS.md`). The repo's crontab files lag the live
+  ones in unrelated lines: run `pi/pull_crontabs.sh` and review the diff before
+  any `pi/push_crontabs.sh`.
 
 ## Backup and disk tooling
 

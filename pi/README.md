@@ -20,16 +20,13 @@ normally live under `/home/pi/scripts/`.
 - [System event monitor](docs/monitoring/SYSTEM_MONITOR.md)
 - [SMART disk alerts](docs/monitoring/SMART.md)
 
-## Dashboard
+## Apps
 
-- [React dashboard frontend](docs/dashboard/REACT_DASHBOARD.md)
-- [Hosted projects directory and scanners](docs/dashboard/HOSTED_PROJECTS.md)
-- [Dashboard and COP ALERT](docs/dashboard/VAN_DASHBOARD.md)
+- [Van dashboard](https://github.com/JakeIwen/van-dashboard) (not yet published;
+  checkout `~/dev/van-dashboard`): the port 8788 dashboard, COP ALERT, hosted
+  projects and its own deploy
 - [Movies & TV library](docs/media/VIDEO_LIBRARY.md)
-- [Dashboard testing](docs/dashboard/DASHBOARD_TESTING.md)
-- [vOnStar dashboard controls](docs/dashboard/VONSTAR.md)
 - [Deal Watch](docs/price_check/PRICE_CHECK.md)
-- [USB port controls](docs/dashboard/USB_PORT_CONTROLS.md)
 - [Application layout](apps/README.md)
 
 ## Project guides
