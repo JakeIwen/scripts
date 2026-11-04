@@ -55,6 +55,21 @@ def tree_state(root):
                                      and path.name != ".install.lock")}
 
 
+OLD_DROPIN = b"[Service]\nExecStart=\nExecStart=/usr/bin/python3 -P -m pi.apps.van_dashboard\n"
+QUOTED_UNIT = (b"[Service]\nExecStart=/usr/bin/python3 -P -m \"pi.apps.van_dashboard\"\n")
+BASE = "/etc/systemd/system/" + DASHBOARD
+# Verbatim shape of `systemctl show van-dashboard.service` on the Pi (Exec lines trimmed).
+SHOW = """ExecStartPre={{ path=/usr/bin/test ; argv[]=/usr/bin/test -r /home/pi/x ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }}
+ExecStart={{ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 -P -m {module} ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }}
+ExecStartEx={{ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 -P -m {module} ; flags= ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }}
+ExecReload=
+LoadState={load}
+FragmentPath={fragment}
+DropInPaths={dropins}
+NeedDaemonReload={reload}
+"""
+
+
 class ExternalConsumerTests(unittest.TestCase):
     def test_dashboard_is_an_external_consumer_and_never_a_package_unit(self):
         self.assertIn(DASHBOARD, deployment.EXTERNAL_CONSUMERS)
@@ -101,6 +116,83 @@ class ExternalConsumerTests(unittest.TestCase):
                 self.assertEqual(tree_state(root), before)
                 self.assertEqual((services.install_calls, services.restart_calls), ([], []))
                 self.assertEqual(services.units[DASHBOARD], SCRIPTS_ERA_UNIT)
+
+    def refused_untouched(self, services, pattern):
+        fixtures = transactions.PythonDeploymentTests
+        with fixtures.fixture() as repo, tempfile.TemporaryDirectory() as name:
+            root = Path(name) / "packages"
+            services.install_calls.clear()
+            with self.assertRaisesRegex(ValueError, pattern):
+                self.install(repo, root, "activate", services)
+            self.assertEqual((services.install_calls, services.restart_calls), ([], []))
+            self.assertFalse((root / "current").exists())
+
+    def test_new_unit_file_with_pending_reload_is_refused(self):
+        # Cutover interrupted before daemon-reload: systemd still runs the old command.
+        services = transactions.FakeSystemServices(active=set())
+        services.loaded_files[DASHBOARD] = {BASE: SCRIPTS_ERA_UNIT}
+        services.units[DASHBOARD] = CUT_OVER_UNIT
+        self.refused_untouched(services, "pending a daemon-reload")
+
+    def test_old_command_dropin_is_refused_even_after_reload(self):
+        services = transactions.FakeSystemServices(active=set())
+        services.units[DASHBOARD] = CUT_OVER_UNIT
+        services.dropins_by_unit[DASHBOARD] = {"old.conf": OLD_DROPIN}
+        self.refused_untouched(services, "still runs -m pi.apps.van_dashboard")
+
+    def test_missing_base_file_with_loaded_old_unit_is_refused(self):
+        services = transactions.FakeSystemServices(active=set())
+        services.loaded_files[DASHBOARD] = {BASE: SCRIPTS_ERA_UNIT}
+        self.refused_untouched(services, "pending a daemon-reload")
+        # Base file gone from disk, old launch still loaded from a drop-in.
+        services.loaded_files[DASHBOARD] = {BASE + ".d/x.conf": OLD_DROPIN}
+        self.refused_untouched(services, "pending a daemon-reload")
+
+    def test_quoted_module_is_refused(self):
+        services = transactions.FakeSystemServices(active=set())
+        services.units[DASHBOARD] = QUOTED_UNIT
+        self.refused_untouched(services, "still runs -m pi.apps.van_dashboard")
+
+    def test_unreadable_unit_state_is_refused(self):
+        services = transactions.FakeSystemServices(active=set())
+
+        def broken(unit):
+            raise PermissionError("cannot read")
+        services.consumer_state = broken
+        self.refused_untouched(services, "cannot verify.*PermissionError")
+
+    def systemctl_state(self, show, files=None, fail=False):
+        """The real SystemServices reading a stub systemctl and a unit directory."""
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            for relative, raw in (files or {}).items():
+                (root / relative).parent.mkdir(parents=True, exist_ok=True)
+                (root / relative).write_bytes(raw)
+            stub = root / "systemctl"
+            show = show.replace("@BASE@", str(root / DASHBOARD))
+            stub.write_text("#!/bin/sh\n" + ("exit 1\n" if fail else f"cat <<'EOF'\n{show}EOF\n"))
+            stub.chmod(0o755)
+            services = deployment.SystemServices(units=root, systemctl=str(stub))
+            deployment.check_external_consumers(services)
+
+    def test_real_systemctl_show_output_decides(self):
+        old = SHOW.format(module="pi.apps.van_dashboard", load="loaded", fragment="@BASE@", dropins="", reload="no")
+        new = SHOW.format(module="van_dashboard", load="loaded", fragment="@BASE@", dropins="", reload="no")
+        absent = SHOW.format(module="van_dashboard", load="not-found", fragment="", dropins="", reload="no")
+        self.systemctl_state(new, {DASHBOARD: CUT_OVER_UNIT})
+        self.systemctl_state(absent.replace("ExecStart", "Unused"))
+        with self.assertRaisesRegex(ValueError, "pi.apps.van_dashboard"):
+            self.systemctl_state(old, {DASHBOARD: CUT_OVER_UNIT})
+        with self.assertRaisesRegex(ValueError, "pending a daemon-reload"):
+            self.systemctl_state(new.replace("NeedDaemonReload=no",
+                                 "NeedDaemonReload=yes"), {DASHBOARD: CUT_OVER_UNIT})
+        with self.assertRaisesRegex(ValueError, "cannot verify"):
+            self.systemctl_state("", fail=True)
+        with self.assertRaisesRegex(ValueError, "cannot verify"):
+            self.systemctl_state("garbage without equals\n")
+        # Loaded, but the fragment systemd names is gone from disk: not "absent".
+        with self.assertRaisesRegex(ValueError, "cannot verify"):
+            self.systemctl_state(new)
 
     def test_cut_over_or_absent_dashboard_unit_allows_deploys(self):
         fixtures = transactions.PythonDeploymentTests

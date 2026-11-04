@@ -9,7 +9,6 @@ configs="$dsc/pi/configs"
 secrets="$dsc/pi/secrets"
 shared_sh="$dsc/shared/sh"
 pi_ip='pi@vanpi.lan'
-dashboard_unit=/etc/systemd/system/van-dashboard.service
 # pi_ip='pi@100.82.91.76'
 package_units=""
 
@@ -35,22 +34,16 @@ check_pi_bashrc_known() {
 
 # The scripts-era dashboard unit runs -m pi.apps.van_dashboard from the package
 # release, which this checkout no longer ships: syncing before the dashboard's
-# own repo is deployed would break its next restart.
+# own repo is deployed would break its next restart. The Pi's receiver makes
+# the same effective-state check as the package install (deploy_python.py
+# check_external_consumers), so the preflight and the later guard can't
+# disagree, and any failure to run it refuses the sync before any upload.
 check_dashboard_cut_over() {
-  local state
-  if ! state="$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$pi_ip" \
-    "if [ ! -e $dashboard_unit ]; then echo absent; elif grep -qE '^[[:space:]]*Exec[A-Za-z]*=.*[[:space:]]-m[[:space:]]+pi[.]apps[.]van_dashboard([.[:space:]]|\$)' $dashboard_unit; then echo scripts-era; else echo cut-over; fi")"; then
-    echo "couldn't read the Pi's $dashboard_unit" >&2
+  python3 "$dsc/pi/deploy_python.py" --check-consumers --target "$pi_ip" >&2 || {
+    echo "Dashboard cutover check failed; see the message above and the van-dashboard" \
+      "repo's docs/cutover.md. No upload was made." >&2
     return 1
-  fi
-  case "$state" in
-    absent|cut-over) ;;
-    scripts-era)
-      echo "The Pi's van-dashboard.service still runs -m pi.apps.van_dashboard, which this" \
-        "checkout no longer ships. Deploy the van-dashboard repo first (its docs/cutover.md)." >&2
-      return 1 ;;
-    *) echo "unexpected van-dashboard.service check result: $state" >&2; return 1 ;;
-  esac
+  }
 }
 
 sync_preflight() {

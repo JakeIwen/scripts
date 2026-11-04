@@ -42,6 +42,7 @@ class FakeSystemServices:
             unit: None for unit in (*deployment.SERVICES, *deployment.EXTERNAL_CONSUMERS)
         }
         self.state_overrides = {}
+        self.loaded_files = {}
         self.state_errors = {}
         self.running_record_errors = {}
 
@@ -62,6 +63,29 @@ class FakeSystemServices:
         if unit not in self.units:
             raise FileNotFoundError(unit)
         return self.units[unit]
+
+    def disk_files(self, unit):
+        base = f"/etc/systemd/system/{unit}"
+        files = {base: self.units[unit]} if unit in self.units else {}
+        files.update({f"{base}.d/{name}": raw for name, raw in self.dropins_by_unit.get(unit, {}).items()})
+        return files
+
+    def consumer_state(self, unit):
+        """Mimic `systemctl show`: Exec* come from what is loaded (files unless
+        loaded_files says the on-disk ones were not reloaded), like systemd."""
+        disk = self.disk_files(unit)
+        loaded = self.loaded_files.get(unit, disk)
+        base = f"/etc/systemd/system/{unit}"
+        lines = [f"LoadState={'loaded' if loaded else 'not-found'}",
+                 f"NeedDaemonReload={'no' if loaded == disk else 'yes'}",
+                 f"FragmentPath={base if base in loaded else ''}",
+                 "DropInPaths=" + " ".join(path for path in loaded if path != base)]
+        for path, raw in loaded.items():
+            for key, value in deployment.directives(raw):
+                if key.startswith("Exec") and value:
+                    lines.append(f"{key}={{ path={value.split()[0]} ; argv[]={value} ; ignore_errors=no ; "
+                                 "start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }")
+        return deployment.parse_show("\n".join(lines)), list(disk.items())
 
     def require_absent(self, unit):
         if unit in self.units or self.dropins_by_unit[unit]:

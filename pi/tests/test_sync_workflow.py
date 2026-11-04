@@ -1,8 +1,13 @@
+import os
 from pathlib import Path
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
+
+from pi.tests.test_python_deployment_consumers import (
+    CUT_OVER_UNIT, OLD_DROPIN, QUOTED_UNIT, SCRIPTS_ERA_UNIT, SHOW)
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -29,10 +34,6 @@ class SyncWorkflowTests(unittest.TestCase):
 dsc={shlex.quote(str(REPOSITORY_ROOT.parent))}
 VAN_COMPUTE_CHECKOUT={shlex.quote(str(checkout))}
 ssh() {{
-  if [[ "$*" == *van-dashboard.service* ]]; then
-    printf '%s\\n' {dashboard}
-    return 0
-  fi
   if [[ "$*" == *activated.json* ]]; then
     printf 'activation-check\\n'
     return {status}
@@ -40,7 +41,16 @@ ssh() {{
   [[ "$*" == *'git hash-object'* ]] && git -C "$dsc" hash-object pi/.bashrc
   return 0
 }}
-python3() {{ [[ "$*" == *--list-units* ]] && printf 'video-library.service\\n'; return 0; }}
+# The dashboard check itself is covered by DashboardCutOverGuardTests.
+python3() {{
+  if [[ "$*" == *--check-consumers* ]]; then
+    [[ {dashboard} == absent ]] && return 0
+    echo "docs/cutover.md" >&2
+    return 1
+  fi
+  [[ "$*" == *--list-units* ]] && printf 'video-library.service\\n'
+  return 0
+}}
 sync_non_python() {{ printf 'non-python-write\\n'; }}
 sync_python_packages() {{ printf 'package-write\\n'; }}
 sync_compute() {{ printf 'compute-write\\n'; }}
@@ -130,49 +140,91 @@ sync_preflight
 
 
 class DashboardCutOverGuardTests(unittest.TestCase):
-    """Broad sync must not ship a release the scripts-era dashboard unit still runs from."""
+    """Broad sync must not ship a release the scripts-era dashboard unit still runs from.
 
-    def check(self, unit_text=None, reachable=True):
+    The preflight runs the real deploy_python.py --check-consumers; a fake ssh
+    executes its receiver locally against a stub systemctl and a unit folder.
+    """
+
+    # Python, not bash: pattern substitution over the 30 KB receiver is quadratic in bash 3.2.
+    FAKE_SSH = """#!/usr/bin/env python3
+import os, sys
+if os.environ["FAKE_SSH_FAIL"]:
+    sys.exit(255)
+units = os.environ["FAKE_UNITS"]
+command = (sys.argv[-1].replace("/usr/bin/python3", os.environ["FAKE_PYTHON"])
+           .replace("/usr/bin/systemctl", units + "/systemctl")
+           .replace("/etc/systemd/system", units))
+os.execv("/bin/bash", ["bash", "-c", command])
+"""
+
+    def check(self, show=None, unit_text=None, dropin=None, unreachable=False):
         definitions = SYNC_SCRIPT.read_text().split('source "$dsc/pi/sync_workflow.sh"')[0]
         with tempfile.TemporaryDirectory(prefix="sync-dashboard-unit-") as directory:
-            unit = Path(directory) / "van-dashboard.service"
+            root = Path(directory)
+            (root / "bin").mkdir()
+            (root / "bin/ssh").write_text(self.FAKE_SSH)
+            (root / "bin/ssh").chmod(0o755)
+            units = root / "units"
+            units.mkdir()
             if unit_text is not None:
-                unit.write_text(unit_text)
-            # Run the remote probe locally against the fixture unit.
-            fake_ssh = 'bash -c "${@: -1}"' if reachable else "return 255"
+                (units / "van-dashboard.service").write_bytes(unit_text)
+            if dropin is not None:
+                (units / "van-dashboard.service.d").mkdir()
+                (units / "van-dashboard.service.d/old.conf").write_bytes(dropin)
+            stub = units / "systemctl"
+            stub.write_text("#!/bin/sh\n" + ("exit 1\n" if show is None else
+                f"cat <<'EOF'\n{show.replace('@BASE@', str(units / 'van-dashboard.service'))}EOF\n"))
+            stub.chmod(0o755)
             harness = definitions + f"""
-dashboard_unit={shlex.quote(str(unit))}
-ssh() {{ {fake_ssh}; }}
+dsc={shlex.quote(str(REPOSITORY_ROOT.parent))}
 check_dashboard_cut_over
 """
-            return subprocess.run(["/bin/bash", "-c", harness], capture_output=True, text=True)
+            env = {**os.environ, "PATH": f"{root / 'bin'}:{os.environ['PATH']}",
+                   "FAKE_UNITS": str(units), "FAKE_PYTHON": sys.executable,
+                   "FAKE_SSH_FAIL": "1" if unreachable else ""}
+            return subprocess.run(["/bin/bash", "-c", harness], capture_output=True, text=True, env=env)
+
+    def show(self, module="van_dashboard", load="loaded", fragment="@BASE@", reload="no"):
+        return SHOW.format(module=module, load=load, fragment=fragment, dropins="", reload=reload)
+
+    def assertRefused(self, result, reason):
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertRegex(result.stderr, reason)
+        self.assertIn("docs/cutover.md", result.stderr)
 
     def test_scripts_era_launch_refuses(self):
-        for unit_text in (
-            "[Service]\nExecStart=/usr/bin/python3 -P -m pi.apps.van_dashboard\n",
-            "[Service]\nExecStart=/usr/bin/python3 -P -m van_dashboard\n"
-            "ExecStopPost=/usr/bin/python3 -P -m pi.apps.van_dashboard.van_dashboard_cop --relay-off\n",
-        ):
-            with self.subTest(unit_text=unit_text):
-                result = self.check(unit_text)
-                self.assertEqual(result.returncode, 1, result.stderr)
-                self.assertIn("deploy the van-dashboard repo first", result.stderr.lower())
+        self.assertRefused(self.check(self.show("pi.apps.van_dashboard"), SCRIPTS_ERA_UNIT),
+                           "still runs -m pi.apps.van_dashboard")
+
+    def test_new_unit_file_with_pending_reload_refuses(self):
+        self.assertRefused(self.check(self.show("pi.apps.van_dashboard", reload="yes"), CUT_OVER_UNIT),
+                           "pending a daemon-reload")
+
+    def test_old_command_dropin_refuses(self):
+        self.assertRefused(self.check(self.show(), CUT_OVER_UNIT, dropin=OLD_DROPIN),
+                           "still runs -m pi.apps.van_dashboard")
+
+    def test_missing_base_file_with_loaded_old_unit_refuses(self):
+        self.assertRefused(self.check(self.show("pi.apps.van_dashboard")), "cannot verify")
+
+    def test_quoted_module_refuses(self):
+        self.assertRefused(self.check(self.show(), QUOTED_UNIT),
+                           "still runs -m pi.apps.van_dashboard")
+
+    def test_read_error_or_unreachable_pi_refuses(self):
+        self.assertRefused(self.check(show=None, unit_text=CUT_OVER_UNIT), "cannot verify")
+        self.assertRefused(self.check(self.show(), CUT_OVER_UNIT, unreachable=True), "Dashboard cutover check failed")
 
     def test_cut_over_or_absent_unit_passes(self):
-        for unit_text in (
-            "[Service]\nExecStart=/usr/bin/python3 -P -m van_dashboard\n"
-            "ExecStopPost=/usr/bin/python3 -P -m van_dashboard.van_dashboard_cop --relay-off\n"
-            "# formerly -m pi.apps.van_dashboard\n",
-            None,
+        for show, unit_text in (
+            (self.show(), CUT_OVER_UNIT + b"# formerly -m pi.apps.van_dashboard\n"),
+            (self.show(load="not-found", fragment="").replace("ExecStart", "Unused"), None),
         ):
             with self.subTest(unit_text=unit_text):
-                result = self.check(unit_text)
+                result = self.check(show, unit_text)
                 self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_unreadable_pi_refuses(self):
-        result = self.check(reachable=False)
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("couldn't read", result.stderr)
 
 
 class PiBashrcGuardTests(unittest.TestCase):
