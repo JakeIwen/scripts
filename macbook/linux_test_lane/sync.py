@@ -6,7 +6,10 @@ run_tests.py would discover travel; the VM keeps its own runner state and venv.
 """
 from pathlib import Path, PurePosixPath
 import os
+import pwd
+import stat
 import subprocess
+import sys
 
 # Mac-built dependencies and other runners' trees never reach the VM.
 EXCLUDED_PREFIXES = ('.local/', '.claude/worktrees/', '.git/')
@@ -18,7 +21,36 @@ PROTECTED = ('/.git/', '/.local/', 'node_modules/')
 GIT_EXCLUDES = ('/worktrees/', '/run_tests/', '/index', '/HEAD', '/ORIG_HEAD',
                 '/FETCH_HEAD', '/hooks/', '*.lock')
 WILDCARDS = '*?['
-RSYNC = ('rsync', '-a', '--mkpath')
+RSYNC = ('rsync', '-a', '--checksum', '--mkpath')
+
+
+def validate_destination(destination):
+    """Refuse redirects before rsync can delete anything outside the lane."""
+    home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+    expected = home / 'linux-test-lane/checkout'
+    if Path(destination) != expected:
+        raise ValueError(f'Unexpected VM checkout: {destination}')
+    target = expected / '.git'
+    device = home.stat().st_dev
+    for path in (*reversed(target.parents), target):
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            if path not in (home / 'linux-test-lane', expected, target):
+                raise ValueError(f'Missing VM ancestor: {path}')
+            path.mkdir(mode=0o755)
+            info = path.lstat()
+        if not stat.S_ISDIR(info.st_mode) or path.resolve() != path:
+            raise ValueError(f'Unsafe VM sync directory: {path}')
+        if path == home or home in path.parents:
+            if info.st_dev != device or info.st_uid != os.getuid() or info.st_mode & 0o022:
+                raise ValueError(f'Non-private or redirected VM sync directory: {path}')
+
+
+def destination_command(destination, arguments=()):
+    # Run this same stdlib-only module on the guest, before provisioning or exec.
+    return ['/usr/bin/python3', '-B', str(Path(__file__).resolve()), str(destination), *arguments]
+
 
 
 def synced_paths(paths, root):
@@ -57,19 +89,20 @@ def filter_rules(paths):
 def tree_command(source, destination):
     # Rules arrive on stdin; --delete-excluded removes files no longer listed,
     # and the P rules above keep the VM's own state.
-    return [*RSYNC, '--delete', '--delete-excluded', '--filter=. -',
-            f'{source}/', f'{destination}/']
+    return destination_command(destination, [*RSYNC, '--delete', '--delete-excluded', '--filter=. -',
+                                       f'{source}/', f'{destination}/'])
 
 
 def git_mirror_command(common_dir, destination):
     excludes = [f'--exclude={pattern}' for pattern in GIT_EXCLUDES]
-    return [*RSYNC, '--delete', *excludes, f'{common_dir}/', f'{destination}/.git/']
+    return destination_command(destination, [*RSYNC, '--delete', *excludes,
+                                       f'{common_dir}/', f'{destination}/.git/'])
 
 
 def git_state_command(git_dir, destination):
     """The checkout's own HEAD and index (a worktree's live in its git dir)."""
-    return [*RSYNC, '--ignore-missing-args', f'{git_dir}/HEAD', f'{git_dir}/index',
-            f'{destination}/.git/']
+    return destination_command(destination, [*RSYNC, '--ignore-missing-args', f'{git_dir}/HEAD',
+                                       f'{git_dir}/index', f'{destination}/.git/'])
 
 
 def git_path(root, option):
@@ -92,3 +125,11 @@ def source_mount(root):
     if mount != Path(root).resolve() and mount not in Path(root).resolve().parents:
         raise ValueError(f'{root} is outside {mount}, the only checkout the VM mounts')
     return mount
+
+
+if __name__ == '__main__':
+    validate_destination(sys.argv[1])
+    if len(sys.argv) > 2:
+        if sys.argv[2] != RSYNC[0]:
+            raise ValueError('Only lane rsync commands are supported')
+        os.execvp(sys.argv[2], sys.argv[2:])

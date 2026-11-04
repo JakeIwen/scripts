@@ -13,19 +13,21 @@ import time
 from run_tests import repository_paths
 from . import lima
 from .pins import HERE, PINS_FILE, read_pins
-from .sync import (filter_rules, git_dirs, git_mirror_command, git_state_command,
+from .sync import (destination_command, filter_rules, git_dirs, git_mirror_command, git_state_command,
                    source_mount, synced_paths, tree_command)
 
 ROOT = HERE.parents[1]
 PROVISION = HERE / 'provision.sh'
 REQUIREMENTS = HERE / 'requirements.txt'
+OFFSITE_INSTALLERS = (ROOT / 'pi/scripts/backup/install_restic.sh',
+                      ROOT / 'synology/offsite/binaries.py')
 LOCK_FILE = Path.home() / '.local/state/linux-test-lane/lock'
 STAMP_FILE = '/var/lib/linux-test-lane/provisioned'
 # The lane covers code that runs on Linux: the Pi, shared modules and the
-# Synology receiver, plus the runner itself. shared/claude-mods is excluded:
+# Synology receiver, plus the runner and lane regressions. shared/claude-mods is excluded:
 # its suites run through the Mac's `claude plugin test` and its codexclean
 # build needs Node >= 22.13; the Pi only receives built copies.
-DEFAULT_PATHS = ('pi', 'shared', 'synology', 'tests')
+DEFAULT_PATHS = ('pi', 'shared', 'synology', 'tests', 'macbook/tests/test_linux_test_lane.py')
 DEFAULT_EXCLUDES = ('shared/claude-mods',)
 
 
@@ -41,7 +43,7 @@ def vm_paths(pins):
 def provision_stamp(venv):
     """Changes whenever provisioning inputs do, so `up` re-runs it only then."""
     digest = hashlib.sha256()
-    for path in (PROVISION, PINS_FILE, REQUIREMENTS):
+    for path in (PROVISION, PINS_FILE, REQUIREMENTS, *OFFSITE_INSTALLERS):
         digest.update(path.name.encode() + b'\0' + path.read_bytes() + b'\0')
     digest.update(venv.encode())
     return digest.hexdigest()
@@ -86,20 +88,29 @@ def ensure_instance(pins, timings):
             lima.start()
 
 
-def ensure_provisioned(pins, timings):
-    _, venv = vm_paths(pins)
+def ensure_provisioned(pins, timings, repair=False):
+    checkout, venv = vm_paths(pins)
+    # Provisioning recreates the venv below this same lane ancestor. Validate
+    # before even consulting its stamp, not only before rsync's --delete.
+    lima.run_in_vm(*destination_command(checkout))
     stamp = provision_stamp(venv)
     current = lima.run_in_vm('cat', STAMP_FILE, capture=True, check=False).stdout.strip()
-    if current == stamp:
+    if current == stamp and not repair:
+        try:
+            lima.run_in_vm('sudo', 'bash', PROVISION, '--verify', venv)
+        except subprocess.CalledProcessError:
+            log('required tools are missing or drifted; run `linux-test-lane up --repair` '
+                'to restore the checked-in pins. Change pins.env only for a deliberate pin upgrade.')
+            raise
         return
-    log('provisioning (stamp changed)')
+    log('provisioning (' + ('explicit repair; retaining checked-in pins' if repair else 'inputs changed') + ')')
     with phase('provision', timings):
-        lima.run_in_vm('sudo', 'bash', PROVISION, stamp, venv)
+        lima.run_in_vm('sudo', 'bash', PROVISION, stamp, venv, *(['--repair'] if repair else []))
 
 
-def up(pins, timings):
+def up(pins, timings, repair=False):
     ensure_instance(pins, timings)
-    ensure_provisioned(pins, timings)
+    ensure_provisioned(pins, timings, repair=repair)
 
 
 def sync(pins, timings):
@@ -129,7 +140,11 @@ def runner_arguments(args):
 def run_tests(pins, args, timings):
     checkout, venv = vm_paths(pins)
     with phase('suite', timings):
-        return lima.run_in_vm(f'{venv}/bin/python', 'run_tests.py', *runner_arguments(args),
+        # Fixed lane inputs, not inherited host opt-ins. Both binaries live in
+        # the active venv (restic via symlink), which the runner fingerprints.
+        return lima.run_in_vm('env', f'OFFSITE_RESTIC={venv}/bin/offsite-restic',
+                              f'OFFSITE_REST_SERVER={venv}/bin/offsite-rest-server',
+                              f'{venv}/bin/python', 'run_tests.py', *runner_arguments(args),
                               workdir=checkout, check=False).returncode
 
 
@@ -154,7 +169,9 @@ def status(pins):
 def parser():
     root = argparse.ArgumentParser(description=__doc__)
     commands = root.add_subparsers(dest='command', required=True)
-    commands.add_parser('up', help='create, start and provision the VM as needed')
+    start = commands.add_parser('up', help='create, start and provision the VM as needed')
+    start.add_argument('--repair', action='store_true',
+                       help='reinstall required tools with the checked-in pins, even with a current stamp')
     test = commands.add_parser('test', help='up, sync this working tree, run the suite in the VM')
     test.add_argument('--path', action='append', default=[],
                       help='run_tests.py --path (repeatable; default: ' + ', '.join(DEFAULT_PATHS) + ')')
@@ -191,7 +208,7 @@ def dispatch(args, pins):
                     lima.delete()
                 return 0
             with phase('up', timings):
-                up(pins, timings)
+                up(pins, timings, repair=args.command == 'up' and args.repair)
             if args.command == 'up':
                 return 0
             sync(pins, timings)

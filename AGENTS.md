@@ -193,7 +193,8 @@ compare it with this checkout. Deployed files may differ from the repository.
   on the Mac that runs the Linux/Pi tests off the Pi. `pins.env` is the one
   record of the image (dated URL + digest), Pi-matching tool versions and VM
   size; `provision.sh` runs as root in the VM and refuses drift from those
-  versions (restic comes from `pi/scripts/backup/install_restic.sh`);
+  versions (restic comes from `pi/scripts/backup/install_restic.sh`, rest-server
+  from `synology/offsite/binaries.py`, reusing their verified release pins);
   `requirements.txt` mirrors `.local/test-venv`. `lima.py` renders the template
   and wraps `limactl`; `sync.py` copies exactly the files `run_tests.py`
   discovers, plus Git state (a worktree's own HEAD/index), through a read-only
@@ -1086,8 +1087,9 @@ extend that registry instead of adding per-test `sys.path` patches.
   metadata for tracked/unignored inputs (never trusting Git's stat cache),
   symlink targets, submodule contents, `.local/test-venv`, the active venv,
   and `node_modules` beside package manifests. It also covers the
-  interpreter/platform, resolved tool binaries, `PATH`, `PYTHONPATH` and
-  `BTT_LIVE_TESTS`. `.claude/worktrees/` belongs to other runners
+  interpreter/platform, resolved tool binaries, `PATH`, `PYTHONPATH`,
+  `BTT_LIVE_TESTS`, `OFFSITE_RESTIC` and `OFFSITE_REST_SERVER` (including their
+  resolved executable bytes). `.claude/worktrees/` belongs to other runners
   and is excluded from both discovery and fingerprints.
   A pass within 6 hours prints `PASS: all N suite commands completed
   (cached: ...)` and exits 0; `--force` reruns and revokes the earlier pass
@@ -1119,17 +1121,41 @@ Setup is `brew install lima`; from the checkout root:
 
 - `macbook/linux_test_lane/linux-test-lane up` creates, starts and provisions
   the VM (8 CPUs, 8 GiB, 40 GiB) when needed; reprovisions when
-  `provision.sh`, `pins.env` or `requirements.txt` change.
+  `provision.sh`, `pins.env`, `requirements.txt` or either upstream binary
+  installer changes.
 - `... test` runs `up`, syncs this working tree (tracked plus unignored files,
   deletions included) and runs the VM's `run_tests.py --path pi --path shared
-  --path synology --path tests --exclude-path shared/claude-mods`, ending
+  --path synology --path tests --path macbook/tests/test_linux_test_lane.py
+  --exclude-path shared/claude-mods`, ending
   with the runner's PASS/FAILED line and exit status; the VM keeps its own pass
-  cache. `--path`/`--exclude-path` replace that selection; `--force`, `-j`
+  cache. Every invocation checks required tools and their pinned versions,
+  including both offsite binaries, even with a current provisioning stamp;
+  missing/drifted tools fail before cache lookup. To restore the checked-in
+  pins, run `macbook/linux_test_lane/linux-test-lane up --repair`: it retains
+  the destination guard, reinstalls distro packages, reruns the pinned
+  installers and recreates the test venv, then verifies everything before
+  writing the stamp. Plain `up` with a current stamp only verifies; it does
+  not repair. Change `pins.env` only for a deliberate runtime upgrade, never
+  to hide a missing tool. Source and Git copies use rsync checksums,
+  not size/mtime guesses. Before provisioning (including a stale/missing stamp)
+  and each rsync the guest rejects redirected, symlinked or non-owned
+  checkout/`.git` ancestors outside its fixed lane root.
+  `--path`/`--exclude-path` replace that selection; `--force`, `-j`
   and `--timeout` pass through. shared/claude-mods is left out because its
   suites run through the Mac's `claude plugin test` and its codexclean build
   needs Node >= 22.13; the Pi only receives built copies.
 - `status`, `shell` (a shell in the VM checkout), `stop` (it otherwise stays
   running) and `destroy` (deletes the VM and disk, for a clean start).
+
+Lane tests always set `OFFSITE_RESTIC` and `OFFSITE_REST_SERVER` to
+`/home/pi/linux-test-lane/venv/bin/offsite-restic` and `offsite-rest-server`.
+The first is a symlink to the VM's verified restic 0.19.1; the second is the
+archive-verified rest-server 0.14.0, installed only in the test venv. Receiver
+and REST acceptance tests therefore execute rather than skip. Host overrides
+are not forwarded: these values are fixed by the tracked lane code, and the
+runner fingerprints both environment values and resolved binaries (also through
+its active venv), following symlinks.
+Provisioning also installs rsyslog for the separate privileged spool check.
 
 Lane commands serialize on `~/.local/state/linux-test-lane/lock`, since every
 worktree shares the VM's one checkout. The VM user is `pi` (uid 1000) with
