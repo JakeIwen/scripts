@@ -26,11 +26,22 @@ source the generated declarations directly. Lock paths and modes are unchanged.
 
 | Lock | Mode | Holder | Meaning |
 | --- | --- | --- | --- |
-| `job-<kind>.lock` (`borg`, `exfat`, `pi-cloud`, `time-machine`, `clone`) | exclusive | the job parent; PID recorded | one instance per job kind; the stop/abort target |
-| `disk-<label>.lock` (`bigboi`, `hdd1tb`, `mbp2tbkup`, `movingparts`, `EXFAT512`: every label `disk_policy.sh` manages) | shared by jobs, exclusive by lifecycle | every job using the disk, inherited by its children | the disk cannot be unmounted or spun down while held |
+| `job-<kind>.lock` (`borg`, `exfat`, `pi-cloud`, `time-machine`, `clone`, `offsite`) | exclusive | the job parent; PID recorded (`offsite` also held, without a PID record, by every exclusive legacy holder) | one instance per job kind; the stop/abort target |
+| `disk-<label>.lock` (`bigboi`, `hdd1tb`, `mbp2tbkup`, `movingparts`, `EXFAT512`, `FORT-MPLS-5TB`: every label `disk_policy.sh` manages) | shared by jobs, exclusive by lifecycle | every job using the disk, inherited by its children | the disk cannot be unmounted or spun down while held |
 | `data-borg-repo.lock` | exclusive | Borg mutation or a consistent repository copy | repository-level mutual exclusion |
 | `cloud-upload.lock` | exclusive | one cloud worker run | exactly one iCloud uploader (Pi or Mac) |
-| `/run/lock/vanpi_backup.lock` (legacy) | shared by migrated jobs, exclusive by legacy consumers; PID recorded by exclusive holders only | restore, hotspare initialization, deployment fences | an exclusive holder excludes every job; any running job excludes exclusive holders |
+| `/run/lock/vanpi_backup.lock` (legacy) | shared by migrated jobs and by an offsite run while it copies its code snapshot; exclusive by legacy consumers; PID recorded by exclusive holders only | restore, hotspare initialization, offsite `prepare-disk`, deployment fences | an exclusive holder excludes every job; any running migrated job excludes exclusive holders |
+
+Offsite runs never hold the legacy lock past their snapshot copy, so the
+exclusive legacy consumers' `acquire_job_lock` (restore, hotspare
+initialization, `prepare-disk`) also takes `job-offsite` exclusively, without
+waiting and without a PID record, and keeps it for the caller's lifetime; a
+busy lock refuses with "an offsite run is active" and gives the legacy lock
+back. A missing registry or `job-offsite.lock` cannot have admitted an offsite
+run (its launcher requires the pre-created inode), so it is skipped, never
+created; unsafe metadata fails closed. The deployment fence takes the legacy
+lock alone: leaving `job-offsite` out is what lets an installer publish during
+a seed.
 
 Shell jobs use `backup_locks.sh` (sourced by `backup_conf.sh`): fd 9 is the
 legacy lock, fd 10 the job lock, other fds are allocated per disk, data set or
@@ -75,25 +86,30 @@ still independently asserts its job hold before planning or deleting objects.
 | Mac cloud | `time_machine_icloud.sh --run` | shared | `time-machine` | `mbp2tbkup` whole run | capture gate (unchanged Samba drain handshake) | yes, whole run |
 | Mac staging GC | `time_machine_icloud.sh --staging-gc-*` | shared | `time-machine` | `mbp2tbkup` | none | no |
 | Hotspare clone | `clone_now.sh` | shared | `clone` | none (cards use the existing per-device `lock_disk`) | none | no |
-| Offsite seed / remote backup / check / restore-test | `offsite_backup.sh` | exclusive, whole command | none | all (implied) | all (implied; unchanged Time Machine Samba gate) | no second hold; legacy exclusive already excludes every cloud worker |
-| Restore | `restore_from_borg.sh` | exclusive | none | all (implied) | all (implied) | no |
-| Hotspare init | `new_hotspare.sh` | exclusive | none | all (implied) | all (implied) | no |
-| Deployment fence | both targeted cloud installers | exclusive, non-blocking | none | all | all | all |
+| Offsite backup / check / receipts / restore-test (local or `--remote`) | `offsite_backup.sh` | shared, non-blocking, only while the code snapshot is copied | `offsite`, taken first (fd 10, PID record; the Python parent after `exec`) | a local target's label for the whole command; each source's label for its source phase, taken before mounting; `restore-test`: the disk holding `--target` (`findmnt -T`), or none on the root filesystem | `borg-repo` during the `borg` source only (busy: the source moves to the end, then waits up to 3 h, polling once a second and holding no `bigboi` lock until it has the repository); the Time Machine image keeps its Samba gate | yes, whole command (one named policy constant) |
+| Offsite prepare-disk | `offsite_backup.sh prepare-disk` | exclusive, whole command | `offsite`, exclusive without a PID record (via `acquire_job_lock`) | all (implied) | all (implied) | no |
+| Restore | `restore_from_borg.sh` | exclusive | `offsite`, exclusive without a PID record | all (implied) | all (implied) | no |
+| Hotspare init | `new_hotspare.sh` | exclusive | `offsite`, exclusive without a PID record | all (implied) | all (implied) | no |
+| Deployment fence | both targeted cloud installers | exclusive, non-blocking | none, never `offsite` | all but a running offsite run's | all but a running offsite run's | all but a running offsite run's |
 | SMART watch | `smart_watch.sh` | none | none | each mounted HDD for one `smartctl` read; busy means skip | none | no |
 
 ## Conflict matrix
 
-| | Borg | EXFAT | Pi cloud | Mac cloud | Clone | Restore / init |
-| --- | --- | --- | --- | --- | --- | --- |
-| Borg | job lock | overlap | overlap except the repository copy window: Borg waits up to `BORG_REPO_LOCK_WAIT_SECONDS` then fails; Pi cloud defers to its next timer | overlap | overlap except Borg's hotspare phase (`job-clone`) | excluded |
-| EXFAT | overlap | job lock | overlap | overlap | overlap | excluded |
-| Pi cloud | see above | overlap | job lock | **cloud slot**: the later starter exits before recording an attempt; timers and resume paths retry | overlap | excluded |
-| Mac cloud | overlap | overlap | cloud slot | job lock | overlap | excluded |
-| Clone | see above | overlap | overlap | overlap | job lock, per-card `lock_disk` | excluded |
-| Restore / init | excluded | excluded | excluded | excluded | excluded | legacy exclusive |
+| | Borg | EXFAT | Pi cloud | Mac cloud | Clone | Offsite run | Restore / init / prepare-disk |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Borg | job lock | overlap | overlap except the repository copy window: Borg waits up to `BORG_REPO_LOCK_WAIT_SECONDS` then fails; Pi cloud defers to its next timer | overlap | overlap except Borg's hotspare phase (`job-clone`) | overlap except the `borg` source (`borg-repo`): Borg waits as for Pi cloud; offsite defers the source, then waits up to 3 h and fails only that source | excluded |
+| EXFAT | overlap | job lock | overlap | overlap | overlap | overlap (`EXFAT512` shared by both) | excluded |
+| Pi cloud | see above | overlap | job lock | **cloud slot**: the later starter exits before recording an attempt; timers and resume paths retry | overlap | cloud slot: the Pi worker exits before recording an attempt while any offsite command runs | excluded |
+| Mac cloud | overlap | overlap | cloud slot | job lock | overlap | cloud slot, as for Pi cloud; while offsite reads the image, its Samba gate also defers a capture | excluded |
+| Clone | see above | overlap | overlap | overlap | job lock, per-card `lock_disk` | overlap | excluded |
+| Offsite run | see above | overlap | cloud slot | cloud slot | overlap | `job-offsite` | excluded (`job-offsite`, and the legacy lock during the snapshot copy) |
+| Restore / init / prepare-disk | excluded | excluded | excluded | excluded | excluded | excluded | legacy exclusive |
 
 "Overlap" accepts ordinary I/O contention. Mac Time Machine (Samba) is not a
-backup job; the capture handshake and share drain are unchanged.
+backup job; the capture handshake and share drain are unchanged. Offsite runs
+take no priority admission: `acquire_job_lock`'s `--admit disk` call always
+admits, so holding `cloud-upload` directly keeps today's behavior that no
+iCloud upload runs during offsite work.
 
 ## Lifecycle, cancellation and recovery
 
@@ -106,6 +122,14 @@ backup job; the capture handshake and share drain are unchanged.
   remaining holders of those lock files, including inherited children, receive
   KILL. Without labels, every registered disk is drained (the historical
   "stop everything" behavior for callers that cannot name labels).
+  An offsite run is found like any job, through `job-offsite.lock`'s PID record
+  (its Python parent, `exec`ed by the launcher, holds the phase disk
+  descriptors). `umount_disks.sh --spindown` drains `FORT-MPLS-5TB` with the
+  other attached HDDs, so ignition stops a local seed and then unmounts and
+  spins the drive down. A remote run reading only `EXFAT512` (never unmounted
+  on spindown) is not drained; its own ignition guard stops it. Draining a disk
+  the run does not hold leaves it alone. `prepare-disk` is still stopped as a
+  legacy exclusive holder.
 - After a successful drain `umount_disks.sh` (its sourced `umount_disks_fence.sh`)
   claims every disk it is about to
   unmount or spin down exclusively (`hold_backup_disks_exclusive`) and keeps
@@ -151,7 +175,41 @@ backup job; the capture handshake and share drain are unchanged.
   unlock would strip the child too, while a close ends the lock only with the
   last descriptor on that open file.
 - Deployment fences take the legacy lock exclusively and non-blocking, so they
-  wait for complete quiescence of every job.
+  wait for every migrated job and refuse while restore, hotspare
+  initialization or `prepare-disk` runs. An offsite run holds the legacy lock
+  only while it copies its code snapshot (seconds), so the fence fails fast
+  only in that window and otherwise publishes while the run continues on its
+  frozen copy.
+- Under the fence, both installers refuse to publish a staged registry that
+  lacks any lock (job, disk, data or cloud) currently held in the live
+  registry, since drain, stop and status code find holders only through it.
+  Holders are read from `/proc/locks` by inode, never probed: even a momentary
+  exclusive probe would fail a starting job's non-blocking shared disk hold.
+
+## Offsite code snapshot and its limits
+
+`offsite_backup.sh` stays the stable entry point. For every command but
+`prepare-disk` it takes `job-offsite` on fd 10 and writes the PID record, takes
+the legacy lock shared without waiting, checks ignition, has
+`offsite_snapshot.py create` copy the run's code closure (declared once in
+`offsite_config.py`) to `/var/lib/vanpi-offsite/code/<run-id>/` and verify it
+against the live files, closes fd 9 and `exec`s the copy's
+`offsite_backup.py`. Backup shell code resolves its own helpers beside the
+sourced file (`backup_conf.sh`, `mount_disks.sh`), so the copy calls its own
+copies while the installed tree's paths are unchanged; data, secrets, state and
+the metering CLI stay live.
+
+- Broad sync (`pi/sync_scripts.sh`) is still unfenced. The snapshot narrows its
+  window to the seconds of the copy, and the post-copy hash check catches most
+  overlaps, but a sync spanning the copy can still leave a mixed snapshot, as
+  it can for any job that starts mid-sync.
+- The registry guard protects forward deploys only: a targeted installer runs
+  its own staged code. Never deploy or roll back the backup cohort to a
+  revision without granular offsite locks while `job-offsite` is held; stop
+  the run first.
+- With pre-granular drain code, the emergency ignition path still frees the
+  drive (it kills holders by disk lock file), but the normal path refuses to
+  unmount because it cannot find the run.
 
 ## Scheduling policy
 
