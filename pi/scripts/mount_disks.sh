@@ -525,12 +525,12 @@ rm_mnt_dir() { # prevent Time Machine from backing up onto SD card etc
 }
 
 md_fix_hfs_mounts() {
-  if [[ ! -r /home/pi/scripts/fix_hfs_fs.sh ]]; then
-    echo "ERROR: cannot read /home/pi/scripts/fix_hfs_fs.sh" >&2
+  if [[ ! -r "$md_script_dir/fix_hfs_fs.sh" ]]; then
+    echo "ERROR: cannot read $md_script_dir/fix_hfs_fs.sh" >&2
     return 1
   fi
   # shellcheck source=fix_hfs_fs.sh
-  . /home/pi/scripts/fix_hfs_fs.sh
+  . "$md_script_dir/fix_hfs_fs.sh"
 }
 
 md_print_mounts() {

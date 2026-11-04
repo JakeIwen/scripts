@@ -174,7 +174,10 @@ JOB_LOCK_GROUP=${VANPI_BACKUP_JOB_LOCK_GROUP:-pi}
 JOB_LOCK_MODE=${VANPI_BACKUP_JOB_LOCK_MODE:-660}
 JOB_LOCK_STAT=${VANPI_BACKUP_JOB_LOCK_STAT:-/usr/bin/stat}
 JOB_LOCK_FLOCK=${VANPI_BACKUP_JOB_LOCK_FLOCK:-/usr/bin/flock}
-BACKUP_PRIORITY_TOOL=${VANPI_BACKUP_PRIORITY_TOOL:-/home/pi/scripts/backup/backup_priority_control.py}
+# Code paths resolve beside this file, so a frozen copy of the scripts tree
+# (offsite runs) keeps calling its own helpers; live installs are unchanged.
+BACKUP_CONF_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+BACKUP_PRIORITY_TOOL=${VANPI_BACKUP_PRIORITY_TOOL:-$BACKUP_CONF_DIR/backup_priority_control.py}
 validate_job_lock_file() {
   local metadata owner group mode inode extra
   if [[ -L "$JOB_LOCK" || ! -f "$JOB_LOCK" ]]; then
@@ -217,11 +220,11 @@ acquire_job_lock() {
 
 # Resource-specific locks for migrated jobs (job identity, disks, data sets and
 # the single iCloud upload slot). See pi/docs/backup/CONCURRENCY.md.
-. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/backup_locks.sh"
+. "$BACKUP_CONF_DIR/backup_locks.sh"
 
 # The fixed helper emits only known setting names and validated integers.
 if [[ -e /etc/vanpi-backup-settings.json || -L /etc/vanpi-backup-settings.json ]]; then
-  backup_preference_assignments=$(/usr/bin/python3 /home/pi/scripts/backup/backup_settings_control.py --shell) || return 1
+  backup_preference_assignments=$(/usr/bin/python3 "$BACKUP_CONF_DIR/backup_settings_control.py" --shell) || return 1
   while IFS='=' read -r backup_preference_name backup_preference_value; do
     [[ -n "$backup_preference_name" ]] || continue
     [[ "$backup_preference_name" =~ ^[A-Z][A-Z0-9_]*$ && "$backup_preference_value" =~ ^[0-9]+$ ]] || return 1

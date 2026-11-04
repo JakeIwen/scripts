@@ -2,7 +2,8 @@
 # Drain only the requested backup disks before lifecycle changes, or ask one
 # verified dashboard-visible job to stop without affecting its peers.
 set -u
-backup_conf=${ABORT_BACKUP_CONF:-/home/pi/scripts/backup/backup_conf.sh}
+# Beside this file, so a frozen offsite code snapshot drains through its own copy.
+backup_conf=${ABORT_BACKUP_CONF:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/backup_conf.sh}
 . "$backup_conf"
 
 emergency=0
