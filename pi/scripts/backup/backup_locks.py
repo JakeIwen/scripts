@@ -33,7 +33,8 @@ DISK_LABELS = ('bigboi', 'hdd1tb', 'mbp2tbkup', 'movingparts', 'EXFAT512', 'FORT
 DATA_NAMES = ('borg-repo',)
 CLOUD_SLOT = 'upload'
 JOB_LABELS = {'borg': 'local Pi backup', 'exfat': 'EXFAT512 snapshot', PI_CLOUD: 'Pi iCloud backup',
-              TIME_MACHINE: 'Mac Time Machine iCloud backup', 'clone': 'hotspare clone'}
+              TIME_MACHINE: 'Mac Time Machine iCloud backup', 'clone': 'hotspare clone',
+              'offsite': 'offsite drive backup'}
 JOB_KINDS = tuple(JOB_LABELS)
 LOCK_NAMES = {LockClass.JOB: JOB_KINDS, LockClass.DISK: DISK_LABELS,
               LockClass.DATA: DATA_NAMES, LockClass.CLOUD: (CLOUD_SLOT,)}

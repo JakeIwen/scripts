@@ -162,8 +162,10 @@ lock_disk() { # lock_disk sda — held for the remaining life of the calling scr
 
 # Legacy whole-system lock. Migrated jobs hold it shared alongside their
 # resource locks (backup_locks.sh); restore, hotspare initialization and
-# deployment fences still hold it exclusively through acquire_job_lock, which
-# therefore excludes and is excluded by every running job. systemd-tmpfiles
+# offsite prepare-disk still hold it exclusively through acquire_job_lock, which
+# therefore excludes and is excluded by every running job. Offsite runs hold
+# only resource locks, so acquire_job_lock also takes job-offsite exclusively;
+# the deployment fence takes the legacy lock alone. systemd-tmpfiles
 # pre-creates this file as root:pi 0660. Keeping a root-owned inode is
 # important because /run/lock is sticky and fs.protected_regular may otherwise
 # prevent a root abort helper from reopening a lock first created by pi.
@@ -203,14 +205,20 @@ acquire_job_lock() {
   exec 9<&"$fd"
   exec {fd}<&-
   "$JOB_LOCK_FLOCK" -n 9 || return 1
+  if ! hold_offsite_exclusion; then
+    exec 9>&-
+    return 1
+  fi
   if [[ -f "$BACKUP_PRIORITY_TOOL" ]]; then
     if ! /usr/bin/python3 "$BACKUP_PRIORITY_TOOL" --admit "${1:-disk}"; then
+      release_backup_lock job offsite
       "$JOB_LOCK_FLOCK" -u 9
       exec 9>&-
       return 1
     fi
   elif [[ -d /var/lib/vanpi-backup-priority ]]; then
     echo 'backup priority helper is unavailable; refusing admission' >&2
+    release_backup_lock job offsite
     "$JOB_LOCK_FLOCK" -u 9
     exec 9>&-
     return 1

@@ -1,4 +1,11 @@
-"""Subprocess command double for offsite entry-point behavior tests; no device I/O."""
+"""Subprocess command double for offsite entry-point behavior tests; no device I/O.
+
+The `mounts` double honors offsite_mounts.sh's admission and release contract
+(OFFSITE.md "Locks"): it checks the inherited descriptors and probes the real
+fixture registry, so lock ordering mistakes fail these tests.
+"""
+import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -7,20 +14,30 @@ import tempfile
 import time
 
 
+# Snapshot helper paths installed over a fixture live tree by the isolation test.
+ALIASES = {'offsite_mounts.sh': 'mounts', 'samba_share_control.sh': 'samba', 'ntfy_send.sh': 'notify'}
+LOGGED_ENVIRONMENT = ('OFFSITE_ADMISSION', 'VANPI_BACKUP_JOB_LOCK_FD', 'VANPI_BACKUP_DISK_LOCK_FDS',
+                      'VANPI_BACKUP_CLOUD_SLOT_FD')
+
+
 def main():
     fixture = Path(os.environ['OFFSITE_FIXTURE'])
     state = json.loads(fixture.read_text())
-    name, args = Path(sys.argv[0]).name.removeprefix('fake-'), sys.argv[1:]
+    executable = Path(sys.argv[0]).name
+    name, args = ALIASES.get(executable, executable.removeprefix('fake-')), sys.argv[1:]
     with (fixture.parent / 'commands.jsonl').open('a') as stream:
         stream.write(json.dumps([name, *args]) + '\n')
+    with (fixture.parent / 'executions.jsonl').open('a') as stream:
+        stream.write(json.dumps({'name': name, 'args': args, 'path': sys.argv[0],
+                                 'env': {key: os.environ.get(key) for key in LOGGED_ENVIRONMENT}}) + '\n')
     if state.get('fail_command') == name:
         print('fixture command failure', flush=True)
         return 7
     commands = {'lsblk': lsblk, 'findmnt': findmnt, 'mounts': mounts, 'sfdisk': partition,
                 'mkfs': mkfs, 'tune2fs': features, 'restic': restic, 'smbstatus': smbstatus,
-                'samba': samba, 'umount': umount}
+                'samba': samba, 'notify': notify}
     result = commands.get(name, lambda s, a: 0)(state, args)
-    if name in ('sfdisk', 'mkfs', 'samba', 'umount') or (name == 'mounts' and args[0] in ('mount', 'release')):
+    if name in ('sfdisk', 'mkfs', 'samba', 'notify') or (name == 'mounts' and args[0] in ('mount', 'release')):
         with tempfile.NamedTemporaryFile(mode='w', dir=fixture.parent, delete=False) as stream:
             json.dump(state, stream)
         os.replace(stream.name, fixture)
@@ -47,10 +64,62 @@ def findmnt(state, args):
     else:
         target = args[args.index('-T') + 1]
         targets = sorted((p for p in mapping if target == p or target.startswith(p.rstrip('/') + '/')), key=len)
-        matches = [mapping[targets[-1]]] if targets else []
+        column = args[args.index('-o') + 1] if '-o' in args else 'SOURCE'
+        matches = [targets[-1] if column == 'TARGET' else mapping[targets[-1]]] if targets else []
     if not matches:
         return 1
     print('\n'.join(matches))
+
+
+def holds(fd, path, exclusive):
+    try:
+        actual, expected = os.fstat(fd), path.lstat()
+    except OSError:
+        return False
+    if (actual.st_dev, actual.st_ino) != (expected.st_dev, expected.st_ino):
+        return False
+    if not sys.platform.startswith('linux'):
+        return True  # Darwin has no fdinfo: descriptor identity only.
+    import backup_locks
+    try:
+        backup_locks.require_held(fd, path, exclusive=exclusive)
+    except (OSError, RuntimeError):
+        return False
+    return True
+
+
+def admitted(args):
+    """offsite_mounts.sh: `job` needs job-offsite (and for mount the label's shared disk fd)."""
+    mode, registry = os.environ.get('OFFSITE_ADMISSION'), Path(os.environ['VANPI_BACKUP_LOCK_DIR'])
+    if mode == 'prepare':
+        return holds(9, Path(os.environ['VANPI_BACKUP_JOB_LOCK']), True)
+    if mode != 'job' or not holds(int(os.environ['VANPI_BACKUP_JOB_LOCK_FD']), registry / 'job-offsite.lock', True):
+        return False
+    if args[0] != 'mount':
+        return True
+    disks = dict(item.split('=') for item in os.environ.get('VANPI_BACKUP_DISK_LOCK_FDS', '').split(',') if item)
+    return args[1] in disks and holds(int(disks[args[1]]), registry / f'disk-{args[1]}.lock', False)
+
+
+def released(state, label, target):
+    """0 released, 3 another holder, 4 verified absent, 1 failure (the helper's exit codes)."""
+    if state.get('drained_before_release') == label:
+        state['mounts'].pop(target, None)  # An ignition drain won the race for the disk.
+    if target not in state['mounts']:
+        return 4
+    if state.get('release_failure') == label:
+        print('fixture unmount failure')
+        return 1
+    fd = os.open(Path(os.environ['VANPI_BACKUP_LOCK_DIR']) / f'disk-{label}.lock', os.O_RDONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return 3
+    finally:
+        os.close(fd)
+    state['mounts'].pop(target)
+    state.setdefault('released', []).append(label)
+    return 0
 
 
 def mounts(state, args):
@@ -58,6 +127,9 @@ def mounts(state, args):
         print('\n'.join(state[args[0]]))
         return
     label = args[1]
+    if args[0] in ('mount', 'release') and not admitted(args):
+        print('fixture mount helper refused admission')
+        return 1
     rows = [row for row in all_rows(state) if row.get('label') == label]
     if len(rows) != 1:
         return 1
@@ -68,7 +140,7 @@ def mounts(state, args):
         Path(target).mkdir(exist_ok=True)
         state['mounts'][target] = rows[0]['name']
     elif args[0] == 'release':
-        state['mounts'].pop(target)
+        return released(state, label, target)
 
 
 def partition(state, args):
@@ -110,6 +182,9 @@ def restic(state, args):
         print(Path(state['mount_root']).parent.joinpath('receipt.json').read_text())
     elif 'backup' in args:
         Path(state['mount_root']).parent.joinpath('snapshot-source').write_text(args[args.index('--tag') + 1])
+        live = state.get('move_live')
+        if live and Path(live).exists():
+            os.rename(live, live + '.moved')  # A deployment replaced the whole live tree mid-run.
         events = state.get('progress_events', [{'message_type': 'status', 'bytes_done': 25,
                                               'total_bytes': 100, 'seconds_elapsed': 5}])
         for event in events:
@@ -132,6 +207,11 @@ def restic(state, args):
         print(json.dumps({'message_type': 'summary', 'changed_snapshots': 1}))
     elif 'check' in args:
         print('no errors were found')
+    elif 'restore' in args:
+        restored = Path(args[args.index('--target') + 1] + args[args.index('--include') + 1])
+        restored.parent.mkdir(parents=True, exist_ok=True)
+        restored.write_text('content')
+        print('restored 1 file')
 
 
 def smbstatus(state, args):
@@ -140,13 +220,31 @@ def smbstatus(state, args):
     print(json.dumps({'open_files': handles, 'tcons': {'1': {'service': 'mbp2tbkup'}} if state.get('trees') else {}}))
 
 
+def notify(state, args):
+    """Record which registry locks are still held and, from a snapshot, verify its manifest."""
+    registry = Path(os.environ['VANPI_BACKUP_LOCK_DIR'])
+    busy = []
+    for path in sorted(registry.glob('*.lock')):
+        if path.name.startswith('job-'):
+            continue
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            busy.append(path.name)
+        finally:
+            os.close(fd)
+    state['busy_at_notify'] = busy
+    root = Path(sys.argv[0]).parent
+    if (root / 'manifest.json').exists():
+        manifest = json.loads((root / 'manifest.json').read_text())
+        state['manifest_ok'] = all(hashlib.sha256((root / name).read_bytes()).hexdigest() == digest
+                                   for name, digest in manifest['files'].items())
+
+
 def samba(state, args):
     if args[0] == 'close':
         state['trees'] = False
-
-
-def umount(state, args):
-    state['mounts'].pop(args[-1])
 
 
 if __name__ == '__main__':

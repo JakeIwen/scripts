@@ -213,6 +213,31 @@ release_backup_lock() { # <job|data|cloud> <name>
   return 0
 }
 
+hold_offsite_exclusion() { # exclusive legacy holders also exclude offsite runs
+  # Offsite runs hold job-offsite and resource locks, never the legacy lock,
+  # so restore, hotspare initialization and prepare-disk take the offsite
+  # identity too (no PID record) for the caller's lifetime. A missing registry
+  # or inode cannot have admitted an offsite run, whose launcher requires the
+  # pre-created inode; unsafe metadata fails closed.
+  local path fd
+  path=$(backup_lock_path job offsite) || return 1
+  [[ -e "$BACKUP_LOCK_DIR" || -L "$BACKUP_LOCK_DIR" ]] || return 0
+  if [[ -L "$BACKUP_LOCK_DIR" || ! -d "$BACKUP_LOCK_DIR" ]] ||
+     ! backup_lock_metadata_ok "$BACKUP_LOCK_DIR" "$BACKUP_LOCK_DIR_MODE"; then
+    echo "backup lock directory is unsafe; refusing exclusive maintenance" >&2
+    return 1
+  fi
+  [[ -e "$path" || -L "$path" ]] || return 0
+  backup_lock_open fd "$path" backup_lock_validate || return 1
+  if ! "$JOB_LOCK_FLOCK" -n "$fd"; then
+    exec {fd}>&-
+    echo 'an offsite run is active' >&2
+    return 1
+  fi
+  # Recorded like acquire_backup_lock's holds, so release_backup_lock job offsite closes it.
+  BACKUP_EXCLUSIVE_LOCK_FD[job-offsite]=$fd
+}
+
 release_backup_job() { # releases every descriptor this job acquired, in reverse order
   local key label
   for key in "${!BACKUP_EXCLUSIVE_LOCK_FD[@]}"; do

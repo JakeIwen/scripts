@@ -1184,9 +1184,22 @@ The active design is represented by:
 - `pi/scripts/backup/abort_backup.sh`: coordinated termination before unmounting.
 - `pi/scripts/backup/clone_to_sd.sh`: bootable spare-card cloning.
 - `pi/scripts/backup/offsite_backup.sh`: encrypted restic offsite drives, seeded
-  locally then served by a friend's Synology over Tailscale. It holds the exclusive
-  legacy lock like `restore_from_borg.sh`; `offsite_config.py` owns sources, excludes
-  and canonical marker/transport/receipt records (NAS Python 3.9+, Pi runtime 3.11+).
+  locally then served by a friend's Synology over Tailscale. `prepare-disk` holds the
+  exclusive legacy lock like `restore_from_borg.sh`; the other mutating commands hold
+  `job-offsite` (fd 10, PID record), hold the legacy lock shared only while
+  `offsite_snapshot.py` copies their code, then exec that frozen copy, so the cohort
+  installers, nightly Borg and EXFAT run beside a days-long seed. `acquire_job_lock`
+  also takes `job-offsite`; the deploy fence does not, and its registry guard
+  (`local_backup_registry_guard`) refuses to unregister a held lock. `offsite_snapshot.py`
+  creates, verifies and deletes that per-run copy under `/var/lib/vanpi-offsite/code/`
+  (descriptor-relative deletion that never follows links or crosses mounts);
+  `offsite_locks.py` proves the launcher's hold and owns the run's cloud-slot, disk
+  and `data-borg-repo` descriptors (non-blocking but for the bounded Borg wait,
+  released by close). `offsite_config.py` owns sources, excludes, lock policy
+  constants, the frozen closure / live data / live boundary sets
+  (`test_offsite_snapshot_closure.py` rescans them) and canonical
+  marker/transport/receipt records (NAS Python 3.9+, Pi runtime 3.11+). Persisted
+  state is additive-only (`test_offsite_state_compat.py` checks v2 both ways).
   `offsite_repository.py` verifies local mounts/IDs; `offsite_prepare.py` guards
   erasure; `offsite_samba.py` owns the Time Machine capture gate; `offsite_run.py`
   writes status/processed-versus-packed byte metrics; `offsite_mounts.sh` reuses

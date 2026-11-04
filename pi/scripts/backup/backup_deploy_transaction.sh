@@ -9,6 +9,8 @@ LOCAL_BACKUP_PI_OWNER=${LOCAL_BACKUP_PI_OWNER:-pi:pi}
 LOCAL_BACKUP_ROOT_OWNER=${LOCAL_BACKUP_ROOT_OWNER:-root:root}
 LOCAL_BACKUP_TIMERS=(vanpi-icloud-backup.timer vanpi-time-machine-icloud.timer
   vanpi-icloud-backup-resume.timer vanpi-time-machine-icloud-resume.timer)
+LOCAL_BACKUP_PROC_LOCKS=${LOCAL_BACKUP_PROC_LOCKS:-/proc/locks}
+LOCAL_BACKUP_STAGED_REGISTRY=pi/scripts/backup/backup_lock_registry.sh
 
 local_backup_hash() {
   local digest
@@ -89,6 +91,54 @@ local_backup_preflight() { # <stage> <pi|tm> <reviewed-hashes>; no live writes
       "$policy" "$owner" "$mode" "$first" "$(local_backup_expected_hash "$previous" "$source")") || return 1
     printf '%s|%s|%s|%s\n' "$source" "$destination" "$policy" "$metadata" >> "$stage/transaction/preflight" || return 1
   done <<< "$plan"
+}
+
+local_backup_staged_lock_names() { # <stage>: <class>-<name> per line, from the registry being published
+  /bin/bash -c '
+    . "$1" || exit 1
+    for name in "${BACKUP_JOB_KINDS[@]}"; do printf "job-%s\n" "$name"; done
+    for name in "${BACKUP_DISK_LABELS[@]}"; do printf "disk-%s\n" "$name"; done
+    for name in "${BACKUP_DATA_NAMES[@]}"; do printf "data-%s\n" "$name"; done
+    [[ -z ${BACKUP_CLOUD_SLOT:-} ]] || printf "cloud-%s\n" "$BACKUP_CLOUD_SLOT"
+  ' registry "$1/$LOCAL_BACKUP_STAGED_REGISTRY"
+}
+
+local_backup_registry_guard() { # <stage>: under the fence; refuse to unregister a lock held now
+  # Drain, stop and status code find jobs only through the registry, so
+  # publishing one without a held entry (e.g. a rollback during an offsite
+  # run) would hide that holder. /proc/locks names holders without touching
+  # them: even a momentary probe flock fails a starting job's shared disk hold.
+  local stage=$1 staged name path identity
+  local -a fields
+  local -A known=() held=()
+  [[ -e "$BACKUP_LOCK_DIR" || -L "$BACKUP_LOCK_DIR" ]] || return 0
+  if [[ -L "$BACKUP_LOCK_DIR" || ! -d "$BACKUP_LOCK_DIR" ]] ||
+     ! backup_lock_metadata_ok "$BACKUP_LOCK_DIR" "$BACKUP_LOCK_DIR_MODE"; then
+    echo "Backup lock directory is unsafe: $BACKUP_LOCK_DIR" >&2
+    return 1
+  fi
+  staged=$(local_backup_staged_lock_names "$stage") || { echo 'Cannot read the staged lock registry.' >&2; return 1; }
+  while IFS= read -r name; do
+    [[ -z "$name" ]] || known[$name]=1
+  done <<< "$staged"
+  [[ -r "$LOCAL_BACKUP_PROC_LOCKS" ]] || { echo "Cannot read $LOCAL_BACKUP_PROC_LOCKS." >&2; return 1; }
+  # Holder records read "N: FLOCK ADVISORY WRITE <pid> <hex major>:<hex minor>:<inode> ...";
+  # "->" marks a waiter, and "<none>" records have no inode to match.
+  while read -r -a fields; do
+    [[ "${fields[1]:-}" != '->' && "${fields[5]:-}" =~ ^([0-9a-f]+):([0-9a-f]+):([0-9]+)$ ]] || continue
+    held["$((16#${BASH_REMATCH[1]})):$((16#${BASH_REMATCH[2]})):${BASH_REMATCH[3]}"]=1
+  done < "$LOCAL_BACKUP_PROC_LOCKS"
+  for path in "$BACKUP_LOCK_DIR"/*.lock; do
+    [[ -f "$path" && ! -L "$path" ]] || continue
+    identity=$("$LOCAL_BACKUP_STAT" -c '%Hd:%Ld:%i' -- "$path") || return 1
+    [[ -n ${held[$identity]:-} ]] || continue
+    name=${path##*/}
+    name=${name%.lock}
+    [[ -n ${known[$name]:-} ]] || {
+      echo "Refusing to publish a lock registry without $name while it is held; stop that job first." >&2
+      return 1
+    }
+  done
 }
 
 local_backup_stage_settings() { # <defaults> <live> <policy> <private-staged-output>

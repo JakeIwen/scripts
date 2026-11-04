@@ -107,7 +107,7 @@ class DashboardTests(unittest.TestCase):
                 args = ['backup', '--label', self.f.label, '--only', 'borg']
                 child = self.f.start(*args, *(['--remote'] if remote else []))
                 try:
-                    deadline = time.monotonic() + 15
+                    deadline = time.monotonic() + 60
                     while not started.exists() and child.poll() is None:
                         self.assertLess(time.monotonic(), deadline, 'source backup never started')
                         time.sleep(0.02)

@@ -206,7 +206,7 @@ class OffsiteTests(unittest.TestCase):
         self.f.save()
         child = self.f.start('backup', '--label', self.f.label, '--only', 'time-machine')
         try:
-            deadline = time.monotonic() + 15
+            deadline = time.monotonic() + 60
             while not (self.f.root / 'backup-started').exists() and child.poll() is None:
                 if time.monotonic() > deadline:
                     self.fail('backup did not start')

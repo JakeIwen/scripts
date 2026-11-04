@@ -1,17 +1,21 @@
 """Identity-bound REST target; every network operation uses fresh cost admission."""
 import json
+from pathlib import Path
 
-from offsite_config import REMOTE_CONFIG, REMOTE_CONSUMER, validate_transport
+from offsite_config import LIVE_ROOT, METERED_CLI, REMOTE_CONFIG, REMOTE_CONSUMER, validate_transport
 from offsite_repository import Interrupted, LocalRepository, password, records
 from protected_json import read_protected_json
 
 
-REMOTE_COMMANDS = {
-    'tailscale': '/usr/bin/tailscale',
-    'uplink': '/home/pi/scripts/backup/icloud_uplink.py',
-    'metered': '/home/pi/scripts/vanpi-metered',
-    'route': '/usr/bin/ip',
-}
+def remote_commands(code_root=None):
+    # The uplink collector is frozen with the run; metering admission stays the live CLI.
+    root = LIVE_ROOT if code_root is None else Path(code_root)
+    return {
+        'tailscale': '/usr/bin/tailscale',
+        'uplink': str(root / 'backup' / 'icloud_uplink.py'),
+        'metered': str(LIVE_ROOT / METERED_CLI),
+        'route': '/usr/bin/ip',
+    }
 
 
 def transport_config(path):
@@ -24,7 +28,7 @@ class RemoteRepository(LocalRepository):
     def __init__(self, cfg, commands, label):
         super().__init__(cfg, commands, label)
         # Optional binaries are not consulted for any local v1 operation.
-        for name, path in REMOTE_COMMANDS.items():
+        for name, path in remote_commands(cfg.code_root).items():
             commands.cfg.commands.setdefault(name, path)
         self.marker = self.transport = self.auth = None
 
@@ -83,8 +87,11 @@ class RemoteRepository(LocalRepository):
             return False
         return super().mount_source(label, on_mount=on_mount)
 
+    def hold_target(self):
+        # This is a network repository, never a local offsite disk.
+        return None
+
     def unmount(self):
-        # This is a network repository, never a local offsite mount.
         return None
 
     def restic(self, *args, **kwargs):

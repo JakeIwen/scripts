@@ -57,6 +57,7 @@ local_backup_begin() { # <stage> <pi|tm> <reviewed-hashes>: fence and preflight 
   trap 'exit 130' INT
   trap 'exit 143' TERM HUP
   local_backup_preflight "$stage" "$profile" "$previous" || return 1
+  local_backup_registry_guard "$stage" || return 1
   for timer in "${LOCAL_BACKUP_TIMERS[@]}"; do
     state=$($LOCAL_BACKUP_SUDO "$LOCAL_BACKUP_SYSTEMCTL" show "$timer" -p ActiveState --value) || return 1
     [[ "$state" != active ]] || LOCAL_BACKUP_ACTIVE_TIMERS+=("$timer")

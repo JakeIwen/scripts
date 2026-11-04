@@ -76,7 +76,9 @@ race_open() { # <replace|remove|symlink> <path> <public acquisition> [arguments 
     ' test "$config" "$@" > "$test_root/race.log" 2>&1 &
   pid=$!
   pids+=("$pid")
-  for ((attempt=0; attempt<500; attempt++)); do
+  # Upper bound only: acquire_job_lock reaches job-offsite after several helper
+  # processes, which can take seconds on a loaded Pi.
+  for ((attempt=0; attempt<3000; attempt++)); do
     [[ -e "$test_root/race-ready" ]] && break
     kill -0 "$pid" 2>/dev/null || break
     /bin/sleep 0.01
@@ -111,6 +113,7 @@ for change in replace remove symlink; do
   race_open "$change" "$JOB_LOCK" acquire_backup_job borg bigboi
   race_open "$change" "$JOB_LOCK" hold_backup_disks_exclusive bigboi
   race_open "$change" "$JOB_LOCK" acquire_job_lock
+  race_open "$change" "$(backup_lock_path job offsite)" acquire_job_lock
 done
 
 # Replace the pathname after flock but before the PID write. The record belongs

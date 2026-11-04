@@ -1,15 +1,20 @@
 """Public deployment contracts against fixture Git repos and real Linux files."""
+import fcntl
 import hashlib
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 
+import backup_locks
+
 HELPER = Path(__file__).resolve().parents[2] / 'backup_local_deploy.sh'
 POLICIES_WITH_HASHES = {'revision', 'conf', 'cloud', 'status'}
+REGISTRY_SOURCE = 'pi/scripts/backup/backup_lock_registry.sh'
 
 
 def digest(data):
@@ -90,6 +95,10 @@ class DeploymentPlanTests(DeploymentTestCase):
                     ('offsite_samba.py', 'offsite_run.py'),
                     ('offsite_prepare.py', 'offsite_backup.py'),
                     ('offsite_run.py', 'offsite_backup.py'),
+                    ('offsite_repository.py', 'offsite_snapshot.py'),
+                    ('offsite_snapshot.py', 'offsite_locks.py'),
+                    ('offsite_locks.py', 'offsite_backup.py'),
+                    ('offsite_snapshot.py', 'offsite_backup.sh'),
                     ('offsite_mounts.sh', 'offsite_backup.sh'),
                     ('offsite_backup.py', 'offsite_backup.sh')]:
                 names = [Path(name).name for name in sources]
@@ -215,6 +224,9 @@ class DeploymentFixture(DeploymentTestCase):
             old, new = f'old {source}\n'.encode(), f'new {source}\n'.encode()
             if policy in ('preserve', 'defaults'):
                 old, new = b'{"setting": 1}\n', b'{"setting": 0, "new_default": 2}\n'
+            elif source == REGISTRY_SOURCE:
+                # The fence reads the staged registry; keep it real.
+                new = (HELPER.parent.parent / source).read_bytes()
             staged.write_bytes(new); deployed.write_bytes(old)
             deployed.chmod(0o770 if mode == 'preserve' else int(mode, 8))
             previous[source] = digest(old) if policy in POLICIES_WITH_HASHES else 'managed'
@@ -226,11 +238,18 @@ class DeploymentFixture(DeploymentTestCase):
             path.write_text(content); path.chmod(0o700)
         lock = root / 'legacy'
         lock.touch(); lock.chmod(0o660)
+        registry = root / 'registry'
+        registry.mkdir(); registry.chmod(0o770)
+        for lock_class, names in backup_locks.LOCK_NAMES.items():
+            for name in names:
+                path = registry / f'{lock_class.value}-{name}.lock'
+                path.touch(); path.chmod(0o660)
         self.env.update(TEST_ROOT=str(root), TEST_EXPECT_RECORDS=str(len(records)), LOCAL_BACKUP_ROOT=str(live),
                         LOCAL_BACKUP_SUDO=str(root / 'sudo'), LOCAL_BACKUP_SYSTEMCTL=str(root / 'systemctl'),
                         LOCAL_BACKUP_PI_OWNER=f'{owner}:{group}', LOCAL_BACKUP_ROOT_OWNER=f'{owner}:{group}',
                         VANPI_BACKUP_JOB_LOCK=str(lock), VANPI_BACKUP_JOB_LOCK_OWNER=owner,
-                        VANPI_BACKUP_JOB_LOCK_GROUP=group, VANPI_BACKUP_JOB_LOCK_MODE='660')
+                        VANPI_BACKUP_JOB_LOCK_GROUP=group, VANPI_BACKUP_JOB_LOCK_MODE='660',
+                        VANPI_BACKUP_LOCK_DIR=str(registry), VANPI_BACKUP_LOCK_DIR_MODE='770')
         return root, stage, live, records, previous, snapshots
 
 
@@ -432,6 +451,83 @@ class DeploymentRollbackTests(DeploymentFixture):
         result = self.apply(fixture, tail='local_backup_commit; exit 45')
         self.assertEqual(result.returncode, 45)
         self.assertNotIn('rollback:', (fixture[0] / 'events').read_text())
+
+
+@unittest.skipUnless(sys.platform.startswith('linux') and Path('/proc/locks').is_file(),
+                     'the registry guard reads Linux /proc/locks')
+class RegistryShrinkGuardTests(DeploymentFixture):
+    def hold(self, name, exclusive=True):
+        fd = os.open(Path(self.env['VANPI_BACKUP_LOCK_DIR']) / f'{name}.lock', os.O_RDONLY)
+        self.addCleanup(os.close, fd)
+        fcntl.flock(fd, (fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH) | fcntl.LOCK_NB)
+
+    @staticmethod
+    def stage_registry(stage, edit):
+        path = stage / REGISTRY_SOURCE
+        text = path.read_text()
+        changed = edit(text)
+        assert changed != text
+        path.write_text(changed)
+
+    def assert_refused_before_mutation(self, fixture, result, message):
+        root, stage, live, _records, _previous, snapshots = fixture
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(message, result.stderr)
+        events = (root / 'events').read_text() if (root / 'events').exists() else ''
+        self.assertNotIn('publish:', events)
+        self.assertNotIn('systemctl:stop', events)
+        self.assertFalse((stage / 'previous').exists())
+        for destination, (old, _mode) in snapshots.items():
+            self.assertEqual((live / destination.lstrip('/')).read_bytes(), old, destination)
+
+    def test_refuses_a_staged_registry_without_any_held_lock_class(self):
+        cases = [('job-offsite', True, lambda text: text.replace(' offsite)', ')')),
+                 ('disk-FORT-MPLS-5TB', False, lambda text: text.replace(' FORT-MPLS-5TB', '')),
+                 ('data-borg-repo', True, lambda text: text.replace('(borg-repo)', '()')),
+                 ('cloud-upload', True, lambda text: re.sub(r'(?m)^BACKUP_CLOUD_SLOT=.*$', 'BACKUP_CLOUD_SLOT=', text))]
+        for name, exclusive, edit in cases:
+            with self.subTest(lock=name):
+                fixture = self.fixture()
+                self.stage_registry(fixture[1], edit)
+                self.hold(name, exclusive)
+                result = self.apply(fixture)
+                self.assert_refused_before_mutation(fixture, result, f'without {name} while it is held')
+
+    def test_publishes_during_a_run_that_holds_only_resource_locks(self):
+        # An offsite run's locks, but not the legacy lock the fence takes.
+        fixture = self.fixture()
+        for name, exclusive in (('job-offsite', True), ('disk-FORT-MPLS-5TB', False), ('cloud-upload', True)):
+            self.hold(name, exclusive)
+        # Holders are found without opening lock files: none is readable now.
+        for path in Path(self.env['VANPI_BACKUP_LOCK_DIR']).iterdir():
+            path.chmod(0)
+        result = self.apply(fixture)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_unheld_entries_may_go_and_unsafe_inputs_fail_closed(self):
+        fixture = self.fixture()
+        self.stage_registry(fixture[1], lambda text: text.replace(' offsite)', ')'))
+        result = self.apply(fixture)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for change, message in (('proc', 'Cannot read'), ('registry', 'Cannot read the staged lock registry'),
+                                ('symlink', 'Backup lock directory is unsafe')):
+            with self.subTest(change=change):
+                fixture = self.fixture()
+                if change == 'proc':
+                    self.env['LOCAL_BACKUP_PROC_LOCKS'] = str(self.root / 'missing-locks')
+                elif change == 'registry':
+                    (fixture[1] / REGISTRY_SOURCE).write_text('exit 1\n')
+                else:
+                    registry = Path(self.env['VANPI_BACKUP_LOCK_DIR'])
+                    registry.rename(registry.with_name('saved-registry'))
+                    registry.symlink_to(registry.with_name('saved-registry'))
+                result = self.apply(fixture)
+                self.env.pop('LOCAL_BACKUP_PROC_LOCKS', None)
+                self.assert_refused_before_mutation(fixture, result, message)
+        fixture = self.fixture()
+        shutil.rmtree(self.env['VANPI_BACKUP_LOCK_DIR'])
+        result = self.apply(fixture)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == '__main__':

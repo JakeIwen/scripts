@@ -1,11 +1,10 @@
 """Remote CLI fixture: real subprocess boundary, synthetic admission evidence only."""
 from dataclasses import asdict
 import json
-import os
-import subprocess
+from pathlib import Path
 import sys
 
-from offsite_remote import REMOTE_COMMANDS
+from offsite_remote import remote_commands
 from pi.tests.backup.offsite_fixtures import BOOTSTRAP, OffsiteFixture
 
 SECRET = 'fixture-transport-secret-' + 'x' * 40
@@ -26,6 +25,15 @@ elif name == 'tailscale':
 else:
     print('{}')
 '''
+# Helpers a snapshot run executes from its own copy; the isolation tests install
+# the command double over them in the fixture live tree.
+SNAPSHOT_HELPERS = ('backup/offsite_mounts.sh', 'samba_share_control.sh', 'ntfy_send.sh')
+LOG_EXECUTION = """
+import json, os, sys
+from pathlib import Path
+with (Path(os.environ['OFFSITE_FIXTURE']).parent / 'executions.jsonl').open('a') as stream:
+    stream.write(json.dumps({'name': 'uplink', 'args': sys.argv[1:], 'path': sys.argv[0], 'env': {}}) + '\\n')
+"""
 
 
 class RemoteFixture(OffsiteFixture):
@@ -34,7 +42,7 @@ class RemoteFixture(OffsiteFixture):
 
     def __init__(self):
         super().__init__()
-        for name in REMOTE_COMMANDS:
+        for name in remote_commands():
             path = self.bin / name
             path.write_text('#!' + sys.executable + '\n' + GUARD_COMMAND)
             path.chmod(0o700)
@@ -45,6 +53,16 @@ class RemoteFixture(OffsiteFixture):
                                                   'transport_password': SECRET}))
         self.remote_config.chmod(0o600)
         self.loopback = None
+
+    def install_stub_helpers(self):
+        """Replace the live tree's device-facing helpers with the command double before a snapshot."""
+        fake = Path(__file__).with_name('offsite_fake_command.py').read_text()
+        for relative in SNAPSHOT_HELPERS:
+            (self.live / relative).write_text('#!' + sys.executable + '\n' + fake)
+        (self.live / 'backup' / 'icloud_uplink.py').write_text('#!' + sys.executable + '\n' + LOG_EXECUTION
+                                                                + GUARD_COMMAND)
+        for relative in (*SNAPSHOT_HELPERS, 'backup/icloud_uplink.py'):
+            (self.live / relative).chmod(0o755)
 
     def start(self, *args):
         code = BOOTSTRAP
@@ -59,8 +77,4 @@ class LoopbackRepository(RemoteRepository):
         self.path=os.environ['OFFSITE_LOOPBACK']
 '''
             code = code.replace('with context:', setup + "\nwith context, patch('offsite_remote.RemoteRepository',LoopbackRepository):")
-        environment = {**self.env, 'OFFSITE_LOOPBACK': self.loopback or ''}
-        descriptors = () if args[0] in ('status', 'dashboard', 'rates') else (self.fd,)
-        return subprocess.Popen([sys.executable, '-B', '-c', code, *args], cwd=self.root,
-                                env=environment, pass_fds=descriptors, text=True,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return super().start(*args, code=code, env={'OFFSITE_LOOPBACK': self.loopback or ''})
