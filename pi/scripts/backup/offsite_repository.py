@@ -30,7 +30,8 @@ class Commands:
     def __init__(self, cfg, locks):
         # locks: the admitted offsite_locks.OffsiteLocks whose descriptors children inherit.
         self.cfg, self.locks = cfg, locks
-        self.cancelled = None
+        self.cancelled = None  # the signal's name, once TERM/INT arrives
+        self.stopped = None  # the latched stop cause; see stop_cause()
 
     @contextmanager
     def signals(self):
@@ -44,12 +45,15 @@ class Commands:
                 signal.signal(sig, handler)
 
     def stop_cause(self):
-        """Why the run must stop (TERM/INT or the ignition flag), or None."""
-        if self.cancelled:
-            return f'Stopped by {self.cancelled}; rerun when parked to resume'
-        if self.cfg.ignition.exists() or self.cfg.ignition.is_symlink():
-            return 'Ignition is on; rerun when parked to resume'
-        return None
+        """Why the run must stop (TERM/INT or the ignition flag), or None; once seen, for good."""
+        # Latched: on_stop may already have closed the run's holds, so an
+        # ignition flag that clears again must not let later work run without them.
+        if self.stopped is None:
+            if self.cancelled:
+                self.stopped = f'Stopped by {self.cancelled}; rerun when parked to resume'
+            elif self.cfg.ignition.exists() or self.cfg.ignition.is_symlink():
+                self.stopped = 'Ignition is on; rerun when parked to resume'
+        return self.stopped
 
     def allowed(self):
         cause = self.stop_cause()

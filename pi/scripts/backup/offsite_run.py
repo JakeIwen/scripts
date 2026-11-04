@@ -241,6 +241,9 @@ class Backup:
             self.repo.verify()
             self.target_verified = True
             self.run_sources()
+            # A stop seen only during the last source's release still interrupts
+            # the run, so a pre-existing verified target is released below.
+            self.commands.allowed()
         except (OSError, ValueError, RuntimeError) as exc:
             result = Result.INTERRUPTED if isinstance(exc, Interrupted) else Result.FAILED
             outcome = {'result': result, 'cause': str(exc)}

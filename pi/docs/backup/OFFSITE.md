@@ -288,6 +288,11 @@ conflict matrix and drain behavior are in [backup concurrency](CONCURRENCY.md).
   release and the ntfy run. The ordinary drain waits only 60 s for the target, an
   unmount can stall, and ntfy can block without an uplink. `job-offsite` (fd 10)
   stays held until exit.
+- A stop is final once seen, even an ignition flag that clears again: the run's
+  disk, data and slot descriptors may already be closed, so it starts no further
+  source. A stop
+  seen only during the last source's release still ends the run `interrupted`
+  (exit 143), and the target is released as for any stop.
 - `restore-test` locks the disk whose mounted filesystem (`findmnt -T`) holds
   `--target`; any target that is neither on such a disk nor on the root
   filesystem is refused, and so is a root-filesystem target inside `/mnt`: it

@@ -2,7 +2,8 @@
 
 Covers the cloud-slot policy, the Borg repository deferral and bounded wait,
 per-phase disk holds and their guarded release (a stop frees the target even
-while a release stalls), restore targets, and admission refusals.
+while a release stalls, and stays final once seen), restore targets, and
+admission refusals.
 """
 import json
 import os
@@ -347,6 +348,48 @@ class StopDuringReleaseTests(LockFixtureCase):
         for row in self.releases():
             self.assertEqual(row['env']['VANPI_BACKUP_DISK_LOCK_FDS'], '', row)
             self.assertIsNone(row['env']['VANPI_BACKUP_CLOUD_SLOT_FD'], row)
+
+    def test_an_ignition_flag_that_clears_during_a_release_still_stops_the_run(self):
+        # The stop closed the run's holds, so a later source would run without its target lock or slot.
+        self.unmount('movingparts')
+        stalled, proceed = self.stall_release('movingparts')
+        child = self.start('movingparts', 'borg')
+        self.wait_for(stalled.exists, child, 'movingparts was never released')
+        self.f.cfg.ignition.touch()
+        self.wait_for(lambda: self.free(LockClass.DISK, self.f.label), child,
+                      'the ignition stop never freed the target', timeout=10)
+        self.f.cfg.ignition.unlink()
+        proceed.touch()
+        out, err = child.communicate(timeout=60)
+        self.assertEqual(child.returncode, 143, out + err)
+        state = json.loads(out.splitlines()[-1])
+        self.assertEqual(state['result'], 'interrupted')
+        self.assertIn('Ignition is on', state['cause'])
+        self.assertEqual(state['sources']['movingparts']['result'], 'ok')
+        self.assertEqual(state['sources']['borg']['result'], 'interrupted')
+        self.assertEqual(self.restic_backups(), ['movingparts'])
+        self.assertEqual([row['args'][1] for row in self.releases()], ['movingparts', self.f.label])
+
+    def test_term_during_the_last_release_interrupts_the_run_and_releases_its_target(self):
+        # The target was already mounted, so only a stopped run releases it.
+        self.unmount('movingparts')
+        stalled, proceed = self.stall_release('movingparts')
+        child = self.start('movingparts')
+        self.wait_for(stalled.exists, child, 'movingparts was never released')
+        child.send_signal(signal.SIGTERM)
+        self.wait_for(lambda: self.free(LockClass.DISK, self.f.label), child,
+                      'the target stayed locked behind a stalled release', timeout=10)
+        proceed.touch()
+        out, err = child.communicate(timeout=60)
+        self.assertEqual(child.returncode, 143, out + err)
+        state = json.loads(out.splitlines()[-1])
+        self.assertEqual(state['result'], 'interrupted')
+        self.assertIn('SIGTERM', state['cause'])
+        self.assertEqual(state['sources']['movingparts']['result'], 'ok')
+        self.assertEqual([row['args'][1] for row in self.releases()], ['movingparts', self.f.label])
+        self.f.reload()
+        self.assertEqual(self.f.state['released'], ['movingparts', self.f.label])
+        self.assertEqual([row[1] for row in self.f.calls() if row[0] == 'notify'], ['vanpi offsite interrupted'])
 
     def test_check_releases_its_target_holding_no_resource_descriptor(self):
         self.unmount(self.f.label)
