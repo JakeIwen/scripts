@@ -12,7 +12,6 @@ from pathlib import Path
 import argparse
 import fcntl
 import hashlib
-import importlib.util
 import json
 import math
 import os
@@ -28,11 +27,9 @@ from typing import BinaryIO
 
 ROOT = Path(__file__).resolve().parent
 LOADED_RUNNER = Path(__file__).read_bytes()
-FRONTEND = Path('pi/apps/van_dashboard/frontend')
 COMMAND_TIMEOUT = 900
 CACHE_WINDOW = 6 * 3600
 KEEP_PASSES = 50
-VAN_COMPUTE_HELPER = ROOT / 'pi/tests/dashboard/_van_compute_checkout.py'
 # Test-file prefix -> import roots its tests need, in search order.
 PYTHON_IMPORT_ROOTS = {
     'macbook/bettertouchtool/tests': ('macbook/bettertouchtool',),
@@ -60,7 +57,6 @@ def test_files():
 
 def suite_commands(paths):
     plugins = set()
-    frontend = False
     for path in paths:
         if path.suffix == '.py':
             # Independent projects import similarly named modules (including
@@ -75,9 +71,7 @@ def suite_commands(paths):
         elif path.suffix in {'.ts', '.tsx'}:
             plugin = next((parent for parent in path.parents
                            if (ROOT / parent / '.claude-plugin/plugin.json').is_file()), None)
-            if FRONTEND in path.parents:
-                frontend = True
-            elif plugin is not None:
+            if plugin is not None:
                 plugins.add(plugin)
             else:
                 raise ValueError('No suite configured for ' + str(path))
@@ -85,8 +79,6 @@ def suite_commands(paths):
             raise ValueError('No test runner configured for ' + str(path))
     for plugin in sorted(plugins):
         yield str(plugin), ['claude', 'plugin', 'test', str(plugin)], ROOT
-    if frontend:
-        yield str(FRONTEND), ['npm', 'test', '--', '--bail=1'], ROOT / FRONTEND
 
 
 def git_output(*args, cwd=ROOT):
@@ -162,10 +154,7 @@ def hash_path(digest, path, ancestors=()):
             hash_repository(digest, path, ancestors + (path,))
         else:
             for child in sorted(path.iterdir()):
-                # Vitest's result file and Vite's temporary configs are outputs.
-                if child.name == '.git' or child.name == '.vite-temp':
-                    continue
-                if child.name == 'vitest' and path.name == '.vite':
+                if child.name == '.git':
                     continue
                 hash_path(digest, child, ancestors + (path,))
     else:
@@ -186,19 +175,6 @@ def hash_repository(digest, root, ancestors=()):
         hash_path(digest, path, ancestors)
 
 
-def hash_van_compute(digest):
-    """Use the tests' resolver; never silently turn resolver/Git errors into a key."""
-    if not VAN_COMPUTE_HELPER.is_file():
-        return
-    spec = importlib.util.spec_from_file_location('_van_compute_checkout', VAN_COMPUTE_HELPER)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    checkout = module.CHECKOUT
-    hash_value(digest, checkout)
-    digest.update(git_output('rev-parse', 'HEAD', cwd=checkout))
-    hash_repository(digest, checkout)
-
-
 def tree_fingerprint():
     try:
         # A process waiting on the lock may still be executing the old runner.
@@ -209,16 +185,15 @@ def tree_fingerprint():
         # These change resolution or opt-in behavior without changing source files.
         for item in (sys.version, sys.executable, sys.platform, sys.prefix,
                      *(os.environ.get(key, '') for key in
-                       ('BTT_LIVE_TESTS', 'PATH', 'PYTHONPATH', 'VAN_COMPUTE_CHECKOUT'))):
+                       ('BTT_LIVE_TESTS', 'PATH', 'PYTHONPATH'))):
             hash_value(digest, item)
         if sys.prefix != sys.base_prefix and Path(sys.prefix) != ROOT / '.local/test-venv':
             hash_path(digest, Path(sys.prefix))
-        for executable in (sys.executable, 'node', 'npm', 'claude', 'bash', 'zsh'):
+        for executable in (sys.executable, 'node', 'claude', 'bash', 'zsh'):
             resolved = shutil.which(executable)
             hash_value(digest, (executable, resolved))
             if resolved:
                 hash_path(digest, Path(resolved))
-        hash_van_compute(digest)
         return digest.hexdigest()
     except Exception as error:
         # Resolver imports and disappearing inputs must disable reuse, not hide

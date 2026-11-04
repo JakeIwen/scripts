@@ -5,7 +5,7 @@ unit=${1:?usage: rollback_python_service.sh UNIT FLAT_SCRIPT}
 flat=${2:?usage: rollback_python_service.sh UNIT FLAT_SCRIPT}
 [[ $# -eq 2 ]] || exit 2
 case "$unit:$flat" in
-  van-dashboard.service:van_dashboard.py|video-library.service:video_library_server.py|audiobooks.service:audiobook_server.py)
+  video-library.service:video_library_server.py|audiobooks.service:audiobook_server.py)
     interpreter=/usr/bin/python3 ;;
   bme280-mqtt.service:bme280_mqtt.py)
     interpreter=/home/pi/pyvenv/bin/python ;;
@@ -18,9 +18,6 @@ flat_root=/home/pi/scripts/python-automation
 exec 9>"$root/.install.lock"
 /usr/bin/flock -x 9
 backup="$root/pre-package-units/$unit.backup"
-if [[ "$unit" == van-dashboard.service && ! -e "$backup" ]]; then
-  backup="$root/pre-package-units"
-fi
 [[ "$(/usr/bin/readlink -e "$backup")" == "$backup" ]] || exit 1
 [[ -f "$backup/$unit" && ! -L "$backup/$unit" ]] || exit 1
 [[ -f "$units/$unit" && ! -L "$units/$unit" ]] || exit 1
@@ -49,11 +46,6 @@ for state in "$root/service-state/$unit.json" "$root/pending-restarts/$unit.json
     mv "$state" "$retired/${parent##*/}/"
   fi
 done
-if [[ "$unit" == van-dashboard.service ]]; then
-  for state in "$root/activated.json" "$root/pending-restart"; do
-    if [[ -e "$state" || -L "$state" ]]; then mv "$state" "$retired/"; fi
-  done
-fi
 sudo /usr/bin/systemctl daemon-reload
 sudo /usr/bin/systemctl restart "$unit"
 printf 'Restored %s; retired state: %s\n' "$unit" "$retired"

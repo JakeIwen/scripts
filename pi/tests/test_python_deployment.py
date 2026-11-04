@@ -22,6 +22,10 @@ from pi.tests.python_deployment_fixtures import FIXTURE_MODULES
 
 from pi.tests.python_deployment_services import FakeSystemServices, flat_unit, package_unit
 
+# The unit transaction tests deploy when one service is enough.
+SAMPLE = "video-library.service"
+SAMPLE_MODULE = "pi/apps/video_library/video_library_server.py"
+
 
 class InterruptedArchive(io.BytesIO):
     def __init__(self, data, cutoff):
@@ -108,11 +112,11 @@ class PythonDeploymentTests(unittest.TestCase):
         return output.getvalue()
 
     @staticmethod
-    def _services(active=(deployment.DASHBOARD,)):
+    def _services(active=(SAMPLE,)):
         return FakeSystemServices(active=set(active))
 
     @staticmethod
-    def _install(plan, repo, root, mode, services=None, selected=(deployment.DASHBOARD,)):
+    def _install(plan, repo, root, mode, services=None, selected=(SAMPLE,)):
         if services is not None and hasattr(services, "bind_release_root"):
             services.bind_release_root(root)
         stream = io.BytesIO(PythonDeploymentTests._archive(plan, repo))
@@ -265,15 +269,14 @@ class PythonDeploymentTests(unittest.TestCase):
 
     def test_service_digests_cover_only_each_services_runtime_dependencies(self):
         cases = {
-            "pi/apps/media_organizer/records.py": {deployment.DASHBOARD},
-            "pi/apps/media_organizer/config.py": {deployment.DASHBOARD},
+            "pi/apps/media_organizer/records.py": set(),
+            "pi/apps/media_organizer/config.py": set(),
             "pi/apps/media_organizer/cli.py": set(),
-            "pi/apps/van_dashboard/routes/common.py": {deployment.DASHBOARD},
             "pi/apps/video_library/players/vlc_player.py": {"video-library.service"},
             "pi/apps/video_library/static/video_library.js": {"video-library.service"},
             "shared/python/sonos_tasks.py": {"video-library.service"},
-            "shared/__init__.py": {"video-library.service", deployment.DASHBOARD, "vanpi-metered.service"},
-            "shared/python/__init__.py": {"video-library.service", deployment.DASHBOARD, "vanpi-metered.service"},
+            "shared/__init__.py": {"video-library.service", "vanpi-metered.service"},
+            "shared/python/__init__.py": {"video-library.service", "vanpi-metered.service"},
             "pi/apps/audiobooks/audiobook_server.py": {"audiobooks.service"},
             "pi/apps/bme280/bme280_mqtt.py": {"bme280-mqtt.service"},
             "pi/package_runtime.py": set(deployment.SERVICES),
@@ -323,13 +326,13 @@ class PythonDeploymentTests(unittest.TestCase):
 
             for option, expected_mode in (("--activate", "activate"), ("--update", "update")):
                 mode_result = subprocess.run(
-                    [sys.executable, script, "--dry-run", option, "--service", deployment.DASHBOARD],
+                    [sys.executable, script, "--dry-run", option, "--service", SAMPLE],
                     cwd=repo, env=environment, capture_output=True, text=True, check=False,
                 )
                 self.assertEqual(mode_result.returncode, 0, mode_result.stderr)
                 mode_plan = json.loads(mode_result.stdout)
                 self.assertEqual(mode_plan["mode"], expected_mode)
-                self.assertIn("not selected", mode_plan["units"]["video-library.service"])
+                self.assertIn("not selected", mode_plan["units"]["audiobooks.service"])
                 self.assertFalse(marker.exists())
 
     def test_actual_repository_dry_run_contains_only_direct_allowlisted_sources(self):
@@ -372,7 +375,7 @@ class PythonDeploymentTests(unittest.TestCase):
             self.assertEqual(sentinel.read_bytes(), b"old flat sentinel")
             self.assertTrue((root / "releases" / plan["release"] / "manifest.json").is_file())
 
-    def test_first_dashboard_activation_is_explicit_and_saves_unit_and_state(self):
+    def test_first_activation_is_explicit_and_saves_unit_and_state(self):
         with self.fixture() as repo, tempfile.TemporaryDirectory() as name:
             root = Path(name) / "packages"
             services = self._services()
@@ -380,29 +383,29 @@ class PythonDeploymentTests(unittest.TestCase):
             archive = self._archive(plan, repo)
             with self.assertRaises(ValueError):
                 deployment.install_release(io.BytesIO(archive), root, "update", services=services,
-                                           selected=[deployment.DASHBOARD])
+                                           selected=[SAMPLE])
             self.assertFalse((root / "current").exists())
             self.assertFalse((root / "pre-package-units").exists())
             self.assertEqual(services.restart_calls, [])
 
             result = deployment.install_release(
                 io.BytesIO(archive), root, "activate", services=services,
-                selected=[deployment.DASHBOARD],
+                selected=[SAMPLE],
             )
-            backup = root / "pre-package-units" / (deployment.DASHBOARD + ".backup")
-            self.assertEqual(result["restarted"], [deployment.DASHBOARD])
-            self.assertEqual((backup / deployment.DASHBOARD).read_bytes(), flat_unit(deployment.DASHBOARD))
+            backup = root / "pre-package-units" / (SAMPLE + ".backup")
+            self.assertEqual(result["restarted"], [SAMPLE])
+            self.assertEqual((backup / SAMPLE).read_bytes(), flat_unit(SAMPLE))
             self.assertEqual(
-                json.loads((root / "service-state" / (deployment.DASHBOARD + ".json")).read_bytes()),
-                {"release": plan["release"], "digest": plan["manifest"]["services"][deployment.DASHBOARD]},
+                json.loads((root / "service-state" / (SAMPLE + ".json")).read_bytes()),
+                {"release": plan["release"], "digest": plan["manifest"]["services"][SAMPLE]},
             )
             self.assertEqual(json.loads((root / "activated.json").read_bytes()), {"release": plan["release"]})
-            self.assertFalse((root / "pending-restarts" / (deployment.DASHBOARD + ".json")).exists())
+            self.assertFalse((root / "pending-restarts" / (SAMPLE + ".json")).exists())
 
     def test_all_four_activation_saves_each_unit_and_restarts_only_active(self):
         with self.fixture() as repo, tempfile.TemporaryDirectory() as name:
             root = Path(name) / "packages"
-            active = {deployment.DASHBOARD, "audiobooks.service"}
+            active = {SAMPLE, "audiobooks.service"}
             services = self._services(active=active)
             plan = deployment.build_plan(repo)
             services.bind_release_root(root)
@@ -455,7 +458,7 @@ class PythonDeploymentTests(unittest.TestCase):
                     },
                 )
 
-    def test_scoped_non_dashboard_activation_can_be_routinely_updated(self):
+    def test_scoped_activation_can_be_routinely_updated(self):
         unit = "video-library.service"
         with self.fixture() as repo, tempfile.TemporaryDirectory() as name:
             root = Path(name) / "packages"
@@ -469,7 +472,7 @@ class PythonDeploymentTests(unittest.TestCase):
             result = self._install(second, repo, root, "update", services=services, selected=[unit])
             self.assertEqual(result["restarted"], [unit])
             self.assertEqual(services.restart_calls, [unit])
-            self.assertFalse((root / "service-state" / (deployment.DASHBOARD + ".json")).exists())
+            self.assertFalse((root / "service-state" / "audiobooks.service.json").exists())
 
     def test_scoped_module_and_unit_changes_restart_only_selected_service(self):
         with self.fixture() as repo, tempfile.TemporaryDirectory() as name:
@@ -479,29 +482,29 @@ class PythonDeploymentTests(unittest.TestCase):
             self._install(first, repo, root, "activate", services=services)
             services.restart_calls.clear()
             services.install_calls.clear()
-            dashboard = repo / "pi/apps/van_dashboard/van_dashboard.py"
-            dashboard.write_text("SOURCE_MARKER = 'dashboard v2'\n")
+            module = repo / SAMPLE_MODULE
+            module.write_text("SOURCE_MARKER = 'sample v2'\n")
             second = deployment.build_plan(repo)
             result = self._install(second, repo, root, "update", services=services)
-            self.assertEqual(result["restarted"], [deployment.DASHBOARD])
+            self.assertEqual(result["restarted"], [SAMPLE])
             self.assertEqual(services.install_calls, [])
 
             services.restart_calls.clear()
-            unit_path = repo / "pi/services" / deployment.DASHBOARD
-            unit_path.write_bytes(package_unit(deployment.DASHBOARD, "fixture package v2"))
+            unit_path = repo / "pi/services" / SAMPLE
+            unit_path.write_bytes(package_unit(SAMPLE, "fixture package v2"))
             third = deployment.build_plan(repo)
-            self.assertEqual(second["manifest"]["services"][deployment.DASHBOARD],
-                             third["manifest"]["services"][deployment.DASHBOARD])
+            self.assertEqual(second["manifest"]["services"][SAMPLE],
+                             third["manifest"]["services"][SAMPLE])
             result = self._install(third, repo, root, "update", services=services)
-            self.assertEqual(result["restarted"], [deployment.DASHBOARD])
-            self.assertEqual([call[0] for call in services.install_calls], [deployment.DASHBOARD])
+            self.assertEqual(result["restarted"], [SAMPLE])
+            self.assertEqual([call[0] for call in services.install_calls], [SAMPLE])
 
     def test_all_selected_intents_are_journaled_before_switch_and_complete_incrementally(self):
         with self.fixture() as repo, tempfile.TemporaryDirectory() as name:
             root = Path(name) / "packages"
             units = list(deployment.SERVICES)
-            services = self._services(active={deployment.DASHBOARD, "video-library.service", "audiobooks.service"})
-            services.restart_failures["video-library.service"] = 1
+            services = self._services(active={"video-library.service", "audiobooks.service", "bme280-mqtt.service"})
+            services.restart_failures["audiobooks.service"] = 1
             plan = deployment.build_plan(repo)
             real_replace = deployment.replace_link
             checked = False
@@ -523,23 +526,23 @@ class PythonDeploymentTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     self._install(plan, repo, root, "activate", services=services, selected=units)
             self.assertTrue(checked)
-            self.assertTrue((root / "service-state" / (deployment.DASHBOARD + ".json")).is_file())
-            self.assertFalse((root / "pending-restarts" / (deployment.DASHBOARD + ".json")).exists())
+            self.assertTrue((root / "service-state" / (units[0] + ".json")).is_file())
+            self.assertFalse((root / "pending-restarts" / (units[0] + ".json")).exists())
             for unit in units[1:]:
                 self.assertTrue((root / "pending-restarts" / (unit + ".json")).is_file())
                 self.assertFalse((root / "service-state" / (unit + ".json")).exists())
 
             services.restart_calls.clear()
             self._install(plan, repo, root, "activate", services=services,
-                          selected=["video-library.service"])
-            self.assertEqual(services.restart_calls, ["video-library.service"])
-            services.restart_calls.clear()
-            self._install(plan, repo, root, "activate", services=services,
                           selected=["audiobooks.service"])
             self.assertEqual(services.restart_calls, ["audiobooks.service"])
             services.restart_calls.clear()
             self._install(plan, repo, root, "activate", services=services,
-                          selected=["bme280-mqtt.service", "vanpi-metered.service"])
+                          selected=["bme280-mqtt.service"])
+            self.assertEqual(services.restart_calls, ["bme280-mqtt.service"])
+            services.restart_calls.clear()
+            self._install(plan, repo, root, "activate", services=services,
+                          selected=["vanpi-metered.service"])
             self.assertEqual(services.restart_calls, [])
             self.assertFalse(any((root / "pending-restarts").glob("*.json")))
             self.assertEqual({p.name for p in (root / "service-state").glob("*.json")},
@@ -559,12 +562,12 @@ class PythonDeploymentTests(unittest.TestCase):
             services.install_unit = fail_after_copy
             with self.assertRaises(RuntimeError):
                 self._install(plan, repo, root, "activate", services=services)
-            pending = json.loads((root / "pending-restarts" / (deployment.DASHBOARD + ".json")).read_bytes())
+            pending = json.loads((root / "pending-restarts" / (SAMPLE + ".json")).read_bytes())
             self.assertTrue(pending["restart"])
             services.install_unit = original
             self._install(plan, repo, root, "activate", services=services)
             self.assertEqual(len(services.install_calls), 2)
-            self.assertEqual(services.restart_calls, [deployment.DASHBOARD])
+            self.assertEqual(services.restart_calls, [SAMPLE])
 
     def test_inactive_service_pending_reload_retry_does_not_start_it(self):
         unit = "audiobooks.service"
@@ -605,9 +608,9 @@ class PythonDeploymentTests(unittest.TestCase):
             root = Path(name) / "packages"
             services = self._services()
             self._install(deployment.build_plan(repo), repo, root, "activate", services=services)
-            services.active.remove(deployment.DASHBOARD)
+            services.active.remove(SAMPLE)
             services.restart_calls.clear()
-            (repo / "pi/apps/van_dashboard/van_dashboard.py").write_text("CHANGED = True\n")
+            (repo / SAMPLE_MODULE).write_text("CHANGED = True\n")
             plan = deployment.build_plan(repo)
             result = self._install(plan, repo, root, "update", services=services)
             self.assertEqual(result["restarted"], [])
@@ -618,7 +621,7 @@ class PythonDeploymentTests(unittest.TestCase):
             with self.subTest(case=case), self.fixture() as repo, tempfile.TemporaryDirectory() as name:
                 root = Path(name) / "packages"
                 services = self._services(active=set())
-                selected = [deployment.DASHBOARD, "video-library.service"]
+                selected = ["audiobooks.service", "video-library.service"]
                 if case == "foreign-unit":
                     services.units["video-library.service"] = b"[Service]\nExecStart=/bin/foreign\n"
                 else:
@@ -641,10 +644,8 @@ class PythonDeploymentTests(unittest.TestCase):
             with self.subTest(unit=unit), self.fixture() as repo, tempfile.TemporaryDirectory() as name:
                 root = Path(name) / "packages"
                 services = self._services(active=set())
-                # Establish the global dashboard marker as production already has it.
-                selected = list(deployment.SERVICES) if unit != deployment.DASHBOARD else [deployment.DASHBOARD]
                 self._install(deployment.build_plan(repo), repo, root, "activate",
-                              services=services, selected=selected)
+                              services=services, selected=list(deployment.SERVICES))
                 state = root / "service-state" / (unit + ".json")
                 state.unlink()
                 services.units[unit] = flat_unit(unit, "operator rollback")
@@ -684,7 +685,7 @@ class PythonDeploymentTests(unittest.TestCase):
                 with self.subTest(label=label):
                     with self.assertRaises(errors):
                         deployment.install_release(stream, root, "update", services=services,
-                                                   selected=[deployment.DASHBOARD])
+                                                   selected=[SAMPLE])
                     self.assertEqual(self._current_snapshot(root), before)
 
     def test_unsupported_current_path_is_refused_without_changes(self):
@@ -774,8 +775,7 @@ class PythonDeploymentTests(unittest.TestCase):
                 first = deployment.build_plan(repo)
                 activated = self._install(first, repo, root, "activate", services=services)
                 self.assertEqual(activated["gc"]["status"], "ok")
-                dashboard = repo / "pi/apps/van_dashboard/van_dashboard.py"
-                dashboard.write_text("SOURCE_MARKER = 'gc update'\n")
+                (repo / SAMPLE_MODULE).write_text("SOURCE_MARKER = 'gc update'\n")
                 second = deployment.build_plan(repo)
                 updated = self._install(second, repo, root, "update", services=services)
             self.assertEqual(updated["gc"]["status"], "ok")
@@ -859,7 +859,7 @@ class PythonDeploymentTests(unittest.TestCase):
             "missing-record", "unreadable-record", "pid-mismatch", "invocation-mismatch",
             "package-mismatch", "transitional-state", "service-query-error",
         )
-        for unit in deployment.SERVICES:
+        for unit in (*deployment.SERVICES, *deployment.EXTERNAL_CONSUMERS):
             for case in cases:
                 with self.subTest(unit=unit, case=case), self._gc_root() as (root, releases, services):
                     services.active.add(unit)
@@ -928,8 +928,7 @@ class PythonDeploymentTests(unittest.TestCase):
                 candidates = [self._make_release(root, f"delete-error-{index}",
                                                  (index + 1) * 1_000_000_000)
                               for index in range(5)]
-                dashboard = repo / "pi/apps/van_dashboard/van_dashboard.py"
-                dashboard.write_text("SOURCE_MARKER = 'restart before gc error'\n")
+                (repo / SAMPLE_MODULE).write_text("SOURCE_MARKER = 'restart before gc error'\n")
                 second = deployment.build_plan(repo)
                 services.restart_calls.clear()
                 real_rmtree = shutil.rmtree
@@ -941,7 +940,7 @@ class PythonDeploymentTests(unittest.TestCase):
 
                 with mock.patch.object(deployment.shutil, "rmtree", side_effect=fail_candidate):
                     result = self._install(second, repo, root, "update", services=services)
-            self.assertEqual(result["restarted"], [deployment.DASHBOARD])
+            self.assertEqual(result["restarted"], [SAMPLE])
             self.assertEqual(result["gc"]["status"], "skipped")
             self.assertEqual(deployment.current_release(root).name, second["release"])
             self.assertTrue(candidates[0].is_dir())
@@ -963,7 +962,7 @@ class PythonDeploymentTests(unittest.TestCase):
                     self.assertEqual(result["restarted"], [])
                 self.assertTrue(original_runtime.is_dir())
                 external_runtime = deployment.current_release(root)
-                services.restart(deployment.DASHBOARD)
+                services.restart(SAMPLE)
                 services.restart_calls.clear()
                 for index in range(6, 12):
                     audiobook.write_text(f"SOURCE_MARKER = 'unrelated-{index}'\n")
@@ -1022,7 +1021,7 @@ class PythonDeploymentTests(unittest.TestCase):
                         services.dropins(unit)
 
     def test_dropin_launch_overrides_are_rejected(self):
-        unit = deployment.DASHBOARD
+        unit = SAMPLE
         dangerous = (
             "ExecStart", "ExecStartPre", "ExecStopPost", "EnvironmentFile",
             "UnsetEnvironment", "PassEnvironment", "RootDirectory", "RootImage",

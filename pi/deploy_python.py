@@ -20,15 +20,6 @@ ROOT = Path(__file__).resolve().parents[1]
 LIVE_ROOT = Path('/home/pi/scripts/python-packages')
 # This table also supplies the generic sync's unit exclusion list.
 SERVICES = {
-    'van-dashboard.service': {
-        'app': 'van_dashboard', 'interpreter': '/usr/bin/python3',
-        'flat': 'van_dashboard.py',
-        # The controller imports these records in-process, not through the CLI.
-        'extra': ('pi/apps/media_organizer/__init__.py',
-                  'pi/apps/media_organizer/config.py', 'pi/apps/media_organizer/records.py',
-                  'shared/__init__.py', 'shared/python/__init__.py', 'shared/python/tool_settings.py'),
-        'extra_dirs': ('pi/apps/metered/', 'shared/metered/'),
-    },
     'video-library.service': {
         'app': 'video_library', 'interpreter': '/usr/bin/python3',
         'flat': 'video_library_server.py',
@@ -50,14 +41,16 @@ SERVICES = {
                   'pi/apps/video_library/qbittorrent_availability.py'),
     },
 }
-DASHBOARD = 'van-dashboard.service'
+# Units other repos own and deploy that import from this package release and
+# publish /run/<unit stem>/package-release like SERVICES do. GC keeps their
+# running release; this installer never installs, selects or restarts them.
+EXTERNAL_CONSUMERS = ('van-dashboard.service',)
 RETAIN_NEWEST = 3
 GC_DELETE_LIMIT = 16
 # Only immediate Python modules in these reviewed directories are inputs.
 MODULE_DIRS = (
     'pi/apps/audiobooks', 'pi/apps/bme280', 'pi/apps/media_organizer',
-    'pi/apps/van_dashboard', 'pi/apps/iptorrents_watch',
-    'pi/apps/van_dashboard/routes', 'pi/apps/video_library',
+    'pi/apps/iptorrents_watch', 'pi/apps/video_library',
     'pi/apps/video_library/players', 'pi/scripts/python', 'shared/python',
     'pi/apps/metered', 'shared/metered',
 )
@@ -378,7 +371,7 @@ def collect_releases(root, lock, services, installed):
             if not re.fullmatch(r'releases/[0-9a-f]{24}', target):
                 raise ValueError(f'unexpected {name} release target')
             keep.add(Path(target).name)
-        for unit in SERVICES:
+        for unit in (*SERVICES, *EXTERNAL_CONSUMERS):
             running = running_release(root, services, unit)
             if running:
                 keep.add(running)
@@ -630,50 +623,25 @@ def install_release(stream, root, mode, services=None, selected=None):
             if pending is not None and not isinstance(pending.get('restart'), bool):
                 raise ValueError(f'invalid pending restart intent: {unit}')
             live, packaged, flat, dropins = unit_preflight(services, unit, mode, saved)
-            # Upgrade the pre-existing dashboard installer state without
-            # demanding a second first-cutover backup of its package unit.
-            old_dashboard = (unit == DASHBOARD and saved is None and old is not None and
-                             (root / 'activated.json').is_file() and packaged)
-            old_pending = unit == DASHBOARD and (root / 'pending-restart').is_file()
-            if old_dashboard:
-                # Another service may already have advanced current. The legacy
-                # activation marker, not that shared link, identifies the last
-                # dashboard dependency comparison.
-                activation = json.loads((root / 'activated.json').read_bytes())
-                prior_id = activation.get('release', '')
-                if not re.fullmatch('[0-9a-f]{24}', prior_id):
-                    raise ValueError('invalid legacy dashboard activation marker')
-                prior = root / 'releases' / prior_id
-                if prior.is_symlink():
-                    raise ValueError('symlinked legacy dashboard release')
-                prior_manifest = json.loads((prior / 'manifest.json').read_bytes())
-                prior_digest = prior_manifest.get('services', {}).get(unit, '')
-                if (digest(encoded(prior_manifest))[:24] != prior_id or
-                        not re.fullmatch('[0-9a-f]{64}', prior_digest)):
-                    raise ValueError('invalid legacy dashboard activation manifest')
-                saved = {'release': prior_id, 'digest': prior_digest}
             backup = root / 'pre-package-units' / (unit + '.backup')
-            old_backup = unit == DASHBOARD and (root / 'pre-package-units' / unit).is_file()
             if mode == 'update' and (saved is None or not packaged):
                 raise ValueError(f'{unit}: explicit --activate --service {unit} required')
             if live is not None and not flat and not packaged:
                 raise ValueError(f'{unit}: expected recognizable flat or package ExecStart')
-            resumable = (((pending or old_pending) and (backup.exists() or old_backup)) or
-                         (pending and SERVICES[unit]['flat'] is None))
+            resumable = pending is not None and (backup.exists() or SERVICES[unit]['flat'] is None)
             if saved is None and packaged and not resumable:
                 raise ValueError(f'{unit}: first activation requires the expected flat unit')
             new = (release / f'pi/services/{unit}').read_bytes()
             if not recognized_unit(new, unit, package=True):
                 raise ValueError(f'{unit}: invalid packaged source unit')
-            changed = (pending is not None or old_pending or live != new or saved is None or
+            changed = (pending is not None or live != new or saved is None or
                        saved['digest'] != manifest['services'][unit])
-            restart = changed and (services.is_active(unit) or old_pending or
+            restart = changed and (services.is_active(unit) or
                                    (pending is not None and pending['restart']))
             work.append({'unit': unit, 'state': state_path, 'pending': pending_path,
-                         'backup': backup, 'save': flat and not old_backup,
+                         'backup': backup, 'save': flat,
                          'dropins': dropins, 'changed': changed, 'restart': restart,
-                         'install': live != new or pending is not None or old_pending,
-                         'old_pending': old_pending})
+                         'install': live != new or pending is not None})
         for item in work:
             unit = item['unit']
             if item['save']:
@@ -695,31 +663,10 @@ def install_release(stream, root, mode, services=None, selected=None):
                 services.restart(unit)
                 restarted.append(unit)
             atomic_json(item['state'], {'release': release_id, 'digest': manifest['services'][unit]})
-            if unit == DASHBOARD:
-                atomic_json(root / 'activated.json', {'release': release_id})
+            # The host activation gate pi/sync_scripts.sh checks before any upload.
+            atomic_json(root / 'activated.json', {'release': release_id})
             item['pending'].unlink(missing_ok=True)
-            if item['old_pending']:
-                (root / 'pending-restart').unlink(missing_ok=True)
         return completed(release, restarted)
-
-
-def check_dashboard_compute_provider(target):
-    """Refuse a dashboard update before transferring a dependent package."""
-    guard = (ROOT / 'pi/check_compute_provider.py').read_bytes()
-    try:
-        subprocess.run(
-            ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', '--',
-             target, '/usr/bin/python3 -B -'],
-            input=guard, check=True, timeout=30,
-        )
-    except (OSError, subprocess.SubprocessError) as error:
-        raise RuntimeError(
-            'Dashboard update refused: the canonical compute provider at '
-            '/home/pi/van_compute/current/van_compute/metrics.py must be healthy '
-            'and unfenced. Run the van-compute checkout\'s coupled '
-            'macbook/scripts/install_van_compute_worker.zsh from '
-            "the owner's Terminal first; no package deployment was started."
-        ) from error
 
 
 def main(argv=None):
@@ -756,8 +703,6 @@ def main(argv=None):
         return
     if not re.fullmatch(r'[A-Za-z0-9_.@:-]+', args.target) or args.target.startswith('-'):
         parser.error('invalid SSH target')
-    if mode == 'update' and DASHBOARD in selected_units(args.service):
-        check_dashboard_compute_provider(args.target)
     import shlex
     receiver = Path(__file__).read_text()
     receiver = receiver.replace('ROOT = Path(__file__).resolve().parents[1]', 'ROOT = Path.cwd()')

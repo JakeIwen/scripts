@@ -34,17 +34,10 @@ check_pi_bashrc_known() {
 
 sync_preflight() {
   (cd "$dsc" && python3 -m pi.generate_backup_lock_registry --check) || return 1
+  # sync_compute runs this installer last; refuse before any upload if it is missing.
   compute_installer="$VAN_COMPUTE_CHECKOUT/macbook/scripts/install_van_compute_worker.zsh"
   if [[ ! -x "$compute_installer" ]]; then
     echo "Van compute checkout is missing its executable installer: $compute_installer" >&2
-    return 1
-  fi
-
-  # Refuse before staging or updating anything: the dashboard's new unit and
-  # imports need the supervised, coupled compute cutover to have completed.
-  if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$pi_ip" \
-    /usr/bin/python3 -B - < "$dsc/pi/check_compute_provider.py"; then
-    echo "Compute provider preflight refused sync; run $VAN_COMPUTE_CHECKOUT/macbook/scripts/install_van_compute_worker.zsh from the owner's Terminal in the reviewed checkout first." >&2
     return 1
   fi
 

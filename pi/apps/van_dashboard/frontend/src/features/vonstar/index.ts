@@ -1,1 +1,0 @@
-export { VonstarFeature } from './VonstarFeature';

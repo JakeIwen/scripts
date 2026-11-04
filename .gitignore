@@ -42,6 +42,5 @@ macbook/scripts/performance-audio-jobs/
 *.pyc
 node_modules/
 **/node_modules/
-pi/apps/van_dashboard/frontend/dist/
 AGENTS.private.md
 .agent/

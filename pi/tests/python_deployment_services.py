@@ -27,9 +27,7 @@ class FakeSystemServices:
         self.units = {
             unit: flat_unit(unit) for unit, spec in deployment.SERVICES.items() if spec['flat'] is not None
         }
-        if isinstance(units, bytes):
-            self.units[deployment.DASHBOARD] = units
-        elif units:
+        if units:
             self.units.update(units)
         self.active = set(active or ())
         self.restart_failures = dict(restart_failures or {})
@@ -40,7 +38,9 @@ class FakeSystemServices:
         self.release_root = None
         self.next_pid = 4100
         self.invocation_number = 0
-        self.running_records = {unit: None for unit in deployment.SERVICES}
+        self.running_records = {
+            unit: None for unit in (*deployment.SERVICES, *deployment.EXTERNAL_CONSUMERS)
+        }
         self.state_overrides = {}
         self.state_errors = {}
         self.running_record_errors = {}

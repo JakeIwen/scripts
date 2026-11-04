@@ -3,9 +3,6 @@ import shlex
 import subprocess
 import tempfile
 import unittest
-from unittest import mock
-
-from pi import check_compute_provider
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -16,7 +13,7 @@ FAILURE_STATUS = 23
 
 
 class SyncWorkflowTests(unittest.TestCase):
-    def test_compute_guard_stops_sync_before_any_mutation(self):
+    def test_package_activation_guard_stops_sync_before_any_mutation(self):
         definitions = SYNC_SCRIPT.read_text().split('source "$dsc/pi/sync_workflow.sh"')[0]
         temporary = tempfile.TemporaryDirectory(prefix="sync-compute-checkout-")
         self.addCleanup(temporary.cleanup)
@@ -32,14 +29,14 @@ class SyncWorkflowTests(unittest.TestCase):
 dsc={shlex.quote(str(REPOSITORY_ROOT.parent))}
 VAN_COMPUTE_CHECKOUT={shlex.quote(str(checkout))}
 ssh() {{
-  if [[ "$*" == *'/usr/bin/python3 -B -'* ]]; then
-    printf 'provider-check\\n'
+  if [[ "$*" == *activated.json* ]]; then
+    printf 'activation-check\\n'
     return {status}
   fi
   [[ "$*" == *'git hash-object'* ]] && git -C "$dsc" hash-object pi/.bashrc
   return 0
 }}
-python3() {{ [[ "$*" == *--list-units* ]] && printf 'van-dashboard.service\\n'; return 0; }}
+python3() {{ [[ "$*" == *--list-units* ]] && printf 'video-library.service\\n'; return 0; }}
 sync_non_python() {{ printf 'non-python-write\\n'; }}
 sync_python_packages() {{ printf 'package-write\\n'; }}
 sync_compute() {{ printf 'compute-write\\n'; }}
@@ -49,19 +46,18 @@ run_sync_workflow
                 result = subprocess.run(['/bin/bash', '-c', harness],
                                         capture_output=True, text=True)
                 self.assertEqual(result.returncode, status, result.stderr)
-                self.assertEqual(result.stdout.splitlines(), ['provider-check'] + (
+                self.assertEqual(result.stdout.splitlines(), ['activation-check'] + (
                     ['non-python-write', 'package-write', 'compute-write'] if status == 0 else []))
                 if status:
-                    self.assertIn("owner's Terminal", result.stderr)
-                    self.assertIn(str(installer), result.stderr)
+                    self.assertIn("activation preflight failed", result.stderr)
 
-    def test_missing_compute_checkout_stops_before_provider_probe(self):
+    def test_missing_compute_installer_stops_before_any_remote_probe(self):
         definitions = SYNC_SCRIPT.read_text().split('source "$dsc/pi/sync_workflow.sh"')[0]
         with tempfile.TemporaryDirectory(prefix="sync-missing-compute-") as directory:
             missing = Path(directory) / "absent"
             harness = definitions + f'''
 VAN_COMPUTE_CHECKOUT={shlex.quote(str(missing))}
-ssh() {{ printf 'unexpected-provider-probe\\n'; }}
+ssh() {{ printf 'unexpected-remote-probe\\n'; }}
 sync_preflight
 '''
             result = subprocess.run(
@@ -169,75 +165,6 @@ check_pi_bashrc_known
         unreachable = self.guard("alias v='one'\n", reachable=False)
         self.assertEqual(unreachable.returncode, 1)
         self.assertIn("couldn't read", unreachable.stderr)
-
-
-class ComputeProviderGuardTests(unittest.TestCase):
-    def setUp(self):
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.home = Path(temporary.name).resolve()
-        self.root = self.home / 'compute'
-        self.queue = self.home / 'queue'
-        self.old = self.home / 'old'
-        self.release = self.root / 'releases' / ('a' * 24)
-        package = self.release / 'van_compute'
-        package.mkdir(parents=True)
-        (package / '__init__.py').write_text('')
-        (package / 'metrics.py').write_text(
-            '# older, compatible provider\n'
-            'class ComputeMetricsError(Exception): pass\n'
-            'class ComputeMetricsReader: pass\n')
-        (self.release / 'source.sha256').write_text('a' * 64)
-        (self.root / 'deployment.sha256').write_text('a' * 64)
-        (self.root / 'current').symlink_to('releases/' + self.release.name)
-
-    def check(self):
-        check_compute_provider.check_provider(self.root, self.queue, self.old)
-
-    def test_older_valid_provider_import_is_read_only(self):
-        before = sorted(str(path) for path in self.home.rglob('*'))
-        self.check()
-        self.assertEqual(sorted(str(path) for path in self.home.rglob('*')), before)
-
-    def test_missing_dangling_and_foreign_provider_refuse(self):
-        current = self.root / 'current'
-        current.unlink()
-        with self.assertRaises(ValueError):
-            self.check()
-        current.symlink_to('releases/' + 'b' * 24)
-        with self.assertRaises(OSError):
-            self.check()
-        current.unlink()
-        current.symlink_to(self.release)
-        with self.assertRaises(ValueError):
-            self.check()
-
-    def test_missing_unreadable_or_unimportable_metrics_refuse(self):
-        metrics = self.release / 'van_compute/metrics.py'
-        metrics.unlink()
-        with self.assertRaises(OSError):
-            self.check()
-        metrics.write_text('this is not Python!')
-        with self.assertRaises(subprocess.CalledProcessError):
-            self.check()
-        with mock.patch.object(Path, 'read_bytes', side_effect=PermissionError):
-            with self.assertRaises(PermissionError):
-                self.check()
-
-    def test_marker_mismatch_and_interrupted_cutovers_refuse(self):
-        (self.root / 'deployment.sha256').write_text('b' * 64)
-        with self.assertRaises(ValueError):
-            self.check()
-        (self.root / 'deployment.sha256').write_text('a' * 64)
-        for marker in (self.queue / '.maintenance.json',
-                       self.root / 'scripts/.van-compute-upgrade-owner',
-                       self.old / '.van-compute-upgrade-owner'):
-            with self.subTest(marker=marker):
-                marker.parent.mkdir(parents=True, exist_ok=True)
-                marker.symlink_to(self.home / 'absent')
-                with self.assertRaises(ValueError):
-                    self.check()
-                marker.unlink()
 
 
 if __name__ == "__main__":

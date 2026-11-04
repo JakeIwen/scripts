@@ -1,7 +1,8 @@
 """Wire records shared by the CLI, the dashboard and the qBittorrent hook.
 
 Every record round-trips through ``to_dict``/``from_dict`` as plain JSON.  The
-dashboard's React feature mirrors these shapes in its schema; change both.
+van-dashboard repo's React feature mirrors these shapes in its schema, and its
+backend imports this module and ``config`` from the package release; change both.
 """
 
 from __future__ import annotations

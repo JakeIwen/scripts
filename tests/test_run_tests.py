@@ -296,24 +296,6 @@ class RunnerTests(RunnerCase):
         (self.repo / 'vendor/new.txt').write_text('two')
         self.assert_uncached()
 
-    def test_van_compute_untracked_bytes_and_resolver_errors(self):
-        checkout = self.repo.parent / 'van-compute'
-        checkout.mkdir()
-        self.git('init', '-q', cwd=checkout)
-        self.git('commit', '--allow-empty', '-qm', 'checkout', cwd=checkout)
-        untracked = checkout / 'new.py'
-        untracked.write_text('one')
-        helper = self.repo / 'pi/tests/dashboard/_van_compute_checkout.py'
-        helper.parent.mkdir(parents=True)
-        helper.write_text(f'from pathlib import Path\nCHECKOUT = Path({str(checkout)!r})\n')
-        self.add_tests(a=(0, False))
-        self.assert_uncached()
-        untracked.write_text('two')
-        self.assert_uncached()
-        helper.write_text('raise ImportError("broken resolver")')
-        self.assertIn('Pass cache unavailable', self.assert_uncached())
-        self.assert_uncached()
-
     def test_common_lock_directory_works_from_another_cwd_and_worktree(self):
         self.add_tests(a=(0, False))
         code, output = self.run_suite(cwd=self.repo.parent)
