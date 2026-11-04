@@ -559,11 +559,12 @@ and report identities. Recreate venvs rather than moving them.
   break, including one ending at the next paragraph's start, is refused because the
   flattened text would be pasted back merged. Selections across formatting runs
   within one paragraph, and whole-field selections in the URL bar, are allowed.
-  `tests/text_markers.test.cjs` models those Firefox semantics from its
-  accessibility sources, reproduces the refused paragraph-start selection and the
-  URL-bar select-all, and verifies consecutive transforms, Unicode length changes,
-  repeated text, document-end selections, boundary refusals and selection movement
-  during reselection.
+  `tests/firefox_editor_fixture.cjs` models those Firefox semantics from its
+  accessibility sources for both `tests/text_markers.test.cjs` and the editing keys'
+  `tests/editing_keys.test.cjs`. The first reproduces the refused paragraph-start
+  selection and the URL-bar select-all, and verifies consecutive transforms,
+  Unicode length changes, repeated text, document-end selections, boundary refusals
+  and selection movement during reselection.
 - `signal_text_diagnostic.js`: temporary Media > Tools > Signal Diagnostic button's
   target-app runner. It requests Signal activation and waits up to 30 seconds for a stable draft selection,
   optionally attempts the selected transform, then returns to BTT with a detailed
