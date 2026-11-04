@@ -1,12 +1,15 @@
 #!/usr/bin/python3
-"""Print Jacob's + commands from the global agent instructions.
+"""Print Jacob's + commands and user-added slash commands.
 
 The + commands (`+cp`, `+id`, `+cmd`, ...) are defined once, in the
 "## + commands" section of each machine's global instruction file, one
 bullet per command whose first sentence is its summary. This prints each
 command with that sentence, so the list can't drift from the definitions.
 The list is alphabetical by command name (Jacob's preference), whatever
-order the instruction file defines them in.
+order the instruction file defines them in. A second, alphabetical "Slash
+commands" block lists Claude command files and active mods' literal command
+metadata, or Codex prompts when --file is under ~/.codex. Skills are not listed;
+unreadable slash-command sources are omitted without losing the + commands.
 
 `--hook` reads a Claude Code or Codex UserPromptSubmit event on stdin. When
 the prompt is exactly `+cmd`, it blocks the prompt and returns the list as
@@ -22,6 +25,8 @@ import json
 import re
 import sys
 from pathlib import Path
+
+import slash_commands
 
 DEFAULT_FILE = Path.home() / ".claude/CLAUDE.md"
 HEADING = "## + commands"
@@ -78,7 +83,9 @@ def listing(path: Path) -> str | None:
     found.sort(key=lambda pair: pair[0].lower())
     width = max(len(name) for name, _ in found)
     rows = [f"  {name.ljust(width)}  {summary}" for name, summary in found]
-    return "\n".join(["+ commands", *rows, f'Full definitions: "+ commands" in {_home_relative(path)}'])
+    text = "\n".join(["+ commands", *rows, f'Full definitions: "+ commands" in {_home_relative(path)}'])
+    slash_block = slash_commands.listing(path)
+    return text + "\n\n" + slash_block if slash_block else text
 
 
 def _home_relative(path: Path) -> str:

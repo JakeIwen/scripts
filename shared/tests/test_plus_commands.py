@@ -1,6 +1,7 @@
 """Exercise the + command listing and its UserPromptSubmit hook mode."""
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -37,12 +38,14 @@ class PlusCommandsTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
+        self.environment = dict(os.environ, HOME=temporary.name, CLAUDE_CODE_PLUGIN_DIRS='')
         self.file = Path(temporary.name) / 'AGENTS.md'
         self.file.write_text(INSTRUCTIONS)
 
     def run_script(self, *args, stdin=''):
         return subprocess.run([sys.executable, str(SCRIPT), '--file', str(self.file), *args],
-                              input=stdin, capture_output=True, text=True, check=False)
+                              input=stdin, capture_output=True, text=True, check=False,
+                              env=self.environment)
 
     def test_lists_each_command_alphabetically_with_its_first_sentence(self):
         result = self.run_script()

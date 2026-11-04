@@ -514,8 +514,14 @@ compare it with this checkout. Deployed files may differ from the repository.
   each bullet in the global instructions' "+ commands" section. With `--hook`
   it is the UserPromptSubmit hook (Claude and Codex, Mac and Pi) that answers a
   bare `+cmd` without a model turn and passes every other prompt through.
-  `uncommitted_owners.py` and `plus_commands.py` sit flat in `/home/pi/scripts/`
-  on the Pi, next to `llm_restore.py`.
+  After the + commands it lists the user's slash commands, which
+  `shared/sh/slash_commands.py` finds without running anything: Claude
+  command files in `~/.claude/commands/` and each mod's literal
+  `$.command.register({...})` metadata (mods from `CLAUDE_CODE_PLUGIN_DIRS`),
+  or Codex prompts when `--file` is under `~/.codex`; skills are left out.
+  `uncommitted_owners.py`, `plus_commands.py` and `slash_commands.py` sit
+  flat in `/home/pi/scripts/` on the Pi, next to `llm_restore.py`; deploy
+  `slash_commands.py` first, since `plus_commands.py` imports it.
 - `shared/sh/known_terms.py` keeps `~/.claude/KNOWN-TERMS.md`, the terms Jacob
   already knows, which the global "Teaching as you go" rule leaves out of
   **Terms** blocks. With `--hook` it is a SessionStart and UserPromptSubmit
