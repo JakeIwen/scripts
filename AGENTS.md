@@ -258,20 +258,20 @@ compare it with this checkout. Deployed files may differ from the repository.
   `text_markers.js` preserves Firefox text-node positions during reselection;
   never round-trip rich-editor selection endpoints through flat offsets.
   `install_text_editing_keys.py` (`btt.py text-keys`) owns the system-wide editing
-  keys (Cmd-X line cut, Cmd-C line copy that restores the caret, quote/bracket
+  keys (Cmd-X line cut, Cmd-C line copy, quote/bracket
   wrapping): conditional pass-through triggers that fire only on a settable
   focused selection outside `EXCLUDED_APPS`; `text_editing_conditions.py` owns
   those conditions and the truth table checked through `text_editing_conditions.js`
   before install, and `text_editing_keys.js` is their runtime on top of
-  `text_selection.js`. A line is the caret's logical line with its break: the
-  runtime selects it through Accessibility (numeric range over `AXValue`; Firefox's
-  marker paragraph) only while the caret is as first read, acts only on an exact
-  readback with the text unchanged and focus checked last, and presses Edit >
-  Cut/Copy through Accessibility, since BTT swallows a Cmd-X or Cmd-C sent from
-  its own trigger; Firefox blank lines are not cut. Cmd-C counts only the line
-  itself on the clipboard and restores the caret only over the line it selected.
-  Never select by posting keys: neither BTT's key actions nor `CGEventPost`
-  confirm delivery.
+  `text_selection.js`. A line is the caret's logical line with its break
+  (numeric range over `AXValue`; Firefox's marker paragraph). Cmd-X selects it
+  through Accessibility only while the caret is as first read, acts only on an
+  exact readback with the text unchanged and focus checked last, and presses
+  Edit > Cut through Accessibility, since BTT swallows a Cmd-X sent from its own
+  trigger; Firefox blank lines are not cut. Cmd-C never touches the field: it
+  writes the line (break as `\n`) to the clipboard with `text_menu_paste.js`'s
+  `writeClipboardText`, refusing if the caret moved while it read. Never select
+  by posting keys: neither BTT's key actions nor `CGEventPost` confirm delivery.
   Their tests reuse `tests/firefox_editor_fixture.cjs`, the Firefox marker model
   shared with `text_markers.test.cjs`.
   `install_finder_paste.py` (`btt.py finder-paste`) owns Cmd-V in Finder: one global

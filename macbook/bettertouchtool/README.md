@@ -318,14 +318,14 @@ this restore covers sequences lost before a checkpoint held them.
   since a posted key's delivery cannot be confirmed; if anything stops the cut
   first, the caret goes back unless you have moved it. In Firefox a blank line is
   refused with a notification: its flat text could not confirm the cut.
-- Cmd-C with no selection copies the caret's line the same way (as VS Code does)
-  and leaves the caret where it was. After Edit > Copy it waits up to a second for
-  the clipboard to hold the line itself (another app's write does not count), then
-  puts the caret back (Firefox through its text marker, other apps through the
-  numeric range), so the selection flickers for a moment. A caret, edit or focus
-  change you make meanwhile is kept, and the notification says the caret was left.
-  With a selection, or where the condition does not match, Cmd-C is the app's
-  normal copy.
+- Cmd-C with no selection copies the caret's line (as VS Code does): exactly what
+  Cmd-X would remove, its break written as `\n` (an empty line copies `\n`; in
+  Firefox, the paragraph's text plus `\n` when another paragraph follows). The
+  runtime writes it to the clipboard itself, as plain text, so the field is never
+  selected or changed and the caret stays put; rich formatting is not copied. It
+  reads the caret again after the text and copies nothing if a key moved it in
+  between. With a selection, or where the condition does not match, Cmd-C is the
+  app's normal copy.
 
 Each keyboard trigger has an advanced condition and BTT's "If advanced conditions
 fail, let the shortcut pass through" option: the key behaves normally unless
@@ -520,8 +520,9 @@ and report identities. Recreate venvs rather than moving them.
   Runtime source is loaded on each use, so subsequent source fixes do not need
   another menu installation.
 - `text_menu_paste.js`: `findEditMenuItem` locates the Cut/Copy/Paste group (the
-  editing keys press its Cut and Copy), and `focusUnchanged` is the focus check
-  both Paste and the editing keys repeat before they act.
+  editing keys press its Cut), `focusUnchanged` is the focus check both Paste and
+  the line cut repeat before they act, and `writeClipboardText` is the one plain
+  clipboard write, used by Paste's temporary clipboard and the editing keys' Cmd-C.
   Signal/Firefox's replacement adapter uses the unique native Paste
   menu item (Cmd-V equivalent) through Accessibility, never simulated keypresses.
   It preserves every readable clipboard item/format, marks transformed text transient

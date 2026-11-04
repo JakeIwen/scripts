@@ -20,26 +20,29 @@ function lineRangeAt(text, caret) {
     return end > start ? {location: start, length: end - start} : null;
 }
 
+// A line strategy finds the caret's line ({range, text, copy}, where `copy` is
+// what Cmd-C puts on the clipboard: what a cut would remove, its break as \n).
 // Cocoa and Chromium/Electron: numeric ranges over AXValue, whose breaks are characters.
 function rangeLines(element) {
     const read = () => selectionOffsets(selectionAttribute(element, 'AXSelectedTextRange'));
+    const same = (a, b) => a.location === b.location && a.length === b.length;
     const selectedText = () => {
         const selected = selectionAttribute(element, 'AXSelectedText', {optional: true});
         return selected === null ? '' : ObjC.unwrap(selected);
     };
     return {
         read,
+        same,
         collapsed: range => range.length === 0,
         // Exactly `range`, and the app agrees on its text.
-        isSelected: (range, text) => {
-            const now = read();
-            return now.location === range.location && now.length === range.length && selectedText() === text;
-        },
+        isSelected: (range, text) => same(read(), range) && selectedText() === text,
         lineAt: (caret, text) => {
             if (caret.location > text.length) throw new Error('The app’s caret lies outside its text.');
-            return lineRangeAt(text, caret.location);
+            const range = lineRangeAt(text, caret.location);
+            if (!range) return null;
+            const line = text.slice(range.location, range.location + range.length);
+            return {range, text: line, copy: line.replace(/(?:\r\n?|\u2029)$/, '\n')};
         },
-        text: (range, text) => text.slice(range.location, range.location + range.length),
         cutRefusal: () => null,
         select: range => {
             const value = selectionRangeValue(range.location, range.length);
@@ -50,15 +53,19 @@ function rangeLines(element) {
 }
 
 // Firefox: flat offsets omit paragraph breaks and are ambiguous at paragraph
-// boundaries, so its lines are text-marker paragraphs.
+// boundaries, so its lines are text-marker paragraphs, whose text has no break.
 function markerLines(markers) {
     return {
         read: markers.read,
+        same: markers.same,
         collapsed: markers.collapsed,
         // Marker endpoints are exact, so they also fix the text.
         isSelected: range => markers.same(markers.read(), range),
-        lineAt: caret => markers.paragraphAt(caret),
-        text: range => markers.text(range),
+        lineAt: caret => {
+            const range = markers.paragraphAt(caret);
+            const text = markers.text(range);
+            return {range, text, copy: text + (markers.paragraphFollows(range) ? '\n' : '')};
+        },
         // A blank paragraph is unsafe to cut: its marker range cannot be told
         // from an empty one, and with no text in the flat AXValue the cut
         // cannot be confirmed. Fail closed until it is verified live.
@@ -67,26 +74,29 @@ function markerLines(markers) {
     };
 }
 
-// The focused field, its text and caret, and the caret's line, read once: every
-// later step checks the field against this record before it acts.
-function lineEditor(directory, key, verb) {
+function editMenuHelpers(directory) {
+    return new Function(selectionReadSource(directory + '/text_menu_paste.js')
+        + '\nreturn {findEditMenuItem, focusUnchanged, writeClipboardText};')();
+}
+
+// The focused field, its text, caret and the caret's line, read once: every
+// later step checks the field against this record before it acts. The caret
+// is read again after the text and line, so a key typed in between is caught.
+function caretLine(directory, verb) {
     if (!$.AXIsProcessTrusted()) throw new Error('BetterTouchTool needs Accessibility access.');
     const system = $.AXUIElementCreateSystemWide();
     const application = selectionAttribute(system, 'AXFocusedApplication');
     const element = focusedSelectionElement(system, application, false);
-    const menu = new Function(selectionReadSource(directory + '/text_menu_paste.js')
-        + '\nreturn {findEditMenuItem, focusUnchanged};')();
+    const helpers = editMenuHelpers(directory);
     const lines = selectionIsFirefox(selectionApplicationBundle(application))
         ? markerLines(selectionMarkers(directory, element)) : rangeLines(element);
-    const text = ObjC.unwrap(selectionAttribute(element, 'AXValue'));
-    if (typeof text !== 'string') throw new Error('The focused field does not expose its text; nothing was ' + verb + '.');
     const caret = lines.read();
     if (!lines.collapsed(caret)) throw new Error('Text is selected now; nothing was ' + verb + '.');
-    const range = lines.lineAt(caret, text);
-    return {system, application, element, lines, text, caret, focusUnchanged: menu.focusUnchanged,
-        // Through the Edit menu: BTT swallows a Cmd-X or Cmd-C sent from its own trigger.
-        command: menu.findEditMenuItem(application, selectionAttribute, key),
-        line: range && {range, text: lines.text(range, text)}};
+    const text = ObjC.unwrap(selectionAttribute(element, 'AXValue'));
+    if (typeof text !== 'string') throw new Error('The focused field does not expose its text; nothing was ' + verb + '.');
+    const line = lines.lineAt(caret, text);
+    if (!lines.same(lines.read(), caret)) throw new Error('The caret moved while the line was read; nothing was ' + verb + '.');
+    return {system, application, element, lines, text, caret, line, helpers};
 }
 
 // True while this field's text is unchanged, `range` (holding `selected`) is
@@ -96,7 +106,7 @@ function editorHolds(editor, range, selected) {
     const {element} = editor;
     return ObjC.unwrap(selectionAttribute(element, 'AXValue')) === editor.text
         && editor.lines.isSelected(range, selected)
-        && editor.focusUnchanged(editor.system, editor.application, element, selectionAttribute);
+        && editor.helpers.focusUnchanged(editor.system, editor.application, element, selectionAttribute);
 }
 
 function waitFor(condition, attempts) {
@@ -109,27 +119,25 @@ function waitFor(condition, attempts) {
 
 // Finding the Edit menu takes a while: a caret moved meanwhile must not be
 // overwritten by selecting the line read before it.
-function assertCaretUnchanged(editor, verb) {
-    if (!editorHolds(editor, editor.caret, ''))
-        throw new Error('The caret, text or focus changed; nothing was ' + verb + '.');
+function assertCaretUnchanged(editor) {
+    if (!editorHolds(editor, editor.caret, '')) throw new Error('The caret, text or focus changed; nothing was cut.');
 }
 
-function selectLine(editor, verb) {
+function selectLine(editor) {
     editor.lines.select(editor.line.range);
     // Apps apply a selection asynchronously and may clamp or ignore it: only
     // the exact line, read back, counts.
     if (!waitFor(() => editorHolds(editor, editor.line.range, editor.line.text), 10))
-        throw new Error('The app did not select the line; nothing was ' + verb + '.');
+        throw new Error('The app did not select the line; nothing was cut.');
 }
 
-function pressLineCommand(editor, name, verb) {
-    if (ObjC.unwrap(selectionAttribute(editor.command, 'AXEnabled')) !== true)
-        throw new Error('The app’s ' + name + ' command is unavailable; nothing was ' + verb + '.');
+function pressCut(editor, command) {
+    if (ObjC.unwrap(selectionAttribute(command, 'AXEnabled')) !== true)
+        throw new Error('The app’s Cut command is unavailable; nothing was cut.');
     // The menu command acts on whatever is focused and selected when it runs.
     if (!editorHolds(editor, editor.line.range, editor.line.text))
-        throw new Error('The selection or focus changed before ' + name + '; nothing was ' + verb + '.');
-    if ($.AXUIElementPerformAction(editor.command, $('AXPress')) !== 0)
-        throw new Error('The app refused its ' + name + ' command.');
+        throw new Error('The selection or focus changed before Cut; nothing was cut.');
+    if ($.AXUIElementPerformAction(command, $('AXPress')) !== 0) throw new Error('The app refused its Cut command.');
 }
 
 // Puts the caret back only over the line this run selected (or finds it never
@@ -161,16 +169,18 @@ function textWithoutLine(editor) {
 }
 
 function cutSelectedLine(directory) {
-    const editor = lineEditor(directory, 'x', 'cut');
+    const editor = caretLine(directory, 'cut');
     if (!editor.line) return 'nothing to cut';
     const refusal = editor.lines.cutRefusal(editor.line);
     if (refusal) throw new Error(refusal);
-    assertCaretUnchanged(editor, 'cut');
+    // Through the Edit menu: BTT swallows a Cmd-X sent from its own Cmd-X trigger.
+    const command = editor.helpers.findEditMenuItem(editor.application, selectionAttribute, 'x');
+    assertCaretUnchanged(editor);
     let expected;
     try {
-        selectLine(editor, 'cut');
+        selectLine(editor);
         expected = textWithoutLine(editor);
-        pressLineCommand(editor, 'Cut', 'cut');
+        pressCut(editor, command);
     } catch (error) {
         throw new Error(error.message + caretRestoreNote(editor));
     }
@@ -180,39 +190,12 @@ function cutSelectedLine(directory) {
     return 'cut line';
 }
 
-// Editors write a copy asynchronously, and a rich editor ends a copied block
-// with its own break (Firefox's flat text has none), so trailing breaks differ.
-function matchesCopiedLine(copied, line) {
-    const plain = text => text.replace(/\r\n?|\u2029/g, '\n').replace(/\n+$/, '');
-    return typeof copied === 'string' && copied !== '' && plain(copied) === plain(line);
-}
-
-function waitForCopiedLine(board, version, line) {
-    const copied = () => Number(board.changeCount) !== version
-        && matchesCopiedLine(ObjC.unwrap(board.stringForType($.NSPasteboardTypeString)), line);
-    if (waitFor(copied, 20)) return;
-    throw new Error(Number(board.changeCount) === version ? 'The app did not copy the line.'
-        : 'The clipboard changed, but not to the line.');
-}
-
-function copySelectedLine(directory) {
-    const editor = lineEditor(directory, 'c', 'copied');
-    if (!editor.line) return 'nothing to copy';
-    const board = $.NSPasteboard.generalPasteboard;
-    assertCaretUnchanged(editor, 'copied');
-    let failure = null;
-    try {
-        selectLine(editor, 'copied');
-        const version = Number(board.changeCount);
-        pressLineCommand(editor, 'Copy', 'copied');
-        waitForCopiedLine(board, version, editor.line.text);
-    } catch (error) {
-        failure = error;
-    }
-    // The caret goes back whatever happened, unless the user has moved on.
-    const note = caretRestoreNote(editor);
-    if (failure) throw new Error(failure.message + note);
-    if (note) throw new Error('The line was copied.' + note);
+// Cmd-C writes the line to the clipboard itself, as plain text: the field is
+// never selected, pressed or changed, so nothing needs putting back.
+function copyCaretLine(directory) {
+    const field = caretLine(directory, 'copied');
+    if (!field.line || !field.line.copy) return 'nothing to copy';
+    field.helpers.writeClipboardText($.NSPasteboard.generalPasteboard, field.line.copy);
     return 'copied line';
 }
 
@@ -221,7 +204,7 @@ function copySelectedLine(directory) {
 var EDITING_KEYS = {
     'wrap': options => wrapSelection(options.open, options.directory),
     'cut-line': options => cutSelectedLine(options.directory),
-    'copy-line': options => copySelectedLine(options.directory)
+    'copy-line': options => copyCaretLine(options.directory)
 };
 
 function runEditingKey(options) {
