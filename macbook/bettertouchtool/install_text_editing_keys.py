@@ -8,7 +8,6 @@ editable selection, so code editors and terminals keep their own behavior.
 from __future__ import annotations
 
 import argparse
-import json
 import os
 from pathlib import Path
 import sqlite3
@@ -32,26 +31,14 @@ RUNTIME = tuple(str(DIRECTORY / name) for name in ('text_selection.js', 'text_ed
 
 WRAP_KEYS = (("'", 39, 0), ('"', 39, SHIFT), ('`', 50, 0), ('(', 25, SHIFT), ('[', 33, 0), ('{', 33, SHIFT))
 CUT_KEY = (7, COMMAND)
-# ctrl-A, ctrl-shift-E, shift-Right as BTT keycode lists: select the line and its break.
-CUT_LINE_SHORTCUTS = ('59,0', '59,56,14', '56,124')
-
-# Paragraph keys follow each app's own idea of a line (Firefox: the visual line);
-# shift-Right takes the line break so the line is removed rather than emptied.
-SELECT_LINE = """    for (const shortcut of %s) {
-        await trigger_action({json: JSON.stringify({BTTActionCategory: 0, BTTIsPureAction: true,
-            BTTPredefinedActionType: 264, BTTShortcutToSend: shortcut,
-            BTTAdditionalActionData: {BTTActionSendKeyboardShortcutIncludeCurrentModifiers: false}}),
-            wait_for_reply: true});
-    }
-""" % json.dumps(list(CUT_LINE_SHORTCUTS))
 
 
 def stable_uuid(name):
     return str(uuid.uuid5(NAMESPACE, name)).upper()
 
 
-def _action(function, entry, options, title, before=''):
-    return triggers.runtime_action(function, entry, options, title, RUNTIME, before)
+def _action(function, entry, options, title):
+    return triggers.runtime_action(function, entry, options, title, RUNTIME)
 
 
 def _keyboard(name, keycode, modifiers, condition, notes, action):
@@ -69,7 +56,7 @@ def definitions():
     result.append(_keyboard('cut line', *CUT_KEY, conditions.CARET_CONDITION,
                             'Editing keys: Cmd-X with no selection cuts the line',
                             _action('cutCurrentLine', 'runEditingKey', {'kind': 'cut-line', 'directory': directory},
-                                    'Cut line stopped', before=SELECT_LINE)))
+                                    'Cut line stopped')))
     result.append({'BTTUUID': stable_uuid('prepare text accessibility'), 'BTTTriggerType': APP_CHANGED,
                    'BTTTriggerClass': 'BTTTriggerTypeOtherTriggers', 'BTTAppBundleIdentifier': 'BT.G',
                    'BTTEnabled': 0, 'BTTEnabled2': 0, 'BTTActionCategory': 0,

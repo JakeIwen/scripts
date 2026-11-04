@@ -305,10 +305,16 @@ this restore covers sequences lost before a checkpoint held them.
 
 - `'` `"` `` ` `` `(` `[` `{` typed over a selection wrap it and keep the original
   text selected inside the pair, so a second key wraps again (`("word")`).
-- Cmd-X with no selection selects the caret's line and its line break with
-  Ctrl-A, Ctrl-Shift-E, Shift-Right, then presses the app's own Edit > Cut through
-  Accessibility. BTT swallows a Cmd-X sent from its own Cmd-X trigger, so the cut
-  never goes through the keyboard.
+- Cmd-X with no selection cuts the caret's line: its logical line (a paragraph,
+  however it wraps) with the break that ends it, so the line is removed rather than
+  emptied. An unterminated last line has no break; an empty last line is left
+  alone. The runtime selects the line through Accessibility (a numeric range over
+  `AXValue`; in Firefox, the caret's text-marker paragraph) and reads it back. Only
+  an exact match, in the same app and field with its text unchanged, is cut, by
+  pressing the app's own Edit > Cut through Accessibility: BTT swallows a Cmd-X
+  sent from its own Cmd-X trigger. It then checks that exactly the line left the
+  text. No keystrokes are posted, since a posted key's delivery cannot be confirmed;
+  if anything stops the cut first, the caret goes back unless you have moved it.
 
 Each keyboard trigger has an advanced condition and BTT's "If advanced conditions
 fail, let the shortcut pass through" option: the key behaves normally unless
@@ -324,8 +330,8 @@ before any write.
 Wrapping reuses `text_selection.js` (Firefox and Signal replace through Paste, as
 for the text transforms). Electron apps build their text tree only on request, so
 the app-switch trigger runs `runAppSwitch` to set `AXManualAccessibility`
-in the newly focused app. Firefox maps the paragraph keys to the visual line, so a
-soft-wrapped line in Firefox is cut one visual line at a time. Wrapping replaces
+in the newly focused app. A line is the logical line in every app, Firefox
+included, so a soft-wrapped line is cut whole. Wrapping replaces
 the selection as plain text, which drops formatting in rich editors. Multiple
 cursors and "select next occurrence" are not possible: macOS text controls have a
 single insertion point.
@@ -503,7 +509,8 @@ and report identities. Recreate venvs rather than moving them.
   Runtime source is loaded on each use, so subsequent source fixes do not need
   another menu installation.
 - `text_menu_paste.js`: `findEditMenuItem` locates the Cut/Copy/Paste group (the
-  editing keys' Cmd-X presses its Cut).
+  editing keys press its Cut), and `focusUnchanged` is the focus check both Paste
+  and the editing keys repeat before they act.
   Signal/Firefox's replacement adapter uses the unique native Paste
   menu item (Cmd-V equivalent) through Accessibility, never simulated keypresses.
   It preserves every readable clipboard item/format, marks transformed text transient
@@ -526,7 +533,8 @@ and report identities. Recreate venvs rather than moving them.
   Temporary outcome diagnostics retain per-app results and the last error, so a
   successful Notes transform cannot erase evidence of a Firefox failure. App
   attribution uses AX keyboard focus; these private files contain no selected text.
-- `text_markers.js`: Firefox reselection keeps native text-node positions. A flat
+- `text_markers.js`: Firefox reselection keeps native text-node positions (its
+  `paragraphAt` ranges are also the editing keys' Firefox lines). A flat
   offset can denote both the end of a paragraph and the start of the next one;
   restoring that offset can include an invisible paragraph separator. The adapter
   steps native character boundaries backward from the verified insertion caret,

@@ -262,9 +262,12 @@ compare it with this checkout. Deployed files may differ from the repository.
   that fire only on a settable focused selection outside `EXCLUDED_APPS`;
   `text_editing_conditions.py` owns those conditions and the truth table checked
   through `text_editing_conditions.js` before install, and `text_editing_keys.js`
-  is their runtime on top of `text_selection.js`.
-  BTT swallows a Cmd-X sent from its own Cmd-X trigger, so the line cut presses
-  Edit > Cut through Accessibility instead.
+  is their runtime on top of `text_selection.js`. A line is the caret's logical
+  line with its break: the runtime selects it through Accessibility (numeric range
+  over `AXValue`; Firefox's marker paragraph), acts only on an exact readback with
+  focus and text unchanged, and presses Edit > Cut through Accessibility, since BTT
+  swallows a Cmd-X sent from its own trigger. Never select by posting keys:
+  neither BTT's key actions nor `CGEventPost` confirm delivery.
   `install_finder_paste.py` (`btt.py finder-paste`) owns Cmd-V in Finder: one global
   conditional pass-through trigger (Finder frontmost, no settable text focus) whose
   runtime `finder_paste.js` presses Finder's Edit > Paste for files and text and

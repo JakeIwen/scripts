@@ -31,10 +31,7 @@ const entries = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
         const context = vm.createContext({
             readFile: async path => { calls.push(['readFile', path]); return 'SOURCE'; },
             runJXA: async source => { calls.push(['runJXA', source]); return jxa; },
-            callBTT: async (command, args) => { calls.push(['callBTT', command, args]); },
-            trigger_action: async args => {
-                calls.push(['trigger_action', JSON.parse(args.json).BTTShortcutToSend, args.wait_for_reply]);
-            }
+            callBTT: async (command, args) => { calls.push(['callBTT', command, args]); }
         });
         vm.runInContext(script, context);
         out.push({result: await vm.runInContext(name + '()', context), calls});
@@ -107,12 +104,14 @@ class EmittedScriptTests(unittest.TestCase):
         self.assertEqual(outcome['calls'][-1], ['callBTT', 'display_notification',
                                                 {'title': 'Cut line stopped', '': 'Error: SyntaxError'}])
 
-    def test_cut_selects_the_line_with_keys_before_the_menu_cut(self):
+    def test_cut_runs_one_script_that_selects_the_line_itself(self):
+        # The runtime selects the line itself through Accessibility, in the same
+        # run that presses Cut; the action sends BTT no keys first.
         [outcome] = run_entries([self.entry(by_note('cuts the line'), '{"ok":true,"result":"cut line"}')])
         self.assertEqual(outcome['result'], 'cut line')
-        sent = [call[1:] for call in outcome['calls'][:3]]
-        self.assertEqual(sent, [[shortcut, True] for shortcut in keys.CUT_LINE_SHORTCUTS])
-        self.assertEqual(call_options(outcome['calls'][-1][1], 'runEditingKey'),
+        *reads, (_, source) = outcome['calls']
+        self.assertEqual(reads, [['readFile', path] for path in keys.RUNTIME])
+        self.assertEqual(call_options(source, 'runEditingKey'),
                          {'kind': 'cut-line', 'directory': str(keys.DIRECTORY)})
 
     def test_app_switches_prepare_text_accessibility_outside_excluded_apps(self):

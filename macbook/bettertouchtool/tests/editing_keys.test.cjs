@@ -4,67 +4,242 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-// Cmd-X with no selection: BTT sends the line-selection keys, then the runtime
-// waits for the app's selection to settle and presses Edit > Cut.
-function cutFixture(ranges) {
-    const system = {}, application = {}, field = {}, cut = {}, presses = [];
-    let reads = 0;
+const {firefoxEditor} = require('./firefox_editor_fixture.cjs');
+
+// Cmd-X with no selection, run through runEditingKey against a modelled
+// focused field, its app's Edit menu (found by the real text_menu_paste.js) and
+// the general pasteboard. Elements carry ids so they stay distinct under the
+// Firefox model's by-value equality.
+const PLAIN_TEXT = 'public.utf8-plain-text';
+const nsArray = values => ({count:values.length, objectAtIndex:index => values[index]});
+
+function editMenu() {
+    const bar = {id:'menu bar'}, appMenu = {id:'app menu'}, edit = {id:'edit'}, menu = {id:'edit menu'};
+    const cut = {id:'cut'}, copy = {id:'copy'}, paste = {id:'paste'};
+    const attributes = new Map([
+        [bar, {AXChildren:nsArray([appMenu, edit])}],
+        [appMenu, {AXChildren:nsArray([])}],
+        [edit, {AXChildren:nsArray([menu])}],
+        [menu, {AXRole:'AXMenu', AXChildren:nsArray([cut, copy, paste])}],
+        ...[[cut, 'X'], [copy, 'C'], [paste, 'V']].map(([item, key]) =>
+            [item, {AXRole:'AXMenuItem', AXMenuItemCmdChar:key, AXMenuItemCmdModifiers:0}])
+    ]);
+    return {bar, cut, copy, attributes};
+}
+
+// `field` is the focused element's model: `attribute(name)`, `set(name, value)`
+// for AX writes and `press(kind, write)` for the app's Cut. `onDelay` and
+// `beforePress` (the command's AXEnabled read) let the user act mid-run.
+function keyFixture(field, {bundle = 'com.apple.TextEdit', enabled = true, onDelay, beforePress} = {}) {
+    const system = {id:'system'}, app = {id:'app'}, other = {id:'other field'}, menu = editMenu();
+    const board = {changeCount:7, text:'earlier',
+        stringForType(type) { assert.equal(type, PLAIN_TEXT); return this.text; }};
+    const write = text => { board.changeCount++; board.text = text; };
+    const state = {focused:field.element, other, presses:[], board, write, delays:0};
+    const attribute = (element, name, options) => {
+        let value;
+        if (element === system) value = {AXFocusedApplication:app, AXFocusedUIElement:state.focused}[name];
+        else if (element === app) value = {AXMenuBar:menu.bar}[name];
+        else if (element === field.element) value = name === 'AXRole' ? 'AXTextArea' : field.attribute(name);
+        else if ((element === menu.cut || element === menu.copy) && name === 'AXEnabled') {
+            if (beforePress) beforePress(state);
+            return enabled;
+        } else if (menu.attributes.has(element)) value = menu.attributes.get(element)[name];
+        if (value !== undefined) return value;
+        if (options && options.optional) return null;
+        throw new Error('Unexpected attribute ' + name);
+    };
     const native = value => value;
-    Object.assign(native, {
+    Object.assign(native, field.native, {
         kAXErrorAttributeUnsupported:-25205, kAXErrorNoValue:-25212,
         AXIsProcessTrusted:() => true,
         AXUIElementCreateSystemWide:() => system,
-        CFEqual:(a, b) => a === b,
-        AXUIElementPerformAction(element, action) { presses.push({element, action}); return 0; }
+        CFEqual:field.equal || ((a, b) => a === b),
+        NSPasteboard:{generalPasteboard:board}, NSPasteboardTypeString:PLAIN_TEXT,
+        NSFileManager:{defaultManager:{fileExistsAtPath:() => false}},
+        AXUIElementSetAttributeValue(element, name, value) {
+            assert.equal(element, field.element);
+            return field.set(name, value);
+        },
+        AXUIElementPerformAction(element, action) {
+            assert.equal(action, 'AXPress');
+            const kind = {cut:'cut', copy:'copy'}[element.id];
+            assert.ok(kind, 'unexpected press on ' + element.id);
+            state.presses.push(kind);
+            field.press(kind, write);
+            return 0;
+        }
     });
-    const context = vm.createContext({$:native, Ref:() => [], delay() {},
+    const context = vm.createContext({$:native, Ref:() => [],
+        delay() { state.delays++; if (onDelay) onDelay(state); },
         ObjC:{import() {}, castRefToObject:x => x, unwrap:x => x}});
     for (const file of ['text_selection.js', 'text_editing_keys.js'])
         vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), context);
-    context.selectionAttribute = (element, name) => {
-        if (element === system) return name === 'AXFocusedApplication' ? application : field;
-        if (element === field && name === 'AXRole') return 'AXTextArea';
-        if (element === field && name === 'AXSelectedTextRange') return ranges[Math.min(reads++, ranges.length - 1)];
-        if (element === cut && name === 'AXEnabled') return true;
-        throw new Error('Unexpected attribute ' + name);
-    };
-    context.selectionOffsets = range => range;
-    context.selectionReadSource = file => {
-        assert.match(file, /text_menu_paste\.js$/);
-        return 'function findEditMenuItem(app, attribute, key) { if (key !== "x") throw Error("wrong command"); return CUT; }';
-    };
-    context.CUT = cut;
-    return {context, presses, cut, reads: () => reads};
+    Object.assign(context, {
+        selectionAttribute:attribute,
+        selectionOffsets:range => ({location:range.location, length:range.length}),
+        selectionRangeValue:(location, length) => ({location, length}),
+        selectionApplicationBundle:() => bundle,
+        // The real Edit-menu and marker sources, as BTT loads them.
+        selectionReadSource:file => fs.readFileSync(path.join(__dirname, '..', path.basename(file)), 'utf8')
+    });
+    const run = kind => JSON.parse(context.runEditingKey({kind, directory:'/fixture'}));
+    return {run, state, board, context};
 }
 
-test('the selected line is cut through the Edit menu once the keys have landed', () => {
-    const {context, presses, cut} = cutFixture([{location:4, length:11}, {location:4, length:12}, {location:4, length:12}]);
-    assert.equal(context.cutSelectedLine('/fixture'), 'cut line');
-    assert.deepEqual(presses, [{element:cut, action:'AXPress'}]);
+// A Cocoa text view: AXValue holds the breaks and ranges are numeric. Options
+// model an app that ignores or alters a range write, or whose Cut misbehaves.
+function cocoaField(text, caret, {selectAs = range => range, cuts = true} = {}) {
+    const field = {element:{id:'field'}, text, selection:{location:caret, length:0}, writes:0};
+    const selected = () => field.text.slice(field.selection.location, field.selection.location + field.selection.length);
+    return Object.assign(field, {
+        attribute:name => ({AXValue:field.text, AXSelectedText:selected(),
+            AXSelectedTextRange:{...field.selection}})[name],
+        set(name, value) {
+            assert.equal(name, 'AXSelectedTextRange');
+            field.writes++;
+            field.selection = {...selectAs(value)};
+            return 0;
+        },
+        press(kind, write) {
+            if (cuts) {
+                write(selected());
+                const {location, length} = field.selection;
+                field.text = field.text.slice(0, location) + field.text.slice(location + length);
+                field.selection = {location, length:0};
+            }
+        }
+    });
+}
+
+const THREE = 'one\ntwo\nthree';
+
+test('Cmd-X cuts the caret’s logical line and its break, wherever the caret sits in it', () => {
+    for (const [text, caret, line, rest] of [
+        [THREE, 0, 'one\n', 'two\nthree'],
+        [THREE, 3, 'one\n', 'two\nthree'],
+        [THREE, 4, 'two\n', 'one\nthree'],
+        [THREE, 5, 'two\n', 'one\nthree'],
+        [THREE, 13, 'three', 'one\ntwo\n'],
+        ['a\n\nb', 2, '\n', 'a\nb'],
+        ['one\r\ntwo', 1, 'one\r\n', 'two'],
+        ['one\r\ntwo', 4, 'one\r\n', 'two'],
+        ['one\rtwo', 5, 'two', 'one\r'],
+        ['one\u2029two', 0, 'one\u2029', 'two']
+    ]) {
+        const field = cocoaField(text, caret);
+        const {run, state, board} = keyFixture(field);
+        assert.deepEqual(run('cut-line'), {ok:true, result:'cut line'}, JSON.stringify([text, caret]));
+        assert.deepEqual(state.presses, ['cut']);
+        assert.equal(board.text, line);
+        assert.equal(field.text, rest);
+    }
 });
 
-test('an empty last line has nothing to cut and presses nothing', () => {
-    const {context, presses} = cutFixture([{location:9, length:0}]);
-    assert.equal(context.cutSelectedLine('/fixture'), 'nothing to cut');
-    assert.deepEqual(presses, []);
+test('an empty last line or field has nothing to cut and is left alone', () => {
+    for (const [text, caret] of [['one\n', 4], ['', 0]]) {
+        const field = cocoaField(text, caret);
+        const {run, state, board} = keyFixture(field);
+        assert.deepEqual(run('cut-line'), {ok:true, result:'nothing to cut'});
+        assert.deepEqual(state.presses, []);
+        assert.equal(field.writes, 0);
+        assert.equal(board.changeCount, 7);
+    }
 });
 
-test('a selection that never settles is refused without cutting', () => {
-    const ranges = Array.from({length:30}, (_, index) => ({location:0, length:index + 1}));
-    const {context, presses, reads} = cutFixture(ranges);
-    assert.throws(() => context.cutSelectedLine('/fixture'), /did not settle/);
-    assert.deepEqual(presses, []);
-    assert.equal(reads(), 20);
+test('a line the app does not select exactly is refused before anything is pressed', () => {
+    for (const selectAs of [range => ({location:range.location, length:0}),
+        range => ({location:range.location, length:range.length - 1})]) {
+        const field = cocoaField(THREE, 5, {selectAs});
+        const {run, state, board} = keyFixture(field);
+        const outcome = run('cut-line');
+        assert.equal(outcome.ok, false);
+        assert.match(outcome.error, /did not select the line; nothing was cut/);
+        assert.deepEqual(state.presses, []);
+        assert.equal(field.text, THREE);
+        assert.equal(board.changeCount, 7);
+    }
+});
+
+test('focus or text that changes before the press stops the command untouched', () => {
+    const changes = [state => { state.focused = state.other; },
+        (state, field) => { field.text = 'one\ntwo!\nthree'; }];
+    for (const change of changes) {
+        const field = cocoaField(THREE, 5);
+        const {run, state, board} = keyFixture(field, {beforePress:state => change(state, field)});
+        const outcome = run('cut-line');
+        assert.equal(outcome.ok, false);
+        assert.match(outcome.error, /changed before Cut.*left as it is/);
+        assert.deepEqual(state.presses, []);
+        assert.equal(board.changeCount, 7);
+        // The line stays selected: once the user has moved on, nothing is written back.
+        assert.deepEqual(field.selection, {location:4, length:4});
+    }
+});
+
+test('an unavailable command presses nothing and puts the caret back', () => {
+    const field = cocoaField(THREE, 5);
+    const {run, state} = keyFixture(field, {enabled:false});
+    assert.deepEqual(run('cut-line'), {ok:false, error:'The app’s Cut command is unavailable; nothing was cut.'});
+    assert.deepEqual(state.presses, []);
+    assert.deepEqual(field.selection, {location:5, length:0});
+});
+
+test('a cut the app does not carry out is reported rather than claimed', () => {
+    const field = cocoaField(THREE, 5, {cuts:false});
+    const {run, state} = keyFixture(field);
+    assert.deepEqual(run('cut-line'), {ok:false, error:'The app did not confirm the cut; check the text.'});
+    assert.deepEqual(state.presses, ['cut']);
+});
+
+test('a selection made before the script runs is not replaced', () => {
+    const field = cocoaField(THREE, 5);
+    field.selection = {location:4, length:2};
+    const {run, state} = keyFixture(field);
+    assert.deepEqual(run('cut-line'), {ok:false, error:'Text is selected now; nothing was cut.'});
+    assert.deepEqual(state.presses, []);
+    assert.equal(field.writes, 0);
+});
+
+// Firefox: the field's model from firefox_editor_fixture.cjs. Its numeric
+// selection writes throw, so passing proves lines go through text markers.
+// Its Cut and Copy serialize a selection ending at the next block's start with a break.
+function firefoxField(paragraphs, node, offset) {
+    const document = firefoxEditor({paragraphs, node, start:offset, end:offset});
+    return {element:document.editor, document, native:document.native, equal:document.equal,
+        attribute:name => document.attribute(name),
+        set:(name, value) => document.native.AXUIElementSetAttributeValue(document.editor, name, value),
+        press(kind, write) {
+            const {start, end} = document.state.selection;
+            write(document.rangeText(document.state.selection) + (end.node > start.node && end.offset === 0 ? '\n' : ''));
+            if (kind === 'cut') document.replaceSelection('');
+        }};
+}
+
+test('Firefox cuts the caret’s paragraph and its break through text markers', () => {
+    for (const [node, offset, line, rest] of [[1, 3, 'mIxEd tail\n', ['first', 'third']],
+        [1, 0, 'mIxEd tail\n', ['first', 'third']], [2, 5, 'third', ['first', 'mIxEd tail', '']]]) {
+        const field = firefoxField(['first', 'mIxEd tail', 'third'], node, offset);
+        const {run, state, board} = keyFixture(field, {bundle:'org.mozilla.firefox'});
+        assert.deepEqual(run('cut-line'), {ok:true, result:'cut line'});
+        assert.deepEqual(state.presses, ['cut']);
+        assert.equal(board.text, line);
+        assert.deepEqual(field.document.texts(), rest);
+    }
+});
+
+test('Firefox has nothing to cut in an empty last paragraph', () => {
+    const field = firefoxField(['first', ''], 1, 0);
+    const {run, state} = keyFixture(field, {bundle:'org.mozilla.firefox'});
+    assert.deepEqual(run('cut-line'), {ok:true, result:'nothing to cut'});
+    assert.deepEqual(state.presses, []);
 });
 
 test('editing keys dispatch by kind and report an unknown kind as a refusal', () => {
-    const {context, presses, cut} = cutFixture([{location:4, length:12}]);
-    context.recordTransformOutcome = () => {};
-    assert.deepEqual(JSON.parse(context.runEditingKey({kind:'cut-line', directory:'/fixture'})),
-        {ok:true, result:'cut line'});
-    assert.deepEqual(JSON.parse(context.runEditingKey({kind:'toString', directory:'/fixture'})),
-        {ok:false, error:'Unknown editing key.'});
-    assert.deepEqual(presses, [{element:cut, action:'AXPress'}]);
+    const {run, state} = keyFixture(cocoaField(THREE, 5));
+    assert.deepEqual(run('toString'), {ok:false, error:'Unknown editing key.'});
+    assert.deepEqual(run('cut-line'), {ok:true, result:'cut line'});
+    assert.deepEqual(state.presses, ['cut']);
 });
 
 test('the runtime can load again into the same context, as BTT reuses one', () => {
