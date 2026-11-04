@@ -188,6 +188,18 @@ compare it with this checkout. Deployed files may differ from the repository.
   network changes); flags set without its record are native and left alone. `mac_panel/metered_adapter.py` and
   `static/section_metered.mjs` expose the CLI without bypassing request guards.
   Install/test commands and lease limitations: `pi/docs/networking/METERED_CONNECTIONS.md`.
+- `macbook/linux_test_lane/`: the opt-in Linux test lane (Python 3.9+, CLI
+  `macbook/linux_test_lane/linux-test-lane`), a Lima `vz` Debian 12 arm64 VM
+  on the Mac that runs the Linux/Pi tests off the Pi. `pins.env` is the one
+  record of the image (dated URL + digest), Pi-matching tool versions and VM
+  size; `provision.sh` runs as root in the VM and refuses drift from those
+  versions (restic comes from `pi/scripts/backup/install_restic.sh`);
+  `requirements.txt` mirrors `.local/test-venv`. `lima.py` renders the template
+  and wraps `limactl`; `sync.py` copies exactly the files `run_tests.py`
+  discovers, plus Git state (a worktree's own HEAD/index), through a read-only
+  mount of the main checkout onto VM-local `/home/pi/linux-test-lane/checkout`,
+  keeping the VM's own venv and `.git/run_tests/` cache. Usage under
+  [Repository test suite](#repository-test-suite).
 - `macbook/`: macOS shell utilities, AppleScripts, and BetterTouchTool helpers.
   `macbook/scripts/shimg.zsh` is called by `~/.zshrc`'s `shimg` function;
   it saves clipboard PNGs into the Pi `agent-shared` folder under
@@ -1095,6 +1107,33 @@ extend that registry instead of adding per-test `sys.path` patches.
   path components, a prefix that matches no repository path is an error, and
   output lines name the selection. A selected pass has its own cache key, so it
   never certifies the whole suite (whose key is unchanged).
+
+### Linux test lane
+
+Mac skips are not Linux passes: Linux-only cases (fdinfo/flock lock evidence,
+Bash 4+ backup shell, real Borg/rclone, user namespaces, GNU tools) run in a
+Debian bookworm VM on the Mac (`macbook/linux_test_lane/`), never on the Pi.
+It is opt-in: plain `run_tests.py` never starts it and no deployer calls it.
+Setup is `brew install lima`; from the checkout root:
+
+- `macbook/linux_test_lane/linux-test-lane up` creates, starts and provisions
+  the VM (8 CPUs, 8 GiB, 40 GiB) when needed; reprovisions when
+  `provision.sh`, `pins.env` or `requirements.txt` change.
+- `... test` runs `up`, syncs this working tree (tracked plus unignored files,
+  deletions included) and runs the VM's `run_tests.py --path pi --path shared
+  --path synology --path tests --exclude-path shared/claude-mods`, ending
+  with the runner's PASS/FAILED line and exit status; the VM keeps its own pass
+  cache. `--path`/`--exclude-path` replace that selection; `--force`, `-j`
+  and `--timeout` pass through. shared/claude-mods is left out because its
+  suites run through the Mac's `claude plugin test` and its codexclean build
+  needs Node >= 22.13; the Pi only receives built copies.
+- `status`, `shell` (a shell in the VM checkout), `stop` (it otherwise stays
+  running) and `destroy` (deletes the VM and disk, for a clean start).
+
+Lane commands serialize on `~/.local/state/linux-test-lane/lock`, since every
+worktree shares the VM's one checkout. The VM user is `pi` (uid 1000) with
+passwordless sudo, like the Pi; tests still run unprivileged, so root-only
+cases (`test_time_machine_runtime`, the rsyslog spool test) skip there too.
 
 ## Deployment commits
 
