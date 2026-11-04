@@ -159,6 +159,8 @@ def mounts(state, args):
 
 
 def partition(state, args):
+    # sfdisk reads its script to EOF; replying first can break the supervisor's pipe write.
+    sys.stdin.read()
     for disk in state['disks']:
         if disk['name'] == args[-1]:
             path = disk['name'] + '1'

@@ -16,6 +16,8 @@ root=Path(os.environ['OFFSITE_FIXTURE']).parent
 if name == 'metered':
     if sys.argv[1:] != ['admit','pi.offsite_backup']:
         raise SystemExit(2)
+    # The real admit CLI reads evidence to EOF; exiting first races the parent's pipe write.
+    json.load(sys.stdin)
     print(json.dumps({'allowed': not (root/'denied').exists(), 'reason':'fixture'}))
 elif name == 'route':
     print(json.dumps([{'dev':'eth0' if (root/'wrong-route').exists() else 'tailscale0'}]))
