@@ -556,6 +556,13 @@ compare it with this checkout. Deployed files may differ from the repository.
   `<title>`; given a transcript path it prints the same list for any
   session. Pi URLs use the Mac's `/Volumes/pihome` mount. Stdlib; the Pi copy
   sits flat in `/home/pi/scripts/`.
+- `shared/sh/notify_on_finish.py` is the Python 3.9+ Claude/Codex UserPromptSubmit
+  and Stop hook behind `+n`: standalone tokens arm a per-session flag under
+  `~/.agent/notify-on-finish/`, Stop consumes it once and starts the existing
+  `claude_ntfy_notify.py --send` detached; flags expire after two days. `hold`
+  skips one Stop while background work continues, retaining the armed flag.
+  Mac hooks run from the checkout; deploy the standalone script flat to `/home/pi/scripts/`
+  before installing Pi hooks. CLI tests: `shared/tests/test_notify_on_finish.py`.
 - Shell tricks, Jacob's small interactive helper set (13 per host, at most 16):
   `shared/sh/shell_tricks_common.sh` (tools both hosts share, plus `tricks`),
   host files `macbook/scripts/shell_tricks.zsh` and `pi/scripts/shell_tricks.bash`,
