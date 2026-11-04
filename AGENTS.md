@@ -265,11 +265,13 @@ compare it with this checkout. Deployed files may differ from the repository.
   before install, and `text_editing_keys.js` is their runtime on top of
   `text_selection.js`. A line is the caret's logical line with its break: the
   runtime selects it through Accessibility (numeric range over `AXValue`; Firefox's
-  marker paragraph), acts only on an exact readback with focus and text unchanged,
-  and presses Edit > Cut/Copy through Accessibility, since BTT swallows a Cmd-X or
-  Cmd-C sent from its own trigger. Cmd-C counts only the line itself on the
-  clipboard and restores the caret only over the line it selected. Never select
-  by posting keys: neither BTT's key actions nor `CGEventPost` confirm delivery.
+  marker paragraph) only while the caret is as first read, acts only on an exact
+  readback with the text unchanged and focus checked last, and presses Edit >
+  Cut/Copy through Accessibility, since BTT swallows a Cmd-X or Cmd-C sent from
+  its own trigger; Firefox blank lines are not cut. Cmd-C counts only the line
+  itself on the clipboard and restores the caret only over the line it selected.
+  Never select by posting keys: neither BTT's key actions nor `CGEventPost`
+  confirm delivery.
   Their tests reuse `tests/firefox_editor_fixture.cjs`, the Firefox marker model
   shared with `text_markers.test.cjs`.
   `install_finder_paste.py` (`btt.py finder-paste`) owns Cmd-V in Finder: one global

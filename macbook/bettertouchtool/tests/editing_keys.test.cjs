@@ -28,19 +28,27 @@ function editMenu() {
 }
 
 // `field` is the focused element's model: `attribute(name)`, `set(name, value)`
-// for AX writes and `press(kind, write)` for the app's Cut or Copy. `onDelay`
-// and `beforePress` (the commands' AXEnabled read) let the user act mid-run.
-function keyFixture(field, {bundle = 'com.apple.TextEdit', enabled = true, onDelay, beforePress} = {}) {
-    const system = {id:'system'}, app = {id:'app'}, other = {id:'other field'}, menu = editMenu();
+// for AX writes and `press(kind, write)` for the app's Cut or Copy. A second
+// field, `state.other` (all of its text selected), can take focus; the Edit
+// menu acts on whichever field is focused when it is pressed. `onAttribute`
+// (every AX read), `onDelay` and `beforePress` (the commands' AXEnabled read)
+// let the user act mid-run.
+function keyFixture(field, {bundle = 'com.apple.TextEdit', enabled = true, onAttribute, onDelay, beforePress} = {}) {
+    const system = {id:'system'}, app = {id:'app'}, menu = editMenu();
+    const other = cocoaField('IMPORTANT', 0, {id:'other field'});
+    other.selection = {location:0, length:other.text.length};
     const board = {changeCount:7, text:'earlier',
         stringForType(type) { assert.equal(type, PLAIN_TEXT); return this.text; }};
     const write = text => { board.changeCount++; board.text = text; };
     const state = {focused:field.element, other, presses:[], board, write, delays:0};
+    const fields = [field, other];
     const attribute = (element, name, options) => {
+        if (onAttribute) onAttribute(state, element, name);
+        const owner = fields.find(candidate => candidate.element === element);
         let value;
         if (element === system) value = {AXFocusedApplication:app, AXFocusedUIElement:state.focused}[name];
         else if (element === app) value = {AXMenuBar:menu.bar}[name];
-        else if (element === field.element) value = name === 'AXRole' ? 'AXTextArea' : field.attribute(name);
+        else if (owner) value = name === 'AXRole' ? 'AXTextArea' : owner.attribute(name);
         else if ((element === menu.cut || element === menu.copy) && name === 'AXEnabled') {
             if (beforePress) beforePress(state);
             return enabled;
@@ -66,7 +74,7 @@ function keyFixture(field, {bundle = 'com.apple.TextEdit', enabled = true, onDel
             const kind = {cut:'cut', copy:'copy'}[element.id];
             assert.ok(kind, 'unexpected press on ' + element.id);
             state.presses.push(kind);
-            field.press(kind, write);
+            fields.find(candidate => candidate.element === state.focused).press(kind, write);
             return 0;
         }
     });
@@ -89,9 +97,9 @@ function keyFixture(field, {bundle = 'com.apple.TextEdit', enabled = true, onDel
 
 // A Cocoa text view: AXValue holds the breaks and ranges are numeric. Options
 // model an app that ignores or alters a range write, or whose Copy/Cut misbehave.
-function cocoaField(text, caret, {selectAs = range => range, refuseCaret = false, copyAs = line => line,
-    copies = true, cuts = true} = {}) {
-    const field = {element:{id:'field'}, text, selection:{location:caret, length:0}, writes:0};
+function cocoaField(text, caret, {id = 'field', selectAs = range => range, refuseCaret = false,
+    copyAs = line => line, copies = true, cuts = true} = {}) {
+    const field = {element:{id}, text, selection:{location:caret, length:0}, writes:0};
     const selected = () => field.text.slice(field.selection.location, field.selection.location + field.selection.length);
     return Object.assign(field, {
         attribute:name => ({AXValue:field.text, AXSelectedText:selected(),
@@ -182,7 +190,7 @@ test('a line the app does not select exactly is refused before anything is press
 });
 
 test('focus or text that changes before the press stops the command untouched', () => {
-    const changes = [state => { state.focused = state.other; },
+    const changes = [state => { state.focused = state.other.element; },
         (state, field) => { field.text = 'one\ntwo!\nthree'; }];
     for (const change of changes) {
         for (const [kind, name] of [['cut-line', 'Cut'], ['copy-line', 'Copy']]) {
@@ -313,11 +321,55 @@ test('Firefox copies the caret’s paragraph and restores the caret marker', () 
     assert.deepEqual(field.document.texts(), ['first', 'mIxEd tail', 'third']);
 });
 
-test('Firefox has nothing to cut in an empty last paragraph', () => {
-    const field = firefoxField(['first', ''], 1, 0);
-    const {run, state} = keyFixture(field, {bundle:'org.mozilla.firefox'});
-    assert.deepEqual(run('cut-line'), {ok:true, result:'nothing to cut'});
+test('Firefox refuses to cut a blank paragraph rather than guess at it', () => {
+    for (const [paragraphs, node] of [[['first', '', 'third'], 1], [['', '', 'third'], 0], [['', '', 'third'], 1],
+        [['first', ''], 1]]) {
+        const field = firefoxField(paragraphs, node, 0);
+        const before = JSON.stringify(field.document.state.selection);
+        const {run, state, board} = keyFixture(field, {bundle:'org.mozilla.firefox'});
+        assert.deepEqual(run('cut-line'), {ok:false, error:'Blank lines can’t be cut in Firefox yet; nothing was cut.'},
+            JSON.stringify([paragraphs, node]));
+        assert.deepEqual(state.presses, []);
+        assert.deepEqual(field.document.texts(), paragraphs);
+        assert.equal(JSON.stringify(field.document.state.selection), before);
+        assert.equal(board.changeCount, 7);
+    }
+});
+
+// Focus can move while the last checks read the field; Cut must still not
+// reach the newly focused field (which has all of its text selected).
+test('focus that moves while the checks read the field never lets Cut reach the new field', () => {
+    for (const [makeField, bundle, name] of [
+        [() => cocoaField(THREE, 5), 'com.apple.TextEdit', 'AXValue'],
+        [() => cocoaField(THREE, 5), 'com.apple.TextEdit', 'AXSelectedTextRange'],
+        [() => cocoaField(THREE, 5), 'com.apple.TextEdit', 'AXSelectedText'],
+        [() => firefoxField(['first', 'mIxEd tail', 'third'], 1, 3), 'org.mozilla.firefox', 'AXSelectedTextMarkerRange']
+    ]) {
+        const field = makeField();
+        let checking = false;
+        const {run, state, board} = keyFixture(field, {bundle, beforePress:() => { checking = true; },
+            onAttribute:(state, element, read) => {
+                if (checking && element === field.element && read === name) state.focused = state.other.element;
+            }});
+        const outcome = run('cut-line');
+        assert.equal(outcome.ok, false, name);
+        assert.match(outcome.error, /changed before Cut; nothing was cut/);
+        assert.deepEqual(state.presses, []);
+        assert.equal(state.other.text, 'IMPORTANT');
+        assert.equal(board.changeCount, 7);
+    }
+});
+
+test('a caret moved while the Edit menu is found is not overwritten by the old line', () => {
+    const field = cocoaField(THREE, 5);
+    const {run, state} = keyFixture(field, {onAttribute:(state, element, name) => {
+        if (name === 'AXMenuBar') field.selection = {location:10, length:0};
+    }});
+    assert.deepEqual(run('cut-line'), {ok:false, error:'The caret, text or focus changed; nothing was cut.'});
+    assert.equal(field.writes, 0);
     assert.deepEqual(state.presses, []);
+    assert.equal(field.text, THREE);
+    assert.deepEqual(field.selection, {location:10, length:0});
 });
 
 test('editing keys dispatch by kind and report an unknown kind as a refusal', () => {

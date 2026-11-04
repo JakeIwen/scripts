@@ -309,12 +309,15 @@ this restore covers sequences lost before a checkpoint held them.
   however it wraps) with the break that ends it, so the line is removed rather than
   emptied. An unterminated last line has no break; an empty last line is left
   alone. The runtime selects the line through Accessibility (a numeric range over
-  `AXValue`; in Firefox, the caret's text-marker paragraph) and reads it back. Only
-  an exact match, in the same app and field with its text unchanged, is cut, by
-  pressing the app's own Edit > Cut through Accessibility: BTT swallows a Cmd-X
-  sent from its own Cmd-X trigger. It then checks that exactly the line left the
-  text. No keystrokes are posted, since a posted key's delivery cannot be confirmed;
-  if anything stops the cut first, the caret goes back unless you have moved it.
+  `AXValue`; in Firefox, the caret's text-marker paragraph), but only while the
+  caret and text are as it first read them, and reads the selection back. Only an
+  exact match, with the text unchanged and the same app and field still focused
+  (checked last, right before the press), is cut, by pressing the app's own Edit >
+  Cut through Accessibility: BTT swallows a Cmd-X sent from its own Cmd-X trigger.
+  It then checks that exactly the line left the text. No keystrokes are posted,
+  since a posted key's delivery cannot be confirmed; if anything stops the cut
+  first, the caret goes back unless you have moved it. In Firefox a blank line is
+  refused with a notification: its flat text could not confirm the cut.
 - Cmd-C with no selection copies the caret's line the same way (as VS Code does)
   and leaves the caret where it was. After Edit > Copy it waits up to a second for
   the clipboard to hold the line itself (another app's write does not count), then

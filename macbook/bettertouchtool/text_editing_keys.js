@@ -40,6 +40,7 @@ function rangeLines(element) {
             return lineRangeAt(text, caret.location);
         },
         text: (range, text) => text.slice(range.location, range.location + range.length),
+        cutRefusal: () => null,
         select: range => {
             const value = selectionRangeValue(range.location, range.length);
             if ($.AXUIElementSetAttributeValue(element, $('AXSelectedTextRange'), value) !== 0)
@@ -56,11 +57,12 @@ function markerLines(markers) {
         collapsed: markers.collapsed,
         // Marker endpoints are exact, so they also fix the text.
         isSelected: range => markers.same(markers.read(), range),
-        lineAt: caret => {
-            const range = markers.paragraphAt(caret);
-            return markers.collapsed(range) ? null : range;
-        },
+        lineAt: caret => markers.paragraphAt(caret),
         text: range => markers.text(range),
+        // A blank paragraph is unsafe to cut: its marker range cannot be told
+        // from an empty one, and with no text in the flat AXValue the cut
+        // cannot be confirmed. Fail closed until it is verified live.
+        cutRefusal: line => line.text === '' ? 'Blank lines can’t be cut in Firefox yet; nothing was cut.' : null,
         select: markers.select
     };
 }
@@ -87,13 +89,14 @@ function lineEditor(directory, key, verb) {
         line: range && {range, text: lines.text(range, text)}};
 }
 
-// True while this field is still focused with its text unchanged and `range`
-// (holding `selected`) selected: anything else is the user's newer state.
+// True while this field's text is unchanged, `range` (holding `selected`) is
+// selected and the field still has focus: anything else is the user's newer
+// state. Focus is read last, as the Edit menu acts on whatever is focused then.
 function editorHolds(editor, range, selected) {
     const {element} = editor;
-    return editor.focusUnchanged(editor.system, editor.application, element, selectionAttribute)
-        && ObjC.unwrap(selectionAttribute(element, 'AXValue')) === editor.text
-        && editor.lines.isSelected(range, selected);
+    return ObjC.unwrap(selectionAttribute(element, 'AXValue')) === editor.text
+        && editor.lines.isSelected(range, selected)
+        && editor.focusUnchanged(editor.system, editor.application, element, selectionAttribute);
 }
 
 function waitFor(condition, attempts) {
@@ -102,6 +105,13 @@ function waitFor(condition, attempts) {
         if (attempt >= attempts) return false;
         delay(0.05);
     }
+}
+
+// Finding the Edit menu takes a while: a caret moved meanwhile must not be
+// overwritten by selecting the line read before it.
+function assertCaretUnchanged(editor, verb) {
+    if (!editorHolds(editor, editor.caret, ''))
+        throw new Error('The caret, text or focus changed; nothing was ' + verb + '.');
 }
 
 function selectLine(editor, verb) {
@@ -153,6 +163,9 @@ function textWithoutLine(editor) {
 function cutSelectedLine(directory) {
     const editor = lineEditor(directory, 'x', 'cut');
     if (!editor.line) return 'nothing to cut';
+    const refusal = editor.lines.cutRefusal(editor.line);
+    if (refusal) throw new Error(refusal);
+    assertCaretUnchanged(editor, 'cut');
     let expected;
     try {
         selectLine(editor, 'cut');
@@ -186,6 +199,7 @@ function copySelectedLine(directory) {
     const editor = lineEditor(directory, 'c', 'copied');
     if (!editor.line) return 'nothing to copy';
     const board = $.NSPasteboard.generalPasteboard;
+    assertCaretUnchanged(editor, 'copied');
     let failure = null;
     try {
         selectLine(editor, 'copied');
