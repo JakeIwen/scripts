@@ -602,10 +602,11 @@ compare it with this checkout. Deployed files may differ from the repository.
   Fail-open; Jacob runs a deliberately blocked command himself with `! <command>` in Claude.
 - `shared/claude-mods/clean-output/` is the Claude Code mod behind `/clean`
   (usage in its README). The Mac loads it from the checkout; the Pi, which
-  has no checkout, loads the copy `zsh deploy_pi.zsh` installs over
-  `vanpi.lan` in `~/.local/share/claude-mods/clean-output/` (both through
-  `settings.json` `env.CLAUDE_CODE_PLUGIN_DIRS`), so re-run it after any
-  change to the mod. Its engine-free modules (`hooks/*.ts` except
+  has no checkout, loads the copy `zsh shared/claude-mods/deploy_pi.zsh
+  clean-output` installs over `vanpi.lan` in
+  `~/.local/share/claude-mods/clean-output/` (both through `settings.json`
+  `env.CLAUDE_CODE_PLUGIN_DIRS`), so re-run it after any change to the mod;
+  the mod's own `deploy_pi.zsh` calls it. Its engine-free modules (`hooks/*.ts` except
   `register.tsx`) also make `codexclean`, the same view of a Codex session:
   `codex/build.mjs` strips their types (Node >= 22.13) into plain modules that
   run on the Pi's Node 20, and `zsh codex/deploy.zsh` installs them on the Pi,
