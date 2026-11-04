@@ -231,7 +231,8 @@ No restic cache fills the Pi rootfs; in-memory index cost still depends on repo 
 
 All source mounts are verified against the exact expected label/source, including
 nested source paths. A source mount created by this run is released at the end of
-that source's phase, and only when no other job holds the disk. Pre-existing source
+that source's phase (if the run is stopping, at its end instead), and only when no
+other job holds the disk. Pre-existing source
 mounts stay mounted. A target mounted by the backup run is released at exit; on
 SIGTERM even a pre-existing verified offsite target is released. Offsite drives are manually mounted, like bigboi, and
 explicitly included in HDD ignition unmount/spindown policy and the disk lock
@@ -270,17 +271,28 @@ conflict matrix and drain behavior are in [backup concurrency](CONCURRENCY.md).
   rechecks ignition and mounts it if needed. An unmount of bigboi during the
   active `borg` phase still stops the run, as it stops Borg itself.
 - Children inherit every held descriptor, so an orphaned restic still holds the
-  disk and the emergency drain finds it. Release is by close, never unlock.
+  disk and the emergency drain finds it. Release is by close, never unlock. The
+  mount helper's `release` is the exception: it inherits only `job-offsite`, so a
+  stalled unmount holds no other disk.
 - Ending a phase, the worker closes its disk descriptor, then the mount helper
   unmounts what this run mounted only if it can take the disk lock exclusively.
-  Helper exit 3 (another job holds the disk: left mounted) and exit 4 (already
+  Helper exit 3 (flock reported another holder: left mounted) and exit 4 (already
   unmounted, e.g. by a drain) are recorded in the status's `cleanup_notes`, not
-  errors; any other failure is a `cleanup_errors` entry that fails the run.
-- Before the final ntfy, every disk, data and slot descriptor is closed: the
-  ordinary drain waits only briefly, and ntfy can block without an uplink.
+  errors; any other failure, a flock error included, is a `cleanup_errors` entry
+  that fails the run.
+- A stopping run (TERM, ignition) holds no disk, data or slot lock while
+  anything is released: a phase that ends with a stop leaves its release to the
+  end of the run, and a stop that arrives while a release runs closes the run's
+  remaining descriptors at once. At the end, every disk, data and slot
+  descriptor closes first; only then do the deferred source releases, the target
+  release and the ntfy run. The ordinary drain waits only 60 s for the target, an
+  unmount can stall, and ntfy can block without an uplink. `job-offsite` (fd 10)
+  stays held until exit.
 - `restore-test` locks the disk whose mounted filesystem (`findmnt -T`) holds
   `--target`; any target that is neither on such a disk nor on the root
-  filesystem is refused.
+  filesystem is refused, and so is a root-filesystem target inside `/mnt`: it
+  sits in an unmounted disk's mount point, which that disk would cover (unlocked)
+  once mounted.
 - Ignition with `umount_disks.sh --spindown` drains every attached HDD, the offsite
   drive included, so it stops the run, then unmounts and spins the drive down. A
   remote run reading only the `EXFAT512` flash drive is not drained by spindown;

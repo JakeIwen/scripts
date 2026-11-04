@@ -85,6 +85,11 @@ def restore_disk(repo, target):
     """The managed backup disk whose mounted filesystem holds target; None for the root filesystem."""
     mount = Path(repo.commands.run('findmnt', '-rn', '-T', target, '-o', 'TARGET').strip())
     if mount == Path('/'):
+        # A disk mounted over its mount point later would cover this directory,
+        # and restic would then write onto that disk without its lock.
+        if target.is_relative_to(repo.cfg.mount_root):
+            raise ValueError(f'Restore test target is inside {repo.cfg.mount_root} but on the root filesystem '
+                             '(its disk is not mounted); mount that disk first or choose a target elsewhere')
         return None
     if mount.parent == repo.cfg.mount_root and mount.name in DISK_LABELS:
         return mount.name

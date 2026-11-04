@@ -24,6 +24,7 @@ class Backup:
         self.locks = self.commands.locks
         self.target_owned = False
         self.target_verified = False
+        self.deferred_releases = []  # labels a stopping phase mounted; cleanup() releases them
         self.remote = getattr(repo, 'remote', False)
         self.state: StatusRecord = {'schema': SCHEMA, 'pid': os.getpid(), 'label': repo.label,
                       'result': Result.RUNNING, 'source': None, 'bytes_done': 0,
@@ -71,14 +72,18 @@ class Backup:
         Locks precede mounting and the ignition re-check follows them, as for
         Borg and EXFAT. Release runs in reverse: close our descriptors, then let
         the helper unmount only what this phase mounted, and only when no other
-        job holds the disk.
+        job holds the disk. A stopping run defers that release to cleanup(),
+        which first closes every descriptor, the target's included: a drain
+        waits only briefly for the target, and an unmount can stall.
         """
         self.summary, self.errors = None, []
         self.sampler = rate_sampler(self.cfg, name)
         self.state.update(source=name, bytes_done=0, bytes_total=None, percent=None, rate=None, eta=None)
         self.save()
-        mounted = []
+        mounted, stopping = [], False
         try:
+            # A stop that arrived since the last phase (during its release, say) takes no new lock.
+            self.commands.allowed()
             if name == BORG_SOURCE and wait is not None:
                 # The deferred wait holds no bigboi lock, so a finishing nightly
                 # Borg can still unmount bigboi and a bigboi drain during the
@@ -91,11 +96,17 @@ class Backup:
             self.commands.allowed()
             self.repo.mount_source(source.label, on_mount=mounted.append)
             return self.snapshot(name, source)
+        except Interrupted:
+            stopping = True
+            raise
         finally:
             self.locks.close(LockClass.DATA, BORG_REPOSITORY_LOCK)
             self.locks.close(LockClass.DISK, source.label)
-            for label in mounted:
-                self.release(label)
+            if stopping or self.commands.stop_cause():
+                self.deferred_releases.extend(mounted)
+            else:
+                for label in mounted:
+                    self.release(label)
 
     def hold_borg_repository(self, wait):
         try:
@@ -108,9 +119,10 @@ class Backup:
             raise RuntimeError(f'Borg repository stayed busy for {waited} (another job holds '
                                'data-borg-repo); borg was not copied this run') from None
 
-    def release(self, label):
+    def release(self, label, release=None):
+        """Run one guarded release (default: the mount helper's for label) and record its outcome."""
         try:
-            note = self.repo.release(label)
+            note = release() if release else self.repo.release(label)
         except (OSError, RuntimeError) as exc:
             self.state.setdefault('cleanup_errors', []).append(f'{label}: {exc}')
             return
@@ -193,16 +205,14 @@ class Backup:
                                 and not self.state.get('cleanup_errors') else Result.FAILED)
 
     def cleanup(self):
-        # Every disk, data and slot descriptor closes before ntfy or any other
-        # network call: the ordinary drain waits only briefly for disk locks.
-        if self.target_owned or (self.target_verified and self.state['result'] == Result.INTERRUPTED):
-            try:
-                note = self.repo.unmount()
-                if note:
-                    self.state.setdefault('cleanup_notes', []).append(note)
-            except (OSError, RuntimeError) as exc:
-                self.state.setdefault('cleanup_errors', []).append(f'{self.repo.label}: {exc}')
+        # Every disk, data and slot descriptor closes before any release helper,
+        # ntfy or other network call: the ordinary drain waits only briefly for
+        # disk locks, and an unmount or a notification without uplink can stall.
         self.locks.close_resources()
+        for label in self.deferred_releases:
+            self.release(label)
+        if self.target_owned or (self.target_verified and self.state['result'] == Result.INTERRUPTED):
+            self.release(self.repo.label, self.repo.unmount)
         if self.state.get('cleanup_errors') and self.state['result'] == Result.OK:
             self.state['result'] = Result.FAILED
 

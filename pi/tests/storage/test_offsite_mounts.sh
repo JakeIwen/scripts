@@ -168,10 +168,25 @@ expect 1 "release whose source no longer matches the label" env TEST_RESOLVED_DE
 expect 1 "release of a stacked mount point" "$helper" release "$label"
 /usr/bin/umount "/mnt/$label"
 expect 1 "release without the job identity" env VANPI_BACKUP_JOB_LOCK_FD=12 "$helper" release "$label"
+# Only flock's contention status (1) means another holder; any other failure
+# (usage, bad descriptor, EX_OSERR) is a cleanup error, not a harmless "busy".
+flock_error="$test_root/flock-error"
+printf '#!/bin/bash\nexit "$TEST_FLOCK_STATUS"\n' > "$flock_error"
+chmod 0700 "$flock_error"
+for code in 64 71; do
+  expect 1 "release whose flock fails with $code" env VANPI_BACKUP_JOB_LOCK_FLOCK="$flock_error" \
+    TEST_FLOCK_STATUS="$code" "$helper" release "$label"
+done
+expect 3 "release whose flock reports contention" env VANPI_BACKUP_JOB_LOCK_FLOCK="$flock_error" \
+  TEST_FLOCK_STATUS=1 "$helper" release "$label"
 mounted "$label" || fail "a refused release unmounted the disk"
 expect 0 "release of an unused disk" "$helper" release "$label"
 mounted "$label" && fail "release left the disk mounted"
-/usr/bin/flock -n "$disk_lock" true || fail "release kept the disk lock"
+# Probe the existing file through a descriptor: path-form flock would create it.
+[[ -f "$disk_lock" ]] || fail "release removed the disk lock"
+exec {probe}<"$disk_lock"
+/usr/bin/flock -n "$probe" || fail "release kept the disk lock"
+exec {probe}<&-
 start_disk_holder
 expect 4 "release after a drain already unmounted the disk" "$helper" release "$label"
 stop_disk_holder

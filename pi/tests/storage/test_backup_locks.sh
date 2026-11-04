@@ -216,14 +216,21 @@ stop_holder() {
   wait "$1" || fail "holder $1 did not exit cleanly"
 }
 
-lock_is_free() { # Probe a pre-existing inode without creating it.
+# Probes open the existing lock file and test that descriptor: path-form flock
+# would create a missing file and call it free. Exported for the bash -c cases.
+lock_probe() { # <path> [-s]: 0 free, 1 another holder conflicts, 2 missing or flock error
   local fd rc
-  exec {fd}<"$1" || return 1
-  /usr/bin/flock -n "$fd"
+  [[ -f "$1" ]] || return 2
+  exec {fd}<"$1" || return 2
+  /usr/bin/flock -n ${2:+"$2"} "$fd"
   rc=$?
   exec {fd}<&-
+  (( rc <= 1 )) || return 2
   return "$rc"
 }
+lock_is_free() { lock_probe "$@"; }
+lock_is_held() { lock_probe "$@"; (( $? == 1 )); }
+export -f lock_probe lock_is_free lock_is_held
 
 run_abort() {
   /bin/bash "$abort_script" "$@" > "$test_root/abort.out" 2>&1 || {
@@ -293,8 +300,8 @@ claim_blocker=$started_pid
 /bin/bash -uc '
   source "$1"
   if hold_backup_disks_exclusive hdd1tb bigboi; then exit 1; fi
-  /usr/bin/flock -n "$BACKUP_LOCK_DIR/disk-hdd1tb.lock" true || exit 2
-  ! /usr/bin/flock -n "$BACKUP_LOCK_DIR/disk-bigboi.lock" true || exit 3
+  lock_is_free "$BACKUP_LOCK_DIR/disk-hdd1tb.lock" || exit 2
+  lock_is_held "$BACKUP_LOCK_DIR/disk-bigboi.lock" || exit 3
 ' test "$TEST_LOCK_LIBRARY" > "$test_root/claim.out" 2>&1 ||
   fail "failed lifecycle claim retained an earlier disk or disturbed its peer"
 stop_holder "$claim_blocker"
@@ -305,14 +312,14 @@ mv "$BACKUP_LOCK_DIR/disk-bigboi.lock" "$test_root/saved-disk.lock"
   source "$1"
   hold_backup_disks_exclusive bigboi hdd1tb || exit 1
   [[ ! -e "$BACKUP_LOCK_DIR/disk-bigboi.lock" ]] || exit 2
-  ! /usr/bin/flock -n "$BACKUP_LOCK_DIR/disk-hdd1tb.lock" true || exit 3
+  lock_is_held "$BACKUP_LOCK_DIR/disk-hdd1tb.lock" || exit 3
 ' test "$TEST_LOCK_LIBRARY" || fail "lifecycle did not safely skip a missing disk lock"
 mv "$test_root/saved-disk.lock" "$BACKUP_LOCK_DIR/disk-bigboi.lock"
 chmod 0600 "$BACKUP_LOCK_DIR/disk-bigboi.lock"
 /bin/bash -uc '
   source "$1"
   if hold_backup_disks_exclusive hdd1tb bigboi; then exit 1; fi
-  /usr/bin/flock -n "$BACKUP_LOCK_DIR/disk-hdd1tb.lock" true
+  lock_is_free "$BACKUP_LOCK_DIR/disk-hdd1tb.lock"
 ' test "$TEST_LOCK_LIBRARY" > "$test_root/claim.out" 2>&1 ||
   fail "unsafe disk lock metadata was accepted or retained an earlier disk"
 chmod 0660 "$BACKUP_LOCK_DIR/disk-bigboi.lock"
@@ -323,14 +330,14 @@ chmod 0660 "$BACKUP_LOCK_DIR/disk-bigboi.lock"
   acquire_backup_job borg bigboi movingparts || exit 1
   label=unknown
   release_backup_disk movingparts
-  /usr/bin/flock -n "$BACKUP_LOCK_DIR/disk-movingparts.lock" true || exit 2
+  lock_is_free "$BACKUP_LOCK_DIR/disk-movingparts.lock" || exit 2
   acquire_backup_lock data borg-repo || exit 3
   key=unknown
   release_backup_lock data borg-repo
-  /usr/bin/flock -n "$BACKUP_LOCK_DIR/data-borg-repo.lock" true || exit 4
+  lock_is_free "$BACKUP_LOCK_DIR/data-borg-repo.lock" || exit 4
   release_backup_job
-  /usr/bin/flock -n "$BACKUP_LOCK_DIR/job-borg.lock" true || exit 5
-  /usr/bin/flock -n "$VANPI_BACKUP_JOB_LOCK" true
+  lock_is_free "$BACKUP_LOCK_DIR/job-borg.lock" || exit 5
+  lock_is_free "$VANPI_BACKUP_JOB_LOCK"
 ' test "$config" || fail "argument-scoped resource release failed"
 
 # EXFAT releases only its destination before asking lifecycle to spin it down.
@@ -338,10 +345,10 @@ chmod 0660 "$BACKUP_LOCK_DIR/disk-bigboi.lock"
   source "$1"
   acquire_backup_job exfat hdd1tb EXFAT512 || exit 1
   release_backup_disk hdd1tb
-  /usr/bin/flock -n "$BACKUP_LOCK_DIR/disk-hdd1tb.lock" true || exit 2
-  ! /usr/bin/flock -n "$BACKUP_LOCK_DIR/disk-EXFAT512.lock" true || exit 3
-  ! /usr/bin/flock -n "$BACKUP_LOCK_DIR/job-exfat.lock" true || exit 4
-  ! /usr/bin/flock -n "$VANPI_BACKUP_JOB_LOCK" true || exit 5
+  lock_is_free "$BACKUP_LOCK_DIR/disk-hdd1tb.lock" || exit 2
+  lock_is_held "$BACKUP_LOCK_DIR/disk-EXFAT512.lock" || exit 3
+  lock_is_held "$BACKUP_LOCK_DIR/job-exfat.lock" || exit 4
+  lock_is_held "$VANPI_BACKUP_JOB_LOCK" || exit 5
   /bin/bash "$2" hdd1tb
 ' test "$config" "$abort_script" || fail "EXFAT destination cleanup lost its remaining holds"
 
@@ -374,9 +381,9 @@ fi
   trap "kill -TERM $heir 2>/dev/null" EXIT
   ! release_backup_disk_if_unused mbp2tbkup || exit 2
   release_backup_disk mbp2tbkup
-  ! /usr/bin/flock -n "$BACKUP_LOCK_DIR/disk-mbp2tbkup.lock" true || exit 3
+  lock_is_held "$BACKUP_LOCK_DIR/disk-mbp2tbkup.lock" || exit 3
   kill -TERM "$heir"; wait "$heir" 2>/dev/null
-  /usr/bin/flock -n "$BACKUP_LOCK_DIR/disk-mbp2tbkup.lock" true || exit 4
+  lock_is_free "$BACKUP_LOCK_DIR/disk-mbp2tbkup.lock" || exit 4
 ' test "$config" || fail "a live child's inherited disk hold was dropped by the parent release"
 
 # Disk-scoped drain must never TERM the unrelated Borg parent.
@@ -384,13 +391,13 @@ run_abort hdd1tb
 wait "$exfat_pid" || fail "EXFAT disk stop failed"
 assert_eq TERM "$(< "$test_root/exfat.signal")" "EXFAT disk drain signal"
 kill -0 "$borg_pid" || fail "hdd1tb drain stopped Borg"
-lock_is_free "$(backup_lock_path disk bigboi)" && fail "Borg lost its bigboi hold"
+lock_is_held "$(backup_lock_path disk bigboi)" || fail "Borg lost its bigboi hold"
 stop_holder "$borg_pid"
 /bin/bash -c '
   source "$1"
   acquire_backup_job pi-cloud bigboi || exit 1
   release_backup_disk_if_unused bigboi || exit 2
-  ! /usr/bin/flock -n -s "$BACKUP_LOCK_DIR/disk-bigboi.lock" true || exit 3
+  lock_is_held "$BACKUP_LOCK_DIR/disk-bigboi.lock" -s || exit 3
   release_backup_disk bigboi
 ' test "$config" || fail "unused disk was not held exclusively until release"
 
@@ -476,7 +483,7 @@ run_abort --user borg
 wait "$borg_pid" || fail "Borg user stop failed"
 assert_eq USR1 "$(< "$test_root/user-borg.signal")" "Borg user stop signal"
 kill -0 "$exfat_pid" || fail "Borg user stop affected EXFAT"
-lock_is_free "$(backup_lock_path disk hdd1tb)" && fail "EXFAT lost its disk hold"
+lock_is_held "$(backup_lock_path disk hdd1tb)" || fail "EXFAT lost its disk hold"
 start_holder wrong-tool "$test_root/not-the-backup.sh" borg bigboi
 wrong_pid=$started_pid
 if /bin/bash "$abort_script" --user borg > "$test_root/refusal.out" 2>&1; then

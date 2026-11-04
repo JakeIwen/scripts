@@ -13,6 +13,9 @@ MOUNT_DISKS_LIBRARY_ONLY=1
 # disk mounted, or it was already unmounted (by a drain); neither is an error.
 OFFSITE_RELEASE_BUSY=3
 OFFSITE_RELEASE_ABSENT=4
+# util-linux flock -n exits 1 only on contention (its default -E conflict code);
+# any other status is an operational error, never "another holder".
+FLOCK_CONFLICT=1
 
 verify() {
   disk_policy_resolve_exact_label "$1" label-only || return 1
@@ -73,7 +76,10 @@ release() { # <label>: the caller already closed its own disk descriptor
   # umount_disks.sh would drain this run itself. Prove no other holder instead:
   # a busy exclusive try means a peer job or a lifecycle drain owns the disk.
   backup_lock_open fd "$path" backup_lock_validate || exit 1
-  "$JOB_LOCK_FLOCK" -n "$fd" || exit "$OFFSITE_RELEASE_BUSY"
+  "$JOB_LOCK_FLOCK" -n "$fd"
+  status=$?
+  (( status == FLOCK_CONFLICT )) && exit "$OFFSITE_RELEASE_BUSY"
+  (( status == 0 )) || exit 1
   md_find_exact_mount_source "/mnt/$label"
   status=$?
   (( status == 1 )) && exit "$OFFSITE_RELEASE_ABSENT"

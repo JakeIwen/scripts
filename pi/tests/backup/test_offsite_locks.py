@@ -1,7 +1,8 @@
 """Offsite resource locks through the public CLI: real flocks, fake devices.
 
 Covers the cloud-slot policy, the Borg repository deferral and bounded wait,
-per-phase disk holds and their guarded release, and admission refusals.
+per-phase disk holds and their guarded release (a stop frees the target even
+while a release stalls), restore targets, and admission refusals.
 """
 import json
 import os
@@ -68,6 +69,24 @@ class LockFixtureCase(unittest.TestCase):
                 self.fail(message + ': ' + ''.join(child.communicate()))
             self.assertLess(time.monotonic(), deadline, message)
             time.sleep(0.05)
+
+    def free(self, lock_class, name):
+        """A non-blocking exclusive probe through a descriptor on the existing lock file."""
+        try:
+            with backup_locks.held(lock_class, name):
+                return True
+        except LockBusy:
+            return False
+
+    def stall_release(self, label):
+        """Make the mount helper's release of label block until the returned proceed file exists."""
+        stalled, proceed = self.f.root / 'release.stalled', self.f.root / 'release.proceed'
+        self.update(release_stall={'label': label, 'stalled': str(stalled), 'proceed': str(proceed)})
+        self.addCleanup(proceed.touch)  # a failing test never leaves the stub waiting
+        return stalled, proceed
+
+    def releases(self):
+        return [row for row in self.f.executions() if row['name'] == 'mounts' and row['args'][0] == 'release']
 
     def restic_backups(self):
         return [row[row.index('--tag') + 1] for row in self.f.calls() if row[0] == 'restic' and 'backup' in row
@@ -279,6 +298,66 @@ class DiskPhaseTests(LockFixtureCase):
         self.assertTrue(check['env']['VANPI_BACKUP_CLOUD_SLOT_FD'])
 
 
+class StopDuringReleaseTests(LockFixtureCase):
+    """A drain TERMs the run and waits only briefly for the target: no release may keep it."""
+
+    def test_stop_during_a_source_phase_frees_the_target_before_its_stalled_release(self):
+        self.unmount('movingparts')
+        self.unmount(self.f.label)
+        stalled, proceed = self.stall_release('movingparts')
+        self.update(hang=True)
+        child = self.start('movingparts')
+        self.wait_for((self.f.root / 'backup-started').exists, child, 'backup never started')
+        self.assertFalse(self.free(LockClass.DISK, self.f.label), 'the run should hold its target')
+        stopped = time.monotonic()
+        child.send_signal(signal.SIGTERM)
+        self.wait_for(stalled.exists, child, 'the deferred source release never ran')
+        self.wait_for(lambda: self.free(LockClass.DISK, self.f.label), child,
+                      'the target stayed locked behind a stalled release', timeout=10)
+        self.assertLess(time.monotonic() - stopped, 10)
+        self.assertIsNone(child.poll(), 'the release should still be stalled')
+        proceed.touch()
+        out, err = child.communicate(timeout=60)
+        self.assertEqual(child.returncode, 143, out + err)
+        self.assertEqual([row['args'][1] for row in self.releases()], ['movingparts', self.f.label])
+        self.f.reload()
+        self.assertEqual(self.f.state['released'], ['movingparts', self.f.label])
+        self.assertEqual(json.loads(out.splitlines()[-1])['sources']['movingparts']['result'], 'interrupted')
+
+    def test_stop_while_a_release_stalls_frees_the_target_and_starts_no_further_source(self):
+        self.unmount('movingparts')
+        stalled, proceed = self.stall_release('movingparts')
+        child = self.start('movingparts', 'borg')
+        self.wait_for(stalled.exists, child, 'movingparts was never released')
+        self.assertFalse(self.free(LockClass.DISK, self.f.label), 'the run should hold its target')
+        child.send_signal(signal.SIGTERM)
+        self.wait_for(lambda: self.free(LockClass.DISK, self.f.label), child,
+                      'the target stayed locked behind a stalled release', timeout=10)
+        self.assertIsNone(child.poll(), 'the release should still be stalled')
+        proceed.touch()
+        out, err = child.communicate(timeout=60)
+        self.assertEqual(child.returncode, 143, out + err)
+        state = json.loads(out.splitlines()[-1])
+        self.assertEqual(state['sources']['movingparts']['result'], 'ok')
+        self.assertEqual(state['sources']['borg']['result'], 'interrupted')
+        self.assertEqual(self.restic_backups(), ['movingparts'])
+        self.f.reload()
+        self.assertIn('movingparts', self.f.state['released'])
+        # The helper inherits only job-offsite, so a stalled unmount holds no disk or slot.
+        for row in self.releases():
+            self.assertEqual(row['env']['VANPI_BACKUP_DISK_LOCK_FDS'], '', row)
+            self.assertIsNone(row['env']['VANPI_BACKUP_CLOUD_SLOT_FD'], row)
+
+    def test_check_releases_its_target_holding_no_resource_descriptor(self):
+        self.unmount(self.f.label)
+        result = self.f.run('check', '--label', self.f.label)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        [release] = self.releases()
+        self.assertEqual(release['args'], ['release', self.f.label])
+        self.assertEqual(release['env']['VANPI_BACKUP_DISK_LOCK_FDS'], '')
+        self.assertIsNone(release['env']['VANPI_BACKUP_CLOUD_SLOT_FD'])
+
+
 class PolicyTests(LockFixtureCase):
     def test_oom_fallback_excludes_the_named_local_jobs(self):
         self.update(excluded_local_jobs=['borg', 'exfat'])
@@ -335,6 +414,14 @@ class RestoreTargetTests(LockFixtureCase):
         result = self.restore(self.f.root / 'restore-test')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.restic_restore()['env']['VANPI_BACKUP_DISK_LOCK_FDS'], '')
+
+    def test_root_filesystem_target_inside_the_mount_root_is_refused(self):
+        # movingparts mounting later would cover the target, unlocked.
+        self.unmount('movingparts')
+        result = self.restore(self.f.cfg.mount_root / 'movingparts' / 'restore-probe')
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('on the root filesystem (its disk is not mounted)', result.stderr)
+        self.assertFalse(any(row['name'] == 'restic' and 'restore' in row['args'] for row in self.f.executions()))
 
     def test_target_on_another_filesystem_is_refused(self):
         other = self.f.root / 'other-mount'

@@ -106,8 +106,18 @@ def admitted(args):
     return args[1] in disks and holds(int(disks[args[1]]), registry / f'disk-{args[1]}.lock', False)
 
 
+def stall(record):
+    """A release that blocks (a stuck unmount) until the test creates record['proceed']."""
+    Path(record['stalled']).touch()
+    deadline = time.monotonic() + HOLD_SECONDS
+    while not Path(record['proceed']).exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+
+
 def released(state, label, target):
     """0 released, 3 another holder, 4 verified absent, 1 failure (the helper's exit codes)."""
+    if state.get('release_stall', {}).get('label') == label:
+        stall(state['release_stall'])
     if state.get('drained_before_release') == label:
         state['mounts'].pop(target, None)  # An ignition drain won the race for the disk.
     if target not in state['mounts']:

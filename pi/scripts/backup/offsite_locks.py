@@ -82,23 +82,25 @@ class OffsiteLocks:
         for kind in EXCLUDED_LOCAL_JOBS:
             self.take(LockClass.JOB, kind, exclusive=True)
 
-    def fds(self):
-        held = (self.admitted, *self.resources.values())
+    def fds(self, resources=True):
+        """Descriptors a child inherits; resources=False: only the admitted one."""
+        held = (self.admitted, *(self.resources.values() if resources else ()))
         for record in held:
             record.check_identity()
         return tuple(sorted(record.fd for record in held))
 
-    def child_environment(self, environment):
+    def child_environment(self, environment, resources=True):
         """Admission metadata a child (offsite_mounts.sh above all) validates."""
         environment = {key: value for key, value in environment.items() if key not in (
             'VANPI_BACKUP_JOB_LOCK_FD', 'VANPI_BACKUP_DISK_LOCK_FDS', 'VANPI_BACKUP_CLOUD_SLOT_FD')}
         environment['OFFSITE_ADMISSION'] = self.mode
         if self.mode == JOB:
+            held = self.resources if resources else {}
             environment['VANPI_BACKUP_JOB_LOCK_FD'] = str(self.admitted.fd)
             environment['VANPI_BACKUP_DISK_LOCK_FDS'] = ','.join(
-                f'{name}={held.fd}' for (lock_class, name), held in self.resources.items()
+                f'{name}={record.fd}' for (lock_class, name), record in held.items()
                 if lock_class == LockClass.DISK)
-            slot = self.resources.get((LockClass.CLOUD, locks.CLOUD_SLOT))
+            slot = held.get((LockClass.CLOUD, locks.CLOUD_SLOT))
             if slot is not None:
                 environment['VANPI_BACKUP_CLOUD_SLOT_FD'] = str(slot.fd)
         return environment
