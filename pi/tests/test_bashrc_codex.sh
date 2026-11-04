@@ -1,6 +1,12 @@
 #!/bin/bash
 # Exercise the real Pi profile as BASH_ENV, including nested strict-mode scripts.
-set -euo pipefail
+set -Eeuo pipefail
+# A bare failing [[ ]] exits silently under set -e; name it so a failure seen
+# only in captured parallel-runner output can be diagnosed.
+trap 'printf "FAILED line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
+# Bash ignores BASH_ENV when stdin is a socket (it assumes rshd/sshd and reads
+# ~/.bashrc instead), and a parallel runner or agent harness may pass one.
+exec < /dev/null
 repo=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 profile="$repo/pi/.bashrc"
 test_dir=$(mktemp -d "${TMPDIR:-/tmp}/bashrc-codex-test.XXXXXX")
@@ -19,7 +25,9 @@ printf '%s\n' 'set -euo pipefail' '[[ $(type -t blklbl) == function ]]' \
 /bin/bash -n "$profile"
 env -i HOME="$home" PATH=/usr/bin:/bin CODEX_THREAD_ID=t \
   /bin/bash -c '
-  set -euo pipefail
+  set -Eeuo pipefail
+  trap '"'"'printf "FAILED line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2
+    head -c 400 "$HOME/load.out" "$HOME/load.err" >&2 || :'"'"' ERR
   source "$1" > "$HOME/load.out" 2> "$HOME/load.err"
   [[ ! -s $HOME/load.out && ! -s $HOME/load.err && ! -e $HOME/leaked ]]
   [[ -z ${DISPLAY+x} && -z ${BASHRC_TEST_SECRET+x} && -z ${PROMPT_COMMAND+x} ]]
@@ -55,8 +63,13 @@ env -i HOME="$home" PATH=/usr/bin:/bin CODEX_THREAD_ID=t \
   ' _ "$profile" "$test_dir/strict.sh"
 
 # Automatic startup, not just an explicit source, must be silent too.
+status=0
 env -i HOME="$home" PATH=/usr/bin:/bin CODEX_THREAD_ID=t BASH_ENV="$profile" \
   /bin/bash -euo pipefail -c '[[ $(type -t blklbl) == function ]]' \
-  > "$test_dir/startup.out" 2> "$test_dir/startup.err"
-[[ ! -s $test_dir/startup.out && ! -s $test_dir/startup.err ]]
+  > "$test_dir/startup.out" 2> "$test_dir/startup.err" || status=$?
+if [[ $status -ne 0 || -s $test_dir/startup.out || -s $test_dir/startup.err ]]; then
+  echo "automatic startup exited $status or was not silent:" >&2
+  head -c 400 "$test_dir/startup.out" "$test_dir/startup.err" >&2
+  exit 1
+fi
 echo 'Codex bashrc boundary tests passed'
