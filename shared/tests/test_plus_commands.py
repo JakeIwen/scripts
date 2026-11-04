@@ -1,6 +1,7 @@
 """Exercise the + command listing and its UserPromptSubmit hook mode."""
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -37,22 +38,24 @@ class PlusCommandsTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
+        self.environment = dict(os.environ, HOME=temporary.name, CLAUDE_CODE_PLUGIN_DIRS='')
         self.file = Path(temporary.name) / 'AGENTS.md'
         self.file.write_text(INSTRUCTIONS)
 
     def run_script(self, *args, stdin=''):
         return subprocess.run([sys.executable, str(SCRIPT), '--file', str(self.file), *args],
-                              input=stdin, capture_output=True, text=True, check=False)
+                              input=stdin, capture_output=True, text=True, check=False,
+                              env=self.environment)
 
-    def test_lists_each_command_with_its_first_sentence(self):
+    def test_lists_each_command_alphabetically_with_its_first_sentence(self):
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stderr)
         lines = result.stdout.splitlines()
         self.assertEqual(lines[0], '+ commands')
         self.assertEqual(lines[1:4], [
+            '  +art  Summarize this conversation, narrowed to any focus (+art just the wiring).',
             '  +cp   Commit and push, the same as c/p.',
             "  +id   Find which sessions own the repo's uncommitted work.",
-            '  +art  Summarize this conversation, narrowed to any focus (+art just the wiring).',
         ])
         self.assertTrue(lines[4].startswith('Full definitions: "+ commands" in '))
         self.assertNotIn('+old', result.stdout)

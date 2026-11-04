@@ -291,8 +291,8 @@ not raw device logs or configurations.
 
 For recorder code or receiver-permission maintenance on an existing
 storage-managed installation, use a narrow checked update. It preserves the
-deployed storage configuration and only restarts the recorder; receiver,
-dashboard, frontend and backup configuration remain outside its target set.
+deployed storage configuration and only restarts the recorder; receiver and
+backup configuration remain outside its target set.
 Choose a new plan filename for each update:
 
 ```bash
@@ -307,12 +307,6 @@ and tmpfiles configuration. Repaired live spool permissions remain in place;
 restoring an older tmpfiles file can reintroduce its permissions bug at the next
 boot or receiver restart. Readiness allows up to ten minutes for bounded RAM
 replay and checks a fresh flash selection plus a read-only CLI report.
-
-Build the frontend from the repository root:
-
-```bash
-npm --prefix pi/apps/van_dashboard/frontend run build
-```
 
 Use the storage-aware installer after the initial recorder installation.
 `check` verifies the exact flash mount/UUID/filesystem, available space, managed
@@ -331,15 +325,17 @@ python3 pi/deploy_network_storage.py apply --plan /private/tmp/van-network-stora
 `apply` rechecks live and local fingerprints, preserves the existing database
 and raw history on the verified flash volume, and saves exact rollback files
 under `/var/lib/vanpi-network-deploy/storage/`. Only the managed recorder,
-dashboard-storage adapter/frontend release, receiver configuration and service setup are
-installed. The backup change appends `/var/lib/vanpi-network` and
+receiver configuration and service setup are installed. The backup change appends `/var/lib/vanpi-network` and
 `/var/log/openwrt` to the **deployed**
 `/home/pi/scripts/backup/backup_conf.sh` `BORG_EXCLUDES` array, preserving every
 other byte and validating shell syntax. It does not replace `pi_backup.sh` or
 copy unrelated checkout backup edits. Mounts, network policies, CAN recording,
 backup jobs and the global disk lifecycle are not changed. No Git staging or
-commit occurs. The frontend build containing the storage banner is deployed
-through the existing guarded dashboard release mechanism.
+commit occurs. The dashboard's storage drop-in and frontend come from the
+van-dashboard repo's own deploy; `apply` doesn't restart the dashboard, which
+runs the recorder CLI per request. Readiness requires the dashboard's
+`/api/network-history` endpoint (it caches a success for 10 s) and a direct CLI
+report.
 
 Rollback the release recorded in that plan with this single command:
 
@@ -347,57 +343,30 @@ Rollback the release recorded in that plan with this single command:
 python3 pi/deploy_network_storage.py rollback --release "$(python3 -c 'import json; print(json.load(open("/private/tmp/van-network-storage-plan.json"))["release"])')"
 ```
 
-The current recorder/storage release is
-`network-storage-20261001T102241Z-0dc55a92`. To undo its replay-order update while
-retaining flash storage:
-
-```bash
-python3 pi/deploy_network_storage.py rollback --release network-storage-20261001T102241Z-0dc55a92
-```
-
-To undo the preceding permission/diagnostic update and original flash migration
-as well, run that command first, then these in order:
-
-```bash
-python3 pi/deploy_network_storage.py rollback --release network-storage-20261001T101434Z-45aed0a4
-python3 pi/deploy_network_storage.py rollback --release network-storage-20260930T093830Z-fba885dc
-python3 pi/deploy_network_storage.py rollback --release network-storage-20260930T090204Z-e02b828b
-```
+Saved full storage releases made before the dashboard moved to its own repo
+(`network-storage-20260930T090204Z-e02b828b`, the original migration,
+`network-storage-20260930T093830Z-fba885dc` and
+`network-storage-20261019T041648Z-a8f077a8`, as listed on 2026-11-03) include
+the dashboard drop-in and React release, so `rollback` refuses them whole rather
+than restoring them in part. Recorder-only releases, such as
+`network-storage-20261001T101434Z-45aed0a4` and
+`network-storage-20261001T102241Z-0dc55a92`, still roll back. Recover from a
+full release with a reviewed forward storage deployment.
 
 Full storage rollback stops the recorder and receiver and consolidates pending RAM
 evidence onto verified flash through `storage-sync`. Rolling back an update
-restores the preceding flash-aware version. Rolling back the original migration
+restores the preceding flash-aware version. Rolling back an original migration
 also backs up the latest consolidated database into the former SD location
 before restoring the saved code/configuration, service setup and Borg exclusions.
 The flash history is retained. It fails closed if the flash volume is missing or identity validation
 fails; it does not silently restore a stale SD snapshot and lose new evidence.
-It also refuses to overwrite managed files changed after deployment. Undoing
-the original migration intentionally restores SD writes under the prior installation.
+It also refuses to overwrite managed files changed after deployment.
 
-The original `pi/deploy_network_flight_recorder.py` installer and receiver setup
-refuse their legacy workflow while storage configuration is installed. Roll
-back the storage migration first if a full recorder rollback is intended.
-Do not use `pi/sync_scripts.sh` to bypass those checks.
-
-The initial recorder installation had three releases. **Only after storage
-rollback**, these historical rollback steps undo the recorder in reverse order:
-
-```bash
-python3 pi/deploy_network_flight_recorder.py rollback --release network-20260930T022426Z-10d451d2
-```
-
-Then the two preceding releases:
-
-```bash
-python3 pi/deploy_network_flight_recorder.py rollback --release network-20260930T021028Z-87126f5d
-```
-
-```bash
-python3 pi/deploy_network_flight_recorder.py rollback --release network-20260930T015418Z-e164e3ea
-```
-
-All steps preserve the collected database. See the verification report for the
-last observed deployment state; create a fresh checked plan for future updates.
+The original `pi/deploy_network_flight_recorder.py` installer is retired: its
+target set and saved manifests (the three initial `network-2026093*` releases)
+include the dashboard backend, unit and frontend, so it refuses every action.
+The module remains only as helpers the storage installer embeds. Do not use
+`pi/sync_scripts.sh` to bypass these checks.
 
 ## Layout and verification
 
@@ -406,21 +375,15 @@ last observed deployment state; create a fresh checked plan for future updates.
 | `pi/scripts/network_flight_recorder.py` | CLI: collector, import, reports and exports |
 | `pi/scripts/network_recorder/` | Parsers/redaction, durable ingestion, storage, explicit incident rules and read-only reports |
 | `pi/services/network-flight-recorder.service` | Collector lifecycle and filesystem sandbox |
-| `pi/apps/van_dashboard/van_dashboard_history.py` | Validated, cached read-only CLI adapter |
-| `pi/apps/van_dashboard/frontend/src/features/networkHistory/` | Dashboard ranges, filters, timeline, evidence and export UI |
 | `pi/tests/network/fixtures/network_flight_recorder/` | Labeled observed/redacted and synthetic evidence |
 | `pi/deploy_network_storage.py` | Verified flash/RAM migration, narrow backup exclusions and current-history-preserving rollback |
-| `pi/deploy_network_flight_recorder.py` | Initial recorder deployment/rollback; guarded against use after storage migration |
+| `pi/deploy_network_flight_recorder.py` | Retired initial installer; helpers the storage installer embeds |
 
-Run the focused backend cases and established dashboard suite using the
-[documented Flask test environment](../dashboard/DASHBOARD_TESTING.md):
-
-```bash
-python3 -m unittest pi.tests.network.test_network_flight_recorder pi.tests.network.test_openwrt_network_spool pi.tests.dashboard.test_network_history
-```
+Run the focused recorder cases from the repository root (the dashboard's history
+adapter and Network History view are tested in the van-dashboard repo):
 
 ```bash
-npm --prefix pi/apps/van_dashboard/frontend test -- src/features/networkHistory src/features/network src/features/systemHealth src/features/ubnt src/dashboard
+.local/test-venv/bin/python -m unittest pi.tests.network.test_network_flight_recorder pi.tests.network.test_openwrt_network_spool
 ```
 
 Client-specific end-to-end reachability remains unobserved. WAN/lifiwan have no

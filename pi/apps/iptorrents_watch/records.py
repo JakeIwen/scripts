@@ -1,6 +1,6 @@
 """Wire records shared by the CLI and the dashboard (plain JSON round trips).
 
-The dashboard's React feature mirrors these shapes in its schema; change both.
+The van-dashboard repo's React feature mirrors these shapes in its schema; change both.
 """
 
 from __future__ import annotations

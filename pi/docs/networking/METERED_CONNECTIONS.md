@@ -254,9 +254,8 @@ The third compact `policyctl read` column stays zero for existing backup readers
    and let the policy service start qBittorrent. On a verified unmetered uplink,
    require `pi.torrents` actual `running`, no remaining `metered-hold` tags and
    cleared fallback ownership. Do not leave seeding stopped by a deployment hold.
-7. Update the dashboard backend:
-   `python3 pi/deploy_python.py --update --service van-dashboard.service`, then
-   `bash pi/deploy_van_dashboard_frontend.sh`.
+7. Update the dashboard from its own repo (`~/dev/van-dashboard`,
+   `scripts/deploy.py`; it deploys the backend and frontend together).
    Check `http://vanpi.lan:8788/api/metered`, the service journal and registry/state
    decoding, then open the OpenWrt sheet's Metered section in the browser. Neither
    the backend nor reconciler requires a frontend build to start, but the old
@@ -267,10 +266,12 @@ The third compact `policyctl read` column stays zero for existing backup readers
    castit through its own receiver deployer only while no cast is playing, then
    verify the full installed CLI, dashboard, updater, cron and receiver cohort.
 
-For a later shared-library change, select **both** `vanpi-metered.service` and
-`van-dashboard.service` with the package updater. Both dependency digests include
-shared metering code and JSON assets. The generic sync excludes the new unit;
-activation must precede routine all-service updates.
+For a later shared-library change, update `vanpi-metered.service` with the package
+updater (its dependency digest includes shared metering code and JSON assets),
+then restart the dashboard (`sudo systemctl restart van-dashboard`) or redeploy it
+from its repo: it imports the same modules from the package release but keeps the
+release it pinned at start. The generic sync excludes the new unit; activation
+must precede routine all-service updates.
 
 Rollback must restore the flat cloud/admission/policy cohort coherently with the
 matching package. Restore the saved policy file only after checking for newer

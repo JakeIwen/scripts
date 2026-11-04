@@ -100,13 +100,6 @@ class MonitorLockTests(MonitorFixture):
                         query()
             self.assertEqual(reader.grouped_event_counts(0)[0]["count"], 75)
 
-    def test_dashboard_marks_transient_lock_as_unavailable(self):
-        self.seed_storm("Buffer I/O error on dev sda1")
-        with transient_read_lock(self.path) as blocker:
-            blocker.execute("BEGIN EXCLUSIVE")
-            disk = fixtures.MonitorStorageHistoryTests.disk_status(self)
-        self.assertEqual(disk["health"]["basis"], "history_unavailable")
-
 
 class MonitorExpiryTests(MonitorFixture):
     def test_expiry_work_does_not_grow_with_cleared_event_history(self):

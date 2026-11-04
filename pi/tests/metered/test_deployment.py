@@ -45,15 +45,14 @@ class MeteredDeploymentTests(unittest.TestCase):
                 fixtures.PythonDeploymentTests._install(plan, repo, root, 'activate', services, [UNIT])
             self.assertFalse((root / 'current').exists())
 
-    def test_shared_rules_and_registry_trigger_both_consuming_service_digests(self):
+    def test_shared_rules_and_registry_trigger_the_metered_service_digest(self):
         with fixtures.PythonDeploymentTests.fixture() as repo:
             for relative in ('shared/metered/rules.py', 'shared/metered/consumers.json'):
                 before = deployment.build_plan(repo)['manifest']['services']
                 path = repo / relative
                 path.write_text(path.read_text() + '\n')
                 after = deployment.build_plan(repo)['manifest']['services']
-                self.assertEqual({key for key in before if before[key] != after[key]},
-                                 {UNIT, deployment.DASHBOARD})
+                self.assertEqual({key for key in before if before[key] != after[key]}, {UNIT})
 
     def test_actual_archive_imports_shared_contracts_from_an_unrelated_directory(self):
         root = Path(__file__).resolve().parents[3]

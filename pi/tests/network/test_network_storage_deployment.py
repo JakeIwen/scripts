@@ -15,11 +15,13 @@ import types
 import unittest
 from unittest import mock
 
-from ._network_storage_support import create_frontend, monitor_fixture
+from ._network_storage_support import monitor_fixture
 
 PI = Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(PI))
 import deploy_network_storage as deploy
+
+DASHBOARD_DROPIN = '/etc/systemd/system/van-dashboard.service.d/network-storage.conf'
 
 
 class StorageDeploymentTests(unittest.TestCase):
@@ -30,10 +32,9 @@ class StorageDeploymentTests(unittest.TestCase):
             for source in (*expected, *deploy.dependencies.MONITOR_DEPENDENCIES):
                 path=root/source;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('# fixture\n')
             with mock.patch.object(deploy,'REPO',root),\
-                 mock.patch.object(deploy.subprocess,'run',return_value=subprocess.CompletedProcess([],1,b'',b'')),\
-                 mock.patch.object(Path, 'rglob', side_effect=AssertionError('frontend must not be scanned')):
+                 mock.patch.object(deploy.subprocess,'run',return_value=subprocess.CompletedProcess([],1,b'',b'')):
                 plan = deploy.make_plan('fixture', recorder_only=True)
-        self.assertEqual(plan['frontend_files'], [])
+        self.assertNotIn('frontend_files', plan)
         self.assertIsNone(plan['config'])
         deploy.validate_plan(plan)
 
@@ -69,12 +70,10 @@ class StorageDeploymentTests(unittest.TestCase):
     def test_rollback_refuses_missing_flash_before_stopping_services(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)/'network-storage-fixture';root.mkdir()
-            plan=dict(schema_version=1,release=root.name,files=[],config={},installed_tree_sha256='tree')
+            plan=dict(schema_version=1,release=root.name,files=[],config={})
             (root/'manifest.json').write_text(json.dumps(plan))
             with mock.patch.object(deploy,'BACKUPS',Path(directory)),mock.patch.object(deploy,'validate_plan'),\
                  mock.patch.object(deploy.base,'regular_info',return_value={'sha256':'x'}),\
-                 mock.patch.object(deploy.base,'link_info',return_value='releases/'+root.name),\
-                 mock.patch.object(deploy.base,'tree_digest',return_value='tree'),\
                  mock.patch.object(deploy,'FlashRoot',side_effect=ValueError('flash absent')),\
                  mock.patch.object(deploy.base,'systemctl') as service:
                 plan['backup_conf_sha256']='x';(root/'manifest.json').write_text(json.dumps(plan))
@@ -105,20 +104,19 @@ class FullStorageUpdateTests(unittest.TestCase):
         self.conf.write_text(json.dumps(self.config))
         self.contents[config_source] = self.conf.read_bytes()
         self.core = Path(self.targets['pi/scripts/network_flight_recorder.py'])
-        self.dropin = Path(self.targets['pi/services/van-dashboard-network-storage.conf'])
+        self.receiver = Path(self.targets['pi/services/rsyslog-vanpi-network.conf'])
         self.backend = []
         for name in ('home/pi/scripts/python-automation/van_dashboard_history.py',
                      'home/pi/scripts/python-automation/van_dashboard.py',
                      'etc/systemd/system/van-dashboard.service',
-                     'home/pi/scripts/python-packages/current/pi/apps/van_dashboard/van_dashboard_history.py',
-                     'home/pi/scripts/python-packages/activated.json'):
+                     DASHBOARD_DROPIN.lstrip('/'),
+                     'home/pi/van_dashboard/frontend/current/index.html',
+                     'home/pi/scripts/python-packages/current/pi/package_runtime.py'):
             path = self.root / name; path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b'frozen fallback or independently owned package')
             self.backend.append(path)
-        self.marker = self.backend[-1]
         self.database = self.flash / 'events.sqlite3'; self.database.write_bytes(b'live history')
         self.backup = self.root / 'backup.conf'; self.backup.write_text("BORG_EXCLUDES=(\n  '/keep'\n)\n")
-        self.frontend = create_frontend(self.root)
         self.states = {name: dict(active=True, enabled='enabled') for name in deploy.SERVICES}
         self.calls = []
         self.fail_once = False
@@ -137,21 +135,18 @@ class FullStorageUpdateTests(unittest.TestCase):
                    mock.patch.object(deploy, 'CONFIG', self.conf),
                    mock.patch.object(deploy, 'BACKUPS', self.root / 'backups'),
                    mock.patch.object(deploy, 'BACKUP_CONF', self.backup),
-                   mock.patch.object(deploy.base, 'FRONTEND', self.frontend),
-                   mock.patch.object(deploy.base, 'PACKAGE_ACTIVATION', self.marker),
-                   mock.patch.object(deploy.base, 'STORAGE_CONFIG', self.conf),
                    mock.patch.object(deploy.base, 'command', side_effect=command),
                    mock.patch.object(deploy.base, 'service_state', side_effect=lambda name: copy.deepcopy(self.states[name])),
                    mock.patch.object(deploy, 'mount_identity', return_value=dict(device=123)),
                    mock.patch.object(deploy, 'FlashRoot'),
                    mock.patch.object(deploy, 'repair_spool_permissions', return_value=dict(checked=8, repaired=8, missing=0)),
+                   mock.patch.object(deploy, 'recorder_report_ready', return_value=True),
                    mock.patch.object(deploy.os, 'access', return_value=True),
                    mock.patch('pwd.getpwnam', return_value=types.SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())),
                    mock.patch.object(deploy.base.os, 'chown')]
         for patch in patches:
             patch.start(); self.addCleanup(patch.stop)
-        self.plan = dict(schema_version=1, release='network-storage-full-update', config=self.config,
-                         files=[], frontend_files=[dict(relative='index.html', sha256=deploy.base.sha(b'new frontend'))])
+        self.plan = dict(schema_version=1, release='network-storage-full-update', config=self.config, files=[])
         for source, destination in self.targets.items():
             self.plan['files'].append(dict(source=source, destination=destination,
                                            sha256=deploy.base.sha(self.contents[source]),
@@ -163,41 +158,34 @@ class FullStorageUpdateTests(unittest.TestCase):
         self.addCleanup(directory.cleanup); self.stage = Path(directory.name)
         for index, row in enumerate(self.plan['files']):
             (self.stage / str(index)).write_bytes(self.contents[row['source']])
-        (self.stage / 'frontend-0').write_bytes(b'new frontend')
 
     def assert_backend_untouched(self):
         for path in self.backend:
             self.assertEqual(path.read_bytes(), b'frozen fallback or independently owned package')
 
-    def test_full_update_and_rollback_own_frontend_and_dropin_not_package_backend(self):
+    def test_full_update_and_rollback_leave_the_dashboard_and_package_backend_alone(self):
         before = {Path(row['destination']): Path(row['destination']).read_bytes() for row in self.plan['files']}
         result = deploy.apply(self.plan, self.stage)
         self.assertTrue(result['ok'])
-        self.assertEqual(self.dropin.read_bytes(), b'new=True\n')
-        self.assertEqual((self.frontend / 'current/index.html').read_bytes(), b'new frontend')
-        release = self.frontend / 'releases' / self.plan['release']
-        owned_by_pi = {Path(call.args[0]) for call in deploy.os.chown.call_args_list
-                       if call.args[1:3] == (os.getuid(), os.getgid())}
-        self.assertLessEqual({release, release / 'index.html', release / 'BUILD_ID'}, owned_by_pi)
+        self.assertEqual(self.core.read_bytes(), b'new=True\n')
+        self.assertIn(['/usr/bin/curl', '-fsS', '--max-time', '4',
+                       'http://127.0.0.1:8788/api/network-history?hours=1'], self.calls)
         self.assert_backend_untouched()
         self.database.write_bytes(b'history collected since deployment')
         deploy.rollback(self.plan['release'])
         for path, contents in before.items():
             self.assertEqual(path.read_bytes(), contents)
-        self.assertEqual(os.readlink(self.frontend / 'current'), 'releases/old')
-        self.assertEqual(os.readlink(self.frontend / 'previous'), 'releases/older')
         self.assertEqual(self.database.read_bytes(), b'history collected since deployment')
         self.assert_backend_untouched()
         self.assertTrue(all(state['active'] for state in self.states.values()))
-        self.assertEqual(self.calls.count(['/usr/bin/systemctl', 'restart', 'van-dashboard']), 2)
+        self.assertFalse(any('van-dashboard' in call for call in self.calls))
 
     def test_full_update_failure_restores_owned_files_without_touching_backend(self):
         self.fail_once = True
         with self.assertRaises(RuntimeError):
             deploy.apply(self.plan, self.stage)
         self.assertEqual(self.core.read_bytes(), b'old=True\n')
-        self.assertEqual(self.dropin.read_bytes(), b'old=True\n')
-        self.assertEqual(os.readlink(self.frontend / 'current'), 'releases/old')
+        self.assertEqual(self.receiver.read_bytes(), b'old=True\n')
         self.assertEqual(self.database.read_bytes(), b'live history')
         self.assert_backend_untouched()
         self.assertTrue(all(state['active'] for state in self.states.values()))
@@ -210,12 +198,37 @@ class FullStorageUpdateTests(unittest.TestCase):
             deploy.apply(self.plan, self.stage)
         self.core.write_bytes(b'old=True\n')
         deploy.apply(self.plan, self.stage)
-        self.dropin.write_text('independent dropin edit')
+        self.receiver.write_text('independent receiver edit')
         calls_before = list(self.calls)
         with self.assertRaises(ValueError):
             deploy.rollback(self.plan['release'])
         self.assertEqual(self.calls, calls_before)
-        self.assertEqual(self.dropin.read_text(), 'independent dropin edit')
+        self.assertEqual(self.receiver.read_text(), 'independent receiver edit')
+        self.assert_backend_untouched()
+
+    def test_manifests_with_retired_dashboard_targets_are_refused_whole(self):
+        retired_rows = {
+            'flat backend': '/home/pi/scripts/python-automation/van_dashboard.py',
+            'backend unit': '/etc/systemd/system/van-dashboard.service',
+            'storage drop-in': DASHBOARD_DROPIN,
+        }
+        cases = {label: dict(files=[*self.plan['files'], dict(
+                     source='pi/services/retired', destination=destination, sha256='0' * 64)])
+                 for label, destination in retired_rows.items()}
+        cases['frontend release'] = dict(frontend_files=[dict(relative='index.html', sha256='0' * 64)])
+        for label, change in cases.items():
+            with self.subTest(label):
+                plan = {**copy.deepcopy(self.plan), **copy.deepcopy(change),
+                        'release': 'network-storage-historical-' + label.replace(' ', '-')}
+                root = self.root / 'backups' / plan['release']; root.mkdir(parents=True)
+                (root / 'manifest.json').write_text(json.dumps(plan))
+                calls_before = list(self.calls)
+                for action in (lambda: deploy.inspect(copy.deepcopy(plan)),
+                               lambda: deploy.apply(copy.deepcopy(plan), self.stage),
+                               lambda: deploy.rollback(plan['release'])):
+                    with self.assertRaisesRegex(ValueError, 'retired dashboard targets.*van-dashboard'):
+                        action()
+                self.assertEqual(self.calls, calls_before)
         self.assert_backend_untouched()
 
 class RecorderOnlyUpdateTests(unittest.TestCase):
@@ -227,7 +240,6 @@ class RecorderOnlyUpdateTests(unittest.TestCase):
         self.flash=self.root/'flash';self.flash.mkdir()
         self.config=dict(runtime_root=str(self.runtime),flash_root=str(self.flash))
         self.conf=self.root/'storage.json';self.conf.write_text(json.dumps(self.config))
-        self.marker=self.root/'activated.json';self.marker.write_text('{}')
         self.core=self.root/'recorder.py';self.core.write_text('old=True\n')
         self.tmpfiles=self.root/'tmpfiles.conf';self.tmpfiles.write_text('old tmpfiles mode')
         self.database=self.flash/'events.sqlite3';self.database.write_bytes(b'initial evidence')
@@ -261,13 +273,10 @@ class RecorderOnlyUpdateTests(unittest.TestCase):
             return copy.deepcopy(self.state)
         patches=[mock.patch.object(deploy,'RECORDER_TARGETS',targets),
                  mock.patch.object(deploy,'CONFIG',self.conf),
-                 mock.patch.object(deploy.base,'PACKAGE_ACTIVATION',self.marker),
-                 mock.patch.object(deploy.base,'STORAGE_CONFIG',self.conf),
                  mock.patch.object(deploy,'BACKUPS',self.root/'backups'),
                  mock.patch.object(deploy,'BACKUP_CONF',self.backup),
                  mock.patch.object(deploy.base,'command',side_effect=command),
                  mock.patch.object(deploy.base,'service_state',side_effect=state),
-                 mock.patch.object(deploy.base,'tree_digest',side_effect=AssertionError('frontend must be untouched')),
                  mock.patch.object(deploy,'repair_spool_permissions',side_effect=repair),
                  mock.patch.object(deploy,'mount_identity',return_value=dict(device=123)),
                  mock.patch.object(deploy.os,'access',return_value=True),
@@ -276,7 +285,7 @@ class RecorderOnlyUpdateTests(unittest.TestCase):
                  mock.patch.object(deploy,'wait_recorder_ready',return_value=dict(mode='flash',report_ok=True))]
         for patch in patches:patch.start();self.addCleanup(patch.stop)
         self.plan=dict(schema_version=1,release='network-storage-recorder-only',recorder_only=True,
-                       config=None,frontend_files=[],files=[])
+                       config=None,files=[])
         for source,destination in targets.items():
             self.plan['files'].append(dict(source=source,destination=destination,
                                            sha256=deploy.base.sha(self.contents[source]),
@@ -287,7 +296,7 @@ class RecorderOnlyUpdateTests(unittest.TestCase):
         self.addCleanup(directory.cleanup);self.stage=Path(directory.name)
         for index,row in enumerate(self.plan['files']):(self.stage/str(index)).write_bytes(self.contents[row['source']])
 
-    def test_embedded_payload_checks_activated_storage_host_without_legacy_refusal(self):
+    def test_embedded_payload_checks_a_storage_host_offline(self):
         def run_offline(args, **kwargs):
             self.assertEqual(args[0], 'ssh')
             self.assertEqual(args[-1], 'sudo -n /usr/bin/python3 -')
@@ -298,8 +307,6 @@ class RecorderOnlyUpdateTests(unittest.TestCase):
             with mock.patch.dict(sys.modules):
                 exec(compile(ast.Module(body=payload.body[:-1], type_ignores=[]), '<payload>', 'exec'), namespace)
                 embedded = namespace['base']
-                embedded.PACKAGE_ACTIVATION = self.marker
-                embedded.STORAGE_CONFIG = self.conf
                 embedded.command = deploy.base.command
                 embedded.service_state = deploy.base.service_state
                 namespace['dependencies'].MONITOR_DEPENDENCIES = deploy.dependencies.MONITOR_DEPENDENCIES
@@ -314,8 +321,6 @@ class RecorderOnlyUpdateTests(unittest.TestCase):
         self.assertTrue(result['recorder_only'])
         self.assertFalse(result['migration'])
         self.assertEqual(result['mount'], {'device': 123})
-        self.assertEqual(result['frontend_files'], [])
-        self.assertEqual(self.marker.read_text(), '{}')
         self.assertFalse(any(call[0] == '/usr/bin/systemctl' for call in self.calls))
 
     def test_apply_and_code_rollback_preserve_new_evidence_and_repaired_permissions(self):
@@ -534,6 +539,21 @@ class SpoolRepairTests(unittest.TestCase):
             with mock.patch.object(deploy.base,'command',return_value=subprocess.CompletedProcess([],0,json.dumps(rows),'')):
                 with self.assertRaises(ValueError):deploy.repair_spool_permissions(self.config)
             self.assert_no_metadata_change()
+
+
+class LegacyRecorderInstallerTests(unittest.TestCase):
+    def test_every_action_refuses_without_connecting(self):
+        script = PI / 'deploy_network_flight_recorder.py'
+        for argv in (['check', '--plan', 'unused.json'], ['apply', '--plan', 'unused.json'],
+                     ['rollback', '--release', 'network-20260930T022426Z-10d451d2']):
+            with self.subTest(argv[0]), tempfile.TemporaryDirectory() as directory:
+                result = subprocess.run([sys.executable, '-B', str(script), *argv], cwd=directory,
+                                        env=dict(os.environ, PATH=directory),
+                                        capture_output=True, text=True, timeout=30)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('retired', result.stderr)
+                self.assertIn('deploy_network_storage.py', result.stderr)
+                self.assertEqual(list(Path(directory).iterdir()), [])
 
 
 if __name__=='__main__':

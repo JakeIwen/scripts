@@ -1,11 +1,13 @@
+import os
 from pathlib import Path
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
-from unittest import mock
 
-from pi import check_compute_provider
+from pi.tests.test_python_deployment_consumers import (
+    ABSENT_SHOW, BASE, CUT_OVER_UNIT, OLD_DROPIN, QUOTED_UNIT, SCRIPTS_ERA_UNIT, SHOW, show_state)
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -16,7 +18,7 @@ FAILURE_STATUS = 23
 
 
 class SyncWorkflowTests(unittest.TestCase):
-    def test_compute_guard_stops_sync_before_any_mutation(self):
+    def test_preflight_guards_stop_sync_before_any_mutation(self):
         definitions = SYNC_SCRIPT.read_text().split('source "$dsc/pi/sync_workflow.sh"')[0]
         temporary = tempfile.TemporaryDirectory(prefix="sync-compute-checkout-")
         self.addCleanup(temporary.cleanup)
@@ -25,21 +27,30 @@ class SyncWorkflowTests(unittest.TestCase):
         installer.parent.mkdir(parents=True)
         installer.write_text("#!/bin/zsh\nexit 0\n", encoding="utf-8")
         installer.chmod(0o700)
-        for status in (0, 1):
-            with self.subTest(status=status):
+        for dashboard, status in (("absent", 0), ("absent", 1), ("scripts-era", 0)):
+            with self.subTest(dashboard=dashboard, status=status):
                 harness = definitions + f'''
 # Every external operation is a fake; only the actual preflight/workflow run.
 dsc={shlex.quote(str(REPOSITORY_ROOT.parent))}
 VAN_COMPUTE_CHECKOUT={shlex.quote(str(checkout))}
 ssh() {{
-  if [[ "$*" == *'/usr/bin/python3 -B -'* ]]; then
-    printf 'provider-check\\n'
+  if [[ "$*" == *activated.json* ]]; then
+    printf 'activation-check\\n'
     return {status}
   fi
   [[ "$*" == *'git hash-object'* ]] && git -C "$dsc" hash-object pi/.bashrc
   return 0
 }}
-python3() {{ [[ "$*" == *--list-units* ]] && printf 'van-dashboard.service\\n'; return 0; }}
+# The dashboard check itself is covered by DashboardCutOverGuardTests.
+python3() {{
+  if [[ "$*" == *--check-consumers* ]]; then
+    [[ {dashboard} == absent ]] && return 0
+    echo "docs/cutover.md" >&2
+    return 1
+  fi
+  [[ "$*" == *--list-units* ]] && printf 'video-library.service\\n'
+  return 0
+}}
 sync_non_python() {{ printf 'non-python-write\\n'; }}
 sync_python_packages() {{ printf 'package-write\\n'; }}
 sync_compute() {{ printf 'compute-write\\n'; }}
@@ -48,20 +59,24 @@ run_sync_workflow
 '''
                 result = subprocess.run(['/bin/bash', '-c', harness],
                                         capture_output=True, text=True)
+                if dashboard == "scripts-era":
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertEqual(result.stdout, "")
+                    self.assertIn("docs/cutover.md", result.stderr)
+                    continue
                 self.assertEqual(result.returncode, status, result.stderr)
-                self.assertEqual(result.stdout.splitlines(), ['provider-check'] + (
+                self.assertEqual(result.stdout.splitlines(), ['activation-check'] + (
                     ['non-python-write', 'package-write', 'compute-write'] if status == 0 else []))
                 if status:
-                    self.assertIn("owner's Terminal", result.stderr)
-                    self.assertIn(str(installer), result.stderr)
+                    self.assertIn("activation preflight failed", result.stderr)
 
-    def test_missing_compute_checkout_stops_before_provider_probe(self):
+    def test_missing_compute_installer_stops_before_any_remote_probe(self):
         definitions = SYNC_SCRIPT.read_text().split('source "$dsc/pi/sync_workflow.sh"')[0]
         with tempfile.TemporaryDirectory(prefix="sync-missing-compute-") as directory:
             missing = Path(directory) / "absent"
             harness = definitions + f'''
 VAN_COMPUTE_CHECKOUT={shlex.quote(str(missing))}
-ssh() {{ printf 'unexpected-provider-probe\\n'; }}
+ssh() {{ printf 'unexpected-remote-probe\\n'; }}
 sync_preflight
 '''
             result = subprocess.run(
@@ -124,6 +139,98 @@ sync_preflight
                 )
 
 
+class DashboardCutOverGuardTests(unittest.TestCase):
+    """Broad sync must not ship a release the scripts-era dashboard unit still runs from.
+
+    The preflight runs the real deploy_python.py --check-consumers; a fake ssh
+    executes its receiver locally against a stub systemctl and a unit folder.
+    """
+
+    # Python, not bash: pattern substitution over the 30 KB receiver is quadratic in bash 3.2.
+    FAKE_SSH = """#!/usr/bin/env python3
+import os, shlex, sys
+if os.environ["FAKE_SSH_FAIL"]:
+    sys.exit(255)
+units = os.environ["FAKE_UNITS"]
+arguments = shlex.split(sys.argv[-1])
+arguments[0] = os.environ["FAKE_PYTHON"]
+arguments[2] = (arguments[2].replace("/usr/bin/systemctl", units + "/systemctl")
+                .replace("/etc/systemd/system", units))
+os.execv(arguments[0], arguments)
+"""
+
+    def check(self, show=None, unit_text=None, dropin=None, unreachable=False):
+        definitions = SYNC_SCRIPT.read_text().split('source "$dsc/pi/sync_workflow.sh"')[0]
+        with tempfile.TemporaryDirectory(prefix="sync-dashboard-unit-") as directory:
+            root = Path(directory)
+            (root / "bin").mkdir()
+            (root / "bin/ssh").write_text(self.FAKE_SSH)
+            (root / "bin/ssh").chmod(0o755)
+            units = root / "units"
+            units.mkdir()
+            if unit_text is not None:
+                (units / "van-dashboard.service").write_bytes(unit_text)
+            if dropin is not None:
+                (units / "van-dashboard.service.d").mkdir()
+                (units / "van-dashboard.service.d/old.conf").write_bytes(dropin)
+            stub = units / "systemctl"
+            stub.write_text("#!/bin/sh\n" + ("exit 1\n" if show is None else
+                f"cat <<'EOF'\n{show.replace(BASE, str(units / 'van-dashboard.service'))}EOF\n"))
+            stub.chmod(0o755)
+            harness = definitions + f"""
+dsc={shlex.quote(str(REPOSITORY_ROOT.parent))}
+check_dashboard_cut_over
+"""
+            env = {**os.environ, "PATH": f"{root / 'bin'}:{os.environ['PATH']}",
+                   "FAKE_UNITS": str(units), "FAKE_PYTHON": sys.executable,
+                   "FAKE_SSH_FAIL": "1" if unreachable else ""}
+            return subprocess.run(["/bin/bash", "-c", harness], capture_output=True, text=True, env=env)
+
+    def show(self, module="van_dashboard", load="loaded", fragment=BASE, reload="no"):
+        raw = show_state() if module == "van_dashboard" else SHOW
+        if load == "not-found":
+            raw = ABSENT_SHOW
+        return show_state(raw, LoadState=load, FragmentPath=fragment, DropInPaths="", NeedDaemonReload=reload)
+
+    def assertRefused(self, result, reason):
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertRegex(result.stderr, reason)
+        self.assertIn("docs/cutover.md", result.stderr)
+
+    def test_scripts_era_launch_refuses(self):
+        self.assertRefused(self.check(self.show("pi.apps.van_dashboard"), SCRIPTS_ERA_UNIT),
+                           "unsupported launch.*pi.apps.van_dashboard.*allowlist")
+
+    def test_new_unit_file_with_pending_reload_refuses(self):
+        self.assertRefused(self.check(self.show("pi.apps.van_dashboard", reload="yes"), CUT_OVER_UNIT),
+                           "pending a daemon-reload")
+
+    def test_old_command_dropin_refuses(self):
+        self.assertRefused(self.check(self.show(), CUT_OVER_UNIT, dropin=OLD_DROPIN),
+                           "unsupported launch.*pi.apps.van_dashboard.*allowlist")
+
+    def test_missing_base_file_with_loaded_old_unit_refuses(self):
+        self.assertRefused(self.check(self.show("pi.apps.van_dashboard")), "cannot verify")
+
+    def test_quoted_module_refuses(self):
+        self.assertRefused(self.check(self.show(), QUOTED_UNIT),
+                           "unsupported launch.*pi.apps.van_dashboard.*allowlist")
+
+    def test_read_error_or_unreachable_pi_refuses(self):
+        self.assertRefused(self.check(show=None, unit_text=CUT_OVER_UNIT), "cannot verify")
+        self.assertRefused(self.check(self.show(), CUT_OVER_UNIT, unreachable=True), "Dashboard cutover check failed")
+
+    def test_cut_over_or_absent_unit_passes(self):
+        for show, unit_text in (
+            (self.show(), CUT_OVER_UNIT + b"# formerly -m pi.apps.van_dashboard\n"),
+            (self.show(load="not-found", fragment=""), None),
+        ):
+            with self.subTest(unit_text=unit_text):
+                result = self.check(show, unit_text)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+
 class PiBashrcGuardTests(unittest.TestCase):
     """Broad sync must not install pi/.bashrc over a live copy it has never seen."""
 
@@ -169,75 +276,6 @@ check_pi_bashrc_known
         unreachable = self.guard("alias v='one'\n", reachable=False)
         self.assertEqual(unreachable.returncode, 1)
         self.assertIn("couldn't read", unreachable.stderr)
-
-
-class ComputeProviderGuardTests(unittest.TestCase):
-    def setUp(self):
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.home = Path(temporary.name).resolve()
-        self.root = self.home / 'compute'
-        self.queue = self.home / 'queue'
-        self.old = self.home / 'old'
-        self.release = self.root / 'releases' / ('a' * 24)
-        package = self.release / 'van_compute'
-        package.mkdir(parents=True)
-        (package / '__init__.py').write_text('')
-        (package / 'metrics.py').write_text(
-            '# older, compatible provider\n'
-            'class ComputeMetricsError(Exception): pass\n'
-            'class ComputeMetricsReader: pass\n')
-        (self.release / 'source.sha256').write_text('a' * 64)
-        (self.root / 'deployment.sha256').write_text('a' * 64)
-        (self.root / 'current').symlink_to('releases/' + self.release.name)
-
-    def check(self):
-        check_compute_provider.check_provider(self.root, self.queue, self.old)
-
-    def test_older_valid_provider_import_is_read_only(self):
-        before = sorted(str(path) for path in self.home.rglob('*'))
-        self.check()
-        self.assertEqual(sorted(str(path) for path in self.home.rglob('*')), before)
-
-    def test_missing_dangling_and_foreign_provider_refuse(self):
-        current = self.root / 'current'
-        current.unlink()
-        with self.assertRaises(ValueError):
-            self.check()
-        current.symlink_to('releases/' + 'b' * 24)
-        with self.assertRaises(OSError):
-            self.check()
-        current.unlink()
-        current.symlink_to(self.release)
-        with self.assertRaises(ValueError):
-            self.check()
-
-    def test_missing_unreadable_or_unimportable_metrics_refuse(self):
-        metrics = self.release / 'van_compute/metrics.py'
-        metrics.unlink()
-        with self.assertRaises(OSError):
-            self.check()
-        metrics.write_text('this is not Python!')
-        with self.assertRaises(subprocess.CalledProcessError):
-            self.check()
-        with mock.patch.object(Path, 'read_bytes', side_effect=PermissionError):
-            with self.assertRaises(PermissionError):
-                self.check()
-
-    def test_marker_mismatch_and_interrupted_cutovers_refuse(self):
-        (self.root / 'deployment.sha256').write_text('b' * 64)
-        with self.assertRaises(ValueError):
-            self.check()
-        (self.root / 'deployment.sha256').write_text('a' * 64)
-        for marker in (self.queue / '.maintenance.json',
-                       self.root / 'scripts/.van-compute-upgrade-owner',
-                       self.old / '.van-compute-upgrade-owner'):
-            with self.subTest(marker=marker):
-                marker.parent.mkdir(parents=True, exist_ok=True)
-                marker.symlink_to(self.home / 'absent')
-                with self.assertRaises(ValueError):
-                    self.check()
-                marker.unlink()
 
 
 if __name__ == "__main__":

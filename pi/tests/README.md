@@ -3,7 +3,6 @@
 Tests shared by one feature live together:
 
 - `compute/`: compute protocol, broker, deployment, upgrade, and worker tests.
-- `dashboard/`: dashboard application, routes, assets, and tile tests.
 - `media/`: Movies & TV service, durable identity/catalog, qBittorrent bridge,
   rollback deployment, and incomplete-to-final integration tests.
 - `network/`: connectivity collection and UBNT Wi-Fi tests.
@@ -44,6 +43,4 @@ UMOUNT_PHASE_TEST_REQUIRE=1 python3 -m unittest \
   pi.tests.storage.test_umount_disks_phases
 ```
 
-Dashboard tests require Flask. See
-[`../docs/dashboard/DASHBOARD_TESTING.md`](../docs/dashboard/DASHBOARD_TESTING.md)
-for the isolated vanpi and local-venv runners.
+The dashboard's tests moved with it to `~/dev/van-dashboard`.

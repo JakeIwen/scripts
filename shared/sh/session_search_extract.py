@@ -215,7 +215,12 @@ def resume_command(session: Session) -> str:
 
 def header(name: str, modified: int) -> str:
     elapsed = max(0, int(time.time()) - modified)
-    count, unit = (elapsed // 3600, "hour") if elapsed < 86400 else (elapsed // 86400, "day")
+    if elapsed < 3600:
+        count, unit = elapsed // 60, "minute"
+    elif elapsed < 86400:
+        count, unit = elapsed // 3600, "hour"
+    else:
+        count, unit = elapsed // 86400, "day"
     line = "{} {}{} ago | {}".format(count, unit, "" if count == 1 else "s", name)
     return re.sub(r"[\n\r\t]", " ", line)
 

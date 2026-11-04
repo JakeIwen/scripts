@@ -282,48 +282,5 @@ class MonitorCompactionTests(MonitorFixture):
         self.assertGreaterEqual(len(checks), 3)
 
 
-class MonitorStorageHistoryTests(MonitorFixture):
-    def disk_status(self):
-        from pi.apps.van_dashboard.van_dashboard_disks import DiskManager
-
-        root = Path(self.directory.name)
-        config = root / "policy.conf"
-        config.write_text("\n".join(
-            f"{name}=(\n testdisk\n)" for name in
-            ("MOUNT_LABELS", "ALWAYS_MOUNT_LABELS", "MANUAL_MOUNT_LABELS", "HDD_LABELS")
-        ))
-        boot = root / "boot-id"
-        boot.write_text(BOOT)
-        command = mock.Mock(return_value=mock.Mock(
-            returncode=0, stdout='{"blockdevices":[]}', stderr="",
-        ))
-        manager = DiskManager(
-            config=str(config), event_database=str(self.path), boot_id_path=str(boot),
-            hold_dir=str(root / "holds"), health_dir=str(root / "health"),
-            command=command, wall_clock=lambda: NOW,
-        )
-        return manager.status()["disks"][0]
-
-    def test_v5_storage_history_resolves_deduped_snapshot_and_counts_repeats(self):
-        store = self.store()
-        state = {"boot_id": BOOT, "disk_io": {"devices": [{"name": "sda", "labels": ["testdisk"]}]}}
-        for i in range(150):
-            raw = journal_record(i, message="Buffer I/O error on dev sda1")
-            store.insert_event(**journal.parse_journal_record(raw), state=state)
-        disk = self.disk_status()
-        self.assertEqual(disk["health"]["historical_error_count"], 150)
-        self.assertEqual(disk["health"]["current_boot_error_count"], 150)
-
-    def test_v4_storage_history_does_not_migrate(self):
-        create_v4(self.path, [journal_record(0, message="Buffer I/O error on dev sda1")])
-        state = {"boot_id": BOOT, "disk_io": {"devices": [{"name": "sda", "labels": ["testdisk"]}]}}
-        with contextlib.closing(sqlite3.connect(self.path)) as connection, connection:
-            connection.execute("UPDATE events SET state_json=?", (json_dumps(state),))
-        disk = self.disk_status()
-        self.assertEqual(disk["health"]["historical_error_count"], 1)
-        with contextlib.closing(sqlite3.connect(self.path)) as connection:
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 4)
-
-
 if __name__ == "__main__":
     unittest.main()

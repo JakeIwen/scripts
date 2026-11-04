@@ -327,7 +327,7 @@ Retain the backup and an independent recovery card until normal workload is stab
   `.bak-*` files retain their historical root IDs; the guarded revert refuses
   such a backup after the restored root ID changes. The iCloud restore notes
   likewise require replacement-card identifier repair, not a new cmdline.
-- `van_dashboard_hotspares.py` reads normalized block topology, clone stamps,
+- The van-dashboard repo's `van_dashboard_hotspares.py` reads normalized block topology, clone stamps,
   and label-verified read-only ext4 usage evidence, not boot parameters. The
   dashboard's “current/bootable” evidence and `backup_watchdog.sh`'s stamps or
   `CLONE_INFO.txt` are **not proof** of the quirk's presence on a spare. Do not

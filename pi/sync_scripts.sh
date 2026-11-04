@@ -32,23 +32,31 @@ check_pi_bashrc_known() {
   fi
 }
 
+# The scripts-era dashboard unit runs -m pi.apps.van_dashboard from the package
+# release, which this checkout no longer ships: syncing before the dashboard's
+# own repo is deployed would break its next restart. The Pi's receiver makes
+# the same effective-state check as the package install (deploy_python.py
+# check_external_consumers), so the preflight and the later guard can't
+# disagree, and any failure to run it refuses the sync before any upload.
+check_dashboard_cut_over() {
+  python3 "$dsc/pi/deploy_python.py" --check-consumers --target "$pi_ip" >&2 || {
+    echo "Dashboard cutover check failed; see the message above and the van-dashboard" \
+      "repo's docs/cutover.md. No upload was made." >&2
+    return 1
+  }
+}
+
 sync_preflight() {
   (cd "$dsc" && python3 -m pi.generate_backup_lock_registry --check) || return 1
+  # sync_compute runs this installer last; refuse before any upload if it is missing.
   compute_installer="$VAN_COMPUTE_CHECKOUT/macbook/scripts/install_van_compute_worker.zsh"
   if [[ ! -x "$compute_installer" ]]; then
     echo "Van compute checkout is missing its executable installer: $compute_installer" >&2
     return 1
   fi
 
-  # Refuse before staging or updating anything: the dashboard's new unit and
-  # imports need the supervised, coupled compute cutover to have completed.
-  if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$pi_ip" \
-    /usr/bin/python3 -B - < "$dsc/pi/check_compute_provider.py"; then
-    echo "Compute provider preflight refused sync; run $VAN_COMPUTE_CHECKOUT/macbook/scripts/install_van_compute_worker.zsh from the owner's Terminal in the reviewed checkout first." >&2
-    return 1
-  fi
-
   check_pi_bashrc_known || return 1
+  check_dashboard_cut_over || return 1
 
   if ! package_units="$(python3 "$dsc/pi/deploy_python.py" --list-units)" ||
     [[ -z "$package_units" ]]; then

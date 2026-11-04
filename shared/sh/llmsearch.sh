@@ -14,8 +14,9 @@ Usage: llmsearch [flags] [--] <query>
 
 Search Claude Code and Codex session events for one literal, case-insensitive
 substring, including thinking, tool calls and output. All query arguments form
-one term: llmsearch dim auto finds "dim auto" only. Results are shown newest
-first; grouped grep results update live when output goes to a terminal.
+one term: llmsearch dim auto finds "dim auto" only. Results show one result per
+session, newest activity first, with the match count and latest excerpt.
+Directory roll-ups (-d) update live when grep output goes to a terminal.
 
 Index queries (--index only):
   Search this machine's transcript index (LLM Switchboard's, on the Mac or the
@@ -46,8 +47,10 @@ Flags:
                it was forked or branched from and its own forks, as a tree.
                Codex subagent threads are left out.
   -e, --single Show every matching excerpt instead of grouping them.
-  -g, --group  Group by directory and tool, with total matches and the latest
-               hit (the default; undoes an earlier -e).
+  -g, --group  One result per session, with the match count and latest
+               excerpt (the default; undoes an earlier -e or -d).
+  -d, --dirs   Group by directory and tool, with total matches and the latest
+               hit. The last -d, -g or -e flag wins.
   --index      Use the fast whole-word index of prompts and visible replies.
   --grep       Use the default full substring scan (undoes an earlier --index).
                The last --index or --grep flag wins.
@@ -60,6 +63,7 @@ EOF
 }
 
 session_search_grep=true
+session_search_dirs=false
 if ! session_search_parse_args "$@"; then
     llmsearch_usage >&2
     exit 2
@@ -88,9 +92,9 @@ llmsearch_grep() {
         echo 'llmsearch: no Claude or Codex session directories found' >&2
         return 1
     fi
-    # Records are the machine format (llm-switchboard's oracle reads them), so
-    # they stay ungrouped now that grouping is the default.
-    if [ "$session_search_group" = true ] && [ "${SESSION_SEARCH_RECORDS:-}" != 1 ] &&
+    # Directory roll-ups need the machine records; per-session results already
+    # come from the extractor. Keep oracle records ungrouped in either mode.
+    if [ "$session_search_dirs" = true ] && [ "${SESSION_SEARCH_RECORDS:-}" != 1 ] &&
         [ "$session_search_forks" = false ]; then
         SESSION_SEARCH_RECORDS=1 llmsearch_sources |
             python3 "$llmsearch_scripts/session_search_display.py" --group
@@ -131,8 +135,9 @@ llmsearch_print_results() {
 # One jq run orders or groups the results: jq 1.6 takes a fifth of a second to
 # start on a busy Pi.
 llmsearch_print_index() {
-    jq -nj -L "$llmsearch_scripts" --argjson group "$session_search_group" '
-        include "session_search_records"; session_search_index_fields($group)
+    jq -nj -L "$llmsearch_scripts" --argjson group "$session_search_group" \
+        --argjson dirs "$session_search_dirs" '
+        include "session_search_records"; session_search_index_fields($group; $dirs)
     ' | llmsearch_print_results
 }
 

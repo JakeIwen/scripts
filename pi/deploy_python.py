@@ -20,15 +20,6 @@ ROOT = Path(__file__).resolve().parents[1]
 LIVE_ROOT = Path('/home/pi/scripts/python-packages')
 # This table also supplies the generic sync's unit exclusion list.
 SERVICES = {
-    'van-dashboard.service': {
-        'app': 'van_dashboard', 'interpreter': '/usr/bin/python3',
-        'flat': 'van_dashboard.py',
-        # The controller imports these records in-process, not through the CLI.
-        'extra': ('pi/apps/media_organizer/__init__.py',
-                  'pi/apps/media_organizer/config.py', 'pi/apps/media_organizer/records.py',
-                  'shared/__init__.py', 'shared/python/__init__.py', 'shared/python/tool_settings.py'),
-        'extra_dirs': ('pi/apps/metered/', 'shared/metered/'),
-    },
     'video-library.service': {
         'app': 'video_library', 'interpreter': '/usr/bin/python3',
         'flat': 'video_library_server.py',
@@ -50,14 +41,26 @@ SERVICES = {
                   'pi/apps/video_library/qbittorrent_availability.py'),
     },
 }
-DASHBOARD = 'van-dashboard.service'
+# Units other repos own and deploy that import from this package release and
+# publish /run/<unit stem>/package-release like SERVICES do. GC keeps their
+# running release; this installer never installs, selects or restarts them.
+EXTERNAL_CONSUMERS = ('van-dashboard.service',)
+# Only reviewed launch forms prove the consumer no longer executes the removed
+# package; a wrapper could hide that import even when its argv names no module.
+CONSUMER_LAUNCH_FORMS = frozenset({
+    ('/usr/bin/test',),
+    ('/usr/bin/python3', '-P', '-m', 'van_dashboard'),
+})
+CONSUMER_EXEC_PROPERTIES = ('ExecCondition', 'ExecStartPre', 'ExecStart', 'ExecStartPost',
+                            'ExecReload', 'ExecStop', 'ExecStopPost')
+CONSUMER_PROPERTIES = ('LoadState', 'NeedDaemonReload', 'FragmentPath', 'DropInPaths',
+                       *CONSUMER_EXEC_PROPERTIES)
 RETAIN_NEWEST = 3
 GC_DELETE_LIMIT = 16
 # Only immediate Python modules in these reviewed directories are inputs.
 MODULE_DIRS = (
     'pi/apps/audiobooks', 'pi/apps/bme280', 'pi/apps/media_organizer',
-    'pi/apps/van_dashboard', 'pi/apps/iptorrents_watch',
-    'pi/apps/van_dashboard/routes', 'pi/apps/video_library',
+    'pi/apps/iptorrents_watch', 'pi/apps/video_library',
     'pi/apps/video_library/players', 'pi/scripts/python', 'shared/python',
     'pi/apps/metered', 'shared/metered',
 )
@@ -378,7 +381,7 @@ def collect_releases(root, lock, services, installed):
             if not re.fullmatch(r'releases/[0-9a-f]{24}', target):
                 raise ValueError(f'unexpected {name} release target')
             keep.add(Path(target).name)
-        for unit in SERVICES:
+        for unit in (*SERVICES, *EXTERNAL_CONSUMERS):
             running = running_release(root, services, unit)
             if running:
                 keep.add(running)
@@ -412,8 +415,26 @@ def collect_releases(root, lock, services, installed):
 
 class SystemServices:
     """Only instantiated on the Pi receiver; tests supply a fake service manager."""
-    def __init__(self, units=Path('/etc/systemd/system')):
+    def __init__(self, units=Path('/etc/systemd/system'), systemctl='/usr/bin/systemctl'):
         self.units = units
+        self.systemctl = systemctl
+
+    def consumer_state(self, unit):
+        """What systemd will execute (`show`) plus every unit file on disk or loaded."""
+        # Explicit properties retain empty scalars and exclude ExecMain* metadata.
+        arguments = [item for key in CONSUMER_PROPERTIES for item in ('-p', key)]
+        result = subprocess.run([self.systemctl, 'show', unit, *arguments], check=True,
+                                text=True, capture_output=True, timeout=10)
+        properties = parse_show(result.stdout)
+        base = str(self.units / unit)
+        paths = [single(properties, 'FragmentPath'), *single(properties, 'DropInPaths').split()]
+        if os.path.lexists(base):
+            paths.append(base)
+        directory = self.units / (unit + '.d')
+        if directory.is_dir():
+            paths += [str(path) for path in sorted(directory.glob('*.conf'))]
+        # A listed file that cannot be read raises: fail closed, never "absent".
+        return properties, [(path, Path(path).read_bytes()) for path in dict.fromkeys(paths) if path]
 
     def read_unit(self, unit):
         path = self.units / unit
@@ -538,6 +559,102 @@ def validate_dropins(unit, dropins):
                 raise ValueError(f'{unit} drop-in {name} overrides package launch: {key}')
 
 
+def parse_show(text):
+    """`systemctl show` output as {property: [values]}; Exec* properties repeat."""
+    properties = {}
+    for line in text.splitlines():
+        if not line:
+            continue
+        key, separator, value = line.partition('=')
+        if not separator:
+            raise ValueError(f'unparseable systemctl show line: {line!r}')
+        properties.setdefault(key, []).append(value)
+    return properties
+
+
+def single(properties, key):
+    if len(properties.get(key, ())) != 1:
+        raise ValueError(f'systemctl show gave no single {key}')
+    return properties[key][0]
+
+
+def consumer_exec_command(value):
+    """Accept a complete systemd command record, not an argv substring in debris."""
+    import shlex
+    record = re.fullmatch(
+        r'\{ path=(/\S+) ; argv\[\]=((?:(?! ; ignore_errors=).)*) ; ignore_errors=(?:yes|no) ; '
+        r'start_time=\[[^\]\r\n]*\] ; stop_time=\[[^\]\r\n]*\] ; '
+        r'pid=[0-9]+ ; code=[^;\s]+ ; status=[^;\s]+ \}', value)
+    if not record:
+        raise ValueError(f'unparseable Exec record: {value!r}')
+    words = shlex.split(record[2])
+    if not words or words[0] != record[1]:
+        raise ValueError(f'Exec path and argv disagree: {value!r}')
+    return record[2]
+
+
+def allowed_consumer_command(command, unit_file=False):
+    import shlex
+    words = shlex.split(command)
+    if unit_file and words:
+        words[0] = words[0].lstrip('-@:+!')
+    for form in CONSUMER_LAUNCH_FORMS:
+        if tuple(words[:len(form)]) == form:
+            return True
+        if (len(form) > 1 and len(words) >= len(form)
+                and tuple(words[:len(form) - 1]) == form[:-1]
+                and words[len(form) - 1].startswith(form[-1] + '.')):
+            return True
+    return False
+
+
+def consumer_problem(properties, files):
+    """Why an external consumer unit must block a release, or None. Raises on anything unreadable."""
+    load, reload = single(properties, 'LoadState'), single(properties, 'NeedDaemonReload')
+    fragment, dropins = single(properties, 'FragmentPath'), single(properties, 'DropInPaths')
+    if reload != 'no':
+        return 'has unit changes pending a daemon-reload, so systemd still runs its old commands'
+    if load == 'loaded' and not fragment:
+        return 'is loaded without a unit file that can be checked'
+    if load not in ('loaded', 'not-found'):
+        return f'is in load state {load}'
+    if properties.keys() - set(CONSUMER_PROPERTIES):
+        raise ValueError('unexpected systemctl show properties')
+    commands = [(consumer_exec_command(value), False)
+                for key in CONSUMER_EXEC_PROPERTIES for value in properties.get(key, ()) if value]
+    if load == 'not-found' and (fragment or dropins or commands or files):
+        return 'is not found but still has a unit file, drop-in or command'
+    for path, raw in files:
+        commands += [(value, True) for key, value in directives(raw) if key.startswith('Exec') and value]
+    for command, unit_file in commands:
+        if not allowed_consumer_command(command, unit_file):
+            return (f'has unsupported launch {command!r}; update the guard\'s allowlist '
+                    'if the unit legitimately changed')
+    return None
+
+
+def check_external_consumers(services):
+    """Refuse a release whose current link would strand another repo's unit.
+
+    Those units import through current, so a release missing a module their
+    effective commands run (the scripts-era dashboard unit's
+    -m pi.apps.van_dashboard) would fail at their next restart, relay-off
+    included. Reads systemd's effective state, not just the unit file, and
+    fails closed on any read or parse error.
+    """
+    for unit in EXTERNAL_CONSUMERS:
+        try:
+            problem = consumer_problem(*services.consumer_state(unit))
+        except Exception as error:
+            raise ValueError(f'{unit}: cannot verify its effective launch commands '
+                             f'({type(error).__name__}: {error}); deploy the van-dashboard repo '
+                             'first (its docs/cutover.md). No state, link or unit was changed.') from error
+        if problem:
+            raise ValueError(f'{unit} {problem}; deploy the van-dashboard repo first (its '
+                             'docs/cutover.md), then daemon-reload and retry. '
+                             'No state, link or unit was changed.')
+
+
 def atomic_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, name = tempfile.mkstemp(prefix='.state-', dir=path.parent)
@@ -619,6 +736,7 @@ def install_release(stream, root, mode, services=None, selected=None):
             return completed(release, [])
         if services is None:
             raise ValueError('activation requires a service manager')
+        check_external_consumers(services)
         work = []
         # Validate ALL selected services before saving, journaling or changing
         # current/units. --update cannot silently undo a deliberate flat rollback.
@@ -630,50 +748,25 @@ def install_release(stream, root, mode, services=None, selected=None):
             if pending is not None and not isinstance(pending.get('restart'), bool):
                 raise ValueError(f'invalid pending restart intent: {unit}')
             live, packaged, flat, dropins = unit_preflight(services, unit, mode, saved)
-            # Upgrade the pre-existing dashboard installer state without
-            # demanding a second first-cutover backup of its package unit.
-            old_dashboard = (unit == DASHBOARD and saved is None and old is not None and
-                             (root / 'activated.json').is_file() and packaged)
-            old_pending = unit == DASHBOARD and (root / 'pending-restart').is_file()
-            if old_dashboard:
-                # Another service may already have advanced current. The legacy
-                # activation marker, not that shared link, identifies the last
-                # dashboard dependency comparison.
-                activation = json.loads((root / 'activated.json').read_bytes())
-                prior_id = activation.get('release', '')
-                if not re.fullmatch('[0-9a-f]{24}', prior_id):
-                    raise ValueError('invalid legacy dashboard activation marker')
-                prior = root / 'releases' / prior_id
-                if prior.is_symlink():
-                    raise ValueError('symlinked legacy dashboard release')
-                prior_manifest = json.loads((prior / 'manifest.json').read_bytes())
-                prior_digest = prior_manifest.get('services', {}).get(unit, '')
-                if (digest(encoded(prior_manifest))[:24] != prior_id or
-                        not re.fullmatch('[0-9a-f]{64}', prior_digest)):
-                    raise ValueError('invalid legacy dashboard activation manifest')
-                saved = {'release': prior_id, 'digest': prior_digest}
             backup = root / 'pre-package-units' / (unit + '.backup')
-            old_backup = unit == DASHBOARD and (root / 'pre-package-units' / unit).is_file()
             if mode == 'update' and (saved is None or not packaged):
                 raise ValueError(f'{unit}: explicit --activate --service {unit} required')
             if live is not None and not flat and not packaged:
                 raise ValueError(f'{unit}: expected recognizable flat or package ExecStart')
-            resumable = (((pending or old_pending) and (backup.exists() or old_backup)) or
-                         (pending and SERVICES[unit]['flat'] is None))
+            resumable = pending is not None and (backup.exists() or SERVICES[unit]['flat'] is None)
             if saved is None and packaged and not resumable:
                 raise ValueError(f'{unit}: first activation requires the expected flat unit')
             new = (release / f'pi/services/{unit}').read_bytes()
             if not recognized_unit(new, unit, package=True):
                 raise ValueError(f'{unit}: invalid packaged source unit')
-            changed = (pending is not None or old_pending or live != new or saved is None or
+            changed = (pending is not None or live != new or saved is None or
                        saved['digest'] != manifest['services'][unit])
-            restart = changed and (services.is_active(unit) or old_pending or
+            restart = changed and (services.is_active(unit) or
                                    (pending is not None and pending['restart']))
             work.append({'unit': unit, 'state': state_path, 'pending': pending_path,
-                         'backup': backup, 'save': flat and not old_backup,
+                         'backup': backup, 'save': flat,
                          'dropins': dropins, 'changed': changed, 'restart': restart,
-                         'install': live != new or pending is not None or old_pending,
-                         'old_pending': old_pending})
+                         'install': live != new or pending is not None})
         for item in work:
             unit = item['unit']
             if item['save']:
@@ -695,44 +788,25 @@ def install_release(stream, root, mode, services=None, selected=None):
                 services.restart(unit)
                 restarted.append(unit)
             atomic_json(item['state'], {'release': release_id, 'digest': manifest['services'][unit]})
-            if unit == DASHBOARD:
-                atomic_json(root / 'activated.json', {'release': release_id})
+            # The host activation gate pi/sync_scripts.sh checks before any upload.
+            atomic_json(root / 'activated.json', {'release': release_id})
             item['pending'].unlink(missing_ok=True)
-            if item['old_pending']:
-                (root / 'pending-restart').unlink(missing_ok=True)
         return completed(release, restarted)
-
-
-def check_dashboard_compute_provider(target):
-    """Refuse a dashboard update before transferring a dependent package."""
-    guard = (ROOT / 'pi/check_compute_provider.py').read_bytes()
-    try:
-        subprocess.run(
-            ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', '--',
-             target, '/usr/bin/python3 -B -'],
-            input=guard, check=True, timeout=30,
-        )
-    except (OSError, subprocess.SubprocessError) as error:
-        raise RuntimeError(
-            'Dashboard update refused: the canonical compute provider at '
-            '/home/pi/van_compute/current/van_compute/metrics.py must be healthy '
-            'and unfenced. Run the van-compute checkout\'s coupled '
-            'macbook/scripts/install_van_compute_worker.zsh from '
-            "the owner's Terminal first; no package deployment was started."
-        ) from error
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dry-run', action='store_true', help='print a local JSON plan; never connect')
     parser.add_argument('--list-units', action='store_true', help='print package-owned units locally; never connect')
+    parser.add_argument('--check-consumers', action='store_true',
+                        help="read-only: require external consumers' reviewed post-cutover launch forms")
     parser.add_argument('--target', default='pi@vanpi.lan')
     parser.add_argument('--service', action='append', choices=tuple(SERVICES), help='select service(s); default all')
     group = parser.add_mutually_exclusive_group()
     group.add_argument('--activate', action='store_true', help='explicit per-service first cutover (saves old units)')
     group.add_argument('--update', action='store_true', help='update only already activated services')
     group.add_argument('--legacy-flatten', action='store_true', help='retired: always refuses; flat tree is frozen')
-    parser.add_argument('--receive', choices=('stage', 'activate', 'update'), help=argparse.SUPPRESS)
+    parser.add_argument('--receive', choices=('stage', 'activate', 'update', 'consumers'), help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.legacy_flatten:
         parser.error('--legacy-flatten is retired; the flat rollback tree is frozen')
@@ -740,6 +814,12 @@ def main(argv=None):
         if args.receive or args.activate or args.update or args.service or args.dry_run:
             parser.error('--list-units must be used alone')
         print('\n'.join(SERVICES))
+        return
+    if args.receive == 'consumers':
+        try:
+            check_external_consumers(SystemServices())
+        except ValueError as error:
+            parser.exit(1, f'{error}\n')
         return
     if args.receive:
         if args.dry_run:
@@ -749,19 +829,26 @@ def main(argv=None):
         print(json.dumps(install_release(sys.stdin.buffer, LIVE_ROOT, args.receive,
                                          SystemServices(), selected=args.service)))
         return
-    mode = 'activate' if args.activate else 'update' if args.update else 'stage'
-    plan = build_plan(mode=mode, selected=args.service)
-    print(json.dumps(plan, indent=2, sort_keys=True), flush=True)
-    if args.dry_run:
-        return
+    if args.check_consumers:
+        if args.receive or args.activate or args.update or args.service or args.dry_run:
+            parser.error('--check-consumers must be used alone (except --target)')
+    mode = 'consumers' if args.check_consumers else (
+        'activate' if args.activate else 'update' if args.update else 'stage')
+    if not args.check_consumers:
+        plan = build_plan(mode=mode, selected=args.service)
+        print(json.dumps(plan, indent=2, sort_keys=True), flush=True)
+        if args.dry_run:
+            return
     if not re.fullmatch(r'[A-Za-z0-9_.@:-]+', args.target) or args.target.startswith('-'):
         parser.error('invalid SSH target')
-    if mode == 'update' and DASHBOARD in selected_units(args.service):
-        check_dashboard_compute_provider(args.target)
     import shlex
     receiver = Path(__file__).read_text()
     receiver = receiver.replace('ROOT = Path(__file__).resolve().parents[1]', 'ROOT = Path.cwd()')
     command = '/usr/bin/python3 -c ' + shlex.quote(receiver) + ' --receive ' + mode
+    if args.check_consumers:
+        # Same receiver-side check the install runs; sync_scripts.sh calls this before any upload.
+        raise SystemExit(subprocess.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10',
+                                         '--', args.target, command], stdin=subprocess.DEVNULL).returncode)
     for unit in args.service or ():
         command += ' --service ' + shlex.quote(unit)
     with tempfile.TemporaryFile() as archive:

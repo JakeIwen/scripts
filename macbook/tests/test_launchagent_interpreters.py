@@ -34,7 +34,7 @@ class LaunchAgentInterpreterTests(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == "darwin", "the named interpreters exist only on the Mac")
     def test_python_agents_start_on_their_named_interpreter(self):
-        for label in ("com.jacobr.deal-watch-refresh", "com.jacobr.hosted-project-scan"):
+        for label in ("com.jacobr.deal-watch-refresh",):
             with self.subTest(label):
                 plist = load(LAUNCHAGENTS / f"{label}.plist")
                 argv = [in_this_checkout(arg) for arg in plist["ProgramArguments"]]

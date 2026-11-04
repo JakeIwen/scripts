@@ -1,0 +1,5 @@
+{
+  "name": "agent-label",
+  "version": "0.1.0",
+  "description": "Prefixes each subagent's task description with the model and effort it runs at, so the agent list shows them"
+}

@@ -39,6 +39,12 @@ request_max_retries = 0
 stream_max_retries = 0
 [projects.%s]
 trust_level = "trusted"
+[features]
+# Plugins on makes Codex git-fetch github.com/openai/plugins into $CODEX_HOME/.tmp from a
+# detached process that outlives Codex, breaking the offline design and temp-dir cleanup.
+plugins = false
+remote_plugin = false
+plugin_discovery_prefetch = false
 [analytics]
 enabled = false
 [feedback]

@@ -36,14 +36,13 @@ class SyncStorageOwnershipTests(unittest.TestCase):
         self.assertEqual(
             set(units),
             {
-                "van-dashboard.service",
                 "video-library.service",
                 "audiobooks.service",
                 "bme280-mqtt.service",
                 "vanpi-metered.service",
             },
         )
-        self.assertEqual(len(units), 5)
+        self.assertEqual(len(units), 4)
         return units
 
     def stage(self, root):

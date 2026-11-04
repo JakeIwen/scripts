@@ -227,9 +227,8 @@ class SessionSearchTests(SessionFixtureTestCase):
             result = self.search(tool, '-g', '-t', '--', '--title')
             self.assertEqual(result.returncode, 0, result.stderr)
             blocks = result.stdout.strip().split('\n\n')
-            self.assertEqual(len(blocks), 2)
-            self.assertTrue(all(block.startswith('2 matches | 1 hour ago') if tool == 'llm'
-                                else block.startswith('1 matches | ') for block in blocks))
+            self.assertEqual(len(blocks), 4 if tool == 'llm' else 2)
+            self.assertTrue(all(block.startswith('1 matches | ') for block in blocks))
             records = self.search(tool, '--title', '--', '--title', SESSION_SEARCH_RECORDS='1')
             self.assertEqual(records.returncode, 0, records.stderr)
             decoded = [json.loads(line) for line in records.stdout.splitlines()]
@@ -272,7 +271,7 @@ class SessionSearchTests(SessionFixtureTestCase):
             with self.subTest(tool=tool):
                 grouped = self.search(tool, '-g', 'needle')
                 self.assertEqual(grouped.returncode, 0, grouped.stderr)
-                self.assertEqual(len(grouped.stdout.strip().split('\n\n')), 2)
+                self.assertEqual(len(grouped.stdout.strip().split('\n\n')), 4 if tool == 'llm' else 2)
                 self.assertRegex(grouped.stdout, r'^\d matches \| ')
                 self.assertEqual(self.search(tool, 'needle').stdout, grouped.stdout)
                 self.assertEqual(self.search(tool, '-e', '-g', 'needle').stdout, grouped.stdout)
@@ -317,11 +316,11 @@ class SessionSearchTests(SessionFixtureTestCase):
                 self.assertEqual(record['context'], 'newer needle')
                 self.assertEqual(record['matched_at'], 1792324800)
 
-    def test_grouped_llm_directories_are_newest_first(self):
+    def test_llm_directory_rollups_are_newest_first(self):
         recent = self.write_session('codex', 'recent', ['recent needle'], cwd='/tmp/recent')
         modified = time.time() - 3600 - 30
         os.utime(recent, (modified, modified))
-        result = self.search('llm', '-g', 'needle')
+        result = self.search('llm', '-d', 'needle')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(result.stdout.startswith('1 matches | 1 hour ago | recent\n'))
         self.assertNotIn('\x1b', result.stdout)
@@ -391,7 +390,7 @@ class SessionSearchTests(SessionFixtureTestCase):
             self.write_session(tool, 'second', ['other needle'],
                                timestamps=['2026-10-18T11:00:00Z'])
         self.write_session('claude', 'elsewhere', ['separate needle'], cwd='/tmp/elsewhere')
-        for flag in ('-g', '--group'):
+        for flag in ('-d', '--dirs'):
             with self.subTest(flag=flag):
                 result = self.search('llm', flag, 'needle')
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -411,7 +410,7 @@ class SessionSearchTests(SessionFixtureTestCase):
             os.utime(newer, (timestamp, timestamp))
         self.write_session('claude', 'unknown-one', ['unknown needle'], cwd='')
         self.write_session('claude', 'unknown-two', ['unknown needle'], cwd='')
-        result = self.search('llm', '-g', 'needle')
+        result = self.search('llm', '-d', 'needle')
         self.assertEqual(result.returncode, 0, result.stderr)
         blocks = result.stdout.strip().split('\n\n')
         self.assertEqual(len(blocks), 4)
@@ -425,11 +424,12 @@ class SessionSearchTests(SessionFixtureTestCase):
             result = self.search('llm', flag)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn('Usage: llmsearch [flags] [--] <query>', result.stdout)
-            self.assertIn('Group by directory and tool', result.stdout)
+            self.assertIn('One result per session', result.stdout)
         result = self.search('llm', '-g', 'needle')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(result.stdout.strip().split('\n\n')), 1)
-        self.assertTrue(result.stdout.startswith('3 matches | '))
+        self.assertEqual(len(result.stdout.strip().split('\n\n')), 2)
+        self.assertIn('2 matches | ', result.stdout)
+        self.assertIn('1 matches | ', result.stdout)
         self.assertEqual(self.search('llm', '-g').returncode, 2)
         self.assertEqual(self.search('llm', '-g', 'absent').stdout, '')
         self.write_session('claude', 'literal', ['literal --help option'])
@@ -674,7 +674,7 @@ class IndexSearchTests(SessionFixtureTestCase):
             self.index_result('claude', 'elsewhere', 'Elsewhere', 1, 'separate needle', 5,
                         cwd='/tmp/elsewhere'),
         ])
-        for flags in (('-g',), ('--group',), ()):
+        for flags in (('-d',), ('--dirs',)):
             with self.subTest(flags=flags):
                 result = self.llmsearch('--index', *flags, 'needle')
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -719,7 +719,7 @@ class IndexSearchTests(SessionFixtureTestCase):
                 self.assertEqual(self.switchboard_calls(), [])
         result = self.llmsearch('--index', '--grep', 'needle')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(result.stdout.strip().split('\n\n')), 2)
+        self.assertEqual(len(result.stdout.strip().split('\n\n')), 4)
         self.assertEqual(self.switchboard_calls(), [])
 
     def test_index_mode_flags_after_double_dash_are_search_text(self):

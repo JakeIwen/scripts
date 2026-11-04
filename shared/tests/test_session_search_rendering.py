@@ -65,7 +65,8 @@ class SearchRenderingTests(fixtures.SessionFixtureTestCase):
         self.fake_switchboard([self.index_result('claude', 'first', 'first', 2, 'needle', 3)])
         cases = [(tool, flags, False) for tool in ('claude', 'codex', 'llm')
                  for flags in ([], ['-e'], ['-g'], ['-t'])]
-        cases += [('llm', ['--index', *flags], True) for flags in ([], ['-e'], ['-g'])]
+        cases += [('llm', ['-d'], False)]
+        cases += [('llm', ['--index', *flags], True) for flags in ([], ['-e'], ['-g'], ['-d'])]
         for tool, flags, index in cases:
             with self.subTest(tool=tool, flags=flags, index=index):
                 query = 'first' if '-t' in flags else 'needle'
@@ -77,8 +78,8 @@ class SearchRenderingTests(fixtures.SessionFixtureTestCase):
                 disabled = self.run_search(tool, *flags, query, index=index,
                                            terminal=True, NO_COLOR='1')
                 self.assertNotIn(b'\x1b[38;5;215m', disabled)
-                # Grouped llmsearch grep redraws live on a terminal.
-                if not (tool == 'llm' and '-e' not in flags and not index):
+                # Only directory roll-ups redraw live on a terminal.
+                if not (tool == 'llm' and '-d' in flags and not index):
                     self.assertEqual(disabled, plain)
                     self.assertEqual(colored.replace(b'\x1b[38;5;215m', b'').replace(b'\x1b[0m', b''), plain)
         records = self.run_search('llm', 'needle', terminal=True, SESSION_SEARCH_RECORDS='1')

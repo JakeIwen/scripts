@@ -271,24 +271,12 @@ partial while current-source receipts continued. Existing history counts can
 increase during catch-up. This is normal bounded background ingestion, not a
 claim that old intervals are complete.
 
-These historical recorder rollback commands apply only **after storage
-rollback**; the legacy installer now refuses them while storage configuration
-is present. Undo the last original recorder update from the repository root:
-
-```bash
-python3 pi/deploy_network_flight_recorder.py rollback --release network-20260930T022426Z-10d451d2
-```
-
-To return all the way to the state before this project, first run that command,
-then roll back the two preceding releases in this order:
-
-```bash
-python3 pi/deploy_network_flight_recorder.py rollback --release network-20260930T021028Z-87126f5d
-```
-
-```bash
-python3 pi/deploy_network_flight_recorder.py rollback --release network-20260930T015418Z-e164e3ea
-```
+The original installer that deployed these three releases
+(`network-20260930T015418Z-e164e3ea`, `network-20260930T021028Z-87126f5d` and
+`network-20260930T022426Z-10d451d2`) is retired: their manifests include the
+dashboard backend, unit and frontend, which the van-dashboard repo now deploys,
+so `pi/deploy_network_flight_recorder.py` refuses their rollback. See
+`NETWORK_FLIGHT_RECORDER.md` for what still rolls back.
 
 Unresolved observability limits are explicit in every bundle: no every-client
 association/end-to-end proof; no WAN/lifiwan gateway/public decomposition;

@@ -14,7 +14,6 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPOSITORY_ROOT / "pi" / "rollback_python_service.sh"
 
 SERVICES = {
-    "van-dashboard.service": ("van_dashboard.py", "/usr/bin/python3"),
     "video-library.service": ("video_library_server.py", "/usr/bin/python3"),
     "audiobooks.service": ("audiobook_server.py", "/usr/bin/python3"),
     "bme280-mqtt.service": ("bme280_mqtt.py", "/home/pi/pyvenv/bin/python"),
@@ -98,13 +97,9 @@ esac
         path.write_text(content, encoding="utf-8")
         path.chmod(stat.S_IRWXU)
 
-    def prepare_service(self, unit: str, *, old_dashboard_backup: bool = False):
+    def prepare_service(self, unit: str):
         flat, interpreter = SERVICES[unit]
-        backup_root = self.root / "pre-package-units"
-        if old_dashboard_backup:
-            backup_dir = backup_root
-        else:
-            backup_dir = backup_root / f"{unit}.backup"
+        backup_dir = self.root / "pre-package-units" / f"{unit}.backup"
         backup_dir.mkdir(parents=True, exist_ok=True)
         backup = backup_dir / unit
         expected_flat = self.flat_root / flat
@@ -189,47 +184,6 @@ class PythonRollbackTests(unittest.TestCase):
                 self.assertIn("systemctl daemon-reload", log)
                 self.assertIn(f"systemctl restart {unit}", log)
 
-    def test_dashboard_old_backup_retires_legacy_host_markers(self):
-        with RollbackFixture() as fixture:
-            unit = "van-dashboard.service"
-            flat = "van_dashboard.py"
-            _backup, current, flat_path, expected_unit = fixture.prepare_service(
-                unit, old_dashboard_backup=True
-            )
-            generic = fixture.root / "service-state" / f"{unit}.json"
-            pending = fixture.root / "pending-restarts" / f"{unit}.json"
-            activated = fixture.root / "activated.json"
-            old_pending = fixture.root / "pending-restart"
-            for path, contents in (
-                (generic, b"generic"),
-                (pending, b"pending"),
-                (activated, b"activated"),
-                (old_pending, b"old pending"),
-            ):
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(contents)
-            flat_before = flat_path.read_bytes()
-
-            result = fixture.run(unit, flat)
-
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(current.read_bytes(), expected_unit)
-            retired = fixture.retired_path(result)
-            self.assertEqual((retired / "activated.json").read_bytes(), b"activated")
-            self.assertEqual(
-                (retired / "pending-restart").read_bytes(), b"old pending"
-            )
-            self.assertEqual(
-                (retired / "service-state" / f"{unit}.json").read_bytes(), b"generic"
-            )
-            self.assertEqual(
-                (retired / "pending-restarts" / f"{unit}.json").read_bytes(),
-                b"pending",
-            )
-            self.assertFalse(activated.exists())
-            self.assertFalse(old_pending.exists())
-            self.assertEqual(flat_path.read_bytes(), flat_before)
-
     def test_changed_dropins_refuse_before_any_mutation(self):
         with RollbackFixture() as fixture:
             unit = "video-library.service"
@@ -259,11 +213,14 @@ class PythonRollbackTests(unittest.TestCase):
             self.assertEqual(fixture.command_log(), "")
 
     def test_unknown_service_script_pair_refuses_without_touching_fixture(self):
-        with RollbackFixture() as fixture:
-            result = fixture.run("unknown.service", "unknown.py")
+        # The dashboard's own repo deploys and rolls it back now.
+        for unit, flat in (("unknown.service", "unknown.py"),
+                           ("van-dashboard.service", "van_dashboard.py")):
+            with self.subTest(unit=unit), RollbackFixture() as fixture:
+                result = fixture.run(unit, flat)
 
-            self.assertEqual(result.returncode, 2)
-            self.assertEqual(fixture.command_log(), "")
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(fixture.command_log(), "")
 
     def test_missing_or_foreign_backup_unit_refuses_without_mutation(self):
         for foreign in (False, True):

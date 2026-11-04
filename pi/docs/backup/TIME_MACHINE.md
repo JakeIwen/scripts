@@ -1,7 +1,7 @@
 # Time Machine backup
 
 The Mac backs up through the `mbp2tbkup` SMB share. The current native image is
-`m4mac0.sparsebundle`; `pi/services/van-dashboard.service` sets
+`m4mac0.sparsebundle`; the van-dashboard repo's `services/van-dashboard.service` sets
 `VAN_DASHBOARD_TIME_MACHINE_BUNDLE` to this path for progress and freshness.
 
 ## Capacity and encryption

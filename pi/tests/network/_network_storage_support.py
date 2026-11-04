@@ -15,13 +15,3 @@ def monitor_fixture(test, deploy):
     test.addCleanup(patch.stop)
     return {path: deploy.base.digest(path) for path in targets.values()}
 
-
-def create_frontend(root):
-    frontend = root / 'frontend'
-    for name in ('old', 'older'):
-        path = frontend / 'releases' / name
-        path.mkdir(parents=True)
-        (path / 'index.html').write_text(name)
-    (frontend / 'current').symlink_to('releases/old')
-    (frontend / 'previous').symlink_to('releases/older')
-    return frontend
