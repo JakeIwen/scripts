@@ -362,6 +362,49 @@ class RunnerTests(RunnerCase):
         self.assertEqual(sorted(self.executions()), ['a', 'b'])
         self.assertTrue(any('cached' in output for output in outputs))
 
+    def add_other_test(self, name):
+        directory = self.repo / 'other'
+        directory.mkdir(exist_ok=True)
+        (directory / f'test_{name}.py').write_text(FAKE_TEST.format(name=name, sleep=0, fail=False))
+        self.git('add', '-A')
+        self.git('commit', '-qm', 'other tests')
+
+    def test_path_selection_runs_subset_and_never_certifies_whole_suite(self):
+        self.add_tests(a=(0, False))
+        self.add_other_test('b')
+        code, output = self.run_suite('--path', 'tests')
+        self.assertEqual(code, 0, output)
+        self.assertEqual(self.executions(), ['a'])
+        self.assertIn('PASS: all 1 suite commands under tests completed.', output)
+        # The whole suite has its own key, so the subset's pass doesn't cover it.
+        code, output = self.run_suite()
+        self.assertEqual(code, 0, output)
+        self.assertIn('PASS: all 2 suite commands completed.', output)
+        self.assertEqual(sorted(self.executions()), ['a', 'a', 'b'])
+        code, output = self.run_suite('--path', 'tests/')
+        self.assertEqual(code, 0, output)
+        self.assertIn('PASS: all 1 suite commands under tests/ completed (cached', output)
+        code, output = self.run_suite('--exclude-path', 'other')
+        self.assertEqual(code, 0, output)
+        self.assertIn('Discovered 1 test files excluding other;', output)
+        self.assertEqual(self.executions().count('b'), 1)
+
+    def test_path_selection_rejects_unknown_and_outside_paths(self):
+        self.add_tests(a=(0, False))
+        for args, message in ((('--path', 'nope'), '--path nope matches no repository path'),
+                              (('--exclude-path', 'tests/x'), 'matches no repository path'),
+                              (('--path', '../repo'), 'must be a path inside the repository'),
+                              (('--path', '.'), 'must be a path inside the repository'),
+                              (('--path', str(self.repo)), 'must be a path inside the repository')):
+            with self.subTest(args=args):
+                code, output = self.run_suite(*args)
+                self.assertEqual(code, 1, output)
+                self.assertIn(message, output)
+        code, output = self.run_suite('--path', 'data.txt')
+        self.assertEqual(code, 1, output)
+        self.assertIn('No tests discovered', output)
+        self.assertEqual(self.executions(), [])
+
     def test_edit_during_run_is_not_cached(self):
         self.add_tests(a=(0, False))
         code, output = self.run_suite(FAKE_EDIT=str(self.repo / 'data.txt'))

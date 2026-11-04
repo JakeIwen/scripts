@@ -1090,6 +1090,11 @@ extend that registry instead of adding per-test `sys.path` patches.
   `passes.json`, `lock`): untracked and shared by all worktrees. Corrupt
   JSON is discarded; writes replace files atomically. The runner's CLI
   regression tests are `tests/test_run_tests.py`.
+- Selection: `--path PREFIX` (repeatable) runs only tests under those
+  repository paths and `--exclude-path PREFIX` drops some; both match whole
+  path components, a prefix that matches no repository path is an error, and
+  output lines name the selection. A selected pass has its own cache key, so it
+  never certifies the whole suite (whose key is unchanged).
 
 ## Deployment commits
 
