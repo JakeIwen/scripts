@@ -448,7 +448,9 @@ def run_locked(args, state, check_interruption):
     timings.update({result.name: round(result.secs, 2) for result in results})
     write_json(timings_file, timings)
     if failures:
-        print(f'FAILED: {len(failures)} command(s) failed; {not_run} were not run.',
+        # Name the failures on the last line: callers often keep only the tail.
+        names = ', '.join(result.name for result in failures)
+        print(f'FAILED: {len(failures)} command(s) failed ({names}); {not_run} were not run.',
               file=sys.stderr, flush=True)
         return 1
     after = None if before is None else tree_fingerprint()

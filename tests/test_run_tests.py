@@ -254,7 +254,7 @@ class RunnerTests(RunnerCase):
         code, output = self.run_suite('-j', '2')
         self.assertEqual(code, 1, output)
         self.assertEqual(sorted(self.executions()), ['a', 'b'], output)
-        self.assertIn('FAILED: 2 command(s) failed; 2 were not run.', output)
+        self.assertRegex(output, r'FAILED: 2 command\(s\) failed \(tests/test_\w+\.py, tests/test_\w+\.py\); 2 were not run\.')
         self.assertIn('output-a', output)
         self.assertIn('output-b', output)
 
