@@ -631,8 +631,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   frontmatter, then the parent's latest request (a 2.1.314 probe showed
   built-ins such as Explore inherit both). The agent's first request is then
   checked against the label, and a toast says when they differ. Aliases are
-  shown by the id they last resolved to (kept in `$.store`). Mac only, loaded
-  like term-highlight.
+  shown by the id they last resolved to (kept in `$.store`, per machine). The
+  Mac loads it from the checkout; the Pi loads the copy `zsh
+  shared/claude-mods/deploy_pi.zsh agent-label` installs, as for clean-output.
 - Pi video audio is hardwired: HDMI-A-1 → splitter box (HDMI to the monitor,
   audio to optical) → Sonos soundbar's optical input. `sns.sh rear_movie`
   switches the soundbar to optical and groups vonRear with it; VLC and Van TV's
