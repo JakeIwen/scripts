@@ -78,9 +78,13 @@ function findEditMenuItem(application, attribute, key) {
     throw new Error('Cannot identify the app’s Cut/Copy/Paste menu commands.');
 }
 
+function focusUnchanged(system, application, element, attribute) {
+    return $.CFEqual(application, attribute(system, 'AXFocusedApplication')) &&
+        $.CFEqual(element, attribute(system, 'AXFocusedUIElement'));
+}
+
 function assertPasteFocus(system, application, element, attribute) {
-    if (!$.CFEqual(application, attribute(system, 'AXFocusedApplication')) ||
-        !$.CFEqual(element, attribute(system, 'AXFocusedUIElement')))
+    if (!focusUnchanged(system, application, element, attribute))
         throw new Error('Focus changed during the paste operation; no retry was performed.');
 }
 
