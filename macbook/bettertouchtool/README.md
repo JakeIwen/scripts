@@ -29,7 +29,7 @@ Apple Events access is sandboxed. `inspect` and `backup` need no Apple Events.
 | `status` | Playback-status output and compact row spacing. |
 | `notes` | Recent/Pinned Notes setup; `--labels-only --apply` limits edits to labels. |
 | `escape` | Escape dismissal while the three Media dropdowns are visible. |
-| `text-keys` | Editing keys outside code editors: Cmd-X with no selection cuts the line; `'` `"` `` ` `` `(` `[` `{` wrap a selection. `--apply` installs, `--disable` turns them off; see below. |
+| `text-keys` | Editing keys outside code editors: Cmd-X with no selection cuts the line and Cmd-C copies it; `'` `"` `` ` `` `(` `[` `{` wrap a selection. `--apply` installs, `--disable` turns them off; see below. |
 | `finder-paste` | Cmd-V in Finder saves a clipboard image (a ctrl-cmd-shift-4 screenshot) as a PNG in the current folder; copied files and text paste as before. `--apply` installs, `--disable` turns it off; see below. |
 | `repair rps` | Restore the missing sync-button link without running a deployment; optional `--with-escape`. |
 | `repair sizes` | Repair conflicting min/max dimensions without normalizing valid custom sizes. |
@@ -300,7 +300,7 @@ this restore covers sequences lost before a checkpoint held them.
 /usr/bin/python3 -B ~/dev/scripts/macbook/bettertouchtool/btt.py text-keys --disable
 ```
 
-`install_text_editing_keys.py` adds seven global keyboard triggers and one
+`install_text_editing_keys.py` adds eight global keyboard triggers and one
 "Active App Did Change" trigger to the active Master preset, under fixed UUIDs:
 
 - `'` `"` `` ` `` `(` `[` `{` typed over a selection wrap it and keep the original
@@ -315,11 +315,19 @@ this restore covers sequences lost before a checkpoint held them.
   sent from its own Cmd-X trigger. It then checks that exactly the line left the
   text. No keystrokes are posted, since a posted key's delivery cannot be confirmed;
   if anything stops the cut first, the caret goes back unless you have moved it.
+- Cmd-C with no selection copies the caret's line the same way (as VS Code does)
+  and leaves the caret where it was. After Edit > Copy it waits up to a second for
+  the clipboard to hold the line itself (another app's write does not count), then
+  puts the caret back (Firefox through its text marker, other apps through the
+  numeric range), so the selection flickers for a moment. A caret, edit or focus
+  change you make meanwhile is kept, and the notification says the caret was left.
+  With a selection, or where the condition does not match, Cmd-C is the app's
+  normal copy.
 
 Each keyboard trigger has an advanced condition and BTT's "If advanced conditions
 fail, let the shortcut pass through" option: the key behaves normally unless
 `focused_element_details` shows a settable `AXSelectedText` with a nonempty range
-(wrapping) or an empty one (Cmd-X), in an app outside
+(wrapping) or an empty one (Cmd-X, Cmd-C), in an app outside
 `text_editing_conditions.EXCLUDED_APPS` (code editors
 and terminals, plus `com.jetbrains.*`). Read-only text, web page text and apps with
 no text tree never match. Checking the condition adds about 20 ms to each of these
@@ -331,7 +339,7 @@ Wrapping reuses `text_selection.js` (Firefox and Signal replace through Paste, a
 for the text transforms). Electron apps build their text tree only on request, so
 the app-switch trigger runs `runAppSwitch` to set `AXManualAccessibility`
 in the newly focused app. A line is the logical line in every app, Firefox
-included, so a soft-wrapped line is cut whole. Wrapping replaces
+included, so a soft-wrapped line is cut or copied whole. Wrapping replaces
 the selection as plain text, which drops formatting in rich editors. Multiple
 cursors and "select next occurrence" are not possible: macOS text controls have a
 single insertion point.
@@ -483,7 +491,7 @@ and report identities. Recreate venvs rather than moving them.
 - `install_text_editing_keys.py`: the editing keys' guarded installer, also through
   the socket CLI (see Editing keys). `text_editing_conditions.py` holds their trigger
   conditions and truth table, evaluated with NSPredicate by `text_editing_conditions.js`.
-  `text_editing_keys.js` is their runtime (wrap, line cut, app-switch preparation),
+  `text_editing_keys.js` is their runtime (wrap, line cut and copy, app-switch preparation),
   loaded after `text_selection.js`; each trigger's action reads both files.
 - `text_selection.js`: runtime Accessibility adapter, executed inside BTT via
   `runJXA`. It reads the focused control's selected text/range, checks that the
@@ -509,8 +517,8 @@ and report identities. Recreate venvs rather than moving them.
   Runtime source is loaded on each use, so subsequent source fixes do not need
   another menu installation.
 - `text_menu_paste.js`: `findEditMenuItem` locates the Cut/Copy/Paste group (the
-  editing keys press its Cut), and `focusUnchanged` is the focus check both Paste
-  and the editing keys repeat before they act.
+  editing keys press its Cut and Copy), and `focusUnchanged` is the focus check
+  both Paste and the editing keys repeat before they act.
   Signal/Firefox's replacement adapter uses the unique native Paste
   menu item (Cmd-V equivalent) through Accessibility, never simulated keypresses.
   It preserves every readable clipboard item/format, marks transformed text transient

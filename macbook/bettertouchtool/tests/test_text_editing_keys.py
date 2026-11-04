@@ -97,6 +97,16 @@ class EmittedScriptTests(unittest.TestCase):
         self.assertEqual(outcome['calls'][-1], ['callBTT', 'display_notification',
                                                 {'title': 'Wrap stopped', '': 'fixture refusal'}])
 
+    def test_the_line_keys_share_the_caret_condition_and_distinct_triggers(self):
+        cut, copy = by_note('cuts the line'), by_note('copies the line')
+        self.assertEqual((cut['BTTShortcutKeyCode'], copy['BTTShortcutKeyCode']), (7, 8))
+        for definition in (cut, copy):
+            self.assertEqual(definition['BTTShortcutModifierKeys'], triggers.COMMAND)
+            self.assertEqual(definition['BTTTriggerConditionsFormat'], conditions.CARET_CONDITION)
+            self.assertTrue(definition[triggers.PASSTHROUGH])
+        self.assertNotEqual(cut['BTTUUID'], copy['BTTUUID'])
+        self.assertEqual(copy['BTTUUID'], keys.stable_uuid('copy line'))
+
     def test_a_runtime_script_failure_is_reported_with_its_message(self):
         failure = '{"OSAScriptErrorNumberKey":-2700,"NSLocalizedDescription":"Error: SyntaxError"}'
         [outcome] = run_entries([self.entry(by_note('cuts the line'), failure)])
@@ -104,15 +114,23 @@ class EmittedScriptTests(unittest.TestCase):
         self.assertEqual(outcome['calls'][-1], ['callBTT', 'display_notification',
                                                 {'title': 'Cut line stopped', '': 'Error: SyntaxError'}])
 
-    def test_cut_runs_one_script_that_selects_the_line_itself(self):
+    def test_cut_and_copy_run_one_script_that_selects_the_line_itself(self):
         # The runtime selects the line itself through Accessibility, in the same
-        # run that presses Cut; the action sends BTT no keys first.
-        [outcome] = run_entries([self.entry(by_note('cuts the line'), '{"ok":true,"result":"cut line"}')])
-        self.assertEqual(outcome['result'], 'cut line')
-        *reads, (_, source) = outcome['calls']
-        self.assertEqual(reads, [['readFile', path] for path in keys.RUNTIME])
-        self.assertEqual(call_options(source, 'runEditingKey'),
-                         {'kind': 'cut-line', 'directory': str(keys.DIRECTORY)})
+        # run that presses Cut or Copy; the action sends BTT no keys first.
+        for note, kind, result in (('cuts the line', 'cut-line', 'cut line'),
+                                   ('copies the line', 'copy-line', 'copied line')):
+            with self.subTest(kind=kind):
+                [outcome] = run_entries([self.entry(by_note(note), '{"ok":true,"result":"%s"}' % result)])
+                self.assertEqual(outcome['result'], result)
+                *reads, (_, source) = outcome['calls']
+                self.assertEqual(reads, [['readFile', path] for path in keys.RUNTIME])
+                self.assertEqual(call_options(source, 'runEditingKey'),
+                                 {'kind': kind, 'directory': str(keys.DIRECTORY)})
+
+    def test_a_refused_copy_is_reported_as_a_notification(self):
+        [outcome] = run_entries([self.entry(by_note('copies the line'), '{"ok":false,"error":"fixture refusal"}')])
+        self.assertEqual(outcome['calls'][-1], ['callBTT', 'display_notification',
+                                                {'title': 'Copy line stopped', '': 'fixture refusal'}])
 
     def test_app_switches_prepare_text_accessibility_outside_excluded_apps(self):
         [outcome] = run_entries([self.entry(by_note('on app switch'), '{"ok":true,"result":"enabled"}')])
@@ -220,11 +238,11 @@ class SavedStateTests(unittest.TestCase):
                 self.assertIn(expected, error)
 
     def test_only_other_enabled_shortcuts_on_these_keys_in_active_presets_conflict(self):
-        for index, preset, enabled, keycode in [(90, 1, 1, 7), (91, 2, 1, 7), (92, 1, 0, 7), (93, 1, 1, 8)]:
+        for index, preset, enabled, keycode in [(90, 1, 1, 7), (91, 2, 1, 7), (92, 1, 0, 7), (93, 1, 1, 8), (94, 1, 1, 9)]:
             self.update('''INSERT INTO ZBTTBASEENTITY (Z_PK,ZUNIQUEIDENTIFIER,ZBELONGSTOPRESET2,ZGESTURETYPE,
                 ZKEYCODE,ZMODIFIERKEYS,ZISENABLED,ZENABLEDNEW) VALUES (?,?,?,0,?,?,?,?)''',
                         index, 'other-%d' % index, preset, keycode, triggers.COMMAND, enabled, enabled)
-        self.assertEqual(triggers.conflicts(self.database, self.plan), ['other-90'])
+        self.assertEqual(triggers.conflicts(self.database, self.plan), ['other-90', 'other-93'])
 
 
 if __name__ == '__main__':

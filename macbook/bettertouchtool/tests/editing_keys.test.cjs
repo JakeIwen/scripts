@@ -6,7 +6,7 @@ const vm = require('node:vm');
 
 const {firefoxEditor} = require('./firefox_editor_fixture.cjs');
 
-// Cmd-X with no selection, run through runEditingKey against a modelled
+// Cmd-X / Cmd-C with no selection, run through runEditingKey against a modelled
 // focused field, its app's Edit menu (found by the real text_menu_paste.js) and
 // the general pasteboard. Elements carry ids so they stay distinct under the
 // Firefox model's by-value equality.
@@ -28,8 +28,8 @@ function editMenu() {
 }
 
 // `field` is the focused element's model: `attribute(name)`, `set(name, value)`
-// for AX writes and `press(kind, write)` for the app's Cut. `onDelay` and
-// `beforePress` (the command's AXEnabled read) let the user act mid-run.
+// for AX writes and `press(kind, write)` for the app's Cut or Copy. `onDelay`
+// and `beforePress` (the commands' AXEnabled read) let the user act mid-run.
 function keyFixture(field, {bundle = 'com.apple.TextEdit', enabled = true, onDelay, beforePress} = {}) {
     const system = {id:'system'}, app = {id:'app'}, other = {id:'other field'}, menu = editMenu();
     const board = {changeCount:7, text:'earlier',
@@ -88,8 +88,9 @@ function keyFixture(field, {bundle = 'com.apple.TextEdit', enabled = true, onDel
 }
 
 // A Cocoa text view: AXValue holds the breaks and ranges are numeric. Options
-// model an app that ignores or alters a range write, or whose Cut misbehaves.
-function cocoaField(text, caret, {selectAs = range => range, cuts = true} = {}) {
+// model an app that ignores or alters a range write, or whose Copy/Cut misbehave.
+function cocoaField(text, caret, {selectAs = range => range, refuseCaret = false, copyAs = line => line,
+    copies = true, cuts = true} = {}) {
     const field = {element:{id:'field'}, text, selection:{location:caret, length:0}, writes:0};
     const selected = () => field.text.slice(field.selection.location, field.selection.location + field.selection.length);
     return Object.assign(field, {
@@ -98,11 +99,14 @@ function cocoaField(text, caret, {selectAs = range => range, cuts = true} = {}) 
         set(name, value) {
             assert.equal(name, 'AXSelectedTextRange');
             field.writes++;
+            if (refuseCaret && value.length === 0) return -25200;
             field.selection = {...selectAs(value)};
             return 0;
         },
         press(kind, write) {
-            if (cuts) {
+            if (kind === 'copy') {
+                if (copies) write(copyAs(selected()));
+            } else if (cuts) {
                 write(selected());
                 const {location, length} = field.selection;
                 field.text = field.text.slice(0, location) + field.text.slice(location + length);
@@ -136,28 +140,44 @@ test('Cmd-X cuts the caret’s logical line and its break, wherever the caret si
     }
 });
 
-test('an empty last line or field has nothing to cut and is left alone', () => {
-    for (const [text, caret] of [['one\n', 4], ['', 0]]) {
-        const field = cocoaField(text, caret);
+test('Cmd-C copies the caret’s line and puts the caret back where it was', () => {
+    for (const [caret, line] of [[5, 'two\n'], [13, 'three']]) {
+        const field = cocoaField(THREE, caret);
         const {run, state, board} = keyFixture(field);
-        assert.deepEqual(run('cut-line'), {ok:true, result:'nothing to cut'});
-        assert.deepEqual(state.presses, []);
-        assert.equal(field.writes, 0);
-        assert.equal(board.changeCount, 7);
+        assert.deepEqual(run('copy-line'), {ok:true, result:'copied line'});
+        assert.deepEqual(state.presses, ['copy']);
+        assert.equal(board.text, line);
+        assert.equal(field.text, THREE);
+        assert.deepEqual(field.selection, {location:caret, length:0});
+    }
+});
+
+test('an empty last line or field has nothing to cut or copy and is left alone', () => {
+    for (const [text, caret] of [['one\n', 4], ['', 0]]) {
+        for (const [kind, result] of [['cut-line', 'nothing to cut'], ['copy-line', 'nothing to copy']]) {
+            const field = cocoaField(text, caret);
+            const {run, state, board} = keyFixture(field);
+            assert.deepEqual(run(kind), {ok:true, result});
+            assert.deepEqual(state.presses, []);
+            assert.equal(field.writes, 0);
+            assert.equal(board.changeCount, 7);
+        }
     }
 });
 
 test('a line the app does not select exactly is refused before anything is pressed', () => {
     for (const selectAs of [range => ({location:range.location, length:0}),
         range => ({location:range.location, length:range.length - 1})]) {
-        const field = cocoaField(THREE, 5, {selectAs});
-        const {run, state, board} = keyFixture(field);
-        const outcome = run('cut-line');
-        assert.equal(outcome.ok, false);
-        assert.match(outcome.error, /did not select the line; nothing was cut/);
-        assert.deepEqual(state.presses, []);
-        assert.equal(field.text, THREE);
-        assert.equal(board.changeCount, 7);
+        for (const [kind, verb] of [['cut-line', 'cut'], ['copy-line', 'copied']]) {
+            const field = cocoaField(THREE, 5, {selectAs});
+            const {run, state, board} = keyFixture(field);
+            const outcome = run(kind);
+            assert.equal(outcome.ok, false);
+            assert.match(outcome.error, new RegExp('did not select the line; nothing was ' + verb));
+            assert.deepEqual(state.presses, []);
+            assert.equal(field.text, THREE);
+            assert.equal(board.changeCount, 7);
+        }
     }
 });
 
@@ -165,24 +185,73 @@ test('focus or text that changes before the press stops the command untouched', 
     const changes = [state => { state.focused = state.other; },
         (state, field) => { field.text = 'one\ntwo!\nthree'; }];
     for (const change of changes) {
-        const field = cocoaField(THREE, 5);
-        const {run, state, board} = keyFixture(field, {beforePress:state => change(state, field)});
-        const outcome = run('cut-line');
-        assert.equal(outcome.ok, false);
-        assert.match(outcome.error, /changed before Cut.*left as it is/);
-        assert.deepEqual(state.presses, []);
-        assert.equal(board.changeCount, 7);
-        // The line stays selected: once the user has moved on, nothing is written back.
-        assert.deepEqual(field.selection, {location:4, length:4});
+        for (const [kind, name] of [['cut-line', 'Cut'], ['copy-line', 'Copy']]) {
+            const field = cocoaField(THREE, 5);
+            const {run, state, board} = keyFixture(field, {beforePress:state => change(state, field)});
+            const outcome = run(kind);
+            assert.equal(outcome.ok, false);
+            assert.match(outcome.error, new RegExp('changed before ' + name + '.*left as it is'));
+            assert.deepEqual(state.presses, []);
+            assert.equal(board.changeCount, 7);
+            // The line stays selected: once the user has moved on, nothing is written back.
+            assert.deepEqual(field.selection, {location:4, length:4});
+        }
     }
 });
 
-test('an unavailable command presses nothing and puts the caret back', () => {
-    const field = cocoaField(THREE, 5);
-    const {run, state} = keyFixture(field, {enabled:false});
-    assert.deepEqual(run('cut-line'), {ok:false, error:'The app’s Cut command is unavailable; nothing was cut.'});
-    assert.deepEqual(state.presses, []);
+test('a caret the user moves while the copy lands is kept, and the interruption reported', () => {
+    const field = cocoaField(THREE, 5, {copies:false});
+    const {run, board} = keyFixture(field, {onDelay:state => {
+        field.selection = {location:1, length:0};
+        state.write('two\n');
+    }});
+    assert.deepEqual(run('copy-line'),
+        {ok:false, error:'The line was copied. The selection changed meanwhile and was left as it is.'});
+    assert.equal(board.text, 'two\n');
+    assert.deepEqual(field.selection, {location:1, length:0});
+});
+
+test('an unrelated clipboard write is not taken for the copy', () => {
+    const field = cocoaField(THREE, 5, {copies:false});
+    const {run, board} = keyFixture(field, {onDelay:state => { if (state.delays === 1) state.write('elsewhere'); }});
+    assert.deepEqual(run('copy-line'), {ok:false, error:'The clipboard changed, but not to the line.'});
+    assert.equal(board.text, 'elsewhere');
     assert.deepEqual(field.selection, {location:5, length:0});
+});
+
+test('the copy waits past an unrelated write for the line itself', () => {
+    const field = cocoaField(THREE, 5, {copies:false});
+    const {run, board} = keyFixture(field, {onDelay:state => state.write(state.delays === 1 ? 'elsewhere' : 'two\n')});
+    assert.deepEqual(run('copy-line'), {ok:true, result:'copied line'});
+    assert.equal(board.text, 'two\n');
+    assert.deepEqual(field.selection, {location:5, length:0});
+});
+
+test('a rich editor’s own trailing break or CRLF still counts as the copied line', () => {
+    for (const copyAs of [line => line.replace('\n', ''), line => line.replace('\n', '\r\n\r\n')]) {
+        const field = cocoaField(THREE, 5, {copyAs});
+        assert.deepEqual(keyFixture(field).run('copy-line'), {ok:true, result:'copied line'});
+    }
+});
+
+test('a Copy that never reaches the clipboard fails with the caret put back', () => {
+    const field = cocoaField(THREE, 5, {copies:false});
+    const {run, state, board} = keyFixture(field);
+    assert.deepEqual(run('copy-line'), {ok:false, error:'The app did not copy the line.'});
+    assert.deepEqual(state.presses, ['copy']);
+    assert.equal(board.changeCount, 7);
+    assert.deepEqual(field.selection, {location:5, length:0});
+});
+
+test('an unavailable command presses nothing and puts the caret back', () => {
+    for (const [kind, error] of [['cut-line', 'The app’s Cut command is unavailable; nothing was cut.'],
+        ['copy-line', 'The app’s Copy command is unavailable; nothing was copied.']]) {
+        const field = cocoaField(THREE, 5);
+        const {run, state} = keyFixture(field, {enabled:false});
+        assert.deepEqual(run(kind), {ok:false, error});
+        assert.deepEqual(state.presses, []);
+        assert.deepEqual(field.selection, {location:5, length:0});
+    }
 });
 
 test('a cut the app does not carry out is reported rather than claimed', () => {
@@ -190,6 +259,13 @@ test('a cut the app does not carry out is reported rather than claimed', () => {
     const {run, state} = keyFixture(field);
     assert.deepEqual(run('cut-line'), {ok:false, error:'The app did not confirm the cut; check the text.'});
     assert.deepEqual(state.presses, ['cut']);
+});
+
+test('a caret the app will not put back is reported with the copy’s result', () => {
+    const field = cocoaField(THREE, 5, {refuseCaret:true});
+    assert.deepEqual(keyFixture(field).run('copy-line'),
+        {ok:false, error:'The line was copied. The caret could not be put back: The app refused the selection.'});
+    assert.deepEqual(field.selection, {location:4, length:4});
 });
 
 test('a selection made before the script runs is not replaced', () => {
@@ -226,6 +302,15 @@ test('Firefox cuts the caret’s paragraph and its break through text markers', 
         assert.equal(board.text, line);
         assert.deepEqual(field.document.texts(), rest);
     }
+});
+
+test('Firefox copies the caret’s paragraph and restores the caret marker', () => {
+    const field = firefoxField(['first', 'mIxEd tail', 'third'], 1, 3);
+    const {run, board} = keyFixture(field, {bundle:'org.mozilla.firefox'});
+    assert.deepEqual(run('copy-line'), {ok:true, result:'copied line'});
+    assert.equal(board.text, 'mIxEd tail\n');
+    assert.deepEqual(field.document.state.selection, {start:{node:1, offset:3}, end:{node:1, offset:3}});
+    assert.deepEqual(field.document.texts(), ['first', 'mIxEd tail', 'third']);
 });
 
 test('Firefox has nothing to cut in an empty last paragraph', () => {

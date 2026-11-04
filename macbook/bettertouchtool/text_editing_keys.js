@@ -1,5 +1,6 @@
 // Runtime for the system-wide editing keys (install_text_editing_keys.py).
 // BTT's JXA engine runs it after text_selection.js, whose AX helpers it uses.
+ObjC.import('AppKit');
 
 function wrapSelection(open, directory) {
     return selectionTransforms(directory).wrap(open, selectionUI(directory));
@@ -81,7 +82,7 @@ function lineEditor(directory, key, verb) {
     if (!lines.collapsed(caret)) throw new Error('Text is selected now; nothing was ' + verb + '.');
     const range = lines.lineAt(caret, text);
     return {system, application, element, lines, text, caret, focusUnchanged: menu.focusUnchanged,
-        // Through the Edit menu: BTT swallows a Cmd-X sent from its own Cmd-X trigger.
+        // Through the Edit menu: BTT swallows a Cmd-X or Cmd-C sent from its own trigger.
         command: menu.findEditMenuItem(application, selectionAttribute, key),
         line: range && {range, text: lines.text(range, text)}};
 }
@@ -166,11 +167,47 @@ function cutSelectedLine(directory) {
     return 'cut line';
 }
 
+// Editors write a copy asynchronously, and a rich editor ends a copied block
+// with its own break (Firefox's flat text has none), so trailing breaks differ.
+function matchesCopiedLine(copied, line) {
+    const plain = text => text.replace(/\r\n?|\u2029/g, '\n').replace(/\n+$/, '');
+    return typeof copied === 'string' && copied !== '' && plain(copied) === plain(line);
+}
+
+function waitForCopiedLine(board, version, line) {
+    const copied = () => Number(board.changeCount) !== version
+        && matchesCopiedLine(ObjC.unwrap(board.stringForType($.NSPasteboardTypeString)), line);
+    if (waitFor(copied, 20)) return;
+    throw new Error(Number(board.changeCount) === version ? 'The app did not copy the line.'
+        : 'The clipboard changed, but not to the line.');
+}
+
+function copySelectedLine(directory) {
+    const editor = lineEditor(directory, 'c', 'copied');
+    if (!editor.line) return 'nothing to copy';
+    const board = $.NSPasteboard.generalPasteboard;
+    let failure = null;
+    try {
+        selectLine(editor, 'copied');
+        const version = Number(board.changeCount);
+        pressLineCommand(editor, 'Copy', 'copied');
+        waitForCopiedLine(board, version, editor.line.text);
+    } catch (error) {
+        failure = error;
+    }
+    // The caret goes back whatever happened, unless the user has moved on.
+    const note = caretRestoreNote(editor);
+    if (failure) throw new Error(failure.message + note);
+    if (note) throw new Error('The line was copied.' + note);
+    return 'copied line';
+}
+
 // var, not const: BTT's runJXA reuses its context, so this file runs again in
 // the same scope, and a repeated top-level const is a SyntaxError.
 var EDITING_KEYS = {
     'wrap': options => wrapSelection(options.open, options.directory),
-    'cut-line': options => cutSelectedLine(options.directory)
+    'cut-line': options => cutSelectedLine(options.directory),
+    'copy-line': options => copySelectedLine(options.directory)
 };
 
 function runEditingKey(options) {
