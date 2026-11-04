@@ -382,7 +382,8 @@ compare it with this checkout. Deployed files may differ from the repository.
   (not the retirement check) over `vanpi.lan` into
   `~/.local/share/codex-autocontinue/` with repo paths, keeping `.previous` for
   rollback, and checks hashes; `pi/.bashrc`'s `_codex_tui` runs it. The Mac's
-  `~/.zshrc` (in `~/config`) runs the checkout's `run` directly.
+  `_codex_tui` (private `~/config`, `mac/shell/`, loaded by `~/.zshrc`) runs
+  the checkout's `run` directly.
   `retirement-check` is the weekly Mac cron entry (`--dry-run` previews without
   mutations). `retirement_probe.py` tests installed Codex against the loopback
   Responses fixture with default retries and an isolated temporary HOME;
@@ -560,7 +561,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   host files `macbook/scripts/shell_tricks.zsh` and `pi/scripts/shell_tricks.bash`,
   and their one help doc `shared/sh/shell_tricks.md` (a `## name` section per
   tool with `Hosts:`, `Summary:`, `Usage:`; `tricks [NAME|-l]` prints it). The
-  Mac's `~/.zshrc` (tracked in the private `~/config` as `mac/zshrc`) and
+  Mac's `~/.zshrc` (tracked in the private `~/mac-config` as `zshrc`) and
   `pi/.bashrc` source the host file before any alias. The Pi runs all three flat
   from `/home/pi/scripts/`: ship them together. `shared/tests/test_shell_tricks.py`
   keeps tools and doc in step; behavior cases live in `shared/tests/shell_tricks_cases.sh`.
@@ -572,7 +573,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   go in `### NFN ### (added by nfn)` immediately above it. One single-line
   definition is replaced or moved; aliases, multiline and duplicate definitions
   require a hand edit. Placement and parsing intentionally duplicate the Mac's
-  private `~/config/mac/nfn.py` implementation.
+  private `~/mac-config/nfn.py` implementation.
   It commits the function edit to `pi/.bashrc` on GitHub master with `gh api`
   (contents-API compare-and-swap on the blob SHA), then installs it as
   `/home/pi/.bashrc`; when the live file and GitHub differ, or GitHub refuses,

@@ -16,10 +16,15 @@ const firstRequests = new Map<string, Choice>()
 /** Bounds `firstRequests`: agents started with no Agent call (workflows) never claim theirs. */
 const MAX_UNCLAIMED = 64
 
-/** Alias → the model id it last resolved to (`sonnet` → `claude-sonnet-5-5`), kept across sessions. */
-async function aliases($: EngineInterface): Promise<Record<string, string>> {
-  const stored = await $.store.get('aliases')
-  return typeof stored === 'object' && stored !== null ? (stored as Record<string, string>) : {}
+/**
+ * The model id an alias last resolved to (`sonnet` → `claude-sonnet-5-5`),
+ * kept across sessions. One store key per alias, so two agents learning
+ * theirs at once can't overwrite each other's.
+ */
+async function aliasTarget($: EngineInterface, alias: string): Promise<string | undefined> {
+  if (!isAlias(alias)) return undefined
+  const stored = await $.store.get(`alias:${alias}`)
+  return typeof stored === 'string' ? stored : undefined
 }
 
 /** The frontmatter of the agent file defining `type`, the project's before the user's; empty for built-ins. */
@@ -35,10 +40,8 @@ async function agentFile($: EngineInterface, type: string | undefined): Promise<
 
 /** Checks an agent's first request against its label: learns what an alias resolved to, and says when the label was wrong. */
 async function check($: EngineInterface, label: Labelled, observed: Choice) {
-  if (isAlias(label.asked) && sameModel(label.asked, observed.model)) {
-    const known = await aliases($)
-    if (known[label.asked] !== observed.model) await $.store.set('aliases', { ...known, [label.asked]: observed.model })
-  }
+  const learns = isAlias(label.asked) && sameModel(label.asked, observed.model)
+  if (learns && (await aliasTarget($, label.asked)) !== observed.model) await $.store.set(`alias:${label.asked}`, observed.model)
   const why = mismatch(label.shown, observed)
   if (why !== undefined) $.ui.toast(`agent-label: "${label.description}" ${why}`)
 }
@@ -68,18 +71,18 @@ export const register: Register = on => {
     const parent = latest.get(e.agentId ?? MAIN)
     if (parent === undefined) return next(e)
     const choice = resolveChoice(e, await agentFile($, e.subagent_type), parent)
-    const shown = { ...choice, model: (await aliases($))[choice.model] ?? choice.model }
-    const ran = await next({ ...e, description: withLabel(e.description, labelFor(shown, {})) })
+    const shown = { ...choice, model: (await aliasTarget($, choice.model)) ?? choice.model }
+    const ran = await next({ ...e, description: withLabel(e.description, labelFor(shown)) })
 
     const result = ran.result as { agentId?: unknown } | undefined
     if (typeof result?.agentId !== 'string') return ran
     const label = { description: e.description, asked: choice.model, shown }
     const seen = firstRequests.get(result.agentId)
-    if (seen === undefined) labelled.set(result.agentId, label)
-    else {
+    if (seen !== undefined) {
       firstRequests.delete(result.agentId)
       await check($, label, seen)
-    }
+    } else if (!latest.has(result.agentId)) labelled.set(result.agentId, label)
+    // else an agent already running (respawned under its name): its first request is long past
     return ran
   }).catch(($, e, next) => next(e)) // a failed label leaves the call as written
 }

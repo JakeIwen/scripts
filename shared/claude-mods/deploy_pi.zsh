@@ -21,4 +21,6 @@ pi=vanpi.lan
 git -C "$here" ls-files -z -- . ':!codex' | COPYFILE_DISABLE=1 tar -C "$here" --null -T - -cf - | tar -C "$stage" -xf -
 ssh $pi "mkdir -p $dest"
 command rsync -a --delete "$stage/" "$pi:$dest/"
-ssh $pi "cd $dest && claude plugin test . 2>&1 | tail -3"
+# pipefail on the Pi's side too: without it the remote exit is tail's, so a
+# failing test run still read as a successful deploy.
+ssh $pi "set -o pipefail; cd $dest && claude plugin test . 2>&1 | tail -3"

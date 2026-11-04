@@ -28,13 +28,19 @@ export function sameModel(expected: string, observed: string): boolean {
   return bare(expected) === bare(observed) || (isAlias(expected) && bare(observed).startsWith(`claude-${expected}-`))
 }
 
-/** The `key: value` lines of an agent file's YAML frontmatter, quotes stripped. */
+/** A YAML scalar: a quoted one loses its quotes, a plain one its trailing ` # comment`. */
+function scalar(raw: string): string {
+  const quoted = /^(['"])(.*?)\1(?:\s+#.*)?$/.exec(raw)
+  return quoted?.[2] ?? raw.replace(/\s+#.*$/, '')
+}
+
+/** The `key: value` lines of an agent file's YAML frontmatter, as plain strings. */
 export function frontmatter(text: string): Record<string, string> {
   const block = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1] ?? ''
   const fields: Record<string, string> = {}
   for (const line of block.split(/\r?\n/)) {
     const m = /^([A-Za-z][\w-]*):\s*(.*?)\s*$/.exec(line)
-    if (m?.[1] !== undefined && m[2] !== undefined) fields[m[1]] = m[2].replace(/^(['"])(.*)\1$/, '$2')
+    if (m?.[1] !== undefined && m[2] !== undefined) fields[m[1]] = scalar(m[2])
   }
   return fields
 }
@@ -52,9 +58,9 @@ export function resolveChoice(call: AgentCall, file: Record<string, string>, par
   return { model: call.model ?? fileModel ?? parent.model, effort: call.effort ?? file.effort ?? parent.effort }
 }
 
-/** `[sonnet 5.5 · high]`, naming an alias by the id it last resolved to when known. */
-export function labelFor(choice: Choice, aliases: Record<string, string>): string {
-  const model = shortModel(aliases[choice.model] ?? choice.model)
+/** `[sonnet 5.5 · high]`. */
+export function labelFor(choice: Choice): string {
+  const model = shortModel(choice.model)
   return choice.effort === undefined ? `[${model}]` : `[${model} · ${choice.effort}]`
 }
 
@@ -67,5 +73,5 @@ export function withLabel(description: string, label: string): string {
 export function mismatch(expected: Choice, observed: Choice): string | undefined {
   const sameEffort = String(expected.effort) === String(observed.effort)
   if (sameModel(expected.model, observed.model) && sameEffort) return undefined
-  return `runs on ${labelFor(observed, {})}, not ${labelFor(expected, {})}`
+  return `runs on ${labelFor(observed)}, not ${labelFor(expected)}`
 }

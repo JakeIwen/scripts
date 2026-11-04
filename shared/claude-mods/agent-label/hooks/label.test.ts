@@ -29,10 +29,15 @@ test('frontmatter fields are read with quotes stripped, the body ignored', () =>
   expect(frontmatter('no frontmatter')).toEqual({})
 })
 
-test('the label names an alias by the id it last resolved to, and replaces an old tag', () => {
-  const label = labelFor({ model: 'sonnet', effort: 'high' }, { sonnet: 'claude-sonnet-5-5' })
+test('a trailing YAML comment is not part of the value, but a # inside one is', () => {
+  const text = '---\nmodel: sonnet # preferred\neffort: "high" # for reviews\nname: a#b\n---\n'
+  expect(frontmatter(text)).toEqual({ model: 'sonnet', effort: 'high', name: 'a#b' })
+})
+
+test('the label shortens the model and replaces an old tag', () => {
+  const label = labelFor({ model: 'claude-sonnet-5-5', effort: 'high' })
   expect(label).toBe('[sonnet 5.5 · high]')
-  expect(labelFor({ model: 'claude-gpt-6-luna[1m]' }, {})).toBe('[gpt-6-luna]')
+  expect(labelFor({ model: 'claude-gpt-6-luna[1m]' })).toBe('[gpt-6-luna]')
   expect(withLabel('[opus 5.5 · xhigh] Read the logs', label)).toBe('[sonnet 5.5 · high] Read the logs')
 })
 
