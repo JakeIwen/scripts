@@ -35,6 +35,14 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     return () => observer.disconnect();
   }, []);
 
+  // A dismissal left pending past unmount would update an unmounted provider.
+  useEffect(
+    () => () => {
+      if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
+    },
+    [],
+  );
+
   const showToast = useCallback((message: string, tone: 'normal' | 'error' = 'normal') => {
     if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
     setToast({ message, tone });
