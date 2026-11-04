@@ -30,11 +30,12 @@ function editMenu() {
 // `state.other` (all of its text selected), can take focus; the Edit menu acts
 // on whichever field is focused when it is pressed. `onAttribute` (every AX
 // read) and `beforePress` (Cut's AXEnabled read) let the user act mid-run.
-function keyFixture(field, {bundle = 'com.apple.TextEdit', enabled = true, onAttribute, beforePress} = {}) {
+function keyFixture(field, {bundle = 'com.apple.TextEdit', enabled = true, clipboard:items = [{[PLAIN_TEXT]:'earlier'}],
+    onAttribute, beforePress} = {}) {
     const system = {id:'system'}, app = {id:'app'}, menu = editMenu();
     const other = cocoaField('IMPORTANT', 0, {id:'other field'});
     other.selection = {location:0, length:other.text.length};
-    const {board, native:clipboard, contents} = pasteboardFake({items:[{[PLAIN_TEXT]:'earlier'}], changeCount:7});
+    const {board, native:clipboard, contents} = pasteboardFake({items, changeCount:7});
     // An app's own Cut.
     const write = text => { board.clearContents; board.writeObjects([new Item({[PLAIN_TEXT]:text})]); };
     const state = {focused:field.element, other, presses:[], board};
@@ -171,16 +172,59 @@ test('a key typed between the copy’s reads is caught and nothing is copied', (
     const {run, board, contents} = keyFixture(field, {onAttribute:(state, element, name) => {
         if (typing && element === field.element && name === 'AXValue') { typing = false; typed(field); }
     }});
-    assert.deepEqual(run('copy-line'), {ok:false, error:'The caret moved while the line was read; nothing was copied.'});
+    assert.deepEqual(run('copy-line'), {ok:false, error:'The caret or focus moved while the line was read; nothing was copied.'});
     assert.deepEqual(contents(), [{[PLAIN_TEXT]:'earlier'}]);
     assert.equal(board.changeCount, 7);
 });
 
-test('a clipboard that does not read back the line is reported', () => {
+// A failed write has already cleared the clipboard: what was there goes back.
+test('a clipboard write that fails puts the previous clipboard back, every item and type', () => {
+    const previous = [{[PLAIN_TEXT]:'previous text', 'public.rtf':'previous rich text'}, {'custom/type':'second item'}];
+    for (const [fail, error] of [
+        [function () { return false; }, 'Could not write the clipboard. Nothing was copied.'],
+        [function () { return true; }, 'The clipboard text did not read back. Nothing was copied.']
+    ]) {
+        const field = cocoaField(THREE, 5);
+        const {run, board, contents} = keyFixture(field, {clipboard:previous});
+        const write = board.writeObjects;
+        let first = true;
+        board.writeObjects = function (items) {
+            if (first) { first = false; return fail.call(this, items); }
+            return write.call(this, items);
+        };
+        assert.deepEqual(run('copy-line'), {ok:false, error});
+        assert.deepEqual(contents(), previous);
+    }
+});
+
+// Copies made while the line is read, here or in another app, are newer than
+// the line and are kept.
+test('a copy made while the line is read is kept, with or without a focus change', () => {
+    for (const [moveFocus, error] of [
+        [true, 'The caret or focus moved while the line was read; nothing was copied.'],
+        [false, 'The clipboard changed while the line was read. Nothing was copied.']
+    ]) {
+        const field = cocoaField(THREE, 5);
+        let reads = 0;
+        const {run, contents} = keyFixture(field, {onAttribute:(state, element, name) => {
+            if (element === field.element && name === 'AXSelectedTextRange' && ++reads === 2) {
+                if (moveFocus) state.focused = state.other.element;
+                state.board.clearContents;
+                state.board.writeObjects([new Item({[PLAIN_TEXT]:'newer copy'})]);
+            }
+        }});
+        assert.deepEqual(run('copy-line'), {ok:false, error});
+        assert.deepEqual(contents(), [{[PLAIN_TEXT]:'newer copy'}]);
+    }
+});
+
+test('focus that moves while the line is read stops the copy', () => {
     const field = cocoaField(THREE, 5);
-    const {run, board} = keyFixture(field);
-    board.writeObjects = () => true;
-    assert.deepEqual(run('copy-line'), {ok:false, error:'The clipboard text did not read back.'});
+    const {run, contents} = keyFixture(field, {onAttribute:(state, element, name) => {
+        if (element === field.element && name === 'AXValue') state.focused = state.other.element;
+    }});
+    assert.deepEqual(run('copy-line'), {ok:false, error:'The caret or focus moved while the line was read; nothing was copied.'});
+    assert.deepEqual(contents(), [{[PLAIN_TEXT]:'earlier'}]);
 });
 
 test('an empty last line or field has nothing to cut or copy and is left alone', () => {
@@ -318,7 +362,7 @@ test('a Firefox caret that moves while the paragraph is read copies nothing', ()
             field.document.state.selection = {start:{node:1, offset:4}, end:{node:1, offset:4}};
         }
     }});
-    assert.deepEqual(run('copy-line'), {ok:false, error:'The caret moved while the line was read; nothing was copied.'});
+    assert.deepEqual(run('copy-line'), {ok:false, error:'The caret or focus moved while the line was read; nothing was copied.'});
     assert.equal(board.changeCount, 7);
 });
 

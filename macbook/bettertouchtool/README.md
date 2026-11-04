@@ -323,9 +323,11 @@ this restore covers sequences lost before a checkpoint held them.
   Firefox, the paragraph's text plus `\n` when another paragraph follows). The
   runtime writes it to the clipboard itself, as plain text, so the field is never
   selected or changed and the caret stays put; rich formatting is not copied. It
-  reads the caret again after the text and copies nothing if a key moved it in
-  between. With a selection, or where the condition does not match, Cmd-C is the
-  app's normal copy.
+  notes the clipboard's version before reading the field and reads the caret and
+  focus again after the text, and copies nothing if a key, a focus change or
+  another copy came in between. If the write itself fails, the previous clipboard
+  (every item and type) is put back. With a selection, or where the condition does
+  not match, Cmd-C is the app's normal copy.
 
 Each keyboard trigger has an advanced condition and BTT's "If advanced conditions
 fail, let the shortcut pass through" option: the key behaves normally unless
@@ -522,7 +524,10 @@ and report identities. Recreate venvs rather than moving them.
 - `text_menu_paste.js`: `findEditMenuItem` locates the Cut/Copy/Paste group (the
   editing keys press its Cut), `focusUnchanged` is the focus check both Paste and
   the line cut repeat before they act, and `writeClipboardText` is the one plain
-  clipboard write, used by Paste's temporary clipboard and the editing keys' Cmd-C.
+  clipboard write, used by Paste's temporary clipboard and the editing keys' Cmd-C:
+  it refuses if the clipboard moved since `copyPasteboard` saved it, and on a
+  failed write `restorePasteboard` puts the saved clipboard back while the failed
+  write is still the newest.
   Signal/Firefox's replacement adapter uses the unique native Paste
   menu item (Cmd-V equivalent) through Accessibility, never simulated keypresses.
   It preserves every readable clipboard item/format, marks transformed text transient

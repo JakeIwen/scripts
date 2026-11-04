@@ -270,8 +270,9 @@ compare it with this checkout. Deployed files may differ from the repository.
   Edit > Cut through Accessibility, since BTT swallows a Cmd-X sent from its own
   trigger; Firefox blank lines are not cut. Cmd-C never touches the field: it
   writes the line (break as `\n`) to the clipboard with `text_menu_paste.js`'s
-  `writeClipboardText`, refusing if the caret moved while it read. Never select
-  by posting keys: neither BTT's key actions nor `CGEventPost` confirm delivery.
+  `writeClipboardText`, refusing if the caret, focus or clipboard changed while it
+  read, and a failed write puts the previous clipboard back. Never select by
+  posting keys: neither BTT's key actions nor `CGEventPost` confirm delivery.
   Their tests reuse `tests/firefox_editor_fixture.cjs`, the Firefox marker model
   shared with `text_markers.test.cjs`, and `tests/pasteboard_fixture.cjs`, the
   in-memory pasteboard shared with `menu_paste.test.cjs`.

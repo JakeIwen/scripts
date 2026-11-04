@@ -76,12 +76,13 @@ function markerLines(markers) {
 
 function editMenuHelpers(directory) {
     return new Function(selectionReadSource(directory + '/text_menu_paste.js')
-        + '\nreturn {findEditMenuItem, focusUnchanged, writeClipboardText};')();
+        + '\nreturn {findEditMenuItem, focusUnchanged, copyPasteboard, writeClipboardText};')();
 }
 
 // The focused field, its text, caret and the caret's line, read once: every
 // later step checks the field against this record before it acts. The caret
-// is read again after the text and line, so a key typed in between is caught.
+// and focus are read again after the text and line, so a key typed or a focus
+// change in between is caught.
 function caretLine(directory, verb) {
     if (!$.AXIsProcessTrusted()) throw new Error('BetterTouchTool needs Accessibility access.');
     const system = $.AXUIElementCreateSystemWide();
@@ -95,7 +96,8 @@ function caretLine(directory, verb) {
     const text = ObjC.unwrap(selectionAttribute(element, 'AXValue'));
     if (typeof text !== 'string') throw new Error('The focused field does not expose its text; nothing was ' + verb + '.');
     const line = lines.lineAt(caret, text);
-    if (!lines.same(lines.read(), caret)) throw new Error('The caret moved while the line was read; nothing was ' + verb + '.');
+    if (!lines.same(lines.read(), caret) || !helpers.focusUnchanged(system, application, element, selectionAttribute))
+        throw new Error('The caret or focus moved while the line was read; nothing was ' + verb + '.');
     return {system, application, element, lines, text, caret, line, helpers};
 }
 
@@ -191,12 +193,21 @@ function cutSelectedLine(directory) {
 }
 
 // Cmd-C writes the line to the clipboard itself, as plain text: the field is
-// never selected, pressed or changed, so nothing needs putting back.
+// never selected, pressed or changed, so nothing needs putting back. The
+// clipboard's version is read before the field, so a copy made anywhere while
+// the line is read is kept; a failed write puts the previous clipboard back.
 function copyCaretLine(directory) {
+    const board = $.NSPasteboard.generalPasteboard;
+    const version = Number(board.changeCount);
     const field = caretLine(directory, 'copied');
     if (!field.line || !field.line.copy) return 'nothing to copy';
-    const board = $.NSPasteboard.generalPasteboard;
-    field.helpers.writeClipboardText(board, field.line.copy, Number(board.changeCount));
+    try {
+        const saved = field.helpers.copyPasteboard(board);
+        if (saved.version !== version) throw new Error('The clipboard changed while the line was read.');
+        field.helpers.writeClipboardText(board, field.line.copy, saved);
+    } catch (error) {
+        throw new Error(error.message + ' Nothing was copied.');
+    }
     return 'copied line';
 }
 

@@ -2,6 +2,8 @@
 // No Copy shortcut, submit, or navigation action is used.
 ObjC.import('AppKit');
 
+// A snapshot of every readable clipboard item and type, with the changeCount
+// it was taken at.
 function copyPasteboard(board) {
     const version = Number(board.changeCount), copies = $.NSMutableArray.array, items = board.pasteboardItems;
     for (let i = 0; items && i < Number(items.count); i++) {
@@ -9,56 +11,67 @@ function copyPasteboard(board) {
         for (let j = 0; j < Number(item.types.count); j++) {
             const type = item.types.objectAtIndex(j), data = item.dataForType(type);
             if (!data || data.length === undefined || !copy.setDataForType(data.copy, type))
-                throw new Error('Could not preserve the current clipboard; nothing pasted.');
+                throw new Error('Could not preserve the current clipboard.');
         }
         copies.addObject(copy);
     }
-    if (Number(board.changeCount) !== version) throw new Error('Clipboard changed; nothing pasted.');
+    if (Number(board.changeCount) !== version) throw new Error('The clipboard changed.');
     return {version, copies};
+}
+
+// Puts `saved` back, but only while the clipboard still holds the write that
+// produced `owned`: a newer copy made since then is kept.
+function restorePasteboard(board, saved, owned) {
+    if (Number(board.changeCount) !== owned) return;
+    board.clearContents;
+    if (Number(saved.copies.count) && !board.writeObjects(saved.copies))
+        throw new Error('The previous clipboard could not be restored.');
 }
 
 // Replaces the clipboard with plain `text`, plus '1' under each of `flags`
 // (nspasteboard.org markers), and returns the changeCount it then owns. It
-// refuses unless the clipboard is still at `expected` just before it clears it,
-// so a copy made meanwhile (even while the item was built) is kept. `claim`
-// hears each owned count as soon as the clipboard is cleared, so a caller can
-// still restore what it saved when a later step fails.
-function writeClipboardText(board, text, expected, {flags = [], options = 0, claim = () => {}} = {}) {
+// refuses unless the clipboard is still at `saved.version` just before it
+// clears it, so a copy made meanwhile (even while the item was built) is
+// kept, and if the write then fails it puts `saved` back.
+function writeClipboardText(board, text, saved, {flags = [], options = 0} = {}) {
     const item = $.NSPasteboardItem.alloc.init;
     if (!item.setStringForType(text, $.NSPasteboardTypeString)) throw new Error('Could not prepare the clipboard text.');
     for (const type of flags) {
         if (!item.setStringForType('1', type)) throw new Error('Could not mark the clipboard data.');
     }
-    if (Number(board.changeCount) !== expected) throw new Error('The clipboard changed.');
+    if (Number(board.changeCount) !== saved.version) throw new Error('The clipboard changed.');
     let owned = Number(board.prepareForNewContentsWithOptions(options));
-    claim(owned);
-    if (Number(board.changeCount) !== owned) throw new Error('The clipboard changed during the write.');
-    if (!board.writeObjects($.NSArray.arrayWithObject(item))) throw new Error('Could not write the clipboard.');
-    owned = Number(board.changeCount);
-    claim(owned);
-    if (ObjC.unwrap(board.stringForType($.NSPasteboardTypeString)) !== text)
-        throw new Error('The clipboard text did not read back.');
-    return owned;
+    try {
+        if (Number(board.changeCount) !== owned) throw new Error('The clipboard changed during the write.');
+        if (!board.writeObjects($.NSArray.arrayWithObject(item))) throw new Error('Could not write the clipboard.');
+        owned = Number(board.changeCount);
+        if (ObjC.unwrap(board.stringForType($.NSPasteboardTypeString)) !== text)
+            throw new Error('The clipboard text did not read back.');
+        return owned;
+    } catch (error) {
+        try {
+            restorePasteboard(board, saved, owned);
+        } catch (restore) {
+            throw new Error(error.message + ' ' + restore.message);
+        }
+        throw error;
+    }
 }
 
 function withTemporaryClipboard(board, text, action) {
-    const saved = copyPasteboard(board);
-    let owned = null;
+    let saved, owned;
     try {
-        try {
-            writeClipboardText(board, text, saved.version, {flags: ['org.nspasteboard.TransientType', 'org.nspasteboard.ConcealedType'],
-                options: $.NSPasteboardContentsCurrentHostOnly, claim: count => { owned = count; }});
-        } catch (error) {
-            throw new Error(error.message + ' Nothing was pasted.');
-        }
+        saved = copyPasteboard(board);
+        owned = writeClipboardText(board, text, saved, {options: $.NSPasteboardContentsCurrentHostOnly,
+            flags: ['org.nspasteboard.TransientType', 'org.nspasteboard.ConcealedType']});
+    } catch (error) {
+        throw new Error(error.message + ' Nothing was pasted.');
+    }
+    try {
         action(() => Number(board.changeCount) === owned);
     } finally {
         // Preserve a newer user copy instead of restoring our older snapshot over it.
-        if (owned !== null && Number(board.changeCount) === owned) {
-            board.clearContents;
-            if (Number(saved.copies.count) && !board.writeObjects(saved.copies))
-                throw new Error('Clipboard restoration failed after the paste attempt.');
-        }
+        restorePasteboard(board, saved, owned);
     }
 }
 
