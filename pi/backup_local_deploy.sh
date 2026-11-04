@@ -83,7 +83,7 @@ local_backup_exit() { # EXIT trap: rollback and timer restoration run with fd 9 
   # A repeated stop or terminal disconnect must not interrupt restoration and
   # release the fence with a mixed cohort. Keep cleanup non-reentrant to exit.
   trap '' INT TERM HUP
-  local status=$1 timer cleanup_failed=0
+  local status=$1 cleanup_failed=0
   trap - EXIT
   if [[ "$LOCAL_BACKUP_STATE" != committed ]]; then
     (( status != 0 )) || status=1
@@ -100,9 +100,7 @@ local_backup_exit() { # EXIT trap: rollback and timer restoration run with fd 9 
   fi
   local_backup_cleanup_temporaries || cleanup_failed=1
   if [[ "$LOCAL_BACKUP_STATE" == committed || "$LOCAL_BACKUP_STATE" == restored ]]; then
-    for timer in "${LOCAL_BACKUP_ACTIVE_TIMERS[@]}"; do
-      $LOCAL_BACKUP_SUDO "$LOCAL_BACKUP_SYSTEMCTL" start "$timer" || cleanup_failed=1
-    done
+    local_backup_restart_timers || cleanup_failed=1
   fi
   (( cleanup_failed == 0 )) || { echo 'Deployment cleanup or timer restoration failed.' >&2; (( status != 0 )) || status=1; }
   exec 9<&-

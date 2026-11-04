@@ -272,3 +272,11 @@ local_backup_cleanup_temporaries() {
   done
   (( failed == 0 ))
 }
+
+local_backup_restart_timers() { # every timer active before the fence; tries them all
+  local timer failed=0
+  for timer in "${LOCAL_BACKUP_ACTIVE_TIMERS[@]}"; do
+    $LOCAL_BACKUP_SUDO "$LOCAL_BACKUP_SYSTEMCTL" start "$timer" || failed=1
+  done
+  (( failed == 0 ))
+}
