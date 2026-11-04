@@ -1120,14 +1120,50 @@ rather than skip without it.
 Run `.local/test-venv/bin/python run_tests.py` from the repository root before committing or reporting
 completion. It discovers tracked and unignored new tests, excludes deleted files,
 and runs isolated Python unittest modules per file, Node tests, shell tests,
-Claude mod tests and the dashboard's Vitest suite. It stops at the first failed command and exits nonzero; omitted
-remaining suites are not a pass. Missing interpreters/dependencies are errors.
+Claude mod tests and the dashboard's Vitest suite. Missing interpreters/dependencies
+are errors; executable availability is checked before suite commands start.
 Tests needing specific OS features or hardware must state their skip reason.
 Set `BTT_LIVE_TESTS=1` to also enable BTT's opt-in native bridge tests.
 Use an interpreter with Flask and Werkzeug installed (this checkout has an isolated
 `.local/test-venv/bin/python`) and install the dashboard's npm dependencies first.
 `run_tests.py` owns the standalone-script import roots in `PYTHON_IMPORT_ROOTS`;
 extend that registry instead of adding per-test `sys.path` patches.
+
+- Parallel: commands run `-j N` at a time (default CPU count; `-j 1` is
+  one-at-a-time), slowest first by the durations earlier runs recorded;
+  commands never timed start first. Tests must therefore not share fixed
+  temp paths, ports or global files. Each command's output is captured and
+  shown together with `PASS <name> (<secs>s)` or `FAIL <name> (exit N)`.
+- Fail fast: after the first observed failure no new command starts; running
+  ones finish (their teardown matters), all failures print, and the final
+  `FAILED:` line says how many commands were not run (exit 1). Not-run
+  commands are not a pass. A command over 900 s fails and its process group
+  is killed; `--timeout SECONDS` overrides that deadline. Ctrl-C/SIGTERM
+  kills active groups, releases the lock and exits 130/143. Test commands don't
+  inherit the lock, so a process a test leaks can't block later runs.
+- Pass cache: the checkout-specific sha256 covers fresh bytes and file
+  metadata for tracked/unignored inputs (never trusting Git's stat cache),
+  symlink targets, submodule contents, `.local/test-venv`, the active venv,
+  and `node_modules` beside package manifests. Vite's temporary configs and
+  Vitest's result cache are excluded as generated output. It also covers
+  the interpreter/platform, resolved tool binaries, `PATH`, `PYTHONPATH`,
+  `BTT_LIVE_TESTS`, and the resolved van-compute checkout's HEAD and bytes
+  (including untracked files). `.claude/worktrees/` belongs to other runners
+  and is excluded from both discovery and fingerprints.
+  A pass within 6 hours prints `PASS: all N suite commands completed
+  (cached: ...)` and exits 0; `--force` reruns and revokes the earlier pass
+  before starting. Live BTT tests (`BTT_LIVE_TESTS=1`) always run. Use
+  `--force` after changes to other external services or undeclared inputs.
+  A pass is recorded only when inputs are unchanged after the run; unreadable
+  inputs disable caching rather than silently disappearing from its key.
+- Coalescing: runs take an exclusive lock before fingerprinting and discovery,
+  so a second session waits ("Waiting for another run_tests.py run...") and
+  then usually hits the cache for the same checkout and inputs. Runners from
+  before this change don't take the lock.
+- State lives in `<git common dir>/run_tests/` (`timings.json`,
+  `passes.json`, `lock`): untracked and shared by all worktrees. Corrupt
+  JSON is discarded; writes replace files atomically. The runner's CLI
+  regression tests are `tests/test_run_tests.py`.
 
 ## Deployment commits
 
