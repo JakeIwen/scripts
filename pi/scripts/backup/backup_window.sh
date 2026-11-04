@@ -6,6 +6,13 @@ set -u
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 force_args=()
 
+# Root cron runs this hourly, so recovery of an interrupted backup deployment
+# goes here, ahead of the window check: the mixed cohort is restored within
+# the hour and before the jobs below start. While it stays recorded every job
+# refuses on its own (backup_conf.sh), so a failure ends this run too.
+. "$script_dir/backup_deploy_trigger.sh" || exit 1
+backup_deploy_recover_pending || exit $?
+
 case "$#" in
   0) ;;
   1)

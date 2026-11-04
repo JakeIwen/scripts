@@ -90,7 +90,7 @@ still independently asserts its job hold before planning or deleting objects.
 | Offsite prepare-disk | `offsite_backup.sh prepare-disk` | exclusive, whole command | `offsite`, exclusive without a PID record (via `acquire_job_lock`) | all (implied) | all (implied) | no |
 | Restore | `restore_from_borg.sh` | exclusive | `offsite`, exclusive without a PID record | all (implied) | all (implied) | no |
 | Hotspare init | `new_hotspare.sh` | exclusive | `offsite`, exclusive without a PID record | all (implied) | all (implied) | no |
-| Deployment fence | both targeted cloud installers | exclusive, non-blocking | none, never `offsite` | all but a running offsite run's | all but a running offsite run's | all but a running offsite run's |
+| Deployment fence and its recovery | both targeted cloud installers; a transaction's journaled recoverer | exclusive, non-blocking, PID recorded | none, never `offsite` | all but a running offsite run's | all but a running offsite run's | all but a running offsite run's |
 | SMART watch | `smart_watch.sh` | none | none | each mounted HDD for one `smartctl` read; busy means skip | none | no |
 
 ## Conflict matrix
@@ -176,7 +176,9 @@ iCloud upload runs during offsite work.
   last descriptor on that open file.
 - Deployment fences take the legacy lock exclusively and non-blocking, so they
   wait for every migrated job and refuse while restore, hotspare
-  initialization or `prepare-disk` runs. An offsite run holds the legacy lock
+  initialization or `prepare-disk` runs. Like other exclusive holders they
+  write their PID into it, so a drain TERMs an installer into its rollback
+  (see "Interrupted deployments" below). An offsite run holds the legacy lock
   only while it copies its code snapshot (seconds), so the fence fails fast
   only in that window and otherwise publishes while the run continues on its
   frozen copy.
@@ -185,6 +187,62 @@ iCloud upload runs during offsite work.
   registry, since drain, stop and status code find holders only through it.
   Holders are read from `/proc/locks` by inode, never probed: even a momentary
   exclusive probe would fail a starting job's non-blocking shared disk hold.
+
+## Interrupted deployments
+
+The targeted installers publish the cohort one file at a time. A SIGKILL (the
+emergency drain's, after its grace) skips their EXIT-trap rollback and could
+leave old and new files mixed, so every transaction is journaled durably:
+
+- **Journal.** `/var/lib/vanpi-backup-deploy/` (root, on the root filesystem;
+  `/tmp`, where stages live, is emptied at boot) holds one root-only
+  directory per transaction: `previous/manifest` and `previous/tree/` (the
+  saved originals), `active-timers`, and `recovery/`, a copy of
+  `backup_deploy_recovery.sh` with every library it sources. Beside them,
+  `pending` names the open transaction. It is written with fsync and an
+  atomic rename before the first live change (`phase=preparing`, before any
+  timer stops), switched to `phase=publishing` only once the whole manifest
+  and tree are durable, and removed on commit or after a verified restore.
+  Temporaries carry the installer's PID, so recovery finds even ones a killed
+  run never recorded. The newest five transactions are kept for manual
+  rollback.
+- **Jobs refuse.** While `pending` exists (or the state cannot be inspected),
+  `validate_job_lock_file` refuses, which every job admission uses:
+  `acquire_backup_job` (Borg, EXFAT, both cloud workers, clones),
+  `acquire_job_lock` (restore, hotspare init, `prepare-disk`) and the offsite
+  launcher. Python workers cannot start without their shell admission. The
+  fence and the disk lifecycle (`abort_backup.sh`, `hold_backup_disks_exclusive`)
+  never consult it, so a drain or unmount never waits on a transaction.
+- **Recovery.** The hourly root cron `backup_window.sh --scheduled` (ahead of
+  its window check) and each installer (before it takes its own fence) run
+  `backup_deploy_recover_pending`. After checking ownership it runs the
+  recorded transaction's own journaled recoverer as root, so the code reading
+  a journal is the code that wrote it, whatever mix the live tree holds. The
+  recoverer takes the legacy lock exclusively without waiting (busy: retry
+  next hour), writes its PID, removes leftover temporaries, restores every
+  manifest record with the same content, owner and mode checks as
+  `local_backup_rollback` (a file still at its original is left alone), reloads
+  systemd, restarts exactly the recorded timers and clears the marker. Each
+  step is idempotent, so a drain may TERM or KILL it. A recovery that cannot
+  finish (a live file edited since, matching neither version) keeps the marker,
+  leaves timers stopped, sends one `NTFY_WARNING_URL` warning a day, and the
+  next installer refuses to publish over it.
+- **Emergency path.** Unchanged in time: `abort_backup.sh --emergency` TERMs
+  the installer through the legacy lock's PID record, waits its 8-second
+  grace for the in-process rollback, then KILLs every holder of the lock
+  file and moves on to the disks. Whatever the rollback did not finish is
+  recovered later, before any job runs, never in the drain.
+- **First deployment.** The installer runs its own staged helper while job
+  admission and the trigger run the live cohort, so the first deployment of
+  this mechanism publishes `backup_deploy_state.sh`, `backup_deploy_trigger.sh`
+  and `backup_window.sh` first: killed after those three, the hourly trigger
+  is live (the guard follows with `backup_conf.sh`). Killed earlier, the old
+  cohort runs beside one or two inert new modules, with timers stopped as
+  before this change, until the next installer run recovers it. A publisher without a
+  journal (an older installer or the broad sync) leaves no marker, so jobs
+  run as before; it is also unprotected. Never deploy a revision older than
+  the journal while a transaction is recorded: it would publish over it, and
+  the newer recoverer would then refuse the unrecognized live files.
 
 ## Offsite code snapshot and its limits
 

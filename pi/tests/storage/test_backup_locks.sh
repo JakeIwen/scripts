@@ -29,6 +29,7 @@ cleanup() {
 trap cleanup EXIT
 
 export VANPI_BACKUP_LOCK_DIR="$test_root/registry"
+export VANPI_BACKUP_DEPLOY_STATE_DIR="$test_root/deploy-state"
 export VANPI_BACKUP_JOB_LOCK="$test_root/legacy.lock"
 export VANPI_BACKUP_JOB_LOCK_OWNER=$(/usr/bin/id -un)
 export VANPI_BACKUP_JOB_LOCK_GROUP=$(/usr/bin/id -gn)

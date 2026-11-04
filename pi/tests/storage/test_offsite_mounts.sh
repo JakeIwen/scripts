@@ -35,8 +35,8 @@ trap cleanup EXIT
 
 tree="$test_root/scripts"
 mkdir -p "$tree/backup"
-for name in offsite_mounts.sh backup_conf.sh backup_locks.sh backup_lock_io.sh backup_lock_registry.sh \
-    backup_locks.py backup_admission.py; do
+for name in offsite_mounts.sh backup_conf.sh backup_deploy_state.sh backup_locks.sh backup_lock_io.sh \
+    backup_lock_registry.sh backup_locks.py backup_admission.py; do
   cp "$repo_root/pi/scripts/backup/$name" "$tree/backup/$name"
 done
 : > "$tree/backup/backup_settings_control.py"
@@ -66,6 +66,7 @@ STUB
 
 export REAL_MOUNT_DISKS="$repo_root/pi/scripts/mount_disks.sh" TEST_EVENTS="$test_root/events"
 export VANPI_BACKUP_LOCK_DIR="$test_root/registry" VANPI_BACKUP_JOB_LOCK="$test_root/legacy.lock"
+export VANPI_BACKUP_DEPLOY_STATE_DIR="$test_root/deploy-state"
 export VANPI_BACKUP_JOB_LOCK_OWNER=$(/usr/bin/id -un) VANPI_BACKUP_JOB_LOCK_GROUP=$(/usr/bin/id -gn)
 export VANPI_BACKUP_JOB_LOCK_MODE=660 VANPI_BACKUP_LOCK_DIR_MODE=770
 export OFFSITE_IGNITION_FLAG="$test_root/ignition"

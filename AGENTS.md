@@ -781,7 +781,17 @@ compare it with this checkout. Deployed files may differ from the repository.
   ownership, mode and first-install plan; `backup_deploy_transaction.sh` stages
   the full cohort and private previous tree before publishing, then restores and
   verifies attempted replacements under the fence on failure. Incomplete
-  restoration or unit reload leaves timers stopped. `VANPI_BACKUP_PREVIOUS_REVISION` names
+  restoration or unit reload leaves timers stopped. The transaction is journaled
+  in `/var/lib/vanpi-backup-deploy/` (`/tmp` is emptied at boot):
+  `backup_deploy_state.sh` owns its vocabulary and the job-admission guard
+  (`validate_job_lock_file` refuses every job while its `pending` marker exists),
+  `backup_deploy_trigger.sh` runs a recorded transaction's own journaled copy of
+  `backup_deploy_recovery.sh` (hourly from `backup_window.sh`, and from every
+  installer before its fence), and the recoverer restores, restarts the recorded
+  timers and clears the marker, or warns once a day and keeps refusing. The
+  installer records its PID in the legacy lock so drains TERM it first; the
+  emergency grace is unchanged. Details: CONCURRENCY.md "Interrupted deployments".
+  `VANPI_BACKUP_PREVIOUS_REVISION` names
   the previously deployed commit when installing a newly committed change.
   `VANPI_BACKUP_PREVIOUS_CONF_SHA256` accepts an explicitly reviewed config hash
   when unrelated deployed settings differ from that commit. Previous-tree absence
@@ -1224,16 +1234,20 @@ capacity limits, labels, and deployed versions before changing clone behavior.
 
 ## Backup concurrency rollback
 
-Both installers print a private `<stage>/previous` directory. Older flat
-`previous/` directories retain their saved install/mv recovery procedure.
-`previous/tree/`
+Both installers journal each transaction in the root-only
+`/var/lib/vanpi-backup-deploy/<id>/` and print its `previous` directory on
+commit; the newest five are kept. Older `<stage>/previous` directories (in
+`/tmp`, gone after a reboot) and flat `previous/` directories retain their
+saved recovery procedures. `previous/tree/`
 mirrors absolute destinations (for example `tree/home/pi/scripts/backup/` and
 `tree/etc/systemd/system/`). `previous/manifest` has one pipe-delimited record
 per plan entry: source, destination, old SHA-256 or `absent`, old owner:group,
 old mode, staged SHA-256, staged owner:group, staged mode, replace/keep action,
-and temporary path. All originals and replacements are prepared before the
-first publication. `transaction/published` records attempted destinations;
-`transaction/active-timers` records which timers were active before the fence.
+and temporary path (suffixed with the installer's PID). All originals and
+replacements are prepared, and the manifest made durable, before the first
+publication. `active-timers` records which timers were active before the fence,
+`recovery/` holds the recoverer with every library it sources, and the stage's
+`transaction/published` lists attempted destinations.
 
 Ordinary failures automatically restore attempted replacements in reverse
 order while fd 9 still holds the exclusive legacy fence. Cleanup ignores repeated
@@ -1241,7 +1255,19 @@ INT/TERM/HUP until it ends, so a second stop cannot cut rollback short. It check
 both content and owner/mode, removes only verified newly introduced files,
 and reloads restored systemd units before restarting any prior active timer.
 An incomplete restore/reload prints `ROLLBACK INCOMPLETE`, exits nonzero and
-leaves timers stopped. The rollback directory is retained. Activation actions
+leaves timers stopped. The rollback directory is retained. From before the first
+live change until commit or a verified restore, `/var/lib/vanpi-backup-deploy/pending`
+names the transaction and every backup job refuses. A KILLed installer (the
+emergency drain's, after its unchanged grace) or an incomplete restore leaves it
+for automatic recovery: the hourly `backup_window.sh --scheduled` and the next
+installer run that transaction's `recovery/backup_deploy_recovery.sh` under the
+fence, which restores every record, reloads units, restarts the recorded timers
+and removes the marker, or keeps it, leaves timers stopped and sends one
+`NTFY_WARNING_URL` warning a day; the next installer then refuses to publish.
+To clear a failed recovery, fix what it reports (usually a live file edited
+since, matching neither its saved nor its published version), then wait for the
+hour or run `sudo /bin/bash /var/lib/vanpi-backup-deploy/<id>/recovery/backup_deploy_recovery.sh <id>`.
+Never delete `pending` by hand: jobs would then run a mixed cohort. Activation actions
 (including Time Machine capture requests) occur only after the cohort commits;
 their failure reports a committed cohort with incomplete activation.
 
@@ -1249,16 +1275,20 @@ For a later manual rollback, first pause both cloud jobs with the existing
 controls, preserve independent holds and let local jobs finish. Inspect the
 saved manifest, private tree and current hashes before writing. Use the staged
 `pi/backup_local_deploy.sh` contract, not a newer installed helper, and source
-the staged `pi/scripts/backup/backup_locks.sh`. Validate and open the existing
+the staged `pi/scripts/backup/backup_locks.sh`; once the stage is gone, source
+the transaction's `recovery/` copies of `backup_deploy_transaction.sh` and
+`backup_locks.sh` instead. Validate and open the existing
 legacy inode with `backup_lock_open`, acquire its exclusive
-flock and stop the four cloud timers. Set `LOCAL_BACKUP_STAGE` to the saved
-stage, initialize `LOCAL_BACKUP_TEMPORARIES=()`, and load the reviewed manifest
-records into `LOCAL_BACKUP_PUBLISHED`. `local_backup_rollback` restores those
+flock and stop the four cloud timers. Set `LOCAL_BACKUP_TXN` to the saved
+transaction directory and `LOCAL_BACKUP_TEMP_ID` to your shell's PID, initialize
+`LOCAL_BACKUP_TEMPORARIES=()`, and load the reviewed manifest records into
+`LOCAL_BACKUP_PUBLISHED`. `local_backup_rollback` restores those
 records and reloads units; `local_backup_cleanup_temporaries` removes its
 staging files. Do not restart timers or release the fence before restoration
 is verified. Restore only the previously active timers, then resume the
-selected cloud job through its control entry point. There is no separate
-standalone rollback executable.
+selected cloud job through its control entry point. The journaled recoverer
+handles only uncommitted transactions; a committed cohort has no standalone
+rollback executable.
 
 Never remove or replace `/run/lock` inodes during recovery. The tmpfiles
 configuration is in the cohort; created registry inodes remain in place.

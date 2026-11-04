@@ -81,6 +81,7 @@ METERED_CLI = 'vanpi-metered'
 # test_offsite_snapshot_closure.py rescans the sources and fails on any miss.
 FROZEN_IMPLEMENTATION = (
     'backup/abort_backup.sh', 'backup/backup_admission.py', 'backup/backup_conf.sh',
+    'backup/backup_deploy_state.sh',
     'backup/backup_lifecycle.sh', 'backup/backup_lock_io.sh', 'backup/backup_lock_registry.sh',
     'backup/backup_locks.py', 'backup/backup_locks.sh', 'backup/backup_priority.py',
     'backup/backup_priority_control.py', 'backup/backup_setting_fields.py', 'backup/backup_settings.py',

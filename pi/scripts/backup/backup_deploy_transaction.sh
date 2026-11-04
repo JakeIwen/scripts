@@ -1,6 +1,11 @@
 #!/bin/bash
 # File transaction behind backup_local_deploy.sh. The fixed plan is the only
 # destination allowlist; no lock inode or runtime backup data is ever replaced.
+# Its journal (previous tree, manifest, active timers, marker) lives in the
+# persistent state directory, not the stage: /tmp is emptied at boot, and a
+# forced kill must leave enough on disk to restore every destination exactly.
+LOCAL_BACKUP_CODE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+. "$LOCAL_BACKUP_CODE_DIR/backup_deploy_trigger.sh" || return 1
 LOCAL_BACKUP_SUDO=${LOCAL_BACKUP_SUDO-/usr/bin/sudo -n}
 LOCAL_BACKUP_STAT=${LOCAL_BACKUP_STAT:-/usr/bin/stat}
 LOCAL_BACKUP_SYSTEMCTL=${LOCAL_BACKUP_SYSTEMCTL:-/usr/bin/systemctl}
@@ -11,6 +16,13 @@ LOCAL_BACKUP_TIMERS=(vanpi-icloud-backup.timer vanpi-time-machine-icloud.timer
   vanpi-icloud-backup-resume.timer vanpi-time-machine-icloud-resume.timer)
 LOCAL_BACKUP_PROC_LOCKS=${LOCAL_BACKUP_PROC_LOCKS:-/proc/locks}
 LOCAL_BACKUP_STAGED_REGISTRY=pi/scripts/backup/backup_lock_registry.sh
+LOCAL_BACKUP_SYNC=${LOCAL_BACKUP_SYNC:-/usr/bin/sync}
+# Copied into each transaction so its recovery never depends on the live tree.
+LOCAL_BACKUP_RECOVERY_CLOSURE=("$BACKUP_DEPLOY_RECOVERY" backup_deploy_state.sh backup_deploy_trigger.sh
+  backup_deploy_plan.sh backup_deploy_transaction.sh backup_locks.sh backup_lock_io.sh backup_lock_registry.sh)
+# Finished transactions kept beside a new one, for a later manual rollback.
+LOCAL_BACKUP_KEEP_TRANSACTIONS=4
+LOCAL_BACKUP_TXN=${LOCAL_BACKUP_TXN:-}
 
 local_backup_hash() {
   local digest
@@ -167,10 +179,10 @@ local_backup_prepare_record() { # <preflight-record>; every original is saved be
   local new_hash action=replace
   IFS='|' read -r source destination policy old_hash old_owner old_mode owner mode <<< "$1"
   live="$LOCAL_BACKUP_ROOT$destination"
-  saved="$LOCAL_BACKUP_STAGE/previous/tree$destination"
+  saved="$LOCAL_BACKUP_TXN/previous/tree$destination"
   local_backup_snapshot_matches "$live" "$old_hash" "$old_owner" "$old_mode" || return 1
   if [[ "$old_hash" != absent ]]; then
-    /usr/bin/mkdir -p -m 0700 "${saved%/*}" || return 1
+    $LOCAL_BACKUP_SUDO /usr/bin/mkdir -p -m 0700 "${saved%/*}" || return 1
     $LOCAL_BACKUP_SUDO /usr/bin/cp -p -- "$live" "$saved" || return 1
     local_backup_snapshot_matches "$saved" "$old_hash" "$old_owner" "$old_mode" || return 1
   fi
@@ -180,7 +192,8 @@ local_backup_prepare_record() { # <preflight-record>; every original is saved be
     local_backup_stage_settings "$LOCAL_BACKUP_STAGE/$source" "$saved" "$policy" "$replacement" || return 1
   fi
   new_hash=$(local_backup_hash "$replacement") || return 1
-  temporary="$live.deploy.$BASHPID"
+  # Fixed per-run names let recovery find temporaries a killed run never recorded.
+  temporary="$live.deploy.$LOCAL_BACKUP_TEMP_ID"
   if [[ ( "$policy" == preserve || "$policy" == defaults ) && "$new_hash" == "$old_hash" ]]; then
     action=keep
     temporary=-
@@ -193,22 +206,27 @@ local_backup_prepare_record() { # <preflight-record>; every original is saved be
   # Absence is recorded explicitly; rollback never invents an old file.
   printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' "$source" "$destination" \
     "$old_hash" "$old_owner" "$old_mode" "$new_hash" "$owner" "$mode" "$action" "$temporary" \
-    >> "$LOCAL_BACKUP_STAGE/previous/manifest" || return 1
+    >> "$LOCAL_BACKUP_STAGE/transaction/manifest" || return 1
 }
 
 local_backup_prepare() {
   local record
-  /usr/bin/mkdir -m 0700 "$LOCAL_BACKUP_STAGE/previous" || return 1
-  : > "$LOCAL_BACKUP_STAGE/previous/manifest" || return 1
+  $LOCAL_BACKUP_SUDO /usr/bin/install -d -o "${BACKUP_DEPLOY_STATE_OWNER%%:*}" \
+    -g "${BACKUP_DEPLOY_STATE_OWNER#*:}" -m 0700 "$LOCAL_BACKUP_TXN/previous" || return 1
+  : > "$LOCAL_BACKUP_STAGE/transaction/manifest" || return 1
   while IFS= read -r record; do
     local_backup_prepare_record "$record" || return 1
   done < "$LOCAL_BACKUP_STAGE/transaction/preflight"
+  local_backup_install_private "$LOCAL_BACKUP_STAGE/transaction/manifest" "$LOCAL_BACKUP_TXN/previous/manifest" || return 1
+  # Only a complete, durable manifest may switch the marker to publishing.
+  local_backup_marker_write publishing || return 1
   LOCAL_BACKUP_STATE=ready
 }
 
 local_backup_publish() {
-  local record source destination old_hash old_owner old_mode new_hash owner mode action temporary live
+  local record records source destination old_hash old_owner old_mode new_hash owner mode action temporary live
   [[ "$LOCAL_BACKUP_STATE" == ready ]] || return 1
+  records=$($LOCAL_BACKUP_SUDO /bin/cat -- "$LOCAL_BACKUP_TXN/previous/manifest") || return 1
   LOCAL_BACKUP_STATE=publishing
   while IFS= read -r record; do
     IFS='|' read -r source destination old_hash old_owner old_mode new_hash owner mode action temporary <<< "$record"
@@ -222,7 +240,7 @@ local_backup_publish() {
     printf '%s\n' "$destination" >> "$LOCAL_BACKUP_STAGE/transaction/published" || return 1
     $LOCAL_BACKUP_SUDO /usr/bin/mv -Tf -- "$temporary" "$live" || return 1
     local_backup_snapshot_matches "$live" "$new_hash" "$owner" "$mode" || return 1
-  done < "$LOCAL_BACKUP_STAGE/previous/manifest"
+  done <<< "$records"
   LOCAL_BACKUP_STATE=published
 }
 
@@ -230,7 +248,7 @@ local_backup_restore_record() {
   local source destination old_hash old_owner old_mode new_hash owner mode action temporary live saved
   IFS='|' read -r source destination old_hash old_owner old_mode new_hash owner mode action temporary <<< "$1"
   live="$LOCAL_BACKUP_ROOT$destination"
-  saved="$LOCAL_BACKUP_STAGE/previous/tree$destination"
+  saved="$LOCAL_BACKUP_TXN/previous/tree$destination"
   # Do not clobber an unrelated edit that occurred during the failed deploy.
   if local_backup_snapshot_matches "$live" "$old_hash" "$old_owner" "$old_mode"; then
     return 0
@@ -240,7 +258,7 @@ local_backup_restore_record() {
     $LOCAL_BACKUP_SUDO /usr/bin/rm -- "$live" || return 1
   else
     local_backup_snapshot_matches "$saved" "$old_hash" "$old_owner" "$old_mode" || return 1
-    temporary="$live.rollback.$BASHPID"
+    temporary="$live.rollback.$LOCAL_BACKUP_TEMP_ID"
     [[ ! -e "$temporary" && ! -L "$temporary" ]] || return 1
     LOCAL_BACKUP_TEMPORARIES+=("$temporary")
     $LOCAL_BACKUP_SUDO /usr/bin/install -o "${old_owner%%:*}" -g "${old_owner#*:}" -m "$old_mode" "$saved" "$temporary" || return 1
@@ -279,4 +297,83 @@ local_backup_restart_timers() { # every timer active before the fence; tries the
     $LOCAL_BACKUP_SUDO "$LOCAL_BACKUP_SYSTEMCTL" start "$timer" || failed=1
   done
   (( failed == 0 ))
+}
+
+local_backup_install_private() { # <source> <journal path>: a verified copy only the state owner can read
+  local expected
+  expected=$(local_backup_hash "$1") || return 1
+  $LOCAL_BACKUP_SUDO /usr/bin/install -o "${BACKUP_DEPLOY_STATE_OWNER%%:*}" \
+    -g "${BACKUP_DEPLOY_STATE_OWNER#*:}" -m 0600 -- "$1" "$2" || return 1
+  local_backup_snapshot_matches "$2" "$expected" "$BACKUP_DEPLOY_STATE_OWNER" 600
+}
+
+local_backup_state_directory() { # create the fixed state directory once; refuse an unsafe one
+  if [[ ! -e "$BACKUP_DEPLOY_STATE_DIR" && ! -L "$BACKUP_DEPLOY_STATE_DIR" ]]; then
+    $LOCAL_BACKUP_SUDO /usr/bin/install -d -o "${BACKUP_DEPLOY_STATE_OWNER%%:*}" \
+      -g "${BACKUP_DEPLOY_STATE_OWNER#*:}" -m 0755 "$BACKUP_DEPLOY_STATE_DIR" || return 1
+  fi
+  backup_deploy_owned "$BACKUP_DEPLOY_STATE_DIR" d || {
+    echo "Backup deployment state directory is unsafe: $BACKUP_DEPLOY_STATE_DIR" >&2; return 1;
+  }
+}
+
+local_backup_prune_transactions() { # under the fence with nothing recorded: drop the oldest records
+  local path index
+  local -a finished=()
+  for path in "$BACKUP_DEPLOY_STATE_DIR"/*; do
+    [[ "${path##*/}" =~ $BACKUP_DEPLOY_ID_PATTERN ]] || continue
+    backup_deploy_owned "$path" d || { echo "Unsafe deployment record: $path" >&2; return 1; }
+    finished+=("$path")
+  done
+  # Ids begin with a fixed-width UTC timestamp, so glob order is chronological.
+  for ((index = 0; index + LOCAL_BACKUP_KEEP_TRANSACTIONS < ${#finished[@]}; index++)); do
+    $LOCAL_BACKUP_SUDO /usr/bin/rm -r --one-file-system -- "${finished[$index]}" || return 1
+  done
+}
+
+local_backup_journal_open() { # <pi|tm>: durable transaction record before any live change
+  local name recovery
+  [[ "$LOCAL_BACKUP_ROOT" != *$'\n'* ]] || return 1
+  local_backup_state_directory || return 1
+  local_backup_prune_transactions || return 1
+  LOCAL_BACKUP_PROFILE=$1
+  LOCAL_BACKUP_TXN=$BACKUP_DEPLOY_STATE_DIR/$(/usr/bin/date -u +%Y%m%dT%H%M%SZ)-$LOCAL_BACKUP_TEMP_ID
+  recovery=$LOCAL_BACKUP_TXN/$BACKUP_DEPLOY_RECOVERY_DIR
+  [[ ! -e "$LOCAL_BACKUP_TXN" && ! -L "$LOCAL_BACKUP_TXN" ]] || return 1
+  $LOCAL_BACKUP_SUDO /usr/bin/install -d -o "${BACKUP_DEPLOY_STATE_OWNER%%:*}" \
+    -g "${BACKUP_DEPLOY_STATE_OWNER#*:}" -m 0700 "$LOCAL_BACKUP_TXN" "$recovery" || return 1
+  for name in "${LOCAL_BACKUP_RECOVERY_CLOSURE[@]}"; do
+    local_backup_install_private "$LOCAL_BACKUP_CODE_DIR/$name" "$recovery/$name" || return 1
+  done
+  printf '%s\n' "${LOCAL_BACKUP_ACTIVE_TIMERS[@]}" > "$LOCAL_BACKUP_STAGE/transaction/active-timers" || return 1
+  local_backup_install_private "$LOCAL_BACKUP_STAGE/transaction/active-timers" "$LOCAL_BACKUP_TXN/active-timers" || return 1
+  local_backup_marker_write preparing
+}
+
+local_backup_marker_write() { # <preparing|publishing>: everything journaled so far is durable first
+  local working=$LOCAL_BACKUP_STAGE/transaction/marker temporary=$BACKUP_DEPLOY_MARKER.$LOCAL_BACKUP_TEMP_ID
+  printf 'version=%s\nid=%s\nphase=%s\nprofile=%s\ntemp=%s\nroot=%s\n' "$BACKUP_DEPLOY_MARKER_VERSION" \
+    "${LOCAL_BACKUP_TXN##*/}" "$1" "$LOCAL_BACKUP_PROFILE" "$LOCAL_BACKUP_TEMP_ID" "$LOCAL_BACKUP_ROOT" \
+    > "$working" || return 1
+  [[ ! -e "$temporary" && ! -L "$temporary" ]] || return 1
+  LOCAL_BACKUP_TEMPORARIES+=("$temporary")
+  $LOCAL_BACKUP_SUDO /usr/bin/install -o "${BACKUP_DEPLOY_STATE_OWNER%%:*}" \
+    -g "${BACKUP_DEPLOY_STATE_OWNER#*:}" -m 0644 -- "$working" "$temporary" || return 1
+  # syncfs: the journal, its previous tree and this marker reach the disk before the rename.
+  $LOCAL_BACKUP_SUDO "$LOCAL_BACKUP_SYNC" -f -- "$temporary" || return 1
+  $LOCAL_BACKUP_SUDO /usr/bin/mv -Tf -- "$temporary" "$BACKUP_DEPLOY_MARKER" || return 1
+  $LOCAL_BACKUP_SUDO "$LOCAL_BACKUP_SYNC" -- "$BACKUP_DEPLOY_STATE_DIR"
+}
+
+local_backup_journal_close() { # remove this transaction's marker durably; never another's
+  local status
+  [[ -n "$LOCAL_BACKUP_TXN" ]] || return 0
+  backup_deploy_marker_read
+  status=$?
+  (( status != 1 )) || return 0
+  (( status == 0 )) && [[ "$BACKUP_DEPLOY_STATE_DIR/$BACKUP_DEPLOY_ID" == "$LOCAL_BACKUP_TXN" ]] || return 1
+  $LOCAL_BACKUP_SUDO /usr/bin/rm -- "$BACKUP_DEPLOY_MARKER" || return 1
+  $LOCAL_BACKUP_SUDO "$LOCAL_BACKUP_SYNC" -- "$BACKUP_DEPLOY_STATE_DIR" || return 1
+  # A later transaction's failure deserves its own alert; a stale stamp only delays one.
+  [[ ! -e "$BACKUP_DEPLOY_ALERTED" ]] || $LOCAL_BACKUP_SUDO /usr/bin/rm -f -- "$BACKUP_DEPLOY_ALERTED" || true
 }

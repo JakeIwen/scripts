@@ -1,11 +1,12 @@
 """Deployment fixtures: a fixture Git repo, stage and live trees, sudo/systemctl shims.
 
 The installers run some of these tests on the Pi, so every fixture keeps its
-locks, registry and live tree under its own temporary root.
+locks, registry, deployment state and live tree under its own temporary root.
 """
 import hashlib
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -16,6 +17,7 @@ import backup_locks
 HELPER = Path(__file__).resolve().parents[2] / 'backup_local_deploy.sh'
 POLICIES_WITH_HASHES = {'revision', 'conf', 'cloud', 'status'}
 REGISTRY_SOURCE = 'pi/scripts/backup/backup_lock_registry.sh'
+TRANSACTION_ID = re.compile(r'[0-9]{8}T[0-9]{6}Z-[1-9][0-9]*')
 
 
 def digest(data):
@@ -80,11 +82,21 @@ class DeploymentTestCase(unittest.TestCase):
 
 # The shim delegates actual filesystem commands. Failures can occur before or
 # after rename, or on restoration; a fresh fd proves cleanup still owns the fence.
+# TEST_KILL_STEP / TEST_KILL_PREPARE SIGKILL the installer (no trap runs) after
+# that many publications or prepared temporaries; TEST_BLOCK_STEP stalls it in a
+# foreground command so a TERM stays pending; TEST_READY_STEP marks progress.
 SUDO_SHIM = r'''#!/bin/bash
 set -eu
 command=$1
 shift
 last=${!#}
+if [[ "$command" == /usr/bin/install && "$last" == *.deploy.* ]]; then
+  "$command" "$@"
+  prepared=0; [[ ! -e "$TEST_ROOT/prepared" ]] || read -r prepared < "$TEST_ROOT/prepared"
+  prepared=$((prepared+1)); echo "$prepared" > "$TEST_ROOT/prepared"
+  if [[ "$prepared" == "${TEST_KILL_PREPARE:-0}" ]]; then kill -KILL "$PPID"; fi
+  exit 0
+fi
 if [[ "$command" == /usr/bin/mv ]]; then
   source_path=${@: -2:1}
   if [[ "$source_path" == *.deploy.* || "$source_path" == *.rollback.* ]]; then
@@ -96,16 +108,24 @@ if [[ "$command" == /usr/bin/mv ]]; then
     count=0; [[ ! -e "$TEST_ROOT/count" ]] || read -r count < "$TEST_ROOT/count"
     count=$((count+1)); echo "$count" > "$TEST_ROOT/count"
     if (( count == 1 )); then
-      [[ $(wc -l < "$TEST_ROOT/stage/previous/manifest") == "$TEST_EXPECT_RECORDS" ]] || exit 95
+      # Nothing is published before a complete journal and a publishing marker.
+      marker="$VANPI_BACKUP_DEPLOY_STATE_DIR/pending"
+      grep -qx 'phase=publishing' "$marker" || exit 94
+      manifest="$VANPI_BACKUP_DEPLOY_STATE_DIR/$(sed -n 's/^id=//p' "$marker")/previous/manifest"
+      [[ $(wc -l < "$manifest") == "$TEST_EXPECT_RECORDS" ]] || exit 95
       while IFS='|' read -r src dest old old_owner old_mode new owner mode action temp; do
         [[ "$action" == keep || -f "$temp" ]] || exit 96
-      done < "$TEST_ROOT/stage/previous/manifest"
+      done < "$manifest"
     fi
+    [[ -z "${TEST_PUBLISH_DELAY:-}" ]] || /bin/sleep "$TEST_PUBLISH_DELAY"
     if [[ "$count" == "${TEST_FAIL_STEP:-0}" && "${TEST_FAIL_WHEN:-after}" == before ]]; then
       : > "$TEST_ROOT/failed"; exit 41
     fi
     "$command" "$@"
     echo "publish:$last" >> "$TEST_ROOT/events"
+    [[ "$count" != "${TEST_READY_STEP:-0}" ]] || : > "$TEST_ROOT/ready"
+    if [[ "$count" == "${TEST_KILL_STEP:-0}" ]]; then kill -KILL "$PPID"; exit 0; fi
+    if [[ "$count" == "${TEST_BLOCK_STEP:-0}" ]]; then : > "$TEST_ROOT/ready"; /bin/sleep 60; fi
     if [[ "$count" == "${TEST_FAIL_STEP:-0}" ]]; then
       : > "$TEST_ROOT/failed"
       if [[ "${TEST_FAIL_WHEN:-after}" == signal ]]; then kill -TERM "$PPID"; fi
@@ -128,7 +148,11 @@ exec "$command" "$@"
 SYSTEMCTL_SHIM = r'''#!/bin/bash
 set -eu
 if [[ "$1" == show ]]; then
-  case "$2" in *.timer) echo active ;; *) echo inactive ;; esac
+  # TEST_ACTIVE_TIMERS lists the active timers; by default every timer is.
+  case " ${TEST_ACTIVE_TIMERS:-$2} " in
+    *" $2 "*) [[ "$2" == *.timer ]] && echo active || echo inactive ;;
+    *) echo inactive ;;
+  esac
   exit 0
 fi
 echo "systemctl:$*" >> "$TEST_ROOT/events"
@@ -171,6 +195,12 @@ class DeploymentFixture(DeploymentTestCase):
             for name in names:
                 path = registry / f'{lock_class.value}-{name}.lock'
                 path.touch(); path.chmod(0o660)
+        notify = root / 'notify'
+        notify.write_text('#!/bin/bash\nprintf "%s|%s|%s\\n" "$NTFY_TOPIC_VAR" "$1" "$3" >> "$TEST_ROOT/alerts"\n')
+        notify.chmod(0o700)
+        self.env.update(VANPI_BACKUP_DEPLOY_STATE_DIR=str(root / 'deploy-state'),
+                        VANPI_BACKUP_DEPLOY_STATE_OWNER=f'{owner}:{group}',
+                        VANPI_BACKUP_DEPLOY_NOTIFY=str(notify))
         self.env.update(TEST_ROOT=str(root), TEST_EXPECT_RECORDS=str(len(records)), LOCAL_BACKUP_ROOT=str(live),
                         LOCAL_BACKUP_SUDO=str(root / 'sudo'), LOCAL_BACKUP_SYSTEMCTL=str(root / 'systemctl'),
                         LOCAL_BACKUP_PI_OWNER=f'{owner}:{group}', LOCAL_BACKUP_ROOT_OWNER=f'{owner}:{group}',
@@ -197,20 +227,40 @@ class DeploymentFixture(DeploymentTestCase):
                           stage, profile, self.hashes(previous), timeout=180)
 
 
-    def assert_restored(self, fixture):
-        root, stage, live, records, _previous, snapshots = fixture
-        self.assertEqual(len((stage / 'previous/manifest').read_text().splitlines()), len(records))
+    @staticmethod
+    def state_dir(fixture):
+        return fixture[0] / 'deploy-state'
+
+
+    def transaction(self, fixture):
+        """The newest journaled transaction directory of this fixture."""
+        records = sorted(path for path in self.state_dir(fixture).iterdir()
+                         if path.is_dir() and TRANSACTION_ID.fullmatch(path.name))
+        self.assertTrue(records, 'no deployment transaction was journaled')
+        return records[-1]
+
+
+    def assert_restored(self, fixture, active=4, journaled=True):
+        """Live files, owners and modes as before; journaled=False for a run killed while preparing."""
+        root, _stage, live, records, _previous, snapshots = fixture
+        transaction = self.transaction(fixture)
+        if journaled:
+            self.assertEqual(len((transaction / 'previous/manifest').read_text().splitlines()), len(records))
         for destination, original in snapshots.items():
             path = live / destination.lstrip('/')
             if original is None:
                 self.assertFalse(path.exists(), destination)
-            else:
-                self.assertEqual((path.read_bytes(), path.stat().st_mode & 0o7777), original, destination)
-                saved = stage / 'previous/tree' / destination.lstrip('/')
+                continue
+            info = path.stat()
+            self.assertEqual((path.read_bytes(), info.st_mode & 0o7777), original, destination)
+            self.assertEqual((info.st_uid, info.st_gid), (os.getuid(), os.getgid()), destination)
+            if journaled:
+                saved = transaction / 'previous/tree' / destination.lstrip('/')
                 self.assertEqual((saved.read_bytes(), saved.stat().st_mode & 0o7777), original, destination)
         self.assertFalse(list(live.rglob('*.deploy.*')))
         self.assertFalse(list(live.rglob('*.rollback.*')))
+        self.assertFalse((self.state_dir(fixture) / 'pending').exists(), 'restored cohort kept its marker')
         events = (root / 'events').read_text()
         if 'publish:' in events:
             self.assertLess(events.index('systemctl:daemon-reload'), events.index('systemctl:start '))
-        self.assertEqual(events.count('systemctl:start '), 4)
+        self.assertEqual(events.count('systemctl:start '), active)

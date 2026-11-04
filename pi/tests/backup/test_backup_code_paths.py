@@ -14,8 +14,8 @@ import unittest
 
 
 SCRIPTS = Path(__file__).resolve().parents[2] / 'scripts'
-CONF_TREE = ('backup/backup_conf.sh', 'backup/backup_locks.sh', 'backup/backup_lock_io.sh',
-             'backup/backup_lock_registry.sh')
+CONF_TREE = ('backup/backup_conf.sh', 'backup/backup_deploy_state.sh', 'backup/backup_locks.sh',
+             'backup/backup_lock_io.sh', 'backup/backup_lock_registry.sh')
 MOUNT_TREE = ('mount_disks.sh', 'disk_policy.sh', 'backup/stale_mount_recovery.sh')
 SETTINGS = Path('/etc/vanpi-backup-settings.json')
 

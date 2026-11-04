@@ -38,6 +38,11 @@ class DeploymentPlanTests(DeploymentTestCase):
                     ('offsite_backup.py', 'offsite_backup.sh')]:
                 names = [Path(name).name for name in sources]
                 self.assertLess(names.index(dependency), names.index(consumer))
+            # Interrupted, the first deployment of the journal must already
+            # have a live recovery trigger before it changes anything else.
+            names = [Path(name).name for name in sources]
+            self.assertEqual(names[:3], ['backup_deploy_state.sh', 'backup_deploy_trigger.sh', 'backup_window.sh'])
+            self.assertIn('backup_deploy_recovery.sh', names)
             for source in sources:
                 self.assertTrue((HELPER.parent.parent / source).is_file(), source)
             for name in ('mount_disks.sh', 'umount_disks.sh', 'internet_switches.sh'):
@@ -101,7 +106,7 @@ class DeploymentPreflightTests(DeploymentFixture):
                 self.assertNotEqual(self.preflight(fixture).returncode, 0)
                 path.write_bytes(snapshots[destination][0])
         self.assertFalse((root / 'events').exists())
-        self.assertFalse((stage / 'previous').exists())
+        self.assertFalse(self.state_dir(fixture).exists())
 
 
     def test_absent_predecessor_accepts_missing_or_exact_staged_only(self):
@@ -136,11 +141,14 @@ class DeploymentPreflightTests(DeploymentFixture):
             root, stage, live, records, _previous, snapshots = fixture
             result = self.apply(fixture, profile)
             self.assertEqual(result.returncode, 0, result.stderr)
-            manifest = (stage / 'previous/manifest').read_text().splitlines()
+            transaction = self.transaction(fixture)
+            manifest = (transaction / 'previous/manifest').read_text().splitlines()
             self.assertEqual(len(manifest), len(records))
-            self.assertEqual((stage / 'previous').stat().st_mode & 0o777, 0o700)
+            for private in (transaction, transaction / 'previous'):
+                self.assertEqual(private.stat().st_mode & 0o777, 0o700)
+            self.assertFalse((self.state_dir(fixture) / 'pending').exists())
             for source, destination, policy, *_ in records:
-                saved = stage / 'previous/tree' / destination.lstrip('/')
+                saved = transaction / 'previous/tree' / destination.lstrip('/')
                 self.assertEqual((saved.read_bytes(), saved.stat().st_mode & 0o7777), snapshots[destination])
                 actual = (live / destination.lstrip('/')).read_bytes()
                 if policy == 'preserve':
@@ -207,6 +215,8 @@ class DeploymentRollbackTests(DeploymentFixture):
         self.assertEqual(result.returncode, 70, result.stderr)
         self.assertTrue((fixture[0] / 'cleanup-signal').is_file())
         self.assertNotIn('systemctl:start ', (fixture[0] / 'events').read_text())
+        # Jobs keep refusing until automatic recovery finishes the restore.
+        self.assertTrue((self.state_dir(fixture) / 'pending').is_file())
 
 
     def test_incomplete_restore_or_reload_never_restarts_timers(self):
@@ -217,6 +227,7 @@ class DeploymentRollbackTests(DeploymentFixture):
             result = self.apply(fixture)
             self.assertEqual(result.returncode, 70, result.stderr)
             self.assertNotIn('systemctl:start ', (fixture[0] / 'events').read_text())
+            self.assertTrue((self.state_dir(fixture) / 'pending').is_file())
             self.env.pop(failure)
 
 
@@ -273,7 +284,7 @@ class RegistryShrinkGuardTests(DeploymentFixture):
         events = (root / 'events').read_text() if (root / 'events').exists() else ''
         self.assertNotIn('publish:', events)
         self.assertNotIn('systemctl:stop', events)
-        self.assertFalse((stage / 'previous').exists())
+        self.assertFalse(self.state_dir(fixture).exists())
         for destination, (old, _mode) in snapshots.items():
             self.assertEqual((live / destination.lstrip('/')).read_bytes(), old, destination)
 

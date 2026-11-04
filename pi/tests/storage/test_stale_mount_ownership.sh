@@ -17,6 +17,7 @@ trap cleanup EXIT
 export TEST_ROOT="$test_root" TEST_CONF="$repo_root/pi/scripts/backup/backup_conf.sh"
 export TEST_MOUNT_LIBRARY="$repo_root/pi/scripts/mount_disks.sh"
 export VANPI_BACKUP_LOCK_DIR="$test_root/registry" VANPI_BACKUP_JOB_LOCK="$test_root/legacy.lock"
+export VANPI_BACKUP_DEPLOY_STATE_DIR="$test_root/deploy-state"
 export VANPI_BACKUP_JOB_LOCK_OWNER=$(/usr/bin/id -un) VANPI_BACKUP_JOB_LOCK_GROUP=$(/usr/bin/id -gn)
 export VANPI_BACKUP_JOB_LOCK_MODE=660 VANPI_BACKUP_LOCK_DIR_MODE=770
 export VANPI_BACKUP_PRIORITY_TOOL="$test_root/no-priority"

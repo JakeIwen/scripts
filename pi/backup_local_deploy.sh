@@ -42,6 +42,17 @@ local_backup_previous_hashes() { # <repo> <pi|tm>: reviewed provenance for the w
 local_backup_begin() { # <stage> <pi|tm> <reviewed-hashes>: fence and preflight before publication
   local stage=$1 profile=$2 previous=$3 fd timer state
   . "$local_backup_helper_dir/scripts/backup/backup_locks.sh" || return 1
+  # An earlier run's interrupted transaction is restored, by its own journaled
+  # recoverer, before this one can add to the mix; that recoverer takes the
+  # fence itself, so it runs before this run takes it.
+  backup_deploy_recover_pending $LOCAL_BACKUP_SUDO || {
+    if (( $? == 75 )); then
+      echo 'Backup lock is busy while an earlier deployment awaits recovery; retry deployment later.' >&2
+    else
+      echo 'An interrupted backup deployment could not be recovered; refusing to publish over it.' >&2
+    fi
+    return 1
+  }
   [[ ! -L "$JOB_LOCK" && -f "$JOB_LOCK" ]] || return 1
   backup_lock_open fd "$JOB_LOCK" backup_lock_metadata_ok "$JOB_LOCK_MODE" || return 1
   exec 9<&"$fd"
@@ -49,6 +60,8 @@ local_backup_begin() { # <stage> <pi|tm> <reviewed-hashes>: fence and preflight 
   "$JOB_LOCK_FLOCK" -n 9 || { echo 'Backup lock became busy; retry deployment later.' >&2; return 1; }
   LOCAL_BACKUP_STAGE=$stage
   LOCAL_BACKUP_STATE=preparing
+  LOCAL_BACKUP_TEMP_ID=$BASHPID
+  LOCAL_BACKUP_TXN=
   LOCAL_BACKUP_PUBLISHED=()
   LOCAL_BACKUP_TEMPORARIES=()
   LOCAL_BACKUP_ACTIVE_TIMERS=()
@@ -56,13 +69,21 @@ local_backup_begin() { # <stage> <pi|tm> <reviewed-hashes>: fence and preflight 
   trap 'local_backup_exit "$?"' EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM HUP
+  # abort_backup.sh finds an exclusive legacy holder only through this record,
+  # so a drain TERMs the installer into its rollback before any KILL.
+  backup_lock_record_pid 9 || return 1
+  if backup_deploy_pending; then
+    echo 'A backup deployment transaction is still recorded; refusing to publish over it.' >&2
+    return 1
+  fi
   local_backup_preflight "$stage" "$profile" "$previous" || return 1
   local_backup_registry_guard "$stage" || return 1
   for timer in "${LOCAL_BACKUP_TIMERS[@]}"; do
     state=$($LOCAL_BACKUP_SUDO "$LOCAL_BACKUP_SYSTEMCTL" show "$timer" -p ActiveState --value) || return 1
     [[ "$state" != active ]] || LOCAL_BACKUP_ACTIVE_TIMERS+=("$timer")
   done
-  printf '%s\n' "${LOCAL_BACKUP_ACTIVE_TIMERS[@]}" > "$stage/transaction/active-timers" || return 1
+  # Recorded durably before the first live change, the timers included.
+  local_backup_journal_open "$profile" || return 1
   for timer in "${LOCAL_BACKUP_ACTIVE_TIMERS[@]}"; do
     $LOCAL_BACKUP_SUDO "$LOCAL_BACKUP_SYSTEMCTL" stop "$timer" || return 1
   done
@@ -75,8 +96,10 @@ local_backup_begin() { # <stage> <pi|tm> <reviewed-hashes>: fence and preflight 
 
 local_backup_commit() { # Call only after publication and platform checks succeed.
   [[ "$LOCAL_BACKUP_STATE" == published ]] || return 1
+  # Recovery rolls back whatever the marker names, so it goes before the commit.
+  local_backup_journal_close || return 1
   LOCAL_BACKUP_STATE=committed
-  printf 'Cohort committed. Rollback tree and manifest: %s/previous\n' "$LOCAL_BACKUP_STAGE"
+  printf 'Cohort committed. Rollback tree and manifest: %s/previous\n' "$LOCAL_BACKUP_TXN"
 }
 
 local_backup_exit() { # EXIT trap: rollback and timer restoration run with fd 9 still held.
@@ -92,7 +115,7 @@ local_backup_exit() { # EXIT trap: rollback and timer restoration run with fd 9 
       echo 'Deployment failed; previous cohort restored and verified.' >&2
     else
       LOCAL_BACKUP_STATE=incomplete
-      echo "ROLLBACK INCOMPLETE: timers remain stopped. Recovery: $LOCAL_BACKUP_STAGE/previous" >&2
+      echo "ROLLBACK INCOMPLETE: timers remain stopped and backup jobs refuse until automatic recovery (hourly) restores $LOCAL_BACKUP_TXN/previous" >&2
       status=70
     fi
   elif (( status != 0 )); then
@@ -102,7 +125,12 @@ local_backup_exit() { # EXIT trap: rollback and timer restoration run with fd 9 
   if [[ "$LOCAL_BACKUP_STATE" == committed || "$LOCAL_BACKUP_STATE" == restored ]]; then
     local_backup_restart_timers || cleanup_failed=1
   fi
-  (( cleanup_failed == 0 )) || { echo 'Deployment cleanup or timer restoration failed.' >&2; (( status != 0 )) || status=1; }
+  # Anything short of a clean restore keeps the marker, so jobs keep refusing
+  # and the hourly recovery finishes the job.
+  if [[ "$LOCAL_BACKUP_STATE" == restored ]] && (( cleanup_failed == 0 )); then
+    local_backup_journal_close || cleanup_failed=1
+  fi
+  (( cleanup_failed == 0 )) || { echo 'Deployment cleanup or timer restoration failed; automatic recovery retries it.' >&2; (( status != 0 )) || status=1; }
   exec 9<&-
   exit "$status"
 }

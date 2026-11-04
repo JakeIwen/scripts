@@ -45,6 +45,7 @@ run_with_lock_config() {
     VANPI_BACKUP_LOCK_DIR="$registry" \
     VANPI_BACKUP_LOCK_DIR_MODE=770 \
     VANPI_BACKUP_PRIORITY_TOOL="$priority_tool" \
+    VANPI_BACKUP_DEPLOY_STATE_DIR="$test_root/deploy-state" \
     /bin/bash "$@"
 }
 
@@ -151,6 +152,7 @@ VANPI_BACKUP_JOB_LOCK="$lock" \
   VANPI_BACKUP_LOCK_DIR="$registry" \
   VANPI_BACKUP_LOCK_DIR_MODE=770 \
   VANPI_BACKUP_PRIORITY_TOOL="$priority_tool" \
+  VANPI_BACKUP_DEPLOY_STATE_DIR="$test_root/deploy-state" \
   /bin/bash -c '
   source "$1"
   acquire_job_lock || exit 1
