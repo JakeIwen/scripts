@@ -3,6 +3,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -58,16 +59,37 @@ def tree_state(root):
 OLD_DROPIN = b"[Service]\nExecStart=\nExecStart=/usr/bin/python3 -P -m pi.apps.van_dashboard\n"
 QUOTED_UNIT = (b"[Service]\nExecStart=/usr/bin/python3 -P -m \"pi.apps.van_dashboard\"\n")
 BASE = "/etc/systemd/system/" + DASHBOARD
-# Verbatim shape of `systemctl show van-dashboard.service` on the Pi (Exec lines trimmed).
-SHOW = """ExecStartPre={{ path=/usr/bin/test ; argv[]=/usr/bin/test -r /home/pi/x ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }}
-ExecStart={{ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 -P -m {module} ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }}
-ExecStartEx={{ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 -P -m {module} ; flags= ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }}
-ExecReload=
-LoadState={load}
-FragmentPath={fragment}
-DropInPaths={dropins}
-NeedDaemonReload={reload}
+# Captured on vanpi, 2026-11-03, with the guard's explicit -p list. Empty
+# command lists are omitted; empty scalar properties are still printed.
+SHOW = """ExecStartPre={ path=/usr/bin/test ; argv[]=/usr/bin/test -r /home/pi/van_compute/current/van_compute/metrics.py ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }
+ExecStartPre={ path=/usr/bin/test ; argv[]=/usr/bin/test -r /home/pi/scripts/van-dashboard-frontend/current/index.html ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }
+ExecStartPre={ path=/usr/bin/test ; argv[]=/usr/bin/test -r /home/pi/scripts/python-packages/current/manifest.json ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }
+ExecStartPre={ path=/usr/bin/test ; argv[]=/usr/bin/test -x /home/pi/scripts/safe_reboot.sh ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }
+ExecStartPre={ path=/usr/bin/test ; argv[]=/usr/bin/test -x /home/pi/scripts/safe_power_down.sh ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }
+ExecStart={ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 -P -m pi.apps.van_dashboard ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }
+ExecStopPost={ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 -P -m pi.apps.van_dashboard.van_dashboard_cop --relay-off ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }
+LoadState=loaded
+FragmentPath=/etc/systemd/system/van-dashboard.service
+DropInPaths=/etc/systemd/system/van-dashboard.service.d/network-storage.conf
+NeedDaemonReload=no
 """
+ABSENT_SHOW = """LoadState=not-found
+FragmentPath=
+DropInPaths=
+NeedDaemonReload=no
+"""
+CUT_OVER_SHOW = (SHOW.replace("pi.apps.van_dashboard", "van_dashboard")
+                .replace("/home/pi/scripts/van-dashboard-frontend/", "/home/pi/van_dashboard/frontend/"))
+CUT_OVER_SHOW = SHOW.splitlines()[0].replace(
+    "/home/pi/van_compute/current/van_compute/metrics.py",
+    "/home/pi/van_dashboard/current/van_dashboard/__main__.py") + "\n" + CUT_OVER_SHOW
+NETWORK_DROPIN = b"[Service]\nEnvironment=VANPI_NETWORK_STORAGE_CONFIG=/etc/vanpi-network-storage.json\n"
+
+
+def show_state(raw=CUT_OVER_SHOW, **changes):
+    """Vary captured state without fabricating systemd's command serialization."""
+    return "\n".join(key + "=" + changes.get(key, value)
+                     for key, value in (line.split("=", 1) for line in raw.splitlines())) + "\n"
 
 
 class ExternalConsumerTests(unittest.TestCase):
@@ -138,7 +160,7 @@ class ExternalConsumerTests(unittest.TestCase):
         services = transactions.FakeSystemServices(active=set())
         services.units[DASHBOARD] = CUT_OVER_UNIT
         services.dropins_by_unit[DASHBOARD] = {"old.conf": OLD_DROPIN}
-        self.refused_untouched(services, "still runs -m pi.apps.van_dashboard")
+        self.refused_untouched(services, "unsupported launch.*pi.apps.van_dashboard.*allowlist")
 
     def test_missing_base_file_with_loaded_old_unit_is_refused(self):
         services = transactions.FakeSystemServices(active=set())
@@ -151,7 +173,7 @@ class ExternalConsumerTests(unittest.TestCase):
     def test_quoted_module_is_refused(self):
         services = transactions.FakeSystemServices(active=set())
         services.units[DASHBOARD] = QUOTED_UNIT
-        self.refused_untouched(services, "still runs -m pi.apps.van_dashboard")
+        self.refused_untouched(services, "unsupported launch.*pi.apps.van_dashboard.*allowlist")
 
     def test_unreadable_unit_state_is_refused(self):
         services = transactions.FakeSystemServices(active=set())
@@ -169,36 +191,93 @@ class ExternalConsumerTests(unittest.TestCase):
                 (root / relative).parent.mkdir(parents=True, exist_ok=True)
                 (root / relative).write_bytes(raw)
             stub = root / "systemctl"
-            show = show.replace("@BASE@", str(root / DASHBOARD))
-            stub.write_text("#!/bin/sh\n" + ("exit 1\n" if fail else f"cat <<'EOF'\n{show}EOF\n"))
+            show = show.replace(BASE, str(root / DASHBOARD))
+            expected = (f"show {DASHBOARD} -p LoadState -p NeedDaemonReload -p FragmentPath -p DropInPaths "
+                        "-p ExecCondition -p ExecStartPre -p ExecStart -p ExecStartPost "
+                        "-p ExecReload -p ExecStop -p ExecStopPost")
+            stub.write_text("#!/bin/sh\n" + f'test "$*" = {shlex.quote(expected)} || exit 2\n' +
+                            ("exit 1\n" if fail else f"cat <<'EOF'\n{show}EOF\n"))
             stub.chmod(0o755)
             services = deployment.SystemServices(units=root, systemctl=str(stub))
             deployment.check_external_consumers(services)
 
     def test_real_systemctl_show_output_decides(self):
-        old = SHOW.format(module="pi.apps.van_dashboard", load="loaded", fragment="@BASE@", dropins="", reload="no")
-        new = SHOW.format(module="van_dashboard", load="loaded", fragment="@BASE@", dropins="", reload="no")
-        absent = SHOW.format(module="van_dashboard", load="not-found", fragment="", dropins="", reload="no")
-        self.systemctl_state(new, {DASHBOARD: CUT_OVER_UNIT})
-        self.systemctl_state(absent.replace("ExecStart", "Unused"))
+        files = {DASHBOARD: CUT_OVER_UNIT, DASHBOARD + ".d/network-storage.conf": NETWORK_DROPIN}
+        self.systemctl_state(CUT_OVER_SHOW, files)
+        self.systemctl_state(ABSENT_SHOW)
+        self.systemctl_state(show_state(DropInPaths=""), {DASHBOARD: CUT_OVER_UNIT})
         with self.assertRaisesRegex(ValueError, "pi.apps.van_dashboard"):
-            self.systemctl_state(old, {DASHBOARD: CUT_OVER_UNIT})
+            self.systemctl_state(SHOW, files)
         with self.assertRaisesRegex(ValueError, "pending a daemon-reload"):
-            self.systemctl_state(new.replace("NeedDaemonReload=no",
-                                 "NeedDaemonReload=yes"), {DASHBOARD: CUT_OVER_UNIT})
+            self.systemctl_state(show_state(NeedDaemonReload="yes"), files)
         with self.assertRaisesRegex(ValueError, "cannot verify"):
             self.systemctl_state("", fail=True)
         with self.assertRaisesRegex(ValueError, "cannot verify"):
             self.systemctl_state("garbage without equals\n")
         # Loaded, but the fragment systemd names is gone from disk: not "absent".
         with self.assertRaisesRegex(ValueError, "cannot verify"):
-            self.systemctl_state(new)
+            self.systemctl_state(CUT_OVER_SHOW)
+
+    def test_unrecognized_launches_refuse_on_disk_and_in_effective_commands(self):
+        commands = (
+            "/usr/bin/python3 -Pmpi.apps.van_dashboard",
+            "/usr/bin/python3 -P -mpi.apps.van_dashboard",
+            "/bin/sh /home/pi/start-dashboard.sh",
+            "/bin/sh -c '/usr/bin/python3 -P -m pi.apps.van_dashboard'",
+            "/usr/bin/env /usr/bin/python3 -P -m pi.apps.van_dashboard",
+            "/usr/bin/python3 -P -m pi.apps.media_organizer",
+            "/home/pi/pyvenv/bin/python -P -m van_dashboard",
+            "/usr/bin/python3 -P -m van_dashboard_other",
+        )
+        original = deployment.parse_show(CUT_OVER_SHOW)["ExecStart"][0]
+        for command in commands:
+            with self.subTest(command=command):
+                path = shlex.split(command)[0]
+                record = original.replace("path=/usr/bin/python3", f"path={path}").replace(
+                    "argv[]=/usr/bin/python3 -P -m van_dashboard ;", f"argv[]={command} ;")
+                with self.assertRaisesRegex(ValueError, "unsupported launch.*allowlist"):
+                    self.systemctl_state(show_state(ExecStart=record, DropInPaths=""), {DASHBOARD: CUT_OVER_UNIT})
+                with self.assertRaisesRegex(ValueError, "unsupported launch.*allowlist"):
+                    self.systemctl_state(show_state(DropInPaths=""),
+                                         {DASHBOARD: f"[Service]\nExecStart={command}\n".encode()})
+
+    def test_malformed_records_and_missing_scalars_refuse(self):
+        original = deployment.parse_show(CUT_OVER_SHOW)["ExecStart"][0]
+        for record in (original[:-2], original.split(" ; ignore_errors")[0] + " ;",
+                       "junk " + original, original + " trailing", original + original,
+                       original.replace("path=/usr/bin/python3", "path=/bin/sh"),
+                       original.replace("pid=0", "pid=unknown"), "{ argv[]= ; }"):
+            with self.subTest(record=record), self.assertRaisesRegex(ValueError, "cannot verify"):
+                self.systemctl_state(show_state(ExecStart=record, DropInPaths=""), {DASHBOARD: CUT_OVER_UNIT})
+        for key in ("LoadState", "NeedDaemonReload", "FragmentPath", "DropInPaths"):
+            for raw in (CUT_OVER_SHOW, ABSENT_SHOW):
+                missing = "\n".join(line for line in raw.splitlines() if not line.startswith(key + "=")) + "\n"
+                with self.subTest(key=key, raw=raw), self.assertRaisesRegex(ValueError, "cannot verify"):
+                    self.systemctl_state(missing, {DASHBOARD: CUT_OVER_UNIT})
+
+    def test_each_effective_exec_property_is_checked(self):
+        old = deployment.parse_show(SHOW)["ExecStart"][0]
+        for key in deployment.CONSUMER_EXEC_PROPERTIES:
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, "unsupported launch"):
+                self.systemctl_state(show_state(DropInPaths="") + f"{key}={old}\n", {DASHBOARD: CUT_OVER_UNIT})
+
+    def test_absent_unit_with_residual_commands_or_files_refuses(self):
+        for raw, files in ((ABSENT_SHOW, {DASHBOARD: CUT_OVER_UNIT}),
+                           (ABSENT_SHOW + CUT_OVER_SHOW.splitlines()[0] + "\n", {})):
+            with self.subTest(raw=raw), self.assertRaisesRegex(ValueError, "not found but still"):
+                self.systemctl_state(raw, files)
+
+    def test_exec_prefixes_and_empty_resets_are_supported_on_disk(self):
+        for prefix in ("", "-", "@", ":", "+", "!", "!!", "-:"):
+            with self.subTest(prefix=prefix):
+                dropin = ("[Service]\nExecStart=\nExecStart=" + prefix +
+                          "/usr/bin/python3 -P -m van_dashboard\n").encode()
+                self.systemctl_state(show_state(DropInPaths=BASE + ".d/override.conf"),
+                                     {DASHBOARD: CUT_OVER_UNIT, DASHBOARD + ".d/override.conf": dropin})
 
     def test_cut_over_or_absent_dashboard_unit_allows_deploys(self):
         fixtures = transactions.PythonDeploymentTests
-        # A unit running a module this release still ships is fine too.
-        still_shipped = b"[Service]\nExecStart=/usr/bin/python3 -P -m pi.apps.media_organizer\n"
-        for unit in (CUT_OVER_UNIT, still_shipped, None):
+        for unit in (CUT_OVER_UNIT, None):
             with self.subTest(unit=unit), fixtures.fixture() as repo, \
                     tempfile.TemporaryDirectory() as name:
                 root = Path(name) / "packages"

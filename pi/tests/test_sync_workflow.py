@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 from pi.tests.test_python_deployment_consumers import (
-    CUT_OVER_UNIT, OLD_DROPIN, QUOTED_UNIT, SCRIPTS_ERA_UNIT, SHOW)
+    ABSENT_SHOW, BASE, CUT_OVER_UNIT, OLD_DROPIN, QUOTED_UNIT, SCRIPTS_ERA_UNIT, SHOW, show_state)
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -148,14 +148,15 @@ class DashboardCutOverGuardTests(unittest.TestCase):
 
     # Python, not bash: pattern substitution over the 30 KB receiver is quadratic in bash 3.2.
     FAKE_SSH = """#!/usr/bin/env python3
-import os, sys
+import os, shlex, sys
 if os.environ["FAKE_SSH_FAIL"]:
     sys.exit(255)
 units = os.environ["FAKE_UNITS"]
-command = (sys.argv[-1].replace("/usr/bin/python3", os.environ["FAKE_PYTHON"])
-           .replace("/usr/bin/systemctl", units + "/systemctl")
-           .replace("/etc/systemd/system", units))
-os.execv("/bin/bash", ["bash", "-c", command])
+arguments = shlex.split(sys.argv[-1])
+arguments[0] = os.environ["FAKE_PYTHON"]
+arguments[2] = (arguments[2].replace("/usr/bin/systemctl", units + "/systemctl")
+                .replace("/etc/systemd/system", units))
+os.execv(arguments[0], arguments)
 """
 
     def check(self, show=None, unit_text=None, dropin=None, unreachable=False):
@@ -174,7 +175,7 @@ os.execv("/bin/bash", ["bash", "-c", command])
                 (units / "van-dashboard.service.d/old.conf").write_bytes(dropin)
             stub = units / "systemctl"
             stub.write_text("#!/bin/sh\n" + ("exit 1\n" if show is None else
-                f"cat <<'EOF'\n{show.replace('@BASE@', str(units / 'van-dashboard.service'))}EOF\n"))
+                f"cat <<'EOF'\n{show.replace(BASE, str(units / 'van-dashboard.service'))}EOF\n"))
             stub.chmod(0o755)
             harness = definitions + f"""
 dsc={shlex.quote(str(REPOSITORY_ROOT.parent))}
@@ -185,8 +186,11 @@ check_dashboard_cut_over
                    "FAKE_SSH_FAIL": "1" if unreachable else ""}
             return subprocess.run(["/bin/bash", "-c", harness], capture_output=True, text=True, env=env)
 
-    def show(self, module="van_dashboard", load="loaded", fragment="@BASE@", reload="no"):
-        return SHOW.format(module=module, load=load, fragment=fragment, dropins="", reload=reload)
+    def show(self, module="van_dashboard", load="loaded", fragment=BASE, reload="no"):
+        raw = show_state() if module == "van_dashboard" else SHOW
+        if load == "not-found":
+            raw = ABSENT_SHOW
+        return show_state(raw, LoadState=load, FragmentPath=fragment, DropInPaths="", NeedDaemonReload=reload)
 
     def assertRefused(self, result, reason):
         self.assertEqual(result.returncode, 1, result.stderr)
@@ -196,7 +200,7 @@ check_dashboard_cut_over
 
     def test_scripts_era_launch_refuses(self):
         self.assertRefused(self.check(self.show("pi.apps.van_dashboard"), SCRIPTS_ERA_UNIT),
-                           "still runs -m pi.apps.van_dashboard")
+                           "unsupported launch.*pi.apps.van_dashboard.*allowlist")
 
     def test_new_unit_file_with_pending_reload_refuses(self):
         self.assertRefused(self.check(self.show("pi.apps.van_dashboard", reload="yes"), CUT_OVER_UNIT),
@@ -204,14 +208,14 @@ check_dashboard_cut_over
 
     def test_old_command_dropin_refuses(self):
         self.assertRefused(self.check(self.show(), CUT_OVER_UNIT, dropin=OLD_DROPIN),
-                           "still runs -m pi.apps.van_dashboard")
+                           "unsupported launch.*pi.apps.van_dashboard.*allowlist")
 
     def test_missing_base_file_with_loaded_old_unit_refuses(self):
         self.assertRefused(self.check(self.show("pi.apps.van_dashboard")), "cannot verify")
 
     def test_quoted_module_refuses(self):
         self.assertRefused(self.check(self.show(), QUOTED_UNIT),
-                           "still runs -m pi.apps.van_dashboard")
+                           "unsupported launch.*pi.apps.van_dashboard.*allowlist")
 
     def test_read_error_or_unreachable_pi_refuses(self):
         self.assertRefused(self.check(show=None, unit_text=CUT_OVER_UNIT), "cannot verify")
@@ -220,7 +224,7 @@ check_dashboard_cut_over
     def test_cut_over_or_absent_unit_passes(self):
         for show, unit_text in (
             (self.show(), CUT_OVER_UNIT + b"# formerly -m pi.apps.van_dashboard\n"),
-            (self.show(load="not-found", fragment="").replace("ExecStart", "Unused"), None),
+            (self.show(load="not-found", fragment=""), None),
         ):
             with self.subTest(unit_text=unit_text):
                 result = self.check(show, unit_text)

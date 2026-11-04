@@ -1125,12 +1125,15 @@ mirrors it):
 - Until the Pi is cut over, a release would strand the scripts-era unit, which
   runs `-m pi.apps.van_dashboard` through `current`. The receiver refuses
   `--activate`/`--update` unless systemd's effective state for each
-  `EXTERNAL_CONSUMERS` unit (`systemctl show`: `NeedDaemonReload`, every `Exec*`
-  command, plus the fragment and drop-ins on disk) runs no `RETIRED_MODULES`
-  module; a pending reload, an unreadable or unparseable state, or a loaded unit
-  whose file is missing also refuses. `pi/sync_scripts.sh`'s preflight runs the
-  same check (`deploy_python.py --check-consumers`) before any upload. Deploy the
-  van-dashboard repo first (its `docs/cutover.md`).
+  `EXTERNAL_CONSUMERS` unit matches `CONSUMER_LAUNCH_FORMS`: `/usr/bin/test`
+  with any args, or `/usr/bin/python3 -P -m van_dashboard[.<submodule>]` with
+  separate tokens and optional args. Explicit `systemctl show -p` properties
+  exclude ExecMain metadata and retain empty scalars. Every complete effective
+  command and non-empty on-disk Exec directive is checked (prefixes stripped,
+  reset lines ignored). Unknown launchers, malformed state, a pending reload or
+  an unreadable fragment/drop-in refuse; a genuinely absent unit passes.
+  `pi/sync_scripts.sh` runs the same check (`--check-consumers`) before any upload.
+  Deploy the van-dashboard repo first (its `docs/cutover.md`).
 - A scripts deploy that changes those modules does not restart the dashboard: it
   keeps the release it pinned at start. Restart it afterwards
   (`ssh pi@vanpi.lan sudo systemctl restart van-dashboard`) or redeploy it.

@@ -45,9 +45,16 @@ SERVICES = {
 # publish /run/<unit stem>/package-release like SERVICES do. GC keeps their
 # running release; this installer never installs, selects or restarts them.
 EXTERNAL_CONSUMERS = ('van-dashboard.service',)
-# Modules no release ships any more; a consumer unit still launching one breaks
-# at its next restart (relay-off ExecStopPost included).
-RETIRED_MODULES = ('pi.apps.van_dashboard',)
+# Only reviewed launch forms prove the consumer no longer executes the removed
+# package; a wrapper could hide that import even when its argv names no module.
+CONSUMER_LAUNCH_FORMS = frozenset({
+    ('/usr/bin/test',),
+    ('/usr/bin/python3', '-P', '-m', 'van_dashboard'),
+})
+CONSUMER_EXEC_PROPERTIES = ('ExecCondition', 'ExecStartPre', 'ExecStart', 'ExecStartPost',
+                            'ExecReload', 'ExecStop', 'ExecStopPost')
+CONSUMER_PROPERTIES = ('LoadState', 'NeedDaemonReload', 'FragmentPath', 'DropInPaths',
+                       *CONSUMER_EXEC_PROPERTIES)
 RETAIN_NEWEST = 3
 GC_DELETE_LIMIT = 16
 # Only immediate Python modules in these reviewed directories are inputs.
@@ -414,8 +421,10 @@ class SystemServices:
 
     def consumer_state(self, unit):
         """What systemd will execute (`show`) plus every unit file on disk or loaded."""
-        result = subprocess.run([self.systemctl, 'show', unit], check=True, text=True,
-                                capture_output=True, timeout=10)
+        # Explicit properties retain empty scalars and exclude ExecMain* metadata.
+        arguments = [item for key in CONSUMER_PROPERTIES for item in ('-p', key)]
+        result = subprocess.run([self.systemctl, 'show', unit, *arguments], check=True,
+                                text=True, capture_output=True, timeout=10)
         properties = parse_show(result.stdout)
         base = str(self.units / unit)
         paths = [single(properties, 'FragmentPath'), *single(properties, 'DropInPaths').split()]
@@ -569,18 +578,38 @@ def single(properties, key):
     return properties[key][0]
 
 
-def retired_module(words):
-    for word in words:
-        name = word[2:] if word.startswith('-m') and len(word) > 2 else word
-        for module in RETIRED_MODULES:
-            if name == module or name.startswith(module + '.'):
-                return module
-    return None
+def consumer_exec_command(value):
+    """Accept a complete systemd command record, not an argv substring in debris."""
+    import shlex
+    record = re.fullmatch(
+        r'\{ path=(/\S+) ; argv\[\]=((?:(?! ; ignore_errors=).)*) ; ignore_errors=(?:yes|no) ; '
+        r'start_time=\[[^\]\r\n]*\] ; stop_time=\[[^\]\r\n]*\] ; '
+        r'pid=[0-9]+ ; code=[^;\s]+ ; status=[^;\s]+ \}', value)
+    if not record:
+        raise ValueError(f'unparseable Exec record: {value!r}')
+    words = shlex.split(record[2])
+    if not words or words[0] != record[1]:
+        raise ValueError(f'Exec path and argv disagree: {value!r}')
+    return record[2]
+
+
+def allowed_consumer_command(command, unit_file=False):
+    import shlex
+    words = shlex.split(command)
+    if unit_file and words:
+        words[0] = words[0].lstrip('-@:+!')
+    for form in CONSUMER_LAUNCH_FORMS:
+        if tuple(words[:len(form)]) == form:
+            return True
+        if (len(form) > 1 and len(words) >= len(form)
+                and tuple(words[:len(form) - 1]) == form[:-1]
+                and words[len(form) - 1].startswith(form[-1] + '.')):
+            return True
+    return False
 
 
 def consumer_problem(properties, files):
     """Why an external consumer unit must block a release, or None. Raises on anything unreadable."""
-    import shlex
     load, reload = single(properties, 'LoadState'), single(properties, 'NeedDaemonReload')
     fragment, dropins = single(properties, 'FragmentPath'), single(properties, 'DropInPaths')
     if reload != 'no':
@@ -589,22 +618,18 @@ def consumer_problem(properties, files):
         return 'is loaded without a unit file that can be checked'
     if load not in ('loaded', 'not-found'):
         return f'is in load state {load}'
-    if load == 'not-found' and (fragment or dropins):
-        return 'is not found but still has a unit file or drop-in'
-    commands = []
-    for key, values in properties.items():
-        for value in values if key.startswith('Exec') else ():
-            if value:
-                found = re.findall(r'argv\[\]=(.*?) ;', value)
-                if not found:
-                    raise ValueError(f'unparseable {key}: {value!r}')
-                commands += found
+    if properties.keys() - set(CONSUMER_PROPERTIES):
+        raise ValueError('unexpected systemctl show properties')
+    commands = [(consumer_exec_command(value), False)
+                for key in CONSUMER_EXEC_PROPERTIES for value in properties.get(key, ()) if value]
+    if load == 'not-found' and (fragment or dropins or commands or files):
+        return 'is not found but still has a unit file, drop-in or command'
     for path, raw in files:
-        commands += [value for key, value in directives(raw) if key.startswith('Exec')]
-    for command in commands:
-        module = retired_module(shlex.split(command))
-        if module:
-            return f'still runs -m {module}, which no release ships'
+        commands += [(value, True) for key, value in directives(raw) if key.startswith('Exec') and value]
+    for command, unit_file in commands:
+        if not allowed_consumer_command(command, unit_file):
+            return (f'has unsupported launch {command!r}; update the guard\'s allowlist '
+                    'if the unit legitimately changed')
     return None
 
 
@@ -774,7 +799,7 @@ def main(argv=None):
     parser.add_argument('--dry-run', action='store_true', help='print a local JSON plan; never connect')
     parser.add_argument('--list-units', action='store_true', help='print package-owned units locally; never connect')
     parser.add_argument('--check-consumers', action='store_true',
-                        help="read-only: refuse unless the Pi's external consumer units run no retired module")
+                        help="read-only: require external consumers' reviewed post-cutover launch forms")
     parser.add_argument('--target', default='pi@vanpi.lan')
     parser.add_argument('--service', action='append', choices=tuple(SERVICES), help='select service(s); default all')
     group = parser.add_mutually_exclusive_group()
