@@ -22,11 +22,11 @@ SHIFT, COMMAND = 1 << 17, 1 << 20
 GLOBAL = 'BT.G'
 
 
-def runtime_action(function, entry, options, title, runtime, before=''):
+def runtime_action(function, entry, options, title, runtime):
     """A Real-JS action running one runtime entry, which returns an {ok, result|error} outcome."""
     call = '\n%s(%s);' % (entry, json.dumps(options))
     # A script that fails inside runJXA comes back as {NSLocalizedDescription} instead.
-    script = (f'async function {function}() {{\n{before}'
+    script = (f'async function {function}() {{\n'
               f'    const sources = await Promise.all({json.dumps(list(runtime))}.map(path => readFile(path)));\n'
               f'    const result = JSON.parse(await runJXA(sources.join("\\n") + {json.dumps(call)}));\n'
               f'    const error = result.error || result.NSLocalizedDescription;\n'

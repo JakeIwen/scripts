@@ -57,13 +57,17 @@ function selectionOffsets(original) {
     return {location, length};
 }
 
-function replacementSelectionRange(original, selected) {
-    const {location} = selectionOffsets(original);
+function selectionRangeValue(location, length) {
     const buffer = selectionRangeBuffer();
     // JavaScript length and macOS text ranges both count UTF-16 code units.
-    const replacementRange = $.NSValue.valueWithRange($.NSMakeRange(location + selected.offset, selected.length));
-    replacementRange.getValueSize(buffer.data.mutableBytes, buffer.size);
+    const range = $.NSValue.valueWithRange($.NSMakeRange(location, length));
+    range.getValueSize(buffer.data.mutableBytes, buffer.size);
     return ObjC.castRefToObject($.AXValueCreate($.kAXValueCFRangeType, buffer.data.bytes));
+}
+
+function replacementSelectionRange(original, selected) {
+    const {location} = selectionOffsets(original);
+    return selectionRangeValue(location + selected.offset, selected.length);
 }
 
 function writeSelection(system, selection, replacement, selected) {
@@ -91,6 +95,11 @@ function selectionApplicationBundle(application) {
 function selectionIsFirefox(bundle) {
     // Release, Developer Edition and Nightly share Gecko's accessibility code.
     return /^org\.mozilla\./.test(bundle || '');
+}
+
+function selectionMarkers(directory, element) {
+    return new Function(selectionReadSource(directory + '/text_markers.js')
+        + '\nreturn textMarkerSelection;')()(element, selectionAttribute);
 }
 
 function selectionNeedsMenuPaste(bundle) {
@@ -126,10 +135,7 @@ function selectionUI(directory) {
             if (selectionNeedsMenuPaste(bundle)) {
                 const paste = new Function(selectionReadSource(directory + '/text_menu_paste.js')
                     + '\nreturn pasteSelectionUsingMenu;')();
-                const markers = selectionIsFirefox(bundle)
-                    ? new Function(selectionReadSource(directory + '/text_markers.js')
-                        + '\nreturn textMarkerSelection;')()(selection.element, selectionAttribute)
-                    : null;
+                const markers = selectionIsFirefox(bundle) ? selectionMarkers(directory, selection.element) : null;
                 paste(system, application, selection, replacement, {
                     attribute:selectionAttribute, offsets:selectionOffsets,
                     range:replacementSelectionRange, markers

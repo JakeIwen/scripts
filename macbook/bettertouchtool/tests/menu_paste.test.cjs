@@ -5,44 +5,17 @@ const path = require('node:path');
 const vm = require('node:vm');
 const {execFileSync} = require('node:child_process');
 
-const array = values => ({count:values.length, objectAtIndex:i => values[i]});
-const mutableArray = () => {
-    const values = [];
-    return {get count() { return values.length; }, objectAtIndex:i => values[i], addObject:value => values.push(value)};
-};
-const data = value => ({value, length:value.length, get copy() { return data(value); }});
-class Item {
-    constructor(values = {}) { this.values = new Map(Object.entries(values).map(([k,v]) => [k,data(v)])); }
-    get types() { return array([...this.values.keys()]); }
-    dataForType(type) { return this.values.get(type); }
-    setDataForType(value, type) { this.values.set(type,value); return true; }
-    setStringForType(value, type) { return this.setDataForType(data(value),type); }
-}
+const {array, Item, pasteboardFake} = require('./pasteboard_fixture.cjs');
 
 function fixture() {
-    const board = {
-        items:[new Item({'public.utf8-plain-text':'original','public.rtf':'rich original'}), new Item({'custom/type':'second'})],
-        changeCount:10,
-        get pasteboardItems() { return array(this.items); },
-        stringForType(type) { return this.items[0]?.dataForType(type)?.value; },
-        get clearContents() { this.items = []; return ++this.changeCount; },
-        prepareForNewContentsWithOptions(options) { assert.equal(options,1); return this.clearContents; },
-        writeObjects(items) {
-            this.items = Array.isArray(items) ? items : Array.from({length:Number(items.count)},(_,i) => items.objectAtIndex(i));
-            this.changeCount++;
-            return true;
-        }
-    };
+    const {board, native:clipboard, contents} = pasteboardFake();
+    // The temporary paste clipboard always stays on this Mac.
+    const prepare = board.prepareForNewContentsWithOptions;
+    board.prepareForNewContentsWithOptions = function (options) { assert.equal(options,1); return prepare.call(this,options); };
     const native = value => value;
-    Object.assign(native, {
-        NSPasteboardItem:{alloc:{get init() { return new Item(); }}},
-        NSArray:{arrayWithObject:item => array([item])}, NSMutableArray:{get array() { return mutableArray(); }},
-        NSPasteboardTypeString:'public.utf8-plain-text', NSPasteboardContentsCurrentHostOnly:1,
-        NSPasteboard:{generalPasteboard:board}, CFEqual:(a,b) => a === b
-    });
+    Object.assign(native, clipboard, {CFEqual:(a,b) => a === b});
     const context = vm.createContext({$:native, ObjC:{import() {},unwrap:x => x}, delay() {}});
     vm.runInContext(fs.readFileSync(path.join(__dirname,'../text_menu_paste.js'),'utf8'),context);
-    const contents = () => Array.from(board.items, item => Object.fromEntries([...item.values].map(([k,v]) => [k,v.value])));
     return {board, native, context, contents};
 }
 
@@ -81,6 +54,27 @@ test('an unreadable clipboard format stops before clearing any clipboard data', 
     assert.throws(() => context.withTemporaryClipboard(board,'TRANSFORMED',() => { pasted = true; }));
     assert.equal(pasted,false);
     assert.equal(board.changeCount,10);
+});
+
+test('a user copy made while the paste text is prepared is kept, and nothing is pasted', () => {
+    const {board,native,context,contents} = fixture();
+    native.NSPasteboardItem = {alloc:{get init() {
+        const item = new Item(), set = item.setStringForType;
+        // The paste's own item: the user copies while it is being built.
+        item.setStringForType = function (value,type) {
+            if (value === 'TRANSFORMED') {
+                board.clearContents;
+                board.writeObjects([new Item({'public.utf8-plain-text':'new user copy'})]);
+            }
+            return set.call(this,value,type);
+        };
+        return item;
+    }}};
+    let pasted = false;
+    assert.throws(() => context.withTemporaryClipboard(board,'TRANSFORMED',() => { pasted = true; }),
+        /The clipboard changed\. Nothing was pasted\./);
+    assert.equal(pasted,false);
+    assert.deepEqual(contents(),[{'public.utf8-plain-text':'new user copy'}]);
 });
 
 test('a successful-looking clipboard write cannot paste missing or stale text', () => {
