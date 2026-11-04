@@ -457,14 +457,14 @@ compare it with this checkout. Deployed files may differ from the repository.
   and patch only those live `.bashrc` definitions, preserving local changes.
   `session_search_paths.py` lists transcripts by newest activity before content
   is searched, interleaving providers for `llmsearch`; excerpts within a session
-  are newest first too. Grouping is the default (`-g`); `-e`/`--single` lists every
+  are newest first too. One result per session is the default (`-g`); `-e`/`--single` lists every
   excerpt (`-s` is `--session`, an id-prefix lookup that, like `-t`, skips the
   index). Ctrl+C: the Python helpers keep SIGINT's default action, and the header's
-  INT trap prints `<command>: aborted` and exits 130. Grouped provider searches give one result per transcript with the last
-  matching excerpt. `session_search_display.py` incrementally groups `llmsearch`
+  INT trap prints `<command>: aborted` and exits 130. All three searches give one result per transcript with its match count and last
+  matching excerpt. `session_search_display.py` incrementally groups `llmsearch -d`/`--dirs`
   by directory/tool and redraws terminal output; pipes get the final listing only.
-  Records mode (`SESSION_SEARCH_RECORDS=1`) is never grouped. Groups and provider
-  entries are newest first. Counts span sessions, and the latest matching event selects the resume command (mtime
+  Records mode (`SESSION_SEARCH_RECORDS=1`) is never grouped. The last `-d`, `-g` or
+  `-e` wins in `llmsearch`; sessions and directory groups are newest first. Directory counts span sessions, and the latest matching event selects the resume command (mtime
   fallback without timestamps). Headers are soft orange (256-colour 215) only
   on terminals with no nonempty `NO_COLOR`; records and redirected output
   remain plain.

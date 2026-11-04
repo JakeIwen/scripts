@@ -50,6 +50,24 @@ session_search_files() {
     done
 }
 
+# Directory roll-ups are llmsearch-only; provider searches keep treating -d as
+# search text, just as they do with --grep/--index.
+session_search_group_flag() {
+    case "$1" in
+        -g|--group) session_search_group=true ;;
+        -e|--single) session_search_group=false ;;
+        -d|--dirs)
+            [ -n "${session_search_dirs+set}" ] || return 1
+            session_search_dirs=true
+            session_search_group=true
+            return 0
+            ;;
+        *) return 1 ;;
+    esac
+    [ -z "${session_search_dirs+set}" ] || session_search_dirs=false
+    return 0
+}
+
 # A caller that offers --grep/--index sets session_search_grep to its default
 # before parsing; for the others these flags are search text. The query is also
 # kept split at --, into words before it and literal text after it.
@@ -70,6 +88,7 @@ session_search_parse_args() {
         arg=$1
         shift
         if [ "$literal" = false ]; then
+            if session_search_group_flag "$arg"; then continue; fi
             case "$arg" in
                 -a|-b|-a[0-9]*|-b[0-9]*|-[0-9]*)
                     case "$arg" in
@@ -96,8 +115,6 @@ session_search_parse_args() {
                 -t|--title|-n|--name) session_search_title=true; continue ;;
                 -s|--session) session_search_session=true; continue ;;
                 -f|--forks) session_search_forks=true; continue ;;
-                -g|--group) session_search_group=true; continue ;;
-                -e|--single) session_search_group=false; continue ;;
                 -h|--help) session_search_help=true; continue ;;
                 --grep|--index)
                     if [ -n "${session_search_grep+set}" ]; then

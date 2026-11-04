@@ -41,12 +41,21 @@ def session_search_index_ids:
     inputs | select((.host // "") == "") | [.tool, .id] |
     map(tostring | gsub("\u0000"; "") + "\u0000") | add;
 
+# Index rows can contain several matches for a session; keep their total and
+# newest matching message, but order sessions by activity like the grep scan.
+def session_search_index_sessions:
+    group_by([.provider, .id]) |
+    map(sort_by(.matched_at, .modified) | last + {count: (map(.count) | add)}) |
+    sort_by(-.modified, .provider, .id)[];
+
 # NUL-terminated fields for the shell to label and print: tool, cwd, id, name,
-# mtime (empty when unknown), count and excerpt. Keep the index's newest-match
-# order, or group newest first like grep mode's -g.
-def session_search_index_fields($group):
+# mtime (empty when unknown), count and excerpt. Ungrouped rows keep the index's
+# newest-match order; directory roll-ups retain their existing print order.
+def session_search_index_fields($group; $dirs):
     [inputs | session_search_index_record] |
-    if $group then session_search_group(.[]; .id) else .[] end |
+    if $dirs then session_search_group(.[]; .id)
+    elif $group then session_search_index_sessions
+    else .[] end |
     [.provider, .cwd, .id, .name, (if .mtime == null then "" else .modified end),
      .count, .context] |
     # NUL ends each field, so no field may contain one.
