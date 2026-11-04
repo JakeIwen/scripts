@@ -286,12 +286,28 @@ class RunningCommand:
     started: float
 
 
+def live_group_members(group):
+    listing = subprocess.run(['ps', '-A', '-o', 'pid=,pgid=,stat='],
+                             capture_output=True, text=True, check=True).stdout
+    rows = (line.split() for line in listing.splitlines())
+    return [int(pid) for pid, pgid, state in rows
+            if int(pgid) == group and not state.startswith('Z')]
+
+
 def kill_group(process):
+    """Kill the command's process group; return members still running."""
     try:
         os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError:
         pass
+    except PermissionError:
+        # macOS refuses killpg when every member left is a zombie; any member
+        # still running is one we may not signal, so the run must not pass.
+        process.kill()
+        process.wait()
+        return live_group_members(process.pid)
     process.wait()
+    return []
 
 
 def start_command(name, command, directory):
@@ -314,11 +330,14 @@ def finish_command(running, timeout):
         return None
     if status is None:
         status = 'timeout'
-    # A finished leader must not leave background descendants holding the lock.
-    kill_group(running.process)
+    # A finished leader must not leave background descendants running.
+    survivors = kill_group(running.process)
     running.output.seek(0)
     output = running.output.read().decode(errors='replace')
     running.output.close()
+    if survivors:
+        status = 'processes left running'
+        output += f'run_tests.py could not kill processes {survivors} left by this command.\n'
     return CommandResult(running.name, status, elapsed, output)
 
 
@@ -326,7 +345,7 @@ def report_result(result):
     if result.status == 0:
         label = f'PASS {result.name} ({result.secs:.1f}s)'
     else:
-        status = 'timeout' if result.status == 'timeout' else f'exit {result.status}'
+        status = result.status if isinstance(result.status, str) else f'exit {result.status}'
         label = f'FAIL {result.name} ({status})'
     print(label, flush=True)
     if result.output:
@@ -365,8 +384,11 @@ def run_suite(commands, jobs, timings, timeout, check_interruption):
                 time.sleep(0.02)
     finally:
         for job in running:
-            kill_group(job.process)
+            survivors = kill_group(job.process)
             job.output.close()
+            if survivors:
+                print(f'run_tests.py could not kill processes {survivors} left by {job.name}.',
+                      file=sys.stderr, flush=True)
     return results, failures, len(commands) - len(results)
 
 

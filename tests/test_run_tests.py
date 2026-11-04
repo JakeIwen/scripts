@@ -337,7 +337,7 @@ class RunnerTests(RunnerCase):
         first.write_text(first.read_text() + f'\nimport shutil\nshutil.rmtree({str(removed)!r})\n')
         code, output = self.run_suite('-j', '1')
         self.assertEqual(code, 1, output)
-        self.assertIn('FAIL zzgone/test_b.py (exit launch error)', output)
+        self.assertIn('FAIL zzgone/test_b.py (launch error)', output)
         self.assertIn('FAILED: 1 command(s) failed', output)
 
     def test_help_empty_inventory_and_bad_arguments(self):
@@ -466,6 +466,46 @@ class T(unittest.TestCase):
         os.kill(pid, 0)  # still running after the suite finished
         with (self.repo / '.git/run_tests/lock').open('a') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def test_command_leaving_only_a_zombie_in_its_group_passes(self):
+        # macOS killpg fails with EPERM when the group holds only zombies, as it
+        # does when a test's background child exits just as its command ends.
+        parent = Path(self.counter.parent / 'zombie-parent.pid')
+        (self.repo / 'tests' / 'test_zombie.py').write_text(f"""\
+import os, subprocess, time, unittest
+PARENT = {str(parent)!r}
+def state(pid):
+    return subprocess.run(['ps', '-o', 'stat=', '-p', str(pid)],
+                          capture_output=True, text=True).stdout.strip()
+class T(unittest.TestCase):
+    def test_it(self):
+        if os.fork() == 0:
+            grandchild = os.fork()
+            if grandchild == 0:
+                os._exit(0)  # stays in the group as a zombie nobody reaps
+            os.setsid()
+            deadline = time.monotonic() + 10
+            while not state(grandchild).startswith('Z') and time.monotonic() < deadline:
+                time.sleep(0.02)
+            if not state(grandchild).startswith('Z'):
+                os._exit(1)
+            with open(PARENT + '.tmp', 'w') as handle:
+                handle.write(str(os.getpid()))
+            os.replace(PARENT + '.tmp', PARENT)
+            time.sleep(30)
+            os._exit(0)
+        deadline = time.monotonic() + 10
+        while not os.path.exists(PARENT):
+            self.assertLess(time.monotonic(), deadline, 'grandchild never became a zombie')
+            time.sleep(0.02)
+""")
+        def kill_parent():
+            if parent.exists():
+                subprocess.run(['kill', '-9', parent.read_text()], capture_output=True)
+        self.addCleanup(kill_parent)
+        code, output = self.run_suite()
+        self.assertEqual(code, 0, output)
+        self.assertIn('PASS: all', output)
 
 if __name__ == '__main__':
     unittest.main()
