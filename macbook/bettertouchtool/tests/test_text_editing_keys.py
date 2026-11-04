@@ -67,14 +67,14 @@ class ConditionTests(unittest.TestCase):
         self.assertEqual(conditions.truth_table_errors(), [])
 
     def test_dropping_the_writable_check_is_caught_before_install(self):
-        loose = conditions.CUT_CONDITION.replace('(?=.*AXSelectedText [(]W[)]:  ").*', '.*')
-        self.assertNotEqual(loose, conditions.CUT_CONDITION)
-        with patch.object(conditions, 'CUT_CONDITION', loose):
-            self.assertIn('cut condition fires on: read-only text', conditions.truth_table_errors())
+        loose = conditions.CARET_CONDITION.replace('(?=.*AXSelectedText [(]W[)]:  ").*', '.*')
+        self.assertNotEqual(loose, conditions.CARET_CONDITION)
+        with patch.object(conditions, 'CARET_CONDITION', loose):
+            self.assertIn('caret condition fires on: read-only text', conditions.truth_table_errors())
 
     def test_stored_conditions_compare_in_nspredicate_format(self):
-        reserialized = conditions.CUT_CONDITION.replace(' AND ', '  AND  ')
-        self.assertEqual(conditions.canonical(reserialized), conditions.canonical(conditions.CUT_CONDITION))
+        reserialized = conditions.CARET_CONDITION.replace(' AND ', '  AND  ')
+        self.assertEqual(conditions.canonical(reserialized), conditions.canonical(conditions.CARET_CONDITION))
 
 
 @unittest.skipUnless(shutil.which('node'), 'emitted scripts are executed with Node')

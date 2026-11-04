@@ -66,7 +66,7 @@ def definitions():
                         _action('wrapSelectedText', 'runEditingKey',
                                 {'kind': 'wrap', 'open': char, 'directory': directory}, 'Wrap stopped'))
               for char, keycode, modifiers in WRAP_KEYS]
-    result.append(_keyboard('cut line', *CUT_KEY, conditions.CUT_CONDITION,
+    result.append(_keyboard('cut line', *CUT_KEY, conditions.CARET_CONDITION,
                             'Editing keys: Cmd-X with no selection cuts the line',
                             _action('cutCurrentLine', 'runEditingKey', {'kind': 'cut-line', 'directory': directory},
                                     'Cut line stopped', before=SELECT_LINE)))
