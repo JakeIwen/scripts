@@ -9,6 +9,8 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import signal
+import subprocess
 import sys
 import tempfile
 import time
@@ -18,6 +20,9 @@ import time
 ALIASES = {'offsite_mounts.sh': 'mounts', 'samba_share_control.sh': 'samba', 'ntfy_send.sh': 'notify'}
 LOGGED_ENVIRONMENT = ('OFFSITE_ADMISSION', 'VANPI_BACKUP_JOB_LOCK_FD', 'VANPI_BACKUP_DISK_LOCK_FDS',
                       'VANPI_BACKUP_CLOUD_SLOT_FD')
+# Upper bounds only, so a failed test never leaves a fixture process behind for long.
+HOLD_SECONDS = 300
+ORPHAN_SECONDS = 120
 
 
 def main():
@@ -127,6 +132,8 @@ def mounts(state, args):
         print('\n'.join(state[args[0]]))
         return
     label = args[1]
+    if state.get('source_conf') and args[0] in ('mount', 'release') and not sourced_configuration(state):
+        return 1
     if args[0] in ('mount', 'release') and not admitted(args):
         print('fixture mount helper refused admission')
         return 1
@@ -189,7 +196,13 @@ def restic(state, args):
                                               'total_bytes': 100, 'seconds_elapsed': 5}])
         for event in events:
             print(json.dumps(event), flush=True)
+        if state.get('orphan'):
+            spawn_orphan(Path(state['orphan']))
         Path(state['mount_root']).parent.joinpath('backup-started').touch()
+        hold = state.get('hold_until')
+        deadline = time.monotonic() + HOLD_SECONDS
+        while hold and not Path(hold).exists() and time.monotonic() < deadline:
+            time.sleep(0.1)
         if state.get('hang'):
             while True:
                 time.sleep(0.1)
@@ -212,6 +225,41 @@ def restic(state, args):
         restored.parent.mkdir(parents=True, exist_ok=True)
         restored.write_text('content')
         print('restored 1 file')
+
+
+def spawn_orphan(record):
+    """A descendant in its own session that keeps restic's inherited lock descriptors and ignores TERM.
+
+    Its standard streams go to /dev/null so the worker's pipe reaches EOF; only
+    the lock descriptors outlive restic, as with a real orphaned child.
+    """
+    if os.fork():
+        return
+    os.setsid()
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    null = os.open(os.devnull, os.O_RDWR)
+    for stream in (0, 1, 2):
+        os.dup2(null, stream)
+    os.close(null)
+    temporary = record.with_name(record.name + '.tmp')
+    temporary.write_text(str(os.getpid()))
+    os.replace(temporary, record)
+    time.sleep(ORPHAN_SECONDS)
+    os._exit(0)
+
+
+def sourced_configuration(state):
+    """Source backup_conf.sh beside this helper first, as offsite_mounts.sh does; False if it fails."""
+    here = Path(sys.argv[0]).resolve().parent
+    result = subprocess.run(['/bin/bash', '-c', '. "$1" || exit 1; printf "%s\\n" "$BACKUP_CONF_DIR" "$KEEP_DAILY"',
+                             'conf', str(here / 'backup_conf.sh')], capture_output=True, text=True, timeout=60)
+    lines = result.stdout.splitlines()
+    live = state.get('move_live')
+    state.setdefault('sourced_conf', []).append({
+        'status': result.returncode, 'directory': lines[0] if lines else None,
+        'keep_daily': lines[1] if len(lines) > 1 else None, 'stderr': result.stderr[-500:],
+        'live_present': Path(live).exists() if live else None})
+    return result.returncode == 0
 
 
 def smbstatus(state, args):
