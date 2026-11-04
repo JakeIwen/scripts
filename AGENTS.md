@@ -1123,6 +1123,7 @@ and runs isolated Python unittest modules per file, Node tests, shell tests,
 Claude mod tests and the dashboard's Vitest suite. Missing interpreters/dependencies
 are errors; executable availability is checked before suite commands start.
 Tests needing specific OS features or hardware must state their skip reason.
+Shell tests run under macOS `/bin/bash` 3.2, where `set -e` ignores a failing `[[ ]]` or `(( ))`, so assertions must fail explicitly (`[[ ... ]] || fail ...`).
 Set `BTT_LIVE_TESTS=1` to also enable BTT's opt-in native bridge tests.
 Use an interpreter with Flask and Werkzeug installed (this checkout has an isolated
 `.local/test-venv/bin/python`) and install the dashboard's npm dependencies first.
