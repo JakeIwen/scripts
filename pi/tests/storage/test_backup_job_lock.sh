@@ -92,13 +92,18 @@ VANPI_BACKUP_JOB_LOCK="$lock" \
   : > "$2"
   trap "exit 0" TERM INT
   while :; do /bin/sleep 0.1; done
-' test "$config" "$ready" &
+' test "$config" "$ready" >"$test_root/holder.log" 2>&1 &
 holder_pid=$!
-for _ in {1..50}; do
-  [[ -e "$ready" ]] && break
+# Startup includes configuration and metadata probes on a loaded Pi; wait for
+# readiness, not a fixed number of polls, and don't hide a dead helper.
+deadline=$((SECONDS + 10))
+while [[ ! -e "$ready" ]] && kill -0 "$holder_pid" 2>/dev/null && (( SECONDS < deadline )); do
   /bin/sleep 0.02
 done
-[[ -e "$ready" ]] || fail "lock holder did not start"
+[[ -e "$ready" ]] || {
+  cat "$test_root/holder.log" >&2
+  fail "lock holder did not become ready within 10s or exited during startup"
+}
 if run_with_lock_config -c 'source "$1"; acquire_job_lock' test "$config" \
     >/dev/null 2>&1; then
   fail "second caller acquired an active lock"
