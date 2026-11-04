@@ -84,5 +84,10 @@ class PTYDriver:
                     self.process.kill()
                 self.process.wait(timeout=5)
         finally:
+            # Codex's helpers share its session; none may outlive it and write into the temp home.
+            try:
+                os.killpg(self.process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
             os.close(self.master)
             os.close(self.slave)
