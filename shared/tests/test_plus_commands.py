@@ -44,15 +44,15 @@ class PlusCommandsTests(unittest.TestCase):
         return subprocess.run([sys.executable, str(SCRIPT), '--file', str(self.file), *args],
                               input=stdin, capture_output=True, text=True, check=False)
 
-    def test_lists_each_command_with_its_first_sentence(self):
+    def test_lists_each_command_alphabetically_with_its_first_sentence(self):
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stderr)
         lines = result.stdout.splitlines()
         self.assertEqual(lines[0], '+ commands')
         self.assertEqual(lines[1:4], [
+            '  +art  Summarize this conversation, narrowed to any focus (+art just the wiring).',
             '  +cp   Commit and push, the same as c/p.',
             "  +id   Find which sessions own the repo's uncommitted work.",
-            '  +art  Summarize this conversation, narrowed to any focus (+art just the wiring).',
         ])
         self.assertTrue(lines[4].startswith('Full definitions: "+ commands" in '))
         self.assertNotIn('+old', result.stdout)

@@ -5,6 +5,8 @@ The + commands (`+cp`, `+id`, `+cmd`, ...) are defined once, in the
 "## + commands" section of each machine's global instruction file, one
 bullet per command whose first sentence is its summary. This prints each
 command with that sentence, so the list can't drift from the definitions.
+The list is alphabetical by command name (Jacob's preference), whatever
+order the instruction file defines them in.
 
 `--hook` reads a Claude Code or Codex UserPromptSubmit event on stdin. When
 the prompt is exactly `+cmd`, it blocks the prompt and returns the list as
@@ -73,6 +75,7 @@ def listing(path: Path) -> str | None:
         return None
     if not found:
         return None
+    found.sort(key=lambda pair: pair[0].lower())
     width = max(len(name) for name, _ in found)
     rows = [f"  {name.ljust(width)}  {summary}" for name, summary in found]
     return "\n".join(["+ commands", *rows, f'Full definitions: "+ commands" in {_home_relative(path)}'])
