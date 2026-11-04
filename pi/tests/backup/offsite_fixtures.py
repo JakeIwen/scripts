@@ -5,9 +5,11 @@ copies the closure from a fixture live tree, and the worker then imports only
 from that snapshot while it holds job-offsite (prepare-disk: the legacy lock on
 fd 9). The fake commands stand in for devices, restic and the mount helper.
 """
+import atexit
 from contextlib import ExitStack
 from dataclasses import asdict, replace
 import fcntl
+import functools
 import hashlib
 import json
 import os
@@ -15,6 +17,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 
 from backup_admission import HeldDescriptor
 import backup_locks
@@ -23,6 +26,8 @@ from pi.tests.backup.backup_lock_fixtures import temporary_registry
 
 
 REPO_SCRIPTS = Path(__file__).resolve().parents[2] / 'scripts'
+# Command doubles skip site (-S): none needs it, and a test starts dozens of them.
+FAKE_SHEBANG = '#!' + sys.executable + ' -S\n'
 READ_ONLY = ('status', 'dashboard', 'rates')
 PROLOGUE = '''
 import os, sys
@@ -75,6 +80,24 @@ with context:
 '''
 
 
+@functools.cache
+def command_double(source):
+    """One read-only executable per test process for a double's source; fixtures hard-link it per name.
+
+    macOS assesses each newly written executable on its first exec (about 70 ms
+    measured, more under the parallel suite), so fresh per-fixture copies paid
+    that for every command name in every test. A hard link shares the assessed
+    inode yet keeps the name's own path in argv[0]. Read-only, so a test that
+    rewrote a double in place would fail instead of leaking into later tests.
+    """
+    directory = Path(tempfile.mkdtemp(prefix='offsite-doubles-'))
+    atexit.register(shutil.rmtree, directory, ignore_errors=True)
+    path = directory / 'command'
+    path.write_text(FAKE_SHEBANG + source)
+    path.chmod(0o555)
+    return path
+
+
 def high_descriptor(fd):
     # Keep fixture descriptors clear of the production numbers 9 and 10.
     moved = fcntl.fcntl(fd, fcntl.F_DUPFD, 200)
@@ -101,11 +124,9 @@ class OffsiteFixture:
         self.job_fd = self.hold(self.job_path)
         self.bin = self.root / 'bin'
         self.bin.mkdir()
-        fake = Path(__file__).with_name('offsite_fake_command.py').read_text()
+        fake = command_double(Path(__file__).with_name('offsite_fake_command.py').read_text())
         for name in COMMANDS:
-            path = self.bin / ('fake-' + name)
-            path.write_text('#!' + sys.executable + '\n' + fake)
-            path.chmod(0o755)
+            os.link(fake, self.bin / ('fake-' + name))
         for directory in ('mnt', 'by-id', 'drain', 'state', 'password'):
             (self.root / directory).mkdir(mode=0o700)
         self.cfg = Config(state=self.root / 'state', password=self.root / 'password' / 'secret',

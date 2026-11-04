@@ -1051,6 +1051,7 @@ Claude mod tests. Missing interpreters/dependencies
 are errors; executable availability is checked before suite commands start.
 Tests needing specific OS features or hardware must state their skip reason.
 Shell tests run under macOS `/bin/bash` 3.2, where `set -e` ignores a failing `[[ ]]` or `(( ))`, so assertions must fail explicitly (`[[ ... ]] || fail ...`).
+macOS checks each newly written executable on its first run (about 70 ms, more under suite load). Fixtures that start many command doubles hard-link one copy per process (`command_double` in `pi/tests/backup/offsite_fixtures.py`) or run scripts through their interpreter, and never start a freshly written executable inside a short timeout.
 Set `BTT_LIVE_TESTS=1` to also enable BTT's opt-in native bridge tests.
 Use an interpreter with Flask and Werkzeug installed (this checkout has an isolated
 `.local/test-venv/bin/python`).

@@ -4,15 +4,13 @@ The `mounts` double honors offsite_mounts.sh's admission and release contract
 (OFFSITE.md "Locks"): it checks the inherited descriptors and probes the real
 fixture registry, so lock ordering mistakes fail these tests.
 """
+# Every call is a fresh interpreter (the fixtures start it with -S) and the
+# suites make thousands, so modules only a few commands need load where used.
 import fcntl
-import hashlib
 import json
 import os
 from pathlib import Path
-import signal
-import subprocess
 import sys
-import tempfile
 import time
 
 
@@ -43,9 +41,9 @@ def main():
                 'samba': samba, 'notify': notify}
     result = commands.get(name, lambda s, a: 0)(state, args)
     if name in ('sfdisk', 'mkfs', 'samba', 'notify') or (name == 'mounts' and args[0] in ('mount', 'release')):
-        with tempfile.NamedTemporaryFile(mode='w', dir=fixture.parent, delete=False) as stream:
-            json.dump(state, stream)
-        os.replace(stream.name, fixture)
+        temporary = fixture.with_name(f'{fixture.name}.{os.getpid()}.tmp')
+        temporary.write_text(json.dumps(state))
+        os.replace(temporary, fixture)
     return result or 0
 
 
@@ -243,6 +241,7 @@ def spawn_orphan(record):
     Its standard streams go to /dev/null so the worker's pipe reaches EOF; only
     the lock descriptors outlive restic, as with a real orphaned child.
     """
+    import signal
     if os.fork():
         return
     os.setsid()
@@ -260,6 +259,7 @@ def spawn_orphan(record):
 
 def sourced_configuration(state):
     """Source backup_conf.sh beside this helper first, as offsite_mounts.sh does; False if it fails."""
+    import subprocess
     here = Path(sys.argv[0]).resolve().parent
     result = subprocess.run(['/bin/bash', '-c', '. "$1" || exit 1; printf "%s\\n" "$BACKUP_CONF_DIR" "$KEEP_DAILY"',
                              'conf', str(here / 'backup_conf.sh')], capture_output=True, text=True, timeout=60)
@@ -295,6 +295,7 @@ def notify(state, args):
     state['busy_at_notify'] = busy
     root = Path(sys.argv[0]).parent
     if (root / 'manifest.json').exists():
+        import hashlib
         manifest = json.loads((root / 'manifest.json').read_text())
         state['manifest_ok'] = all(hashlib.sha256((root / name).read_bytes()).hexdigest() == digest
                                    for name, digest in manifest['files'].items())
