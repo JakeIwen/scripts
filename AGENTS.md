@@ -273,7 +273,8 @@ compare it with this checkout. Deployed files may differ from the repository.
   `writeClipboardText`, refusing if the caret moved while it read. Never select
   by posting keys: neither BTT's key actions nor `CGEventPost` confirm delivery.
   Their tests reuse `tests/firefox_editor_fixture.cjs`, the Firefox marker model
-  shared with `text_markers.test.cjs`.
+  shared with `text_markers.test.cjs`, and `tests/pasteboard_fixture.cjs`, the
+  in-memory pasteboard shared with `menu_paste.test.cjs`.
   `install_finder_paste.py` (`btt.py finder-paste`) owns Cmd-V in Finder: one global
   conditional pass-through trigger (Finder frontmost, no settable text focus) whose
   runtime `finder_paste.js` presses Finder's Edit > Paste for files and text and

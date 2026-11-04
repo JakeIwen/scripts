@@ -532,9 +532,11 @@ and report identities. Recreate venvs rather than moving them.
   the resulting draft must match the exact expected edit before success is reported.
   It then restores the transformed selection. No Copy or message-send action runs.
   `tests/menu_paste.test.cjs` covers restoration, concurrent copies, menu refusal,
-  unverified writes and asynchronous draft confirmation. With `BTT_LIVE_TESTS=1`,
-  it also exercises the real Cocoa bridge on a disposable named pasteboard; that
-  opt-in test never accesses the general clipboard or user text.
+  unverified writes and asynchronous draft confirmation, on the in-memory
+  pasteboard in `tests/pasteboard_fixture.cjs` that the editing keys' tests share.
+  With `BTT_LIVE_TESTS=1`, it also exercises the real Cocoa bridge on a disposable
+  named pasteboard; that opt-in test never accesses the general clipboard or user
+  text.
   Command discovery inspects only immediate Cut/Copy/Paste siblings in a top-level
   menu; it never descends into browser history, bookmarks or Services submenus.
   Firefox bypasses `AXSelectedText` because its

@@ -5,39 +5,12 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const {firefoxEditor} = require('./firefox_editor_fixture.cjs');
+const {PLAIN_TEXT, array:nsArray, Item, pasteboardFake} = require('./pasteboard_fixture.cjs');
 
 // Cmd-X / Cmd-C with no selection, run through runEditingKey against a modelled
 // focused field, its app's Edit menu (found by the real text_menu_paste.js) and
 // the general pasteboard (written by its real writeClipboardText). Elements
 // carry ids so they stay distinct under the Firefox model's by-value equality.
-const PLAIN_TEXT = 'public.utf8-plain-text';
-const nsArray = values => ({count:values.length, objectAtIndex:index => values[index]});
-
-// The general pasteboard: `prepared` lists each clear's options, `items` the
-// type → string maps written since. `write` is an app's own Cut.
-function pasteboard() {
-    const board = {changeCount:7, items:[{[PLAIN_TEXT]:'earlier'}], prepared:[],
-        get text() { return this.items.length ? this.items[0][PLAIN_TEXT] : undefined; },
-        stringForType(type) { return this.items.length ? this.items[0][type] : undefined; },
-        prepareForNewContentsWithOptions(options) {
-            this.prepared.push(options);
-            this.items = [];
-            return ++this.changeCount;
-        },
-        writeObjects(array) {
-            this.items = [array.objectAtIndex(0).values];
-            return true;
-        }};
-    const write = text => { board.changeCount++; board.items = [{[PLAIN_TEXT]:text}]; };
-    const item = () => {
-        const values = {};
-        return {values, setStringForType(value, type) { values[type] = value; return true; }};
-    };
-    return {board, write, native:{NSPasteboard:{generalPasteboard:board}, NSPasteboardTypeString:PLAIN_TEXT,
-        NSPasteboardContentsCurrentHostOnly:1,
-        NSPasteboardItem:{alloc:{get init() { return item(); }}}, NSArray:{arrayWithObject:value => nsArray([value])}}};
-}
-
 function editMenu() {
     const bar = {id:'menu bar'}, appMenu = {id:'app menu'}, edit = {id:'edit'}, menu = {id:'edit menu'};
     const cut = {id:'cut'}, copy = {id:'copy'}, paste = {id:'paste'};
@@ -61,7 +34,9 @@ function keyFixture(field, {bundle = 'com.apple.TextEdit', enabled = true, onAtt
     const system = {id:'system'}, app = {id:'app'}, menu = editMenu();
     const other = cocoaField('IMPORTANT', 0, {id:'other field'});
     other.selection = {location:0, length:other.text.length};
-    const {board, write, native:clipboard} = pasteboard();
+    const {board, native:clipboard, contents} = pasteboardFake({items:[{[PLAIN_TEXT]:'earlier'}], changeCount:7});
+    // An app's own Cut.
+    const write = text => { board.clearContents; board.writeObjects([new Item({[PLAIN_TEXT]:text})]); };
     const state = {focused:field.element, other, presses:[], board};
     const fields = [field, other];
     const attribute = (element, name, options) => {
@@ -112,7 +87,7 @@ function keyFixture(field, {bundle = 'com.apple.TextEdit', enabled = true, onAtt
         selectionReadSource:file => fs.readFileSync(path.join(__dirname, '..', path.basename(file)), 'utf8')
     });
     const run = kind => JSON.parse(context.runEditingKey({kind, directory:'/fixture'}));
-    return {run, state, board, context};
+    return {run, state, board, contents, context};
 }
 
 // A Cocoa text view: AXValue holds the breaks and ranges are numeric. Options
@@ -173,10 +148,10 @@ test('Cmd-C puts the caret’s line on the clipboard as plain text and leaves th
         ['one\u2029two', 0, 'one\n']
     ]) {
         const field = cocoaField(text, caret);
-        const {run, state, board} = keyFixture(field);
+        const {run, state, board, contents} = keyFixture(field);
         assert.deepEqual(run('copy-line'), {ok:true, result:'copied line'}, JSON.stringify([text, caret]));
         // One ordinary copy: plain text alone, not marked transient or kept off other devices.
-        assert.deepEqual(board.items, [{[PLAIN_TEXT]:line}]);
+        assert.deepEqual(contents(), [{[PLAIN_TEXT]:line}]);
         assert.deepEqual(board.prepared, [0]);
         assert.deepEqual(state.presses, []);
         assert.equal(field.writes, 0);
@@ -193,11 +168,11 @@ test('a key typed between the copy’s reads is caught and nothing is copied', (
     };
     const field = cocoaField(THREE, 5);
     let typing = true;
-    const {run, board} = keyFixture(field, {onAttribute:(state, element, name) => {
+    const {run, board, contents} = keyFixture(field, {onAttribute:(state, element, name) => {
         if (typing && element === field.element && name === 'AXValue') { typing = false; typed(field); }
     }});
     assert.deepEqual(run('copy-line'), {ok:false, error:'The caret moved while the line was read; nothing was copied.'});
-    assert.deepEqual(board.items, [{[PLAIN_TEXT]:'earlier'}]);
+    assert.deepEqual(contents(), [{[PLAIN_TEXT]:'earlier'}]);
     assert.equal(board.changeCount, 7);
 });
 
@@ -318,9 +293,9 @@ test('Firefox copies the caret’s paragraph text, with a break unless it is the
     ]) {
         const field = firefoxField(paragraphs, node, offset);
         const caret = JSON.stringify(field.document.state.selection);
-        const {run, state, board} = keyFixture(field, {bundle:'org.mozilla.firefox'});
+        const {run, state, board, contents} = keyFixture(field, {bundle:'org.mozilla.firefox'});
         assert.deepEqual(run('copy-line'), {ok:true, result:'copied line'}, JSON.stringify([paragraphs, node]));
-        assert.deepEqual(board.items, [{[PLAIN_TEXT]:line}]);
+        assert.deepEqual(contents(), [{[PLAIN_TEXT]:line}]);
         assert.deepEqual(state.presses, []);
         assert.equal(JSON.stringify(field.document.state.selection), caret);
         assert.deepEqual(field.document.texts(), paragraphs);
