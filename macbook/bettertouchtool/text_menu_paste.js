@@ -17,22 +17,38 @@ function copyPasteboard(board) {
     return {version, copies};
 }
 
+// Replaces the clipboard with plain `text`, plus '1' under each of `flags`
+// (nspasteboard.org markers), and returns the changeCount it then owns.
+// `claim` hears each owned count as soon as the clipboard is cleared, so a
+// caller can still restore what it saved when a later step fails.
+function writeClipboardText(board, text, {flags = [], options = 0, claim = () => {}} = {}) {
+    const item = $.NSPasteboardItem.alloc.init;
+    if (!item.setStringForType(text, $.NSPasteboardTypeString)) throw new Error('Could not prepare the clipboard text.');
+    for (const type of flags) {
+        if (!item.setStringForType('1', type)) throw new Error('Could not mark the clipboard data.');
+    }
+    let owned = Number(board.prepareForNewContentsWithOptions(options));
+    claim(owned);
+    if (Number(board.changeCount) !== owned) throw new Error('The clipboard changed during the write.');
+    if (!board.writeObjects($.NSArray.arrayWithObject(item))) throw new Error('Could not write the clipboard.');
+    owned = Number(board.changeCount);
+    claim(owned);
+    if (ObjC.unwrap(board.stringForType($.NSPasteboardTypeString)) !== text)
+        throw new Error('The clipboard text did not read back.');
+    return owned;
+}
+
 function withTemporaryClipboard(board, text, action) {
     const saved = copyPasteboard(board);
-    const item = $.NSPasteboardItem.alloc.init;
-    if (!item.setStringForType(text, $.NSPasteboardTypeString)) throw new Error('Could not prepare transformed text.');
-    for (const type of ['org.nspasteboard.TransientType', 'org.nspasteboard.ConcealedType']) {
-        if (!item.setStringForType('1', type)) throw new Error('Could not mark temporary clipboard data.');
-    }
     let owned = null;
     try {
         if (Number(board.changeCount) !== saved.version) throw new Error('Clipboard changed; nothing pasted.');
-        owned = Number(board.prepareForNewContentsWithOptions($.NSPasteboardContentsCurrentHostOnly));
-        if (Number(board.changeCount) !== owned) throw new Error('Clipboard changed; nothing pasted.');
-        if (!board.writeObjects($.NSArray.arrayWithObject(item))) throw new Error('Could not set temporary clipboard data.');
-        owned = Number(board.changeCount);
-        if (ObjC.unwrap(board.stringForType($.NSPasteboardTypeString)) !== text)
-            throw new Error('Temporary clipboard text was not verified; nothing pasted.');
+        try {
+            writeClipboardText(board, text, {flags: ['org.nspasteboard.TransientType', 'org.nspasteboard.ConcealedType'],
+                options: $.NSPasteboardContentsCurrentHostOnly, claim: count => { owned = count; }});
+        } catch (error) {
+            throw new Error(error.message + ' Nothing was pasted.');
+        }
         action(() => Number(board.changeCount) === owned);
     } finally {
         // Preserve a newer user copy instead of restoring our older snapshot over it.
