@@ -791,9 +791,15 @@ compare it with this checkout. Deployed files may differ from the repository.
   repository, and the cloud workers hold the exclusive `cloud-upload` slot for
   their whole run (taken by the shell wrapper before `exec`, so a busy slot exits
   before any attempt is recorded). Migrated jobs hold the legacy
-  `/run/lock/vanpi_backup.lock` shared on fd 9; `restore_from_borg.sh`,
-  `new_hotspare.sh` and the deployment fences keep `acquire_job_lock` exclusive,
-  so legacy consumers exclude and are excluded by every job. Never create lock
+  `/run/lock/vanpi_backup.lock` shared on fd 9. `restore_from_borg.sh`,
+  `new_hotspare.sh` and offsite `prepare-disk` take it exclusively through
+  `acquire_job_lock`, which also takes `job-offsite`, so they exclude and are
+  excluded by every job, an offsite run included. The deploy fence
+  (`local_backup_begin` in `pi/backup_local_deploy.sh`) opens the existing inode
+  and takes it exclusively, non-blocking, on fd 9 itself, never through
+  `acquire_job_lock`: it refuses while any migrated job runs and no offsite run
+  can start while it is held, but without `job-offsite` it publishes beside a
+  running offsite run (see `offsite_backup.sh` below). Never create lock
   files at runtime, never probe with path-form `flock`, and never drain a disk
   that the caller is not about to unmount or spin down: `umount_disks.sh` passes
   the labels it unmounts (with `--spindown`, every attached HDD, since a job
