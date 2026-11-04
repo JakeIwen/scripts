@@ -1122,6 +1122,11 @@ mirrors it):
 - Its `__main__` writes `/run/van-dashboard/package-release` naming the scripts
   release it imported. `deploy_python.py` lists the unit in `EXTERNAL_CONSUMERS`,
   so release GC keeps that release while the dashboard runs.
+- Until the Pi is cut over, a release would strand the scripts-era unit, which
+  runs `-m pi.apps.van_dashboard` through `current`: the receiver refuses
+  `--activate`/`--update` while an `EXTERNAL_CONSUMERS` unit runs a `pi`/`shared`
+  module the release lacks, and `pi/sync_scripts.sh`'s preflight refuses before
+  any upload. Deploy the van-dashboard repo first (its `docs/cutover.md`).
 - A scripts deploy that changes those modules does not restart the dashboard: it
   keeps the release it pinned at start. Restart it afterwards
   (`ssh pi@vanpi.lan sudo systemctl restart van-dashboard`) or redeploy it.

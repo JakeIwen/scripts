@@ -13,7 +13,7 @@ FAILURE_STATUS = 23
 
 
 class SyncWorkflowTests(unittest.TestCase):
-    def test_package_activation_guard_stops_sync_before_any_mutation(self):
+    def test_preflight_guards_stop_sync_before_any_mutation(self):
         definitions = SYNC_SCRIPT.read_text().split('source "$dsc/pi/sync_workflow.sh"')[0]
         temporary = tempfile.TemporaryDirectory(prefix="sync-compute-checkout-")
         self.addCleanup(temporary.cleanup)
@@ -22,13 +22,17 @@ class SyncWorkflowTests(unittest.TestCase):
         installer.parent.mkdir(parents=True)
         installer.write_text("#!/bin/zsh\nexit 0\n", encoding="utf-8")
         installer.chmod(0o700)
-        for status in (0, 1):
-            with self.subTest(status=status):
+        for dashboard, status in (("absent", 0), ("absent", 1), ("scripts-era", 0)):
+            with self.subTest(dashboard=dashboard, status=status):
                 harness = definitions + f'''
 # Every external operation is a fake; only the actual preflight/workflow run.
 dsc={shlex.quote(str(REPOSITORY_ROOT.parent))}
 VAN_COMPUTE_CHECKOUT={shlex.quote(str(checkout))}
 ssh() {{
+  if [[ "$*" == *van-dashboard.service* ]]; then
+    printf '%s\\n' {dashboard}
+    return 0
+  fi
   if [[ "$*" == *activated.json* ]]; then
     printf 'activation-check\\n'
     return {status}
@@ -45,6 +49,11 @@ run_sync_workflow
 '''
                 result = subprocess.run(['/bin/bash', '-c', harness],
                                         capture_output=True, text=True)
+                if dashboard == "scripts-era":
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertEqual(result.stdout, "")
+                    self.assertIn("docs/cutover.md", result.stderr)
+                    continue
                 self.assertEqual(result.returncode, status, result.stderr)
                 self.assertEqual(result.stdout.splitlines(), ['activation-check'] + (
                     ['non-python-write', 'package-write', 'compute-write'] if status == 0 else []))
@@ -118,6 +127,52 @@ sync_preflight
                     recorded,
                     [*PHASES[: index + 1], f"status={FAILURE_STATUS}"],
                 )
+
+
+class DashboardCutOverGuardTests(unittest.TestCase):
+    """Broad sync must not ship a release the scripts-era dashboard unit still runs from."""
+
+    def check(self, unit_text=None, reachable=True):
+        definitions = SYNC_SCRIPT.read_text().split('source "$dsc/pi/sync_workflow.sh"')[0]
+        with tempfile.TemporaryDirectory(prefix="sync-dashboard-unit-") as directory:
+            unit = Path(directory) / "van-dashboard.service"
+            if unit_text is not None:
+                unit.write_text(unit_text)
+            # Run the remote probe locally against the fixture unit.
+            fake_ssh = 'bash -c "${@: -1}"' if reachable else "return 255"
+            harness = definitions + f"""
+dashboard_unit={shlex.quote(str(unit))}
+ssh() {{ {fake_ssh}; }}
+check_dashboard_cut_over
+"""
+            return subprocess.run(["/bin/bash", "-c", harness], capture_output=True, text=True)
+
+    def test_scripts_era_launch_refuses(self):
+        for unit_text in (
+            "[Service]\nExecStart=/usr/bin/python3 -P -m pi.apps.van_dashboard\n",
+            "[Service]\nExecStart=/usr/bin/python3 -P -m van_dashboard\n"
+            "ExecStopPost=/usr/bin/python3 -P -m pi.apps.van_dashboard.van_dashboard_cop --relay-off\n",
+        ):
+            with self.subTest(unit_text=unit_text):
+                result = self.check(unit_text)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn("deploy the van-dashboard repo first", result.stderr.lower())
+
+    def test_cut_over_or_absent_unit_passes(self):
+        for unit_text in (
+            "[Service]\nExecStart=/usr/bin/python3 -P -m van_dashboard\n"
+            "ExecStopPost=/usr/bin/python3 -P -m van_dashboard.van_dashboard_cop --relay-off\n"
+            "# formerly -m pi.apps.van_dashboard\n",
+            None,
+        ):
+            with self.subTest(unit_text=unit_text):
+                result = self.check(unit_text)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_unreadable_pi_refuses(self):
+        result = self.check(reachable=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("couldn't read", result.stderr)
 
 
 class PiBashrcGuardTests(unittest.TestCase):

@@ -531,6 +531,36 @@ def validate_dropins(unit, dropins):
                 raise ValueError(f'{unit} drop-in {name} overrides package launch: {key}')
 
 
+def check_external_consumers(services, manifest):
+    """Refuse a release whose current link would strand another repo's unit.
+
+    Those units import through current, so a release missing a module their
+    commands run (the scripts-era dashboard unit's -m pi.apps.van_dashboard)
+    would fail at their next restart, relay-off included.
+    """
+    import shlex
+    files = manifest['files']
+    shipped = {PurePosixPath(name).parts[0] for name in files}
+    for unit in EXTERNAL_CONSUMERS:
+        try:
+            raw = services.read_unit(unit)
+        except FileNotFoundError:
+            continue
+        for key, value in directives(raw):
+            if not key.startswith('Exec'):
+                continue
+            words = shlex.split(value)
+            for index, word in enumerate(words[:-1]):
+                module = words[index + 1]
+                path = module.replace('.', '/')
+                if (word == '-m' and module.split('.')[0] in shipped
+                        and f'{path}/__main__.py' not in files and f'{path}.py' not in files):
+                    raise ValueError(
+                        f'{unit} still runs -m {module} ({key}), which this release no longer '
+                        'ships; deploy the van-dashboard repo first (its docs/cutover.md), then '
+                        'retry. No state, link or unit was changed.')
+
+
 def atomic_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, name = tempfile.mkstemp(prefix='.state-', dir=path.parent)
@@ -612,6 +642,7 @@ def install_release(stream, root, mode, services=None, selected=None):
             return completed(release, [])
         if services is None:
             raise ValueError('activation requires a service manager')
+        check_external_consumers(services, manifest)
         work = []
         # Validate ALL selected services before saving, journaling or changing
         # current/units. --update cannot silently undo a deliberate flat rollback.

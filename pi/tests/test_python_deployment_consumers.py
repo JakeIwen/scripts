@@ -1,5 +1,6 @@
 """Contracts with units other repos own that import this package release."""
 import io
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -38,6 +39,20 @@ for name in sys.argv[2:]:
     if not origin or not origin.startswith(release + '/'):
         raise SystemExit(f'{name} resolved outside the release: {origin}')
 """
+SCRIPTS_ERA_UNIT = (b"[Service]\n"
+                    b"ExecStart=/usr/bin/python3 -P -m pi.apps.van_dashboard\n"
+                    b"ExecStopPost=/usr/bin/python3 -P -m pi.apps.van_dashboard.van_dashboard_cop --relay-off\n")
+CUT_OVER_UNIT = (b"[Service]\n"
+                 b"ExecStart=/usr/bin/python3 -P -m van_dashboard\n"
+                 b"ExecStopPost=/usr/bin/python3 -P -m van_dashboard.van_dashboard_cop --relay-off\n")
+
+
+def tree_state(root):
+    """Links, journals and units a refused install must leave exactly as they were."""
+    return {str(path.relative_to(root)): os.readlink(path) if path.is_symlink() else path.read_bytes()
+            for path in sorted(root.rglob("*"))
+            if path.is_symlink() or (path.is_file() and "releases" not in path.parts
+                                     and path.name != ".install.lock")}
 
 
 class ExternalConsumerTests(unittest.TestCase):
@@ -61,6 +76,51 @@ class ExternalConsumerTests(unittest.TestCase):
         # Without the consumer's record the oldest two would go (newest three
         # plus the installed one are retained), so collection really ran.
         self.assertEqual(result["removed"], [releases[1].name, releases[2].name])
+
+    def install(self, repo, root, mode, services):
+        fixtures = transactions.PythonDeploymentTests
+        return fixtures._install(deployment.build_plan(repo), repo, root, mode, services=services,
+                                 selected=list(deployment.SERVICES))
+
+    def test_scripts_era_dashboard_unit_blocks_activation_and_update(self):
+        fixtures = transactions.PythonDeploymentTests
+        for mode in ("activate", "update"):
+            with self.subTest(mode=mode), fixtures.fixture() as repo, \
+                    tempfile.TemporaryDirectory() as name:
+                root = Path(name) / "packages"
+                services = transactions.FakeSystemServices(active=set(deployment.SERVICES))
+                if mode == "update":
+                    self.install(repo, root, "activate", services)
+                    (repo / transactions.SAMPLE_MODULE).write_text("CHANGED = True\n")
+                services.units[DASHBOARD] = SCRIPTS_ERA_UNIT
+                services.install_calls.clear()
+                services.restart_calls.clear()
+                before = tree_state(root) if root.exists() else {}
+                with self.assertRaisesRegex(ValueError, "pi.apps.van_dashboard.*van-dashboard repo"):
+                    self.install(repo, root, mode, services)
+                self.assertEqual(tree_state(root), before)
+                self.assertEqual((services.install_calls, services.restart_calls), ([], []))
+                self.assertEqual(services.units[DASHBOARD], SCRIPTS_ERA_UNIT)
+
+    def test_cut_over_or_absent_dashboard_unit_allows_deploys(self):
+        fixtures = transactions.PythonDeploymentTests
+        # A unit running a module this release still ships is fine too.
+        still_shipped = b"[Service]\nExecStart=/usr/bin/python3 -P -m pi.apps.media_organizer\n"
+        for unit in (CUT_OVER_UNIT, still_shipped, None):
+            with self.subTest(unit=unit), fixtures.fixture() as repo, \
+                    tempfile.TemporaryDirectory() as name:
+                root = Path(name) / "packages"
+                services = transactions.FakeSystemServices(active=set())
+                if unit is not None:
+                    services.units[DASHBOARD] = unit
+                first = self.install(repo, root, "activate", services)
+                (repo / transactions.SAMPLE_MODULE).write_text("CHANGED = True\n")
+                second = self.install(repo, root, "update", services)
+                self.assertEqual(os.readlink(root / "current"),
+                                 "releases/" + Path(second["release"]).name)
+                self.assertEqual(json.loads((root / "activated.json").read_bytes()),
+                                 {"release": Path(second["release"]).name})
+                self.assertNotEqual(first["release"], second["release"])
 
     def test_staged_release_keeps_every_module_the_dashboard_imports(self):
         plan = deployment.build_plan(REPOSITORY_ROOT)

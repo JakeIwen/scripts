@@ -9,6 +9,7 @@ configs="$dsc/pi/configs"
 secrets="$dsc/pi/secrets"
 shared_sh="$dsc/shared/sh"
 pi_ip='pi@vanpi.lan'
+dashboard_unit=/etc/systemd/system/van-dashboard.service
 # pi_ip='pi@100.82.91.76'
 package_units=""
 
@@ -32,6 +33,26 @@ check_pi_bashrc_known() {
   fi
 }
 
+# The scripts-era dashboard unit runs -m pi.apps.van_dashboard from the package
+# release, which this checkout no longer ships: syncing before the dashboard's
+# own repo is deployed would break its next restart.
+check_dashboard_cut_over() {
+  local state
+  if ! state="$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$pi_ip" \
+    "if [ ! -e $dashboard_unit ]; then echo absent; elif grep -qE '^[[:space:]]*Exec[A-Za-z]*=.*[[:space:]]-m[[:space:]]+pi[.]apps[.]van_dashboard([.[:space:]]|\$)' $dashboard_unit; then echo scripts-era; else echo cut-over; fi")"; then
+    echo "couldn't read the Pi's $dashboard_unit" >&2
+    return 1
+  fi
+  case "$state" in
+    absent|cut-over) ;;
+    scripts-era)
+      echo "The Pi's van-dashboard.service still runs -m pi.apps.van_dashboard, which this" \
+        "checkout no longer ships. Deploy the van-dashboard repo first (its docs/cutover.md)." >&2
+      return 1 ;;
+    *) echo "unexpected van-dashboard.service check result: $state" >&2; return 1 ;;
+  esac
+}
+
 sync_preflight() {
   (cd "$dsc" && python3 -m pi.generate_backup_lock_registry --check) || return 1
   # sync_compute runs this installer last; refuse before any upload if it is missing.
@@ -42,6 +63,7 @@ sync_preflight() {
   fi
 
   check_pi_bashrc_known || return 1
+  check_dashboard_cut_over || return 1
 
   if ! package_units="$(python3 "$dsc/pi/deploy_python.py" --list-units)" ||
     [[ -z "$package_units" ]]; then
