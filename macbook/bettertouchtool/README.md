@@ -318,16 +318,16 @@ this restore covers sequences lost before a checkpoint held them.
   since a posted key's delivery cannot be confirmed; if anything stops the cut
   first, the caret goes back unless you have moved it. In Firefox a blank line is
   refused with a notification: its flat text could not confirm the cut.
-- Cmd-C with no selection copies the caret's line (as VS Code does): exactly what
-  Cmd-X would remove, its break written as `\n` (an empty line copies `\n`; in
-  Firefox, the paragraph's text plus `\n` when another paragraph follows). The
-  runtime writes it to the clipboard itself, as plain text, so the field is never
-  selected or changed and the caret stays put; rich formatting is not copied. It
-  notes the clipboard's version before reading the field and reads the caret and
-  focus again after the text, and copies nothing if a key, a focus change or
-  another copy came in between. If the write itself fails, the previous clipboard
-  (every item and type) is put back. With a selection, or where the condition does
-  not match, Cmd-C is the app's normal copy.
+- Cmd-C with no selection copies the caret's line (as VS Code does): its text and
+  one `\n`, whatever break the app uses, on the last line too, so an empty line
+  copies `\n` (in Firefox, the paragraph's text plus `\n`). The runtime writes it
+  to the clipboard itself, as plain text, so the field is never selected or
+  changed and the caret stays put; rich formatting is not copied. It notes the
+  clipboard's version before reading the field and reads the caret and focus again
+  after the text, and copies nothing if a key, a focus change or another copy came
+  in between. If the write itself fails, the previous clipboard (every item and
+  type) is put back. With a selection, or where the condition does not match,
+  Cmd-C is the app's normal copy.
 
 Each keyboard trigger has an advanced condition and BTT's "If advanced conditions
 fail, let the shortcut pass through" option: the key behaves normally unless

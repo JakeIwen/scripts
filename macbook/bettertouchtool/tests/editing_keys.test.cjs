@@ -141,12 +141,13 @@ test('Cmd-X cuts the caret’s logical line and its break, wherever the caret si
     }
 });
 
-// What Cmd-C copies is what Cmd-X removes, its break written as \n.
+// Cmd-C copies the line's text and one \n, whatever break the app uses, on
+// the last line too (as VS Code does), and \n alone for an empty line.
 test('Cmd-C puts the caret’s line on the clipboard as plain text and leaves the field alone', () => {
     for (const [text, caret, line] of [
-        [THREE, 0, 'one\n'], [THREE, 5, 'two\n'], [THREE, 13, 'three'], ['a\n\nb', 2, '\n'],
-        ['one\r\ntwo', 1, 'one\n'], ['one\r\ntwo', 4, 'one\n'], ['one\rtwo', 0, 'one\n'], ['one\rtwo', 5, 'two'],
-        ['one\u2029two', 0, 'one\n']
+        [THREE, 0, 'one\n'], [THREE, 5, 'two\n'], [THREE, 13, 'three\n'], ['a\n\nb', 2, '\n'],
+        ['one\r\ntwo', 1, 'one\n'], ['one\r\ntwo', 4, 'one\n'], ['one\rtwo', 0, 'one\n'], ['one\rtwo', 5, 'two\n'],
+        ['one\u2029two', 0, 'one\n'], ['one\n', 4, '\n'], ['', 0, '\n']
     ]) {
         const field = cocoaField(text, caret);
         const {run, state, board, contents} = keyFixture(field);
@@ -227,16 +228,14 @@ test('focus that moves while the line is read stops the copy', () => {
     assert.deepEqual(contents(), [{[PLAIN_TEXT]:'earlier'}]);
 });
 
-test('an empty last line or field has nothing to cut or copy and is left alone', () => {
+test('an empty last line or field has nothing to cut and is left alone', () => {
     for (const [text, caret] of [['one\n', 4], ['', 0]]) {
-        for (const [kind, result] of [['cut-line', 'nothing to cut'], ['copy-line', 'nothing to copy']]) {
-            const field = cocoaField(text, caret);
-            const {run, state, board} = keyFixture(field);
-            assert.deepEqual(run(kind), {ok:true, result});
-            assert.deepEqual(state.presses, []);
-            assert.equal(field.writes, 0);
-            assert.equal(board.changeCount, 7);
-        }
+        const field = cocoaField(text, caret);
+        const {run, state, board} = keyFixture(field);
+        assert.deepEqual(run('cut-line'), {ok:true, result:'nothing to cut'});
+        assert.deepEqual(state.presses, []);
+        assert.equal(field.writes, 0);
+        assert.equal(board.changeCount, 7);
     }
 });
 
@@ -328,12 +327,13 @@ test('Firefox cuts the caret’s paragraph and its break through text markers', 
     }
 });
 
-// Firefox's paragraph text has no break; the copy adds \n when another paragraph follows.
-test('Firefox copies the caret’s paragraph text, with a break unless it is the last', () => {
+// Firefox's paragraph text has no break; the copy adds one \n, to the last paragraph too.
+test('Firefox copies the caret’s paragraph text and a break, blank and last paragraphs included', () => {
     for (const [paragraphs, node, offset, line] of [
         [['first', 'mIxEd tail', 'third'], 1, 3, 'mIxEd tail\n'], [['first', 'mIxEd tail', 'third'], 0, 0, 'first\n'],
-        [['first', 'mIxEd tail', 'third'], 2, 2, 'third'], [['first', '', 'third'], 1, 0, '\n'],
-        [['', '', 'third'], 0, 0, '\n'], [['', '', 'third'], 1, 0, '\n'], [['first', ''], 0, 2, 'first\n']
+        [['first', 'mIxEd tail', 'third'], 2, 2, 'third\n'], [['first', '', 'third'], 1, 0, '\n'],
+        [['', '', 'third'], 0, 0, '\n'], [['', '', 'third'], 1, 0, '\n'], [['first', ''], 0, 2, 'first\n'],
+        [['first', ''], 1, 0, '\n'], [['', ''], 0, 0, '\n'], [['', ''], 1, 0, '\n']
     ]) {
         const field = firefoxField(paragraphs, node, offset);
         const caret = JSON.stringify(field.document.state.selection);
@@ -346,11 +346,19 @@ test('Firefox copies the caret’s paragraph text, with a break unless it is the
     }
 });
 
-test('Firefox has nothing to copy in an empty last paragraph', () => {
-    const field = firefoxField(['first', ''], 1, 0);
-    const {run, board} = keyFixture(field, {bundle:'org.mozilla.firefox'});
-    assert.deepEqual(run('copy-line'), {ok:true, result:'nothing to copy'});
-    assert.equal(board.changeCount, 7);
+// Every document of one to four paragraphs, each blank or not, with the
+// caret in each paragraph: blank runs must not merge or vanish.
+test('Firefox copies each paragraph of every short mix of blank and filled paragraphs', () => {
+    for (let count = 1; count <= 4; count++) {
+        for (let mask = 0; mask < 2 ** count; mask++) {
+            const paragraphs = Array.from({length:count}, (_, index) => mask & (1 << index) ? 'x' : '');
+            for (let node = 0; node < count; node++) {
+                const {run, contents} = keyFixture(firefoxField(paragraphs, node, 0), {bundle:'org.mozilla.firefox'});
+                assert.deepEqual(run('copy-line'), {ok:true, result:'copied line'}, JSON.stringify([paragraphs, node]));
+                assert.deepEqual(contents(), [{[PLAIN_TEXT]:paragraphs[node] + '\n'}], JSON.stringify([paragraphs, node]));
+            }
+        }
+    }
 });
 
 test('a Firefox caret that moves while the paragraph is read copies nothing', () => {

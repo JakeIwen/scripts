@@ -269,7 +269,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   exact readback with the text unchanged and focus checked last, and presses
   Edit > Cut through Accessibility, since BTT swallows a Cmd-X sent from its own
   trigger; Firefox blank lines are not cut. Cmd-C never touches the field: it
-  writes the line (break as `\n`) to the clipboard with `text_menu_paste.js`'s
+  writes the line's text plus `\n` to the clipboard with `text_menu_paste.js`'s
   `writeClipboardText`, refusing if the caret, focus or clipboard changed while it
   read, and a failed write puts the previous clipboard back. Never select by
   posting keys: neither BTT's key actions nor `CGEventPost` confirm delivery.

@@ -20,8 +20,9 @@ function lineRangeAt(text, caret) {
     return end > start ? {location: start, length: end - start} : null;
 }
 
-// A line strategy finds the caret's line ({range, text, copy}, where `copy` is
-// what Cmd-C puts on the clipboard: what a cut would remove, its break as \n).
+// A line strategy finds the caret's line: {range, text, copy}, where `range` is
+// what Cmd-X cuts (null for an empty last line) and `copy` what Cmd-C puts on
+// the clipboard, the line's text with one \n in every case, the last line too.
 // Cocoa and Chromium/Electron: numeric ranges over AXValue, whose breaks are characters.
 function rangeLines(element) {
     const read = () => selectionOffsets(selectionAttribute(element, 'AXSelectedTextRange'));
@@ -39,9 +40,8 @@ function rangeLines(element) {
         lineAt: (caret, text) => {
             if (caret.location > text.length) throw new Error('The app’s caret lies outside its text.');
             const range = lineRangeAt(text, caret.location);
-            if (!range) return null;
-            const line = text.slice(range.location, range.location + range.length);
-            return {range, text: line, copy: line.replace(/(?:\r\n?|\u2029)$/, '\n')};
+            const line = range ? text.slice(range.location, range.location + range.length) : '';
+            return {range, text: line, copy: line.replace(/(?:\r\n?|[\n\u2029])$/, '') + '\n'};
         },
         cutRefusal: () => null,
         select: range => {
@@ -64,7 +64,7 @@ function markerLines(markers) {
         lineAt: caret => {
             const range = markers.paragraphAt(caret);
             const text = markers.text(range);
-            return {range, text, copy: text + (markers.paragraphFollows(range) ? '\n' : '')};
+            return {range, text, copy: text + '\n'};
         },
         // A blank paragraph is unsafe to cut: its marker range cannot be told
         // from an empty one, and with no text in the flat AXValue the cut
@@ -172,7 +172,7 @@ function textWithoutLine(editor) {
 
 function cutSelectedLine(directory) {
     const editor = caretLine(directory, 'cut');
-    if (!editor.line) return 'nothing to cut';
+    if (!editor.line.range) return 'nothing to cut';
     const refusal = editor.lines.cutRefusal(editor.line);
     if (refusal) throw new Error(refusal);
     // Through the Edit menu: BTT swallows a Cmd-X sent from its own Cmd-X trigger.
@@ -200,7 +200,6 @@ function copyCaretLine(directory) {
     const board = $.NSPasteboard.generalPasteboard;
     const version = Number(board.changeCount);
     const field = caretLine(directory, 'copied');
-    if (!field.line || !field.line.copy) return 'nothing to copy';
     try {
         const saved = field.helpers.copyPasteboard(board);
         if (saved.version !== version) throw new Error('The clipboard changed while the line was read.');

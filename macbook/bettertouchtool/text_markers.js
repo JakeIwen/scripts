@@ -57,11 +57,6 @@ function textMarkerSelection(element, attribute) {
     function paragraphAt(range) {
         return paragraph(endpoints(range).start);
     }
-    function paragraphFollows(paragraphRange) {
-        // A paragraph's end is the next paragraph's start, which resolves to that
-        // paragraph; at the document end it resolves to the paragraph itself.
-        return !same(paragraph(endpoints(paragraphRange).end), paragraphRange);
-    }
     function text(range) {
         return ObjC.unwrap(parameter('AXStringForTextMarkerRange', range));
     }
@@ -106,7 +101,6 @@ function textMarkerSelection(element, attribute) {
         same,
         collapsed,
         paragraphAt,
-        paragraphFollows,
         validate,
         endingAt,
         select: function (range) {
