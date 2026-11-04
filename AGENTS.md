@@ -906,7 +906,7 @@ compare it with this checkout. Deployed files may differ from the repository.
   `macbook/scripts/deal_watch_browser.mjs`; its anonymous cookies stay on the Mac.
   `pi/scripts/price_check/search_watch/browser_headers.json` remains the legacy
   header allowlist. Preserve Chromium headers without Firefox defaults. See
-  `pi/docs/dashboard/PRICE_CHECK.md`.
+  `pi/docs/price_check/PRICE_CHECK.md`.
   Recovery retries silently at six-minute intervals, stops after 50 consecutive
   failed attempts and sends one ntfy alert. A successful search resets the
   durable count; preserve claim fencing and idempotent failure acknowledgements.
