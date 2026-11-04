@@ -195,7 +195,8 @@ function cutSelectedLine(directory) {
 function copyCaretLine(directory) {
     const field = caretLine(directory, 'copied');
     if (!field.line || !field.line.copy) return 'nothing to copy';
-    field.helpers.writeClipboardText($.NSPasteboard.generalPasteboard, field.line.copy);
+    const board = $.NSPasteboard.generalPasteboard;
+    field.helpers.writeClipboardText(board, field.line.copy, Number(board.changeCount));
     return 'copied line';
 }
 

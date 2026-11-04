@@ -18,15 +18,18 @@ function copyPasteboard(board) {
 }
 
 // Replaces the clipboard with plain `text`, plus '1' under each of `flags`
-// (nspasteboard.org markers), and returns the changeCount it then owns.
-// `claim` hears each owned count as soon as the clipboard is cleared, so a
-// caller can still restore what it saved when a later step fails.
-function writeClipboardText(board, text, {flags = [], options = 0, claim = () => {}} = {}) {
+// (nspasteboard.org markers), and returns the changeCount it then owns. It
+// refuses unless the clipboard is still at `expected` just before it clears it,
+// so a copy made meanwhile (even while the item was built) is kept. `claim`
+// hears each owned count as soon as the clipboard is cleared, so a caller can
+// still restore what it saved when a later step fails.
+function writeClipboardText(board, text, expected, {flags = [], options = 0, claim = () => {}} = {}) {
     const item = $.NSPasteboardItem.alloc.init;
     if (!item.setStringForType(text, $.NSPasteboardTypeString)) throw new Error('Could not prepare the clipboard text.');
     for (const type of flags) {
         if (!item.setStringForType('1', type)) throw new Error('Could not mark the clipboard data.');
     }
+    if (Number(board.changeCount) !== expected) throw new Error('The clipboard changed.');
     let owned = Number(board.prepareForNewContentsWithOptions(options));
     claim(owned);
     if (Number(board.changeCount) !== owned) throw new Error('The clipboard changed during the write.');
@@ -42,9 +45,8 @@ function withTemporaryClipboard(board, text, action) {
     const saved = copyPasteboard(board);
     let owned = null;
     try {
-        if (Number(board.changeCount) !== saved.version) throw new Error('Clipboard changed; nothing pasted.');
         try {
-            writeClipboardText(board, text, {flags: ['org.nspasteboard.TransientType', 'org.nspasteboard.ConcealedType'],
+            writeClipboardText(board, text, saved.version, {flags: ['org.nspasteboard.TransientType', 'org.nspasteboard.ConcealedType'],
                 options: $.NSPasteboardContentsCurrentHostOnly, claim: count => { owned = count; }});
         } catch (error) {
             throw new Error(error.message + ' Nothing was pasted.');

@@ -56,6 +56,27 @@ test('an unreadable clipboard format stops before clearing any clipboard data', 
     assert.equal(board.changeCount,10);
 });
 
+test('a user copy made while the paste text is prepared is kept, and nothing is pasted', () => {
+    const {board,native,context,contents} = fixture();
+    native.NSPasteboardItem = {alloc:{get init() {
+        const item = new Item(), set = item.setStringForType;
+        // The paste's own item: the user copies while it is being built.
+        item.setStringForType = function (value,type) {
+            if (value === 'TRANSFORMED') {
+                board.clearContents;
+                board.writeObjects([new Item({'public.utf8-plain-text':'new user copy'})]);
+            }
+            return set.call(this,value,type);
+        };
+        return item;
+    }}};
+    let pasted = false;
+    assert.throws(() => context.withTemporaryClipboard(board,'TRANSFORMED',() => { pasted = true; }),
+        /The clipboard changed\. Nothing was pasted\./);
+    assert.equal(pasted,false);
+    assert.deepEqual(contents(),[{'public.utf8-plain-text':'new user copy'}]);
+});
+
 test('a successful-looking clipboard write cannot paste missing or stale text', () => {
     const {board,context,contents} = fixture();
     const original = contents(), write = board.writeObjects;
