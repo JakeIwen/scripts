@@ -128,6 +128,13 @@ cat > "$findmnt_command" <<EOF
 printf '%s\\n' '$source_mnt'
 EOF
 chmod +x "$findmnt_command"
+# main reads the requested HDD policy ("disks torrents starlink"); allow HDDs.
+policyctl="$test_root/policyctl"
+cat > "$policyctl" <<'EOF'
+#!/bin/bash
+[[ "$*" == read ]] && printf '%s\n' '1 0 0'
+EOF
+chmod +x "$policyctl"
 main || fail "snapshot main entry point failed"
 mapfile -t main_snapshots < <(list_completed_snapshots)
 [[ ${#main_snapshots[@]} == 1 ]] || fail "snapshot main did not publish one completed tree"
