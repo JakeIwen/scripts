@@ -15,6 +15,7 @@ class Section(str, Enum):
     RESTORE = 'llm-restore'
     GUARD = 'guard'
     NTFY = 'ntfy'
+    USAGE = 'usage'
 
 
 class TaskState(str, Enum):
@@ -158,6 +159,7 @@ class ServiceLogsPayload(TypedDict):
 
 
 class CronJob(TypedDict):
+    next_runs: list[float]
     id: str
     expression: str
     schedule: str
@@ -228,3 +230,75 @@ class Health(TypedDict):
     instance: str
     started_at: float
     source_changed: bool
+
+
+class HistoryPoint(TypedDict):
+    ts: float
+    level: str
+    value: float | None
+    text: str | None
+
+
+class HistorySample(HistoryPoint):
+    section: str
+    key: str
+
+
+class HistoryPayload(TypedDict):
+    series: dict[str, list[HistoryPoint]]
+
+
+class UsageWindow(TypedDict):
+    used: float
+    left: float
+    resets_at: str | None
+
+
+class UsageCredits(TypedDict):
+    left: float | None
+    allowance_per_day: float | None
+    burn_per_day: float | None
+    expires: str
+    days_left: float
+
+
+class ClaudePosition(TypedDict):
+    left: float
+    elapsed_pct: float
+    line_left: float
+    ahead: float
+    resets_in_h: float
+
+
+class UsageRoute(TypedDict):
+    workers: str
+    review: str
+
+
+class UsageAvailability(TypedDict):
+    claude: str
+    gpt: str
+
+
+class UsagePayload(TypedDict):
+    fetched_at: str
+    age_minutes: float
+    claude_weekly: UsageWindow | None
+    claude_session: UsageWindow | None
+    fable_weekly: UsageWindow | None
+    codex_weekly: UsageWindow | None
+    codex_session: UsageWindow | None
+    credits: UsageCredits
+    claude_position: ClaudePosition | None
+    lean: str
+    reasons: list[str]
+    route: UsageRoute
+    availability: UsageAvailability
+
+
+class Level(str, Enum):
+    OK = 'ok'
+    IDLE = 'idle'
+    UNKNOWN = 'unknown'
+    WARN = 'warn'
+    ERROR = 'error'

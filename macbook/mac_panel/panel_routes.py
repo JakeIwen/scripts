@@ -1,4 +1,9 @@
 """Explicit route table; adapters own each tool's CLI contract."""
+import math
+from urllib.parse import parse_qs, urlsplit
+
+from history_store import HistoryStore
+from usage_adapter import UsageAdapter
 from amphetamine_adapter import AmphetamineAdapter
 from automations_adapter import AutomationsAdapter
 from cli_runner import CliRunner
@@ -14,7 +19,8 @@ from settings_adapter import SettingsAdapter
 
 
 class PanelRoutes:
-    def __init__(self, runner=None, settings=None):
+    def __init__(self, runner=None, settings=None, history=None):
+        self.history = history if history is not None else HistoryStore()
         runner = runner or CliRunner()
         self.automations = AutomationsAdapter(runner)
         self.deferred = DeferredAdapter(runner)
@@ -31,6 +37,7 @@ class PanelRoutes:
             Section.RESTORE: RestoreAdapter(runner),
             Section.GUARD: self.guard,
             Section.NTFY: NtfyAdapter(),
+            Section.USAGE: UsageAdapter(runner),
         }
         self.reads = {f'/api/{name.value}': adapter.read for name, adapter in self.adapters.items()}
         self.writes = {
@@ -51,7 +58,32 @@ class PanelRoutes:
             raise ApiError(400, 'Only explicit confirmation is accepted')
         return self.guard.action({'action': 'notify-test', **body})
 
+    def history_read(self, query):
+        fields = parse_qs(query, keep_blank_values=True)
+        if (not {'section', 'since', 'until'} <= fields.keys() or
+                fields.keys() - {'section', 'since', 'until', 'key'} or
+                any(len(values) != 1 for values in fields.values())):
+            raise ApiError(400, 'History requires section, since, until and optional key')
+        try:
+            section = Section(fields['section'][0])
+            since, until = float(fields['since'][0]), float(fields['until'][0])
+            if not math.isfinite(since) or not math.isfinite(until) or since > until:
+                raise ValueError('Invalid interval')
+        except ValueError:
+            raise ApiError(400, 'Invalid history section or interval') from None
+        from sampler import CADENCES
+        if section not in CADENCES:
+            raise ApiError(400, 'Section has no history')
+        key = fields.get('key', [None])[0]
+        if key == '':
+            raise ApiError(400, 'History key must not be empty')
+        return self.history.series(section, since, until, key=key)
+
     def dispatch(self, method, path, body=None):
+        parsed = urlsplit(path)
+        path = parsed.path
+        if method == 'GET' and path == '/api/history':
+            return Reply(self.history_read(parsed.query))
         if method == 'GET' and path.startswith('/api/tasks/'):
             return Reply(self.deferred.tasks.get(path.removeprefix('/api/tasks/')))
         if method == 'GET' and path.startswith('/api/services/logs/'):
