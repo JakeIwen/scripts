@@ -29,6 +29,7 @@ cleanup() {
 trap cleanup EXIT
 
 export VANPI_BACKUP_LOCK_DIR="$test_root/registry"
+export VANPI_BACKUP_DEPLOY_STATE_DIR="$test_root/deploy-state"
 export VANPI_BACKUP_JOB_LOCK="$test_root/legacy.lock"
 export VANPI_BACKUP_JOB_LOCK_OWNER=$(/usr/bin/id -un)
 export VANPI_BACKUP_JOB_LOCK_GROUP=$(/usr/bin/id -gn)
@@ -167,7 +168,13 @@ fi
 child=
 stop_holder() {
   printf '%s\n' "$1" >> "$TEST_READY.signal"
-  [[ -z "$child" ]] || { kill -TERM "$child" 2>/dev/null; wait "$child" 2>/dev/null; }
+  # A signal can arrive between starting a child and assigning child=$!.
+  # The shell job table includes that child before the assignment runs.
+  local child_pid
+  for child_pid in $(jobs -pr); do
+    kill -TERM "$child_pid" 2>/dev/null || true
+    wait "$child_pid" 2>/dev/null || true
+  done
   exit 0
 }
 trap 'stop_holder TERM' TERM INT

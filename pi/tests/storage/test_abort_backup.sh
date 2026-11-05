@@ -35,6 +35,7 @@ signal_file="$test_root/signal"
 
 export VANPI_BACKUP_JOB_LOCK="$job_lock"
 export VANPI_BACKUP_LOCK_DIR="$test_root/registry"
+export VANPI_BACKUP_DEPLOY_STATE_DIR="$test_root/deploy-state"
 export VANPI_BACKUP_JOB_LOCK_OWNER=$(/usr/bin/id -un)
 export VANPI_BACKUP_JOB_LOCK_GROUP=$(/usr/bin/id -gn)
 export VANPI_BACKUP_JOB_LOCK_MODE=660 VANPI_BACKUP_LOCK_DIR_MODE=770

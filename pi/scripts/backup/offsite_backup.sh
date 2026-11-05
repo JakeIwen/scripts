@@ -34,6 +34,7 @@ hold_offsite_run() { # job identity first, then the legacy lock shared for the s
   exec {fd}<&-
   "$JOB_LOCK_FLOCK" -n -s 9 ||
     refuse 'A restore, hotspare initialization, prepare-disk or backup deployment is active.'
+  backup_deploy_refuse_jobs || exit 1
 }
 
 case "${1:-}" in

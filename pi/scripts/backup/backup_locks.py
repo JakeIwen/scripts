@@ -174,6 +174,16 @@ def require_held(fd, path, *, exclusive=True):
     raise LockBusy(f'backup descriptor {fd} does not hold {path.name} in {mode} mode')
 
 
+def require_legacy_hold(fd=9):
+    """Accept either inherited mode without acquiring or changing its lock."""
+    path = legacy_lock()
+    validate_lock_file(path)
+    try:
+        require_held(fd, path, exclusive=False)
+    except LockBusy:
+        require_held(fd, path, exclusive=True)
+
+
 def require_job_lock(kind, fd=None):
     require_held(job_lock_fd() if fd is None else fd, lock_path(LockClass.JOB, kind))
 
@@ -308,3 +318,14 @@ def legacy_exclusive_holder(process_root=Path('/proc'), path=None):
         return None
     finally:
         os.close(fd)
+
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(description='Validate inherited clone admission; never acquire a lock.')
+    parser.add_argument('--check-legacy-hold', action='store_true', required=True)
+    parser.parse_args()
+    try:
+        require_legacy_hold()
+    except (OSError, RuntimeError) as error:
+        parser.exit(1, str(error) + '\n')

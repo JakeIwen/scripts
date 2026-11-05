@@ -180,8 +180,14 @@ JOB_LOCK_FLOCK=${VANPI_BACKUP_JOB_LOCK_FLOCK:-/usr/bin/flock}
 # (offsite runs) keeps calling its own helpers; live installs are unchanged.
 BACKUP_CONF_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 BACKUP_PRIORITY_TOOL=${VANPI_BACKUP_PRIORITY_TOOL:-$BACKUP_CONF_DIR/backup_priority_control.py}
+. "$BACKUP_CONF_DIR/backup_deploy_state.sh" || return 1
+# Every job admission (acquire_job_lock, acquire_backup_job and the offsite
+# launcher) opens the legacy lock through this validator, and the deployment
+# fence and disk lifecycle never do: it is the one place an interrupted
+# deployment's possibly mixed cohort refuses jobs, without ever delaying a drain.
 validate_job_lock_file() {
   local metadata owner group mode inode extra
+  backup_deploy_refuse_jobs || return 1
   if [[ -L "$JOB_LOCK" || ! -f "$JOB_LOCK" ]]; then
     echo "backup job lock is missing or unsafe: $JOB_LOCK" >&2
     return 1
@@ -205,6 +211,8 @@ acquire_job_lock() {
   exec 9<&"$fd"
   exec {fd}<&-
   "$JOB_LOCK_FLOCK" -n 9 || return 1
+  # Check under the hold: an installer may have died after the pre-open check.
+  backup_deploy_refuse_jobs || { exec 9<&-; return 1; }
   if ! hold_offsite_exclusion; then
     exec 9>&-
     return 1

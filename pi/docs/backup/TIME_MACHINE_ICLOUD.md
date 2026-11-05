@@ -241,6 +241,58 @@ Deploy the Pi with `bash pi/deploy_time_machine_icloud.sh`. It checks live share
 code and gate hashes, runs tests, preserves settings, refuses active workers,
 and keeps rollback copies. Dashboard module/UI deployment is separate.
 
+For safe target verification without deploying services, run from the checkout:
+
+```sh
+bash pi/deploy_time_machine_icloud.sh --check
+```
+
+Both modes accept an optional SSH target (default `pi@vanpi.lan`); `--check`
+may precede or follow it. They require the checkout's `.local/test-venv/bin/python`
+and run the canonical `run_tests.py` gate first (parallel, with its existing
+pass cache/coalescing), plus registry-drift and wrapper-syntax checks. A missing
+test environment fails before SSH; no suite is silently skipped.
+
+`pi/time_machine_deploy_checks.py` defines the target tests and their staged
+sources once. Its `--files` output combines check-only dependencies with the
+existing `local_backup_sources tm` allowlist; it does not maintain a second
+published-payload map or stage the Pi-only profile. The target runs, uncached,
+with at most three tests concurrently:
+
+- Root `pi.tests.backup.test_time_machine_runtime`: native tmpfiles creation and
+  repeated setup under a private `--root`.
+- `pi/tests/storage/test_backup_job_lock.sh` and `test_backup_locks.sh`: real
+  Linux lock/process behavior in independent temporary registries.
+- `pi.tests.backup.test_backup_admission`: Linux fdinfo/descriptor validation,
+  real client inheritance and public worker admission. This remains on the Pi
+  because its Linux assertions skip on the Mac.
+
+Every command's name, output and failure status are reported; failures stop
+before publication. Metered admission, generated registry validation, installed
+Samba/connectivity helper hashes, `testparm`, `systemd-analyze verify` and
+`backup_schedule.py --check` still run against the target. Check-only mode
+then prints its private stage and exits **before `local_backup_begin`**: it does
+not take the deployment fence, stop timers, publish files, apply schedules,
+request capture or activate services. It creates only a disposable target stage
+and the isolated tests' temporary fixtures; it is not a redeployment. Stages
+are retained for inspection, as with ordinary deployment.
+
+Cloud/store/settings/priority, stubbed Samba-control and other portable checks
+are no longer repeated on the target. Some removed commands also contained
+target-only coverage: held-lock staging, pipeline admission, Time Machine
+process evidence, Python resource-lock inheritance/enumeration and deployment
+preflight smokes require Linux, as does the OpenWrt schedule suite. The iCloud
+worker's Borg round-trip and real-rclone cases also skip on the Mac; download
+integration needs rclone too. A Mac suite pass does **not** cover these cases.
+They run in the optional Mac-hosted Lima Linux lane with
+`macbook/linux_test_lane/linux-test-lane test` (see
+[Linux test lane](../../../AGENTS.md#linux-test-lane)). That lane supplies the
+Linux tools and runs the broader Pi/shared suites; its ordinary unprivileged
+run still skips root-only runtime/spool checks, which need a separate privileged
+run. Neither plain `run_tests.py` nor this deployer starts the lane automatically,
+so a deployment pass alone does **not** certify those broader Linux regressions.
+The four targeted commands above are not a replacement for that coverage.
+
 One-time Mac installation (run from Jacob's normal Terminal, with sudo):
 
 ```sh

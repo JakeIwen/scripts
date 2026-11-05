@@ -5,7 +5,13 @@
 # "new" permits a missing live file only when the previous tree lacked it;
 # even then an existing file must equal the staged source. "required" forbids
 # first install. "replace" retains the installers' managed document/unit policy.
+# Runtime dependencies go before their consumers. First-rollout safety comes
+# from the separately verified bootstrap, not from any publication prefix:
+# its independent recovery trigger is never a record in this rollback plan.
 BACKUP_DEPLOY_PLAN=(
+  'both|pi/scripts/backup/backup_deploy_state.sh|/home/pi/scripts/backup/backup_deploy_state.sh|revision|pi:pi|750|new'
+  'both|pi/scripts/backup/backup_deploy_trigger.sh|/home/pi/scripts/backup/backup_deploy_trigger.sh|revision|pi:pi|750|new'
+  'both|pi/scripts/backup/backup_window.sh|/home/pi/scripts/backup/backup_window.sh|revision|pi:pi|750|new'
   'both|pi/scripts/backup/backup_lock_registry.sh|/home/pi/scripts/backup/backup_lock_registry.sh|revision|pi:pi|750|new'
   'both|pi/scripts/backup/backup_lock_io.sh|/home/pi/scripts/backup/backup_lock_io.sh|revision|pi:pi|750|new'
   'both|pi/scripts/backup/backup_locks.sh|/home/pi/scripts/backup/backup_locks.sh|revision|pi:pi|750|new'
@@ -28,7 +34,6 @@ BACKUP_DEPLOY_PLAN=(
   'both|pi/scripts/backup/backup_settings_control.py|/home/pi/scripts/backup/backup_settings_control.py|revision|pi:pi|750|new'
   'both|pi/scripts/backup/backup_schedule.py|/home/pi/scripts/backup/backup_schedule.py|revision|pi:pi|750|new'
   'both|pi/scripts/backup/cloud_backup_control.py|/home/pi/scripts/backup/cloud_backup_control.py|revision|pi:pi|750|new'
-  'both|pi/scripts/backup/backup_window.sh|/home/pi/scripts/backup/backup_window.sh|revision|pi:pi|750|new'
   'both|pi/scripts/backup/pi_backup.sh|/home/pi/scripts/backup/pi_backup.sh|revision|pi:pi|750|new'
   'both|pi/scripts/backup/exfat_snapshot.sh|/home/pi/scripts/backup/exfat_snapshot.sh|revision|pi:pi|750|new'
   'both|pi/scripts/backup/openwrt_backup.sh|/home/pi/scripts/backup/openwrt_backup.sh|revision|pi:pi|750|new'
@@ -73,6 +78,7 @@ BACKUP_DEPLOY_PLAN=(
   'both|pi/scripts/backup/TIME_MACHINE_ICLOUD_RESTORE.txt|/home/pi/scripts/backup/TIME_MACHINE_ICLOUD_RESTORE.txt|replace|pi:pi|750|optional'
   'both|pi/scripts/backup/backup_deploy_plan.sh|/home/pi/scripts/backup/backup_deploy_plan.sh|revision|pi:pi|750|new'
   'both|pi/scripts/backup/backup_deploy_transaction.sh|/home/pi/scripts/backup/backup_deploy_transaction.sh|revision|pi:pi|750|new'
+  'both|pi/scripts/backup/backup_deploy_recovery.sh|/home/pi/scripts/backup/backup_deploy_recovery.sh|revision|pi:pi|750|new'
   'both|pi/scripts/mount_disks.sh|/home/pi/scripts/mount_disks.sh|revision|pi:pi|preserve|required'
   'both|pi/scripts/umount_disks.sh|/home/pi/scripts/umount_disks.sh|revision|pi:pi|preserve|required'
   'both|pi/scripts/internet_switches.sh|/home/pi/scripts/internet_switches.sh|revision|pi:pi|preserve|required'

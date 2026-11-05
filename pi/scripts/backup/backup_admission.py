@@ -10,6 +10,7 @@ from dataclasses import dataclass, replace
 import os
 from pathlib import Path
 import re
+import subprocess
 
 import backup_locks as locks
 
@@ -96,8 +97,15 @@ def from_environment(kind):
     all_fds = (legacy_fd, job_fd, cloud_fd, *disk_fds.values())
     if len(set(all_fds)) != len(all_fds):
         raise RuntimeError('backup worker admission repeats a descriptor')
+    legacy = validated_descriptor(legacy_fd, locks.legacy_lock(), exclusive=False)
+    # Reuse the shell's marker contract while our verified hold excludes a new deploy.
+    guard = subprocess.run(['/bin/bash', '-c', '. "$1" && backup_deploy_refuse_jobs',
+                            'backup-admission', str(Path(__file__).with_name('backup_deploy_state.sh'))],
+                           capture_output=True, text=True, timeout=10)
+    if guard.returncode:
+        raise RuntimeError(guard.stderr.strip() or 'backup deployment admission is unavailable')
     return WorkerAdmission(kind, registry,
-        validated_descriptor(legacy_fd, locks.legacy_lock(), exclusive=False),
+        legacy,
         validated_descriptor(job_fd, registry / f'job-{kind}.lock', exclusive=True),
         validated_descriptor(cloud_fd, registry / f'cloud-{locks.CLOUD_SLOT}.lock', exclusive=True),
         tuple((label, validated_descriptor(fd, registry / f'disk-{label}.lock', exclusive=False))

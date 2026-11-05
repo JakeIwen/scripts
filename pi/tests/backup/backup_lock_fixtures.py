@@ -70,6 +70,8 @@ def temporary_registry():
         environment = {'VANPI_BACKUP_LOCK_DIR': str(registry), 'VANPI_BACKUP_JOB_LOCK': str(legacy),
                        'VANPI_BACKUP_JOB_LOCK_OWNER': pwd.getpwuid(os.getuid()).pw_name,
                        'VANPI_BACKUP_JOB_LOCK_GROUP': grp.getgrgid(os.getgid()).gr_name,
-                       'VANPI_BACKUP_JOB_LOCK_MODE': '660', 'VANPI_BACKUP_LOCK_DIR_MODE': '770'}
+                       'VANPI_BACKUP_JOB_LOCK_MODE': '660', 'VANPI_BACKUP_LOCK_DIR_MODE': '770',
+                       # Job admission consults deployment state; never the host's.
+                       'VANPI_BACKUP_DEPLOY_STATE_DIR': str(root / 'deploy-state')}
         with mock.patch.dict(os.environ, environment):
             yield LockRegistry(root, registry, legacy, environment)

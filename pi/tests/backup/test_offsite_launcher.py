@@ -18,10 +18,13 @@ import tempfile
 import time
 import unittest
 
+from pi.tests.backup.admission_gate import admission_gate
+
 
 SCRIPTS = Path(__file__).resolve().parents[2] / 'scripts'
-COPIED = ('backup/offsite_backup.sh', 'backup/backup_conf.sh', 'backup/backup_locks.sh',
-          'backup/backup_lock_io.sh', 'backup/backup_lock_registry.sh', 'backup/backup_locks.py')
+COPIED = ('backup/offsite_backup.sh', 'backup/backup_conf.sh', 'backup/backup_deploy_state.sh',
+          'backup/backup_locks.sh', 'backup/backup_lock_io.sh', 'backup/backup_lock_registry.sh',
+          'backup/backup_locks.py')
 SECRETS = '/home/pi/secrets/.bash_variables'
 IGNITION = 'IGNITION_FLAG=/home/pi/hooks/ignition_is_on'
 UNSHARE = '/usr/bin/unshare'
@@ -163,7 +166,9 @@ class OffsiteLauncherTests(unittest.TestCase):
             path.touch(mode=0o660)
             path.chmod(0o660)
         self.job_lock = self.registry / 'job-offsite.lock'
+        self.deploy_state = self.root / 'deploy-state'
         common = {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8', 'STUB_RECORDS': str(self.records),
+                  'VANPI_BACKUP_DEPLOY_STATE_DIR': str(self.deploy_state),
                   'OFFSITE_STATE_ROOT': str(self.state), 'VANPI_BACKUP_LOCK_DIR': str(self.registry),
                   'VANPI_BACKUP_JOB_LOCK': str(self.legacy), 'VANPI_BACKUP_JOB_LOCK_MODE': '660',
                   'VANPI_BACKUP_LOCK_DIR_MODE': '770', 'PYTHONDONTWRITEBYTECODE': '1',
@@ -290,6 +295,34 @@ class OffsiteLauncherTests(unittest.TestCase):
         self.assertEqual(run.wait(timeout=20), 0)
         self.assertTrue(self.free(self.job_lock))
         self.assertEqual(self.acquire_job_lock().returncode, 0)
+
+    def test_an_interrupted_deployment_refuses_every_mutating_command_before_any_work(self):
+        self.deploy_state.mkdir()
+        (self.deploy_state / 'pending').write_text('version=1\nid=20261104T000000Z-42\n')
+        arguments = {'backup': ('--label', 'FORT-MPLS-5TB'), 'check': ('--label', 'FORT-MPLS-5TB', '--remote'),
+                     'receipts': ('--label', 'nas'), 'restore-test': ('--label', 'nas', '--receipt', 'r'),
+                     'prepare-disk': ('--device', '/dev/null', '--label', 'FORT-MPLS-5TB')}
+        for command, extra in arguments.items():
+            with self.subTest(command=command):
+                result = self.run_launcher(command, *extra)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn('Backup deployment 20261104T000000Z-42 did not finish', result.stderr)
+                self.assertFalse((self.records / 'snapshot.json').exists())
+                self.assertFalse((self.records / 'live.json').exists())
+                self.assertTrue(self.free(self.job_lock) and self.free(self.legacy))
+        (self.deploy_state / 'pending').unlink()
+        result = self.run_launcher('backup', '--label', 'FORT-MPLS-5TB', STUB_EXIT='7')
+        self.assertEqual(result.returncode, 7, result.stderr)
+
+    def test_deployment_between_precheck_and_flock_refuses_before_snapshot(self):
+        with admission_gate(self.root) as (env, interrupt):
+            process = self.launch('backup', '--label', 'FORT-MPLS-5TB', **env)
+            interrupt(self.legacy, self.deploy_state)
+            out, err = process.communicate(timeout=20)
+        self.assertNotEqual(process.returncode, 0, out)
+        self.assertIn('did not finish; backup jobs refuse', err)
+        self.assertFalse((self.records / 'snapshot.json').exists())
+        self.assertTrue(self.free(self.legacy) and self.free(self.job_lock))
 
     def test_exclusive_legacy_holder_refuses_before_snapshot(self):
         self.hold(self.legacy)

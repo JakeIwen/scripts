@@ -253,6 +253,15 @@ release_backup_job() { # releases every descriptor this job acquired, in reverse
   unset VANPI_BACKUP_LEGACY_LOCK_FD VANPI_BACKUP_DISK_LOCK_FDS
 }
 
+ensure_clone_admission() { # Standalone clones join the fence; children retain their parent's hold.
+  if [[ -e /proc/self/fd/9 ]]; then
+    /usr/bin/python3 "$BACKUP_CONF_DIR/backup_locks.py" --check-legacy-hold || return 1
+    backup_deploy_refuse_jobs
+  else
+    acquire_backup_job clone
+  fi
+}
+
 acquire_backup_job() { # <kind> [disk-label ...]: legacy shared + exclusive job identity + disks
   # Order matters: the legacy lock first (an exclusive legacy holder excludes
   # everything), then the job identity, then priority admission for cloud
@@ -271,6 +280,7 @@ acquire_backup_job() { # <kind> [disk-label ...]: legacy shared + exclusive job 
     exec 9>&-
     return 1
   fi
+  backup_deploy_refuse_jobs || { exec 9<&-; return 1; }
   backup_lock_open fd "$path" backup_lock_validate || { exec 9>&-; return 1; }
   exec 10<&"$fd"
   [[ "$fd" == 10 ]] || exec {fd}<&-
