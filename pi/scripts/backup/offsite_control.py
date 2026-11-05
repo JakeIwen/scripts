@@ -8,7 +8,7 @@ import stat
 import subprocess
 
 from offsite_config import LABEL_PATTERN, LIVE_ROOT, REMOTE_CONFIG, REPO_ID_PATTERN, SCHEMA
-from offsite_config import RemoteControlGuard, RemoteControlRecord
+from offsite_config import RemoteControlGuard, RemoteControlRecord, TargetKind
 from offsite_repository import durable_json, private_directory, records
 from protected_json import MISSING, read_protected_json, validate_metadata
 
@@ -163,7 +163,7 @@ def request_control(cfg, action, label, revision, *, command=subprocess.run):
 
 def control_status(cfg, current):
     """No probes, credentials or PID signalling; only local private intent is read."""
-    if current.get('target_kind') != 'remote':
+    if current.get('target_kind') != TargetKind.REMOTE:
         return {'supported': False, 'reason': 'local-target'}
     label = current.get('label')
     try:
